@@ -28,7 +28,7 @@ The issue is the canonical record; the markdown file is a copy for browsing and 
 | 0001 | One binary, two roles: hub and body | accepted | [#2](https://github.com/Performant-Labs/holler/issues/2) |
 | 0002 | Decisions retired from holler-server and holler-client | accepted | [#3](https://github.com/Performant-Labs/holler/issues/3) |
 | 0003 | CLI surface of the single binary; one version | accepted | [#4](https://github.com/Performant-Labs/holler/issues/4) |
-| 0004 | | reserved | [#5](https://github.com/Performant-Labs/holler/issues/5) |
+| 0004 | Holler protocol v2 is JSON-RPC 2.0 over WebSocket | accepted | [#5](https://github.com/Performant-Labs/holler/issues/5) |
 | 0005 | | reserved | [#6](https://github.com/Performant-Labs/holler/issues/6) |
 | 0006 | | reserved | [#7](https://github.com/Performant-Labs/holler/issues/7) |
 | 0007 | | reserved | [#8](https://github.com/Performant-Labs/holler/issues/8) |
