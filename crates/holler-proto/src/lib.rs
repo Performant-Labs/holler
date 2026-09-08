@@ -31,6 +31,7 @@ pub mod error;
 pub mod id;
 pub mod log;
 pub mod methods;
+pub mod token;
 pub mod version;
 pub mod vocab;
 
@@ -45,6 +46,8 @@ pub use docs::{
 pub use envelope::{decode, encode, Envelope, EnvelopeError, typed_params};
 pub use error::{Code, Error as WireError, ErrorData};
 pub use id::{CorrelationId, CorrelationIdError};
+pub use token::RedeemError;
+pub use token::TokenError;
 pub use log::{
     emit, emit_banner, get, init, key_is_secret, redact, redact_frame, resolve, value_is_secret,
     Component, Config, DebugLevel, Direction as LogDirection, Event, LogFormat, REDACTED, Severity,
