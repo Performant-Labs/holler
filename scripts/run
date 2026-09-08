@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+#
+# Dispatches an org-convention command name (object:sub-object:verb, see
+# Performant-Labs/playbook frameworks/node/npm-scripts.md) to its script.
+# The npm-native equivalent of this file is `npm run <name>`; this crate
+# has no package.json, so this is that entry point instead.
+#
+# Ported from holler-server's scripts/run (holler-client#128). The
+# app:local:* names are added by the Dev scripts story -- for now only
+# `build` and the usage line exist.
+#
+# Usage: ./scripts/run build
+
+set -euo pipefail
+
+dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cmd="${1:-}"
+
+case "$cmd" in
+  # Bare lifecycle verb (playbook convention: build/dev/start/test/... stay
+  # unnamespaced) -- cargo build --release, standalone.
+  build)             cd "$dir/.." && exec cargo build --release ;;
+  "")
+    echo "usage: ./scripts/run <command>" >&2
+    ;&
+  *)
+    echo "known commands: build" >&2
+    exit 1
+    ;;
+esac
