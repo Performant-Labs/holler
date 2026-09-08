@@ -8,18 +8,20 @@
 //! 2. `wait_for` returns `None` cleanly and fast on timeout (no hang),
 //! 3. `kill_tree` reaps a child *and its grandchildren* (no orphaned agents).
 //!
-//! The `Hub::start` / `join` / `Body::*` helpers are deliberately *not*
-//! exercised here: they drive `holler hub serve` / `body join` / `body run`,
-//! which the hub & body stories implement. Those selftests land with those
-//! stories.
+//! The `Body::*` helpers are deliberately *not* exercised here: they drive
+//! `holler body join` / `body run`, which the body story implements. That
+//! selftest lands with that story. `Hub`, by contrast, **is** exercised: story
+//! #143 implemented `hub serve`, so `hub_dropped_without_stop_reaps_its_tree`
+//! below pins that a `Hub` dropped without `stop` still reaps its process tree
+//! (no orphaned hub).
 
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable, dead_code)] // #149
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable, dead_code)] // #138
 
 mod support;
 
-use support::{kill_tree, make_own_process_group, wait_for, StateDir};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
+use support::{kill_tree, make_own_process_group, wait_for, StateDir};
 
 /// `StateDir::new` creates a real directory, and dropping it removes it — so a
 /// panicking test does not leak state dirs into the temp area.
@@ -35,10 +37,8 @@ fn state_dir_is_removed_on_drop() {
     }; // `dir` drops here.
 
     // Give the drop a beat to settle, then assert the dir is gone.
-    wait_for(Duration::from_secs(2), || {
-        (!path.exists()).then_some(())
-    })
-    .unwrap_or_else(|| panic!("StateDir was not removed on drop: {path:?}"));
+    wait_for(Duration::from_secs(2), || (!path.exists()).then_some(()))
+        .unwrap_or_else(|| panic!("StateDir was not removed on drop: {path:?}"));
 }
 
 /// `wait_for` must stop at the deadline and return `None` promptly. The spec's
@@ -57,7 +57,10 @@ fn wait_for_times_out_cleanly() {
     let result: Option<i32> = wait_for(timeout, || None);
     let elapsed = started.elapsed();
 
-    assert!(result.is_none(), "a never-satisfying check must time out to None");
+    assert!(
+        result.is_none(),
+        "a never-satisfying check must time out to None"
+    );
     assert!(
         elapsed <= timeout + Duration::from_millis(150),
         "wait_for overshot its budget: took {elapsed:?} for a {timeout:?} timeout"
@@ -141,7 +144,49 @@ fn kill_tree_kills_grandchildren() {
     );
 }
 
+/// A `Hub` dropped *without* calling [`Hub::stop`] must still reap its process
+/// tree — otherwise the hub is orphaned (reparented to init) and leaks. This is
+/// exactly what the WS first-frame tests in `hub_serve_test` do (they `drop(hub)`
+/// at the end). Pinned here so a regression in the harness's `Drop` impl is
+/// caught by the harness's own selftests, not just by a flaky "orphans left over"
+/// observation.
+///
+/// (Story #143 implemented `hub serve`, so this selftest — which the header above
+/// deferred to "the hub story" — now lands here.)
+#[cfg(unix)]
+#[test]
+fn hub_dropped_without_stop_reaps_its_tree() {
+    use support::Hub;
+    let state = StateDir::new();
+    let hub = Hub::start(&state);
+    // The hub is its own process-group leader (Hub::start calls
+    // make_own_process_group), so pgid == pid.
+    let pgid = hub.pid() as i64;
+    assert!(
+        hub_child_visible(pgid),
+        "the hub we just started is not visible in its own process group"
+    );
+    // Let it drop *without* calling stop — the `Drop` impl must reap the tree.
+    drop(hub);
+    let reaped = wait_for(Duration::from_secs(5), || {
+        (!hub_child_visible(pgid)).then_some(())
+    });
+    assert!(
+        reaped.is_some(),
+        "dropping a `Hub` without calling `stop` leaked its process (pgid {pgid} \
+         still alive after 5s) — the harness `Drop` impl must reap the tree"
+    );
+    drop(state);
+}
+
 // --- helpers (test-local; not part of the public harness API) ---------------
+
+/// True if any process whose pgid is `pgid` is currently running (the hub or a
+/// descendant of it). Unix-only (uses `ps`), like [`grandchildren_of`].
+#[cfg(unix)]
+fn hub_child_visible(pgid: i64) -> bool {
+    grandchildren_of(pgid) > 0
+}
 
 /// The grandchild count of a process group, via `ps` on Unix.
 #[cfg(unix)]
@@ -152,7 +197,11 @@ fn grandchildren_of(pgid: i64) -> u32 {
         .args(["-eo", "pgid,comm"])
         .output()
         .expect("run ps");
-    assert!(out.status.success(), "ps failed: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "ps failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let text = String::from_utf8_lossy(&out.stdout);
     text.lines()
         .skip(1) // header

@@ -28,14 +28,18 @@ fn designed_to_fail_case_is_detected() {
     // `cmd /c exit 1`. We must *see* the non-zero status — not have it
     // swallowed.
     #[cfg(unix)]
-    let child = std::process::Command::new("sh").arg("-c").arg("exit 1").spawn();
+    let child = std::process::Command::new("sh")
+        .arg("-c")
+        .arg("exit 1")
+        .spawn();
     #[cfg(windows)]
-    let child = std::process::Command::new("cmd").arg("/c").arg("exit 1").spawn();
+    let child = std::process::Command::new("cmd")
+        .arg("/c")
+        .arg("exit 1")
+        .spawn();
 
     let mut child = child.expect("spawn the child process");
-    let status = child
-        .wait()
-        .expect("wait for the child to exit");
+    let status = child.wait().expect("wait for the child to exit");
     assert!(
         !status.success(),
         "harness must observe the child's exit-1 as a failure; it reported success"
@@ -86,8 +90,8 @@ fn dial_closed_port_fails_fast() {
 
     let mut saw_refusal = false;
     for _ in 0..TRIES {
-        let listener = TcpListener::bind("127.0.0.1:0")
-            .expect("bind a throwaway listener on 127.0.0.1");
+        let listener =
+            TcpListener::bind("127.0.0.1:0").expect("bind a throwaway listener on 127.0.0.1");
         let port = listener
             .local_addr()
             .expect("read the assigned port")
@@ -95,10 +99,7 @@ fn dial_closed_port_fails_fast() {
         // Drop the listener *before* dialing so the port is closed.
         drop(listener);
 
-        let target = SocketAddr::new(
-            std::net::IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
-            port,
-        );
+        let target = SocketAddr::new(std::net::IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), port);
 
         // A genuinely closed port must *fail* the connect (refused). We do not
         // hard-assert a specific `ErrorKind` — refused can surface differently

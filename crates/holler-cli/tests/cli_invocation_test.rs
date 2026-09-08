@@ -1,4 +1,4 @@
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable, dead_code)] // #149
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable, dead_code)] // #127
 //! ADR 0003 invocation tests (story #127, RED first).
 //!
 //! These pin the normative CLI surface: every leaf in ADR 0003 must parse
@@ -11,6 +11,10 @@ use predicates::function::function;
 use predicates::prelude::*;
 use predicates::str::contains;
 use rstest::rstest;
+
+// Story #143's dedicated cases below (`hub_serve_is_recognised`) spawn a real
+// hub and tear it down as a process tree, so they reuse the shared harness.
+mod support;
 
 fn holler() -> Command {
     Command::cargo_bin("holler").expect("holler binary on PATH")
@@ -70,14 +74,20 @@ fn bare_invocation_fails_closed(#[case] args: &[&str]) {
 // implemented" on stderr and exits 1 (ADR 0003: exit 1 = runtime failure,
 // which "not implemented" is until the owning story lands). Proving the verb
 // parses is the point: a typo'd or unlisted spelling would exit 2 instead.
+// NOTE (story #143): `hub serve` and `hub status` were originally listed here
+// as skeleton leaves that print "not implemented" and exit 1. #143 implements
+// them: `hub serve` is now a *long-running* server (it never exits on its own,
+// so it can't be asserted with `.assert()`, which waits for process exit) and
+// `hub status` now exits 1 with a *real* "no live hub reachable" message (ADR
+// 0003: exit 1 = unreachable hub) rather than "not implemented". Both are
+// therefore removed from this "not implemented" table and pinned by dedicated
+// tests below (`hub_serve_is_recognised`, `hub_status_without_live_hub`).
 #[rstest]
-#[case::hub_serve(&["hub", "serve", "--listen", "127.0.0.1:8700"])]
 #[case::hub_token_mint(&["hub", "token", "mint", "--label", "x"])]
 #[case::hub_token_list(&["hub", "token", "list"])]
 #[case::hub_token_delete(&["hub", "token", "delete", "ID"])]
 #[case::hub_token_revoke(&["hub", "token", "revoke", "ID"])]
 #[case::hub_token_ping(&["hub", "token", "ping", "ID"])]
-#[case::hub_status(&["hub", "status"])]
 #[case::hub_caps(&["hub", "caps"])]
 #[case::hub_support(&["hub", "support", "FEATURE"])]
 #[case::hub_query_local(&["hub", "query", "CMD"])]
@@ -101,4 +111,84 @@ fn every_adr_0003_leaf_parses(#[case] args: &[&str]) {
         .failure()
         .code(1)
         .stderr(contains("not implemented"));
+}
+
+// Story #143 made `hub serve` a real, *long-running* server. We can't use
+// `.assert()` here (it blocks until the child exits, and a server never does);
+// the whole serve lifecycle is pinned by `hub_serve_test.rs`. What this case
+// still owes ADR 0003 is the *parse* guarantee: `serve` is a recognised `hub`
+// leaf, so it must NOT fail closed as an unknown subcommand (exit 2). We prove
+// that by giving it a loopback listen target and a *definite* policy refusal —
+// another hub already holding the instance lock — so the process exits (code 3)
+// instead of running forever, and we assert it did so (i.e. it parsed and ran,
+// rather than bailing at exit 2 as "unknown").
+//
+// It is self-cleaning: it starts one hub (its own process group, like every
+// harness spawn) to hold the instance lock, asserts the second `serve` is
+// refused with exit 3, then kills the first's whole tree and removes the temp
+// state dir.
+#[test]
+fn hub_serve_is_recognised() {
+    use support::{kill_tree, make_own_process_group};
+    let state = std::env::temp_dir().join(format!("holler-inv-serve-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&state);
+    let _ = std::fs::create_dir_all(state.join("hub"));
+    // Hold the instance lock (the first hub), on a loopback port, as its own
+    // process group so we can tear the whole tree down at the end.
+    let mut holder_cmd = std::process::Command::new(env!("CARGO_BIN_EXE_holler"));
+    holder_cmd
+        .args(["hub", "serve", "--listen", "127.0.0.1:0"])
+        .env("HOLLER_STATE_DIR", &state)
+        .env("NO_COLOR", "1")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    make_own_process_group(&mut holder_cmd);
+    let mut holder = holder_cmd
+        .spawn()
+        .expect("start the first (lock-holding) hub");
+
+    // Poll until the first hub has bound (the lock is held before it binds, so
+    // `listening.json` existing is a sound proxy for "lock is held").
+    let mut locked = false;
+    for _ in 0..100 {
+        if state.join("hub").join("listening.json").exists() {
+            locked = true;
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    assert!(locked, "first hub did not come up to hold the lock");
+
+    // The *second* `serve` must parse (not exit 2) and then be refused because
+    // the lock is held: exit 3 (fail-closed policy refusal).
+    holler()
+        .env("HOLLER_STATE_DIR", &state)
+        .env("NO_COLOR", "1")
+        .args(["hub", "serve", "--listen", "127.0.0.1:0"])
+        .assert()
+        .failure()
+        .code(3);
+
+    // Tear the first hub's whole tree down (reap; no zombie, no orphan).
+    kill_tree(&mut holder);
+    let _ = std::fs::remove_dir_all(&state);
+}
+
+// Story #143 implemented `hub status`: with no live hub it exits 1 (ADR 0003:
+// "1 runtime failure (unreachable hub…)") with a *real* diagnostic — it no
+// longer prints the skeleton's "not implemented". This pins both facts: the
+// leaf parses (does not exit 2) and the unreachable-hub path exits 1.
+#[test]
+fn hub_status_without_live_hub() {
+    let state = std::env::temp_dir().join(format!("holler-inv-status-{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&state);
+    holler()
+        .env("HOLLER_STATE_DIR", &state)
+        .env("NO_COLOR", "1")
+        .args(["hub", "status"])
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(contains("not implemented").not());
+    let _ = std::fs::remove_dir_all(&state);
 }

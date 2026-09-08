@@ -14,15 +14,61 @@
 //! silent fallback. All logging goes to stderr; stdout is command output.
 
 use clap::Parser;
-use holler_cli::{
-    Attach, AttachCommand, BodyCommand, Cli, Command, HubCommand, TokenCommand,
-};
+use holler_cli::{Attach, AttachCommand, BodyCommand, Cli, Command, HubCommand, TokenCommand};
 use holler_proto::log::{emit_banner, init, resolve};
 
 /// ADR 0003: every unimplemented leaf exits 1 with this shape on stderr.
 fn not_implemented(story: &str) -> ! {
     eprintln!("error: not implemented (story {story})");
     std::process::exit(1);
+}
+
+/// `holler hub status [--json]` — read the live hub's status document over the
+/// control socket and print it (story #143). With `--json`, the raw
+/// `StatusDoc` JSON goes to stdout (machine-readable). Without, a short
+/// human-readable summary goes to stdout. If no live hub is reachable, the
+/// spec's exact message goes to stderr and the exit code is 1.
+fn hub_status(json: bool) -> ! {
+    // The state dir may be unresolvable (no `HOLLER_STATE_DIR`/`$HOME`); then
+    // there is no live hub and the error message below just has no path to name.
+    let state_root = holler_hub::state::resolve_state_dir().unwrap_or_default();
+    match holler_hub::control::status() {
+        Ok(doc) => {
+            if json {
+                println!("{}", doc);
+            } else {
+                let listening = doc
+                    .get("listening")
+                    .and_then(|l| l.as_array())
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|v| v.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    })
+                    .unwrap_or_else(|| "(none)".to_string());
+                let clients = doc.get("clients").and_then(|v| v.as_u64()).unwrap_or(0);
+                let sessions = doc.get("sessions").and_then(|v| v.as_u64()).unwrap_or(0);
+                let version = doc.get("version").and_then(|v| v.as_str()).unwrap_or("?");
+                println!("hub {version} (protocol 2)");
+                println!("  listening: {listening}");
+                println!("  clients:   {clients}");
+                println!("  sessions:  {sessions}");
+            }
+            std::process::exit(0);
+        }
+        Err(holler_hub::control::ControlError::NoLiveHub) => {
+            eprintln!(
+                "error: no live holler hub reachable at {}",
+                state_root.display()
+            );
+            std::process::exit(1);
+        }
+        Err(e) => {
+            eprintln!("error: {e}");
+            std::process::exit(1);
+        }
+    }
 }
 
 fn main() {
@@ -64,22 +110,49 @@ fn main() {
     init(config);
     emit_banner();
 
+    // Story #143: the two hub leaves that are implemented — `hub serve`
+    // (the loopback listener + control socket) and `hub status` (read the
+    // live hub's status over the control socket). Every other leaf is still
+    // the skeleton's "not implemented" (their stories land later).
+    if let Command::Hub(hub) = &cli.command {
+        match &hub.command {
+            HubCommand::Serve(serve) => {
+                // `run` is a lib and returns the exit code (ADR 0003: 0 clean
+                // signal shutdown, 1 runtime failure, 3 fail-closed refusal).
+                // The bin — the one place a helper's code may be acted on by
+                // exiting — applies it. A clean 0 would otherwise fall through
+                // to the "not implemented" arm below, so we exit in all cases.
+                std::process::exit(holler_hub::serve::run(
+                    &serve.listen,
+                    serve.advertise.as_deref(),
+                ));
+            }
+            HubCommand::Status(_) => {
+                // `--json` is the root-level global flag (issue #147/#155), not
+                // a per-leaf field: `Status` is empty, so read `cli.json`.
+                hub_status(cli.json);
+            }
+            // Everything else is still the skeleton's "not implemented".
+            HubCommand::Token(token) => {
+                let story = match &token.command {
+                    TokenCommand::Mint(_) => "TokenMint",
+                    TokenCommand::List(_) => "TokenList",
+                    TokenCommand::Delete(_) => "TokenDelete",
+                    TokenCommand::Revoke(_) => "TokenRevoke",
+                    TokenCommand::Ping(_) => "TokenPing",
+                };
+                not_implemented(story);
+            }
+            HubCommand::Caps(_) => not_implemented("HubCaps"),
+            HubCommand::Support(_) => not_implemented("HubSupport"),
+            HubCommand::Query(_) => not_implemented("HubQuery"),
+        }
+    }
+
     let story = match &cli.command {
-        // hub
-        Command::Hub(hub) => match &hub.command {
-            HubCommand::Serve(_) => "HubServing",
-            HubCommand::Token(token) => match &token.command {
-                TokenCommand::Mint(_) => "TokenMint",
-                TokenCommand::List(_) => "TokenList",
-                TokenCommand::Delete(_) => "TokenDelete",
-                TokenCommand::Revoke(_) => "TokenRevoke",
-                TokenCommand::Ping(_) => "TokenPing",
-            },
-            HubCommand::Status(_) => "HubStatus",
-            HubCommand::Caps(_) => "HubCaps",
-            HubCommand::Support(_) => "HubSupport",
-            HubCommand::Query(_) => "HubQuery",
-        },
+        // hub (the implemented Serve/Status were handled above and returned;
+        // this arm is defensive — every `Command::Hub` path above exits)
+        Command::Hub(_) => not_implemented("Hub"),
         // top-level (hub-only daily verbs)
         Command::Roster(_) => "Roster",
         Command::Say(_) => "Say",
