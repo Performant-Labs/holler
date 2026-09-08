@@ -2,7 +2,7 @@
 //!
 //! Parses the full ADR 0003 CLI surface (see `cli.rs`), then routes each
 //! leaf command to a "not implemented" handler. Behaviour is intentionally
-//! inert in the workspace skeleton (story #327): every leaf prints
+//! inert in the workspace skeleton (story #127): every leaf prints
 //! `error: not implemented (story <name>)` to stderr and exits 1, while
 //! `--version`/`--help`/bare/unknown follow the ADR 0003 exit-code rules.
 
