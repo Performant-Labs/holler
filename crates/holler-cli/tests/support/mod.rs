@@ -113,10 +113,7 @@ fn holler_bin() -> &'static str {
 /// by `timeout`) and returns `None` on timeout, so callers can distinguish
 /// "became ready" from "timed out". No `thread::sleep` gates in test code —
 /// readiness is always observed, never guessed.
-pub fn wait_for<T>(
-    timeout: Duration,
-    mut check: impl FnMut() -> Option<T>,
-) -> Option<T> {
+pub fn wait_for<T>(timeout: Duration, mut check: impl FnMut() -> Option<T>) -> Option<T> {
     let deadline = Instant::now() + timeout;
     loop {
         // Poll first: a check that is already ready should not pay a sleep.
@@ -155,19 +152,68 @@ const POLL_INTERVAL: Duration = Duration::from_millis(50);
 pub struct Hub {
     pub port: u16,
     child: Child,
+    /// Set once [`Hub::stop`] has torn the process down. The `Drop` impl
+    /// re-runs the same teardown if a test lets the `Hub` fall out of scope
+    /// *without* calling `stop` (e.g. the WS first-frame tests just `drop(hub)`,
+    /// and any test that panics mid-body). Without this, dropping the `Child`
+    /// handle would orphan the hub process (reparented to init) and leak it.
+    stopped: bool,
+}
+
+/// Tear the hub's whole process tree down: SIGINT first (graceful), then a
+/// hard SIGKILL of the tree if it has not exited within `timeout`, and reap so
+/// no zombie is left. Idempotent: if the child has already exited (e.g. a
+/// prior `stop` or `Drop` already reaped it, or it died on its own) it is a
+/// no-op, so [`Hub::stop`] and `impl Drop for Hub` can both call it safely.
+fn stop_hub(child: &mut Child, timeout: Duration) {
+    // Already exited? Nothing to signal or reap.
+    if child.try_wait().ok().flatten().is_some() {
+        return;
+    }
+    // SIGINT first (graceful teardown); on non-Unix there is no process-group
+    // signal, so go straight to the kill-tree fallback below.
+    #[cfg(unix)]
+    signal_tree(child);
+    // Give it `timeout` to wind down on the signal… (`wait_for` polls until the
+    // closure returns `Some`, i.e. until `try_wait` reports an exit.)
+    wait_for(timeout, || child.try_wait().ok().flatten());
+    // …then hard-kill the whole tree and reap (no-op if it already exited).
+    kill_tree(child);
+}
+
+impl Drop for Hub {
+    fn drop(&mut self) {
+        // `stop()` flips `stopped` before tearing down; if it's already true the
+        // child was reaped there and there is nothing left to do. Otherwise
+        // (a test let the `Hub` drop without calling `stop`, or panicked) we
+        // still reap the tree so no hub process is ever orphaned.
+        if !self.stopped {
+            stop_hub(&mut self.child, Duration::from_secs(5));
+        }
+    }
 }
 
 impl Hub {
     /// Spawn a hub bound to a free loopback port and wait (≤10 s) for it to
     /// report the bound port on stderr.
     pub fn start(state: &StateDir) -> Hub {
-        let mut child = holler_cmd(state)
-            .args(["hub", "serve", "--listen", "127.0.0.1:0"])
+        // Bind the base `Command` to a name first (rather than chaining on the
+        // `holler_cmd` temporary) so we can keep it alive long enough to call
+        // `make_own_process_group` on it — see the note below.
+        let mut cmd = holler_cmd(state);
+        cmd.args(["hub", "serve", "--listen", "127.0.0.1:0"])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
-            .stderr(Stdio::piped())
-            .spawn()
-            .expect("spawn `holler hub serve`");
+            .stderr(Stdio::piped());
+        // Give the hub its own process group (ADR 0002) so `signal_tree` /
+        // `kill_tree` can signal it by group: `Hub::stop` sends
+        // `kill(-pid, SIGINT)` for a graceful stop and falls back to
+        // `kill(-pid, SIGKILL)`. Without a group of its own, `-pid` names no
+        // group and both calls are no-ops, so `stop` would hang on `wait()`.
+        // (`Body::start` already does this; the hub spawn had simply omitted
+        // it.)
+        make_own_process_group(&mut cmd);
+        let mut child = cmd.spawn().expect("spawn `holler hub serve`");
 
         // The hub emits one JSON object per event on stderr; the
         // listener-ready line is `{"event":"listening","addr":"127.0.0.1:<port>"}`.
@@ -189,7 +235,11 @@ impl Hub {
             );
         });
 
-        Hub { port, child }
+        Hub {
+            port,
+            child,
+            stopped: false,
+        }
     }
 
     /// The WebSocket URL bodies dial to reach this hub.
@@ -197,14 +247,28 @@ impl Hub {
         format!("ws://127.0.0.1:{}", self.port)
     }
 
-    /// Stop the hub gracefully: SIGINT (Ctrl-C) first, then `kill_tree` if it
-    /// has not exited within `timeout`.
-    pub fn stop(self, timeout: Duration) {
-        let mut child = self.child;
-        // SIGINT first (graceful teardown), then a hard kill-tree as fallback.
-        signal_tree(&mut child);
-        wait_for(timeout, || child.try_wait().ok().flatten());
-        kill_tree(&mut child);
+    /// The hub child's pid (to signal it directly from a test, e.g. SIGINT).
+    pub fn pid(&self) -> u32 {
+        self.child.id()
+    }
+
+    /// A mutable handle to the hub child, for tests that need to
+    /// `try_wait` / `kill` it without consuming the `Hub`.
+    pub fn child_mut(&mut self) -> &mut Child {
+        &mut self.child
+    }
+
+    /// Stop the hub gracefully: SIGINT (Ctrl-C) first, then a hard kill of the
+    /// process tree if it has not exited within `timeout`.
+    ///
+    /// Takes `self` by value (consuming the `Hub`). We flip `stopped` *before*
+    /// tearing down so that the `Drop` impl that runs when `self` is dropped at
+    /// the end of this function is a no-op (the child is already reaped).
+    pub fn stop(mut self, timeout: Duration) {
+        self.stopped = true;
+        stop_hub(&mut self.child, timeout);
+        // `self` (and thus `self.child`) is dropped here; `Drop` sees
+        // `stopped == true` and does nothing.
     }
 }
 
@@ -227,7 +291,10 @@ pub fn mint_token(state: &StateDir, label: &str) -> (String, String) {
         String::from_utf8_lossy(&out.stderr)
     );
     let v: Value = serde_json::from_slice(&out.stdout).expect("mint --json is a JSON object");
-    let token_id = v["id"].as_str().expect("mint result carries `id`").to_string();
+    let token_id = v["id"]
+        .as_str()
+        .expect("mint result carries `id`")
+        .to_string();
     let secret = v["secret"]
         .as_str()
         .expect("mint result carries `secret`")
@@ -328,9 +395,7 @@ impl Body {
     pub fn stop(self, state: &StateDir, timeout: Duration) {
         let mut child = self.child;
         // Graceful: ask the body to detach, then wait, then hard-kill the tree.
-        let _ = holler_cmd(state)
-            .args(["body", "detach"])
-            .status();
+        let _ = holler_cmd(state).args(["body", "detach"]).status();
         wait_for(timeout, || child.try_wait().ok().flatten());
         kill_tree(&mut child);
     }
@@ -352,7 +417,11 @@ pub fn body_status_json(state: &StateDir) -> Value {
 }
 
 fn status_json_of(state: &StateDir, sub: &[&str]) -> Value {
-    let args: Vec<String> = sub.iter().map(|s| s.to_string()).chain(["--json".to_string()]).collect();
+    let args: Vec<String> = sub
+        .iter()
+        .map(|s| s.to_string())
+        .chain(["--json".to_string()])
+        .collect();
     let out = holler_cmd(state)
         .args(&args)
         .stdout(Stdio::piped())

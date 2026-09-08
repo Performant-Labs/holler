@@ -17,7 +17,7 @@ use clap::{ArgAction, Parser, Subcommand};
 #[command(
     name = "holler",
     about = "One binary, two roles: hub and body (ADR 0001)",
-    version,
+    version
 )]
 pub struct Cli {
     /// Set logging verbosity (none|quiet|noisy). Overrides `HOLLER_DEBUG`.

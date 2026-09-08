@@ -62,6 +62,12 @@ path = "tests/cli_surface_test.rs"
 name = "docs_cli_test"
 path = "tests/docs_cli_test.rs"
 
+# `holler hub serve` + `holler hub status` e2e (story #143): the hub's
+# WebSocket listener, instance lock, Unix-domain control socket, and status.
+[[test]]
+name = "hub_serve_test"
+path = "tests/hub_serve_test.rs"
+
 # Explicit pin (story #129): the test-of-tests canary is named here so a later
 # move of the file under a subdirectory cannot silently un-discover it from the
 # CI canary step.
