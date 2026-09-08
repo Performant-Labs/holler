@@ -1,0 +1,4 @@
+# ADR 0002 retires "Windows on the CI matrix" but not the toolchain; CI pins
+# the channel here so the workspace builds reproducibly on both runners.
+[toolchain]
+channel = "stable"

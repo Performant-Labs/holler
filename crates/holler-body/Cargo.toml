@@ -1,0 +1,29 @@
+[package]
+name = "holler-body"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "The body role of the holler binary (empty in the workspace skeleton)"
+
+[lib]
+name = "holler_body"
+path = "src/lib.rs"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+tokio-tungstenite = { workspace = true }
+rustls = { workspace = true }
+futures-util = { workspace = true }
+time = { workspace = true }
+hostname = { workspace = true }
+reqwest = { workspace = true }
+agent-client-protocol = { workspace = true }
+ulid = { workspace = true }
+toml = { workspace = true }
+libc = { workspace = true }
+holler-proto = { path = "../holler-proto" }
+
+[dev-dependencies]
+tempfile = { workspace = true }
