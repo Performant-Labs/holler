@@ -13,6 +13,7 @@
 //! [`StateDir`]; readiness is *observed* via [`wait_for`], never guessed with a
 //! blind sleep; long-lived children are spawned in their own process group so
 //! [`kill_tree`] reaps them (and any spawned agents) on drop/panic.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable, dead_code)] // #143
 
 use std::io::{BufRead, Write};
 use std::os::unix::net::UnixStream;

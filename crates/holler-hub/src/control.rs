@@ -39,7 +39,11 @@ impl std::fmt::Display for ControlError {
 
 /// Resolve the control socket path for the current state dir.
 pub fn sock_path() -> PathBuf {
-    control_sock_path(&HubState::from_root(resolve_state_dir()))
+    // A missing state dir has no socket; `unwrap_or_default` is a defensive
+    // no-op (this helper is only used where the state dir is resolvable).
+    control_sock_path(&HubState::from_root(
+        resolve_state_dir().unwrap_or_default(),
+    ))
 }
 
 /// Ask the live hub for its status document over the control socket.
@@ -47,8 +51,16 @@ pub fn sock_path() -> PathBuf {
 /// Returns the reply envelope's `result` (the `StatusDoc` JSON value). Errors
 /// map to [`ControlError::NoLiveHub`] when the socket is absent (hub not
 /// running) — the CLI prints the spec's exact message and exits 1.
+// The `b-status` id literal and the well-formed request envelope both parse /
+// encode infallibly, so the `.expect`s here are unreachable.
+#[allow(clippy::expect_used)] // #143
 pub fn status() -> Result<serde_json::Value, ControlError> {
-    let path = control_sock_path(&HubState::from_root(resolve_state_dir()));
+    // No resolvable state dir means there is no control socket to connect to —
+    // the same "no live hub" condition as an absent socket.
+    let path = match resolve_state_dir() {
+        Some(dir) => control_sock_path(&HubState::from_root(dir)),
+        None => return Err(ControlError::NoLiveHub),
+    };
     let stream = UnixStream::connect(&path).map_err(|_| ControlError::NoLiveHub)?;
     stream
         .set_read_timeout(Some(CLIENT_TIMEOUT))

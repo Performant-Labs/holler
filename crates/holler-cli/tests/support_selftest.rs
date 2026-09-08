@@ -15,7 +15,7 @@
 //! below pins that a `Hub` dropped without `stop` still reaps its process tree
 //! (no orphaned hub).
 
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable, dead_code)] // #149
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable, dead_code)] // #138
 
 mod support;
 

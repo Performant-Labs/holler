@@ -1,4 +1,4 @@
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable, dead_code)] // #149
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable, dead_code)] // #138
 //! Shared test harness (story #138).
 //!
 //! One hand-written Rust module every integration test composes from: real
@@ -326,10 +326,7 @@ pub fn join(state: &StateDir, ws_url: &str, token_id: &str, secret: &str) {
 /// Each row points the body at the built `stub-acp` agent with the given extra
 /// argv, so a session the body spawns runs the deterministic stub (story #130)
 /// instead of a real model. Returns the path written.
-pub fn write_sessions_toml(
-    state: &StateDir,
-    sessions: &[(&str, &[&str])],
-) -> PathBuf {
+pub fn write_sessions_toml(state: &StateDir, sessions: &[(&str, &[&str])]) -> PathBuf {
     // Compile-time read (defect #147): a missing var fails the build, not a
     // silently-exited test.
     let stub = env!("CARGO_BIN_EXE_stub-acp");
