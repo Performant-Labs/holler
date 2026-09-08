@@ -55,7 +55,6 @@
 #     those. Exits with the same status the underlying `cargo test` exits
 #     with (exit 0 only if every selected case passed). --dir defaults to '.'.
 
-require 'octokit'
 require 'time'
 require 'open3'
 require 'optparse'
@@ -71,7 +70,14 @@ MARKER_END = '<!-- test-run-fields:end -->'
 # subcommands that talk to GitHub: discover, start, run, record, and the
 # non-preview exec path). A local `exec --list` preview does not need it --
 # see the short-circuit in main().
+#
+# `require 'octokit'` lives HERE, not at the top of the file, on purpose:
+# the top-of-file require fires at load time, before `main` has parsed the
+# subcommand, so a token-free `exec --list` smoke would die with a LoadError
+# before it ever reached the short-circuit. Deferring it into the lazy client
+# means only the GitHub-touching paths ever pay for the gem.
 def client
+  require 'octokit'
   token = ENV['GITHUB_TOKEN']
   if token.nil? || token.empty?
     token, status = Open3.capture2e('gh', 'auth', 'token')
@@ -531,15 +537,6 @@ def main
       o.on('-h', '--help') { puts o.banner; exit 0 }
     end.parse!(ARGV)
 
-    # --last-failed N resolves to a list of Test IDs (the ❌ rows of issue N)
-    # that feeds the selection's list_ids axis. It combines with --list FILE.
-    last_failed_ids = nil
-    unless opts[:last_failed].nil?
-      run_issue = gh.issue(REPO, opts[:last_failed].to_i)
-      last_failed_ids = TestSelection.last_failed(run_issue.body)
-      warn "warning: exec: no failing rows in test-run issue #{opts[:last_failed]} -- nothing to re-run" if last_failed_ids.empty?
-    end
-
     has_selection = !test_id.nil? || !opts[:group].nil? || !opts[:cat].nil? || !opts[:applies].nil? ||
                     !opts[:tags].nil? || !opts[:tag_inverts].nil? ||
                     !opts[:list].nil? || !opts[:list_invert].nil? || !opts[:last_failed].nil?
@@ -573,10 +570,23 @@ def main
     active = ['list: ' + opts[:list]] unless opts[:list].nil? || opts[:list] == ''
     active += ['last-failed: #' + opts[:last_failed]] unless opts[:last_failed].nil?
 
-    # Only the non-preview paths talk to GitHub (discover +, for --last-failed,
-    # the run issue). A preview needs the catalog too, so it also uses the
-    # client; only a bare --list (handled above) ever gets here without one.
+    # Only the non-preview paths talk to GitHub (discover, and --last-failed's
+    # run issue). A preview needs the catalog too, so it also uses the client;
+    # only a bare --list (short-circuited above) ever gets past here without
+    # building one -- so it never pays for octokit or a token.
     gh = client
+
+    # --last-failed N resolves to a list of Test IDs (the ❌ rows of issue N)
+    # that feeds the selection's list_ids axis. It combines with --list FILE.
+    # It is a REAL GitHub read (it fetches issue N's body), so it runs only
+    # now that `gh` exists and only after the bare-`--list` short-circuit --
+    # the token-free smoke path must never reach it.
+    last_failed_ids = nil
+    unless opts[:last_failed].nil?
+      run_issue = gh.issue(REPO, opts[:last_failed].to_i)
+      last_failed_ids = TestSelection.last_failed(run_issue.body)
+      warn "warning: exec: no failing rows in test-run issue #{opts[:last_failed]} -- nothing to re-run" if last_failed_ids.empty?
+    end
 
     catalog = discover(gh)
     # A positional TEST_ID narrows the catalog to that one entry (the legacy
