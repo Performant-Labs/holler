@@ -253,9 +253,11 @@ fn hello_requires_protocol_2() {
 // 9. a2a_part_and_message_match_spec_examples
 // ---------------------------------------------------------------------------
 
-/// Deserialize an A2A fixture through `holler_proto::a2a`, re-serialise with
-/// sorted keys, and assert the canonical form equals the file's contents —
-/// proving the types are shape-identical to the A2A JSON schema.
+/// Deserialize an A2A fixture through `holler_proto::a2a`, re-serialise, and
+/// assert the canonical form (sorted keys, one line) equals the file's
+/// canonical form — proving the types are shape-identical to the A2A JSON
+/// schema. Key order is sorted on both sides, so the comparison is
+/// process-independent (not sensitive to `serde_json::Map`'s iteration order).
 fn assert_fixture_round_trips(file: &str) {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures/a2a/")
@@ -264,8 +266,9 @@ fn assert_fixture_round_trips(file: &str) {
     let msg: Message =
         serde_json::from_str(&original).unwrap_or_else(|e| panic!("{file}: parse: {e}"));
     let re = serde_json::to_string(&msg).unwrap();
-    // Compare canonical (sorted-keys, one-line) forms so key order is
-    // irrelevant; this still pins the exact keys, values, and structure.
+    // Compare canonical (sorted-keys, one-line) forms so key *order* is
+    // irrelevant and the form is process-independent (see `write_json`); this
+    // still pins the exact keys, values, and structure.
     let norm = |s: &str| -> String {
         let v: serde_json::Value = serde_json::from_str(s).unwrap();
         canonical_json(&v).to_string()
@@ -301,17 +304,24 @@ fn write_json(f: &mut std::fmt::Formatter<'_>, v: &serde_json::Value) -> std::fm
             write!(f, "]")
         }
         serde_json::Value::Object(m) => {
-            // m is a serde_json::Map (a BTreeMap) -> already sorted by key.
+            // Sort keys so the canonical form is deterministic and
+            // order-independent: `serde_json::Map`'s iteration order is
+            // process-dependent (HashMap-backed by default, hash-seed
+            // dependent), so relying on raw iteration order made the
+            // byte-for-byte comparison flaky in CI. Sorting by key gives a
+            // stable canonical form on both sides.
             write!(f, "{{")?;
+            let mut keys: Vec<&String> = m.keys().collect();
+            keys.sort();
             let mut first = true;
-            for (k, x) in m.iter() {
+            for k in keys {
                 if !first {
-                    write!(f, ",")?;
+                    write!(f, ",")?
                 }
                 first = false;
                 write_json_string(f, k)?;
                 write!(f, ":")?;
-                write_json(f, x)?;
+                write_json(f, m.get(k).unwrap())?;
             }
             write!(f, "}}")
         }
@@ -334,8 +344,8 @@ fn write_json_string(f: &mut std::fmt::Formatter<'_>, s: &str) -> std::fmt::Resu
 }
 
 fn canonical_json(v: &serde_json::Value) -> Canonical {
-    // serde_json::Map is a BTreeMap: object keys are already in sorted order,
-    // so the value is already canonical.
+    // `write_json` sorts object keys, so the rendered string is the canonical
+    // (order-independent) form regardless of the Map's backing iteration order.
     Canonical(v.clone())
 }
 
