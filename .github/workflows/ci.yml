@@ -61,12 +61,14 @@ jobs:
       #    -- the retrofit is happening in parallel ... until cases exist
       #    `discover` must exit 0 with `[]`; write the smoke test to TOLERATE
       #    that)."
-      # So the smoke's contract is: run `exec --list` and FAIL ONLY IF the
-      # script errors out (non-zero exit / crash). It deliberately does NOT
-      # assert on the line count -- today the catalog is empty so 0 lines is
-      # the correct, tolerated outcome; once a real case lands it will print
-      # >=1 line and the same assertion still passes. That is what "tolerate
-      # that" means.
+      # So the smoke's contract is: run `exec --list` (a whole-catalog
+      # preview) and FAIL ONLY IF the script errors out (non-zero exit /
+      # crash). It deliberately does NOT assert on the line count: today the
+      # catalog is empty, so the preview resolves to 0 cases and the script
+      # prints a short "0 case(s) matched" line and exits 0 -- the tolerated
+      # outcome. Once a real case lands it prints >=1 case line (and the same
+      # non-zero-exit assertion still passes). That is what "tolerate that"
+      # means.
       #
       #   * octokit is NOT shipped by the runners. `exec --list` (whole-catalog
       #     preview) builds the GitHub client, so it needs the gem. We install
