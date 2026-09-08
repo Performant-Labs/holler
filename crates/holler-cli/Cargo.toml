@@ -1,0 +1,42 @@
+[package]
+name = "holler-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "The holler binary — parses the full ADR 0003 CLI surface"
+
+[lib]
+name = "holler_cli"
+path = "src/lib.rs"
+
+[[bin]]
+name = "holler"
+path = "src/main.rs"
+
+[dependencies]
+clap = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+tokio-tungstenite = { workspace = true }
+rustls = { workspace = true }
+futures-util = { workspace = true }
+time = { workspace = true }
+hostname = { workspace = true }
+getrandom = { workspace = true }
+hmac = { workspace = true }
+sha2 = { workspace = true }
+fs4 = { workspace = true }
+toml = { workspace = true }
+reqwest = { workspace = true }
+agent-client-protocol = { workspace = true }
+ulid = { workspace = true }
+libc = { workspace = true }
+holler-proto = { path = "../holler-proto" }
+holler-hub = { path = "../holler-hub" }
+holler-body = { path = "../holler-body" }
+
+[dev-dependencies]
+assert_cmd = { workspace = true }
+predicates = { workspace = true }
+rstest = { workspace = true }

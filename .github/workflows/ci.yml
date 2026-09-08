@@ -1,0 +1,48 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      # Windows is deliberately OFF the matrix (not soft-failed): ADR 0002
+      # retires "Windows on the CI matrix" from the server. The job name is
+      # `test` so the required checks are `test (ubuntu-latest)` and
+      # `test (macos-latest)`.
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        run: rustup toolchain install stable
+        shell: pwsh
+
+      # The canary is the first gate. `--test cli_invocation_test` alone
+      # (not `cargo test`, which also builds the libs) so CI goes red as
+      # early as possible if the runner ever swallows a failure. The
+      # canary story swaps this step to `--test wire_selftest`; until then
+      # the invocation test stands in as the fail-fast gate.
+      - name: Canary (fail-fast)
+        run: cargo test -p holler-cli --test cli_invocation_test
+        shell: pwsh
+
+      - name: Full test suite
+        run: cargo test --workspace
+        shell: pwsh
+
+      # The runner-port story adds scripts/test_selection_test.rb; this step
+      # is skipped until that file exists.
+      - name: test_selection_test (runner port)
+        if: hashFiles('scripts/test_selection_test.rb') != ''
+        run: ruby scripts/test_selection_test.rb
+        shell: pwsh
+
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+        shell: pwsh
