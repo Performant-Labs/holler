@@ -129,6 +129,41 @@ that's a separate, deliberately-rare push (a phone/desktop notification),
 reserved for things worth walking back to the terminal for. Routine progress
 should never trigger one.
 
+### 3. Verify the interrupt actually fires — don't just reason about it
+
+Failure mode 3 happened *after* §1 and §2 were both already built, reasoned
+through, and believed to be correct. Neither half was actually broken in
+isolation — the watchdog's detection logic was sound, and the log-watch
+interrupt genuinely does push notifications — but their combination had a
+gap only a live test surfaced: a real event stopped being logged, and a
+correctly-wired interrupt has nothing to catch if the thing it watches goes
+silent.
+
+The concrete practice this demands: **treat "I fixed it" and "I confirmed
+it fires" as two separate claims**, and don't make the first one stand in
+for the second.
+
+- **Detection alone proves nothing about delivery.** A script correctly
+  writing the right line to a log file is necessary, not sufficient — it
+  says nothing about whether anything is actually listening, or whether the
+  listener's filter matches that exact line.
+- **An interrupt correctly wired to a source proves nothing about the
+  source staying correct.** The log-watch in §2 was independently verified
+  once — that it fires on a matching line — but that didn't guarantee the
+  upstream script would keep producing matching lines under every real
+  condition (e.g. a long run of timeouts). Re-verify after any change to
+  either half, not just the half that changed.
+- **Trigger the condition for real, or synthetically, and watch the
+  notification land.** For a stale-state bug like this one, that meant
+  hand-editing the state file to simulate the exact staleness window, then
+  running a real probe cycle and observing the notification arrive — not
+  reading the code and concluding it should work.
+- **"Now I know exactly why" is not the same claim as "and I confirmed the
+  fix."** Say the second one only once you've done it. A plausible root
+  cause, stated with confidence, is still just a hypothesis until something
+  external confirms it — the gap between those two claims is exactly where
+  this failure mode kept recurring.
+
 ---
 
 ## Section: Claude (Claude Code)
@@ -152,11 +187,8 @@ about — use them instead of any sleep-and-poll loop:
 - Reserve an actual attention-grabbing (desktop/phone) push for genuine
   walk-away-worthy events — a real block needing a decision, a long job
   finishing — never for routine status.
-- **Verify the interrupt, not just the detection.** It is easy to confirm a
-  script *logs* the right thing and stop there. Confirm the notification
-  actually arrives — trigger the condition for real (or synthetically, as
-  in §1's stale-flag fix) and watch it land — before trusting the pipeline
-  end to end.
+- **Verify the interrupt per §3** — it's the same requirement here as
+  anywhere else, not a Claude-specific nuance.
 
 ## Section: OpenCode
 
