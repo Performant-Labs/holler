@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)] // #149
 //! Integration tests for the ACP v2 stub agent (story #130).
 //!
 //! Each test spawns the built `stub-acp` binary as a real process and drives
@@ -32,11 +33,10 @@ struct Stub {
 /// Cargo sets `CARGO_BIN_EXE_<name>` for integration tests to the built binary
 /// path. (We can't use `assert_cmd::cargo_bin` here because its `Command`
 /// wrapper cannot hand us a live, piped stdin for interactive I/O.)
-fn stub_bin_path() -> String {
-    std::env::var("CARGO_BIN_EXE_stub-acp").unwrap_or_else(|_| {
-        eprintln!("CARGO_BIN_EXE_stub-acp not set");
-        std::process::exit(2)
-    })
+fn stub_bin_path() -> &'static str {
+    // Compile-time read (defect #147): a missing var fails the build, not a
+    // silently-exited test.
+    env!("CARGO_BIN_EXE_stub-acp")
 }
 
 fn spawn_stub(args: &[&str]) -> Stub {

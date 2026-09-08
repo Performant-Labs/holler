@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable, dead_code)] // #149
 //! `stub-acp` — a deterministic ACP **v2** agent stub (story #130).
 //!
 //! The test suite spawns this binary instead of a real agent. It is a real
@@ -44,7 +45,8 @@ const ERROR_METHOD_NOT_FOUND: i64 = -32601;
 struct Config {
     /// Advertised session names (comma-separated). Parsed but not otherwise
     /// used by the wire behaviour: `session/new` always returns `SESSION_ID`.
-    #[allow(dead_code)]
+    // Forward-contract stub path: exercised by a later story (the file-level
+    // `dead_code` allow covers this — see the `// #149` blanket at the top).
     sessions: String,
     /// Number of `agent_message_chunk` notifications emitted per prompt.
     chunks: usize,
