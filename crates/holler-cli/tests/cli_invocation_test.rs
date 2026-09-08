@@ -82,26 +82,48 @@ fn bare_invocation_fails_closed(#[case] args: &[&str]) {
 // 0003: exit 1 = unreachable hub) rather than "not implemented". Both are
 // therefore removed from this "not implemented" table and pinned by dedicated
 // tests below (`hub_serve_is_recognised`, `hub_status_without_live_hub`).
+//
+// `--json` appears on the leaves **before** the subcommand path (e.g.
+// `--json hub token mint --label x`): it is a *global* flag on the root
+// (ADR 0003), so clap accepts it anywhere in the command line. The `x_json`
+// cases pin that placement — the exact regression a per-leaf `--json` would
+// reintroduce (with a leaf-local flag, `--json` after `mint` works but before
+// it is a clap error / exit 2). `hub status` keeps no `_json` row here because
+// #143 moved it out of this table; its `--json` form is pinned by the
+// dedicated `hub_status_without_live_hub` test.
 #[rstest]
 #[case::hub_token_mint(&["hub", "token", "mint", "--label", "x"])]
+#[case::hub_token_mint_json(&["--json", "hub", "token", "mint", "--label", "x"])]
 #[case::hub_token_list(&["hub", "token", "list"])]
+#[case::hub_token_list_json(&["--json", "hub", "token", "list"])]
 #[case::hub_token_delete(&["hub", "token", "delete", "ID"])]
 #[case::hub_token_revoke(&["hub", "token", "revoke", "ID"])]
 #[case::hub_token_ping(&["hub", "token", "ping", "ID"])]
+#[case::hub_token_ping_json(&["--json", "hub", "token", "ping", "ID"])]
 #[case::hub_caps(&["hub", "caps"])]
+#[case::hub_caps_json(&["--json", "hub", "caps"])]
 #[case::hub_support(&["hub", "support", "FEATURE"])]
+#[case::hub_support_json(&["--json", "hub", "support", "FEATURE"])]
 #[case::hub_query_local(&["hub", "query", "CMD"])]
+#[case::hub_query_local_json(&["--json", "hub", "query", "CMD"])]
 #[case::hub_query_remote(&["hub", "query", "TARGET", "CMD"])]
+#[case::hub_query_remote_json(&["--json", "hub", "query", "TARGET", "CMD"])]
 #[case::roster(&["roster"])]
+#[case::roster_json(&["--json", "roster"])]
 #[case::say(&["say", "SESSION", "TEXT"])]
+#[case::say_json(&["--json", "say", "SESSION", "TEXT"])]
 #[case::interrupt(&["interrupt", "SESSION"])]
 #[case::body_join(&["body", "join", "--server", "URL", "--token", "ID:SECRET"])]
 #[case::body_run(&["body", "run"])]
 #[case::body_detach(&["body", "detach"])]
 #[case::body_status(&["body", "status"])]
+#[case::body_status_json(&["--json", "body", "status"])]
 #[case::body_caps(&["body", "caps"])]
+#[case::body_caps_json(&["--json", "body", "caps"])]
 #[case::body_support(&["body", "support", "FEATURE"])]
+#[case::body_support_json(&["--json", "body", "support", "FEATURE"])]
 #[case::body_query(&["body", "query", "CMD"])]
+#[case::body_query_json(&["--json", "body", "query", "CMD"])]
 #[case::body_attach_sessions(&["body", "attach", "sessions"])]
 #[case::body_attach_init(&["body", "attach", "init"])]
 fn every_adr_0003_leaf_parses(#[case] args: &[&str]) {
@@ -177,11 +199,17 @@ fn hub_serve_is_recognised() {
 // Story #143 implemented `hub status`: with no live hub it exits 1 (ADR 0003:
 // "1 runtime failure (unreachable hub…)") with a *real* diagnostic — it no
 // longer prints the skeleton's "not implemented". This pins both facts: the
-// leaf parses (does not exit 2) and the unreachable-hub path exits 1.
+// leaf parses (does not exit 2) and the unreachable-hub path exits 1. The
+// `--json` form is asserted in the same test (#147 item 3): it is a root-level
+// global flag, so `--json` *before* `hub status` must also parse (not exit 2)
+// and take the same unreachable-hub exit-1 path, with a JSON document on
+// stdout instead of the human summary.
 #[test]
 fn hub_status_without_live_hub() {
     let state = std::env::temp_dir().join(format!("holler-inv-status-{}", std::process::id()));
     let _ = std::fs::create_dir_all(&state);
+    // Human form: exit 1, real diagnostic (not the skeleton's "not
+    // implemented").
     holler()
         .env("HOLLER_STATE_DIR", &state)
         .env("NO_COLOR", "1")
@@ -190,5 +218,14 @@ fn hub_status_without_live_hub() {
         .failure()
         .code(1)
         .stderr(contains("not implemented").not());
+    // `--json` global placement: still parses (not exit 2) and still exits 1
+    // (unreachable hub) — the JSON arm of the same command.
+    holler()
+        .env("HOLLER_STATE_DIR", &state)
+        .env("NO_COLOR", "1")
+        .args(["--json", "hub", "status"])
+        .assert()
+        .failure()
+        .code(1);
     let _ = std::fs::remove_dir_all(&state);
 }
