@@ -23,6 +23,15 @@ jobs:
         run: rustup toolchain install stable
         shell: pwsh
 
+      # Step 0 (issue #149/#155): the source-shape guards that need no
+      # compiler — unjustified #[allow], process::exit outside main.rs, a
+      # hard-coded CARGO_BIN_EXE_ path, an oversized file, an unattributed
+      # workspace dependency. Cheapest check, so it runs before anything is
+      # built; it is the same script a contributor runs locally.
+      - name: Lint (scripts/lint.sh)
+        run: bash scripts/lint.sh
+        shell: bash
+
       # The canary is the first gate. `--test wire_selftest` alone (not
       # `cargo test`, which also builds the libs) so CI goes red as early as
       # possible if the runner ever swallows a failure. This is the
@@ -47,3 +56,24 @@ jobs:
       - name: Clippy
         run: cargo clippy --all-targets -- -D warnings
         shell: pwsh
+
+      # Unused dependencies fail the build (issue #155 §7): a crate must
+      # declare only what it consumes. Runs once (ubuntu) — the answer does
+      # not depend on the OS.
+      - name: Unused dependencies (cargo machete)
+        if: matrix.os == 'ubuntu-latest'
+        uses: bnjbvr/cargo-machete@main
+
+      # Advisory only (issue #155 §7): a PR past 800 added lines is warned,
+      # not failed — reviewers decide whether it should have been split.
+      - name: PR size
+        if: github.event_name == 'pull_request' && matrix.os == 'ubuntu-latest'
+        env:
+          ADDED: ${{ github.event.pull_request.additions }}
+        run: |
+          if [ "$ADDED" -gt 800 ]; then
+            echo "::warning title=Large PR::This PR adds $ADDED lines (guideline: 800). Consider splitting it."
+          else
+            echo "PR adds $ADDED lines (guideline: 800)."
+          fi
+        shell: bash
