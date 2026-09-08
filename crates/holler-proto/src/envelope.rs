@@ -456,7 +456,12 @@ mod ctor_tests {
         let env = Envelope::error_frame(&id(), &err);
         assert!(matches!(env, Envelope::Error { .. }));
         assert_eq!(env.id().unwrap(), "h-1TEST");
-        assert_eq!(env.error().unwrap().code, Code::InvalidRequest);
+        // #145: the wire `error.code` is the JSON-RPC number, not a `Code`.
+        assert_eq!(env.error().unwrap().code, -32600);
+        assert_eq!(
+            Code::from_jsonrpc(env.error().unwrap().code),
+            Some(Code::InvalidRequest),
+        );
         assert!(env.result().is_none());
     }
 }

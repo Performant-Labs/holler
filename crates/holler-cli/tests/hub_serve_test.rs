@@ -110,12 +110,15 @@ async fn first_frame_on_the_wire_roundtrips_a_jsonrpc_error() {
     let err = next_frame_err(&mut ws)
         .await
         .expect("hub must reply with an error frame");
-    assert_eq!(err.code, holler_proto::Code::Unauthenticated);
+    // #145: the wire `error.code` is the JSON-RPC *number*; the Holler
+    // identity is the `data.code` string.
+    assert_eq!(err.code, -32002, "unauthenticated is JSON-RPC -32002");
     assert_eq!(
-        err.data
-            .as_ref()
-            .and_then(|d| d.get("code"))
-            .and_then(|c| c.as_str()),
+        holler_proto::Code::from_jsonrpc(err.code),
+        Some(holler_proto::Code::Unauthenticated),
+    );
+    assert_eq!(
+        err.data.as_ref().map(|d| d.code.as_str()),
         Some("unauthenticated"),
         "error.data.code is the Holler string",
     );
@@ -149,7 +152,12 @@ async fn batch_or_binary_first_frame_is_32600_then_close() {
     let err = next_frame_err(&mut ws)
         .await
         .expect("hub must reject the batch");
-    assert_eq!(err.code, holler_proto::Code::InvalidRequest);
+    // #145: wire `error.code` is the JSON-RPC number (-32600 for a batch).
+    assert_eq!(err.code, -32600, "a batch is JSON-RPC -32600 invalid_request");
+    assert_eq!(
+        holler_proto::Code::from_jsonrpc(err.code),
+        Some(holler_proto::Code::InvalidRequest),
+    );
     assert!(
         closed_next(&mut ws).await,
         "hub closes the socket after a batch"
@@ -174,7 +182,16 @@ async fn binary_first_frame_is_32600_then_close() {
     let err = next_frame_err(&mut ws)
         .await
         .expect("hub must reject the binary frame");
-    assert_eq!(err.code, holler_proto::Code::InvalidRequest);
+    // #145: wire `error.code` is the JSON-RPC number (-32600 for a binary frame).
+    assert_eq!(
+        err.code,
+        -32600,
+        "a binary first frame is JSON-RPC -32600 invalid_request"
+    );
+    assert_eq!(
+        holler_proto::Code::from_jsonrpc(err.code),
+        Some(holler_proto::Code::InvalidRequest),
+    );
     assert!(
         closed_next(&mut ws).await,
         "hub closes the socket after a binary frame"
@@ -199,7 +216,16 @@ async fn garbage_first_frame_is_32700_then_close() {
     let err = next_frame_err(&mut ws)
         .await
         .expect("hub must reject the garbage");
-    assert_eq!(err.code, holler_proto::Code::ParseError);
+    // #145: wire `error.code` is the JSON-RPC number (-32700 for non-JSON).
+    assert_eq!(
+        err.code,
+        -32700,
+        "non-JSON input is JSON-RPC -32700 parse_error"
+    );
+    assert_eq!(
+        holler_proto::Code::from_jsonrpc(err.code),
+        Some(holler_proto::Code::ParseError),
+    );
     assert!(
         closed_next(&mut ws).await,
         "hub closes the socket after garbage"
