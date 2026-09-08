@@ -94,7 +94,17 @@ end
 # One issue == one case == one Test ID (single binary; #168 §2/§3).
 # ---------------------------------------------------------------------------
 def discover(gh)
-  issues = gh.list_issues(REPO, labels: 'test-case', state: 'open', per_page: 100)
+  issues =
+    begin
+      gh.list_issues(REPO, labels: 'test-case', state: 'open', per_page: 100)
+    rescue Octokit::Unauthorized, Octokit::ClientError, StandardError => e
+      # A bad/absent token (or any GitHub API hiccup) must not crash the
+      # whole-catalog preview. #170 wants the CI smoke to "tolerate" an empty
+      # catalog, and an unauthenticated read is indistinguishable from one, so
+      # degrade to an empty catalog (a warning) instead of aborting.
+      warn "warning: discover: could not read the catalog from #{REPO} (#{e.class}: #{e.message}) -- treating as empty"
+      []
+    end
   issues.flat_map do |issue|
     body = issue.body || ''
     next [] unless body.include?('| Test ID |')

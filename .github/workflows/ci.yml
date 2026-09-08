@@ -39,6 +39,10 @@ jobs:
           echo "=== filesystem: octokit.rb under GEM_HOME? ==="; find "$GEM_HOME" -name 'octokit.rb' 2>/dev/null | head || echo "NOT under GEM_HOME"
           echo "=== Gem.path under override ==="; ruby -e 'puts Gem.path.inspect'
           echo "=== REQUIRE TEST ==="; ruby -e 'require "octokit"; puts "REQUIRE OK"' 2>&1 || echo "REQUIRE FAILED"
+          # REDACTED token diagnostic: first 6 chars + length only (never the
+          # full secret) so we can see which token the client actually uses.
+          echo "=== TOKEN REDACTED ==="; ruby -e 't=ENV["GITHUB_TOKEN"]||""; puts t.empty? ? "GITHUB_TOKEN EMPTY/UNSET" : "prefix=#{t[0,6]} len=#{t.length}"'
+          echo "=== octokit UA ==="; ruby -e 'require "octokit"; puts Octokit.default_client.user_agent' 2>&1
       - name: Install Rust
         run: rustup toolchain install stable
         shell: pwsh
