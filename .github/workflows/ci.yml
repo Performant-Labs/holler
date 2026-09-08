@@ -46,12 +46,33 @@ jobs:
         run: cargo test --workspace
         shell: pwsh
 
-      # The runner-port story adds scripts/test_selection_test.rb; this step
-      # is skipped until that file exists.
+      # The runner-port story (#170) adds scripts/test_selection_test.rb;
+      # this step is skipped until that file exists. It runs on the
+      # runners' preinstalled Ruby (2.6 on macOS) -- the selection core is
+      # deliberately stdlib-only so no gem install is needed.
       - name: test_selection_test (runner port)
         if: hashFiles('scripts/test_selection_test.rb') != ''
         run: ruby scripts/test_selection_test.rb
         shell: pwsh
+
+      # test-run.rb shell smoke (#170): the runner script must PARSE its
+      # arguments and reach discover(). With the test-case catalog still
+      # empty (reserved slots only -- the case authoring is a parallel track),
+      # `exec --list` prints "0 case(s) matched" and exits 0; this proves the
+      # script boots and the discovery path is wired. test-run.rb itself needs
+      # octokit, which the runners do NOT ship, so we `gem install` it into
+      # GEM_HOME when it is absent (idempotent). This step is ubuntu-only
+      # (macOS's preinstalled 2.6 Ruby is below octokit's required floor, and
+      # a Homebrew Ruby would add an install step that #170 does not ask for);
+      # the full minitest suite already runs on both OSes.
+      - name: test-run.rb exec --list smoke (runner port)
+        if: hashFiles('scripts/test-run.rb') != '' && matrix.os == 'ubuntu-latest'
+        run: |
+          gem list octokit >/dev/null 2>&1 || gem install --user-install octokit --no-document
+          ruby scripts/test-run.rb exec --list
+        shell: bash
+        env:
+          GEM_HOME: /tmp/gemhome
 
       - name: Clippy
         run: cargo clippy --all-targets -- -D warnings
