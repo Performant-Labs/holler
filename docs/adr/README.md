@@ -26,7 +26,7 @@ The issue is the canonical record; the markdown file is a copy for browsing and 
 | # | Title | Status | Issue |
 |---|-------|--------|-------|
 | 0001 | One binary, two roles: hub and body | accepted | [#2](https://github.com/Performant-Labs/holler/issues/2) |
-| 0002 | | reserved | [#3](https://github.com/Performant-Labs/holler/issues/3) |
+| 0002 | Decisions retired from holler-server and holler-client | accepted | [#3](https://github.com/Performant-Labs/holler/issues/3) |
 | 0003 | | reserved | [#4](https://github.com/Performant-Labs/holler/issues/4) |
 | 0004 | | reserved | [#5](https://github.com/Performant-Labs/holler/issues/5) |
 | 0005 | | reserved | [#6](https://github.com/Performant-Labs/holler/issues/6) |
