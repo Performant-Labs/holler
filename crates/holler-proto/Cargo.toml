@@ -12,9 +12,14 @@ path = "src/lib.rs"
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
-# RFC3339 microsecond emission timestamps for the debug-logging banner/events
-# (story #144). `time` is already a workspace dependency (used by holler-cli);
-# this is the one non-OS, non-network addition to the "no I/O" crate.
+# base64: A2A encodes `raw` (file) parts as base64 strings on the wire; this
+# crate encodes/decodes them (the old in-house 80-line base64 is gone, #146).
+base64 = { workspace = true }
+# ulid: correlation ids are minted as real ULIDs (ADR 0004) — #146 replaced
+# the "carry an opaque string" claim with the crate that mints them.
+ulid = { workspace = true }
+# time: RFC3339 emission timestamps for the debug-logging banner/events
+# (story #144) — the one non-OS, non-network addition to the "no I/O" crate.
 time = { workspace = true }
 
 [dev-dependencies]
