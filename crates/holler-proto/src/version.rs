@@ -1,6 +1,6 @@
 //! Protocol version constants (ADR 0003: a single protocol version).
 //!
-// The hub advertises `protocol_min = protocol_max = 2`. `2` is the version
+//! The hub advertises `protocol_min = protocol_max = 2`. `2` is the version
 //! this protocol (docs/protocol/v2.md) defines. `holler hello.protocol` must
 //! equal `2` or the peer answers `-32000 unsupported_version` and closes the
 //! socket — **no silent downgrade**.
