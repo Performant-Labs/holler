@@ -1,0 +1,21 @@
+{
+  "protocol": 2,
+  "protocol_min": 2,
+  "protocol_max": 2,
+  "role": "hub",
+  "hostname": "uranus",
+  "features": [
+    "interrupt",
+    "presence",
+    "ping",
+    "query",
+    "roster",
+    "token"
+  ],
+  "harnesses_known": [
+    "opencode"
+  ],
+  "harnesses_confirmed": [
+    "opencode"
+  ]
+}

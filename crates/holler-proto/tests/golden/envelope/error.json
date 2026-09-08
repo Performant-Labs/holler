@@ -1,0 +1,12 @@
+{
+  "error": {
+    "code": -32002,
+    "data": {
+      "code": "unauthenticated",
+      "reason": "revoked"
+    },
+    "message": "credential revoked"
+  },
+  "id": "h-01HTESTGOLDEN000000000000",
+  "jsonrpc": "2.0"
+}

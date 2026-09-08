@@ -1,0 +1,19 @@
+{
+  "status": {
+    "role": "body",
+    "protocol": 2,
+    "protocol_min": 2,
+    "protocol_max": 2,
+    "hostname": "kiwi",
+    "connected": false,
+    "features": []
+  },
+  "caps": {
+    "opencode": {
+      "feature": "opencode",
+      "kind": "harness",
+      "ok": true,
+      "how": "opencode acp"
+    }
+  }
+}
