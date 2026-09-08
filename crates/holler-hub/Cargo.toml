@@ -22,6 +22,16 @@ fs4 = { workspace = true }
 httparse = { workspace = true }
 http = { workspace = true }
 holler-proto = { path = "../holler-proto" }
+# Story #163: the token store. fs4 is the whole-file advisory lock around every
+# load-modify-save; getrandom mints secrets/credentials/ids/pepper; hmac + sha2
+# store secrets at rest as HMAC-SHA-256(pepper, secret); hex encodes ids/digests.
+hmac = { workspace = true }
+sha2 = { workspace = true }
+getrandom = { workspace = true }
+hex = { workspace = true }
+# subtle: constant-time HMAC comparison (a timing side-channel on secret
+# comparison is a fail-closed defect — #163).
+subtle = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
