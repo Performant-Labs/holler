@@ -1,4 +1,4 @@
-//! ADR 0003 invocation tests (story #327, RED first).
+//! ADR 0003 invocation tests (story #127, RED first).
 //!
 //! These pin the normative CLI surface: every leaf in ADR 0003 must parse
 //! (and, in the skeleton, report "not implemented" exit 1), `--version`
