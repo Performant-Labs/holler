@@ -10,7 +10,7 @@
 //!   In particular `body status` is `status` only (the `st` alias is a
 //!   rejected spelling).
 
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{ArgAction, Parser, Subcommand};
 
 /// `holler` — one binary, two roles (hub and body). ADR 0001.
 #[derive(Parser, Debug)]
@@ -20,29 +20,40 @@ use clap::{Parser, Subcommand, ValueEnum};
     version,
 )]
 pub struct Cli {
-    /// Set logging verbosity.
-    #[arg(long, global = true, default_value = "quiet")]
-    pub debug: DebugLevel,
+    /// Set logging verbosity (none|quiet|noisy). Overrides `HOLLER_DEBUG`.
+    ///
+    /// Captured as an `Option` with an **empty** default (not `None`) so the
+    /// resolver can tell "the flag was given" (`Some("noisy")` beats the env)
+    /// from "absent" (clap fills `Some("")`, which `resolve` treats as
+    /// "fall through to env, then the `none` default"). `resolve` fails closed
+    /// (exit 3) on a non-empty value outside none|quiet|noisy.
+    #[arg(
+        long,
+        global = true,
+        action = ArgAction::Set,
+        num_args = 1,
+        default_value = "",
+        hide_default_value = true,
+    )]
+    pub debug: Option<String>,
 
-    /// Output format for logs.
-    #[arg(long, global = true, default_value = "text")]
-    pub log_format: LogFormat,
+    /// Output format for logs (text|json). Overrides `HOLLER_LOG_FORMAT`.
+    ///
+    /// Same empty-default `Option` capture as `debug`: an absent flag arrives
+    /// as `Some("")` (fall through to env, then the `text` default); a
+    /// non-empty value outside text|json fails closed (exit 3) in `resolve`.
+    #[arg(
+        long,
+        global = true,
+        action = ArgAction::Set,
+        num_args = 1,
+        default_value = "",
+        hide_default_value = true,
+    )]
+    pub log_format: Option<String>,
 
     #[command(subcommand)]
     pub command: Command,
-}
-
-#[derive(Clone, Debug, ValueEnum)]
-pub enum DebugLevel {
-    None,
-    Quiet,
-    Noisy,
-}
-
-#[derive(Clone, Debug, ValueEnum)]
-pub enum LogFormat {
-    Text,
-    Json,
 }
 
 #[derive(Subcommand, Debug)]
