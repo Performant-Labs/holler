@@ -68,6 +68,13 @@ path = "tests/docs_cli_test.rs"
 name = "hub_serve_test"
 path = "tests/hub_serve_test.rs"
 
+# `holler hub token …` e2e (story #163): the CLI's thin layer over the hub's
+# token store — each verb's ADR 0003 exit code and its human/`--json` stdout
+# shape, driving the real binary against an isolated `HOLLER_STATE_DIR`.
+[[test]]
+name = "token_cli_test"
+path = "tests/token_cli_test.rs"
+
 # Explicit pin (story #129): the test-of-tests canary is named here so a later
 # move of the file under a subdirectory cannot silently un-discover it from the
 # CI canary step.

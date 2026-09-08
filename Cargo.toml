@@ -79,6 +79,20 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "str
 agent-client-protocol = "2.1.0"
 # ULID correlation ids and token ids.
 ulid = "1"
+# hmac + sha2: the hub's token store (story #163) stores secrets at rest as
+# HMAC-SHA-256(pepper, secret), never raw. Both consumed by holler-hub.
+hmac = "0.12"
+sha2 = "0.10"
+# getrandom: 256-bit CSPRNG for join secrets, credentials, token ids, client
+# ids, and the autogen pepper (story #163). Consumed by holler-hub.
+getrandom = "0.3"
+# hex: token ids (tok_/cli_ <32hex>) and the at-rest HMAC digests are hex
+# (story #163). Consumed by holler-hub.
+hex = "0.4"
+# subtle: constant-time comparison of HMAC digests in the token store — a
+# timing side-channel on secret comparison is a fail-closed defect (story #163).
+# Consumed by holler-hub.
+subtle = "2"
 # POSIX process-group control for the test harness's kill_tree.
 libc = "0.2"
 # scratch state dirs for the test harness.

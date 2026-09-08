@@ -84,22 +84,24 @@ fn bare_invocation_fails_closed(#[case] args: &[&str]) {
 // tests below (`hub_serve_is_recognised`, `hub_status_without_live_hub`).
 //
 // `--json` appears on the leaves **before** the subcommand path (e.g.
-// `--json hub token mint --label x`): it is a *global* flag on the root
-// (ADR 0003), so clap accepts it anywhere in the command line. The `x_json`
-// cases pin that placement — the exact regression a per-leaf `--json` would
-// reintroduce (with a leaf-local flag, `--json` after `mint` works but before
-// it is a clap error / exit 2). `hub status` keeps no `_json` row here because
-// #143 moved it out of this table; its `--json` form is pinned by the
-// dedicated `hub_status_without_live_hub` test.
+// `--json hub caps`): it is a *global* flag on the root (ADR 0003), so clap
+// accepts it anywhere in the command line. The `x_json` cases pin that
+// placement — the exact regression a per-leaf `--json` would reintroduce (with
+// a leaf-local flag, `--json` after the leaf works but before it is a clap
+// error / exit 2).
+//
+// NOTE (story #163): `hub status` (#143) and the eight `hub token …` leaves
+// (#163) were originally listed here as skeleton leaves that print "not
+// implemented" and exit 1. #143 implemented `hub status` (exit 1 = unreachable
+// hub, a *real* diagnostic) and #163 implements the `hub token` leaves (they
+// now operate the real file-backed token store and exit 0 / 1 / 3 per ADR 0003,
+// never "not implemented"). All nine are therefore removed from this "not
+// implemented" table and pinned by dedicated tests: `hub status` by
+// `hub_status_without_live_hub` (below), the `hub token` leaves by
+// `crates/holler-cli/tests/token_cli_test.rs`. The `cli-surface.txt` fixture
+// (which #149 adds `--json` rows for the token leaves) keeps pinning the *parse*
+// guarantee — clap accepts every line — independently of their run-time exit.
 #[rstest]
-#[case::hub_token_mint(&["hub", "token", "mint", "--label", "x"])]
-#[case::hub_token_mint_json(&["--json", "hub", "token", "mint", "--label", "x"])]
-#[case::hub_token_list(&["hub", "token", "list"])]
-#[case::hub_token_list_json(&["--json", "hub", "token", "list"])]
-#[case::hub_token_delete(&["hub", "token", "delete", "ID"])]
-#[case::hub_token_revoke(&["hub", "token", "revoke", "ID"])]
-#[case::hub_token_ping(&["hub", "token", "ping", "ID"])]
-#[case::hub_token_ping_json(&["--json", "hub", "token", "ping", "ID"])]
 #[case::hub_caps(&["hub", "caps"])]
 #[case::hub_caps_json(&["--json", "hub", "caps"])]
 #[case::hub_support(&["hub", "support", "FEATURE"])]
