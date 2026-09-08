@@ -1,0 +1,15 @@
+{
+  "contextId": "ctx-001",
+  "messageId": "m-raw-001",
+  "parts": [
+    {
+      "filename": "diagram.png",
+      "mediaType": "image/png",
+      "raw": "iVBORw0KGgoAAAADAAAA"
+    },
+    {
+      "text": "Here is the diagram I mentioned."
+    }
+  ],
+  "role": "ROLE_USER"
+}
