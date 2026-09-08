@@ -19,7 +19,7 @@ as [holler#142](https://github.com/Performant-Labs/holler/issues/142)
 (`holler wait`, a real blocking waiter on roster state + `last_turn`); until
 it ships, an orchestrator has to work around the gap.
 
-Two failure modes came out of that gap during real use:
+Three failure modes came out of that gap during real use, found in this order:
 
 1. **Polling by hand doesn't scale.** Asking "are you done yet?" via `say`
    in a loop is expensive (each call can legitimately take minutes if the
@@ -32,6 +32,15 @@ Two failure modes came out of that gap during real use:
    unread, for **over two hours** on one occasion, because nothing pulled
    the orchestrator's attention to the log. Detection without an actual
    interrupt is just a diary.
+3. **A "notified" flag can go stale and mask a real new event.** After
+   wiring the interrupt (§2), a *second* real completion still went
+   unreported: the watchdog's own de-duplication state (`probe_notified`,
+   set after the first nudge so it doesn't re-nudge for the *same*
+   completion) never reset, because every probe in between timed out
+   (the session was busy on genuinely new work) instead of ever observing
+   a "still working" reply — the one thing that would have cleared the
+   flag. The interrupt mechanism was working correctly; the thing it was
+   listening for silently stopped firing. See the fix in §1.
 
 ## What we decided
 
@@ -54,8 +63,8 @@ need judgment, so it should not cost a model call. A shell script on a
   labeled as one in every nudge it sends, and it is the first thing to retire
   once holler#142 ships.
 - **Every run appends one line per event to a plain log file.** Not a
-  database, not a dashboard — a `tail`-able log, because the actual fix (next
-  section) depends on that.
+  database, not a dashboard — a `tail`-able log, because the actual fix (§2)
+  depends on that.
 
 **Known, undisguised gap:** the watchdog's nudge target is a Holler session
 named `mo`, per the MO pattern — but nothing guarantees that session exists.
@@ -63,7 +72,25 @@ When it doesn't, every nudge attempt fails with `unknown_session`, and the
 script logs that failure explicitly rather than swallowing it
 (`nudge FAILED (mo unreachable? ...)`). A monitor that silently no-ops on its
 own delivery failure is worse than no monitor — it manufactures false
-confidence. Log the failure loudly; don't hide it.
+confidence. Log the failure loudly; don't hide it. (This gap is still open —
+fixing it means standing up a real holler body session for the orchestrator
+role, which the orchestrator itself cannot do from inside its own
+conversation.)
+
+**Fixed: the stale-notified-flag bug (failure mode 3 above).** The
+`probe_notified` flag suppresses a repeat nudge for the *same* completion,
+but had no expiry — so a completion notified once, followed by hours where
+every probe timed out instead of getting a real "still working" reply,
+left the flag stuck `true` through a second, genuinely new completion. Fix:
+record a timestamp alongside the flag; if it's older than `STALE_SECONDS`
+(1200s — well past the 5-minute probe interval, short enough that a stuck
+flag doesn't hide a real event for long) when a fresh "looks done" reply
+comes in, treat the flag as stale, reset it, and nudge. **Verified live**,
+not just reasoned about: the fix was tested by artificially staling a real
+session's flag and running a real probe cycle — the script logged the
+staleness reset, logged a fresh nudge, and the orchestrator's log-watch (§2)
+caught the new line and pushed a real notification, observed arriving in
+real time.
 
 ### 2. The orchestrator needs a real interrupt, not a habit
 
@@ -86,6 +113,15 @@ cadence to forget, no log to remember to check. This is the actual
 event-stream mechanism, not a discipline the orchestrator has to maintain.
 **Detection without a wired interrupt is not monitoring — it's a diary
 nobody reads.**
+
+**This mechanism is only as good as the events it's fed.** It is a real,
+verified fix for "the orchestrator forgot to check the log" — but it cannot
+notice an event the upstream script never logs in the first place (see
+failure mode 3 above). An interrupt wired to a buggy event source is still
+silent. Both halves — the watchdog emitting the right events, and the
+orchestrator actually listening for them — have to be independently
+correct and independently verified; fixing one does not imply the other
+still works.
 
 When the orchestrator itself needs to pull a human's attention (not just its
 own) — e.g. it hit a real decision point while the human has stepped away —
@@ -116,6 +152,11 @@ about — use them instead of any sleep-and-poll loop:
 - Reserve an actual attention-grabbing (desktop/phone) push for genuine
   walk-away-worthy events — a real block needing a decision, a long job
   finishing — never for routine status.
+- **Verify the interrupt, not just the detection.** It is easy to confirm a
+  script *logs* the right thing and stop there. Confirm the notification
+  actually arrives — trigger the condition for real (or synthetically, as
+  in §1's stale-flag fix) and watch it land — before trusting the pipeline
+  end to end.
 
 ## Section: OpenCode
 
