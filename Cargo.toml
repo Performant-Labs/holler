@@ -16,7 +16,13 @@ license = "AGPL-3.0-or-later"
 # them so every crate is compiled and checked by CI from the skeleton on.
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+# `preserve_order` backs `serde_json::Map` with `IndexMap` (insertion-ordered)
+# instead of the default `HashMap` (hash-seed-dependent iteration order). With
+# it, re-serialising a deserialised value emits object keys in a deterministic
+# order. The canonical round-trip tests additionally sort keys, so the
+# byte-for-byte comparison is order-independent and process-stable. `indexmap`
+# is already a serde_json dep, so this adds no new crate.
+serde_json = { version = "1", features = ["preserve_order"] }
 clap = { version = "4", features = ["derive"] }
 tokio = { version = "1.53.1", features = ["rt-multi-thread", "net", "sync", "macros", "time", "io-util", "rt", "signal"] }
 tokio-tungstenite = { version = "0.30.0", features = ["rustls-tls-native-roots"] }
