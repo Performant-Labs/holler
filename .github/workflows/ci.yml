@@ -23,13 +23,14 @@ jobs:
         run: rustup toolchain install stable
         shell: pwsh
 
-      # The canary is the first gate. `--test cli_invocation_test` alone
-      # (not `cargo test`, which also builds the libs) so CI goes red as
-      # early as possible if the runner ever swallows a failure. The
-      # canary story swaps this step to `--test wire_selftest`; until then
-      # the invocation test stands in as the fail-fast gate.
+      # The canary is the first gate. `--test wire_selftest` alone (not
+      # `cargo test`, which also builds the libs) so CI goes red as early as
+      # possible if the runner ever swallows a failure. This is the
+      # test-of-tests: it proves the harness detects a child that exits 1, a
+      # nested panic, a closed-port connect, and a booted tokio runtime —
+      # before any real e2e relies on the runner (ADR 0002; Windows off).
       - name: Canary (fail-fast)
-        run: cargo test -p holler-cli --test cli_invocation_test
+        run: cargo test -p holler-cli --test wire_selftest
         shell: pwsh
 
       - name: Full test suite
