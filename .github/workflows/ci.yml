@@ -19,6 +19,26 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # TEMPORARY (diagnostic for the #170 smoke): dump the runner's gem
+      # environment and test which install strategy makes `require 'octokit'`
+      # succeed under a step-level GEM_HOME override. Non-failing (continue-on-
+      # error) so it cannot break the build; remove once the smoke is green.
+      - name: gem-probe (temporary diagnostic, non-failing)
+        if: matrix.os == 'ubuntu-latest'
+        continue-on-error: true
+        env:
+          GEM_HOME: /tmp/gemhome
+          GEM_PATH: /tmp/gemhome
+        run: |
+          echo "=== which ruby / version ==="; which ruby; ruby -v
+          echo "=== GEM_HOME/GEM_PATH (step env) ==="; echo "GEM_HOME=$GEM_HOME GEM_PATH=$GEM_PATH"
+          echo "=== default (pre-override) gem env home + octokit present? ==="
+          env -u GEM_HOME -u GEM_PATH gem env home 2>&1
+          env -u GEM_HOME -u GEM_PATH gem list octokit 2>&1 || echo "octokit absent from default env"
+          echo "=== install into GEM_HOME ==="; gem install --no-document --install-dir "$GEM_HOME" octokit 2>&1 | tail -3
+          echo "=== filesystem: octokit.rb under GEM_HOME? ==="; find "$GEM_HOME" -name 'octokit.rb' 2>/dev/null | head || echo "NOT under GEM_HOME"
+          echo "=== Gem.path under override ==="; ruby -e 'puts Gem.path.inspect'
+          echo "=== REQUIRE TEST ==="; ruby -e 'require "octokit"; puts "REQUIRE OK"' 2>&1 || echo "REQUIRE FAILED"
       - name: Install Rust
         run: rustup toolchain install stable
         shell: pwsh
@@ -72,10 +92,14 @@ jobs:
       #
       #   * octokit is NOT shipped by the runners. `exec --list` (whole-catalog
       #     preview) builds the GitHub client, so it needs the gem. We install
-      #     it into GEM_HOME (not --user-install, which would land it in
-      #     ~/.gem and be invisible to `require` under GEM_HOME) when absent.
-      #     The client builds from the runner's pre-set GITHUB_TOKEN, so no
-      #     separate `gh auth` is needed in this step.
+      #     it into a dedicated GEM_HOME (/tmp/gemhome) AND point GEM_PATH at
+      #     the same dir: when a step overrides GEM_HOME, Ruby's gem search
+      #     path becomes just GEM_HOME (the user/system gem dirs are dropped),
+      #     so GEM_PATH must include it or `require 'octokit'` misses the
+      #     freshly installed gem. A `gem install` always puts the gem in its
+      #     own GEM_HOME, so the install lands exactly where Ruby will look.
+      #     The client authenticates from the runner's pre-set GITHUB_TOKEN,
+      #     so no `gh auth` is needed in this step.
       #   * ubuntu-only: macOS's preinstalled 2.6 Ruby is below octokit's
       #     required floor, and a Homebrew Ruby would add an install step that
       #     #170 does not ask for; the full minitest suite already runs on both.
@@ -83,13 +107,14 @@ jobs:
         if: hashFiles('scripts/test-run.rb') != '' && matrix.os == 'ubuntu-latest'
         run: |
           gem list octokit >/dev/null 2>&1 || gem install --no-document --install-dir "$GEM_HOME" octokit
-          # Fail only on a hard error (non-zero exit). A zero-line output is
+          # Fail only on a hard error (non-zero exit). A zero-case output is
           # the expected, tolerated outcome while the catalog is empty.
           ruby scripts/test-run.rb exec --list
           echo "ok: exec --list ran without erroring (catalog empty -> 0 cases, tolerated)"
         shell: bash
         env:
           GEM_HOME: /tmp/gemhome
+          GEM_PATH: /tmp/gemhome
 
       - name: Clippy
         run: cargo clippy --all-targets -- -D warnings
