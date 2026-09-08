@@ -10,3 +10,7 @@ pub use crate::cli::{
     Attach, AttachCommand, Body, BodyCommand, Cli, Command, Hub, HubCommand, Interrupt, Join, List,
     Mint, Ping, Query, Revoke, Roster, Run, Say, Serve, Status, Support, Token, TokenCommand,
 };
+// NOTE (story #144): the global `--debug` / `--log-format` values are
+// captured on `Cli` as `Option<String>` (not typed enums) so the logging
+// resolver in `holler_proto::log` can distinguish "the flag was given" (it
+// beats the environment) from "absent" (env, then the none/text defaults).

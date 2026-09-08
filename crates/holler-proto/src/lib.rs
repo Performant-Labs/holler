@@ -16,9 +16,13 @@
 //! - [`names`] — the `SessionName` grammar (ADR 0005) and the feature /
 //!   harness id vocabulary.
 //! - [`features`] — the single protocol version constant (ADR 0003).
+//! - [`log`] — debug logging for both roles (story #144): the
+//!   `--debug`/`HOLLER_DEBUG` and `--log-format`/`HOLLER_LOG_FORMAT` dials,
+//!   severity, components, secret redaction, and the stderr banner.
 //!
-//! **This crate has no network, OS, or async dependency** — only
-//! `serde`/`serde_json`. The hub and body both link it.
+//! **This crate has no network or async dependency** — only
+//! `serde`/`serde_json` (plus `time` for the log emission timestamp). The
+//! hub and body both link it.
 
 pub mod a2a;
 pub mod docs;
@@ -26,6 +30,7 @@ pub mod envelope;
 pub mod error;
 pub mod features;
 pub mod id;
+pub mod log;
 pub mod methods;
 pub mod names;
 
@@ -41,5 +46,9 @@ pub use envelope::{decode, decode_call, encode, shape_name, Envelope, EnvelopeEr
 pub use error::{Code, Error as WireError, ErrorDef, TABLE};
 pub use features::{is_supported_version, PROTOCOL_MAX, PROTOCOL_MIN, PROTOCOL_VERSION};
 pub use id::{CorrelationId, CorrelationIdError};
+pub use log::{
+    emit, emit_banner, get, init, key_is_secret, redact, redact_frame, resolve, value_is_secret,
+    Component, Config, DebugLevel, Direction as LogDirection, Event, LogFormat, REDACTED, Severity,
+};
 pub use methods::{find, is_notification, is_request, Direction, Method, MethodKind, CATALOG};
 pub use names::{NameError, SessionName, Vocab, FEATURES, HARNESS_IDS};
