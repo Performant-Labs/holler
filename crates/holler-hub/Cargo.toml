@@ -1,0 +1,29 @@
+[package]
+name = "holler-hub"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "The hub role of the holler binary (empty in the workspace skeleton)"
+
+[lib]
+name = "holler_hub"
+path = "src/lib.rs"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+tokio-tungstenite = { workspace = true }
+rustls = { workspace = true }
+futures-util = { workspace = true }
+time = { workspace = true }
+hostname = { workspace = true }
+getrandom = { workspace = true }
+hmac = { workspace = true }
+sha2 = { workspace = true }
+fs4 = { workspace = true }
+holler-proto = { path = "../holler-proto" }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+libc = { workspace = true }

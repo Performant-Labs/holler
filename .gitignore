@@ -1,0 +1,5 @@
+target/
+*.log
+holler-state/
+sessions.toml
+attach.toml
