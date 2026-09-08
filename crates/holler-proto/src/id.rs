@@ -11,13 +11,24 @@
 //! exists so the two sides' id spaces **cannot collide** — a `b-` id can
 //! never equal an `h-` id — and so an unmatched response can be triaged.
 //!
-//! The body after the prefix is a **ULID** (monotonic, time-ordered). This
-//! crate has no ULID dependency; `CorrelationId` carries the minted string and
-//! the `h-`/`b-` minting helpers format a supplied ULID body. A `CorrelationId`
-//! is parsed **leniently** (any non-empty `h-`/`b-`-prefixed string) — the
-//! grammar the codec *validates* is that the prefix is exactly `h` or `b`.
+//! The body after the prefix is a **ULID** (Crockford Base32, time-ordered
+//! then random). The [`mint_hub`](Self::mint_hub) /
+//! [`mint_body`](Self::mint_body) constructors generate a real ULID, so a
+//! minted id is always a well-formed `h-<26 chars>` / `b-<26 chars>`.
+//!
+//! Parsing is **lenient**: any non-empty `h-`/`b-`-prefixed string is
+//! accepted. The strict ULID-body grammar (length 26) is asserted by the
+//! minters, not re-checked on parse — a peer never rejects an id for the
+//! body's grammar.
+//!
+//! Wire shape (ADR 0004 §5): the JSON-RPC `id` member is a **string**. The
+//! grammar for a minted id is `^(h|b)-[0-9A-HJKMNP-TV-Z]{26}$` (Crockford
+//! Base32, upper). Numeric ids are rejected (see
+//! [`crate::envelope::EnvelopeError::BadId`]).
 
 use std::fmt;
+
+use ulid::Ulid;
 
 /// A correlation id: a minted, prefixed string.
 #[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -27,8 +38,11 @@ impl CorrelationId {
     /// Parse a wire string into a `CorrelationId`.
     ///
     /// Succeeds iff the string is non-empty and starts with `h-` or `b-`.
-    /// (The body after the prefix is treated opaquely here; the *strict*
-    /// ULID-body grammar is asserted by the minters and by the tests.)
+    /// The body after the prefix is treated **opaquely** (any non-empty
+    /// string is accepted) — the minters are where the strict ULID-body
+    /// grammar is asserted, and a peer never rejects an id for the body's
+    /// grammar (a wire id that is a valid prefix but a malformed body is
+    /// still a distinct id, and that is the point of the prefix).
     pub fn parse(s: &str) -> Result<Self, CorrelationIdError> {
         if s.is_empty() {
             return Err(CorrelationIdError::Empty);
@@ -58,14 +72,22 @@ impl CorrelationId {
         self.0.starts_with("b-")
     }
 
-    /// Mint a **hub** id from a ULID body: `h-<ulid>`.
-    pub fn mint_hub(ulid_body: &str) -> Self {
-        Self(format!("h-{ulid_body}"))
+    /// Mint a **hub** correlation id: `h-<ULID>`.
+    ///
+    /// The body after the prefix is a real ULID (Crockford Base32, 26
+    /// chars, time-ordered then random) generated via the `ulid` crate.
+    /// Two ids minted in the same millisecond are still distinct (the
+    /// random part differs), and minted ids are lexicographically ordered
+    /// by mint time.
+    pub fn mint_hub() -> Self {
+        Self(format!("h-{}", Ulid::new()))
     }
 
-    /// Mint a **body** id from a ULID body: `b-<ulid>`.
-    pub fn mint_body(ulid_body: &str) -> Self {
-        Self(format!("b-{ulid_body}"))
+    /// Mint a **body** correlation id: `b-<ULID>`.
+    ///
+    /// See [`CorrelationId::mint_hub`] for the body's properties.
+    pub fn mint_body() -> Self {
+        Self(format!("b-{}", Ulid::new()))
     }
 }
 
@@ -76,7 +98,7 @@ impl std::fmt::Display for CorrelationId {
 }
 
 impl std::fmt::Debug for CorrelationId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "CorrelationId({:?})", self.0)
     }
 }

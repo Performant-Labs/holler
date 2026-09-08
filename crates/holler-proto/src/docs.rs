@@ -19,6 +19,140 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::a2a::{Message, Part};
+use crate::error::{Code, Error as WireError};
+
+// ---------------------------------------------------------------------------
+// enums (docs §3–7): closed string vocabularies as real types
+// ---------------------------------------------------------------------------
+
+/// The two endpoint roles a `circuit/hello` (or `query/status`) document is
+/// sent from. Wire values `"body"` / `"hub"` (docs §3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum HelloRole {
+    /// A body (a box running harnesses and sessions).
+    Body,
+    /// The hub (the router that bodies connect to).
+    Hub,
+}
+
+/// A `query/support` answer's subject class (docs §5.3). Wire values
+/// `"feature"` / `"harness"` / `"capability"`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SupportKind {
+    /// A protocol feature id (docs §9).
+    Feature,
+    /// A harness id (docs §9).
+    Harness,
+    /// A capability (a finer-grained feature of a harness).
+    Capability,
+}
+
+/// The A2A **session** state a session is in (docs §7): `idle` (Holler's
+/// addition, ADR 0005 — no A2A task-state equivalent), `working`, or
+/// `input-required`. Distinct from the A2A *task* states (`TaskState`, a2a)
+/// which a turn ends in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SessionState {
+    /// The session is idle (no turn in flight) — Holler's addition.
+    Idle,
+    /// The session is mid-turn.
+    Working,
+    /// The turn is paused awaiting user input.
+    InputRequired,
+    /// The turn ended successfully (A2A `completed`).
+    Completed,
+    /// The turn was cancelled (A2A `canceled`).
+    Canceled,
+    /// The turn ended in an error (A2A `failed`).
+    Failed,
+    /// The turn was refused (A2A `rejected`; Holler's addition).
+    Rejected,
+}
+
+/// How a session was established (docs §7): `spawn` a fresh harness session or
+/// `attach` to an existing one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Mode {
+    /// Spawn a fresh harness session.
+    Spawn,
+    /// Attach to an existing harness session.
+    Attach,
+}
+
+impl HelloRole {
+    /// The wire string (`"body"` / `"hub"`).
+    #[inline]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            HelloRole::Body => "body",
+            HelloRole::Hub => "hub",
+        }
+    }
+}
+impl std::fmt::Display for HelloRole {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl SupportKind {
+    /// The wire string (`"feature"` / `"harness"` / `"capability"`).
+    #[inline]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            SupportKind::Feature => "feature",
+            SupportKind::Harness => "harness",
+            SupportKind::Capability => "capability",
+        }
+    }
+}
+impl std::fmt::Display for SupportKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl SessionState {
+    /// The wire string (`"idle"`, `"working"`, `"input-required"`,
+    /// `"completed"`, `"canceled"`, `"failed"`, `"rejected"`).
+    #[inline]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            SessionState::Idle => "idle",
+            SessionState::Working => "working",
+            SessionState::InputRequired => "input-required",
+            SessionState::Completed => "completed",
+            SessionState::Canceled => "canceled",
+            SessionState::Failed => "failed",
+            SessionState::Rejected => "rejected",
+        }
+    }
+}
+impl std::fmt::Display for SessionState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl Mode {
+    /// The wire string (`"spawn"` / `"attach"`).
+    #[inline]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Mode::Spawn => "spawn",
+            Mode::Attach => "attach",
+        }
+    }
+}
+impl std::fmt::Display for Mode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
 
 // ---------------------------------------------------------------------------
 // hello
@@ -38,8 +172,8 @@ pub struct Hello {
     pub protocol_min: u32,
     /// The highest protocol version this endpoint can also speak.
     pub protocol_max: u32,
-    /// `"body"` or `"hub"`.
-    pub role: String,
+    /// The endpoint role: `"body"` or `"hub"`.
+    pub role: HelloRole,
     /// The hostname / label this endpoint is reachable by.
     pub hostname: String,
     /// Present on a **body** hello: the short token id (ADR 0006).
@@ -72,8 +206,8 @@ pub struct HelloSession {
     pub name: String,
     /// The harness that hosts this session.
     pub harness: String,
-    /// `"spawn"` or `"attach"`.
-    pub mode: String,
+    /// How the session was established: `spawn` or `attach`.
+    pub mode: Mode,
     /// The existing harness session being attached to (attach mode only).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub harness_session_id: Option<String>,
@@ -87,7 +221,7 @@ pub struct HelloSession {
 /// shape, two `role` values.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Status {
-    pub role: String,
+    pub role: HelloRole,
     pub protocol: u32,
     pub protocol_min: u32,
     pub protocol_max: u32,
@@ -136,7 +270,7 @@ pub struct StatusSession {
     pub name: String,
     pub harness: String,
     /// The A2A session state: `idle` | `working` | `input-required`.
-    pub state: String,
+    pub state: SessionState,
 }
 
 /// `query/caps` = `status` plus an explicit `caps` map (docs §5.2).
@@ -167,8 +301,8 @@ pub struct SupportParams {
 pub struct Support {
     /// The id that was asked about.
     pub feature: String,
-    /// `"feature"` | `"harness"` | `"capability"`.
-    pub kind: String,
+    /// The subject class: `feature` | `harness` | `capability`.
+    pub kind: SupportKind,
     /// Whether this endpoint supports it.
     pub ok: bool,
     /// How it is satisfied (e.g. `"opencode acp"`).
@@ -233,9 +367,9 @@ pub struct SessionAd {
     /// The A2A **session** state — one of `idle`, `working`, `input-required`
     /// (`idle` is Holler's addition, ADR 0005; it has no A2A task-state
     /// constant).
-    pub state: String,
-    /// `"spawn"` or `"attach"`.
-    pub mode: String,
+    pub state: SessionState,
+    /// How the session was established: `spawn` or `attach`.
+    pub mode: Mode,
     /// The existing harness session being attached to (attach mode only).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub harness_session_id: Option<String>,
@@ -359,20 +493,25 @@ pub struct AuthOk {
 /// `failed`) — are Holler's addition, so this table is the single source of
 /// truth for the body's derivation. It is **total**: every ACP stopReason
 /// lands on an A2A terminal state, so the bridge is a pass-through.
-pub const STOP_TO_STATE: &[(&str, &str)] = &[
-    ("end_turn", "completed"),
-    ("cancelled", "canceled"),
-    ("error", "failed"),
-    ("refusal", "rejected"),
-    ("max_tokens", "failed"),
-    ("max_turn_requests", "failed"),
-    ("limit", "failed"),
+pub const STOP_TO_STATE: &[(&str, SessionState)] = &[
+    ("end_turn", SessionState::Completed),
+    ("cancelled", SessionState::Canceled),
+    ("error", SessionState::Failed),
+    ("refusal", SessionState::Rejected),
+    ("max_tokens", SessionState::Failed),
+    ("max_turn_requests", SessionState::Failed),
+    ("limit", SessionState::Failed),
 ];
 
 /// The A2A terminal states a turn may end in (the codomain of
 /// `STOP_TO_STATE`). `input-required` is *not* terminal (the turn pauses for
 /// input); `idle` is a session, not a task, state.
-pub const A2A_TERMINAL_STATES: &[&str] = &["completed", "canceled", "failed", "rejected"];
+pub const A2A_TERMINAL_STATES: &[SessionState] = &[
+    SessionState::Completed,
+    SessionState::Canceled,
+    SessionState::Failed,
+    SessionState::Rejected,
+];
 
 /// Derive the A2A terminal state from an ACP `stopReason` (docs §6 table).
 ///
@@ -380,9 +519,34 @@ pub const A2A_TERMINAL_STATES: &[&str] = &["completed", "canceled", "failed", "r
 /// a stopReason outside the table (an ACP version drift) it returns `None` —
 /// the caller then answers `failed` and logs, so a turn can never end in a
 /// non-terminal or unmapped state.
-pub fn state_for_stop_reason(stop_reason: &str) -> Option<String> {
+pub fn state_for_stop_reason(stop_reason: &str) -> Option<SessionState> {
     STOP_TO_STATE
         .iter()
         .find(|(s, _)| *s == stop_reason)
-        .map(|(_, st)| st.to_string())
+        .map(|(_, st)| *st)
+}
+
+/// Parse a wire `state` string into a [`SessionState`].
+///
+/// Returns an `invalid_params` wire error when `s` is not one of the seven
+/// documented states. The offending value rides in the error `reason` for
+/// diagnostics. This is the one place a `state` string is read back to a
+/// typed value (decoding a full document uses serde directly against the
+/// enums); a hub or body that receives an unknown state should reject it
+/// rather than invent a state.
+pub fn parse_session_state(s: &str) -> Result<SessionState, WireError> {
+    match s {
+        "idle" => Ok(SessionState::Idle),
+        "working" => Ok(SessionState::Working),
+        "input-required" => Ok(SessionState::InputRequired),
+        "completed" => Ok(SessionState::Completed),
+        "canceled" => Ok(SessionState::Canceled),
+        "failed" => Ok(SessionState::Failed),
+        "rejected" => Ok(SessionState::Rejected),
+        _ => Err(WireError::new(
+            Code::InvalidParams,
+            "unknown session state",
+            Some("state"),
+        )),
+    }
 }

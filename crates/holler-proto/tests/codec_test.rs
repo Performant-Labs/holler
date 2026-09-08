@@ -9,13 +9,13 @@ mod common;
 
 use std::fs;
 
-use holler_proto::a2a::{Message, Part, Role, TaskState};
+use holler_proto::a2a::{Content, Message, Part, Role, TaskState};
 use holler_proto::docs;
 use holler_proto::envelope::{decode, encode, Envelope, EnvelopeError};
 use holler_proto::error::{Code, Error as WireError};
 use holler_proto::id::CorrelationId;
 use holler_proto::methods::CATALOG;
-use holler_proto::names::SessionName;
+use holler_proto::vocab::{RoutableName, SessionName};
 use rstest::rstest;
 
 // ---------------------------------------------------------------------------
@@ -137,14 +137,15 @@ fn unknown_method_maps_to_32601() {
 #[test]
 fn id_prefixes_never_collide() {
     // A hub id can never parse as a body id and vice versa.
-    let h = CorrelationId::mint_hub("01HTEST00000000000000000000");
-    let b = CorrelationId::mint_body("01HTEST00000000000000000000");
+    let h = CorrelationId::mint_hub();
+    let b = CorrelationId::mint_body();
     assert!(h.is_hub() && !h.is_body());
     assert!(b.is_body() && !b.is_hub()); // body is body, not a hub
     assert_ne!(h.as_str(), b.as_str());
-    // The body strings are identical; only the prefix differs.
-    assert_eq!(&h.as_str()[2..], &b.as_str()[2..]);
-    // And the two full ids are distinct.
+    // The minted bodies are real ULIDs: 26 Crockford Base32 chars each.
+    assert_eq!(h.as_str().len(), "h-".len() + 26);
+    assert_eq!(b.as_str().len(), "b-".len() + 26);
+    // And the two full ids are distinct (the prefixes alone guarantee it).
     assert_ne!(h, b);
 }
 
@@ -260,12 +261,14 @@ fn every_code_round_trips_through_wire(#[case] code: Code) {
 #[rstest]
 #[case::bare("alpha")]
 #[case::dashed("io")]
-#[case::labeled("io/alpha")]
 #[case::digits("123")]
-#[case::labeled_dashed("kiwi/alpha-1")]
 #[case::single_char("a")]
+#[case::labeled("io/alpha")]
+#[case::labeled_dashed("kiwi/alpha-1")]
 fn names_grammar_valid(#[case] name: &str) {
-    assert!(SessionName::parse(name).is_ok(), "{name} should be valid");
+    // The labeled cases are cross-hub (`<label>/<session>`); the bare cases
+    // parse under both kinds, so `RoutableName` is the most permissive check.
+    assert!(RoutableName::parse(name).is_ok(), "{name} should be valid");
 }
 
 #[rstest]
@@ -280,22 +283,32 @@ fn names_grammar_valid(#[case] name: &str) {
 #[case::leading_slash("/alpha")]
 fn names_grammar_invalid(#[case] name: &str) {
     assert!(
-        SessionName::parse(name).is_err(),
+        RoutableName::parse(name).is_err(),
         "{name} should be invalid"
     );
 }
 
 #[test]
 fn name_label_and_session_split() {
-    let n = SessionName::parse("io/alpha").unwrap();
+    let n = RoutableName::parse("io/alpha").unwrap();
     assert_eq!(n.label(), "io");
     assert_eq!(n.session(), "alpha");
     assert!(n.has_label());
 
-    let bare = SessionName::parse("alpha").unwrap();
+    let bare = RoutableName::parse("alpha").unwrap();
     assert_eq!(bare.label(), "");
     assert_eq!(bare.session(), "alpha");
     assert!(!bare.has_label());
+}
+
+// A `SessionName` is the within-body name: a single segment, no `/` (the
+// cross-hub `/`-form is a `RoutableName`).
+#[test]
+fn session_name_rejects_a_slash() {
+    assert!(SessionName::parse("alpha").is_ok());
+    assert!(SessionName::parse("alpha-1").is_ok());
+    // A `/` is the `RoutableName` shape, not a `SessionName`.
+    assert!(SessionName::parse("io/alpha").is_err());
 }
 
 // ---------------------------------------------------------------------------
@@ -305,15 +318,15 @@ fn name_label_and_session_split() {
 #[test]
 fn hello_requires_protocol_2() {
     // protocol 2 is supported.
-    assert!(holler_proto::features::is_supported_version(2));
+    assert!(holler_proto::version::is_supported_version(2));
     // protocol 1 and 3 are not — the hub answers -32000 and closes.
-    assert!(!holler_proto::features::is_supported_version(1));
-    assert!(!holler_proto::features::is_supported_version(3));
+    assert!(!holler_proto::version::is_supported_version(1));
+    assert!(!holler_proto::version::is_supported_version(3));
     // The advertised range is exactly [2, 2] (ADR 0003).
     assert_eq!(
         (
-            holler_proto::features::PROTOCOL_MIN,
-            holler_proto::features::PROTOCOL_MAX
+            holler_proto::version::PROTOCOL_MIN,
+            holler_proto::version::PROTOCOL_MAX
         ),
         (2, 2)
     );
@@ -379,39 +392,40 @@ fn stop_reason_to_task_state_mapping_is_total() {
             "{reason} is unmapped"
         );
     }
-    // The mapping is exactly the spec table.
+    // The mapping is exactly the spec table (wire strings via `as_str`).
+    use docs::SessionState;
     assert_eq!(
-        docs::state_for_stop_reason("end_turn").as_deref(),
+        docs::state_for_stop_reason("end_turn").as_ref().map(|s| s.as_str()),
         Some("completed")
     );
     assert_eq!(
-        docs::state_for_stop_reason("cancelled").as_deref(),
+        docs::state_for_stop_reason("cancelled").as_ref().map(|s| s.as_str()),
         Some("canceled")
     );
     assert_eq!(
-        docs::state_for_stop_reason("error").as_deref(),
+        docs::state_for_stop_reason("error").as_ref().map(|s| s.as_str()),
         Some("failed")
     );
     assert_eq!(
-        docs::state_for_stop_reason("refusal").as_deref(),
+        docs::state_for_stop_reason("refusal").as_ref().map(|s| s.as_str()),
         Some("rejected")
     );
     assert_eq!(
-        docs::state_for_stop_reason("max_tokens").as_deref(),
+        docs::state_for_stop_reason("max_tokens").as_ref().map(|s| s.as_str()),
         Some("failed")
     );
     assert_eq!(
-        docs::state_for_stop_reason("max_turn_requests").as_deref(),
+        docs::state_for_stop_reason("max_turn_requests").as_ref().map(|s| s.as_str()),
         Some("failed")
     );
     assert_eq!(
-        docs::state_for_stop_reason("limit").as_deref(),
+        docs::state_for_stop_reason("limit").as_ref().map(|s| s.as_str()),
         Some("failed")
     );
     // The codomain is exactly the A2A terminal states.
-    let images: std::collections::BTreeSet<&str> =
+    let images: std::collections::BTreeSet<SessionState> =
         docs::STOP_TO_STATE.iter().map(|(_, st)| *st).collect();
-    let expected: std::collections::BTreeSet<&str> =
+    let expected: std::collections::BTreeSet<SessionState> =
         docs::A2A_TERMINAL_STATES.iter().copied().collect();
     assert_eq!(images, expected);
     // No A2A terminal state is unreachable.
@@ -455,71 +469,54 @@ fn a2a_enums_use_protocol_constant_strings() {
 // (v1.0 dropped the v0.3 `kind` field — the member name *is* the tag.)
 #[test]
 fn a2a_part_is_member_name_discriminated() {
-    // Text part: the `text` member is present, the other OneOf members absent.
+    // Text part: the `text` member is present, the other content members absent.
     let text: Part = serde_json::from_str(r#"{"text":"hi"}"#).unwrap();
-    assert_eq!(
-        Part::Text {
-            value: String::from("hi"),
-            filename: None,
-            media_type: None,
-            metadata: None,
-        },
-        text
-    );
+    assert!(matches!(&text.content, Some(Content::Text(s)) if s == "hi"));
 
     // File part: `raw` (base64) plus the shared `filename`/`mediaType` siblings.
     let raw: Part = serde_json::from_str(
         r#"{"raw":"Zm9vYmFy","filename":"f.bin","mediaType":"application/octet-stream"}"#,
     )
     .unwrap();
-    assert_eq!(
-        Part::Raw {
-            value: vec![b'f', b'o', b'o', b'b', b'a', b'r'],
-            filename: Some(String::from("f.bin")),
-            media_type: Some(String::from("application/octet-stream")),
-            metadata: None,
-        },
-        raw,
-    );
+    assert!(matches!(&raw.content, Some(Content::Raw(b)) if b == b"foobar"));
+    assert_eq!(raw.filename.as_deref(), Some("f.bin"));
+    assert_eq!(raw.media_type.as_deref(), Some("application/octet-stream"));
 
     // Data part: `data` is an arbitrary JSON value.
     let data: Part = serde_json::from_str(r#"{"data":{"a":1}}"#).unwrap();
-    assert_eq!(
-        Part::Data {
-            value: serde_json::json!({"a":1}),
-            filename: None,
-            media_type: None,
-            metadata: None,
-        },
-        data,
-    );
+    assert!(matches!(
+        &data.content,
+        Some(Content::Data(v)) if v == &serde_json::json!({"a": 1})
+    ));
 
-    // Zero OneOf members present -> a legal "empty" part (A2A's OneOf is
+    // Zero content members present -> a legal "empty" part (A2A's OneOf is
     // not-mandatory), not an error. Only the shared fields may be set.
     let empty: Part =
         serde_json::from_str(r#"{"filename":"a.txt","mediaType":"text/plain"}"#).unwrap();
-    assert!(matches!(empty, Part::Empty { .. }));
+    assert!(empty.content.is_none());
 
-    // More than one OneOf member present -> a Part may carry exactly one, so
+    // More than one content member present -> a Part may carry exactly one, so
     // this is a hard deserialize error.
     assert!(serde_json::from_str::<Part>(r#"{"text":"a","raw":"YQ=="}"#).is_err());
 
     // An unknown member alone is still an "empty" part (A2A does not define
     // deny-unknown on Part); the two-discriminator case above is what errors.
-    assert!(matches!(
-        serde_json::from_str::<Part>(r#"{"foo":"bar"}"#).unwrap(),
-        Part::Empty { .. }
-    ));
+    assert!(
+        serde_json::from_str::<Part>(r#"{"foo":"bar"}"#)
+            .unwrap()
+            .content
+            .is_none()
+    );
 }
 
 // A Part round-trips through JSON to the exact flat object A2A shows — this
 // is what makes a Holler `Part` byte-identical to an A2A `Part`.
 #[test]
 fn a2a_part_wire_form_is_flat_and_stable() {
-    let raw = Part::Raw {
-        value: b"foobar".to_vec(),
-        filename: Some(String::from("f.bin")),
-        media_type: Some(String::from("application/octet-stream")),
+    let raw = Part {
+        content: Some(Content::Raw(b"foobar".to_vec())),
+        filename: Some("f.bin".to_string()),
+        media_type: Some("application/octet-stream".to_string()),
         metadata: None,
     };
     let s = serde_json::to_string(&raw).unwrap();
