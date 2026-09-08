@@ -1,0 +1,19 @@
+{
+  "messageId": "m-data-001",
+  "parts": [
+    {
+      "data": [
+        {
+          "description": "request for VPN access",
+          "ticketNumber": "REQ12312"
+        },
+        {
+          "description": "Add to DL - team-gcp-onboarding",
+          "ticketNumber": "REQ23422"
+        }
+      ],
+      "mediaType": "application/json"
+    }
+  ],
+  "role": "ROLE_AGENT"
+}
