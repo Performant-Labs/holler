@@ -189,6 +189,19 @@ about — use them instead of any sleep-and-poll loop:
   finishing — never for routine status.
 - **Verify the interrupt per §3** — it's the same requirement here as
   anywhere else, not a Claude-specific nuance.
+- **Known Claude tendency: reaching for `say` when the situation actually
+  needs `interrupt`.** `say` queues a new prompt behind whatever the session
+  is currently doing — marking the message "urgent" in its text changes
+  nothing about when the session sees it. Observed repeatedly in this
+  project's own orchestration: Claude sent time-sensitive checks via `say`
+  while a session was mid-turn on something unrelated, and the check sat
+  queued, unseen, until well after it would have mattered. `holler interrupt
+  <session>` is the actual control-frame primitive — it reaches the session
+  immediately, even mid-turn, cancelling the in-flight turn while the
+  session stays on the roster and promptable again. If a message is
+  genuinely time-sensitive, interrupt first, then `say` the real question
+  once the session is free — don't just write "urgent" into a queued `say`
+  and assume that changes its delivery.
 
 ## Section: OpenCode
 
