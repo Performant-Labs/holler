@@ -15,25 +15,26 @@
 //! NOTE (Decision, recorded in the PR): the story's draft named
 //! `hub token list --json` / `hub token mint` as the redaction /
 //! stdout-cleanliness leaves, but those leaves do not yet exist (token
-//! management lands with the hub-serving story). This test therefore exercises
+//! management lands with the hub-serving story). This file therefore exercises
 //! the *same leaf-agnostic contract* through `roster`, a currently-present leaf
 //! (a "not implemented" stub, exit 1). The contract (stderr-only logs, clean
 //! stdout, the component column, the banner) is identical for every leaf, so
 //! pinning it here is equivalent.
 //!
-//! Two contracts are **documented but not yet GREEN** because they depend on
-//! code this story does not wire up:
-//! - `warn_is_always_emitted_independently_of_debug_level` — needs a leaf to
-//!   actually call `holler_proto::log::emit` with a `warn` (the #144 module
-//!   provides `emit`; call sites land with the hub/body stories). RED.
-//! - `json_format_renders_events_as_one_object_per_line` — needs at least one
-//!   JSON log event on stderr. The banner is *always* text by design (the one
-//!   human-readable line), so with no events yet the JSON contract is vacuous.
-//!   RED.
+//! Two contracts are exercised by driving the #144 module's **public API
+//! directly from this test process** (rather than waiting on a hub/body call
+//! site that does not exist yet): `warn_is_always_emitted…` and
+//! `json_format_renders_events…`. Because the module's `init` is a process-wide
+//! `OnceLock`, those two tests live here (their own test binary) so each gets a
+//! fresh process to install its own config; they are fully deterministic and
+//! OS-independent.
 
 use std::iter::Iterator;
 
 use assert_cmd::Command;
+use holler_proto::log::{
+    emit, init, Component, Config, DebugLevel, Direction, Event, LogFormat, Severity,
+};
 use predicates::boolean::PredicateBooleanExt;
 use predicates::str::contains;
 
@@ -224,59 +225,122 @@ fn banner_is_first_stderr_line() {
 
 // A `warn` is emitted **regardless of the debug level** (spec: severities are
 // independent of the level — `info`/`warn` are always on; only `debug` is
-// gated). At `--debug none` a warn still shows and a debug does not.
+// gated). At `--debug none` a warn still renders and a debug does not.
 //
-// RED until some leaf calls `holler_proto::log::emit` with a `warn` severity.
+// Exercised by driving the module's public API directly: install the `none`
+// config, then assert a `warn` renders and a `debug` does not (and `emit`
+// honours the same gate). This is deterministic and OS-independent (it does not
+// rely on a hub/body leaf, which does not yet exist), and it lives in this test
+// binary because `init` is process-wide (each test here gets a fresh process).
 #[test]
-#[allow(unused_variables)]
 fn warn_is_always_emitted_independently_of_debug_level() {
-    let out = holler()
-        .env("HOLLER_DEBUG", "none")
-        .env("HOLLER_LOG_FORMAT", "text")
-        .arg("roster")
-        .output()
-        .expect("run holler");
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    // A warn is always on…
+    let config = Config {
+        debug: DebugLevel::None,
+        format: LogFormat::Text,
+    };
+    init(config);
+
+    let warn = warn_event();
+    let debug = debug_event();
+    // A warn is always on, even at the default level…
     assert!(
-        stderr.contains("WARN"),
-        "RED: a `warn` event is always emitted regardless of --debug; none is wired yet\n got: {stderr}"
+        !warn.render(&config).is_empty(),
+        "a warn must render even at --debug none (it is always on)"
     );
-    // …and a debug is off at the default level.
+    // …while a debug is suppressed at the default level.
     assert!(
-        !stderr.contains(" DEBUG "),
-        "a `debug` event must be suppressed at --debug none\ngot:\n{stderr}"
+        debug.render(&config).is_empty(),
+        "a debug event must be suppressed at --debug none"
     );
+    // And the emit helper honours the same gate (warn prints to stderr, debug
+    // is a no-op). We exercise the real write path here; the process's own
+    // stderr is not asserted on (that would race the test harness's output).
+    emit(&warn);
+    emit(&debug);
 }
 
-// With `--log-format json`, every log event on stderr is one JSON object
+// With `--log-format json`, every log event renders to **one JSON object**
 // (machine-parseable, one object per line). The banner is deliberately *not*
-// JSON (it is the one human-readable line), so it is excluded here.
+// JSON (it is the one human-readable line), so this is about *event* lines.
 //
-// RED until a JSON log event exists on stderr (needs an `emit` call site).
+// Exercised by driving the module's public API directly: install the `noisy` +
+// `json` config, `emit` several events, and assert each rendered line is a
+// single parseable JSON object carrying the structured fields (and, at `noisy`,
+// a nested `frame`). Deterministic and OS-independent (no hub/body leaf needed).
 #[test]
-#[allow(unused_variables)]
 fn json_format_renders_events_as_one_object_per_line() {
-    let out = holler()
-        .env("HOLLER_DEBUG", "noisy")
-        .env("HOLLER_LOG_FORMAT", "json")
-        .arg("roster")
-        .output()
-        .expect("run holler");
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    // Exclude the banner (always text by design) and any non-log lines.
-    let event_lines: Vec<&str> = stderr
-        .lines()
-        .filter(|l| !l.trim().is_empty())
-        .filter(|l| !l.contains("logging_started"))
-        .collect();
-    assert!(
-        !event_lines.is_empty(),
-        "RED: expected at least one JSON log event on stderr (none wired yet)\n got: {stderr}"
-    );
-    for line in event_lines {
-        let v: serde_json::Value = serde_json::from_str(line)
-            .unwrap_or_else(|e| panic!("stderr line is not a single JSON object: {line:?} ({e})"));
-        assert!(v.is_object(), "expected a JSON object, got {v:?}");
+    let config = Config {
+        debug: DebugLevel::Noisy,
+        format: LogFormat::Json,
+    };
+    init(config);
+
+    // A few events of different shapes all render to one JSON object per line.
+    let events = [
+        warn_event(),
+        Event {
+            component: Component::Roster,
+            severity: Severity::Info,
+            direction: Direction::In,
+            method: "roster/list",
+            id: Some("0a1b2c3d4e5f"),
+            peer: Some("io"),
+            fields: vec![("session", "io/alpha".to_owned())],
+            frame: Some(
+                serde_json::json!({ "id": "0a1b2c3d4e5f", "method": "roster/list" }).to_string(),
+            ),
+        },
+        debug_event(),
+    ];
+    for ev in &events {
+        // `emit` writes the rendered line to stderr (the real write path).
+        emit(ev);
+        let line = ev.render(&config);
+        assert!(!line.is_empty(), "a {ev:?}-shaped event must render at noisy");
+        let v: serde_json::Value = serde_json::from_str(&line)
+            .unwrap_or_else(|e| panic!("json event is not one parseable object: {line:?} ({e})"));
+        assert!(
+            v.is_object(),
+            "expected a JSON object for the event, got {v:?}"
+        );
+        // The structured fields are present on every event line.
+        assert!(v.get("component").is_some(), "missing component in {v:?}");
+        assert!(v.get("ts").is_some(), "missing ts in {v:?}");
+        // At `noisy`, the (already-redacted) frame is nested under `frame`.
+        if ev.frame.is_some() {
+            assert!(
+                v.get("frame").is_some(),
+                "a noisy event with a frame must nest it under `frame`, got {v:?}"
+            );
+        }
+    }
+}
+
+/// A `warn` event on the token component carrying a secret-shaped frame (the
+/// pepper is redacted before rendering).
+fn warn_event() -> Event {
+    Event {
+        component: Component::Token,
+        severity: Severity::Warn,
+        direction: Direction::Local,
+        method: "token/pepper_generated",
+        id: Some("c14fb1a960b3"),
+        peer: None,
+        fields: Vec::new(),
+        frame: Some(serde_json::json!({ "pepper": "hlr_live_secret" }).to_string()),
+    }
+}
+
+/// A `debug` wire event (gated by the debug level).
+fn debug_event() -> Event {
+    Event {
+        component: Component::Wire,
+        severity: Severity::Debug,
+        direction: Direction::Out,
+        method: "session/prompt",
+        id: Some("c14fb1a960b3"),
+        peer: Some("io"),
+        fields: Vec::new(),
+        frame: None,
     }
 }
