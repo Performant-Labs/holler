@@ -113,13 +113,24 @@ pub fn wait_for<T>(
 ) -> Option<T> {
     let deadline = Instant::now() + timeout;
     loop {
+        // Poll first: a check that is already ready should not pay a sleep.
         if let Some(v) = check() {
             return Some(v);
         }
-        if Instant::now() >= deadline {
+        // Then, only if budget remains, sleep for the *lesser* of the poll
+        // interval and the time left. Sleeping a fixed POLL_INTERVAL would let
+        // the loop overshoot the deadline by up to one interval (and, on a
+        // loaded CI runner, by more, since `thread::sleep` is a *minimum* —
+        // the OS may wake us late). Sleeping exactly the remaining budget keeps
+        // the whole call bounded by `timeout` plus at most one `check()`'s cost.
+        let now = Instant::now();
+        if now >= deadline {
             return None;
         }
-        std::thread::sleep(POLL_INTERVAL);
+        let remaining = deadline
+            .checked_duration_since(now)
+            .unwrap_or(Duration::ZERO);
+        std::thread::sleep(remaining.min(POLL_INTERVAL));
     }
 }
 
