@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable, dead_code)] // #149
 //! Codec test suite for `holler-proto` (issue #136 / holler-server#331).
 //!
 //! Every case below is a named test; the A2A fixtures under

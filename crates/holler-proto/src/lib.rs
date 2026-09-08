@@ -42,7 +42,7 @@ pub use docs::{
     ProtocolParams, SessionAd, Status, StatusSession, Support, SupportParams, Update,
     A2A_TERMINAL_STATES, STOP_TO_STATE,
 };
-pub use envelope::{decode, decode_call, encode, shape_name, Envelope, EnvelopeError};
+pub use envelope::{decode, encode, Envelope, EnvelopeError};
 pub use error::{Code, Error as WireError, ErrorDef, TABLE};
 pub use features::{is_supported_version, PROTOCOL_MAX, PROTOCOL_MIN, PROTOCOL_VERSION};
 pub use id::{CorrelationId, CorrelationIdError};

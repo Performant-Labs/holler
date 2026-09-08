@@ -334,6 +334,11 @@ impl Serialize for Part {
     }
 }
 
+// The workspace denies `expect` (issue #149): a helper panicking masks the
+// caller. `Part::deserialize` is the one place an `expect` is still the
+// honest choice — see the arm it guards. The item allow is linked to #149 so
+// scripts/lint.sh admits it.
+#[allow(clippy::expect_used, clippy::panic)] // #149
 impl<'de> Deserialize<'de> for Part {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         let w = PartWire::deserialize(d)?;
@@ -372,6 +377,12 @@ impl<'de> Deserialize<'de> for Part {
                         metadata,
                     })
                 } else {
+                    // Exactly one discriminator is present (n == 1) and the other
+                    // three are exhausted, so `data` is `Some` here: if it were
+                    // `None` the invariant that this arm only runs when `data`
+                    // is the one present discriminator would be broken, which
+                    // `PartWire` (the single deserialisation point) cannot
+                    // produce. `expect` is the honest way to say that.
                     Ok(Part::Data {
                         value: w.data.expect("exactly one discriminator present"),
                         filename,
@@ -519,6 +530,7 @@ mod base64_vec {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable)] // #149: unit-test module — asserts panic on failure by design
 mod tests {
     use super::*;
 
