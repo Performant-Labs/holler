@@ -72,16 +72,10 @@ fn hub_status(json: bool) -> ! {
 }
 
 fn main() {
-    // ADR 0003: a bare `holler` (no args) fails closed — exit 2, non-empty
-    // usage on stderr. Detected up front, before parsing, so a bare
-    // invocation never reaches the subcommand dispatch below.
-    if std::env::args().count() == 1 {
-        eprintln!(
-            "error: a subcommand is required (hub | body | roster | say | interrupt)\n\nUsage: holler [OPTIONS] <COMMAND>"
-        );
-        std::process::exit(2);
-    }
-
+    // ADR 0003: a bare `holler` (or `holler hub`, an unknown subcommand, …)
+    // fails closed with exit 2 and a usage message on stderr. That is clap's
+    // own behaviour now — the root parser is `subcommand_required = true`, so
+    // there is no pre-parse branch to special-case the empty argv (issue #148).
     let cli = Cli::parse();
 
     // Resolve the logging dials: the CLI flag beats the environment, the
