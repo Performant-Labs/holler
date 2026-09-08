@@ -203,6 +203,25 @@ about — use them instead of any sleep-and-poll loop:
   once the session is free — don't just write "urgent" into a queued `say`
   and assume that changes its delivery.
 
+  **Fixed, mechanically, not by memory.** Telling the model "remember to use
+  interrupt" doesn't survive compaction or a fresh session — this tendency
+  recurred multiple times *within the same session* despite being corrected
+  each time. The actual fix is a `PreToolUse` hook on the `Bash` tool
+  (`~/.claude/settings.json`, per-user) that inspects every Bash command: if
+  it matches `holler say ...` **and** contains urgency language (`urgent`,
+  `immediately`, `right away`, `asap`, `as soon as possible`), the hook
+  **denies the tool call** with a message pointing at `interrupt` instead.
+  It never auto-inserts or auto-prepends `interrupt` — that would cancel
+  real in-progress work on *every* routine check, trading one failure mode
+  for a worse one. It only blocks-and-explains. Per §3: this was pipe-tested
+  against synthetic payloads (which caught a real false positive — "right
+  now" is common in ordinary status-check phrasing like "what are you doing
+  right now" and had to be dropped from the trigger-word list) and then
+  **live-fired** — a real Bash tool call containing the trigger pattern was
+  denied before it executed, confirmed by the command's output never
+  appearing. A written reminder is a suggestion the model can forget or
+  override; a hook is a gate the tool call cannot get past.
+
 ## Section: OpenCode
 
 OpenCode sessions (the harness `alpha`/`beta` ran on in this repo's own
