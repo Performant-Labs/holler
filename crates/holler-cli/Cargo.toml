@@ -4,6 +4,14 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 description = "The holler binary — parses the full ADR 0003 CLI surface"
+# The stub agent (story #130) lives at tests/stub-acp/main.rs and is a [[bin]],
+# not an integration test. Cargo would otherwise auto-detect that file under
+# tests/ as a *second* target named `stub-acp` (an integration test), which
+# collides with the bin and emits a "present in multiple build targets" warning
+# on every build. Disabling auto-detection and declaring the real test targets
+# explicitly (below) keeps the bin the sole owner of the name while still
+# building/running both integration tests.
+autotests = false
 
 [lib]
 name = "holler_cli"
@@ -12,6 +20,33 @@ path = "src/lib.rs"
 [[bin]]
 name = "holler"
 path = "src/main.rs"
+
+# ACP v2 stub agent (story #130): a fake agent process the test suite spawns
+# in place of OpenCode. The spec pins it at tests/stub-acp/main.rs and names
+# the bin `stub-acp` so `cargo_bin("stub-acp")` resolves to it (cargo appends
+# `.exe` on Windows). (A file under tests/ would otherwise be auto-detected as
+# an integration-test target; the explicit [[bin]] pins it as a binary.)
+[[bin]]
+name = "stub-acp"
+path = "tests/stub-acp/main.rs"
+
+# Explicit integration-test targets. With autotests = false (set above, to keep
+# the stub-acp dir from spawning a colliding auto-detected target), every real
+# test under tests/ must be declared here or it silently stops building.
+[[test]]
+name = "cli_invocation_test"
+path = "tests/cli_invocation_test.rs"
+
+[[test]]
+name = "stub_acp_test"
+path = "tests/stub_acp_test.rs"
+
+# Explicit pin (story #129): the test-of-tests canary is named here so a later
+# move of the file under a subdirectory cannot silently un-discover it from the
+# CI canary step.
+[[test]]
+name = "wire_selftest"
+path = "tests/wire_selftest.rs"
 
 [dependencies]
 clap = { workspace = true }
@@ -35,13 +70,6 @@ libc = { workspace = true }
 holler-proto = { path = "../holler-proto" }
 holler-hub = { path = "../holler-hub" }
 holler-body = { path = "../holler-body" }
-
-# Explicit pin (story #129): the test-of-tests canary is named here so a later
-# move of the file under a subdirectory cannot silently un-discover it from the
-# CI canary step.
-[[test]]
-name = "wire_selftest"
-path = "tests/wire_selftest.rs"
 
 [dev-dependencies]
 assert_cmd = { workspace = true }
