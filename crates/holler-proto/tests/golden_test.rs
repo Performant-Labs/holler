@@ -106,11 +106,10 @@ fn envelope_request_notification_response_match_golden() {
 }
 
 /// The error golden file is written **by hand in the JSON-RPC-conformant
-/// form** (`error.code` is a number). The encoder currently emits a string
-/// (#145), so this test is ignored until #145 lands — the golden file is the
-/// spec of record, not a snapshot of the bug.
+/// form** (`error.code` is a number, per JSON-RPC 2.0 §5.1). #145 made the
+/// encoder emit that conformant form, so this test now runs: the golden file
+/// is the spec of record, not a snapshot of the (former) bug.
 #[test]
-#[ignore = "blocked on #145: Error serialises `code` as a string; golden holds the conformant numeric form"] // #145
 fn envelope_error_matches_golden() {
     let env = envelopes().into_iter().find(|e| e.shape_name() == "error").unwrap();
     let wire = encode(&env).unwrap();
@@ -256,14 +255,15 @@ fn foreign_a2a_part_with_metadata_round_trips() {
 }
 
 /// A conformant JSON-RPC error from a foreign peer — numeric `-32601`, no
-/// `data`. Must decode. Currently fails (#145): the codec expects a string
-/// code.
+/// `data`. Must decode (#145 made the codec accept a numeric `error.code`).
+/// The wire code is the number; it maps back to the named `Code` by number.
 #[test]
-#[ignore = "blocked on #145: a numeric error.code does not decode"] // #145
 fn foreign_method_not_found_error_decodes() {
     let env = decode(&foreign("error_method_not_found.json")).unwrap();
     assert_eq!(env.shape_name(), "error");
-    assert_eq!(env.error().map(|e| e.code), Some(Code::MethodNotFound));
+    let e = env.error().expect("an error frame has an error object");
+    assert_eq!(e.code, -32601);
+    assert_eq!(Code::from_jsonrpc(e.code), Some(Code::MethodNotFound));
 }
 
 // Keep the canonicaliser honest: sorted keys, stable.

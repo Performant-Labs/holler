@@ -11,8 +11,8 @@ use std::fs;
 
 use holler_proto::a2a::{Message, Part, Role, TaskState};
 use holler_proto::docs;
-use holler_proto::envelope::{decode, encode, EnvelopeError};
-use holler_proto::error::{Code, TABLE};
+use holler_proto::envelope::{decode, encode, Envelope, EnvelopeError};
+use holler_proto::error::{Code, Error as WireError};
 use holler_proto::id::CorrelationId;
 use holler_proto::methods::CATALOG;
 use holler_proto::names::SessionName;
@@ -155,35 +155,102 @@ fn id_prefixes_never_collide() {
 #[test]
 fn error_table_codes_are_unique_and_in_range() {
     use std::collections::BTreeSet;
-    let codes: BTreeSet<i64> = TABLE.iter().map(|d| d.jsonrpc_code).collect();
-    assert_eq!(codes.len(), TABLE.len(), "JSON-RPC codes are not unique");
-    for d in TABLE {
+    // The one source of truth is the Code enum (#145): there is no separate
+    // table to cross-check, so uniqueness/range are asserted over the enum.
+    let codes: BTreeSet<i64> = Code::ALL.iter().map(|c| c.jsonrpc()).collect();
+    assert_eq!(codes.len(), Code::ALL.len(), "JSON-RPC codes are not unique");
+    for &c in &Code::ALL {
+        let data_code = c.data_code();
         // NOTE: order matters. `invalid_params` also starts with `invalid`, so
-        // the more specific prefix must be tested first, or that row would be
+        // the more specific prefix must be tested first, or that code would be
         // (incorrectly) routed to the generic `invalid` branch below.
-        if d.data_code.starts_with("invalid_params") {
-            assert_eq!(d.jsonrpc_code, -32602);
-        } else if d.data_code.starts_with("parse_error") {
-            assert_eq!(d.jsonrpc_code, -32700);
-        } else if d.data_code.starts_with("invalid") {
-            assert_eq!(d.jsonrpc_code, -32600);
-        } else if d.data_code.starts_with("method") {
-            assert_eq!(d.jsonrpc_code, -32601);
+        if data_code.starts_with("invalid_params") {
+            assert_eq!(c.jsonrpc(), -32602);
+        } else if data_code.starts_with("parse_error") {
+            assert_eq!(c.jsonrpc(), -32700);
+        } else if data_code.starts_with("invalid") {
+            assert_eq!(c.jsonrpc(), -32600);
+        } else if data_code.starts_with("method") {
+            assert_eq!(c.jsonrpc(), -32601);
         } else {
             // Application codes: the closed interval -32099..=-32000 (note the
             // order: -32099 is the more negative bound), and not the reserved
             // -32603/-32009.
             assert!(
-                d.jsonrpc_code >= -32099 && d.jsonrpc_code <= -32000,
-                "{} outside app range",
-                d.data_code
+                c.jsonrpc() >= -32099 && c.jsonrpc() <= -32000,
+                "{data_code} outside app range"
             );
-            assert_ne!(d.jsonrpc_code, -32009, "{} is reserved", d.data_code);
+            assert_ne!(c.jsonrpc(), -32009, "{data_code} is reserved");
         }
-        // data.codes are also unique.
     }
-    let data: BTreeSet<&str> = TABLE.iter().map(|d| d.data_code).collect();
-    assert_eq!(data.len(), TABLE.len(), "data.codes are not unique");
+    // data.codes are also unique.
+    let data: BTreeSet<&str> = Code::ALL.iter().map(|c| c.data_code()).collect();
+    assert_eq!(data.len(), Code::ALL.len(), "data.codes are not unique");
+}
+
+// ---------------------------------------------------------------------------
+// 6b. JSON-RPC 2.0 §5.1: the error object's `code` is a NUMBER, and the
+//     Holler identity rides in `data.code` as a string (#145).
+// ---------------------------------------------------------------------------
+
+/// An application error (unauthenticated, -32002) encodes with a numeric
+/// `code` and a string `data.code`. JSON-RPC 2.0 §5.1 forbids a string
+/// `error.code`; docs/protocol/v2.md §8 promises `-32002`.
+#[test]
+fn error_frame_encodes_numeric_code_and_string_data_code() {
+    let env = Envelope::Error {
+        id: Some("h-01HTEST00000000000000000000".into()),
+        error: WireError::new(Code::Unauthenticated, "credential revoked", Some("revoked")),
+    };
+    let wire = encode(&env).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&wire).unwrap();
+    let err = v.get("error").expect("error object present");
+    // `code` is the JSON-RPC number …
+    assert_eq!(err.get("code"), Some(&serde_json::json!(-32002)));
+    // … and the Holler identity is the string in `data.code`.
+    assert_eq!(err.get("data").and_then(|d| d.get("code")), Some(&serde_json::json!("unauthenticated")));
+}
+
+/// A conformant error from a foreign peer — numeric `-32601`, no `data` —
+/// must decode and map back to the matching `Code` by number.
+#[test]
+fn foreign_jsonrpc_error_decodes() {
+    let frame = r#"{"jsonrpc":"2.0","id":"h-x","error":{"code":-32601,"message":"nope"}}"#;
+    let env = decode(frame).unwrap();
+    assert!(matches!(&env, Envelope::Error { .. }));
+    let e = env.error().expect("an error frame has an error object");
+    // The wire code is the number, and it maps back to the named Code.
+    assert_eq!(e.code, -32601);
+    assert_eq!(Code::from_jsonrpc(e.code), Some(Code::MethodNotFound));
+}
+
+/// Every code in the closed table survives a wire round-trip: encode → decode
+/// → same numeric code, same data.code, same named Code.
+#[rstest]
+#[case::parse_error(Code::ParseError)]
+#[case::invalid_request(Code::InvalidRequest)]
+#[case::method_not_found(Code::MethodNotFound)]
+#[case::invalid_params(Code::InvalidParams)]
+#[case::unsupported_version(Code::UnsupportedVersion)]
+#[case::join_failed(Code::JoinFailed)]
+#[case::unauthenticated(Code::Unauthenticated)]
+#[case::unknown_session(Code::UnknownSession)]
+#[case::not_connected(Code::NotConnected)]
+#[case::session_superseded(Code::SessionSuperseded)]
+#[case::unknown_feature(Code::UnknownFeature)]
+#[case::limit_exceeded(Code::LimitExceeded)]
+#[case::connection_lost(Code::ConnectionLost)]
+fn every_code_round_trips_through_wire(#[case] code: Code) {
+    let env = Envelope::Error {
+        id: None,
+        error: WireError::new(code, "msg", None),
+    };
+    let wire = encode(&env).unwrap();
+    let back = decode(&wire).unwrap();
+    let e = back.error().expect("error frame");
+    assert_eq!(e.code, code.jsonrpc());
+    assert_eq!(Code::from_jsonrpc(e.code), Some(code));
+    assert_eq!(e.data.as_ref().map(|d| d.code.as_str()), Some(code.data_code()));
 }
 
 // ---------------------------------------------------------------------------
