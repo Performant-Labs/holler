@@ -17,7 +17,8 @@ use clap::{ArgAction, Parser, Subcommand};
 #[command(
     name = "holler",
     about = "One binary, two roles: hub and body (ADR 0001)",
-    version
+    version,
+    subcommand_required = true
 )]
 pub struct Cli {
     /// Set logging verbosity (none|quiet|noisy). Overrides `HOLLER_DEBUG`.
@@ -212,8 +213,7 @@ pub struct Support {
 /// remote TARGET (remote form) or CMD (local form) — two shapes the clap
 /// derive tree can't express as fixed positionals (a `trailing_var_arg` after
 /// a required positional is rejected at parse time). So the tail is captured
-/// as one variadic and split in code: `target = rest.first()`,
-/// `cmd = rest.get(1)`, `args = rest[2..]`.
+/// as one variadic and split in code by [`Query::resolve`].
 #[derive(Parser, Debug)]
 pub struct Query {
     /// The query tail: CMD [ARGS...] (local) or TARGET CMD [ARGS...] (remote).
@@ -222,23 +222,164 @@ pub struct Query {
 }
 
 impl Query {
-    /// The remote target (first token), if present — `None` for the local
-    /// form. See the struct doc for the two-shape rationale.
-    pub fn target(&self) -> Option<&str> {
-        self.rest.first().map(String::as_ref)
-    }
-
-    /// The command (second token in the remote form, first in the local form).
-    pub fn cmd(&self) -> Option<&str> {
-        self.rest.get(1).map(String::as_ref)
-    }
-
-    /// Any arguments following the command.
-    pub fn args(&self) -> &[String] {
-        match self.rest.get(2..) {
-            Some(tail) => tail,
-            None => &[],
+    /// Disambiguate the variadic tail into its target, command verb, and args.
+    ///
+    /// The first token is a **CMD** iff it is one of `status | caps |
+    /// support | protocol`; otherwise it is a **TARGET**. That rule is owned
+    /// here (issue #148): the old `target()`/`cmd()`/`args()` accessors
+    /// treated the first token as the target unconditionally, so for the local
+    /// form `query status` `target()` wrongly returned `status` and `cmd()`
+    /// returned `None`.
+    ///
+    /// A local form with no trailing command (`query`, or a bare non-CMD token)
+    /// is a usage error (exit 2) — `rest` is a non-empty variadic, so an empty
+    /// tail is unreachable (clap rejects it) and only the second shape errors.
+    pub fn resolve(&self) -> Result<QueryResolution, Usage> {
+        // `rest` is a required variadic, so clap guarantees at least one token;
+        // `let-else` (not `expect`) keeps the borrow checker happy.
+        let first = match self.rest.first() {
+            Some(first) => first,
+            None => return Err(Usage::new("a query needs a CMD [ARGS...] or TARGET CMD".to_string())),
+        };
+        if is_cmd(first) {
+            // Local form: `query CMD [ARGS...]` — no target.
+            Ok(QueryResolution::Local {
+                cmd: cmd_of(first),
+                args: self.rest.iter().skip(1).cloned().collect(),
+            })
+        } else if let Some(second) = self.rest.get(1) {
+            // Remote form: `query TARGET CMD [ARGS...]`.
+            Ok(QueryResolution::Remote {
+                target: Target::new(first.clone()),
+                cmd: cmd_of(second),
+                args: self.rest.iter().skip(2).cloned().collect(),
+            })
+        } else {
+            // Remote target named, but no command after it: a usage error.
+            Err(Usage::new(format!(
+                "a command is required after the target: `query {first} CMD [ARGS...]`"
+            )))
         }
+    }
+}
+
+/// The result of [`Query::resolve`]: the query tail disambiguated into its
+/// TARGET (remote form) or CMD (local form), the command verb, and the
+/// remaining args.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum QueryResolution {
+    /// Local form (`query CMD [ARGS...]`): no remote target.
+    Local { cmd: Cmd, args: Vec<String> },
+    /// Remote form (`query TARGET CMD [ARGS...]`): a target is named.
+    Remote {
+        target: Target,
+        cmd: Cmd,
+        args: Vec<String>,
+    },
+}
+
+impl QueryResolution {
+    /// The remote target, if this is the remote form.
+    pub fn target(&self) -> Option<&Target> {
+        match self {
+            QueryResolution::Local { .. } => None,
+            QueryResolution::Remote { target, .. } => Some(target),
+        }
+    }
+
+    /// The command's verb.
+    pub fn cmd(&self) -> &Cmd {
+        match self {
+            QueryResolution::Local { cmd, .. } | QueryResolution::Remote { cmd, .. } => cmd,
+        }
+    }
+
+    /// The arguments following the command.
+    pub fn args(&self) -> &[String] {
+        match self {
+            QueryResolution::Local { args, .. } | QueryResolution::Remote { args, .. } => args,
+        }
+    }
+}
+
+/// A remote target for `query`: the first token of the remote form, kept
+/// verbatim. ADR 0003 says `TARGET` is `token id | client id | label |
+/// label/session` and is resolved *at the hub* against the roster; the CLI
+/// only classifies the shape, it never resolves the name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Target(String);
+
+impl Target {
+    /// Wrap a raw target token. (The CLI does not validate the grammar here —
+    /// ADR 0005's resolution and any ambiguity are the hub's job at call time.)
+    pub fn new(raw: String) -> Self {
+        Self(raw)
+    }
+
+    /// The target exactly as the user typed it.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// The command verb of a `query`, disambiguated by `resolve`. The four names
+/// are the `query/…` method catalog from protocol v2 (`v2.md` §4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Cmd {
+    /// `query/status`
+    Status,
+    /// `query/caps`
+    Caps,
+    /// `query/support`
+    Support,
+    /// `query/protocol`
+    Protocol,
+}
+
+impl Cmd {
+    /// The wire method name (`query/status`, …) for [`v2.md`](../../../../docs/protocol/v2.md) §4.
+    pub fn method(self) -> &'static str {
+        match self {
+            Cmd::Status => "query/status",
+            Cmd::Caps => "query/caps",
+            Cmd::Support => "query/support",
+            Cmd::Protocol => "query/protocol",
+        }
+    }
+}
+
+/// A usage error from [`Query::resolve`] — the tail names a target but no
+/// command (ADR 0003: exit 2). The message is what `main` prints to stderr.
+#[derive(Debug)]
+pub struct Usage {
+    message: String,
+}
+
+impl Usage {
+    fn new(message: String) -> Self {
+        Self { message }
+    }
+}
+
+impl std::fmt::Display for Usage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+/// True iff `token` is a query command verb (the CMD/TARGET disambiguator).
+fn is_cmd(token: &str) -> bool {
+    matches!(token, "status" | "caps" | "support" | "protocol")
+}
+
+/// Map a command-verb string (already known to be a CMD) to its enum.
+fn cmd_of(token: &str) -> Cmd {
+    match token {
+        "caps" => Cmd::Caps,
+        "support" => Cmd::Support,
+        "protocol" => Cmd::Protocol,
+        // is_cmd() is the gate; `status` and nothing else fall through.
+        _ => Cmd::Status,
     }
 }
 
@@ -324,4 +465,83 @@ pub struct Init {
     /// Overwrite an existing output file.
     #[arg(long)]
     pub force: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    // Unit tests legitimately use unwrap/expect/panic (the integration test
+    // files do the same at their crate top). An in-crate `mod` can't use a
+    // file-level `#![allow]`, so the module opts out here instead.
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable)] // #149
+
+    use super::*;
+
+    fn query(rest: &[&str]) -> Query {
+        Query { rest: rest.iter().map(|s| s.to_string()).collect() }
+    }
+
+    /// The four shapes the old accessors got wrong (issue #148): `status`,
+    /// `TARGET status`, `support opencode`, `TARGET support opencode`.
+    #[test]
+    fn resolves_the_four_query_shapes() {
+        // (a) Local, no target: `query status` — cmd is the first token.
+        let r = query(&["status"]).resolve().expect("local `query status` must resolve");
+        assert!(r.target().is_none(), "`query status` has no target");
+        assert_eq!(r.cmd(), &Cmd::Status);
+        assert!(r.args().is_empty());
+
+        // (b) Remote, same verb: `query TARGET status`.
+        let r = query(&["io", "status"]).resolve().expect("remote `query io status` must resolve");
+        assert_eq!(r.target(), Some(&Target::new("io".into())));
+        assert_eq!(r.cmd(), &Cmd::Status);
+        assert!(r.args().is_empty());
+
+        // (c) Local, command taking an arg: `query support opencode`.
+        let r = query(&["support", "opencode"])
+            .resolve()
+            .expect("local `query support opencode` must resolve");
+        assert!(r.target().is_none(), "`query support opencode` has no target");
+        assert_eq!(r.cmd(), &Cmd::Support);
+        assert_eq!(r.args(), &["opencode".to_string()]);
+
+        // (d) Remote, command taking an arg: `query TARGET support opencode`.
+        let r = query(&["io/alpha", "support", "opencode"])
+            .resolve()
+            .expect("remote `query io/alpha support opencode` must resolve");
+        assert_eq!(r.target(), Some(&Target::new("io/alpha".into())));
+        assert_eq!(r.cmd(), &Cmd::Support);
+        assert_eq!(r.args(), &["opencode".to_string()]);
+    }
+
+    /// A target with no following command is a usage error (ADR 0003: exit 2).
+    #[test]
+    fn target_without_command_is_a_usage_error() {
+        // A bare, non-CMD token is a remote target with no command after it.
+        let err = query(&["io"]).resolve().expect_err("`query io` (no cmd) must be a usage error");
+        let Usage { .. } = err; // just assert it is the usage error type
+        assert!(err.to_string().contains("io"));
+    }
+
+    /// The four verbs map onto the v2 §4 method catalog names.
+    #[test]
+    fn cmd_maps_to_the_wire_method_name() {
+        assert_eq!(Cmd::Status.method(), "query/status");
+        assert_eq!(Cmd::Caps.method(), "query/caps");
+        assert_eq!(Cmd::Support.method(), "query/support");
+        assert_eq!(Cmd::Protocol.method(), "query/protocol");
+    }
+
+    /// `caps` and `protocol` also disambiguate local-vs-remote by the same rule.
+    #[test]
+    fn caps_and_protocol_resolve_like_the_other_verbs() {
+        assert_eq!(query(&["caps"]).resolve().unwrap().cmd(), &Cmd::Caps);
+        assert_eq!(
+            query(&["beta", "caps"]).resolve().unwrap().cmd(),
+            &Cmd::Caps
+        );
+        // `protocol <n>` keeps the version in the args (query/protocol {version}).
+        let r = query(&["protocol", "2"]).resolve().unwrap();
+        assert_eq!(r.cmd(), &Cmd::Protocol);
+        assert_eq!(r.args(), &["2".to_string()]);
+    }
 }
