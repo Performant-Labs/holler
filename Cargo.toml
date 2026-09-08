@@ -42,34 +42,26 @@ dead_code = "deny"
 clap = { version = "4", features = ["derive"] } # for holler-cli
 # serde derive macros for the proto types (holler-proto) and config types (holler-body).
 serde = { version = "1", features = ["derive"] } # for holler-proto, holler-body
-# preserve_order backs serde_json::Map with IndexMap (insertion-ordered) instead of
-# the default HashMap (hash-seed-dependent order), so re-serialising a deserialised
-# value is deterministic. The codec's canonical round-trip sort (holler-proto) and the
-# `--json` printer (holler-cli) rely on this. indexmap is already a serde_json dep,
-# so this adds no new crate.
-serde_json = { version = "1", features = ["preserve_order"] } # for holler-proto, holler-cli
-# rt-multi-thread/signal: hub & body event loops (holler-hub, holler-body); net:
-# loopback WebSocket listener + control socket; sync: mpsc/oneshot channels; time:
-# timers (say --timeout budget, presence TTL); io-util: framed WebSocket I/O; rt:
-# the reactor every other feature builds on.
-tokio = { version = "1.53.1", features = ["rt-multi-thread", "net", "sync", "macros", "time", "io-util", "rt", "signal"] } # for holler-hub, holler-body
+# serde_json without `preserve_order`: holler-proto's canonical round-trips
+# sort keys explicitly (tests/common) and the hub's `--json` status printer is
+# hand-built (insertion order), so nothing relies on serde_json::Map's ordering.
+serde_json = { version = "1" } # for holler-proto, holler-cli
+# A2A encodes `raw` (file) parts as base64 strings; holler-proto encodes/decodes them.
+base64 = "0.22"
+# rt-multi-thread/signal: the hub & body event loops; net: loopback WebSocket
+# listener + control socket; sync: mpsc/oneshot channels; time: timers
+# (say --timeout budget, presence TTL); io-util: framed WebSocket I/O; rt: the
+# reactor every other feature builds on.
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "net", "sync", "macros", "time", "io-util", "rt", "signal"] } # for holler-hub
 # rustls-tls-native-roots: the hub/body TLS WebSocket transport over 127.0.0.1
 # (ADR 0002).
 tokio-tungstenite = { version = "0.30.0", features = ["rustls-tls-native-roots"] } # for holler-hub, holler-body
-# ring (not aws-lc): the provider the pinned old-repo builds used.
-rustls = { version = "0.23", default-features = false, features = ["ring"] } # for holler-body (credential hashing)
 # sink: the WebSocket upgrade/futures plumbing.
 futures-util = { version = "0.3.34", features = ["sink"] } # for holler-hub, holler-body
-# formatting/parsing/macros: token TTLs (`--ttl 24h`) and on-disk timestamp shapes.
-time = { version = "0.3", features = ["formatting", "parsing", "macros"] } # for holler-cli, holler-hub
+# RFC3339 emission timestamps for the debug-logging banner/events (story #144).
+time = { version = "0.3", features = ["formatting", "parsing", "macros"] } # for holler-proto
 # the `hostname` field of a hello/status document.
 hostname = "0.4.2"
-# entropy source for minted ULIDs and token secrets.
-getrandom = "0.2"
-# HMAC of the join secret.
-hmac = "0.12"
-# SHA-256 of the join secret for the credential.
-sha2 = "0.10"
 # sync: the advisory file lock on the state dir.
 fs4 = { version = "1.1.0", features = ["sync"] } # for holler-hub, holler-cli
 # The hub performs the WebSocket server handshake by hand (tokio-tungstenite
