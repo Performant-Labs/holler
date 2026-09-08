@@ -1,0 +1,25 @@
+{
+  "protocol": 2,
+  "protocol_min": 2,
+  "protocol_max": 2,
+  "role": "body",
+  "hostname": "kiwi",
+  "token_id": "tok_7f3a",
+  "client_id": "cli_19",
+  "features": [
+    "interrupt",
+    "presence",
+    "ping",
+    "query"
+  ],
+  "harnesses": [
+    "opencode"
+  ],
+  "sessions": [
+    {
+      "name": "alpha",
+      "harness": "opencode",
+      "mode": "spawn"
+    }
+  ]
+}

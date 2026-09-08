@@ -5,6 +5,8 @@
 //! `tests/fixtures/a2a/` pin the object-model round-trip to the A2A v1.0.1
 //! spec examples.
 
+mod common;
+
 use std::fs;
 
 use holler_proto::a2a::{Message, Part, Role, TaskState};
@@ -268,86 +270,14 @@ fn assert_fixture_round_trips(file: &str) {
         serde_json::from_str(&original).unwrap_or_else(|e| panic!("{file}: parse: {e}"));
     let re = serde_json::to_string(&msg).unwrap();
     // Compare canonical (sorted-keys, one-line) forms so key *order* is
-    // irrelevant and the form is process-independent (see `write_json`); this
-    // still pins the exact keys, values, and structure.
-    let norm = |s: &str| -> String {
-        let v: serde_json::Value = serde_json::from_str(s).unwrap();
-        canonical_json(&v).to_string()
-    };
+    // irrelevant and the form is process-independent (`common::canonical`);
+    // this still pins the exact keys, values, and structure.
+    let norm = |s: &str| -> String { common::canonical_str(s).unwrap() };
     assert_eq!(
         norm(&original),
         norm(&re),
         "{file} does not round-trip byte-for-byte (canonical)"
     );
-}
-
-// A canonical (sorted-keys) one-line JSON string for equality comparisons.
-struct Canonical(serde_json::Value);
-impl std::fmt::Display for Canonical {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write_json(f, &self.0)
-    }
-}
-fn write_json(f: &mut std::fmt::Formatter<'_>, v: &serde_json::Value) -> std::fmt::Result {
-    match v {
-        serde_json::Value::Null => write!(f, "null"),
-        serde_json::Value::Bool(b) => write!(f, "{}", b),
-        serde_json::Value::Number(n) => write!(f, "{}", n),
-        serde_json::Value::String(s) => write_json_string(f, s),
-        serde_json::Value::Array(a) => {
-            write!(f, "[")?;
-            for (i, x) in a.iter().enumerate() {
-                if i > 0 {
-                    write!(f, ",")?;
-                }
-                write_json(f, x)?;
-            }
-            write!(f, "]")
-        }
-        serde_json::Value::Object(m) => {
-            // Sort keys so the canonical form is deterministic and
-            // order-independent: `serde_json::Map`'s iteration order is
-            // process-dependent (HashMap-backed by default, hash-seed
-            // dependent), so relying on raw iteration order made the
-            // byte-for-byte comparison flaky in CI. Sorting by key gives a
-            // stable canonical form on both sides.
-            write!(f, "{{")?;
-            let mut keys: Vec<&String> = m.keys().collect();
-            keys.sort();
-            let mut first = true;
-            for k in keys {
-                if !first {
-                    write!(f, ",")?
-                }
-                first = false;
-                write_json_string(f, k)?;
-                write!(f, ":")?;
-                write_json(f, m.get(k).unwrap())?;
-            }
-            write!(f, "}}")
-        }
-    }
-}
-fn write_json_string(f: &mut std::fmt::Formatter<'_>, s: &str) -> std::fmt::Result {
-    write!(f, "\"")?;
-    for c in s.chars() {
-        match c {
-            '"' => write!(f, "\\\"")?,
-            '\\' => write!(f, "\\\\")?,
-            '\n' => write!(f, "\\n")?,
-            '\r' => write!(f, "\\r")?,
-            '\t' => write!(f, "\\t")?,
-            c if (c as u32) < 0x20 => write!(f, "\\u{:04x}", c as u32)?,
-            c => write!(f, "{}", c)?,
-        }
-    }
-    write!(f, "\"")
-}
-
-fn canonical_json(v: &serde_json::Value) -> Canonical {
-    // `write_json` sorts object keys, so the rendered string is the canonical
-    // (order-independent) form regardless of the Map's backing iteration order.
-    Canonical(v.clone())
 }
 
 #[test]

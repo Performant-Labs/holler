@@ -1,0 +1,22 @@
+{
+  "role": "body",
+  "protocol": 2,
+  "protocol_min": 2,
+  "protocol_max": 2,
+  "hostname": "kiwi",
+  "connected": true,
+  "token_id": "tok_7f3a",
+  "features": [
+    "ping"
+  ],
+  "harnesses": [
+    "opencode"
+  ],
+  "session_list": [
+    {
+      "name": "alpha",
+      "harness": "opencode",
+      "state": "idle"
+    }
+  ]
+}

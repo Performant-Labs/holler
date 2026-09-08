@@ -1,0 +1,16 @@
+{
+  "session": "io/alpha",
+  "message": {
+    "messageId": "m-1",
+    "contextId": "io/alpha",
+    "role": "ROLE_USER",
+    "parts": [
+      {
+        "text": "reply with the word ALPHA"
+      }
+    ]
+  },
+  "meta": {
+    "origin": "cli"
+  }
+}

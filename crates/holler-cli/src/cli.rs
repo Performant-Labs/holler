@@ -52,6 +52,14 @@ pub struct Cli {
     )]
     pub log_format: Option<String>,
 
+    /// Print machine-readable output.
+    ///
+    /// Global (issue #147/#155): reachable after any leaf, including
+    /// `hub token mint --label x --json` — which the per-struct copies this
+    /// replaced could not parse (the flag sat on `Token`, before the leaf).
+    #[arg(long, global = true)]
+    pub json: bool,
+
     #[command(subcommand)]
     pub command: Command,
 }
@@ -132,9 +140,6 @@ pub struct Serve {
 
 #[derive(Parser, Debug)]
 pub struct Token {
-    /// Print machine-readable output.
-    #[arg(long)]
-    pub json: bool,
     #[command(subcommand)]
     pub command: TokenCommand,
 }
@@ -186,26 +191,15 @@ pub struct Ping {
 }
 
 #[derive(Parser, Debug)]
-pub struct Status {
-    /// Print machine-readable output.
-    #[arg(long)]
-    pub json: bool,
-}
+pub struct Status {}
 
 #[derive(Parser, Debug)]
-pub struct Caps {
-    /// Print machine-readable output.
-    #[arg(long)]
-    pub json: bool,
-}
+pub struct Caps {}
 
 #[derive(Parser, Debug)]
 pub struct Support {
     /// Feature name to query.
     pub feature: String,
-    /// Print machine-readable output.
-    #[arg(long)]
-    pub json: bool,
 }
 
 /// `query CMD [ARGS...]` (local) or `query TARGET CMD [ARGS...]` (remote).
@@ -221,9 +215,6 @@ pub struct Query {
     /// The query tail: CMD [ARGS...] (local) or TARGET CMD [ARGS...] (remote).
     #[arg(required = true, trailing_var_arg = true)]
     pub rest: Vec<String>,
-    /// Print machine-readable output.
-    #[arg(long)]
-    pub json: bool,
 }
 
 impl Query {
@@ -250,11 +241,7 @@ impl Query {
 // --- top-level (hub-only daily verbs) ----------------------------------
 
 #[derive(Parser, Debug)]
-pub struct Roster {
-    /// Print machine-readable output.
-    #[arg(long)]
-    pub json: bool,
-}
+pub struct Roster {}
 
 #[derive(Parser, Debug)]
 pub struct Say {
@@ -265,9 +252,6 @@ pub struct Say {
     /// Wait up to this long for the reply (default 600s).
     #[arg(long, default_value = "600s")]
     pub timeout: String,
-    /// Print machine-readable output.
-    #[arg(long)]
-    pub json: bool,
 }
 
 #[derive(Parser, Debug)]

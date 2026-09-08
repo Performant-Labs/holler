@@ -1,0 +1,6 @@
+{
+  "feature": "claude",
+  "kind": "harness",
+  "ok": false,
+  "reason": "no adapter"
+}

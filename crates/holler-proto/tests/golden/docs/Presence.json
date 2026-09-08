@@ -1,0 +1,12 @@
+{
+  "hostname": "kiwi",
+  "sessions": [
+    {
+      "name": "alpha",
+      "harness": "opencode",
+      "state": "working",
+      "mode": "attach",
+      "harness_session_id": "ses_1"
+    }
+  ]
+}

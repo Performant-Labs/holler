@@ -52,6 +52,16 @@ path = "tests/stub_acp_test.rs"
 name = "support_selftest"
 path = "tests/support_selftest.rs"
 
+# CLI-surface fixture and docs doc-test (issue #155 §5/§6). Both read
+# tests/fixtures/cli-surface*.txt via the shared tests/fixture/mod.rs.
+[[test]]
+name = "cli_surface_test"
+path = "tests/cli_surface_test.rs"
+
+[[test]]
+name = "docs_cli_test"
+path = "tests/docs_cli_test.rs"
+
 # Explicit pin (story #129): the test-of-tests canary is named here so a later
 # move of the file under a subdirectory cannot silently un-discover it from the
 # CI canary step.
@@ -59,33 +69,20 @@ path = "tests/support_selftest.rs"
 name = "wire_selftest"
 path = "tests/wire_selftest.rs"
 
+# Declare only what is consumed (issue #155 §7 — `cargo machete` fails CI
+# otherwise). A story that starts using a workspace dependency adds it here in
+# the same PR; the skeleton's speculative list was removed in #155.
 [dependencies]
 clap = { workspace = true }
-serde = { workspace = true }
-serde_json = { workspace = true }
-tokio = { workspace = true }
-tokio-tungstenite = { workspace = true }
-rustls = { workspace = true }
-futures-util = { workspace = true }
-time = { workspace = true }
-hostname = { workspace = true }
-getrandom = { workspace = true }
-hmac = { workspace = true }
-sha2 = { workspace = true }
-fs4 = { workspace = true }
-toml = { workspace = true }
-reqwest = { workspace = true }
-agent-client-protocol = { workspace = true }
-ulid = { workspace = true }
-libc = { workspace = true }
+serde_json = { workspace = true }   # stub-acp bin
 holler-proto = { path = "../holler-proto" }
-holler-hub = { path = "../holler-hub" }
-holler-body = { path = "../holler-body" }
 
 [dev-dependencies]
 assert_cmd = { workspace = true }
 predicates = { workspace = true }
 rstest = { workspace = true }
+tokio = { workspace = true }        # wire_selftest runtime canary
+libc = { workspace = true }         # tests/support kill_tree
 
 # Workspace lints (issue #149): inherit [workspace.lints] from the root
 # Cargo.toml — deny dead_code, clippy unwrap/expect/panic/unreachable, and the

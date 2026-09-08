@@ -1,0 +1,65 @@
+# The normative, machine-readable CLI surface (ADR 0003 §"CLI"; issue #155 §5).
+#
+# One invocation per line:  <leaf verb path> | <arguments>
+# Every line must parse with `Cli::try_parse_from`, and every leaf verb clap
+# knows must appear on at least one line (both asserted by
+# tests/cli_surface_test.rs). A verb ADR 0003 specifies that no story has
+# implemented yet lives in cli-surface.pending.txt instead — move its lines
+# here in the story that adds the verb.
+#
+# Cover every flag at least once. Tokens are split on whitespace; double
+# quotes group a token.
+
+# --- hub -------------------------------------------------------------------
+hub serve |
+hub serve | --listen 127.0.0.1:41807
+hub serve | --listen 127.0.0.1:41807 --listen [::1]:41807 --advertise hub.example.ts.net:443
+hub token mint | --label io
+hub token mint | --label io --ttl 2h --json
+hub token list |
+hub token list | --json
+hub token delete | tok_7f3a
+hub token rm | tok_7f3a
+hub token remove | tok_7f3a
+hub token revoke | tok_7f3a
+hub token ping | tok_7f3a
+hub token ping | tok_7f3a --json
+hub status |
+hub status | --json
+hub caps |
+hub caps | --json
+hub support | opencode
+hub support | opencode --json
+hub query | status
+hub query | protocol 2 --json
+hub query | io status
+hub query | io/alpha support opencode --json
+
+# --- top-level daily verbs (hub-only) --------------------------------------
+roster |
+roster | --json
+say | io/alpha "reply with the word ALPHA"
+say | alpha "hi" --timeout 30s --json
+interrupt | io/alpha
+
+# --- body ------------------------------------------------------------------
+body join | --server wss://hub.example.ts.net --token tok_7f3a:hlr_join_x
+body run |
+body run | --config sessions.toml
+body detach |
+body status |
+body status | --json
+body caps |
+body caps | --json
+body support | opencode
+body support | attach --json
+body query | status
+body query | protocol 2 --json
+body attach sessions |
+body attach sessions | --endpoint http://127.0.0.1:4096
+body attach init |
+body attach init | --endpoint http://127.0.0.1:4096 --session ses_1 --name alpha --out attach.toml --force
+
+# --- global flags, on a leaf that has none of its own --------------------
+roster | --debug noisy --log-format json --json
+body detach | --debug none

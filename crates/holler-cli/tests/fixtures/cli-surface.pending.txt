@@ -1,0 +1,15 @@
+# Verbs and flags ADR 0003 specifies that NO story has implemented yet
+# (issue #155 §5). Same format as cli-surface.txt.
+#
+# tests/cli_surface_test.rs asserts every line here does NOT parse — so when
+# the owning story lands its verb, the test fails until the line is moved to
+# cli-surface.txt. The docs doc-test (tests/docs_cli_test.rs) tolerates a
+# documented command whose leaf path is listed here, and nowhere else.
+#
+# Each line names its story.
+
+wait | io/alpha                                              # holler#142
+wait | io/alpha,io/beta --until completed,failed --after h-01H --timeout 120s --json   # holler#142
+answer | io/alpha yes                                         # holler#151
+say | io/alpha "hi" --queue                                   # holler#150
+interrupt | io/alpha "stop; do X instead"                     # holler#150
