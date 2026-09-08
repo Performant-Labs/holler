@@ -1,127 +1,29 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)] // #149
 //! Integration tests for the ACP v2 stub agent (story #130).
 //!
-//! Each test spawns the built `stub-acp` binary as a real process and drives
-//! it over stdio with newline-delimited JSON-RPC 2.0: writes requests, reads
-//! the streamed notifications + response. The protocol shapes asserted here
-//! are ACP v2 (`agent-client-protocol` 2.1.0's schema): `session/update`
-//! carries a `sessionUpdate` discriminator and a nested typed payload
-//! (e.g. `state_update` → `{state:"running"}`, `agent_message_chunk` →
-//! `{content:{type:"text", text}}`).
+//! These pin the stub's *observable* ACP v2 behaviour — the surface a real ACP
+//! client (and later the body's ACP-driver story) talks to. The driver (spawn,
+//! read, write, close) is the shared `tests/support` `Stub` — the *same* driver
+//! the ACP-driver story's tests will use — so the stub is verified through
+//! exactly the client-side path the body will later drive. (This file used to
+//! re-implement that driver by hand, keeping a second copy of the same logic in
+//! the tree — see issue #147.)
+//!
+//! Request lines and the fixed ids are the shared `support` constants
+//! (`INITIALIZE`, `SESSION_NEW`, `PROMPT`, `CANCEL`, `UNKNOWN`), so the driver
+//! and these tests agree on the wire by construction.
 
-use serde_json::Value;
-use std::io::{BufRead, BufReader, Write};
-use std::process::{Child, Command, Stdio};
+mod support;
 
-// ACP v2 wire shapes ---------------------------------------------------------
+use support::Stub;
+use support::{CANCEL, PERMISSION_REQUEST_ID, PROMPT, UNKNOWN};
 
-const INITIALIZE: &str = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":2,"info":{"name":"tester","version":"0"}}}"#;
-const SESSION_NEW: &str = r#"{"jsonrpc":"2.0","id":2,"method":"session/new","params":{"cwd":"/"}}"#;
-const PROMPT: &str = r#"{"jsonrpc":"2.0","id":3,"method":"session/prompt","params":{"sessionId":"stub","prompt":[{"type":"text","text":"hi"}]}}"#;
-const CANCEL: &str =
-    r#"{"jsonrpc":"2.0","id":4,"method":"session/cancel","params":{"sessionId":"stub"}}"#;
-const UNKNOWN: &str = r#"{"jsonrpc":"2.0","id":5,"method":"bogus/method","params":{}}"#;
-
-// Harness ---------------------------------------------------------------------
-
-struct Stub {
-    child: Child,
-    reader: Option<BufReader<std::process::ChildStdout>>,
-    stdin: std::process::ChildStdin,
-}
-
-/// Cargo sets `CARGO_BIN_EXE_<name>` for integration tests to the built binary
-/// path. (We can't use `assert_cmd::cargo_bin` here because its `Command`
-/// wrapper cannot hand us a live, piped stdin for interactive I/O.)
-fn stub_bin_path() -> &'static str {
-    // Compile-time read (defect #147): a missing var fails the build, not a
-    // silently-exited test.
-    env!("CARGO_BIN_EXE_stub-acp")
-}
-
+/// Spawn `stub-acp` with `args` and piped stdio via the shared driver.
+/// (`stderr` is nulled inside [`Stub::start`]: the stub writes only the
+/// JSON-RPC stream to stdout, so there is nothing a test needs from stderr.)
 fn spawn_stub(args: &[&str]) -> Stub {
-    let mut child = Command::new(stub_bin_path())
-        .args(args)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .expect("spawn stub-acp");
-    let stdin = child.stdin.take().expect("child stdin is piped");
-    let stdout = child.stdout.take().expect("child stdout is piped");
-    Stub {
-        child,
-        reader: Some(BufReader::new(stdout)),
-        stdin,
-    }
+    Stub::start(args)
 }
-
-impl Stub {
-    fn reader(&mut self) -> &mut BufReader<std::process::ChildStdout> {
-        self.reader.as_mut().expect("stdout reader is present")
-    }
-
-    fn send(&mut self, line: &str) {
-        self.stdin
-            .write_all(line.as_bytes())
-            .expect("write request line");
-        self.stdin.write_all(b"\n").expect("write newline");
-        self.stdin.flush().expect("flush stdin");
-    }
-
-    /// Read the next JSON line and parse it into a `Value`.
-    fn read_line(&mut self) -> Value {
-        let mut buf = String::new();
-        self.reader()
-            .read_line(&mut buf)
-            .expect("read stdout line (EOF while a message was expected)");
-        serde_json::from_str(&buf).expect("valid JSON line from stub")
-    }
-
-    /// Read messages until one with the given JSON-RPC id (a response) arrives.
-    /// Notifications carry no id and are skipped. Returns the parsed response.
-    /// `id` is the numeric JSON-RPC id as a string (e.g. "3"); the stub sends
-    /// ids as JSON numbers, so we compare via `as_i64`.
-    fn read_response(&mut self, id: &str) -> Value {
-        let want: i64 = id.parse().expect("test ids are integers");
-        loop {
-            let v = self.read_line();
-            match v.get("id").and_then(|i| i.as_i64()) {
-                Some(i) if i == want => return v,
-                Some(_) => panic!("unexpected response id: {v}"),
-                None => continue, // a streamed session/update notification
-            }
-        }
-    }
-
-    /// Handshake: initialize + session/new. Returns the session id (expect "stub").
-    fn handshake(&mut self) {
-        self.send(INITIALIZE);
-        let init = self.read_response("1");
-        assert_eq!(
-            init["result"]["protocolVersion"].as_u64(),
-            Some(2),
-            "initialize must negotiate protocolVersion 2: {init}"
-        );
-        assert!(
-            init["result"].get("agentCapabilities").is_some(),
-            "initialize result must carry agentCapabilities: {init}"
-        );
-        self.send(SESSION_NEW);
-        assert_eq!(self.read_response("2")["result"]["sessionId"], "stub");
-    }
-
-    /// Close stdin (EOF) and wait for the process to exit, returning the exit
-    /// code. Dropping the `ChildStdin` closes the write end of the pipe, so
-    /// the stub's stdin reader sees EOF. Takes `self` by value because the
-    /// `ChildStdin` is a `!Clone` field we must move out and drop.
-    fn close(mut self) -> Option<i32> {
-        drop(self.stdin);
-        self.child.wait().ok().map(|s| s.code().unwrap_or(-1))
-    }
-}
-
-// Tests ------------------------------------------------------------------------
 
 #[test]
 fn prompt_streams_chunks_then_end_turn() {
@@ -202,7 +104,11 @@ fn ask_permission_emits_requires_action_then_resumes() {
     // The agent then raises a permission request (id 10) and reports
     // requires_action.
     let perm = stub.read_line();
-    assert_eq!(perm["id"].as_i64(), Some(10), "permission request: {perm}");
+    assert_eq!(
+        perm["id"].as_i64(),
+        Some(PERMISSION_REQUEST_ID),
+        "permission request: {perm}"
+    );
     assert_eq!(perm["method"], "session/request_permission");
     assert_eq!(perm["params"]["sessionId"], "stub");
     assert_eq!(perm["params"]["toolCall"]["title"], "stub tool");

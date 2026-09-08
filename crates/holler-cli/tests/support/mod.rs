@@ -26,6 +26,7 @@
 //! a hard process exit) on harness failure so a test failure is a test failure,
 //! not a masked 0.
 
+use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
 use std::time::{Duration, Instant};
@@ -96,14 +97,20 @@ pub fn holler_cmd(state: &StateDir) -> Command {
 /// The absolute path to the built `holler` binary.
 ///
 /// Cargo sets `CARGO_BIN_EXE_holler` for integration-test targets to the
-/// compiled binary. (We cannot use `assert_cmd::cargo_bin` for the long-lived
-/// processes here — `Hub`/`Body` need piped stdio to parse the live listener
-/// port — so we build a plain `std::process::Command` off the raw path.)
+/// compiled binary, and this is read at *compile* time (`env!`), so the path
+/// is baked into every test binary that pulls in this module. (We cannot use
+/// `assert_cmd::cargo_bin` for the long-lived processes here — `Hub`/`Body`
+/// need piped stdio to parse the live listener port — so we build a plain
+/// `std::process::Command` off the baked path.)
 ///
-/// Read with `env!` (compile time), not `env::var` (runtime): the var is set
-/// by cargo per test target, so a missing one is a build/setup error. A missing
-/// var must fail the *build*, not let a helper silently `exit(2)` (defect #147).
-fn holler_bin() -> &'static str {
+/// The `env!` (not a runtime `std::env::var` lookup + `exit(2)`) is
+/// deliberate: a test helper that terminates the process on a missing binary
+/// path tears down the *whole* test process the
+/// moment one binary path is missing, silently hiding every other test in the
+/// crate behind a single `exit(2)`. `env!` instead fails the *compile* when the
+/// variable is absent, so a missing binary is a loud, per-target error rather
+/// than a silent blackout.
+pub fn holler_bin() -> &'static str {
     env!("CARGO_BIN_EXE_holler")
 }
 
@@ -278,8 +285,14 @@ impl Hub {
 /// (`body join --token <id>:<secret>`). The hub persists the token under
 /// `<state>/hub`, so no live hub process is required to *mint*.
 pub fn mint_token(state: &StateDir, label: &str) -> (String, String) {
+    // `--json` is a *global* flag (ADR 0003), so it is accepted at the root of
+    // the command — *before* the subcommand path — not after `mint`. The
+    // ADR 0003 table lists `hub token mint --label LABEL [--ttl 24h] [--json]`
+    // but `--json` is global, so it may appear before `mint` (where we place it);
+    // putting it after `mint` would only be accepted if `mint` had its *own*
+    // `--json`, which it does not.
     let out = holler_cmd(state)
-        .args(["hub", "token", "mint", "--label", label, "--json"])
+        .args(["--json", "hub", "token", "mint", "--label", label])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -291,9 +304,12 @@ pub fn mint_token(state: &StateDir, label: &str) -> (String, String) {
         String::from_utf8_lossy(&out.stderr)
     );
     let v: Value = serde_json::from_slice(&out.stdout).expect("mint --json is a JSON object");
-    let token_id = v["id"]
+    // The `--json` document's id field is `token_id` (ADR 0003: the join token
+    // is `ID:SECRET` and `ID` is the token id). `id` is the wrong field name —
+    // the document has always carried `token_id`.
+    let token_id = v["token_id"]
         .as_str()
-        .expect("mint result carries `id`")
+        .expect("mint --json result carries `token_id`")
         .to_string();
     let secret = v["secret"]
         .as_str()
@@ -321,6 +337,15 @@ pub fn join(state: &StateDir, ws_url: &str, token_id: &str, secret: &str) {
     );
 }
 
+/// The absolute path to the built `stub-acp` agent binary.
+///
+/// Compile-time (`env!`) for the same reason as [`holler_bin`]: a missing
+/// binary must fail the *compile* of the test target, never `exit(2)` the
+/// whole process and hide every other test.
+pub fn stub_acp_bin() -> &'static str {
+    env!("CARGO_BIN_EXE_stub-acp")
+}
+
 /// Write `<state>/body/sessions.toml` with one spawn-mode row per entry.
 ///
 /// Each row points the body at the built `stub-acp` agent with the given extra
@@ -333,29 +358,23 @@ pub fn write_sessions_toml(state: &StateDir, sessions: &[(&str, &[&str])]) -> Pa
 
     let mut toml = String::new();
     for (name, extra) in sessions {
-        // spawn-mode row: the body launches `stub-acp <extra…>` for this
-        // session. `args` is a single TOML string array — one `[a, b, …]` row,
-        // NOT one `args = [x]` per element (that would be a duplicate key and
-        // fail to parse the moment the body story reads the file).
-        //
-        // Each arg is JSON-escaped so a path with a quote or backslash still
-        // produces valid TOML (JSON string escaping is a valid TOML basic-string
-        // escape for the characters TOML cares about: `\"` and `\\`).
-        let args = extra
-            .iter()
-            .map(|a| serde_json::to_string(a).unwrap_or_else(|_| panic!("json-encode {a:?}")))
+        // The full argv: the agent binary first, then its extra args. JSON's
+        // string escaping is a valid subset of TOML basic-string escaping, so
+        // each element is JSON-escaped and the elements are joined into one
+        // TOML string array (an inline array — the loader sees `command` as a
+        // list, matching how the body execs the agent).
+        let argv = std::iter::once(stub)
+            .chain(extra.iter().copied())
+            .map(|a| serde_json::to_string(a).expect("json-encode argv element"))
             .collect::<Vec<_>>()
             .join(", ");
-        // Both `command` (a path) and each arg are JSON-escaped and then placed
-        // in a TOML basic string: JSON's `\"`/`\\` escaping is a valid subset of
-        // TOML basic-string escaping, so the result is always parseable TOML.
-        let stub_q = serde_json::to_string(&stub).unwrap();
         toml.push_str(&format!(
-            r#"[sessions."{name}"]
-mode = "spawn"
-command = {stub_q}
-args = [{args}]
-"#
+            r#"[[session]]
+name = {name_q}
+harness = "opencode"
+command = [{argv}]
+"#,
+            name_q = serde_json::to_string(name).expect("json-encode name"),
         ));
     }
 
@@ -363,6 +382,205 @@ args = [{args}]
     std::fs::create_dir_all(state.body()).expect("create body dir");
     std::fs::write(&path, toml).expect("write sessions.toml");
     path
+}
+
+/// The built `stub-acp` agent, driven over a real stdin/stdout pipe — the one
+/// ACP client-side driver the test suite shares.
+///
+/// Both the stub's own selftests (`stub_acp_test`) and the ACP-driver story
+/// talk to `stub-acp` the same way: spawn it, read its newline-delimited JSON
+/// responses off stdout, write requests (JSON-RPC objects) to stdin, and
+/// terminate it on drop. The stub tests used to re-implement this driver by
+/// hand; centralising it here means the driver the story's tests rely on is the
+/// *exact* one the stub is verified against (one implementation, not two).
+///
+/// The path is the compile-time `CARGO_BIN_EXE_stub-acp` (see [`stub_acp_bin`])
+/// — never a runtime env read, so a missing binary fails the compile, not the
+/// whole test process.
+///
+/// **Teardown closes stdin (EOF) first, then reaps.** `ChildStdin` has no
+/// `close()`, so the only way to close the pipe is to drop the handle — which
+/// is what [`Stub::drop`] does *before* it reaps. Closing stdin first (rather
+/// than killing the child first) matters: a test may drop its `Stub` while a
+/// turn is still in flight (the `ask-permission` turn parks on its permission
+/// gate; a plain prompt may still be streaming its chunks), and the test may
+/// still be reading that turn's remaining output. If we killed the child first,
+/// its stdout pipe would truncate and the in-flight `read_response` would block
+/// forever on a dead pipe. An EOF, by contrast, lets the stub finish the turn
+/// and write the remaining output before it exits. (The stub is written so a
+/// *bare* EOF never misreports an already-resolved turn as `cancelled` — only a
+/// real `session/cancel` does — so closing stdin on drop is safe either way.)
+/// After the EOF, `wait` reaps; a stub that is somehow still alive is `kill`-ed
+/// as a fallback so a panicking test never leaks a child process.
+/// The fixed JSON-RPC request lines the stub contract tests drive with. Each is
+/// a pre-serialized JSON object (no trailing newline — [`Stub::send`] appends
+/// it). The ids are the stub's own: initialize=1, session/new=2, prompt=3,
+/// cancel=4, the unknown method=5, and the permission request the stub itself
+/// raises is id 10 (see [`PERMISSION_REQUEST_ID`]). Sharing these here —
+/// rather than re-declaring them in each test file — means the driver and the
+/// tests that use it agree on the wire by construction.
+/// The fixed id the stub assigns to the `session/request_permission` request it
+/// raises under `--ask-permission`; the client answers it with that same id.
+pub const PERMISSION_REQUEST_ID: i64 = 10;
+pub const INITIALIZE: &str = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":2,"info":{"name":"tester","version":"0"}}}"#;
+pub const SESSION_NEW: &str =
+    r#"{"jsonrpc":"2.0","id":2,"method":"session/new","params":{"cwd":"/"}}"#;
+pub const PROMPT: &str = r#"{"jsonrpc":"2.0","id":3,"method":"session/prompt","params":{"sessionId":"stub","prompt":[{"type":"text","text":"hi"}]}}"#;
+pub const CANCEL: &str =
+    r#"{"jsonrpc":"2.0","id":4,"method":"session/cancel","params":{"sessionId":"stub"}}"#;
+pub const UNKNOWN: &str = r#"{"jsonrpc":"2.0","id":5,"method":"bogus/method","params":{}}"#;
+
+pub struct Stub {
+    child: Child,
+    /// The stub's stdin pipe handle. `Option` so `Drop` can `take()` it (moving
+    /// it out of the field, leaving `None`) and drop it to close the pipe — a
+    /// `ChildStdin` cannot be moved out of `&mut self` any other way, and has no
+    /// `close()`. The `Child`'s own stdin slot is emptied in `start` (see there),
+    /// so this is the sole owner of the write end and the pipe is closed exactly
+    /// once.
+    stdin: Option<std::process::ChildStdin>,
+    reader: std::io::BufReader<std::process::ChildStdout>,
+}
+
+impl Stub {
+    /// Spawn `stub-acp` with `extra` args (e.g. `--slow`, `--ask-permission`)
+    /// and piped stdio.
+    pub fn start(extra: &[&str]) -> Stub {
+        let mut child = Command::new(stub_acp_bin())
+            .args(extra)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            // stderr is nulled (not piped): the stub writes only the JSON-RPC
+            // stream to stdout, and a piped stderr nobody reads could fill its
+            // OS buffer and block the stub if it ever logged heavily.
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn stub-acp");
+        // `Stub` becomes the sole owner of the stdin pipe: take the handle out
+        // of the `Child` so the child's own drop cannot close the pipe (the
+        // write end is closed exactly once — by `Stub::drop`).
+        let stdin = child.stdin.take().expect("stub-acp stdin piped");
+        let reader = std::io::BufReader::new(child.stdout.take().expect("stub-acp stdout piped"));
+        Stub {
+            child,
+            stdin: Some(stdin),
+            reader,
+        }
+    }
+
+    /// Write one raw JSON request line to the stub's stdin and flush it.
+    ///
+    /// The line is written as a pre-serialized JSON object (the test's module
+    /// constants such as [`PROMPT`] are already serialized). A trailing newline
+    /// terminates the JSON-RPC message; the stub reads stdin line-delimited.
+    /// This is the driver's only write primitive — every higher-level helper
+    /// ([`Stub::handshake`], the tests' `send(CANCEL)`, …) is built on it.
+    pub fn send(&mut self, line: &str) {
+        self.stdin
+            .as_mut()
+            .expect("stub-acp stdin live")
+            .write_all(line.as_bytes())
+            .expect("write request line");
+        self.stdin
+            .as_mut()
+            .expect("stub-acp stdin live")
+            .write_all(b"\n")
+            .expect("write newline");
+        self.stdin
+            .as_mut()
+            .expect("stub-acp stdin live")
+            .flush()
+            .expect("flush stdin");
+    }
+
+    /// Read the next newline-delimited JSON line off the stub's stdout and
+    /// parse it into a `Value`. Notifications and responses are indistinguishable
+    /// here — the caller decides which it expects; use [`Stub::read_response`] to
+    /// skip notifications and wait for a specific id.
+    pub fn read_line(&mut self) -> Value {
+        let mut buf = String::new();
+        self.reader
+            .read_line(&mut buf)
+            .expect("read stdout line (EOF while a message was expected)");
+        serde_json::from_str(&buf).expect("valid JSON line from stub")
+    }
+
+    /// Read messages until one with the given JSON-RPC id (a response) arrives.
+    /// Notifications carry no id and are skipped. Returns the parsed response.
+    /// `id` is the numeric JSON-RPC id as a string (e.g. "3"); the stub sends
+    /// ids as JSON numbers, so we compare via `as_i64`.
+    pub fn read_response(&mut self, id: &str) -> Value {
+        let want: i64 = id.parse().expect("test ids are integers");
+        loop {
+            let v = self.read_line();
+            match v.get("id").and_then(|i| i.as_i64()) {
+                Some(i) if i == want => return v,
+                Some(_) => panic!("unexpected response id: {v}"),
+                None => continue, // a streamed session/update notification
+            }
+        }
+    }
+
+    /// Handshake: initialize + session/new. Asserts the negotiated protocol
+    /// version is 2 and the session id is "stub".
+    pub fn handshake(&mut self) {
+        self.send(INITIALIZE);
+        let init = self.read_response("1");
+        assert_eq!(
+            init["result"]["protocolVersion"].as_u64(),
+            Some(2),
+            "initialize must negotiate protocolVersion 2: {init}"
+        );
+        assert!(
+            init["result"].get("agentCapabilities").is_some(),
+            "initialize result must carry agentCapabilities: {init}"
+        );
+        self.send(SESSION_NEW);
+        assert_eq!(self.read_response("2")["result"]["sessionId"], "stub");
+    }
+
+    /// Close stdin (EOF) and wait for the process to exit, returning the exit
+    /// code. Taking the `ChildStdin` handle out and dropping it closes the write
+    /// end of the pipe, so the stub's stdin reader sees EOF. Takes `self` by
+    /// value because the `!Clone` stdin handle must be moved out and dropped;
+    /// after `close` the `Stub` must not be used again.
+    pub fn close(mut self) -> Option<i32> {
+        // Drop the stdin handle (closes the write end → EOF to the stub), then
+        // reap. `Option::take` empties the field so the (suppressed) `Drop` impl
+        // does not close the pipe a second time.
+        drop(self.stdin.take());
+        self.child.wait().ok().map(|s| s.code().unwrap_or(-1))
+    }
+}
+
+impl Drop for Stub {
+    fn drop(&mut self) {
+        // Order matters: close the stub's stdin FIRST, then reap.
+        //
+        // Closing the stdin pipe (by dropping the `ChildStdin` handle — it has
+        // no `close()`) sends the stub an EOF. The stub is written so a *bare*
+        // EOF never misreports an already-resolved turn as `cancelled`; for an
+        // in-flight turn it lets the turn finish (emitting its remaining
+        // chunks and terminal response) before the process exits. Closing stdin
+        // before killing is essential: if we killed the child first, its stdout
+        // pipe would be truncated and a test that is still mid-`read_response`
+        // for the turn's remaining output would block forever on a dead pipe.
+        //
+        // `take()` moves the handle out of the field (leaving `None`, so the
+        // `Child`'s own drop cannot close the pipe a second time) and dropping
+        // it closes the pipe.
+        if let Some(stdin) = self.stdin.take() {
+            drop(stdin); // → EOF to the stub; the stub exits once it drains.
+        }
+        // Reap: the EOF above ends the stub (it drains and exits on EOF), so
+        // `wait` returns its status. Only if the stub is somehow still alive
+        // (e.g. parked on a permission gate and not reached by the EOF for some
+        // reason) does `wait` fail, in which case `kill()` is the fallback so a
+        // panicking test never leaks a child.
+        if self.child.wait().is_err() {
+            let _ = self.child.kill();
+        }
+    }
 }
 
 /// A running body subprocess.
