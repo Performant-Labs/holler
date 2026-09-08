@@ -8,53 +8,23 @@
 //! **`-32603` (Internal error) and `-32009` are reserved** and unused in v2.
 //! An *unmatched response* (a response whose `id` matches no outstanding
 //! request) has **no** JSON-RPC code in v2: the peer logs and discards it.
+//!
+//! There is **one source of truth**: the [`Code`] enum. Each variant carries
+//! its own JSON-RPC number ([`Code::jsonrpc`]) and its Holler string
+//! ([`Code::data_code`]) in a single `match` each, so there is no parallel
+//! table or identity array to drift out of order. (The old `TABLE` const and
+//! the hand-maintained `IDX` identity array are gone, #145.)
 
 use serde::{Deserialize, Serialize};
 
-/// One row of the error table.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ErrorDef {
-    /// The JSON-RPC numeric `error.code`.
-    pub jsonrpc_code: i64,
-    /// The Holler string carried in `error.data.code`.
-    pub data_code: &'static str,
-    /// One-line description of when the error fires.
-    pub when: &'static str,
-}
-
-/// The complete, closed v2 error table (13 rows).
-#[rustfmt::skip]
-pub const TABLE: &[ErrorDef] = &[
-    // jsonrpc_code  data.code             when
-    ErrorDef { jsonrpc_code: -32700, data_code: "parse_error",        when: "The frame is not JSON." },
-    ErrorDef { jsonrpc_code: -32600, data_code: "invalid_request",    when: "A batch (array), a binary frame, or a missing/≠\"2.0\" jsonrpc field." },
-    ErrorDef { jsonrpc_code: -32601, data_code: "method_not_found",   when: "Unknown method." },
-    ErrorDef { jsonrpc_code: -32602, data_code: "invalid_params",     when: "Schema violation in params." },
-    ErrorDef { jsonrpc_code: -32000, data_code: "unsupported_version",when: "hello.protocol ≠ 2. Socket closes; no silent downgrade." },
-    ErrorDef { jsonrpc_code: -32001, data_code: "join_failed",        when: "circuit/join secret unknown/already-bound/invalidated/revoked/expired." },
-    ErrorDef { jsonrpc_code: -32002, data_code: "unauthenticated",    when: "Bad or revoked credential; or a method sent before authenticate." },
-    ErrorDef { jsonrpc_code: -32003, data_code: "unknown_session",    when: "prompt/cancel to a name not hosted here, or held by a different token." },
-    ErrorDef { jsonrpc_code: -32004, data_code: "not_connected",      when: "A remote query/ping for a bound token with no live socket." },
-    ErrorDef { jsonrpc_code: -32005, data_code: "session_superseded", when: "A new authenticate for the same token replaced this connection." },
-    ErrorDef { jsonrpc_code: -32006, data_code: "unknown_feature",    when: "A query/support (or query/protocol version) id outside the vocabulary." },
-    ErrorDef { jsonrpc_code: -32007, data_code: "limit_exceeded",     when: "A hub cap was hit (reserved; used by the caps story)." },
-    ErrorDef { jsonrpc_code: -32008, data_code: "connection_lost",    when: "The body's socket dropped mid-turn (hub → CLI)." },
-];
-
-/// Look up a Holler `data.code` → its JSON-RPC code.
+/// A JSON-RPC error code, the single source of truth for the v2 error table.
 ///
-/// `None` for a `data.code` not in the table (which cannot be produced by the
-/// v2 codec, since `Error::new` only ever returns a `Code` from this table).
-pub fn jsonrpc_code_for(data_code: &str) -> Option<i64> {
-    TABLE
-        .iter()
-        .find(|d| d.data_code == data_code)
-        .map(|d| d.jsonrpc_code)
-}
-
-/// A JSON-RPC error code, paired with its Holler `data.code`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+/// The enum is **not** serialised as a string: on the wire, an error object
+/// carries the numeric JSON-RPC `code` (see [`Error`]); the Holler identity
+/// travels as a string in `data.code`. This type is the in-process mapping
+/// between the two, and a peer's numeric code is mapped back to a variant by
+/// [`Code::from_jsonrpc`] (unknown numbers stay raw on the wire).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Code {
     ParseError,
     InvalidRequest,
@@ -72,47 +42,132 @@ pub enum Code {
 }
 
 impl Code {
-    /// The JSON-RPC numeric code for this Holler code.
-    pub fn jsonrpc(self) -> i64 {
-        TABLE[IDX[self as usize]].jsonrpc_code
+    /// All the codes in the closed v2 table, in table order.
+    ///
+    /// The codec and tests iterate this to assert uniqueness and range over
+    /// the one source of truth (there is no separate table to check).
+    pub const ALL: [Code; 13] = [
+        Code::ParseError,
+        Code::InvalidRequest,
+        Code::MethodNotFound,
+        Code::InvalidParams,
+        Code::UnsupportedVersion,
+        Code::JoinFailed,
+        Code::Unauthenticated,
+        Code::UnknownSession,
+        Code::NotConnected,
+        Code::SessionSuperseded,
+        Code::UnknownFeature,
+        Code::LimitExceeded,
+        Code::ConnectionLost,
+    ];
+
+    /// The JSON-RPC numeric code for this Holler code (docs §8).
+    #[inline]
+    pub const fn jsonrpc(self) -> i64 {
+        match self {
+            Code::ParseError => -32700,
+            Code::InvalidRequest => -32600,
+            Code::MethodNotFound => -32601,
+            Code::InvalidParams => -32602,
+            Code::UnsupportedVersion => -32000,
+            Code::JoinFailed => -32001,
+            Code::Unauthenticated => -32002,
+            Code::UnknownSession => -32003,
+            Code::NotConnected => -32004,
+            Code::SessionSuperseded => -32005,
+            Code::UnknownFeature => -32006,
+            Code::LimitExceeded => -32007,
+            Code::ConnectionLost => -32008,
+        }
     }
 
     /// The Holler string (`error.data.code`) for this code.
-    pub fn data_code(self) -> &'static str {
-        TABLE[IDX[self as usize]].data_code
+    #[inline]
+    pub const fn data_code(self) -> &'static str {
+        match self {
+            Code::ParseError => "parse_error",
+            Code::InvalidRequest => "invalid_request",
+            Code::MethodNotFound => "method_not_found",
+            Code::InvalidParams => "invalid_params",
+            Code::UnsupportedVersion => "unsupported_version",
+            Code::JoinFailed => "join_failed",
+            Code::Unauthenticated => "unauthenticated",
+            Code::UnknownSession => "unknown_session",
+            Code::NotConnected => "not_connected",
+            Code::SessionSuperseded => "session_superseded",
+            Code::UnknownFeature => "unknown_feature",
+            Code::LimitExceeded => "limit_exceeded",
+            Code::ConnectionLost => "connection_lost",
+        }
+    }
+
+    /// Map a (possibly foreign) JSON-RPC numeric code back to the matching
+    /// variant, or `None` if it is not in the v2 table. A peer that sends a
+    /// number we do not recognise still decodes: the [`Error`] keeps the raw
+    /// number in its `code` field; this is only the typed recovery.
+    #[inline]
+    pub fn from_jsonrpc(code: i64) -> Option<Code> {
+        Code::ALL.iter().find(|c| c.jsonrpc() == code).copied()
     }
 }
 
-// Position of each Code in TABLE — keeps the mapping total and panic-free.
-const IDX: [usize; 13] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+/// The `error.data` object on the wire: the Holler identity plus an optional
+/// one-line reason. `code` is a **string** here (it is the `data.code`
+/// string, not the JSON-RPC number — that number lives on [`Error::code`]).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ErrorData {
+    /// The Holler string, e.g. `"unauthenticated"`.
+    pub code: String,
+    /// Optional one-line reason (e.g. `unknown_session` "name held by
+    /// another body", `join_failed`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
 
 /// The JSON-RPC `error` object (docs §8 / JSON-RPC 2.0 §6).
+///
+/// `code` is the **numeric** JSON-RPC code (JSON-RPC 2.0 §5.1); the Holler
+/// identity rides in `data.code` as a string.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Error {
-    /// The Holler error code.
-    pub code: Code,
+    /// The JSON-RPC numeric code (e.g. `-32002`). A foreign/unknown number
+    /// is kept as-is; see [`Code::from_jsonrpc`].
+    pub code: i64,
     /// A short, human-readable description.
     pub message: String,
-    /// Optional structured data. v2 carries `{"code": <data_code>, "reason"?}`.
+    /// Optional structured data: `{"code": <data_code>, "reason"?}`.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub data: Option<serde_json::Value>,
+    pub data: Option<ErrorData>,
 }
 
 impl Error {
-    /// Build an error with the conventional `data` object:
-    /// `{"code": <data_code>}`, plus `{"reason": <reason>}` when `reason` is
-    /// `Some`. `reason` is used, e.g., for `unknown_session` ("name held by
-    /// another body") and `join_failed`.
+    /// Build a conformant error from a known [`Code`]: the numeric JSON-RPC
+    /// code plus the conventional `data` object (`{"code": <data_code>}`, and
+    /// `{"reason": <reason>}` when `reason` is `Some`).
     pub fn new(code: Code, message: impl Into<String>, reason: Option<&'static str>) -> Self {
-        let mut obj = serde_json::Map::new();
-        obj.insert("code".to_owned(), serde_json::json!(code.data_code()));
-        if let Some(r) = reason {
-            obj.insert("reason".to_owned(), serde_json::json!(r));
-        }
         Self {
-            code,
+            code: code.jsonrpc(),
             message: message.into(),
-            data: Some(serde_json::Value::Object(obj)),
+            data: Some(ErrorData {
+                code: code.data_code().to_owned(),
+                reason: reason.map(str::to_owned),
+            }),
+        }
+    }
+}
+
+impl From<Code> for Error {
+    /// The bare error for a code: numeric `code`, the Holler string as the
+    /// message, and `data.code` set (no reason).
+    fn from(code: Code) -> Self {
+        Self {
+            code: code.jsonrpc(),
+            message: code.data_code().to_owned(),
+            data: Some(ErrorData {
+                code: code.data_code().to_owned(),
+                reason: None,
+            }),
         }
     }
 }
