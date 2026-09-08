@@ -3,7 +3,7 @@ name = "holler-proto"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Wire protocol types for holler (empty in the workspace skeleton)"
+description = "Holler protocol v2: JSON-RPC 2.0 envelope codec, method catalog, error table, name/id newtypes, and the A2A object model (no I/O deps)"
 
 [lib]
 name = "holler_proto"
@@ -12,3 +12,6 @@ path = "src/lib.rs"
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
+
+[dev-dependencies]
+rstest = { workspace = true }

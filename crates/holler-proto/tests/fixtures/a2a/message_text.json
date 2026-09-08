@@ -1,0 +1,20 @@
+{
+  "extensions": [
+    "https://example.com/extensions/geolocation/v1"
+  ],
+  "metadata": {
+    "https://example.com/extensions/geolocation/v1": {
+      "accuracy": 10.0,
+      "latitude": 37.7749,
+      "longitude": -122.4194,
+      "timestamp": "2025-10-21T14:30:00Z"
+    }
+  },
+  "messageId": "m-text-001",
+  "parts": [
+    {
+      "text": "Find restaurants near me"
+    }
+  ],
+  "role": "ROLE_USER"
+}
