@@ -1,0 +1,10 @@
+{
+  "messageId": "m-url-001",
+  "parts": [
+    {
+      "mediaType": "application/json",
+      "url": "https://research-agent.example.com/a2a/v1"
+    }
+  ],
+  "role": "ROLE_USER"
+}
