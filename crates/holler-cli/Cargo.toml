@@ -38,6 +38,10 @@ name = "cli_invocation_test"
 path = "tests/cli_invocation_test.rs"
 
 [[test]]
+name = "logging_test"
+path = "tests/logging_test.rs"
+
+[[test]]
 name = "stub_acp_test"
 path = "tests/stub_acp_test.rs"
 
