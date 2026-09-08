@@ -67,15 +67,17 @@ MARKER_START = '<!-- test-run-fields:start -->'
 MARKER_END = '<!-- test-run-fields:end -->'
 
 # Lazily constructs the GitHub client on first use (and only for the
-# subcommands that talk to GitHub: discover, start, run, record, and the
-# non-preview exec path). A local `exec --list` preview does not need it --
-# see the short-circuit in main().
+# subcommands that talk to GitHub: discover, start, run, record, and exec --
+# every exec path, including a bare `exec --list` whole-catalog preview,
+# resolves against the catalog and so builds the client).
 #
-# `require 'octokit'` lives HERE, not at the top of the file, on purpose:
-# the top-of-file require fires at load time, before `main` has parsed the
-# subcommand, so a token-free `exec --list` smoke would die with a LoadError
-# before it ever reached the short-circuit. Deferring it into the lazy client
-# means only the GitHub-touching paths ever pay for the gem.
+# `require 'octokit'` lives HERE, not at the top of the file, on purpose: a
+# top-of-file require fires at load time, before `main` has parsed the
+# subcommand, so a token-free `discover`-less invocation would die with a
+# LoadError before it even knew which subcommand was requested. Deferring it
+# into the lazy client means only the GitHub-touching paths ever pay for the
+# gem. (The CI smoke DOES use the client, so CI installs octokit into
+# GEM_HOME -- see .github/workflows/ci.yml.)
 def client
   require 'octokit'
   token = ENV['GITHUB_TOKEN']
@@ -537,26 +539,24 @@ def main
       o.on('-h', '--help') { puts o.banner; exit 0 }
     end.parse!(ARGV)
 
+    # A BARE `--list` (no file) is a real selection: it previews the WHOLE
+    # catalog (one line per case). #170's CI smoke relies on exactly this --
+    # "`exec --list` ... prints >=1 line (0 real cases yet ... until cases
+    # exist discover must exit 0 with []; tolerate that)". So a lone --list is
+    # a legitimate (empty-selection) request that must resolve through the
+    # catalog and exit 0, NOT a usage error. It counts as a selection below.
+    # NOTE: a bare `--list` (no FILE) is registered with opts[:list] = nil
+    # (the preview flag), so "given" must be tested as KEY PRESENCE
+    # (opts.key?), not `!opts[:list].nil?` (which is false when list is nil --
+    # the bare-preview case). opts[:list_invert] and opts[:last_failed] are
+    # always strings, so they are checked with the normal nil test.
     has_selection = !test_id.nil? || !opts[:group].nil? || !opts[:cat].nil? || !opts[:applies].nil? ||
                     !opts[:tags].nil? || !opts[:tag_inverts].nil? ||
-                    !opts[:list].nil? || !opts[:list_invert].nil? || !opts[:last_failed].nil?
-    # A bare `exec` (no selection at all) just prints usage; nothing runs and
-    # nothing is fetched. This is also what the CI smoke runs, so it must not
-    # touch GitHub (no token needed, no discover).
+                    opts.key?(:list) || !opts[:list_invert].nil? || !opts[:last_failed].nil?
+    # Only a TRULY bare `exec` (no positional id, no flags at all) prints
+    # usage. Everything else -- including a lone `exec --list` -- proceeds to
+    # resolve against the catalog.
     abort(exec_banner) unless has_selection
-
-    # A BARE `--list` (no file) is a local preview of a selection -- but it
-    # selects the whole catalog, which is uninformative. It must pair with a
-    # selection axis (--group/--cat/--applies/--tag/--tag-invert/--list FILE/
-    # --last-failed) to be meaningful. So when the ONLY thing given is a bare
-    # --list (no other axis), it needs no GitHub API and we short-circuit to
-    # usage here -- this keeps `exec --list` runnable token-free and catalog-
-    # free, which is exactly the empty-catalog case #170's CI smoke exercises.
-    other_axes = !test_id.nil? || !opts[:group].nil? || !opts[:cat].nil? || !opts[:applies].nil? ||
-                 !opts[:tags].nil? || !opts[:tag_inverts].nil? || !opts[:list_invert].nil? || !opts[:last_failed].nil?
-    if opts[:preview] && !other_axes
-      abort(exec_banner + '\n(a bare --list previews the whole catalog -- add a selection axis such as --group/--cat/--applies/--tag/--list FILE)')
-    end
 
     # Which flags were given (names the "no match" error). --last-failed is
     # not in this list: it narrows via list_ids, and an empty set is a warning
@@ -570,17 +570,17 @@ def main
     active = ['list: ' + opts[:list]] unless opts[:list].nil? || opts[:list] == ''
     active += ['last-failed: #' + opts[:last_failed]] unless opts[:last_failed].nil?
 
-    # Only the non-preview paths talk to GitHub (discover, and --last-failed's
-    # run issue). A preview needs the catalog too, so it also uses the client;
-    # only a bare --list (short-circuited above) ever gets past here without
-    # building one -- so it never pays for octokit or a token.
+    # Every surviving path (a lone bare --list included) resolves against the
+    # catalog, so all of them build the GitHub client: `exec --list` previews
+    # the whole catalog, and `--last-failed` reads issue N. This is why the CI
+    # smoke installs octokit (the runners do not ship it) and authenticates
+    # from the runner's pre-set GITHUB_TOKEN.
     gh = client
 
     # --last-failed N resolves to a list of Test IDs (the ❌ rows of issue N)
     # that feeds the selection's list_ids axis. It combines with --list FILE.
     # It is a REAL GitHub read (it fetches issue N's body), so it runs only
-    # now that `gh` exists and only after the bare-`--list` short-circuit --
-    # the token-free smoke path must never reach it.
+    # now that `gh` (the client) exists.
     last_failed_ids = nil
     unless opts[:last_failed].nil?
       run_issue = gh.issue(REPO, opts[:last_failed].to_i)
@@ -611,6 +611,13 @@ def main
       selected = sel.call(selected)
       if opts[:preview]
         selected.each { |c| puts "#{c[:id]}  #{c[:automation] || '(none)'}" }
+        # An empty preview is a valid, exit-0 outcome -- e.g. a bare `exec
+        # --list` against an empty catalog (#170: "discover must exit 0 with
+        # []"). So report it and succeed rather than erroring.
+        if selected.empty?
+          puts "0 case(s) matched (the catalog has no matching cases yet)"
+          exit(0)
+        end
         puts "#{selected.size} case(s) matched"
         exit(0)
       end
