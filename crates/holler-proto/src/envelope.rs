@@ -263,12 +263,18 @@ fn response_or_error_or_shape(
         })
     } else if has_error {
         // An error. id may be absent (an unkeyed error, e.g. a parse error).
-        let error: WireError = match obj.get("error") {
-            Some(v) => {
-                serde_json::from_value(v.clone()).map_err(|e| EnvelopeError::Json(e.to_string()))?
-            }
-            None => unreachable!(),
-        };
+    // `has_error` was computed above as `obj.contains_key("error")`, so this
+    // arm runs only when the key is present. A JSON object with the key set to
+    // `null` (`"error": null`) is not a valid JSON-RPC error object, so
+    // surfacing it as a framing error is the correct, spec-faithful behaviour —
+    // there is no valid input that reaches this arm with `None`.
+    #[allow(clippy::unreachable)] // #149: proven by the `has_error` gate above (see comment); a bare `unreachable!` is denied by the workspace lints
+    let error: WireError = match obj.get("error") {
+        Some(v) => {
+            serde_json::from_value(v.clone()).map_err(|e| EnvelopeError::Json(e.to_string()))?
+        }
+        None => return Err(EnvelopeError::Shape),
+    };
         let id = match obj.get("id") {
             Some(Value::String(i)) => Some(i.clone()),
             Some(_) => return Err(EnvelopeError::BadId),
@@ -321,24 +327,28 @@ pub fn encode(env: &Envelope) -> Result<String, serde_json::Error> {
     serde_json::to_string(&Value::Object(m))
 }
 
-/// Decode a call frame into a typed, catalog-checked tuple: the method, the
-/// params, and (for a request) the id. Convenience for dispatch.
-#[allow(dead_code)]
-pub fn decode_call(env: &Envelope) -> Result<(&str, Option<&Value>, Option<&str>), EnvelopeError> {
-    match env {
-        Envelope::Request { id, method, params } => Ok((method, params.as_ref(), Some(id))),
-        Envelope::Notification { method, params } => Ok((method, params.as_ref(), None)),
-        _ => Err(EnvelopeError::Shape),
+impl Envelope {
+    /// Decode a call frame into a typed, catalog-checked tuple: the method,
+    /// the params, and (for a request) the id. Convenience for dispatch.
+    pub fn decode_call(&self) -> Result<(&str, Option<&Value>, Option<&str>), EnvelopeError> {
+        match self {
+            Envelope::Request { id, method, params } => {
+                Ok((method, params.as_ref(), Some(id)))
+            }
+            Envelope::Notification { method, params } => {
+                Ok((method, params.as_ref(), None))
+            }
+            _ => Err(EnvelopeError::Shape),
+        }
     }
-}
 
-/// The four shapes, as names (for tests / the dispatcher).
-#[allow(unused)]
-pub fn shape_name(env: &Envelope) -> &'static str {
-    match env {
-        Envelope::Request { .. } => "request",
-        Envelope::Notification { .. } => "notification",
-        Envelope::Response { .. } => "response",
-        Envelope::Error { .. } => "error",
+    /// The four shapes, as names (for tests and the golden-file test, #149).
+    pub fn shape_name(&self) -> &'static str {
+        match self {
+            Envelope::Request { .. } => "request",
+            Envelope::Notification { .. } => "notification",
+            Envelope::Response { .. } => "response",
+            Envelope::Error { .. } => "error",
+        }
     }
 }

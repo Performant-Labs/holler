@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)] // #149
 //! Test-of-tests canary (story #129).
 //!
 //! Proves the harness can *see* a failure before any real test exists. If this

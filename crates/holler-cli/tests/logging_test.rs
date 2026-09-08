@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable, dead_code)] // #149
 //! Integration tests for the debug-logging CLI wiring (story #144, RED first).
 //!
 //! These drive the **real `holler` binary** as a subprocess and pin the

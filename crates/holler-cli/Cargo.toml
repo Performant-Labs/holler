@@ -86,3 +86,9 @@ holler-body = { path = "../holler-body" }
 assert_cmd = { workspace = true }
 predicates = { workspace = true }
 rstest = { workspace = true }
+
+# Workspace lints (issue #149): inherit [workspace.lints] from the root
+# Cargo.toml — deny dead_code, clippy unwrap/expect/panic/unreachable, and the
+# complexity gates (thresholds in clippy.toml).
+[lints]
+workspace = true
