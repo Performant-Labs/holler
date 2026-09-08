@@ -6,8 +6,10 @@
 //! 1. lines inside fenced code blocks (`bash`/`sh`/`shell`/`console`/`text`/
 //!    untagged) that start with `holler ` (an optional `$ ` prompt is
 //!    stripped),
-//! 2. inline code spans `` `holler …` `` anywhere in the prose — this is what
-//!    catches a CLI-mapping table (the `v2.md` §10 drift, #148).
+//! 2. inline code spans `` `holler …` `` anywhere in the prose (a few
+//!    `v2.md` §10.1 wire-mapping rows, e.g. `hub query <target> caps`).
+//!    The bulk of the surface is the `v2.md` §10 code block (the ADR 0003
+//!    table reproduced verbatim, #148), which arrives via source (1).
 //!
 //! Placeholders are normalised (`<x>` → `x`, `[optional]` dropped, `a|b` →
 //! `a`, `…` dropped, a trailing annotation after two spaces / ` (` / ` — `
