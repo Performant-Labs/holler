@@ -126,6 +126,10 @@ pub struct Body {
     pub command: BodyCommand,
 }
 
+// NOTE: every leaf's `--json` field was removed here — `--json` is now a
+// single global flag on `Cli` (ADR 0003), so `status`/`caps`/`support`/`query`
+// under `body` share the root's `--json` rather than each declaring their own.
+
 // --- hub ---------------------------------------------------------------
 
 #[derive(Parser, Debug)]

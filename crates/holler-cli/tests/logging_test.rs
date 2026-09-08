@@ -297,7 +297,10 @@ fn json_format_renders_events_as_one_object_per_line() {
         // `emit` writes the rendered line to stderr (the real write path).
         emit(ev);
         let line = ev.render(&config);
-        assert!(!line.is_empty(), "a {ev:?}-shaped event must render at noisy");
+        assert!(
+            !line.is_empty(),
+            "a {ev:?}-shaped event must render at noisy"
+        );
         let v: serde_json::Value = serde_json::from_str(&line)
             .unwrap_or_else(|e| panic!("json event is not one parseable object: {line:?} ({e})"));
         assert!(
