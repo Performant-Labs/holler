@@ -509,12 +509,15 @@ version = "0.1.0"
 dependencies = [
  "assert_cmd",
  "clap",
+ "futures-util",
+ "holler-hub",
  "holler-proto",
  "libc",
  "predicates",
  "rstest",
  "serde_json",
  "tokio",
+ "tokio-tungstenite",
 ]
 
 [[package]]
@@ -531,7 +534,6 @@ dependencies = [
  "httparse",
  "libc",
  "rustls",
- "serde",
  "serde_json",
  "sha2",
  "tempfile",

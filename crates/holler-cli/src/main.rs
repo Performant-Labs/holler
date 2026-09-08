@@ -14,9 +14,7 @@
 //! silent fallback. All logging goes to stderr; stdout is command output.
 
 use clap::Parser;
-use holler_cli::{
-    Attach, AttachCommand, BodyCommand, Cli, Command, HubCommand, TokenCommand,
-};
+use holler_cli::{Attach, AttachCommand, BodyCommand, Cli, Command, HubCommand, TokenCommand};
 use holler_proto::log::{emit_banner, init, resolve};
 
 /// ADR 0003: every unimplemented leaf exits 1 with this shape on stderr.
@@ -31,7 +29,9 @@ fn not_implemented(story: &str) -> ! {
 /// human-readable summary goes to stdout. If no live hub is reachable, the
 /// spec's exact message goes to stderr and the exit code is 1.
 fn hub_status(json: bool) -> ! {
-    let state = holler_hub::state::HubState::from_root(holler_hub::state::resolve_state_dir());
+    // The state dir may be unresolvable (no `HOLLER_STATE_DIR`/`$HOME`); then
+    // there is no live hub and the error message below just has no path to name.
+    let state_root = holler_hub::state::resolve_state_dir().unwrap_or_default();
     match holler_hub::control::status() {
         Ok(doc) => {
             if json {
@@ -60,7 +60,7 @@ fn hub_status(json: bool) -> ! {
         Err(holler_hub::control::ControlError::NoLiveHub) => {
             eprintln!(
                 "error: no live holler hub reachable at {}",
-                state.root.display()
+                state_root.display()
             );
             std::process::exit(1);
         }
@@ -117,10 +117,20 @@ fn main() {
     if let Command::Hub(hub) = &cli.command {
         match &hub.command {
             HubCommand::Serve(serve) => {
-                holler_hub::serve::run(&serve.listen, serve.advertise.as_deref());
+                // `run` is a lib and returns the exit code (ADR 0003: 0 clean
+                // signal shutdown, 1 runtime failure, 3 fail-closed refusal).
+                // The bin — the one place a helper's code may be acted on by
+                // exiting — applies it. A clean 0 would otherwise fall through
+                // to the "not implemented" arm below, so we exit in all cases.
+                std::process::exit(holler_hub::serve::run(
+                    &serve.listen,
+                    serve.advertise.as_deref(),
+                ));
             }
-            HubCommand::Status(status) => {
-                hub_status(status.json);
+            HubCommand::Status(_) => {
+                // `--json` is the root-level global flag (issue #147/#155), not
+                // a per-leaf field: `Status` is empty, so read `cli.json`.
+                hub_status(cli.json);
             }
             // Everything else is still the skeleton's "not implemented".
             HubCommand::Token(token) => {
@@ -140,8 +150,9 @@ fn main() {
     }
 
     let story = match &cli.command {
-        // hub (the implemented Serve/Status were handled above and returned)
-        Command::Hub(_) => unreachable!("hub Serve/Status were handled above"),
+        // hub (the implemented Serve/Status were handled above and returned;
+        // this arm is defensive — every `Command::Hub` path above exits)
+        Command::Hub(_) => not_implemented("Hub"),
         // top-level (hub-only daily verbs)
         Command::Roster(_) => "Roster",
         Command::Say(_) => "Say",

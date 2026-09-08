@@ -1,4 +1,4 @@
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable, dead_code)] // #149
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable, dead_code)] // #127
 //! ADR 0003 invocation tests (story #127, RED first).
 //!
 //! These pin the normative CLI surface: every leaf in ADR 0003 must parse

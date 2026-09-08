@@ -404,6 +404,7 @@ impl Envelope {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable)] // #143
 mod ctor_tests {
     use super::*;
     use crate::error::{Code, Error as WireError};

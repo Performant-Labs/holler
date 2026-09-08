@@ -7,7 +7,6 @@
 //! test gets isolated state).
 
 use std::path::{Path, PathBuf};
-use std::process;
 
 /// The resolved state dir and the role subdirs it roots.
 #[derive(Debug, Clone)]
@@ -29,18 +28,20 @@ impl HubState {
 
 /// Resolve the state dir from the environment.
 ///
-/// `HOLLER_STATE_DIR` wins; the default is `~/.holler`. A missing `$HOME`
-/// with no override is a hard error (exit 3) — we refuse to guess a state
-/// location.
-pub fn resolve_state_dir() -> PathBuf {
+/// `HOLLER_STATE_DIR` wins; the default is `~/.holler`. A missing `$HOME` with
+/// no override is a fail-closed refusal — we refuse to guess a state location.
+/// Returns `None` (after printing the refusal) in that case so the **caller**
+/// (the CLI's `hub serve` leaf, a bin) owns the exit; a lib helper never exits
+/// (an exit here would mask the code from the caller).
+pub fn resolve_state_dir() -> Option<PathBuf> {
     if let Some(dir) = std::env::var_os("HOLLER_STATE_DIR") {
-        return PathBuf::from(dir);
+        return Some(PathBuf::from(dir));
     }
     let Some(home) = std::env::var_os("HOME") else {
         eprintln!("error: HOLLER_STATE_DIR is not set and $HOME is unavailable");
-        process::exit(3);
+        return None;
     };
-    PathBuf::from(home).join(".holler")
+    Some(PathBuf::from(home).join(".holler"))
 }
 
 /// Ensure the state dir and the hub subdir exist (creating them).
@@ -66,7 +67,7 @@ pub fn advertise_path(state: &HubState) -> PathBuf {
 
 /// True iff `p` is a descendant of (or equal to) `root`. Used to refuse to
 /// create sockets in a state dir that does not actually own them.
-#[allow(dead_code)]
+#[allow(dead_code)] // #143 forward-declared for a later story that guards socket paths
 pub fn is_within(root: &Path, p: &Path) -> bool {
     p.starts_with(root)
 }

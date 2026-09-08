@@ -82,6 +82,10 @@ path = "tests/wire_selftest.rs"
 clap = { workspace = true }
 serde_json = { workspace = true }   # stub-acp bin
 holler-proto = { path = "../holler-proto" }
+# Story #143: the `hub serve` / `hub status` leaves drive the hub crate (the
+# listener + control socket). This is the first story to consume holler-hub
+# from the CLI, so per the #155 §7 rule it is declared here.
+holler-hub = { path = "../holler-hub" }
 
 [dev-dependencies]
 assert_cmd = { workspace = true }
@@ -89,6 +93,8 @@ predicates = { workspace = true }
 rstest = { workspace = true }
 tokio = { workspace = true }        # wire_selftest runtime canary
 libc = { workspace = true }         # tests/support kill_tree
+tokio-tungstenite = { workspace = true }  # hub_serve_test WS client
+futures-util = { workspace = true }  # hub_serve_test Sink/Stream traits
 
 # Workspace lints (issue #149): inherit [workspace.lints] from the root
 # Cargo.toml — deny dead_code, clippy unwrap/expect/panic/unreachable, and the

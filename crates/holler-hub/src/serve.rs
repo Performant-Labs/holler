@@ -23,7 +23,6 @@
 
 use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
-use std::process;
 use std::task::{Context, Poll};
 
 use futures_util::{Future, Sink, SinkExt, StreamExt};
@@ -49,53 +48,78 @@ use holler_proto::Code;
 /// The internal `control/…` method names answered on the control socket
 /// (ADR 0006 / the control socket is internal, non-wire — these are NOT in the
 /// v2 wire catalog, so the control dispatch does not go through `decode`).
-#[allow(dead_code)]
+#[allow(dead_code)] // #143 forward-declared for a later story that reads the catalog
 pub const CONTROL_METHODS: &[&str] = &["control/status"];
 
-/// The one `hub serve` runs forever: validate, lock, bind, serve, then shut
-/// down gracefully. It only returns on a fatal error (which has already
-/// `process::exit`-ed); on a clean signal shutdown it exits 0.
-pub fn run(listen: &[String], advertise: Option<&str>) -> ! {
-    let state = HubState::from_root(resolve_state_dir());
+/// Run the hub: validate, lock, bind, serve, then shut down gracefully.
+///
+/// Returns the **exit code** the caller (the CLI's `hub serve` leaf, a bin —
+/// the only place a helper's outcome may turn into an exit) should exit with.
+/// A clean signal shutdown returns 0; a runtime failure 1; a fail-closed policy
+/// refusal (non-loopback bind, or another hub holds the lock) 3. The hub is a
+/// lib, so this *returns* the code rather than exiting (a helper must
+/// panic/return, never exit — an exit here would mask the code from the caller).
+// Building the tokio runtime is infallible in practice (it only fails if the
+// OS refuses to allocate the thread pool), so the `.expect` is unreachable.
+#[allow(clippy::expect_used)] // #143
+pub fn run(listen: &[String], advertise: Option<&str>) -> i32 {
+    // A missing state dir (no `HOLLER_STATE_DIR` and no `$HOME`) is a
+    // fail-closed refusal (the bin will exit 3 on this 3).
+    let state = match resolve_state_dir() {
+        Some(dir) => HubState::from_root(dir),
+        None => return 3,
+    };
     if let Err(e) = ensure_dirs(&state) {
         eprintln!(
             "error: cannot create state dir {}: {e}",
             state.root.display()
         );
-        process::exit(1);
+        return 1;
     }
 
     // 1. Refuse any non-loopback listen address before anything binds.
-    let addrs: Vec<SocketAddr> = listen.iter().map(|s| validate_loopback(s)).collect();
+    let addrs: Vec<SocketAddr> = match listen.iter().map(|s| validate_loopback(s)).collect() {
+        Some(a) => a,
+        None => return 3,
+    };
 
     // 2. Acquire the per-state-dir instance lock (a second hub exits 3).
-    let lock = acquire_lock(&state);
+    let lock = match acquire_lock(&state) {
+        Some(g) => g,
+        None => return 3,
+    };
 
     // 3-5. Bind the listeners and serve — this is async (tokio's TCP bind is
-    // async), so it runs inside the runtime. The runtime is dropped (after a
-    // clean signal shutdown) via `process::exit` in `serve_forever`.
+    // async), so it runs inside the runtime. `serve_forever` returns the exit
+    // code (0 on a clean signal shutdown, 1 on a fatal bind error); on a 0 we
+    // tear down the artifacts and propagate 0, otherwise we propagate the code.
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
         .expect("build the tokio runtime");
-    rt.block_on(serve_forever(addrs, advertise, state.clone(), lock));
+    let code = rt.block_on(serve_forever(addrs, advertise, state.clone(), lock));
 
-    // Graceful teardown: remove both artifacts, then exit 0.
-    let _ = std::fs::remove_file(control_sock_path(&state));
-    let _ = std::fs::remove_file(serve_lock_path(&state));
-    process::exit(0);
+    if code == 0 {
+        // Graceful teardown: remove both artifacts. (The lock guard is dropped
+        // above with `state`; a non-zero code skips this, but the flock is
+        // released on process death regardless.)
+        let _ = std::fs::remove_file(control_sock_path(&state));
+        let _ = std::fs::remove_file(serve_lock_path(&state));
+    }
+    code
 }
 
-/// Validate that a `--listen HOST:PORT` address is loopback; refuse (exit 3)
-/// otherwise with the spec's exact message. Returns the parsed `SocketAddr`
-/// (with the port, possibly 0). The name `localhost` is **never** resolved
-/// (ADR 0006) — it is not a loopback literal and is refused.
-fn validate_loopback(addr: &str) -> SocketAddr {
+/// Validate that a `--listen HOST:PORT` address is loopback. Returns `None`
+/// (after printing the refusal) if it is not a valid or not a loopback
+/// address; `Some(SocketAddr)` (with the port, possibly 0) otherwise. The name
+/// `localhost` is **never** resolved (ADR 0006) — it is not a loopback literal
+/// and is refused.
+fn validate_loopback(addr: &str) -> Option<SocketAddr> {
     let parsed = match addr.parse::<SocketAddr>() {
         Ok(a) => a,
         Err(_) => {
             eprintln!("error: {addr} is not a valid host:port address");
-            process::exit(3);
+            return None;
         }
     };
     let loopback = match parsed.ip() {
@@ -106,26 +130,30 @@ fn validate_loopback(addr: &str) -> SocketAddr {
         eprintln!(
             "error: refusing to bind {addr} as plain ws: put a TLS-terminating proxy in front (docs/deploy.md) \u{2014} non-loopback plain ws is not allowed (ADR 0006)"
         );
-        process::exit(3);
+        return None;
     }
-    parsed
+    Some(parsed)
 }
 
-/// Acquire the instance lock. On success return the guard (held for the
-/// process lifetime). On a held lock, print the refusal and exit 3. The
-/// `flock` releases on process death, so a crashed hub's lock is reclaimed.
-fn acquire_lock(state: &HubState) -> LockGuard {
+/// Acquire the instance lock. On success return `Some` guard (held for the
+/// process lifetime). On a held or unopenable lock, print the refusal and
+/// return `None` (the caller exits 3). The `flock` releases on process death,
+/// so a crashed hub's lock is reclaimed.
+fn acquire_lock(state: &HubState) -> Option<LockGuard> {
     use fs4::FileExt;
     let path = serve_lock_path(state);
-    let file = std::fs::OpenOptions::new()
+    let file = match std::fs::OpenOptions::new()
         .create(true)
         .truncate(true) // the lock file holds only the *current* holder's PID.
         .write(true)
         .open(&path)
-        .unwrap_or_else(|e| {
+    {
+        Ok(f) => f,
+        Err(e) => {
             eprintln!("error: cannot open instance lock {}: {e}", path.display());
-            process::exit(3);
-        });
+            return None;
+        }
+    };
     // Fully-qualified so we call fs4's flock (not std's inherent `try_lock`,
     // which shadows the trait method and uses a distinct `TryLockError` type).
     match FileExt::try_lock(&file) {
@@ -137,16 +165,16 @@ fn acquire_lock(state: &HubState) -> LockGuard {
                 "error: another holler hub is running (pid {pid}) against {}",
                 state.root.display()
             );
-            process::exit(3);
+            return None;
         }
         Err(e) => {
             eprintln!("error: cannot lock instance file {}: {e}", path.display());
-            process::exit(3);
+            return None;
         }
     }
     // Write our pid so a later refusal can name it.
     let _ = write_pid(&file);
-    LockGuard { file, path }
+    Some(LockGuard { file, path })
 }
 
 /// A held advisory lock. Dropped only if the process dies without a clean
@@ -171,15 +199,19 @@ fn write_pid(file: &std::fs::File) -> std::io::Result<()> {
     Ok(())
 }
 
-/// Bind the listeners and serve until a signal, then return (the caller
-/// tears down and exits 0). Runs inside the tokio runtime (tokio's TCP bind
-/// is async). Any fatal bind error exits the process directly (exit 1).
+/// Bind the listeners and serve until a signal. Runs inside the tokio runtime
+/// (tokio's TCP bind is async). Returns the exit code: 0 on a clean signal
+/// shutdown (the caller tears down), 1 on a fatal bind error. A helper returns
+/// the code rather than exiting (exiting is the bin's job).
+// Installing the SIGINT/SIGTERM handlers only fails if the OS refuses, so the
+// two `.expect`s are unreachable.
+#[allow(clippy::expect_used)] // #143
 async fn serve_forever(
     addrs: Vec<SocketAddr>,
     advertise: Option<&str>,
     state: HubState,
     _lock: LockGuard,
-) {
+) -> i32 {
     // 3. Bind the WebSocket listeners (port 0 → the OS picks a free port).
     //
     // We deliberately do NOT emit the `listening` readiness event here: the
@@ -198,12 +230,12 @@ async fn serve_forever(
                 }
                 Err(e) => {
                     eprintln!("error: cannot report the bound address: {e}");
-                    process::exit(1);
+                    return 1;
                 }
             },
             Err(e) => {
                 eprintln!("error: failed to bind {addr}: {e}");
-                process::exit(1);
+                return 1;
             }
         }
     }
@@ -235,7 +267,7 @@ async fn serve_forever(
                 "error: failed to bind control socket {}: {e}",
                 sock_path.display()
             );
-            process::exit(1);
+            return 1;
         }
     };
     #[cfg(unix)]
@@ -284,8 +316,9 @@ async fn serve_forever(
     // Make sure the channel is tripped even if both signal receivers were
     // consumed (defensive; one of the arms above already ran).
     let _ = stop_tx.take().map(|t| t.send(()));
-    // Wait for the accept loop to wind down before returning.
+    // Wait for the accept loop to wind down, then return 0 for a clean shutdown.
     let _ = accept_handle.await;
+    0
 }
 
 /// Poll the WS and control listeners, spawning a task per connection, until
@@ -705,6 +738,8 @@ fn unkeyed_error_line(code: Code, message: &str) -> String {
 
 /// A synthetic hub id for control replies whose request id is missing or
 /// unparsable (defensive; the control protocol expects a request id).
+// The literal is a well-formed `h-` id, so the parse is infallible.
+#[allow(clippy::expect_used)] // #143
 fn fallback_id() -> holler_proto::CorrelationId {
     holler_proto::CorrelationId::parse("h-000000000000000000000000")
         .expect("a well-formed synthetic hub id")
@@ -726,7 +761,9 @@ fn resolve_cid(id: Option<&str>) -> holler_proto::CorrelationId {
 /// `harnesses_known`, `harnesses_confirmed`, `protocol:2`, and `version`.
 /// No bodies are connected yet on this story, so `clients`/`sessions` are 0.
 fn status_doc() -> serde_json::Value {
-    let state = HubState::from_root(resolve_state_dir());
+    // Only ever called by the live hub's own control dispatch, where the state
+    // dir is always resolvable; `unwrap_or_default` is a defensive no-op.
+    let state = HubState::from_root(resolve_state_dir().unwrap_or_default());
     let listening = read_listening(&state);
     let advertise = std::fs::read_to_string(advertise_path(&state))
         .ok()
