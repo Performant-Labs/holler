@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable, dead_code)] // #149
 //! Shared test harness (story #138).
 //!
 //! One hand-written Rust module every integration test composes from: real
@@ -17,9 +18,13 @@
 //! This module is a *helper*, not a test: it lives at `tests/support/mod.rs`
 //! (a directory, so Cargo does not treat it as its own test target) and each
 //! integration test declares `mod support;` to pull it in.
-
-#![allow(dead_code)] // Forward-contract fns (Hub::start, join, …) are not yet
-                      // exercised until the hub/body stories land.
+//!
+//! The file-level `#![allow]` at the top of this file is the one blanket
+//! `scripts/lint.sh` permits (it carries the `// #149` issue link): the
+//! forward-contract fns (Hub::start, join, …) are not yet exercised until the
+//! hub/body stories land, and the harness's spawn/wait paths panic (not
+//! a hard process exit) on harness failure so a test failure is a test failure,
+//! not a masked 0.
 
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
@@ -94,11 +99,12 @@ pub fn holler_cmd(state: &StateDir) -> Command {
 /// compiled binary. (We cannot use `assert_cmd::cargo_bin` for the long-lived
 /// processes here — `Hub`/`Body` need piped stdio to parse the live listener
 /// port — so we build a plain `std::process::Command` off the raw path.)
-fn holler_bin() -> String {
-    std::env::var("CARGO_BIN_EXE_holler").unwrap_or_else(|_| {
-        eprintln!("CARGO_BIN_EXE_holler not set — run via `cargo test`");
-        std::process::exit(2)
-    })
+///
+/// Read with `env!` (compile time), not `env::var` (runtime): the var is set
+/// by cargo per test target, so a missing one is a build/setup error. A missing
+/// var must fail the *build*, not let a helper silently `exit(2)` (defect #147).
+fn holler_bin() -> &'static str {
+    env!("CARGO_BIN_EXE_holler")
 }
 
 /// Poll `check` every 50 ms until it returns `Some` or `timeout` elapses.
@@ -257,10 +263,9 @@ pub fn write_sessions_toml(
     state: &StateDir,
     sessions: &[(&str, &[&str])],
 ) -> PathBuf {
-    let stub = std::env::var("CARGO_BIN_EXE_stub-acp").unwrap_or_else(|_| {
-        eprintln!("CARGO_BIN_EXE_stub-acp not set — run via `cargo test`");
-        std::process::exit(2)
-    });
+    // Compile-time read (defect #147): a missing var fails the build, not a
+    // silently-exited test.
+    let stub = env!("CARGO_BIN_EXE_stub-acp");
 
     let mut toml = String::new();
     for (name, extra) in sessions {

@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable, dead_code)] // #149
 //! RED unit tests for the `holler_proto::log` module (story #144).
 //!
 //! These pin the *core* (no-OS) contract of the debug-logging primitive:

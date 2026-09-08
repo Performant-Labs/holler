@@ -10,36 +10,83 @@ version = "0.1.0"
 edition = "2021"
 license = "AGPL-3.0-or-later"
 
+# Workspace lints (issue #149). Every crate opts in with `[lints] workspace =
+# true`. The deny set makes the #145–#148 defect classes unmergeable:
+# `dead_code` (rustc) forbids a helper landing without a caller; the clippy
+# denies forbid the panic/expect/unreachable escape hatches a helper hides
+# behind (a helper must return a `Result`, and the caller — only a bin's
+# `main` — decides how to surface it). Thresholds live in `clippy.toml`.
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+unreachable = "deny"
+cognitive_complexity = "deny"
+too_many_lines = "deny"
+struct_excessive_bools = "deny"
+large_enum_variant = "warn"
+
+[workspace.lints.rust]
+dead_code = "deny"
+
 # ADR 0003 (CLI + Versioning): the dependency set is pinned exactly to what
 # the old repos shipped (holler-server / holler-client) and is known to
 # build together on the stable toolchain. `holler-cli` depends on all of
 # them so every crate is compiled and checked by CI from the skeleton on.
+#
+# Lint rule #149: every dep with a feature list carries a `# for <consumer>`
+# marker on its own line naming who needs each feature — a dep with an
+# unexplained feature is an unreviewable one (scripts/lint.sh check 5).
 [workspace.dependencies]
-serde = { version = "1", features = ["derive"] }
-# `preserve_order` backs `serde_json::Map` with `IndexMap` (insertion-ordered)
-# instead of the default `HashMap` (hash-seed-dependent iteration order). With
-# it, re-serialising a deserialised value emits object keys in a deterministic
-# order. The canonical round-trip tests additionally sort keys, so the
-# byte-for-byte comparison is order-independent and process-stable. `indexmap`
-# is already a serde_json dep, so this adds no new crate.
-serde_json = { version = "1", features = ["preserve_order"] }
-clap = { version = "4", features = ["derive"] }
-tokio = { version = "1.53.1", features = ["rt-multi-thread", "net", "sync", "macros", "time", "io-util", "rt", "signal"] }
-tokio-tungstenite = { version = "0.30.0", features = ["rustls-tls-native-roots"] }
-rustls = { version = "0.23", default-features = false, features = ["ring"] }
-futures-util = { version = "0.3.34", features = ["sink"] }
-time = { version = "0.3", features = ["formatting", "parsing", "macros"] }
+# clap derive macros for the CLI tree (Parser/Subcommand/ValueEnum).
+clap = { version = "4", features = ["derive"] } # for holler-cli
+# serde derive macros for the proto types (holler-proto) and config types (holler-body).
+serde = { version = "1", features = ["derive"] } # for holler-proto, holler-body
+# preserve_order backs serde_json::Map with IndexMap (insertion-ordered) instead of
+# the default HashMap (hash-seed-dependent order), so re-serialising a deserialised
+# value is deterministic. The codec's canonical round-trip sort (holler-proto) and the
+# `--json` printer (holler-cli) rely on this. indexmap is already a serde_json dep,
+# so this adds no new crate.
+serde_json = { version = "1", features = ["preserve_order"] } # for holler-proto, holler-cli
+# rt-multi-thread/signal: hub & body event loops (holler-hub, holler-body); net:
+# loopback WebSocket listener + control socket; sync: mpsc/oneshot channels; time:
+# timers (say --timeout budget, presence TTL); io-util: framed WebSocket I/O; rt:
+# the reactor every other feature builds on.
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "net", "sync", "macros", "time", "io-util", "rt", "signal"] } # for holler-hub, holler-body
+# rustls-tls-native-roots: the hub/body TLS WebSocket transport over 127.0.0.1
+# (ADR 0002).
+tokio-tungstenite = { version = "0.30.0", features = ["rustls-tls-native-roots"] } # for holler-hub, holler-body
+# ring (not aws-lc): the provider the pinned old-repo builds used.
+rustls = { version = "0.23", default-features = false, features = ["ring"] } # for holler-body (credential hashing)
+# sink: the WebSocket upgrade/futures plumbing.
+futures-util = { version = "0.3.34", features = ["sink"] } # for holler-hub, holler-body
+# formatting/parsing/macros: token TTLs (`--ttl 24h`) and on-disk timestamp shapes.
+time = { version = "0.3", features = ["formatting", "parsing", "macros"] } # for holler-cli, holler-hub
+# the `hostname` field of a hello/status document.
 hostname = "0.4.2"
+# entropy source for minted ULIDs and token secrets.
 getrandom = "0.2"
+# HMAC of the join secret.
 hmac = "0.12"
+# SHA-256 of the join secret for the credential.
 sha2 = "0.10"
-fs4 = { version = "1.1.0", features = ["sync"] }
+# sync: the advisory file lock on the state dir.
+fs4 = { version = "1.1.0", features = ["sync"] } # for holler-hub, holler-cli
+# the body config file and the CLI's config reader.
 toml = "0.8"
-reqwest = { version = "0.12", default-features = false, features = ["json", "stream"] }
+# json/stream: the hub's HTTP/JSON outward face (roster JSON).
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream"] } # for holler-cli
+# the ACP wire types the stub agent and body speak.
 agent-client-protocol = "2.1.0"
+# ULID correlation ids and token ids.
 ulid = "1"
+# POSIX process-group control for the test harness's kill_tree.
 libc = "0.2"
+# scratch state dirs for the test harness.
 tempfile = "3"
+# subprocess assertions for the CLI surface tests.
 assert_cmd = "2"
+# predicates for CLI output assertions.
 predicates = "3"
+# table-driven cases for the invocation/codec tests.
 rstest = "0.23"

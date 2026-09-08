@@ -13,7 +13,7 @@
 //! which the hub & body stories implement. Those selftests land with those
 //! stories.
 
-#![allow(dead_code)]
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable, dead_code)] // #149
 
 mod support;
 
