@@ -36,6 +36,13 @@ holler-proto = { path = "../holler-proto" }
 holler-hub = { path = "../holler-hub" }
 holler-body = { path = "../holler-body" }
 
+# Explicit pin (story #129): the test-of-tests canary is named here so a later
+# move of the file under a subdirectory cannot silently un-discover it from the
+# CI canary step.
+[[test]]
+name = "wire_selftest"
+path = "tests/wire_selftest.rs"
+
 [dev-dependencies]
 assert_cmd = { workspace = true }
 predicates = { workspace = true }
