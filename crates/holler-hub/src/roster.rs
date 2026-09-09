@@ -36,13 +36,14 @@
 //!
 //! This module is pure state: the connection loop (issue #182) calls
 //! [`Roster::touch`]/[`Roster::advertise`]/[`Roster::clear`] on a shared
-//! instance as frames arrive and circuits open/close, and the control socket
-//! reads [`Roster::rows`] (via `control/roster`) and runs the TTL
-//! [`Roster::sweep`] on its own interval. The sweep's clock is injectable
-//! ([`Clock`]): production uses [`Clock::System`] (the real clock), while the
-//! unit tests hand a roster a [`Clock::Manual`] they advance by exact seconds,
-//! so the 45/180/360 s thresholds are deterministic (no 15-s real heartbeat, no
-//! flaky wall-clock timing).
+//! instance as frames arrive and circuits open/close, the control socket
+//! reads [`Roster::rows`] (via `control/roster`), and a dedicated background
+//! task spawned alongside the accept loop in `serve_forever` (issue #255)
+//! runs the TTL [`Roster::sweep`] on [`Roster::sweep_ms`]'s interval. The
+//! sweep's clock is injectable ([`Clock`]): production uses [`Clock::System`]
+//! (the real clock), while the unit tests hand a roster a [`Clock::Manual`]
+//! they advance by exact seconds, so the 45/180/360 s thresholds are
+//! deterministic (no 15-s real heartbeat, no flaky wall-clock timing).
 //!
 //! The whole roster is guarded by one `std::sync::Mutex` and every entry point
 //! is a **synchronous** function: a connection handler holds the mutex only for
@@ -226,9 +227,10 @@ impl Inner {
 }
 
 /// The hub-wide roster (issue #186), shared across the WS connection tasks
-/// (which touch/advertise/clear on frame arrival) and the control socket (which
-/// reads it and runs the TTL sweep). Cheap to clone (everything shared is
-/// behind an `Arc`).
+/// (which touch/advertise/clear on frame arrival), the control socket (which
+/// reads it), and the dedicated sweep task `serve_forever` spawns (issue
+/// #255, which runs the TTL sweep on its own interval). Cheap to clone
+/// (everything shared is behind an `Arc`).
 #[derive(Clone)]
 pub struct Roster {
     inner: Arc<StdMutex<Inner>>,
