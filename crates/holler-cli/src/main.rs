@@ -55,18 +55,23 @@ fn not_implemented(story: &str) -> ! {
     std::process::exit(1);
 }
 
-/// Print a leaf's own `message` (stdout on success, stderr on a refusal —
-/// `println!`, matching `say`/`interrupt`'s own convention) and exit with
-/// `exit_code`. Shared by `say`/`interrupt` in `main` purely to keep that
-/// function's own cognitive complexity under the workspace threshold —
-/// `roster`'s own call site keeps its `print!` (no added newline; its table
-/// output already ends with one) rather than folding in here.
-fn print_and_exit(message: &str, to_stderr: bool, exit_code: i32) -> ! {
+/// Print a leaf command's result (a refusal to stderr with the `error: `
+/// prefix, a success to stdout) and exit with its own code. Shared by
+/// `Roster`/`Say`/`Answer`/`Interrupt` (issue #151 added `Answer`, #191 added
+/// `Interrupt` — inlining each one's own copy of this same four-line if/else
+/// pushed `main` past the workspace's cognitive-complexity/line-count
+/// guards) so each call site is one line. `newline_on_success`: `Roster`'s
+/// table already ends every line with its own `\n` (`print!`, no extra one);
+/// `Say`/`Answer`/`Interrupt`'s reply text does not (`println!` adds it) —
+/// the one difference between these call sites' prior inline copies.
+fn print_leaf_result_and_exit(message: &str, to_stderr: bool, exit_code: i32, newline_on_success: bool) -> ! {
     if !message.is_empty() {
         if to_stderr {
             eprintln!("error: {message}");
-        } else {
+        } else if newline_on_success {
             println!("{message}");
+        } else {
+            print!("{message}");
         }
     }
     std::process::exit(exit_code);
@@ -186,22 +191,19 @@ fn main() {
 
     if let Command::Roster(roster) = &cli.command {
         let result = holler_cli::roster_cmd::run(roster, cli.json);
-        if !result.message.is_empty() {
-            if result.to_stderr {
-                eprintln!("error: {}", result.message);
-            } else {
-                print!("{}", result.message);
-            }
-        }
-        std::process::exit(result.exit_code);
+        print_leaf_result_and_exit(&result.message, result.to_stderr, result.exit_code, false);
     }
     if let Command::Say(say) = &cli.command {
         let result = holler_cli::say_cmd::run(say, cli.json);
-        print_and_exit(&result.message, result.to_stderr, result.exit_code);
+        print_leaf_result_and_exit(&result.message, result.to_stderr, result.exit_code, true);
     }
     if let Command::Interrupt(interrupt) = &cli.command {
         let result = holler_cli::interrupt_cmd::run(interrupt, cli.json);
-        print_and_exit(&result.message, result.to_stderr, result.exit_code);
+        print_leaf_result_and_exit(&result.message, result.to_stderr, result.exit_code, true);
+    }
+    if let Command::Answer(answer) = &cli.command {
+        let result = holler_cli::answer_cmd::run(answer, cli.json);
+        print_leaf_result_and_exit(&result.message, result.to_stderr, result.exit_code, true);
     }
 
     // Every `Command` variant is handled by one of the arms above (each

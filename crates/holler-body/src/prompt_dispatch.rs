@@ -34,13 +34,21 @@
 //!   `-32004 not_connected` — the closest existing code to "this session's
 //!   driver could not be reached right now"; there is no dedicated
 //!   "cancel failed" code in the v2 table either.
+//! - **`session/answer` (issue #151)** maps `SessionManager::answer`'s three
+//!   failure shapes onto the closed v2 table: nothing pending →
+//!   `-32010 nothing_pending` (the code's whole reason for existing); the
+//!   `choice` not resolving, or an unsupported elicitation shape → `-32602
+//!   invalid_params` (malformed *content*, not a protocol violation); every
+//!   other failure (a dropped connection, a driver that could not be
+//!   reached) → `-32004 not_connected`, the same fallback `session/cancel`
+//!   uses just above.
 
 use std::sync::Arc;
 use std::time::Instant;
 
 use holler_proto::{
-    Cancel, CancelResult, Code, CorrelationId, Envelope, Message, Part, Prompt, PromptResult,
-    Role, SessionName, WireError,
+    Answer, AnswerResult, Cancel, CancelResult, Code, CorrelationId, Envelope, Message, Part,
+    Prompt, PromptResult, Role, SessionName, WireError,
 };
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message as WsMessage;
@@ -149,6 +157,55 @@ pub async fn handle_cancel(
         Err(SessionManagerError::Gone) => {
             send_error(&outbound, &cid, Code::NotConnected, "the session task is gone");
         }
+    }
+}
+
+/// Handle one inbound `session/answer` request (issue #151). Resolves a held
+/// permission/elicitation via [`SessionManager::answer`] and answers
+/// `{applied:true}` once the driver reports the turn resumed (or ended
+/// outright) — never before, per that method's own contract. A session with
+/// nothing pending answers `-32010 nothing_pending`; a `choice` that did not
+/// resolve, or an elicitation shape this driver does not resolve, answers
+/// `-32602 invalid_params` (the closest existing code to "your request was
+/// well-formed but its content was wrong"); every other failure (the
+/// connection ended, or the driver could not be reached) answers `-32004
+/// not_connected`, mirroring [`handle_cancel`]'s own mapping.
+pub async fn handle_answer(
+    session_manager: Arc<SessionManager>,
+    id: String,
+    params: Answer,
+    outbound: mpsc::UnboundedSender<WsMessage>,
+) {
+    let Ok(cid) = CorrelationId::parse(&id) else { return };
+    let name = match SessionName::parse(&params.session) {
+        Ok(n) => n,
+        Err(e) => {
+            send_error(&outbound, &cid, Code::UnknownSession, &format!("bad session name: {e}"));
+            return;
+        }
+    };
+    match session_manager.answer(&name, params.choice.clone()).await {
+        Ok(Ok(())) => send_response(&outbound, &cid, &AnswerResult { applied: true }),
+        Ok(Err(msg)) => send_answer_refusal(&outbound, &cid, &msg),
+        Err(SessionManagerError::UnknownSession) => {
+            send_error(&outbound, &cid, Code::UnknownSession, &format!("no such session: {}", params.session));
+        }
+        Err(SessionManagerError::Gone) => {
+            send_error(&outbound, &cid, Code::NotConnected, "the session task is gone");
+        }
+    }
+}
+
+/// Map [`crate::session_manager::task::handle_answer`]'s one-line failure
+/// strings to the closed v2 error table. Split out of [`handle_answer`] to
+/// keep that function's own match flat.
+fn send_answer_refusal(outbound: &mpsc::UnboundedSender<WsMessage>, cid: &CorrelationId, msg: &str) {
+    if msg == "nothing pending to answer" {
+        send_error_frame(outbound, cid, &WireError::nothing_pending());
+    } else if msg.contains("did not resolve") || msg.contains("unsupported elicitation") {
+        send_error(outbound, cid, Code::InvalidParams, msg);
+    } else {
+        send_error(outbound, cid, Code::NotConnected, msg);
     }
 }
 

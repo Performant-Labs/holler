@@ -8,7 +8,7 @@
 //!   no batches, `method_not_found`).
 //! - [`id`] — correlation ids (`h-`/`b-` prefixed ULIDs; the two sides never
 //!   collide).
-//! - [`methods`] — the method catalog (13 methods, their kinds and
+//! - [`methods`] — the method catalog (14 methods, their kinds and
 //!   directions).
 //! - [`error`] — the error table (JSON-RPC codes + Holler `data.code`).
 //! - [`docs`] — the per-method `params`/`result` types (hello, status,
@@ -38,10 +38,11 @@ pub mod vocab;
 // Flat re-exports so the common path is `holler_proto::{...}`.
 pub use a2a::{Content, Message, Part, Role, TaskState};
 pub use docs::{
-    state_for_stop_reason, AuthOk, Authenticate, Cancel, CancelResult, Caps, ConfirmedHarness,
-    Hello, HelloRole, HelloSession, Join, JoinResult, Mode, PingAck, Presence, Prompt,
-    PromptResult, ProtocolAnswer, ProtocolParams, SessionAd, SessionState, Status, StatusSession,
-    Support, SupportKind, SupportParams, Update, A2A_TERMINAL_STATES, STOP_TO_STATE,
+    state_for_stop_reason, Answer, AnswerResult, AuthOk, Authenticate, Cancel, CancelResult, Caps,
+    ConfirmedHarness, Hello, HelloRole, HelloSession, Join, JoinResult, Mode, PendingItem,
+    PendingKind, PingAck, Presence, Prompt, PromptResult, ProtocolAnswer, ProtocolParams,
+    SessionAd, SessionState, Status, StatusSession, Support, SupportKind, SupportParams, Update,
+    A2A_TERMINAL_STATES, STOP_TO_STATE,
 };
 pub use envelope::{decode, encode, Envelope, EnvelopeError, typed_params};
 pub use error::{Code, Error as WireError, ErrorData};

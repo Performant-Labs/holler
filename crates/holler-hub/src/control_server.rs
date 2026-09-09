@@ -83,6 +83,7 @@ async fn dispatch_control(line: &str, registry: &Registry, roster: &Roster) -> S
         Some("control/say") => say(&cid, &obj, registry).await,
         // `control/interrupt` (issue #191): the CLI's `interrupt` verb.
         Some("control/interrupt") => interrupt(&cid, &obj, registry).await,
+        Some("control/answer") => answer(&cid, &obj, registry).await,
         // `control/roster` (issue #186): read the hub's own roster and return
         // `{rows: [...]}` (the live-only view; the CLI's `--all` reads the
         // same socket and asks for the full set, which the server honors here).
@@ -218,11 +219,18 @@ async fn say(cid: &holler_proto::CorrelationId, obj: &serde_json::Value, registr
             let err = WireError::session_busy(state, turn_age_ms, last_update_age_ms);
             encode_error_frame(cid, &err)
         }
-        Err(crate::talk::SayError::InputRequired { question }) => encode_error(
-            cid,
-            Code::SessionBusy,
-            question.unwrap_or_else(|| format!("{session} is waiting for an answer")),
-        ),
+        // Issue #151: reported as `-32009 session_busy` with `data.state
+        // = "input-required"` (distinct from `working`/`stalled`) so the
+        // CLI's own busy hint (`say_cmd::busy_hint`) can point at `answer`
+        // instead of `interrupt`/`--queue` — neither of which resolves a
+        // held permission/elicitation.
+        Err(crate::talk::SayError::InputRequired { question, turn_age_ms, last_update_age_ms }) => {
+            let mut err = WireError::session_busy("input-required", turn_age_ms, last_update_age_ms);
+            if let Some(q) = question {
+                err.message = q;
+            }
+            encode_error_frame(cid, &err)
+        }
         Err(crate::talk::SayError::Refused(err)) => encode_error_frame(cid, &err),
         Err(crate::talk::SayError::ConnectionLost) => {
             encode_error(cid, Code::ConnectionLost, format!("{session} io disconnected mid-turn; ask again"))
@@ -288,6 +296,42 @@ async fn interrupt(cid: &holler_proto::CorrelationId, obj: &serde_json::Value, r
             encode_error(cid, Code::ConnectionLost, format!("{session} io disconnected mid-turn; ask again"))
         }
         Err(crate::interrupt::InterruptError::PromptFailed(e)) => encode_error(cid, Code::NotConnected, e.message()),
+    }
+}
+
+/// `control/answer {session, choice, timeout_ms?}` (issue #151): the CLI's
+/// `answer` verb, relayed to [`crate::talk::answer`]. Mirrors [`say`]'s own
+/// param/result mapping; the body-side refusal (`-32010 nothing_pending`,
+/// `-32602 invalid_params`, …) is forwarded verbatim via
+/// [`crate::talk::AnswerError::Refused`], never re-coded here.
+async fn answer(cid: &holler_proto::CorrelationId, obj: &serde_json::Value, registry: &Registry) -> String {
+    let params = obj.get("params");
+    let Some(session) = params.and_then(|p| p.get("session")).and_then(|v| v.as_str()) else {
+        return encode_error(cid, Code::InvalidParams, "control/answer needs params.session".to_string());
+    };
+    let Some(choice) = params.and_then(|p| p.get("choice")).and_then(|v| v.as_str()) else {
+        return encode_error(cid, Code::InvalidParams, "control/answer needs params.choice".to_string());
+    };
+    let timeout_ms = params.and_then(|p| p.get("timeout_ms")).and_then(|v| v.as_u64()).unwrap_or(10_000);
+    let timeout = std::time::Duration::from_millis(timeout_ms);
+
+    match crate::talk::answer(registry, session, choice, timeout).await {
+        Ok(outcome) => encode_response(cid, serde_json::json!({ "session": outcome.session, "applied": outcome.applied })),
+        Err(crate::talk::AnswerError::UnknownSession) => {
+            encode_error(cid, Code::UnknownSession, format!("unknown session: {session}"))
+        }
+        Err(crate::talk::AnswerError::NotConnected) => {
+            encode_error(cid, Code::NotConnected, format!("{session}'s body is not connected"))
+        }
+        Err(crate::talk::AnswerError::Ambiguous(candidates)) => {
+            let message = format!("ambiguous session {session}: candidates are {}", candidates.join(", "));
+            let err = WireError::new(Code::UnknownSession, message, Some("ambiguous"));
+            encode_error_frame(cid, &err)
+        }
+        Err(crate::talk::AnswerError::Refused(err)) => encode_error_frame(cid, &err),
+        Err(crate::talk::AnswerError::ConnectionLost) => {
+            encode_error(cid, Code::ConnectionLost, format!("{session} io disconnected; ask again"))
+        }
     }
 }
 

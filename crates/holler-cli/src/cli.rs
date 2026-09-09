@@ -4,7 +4,8 @@
 //! - Global flags (`--debug`, `--log-format`, `--json`) are on the root and
 //!   therefore reachable on every subcommand. `--debug`/`--log-format` are
 //!   parsed but unused until the logging story.
-//! - `say`, `interrupt`, `roster` are top-level (hub-only daily verbs);
+//! - `say`, `interrupt`, `answer`, `roster` are top-level (hub-only daily
+//!   verbs);
 //!   everything else is namespaced under `hub` or `body`.
 //! - No aliases are added beyond the ones ADR 0003 names (`rm`/`remove`).
 //!   In particular `body status` is `status` only (the `st` alias is a
@@ -77,6 +78,8 @@ pub enum Command {
     Say(Say),
     /// Interrupt the session's in-flight turn. (hub-only)
     Interrupt(Interrupt),
+    /// Resolve a held permission/elicitation. (hub-only)
+    Answer(Answer),
 }
 
 #[derive(Subcommand, Debug)]
@@ -425,6 +428,17 @@ pub struct Interrupt {
     /// Redirect text (issue #191): cancel, then run this prompt ahead of
     /// the queue, streaming its reply exactly like `say`.
     pub text: Option<String>,
+}
+
+#[derive(Parser, Debug)]
+pub struct Answer {
+    /// Session address, <label>/<session> (or a bare <session>).
+    pub session: String,
+    /// The choice: a 0-based index, an option's label/key (case-insensitive),
+    /// a comma-separated list (one segment per question, for a multi-field
+    /// elicitation), or one of `once`/`always`/`reject` for a permission
+    /// prompt that offers them.
+    pub choice: String,
 }
 
 // --- body ----------------------------------------------------------------

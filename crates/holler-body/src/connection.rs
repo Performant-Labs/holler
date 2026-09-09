@@ -27,16 +27,15 @@
 //! threading 7-15 loose positional parameters — a pure refactor, no behavior
 //! change.
 
+mod session_dispatch;
+
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
 use futures_util::{Sink, SinkExt, Stream, StreamExt};
 use holler_proto::log::{Component, Direction as LogDirection, Event, Severity};
-use holler_proto::{
-    Authenticate, Cancel, Code, CorrelationId, Envelope, Hello, HelloRole, PingAck, Presence,
-    Prompt,
-};
+use holler_proto::{Authenticate, Code, CorrelationId, Envelope, Hello, HelloRole, PingAck, Presence};
 use tokio::signal::unix::{signal, SignalKind};
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::{Error as WsError, Message};
@@ -658,22 +657,24 @@ where
                 warn("conn_superseded", vec![]);
                 FrameOutcome::Superseded
             }
-            Envelope::Request { id, method, params } if method == "session/prompt" => {
-                match holler_proto::typed_params::<Prompt>(&Envelope::Request { id: id.clone(), method, params }) {
-                    Ok(p) => crate::dispatch::spawn_prompt_dispatch(self.session_manager, &self.outbound_tx, id, p),
-                    Err(e) => crate::dispatch::send_invalid_params(self.sink, &id, &e).await,
-                }
-                FrameOutcome::Continue
-            }
-            Envelope::Request { id, method, params } if method == "session/cancel" => {
-                // Issue #191's priority path: the cancel dispatch task's own
+            Envelope::Request { id, method, params }
+                if matches!(method.as_str(), "session/prompt" | "session/cancel" | "session/answer") =>
+            {
+                // Issue #191's priority path: `session/cancel`'s own
                 // response frame goes out via `priority_tx`, not the normal
-                // `outbound_tx` — see [`LiveConnection::priority_tx`]'s doc.
-                match holler_proto::typed_params::<Cancel>(&Envelope::Request { id: id.clone(), method, params }) {
-                    Ok(p) => crate::dispatch::spawn_cancel_dispatch(self.session_manager, &self.priority_tx, id, p),
-                    Err(e) => crate::dispatch::send_invalid_params(self.sink, &id, &e).await,
-                }
-                FrameOutcome::Continue
+                // `outbound_tx` — see `priority_tx`'s own doc comment above.
+                // `dispatch_session_request` picks between the two channels
+                // itself, by method name.
+                session_dispatch::dispatch_session_request(
+                    self.sink,
+                    self.session_manager,
+                    &self.outbound_tx,
+                    &self.priority_tx,
+                    id,
+                    method,
+                    params,
+                )
+                .await
             }
             Envelope::Request { id, .. } => {
                 let Ok(cid) = CorrelationId::parse(&id) else { return FrameOutcome::Continue };
