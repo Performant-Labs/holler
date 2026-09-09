@@ -6,8 +6,12 @@
 //! (report this process's own identity). The protocol/body talk stories fill
 //! the rest in.
 
+pub mod backoff;
+pub mod connection;
+pub mod connection_state;
 pub mod detach;
 pub mod identity;
+pub mod instance_lock;
 pub mod join;
 pub mod server_address;
 pub mod status;

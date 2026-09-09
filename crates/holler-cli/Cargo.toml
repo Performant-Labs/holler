@@ -84,6 +84,14 @@ path = "tests/token_cli_test.rs"
 name = "body_join_test"
 path = "tests/body_join_test.rs"
 
+# `holler body run` e2e (issue #182): the connection loop — authenticate,
+# hello, presence heartbeat, liveness/reconnect, detach, and the hub-side
+# `hub token ping` companion — driving both real binaries against an isolated
+# `HOLLER_STATE_DIR` and a real loopback hub.
+[[test]]
+name = "body_run_test"
+path = "tests/body_run_test.rs"
+
 # Explicit pin (story #129): the test-of-tests canary is named here so a later
 # move of the file under a subdirectory cannot silently un-discover it from the
 # CI canary step.

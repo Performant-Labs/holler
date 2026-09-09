@@ -30,6 +30,13 @@ serde_json = { workspace = true }
 # `rustls` itself is a holler-body dependency, not just a transitive one
 # (story #176).
 rustls = { workspace = true }
+# the advisory `body/run.lock` instance lock (issue #182), the same flock
+# pattern the hub's `serve.lock` uses (the `sync` feature is set once at the
+# workspace level).
+fs4 = { workspace = true }
+# the reconnect backoff's jitter (issue #182): a 64-bit CSPRNG draw, the same
+# primitive the hub's token store uses for secrets.
+getrandom = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

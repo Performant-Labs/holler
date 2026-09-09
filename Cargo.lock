@@ -576,7 +576,9 @@ dependencies = [
 name = "holler-body"
 version = "0.1.0"
 dependencies = [
+ "fs4",
  "futures-util",
+ "getrandom 0.3.4",
  "holler-proto",
  "rustls",
  "serde",
