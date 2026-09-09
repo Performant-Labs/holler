@@ -10,12 +10,15 @@ fail=0
 #    allow(dead_code) — but only if that allow carries a trailing `// #NNN`
 #    issue link naming the story that lands the caller. Otherwise dead code
 #    stays dead: land helpers with their first caller.
-if grep -rn --include='*.rs' -E '#!?\[allow\([^)]*dead_code[^)]*\)' crates/ \
+#    An `allow(...)` can also arrive wrapped inside `cfg_attr(cond, allow(...))`
+#    (#248) — that hides the same bypass from a regex anchored on `#!?\[allow\(`,
+#    so both checks below also match `allow(` reached via `cfg_attr\([^)]*`.
+if grep -rn --include='*.rs' -E '(#!?\[allow\([^)]*dead_code[^)]*\)|cfg_attr\([^)]*allow\([^)]*dead_code[^)]*\))' crates/ \
     | grep -vE '//\s*#[0-9]+'; then
   echo "lint: allow(dead_code) without a '// #NNN' link is forbidden — land helpers with their first caller (or link the forward-contract story)"
   fail=1
 fi
-if grep -rn --include='*.rs' -E '#!?\[allow\(' crates/ \
+if grep -rn --include='*.rs' -E '(#!?\[allow\(|cfg_attr\([^)]*allow\()' crates/ \
     | grep -vE '//\s*#[0-9]+' \
     | grep -v 'allow(clippy::assertions_on_constants)'; then
   echo "lint: every #[allow] needs a trailing '// #NNN' issue link"
@@ -55,5 +58,12 @@ if grep -nE 'features\s*=' Cargo.toml crates/*/Cargo.toml 2>/dev/null \
   echo "lint: every dep feature needs a comment naming its consumer"
   fail=1
 fi
+
+# 6. Golden-file blessing side effect (#246): BLESS=1 reorders every golden
+#    file's keys alphabetically, which can bury a real value-drift regression
+#    in a wall of cosmetic reorder diff. Summarize which changed golden files
+#    carry a real value change vs. a pure reorder, so reviewer attention goes
+#    to the former. Informational only — never fails the build on its own.
+bash scripts/golden-diff-summary.sh
 
 exit $fail
