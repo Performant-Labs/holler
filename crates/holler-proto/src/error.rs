@@ -5,7 +5,7 @@
 //! `-32000..-32099` carrying `data.code` = the Holler string, and a
 //! `reason` in `data.reason`.
 //!
-//! **`-32603` (Internal error) and `-32009` are reserved** and unused in v2.
+//! **`-32603` (Internal error) is reserved** and unused in v2.
 //! An *unmatched response* (a response whose `id` matches no outstanding
 //! request) has **no** JSON-RPC code in v2: the peer logs and discards it.
 //!
@@ -39,6 +39,7 @@ pub enum Code {
     UnknownFeature,
     LimitExceeded,
     ConnectionLost,
+    SessionBusy,
 }
 
 impl Code {
@@ -46,7 +47,7 @@ impl Code {
     ///
     /// The codec and tests iterate this to assert uniqueness and range over
     /// the one source of truth (there is no separate table to check).
-    pub const ALL: [Code; 13] = [
+    pub const ALL: [Code; 14] = [
         Code::ParseError,
         Code::InvalidRequest,
         Code::MethodNotFound,
@@ -60,6 +61,7 @@ impl Code {
         Code::UnknownFeature,
         Code::LimitExceeded,
         Code::ConnectionLost,
+        Code::SessionBusy,
     ];
 
     /// The JSON-RPC numeric code for this Holler code (docs §8).
@@ -79,6 +81,7 @@ impl Code {
             Code::UnknownFeature => -32006,
             Code::LimitExceeded => -32007,
             Code::ConnectionLost => -32008,
+            Code::SessionBusy => -32009,
         }
     }
 
@@ -99,6 +102,7 @@ impl Code {
             Code::UnknownFeature => "unknown_feature",
             Code::LimitExceeded => "limit_exceeded",
             Code::ConnectionLost => "connection_lost",
+            Code::SessionBusy => "session_busy",
         }
     }
 
@@ -123,6 +127,16 @@ pub struct ErrorData {
     /// another body", `join_failed`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+    /// `session_busy` only: the session's current A2A state (`working` or
+    /// `stalled`) at refusal time, so the caller's hint names what it hit.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub state: Option<String>,
+    /// `session_busy` only: milliseconds since the in-flight turn started.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub turn_age_ms: Option<u64>,
+    /// `session_busy` only: milliseconds since the last `session/update`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_update_age_ms: Option<u64>,
 }
 
 /// The JSON-RPC `error` object (docs §8 / JSON-RPC 2.0 §6).
@@ -137,8 +151,14 @@ pub struct Error {
     /// A short, human-readable description.
     pub message: String,
     /// Optional structured data: `{"code": <data_code>, "reason"?}`.
+    ///
+    /// Boxed (issue #150): `ErrorData` grew a `session_busy`-only trio of
+    /// fields, which pushed `Result<T, WireError>` past clippy's
+    /// `result_large_err` threshold everywhere `WireError` is the error type
+    /// — a bare `Option<ErrorData>` would make every such `Result` this
+    /// error's full size even on the common, data-less path.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub data: Option<ErrorData>,
+    pub data: Option<Box<ErrorData>>,
 }
 
 impl Error {
@@ -149,10 +169,30 @@ impl Error {
         Self {
             code: code.jsonrpc(),
             message: message.into(),
-            data: Some(ErrorData {
+            data: Some(Box::new(ErrorData {
                 code: code.data_code().to_owned(),
                 reason: reason.map(str::to_owned),
-            }),
+                state: None,
+                turn_age_ms: None,
+                last_update_age_ms: None,
+            })),
+        }
+    }
+
+    /// Build a `-32009 session_busy` refusal (issue #150): `say` refuses a
+    /// `working`/`stalled` session unless `--queue` opts in. The ages are
+    /// the caller's next-command hint — "how long has this been stuck".
+    pub fn session_busy(state: impl Into<String>, turn_age_ms: u64, last_update_age_ms: u64) -> Self {
+        Self {
+            code: Code::SessionBusy.jsonrpc(),
+            message: "session is busy".to_owned(),
+            data: Some(Box::new(ErrorData {
+                code: Code::SessionBusy.data_code().to_owned(),
+                reason: None,
+                state: Some(state.into()),
+                turn_age_ms: Some(turn_age_ms),
+                last_update_age_ms: Some(last_update_age_ms),
+            })),
         }
     }
 }
@@ -164,10 +204,13 @@ impl From<Code> for Error {
         Self {
             code: code.jsonrpc(),
             message: code.data_code().to_owned(),
-            data: Some(ErrorData {
+            data: Some(Box::new(ErrorData {
                 code: code.data_code().to_owned(),
                 reason: None,
-            }),
+                state: None,
+                turn_age_ms: None,
+                last_update_age_ms: None,
+            })),
         }
     }
 }
