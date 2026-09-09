@@ -141,6 +141,19 @@ The acceptance for this story is to point the runner at the **real** catalog —
 - **One true gap:** `exec --applies body` → **0 matched**. The live catalog carries only `Applies to: both` (86) and `Applies to: hub` (10) — **no `body` case exists yet**. The runner correctly reports "no catalog cases matched the selection (applies: body)" and exits non-zero (the designed behavior for an empty selection); it is the *catalog* that has no body cases to select, not a runner bug. It is a catalog-coverage observation for the #168 retrofit track, and the point stands: the runner addresses the live cases faithfully.
 - `exec --list` (bare) is the **token-free** smoke (no token, no octokit) and exits 0 against an empty catalog — it is *not* how you read the live 96 (that needs a client path, e.g. `discover` or `exec --last-failed N`).
 
+### The two non-obvious `Automation` shapes are exercised, not just the bare `tests/` form
+
+Shape distribution across the 96: **93 `crates/<crate>/tests/` cases + 4 `src/` cases + 1 `;`-joined multi-crate case** (which spans two `tests/` segments), and **zero** fall back to the whole-workspace fallback and **zero** fail to parse. The common `crates/<crate>/tests/<file>.rs (<fn>)` form is the uninteresting 93; the interesting part is that the runner *also* resolves the two rarer shapes correctly. Verified by running the runner's *real* `Automation` parser (`scripts/automation.rb`) against the live catalog and then executing the resolved commands:
+
+- **The semicolon multi-crate case** (case `hlr-1203`, logging group, the only `;`-joined case in the catalog) is a single `Automation` field with two segments across two crates:
+  ```
+  crates/holler-cli/tests/logging_test.rs (debug_flag_beats_env); crates/holler-proto/tests/log_test.rs (resolve_flag_beats_env)
+  ```
+  `split_segments` yields **2** segments; `parse_segment` resolves each to its own crate — `cargo test -p holler-cli --test logging_test debug_flag_beats_env` and `cargo test -p holler-proto --test log_test resolve_flag_beats_env` — **both `fallback_used == false`** (neither fell through to the whole-workspace fallback). Executing both: **each passes** (`1 passed` per crate). The runner runs all segments and `exit 0`s only if *all* pass.
+- **The four `src/` cases** (`hlr-1001`–`hlr-1004`, all in `crates/holler-cli/src/cli.rs`) each resolve to a **unit** test — `cargo test -p holler-cli --lib <fn>` — via the `src/` grammar branch (`lib_test == true`, no fallback). All four functions exist in `cli.rs` and all four **pass** under `--lib`.
+
+So the runner addresses the live catalog across all three shape classes (bare `tests/`, `;`-joined multi-crate, and `src/` unit), not just the common one.
+
 ## The `Automation` grammar
 
 Each catalog case's `Automation` field is one or more `;`-separated **segments**; the runner resolves each to a `cargo` command it will run. The grammar (exact, from issue [#168](https://github.com/Performant-Labs/holler/issues/168) §5) is a **pure function** in `scripts/automation.rb`, shared by `run` and `exec` so they cannot drift. `<crate>` is derived from the path form — a `tests/<file>.rs` with **no** crate prefix means the `holler-cli` crate:
