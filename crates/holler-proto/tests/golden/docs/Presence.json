@@ -2,13 +2,20 @@
   "hostname": "kiwi",
   "sessions": [
     {
-      "name": "alpha",
       "harness": "opencode",
-      "state": "working",
-      "mode": "attach",
       "harness_session_id": "ses_1",
-      "turn_started_at": "2026-09-08T12:00:00Z",
-      "last_update_at": "2026-09-08T12:00:03Z"
+      "last_turn": {
+        "ended_at": "2026-09-08T11:59:50Z",
+        "state": "completed",
+        "stop_reason": "end_turn",
+        "turn_id": "h-01HTESTGOLDENPREV00000000"
+      },
+      "last_update_at": "2026-09-08T12:00:03Z",
+      "mode": "attach",
+      "name": "alpha",
+      "state": "working",
+      "turn_id": "h-01HTESTGOLDEN000000000000",
+      "turn_started_at": "2026-09-08T12:00:00Z"
     }
   ]
 }
