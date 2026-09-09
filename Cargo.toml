@@ -93,6 +93,15 @@ hex = "0.4"
 # timing side-channel on secret comparison is a fail-closed defect (story #163).
 # Consumed by holler-hub.
 subtle = "2"
+# rustls: the crypto provider behind `wss://` (TLS) WebSocket. rustls 0.23
+# picks its crypto from a process-global that must be installed before the
+# first ClientConfig/ServerConfig. The binary installs the `aws-lc-rs`
+# default (the same provider the workspace's tokio-tungstenite TLS features
+# select) in `main` before any connect (story #176). Consumed by holler-cli
+# (links `rustls::crypto::aws_lc_rs::default_provider`) and holler-body
+# (queries `rustls::crypto::CryptoProvider::get_default` to fail a `wss`
+# connect closed when no provider is installed).
+rustls = "0.23"
 # POSIX process-group control for the test harness's kill_tree.
 libc = "0.2"
 # scratch state dirs for the test harness.

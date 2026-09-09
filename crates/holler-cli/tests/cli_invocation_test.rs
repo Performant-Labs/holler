@@ -101,6 +101,16 @@ fn bare_invocation_fails_closed(#[case] args: &[&str]) {
 // `crates/holler-cli/tests/token_cli_test.rs`. The `cli-surface.txt` fixture
 // (which #149 adds `--json` rows for the token leaves) keeps pinning the *parse*
 // guarantee — clap accepts every line — independently of their run-time exit.
+//
+// NOTE (story #176): `body join`, `body detach`, and `body status` (with the
+// `--json` arm) were originally listed here as skeleton leaves that print
+// "not implemented" and exit 1. #176 implements them: `body join` redeems a
+// one-time join secret over WebSocket and exits 0/1/3, `body detach` removes
+// the local credential and exits 0, and `body status` reports the local join
+// state and exits 0. They are therefore removed from this "not implemented"
+// table and pinned by dedicated tests in `crates/holler-cli/tests/body_join_test.rs`.
+// The `cli-surface.txt` fixture keeps pinning the *parse* guarantee for these
+// rows (clap accepts every line) independently of their run-time exit.
 #[rstest]
 #[case::hub_caps(&["hub", "caps"])]
 #[case::hub_caps_json(&["--json", "hub", "caps"])]
@@ -115,11 +125,7 @@ fn bare_invocation_fails_closed(#[case] args: &[&str]) {
 #[case::say(&["say", "SESSION", "TEXT"])]
 #[case::say_json(&["--json", "say", "SESSION", "TEXT"])]
 #[case::interrupt(&["interrupt", "SESSION"])]
-#[case::body_join(&["body", "join", "--server", "URL", "--token", "ID:SECRET"])]
 #[case::body_run(&["body", "run"])]
-#[case::body_detach(&["body", "detach"])]
-#[case::body_status(&["body", "status"])]
-#[case::body_status_json(&["--json", "body", "status"])]
 #[case::body_caps(&["body", "caps"])]
 #[case::body_caps_json(&["--json", "body", "caps"])]
 #[case::body_support(&["body", "support", "FEATURE"])]

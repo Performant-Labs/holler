@@ -75,6 +75,15 @@ path = "tests/hub_serve_test.rs"
 name = "token_cli_test"
 path = "tests/token_cli_test.rs"
 
+# `holler body join` / `body detach` / `body status` e2e (story #176): the
+# body's identity lifecycle — a join redeems a minted secret over the wire and
+# persists the credential, a refused redeem is exit 1, a plaintext non-loopback
+# `ws://` is a fail-closed exit 3, detach forgets the identity, and status
+# reports this process's own join state.
+[[test]]
+name = "body_join_test"
+path = "tests/body_join_test.rs"
+
 # Explicit pin (story #129): the test-of-tests canary is named here so a later
 # move of the file under a subdirectory cannot silently un-discover it from the
 # CI canary step.
@@ -87,12 +96,25 @@ path = "tests/wire_selftest.rs"
 # the same PR; the skeleton's speculative list was removed in #155.
 [dependencies]
 clap = { workspace = true }
-serde_json = { workspace = true }   # stub-acp bin
+# stub-acp bin (serializes its ACP frames) and the body-join e2e test's
+# `#[cfg(test)]` unit test (decodes the credential/status documents it inspects).
+serde_json = { workspace = true }
 holler-proto = { path = "../holler-proto" }
 # Story #143: the `hub serve` / `hub status` leaves drive the hub crate (the
 # listener + control socket). This is the first story to consume holler-hub
 # from the CLI, so per the #155 §7 rule it is declared here.
 holler-hub = { path = "../holler-hub" }
+# Story #176: the `body join` / `body detach` / `body status` leaves drive the
+# body crate (the wire join, the on-disk identity, and the local status doc).
+# It is a runtime dependency of the bin (not a dev-dep): `main.rs` calls the
+# body helpers on the normal command path.
+holler-body = { path = "../holler-body" }
+# Story #176: `main` installs the rustls crypto provider that a `wss://`
+# (TLS) WebSocket join needs (the `aws-lc-rs` default, matching the
+# workspace's tokio-tungstenite TLS features). It is a runtime dep of the bin
+# (the bin installs the provider before any connect; the body fails a `wss`
+# connect closed if none is installed).
+rustls = { workspace = true }
 
 [dev-dependencies]
 assert_cmd = { workspace = true }
