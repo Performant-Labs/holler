@@ -433,6 +433,46 @@ pub struct SessionAd {
     /// story #340) renders from this.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pending: Option<Vec<PendingItem>>,
+    /// The JSON-RPC `id` of the current or most recent `session/prompt`
+    /// (issue #142) — the `h-…` id `holler wait --after <turn_id>` reads
+    /// back to avoid re-matching an already-seen turn. **Absent before the
+    /// first prompt** a session has ever received; present (and unchanging)
+    /// once a prompt has been sent, independent of `state`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub turn_id: Option<String>,
+    /// The outcome of the most recently **completed** turn (issue #142) —
+    /// present once a turn has ended, and updated on every subsequent turn.
+    /// `wait`'s default `--until` set and the roster's `LAST TURN` column
+    /// (the roster story #340) both read this; it survives a reconnect
+    /// (carried in presence, not just the one-shot `session/prompt`
+    /// response) so a `wait --after` call made after a body drops and
+    /// rejoins still sees the prior turn's outcome.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_turn: Option<LastTurn>,
+}
+
+/// The outcome of a session's most recently completed turn (issue #142).
+/// `state` reuses [`SessionState`]'s four A2A terminal variants (`completed`
+/// | `canceled` | `failed` | `rejected`) rather than a parallel enum — it is
+/// exactly the codomain of [`STOP_TO_STATE`] / [`A2A_TERMINAL_STATES`], and
+/// ADR 0004's "one vocabulary" already settled that terminal turn outcomes
+/// have one name each on the wire.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LastTurn {
+    /// The JSON-RPC id of the `session/prompt` this outcome belongs to —
+    /// compared against `wait --after <turn_id>` to detect a *new* terminal
+    /// turn rather than re-matching one already reported to the caller.
+    pub turn_id: String,
+    /// The A2A terminal state the turn ended in: `completed` | `canceled` |
+    /// `failed` | `rejected`.
+    pub state: SessionState,
+    /// The ACP `stopReason`, carried verbatim (docs §6) — the source of
+    /// truth `state` was derived from.
+    pub stop_reason: String,
+    /// When the turn ended (RFC 3339), matching the `turn_started_at` /
+    /// `last_update_at` convention (issue #150).
+    pub ended_at: String,
 }
 
 // ---------------------------------------------------------------------------

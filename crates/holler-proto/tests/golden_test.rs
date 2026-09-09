@@ -200,6 +200,13 @@ fn docs_instances() -> Vec<(&'static str, Value)> {
                 turn_started_at: Some("2026-09-08T12:00:00Z".into()),
                 last_update_at: Some("2026-09-08T12:00:03Z".into()),
                 pending: None,
+                turn_id: Some("h-01HTESTGOLDEN000000000000".into()),
+                last_turn: Some(LastTurn {
+                    turn_id: "h-01HTESTGOLDENPREV00000000".into(),
+                    state: SessionState::Completed,
+                    stop_reason: "end_turn".into(),
+                    ended_at: "2026-09-08T11:59:50Z".into(),
+                }),
             }],
         }).unwrap()),
         ("Prompt", serde_json::to_value(Prompt { session: "io/alpha".into(), message: user_message(), meta: meta() }).unwrap()),
