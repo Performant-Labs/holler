@@ -127,11 +127,13 @@ async fn hub_query_local(cid: &holler_proto::CorrelationId, obj: &serde_json::Va
                 Err(e) => encode_error(cid, Code::UnknownFeature, e.message),
             }
         }
-        "query/protocol" => {
-            let version = inner_params.as_ref().and_then(|p| p.get("version")).and_then(|v| v.as_u64()).map(|v| v as u32);
-            let doc = crate::query::local_protocol(version);
-            encode_response(cid, serde_json::to_value(doc).unwrap_or_default())
-        }
+        "query/protocol" => match holler_proto::ProtocolParams::parse_version(inner_params.as_ref()) {
+            Ok(version) => {
+                let doc = crate::query::local_protocol(version);
+                encode_response(cid, serde_json::to_value(doc).unwrap_or_default())
+            }
+            Err(e) => encode_error_frame(cid, &e),
+        },
         other => encode_error(cid, Code::MethodNotFound, format!("unknown query method: {other}")),
     }
 }

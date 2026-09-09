@@ -836,14 +836,8 @@ where
                 .unwrap_or_default();
             crate::query::local_support(feature, configs).map(|s| serde_json::to_value(s).unwrap_or_default())
         }
-        "query/protocol" => {
-            let version = params
-                .as_ref()
-                .and_then(|p| p.get("version"))
-                .and_then(|v| v.as_u64())
-                .map(|v| v as u32);
-            Ok(serde_json::to_value(crate::query::local_protocol(version)).unwrap_or_default())
-        }
+        "query/protocol" => holler_proto::ProtocolParams::parse_version(params.as_ref())
+            .map(|version| serde_json::to_value(crate::query::local_protocol(version)).unwrap_or_default()),
         _ => Err(holler_proto::WireError::new(Code::MethodNotFound, "unknown query method", None)),
     };
     let send_result = match result {

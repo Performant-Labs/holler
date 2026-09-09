@@ -13,15 +13,47 @@ use crate::cli::Cmd;
 /// Build a `query/*` request's `params` from the CLI's already-parsed
 /// command verb and its trailing args. Only `support` (`{feature}`) and
 /// `protocol` (`{version?}`) take any; `status`/`caps` take none.
+///
+/// `protocol`'s arg is carried through **verbatim** — as the parsed `u32`
+/// when it happens to be one, or as a raw JSON string otherwise (issue
+/// #251) — rather than silently dropped with `.ok()` on a failed
+/// `u32` parse. A dropped negative/non-numeric arg used to reach the peer
+/// as "no version asked", which the peer then answered normally instead of
+/// the documented `-32006 unknown_feature`; carrying the raw string lets
+/// [`holler_proto::ProtocolParams::parse_version`] see and reject it there,
+/// the one place that validation is done.
 pub fn query_cmd_params(cmd: &Cmd, args: &[String]) -> Option<serde_json::Value> {
     match cmd {
         Cmd::Support => args.first().map(|f| serde_json::json!({ "feature": f })),
-        Cmd::Protocol => args
-            .first()
-            .and_then(|s| s.parse::<u32>().ok())
-            .map(|v| serde_json::json!({ "version": v })),
+        Cmd::Protocol => args.first().map(|s| serde_json::json!({ "version": protocol_version_arg_value(s) })),
         Cmd::Status | Cmd::Caps => None,
     }
+}
+
+/// `protocol`'s trailing arg as the raw JSON value carried into `params`:
+/// the parsed `u32` when `s` happens to be one, or `s` itself as a JSON
+/// string otherwise (issue #251). Carrying a non-`u32` string through
+/// **verbatim**, rather than dropping it with `.ok()` on a failed parse, is
+/// what lets [`holler_proto::ProtocolParams::parse_version`] see and reject
+/// it downstream — a dropped negative/non-numeric arg used to reach the
+/// peer as "no version asked", which the peer then answered normally
+/// instead of the documented `-32006 unknown_feature`.
+fn protocol_version_arg_value(s: &str) -> serde_json::Value {
+    s.parse::<u32>()
+        .map(serde_json::Value::from)
+        .unwrap_or_else(|_| serde_json::Value::String(s.to_string()))
+}
+
+/// Parse `query protocol`'s optional trailing arg into a validated
+/// `version` for a **local** (no wire round trip) `protocol` leaf — `body
+/// query protocol [N]`'s own direct call into
+/// [`holler_body::query::local_protocol`] (issue #251). Builds the same
+/// `{version: ...}` shape [`query_cmd_params`]'s `Protocol` arm sends over
+/// the wire and validates it the same way, so the local and the
+/// wire-forwarded leaves agree on what a valid `version` is.
+pub fn protocol_version_from_args(args: &[String]) -> Result<Option<u32>, holler_proto::WireError> {
+    let params = args.first().map(|s| serde_json::json!({ "version": protocol_version_arg_value(s) }));
+    holler_proto::ProtocolParams::parse_version(params.as_ref())
 }
 
 /// `true` iff a control refusal is the hub's ambiguous-target marker (see
