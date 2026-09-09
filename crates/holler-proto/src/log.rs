@@ -428,6 +428,31 @@ fn short_id(id: &str) -> String {
     }
 }
 
+/// Escape control characters (`\n`, `\r`, tabs, and any other non-printable
+/// byte) in a field value before it is concatenated into a text-format log
+/// line. Values reaching here can be attacker-supplied (e.g. a body's
+/// self-declared `hostname`), so a raw newline/carriage-return must never
+/// reach `eprintln!` unescaped — that would let the value forge additional,
+/// fake log lines (CWE-117 log injection). Printable characters (including
+/// non-ASCII text) are passed through untouched; only `char::is_control`
+/// characters are rewritten via `char::escape_default` (e.g. `\n` -> the two
+/// characters `\` `n`, a raw NUL -> `\u{0}`).
+fn escape_field_value(v: &str) -> String {
+    if v.chars().any(char::is_control) {
+        v.chars()
+            .flat_map(|c| {
+                if c.is_control() {
+                    c.escape_default().collect::<Vec<char>>()
+                } else {
+                    vec![c]
+                }
+            })
+            .collect()
+    } else {
+        v.to_owned()
+    }
+}
+
 fn render_text(ev: &Event) -> String {
     let ts = timestamp();
     let level = ev.severity.as_str();
@@ -441,7 +466,7 @@ fn render_text(ev: &Event) -> String {
         s.push_str(&format!(" peer={peer}"));
     }
     for (k, v) in &ev.fields {
-        s.push_str(&format!(" {k}={v}"));
+        s.push_str(&format!(" {k}={}", escape_field_value(v)));
     }
     if let Some(frame) = &ev.frame {
         s.push_str(&format!(" {frame}"));
