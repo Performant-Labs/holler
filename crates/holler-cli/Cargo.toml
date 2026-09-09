@@ -107,6 +107,16 @@ path = "tests/wire_selftest.rs"
 name = "acp_driver_test"
 path = "tests/acp_driver_test.rs"
 
+# `crash_mid_turn_is_error_not_hang` split into its own process (own
+# `[[test]]` target) — its crash-detection signal is sensitive to
+# process-wide reactor/thread-pool contention from the *other* 18
+# `acp_driver_test` tests spawning/tearing down their own children in the
+# same binary; giving it a fresh process removes that contention entirely.
+# See the file's own module doc for the measured evidence.
+[[test]]
+name = "acp_driver_crash_test"
+path = "tests/acp_driver_crash_test.rs"
+
 # Declare only what is consumed (issue #155 §7 — `cargo machete` fails CI
 # otherwise). A story that starts using a workspace dependency adds it here in
 # the same PR; the skeleton's speculative list was removed in #155.

@@ -1,6 +1,9 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable)] // #188
 //! RED tests for the ACP v2 spawn driver (issue #188) — the issue's own test
-//! list, verbatim in name where practical.
+//! list, verbatim in name where practical. 18 of the 19 tests live here;
+//! `crash_mid_turn_is_error_not_hang` lives in its own `[[test]]` target
+//! (`acp_driver_crash_test.rs`, own process) — see that file's module doc for
+//! why.
 //!
 //! # Why this file lives in `holler-cli`, not `holler-body`
 //!
@@ -29,6 +32,30 @@ use holler_body::acp_driver::{
 };
 use holler_body::config::{Interrupt, SessionConfig, SessionMode};
 use holler_proto::SessionName;
+
+/// Serializes every test in this file so at most one is running at a time.
+///
+/// Each test spawns a real `stub-acp` child process and drives a real
+/// connection; running many of them fully concurrently (`cargo test`'s
+/// default per-binary parallelism — this file has 18 tests) measurably added
+/// scheduling contention for the SDK's own background actor tasks (see
+/// `acp_driver_crash_test.rs`'s module doc for the fuller investigation of
+/// that class of issue, which is what pushed `crash_mid_turn_is_error_not_hang`
+/// into its own test binary entirely). Serializing here removes that
+/// contention at its source for the remaining 18 tests rather than padding
+/// every one of their timeouts.
+static SERIAL: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// Acquire the serialization lock for the calling test's duration. A
+/// `tokio::sync::Mutex` (not `std::sync::Mutex`) because every test holds
+/// this guard across many `.await` points — holding a blocking `std` lock
+/// across an await is exactly the anti-pattern `clippy::await_holding_lock`
+/// (denied workspace-wide) exists to catch; `tokio`'s async-aware mutex has
+/// no such hazard (nor does it poison on panic, so a prior test's panic
+/// mid-guard cannot wedge every later test).
+async fn serial_guard() -> tokio::sync::MutexGuard<'static, ()> {
+    SERIAL.lock().await
+}
 
 /// Build a spawn-mode `SessionConfig` that runs the built `stub-acp` binary
 /// with `extra` args — the same binary path `tests/support::stub_acp_bin`
@@ -73,8 +100,9 @@ async fn drain_to_done(
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn spawn_initialize_new_session_ok() {
+    let _serial = serial_guard().await;
     let config = stub_config("alpha", &["--chunks", "1"]);
     let driver = AcpDriver::spawn(&config)
         .await
@@ -83,12 +111,12 @@ async fn spawn_initialize_new_session_ok() {
     driver.shutdown().await.expect("shutdown");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn startup_timeout_on_hung_command() {
-    // SAFETY (single-threaded-env caveat): `std::env::set_var` mutates
-    // process-global state; this test runs alone on `#[tokio::test]`'s own
-    // (per-test) current-thread runtime and no other test in this binary
-    // reads `HOLLER_ACP_TIMEOUT_MS`, so there is no cross-test race.
+    let _serial = serial_guard().await;
+    // SAFETY: `std::env::set_var` mutates process-global state. `_serial`
+    // guarantees no other test in this file runs concurrently, and no other
+    // test reads `HOLLER_ACP_TIMEOUT_MS`, so there is no cross-test race.
     unsafe {
         std::env::set_var("HOLLER_ACP_TIMEOUT_MS", "300");
     }
@@ -123,8 +151,9 @@ async fn startup_timeout_on_hung_command() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn prompt_streams_chunks_then_done_end_turn() {
+    let _serial = serial_guard().await;
     let config = stub_config("alpha", &["--chunks", "3"]);
     let driver = AcpDriver::spawn(&config).await.expect("spawn");
     let mut stream = driver.prompt("hi").await;
@@ -145,8 +174,9 @@ async fn prompt_streams_chunks_then_done_end_turn() {
     driver.shutdown().await.expect("shutdown");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn cancel_mid_turn_yields_cancelled_and_status_idle_only_after_response() {
+    let _serial = serial_guard().await;
     let config = stub_config("alpha", &["--slow", "--chunks", "5"]);
     let driver = AcpDriver::spawn(&config).await.expect("spawn");
     let mut stream = driver.prompt("hi").await;
@@ -166,10 +196,12 @@ async fn cancel_mid_turn_yields_cancelled_and_status_idle_only_after_response() 
         Some(&DriverEvent::Done(StopReason::Cancelled)),
         "{events:?}"
     );
+    driver.shutdown().await.expect("shutdown");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn prompt_after_cancel_is_fresh_turn() {
+    let _serial = serial_guard().await;
     let config = stub_config("alpha", &["--slow", "--chunks", "5"]);
     let driver = AcpDriver::spawn(&config).await.expect("spawn");
     let mut first = driver.prompt("first-turn-text").await;
@@ -194,8 +226,9 @@ async fn prompt_after_cancel_is_fresh_turn() {
     driver.shutdown().await.expect("shutdown");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn requires_action_maps_to_input_required_then_back_to_working() {
+    let _serial = serial_guard().await;
     let config = stub_config("alpha", &["--ask-permission", "--chunks", "3"]);
     let driver = AcpDriver::spawn(&config).await.expect("spawn");
     let mut stream = driver.prompt("hi").await;
@@ -224,8 +257,9 @@ async fn requires_action_maps_to_input_required_then_back_to_working() {
     driver.shutdown().await.expect("shutdown");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn permission_is_held_not_auto_denied() {
+    let _serial = serial_guard().await;
     let config = stub_config("alpha", &["--ask-permission", "--chunks", "3"]);
     let driver = AcpDriver::spawn(&config).await.expect("spawn");
     let mut stream = driver.prompt("hi").await;
@@ -251,10 +285,12 @@ async fn permission_is_held_not_auto_denied() {
         .cancel()
         .await
         .expect("cancel cleans up the still-pending request");
+    driver.shutdown().await.expect("shutdown");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn cancel_rejects_pending_permission_and_ends_turn_cancelled() {
+    let _serial = serial_guard().await;
     let config = stub_config("alpha", &["--ask-permission", "--chunks", "3"]);
     let driver = AcpDriver::spawn(&config).await.expect("spawn");
     let mut stream = driver.prompt("hi").await;
@@ -278,10 +314,12 @@ async fn cancel_rejects_pending_permission_and_ends_turn_cancelled() {
         driver.answer("allow").await,
         Err(DriverError::NothingPending)
     );
+    driver.shutdown().await.expect("shutdown");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn elicitation_create_is_input_required_with_options() {
+    let _serial = serial_guard().await;
     let config = stub_config("alpha", &["--ask-elicitation", "--chunks", "3"]);
     let driver = AcpDriver::spawn(&config).await.expect("spawn");
     let mut stream = driver.prompt("hi").await;
@@ -305,8 +343,9 @@ async fn elicitation_create_is_input_required_with_options() {
     driver.shutdown().await.expect("shutdown");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn answer_with_nothing_pending_is_error() {
+    let _serial = serial_guard().await;
     let config = stub_config("alpha", &["--chunks", "1"]);
     let driver = AcpDriver::spawn(&config).await.expect("spawn");
     assert_eq!(
@@ -316,28 +355,9 @@ async fn answer_with_nothing_pending_is_error() {
     driver.shutdown().await.expect("shutdown");
 }
 
-#[tokio::test]
-async fn crash_mid_turn_is_error_not_hang() {
-    let config = stub_config("alpha", &["--crash-after-prompt", "--chunks", "3"]);
-    let driver = AcpDriver::spawn(&config).await.expect("spawn");
-    let mut stream = driver.prompt("hi").await;
-    // A generous bound (measured well under 100ms in isolation): crash
-    // detection rides `connection.incoming_closed()`, which needs the SDK's
-    // own blocking-thread-pool reader to observe the child's stdout EOF —
-    // under a loaded test-thread-pool run (many real child processes at
-    // once) that can occasionally take longer than a tight bound would
-    // tolerate. This test's actual assertion is "eventually resolves to
-    // Error", not "resolves within N ms".
-    let events = drain_to_done(&mut stream, Duration::from_secs(15)).await;
-    assert_eq!(
-        events.last(),
-        Some(&DriverEvent::Done(StopReason::Error)),
-        "{events:?}"
-    );
-}
-
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn shutdown_kills_tree_no_orphans() {
+    let _serial = serial_guard().await;
     let config = stub_config("alpha", &["--chunks", "1"]);
     let driver = AcpDriver::spawn(&config).await.expect("spawn");
     driver.shutdown().await.expect("shutdown");
@@ -347,8 +367,9 @@ async fn shutdown_kills_tree_no_orphans() {
     driver.shutdown().await.expect("idempotent shutdown");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn permission_request_surfaces_as_input_required_immediately() {
+    let _serial = serial_guard().await;
     let config = stub_config("alpha", &["--ask-permission", "--chunks", "3"]);
     let driver = AcpDriver::spawn(&config).await.expect("spawn");
     let mut stream = driver.prompt("hi").await;
@@ -373,10 +394,12 @@ async fn permission_request_surfaces_as_input_required_immediately() {
         "InputRequired must be pushed, not polled for"
     );
     driver.cancel().await.expect("cleanup");
+    driver.shutdown().await.expect("shutdown");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn answer_by_index_and_by_option_id_both_resolve_and_reply_is_sent_to_the_agent() {
+    let _serial = serial_guard().await;
     // By index (0 = "allow").
     let config = stub_config("alpha", &["--ask-permission", "--chunks", "2"]);
     let driver = AcpDriver::spawn(&config).await.expect("spawn");
@@ -418,8 +441,9 @@ async fn answer_by_index_and_by_option_id_both_resolve_and_reply_is_sent_to_the_
     driver2.shutdown().await.expect("shutdown");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn answer_with_unresolvable_choice_fails_closed_before_any_reply_is_sent() {
+    let _serial = serial_guard().await;
     let config = stub_config("alpha", &["--ask-permission", "--chunks", "2"]);
     let driver = AcpDriver::spawn(&config).await.expect("spawn");
     let mut stream = driver.prompt("hi").await;
@@ -446,8 +470,9 @@ async fn answer_with_unresolvable_choice_fails_closed_before_any_reply_is_sent()
     driver.shutdown().await.expect("shutdown");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn multi_field_elicitation_resolves_a_comma_separated_choice_one_segment_per_field() {
+    let _serial = serial_guard().await;
     let config = stub_config("alpha", &["--ask-elicitation", "--chunks", "2"]);
     let driver = AcpDriver::spawn(&config).await.expect("spawn");
     let mut stream = driver.prompt("hi").await;
@@ -471,8 +496,9 @@ async fn multi_field_elicitation_resolves_a_comma_separated_choice_one_segment_p
     driver.shutdown().await.expect("shutdown");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn multi_field_elicitation_with_wrong_segment_count_fails_closed() {
+    let _serial = serial_guard().await;
     let config = stub_config("alpha", &["--ask-elicitation", "--chunks", "2"]);
     let driver = AcpDriver::spawn(&config).await.expect("spawn");
     let mut stream = driver.prompt("hi").await;
@@ -500,10 +526,12 @@ async fn multi_field_elicitation_with_wrong_segment_count_fails_closed() {
         "still held open after both failures"
     );
     driver.cancel().await.expect("cleanup");
+    driver.shutdown().await.expect("shutdown");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn cancel_while_permission_pending_replies_cancelled_outcome() {
+    let _serial = serial_guard().await;
     // Distinct from `cancel_rejects_pending_permission_and_ends_turn_cancelled`:
     // this pins that the turn itself resolves `cancelled` (not just that the
     // pending permission is cleared).
@@ -525,11 +553,13 @@ async fn cancel_while_permission_pending_replies_cancelled_outcome() {
         Some(&DriverEvent::Done(StopReason::Cancelled)),
         "{events:?}"
     );
+    driver.shutdown().await.expect("shutdown");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn elicitation_url_mode_and_non_enum_form_fields_are_reported_unsupported_not_silently_dropped(
 ) {
+    let _serial = serial_guard().await;
     let config = stub_config("alpha", &["--ask-elicitation-url", "--chunks", "3"]);
     let driver = AcpDriver::spawn(&config).await.expect("spawn");
     let mut stream = driver.prompt("hi").await;
@@ -560,4 +590,5 @@ async fn elicitation_url_mode_and_non_enum_form_fields_are_reported_unsupported_
         .cancel()
         .await
         .expect("cancel still resolves an unsupported pending item");
+    driver.shutdown().await.expect("shutdown");
 }
