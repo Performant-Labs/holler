@@ -27,6 +27,13 @@ jobs:
         run: rustup toolchain install stable
         shell: pwsh
 
+      # ~/.cargo (registry/git) and target/ across runs, keyed on the OS,
+      # job, and Cargo.lock hash — the standard Swatinem/rust-cache setup.
+      # Cuts the workspace build (holler-body/holler-cli/holler-hub/
+      # holler-proto plus their dev-deps) from a cold multi-minute build to
+      # a warm incremental one on every step below that invokes `cargo`.
+      - uses: Swatinem/rust-cache@v2
+
       # Step 0 (issue #149/#155): the source-shape guards that need no
       # compiler — unjustified #[allow], process::exit outside main.rs, a
       # hard-coded CARGO_BIN_EXE_ path, an oversized file, an unattributed
@@ -36,18 +43,47 @@ jobs:
         run: bash scripts/lint.sh
         shell: bash
 
-      # The canary is the first gate. `--test wire_selftest` alone (not
-      # `cargo test`, which also builds the libs) so CI goes red as early as
-      # possible if the runner ever swallows a failure. This is the
-      # test-of-tests: it proves the harness detects a child that exits 1, a
-      # nested panic, a closed-port connect, and a booted tokio runtime —
-      # before any real e2e relies on the runner (ADR 0002; Windows off).
+      # 1. The canary is the first gate that touches the compiler.
+      # `--test wire_selftest` alone (not `cargo test`, which also builds
+      # the libs) so CI goes red as early as possible if the runner ever
+      # swallows a failure. This is the test-of-tests: it proves the
+      # harness detects a child that exits 1, a nested panic, a closed-port
+      # connect, and a booted tokio runtime — before any real e2e relies on
+      # the runner (ADR 0002; Windows off).
       - name: Canary (fail-fast)
         run: cargo test -p holler-cli --test wire_selftest
         shell: pwsh
 
-      - name: Full test suite
+      # 2. The wire-protocol crate in isolation — the shared vocabulary
+      # every other crate depends on. Named separately so a wire/codec
+      # regression is attributable at a glance, without waiting on the
+      # rest of the workspace to build.
+      - name: Codec
+        run: cargo test -p holler-proto
+        shell: pwsh
+
+      # 3. Everything else: holler-body, holler-cli, holler-hub, and the
+      # remaining holler-proto/holler-cli integration suites (including
+      # docs_cli_test.rs and docs_wire_test.rs). Excludes `#[ignore]`d
+      # tests by default (both the real cross-process ones covered by step
+      # 4, and the upstream-SDK-blocked ones tracked under #188/#272, which
+      # stay skipped everywhere in this matrix).
+      - name: Workspace suite
         run: cargo test --workspace
+        shell: pwsh
+
+      # 4. Real cross-process interop, run explicitly via `-- --ignored`.
+      # These two body_run_test.rs cases are the single-binary equivalent
+      # of holler-server's split-binary interop step: they start a real
+      # `holler hub serve` + a real `holler body run` and time an actual
+      # process restart and reconnect (hub_restart_is_recovered_by_reconnect,
+      # fresh_hello_and_presence_on_every_reconnect), tagged
+      # "test-tag-interop" in the source. Deliberately does NOT include
+      # acp_driver_crash_test.rs / session_manager_test.rs's `#[ignore]`d
+      # cases — those are the upstream SDK crash-watcher defect (#188/#272),
+      # confirmed not fixable in this crate, and stay skipped here too.
+      - name: Interop-tagged (real cross-process)
+        run: cargo test -p holler-cli --test body_run_test -- --ignored
         shell: pwsh
 
       # The runner-port story (#170) adds scripts/test_selection_test.rb;
@@ -105,8 +141,22 @@ jobs:
           echo "ok: exec --list ran without erroring (catalog empty -> 0 cases, tolerated)"
         shell: bash
 
+      # 5. Clippy over the whole workspace, including test/bench targets —
+      # a `#[cfg(test)]`-only lint violation must fail CI too.
       - name: Clippy
-        run: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets -- -D warnings
+        shell: pwsh
+
+      # 6. Docs: docs_cli_test.rs parses every `holler …` command shown in
+      # README.md and docs/**/*.md against the real CLI and fails if one no
+      # longer matches — the "README parses as documented" check the issue
+      # asks for already exists as this test. Named separately (it also
+      # runs as part of step 3's `cargo test --workspace`) so a docs
+      # regression is attributable without having to open the workspace-
+      # suite log. scripts/lint.sh already runs as its own named step
+      # above, so it is not duplicated here.
+      - name: Docs
+        run: cargo test -p holler-cli --test docs_cli_test
         shell: pwsh
 
       # Unused dependencies fail the build (issue #155 §7): a crate must

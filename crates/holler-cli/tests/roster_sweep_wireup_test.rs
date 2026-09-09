@@ -57,6 +57,11 @@ fn conn_state_of<'a>(v: &'a Value, name: &str) -> Option<&'a str> {
         .as_str()
 }
 
+/// A roster row's `name` is `"<token label>/<session name>"`, not the bare
+/// session name — `roster_all_json`'s `rows[].name` field for the session
+/// `"alpha"` minted under the `"body-1"` label below is `"body-1/alpha"`.
+const ALPHA_ROW: &str = "body-1/alpha";
+
 #[test]
 fn roster_sweep_runs_in_production_hub_without_being_called_directly() {
     let hub_state = StateDir::new();
@@ -92,7 +97,7 @@ fn roster_sweep_runs_in_production_hub_without_being_called_directly() {
     // heartbeat (never a blind sleep, ADR 0002).
     wait_for(Duration::from_secs(15), || {
         let v = roster_all_json(&hub_state);
-        (conn_state_of(&v, "alpha") == Some("connected")).then_some(())
+        (conn_state_of(&v, ALPHA_ROW) == Some("connected")).then_some(())
     })
     .expect("the roster shows `alpha` connected before the freeze");
 
@@ -111,11 +116,11 @@ fn roster_sweep_runs_in_production_hub_without_being_called_directly() {
     let sweep_result = (|| {
         wait_for(Duration::from_secs(10), || {
             let v = roster_all_json(&hub_state);
-            (conn_state_of(&v, "alpha") == Some("reconnecting")).then_some(())
+            (conn_state_of(&v, ALPHA_ROW) == Some("reconnecting")).then_some(())
         })?;
         wait_for(Duration::from_secs(10), || {
             let v = roster_all_json(&hub_state);
-            (conn_state_of(&v, "alpha") == Some("gone")).then_some(())
+            (conn_state_of(&v, ALPHA_ROW) == Some("gone")).then_some(())
         })
     })();
 
