@@ -156,6 +156,14 @@ path = "tests/roster_cli_test.rs"
 name = "roster_sweep_wireup_test"
 path = "tests/roster_sweep_wireup_test.rs"
 
+# `answer SESSION CHOICE` (issue #151): resolve a held permission/elicitation
+# against a real hub + body + `stub-acp` (`--ask-permission`/
+# `--ask-elicitation`). Lives here for the same `CARGO_BIN_EXE_stub-acp`
+# reason as `talk_test` / `roster_cli_test` above.
+[[test]]
+name = "answer_cli_test"
+path = "tests/answer_cli_test.rs"
+
 # Declare only what is consumed (issue #155 §7 — `cargo machete` fails CI
 # otherwise). A story that starts using a workspace dependency adds it here in
 # the same PR; the skeleton's speculative list was removed in #155.

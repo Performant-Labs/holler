@@ -27,16 +27,15 @@
 //! threading 7-15 loose positional parameters — a pure refactor, no behavior
 //! change.
 
+mod session_dispatch;
+
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
 use futures_util::{Sink, SinkExt, Stream, StreamExt};
 use holler_proto::log::{Component, Direction as LogDirection, Event, Severity};
-use holler_proto::{
-    Authenticate, Cancel, Code, CorrelationId, Envelope, Hello, HelloRole, PingAck, Presence,
-    Prompt,
-};
+use holler_proto::{Authenticate, Code, CorrelationId, Envelope, Hello, HelloRole, PingAck, Presence};
 use tokio::signal::unix::{signal, SignalKind};
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::{Error as WsError, Message};
@@ -630,19 +629,18 @@ where
                 warn("conn_superseded", vec![]);
                 FrameOutcome::Superseded
             }
-            Envelope::Request { id, method, params } if method == "session/prompt" => {
-                match holler_proto::typed_params::<Prompt>(&Envelope::Request { id: id.clone(), method, params }) {
-                    Ok(p) => spawn_prompt_dispatch(self.session_manager, &self.outbound_tx, id, p),
-                    Err(e) => send_invalid_params(self.sink, &id, &e).await,
-                }
-                FrameOutcome::Continue
-            }
-            Envelope::Request { id, method, params } if method == "session/cancel" => {
-                match holler_proto::typed_params::<Cancel>(&Envelope::Request { id: id.clone(), method, params }) {
-                    Ok(p) => spawn_cancel_dispatch(self.session_manager, &self.outbound_tx, id, p),
-                    Err(e) => send_invalid_params(self.sink, &id, &e).await,
-                }
-                FrameOutcome::Continue
+            Envelope::Request { id, method, params }
+                if matches!(method.as_str(), "session/prompt" | "session/cancel" | "session/answer") =>
+            {
+                session_dispatch::dispatch_session_request(
+                    self.sink,
+                    self.session_manager,
+                    &self.outbound_tx,
+                    id,
+                    method,
+                    params,
+                )
+                .await
             }
             Envelope::Request { id, .. } => {
                 let Ok(cid) = CorrelationId::parse(&id) else { return FrameOutcome::Continue };
@@ -763,46 +761,6 @@ where
     let presence: Presence = session_manager.presence_doc(identity.hostname.clone());
     let params = serde_json::to_value(presence).map_err(|_| ())?;
     send(sink, &Envelope::notification("session/presence", Some(params))).await
-}
-
-/// Spawn a `session/prompt` dispatch task. Split out of [`LiveConnection::
-/// handle_text`] (used once, but alongside [`spawn_cancel_dispatch`]/
-/// [`send_invalid_params`], to keep that dispatch's cognitive complexity
-/// under the workspace threshold).
-fn spawn_prompt_dispatch(
-    session_manager: &Arc<SessionManager>,
-    outbound_tx: &mpsc::UnboundedSender<Message>,
-    id: String,
-    params: Prompt,
-) {
-    let sm = Arc::clone(session_manager);
-    let ob = outbound_tx.clone();
-    tokio::spawn(crate::prompt_dispatch::handle_prompt(sm, id, params, ob));
-}
-
-/// Spawn a `session/cancel` dispatch task. See [`spawn_prompt_dispatch`]'s
-/// own doc.
-fn spawn_cancel_dispatch(
-    session_manager: &Arc<SessionManager>,
-    outbound_tx: &mpsc::UnboundedSender<Message>,
-    id: String,
-    params: Cancel,
-) {
-    let sm = Arc::clone(session_manager);
-    let ob = outbound_tx.clone();
-    tokio::spawn(crate::prompt_dispatch::handle_cancel(sm, id, params, ob));
-}
-
-/// Answer a `session/prompt`/`session/cancel` whose params failed to parse
-/// with `-32602 invalid_params`. See [`spawn_prompt_dispatch`]'s own doc.
-async fn send_invalid_params<Snk>(sink: &mut Snk, id: &str, e: &holler_proto::WireError)
-where
-    Snk: Sink<Message, Error = WsError> + Unpin,
-{
-    if let Ok(cid) = CorrelationId::parse(id) {
-        let err = holler_proto::WireError::new(Code::InvalidParams, &e.message, None);
-        let _ = send(sink, &Envelope::error_frame(&cid, &err)).await;
-    }
 }
 
 /// Answer one `query/*` request (issue #185) from local state — see

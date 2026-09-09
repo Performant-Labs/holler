@@ -12,6 +12,7 @@ use std::collections::BTreeMap;
 
 use agent_client_protocol::schema::v2;
 use agent_client_protocol::Responder;
+use holler_proto::docs::{PendingItem, PendingKind};
 
 use super::answerable::OptionSet;
 use super::DriverError;
@@ -46,6 +47,15 @@ pub(super) struct PendingBlock {
     /// Still held open and still surfaced as `InputRequired` — never silently
     /// dropped — but `answer()` against it always fails closed.
     pub(super) unsupported: Option<String>,
+    /// Which ACP request this is (issue #151's `session/presence.pending`
+    /// needs this so the roster's `PENDING` column can say *what* is being
+    /// asked).
+    pub(super) kind: PendingKind,
+    /// The human-readable question: the permission's own `title`, or the
+    /// elicitation's own `message` (see [`permission_fields`]/
+    /// [`elicitation_fields`]'s callers in `connection.rs`, which have the
+    /// original request and thread it in here).
+    pub(super) prompt: String,
 }
 
 /// Reply `Cancelled`/`Cancel` to a pending request (the ACP v2 cancellation
@@ -199,6 +209,38 @@ pub(super) fn elicitation_fields(
         );
     }
     (fields, None)
+}
+
+/// Build this pending block's [`PendingItem`]s (issue #151): one per
+/// resolvable field (each field is independently answerable — a multi-field
+/// elicitation's own `answer()` resolves one comma segment per field, in
+/// this same order), or a single placeholder item when the block itself is
+/// `unsupported` (held open, but with no resolvable field at all — still
+/// surfaced, never silently dropped). `id` is the field's own name for a
+/// named elicitation field, or its position for a permission's single
+/// unnamed field / the unsupported placeholder — stable within one held
+/// block, which is all `session/presence` needs it for (the wire `answer`
+/// itself takes a `choice`, not this `id`).
+pub(super) fn pending_items(block: &PendingBlock) -> Vec<PendingItem> {
+    if block.fields.is_empty() {
+        return vec![PendingItem {
+            id: "0".to_string(),
+            kind: block.kind,
+            prompt: block.prompt.clone(),
+            options: Vec::new(),
+        }];
+    }
+    block
+        .fields
+        .iter()
+        .enumerate()
+        .map(|(index, field)| PendingItem {
+            id: if field.name.is_empty() { index.to_string() } else { field.name.clone() },
+            kind: block.kind,
+            prompt: block.prompt.clone(),
+            options: field.options.labels(),
+        })
+        .collect()
 }
 
 /// Resolve one elicitation form property to a [`PendingField`], or the

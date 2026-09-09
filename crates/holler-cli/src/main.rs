@@ -55,6 +55,28 @@ fn not_implemented(story: &str) -> ! {
     std::process::exit(1);
 }
 
+/// Print a leaf command's result (a refusal to stderr with the `error: `
+/// prefix, a success to stdout) and exit with its own code. Shared by
+/// `Roster`/`Say`/`Answer` (issue #151 added the third — inlining its own
+/// copy of this same four-line if/else pushed `main` past the workspace's
+/// cognitive-complexity/line-count guards) so each call site is one line.
+/// `newline_on_success`: `Roster`'s table already ends every line with its
+/// own `\n` (`print!`, no extra one); `Say`/`Answer`'s reply text does not
+/// (`println!` adds it) — the one difference between the three call sites'
+/// prior inline copies.
+fn print_leaf_result_and_exit(message: &str, to_stderr: bool, exit_code: i32, newline_on_success: bool) -> ! {
+    if !message.is_empty() {
+        if to_stderr {
+            eprintln!("error: {message}");
+        } else if newline_on_success {
+            println!("{message}");
+        } else {
+            print!("{message}");
+        }
+    }
+    std::process::exit(exit_code);
+}
+
 fn main() {
     // Install the rustls crypto provider before any I/O: a `wss://` (TLS)
     // WebSocket needs a process-global provider set up ahead of the first
@@ -169,25 +191,15 @@ fn main() {
 
     if let Command::Roster(roster) = &cli.command {
         let result = holler_cli::roster_cmd::run(roster, cli.json);
-        if !result.message.is_empty() {
-            if result.to_stderr {
-                eprintln!("error: {}", result.message);
-            } else {
-                print!("{}", result.message);
-            }
-        }
-        std::process::exit(result.exit_code);
+        print_leaf_result_and_exit(&result.message, result.to_stderr, result.exit_code, false);
     }
     if let Command::Say(say) = &cli.command {
         let result = holler_cli::say_cmd::run(say, cli.json);
-        if !result.message.is_empty() {
-            if result.to_stderr {
-                eprintln!("error: {}", result.message);
-            } else {
-                println!("{}", result.message);
-            }
-        }
-        std::process::exit(result.exit_code);
+        print_leaf_result_and_exit(&result.message, result.to_stderr, result.exit_code, true);
+    }
+    if let Command::Answer(answer) = &cli.command {
+        let result = holler_cli::answer_cmd::run(answer, cli.json);
+        print_leaf_result_and_exit(&result.message, result.to_stderr, result.exit_code, true);
     }
 
     let story = match &cli.command {
@@ -196,6 +208,7 @@ fn main() {
         Command::Hub(_) => not_implemented("Hub"),
         Command::Roster(_) => not_implemented("Roster"),
         Command::Say(_) => not_implemented("Say"),
+        Command::Answer(_) => not_implemented("Answer"),
         Command::Interrupt(_) => "Interrupt",
         Command::Body(_) => not_implemented("Body"),
     };
