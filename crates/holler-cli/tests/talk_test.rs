@@ -25,11 +25,11 @@ mod support;
 
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
-use support::{join, mint_token, wait_for, write_sessions_toml, Body, Hub, StateDir};
+use support::{join, kill_tree, mint_token, wait_for, write_sessions_toml, Body, Hub, StateDir};
 
 fn stdout_of(out: &Output) -> String {
     String::from_utf8_lossy(&out.stdout).into_owned()
@@ -425,4 +425,63 @@ fn say_timeout_message() {
     assert_eq!(out.status.code(), Some(1), "stderr: {}", stderr_of(&out));
     let err = stderr_of(&out);
     assert!(err.contains("no reply from") && err.contains("1s"), "got: {err:?}");
+}
+
+/// Issue #243: a body that goes silent **without closing the TCP socket**
+/// (a sleep/suspend, or a silent network partition — as opposed to
+/// `body_drop_mid_turn_is_connection_lost_not_unreachable`'s `kill_tree`,
+/// which sends a real FIN/RST the hub's socket read immediately observes)
+/// must still have the hub notice within a bounded time and fail any `say`
+/// routed to it with `connection_lost`, never hang forever.
+///
+/// `SIGSTOP` on the body process itself (not its process group / children,
+/// and never `kill_tree`) is what produces exactly that: every thread in the
+/// body freezes mid-flight, so it stops both reading and writing, but the
+/// kernel-level TCP connection stays fully established (no FIN, no RST) —
+/// this is the real mechanism issue #243's own repro describes, not a mock
+/// of it. `HOLLER_HUB_LIVENESS_TIMEOUT_MS` (this story's own env override,
+/// `circuit.rs`'s `liveness_timeout()`) is set far below the CLI's own
+/// `--timeout` so a passing run proves the *hub's* liveness check ended the
+/// connection, not the `say` client's own wait.
+#[test]
+fn body_frozen_without_close_is_connection_lost_within_bounded_time() {
+    let hub_state = StateDir::new();
+    let body_state = StateDir::new();
+    let hub = Hub::start_with_env(&hub_state, &[("HOLLER_HUB_LIVENESS_TIMEOUT_MS", "800")]);
+    let mut body = start_body(&hub_state, &body_state, &hub, &[("alpha", &["--chunks", "1"])]);
+
+    let warm = say_ready(&hub_state, "alpha", "warm up", Duration::from_secs(10));
+    assert!(warm.status.success(), "stderr: {}", stderr_of(&warm));
+
+    // Freeze the body process in place. A positive pid signals only this one
+    // process (not `-pid`, which would also freeze the `stub-acp` agent it
+    // spawned) — irrelevant to the hub's own socket either way, but keeps
+    // this test's intent (freeze the peer holding the connection) exact.
+    let pid = body.child_mut().id() as i32;
+    unsafe {
+        libc::kill(pid, libc::SIGSTOP);
+    }
+
+    let started = Instant::now();
+    let out = say_full(hub_state.path(), &["--timeout", "20s", "alpha", "are you there"]);
+    let elapsed = started.elapsed();
+
+    // Resume then reap the frozen body before any assertion below can panic
+    // and skip cleanup (a `SIGSTOP`ped process is otherwise left behind).
+    unsafe {
+        libc::kill(pid, libc::SIGCONT);
+    }
+    kill_tree(body.child_mut());
+
+    assert_eq!(out.status.code(), Some(1), "stderr: {}", stderr_of(&out));
+    let err = stderr_of(&out);
+    assert!(err.contains("connection_lost") || err.contains("disconnected"), "got: {err:?}");
+    assert!(
+        !err.contains("no reply from"),
+        "must be the hub's own liveness check, not the CLI's --timeout firing: {err:?}"
+    );
+    assert!(
+        elapsed < Duration::from_secs(10),
+        "the hub's 800ms liveness timeout must end the say well under the 20s CLI --timeout; took {elapsed:?}"
+    );
 }
