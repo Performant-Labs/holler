@@ -338,7 +338,6 @@ fn start_hub_at(state: &StateDir, addr: &str) -> std::process::Child {
 /// Issue #182: "stop hub, start again on the same port, body reports
 /// `connected` again <= 35s".
 #[test]
-#[ignore] // test-tag-interop: real cross-process hub restart, excluded from the default suite.
 fn hub_restart_is_recovered_by_reconnect() {
     let state = StateDir::new();
     let addr = "127.0.0.1:41917"; // a fixed, unusual port (unlikely to collide locally).
@@ -372,7 +371,6 @@ fn hub_restart_is_recovered_by_reconnect() {
 /// authenticate → hello exchange succeeds) as the observable proxy, since the
 /// hub exposes no hello counter on the wire.
 #[test]
-#[ignore] // test-tag-interop: real cross-process hub restarts, excluded from the default suite.
 fn fresh_hello_and_presence_on_every_reconnect() {
     let state = StateDir::new();
     let addr = "127.0.0.1:41918";
