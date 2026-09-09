@@ -8,7 +8,28 @@ Phase 1 is a hard gate. Run every pre-flight check; do not stop at the first fai
 
 ---
 
-Filing rules, Phase 1 (Pre-flight), Phase 2's plan/run mechanics, and Phase 3 (Findings report) are canonical in playbook — read and follow `~/Projects/playbook/workflow/review-battery-all.md` verbatim for those sections; do not hand-copy them here, they will drift. This file carries ONLY Holler's specific default-battery pass prompts below.
+Filing rules, Phase 2's plan/run mechanics, and Phase 3 (Findings report) are canonical in playbook — read and follow `~/Projects/playbook/workflow/review-battery-all.md` verbatim for those sections; do not hand-copy them here, they will drift.
+
+---
+
+## Phase 1 — repo-specific deltas
+
+Playbook's canonical Phase 1 pre-flight table is npm-flavored; Holler is a Rust workspace, so these
+rows differ from playbook's canonical Phase 1 table. Everything else in Phase 1 (the icon/color
+printing spec, the general table structure, the output rules) is canonical there — follow it
+verbatim.
+
+- ADR range: `docs/adr/ADR-0001.md`–`docs/adr/ADR-0006.md` (not playbook's `0001.md`–`0013.md`).
+- Product suite: `cargo test`, `cargo clippy`, `cargo fmt --check` (not `npm test`, `npm run
+  check`, `npm run test:e2e`).
+- Build-junk / detritus patterns: `target/`, `holler-state/`, `*.log`, `sessions.toml`,
+  `attach.toml` (not `dist/`, `coverage/`, `*.tsbuildinfo`, `playwright-report/`,
+  `test-results/`).
+- Extra check row (Holler has no npm-flavored equivalent): "Build guards still pass | gate |
+  `scripts/lint.sh` | lint.sh fails (dead-code allow without issue link, `process::exit` outside
+  `main.rs`, file-size guard, dep-feature-comment)".
+- Phase 2a plan-step axis list: `Shape, Truth+Safety, Spec, Exploitability, Tests, Protocol,
+  Concurrency, Rollout, Scope` (no webapp/a11y-dormant line, and shorter than Aftersight's list).
 
 ---
 
