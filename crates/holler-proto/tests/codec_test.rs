@@ -441,6 +441,8 @@ fn presence_session_ad_carries_turn_timing_only_while_working() {
         turn_started_at: Some("2026-09-08T12:00:00Z".into()),
         last_update_at: Some("2026-09-08T12:00:03Z".into()),
         pending: None,
+        turn_id: None,
+        last_turn: None,
     };
     let wire = serde_json::to_value(&working).unwrap();
     assert_eq!(wire["turn_started_at"], serde_json::json!("2026-09-08T12:00:00Z"));
@@ -457,6 +459,8 @@ fn presence_session_ad_carries_turn_timing_only_while_working() {
         turn_started_at: None,
         last_update_at: None,
         pending: None,
+        turn_id: None,
+        last_turn: None,
     };
     let wire = serde_json::to_value(&idle).unwrap();
     assert!(wire.get("turn_started_at").is_none(), "absent, not null, when idle");
@@ -494,6 +498,8 @@ fn presence_session_ad_carries_pending_only_while_input_required() {
                 options: vec!["main".into(), "release/1.0".into()],
             },
         ]),
+        turn_id: Some("h-01HTESTPENDING000000000000".into()),
+        last_turn: None,
     };
     let wire = serde_json::to_value(&input_required).unwrap();
     let pend = wire["pending"].as_array().expect("pending is an array on the wire");
@@ -512,9 +518,82 @@ fn presence_session_ad_carries_pending_only_while_input_required() {
         turn_started_at: Some("2026-09-08T12:00:00Z".into()),
         last_update_at: Some("2026-09-08T12:00:03Z".into()),
         pending: None,
+        turn_id: Some("h-01HTESTWORKING000000000000".into()),
+        last_turn: None,
     };
     let wire = serde_json::to_value(&working).unwrap();
     assert!(wire.get("pending").is_none(), "absent, not null, when working");
+}
+
+/// A presence row's `turn_id`/`last_turn` (issue #142) round-trip; `turn_id`
+/// is absent (not `null`) before a session's first prompt, and `last_turn`
+/// is absent until a turn has actually ended — both are independent of
+/// `state`, unlike the `working`-only and `input-required`-only fields above.
+#[test]
+fn presence_session_ad_carries_turn_id_and_last_turn() {
+    use docs::{LastTurn, Mode, SessionAd, SessionState};
+
+    // Before the first prompt: neither field is on the wire.
+    let fresh = SessionAd {
+        name: "alpha".into(),
+        harness: "opencode".into(),
+        state: SessionState::Idle,
+        mode: Mode::Spawn,
+        harness_session_id: None,
+        turn_started_at: None,
+        last_update_at: None,
+        pending: None,
+        turn_id: None,
+        last_turn: None,
+    };
+    let wire = serde_json::to_value(&fresh).unwrap();
+    assert!(wire.get("turn_id").is_none(), "absent, not null, before the first prompt");
+    assert!(wire.get("last_turn").is_none(), "absent, not null, before any turn has ended");
+    let back: SessionAd = serde_json::from_value(wire).unwrap();
+    assert_eq!(back, fresh);
+
+    // After a turn has completed: idle again, but turn_id/last_turn persist.
+    let settled = SessionAd {
+        name: "alpha".into(),
+        harness: "opencode".into(),
+        state: SessionState::Idle,
+        mode: Mode::Spawn,
+        harness_session_id: None,
+        turn_started_at: None,
+        last_update_at: None,
+        pending: None,
+        turn_id: Some("h-01HTESTTURN0000000000000A".into()),
+        last_turn: Some(LastTurn {
+            turn_id: "h-01HTESTTURN0000000000000A".into(),
+            state: SessionState::Completed,
+            stop_reason: "end_turn".into(),
+            ended_at: "2026-09-08T12:00:05Z".into(),
+        }),
+    };
+    let wire = serde_json::to_value(&settled).unwrap();
+    assert_eq!(wire["turn_id"], serde_json::json!("h-01HTESTTURN0000000000000A"));
+    assert_eq!(wire["last_turn"]["state"], serde_json::json!("completed"));
+    assert_eq!(wire["last_turn"]["stop_reason"], serde_json::json!("end_turn"));
+    assert_eq!(wire["last_turn"]["ended_at"], serde_json::json!("2026-09-08T12:00:05Z"));
+    let back: SessionAd = serde_json::from_value(wire).unwrap();
+    assert_eq!(back, settled);
+
+    // Rejected/canceled/failed all round-trip through the same LastTurn shape.
+    for (state, stop_reason) in [
+        (SessionState::Canceled, "cancelled"),
+        (SessionState::Failed, "error"),
+        (SessionState::Rejected, "refusal"),
+    ] {
+        let lt = LastTurn {
+            turn_id: "h-01HTESTTURN0000000000000B".into(),
+            state,
+            stop_reason: stop_reason.into(),
+            ended_at: "2026-09-08T12:01:00Z".into(),
+        };
+        let wire = serde_json::to_value(&lt).unwrap();
+        let back: LastTurn = serde_json::from_value(wire).unwrap();
+        assert_eq!(back, lt);
+    }
 }
 
 // ---------------------------------------------------------------------------
