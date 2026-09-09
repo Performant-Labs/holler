@@ -1,9 +1,4 @@
 {
-  "protocol": 2,
-  "protocol_min": 2,
-  "protocol_max": 2,
-  "role": "hub",
-  "hostname": "uranus",
   "features": [
     "interrupt",
     "presence",
@@ -12,10 +7,15 @@
     "roster",
     "token"
   ],
+  "harnesses_confirmed": [
+    "opencode"
+  ],
   "harnesses_known": [
     "opencode"
   ],
-  "harnesses_confirmed": [
-    "opencode"
-  ]
+  "hostname": "uranus",
+  "protocol": 2,
+  "protocol_max": 2,
+  "protocol_min": 2,
+  "role": "hub"
 }

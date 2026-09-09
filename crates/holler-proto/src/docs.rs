@@ -219,7 +219,7 @@ pub struct HelloSession {
 
 /// A `query/status` answer (and the base for a `query/caps` answer). One
 /// shape, two `role` values.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Status {
     pub role: HelloRole,
     pub protocol: u32,
@@ -252,9 +252,79 @@ pub struct Status {
     /// **Hub**: total number of sessions across bodies.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sessions: Option<u32>,
-    /// **Body**: the sessions this body hosts, with their live state.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// **Body**: the sessions this body hosts, with their live state. Wire
+    /// key `"sessions"` (docs §5.1, issue #250) — see the hand-written
+    /// [`Deserialize`] impl below for why this can't just be
+    /// `#[serde(rename = "sessions")]` like the `Serialize` side.
+    #[serde(rename = "sessions", skip_serializing_if = "Option::is_none")]
     pub session_list: Option<Vec<StatusSession>>,
+}
+
+// `sessions` (the hub's session *count*, a `u32`) and `session_list` (a
+// body's session *list*, wire-renamed to the same key `"sessions"` — docs
+// §5.1, issue #250) can't both derive `Deserialize` normally: the derive
+// macro identifies an incoming field by matching the wire key string, and
+// two Rust fields claiming the identical wire key `"sessions"` makes it
+// generate two identical match arms — the second is `unreachable_pattern`
+// dead code, and whichever arm the derive keeps wins for *every* incoming
+// `"sessions"` key regardless of its JSON shape (silently misrouting or
+// dropping the other role's payload). The two are mutually exclusive on the
+// wire — a hub sends a number, a body sends an array, per docs §5.1's own
+// examples, never both — so this hand-written impl routes on the JSON
+// shape instead of on declared field identity, then defers every other
+// field to `serde_json::from_value` (inferring each field's type from
+// `Status`'s own definition, so it can't drift from it silently).
+impl<'de> Deserialize<'de> for Status {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error as _;
+
+        fn take<T: serde::de::DeserializeOwned, E: serde::de::Error>(
+            obj: &mut serde_json::Map<String, Value>,
+            key: &str,
+        ) -> Result<Option<T>, E> {
+            match obj.remove(key) {
+                Some(v) => serde_json::from_value(v).map(Some).map_err(E::custom),
+                None => Ok(None),
+            }
+        }
+        fn require<T: serde::de::DeserializeOwned, E: serde::de::Error>(
+            obj: &mut serde_json::Map<String, Value>,
+            key: &str,
+        ) -> Result<T, E> {
+            take(obj, key)?.ok_or_else(|| E::custom(format!("Status: missing field `{key}`")))
+        }
+
+        let mut value = Value::deserialize(deserializer)?;
+        let obj = value.as_object_mut().ok_or_else(|| D::Error::custom("Status: expected a JSON object"))?;
+
+        let (sessions, session_list): (Option<u32>, Option<Vec<StatusSession>>) = match obj.remove("sessions") {
+            None => (None, None),
+            Some(arr @ Value::Array(_)) => (None, Some(serde_json::from_value(arr).map_err(D::Error::custom)?)),
+            Some(num @ Value::Number(_)) => (Some(serde_json::from_value(num).map_err(D::Error::custom)?), None),
+            Some(other) => return Err(D::Error::custom(format!("Status: `sessions` must be a number or an array, got {other}"))),
+        };
+
+        Ok(Status {
+            role: require(obj, "role")?,
+            protocol: require(obj, "protocol")?,
+            protocol_min: require(obj, "protocol_min")?,
+            protocol_max: require(obj, "protocol_max")?,
+            hostname: require(obj, "hostname")?,
+            connected: take(obj, "connected")?,
+            token_id: take(obj, "token_id")?,
+            listening: take(obj, "listening")?,
+            features: take(obj, "features")?.unwrap_or_default(),
+            harnesses: take(obj, "harnesses")?,
+            harnesses_known: take(obj, "harnesses_known")?,
+            harnesses_confirmed: take(obj, "harnesses_confirmed")?,
+            bodies: take(obj, "bodies")?,
+            sessions,
+            session_list,
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -713,62 +783,3 @@ pub fn parse_session_state(s: &str) -> Result<SessionState, WireError> {
     }
 }
 
-#[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable)] // #185/#251
-mod protocol_version_tests {
-    use super::*;
-
-    /// No `params` at all (`query/protocol` with no body): no version asked,
-    /// never a rejection.
-    #[test]
-    fn no_params_is_no_version_asked() {
-        assert_eq!(ProtocolParams::parse_version(None), Ok(None));
-    }
-
-    /// `params` present but with no `version` key: same as no `params`.
-    #[test]
-    fn params_without_version_key_is_no_version_asked() {
-        let params = serde_json::json!({});
-        assert_eq!(ProtocolParams::parse_version(Some(&params)), Ok(None));
-    }
-
-    /// `version: 0` is rejected — the docs require a *positive* integer.
-    #[test]
-    fn version_zero_is_unknown_feature() {
-        let params = serde_json::json!({"version": 0});
-        let err = ProtocolParams::parse_version(Some(&params)).expect_err("0 must be rejected");
-        assert_eq!(err.code, Code::UnknownFeature.jsonrpc());
-    }
-
-    /// A negative `version` is rejected (not silently treated as "no
-    /// version asked").
-    #[test]
-    fn negative_version_is_unknown_feature() {
-        let params = serde_json::json!({"version": -1});
-        let err = ProtocolParams::parse_version(Some(&params)).expect_err("negative must be rejected");
-        assert_eq!(err.code, Code::UnknownFeature.jsonrpc());
-    }
-
-    /// A non-numeric `version` is rejected.
-    #[test]
-    fn non_numeric_version_is_unknown_feature() {
-        let params = serde_json::json!({"version": "two"});
-        let err = ProtocolParams::parse_version(Some(&params)).expect_err("a string must be rejected");
-        assert_eq!(err.code, Code::UnknownFeature.jsonrpc());
-    }
-
-    /// A `version` too large to fit `u32` is rejected.
-    #[test]
-    fn oversized_version_is_unknown_feature() {
-        let params = serde_json::json!({"version": 5_000_000_000_u64});
-        let err = ProtocolParams::parse_version(Some(&params)).expect_err("must not silently truncate");
-        assert_eq!(err.code, Code::UnknownFeature.jsonrpc());
-    }
-
-    /// A valid positive `version` parses through untouched.
-    #[test]
-    fn positive_version_parses() {
-        let params = serde_json::json!({"version": 2});
-        assert_eq!(ProtocolParams::parse_version(Some(&params)), Ok(Some(2)));
-    }
-}

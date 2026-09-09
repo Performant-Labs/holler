@@ -1,24 +1,24 @@
 {
-  "role": "hub",
-  "protocol": 2,
-  "protocol_min": 2,
-  "protocol_max": 2,
-  "hostname": "uranus",
-  "listening": "ws://127.0.0.1:41807",
+  "bodies": 1,
   "features": [
     "roster"
+  ],
+  "harnesses_confirmed": [
+    {
+      "bodies": [
+        "kiwi"
+      ],
+      "id": "opencode"
+    }
   ],
   "harnesses_known": [
     "opencode"
   ],
-  "harnesses_confirmed": [
-    {
-      "id": "opencode",
-      "bodies": [
-        "kiwi"
-      ]
-    }
-  ],
-  "bodies": 1,
+  "hostname": "uranus",
+  "listening": "ws://127.0.0.1:41807",
+  "protocol": 2,
+  "protocol_max": 2,
+  "protocol_min": 2,
+  "role": "hub",
   "sessions": 2
 }
