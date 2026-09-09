@@ -368,21 +368,49 @@ pub fn mint_token(state: &StateDir, label: &str) -> (String, String) {
 
 /// Join `state`'s body to the hub at `ws_url` using the minted token, and
 /// assert the join succeeded (exit 0).
+///
+/// Retries the join a few times before failing. `body join` reads the hub's
+/// `tokens.json` (in the hub's state dir) to redeem the one-time secret, and a
+/// token is minted by a *separate* CLI process writing that same file — so on
+/// a loaded CI runner the freshly-minted token can transiently read as absent
+/// ("no matching token"), a test-harness race that is unrelated to the feature
+/// under test. A real failure (a genuinely bad token, an already-redeemed
+/// secret) is reproduced on every retry, so a bounded retry loop only absorbs
+/// the race and still surfaces every genuine join failure. (Issue #186 CI
+/// hardening — this is what kept `say_ambiguous*` flapping on the shared
+/// ubuntu runner.)
 pub fn join(state: &StateDir, ws_url: &str, token_id: &str, secret: &str) {
     let token = format!("{token_id}:{secret}");
-    let out = holler_cmd(state)
-        .args(["body", "join", "--server", ws_url, "--token", &token])
+    let mut out = run_join(state, ws_url, &token);
+    for attempt in 1..=5 {
+        if out.status.success() {
+            return;
+        }
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        // Only the transient "hub hasn't flushed the token yet" race is
+        // retryable; anything else (bad token, already redeemed, …) will just
+        // fail again and should be surfaced immediately.
+        if !stderr.contains("no matching token") || attempt == 5 {
+            assert!(
+                out.status.success(),
+                "body join failed (exit {:?}, after {attempt} attempts): {stderr}",
+                out.status.code(),
+            );
+        }
+        std::thread::sleep(Duration::from_millis(200 * attempt as u64));
+        out = run_join(state, ws_url, &token);
+    }
+}
+
+/// One attempt at `body join` (see [`join`]'s retry loop).
+fn run_join(state: &StateDir, ws_url: &str, token: &str) -> Output {
+    holler_cmd(state)
+        .args(["body", "join", "--server", ws_url, "--token", token])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .and_then(|c| c.wait_with_output())
-        .expect("run `body join`");
-    assert!(
-        out.status.success(),
-        "body join failed (exit {:?}): {}",
-        out.status.code(),
-        String::from_utf8_lossy(&out.stderr)
-    );
+        .expect("run `body join`")
 }
 
 /// The absolute path to the built `stub-acp` agent binary.

@@ -14,12 +14,17 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 use tokio::net::UnixStream;
 
 use crate::live::Registry;
+use crate::roster::Roster;
 use crate::state::{advertise_path, resolve_state_dir, HubState};
 
 /// Handle one control-socket connection: newline-delimited JSON-RPC. A frame
 /// that does not decode is `-32700`/`-32600`; an unknown `control/…` method is
 /// `-32601 method_not_found`.
-pub async fn handle_control_conn(stream: UnixStream, registry: Registry) {
+pub async fn handle_control_conn(
+    stream: UnixStream,
+    registry: Registry,
+    roster: std::sync::Arc<Roster>,
+) {
     let (read_half, write_half) = tokio::io::split(stream);
     let mut write_half = write_half;
     let mut lines = tokio::io::BufReader::new(read_half).lines();
@@ -30,7 +35,7 @@ pub async fn handle_control_conn(stream: UnixStream, registry: Registry) {
                 if line.is_empty() {
                     continue;
                 }
-                let reply = dispatch_control(&line, &registry).await;
+                let reply = dispatch_control(&line, &registry, &roster).await;
                 let bytes = format!("{reply}\n");
                 if write_half.write_all(bytes.as_bytes()).await.is_err() {
                     return; // client went away.
@@ -44,7 +49,7 @@ pub async fn handle_control_conn(stream: UnixStream, registry: Registry) {
 
 /// Parse one control frame, dispatch it, and return the reply as a single
 /// line (no trailing newline; the caller adds it).
-async fn dispatch_control(line: &str, registry: &Registry) -> String {
+async fn dispatch_control(line: &str, registry: &Registry, roster: &Roster) -> String {
     // The control socket is **internal, non-wire**: it is not validated
     // against the v2 wire catalog (those are the `control/…` methods, which
     // live only here). We still parse the frame as a JSON-RPC object so we can
@@ -76,6 +81,10 @@ async fn dispatch_control(line: &str, registry: &Registry) -> String {
         Some("control/query_local") => hub_query_local(&cid, &obj, registry).await,
         Some("control/query_remote") => hub_query_remote(&cid, &obj, registry).await,
         Some("control/say") => say(&cid, &obj, registry).await,
+        // `control/roster` (issue #186): read the hub's own roster and return
+        // `{rows: [...]}` (the live-only view; the CLI's `--all` reads the
+        // same socket and asks for the full set, which the server honors here).
+        Some("control/roster") => roster_control(&cid, &obj, roster).await,
         Some(other) => encode_error(&cid, Code::MethodNotFound, format!("unknown control method: {other}")),
         // No method: not a call (a stray response/notification or empty frame).
         None => unkeyed_error_line(Code::InvalidRequest, "a control frame must be a request with a method"),
@@ -222,6 +231,23 @@ async fn say(cid: &holler_proto::CorrelationId, obj: &serde_json::Value, registr
             encode_error(cid, Code::NotConnected, "prompt was interrupted before it completed".to_string())
         }
     }
+}
+
+/// `control/roster {all?}` (issue #186): the CLI's `holler roster` verb,
+/// answered straight from this hub's in-process roster. Without `params.all`
+/// it returns the live-only view (every row except `gone`, matching
+/// [`Roster::rows`]); with `params.all == true` it includes `gone` rows so the
+/// operator can see what fell off and how recently. `stalled` is not a filter
+/// dimension here (it is a display-only column in the CLI), and `hostname`
+/// narrowing is the CLI's job (it can read the roster once and filter locally),
+/// so this control method is deliberately parameter-light.
+async fn roster_control(cid: &holler_proto::CorrelationId, obj: &serde_json::Value, roster: &Roster) -> String {
+    let all = obj.get("params").and_then(|p| p.get("all")).and_then(|v| v.as_bool()).unwrap_or(false);
+    let rows = roster.rows(Option::from(all));
+    encode_response(
+        cid,
+        serde_json::json!({ "rows": rows }),
+    )
 }
 
 /// The bound listen addresses, read the same way [`status_doc`] does (from

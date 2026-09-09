@@ -118,6 +118,15 @@ pub fn say(session: &str, text: &str, queue: bool, timeout: std::time::Duration)
     exchange_with_timeout("b-say", "control/say", Some(params), timeout + std::time::Duration::from_secs(5))
 }
 
+/// `holler roster [--all]` (issue #186): the live hub's roster, read straight
+/// from the hub's in-process [`crate::roster::Roster`]. Returns the reply
+/// envelope's `result`, which is `{rows: [...]}` (each row is the roster's
+/// display `Row`). Without `all` the hub returns the live-only view (every row
+/// except `gone`); with `all` it includes `gone` rows.
+pub fn roster(all: bool) -> Result<serde_json::Value, ControlError> {
+    exchange("b-roster", "control/roster", Some(serde_json::json!({ "all": all })))
+}
+
 /// Send one `method`/`params` request over the control socket and return its
 /// `result` — the shared body of every one-shot control exchange (`status`,
 /// `token_ping`, …). `id_literal` is a fixed, well-formed `b-` id (each

@@ -16,7 +16,7 @@
 use clap::Parser;
 use holler_cli::{
     Attach, AttachCommand, BodyCommand, Cli, Cmd, Command, HubCommand, Mint, Query,
-    QueryResolution, Say, TokenCommand,
+    QueryResolution, Roster, Say, TokenCommand,
 };
 use holler_cli::query_cmd::{body_local_configs, is_ambiguous, query_cmd_params};
 use holler_cli::time_fmt::format_epoch;
@@ -173,11 +173,9 @@ fn print_control_doc(json: bool, doc: serde_json::Value, human: impl FnOnce() ->
     }
 }
 
-/// Apply the shared exit code for a [`holler_hub::control::ControlError`]
-/// that is not the query-specific ambiguity case: no live hub reachable is
-/// exit 1 (the spec's exact message); every other refusal (including a body
-/// not connected, `-32004`) is also exit 1 — only an ambiguous TARGET (`hub
-/// query`'s own arm) is exit 2.
+/// The shared exit code for a [`holler_hub::control::ControlError`]: no live
+/// hub reachable is exit 1 (the spec's exact message); every other refusal
+/// (not connected, `-32004`) is exit 1 — only an ambiguous TARGET is exit 2.
 fn control_error_exit(e: holler_hub::control::ControlError) -> ! {
     match e {
         holler_hub::control::ControlError::NoLiveHub => {
@@ -199,6 +197,21 @@ fn say_command(say: &Say, json: bool) -> ! {
             eprintln!("error: {}", result.message);
         } else {
             println!("{}", result.message);
+        }
+    }
+    std::process::exit(result.exit_code);
+}
+
+/// `holler roster` (issue #186) — thin wrapper: [`holler_cli::roster_cmd::run`]
+/// carries the logic (kept out of `main.rs`'s 900-line budget, like
+/// `say_cmd.rs`); this is the one place allowed to exit on it.
+fn roster_command(roster: &Roster, json: bool) -> ! {
+    let result = holler_cli::roster_cmd::run(roster, json);
+    if !result.message.is_empty() {
+        if result.to_stderr {
+            eprintln!("error: {}", result.message);
+        } else {
+            print!("{}", result.message);
         }
     }
     std::process::exit(result.exit_code);
@@ -602,22 +615,20 @@ fn main() {
         }
     }
 
-    // Story #190: `say` does something real now (`interrupt`, #191, doesn't yet).
+    if let Command::Roster(roster) = &cli.command {
+        roster_command(roster, cli.json);
+    }
     if let Command::Say(say) = &cli.command {
         say_command(say, cli.json);
     }
 
     let story = match &cli.command {
-        // hub (the implemented leaves were handled above and returned; this
-        // arm is defensive — every `Command::Hub` path above exits)
+        // the implemented leaves were handled above and returned; these arms
+        // are defensive — every path above exits.
         Command::Hub(_) => not_implemented("Hub"),
-        // top-level (hub-only daily verbs)
-        Command::Roster(_) => "Roster",
-        Command::Say(_) => not_implemented("Say"), // handled above; defensive.
+        Command::Roster(_) => not_implemented("Roster"),
+        Command::Say(_) => not_implemented("Say"),
         Command::Interrupt(_) => "Interrupt",
-        // body (the implemented Join/Detach/Status were handled above and
-        // returned; this arm is defensive — every `Command::Body` path above
-        // exits)
         Command::Body(_) => not_implemented("Body"),
     };
 

@@ -66,6 +66,7 @@ pub async fn handle_authenticated<Snk, St>(
     params: Authenticate,
     state: &HubState,
     registry: &Registry,
+    roster: &std::sync::Arc<crate::roster::Roster>,
 ) where
     Snk: Sink<Message, Error = WsError> + Unpin,
     St: Stream<Item = Result<Message, WsError>> + Unpin,
@@ -75,6 +76,11 @@ pub async fn handle_authenticated<Snk, St>(
         Err(e) => {
             send_error(sink, id, Code::Unauthenticated, &format!("authentication failed: {e}")).await;
             close(sink).await;
+            // The credentials are no longer valid, so the body is permanently
+            // gone — drop it from the roster outright (it can never re-auth
+            // with the same token, so the TTL would only keep a stale row
+            // around). Issue #186.
+            roster.clear(&params.token_id);
             return;
         }
     };
@@ -83,6 +89,7 @@ pub async fn handle_authenticated<Snk, St>(
         // always carry a `client_id`. Treated the same as a bad credential.
         send_error(sink, id, Code::Unauthenticated, "authentication failed: no client id on record").await;
         close(sink).await;
+        roster.clear(&params.token_id);
         return;
     };
 
@@ -119,7 +126,7 @@ pub async fn handle_authenticated<Snk, St>(
     // `harnesses_confirmed` stays the trustworthy subset of `harnesses_known`.
     let pending_confirms = send_confirm_probes(sink, &body_harnesses).await;
 
-    session_loop(sink, stream, &mut cmd_rx, &client_id, registry, pending_confirms).await;
+    session_loop(sink, stream, &mut cmd_rx, &client_id, registry, roster, pending_confirms).await;
     registry.remove(&client_id).await;
     log(Severity::Warn, "conn_dropped", vec![("client_id", client_id)]);
 }
@@ -267,6 +274,7 @@ async fn session_loop<Snk, St>(
     cmd_rx: &mut tokio::sync::mpsc::UnboundedReceiver<LiveCommand>,
     client_id: &str,
     registry: &Registry,
+    roster: &std::sync::Arc<crate::roster::Roster>,
     mut pending_confirms: std::collections::HashMap<String, String>,
 ) where
     Snk: Sink<Message, Error = WsError> + Unpin,
@@ -283,6 +291,18 @@ async fn session_loop<Snk, St>(
     let mut pending_query: PendingQuery = None;
     let mut pending_says: std::collections::HashMap<String, PendingSay> = std::collections::HashMap::new();
 
+    // Issue #186: the roster row is keyed by *token*, and `handle_authenticated`
+    // removes this client from the registry the moment `session_loop` returns.
+    // So capture the token now, while the registry entry is still live, and use
+    // it to `clear` the roster row on teardown (an explicit close is `gone`
+    // immediately, not "reconnecting").
+    let roster_token = registry.token_id_for_client(client_id).await;
+    let clear_on_drop = move || {
+        if let Some(token) = &roster_token {
+            roster.clear(token);
+        }
+    };
+
     loop {
         tokio::select! {
             frame = stream.next() => {
@@ -293,18 +313,21 @@ async fn session_loop<Snk, St>(
                             &t,
                             client_id,
                             registry,
+                            roster,
                             &mut pending_ping,
                             &mut pending_query,
                             &mut pending_confirms,
                             &mut pending_says,
                         ).await.is_err() {
                             fail_pending_says(&mut pending_says);
+                            clear_on_drop();
                             return;
                         }
                     }
                     Some(Ok(Message::Ping(_))) | Some(Ok(Message::Pong(_))) | Some(Ok(Message::Frame(_))) => {}
                     Some(Ok(Message::Binary(_))) | Some(Ok(Message::Close(_))) | Some(Err(_)) | None => {
                         fail_pending_says(&mut pending_says);
+                        clear_on_drop();
                         return;
                     }
                 }
@@ -401,12 +424,13 @@ where
 
 /// Handle one inbound text frame in the live session loop. `Err` means the
 /// socket should be torn down (a decode failure or a send failure).
-#[allow(clippy::too_many_arguments)] // #190: four independent pending-request trackers, each genuinely distinct
+#[allow(clippy::too_many_arguments)] // #190/#186: four independent pending-request trackers plus the roster, each genuinely distinct
 async fn handle_inbound<Snk>(
     sink: &mut Snk,
     text: &str,
     client_id: &str,
     registry: &Registry,
+    roster: &std::sync::Arc<crate::roster::Roster>,
     pending_ping: &mut PendingPing,
     pending_query: &mut PendingQuery,
     pending_confirms: &mut std::collections::HashMap<String, String>,
@@ -422,9 +446,19 @@ where
             return Err(());
         }
     };
+    // Every inbound frame on an authenticated socket is proof the body is
+    // still talking to us (issue #186), so refresh the roster row's
+    // `last_heard_ms` on whatever the frame is. The roster is keyed by token,
+    // not client id — resolve the token through the registry (a body that has
+    // already been unregistered mid-frame just has no token to attribute, and
+    // the loop's teardown `roster.clear` then finalises it). `None` is a
+    // defensive no-op: the frame is still serviced normally below.
+    if let Some(token_id) = registry.token_id_for_client(client_id).await {
+        roster.touch(&token_id, env.method().unwrap_or(""));
+    }
     match &env {
         Envelope::Notification { method, params } if method == "session/presence" => {
-            handle_presence_notification(client_id, params.clone(), registry).await;
+            handle_presence_notification(client_id, params.clone(), registry, roster).await;
             Ok(())
         }
         Envelope::Notification { method, params } if method == "session/update" => {
@@ -461,9 +495,25 @@ where
 /// `say`'s busy check and name resolution have something real to read. Split
 /// out of [`handle_inbound`] to keep that dispatch's cognitive complexity
 /// under the workspace threshold.
-async fn handle_presence_notification(client_id: &str, params: Option<serde_json::Value>, registry: &Registry) {
+async fn handle_presence_notification(
+    client_id: &str,
+    params: Option<serde_json::Value>,
+    registry: &Registry,
+    roster: &std::sync::Arc<crate::roster::Roster>,
+) {
     let Some(p) = params.and_then(|v| serde_json::from_value::<Presence>(v).ok()) else { return };
-    log(Severity::Debug, "presence", vec![("client_id", client_id.to_string()), ("hostname", p.hostname)]);
+    // Clone `p.hostname` into the log line (issue #186): `roster.advertise`
+    // below borrows the whole `Presence`, so the log must not move a field out.
+    log(Severity::Debug, "presence", vec![("client_id", client_id.to_string()), ("hostname", p.hostname.clone())]);
+    // Advertise the roster row *before* `registry.update_presence` moves
+    // `p.sessions` out (issue #186). The roster row is keyed by token, so
+    // resolve the client id to its token first. A body that lost its registry
+    // entry (a duplicate that was just replaced) has no token to attribute to;
+    // the roster row for the token the *new* socket owns is what `rows()`
+    // returns, and this stale socket's own teardown clears its (old) token.
+    if let Some(token_id) = registry.token_id_for_client(client_id).await {
+        roster.advertise(&token_id, &p);
+    }
     registry.set_session_count(client_id, p.sessions.len() as u32).await;
     registry.update_presence(client_id, p.sessions).await;
 }
