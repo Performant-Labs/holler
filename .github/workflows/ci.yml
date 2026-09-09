@@ -4,6 +4,10 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Lets a maintainer re-run the suite against a specific branch/commit without
+  # needing an open PR (e.g. after force-pushing, or to verify a fix in place
+  # before re-opening). No inputs; it just runs the same matrix.
+  workflow_dispatch:
 
 jobs:
   test:
