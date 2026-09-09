@@ -31,6 +31,7 @@ use holler_proto::{
 use tokio::signal::unix::{signal, SignalKind};
 use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 
+use crate::config::SessionConfig;
 use crate::identity::BodyIdentity;
 
 /// The heartbeat/presence interval (issue #182 step 3): 15s, or
@@ -65,8 +66,11 @@ pub enum RunExit {
 /// validated + registered ([`crate::registry::SessionRegistry::presence_doc`]'s
 /// output) — it is sent verbatim in every `session/presence` this loop emits,
 /// replacing the always-empty `sessions:[]` issue #182 shipped (no session
-/// config existed yet on that story).
-pub fn run(state_root: &Path, sessions: Vec<SessionAd>) -> RunExit {
+/// config existed yet on that story). `configs` (issue #185) is the same
+/// session list's *pre-registry* validated config rows — the live session
+/// loop needs them (not just the wire-shaped `SessionAd`) to answer a
+/// hub-forwarded `query/support` probe (harness `command[0]` resolution).
+pub fn run(state_root: &Path, sessions: Vec<SessionAd>, configs: Vec<SessionConfig>) -> RunExit {
     let identity = match crate::identity::load(state_root) {
         None => {
             eprintln!("error: not joined; run `holler body join` first");
@@ -92,7 +96,7 @@ pub fn run(state_root: &Path, sessions: Vec<SessionAd>) -> RunExit {
         Ok(rt) => rt,
         Err(e) => return RunExit::Io(format!("runtime: {e}")),
     };
-    let exit = rt.block_on(run_loop(state_root, &identity, &sessions));
+    let exit = rt.block_on(run_loop(state_root, &identity, &sessions, &configs));
     drop(lock); // release + remove the lock file on every clean path out.
     exit
 }
@@ -112,7 +116,12 @@ enum Attempt {
 /// The reconnect loop: connect, authenticate, hello, then live until the
 /// circuit ends. A dropped circuit backs off (full jitter, 1s..30s) and
 /// tries again, forever, until a clean end or an unretryable auth failure.
-async fn run_loop(state_root: &Path, identity: &BodyIdentity, sessions: &[SessionAd]) -> RunExit {
+async fn run_loop(
+    state_root: &Path,
+    identity: &BodyIdentity,
+    sessions: &[SessionAd],
+    configs: &[SessionConfig],
+) -> RunExit {
     let mut sigint = match signal(SignalKind::interrupt()) {
         Ok(s) => s,
         Err(e) => return RunExit::Io(format!("install SIGINT handler: {e}")),
@@ -124,7 +133,8 @@ async fn run_loop(state_root: &Path, identity: &BodyIdentity, sessions: &[Sessio
 
     let mut attempt: u32 = 0;
     loop {
-        let outcome = connect_and_serve(state_root, identity, sessions, attempt, &mut sigint, &mut sigterm).await;
+        let outcome =
+            connect_and_serve(state_root, identity, sessions, configs, attempt, &mut sigint, &mut sigterm).await;
         match outcome {
             Attempt::Ended(exit) => return exit,
             Attempt::AuthFailed(msg) => {
@@ -218,6 +228,7 @@ async fn connect_and_serve(
     state_root: &Path,
     identity: &BodyIdentity,
     sessions: &[SessionAd],
+    configs: &[SessionConfig],
     attempt: u32,
     sigint: &mut tokio::signal::unix::Signal,
     sigterm: &mut tokio::signal::unix::Signal,
@@ -241,7 +252,7 @@ async fn connect_and_serve(
     if let Err(reason) = authenticate(&mut sink, &mut stream, identity).await {
         return reason;
     }
-    if hello_exchange(&mut sink, &mut stream, identity).await.is_err() {
+    if hello_exchange(&mut sink, &mut stream, identity, configs).await.is_err() {
         return Attempt::Dropped("hello exchange failed".to_string());
     }
 
@@ -256,7 +267,7 @@ async fn connect_and_serve(
         },
     );
 
-    live_loop(state_root, &mut sink, &mut stream, identity, sessions, sigint, sigterm).await
+    live_loop(state_root, &mut sink, &mut stream, identity, sessions, configs, (sigint, sigterm)).await
 }
 
 /// Send `circuit/authenticate` and await the answer. `-32002` maps to
@@ -292,11 +303,24 @@ where
 }
 
 /// The bidirectional hello exchange (see the module doc's "Decisions made").
-async fn hello_exchange<Snk, St>(sink: &mut Snk, stream: &mut St, identity: &BodyIdentity) -> Result<(), ()>
+/// `configs` (issue #185) is this body's own session config — its harness
+/// ids populate the hello's `harnesses` field, which is what the hub's
+/// confirmation pass ([`crate::query`]'s hub-side counterpart, `holler_hub::
+/// circuit::confirm_harnesses`) probes right after this exchange completes.
+async fn hello_exchange<Snk, St>(
+    sink: &mut Snk,
+    stream: &mut St,
+    identity: &BodyIdentity,
+    configs: &[SessionConfig],
+) -> Result<(), ()>
 where
     Snk: Sink<Message, Error = WsError> + Unpin,
     St: Stream<Item = Result<Message, WsError>> + Unpin,
 {
+    let mut harnesses: Vec<String> = configs.iter().map(|c| c.harness.clone()).collect();
+    harnesses.sort();
+    harnesses.dedup();
+
     let cid = CorrelationId::mint_body();
     let hello = Hello {
         protocol: holler_proto::PROTOCOL_VERSION,
@@ -307,7 +331,7 @@ where
         token_id: Some(identity.token_id.clone()),
         client_id: Some(identity.client_id.clone()),
         features: Vec::new(),
-        harnesses: Some(Vec::new()),
+        harnesses: Some(harnesses),
         harnesses_known: None,
         harnesses_confirmed: None,
         sessions: Some(Vec::new()),
@@ -374,19 +398,25 @@ const DETACH_POLL: Duration = Duration::from_millis(500);
 
 /// The live session: heartbeat, answer pings, watch for detach/liveness/
 /// signals, until the circuit ends one way or another.
+// `signals` is a tuple, not two separate params — clippy's `too_many_arguments`
+// (7-arg threshold) would otherwise flag this fn once `configs` (issue #185)
+// joined `sessions` alongside the pre-existing `state_root`/`sink`/`stream`/
+// `identity`; bundling the two `Signal`s (always passed and used together —
+// see [`any_signal`]) is the natural pairing to fold, not an arbitrary one.
 async fn live_loop<Snk, St>(
     state_root: &Path,
     sink: &mut Snk,
     stream: &mut St,
     identity: &BodyIdentity,
     sessions: &[SessionAd],
-    sigint: &mut tokio::signal::unix::Signal,
-    sigterm: &mut tokio::signal::unix::Signal,
+    configs: &[SessionConfig],
+    signals: (&mut tokio::signal::unix::Signal, &mut tokio::signal::unix::Signal),
 ) -> Attempt
 where
     Snk: Sink<Message, Error = WsError> + Unpin,
     St: Stream<Item = Result<Message, WsError>> + Unpin,
 {
+    let (sigint, sigterm) = signals;
     let detach_path = detach_request_path(state_root);
     let mut heartbeat = tokio::time::interval(heartbeat_interval());
     heartbeat.tick().await; // the first tick fires immediately; consume it.
@@ -421,7 +451,7 @@ where
                 return Attempt::Dropped("no frame from the hub within the liveness window".to_string());
             }
             frame = stream.next() => {
-                match handle_frame(sink, frame, identity).await {
+                match handle_frame(sink, frame, identity, state_root, configs).await {
                     FrameOutcome::Continue => last_frame_at = tokio::time::Instant::now(),
                     FrameOutcome::Superseded => return Attempt::Ended(RunExit::Ok),
                     FrameOutcome::Dropped(reason) => return Attempt::Dropped(reason),
@@ -466,12 +496,14 @@ async fn handle_frame<Snk>(
     sink: &mut Snk,
     frame: Option<Result<Message, WsError>>,
     identity: &BodyIdentity,
+    state_root: &Path,
+    configs: &[SessionConfig],
 ) -> FrameOutcome
 where
     Snk: Sink<Message, Error = WsError> + Unpin,
 {
     match frame {
-        Some(Ok(Message::Text(t))) => handle_text(sink, &t, identity).await,
+        Some(Ok(Message::Text(t))) => handle_text(sink, &t, identity, state_root, configs).await,
         Some(Ok(Message::Ping(_))) | Some(Ok(Message::Pong(_))) | Some(Ok(Message::Frame(_))) => FrameOutcome::Continue,
         Some(Ok(Message::Binary(_))) => FrameOutcome::Continue,
         Some(Ok(Message::Close(_))) => FrameOutcome::Dropped("hub closed the socket".to_string()),
@@ -481,10 +513,19 @@ where
 }
 
 /// Dispatch one decoded text frame (issue #182 step 8's inbound methods that
-/// are in scope for this story — `circuit/ping`, `circuit/superseded`; every
-/// other method a later story owns is answered `-32601` for now, since no
-/// session/query dispatch exists yet).
-async fn handle_text<Snk>(sink: &mut Snk, text: &str, identity: &BodyIdentity) -> FrameOutcome
+/// are in scope for this story — `circuit/ping`, `circuit/superseded`; issue
+/// #185 adds the four `query/*` requests, answered from local state per
+/// [`crate::query`] — the same document a local `body status`/`caps`/
+/// `support`/`query` CLI leaf builds, now also reachable when the hub
+/// forwards a `hub query TARGET …` over this live socket). Every other
+/// method a later story owns is answered `-32601` for now.
+async fn handle_text<Snk>(
+    sink: &mut Snk,
+    text: &str,
+    identity: &BodyIdentity,
+    state_root: &Path,
+    configs: &[SessionConfig],
+) -> FrameOutcome
 where
     Snk: Sink<Message, Error = WsError> + Unpin,
 {
@@ -502,6 +543,9 @@ where
                 Err(()) => FrameOutcome::Dropped("send ping ack: socket closed".to_string()),
             }
         }
+        Envelope::Request { id, method, params } if method.starts_with("query/") => {
+            handle_query(sink, &id, &method, params, identity, state_root, configs).await
+        }
         Envelope::Notification { method, .. } if method == "circuit/superseded" => {
             warn("conn_superseded", vec![]);
             FrameOutcome::Superseded
@@ -513,6 +557,57 @@ where
             FrameOutcome::Continue
         }
         Envelope::Notification { .. } | Envelope::Response { .. } | Envelope::Error { .. } => FrameOutcome::Continue,
+    }
+}
+
+/// Answer one `query/*` request (issue #185) from local state — see
+/// [`crate::query`] for the document builders. `query/support` with an
+/// unknown id answers `-32006`; every other case answers `Ok`.
+async fn handle_query<Snk>(
+    sink: &mut Snk,
+    id: &str,
+    method: &str,
+    params: Option<serde_json::Value>,
+    identity: &BodyIdentity,
+    state_root: &Path,
+    configs: &[SessionConfig],
+) -> FrameOutcome
+where
+    Snk: Sink<Message, Error = WsError> + Unpin,
+{
+    let Ok(cid) = CorrelationId::parse(id) else {
+        return FrameOutcome::Continue;
+    };
+    let result: Result<serde_json::Value, holler_proto::WireError> = match method {
+        "query/status" => Ok(serde_json::to_value(crate::query::local_status(state_root, Some(identity), configs))
+            .unwrap_or_default()),
+        "query/caps" => Ok(serde_json::to_value(crate::query::local_caps(state_root, Some(identity), configs))
+            .unwrap_or_default()),
+        "query/support" => {
+            let feature = params
+                .as_ref()
+                .and_then(|p| p.get("feature"))
+                .and_then(|v| v.as_str())
+                .unwrap_or_default();
+            crate::query::local_support(feature, configs).map(|s| serde_json::to_value(s).unwrap_or_default())
+        }
+        "query/protocol" => {
+            let version = params
+                .as_ref()
+                .and_then(|p| p.get("version"))
+                .and_then(|v| v.as_u64())
+                .map(|v| v as u32);
+            Ok(serde_json::to_value(crate::query::local_protocol(version)).unwrap_or_default())
+        }
+        _ => Err(holler_proto::WireError::new(Code::MethodNotFound, "unknown query method", None)),
+    };
+    let send_result = match result {
+        Ok(value) => send(sink, &Envelope::response(&cid, Some(value))).await,
+        Err(e) => send(sink, &Envelope::error_frame(&cid, &e)).await,
+    };
+    match send_result {
+        Ok(()) => FrameOutcome::Continue,
+        Err(()) => FrameOutcome::Dropped("send query answer: socket closed".to_string()),
     }
 }
 

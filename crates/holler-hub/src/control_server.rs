@@ -67,10 +67,108 @@ async fn dispatch_control(line: &str, registry: &Registry) -> String {
             encode_response(&cid, doc)
         }
         Some("control/token_ping") => token_ping(&cid, &obj, registry).await,
+        Some("control/caps") => {
+            let listening = read_listening_here();
+            let doc = crate::query::local_caps(registry, listening).await;
+            encode_response(&cid, serde_json::to_value(doc).unwrap_or_default())
+        }
+        Some("control/support") => hub_support(&cid, &obj, registry).await,
+        Some("control/query_local") => hub_query_local(&cid, &obj, registry).await,
+        Some("control/query_remote") => hub_query_remote(&cid, &obj, registry).await,
         Some(other) => encode_error(&cid, Code::MethodNotFound, format!("unknown control method: {other}")),
         // No method: not a call (a stray response/notification or empty frame).
         None => unkeyed_error_line(Code::InvalidRequest, "a control frame must be a request with a method"),
     }
+}
+
+/// `control/support {feature}` (issue #185): a single `query/support` answer
+/// for the hub role (see [`crate::query::local_support`]).
+async fn hub_support(cid: &holler_proto::CorrelationId, obj: &serde_json::Value, registry: &Registry) -> String {
+    let Some(feature) = obj.get("params").and_then(|p| p.get("feature")).and_then(|v| v.as_str()) else {
+        return encode_error(cid, Code::InvalidParams, "control/support needs params.feature".to_string());
+    };
+    match crate::query::local_support(feature, registry).await {
+        Ok(doc) => encode_response(cid, serde_json::to_value(doc).unwrap_or_default()),
+        Err(e) => encode_error(cid, Code::UnknownFeature, e.message),
+    }
+}
+
+/// `control/query_local {method, params?}` (issue #185): `holler hub query
+/// CMD [ARGS...]` — the local form, answered from this hub's own state
+/// without touching any body.
+async fn hub_query_local(cid: &holler_proto::CorrelationId, obj: &serde_json::Value, registry: &Registry) -> String {
+    let Some(method) = obj.get("params").and_then(|p| p.get("method")).and_then(|v| v.as_str()) else {
+        return encode_error(cid, Code::InvalidParams, "control/query_local needs params.method".to_string());
+    };
+    let inner_params = obj.get("params").and_then(|p| p.get("params")).cloned();
+    match method {
+        "query/status" => {
+            let doc = crate::query::local_status(registry, read_listening_here()).await;
+            encode_response(cid, serde_json::to_value(doc).unwrap_or_default())
+        }
+        "query/caps" => {
+            let doc = crate::query::local_caps(registry, read_listening_here()).await;
+            encode_response(cid, serde_json::to_value(doc).unwrap_or_default())
+        }
+        "query/support" => {
+            let feature = inner_params.as_ref().and_then(|p| p.get("feature")).and_then(|v| v.as_str()).unwrap_or_default();
+            match crate::query::local_support(feature, registry).await {
+                Ok(doc) => encode_response(cid, serde_json::to_value(doc).unwrap_or_default()),
+                Err(e) => encode_error(cid, Code::UnknownFeature, e.message),
+            }
+        }
+        "query/protocol" => {
+            let version = inner_params.as_ref().and_then(|p| p.get("version")).and_then(|v| v.as_u64()).map(|v| v as u32);
+            let doc = crate::query::local_protocol(version);
+            encode_response(cid, serde_json::to_value(doc).unwrap_or_default())
+        }
+        other => encode_error(cid, Code::MethodNotFound, format!("unknown query method: {other}")),
+    }
+}
+
+/// `control/query_remote {target, method, params?}` (issue #185): `holler hub
+/// query TARGET CMD [ARGS...]` — resolve `target` against the live registry
+/// and forward the `query/*` request over that body's socket. No live body
+/// for `target` is `-32004 not_connected` (exit 1 at the CLI); more than one
+/// match is reported as an ambiguous refusal (the CLI maps that to exit 2,
+/// ADR 0003's usage-error code for an unresolvable target).
+async fn hub_query_remote(cid: &holler_proto::CorrelationId, obj: &serde_json::Value, registry: &Registry) -> String {
+    let params = obj.get("params");
+    let (Some(target), Some(method)) = (
+        params.and_then(|p| p.get("target")).and_then(|v| v.as_str()),
+        params.and_then(|p| p.get("method")).and_then(|v| v.as_str()),
+    ) else {
+        return encode_error(cid, Code::InvalidParams, "control/query_remote needs params.target and params.method".to_string());
+    };
+    let inner_params = params.and_then(|p| p.get("params")).cloned();
+
+    match registry.find_target(target).await {
+        crate::live::TargetLookup::Found(handle) => {
+            match handle.query(method, inner_params, std::time::Duration::from_secs(10)).await {
+                Some(Ok(value)) => encode_response(cid, value),
+                // The body itself raised a wire error (e.g. `query/support`'s
+                // `-32006 unknown_feature`) — forward it verbatim rather than
+                // re-wrapping it in a fresh `Code`.
+                Some(Err(e)) => holler_proto::encode(&Envelope::error_frame(cid, &e)).unwrap_or_default(),
+                None => encode_error(cid, Code::NotConnected, format!("{target} did not answer")),
+            }
+        }
+        crate::live::TargetLookup::NotConnected => {
+            encode_error(cid, Code::NotConnected, format!("{target} is not connected"))
+        }
+        crate::live::TargetLookup::Ambiguous => {
+            encode_error(cid, Code::InvalidRequest, format!("{target} is ambiguous — matches more than one live body"))
+        }
+    }
+}
+
+/// The bound listen addresses, read the same way [`status_doc`] does (from
+/// `hub/listening.json`, written once at `hub serve` startup) — the shared
+/// helper both `control/status` and the new `control/caps`/`control/
+/// query_local {method:"query/status"}` need.
+fn read_listening_here() -> Vec<String> {
+    let state = HubState::from_root(resolve_state_dir().unwrap_or_default());
+    read_listening(&state)
 }
 
 /// `control/token_ping {token_id}` (issue #182): find the live circuit bound
@@ -137,9 +235,10 @@ fn resolve_cid(id: Option<&str>) -> holler_proto::CorrelationId {
 /// story spec the doc has `role:"hub"`, a `listening` **array** of bound
 /// addresses, an optional `advertise`, `clients` (bodies), `sessions`,
 /// `harnesses_known`, `harnesses_confirmed`, `protocol:2`, and `version`.
-/// `clients` is now the live registry's size (issue #182) — previously always
-/// `0` (no body could authenticate yet); `sessions` stays `0` until a session
-/// story lands.
+/// `clients`/`sessions`/`harnesses_known`/`harnesses_confirmed` are now the
+/// live registry's real counts (issue #182 landed `clients`; issue #185 adds
+/// the rest — previously always `0`/`[]`, since no body could yet report a
+/// session count or a confirmed harness).
 async fn status_doc(registry: &Registry) -> serde_json::Value {
     // Only ever called by the live hub's own control dispatch, where the state
     // dir is always resolvable; `unwrap_or_default` is a defensive no-op.
@@ -166,9 +265,9 @@ async fn status_doc(registry: &Registry) -> serde_json::Value {
         "listening": listening,
         "advertise": advertise,
         "clients": registry.len().await,
-        "sessions": 0,
-        "harnesses_known": [],
-        "harnesses_confirmed": [],
+        "sessions": registry.total_sessions().await,
+        "harnesses_known": registry.harnesses_known().await,
+        "harnesses_confirmed": registry.harnesses_confirmed().await,
     })
 }
 
