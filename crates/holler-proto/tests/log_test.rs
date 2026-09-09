@@ -251,3 +251,74 @@ fn info_and_warn_are_always_emitted() {
         }
     }
 }
+
+// --- log injection (#237) ------------------------------------------------------
+
+#[test]
+fn render_text_escapes_newlines_in_field_values() {
+    // Regression for #237: a body-supplied field (e.g. `hostname`) that
+    // embeds a `\n` (plus a forged timestamp/level/component prefix) must
+    // not be able to inject a second, fabricated log line into the
+    // text-format renderer's single-line output.
+    let forged = "evil\n2026-09-09T00:00:00.000000Z INFO         wire -- lockout client_id=forged";
+    let mut ev = event(Component::Registry, Severity::Info, "conn_connected");
+    ev.fields = vec![("hostname", forged.to_owned())];
+    let config = Config { debug: DebugLevel::None, format: LogFormat::Text };
+    let line = ev.render(&config);
+
+    assert_eq!(
+        line.lines().count(),
+        1,
+        "an attacker-controlled field value must never produce more than one line, got: {line:?}"
+    );
+    assert!(
+        !line.contains('\n'),
+        "the rendered line must not contain a raw newline, got: {line:?}"
+    );
+    assert!(
+        line.contains("hostname=evil\\n2026-09-09"),
+        "the newline must be rendered as the escaped two-character sequence \\n, got: {line:?}"
+    );
+}
+
+#[test]
+fn render_text_escapes_carriage_returns_and_other_control_chars() {
+    let ev_fields = vec![("hostname", "host\rname\t\u{0}end".to_owned())];
+    let mut ev = event(Component::Registry, Severity::Debug, "presence");
+    ev.fields = ev_fields;
+    let config = Config { debug: DebugLevel::Noisy, format: LogFormat::Text };
+    let line = ev.render(&config);
+
+    assert!(!line.contains('\r'), "a raw carriage return must not reach the line: {line:?}");
+    assert!(line.contains("\\r"), "carriage return must be escaped: {line:?}");
+    assert!(line.contains("\\t"), "tab must be escaped: {line:?}");
+    assert!(line.contains("\\u{0}"), "NUL must be escaped: {line:?}");
+}
+
+#[test]
+fn render_text_leaves_printable_field_values_untouched() {
+    // Ordinary hostnames (and any other printable value, including non-ASCII
+    // text) must render verbatim — the fix must not over-escape.
+    let mut ev = event(Component::Registry, Severity::Info, "conn_connected");
+    ev.fields = vec![("hostname", "laptop-42.local".to_owned())];
+    let config = Config { debug: DebugLevel::None, format: LogFormat::Text };
+    let line = ev.render(&config);
+    assert!(
+        line.contains("hostname=laptop-42.local"),
+        "a normal hostname must render verbatim, got: {line:?}"
+    );
+}
+
+#[test]
+fn render_json_already_escapes_control_characters() {
+    // The JSON path was already safe (serde_json escapes control characters
+    // in strings); this pins that guarantee so a future change can't
+    // silently regress it.
+    let mut ev = event(Component::Registry, Severity::Info, "conn_connected");
+    ev.fields = vec![("hostname", "evil\nforged line".to_owned())];
+    let config = Config { debug: DebugLevel::None, format: LogFormat::Json };
+    let line = ev.render(&config);
+    assert_eq!(line.lines().count(), 1, "the JSON line must stay a single line: {line:?}");
+    let v: serde_json::Value = serde_json::from_str(&line).expect("valid JSON despite the embedded newline");
+    assert_eq!(v["hostname"], "evil\nforged line", "serde_json round-trips the raw value safely");
+}
