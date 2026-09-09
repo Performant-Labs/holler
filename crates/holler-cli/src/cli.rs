@@ -386,7 +386,13 @@ fn cmd_of(token: &str) -> Cmd {
 // --- top-level (hub-only daily verbs) ----------------------------------
 
 #[derive(Parser, Debug)]
-pub struct Roster {}
+pub struct Roster {
+    /// Include `gone` rows (bodies that have dropped off) in the listing.
+    /// Without this the roster shows the live-only view (connected +
+    /// reconnecting).
+    #[arg(long)]
+    pub all: bool,
+}
 
 #[derive(Parser, Debug)]
 pub struct Say {

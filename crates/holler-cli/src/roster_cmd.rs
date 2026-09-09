@@ -1,0 +1,87 @@
+//! `roster`'s pure logic (issue #186), split out of `main.rs` to keep that
+//! file under the workspace's 900-line build guard (`scripts/lint.sh` check
+//! 4) — the same split `say_cmd.rs` (issue #190) made for `say` and
+//! `query_cmd.rs` (issue #185) made for `hub query`. This module returns a
+//! plain [`RosterResult`]; only the bin (`main.rs`, the one file allowed to
+//! exit the process) turns that into an actual exit.
+//!
+//! The dispatch: `main` routes `Command::Roster` here (issue #186 made
+//! `roster` a live verb; #190 did the same for `say`; `interrupt`, #191,
+//! doesn't yet).
+
+use crate::Roster;
+
+/// What `roster_command` (in `main.rs`) should print and exit with.
+pub struct RosterResult {
+    /// The output to print — the table (or `--json`'s raw document) on
+    /// success, the refusal's message on every error.
+    pub message: String,
+    /// `true` prints `message` to stderr (a refusal); `false` prints to
+    /// stdout (the roster table or JSON document).
+    pub to_stderr: bool,
+    pub exit_code: i32,
+}
+
+fn ok(message: String) -> RosterResult {
+    RosterResult { message, to_stderr: false, exit_code: 0 }
+}
+fn err(message: String, exit_code: i32) -> RosterResult {
+    RosterResult { message, to_stderr: true, exit_code }
+}
+
+/// `holler roster [--all] [--json]` (issue #186): read the live hub's roster
+/// over the control socket and report it — the table (or `--json`'s raw
+/// document) on success, a refusal on every error. Exit codes: `0` a roster
+/// came back (live-only view by default, `--all` adds `gone`), `1` every
+/// runtime refusal (no live hub reachable, a control-socket I/O error, or a
+/// bad reply).
+pub fn run(roster: &Roster, json: bool) -> RosterResult {
+    let state_root = holler_hub::state::resolve_state_dir().unwrap_or_default();
+    match holler_hub::control::roster(roster.all) {
+        Ok(doc) => {
+            if json {
+                ok(doc.to_string())
+            } else {
+                ok(render_table(&doc))
+            }
+        }
+        Err(holler_hub::control::ControlError::NoLiveHub) => {
+            err(format!("no live holler hub reachable at {}", state_root.display()), 1)
+        }
+        Err(e) => err(e.to_string(), 1),
+    }
+}
+
+/// Render the roster reply (`{rows: [...]}`) as the spec's table. Columns are
+/// the row's display fields; a held permission is the `PENDING` column (the
+/// human view shows just its count — `--json` carries the full array). An
+/// empty roster prints a friendly one-liner instead of a bare header.
+fn render_table(doc: &serde_json::Value) -> String {
+    let rows = doc.get("rows").and_then(|r| r.as_array()).cloned().unwrap_or_default();
+    if rows.is_empty() {
+        return "(no sessions on the hub)\n".to_string();
+    }
+    let mut out = String::new();
+    out.push_str(&format!(
+        "{:<20} {:<10} {:<8} {:<10} {:<10} {:<8} PENDING\n",
+        "SESSION", "HARNESS", "MODE", "STATE", "CONN", "HOSTNAME"
+    ));
+    for row in &rows {
+        let pending = row
+            .get("pending")
+            .and_then(|p| p.as_array())
+            .map(|items| items.len().to_string())
+            .unwrap_or_else(|| "-".into());
+        out.push_str(&format!(
+            "{:<20} {:<10} {:<8} {:<10} {:<10} {:<8} {}\n",
+            row.get("name").and_then(|v| v.as_str()).unwrap_or("-"),
+            row.get("harness").and_then(|v| v.as_str()).unwrap_or("-"),
+            row.get("mode").and_then(|v| v.as_str()).unwrap_or("-"),
+            row.get("state").and_then(|v| v.as_str()).unwrap_or("-"),
+            row.get("conn_state").and_then(|v| v.as_str()).unwrap_or("-"),
+            row.get("hostname").and_then(|v| v.as_str()).unwrap_or("-"),
+            pending
+        ));
+    }
+    out
+}
