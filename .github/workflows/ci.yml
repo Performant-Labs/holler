@@ -74,37 +74,36 @@ jobs:
       # non-zero-exit assertion still passes). That is what "tolerate that"
       # means.
       #
-      #   * octokit is NOT shipped by the runners. `exec --list` (whole-catalog
-      #     preview) builds the GitHub client, so it needs the gem. We install
-      #     it into a dedicated GEM_HOME (/tmp/gemhome) AND point GEM_PATH at
-      #     the same dir: when a step overrides GEM_HOME, Ruby's gem search
-      #     path becomes just GEM_HOME (the user/system gem dirs are dropped),
-      #     so GEM_PATH must include it or `require 'octokit'` misses the
-      #     freshly installed gem. A `gem install` always puts the gem in its
-      #     own GEM_HOME, so the install lands exactly where Ruby will look.
-      #   * Auth: the client reads GITHUB_TOKEN. This repo does not (yet)
-      #     configure a GitHub token secret for Actions, so on the runners
-      #     GITHUB_TOKEN is empty and the GitHub API returns 401. `discover`
-      #     is written to DEGRADE to an empty catalog on an auth error, so the
-      #     smoke still passes (exit 0, "0 case(s) matched") -- which is
-      #     exactly #170's "tolerate an empty catalog" contract. Once a token
-      #     is added (a follow-up), discover reads the real catalog and the
-      #     same smoke prints the real cases (>=1 line) and still passes.
-      #   * ubuntu-only: macOS's preinstalled 2.6 Ruby is below octokit's
-      #     required floor, and a Homebrew Ruby would add an install step that
+      #   * Token-free by design. `exec --list` is a whole-catalog PREVIEW:
+      #     it only reads the catalog to display it and never launches a
+      #     process or fetches a single issue. test-run.rb therefore builds
+      #     the GitHub client (and `require`s octokit) ONLY for the paths that
+      #     genuinely touch GitHub -- `--last-failed` (fetches issue N) and the
+      #     run path (launches processes). A pure preview passes a nil client,
+      #     so `discover` returns [] immediately: no GITHUB_TOKEN is read and
+      #     octokit is never loaded. This keeps the smoke immune to two runner
+      #     facts that earlier revisions tripped over -- this repo does not
+      #     (yet) configure a GitHub token secret for Actions (so GITHUB_TOKEN
+      #     is empty and the API 401s), and the gem environment on a
+      #     workflow_dispatch run resolves octokit differently than on a
+      #     pull_request run (one loads, one does not). An empty catalog is
+      #     exactly #170's "tolerate an empty catalog" contract; once a token
+      #     is added (a follow-up) the same smoke prints the real cases and
+      #     still passes.
+      #   * ubuntu-only: macOS's preinstalled 2.6 Ruby is below what the
+      #     runner script needs, and a Homebrew Ruby would add an install step
       #     #170 does not ask for; the full minitest suite already runs on both.
       - name: test-run.rb exec --list smoke (runner port)
         if: hashFiles('scripts/test-run.rb') != '' && matrix.os == 'ubuntu-latest'
         run: |
-          gem list octokit >/dev/null 2>&1 || gem install --no-document --install-dir "$GEM_HOME" octokit
-          # Fail only on a hard error (non-zero exit). A zero-case output is
-          # the expected, tolerated outcome while the catalog is empty.
+          # No GITHUB_TOKEN / no octokit: `exec --list` is a pure preview, so
+          # the script never builds the client (and thus never requires
+          # octokit). We assert only on a hard error (non-zero exit / crash);
+          # a zero-case "0 case(s) matched" output is the expected, tolerated
+          # outcome while the catalog is empty, and >=1 case line once cases land.
           ruby scripts/test-run.rb exec --list
           echo "ok: exec --list ran without erroring (catalog empty -> 0 cases, tolerated)"
         shell: bash
-        env:
-          GEM_HOME: /tmp/gemhome
-          GEM_PATH: /tmp/gemhome
 
       - name: Clippy
         run: cargo clippy --all-targets -- -D warnings
