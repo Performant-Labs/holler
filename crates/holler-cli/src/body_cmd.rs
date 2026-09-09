@@ -20,7 +20,7 @@
 //! their print+exit tail with `hub_cmd.rs`'s own versions via
 //! [`crate::query_cmd::print_and_exit_code`] (issue #229).
 
-use crate::query_cmd::{body_local_configs, print_and_exit_code, FetchOutcome};
+use crate::query_cmd::{body_local_configs, print_and_exit_code, protocol_version_from_args, FetchOutcome};
 use crate::{Cmd, Query, QueryResolution};
 
 /// Resolve the state dir, or fail closed (exit 1) if there is nowhere for
@@ -245,13 +245,15 @@ pub fn query(q: &Query, json: bool) -> i32 {
                 Err(e) => FetchOutcome::Err { message: e.message, exit_code: 1 },
             }
         }
-        Cmd::Protocol => {
-            let version = args.first().and_then(|s| s.parse::<u32>().ok());
-            let doc = holler_body::query::local_protocol(version);
-            doc_outcome(&doc, |doc| {
-                format!("protocol: session={} min={} max={}", doc.session, doc.min, doc.max)
-            })
-        }
+        Cmd::Protocol => match protocol_version_from_args(args) {
+            Ok(version) => {
+                let doc = holler_body::query::local_protocol(version);
+                doc_outcome(&doc, |doc| {
+                    format!("protocol: session={} min={} max={}", doc.session, doc.min, doc.max)
+                })
+            }
+            Err(e) => FetchOutcome::Err { message: e.message, exit_code: 1 },
+        },
     };
     print_and_exit_code(json, outcome)
 }
