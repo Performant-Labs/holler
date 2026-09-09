@@ -45,6 +45,9 @@ say | io/alpha "reply with the word ALPHA"
 say | alpha "hi" --timeout 30s --json
 say | io/alpha "hi" --queue
 interrupt | io/alpha
+answer | io/alpha yes
+answer | io/alpha 0
+answer | io/alpha red,m --json
 
 # --- body ------------------------------------------------------------------
 body join | --server wss://hub.example.ts.net --token tok_7f3a:hlr_join_x

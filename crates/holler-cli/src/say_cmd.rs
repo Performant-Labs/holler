@@ -65,15 +65,28 @@ fn resolve_say_text(say: &Say) -> Result<String, String> {
 /// The `-32009 session_busy` refusal's human hint (issue #190's exact
 /// wording): `"<session> is <state> (turn <age>, last update <age> ago); use
 /// 'interrupt <session> \"…\"' to replace it, or 'say --queue' to append"`.
+///
+/// A held permission/elicitation (issue #151, `data.state ==
+/// "input-required"`) is a distinct hint: neither `interrupt` nor `--queue`
+/// resolves it — only `answer` does, so the wording points there instead,
+/// and drops the `--queue` suggestion entirely (`--queue` is refused on
+/// `input-required`, never silently accepted — see `talk::say`'s own gate).
 fn busy_hint(session: &str, e: &holler_proto::WireError) -> String {
     let data = e.data.as_ref();
     let state = data.and_then(|d| d.state.clone()).unwrap_or_else(|| "working".to_string());
     let turn_age = fmt_age(data.and_then(|d| d.turn_age_ms).unwrap_or(0));
     let last_update_age = fmt_age(data.and_then(|d| d.last_update_age_ms).unwrap_or(0));
-    format!(
-        "session_busy: {session} is {state} (turn {turn_age}, last update {last_update_age} ago); \
-         use 'interrupt {session} \"…\"' to replace it, or 'say --queue' to append"
-    )
+    if state == "input-required" {
+        format!(
+            "session_busy: {session} is input-required (turn {turn_age}, last update {last_update_age} ago); \
+             use 'answer {session} <choice>' to resolve it"
+        )
+    } else {
+        format!(
+            "session_busy: {session} is {state} (turn {turn_age}, last update {last_update_age} ago); \
+             use 'interrupt {session} \"…\"' to replace it, or 'say --queue' to append"
+        )
+    }
 }
 
 /// Render a millisecond age as `<m>m<s>s` (or bare `<s>s` under a minute) —

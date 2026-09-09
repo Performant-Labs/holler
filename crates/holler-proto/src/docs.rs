@@ -656,6 +656,34 @@ pub struct CancelResult {
     pub applied: bool,
 }
 
+/// The `params` of `session/answer` (issue #151): resolve a held
+/// `input-required` permission/elicitation. `choice` is a 0-based index, an
+/// exact (case-insensitive) label/key match, or — for a multi-field
+/// elicitation — a comma-separated list, one segment per field, in the
+/// order the pending item's `options` were declared (`holler_body::
+/// acp_driver::answerable::resolve_choice` is the resolution logic this
+/// mirrors on the wire).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Answer {
+    /// The target session name.
+    pub session: String,
+    /// The caller's choice (index | label/key | comma-separated segments).
+    pub choice: String,
+}
+
+/// The `result` of `session/answer` — sent **only after** the driver
+/// resumed the turn (the ACP `session/request_permission`/`elicitation/
+/// create` reply went out and the agent reported `working` again, or the
+/// turn ended outright). A session with nothing pending answers
+/// `-32010 nothing_pending` instead of this result (docs §8).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AnswerResult {
+    /// Always `true` (the answer was applied).
+    pub applied: bool,
+}
+
 /// The `params` of `circuit/join` (docs §3) — the one-time bootstrap.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

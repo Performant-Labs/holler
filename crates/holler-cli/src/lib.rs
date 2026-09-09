@@ -5,6 +5,7 @@
 //! thin entry point over this tree.
 
 mod cli;
+pub mod answer_cmd;
 pub mod body_cmd;
 pub mod hub_cmd;
 pub mod query_cmd;
@@ -14,7 +15,7 @@ pub mod time_fmt;
 pub mod token_cmd;
 
 pub use crate::cli::{
-    Attach, AttachCommand, Body, BodyCommand, Cli, Cmd, Command, Delete, Hub, HubCommand,
+    Answer, Attach, AttachCommand, Body, BodyCommand, Cli, Cmd, Command, Delete, Hub, HubCommand,
     Interrupt, Join, List, Mint, Ping, Query, QueryResolution, Revoke, Roster, Run, Say, Serve,
     Status, Support, Target, Token, TokenCommand, Usage,
 };

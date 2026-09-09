@@ -236,25 +236,27 @@ async fn queue_survives_cancel() {
 
 #[tokio::test]
 async fn queue_overflow_is_limit_exceeded() {
-    // `--chunks` must be >=2: the stub's gate fires after chunk 0
-    // (`emitted == 1`), and its terminal check (`emitted >= chunks`) is
-    // matched first — with `--chunks 1` the turn would end before the gate
-    // ever raises, defeating the "hold this session open indefinitely"
-    // setup this test needs.
-    let manager = SessionManager::start(&registry_of(&[("alpha", &["--ask-permission", "--chunks", "2"])]));
+    // `--slow` (200ms/chunk) with enough chunks to hold the occupying turn
+    // `working` for the whole test. **Not** `--ask-permission` (issue #151):
+    // an `input-required` session refuses a queued prompt outright rather
+    // than accepting it into the FIFO (`plain_prompt_to_input_required_
+    // session_is_session_busy` above) — this test needs a `working` session
+    // that stays busy long enough to fill the queue, which is a disjoint
+    // setup from the gate this story added.
+    let manager = SessionManager::start(&registry_of(&[("alpha", &["--slow", "--chunks", "50"])]));
     let alpha = sn("alpha");
 
     let occupying = manager.prompt(&alpha, "occ", "hi", false);
     tokio::pin!(occupying);
     tokio::select! {
         res = &mut occupying => panic!("finished early: {res:?}"),
-        () = wait_for_state(&manager, &alpha, SessionState::InputRequired, Duration::from_secs(2)) => {}
+        () = wait_for_state(&manager, &alpha, SessionState::Working, Duration::from_secs(2)) => {}
     }
 
-    // Fill the bounded FIFO exactly to its 64-item cap. `--ask-permission`
-    // holds the occupying turn open indefinitely, so none of these queued
-    // prompts get dispatched during this test — each is driven only far
-    // enough (via the timed `select!`) to be accepted into the queue.
+    // Fill the bounded FIFO exactly to its 64-item cap. The occupying turn
+    // (50 slow chunks, ~10s) outlasts this whole fill, so none of these
+    // queued prompts get dispatched during this test — each is driven only
+    // far enough (via the timed `select!`) to be accepted into the queue.
     let mut queued: Vec<_> =
         (0..64).map(|i| Box::pin(manager.prompt(&alpha, format!("q{i}"), "queued", true))).collect();
     for fut in &mut queued {
@@ -513,6 +515,87 @@ async fn timing_fields_survive_working_to_input_required_transition() {
     assert_eq!(idle_ad.state, SessionState::Idle);
     assert!(idle_ad.turn_started_at.is_none());
     assert!(idle_ad.last_update_at.is_none());
+}
+
+/// Issue #151: `presence_doc()`'s `pending` carries the held permission's
+/// own detail while `input-required` — the roster's `PENDING` column
+/// (issue #151's own roster story) renders straight from this — and is gone
+/// (`None`) the instant the session leaves that state, whether it resumes to
+/// `Working` (this test) or the turn ends outright.
+#[tokio::test]
+async fn presence_pending_appears_while_input_required_and_clears_once_answered() {
+    let manager = SessionManager::start(&registry_of(&[("alpha", &["--ask-permission", "--chunks", "2"])]));
+    let alpha = sn("alpha");
+
+    let first = manager.prompt(&alpha, "a1", "hi", false);
+    tokio::pin!(first);
+    tokio::select! {
+        res = &mut first => panic!("finished early: {res:?}"),
+        () = wait_for_state(&manager, &alpha, SessionState::InputRequired, Duration::from_secs(2)) => {}
+    }
+
+    let paused_ad = find(&manager.presence_doc("h".to_string()), "alpha");
+    let pending = paused_ad.pending.expect("pending must be Some while input-required");
+    assert_eq!(pending.len(), 1, "the stub's permission gate is a single field: {pending:?}");
+    assert_eq!(pending[0].prompt, "stub tool wants to run");
+    assert_eq!(pending[0].options, vec!["Allow".to_string(), "Deny".to_string()]);
+
+    let answer = manager.answer(&alpha, "allow").await;
+    assert_eq!(answer, Ok(Ok(())));
+    let result = first.await;
+    assert_result_ok(&result, "a1", "end_turn", SessionState::Completed);
+
+    let idle_ad = find(&manager.presence_doc("h".to_string()), "alpha");
+    assert!(idle_ad.pending.is_none(), "pending must clear once the session leaves input-required");
+}
+
+/// Issue #151: `answer` against a session that has never been prompted (no
+/// driver, `Idle`) fails closed with the same one-line reason the wire maps
+/// to `-32010 nothing_pending` (`prompt_dispatch::handle_answer`).
+#[tokio::test]
+async fn answer_with_nothing_pending_at_manager_level_is_error() {
+    let manager = SessionManager::start(&registry_of(&[("alpha", &["--chunks", "1"])]));
+    let alpha = sn("alpha");
+
+    let answer = manager.answer(&alpha, "allow").await;
+    assert_eq!(answer, Ok(Err("nothing pending to answer".to_string())));
+}
+
+/// Issue #151: a plain prompt to an `input-required` session is refused
+/// exactly like a `working` one (`PromptOutcome::Busy`), never silently
+/// queued — `queue:true` does not change this, distinguishing it from the
+/// `working` busy case (`queued_prompt_runs_after_current_turn` above, which
+/// *does* accept a queued prompt).
+#[tokio::test]
+async fn plain_prompt_to_input_required_session_is_session_busy() {
+    let manager = SessionManager::start(&registry_of(&[("alpha", &["--ask-permission", "--chunks", "2"])]));
+    let alpha = sn("alpha");
+
+    let first = manager.prompt(&alpha, "a1", "hi", false);
+    tokio::pin!(first);
+    tokio::select! {
+        res = &mut first => panic!("finished early: {res:?}"),
+        () = wait_for_state(&manager, &alpha, SessionState::InputRequired, Duration::from_secs(2)) => {}
+    }
+
+    let busy = manager.prompt(&alpha, "a2", "hi again", false).await;
+    match busy {
+        Ok(PromptOutcome::Busy { state, .. }) => assert_eq!(state, "input-required"),
+        other => panic!("expected Busy(input-required), got {other:?}"),
+    }
+
+    // `--queue` (issue #150/#190) is `working`-only relief; it must not
+    // silently accept a prompt against a held permission/elicitation either.
+    let queued = manager.prompt(&alpha, "a3", "hi again, queued", true).await;
+    match queued {
+        Ok(PromptOutcome::Busy { state, .. }) => assert_eq!(state, "input-required"),
+        other => panic!("expected Busy(input-required) even with queue:true, got {other:?}"),
+    }
+
+    let answer = manager.answer(&alpha, "allow").await;
+    assert_eq!(answer, Ok(Ok(())));
+    let result = first.await;
+    assert_result_ok(&result, "a1", "end_turn", SessionState::Completed);
 }
 
 /// Issue #245: the only existing crash test

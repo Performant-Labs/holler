@@ -66,6 +66,9 @@ fn canonical_frame(method: &str) -> String {
         "session/cancel" => format!(
             r#"{{"jsonrpc":"2.0","id":"{id}","method":"session/cancel","params":{{"session":"io/alpha"}}}}"#
         ),
+        "session/answer" => format!(
+            r#"{{"jsonrpc":"2.0","id":"{id}","method":"session/answer","params":{{"session":"io/alpha","choice":"0"}}}}"#
+        ),
         _ => panic!("no canonical frame for {method:?}"),
     }
 }

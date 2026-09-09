@@ -1,6 +1,6 @@
 //! The v2 method catalog (docs §4).
 //!
-//! Thirteen methods, four kinds, two directions. `catalog()` is the single
+//! Fourteen methods, four kinds, two directions. `catalog()` is the single
 //! source of truth — the body/hub dispatch and the codec's
 //! `method_not_found` path both read from it.
 //!
@@ -43,7 +43,7 @@ pub enum Direction {
     HubToBody,
 }
 
-/// The complete, closed v2 method catalog (13 rows).
+/// The complete, closed v2 method catalog (14 rows).
 #[rustfmt::skip]
 pub const CATALOG: &[Method] = &[
     // name                 kind          direction   (docs §4)
@@ -60,6 +60,10 @@ pub const CATALOG: &[Method] = &[
     Method { name: "session/prompt",      kind: MethodKind::Request,      dir: Direction::HubToBody },
     Method { name: "session/update",      kind: MethodKind::Notification, dir: Direction::BodyToHub },
     Method { name: "session/cancel",      kind: MethodKind::Request,      dir: Direction::HubToBody },
+    // `session/answer` (issue #151): resolve a held `input-required`
+    // permission/elicitation — same direction/kind as `session/cancel`, the
+    // request it's modeled on.
+    Method { name: "session/answer",      kind: MethodKind::Request,      dir: Direction::HubToBody },
 ];
 
 /// Look up a method by its exact wire name.
