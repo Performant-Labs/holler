@@ -250,7 +250,10 @@ pub struct AcpDriver {
     session: v2::SessionId,
     connection: V2ConnectionTo<Agent>,
     shared: Arc<Mutex<Shared>>,
-    join_handle: JoinHandle<()>,
+    // `Mutex<Option<..>>`, mirroring `shutdown_tx` right above, so
+    // `shutdown()` can `.take()` the handle and `.await` it *by value*
+    // instead of busy-polling it behind `&self` (see `AcpDriver::shutdown`).
+    join_handle: Mutex<Option<JoinHandle<()>>>,
     shutdown_tx: Mutex<Option<oneshot::Sender<()>>>,
 }
 
@@ -265,8 +268,12 @@ impl Drop for AcpDriver {
         // it owns is dropped, which the runtime does once the aborted task is
         // polled to completion. This is synchronous best-effort cleanup — a
         // `Drop` impl cannot `.await` a graceful `session/close` the way
-        // `shutdown()` does.
-        self.join_handle.abort();
+        // `shutdown()` does. `JoinHandle::abort` only needs `&self`, so this
+        // works fine without taking the handle out of the mutex (it may
+        // already be gone if `shutdown()` ran first, which is a no-op here).
+        if let Some(handle) = lock_option(&self.join_handle).as_ref() {
+            handle.abort();
+        }
     }
 }
 
@@ -341,7 +348,7 @@ impl AcpDriver {
                 session: ready.session_id,
                 connection: ready.connection,
                 shared,
-                join_handle,
+                join_handle: Mutex::new(Some(join_handle)),
                 shutdown_tx: Mutex::new(Some(shutdown_tx)),
             }),
             Ok(Ok(Err(reason))) => {
@@ -444,7 +451,9 @@ impl AcpDriver {
                 "connection ended while awaiting the cancelled state_update".to_string(),
             )),
             Err(_timed_out) => {
-                self.join_handle.abort();
+                if let Some(handle) = lock_option(&self.join_handle).as_ref() {
+                    handle.abort();
+                }
                 Err(DriverError::Cancel(format!(
                     "no cancelled state_update within {CANCEL_TIMEOUT:?}; child force-killed"
                 )))
@@ -503,10 +512,21 @@ impl AcpDriver {
         if let Some(tx) = lock_option(&self.shutdown_tx).take() {
             let _ = tx.send(());
         }
-        match tokio::time::timeout(SHUTDOWN_GRACE, wait_join(&self.join_handle)).await {
-            Ok(()) => Ok(()),
+        // Take the handle out by value so it can be awaited directly — a
+        // real async wait on the task's own completion, not a hand-rolled
+        // poll loop (see the struct field's doc comment for why this mirrors
+        // `shutdown_tx`). The lock is not held across the `.await`.
+        let handle = lock_option(&self.join_handle).take();
+        let Some(handle) = handle else {
+            // Nothing to wait on: `shutdown()` already ran (or `Drop` beat
+            // us to it, though `Drop` never takes the handle out).
+            return Ok(());
+        };
+        let abort_handle = handle.abort_handle();
+        match tokio::time::timeout(SHUTDOWN_GRACE, handle).await {
+            Ok(_join_result) => Ok(()),
             Err(_timed_out) => {
-                self.join_handle.abort();
+                abort_handle.abort();
                 Ok(())
             }
         }
@@ -533,28 +553,4 @@ impl AcpDriver {
 
 fn lock_option<T>(m: &Mutex<Option<T>>) -> MutexGuard<'_, Option<T>> {
     m.lock().unwrap_or_else(PoisonError::into_inner)
-}
-
-/// Await a `JoinHandle<()>` without surfacing a join error as anything other
-/// than "the task ended" — `shutdown`'s own bounded wait only cares whether
-/// the task is still running, not why it stopped.
-async fn wait_join(handle: &JoinHandle<()>) {
-    // `JoinHandle` is not `Clone`; abort-safety here only needs to *observe*
-    // completion, not consume the handle, so poll it directly rather than
-    // awaiting a moved clone.
-    struct WaitJoin<'a>(&'a JoinHandle<()>);
-    impl std::future::Future for WaitJoin<'_> {
-        type Output = ();
-        fn poll(self: Pin<&mut Self>, cx: &mut TaskContext<'_>) -> Poll<()> {
-            if self.0.is_finished() {
-                return Poll::Ready(());
-            }
-            // No native "notify on finish" without consuming the handle;
-            // a short re-poll interval keeps this bounded and cheap relative
-            // to `SHUTDOWN_GRACE`.
-            cx.waker().wake_by_ref();
-            Poll::Pending
-        }
-    }
-    WaitJoin(handle).await;
 }
