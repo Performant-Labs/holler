@@ -143,6 +143,113 @@ fn query_protocol_with_version_1_is_ok_false() {
     assert_eq!(doc["ok"].as_bool(), Some(false));
 }
 
+/// `query/protocol {version:2}` (the current, in-range version) is a normal
+/// `ok:true` answer, not a rejection — issue #251's fix must not touch the
+/// happy path.
+#[test]
+fn query_protocol_with_current_version_is_ok_true() {
+    let state = StateDir::new();
+    let (code, stdout, stderr) = run(&state, &["--json", "body", "query", "protocol", "2"]);
+    assert_eq!(code, 0, "stderr: {stderr}");
+    let doc: Value = serde_json::from_str(&stdout).expect("valid JSON");
+    assert_eq!(doc["asked"].as_u64(), Some(2));
+    assert_eq!(doc["ok"].as_bool(), Some(true));
+}
+
+/// `query/protocol` with no `version` at all reports the plain range and is
+/// never a rejection (docs §5.4).
+#[test]
+fn query_protocol_with_no_version_is_not_rejected() {
+    let state = StateDir::new();
+    let (code, stdout, stderr) = run(&state, &["--json", "body", "query", "protocol"]);
+    assert_eq!(code, 0, "stderr: {stderr}");
+    let doc: Value = serde_json::from_str(&stdout).expect("valid JSON");
+    assert!(doc.get("asked").is_none(), "no version asked must not appear in the answer: {doc}");
+}
+
+/// `query/protocol {version:0}` is the documented `-32006 unknown_feature`
+/// (docs §5.4: "`n` must be a positive integer") on the **body**'s local
+/// leaf (issue #251) — not a normal `ok:false` answer.
+#[test]
+fn body_query_protocol_version_zero_is_unknown_feature() {
+    let state = StateDir::new();
+    let (code, _, stderr) = run(&state, &["body", "query", "protocol", "0"]);
+    assert_eq!(code, 1, "version:0 must be a refusal, not a crash or a normal answer");
+    assert!(stderr.contains("positive integer"), "stderr names the failure: {stderr}");
+}
+
+/// A negative `version` is rejected the same way as `0` — the old bug
+/// silently treated an unparseable/negative value as "no version asked"
+/// (a misleading `ok`-less normal answer) instead of `-32006`.
+#[test]
+fn body_query_protocol_negative_version_is_unknown_feature() {
+    let state = StateDir::new();
+    let (code, _, stderr) = run(&state, &["body", "query", "protocol", "-1"]);
+    assert_eq!(code, 1, "a negative version must be a refusal, not silently 'no version asked'");
+    assert!(stderr.contains("positive integer"), "stderr names the failure: {stderr}");
+}
+
+/// A malformed (non-numeric) `version` is rejected the same way.
+#[test]
+fn body_query_protocol_malformed_version_is_unknown_feature() {
+    let state = StateDir::new();
+    let (code, _, stderr) = run(&state, &["body", "query", "protocol", "not-a-number"]);
+    assert_eq!(code, 1, "a malformed version must be a refusal, not silently 'no version asked'");
+    assert!(stderr.contains("positive integer"), "stderr names the failure: {stderr}");
+}
+
+/// The **hub**'s local `query/protocol` leaf (`hub query protocol …`, served
+/// by `control_server.rs`'s `hub_query_local`) enforces the same rule as the
+/// body's (issue #251): `0` is `-32006`, not a normal answer.
+#[test]
+fn hub_query_protocol_version_zero_is_unknown_feature() {
+    let state = StateDir::new();
+    let hub = Hub::start(&state);
+    let (code, _, stderr) = run(&state, &["hub", "query", "protocol", "0"]);
+    assert_eq!(code, 1, "version:0 must be a refusal, not a crash or a normal answer");
+    assert!(stderr.contains("positive integer"), "stderr names the failure: {stderr}");
+    hub.stop(Duration::from_secs(5));
+}
+
+/// The hub's local leaf also rejects a negative/malformed `version` (rather
+/// than silently forwarding "no version asked" as the old CLI arg parsing
+/// and wire dispatch both used to do).
+#[test]
+fn hub_query_protocol_negative_and_malformed_version_are_unknown_feature() {
+    let state = StateDir::new();
+    let hub = Hub::start(&state);
+
+    let (code, _, stderr) = run(&state, &["hub", "query", "protocol", "-1"]);
+    assert_eq!(code, 1, "a negative version must be a refusal: {stderr}");
+    assert!(stderr.contains("positive integer"), "stderr names the failure: {stderr}");
+
+    let (code, _, stderr) = run(&state, &["hub", "query", "protocol", "not-a-number"]);
+    assert_eq!(code, 1, "a malformed version must be a refusal: {stderr}");
+    assert!(stderr.contains("positive integer"), "stderr names the failure: {stderr}");
+
+    hub.stop(Duration::from_secs(5));
+}
+
+/// The hub's local `query/protocol` leaf still answers normally for a valid
+/// version and for no version at all — the fix must not touch those paths.
+#[test]
+fn hub_query_protocol_valid_and_absent_version_are_not_rejected() {
+    let state = StateDir::new();
+    let hub = Hub::start(&state);
+
+    let (code, stdout, stderr) = run(&state, &["--json", "hub", "query", "protocol", "2"]);
+    assert_eq!(code, 0, "stderr: {stderr}");
+    let doc: Value = serde_json::from_str(&stdout).expect("valid JSON");
+    assert_eq!(doc["ok"].as_bool(), Some(true));
+
+    let (code, stdout, stderr) = run(&state, &["--json", "hub", "query", "protocol"]);
+    assert_eq!(code, 0, "stderr: {stderr}");
+    let doc: Value = serde_json::from_str(&stdout).expect("valid JSON");
+    assert!(doc.get("asked").is_none(), "no version asked must not appear in the answer: {doc}");
+
+    hub.stop(Duration::from_secs(5));
+}
+
 /// `body query` has no remote target — `body query TARGET status` is a usage
 /// error (exit 2), not a silent local answer.
 #[test]
@@ -232,6 +339,36 @@ fn remote_query_status_by_label_and_by_token_id() {
     assert_eq!(code, 0, "query by token id must exit 0; stderr: {stderr}");
     let doc: Value = serde_json::from_str(&stdout).expect("valid JSON");
     assert_eq!(doc["role"].as_str(), Some("body"));
+
+    body.stop(&state, Duration::from_secs(5));
+    hub.stop(Duration::from_secs(5));
+}
+
+/// `hub query TARGET protocol 0` forwards to the **body**'s live-socket
+/// `query/protocol` dispatch (`holler_body::connection::handle_query`) — a
+/// third distinct code path from the two local leaves above. Issue #251's
+/// fix must reject `0` there too, not just on the hub's/body's local forms.
+#[test]
+fn remote_query_protocol_version_zero_is_unknown_feature() {
+    let state = StateDir::new();
+    let hub = Hub::start(&state);
+    join_fresh(&state, &hub.ws_url(), "kiwi");
+    let config = support::write_sessions_toml(&state, &[]);
+    let body = Body::start(&state, &config);
+
+    let ready = wait_for(READY, || {
+        (support::hub_status_json(&state).get("clients").and_then(|v| v.as_u64()) == Some(1)).then_some(())
+    });
+    assert!(ready.is_some(), "the body must be live before it can be queried");
+
+    let (code, _, stderr) = run(&state, &["hub", "query", "default", "protocol", "0"]);
+    assert_eq!(code, 1, "version:0 forwarded to a live body must be a refusal: {stderr}");
+    assert!(stderr.contains("positive integer"), "stderr names the failure: {stderr}");
+
+    let (code, stdout, stderr) = run(&state, &["--json", "hub", "query", "default", "protocol", "2"]);
+    assert_eq!(code, 0, "a valid version must still work normally; stderr: {stderr}");
+    let doc: Value = serde_json::from_str(&stdout).expect("valid JSON");
+    assert_eq!(doc["ok"].as_bool(), Some(true));
 
     body.stop(&state, Duration::from_secs(5));
     hub.stop(Duration::from_secs(5));

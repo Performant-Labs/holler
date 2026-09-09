@@ -322,6 +322,33 @@ pub struct ProtocolParams {
     pub version: Option<u32>,
 }
 
+impl ProtocolParams {
+    /// Parse and validate `query/protocol`'s optional `version` (docs §5.4)
+    /// out of the raw request `params`, shared by both the hub's and the
+    /// body's dispatch (issue #251): absent `params`, or `params` present but
+    /// with no `version` key, is `Ok(None)` — no version asked, never a
+    /// rejection. A `version` that is present but is not a positive integer
+    /// — `0`, negative, non-numeric, or too large to fit `u32` — is the
+    /// documented `-32006 unknown_feature` refusal (docs §5.4: "`n` must be a
+    /// positive integer, else `-32006 unknown_feature`") instead of silently
+    /// falling through as "no version asked". Only a `version` that parses
+    /// as a valid positive `u32` reaches [`local_protocol`]-style range
+    /// checking as `Ok(Some(v))`.
+    pub fn parse_version(params: Option<&Value>) -> Result<Option<u32>, WireError> {
+        let Some(raw) = params.and_then(|p| p.get("version")) else {
+            return Ok(None);
+        };
+        match raw.as_u64().and_then(|v| u32::try_from(v).ok()) {
+            Some(0) | None => Err(WireError::new(
+                Code::UnknownFeature,
+                format!("query/protocol version must be a positive integer, got {raw}"),
+                Some("version"),
+            )),
+            Some(v) => Ok(Some(v)),
+        }
+    }
+}
+
 /// The `result` of `query/protocol` (docs §5.4).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -683,5 +710,65 @@ pub fn parse_session_state(s: &str) -> Result<SessionState, WireError> {
             "unknown session state",
             Some("state"),
         )),
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable)] // #185/#251
+mod protocol_version_tests {
+    use super::*;
+
+    /// No `params` at all (`query/protocol` with no body): no version asked,
+    /// never a rejection.
+    #[test]
+    fn no_params_is_no_version_asked() {
+        assert_eq!(ProtocolParams::parse_version(None), Ok(None));
+    }
+
+    /// `params` present but with no `version` key: same as no `params`.
+    #[test]
+    fn params_without_version_key_is_no_version_asked() {
+        let params = serde_json::json!({});
+        assert_eq!(ProtocolParams::parse_version(Some(&params)), Ok(None));
+    }
+
+    /// `version: 0` is rejected — the docs require a *positive* integer.
+    #[test]
+    fn version_zero_is_unknown_feature() {
+        let params = serde_json::json!({"version": 0});
+        let err = ProtocolParams::parse_version(Some(&params)).expect_err("0 must be rejected");
+        assert_eq!(err.code, Code::UnknownFeature.jsonrpc());
+    }
+
+    /// A negative `version` is rejected (not silently treated as "no
+    /// version asked").
+    #[test]
+    fn negative_version_is_unknown_feature() {
+        let params = serde_json::json!({"version": -1});
+        let err = ProtocolParams::parse_version(Some(&params)).expect_err("negative must be rejected");
+        assert_eq!(err.code, Code::UnknownFeature.jsonrpc());
+    }
+
+    /// A non-numeric `version` is rejected.
+    #[test]
+    fn non_numeric_version_is_unknown_feature() {
+        let params = serde_json::json!({"version": "two"});
+        let err = ProtocolParams::parse_version(Some(&params)).expect_err("a string must be rejected");
+        assert_eq!(err.code, Code::UnknownFeature.jsonrpc());
+    }
+
+    /// A `version` too large to fit `u32` is rejected.
+    #[test]
+    fn oversized_version_is_unknown_feature() {
+        let params = serde_json::json!({"version": 5_000_000_000_u64});
+        let err = ProtocolParams::parse_version(Some(&params)).expect_err("must not silently truncate");
+        assert_eq!(err.code, Code::UnknownFeature.jsonrpc());
+    }
+
+    /// A valid positive `version` parses through untouched.
+    #[test]
+    fn positive_version_parses() {
+        let params = serde_json::json!({"version": 2});
+        assert_eq!(ProtocolParams::parse_version(Some(&params)), Ok(Some(2)));
     }
 }
