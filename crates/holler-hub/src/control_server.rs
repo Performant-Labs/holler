@@ -80,7 +80,7 @@ async fn dispatch_control(line: &str, registry: &Registry, roster: &Roster) -> S
         Some("control/support") => hub_support(&cid, &obj, registry).await,
         Some("control/query_local") => hub_query_local(&cid, &obj, registry).await,
         Some("control/query_remote") => hub_query_remote(&cid, &obj, registry).await,
-        Some("control/say") => say(&cid, &obj, registry).await,
+        Some("control/say") => say(&cid, &obj, registry, roster).await,
         // `control/interrupt` (issue #191): the CLI's `interrupt` verb.
         Some("control/interrupt") => interrupt(&cid, &obj, registry).await,
         Some("control/answer") => answer(&cid, &obj, registry).await,
@@ -88,6 +88,14 @@ async fn dispatch_control(line: &str, registry: &Registry, roster: &Roster) -> S
         // `{rows: [...]}` (the live-only view; the CLI's `--all` reads the
         // same socket and asks for the full set, which the server honors here).
         Some("control/roster") => roster_control(&cid, &obj, roster).await,
+        // Issue #192's test-only hook: forcibly end a body's live connection
+        // to simulate an abrupt drop. Gated behind `HOLLER_TEST_HOOKS=1` (an
+        // env var, not `cfg(test)`, since this dispatch runs inside the real
+        // compiled `holler` binary a test spawns as a subprocess — a
+        // `cfg(test)` gate would never be reachable there at all). Answered
+        // as a plain unknown method when the flag is unset, so the hook is
+        // indistinguishable from not existing in a production hub.
+        Some("control/test_drop") if test_hooks_enabled() => test_drop(&cid, &obj, registry).await,
         Some(other) => encode_error(&cid, Code::MethodNotFound, format!("unknown control method: {other}")),
         // No method: not a call (a stray response/notification or empty frame).
         None => unkeyed_error_line(Code::InvalidRequest, "a control frame must be a request with a method"),
@@ -181,7 +189,7 @@ async fn hub_query_remote(cid: &holler_proto::CorrelationId, obj: &serde_json::V
 /// `say` verb, relayed to [`crate::talk::say`]. See that module for the full
 /// resolve → busy-check → send → collect → TalkLog flow; this is only the
 /// control-socket param/result mapping.
-async fn say(cid: &holler_proto::CorrelationId, obj: &serde_json::Value, registry: &Registry) -> String {
+async fn say(cid: &holler_proto::CorrelationId, obj: &serde_json::Value, registry: &Registry, roster: &Roster) -> String {
     let params = obj.get("params");
     let Some(session) = params.and_then(|p| p.get("session")).and_then(|v| v.as_str()) else {
         return encode_error(cid, Code::InvalidParams, "control/say needs params.session".to_string());
@@ -194,7 +202,7 @@ async fn say(cid: &holler_proto::CorrelationId, obj: &serde_json::Value, registr
     let timeout = std::time::Duration::from_millis(timeout_ms);
 
     let state = HubState::from_root(resolve_state_dir().unwrap_or_default());
-    match crate::talk::say(registry, &state, session, text, queue, timeout).await {
+    match crate::talk::say(registry, roster, &state, session, text, queue, timeout).await {
         Ok(outcome) => encode_response(cid, serde_json::json!({
             "session": outcome.session,
             "stop_reason": outcome.stop_reason,
@@ -207,9 +215,10 @@ async fn say(cid: &holler_proto::CorrelationId, obj: &serde_json::Value, registr
         Err(crate::talk::SayError::UnknownSession) => {
             encode_error(cid, Code::UnknownSession, format!("unknown session: {session}"))
         }
-        Err(crate::talk::SayError::NotConnected) => {
-            encode_error(cid, Code::NotConnected, format!("{session}'s body is not connected"))
-        }
+        // Issue #192, rule 4: `detail` already carries the roster's own
+        // `conn_state` (and, for `reconnecting`, the last-seen age) when the
+        // roster still remembers this name — see `talk::not_connected_detail`.
+        Err(crate::talk::SayError::NotConnected(detail)) => encode_error(cid, Code::NotConnected, detail),
         Err(crate::talk::SayError::Ambiguous(candidates)) => {
             let message = format!("ambiguous session {session}: candidates are {}", candidates.join(", "));
             let err = WireError::new(Code::UnknownSession, message, Some("ambiguous"));
@@ -366,6 +375,39 @@ async fn roster_control(cid: &holler_proto::CorrelationId, obj: &serde_json::Val
 fn read_listening_here() -> Vec<String> {
     let state = HubState::from_root(resolve_state_dir().unwrap_or_default());
     read_listening(&state)
+}
+
+/// Whether the issue #192 test-only control hooks (`control/test_drop`) are
+/// enabled on this hub process. `HOLLER_TEST_HOOKS=1` only — checked at
+/// request time (not cached), so a test that spawns its own hub with this
+/// env var never affects any other concurrently-running hub process.
+fn test_hooks_enabled() -> bool {
+    std::env::var("HOLLER_TEST_HOOKS").map(|v| v == "1").unwrap_or(false)
+}
+
+/// `control/test_drop {token}` (issue #192, test-only): resolve `token`
+/// (a token id, client id, or hostname/label — the same grammar
+/// `control/query_remote`'s `target` uses) against the live registry and ask
+/// that connection to forcibly end itself, simulating an abrupt network drop.
+/// No live match is `-32004 not_connected`; more than one is `-32600` (the
+/// CLI's own exit-2 ambiguity shape), matching `hub_query_remote`'s own
+/// mapping.
+async fn test_drop(cid: &holler_proto::CorrelationId, obj: &serde_json::Value, registry: &Registry) -> String {
+    let Some(token) = obj.get("params").and_then(|p| p.get("token")).and_then(|v| v.as_str()) else {
+        return encode_error(cid, Code::InvalidParams, "control/test_drop needs params.token".to_string());
+    };
+    match registry.find_target(token).await {
+        crate::live::TargetLookup::Found(handle) => {
+            let dropped = handle.force_drop().await;
+            encode_response(cid, serde_json::json!({ "dropped": dropped }))
+        }
+        crate::live::TargetLookup::NotConnected => {
+            encode_error(cid, Code::NotConnected, format!("{token} has no live connection"))
+        }
+        crate::live::TargetLookup::Ambiguous => {
+            encode_error(cid, Code::InvalidRequest, format!("{token} is ambiguous — matches more than one live body"))
+        }
+    }
 }
 /// `control/token_ping {token_id}` (issue #182): find the live circuit bound
 /// to `token_id` in the registry and ask it to answer a `circuit/ping`,

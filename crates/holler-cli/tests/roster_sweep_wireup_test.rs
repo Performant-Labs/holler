@@ -13,13 +13,14 @@
 //!
 //! The hub's own connection-level liveness timeout (issue #243,
 //! `circuit.rs`'s `liveness_timeout()`, default 3× the heartbeat) would
-//! *also* eventually tear the connection down and mark the row `gone`
-//! immediately (`Roster::clear`, issue #80) — a different code path than the
-//! TTL sweep this story wires up. `HOLLER_HUB_LIVENESS_TIMEOUT_MS` is set far
-//! longer than this test's whole run so that path never fires, and only the
-//! roster's own (heavily shortened via `HOLLER_ROSTER_*_MS`) TTL thresholds,
-//! swept on a short `HOLLER_ROSTER_SWEEP_MS` interval, can be what moves the
-//! row.
+//! *also* eventually tear the connection down and mark the row `reconnecting`
+//! immediately (`Roster::mark_reconnecting`, issue #192 — this was `gone`
+//! immediately, issue #80, before #192 revised abrupt drops to give the body
+//! a reconnect grace window) — a different code path than the TTL sweep this
+//! story wires up. `HOLLER_HUB_LIVENESS_TIMEOUT_MS` is set far longer than
+//! this test's whole run so that path never fires, and only the roster's own
+//! (heavily shortened via `HOLLER_ROSTER_*_MS`) TTL thresholds, swept on a
+//! short `HOLLER_ROSTER_SWEEP_MS` interval, can be what moves the row.
 
 mod support;
 

@@ -155,6 +155,21 @@ pub fn roster(all: bool, prefix: Option<&str>) -> Result<serde_json::Value, Cont
     exchange("b-roster", "control/roster", Some(serde_json::json!({ "all": all, "prefix": prefix })))
 }
 
+/// Issue #192's `control/test_drop` test hook: ask the hub whose state dir
+/// is `state_root` to forcibly end `token`'s live connection, simulating an
+/// abrupt network drop. Takes an explicit state root (not the ambient
+/// `HOLLER_STATE_DIR` every other client fn here reads via
+/// [`resolve_state_dir`]) so a multi-threaded test suite can target one
+/// specific hub without racing another test's own env mutation of that same
+/// process-wide variable. Only answered when the target hub process has
+/// `HOLLER_TEST_HOOKS=1` set; every other hub answers
+/// `-32601 method_not_found`, indistinguishable from an unknown method.
+pub fn test_drop_at(state_root: &std::path::Path, token: &str) -> Result<serde_json::Value, ControlError> {
+    let path = control_sock_path(&HubState::from_root(state_root.to_path_buf()));
+    let params = serde_json::json!({ "token": token });
+    send_over(&path, "b-test-drop", "control/test_drop", Some(params), CLIENT_TIMEOUT)
+}
+
 /// Send one `method`/`params` request over the control socket and return its
 /// `result` — the shared body of every one-shot control exchange (`status`,
 /// `token_ping`, …). `id_literal` is a fixed, well-formed `b-` id (each
@@ -165,10 +180,10 @@ fn exchange(id_literal: &str, method: &str, params: Option<serde_json::Value>) -
 }
 
 /// [`exchange`] with a caller-chosen read timeout (issue #190: `say` waits
-/// far longer than the 5s default one-shot exchanges use).
-// The `id_literal` callers pass are always well-formed `b-` ids, and the
-// request envelope encodes infallibly, so the `.expect`s here are unreachable.
-#[allow(clippy::expect_used)] // #143
+/// far longer than the 5s default one-shot exchanges use). Resolves the
+/// control socket path from the ambient `HOLLER_STATE_DIR` (see
+/// [`resolve_state_dir`]); [`test_drop_at`] is the one caller that instead
+/// takes an explicit state root and calls [`send_over`] directly.
 fn exchange_with_timeout(
     id_literal: &str,
     method: &str,
@@ -181,7 +196,25 @@ fn exchange_with_timeout(
         Some(dir) => control_sock_path(&HubState::from_root(dir)),
         None => return Err(ControlError::NoLiveHub),
     };
-    let stream = UnixStream::connect(&path).map_err(|_| ControlError::NoLiveHub)?;
+    send_over(&path, id_literal, method, params, timeout)
+}
+
+/// The shared wire mechanics of one control-socket exchange: connect, send
+/// the request line, read one reply line, decode it. Split out of
+/// [`exchange_with_timeout`] (issue #192) so [`test_drop_at`] can reuse the
+/// exact same wire path against an explicit socket path instead of the
+/// ambient `HOLLER_STATE_DIR`.
+// The `id_literal` callers pass are always well-formed `b-` ids, and the
+// request envelope encodes infallibly, so the `.expect`s here are unreachable.
+#[allow(clippy::expect_used)] // #143
+fn send_over(
+    path: &PathBuf,
+    id_literal: &str,
+    method: &str,
+    params: Option<serde_json::Value>,
+    timeout: std::time::Duration,
+) -> Result<serde_json::Value, ControlError> {
+    let stream = UnixStream::connect(path).map_err(|_| ControlError::NoLiveHub)?;
     stream.set_read_timeout(Some(timeout)).map_err(ControlError::Io)?;
 
     let cid = CorrelationId::parse(id_literal).expect("a well-formed literal control id");

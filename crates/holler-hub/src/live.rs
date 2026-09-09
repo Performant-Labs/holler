@@ -96,6 +96,17 @@ pub enum LiveCommand {
         replace: bool,
         reply: oneshot::Sender<SayReply>,
     },
+    /// Issue #192's `control/test_drop` test hook: forcibly end this
+    /// connection to simulate an abrupt network drop (never a clean WS
+    /// close), so a test can observe the hub's own reconnect contract
+    /// without waiting out the liveness timeout or killing the whole body
+    /// process. The connection task fails every pending `say`/`cancel` with
+    /// `connection_lost`, marks the token's roster rows `reconnecting`, acks
+    /// on `reply`, then ends its own loop — the socket itself closes
+    /// abruptly (no WS close frame) once the connection task's owned
+    /// sink/stream go out of scope, exactly like a real dropped TCP
+    /// connection would look to the body on the other end.
+    Drop { reply: oneshot::Sender<()> },
 }
 
 /// One outstanding `session/cancel` (issue #191): kept separate from
@@ -274,6 +285,19 @@ impl LiveHandle {
     /// The last presence this body reported, if any yet.
     pub async fn presence(&self) -> Option<Vec<SessionAd>> {
         self.presence.lock().await.clone()
+    }
+
+    /// Issue #192's `control/test_drop` test hook: ask the live connection to
+    /// forcibly end itself (see [`LiveCommand::Drop`]'s own doc), waiting up
+    /// to 2s for its ack. `false` means the connection task was already gone
+    /// (a send failure) or never acked within the wait — either way the
+    /// caller should treat the body as no longer live.
+    pub async fn force_drop(&self) -> bool {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        if self.tx.send(LiveCommand::Drop { reply: reply_tx }).is_err() {
+            return false;
+        }
+        tokio::time::timeout(std::time::Duration::from_secs(2), reply_rx).await.is_ok()
     }
 }
 

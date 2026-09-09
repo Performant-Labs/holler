@@ -412,6 +412,63 @@ impl Roster {
         }
     }
 
+    /// An **abrupt** connection ending (issue #192): the socket closed
+    /// without a clean WS close handshake (a decode failure, a socket error,
+    /// EOF, the connection-level liveness timeout, or the `control/test_drop`
+    /// test hook) — every row of that token goes `reconnecting`
+    /// **immediately**, `last_seen` re-anchored to now so `say`'s own
+    /// not-connected detail (`"io/alpha is reconnecting (last seen Ns
+    /// ago)"`) reports the age of *this* drop, not a stale earlier one.
+    /// Distinct from [`Roster::clear`] (an *explicit* close/detach/
+    /// revocation, still `gone` immediately per holler-server#80): a body
+    /// that merely dropped is expected to reconnect, so its rows get the
+    /// same grace window the TTL sweep already gives a body that stops
+    /// heartbeating without dropping the socket at all (`reconnect_secs` →
+    /// `reconnecting`, `gone_secs` → `gone`) — this just applies that same
+    /// `reconnecting` state instantly instead of waiting out the sweep. A row
+    /// already `gone` is left alone (a stale drop signal arriving after the
+    /// row has already aged all the way out must never revive it).
+    pub fn mark_reconnecting(&self, token_id: &str) {
+        let mut inner = self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let now = inner.now_secs();
+        let mut changed = 0usize;
+        for row in inner.rows.values_mut() {
+            if row.token_id == token_id && row.conn_state != "gone" {
+                row.conn_state = "reconnecting";
+                row.last_seen = now;
+                changed += 1;
+            }
+        }
+        if changed > 0 {
+            inner.bump_gen();
+        }
+    }
+
+    /// Look up a single row by name (issue #192's own need: `say`'s
+    /// not-connected detail message wants the row's `conn_state`/`last_seen`
+    /// even when the row is `reconnecting` or `gone` — states
+    /// [`Roster::rows`] hides by default). Tries an exact key match first
+    /// (`name` already qualified as `<label>/<session>`); falling back to any
+    /// row whose name **ends with** `/<name>` (a bare session name, ADR
+    /// 0003's own resolution grammar) when that misses. `None` if nothing in
+    /// the roster (live, reconnecting, or gone-but-not-yet-pruned) matches.
+    pub fn find_by_name(&self, name: &str) -> Option<Row> {
+        let inner = self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(row) = inner.rows.get(name) {
+            return Some(row.clone());
+        }
+        let suffix = format!("/{name}");
+        inner.rows.values().find(|r| r.name.ends_with(&suffix)).cloned()
+    }
+
+    /// `row`'s age in whole seconds since `last_seen`, on the roster's own
+    /// clock (so a unit test with an injected [`Clock::Manual`] gets a
+    /// deterministic value too, not the wall clock).
+    pub fn age_secs(&self, row: &Row) -> u64 {
+        let inner = self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        inner.now_secs().saturating_sub(row.last_seen)
+    }
+
     /// Run the tri-state TTL sweep at `now` (the injected clock): a row
     /// `≥ reconnect` old is `reconnecting`, `≥ gone` old is `gone`, `≥ prune`
     /// old is removed. Idempotent per direction (a `gone` row is not re-
