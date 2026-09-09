@@ -27,8 +27,8 @@ use std::task::{Context, Poll};
 
 use futures_util::{Future, Sink, SinkExt, Stream, StreamExt};
 use holler_proto::{decode, Envelope, Join, WireError};
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
-use tokio::net::{TcpListener, TcpStream, UnixListener, UnixStream};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::{TcpListener, TcpStream, UnixListener};
 use tokio::signal::unix::{signal, SignalKind};
 use tokio_tungstenite::{
     tungstenite::{
@@ -342,8 +342,13 @@ async fn serve_forever(
     let mut sig_term = signal(SignalKind::terminate()).expect("install SIGTERM handler");
 
     let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+    // The live-circuit registry (issue #182): one per hub process, shared by
+    // every accepted WS connection (recording/removing itself as it
+    // authenticates/disconnects) and every control-socket connection (`hub
+    // token ping` reaches a body's socket through it).
+    let registry = crate::live::Registry::new();
     let accept_handle = tokio::spawn(async move {
-        accept_loop(uds, ws_listeners, state, stop_rx).await;
+        accept_loop(uds, ws_listeners, state, registry, stop_rx).await;
     });
 
     // 6. Only now — WS listeners bound, control socket bound + mode 0600,
@@ -385,6 +390,7 @@ async fn accept_loop(
     uds: UnixListener,
     ws_listeners: Vec<TcpListener>,
     state: HubState,
+    registry: crate::live::Registry,
     mut stop_rx: tokio::sync::oneshot::Receiver<()>,
 ) {
     let mut accept_any = AcceptAny {
@@ -400,14 +406,14 @@ async fn accept_loop(
                     Ok(pair) => pair,
                     Err(_) => continue,
                 };
-                tokio::spawn(handle_control_conn(stream));
+                tokio::spawn(crate::control_server::handle_control_conn(stream, registry.clone()));
             }
             res = (&mut accept_any) => {
                 let stream = match res {
                     Ok(s) => s,
                     Err(_) => continue,
                 };
-                tokio::spawn(handle_ws_conn(stream, state.clone()));
+                tokio::spawn(handle_ws_conn(stream, state.clone(), registry.clone()));
             }
         }
     }
@@ -630,7 +636,7 @@ where
     }
 }
 
-async fn handle_ws_conn(stream: TcpStream, state: HubState) {
+async fn handle_ws_conn(stream: TcpStream, state: HubState, registry: crate::live::Registry) {
     let ws = match server_handshake(stream).await {
         Some(ws) => ws,
         None => return, // not a WebSocket client (or it left mid-handshake).
@@ -675,8 +681,16 @@ async fn handle_ws_conn(stream: TcpStream, state: HubState) {
             };
             crate::join::redeem_join(&mut sink, env.id(), params, &state).await;
         }
-        // Any other method on a fresh socket (incl. `circuit/authenticate`),
-        // or a response/error where a request is expected: unauthenticated.
+        // A returning body re-authenticating with its persisted credential
+        // (issue #182). On success this holds the socket for the whole live
+        // session (hello exchange, presence, ping); it only returns once the
+        // circuit ends. Split into its own fn to keep this dispatch's
+        // cognitive complexity under the workspace threshold.
+        Some("circuit/authenticate") => {
+            dispatch_authenticate(&mut sink, &mut stream, &env, &state, &registry).await;
+        }
+        // Any other method on a fresh socket, or a response/error where a
+        // request is expected: unauthenticated.
         _ => {
             send_error(
                 &mut sink,
@@ -688,6 +702,29 @@ async fn handle_ws_conn(stream: TcpStream, state: HubState) {
             close(&mut sink).await;
         }
     }
+}
+
+/// The `circuit/authenticate` arm of [`handle_ws_conn`], split out to keep
+/// that dispatch's cognitive complexity under the workspace threshold. Parses
+/// the params (a bad shape is `-32602 invalid_params`) and hands off to
+/// [`crate::circuit::handle_authenticated`], which owns the entire live
+/// session from here.
+async fn dispatch_authenticate(
+    sink: &mut (impl Sink<Message, Error = WsError> + Unpin),
+    stream: &mut (impl Stream<Item = Result<Message, WsError>> + Unpin),
+    env: &Envelope,
+    state: &HubState,
+    registry: &crate::live::Registry,
+) {
+    let params = match holler_proto::typed_params::<holler_proto::Authenticate>(env) {
+        Ok(p) => p,
+        Err(e) => {
+            send_error(sink, env.id(), Code::InvalidParams, &e.message).await;
+            close(sink).await;
+            return;
+        }
+    };
+    crate::circuit::handle_authenticated(sink, stream, env.id(), params, state, registry).await;
 }
 
 /// Send an error envelope (echoing `id` when given) as a text frame, then let
@@ -719,159 +756,8 @@ pub(crate) async fn close(sink: &mut (impl Sink<Message, Error = WsError> + Unpi
     let _ = sink.flush().await;
 }
 
-/// Handle one control-socket connection: newline-delimited JSON-RPC. Only
-/// `control/status` is answered on this story; every other `control/…` method
-/// is `-32601 method_not_found` (they land in later stories), and a frame that
-/// does not decode is `-32700`/`-32600`.
-async fn handle_control_conn(stream: UnixStream) {
-    use tokio::io::AsyncWriteExt;
-
-    let (read_half, write_half) = tokio::io::split(stream);
-    let mut write_half = write_half;
-    let mut lines = tokio::io::BufReader::new(read_half).lines();
-    loop {
-        match lines.next_line().await {
-            Ok(Some(line)) => {
-                let line = line.trim_end().to_string();
-                if line.is_empty() {
-                    continue;
-                }
-                let reply = dispatch_control(&line);
-                let bytes = format!("{reply}\n");
-                if write_half.write_all(bytes.as_bytes()).await.is_err() {
-                    return; // client went away.
-                }
-            }
-            Ok(None) => return, // client closed.
-            Err(_) => return,
-        }
-    }
-}
-
-/// Parse one control frame, dispatch it, and return the reply as a single line
-/// (no trailing newline; the caller adds it). Only `control/status` is
-/// implemented on this story.
-fn dispatch_control(line: &str) -> String {
-    // The control socket is **internal, non-wire**: it is not validated
-    // against the v2 wire catalog (those are the `control/…` methods, which
-    // live only here). We still parse the frame as a JSON-RPC object so we can
-    // echo the request's id and answer with the right envelope shape.
-    let obj: serde_json::Value = match serde_json::from_str(line) {
-        Ok(v) => v,
-        Err(_) => {
-            return unkeyed_error_line(Code::ParseError, "the control frame is not JSON");
-        }
-    };
-    // A batch (array) on the control socket is also a parse-shape error.
-    if obj.is_array() {
-        return unkeyed_error_line(Code::InvalidRequest, "a batch is not a control frame");
-    }
-    let id = obj.get("id").and_then(|v| v.as_str()).map(str::to_owned);
-    let method = obj.get("method").and_then(|v| v.as_str());
-
-    match method {
-        Some("control/status") => {
-            let doc = status_doc();
-            let cid = resolve_cid(id.as_deref());
-            let env = Envelope::response(&cid, Some(doc));
-            holler_proto::encode(&env).unwrap_or_default()
-        }
-        Some(other) => {
-            let cid = resolve_cid(id.as_deref());
-            let env = Envelope::error_frame(
-                &cid,
-                &WireError::new(
-                    Code::MethodNotFound,
-                    format!("unknown control method: {other}"),
-                    None,
-                ),
-            );
-            holler_proto::encode(&env).unwrap_or_default()
-        }
-        // No method: not a call (a stray response/notification or empty frame).
-        None => unkeyed_error_line(
-            Code::InvalidRequest,
-            "a control frame must be a request with a method",
-        ),
-    }
-}
-
-/// Build a hub-minted unkeyed error line (`id: null`) carrying `code`.
-fn unkeyed_error_line(code: Code, message: &str) -> String {
-    let env = Envelope::Error {
-        id: None,
-        error: WireError::new(code, message, None),
-    };
-    holler_proto::encode(&env).unwrap_or_default()
-}
-
-/// A synthetic hub id for control replies whose request id is missing or
-/// unparsable (defensive; the control protocol expects a request id).
-// The literal is a well-formed `h-` id, so the parse is infallible.
-#[allow(clippy::expect_used)] // #143
-fn fallback_id() -> holler_proto::CorrelationId {
-    holler_proto::CorrelationId::parse("h-000000000000000000000000")
-        .expect("a well-formed synthetic hub id")
-}
-
-/// Resolve a request id (a wire string, possibly absent) to a
-/// [`CorrelationId`], falling back to a synthetic hub id when it is missing or
-/// does not carry the `h-`/`b-` prefix.
-fn resolve_cid(id: Option<&str>) -> holler_proto::CorrelationId {
-    match id.and_then(|s| holler_proto::CorrelationId::parse(s).ok()) {
-        Some(cid) => cid,
-        None => fallback_id(),
-    }
-}
-
-/// Build the hub's status document for a `control/status` answer. Per the
-/// story spec the doc has `role:"hub"`, a `listening` **array** of bound
-/// addresses, an optional `advertise`, `clients` (bodies), `sessions`,
-/// `harnesses_known`, `harnesses_confirmed`, `protocol:2`, and `version`.
-/// No bodies are connected yet on this story, so `clients`/`sessions` are 0.
-fn status_doc() -> serde_json::Value {
-    // Only ever called by the live hub's own control dispatch, where the state
-    // dir is always resolvable; `unwrap_or_default` is a defensive no-op.
-    let state = HubState::from_root(resolve_state_dir().unwrap_or_default());
-    let listening = read_listening(&state);
-    let advertise = std::fs::read_to_string(advertise_path(&state))
-        .ok()
-        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
-        .and_then(|v| {
-            v.get("advertise")
-                .and_then(|a| a.as_str())
-                .map(str::to_owned)
-        });
-    let version = env!("CARGO_PKG_VERSION");
-    let hostname = hostname::get()
-        .map(|h| h.to_string_lossy().into_owned())
-        .unwrap_or_else(|_| "unknown".to_string());
-
-    serde_json::json!({
-        "role": "hub",
-        "protocol": 2,
-        "version": version,
-        "hostname": hostname,
-        "listening": listening,
-        "advertise": advertise,
-        "clients": 0,
-        "sessions": 0,
-        "harnesses_known": [],
-        "harnesses_confirmed": [],
-    })
-}
-
-/// The bound listen addresses for the live hub, read from the listening event
-/// we already emitted on stderr at startup. We re-derive them from the live
-/// listeners' state: there is no persisted listener list, so we re-bind is
-/// wrong. Instead the hub records its bound addrs in memory; `status_doc` runs
-/// on the same process, so we read them from a file the start path writes.
-fn read_listening(state: &HubState) -> Vec<String> {
-    // The start path writes the bound addresses to `hub/listening.json` so a
-    // `control/status` (running in the same process) can report them.
-    let path = state.hub_dir.join("listening.json");
-    match std::fs::read_to_string(&path) {
-        Ok(s) => serde_json::from_str(&s).unwrap_or_default(),
-        Err(_) => Vec::new(),
-    }
-}
+// The control-socket **server** side (its own dispatch and the `hub token
+// ping` live probe) lives in [`crate::control_server`] — moved out of this
+// file (issue #182) to keep `serve.rs` under the file-size guard as the
+// authenticated live-session path (`circuit/authenticate` → `circuit/hello` →
+// presence) landed here.

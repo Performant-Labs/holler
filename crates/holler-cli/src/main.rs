@@ -297,11 +297,16 @@ fn run_token_inactivate(id: &str, verb: &str, json: bool) -> ! {
     std::process::exit(0);
 }
 
-/// `holler hub token ping ID` — the spec leaves `ping` to the **registry**
-/// story (it needs a live socket). Here it checks the store's record and
-/// reports `valid` / `expired` / `revoked` / `not_found` cleanly; a
-/// `revoked` or `not_found` token is a fail-closed refusal (exit 3), and a
-/// missing hub is exit 1.
+/// `holler hub token ping ID` (issue #182): first the store's own record
+/// check — a `revoked`/`expired`/`not_found` token can never be live, so
+/// those stay a fail-closed policy refusal (exit 3) without ever touching the
+/// live hub. An **unused** (not-yet-redeemed) token has never had a socket to
+/// begin with, so it keeps the pre-#182 behaviour: `valid`, exit 0 (there is
+/// nothing live to probe). Only a **bound** token is actually probed: the
+/// control socket asks the live hub to send a `circuit/ping` over that
+/// token's socket and report `{hostname, rtt_ms}`. No live socket for it —
+/// including no live hub at all — is the spec's `-32004 not_connected`
+/// (exit 1); a genuine answer is exit 0.
 fn token_ping(id: &str, json: bool) -> ! {
     let state = token_state();
     let rows = match holler_hub::token::list(&state) {
@@ -316,25 +321,55 @@ fn token_ping(id: &str, json: bool) -> ! {
         std::process::exit(3);
     };
     let now = holler_hub::token::now_secs();
-    let status = match record.state {
-        holler_hub::token::TokenState::Revoked => "revoked",
-        holler_hub::token::TokenState::Unused if record.expires < now => "expired",
-        holler_hub::token::TokenState::Bound if record.expires < now => "expired",
-        _ => "valid",
+    let refusal = match record.state {
+        holler_hub::token::TokenState::Revoked => Some("revoked"),
+        holler_hub::token::TokenState::Unused if record.expires < now => Some("expired"),
+        holler_hub::token::TokenState::Bound if record.expires < now => Some("expired"),
+        holler_hub::token::TokenState::Unused => None, // never redeemed: nothing to probe, `valid`.
+        holler_hub::token::TokenState::Bound => None,  // worth probing live.
     };
+    if let Some(status) = refusal {
+        if json {
+            println!("{}", serde_json::json!({ "token_id": id, "label": record.label, "state": status }));
+        } else {
+            println!("{status} ({})", record.label);
+        }
+        std::process::exit(3);
+    }
+    if record.state == holler_hub::token::TokenState::Bound {
+        token_ping_live(id, &record.label, json);
+    }
     if json {
-        println!("{}", serde_json::json!({ "token_id": id, "label": record.label, "state": status }));
+        println!("{}", serde_json::json!({ "token_id": id, "label": record.label, "state": "valid" }));
     } else {
-        let suffix = match (&record.hostname, record.state) {
-            (Some(host), holler_hub::token::TokenState::Bound) => format!(" ({}, {})", record.label, host),
-            _ => format!(" ({})", record.label),
-        };
-        println!("{status}{suffix}");
+        println!("valid ({})", record.label);
     }
-    if status == "valid" {
-        std::process::exit(0);
+    std::process::exit(0);
+}
+
+/// The live half of `hub token ping`: probe the hub's control socket. Split
+/// out of [`token_ping`] to keep that dispatch's cognitive complexity under
+/// the workspace threshold.
+fn token_ping_live(id: &str, label: &str, json: bool) -> ! {
+    match holler_hub::control::token_ping(id) {
+        Ok(doc) => {
+            let hostname = doc.get("hostname").and_then(|v| v.as_str()).unwrap_or("?");
+            let rtt_ms = doc.get("rtt_ms").and_then(|v| v.as_u64()).unwrap_or(0);
+            if json {
+                println!("{}", serde_json::json!({ "token_id": id, "label": label, "state": "valid", "hostname": hostname, "rtt_ms": rtt_ms }));
+            } else {
+                println!("valid ({label}, {hostname}) rtt={rtt_ms}ms");
+            }
+            std::process::exit(0);
+        }
+        Err(e) => {
+            if json {
+                println!("{}", serde_json::json!({ "token_id": id, "label": label, "state": "not_connected" }));
+            }
+            eprintln!("not_connected {id} ({e})");
+            std::process::exit(1);
+        }
     }
-    std::process::exit(3);
 }
 
 /// Parse a `--ttl` like `15m` / `2h` / `24h` into seconds, or `None` if the
@@ -455,15 +490,17 @@ fn main() {
 
     // Story #176: the body's identity leaves — `body join` (redeem a minted
     // join secret over the wire and persist the identity), `body detach`
-    // (forget it), and `body status` (report this process's own identity). The
-    // other body leaves (run, caps, support, query, attach) are still inert —
-    // their stories land later.
+    // (forget it), and `body status` (report this process's own identity).
+    // Story #182 adds `body run` (the live connection loop) and makes `body
+    // detach` live-aware (write `detach_request` and wait, when a run is
+    // active, rather than only deleting the credential). The other body
+    // leaves (caps, support, query, attach) are still inert.
     if let Command::Body(body) = &cli.command {
         match &body.command {
             BodyCommand::Join(join) => body_join(&join.server, &join.token),
             BodyCommand::Detach(_) => body_detach(),
             BodyCommand::Status(_) => body_status(cli.json),
-            BodyCommand::Run(_) => not_implemented("BodyRun"),
+            BodyCommand::Run(_) => body_run(),
             BodyCommand::Caps(_) => not_implemented("BodyCaps"),
             BodyCommand::Support(_) => not_implemented("BodySupport"),
             BodyCommand::Query(_) => not_implemented("BodyQuery"),
@@ -529,14 +566,34 @@ fn body_join(server: &str, token: &str) -> ! {
     std::process::exit(code);
 }
 
-/// `holler body detach` — forget the body's identity (delete
-/// `<state>/body/credential.json`). Idempotent: always exit 0 except an I/O
-/// failure (exit 1).
+/// `holler body detach` — forget the body's identity: the no-run form
+/// deletes `<state>/body/credential.json` outright; when a `body run` is
+/// live (issue #182) it is asked to end the circuit first (see
+/// `holler_body::detach`'s module doc). Idempotent: always exit 0 except an
+/// I/O failure (exit 1).
 fn body_detach() -> ! {
     let state = body_state();
     let code = match holler_body::detach::detach(&state.root) {
         holler_body::detach::DetachExit::Ok => 0,
         holler_body::detach::DetachExit::Io => 1,
+    };
+    std::process::exit(code);
+}
+
+/// `holler body run` (issue #182) — the live connection loop: authenticate,
+/// exchange hellos, heartbeat, survive drops with backoff, and honour
+/// `detach`. Runs until a clean end (detach or a signal) or an unretryable
+/// authentication failure. `--config` (the session config) is accepted but
+/// unused here — no sessions exist yet on this story (`sessions:[]` in every
+/// presence); the body-config story wires it up.
+fn body_run() -> ! {
+    let state = body_state();
+    let code = match holler_body::connection::run(&state.root) {
+        holler_body::connection::RunExit::Ok => 0,
+        holler_body::connection::RunExit::NotJoined
+        | holler_body::connection::RunExit::AuthFailed(_)
+        | holler_body::connection::RunExit::Io(_) => 1,
+        holler_body::connection::RunExit::LockHeld(_) => 3,
     };
     std::process::exit(code);
 }
