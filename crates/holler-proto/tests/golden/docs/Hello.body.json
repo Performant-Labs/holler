@@ -1,10 +1,4 @@
 {
-  "protocol": 2,
-  "protocol_min": 2,
-  "protocol_max": 2,
-  "role": "body",
-  "hostname": "kiwi",
-  "token_id": "tok_7f3a",
   "client_id": "cli_19",
   "features": [
     "interrupt",
@@ -15,11 +9,17 @@
   "harnesses": [
     "opencode"
   ],
+  "hostname": "kiwi",
+  "protocol": 2,
+  "protocol_max": 2,
+  "protocol_min": 2,
+  "role": "body",
   "sessions": [
     {
-      "name": "alpha",
       "harness": "opencode",
-      "mode": "spawn"
+      "mode": "spawn",
+      "name": "alpha"
     }
-  ]
+  ],
+  "token_id": "tok_7f3a"
 }
