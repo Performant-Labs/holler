@@ -373,6 +373,17 @@ pub struct SessionAd {
     /// The existing harness session being attached to (attach mode only).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub harness_session_id: Option<String>,
+    /// When the in-flight turn started (RFC 3339). Present only while
+    /// `state` is `working` (issue #150 — the busy-turn policy's `--queue`
+    /// hint and the roster's `stalled` derivation both read this).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub turn_started_at: Option<String>,
+    /// When the body last sent a `session/update` for the in-flight turn
+    /// (RFC 3339). Present only while `state` is `working`; a session
+    /// `working` with no update for `HOLLER_STALL_MS` displays as roster's
+    /// derived `stalled` state (issue #150).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_update_at: Option<String>,
 }
 
 // ---------------------------------------------------------------------------

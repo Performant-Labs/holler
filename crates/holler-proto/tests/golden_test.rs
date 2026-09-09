@@ -194,7 +194,12 @@ fn docs_instances() -> Vec<(&'static str, Value)> {
         ("ProtocolAnswer", serde_json::to_value(ProtocolAnswer { session: 2, min: 2, max: 2, asked: Some(2), ok: Some(true) }).unwrap()),
         ("Presence", serde_json::to_value(Presence {
             hostname: "kiwi".into(),
-            sessions: vec![SessionAd { name: "alpha".into(), harness: "opencode".into(), state: SessionState::Working, mode: Mode::Attach, harness_session_id: Some("ses_1".into()) }],
+            sessions: vec![SessionAd {
+                name: "alpha".into(), harness: "opencode".into(), state: SessionState::Working, mode: Mode::Attach,
+                harness_session_id: Some("ses_1".into()),
+                turn_started_at: Some("2026-09-08T12:00:00Z".into()),
+                last_update_at: Some("2026-09-08T12:00:03Z".into()),
+            }],
         }).unwrap()),
         ("Prompt", serde_json::to_value(Prompt { session: "io/alpha".into(), message: user_message(), meta: meta() }).unwrap()),
         ("PromptResult", serde_json::to_value(PromptResult { stop_reason: "end_turn".into(), state: "completed".into(), message: agent_message() }).unwrap()),

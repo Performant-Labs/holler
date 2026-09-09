@@ -175,13 +175,13 @@ fn error_table_codes_are_unique_and_in_range() {
             assert_eq!(c.jsonrpc(), -32601);
         } else {
             // Application codes: the closed interval -32099..=-32000 (note the
-            // order: -32099 is the more negative bound), and not the reserved
-            // -32603/-32009.
+            // order: -32099 is the more negative bound), excluding the
+            // reserved -32603 (outside this range already) and not
+            // (any longer) -32009, which #150 claims as `session_busy`.
             assert!(
                 c.jsonrpc() >= -32099 && c.jsonrpc() <= -32000,
                 "{data_code} outside app range"
             );
-            assert_ne!(c.jsonrpc(), -32009, "{data_code} is reserved");
         }
     }
     // data.codes are also unique.
@@ -210,6 +210,27 @@ fn error_frame_encodes_numeric_code_and_string_data_code() {
     assert_eq!(err.get("code"), Some(&serde_json::json!(-32002)));
     // … and the Holler identity is the string in `data.code`.
     assert_eq!(err.get("data").and_then(|d| d.get("code")), Some(&serde_json::json!("unauthenticated")));
+}
+
+/// The busy-turn policy's refusal (issue #150): `say` to a `working`/
+/// `stalled` session encodes `-32009 session_busy` with the state and both
+/// ages in `data`, so the caller's next command is exactly the hint, not a
+/// guess.
+#[test]
+fn session_busy_error_carries_state_and_turn_ages() {
+    let env = Envelope::Error {
+        id: Some("h-01HTEST00000000000000000001".into()),
+        error: WireError::session_busy("working", 45_000, 3_000),
+    };
+    let wire = encode(&env).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&wire).unwrap();
+    let err = v.get("error").expect("error object present");
+    assert_eq!(err.get("code"), Some(&serde_json::json!(-32009)));
+    let data = err.get("data").expect("session_busy carries data");
+    assert_eq!(data.get("code"), Some(&serde_json::json!("session_busy")));
+    assert_eq!(data.get("state"), Some(&serde_json::json!("working")));
+    assert_eq!(data.get("turn_age_ms"), Some(&serde_json::json!(45_000)));
+    assert_eq!(data.get("last_update_age_ms"), Some(&serde_json::json!(3_000)));
 }
 
 /// A conformant error from a foreign peer — numeric `-32601`, no `data` —
@@ -241,6 +262,7 @@ fn foreign_jsonrpc_error_decodes() {
 #[case::unknown_feature(Code::UnknownFeature)]
 #[case::limit_exceeded(Code::LimitExceeded)]
 #[case::connection_lost(Code::ConnectionLost)]
+#[case::session_busy(Code::SessionBusy)]
 fn every_code_round_trips_through_wire(#[case] code: Code) {
     let env = Envelope::Error {
         id: None,
@@ -252,6 +274,9 @@ fn every_code_round_trips_through_wire(#[case] code: Code) {
     assert_eq!(e.code, code.jsonrpc());
     assert_eq!(Code::from_jsonrpc(e.code), Some(code));
     assert_eq!(e.data.as_ref().map(|d| d.code.as_str()), Some(code.data_code()));
+    // #150's three session_busy-only fields are absent for every other code —
+    // `WireError::new` never sets them, so this holds for the whole table.
+    assert_eq!(e.data.as_ref().and_then(|d| d.state.as_deref()), None);
 }
 
 // ---------------------------------------------------------------------------
@@ -375,6 +400,39 @@ fn a2a_part_url_fixture_round_trips() {
 #[test]
 fn a2a_part_data_fixture_round_trips() {
     assert_fixture_round_trips("part_data.json");
+}
+
+/// A presence row's `turn_started_at`/`last_update_at` (issue #150) round-trip
+/// and are absent from the wire (not `null`) when the session is `idle`.
+#[test]
+fn presence_session_ad_carries_turn_timing_only_while_working() {
+    let working = docs::SessionAd {
+        name: "alpha".into(),
+        harness: "opencode".into(),
+        state: docs::SessionState::Working,
+        mode: docs::Mode::Attach,
+        harness_session_id: Some("ses_1".into()),
+        turn_started_at: Some("2026-09-08T12:00:00Z".into()),
+        last_update_at: Some("2026-09-08T12:00:03Z".into()),
+    };
+    let wire = serde_json::to_value(&working).unwrap();
+    assert_eq!(wire["turn_started_at"], serde_json::json!("2026-09-08T12:00:00Z"));
+    assert_eq!(wire["last_update_at"], serde_json::json!("2026-09-08T12:00:03Z"));
+    let back: docs::SessionAd = serde_json::from_value(wire).unwrap();
+    assert_eq!(back, working);
+
+    let idle = docs::SessionAd {
+        name: "alpha".into(),
+        harness: "opencode".into(),
+        state: docs::SessionState::Idle,
+        mode: docs::Mode::Spawn,
+        harness_session_id: None,
+        turn_started_at: None,
+        last_update_at: None,
+    };
+    let wire = serde_json::to_value(&idle).unwrap();
+    assert!(wire.get("turn_started_at").is_none(), "absent, not null, when idle");
+    assert!(wire.get("last_update_at").is_none(), "absent, not null, when idle");
 }
 
 // ---------------------------------------------------------------------------
