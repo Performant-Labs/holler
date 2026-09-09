@@ -118,6 +118,13 @@ pub fn say(session: &str, text: &str, queue: bool, timeout: std::time::Duration)
     exchange_with_timeout("b-say", "control/say", Some(params), timeout + std::time::Duration::from_secs(5))
 }
 
+/// `answer SESSION CHOICE` (issue #151): ask the live hub to resolve a held
+/// permission/elicitation and report `{session, applied}`.
+pub fn answer(session: &str, choice: &str) -> Result<serde_json::Value, ControlError> {
+    let params = serde_json::json!({ "session": session, "choice": choice });
+    exchange("b-answer", "control/answer", Some(params))
+}
+
 /// `holler roster [--all] [--prefix PREFIX]` (issue #186; `--prefix` added by
 /// issue #236, ADR 0005 §4): the live hub's roster, read straight from the
 /// hub's in-process [`crate::roster::Roster`]. Returns the reply envelope's

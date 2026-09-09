@@ -26,6 +26,13 @@ impl OptionSet {
         Self { options }
     }
 
+    /// The human-readable label of every option, in declaration order (issue
+    /// #151: the roster's `PENDING` column and `session/presence`'s
+    /// `PendingItem.options` render from these).
+    pub fn labels(&self) -> Vec<String> {
+        self.options.iter().map(|(_key, label)| label.clone()).collect()
+    }
+
     /// Resolve one trimmed segment against this field's options: a 0-based
     /// index, or an exact case-insensitive match against the option's key or
     /// label. Returns the option's `key` (the wire value) on success.

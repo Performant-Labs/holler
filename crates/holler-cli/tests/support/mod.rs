@@ -770,6 +770,18 @@ pub fn interrupt(state: &StateDir, session: &str) -> Output {
         .expect("run `interrupt`")
 }
 
+/// Resolve `session`'s held permission/elicitation with `choice` (issue
+/// #151) and return the raw `Output`.
+pub fn answer(state: &StateDir, session: &str, choice: &str) -> Output {
+    holler_cmd(state)
+        .args(["answer", session, choice])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .and_then(|c| c.wait_with_output())
+        .expect("run `answer`")
+}
+
 /// Kill `child`'s entire process tree.
 ///
 /// Unix: the child was spawned in its own process group (see

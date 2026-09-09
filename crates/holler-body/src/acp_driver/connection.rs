@@ -13,6 +13,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use agent_client_protocol::schema::v2;
 use agent_client_protocol::{AcpAgent, AcpAgentConfig, Agent, Client, Responder, V2ConnectionTo};
+use holler_proto::docs::PendingKind;
 use tokio::sync::{mpsc, oneshot};
 
 use super::pending::{
@@ -154,6 +155,8 @@ fn handle_permission_request(
             fields,
             responder: PendingResponder::Permission(responder),
             unsupported,
+            kind: PendingKind::Permission,
+            prompt: request.title.clone(),
         },
     );
 }
@@ -170,6 +173,8 @@ fn handle_elicitation_request(
             fields,
             responder: PendingResponder::Elicitation(responder),
             unsupported,
+            kind: PendingKind::Elicitation,
+            prompt: request.message.clone(),
         },
     );
 }

@@ -262,8 +262,9 @@ Codex `body` session is actually run through Holler:
 - Confirm whether Codex exposes an equivalent structured-question/permission
   surface analogous to OpenCode's `/question` and `/permission`, and whether
   Holler's `blocked` roster field is wired to it the same way.
-- Confirm whether `holler answer` works against a Codex-driven session, or
-  whether Codex's tool-approval model needs a different answer shape.
+- Confirm whether `holler answer SESSION CHOICE` works against a
+  Codex-driven session, or whether Codex's tool-approval model needs a
+  different answer shape.
 - Until confirmed, treat a Codex session's `blocked` state (if `roster` ever
   reports one) as needing direct investigation against whatever surface
   Codex actually exposes, rather than assuming the OpenCode answer path

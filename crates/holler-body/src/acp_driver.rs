@@ -106,10 +106,12 @@ use futures_util::Stream;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 
+use holler_proto::docs::PendingItem;
+
 use crate::config::{SessionConfig, SessionMode};
 use answerable::{resolve_choice, OptionSet};
 use connection::{lock, Ready, Shared};
-use pending::{reply_cancelled, send_resolved_reply};
+use pending::{pending_items, reply_cancelled, send_resolved_reply};
 
 /// How long [`AcpDriver::spawn`] waits for `initialize` + `session/new` to
 /// complete before treating the child as hung. `HOLLER_ACP_TIMEOUT_MS`
@@ -561,6 +563,16 @@ impl AcpDriver {
     /// The driver's current status.
     pub fn status(&self) -> Status {
         lock(&self.shared).status
+    }
+
+    /// The currently-held permission/elicitation, if any (issue #151):
+    /// `session/presence`'s `pending` field and the roster's `PENDING`
+    /// column render from this. Empty when nothing is pending (never a
+    /// vacuous placeholder) — mirroring [`AcpDriver::status`]'s own "read the
+    /// live state" contract rather than caching a snapshot that could drift
+    /// from what `answer()` would actually see.
+    pub fn pending(&self) -> Vec<PendingItem> {
+        lock(&self.shared).pending.as_ref().map(pending_items).unwrap_or_default()
     }
 
     /// Close the session gracefully, then end the connection (which kills the

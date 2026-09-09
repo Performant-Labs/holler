@@ -49,13 +49,12 @@
 //!   answers later); consuming it here would force an awkward clone at the
 //!   call site for no benefit — this story only ever reads `SessionConfig`
 //!   out of it once, at spawn time.
-//! - **Presence's `pending` field stays `None`** here, matching the
-//!   pre-existing `SessionRegistry::presence_doc` baseline (issue #187).
-//!   Populating it with real `PendingItem`s is issue #151's own scope (the
-//!   `AcpDriver`'s pending-block detail — prompt text, options — is not
-//!   exposed by any `AcpDriver` getter yet); this story only adds the
-//!   `working`/`input-required` timing fields and `turn_id`/`last_turn`
-//!   issue #150/#142 already reserved room for on the wire type.
+//! - **Presence's `pending` field** is populated from `AcpDriver::pending`
+//!   (issue #151) via `task::set_state` every time a session's task moves to
+//!   (or stays in) `InputRequired`, and cleared the instant it leaves that
+//!   state — this story only adds the `working`/`input-required` timing
+//!   fields and `turn_id`/`last_turn` issue #150/#142 already reserved room
+//!   for on the wire type; `pending` itself landed with issue #151.
 //! - **A driver crash (`StopReason::Error`) drops the `AcpDriver`** so the
 //!   *next* `Prompt`/`Replace` command respawns a fresh one (the issue's own
 //!   "restarts the driver on the next prompt" — not eagerly, and not as a
@@ -321,7 +320,7 @@ impl SessionManager {
                     harness_session_id: managed.config.session_id.clone(),
                     turn_started_at: p.turn_started_at.clone(),
                     last_update_at: p.last_update_at.clone(),
-                    pending: None,
+                    pending: p.pending.clone(),
                     turn_id: p.turn_id.clone(),
                     last_turn: p.last_turn.clone(),
                 }

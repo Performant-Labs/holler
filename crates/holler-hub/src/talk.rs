@@ -52,8 +52,13 @@ pub enum SayError {
     /// The target session is `working`/`stalled` and `--queue` was not
     /// given (or was refused outright on `input-required`).
     Busy { state: String, turn_age_ms: u64, last_update_age_ms: u64 },
-    /// The target session is `input-required`, holding a question.
-    InputRequired { question: Option<String> },
+    /// The target session is `input-required`, holding a question (issue
+    /// #151: `--queue` never overrides this — a held permission/elicitation
+    /// is answered, not queued behind). `question` is the pending item's own
+    /// prompt text when the cached presence carries one (empty roster
+    /// caches — e.g. a body that predates issue #151 — still refuse, just
+    /// without that detail).
+    InputRequired { question: Option<String>, turn_age_ms: u64, last_update_age_ms: u64 },
     /// The body answered with some other JSON-RPC refusal.
     Refused(holler_proto::WireError),
     /// The socket dropped mid-turn.
@@ -62,6 +67,68 @@ pub enum SayError {
     Timeout,
     /// The turn was cancelled before it completed.
     Cancelled,
+}
+
+/// Why [`answer`] could not resolve a held permission/elicitation (issue
+/// #151). Mirrors [`SayError`]'s own resolve-target shapes; the body-side
+/// refusal (nothing pending, an unresolved choice, …) always arrives as
+/// [`AnswerError::Refused`] — the hub does not reinterpret those codes, it
+/// only forwards them (see `crate::control_server::answer`).
+pub enum AnswerError {
+    /// No live session matched `session` at all.
+    UnknownSession,
+    /// A session by this name exists but its body is not currently
+    /// connected.
+    NotConnected,
+    /// More than one live session matched a bare name; `candidates` are
+    /// `<label>/<session>` strings for the CLI to list.
+    Ambiguous(Vec<String>),
+    /// The body answered with a JSON-RPC error (`-32010 nothing_pending`,
+    /// `-32602 invalid_params`, …) — forwarded verbatim.
+    Refused(holler_proto::WireError),
+    /// No reply arrived within the caller's timeout budget (or the
+    /// connection ended first) — the closest analogue to `say`'s own
+    /// `ConnectionLost`/`Timeout` split, collapsed to one variant since
+    /// `answer` has no streamed `session/update`s to have already recorded.
+    ConnectionLost,
+}
+
+/// A successful [`answer`] outcome.
+pub struct AnswerOutcome {
+    pub session: String,
+    pub applied: bool,
+}
+
+/// Resolve `session`'s held permission/elicitation with `choice` (issue
+/// #151): resolve the target against the live registry exactly like
+/// [`say`], then forward a `session/answer {session, choice}` request over
+/// that body's own socket via [`crate::live::LiveHandle::query`] — the same
+/// generic per-connection request/response forward `hub query TARGET …`
+/// (issue #185) already uses, reused here rather than adding a dedicated
+/// `LiveCommand` variant for what is, on the wire, just one more
+/// request/response pair on the same connection.
+pub async fn answer(
+    registry: &Registry,
+    session: &str,
+    choice: &str,
+    timeout: Duration,
+) -> Result<AnswerOutcome, AnswerError> {
+    let name = holler_proto::RoutableName::parse(session).map_err(|_| AnswerError::UnknownSession)?;
+    let (handle, ad) = match registry.resolve_session(&name).await {
+        ResolveOutcome::Found(h, ad) => (h, ad),
+        ResolveOutcome::Unknown => return Err(AnswerError::UnknownSession),
+        ResolveOutcome::NotConnected => return Err(AnswerError::NotConnected),
+        ResolveOutcome::Ambiguous(candidates) => return Err(AnswerError::Ambiguous(candidates)),
+    };
+    let params = serde_json::json!({ "session": ad.name, "choice": choice });
+    match handle.query("session/answer", Some(params), timeout).await {
+        None => Err(AnswerError::ConnectionLost),
+        Some(Err(e)) => Err(AnswerError::Refused(e)),
+        Some(Ok(value)) => {
+            let applied = value.get("applied").and_then(|v| v.as_bool()).unwrap_or(false);
+            Ok(AnswerOutcome { session: format!("{}/{}", handle.hostname, ad.name), applied })
+        }
+    }
 }
 
 /// A successful `say` outcome.
@@ -100,7 +167,10 @@ pub async fn say(
     // independently, so a race still fails closed).
     match ad.state {
         SessionState::InputRequired => {
-            return Err(SayError::InputRequired { question: None });
+            let question = ad.pending.as_ref().and_then(|items| items.first()).map(|item| item.prompt.clone());
+            let turn_age_ms = age_ms(ad.turn_started_at.as_deref());
+            let last_update_age_ms = age_ms(ad.last_update_at.as_deref());
+            return Err(SayError::InputRequired { question, turn_age_ms, last_update_age_ms });
         }
         SessionState::Working if !queue => {
             let turn_age_ms = age_ms(ad.turn_started_at.as_deref());

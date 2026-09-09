@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Instant;
 
 use futures_util::StreamExt;
-use holler_proto::docs::LastTurn;
+use holler_proto::docs::{LastTurn, PendingItem};
 use holler_proto::{log, SessionName, SessionState};
 use tokio::sync::{broadcast, mpsc, oneshot};
 
@@ -28,6 +28,12 @@ pub(super) struct SessionPresence {
     pub(super) last_update_at: Option<String>,
     pub(super) turn_id: Option<String>,
     pub(super) last_turn: Option<LastTurn>,
+    /// The held permission(s)/elicitation(s) (issue #151) — `Some` only
+    /// while `state` is `InputRequired`, mirroring `SessionAd.pending`'s own
+    /// wire contract. Populated from [`AcpDriver::pending`] by [`set_state`]
+    /// every time this session transitions to (or stays in)
+    /// `InputRequired`, and cleared the moment it leaves that state.
+    pub(super) pending: Option<Vec<PendingItem>>,
 }
 
 impl Default for SessionPresence {
@@ -44,6 +50,7 @@ impl Default for SessionPresence {
             last_update_at: None,
             turn_id: None,
             last_turn: None,
+            pending: None,
         }
     }
 }
@@ -167,7 +174,16 @@ async fn handle_prompt(
         start_turn(inner, id, text, reply_tx, updates).await;
         return;
     }
-    if !queue {
+    // Issue #151: `input-required` is `queue`-immune — a held permission/
+    // elicitation is answered, not appended behind. `--queue` only ever
+    // relieves a plain `working` busy session (the `!queue` arm just below);
+    // an `input-required` prompt is always the immediate `Busy` refusal, even
+    // with `queue:true`. The hub's own `talk::say` already gates this before
+    // ever forwarding the request (never sends a queued prompt to a session
+    // it knows is input-required) — this is the body's own fail-closed
+    // backstop for a caller that skips that gate (a direct wire client, or a
+    // race against a state change the hub's cache hasn't caught up to yet).
+    if !queue || current_state == SessionState::InputRequired {
         let (state, turn_age_ms, last_update_age_ms) = busy_ages(inner, current_state);
         let _ = reply_tx.send(PromptOutcome::Busy { state, turn_age_ms, last_update_age_ms });
         return;
@@ -352,6 +368,7 @@ async fn start_turn(
         p.state = SessionState::Working;
         p.turn_started_at = Some(ts.clone());
         p.last_update_at = Some(ts);
+        p.pending = None;
         p.turn_id = Some(turn_id);
     }
     notify_presence(inner);
@@ -389,9 +406,20 @@ async fn handle_stream_event(inner: &mut Inner, event: Option<DriverEvent>) {
 }
 
 fn set_state(inner: &mut Inner, state: SessionState) {
+    // Issue #151: `pending` mirrors `state` — populated from the driver's
+    // own held block only while entering/staying `InputRequired`, and
+    // cleared the instant this leaves that state (a resumed `Working`, or a
+    // turn that ended outright). Read before the lock below so this never
+    // holds the presence mutex while also locking the driver's own.
+    let pending: Option<Vec<PendingItem>> = if state == SessionState::InputRequired {
+        inner.driver.as_ref().map(|d| d.pending()).filter(|items| !items.is_empty())
+    } else {
+        None
+    };
     {
         let mut p = inner.presence.lock().unwrap_or_else(PoisonError::into_inner);
         p.state = state;
+        p.pending = pending;
     }
     // Shares its "bump the staleness clock + notify" half with the `Chunk`
     // arms below — a state transition is real activity too, and this is the
@@ -435,6 +463,7 @@ async fn finish_turn_no_dispatch(inner: &mut Inner, reason: StopReason) {
         p.state = SessionState::Idle;
         p.turn_started_at = None;
         p.last_update_at = None;
+        p.pending = None;
         p.turn_id = Some(turn_id.clone());
         p.last_turn = Some(last_turn.clone());
     }
