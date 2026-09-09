@@ -5,9 +5,9 @@ cross-machine; the **internal** channels are not.
 
 ## Wire (versioned, reachable off-box)
 
-| Hop | Protocol | Page |
-| --- | --- | --- |
-| hub ⇄ body | JSON-RPC 2.0 over WebSocket (A2A object model, ACP behind it) | [v2](v2.md) |
+| Hop | Protocol | Confidentiality | Page |
+| --- | --- | --- | --- |
+| hub ⇄ body | JSON-RPC 2.0 over WebSocket (A2A object model, ACP behind it) | TLS 1.3 via a proxy in front of loopback `ws` (ADR 0006); native TLS is v2 | [v2](v2.md) |
 
 ## Internal, non-wire
 

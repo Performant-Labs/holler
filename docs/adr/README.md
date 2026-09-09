@@ -30,7 +30,7 @@ The issue is the canonical record; the markdown file is a copy for browsing and 
 | 0003 | CLI surface of the single binary; one version | accepted | [#4](https://github.com/Performant-Labs/holler/issues/4) |
 | 0004 | Holler protocol v2 is JSON-RPC 2.0 over WebSocket | accepted | [#5](https://github.com/Performant-Labs/holler/issues/5) |
 | 0005 | Hierarchical session names; name is not locator | accepted | [#6](https://github.com/Performant-Labs/holler/issues/6) |
-| 0006 | | reserved | [#7](https://github.com/Performant-Labs/holler/issues/7) |
+| 0006 | v1 deployment: loopback `ws` behind a TLS-terminating proxy; a tailnet is the supported path | accepted | [#7](https://github.com/Performant-Labs/holler/issues/7) |
 | 0007 | | reserved | [#8](https://github.com/Performant-Labs/holler/issues/8) |
 | 0008 | | reserved | [#9](https://github.com/Performant-Labs/holler/issues/9) |
 | 0009 | | reserved | [#10](https://github.com/Performant-Labs/holler/issues/10) |
