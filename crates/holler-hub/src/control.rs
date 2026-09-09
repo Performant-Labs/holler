@@ -102,15 +102,42 @@ pub fn query_remote(
     exchange("b-query-remote", "control/query_remote", Some(outer))
 }
 
+/// `say SESSION TEXT` (issue #190): ask the live hub to resolve `session`,
+/// run one `session/prompt` turn, and report `{session, stop_reason, state,
+/// updates, elapsed_ms, text, message}`. `timeout` is the caller's own
+/// `--timeout` (default 600s) — this call waits up to `timeout` **plus** a
+/// small fixed margin for the control-socket round trip itself, since the
+/// hub's own exchange already applies `timeout` to the live socket wait.
+pub fn say(session: &str, text: &str, queue: bool, timeout: std::time::Duration) -> Result<serde_json::Value, ControlError> {
+    let params = serde_json::json!({
+        "session": session,
+        "text": text,
+        "queue": queue,
+        "timeout_ms": u64::try_from(timeout.as_millis()).unwrap_or(u64::MAX),
+    });
+    exchange_with_timeout("b-say", "control/say", Some(params), timeout + std::time::Duration::from_secs(5))
+}
+
 /// Send one `method`/`params` request over the control socket and return its
 /// `result` — the shared body of every one-shot control exchange (`status`,
 /// `token_ping`, …). `id_literal` is a fixed, well-formed `b-` id (each
 /// caller's own; the control socket does not correlate concurrent calls, so a
 /// literal per call site is enough).
+fn exchange(id_literal: &str, method: &str, params: Option<serde_json::Value>) -> Result<serde_json::Value, ControlError> {
+    exchange_with_timeout(id_literal, method, params, CLIENT_TIMEOUT)
+}
+
+/// [`exchange`] with a caller-chosen read timeout (issue #190: `say` waits
+/// far longer than the 5s default one-shot exchanges use).
 // The `id_literal` callers pass are always well-formed `b-` ids, and the
 // request envelope encodes infallibly, so the `.expect`s here are unreachable.
 #[allow(clippy::expect_used)] // #143
-fn exchange(id_literal: &str, method: &str, params: Option<serde_json::Value>) -> Result<serde_json::Value, ControlError> {
+fn exchange_with_timeout(
+    id_literal: &str,
+    method: &str,
+    params: Option<serde_json::Value>,
+    timeout: std::time::Duration,
+) -> Result<serde_json::Value, ControlError> {
     // No resolvable state dir means there is no control socket to connect to —
     // the same "no live hub" condition as an absent socket.
     let path = match resolve_state_dir() {
@@ -118,9 +145,7 @@ fn exchange(id_literal: &str, method: &str, params: Option<serde_json::Value>) -
         None => return Err(ControlError::NoLiveHub),
     };
     let stream = UnixStream::connect(&path).map_err(|_| ControlError::NoLiveHub)?;
-    stream
-        .set_read_timeout(Some(CLIENT_TIMEOUT))
-        .map_err(ControlError::Io)?;
+    stream.set_read_timeout(Some(timeout)).map_err(ControlError::Io)?;
 
     let cid = CorrelationId::parse(id_literal).expect("a well-formed literal control id");
     let req = holler_proto::Envelope::request(&cid, method, params);

@@ -40,6 +40,7 @@ roster |
 roster | --json
 say | io/alpha "reply with the word ALPHA"
 say | alpha "hi" --timeout 30s --json
+say | io/alpha "hi" --queue
 interrupt | io/alpha
 
 # --- body ------------------------------------------------------------------

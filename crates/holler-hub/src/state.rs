@@ -79,6 +79,18 @@ pub fn advertise_path(state: &HubState) -> PathBuf {
     state.hub_dir.join("advertise.json")
 }
 
+/// The TalkLog dir (`<root>/hub/talklog`), created on first use by
+/// [`crate::talk`].
+pub fn talklog_dir(state: &HubState) -> PathBuf {
+    state.hub_dir.join("talklog")
+}
+
+/// One session's TalkLog file: `<root>/hub/talklog/<label>__<session>.jsonl`
+/// (issue #190).
+pub fn talklog_path(state: &HubState, label: &str, session: &str) -> PathBuf {
+    talklog_dir(state).join(format!("{label}__{session}.jsonl"))
+}
+
 /// True iff `p` is a descendant of (or equal to) `root`. Used to refuse to
 /// create sockets in a state dir that does not actually own them.
 #[allow(dead_code)] // #143 forward-declared for a later story that guards socket paths

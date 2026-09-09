@@ -75,6 +75,7 @@ async fn dispatch_control(line: &str, registry: &Registry) -> String {
         Some("control/support") => hub_support(&cid, &obj, registry).await,
         Some("control/query_local") => hub_query_local(&cid, &obj, registry).await,
         Some("control/query_remote") => hub_query_remote(&cid, &obj, registry).await,
+        Some("control/say") => say(&cid, &obj, registry).await,
         Some(other) => encode_error(&cid, Code::MethodNotFound, format!("unknown control method: {other}")),
         // No method: not a call (a stray response/notification or empty frame).
         None => unkeyed_error_line(Code::InvalidRequest, "a control frame must be a request with a method"),
@@ -162,6 +163,67 @@ async fn hub_query_remote(cid: &holler_proto::CorrelationId, obj: &serde_json::V
     }
 }
 
+/// `control/say {session, text, timeout_ms, queue}` (issue #190): the CLI's
+/// `say` verb, relayed to [`crate::talk::say`]. See that module for the full
+/// resolve → busy-check → send → collect → TalkLog flow; this is only the
+/// control-socket param/result mapping.
+async fn say(cid: &holler_proto::CorrelationId, obj: &serde_json::Value, registry: &Registry) -> String {
+    let params = obj.get("params");
+    let Some(session) = params.and_then(|p| p.get("session")).and_then(|v| v.as_str()) else {
+        return encode_error(cid, Code::InvalidParams, "control/say needs params.session".to_string());
+    };
+    let Some(text) = params.and_then(|p| p.get("text")).and_then(|v| v.as_str()) else {
+        return encode_error(cid, Code::InvalidParams, "control/say needs params.text".to_string());
+    };
+    let queue = params.and_then(|p| p.get("queue")).and_then(|v| v.as_bool()).unwrap_or(false);
+    let timeout_ms = params.and_then(|p| p.get("timeout_ms")).and_then(|v| v.as_u64()).unwrap_or(600_000);
+    let timeout = std::time::Duration::from_millis(timeout_ms);
+
+    let state = HubState::from_root(resolve_state_dir().unwrap_or_default());
+    match crate::talk::say(registry, &state, session, text, queue, timeout).await {
+        Ok(outcome) => encode_response(cid, serde_json::json!({
+            "session": outcome.session,
+            "stop_reason": outcome.stop_reason,
+            "state": outcome.state,
+            "updates": outcome.updates,
+            "elapsed_ms": outcome.elapsed_ms,
+            "text": crate::talk::reply_text(&outcome.message),
+            "message": outcome.message,
+        })),
+        Err(crate::talk::SayError::UnknownSession) => {
+            encode_error(cid, Code::UnknownSession, format!("unknown session: {session}"))
+        }
+        Err(crate::talk::SayError::NotConnected) => {
+            encode_error(cid, Code::NotConnected, format!("{session}'s body is not connected"))
+        }
+        Err(crate::talk::SayError::Ambiguous(candidates)) => {
+            let message = format!("ambiguous session {session}: candidates are {}", candidates.join(", "));
+            let err = WireError::new(Code::UnknownSession, message, Some("ambiguous"));
+            encode_error_frame(cid, &err)
+        }
+        Err(crate::talk::SayError::Busy { state, turn_age_ms, last_update_age_ms }) => {
+            let err = WireError::session_busy(state, turn_age_ms, last_update_age_ms);
+            encode_error_frame(cid, &err)
+        }
+        Err(crate::talk::SayError::InputRequired { question }) => encode_error(
+            cid,
+            Code::SessionBusy,
+            question.unwrap_or_else(|| format!("{session} is waiting for an answer")),
+        ),
+        Err(crate::talk::SayError::Refused(err)) => encode_error_frame(cid, &err),
+        Err(crate::talk::SayError::ConnectionLost) => {
+            encode_error(cid, Code::ConnectionLost, format!("{session} io disconnected mid-turn; ask again"))
+        }
+        Err(crate::talk::SayError::Timeout) => {
+            let secs = timeout.as_secs();
+            encode_error(cid, Code::NotConnected, format!("no reply from {session} within {secs}s"))
+        }
+        Err(crate::talk::SayError::Cancelled) => {
+            encode_error(cid, Code::NotConnected, "prompt was interrupted before it completed".to_string())
+        }
+    }
+}
+
 /// The bound listen addresses, read the same way [`status_doc`] does (from
 /// `hub/listening.json`, written once at `hub serve` startup) — the shared
 /// helper both `control/status` and the new `control/caps`/`control/
@@ -170,7 +232,6 @@ fn read_listening_here() -> Vec<String> {
     let state = HubState::from_root(resolve_state_dir().unwrap_or_default());
     read_listening(&state)
 }
-
 /// `control/token_ping {token_id}` (issue #182): find the live circuit bound
 /// to `token_id` in the registry and ask it to answer a `circuit/ping`,
 /// returning `{hostname, rtt_ms}`. No live socket for that token is
@@ -200,6 +261,14 @@ fn encode_response(cid: &holler_proto::CorrelationId, result: serde_json::Value)
 
 fn encode_error(cid: &holler_proto::CorrelationId, code: Code, message: String) -> String {
     let env = Envelope::error_frame(cid, &WireError::new(code, message, None));
+    holler_proto::encode(&env).unwrap_or_default()
+}
+
+/// Encode an already-built [`WireError`] verbatim (issue #190: `say`'s own
+/// `session_busy`/body-refused errors already carry the exact `data` the CLI
+/// needs — `encode_error` would flatten that away).
+fn encode_error_frame(cid: &holler_proto::CorrelationId, error: &WireError) -> String {
+    let env = Envelope::error_frame(cid, error);
     holler_proto::encode(&env).unwrap_or_default()
 }
 

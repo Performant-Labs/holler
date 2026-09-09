@@ -392,11 +392,19 @@ pub struct Roster {}
 pub struct Say {
     /// Session address, <label>/<session> (or a bare <session>).
     pub session: String,
-    /// Prompt text.
-    pub text: String,
+    /// Prompt text. Omit when `--parts-file` supplies the full A2A message.
+    #[arg(required_unless_present = "parts_file")]
+    pub text: Option<String>,
+    /// A full A2A `Message` (non-text parts) instead of a plain-text `TEXT`.
+    #[arg(long)]
+    pub parts_file: Option<String>,
     /// Wait up to this long for the reply (default 600s).
     #[arg(long, default_value = "600s")]
     pub timeout: String,
+    /// Append behind a busy session's current turn instead of refusing with
+    /// `session_busy`.
+    #[arg(long)]
+    pub queue: bool,
 }
 
 #[derive(Parser, Debug)]

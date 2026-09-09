@@ -208,7 +208,7 @@ about — use them instead of any sleep-and-poll loop:
   recurred multiple times *within the same session* despite being corrected
   each time. The actual fix is a `PreToolUse` hook on the `Bash` tool
   (`~/.claude/settings.json`, per-user) that inspects every Bash command: if
-  it matches `holler say ...` **and** contains urgency language (`urgent`,
+  it matches a `say` invocation **and** contains urgency language (`urgent`,
   `immediately`, `right away`, `asap`, `as soon as possible`), the hook
   **denies the tool call** with a message pointing at `interrupt` instead.
   It never auto-inserts or auto-prepends `interrupt` — that would cancel

@@ -204,10 +204,21 @@ impl Hub {
     /// Spawn a hub bound to a free loopback port and wait (≤10 s) for it to
     /// report the bound port on stderr.
     pub fn start(state: &StateDir) -> Hub {
+        Self::start_with_env(state, &[])
+    }
+
+    /// [`Hub::start`] with extra environment variables on the hub process
+    /// itself (issue #190's `say_to_stalled_session_names_stalled`: the
+    /// `HOLLER_STALL_MS` a busy-check reads is the *hub* process's own env,
+    /// not the racing `say` CLI invocation's — setting it only on the racer
+    /// has no effect, since the check runs inside the hub over the control
+    /// socket).
+    pub fn start_with_env(state: &StateDir, envs: &[(&str, &str)]) -> Hub {
         // Bind the base `Command` to a name first (rather than chaining on the
         // `holler_cmd` temporary) so we can keep it alive long enough to call
         // `make_own_process_group` on it — see the note below.
         let mut cmd = holler_cmd(state);
+        cmd.envs(envs.iter().copied());
         cmd.args(["hub", "serve", "--listen", "127.0.0.1:0"])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
@@ -629,7 +640,17 @@ impl Body {
     /// Spawn a body running the config at `config` (its `sessions.toml`), in
     /// its own process group so [`kill_tree`] can reap the agents it spawns.
     pub fn start(state: &StateDir, config: &Path) -> Body {
+        Self::start_with_env(state, config, &[])
+    }
+
+    /// [`Body::start`] with extra environment variables on the body process
+    /// itself (issue #190: `HOLLER_HEARTBEAT_INTERVAL_MS` — the hub's own
+    /// presence cache, which `say`'s busy/stalled check reads, only refreshes
+    /// on this body's heartbeat; the 15s production default is far too slow
+    /// for a test to observe a state change within its own timeout budget).
+    pub fn start_with_env(state: &StateDir, config: &Path, envs: &[(&str, &str)]) -> Body {
         let mut cmd = holler_cmd(state);
+        cmd.envs(envs.iter().copied());
         cmd.arg("body")
             .arg("run")
             .arg("--config")
@@ -640,6 +661,14 @@ impl Body {
         make_own_process_group(&mut cmd);
         let child = cmd.spawn().expect("spawn `holler body run`");
         Body { child }
+    }
+
+    /// A mutable handle to the body child, for tests that need to
+    /// `kill_tree`/`try_wait` it directly (issue #190's
+    /// `body_drop_mid_turn_is_connection_lost_not_unreachable`, which yanks
+    /// the body out mid-turn rather than asking it to detach cleanly).
+    pub fn child_mut(&mut self) -> &mut Child {
+        &mut self.child
     }
 
     /// Detach the body from its hub and wait for it to exit; if it is still up

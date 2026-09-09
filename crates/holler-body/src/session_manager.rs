@@ -100,6 +100,12 @@ pub enum SessionCommand {
         text: String,
         queue: bool,
         reply_tx: oneshot::Sender<PromptOutcome>,
+        /// Mid-turn text chunks, forwarded as the driver emits them (issue
+        /// #190's coalescer consumes this to build `session/update`
+        /// notifications). `None` for a caller with no streaming consumer
+        /// (e.g. the existing #189 unit tests) — chunks are then simply
+        /// dropped, exactly like before this story.
+        updates: Option<mpsc::UnboundedSender<String>>,
     },
     /// Cancel the in-flight turn only; queued prompts are untouched.
     Cancel { reply_tx: oneshot::Sender<Result<(), String>> },
@@ -233,10 +239,27 @@ impl SessionManager {
         text: impl Into<String>,
         queue: bool,
     ) -> Result<PromptOutcome, SessionManagerError> {
+        self.prompt_with_updates(name, id, text, queue, None).await
+    }
+
+    /// Send a prompt with a live channel for mid-turn text chunks (issue
+    /// #190's `session/prompt` dispatch: the connection loop drains
+    /// `updates` through a [`crate::reply_coalescer::Coalescer`] while
+    /// awaiting the final [`PromptOutcome`] this call resolves to). A queued
+    /// prompt's chunks arrive once its own turn is actually dispatched, same
+    /// as an immediate one — nothing streams while it sits in the FIFO.
+    pub async fn prompt_with_updates(
+        &self,
+        name: &SessionName,
+        id: impl Into<String>,
+        text: impl Into<String>,
+        queue: bool,
+        updates: Option<mpsc::UnboundedSender<String>>,
+    ) -> Result<PromptOutcome, SessionManagerError> {
         let (reply_tx, reply_rx) = oneshot::channel();
         self.send(
             name,
-            SessionCommand::Prompt { id: id.into(), text: text.into(), queue, reply_tx },
+            SessionCommand::Prompt { id: id.into(), text: text.into(), queue, reply_tx, updates },
         )
         .await?;
         reply_rx.await.map_err(|_| SessionManagerError::Gone)

@@ -6,6 +6,8 @@
 
 mod cli;
 pub mod query_cmd;
+pub mod say_cmd;
+pub mod time_fmt;
 
 pub use crate::cli::{
     Attach, AttachCommand, Body, BodyCommand, Cli, Cmd, Command, Delete, Hub, HubCommand,

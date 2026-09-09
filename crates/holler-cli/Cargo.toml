@@ -134,6 +134,13 @@ path = "tests/session_manager_test.rs"
 name = "query_test"
 path = "tests/query_test.rs"
 
+# Talk (issue #190): `say` → `session/prompt`, coalesced `session/update`,
+# the final result, and the TalkLog. Lives here for the same
+# `CARGO_BIN_EXE_stub-acp` reason as `session_manager_test` above.
+[[test]]
+name = "talk_test"
+path = "tests/talk_test.rs"
+
 # Declare only what is consumed (issue #155 §7 — `cargo machete` fails CI
 # otherwise). A story that starts using a workspace dependency adds it here in
 # the same PR; the skeleton's speculative list was removed in #155.
