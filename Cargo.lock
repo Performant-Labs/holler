@@ -564,6 +564,7 @@ dependencies = [
  "http",
  "httparse",
  "libc",
+ "serde",
  "serde_json",
  "sha2",
  "subtle",

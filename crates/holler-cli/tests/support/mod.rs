@@ -200,6 +200,23 @@ impl Drop for Hub {
     }
 }
 
+/// Spawn a background thread that keeps draining `reader` until the
+/// child'''s stderr closes (the process exited). Without this, dropping the
+/// reader after the initial "listening" line closes the pipe'''s read end
+/// while the hub keeps running — see the call site for why that is fatal.
+pub fn drain_stderr_forever(mut reader: std::io::BufReader<std::process::ChildStderr>) {
+    std::thread::spawn(move || {
+        let mut line = String::new();
+        loop {
+            line.clear();
+            match reader.read_line(&mut line) {
+                Ok(0) | Err(_) => break,
+                Ok(_) => {}
+            }
+        }
+    });
+}
+
 impl Hub {
     /// Spawn a hub bound to a free loopback port and wait (≤10 s) for it to
     /// report the bound port on stderr.
@@ -225,16 +242,22 @@ impl Hub {
         // The hub emits one JSON object per event on stderr; the
         // listener-ready line is `{"event":"listening","addr":"127.0.0.1:<port>"}`.
         // We drain stderr line-by-line until that event arrives or 10 s pass.
-        let port = {
-            let stderr = child.stderr.take().expect("hub stderr is piped");
-            let reader = std::io::BufReader::new(stderr);
-            let mut reader = Some(reader);
-            wait_for(Duration::from_secs(10), || {
-                let r = reader.as_mut()?;
-                read_json_event(r, "listening").map(|v| parse_port(&v))
-            })
+        let stderr = child.stderr.take().expect("hub stderr is piped");
+        let reader = std::io::BufReader::new(stderr);
+        let mut reader = Some(reader);
+        let port = wait_for(Duration::from_secs(10), || {
+            let r = reader.as_mut()?;
+            read_json_event(r, "listening").map(|v| parse_port(&v))
+        });
+        // Keep draining stderr for the rest of the hub's life instead of
+        // letting `reader` drop here. Dropping it closes the pipe's read end
+        // while the hub process keeps running; its structured logging
+        // (`eprintln!`, see holler-proto/src/log.rs) then panics on the next
+        // write to a now-broken pipe, silently killing the hub. See #184.
+        if let Some(r) = reader {
+            drain_stderr_forever(r);
         }
-        .unwrap_or_else(|| {
+        let port = port.unwrap_or_else(|| {
             let _ = child.kill();
             panic!(
                 "hub did not report a listening port within 10s \
@@ -252,6 +275,19 @@ impl Hub {
     /// The WebSocket URL bodies dial to reach this hub.
     pub fn ws_url(&self) -> String {
         format!("ws://127.0.0.1:{}", self.port)
+    }
+
+    /// Build a `Hub` from an already-spawned child and its bound port. Lets a
+    /// test spawn `holler hub serve` with *extra* environment (the hygiene /
+    /// lockout knobs — #184) that `start`'s fixed env does not set, while still
+    /// inheriting `ws_url` / `stop` / `Drop` teardown.
+    #[allow(dead_code)] // #184
+    pub fn from_parts(port: u16, child: Child) -> Hub {
+        Hub {
+            port,
+            child,
+            stopped: false,
+        }
     }
 
     /// The hub child's pid (to signal it directly from a test, e.g. SIGINT).
@@ -764,6 +800,18 @@ fn read_json_event(reader: &mut impl std::io::BufRead, want: &str) -> Option<Val
     }
     let v: Value = serde_json::from_str(&line).ok()?;
     (v.get("event").and_then(|e| e.as_str()) == Some(want)).then_some(v)
+}
+
+/// Public wrapper over the private [`read_json_event`] so a test that spawns
+/// its own hub (to set hygiene/lockout env, e.g. `hub_hygiene_test`) can parse
+/// the `listening` line exactly as [`Hub::start`] does.
+pub fn read_json_event_pub(reader: &mut impl std::io::BufRead, want: &str) -> Option<Value> {
+    read_json_event(reader, want)
+}
+
+/// Public wrapper over the private [`parse_port`] (see [`read_json_event_pub`]).
+pub fn parse_port_pub(event: &Value) -> u16 {
+    parse_port(event)
 }
 
 /// Parse the port out of a `listening` event's `addr` field

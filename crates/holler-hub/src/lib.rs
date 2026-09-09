@@ -5,7 +5,14 @@
 //! per-state-dir instance lock, the Unix-domain control socket, and the
 //! `control/status` answer that `holler hub status` reads.
 
+pub mod auth_io;
 pub mod control;
+pub mod control_io;
+pub mod connection;
+pub mod handshake;
+pub mod lockout;
+pub mod registry;
 pub mod serve;
 pub mod state;
 pub mod token;
+pub mod wire_io;

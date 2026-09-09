@@ -68,6 +68,15 @@ path = "tests/docs_cli_test.rs"
 name = "hub_serve_test"
 path = "tests/hub_serve_test.rs"
 
+# Connection hygiene (story #184): supersede-on-reauth (1000), revoke
+# force-close (1008), oversized-frame 1009, silent pre-auth timeout (1001),
+# the pre-auth cap (1013 / raw-refuse), failed-auth lockout (1008), a slow
+# token store not stalling a sibling ping, and `peer` in `hub status --json`.
+# Raw `tokio-tungstenite` clients against a real hub (as `hub_serve_test`).
+[[test]]
+name = "hub_hygiene_test"
+path = "tests/hub_hygiene_test.rs"
+
 # `holler hub token …` e2e (story #163): the CLI's thin layer over the hub's
 # token store — each verb's ADR 0003 exit code and its human/`--json` stdout
 # shape, driving the real binary against an isolated `HOLLER_STATE_DIR`.
