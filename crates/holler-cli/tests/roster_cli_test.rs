@@ -18,7 +18,7 @@ use std::time::Duration;
 
 use serde_json::Value;
 
-use support::{holler_cmd, join, mint_token, roster_json, wait_for, Body, Hub, StateDir};
+use support::{holler_cmd, join, mint_token, roster_json, wait_for, Body, Hub, StateDir, STARTUP_WAIT};
 
 fn run(state: &StateDir, args: &[&str]) -> (i32, String, String) {
     let out = holler_cmd(state)
@@ -48,7 +48,7 @@ fn roster_cli_shows_two_sessions_from_one_body() {
     let body = Body::start(&state, &config);
 
     // Observe (never sleep): wait until the hub's roster shows both sessions.
-    wait_for(Duration::from_secs(15), || {
+    wait_for(STARTUP_WAIT, || {
         let v = roster_json(&state);
         let rows = v.get("rows").and_then(|r| r.as_array())?;
         if rows.len() == 2 {
@@ -92,7 +92,7 @@ fn roster_json_shape() {
     // The row's name is qualified `<label>/<session>` (ADR 0005 §2, issue
     // #236): `mint_token` above minted the `body-1` label, so the row is
     // `body-1/alpha`, not the bare `alpha` the body itself advertised.
-    wait_for(Duration::from_secs(15), || {
+    wait_for(STARTUP_WAIT, || {
         let v = roster_json(&state);
         let rows = v.get("rows").and_then(|r| r.as_array())?;
         rows.iter().find(|r| r.get("name").and_then(Value::as_str) == Some("body-1/alpha")).map(|_| ())
@@ -141,7 +141,7 @@ fn roster_cli_prefix_filters_by_label() {
     let media_body = Body::start(&media_body_state, &media_config);
 
     // Observe (never sleep): wait until both bodies' rows have landed.
-    wait_for(Duration::from_secs(15), || {
+    wait_for(STARTUP_WAIT, || {
         let v = roster_json(&hub_state);
         let rows = v.get("rows").and_then(|r| r.as_array())?;
         let names: Vec<&str> = rows.iter().filter_map(|r| r.get("name").and_then(Value::as_str)).collect();

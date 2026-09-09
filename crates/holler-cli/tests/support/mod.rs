@@ -146,6 +146,10 @@ pub fn wait_for<T>(timeout: Duration, mut check: impl FnMut() -> Option<T>) -> O
 
 const POLL_INTERVAL: Duration = Duration::from_millis(50);
 
+/// Budget for a [`wait_for`] observing real hub+body(s) startup convergence: each poll forks a
+/// `holler` subprocess, so a loaded CI runner can be slower here than a dev box.
+pub const STARTUP_WAIT: Duration = Duration::from_secs(30);
+
 /// A running hub subprocess.
 ///
 /// `Hub::start` launches `holler hub serve --listen 127.0.0.1:0` (port 0 → the
@@ -329,28 +333,23 @@ impl Hub {
 
 /// Mint a join token on the (local, state-dir-bound) hub.
 ///
-/// Returns `(token_id, secret)` — the pair a body joins with
-/// (`body join --token <id>:<secret>`). The hub persists the token under
-/// `<state>/hub`, so no live hub process is required to *mint*.
+/// Returns `(token_id, secret)` — the pair a body joins with (`body join --token <id>:<secret>`).
+/// No live hub process is required to *mint*. Retries on "another holler process holds the token
+/// lock; retry" (`acquire_lock`'s `WouldBlock` is a plain error, never a wait): a second mint can
+/// land mid-authenticate on the same store.
 pub fn mint_token(state: &StateDir, label: &str) -> (String, String) {
-    // `--json` is a *global* flag (ADR 0003), so it is accepted at the root of
-    // the command — *before* the subcommand path — not after `mint`. The
-    // ADR 0003 table lists `hub token mint --label LABEL [--ttl 24h] [--json]`
-    // but `--json` is global, so it may appear before `mint` (where we place it);
-    // putting it after `mint` would only be accepted if `mint` had its *own*
-    // `--json`, which it does not.
-    let out = holler_cmd(state)
-        .args(["--json", "hub", "token", "mint", "--label", label])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .and_then(|c| c.wait_with_output())
-        .expect("run `hub token mint`");
-    assert!(
-        out.status.success(),
-        "hub token mint failed: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
+    let mut out = run_mint(state, label); // `--json` is global (ADR 0003): before the subcommand.
+    for attempt in 1..=5 {
+        if out.status.success() {
+            break;
+        }
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        if !stderr.contains("holds the token lock") || attempt == 5 {
+            assert!(out.status.success(), "hub token mint failed (after {attempt} attempts): {stderr}");
+        }
+        std::thread::sleep(Duration::from_millis(200 * attempt as u64));
+        out = run_mint(state, label);
+    }
     let v: Value = serde_json::from_slice(&out.stdout).expect("mint --json is a JSON object");
     // The `--json` document's id field is `token_id` (ADR 0003: the join token
     // is `ID:SECRET` and `ID` is the token id). `id` is the wrong field name —
@@ -364,6 +363,17 @@ pub fn mint_token(state: &StateDir, label: &str) -> (String, String) {
         .expect("mint result carries `secret`")
         .to_string();
     (token_id, secret)
+}
+
+/// One attempt at `hub token mint` (see [`mint_token`]'s retry loop).
+fn run_mint(state: &StateDir, label: &str) -> Output {
+    holler_cmd(state)
+        .args(["--json", "hub", "token", "mint", "--label", label])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .and_then(|c| c.wait_with_output())
+        .expect("run `hub token mint`")
 }
 
 /// Join `state`'s body to the hub at `ws_url` using the minted token, and
