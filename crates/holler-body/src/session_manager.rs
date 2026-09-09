@@ -119,6 +119,10 @@ pub enum SessionCommand {
     Replace {
         text: String,
         reply_tx: oneshot::Sender<PromptOutcome>,
+        /// Mid-turn text chunks for this redirect turn (issue #191: `interrupt
+        /// SESSION TEXT` streams its reply exactly like `say`). `None` for a
+        /// caller with no streaming consumer (the pre-#191 unit tests).
+        updates: Option<mpsc::UnboundedSender<String>>,
     },
     /// End this session's task: gracefully shut down its driver (if any) and
     /// return. Queued prompts are dropped without a reply (their `reply_tx`
@@ -289,8 +293,21 @@ impl SessionManager {
         name: &SessionName,
         text: impl Into<String>,
     ) -> Result<PromptOutcome, SessionManagerError> {
+        self.replace_with_updates(name, text, None).await
+    }
+
+    /// [`Self::replace`] with a live channel for mid-turn text chunks (issue
+    /// #191: the connection loop drains `updates` through the same
+    /// [`crate::reply_coalescer::Coalescer`] `prompt_with_updates` uses, so
+    /// `interrupt SESSION TEXT`'s reply streams exactly like `say`'s).
+    pub async fn replace_with_updates(
+        &self,
+        name: &SessionName,
+        text: impl Into<String>,
+        updates: Option<mpsc::UnboundedSender<String>>,
+    ) -> Result<PromptOutcome, SessionManagerError> {
         let (reply_tx, reply_rx) = oneshot::channel();
-        self.send(name, SessionCommand::Replace { text: text.into(), reply_tx }).await?;
+        self.send(name, SessionCommand::Replace { text: text.into(), reply_tx, updates }).await?;
         reply_rx.await.map_err(|_| SessionManagerError::Gone)
     }
 

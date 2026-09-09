@@ -8,6 +8,7 @@ mod cli;
 pub mod answer_cmd;
 pub mod body_cmd;
 pub mod hub_cmd;
+pub mod interrupt_cmd;
 pub mod query_cmd;
 pub mod roster_cmd;
 pub mod say_cmd;

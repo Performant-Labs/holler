@@ -57,13 +57,13 @@ fn not_implemented(story: &str) -> ! {
 
 /// Print a leaf command's result (a refusal to stderr with the `error: `
 /// prefix, a success to stdout) and exit with its own code. Shared by
-/// `Roster`/`Say`/`Answer` (issue #151 added the third — inlining its own
-/// copy of this same four-line if/else pushed `main` past the workspace's
-/// cognitive-complexity/line-count guards) so each call site is one line.
-/// `newline_on_success`: `Roster`'s table already ends every line with its
-/// own `\n` (`print!`, no extra one); `Say`/`Answer`'s reply text does not
-/// (`println!` adds it) — the one difference between the three call sites'
-/// prior inline copies.
+/// `Roster`/`Say`/`Answer`/`Interrupt` (issue #151 added `Answer`, #191 added
+/// `Interrupt` — inlining each one's own copy of this same four-line if/else
+/// pushed `main` past the workspace's cognitive-complexity/line-count
+/// guards) so each call site is one line. `newline_on_success`: `Roster`'s
+/// table already ends every line with its own `\n` (`print!`, no extra one);
+/// `Say`/`Answer`/`Interrupt`'s reply text does not (`println!` adds it) —
+/// the one difference between these call sites' prior inline copies.
 fn print_leaf_result_and_exit(message: &str, to_stderr: bool, exit_code: i32, newline_on_success: bool) -> ! {
     if !message.is_empty() {
         if to_stderr {
@@ -197,21 +197,19 @@ fn main() {
         let result = holler_cli::say_cmd::run(say, cli.json);
         print_leaf_result_and_exit(&result.message, result.to_stderr, result.exit_code, true);
     }
+    if let Command::Interrupt(interrupt) = &cli.command {
+        let result = holler_cli::interrupt_cmd::run(interrupt, cli.json);
+        print_leaf_result_and_exit(&result.message, result.to_stderr, result.exit_code, true);
+    }
     if let Command::Answer(answer) = &cli.command {
         let result = holler_cli::answer_cmd::run(answer, cli.json);
         print_leaf_result_and_exit(&result.message, result.to_stderr, result.exit_code, true);
     }
 
-    let story = match &cli.command {
-        // the implemented leaves were handled above and returned; these arms
-        // are defensive — every path above exits.
-        Command::Hub(_) => not_implemented("Hub"),
-        Command::Roster(_) => not_implemented("Roster"),
-        Command::Say(_) => not_implemented("Say"),
-        Command::Answer(_) => not_implemented("Answer"),
-        Command::Interrupt(_) => "Interrupt",
-        Command::Body(_) => not_implemented("Body"),
-    };
-
-    not_implemented(story);
+    // Every `Command` variant is handled by one of the arms above (each
+    // exits before falling through), so this is never actually reached —
+    // not a real "unimplemented" leaf anymore (the workspace skeleton's
+    // original catch-all, story #127, is fully retired). `main` returning
+    // `()` here (rather than an `unreachable!()` the workspace lints deny)
+    // is exactly as sound: nothing downstream reads a value out of it.
 }

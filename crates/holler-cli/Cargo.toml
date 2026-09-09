@@ -156,6 +156,14 @@ path = "tests/roster_cli_test.rs"
 name = "roster_sweep_wireup_test"
 path = "tests/roster_sweep_wireup_test.rs"
 
+# Interrupt (issue #191): `session/cancel`, the `interrupt SESSION TEXT`
+# redirect, the ack-timeout, and the priority path — against a real hub +
+# body. Lives here for the same `CARGO_BIN_EXE_stub-acp` reason as
+# `talk_test`/`roster_cli_test` above.
+[[test]]
+name = "interrupt_test"
+path = "tests/interrupt_test.rs"
+
 # `answer SESSION CHOICE` (issue #151): resolve a held permission/elicitation
 # against a real hub + body + `stub-acp` (`--ask-permission`/
 # `--ask-elicitation`). Lives here for the same `CARGO_BIN_EXE_stub-acp`

@@ -37,7 +37,7 @@ use holler_proto::{
 };
 use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 
-use crate::live::{LiveCommand, Registry, SayReply, SeenUpdate};
+use crate::live::{CancelCommand, CancelReply, LiveCommand, Registry, SayReply, SeenUpdate};
 use crate::serve::{close, send_error};
 use crate::state::HubState;
 
@@ -158,7 +158,7 @@ pub async fn handle_authenticated<Snk, St>(
         vec![("client_id", client_id.clone()), ("hostname", params.hostname.clone())],
     );
 
-    let mut cmd_rx = registry.insert(&client_id, &params.hostname, &params.token_id).await;
+    let (mut cmd_rx, mut cancel_rx) = registry.insert(&client_id, &params.hostname, &params.token_id).await;
     registry.set_harnesses_advertised(&client_id, body_harnesses.clone()).await;
     // Issue #236 (ADR 0005 §2): the label travels with the authenticated
     // token, never on the wire, so this is the one place the hub can read it
@@ -184,7 +184,16 @@ pub async fn handle_authenticated<Snk, St>(
     let pending_confirms = send_confirm_probes(sink, &body_harnesses).await;
 
     let mut conn =
-        SessionConnection::new(sink, stream, &mut cmd_rx, &client_id, registry, roster, pending_confirms).await;
+        SessionConnection::new(
+            sink,
+            stream,
+            CommandChannels { cmd_rx: &mut cmd_rx, cancel_rx: &mut cancel_rx },
+            &client_id,
+            registry,
+            roster,
+            pending_confirms,
+        )
+        .await;
     conn.run().await;
     registry.remove(&client_id).await;
     log(Severity::Warn, "conn_dropped", vec![("client_id", client_id)]);
@@ -343,6 +352,10 @@ struct SessionConnection<'a, Snk, St> {
     sink: &'a mut Snk,
     stream: &'a mut St,
     cmd_rx: &'a mut tokio::sync::mpsc::UnboundedReceiver<LiveCommand>,
+    /// The priority channel `LiveHandle::cancel` sends on (issue #191) — see
+    /// [`CancelCommand`]'s own doc for why this is drained separately from
+    /// (and with priority over) `cmd_rx`.
+    cancel_rx: &'a mut tokio::sync::mpsc::UnboundedReceiver<CancelCommand>,
     client_id: &'a str,
     registry: &'a Registry,
     roster: &'a std::sync::Arc<crate::roster::Roster>,
@@ -351,7 +364,22 @@ struct SessionConnection<'a, Snk, St> {
     pending_query: PendingQuery,
     pending_confirms: std::collections::HashMap<String, String>,
     pending_says: std::collections::HashMap<String, PendingSay>,
+    /// One `session/cancel` still awaiting its `{applied:true}` response on
+    /// this connection (issue #191), keyed by `request_id` — same "map, not
+    /// a single `Option`" discipline as `pending_says` (issue #202's
+    /// regression: a sibling's own `say` and this cancel can be concurrent).
+    pending_cancels: std::collections::HashMap<String, tokio::sync::oneshot::Sender<CancelReply>>,
     last_frame_at: tokio::time::Instant,
+}
+
+/// The two command channels a live connection's task drains (issue #191):
+/// bundled together purely to keep [`SessionConnection::new`] under clippy's
+/// too-many-arguments gate — `cmd_rx` (the normal `LiveCommand`s) and
+/// `cancel_rx` (the priority `CancelCommand`s) are otherwise unrelated to
+/// each other.
+struct CommandChannels<'a> {
+    cmd_rx: &'a mut tokio::sync::mpsc::UnboundedReceiver<LiveCommand>,
+    cancel_rx: &'a mut tokio::sync::mpsc::UnboundedReceiver<CancelCommand>,
 }
 
 impl<'a, Snk, St> SessionConnection<'a, Snk, St>
@@ -362,7 +390,7 @@ where
     async fn new(
         sink: &'a mut Snk,
         stream: &'a mut St,
-        cmd_rx: &'a mut tokio::sync::mpsc::UnboundedReceiver<LiveCommand>,
+        channels: CommandChannels<'a>,
         client_id: &'a str,
         registry: &'a Registry,
         roster: &'a std::sync::Arc<crate::roster::Roster>,
@@ -372,7 +400,8 @@ where
         Self {
             sink,
             stream,
-            cmd_rx,
+            cmd_rx: channels.cmd_rx,
+            cancel_rx: channels.cancel_rx,
             client_id,
             registry,
             roster,
@@ -381,6 +410,7 @@ where
             pending_query: None,
             pending_confirms,
             pending_says: std::collections::HashMap::new(),
+            pending_cancels: std::collections::HashMap::new(),
             last_frame_at: tokio::time::Instant::now(),
         }
     }
@@ -391,6 +421,26 @@ where
     fn clear_from_roster(&self) {
         if let Some(token) = &self.roster_token {
             self.roster.clear(token);
+        }
+    }
+
+    /// Handle one [`CancelCommand`] received from the priority channel (issue
+    /// #191): send `session/cancel` and register the pending reply, or (a
+    /// send failure, or the registry entry itself being gone) report
+    /// `Err(())` so the caller ([`Self::run`]) tears the connection down —
+    /// split out purely to keep that `select!`'s own cognitive complexity
+    /// under the workspace threshold.
+    async fn handle_cancel_command(&mut self, cancel_cmd: Option<CancelCommand>) -> Result<(), ()> {
+        let CancelCommand { request_id, session, reply } = cancel_cmd.ok_or(())?;
+        match send_cancel(self.sink, &request_id, &session).await {
+            Ok(()) => {
+                self.pending_cancels.insert(request_id, reply);
+                Ok(())
+            }
+            Err(()) => {
+                let _ = reply.send(CancelReply::ConnectionLost);
+                Err(())
+            }
         }
     }
 
@@ -405,12 +455,19 @@ where
     async fn run(&mut self) {
         loop {
             tokio::select! {
+                // `biased` (issue #191): `cancel_rx` is listed ahead of
+                // `cmd_rx` so a queued `session/cancel` always wins the tie
+                // when both channels have a command ready — the hub-side
+                // half of the priority path (`LiveHandle::cancel` sends here
+                // instead of the normal `tx`/`cmd_rx`, which can carry a
+                // queued `say`/`query`/`ping` ahead of it).
+                biased;
                 frame = self.stream.next() => {
                     match frame {
                         Some(Ok(Message::Text(t))) => {
                             self.last_frame_at = tokio::time::Instant::now();
                             if self.handle_inbound(&t).await.is_err() {
-                                self.fail_pending_says();
+                                self.fail_pending();
                                 self.clear_from_roster();
                                 return;
                             }
@@ -419,7 +476,7 @@ where
                             self.last_frame_at = tokio::time::Instant::now();
                         }
                         Some(Ok(Message::Binary(_))) | Some(Ok(Message::Close(_))) | Some(Err(_)) | None => {
-                            self.fail_pending_says();
+                            self.fail_pending();
                             self.clear_from_roster();
                             return;
                         }
@@ -431,36 +488,56 @@ where
                         "conn_liveness_expired",
                         vec![("client_id", self.client_id.to_string())],
                     );
-                    self.fail_pending_says();
+                    self.fail_pending();
                     self.clear_from_roster();
                     return;
                 }
+                cancel_cmd = self.cancel_rx.recv() => {
+                    if self.handle_cancel_command(cancel_cmd).await.is_err() {
+                        return;
+                    }
+                }
                 cmd = self.cmd_rx.recv() => {
-                    match cmd {
-                        Some(LiveCommand::Ping { reply: reply_tx }) => {
-                            match send_ping_probe(self.sink).await {
-                                Ok(cid) => self.pending_ping = Some((cid, reply_tx)),
-                                Err(()) => return,
-                            }
-                        }
-                        Some(LiveCommand::Query { method, params, reply: reply_tx }) => {
-                            match send_query_forward(self.sink, &method, params).await {
-                                Ok(cid) => self.pending_query = Some((cid, reply_tx)),
-                                Err(()) => return,
-                            }
-                        }
-                        Some(LiveCommand::Say { request_id, session, message, queue, reply }) => {
-                            match send_prompt(self.sink, &request_id, &session, message, queue).await {
-                                Ok(()) => {
-                                    self.pending_says.insert(request_id, PendingSay { reply, updates: Vec::new() });
-                                }
-                                Err(()) => {
-                                    let _ = reply.send(SayReply::ConnectionLost);
-                                    return;
-                                }
-                            }
-                        }
-                        None => return, // the registry entry was dropped/replaced.
+                    if self.handle_live_command(cmd).await.is_err() {
+                        return;
+                    }
+                }
+            }
+        }
+    }
+
+    /// Handle one [`LiveCommand`] received from the normal channel: `Err(())`
+    /// (a send failure, or the registry entry itself being gone) tells
+    /// [`Self::run`] to tear the connection down. Split out for the same
+    /// reason as [`Self::handle_cancel_command`] — keeping that `select!`'s
+    /// own cognitive complexity under the workspace threshold.
+    async fn handle_live_command(&mut self, cmd: Option<LiveCommand>) -> Result<(), ()> {
+        match cmd.ok_or(())? {
+            LiveCommand::Ping { reply: reply_tx } => match send_ping_probe(self.sink).await {
+                Ok(cid) => {
+                    self.pending_ping = Some((cid, reply_tx));
+                    Ok(())
+                }
+                Err(()) => Err(()),
+            },
+            LiveCommand::Query { method, params, reply: reply_tx } => {
+                match send_query_forward(self.sink, &method, params).await {
+                    Ok(cid) => {
+                        self.pending_query = Some((cid, reply_tx));
+                        Ok(())
+                    }
+                    Err(()) => Err(()),
+                }
+            }
+            LiveCommand::Say { request_id, session, message, queue, replace, reply } => {
+                match send_prompt(self.sink, &request_id, &session, message, queue, replace).await {
+                    Ok(()) => {
+                        self.pending_says.insert(request_id, PendingSay { reply, updates: Vec::new() });
+                        Ok(())
+                    }
+                    Err(()) => {
+                        let _ = reply.send(SayReply::ConnectionLost);
+                        Err(())
                     }
                 }
             }
@@ -468,12 +545,15 @@ where
     }
 
     /// The socket ended (or the liveness timeout fired) while one or more
-    /// `say`s were still in flight: report every one of them as
+    /// `say`s/cancels were still in flight: report every one of them as
     /// `connection_lost`, never a silent drop (the spec's own wording: "body
     /// io disconnected mid-turn; ask again" — never "hub unreachable").
-    fn fail_pending_says(&mut self) {
+    fn fail_pending(&mut self) {
         for (_, p) in self.pending_says.drain() {
             let _ = p.reply.send(SayReply::ConnectionLost);
+        }
+        for (_, reply) in self.pending_cancels.drain() {
+            let _ = reply.send(CancelReply::ConnectionLost);
         }
     }
 
@@ -517,11 +597,18 @@ where
                 Ok(())
             }
             Envelope::Response { id, result } => {
-                handle_response(id, result.clone(), &mut self.pending_ping, &mut self.pending_query, &mut self.pending_says);
+                handle_response(
+                    id,
+                    result.clone(),
+                    &mut self.pending_ping,
+                    &mut self.pending_query,
+                    &mut self.pending_says,
+                    &mut self.pending_cancels,
+                );
                 Ok(())
             }
             Envelope::Error { id, error } => {
-                handle_error_response(id.as_deref(), error, &mut self.pending_query, &mut self.pending_says);
+                handle_error_response(id.as_deref(), error, &mut self.pending_query, &mut self.pending_says, &mut self.pending_cancels);
                 Ok(())
             }
             Envelope::Request { id, .. } => {
@@ -533,21 +620,38 @@ where
     }
 }
 
-/// Send a `session/prompt {session, message, queue}` request to the body
-/// under `request_id`.
+/// Send a `session/prompt {session, message, queue, replace}` request to the
+/// body under `request_id`. `replace` (issue #191) is set only by
+/// `interrupt SESSION TEXT`, after the matching cancel's own `{applied:true}`
+/// — see `crate::interrupt`.
 async fn send_prompt<Snk>(
     sink: &mut Snk,
     request_id: &str,
     session: &str,
     message: Box<holler_proto::Message>,
     queue: bool,
+    replace: bool,
 ) -> Result<(), ()>
 where
     Snk: Sink<Message, Error = WsError> + Unpin,
 {
     let cid = holler_proto::CorrelationId::parse(request_id).map_err(|_| ())?;
-    let params = holler_proto::Prompt { session: session.to_string(), message: *message, meta: None, queue };
+    let params = holler_proto::Prompt { session: session.to_string(), message: *message, meta: None, queue, replace };
     let req = Envelope::request(&cid, "session/prompt", Some(serde_json::to_value(params).map_err(|_| ())?));
+    let text = holler_proto::encode(&req).map_err(|_| ())?;
+    sink.send(Message::text(text)).await.map_err(|_| ())?;
+    sink.flush().await.map_err(|_| ())
+}
+
+/// Send a `session/cancel {session}` request to the body under `request_id`
+/// (issue #191) — the priority-path counterpart of [`send_prompt`].
+async fn send_cancel<Snk>(sink: &mut Snk, request_id: &str, session: &str) -> Result<(), ()>
+where
+    Snk: Sink<Message, Error = WsError> + Unpin,
+{
+    let cid = holler_proto::CorrelationId::parse(request_id).map_err(|_| ())?;
+    let params = holler_proto::Cancel { session: session.to_string() };
+    let req = Envelope::request(&cid, "session/cancel", Some(serde_json::to_value(params).map_err(|_| ())?));
     let text = holler_proto::encode(&req).map_err(|_| ())?;
     sink.send(Message::text(text)).await.map_err(|_| ())?;
     sink.flush().await.map_err(|_| ())
@@ -655,7 +759,16 @@ fn handle_response(
     pending_ping: &mut PendingPing,
     pending_query: &mut PendingQuery,
     pending_says: &mut std::collections::HashMap<String, PendingSay>,
+    pending_cancels: &mut std::collections::HashMap<String, tokio::sync::oneshot::Sender<CancelReply>>,
 ) {
+    if let Some(reply) = pending_cancels.remove(id) {
+        let outcome = match result.and_then(|v| serde_json::from_value::<holler_proto::CancelResult>(v).ok()) {
+            Some(r) if r.applied => CancelReply::Applied,
+            _ => CancelReply::ConnectionLost,
+        };
+        let _ = reply.send(outcome);
+        return;
+    }
     if let Some(pending) = pending_says.remove(id) {
         let outcome = match result.and_then(|v| serde_json::from_value::<PromptResult>(v).ok()) {
             Some(r) => SayReply::Result {
@@ -692,8 +805,13 @@ fn handle_error_response(
     error: &WireError,
     pending_query: &mut PendingQuery,
     pending_says: &mut std::collections::HashMap<String, PendingSay>,
+    pending_cancels: &mut std::collections::HashMap<String, tokio::sync::oneshot::Sender<CancelReply>>,
 ) {
     let Some(want_id) = id else { return };
+    if let Some(reply) = pending_cancels.remove(want_id) {
+        let _ = reply.send(CancelReply::Refused(error.clone()));
+        return;
+    }
     if let Some(pending) = pending_says.remove(want_id) {
         let _ = pending.reply.send(SayReply::Refused(error.clone()));
         return;

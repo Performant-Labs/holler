@@ -408,7 +408,7 @@ where
     }
 }
 
-async fn send<Snk>(sink: &mut Snk, env: &Envelope) -> Result<(), ()>
+pub(crate) async fn send<Snk>(sink: &mut Snk, env: &Envelope) -> Result<(), ()>
 where
     Snk: Sink<Message, Error = WsError> + Unpin,
 {
@@ -439,7 +439,7 @@ enum Beat {
     Frame(FrameOutcome),
 }
 
-enum FrameOutcome {
+pub(crate) enum FrameOutcome {
     Continue,
     Superseded,
     Dropped(String),
@@ -452,9 +452,12 @@ enum FrameOutcome {
 /// used to carry). `sink`/`stream` are the socket halves; `identity`/
 /// `session_manager`/`configs`/`state_root` are the body's own read-mostly
 /// context; `heartbeat`/`detach_poll`/`last_frame_at` are the loop's timers;
-/// `outbound_tx`/`outbound_rx` is the channel every `session/prompt`/
-/// `session/cancel` dispatch task's own frames cross to reach `sink` (which
-/// has exactly one owner: this loop).
+/// `outbound_tx`/`outbound_rx` is the channel every `session/prompt`
+/// dispatch task's own frames cross to reach `sink` (which has exactly one
+/// owner: this loop); `priority_tx`/`priority_rx` (issue #191) is the
+/// second, high-priority channel `session/cancel`'s own response frame uses
+/// instead, so it is never stuck behind a large `session/update` flush
+/// already queued on `outbound_rx`.
 struct LiveConnection<'a, Snk, St> {
     sink: &'a mut Snk,
     stream: &'a mut St,
@@ -468,6 +471,16 @@ struct LiveConnection<'a, Snk, St> {
     last_frame_at: tokio::time::Instant,
     outbound_tx: mpsc::UnboundedSender<Message>,
     outbound_rx: mpsc::UnboundedReceiver<Message>,
+    /// A second, high-priority outbound channel used **only** for
+    /// `session/cancel`'s own response frame (issue #191's priority path):
+    /// a `session/cancel` dispatch task's `applied:true` (or refusal) writes
+    /// here instead of `outbound_tx`, and [`Self::next_beat`] drains this
+    /// channel with `biased` precedence ahead of `outbound_rx` — so the
+    /// cancel's own ack is never stuck behind a large `session/update` flush
+    /// or another prompt's own outbound frames already queued on the normal
+    /// channel.
+    priority_tx: mpsc::UnboundedSender<Message>,
+    priority_rx: mpsc::UnboundedReceiver<Message>,
     presence_changed: tokio::sync::broadcast::Receiver<holler_proto::SessionName>,
 }
 
@@ -485,6 +498,7 @@ where
         configs: &'a [SessionConfig],
     ) -> Self {
         let (outbound_tx, outbound_rx) = mpsc::unbounded_channel::<Message>();
+        let (priority_tx, priority_rx) = mpsc::unbounded_channel::<Message>();
         // Issue #190: push `session/presence` immediately on any session's
         // state change (not just at the next heartbeat) — this is what lets
         // the hub's own `say` busy/stalled check (issue #190's roster
@@ -506,6 +520,8 @@ where
             last_frame_at: tokio::time::Instant::now(),
             outbound_tx,
             outbound_rx,
+            priority_tx,
+            priority_rx,
             presence_changed,
         }
     }
@@ -545,13 +561,25 @@ where
         sigterm: &mut tokio::signal::unix::Signal,
     ) -> Beat {
         let last_frame_at = self.last_frame_at;
+        // `biased` (issue #191): `priority_rx` is listed ahead of
+        // `outbound_rx` so a queued `session/cancel` ack always wins the tie
+        // when both channels have a frame ready — the whole point of the
+        // priority path. Every other branch keeps its pre-#191 behaviour
+        // (each is checked in turn when ready; none of them contends with
+        // `priority_rx` under any test this story or #182/#190 wrote).
         tokio::select! {
+            biased;
             _ = self.heartbeat.tick() => Beat::Presence(send_presence_or_drop(self.sink, self.identity, self.session_manager).await),
             changed = self.presence_changed.recv() => presence_changed_beat(&changed, self.sink, self.identity, self.session_manager).await,
             _ = self.detach_poll.tick() => Beat::MaybeEnded(check_detach(self.sink, &self.detach_path, self.state_root).await),
             _ = any_signal(sigint, sigterm) => Beat::Signal,
             _ = tokio::time::sleep_until(last_frame_at + liveness_timeout()) => Beat::LivenessExpired,
-            outbound = self.outbound_rx.recv() => Beat::MaybeEnded(relay_outbound(self.sink, outbound).await),
+            // Folded into one leaf (`next_outbound`) rather than two separate
+            // arms here, purely to keep this `select!`'s own arm count (and
+            // therefore its cognitive-complexity score) at its pre-#191
+            // level — the priority-vs-normal race itself still happens,
+            // inside that helper's own `biased` select.
+            outbound = next_outbound(&mut self.priority_rx, &mut self.outbound_rx) => Beat::MaybeEnded(relay_outbound(self.sink, outbound).await),
             frame = self.stream.next() => Beat::Frame(self.handle_frame(frame).await),
         }
     }
@@ -623,7 +651,7 @@ where
                 }
             }
             Envelope::Request { id, method, params } if method.starts_with("query/") => {
-                handle_query(self.sink, &id, &method, params, self.identity, self.state_root, self.configs).await
+                crate::dispatch::handle_query(self.sink, &id, &method, params, self.identity, self.state_root, self.configs).await
             }
             Envelope::Notification { method, .. } if method == "circuit/superseded" => {
                 warn("conn_superseded", vec![]);
@@ -632,10 +660,16 @@ where
             Envelope::Request { id, method, params }
                 if matches!(method.as_str(), "session/prompt" | "session/cancel" | "session/answer") =>
             {
+                // Issue #191's priority path: `session/cancel`'s own
+                // response frame goes out via `priority_tx`, not the normal
+                // `outbound_tx` — see `priority_tx`'s own doc comment above.
+                // `dispatch_session_request` picks between the two channels
+                // itself, by method name.
                 session_dispatch::dispatch_session_request(
                     self.sink,
                     self.session_manager,
                     &self.outbound_tx,
+                    &self.priority_tx,
                     id,
                     method,
                     params,
@@ -723,6 +757,23 @@ where
 /// empty right now, not closed) keeps the loop going; split out of
 /// [`LiveConnection::next_beat`] for the same reason as
 /// [`send_presence_or_drop`].
+/// Race the priority and normal outbound channels, giving `priority_rx`
+/// precedence whenever both have a frame ready (issue #191's priority path:
+/// a `session/cancel` response must never queue behind a large
+/// `session/update` flush already sitting in `outbound_rx`). Folded into one
+/// leaf `select!` so [`LiveConnection::next_beat`]'s own `select!` doesn't
+/// need a second arm for it — see that call site's own comment.
+async fn next_outbound(
+    priority_rx: &mut mpsc::UnboundedReceiver<Message>,
+    outbound_rx: &mut mpsc::UnboundedReceiver<Message>,
+) -> Option<Message> {
+    tokio::select! {
+        biased;
+        msg = priority_rx.recv() => msg,
+        msg = outbound_rx.recv() => msg,
+    }
+}
+
 async fn relay_outbound<Snk>(sink: &mut Snk, outbound: Option<Message>) -> Option<Attempt>
 where
     Snk: Sink<Message, Error = WsError> + Unpin,
@@ -761,51 +812,6 @@ where
     let presence: Presence = session_manager.presence_doc(identity.hostname.clone());
     let params = serde_json::to_value(presence).map_err(|_| ())?;
     send(sink, &Envelope::notification("session/presence", Some(params))).await
-}
-
-/// Answer one `query/*` request (issue #185) from local state — see
-/// [`crate::query`] for the document builders. `query/support` with an
-/// unknown id answers `-32006`; every other case answers `Ok`.
-async fn handle_query<Snk>(
-    sink: &mut Snk,
-    id: &str,
-    method: &str,
-    params: Option<serde_json::Value>,
-    identity: &BodyIdentity,
-    state_root: &Path,
-    configs: &[SessionConfig],
-) -> FrameOutcome
-where
-    Snk: Sink<Message, Error = WsError> + Unpin,
-{
-    let Ok(cid) = CorrelationId::parse(id) else {
-        return FrameOutcome::Continue;
-    };
-    let result: Result<serde_json::Value, holler_proto::WireError> = match method {
-        "query/status" => Ok(serde_json::to_value(crate::query::local_status(state_root, Some(identity), configs))
-            .unwrap_or_default()),
-        "query/caps" => Ok(serde_json::to_value(crate::query::local_caps(state_root, Some(identity), configs))
-            .unwrap_or_default()),
-        "query/support" => {
-            let feature = params
-                .as_ref()
-                .and_then(|p| p.get("feature"))
-                .and_then(|v| v.as_str())
-                .unwrap_or_default();
-            crate::query::local_support(feature, configs).map(|s| serde_json::to_value(s).unwrap_or_default())
-        }
-        "query/protocol" => holler_proto::ProtocolParams::parse_version(params.as_ref())
-            .map(|version| serde_json::to_value(crate::query::local_protocol(version)).unwrap_or_default()),
-        _ => Err(holler_proto::WireError::new(Code::MethodNotFound, "unknown query method", None)),
-    };
-    let send_result = match result {
-        Ok(value) => send(sink, &Envelope::response(&cid, Some(value))).await,
-        Err(e) => send(sink, &Envelope::error_frame(&cid, &e)).await,
-    };
-    match send_result {
-        Ok(()) => FrameOutcome::Continue,
-        Err(()) => FrameOutcome::Dropped("send query answer: socket closed".to_string()),
-    }
 }
 
 fn now_millis() -> i64 {

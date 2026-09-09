@@ -6,6 +6,14 @@
 //! that file past the workspace's 900-line file-size guard
 //! (`scripts/lint.sh` check 4); this whole three-way dispatch moved here as
 //! one unit rather than picking an arbitrary single function to relocate.
+//!
+//! Issue #191's priority path: `session/cancel`'s own dispatch task writes
+//! its `{applied:true}` response via `priority_tx`, a second channel
+//! [`crate::connection::LiveConnection`] drains with priority over the
+//! normal `outbound_tx` — so a cancel's own ack can never queue behind a
+//! large `session/update` flush or another prompt's own outbound frames.
+//! `session/prompt`/`session/answer` are unaffected and still use
+//! `outbound_tx`.
 
 use std::sync::Arc;
 
@@ -27,6 +35,7 @@ pub(super) async fn dispatch_session_request<Snk>(
     sink: &mut Snk,
     session_manager: &Arc<SessionManager>,
     outbound_tx: &mpsc::UnboundedSender<Message>,
+    priority_tx: &mpsc::UnboundedSender<Message>,
     id: String,
     method: String,
     params: Option<serde_json::Value>,
@@ -40,8 +49,10 @@ where
             Ok(p) => spawn_prompt_dispatch(session_manager, outbound_tx, id, p),
             Err(e) => send_invalid_params(sink, &id, &e).await,
         },
+        // Issue #191: dispatched onto `priority_tx`, not `outbound_tx` — see
+        // the module doc.
         "session/cancel" => match holler_proto::typed_params::<Cancel>(&env) {
-            Ok(p) => spawn_cancel_dispatch(session_manager, outbound_tx, id, p),
+            Ok(p) => spawn_cancel_dispatch(session_manager, priority_tx, id, p),
             Err(e) => send_invalid_params(sink, &id, &e).await,
         },
         // The caller's own guard (`handle_text`) only reaches here for one

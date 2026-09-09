@@ -45,6 +45,7 @@ say | io/alpha "reply with the word ALPHA"
 say | alpha "hi" --timeout 30s --json
 say | io/alpha "hi" --queue
 interrupt | io/alpha
+interrupt | io/alpha "stop; do X instead"
 answer | io/alpha yes
 answer | io/alpha 0
 answer | io/alpha red,m --json
