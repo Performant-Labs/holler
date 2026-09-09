@@ -6,6 +6,29 @@
 //! `circuit/join` (story #176, [`crate::join`]) is the one-shot bootstrap and
 //! stays completely separate: it never leads into talk on the same socket.
 //! This module is what a **returning** body's socket runs through instead.
+//!
+//! Issue #230 folded the session loop's connection-scoped mutable state (the
+//! sink/stream, client id, registry, roster, and the four pending-request
+//! trackers) into [`SessionConnection`], turning `session_loop`/`handle_inbound`
+//! into methods on it instead of functions threading 9 loose positional
+//! parameters (which is what forced their
+//! clippy "too many arguments" `allow` escapes) — a pure refactor, no
+//! behavior change on its own.
+//!
+//! Issue #243 is a real gap this module closes: unlike the body's own
+//! `live_loop` (`holler-body`'s `connection.rs`), which has always raced a
+//! `last_frame_at`/heartbeat-interval liveness timeout in its main
+//! `tokio::select!`, this hub-side loop used to have **none** — it only
+//! reacted to `stream.next()` or `cmd_rx.recv()`. A body that goes
+//! unreachable without a clean TCP close (sleep/suspend, a silent network
+//! partition) used to park this task indefinitely, and any `say` routed to
+//! that session would hang forever with no `connection_lost` error.
+//! [`SessionConnection`] now tracks its own `last_frame_at` (refreshed on
+//! every inbound WS frame, not just a decoded one — the same discipline as
+//! the body side) and races it against [`liveness_timeout`] in the same
+//! `select!` that already watches the socket and the command channel; on
+//! expiry the connection is torn down exactly like every other teardown path
+//! here (`fail_pending_says` + clearing the roster row immediately).
 
 use futures_util::{Sink, SinkExt, Stream, StreamExt};
 use holler_proto::{
@@ -39,6 +62,32 @@ struct PendingSay {
 /// How long the hub waits for the body's half of the hello exchange, and for
 /// the body's answer to the hub's own hello, before giving up on the socket.
 const HELLO_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// The heartbeat/presence interval a body is expected to keep to (mirrors
+/// `holler-body`'s own `heartbeat_interval()`): 15s, or
+/// `HOLLER_HEARTBEAT_INTERVAL_MS` for tests that cannot wait 15s for real.
+fn heartbeat_interval() -> std::time::Duration {
+    std::env::var("HOLLER_HEARTBEAT_INTERVAL_MS")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .map(std::time::Duration::from_millis)
+        .unwrap_or(std::time::Duration::from_secs(15))
+}
+
+/// How long with no frame of any kind from the body before this connection is
+/// treated as dead (issue #243) — 3 × the heartbeat interval by default,
+/// matching the body's own `live_loop` liveness bound and the roster's
+/// `reconnect_secs` default (45s), so a body that has actually gone silent
+/// (not just mid-reconnect) is torn down at the same horizon the roster
+/// display already assumes. Independently overridable via
+/// `HOLLER_HUB_LIVENESS_TIMEOUT_MS` (tests cannot wait 45s for real).
+fn liveness_timeout() -> std::time::Duration {
+    std::env::var("HOLLER_HUB_LIVENESS_TIMEOUT_MS")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .map(std::time::Duration::from_millis)
+        .unwrap_or(heartbeat_interval() * 3)
+}
 
 fn log(severity: Severity, method: &'static str, fields: Vec<(&'static str, String)>) {
     holler_proto::log::emit(&Event {
@@ -126,7 +175,9 @@ pub async fn handle_authenticated<Snk, St>(
     // `harnesses_confirmed` stays the trustworthy subset of `harnesses_known`.
     let pending_confirms = send_confirm_probes(sink, &body_harnesses).await;
 
-    session_loop(sink, stream, &mut cmd_rx, &client_id, registry, roster, pending_confirms).await;
+    let mut conn =
+        SessionConnection::new(sink, stream, &mut cmd_rx, &client_id, registry, roster, pending_confirms).await;
+    conn.run().await;
     registry.remove(&client_id).await;
     log(Severity::Warn, "conn_dropped", vec![("client_id", client_id)]);
 }
@@ -263,114 +314,214 @@ fn hub_hello_doc(_body_hostname: &str) -> Hello {
 type PendingPing = Option<(String, tokio::sync::oneshot::Sender<PingAck>)>;
 type PendingQuery = Option<(String, tokio::sync::oneshot::Sender<Result<serde_json::Value, WireError>>)>;
 
-/// The live session loop: answer presence heartbeats and `circuit/ping`
-/// requests from the body, and service [`LiveCommand`]s from the registry
-/// (`hub token ping`'s probe, issue #185's `hub query TARGET …` forward, and
-/// issue #190's `say`). Returns when the socket closes, errors, or a decode
-/// failure ends the connection.
-async fn session_loop<Snk, St>(
-    sink: &mut Snk,
-    stream: &mut St,
-    cmd_rx: &mut tokio::sync::mpsc::UnboundedReceiver<LiveCommand>,
-    client_id: &str,
-    registry: &Registry,
-    roster: &std::sync::Arc<crate::roster::Roster>,
-    mut pending_confirms: std::collections::HashMap<String, String>,
-) where
+/// Issue #230: the session loop's connection-scoped mutable state, bundled
+/// into one owned struct instead of threaded as 9 loose positional
+/// parameters across `session_loop`/`handle_inbound` (which is what forced
+/// their clippy "too many arguments" `allow` escapes). `sink`/`stream` are
+/// the socket halves; `client_id`/`registry`/`roster` are this connection's
+/// read-mostly identity and shared state; `pending_ping`/`pending_query`/
+/// `pending_confirms`/`pending_says` are the four independent
+/// pending-request trackers `handle_inbound` resolves against; `roster_token`
+/// is captured once (issue #186: the roster row is keyed by *token*, and
+/// `handle_authenticated` removes this client from the registry the moment
+/// [`Self::run`] returns, so the token must be captured while the registry
+/// entry is still live) so teardown can clear the roster row unconditionally.
+/// `last_frame_at` (issue #243) is this connection's own liveness clock,
+/// refreshed on every inbound WS frame — mirroring the body-side
+/// `LiveConnection`'s own field — and raced against [`liveness_timeout`] in
+/// [`Self::run`]'s `select!` so a body that goes silent without closing the
+/// socket is torn down instead of parking this task forever.
+struct SessionConnection<'a, Snk, St> {
+    sink: &'a mut Snk,
+    stream: &'a mut St,
+    cmd_rx: &'a mut tokio::sync::mpsc::UnboundedReceiver<LiveCommand>,
+    client_id: &'a str,
+    registry: &'a Registry,
+    roster: &'a std::sync::Arc<crate::roster::Roster>,
+    roster_token: Option<String>,
+    pending_ping: PendingPing,
+    pending_query: PendingQuery,
+    pending_confirms: std::collections::HashMap<String, String>,
+    pending_says: std::collections::HashMap<String, PendingSay>,
+    last_frame_at: tokio::time::Instant,
+}
+
+impl<'a, Snk, St> SessionConnection<'a, Snk, St>
+where
     Snk: Sink<Message, Error = WsError> + Unpin,
     St: Stream<Item = Result<Message, WsError>> + Unpin,
 {
-    // At most one outstanding hub-initiated ping/query at a time: this
-    // connection serves exactly one `hub token ping` or `hub query` caller
-    // per round trip. `pending_confirms` (issue #185) may hold several at
-    // once (one per harness the body advertised) — each is independent, so
-    // it stays a map rather than a single slot. `say`s, by contrast, are
-    // genuinely concurrent on one connection — see [`PendingSay`]'s own doc
-    // — so they also key a map, by `request_id`.
-    let mut pending_ping: PendingPing = None;
-    let mut pending_query: PendingQuery = None;
-    let mut pending_says: std::collections::HashMap<String, PendingSay> = std::collections::HashMap::new();
-
-    // Issue #186: the roster row is keyed by *token*, and `handle_authenticated`
-    // removes this client from the registry the moment `session_loop` returns.
-    // So capture the token now, while the registry entry is still live, and use
-    // it to `clear` the roster row on teardown (an explicit close is `gone`
-    // immediately, not "reconnecting").
-    let roster_token = registry.token_id_for_client(client_id).await;
-    let clear_on_drop = move || {
-        if let Some(token) = &roster_token {
-            roster.clear(token);
+    async fn new(
+        sink: &'a mut Snk,
+        stream: &'a mut St,
+        cmd_rx: &'a mut tokio::sync::mpsc::UnboundedReceiver<LiveCommand>,
+        client_id: &'a str,
+        registry: &'a Registry,
+        roster: &'a std::sync::Arc<crate::roster::Roster>,
+        pending_confirms: std::collections::HashMap<String, String>,
+    ) -> Self {
+        let roster_token = registry.token_id_for_client(client_id).await;
+        Self {
+            sink,
+            stream,
+            cmd_rx,
+            client_id,
+            registry,
+            roster,
+            roster_token,
+            pending_ping: None,
+            pending_query: None,
+            pending_confirms,
+            pending_says: std::collections::HashMap::new(),
+            last_frame_at: tokio::time::Instant::now(),
         }
-    };
+    }
 
-    loop {
-        tokio::select! {
-            frame = stream.next() => {
-                match frame {
-                    Some(Ok(Message::Text(t))) => {
-                        if handle_inbound(
-                            sink,
-                            &t,
-                            client_id,
-                            registry,
-                            roster,
-                            &mut pending_ping,
-                            &mut pending_query,
-                            &mut pending_confirms,
-                            &mut pending_says,
-                        ).await.is_err() {
-                            fail_pending_says(&mut pending_says);
-                            clear_on_drop();
-                            return;
-                        }
-                    }
-                    Some(Ok(Message::Ping(_))) | Some(Ok(Message::Pong(_))) | Some(Ok(Message::Frame(_))) => {}
-                    Some(Ok(Message::Binary(_))) | Some(Ok(Message::Close(_))) | Some(Err(_)) | None => {
-                        fail_pending_says(&mut pending_says);
-                        clear_on_drop();
-                        return;
-                    }
-                }
-            }
-            cmd = cmd_rx.recv() => {
-                match cmd {
-                    Some(LiveCommand::Ping { reply: reply_tx }) => {
-                        match send_ping_probe(sink).await {
-                            Ok(cid) => pending_ping = Some((cid, reply_tx)),
-                            Err(()) => return,
-                        }
-                    }
-                    Some(LiveCommand::Query { method, params, reply: reply_tx }) => {
-                        match send_query_forward(sink, &method, params).await {
-                            Ok(cid) => pending_query = Some((cid, reply_tx)),
-                            Err(()) => return,
-                        }
-                    }
-                    Some(LiveCommand::Say { request_id, session, message, queue, reply }) => {
-                        match send_prompt(sink, &request_id, &session, message, queue).await {
-                            Ok(()) => {
-                                pending_says.insert(request_id, PendingSay { reply, updates: Vec::new() });
-                            }
-                            Err(()) => {
-                                let _ = reply.send(SayReply::ConnectionLost);
+    /// Issue #186: the roster row is keyed by *token*, so an explicit close
+    /// is `gone` immediately, not "reconnecting" — used on every teardown
+    /// path below, including the issue #243 liveness timeout.
+    fn clear_from_roster(&self) {
+        if let Some(token) = &self.roster_token {
+            self.roster.clear(token);
+        }
+    }
+
+    /// The live session loop: answer presence heartbeats and `circuit/ping`
+    /// requests from the body, service [`LiveCommand`]s from the registry
+    /// (`hub token ping`'s probe, issue #185's `hub query TARGET …` forward,
+    /// and issue #190's `say`), and (issue #243) tear the connection down if
+    /// no frame of any kind arrives from the body within [`liveness_timeout`]
+    /// — the same liveness discipline `holler-body`'s own `live_loop` has
+    /// always applied in the other direction. Returns when the socket
+    /// closes, errors, decodes fail, or the liveness timeout fires.
+    async fn run(&mut self) {
+        loop {
+            tokio::select! {
+                frame = self.stream.next() => {
+                    match frame {
+                        Some(Ok(Message::Text(t))) => {
+                            self.last_frame_at = tokio::time::Instant::now();
+                            if self.handle_inbound(&t).await.is_err() {
+                                self.fail_pending_says();
+                                self.clear_from_roster();
                                 return;
                             }
                         }
+                        Some(Ok(Message::Ping(_))) | Some(Ok(Message::Pong(_))) | Some(Ok(Message::Frame(_))) => {
+                            self.last_frame_at = tokio::time::Instant::now();
+                        }
+                        Some(Ok(Message::Binary(_))) | Some(Ok(Message::Close(_))) | Some(Err(_)) | None => {
+                            self.fail_pending_says();
+                            self.clear_from_roster();
+                            return;
+                        }
                     }
-                    None => return, // the registry entry was dropped/replaced.
+                }
+                _ = tokio::time::sleep_until(self.last_frame_at + liveness_timeout()) => {
+                    log(
+                        Severity::Warn,
+                        "conn_liveness_expired",
+                        vec![("client_id", self.client_id.to_string())],
+                    );
+                    self.fail_pending_says();
+                    self.clear_from_roster();
+                    return;
+                }
+                cmd = self.cmd_rx.recv() => {
+                    match cmd {
+                        Some(LiveCommand::Ping { reply: reply_tx }) => {
+                            match send_ping_probe(self.sink).await {
+                                Ok(cid) => self.pending_ping = Some((cid, reply_tx)),
+                                Err(()) => return,
+                            }
+                        }
+                        Some(LiveCommand::Query { method, params, reply: reply_tx }) => {
+                            match send_query_forward(self.sink, &method, params).await {
+                                Ok(cid) => self.pending_query = Some((cid, reply_tx)),
+                                Err(()) => return,
+                            }
+                        }
+                        Some(LiveCommand::Say { request_id, session, message, queue, reply }) => {
+                            match send_prompt(self.sink, &request_id, &session, message, queue).await {
+                                Ok(()) => {
+                                    self.pending_says.insert(request_id, PendingSay { reply, updates: Vec::new() });
+                                }
+                                Err(()) => {
+                                    let _ = reply.send(SayReply::ConnectionLost);
+                                    return;
+                                }
+                            }
+                        }
+                        None => return, // the registry entry was dropped/replaced.
+                    }
                 }
             }
         }
     }
-}
 
-/// The socket ended while one or more `say`s were still in flight: report
-/// every one of them as `connection_lost`, never a silent drop (the spec's
-/// own wording: "body io disconnected mid-turn; ask again" — never "hub
-/// unreachable").
-fn fail_pending_says(pending_says: &mut std::collections::HashMap<String, PendingSay>) {
-    for (_, p) in pending_says.drain() {
-        let _ = p.reply.send(SayReply::ConnectionLost);
+    /// The socket ended (or the liveness timeout fired) while one or more
+    /// `say`s were still in flight: report every one of them as
+    /// `connection_lost`, never a silent drop (the spec's own wording: "body
+    /// io disconnected mid-turn; ask again" — never "hub unreachable").
+    fn fail_pending_says(&mut self) {
+        for (_, p) in self.pending_says.drain() {
+            let _ = p.reply.send(SayReply::ConnectionLost);
+        }
+    }
+
+    /// Handle one inbound text frame in the live session loop. `Err` means
+    /// the socket should be torn down (a decode failure or a send failure).
+    async fn handle_inbound(&mut self, text: &str) -> Result<(), ()> {
+        let env = match holler_proto::decode(text) {
+            Ok(e) => e,
+            Err(e) => {
+                send_error(self.sink, None, e.code(), &e.to_string()).await;
+                return Err(());
+            }
+        };
+        // Every inbound frame on an authenticated socket is proof the body is
+        // still talking to us (issue #186), so refresh the roster row's
+        // `last_heard_ms` on whatever the frame is. The roster is keyed by
+        // token, not client id — resolve the token through the registry (a
+        // body that has already been unregistered mid-frame just has no
+        // token to attribute, and the loop's teardown `clear_from_roster`
+        // then finalises it). `None` is a defensive no-op: the frame is still
+        // serviced normally below.
+        if let Some(token_id) = self.registry.token_id_for_client(self.client_id).await {
+            self.roster.touch(&token_id, env.method().unwrap_or(""));
+        }
+        match &env {
+            Envelope::Notification { method, params } if method == "session/presence" => {
+                handle_presence_notification(self.client_id, params.clone(), self.registry, self.roster).await;
+                Ok(())
+            }
+            Envelope::Notification { method, params } if method == "session/update" => {
+                handle_update_notification(params.clone(), &mut self.pending_says);
+                Ok(())
+            }
+            Envelope::Request { id, method, .. } if method == "circuit/ping" => {
+                let ack = PingAck { hostname: self.client_id.to_string(), ts: now_millis() };
+                reply(self.sink, Some(id), serde_json::to_value(ack).unwrap_or_default()).await
+            }
+            Envelope::Response { id, result } if self.pending_confirms.contains_key(id) => {
+                handle_confirm_response(id, result.clone(), self.client_id, &mut self.pending_confirms, self.registry)
+                    .await;
+                Ok(())
+            }
+            Envelope::Response { id, result } => {
+                handle_response(id, result.clone(), &mut self.pending_ping, &mut self.pending_query, &mut self.pending_says);
+                Ok(())
+            }
+            Envelope::Error { id, error } => {
+                handle_error_response(id.as_deref(), error, &mut self.pending_query, &mut self.pending_says);
+                Ok(())
+            }
+            Envelope::Request { id, .. } => {
+                send_error(self.sink, Some(id), Code::MethodNotFound, "unknown method").await;
+                Ok(())
+            }
+            Envelope::Notification { .. } => Ok(()),
+        }
     }
 }
 
@@ -422,79 +573,12 @@ where
     Ok(cid.as_str().to_string())
 }
 
-/// Handle one inbound text frame in the live session loop. `Err` means the
-/// socket should be torn down (a decode failure or a send failure).
-#[allow(clippy::too_many_arguments)] // #190/#186: four independent pending-request trackers plus the roster, each genuinely distinct
-async fn handle_inbound<Snk>(
-    sink: &mut Snk,
-    text: &str,
-    client_id: &str,
-    registry: &Registry,
-    roster: &std::sync::Arc<crate::roster::Roster>,
-    pending_ping: &mut PendingPing,
-    pending_query: &mut PendingQuery,
-    pending_confirms: &mut std::collections::HashMap<String, String>,
-    pending_says: &mut std::collections::HashMap<String, PendingSay>,
-) -> Result<(), ()>
-where
-    Snk: Sink<Message, Error = WsError> + Unpin,
-{
-    let env = match holler_proto::decode(text) {
-        Ok(e) => e,
-        Err(e) => {
-            send_error(sink, None, e.code(), &e.to_string()).await;
-            return Err(());
-        }
-    };
-    // Every inbound frame on an authenticated socket is proof the body is
-    // still talking to us (issue #186), so refresh the roster row's
-    // `last_heard_ms` on whatever the frame is. The roster is keyed by token,
-    // not client id — resolve the token through the registry (a body that has
-    // already been unregistered mid-frame just has no token to attribute, and
-    // the loop's teardown `roster.clear` then finalises it). `None` is a
-    // defensive no-op: the frame is still serviced normally below.
-    if let Some(token_id) = registry.token_id_for_client(client_id).await {
-        roster.touch(&token_id, env.method().unwrap_or(""));
-    }
-    match &env {
-        Envelope::Notification { method, params } if method == "session/presence" => {
-            handle_presence_notification(client_id, params.clone(), registry, roster).await;
-            Ok(())
-        }
-        Envelope::Notification { method, params } if method == "session/update" => {
-            handle_update_notification(params.clone(), pending_says);
-            Ok(())
-        }
-        Envelope::Request { id, method, .. } if method == "circuit/ping" => {
-            let ack = PingAck { hostname: client_id.to_string(), ts: now_millis() };
-            reply(sink, Some(id), serde_json::to_value(ack).unwrap_or_default()).await
-        }
-        Envelope::Response { id, result } if pending_confirms.contains_key(id) => {
-            handle_confirm_response(id, result.clone(), client_id, pending_confirms, registry).await;
-            Ok(())
-        }
-        Envelope::Response { id, result } => {
-            handle_response(id, result.clone(), pending_ping, pending_query, pending_says);
-            Ok(())
-        }
-        Envelope::Error { id, error } => {
-            handle_error_response(id.as_deref(), error, pending_query, pending_says);
-            Ok(())
-        }
-        Envelope::Request { id, .. } => {
-            send_error(sink, Some(id), Code::MethodNotFound, "unknown method").await;
-            Ok(())
-        }
-        Envelope::Notification { .. } => Ok(()),
-    }
-}
-
 /// A `session/presence` notification: record the body's current session
 /// count (`hub status`'s `sessions`, issue #185) and cache its live session
 /// state (issue #190's roster stand-in — see the `live` module doc) so
 /// `say`'s busy check and name resolution have something real to read. Split
-/// out of [`handle_inbound`] to keep that dispatch's cognitive complexity
-/// under the workspace threshold.
+/// out of [`SessionConnection::handle_inbound`] to keep that dispatch's
+/// cognitive complexity under the workspace threshold.
 async fn handle_presence_notification(
     client_id: &str,
     params: Option<serde_json::Value>,
@@ -520,7 +604,7 @@ async fn handle_presence_notification(
 
 /// A `session/update` notification: append it to the matching in-flight
 /// `say`'s own record (by `prompt_id`), if any is still pending. Split out
-/// of [`handle_inbound`] for the same reason as
+/// of [`SessionConnection::handle_inbound`] for the same reason as
 /// [`handle_presence_notification`].
 fn handle_update_notification(
     params: Option<serde_json::Value>,
@@ -555,8 +639,8 @@ async fn handle_confirm_response(
 /// Route a plain `Response` to whichever of `pending_says`/`pending_ping`/
 /// `pending_query` is waiting on this `id` (at most one is, by construction —
 /// `pending_says` keys by `id` directly; the other two are each a single
-/// outstanding slot). Split out of [`handle_inbound`] for the same reason as
-/// [`handle_presence_notification`].
+/// outstanding slot). Split out of [`SessionConnection::handle_inbound`] for
+/// the same reason as [`handle_presence_notification`].
 fn handle_response(
     id: &str,
     result: Option<serde_json::Value>,
