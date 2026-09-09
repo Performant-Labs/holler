@@ -55,6 +55,23 @@ fn not_implemented(story: &str) -> ! {
     std::process::exit(1);
 }
 
+/// Print a leaf's own `message` (stdout on success, stderr on a refusal —
+/// `println!`, matching `say`/`interrupt`'s own convention) and exit with
+/// `exit_code`. Shared by `say`/`interrupt` in `main` purely to keep that
+/// function's own cognitive complexity under the workspace threshold —
+/// `roster`'s own call site keeps its `print!` (no added newline; its table
+/// output already ends with one) rather than folding in here.
+fn print_and_exit(message: &str, to_stderr: bool, exit_code: i32) -> ! {
+    if !message.is_empty() {
+        if to_stderr {
+            eprintln!("error: {message}");
+        } else {
+            println!("{message}");
+        }
+    }
+    std::process::exit(exit_code);
+}
+
 fn main() {
     // Install the rustls crypto provider before any I/O: a `wss://` (TLS)
     // WebSocket needs a process-global provider set up ahead of the first
@@ -180,25 +197,17 @@ fn main() {
     }
     if let Command::Say(say) = &cli.command {
         let result = holler_cli::say_cmd::run(say, cli.json);
-        if !result.message.is_empty() {
-            if result.to_stderr {
-                eprintln!("error: {}", result.message);
-            } else {
-                println!("{}", result.message);
-            }
-        }
-        std::process::exit(result.exit_code);
+        print_and_exit(&result.message, result.to_stderr, result.exit_code);
+    }
+    if let Command::Interrupt(interrupt) = &cli.command {
+        let result = holler_cli::interrupt_cmd::run(interrupt, cli.json);
+        print_and_exit(&result.message, result.to_stderr, result.exit_code);
     }
 
-    let story = match &cli.command {
-        // the implemented leaves were handled above and returned; these arms
-        // are defensive — every path above exits.
-        Command::Hub(_) => not_implemented("Hub"),
-        Command::Roster(_) => not_implemented("Roster"),
-        Command::Say(_) => not_implemented("Say"),
-        Command::Interrupt(_) => "Interrupt",
-        Command::Body(_) => not_implemented("Body"),
-    };
-
-    not_implemented(story);
+    // Every `Command` variant is handled by one of the arms above (each
+    // exits before falling through), so this is never actually reached —
+    // not a real "unimplemented" leaf anymore (the workspace skeleton's
+    // original catch-all, story #127, is fully retired). `main` returning
+    // `()` here (rather than an `unreachable!()` the workspace lints deny)
+    // is exactly as sound: nothing downstream reads a value out of it.
 }

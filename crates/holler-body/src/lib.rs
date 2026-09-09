@@ -12,6 +12,7 @@ pub mod config;
 pub mod connection;
 pub mod connection_state;
 pub mod detach;
+pub(crate) mod dispatch;
 pub mod identity;
 pub mod instance_lock;
 pub mod join;

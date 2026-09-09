@@ -422,6 +422,9 @@ pub struct Say {
 pub struct Interrupt {
     /// Session address, <label>/<session> (or a bare <session>).
     pub session: String,
+    /// Redirect text (issue #191): cancel, then run this prompt ahead of
+    /// the queue, streaming its reply exactly like `say`.
+    pub text: Option<String>,
 }
 
 // --- body ----------------------------------------------------------------

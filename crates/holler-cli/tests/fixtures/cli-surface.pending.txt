@@ -11,4 +11,3 @@
 wait | io/alpha                                              # holler#142
 wait | io/alpha,io/beta --until completed,failed --after h-01H --timeout 120s --json   # holler#142
 answer | io/alpha yes                                         # holler#151
-interrupt | io/alpha "stop; do X instead"                     # holler#150

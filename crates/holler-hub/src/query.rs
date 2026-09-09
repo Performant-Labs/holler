@@ -172,7 +172,7 @@ mod tests {
     #[tokio::test]
     async fn confirmed_harness_reflects_real_probe() {
         let registry = Registry::new();
-        let mut rx = registry.insert("cli_1", "kiwi", "tok_1").await;
+        let (mut rx, mut cancel_rx) = registry.insert("cli_1", "kiwi", "tok_1").await;
         registry.set_harnesses_advertised("cli_1", vec!["opencode".to_string()]).await;
         // Not yet confirmed: advertising alone is not proof.
         let s = local_support("opencode", &registry).await.expect("known id");
@@ -183,6 +183,7 @@ mod tests {
         assert!(s.ok, "a confirmed harness must be ok:true: {s:?}");
 
         rx.close();
+        cancel_rx.close();
     }
 
     #[test]

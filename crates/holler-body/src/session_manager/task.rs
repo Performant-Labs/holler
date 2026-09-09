@@ -132,8 +132,8 @@ pub(super) async fn run(mut mailbox: mpsc::Receiver<SessionCommand>, mut inner: 
                     Some(SessionCommand::Answer { choice, reply_tx }) => {
                         handle_answer(&mut inner, choice, reply_tx).await;
                     }
-                    Some(SessionCommand::Replace { text, reply_tx }) => {
-                        handle_replace(&mut inner, text, reply_tx).await;
+                    Some(SessionCommand::Replace { text, reply_tx, updates }) => {
+                        handle_replace(&mut inner, text, reply_tx, updates).await;
                     }
                 }
             }
@@ -273,7 +273,12 @@ async fn handle_answer(inner: &mut Inner, choice: String, reply_tx: oneshot::Sen
     }
 }
 
-async fn handle_replace(inner: &mut Inner, text: String, reply_tx: oneshot::Sender<PromptOutcome>) {
+async fn handle_replace(
+    inner: &mut Inner,
+    text: String,
+    reply_tx: oneshot::Sender<PromptOutcome>,
+    updates: Option<mpsc::UnboundedSender<String>>,
+) {
     match cancel_current(inner).await {
         Some(Err(e)) => {
             let _ = reply_tx.send(PromptOutcome::Error(e));
@@ -293,9 +298,9 @@ async fn handle_replace(inner: &mut Inner, text: String, reply_tx: oneshot::Send
     }
     inner.replace_counter += 1;
     let id = format!("replace-{}", inner.replace_counter);
-    // `Replace` (interrupt, #191) carries no updates channel of its own yet —
-    // out of this story's scope (Talk is `say`, not `interrupt`).
-    start_turn(inner, id, text, reply_tx, None).await;
+    // `Replace` (`interrupt SESSION TEXT`, issue #191) streams its reply
+    // exactly like `say` — `updates` is the caller's own coalescer feed.
+    start_turn(inner, id, text, reply_tx, updates).await;
 }
 
 /// Cancel the in-flight turn via the driver, if a driver exists at all.

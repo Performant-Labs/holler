@@ -36,7 +36,7 @@ use std::time::{Duration, Instant};
 
 use holler_proto::{Content, Message, Part, Role, SessionState};
 
-use crate::live::{Registry, ResolveOutcome, SayReply};
+use crate::live::{LiveHandle, Registry, ResolveOutcome, SayReply};
 use crate::state::{talklog_dir, talklog_path, HubState};
 
 /// Why [`say`] could not produce a reply.
@@ -62,6 +62,30 @@ pub enum SayError {
     Timeout,
     /// The turn was cancelled before it completed.
     Cancelled,
+}
+
+impl SayError {
+    /// A one-line, human-readable reason (issue #191's own need: `interrupt
+    /// SESSION TEXT`'s redirect phase shares this error shape but has no
+    /// `say`-specific wording of its own to fall back on for the variants
+    /// that can't actually recur once the cancel step already confirmed the
+    /// session idle — `Busy`/`InputRequired`/`Ambiguous` are still covered
+    /// so this stays total).
+    pub fn message(&self) -> String {
+        match self {
+            Self::UnknownSession => "unknown session".to_string(),
+            Self::NotConnected => "not connected".to_string(),
+            Self::Ambiguous(candidates) => format!("ambiguous session: candidates are {}", candidates.join(", ")),
+            Self::Busy { state, .. } => format!("session_busy: {state}"),
+            Self::InputRequired { question } => {
+                question.clone().unwrap_or_else(|| "waiting for an answer".to_string())
+            }
+            Self::Refused(err) => err.message.clone(),
+            Self::ConnectionLost => "io disconnected mid-turn; ask again".to_string(),
+            Self::Timeout => "no reply within the timeout".to_string(),
+            Self::Cancelled => "prompt was interrupted before it completed".to_string(),
+        }
+    }
 }
 
 /// A successful `say` outcome.
@@ -117,6 +141,66 @@ pub async fn say(
         _ => {}
     }
 
+    let kind = if queue { TurnKind::Queue } else { TurnKind::Plain };
+    send_turn(registry, state, &handle, &ad, text, kind, timeout).await
+}
+
+/// `interrupt SESSION TEXT`'s own redirect turn (issue #191): unlike [`say`],
+/// no busy check runs here — the caller (`crate::interrupt::interrupt`) has
+/// already confirmed the matching `session/cancel`'s `{applied:true}`, so the
+/// session is expected to be idle by the time this sends `session/prompt
+/// {replace:true}`. `handle`/`ad` are the same live-registry resolution the
+/// cancel step already performed (resolving a second time would risk a
+/// benign-but-pointless re-race against the registry's own presence cache).
+pub async fn send_replace_turn(
+    registry: &Registry,
+    state: &HubState,
+    handle: &LiveHandle,
+    ad: &holler_proto::SessionAd,
+    text: &str,
+    timeout: Duration,
+) -> Result<SayOutcome, SayError> {
+    send_turn(registry, state, handle, ad, text, TurnKind::Replace, timeout).await
+}
+
+/// `queue`/`replace` collapsed into one enum purely to keep [`send_turn`]
+/// under clippy's too-many-arguments gate — the two booleans were never
+/// both meaningful at once (a redirect is never `--queue`d).
+#[derive(Clone, Copy)]
+enum TurnKind {
+    /// A plain `say` (no `--queue`, no redirect): the busy check already ran
+    /// in [`say`] before this turn is sent.
+    Plain,
+    /// `say --queue`: append behind the session's current turn instead of
+    /// refusing with `session_busy`.
+    Queue,
+    /// `interrupt SESSION TEXT`'s own redirect (`Prompt.replace`).
+    Replace,
+}
+
+impl TurnKind {
+    fn queue(self) -> bool {
+        matches!(self, Self::Queue)
+    }
+    fn replace(self) -> bool {
+        matches!(self, Self::Replace)
+    }
+}
+
+/// The shared tail of [`say`]/[`send_replace_turn`]: mint a request id, send
+/// `session/prompt` (a plain one, a `--queue`d one, or — issue #191 — a
+/// `replace:true` redirect), collect the reply, append the TalkLog, and hand
+/// back a [`SayOutcome`]. Split out once #191 needed a second caller that
+/// skips the busy check but shares everything after it.
+async fn send_turn(
+    registry: &Registry,
+    state: &HubState,
+    handle: &LiveHandle,
+    ad: &holler_proto::SessionAd,
+    text: &str,
+    kind: TurnKind,
+    timeout: Duration,
+) -> Result<SayOutcome, SayError> {
     let request_id = holler_proto::CorrelationId::mint_hub().as_str().to_string();
     let message = user_message(&request_id, text);
     let started = Instant::now();
@@ -127,7 +211,7 @@ pub async fn say(
     });
 
     let reply = handle
-        .say(request_id.clone(), ad.name.clone(), Box::new(message), queue, timeout)
+        .say(request_id.clone(), ad.name.clone(), Box::new(message), kind.queue(), kind.replace(), timeout)
         .await;
 
     let elapsed_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
@@ -176,7 +260,7 @@ pub async fn say(
                 stop_reason: stop_reason.clone(),
                 ended_at: holler_proto::log::timestamp(),
             });
-            registry.replace_session(&handle, *updated_ad).await;
+            registry.replace_session(handle, updated_ad).await;
             Ok(SayOutcome {
                 session: format!("{}/{}", handle.hostname, ad.name),
                 message: *message,

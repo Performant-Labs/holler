@@ -74,7 +74,19 @@ pub async fn handle_prompt(
         outbound.clone(),
     ));
 
-    let outcome = session_manager.prompt_with_updates(&name, id.clone(), text, params.queue, Some(chunk_tx)).await;
+    // `replace` (issue #191, `interrupt SESSION TEXT`): cancel whatever is
+    // in flight and run this prompt ahead of the queue instead of the normal
+    // busy-check dispatch — `SessionManager::replace_with_updates` is exactly
+    // `SessionCommand::Replace`'s own entry point. The hub only ever sets
+    // `replace` after it has itself confirmed the cancel (`control/interrupt`
+    // waits for `{applied:true}` before sending this request), so by the time
+    // this arrives the session is expected to already be idle — `replace`
+    // still cancels defensively rather than assuming that.
+    let outcome = if params.replace {
+        session_manager.replace_with_updates(&name, text, Some(chunk_tx)).await
+    } else {
+        session_manager.prompt_with_updates(&name, id.clone(), text, params.queue, Some(chunk_tx)).await
+    };
     // The updates task ends on its own once the session task drops its
     // `current_updates` sender (turn-end, before the reply fires — see
     // `session_manager::task::finish_turn_no_dispatch`), so by the time

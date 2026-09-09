@@ -209,7 +209,7 @@ fn docs_instances() -> Vec<(&'static str, Value)> {
                 }),
             }],
         }).unwrap()),
-        ("Prompt", serde_json::to_value(Prompt { session: "io/alpha".into(), message: user_message(), meta: meta(), queue: false }).unwrap()),
+        ("Prompt", serde_json::to_value(Prompt { session: "io/alpha".into(), message: user_message(), meta: meta(), queue: false, replace: false }).unwrap()),
         ("PromptResult", serde_json::to_value(PromptResult { stop_reason: "end_turn".into(), state: "completed".into(), message: agent_message() }).unwrap()),
         ("Update", serde_json::to_value(Update { session: "io/alpha".into(), prompt_id: id(), seq: 1, parts: vec![Part::text_part("AL")] }).unwrap()),
         ("Cancel", serde_json::to_value(Cancel { session: "io/alpha".into() }).unwrap()),

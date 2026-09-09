@@ -118,6 +118,24 @@ pub fn say(session: &str, text: &str, queue: bool, timeout: std::time::Duration)
     exchange_with_timeout("b-say", "control/say", Some(params), timeout + std::time::Duration::from_secs(5))
 }
 
+/// `interrupt SESSION [TEXT]` (issue #191): ask the live hub to cancel
+/// `session`'s in-flight turn and, when `text` is given, run it as a
+/// redirect prompt right after. The client-side read timeout here is a
+/// generous fixed ceiling — the hub's own RTT-scaled ack wait
+/// (`interrupt::ack_timeout`) is computed hub-side from a measurement this
+/// client has no visibility into, so this is deliberately far larger than
+/// any ack timeout should ever need in practice, plus (when `text` is given)
+/// the redirect prompt's own 600s budget.
+pub fn interrupt(session: &str, text: Option<&str>) -> Result<serde_json::Value, ControlError> {
+    let params = serde_json::json!({ "session": session, "text": text });
+    let ceiling = if text.is_some() {
+        std::time::Duration::from_secs(60 + 600 + 5)
+    } else {
+        std::time::Duration::from_secs(60)
+    };
+    exchange_with_timeout("b-interrupt", "control/interrupt", Some(params), ceiling)
+}
+
 /// `holler roster [--all] [--prefix PREFIX]` (issue #186; `--prefix` added by
 /// issue #236, ADR 0005 §4): the live hub's roster, read straight from the
 /// hub's in-process [`crate::roster::Roster`]. Returns the reply envelope's
