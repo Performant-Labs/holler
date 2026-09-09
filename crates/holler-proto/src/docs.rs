@@ -414,15 +414,25 @@ pub struct SessionAd {
     /// The existing harness session being attached to (attach mode only).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub harness_session_id: Option<String>,
-    /// When the in-flight turn started (RFC 3339). Present only while
-    /// `state` is `working` (issue #150 — the busy-turn policy's `--queue`
-    /// hint and the roster's `stalled` derivation both read this).
+    /// When the in-flight turn started (RFC 3339). Present from the start of
+    /// a turn until it ends — i.e. through both `working` and any
+    /// `input-required` pause within it, not only while `state` is `working`
+    /// (issue #213: the timing stays meaningful across the pause too, so
+    /// clearing it on `input-required` would throw away information a
+    /// consumer might want). Absent while `idle`. The busy-turn policy's
+    /// `--queue` hint and the roster's `stalled` derivation read this (issue
+    /// #150).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub turn_started_at: Option<String>,
-    /// When the body last sent a `session/update` for the in-flight turn
-    /// (RFC 3339). Present only while `state` is `working`; a session
-    /// `working` with no update for `HOLLER_STALL_MS` displays as roster's
-    /// derived `stalled` state (issue #150).
+    /// When the body last saw real activity for the in-flight turn — a
+    /// `session/update` chunk *or* a `working`/`input-required` state
+    /// transition (RFC 3339; issue #210 closed the gap where only state
+    /// transitions bumped this, leaving an actively-streaming turn looking
+    /// stale). Present from the start of a turn until it ends, through any
+    /// `input-required` pause within it, matching `turn_started_at` above
+    /// (issue #213) — absent while `idle`. A session `working` with no
+    /// update for `HOLLER_STALL_MS` displays as roster's derived `stalled`
+    /// state (issue #150).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_update_at: Option<String>,
     /// The held permission(s)/elicitation(s) being asked. Present **only**

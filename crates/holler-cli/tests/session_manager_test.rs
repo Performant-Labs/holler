@@ -413,6 +413,108 @@ async fn driver_crash_isolated_and_restarts_on_next_prompt() {
     assert_result_ok(&recovered, "a2", "end_turn", SessionState::Completed);
 }
 
+/// Regression test for issue #210: a turn that streams several `Chunk`
+/// events with no intervening state transition must still keep
+/// `last_update_at` moving forward — the whole point of the staleness clock
+/// is to reflect real activity, and a `Chunk`-only stretch (the common case
+/// for a long streamed reply) is exactly that. `--slow` spaces chunks 200ms
+/// apart so the poll below is guaranteed to land strictly between two of
+/// them while `state` stays `working` the entire time.
+#[tokio::test]
+async fn chunk_only_activity_keeps_last_update_at_fresh() {
+    let manager = SessionManager::start(&registry_of(&[("alpha", &["--slow", "--chunks", "5"])]));
+    let alpha = sn("alpha");
+
+    let first = manager.prompt(&alpha, "a1", "hi", false);
+    tokio::pin!(first);
+    tokio::select! {
+        res = &mut first => panic!("finished early: {res:?}"),
+        () = wait_for_state(&manager, &alpha, SessionState::Working, Duration::from_secs(2)) => {}
+    }
+
+    let ad0 = find(&manager.presence_doc("h".to_string()), "alpha");
+    assert_eq!(ad0.state, SessionState::Working);
+    let last_update_0 = ad0.last_update_at.expect("last_update_at present while working");
+
+    // Sample repeatedly across more than one 200ms inter-chunk gap: as soon
+    // as `last_update_at` has moved past its initial value while `state` is
+    // still `working` (never touched by any transition since), issue #210
+    // is fixed. Poll rather than a single fixed sleep so this isn't
+    // timing-flaky against CI scheduling jitter.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
+    let mut moved = false;
+    while tokio::time::Instant::now() < deadline {
+        let ad = find(&manager.presence_doc("h".to_string()), "alpha");
+        assert_eq!(ad.state, SessionState::Working, "no state transition should occur mid-stream here");
+        if ad.last_update_at.as_deref() != Some(last_update_0.as_str()) {
+            moved = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(moved, "last_update_at never advanced during a Chunk-only streaming stretch (issue #210)");
+
+    // Clean up: cancel the still-running turn rather than waiting out all 5
+    // chunks.
+    let cancel = manager.cancel(&alpha).await;
+    assert_eq!(cancel, Ok(Ok(())));
+    let _ = first.await;
+}
+
+/// Issue #213: `turn_started_at`/`last_update_at` are documented (and, as of
+/// this fix, implemented) as present for the whole turn — including any
+/// `input-required` pause within it — not cleared the moment `state` leaves
+/// `working`. No consumer in this codebase yet treats "present" as
+/// synonymous with "state is working" (checked: no reader outside this
+/// crate's own presence plumbing exists), and the timing stays meaningful
+/// during the pause (an operator still cares how long the turn has been
+/// open), so this test pins "still present" as the chosen contract rather
+/// than "cleared".
+#[tokio::test]
+async fn timing_fields_survive_working_to_input_required_transition() {
+    let manager = SessionManager::start(&registry_of(&[("alpha", &["--ask-permission", "--chunks", "2"])]));
+    let alpha = sn("alpha");
+
+    let first = manager.prompt(&alpha, "a1", "hi", false);
+    tokio::pin!(first);
+    tokio::select! {
+        res = &mut first => panic!("finished early: {res:?}"),
+        () = wait_for_state(&manager, &alpha, SessionState::Working, Duration::from_secs(2)) => {}
+    }
+    let working_ad = find(&manager.presence_doc("h".to_string()), "alpha");
+    let turn_started_while_working =
+        working_ad.turn_started_at.clone().expect("turn_started_at present while working");
+
+    tokio::select! {
+        res = &mut first => panic!("finished early: {res:?}"),
+        () = wait_for_state(&manager, &alpha, SessionState::InputRequired, Duration::from_secs(2)) => {}
+    }
+
+    let paused_ad = find(&manager.presence_doc("h".to_string()), "alpha");
+    assert_eq!(paused_ad.state, SessionState::InputRequired);
+    assert_eq!(
+        paused_ad.turn_started_at.as_deref(),
+        Some(turn_started_while_working.as_str()),
+        "turn_started_at must survive the Working -> InputRequired transition (issue #213)"
+    );
+    assert!(
+        paused_ad.last_update_at.is_some(),
+        "last_update_at must still be present during input-required (issue #213)"
+    );
+
+    let answer = manager.answer(&alpha, "allow").await;
+    assert_eq!(answer, Ok(Ok(())));
+    let result = first.await;
+    assert_result_ok(&result, "a1", "end_turn", SessionState::Completed);
+
+    // And once the turn actually ends, both fields go back to absent (idle
+    // clears them, unchanged behavior — see `presence_carries_turn_and_update_timestamps`).
+    let idle_ad = find(&manager.presence_doc("h".to_string()), "alpha");
+    assert_eq!(idle_ad.state, SessionState::Idle);
+    assert!(idle_ad.turn_started_at.is_none());
+    assert!(idle_ad.last_update_at.is_none());
+}
+
 #[tokio::test]
 async fn state_transitions_idle_working_input_required_idle_emit_presence() {
     let manager = SessionManager::start(&registry_of(&[("alpha", &["--ask-permission", "--chunks", "2"])]));

@@ -239,7 +239,10 @@ async fn handle_answer(inner: &mut Inner, choice: String, reply_tx: oneshot::Sen
                 // A chained gate: still not "Working" — keep waiting.
                 set_state(inner, SessionState::InputRequired);
             }
-            Some(DriverEvent::Chunk(_)) => {}
+            // Same rationale as `handle_stream_event`'s `Chunk` arm (issue
+            // #210): a chunk arriving while waiting for the driver to
+            // resume to `Working` is still real activity, not silence.
+            Some(DriverEvent::Chunk(_)) => touch_last_update(inner),
             Some(DriverEvent::Done(reason)) => {
                 finish_turn(inner, reason).await;
                 // The answer itself was applied; the turn simply ended right
@@ -338,7 +341,11 @@ async fn handle_stream_event(inner: &mut Inner, event: Option<DriverEvent>) {
         // ever sending one) — treat conservatively as a crashed turn rather
         // than hanging forever with a `current_reply` nobody will ever fire.
         None => finish_turn(inner, StopReason::Error).await,
-        Some(DriverEvent::Chunk(_)) => {}
+        // Real turn activity with no state change (the common case for a
+        // long streamed reply) — bump the staleness clock the same way a
+        // state transition does, or `HOLLER_STALL_MS` false-alarms a
+        // healthy, actively-streaming turn as stalled (issue #210).
+        Some(DriverEvent::Chunk(_)) => touch_last_update(inner),
         Some(DriverEvent::State(DriverState::Working)) => set_state(inner, SessionState::Working),
         Some(DriverEvent::State(DriverState::InputRequired)) => {
             set_state(inner, SessionState::InputRequired);
@@ -348,11 +355,26 @@ async fn handle_stream_event(inner: &mut Inner, event: Option<DriverEvent>) {
 }
 
 fn set_state(inner: &mut Inner, state: SessionState) {
+    {
+        let mut p = inner.presence.lock().unwrap_or_else(PoisonError::into_inner);
+        p.state = state;
+    }
+    // Shares its "bump the staleness clock + notify" half with the `Chunk`
+    // arms below — a state transition is real activity too, and this is the
+    // one place both kinds of activity funnel through (issue #210).
+    touch_last_update(inner);
+}
+
+/// Bump `last_update_at`/`last_update_at_ms` to "now" and notify presence
+/// watchers — the single place any evidence of real turn activity (a
+/// streamed `Chunk`, or a state transition via [`set_state`]) goes through,
+/// so the two paths that used to update this timestamp independently can't
+/// drift out of sync again (issue #210).
+fn touch_last_update(inner: &mut Inner) {
     inner.last_update_at_ms = Some(Instant::now());
     let ts = log::timestamp();
     {
         let mut p = inner.presence.lock().unwrap_or_else(PoisonError::into_inner);
-        p.state = state;
         p.last_update_at = Some(ts);
     }
     notify_presence(inner);
