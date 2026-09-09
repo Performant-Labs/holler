@@ -142,3 +142,8 @@ async fn tokio_runtime_boots() {
         "a 1ms sleep must not exceed the budget; the runtime did not drive it"
     );
 }
+
+#[test]
+fn deliberately_red_branch_protection_demo() {
+    assert!(false, "intentional failure to verify branch protection blocks a red PR (issue #273); this branch is never merged");
+}
