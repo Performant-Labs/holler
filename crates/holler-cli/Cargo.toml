@@ -117,6 +117,14 @@ path = "tests/acp_driver_test.rs"
 name = "acp_driver_crash_test"
 path = "tests/acp_driver_crash_test.rs"
 
+# Session manager (issue #189): per-session tasks, the busy-turn queue,
+# isolated cancel, and post-cancel freshness. Lives here (not
+# `holler-body/tests/`) for the same `CARGO_BIN_EXE_stub-acp` reason as
+# `acp_driver_test.rs` above — see this file's own module doc.
+[[test]]
+name = "session_manager_test"
+path = "tests/session_manager_test.rs"
+
 # Declare only what is consumed (issue #155 §7 — `cargo machete` fails CI
 # otherwise). A story that starts using a workspace dependency adds it here in
 # the same PR; the skeleton's speculative list was removed in #155.

@@ -17,4 +17,5 @@ pub mod instance_lock;
 pub mod join;
 pub mod registry;
 pub mod server_address;
+pub mod session_manager;
 pub mod status;
