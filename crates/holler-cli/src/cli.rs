@@ -392,6 +392,11 @@ pub struct Roster {
     /// reconnecting).
     #[arg(long)]
     pub all: bool,
+    /// List only sessions named exactly PREFIX or nested under it
+    /// (`PREFIX/…`) — e.g. `--prefix io` (or `io/`) matches `io` and every
+    /// `io/<session>` (ADR 0005 §4).
+    #[arg(long)]
+    pub prefix: Option<String>,
 }
 
 #[derive(Parser, Debug)]

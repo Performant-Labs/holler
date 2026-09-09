@@ -160,6 +160,14 @@ pub async fn handle_authenticated<Snk, St>(
 
     let mut cmd_rx = registry.insert(&client_id, &params.hostname, &params.token_id).await;
     registry.set_harnesses_advertised(&client_id, body_harnesses.clone()).await;
+    // Issue #236 (ADR 0005 §2): the label travels with the authenticated
+    // token, never on the wire, so this is the one place the hub can read it
+    // — `record` is the verified token record from just above. Binding it
+    // (and the client id) here, before any `session/presence` arrives, means
+    // every roster row this body advertises is qualified `<label>/<session>`
+    // from its very first row, not just from the second presence beat.
+    roster.set_token(&params.token_id, &client_id);
+    roster.set_label(&params.token_id, &record.label);
 
     // The confirmation pass (issue #185): for each harness the body just
     // advertised, send a real `query/support` probe and record `confirmed`
