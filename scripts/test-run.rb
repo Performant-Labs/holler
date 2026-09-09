@@ -94,14 +94,22 @@ end
 # One issue == one case == one Test ID (single binary; #168 §2/§3).
 # ---------------------------------------------------------------------------
 def discover(gh)
+  # A nil client means the caller is a pure preview (a catalog filter with no
+  # --last-failed), which never needs GitHub: it only reads the catalog to
+  # display it. Such a run has no GITHUB_TOKEN requirement and does not load
+  # octokit at all (the client is built lazily, only for the GitHub-touching
+  # paths), so a preview cannot fail on a token- or gem-poor runner. An empty
+  # catalog is the correct, tolerated answer in that case (#170).
+  return [] if gh.nil?
+
   issues =
     begin
       gh.list_issues(REPO, labels: 'test-case', state: 'open', per_page: 100)
-    rescue Octokit::Unauthorized, Octokit::ClientError, StandardError => e
-      # A bad/absent token (or any GitHub API hiccup) must not crash the
-      # whole-catalog preview. #170 wants the CI smoke to "tolerate" an empty
-      # catalog, and an unauthenticated read is indistinguishable from one, so
-      # degrade to an empty catalog (a warning) instead of aborting.
+    rescue StandardError => e
+      # A bad token or any other GitHub API hiccup must not crash a run that
+      # does have a client: degrade to an empty catalog (a warning) instead of
+      # aborting, so `--last-failed` (which still builds the client) keeps the
+      # same "tolerate an unreadable catalog" contract as a preview.
       warn "warning: discover: could not read the catalog from #{REPO} (#{e.class}: #{e.message}) -- treating as empty"
       []
     end
@@ -580,12 +588,26 @@ def main
     active = ['list: ' + opts[:list]] unless opts[:list].nil? || opts[:list] == ''
     active += ['last-failed: #' + opts[:last_failed]] unless opts[:last_failed].nil?
 
-    # Every surviving path (a lone bare --list included) resolves against the
-    # catalog, so all of them build the GitHub client: `exec --list` previews
-    # the whole catalog, and `--last-failed` reads issue N. This is why the CI
-    # smoke installs octokit (the runners do not ship it) and authenticates
-    # from the runner's pre-set GITHUB_TOKEN.
-    gh = client
+    # Which paths need the GitHub client. A pure PREVIEW (any catalog filter
+    # WITHOUT --last-failed) only READS the catalog to display it -- it never
+    # launches a process or fetches a single issue -- so it does not need the
+    # client at all. `--last-failed` is the one selection axis that makes a
+    # real per-issue GitHub read (it fetches issue N's body), so it needs the
+    # client; so does the run path (it launches processes).
+    #
+    # Making preview token-free is deliberate: a CI smoke of `exec --list`
+    # then needs no GITHUB_TOKEN and no octokit (the gem is only loaded by the
+    # lazy client, which preview never builds), so it cannot break on a runner
+    # that has no token or whose gem environment differs per event type.
+    preview = !test_id.nil? || !opts[:group].nil? || !opts[:cat].nil? ||
+              !opts[:applies].nil? || !opts[:tags].nil? || !opts[:tag_inverts].nil? ||
+              opts.key?(:list) || !opts[:list_invert].nil?
+    # (preview || last_failed.nil?) must be parenthesized: the ternary binds
+    # looser than ||, so without the parens this would be (preview || nil?)
+    # ? nil : client -- i.e. nil for EVERY non-preview command (a plain run
+    # command is "no preview, no --last-failed") and the run path would lose
+    # its client. We want the client only for the run path and --last-failed.
+    gh = (preview || opts[:last_failed].nil?) ? nil : client
 
     # --last-failed N resolves to a list of Test IDs (the ❌ rows of issue N)
     # that feeds the selection's list_ids axis. It combines with --list FILE.
