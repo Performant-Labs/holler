@@ -60,3 +60,48 @@ pub fn body_local_configs(state_root: &std::path::Path) -> Vec<holler_body::conf
     }
     Vec::new()
 }
+
+// --- shared `caps`/`support`/`query` print+exit tail (issue #229) ----------
+//
+// `hub_cmd.rs`'s and `body_cmd.rs`'s six leaves (`caps`, `support`, `query`
+// on each side) all end the same way: on success, print the raw JSON to
+// stdout with `--json`, or a short human summary otherwise, and exit 0; on
+// a refusal, print `error: <message>` to stderr and exit with the refusal's
+// code. That tail — previously two near-identical helpers,
+// `print_control_doc`/`control_error_exit` for the hub side and
+// `print_query_doc` for the body side — is expressed once here. What
+// legitimately differs between the two sides (a control-socket round trip
+// with `ControlError` vs a local, always-fallible-only-on-serialize lookup)
+// stays in each side's own module, which builds a [`FetchOutcome`] from its
+// own result type and hands it to [`print_and_exit_code`].
+//
+// The already-serialized JSON text (not a re-parsed `serde_json::Value`) is
+// carried in `Doc` on purpose: `holler_body`'s query documents are plain
+// structs, and round-tripping one through `Value` would risk reordering its
+// object keys (a `Value` map is unordered without the `preserve_order`
+// feature) and changing the exact bytes `--json` prints.
+pub enum FetchOutcome {
+    /// A document to report: `json_text` verbatim on `--json`, else `human`.
+    Doc { json_text: String, human: String },
+    /// A refusal: `message` to stderr (prefixed `error: `), then `exit_code`.
+    Err { message: String, exit_code: i32 },
+}
+
+/// Print a [`FetchOutcome`] per ADR 0003 and return the exit code the caller
+/// (`main.rs`, the one file allowed to end the process) should apply.
+pub fn print_and_exit_code(json: bool, outcome: FetchOutcome) -> i32 {
+    match outcome {
+        FetchOutcome::Doc { json_text, human } => {
+            if json {
+                println!("{json_text}");
+            } else {
+                println!("{human}");
+            }
+            0
+        }
+        FetchOutcome::Err { message, exit_code } => {
+            eprintln!("error: {message}");
+            exit_code
+        }
+    }
+}

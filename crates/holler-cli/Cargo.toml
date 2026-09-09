@@ -153,6 +153,9 @@ path = "tests/roster_cli_test.rs"
 # the same PR; the skeleton's speculative list was removed in #155.
 [dependencies]
 clap = { workspace = true }
+# body_cmd.rs's shared `doc_outcome` (issue #229): generic over any of
+# `holler_body::query`'s document types via their derived `Serialize`.
+serde = { workspace = true }
 # stub-acp bin (serializes its ACP frames) and the body-join e2e test's
 # `#[cfg(test)]` unit test (decodes the credential/status documents it inspects).
 serde_json = { workspace = true }
