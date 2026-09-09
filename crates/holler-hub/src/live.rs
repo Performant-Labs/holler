@@ -89,8 +89,34 @@ pub enum LiveCommand {
         // variant against `Ping`'s single-`oneshot::Sender` payload.
         message: Box<Message>,
         queue: bool,
+        /// `interrupt SESSION TEXT` (issue #191): mark this `session/prompt`
+        /// as a redirect (`Prompt.replace`) rather than a plain `say` — sent
+        /// only after the hub has itself observed the matching cancel's
+        /// `{applied:true}`.
+        replace: bool,
         reply: oneshot::Sender<SayReply>,
     },
+}
+
+/// One outstanding `session/cancel` (issue #191): kept separate from
+/// [`LiveCommand`] so it can travel the connection's own **priority**
+/// channel — see [`LiveHandle::cancel`]/[`crate::circuit`]'s doc for why a
+/// cancel must never queue behind a `Say`/`Query`/`Ping` command already
+/// sitting in the normal `cmd_rx`.
+pub struct CancelCommand {
+    pub request_id: String,
+    pub session: String,
+    pub reply: oneshot::Sender<CancelReply>,
+}
+
+/// How a [`CancelCommand`] resolved.
+pub enum CancelReply {
+    /// The body answered `{applied:true}`.
+    Applied,
+    /// The body answered with a JSON-RPC error.
+    Refused(WireError),
+    /// The socket dropped before a response arrived.
+    ConnectionLost,
 }
 
 /// The per-body state a control-socket task or the confirmation pass reads or
@@ -101,6 +127,11 @@ struct LiveState {
     harnesses_advertised: Vec<String>,
     harnesses_confirmed: BTreeSet<String>,
     session_count: u32,
+    /// The most recently measured circuit RTT (issue #191): updated by
+    /// `hub token ping` and by `interrupt`'s own cancel round trip. `None`
+    /// until this circuit has measured one — the ack-timeout floor
+    /// (`interrupt::ack_timeout`) covers that case.
+    last_rtt_ms: Option<u64>,
 }
 
 /// One streamed `session/update` the connection task observed while a `say`
@@ -137,6 +168,9 @@ pub struct LiveHandle {
     pub hostname: String,
     pub token_id: String,
     tx: tokio::sync::mpsc::UnboundedSender<LiveCommand>,
+    /// The priority channel a `session/cancel` travels instead of `tx`
+    /// (issue #191) — see [`CancelCommand`]'s own doc.
+    cancel_tx: tokio::sync::mpsc::UnboundedSender<CancelCommand>,
     state: Arc<Mutex<LiveState>>,
     /// The last `session/presence` this body sent (issue #190's roster
     /// stand-in — see the module doc). `None` until its first presence.
@@ -192,14 +226,49 @@ impl LiveHandle {
         session: String,
         message: Box<Message>,
         queue: bool,
+        replace: bool,
         timeout: std::time::Duration,
     ) -> Option<SayReply> {
         let (reply_tx, reply_rx) = oneshot::channel();
-        let cmd = LiveCommand::Say { request_id, session, message, queue, reply: reply_tx };
+        let cmd = LiveCommand::Say { request_id, session, message, queue, replace, reply: reply_tx };
         if self.tx.send(cmd).is_err() {
             return None;
         }
         tokio::time::timeout(timeout, reply_rx).await.ok()?.ok()
+    }
+
+    /// Ask the live connection to send `session/cancel` for `session` over
+    /// its **priority** channel and await the body's `{applied:true}` (or
+    /// refusal), bounded by `timeout` (`interrupt::ack_timeout`'s RTT-scaled
+    /// value). `None` means no answer arrived within `timeout` — the
+    /// caller reports the spec's own "interrupt sent but not confirmed"
+    /// wording, never a bare `not_connected` (the connection may well still
+    /// be alive; the body is just slow to confirm).
+    pub async fn cancel(
+        &self,
+        request_id: String,
+        session: String,
+        timeout: std::time::Duration,
+    ) -> Option<CancelReply> {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        let cmd = CancelCommand { request_id, session, reply: reply_tx };
+        if self.cancel_tx.send(cmd).is_err() {
+            return None;
+        }
+        tokio::time::timeout(timeout, reply_rx).await.ok()?.ok()
+    }
+
+    /// The last measured circuit RTT (issue #191's ack-timeout scale), if
+    /// any has been recorded yet for this body.
+    pub async fn last_rtt(&self) -> Option<std::time::Duration> {
+        self.state.lock().await.last_rtt_ms.map(std::time::Duration::from_millis)
+    }
+
+    /// Record a freshly measured RTT for this body (`hub token ping`'s own
+    /// measurement, or `interrupt`'s own cancel round trip) — the input to
+    /// the *next* `interrupt`'s ack-timeout scale.
+    pub async fn record_rtt(&self, rtt: std::time::Duration) {
+        self.state.lock().await.last_rtt_ms = Some(u64::try_from(rtt.as_millis()).unwrap_or(u64::MAX));
     }
 
     /// The last presence this body reported, if any yet.
@@ -248,22 +317,29 @@ impl Registry {
     }
 
     /// Register a newly-authenticated circuit, returning the receiver its
-    /// connection task drains for [`LiveCommand`]s. Replaces (and thereby
-    /// supersedes) a prior live handle for the same `client_id` — a second
-    /// `body run` reconnecting under the same identity naturally displaces
-    /// the stale one rather than leaving two entries.
+    /// connection task drains for [`LiveCommand`]s, and (issue #191) the
+    /// second, high-priority receiver it drains for [`CancelCommand`]s.
+    /// Replaces (and thereby supersedes) a prior live handle for the same
+    /// `client_id` — a second `body run` reconnecting under the same
+    /// identity naturally displaces the stale one rather than leaving two
+    /// entries.
     pub async fn insert(
         &self,
         client_id: &str,
         hostname: &str,
         token_id: &str,
-    ) -> tokio::sync::mpsc::UnboundedReceiver<LiveCommand> {
+    ) -> (
+        tokio::sync::mpsc::UnboundedReceiver<LiveCommand>,
+        tokio::sync::mpsc::UnboundedReceiver<CancelCommand>,
+    ) {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let (cancel_tx, cancel_rx) = tokio::sync::mpsc::unbounded_channel();
         let handle = LiveHandle {
             client_id: client_id.to_string(),
             hostname: hostname.to_string(),
             token_id: token_id.to_string(),
             tx,
+            cancel_tx,
             state: Arc::new(Mutex::new(LiveState::default())),
             presence: Arc::new(Mutex::new(None)),
         };
@@ -271,7 +347,7 @@ impl Registry {
         // A fresh connection supersedes any stale offline snapshot for this
         // exact `client_id` — see the `offline` field's own doc.
         self.offline.lock().await.remove(client_id);
-        rx
+        (rx, cancel_rx)
     }
 
     /// Drop a circuit's live entry (the connection ended). A no-op if it was
@@ -509,7 +585,7 @@ mod tests {
     #[tokio::test]
     async fn find_target_matches_by_token_id_client_id_or_label() {
         let registry = Registry::new();
-        let mut rx = registry.insert("cli_1", "kiwi", "tok_1").await;
+        let (mut rx, mut cancel_rx) = registry.insert("cli_1", "kiwi", "tok_1").await;
 
         assert!(matches!(registry.find_target("tok_1").await, TargetLookup::Found(_)));
         assert!(matches!(registry.find_target("cli_1").await, TargetLookup::Found(_)));
@@ -519,6 +595,7 @@ mod tests {
         assert!(matches!(registry.find_target("nobody").await, TargetLookup::NotConnected));
 
         rx.close();
+        cancel_rx.close();
     }
 
     /// Two live bodies sharing the same hostname (a collision issue #184's
@@ -528,8 +605,8 @@ mod tests {
     #[tokio::test]
     async fn ambiguous_target_is_reported_as_ambiguous() {
         let registry = Registry::new();
-        let mut rx1 = registry.insert("cli_1", "kiwi", "tok_1").await;
-        let mut rx2 = registry.insert("cli_2", "kiwi", "tok_2").await;
+        let (mut rx1, mut cancel_rx1) = registry.insert("cli_1", "kiwi", "tok_1").await;
+        let (mut rx2, mut cancel_rx2) = registry.insert("cli_2", "kiwi", "tok_2").await;
 
         assert!(matches!(registry.find_target("kiwi").await, TargetLookup::Ambiguous));
         // Each body's own token/client id still resolves unambiguously.
@@ -537,12 +614,14 @@ mod tests {
 
         rx1.close();
         rx2.close();
+        cancel_rx1.close();
+        cancel_rx2.close();
     }
 
     #[tokio::test]
     async fn confirm_harness_and_advertised_are_independent() {
         let registry = Registry::new();
-        let mut rx = registry.insert("cli_1", "kiwi", "tok_1").await;
+        let (mut rx, mut cancel_rx) = registry.insert("cli_1", "kiwi", "tok_1").await;
         registry.set_harnesses_advertised("cli_1", vec!["opencode".to_string(), "claude".to_string()]).await;
         assert_eq!(registry.harnesses_known().await, vec!["claude".to_string(), "opencode".to_string()]);
         assert!(registry.harnesses_confirmed().await.is_empty(), "advertising alone confirms nothing");
@@ -554,17 +633,20 @@ mod tests {
         assert_eq!(confirmed[0].bodies, vec!["kiwi".to_string()]);
 
         rx.close();
+        cancel_rx.close();
     }
 
     #[tokio::test]
     async fn session_count_sums_across_bodies() {
         let registry = Registry::new();
-        let mut rx1 = registry.insert("cli_1", "kiwi", "tok_1").await;
-        let mut rx2 = registry.insert("cli_2", "mango", "tok_2").await;
+        let (mut rx1, mut cancel_rx1) = registry.insert("cli_1", "kiwi", "tok_1").await;
+        let (mut rx2, mut cancel_rx2) = registry.insert("cli_2", "mango", "tok_2").await;
         registry.set_session_count("cli_1", 2).await;
         registry.set_session_count("cli_2", 3).await;
         assert_eq!(registry.total_sessions().await, 5);
         rx1.close();
         rx2.close();
+        cancel_rx1.close();
+        cancel_rx2.close();
     }
 }

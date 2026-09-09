@@ -122,6 +122,13 @@ struct Config {
     /// never silently dropped).
     ask_elicitation_url: bool,
     crash_after_prompt: bool,
+    /// Issue #191: silently drop every inbound `session/cancel` — never
+    /// resolve the in-flight turn to `cancelled`, never send the `idle`
+    /// state_update. Simulates a stalled/misbehaving agent so
+    /// `AcpDriver::cancel()`'s own `CANCEL_TIMEOUT` (and, one layer up, the
+    /// hub's RTT-scaled ack timeout) is what actually fires in
+    /// `ack_timeout_message_when_body_stalls`.
+    ignore_cancel: bool,
 }
 
 /// The in-flight turn's position. `emitted` counts `agent_message_chunk`
@@ -252,6 +259,7 @@ fn parse_args() -> Config {
         ask_elicitation: false,
         ask_elicitation_url: false,
         crash_after_prompt: false,
+        ignore_cancel: false,
     };
     let mut i = 0;
     while i < args.len() {
@@ -271,6 +279,7 @@ fn parse_args() -> Config {
             "--ask-elicitation" => cfg.ask_elicitation = true,
             "--ask-elicitation-url" => cfg.ask_elicitation_url = true,
             "--crash-after-prompt" => cfg.crash_after_prompt = true,
+            "--ignore-cancel" => cfg.ignore_cancel = true,
             // Unknown / positional args are ignored.
             _ => {}
         }
@@ -391,7 +400,7 @@ fn worker_loop(cfg: &Config, rx: Receiver<Value>) {
                 }
                 // Route the message by kind (may start a turn, park it, resume
                 // it, or resolve it to `cancelled`).
-                route(&mut lock, &mut pending, &mut turn, &msg);
+                route(cfg, &mut lock, &mut pending, &mut turn, &msg);
                 // If routing resumed a parked turn (the gate answer), emit its
                 // next step now (the remaining chunks). A cancel or a
                 // completed turn has already resolved it, so `drain` is a no-op.
@@ -407,6 +416,7 @@ fn worker_loop(cfg: &Config, rx: Receiver<Value>) {
 /// *response*, by its `id`). Turns the message into the appropriate stub
 /// reaction (a response, an error, a permission-resume, or a stash).
 fn route(
+    cfg: &Config,
     lock: &mut impl Write,
     pending: &mut VecDeque<Value>,
     turn: &mut Option<Turn>,
@@ -466,6 +476,14 @@ fn route(
             }
         }
         Some("session/cancel") => {
+            // `--ignore-cancel` (issue #191): simulate a stalled/misbehaving
+            // agent that never resolves the cancel at all — no `idle`
+            // state_update, turn left exactly as it was. This is what makes
+            // `AcpDriver::cancel()`'s own `CANCEL_TIMEOUT` (and, one layer
+            // up, the hub's ack timeout) the thing that actually fires.
+            if cfg.ignore_cancel {
+                return;
+            }
             // A cancel outranks anything else in flight: the in-flight turn
             // resolves to `cancelled` FIRST (an `idle` state_update — the
             // `session/prompt` response was already sent when the prompt

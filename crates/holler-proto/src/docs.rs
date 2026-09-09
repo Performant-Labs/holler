@@ -603,6 +603,15 @@ pub struct Prompt {
     /// keeps every pre-#190 `Prompt` fixture byte-identical.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub queue: bool,
+    /// `interrupt SESSION TEXT` (issue #191): cancel the in-flight turn (if
+    /// any) and run this prompt **ahead of** the queue — the body-side
+    /// `SessionCommand::Replace` a `session/cancel` + this flag together
+    /// implement. Absent on the wire (and defaulted on decode) when `false`,
+    /// same discipline as `queue` — every pre-#191 `Prompt` fixture stays
+    /// byte-identical. Mutually exclusive with `queue` in practice (the hub
+    /// never sets both), but the wire does not enforce that itself.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub replace: bool,
 }
 
 /// The `result` of `session/prompt` — sent **exactly once**, when the turn

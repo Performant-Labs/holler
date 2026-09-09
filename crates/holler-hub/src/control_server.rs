@@ -81,6 +81,8 @@ async fn dispatch_control(line: &str, registry: &Registry, roster: &Roster) -> S
         Some("control/query_local") => hub_query_local(&cid, &obj, registry).await,
         Some("control/query_remote") => hub_query_remote(&cid, &obj, registry).await,
         Some("control/say") => say(&cid, &obj, registry).await,
+        // `control/interrupt` (issue #191): the CLI's `interrupt` verb.
+        Some("control/interrupt") => interrupt(&cid, &obj, registry).await,
         Some("control/answer") => answer(&cid, &obj, registry).await,
         // `control/roster` (issue #186): read the hub's own roster and return
         // `{rows: [...]}` (the live-only view; the CLI's `--all` reads the
@@ -243,6 +245,60 @@ async fn say(cid: &holler_proto::CorrelationId, obj: &serde_json::Value, registr
     }
 }
 
+/// `control/interrupt {session, text?}` (issue #191): the CLI's `interrupt`
+/// verb, relayed to [`crate::interrupt::interrupt`]. Without `text` the
+/// result is `{session, applied: true}`; with `text` it also carries the
+/// redirect turn's own reply, in exactly `control/say`'s own result shape
+/// (`stop_reason`/`state`/`updates`/`elapsed_ms`/`text`/`message`) so the CLI
+/// can share `say_cmd.rs`'s own printing logic.
+async fn interrupt(cid: &holler_proto::CorrelationId, obj: &serde_json::Value, registry: &Registry) -> String {
+    let params = obj.get("params");
+    let Some(session) = params.and_then(|p| p.get("session")).and_then(|v| v.as_str()) else {
+        return encode_error(cid, Code::InvalidParams, "control/interrupt needs params.session".to_string());
+    };
+    let text = params.and_then(|p| p.get("text")).and_then(|v| v.as_str());
+
+    let state = HubState::from_root(resolve_state_dir().unwrap_or_default());
+    match crate::interrupt::interrupt(registry, &state, session, text).await {
+        Ok(outcome) => {
+            let mut result = serde_json::json!({ "session": outcome.session, "applied": true });
+            if let Some(reply) = &outcome.reply {
+                result["stop_reason"] = serde_json::Value::String(reply.stop_reason.clone());
+                result["state"] = serde_json::Value::String(reply.state.clone());
+                result["updates"] = serde_json::json!(reply.updates);
+                result["elapsed_ms"] = serde_json::json!(reply.elapsed_ms);
+                result["text"] = serde_json::Value::String(crate::talk::reply_text(&reply.message));
+                result["message"] = serde_json::to_value(&reply.message).unwrap_or_default();
+            }
+            encode_response(cid, result)
+        }
+        Err(crate::interrupt::InterruptError::UnknownSession) => {
+            encode_error(cid, Code::UnknownSession, format!("unknown session: {session}"))
+        }
+        Err(crate::interrupt::InterruptError::NotConnected) => {
+            encode_error(cid, Code::NotConnected, format!("{session}'s body is not connected"))
+        }
+        Err(crate::interrupt::InterruptError::Ambiguous(candidates)) => {
+            let message = format!("ambiguous session {session}: candidates are {}", candidates.join(", "));
+            let err = WireError::new(Code::UnknownSession, message, Some("ambiguous"));
+            encode_error_frame(cid, &err)
+        }
+        Err(crate::interrupt::InterruptError::AckTimeout { secs }) => encode_error(
+            cid,
+            Code::NotConnected,
+            format!(
+                "interrupt sent but not confirmed within {secs}s (body may be stalled); \
+                 the session is still on the roster"
+            ),
+        ),
+        Err(crate::interrupt::InterruptError::Refused(err)) => encode_error_frame(cid, &err),
+        Err(crate::interrupt::InterruptError::ConnectionLost) => {
+            encode_error(cid, Code::ConnectionLost, format!("{session} io disconnected mid-turn; ask again"))
+        }
+        Err(crate::interrupt::InterruptError::PromptFailed(e)) => encode_error(cid, Code::NotConnected, e.message()),
+    }
+}
+
 /// `control/answer {session, choice, timeout_ms?}` (issue #151): the CLI's
 /// `answer` verb, relayed to [`crate::talk::answer`]. Mirrors [`say`]'s own
 /// param/result mapping; the body-side refusal (`-32010 nothing_pending`,
@@ -326,7 +382,11 @@ async fn token_ping(cid: &holler_proto::CorrelationId, obj: &serde_json::Value, 
     let started = std::time::Instant::now();
     match handle.ping(std::time::Duration::from_secs(5)).await {
         Some(ack) => {
-            let rtt_ms = started.elapsed().as_millis() as u64;
+            let elapsed = started.elapsed();
+            // Issue #191: this measured RTT is the input to the *next*
+            // `interrupt`'s ack-timeout scale (`interrupt::ack_timeout`).
+            handle.record_rtt(elapsed).await;
+            let rtt_ms = u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX);
             encode_response(cid, serde_json::json!({ "hostname": ack.hostname, "rtt_ms": rtt_ms }))
         }
         None => encode_error(cid, Code::NotConnected, format!("{token_id} did not answer the ping")),

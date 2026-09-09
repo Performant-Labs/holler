@@ -143,8 +143,15 @@ fn bare_invocation_fails_closed(#[case] args: &[&str]) {
 // (`roster_without_live_hub_exits_1`, below), the same treatment `say` got
 // for the same reason. The full live view (TTL tri-state, collision, --all)
 // is pinned by `crates/holler-cli/tests/roster_cli_test.rs`.
+// NOTE (issue #191): `interrupt SESSION` was originally listed here too.
+// `interrupt` now does something real — it exits 1 with a genuine "no live
+// holler hub reachable" diagnostic rather than "not implemented" when there
+// is no hub to route through. Moved to its own pinned case
+// (`interrupt_without_live_hub_exits_1`, below), the same treatment `say`/
+// `roster` got for the same reason. The full cancel/ack-timeout/redirect path
+// against a live hub+body is pinned by
+// `crates/holler-cli/tests/interrupt_test.rs`.
 #[rstest]
-#[case::interrupt(&["interrupt", "SESSION"])]
 #[case::body_attach_sessions(&["body", "attach", "sessions"])]
 #[case::body_attach_init(&["body", "attach", "init"])]
 fn every_adr_0003_leaf_parses(#[case] args: &[&str]) {
@@ -304,6 +311,36 @@ fn roster_without_live_hub_exits_1() {
         .env("HOLLER_STATE_DIR", &state)
         .env("NO_COLOR", "1")
         .args(["--json", "roster"])
+        .assert()
+        .failure()
+        .code(1);
+    let _ = std::fs::remove_dir_all(&state);
+}
+
+// Issue #191: `interrupt SESSION` against a state dir with no live hub exits
+// 1 with the spec's exact diagnostic rather than the skeleton's "not
+// implemented" — the same "parses, and takes the real unreachable-hub path"
+// pin `say_without_live_hub_exits_1`/`roster_without_live_hub_exits_1` give
+// their own verbs above. The full cancel/ack-timeout/redirect path against a
+// real hub+body is pinned by `crates/holler-cli/tests/interrupt_test.rs`.
+#[test]
+fn interrupt_without_live_hub_exits_1() {
+    let state = std::env::temp_dir().join(format!("holler-inv-interrupt-{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&state);
+    holler()
+        .env("HOLLER_STATE_DIR", &state)
+        .env("NO_COLOR", "1")
+        .args(["interrupt", "SESSION"])
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(contains("not implemented").not())
+        .stderr(contains("no live holler hub reachable"));
+    // `--json` is a global flag, so it also takes the same unreachable path.
+    holler()
+        .env("HOLLER_STATE_DIR", &state)
+        .env("NO_COLOR", "1")
+        .args(["--json", "interrupt", "SESSION"])
         .assert()
         .failure()
         .code(1);
