@@ -35,6 +35,15 @@ pub(super) struct Shared {
     /// fired (and cleared) by the notification handler, or by the crash
     /// watcher if the connection dies first.
     pub(super) awaiting_done: Option<oneshot::Sender<StopReason>>,
+    /// The most recent real `StopReason` this driver has observed (issue
+    /// #238): every path that settles a turn — the notification handler's
+    /// `Idle` arm and the crash watcher — records it here too, not just on
+    /// `awaiting_done`/`current_events`. `cancel()`'s "nothing in flight"
+    /// no-op path reads this so it reports the turn's *actual* last outcome
+    /// instead of inventing `Cancelled` for a turn that may have ended some
+    /// other way entirely (e.g. it already resolved `end_turn` before
+    /// `cancel()` was even called).
+    pub(super) last_stop_reason: Option<StopReason>,
 }
 
 pub(super) fn lock(shared: &Mutex<Shared>) -> MutexGuard<'_, Shared> {
@@ -106,6 +115,7 @@ fn handle_state_update(shared: &Arc<Mutex<Shared>>, state: v2::StateUpdate) {
             let stop_reason = StopReason::from_acp(idle.stop_reason.as_ref());
             let mut guard = lock(shared);
             guard.status = Status::Idle;
+            guard.last_stop_reason = Some(stop_reason);
             if let Some(tx) = guard.current_events.take() {
                 let _ = tx.send(DriverEvent::Done(stop_reason));
             }
@@ -202,6 +212,7 @@ async fn do_handshake(
     connection.spawn(async move {
         watch_conn.incoming_closed().await;
         let mut guard = lock(&watch_shared);
+        guard.last_stop_reason = Some(StopReason::Error);
         if let Some(tx) = guard.current_events.take() {
             let _ = tx.send(DriverEvent::Done(StopReason::Error));
         }
