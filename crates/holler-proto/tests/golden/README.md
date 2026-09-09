@@ -11,6 +11,7 @@ wire changes a file in this directory** and shows in every PR diff.
 | `foreign/` | frames **written by hand from the JSON-RPC 2.0 and A2A v1.0.1 spec text**, never produced by our encoder; each must decode, or be rejected for an asserted, documented reason | never regenerated — hand-edited only |
 
 `envelope/error.json` is hand-written in the JSON-RPC-conformant form
-(`error.code` is a **number**). The encoder does not yet produce that (#145);
-its test is `#[ignore]`d with that link until #145 lands. The golden file is
-the spec of record, not a snapshot of the bug.
+(`error.code` is a **number**, per JSON-RPC 2.0 §5.1). #145 made the encoder
+emit that conformant form, so its test (`envelope_error_matches_golden`) now
+runs unconditionally, like the others. The golden file is the spec of record,
+not a snapshot of the (former) bug.
