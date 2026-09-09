@@ -90,7 +90,7 @@ pub(super) fn send_resolved_reply(
         }
         PendingResponder::Elicitation(r) => {
             let mut content: BTreeMap<String, v2::ElicitationContentValue> = BTreeMap::new();
-            for ((name, multi), value) in field_names.into_iter().zip(resolved.into_iter()) {
+            for ((name, multi), value) in field_names.into_iter().zip(resolved) {
                 let content_value = if multi {
                     v2::ElicitationContentValue::StringArray(vec![value])
                 } else {
