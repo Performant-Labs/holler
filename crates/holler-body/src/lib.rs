@@ -15,6 +15,7 @@ pub mod detach;
 pub mod identity;
 pub mod instance_lock;
 pub mod join;
+pub mod query;
 pub mod registry;
 pub mod server_address;
 pub mod session_manager;

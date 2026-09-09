@@ -10,6 +10,7 @@ pub mod control;
 pub mod control_server;
 pub mod join;
 pub mod live;
+pub mod query;
 pub mod serve;
 pub mod state;
 pub mod token;

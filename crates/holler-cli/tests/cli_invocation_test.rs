@@ -118,26 +118,22 @@ fn bare_invocation_fails_closed(#[case] args: &[&str]) {
 // own pinned case (`body_run_unjoined_exits_1`, below) — the full connect/
 // authenticate/reconnect/detach lifecycle against a live hub is pinned by
 // `crates/holler-cli/tests/body_run_test.rs`.
+//
+// NOTE (issue #185): `hub caps`/`support`/`query` and `body caps`/`support`/
+// `query` were originally listed here too (12 cases, `--json` arms
+// included). #185 implements all six leaves: `body caps`/`support`/`query`
+// answer from local state and exit 0 (or 1 on an unknown `query/support`
+// feature id, 2 on a malformed query tail), `hub caps`/`support`/`query`
+// round-trip the live hub's control socket and exit 1 with the real "no live
+// holler hub reachable" message when none is up — never "not implemented".
+// All twelve are therefore removed from this "not implemented" table and
+// pinned by dedicated tests in `crates/holler-cli/tests/query_test.rs`.
 #[rstest]
-#[case::hub_caps(&["hub", "caps"])]
-#[case::hub_caps_json(&["--json", "hub", "caps"])]
-#[case::hub_support(&["hub", "support", "FEATURE"])]
-#[case::hub_support_json(&["--json", "hub", "support", "FEATURE"])]
-#[case::hub_query_local(&["hub", "query", "CMD"])]
-#[case::hub_query_local_json(&["--json", "hub", "query", "CMD"])]
-#[case::hub_query_remote(&["hub", "query", "TARGET", "CMD"])]
-#[case::hub_query_remote_json(&["--json", "hub", "query", "TARGET", "CMD"])]
 #[case::roster(&["roster"])]
 #[case::roster_json(&["--json", "roster"])]
 #[case::say(&["say", "SESSION", "TEXT"])]
 #[case::say_json(&["--json", "say", "SESSION", "TEXT"])]
 #[case::interrupt(&["interrupt", "SESSION"])]
-#[case::body_caps(&["body", "caps"])]
-#[case::body_caps_json(&["--json", "body", "caps"])]
-#[case::body_support(&["body", "support", "FEATURE"])]
-#[case::body_support_json(&["--json", "body", "support", "FEATURE"])]
-#[case::body_query(&["body", "query", "CMD"])]
-#[case::body_query_json(&["--json", "body", "query", "CMD"])]
 #[case::body_attach_sessions(&["body", "attach", "sessions"])]
 #[case::body_attach_init(&["body", "attach", "init"])]
 fn every_adr_0003_leaf_parses(#[case] args: &[&str]) {

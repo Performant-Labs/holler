@@ -5,6 +5,7 @@
 //! thin entry point over this tree.
 
 mod cli;
+pub mod query_cmd;
 
 pub use crate::cli::{
     Attach, AttachCommand, Body, BodyCommand, Cli, Cmd, Command, Delete, Hub, HubCommand,
