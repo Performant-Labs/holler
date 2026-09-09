@@ -582,6 +582,25 @@ pub struct AuthOk {
 }
 
 // ---------------------------------------------------------------------------
+// ping (issue #182) — a hub-initiated liveness probe on a live circuit
+// ---------------------------------------------------------------------------
+
+/// The `result` of a `circuit/ping` a body answers (issue #182). `circuit/
+/// ping` carries no params (an empty object decodes fine via
+/// [`crate::typed_params`]'s "no params → empty object" rule) — the probe is
+/// "are you there", not a query. `ts` is the body's own clock at answer time;
+/// the asker (the hub, for `hub token ping`) derives `rtt_ms` from its own
+/// elapsed wall-clock around the request, not from this field.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PingAck {
+    /// The body's hostname / label.
+    pub hostname: String,
+    /// The body's own unix-epoch milliseconds at answer time.
+    pub ts: i64,
+}
+
+// ---------------------------------------------------------------------------
 // ACP stop_reason → A2A terminal state (docs §6 table)
 // ---------------------------------------------------------------------------
 

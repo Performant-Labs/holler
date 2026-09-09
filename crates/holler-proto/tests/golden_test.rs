@@ -218,6 +218,7 @@ fn docs_instances() -> Vec<(&'static str, Value)> {
         ("JoinResult", serde_json::to_value(JoinResult { client_id: "cli_19".into(), credential: "hlr_live_x".into() }).unwrap()),
         ("Authenticate", serde_json::to_value(Authenticate { token_id: "tok_7f3a".into(), credential: "hlr_live_x".into(), hostname: "kiwi".into() }).unwrap()),
         ("AuthOk", serde_json::to_value(AuthOk { ok: true }).unwrap()),
+        ("PingAck", serde_json::to_value(PingAck { hostname: "kiwi".into(), ts: 1_757_000_000_000 }).unwrap()),
     ]
 }
 

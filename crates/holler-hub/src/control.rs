@@ -25,6 +25,9 @@ pub enum ControlError {
     Io(std::io::Error),
     /// The reply did not parse as a v2 envelope.
     BadReply(String),
+    /// The hub answered with a JSON-RPC error (issue #182: `control/
+    /// token_ping`'s `-32004 not_connected` is reported this way).
+    Refused(holler_proto::WireError),
 }
 
 impl std::fmt::Display for ControlError {
@@ -33,6 +36,7 @@ impl std::fmt::Display for ControlError {
             ControlError::NoLiveHub => write!(f, "no live holler hub reachable"),
             ControlError::Io(e) => write!(f, "control socket I/O error: {e}"),
             ControlError::BadReply(s) => write!(f, "bad reply from the hub: {s}"),
+            ControlError::Refused(e) => write!(f, "{}", e.message),
         }
     }
 }
@@ -51,10 +55,28 @@ pub fn sock_path() -> PathBuf {
 /// Returns the reply envelope's `result` (the `StatusDoc` JSON value). Errors
 /// map to [`ControlError::NoLiveHub`] when the socket is absent (hub not
 /// running) — the CLI prints the spec's exact message and exits 1.
-// The `b-status` id literal and the well-formed request envelope both parse /
-// encode infallibly, so the `.expect`s here are unreachable.
-#[allow(clippy::expect_used)] // #143
 pub fn status() -> Result<serde_json::Value, ControlError> {
+    exchange("b-status", "control/status", None)
+}
+
+/// `hub token ping ID` (issue #182): ask the live hub to send a `circuit/
+/// ping` over the token's live socket (if any) and report `{hostname,
+/// rtt_ms}`. No live socket for that token surfaces as
+/// [`ControlError::Refused`] carrying the hub's `-32004 not_connected`.
+pub fn token_ping(token_id: &str) -> Result<serde_json::Value, ControlError> {
+    let params = serde_json::json!({ "token_id": token_id });
+    exchange("b-token-ping", "control/token_ping", Some(params))
+}
+
+/// Send one `method`/`params` request over the control socket and return its
+/// `result` — the shared body of every one-shot control exchange (`status`,
+/// `token_ping`, …). `id_literal` is a fixed, well-formed `b-` id (each
+/// caller's own; the control socket does not correlate concurrent calls, so a
+/// literal per call site is enough).
+// The `id_literal` callers pass are always well-formed `b-` ids, and the
+// request envelope encodes infallibly, so the `.expect`s here are unreachable.
+#[allow(clippy::expect_used)] // #143
+fn exchange(id_literal: &str, method: &str, params: Option<serde_json::Value>) -> Result<serde_json::Value, ControlError> {
     // No resolvable state dir means there is no control socket to connect to —
     // the same "no live hub" condition as an absent socket.
     let path = match resolve_state_dir() {
@@ -66,17 +88,12 @@ pub fn status() -> Result<serde_json::Value, ControlError> {
         .set_read_timeout(Some(CLIENT_TIMEOUT))
         .map_err(ControlError::Io)?;
 
-    let cid = CorrelationId::parse("b-status").expect("a valid body-minted id");
-    let req = holler_proto::Envelope::request(&cid, "control/status", None);
-    let bytes = format!(
-        "{}\n",
-        holler_proto::encode(&req).expect("encode the status request")
-    );
+    let cid = CorrelationId::parse(id_literal).expect("a well-formed literal control id");
+    let req = holler_proto::Envelope::request(&cid, method, params);
+    let bytes = format!("{}\n", holler_proto::encode(&req).expect("encode the control request"));
 
     let mut stream = stream;
-    stream
-        .write_all(bytes.as_bytes())
-        .map_err(ControlError::Io)?;
+    stream.write_all(bytes.as_bytes()).map_err(ControlError::Io)?;
     stream.flush().map_err(ControlError::Io)?;
 
     let mut line = String::new();
@@ -84,17 +101,14 @@ pub fn status() -> Result<serde_json::Value, ControlError> {
         .read_line(&mut line)
         .map_err(ControlError::Io)?;
     if n == 0 {
-        return Err(ControlError::BadReply(
-            "the hub closed the socket before replying".into(),
-        ));
+        return Err(ControlError::BadReply("the hub closed the socket before replying".into()));
     }
 
     let env = holler_proto::decode(&line).map_err(|e| ControlError::BadReply(e.to_string()))?;
-    // The reply is a response (result) — but be lenient: accept whatever the
-    // hub sent and hand the envelope back; the caller reads `.result`.
-    let result = env
-        .result()
+    if let Some(error) = env.error() {
+        return Err(ControlError::Refused(error.clone()));
+    }
+    env.result()
         .cloned()
-        .ok_or_else(|| ControlError::BadReply("the hub reply carried no result".into()))?;
-    Ok(result)
+        .ok_or_else(|| ControlError::BadReply("the hub reply carried no result".into()))
 }

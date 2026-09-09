@@ -39,9 +39,9 @@ pub mod vocab;
 pub use a2a::{Content, Message, Part, Role, TaskState};
 pub use docs::{
     state_for_stop_reason, AuthOk, Authenticate, Cancel, CancelResult, Caps, ConfirmedHarness,
-    Hello, HelloRole, HelloSession, Join, JoinResult, Mode, Presence, Prompt, PromptResult,
-    ProtocolAnswer, ProtocolParams, SessionAd, SessionState, Status, StatusSession, Support,
-    SupportKind, SupportParams, Update, A2A_TERMINAL_STATES, STOP_TO_STATE,
+    Hello, HelloRole, HelloSession, Join, JoinResult, Mode, PingAck, Presence, Prompt,
+    PromptResult, ProtocolAnswer, ProtocolParams, SessionAd, SessionState, Status, StatusSession,
+    Support, SupportKind, SupportParams, Update, A2A_TERMINAL_STATES, STOP_TO_STATE,
 };
 pub use envelope::{decode, encode, Envelope, EnvelopeError, typed_params};
 pub use error::{Code, Error as WireError, ErrorData};

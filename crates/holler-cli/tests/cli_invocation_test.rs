@@ -111,6 +111,13 @@ fn bare_invocation_fails_closed(#[case] args: &[&str]) {
 // table and pinned by dedicated tests in `crates/holler-cli/tests/body_join_test.rs`.
 // The `cli-surface.txt` fixture keeps pinning the *parse* guarantee for these
 // rows (clap accepts every line) independently of their run-time exit.
+//
+// NOTE (issue #182): `body run` was originally listed here too. #182
+// implements the live connection loop; an unjoined body now exits 1 with a
+// real "not joined" message rather than "not implemented", so it moves to its
+// own pinned case (`body_run_unjoined_exits_1`, below) — the full connect/
+// authenticate/reconnect/detach lifecycle against a live hub is pinned by
+// `crates/holler-cli/tests/body_run_test.rs`.
 #[rstest]
 #[case::hub_caps(&["hub", "caps"])]
 #[case::hub_caps_json(&["--json", "hub", "caps"])]
@@ -125,7 +132,6 @@ fn bare_invocation_fails_closed(#[case] args: &[&str]) {
 #[case::say(&["say", "SESSION", "TEXT"])]
 #[case::say_json(&["--json", "say", "SESSION", "TEXT"])]
 #[case::interrupt(&["interrupt", "SESSION"])]
-#[case::body_run(&["body", "run"])]
 #[case::body_caps(&["body", "caps"])]
 #[case::body_caps_json(&["--json", "body", "caps"])]
 #[case::body_support(&["body", "support", "FEATURE"])]
@@ -235,5 +241,26 @@ fn hub_status_without_live_hub() {
         .assert()
         .failure()
         .code(1);
+    let _ = std::fs::remove_dir_all(&state);
+}
+
+// Issue #182: `body run` against a state dir that has never joined exits 1
+// with a real "not joined" diagnostic (not the skeleton's "not implemented",
+// and not a hang — a run with nothing to authenticate returns immediately).
+// The live connect/authenticate/reconnect/detach lifecycle is pinned by
+// `body_run_test.rs`, which needs a live hub; this case only pins the
+// unjoined short-circuit, so it stays in this file's fast, hub-free suite.
+#[test]
+fn body_run_unjoined_exits_1() {
+    let state = std::env::temp_dir().join(format!("holler-inv-run-{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&state);
+    holler()
+        .env("HOLLER_STATE_DIR", &state)
+        .env("NO_COLOR", "1")
+        .args(["body", "run"])
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(contains("not joined"));
     let _ = std::fs::remove_dir_all(&state);
 }
