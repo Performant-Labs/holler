@@ -10,9 +10,26 @@ name = "holler_body"
 path = "src/lib.rs"
 
 # Declare only what is consumed (issue #155 §7 — `cargo machete` fails CI
-# otherwise). The crate is still the skeleton's empty lib; the body stories add
-# their dependencies (from the root [workspace.dependencies]) as they use them.
+# otherwise). Story #176 (`body join` / `body detach` / `body status`) adds the
+# first real dependencies: the one-shot join needs the WebSocket client
+# transport and the wire envelope/types; `status` / the on-disk identity need
+# serde(+json) to read and write `body/credential.json`; `tokio` drives the
+# client's event loop; and the system roots make `wss://` fail closed on a bad
+# certificate (ADR 0002) — all pinned in the root [workspace.dependencies].
 [dependencies]
+holler-proto = { path = "../holler-proto" }
+tokio = { workspace = true }
+tokio-tungstenite = { workspace = true }
+futures-util = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+# The `wss://` connect is TLS: rustls 0.23 needs a process-global crypto
+# provider installed before use (the binary installs the `ring` provider in
+# `main`). The body only needs to *query* whether a provider is installed so a
+# `wss` join can fail closed (a clear exit-1 reason) when none is — hence
+# `rustls` itself is a holler-body dependency, not just a transitive one
+# (story #176).
+rustls = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

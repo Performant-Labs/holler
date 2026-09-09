@@ -224,23 +224,60 @@ impl Hub {
 
         // The hub emits one JSON object per event on stderr; the
         // listener-ready line is `{"event":"listening","addr":"127.0.0.1:<port>"}`.
-        // We drain stderr line-by-line until that event arrives or 10 s pass.
+        //
+        // We drain that stderr on a *background* thread rather than in the
+        // calling thread. The hub also writes (at debug) per-connection wire
+        // events to stderr; if we read the pipe synchronously here and then
+        // *stop* once the port is known, the pipe fills and the blocked
+        // `write`s stall the hub's tokio runtime — so the accept loop never
+        // runs and a later `body join` times out with "connection lost". A
+        // dedicated drainer keeps the pipe flowing for the hub's whole life.
+        // `Hub::start` still blocks on the *port* (signalled over an mpsc
+        // channel once the `listening` event is seen), so readiness is
+        // observed, never slept on (ADR 0002).
         let port = {
             let stderr = child.stderr.take().expect("hub stderr is piped");
-            let reader = std::io::BufReader::new(stderr);
-            let mut reader = Some(reader);
-            wait_for(Duration::from_secs(10), || {
-                let r = reader.as_mut()?;
-                read_json_event(r, "listening").map(|v| parse_port(&v))
-            })
-        }
-        .unwrap_or_else(|| {
-            let _ = child.kill();
-            panic!(
-                "hub did not report a listening port within 10s \
-                 (`hub serve` is not implemented yet?)"
-            );
-        });
+            let (found_tx, found_rx) = std::sync::mpsc::channel::<u16>();
+            std::thread::spawn(move || {
+                let mut reader = std::io::BufReader::new(stderr);
+                let mut line = String::new();
+                let mut sent = false;
+                loop {
+                    line.clear();
+                    let n = match reader.read_line(&mut line) {
+                        Ok(0) => break,
+                        Ok(n) => n,
+                        Err(_) => break,
+                    };
+                    let _ = n;
+                    let v: Value = match serde_json::from_str(&line) {
+                        Ok(v) => v,
+                        Err(_) => continue,
+                    };
+                    if v.get("event").and_then(|e| e.as_str()) == Some("listening")
+                        && !sent
+                    {
+                        let p = parse_port(&v);
+                        sent = true;
+                        // Signal the port; the drainer keeps running so the
+                        // hub's stderr pipe never backs up.
+                        let _ = found_tx.send(p);
+                    }
+                }
+            });
+            // Block until the drainer sees the `listening` event (or 10 s).
+            std::sync::Mutex::new(found_rx)
+                .lock()
+                .unwrap()
+                .recv_timeout(Duration::from_secs(10))
+                .unwrap_or_else(|_| {
+                    let _ = child.kill();
+                    panic!(
+                        "hub did not report a listening port within 10s \
+                         (`hub serve` is not implemented yet?)"
+                    );
+                })
+        };
 
         Hub {
             port,
@@ -745,26 +782,6 @@ fn signal_tree(child: &mut Child) {
 }
 
 // --- internal helpers -------------------------------------------------------
-
-/// Read a single line off `reader`; if it parses as a JSON object whose
-/// `event` field equals `want`, return that object, else `None`.
-///
-/// Returns `None` (without distinguishing "wrong event" from "EOF") on EOF or
-/// a non-matching line. [`Hub::start`] drives this inside [`wait_for`], which
-/// re-invokes the closure every 50 ms — so each tick consumes at most one
-/// stderr line and the loop keeps draining until the `listening` event (or the
-/// 10 s budget) is reached. That tolerates any preamble lines the hub writes
-/// before it is listening.
-fn read_json_event(reader: &mut impl std::io::BufRead, want: &str) -> Option<Value> {
-    let mut line = String::new();
-    match reader.read_line(&mut line) {
-        Ok(0) => return None, // EOF
-        Ok(_) => {}
-        Err(_) => return None, // read error: treat as "not yet"
-    }
-    let v: Value = serde_json::from_str(&line).ok()?;
-    (v.get("event").and_then(|e| e.as_str()) == Some(want)).then_some(v)
-}
 
 /// Parse the port out of a `listening` event's `addr` field
 /// (`"127.0.0.1:8700"` → `8700`).

@@ -25,8 +25,8 @@ use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
 use std::task::{Context, Poll};
 
-use futures_util::{Future, Sink, SinkExt, StreamExt};
-use holler_proto::{decode, Envelope, WireError};
+use futures_util::{Future, Sink, SinkExt, Stream, StreamExt};
+use holler_proto::{decode, Envelope, Join, WireError};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream, UnixListener, UnixStream};
 use tokio::signal::unix::{signal, SignalKind};
@@ -342,9 +342,8 @@ async fn serve_forever(
     let mut sig_term = signal(SignalKind::terminate()).expect("install SIGTERM handler");
 
     let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
-
     let accept_handle = tokio::spawn(async move {
-        accept_loop(uds, ws_listeners, stop_rx).await;
+        accept_loop(uds, ws_listeners, state, stop_rx).await;
     });
 
     // 6. Only now — WS listeners bound, control socket bound + mode 0600,
@@ -385,6 +384,7 @@ async fn serve_forever(
 async fn accept_loop(
     uds: UnixListener,
     ws_listeners: Vec<TcpListener>,
+    state: HubState,
     mut stop_rx: tokio::sync::oneshot::Receiver<()>,
 ) {
     let mut accept_any = AcceptAny {
@@ -407,7 +407,7 @@ async fn accept_loop(
                     Ok(s) => s,
                     Err(_) => continue,
                 };
-                tokio::spawn(handle_ws_conn(stream));
+                tokio::spawn(handle_ws_conn(stream, state.clone()));
             }
         }
     }
@@ -455,14 +455,15 @@ impl Future for AcceptAny<'_> {
 ///
 /// - **not a v2 message** (garbage / batch / shape error) → the matching
 ///   `-32700`/`-32600` error, then close.
-/// - **`circuit/join` or `circuit/authenticate`** → stubbed with
-///   `-32601 method_not_found` (the real handshake lands in later stories),
-///   then close.
-/// - **anything else** (a request or notification that is not join/auth) →
+/// - **`circuit/join`** → redeemed via [`crate::join::redeem_join`], which
+///   replies with the `{client_id, credential}` (or a `join_failed` error) and
+///   closes the one-shot socket.
+/// - **anything else** (a request or notification that is not join) →
 ///   `-32002 unauthenticated`, then close.
 ///
-/// The socket is **always** closed after the first frame on this story: there
-/// is no talk yet (no token registry, no roster).
+/// The socket is **always** closed after the first frame on this story: a join
+/// is a one-shot bootstrap (docs §3), so there is no talk yet.
+///
 /// Perform the **server side** of the WebSocket opening handshake over an
 /// already-accepted loopback `TcpStream`, and return the upgraded
 /// `WebSocketStream`.
@@ -483,11 +484,11 @@ async fn server_handshake(mut stream: TcpStream) -> Option<WebSocketStream<TcpSt
     let mut buf: Vec<u8> = Vec::new();
     let mut tmp = [0u8; 1024];
     let header_end = loop {
-        let n = stream.read(&mut tmp).await.ok()?;
-        if n == 0 {
-            return None; // peer closed before sending a request.
+        match stream.read(&mut tmp).await {
+            Ok(0) => return None, // peer closed before sending a request.
+            Ok(n) => buf.extend_from_slice(&tmp[..n]),
+            Err(_) => return None,
         }
-        buf.extend_from_slice(&tmp[..n]);
         // The header section ends at the first `\r\n\r\n`.
         if let Some(pos) = find_blank_line(&buf) {
             break pos;
@@ -593,34 +594,53 @@ fn serialize_response(response: &WsResponse) -> Vec<u8> {
     out
 }
 
-async fn handle_ws_conn(stream: TcpStream) {
+/// Read frames off a freshly-upgraded socket until a *text* frame arrives,
+/// skipping ping/pong (and the untyped `Frame`), replying to a `Binary` first
+/// frame with `invalid_request`, and closing the socket (returning `None`) on a
+/// close or EOF. Returns the first text frame's payload.
+async fn read_first_text_frame<S>(
+    sink: &mut S,
+    stream: &mut (impl Stream<Item = Result<Message, WsError>> + Unpin),
+) -> Option<String>
+where
+    S: Sink<Message, Error = WsError> + Unpin,
+{
+    loop {
+        match stream.next().await {
+            None => {
+                // Peer closed before sending anything.
+                close(sink).await;
+                return None;
+            }
+            Some(Ok(Message::Text(t))) => return Some(t.to_string()),
+            Some(Ok(Message::Binary(_))) => {
+                // A binary first frame is not a v2 message.
+                send_error(sink, None, Code::InvalidRequest, "a binary frame is not a v2 message").await;
+                close(sink).await;
+                return None;
+            }
+            Some(Ok(Message::Ping(_)))
+            | Some(Ok(Message::Pong(_)))
+            | Some(Ok(Message::Frame(_))) => continue,
+            Some(Ok(Message::Close(_))) | Some(Err(_)) => {
+                close(sink).await;
+                return None;
+            }
+        }
+    }
+}
+
+async fn handle_ws_conn(stream: TcpStream, state: HubState) {
     let ws = match server_handshake(stream).await {
         Some(ws) => ws,
         None => return, // not a WebSocket client (or it left mid-handshake).
     };
     let (mut sink, mut stream) = ws.split();
 
-    // Read the first frame (skip ping/pong; a close or EOF ends the socket).
-    let first = loop {
-        match stream.next().await {
-            None => return, // peer closed before sending anything.
-            Some(Ok(Message::Text(t))) => break t,
-            Some(Ok(Message::Binary(_))) => {
-                send_error(
-                    &mut sink,
-                    None,
-                    Code::InvalidRequest,
-                    "a binary frame is not a v2 message",
-                )
-                .await;
-                close(&mut sink).await;
-                return;
-            }
-            Some(Ok(Message::Ping(_)))
-            | Some(Ok(Message::Pong(_)))
-            | Some(Ok(Message::Frame(_))) => continue,
-            Some(Ok(Message::Close(_))) | Some(Err(_)) => return,
-        }
+    // Read the first frame (skipping ping/pong; a close or EOF ends the socket).
+    let first = match read_first_text_frame(&mut sink, &mut stream).await {
+        Some(t) => t,
+        None => return,
     };
 
     // `first` is a text frame; run it through the codec.
@@ -635,38 +655,28 @@ async fn handle_ws_conn(stream: TcpStream) {
         }
     };
 
-    // A decoded message. Decide by method (the fail-closed rule).
-    let method = match env.method() {
-        Some(m) => m,
-        // A response or error as the *first* frame on a fresh socket is not
-        // a join/auth: refuse it as unauthenticated.
-        None => {
-            send_error(
-                &mut sink,
-                env.id(),
-                Code::Unauthenticated,
-                "not authenticated",
-            )
-            .await;
-            close(&mut sink).await;
-            return;
+    // Decide by method (the fail-closed rule). A response or error as the
+    // *first* frame on a fresh socket is not a join/auth: refuse it as
+    // unauthenticated (the `None` arm).
+    match env.method() {
+        // The one-shot bootstrap (docs §3): the body presents a one-time join
+        // secret; the hub redeems it for a `client_id` + long-lived
+        // `credential`, replies, and closes the socket. (The normal
+        // `circuit/authenticate` path — re-authenticating an existing body —
+        // is a later story; on a fresh socket it is still refused below.)
+        Some("circuit/join") => {
+            let params = match holler_proto::typed_params::<Join>(&env) {
+                Ok(p) => p,
+                Err(e) => {
+                    send_error(&mut sink, env.id(), Code::InvalidParams, &e.message).await;
+                    close(&mut sink).await;
+                    return;
+                }
+            };
+            crate::join::redeem_join(&mut sink, env.id(), params, &state).await;
         }
-    };
-
-    match method {
-        "circuit/join" | "circuit/authenticate" => {
-            // Stubbed for this story: refused, then the socket closes (the
-            // real handshake + registry lands in the join / token stories).
-            send_error(
-                &mut sink,
-                env.id(),
-                Code::MethodNotFound,
-                "join/authenticate are not implemented yet",
-            )
-            .await;
-            close(&mut sink).await;
-        }
-        // Any other method on a fresh socket: unauthenticated.
+        // Any other method on a fresh socket (incl. `circuit/authenticate`),
+        // or a response/error where a request is expected: unauthenticated.
         _ => {
             send_error(
                 &mut sink,
@@ -682,7 +692,7 @@ async fn handle_ws_conn(stream: TcpStream) {
 
 /// Send an error envelope (echoing `id` when given) as a text frame, then let
 /// the sink flush.
-async fn send_error(
+pub(crate) async fn send_error(
     sink: &mut (impl Sink<Message, Error = WsError> + Unpin),
     id: Option<&str>,
     code: Code,
@@ -704,7 +714,7 @@ async fn send_error(
 
 /// Send a WS close frame and flush it to the peer (the peer's client auto-replies
 /// to a close frame; flushing guarantees ours is on the wire before we drop).
-async fn close(sink: &mut (impl Sink<Message, Error = WsError> + Unpin)) {
+pub(crate) async fn close(sink: &mut (impl Sink<Message, Error = WsError> + Unpin)) {
     let _ = sink.send(Message::Close(None)).await;
     let _ = sink.flush().await;
 }

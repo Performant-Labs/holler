@@ -1,5 +1,13 @@
 //! `holler_body` — the body role of the single `holler` binary (ADR 0001).
 //!
-//! Empty in the workspace skeleton (story #127); the protocol/body stories
-//! fill it in. Dependencies are declared (inherited from the workspace,
-//! pinned in ADR 0003) so the crate compiles from the start.
+//! Story #176 lands the body's one-shot bootstrap over the wire: `body join`
+//! (redeem a one-time join secret for a `client_id` + credential and persist
+//! the identity), `body detach` (forget the identity), and `body status`
+//! (report this process's own identity). The protocol/body talk stories fill
+//! the rest in.
+
+pub mod detach;
+pub mod identity;
+pub mod join;
+pub mod server_address;
+pub mod status;

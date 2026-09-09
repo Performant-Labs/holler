@@ -14,9 +14,30 @@
 //! silent fallback. All logging goes to stderr; stdout is command output.
 
 use clap::Parser;
-use holler_cli::{Attach, AttachCommand, BodyCommand, Cli, Command, HubCommand, Mint, TokenCommand};
+use holler_cli::{
+    Attach, AttachCommand, BodyCommand, Cli, Command, HubCommand, Mint, TokenCommand,
+};
 use holler_proto::log::{emit_banner, init, resolve};
 use holler_proto::TokenError;
+
+/// Install rustls's process-global crypto provider for `wss://` (TLS)
+/// transport, before any `ClientConfig`/`ServerConfig` is built.
+///
+/// rustls 0.23 picks its crypto from a process-global that must be installed
+/// before the first use; with none set, a `wss://` connect fails ("no
+/// process-level CryptoProvider available"). The workspace builds rustls with
+/// its default `aws-lc-rs` provider (the same one `tokio-tungstenite`'s
+/// `rustls-tls-*` features select), so the binary installs
+/// `rustls::crypto::aws_lc_rs::default_provider` once, here, at start — before
+/// the body's throwaway runtime in `join` connects, and before the hub's
+/// listener. Installing twice is a no-op: `install_default` returns the
+/// already-installed provider, which we discard. A `wss://` join with no
+/// provider still fails closed (exit 1) in `holler_body::join`, so a
+/// provider-less build can never downgrade to plaintext.
+#[allow(clippy::let_and_return)] // #176
+fn install_tls_provider() {
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+}
 
 /// ADR 0003: every unimplemented leaf exits 1 with this shape on stderr.
 fn not_implemented(story: &str) -> ! {
@@ -353,6 +374,13 @@ fn join_command(state: &holler_hub::state::HubState, token_id: &str, secret: &st
 }
 
 fn main() {
+    // Install the rustls crypto provider before any I/O: a `wss://` (TLS)
+    // WebSocket needs a process-global provider set up ahead of the first
+    // connection, and the body's `join` runs on a throwaway runtime later in
+    // this process. (No-op when the build has no `ring` provider; a `wss`
+    // join then still fails closed in `holler_body::join`.)
+    install_tls_provider();
+
     // ADR 0003: a bare `holler` (or `holler hub`, an unknown subcommand, …)
     // fails closed with exit 2 and a usage message on stderr. That is clap's
     // own behaviour now — the root parser is `subcommand_required = true`, so
@@ -385,10 +413,10 @@ fn main() {
     init(config);
     emit_banner();
 
-    // Story #143: the two hub leaves that are implemented — `hub serve`
-    // (the loopback listener + control socket) and `hub status` (read the
-    // live hub's status over the control socket). Every other leaf is still
-    // the skeleton's "not implemented" (their stories land later).
+    // Story #143: the hub leaves that are implemented — `hub serve` (the
+    // loopback listener + control socket) and `hub status` (read the live hub's
+    // status over the control socket). Every other leaf is still the
+    // skeleton's "not implemented" (their stories land later).
     if let Command::Hub(hub) = &cli.command {
         match &hub.command {
             HubCommand::Serve(serve) => {
@@ -425,29 +453,119 @@ fn main() {
         }
     }
 
+    // Story #176: the body's identity leaves — `body join` (redeem a minted
+    // join secret over the wire and persist the identity), `body detach`
+    // (forget it), and `body status` (report this process's own identity). The
+    // other body leaves (run, caps, support, query, attach) are still inert —
+    // their stories land later.
+    if let Command::Body(body) = &cli.command {
+        match &body.command {
+            BodyCommand::Join(join) => body_join(&join.server, &join.token),
+            BodyCommand::Detach(_) => body_detach(),
+            BodyCommand::Status(_) => body_status(cli.json),
+            BodyCommand::Run(_) => not_implemented("BodyRun"),
+            BodyCommand::Caps(_) => not_implemented("BodyCaps"),
+            BodyCommand::Support(_) => not_implemented("BodySupport"),
+            BodyCommand::Query(_) => not_implemented("BodyQuery"),
+            BodyCommand::Attach(Attach { command }) => match command {
+                AttachCommand::Sessions(_) => not_implemented("BodyAttachSessions"),
+                AttachCommand::Init(_) => not_implemented("BodyAttachInit"),
+            },
+        }
+    }
+
     let story = match &cli.command {
-        // hub (the implemented Serve/Status were handled above and returned;
-        // this arm is defensive — every `Command::Hub` path above exits)
+        // hub (the implemented leaves were handled above and returned; this
+        // arm is defensive — every `Command::Hub` path above exits)
         Command::Hub(_) => not_implemented("Hub"),
         // top-level (hub-only daily verbs)
         Command::Roster(_) => "Roster",
         Command::Say(_) => "Say",
         Command::Interrupt(_) => "Interrupt",
-        // body
-        Command::Body(body) => match &body.command {
-            BodyCommand::Join(_) => "BodyJoin",
-            BodyCommand::Run(_) => "BodyRun",
-            BodyCommand::Detach(_) => "BodyDetach",
-            BodyCommand::Status(_) => "BodyStatus",
-            BodyCommand::Caps(_) => "BodyCaps",
-            BodyCommand::Support(_) => "BodySupport",
-            BodyCommand::Query(_) => "BodyQuery",
-            BodyCommand::Attach(Attach { command }) => match command {
-                AttachCommand::Sessions(_) => "BodyAttachSessions",
-                AttachCommand::Init(_) => "BodyAttachInit",
-            },
-        },
+        // body (the implemented Join/Detach/Status were handled above and
+        // returned; this arm is defensive — every `Command::Body` path above
+        // exits)
+        Command::Body(_) => not_implemented("Body"),
     };
 
     not_implemented(story);
+}
+
+// --- `holler body …` (story #176) ------------------------------------------
+//
+// The body's identity leaves. Each resolves the state dir (the body's
+// credential lives under `<state>/body/`), drives the `holler_body` helpers,
+// and applies the ADR 0003 exit code the helper returns (0 ok, 1 a runtime
+// failure, 3 a fail-closed policy refusal). The CLI is not a tokio runtime —
+// `holler_body::join` builds its own throwaway runtime for the one-shot wire
+// handshake — so these run straight-line like the token verbs.
+
+/// Resolve the state dir, or fail closed (exit 1) if there is nowhere for the
+/// body's credential to live. (The e2e harness always sets `HOLLER_STATE_DIR`.)
+fn body_state() -> holler_hub::state::HubState {
+    match holler_hub::state::resolve_state_dir() {
+        Some(root) => holler_hub::state::HubState::from_root(root),
+        None => {
+            // `resolve_state_dir` already printed the refusal to stderr.
+            std::process::exit(1);
+        }
+    }
+}
+
+/// `holler body join --server <url> --token <ID:SECRET>` — redeem a minted
+/// one-time join secret over the wire and persist the body's identity. The
+/// helper prints its own one-line result (a stderr reason on a refusal; a
+/// success line naming the `client_id`, never the secret) and returns the exit
+/// code, which the bin applies here (ADR 0003: 0 joined, 1 a runtime failure
+/// incl. a refused redeem, 3 a plaintext non-loopback `ws://`).
+fn body_join(server: &str, token: &str) -> ! {
+    let state = body_state();
+    let exit = holler_body::join::join(&state.root, server, token, "default");
+    let code = match exit {
+        holler_body::join::JoinExit::Ok => 0,
+        holler_body::join::JoinExit::Refused(_) => 1,
+        holler_body::join::JoinExit::Policy => 3,
+    };
+    std::process::exit(code);
+}
+
+/// `holler body detach` — forget the body's identity (delete
+/// `<state>/body/credential.json`). Idempotent: always exit 0 except an I/O
+/// failure (exit 1).
+fn body_detach() -> ! {
+    let state = body_state();
+    let code = match holler_body::detach::detach(&state.root) {
+        holler_body::detach::DetachExit::Ok => 0,
+        holler_body::detach::DetachExit::Io => 1,
+    };
+    std::process::exit(code);
+}
+
+/// `holler body status [--json]` — report this process's own identity (local:
+/// it reads the credential file, never a live hub). With `--json`, only the
+/// status document goes to stdout; without, a short human summary does. An
+/// unjoined body is a valid document (`joined: false`, exit 0), not an error;
+/// only a state-dir I/O failure is exit 1.
+fn body_status(json: bool) -> ! {
+    let state = body_state();
+    let (doc, exit) = holler_body::status::status(&state.root);
+    let Some(doc) = doc else {
+        // A state-dir I/O failure: the helper already printed the reason.
+        std::process::exit(1);
+    };
+    if json {
+        match serde_json::to_string(&doc) {
+            Ok(s) => println!("{s}"),
+            Err(e) => {
+                eprintln!("error: {e}");
+                std::process::exit(1);
+            }
+        }
+    } else {
+        println!("{}", holler_body::status::render_human(&doc));
+    }
+    std::process::exit(match exit {
+        holler_body::status::StatusExit::Ok => 0,
+        holler_body::status::StatusExit::Io => 1,
+    });
 }

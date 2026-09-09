@@ -6,6 +6,7 @@
 //! `control/status` answer that `holler hub status` reads.
 
 pub mod control;
+pub mod join;
 pub mod serve;
 pub mod state;
 pub mod token;
