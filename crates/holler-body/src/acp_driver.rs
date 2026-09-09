@@ -66,6 +66,29 @@
 //!   fails closed with [`DriverError::Unsupported`] (no reply is ever sent on
 //!   the caller's behalf). `cancel()` still resolves it (`Cancel` action),
 //!   same as any other pending block.
+//! - **`AcpDriver::cancel()` returns `Result<StopReason, DriverError>`, not
+//!   `Result<(), DriverError>`** (issues #238/#239). Two bugs shared this one
+//!   method: (1) the real `StopReason` a `done_rx` wait observed was thrown
+//!   away, so `session_manager::task::handle_cancel`/`handle_replace` had to
+//!   hardcode `StopReason::Cancelled` for every cancel — even one that raced
+//!   a turn settling some other way — in direct violation of
+//!   `docs/protocol/v2.md` §6's "`stopReason` is the source of truth,
+//!   carried verbatim"; (2) the "is anything even in flight" check and the
+//!   `awaiting_done` registration used to be two separate lock acquisitions
+//!   with a real gap between them, in which the connection task's own `idle`
+//!   notification could arrive and find nobody listening, stalling the full
+//!   `CANCEL_TIMEOUT` before force-killing an already-idle child. Both are
+//!   fixed together: [`connection::Shared`] now also tracks
+//!   `last_stop_reason` (the most recent real outcome this driver has
+//!   observed, from either the notification handler's `Idle` arm or the
+//!   crash watcher), and `cancel()`'s idle/pending check and its
+//!   `awaiting_done` registration happen inside one critical section — see
+//!   that method's own doc comment for the full reasoning, and
+//!   `acp_driver_test.rs`'s `cancel_after_natural_completion_reports_real_reason_not_cancelled`
+//!   / `cancel_mid_turn_reports_real_cancelled_reason` for the regression
+//!   coverage (plus that second test's doc comment for why the exact
+//!   instruction-level race window isn't independently provable in a bounded
+//!   test without a synchronization hook this driver doesn't have).
 
 mod answerable;
 mod connection;
@@ -321,6 +344,7 @@ impl AcpDriver {
             pending: None,
             current_events: None,
             awaiting_done: None,
+            last_stop_reason: None,
         }));
 
         let (ready_tx, ready_rx) = oneshot::channel::<Result<Ready, String>>();
@@ -416,36 +440,71 @@ impl AcpDriver {
     /// this is the contract that makes it impossible to start the next prompt
     /// on a turn the agent still considers open. On timeout, the child is
     /// force-killed and `DriverError::Cancel` is returned.
-    pub async fn cancel(&self) -> Result<(), DriverError> {
-        // Resolve any pending block with the cancelled outcome first (per the
-        // ACP v2 cancellation contract: a client sending `session/cancel`
-        // MUST resolve every pending `session/request_permission` with
-        // `Cancelled`).
-        {
+    ///
+    /// Returns the **real** [`StopReason`] the agent (or, for a nothing-was-
+    /// in-flight no-op, the driver's own last-observed turn) actually
+    /// resolved with — never a synthesized `Cancelled` papering over some
+    /// other outcome (issue #238). `docs/protocol/v2.md` §6 is explicit that
+    /// `stopReason` is "the source of truth (the ACP value, carried
+    /// verbatim)"; inventing one here would violate that contract the moment
+    /// a caller (`session_manager::task::handle_cancel`/`handle_replace`)
+    /// used the return value to finish the turn out.
+    pub async fn cancel(&self) -> Result<StopReason, DriverError> {
+        let (done_tx, done_rx) = oneshot::channel();
+        // Everything this call needs to decide "is a turn actually in
+        // flight, and if not, what did the last one resolve to" is read and
+        // (when a turn IS in flight) `awaiting_done` is registered, all under
+        // this ONE lock acquisition (issue #239). The previous version of
+        // this method took the lock twice — check-then-release, then a
+        // second acquire to register `awaiting_done` — with a real gap in
+        // between. If the connection task's `handle_state_update` delivered
+        // the genuine `idle` state_update in that gap, `awaiting_done` was
+        // still `None` when it fired: the signal was lost, and this method
+        // would wait out the full `CANCEL_TIMEOUT` before force-killing a
+        // perfectly healthy, already-idle child. Doing the check and the
+        // registration inside one critical section closes that window: by
+        // the time this lock is released, either the turn has already fully
+        // settled (and this method returns immediately below) or
+        // `awaiting_done` is already in place to catch the *next* `idle`
+        // notification, whenever it arrives — there is no gap left in which
+        // one could be missed.
+        let already_settled = {
             let mut guard = lock(&self.shared);
+            // Resolve any pending block with the cancelled outcome first (per
+            // the ACP v2 cancellation contract: a client sending
+            // `session/cancel` MUST resolve every pending
+            // `session/request_permission` with `Cancelled`).
             if let Some(pending) = guard.pending.take() {
                 reply_cancelled(pending.responder);
             }
             if guard.status == Status::Idle && guard.current_events.is_none() {
                 // Nothing in flight: a no-op, not a 5s stall waiting for an
-                // `idle` state_update that will never arrive.
-                return Ok(());
+                // `idle` state_update that will never arrive. Report the
+                // real last-observed outcome (issue #238) — a turn may well
+                // have already resolved `end_turn`/`max_tokens`/etc. before
+                // this call ever happened, and claiming `Cancelled` here
+                // would be exactly the kind of invented reason the wire
+                // contract forbids. Only fall back to `Cancelled` when this
+                // driver has never settled any turn at all (nothing real to
+                // report either way — a cancel against a driver that has
+                // never run a prompt is, definitionally, a cancelled no-op).
+                Some(guard.last_stop_reason.unwrap_or(StopReason::Cancelled))
+            } else {
+                guard.awaiting_done = Some(done_tx);
+                None
             }
-        }
-
-        let (done_tx, done_rx) = oneshot::channel();
-        {
-            let mut guard = lock(&self.shared);
-            guard.awaiting_done = Some(done_tx);
+        };
+        if let Some(reason) = already_settled {
+            return Ok(reason);
         }
 
         self.session_cancel()
             .map_err(|e| DriverError::Cancel(format!("sending session/cancel: {e}")))?;
 
         match tokio::time::timeout(CANCEL_TIMEOUT, done_rx).await {
-            Ok(Ok(_stop_reason)) => {
+            Ok(Ok(stop_reason)) => {
                 lock(&self.shared).status = Status::Idle;
-                Ok(())
+                Ok(stop_reason)
             }
             Ok(Err(_recv_dropped)) => Err(DriverError::Cancel(
                 "connection ended while awaiting the cancelled state_update".to_string(),
