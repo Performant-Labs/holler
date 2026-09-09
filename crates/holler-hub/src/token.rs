@@ -642,6 +642,23 @@ fn store_delay() -> Option<std::time::Duration> {
         .map(std::time::Duration::from_millis)
 }
 
+/// `list` on the blocking pool (the serve path's twin). The serve loop runs on
+/// a tokio runtime, so a synchronous `list` there would block an executor
+/// thread while it runs the blocking `flock` + file read. More importantly for
+/// #184: a synchronous `list` on the runtime uses a *non-blocking*
+/// `flock` try — if a sibling connection's `redeem`/`verify` is concurrently
+/// holding the store lock (on the blocking pool), the try fails and the
+/// caller spuriously sees "no matching token". Running the `list` on the
+/// blocking pool lets it block on the flock like every other store op, so a
+/// slow sibling store op cannot stall or mis-refuse a join.
+pub async fn list_async(state: &HubState) -> Result<Vec<Record>, TokenError> {
+    let state = state.clone();
+    if let Some(d) = store_delay() {
+        tokio::time::sleep(d).await;
+    }
+    block_in_place(|| list(&state))
+}
+
 /// `redeem` on the blocking pool.
 pub async fn redeem_async(
     secret: &str,

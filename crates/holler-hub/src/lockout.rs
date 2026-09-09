@@ -98,6 +98,17 @@ impl Lockout {
         }
     }
 
+    /// Reset the failure count for `peer` (a successful authentication clears
+    /// any in-window strikes, per the spec: "A successful auth resets the
+    /// counter"). If the peer is currently locked out, the cooldown is also
+    /// lifted (the successful auth proves the peer is no longer attacking).
+    pub fn reset(&self, peer: &IpAddr) {
+        self.tripped
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(peer);
+    }
+
     /// Record an authentication failure for `peer`. Returns `true` if this
     /// failure **tripped** the lockout (the peer is now refused for the
     /// cooldown). Failures are counted within the sliding window; a peer is
@@ -107,8 +118,7 @@ impl Lockout {
     /// un-lapsed tripped cooldown is re-tripped (its cooldown is refreshed),
     /// and otherwise its in-window failure count is tracked until it reaches
     /// `max_failures`, at which point it is tripped. A successful
-    /// authentication does **not** clear a failure count (a lockout that
-    /// expired does, by the cooldown itself).
+    /// authentication clears the failure count (see [`Self::reset`]).
     pub fn record_failure(&self, peer: &IpAddr) -> bool {
         let now = self.clock.now_ms();
         let mut map = self.tripped.lock().unwrap_or_else(|e| e.into_inner());

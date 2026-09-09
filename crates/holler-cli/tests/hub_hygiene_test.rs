@@ -48,7 +48,7 @@ type WsClient = WebSocketStream<MaybeTlsStream<TcpStream>>;
 /// the harness's `holler_cmd` base so the state dir / debug / log-format env
 /// are inherited; `HOLLER_CLI_NO_UPDATE_CHECK` keeps a one-shot CLI child (the
 /// `hub token …` / `hub status` invocations) from doing a slow update check.
-#[allow(dead_code)]
+#[allow(dead_code)] // #184
 fn start_hub_with_env(state: &StateDir, env: &[(&str, &str)]) -> Hub {
     let mut cmd = holler_cmd(state);
     for (k, v) in env {
@@ -202,10 +202,13 @@ async fn decode_next(
     }
 }
 
-/// Mint a token and authenticate a fresh WS client to the hub (join +
-/// authenticate). `state` is the `StateDir` the hub was spawned against (token
-/// minting is state-dir-bound; the `Hub` itself carries no state reference).
-/// Returns the authenticated sink/stream plus the token id.
+/// Mint a token and authenticate a fresh WS client to the hub. Per protocol
+/// v2 §3, a freshly-minted token is `unused` — it must be **redeemed** via
+/// `circuit/join` (which binds it and returns a `credential`) before
+/// `circuit/authenticate` will accept it. `join` is a one-shot bootstrap that
+/// closes the socket after replying, so this helper uses **two** sockets:
+/// socket 1 joins (redeems), socket 2 authenticates with the credential.
+/// Returns the authenticated sink/stream (socket 2) plus the token id.
 async fn auth_client(
     state: &StateDir,
     hub: &Hub,
@@ -216,26 +219,23 @@ async fn auth_client(
     String,
 ) {
     let (token_id, secret) = mint_token(state, "hygiene");
-    let (mut sink, mut stream) = connect_split(&hub.ws_url()).await;
 
-    // circuit/join and circuit/authenticate are mutually exclusive on a fresh
-    // socket (docs/protocol/v2.md section 3): join is a one-shot bootstrap that
-    // redeems a one-time join secret and closes the socket after replying —
-    // it never leads into talk on the same connection. Here the token/secret
-    // already came from the CLI-side `hub token mint` (not a wire join
-    // secret), so the credential is presented directly via
-    // circuit/authenticate, exactly like the harness's other passing hygiene
-    // tests (e.g. five_bad_auths_lock_out_peer_for_window).
+    // Socket 1: redeem the join secret (binds the token, returns a credential).
+    let (_join_sink, _join_stream, credential) =
+        join_and_get_credential(hub, &secret, hostname).await;
+
+    // Socket 2: authenticate with the (now bound) credential.
+    let (mut sink, mut stream) = connect_split(&hub.ws_url()).await;
     let auth = Message::text(
         holler_proto::encode(
             &holler_proto::Envelope::request(
                 &holler_proto::CorrelationId::mint_hub(),
                 "circuit/authenticate",
-                Some(json!({ "token_id": token_id, "credential": secret, "hostname": hostname })),
+                Some(json!({ "token_id": token_id, "credential": credential, "hostname": hostname })),
             ),
         )
             .unwrap_or_default()
-        );
+    );
     match next_frame(&mut sink, &mut stream, auth).await {
         Frame::Env { code, is_error, .. } => {
             assert!(!is_error, "authenticate was refused (code {:?})", code);
@@ -244,6 +244,49 @@ async fn auth_client(
     }
 
     (sink, stream, token_id)
+}
+
+/// Join on a bootstrap socket and return the credential. The hub closes the
+/// join socket after replying (protocol v2 §3: join is a one-shot bootstrap),
+/// so we read the join response via `decode_next` (no outbound frame) rather
+/// than `next_frame` (which sends a close the hub has already sent). The
+/// sink/stream are dropped by the caller.
+async fn join_and_get_credential(
+    hub: &Hub,
+    secret: &str,
+    hostname: &str,
+) -> (
+    futures_util::stream::SplitSink<WsClient, Message>,
+    futures_util::stream::SplitStream<WsClient>,
+    String,
+) {
+    let (mut sink, mut stream) = connect_split(&hub.ws_url()).await;
+    let join = Message::text(
+        holler_proto::encode(
+            &holler_proto::Envelope::request(
+                &holler_proto::CorrelationId::mint_hub(),
+                "circuit/join",
+                Some(json!({ "secret": secret, "hostname": hostname })),
+            ),
+        )
+            .unwrap_or_default()
+    );
+    let _ = sink.send(join).await;
+    let _ = sink.flush().await;
+    // The join response arrives as a text frame; the hub then closes the
+    // socket. We read the response (the next frame is the join result, since
+    // the hub sends the response before the close).
+    let resp = decode_next(&mut stream).await;
+    let Frame::Env { result: Some(doc), is_error, .. } = resp else {
+        panic!("join did not return a result: {resp:?}");
+    };
+    assert!(!is_error, "join was refused");
+    let credential = doc
+        .get("credential")
+        .and_then(Value::as_str)
+        .expect("join result carries a credential")
+        .to_owned();
+    (sink, stream, credential)
 }
 
 /// The `circuit/ping` request frame (a round-trip canary).
@@ -265,7 +308,6 @@ fn ping_frame() -> Message {
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-#[ignore = "issue #184: a single legitimate circuit/authenticate on a fresh hub is spuriously refused with 1008 auth refused: too many failures, and the hub panics server-side (tokio oneshot.rs:1291 called after complete) — a real, 100% reproducible concurrency bug in the connection-lifecycle/lockout code, not a test issue. Root cause not yet found: record_failure()/the accept loop look correct in isolation, so something is processing the same connection or auth attempt more than once. Needs dedicated investigation."]
 async fn reauth_supersedes_and_closes_old_socket_with_notification() {
     let state = StateDir::new();
     let hub = Hub::start(&state);
@@ -274,23 +316,24 @@ async fn reauth_supersedes_and_closes_old_socket_with_notification() {
     let (token_id, secret) = mint_token(&state, "supersede");
     let hostname = "b184-supersede";
 
-    // Old socket: authenticate (claims the token). circuit/join and
-    // circuit/authenticate are mutually exclusive on a fresh socket
-    // (docs/protocol/v2.md section 3) — join is a one-shot bootstrap that
-    // closes the socket after replying, so it cannot precede authenticate on
-    // the same connection. `token_id`/`secret` already came from the CLI-side
-    // `hub token mint`, so authenticate is presented directly.
+    // First redeem the join secret on a bootstrap socket (protocol v2 §3:
+    // join is a one-shot that closes after replying; it binds the token and
+    // returns the long-lived credential that authenticate requires).
+    let (_join_sink, _join_stream, credential) =
+        join_and_get_credential(&hub, &secret, hostname).await;
+
+    // Old socket: authenticate with the credential (claims the token).
     let (mut old_sink, mut old_stream) = connect_split(&url).await;
     let old_auth = Message::text(
         holler_proto::encode(
             &holler_proto::Envelope::request(
                 &holler_proto::CorrelationId::mint_hub(),
                 "circuit/authenticate",
-                Some(json!({ "token_id": token_id, "credential": secret, "hostname": hostname })),
+                Some(json!({ "token_id": token_id, "credential": &credential, "hostname": hostname })),
             ),
         )
             .unwrap_or_default()
-        );
+    );
     match next_frame(&mut old_sink, &mut old_stream, old_auth).await {
         Frame::Env { is_error, .. } => assert!(!is_error, "old authenticate refused"),
         other => panic!("old: expected auth response, got {other:?}"),
@@ -303,11 +346,11 @@ async fn reauth_supersedes_and_closes_old_socket_with_notification() {
             &holler_proto::Envelope::request(
                 &holler_proto::CorrelationId::mint_hub(),
                 "circuit/authenticate",
-                Some(json!({ "token_id": token_id, "credential": secret, "hostname": hostname })),
+                Some(json!({ "token_id": token_id, "credential": &credential, "hostname": hostname })),
             ),
         )
             .unwrap_or_default()
-        );
+    );
     match next_frame(&mut new_sink, &mut new_stream, new_auth).await {
         Frame::Env { is_error, .. } => assert!(!is_error, "new authenticate must succeed"),
         other => panic!("new: expected auth response, got {other:?}"),
@@ -343,7 +386,6 @@ async fn reauth_supersedes_and_closes_old_socket_with_notification() {
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-#[ignore = "issue #184: a single legitimate circuit/authenticate on a fresh hub is spuriously refused with 1008 auth refused: too many failures, and the hub panics server-side (tokio oneshot.rs:1291 called after complete) — a real, 100% reproducible concurrency bug in the connection-lifecycle/lockout code, not a test issue. Root cause not yet found: record_failure()/the accept loop look correct in isolation, so something is processing the same connection or auth attempt more than once. Needs dedicated investigation."]
 async fn revoke_force_closes_live_connection() {
     let state = StateDir::new();
     let hub = Hub::start(&state);
@@ -392,7 +434,6 @@ async fn revoke_force_closes_live_connection() {
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-#[ignore = "issue #184: a single legitimate circuit/authenticate on a fresh hub is spuriously refused with 1008 auth refused: too many failures, and the hub panics server-side (tokio oneshot.rs:1291 called after complete) — a real, 100% reproducible concurrency bug in the connection-lifecycle/lockout code, not a test issue. Root cause not yet found: record_failure()/the accept loop look correct in isolation, so something is processing the same connection or auth attempt more than once. Needs dedicated investigation."]
 async fn oversized_frame_closes_1009() {
     let state = StateDir::new();
     let hub = Hub::start(&state);
@@ -523,8 +564,8 @@ async fn five_bad_auths_lock_out_peer_for_window() {
                 .unwrap_or_default()
         );
         let _ = sink.send(bad_auth).await;
-        // Read ALL inbound frames until a close or EOF (the hub may send an
-        // error frame before the close on a non-tripping strike).
+        // Read the next inbound frame: a failed authenticate is refused with a
+        // bare 1008 close (no error frame — see `refuse_auth`).
         loop {
             let f = decode_next(&mut stream).await;
             if f.close_code().is_some() {
@@ -579,7 +620,6 @@ async fn five_bad_auths_lock_out_peer_for_window() {
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-#[ignore = "issue #184: a single legitimate circuit/authenticate on a fresh hub is spuriously refused with 1008 auth refused: too many failures, and the hub panics server-side (tokio oneshot.rs:1291 called after complete) — a real, 100% reproducible concurrency bug in the connection-lifecycle/lockout code, not a test issue. Root cause not yet found: record_failure()/the accept loop look correct in isolation, so something is processing the same connection or auth attempt more than once. Needs dedicated investigation."]
 async fn slow_token_store_does_not_stall_sibling_ping() {
     let state = StateDir::new();
     // `HOLLER_STORE_DELAY_MS` makes the hub's async token-store twins wait 200
@@ -605,30 +645,23 @@ async fn slow_token_store_does_not_stall_sibling_ping() {
         .await;
     let _ = slow_id;
 
-    // A sibling client: authenticate (its own store ops) and then time a ping.
+    // A sibling client: join (binds the token) on a bootstrap socket, then
+    // authenticate on a fresh socket (its own store ops), and then time a
+    // ping.
     let (sib_id, sib_secret) = mint_token(&state, "sibling");
+    let (_sib_join_sink, _sib_join_stream, sib_credential) =
+        join_and_get_credential(&hub, &sib_secret, "b184-sib").await;
     let (mut sib_sink, mut sib_stream) = connect_split(&url).await;
-    let sib_join = Message::text(
-        holler_proto::encode(
-            &holler_proto::Envelope::request(
-                &holler_proto::CorrelationId::mint_hub(),
-                "circuit/join",
-                Some(json!({ "secret": sib_secret, "hostname": "b184-sib" })),
-            ),
-        )
-            .unwrap_or_default()
-        );
-    let _ = next_frame(&mut sib_sink, &mut sib_stream, sib_join).await;
     let sib_auth = Message::text(
         holler_proto::encode(
             &holler_proto::Envelope::request(
                 &holler_proto::CorrelationId::mint_hub(),
                 "circuit/authenticate",
-                Some(json!({ "token_id": sib_id, "credential": sib_secret, "hostname": "b184-sib" })),
+                Some(json!({ "token_id": sib_id, "credential": sib_credential, "hostname": "b184-sib" })),
             ),
         )
             .unwrap_or_default()
-        );
+    );
     let _ = next_frame(&mut sib_sink, &mut sib_stream, sib_auth).await;
 
     // The sibling's ping must round-trip without being held up by the slow
@@ -650,7 +683,6 @@ async fn slow_token_store_does_not_stall_sibling_ping() {
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-#[ignore = "issue #184: a single legitimate circuit/authenticate on a fresh hub is spuriously refused with 1008 auth refused: too many failures, and the hub panics server-side (tokio oneshot.rs:1291 called after complete) — a real, 100% reproducible concurrency bug in the connection-lifecycle/lockout code, not a test issue. Root cause not yet found: record_failure()/the accept loop look correct in isolation, so something is processing the same connection or auth attempt more than once. Needs dedicated investigation."]
 async fn peer_addr_present_in_status_json() {
     let state = StateDir::new();
     let hub = Hub::start(&state);
