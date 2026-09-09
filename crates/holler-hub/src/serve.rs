@@ -43,7 +43,27 @@ use crate::state::{
     advertise_path, control_sock_path, ensure_dirs, resolve_state_dir, serve_lock_path, HubState,
 };
 
+use holler_proto::log::{Component, Direction, Event, Severity};
 use holler_proto::Code;
+
+/// Emit a `Warn` refusal/failure event on the given component and log it
+/// (story #144: every hub module reports through the shared logging core
+/// rather than a raw `eprintln!`). `method` is the fixed event name; `msg` is
+/// the human-readable detail (kept verbatim so operators see the same text
+/// they saw before this story, and so any test asserting on a specific
+/// substring keeps matching — `render_text` appends `reason=<msg>`).
+fn warn(component: Component, method: &'static str, msg: String) {
+    holler_proto::log::emit(&Event {
+        component,
+        severity: Severity::Warn,
+        direction: Direction::Local,
+        method,
+        id: None,
+        peer: None,
+        fields: vec![("reason", msg)],
+        frame: None,
+    });
+}
 
 /// The internal `control/…` method names answered on the control socket
 /// (ADR 0006 / the control socket is internal, non-wire — these are NOT in the
@@ -70,9 +90,10 @@ pub fn run(listen: &[String], advertise: Option<&str>) -> i32 {
         None => return 3,
     };
     if let Err(e) = ensure_dirs(&state) {
-        eprintln!(
-            "error: cannot create state dir {}: {e}",
-            state.root.display()
+        warn(
+            Component::Control,
+            "state_dir_create_failed",
+            format!("cannot create state dir {}: {e}", state.root.display()),
         );
         return 1;
     }
@@ -118,7 +139,11 @@ fn validate_loopback(addr: &str) -> Option<SocketAddr> {
     let parsed = match addr.parse::<SocketAddr>() {
         Ok(a) => a,
         Err(_) => {
-            eprintln!("error: {addr} is not a valid host:port address");
+            warn(
+                Component::Control,
+                "listen_addr_invalid",
+                format!("{addr} is not a valid host:port address"),
+            );
             return None;
         }
     };
@@ -127,8 +152,12 @@ fn validate_loopback(addr: &str) -> Option<SocketAddr> {
         IpAddr::V6(ip) => ip.is_loopback(),
     };
     if !loopback {
-        eprintln!(
-            "error: refusing to bind {addr} as plain ws: put a TLS-terminating proxy in front (docs/deploy.md) \u{2014} non-loopback plain ws is not allowed (ADR 0006)"
+        warn(
+            Component::Control,
+            "non_loopback_bind_refused",
+            format!(
+                "refusing to bind {addr} as plain ws: put a TLS-terminating proxy in front (docs/deploy.md) \u{2014} non-loopback plain ws is not allowed (ADR 0006)"
+            ),
         );
         return None;
     }
@@ -150,7 +179,11 @@ fn acquire_lock(state: &HubState) -> Option<LockGuard> {
     {
         Ok(f) => f,
         Err(e) => {
-            eprintln!("error: cannot open instance lock {}: {e}", path.display());
+            warn(
+                Component::Control,
+                "instance_lock_open_failed",
+                format!("cannot open instance lock {}: {e}", path.display()),
+            );
             return None;
         }
     };
@@ -161,14 +194,22 @@ fn acquire_lock(state: &HubState) -> Option<LockGuard> {
         Err(fs4::TryLockError::WouldBlock) => {
             // Another live hub holds the lock. Best-effort: name its pid.
             let pid = std::fs::read_to_string(&path).unwrap_or_default();
-            eprintln!(
-                "error: another holler hub is running (pid {pid}) against {}",
-                state.root.display()
+            warn(
+                Component::Control,
+                "instance_lock_held",
+                format!(
+                    "another holler hub is running (pid {pid}) against {}",
+                    state.root.display()
+                ),
             );
             return None;
         }
         Err(e) => {
-            eprintln!("error: cannot lock instance file {}: {e}", path.display());
+            warn(
+                Component::Control,
+                "instance_lock_failed",
+                format!("cannot lock instance file {}: {e}", path.display()),
+            );
             return None;
         }
     }
@@ -229,12 +270,20 @@ async fn serve_forever(
                     ws_listeners.push(l);
                 }
                 Err(e) => {
-                    eprintln!("error: cannot report the bound address: {e}");
+                    warn(
+                        Component::Wire,
+                        "bind_addr_report_failed",
+                        format!("cannot report the bound address: {e}"),
+                    );
                     return 1;
                 }
             },
             Err(e) => {
-                eprintln!("error: failed to bind {addr}: {e}");
+                warn(
+                    Component::Wire,
+                    "bind_failed",
+                    format!("failed to bind {addr}: {e}"),
+                );
                 return 1;
             }
         }
@@ -253,7 +302,11 @@ async fn serve_forever(
             advertise_path(&state),
             format!("{{\"advertise\":\"{adv}\"}}\n"),
         ) {
-            eprintln!("warning: could not persist advertise config: {e}");
+            warn(
+                Component::Control,
+                "advertise_persist_failed",
+                format!("could not persist advertise config: {e}"),
+            );
         }
     }
 
@@ -263,9 +316,10 @@ async fn serve_forever(
     let uds = match UnixListener::bind(&sock_path) {
         Ok(l) => l,
         Err(e) => {
-            eprintln!(
-                "error: failed to bind control socket {}: {e}",
-                sock_path.display()
+            warn(
+                Component::Control,
+                "control_socket_bind_failed",
+                format!("failed to bind control socket {}: {e}", sock_path.display()),
             );
             return 1;
         }
@@ -298,6 +352,11 @@ async fn serve_forever(
     // on stderr (one per bound address; the harness parses `addr`). Emitting
     // here (not in the bind loop) means a caller that sees `listening` can use
     // the control socket immediately, with no "socket not found" window.
+    //
+    // This is deliberately a raw `eprintln!`, not `log::emit` (#144): the test
+    // harness (`tests/support`) parses this exact `{"event":"listening",…}`
+    // shape regardless of `--log-format`/`--debug`, so it must stay a fixed,
+    // unredacted, always-on wire contract rather than a rendered log line.
     for actual in &bound_addrs {
         eprintln!(r#"{{"event":"listening","addr":"{actual}"}}"#);
     }
