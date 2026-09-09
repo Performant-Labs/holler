@@ -21,18 +21,23 @@
 //!   that window holds no session state to tear down yet.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 
 use futures_util::{Sink, SinkExt, Stream, StreamExt};
 use holler_proto::log::{Component, Direction as LogDirection, Event, Severity};
 use holler_proto::{
-    Authenticate, Code, CorrelationId, Envelope, Hello, HelloRole, PingAck, Presence, SessionAd,
+    Authenticate, Cancel, Code, CorrelationId, Envelope, Hello, HelloRole, PingAck, Presence,
+    Prompt,
 };
 use tokio::signal::unix::{signal, SignalKind};
+use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 
 use crate::config::SessionConfig;
 use crate::identity::BodyIdentity;
+use crate::registry::SessionRegistry;
+use crate::session_manager::SessionManager;
 
 /// The heartbeat/presence interval (issue #182 step 3): 15s, or
 /// `HOLLER_HEARTBEAT_INTERVAL_MS` for tests that cannot wait 15s for real.
@@ -62,15 +67,15 @@ pub enum RunExit {
 /// `holler body run` — builds its own throwaway multi-thread runtime (the CLI
 /// has none in scope) and drives the loop until a clean end.
 ///
-/// `sessions` (issue #187) is this body's configured session list, already
-/// validated + registered ([`crate::registry::SessionRegistry::presence_doc`]'s
-/// output) — it is sent verbatim in every `session/presence` this loop emits,
-/// replacing the always-empty `sessions:[]` issue #182 shipped (no session
-/// config existed yet on that story). `configs` (issue #185) is the same
-/// session list's *pre-registry* validated config rows — the live session
-/// loop needs them (not just the wire-shaped `SessionAd`) to answer a
-/// hub-forwarded `query/support` probe (harness `command[0]` resolution).
-pub fn run(state_root: &Path, sessions: Vec<SessionAd>, configs: Vec<SessionConfig>) -> RunExit {
+/// `registry` (issue #187) is this body's configured, validated session list.
+/// Issue #190 gives it real teeth: a [`SessionManager`] is started over it
+/// (one task per session) for the live's whole lifetime, and its dynamic
+/// `presence_doc()` — not `registry`'s own always-`idle` snapshot — is what
+/// every `session/presence` this loop emits actually carries. Issue #185's
+/// `query/*` answers need the same registry's *config* rows (harness ids,
+/// `command[0]` resolution) — derived here once, from `registry` itself,
+/// rather than threading a second parallel list down alongside it.
+pub fn run(state_root: &Path, registry: SessionRegistry) -> RunExit {
     let identity = match crate::identity::load(state_root) {
         None => {
             eprintln!("error: not joined; run `holler body join` first");
@@ -96,7 +101,24 @@ pub fn run(state_root: &Path, sessions: Vec<SessionAd>, configs: Vec<SessionConf
         Ok(rt) => rt,
         Err(e) => return RunExit::Io(format!("runtime: {e}")),
     };
-    let exit = rt.block_on(run_loop(state_root, &identity, &sessions, &configs));
+    let configs: Vec<SessionConfig> = registry.iter().map(|(_, entry)| entry.config.clone()).collect();
+    let exit = rt.block_on(async {
+        // Started once, for this process's whole live lifetime: every
+        // reconnect attempt below (`connect_and_serve`) shares the same
+        // `SessionManager`, so an in-flight turn survives a dropped/retried
+        // socket — only the WS connection is retried, never a session.
+        let session_manager = Arc::new(SessionManager::start(&registry));
+        let exit = run_loop(state_root, &identity, &session_manager, &configs).await;
+        // Best-effort graceful shutdown: only possible when no in-flight
+        // `session/prompt`/`session/cancel` task still holds its own `Arc`
+        // clone. A live turn racing the process's own clean end is left to
+        // the OS teardown — the SessionManager's tasks are plain tokio tasks
+        // with no state that outlives the process either way.
+        if let Ok(sm) = Arc::try_unwrap(session_manager) {
+            sm.shutdown().await;
+        }
+        exit
+    });
     drop(lock); // release + remove the lock file on every clean path out.
     exit
 }
@@ -119,7 +141,7 @@ enum Attempt {
 async fn run_loop(
     state_root: &Path,
     identity: &BodyIdentity,
-    sessions: &[SessionAd],
+    session_manager: &Arc<SessionManager>,
     configs: &[SessionConfig],
 ) -> RunExit {
     let mut sigint = match signal(SignalKind::interrupt()) {
@@ -134,7 +156,8 @@ async fn run_loop(
     let mut attempt: u32 = 0;
     loop {
         let outcome =
-            connect_and_serve(state_root, identity, sessions, configs, attempt, &mut sigint, &mut sigterm).await;
+            connect_and_serve(state_root, identity, session_manager, configs, attempt, &mut sigint, &mut sigterm)
+                .await;
         match outcome {
             Attempt::Ended(exit) => return exit,
             Attempt::AuthFailed(msg) => {
@@ -227,7 +250,7 @@ fn info(method: &'static str, fields: Vec<(&'static str, String)>) {
 async fn connect_and_serve(
     state_root: &Path,
     identity: &BodyIdentity,
-    sessions: &[SessionAd],
+    session_manager: &Arc<SessionManager>,
     configs: &[SessionConfig],
     attempt: u32,
     sigint: &mut tokio::signal::unix::Signal,
@@ -267,7 +290,7 @@ async fn connect_and_serve(
         },
     );
 
-    live_loop(state_root, &mut sink, &mut stream, identity, sessions, configs, (sigint, sigterm)).await
+    live_loop(state_root, &mut sink, &mut stream, identity, session_manager, configs, (sigint, sigterm)).await
 }
 
 /// Send `circuit/authenticate` and await the answer. `-32002` maps to
@@ -400,15 +423,16 @@ const DETACH_POLL: Duration = Duration::from_millis(500);
 /// signals, until the circuit ends one way or another.
 // `signals` is a tuple, not two separate params — clippy's `too_many_arguments`
 // (7-arg threshold) would otherwise flag this fn once `configs` (issue #185)
-// joined `sessions` alongside the pre-existing `state_root`/`sink`/`stream`/
-// `identity`; bundling the two `Signal`s (always passed and used together —
-// see [`any_signal`]) is the natural pairing to fold, not an arbitrary one.
+// joined the pre-existing `state_root`/`sink`/`stream`/`identity`/
+// `session_manager` (issue #190); bundling the two `Signal`s (always passed
+// and used together — see [`any_signal`]) is the natural pairing to fold,
+// not an arbitrary one.
 async fn live_loop<Snk, St>(
     state_root: &Path,
     sink: &mut Snk,
     stream: &mut St,
     identity: &BodyIdentity,
-    sessions: &[SessionAd],
+    session_manager: &Arc<SessionManager>,
     configs: &[SessionConfig],
     signals: (&mut tokio::signal::unix::Signal, &mut tokio::signal::unix::Signal),
 ) -> Attempt
@@ -423,41 +447,217 @@ where
     let mut detach_poll = tokio::time::interval(DETACH_POLL);
     let mut last_frame_at = tokio::time::Instant::now();
 
-    if send_presence(sink, identity, sessions).await.is_err() {
+    // Every frame a `session/prompt`/`session/cancel` dispatch task produces
+    // (`session/update` notifications, then its own response) crosses this
+    // channel rather than touching `sink` directly — `sink` has exactly one
+    // owner (this loop), and several dispatch tasks (one per concurrently
+    // in-flight request) can be alive at once alongside the heartbeat.
+    let (outbound_tx, mut outbound_rx) = mpsc::unbounded_channel::<Message>();
+
+    // Issue #190: push `session/presence` immediately on any session's state
+    // change (not just at the next heartbeat) — this is what lets the hub's
+    // own `say` busy/stalled check (issue #190's roster stand-in, see
+    // `holler-hub`'s `live` module) read a live-enough snapshot instead of
+    // one up to a full heartbeat interval stale. `SessionManager` has always
+    // published this signal (issue #189); this story is the first consumer.
+    let mut presence_changed = session_manager.subscribe_presence_changes();
+
+    if send_presence(sink, identity, session_manager).await.is_err() {
         return Attempt::Dropped("send initial presence: socket closed".to_string());
     }
 
     loop {
-        tokio::select! {
-            _ = heartbeat.tick() => {
-                if send_presence(sink, identity, sessions).await.is_err() {
-                    return Attempt::Dropped("send presence: socket closed".to_string());
-                }
-            }
-            _ = detach_poll.tick() => {
-                if detach_path.exists() {
-                    close(sink).await;
-                    let _ = mark_disconnected(state_root);
-                    let _ = std::fs::remove_file(&detach_path);
-                    return Attempt::Ended(RunExit::Ok);
-                }
-            }
-            _ = any_signal(sigint, sigterm) => {
-                close(sink).await;
-                let _ = mark_disconnected(state_root);
-                return Attempt::Ended(RunExit::Ok);
-            }
-            _ = tokio::time::sleep_until(last_frame_at + liveness_timeout()) => {
-                return Attempt::Dropped("no frame from the hub within the liveness window".to_string());
-            }
-            frame = stream.next() => {
-                match handle_frame(sink, frame, identity, state_root, configs).await {
-                    FrameOutcome::Continue => last_frame_at = tokio::time::Instant::now(),
-                    FrameOutcome::Superseded => return Attempt::Ended(RunExit::Ok),
-                    FrameOutcome::Dropped(reason) => return Attempt::Dropped(reason),
-                }
-            }
+        let beat = next_beat(
+            sink,
+            stream,
+            identity,
+            session_manager,
+            configs,
+            &detach_path,
+            state_root,
+            &mut heartbeat,
+            &mut presence_changed,
+            &mut detach_poll,
+            sigint,
+            sigterm,
+            last_frame_at,
+            &mut outbound_rx,
+            &outbound_tx,
+        )
+        .await;
+        if let Some(attempt) = apply_beat(beat, sink, state_root, &mut last_frame_at).await {
+            return attempt;
         }
+    }
+}
+
+/// Race every live-loop event source and produce the one [`Beat`] that
+/// fired. Split out of [`live_loop`] entirely (not just each arm's own
+/// branching, as the other `live_loop` helpers do) — a bare `select!` this
+/// wide is itself the dominant share of the caller's cognitive-complexity
+/// score, independent of how much branching logic each arm still carries
+/// (see [`apply_beat`] for the interpretation step this hands off to).
+#[allow(clippy::too_many_arguments)] // #190: every field is a genuinely distinct event source `select!` races
+async fn next_beat<Snk, St>(
+    sink: &mut Snk,
+    stream: &mut St,
+    identity: &BodyIdentity,
+    session_manager: &Arc<SessionManager>,
+    configs: &[SessionConfig],
+    detach_path: &Path,
+    state_root: &Path,
+    heartbeat: &mut tokio::time::Interval,
+    presence_changed: &mut tokio::sync::broadcast::Receiver<holler_proto::SessionName>,
+    detach_poll: &mut tokio::time::Interval,
+    sigint: &mut tokio::signal::unix::Signal,
+    sigterm: &mut tokio::signal::unix::Signal,
+    last_frame_at: tokio::time::Instant,
+    outbound_rx: &mut mpsc::UnboundedReceiver<Message>,
+    outbound_tx: &mpsc::UnboundedSender<Message>,
+) -> Beat
+where
+    Snk: Sink<Message, Error = WsError> + Unpin,
+    St: Stream<Item = Result<Message, WsError>> + Unpin,
+{
+    tokio::select! {
+        _ = heartbeat.tick() => Beat::Presence(send_presence_or_drop(sink, identity, session_manager).await),
+        changed = presence_changed.recv() => presence_changed_beat(&changed, sink, identity, session_manager).await,
+        _ = detach_poll.tick() => Beat::MaybeEnded(check_detach(sink, detach_path, state_root).await),
+        _ = any_signal(sigint, sigterm) => Beat::Signal,
+        _ = tokio::time::sleep_until(last_frame_at + liveness_timeout()) => Beat::LivenessExpired,
+        outbound = outbound_rx.recv() => Beat::MaybeEnded(relay_outbound(sink, outbound).await),
+        frame = stream.next() => {
+            Beat::Frame(handle_frame(sink, frame, identity, state_root, configs, session_manager, outbound_tx).await)
+        }
+    }
+}
+
+/// Interpret one [`Beat`]: `Some` means the circuit ends with that
+/// `Attempt`, `None` means keep looping (updating `last_frame_at` first, for
+/// `Beat::Frame(FrameOutcome::Continue)`). Split out of [`live_loop`] (see
+/// its own comment) — the flat interpretation `match` was itself a
+/// meaningful share of that function's cognitive-complexity score.
+async fn apply_beat<Snk>(
+    beat: Beat,
+    sink: &mut Snk,
+    state_root: &Path,
+    last_frame_at: &mut tokio::time::Instant,
+) -> Option<Attempt>
+where
+    Snk: Sink<Message, Error = WsError> + Unpin,
+{
+    match beat {
+        Beat::Continue => None,
+        Beat::Presence(None) | Beat::MaybeEnded(None) => None,
+        Beat::Presence(Some(dropped)) | Beat::MaybeEnded(Some(dropped)) => Some(dropped),
+        Beat::Signal => {
+            close(sink).await;
+            let _ = mark_disconnected(state_root);
+            Some(Attempt::Ended(RunExit::Ok))
+        }
+        Beat::LivenessExpired => Some(Attempt::Dropped("no frame from the hub within the liveness window".to_string())),
+        Beat::Frame(FrameOutcome::Continue) => {
+            *last_frame_at = tokio::time::Instant::now();
+            None
+        }
+        Beat::Frame(FrameOutcome::Superseded) => Some(Attempt::Ended(RunExit::Ok)),
+        Beat::Frame(FrameOutcome::Dropped(reason)) => Some(Attempt::Dropped(reason)),
+    }
+}
+
+/// One `select!` tick's outcome (see [`live_loop`]'s own comment on why this
+/// exists): `Presence`/`MaybeEnded` both carry "keep going, or end the
+/// circuit with this `Attempt`" and share a match arm below — the two names
+/// stay distinct only so each call site reads clearly for what it is.
+enum Beat {
+    Continue,
+    Presence(Option<Attempt>),
+    MaybeEnded(Option<Attempt>),
+    Signal,
+    LivenessExpired,
+    Frame(FrameOutcome),
+}
+
+/// `send_presence`, mapped to the `Attempt::Dropped` the caller should
+/// return on failure (or `None` to keep looping). Split out of [`live_loop`]
+/// (used at both its heartbeat and presence-changed call sites) to keep that
+/// `select!`'s cognitive complexity under the workspace threshold.
+async fn send_presence_or_drop<Snk>(
+    sink: &mut Snk,
+    identity: &BodyIdentity,
+    session_manager: &SessionManager,
+) -> Option<Attempt>
+where
+    Snk: Sink<Message, Error = WsError> + Unpin,
+{
+    if send_presence(sink, identity, session_manager).await.is_err() {
+        Some(Attempt::Dropped("send presence: socket closed".to_string()))
+    } else {
+        None
+    }
+}
+
+/// Whether a `presence_changed` broadcast result is worth an immediate
+/// resend — `true` for an actual change, and (deliberately) also for a
+/// `Lagged` overrun, since `presence_doc()` always reflects the *current*
+/// state regardless of how many discrete changes a slow subscriber missed.
+/// `Closed` cannot happen while `session_manager` (held by this same call
+/// chain, in `connection::run`) outlives [`live_loop`].
+fn presence_worth_resending<T>(changed: &Result<T, tokio::sync::broadcast::error::RecvError>) -> bool {
+    changed.is_ok() || matches!(changed, Err(tokio::sync::broadcast::error::RecvError::Lagged(_)))
+}
+
+/// The `presence_changed` arm's own [`Beat`] — split out of the `select!` in
+/// [`live_loop`] (see that function's own comment) for the same reason as
+/// [`send_presence_or_drop`].
+async fn presence_changed_beat<Snk, T>(
+    changed: &Result<T, tokio::sync::broadcast::error::RecvError>,
+    sink: &mut Snk,
+    identity: &BodyIdentity,
+    session_manager: &SessionManager,
+) -> Beat
+where
+    Snk: Sink<Message, Error = WsError> + Unpin,
+{
+    if presence_worth_resending(changed) {
+        Beat::Presence(send_presence_or_drop(sink, identity, session_manager).await)
+    } else {
+        Beat::Continue
+    }
+}
+
+/// Check (and, if requested, act on) `detach_request`. Split out of
+/// [`live_loop`] for the same reason as [`send_presence_or_drop`].
+async fn check_detach<Snk>(sink: &mut Snk, detach_path: &Path, state_root: &Path) -> Option<Attempt>
+where
+    Snk: Sink<Message, Error = WsError> + Unpin,
+{
+    if !detach_path.exists() {
+        return None;
+    }
+    close(sink).await;
+    let _ = mark_disconnected(state_root);
+    let _ = std::fs::remove_file(detach_path);
+    Some(Attempt::Ended(RunExit::Ok))
+}
+
+/// Forward one frame a `session/prompt`/`session/cancel` dispatch task
+/// produced onto the wire. `None` (no message — the outbound channel is
+/// empty right now, not closed) keeps the loop going; split out of
+/// [`live_loop`] for the same reason as [`send_presence_or_drop`].
+async fn relay_outbound<Snk>(sink: &mut Snk, outbound: Option<Message>) -> Option<Attempt>
+where
+    Snk: Sink<Message, Error = WsError> + Unpin,
+{
+    // `None` means every sender (this loop's own `outbound_tx`, cloned into
+    // each dispatch task) is gone — unreachable while this loop still holds
+    // its own clone in scope, but matched defensively rather than
+    // `.expect()`-ing a channel invariant.
+    let msg = outbound?;
+    if sink.send(msg).await.is_err() || sink.flush().await.is_err() {
+        Some(Attempt::Dropped("send outbound frame: socket closed".to_string()))
+    } else {
+        None
     }
 }
 
@@ -473,14 +673,14 @@ where
     let _ = sink.flush().await;
 }
 
-async fn send_presence<Snk>(sink: &mut Snk, identity: &BodyIdentity, sessions: &[SessionAd]) -> Result<(), ()>
+async fn send_presence<Snk>(sink: &mut Snk, identity: &BodyIdentity, session_manager: &SessionManager) -> Result<(), ()>
 where
     Snk: Sink<Message, Error = WsError> + Unpin,
 {
-    let presence = Presence {
-        hostname: identity.hostname.clone(),
-        sessions: sessions.to_vec(),
-    };
+    // Issue #190: the *live* per-session state (idle/working/input-required,
+    // turn timing, `last_turn`) — not the always-`idle` config snapshot issue
+    // #182 shipped before any session ever ran a turn.
+    let presence: Presence = session_manager.presence_doc(identity.hostname.clone());
     let params = serde_json::to_value(presence).map_err(|_| ())?;
     send(sink, &Envelope::notification("session/presence", Some(params))).await
 }
@@ -492,18 +692,21 @@ enum FrameOutcome {
 }
 
 /// Handle one inbound WS message in the live loop.
+#[allow(clippy::too_many_arguments)] // #190: `state_root`/`configs` (issue #185's query answers) alongside `session_manager`/`outbound_tx` (issue #190's prompt dispatch) are each genuinely distinct
 async fn handle_frame<Snk>(
     sink: &mut Snk,
     frame: Option<Result<Message, WsError>>,
     identity: &BodyIdentity,
     state_root: &Path,
     configs: &[SessionConfig],
+    session_manager: &Arc<SessionManager>,
+    outbound_tx: &mpsc::UnboundedSender<Message>,
 ) -> FrameOutcome
 where
     Snk: Sink<Message, Error = WsError> + Unpin,
 {
     match frame {
-        Some(Ok(Message::Text(t))) => handle_text(sink, &t, identity, state_root, configs).await,
+        Some(Ok(Message::Text(t))) => handle_text(sink, &t, identity, state_root, configs, session_manager, outbound_tx).await,
         Some(Ok(Message::Ping(_))) | Some(Ok(Message::Pong(_))) | Some(Ok(Message::Frame(_))) => FrameOutcome::Continue,
         Some(Ok(Message::Binary(_))) => FrameOutcome::Continue,
         Some(Ok(Message::Close(_))) => FrameOutcome::Dropped("hub closed the socket".to_string()),
@@ -512,19 +715,24 @@ where
     }
 }
 
-/// Dispatch one decoded text frame (issue #182 step 8's inbound methods that
-/// are in scope for this story — `circuit/ping`, `circuit/superseded`; issue
-/// #185 adds the four `query/*` requests, answered from local state per
-/// [`crate::query`] — the same document a local `body status`/`caps`/
-/// `support`/`query` CLI leaf builds, now also reachable when the hub
-/// forwards a `hub query TARGET …` over this live socket). Every other
-/// method a later story owns is answered `-32601` for now.
+/// Dispatch one decoded text frame: `circuit/ping`/`circuit/superseded`
+/// (issue #182); issue #185's four `query/*` requests, answered from local
+/// state per [`crate::query`] (the same document a local `body status`/
+/// `caps`/`support`/`query` CLI leaf builds, now also reachable when the hub
+/// forwards a `hub query TARGET …` over this live socket); and — issue #190
+/// — `session/prompt`/`session/cancel`, each spawned as its own task against
+/// `session_manager` so a long-running turn on one session never blocks this
+/// loop's heartbeat, a ping reply, or another session's own turn. Every
+/// other method a later story owns is still answered `-32601`.
+#[allow(clippy::too_many_arguments)] // #190: same shape as `handle_frame`, one level down
 async fn handle_text<Snk>(
     sink: &mut Snk,
     text: &str,
     identity: &BodyIdentity,
     state_root: &Path,
     configs: &[SessionConfig],
+    session_manager: &Arc<SessionManager>,
+    outbound_tx: &mpsc::UnboundedSender<Message>,
 ) -> FrameOutcome
 where
     Snk: Sink<Message, Error = WsError> + Unpin,
@@ -550,6 +758,20 @@ where
             warn("conn_superseded", vec![]);
             FrameOutcome::Superseded
         }
+        Envelope::Request { id, method, params } if method == "session/prompt" => {
+            match holler_proto::typed_params::<Prompt>(&Envelope::Request { id: id.clone(), method, params }) {
+                Ok(p) => spawn_prompt_dispatch(session_manager, outbound_tx, id, p),
+                Err(e) => send_invalid_params(sink, &id, &e).await,
+            }
+            FrameOutcome::Continue
+        }
+        Envelope::Request { id, method, params } if method == "session/cancel" => {
+            match holler_proto::typed_params::<Cancel>(&Envelope::Request { id: id.clone(), method, params }) {
+                Ok(p) => spawn_cancel_dispatch(session_manager, outbound_tx, id, p),
+                Err(e) => send_invalid_params(sink, &id, &e).await,
+            }
+            FrameOutcome::Continue
+        }
         Envelope::Request { id, .. } => {
             let Ok(cid) = CorrelationId::parse(&id) else { return FrameOutcome::Continue };
             let err = holler_proto::WireError::new(Code::MethodNotFound, "not implemented on this body yet", None);
@@ -557,6 +779,45 @@ where
             FrameOutcome::Continue
         }
         Envelope::Notification { .. } | Envelope::Response { .. } | Envelope::Error { .. } => FrameOutcome::Continue,
+    }
+}
+
+/// Spawn a `session/prompt` dispatch task. Split out of [`handle_text`] (used
+/// once, but alongside [`spawn_cancel_dispatch`]/[`send_invalid_params`], to
+/// keep that dispatch's cognitive complexity under the workspace threshold).
+fn spawn_prompt_dispatch(
+    session_manager: &Arc<SessionManager>,
+    outbound_tx: &mpsc::UnboundedSender<Message>,
+    id: String,
+    params: Prompt,
+) {
+    let sm = Arc::clone(session_manager);
+    let ob = outbound_tx.clone();
+    tokio::spawn(crate::prompt_dispatch::handle_prompt(sm, id, params, ob));
+}
+
+/// Spawn a `session/cancel` dispatch task. See [`spawn_prompt_dispatch`]'s
+/// own doc.
+fn spawn_cancel_dispatch(
+    session_manager: &Arc<SessionManager>,
+    outbound_tx: &mpsc::UnboundedSender<Message>,
+    id: String,
+    params: Cancel,
+) {
+    let sm = Arc::clone(session_manager);
+    let ob = outbound_tx.clone();
+    tokio::spawn(crate::prompt_dispatch::handle_cancel(sm, id, params, ob));
+}
+
+/// Answer a `session/prompt`/`session/cancel` whose params failed to parse
+/// with `-32602 invalid_params`. See [`spawn_prompt_dispatch`]'s own doc.
+async fn send_invalid_params<Snk>(sink: &mut Snk, id: &str, e: &holler_proto::WireError)
+where
+    Snk: Sink<Message, Error = WsError> + Unpin,
+{
+    if let Ok(cid) = CorrelationId::parse(id) {
+        let err = holler_proto::WireError::new(Code::InvalidParams, &e.message, None);
+        let _ = send(sink, &Envelope::error_frame(&cid, &err)).await;
     }
 }
 

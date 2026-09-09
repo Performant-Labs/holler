@@ -32,6 +32,11 @@ hex = { workspace = true }
 # subtle: constant-time HMAC comparison (a timing side-channel on secret
 # comparison is a fail-closed defect — #163).
 subtle = { workspace = true }
+# Issue #190: `talk::say`'s own pre-send busy check parses a cached
+# `SessionAd`'s RFC 3339 `turn_started_at`/`last_update_at` into the ages the
+# spec's `session_busy` hint prints — the same crate holler-proto's `log`
+# module already uses for its own RFC 3339 timestamps.
+time = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

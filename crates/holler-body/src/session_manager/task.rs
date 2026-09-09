@@ -55,6 +55,7 @@ struct QueuedPrompt {
     id: String,
     text: String,
     reply_tx: oneshot::Sender<PromptOutcome>,
+    updates: Option<mpsc::UnboundedSender<String>>,
 }
 
 /// This task's entire private state. Nothing here is behind a lock — it is
@@ -68,6 +69,9 @@ pub(super) struct Inner {
     current_stream: Option<DriverEventStream>,
     current_turn_id: Option<String>,
     current_reply: Option<oneshot::Sender<PromptOutcome>>,
+    /// Where this turn's mid-turn text chunks go, if anyone is listening
+    /// (issue #190). `None` for a caller that only wants the final result.
+    current_updates: Option<mpsc::UnboundedSender<String>>,
     turn_started_at_ms: Option<Instant>,
     last_update_at_ms: Option<Instant>,
     queue: VecDeque<QueuedPrompt>,
@@ -93,6 +97,7 @@ impl Inner {
             current_stream: None,
             current_turn_id: None,
             current_reply: None,
+            current_updates: None,
             turn_started_at_ms: None,
             last_update_at_ms: None,
             queue: VecDeque::new(),
@@ -118,8 +123,8 @@ pub(super) async fn run(mut mailbox: mpsc::Receiver<SessionCommand>, mut inner: 
                         }
                         return;
                     }
-                    Some(SessionCommand::Prompt { id, text, queue, reply_tx }) => {
-                        handle_prompt(&mut inner, id, text, queue, reply_tx).await;
+                    Some(SessionCommand::Prompt { id, text, queue, reply_tx, updates }) => {
+                        handle_prompt(&mut inner, id, text, queue, reply_tx, updates).await;
                     }
                     Some(SessionCommand::Cancel { reply_tx }) => {
                         handle_cancel(&mut inner, reply_tx).await;
@@ -155,10 +160,11 @@ async fn handle_prompt(
     text: String,
     queue: bool,
     reply_tx: oneshot::Sender<PromptOutcome>,
+    updates: Option<mpsc::UnboundedSender<String>>,
 ) {
     let current_state = inner.presence.lock().unwrap_or_else(PoisonError::into_inner).state;
     if current_state == SessionState::Idle {
-        start_turn(inner, id, text, reply_tx).await;
+        start_turn(inner, id, text, reply_tx, updates).await;
         return;
     }
     if !queue {
@@ -170,7 +176,7 @@ async fn handle_prompt(
         let _ = reply_tx.send(PromptOutcome::QueueFull);
         return;
     }
-    inner.queue.push_back(QueuedPrompt { id, text, reply_tx });
+    inner.queue.push_back(QueuedPrompt { id, text, reply_tx, updates });
 }
 
 /// The `-32009 session_busy` refusal's `data` trio: the session's current A2A
@@ -275,7 +281,9 @@ async fn handle_replace(inner: &mut Inner, text: String, reply_tx: oneshot::Send
     }
     inner.replace_counter += 1;
     let id = format!("replace-{}", inner.replace_counter);
-    start_turn(inner, id, text, reply_tx).await;
+    // `Replace` (interrupt, #191) carries no updates channel of its own yet —
+    // out of this story's scope (Talk is `say`, not `interrupt`).
+    start_turn(inner, id, text, reply_tx, None).await;
 }
 
 /// Cancel the in-flight turn via the driver, if a driver exists at all.
@@ -300,6 +308,7 @@ async fn start_turn(
     id: String,
     text: String,
     reply_tx: oneshot::Sender<PromptOutcome>,
+    updates: Option<mpsc::UnboundedSender<String>>,
 ) -> bool {
     if inner.driver.is_none() {
         match AcpDriver::spawn(&inner.config).await {
@@ -321,6 +330,7 @@ async fn start_turn(
     inner.current_stream = Some(stream);
     inner.current_turn_id = Some(id);
     inner.current_reply = Some(reply_tx);
+    inner.current_updates = updates;
     inner.turn_started_at_ms = Some(Instant::now());
     inner.last_update_at_ms = inner.turn_started_at_ms;
     let ts = log::timestamp();
@@ -344,8 +354,19 @@ async fn handle_stream_event(inner: &mut Inner, event: Option<DriverEvent>) {
         // Real turn activity with no state change (the common case for a
         // long streamed reply) — bump the staleness clock the same way a
         // state transition does, or `HOLLER_STALL_MS` false-alarms a
-        // healthy, actively-streaming turn as stalled (issue #210).
-        Some(DriverEvent::Chunk(_)) => touch_last_update(inner),
+        // healthy, actively-streaming turn as stalled (issue #210), and
+        // forward the chunk to whoever is streaming this turn's updates
+        // (issue #190's coalescer), if anyone is.
+        Some(DriverEvent::Chunk(text)) => {
+            touch_last_update(inner);
+            if let Some(tx) = &inner.current_updates {
+                // A dropped receiver (the connection task ended, or nobody
+                // was ever listening) is not a reason to fail the turn — the
+                // driver keeps streaming regardless of whether anyone reads
+                // the chunks; only the final `PromptOutcome` matters to it.
+                let _ = tx.send(text);
+            }
+        }
         Some(DriverEvent::State(DriverState::Working)) => set_state(inner, SessionState::Working),
         Some(DriverEvent::State(DriverState::InputRequired)) => {
             set_state(inner, SessionState::InputRequired);
@@ -405,6 +426,7 @@ async fn finish_turn_no_dispatch(inner: &mut Inner, reason: StopReason) {
         p.last_turn = Some(last_turn.clone());
     }
     inner.current_stream = None;
+    inner.current_updates = None;
     inner.turn_started_at_ms = None;
     inner.last_update_at_ms = None;
     // Crash isolation (issue #189's own acceptance item): drop the driver so
@@ -437,7 +459,7 @@ async fn dispatch_next_queued(inner: &mut Inner) {
     // A spawn failure for one queued item must not strand the rest of the
     // FIFO behind it — try the next one instead of leaving the queue stuck.
     while let Some(item) = inner.queue.pop_front() {
-        if start_turn(inner, item.id, item.text, item.reply_tx).await {
+        if start_turn(inner, item.id, item.text, item.reply_tx, item.updates).await {
             return;
         }
     }

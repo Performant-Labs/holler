@@ -10,13 +10,31 @@
 use futures_util::{Sink, SinkExt, Stream, StreamExt};
 use holler_proto::{
     log::{Component, Direction as LogDirection, Event, Severity},
-    Authenticate, Code, Envelope, Hello, HelloRole, PingAck, Presence, WireError,
+    Authenticate, Code, Envelope, Hello, HelloRole, PingAck, Presence, PromptResult, Update, WireError,
 };
 use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 
-use crate::live::{LiveCommand, Registry};
+use crate::live::{LiveCommand, Registry, SayReply, SeenUpdate};
 use crate::serve::{close, send_error};
 use crate::state::HubState;
+
+/// One `say` still awaiting its `session/prompt` response on this
+/// connection (issue #190). Keyed by `request_id` in a map (not the single
+/// `Option` `pending_ping` uses) — unlike a probe ping, `say`s to different
+/// (or even the same, via `--queue`) sessions are routinely concurrent on
+/// one connection: the hub forwards a `--queue`d `session/prompt` to the
+/// body immediately, without itself waiting for the turn ahead of it to
+/// finish, so two (or more) requests can be in flight on this socket at
+/// once. A single `Option` here would have the second `say` silently drop
+/// the first's reply channel (`Sender` overwritten and dropped) the moment
+/// it arrived — confirmed the hard way while building this story's own
+/// `say_queue_appends_and_runs_after_turn` test, which failed with a
+/// spurious "no reply … within 600s" the instant the queued call's request
+/// went out, not after any real 600s wait.
+struct PendingSay {
+    reply: tokio::sync::oneshot::Sender<SayReply>,
+    updates: Vec<SeenUpdate>,
+}
 
 /// How long the hub waits for the body's half of the hello exchange, and for
 /// the body's answer to the hub's own hello, before giving up on the socket.
@@ -232,17 +250,17 @@ fn hub_hello_doc(_body_hostname: &str) -> Hello {
     }
 }
 
-/// A pending hub-initiated `query/*` forward (issue #185: `hub query TARGET
-/// …`) awaiting its answer — at most one at a time, same discipline as
-/// [`PendingPing`].
+/// A pending hub-initiated `circuit/ping`/`query/*` forward — at most one at
+/// a time, same discipline as before #190 (unlike `say`, neither is ever
+/// concurrent on one connection today).
 type PendingPing = Option<(String, tokio::sync::oneshot::Sender<PingAck>)>;
 type PendingQuery = Option<(String, tokio::sync::oneshot::Sender<Result<serde_json::Value, WireError>>)>;
 
 /// The live session loop: answer presence heartbeats and `circuit/ping`
 /// requests from the body, and service [`LiveCommand`]s from the registry
-/// (`hub token ping`'s probe, and issue #185's `hub query TARGET …`
-/// forward). Returns when the socket closes, errors, or a decode failure
-/// ends the connection.
+/// (`hub token ping`'s probe, issue #185's `hub query TARGET …` forward, and
+/// issue #190's `say`). Returns when the socket closes, errors, or a decode
+/// failure ends the connection.
 async fn session_loop<Snk, St>(
     sink: &mut Snk,
     stream: &mut St,
@@ -258,21 +276,37 @@ async fn session_loop<Snk, St>(
     // connection serves exactly one `hub token ping` or `hub query` caller
     // per round trip. `pending_confirms` (issue #185) may hold several at
     // once (one per harness the body advertised) — each is independent, so
-    // it stays a map rather than a single slot.
+    // it stays a map rather than a single slot. `say`s, by contrast, are
+    // genuinely concurrent on one connection — see [`PendingSay`]'s own doc
+    // — so they also key a map, by `request_id`.
     let mut pending_ping: PendingPing = None;
     let mut pending_query: PendingQuery = None;
+    let mut pending_says: std::collections::HashMap<String, PendingSay> = std::collections::HashMap::new();
 
     loop {
         tokio::select! {
             frame = stream.next() => {
                 match frame {
                     Some(Ok(Message::Text(t))) => {
-                        if handle_inbound(sink, &t, client_id, &mut pending_ping, &mut pending_query, &mut pending_confirms, registry).await.is_err() {
+                        if handle_inbound(
+                            sink,
+                            &t,
+                            client_id,
+                            registry,
+                            &mut pending_ping,
+                            &mut pending_query,
+                            &mut pending_confirms,
+                            &mut pending_says,
+                        ).await.is_err() {
+                            fail_pending_says(&mut pending_says);
                             return;
                         }
                     }
                     Some(Ok(Message::Ping(_))) | Some(Ok(Message::Pong(_))) | Some(Ok(Message::Frame(_))) => {}
-                    Some(Ok(Message::Binary(_))) | Some(Ok(Message::Close(_))) | Some(Err(_)) | None => return,
+                    Some(Ok(Message::Binary(_))) | Some(Ok(Message::Close(_))) | Some(Err(_)) | None => {
+                        fail_pending_says(&mut pending_says);
+                        return;
+                    }
                 }
             }
             cmd = cmd_rx.recv() => {
@@ -289,11 +323,52 @@ async fn session_loop<Snk, St>(
                             Err(()) => return,
                         }
                     }
+                    Some(LiveCommand::Say { request_id, session, message, queue, reply }) => {
+                        match send_prompt(sink, &request_id, &session, message, queue).await {
+                            Ok(()) => {
+                                pending_says.insert(request_id, PendingSay { reply, updates: Vec::new() });
+                            }
+                            Err(()) => {
+                                let _ = reply.send(SayReply::ConnectionLost);
+                                return;
+                            }
+                        }
+                    }
                     None => return, // the registry entry was dropped/replaced.
                 }
             }
         }
     }
+}
+
+/// The socket ended while one or more `say`s were still in flight: report
+/// every one of them as `connection_lost`, never a silent drop (the spec's
+/// own wording: "body io disconnected mid-turn; ask again" — never "hub
+/// unreachable").
+fn fail_pending_says(pending_says: &mut std::collections::HashMap<String, PendingSay>) {
+    for (_, p) in pending_says.drain() {
+        let _ = p.reply.send(SayReply::ConnectionLost);
+    }
+}
+
+/// Send a `session/prompt {session, message, queue}` request to the body
+/// under `request_id`.
+async fn send_prompt<Snk>(
+    sink: &mut Snk,
+    request_id: &str,
+    session: &str,
+    message: Box<holler_proto::Message>,
+    queue: bool,
+) -> Result<(), ()>
+where
+    Snk: Sink<Message, Error = WsError> + Unpin,
+{
+    let cid = holler_proto::CorrelationId::parse(request_id).map_err(|_| ())?;
+    let params = holler_proto::Prompt { session: session.to_string(), message: *message, meta: None, queue };
+    let req = Envelope::request(&cid, "session/prompt", Some(serde_json::to_value(params).map_err(|_| ())?));
+    let text = holler_proto::encode(&req).map_err(|_| ())?;
+    sink.send(Message::text(text)).await.map_err(|_| ())?;
+    sink.flush().await.map_err(|_| ())
 }
 
 /// Send a `circuit/ping` request to the body, returning its correlation id so
@@ -326,14 +401,16 @@ where
 
 /// Handle one inbound text frame in the live session loop. `Err` means the
 /// socket should be torn down (a decode failure or a send failure).
+#[allow(clippy::too_many_arguments)] // #190: four independent pending-request trackers, each genuinely distinct
 async fn handle_inbound<Snk>(
     sink: &mut Snk,
     text: &str,
     client_id: &str,
+    registry: &Registry,
     pending_ping: &mut PendingPing,
     pending_query: &mut PendingQuery,
     pending_confirms: &mut std::collections::HashMap<String, String>,
-    registry: &Registry,
+    pending_says: &mut std::collections::HashMap<String, PendingSay>,
 ) -> Result<(), ()>
 where
     Snk: Sink<Message, Error = WsError> + Unpin,
@@ -347,7 +424,11 @@ where
     };
     match &env {
         Envelope::Notification { method, params } if method == "session/presence" => {
-            handle_presence(client_id, params.clone(), registry).await;
+            handle_presence_notification(client_id, params.clone(), registry).await;
+            Ok(())
+        }
+        Envelope::Notification { method, params } if method == "session/update" => {
+            handle_update_notification(params.clone(), pending_says);
             Ok(())
         }
         Envelope::Request { id, method, .. } if method == "circuit/ping" => {
@@ -359,11 +440,11 @@ where
             Ok(())
         }
         Envelope::Response { id, result } => {
-            handle_response(id, result.clone(), pending_ping, pending_query);
+            handle_response(id, result.clone(), pending_ping, pending_query, pending_says);
             Ok(())
         }
         Envelope::Error { id, error } => {
-            handle_error_response(id.as_deref(), error, pending_query);
+            handle_error_response(id.as_deref(), error, pending_query, pending_says);
             Ok(())
         }
         Envelope::Request { id, .. } => {
@@ -374,19 +455,37 @@ where
     }
 }
 
-/// A `session/presence` notification's side effect: record the body's
-/// current session count (`hub status`'s `sessions`, issue #185).
-async fn handle_presence(client_id: &str, params: Option<serde_json::Value>, registry: &Registry) {
-    if let Some(p) = params.and_then(|v| serde_json::from_value::<Presence>(v).ok()) {
-        registry.set_session_count(client_id, p.sessions.len() as u32).await;
-        log(Severity::Debug, "presence", vec![("client_id", client_id.to_string()), ("hostname", p.hostname)]);
+/// A `session/presence` notification: record the body's current session
+/// count (`hub status`'s `sessions`, issue #185) and cache its live session
+/// state (issue #190's roster stand-in — see the `live` module doc) so
+/// `say`'s busy check and name resolution have something real to read. Split
+/// out of [`handle_inbound`] to keep that dispatch's cognitive complexity
+/// under the workspace threshold.
+async fn handle_presence_notification(client_id: &str, params: Option<serde_json::Value>, registry: &Registry) {
+    let Some(p) = params.and_then(|v| serde_json::from_value::<Presence>(v).ok()) else { return };
+    log(Severity::Debug, "presence", vec![("client_id", client_id.to_string()), ("hostname", p.hostname)]);
+    registry.set_session_count(client_id, p.sessions.len() as u32).await;
+    registry.update_presence(client_id, p.sessions).await;
+}
+
+/// A `session/update` notification: append it to the matching in-flight
+/// `say`'s own record (by `prompt_id`), if any is still pending. Split out
+/// of [`handle_inbound`] for the same reason as
+/// [`handle_presence_notification`].
+fn handle_update_notification(
+    params: Option<serde_json::Value>,
+    pending_says: &mut std::collections::HashMap<String, PendingSay>,
+) {
+    let Some(p) = params.and_then(|v| serde_json::from_value::<Update>(v).ok()) else { return };
+    if let Some(pending) = pending_says.get_mut(&p.prompt_id) {
+        pending.updates.push(SeenUpdate { ts: holler_proto::log::timestamp(), seq: p.seq, parts: p.parts });
     }
 }
 
 /// A confirmation probe's answer (issue #185) — matched by id against every
 /// harness's outstanding probe at once, independent of `pending_ping`/
 /// `pending_query`'s single-slot discipline and of whatever else (presence, a
-/// `hub query` forward) interleaves on the wire around it.
+/// `hub query` forward, a `say`) interleaves on the wire around it.
 async fn handle_confirm_response(
     id: &str,
     result: Option<serde_json::Value>,
@@ -403,10 +502,31 @@ async fn handle_confirm_response(
     }
 }
 
-/// Route a plain `Response` to whichever of `pending_ping`/`pending_query` is
-/// waiting on this `id` (at most one is, by construction — each is a single
-/// outstanding slot).
-fn handle_response(id: &str, result: Option<serde_json::Value>, pending_ping: &mut PendingPing, pending_query: &mut PendingQuery) {
+/// Route a plain `Response` to whichever of `pending_says`/`pending_ping`/
+/// `pending_query` is waiting on this `id` (at most one is, by construction —
+/// `pending_says` keys by `id` directly; the other two are each a single
+/// outstanding slot). Split out of [`handle_inbound`] for the same reason as
+/// [`handle_presence_notification`].
+fn handle_response(
+    id: &str,
+    result: Option<serde_json::Value>,
+    pending_ping: &mut PendingPing,
+    pending_query: &mut PendingQuery,
+    pending_says: &mut std::collections::HashMap<String, PendingSay>,
+) {
+    if let Some(pending) = pending_says.remove(id) {
+        let outcome = match result.and_then(|v| serde_json::from_value::<PromptResult>(v).ok()) {
+            Some(r) => SayReply::Result {
+                message: Box::new(r.message),
+                stop_reason: r.stop_reason,
+                state: r.state,
+                updates: pending.updates,
+            },
+            None => SayReply::ConnectionLost,
+        };
+        let _ = pending.reply.send(outcome);
+        return;
+    }
     if pending_ping.as_ref().is_some_and(|(want, _)| id == want) {
         if let Some((_, tx)) = pending_ping.take() {
             if let Some(ack) = result.and_then(|v| serde_json::from_value::<PingAck>(v).ok()) {
@@ -420,13 +540,22 @@ fn handle_response(id: &str, result: Option<serde_json::Value>, pending_ping: &m
     }
 }
 
-/// Route an `Error` envelope to `pending_query` when it matches (issue #185:
-/// a body's `query/*` error, e.g. `query/support`'s `-32006`, forwarded
-/// verbatim to the `hub query` caller). `circuit/ping`/confirmation probes
-/// never error on the wire (a body always answers `query/support` with a
-/// result, `ok:false` included), so only `pending_query` is checked here.
-fn handle_error_response(id: Option<&str>, error: &WireError, pending_query: &mut PendingQuery) {
+/// Route an `Error` envelope to whichever of `pending_says`/`pending_query`
+/// matches (issue #190's own body-refused `say`, or issue #185's a body's
+/// `query/*` error — e.g. `query/support`'s `-32006` — forwarded verbatim to
+/// the `hub query` caller). `circuit/ping`/confirmation probes never error on
+/// the wire (a body always answers with a result, `ok:false` included).
+fn handle_error_response(
+    id: Option<&str>,
+    error: &WireError,
+    pending_query: &mut PendingQuery,
+    pending_says: &mut std::collections::HashMap<String, PendingSay>,
+) {
     let Some(want_id) = id else { return };
+    if let Some(pending) = pending_says.remove(want_id) {
+        let _ = pending.reply.send(SayReply::Refused(error.clone()));
+        return;
+    }
     if pending_query.as_ref().is_some_and(|(want, _)| want_id == want) {
         if let Some((_, tx)) = pending_query.take() {
             let _ = tx.send(Err(error.clone()));
