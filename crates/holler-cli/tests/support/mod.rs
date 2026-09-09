@@ -569,8 +569,8 @@ impl Stub {
             "initialize must negotiate protocolVersion 2: {init}"
         );
         assert!(
-            init["result"].get("agentCapabilities").is_some(),
-            "initialize result must carry agentCapabilities: {init}"
+            init["result"]["capabilities"]["session"].is_object(),
+            "initialize result must carry capabilities.session: {init}"
         );
         self.send(SESSION_NEW);
         assert_eq!(self.read_response("2")["result"]["sessionId"], "stub");
