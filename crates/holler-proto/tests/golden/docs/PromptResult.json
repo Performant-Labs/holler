@@ -1,15 +1,15 @@
 {
-  "stop_reason": "end_turn",
-  "state": "completed",
   "message": {
-    "messageId": "m-2",
     "contextId": "io/alpha",
-    "taskId": "h-01HTESTGOLDEN000000000000",
-    "role": "ROLE_AGENT",
+    "messageId": "m-2",
     "parts": [
       {
         "text": "ALPHA"
       }
-    ]
-  }
+    ],
+    "role": "ROLE_AGENT",
+    "taskId": "h-01HTESTGOLDEN000000000000"
+  },
+  "state": "completed",
+  "stop_reason": "end_turn"
 }

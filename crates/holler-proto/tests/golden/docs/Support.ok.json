@@ -1,6 +1,6 @@
 {
   "feature": "opencode",
+  "how": "opencode acp",
   "kind": "harness",
-  "ok": true,
-  "how": "opencode acp"
+  "ok": true
 }
