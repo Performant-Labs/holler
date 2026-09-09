@@ -168,11 +168,19 @@ pub struct Row {
     pub last_turn: Option<LastTurn>,
 }
 
-/// The token → client-id / hostname binding a roster needs to attribute rows.
+/// The token → client-id / hostname / label binding a roster needs to
+/// attribute rows. `label` (issue #236, ADR 0005 §2) is the hub's own half of
+/// `<label>/<session>` qualification: bodies never send the label on the
+/// wire, so the hub attributes it once, from the authenticated token, at
+/// `circuit/authenticate` time (`crate::circuit::handle_authenticated` calls
+/// [`Roster::set_label`]). A row built before the label is bound (or built by
+/// a unit test that never binds one) falls back to the bare name — see
+/// [`qualified_name`].
 #[derive(Debug, Clone, Default)]
 struct TokenInfo {
     client_id: Option<String>,
     hostname: Option<String>,
+    label: Option<String>,
 }
 
 /// The mutable roster state, guarded by a `std::sync::Mutex` (see the module
@@ -312,6 +320,16 @@ impl Roster {
         self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner).bind_token(token_id, None, Some(hostname));
     }
 
+    /// Record the label a token was minted with (issue #236, ADR 0005 §2):
+    /// bound once, at `circuit/authenticate` time, from the token record the
+    /// hub already verified — never from the wire (bodies don't send it).
+    /// Every row this token advertises afterward is qualified `<label>/
+    /// <session>` (see [`qualified_name`]); idempotent, like [`Roster::
+    /// set_token`]/[`Roster::set_hostname`].
+    pub fn set_label(&self, token_id: &str, label: &str) {
+        self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner).bind_label(token_id, label);
+    }
+
     /// A `session/presence` from a body: replace (not merge) that token's set
     /// of rows. A row in the frame is upserted (`connected`, `last_seen` =
     /// now); a row the token previously held but which is absent from the frame
@@ -322,7 +340,7 @@ impl Roster {
         let mut inner = self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         inner.bind_token(token_id, None, Some(&p.hostname));
         let info = inner.tokens.get(token_id).cloned().unwrap_or_default();
-        let incoming: HashSet<String> = p.sessions.iter().map(|s| s.name.clone()).collect();
+        let incoming: HashSet<String> = p.sessions.iter().map(|s| qualified_name(&info, s)).collect();
         // The newest ad timestamp in this frame (the `last_update_at` base):
         // the body emits one presence per body, so its sessions share one
         // clock and this is the frame's "now" on the body's wall.
@@ -431,6 +449,18 @@ impl Roster {
     /// default roster listing); `Some(true)` includes them. Each returned row
     /// has `stalled` applied to its `state` display where applicable.
     pub fn rows(&self, all: Option<bool>) -> Vec<Row> {
+        self.rows_matching(all, None)
+    }
+
+    /// [`Roster::rows`], additionally narrowed to `prefix` (issue #236, ADR
+    /// 0005 §4): a row's `name` matches when it is **exactly** `prefix` or
+    /// **nests under** it (`name == prefix` or `name.starts_with("{prefix}/")`)
+    /// — the same transitive-prefix grammar as a filesystem path or a NATS
+    /// subject, so `--prefix io` returns `io` itself (a session literally
+    /// named `io`) and everything under it (`io/alpha`, `io/nested/beta`, …)
+    /// without matching an unrelated `io-other/alpha`. `prefix` of `None`
+    /// (or the empty string) matches every row, same as [`Roster::rows`].
+    pub fn rows_matching(&self, all: Option<bool>, prefix: Option<&str>) -> Vec<Row> {
         let (rows, now) = {
             let inner = self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             let rows: Vec<Row> = inner.rows.values().cloned().collect();
@@ -439,6 +469,9 @@ impl Roster {
         let mut out = Vec::new();
         for row in rows {
             if row.conn_state == "gone" && !all.unwrap_or(false) {
+                continue;
+            }
+            if !name_matches_prefix(&row.name, prefix) {
                 continue;
             }
             out.push(self.stalled_display(&row, now));
@@ -479,6 +512,19 @@ impl Roster {
     }
 }
 
+/// One advertisement's identity fields, bundled so [`Inner::apply_ad`] can
+/// hand them to [`Inner::upsert_row`]/[`Inner::build_row`] as a single
+/// argument (clippy's `too_many_arguments`, at 4 already-distinct pieces of
+/// identity plus the clock inputs each of those two took separately).
+struct AdInput<'a> {
+    token_id: &'a str,
+    info: &'a TokenInfo,
+    ad: &'a SessionAd,
+    /// The already-qualified row key ([`qualified_name`]'s output) — computed
+    /// once in `apply_ad`, not recomputed by its callees.
+    name: &'a str,
+}
+
 impl Inner {
     /// Bump the published generation (a roster change a `wait`-er notices).
     /// Called only while the roster's guard is already held (never re-locks, so
@@ -496,40 +542,32 @@ impl Inner {
     /// self-deadlock).
     fn apply_ad(&mut self, token_id: &str, info: &TokenInfo, s: &SessionAd, base: Option<u64>) -> Option<String> {
         let now = self.now_secs();
-        if let Some(existing) = self.rows.get(&s.name) {
+        let name = qualified_name(info, s);
+        let ad = AdInput { token_id, info, ad: s, name: &name };
+        if let Some(existing) = self.rows.get(&name) {
             if existing.token_id == token_id {
                 // Same token: a re-claim is always accepted (a locator refresh).
-                self.upsert_row(token_id, info, s, existing.first_seen, now, base);
+                self.upsert_row(&ad, existing.first_seen, now, base);
                 return None;
             }
             // A different token: held iff the current holder is `connected`;
             // a `reconnecting`/`gone` holder is displaced (the #383 rule).
             if existing.conn_state == "connected" {
-                self.log_name_held(&s.name, existing);
-                return Some(s.name.clone());
+                self.log_name_held(&name, existing);
+                return Some(name);
             }
-            self.upsert_row(token_id, info, s, existing.first_seen, now, base);
+            self.upsert_row(&ad, existing.first_seen, now, base);
             return None;
         }
         // A brand-new name.
-        self.rows
-            .insert(s.name.clone(), self.build_row(token_id, info, s, now, now, base));
+        self.rows.insert(name.clone(), self.build_row(&ad, now, now, base));
         None
     }
 
     /// Replace an existing row with the new advertisement (upsert / re-claim /
     /// displacement). `first_seen` is preserved across a re-claim.
-    fn upsert_row(
-        &mut self,
-        token_id: &str,
-        info: &TokenInfo,
-        s: &SessionAd,
-        first_seen: u64,
-        now: u64,
-        base: Option<u64>,
-    ) {
-        self.rows
-            .insert(s.name.clone(), self.build_row(token_id, info, s, first_seen, now, base));
+    fn upsert_row(&mut self, ad: &AdInput<'_>, first_seen: u64, now: u64, base: Option<u64>) {
+        self.rows.insert(ad.name.to_string(), self.build_row(ad, first_seen, now, base));
     }
 
     /// Mark the rows this token previously held but the frame dropped as
@@ -561,22 +599,15 @@ impl Inner {
     /// correct under an injected test clock); the ad's `last_update_at` only
     /// supplies the *offset* within the presence batch (see
     /// [`Inner::last_update_secs`]).
-    fn build_row(
-        &self,
-        token_id: &str,
-        info: &TokenInfo,
-        s: &SessionAd,
-        first_seen: u64,
-        now: u64,
-        base: Option<u64>,
-    ) -> Row {
+    fn build_row(&self, ad: &AdInput<'_>, first_seen: u64, now: u64, base: Option<u64>) -> Row {
+        let (info, s) = (ad.info, ad.ad);
         Row {
-            name: s.name.clone(),
+            name: ad.name.to_string(),
             harness: s.harness.clone(),
             mode: s.mode.as_str().to_string(),
             state: s.state.as_str().to_string(),
             conn_state: "connected",
-            token_id: token_id.to_string(),
+            token_id: ad.token_id.to_string(),
             client_id: info.client_id.clone().unwrap_or_default(),
             hostname: info.hostname.clone().unwrap_or_default(),
             harness_session_id: s.harness_session_id.clone(),
@@ -637,6 +668,42 @@ impl Inner {
             info.hostname = Some(h.to_string());
         }
     }
+
+    /// Bind a token's label (issue #236). Separate from [`Inner::bind_token`]
+    /// because it is set exactly once, at authentication, from data the
+    /// wire never carries (see [`Roster::set_label`]).
+    fn bind_label(&mut self, token_id: &str, label: &str) {
+        self.tokens.entry(token_id.to_string()).or_default().label = Some(label.to_string());
+    }
+}
+
+/// The roster row's key: `<label>/<bare-name>` (ADR 0005 §2) once the roster
+/// knows the advertising token's label (bound at `circuit/authenticate` time
+/// — see [`Roster::set_label`]); the bare name alone when it doesn't (a unit
+/// test that builds rows without binding a label, or — defensively — a
+/// presence that somehow outraces the auth-time bind). Bodies only ever send
+/// the bare name (ADR 0005 §2: "Bodies never send the label"), so this is
+/// entirely the hub's own attribution, not anything read off the wire.
+fn qualified_name(info: &TokenInfo, s: &SessionAd) -> String {
+    match info.label.as_deref() {
+        Some(label) if !label.is_empty() => format!("{label}/{}", s.name),
+        _ => s.name.clone(),
+    }
+}
+
+/// `--prefix` matching (issue #236, ADR 0005 §4): `name` matches `prefix`
+/// when it is exactly `prefix` or nests under it (`name.starts_with(
+/// "{prefix}/")`). A trailing `/` on `prefix` (e.g. `io/`, matching the ADR's
+/// own example) is stripped first so `io` and `io/` behave identically. No
+/// prefix (`None`, or the empty string once trimmed) matches everything.
+fn name_matches_prefix(name: &str, prefix: Option<&str>) -> bool {
+    let Some(prefix) = prefix.map(|p| p.trim_end_matches('/')) else {
+        return true;
+    };
+    if prefix.is_empty() {
+        return true;
+    }
+    name == prefix || name.starts_with(&format!("{prefix}/"))
 }
 
 /// Parse an RFC3339 timestamp into whole epoch seconds, or `None` (an absent /

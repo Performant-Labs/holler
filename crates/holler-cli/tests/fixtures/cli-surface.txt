@@ -38,6 +38,9 @@ hub query | io/alpha support opencode --json
 # --- top-level daily verbs (hub-only) --------------------------------------
 roster |
 roster | --json
+roster | --all
+roster | --prefix io
+roster | --prefix io/ --all --json
 say | io/alpha "reply with the word ALPHA"
 say | alpha "hi" --timeout 30s --json
 say | io/alpha "hi" --queue

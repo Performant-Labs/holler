@@ -233,17 +233,24 @@ async fn say(cid: &holler_proto::CorrelationId, obj: &serde_json::Value, registr
     }
 }
 
-/// `control/roster {all?}` (issue #186): the CLI's `holler roster` verb,
-/// answered straight from this hub's in-process roster. Without `params.all`
-/// it returns the live-only view (every row except `gone`, matching
-/// [`Roster::rows`]); with `params.all == true` it includes `gone` rows so the
-/// operator can see what fell off and how recently. `stalled` is not a filter
-/// dimension here (it is a display-only column in the CLI), and `hostname`
-/// narrowing is the CLI's job (it can read the roster once and filter locally),
-/// so this control method is deliberately parameter-light.
+/// `control/roster {all?, prefix?}` (issue #186; `prefix` added by issue
+/// #236, ADR 0005 §4): the CLI's `holler roster` verb, answered straight from
+/// this hub's in-process roster. Without `params.all` it returns the
+/// live-only view (every row except `gone`, matching [`Roster::rows`]); with
+/// `params.all == true` it includes `gone` rows so the operator can see what
+/// fell off and how recently. `params.prefix`, when present and non-empty,
+/// narrows to rows named exactly that prefix or nested under it
+/// (`Roster::rows_matching`'s grammar) — done hub-side (not by the CLI
+/// filtering a full fetch locally) so a hub with many sessions doesn't ship
+/// the whole roster over the control socket just to throw most of it away.
+/// `stalled` is not a filter dimension here (it is a display-only column in
+/// the CLI), and `hostname` narrowing is still the CLI's job (it can read the
+/// roster once and filter locally).
 async fn roster_control(cid: &holler_proto::CorrelationId, obj: &serde_json::Value, roster: &Roster) -> String {
-    let all = obj.get("params").and_then(|p| p.get("all")).and_then(|v| v.as_bool()).unwrap_or(false);
-    let rows = roster.rows(Option::from(all));
+    let params = obj.get("params");
+    let all = params.and_then(|p| p.get("all")).and_then(|v| v.as_bool()).unwrap_or(false);
+    let prefix = params.and_then(|p| p.get("prefix")).and_then(|v| v.as_str());
+    let rows = roster.rows_matching(Option::from(all), prefix);
     encode_response(
         cid,
         serde_json::json!({ "rows": rows }),

@@ -416,3 +416,61 @@ fn roster_json_shape() {
     assert_eq!(pending[0].prompt, "may use the network?");
     assert_eq!(pending[0].options, vec!["allow", "reject"]);
 }
+
+/// Issue #236 (ADR 0005 §2 + §4): once a token's label is bound
+/// ([`Roster::set_label`], the same call `circuit::handle_authenticated`
+/// makes at auth time), the rows it advertises are named `<label>/<session>`,
+/// and `--prefix`'s transitive match (`Roster::rows_matching`) narrows on
+/// that qualification — a real label boundary, not a plain substring search.
+#[test]
+fn label_qualifies_row_names_and_prefix_filters_on_the_label_boundary() {
+    let r = Roster::new(&Config::default());
+    r.set_token(T, C);
+    r.set_label(T, "io");
+    r.advertise(T, &presence("h1", &["alpha", "beta"]));
+
+    let other = "tok_0002";
+    r.set_token(other, "cli_0002");
+    r.set_label(other, "io-other");
+    r.advertise(other, &presence("h2", &["gamma"]));
+
+    let mut names: Vec<String> = r.rows(None).iter().map(|row| row.name.clone()).collect();
+    names.sort();
+    assert_eq!(
+        names,
+        vec!["io-other/gamma".to_string(), "io/alpha".to_string(), "io/beta".to_string()],
+        "every row is qualified `<label>/<session>` once its token's label is bound"
+    );
+
+    // `--prefix io` matches `io/alpha` and `io/beta`, never `io-other/gamma` —
+    // proving the match is on the `/`-delimited label boundary, not a plain
+    // substring/`starts_with("io")` search (which `io-other/gamma` would also
+    // satisfy).
+    let mut io_names: Vec<String> = r.rows_matching(None, Some("io")).iter().map(|row| row.name.clone()).collect();
+    io_names.sort();
+    assert_eq!(io_names, vec!["io/alpha".to_string(), "io/beta".to_string()]);
+
+    // A trailing slash (the ADR's own example spelling, `io/`) behaves
+    // identically.
+    let mut io_slash: Vec<String> =
+        r.rows_matching(None, Some("io/")).iter().map(|row| row.name.clone()).collect();
+    io_slash.sort();
+    assert_eq!(io_slash, io_names, "a trailing slash on --prefix is equivalent to none");
+
+    // `--prefix io-other` matches only its own row.
+    let other_names: Vec<String> =
+        r.rows_matching(None, Some("io-other")).iter().map(|row| row.name.clone()).collect();
+    assert_eq!(other_names, vec!["io-other/gamma".to_string()]);
+
+    // No prefix (`None`) is every row, same as `rows(None)`.
+    assert_eq!(r.rows_matching(None, None).len(), 3);
+
+    // A token that never had its label bound (e.g. a test — or, defensively,
+    // a presence that somehow outraced the auth-time bind) still gets a row:
+    // it just falls back to the bare name, not a panic or a dropped session.
+    let unlabeled = "tok_0003";
+    r.set_token(unlabeled, "cli_0003");
+    r.advertise(unlabeled, &presence("h3", &["delta"]));
+    let bare = r.rows(None).into_iter().find(|row| row.token_id == unlabeled).expect("the unlabeled row exists");
+    assert_eq!(bare.name, "delta", "no bound label falls back to the bare name");
+}
