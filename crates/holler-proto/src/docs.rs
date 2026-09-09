@@ -500,6 +500,12 @@ pub struct Prompt {
     /// Optional caller metadata (e.g. the originating CLI invocation).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub meta: Option<BTreeMap<String, Value>>,
+    /// `say --queue` (issue #150/#190): append behind a busy session's
+    /// current turn instead of refusing with `-32009 session_busy`. Absent on
+    /// the wire (and defaulted on decode) when `false`, so this addition
+    /// keeps every pre-#190 `Prompt` fixture byte-identical.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub queue: bool,
 }
 
 /// The `result` of `session/prompt` — sent **exactly once**, when the turn

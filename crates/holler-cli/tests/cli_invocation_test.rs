@@ -128,11 +128,17 @@ fn bare_invocation_fails_closed(#[case] args: &[&str]) {
 // holler hub reachable" message when none is up — never "not implemented".
 // All twelve are therefore removed from this "not implemented" table and
 // pinned by dedicated tests in `crates/holler-cli/tests/query_test.rs`.
+//
+// NOTE (issue #190): `say`/`say --json` were originally listed here too.
+// `say` now does something real — it exits 1 with a genuine "no live holler
+// hub reachable" diagnostic rather than "not implemented" when there is no
+// hub to route through. Moved to its own pinned case (`say_without_live_hub_exits_1`,
+// below), the same treatment `hub_status_without_live_hub` got for the same
+// reason. The full route/busy-check/coalesce/TalkLog path against a live
+// hub+body is pinned by `crates/holler-cli/tests/talk_test.rs`.
 #[rstest]
 #[case::roster(&["roster"])]
 #[case::roster_json(&["--json", "roster"])]
-#[case::say(&["say", "SESSION", "TEXT"])]
-#[case::say_json(&["--json", "say", "SESSION", "TEXT"])]
 #[case::interrupt(&["interrupt", "SESSION"])]
 #[case::body_attach_sessions(&["body", "attach", "sessions"])]
 #[case::body_attach_init(&["body", "attach", "init"])]
@@ -234,6 +240,35 @@ fn hub_status_without_live_hub() {
         .env("HOLLER_STATE_DIR", &state)
         .env("NO_COLOR", "1")
         .args(["--json", "hub", "status"])
+        .assert()
+        .failure()
+        .code(1);
+    let _ = std::fs::remove_dir_all(&state);
+}
+
+// Issue #190: `say` against a state dir with no live hub exits 1 with the
+// spec's exact diagnostic rather than the skeleton's "not implemented" — the
+// same "parses, and takes the real unreachable-hub path" pin
+// `hub_status_without_live_hub` gives `hub status` above. The full
+// route/busy-check/coalesce/TalkLog path against a real hub+body is pinned by
+// `crates/holler-cli/tests/talk_test.rs`.
+#[test]
+fn say_without_live_hub_exits_1() {
+    let state = std::env::temp_dir().join(format!("holler-inv-say-{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&state);
+    holler()
+        .env("HOLLER_STATE_DIR", &state)
+        .env("NO_COLOR", "1")
+        .args(["say", "SESSION", "TEXT"])
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(contains("not implemented").not())
+        .stderr(contains("no live holler hub reachable"));
+    holler()
+        .env("HOLLER_STATE_DIR", &state)
+        .env("NO_COLOR", "1")
+        .args(["--json", "say", "SESSION", "TEXT"])
         .assert()
         .failure()
         .code(1);

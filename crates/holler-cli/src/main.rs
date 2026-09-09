@@ -16,9 +16,10 @@
 use clap::Parser;
 use holler_cli::{
     Attach, AttachCommand, BodyCommand, Cli, Cmd, Command, HubCommand, Mint, Query,
-    QueryResolution, TokenCommand,
+    QueryResolution, Say, TokenCommand,
 };
 use holler_cli::query_cmd::{body_local_configs, is_ambiguous, query_cmd_params};
+use holler_cli::time_fmt::format_epoch;
 use holler_proto::log::{emit_banner, init, resolve};
 use holler_proto::TokenError;
 
@@ -188,6 +189,21 @@ fn control_error_exit(e: holler_hub::control::ControlError) -> ! {
     std::process::exit(1);
 }
 
+/// `holler say` (issue #190) — thin wrapper: [`holler_cli::say_cmd::run`]
+/// carries the logic (kept out of `main.rs`'s 900-line budget, same split as
+/// `query_cmd.rs`/#185); this is the one place allowed to exit on it.
+fn say_command(say: &Say, json: bool) -> ! {
+    let result = holler_cli::say_cmd::run(say, json);
+    if !result.message.is_empty() {
+        if result.to_stderr {
+            eprintln!("error: {}", result.message);
+        } else {
+            println!("{}", result.message);
+        }
+    }
+    std::process::exit(result.exit_code);
+}
+
 // --- `holler hub token …` (story #163) --------------------------------------
 //
 // Each verb runs the token store's blocking `flock` operation. The CLI is not
@@ -222,26 +238,6 @@ fn token_exit(e: TokenError) -> ! {
 /// Format a unix epoch second as a local-time `YYYY-MM-DD HH:MM:SS` string
 /// (the `list`/`ping` EXPIRES column). No chrono dependency: a manual civil
 /// calendar conversion (Howard Hinnant's algorithm) is enough for epoch seconds.
-fn format_epoch(secs: u64) -> String {
-    let days = (secs as i64) / 86400;
-    let rem = secs as i64 % 86400;
-    let (hour, minute, second) = (rem / 3600, (rem % 3600) / 60, rem % 60);
-    // Days from 1970-01-01 → year, month, day (Hinnant's civil-from-days).
-    let z = days + 719468;
-    let era = z.div_euclid(146097);
-    let doe = z.rem_euclid(146097);
-    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
-    let y = yoe + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 3) / 153;
-    let day = doy - (153 * mp + 2) / 5;
-    let month = if mp < 10 { mp + 3 } else { mp - 9 };
-    let year = if month <= 2 { y + 1 } else { y };
-    format!(
-        "{year:04}-{month:02}-{day:02} {hour:02}:{minute:02}:{second:02}"
-    )
-}
-
 /// `holler hub token mint --label L [--ttl 24h] [--json]` — mint a join token
 /// and hand the operator the one-time secret. Human output prints `token_id`,
 /// `secret`, `expires`, and a ready-to-paste `holler body join` line; `--json`
@@ -606,13 +602,18 @@ fn main() {
         }
     }
 
+    // Story #190: `say` does something real now (`interrupt`, #191, doesn't yet).
+    if let Command::Say(say) = &cli.command {
+        say_command(say, cli.json);
+    }
+
     let story = match &cli.command {
         // hub (the implemented leaves were handled above and returned; this
         // arm is defensive — every `Command::Hub` path above exits)
         Command::Hub(_) => not_implemented("Hub"),
         // top-level (hub-only daily verbs)
         Command::Roster(_) => "Roster",
-        Command::Say(_) => "Say",
+        Command::Say(_) => not_implemented("Say"), // handled above; defensive.
         Command::Interrupt(_) => "Interrupt",
         // body (the implemented Join/Detach/Status were handled above and
         // returned; this arm is defensive — every `Command::Body` path above
@@ -720,20 +721,15 @@ fn body_run(config_flag: Option<&str>) -> ! {
     for w in &parsed.warnings {
         eprintln!("warn: {w}");
     }
-    let configs = parsed.sessions.clone();
     let registry = holler_body::registry::SessionRegistry::from_sessions(parsed.sessions);
 
-    // The hostname the presence doc's `sessions` are advertised under is the
-    // body's own persisted identity hostname (unavailable before `join`, but
-    // `connection::run` already fails closed with `NotJoined` in that case,
-    // before this registry's sessions are ever sent) — `connection::run`
-    // still builds each `session/presence` itself (it owns the identity), so
-    // only the session list, not a full `Presence`, crosses this boundary.
-    // `configs` (issue #185) is the same session list's pre-registry config
-    // rows, threaded through so a hub-forwarded `query/support` probe can
-    // resolve a harness's `command[0]` on `PATH`.
-    let sessions = registry.presence_doc(String::new()).sessions;
-    let code = match holler_body::connection::run(&state.root, sessions, configs) {
+    // Issue #190: `connection::run` now owns the registry outright — it
+    // starts a `SessionManager` over it (one task per session, for this
+    // process's whole live lifetime), derives issue #185's `query/*`
+    // config rows from the same registry internally, and drives every
+    // `session/presence` from the manager's *live* state, not the
+    // registry's own always-`idle` snapshot.
+    let code = match holler_body::connection::run(&state.root, registry) {
         holler_body::connection::RunExit::Ok => 0,
         holler_body::connection::RunExit::NotJoined
         | holler_body::connection::RunExit::AuthFailed(_)
