@@ -2,35 +2,126 @@
 //! `crash_mid_turn_is_error_not_hang` (issue #188's RED list), split into its
 //! own test binary/OS process, on a multi-thread tokio runtime.
 //!
-//! # Status: `#[ignore]`d — tracked as a follow-up, not part of this story's
-//! merge gate
+//! # Status: `#[ignore]`d — confirmed upstream, not fixable in this crate
 //!
 //! This is the one test in the RED list whose signal depends on the ACP
 //! SDK's own crash-detection plumbing: it spawns a background task
 //! (`connection.spawn`) that awaits `connection.incoming_closed()` and pushes
-//! `DriverEvent::Done(Error)` once the child's stdout reaches EOF. Direct
-//! investigation (an `lsof` on a stuck local process showed the child's
-//! stdout pipe fd was already gone — the OS-level EOF had already happened)
-//! points to that background task itself never getting scheduled again, not
-//! an I/O wait. Two mitigations were applied and both measurably helped
-//! locally (this test's own `[[test]]` target — see `Cargo.toml` — so it
-//! never competes with the other 18 driver tests' own child-process churn in
-//! one process; and `flavor = "multi_thread"` instead of `#[tokio::test]`'s
-//! single-thread default, matching how the SDK's own examples run under
-//! `#[tokio::main]`) — but on the actual target self-hosted Linux CI runner,
-//! running *completely alone* with no other test binary output interleaved,
-//! this test still deterministically hit its 45s bound in both CI attempts
-//! made while developing this story. That rules out cross-process contention
-//! as the sole cause on that specific machine and points at something
-//! environment-specific in how the agent-client-protocol crate's child-process
-//! reaping (`async-process`/`async-signal`, SIGCHLD-based on Linux) behaves
-//! there — a real, worth-investigating question, but not one answerable
-//! without CI shell access this session doesn't have, and not one that
-//! should keep the rest of this story (the actual point: answerable
-//! permission/elicitation blocking, all 18 other RED tests green and stable)
-//! off the critical path. `#[ignore]`d here rather than deleted so the
-//! assertion and investigation notes stay in the tree for whoever picks up
-//! the follow-up.
+//! `DriverEvent::Done(Error)` once the child's stdout reaches EOF.
+//!
+//! ## 2026-09-09 follow-up: reproduced live on the actual CI runner, root cause
+//! identified inside `agent-client-protocol` 2.1.0 itself
+//!
+//! Got shell access to the real CI environment this time (`ssh uranus`; the
+//! runner is a Docker container, image
+//! `harbor.performantlabs.com/performantlabs/pl-runner:1.66.1`, entrypoint
+//! `dumb-init` → `Runner.Listener`, `cap_sys_ptrace` dropped, no `docker
+//! --init`/tini beyond the baked-in `dumb-init`). Built a byte-identical
+//! container from that image, installed the pinned toolchain, and reproduced
+//! the hang deterministically (3/3 runs) running *only*
+//! `acp_driver_crash_test` `--ignored`, exactly the CI command line — so this
+//! is not cross-process contention, not a container-supervisor
+//! double-reaping problem, and not a missing `--init`.
+//!
+//! `strace -f` across the crash (see the PR description / commit for the raw
+//! log excerpts) shows every OS-level mechanic happening correctly and
+//! promptly, all within ~3ms of the child's `exit_group(1)`:
+//! - `SIGCHLD` is delivered to the reactor thread (`--- SIGCHLD
+//!   {si_code=CLD_EXITED, si_status=1} ---`) — `async-signal`'s handler is
+//!   registered and fires; there is no conflicting handler.
+//! - The child's stdout pipe read returns clean EOF (`read(11, "", 8192) =
+//!   0`) immediately after the last real JSON-RPC line is drained.
+//! - `wait4(child_pid, ..., WNOHANG, ...)` reaps the child and gets its exit
+//!   status — no zombie, no double-reap race with the container's `dumb-init`
+//!   supervisor (that supervisor only reaps *its own* orphans; it is not in
+//!   the path between the test binary and its direct child).
+//! - stderr is drained to EOF too, and every pipe fd is closed.
+//!
+//! So `async-process`/`async-signal`'s job is done correctly. The bug is one
+//! layer up: **the OS thread that did all of the above (`read`
+//! EOF → `wait4` reap → close fds) immediately parks on
+//! `futex(FUTEX_WAIT_BITSET_PRIVATE, ..., NULL)` — an unbounded wait — right
+//! after that cleanup, and is never woken again.** No thread in the process
+//! ever becomes runnable again from a real I/O or task-wakeup event; the only
+//! thing that eventually happens is the *test's own* `tokio::time::timeout`
+//! (45s) firing, at which point the runtime tears down and every parked
+//! thread gets woken by that shutdown, not by anything connection-related.
+//! Concretely: neither this test's crash-watcher task (`connection.spawn`)
+//! **nor** `AcpDriver::spawn`'s own `connection::run` task (whose foreground
+//! `tokio::select!` *also* awaits `connection.incoming_closed()` directly,
+//! independent of the crash watcher) ever wakes — both are downstream of the
+//! same `agent_client_protocol::jsonrpc::IncomingClosed` signal, and neither
+//! fires. That rules out a bug specific to holler-body's own crash-watcher
+//! pattern: the SDK's own `finish_incoming_close()` call is what never
+//! happens (or never wakes anything), not a problem with how holler-body
+//! consumes `incoming_closed()`.
+//!
+//! Reading `agent-client-protocol` 2.1.0's own source
+//! (`~/.cargo/registry/.../agent-client-protocol-2.1.0/src/jsonrpc.rs` and
+//! `src/jsonrpc/incoming_actor.rs`) shows why this is very plausibly a crate
+//! bug rather than a holler-body one: `connection.spawn(...)` does **not**
+//! use `tokio::spawn` — it enqueues the future onto an internal
+//! `mpsc::UnboundedSender<Task>` consumed by the crate's own `task_actor`
+//! (`process_stream_concurrently` over the task stream), which itself is
+//! composed with the incoming/outgoing protocol actors through two *nested*
+//! `run_until_connection_close(background, foreground, incoming_closed)`
+//! calls (a `future::select` plus a second `future::select` against
+//! `incoming_closed.closed()` in the "foreground already resolved but
+//! incoming is still closing" branch) built on `futures::try_join!` and
+//! `futures_concurrency::stream::StreamExt::merge`. That is exactly the kind
+//! of deeply-nested, hand-rolled multi-future composition where a lost wakeup
+//! is easy to introduce and hard to notice locally, because it only shows up
+//! under specific multi-thread-runtime scheduling timing.
+//!
+//! This is corroborated, not just theorized: `incoming_closed()` /
+//! `IncomingClosed` / `run_until_connection_close` did not always exist in
+//! this crate — they were added by
+//! <https://github.com/agentclientprotocol/rust-sdk/pull/261> ("fix(acp):
+//! Handle incoming EOF correctly", merged 2026-07-20, +2748/-323), closing
+//! <https://github.com/agentclientprotocol/rust-sdk/issues/250> ("Pending
+//! send_request futures never resolve when the transport ends (EOF)"). It is
+//! large, recent (this repo pins 2.1.0, published 2026-09-04 — no newer
+//! version exists to upgrade to), and self-admittedly retrofits EOF-handling
+//! onto a connection model that wasn't originally built for it. A second,
+//! independent report against the *same* async-process/async-io-under-tokio
+//! boundary — <https://github.com/agentclientprotocol/rust-sdk/issues/254>,
+//! "`AcpAgent` stderr reader busy-polls a full CPU core at idle under a tokio
+//! runtime" (a *spurious*-wake bug: the reactor rewakes a task that isn't
+//! actually ready) — shows the opposite-shaped defect in the same
+//! `async-io`-reactor-driven-under-a-foreign-tokio-runtime area of this
+//! crate. A crate that has one confirmed bug where a task wakes when it
+//! shouldn't, in the exact subsystem where another task now provably doesn't
+//! wake when it should, is strong circumstantial evidence this is one
+//! upstream reliability seam, not two unrelated holler-body integration
+//! mistakes.
+//!
+//! **Not fixable from holler-body without an upstream change.** `AcpDriver`
+//! has no access to the child's raw PID/`Child` handle to build an
+//! independent liveness watchdog — `AcpAgentConfig`/`AcpAgent` own the spawn
+//! entirely — so any local mitigation would have to poll
+//! `connection.is_incoming_closed()`, which is gated on the exact same
+//! `finish_incoming_close()` call that this investigation shows never
+//! happens; it would not help. Per this repo's own external-contribution
+//! policy, filing this against `agentclientprotocol/rust-sdk` (with the
+//! `strace` evidence and the #250/#254/#261 cross-references above) needs a
+//! human's go-ahead — recommended, not done by this session.
+//!
+//! Two mitigations were applied in the original story and both measurably
+//! helped locally (this test's own `[[test]]` target — see `Cargo.toml` — so
+//! it never competes with the other 18 driver tests' own child-process churn
+//! in one process; and `flavor = "multi_thread"` instead of
+//! `#[tokio::test]`'s single-thread default, matching how the SDK's own
+//! examples run under `#[tokio::main]`) — neither changes the outcome on CI,
+//! consistent with the root cause being inside the SDK's own task
+//! composition rather than anything about how this crate drives it.
+//! `#[ignore]`d here rather than deleted so the assertion and investigation
+//! notes stay in the tree for whoever eventually files (or fixes) this
+//! upstream. Issue #189's session-manager story hit the identical hang in
+//! its own `driver_crash_isolated_and_restarts_on_next_prompt` test
+//! (`holler-cli/tests/session_manager_test.rs`, also `#[ignore]`d) and
+//! confirmed — by reproducing directly against *this* test, 3 runs in a row —
+//! that it is the same pre-existing defect, not something introduced by that
+//! story.
 
 use std::time::Duration;
 
