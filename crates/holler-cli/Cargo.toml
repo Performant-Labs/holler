@@ -99,6 +99,14 @@ path = "tests/body_run_test.rs"
 name = "wire_selftest"
 path = "tests/wire_selftest.rs"
 
+# ACP v2 spawn driver (issue #188): drives the real `holler_body::acp_driver`
+# against the real `stub-acp` process. Lives here (not `holler-body/tests/`)
+# because `CARGO_BIN_EXE_stub-acp` only resolves in this package's own test
+# targets — see the file's own doc comment for the full reasoning.
+[[test]]
+name = "acp_driver_test"
+path = "tests/acp_driver_test.rs"
+
 # Declare only what is consumed (issue #155 §7 — `cargo machete` fails CI
 # otherwise). A story that starts using a workspace dependency adds it here in
 # the same PR; the skeleton's speculative list was removed in #155.
