@@ -206,10 +206,9 @@ impl Drop for Hub {
 /// while the hub keeps running — see the call site for why that is fatal.
 pub fn drain_stderr_forever(mut reader: std::io::BufReader<std::process::ChildStderr>) {
     std::thread::spawn(move || {
-        let mut line = String::new();
+        let mut buf = [0u8; 4096];
         loop {
-            line.clear();
-            match reader.read_line(&mut line) {
+            match std::io::Read::read(&mut reader, &mut buf) {
                 Ok(0) | Err(_) => break,
                 Ok(_) => {}
             }

@@ -20,7 +20,7 @@
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::{
@@ -60,29 +60,16 @@ pub struct RegistryEntry {
     /// down (the read half observes the peer-closed condition).
     pub sink: mpsc::UnboundedSender<Message>,
     /// The oneshot *sender* the registry holds when *it* (not the peer)
-    /// force-closes this socket (supersede / revoke). The owning connection's
-    /// `ConnCtx` holds the matching *receiver* and awaits it in `finish` (in a
-    /// `select!` alongside the flush signal), so the connection task waits for
-    /// that close to reach the wire before it drops the read half — the peer
-    /// then sees the close code, not a bare EOF. A *peer*-initiated close never
-    /// signals it (the sender is dropped on deregister, which resolves the
-    /// receiver as "no force-close"), so the task drops immediately — the peer
-    /// would not reply to a close, so waiting would stall the teardown.
-    ///
-    /// Stored as an `Arc<Sender>` (a tokio oneshot `Sender` is not `Clone`;
-    /// only the `Arc` wrapper is). The connection task creates the channel and
-    /// holds the *receiver*; `register` moves a clone of the `Arc` into this
-    /// entry. On a clean deregister (`ConnectionHandle::drop`) the registry
-    /// `map.remove`s the entry (dropping the `Arc` clone), which resolves the
-    /// receiver as `Err` once the connection task's `Arc` is also dropped —
-    /// the "no force-close" case. On supersede/revoke the registry does NOT
-    /// signal the sender (a tokio oneshot `Sender` cannot be signalled through
-    /// a shared reference); instead the close frame is queued on the entry's
-    /// `sink` (the connection's own writer drains it and signals `flushed`,
-    /// which `ConnCtx::finish` also awaits), and the entry is re-inserted
-    /// (supersede) or left removed (revoke) so the deregister drops the
-    /// sender.
-    pub force_close: Arc<tokio::sync::oneshot::Sender<()>>,
+    /// force-closes this socket (supersede / revoke). The connection task
+    /// holds the matching *receiver* in `ConnCtx` (as `force_close_rx`); on
+    /// supersede or revoke the registry moves the entry out of the map and
+    /// calls `send()` on this owned sender, waking the connection task's
+    /// `post_auth_loop` (which races it against the read half) and
+    /// `ConnCtx::finish` (which races it against `flushed`). A
+    /// *peer*-initiated close never signals it: the registry removes the entry
+    /// on deregister (dropping the sender), which resolves the receiver as
+    /// `Err` — the "no force-close" case — so `finish` returns immediately.
+    pub force_close: tokio::sync::oneshot::Sender<()>,
 }
 
 /// The shared registry: one entry per live token, behind an `Arc` (the accept
@@ -95,8 +82,8 @@ pub struct Registry {
 
 impl Registry {
     /// An empty registry.
-    pub fn new() -> Arc<Self> {
-        Arc::new(Self {
+    pub fn new() -> std::sync::Arc<Self> {
+        std::sync::Arc::new(Self {
             entries: Mutex::new(HashMap::new()),
             seq: AtomicU64::new(0),
         })
@@ -116,11 +103,20 @@ impl Registry {
         &self,
         info: &ConnInfo,
         sink: mpsc::UnboundedSender<Message>,
-    ) -> Option<u64> {
+    ) -> Option<(u64, tokio::sync::oneshot::Receiver<()>)> {
         if info.token_id.is_empty() {
             return None;
         }
         let seq = self.next_seq();
+        // Create a NEW force_close oneshot pair for this entry (a tokio
+        // oneshot `Sender` is not `Clone`; we create a fresh pair rather than
+        // cloning the connection's own pair). The *sender* goes into the
+        // registry entry (the registry owns it and signals it on
+        // supersede/revoke); the *receiver* is returned to the caller, who
+        // hands it to the connection task's `ConnCtx` (as `force_close_rx`,
+        // raced against the read half in `post_auth_loop`) and to `finish`
+        // (as `force_close`, raced against `flushed`).
+        let (fc_tx, fc_rx) = tokio::sync::oneshot::channel::<()>();
         let entry = RegistryEntry {
             info: ClientInfo {
                 seq,
@@ -134,7 +130,7 @@ impl Registry {
                 last_frame_at: info.now_ms,
             },
             sink,
-            force_close: info.force_close.clone(),
+            force_close: fc_tx,
         };
 
         {
@@ -147,63 +143,48 @@ impl Registry {
             // connection's writer task drains that channel onto the old socket
             // and flushes the close frame to the wire) and then signals the
             // old connection's `force_close`. The old connection's
-            // `ConnCtx::finish` wakes on that signal and awaits the flush
+            // `post_auth_loop` wakes on that signal (it races the read half
+            // against the oneshot) and `ConnCtx::finish` awaits the flush
             // signal (`flushed`) before it drops its read half, so the old
             // peer sees the 1000 close code rather than a bare EOF. (A
             // *revoke* works the same way but with a 1008 close and no
             // notification; see `Registry::remove`.)
             if superseded {
                 // Take the old entry out of the map so we can move its owned
-                // `Arc<Sender>` out (a tokio oneshot `Sender` is not `Clone`
-                // and `send` takes it by value). The old entry is re-inserted
-                // under its own key immediately after the signal.
+                // `force_close` sender out (a tokio oneshot `Sender` is not
+                // `Clone` and `send` takes it by value). The old entry is NOT
+                // re-inserted: the new entry takes the token's slot, and the
+                // old connection's `ConnectionHandle::drop` (which fires when
+                // the old connection's task ends) finds the new entry in the
+                // map, sees that its `seq` is not the incumbent, and does not
+                // remove the new entry.
                 let Some(old_entry) = map.remove(&info.token_id) else {
                     // A concurrent deregister removed the entry between the
                     // `contains_key` check and this `remove`; the old socket
                     // is already gone, so there is nothing to supersede.
                     map.insert(info.token_id.clone(), entry);
-                    return Some(seq);
+                    return Some((seq, fc_rx));
                 };
                 let _ = old_entry.sink.send(superseded_notification());
                 let _ = old_entry.sink.send(Message::Close(Some(CloseFrame {
                     code: CloseCode::from(1000u16),
                     reason: "superseded".into(),
                 })));
-                // Signal the old connection's `force_close`: its `ConnCtx::finish`
-                // wakes and awaits `flushed` before dropping the read half, so
-                // the old peer sees the 1000 close code, not a bare EOF.
-                // We move the `Arc` out of the entry (allowed because the entry
-                // was just `map.remove`d) so the `Sender` is not moved out of a
-                // shared reference. The `Arc` is dropped after the signal,
-                // releasing the registry's strong reference (the connection task
-                // holds its own `Arc`).
-                // Signal the old connection's `force_close`: the entry was
-                // `map.remove`d, so `old_entry.force_close` is an owned
-                // `Sender` (not behind a shared reference) and can be moved
-                // out by `send()`. The connection task holds only the *receiver*;
-                // the sender is owned by the registry entry. Dropping the old
-                // entry (below) drops the sender, but the signal has already
-                // been delivered.
-                // The old entry's `force_close` `Arc` is NOT signalled here:
-                // a tokio oneshot `Sender` cannot be signalled through a
-                // shared reference (it is not `Clone`, and `send` takes it by
-                // value). Instead, the 1000 close frame queued on `old_entry.sink`
-                // above is drained by the old connection's *own* writer task,
-                // which signals the old connection's `flushed` oneshot.
-                // `ConnCtx::finish` awaits `flushed` (in a `select!` alongside
-                // `force_close`), so the old connection task waits for the
-                // 1000 to reach the wire before dropping the read half — the
-                // old peer sees the close code, not a bare EOF. The entry is
-                // re-inserted below (so the old connection's deregister can
-                // find it and drop the `force_close` `Arc`, which resolves the
-                // receiver as `Err` — the "no force-close" case).
+                // Signal the old connection's `force_close` so its
+                // `post_auth_loop` wakes up (it races the read half against
+                // this oneshot) and its `ConnCtx::finish` resolves (it
+                // races `flushed` against `force_close`). The sender is
+                // owned by the old entry (not shared via `Arc`), so we can
+                // call `send()` directly.
+
+                let _ = old_entry.force_close.send(());
                 map.insert(info.token_id.clone(), entry);
-                map.insert(old_entry.info.token_id.clone(), old_entry);
+
             } else {
                 map.insert(info.token_id.clone(), entry);
             }
         }
-        Some(seq)
+        Some((seq, fc_rx))
     }
 
     /// Remove a token from the registry (revoked or deleted). If the token was
@@ -222,18 +203,15 @@ impl Registry {
             // The registry (not the peer) closed this socket: the entry was
             // `map.remove`d, so `old.force_close` is an owned `Sender` (not
             // behind a shared reference) and can be moved out by `send()`.
-            // The connection task's `ConnCtx::finish` wakes and awaits
-            // `flushed` before dropping the read half.
-            // The 1008 close frame queued on `old.sink` above is drained by
-            // the connection's *own* writer task, which signals the
-            // connection's `flushed` oneshot. `ConnCtx::finish` awaits
-            // `flushed` (in a `select!` alongside `force_close`), so the
-            // connection task waits for the 1008 to reach the wire before
-            // dropping the read half. The entry is left removed (not
-            // re-inserted), so the connection's deregister is a no-op (the
-            // entry is already gone); the `force_close` `Arc` is dropped when
-            // the connection task drops its `ConnectionHandle`, which resolves
-            // the receiver as `Err` — the "no force-close" case.
+            // The connection task's `post_auth_loop` wakes on the signal (it
+            // races the read half against `force_close_rx`) and breaks, then
+            // `ConnCtx::finish` resolves (it races `flushed` against
+            // `force_close`). The 1008 close frame queued on `old.sink` above
+            // is drained by the connection's *own* writer task, which signals
+            // the connection's `flushed` oneshot. The entry is left removed
+            // (not re-inserted), so the connection's deregister is a no-op
+            // (the entry is already gone).
+            let _ = old.force_close.send(());
             true
         } else {
             false
@@ -322,16 +300,6 @@ pub struct ConnInfo {
     pub features: Vec<String>,
     pub harnesses: Vec<String>,
     pub now_ms: u64,
-    /// The connection's `force_close` oneshot *sender* (created in
-    /// `serve::handle_ws_conn`, wrapped in an `Arc` because a tokio oneshot
-    /// `Sender` is not `Clone`). The registry entry stores a clone of this
-    /// `Arc`; on supersede/revoke the registry `map.remove`s the entry and
-    /// calls `send()` on the dereferenced sender (the `Arc` was moved out of
-    /// the entry, so the sender is not behind a shared reference). The
-    /// connection's `ConnCtx` holds the matching *receiver*; a clean
-    /// deregister drops the entry (and its `Arc` clone), which resolves the
-    /// receiver as `Err` once the connection task's `Arc` is also dropped.
-    pub force_close: Arc<tokio::sync::oneshot::Sender<()>>,
 }
 
 /// A connection's registration handle. The connection task holds one for its
@@ -341,20 +309,32 @@ pub struct ConnInfo {
 /// incumbent* (by `seq`), so a superseded connection never removes the socket
 /// that replaced it.
 pub struct ConnectionHandle {
-    registry: Arc<Registry>,
+    registry: std::sync::Arc<Registry>,
     token_id: String,
     seq: u64,
+    /// Signaled when this handle is dropped. `Option` so `Drop` can `take()`
+    /// it out (a tokio oneshot `Sender` is not `Copy` and `send` takes it by
+    /// value, so we can't call `send` through a `&mut` reference).
+    dropped_tx: Option<tokio::sync::oneshot::Sender<()>>,
 }
 
 impl ConnectionHandle {
     /// Build a handle that deregisters `token_id` on drop, but only if this
-    /// `seq` is still the incumbent.
-    pub fn new(registry: Arc<Registry>, token_id: String, seq: u64) -> Self {
-        Self {
+    /// `seq` is still the incumbent. Returns the handle and the drop
+    /// oneshot's *receiver* (the connection task holds it in `handle_ws_conn`
+    /// and awaits it in a `tokio::select!` alongside the writer's
+    /// `flushed_tx`: if the handle drops before the writer processes a
+    /// queued close, the select still resolves so `ConnCtx::finish`
+    /// doesn't stall).
+    pub fn new(registry: std::sync::Arc<Registry>, token_id: String, seq: u64) -> (Self, tokio::sync::oneshot::Receiver<()>) {
+        let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+        let handle = Self {
             registry,
             token_id,
             seq,
-        }
+            dropped_tx: Some(tx),
+        };
+        (handle, rx)
     }
 
     /// The token this connection is registered under.
@@ -365,6 +345,12 @@ impl ConnectionHandle {
 
 impl Drop for ConnectionHandle {
     fn drop(&mut self) {
+        // Signal the connection task that this handle has been dropped.
+        // `take()` moves the `Sender` out of the `Option`, so we can call
+        // `send()` (which takes `self` by value) without a move-out-of-`&mut`.
+        if let Some(tx) = self.dropped_tx.take() {
+            let _ = tx.send(());
+        }
         let reg = &self.registry;
         let mut map = reg.entries.lock().unwrap_or_else(|e| e.into_inner());
         // Remove only if we are still the incumbent for our token (the map's
@@ -375,7 +361,13 @@ impl Drop for ConnectionHandle {
             Some(entry) if entry.info.seq == self.seq => {
                 map.remove(&self.token_id);
             }
-            _ => {}
+            Some(_) => {
+                // A newer connection superseded us; the map holds that newer
+                // entry and we must not remove it.
+            }
+            None => {
+                // Already revoked / forgotten; nothing to do.
+            }
         }
     }
 }
