@@ -233,6 +233,31 @@ fn session_busy_error_carries_state_and_turn_ages() {
     assert_eq!(data.get("last_update_age_ms"), Some(&serde_json::json!(3_000)));
 }
 
+/// The answer command's refusal (issue #151): `answer SESSION CHOICE` to a
+/// session that is not `input-required` encodes `-32010 nothing_pending`.
+/// Unlike `session_busy`, it carries only `code` (+ optional `reason`) —
+/// the session's `pending` list is already on the wire in presence, so the
+/// refusal needs no extra payload.
+#[test]
+fn nothing_pending_error_encodes_code_and_data_code() {
+    let env = Envelope::Error {
+        id: Some("h-01HTEST00000000000000000002".into()),
+        error: WireError::nothing_pending(),
+    };
+    let wire = encode(&env).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&wire).unwrap();
+    let err = v.get("error").expect("error object present");
+    assert_eq!(err.get("code"), Some(&serde_json::json!(-32010)));
+    let data = err.get("data").expect("nothing_pending carries data");
+    assert_eq!(data.get("code"), Some(&serde_json::json!("nothing_pending")));
+    // The session_busy-only enrichment fields stay off the wire here.
+    assert!(data.get("state").is_none());
+    assert!(data.get("turn_age_ms").is_none());
+    // Round-trips back to the named code by its number.
+    let back = decode(&wire).unwrap();
+    assert_eq!(Code::from_jsonrpc(back.error().unwrap().code), Some(Code::NothingPending));
+}
+
 /// A conformant error from a foreign peer — numeric `-32601`, no `data` —
 /// must decode and map back to the matching `Code` by number.
 #[test]
@@ -263,6 +288,7 @@ fn foreign_jsonrpc_error_decodes() {
 #[case::limit_exceeded(Code::LimitExceeded)]
 #[case::connection_lost(Code::ConnectionLost)]
 #[case::session_busy(Code::SessionBusy)]
+#[case::nothing_pending(Code::NothingPending)]
 fn every_code_round_trips_through_wire(#[case] code: Code) {
     let env = Envelope::Error {
         id: None,
@@ -414,6 +440,7 @@ fn presence_session_ad_carries_turn_timing_only_while_working() {
         harness_session_id: Some("ses_1".into()),
         turn_started_at: Some("2026-09-08T12:00:00Z".into()),
         last_update_at: Some("2026-09-08T12:00:03Z".into()),
+        pending: None,
     };
     let wire = serde_json::to_value(&working).unwrap();
     assert_eq!(wire["turn_started_at"], serde_json::json!("2026-09-08T12:00:00Z"));
@@ -429,10 +456,65 @@ fn presence_session_ad_carries_turn_timing_only_while_working() {
         harness_session_id: None,
         turn_started_at: None,
         last_update_at: None,
+        pending: None,
     };
     let wire = serde_json::to_value(&idle).unwrap();
     assert!(wire.get("turn_started_at").is_none(), "absent, not null, when idle");
     assert!(wire.get("last_update_at").is_none(), "absent, not null, when idle");
+}
+
+/// A presence row's `pending` list (issue #151) round-trips and is absent
+/// from the wire (not `null`) whenever the session is **not**
+/// `input-required` — so an `idle`/`working` row stays byte-identical to the
+/// #150 shape, and the roster's `PENDING` column has something to render only
+/// when a permission or elicitation is actually held.
+#[test]
+fn presence_session_ad_carries_pending_only_while_input_required() {
+    use docs::{Mode, PendingItem, PendingKind, SessionAd, SessionState};
+
+    let input_required = SessionAd {
+        name: "gamma".into(),
+        harness: "opencode".into(),
+        state: SessionState::InputRequired,
+        mode: Mode::Spawn,
+        harness_session_id: None,
+        turn_started_at: None,
+        last_update_at: None,
+        pending: Some(vec![
+            PendingItem {
+                id: "perm-1".into(),
+                kind: PendingKind::Permission,
+                prompt: "Run `rm -rf /`?".into(),
+                options: vec!["allow".into(), "reject".into()],
+            },
+            PendingItem {
+                id: "el-1".into(),
+                kind: PendingKind::Elicitation,
+                prompt: "Which branch to merge?".into(),
+                options: vec!["main".into(), "release/1.0".into()],
+            },
+        ]),
+    };
+    let wire = serde_json::to_value(&input_required).unwrap();
+    let pend = wire["pending"].as_array().expect("pending is an array on the wire");
+    // kind uses the kebab-case wire strings that match the ACP method names.
+    assert_eq!(pend[0]["kind"], serde_json::json!("permission"));
+    assert_eq!(pend[1]["kind"], serde_json::json!("elicitation"));
+    let back: SessionAd = serde_json::from_value(wire).unwrap();
+    assert_eq!(back, input_required);
+
+    let working = SessionAd {
+        name: "beta".into(),
+        harness: "opencode".into(),
+        state: SessionState::Working,
+        mode: Mode::Spawn,
+        harness_session_id: Some("openc-abc".into()),
+        turn_started_at: Some("2026-09-08T12:00:00Z".into()),
+        last_update_at: Some("2026-09-08T12:00:03Z".into()),
+        pending: None,
+    };
+    let wire = serde_json::to_value(&working).unwrap();
+    assert!(wire.get("pending").is_none(), "absent, not null, when working");
 }
 
 // ---------------------------------------------------------------------------
