@@ -318,6 +318,28 @@ def run_cases(gh, issue_number, dir:)
   catalog = discover(gh)
   rows = extract_rows(issue.body)
 
+  # Resolve every pending automated case against the real cargo commands and
+  # collect the result comment to post for each case that failed (or used a
+  # fallback). This is the only place `run` talks to GitHub: the resolution
+  # logic itself is factored out into resolve_run_rows so it can be exercised
+  # against a synthetic fixture without a GitHub client.
+  comments = resolve_run_rows(rows, catalog, dir: dir)
+  comments.each { |comment_body| gh.add_comment(REPO, issue_number, comment_body) }
+
+  new_body = splice_body(issue.body, rows, catalog)
+  gh.update_issue(REPO, issue_number, body: new_body)
+  passed = rows.count { |r| r.status.include?('✅') }
+  puts "Updated https://github.com/#{REPO}/issues/#{issue_number} -- #{passed}/#{rows.size} passed"
+end
+
+# Pure (no GitHub, no clock): resolves each pending automated row in `rows`
+# against `catalog`, running the real cargo commands via `dir`. Batches the
+# test-cat-unit cases per crate (one `cargo test -p <crate> --lib` each) and
+# runs every other automated case's segments directly. Returns, in row order,
+# the markdown body of the result comment that should be posted for each row
+# that FAILED or used a fallback (empty when nothing needs a comment). The
+# caller posts those (run_cases on GitHub; the mechanism test to a stub).
+def resolve_run_rows(rows, catalog, dir:)
   interop = ->(row) { (c = catalog.find { |x| x[:id] == row.id }) && c[:labels].include?(INTEROP_LABEL) }
   batchable = partition_unit_batchable(rows, catalog, dir: dir, interop: interop)
   batch_runs = {}
@@ -326,6 +348,7 @@ def run_cases(gh, issue_number, dir:)
     batch_runs[crate] = run_unit_batch(dir, crate)
   end
 
+  comments = []
   rows.each do |row|
     next unless row.status.include?('pending') # already resolved by a prior run/record
 
@@ -355,11 +378,9 @@ def run_cases(gh, issue_number, dir:)
         row.status = '❌ fail'
         note = found ? '' : " -- test '#{fn}' not found in --lib output (renamed or removed?)"
         row.evidence = "batched unit run #{ts} — see comment"
-        comment_body = "### Result for `#{row.id}`: #{row.status}\n\n" \
-                       "Part of a batched `cargo test -p #{crate} --lib` run#{note}.\n\n" \
-                       "```\n#{batch[:out].lines.last(25).join}\n```"
-        comment = gh.add_comment(REPO, issue_number, comment_body)
-        row.evidence = "[#{row.evidence}](#{comment.html_url})"
+        comments << "### Result for `#{row.id}`: #{row.status}\n\n" \
+                    "Part of a batched `cargo test -p #{crate} --lib` run#{note}.\n\n" \
+                    "```\n#{batch[:out].lines.last(25).join}\n```"
       end
       puts "==> #{row.id}: #{row.status} (batched, #{crate})"
       next
@@ -408,17 +429,10 @@ def run_cases(gh, issue_number, dir:)
     end
     row.evidence += ' (fallback: whole-workspace run, automation field not precisely parseable)' if fallback_used
 
-    if row.status == '❌ fail' || fallback_used
-      comment_body = "### Result for `#{row.id}`: #{row.status}\n\n```\n#{log}\n```"
-      comment = gh.add_comment(REPO, issue_number, comment_body)
-      row.evidence = "[#{row.evidence}](#{comment.html_url})"
-    end
+    comments << "### Result for `#{row.id}`: #{row.status}\n\n```\n#{log}\n```" if row.status == '❌ fail' || fallback_used
   end
 
-  new_body = splice_body(issue.body, rows, catalog)
-  gh.update_issue(REPO, issue_number, body: new_body)
-  passed = rows.count { |r| r.status.include?('✅') }
-  puts "Updated https://github.com/#{REPO}/issues/#{issue_number} -- #{passed}/#{rows.size} passed"
+  comments
 end
 
 # Runs a fully-resolved Segment's command, capturing output (for `run`).
