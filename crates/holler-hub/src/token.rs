@@ -630,6 +630,18 @@ pub async fn mint_async(label: &str, ttl_secs: u64, state: &HubState) -> Result<
     block_in_place(|| mint(&label, ttl_secs, &state))
 }
 
+/// A test-only knob (story #184): `HOLLER_STORE_DELAY_MS` makes the async store
+/// twins wait that many milliseconds before running the (real) work, so a test
+/// can simulate a slow token store. Unset (or non-numeric) means no delay. It
+/// is a plain `tokio::time::sleep` on the async task (not inside the blocking
+/// call), so it never holds the store flock and never starves the runtime.
+fn store_delay() -> Option<std::time::Duration> {
+    std::env::var("HOLLER_STORE_DELAY_MS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .map(std::time::Duration::from_millis)
+}
+
 /// `redeem` on the blocking pool.
 pub async fn redeem_async(
     secret: &str,
@@ -638,6 +650,9 @@ pub async fn redeem_async(
 ) -> Result<(String, String), RedeemError> {
     let (secret, hostname) = (secret.to_string(), hostname.to_string());
     let state = state.clone();
+    if let Some(d) = store_delay() {
+        tokio::time::sleep(d).await;
+    }
     block_in_place(|| redeem(&secret, &hostname, &state))
 }
 
@@ -649,5 +664,8 @@ pub async fn verify_credential_async(
 ) -> Result<Record, TokenError> {
     let (token_id, credential) = (token_id.to_string(), credential.to_string());
     let state = state.clone();
+    if let Some(d) = store_delay() {
+        tokio::time::sleep(d).await;
+    }
     block_in_place(|| verify_credential(&token_id, &credential, &state))
 }
