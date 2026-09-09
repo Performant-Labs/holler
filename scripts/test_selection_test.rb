@@ -295,3 +295,186 @@ class TestSelectionTest < Minitest::Test
     assert_equal('cargo test -p holler-cli --test interop_test -- --ignored', s7.cmd)
   end
 end
+
+# ---------------------------------------------------------------------------
+# Mechanism verification (#170 acceptance: "verify the mechanism against a
+# synthetic/fixture case if needed"). The selection tests above cover the
+# selection core in isolation; this covers the RUN mechanism -- the code that
+# takes a test-run issue's pending rows and turns them into cargo invocations
+# plus pass/fail statuses. The catalog is empty (0 real cases exist yet), so
+# the mechanism is driven against a SYNTHETIC fixture through the real
+# resolve_run_rows core, with the two things that touch the outside world
+# (the per-crate `cargo test -p <crate> --lib` batch and each non-batched
+# segment's captured cargo run) stubbed out -- exactly the hermetic fixture the
+# acceptance clause calls for.
+#
+# Deliberately stdlib-only and octokit-free (like the selection tests above),
+# so it runs on any runner's preinstalled Ruby. test-run.rb is required only
+# for its top-level resolve_run_rows; the three functions it calls into are
+# redefined here (last-definition wins), which keeps the test hermetic (no real
+# cargo, no GitHub).
+# ---------------------------------------------------------------------------
+
+# Load the runner first (for its pure, top-level resolve_run_rows core), then
+# redefine the three functions it calls into -- last definition wins, so these
+# stubs shadow test-run.rb's real cargo/GitHub versions and the test stays
+# hermetic. The stubs MUST be defined AFTER `require_relative 'test-run'`: if
+# they came first, the require would overwrite them with the real (network/
+# cargo) implementations and the fixture would run real cargo.
+require_relative 'test-run'
+
+# Stub stand-ins for the outside world, defined at top level (AFTER the
+# require above) so test-run.rb's top-level resolve_run_rows resolves to them
+# (last definition wins). They shadow the real -- network/cargo -- versions so
+# the test is hermetic: no real cargo, no GitHub.
+#
+# FakeSegment mirrors the real Segment interface (crate/file/fn/lib_test/
+# fallback_used/dir/cmd/error/env) and adds the three values a captured cargo
+# run reports back: ok, output, exitstatus.
+FakeSegment = Struct.new(:crate, :file, :fn, :lib_test, :fallback_used, :dir, :cmd, :error, :env, :ok, :output, :exitstatus, keyword_init: true)
+
+# Fake cargo output for the unit-batch step: a { crate => output } map, where
+# the output's `test <path> ... ok|FAILED` lines are what run_unit_batch parses
+# into its { bare_fn => passed? } result map.
+BATCH_OUTPUTS = {}
+
+def run_unit_batch(_dir, crate)
+  out = BATCH_OUTPUTS[crate].to_s
+  results = {}
+  out.each_line do |line|
+    m = line.match(/^test (\S+) \.\.\. (ok|FAILED)/)
+    next unless m
+
+    results[m[1].split('::').last] = (m[2] == 'ok')
+  end
+  { out: out, results: results }
+end
+
+# The non-batched path's per-segment captured cargo run, keyed by crate.
+SEG_RUN = {}
+
+def exec_segment_captured(seg)
+  run = SEG_RUN[seg.crate]
+  raise "mechanism test: no stubbed segment run for crate #{seg.crate.inspect}" if run.nil?
+
+  [run[:ok], run[:output], run[:exitstatus]]
+end
+
+# Which case IDs get unit-batched (normally driven by the test-cat-unit label).
+BATCHABLE_IDS = []
+
+def partition_unit_batchable(_rows, catalog, dir:, interop:)
+  out = {}
+  BATCHABLE_IDS.each do |id|
+    cat = catalog.find { |c| c[:id] == id }
+    next unless cat && cat[:automation]
+    seg = Automation.parse_segment(cat[:automation], dir: dir, interop: interop)
+    out[id] = [seg.crate, seg.fn] unless seg.error
+  end
+  out
+end
+
+class RunMechanismTest < Minitest::Test
+  # A discover()-shaped synthetic catalog (the fixture). Three cases:
+  #   hlr-1000 -> unit-batched (test-cat-unit), lib form.
+  #   hlr-1130 -> NOT batched (no test-cat-unit), integration form.
+  #   hlr-2010 -> unit-batched (test-cat-unit), lib form.
+  def fixture_catalog
+    [
+      { id: 'hlr-1000', issue: 90, applies: 'body', group: 'invocation',
+        automation: 'crates/holler-hub/src/sessions/session.rs (session_starts)',
+        labels: %w[test-grp-invoc test-cat-unit test-hub test-body test-auto] },
+      { id: 'hlr-1130', issue: 91, applies: 'body', group: 'concurrency',
+        automation: 'crates/holler-cli/tests/token_cli_test.rs (list_prints_table)',
+        labels: %w[test-grp-concurrency test-cat-regression test-auto] },
+      { id: 'hlr-2010', issue: 92, applies: 'both', group: 'protocol',
+        automation: 'crates/holler-proto/src/codec/encode.rs (encode_round_trips)',
+        labels: %w[test-grp-protocol test-cat-unit test-hub test-body test-auto] }
+    ]
+  end
+
+  # A test-run issue body whose rows are all pending auto rows (the input the
+  # run mechanism resolves). include_failed controls whether the third (failing)
+  # case is present.
+  def fixture_body(include_failed:)
+    rows = [
+      "| [hlr-1000](https://github.com/Performant-Labs/holler/issues/90) | auto | ⏳ pending |  |",
+      "| [hlr-1130](https://github.com/Performant-Labs/holler/issues/91) | auto | ⏳ pending |  |",
+      "| [hlr-2010](https://github.com/Performant-Labs/holler/issues/92) | auto | ⏳ pending |  |"
+    ]
+    rows.pop if !include_failed
+    <<~BODY
+      <!-- test-run-fields:start -->
+      | Field | Value |
+      |---|---|
+      | Commit | abc1234 |
+
+      | Test Case | Type | Status | Evidence |
+      |---|---|---|---|
+      #{rows.join("\n")}
+      <!-- test-run-fields:end -->
+    BODY
+  end
+
+  # { row.id => row }. Inject (not Array#to_h-with-block, which needs Ruby
+  # 2.6.0+) so the suite runs on macOS's preinstalled Ruby too.
+  def rows_by_id(rows)
+    rows.inject({}) { |h, r| h[r.id] = r; h }
+  end
+
+  # The real run mechanism against a synthetic fixture: a passing batched unit
+  # case -> ✅; a non-batched integration case -> ✅; a FAILING batched unit
+  # case -> ❌ with a result comment that posts the cargo output.
+  def test_run_mechanism_pass_and_fail_against_fixture
+    # Fake cargo --lib output, keyed by BARE fn name (the last `::` segment) --
+    # exactly what run_unit_batch parses. holler-hub's session_starts passes;
+    # holler-proto's encode_round_trips fails. (clear + []=: Hash#replace would
+    # wipe the whole hash, so the first crate's entry would be lost.)
+    BATCH_OUTPUTS.clear
+    BATCH_OUTPUTS['holler-hub'] = "test session_starts ... ok\n"
+    BATCH_OUTPUTS['holler-proto'] = "test encode_round_trips ... FAILED\n"
+    BATCHABLE_IDS.replace(%w[hlr-1000 hlr-2010])
+    SEG_RUN.clear
+    SEG_RUN['holler-cli'] = { ok: true, output: "test result: ok. 1 passed; 0 failed; 0 filtered out", exitstatus: 0 }
+
+    rows = extract_rows(fixture_body(include_failed: true))
+    comments = resolve_run_rows(rows, fixture_catalog, dir: '.')
+
+    by_id = rows_by_id(rows)
+    assert_includes(by_id['hlr-1000'].status, '✅')
+    assert_includes(by_id['hlr-1130'].status, '✅')
+    assert_includes(by_id['hlr-2010'].status, '❌')
+
+    # Exactly ONE comment (the failing case) is returned to post, and it
+    # carries the failing test's cargo output and names the batched crate.
+    assert_equal(1, comments.size)
+    assert_match(/hlr-2010/, comments[0])
+    assert_match(/cargo test -p holler-proto --lib/, comments[0])
+    assert_match(/encode_round_trips \.\.\. FAILED/, comments[0])
+  end
+
+  # The "not found" sub-case: a unit-batched test the crate no longer defines
+  # (renamed/deleted) -> ❌ with an explanatory note, not a silent pass.
+  def test_run_mechanism_batched_case_missing_from_lib_output
+    # holler-hub's --lib output contains a DIFFERENT test -- session_starts is
+    # absent, so the batched case is "not found". (clear + []=: Hash#replace
+    # would wipe the whole hash.)
+    BATCH_OUTPUTS.clear
+    BATCH_OUTPUTS['holler-hub'] = "test other_unit_test ... ok\n"
+    BATCHABLE_IDS.replace(%w[hlr-1000])
+    SEG_RUN.clear
+    SEG_RUN['holler-cli'] = { ok: true, output: "test result: ok. 1 passed; 0 failed; 0 filtered out", exitstatus: 0 }
+
+    rows = extract_rows(fixture_body(include_failed: false)) # only hlr-1000 + hlr-1130
+    comments = resolve_run_rows(rows, fixture_catalog, dir: '.')
+
+    by_id = rows_by_id(rows)
+    # Not found -> ❌ (the evidence points to the comment; the "not found"
+    # explanation lives in the comment itself, since the run otherwise "passed").
+    assert_includes(by_id['hlr-1000'].status, '❌')
+    assert_includes(by_id['hlr-1130'].status, '✅')
+    assert_equal(1, comments.size)
+    assert_match(/not found in --lib output/, comments[0])
+    assert_match(/session_starts/, comments[0])
+  end
+end
