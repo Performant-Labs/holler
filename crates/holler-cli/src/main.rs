@@ -500,7 +500,7 @@ fn main() {
             BodyCommand::Join(join) => body_join(&join.server, &join.token),
             BodyCommand::Detach(_) => body_detach(),
             BodyCommand::Status(_) => body_status(cli.json),
-            BodyCommand::Run(_) => body_run(),
+            BodyCommand::Run(run) => body_run(run.config.as_deref()),
             BodyCommand::Caps(_) => not_implemented("BodyCaps"),
             BodyCommand::Support(_) => not_implemented("BodySupport"),
             BodyCommand::Query(_) => not_implemented("BodyQuery"),
@@ -580,15 +580,61 @@ fn body_detach() -> ! {
     std::process::exit(code);
 }
 
-/// `holler body run` (issue #182) — the live connection loop: authenticate,
-/// exchange hellos, heartbeat, survive drops with backoff, and honour
+/// `holler body run` (issue #182 connection loop; issue #187 wires the
+/// session config in) — resolves the session config (`--config PATH` >
+/// `HOLLER_CONFIG` > `./sessions.toml` > `./session.toml`; none found is a
+/// fail-closed exit 3, per "every session is explicit"), builds the
+/// in-process [`holler_body::registry::SessionRegistry`], and drives the live
+/// connection loop: authenticate, exchange hellos, heartbeat (now carrying
+/// every registered session, `idle`), survive drops with backoff, and honour
 /// `detach`. Runs until a clean end (detach or a signal) or an unretryable
-/// authentication failure. `--config` (the session config) is accepted but
-/// unused here — no sessions exist yet on this story (`sessions:[]` in every
-/// presence); the body-config story wires it up.
-fn body_run() -> ! {
+/// authentication failure.
+fn body_run(config_flag: Option<&str>) -> ! {
     let state = body_state();
-    let code = match holler_body::connection::run(&state.root) {
+    // Not-joined (exit 1, `connection::run`'s own check) outranks a missing
+    // config (exit 3): an unjoined body has nothing to run regardless of its
+    // session list, and `body_run_unjoined_exits_1` pins that ordering — so
+    // this is checked *before* config discovery, even though `connection::
+    // run` re-checks it a moment later once it actually needs the identity.
+    match holler_body::identity::load(&state.root) {
+        None => {
+            eprintln!("error: not joined; run `holler body join` first");
+            std::process::exit(1);
+        }
+        Some(Err(e)) => {
+            eprintln!("error: state dir: {e}");
+            std::process::exit(1);
+        }
+        Some(Ok(_)) => {}
+    }
+
+    let cwd = match std::env::current_dir() {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("error: cannot resolve the current directory: {e}");
+            std::process::exit(1);
+        }
+    };
+    let parsed = match holler_body::config::discover_and_load(config_flag, &cwd) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("error: {}", e.message());
+            std::process::exit(3);
+        }
+    };
+    for w in &parsed.warnings {
+        eprintln!("warn: {w}");
+    }
+    let registry = holler_body::registry::SessionRegistry::from_sessions(parsed.sessions);
+
+    // The hostname the presence doc's `sessions` are advertised under is the
+    // body's own persisted identity hostname (unavailable before `join`, but
+    // `connection::run` already fails closed with `NotJoined` in that case,
+    // before this registry's sessions are ever sent) — `connection::run`
+    // still builds each `session/presence` itself (it owns the identity), so
+    // only the session list, not a full `Presence`, crosses this boundary.
+    let sessions = registry.presence_doc(String::new()).sessions;
+    let code = match holler_body::connection::run(&state.root, sessions) {
         holler_body::connection::RunExit::Ok => 0,
         holler_body::connection::RunExit::NotJoined
         | holler_body::connection::RunExit::AuthFailed(_)

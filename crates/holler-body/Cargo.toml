@@ -37,9 +37,12 @@ fs4 = { workspace = true }
 # the reconnect backoff's jitter (issue #182): a 64-bit CSPRNG draw, the same
 # primitive the hub's token store uses for secrets.
 getrandom = { workspace = true }
+# the body's session config file (issue #187): `sessions.toml`/`session.toml`.
+toml = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+rstest = { workspace = true }
 
 # Workspace lints (issue #149): inherit [workspace.lints] from the root
 # Cargo.toml — deny dead_code, clippy unwrap/expect/panic/unreachable, and the

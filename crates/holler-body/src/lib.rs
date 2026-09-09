@@ -7,11 +7,13 @@
 //! the rest in.
 
 pub mod backoff;
+pub mod config;
 pub mod connection;
 pub mod connection_state;
 pub mod detach;
 pub mod identity;
 pub mod instance_lock;
 pub mod join;
+pub mod registry;
 pub mod server_address;
 pub mod status;
