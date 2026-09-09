@@ -556,6 +556,97 @@ async fn cancel_while_permission_pending_replies_cancelled_outcome() {
     driver.shutdown().await.expect("shutdown");
 }
 
+/// Regression test for issue #238: `cancel()` must report the turn's REAL
+/// `StopReason`, never a hardcoded `Cancelled`, even when nothing was
+/// actually in flight to cancel. `stub-acp`'s own `session/cancel` handler
+/// (see `tests/stub-acp/main.rs`'s `route`) only ever resolves an in-flight
+/// turn to `cancelled` — by the time a turn has already fully resolved on
+/// the wire (`turn` is `None` there too), a further `session/cancel` gets no
+/// second `idle` state_update at all. That is exactly the "nothing in
+/// flight" no-op path this test drives: the turn is run to completion
+/// (`end_turn`) *first*, then `cancel()` is called against an already-idle
+/// driver. Before this fix, that path returned a bare `Ok(())` with the real
+/// reason thrown away; the caller (`session_manager::task::handle_cancel`)
+/// then hardcoded `StopReason::Cancelled` whenever it (wrongly) believed a
+/// turn was still in flight. `AcpDriver::cancel()` itself must never invent
+/// `Cancelled` here — this pins that its own contract is honest regardless
+/// of what any caller does with the value.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn cancel_after_natural_completion_reports_real_reason_not_cancelled() {
+    let _serial = serial_guard().await;
+    let config = stub_config("alpha", &["--chunks", "1"]);
+    let driver = AcpDriver::spawn(&config).await.expect("spawn");
+    let mut stream = driver.prompt("hi").await;
+    let events = drain_to_done(&mut stream, Duration::from_secs(5)).await;
+    assert_eq!(events.last(), Some(&DriverEvent::Done(StopReason::EndTurn)));
+    assert_eq!(driver.status(), Status::Idle);
+
+    // The turn is fully settled (`end_turn`) *before* this call — there is
+    // nothing left to cancel. The old, buggy `cancel()` returned a bare
+    // `Ok(())` here (discarding the real reason); the fix must instead
+    // report the actual last-observed `StopReason`.
+    let result = driver.cancel().await;
+    assert_eq!(
+        result,
+        Ok(StopReason::EndTurn),
+        "cancel() must report the turn's real outcome, not invent Cancelled: {result:?}"
+    );
+    driver.shutdown().await.expect("shutdown");
+}
+
+/// Companion to the above for the "cancel-before-idle" ordering (issue
+/// #239's own lock-ordering fix): cancelling a turn that IS still genuinely
+/// in flight must resolve with the real `Cancelled` reason the agent itself
+/// reports over the wire (via the fixed, single-critical-section
+/// check-and-register in `AcpDriver::cancel()`), not merely "resolve
+/// without hanging". Together with
+/// `cancel_after_natural_completion_reports_real_reason_not_cancelled`
+/// (the "idle-before-cancel" ordering) this exercises both straightforward
+/// orderings the lock-ordering fix has to get right.
+///
+/// # Why the exact TOCTOU race window isn't independently provable here
+///
+/// The bug this fix closes was a genuine data race: a gap of a few
+/// instructions between releasing the lock after the idle/pending check and
+/// re-acquiring it to register `awaiting_done`, during which the connection
+/// task's `handle_state_update` could deliver the real `idle` state_update
+/// and find nobody listening. Hitting that exact instruction-level window
+/// from outside the process, by timing alone, is not reliable — the same
+/// standard of honesty this crate already applies to issue #188's own
+/// `#[ignore]`d `crash_mid_turn_is_error_not_hang` (see
+/// `acp_driver_crash_test.rs`'s module doc): forcing a true data race
+/// deterministically needs a synchronization hook (e.g. an injectable delay
+/// or a test-only notification point) that does not exist in this driver,
+/// and adding one purely to prove a race window is closed would itself be
+/// new production surface for a test to exploit. What IS provable, and what
+/// this pair of tests actually proves, is that the corrected code — a
+/// single critical section covering both the check and the registration —
+/// behaves correctly for both orderings that critical section can produce:
+/// either the turn was already settled when the lock was taken (this test's
+/// sibling), or it wasn't yet and `awaiting_done` was registered before the
+/// lock was released (this test). There is no third ordering left for the
+/// old two-lock version's gap to hide in.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn cancel_mid_turn_reports_real_cancelled_reason() {
+    let _serial = serial_guard().await;
+    let config = stub_config("alpha", &["--slow", "--chunks", "5"]);
+    let driver = AcpDriver::spawn(&config).await.expect("spawn");
+    let mut stream = driver.prompt("hi").await;
+    // At least one event lands before cancelling mid-turn, so `cancel()`
+    // takes the "still in flight" branch (registers `awaiting_done`), not
+    // the "nothing in flight" no-op branch the sibling test exercises.
+    let _ = tokio::time::timeout(Duration::from_secs(2), stream.next()).await;
+    assert_eq!(driver.status(), Status::Working);
+
+    let result = driver.cancel().await;
+    assert_eq!(result, Ok(StopReason::Cancelled), "{result:?}");
+    assert_eq!(driver.status(), Status::Idle);
+
+    let events = drain_to_done(&mut stream, Duration::from_secs(5)).await;
+    assert_eq!(events.last(), Some(&DriverEvent::Done(StopReason::Cancelled)));
+    driver.shutdown().await.expect("shutdown");
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn elicitation_url_mode_and_non_enum_form_fields_are_reported_unsupported_not_silently_dropped(
 ) {

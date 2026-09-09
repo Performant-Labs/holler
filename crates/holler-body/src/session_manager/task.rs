@@ -205,10 +205,19 @@ async fn handle_cancel(inner: &mut Inner, reply_tx: oneshot::Sender<Result<(), S
         Some(Err(e)) => {
             let _ = reply_tx.send(Err(e));
         }
-        Some(Ok(())) => {
+        Some(Ok(reason)) => {
             let _ = reply_tx.send(Ok(()));
             if inner.current_reply.is_some() {
-                finish_turn(inner, StopReason::Cancelled).await;
+                // Finish the turn with the REAL stop reason the driver
+                // reported (issue #238) — never a hardcoded `Cancelled`. The
+                // agent may have actually settled the turn some other way
+                // (`end_turn`/`max_tokens`/`refusal`/…) right as this cancel
+                // was processed; `docs/protocol/v2.md` §6 makes `stopReason`
+                // the source of truth, carried verbatim, so inventing one
+                // here would violate that contract even though "the caller
+                // asked to cancel" — what the caller asked for and what
+                // actually happened are not always the same thing.
+                finish_turn(inner, reason).await;
             }
         }
     }
@@ -270,14 +279,17 @@ async fn handle_replace(inner: &mut Inner, text: String, reply_tx: oneshot::Send
             let _ = reply_tx.send(PromptOutcome::Error(e));
             return;
         }
-        Some(Ok(())) if inner.current_reply.is_some() => {
+        Some(Ok(reason)) if inner.current_reply.is_some() => {
             // Close the cancelled turn out (and fire *its own* caller's
             // reply) without touching the FIFO queue yet — this replacement
             // runs ahead of it, per the issue's own "cancel → run ahead of
-            // the queue" contract for `Replace`.
-            finish_turn_no_dispatch(inner, StopReason::Cancelled).await;
+            // the queue" contract for `Replace`. `reason` is the driver's
+            // real stop reason (issue #238), not a hardcoded `Cancelled` —
+            // the turn being replaced may have already settled some other
+            // way right as this `Replace` was processed.
+            finish_turn_no_dispatch(inner, reason).await;
         }
-        Some(Ok(())) | None => {}
+        Some(Ok(_)) | None => {}
     }
     inner.replace_counter += 1;
     let id = format!("replace-{}", inner.replace_counter);
@@ -288,11 +300,12 @@ async fn handle_replace(inner: &mut Inner, text: String, reply_tx: oneshot::Send
 
 /// Cancel the in-flight turn via the driver, if a driver exists at all.
 /// `None` means "nothing to cancel" (no driver has ever been spawned for
-/// this session yet); `Some(Ok(()))` means the driver confirmed the turn
-/// (if any) is settled — the caller still must check whether a turn was
-/// actually in flight (`inner.current_reply.is_some()`) before treating it
-/// as a real cancellation to finish out.
-async fn cancel_current(inner: &Inner) -> Option<Result<(), String>> {
+/// this session yet); `Some(Ok(reason))` means the driver confirmed the turn
+/// (if any) is settled, carrying the REAL `StopReason` it observed (issue
+/// #238 — never synthesized) — the caller still must check whether a turn
+/// was actually in flight (`inner.current_reply.is_some()`) before treating
+/// it as a real cancellation to finish out.
+async fn cancel_current(inner: &Inner) -> Option<Result<StopReason, String>> {
     let driver = inner.driver.as_ref()?;
     Some(driver.cancel().await.map_err(|e| e.message()))
 }
