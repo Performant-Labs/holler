@@ -125,6 +125,15 @@ path = "tests/acp_driver_crash_test.rs"
 name = "session_manager_test"
 path = "tests/session_manager_test.rs"
 
+# `status`/`caps`/`support`/`protocol` — local and remote, both peers (issue
+# #185): the hub's live-registry-backed counts and confirmation pass, the
+# body's local probes (no run required), and `hub query TARGET …`'s
+# resolve-and-forward path — driving both real binaries against a real
+# loopback hub, the same discipline as `body_run_test.rs` (#182).
+[[test]]
+name = "query_test"
+path = "tests/query_test.rs"
+
 # Declare only what is consumed (issue #155 §7 — `cargo machete` fails CI
 # otherwise). A story that starts using a workspace dependency adds it here in
 # the same PR; the skeleton's speculative list was removed in #155.

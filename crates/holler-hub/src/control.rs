@@ -68,6 +68,40 @@ pub fn token_ping(token_id: &str) -> Result<serde_json::Value, ControlError> {
     exchange("b-token-ping", "control/token_ping", Some(params))
 }
 
+/// `hub caps` (issue #185): the live hub's `query/caps` document.
+pub fn caps() -> Result<serde_json::Value, ControlError> {
+    exchange("b-caps", "control/caps", None)
+}
+
+/// `hub support FEATURE` (issue #185): a single `query/support` answer.
+pub fn support(feature: &str) -> Result<serde_json::Value, ControlError> {
+    let params = serde_json::json!({ "feature": feature });
+    exchange("b-support", "control/support", Some(params))
+}
+
+/// `hub query CMD [ARGS...]` (issue #185, local form): answer `method`
+/// (`query/status`|`caps`|`support`|`protocol`) from the live hub's own
+/// state, with `params` as that method's own params (e.g.
+/// `query/support`'s `{feature}`).
+pub fn query_local(method: &str, params: Option<serde_json::Value>) -> Result<serde_json::Value, ControlError> {
+    let outer = serde_json::json!({ "method": method, "params": params });
+    exchange("b-query-local", "control/query_local", Some(outer))
+}
+
+/// `hub query TARGET CMD [ARGS...]` (issue #185, remote form): forward
+/// `method`/`params` to the live body resolved from `target` (token id,
+/// client id, or hostname/label). No live match is [`ControlError::Refused`]
+/// carrying `-32004 not_connected`; more than one match is a `-32600`-coded
+/// refusal whose message names the ambiguity (the CLI maps that to exit 2).
+pub fn query_remote(
+    target: &str,
+    method: &str,
+    params: Option<serde_json::Value>,
+) -> Result<serde_json::Value, ControlError> {
+    let outer = serde_json::json!({ "target": target, "method": method, "params": params });
+    exchange("b-query-remote", "control/query_remote", Some(outer))
+}
+
 /// Send one `method`/`params` request over the control socket and return its
 /// `result` — the shared body of every one-shot control exchange (`status`,
 /// `token_ping`, …). `id_literal` is a fixed, well-formed `b-` id (each

@@ -15,8 +15,10 @@
 
 use clap::Parser;
 use holler_cli::{
-    Attach, AttachCommand, BodyCommand, Cli, Command, HubCommand, Mint, TokenCommand,
+    Attach, AttachCommand, BodyCommand, Cli, Cmd, Command, HubCommand, Mint, Query,
+    QueryResolution, TokenCommand,
 };
+use holler_cli::query_cmd::{body_local_configs, is_ambiguous, query_cmd_params};
 use holler_proto::log::{emit_banner, init, resolve};
 use holler_proto::TokenError;
 
@@ -91,6 +93,99 @@ fn hub_status(json: bool) -> ! {
             std::process::exit(1);
         }
     }
+}
+
+// --- `holler hub caps|support|query` (issue #185) ---------------------------
+//
+// All three are control-socket round trips (like `hub status`): no live hub
+// reachable is exit 1 with the spec's exact "no live holler hub reachable"
+// message. `query TARGET …` additionally forwards over the target body's own
+// live socket; a target that resolves to zero or more-than-one live body is
+// distinguished from an ordinary refusal (see `hub_query`'s own doc).
+
+/// `holler hub caps [--json]` (issue #185): the live hub's `query/caps`
+/// document (status + a support answer for every known id).
+fn hub_caps(json: bool) -> ! {
+    match holler_hub::control::caps() {
+        Ok(doc) => {
+            let n = doc.get("caps").and_then(|c| c.as_object()).map(|o| o.len()).unwrap_or(0);
+            print_control_doc(json, doc, || format!("hub: {n} caps known"));
+            std::process::exit(0);
+        }
+        Err(e) => control_error_exit(e),
+    }
+}
+
+/// `holler hub support FEATURE [--json]` (issue #185): a single
+/// `query/support` answer from the live hub.
+fn hub_support(feature: &str, json: bool) -> ! {
+    match holler_hub::control::support(feature) {
+        Ok(doc) => {
+            let ok = doc.get("ok").and_then(|v| v.as_bool()).unwrap_or(false);
+            print_control_doc(json, doc, || format!("{feature}: {}", if ok { "ok" } else { "not ok" }));
+            std::process::exit(0);
+        }
+        Err(e) => control_error_exit(e),
+    }
+}
+
+/// `holler hub query CMD [ARGS...]` (local) or `holler hub query TARGET CMD
+/// [ARGS...]` (remote, forwarded to that body's live socket) — issue #185.
+/// ADR 0003's exit codes: 0 on an answer, 1 when no live hub (or, for the
+/// remote form, no live *body* matching TARGET) is reachable, 2 when TARGET
+/// is ambiguous or the query tail itself is malformed.
+fn hub_query(query: &Query, json: bool) -> ! {
+    let resolved = match query.resolve() {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("error: {e}");
+            std::process::exit(2);
+        }
+    };
+    let method = resolved.cmd().method();
+    let params = query_cmd_params(resolved.cmd(), resolved.args());
+
+    let result = match resolved.target() {
+        None => holler_hub::control::query_local(method, params),
+        Some(target) => holler_hub::control::query_remote(target.as_str(), method, params),
+    };
+    match result {
+        Ok(doc) => {
+            print_control_doc(json, doc, || format!("{method}: ok"));
+            std::process::exit(0);
+        }
+        Err(holler_hub::control::ControlError::Refused(e)) if is_ambiguous(&e) => {
+            eprintln!("error: {}", e.message);
+            std::process::exit(2);
+        }
+        Err(e) => control_error_exit(e),
+    }
+}
+
+/// Print a control-socket document per ADR 0003: `--json` prints only the raw
+/// JSON to stdout; without it, `human()`'s short summary does.
+fn print_control_doc(json: bool, doc: serde_json::Value, human: impl FnOnce() -> String) {
+    if json {
+        println!("{doc}");
+    } else {
+        println!("{}", human());
+    }
+}
+
+/// Apply the shared exit code for a [`holler_hub::control::ControlError`]
+/// that is not the query-specific ambiguity case: no live hub reachable is
+/// exit 1 (the spec's exact message); every other refusal (including a body
+/// not connected, `-32004`) is also exit 1 — only an ambiguous TARGET (`hub
+/// query`'s own arm) is exit 2.
+fn control_error_exit(e: holler_hub::control::ControlError) -> ! {
+    match e {
+        holler_hub::control::ControlError::NoLiveHub => {
+            let state_root = holler_hub::state::resolve_state_dir().unwrap_or_default();
+            eprintln!("error: no live holler hub reachable at {}", state_root.display());
+        }
+        other => eprintln!("error: {other}"),
+    }
+    std::process::exit(1);
 }
 
 // --- `holler hub token …` (story #163) --------------------------------------
@@ -482,9 +577,9 @@ fn main() {
                 TokenCommand::Revoke(rev) => token_revoke(&rev.id, cli.json),
                 TokenCommand::Ping(ping) => token_ping(&ping.id, cli.json),
             },
-            HubCommand::Caps(_) => not_implemented("HubCaps"),
-            HubCommand::Support(_) => not_implemented("HubSupport"),
-            HubCommand::Query(_) => not_implemented("HubQuery"),
+            HubCommand::Caps(_) => hub_caps(cli.json),
+            HubCommand::Support(support) => hub_support(&support.feature, cli.json),
+            HubCommand::Query(query) => hub_query(query, cli.json),
         }
     }
 
@@ -501,9 +596,9 @@ fn main() {
             BodyCommand::Detach(_) => body_detach(),
             BodyCommand::Status(_) => body_status(cli.json),
             BodyCommand::Run(run) => body_run(run.config.as_deref()),
-            BodyCommand::Caps(_) => not_implemented("BodyCaps"),
-            BodyCommand::Support(_) => not_implemented("BodySupport"),
-            BodyCommand::Query(_) => not_implemented("BodyQuery"),
+            BodyCommand::Caps(_) => body_caps(cli.json),
+            BodyCommand::Support(support) => body_support(&support.feature, cli.json),
+            BodyCommand::Query(query) => body_query(query, cli.json),
             BodyCommand::Attach(Attach { command }) => match command {
                 AttachCommand::Sessions(_) => not_implemented("BodyAttachSessions"),
                 AttachCommand::Init(_) => not_implemented("BodyAttachInit"),
@@ -625,6 +720,7 @@ fn body_run(config_flag: Option<&str>) -> ! {
     for w in &parsed.warnings {
         eprintln!("warn: {w}");
     }
+    let configs = parsed.sessions.clone();
     let registry = holler_body::registry::SessionRegistry::from_sessions(parsed.sessions);
 
     // The hostname the presence doc's `sessions` are advertised under is the
@@ -633,8 +729,11 @@ fn body_run(config_flag: Option<&str>) -> ! {
     // before this registry's sessions are ever sent) — `connection::run`
     // still builds each `session/presence` itself (it owns the identity), so
     // only the session list, not a full `Presence`, crosses this boundary.
+    // `configs` (issue #185) is the same session list's pre-registry config
+    // rows, threaded through so a hub-forwarded `query/support` probe can
+    // resolve a harness's `command[0]` on `PATH`.
     let sessions = registry.presence_doc(String::new()).sessions;
-    let code = match holler_body::connection::run(&state.root, sessions) {
+    let code = match holler_body::connection::run(&state.root, sessions, configs) {
         holler_body::connection::RunExit::Ok => 0,
         holler_body::connection::RunExit::NotJoined
         | holler_body::connection::RunExit::AuthFailed(_)
@@ -671,4 +770,122 @@ fn body_status(json: bool) -> ! {
         holler_body::status::StatusExit::Ok => 0,
         holler_body::status::StatusExit::Io => 1,
     });
+}
+
+// --- `holler body caps|support|query` (issue #185) --------------------------
+//
+// All three are **local**: they read this body's own persisted identity, the
+// connection-state file, and the session config — the exact same local
+// probes `crate::query`'s document builders answer a hub-forwarded
+// `query/*` request with (see `holler_body::connection::handle_query`), so a
+// live `body run` and a one-shot `body caps`/`support`/`query` agree by
+// construction. `--json` prints only the raw document to stdout (ADR 0003);
+// without it, a short human summary does.
+
+/// Print a query document per ADR 0003: with `--json`, only the raw JSON
+/// (already serialized by the caller) goes to stdout; without it, `human()`'s
+/// short summary does. A serialization failure is defensive (every document
+/// here derives `Serialize` over plain, always-encodable fields) but still
+/// exits 1 rather than panicking.
+fn print_query_doc(json: bool, encoded: Result<String, serde_json::Error>, human: impl FnOnce() -> String) {
+    if json {
+        match encoded {
+            Ok(s) => println!("{s}"),
+            Err(e) => {
+                eprintln!("error: {e}");
+                std::process::exit(1);
+            }
+        }
+    } else {
+        println!("{}", human());
+    }
+}
+
+/// `holler body caps [--json]` (issue #185): the local status doc plus a
+/// support answer for every known feature/harness/capability id (docs §5.2).
+fn body_caps(json: bool) -> ! {
+    let state = body_state();
+    let identity = holler_body::identity::load(&state.root).and_then(Result::ok);
+    let configs = body_local_configs(&state.root);
+    let doc = holler_body::query::local_caps(&state.root, identity.as_ref(), &configs);
+    print_query_doc(json, serde_json::to_string(&doc), || {
+        format!("body: {} caps known", doc.caps.len())
+    });
+    std::process::exit(0);
+}
+
+/// `holler body support FEATURE [--json]` (issue #185): a single
+/// `query/support` answer. An id outside the v2 vocabulary is exit 1 (the
+/// wire's `-32006 unknown_feature`, surfaced as a plain stderr reason here —
+/// this leaf never touches the wire).
+fn body_support(feature: &str, json: bool) -> ! {
+    let state = body_state();
+    let configs = body_local_configs(&state.root);
+    match holler_body::query::local_support(feature, &configs) {
+        Ok(doc) => {
+            print_query_doc(json, serde_json::to_string(&doc), || {
+                let reason = doc.reason.as_deref().map(|r| format!(" ({r})")).unwrap_or_default();
+                format!("{feature}: {}{reason}", if doc.ok { "ok" } else { "not ok" })
+            });
+            std::process::exit(0);
+        }
+        Err(e) => {
+            eprintln!("error: {}", e.message);
+            std::process::exit(1);
+        }
+    }
+}
+
+/// `holler body query CMD [ARGS...] [--json]` (issue #185): local only — a
+/// body never forwards `query/*` to another peer (that is `hub query
+/// TARGET …`'s job). A remote-form tail (`query TARGET CMD…`) is a usage
+/// error (exit 2): a body has no routing table to resolve TARGET against.
+fn body_query(query: &Query, json: bool) -> ! {
+    let resolved = match query.resolve() {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("error: {e}");
+            std::process::exit(2);
+        }
+    };
+    let QueryResolution::Local { cmd, args } = &resolved else {
+        eprintln!("error: `body query` has no remote target — did you mean `hub query TARGET …`?");
+        std::process::exit(2);
+    };
+    let state = body_state();
+    let identity = holler_body::identity::load(&state.root).and_then(Result::ok);
+    let configs = body_local_configs(&state.root);
+    match cmd {
+        Cmd::Status => {
+            let doc = holler_body::query::local_status(&state.root, identity.as_ref(), &configs);
+            print_query_doc(json, serde_json::to_string(&doc), || format!("body: role={:?}", doc.role));
+        }
+        Cmd::Caps => {
+            let doc = holler_body::query::local_caps(&state.root, identity.as_ref(), &configs);
+            print_query_doc(json, serde_json::to_string(&doc), || {
+                format!("body: {} caps known", doc.caps.len())
+            });
+        }
+        Cmd::Support => {
+            let Some(feature) = args.first() else {
+                eprintln!("error: `query support` needs a FEATURE argument");
+                std::process::exit(2);
+            };
+            match holler_body::query::local_support(feature, &configs) {
+                Ok(doc) => print_query_doc(json, serde_json::to_string(&doc), || format!("{feature}: {}", doc.ok)),
+                Err(e) => {
+                    eprintln!("error: {}", e.message);
+                    std::process::exit(1);
+                }
+            }
+        }
+        Cmd::Protocol => {
+            let version = args.first().and_then(|s| s.parse::<u32>().ok());
+            let doc = holler_body::query::local_protocol(version);
+            print_query_doc(json, serde_json::to_string(&doc), || {
+                format!("protocol: session={} min={} max={}", doc.session, doc.min, doc.max)
+            });
+        }
+    }
+    std::process::exit(0);
 }
