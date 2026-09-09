@@ -27,7 +27,9 @@ use std::time::Duration;
 
 use serde_json::Value;
 
-use support::{holler_cmd, join, kill_tree, mint_token, wait_for, write_sessions_toml, Body, Hub, StateDir};
+use support::{
+    holler_cmd, join, kill_tree, mint_token, wait_for, write_sessions_toml, Body, Hub, StateDir, STARTUP_WAIT,
+};
 
 /// `holler roster --all --json` (the `--all` the default `roster_json` helper
 /// omits — needed here because a `gone` row is hidden from the default
@@ -91,11 +93,30 @@ fn roster_sweep_runs_in_production_hub_without_being_called_directly() {
     let (token_id, secret) = mint_token(&hub_state, "body-1");
     join(&hub_state, &hub.ws_url(), &token_id, &secret);
     let config = write_sessions_toml(&hub_state, &[("alpha", &[])]);
-    let mut body = Body::start(&hub_state, &config);
+    // `Body::start` (the plain, no-env form) leaves the body's own presence
+    // heartbeat at its 15s production default. That default is *slower* than
+    // the `HOLLER_ROSTER_RECONNECT_MS`/`HOLLER_ROSTER_GONE_MS` thresholds just
+    // shortened above (1s / 3s): the row would age out of `connected` on the
+    // TTL sweep between any two real heartbeats and only flip back to
+    // `connected` on the *next* one, ~15s later — a strobe, not a steady
+    // state. That strobe is exactly what made this test flaky: the initial
+    // `wait_for` below (previously bounded to 15s, the same order of
+    // magnitude as the strobe's own period) could poll entirely inside a
+    // `reconnecting`/`gone` trough and time out even though the body was
+    // fully alive and current the whole time (seen on both ubuntu-latest and
+    // macos-latest CI). Give the body a heartbeat far shorter than the
+    // shortened TTLs — same order as the sweep interval itself — so
+    // `last_seen` is refreshed often enough that `connected` is a continuous,
+    // observable state whenever the body is alive, and the *only* thing that
+    // can move the row is the real absence of traffic after the `SIGSTOP`
+    // below.
+    let mut body = Body::start_with_env(&hub_state, &config, &[("HOLLER_HEARTBEAT_INTERVAL_MS", "100")]);
 
     // Observe the row appear `connected` via the body's own presence
-    // heartbeat (never a blind sleep, ADR 0002).
-    wait_for(Duration::from_secs(15), || {
+    // heartbeat (never a blind sleep, ADR 0002). `STARTUP_WAIT` (not a bare
+    // 15s) absorbs genuine CI process-spawn/connect variance on top of the
+    // strobe fix above.
+    wait_for(STARTUP_WAIT, || {
         let v = roster_all_json(&hub_state);
         (conn_state_of(&v, ALPHA_ROW) == Some("connected")).then_some(())
     })
