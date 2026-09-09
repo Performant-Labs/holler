@@ -6,6 +6,7 @@
 
 mod cli;
 pub mod query_cmd;
+pub mod roster_cmd;
 pub mod say_cmd;
 pub mod time_fmt;
 

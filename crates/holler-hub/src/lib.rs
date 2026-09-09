@@ -11,6 +11,7 @@ pub mod control_server;
 pub mod join;
 pub mod live;
 pub mod query;
+pub mod roster;
 pub mod serve;
 pub mod state;
 pub mod talk;

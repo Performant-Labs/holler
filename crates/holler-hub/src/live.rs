@@ -309,6 +309,20 @@ impl Registry {
             .cloned()
     }
 
+    /// The token id currently bound to `client_id` (issue #186's roster keys
+    /// its rows by token, but the live loop only knows the `client_id` the
+    /// socket carries, so the presence handler resolves the token through this
+    /// helper). `None` once the client has disconnected (the roster keeps its
+    /// rows and lets the TTL age them out, so an absent live entry is not an
+    /// error — just no token to attribute the presence to).
+    pub async fn token_id_for_client(&self, client_id: &str) -> Option<String> {
+        self.inner
+            .lock()
+            .await
+            .get(client_id)
+            .map(|h| h.token_id.clone())
+    }
+
     /// Resolve a `hub query TARGET …` target against the live registry
     /// (issue #185): `target` may name a token id, a client id, or a
     /// hostname/label (a `label/session` form's label part). Exactly one

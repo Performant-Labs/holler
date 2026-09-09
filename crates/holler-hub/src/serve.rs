@@ -347,8 +347,14 @@ async fn serve_forever(
     // authenticates/disconnects) and every control-socket connection (`hub
     // token ping` reaches a body's socket through it).
     let registry = crate::live::Registry::new();
+    // The roster (issue #186): one per hub process, shared by every accepted
+    // WS connection (which advertises/touches/clears it as presence and frames
+    // arrive and circuits open/close) and the control socket (which reads it
+    // for `holler roster` and runs the TTL sweep). The system clock drives the
+    // 45/180/360 s sweep in production (the unit tests inject a manual clock).
+    let roster = std::sync::Arc::new(crate::roster::Roster::with_system_clock(&crate::roster::Config::from_env()));
     let accept_handle = tokio::spawn(async move {
-        accept_loop(uds, ws_listeners, state, registry, stop_rx).await;
+        accept_loop(uds, ws_listeners, state, registry, roster, stop_rx).await;
     });
 
     // 6. Only now — WS listeners bound, control socket bound + mode 0600,
@@ -391,6 +397,7 @@ async fn accept_loop(
     ws_listeners: Vec<TcpListener>,
     state: HubState,
     registry: crate::live::Registry,
+    roster: std::sync::Arc<crate::roster::Roster>,
     mut stop_rx: tokio::sync::oneshot::Receiver<()>,
 ) {
     let mut accept_any = AcceptAny {
@@ -406,14 +413,14 @@ async fn accept_loop(
                     Ok(pair) => pair,
                     Err(_) => continue,
                 };
-                tokio::spawn(crate::control_server::handle_control_conn(stream, registry.clone()));
+                tokio::spawn(crate::control_server::handle_control_conn(stream, registry.clone(), roster.clone()));
             }
             res = (&mut accept_any) => {
                 let stream = match res {
                     Ok(s) => s,
                     Err(_) => continue,
                 };
-                tokio::spawn(handle_ws_conn(stream, state.clone(), registry.clone()));
+                tokio::spawn(handle_ws_conn(stream, state.clone(), registry.clone(), roster.clone()));
             }
         }
     }
@@ -636,7 +643,12 @@ where
     }
 }
 
-async fn handle_ws_conn(stream: TcpStream, state: HubState, registry: crate::live::Registry) {
+async fn handle_ws_conn(
+    stream: TcpStream,
+    state: HubState,
+    registry: crate::live::Registry,
+    roster: std::sync::Arc<crate::roster::Roster>,
+) {
     let ws = match server_handshake(stream).await {
         Some(ws) => ws,
         None => return, // not a WebSocket client (or it left mid-handshake).
@@ -687,7 +699,7 @@ async fn handle_ws_conn(stream: TcpStream, state: HubState, registry: crate::liv
         // circuit ends. Split into its own fn to keep this dispatch's
         // cognitive complexity under the workspace threshold.
         Some("circuit/authenticate") => {
-            dispatch_authenticate(&mut sink, &mut stream, &env, &state, &registry).await;
+            dispatch_authenticate(&mut sink, &mut stream, &env, &state, &registry, &roster).await;
         }
         // Any other method on a fresh socket, or a response/error where a
         // request is expected: unauthenticated.
@@ -715,6 +727,7 @@ async fn dispatch_authenticate(
     env: &Envelope,
     state: &HubState,
     registry: &crate::live::Registry,
+    roster: &std::sync::Arc<crate::roster::Roster>,
 ) {
     let params = match holler_proto::typed_params::<holler_proto::Authenticate>(env) {
         Ok(p) => p,
@@ -724,7 +737,8 @@ async fn dispatch_authenticate(
             return;
         }
     };
-    crate::circuit::handle_authenticated(sink, stream, env.id(), params, state, registry).await;
+    crate::circuit::handle_authenticated(sink, stream, env.id(), params, state, registry, roster)
+        .await;
 }
 
 /// Send an error envelope (echoing `id` when given) as a text frame, then let
