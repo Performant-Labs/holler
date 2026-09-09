@@ -26,7 +26,7 @@ use std::time::Duration;
 use futures_util::{Sink, SinkExt, Stream, StreamExt};
 use holler_proto::log::{Component, Direction as LogDirection, Event, Severity};
 use holler_proto::{
-    Authenticate, Code, CorrelationId, Envelope, Hello, HelloRole, PingAck, Presence,
+    Authenticate, Code, CorrelationId, Envelope, Hello, HelloRole, PingAck, Presence, SessionAd,
 };
 use tokio::signal::unix::{signal, SignalKind};
 use tokio_tungstenite::tungstenite::{Error as WsError, Message};
@@ -60,7 +60,13 @@ pub enum RunExit {
 
 /// `holler body run` — builds its own throwaway multi-thread runtime (the CLI
 /// has none in scope) and drives the loop until a clean end.
-pub fn run(state_root: &Path) -> RunExit {
+///
+/// `sessions` (issue #187) is this body's configured session list, already
+/// validated + registered ([`crate::registry::SessionRegistry::presence_doc`]'s
+/// output) — it is sent verbatim in every `session/presence` this loop emits,
+/// replacing the always-empty `sessions:[]` issue #182 shipped (no session
+/// config existed yet on that story).
+pub fn run(state_root: &Path, sessions: Vec<SessionAd>) -> RunExit {
     let identity = match crate::identity::load(state_root) {
         None => {
             eprintln!("error: not joined; run `holler body join` first");
@@ -86,7 +92,7 @@ pub fn run(state_root: &Path) -> RunExit {
         Ok(rt) => rt,
         Err(e) => return RunExit::Io(format!("runtime: {e}")),
     };
-    let exit = rt.block_on(run_loop(state_root, &identity));
+    let exit = rt.block_on(run_loop(state_root, &identity, &sessions));
     drop(lock); // release + remove the lock file on every clean path out.
     exit
 }
@@ -106,7 +112,7 @@ enum Attempt {
 /// The reconnect loop: connect, authenticate, hello, then live until the
 /// circuit ends. A dropped circuit backs off (full jitter, 1s..30s) and
 /// tries again, forever, until a clean end or an unretryable auth failure.
-async fn run_loop(state_root: &Path, identity: &BodyIdentity) -> RunExit {
+async fn run_loop(state_root: &Path, identity: &BodyIdentity, sessions: &[SessionAd]) -> RunExit {
     let mut sigint = match signal(SignalKind::interrupt()) {
         Ok(s) => s,
         Err(e) => return RunExit::Io(format!("install SIGINT handler: {e}")),
@@ -118,7 +124,7 @@ async fn run_loop(state_root: &Path, identity: &BodyIdentity) -> RunExit {
 
     let mut attempt: u32 = 0;
     loop {
-        let outcome = connect_and_serve(state_root, identity, attempt, &mut sigint, &mut sigterm).await;
+        let outcome = connect_and_serve(state_root, identity, sessions, attempt, &mut sigint, &mut sigterm).await;
         match outcome {
             Attempt::Ended(exit) => return exit,
             Attempt::AuthFailed(msg) => {
@@ -211,6 +217,7 @@ fn info(method: &'static str, fields: Vec<(&'static str, String)>) {
 async fn connect_and_serve(
     state_root: &Path,
     identity: &BodyIdentity,
+    sessions: &[SessionAd],
     attempt: u32,
     sigint: &mut tokio::signal::unix::Signal,
     sigterm: &mut tokio::signal::unix::Signal,
@@ -249,7 +256,7 @@ async fn connect_and_serve(
         },
     );
 
-    live_loop(state_root, &mut sink, &mut stream, identity, sigint, sigterm).await
+    live_loop(state_root, &mut sink, &mut stream, identity, sessions, sigint, sigterm).await
 }
 
 /// Send `circuit/authenticate` and await the answer. `-32002` maps to
@@ -372,6 +379,7 @@ async fn live_loop<Snk, St>(
     sink: &mut Snk,
     stream: &mut St,
     identity: &BodyIdentity,
+    sessions: &[SessionAd],
     sigint: &mut tokio::signal::unix::Signal,
     sigterm: &mut tokio::signal::unix::Signal,
 ) -> Attempt
@@ -385,14 +393,14 @@ where
     let mut detach_poll = tokio::time::interval(DETACH_POLL);
     let mut last_frame_at = tokio::time::Instant::now();
 
-    if send_presence(sink, identity).await.is_err() {
+    if send_presence(sink, identity, sessions).await.is_err() {
         return Attempt::Dropped("send initial presence: socket closed".to_string());
     }
 
     loop {
         tokio::select! {
             _ = heartbeat.tick() => {
-                if send_presence(sink, identity).await.is_err() {
+                if send_presence(sink, identity, sessions).await.is_err() {
                     return Attempt::Dropped("send presence: socket closed".to_string());
                 }
             }
@@ -435,13 +443,13 @@ where
     let _ = sink.flush().await;
 }
 
-async fn send_presence<Snk>(sink: &mut Snk, identity: &BodyIdentity) -> Result<(), ()>
+async fn send_presence<Snk>(sink: &mut Snk, identity: &BodyIdentity, sessions: &[SessionAd]) -> Result<(), ()>
 where
     Snk: Sink<Message, Error = WsError> + Unpin,
 {
     let presence = Presence {
         hostname: identity.hostname.clone(),
-        sessions: Vec::new(),
+        sessions: sessions.to_vec(),
     };
     let params = serde_json::to_value(presence).map_err(|_| ())?;
     send(sink, &Envelope::notification("session/presence", Some(params))).await
