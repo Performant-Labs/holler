@@ -29,15 +29,16 @@ fn err(message: String, exit_code: i32) -> RosterResult {
     RosterResult { message, to_stderr: true, exit_code }
 }
 
-/// `holler roster [--all] [--json]` (issue #186): read the live hub's roster
-/// over the control socket and report it — the table (or `--json`'s raw
-/// document) on success, a refusal on every error. Exit codes: `0` a roster
-/// came back (live-only view by default, `--all` adds `gone`), `1` every
-/// runtime refusal (no live hub reachable, a control-socket I/O error, or a
-/// bad reply).
+/// `holler roster [--all] [--prefix PREFIX] [--json]` (issue #186; `--prefix`
+/// added by issue #236, ADR 0005 §4): read the live hub's roster over the
+/// control socket and report it — the table (or `--json`'s raw document) on
+/// success, a refusal on every error. Exit codes: `0` a roster came back
+/// (live-only view by default, `--all` adds `gone`, `--prefix` narrows to a
+/// label or a deeper prefix), `1` every runtime refusal (no live hub
+/// reachable, a control-socket I/O error, or a bad reply).
 pub fn run(roster: &Roster, json: bool) -> RosterResult {
     let state_root = holler_hub::state::resolve_state_dir().unwrap_or_default();
-    match holler_hub::control::roster(roster.all) {
+    match holler_hub::control::roster(roster.all, roster.prefix.as_deref()) {
         Ok(doc) => {
             if json {
                 ok(doc.to_string())

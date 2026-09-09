@@ -118,13 +118,16 @@ pub fn say(session: &str, text: &str, queue: bool, timeout: std::time::Duration)
     exchange_with_timeout("b-say", "control/say", Some(params), timeout + std::time::Duration::from_secs(5))
 }
 
-/// `holler roster [--all]` (issue #186): the live hub's roster, read straight
-/// from the hub's in-process [`crate::roster::Roster`]. Returns the reply
-/// envelope's `result`, which is `{rows: [...]}` (each row is the roster's
-/// display `Row`). Without `all` the hub returns the live-only view (every row
-/// except `gone`); with `all` it includes `gone` rows.
-pub fn roster(all: bool) -> Result<serde_json::Value, ControlError> {
-    exchange("b-roster", "control/roster", Some(serde_json::json!({ "all": all })))
+/// `holler roster [--all] [--prefix PREFIX]` (issue #186; `--prefix` added by
+/// issue #236, ADR 0005 §4): the live hub's roster, read straight from the
+/// hub's in-process [`crate::roster::Roster`]. Returns the reply envelope's
+/// `result`, which is `{rows: [...]}` (each row is the roster's display
+/// `Row`). Without `all` the hub returns the live-only view (every row except
+/// `gone`); with `all` it includes `gone` rows. `prefix`, when `Some`, narrows
+/// to rows named exactly that prefix or nested under it — filtered hub-side
+/// (see `control/roster`'s own doc for why).
+pub fn roster(all: bool, prefix: Option<&str>) -> Result<serde_json::Value, ControlError> {
+    exchange("b-roster", "control/roster", Some(serde_json::json!({ "all": all, "prefix": prefix })))
 }
 
 /// Send one `method`/`params` request over the control socket and return its
