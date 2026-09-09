@@ -39,6 +39,12 @@ fs4 = { workspace = true }
 getrandom = { workspace = true }
 # the body's session config file (issue #187): `sessions.toml`/`session.toml`.
 toml = { workspace = true }
+# the ACP v2 spawn driver (issue #188): the typed client SDK owns spawning the
+# agent subprocess (its own process group + kill-tree teardown), the
+# initialize/session/prompt/cancel lifecycle, and the typed
+# session/request_permission + elicitation/create inbound requests the
+# answerable-blocking design intercepts.
+agent-client-protocol = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

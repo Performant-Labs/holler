@@ -75,8 +75,12 @@ http = "1.5.0"
 toml = "0.8"
 # json/stream: the hub's HTTP/JSON outward face (roster JSON).
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream"] } # for holler-cli
-# the ACP wire types the stub agent and body speak.
-agent-client-protocol = "2.1.0"
+# the ACP wire types the stub agent and body speak. `unstable_protocol_v2`
+# gates the crate's v2 (protocol-v2) typed client surface — the ACP v2 spawn
+# driver (issue #188) is the first real consumer; the crate's own v2 examples
+# all require this feature, so v2 is a real, load-bearing dependency, not an
+# unused "unstable" opt-in.
+agent-client-protocol = { version = "2.1.0", features = ["unstable_protocol_v2"] } # for holler-body
 # ULID correlation ids and token ids.
 ulid = "1"
 # hmac + sha2: the hub's token store (story #163) stores secrets at rest as

@@ -59,6 +59,11 @@ const SESSION_ID: &str = "stub";
 /// Synthetic id for the `session/request_permission` request raised under
 /// `--ask-permission`; the client's matching response (id 10) resumes the turn.
 const PERMISSION_REQUEST_ID: i64 = 10;
+/// Synthetic id for the `elicitation/create` request raised under
+/// `--ask-elicitation`/`--ask-elicitation-url`; the client's matching response
+/// (id 11) resumes the turn. Distinct from [`PERMISSION_REQUEST_ID`] so a
+/// driver test can tell the two gate kinds apart on the wire.
+const ELICITATION_REQUEST_ID: i64 = 11;
 /// JSON-RPC "Method not found" code (for unknown inbound methods).
 const ERROR_METHOD_NOT_FOUND: i64 = -32601;
 /// In-band EOF marker `main` sends (instead of relying on a channel drop): a
@@ -72,6 +77,29 @@ fn is_eof_marker(msg: &Value) -> bool {
     msg.get(STDIN_EOF).is_some()
 }
 
+impl Config {
+    /// Which gate this invocation raises mid-turn (at most one of the
+    /// `--ask-*` flags is meaningful per invocation; the first one set wins).
+    fn gate(&self) -> Option<GateKind> {
+        if self.ask_permission {
+            Some(GateKind::Permission)
+        } else if self.ask_elicitation {
+            Some(GateKind::Elicitation)
+        } else if self.ask_elicitation_url {
+            Some(GateKind::ElicitationUrl)
+        } else {
+            None
+        }
+    }
+}
+
+// Four independent CLI switches (`--ask-permission`/`--ask-elicitation`/
+// `--ask-elicitation-url`/`--crash-after-prompt`), each a simple on/off flag a
+// test passes in isolation — not overlapping machine states (`Config::gate`
+// already picks at most one of the first three), so an enum would just move
+// the same four booleans one level down without adding meaning. Same
+// reasoning as `Turn`'s allow just below.
+#[allow(clippy::struct_excessive_bools)] // #188
 #[derive(Clone)]
 struct Config {
     /// Advertised session names (comma-separated). Parsed but not otherwise
@@ -85,14 +113,24 @@ struct Config {
     /// `session/cancel` can land mid-turn and be observed between chunks.
     chunk_delay_ms: u64,
     ask_permission: bool,
+    /// Raise a real multi-field `elicitation/create` (form mode, two enum
+    /// properties: `color` single-select, `toppings` multi-select) instead of
+    /// a permission request (story #188's answerable-blocking coverage).
+    ask_elicitation: bool,
+    /// Raise an `elicitation/create` in `url` mode — the one shape story
+    /// #188's driver deliberately does not resolve (reported unsupported,
+    /// never silently dropped).
+    ask_elicitation_url: bool,
     crash_after_prompt: bool,
 }
 
 /// The in-flight turn's position. `emitted` counts `agent_message_chunk`
 /// notifications already sent (0-based index of the next one);
-/// `awaiting_permission` is true once the permission request has been raised
-/// and before the client's answer (id 10) has resumed it. (The prompt's id
-/// lives in the worker's separate `prompt` slot, not here.)
+/// `awaiting_gate` is true once a permission/elicitation request has been
+/// raised and before the client's answer has resumed it. (The `session/prompt`
+/// request is acked immediately when it arrives — see `route`'s
+/// `"session/prompt"` arm — so there is no pending response id to track here
+/// or anywhere else in the worker.)
 /// The four booleans are deliberately kept as separate fields rather than folded
 /// into a single state enum: the `advance` state machine below is a single
 /// `match` over exactly these facets, and naming each one in the guard (rather
@@ -111,24 +149,38 @@ struct Turn {
     started: bool,
     /// Count of `agent_message_chunk` notifications already sent.
     emitted: usize,
-    /// True once the permission request has been raised and before the client's
-    /// answer (id 10) has resumed the turn. (Cleared by the id-10 answer; the
-    /// turn then continues with the next chunk.)
-    awaiting_permission: bool,
-    /// True once the permission request has been raised, for the life of the
-    /// turn. Unlike `awaiting_permission` it is never cleared: it is what stops
-    /// `advance` from re-firing the permission arm after the id-10 answer
-    /// clears the gate (otherwise the `(emitted == 1, !awaiting)` arm would
-    /// raise the request a second time and re-park the turn forever).
-    asked_permission: bool,
-    /// True from the moment the permission gate is raised (parked) until the
-    /// turn's *resume* step has re-emitted `state_update:running`. A real ACP
-    /// agent, when woken from a permission block, re-announces `running` before
-    /// continuing (that is exactly what the `--ask-permission` contract test
-    /// pins: resume → `running` → remaining chunks). `advance` sets this when it
-    /// raises the gate and clears it once the resume `running` has been sent, so
-    /// the remaining chunks then stream out without a second `running`.
+    /// True once a gate request (permission or elicitation — whichever
+    /// `cfg.ask_*` selects) has been raised and before the client's answer
+    /// (the fixed [`PERMISSION_REQUEST_ID`]/[`ELICITATION_REQUEST_ID`]) has
+    /// resumed the turn. (Cleared by that answer; the turn then continues
+    /// with the next chunk.) Named generically (not `awaiting_permission`)
+    /// because story #188 added a second gate kind — `elicitation/create` —
+    /// that parks the turn exactly the same way.
+    awaiting_gate: bool,
+    /// True once the gate request has been raised, for the life of the turn.
+    /// Unlike `awaiting_gate` it is never cleared: it is what stops `advance`
+    /// from re-firing the gate arm after the answer clears it (otherwise the
+    /// `(emitted == 1, !awaiting)` arm would raise the request a second time
+    /// and re-park the turn forever).
+    gate_raised: bool,
+    /// True from the moment a gate is raised (parked) until the turn's
+    /// *resume* step has re-emitted `state_update:running`. A real ACP agent,
+    /// when woken from a permission/elicitation block, re-announces `running`
+    /// before continuing (that is exactly what the `--ask-permission` contract
+    /// test pins: resume → `running` → remaining chunks). `advance` sets this
+    /// when it raises the gate and clears it once the resume `running` has
+    /// been sent, so the remaining chunks then stream out without a second
+    /// `running`.
     resumed_running: bool,
+}
+
+/// Which gate (if any) this stub invocation raises mid-turn, and the fixed
+/// request id the client answers it with.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum GateKind {
+    Permission,
+    Elicitation,
+    ElicitationUrl,
 }
 
 fn main() {
@@ -197,6 +249,8 @@ fn parse_args() -> Config {
         chunks: 3,
         chunk_delay_ms: 50,
         ask_permission: false,
+        ask_elicitation: false,
+        ask_elicitation_url: false,
         crash_after_prompt: false,
     };
     let mut i = 0;
@@ -214,6 +268,8 @@ fn parse_args() -> Config {
             }
             "--slow" => cfg.chunk_delay_ms = 200,
             "--ask-permission" => cfg.ask_permission = true,
+            "--ask-elicitation" => cfg.ask_elicitation = true,
+            "--ask-elicitation-url" => cfg.ask_elicitation_url = true,
             "--crash-after-prompt" => cfg.crash_after_prompt = true,
             // Unknown / positional args are ignored.
             _ => {}
@@ -231,9 +287,8 @@ fn parse_args() -> Config {
 fn worker_loop(cfg: &Config, rx: Receiver<Value>) {
     let stdout = std::io::stdout();
     let mut lock = stdout.lock();
-    let mut prompt: Option<Value> = None; // the id of the in-flight prompt, if any
     let mut pending: VecDeque<Value> = VecDeque::new(); // inbound messages not yet routed
-    let mut turn: Option<Turn> = None; // in-flight turn state, if any
+    let mut turn: Option<Turn> = None; // in-flight turn state, if any (the sole "is a turn active" flag: a `session/prompt` is acked immediately, so there is no separate pending-response id to track)
 
     loop {
         // Acquire the next inbound message: a stashed one first (so a
@@ -298,16 +353,10 @@ fn worker_loop(cfg: &Config, rx: Receiver<Value>) {
                 // the terminal response); otherwise just keep looping. This is
                 // NOT an EOF — the channel is still open, so we must not break.
                 //
-                // `drain` → `advance` clears BOTH `*turn` and the worker's
-                // `prompt` mirror the moment the turn resolves (the terminal
-                // arm does `prompt.take()`). Clearing `prompt` is what stops the
-                // next gap from re-entering `drain` and re-running the
-                // (now-reset) turn — if only `*turn` were cleared, `prompt`
-                // would still be `Some` and the turn would re-emit `running`
-                // forever. A resolved turn therefore has `prompt == None` and
-                // the `is_some()` guard below makes subsequent gaps no-ops.
-                if prompt.is_some() {
-                    drain(cfg, &mut lock, &mut pending, &mut prompt, &mut turn);
+                // `drain` clears `*turn` the moment the turn resolves, so the
+                // `is_some()` guard below makes subsequent gaps no-ops.
+                if turn.is_some() {
+                    drain(cfg, &mut lock, &mut pending, &mut turn);
                 }
                 continue;
             }
@@ -316,16 +365,16 @@ fn worker_loop(cfg: &Config, rx: Receiver<Value>) {
             // `session/cancel` or force an in-flight turn to `cancelled`. (A
             // real client that sent `session/cancel` already resolved the turn
             // via the routing below.) If a turn is still in flight it has not
-            // produced its terminal response yet, so emit the next step (which,
-            // at the chunk ceiling, is the `end_turn`/`cancelled` the turn
-            // genuinely resolves to). A resolved turn has `prompt == None` and
-            // `drain` is a no-op. Then stop: the worker has emitted everything
-            // it will. (We do NOT consume a further stash here: a stash only
-            // holds unrelated traffic, and the marker path means `main` is done
-            // sending, so draining further could only re-process noise.)
+            // resolved yet, so emit the next step (which, at the chunk ceiling,
+            // is the `end_turn`/`cancelled` idle state_update the turn
+            // genuinely resolves to). Then stop: the worker has emitted
+            // everything it will. (We do NOT consume a further stash here: a
+            // stash only holds unrelated traffic, and the marker path means
+            // `main` is done sending, so draining further could only
+            // re-process noise.)
             Incoming::Eof => {
-                if prompt.is_some() {
-                    drain(cfg, &mut lock, &mut pending, &mut prompt, &mut turn);
+                if turn.is_some() {
+                    drain(cfg, &mut lock, &mut pending, &mut turn);
                 }
                 break;
             }
@@ -335,25 +384,19 @@ fn worker_loop(cfg: &Config, rx: Receiver<Value>) {
                 // its terminal step and stop. (It is never routed as a normal
                 // message: it has no `method`/`id` a client would send.)
                 if is_eof_marker(&msg) {
-                    if prompt.is_some() {
-                        drain(cfg, &mut lock, &mut pending, &mut prompt, &mut turn);
+                    if turn.is_some() {
+                        drain(cfg, &mut lock, &mut pending, &mut turn);
                     }
                     break;
                 }
                 // Route the message by kind (may start a turn, park it, resume
                 // it, or resolve it to `cancelled`).
-                route(&mut lock, &mut pending, &mut prompt, &mut turn, &msg);
-                // If routing resumed a parked turn (the permission answer), emit
-                // its next step now (the remaining chunks). A cancel or a
+                route(&mut lock, &mut pending, &mut turn, &msg);
+                // If routing resumed a parked turn (the gate answer), emit its
+                // next step now (the remaining chunks). A cancel or a
                 // completed turn has already resolved it, so `drain` is a no-op.
-                if prompt.is_some() {
-                    drain(cfg, &mut lock, &mut pending, &mut prompt, &mut turn);
-                }
-                // `drain` → `advance` clears `*turn` the moment the turn
-                // resolves, so clear the worker's `prompt` mirror and stop
-                // pacing it.
-                if prompt.is_some() && turn.is_none() {
-                    prompt = None;
+                if turn.is_some() {
+                    drain(cfg, &mut lock, &mut pending, &mut turn);
                 }
             }
         }
@@ -366,7 +409,6 @@ fn worker_loop(cfg: &Config, rx: Receiver<Value>) {
 fn route(
     lock: &mut impl Write,
     pending: &mut VecDeque<Value>,
-    prompt: &mut Option<Value>,
     turn: &mut Option<Turn>,
     msg: &Value,
 ) {
@@ -380,7 +422,18 @@ fn route(
                 send_response(
                     lock,
                     id.clone(),
-                    json!({ "protocolVersion": PROTOCOL_VERSION, "agentCapabilities": {} }),
+                    // Real `v2::AgentCapabilities` deserializes the session
+                    // surface under `capabilities.session` (`agentCapabilities`
+                    // is not a field the real schema recognises at all — a
+                    // typed client reading it would see `capabilities.session`
+                    // default to `None` and refuse the connection). `{}` for
+                    // `session` means "the baseline session/* methods are
+                    // supported" per the schema's own doc comment.
+                    json!({
+                        "protocolVersion": PROTOCOL_VERSION,
+                        "info": { "name": "stub-acp", "version": "0" },
+                        "capabilities": { "session": {} }
+                    }),
                 );
             }
         }
@@ -390,43 +443,43 @@ fn route(
             }
         }
         Some("session/prompt") => {
+            // Real ACP v2 decouples a `session/prompt` response from turn
+            // completion: the response only means "accepted" (`v2::PromptResponse`
+            // carries no `stopReason` at all — see the driver story's "Decisions I
+            // made"). So the stub acks it **immediately**, here, rather than
+            // deferring to the turn's terminal step the way issue #130's original
+            // (v1-shaped) design did. Completion is reported entirely through the
+            // `idle` state_update (`send_idle_state`).
+            //
             // A prompt (re)starts the turn: a new prompt supersedes any
             // still-pending one, so any in-flight turn state is dropped and a
             // fresh turn begins.
             if let Some(id) = msg.get("id") {
-                *prompt = Some(id.clone());
+                send_response(lock, id.clone(), json!({}));
                 *turn = Some(Turn {
                     started: false,
                     emitted: 0,
-                    awaiting_permission: false,
-                    asked_permission: false,
+                    awaiting_gate: false,
+                    gate_raised: false,
                     resumed_running: false,
                 });
             }
         }
         Some("session/cancel") => {
             // A cancel outranks anything else in flight: the in-flight turn
-            // resolves to `cancelled` FIRST, then the cancel notification itself
-            // is acknowledged with an empty response. Emitting the prompt's
-            // terminal response before the cancel's ack matches the order a real
-            // ACP client observes (its outstanding `session/prompt` settles, then
-            // the `session/cancel` it sent is acked). (Issue #147: this ordering
-            // is what `cancel_yields_cancelled_stop_reason_and_stub_survives`
-            // pins — prompt id resolves to `cancelled`, then the cancel id to
-            // `{}`.)
+            // resolves to `cancelled` FIRST (an `idle` state_update — the
+            // `session/prompt` response was already sent when the prompt
+            // arrived, so there is no second response to send here), then the
+            // cancel notification itself is acknowledged with an empty
+            // response.
             //
-            // Resolving the turn here (clearing `prompt`/`turn`) rather than
-            // deferring to the caller's `drain` guarantees the cancel wins even
-            // if a permission answer is also stashed: the turn is already gone
-            // by the time `drain` runs, so a stale resume can't re-emit it.
-            if prompt.is_some() {
-                // The in-flight prompt's id (captured before `prompt` is
-                // cleared — a `Value::Null` here would orphan the prompt
-                // response, and a client matching on the prompt's id would
-                // hang forever).
-                let prompt_id = prompt.take().unwrap_or(Value::Null);
+            // Resolving the turn here (clearing it) rather than deferring to
+            // the caller's `drain` guarantees the cancel wins even if a
+            // permission answer is also stashed: the turn is already gone by
+            // the time `drain` runs, so a stale resume can't re-emit it.
+            if turn.is_some() {
                 *turn = None;
-                send_response(lock, prompt_id, json!({ "stopReason": "cancelled" }));
+                send_idle_state(lock, "cancelled");
             }
             // Now acknowledge the cancel notification itself (its own id).
             if let Some(id) = msg.get("id") {
@@ -439,18 +492,19 @@ fn route(
                 send_error(lock, id.clone(), ERROR_METHOD_NOT_FOUND, "method not found");
             }
         }
-        // A client *response* (no method). The only one the turn cares about is
-        // the permission answer (id 10); every other response is stashed for
-        // the worker's next `recv`.
+        // A client *response* (no method). The only ones the turn cares about
+        // are the gate answers (id 10 = permission, id 11 = elicitation);
+        // every other response is stashed for the worker's next `recv`.
         None => {
-            if msg.get("id").and_then(Value::as_i64) == Some(PERMISSION_REQUEST_ID) {
-                // The answer to the permission request: resume a parked turn by
+            let id = msg.get("id").and_then(Value::as_i64);
+            if id == Some(PERMISSION_REQUEST_ID) || id == Some(ELICITATION_REQUEST_ID) {
+                // The answer to the gate request: resume a parked turn by
                 // clearing its gate. The caller's `drain` then emits the
-                // remaining chunks. (A stray id-10 response with no in-flight
-                // turn is dropped.)
+                // remaining chunks. (A stray answer with no in-flight turn is
+                // dropped.)
                 if let Some(t) = turn.as_mut() {
-                    if t.awaiting_permission {
-                        t.awaiting_permission = false;
+                    if t.awaiting_gate {
+                        t.awaiting_gate = false;
                     }
                 }
             } else {
@@ -461,8 +515,8 @@ fn route(
 }
 
 /// Consume turn-acting messages from the stash (in arrival order), then emit
-/// the in-flight turn's next step. Returns when the turn resolves (`prompt` /
-/// `turn` cleared) or parks on the permission gate.
+/// the in-flight turn's next step. Returns when the turn resolves (`*turn`
+/// cleared) or parks on the permission/elicitation gate.
 ///
 /// A cancel is consumed before a resume, so a cancel that arrived while the
 /// turn was parked on the permission gate still wins: the turn reports
@@ -472,7 +526,6 @@ fn drain(
     cfg: &Config,
     lock: &mut impl Write,
     pending: &mut VecDeque<Value>,
-    prompt: &mut Option<Value>,
     turn: &mut Option<Turn>,
 ) {
     // Phase 1: consume turn-acting messages from the stash (in arrival order).
@@ -487,13 +540,18 @@ fn drain(
                 cancelled = true;
                 continue;
             }
-            // The permission answer (id 10) resumes a parked turn: clear the
-            // gate so the next `advance` continues with the remaining chunks.
-            // (A stray id-10 response with no in-flight turn is dropped.)
-            None if front.get("id").and_then(Value::as_i64) == Some(PERMISSION_REQUEST_ID) => {
+            // The gate answer (id 10 permission, id 11 elicitation) resumes a
+            // parked turn: clear the gate so the next `advance` continues with
+            // the remaining chunks. (A stray answer with no in-flight turn is
+            // dropped.)
+            None if matches!(
+                front.get("id").and_then(Value::as_i64),
+                Some(PERMISSION_REQUEST_ID) | Some(ELICITATION_REQUEST_ID)
+            ) =>
+            {
                 if let Some(t) = turn.as_mut() {
-                    if t.awaiting_permission {
-                        t.awaiting_permission = false;
+                    if t.awaiting_gate {
+                        t.awaiting_gate = false;
                     }
                 }
                 continue;
@@ -513,21 +571,79 @@ fn drain(
     // cancel is what the turn observed first. Clear the turn state here (the
     // worker then sees `turn.is_none()` and stops pacing it).
     if cancelled {
-        send_response(
-            lock,
-            prompt.take().unwrap_or(Value::Null),
-            json!({ "stopReason": "cancelled" }),
-        );
+        send_idle_state(lock, "cancelled");
         *turn = None;
         return;
     }
 
     // Phase 2: emit the turn's next step (and return, so the worker can pace
-    // the following gap with `recv_timeout`). `advance` clears both `*turn` and
-    // the worker's `prompt` mirror the moment the turn resolves, so the worker
-    // stops pacing it.
-    if turn.is_some() {
-        advance(cfg, lock, prompt, turn.as_mut().unwrap());
+    // the following gap with `recv_timeout`). `advance` reports whether the
+    // turn just resolved so `*turn` is cleared here — the worker's own
+    // `if turn.is_some()` gate is what stops it from re-pacing a resolved
+    // turn on the next `recv_timeout` gap.
+    if let Some(t) = turn.as_mut() {
+        if advance(cfg, lock, t) {
+            *turn = None;
+        }
+    }
+}
+
+/// Send the one outbound request that raises `kind`'s gate (the permission or
+/// elicitation ask). Split out of `advance` purely to keep that function under
+/// the workspace's 100-line-per-function guard (`clippy::too_many_lines`) —
+/// this is a single `match` with no state of its own.
+fn send_gate_request(lock: &mut impl Write, kind: GateKind) {
+    match kind {
+        GateKind::Permission => send_request(
+            lock,
+            PERMISSION_REQUEST_ID,
+            "session/request_permission",
+            json!({
+                "sessionId": SESSION_ID,
+                "title": "stub tool wants to run",
+                "toolCall": { "title": "stub tool" },
+                "options": [
+                    { "optionId": "allow", "name": "Allow", "kind": "allow_once" },
+                    { "optionId": "deny",  "name": "Deny",  "kind": "reject_once" }
+                ]
+            }),
+        ),
+        GateKind::Elicitation => send_request(
+            lock,
+            ELICITATION_REQUEST_ID,
+            "elicitation/create",
+            json!({
+                "mode": "form",
+                "sessionId": SESSION_ID,
+                "message": "pick your options",
+                "requestedSchema": {
+                    "type": "object",
+                    "properties": {
+                        "color": { "type": "string", "enum": ["red", "blue"] },
+                        "size": {
+                            "type": "string",
+                            "oneOf": [
+                                { "const": "s", "title": "Small" },
+                                { "const": "m", "title": "Medium" }
+                            ]
+                        }
+                    },
+                    "required": ["color", "size"]
+                }
+            }),
+        ),
+        GateKind::ElicitationUrl => send_request(
+            lock,
+            ELICITATION_REQUEST_ID,
+            "elicitation/create",
+            json!({
+                "mode": "url",
+                "sessionId": SESSION_ID,
+                "elicitationId": "elic-1",
+                "url": "https://example.invalid/consent",
+                "message": "open this url to continue"
+            }),
+        ),
     }
 }
 
@@ -539,63 +655,67 @@ fn drain(
 /// The step is, in order: `state_update` running (first step only) →
 /// `agent_message_chunk` i → (permission request + `requires_action`, then
 /// park) → more chunks → terminal `end_turn` response (clears the turn).
-fn advance(cfg: &Config, lock: &mut impl Write, prompt: &mut Option<Value>, t: &mut Turn) {
+/// Returns `true` when this step resolved the turn (the caller must then
+/// clear its `Option<Turn>` — `advance` itself only has `&mut Turn`, not the
+/// `Option`, so it cannot clear the slot directly).
+fn advance(cfg: &Config, lock: &mut impl Write, t: &mut Turn) -> bool {
     // The turn is a small, fully-deterministic state machine keyed on
-    // `t.emitted` (how many chunks have streamed) and `t.awaiting_permission`
-    // (parked at the permission gate). The worker calls `advance` exactly once
-    // per pacing gap, so each call emits exactly one step and returns. The
-    // machine is written as a single `match` so the next state is explicit and
-    // unreachable states simply cannot arise:
+    // `t.emitted` (how many chunks have streamed) and `t.awaiting_gate`
+    // (parked at a permission/elicitation gate). The worker calls `advance`
+    // exactly once per pacing gap, so each call emits exactly one step and
+    // returns. The machine is written as a single `match` so the next state
+    // is explicit and unreachable states simply cannot arise:
     //
-    //   * all `chunks` streamed → terminal `end_turn` response, turn cleared.
+    //   * all `chunks` streamed → `idle` state_update + terminal response,
+    //     turn cleared.
     //   * not yet started (`emitted == 0`, fresh) → emit `running`, then park
     //     one gap so a cancel that lands right after the prompt is honoured
     //     before any chunk. The step counter advances, so `running` is never
     //     re-sent (a resume straightens into the remaining chunks instead).
-    //   * `ask_permission` and `emitted == 1`, gate not yet raised → raise the
-    //     permission request + `requires_action`, then park until the client
-    //     answers (id 10) or a cancel lands.
-    //   * parked (`awaiting_permission`) → emit nothing; the worker keeps
-    //     pacing until the id-10 answer (or a cancel) clears the gate.
+    //   * `cfg.gate()` is `Some` and `emitted == 1`, gate not yet raised →
+    //     raise the permission/elicitation request + `requires_action`, then
+    //     park until the client answers (id 10/11) or a cancel lands.
+    //   * parked (`awaiting_gate`) → emit nothing; the worker keeps pacing
+    //     until the answer (or a cancel) clears the gate.
     //   * otherwise → emit the next `agent_message_chunk` and advance. (This is
-    //     also where a resumed turn lands: the id-10 answer cleared
-    //     `awaiting_permission`, so the remaining chunks stream out.)
-    // The state is matched on `(started, emitted, awaiting, asked)`: `started`
+    //     also where a resumed turn lands: the answer cleared `awaiting_gate`,
+    //     so the remaining chunks stream out.)
+    // The state is matched on `(started, emitted, awaiting, raised)`: `started`
     // is set by the `running` step (so the next step is chunk 0, not another
     // `running`), `emitted` is the 0-based index of the next chunk, `awaiting`
-    // marks the open permission gate, and `asked` (never cleared) marks that the
-    // gate has already been raised this turn — what stops the id-10 resume from
-    // re-raising it. Guards keep the arms mutually exclusive so no step can ever
-    // re-fire.
+    // marks the open gate, and `raised` (never cleared) marks that the gate has
+    // already been raised this turn — what stops the answer's resume from
+    // re-raising it. Guards keep the arms mutually exclusive so no step can
+    // ever re-fire.
     match (
         t.started,
         t.emitted,
-        t.awaiting_permission,
-        t.asked_permission,
+        t.awaiting_gate,
+        t.gate_raised,
         t.resumed_running,
     ) {
-        // Terminal: everything has streamed. Resolve the turn and clear its
-        // state (the worker's `prompt` mirror is cleared too) so the worker
-        // stops pacing it and a later `drain` is a no-op.
+        // Terminal: everything has streamed. Emit the `idle` state_update —
+        // what a real ACP v2 client actually watches for completion
+        // (`v2::PromptResponse` carries no `stopReason`; the `session/prompt`
+        // response was already sent, immediately, when the prompt arrived) —
+        // then reset the turn to its fresh state. `worker_loop` sees
+        // `turn.is_none()`... no: it sees the turn reset to a *fresh*, inert
+        // `Turn`, and its own `if turn.is_some()` gate (unchanged) keeps
+        // calling `drain` every pacing gap; `drain`/`advance` on a fresh,
+        // never-`started` turn is idempotent-inert only while a new
+        // `session/prompt` hasn't arrived — so the worker instead clears
+        // `*turn` to `None` outright here, matching the pre-#188 contract
+        // that a resolved turn stops being paced at all.
         (_, emitted, _, _, _) if emitted >= cfg.chunks => {
-            // Emit the terminal response carrying the *original* prompt's id,
-            // then clear BOTH the turn and the worker's `prompt` mirror. Clearing
-            // `prompt` (not just `*t`) is what stops the worker from re-pacing
-            // a resolved turn on the next `recv_timeout` gap — if `prompt`
-            // stayed `Some`, the worker's `if prompt.is_some()` guard would
-            // re-enter `drain` and re-run the (now-reset) turn forever.
-            send_response(
-                lock,
-                prompt.take().unwrap_or(Value::Null),
-                json!({ "stopReason": "end_turn" }),
-            );
+            send_idle_state(lock, "end_turn");
             *t = Turn {
                 started: false,
                 emitted: 0,
-                awaiting_permission: false,
-                asked_permission: false,
+                awaiting_gate: false,
+                gate_raised: false,
                 resumed_running: false,
             };
+            true
         }
         // Fresh turn: announce `running`, then stop for one gap. `started` (not
         // `emitted`) records this step, so the chunk indices stay 0-based and
@@ -609,32 +729,26 @@ fn advance(cfg: &Config, lock: &mut impl Write, prompt: &mut Option<Value>, t: &
                     "update": { "sessionUpdate": "state_update", "state": "running" }
                 }),
             );
+            false
         }
-        // Permission gate (first pass): raise the ask + `requires_action`, park.
-        // Fires once, after chunk 0 (`emitted == 1`), and *only if the gate has
-        // never been raised this turn* (`!asked_permission`). Setting
-        // `resumed_running` here means that, when the id-10 answer clears
-        // `awaiting_permission`, the very next `advance` re-announces `running`
-        // (matching a real agent waking from a permission block) before the
-        // remaining chunks stream out. `asked_permission` stays set so the gate
-        // is never re-raised.
-        (_, 1, false, false, _) if cfg.ask_permission => {
-            t.asked_permission = true;
-            t.awaiting_permission = true;
+        // Gate (first pass): raise the permission/elicitation ask +
+        // `requires_action`, park. Fires once, after chunk 0 (`emitted == 1`),
+        // and *only if the gate has never been raised this turn*
+        // (`!gate_raised`). Setting `resumed_running` here means that, when
+        // the answer clears `awaiting_gate`, the very next `advance`
+        // re-announces `running` (matching a real agent waking from a
+        // permission/elicitation block) before the remaining chunks stream
+        // out. `gate_raised` stays set so the gate is never re-raised.
+        (_, 1, false, false, _) if cfg.gate().is_some() => {
+            t.gate_raised = true;
+            t.awaiting_gate = true;
             t.resumed_running = true;
-            send_request(
-                lock,
-                PERMISSION_REQUEST_ID,
-                "session/request_permission",
-                json!({
-                    "sessionId": SESSION_ID,
-                    "toolCall": { "title": "stub tool" },
-                    "options": [
-                        { "optionId": "allow", "kind": "allow_once" },
-                        { "optionId": "deny",  "kind": "reject_once" }
-                    ]
-                }),
-            );
+            // `cfg.gate()` is `Some` — this arm's own guard already checked
+            // that — so `if let` (not a fallible `match`) reads the intent
+            // directly without a dead `else`.
+            if let Some(kind) = cfg.gate() {
+                send_gate_request(lock, kind);
+            }
             send_notification(
                 lock,
                 json!({
@@ -642,15 +756,16 @@ fn advance(cfg: &Config, lock: &mut impl Write, prompt: &mut Option<Value>, t: &
                     "update": { "sessionUpdate": "state_update", "state": "requires_action" }
                 }),
             );
+            false
         }
-        // Parked on the permission gate: emit nothing; wait for the id-10
-        // answer (or a cancel) to clear `awaiting_permission`.
-        (_, _, true, _, _) => {}
-        // Resume from the permission gate: the id-10 answer just cleared
-        // `awaiting_permission`, so re-announce `running` (a real agent wakes
-        // back to running) and clear the flag; the remaining chunks then stream
-        // via the arm below on the following gaps. This is the step the
-        // `--ask-permission` contract test pins (`resume → running`).
+        // Parked on the gate: emit nothing; wait for the answer (or a cancel)
+        // to clear `awaiting_gate`.
+        (_, _, true, _, _) => false,
+        // Resume from the gate: the answer just cleared `awaiting_gate`, so
+        // re-announce `running` (a real agent wakes back to running) and clear
+        // the flag; the remaining chunks then stream via the arm below on the
+        // following gaps. This is the step the `--ask-permission`/
+        // `--ask-elicitation` contract tests pin (`resume → running`).
         (true, _, false, true, true) => {
             t.resumed_running = false;
             send_notification(
@@ -660,6 +775,7 @@ fn advance(cfg: &Config, lock: &mut impl Write, prompt: &mut Option<Value>, t: &
                     "update": { "sessionUpdate": "state_update", "state": "running" }
                 }),
             );
+            false
         }
         // Streaming (started, not parked, not yet done): emit the next
         // `agent_message_chunk` (0-based index = already-emitted) and advance.
@@ -675,6 +791,15 @@ fn advance(cfg: &Config, lock: &mut impl Write, prompt: &mut Option<Value>, t: &
                     "sessionId": SESSION_ID,
                     "update": {
                         "sessionUpdate": "agent_message_chunk",
+                        // `messageId` is a required field on the real
+                        // `v2::ContentChunk` schema (no `#[serde(default)]`);
+                        // omitting it makes a typed client's deserialization
+                        // of the whole notification fail closed — silently,
+                        // from this stub's point of view, since a malformed
+                        // notification is simply never routed to any handler.
+                        // One fixed id per turn is enough: every chunk in a
+                        // turn belongs to the same streamed message.
+                        "messageId": "stub-message",
                         "content": { "type": "text", "text": format!("stub chunk {index}") }
                     }
                 }),
@@ -686,6 +811,7 @@ fn advance(cfg: &Config, lock: &mut impl Write, prompt: &mut Option<Value>, t: &
                 eprintln!("stub-acp: --crash-after-prompt: exiting mid-turn");
                 std::process::exit(1);
             }
+            false
         }
     }
 }
@@ -711,9 +837,31 @@ fn send_notification(lock: &mut impl Write, params: Value) {
     let _ = lock.flush();
 }
 
-/// Write an outbound JSON-RPC request (the permission ask) as one line.
+/// Write an outbound JSON-RPC request (the permission/elicitation ask) as one
+/// line.
 fn send_request(lock: &mut impl Write, id: i64, method: &str, params: Value) {
     let msg = json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params });
     let _ = writeln!(lock, "{msg}");
     let _ = lock.flush();
+}
+
+/// Write a `session/update` `state_update:idle{stopReason}` notification —
+/// the real ACP v2 signal a typed client (`agent_client_protocol` 2.1.0)
+/// watches for turn completion. `v2::PromptResponse` (the `session/prompt`
+/// response's own type) carries no `stopReason` field at all; only the `idle`
+/// state_update does. Callers still also set `stopReason` on the prompt
+/// response itself (kept for this file's own raw-JSON contract tests, which
+/// predate this notification and assert on it directly).
+fn send_idle_state(lock: &mut impl Write, stop_reason: &str) {
+    send_notification(
+        lock,
+        json!({
+            "sessionId": SESSION_ID,
+            "update": {
+                "sessionUpdate": "state_update",
+                "state": "idle",
+                "stopReason": stop_reason
+            }
+        }),
+    );
 }

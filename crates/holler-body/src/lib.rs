@@ -6,6 +6,7 @@
 //! (report this process's own identity). The protocol/body talk stories fill
 //! the rest in.
 
+pub mod acp_driver;
 pub mod backoff;
 pub mod config;
 pub mod connection;
