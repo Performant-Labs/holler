@@ -349,10 +349,27 @@ async fn serve_forever(
     let registry = crate::live::Registry::new();
     // The roster (issue #186): one per hub process, shared by every accepted
     // WS connection (which advertises/touches/clears it as presence and frames
-    // arrive and circuits open/close) and the control socket (which reads it
-    // for `holler roster` and runs the TTL sweep). The system clock drives the
-    // 45/180/360 s sweep in production (the unit tests inject a manual clock).
+    // arrive and circuits open/close), the control socket (which reads it for
+    // `holler roster`), and the periodic sweep task spawned just below (issue
+    // #255). The system clock drives the 45/180/360 s sweep in production
+    // (the unit tests inject a manual clock).
     let roster = std::sync::Arc::new(crate::roster::Roster::with_system_clock(&crate::roster::Config::from_env()));
+
+    // The roster TTL sweep task (issue #255): `Roster::sweep()` was
+    // previously only exercised by the unit tests against an injected clock
+    // — nothing in the running hub ever called it, so roster rows never aged
+    // `connected → reconnecting → gone` in production. This spawns a
+    // dedicated task, sibling to the accept loop, that sleeps
+    // `roster.sweep_ms()` then calls `roster.sweep()`, wired into the same
+    // signal-triggered stop-channel shutdown as the accept loop (a second
+    // `oneshot` so the one signal arm can trip both).
+    let (sweep_stop_tx, sweep_stop_rx) = tokio::sync::oneshot::channel::<()>();
+    let sweep_handle = {
+        let roster = roster.clone();
+        tokio::spawn(async move {
+            sweep_loop(roster, sweep_stop_rx).await;
+        })
+    };
     let accept_handle = tokio::spawn(async move {
         accept_loop(uds, ws_listeners, state, registry, roster, stop_rx).await;
     });
@@ -371,23 +388,49 @@ async fn serve_forever(
         eprintln!(r#"{{"event":"listening","addr":"{actual}"}}"#);
     }
 
-    // Park on a signal; when one arrives, trip the stop channel so the
-    // accept loop's `select!` unblocks and winds down.
+    // Park on a signal; when one arrives, trip both stop channels so the
+    // accept loop's `select!` and the sweep loop's `select!` both unblock
+    // and wind down.
     let mut stop_tx = Some(stop_tx);
+    let mut sweep_stop_tx = Some(sweep_stop_tx);
     tokio::select! {
         _ = sig_int.recv() => {
             let _ = stop_tx.take().map(|t| t.send(()));
+            let _ = sweep_stop_tx.take().map(|t| t.send(()));
         }
         _ = sig_term.recv() => {
             let _ = stop_tx.take().map(|t| t.send(()));
+            let _ = sweep_stop_tx.take().map(|t| t.send(()));
         }
     }
-    // Make sure the channel is tripped even if both signal receivers were
+    // Make sure both channels are tripped even if both signal receivers were
     // consumed (defensive; one of the arms above already ran).
     let _ = stop_tx.take().map(|t| t.send(()));
-    // Wait for the accept loop to wind down, then return 0 for a clean shutdown.
+    let _ = sweep_stop_tx.take().map(|t| t.send(()));
+    // Wait for both tasks to wind down, then return 0 for a clean shutdown.
     let _ = accept_handle.await;
+    let _ = sweep_handle.await;
     0
+}
+
+/// The roster TTL sweep task (issue #255): sleep [`crate::roster::Roster::sweep_ms`]
+/// then call [`crate::roster::Roster::sweep`], repeating until the stop
+/// channel is tripped (a SIGINT/SIGTERM arrived) — the same
+/// select-on-a-oneshot shutdown shape as [`accept_loop`], so the sweep task
+/// winds down alongside the accept loop rather than lingering past it.
+async fn sweep_loop(
+    roster: std::sync::Arc<crate::roster::Roster>,
+    mut stop_rx: tokio::sync::oneshot::Receiver<()>,
+) {
+    loop {
+        tokio::select! {
+            // A signal arrived: wind down (stop sweeping) and return.
+            _ = &mut stop_rx => return,
+            _ = tokio::time::sleep(std::time::Duration::from_millis(roster.sweep_ms())) => {
+                roster.sweep();
+            }
+        }
+    }
 }
 
 /// Poll the WS and control listeners, spawning a task per connection, until

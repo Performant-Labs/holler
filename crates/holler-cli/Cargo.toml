@@ -148,6 +148,14 @@ path = "tests/talk_test.rs"
 name = "roster_cli_test"
 path = "tests/roster_cli_test.rs"
 
+# Issue #255: proves `Roster::sweep()` actually runs inside the production
+# hub process (a dedicated background task, not just the unit tests'
+# injected-clock coverage). Lives here for the same `CARGO_BIN_EXE_stub-acp`
+# reason as `roster_cli_test` / `talk_test` above.
+[[test]]
+name = "roster_sweep_wireup_test"
+path = "tests/roster_sweep_wireup_test.rs"
+
 # Declare only what is consumed (issue #155 §7 — `cargo machete` fails CI
 # otherwise). A story that starts using a workspace dependency adds it here in
 # the same PR; the skeleton's speculative list was removed in #155.
