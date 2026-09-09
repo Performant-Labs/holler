@@ -37,6 +37,7 @@ use std::time::{Duration, Instant};
 use holler_proto::{Content, Message, Part, Role, SessionState};
 
 use crate::live::{LiveHandle, Registry, ResolveOutcome, SayReply};
+use crate::roster::Roster;
 use crate::state::{talklog_dir, talklog_path, HubState};
 
 /// Why [`say`] could not produce a reply.
@@ -44,8 +45,13 @@ pub enum SayError {
     /// No live session matched `session` at all.
     UnknownSession,
     /// A session by this name exists but its body is not currently
-    /// connected (issue #190's `not_connected` case).
-    NotConnected,
+    /// connected (issue #190's `not_connected` case). Carries a
+    /// human-readable detail (issue #192, rule 4): when the roster still
+    /// remembers the name, this names its `conn_state` and (for
+    /// `reconnecting`) how long ago it was last seen — e.g. `"io/alpha is
+    /// reconnecting (last seen 32s ago)"` — rather than a bare "not
+    /// connected" that hides whether the body might still come back.
+    NotConnected(String),
     /// More than one live session matched a bare name; `candidates` are
     /// `<label>/<session>` strings for the CLI to list.
     Ambiguous(Vec<String>),
@@ -79,7 +85,7 @@ impl SayError {
     pub fn message(&self) -> String {
         match self {
             Self::UnknownSession => "unknown session".to_string(),
-            Self::NotConnected => "not connected".to_string(),
+            Self::NotConnected(detail) => detail.clone(),
             Self::Ambiguous(candidates) => format!("ambiguous session: candidates are {}", candidates.join(", ")),
             Self::Busy { state, .. } => format!("session_busy: {state}"),
             Self::InputRequired { question, .. } => {
@@ -172,6 +178,7 @@ pub struct SayOutcome {
 /// `prompt_id`).
 pub async fn say(
     registry: &Registry,
+    roster: &Roster,
     state: &HubState,
     session: &str,
     text: &str,
@@ -182,7 +189,7 @@ pub async fn say(
     let (handle, ad) = match registry.resolve_session(&name).await {
         ResolveOutcome::Found(h, ad) => (h, ad),
         ResolveOutcome::Unknown => return Err(SayError::UnknownSession),
-        ResolveOutcome::NotConnected => return Err(SayError::NotConnected),
+        ResolveOutcome::NotConnected => return Err(SayError::NotConnected(not_connected_detail(roster, session))),
         ResolveOutcome::Ambiguous(candidates) => return Err(SayError::Ambiguous(candidates)),
     };
 
@@ -340,6 +347,28 @@ async fn send_turn(
                 elapsed_ms,
             })
         }
+    }
+}
+
+/// Build `say`'s `not_connected` detail message (issue #192, rule 4):
+/// `session` as the caller typed it (a bare name or `<label>/<session>`)
+/// resolved against every row the roster still remembers, live or not.
+/// `reconnecting` names the row's own qualified name and how long ago it was
+/// last seen (`"io/alpha is reconnecting (last seen 32s ago)"`) — explicit
+/// about the hub's own v1 policy: **no queuing** here, the operator must
+/// re-`say` once the body reconnects. Any other remembered `conn_state`
+/// (`gone`) still gets a slightly richer message than the bare fallback; no
+/// row at all (never seen, or pruned) falls back to the original #190
+/// wording so `say_to_disconnected_body_is_not_connected`'s own assertion
+/// (`err.contains("not connected")`) keeps holding either way.
+fn not_connected_detail(roster: &Roster, session: &str) -> String {
+    match roster.find_by_name(session) {
+        Some(row) if row.conn_state == "reconnecting" => {
+            let age = roster.age_secs(&row);
+            format!("{} is reconnecting (last seen {age}s ago)", row.name)
+        }
+        Some(row) => format!("{} is not connected ({})", row.name, row.conn_state),
+        None => format!("{session}'s body is not connected"),
     }
 }
 

@@ -172,6 +172,18 @@ path = "tests/interrupt_test.rs"
 name = "answer_cli_test"
 path = "tests/answer_cli_test.rs"
 
+# Reconnect contract (issue #192): fresh hello/presence on every reconnect,
+# ask-again (no durable replay), the hub's immediate `connection_lost` on an
+# in-flight `say` when the body's socket drops, `not_connected` while
+# `reconnecting`, the body's queued-prompt-runs-to-completion-but-discarded
+# reply, and orphan updates ignored exactly once — against a real hub + body
+# + `stub-acp`, using the `control/test_drop` test-only hook
+# (`HOLLER_TEST_HOOKS=1`). Lives here for the same `CARGO_BIN_EXE_stub-acp`
+# reason as `talk_test` / `interrupt_test` above.
+[[test]]
+name = "reconnect_contract_test"
+path = "tests/reconnect_contract_test.rs"
+
 # Declare only what is consumed (issue #155 §7 — `cargo machete` fails CI
 # otherwise). A story that starts using a workspace dependency adds it here in
 # the same PR; the skeleton's speculative list was removed in #155.
