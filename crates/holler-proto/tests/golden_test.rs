@@ -199,6 +199,7 @@ fn docs_instances() -> Vec<(&'static str, Value)> {
                 harness_session_id: Some("ses_1".into()),
                 turn_started_at: Some("2026-09-08T12:00:00Z".into()),
                 last_update_at: Some("2026-09-08T12:00:03Z".into()),
+                pending: None,
             }],
         }).unwrap()),
         ("Prompt", serde_json::to_value(Prompt { session: "io/alpha".into(), message: user_message(), meta: meta() }).unwrap()),

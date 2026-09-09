@@ -40,6 +40,7 @@ pub enum Code {
     LimitExceeded,
     ConnectionLost,
     SessionBusy,
+    NothingPending,
 }
 
 impl Code {
@@ -47,7 +48,7 @@ impl Code {
     ///
     /// The codec and tests iterate this to assert uniqueness and range over
     /// the one source of truth (there is no separate table to check).
-    pub const ALL: [Code; 14] = [
+    pub const ALL: [Code; 15] = [
         Code::ParseError,
         Code::InvalidRequest,
         Code::MethodNotFound,
@@ -62,6 +63,7 @@ impl Code {
         Code::LimitExceeded,
         Code::ConnectionLost,
         Code::SessionBusy,
+        Code::NothingPending,
     ];
 
     /// The JSON-RPC numeric code for this Holler code (docs §8).
@@ -82,6 +84,7 @@ impl Code {
             Code::LimitExceeded => -32007,
             Code::ConnectionLost => -32008,
             Code::SessionBusy => -32009,
+            Code::NothingPending => -32010,
         }
     }
 
@@ -103,6 +106,7 @@ impl Code {
             Code::LimitExceeded => "limit_exceeded",
             Code::ConnectionLost => "connection_lost",
             Code::SessionBusy => "session_busy",
+            Code::NothingPending => "nothing_pending",
         }
     }
 
@@ -194,6 +198,15 @@ impl Error {
                 last_update_age_ms: Some(last_update_age_ms),
             })),
         }
+    }
+
+    /// Build a `-32010 nothing_pending` refusal (issue #151): an
+    /// `answer SESSION CHOICE` arrived for a session that is **not**
+    /// `input-required` — there is no held permission or elicitation to
+    /// resolve. The wire vocabulary is present now; the `answer` dispatch
+    /// that returns it lives in the session-manager story (#342).
+    pub fn nothing_pending() -> Self {
+        Self::new(Code::NothingPending, "no held permission or elicitation to answer", None)
     }
 }
 

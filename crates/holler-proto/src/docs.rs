@@ -356,6 +356,47 @@ pub struct Presence {
     pub sessions: Vec<SessionAd>,
 }
 
+/// What kind of input a session is holding open while `input-required`
+/// (issue #151). The two ACP driver prompts that pause a turn — `session/
+/// request_permission` and `elicitation/create` — each map to `InputRequired`
+/// (ADR-0004 / the ACP driver story #341), and the roster's `PENDING` column
+/// (the roster story #340) must show the caller *which* of the two is being
+/// asked. Wire strings are kebab-case to match the ACP method names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum PendingKind {
+    /// A permission prompt (ACP `session/request_permission`) — the caller
+    /// picks one of the offered permission options (`allow` / `always` /
+    /// `reject`).
+    Permission,
+    /// An elicitation (ACP `elicitation/create`) — the caller supplies a
+    /// structured answer to the agent's question.
+    Elicitation,
+}
+
+/// One held input item advertised in a presence row while a session is
+/// `input-required` (issue #151) — the roster's `PENDING` column is rendered
+/// from these. `prompt` is the human-readable question (the ACP permission
+/// `title`, or the elicitation prompt); `options` are the answerable choices
+/// (the ACP `PermissionOption` ids/names for a `Permission`, or the elicitation
+/// schema fields). `id` is the stable handle the later `answer` request
+/// (the session-manager story #342) resolves.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PendingItem {
+    /// Stable handle for this held item — what `answer SESSION <id>`
+    /// (or its `once`/`always`/`reject` choices) names.
+    pub id: String,
+    /// Whether this is a permission or an elicitation.
+    pub kind: PendingKind,
+    /// The human-readable question being asked.
+    pub prompt: String,
+    /// The answerable choices (empty when the elicitation has no enumerable
+    /// options).
+    #[serde(default)]
+    pub options: Vec<String>,
+}
+
 /// One session in a presence advertisement.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -384,6 +425,14 @@ pub struct SessionAd {
     /// derived `stalled` state (issue #150).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_update_at: Option<String>,
+    /// The held permission(s)/elicitation(s) being asked. Present **only**
+    /// while `state` is `input-required` (issue #151) — it tells the roster
+    /// and the CLI *what* is being asked, so `answer` has a target; absent
+    /// for every other state, mirroring how the `working`-only timing fields
+    /// above stay off the wire. The roster's `PENDING` column (the roster
+    /// story #340) renders from this.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pending: Option<Vec<PendingItem>>,
 }
 
 // ---------------------------------------------------------------------------
