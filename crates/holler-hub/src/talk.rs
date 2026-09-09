@@ -224,7 +224,7 @@ pub async fn say(
     }
 
     let kind = if queue { TurnKind::Queue } else { TurnKind::Plain };
-    send_turn(registry, state, &handle, &ad, text, kind, timeout).await
+    send_turn(&TurnCtx { registry, roster, state }, &handle, &ad, text, kind, timeout).await
 }
 
 /// `interrupt SESSION TEXT`'s own redirect turn (issue #191): unlike [`say`],
@@ -236,13 +236,14 @@ pub async fn say(
 /// benign-but-pointless re-race against the registry's own presence cache).
 pub async fn send_replace_turn(
     registry: &Registry,
+    roster: &Roster,
     state: &HubState,
     handle: &LiveHandle,
     ad: &holler_proto::SessionAd,
     text: &str,
     timeout: Duration,
 ) -> Result<SayOutcome, SayError> {
-    send_turn(registry, state, handle, ad, text, TurnKind::Replace, timeout).await
+    send_turn(&TurnCtx { registry, roster, state }, handle, ad, text, TurnKind::Replace, timeout).await
 }
 
 /// `queue`/`replace` collapsed into one enum purely to keep [`send_turn`]
@@ -269,20 +270,31 @@ impl TurnKind {
     }
 }
 
+/// The shared hub-side context every [`send_turn`] call needs — bundled
+/// purely to keep that function's own argument count under clippy's
+/// too-many-arguments gate once issue #142 added `roster` alongside
+/// `registry`/`state`; each field is exactly as independent as before, just
+/// passed as one struct instead of three positional refs.
+struct TurnCtx<'a> {
+    registry: &'a Registry,
+    roster: &'a Roster,
+    state: &'a HubState,
+}
+
 /// The shared tail of [`say`]/[`send_replace_turn`]: mint a request id, send
 /// `session/prompt` (a plain one, a `--queue`d one, or — issue #191 — a
 /// `replace:true` redirect), collect the reply, append the TalkLog, and hand
 /// back a [`SayOutcome`]. Split out once #191 needed a second caller that
 /// skips the busy check but shares everything after it.
 async fn send_turn(
-    registry: &Registry,
-    state: &HubState,
+    ctx: &TurnCtx<'_>,
     handle: &LiveHandle,
     ad: &holler_proto::SessionAd,
     text: &str,
     kind: TurnKind,
     timeout: Duration,
 ) -> Result<SayOutcome, SayError> {
+    let TurnCtx { registry, roster, state } = *ctx;
     let request_id = holler_proto::CorrelationId::mint_hub().as_str().to_string();
     let message = user_message(&request_id, text);
     let started = Instant::now();

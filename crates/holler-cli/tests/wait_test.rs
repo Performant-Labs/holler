@@ -295,7 +295,22 @@ fn wait_no_hub_exit_1() {
 fn wait_fires_on_gone_when_body_detaches() {
     let hub_state = StateDir::new();
     let body_state = StateDir::new();
-    let hub = Hub::start(&hub_state);
+    // Issue #192 changed a hard kill's own immediate effect: an abrupt drop
+    // (socket read error/EOF, no clean WS close frame) now marks the row
+    // `reconnecting`, not `gone` — only an explicit `body detach` goes
+    // straight to `gone`. `gone` is now reached only via the roster's own
+    // TTL sweep (issue #255), so this test shortens both thresholds (and the
+    // sweep's own interval) the same way `roster_sweep_wireup_test.rs` does,
+    // rather than expecting an immediate transition a hard kill no longer
+    // produces.
+    let hub = Hub::start_with_env(
+        &hub_state,
+        &[
+            ("HOLLER_ROSTER_SWEEP_MS", "200"),
+            ("HOLLER_ROSTER_RECONNECT_MS", "1000"),
+            ("HOLLER_ROSTER_GONE_MS", "1000"),
+        ],
+    );
     let mut body = start_body(&hub_state, &body_state, &hub, &[("alpha", &["--chunks", "1"])]);
     wait_until_sessions_present(&hub_state, &["alpha"], Duration::from_secs(10));
 
@@ -306,9 +321,8 @@ fn wait_fires_on_gone_when_body_detaches() {
     assert!(!handle.is_finished(), "the body is still live; must not have matched yet");
 
     // A hard kill (not a graceful `body detach`) drops the socket out from
-    // under the hub — the hub's connection loop sees the read error/EOF and
-    // clears the roster row `gone` immediately (holler-server#80), no TTL
-    // wait needed.
+    // under the hub; the row ages `connected` → `reconnecting` → `gone`
+    // purely via the roster's shortened TTL sweep above.
     support::kill_tree(body.child_mut());
 
     let ready = wait_for(Duration::from_secs(15), || handle.is_finished().then_some(()));

@@ -80,14 +80,36 @@ async fn dispatch_control(line: &str, registry: &Registry, roster: &Roster) -> S
         Some("control/support") => hub_support(&cid, &obj, registry).await,
         Some("control/query_local") => hub_query_local(&cid, &obj, registry).await,
         Some("control/query_remote") => hub_query_remote(&cid, &obj, registry).await,
-        Some("control/say") => say(&cid, &obj, registry, roster).await,
+        Some(other) if other.starts_with("control/") => {
+            dispatch_session_control(other, &cid, &obj, registry, roster).await
+        }
+        Some(other) => encode_error(&cid, Code::MethodNotFound, format!("unknown control method: {other}")),
+        // No method: not a call (a stray response/notification or empty frame).
+        None => unkeyed_error_line(Code::InvalidRequest, "a control frame must be a request with a method"),
+    }
+}
+
+/// The session/roster half of [`dispatch_control`]'s match — split out
+/// purely to keep `dispatch_control`'s own cognitive-complexity score under
+/// the workspace's `clippy.toml` threshold of 15 once issues #191/#142 added
+/// their own arms alongside #150/#186/#192's existing ones; no behavior
+/// change, just fewer arms in one match.
+async fn dispatch_session_control(
+    method: &str,
+    cid: &holler_proto::CorrelationId,
+    obj: &serde_json::Value,
+    registry: &Registry,
+    roster: &Roster,
+) -> String {
+    match method {
+        "control/say" => say(cid, obj, registry, roster).await,
         // `control/interrupt` (issue #191): the CLI's `interrupt` verb.
-        Some("control/interrupt") => interrupt(&cid, &obj, registry).await,
-        Some("control/answer") => answer(&cid, &obj, registry).await,
+        "control/interrupt" => interrupt(cid, obj, registry, roster).await,
+        "control/answer" => answer(cid, obj, registry).await,
         // `control/roster` (issue #186): read the hub's own roster and return
         // `{rows: [...]}` (the live-only view; the CLI's `--all` reads the
         // same socket and asks for the full set, which the server honors here).
-        Some("control/roster") => roster_control(&cid, &obj, roster).await,
+        "control/roster" => roster_control(cid, obj, roster).await,
         // Issue #192's test-only hook: forcibly end a body's live connection
         // to simulate an abrupt drop. Gated behind `HOLLER_TEST_HOOKS=1` (an
         // env var, not `cfg(test)`, since this dispatch runs inside the real
@@ -95,15 +117,13 @@ async fn dispatch_control(line: &str, registry: &Registry, roster: &Roster) -> S
         // `cfg(test)` gate would never be reachable there at all). Answered
         // as a plain unknown method when the flag is unset, so the hook is
         // indistinguishable from not existing in a production hub.
-        Some("control/test_drop") if test_hooks_enabled() => test_drop(&cid, &obj, registry).await,
+        "control/test_drop" if test_hooks_enabled() => test_drop(cid, obj, registry).await,
         // `control/wait` (issue #142): block until any named session (or
         // every row under `--prefix`) matches one of the target states, or
         // `params.timeout_ms` elapses. Edge-triggered on `Roster::subscribe`
         // — no polling loop anywhere in this path.
-        Some("control/wait") => wait(&cid, &obj, roster).await,
-        Some(other) => encode_error(&cid, Code::MethodNotFound, format!("unknown control method: {other}")),
-        // No method: not a call (a stray response/notification or empty frame).
-        None => unkeyed_error_line(Code::InvalidRequest, "a control frame must be a request with a method"),
+        "control/wait" => wait(cid, obj, roster).await,
+        other => encode_error(cid, Code::MethodNotFound, format!("unknown control method: {other}")),
     }
 }
 
@@ -265,7 +285,7 @@ async fn say(cid: &holler_proto::CorrelationId, obj: &serde_json::Value, registr
 /// redirect turn's own reply, in exactly `control/say`'s own result shape
 /// (`stop_reason`/`state`/`updates`/`elapsed_ms`/`text`/`message`) so the CLI
 /// can share `say_cmd.rs`'s own printing logic.
-async fn interrupt(cid: &holler_proto::CorrelationId, obj: &serde_json::Value, registry: &Registry) -> String {
+async fn interrupt(cid: &holler_proto::CorrelationId, obj: &serde_json::Value, registry: &Registry, roster: &Roster) -> String {
     let params = obj.get("params");
     let Some(session) = params.and_then(|p| p.get("session")).and_then(|v| v.as_str()) else {
         return encode_error(cid, Code::InvalidParams, "control/interrupt needs params.session".to_string());
@@ -273,7 +293,7 @@ async fn interrupt(cid: &holler_proto::CorrelationId, obj: &serde_json::Value, r
     let text = params.and_then(|p| p.get("text")).and_then(|v| v.as_str());
 
     let state = HubState::from_root(resolve_state_dir().unwrap_or_default());
-    match crate::interrupt::interrupt(registry, &state, session, text).await {
+    match crate::interrupt::interrupt(registry, roster, &state, session, text).await {
         Ok(outcome) => {
             let mut result = serde_json::json!({ "session": outcome.session, "applied": true });
             if let Some(reply) = &outcome.reply {
