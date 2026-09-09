@@ -8,6 +8,8 @@
 
 use std::path::{Path, PathBuf};
 
+use holler_proto::log::{Component, Direction, Event, Severity};
+
 /// The resolved state dir and the role subdirs it roots.
 #[derive(Debug, Clone)]
 pub struct HubState {
@@ -38,7 +40,19 @@ pub fn resolve_state_dir() -> Option<PathBuf> {
         return Some(PathBuf::from(dir));
     }
     let Some(home) = std::env::var_os("HOME") else {
-        eprintln!("error: HOLLER_STATE_DIR is not set and $HOME is unavailable");
+        holler_proto::log::emit(&Event {
+            component: Component::Control,
+            severity: Severity::Warn,
+            direction: Direction::Local,
+            method: "state_dir_unresolved",
+            id: None,
+            peer: None,
+            fields: vec![(
+                "reason",
+                "HOLLER_STATE_DIR is not set and $HOME is unavailable".to_owned(),
+            )],
+            frame: None,
+        });
         return None;
     };
     Some(PathBuf::from(home).join(".holler"))
