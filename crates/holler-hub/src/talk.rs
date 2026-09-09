@@ -175,7 +175,12 @@ pub struct SayOutcome {
 /// live hub's own `HubState` (for the TalkLog path); `label` is this call's
 /// own request id source (an `h-…` [`holler_proto::CorrelationId`] is minted
 /// internally per call, so `say` and any concurrent `say` never share a
-/// `prompt_id`).
+/// `prompt_id`). `roster` gets this turn's `turn_id`/`last_turn` written
+/// straight onto the row (issue #142) — ahead of dispatch and the instant the
+/// response lands — so the roster is authoritative even between presence
+/// beats (`prompt_response_updates_last_turn_before_next_presence`); the next
+/// real presence overwrites the row anyway, so this is a best-effort
+/// forward-fill, not the row's system of record.
 pub async fn say(
     registry: &Registry,
     roster: &Roster,
@@ -282,6 +287,12 @@ async fn send_turn(
     let message = user_message(&request_id, text);
     let started = Instant::now();
 
+    // Issue #142: the roster's own `turn_id` moves the instant this turn is
+    // dispatched, ahead of the body's next presence heartbeat — so a `wait
+    // --after <prev turn_id>` started right after this call already sees a
+    // fresh in-flight turn rather than the stale one it was watermarked on.
+    roster.set_turn_id(&handle.token_id, ad.name.as_str(), &request_id);
+
     append_talklog(state, &handle.hostname, ad.name.as_str(), &TalkLine::Prompt {
         prompt_id: request_id.clone(),
         text: text.to_string(),
@@ -330,14 +341,19 @@ async fn send_turn(
             if stop_reason == "cancelled" {
                 return Err(SayError::Cancelled);
             }
-            let mut updated_ad = ad.clone();
-            updated_ad.last_turn = Some(holler_proto::docs::LastTurn {
+            let last_turn = holler_proto::docs::LastTurn {
                 turn_id: request_id.clone(),
                 state: holler_proto::state_for_stop_reason(&stop_reason).unwrap_or(SessionState::Failed),
                 stop_reason: stop_reason.clone(),
                 ended_at: holler_proto::log::timestamp(),
-            });
+            };
+            let mut updated_ad = ad.clone();
+            updated_ad.last_turn = Some(last_turn.clone());
             registry.replace_session(handle, updated_ad).await;
+            // Issue #142: write `last_turn` onto the roster row directly, the
+            // instant this response lands — the roster is authoritative even
+            // between presence beats (see this fn's own doc comment).
+            roster.set_last_turn(&handle.token_id, ad.name.as_str(), last_turn);
             Ok(SayOutcome {
                 session: format!("{}/{}", handle.hostname, ad.name),
                 message: *message,

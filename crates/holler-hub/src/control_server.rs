@@ -96,6 +96,11 @@ async fn dispatch_control(line: &str, registry: &Registry, roster: &Roster) -> S
         // as a plain unknown method when the flag is unset, so the hook is
         // indistinguishable from not existing in a production hub.
         Some("control/test_drop") if test_hooks_enabled() => test_drop(&cid, &obj, registry).await,
+        // `control/wait` (issue #142): block until any named session (or
+        // every row under `--prefix`) matches one of the target states, or
+        // `params.timeout_ms` elapses. Edge-triggered on `Roster::subscribe`
+        // — no polling loop anywhere in this path.
+        Some("control/wait") => wait(&cid, &obj, roster).await,
         Some(other) => encode_error(&cid, Code::MethodNotFound, format!("unknown control method: {other}")),
         // No method: not a call (a stray response/notification or empty frame).
         None => unkeyed_error_line(Code::InvalidRequest, "a control frame must be a request with a method"),
@@ -368,6 +373,147 @@ async fn roster_control(cid: &holler_proto::CorrelationId, obj: &serde_json::Val
     )
 }
 
+/// `control/wait {sessions?, prefix?, until?, after?, timeout_ms?}` (issue
+/// #142): block until a named session (or every row under `prefix`) matches
+/// one of `until`'s target states, or `timeout_ms` elapses. Edge-triggered on
+/// [`Roster::subscribe`] — the loop below only ever wakes on an actual roster
+/// change (`rx.changed()`) or the deadline, never a fixed poll tick, so there
+/// is no disguised polling loop here (see `Roster::read_count`, which the
+/// `wait_uses_no_polling` test reads to prove it).
+///
+/// The result is always a **success** envelope, `{matched, rows}`: a timeout
+/// is `matched:false, rows:[]`, not a JSON-RPC error — "nothing happened in
+/// this window" is an ordinary outcome of a wait, not a hub-side refusal, and
+/// giving it its own wire error code would be one more code the CLI has to
+/// special-case instead of just reading `matched`. `rows` is one entry per
+/// row that currently satisfies `until` (already narrowed to the caller's
+/// `sessions`/`prefix`), each `{session, state, conn_state, turn_id,
+/// stop_reason, last_turn}` — the shape `wait_cmd.rs` renders and `--json`
+/// forwards.
+async fn wait(cid: &holler_proto::CorrelationId, obj: &serde_json::Value, roster: &Roster) -> String {
+    let params = obj.get("params");
+    let sessions = comma_list(params, "sessions");
+    let prefix = params.and_then(|p| p.get("prefix")).and_then(|v| v.as_str()).map(str::to_string);
+    if sessions.is_empty() && prefix.is_none() {
+        return encode_error(cid, Code::InvalidParams, "control/wait needs params.sessions or params.prefix".to_string());
+    }
+    let until = {
+        let given = comma_list(params, "until");
+        if given.is_empty() { default_until() } else { given }
+    };
+    let after = params.and_then(|p| p.get("after")).and_then(|v| v.as_str()).map(str::to_string);
+    let timeout_ms = params.and_then(|p| p.get("timeout_ms")).and_then(|v| v.as_u64()).unwrap_or(600_000);
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_millis(timeout_ms);
+
+    // Subscribe *before* the first check: a change that lands between "check"
+    // and "subscribe" would otherwise be missed (the classic wait/notify
+    // race). `watch::Receiver::subscribe` always yields the sender's current
+    // value first, so the loop's very first `changed()` (if reached) still
+    // reports the latest generation, not a stale one.
+    let mut rx = roster.subscribe();
+    loop {
+        let rows = matching_rows(roster, &sessions, prefix.as_deref(), &until, after.as_deref());
+        if !rows.is_empty() {
+            return encode_response(cid, serde_json::json!({ "matched": true, "rows": rows }));
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return encode_response(cid, serde_json::json!({ "matched": false, "rows": [] }));
+        }
+        tokio::select! {
+            changed = rx.changed() => {
+                if changed.is_err() {
+                    // The roster outlives every connection in the live hub;
+                    // a dropped sender is unreachable in production. Fail
+                    // like a timeout rather than looping forever on an error.
+                    return encode_response(cid, serde_json::json!({ "matched": false, "rows": [] }));
+                }
+            }
+            () = tokio::time::sleep_until(deadline) => {
+                return encode_response(cid, serde_json::json!({ "matched": false, "rows": [] }));
+            }
+        }
+    }
+}
+
+/// The default `--until` set (ADR 0003 / holler#142's spec): every terminal
+/// turn outcome, `input-required`, and `gone` — deliberately **not** bare
+/// `idle` (a session goes idle after join, an interrupt, a refusal, *and* a
+/// success, so it would fire far too eagerly as a default).
+fn default_until() -> Vec<String> {
+    ["completed", "failed", "rejected", "input-required", "gone"]
+        .into_iter()
+        .map(str::to_string)
+        .collect()
+}
+
+/// Split a `params.<field>` comma-separated string into trimmed, non-empty
+/// segments (`""`/absent → empty `Vec`).
+fn comma_list(params: Option<&serde_json::Value>, field: &str) -> Vec<String> {
+    params
+        .and_then(|p| p.get(field))
+        .and_then(|v| v.as_str())
+        .map(|s| s.split(',').map(str::trim).filter(|s| !s.is_empty()).map(str::to_string).collect())
+        .unwrap_or_default()
+}
+
+/// The rows (in [`Roster::rows_matching`]'s display shape — `stalled`
+/// already applied) that currently match both the caller's `sessions`/
+/// `prefix` filter and one of `until`'s target states. `all` rows (`gone`
+/// included) are always read here — `gone` is itself a legal `--until`
+/// target, so a wait watching for it must see rows a plain `roster` listing
+/// would hide by default.
+fn matching_rows(
+    roster: &Roster,
+    sessions: &[String],
+    prefix: Option<&str>,
+    until: &[String],
+    after: Option<&str>,
+) -> Vec<serde_json::Value> {
+    roster
+        .rows_matching(Some(true), prefix)
+        .into_iter()
+        .filter(|row| prefix.is_some() || sessions.iter().any(|s| row.name == *s || row.name.ends_with(&format!("/{s}"))))
+        .filter(|row| row_matches_until(row, until, after))
+        .map(row_to_json)
+        .collect()
+}
+
+/// True iff `row` currently satisfies any of `until`'s target states.
+/// `idle`/`working`/`input-required`/`stalled` compare the row's own
+/// (already stall-derived) `state`; `gone` compares `conn_state`;
+/// `completed`/`canceled`/`failed`/`rejected` compare `last_turn.state`,
+/// additionally requiring `last_turn.turn_id != after` when `after` is given
+/// (the anti-spin rule: a caller re-waiting on a turn it already saw settle
+/// does not instantly re-match on that same turn).
+fn row_matches_until(row: &crate::roster::Row, until: &[String], after: Option<&str>) -> bool {
+    until.iter().any(|state| match state.as_str() {
+        "gone" => row.conn_state == "gone",
+        "idle" | "working" | "input-required" | "stalled" => row.state == *state,
+        "completed" | "canceled" | "failed" | "rejected" => row.last_turn.as_ref().is_some_and(|lt| {
+            lt.state.as_str() == state && after.is_none_or(|a| lt.turn_id != a)
+        }),
+        _ => false,
+    })
+}
+
+/// One matched row, in the shape `wait_cmd.rs` renders (and `--json`
+/// forwards verbatim). `age_secs` (a terminal match only) is computed here,
+/// server-side, from `last_turn.ended_at` — reusing [`crate::roster::
+/// parse_rfc3339`] rather than giving the CLI a second RFC3339 parser (or a
+/// new `time`-crate dependency) just to render "how long ago".
+fn row_to_json(row: crate::roster::Row) -> serde_json::Value {
+    let age_secs = row.last_turn.as_ref().and_then(|lt| crate::roster::parse_rfc3339_secs_since(&lt.ended_at));
+    serde_json::json!({
+        "session": row.name,
+        "state": row.state,
+        "conn_state": row.conn_state,
+        "turn_id": row.turn_id,
+        "stop_reason": row.last_turn.as_ref().map(|lt| lt.stop_reason.clone()),
+        "last_turn": row.last_turn,
+        "age_secs": age_secs,
+    })
+}
+
 /// The bound listen addresses, read the same way [`status_doc`] does (from
 /// `hub/listening.json`, written once at `hub serve` startup) — the shared
 /// helper both `control/status` and the new `control/caps`/`control/
@@ -533,5 +679,93 @@ fn read_listening(state: &HubState) -> Vec<String> {
     match std::fs::read_to_string(&path) {
         Ok(s) => serde_json::from_str(&s).unwrap_or_default(),
         Err(_) => Vec::new(),
+    }
+}
+
+#[cfg(test)]
+mod wait_tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable)] // #142
+    //! Issue #142's `wait_uses_no_polling`: proving the `control/wait`
+    //! handler is genuinely event-driven — it calls the private `wait` fn
+    //! directly (same module, same crate) against a real [`Roster`], rather
+    //! than driving a whole hub subprocess, because the property under test
+    //! (how many times the roster's row table was *read* during a multi-
+    //! hundred-millisecond wait) is an in-process fact `Roster::read_count`
+    //! exposes — there is no wire-level way to observe it from a CLI
+    //! subprocess test.
+    use super::*;
+    use crate::roster::{Config, Roster};
+    use holler_proto::{docs::LastTurn, CorrelationId, Mode, Presence, SessionAd, SessionState};
+
+    fn idle_presence(name: &str) -> Presence {
+        Presence {
+            hostname: "h1".to_string(),
+            sessions: vec![SessionAd {
+                name: name.to_string(),
+                harness: "opencode".to_string(),
+                state: SessionState::Idle,
+                mode: Mode::Spawn,
+                harness_session_id: None,
+                turn_started_at: None,
+                last_update_at: None,
+                pending: None,
+                turn_id: None,
+                last_turn: None,
+            }],
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn wait_uses_no_polling() {
+        let roster = Roster::with_system_clock(&Config::default());
+        roster.set_token("tok1", "cli1");
+        roster.set_label("tok1", "io");
+        roster.advertise("tok1", &idle_presence("alpha"));
+
+        let cid = CorrelationId::parse("b-test-wait").expect("well-formed test id");
+        let obj = serde_json::json!({
+            "id": "b-test-wait",
+            "method": "control/wait",
+            "params": { "sessions": "io/alpha", "until": "completed", "timeout_ms": 5_000 },
+        });
+
+        let before = roster.read_count();
+        let roster_task = roster.clone();
+        let handle = tokio::spawn(async move { wait(&cid, &obj, &roster_task).await });
+
+        // Give the task time to reach its first check and start blocking on
+        // `rx.changed()` (a real event-driven wait spends this whole span
+        // parked, not looping); then deliver exactly one real change.
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        roster.set_last_turn(
+            "tok1",
+            "alpha",
+            LastTurn {
+                turn_id: "h-000000000000000000000001".to_string(),
+                state: SessionState::Completed,
+                stop_reason: "end_turn".to_string(),
+                ended_at: "2026-09-09T00:00:00Z".to_string(),
+            },
+        );
+
+        let reply = tokio::time::timeout(std::time::Duration::from_secs(2), handle)
+            .await
+            .expect("the wait task finished promptly after the change")
+            .expect("the wait task did not panic");
+        let env = holler_proto::decode(&reply).expect("a valid v2 envelope");
+        let result = env.result().expect("a result, not an error");
+        assert_eq!(result["matched"], serde_json::json!(true), "must match once last_turn lands: {result}");
+
+        let after = roster.read_count();
+        // A real 50ms poll loop over this ~300ms span would already have run
+        // 6+ checks; an event-driven wait runs one check up front, blocks,
+        // and re-checks once per actual change — at most a handful of reads
+        // regardless of how long the blocking span was.
+        assert!(
+            after.saturating_sub(before) <= 5,
+            "too many roster reads ({} -> {}) for one real change — looks like a disguised poll loop",
+            before,
+            after
+        );
     }
 }

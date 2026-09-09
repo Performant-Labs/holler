@@ -16,8 +16,11 @@ in the ops handbook for how a meta-O session is set up.
 working on what I gave it, or has it finished and is just sitting there
 waiting for a reply?" — is invisible on the wire today. That gap is tracked
 as [holler#142](https://github.com/Performant-Labs/holler/issues/142)
-(`holler wait`, a real blocking waiter on roster state + `last_turn`); until
-it ships, an orchestrator has to work around the gap.
+(`holler wait SESSION`, a real blocking waiter on roster state + `last_turn`
+— now built; see [`docs/orchestrating.md`](orchestrating.md)). This section
+records what broke *before* it shipped, and what a hand-rolled workaround
+looked like; a new orchestrator should reach for `wait` directly rather than
+reproducing this history.
 
 Three failure modes came out of that gap during real use, found in this order:
 

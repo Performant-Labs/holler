@@ -474,3 +474,80 @@ fn label_qualifies_row_names_and_prefix_filters_on_the_label_boundary() {
     let bare = r.rows(None).into_iter().find(|row| row.token_id == unlabeled).expect("the unlabeled row exists");
     assert_eq!(bare.name, "delta", "no bound label falls back to the bare name");
 }
+
+/// Issue #142: the roster row's own `last_turn`/`turn_id` must be
+/// authoritative the **instant** a `session/prompt` response lands — not just
+/// on the body's next `session/presence` heartbeat. `talk::say` (the
+/// `control/say` handler behind it) achieves this by calling
+/// [`Roster::set_turn_id`] right before dispatch and [`Roster::
+/// set_last_turn`] the moment the response arrives; this test exercises those
+/// two calls directly (the same calls `talk::say` makes) against a roster
+/// that has never received a second presence, proving the update did not
+/// come from one.
+#[test]
+fn prompt_response_updates_last_turn_before_next_presence() {
+    let r = Roster::new(&Config::default());
+    r.set_token(T, C);
+    r.set_label(T, "io");
+    // One presence, establishing the row idle with no turn history yet.
+    r.advertise(T, &presence("h1", &["alpha"]));
+    let before = r.rows(None);
+    assert_eq!(before[0].turn_id, None);
+    assert_eq!(before[0].last_turn, None);
+
+    // Dispatch: the roster's `turn_id` moves immediately (no new presence).
+    r.set_turn_id(T, "alpha", "h-000000000000000000000099");
+    let mid = r.rows(None);
+    assert_eq!(mid[0].turn_id.as_deref(), Some("h-000000000000000000000099"));
+    assert_eq!(mid[0].last_turn, None, "no response yet");
+
+    // The response lands: `last_turn` moves immediately too — still no
+    // second presence has been advertised.
+    let last_turn = LastTurn {
+        turn_id: "h-000000000000000000000099".to_string(),
+        state: SessionState::Completed,
+        stop_reason: "end_turn".to_string(),
+        ended_at: "2026-09-09T00:10:00Z".to_string(),
+    };
+    r.set_last_turn(T, "alpha", last_turn.clone());
+    let after = r.rows(None);
+    assert_eq!(after[0].last_turn.as_ref(), Some(&last_turn), "authoritative ahead of any presence beat");
+}
+
+/// Issue #142: `last_turn` must survive a reconnect — it rides presence (the
+/// body includes its own `last_turn` in every `session/presence` it sends),
+/// so a fresh presence from the same session after a reconnect still carries
+/// the outcome of the turn that ran before the drop.
+#[test]
+fn last_turn_survives_reconnect_via_presence() {
+    let r = Roster::new(&Config::default());
+    r.set_token(T, C);
+    r.set_label(T, "io");
+    r.advertise(T, &Presence { hostname: "h1".into(), sessions: vec![input_required_ad("alpha")] });
+    let before = r.rows(None);
+    let last = before[0].last_turn.clone().expect("a terminal last_turn was advertised");
+    assert_eq!(last.turn_id, "h-000000000000000000000041");
+
+    // The connection drops (explicit close) and a *different* token
+    // reconnects for the same body identity, re-advertising the same session
+    // — the body's own presence still carries the same `last_turn` it had
+    // before the drop (it is the body's own turn history, not the roster's).
+    r.clear(T);
+    let reconnected = "tok_0099";
+    r.set_token(reconnected, "cli_0099");
+    r.set_label(reconnected, "io");
+    let mut ad = input_required_ad("alpha");
+    // The reconnected session is idle again (its held gate was answered
+    // before the drop) but its `last_turn` — the outcome of the *prior*
+    // turn — is unchanged.
+    ad.state = SessionState::Idle;
+    ad.pending = None;
+    r.advertise(reconnected, &Presence { hostname: "h1".into(), sessions: vec![ad] });
+
+    let after = r.rows(None);
+    assert_eq!(after.len(), 1, "the reconnected body's row replaces the cleared one");
+    assert_eq!(after[0].conn_state, "connected");
+    let after_last = after[0].last_turn.as_ref().expect("last_turn survives the reconnect");
+    assert_eq!(after_last.turn_id, "h-000000000000000000000041");
+    assert_eq!(after_last.state.as_str(), "completed");
+}
