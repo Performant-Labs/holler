@@ -3,3 +3,11 @@ target/
 holler-state/
 sessions.toml
 attach.toml
+
+# Accidental `npx --agent '*'` skill-tree dumps (review battery uses home-dir
+# stubs instead — see docs/reviews/review-battery-setup pointer in CLAUDE.md)
+/skills/
+.agents/skills/
+.claude/skills/
+.grok/skills/
+.cursor/skills/
