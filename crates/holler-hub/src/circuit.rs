@@ -27,37 +27,37 @@
 //! every inbound WS frame, not just a decoded one — the same discipline as
 //! the body side) and races it against [`liveness_timeout`] in the same
 //! `select!` that already watches the socket and the command channel; on
-//! expiry the connection is torn down exactly like every other teardown path
-//! here (`fail_pending_says` + clearing the roster row immediately).
+//! expiry the connection is torn down exactly like every other *abrupt*
+//! teardown path here (`fail_pending` + marking the roster's rows
+//! `reconnecting` — issue #192 revised this from an immediate `gone`: the
+//! body is expected to reconnect, and only ages all the way out to `gone` if
+//! it does not, on the same TTL the roster's own sweep already uses).
+//!
+//! Issue #192 pins the reconnect contract end to end: every abrupt ending
+//! (a decode/send failure, a socket error, EOF, this liveness timeout, or the
+//! `control/test_drop` test hook) marks the token's rows `reconnecting`
+//! rather than `gone` ([`SessionConnection::mark_reconnecting`]); only an
+//! explicit WS close frame (`body detach`'s own clean teardown) still goes
+//! straight to `gone` ([`SessionConnection::clear_from_roster`],
+//! holler-server#80). Every pending `say`/`cancel` is still failed
+//! immediately either way (`fail_pending`) — the operator never waits out a
+//! timeout to learn the body dropped mid-turn. See `docs/protocol/v2.md`'s
+//! "Reconnect contract" section for the full six-point contract this
+//! implements.
+
+mod dispatch;
 
 use futures_util::{Sink, SinkExt, Stream, StreamExt};
 use holler_proto::{
     log::{Component, Direction as LogDirection, Event, Severity},
-    Authenticate, Code, Envelope, Hello, HelloRole, PingAck, Presence, PromptResult, Update, WireError,
+    Authenticate, Code, Envelope, Hello, HelloRole, PingAck, WireError,
 };
 use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 
-use crate::live::{CancelCommand, CancelReply, LiveCommand, Registry, SayReply, SeenUpdate};
+use crate::live::{CancelCommand, CancelReply, LiveCommand, Registry, SayReply};
 use crate::serve::{close, send_error};
 use crate::state::HubState;
-
-/// One `say` still awaiting its `session/prompt` response on this
-/// connection (issue #190). Keyed by `request_id` in a map (not the single
-/// `Option` `pending_ping` uses) — unlike a probe ping, `say`s to different
-/// (or even the same, via `--queue`) sessions are routinely concurrent on
-/// one connection: the hub forwards a `--queue`d `session/prompt` to the
-/// body immediately, without itself waiting for the turn ahead of it to
-/// finish, so two (or more) requests can be in flight on this socket at
-/// once. A single `Option` here would have the second `say` silently drop
-/// the first's reply channel (`Sender` overwritten and dropped) the moment
-/// it arrived — confirmed the hard way while building this story's own
-/// `say_queue_appends_and_runs_after_turn` test, which failed with a
-/// spurious "no reply … within 600s" the instant the queued call's request
-/// went out, not after any real 600s wait.
-struct PendingSay {
-    reply: tokio::sync::oneshot::Sender<SayReply>,
-    updates: Vec<SeenUpdate>,
-}
+use dispatch::PendingSay;
 
 /// How long the hub waits for the body's half of the hello exchange, and for
 /// the body's answer to the hub's own hello, before giving up on the socket.
@@ -416,11 +416,24 @@ where
     }
 
     /// Issue #186: the roster row is keyed by *token*, so an explicit close
-    /// is `gone` immediately, not "reconnecting" — used on every teardown
-    /// path below, including the issue #243 liveness timeout.
+    /// (a WS close frame — `body detach`'s own clean teardown) is `gone`
+    /// immediately, never "reconnecting" — the body told us on its way out
+    /// that it is not coming back.
     fn clear_from_roster(&self) {
         if let Some(token) = &self.roster_token {
             self.roster.clear(token);
+        }
+    }
+
+    /// Issue #192: every **abrupt** teardown path below (a decode/send
+    /// failure, a socket error, EOF, the issue #243 liveness timeout, or the
+    /// `control/test_drop` test hook) marks the token's rows `reconnecting`
+    /// instead of `clear`-ing them straight to `gone` — the body is expected
+    /// to reconnect (see [`crate::roster::Roster::mark_reconnecting`]'s own
+    /// doc for why this is not the same as an explicit close).
+    fn mark_reconnecting(&self) {
+        if let Some(token) = &self.roster_token {
+            self.roster.mark_reconnecting(token);
         }
     }
 
@@ -432,7 +445,7 @@ where
     /// under the workspace threshold.
     async fn handle_cancel_command(&mut self, cancel_cmd: Option<CancelCommand>) -> Result<(), ()> {
         let CancelCommand { request_id, session, reply } = cancel_cmd.ok_or(())?;
-        match send_cancel(self.sink, &request_id, &session).await {
+        match dispatch::send_cancel(self.sink, &request_id, &session).await {
             Ok(()) => {
                 self.pending_cancels.insert(request_id, reply);
                 Ok(())
@@ -468,16 +481,28 @@ where
                             self.last_frame_at = tokio::time::Instant::now();
                             if self.handle_inbound(&t).await.is_err() {
                                 self.fail_pending();
-                                self.clear_from_roster();
+                                self.mark_reconnecting();
                                 return;
                             }
                         }
                         Some(Ok(Message::Ping(_))) | Some(Ok(Message::Pong(_))) | Some(Ok(Message::Frame(_))) => {
                             self.last_frame_at = tokio::time::Instant::now();
                         }
-                        Some(Ok(Message::Binary(_))) | Some(Ok(Message::Close(_))) | Some(Err(_)) | None => {
+                        // A clean WS close frame (`body detach`'s own
+                        // teardown, issue #182 step 6): the body told us on
+                        // its way out — `gone` immediately (holler-server#80).
+                        Some(Ok(Message::Close(_))) => {
                             self.fail_pending();
                             self.clear_from_roster();
+                            return;
+                        }
+                        // Every other ending is *abrupt* (issue #192): no
+                        // clean close handshake, so the body is expected to
+                        // reconnect on its own backoff — `reconnecting`, not
+                        // `gone`.
+                        Some(Ok(Message::Binary(_))) | Some(Err(_)) | None => {
+                            self.fail_pending();
+                            self.mark_reconnecting();
                             return;
                         }
                     }
@@ -489,7 +514,7 @@ where
                         vec![("client_id", self.client_id.to_string())],
                     );
                     self.fail_pending();
-                    self.clear_from_roster();
+                    self.mark_reconnecting();
                     return;
                 }
                 cancel_cmd = self.cancel_rx.recv() => {
@@ -513,7 +538,7 @@ where
     /// own cognitive complexity under the workspace threshold.
     async fn handle_live_command(&mut self, cmd: Option<LiveCommand>) -> Result<(), ()> {
         match cmd.ok_or(())? {
-            LiveCommand::Ping { reply: reply_tx } => match send_ping_probe(self.sink).await {
+            LiveCommand::Ping { reply: reply_tx } => match dispatch::send_ping_probe(self.sink).await {
                 Ok(cid) => {
                     self.pending_ping = Some((cid, reply_tx));
                     Ok(())
@@ -521,7 +546,7 @@ where
                 Err(()) => Err(()),
             },
             LiveCommand::Query { method, params, reply: reply_tx } => {
-                match send_query_forward(self.sink, &method, params).await {
+                match dispatch::send_query_forward(self.sink, &method, params).await {
                     Ok(cid) => {
                         self.pending_query = Some((cid, reply_tx));
                         Ok(())
@@ -530,7 +555,7 @@ where
                 }
             }
             LiveCommand::Say { request_id, session, message, queue, replace, reply } => {
-                match send_prompt(self.sink, &request_id, &session, message, queue, replace).await {
+                match dispatch::send_prompt(self.sink, &request_id, &session, message, queue, replace).await {
                     Ok(()) => {
                         self.pending_says.insert(request_id, PendingSay { reply, updates: Vec::new() });
                         Ok(())
@@ -540,6 +565,18 @@ where
                         Err(())
                     }
                 }
+            }
+            // Issue #192's `control/test_drop` test hook: fail every
+            // pending say/cancel with `connection_lost`, mark the token's
+            // rows `reconnecting` (an abrupt drop, not an explicit close),
+            // ack the caller, then tear this connection down — `run`'s own
+            // `Err(())` handling for this arm does *not* re-run cleanup, so
+            // it happens here, once.
+            LiveCommand::Drop { reply } => {
+                self.fail_pending();
+                self.mark_reconnecting();
+                let _ = reply.send(());
+                Err(())
             }
         }
     }
@@ -580,11 +617,11 @@ where
         }
         match &env {
             Envelope::Notification { method, params } if method == "session/presence" => {
-                handle_presence_notification(self.client_id, params.clone(), self.registry, self.roster).await;
+                dispatch::handle_presence_notification(self.client_id, params.clone(), self.registry, self.roster).await;
                 Ok(())
             }
             Envelope::Notification { method, params } if method == "session/update" => {
-                handle_update_notification(params.clone(), &mut self.pending_says);
+                dispatch::handle_update_notification(params.clone(), &mut self.pending_says);
                 Ok(())
             }
             Envelope::Request { id, method, .. } if method == "circuit/ping" => {
@@ -592,12 +629,12 @@ where
                 reply(self.sink, Some(id), serde_json::to_value(ack).unwrap_or_default()).await
             }
             Envelope::Response { id, result } if self.pending_confirms.contains_key(id) => {
-                handle_confirm_response(id, result.clone(), self.client_id, &mut self.pending_confirms, self.registry)
+                dispatch::handle_confirm_response(id, result.clone(), self.client_id, &mut self.pending_confirms, self.registry)
                     .await;
                 Ok(())
             }
             Envelope::Response { id, result } => {
-                handle_response(
+                dispatch::handle_response(
                     id,
                     result.clone(),
                     &mut self.pending_ping,
@@ -608,7 +645,7 @@ where
                 Ok(())
             }
             Envelope::Error { id, error } => {
-                handle_error_response(id.as_deref(), error, &mut self.pending_query, &mut self.pending_says, &mut self.pending_cancels);
+                dispatch::handle_error_response(id.as_deref(), error, &mut self.pending_query, &mut self.pending_says, &mut self.pending_cancels);
                 Ok(())
             }
             Envelope::Request { id, .. } => {
@@ -616,209 +653,6 @@ where
                 Ok(())
             }
             Envelope::Notification { .. } => Ok(()),
-        }
-    }
-}
-
-/// Send a `session/prompt {session, message, queue, replace}` request to the
-/// body under `request_id`. `replace` (issue #191) is set only by
-/// `interrupt SESSION TEXT`, after the matching cancel's own `{applied:true}`
-/// — see `crate::interrupt`.
-async fn send_prompt<Snk>(
-    sink: &mut Snk,
-    request_id: &str,
-    session: &str,
-    message: Box<holler_proto::Message>,
-    queue: bool,
-    replace: bool,
-) -> Result<(), ()>
-where
-    Snk: Sink<Message, Error = WsError> + Unpin,
-{
-    let cid = holler_proto::CorrelationId::parse(request_id).map_err(|_| ())?;
-    let params = holler_proto::Prompt { session: session.to_string(), message: *message, meta: None, queue, replace };
-    let req = Envelope::request(&cid, "session/prompt", Some(serde_json::to_value(params).map_err(|_| ())?));
-    let text = holler_proto::encode(&req).map_err(|_| ())?;
-    sink.send(Message::text(text)).await.map_err(|_| ())?;
-    sink.flush().await.map_err(|_| ())
-}
-
-/// Send a `session/cancel {session}` request to the body under `request_id`
-/// (issue #191) — the priority-path counterpart of [`send_prompt`].
-async fn send_cancel<Snk>(sink: &mut Snk, request_id: &str, session: &str) -> Result<(), ()>
-where
-    Snk: Sink<Message, Error = WsError> + Unpin,
-{
-    let cid = holler_proto::CorrelationId::parse(request_id).map_err(|_| ())?;
-    let params = holler_proto::Cancel { session: session.to_string() };
-    let req = Envelope::request(&cid, "session/cancel", Some(serde_json::to_value(params).map_err(|_| ())?));
-    let text = holler_proto::encode(&req).map_err(|_| ())?;
-    sink.send(Message::text(text)).await.map_err(|_| ())?;
-    sink.flush().await.map_err(|_| ())
-}
-
-/// Send a `circuit/ping` request to the body, returning its correlation id so
-/// the caller can recognise the matching reply.
-async fn send_ping_probe<Snk>(sink: &mut Snk) -> Result<String, ()>
-where
-    Snk: Sink<Message, Error = WsError> + Unpin,
-{
-    let cid = holler_proto::CorrelationId::mint_hub();
-    let req = Envelope::request(&cid, "circuit/ping", None);
-    let text = holler_proto::encode(&req).unwrap_or_default();
-    sink.send(Message::text(text)).await.map_err(|_| ())?;
-    sink.flush().await.map_err(|_| ())?;
-    Ok(cid.as_str().to_string())
-}
-
-/// Send a `hub query TARGET …` forward (issue #185) to the body over this
-/// connection, returning its correlation id.
-async fn send_query_forward<Snk>(sink: &mut Snk, method: &str, params: Option<serde_json::Value>) -> Result<String, ()>
-where
-    Snk: Sink<Message, Error = WsError> + Unpin,
-{
-    let cid = holler_proto::CorrelationId::mint_hub();
-    let req = Envelope::request(&cid, method, params);
-    let text = holler_proto::encode(&req).unwrap_or_default();
-    sink.send(Message::text(text)).await.map_err(|_| ())?;
-    sink.flush().await.map_err(|_| ())?;
-    Ok(cid.as_str().to_string())
-}
-
-/// A `session/presence` notification: record the body's current session
-/// count (`hub status`'s `sessions`, issue #185) and cache its live session
-/// state (issue #190's roster stand-in — see the `live` module doc) so
-/// `say`'s busy check and name resolution have something real to read. Split
-/// out of [`SessionConnection::handle_inbound`] to keep that dispatch's
-/// cognitive complexity under the workspace threshold.
-async fn handle_presence_notification(
-    client_id: &str,
-    params: Option<serde_json::Value>,
-    registry: &Registry,
-    roster: &std::sync::Arc<crate::roster::Roster>,
-) {
-    let Some(p) = params.and_then(|v| serde_json::from_value::<Presence>(v).ok()) else { return };
-    // Clone `p.hostname` into the log line (issue #186): `roster.advertise`
-    // below borrows the whole `Presence`, so the log must not move a field out.
-    log(Severity::Debug, "presence", vec![("client_id", client_id.to_string()), ("hostname", p.hostname.clone())]);
-    // Advertise the roster row *before* `registry.update_presence` moves
-    // `p.sessions` out (issue #186). The roster row is keyed by token, so
-    // resolve the client id to its token first. A body that lost its registry
-    // entry (a duplicate that was just replaced) has no token to attribute to;
-    // the roster row for the token the *new* socket owns is what `rows()`
-    // returns, and this stale socket's own teardown clears its (old) token.
-    if let Some(token_id) = registry.token_id_for_client(client_id).await {
-        roster.advertise(&token_id, &p);
-    }
-    registry.set_session_count(client_id, p.sessions.len() as u32).await;
-    registry.update_presence(client_id, p.sessions).await;
-}
-
-/// A `session/update` notification: append it to the matching in-flight
-/// `say`'s own record (by `prompt_id`), if any is still pending. Split out
-/// of [`SessionConnection::handle_inbound`] for the same reason as
-/// [`handle_presence_notification`].
-fn handle_update_notification(
-    params: Option<serde_json::Value>,
-    pending_says: &mut std::collections::HashMap<String, PendingSay>,
-) {
-    let Some(p) = params.and_then(|v| serde_json::from_value::<Update>(v).ok()) else { return };
-    if let Some(pending) = pending_says.get_mut(&p.prompt_id) {
-        pending.updates.push(SeenUpdate { ts: holler_proto::log::timestamp(), seq: p.seq, parts: p.parts });
-    }
-}
-
-/// A confirmation probe's answer (issue #185) — matched by id against every
-/// harness's outstanding probe at once, independent of `pending_ping`/
-/// `pending_query`'s single-slot discipline and of whatever else (presence, a
-/// `hub query` forward, a `say`) interleaves on the wire around it.
-async fn handle_confirm_response(
-    id: &str,
-    result: Option<serde_json::Value>,
-    client_id: &str,
-    pending_confirms: &mut std::collections::HashMap<String, String>,
-    registry: &Registry,
-) {
-    let Some(harness) = pending_confirms.remove(id) else {
-        return;
-    };
-    let ok = result.and_then(|v| v.get("ok").and_then(|o| o.as_bool())).unwrap_or(false);
-    if ok {
-        registry.confirm_harness(client_id, &harness).await;
-    }
-}
-
-/// Route a plain `Response` to whichever of `pending_says`/`pending_ping`/
-/// `pending_query` is waiting on this `id` (at most one is, by construction —
-/// `pending_says` keys by `id` directly; the other two are each a single
-/// outstanding slot). Split out of [`SessionConnection::handle_inbound`] for
-/// the same reason as [`handle_presence_notification`].
-fn handle_response(
-    id: &str,
-    result: Option<serde_json::Value>,
-    pending_ping: &mut PendingPing,
-    pending_query: &mut PendingQuery,
-    pending_says: &mut std::collections::HashMap<String, PendingSay>,
-    pending_cancels: &mut std::collections::HashMap<String, tokio::sync::oneshot::Sender<CancelReply>>,
-) {
-    if let Some(reply) = pending_cancels.remove(id) {
-        let outcome = match result.and_then(|v| serde_json::from_value::<holler_proto::CancelResult>(v).ok()) {
-            Some(r) if r.applied => CancelReply::Applied,
-            _ => CancelReply::ConnectionLost,
-        };
-        let _ = reply.send(outcome);
-        return;
-    }
-    if let Some(pending) = pending_says.remove(id) {
-        let outcome = match result.and_then(|v| serde_json::from_value::<PromptResult>(v).ok()) {
-            Some(r) => SayReply::Result {
-                message: Box::new(r.message),
-                stop_reason: r.stop_reason,
-                state: r.state,
-                updates: pending.updates,
-            },
-            None => SayReply::ConnectionLost,
-        };
-        let _ = pending.reply.send(outcome);
-        return;
-    }
-    if pending_ping.as_ref().is_some_and(|(want, _)| id == want) {
-        if let Some((_, tx)) = pending_ping.take() {
-            if let Some(ack) = result.and_then(|v| serde_json::from_value::<PingAck>(v).ok()) {
-                let _ = tx.send(ack);
-            }
-        }
-    } else if pending_query.as_ref().is_some_and(|(want, _)| id == want) {
-        if let Some((_, tx)) = pending_query.take() {
-            let _ = tx.send(Ok(result.unwrap_or(serde_json::Value::Null)));
-        }
-    }
-}
-
-/// Route an `Error` envelope to whichever of `pending_says`/`pending_query`
-/// matches (issue #190's own body-refused `say`, or issue #185's a body's
-/// `query/*` error — e.g. `query/support`'s `-32006` — forwarded verbatim to
-/// the `hub query` caller). `circuit/ping`/confirmation probes never error on
-/// the wire (a body always answers with a result, `ok:false` included).
-fn handle_error_response(
-    id: Option<&str>,
-    error: &WireError,
-    pending_query: &mut PendingQuery,
-    pending_says: &mut std::collections::HashMap<String, PendingSay>,
-    pending_cancels: &mut std::collections::HashMap<String, tokio::sync::oneshot::Sender<CancelReply>>,
-) {
-    let Some(want_id) = id else { return };
-    if let Some(reply) = pending_cancels.remove(want_id) {
-        let _ = reply.send(CancelReply::Refused(error.clone()));
-        return;
-    }
-    if let Some(pending) = pending_says.remove(want_id) {
-        let _ = pending.reply.send(SayReply::Refused(error.clone()));
-        return;
-    }
-    if pending_query.as_ref().is_some_and(|(want, _)| want_id == want) {
-        if let Some((_, tx)) = pending_query.take() {
-            let _ = tx.send(Err(error.clone()));
         }
     }
 }
