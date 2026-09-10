@@ -30,8 +30,6 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Mutex;
 use std::sync::OnceLock;
-use std::time::SystemTime;
-use std::time::UNIX_EPOCH;
 
 use hmac::Hmac;
 use hmac::Mac;
@@ -296,11 +294,19 @@ fn constant_time_eq(a: &str, b: &str) -> bool {
 /// The current unix epoch in seconds (the store's clock for `created`/
 /// `expires`/`bound_at`/`last_seen`). Public: the CLI's `ping` compares a
 /// token's `expires` against the same clock.
+///
+/// Issue #207: this crate's `Record` fields and `Roster`'s `Clock`/
+/// `AtomicU64` machinery are `u64` throughout the on-disk token store, so
+/// this keeps its own `u64`-returning signature rather than the `i64` the
+/// other four (now deduplicated into [`holler_proto::now_secs`]) settled
+/// on — converting the whole persisted-record/roster surface to `i64` is a
+/// much bigger change than this issue's "pure refactor, no behavior change"
+/// scope. It still delegates to the one shared clock read (`SystemTime::now`
+/// is otherwise called nowhere else in the workspace) and casts back to
+/// `u64`, which is always safe: unix seconds since 1970 are positive and
+/// nowhere near `i64::MAX`.
 pub fn now_secs() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
+    holler_proto::now_secs() as u64
 }
 
 /// Draw 256 random bits from the CSPRNG. (Never `panic` — a CSPRNG failure is

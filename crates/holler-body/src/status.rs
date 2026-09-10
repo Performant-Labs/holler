@@ -75,7 +75,7 @@ impl StatusDoc {
                 token_id: Some(i.token_id.clone()),
                 server: (!i.server_url.is_empty()).then(|| i.server_url.clone()),
                 hostname: (!i.hostname.is_empty()).then(|| i.hostname.clone()),
-                connected: i.connected(now_secs()),
+                connected: i.connected(holler_proto::now_secs()),
             },
         }
     }
@@ -124,13 +124,6 @@ pub fn render_human(doc: &StatusDoc) -> String {
             s
         }
     }
-}
-
-fn now_secs() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0)
 }
 
 #[cfg(test)]

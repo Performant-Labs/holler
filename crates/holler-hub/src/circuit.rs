@@ -765,7 +765,7 @@ where
                 Ok(())
             }
             Envelope::Request { id, method, .. } if method == "circuit/ping" => {
-                let ack = PingAck { hostname: self.client_id.to_string(), ts: now_millis() };
+                let ack = PingAck { hostname: self.client_id.to_string(), ts: holler_proto::now_millis() };
                 reply(self.sink, Some(id), serde_json::to_value(ack).unwrap_or_default()).await
             }
             Envelope::Response { id, result } if self.pending_confirms.contains_key(id) => {
@@ -797,15 +797,15 @@ where
     }
 }
 
-fn now_millis() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
-}
-
 /// Read the next text frame off `stream` as a decoded [`Envelope`], skipping
 /// ping/pong/raw frames. `None` on close, error, or EOF.
+///
+/// Issue #207: duplicated verbatim in `holler-body`'s
+/// `connection::next_envelope` — see that copy's doc comment for why this is
+/// deliberately not hoisted into `holler_proto` alongside [`holler_proto::
+/// now_secs`]/[`holler_proto::now_millis`] (that crate's documented "no
+/// network or async dependency" charter, which this function's
+/// `tokio_tungstenite`-specific bound would break).
 async fn next_envelope<St>(stream: &mut St) -> Option<Envelope>
 where
     St: Stream<Item = Result<Message, WsError>> + Unpin,

@@ -262,7 +262,7 @@ fn on_response(
         token_id: token_id.to_string(),
         hostname: hostname.to_string(),
         server_url: server_url.to_string(),
-        joined_at: now_secs(),
+        joined_at: holler_proto::now_secs(),
     };
     if let Err(e) = crate::identity::save(&identity, state_root) {
         let e = JoinError::Io(e.to_string());
@@ -285,9 +285,3 @@ where
     Ok(ws)
 }
 
-fn now_secs() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0)
-}
