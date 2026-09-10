@@ -27,7 +27,7 @@ use std::task::{Context, Poll};
 
 use futures_util::{Future, Sink, SinkExt, Stream, StreamExt};
 use holler_proto::{decode, Envelope, Join, WireError};
-use tokio::net::{TcpListener, TcpStream, UnixListener};
+use tokio::net::{TcpListener, TcpSocket, TcpStream, UnixListener};
 use tokio::signal::unix::{signal, SignalKind};
 use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 
@@ -232,6 +232,52 @@ fn write_pid(file: &std::fs::File) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Bind a single WS listen address with `SO_REUSEADDR` set (issue #259): a
+/// hub restarted immediately on the exact same fixed port — the previous
+/// process's own connections are killed out from under it (`kill_tree`'s
+/// `SIGKILL`), not closed gracefully — otherwise races the OS's per-4-tuple
+/// `TIME_WAIT` teardown for those connections' local port and can lose with
+/// `EADDRINUSE`, even though the *listening* socket itself was already fully
+/// reclaimed (`kill_tree` blocks on `wait()`, so the old process is reaped
+/// before the new one ever spawns). `tokio::net::TcpListener::bind` does not
+/// set this itself, so it is set explicitly via [`TcpSocket`] rather than
+/// relying on the underlying mio/socket2 default, which is not part of
+/// tokio's public contract.
+///
+/// A short bind-retry with backoff (5 attempts, 20ms/40ms/80ms/160ms between
+/// them, ~300ms worst case) is layered on top: `SO_REUSEADDR` covers the
+/// `TIME_WAIT` case but not a residual window where the kernel is still
+/// tearing down the killed process's socket state after `wait()` returns —
+/// belt-and-suspenders against exactly the "hub did not report listening
+/// within 10s" flake #259 measured at ~10% with a single unretried bind.
+async fn bind_one_ws_listener(addr: &SocketAddr) -> std::io::Result<TcpListener> {
+    const MAX_ATTEMPTS: u32 = 5;
+    let mut backoff = std::time::Duration::from_millis(20);
+    // Seeded with a real (never-surfaced-unless-every-attempt-fails) error
+    // rather than `Option<io::Error>` + a loop-invariant `.expect()`: the loop
+    // below always runs at least once and overwrites this on every failing
+    // attempt, but clippy's `expect_used` gate (workspace-wide, `-D warnings`)
+    // does not know that invariant, and an `Option` here would need one to
+    // unwrap it at the end.
+    let mut last_err = std::io::Error::other("bind_one_ws_listener: unreachable placeholder");
+    for attempt in 1..=MAX_ATTEMPTS {
+        let socket = if addr.is_ipv4() { TcpSocket::new_v4()? } else { TcpSocket::new_v6()? };
+        socket.set_reuseaddr(true)?;
+        match socket.bind(*addr) {
+            Ok(()) => match socket.listen(1024) {
+                Ok(listener) => return Ok(listener),
+                Err(e) => last_err = e,
+            },
+            Err(e) => last_err = e,
+        }
+        if attempt < MAX_ATTEMPTS {
+            tokio::time::sleep(backoff).await;
+            backoff *= 2;
+        }
+    }
+    Err(last_err)
+}
+
 /// Bind every WS listen address in `addrs`, returning the bound
 /// [`TcpListener`]s and their actual `addr:port` strings. Split out of
 /// [`serve_forever`] (issue #184) purely to keep that fn under clippy's
@@ -241,7 +287,7 @@ async fn bind_ws_listeners(addrs: &[SocketAddr]) -> Result<(Vec<TcpListener>, Ve
     let mut ws_listeners = Vec::new();
     let mut bound_addrs = Vec::new();
     for addr in addrs {
-        match TcpListener::bind(addr).await {
+        match bind_one_ws_listener(addr).await {
             Ok(l) => match l.local_addr() {
                 Ok(actual) => {
                     bound_addrs.push(actual.to_string());
