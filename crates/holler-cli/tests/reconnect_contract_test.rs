@@ -429,3 +429,114 @@ fn roster_returns_to_connected_after_successful_traffic() {
 
     reconnected.expect("the roster must return `alpha` to connected once the body's own traffic resumes");
 }
+
+/// Issue #299: connection churn at volume — dozens of consecutive
+/// disconnect/reconnect cycles against a real hub, using the exact same
+/// `control/test_drop` mechanism the tests above already use. Each cycle: a
+/// successful `test_drop` call is itself proof a live connection just ended
+/// (its own RPC hard-errors with no live match), then the roster must return
+/// to `connected` on the body's fresh reconnect traffic and a fresh `say`
+/// must work — repeated [`CHURN_CYCLES`] times back to back. After the
+/// churn, it asserts no state leak accumulated: exactly one roster row for
+/// the session (no stale duplicate rows) and no leaked processes hanging off
+/// the body (no accumulated dead/orphaned agent children across all those
+/// reconnects).
+const CHURN_CYCLES: usize = 25;
+
+#[test]
+fn connection_churn_survives_dozens_of_reconnect_cycles() {
+    let hub_state = StateDir::new();
+    let body_state = StateDir::new();
+    let hub = Hub::start_with_env(&hub_state, &[("HOLLER_TEST_HOOKS", "1")]);
+    let (token_id, mut body) =
+        start_body_with_token(&hub_state, &body_state, &hub, "b", &[("alpha", &["--chunks", "1"])]);
+
+    let warm = say_ready(&hub_state, "alpha", "warm up", STARTUP_WAIT);
+    assert!(warm.status.success(), "stderr: {}", stderr_of(&warm));
+
+    for cycle in 0..CHURN_CYCLES {
+        // The body must still be alive going into this cycle — a crash mid-churn
+        // is a real bug, not something later cycles should paper over.
+        assert!(
+            body.child_mut().try_wait().expect("try_wait the body").is_none(),
+            "the body process must survive churn cycle {cycle} (it died)"
+        );
+
+        // `test_drop`'s own RPC only succeeds by finding and force-ending a
+        // *live* connection for this token (`control_server.rs`'s
+        // `test_drop`: `NotConnected` is a hard error) — so a successful call
+        // here is itself proof a real drop happened this cycle. This
+        // deliberately does *not* also poll for the roster to transiently
+        // show non-`connected` first: a real body reconnects within ~1s
+        // (`say_during_reconnecting_is_not_connected_with_age` above notes
+        // this exact window is too narrow to reliably observe without
+        // freezing the body), so at churn volume — many consecutive
+        // back-to-back cycles, no freeze — that whole transient can complete
+        // between two 50ms polls and be legitimately missed. What must hold
+        // is the outcome below: the row is back on fresh `connected` traffic.
+        test_drop(&hub_state, &token_id);
+
+        // The body reconnects on its own backoff and sends fresh presence,
+        // which is what flips the row back to `connected` (issue
+        // holler-server#203's fix, proven end to end by
+        // `roster_returns_to_connected_after_successful_traffic` above for a
+        // single cycle — here across many consecutive ones).
+        wait_for(Duration::from_secs(8), || {
+            let v = roster_all_json(&hub_state);
+            (conn_state_of(&v, "b/alpha") == Some("connected")).then_some(())
+        })
+        .unwrap_or_else(|| panic!("cycle {cycle}: the roster must return `alpha` to connected on the body's fresh reconnect"));
+
+        // A fresh `say` must work cleanly on the reconnected session — proves
+        // the reconnect is not just a roster-label flip but a genuinely live
+        // connection each cycle.
+        let out = say_ready(&hub_state, "alpha", &format!("cycle {cycle}"), Duration::from_secs(8));
+        assert!(out.status.success(), "cycle {cycle}: `say` after reconnect failed: {}", stderr_of(&out));
+        assert!(
+            stdout_of(&out).contains("stub chunk"),
+            "cycle {cycle}: unexpected reply: {:?}",
+            stdout_of(&out)
+        );
+    }
+
+    // No crash across the whole churn run.
+    assert!(
+        body.child_mut().try_wait().expect("try_wait the body").is_none(),
+        "the body process must still be alive after {CHURN_CYCLES} churn cycles"
+    );
+
+    // No stale roster rows: exactly one row for this session, not one per
+    // cycle (the hub upserts a token's rows on presence — it must never grow
+    // duplicates across repeated reconnects).
+    let final_roster = roster_all_json(&hub_state);
+    let rows_named_alpha = final_roster["rows"]
+        .as_array()
+        .expect("roster --all --json carries `rows`")
+        .iter()
+        .filter(|r| r.get("name").and_then(Value::as_str) == Some("b/alpha"))
+        .count();
+    assert_eq!(
+        rows_named_alpha, 1,
+        "expected exactly one roster row for `b/alpha` after {CHURN_CYCLES} churn cycles, found {rows_named_alpha}: {final_roster}"
+    );
+
+    // No leaked processes/tasks: the body should still be driving exactly one
+    // live agent child (the current session's `stub-acp`), never an
+    // accumulation of dead/orphaned children from earlier cycles' reconnects.
+    #[cfg(unix)]
+    {
+        let body_pid = body.child_mut().id();
+        let children = Command::new("pgrep")
+            .args(["-P", &body_pid.to_string()])
+            .output()
+            .expect("run pgrep to count the body's live children");
+        let child_count = stdout_of(&children).lines().filter(|l| !l.trim().is_empty()).count();
+        assert!(
+            child_count <= 1,
+            "expected the body to hold at most one live agent child after {CHURN_CYCLES} churn cycles, found {child_count} (a leak): {:?}",
+            stdout_of(&children)
+        );
+    }
+
+    kill_tree(body.child_mut());
+}
