@@ -69,17 +69,40 @@ pub const DEFAULT_TTL: u64 = 24 * 60 * 60;
 const SECRET_BYTES: usize = 32;
 
 /// The `flock` a held store lock is represented by. The guard releases the
-/// advisory lock (and removes the lock file) on drop.
+/// advisory lock on drop.
+///
+/// **Never deletes the lock file** (issue #301 fixed this — it used to). The
+/// lock file must outlive every guard: `flock`'s mutual exclusion is per
+/// *inode*, and `acquire_lock` is called fresh (a brand-new `open`, per call)
+/// by every contending caller. Deleting the path out from under a lock that
+/// is about to be released is a textbook flock+unlink TOCTOU: another
+/// caller's `open(&path)` racing that same instant — already in flight,
+/// blocked only on `try_lock`, not on `open` — can land *before* the removal
+/// (locks the same, still-linked inode, correctly serialized) or *after* it
+/// (creates a brand-new inode at that path and trivially "acquires" a lock
+/// nobody else holds, since the new inode has never been locked). Once two
+/// callers hold "exclusive" locks on two different inodes for what is
+/// supposed to be one logical lock, mutual exclusion over `tokens.json` is
+/// gone: a `redeem`'s load-mutate-save can interleave with another's and
+/// silently lose the loser's write. Measured directly: issue #301's load
+/// test (`holler-cli/tests/token_load_test.rs`, 30 real concurrent `body
+/// join` subprocesses) reproduced exactly this — one token's successful
+/// redeem (the body got its credential) never landed in `tokens.json` (the
+/// row stayed `unused`), clobbered by a concurrent redeem's save that had
+/// loaded an older snapshot through the very race described above. The lock
+/// file itself holds no data (`acquire_lock`'s own comment: "contents are
+/// never read"), so leaving it in place forever costs nothing and closes the
+/// race for good — every caller now locks the one, permanent inode.
 struct StoreLock {
     file: File,
-    path: PathBuf,
 }
 
 impl Drop for StoreLock {
     fn drop(&mut self) {
         // Fully-qualified: use fs4's flock `unlock` (not std's inherent one).
+        // The lock *file* is deliberately left in place — see this struct's
+        // own doc comment for why removing it here was the bug.
         let _ = fs4::FileExt::unlock(&self.file);
-        let _ = std::fs::remove_file(&self.path);
     }
 }
 
@@ -258,10 +281,7 @@ fn acquire_lock(state: &HubState) -> Result<StoreLock, TokenError> {
     // Fully-qualified so we call fs4's flock (not std's inherent `try_lock`,
     // which shadows the trait method and uses a distinct `TryLockError`).
     match fs4::FileExt::try_lock(&file) {
-        Ok(()) => Ok(StoreLock {
-            file,
-            path,
-        }),
+        Ok(()) => Ok(StoreLock { file }),
         Err(fs4::TryLockError::WouldBlock) => Err(TokenError::new(
             "another holler process holds the token lock; retry",
         )),
@@ -269,6 +289,43 @@ fn acquire_lock(state: &HubState) -> Result<StoreLock, TokenError> {
             "cannot lock token store {}: {e}",
             path.display()
         ))),
+    }
+}
+
+/// [`acquire_lock`] with a short bounded retry on contention (issue #301).
+///
+/// `acquire_lock`'s own "an error, not a wait" policy is correct for a
+/// one-shot CLI invocation (`hub token mint`/`delete`/`revoke`): a human (or
+/// the CLI's own caller-level retry — see `holler-cli/tests/support/mod.rs`'s
+/// `mint_token`/`join`) is already in the loop and can just try again a
+/// moment later. `redeem` is different: it runs *inside the live hub*, once
+/// per `circuit/join`, and a real onboarding batch can legitimately land
+/// dozens of those on the hub's own concurrent connection tasks within the
+/// same instant — every one of them a distinct, perfectly valid token, not a
+/// caller mistake. Measured directly (issue #301's load test,
+/// `holler-cli/tests/token_load_test.rs`, 30 real concurrent `body join`
+/// subprocesses against one hub): without this, those redemptions lose the
+/// non-blocking `try_lock` race against each other's own `redeem` calls and
+/// come back `RedeemError::NotFound` ("no matching token") even though the
+/// token is real and unredeemed — `redeem`'s blanket `Err(_) =>
+/// RedeemError::NotFound` on any lock failure swallowed the real "briefly
+/// busy, try again" reason along with genuine "no such token" cases. A short
+/// bounded spin here (a few, at most tens of, milliseconds — well under
+/// what a real join's own caller would ever notice) resolves the hub's
+/// self-contention without touching `acquire_lock`'s contract for its other
+/// (CLI, one-shot) callers.
+fn acquire_lock_retrying(state: &HubState) -> Result<StoreLock, TokenError> {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(2000);
+    let mut delay_ms = 2u64;
+    loop {
+        match acquire_lock(state) {
+            Ok(lock) => return Ok(lock),
+            Err(e) if e.message.contains("holds the token lock") && std::time::Instant::now() < deadline => {
+                std::thread::sleep(std::time::Duration::from_millis(delay_ms));
+                delay_ms = (delay_ms * 2).min(50);
+            }
+            Err(e) => return Err(e),
+        }
     }
 }
 
@@ -513,12 +570,20 @@ pub fn delete(token_id: &str, state: &HubState) -> Result<Record, TokenError> {
 /// [`RedeemError::AlreadyBound`]), and the newly-minted credential is returned
 /// to the body. Exactly one concurrent winner is guaranteed by the whole-file
 /// flock held across the read-modify-write.
+///
+/// Uses [`acquire_lock_retrying`] rather than the bare [`acquire_lock`]
+/// (issue #301): unlike `mint`/`delete`/`revoke` (one-shot CLI invocations
+/// where the operator is already the retry loop), `redeem` runs inside the
+/// live hub once per `circuit/join`, so a real onboarding batch's own
+/// concurrent joins race *each other*'s `redeem` calls for this same lock —
+/// see that function's doc for the measured failure this replaced
+/// (legitimate, distinct, unredeemed tokens wrongly reported `NotFound`).
 pub fn redeem(
     secret: &str,
     hostname: &str,
     state: &HubState,
 ) -> Result<(String, String), RedeemError> {
-    let _lock = match acquire_lock(state) {
+    let _lock = match acquire_lock_retrying(state) {
         Ok(g) => g,
         Err(_) => return Err(RedeemError::NotFound),
     };
