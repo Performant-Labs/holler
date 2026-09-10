@@ -137,7 +137,7 @@ replay resistance, industry-wide, doesn't come from adding a nonce to the bearer
 (that just moves the problem to "now the nonce store needs to be replay-proof") — it comes from
 (a) **channel confidentiality** while the secret is in transit (TLS for `wss` — already solved,
 §1.1) or **OS-boundary confidentiality** (loopback `ws` — already argued adequate, §1.2), and
-(b) **revocability**: `holler token delete <id>` already revokes a bound credential outright
+(b) **revocability**: v1's `v1 holler hub token delete <id>` already revokes a bound credential outright
 (`TokenRecord::state → Revoked`, `credential_hash` cleared so it "can never validate a credential
 again even by accident" — direct quote from the code comment). That is the correct, standard
 mitigation path for a leaked bearer credential, and it already exists. **No design change needed
