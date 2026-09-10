@@ -218,6 +218,18 @@ path = "tests/attach_mode_test.rs"
 name = "debug_trace_test"
 path = "tests/debug_trace_test.rs"
 
+# Multi-word `command` mechanism proof (issue #294 — Claude Code harness
+# docs/acceptance-gate tracker): a bare-name, 3-token `command` (`["sh",
+# "-c", "exec '<stub-acp>' ..."]`, `harness = "claude"`) resolves on PATH
+# and spawns for real, with a live `say` round trip against it — the
+# mechanism the docs' `harness = "claude"` / `npx` recipe depends on, without
+# npx/network/real Claude Code credentials. Lives here for the same
+# `CARGO_BIN_EXE_stub-acp` reason as every other real-subprocess integration
+# test in this file.
+[[test]]
+name = "multiword_command_test"
+path = "tests/multiword_command_test.rs"
+
 # Connection hygiene / registry / lockout (issue #184): supersede-on-reauth,
 # revoke force-close, max frame size, pre-auth timeout, the unauthenticated-
 # connection cap, failed-auth lockout, the `spawn_blocking` token-store test
