@@ -102,6 +102,41 @@ fn log(severity: Severity, method: &'static str, fields: Vec<(&'static str, Stri
     });
 }
 
+/// `Event.method` is `&'static str` throughout this codebase's logging; an
+/// inbound frame's method name is a runtime `String` off the wire, so it is
+/// mapped onto a matching static label here (falling back to `"other"` — the
+/// real method name is still visible in the frame body itself at `noisy`).
+/// Mirrors `holler-body`'s own `connection.rs::static_wire_method`.
+fn static_wire_method(method: Option<&str>) -> &'static str {
+    match method {
+        Some("session/prompt") => "session/prompt",
+        Some("session/cancel") => "session/cancel",
+        Some("session/update") => "session/update",
+        Some("session/presence") => "session/presence",
+        Some("circuit/ping") => "circuit/ping",
+        Some(m) if m.starts_with("query/") => "query",
+        Some(_) => "other",
+        None => "response_or_error",
+    }
+}
+
+/// `component=wire` debug event for one inbound/outbound JSON-RPC frame
+/// (issue #197 / the holler-server#207 regression this closes): `frame` is
+/// populated only at `noisy` via [`holler_proto::log::frame_at_noisy`], so
+/// `quiet` still shows the frame *shape* (method/direction/id) with no body.
+fn log_frame(direction: LogDirection, method: &'static str, id: Option<&str>, raw: &str) {
+    holler_proto::log::emit(&Event {
+        component: Component::Wire,
+        severity: Severity::Debug,
+        direction,
+        method,
+        id: None,
+        peer: None,
+        fields: id.map(|i| vec![("id", i.to_string())]).unwrap_or_default(),
+        frame: holler_proto::log::frame_at_noisy(raw),
+    });
+}
+
 /// Handle a freshly-accepted socket whose first frame was `circuit/
 /// authenticate`: verify the credential, run the hello exchange, and — on
 /// success — hold the session loop until the body disconnects. Every failure
@@ -604,6 +639,12 @@ where
                 return Err(());
             }
         };
+        // Every inbound frame, logged once here regardless of which arm below
+        // ends up handling it (issue #197 / the holler-server#207 regression:
+        // `session/update` — a body's reply to a `say` — never showed up in a
+        // trace at any debug level, because nothing on the hub's inbound path
+        // ever logged a frame at all).
+        log_frame(LogDirection::In, static_wire_method(env.method()), env.id(), text);
         // Every inbound frame on an authenticated socket is proof the body is
         // still talking to us (issue #186), so refresh the roster row's
         // `last_heard_ms` on whatever the frame is. The roster is keyed by

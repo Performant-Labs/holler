@@ -16,10 +16,12 @@ use agent_client_protocol::{AcpAgent, AcpAgentConfig, Agent, Client, Responder, 
 use holler_proto::docs::PendingKind;
 use tokio::sync::{mpsc, oneshot};
 
+use holler_proto::log::Direction as LogDirection;
+
 use super::pending::{
     chunk_text, elicitation_fields, permission_fields, PendingBlock, PendingResponder,
 };
-use super::{DriverEvent, DriverState, Status, StopReason};
+use super::{log_debug, log_warn, DriverEvent, DriverState, Status, StopReason};
 
 /// State shared between the connection's background handlers (which run
 /// concurrently with the driver's public methods) and those methods
@@ -74,6 +76,12 @@ fn handle_notification(shared: &Arc<Mutex<Shared>>, note: v2::UpdateSessionNotif
     match note.update {
         v2::SessionUpdate::AgentMessageChunk(chunk) => {
             if let Some(text) = chunk_text(&chunk.content) {
+                log_debug(
+                    LogDirection::In,
+                    "session/update",
+                    vec![("chunk_len", text.len().to_string())],
+                    holler_proto::log::frame_at_noisy(&serde_json::json!({ "chunk": text }).to_string()),
+                );
                 let guard = lock(shared);
                 if let Some(tx) = &guard.current_events {
                     let _ = tx.send(DriverEvent::Chunk(text));
@@ -88,6 +96,7 @@ fn handle_notification(shared: &Arc<Mutex<Shared>>, note: v2::UpdateSessionNotif
 fn handle_state_update(shared: &Arc<Mutex<Shared>>, state: v2::StateUpdate) {
     match state {
         v2::StateUpdate::Running(_) => {
+            log_debug(LogDirection::In, "state_update", vec![("state", "working".to_string())], None);
             let mut guard = lock(shared);
             guard.status = Status::Working;
             if let Some(tx) = &guard.current_events {
@@ -95,6 +104,7 @@ fn handle_state_update(shared: &Arc<Mutex<Shared>>, state: v2::StateUpdate) {
             }
         }
         v2::StateUpdate::RequiresAction(_) => {
+            log_debug(LogDirection::In, "state_update", vec![("state", "input_required".to_string())], None);
             let mut guard = lock(shared);
             // The permission/elicitation *request* handler (`store_pending`)
             // already flipped status to `InputRequired` and emitted this same
@@ -114,6 +124,12 @@ fn handle_state_update(shared: &Arc<Mutex<Shared>>, state: v2::StateUpdate) {
         }
         v2::StateUpdate::Idle(idle) => {
             let stop_reason = StopReason::from_acp(idle.stop_reason.as_ref());
+            log_debug(
+                LogDirection::In,
+                "state_update",
+                vec![("state", "idle".to_string()), ("stop_reason", stop_reason.as_wire_str().to_string())],
+                None,
+            );
             let mut guard = lock(shared);
             guard.status = Status::Idle;
             guard.last_stop_reason = Some(stop_reason);
@@ -135,6 +151,12 @@ fn handle_state_update(shared: &Arc<Mutex<Shared>>, state: v2::StateUpdate) {
 /// transition immediately (before this handler returns), per the issue's own
 /// "surfaced immediately, not after a poll" requirement.
 fn store_pending(shared: &Arc<Mutex<Shared>>, block: PendingBlock) {
+    log_debug(
+        LogDirection::In,
+        "request_permission_or_elicitation",
+        vec![("kind", format!("{:?}", block.kind))],
+        None,
+    );
     let mut guard = lock(shared);
     guard.pending = Some(block);
     guard.status = Status::InputRequired;
@@ -187,6 +209,7 @@ async fn do_handshake(
     cwd: &Path,
     shared: &Arc<Mutex<Shared>>,
 ) -> Result<v2::SessionId, agent_client_protocol::Error> {
+    log_debug(LogDirection::Out, "initialize", vec![], None);
     let initialize = connection
         .send_request(v2::InitializeRequest::new(
             agent_client_protocol::schema::ProtocolVersion::V2,
@@ -195,10 +218,12 @@ async fn do_handshake(
         .block_task()
         .await?;
     if initialize.capabilities.session.is_none() {
+        log_warn("initialize", vec![("event", "agent did not advertise the v2 session capability".to_string())]);
         return Err(agent_client_protocol::Error::invalid_params()
             .data("agent did not advertise the v2 session capability"));
     }
 
+    log_debug(LogDirection::Out, "session/new", vec![], None);
     let opened = connection
         .build_session(cwd)
         .start_session()
@@ -216,6 +241,9 @@ async fn do_handshake(
     let watch_conn = connection.clone();
     connection.spawn(async move {
         watch_conn.incoming_closed().await;
+        // No pid/exit status is available here — see `AcpDriver::spawn`'s own
+        // doc comment on why the pinned SDK never surfaces it to this crate.
+        log_warn("spawn", vec![("event", "child_exit: connection closed".to_string())]);
         let mut guard = lock(&watch_shared);
         guard.last_stop_reason = Some(StopReason::Error);
         if let Some(tx) = guard.current_events.take() {

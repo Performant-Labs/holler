@@ -226,6 +226,51 @@ fn mark_disconnected(state_root: &Path) -> std::io::Result<()> {
     )
 }
 
+/// `component=wire` debug event for one inbound/outbound JSON-RPC frame
+/// (issue #197 / the holler-server#207 regression this closes): `id` is the
+/// frame's own correlation id (a request/response), `frame` is the full
+/// redacted body — populated only at `noisy` via
+/// [`holler_proto::log::frame_at_noisy`], so `quiet` still shows the frame
+/// *shape* (method/direction/id) with no body.
+/// `Event.method` is `&'static str` throughout this codebase's logging (a
+/// handful of hardcoded call sites, never a runtime string) — an inbound
+/// frame's method name is a `String` off the wire, so it is mapped onto a
+/// matching static label here (falling back to `"other"` for anything not
+/// worth a dedicated arm; the real method name is still visible in the
+/// frame body itself at `noisy`).
+fn static_wire_method(method: &str) -> &'static str {
+    match method {
+        "session/prompt" => "session/prompt",
+        "session/cancel" => "session/cancel",
+        "session/answer" => "session/answer",
+        "session/update" => "session/update",
+        "session/presence" => "session/presence",
+        "circuit/ping" => "circuit/ping",
+        "circuit/superseded" => "circuit/superseded",
+        _ if method.starts_with("query/") => "query",
+        _ => "other",
+    }
+}
+
+fn log_wire_frame(direction: LogDirection, method: &'static str, id: Option<&str>, raw: &str) {
+    // `Event.id` is `Option<&'static str>` (a static-lifetime slot for a
+    // handful of hardcoded short labels elsewhere in this codebase) — a
+    // frame's own runtime correlation id is owned/dynamic, so it goes into
+    // `fields` instead, exactly like every other per-frame id in this
+    // codebase's wire logging (see `circuit.rs`'s own `log()` convention).
+    let fields = id.map(|i| vec![("id", i.to_string())]).unwrap_or_default();
+    holler_proto::log::emit(&Event {
+        component: Component::Wire,
+        severity: Severity::Debug,
+        direction,
+        method,
+        id: None,
+        peer: None,
+        fields,
+        frame: holler_proto::log::frame_at_noisy(raw),
+    });
+}
+
 fn warn(method: &'static str, fields: Vec<(&'static str, String)>) {
     holler_proto::log::emit(&Event {
         component: Component::Session,
@@ -413,6 +458,12 @@ where
     Snk: Sink<Message, Error = WsError> + Unpin,
 {
     let text = holler_proto::encode(env).map_err(|_| ())?;
+    log_wire_frame(
+        LogDirection::Out,
+        static_wire_method(env.method().unwrap_or("response_or_error")),
+        env.id(),
+        &text,
+    );
     sink.send(Message::text(text)).await.map_err(|_| ())?;
     sink.flush().await.map_err(|_| ())
 }
@@ -640,6 +691,16 @@ where
             Ok(e) => e,
             Err(_) => return FrameOutcome::Continue, // a malformed frame is logged upstream; not fatal to the circuit.
         };
+        // Every inbound frame, logged once here regardless of which arm below
+        // ends up handling it (issue #197 / the holler-server#207 regression:
+        // `session/prompt` never showed up at `noisy` because nothing on this
+        // path ever logged an inbound frame at all).
+        log_wire_frame(
+            LogDirection::In,
+            static_wire_method(env.method().unwrap_or("response_or_error")),
+            env.id(),
+            text,
+        );
         match env {
             Envelope::Request { id, method, .. } if method == "circuit/ping" => {
                 let ack = PingAck { hostname: self.identity.hostname.clone(), ts: now_millis() };

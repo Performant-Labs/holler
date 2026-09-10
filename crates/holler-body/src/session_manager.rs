@@ -68,6 +68,7 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
+use holler_proto::log::{Component, Direction as LogDirection, Event as LogEvent, Severity};
 use holler_proto::{Mode, Presence, SessionAd, SessionName, SessionState};
 use tokio::sync::{broadcast, mpsc, oneshot};
 use tokio::task::JoinHandle;
@@ -314,6 +315,23 @@ impl SessionManager {
 
     async fn send(&self, name: &SessionName, cmd: SessionCommand) -> Result<(), SessionManagerError> {
         let session = self.sessions.get(name).ok_or(SessionManagerError::UnknownSession)?;
+        let kind = match &cmd {
+            SessionCommand::Prompt { .. } => "prompt",
+            SessionCommand::Cancel { .. } => "cancel",
+            SessionCommand::Answer { .. } => "answer",
+            SessionCommand::Replace { .. } => "replace",
+            SessionCommand::Shutdown => "shutdown",
+        };
+        holler_proto::log::emit(&LogEvent {
+            component: Component::Session,
+            severity: Severity::Debug,
+            direction: LogDirection::Local,
+            method: "mailbox_enqueue",
+            id: None,
+            peer: None,
+            fields: vec![("name", name.as_str().to_string()), ("command", kind.to_string())],
+            frame: None,
+        });
         session.tx.send(cmd).await.map_err(|_| SessionManagerError::Gone)
     }
 
