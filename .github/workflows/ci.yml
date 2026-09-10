@@ -42,8 +42,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # GitHub-hosted images ship rustup preinstalled; the self-hosted
+      # Uranus/Jupiter runner image (pl-runner, layered on
+      # myoung34/github-runner) does not (confirmed 2026-09-10, PR #312's
+      # first CI run: `rustup: command not found`) — bootstrap it via the
+      # official installer when missing instead of assuming it's there.
       - name: Install Rust
-        run: rustup toolchain install stable
+        run: |
+          if (-not (Get-Command rustup -ErrorAction SilentlyContinue)) {
+            Invoke-WebRequest -Uri https://sh.rustup.rs -OutFile rustup-init.sh
+            bash rustup-init.sh -y --default-toolchain none
+            Add-Content -Path $env:GITHUB_PATH -Value "$HOME/.cargo/bin"
+            $env:PATH = "$HOME/.cargo/bin:$env:PATH"
+          }
+          rustup toolchain install stable
         shell: pwsh
 
       # ~/.cargo (registry/git) and target/ across runs, keyed on the OS,
