@@ -262,6 +262,16 @@ path = "tests/talklog_load_test.rs"
 name = "token_load_test"
 path = "tests/token_load_test.rs"
 
+# Bounded, CI-feasible load test (issue #296): dozens of real, independent
+# WS-connected bodies on one hub, each its own token/session, exchanging real
+# `say` prompts concurrently — proves the hub's roster bookkeeping and
+# per-body fan-out hold up under this concurrency, not production-scale
+# capacity. Lives here for the same `CARGO_BIN_EXE_stub-acp` reason as every
+# other real-subprocess integration test in this file.
+[[test]]
+name = "load_roster_scale_test"
+path = "tests/load_roster_scale_test.rs"
+
 # Declare only what is consumed (issue #155 §7 — `cargo machete` fails CI
 # otherwise). A story that starts using a workspace dependency adds it here in
 # the same PR; the skeleton's speculative list was removed in #155.

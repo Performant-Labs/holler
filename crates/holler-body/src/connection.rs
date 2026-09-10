@@ -161,8 +161,9 @@ async fn run_loop(
 
     let mut attempt: u32 = 0;
     loop {
+        // `attempt` is `&mut`: reset to 0 on a live connect (issue #299 — grows only across consecutive failures).
         let outcome =
-            connect_and_serve(state_root, identity, session_manager, configs, attempt, &mut sigint, &mut sigterm)
+            connect_and_serve(state_root, identity, session_manager, configs, &mut attempt, &mut sigint, &mut sigterm)
                 .await;
         match outcome {
             Attempt::Ended(exit) => return exit,
@@ -297,13 +298,14 @@ fn info(method: &'static str, fields: Vec<(&'static str, String)>) {
     });
 }
 
-/// One connect → authenticate → hello → live-loop attempt.
+/// One connect → authenticate → hello → live-loop attempt. `attempt` is
+/// `&mut` (issue #299): reset to 0 on reaching `Connected` — see below.
 async fn connect_and_serve(
     state_root: &Path,
     identity: &BodyIdentity,
     session_manager: &Arc<SessionManager>,
     configs: &[SessionConfig],
-    attempt: u32,
+    attempt: &mut u32,
     sigint: &mut tokio::signal::unix::Signal,
     sigterm: &mut tokio::signal::unix::Signal,
 ) -> Attempt {
@@ -313,7 +315,7 @@ async fn connect_and_serve(
             state: crate::connection_state::ConnState::Connecting,
             since: holler_proto::now_secs(),
             last_frame_at: None,
-            attempt,
+            attempt: *attempt,
         },
     );
 
@@ -329,6 +331,9 @@ async fn connect_and_serve(
     if hello_exchange(&mut sink, &mut stream, identity, configs).await.is_err() {
         return Attempt::Dropped("hello exchange failed".to_string());
     }
+
+    // Live: the next drop, whenever it comes, must back off from 0 (#299).
+    *attempt = 0;
 
     info("conn_connected", vec![("server", identity.server_url.clone())]);
     let _ = crate::connection_state::write(
