@@ -80,6 +80,8 @@ pub enum Command {
     Interrupt(Interrupt),
     /// Resolve a held permission/elicitation. (hub-only)
     Answer(Answer),
+    /// Block until a session settles/blocks/fails/vanishes. (hub-only)
+    Wait(Wait),
 }
 
 #[derive(Subcommand, Debug)]
@@ -439,6 +441,32 @@ pub struct Answer {
     /// elicitation), or one of `once`/`always`/`reject` for a permission
     /// prompt that offers them.
     pub choice: String,
+}
+
+#[derive(Parser, Debug)]
+pub struct Wait {
+    /// Session name(s) to wait on, comma-separated (`<label>/<session>` or a
+    /// bare `<session>`). Omit when `--prefix` is given instead.
+    #[arg(required_unless_present = "prefix")]
+    pub sessions: Option<String>,
+    /// Wait on every roster row named exactly PREFIX or nested under it
+    /// (`PREFIX/…`), instead of a fixed session list — the same grammar as
+    /// `roster --prefix` (ADR 0005 §4).
+    #[arg(long, conflicts_with = "sessions")]
+    pub prefix: Option<String>,
+    /// Comma-separated target states (default: `completed,failed,rejected,
+    /// input-required,gone`). `STATE` is one of `idle | working |
+    /// input-required | stalled | gone | completed | canceled | failed |
+    /// rejected`.
+    #[arg(long)]
+    pub until: Option<String>,
+    /// Skip re-matching this exact turn id (the caller's own watermark): a
+    /// terminal-state match then requires `last_turn.turn_id != TURN_ID`.
+    #[arg(long)]
+    pub after: Option<String>,
+    /// Give up (exit 2) after this long with no match (default 600s).
+    #[arg(long, default_value = "600s")]
+    pub timeout: String,
 }
 
 // --- body ----------------------------------------------------------------

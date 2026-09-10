@@ -64,8 +64,8 @@ fn render_table(doc: &serde_json::Value) -> String {
     }
     let mut out = String::new();
     out.push_str(&format!(
-        "{:<20} {:<10} {:<8} {:<10} {:<10} {:<8} PENDING\n",
-        "SESSION", "HARNESS", "MODE", "STATE", "CONN", "HOSTNAME"
+        "{:<20} {:<10} {:<8} {:<10} {:<10} {:<8} {:<8} LAST TURN\n",
+        "SESSION", "HARNESS", "MODE", "STATE", "CONN", "HOSTNAME", "PENDING"
     ));
     for row in &rows {
         let pending = row
@@ -74,15 +74,36 @@ fn render_table(doc: &serde_json::Value) -> String {
             .map(|items| items.len().to_string())
             .unwrap_or_else(|| "-".into());
         out.push_str(&format!(
-            "{:<20} {:<10} {:<8} {:<10} {:<10} {:<8} {}\n",
+            "{:<20} {:<10} {:<8} {:<10} {:<10} {:<8} {:<8} {}\n",
             row.get("name").and_then(|v| v.as_str()).unwrap_or("-"),
             row.get("harness").and_then(|v| v.as_str()).unwrap_or("-"),
             row.get("mode").and_then(|v| v.as_str()).unwrap_or("-"),
             row.get("state").and_then(|v| v.as_str()).unwrap_or("-"),
             row.get("conn_state").and_then(|v| v.as_str()).unwrap_or("-"),
             row.get("hostname").and_then(|v| v.as_str()).unwrap_or("-"),
-            pending
+            pending,
+            last_turn_display(row.get("last_turn"))
         ));
     }
     out
+}
+
+/// The `LAST TURN` column (issue #142): `<state> <stop_reason> <age> ago`
+/// (e.g. `completed end_turn 2m ago`) once a turn has ended, or `-` before
+/// the session's first turn / for a row that predates this field. `age` is
+/// computed from `ended_at` via a plain epoch-seconds subtraction (the same
+/// RFC 3339 shape the hub always emits — see `holler_hub::roster::
+/// parse_rfc3339`'s own doc for why there is only one parser for it).
+fn last_turn_display(last_turn: Option<&serde_json::Value>) -> String {
+    let Some(lt) = last_turn.filter(|v| !v.is_null()) else {
+        return "-".to_string();
+    };
+    let state = lt.get("state").and_then(|v| v.as_str()).unwrap_or("-");
+    let stop_reason = lt.get("stop_reason").and_then(|v| v.as_str()).unwrap_or("-");
+    let ended_at = lt.get("ended_at").and_then(|v| v.as_str());
+    let age = ended_at
+        .and_then(holler_hub::roster::parse_rfc3339_secs_since)
+        .map(|secs| if secs < 60 { format!("{secs}s ago") } else { format!("{}m ago", secs / 60) })
+        .unwrap_or_else(|| "-".to_string());
+    format!("{state} {stop_reason} {age}")
 }

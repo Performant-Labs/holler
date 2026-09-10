@@ -170,6 +170,32 @@ pub fn test_drop_at(state_root: &std::path::Path, token: &str) -> Result<serde_j
     send_over(&path, "b-test-drop", "control/test_drop", Some(params), CLIENT_TIMEOUT)
 }
 
+/// `holler wait SESSION[,SESSION…] [--prefix P] [--until STATES] [--after
+/// TURN_ID] [--timeout 600s]` (issue #142): block on the live hub's roster
+/// until a named session (or every row under `prefix`) matches one of
+/// `until`'s target states, or `timeout` elapses. Returns the reply
+/// envelope's `result`, `{matched, rows}` — `matched:false` is the timeout
+/// case (the CLI maps that to exit 2), never a [`ControlError`]. The control
+/// socket's own read timeout is set to `timeout` plus a small fixed margin
+/// (mirroring [`say`]'s own budget), since the hub's own `control/wait`
+/// exchange already applies `timeout` to the wait itself.
+pub fn wait(
+    sessions: Option<&str>,
+    prefix: Option<&str>,
+    until: Option<&str>,
+    after: Option<&str>,
+    timeout: std::time::Duration,
+) -> Result<serde_json::Value, ControlError> {
+    let params = serde_json::json!({
+        "sessions": sessions,
+        "prefix": prefix,
+        "until": until,
+        "after": after,
+        "timeout_ms": u64::try_from(timeout.as_millis()).unwrap_or(u64::MAX),
+    });
+    exchange_with_timeout("b-wait", "control/wait", Some(params), timeout + std::time::Duration::from_secs(5))
+}
+
 /// Send one `method`/`params` request over the control socket and return its
 /// `result` — the shared body of every one-shot control exchange (`status`,
 /// `token_ping`, …). `id_literal` is a fixed, well-formed `b-` id (each

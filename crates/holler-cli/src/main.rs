@@ -205,6 +205,10 @@ fn main() {
         let result = holler_cli::answer_cmd::run(answer, cli.json);
         print_leaf_result_and_exit(&result.message, result.to_stderr, result.exit_code, true);
     }
+    if let Command::Wait(wait) = &cli.command {
+        let result = holler_cli::wait_cmd::run(wait, cli.json);
+        print_leaf_result_and_exit(&result.message, result.to_stderr, result.exit_code, false);
+    }
 
     // Every `Command` variant is handled by one of the arms above (each
     // exits before falling through), so this is never actually reached —

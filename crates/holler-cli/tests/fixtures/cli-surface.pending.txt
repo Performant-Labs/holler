@@ -7,6 +7,3 @@
 # documented command whose leaf path is listed here, and nowhere else.
 #
 # Each line names its story.
-
-wait | io/alpha                                              # holler#142
-wait | io/alpha,io/beta --until completed,failed --after h-01H --timeout 120s --json   # holler#142

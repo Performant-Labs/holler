@@ -35,6 +35,7 @@
 use std::time::{Duration, Instant};
 
 use crate::live::{CancelReply, LiveHandle, Registry, ResolveOutcome};
+use crate::roster::Roster;
 use crate::state::HubState;
 use crate::talk::{self, SayError, SayOutcome};
 
@@ -93,6 +94,7 @@ pub fn ack_timeout(last_measured_rtt: Option<Duration>) -> Duration {
 /// collect its reply exactly like `say`.
 pub async fn interrupt(
     registry: &Registry,
+    roster: &Roster,
     state: &HubState,
     session: &str,
     text: Option<&str>,
@@ -112,7 +114,7 @@ pub async fn interrupt(
         return Ok(InterruptOutcome { session: session_full, reply: None });
     };
 
-    match talk::send_replace_turn(registry, state, &handle, &ad, text, REPLACE_TIMEOUT).await {
+    match talk::send_replace_turn(registry, roster, state, &handle, &ad, text, REPLACE_TIMEOUT).await {
         Ok(outcome) => Ok(InterruptOutcome { session: session_full, reply: Some(outcome) }),
         Err(e) => Err(InterruptError::PromptFailed(e)),
     }

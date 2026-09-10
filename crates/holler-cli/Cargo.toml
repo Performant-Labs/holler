@@ -184,6 +184,14 @@ path = "tests/answer_cli_test.rs"
 name = "reconnect_contract_test"
 path = "tests/reconnect_contract_test.rs"
 
+# `holler wait` (issue #142): edge-triggered, poll-free waiting on the
+# roster's state + `last_turn`, against a real hub + body + `stub-acp`. Lives
+# here for the same `CARGO_BIN_EXE_stub-acp` reason as `answer_cli_test.rs` /
+# `talk_test.rs` above.
+[[test]]
+name = "wait_test"
+path = "tests/wait_test.rs"
+
 # Declare only what is consumed (issue #155 §7 — `cargo machete` fails CI
 # otherwise). A story that starts using a workspace dependency adds it here in
 # the same PR; the skeleton's speculative list was removed in #155.
