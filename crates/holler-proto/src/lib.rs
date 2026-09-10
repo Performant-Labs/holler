@@ -50,8 +50,9 @@ pub use id::{CorrelationId, CorrelationIdError};
 pub use token::RedeemError;
 pub use token::TokenError;
 pub use log::{
-    emit, emit_banner, get, init, key_is_secret, redact, redact_frame, resolve, value_is_secret,
-    Component, Config, DebugLevel, Direction as LogDirection, Event, LogFormat, REDACTED, Severity,
+    emit, emit_banner, frame_at_noisy, get, init, key_is_secret, redact, redact_frame, resolve,
+    value_is_secret, Component, Config, DebugLevel, Direction as LogDirection, Event, LogFormat,
+    REDACTED, Severity,
 };
 pub use methods::{find, is_notification, is_request, Direction, Method, MethodKind, CATALOG};
 pub use version::{is_supported_version, PROTOCOL_MAX, PROTOCOL_MIN, PROTOCOL_VERSION};

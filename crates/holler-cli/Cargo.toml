@@ -210,6 +210,14 @@ path = "tests/attach_cli_test.rs"
 name = "attach_mode_test"
 path = "tests/attach_mode_test.rs"
 
+# Per-component `--debug noisy`/`--debug quiet` trace instrumentation (issue
+# #197): real hub + body + `stub-acp`, plus the same fake OpenCode HTTP
+# server (`#[path]`-included, mirroring `attach_mode_test`'s own convention)
+# for the attach-mode leaf.
+[[test]]
+name = "debug_trace_test"
+path = "tests/debug_trace_test.rs"
+
 # Declare only what is consumed (issue #155 §7 — `cargo machete` fails CI
 # otherwise). A story that starts using a workspace dependency adds it here in
 # the same PR; the skeleton's speculative list was removed in #155.

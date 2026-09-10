@@ -46,6 +46,7 @@
 use std::sync::Arc;
 use std::time::Instant;
 
+use holler_proto::log::{Component, Direction as LogDirection, Event as LogEvent, Severity};
 use holler_proto::{
     Answer, AnswerResult, Cancel, CancelResult, Code, CorrelationId, Envelope, Message, Part,
     Prompt, PromptResult, Role, SessionName, WireError,
@@ -307,8 +308,34 @@ async fn sleep_until_deadline(deadline: Option<Instant>) {
     }
 }
 
+/// The single choke point every outbound frame this module produces goes
+/// through — `session/update` notifications and every `session/prompt`/
+/// `session/cancel`/`session/answer` *response* — none of which touch
+/// `crate::connection::send` at all (they go via `outbound`/`priority_tx`,
+/// relayed to the socket later by `connection::relay_outbound`). Before
+/// issue #197 this had **no wire logging whatsoever**: this is exactly the
+/// holler-server#207 regression ("noisy never showed prompt/reply") —
+/// `session/update` in particular never appeared in a trace at any debug
+/// level, quiet or noisy, because nothing on this path ever logged a frame.
 fn send_frame(outbound: &mpsc::UnboundedSender<WsMessage>, env: &Envelope) {
     if let Ok(text) = holler_proto::encode(env) {
+        let method: &'static str = match env.method() {
+            Some("session/update") => "session/update",
+            _ => match env {
+                Envelope::Response { .. } | Envelope::Error { .. } => "session/prompt",
+                _ => "other",
+            },
+        };
+        holler_proto::log::emit(&LogEvent {
+            component: Component::Wire,
+            severity: Severity::Debug,
+            direction: LogDirection::Out,
+            method,
+            id: None,
+            peer: None,
+            fields: env.id().map(|i| vec![("id", i.to_string())]).unwrap_or_default(),
+            frame: holler_proto::log::frame_at_noisy(&text),
+        });
         let _ = outbound.send(WsMessage::text(text));
     }
 }

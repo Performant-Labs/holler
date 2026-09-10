@@ -439,6 +439,25 @@ enum TalkLine {
 /// (issue #190 spec). Best-effort: a write failure is not a reason to fail
 /// the `say` itself (the reply already happened; logging is observability).
 fn append_talklog(state: &HubState, label: &str, session: &str, line: &TalkLine) {
+    let kind = match line {
+        TalkLine::Prompt { .. } => "prompt",
+        TalkLine::Update { .. } => "update",
+        TalkLine::Done { .. } => "done",
+    };
+    holler_proto::log::emit(&holler_proto::log::Event {
+        component: holler_proto::log::Component::Talklog,
+        severity: holler_proto::log::Severity::Debug,
+        direction: holler_proto::log::Direction::Local,
+        method: "append",
+        id: None,
+        peer: None,
+        fields: vec![
+            ("label", label.to_string()),
+            ("session", session.to_string()),
+            ("line", kind.to_string()),
+        ],
+        frame: None,
+    });
     let _ = std::fs::create_dir_all(talklog_dir(state));
     let path = talklog_path(state, label, session);
     let json = match line {

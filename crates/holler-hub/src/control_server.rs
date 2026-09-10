@@ -47,6 +47,28 @@ pub async fn handle_control_conn(
     }
 }
 
+/// `component=control` debug event: one `control/…` request received on the
+/// socket (issue #197 — `dispatch_control` previously logged nothing at all;
+/// `Component::Control` elsewhere in the hub only ever covers `serve.rs`'s
+/// own bind/lock lifecycle events, never a per-request trace of the control
+/// socket itself).
+fn log_control(method: &str, id: Option<&str>) {
+    let mut fields = vec![("method", method.to_string())];
+    if let Some(i) = id {
+        fields.push(("id", i.to_string()));
+    }
+    holler_proto::log::emit(&holler_proto::log::Event {
+        component: holler_proto::log::Component::Control,
+        severity: holler_proto::log::Severity::Debug,
+        direction: holler_proto::log::Direction::In,
+        method: "control_request",
+        id: None,
+        peer: None,
+        fields,
+        frame: None,
+    });
+}
+
 /// Parse one control frame, dispatch it, and return the reply as a single
 /// line (no trailing newline; the caller adds it).
 async fn dispatch_control(line: &str, registry: &Registry, roster: &Roster) -> String {
@@ -65,6 +87,8 @@ async fn dispatch_control(line: &str, registry: &Registry, roster: &Roster) -> S
     let id = obj.get("id").and_then(|v| v.as_str()).map(str::to_owned);
     let method = obj.get("method").and_then(|v| v.as_str());
     let cid = resolve_cid(id.as_deref());
+
+    log_control(method.unwrap_or("<none>"), id.as_deref());
 
     match method {
         Some("control/status") => {

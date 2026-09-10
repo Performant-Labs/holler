@@ -416,6 +416,24 @@ pub fn redact_frame(frame: &str) -> String {
     serde_json::to_string(&redact(&v)).unwrap_or_else(|_| frame.to_owned())
 }
 
+/// The single gate every "attach a full frame to a debug event" call site
+/// shares (issue #197): `Some(redact_frame(raw))` at `noisy`, `None`
+/// (shape-only — no frame) at `quiet` or `none`. Before this helper existed,
+/// several call sites (`http_attach_driver`'s `log_debug`) attached the
+/// redacted frame **unconditionally**, so `quiet` silently carried the full
+/// frame too, contradicting the module doc's own "`quiet` emits ... only the
+/// *shape*" contract. Every wire/acp/http_attach call site that wants to
+/// show a full frame at `noisy` (and nothing but the shape at `quiet`)
+/// should build its `frame` field through this helper rather than wrapping
+/// `redact_frame` in `Some` directly.
+pub fn frame_at_noisy(raw: &str) -> Option<String> {
+    if get().debug == DebugLevel::Noisy {
+        Some(redact_frame(raw))
+    } else {
+        None
+    }
+}
+
 // --- rendering ----------------------------------------------------------------
 
 /// A 12-char id, `0`-padded on the right when short (the reference layout
