@@ -9,6 +9,11 @@ cross-machine; the **internal** channels are not.
 | --- | --- | --- | --- |
 | hub ⇄ body | JSON-RPC 2.0 over WebSocket (A2A object model, ACP behind it) | TLS 1.3 via a proxy in front of loopback `ws` (ADR 0006); native TLS is v2 | [v2](v2.md) |
 
+The "talk" leaves (`say`/`interrupt`/`answer`) ride this same hop; their
+attach-mode sequence diagram (issue #195, `mode:"attach"` dispatched to the
+HTTP attach driver instead of the ACP spawn driver) lives at
+[talk.md](talk.md).
+
 ## Internal, non-wire
 
 These channels carry the same JSON-RPC 2.0 **envelope** as the wire but are

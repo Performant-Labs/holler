@@ -90,7 +90,12 @@ mod status_sessions_wire_tests {
             harnesses_confirmed: None,
             bodies: None,
             sessions: None,
-            session_list: Some(vec![StatusSession { name: "alpha".into(), harness: "opencode".into(), state: SessionState::Idle }]),
+            session_list: Some(vec![StatusSession {
+                name: "alpha".into(),
+                harness: "opencode".into(),
+                state: SessionState::Idle,
+                endpoint: None,
+            }]),
         };
         let wire = serde_json::to_value(&status).unwrap();
         assert!(wire.get("sessions").unwrap().is_array(), "body role must serialize the session list under the wire key `sessions`");

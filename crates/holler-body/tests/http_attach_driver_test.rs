@@ -171,8 +171,12 @@ async fn sse_drop_mid_turn_reconnects_and_completes() {
 
     server.force_disconnect();
     // Give the driver time to notice the drop and reconnect (bounded by the
-    // backoff schedule's first attempt: full jitter over 0..=1000ms).
-    tokio::time::sleep(Duration::from_millis(1_200)).await;
+    // backoff schedule's first attempt: full jitter over 0..=1000ms, plus the
+    // actual HTTP reconnect round trip). 1200ms cut it too close under a
+    // loaded CI runner (confirmed via repeated real CI failures, not a local
+    // repro) — widened to leave real margin rather than tightening the
+    // assertion window further.
+    tokio::time::sleep(Duration::from_millis(4_000)).await;
     server.push_event(part_updated_text("m1", "ses_3", "after reconnect"));
     server.push_event(session_idle("ses_3"));
 

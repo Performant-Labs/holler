@@ -201,6 +201,15 @@ path = "tests/wait_test.rs"
 name = "attach_cli_test"
 path = "tests/attach_cli_test.rs"
 
+# `mode = "attach"` end to end (issue #195): real hub + body + a fake OpenCode
+# HTTP server (reusing `holler-body`'s own `http_attach_driver_test/
+# fake_server.rs` via a `#[path]` include). Lives here for the same
+# `CARGO_BIN_EXE_stub-acp`/`CARGO_BIN_EXE_holler` reasons as every other
+# real-subprocess integration test in this file.
+[[test]]
+name = "attach_mode_test"
+path = "tests/attach_mode_test.rs"
+
 # Declare only what is consumed (issue #155 §7 — `cargo machete` fails CI
 # otherwise). A story that starts using a workspace dependency adds it here in
 # the same PR; the skeleton's speculative list was removed in #155.
