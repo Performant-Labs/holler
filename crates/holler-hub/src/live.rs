@@ -52,6 +52,26 @@ use tokio::sync::{oneshot, Mutex};
 
 use holler_proto::{Message, PingAck, SessionAd, WireError};
 
+/// `component=registry` debug event: a circuit registered or removed
+/// (issue #197 — nothing in this module logged at all before this; the hub's
+/// live-body registry was completely silent).
+fn log_registry(method: &'static str, client_id: &str, hostname: Option<&str>) {
+    let mut fields = vec![("client_id", client_id.to_string())];
+    if let Some(h) = hostname {
+        fields.push(("hostname", h.to_string()));
+    }
+    holler_proto::log::emit(&holler_proto::log::Event {
+        component: holler_proto::log::Component::Registry,
+        severity: holler_proto::log::Severity::Debug,
+        direction: holler_proto::log::Direction::Local,
+        method,
+        id: None,
+        peer: None,
+        fields,
+        frame: None,
+    });
+}
+
 /// `(hostname, that body's last-known sessions)`, keyed by `client_id` — the
 /// shape [`Registry`]'s `offline` field holds (named here to keep the
 /// field's own type simple enough for clippy's `type_complexity` gate).
@@ -371,6 +391,7 @@ impl Registry {
         // A fresh connection supersedes any stale offline snapshot for this
         // exact `client_id` — see the `offline` field's own doc.
         self.offline.lock().await.remove(client_id);
+        log_registry("register", client_id, Some(hostname));
         (rx, cancel_rx)
     }
 
@@ -382,6 +403,7 @@ impl Registry {
     pub async fn remove(&self, client_id: &str) {
         let removed = self.inner.lock().await.remove(client_id);
         if let Some(handle) = removed {
+            log_registry("remove", client_id, Some(&handle.hostname));
             if let Some(sessions) = handle.presence.lock().await.clone() {
                 self.offline.lock().await.insert(client_id.to_string(), (handle.hostname.clone(), sessions));
             }

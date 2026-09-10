@@ -107,17 +107,51 @@ mod connection;
 mod wire;
 
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tokio::sync::{mpsc, oneshot};
 
 use holler_proto::docs::{PendingItem, PendingKind};
+use holler_proto::log::{Component, Direction as LogDirection, Event as LogEvent, Severity};
 
 use crate::acp_driver::{DriverError, DriverEventStream, Status, StopReason};
 use crate::config::SessionConfig;
 
 use connection::{lock, Command, Shared};
 use wire::BlockKind;
+
+/// `component=http_attach` debug event (mirrors `connection.rs`'s own
+/// `log_debug` — this file owns the `attach()`/`check_exists()`/`shutdown()`
+/// half of the driver, which never shared that submodule's private helper).
+fn log_debug(method: &'static str, fields: Vec<(&'static str, String)>) {
+    holler_proto::log::emit(&LogEvent {
+        component: Component::HttpAttach,
+        severity: Severity::Debug,
+        direction: LogDirection::Out,
+        method,
+        id: None,
+        peer: None,
+        fields,
+        frame: None,
+    });
+}
+
+fn log_warn(method: &'static str, fields: Vec<(&'static str, String)>) {
+    holler_proto::log::emit(&LogEvent {
+        component: Component::HttpAttach,
+        severity: Severity::Warn,
+        direction: LogDirection::Local,
+        method,
+        id: None,
+        peer: None,
+        fields,
+        frame: None,
+    });
+}
+
+fn elapsed_ms(started: Instant) -> String {
+    u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX).to_string()
+}
 
 /// How long [`HttpAttachDriver::cancel`] waits for the attached session's own
 /// `session.idle`/`session.error` event before giving up (there is no child
@@ -163,7 +197,19 @@ impl HttpAttachDriver {
             .ok_or_else(|| DriverError::NotFound("no session_id configured".to_string()))?;
 
         let client = reqwest::Client::new();
-        check_exists(&client, &endpoint, &session_id).await?;
+        match check_exists(&client, &endpoint, &session_id).await {
+            Ok(()) => log_debug(
+                "attach",
+                vec![("event", "attached".to_string()), ("session_id", session_id.clone())],
+            ),
+            Err(e) => {
+                log_warn(
+                    "attach",
+                    vec![("event", format!("attach_failed: {}", e.message()))],
+                );
+                return Err(e);
+            }
+        }
 
         let (command_tx, command_rx) = mpsc::unbounded_channel();
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
@@ -313,6 +359,7 @@ impl HttpAttachDriver {
     /// a fake test server still answers after this call
     /// (`shutdown_does_not_touch_fake_server`).
     pub async fn shutdown(&self) -> Result<(), DriverError> {
+        log_debug("shutdown", vec![("session_id", self.session_id.clone())]);
         if let Some(tx) = lock_option(&self.shutdown_tx).take() {
             let _ = tx.send(());
         }
@@ -338,13 +385,35 @@ async fn check_exists(
 ) -> Result<(), DriverError> {
     let base = endpoint.trim_end_matches('/');
     let v1_url = format!("{base}/session/{session_id}");
-    if let Ok(response) = client.get(&v1_url).send().await {
+    let started = Instant::now();
+    let v1_result = client.get(&v1_url).send().await;
+    log_debug(
+        "check_exists",
+        vec![
+            ("method", "GET".to_string()),
+            ("path", format!("/session/{session_id}")),
+            ("status", v1_result.as_ref().map(|r| r.status().as_str().to_string()).unwrap_or_default()),
+            ("ms", elapsed_ms(started)),
+        ],
+    );
+    if let Ok(response) = v1_result {
         if response.status().is_success() {
             return Ok(());
         }
     }
     let v2_url = format!("{base}/api/session/{session_id}");
-    match client.get(&v2_url).send().await {
+    let started = Instant::now();
+    let v2_result = client.get(&v2_url).send().await;
+    log_debug(
+        "check_exists",
+        vec![
+            ("method", "GET".to_string()),
+            ("path", format!("/api/session/{session_id}")),
+            ("status", v2_result.as_ref().map(|r| r.status().as_str().to_string()).unwrap_or_default()),
+            ("ms", elapsed_ms(started)),
+        ],
+    );
+    match v2_result {
         Ok(response) if response.status().is_success() => Ok(()),
         Ok(response) => Err(DriverError::NotFound(format!(
             "HTTP {} from both {v1_url} and {v2_url}",

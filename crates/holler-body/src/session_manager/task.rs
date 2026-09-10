@@ -193,6 +193,15 @@ pub(super) async fn run(mut mailbox: mpsc::Receiver<SessionCommand>, mut inner: 
 /// function's own `select!` branch stays within the workspace's cognitive-
 /// complexity clippy gate.
 async fn dispatch_command(inner: &mut Inner, cmd: Option<SessionCommand>) -> bool {
+    let kind = match &cmd {
+        None => "mailbox_closed",
+        Some(SessionCommand::Shutdown) => "shutdown",
+        Some(SessionCommand::Prompt { .. }) => "prompt",
+        Some(SessionCommand::Cancel { .. }) => "cancel",
+        Some(SessionCommand::Answer { .. }) => "answer",
+        Some(SessionCommand::Replace { .. }) => "replace",
+    };
+    log_session("mailbox_dequeue", &inner.name, vec![("command", kind.to_string())]);
     match cmd {
         None | Some(SessionCommand::Shutdown) => {
             if let Some(driver) = inner.driver.take() {
@@ -227,6 +236,25 @@ async fn dispatch_command(inner: &mut Inner, cmd: Option<SessionCommand>) -> boo
 /// failure, a `session attach_failed name=… reason=…` warning is logged (the
 /// issue's own line shape) and the row stays gated — [`run`]'s own retry
 /// timer tries again in [`ATTACH_RETRY_INTERVAL`].
+/// `component=session` debug event: mailbox enqueue/dequeue, queue depth,
+/// and state transitions (issue #197 — this module previously only ever
+/// logged `attach_failed`; the mailbox/queue/state-transition visibility the
+/// spec asks for did not exist).
+fn log_session(method: &'static str, name: &SessionName, fields: Vec<(&'static str, String)>) {
+    let mut all = vec![("name", name.as_str().to_string())];
+    all.extend(fields);
+    log::emit(&LogEvent {
+        component: Component::Session,
+        severity: Severity::Debug,
+        direction: LogDirection::Local,
+        method,
+        id: None,
+        peer: None,
+        fields: all,
+        frame: None,
+    });
+}
+
 async fn attempt_initial_attach(inner: &mut Inner) {
     match Driver::spawn_or_attach(&inner.config).await {
         Ok(driver) => {
@@ -288,15 +316,22 @@ async fn handle_prompt(
     // backstop for a caller that skips that gate (a direct wire client, or a
     // race against a state change the hub's cache hasn't caught up to yet).
     if !queue || current_state == SessionState::InputRequired {
+        log_session(
+            "busy_refused",
+            &inner.name,
+            vec![("state", format!("{current_state:?}")), ("queue", queue.to_string())],
+        );
         let (state, turn_age_ms, last_update_age_ms) = busy_ages(inner, current_state);
         let _ = reply_tx.send(PromptOutcome::Busy { state, turn_age_ms, last_update_age_ms });
         return;
     }
     if inner.queue.len() >= QUEUE_CAP {
+        log_session("queue_full", &inner.name, vec![("depth", inner.queue.len().to_string())]);
         let _ = reply_tx.send(PromptOutcome::QueueFull);
         return;
     }
     inner.queue.push_back(QueuedPrompt { id, text, reply_tx, updates });
+    log_session("queue_enqueue", &inner.name, vec![("depth", inner.queue.len().to_string())]);
 }
 
 /// The `-32009 session_busy` refusal's `data` trio: the session's current A2A
@@ -472,6 +507,7 @@ async fn start_turn(
     inner.turn_started_at_ms = Some(Instant::now());
     inner.last_update_at_ms = inner.turn_started_at_ms;
     let ts = log::timestamp();
+    let id_for_log = turn_id.clone();
     {
         let mut p = inner.presence.lock().unwrap_or_else(PoisonError::into_inner);
         p.state = SessionState::Working;
@@ -480,6 +516,7 @@ async fn start_turn(
         p.pending = None;
         p.turn_id = Some(turn_id);
     }
+    log_session("state_transition", &inner.name, vec![("state", "Working".to_string()), ("turn_id", id_for_log)]);
     notify_presence(inner);
     true
 }
@@ -515,6 +552,7 @@ async fn handle_stream_event(inner: &mut Inner, event: Option<DriverEvent>) {
 }
 
 fn set_state(inner: &mut Inner, state: SessionState) {
+    log_session("state_transition", &inner.name, vec![("state", format!("{state:?}"))]);
     // Issue #151: `pending` mirrors `state` — populated from the driver's
     // own held block only while entering/staying `InputRequired`, and
     // cleared the instant this leaves that state (a resumed `Working`, or a
@@ -576,6 +614,11 @@ async fn finish_turn_no_dispatch(inner: &mut Inner, reason: StopReason) {
         p.turn_id = Some(turn_id.clone());
         p.last_turn = Some(last_turn.clone());
     }
+    log_session(
+        "state_transition",
+        &inner.name,
+        vec![("state", "Idle".to_string()), ("turn_id", turn_id.clone()), ("stop_reason", reason.as_wire_str().to_string())],
+    );
     inner.current_stream = None;
     inner.current_updates = None;
     inner.turn_started_at_ms = None;
@@ -610,6 +653,7 @@ async fn dispatch_next_queued(inner: &mut Inner) {
     // A spawn failure for one queued item must not strand the rest of the
     // FIFO behind it — try the next one instead of leaving the queue stuck.
     while let Some(item) = inner.queue.pop_front() {
+        log_session("queue_dequeue", &inner.name, vec![("depth", inner.queue.len().to_string())]);
         if start_turn(inner, item.id, item.text, item.reply_tx, item.updates).await {
             return;
         }

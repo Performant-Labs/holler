@@ -107,11 +107,44 @@ use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 
 use holler_proto::docs::PendingItem;
+use holler_proto::log::{Component, Direction as LogDirection, Event as LogEvent, Severity};
 
 use crate::config::{SessionConfig, SessionMode};
 use answerable::{resolve_choice, OptionSet};
 use connection::{lock, Ready, Shared};
 use pending::{pending_items, reply_cancelled, send_resolved_reply};
+
+/// `component=acp` debug event: an outbound request/notification to the
+/// child, or a local lifecycle event (spawn attempt, shutdown). Mirrors
+/// `http_attach_driver`'s own `log_debug`/`log_warn` convention — the ACP
+/// spawn driver never had one at all before this issue (#197): every
+/// request/notification/child-lifecycle event below is new instrumentation,
+/// not a fix to something that logged incorrectly.
+fn log_debug(direction: LogDirection, method: &'static str, fields: Vec<(&'static str, String)>, frame: Option<String>) {
+    holler_proto::log::emit(&LogEvent {
+        component: Component::Acp,
+        severity: Severity::Debug,
+        direction,
+        method,
+        id: None,
+        peer: None,
+        fields,
+        frame,
+    });
+}
+
+fn log_warn(method: &'static str, fields: Vec<(&'static str, String)>) {
+    holler_proto::log::emit(&LogEvent {
+        component: Component::Acp,
+        severity: Severity::Warn,
+        direction: LogDirection::Local,
+        method,
+        id: None,
+        peer: None,
+        fields,
+        frame: None,
+    });
+}
 
 /// How long [`AcpDriver::spawn`] waits for `initialize` + `session/new` to
 /// complete before treating the child as hung. `HOLLER_ACP_TIMEOUT_MS`
@@ -347,6 +380,23 @@ impl AcpDriver {
         if let Some(env) = &config.env {
             agent_config = agent_config.envs(env.clone());
         }
+        // No pid is available here: the pinned `agent-client-protocol` 2.1.0
+        // SDK spawns and owns the child process internally (`acp_agent.rs`'s
+        // `ChildGuard`) and exposes no accessor for its pid or exit status to
+        // this crate — only "the connection closed" (see the crash watcher
+        // in `connection::do_handshake`). Logging `command`/`args`/`cwd` here
+        // is the most this driver can report about "spawn"; a real pid/exit
+        // status would need a fork of (or an upstream change to) the SDK.
+        log_debug(
+            LogDirection::Local,
+            "spawn",
+            vec![
+                ("event", "spawning".to_string()),
+                ("command", argv[0].clone()),
+                ("args", argv[1..].join(" ")),
+            ],
+            None,
+        );
         // The SDK's `AcpAgentConfig` has no process-cwd field of its own — ACP
         // agents take their working directory from `session/new`'s own `cwd`
         // param instead (see the module doc's "Decisions I made").
@@ -386,19 +436,29 @@ impl AcpDriver {
             .unwrap_or(DEFAULT_STARTUP_TIMEOUT_MS);
 
         match tokio::time::timeout(Duration::from_millis(timeout_ms), ready_rx).await {
-            Ok(Ok(Ok(ready))) => Ok(Self {
-                session: ready.session_id,
-                connection: ready.connection,
-                shared,
-                join_handle: Mutex::new(Some(join_handle)),
-                shutdown_tx: Mutex::new(Some(shutdown_tx)),
-            }),
+            Ok(Ok(Ok(ready))) => {
+                log_debug(
+                    LogDirection::In,
+                    "spawn",
+                    vec![("event", "spawned".to_string())],
+                    None,
+                );
+                Ok(Self {
+                    session: ready.session_id,
+                    connection: ready.connection,
+                    shared,
+                    join_handle: Mutex::new(Some(join_handle)),
+                    shutdown_tx: Mutex::new(Some(shutdown_tx)),
+                })
+            }
             Ok(Ok(Err(reason))) => {
                 join_handle.abort();
+                log_warn("spawn", vec![("event", format!("startup_failed: {reason}"))]);
                 Err(DriverError::Startup(reason))
             }
             Ok(Err(_dropped)) => {
                 join_handle.abort();
+                log_warn("spawn", vec![("event", "connection task ended before readiness".to_string())]);
                 Err(DriverError::Startup(
                     "connection task ended before signalling readiness".to_string(),
                 ))
@@ -409,6 +469,7 @@ impl AcpDriver {
                 // the spawned process group when the connection future is
                 // dropped (which `abort` forces).
                 join_handle.abort();
+                log_warn("spawn", vec![("event", format!("startup_timeout: {timeout_ms}ms"))]);
                 Err(DriverError::Startup(format!(
                     "no response within {timeout_ms}ms (HOLLER_ACP_TIMEOUT_MS)"
                 )))
@@ -431,6 +492,12 @@ impl AcpDriver {
             guard.status = Status::Working;
         }
         let session = self.session();
+        log_debug(
+            LogDirection::Out,
+            "session/prompt",
+            vec![],
+            holler_proto::log::frame_at_noisy(&serde_json::json!({ "text": text }).to_string()),
+        );
         // Fire-and-forget the acceptance ack: v2's `session/prompt` response
         // only means "accepted", not "done" (see the module doc). A failure
         // here (e.g. the child already died) surfaces as a `Done(Error)` on
@@ -441,6 +508,7 @@ impl AcpDriver {
             .block_task()
             .await;
         if result.is_err() {
+            log_warn("session/prompt", vec![("event", "send failed".to_string())]);
             let mut guard = lock(&self.shared);
             guard.status = Status::Idle;
             if let Some(tx) = guard.current_events.take() {
@@ -513,9 +581,16 @@ impl AcpDriver {
             }
         };
         if let Some(reason) = already_settled {
+            log_debug(
+                LogDirection::Local,
+                "session/cancel",
+                vec![("event", "no turn in flight".to_string())],
+                None,
+            );
             return Ok(reason);
         }
 
+        log_debug(LogDirection::Out, "session/cancel", vec![], None);
         self.session_cancel()
             .map_err(|e| DriverError::Cancel(format!("sending session/cancel: {e}")))?;
 
@@ -524,13 +599,17 @@ impl AcpDriver {
                 lock(&self.shared).status = Status::Idle;
                 Ok(stop_reason)
             }
-            Ok(Err(_recv_dropped)) => Err(DriverError::Cancel(
-                "connection ended while awaiting the cancelled state_update".to_string(),
-            )),
+            Ok(Err(_recv_dropped)) => {
+                log_warn("session/cancel", vec![("event", "connection ended while awaiting cancel".to_string())]);
+                Err(DriverError::Cancel(
+                    "connection ended while awaiting the cancelled state_update".to_string(),
+                ))
+            }
             Err(_timed_out) => {
                 if let Some(handle) = lock_option(&self.join_handle).as_ref() {
                     handle.abort();
                 }
+                log_warn("session/cancel", vec![("event", format!("timeout after {CANCEL_TIMEOUT:?}; child force-killed"))]);
                 Err(DriverError::Cancel(format!(
                     "no cancelled state_update within {CANCEL_TIMEOUT:?}; child force-killed"
                 )))
@@ -573,6 +652,7 @@ impl AcpDriver {
             .iter()
             .map(|f| (f.name.clone(), f.multi))
             .collect();
+        log_debug(LogDirection::Out, "answer", vec![], None);
         send_resolved_reply(pending.responder, field_names, resolved)
     }
 
@@ -595,6 +675,7 @@ impl AcpDriver {
     /// child's whole process tree via the SDK's own transport guard). Bounded
     /// by `SHUTDOWN_GRACE`; a hang past that force-kills instead.
     pub async fn shutdown(&self) -> Result<(), DriverError> {
+        log_debug(LogDirection::Out, "shutdown", vec![("event", "session/close".to_string())], None);
         let _ = self.session_close().await;
         if let Some(tx) = lock_option(&self.shutdown_tx).take() {
             let _ = tx.send(());

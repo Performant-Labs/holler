@@ -60,6 +60,7 @@ where
     let params = holler_proto::Prompt { session: session.to_string(), message: *message, meta: None, queue, replace };
     let req = Envelope::request(&cid, "session/prompt", Some(serde_json::to_value(params).map_err(|_| ())?));
     let text = holler_proto::encode(&req).map_err(|_| ())?;
+    super::log_frame(super::LogDirection::Out, "session/prompt", Some(request_id), &text);
     sink.send(Message::text(text)).await.map_err(|_| ())?;
     sink.flush().await.map_err(|_| ())
 }
@@ -74,6 +75,7 @@ where
     let params = holler_proto::Cancel { session: session.to_string() };
     let req = Envelope::request(&cid, "session/cancel", Some(serde_json::to_value(params).map_err(|_| ())?));
     let text = holler_proto::encode(&req).map_err(|_| ())?;
+    super::log_frame(super::LogDirection::Out, "session/cancel", Some(request_id), &text);
     sink.send(Message::text(text)).await.map_err(|_| ())?;
     sink.flush().await.map_err(|_| ())
 }

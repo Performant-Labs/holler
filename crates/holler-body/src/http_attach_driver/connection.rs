@@ -17,7 +17,7 @@
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use futures_util::{Stream, StreamExt, TryStreamExt};
 use serde::Deserialize;
@@ -114,6 +114,12 @@ fn log_warn(method: &'static str, fields: Vec<(&'static str, String)>) {
         fields,
         frame: None,
     });
+}
+
+/// Milliseconds elapsed since `started`, as a log field value — the `ms` half
+/// of the spec's "each HTTP call (method, path, status, ms)" (issue #197).
+fn elapsed_ms(started: Instant) -> String {
+    u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX).to_string()
 }
 
 /// Drives one attached session for its whole lifetime (from `attach()` until
@@ -244,8 +250,18 @@ fn process_sse_chunk(
 async fn connect_sse(client: &reqwest::Client, endpoint: &str) -> Option<ByteStream> {
     let url = format!("{}/event", endpoint.trim_end_matches('/'));
     log_debug("sse_connect", vec![("path", "/event".to_string())], None);
-    let response = client.get(&url).send().await.ok()?;
+    let response = match client.get(&url).send().await {
+        Ok(r) => r,
+        Err(err) => {
+            log_warn("sse_connect", vec![("event", format!("error: {err}"))]);
+            return None;
+        }
+    };
     if !response.status().is_success() {
+        log_warn(
+            "sse_connect",
+            vec![("event", format!("non-success status: {}", response.status()))],
+        );
         return None;
     }
     Some(Box::pin(response.bytes_stream().map_ok(|b| b.to_vec())))
@@ -264,20 +280,24 @@ async fn send_prompt(
     let body = serde_json::json!({ "parts": [{"type": "text", "text": text}] });
     log_debug(
         "prompt_async",
-        vec![("path", format!("/session/{session_id}/prompt_async"))],
-        Some(holler_proto::log::redact_frame(&body.to_string())),
+        vec![("method", "POST".to_string()), ("path", format!("/session/{session_id}/prompt_async"))],
+        holler_proto::log::frame_at_noisy(&body.to_string()),
     );
     lock(shared).status = Status::Working;
+    let started = Instant::now();
     match client.post(&url).json(&body).send().await {
         Ok(response) => {
             log_debug(
                 "prompt_async",
-                vec![("status", response.status().as_str().to_string())],
+                vec![
+                    ("status", response.status().as_str().to_string()),
+                    ("ms", elapsed_ms(started)),
+                ],
                 None,
             );
         }
         Err(err) => {
-            log_warn("prompt_async", vec![("event", format!("error: {err}"))]);
+            log_warn("prompt_async", vec![("event", format!("error: {err}")), ("ms", elapsed_ms(started))]);
         }
     }
 }
@@ -525,16 +545,21 @@ async fn post_reply(
 ) -> Result<(), DriverError> {
     log_debug(
         method,
-        vec![("path", url.to_string())],
-        Some(holler_proto::log::redact_frame(&body.to_string())),
+        vec![("method", "POST".to_string()), ("path", url.to_string())],
+        holler_proto::log::frame_at_noisy(&body.to_string()),
     );
+    let started = Instant::now();
     let response = client
         .post(url)
         .json(body)
         .send()
         .await
         .map_err(|err| DriverError::Rpc(err.to_string()))?;
-    log_debug(method, vec![("status", response.status().as_str().to_string())], None);
+    log_debug(
+        method,
+        vec![("status", response.status().as_str().to_string()), ("ms", elapsed_ms(started))],
+        None,
+    );
     if !response.status().is_success() {
         return Err(DriverError::Rpc(format!("{method} returned HTTP {}", response.status())));
     }
@@ -551,13 +576,22 @@ pub(super) async fn post_interrupt(
     // `/session/{id}/interrupt` is not a real route (see
     // `http_attach_driver.rs`'s module doc).
     let url = format!("{}/api/session/{session_id}/interrupt", endpoint.trim_end_matches('/'));
-    log_debug("interrupt", vec![("path", format!("/api/session/{session_id}/interrupt"))], None);
+    log_debug(
+        "interrupt",
+        vec![("method", "POST".to_string()), ("path", format!("/api/session/{session_id}/interrupt"))],
+        None,
+    );
+    let started = Instant::now();
     let response = client
         .post(&url)
         .send()
         .await
         .map_err(|err| DriverError::Rpc(err.to_string()))?;
-    log_debug("interrupt", vec![("status", response.status().as_str().to_string())], None);
+    log_debug(
+        "interrupt",
+        vec![("status", response.status().as_str().to_string()), ("ms", elapsed_ms(started))],
+        None,
+    );
     if !response.status().is_success() {
         return Err(DriverError::Rpc(format!("interrupt returned HTTP {}", response.status())));
     }
