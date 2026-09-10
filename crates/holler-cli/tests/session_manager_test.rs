@@ -324,7 +324,12 @@ async fn large_backlog_drains_in_strict_fifo_order_no_loss() {
     let mut pending = FuturesUnordered::new();
     let mut next_to_submit = 0usize;
     let mut completion_order: Vec<String> = Vec::new();
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    // 120s, not the ~14s this reliably takes on a fast dev machine: CI's
+    // macOS runner measured >2x slower in practice (a 30s bound tripped
+    // there while the backlog was still draining correctly, just slowly —
+    // see PR #306's first CI run). Still a hard, bounded ceiling — a
+    // genuinely stuck drain fails loudly well short of "minutes".
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(120);
 
     while completion_order.len() < N {
         assert!(tokio::time::Instant::now() < deadline, "backlog did not drain within 30s");
