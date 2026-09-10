@@ -218,6 +218,15 @@ path = "tests/attach_mode_test.rs"
 name = "debug_trace_test"
 path = "tests/debug_trace_test.rs"
 
+# Connection hygiene / registry / lockout (issue #184): supersede-on-reauth,
+# revoke force-close, max frame size, pre-auth timeout, the unauthenticated-
+# connection cap, failed-auth lockout, the `spawn_blocking` token-store test
+# hook, and `hub status --json`'s `clients_detail[].peer` — raw
+# `tokio-tungstenite` clients against a real hub, no body process.
+[[test]]
+name = "hub_hygiene_test"
+path = "tests/hub_hygiene_test.rs"
+
 # Declare only what is consumed (issue #155 §7 — `cargo machete` fails CI
 # otherwise). A story that starts using a workspace dependency adds it here in
 # the same PR; the skeleton's speculative list was removed in #155.
