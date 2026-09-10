@@ -95,7 +95,7 @@ and the [RFC 6455 text itself](https://www.rfc-editor.org/rfc/rfc6455.html). A s
 tells you the *socket* is alive right now; it says nothing about whether the last *text frame*
 you sent was parsed, accepted, or acted on by the application above the WebSocket layer. Holler
 already has its own `ping`/`pong` for exactly this liveness purpose (`docs/protocol/v1.md` §10,
-"Bound-socket aliveness (v1's `v1 holler hub token ping`)") — this is correctly scoped as a liveness check,
+"Bound-socket aliveness (`v1 holler token ping`)") — this is correctly scoped as a liveness check,
 not conflated with message-level integrity, and this memo does not propose changing that.
 
 **JSON-RPC 2.0's `id` correlation is Holler's own envelope pattern, and it already buys implicit
@@ -220,7 +220,7 @@ body: { "of": "<id of the frame being acknowledged>" }
   `session/cancel` or the OpenCode HTTP interrupt fallback, not just after parsing the frame) —
   the ack should mean "cancelled," not "received." The server should treat a missing ack within
   a bounded timeout as "interrupt may not have landed" and surface that to the operator (e.g. in
-  v1's `v1 holler query status`) rather than silently assuming success. The exact timeout value is a
+  `v1 holler status`) rather than silently assuming success. The exact timeout value is a
   judgment call for the team, not something this memo can derive from a source — pick a
   clip 2–3x normal RTT and revisit after real usage.
 - **Not required for:** `query`, `prompt`, `presence`, `hello`, `auth`, `ping`/`pong` — all
