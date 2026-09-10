@@ -8,18 +8,18 @@
 //! `body/connection_state.json`'s `state` field — via [`support::wait_for`],
 //! never a blind sleep (ADR 0002).
 //!
-//! Two RED-list cases (`hub_restart_is_recovered_by_reconnect`,
+//! Two cases (`hub_restart_is_recovered_by_reconnect`,
 //! `fresh_hello_and_presence_on_every_reconnect`) kill and restart a real hub
-//! process and time a real reconnect; both are `#[ignore]` (run with `--
-//! --ignored`) per the same "test-tag-interop" treatment the issue calls out
-//! for the hub-restart case — real cross-process timing, not suited to the
-//! default fast suite. As of #242/#259 this is a *tracked, measured* choice
-//! rather than a silent gap: un-ignoring both and running them 40+ times
-//! locally showed `hub_restart_is_recovered_by_reconnect` fails ~10% of the
-//! time on a fixed-port rebind race (see its doc comment), so both stay
-//! `#[ignore]`d — sharing the same restart mechanism — until #259 fixes that
-//! race. `backoff_caps_at_30s` (the schedule's own RED test) is a
-//! pure-function unit test and lives beside the function it tests,
+//! process and time a real reconnect — real cross-process timing, both run in
+//! the default suite. They were `#[ignore]`d for a while: #242 found CI never
+//! ran them at all, and un-ignoring both and running them 40+ times locally
+//! showed `hub_restart_is_recovered_by_reconnect` failed ~10% of the time on
+//! a fixed-port rebind race (see its doc comment history). #259 fixed the
+//! hub's own listener bind (`bind_one_ws_listener` in
+//! `holler-hub/src/serve.rs`) to set `SO_REUSEADDR` and retry with backoff,
+//! and both were un-ignored after a 20+-run, 0-failure spot-check.
+//! `backoff_caps_at_30s` (the schedule's own RED test) is a pure-function
+//! unit test and lives beside the function it tests,
 //! `crates/holler-body/src/backoff.rs`, per normal Rust convention rather
 //! than this integration-test file.
 
@@ -294,15 +294,15 @@ fn revoked_credential_exit_1_no_retry() {
     hub.stop(Duration::from_secs(5));
 }
 
-// --- interop-tagged: real hub restart / real reconnect timing ---------------
+// --- real hub restart / real reconnect timing --------------------------------
 //
 // Both cases below kill and restart a real hub process bound to the SAME
-// port and time how long a live body takes to notice and reconnect. That is
-// exactly the class of case the issue calls "test-tag-interop": a real
-// cross-process timing test, excluded from the default fast suite and run
-// deliberately (`cargo test -- --ignored`). A short
+// port and time how long a live body takes to notice and reconnect — a real
+// cross-process timing test. They ran under `--ignored` for a while (see the
+// module doc comment and #259) while the fixed-port rebind race was tracked
+// down and fixed; now part of the default suite. A short
 // `HOLLER_HEARTBEAT_INTERVAL_MS` keeps the liveness window (3× the interval)
-// small enough that even the ignored run finishes in seconds, not minutes.
+// small enough that each case finishes in seconds, not minutes.
 
 /// Spawn a hub bound to an **explicit** address (unlike [`Hub::start`], which
 /// always asks for port 0) so a restart can rebind the exact same port. Reuses
@@ -343,17 +343,17 @@ fn start_hub_at(state: &StateDir, addr: &str) -> std::process::Child {
 /// Issue #182: "stop hub, start again on the same port, body reports
 /// `connected` again <= 35s".
 ///
-/// Kept `#[ignore]`d per issue #242's finding and issue #259's follow-up:
+/// Was `#[ignore]`d per issue #242's finding and issue #259's follow-up:
 /// measured locally at ~10% failure rate (4/40 runs) with
 /// `hub did not report listening within 10s: Disconnected` — `start_hub_at`
-/// rebinding the *same fixed port* immediately after `kill_tree` races the
-/// OS releasing the socket (no `SO_REUSEADDR`/backoff on the rebind side).
-/// This is a genuine flake in the test's fixed-port-reuse strategy, not a
-/// reconnect-logic defect: un-ignoring as-is would add an unreliable
-/// required check. See #259 for the fix (randomized/ephemeral port per
-/// restart, or a bind-retry loop) before un-ignoring for real.
+/// rebinding the *same fixed port* immediately after `kill_tree` raced the
+/// OS releasing the socket. #259 fixed the hub's own listener bind
+/// (`bind_one_ws_listener` in `holler-hub/src/serve.rs`) to set
+/// `SO_REUSEADDR` explicitly and retry the bind with a short backoff, so an
+/// immediate rebind on the same fixed port no longer races the OS's
+/// per-connection `TIME_WAIT`/teardown window. Spot-checked 20+ repeated
+/// solo runs, 0 failures, before un-ignoring.
 #[test]
-#[ignore] // test-tag-interop: real cross-process hub restart, excluded from the default suite; see #259 for the ~10% port-rebind flake blocking un-ignore.
 fn hub_restart_is_recovered_by_reconnect() {
     let state = StateDir::new();
     let addr = "127.0.0.1:41917"; // a fixed, unusual port (unlikely to collide locally).
@@ -387,14 +387,14 @@ fn hub_restart_is_recovered_by_reconnect() {
 /// authenticate → hello exchange succeeds) as the observable proxy, since the
 /// hub exposes no hello counter on the wire.
 ///
-/// Kept `#[ignore]`d alongside `hub_restart_is_recovered_by_reconnect` (see
+/// Was `#[ignore]`d alongside `hub_restart_is_recovered_by_reconnect` (see
 /// its doc comment and #259): this test shares the exact same
 /// `start_hub_at`-after-`kill_tree` fixed-port rebind mechanism (two restart
-/// cycles instead of one), so it is exposed to the same ~10% bind-race flake
-/// even though it stayed green in every sampled run (15/15) while validating
-/// #242. Un-ignore together once #259 lands the fix.
+/// cycles instead of one), so it was exposed to the same bind-race flake even
+/// though it stayed green in every sampled run (15/15) while validating
+/// #242. Un-ignored together with #259's `SO_REUSEADDR` + bind-retry fix to
+/// `bind_one_ws_listener`; spot-checked 20+ repeated solo runs, 0 failures.
 #[test]
-#[ignore] // test-tag-interop: real cross-process hub restarts, excluded from the default suite; see #259 (shares the port-rebind flake with hub_restart_is_recovered_by_reconnect).
 fn fresh_hello_and_presence_on_every_reconnect() {
     let state = StateDir::new();
     let addr = "127.0.0.1:41918";
