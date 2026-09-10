@@ -120,10 +120,19 @@ jobs:
       # The runner-port story (#170) adds scripts/test_selection_test.rb;
       # this step is skipped until that file exists. It runs on the
       # runners' preinstalled Ruby (2.6 on macOS) -- the selection core is
-      # deliberately stdlib-only so no gem install is needed.
+      # deliberately stdlib-only so no gem install is needed. GitHub-hosted
+      # images ship Ruby; the self-hosted Uranus/Jupiter pl-runner image
+      # doesn't (same gap class as rustup above, confirmed 2026-09-10 on
+      # PR #312) -- bootstrap via apt when missing, same no-op-on-hosted
+      # shape as the Rust step.
       - name: test_selection_test (runner port)
         if: hashFiles('scripts/test_selection_test.rb') != ''
-        run: ruby scripts/test_selection_test.rb
+        run: |
+          if (-not (Get-Command ruby -ErrorAction SilentlyContinue)) {
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq ruby
+          }
+          ruby scripts/test_selection_test.rb
         shell: pwsh
 
       # test-run.rb smoke (#170). The issue's exact ask:
