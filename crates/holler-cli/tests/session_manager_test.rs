@@ -162,9 +162,26 @@ async fn plain_prompt_to_working_session_is_session_busy_with_ages() {
         res = &mut first => panic!("finished early: {res:?}"),
         () = wait_for_state(&manager, &alpha, SessionState::Working, Duration::from_secs(2)) => {}
     }
-    tokio::time::sleep(Duration::from_millis(30)).await;
 
-    let busy = manager.prompt(&alpha, "a2", "hi again", false).await;
+    // Issue #275: don't trust a bare fixed sleep to have produced ≥20ms of
+    // real elapsed time before the assertion below. Each probe is itself a
+    // side-effect-free `Busy` response (it never dispatches a turn), so poll
+    // by re-issuing it until `turn_age_ms` has actually grown past the
+    // threshold this test asserts, bounded by a deadline — the same
+    // "poll the real observable, don't guess how long it takes" pattern
+    // `chunk_only_activity_keeps_last_update_at_fresh` already uses for
+    // issue #210's `last_update_at` coverage.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+    let busy = loop {
+        let probe = manager.prompt(&alpha, "a2", "hi again", false).await;
+        match &probe {
+            Ok(PromptOutcome::Busy { turn_age_ms, .. }) if *turn_age_ms >= 20 => break probe,
+            Ok(PromptOutcome::Busy { .. }) if tokio::time::Instant::now() < deadline => {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+            _ => break probe,
+        }
+    };
     match busy {
         Ok(PromptOutcome::Busy { state, turn_age_ms, last_update_age_ms }) => {
             assert_eq!(state, "working");

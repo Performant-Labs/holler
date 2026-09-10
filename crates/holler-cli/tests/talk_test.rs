@@ -11,15 +11,15 @@
 //!   minimal presence cache this story adds to `holler-hub`'s `live`
 //!   registry (see that module's own doc) — these tests exercise that
 //!   stand-in directly, through the real CLI/wire path.
-//! - **"the session has started its turn" observability.** With no roster
-//!   command to poll (`holler roster` is still the skeleton's "not
-//!   implemented"), the busy/queue/connection-loss tests below fall back to
-//!   a short, bounded sleep after launching the first `say` in a background
-//!   thread — long enough that the body has reliably reached `Working`
-//!   before the racing/killing action fires. Documented rather than hidden —
-//!   this is the one place this file departs from the harness's own "never
-//!   sleep blindly" convention (see `support/mod.rs`'s own doc), because the
-//!   observable ADR 0002 asks for does not exist yet on this path.
+//! - **"the session has started its turn" observability.** The busy/queue/
+//!   connection-loss tests below launch the first `say` in a background
+//!   thread via [`say_full_in_background`], which polls `holler roster
+//!   --json` (issue #276 — this used to be a fixed sleep, since `holler
+//!   roster` wasn't implemented yet when this file was first written) until
+//!   the target session's roster row reports `state: "working"` before
+//!   returning control, so the racing/killing action that follows always
+//!   fires against a session that has genuinely started its turn rather than
+//!   one that merely had "enough" wall-clock time to have (hopefully) done so.
 
 mod support;
 
@@ -29,7 +29,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
-use support::{join, kill_tree, mint_token, wait_for, write_sessions_toml, Body, Hub, StateDir};
+use support::{join, kill_tree, mint_token, roster_json, wait_for, write_sessions_toml, Body, Hub, StateDir};
 
 fn stdout_of(out: &Output) -> String {
     String::from_utf8_lossy(&out.stdout).into_owned()
@@ -57,20 +57,52 @@ fn say_full(state_path: &Path, args: &[&str]) -> Output {
         .expect("run `say`")
 }
 
-/// Run one `say` on a background thread against `state`'s directory, giving
-/// it `sleep_before_racing` to get underway before returning the join
+/// Run one `say` on a background thread against `state`'s directory, then
+/// wait (an observable outcome, not a blind sleep — issue #276) for the
+/// hub's roster to report `session` as `working` before returning the join
 /// handle — the pattern every busy/queue/connection-loss test below shares.
+///
+/// Polls `holler roster --json` (the same signal
+/// `attach_mode_test.rs::wait_for_roster_row` already polls for the
+/// equivalent "session actually started" wait) rather than assuming a fixed
+/// sleep was long enough for the background process to have spawned,
+/// connected, and started its turn. `ready_timeout` bounds the poll; a
+/// session that never reaches `working` within it is a genuine test failure,
+/// not a race to paper over.
 fn say_full_in_background(
     state: &StateDir,
+    session: &str,
     args: Vec<String>,
-    sleep_before_racing: Duration,
+    ready_timeout: Duration,
 ) -> std::thread::JoinHandle<Output> {
     let state_path = state.path().to_path_buf();
     let handle = std::thread::spawn(move || {
         let args: Vec<&str> = args.iter().map(String::as_str).collect();
         say_full(&state_path, &args)
     });
-    std::thread::sleep(sleep_before_racing);
+    // `state` here is the roster's own enriched view, not the bare
+    // `SessionState` the body reports: `holler-hub`'s `talk.rs` (busy-check)
+    // and `roster.rs` both synthesize `"stalled"` out of a `working` session
+    // once `last_update_age_ms` crosses the hub's stall threshold — so a
+    // session that has genuinely started its turn can already read
+    // `"stalled"` (never `"working"`) by the first poll when the hub is
+    // configured with an aggressive threshold (e.g. `HOLLER_STALL_MS=1`, as
+    // `say_to_stalled_session_names_stalled` does). Treat either as "the
+    // turn started" — `"idle"`/`"input-required"` are the only states that
+    // mean it has not (or, for `input-required`, is not mid-turn at all).
+    let suffix = format!("/{session}");
+    wait_for(ready_timeout, || {
+        let rows = roster_json(state)["rows"].as_array()?.clone();
+        rows.iter()
+            .any(|r| {
+                r["name"].as_str().is_some_and(|n| n.ends_with(&suffix))
+                    && matches!(r["state"].as_str(), Some("working") | Some("stalled"))
+            })
+            .then_some(())
+    })
+    .unwrap_or_else(|| {
+        panic!("background `say {session}` never reached `working` on the roster within {ready_timeout:?}: {:?}", roster_json(state))
+    });
     handle
 }
 
@@ -287,8 +319,12 @@ fn say_to_working_session_is_session_busy_exit_1_with_hint() {
     let warm = say_ready(&hub_state, "alpha", "warm up", Duration::from_secs(10));
     assert!(warm.status.success(), "stderr: {}", stderr_of(&warm));
 
-    let handle =
-        say_full_in_background(&hub_state, owned(&["alpha", "second, slow turn"]), Duration::from_millis(150));
+    let handle = say_full_in_background(
+        &hub_state,
+        "alpha",
+        owned(&["alpha", "second, slow turn"]),
+        Duration::from_secs(10),
+    );
     let racer = support::say(&hub_state, "alpha", "interrupting");
     let _ = handle.join();
 
@@ -309,8 +345,12 @@ fn say_queue_appends_and_runs_after_turn() {
     let warm = say_ready(&hub_state, "alpha", "warm up", Duration::from_secs(10));
     assert!(warm.status.success(), "stderr: {}", stderr_of(&warm));
 
-    let handle =
-        say_full_in_background(&hub_state, owned(&["alpha", "first, slow turn"]), Duration::from_millis(150));
+    let handle = say_full_in_background(
+        &hub_state,
+        "alpha",
+        owned(&["alpha", "first, slow turn"]),
+        Duration::from_secs(10),
+    );
     let queued = say_full(hub_state.path(), &["--queue", "alpha", "queued turn"]);
     let first = handle.join().expect("first say thread");
 
@@ -337,8 +377,9 @@ fn say_to_stalled_session_names_stalled() {
 
     let handle = say_full_in_background(
         &hub_state,
+        "alpha",
         owned(&["alpha", "a long, --slow, 10-chunk turn"]),
-        Duration::from_millis(150),
+        Duration::from_secs(10),
     );
     // Poll (an observable outcome, not a fixed sleep) rather than firing the
     // racer exactly once: the very first busy observation can still land
@@ -397,8 +438,9 @@ fn body_drop_mid_turn_is_connection_lost_not_unreachable() {
 
     let handle = say_full_in_background(
         &hub_state,
+        "alpha",
         owned(&["--timeout", "20s", "alpha", "a long turn, about to be cut off"]),
-        Duration::from_millis(300),
+        Duration::from_secs(10),
     );
     support::kill_tree(body.child_mut());
 
