@@ -45,6 +45,11 @@ toml = { workspace = true }
 # session/request_permission + elicitation/create inbound requests the
 # answerable-blocking design intercepts.
 agent-client-protocol = { workspace = true }
+# the HTTP attach driver (issue #194): drives an OpenCode session another
+# process owns over its own HTTP surface (existence check, prompt_async,
+# the global `/event` SSE stream via `stream`, question/permission polling,
+# interrupt) — never spawns/owns a process the way the ACP driver above does.
+reqwest = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

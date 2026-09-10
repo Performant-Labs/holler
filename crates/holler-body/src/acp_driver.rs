@@ -226,6 +226,10 @@ pub enum DriverError {
     Answer(String),
     /// The typed SDK itself reported an error sending a request/reply.
     Rpc(String),
+    /// (Issue #194, `http_attach_driver`) `attach()`'s existence check
+    /// 404'd, or the endpoint could not be reached at all — fail closed,
+    /// never fall through to spawning/creating a session.
+    NotFound(String),
 }
 
 impl DriverError {
@@ -240,6 +244,7 @@ impl DriverError {
             Self::Unsupported(m) => format!("acp driver: unsupported elicitation: {m}"),
             Self::Answer(m) => format!("acp driver: choice did not resolve: {m}"),
             Self::Rpc(m) => format!("acp driver: rpc error: {m}"),
+            Self::NotFound(m) => format!("attach driver: session not found: {m}"),
         }
     }
 }
@@ -259,6 +264,17 @@ impl std::error::Error for DriverError {}
 /// `poll_recv` already has exactly `Stream::poll_next`'s shape.
 pub struct DriverEventStream {
     rx: mpsc::UnboundedReceiver<DriverEvent>,
+}
+
+impl DriverEventStream {
+    /// Builds a stream over an already-created channel receiver. `pub(crate)`
+    /// so a second driver implementation (`http_attach_driver`, issue #194)
+    /// can return this same concrete type from its own `prompt()` — the
+    /// whole point being that `session_manager::task` (issue #195) can hold
+    /// `Option<DriverEventStream>` regardless of which driver produced it.
+    pub(crate) fn new(rx: mpsc::UnboundedReceiver<DriverEvent>) -> Self {
+        Self { rx }
+    }
 }
 
 impl Stream for DriverEventStream {

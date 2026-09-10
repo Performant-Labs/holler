@@ -73,8 +73,10 @@ httparse = "1.10.1"
 http = "1.5.0"
 # the body config file and the CLI's config reader.
 toml = "0.8"
-# json/stream: the hub's HTTP/JSON outward face (roster JSON).
-reqwest = { version = "0.12", default-features = false, features = ["json", "stream"] } # for holler-cli
+# json/stream: the hub's HTTP/JSON outward face (roster JSON); the body's HTTP
+# attach driver (issue #194) also uses `stream` for the OpenCode `/event` SSE
+# byte stream and `json` for its request/response bodies.
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream"] } # for holler-cli, holler-body
 # the ACP wire types the stub agent and body speak. `unstable_protocol_v2`
 # gates the crate's v2 (protocol-v2) typed client surface — the ACP v2 spawn
 # driver (issue #188) is the first real consumer; the crate's own v2 examples
