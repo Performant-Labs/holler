@@ -151,16 +151,37 @@ fn bare_invocation_fails_closed(#[case] args: &[&str]) {
 // `roster` got for the same reason. The full cancel/ack-timeout/redirect path
 // against a live hub+body is pinned by
 // `crates/holler-cli/tests/interrupt_test.rs`.
-#[rstest]
-#[case::body_attach_sessions(&["body", "attach", "sessions"])]
-#[case::body_attach_init(&["body", "attach", "init"])]
-fn every_adr_0003_leaf_parses(#[case] args: &[&str]) {
+// NOTE (issue #196): `body attach sessions`/`body attach init` were
+// originally listed here too (the last two rows of what was this file's
+// `every_adr_0003_leaf_parses` table — with these gone the table was empty,
+// so the whole rstest is retired here rather than left with zero cases).
+// They now do something real — a pure HTTP GET against the (default,
+// unreachable-in-this-test) `http://127.0.0.1:4096` OpenCode endpoint,
+// exiting 1 with a genuine "could not reach" diagnostic rather than "not
+// implemented". Pinned by the two cases below, the same treatment
+// `say`/`roster`/`interrupt` got for the same reason. The full
+// sessions-table/`--json`/`init`/`--force` behaviour against a fake OpenCode
+// HTTP server is pinned by `crates/holler-cli/tests/attach_cli_test.rs`.
+#[test]
+fn body_attach_sessions_without_live_endpoint_exits_1() {
     holler()
-        .args(args)
+        .args(["body", "attach", "sessions"])
         .assert()
         .failure()
         .code(1)
-        .stderr(contains("not implemented"));
+        .stderr(contains("not implemented").not())
+        .stderr(contains("127.0.0.1:4096"));
+}
+
+#[test]
+fn body_attach_init_without_live_endpoint_exits_1() {
+    holler()
+        .args(["body", "attach", "init"])
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(contains("not implemented").not())
+        .stderr(contains("127.0.0.1:4096"));
 }
 
 // Story #143 made `hub serve` a real, *long-running* server. We can't use

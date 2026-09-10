@@ -192,6 +192,15 @@ path = "tests/reconnect_contract_test.rs"
 name = "wait_test"
 path = "tests/wait_test.rs"
 
+# `holler body attach sessions`/`body attach init` (issue #196): pure HTTP +
+# file write against a fake OpenCode HTTP server (`attach_cli_test/fake_server.rs`
+# — see its own doc comment for why it isn't a straight reuse of
+# `holler-body`'s own fake server for issue #194). Never touches
+# SessionManager/the hub.
+[[test]]
+name = "attach_cli_test"
+path = "tests/attach_cli_test.rs"
+
 # Declare only what is consumed (issue #155 §7 — `cargo machete` fails CI
 # otherwise). A story that starts using a workspace dependency adds it here in
 # the same PR; the skeleton's speculative list was removed in #155.
@@ -219,12 +228,26 @@ holler-body = { path = "../holler-body" }
 # (the bin installs the provider before any connect; the body fails a `wss`
 # connect closed if none is installed).
 rustls = { workspace = true }
+# Issue #196: `body attach sessions`/`body attach init` speak plain HTTP
+# directly to an OpenCode endpoint (`GET /session`, `/api/session` fallback)
+# — no `holler-body` driver involved (this story is pure HTTP + file write,
+# never touching `SessionManager`). `attach_cmd.rs` spins its own throwaway
+# current-thread runtime (the same pattern `holler_body::join::join` uses),
+# so `tokio` is a runtime dependency of the bin here too, not just a
+# dev-dependency.
+reqwest = { workspace = true }
+tokio = { workspace = true }
+# Issue #196: `body attach init` writes a `[[session]]` row in the same TOML
+# grammar `holler-body::config` parses (`toml::to_string_pretty` here; that
+# crate's `parse`/`load` is the read side).
+toml = { workspace = true }
 
 [dev-dependencies]
 assert_cmd = { workspace = true }
 predicates = { workspace = true }
 rstest = { workspace = true }
-tokio = { workspace = true }        # wire_selftest runtime canary
+# tokio moved to [dependencies] (issue #196: attach_cmd.rs's throwaway
+# runtime is now on the normal command path, not just wire_selftest's canary).
 libc = { workspace = true }         # tests/support kill_tree
 tokio-tungstenite = { workspace = true }  # hub_serve_test WS client
 futures-util = { workspace = true }  # hub_serve_test Sink/Stream traits
