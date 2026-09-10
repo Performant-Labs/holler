@@ -19,12 +19,43 @@ jobs:
       # `test (macos-latest)`.
       matrix:
         os: [ubuntu-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
+    # holler is a PUBLIC repo with outside PRs welcome (ADR 0004), so the org
+    # `CI_RUNNER` self-hosted variable must never drive a fork PR's job — per
+    # the org convention (playbook infrastructure/ci-platform.md), a fork PR
+    # must never execute on owned hardware. macOS has no self-hosted fleet
+    # here, so it always stays on GitHub-hosted `macos-latest`. The ubuntu
+    # leg uses the self-hosted runner ONLY for a same-repo push or a
+    # same-repo (non-fork) pull_request — a fork PR's `head.repo.full_name`
+    # never equals `github.repository`, so it falls through to
+    # `ubuntu-latest`. Unlike the XPU fleet's intentionally-no-fallback
+    # `vars.CI_RUNNER` wiring (FreeToken-Intel's ci.yml), the `|| matrix.os`
+    # fallback here is a deliberate safety net for the fork-PR case, not an
+    # accident to guard against — a missing/stale `CI_RUNNER` on a *trusted*
+    # run just costs speed, never safety.
+    runs-on: >-
+      ${{
+        (matrix.os == 'ubuntu-latest' &&
+         (github.event_name != 'pull_request' ||
+          github.event.pull_request.head.repo.full_name == github.repository))
+        && vars.CI_RUNNER || matrix.os
+      }}
     steps:
       - uses: actions/checkout@v4
 
+      # GitHub-hosted images ship rustup preinstalled; the self-hosted
+      # Uranus/Jupiter runner image (pl-runner, layered on
+      # myoung34/github-runner) does not (confirmed 2026-09-10, PR #312's
+      # first CI run: `rustup: command not found`) — bootstrap it via the
+      # official installer when missing instead of assuming it's there.
       - name: Install Rust
-        run: rustup toolchain install stable
+        run: |
+          if (-not (Get-Command rustup -ErrorAction SilentlyContinue)) {
+            Invoke-WebRequest -Uri https://sh.rustup.rs -OutFile rustup-init.sh
+            bash rustup-init.sh -y --default-toolchain none
+            Add-Content -Path $env:GITHUB_PATH -Value "$HOME/.cargo/bin"
+            $env:PATH = "$HOME/.cargo/bin:$env:PATH"
+          }
+          rustup toolchain install stable
         shell: pwsh
 
       # ~/.cargo (registry/git) and target/ across runs, keyed on the OS,
@@ -89,10 +120,19 @@ jobs:
       # The runner-port story (#170) adds scripts/test_selection_test.rb;
       # this step is skipped until that file exists. It runs on the
       # runners' preinstalled Ruby (2.6 on macOS) -- the selection core is
-      # deliberately stdlib-only so no gem install is needed.
+      # deliberately stdlib-only so no gem install is needed. GitHub-hosted
+      # images ship Ruby; the self-hosted Uranus/Jupiter pl-runner image
+      # doesn't (same gap class as rustup above, confirmed 2026-09-10 on
+      # PR #312) -- bootstrap via apt when missing, same no-op-on-hosted
+      # shape as the Rust step.
       - name: test_selection_test (runner port)
         if: hashFiles('scripts/test_selection_test.rb') != ''
-        run: ruby scripts/test_selection_test.rb
+        run: |
+          if (-not (Get-Command ruby -ErrorAction SilentlyContinue)) {
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq ruby
+          }
+          ruby scripts/test_selection_test.rb
         shell: pwsh
 
       # test-run.rb smoke (#170). The issue's exact ask:
