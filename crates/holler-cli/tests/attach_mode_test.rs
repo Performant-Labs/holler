@@ -43,6 +43,18 @@ use serde_json::Value;
 
 use support::{stub_acp_bin, wait_for, Body, Hub, StateDir, STARTUP_WAIT};
 
+/// Serializes every test in this file so at most one is running at a time —
+/// the same pattern `acp_driver_test.rs` uses for the identical reason (see
+/// its own doc comment on its `SERIAL`): each test here spawns a real hub +
+/// body process pair (plus a fake HTTP server task and, in several tests,
+/// extra `std::thread`s racing them), and running all 8 fully concurrently
+/// (`cargo test`'s default per-binary parallelism) measurably adds
+/// scheduling/CPU contention on a shared CI runner — enough to threaten the
+/// bounded sleeps/timeouts *other* test binaries in the same `cargo test
+/// --workspace` run depend on. Serializing here removes that contention at
+/// its source rather than padding every timeout in every suite.
+static SERIAL: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 /// Run `holler ARGS... --json` against `state_path` directly (a bare
 /// `PathBuf`, not `&StateDir`) — for callers that need to run a CLI command
 /// from a background thread while the owning `StateDir` stays on the test's
@@ -209,6 +221,7 @@ fn wait_for_new_request(server: &FakeServer, since: usize, method: &str, path: &
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn attach_session_appears_on_roster_with_mode_attach_and_harness_session_id() {
+    let _guard = SERIAL.lock().await;
     let server = FakeServer::start().await;
     let state = StateDir::new();
     let hub = Hub::start(&state);
@@ -227,6 +240,7 @@ async fn attach_session_appears_on_roster_with_mode_attach_and_harness_session_i
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn say_to_attached_session_round_trips_via_http() {
+    let _guard = SERIAL.lock().await;
     let server = FakeServer::start().await;
     let state = StateDir::new();
     let hub = Hub::start(&state);
@@ -261,6 +275,7 @@ async fn say_to_attached_session_round_trips_via_http() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn interrupt_attached_session_posts_interrupt_and_session_survives() {
+    let _guard = SERIAL.lock().await;
     let server = FakeServer::start().await;
     let state = StateDir::new();
     let hub = Hub::start(&state);
@@ -318,6 +333,7 @@ async fn interrupt_attached_session_posts_interrupt_and_session_survives() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn detach_leaves_fake_opencode_running() {
+    let _guard = SERIAL.lock().await;
     let server = FakeServer::start().await;
     let state = StateDir::new();
     let hub = Hub::start(&state);
@@ -340,6 +356,7 @@ async fn detach_leaves_fake_opencode_running() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn sigint_leaves_fake_opencode_running() {
+    let _guard = SERIAL.lock().await;
     let server = FakeServer::start().await;
     let state = StateDir::new();
     let hub = Hub::start(&state);
@@ -367,6 +384,7 @@ async fn sigint_leaves_fake_opencode_running() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn attach_failure_does_not_stop_sibling_spawn_session() {
+    let _guard = SERIAL.lock().await;
     let server = FakeServer::start().await;
     // A 404 existence check on both prefixes — this attach session's initial
     // attach must fail closed (issue #194's own `check_exists` contract).
@@ -412,6 +430,7 @@ async fn attach_failure_does_not_stop_sibling_spawn_session() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn support_attach_true_support_opencode_reflects_endpoint() {
+    let _guard = SERIAL.lock().await;
     let server = FakeServer::start().await;
     let state = StateDir::new();
     let hub = Hub::start(&state);
@@ -449,6 +468,7 @@ async fn support_attach_true_support_opencode_reflects_endpoint() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn mixed_spawn_and_attach_in_one_config() {
+    let _guard = SERIAL.lock().await;
     let server = FakeServer::start().await;
     let state = StateDir::new();
     let hub = Hub::start(&state);
