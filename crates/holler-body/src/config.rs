@@ -18,6 +18,21 @@
 //! session_id = "ses_..."               # attach: required
 //! ```
 //!
+//! A `command` is any argv, not just a single token — `command[0]` is all
+//! this module (and [`crate::query`]'s PATH-resolution probe) ever looks at,
+//! so a multi-word spawn command works with zero special-casing. For
+//! example, Claude Code has no native `claude acp` subcommand; a session
+//! wired to it goes through the community `@agentclientprotocol/
+//! claude-agent-acp` npm bridge (not shipped by Anthropic; see the README's
+//! "Harness recipes" section and issue #294 for the manual acceptance gate):
+//!
+//! ```text
+//! [[session]]
+//! name = "reviewer"
+//! harness = "claude"
+//! command = ["npx", "-y", "@agentclientprotocol/claude-agent-acp@0.1.5"]
+//! ```
+//!
 //! Every [`ConfigError`] is a fail-closed validation refusal — a duplicate
 //! name, bad name grammar, a missing required field for the chosen mode, or
 //! an unknown top-level/session key (typos must not pass silently, so both

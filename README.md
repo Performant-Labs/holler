@@ -24,6 +24,34 @@ holler body attach init --endpoint http://127.0.0.1:4096 --session ses_1 --name 
 
 Writes a ready `mode = "attach"` `[[session]]` row to `--out` (default `./attach.toml`) and prints the next command to run. `--session` defaults to the endpoint's newest session (from the same listing `sessions` uses) and `--name` defaults to `alpha`. Refuses to overwrite an existing `--out` file unless `--force` is given (exit 3). Neither verb ever spawns a process, prompts a model, or touches Herdr — it is pure HTTP plus a file write.
 
+## Harness recipes
+
+A `[[session]]` row is config, not code (ADR 0012): pointing `harness` and `command` at a new
+ACP-speaking adapter needs no Holler code change or release. For example, Claude Code itself
+doesn't speak ACP — there is no `claude acp` subcommand — so a session that drives it goes through
+[`@agentclientprotocol/claude-agent-acp`](https://www.npmjs.com/package/@agentclientprotocol/claude-agent-acp)
+(npm), the actively-maintained ACP-project bridge for Claude Code:
+
+```toml
+[[session]]
+name = "reviewer"
+harness = "claude"
+command = ["npx", "-y", "@agentclientprotocol/claude-agent-acp@0.1.5"]
+```
+
+- This package is maintained by the ACP project, **not shipped or endorsed by Anthropic**.
+- Its predecessor, `@zed-industries/claude-code-acp`, is **deprecated** in favor of this package —
+  don't reach for it in new config.
+- Pin a specific adapter version (as above) rather than trusting `npx`'s latest-on-each-launch
+  behavior: a silent adapter upgrade could change ACP behavior underneath an already-running body.
+- `holler body support claude` (or `holler body query support claude`) answers the same way it
+  does for every other harness — "does `command[0]` (here, `npx`) resolve on `$PATH` right now" —
+  there is no `claude`-specific special-casing anywhere in that path.
+- This recipe is mechanically identical to any other spawn-mode harness; what it does *not* cover
+  is a real round trip against Claude Code itself. That's tracked as a separate, manual acceptance
+  gate — [issue #294](https://github.com/Performant-Labs/holler/issues/294) — run by a human with
+  real Claude Code credentials, not something CI or a background agent attempts.
+
 ## Debug output
 
 Every `holler` role (`hub serve`, `body run`, and every one-shot CLI leaf) accepts `--debug none|quiet|noisy` (or `HOLLER_DEBUG`; the flag wins) and `--log-format text|json` (or `HOLLER_LOG_FORMAT`). Logging always goes to **stderr** — stdout stays reserved for command output (`--json`, `say`'s reply, …). `none` (the default) emits no debug lines; `quiet` emits one line per event with the frame's *shape* only (component, direction, method, id); `noisy` adds the full **redacted** JSON-RPC/HTTP frame body. `info`/`warn` events (connects, drops, refusals) are always emitted regardless of the debug level.
