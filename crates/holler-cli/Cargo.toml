@@ -239,6 +239,29 @@ path = "tests/multiword_command_test.rs"
 name = "hub_hygiene_test"
 path = "tests/hub_hygiene_test.rs"
 
+# Load test (issue #300): TalkLog behavior at a large accumulated log size —
+# several hundred real prompt/reply exchanges driven through `say` against a
+# real hub + body + `stub-acp`, with per-append latency/file-size
+# characterization and a no-corruption assertion over the whole file. Lives
+# here for the same `CARGO_BIN_EXE_stub-acp` reason as `talk_test.rs`. Its
+# own `[[test]]` target (not folded into `talk_test.rs`) keeps its ~500
+# subprocess-spawning iterations from adding wall-clock to every other
+# `talk_test.rs` case's own binary.
+[[test]]
+name = "talklog_load_test"
+path = "tests/talklog_load_test.rs"
+
+# Load test (issue #301): token mint/redeem at realistic onboarding volume —
+# 20-50 distinct tokens minted, then redeemed concurrently by that many real
+# `body join` subprocesses (real OS threads, real processes), asserting
+# per-token isolation and an uncorrupted on-disk store afterward. Lives here
+# for the same `CARGO_BIN_EXE_holler`/harness reasons as `token_cli_test.rs`;
+# its own `[[test]]` target keeps its threaded subprocess fan-out isolated
+# from that file's other, single-process cases.
+[[test]]
+name = "token_load_test"
+path = "tests/token_load_test.rs"
+
 # Declare only what is consumed (issue #155 §7 — `cargo machete` fails CI
 # otherwise). A story that starts using a workspace dependency adds it here in
 # the same PR; the skeleton's speculative list was removed in #155.
