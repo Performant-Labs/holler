@@ -18,7 +18,8 @@
 //! gate (issue #228) by pushing every leaf's actual logic into a sibling
 //! module — `token_cmd.rs` (`hub token …`), `hub_cmd.rs` (`hub
 //! status|caps|support|query`), `body_cmd.rs` (`body
-//! join|detach|status|run|caps|support|query`), plus the pre-existing
+//! join|detach|status|run|caps|support|query`), `attach_cmd.rs` (`body attach
+//! sessions|init`, issue #196), plus the pre-existing
 //! `say_cmd.rs`/`roster_cmd.rs`/`query_cmd.rs`. Every one of those modules
 //! returns a plain ADR 0003 exit code (already having printed its own
 //! stdout/stderr output); this file's only job is to call the right one and
@@ -47,12 +48,6 @@ use holler_proto::log::{emit_banner, init, resolve};
 #[allow(clippy::let_and_return)] // #176
 fn install_tls_provider() {
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
-}
-
-/// ADR 0003: every unimplemented leaf exits 1 with this shape on stderr.
-fn not_implemented(story: &str) -> ! {
-    eprintln!("error: not implemented (story {story})");
-    std::process::exit(1);
 }
 
 /// Print a leaf command's result (a refusal to stderr with the `error: `
@@ -167,8 +162,9 @@ fn main() {
     // (forget it), and `body status` (report this process's own identity).
     // Story #182 adds `body run` (the live connection loop) and makes `body
     // detach` live-aware (write `detach_request` and wait, when a run is
-    // active, rather than only deleting the credential). The other body
-    // leaves (caps, support, query, attach) are still inert.
+    // active, rather than only deleting the credential). Issue #196 adds
+    // `body attach sessions`/`body attach init` (pure HTTP + file write over
+    // an OpenCode endpoint, no hub/`SessionManager` involvement).
     if let Command::Body(body) = &cli.command {
         match &body.command {
             BodyCommand::Join(join) => {
@@ -183,8 +179,12 @@ fn main() {
             }
             BodyCommand::Query(query) => std::process::exit(holler_cli::body_cmd::query(query, cli.json)),
             BodyCommand::Attach(Attach { command }) => match command {
-                AttachCommand::Sessions(_) => not_implemented("BodyAttachSessions"),
-                AttachCommand::Init(_) => not_implemented("BodyAttachInit"),
+                AttachCommand::Sessions(sessions) => {
+                    std::process::exit(holler_cli::attach_cmd::sessions(sessions, cli.json));
+                }
+                AttachCommand::Init(init) => {
+                    std::process::exit(holler_cli::attach_cmd::init(init, cli.json));
+                }
             },
         }
     }
