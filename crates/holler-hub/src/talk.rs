@@ -175,7 +175,12 @@ pub struct SayOutcome {
 /// live hub's own `HubState` (for the TalkLog path); `label` is this call's
 /// own request id source (an `h-…` [`holler_proto::CorrelationId`] is minted
 /// internally per call, so `say` and any concurrent `say` never share a
-/// `prompt_id`).
+/// `prompt_id`). `roster` gets this turn's `turn_id`/`last_turn` written
+/// straight onto the row (issue #142) — ahead of dispatch and the instant the
+/// response lands — so the roster is authoritative even between presence
+/// beats (`prompt_response_updates_last_turn_before_next_presence`); the next
+/// real presence overwrites the row anyway, so this is a best-effort
+/// forward-fill, not the row's system of record.
 pub async fn say(
     registry: &Registry,
     roster: &Roster,
@@ -219,7 +224,7 @@ pub async fn say(
     }
 
     let kind = if queue { TurnKind::Queue } else { TurnKind::Plain };
-    send_turn(registry, state, &handle, &ad, text, kind, timeout).await
+    send_turn(&TurnCtx { registry, roster, state }, &handle, &ad, text, kind, timeout).await
 }
 
 /// `interrupt SESSION TEXT`'s own redirect turn (issue #191): unlike [`say`],
@@ -231,13 +236,14 @@ pub async fn say(
 /// benign-but-pointless re-race against the registry's own presence cache).
 pub async fn send_replace_turn(
     registry: &Registry,
+    roster: &Roster,
     state: &HubState,
     handle: &LiveHandle,
     ad: &holler_proto::SessionAd,
     text: &str,
     timeout: Duration,
 ) -> Result<SayOutcome, SayError> {
-    send_turn(registry, state, handle, ad, text, TurnKind::Replace, timeout).await
+    send_turn(&TurnCtx { registry, roster, state }, handle, ad, text, TurnKind::Replace, timeout).await
 }
 
 /// `queue`/`replace` collapsed into one enum purely to keep [`send_turn`]
@@ -264,23 +270,40 @@ impl TurnKind {
     }
 }
 
+/// The shared hub-side context every [`send_turn`] call needs — bundled
+/// purely to keep that function's own argument count under clippy's
+/// too-many-arguments gate once issue #142 added `roster` alongside
+/// `registry`/`state`; each field is exactly as independent as before, just
+/// passed as one struct instead of three positional refs.
+struct TurnCtx<'a> {
+    registry: &'a Registry,
+    roster: &'a Roster,
+    state: &'a HubState,
+}
+
 /// The shared tail of [`say`]/[`send_replace_turn`]: mint a request id, send
 /// `session/prompt` (a plain one, a `--queue`d one, or — issue #191 — a
 /// `replace:true` redirect), collect the reply, append the TalkLog, and hand
 /// back a [`SayOutcome`]. Split out once #191 needed a second caller that
 /// skips the busy check but shares everything after it.
 async fn send_turn(
-    registry: &Registry,
-    state: &HubState,
+    ctx: &TurnCtx<'_>,
     handle: &LiveHandle,
     ad: &holler_proto::SessionAd,
     text: &str,
     kind: TurnKind,
     timeout: Duration,
 ) -> Result<SayOutcome, SayError> {
+    let TurnCtx { registry, roster, state } = *ctx;
     let request_id = holler_proto::CorrelationId::mint_hub().as_str().to_string();
     let message = user_message(&request_id, text);
     let started = Instant::now();
+
+    // Issue #142: the roster's own `turn_id` moves the instant this turn is
+    // dispatched, ahead of the body's next presence heartbeat — so a `wait
+    // --after <prev turn_id>` started right after this call already sees a
+    // fresh in-flight turn rather than the stale one it was watermarked on.
+    roster.set_turn_id(&handle.token_id, ad.name.as_str(), &request_id);
 
     append_talklog(state, &handle.hostname, ad.name.as_str(), &TalkLine::Prompt {
         prompt_id: request_id.clone(),
@@ -330,14 +353,19 @@ async fn send_turn(
             if stop_reason == "cancelled" {
                 return Err(SayError::Cancelled);
             }
-            let mut updated_ad = ad.clone();
-            updated_ad.last_turn = Some(holler_proto::docs::LastTurn {
+            let last_turn = holler_proto::docs::LastTurn {
                 turn_id: request_id.clone(),
                 state: holler_proto::state_for_stop_reason(&stop_reason).unwrap_or(SessionState::Failed),
                 stop_reason: stop_reason.clone(),
                 ended_at: holler_proto::log::timestamp(),
-            });
+            };
+            let mut updated_ad = ad.clone();
+            updated_ad.last_turn = Some(last_turn.clone());
             registry.replace_session(handle, updated_ad).await;
+            // Issue #142: write `last_turn` onto the roster row directly, the
+            // instant this response lands — the roster is authoritative even
+            // between presence beats (see this fn's own doc comment).
+            roster.set_last_turn(&handle.token_id, ad.name.as_str(), last_turn);
             Ok(SayOutcome {
                 session: format!("{}/{}", handle.hostname, ad.name),
                 message: *message,

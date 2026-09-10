@@ -61,6 +61,10 @@ use holler_proto::docs::{LastTurn, PendingItem, SessionAd};
 use holler_proto::Presence;
 use tokio::sync::watch;
 
+mod rfc3339;
+use rfc3339::parse_rfc3339_secs;
+pub use rfc3339::parse_rfc3339_secs_since;
+
 /// The TTL thresholds and the stall display threshold, all in whole seconds.
 ///
 /// The defaults are the spec's; the test env overrides (`HOLLER_ROSTER_*_MS`)
@@ -201,6 +205,9 @@ struct Inner {
     /// `drop_absent`) read `now` from the *roster's* clock — the manual clock
     /// in the unit tests — and never the system clock.
     clock: Clock,
+    /// How many times [`Roster::rows_matching`] has run (see
+    /// [`Roster::read_count`]).
+    read_count: AtomicU64,
 }
 
 impl Inner {
@@ -215,6 +222,7 @@ impl Inner {
             change_tx: watch::Sender::default(),
             gen,
             clock,
+            read_count: AtomicU64::new(0),
         }
     }
 
@@ -522,6 +530,7 @@ impl Roster {
     pub fn rows_matching(&self, all: Option<bool>, prefix: Option<&str>) -> Vec<Row> {
         let (rows, now) = {
             let inner = self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            inner.read_count.fetch_add(1, Ordering::SeqCst);
             let rows: Vec<Row> = inner.rows.values().cloned().collect();
             (rows, inner.now_secs())
         };
@@ -549,6 +558,63 @@ impl Roster {
     /// long between [`Roster::sweep`] calls).
     pub fn sweep_ms(&self) -> u64 {
         self.cfg.sweep_ms
+    }
+
+    /// Set a row's `turn_id` directly (issue #142), ahead of the next
+    /// presence beat: called the instant a `session/prompt` is dispatched, so
+    /// `wait --after` can observe the new in-flight turn immediately rather
+    /// than waiting up to one heartbeat interval. Matched by `token_id` +
+    /// the *bare* session name ([`row_matches_bare`]) — the caller (`talk::
+    /// say`) knows the connection's token and the bare name, not whatever
+    /// label the roster qualified the row with. A no-op (no generation bump)
+    /// if no such row exists yet (the row's first presence hasn't landed) —
+    /// the presence that follows will carry the same `turn_id` anyway.
+    pub fn set_turn_id(&self, token_id: &str, bare_name: &str, turn_id: &str) {
+        let mut inner = self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut changed = false;
+        for row in inner.rows.values_mut() {
+            if row.token_id == token_id && row_matches_bare(&row.name, bare_name) {
+                row.turn_id = Some(turn_id.to_string());
+                changed = true;
+            }
+        }
+        if changed {
+            inner.bump_gen();
+        }
+    }
+
+    /// Set a row's `last_turn` directly (issue #142): called the instant a
+    /// turn's `session/prompt` response lands, so the roster row is
+    /// authoritative even between presence beats (the hub also receives the
+    /// turn's terminal state as the `session/prompt` response itself, ahead of
+    /// whatever the body's next heartbeat says — `prompt_response_updates_
+    /// last_turn_before_next_presence`). Same matching rule as
+    /// [`Roster::set_turn_id`]; a no-op if the row is not yet known.
+    pub fn set_last_turn(&self, token_id: &str, bare_name: &str, last_turn: LastTurn) {
+        let mut inner = self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut changed = false;
+        for row in inner.rows.values_mut() {
+            if row.token_id == token_id && row_matches_bare(&row.name, bare_name) {
+                row.last_turn = Some(last_turn.clone());
+                changed = true;
+            }
+        }
+        if changed {
+            inner.bump_gen();
+        }
+    }
+
+    /// How many times [`Roster::rows_matching`] has read the live row table
+    /// (issue #142's `wait_uses_no_polling`: a real event-driven wait reads
+    /// the roster once per *actual* change, not once per fixed poll tick —
+    /// this counter is how the test tells the two apart without scraping log
+    /// output).
+    pub fn read_count(&self) -> u64 {
+        self.inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .read_count
+            .load(Ordering::SeqCst)
     }
 
     // -- internals -----------------------------------------------------------
@@ -750,6 +816,17 @@ fn qualified_name(info: &TokenInfo, s: &SessionAd) -> String {
     }
 }
 
+/// True iff a (possibly qualified) row `name` is the advertisement for the
+/// *bare* session name `bare` — either the row carries no label (`name ==
+/// bare`) or it is qualified and `bare` is its final segment (`name ==
+/// "<label>/<bare>"`). Used by [`Roster::set_turn_id`]/[`Roster::
+/// set_last_turn`], whose callers (`talk::say`) know a connection's token id
+/// and the bare session name it prompted, not the label the roster qualified
+/// the row with.
+fn row_matches_bare(name: &str, bare: &str) -> bool {
+    name == bare || name.ends_with(&format!("/{bare}"))
+}
+
 /// `--prefix` matching (issue #236, ADR 0005 §4): `name` matches `prefix`
 /// when it is exactly `prefix` or nests under it (`name.starts_with(
 /// "{prefix}/")`). A trailing `/` on `prefix` (e.g. `io/`, matching the ADR's
@@ -763,101 +840,6 @@ fn name_matches_prefix(name: &str, prefix: Option<&str>) -> bool {
         return true;
     }
     name == prefix || name.starts_with(&format!("{prefix}/"))
-}
-
-/// Parse an RFC3339 timestamp into whole epoch seconds, or `None` (an absent /
-/// malformed timestamp is treated as "no update signal" — it never stalls a
-/// row on its own). The body emits these from `SystemTime` (UTC, so the offset
-/// is `Z`/`+00:00`); the parser accepts that profile and is lenient about a
-/// fractional-second suffix. A non-UTC offset would be mis-parsed, but that
-/// never happens on this wire — and even then the failure is only a missed
-/// *display* hint (the row keeps showing `working`), never a correctness bug.
-fn parse_rfc3339_secs(ts: Option<&str>) -> Option<u64> {
-    ts.and_then(parse_rfc3339)
-}
-
-/// Parse a single RFC3339 `YYYY-MM-DDTHH:MM:SS(.fff)?Z` timestamp to epoch
-/// seconds. Returns `None` on any shape the body never produces.
-fn parse_rfc3339(s: &str) -> Option<u64> {
-    let bytes = s.as_bytes();
-    if bytes.len() < 20 {
-        return None;
-    }
-    // YYYY-MM-DD
-    let year: i64 = s[0..4].parse().ok()?;
-    if bytes[4] != b'-' {
-        return None;
-    }
-    let month: i64 = s[5..7].parse().ok()?;
-    if bytes[7] != b'-' {
-        return None;
-    }
-    let day: i64 = s[8..10].parse().ok()?;
-    // 'T' separator
-    if !matches!(bytes[10], b'T' | b't' | b' ') {
-        return None;
-    }
-    let hour: i64 = s[11..13].parse().ok()?;
-    if bytes[13] != b':' {
-        return None;
-    }
-    let minute: i64 = s[14..16].parse().ok()?;
-    if bytes[16] != b':' {
-        return None;
-    }
-    let second: i64 = s[17..19].parse().ok()?;
-    // Optional fractional seconds: consume `.fff…` if present.
-    let mut rest = 19usize;
-    if bytes.get(rest) == Some(&b'.') {
-        rest += 1;
-        while rest < bytes.len() && bytes[rest].is_ascii_digit() {
-            rest += 1;
-        }
-    }
-    // Zone: accept a `Z` (or lowercase `z`) or a `+00:00` / `-00:00` offset.
-    if matches!(bytes.get(rest), Some(&b'Z') | Some(&b'z')) {
-        // (Trailing bytes after the zone, if any, are ignored — the body emits
-        // exactly `...Z`.)
-    } else if matches!(bytes.get(rest), Some(&b'+') | Some(&b'-')) {
-        // A non-Z offset; only treat it as epoch-correct when it is UTC.
-        if rest + 5 >= bytes.len() {
-            return None;
-        }
-        let off = s.get(rest + 1..rest + 5)?;
-        if off != "00:00" {
-            return None;
-        }
-    } else {
-        return None;
-    }
-    // The body emits post-1970 UTC timestamps, so the value is non-negative;
-    // convert the `i64` day/time math to `u64` (rejecting any pre-epoch input).
-    let secs = days_from_civil(year, month, day) * 86_400 + hour * 3600 + minute * 60 + second;
-    u64::try_from(secs).ok()
-}
-
-/// Howard Hinnant's `days_from_civil` — whole days since 1970-01-01 for a
-/// proleptic Gregorian date. (The standard 6-line algorithm.)
-fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
-    let y = if month <= 2 {
-        year - 1
-    } else {
-        year
-    };
-    let era = if y >= 0 {
-        y
-    } else {
-        y - 399
-    } / 400;
-    let yoe = y - era * 400;
-    let m = if month > 2 {
-        month - 3
-    } else {
-        month + 9
-    };
-    let doy = (153 * m + 2) / 5 + day - 1;
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    era * 146097 + doe - 719468
 }
 
 /// Read a millisecond env var (`HOLLER_*_MS`); an absent/empty/unparseable var
