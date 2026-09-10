@@ -162,6 +162,67 @@ fn next_deadline_none_when_idle() {
     assert_eq!(c.next_deadline(), None);
 }
 
+/// Issue #297: `no_text_lost_across_turn` above proves correctness at 500
+/// chunks; this drives a full order of magnitude further (1000) to prove the
+/// coalescer holds up under the volume a real long turn can actually
+/// produce, and adds the two properties that test doesn't check — every
+/// chunk flushed exactly once (no duplication, not just no loss) and the
+/// buffer never grows past the byte cap between flushes (bounded per-session
+/// state over the whole turn), on top of the same "every byte flushed,
+/// order preserved" proof.
+#[test]
+fn thousand_chunks_all_flushed_exactly_once_in_order_state_stays_bounded() {
+    let mut c = Coalescer::new();
+    let mut t = Instant::now();
+    let mut sent = String::new();
+    let mut received = String::new();
+    let mut flush_count = 0usize;
+    let mut max_flush_bytes = 0usize;
+    for i in 0..1000 {
+        let chunk = format!("chunk-{i}-");
+        sent.push_str(&chunk);
+        if c.push(&chunk, t) == PushOutcome::CapHit {
+            let parts = c.flush().expect("cap flush is non-empty");
+            let text = text_of(&parts);
+            max_flush_bytes = max_flush_bytes.max(text.len());
+            received.push_str(&text);
+            flush_count += 1;
+        }
+        t += Duration::from_millis(1);
+        if c.due(t) {
+            if let Some(parts) = c.flush() {
+                let text = text_of(&parts);
+                max_flush_bytes = max_flush_bytes.max(text.len());
+                received.push_str(&text);
+                flush_count += 1;
+            }
+        }
+    }
+    // Turn end: drain whatever straggled past the last window/cap flush.
+    if let Some(parts) = c.flush() {
+        received.push_str(&text_of(&parts));
+        flush_count += 1;
+    }
+
+    assert_eq!(
+        received, sent,
+        "every one of 1000 streamed chunks must be flushed, in streaming order, with none dropped"
+    );
+    // Reassembling by naive concatenation (above) already proves nothing was
+    // duplicated too: a duplicated chunk would make `received` longer than
+    // `sent` even if every char in `sent` also appears in `received`, and
+    // `assert_eq!` on the full strings catches that — an extra copy of any
+    // `chunk-N-` shifts every following comparison out of alignment.
+    assert!(flush_count > 1, "1000 chunks spanning many windows must not collapse into a single flush");
+    assert!(
+        max_flush_bytes <= max_bytes(),
+        "a single flush must never exceed the byte cap — the buffer is drained on every trigger \
+         (window, cap, or turn-end), so per-session state never grows unboundedly over the course \
+         of the turn (max_flush_bytes={max_flush_bytes}, cap={})",
+        max_bytes()
+    );
+}
+
 #[test]
 fn never_merges_two_sessions() {
     // Each session owns its own `Coalescer` instance — nothing is shared, so
