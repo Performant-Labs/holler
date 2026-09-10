@@ -25,6 +25,7 @@
 //! hub and body both link it.
 
 pub mod a2a;
+pub mod clock;
 pub mod docs;
 pub mod envelope;
 pub mod error;
@@ -37,6 +38,7 @@ pub mod vocab;
 
 // Flat re-exports so the common path is `holler_proto::{...}`.
 pub use a2a::{Content, Message, Part, Role, TaskState};
+pub use clock::{now_millis, now_secs};
 pub use docs::{
     state_for_stop_reason, Answer, AnswerResult, AuthOk, Authenticate, Cancel, CancelResult, Caps,
     ConfirmedHarness, Hello, HelloRole, HelloSession, Join, JoinResult, Mode, PendingItem,
