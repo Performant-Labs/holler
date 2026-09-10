@@ -25,6 +25,8 @@
 
 use std::time::Duration;
 
+use futures_util::stream::FuturesUnordered;
+use futures_util::StreamExt;
 use holler_body::config::{Interrupt, SessionConfig, SessionMode};
 use holler_body::registry::SessionRegistry;
 use holler_body::session_manager::{PromptOutcome, SessionManager, SessionManagerError};
@@ -286,6 +288,105 @@ async fn queue_overflow_is_limit_exceeded() {
     // The 65th is refused outright: the queue is already full.
     let overflow = manager.prompt(&alpha, "q64", "one too many", true).await;
     assert_eq!(overflow, Ok(PromptOutcome::QueueFull));
+}
+
+/// Issue #298: `queue_overflow_is_limit_exceeded` above proves the FIFO
+/// queue's own hard cap (`QUEUE_CAP` = 64) is enforced correctly at exactly
+/// that depth; this proves the queue's *drain* behavior holds up under a
+/// backlog several times larger than that steady-state capacity — 120
+/// prompts pushed through it while `alpha` is kept deliberately busy, topped
+/// up continuously as it drains rather than sent all at once (which the
+/// 64-cap would just refuse outright, per that test) — with strict FIFO
+/// drain order, no dropped or corrupted entries, and internally consistent
+/// busy/queue state throughout.
+///
+/// Completion order is observed through a real `FuturesUnordered`, not a
+/// manually-raced `tokio::select!` per future: since `SessionManager`
+/// dispatches turns for one session strictly one at a time (the very
+/// property under test), `FuturesUnordered::next()` yields each queued
+/// prompt's `Result` in true completion order with no risk of the executor
+/// reordering two independently-spawned tasks' own wake-ups — the risk a
+/// hand-rolled "spawn N tasks, race them, push to a shared Vec" version of
+/// this test would carry.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn large_backlog_drains_in_strict_fifo_order_no_loss() {
+    let manager = SessionManager::start(&registry_of(&[("alpha", &["--chunks", "1"])]));
+    let alpha = sn("alpha");
+
+    let occupying = manager.prompt(&alpha, "occ", "hi", false);
+    tokio::pin!(occupying);
+    tokio::select! {
+        res = &mut occupying => panic!("finished early: {res:?}"),
+        () = wait_for_state(&manager, &alpha, SessionState::Working, Duration::from_secs(2)) => {}
+    }
+
+    const N: usize = 120;
+    let mut pending = FuturesUnordered::new();
+    let mut next_to_submit = 0usize;
+    let mut completion_order: Vec<String> = Vec::new();
+    // 120s, not the ~14s this reliably takes on a fast dev machine: CI's
+    // macOS runner measured >2x slower in practice (a 30s bound tripped
+    // there while the backlog was still draining correctly, just slowly —
+    // see PR #306's first CI run). Still a hard, bounded ceiling — a
+    // genuinely stuck drain fails loudly well short of "minutes".
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(120);
+
+    while completion_order.len() < N {
+        assert!(tokio::time::Instant::now() < deadline, "backlog did not drain within 30s");
+
+        // Top the backlog up while there is real, observed room for it —
+        // `QueueFull` (not an assumption about capacity) is what stops this
+        // inner loop, exactly like `queue_overflow_is_limit_exceeded`'s own
+        // fill-to-cap loop.
+        while next_to_submit < N {
+            let idx = next_to_submit;
+            let mut fut = Box::pin(manager.prompt(&alpha, format!("q{idx}"), format!("queued {idx}"), true));
+            tokio::select! {
+                biased;
+                res = fut.as_mut() => {
+                    assert_eq!(
+                        res,
+                        Ok(PromptOutcome::QueueFull),
+                        "q{idx} resolved immediately with something other than QueueFull: {res:?}"
+                    );
+                    break; // no room right now — drain some before topping up further
+                }
+                () = tokio::time::sleep(Duration::from_millis(2)) => {
+                    // Accepted (queued, or dispatched immediately if alpha
+                    // had already gone idle) — hand it to the completion
+                    // stream and move on to the next index right away.
+                    pending.push(fut);
+                    next_to_submit += 1;
+                }
+            }
+        }
+
+        let res = pending.next().await.expect("more prompts are still outstanding");
+        match res {
+            Ok(PromptOutcome::Result { turn_id, stop_reason, state, .. }) => {
+                assert_eq!(stop_reason, "end_turn", "{turn_id} did not end cleanly");
+                assert_eq!(state, SessionState::Completed, "{turn_id} did not end cleanly");
+                completion_order.push(turn_id);
+            }
+            other => panic!("unexpected queued outcome: {other:?}"),
+        }
+    }
+
+    let occ_res = occupying.await;
+    assert_result_ok(&occ_res, "occ", "end_turn", SessionState::Completed);
+
+    assert_eq!(
+        completion_order.len(),
+        N,
+        "every one of the {N} queued prompts must complete exactly once — none dropped or duplicated"
+    );
+    let expected: Vec<String> = (0..N).map(|i| format!("q{i}")).collect();
+    assert_eq!(completion_order, expected, "the backlog must drain in strict FIFO order");
+
+    // The manager settles back to a clean idle state once the whole backlog
+    // (occupying turn + all 120 queued ones) has drained — no turn left
+    // dangling, no corrupted busy/queue state left over from the churn.
+    assert_eq!(state_of(&manager, &alpha).await, SessionState::Idle);
 }
 
 #[tokio::test]
