@@ -176,7 +176,7 @@ async fn run_loop(
                     state_root,
                     &crate::connection_state::ConnectionState {
                         state: crate::connection_state::ConnState::Reconnecting,
-                        since: crate::connection_state::now_secs(),
+                        since: holler_proto::now_secs(),
                         last_frame_at: None,
                         attempt,
                     },
@@ -219,7 +219,7 @@ fn mark_disconnected(state_root: &Path) -> std::io::Result<()> {
         state_root,
         &crate::connection_state::ConnectionState {
             state: crate::connection_state::ConnState::Disconnected,
-            since: crate::connection_state::now_secs(),
+            since: holler_proto::now_secs(),
             last_frame_at: None,
             attempt: 0,
         },
@@ -311,7 +311,7 @@ async fn connect_and_serve(
         state_root,
         &crate::connection_state::ConnectionState {
             state: crate::connection_state::ConnState::Connecting,
-            since: crate::connection_state::now_secs(),
+            since: holler_proto::now_secs(),
             last_frame_at: None,
             attempt,
         },
@@ -335,8 +335,8 @@ async fn connect_and_serve(
         state_root,
         &crate::connection_state::ConnectionState {
             state: crate::connection_state::ConnState::Connected,
-            since: crate::connection_state::now_secs(),
-            last_frame_at: Some(crate::connection_state::now_secs()),
+            since: holler_proto::now_secs(),
+            last_frame_at: Some(holler_proto::now_secs()),
             attempt: 0,
         },
     );
@@ -440,6 +440,18 @@ where
     tokio::time::timeout(Duration::from_secs(10), next_envelope(stream)).await.ok()?
 }
 
+/// Issue #207: this is duplicated verbatim in `holler-hub`'s
+/// `circuit::next_envelope` (same generic signature, same body). It is
+/// deliberately *not* hoisted into `holler_proto` alongside [`now_secs`]/
+/// [`now_millis`] (`holler-proto`'s clock helpers): `holler_proto::lib`'s own
+/// doc comment states "this crate has no network or async dependency", and
+/// this function's bound (`Stream<Item = Result<Message, WsError>>`) is
+/// `tokio_tungstenite`-specific — hoisting it would mean adding
+/// `tokio-tungstenite`/`futures-util` as dependencies of a crate whose
+/// documented charter is exactly *not* to carry transport dependencies. That
+/// is a bigger architectural change than this issue's "pure refactor, no
+/// behavior change" scope, so the ~8-line loop stays local to each of the two
+/// crates that own a transport.
 async fn next_envelope<St>(stream: &mut St) -> Option<Envelope>
 where
     St: Stream<Item = Result<Message, WsError>> + Unpin,
@@ -703,7 +715,7 @@ where
         );
         match env {
             Envelope::Request { id, method, .. } if method == "circuit/ping" => {
-                let ack = PingAck { hostname: self.identity.hostname.clone(), ts: now_millis() };
+                let ack = PingAck { hostname: self.identity.hostname.clone(), ts: holler_proto::now_millis() };
                 let Ok(cid) = CorrelationId::parse(&id) else { return FrameOutcome::Continue };
                 let resp = Envelope::response(&cid, Some(serde_json::to_value(ack).unwrap_or_default()));
                 match send(self.sink, &resp).await {
@@ -875,9 +887,3 @@ where
     send(sink, &Envelope::notification("session/presence", Some(params))).await
 }
 
-fn now_millis() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
-}
