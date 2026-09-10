@@ -61,6 +61,7 @@
 //!   retry of the failed turn itself, which is reported to its own caller as
 //!   a normal terminal `PromptOutcome::Result{state: Failed, ..}`).
 
+mod driver;
 mod task;
 
 use std::collections::BTreeMap;
@@ -320,13 +321,24 @@ impl SessionManager {
     /// state — the dynamic replacement for
     /// [`crate::registry::SessionRegistry::presence_doc`]'s always-`idle`
     /// snapshot (that one has no driver behind it yet; this one does).
+    ///
+    /// An attach-mode session that has never yet completed its initial
+    /// [`crate::http_attach_driver::HttpAttachDriver::attach`] (its very
+    /// first attempt failed, and `task`'s own 30s retry loop has not
+    /// succeeded yet) is **omitted entirely** from this document (issue
+    /// #195's own spec: "presence omits the session until it attaches on a
+    /// 30s retry") — never advertised as a fabricated `idle` row for a
+    /// harness session this body cannot actually reach yet.
     pub fn presence_doc(&self, hostname: String) -> Presence {
         let sessions = self
             .sessions
             .iter()
-            .map(|(name, managed)| {
+            .filter_map(|(name, managed)| {
                 let p = managed.presence.lock().unwrap_or_else(PoisonError::into_inner);
-                SessionAd {
+                if p.omitted_pending_attach {
+                    return None;
+                }
+                Some(SessionAd {
                     name: name.as_str().to_string(),
                     harness: managed.config.harness.clone(),
                     state: p.state,
@@ -340,7 +352,7 @@ impl SessionManager {
                     pending: p.pending.clone(),
                     turn_id: p.turn_id.clone(),
                     last_turn: p.last_turn.clone(),
-                }
+                })
             })
             .collect();
         Presence { hostname, sessions }

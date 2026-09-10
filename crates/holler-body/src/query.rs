@@ -57,6 +57,7 @@ pub fn local_status(state_root: &Path, identity: Option<&BodyIdentity>, configs:
             name: s.name.as_str().to_string(),
             harness: s.harness.clone(),
             state: WireSessionState::Idle,
+            endpoint: s.endpoint.clone(),
         })
         .collect();
 
@@ -95,15 +96,20 @@ pub fn local_caps(state_root: &Path, identity: Option<&BodyIdentity>, configs: &
 }
 
 /// Answer `query/support {feature}` (docs §5.3) for this body: local probes
-/// only, never a model.
+/// only, never a model — with one deliberate exception (issue #195): an
+/// `attach`-mode harness's probe dials the real endpoint (see
+/// [`probe_attach_session_live`]'s own doc comment for why that stays a
+/// short, bounded, plain-sync TCP probe rather than growing an async
+/// `reqwest` call into this function).
 ///
 /// - A **harness** id is `ok:true` when some configured session names that
-///   harness and either (a) it is `attach` mode (issue #185: "does the
-///   attach endpoint answer" — this probe does not dial out to verify that;
-///   an `attach` session's mere presence in config is treated as `ok:true,
-///   how:"attach"`, a decision documented in the PR and left for a follow-up
-///   story to make a real probe), or (b) it is `spawn` mode and
-///   `command[0]` resolves on `PATH` or as an existing path.
+///   harness and either (a) it is `attach` mode and its endpoint answers
+///   `GET /session/{session_id}` (bare, falling back to `/api/session/{id}`
+///   — the same dual-prefix existence check
+///   `http_attach_driver::check_exists` uses; issue #185 originally left
+///   this an untested "presence in config is enough" placeholder, replaced
+///   here with the issue #195 spec's real probe), or (b) it is `spawn` mode
+///   and `command[0]` resolves on `PATH` or as an existing path.
 /// - A **capability** id (`attach`, `opencode-http`) is always `ok:true`
 ///   (both are implemented body-side, independent of session config).
 /// - Any other **feature** id is `ok:true` (this body speaks the whole
@@ -144,12 +150,23 @@ fn harness_support(harness: &str, configs: &[SessionConfig]) -> Support {
     for s in &sessions {
         match s.mode {
             SessionMode::Attach => {
+                let (endpoint, session_id) = (s.endpoint.as_deref(), s.session_id.as_deref());
+                let ok = match (endpoint, session_id) {
+                    (Some(endpoint), Some(session_id)) => {
+                        probe_attach_session_live(endpoint, session_id)
+                    }
+                    // Defensive: `config::parse` already refuses an `attach`
+                    // row missing either field, so this never happens for a
+                    // config that reached this far — but a probe with
+                    // nothing to dial is `ok:false`, not a fabricated `true`.
+                    _ => false,
+                };
                 return Support {
                     feature: harness.to_string(),
                     kind: SupportKind::Harness,
-                    ok: true,
-                    how: Some("attach".to_string()),
-                    reason: None,
+                    ok,
+                    how: ok.then(|| "attach".to_string()),
+                    reason: (!ok).then(|| "attach endpoint did not answer".to_string()),
                 };
             }
             SessionMode::Spawn => {
@@ -174,6 +191,95 @@ fn harness_support(harness: &str, configs: &[SessionConfig]) -> Support {
         how: None,
         reason: Some("command[0] not found on PATH".to_string()),
     }
+}
+
+/// A short, bounded, **plain synchronous** existence probe against an
+/// attach-mode harness's real endpoint (issue #195's `support opencode`
+/// spec: "ok iff the endpoint answers `GET /session/{id}`"), hand-rolled
+/// over `std::net::TcpStream` rather than an async `reqwest` call.
+///
+/// This module's callers are a mix of sync and async contexts: the CLI's
+/// `body support`/`body caps`/`body query support` leaves call
+/// [`local_support`]/[`local_caps`] directly from a plain, runtime-free
+/// `fn main` (no tokio context at all), while a live `body run`'s
+/// `dispatch::handle_query` calls the very same functions from inside an
+/// already-running tokio runtime. An async probe would need either a nested
+/// `tokio::runtime::Builder` per sync call site (workable, but see
+/// `join.rs`'s own "a body is a short-lived CLI with no runtime in scope"
+/// framing for why that pattern exists there but is unnecessary here) or —
+/// far worse — a `.block_on()` from *inside* the already-running runtime,
+/// which tokio does not allow at all. A tiny, bounded (≤ ~1.6s total: two
+/// prefixes, ~800ms connect+read timeout each), hand-rolled blocking TCP
+/// probe sidesteps the whole question: it is safe to call from either
+/// context (the same trade-off this workspace's own hand-rolled fake test
+/// server and `holler_hub::serve`'s hand-rolled WebSocket upgrade already
+/// make — see `fake_server.rs`'s own module doc), at the cost of briefly
+/// blocking whichever thread calls it. Acceptable here: `support`/`caps` are
+/// low-frequency, human-triggered admin queries, not a hot path.
+///
+/// Tries the bare `GET {endpoint}/session/{id}` form first, falling back to
+/// `/api/session/{id}` on any failure of the first — the same dual-prefix
+/// fallback `http_attach_driver::check_exists` uses (both forms were
+/// independently confirmed live to work as an existence probe; see that
+/// function's own doc comment). A connect failure, a timeout, or any
+/// non-2xx status from *both* prefixes is `false` — this is a "does the
+/// harness live here" signal for `support`/`caps`, not a fail-closed attach
+/// gate, so it fails open to `false` rather than erroring.
+fn probe_attach_session_live(endpoint: &str, session_id: &str) -> bool {
+    let path_bare = format!("/session/{session_id}");
+    let path_api = format!("/api/session/{session_id}");
+    probe_one(endpoint, &path_bare) || probe_one(endpoint, &path_api)
+}
+
+/// One bounded blocking `GET {endpoint}{path}` — `true` iff the response's
+/// HTTP status line is in the `2xx` range. See
+/// [`probe_attach_session_live`]'s own doc comment for why this is
+/// hand-rolled sync TCP rather than `reqwest`.
+fn probe_one(endpoint: &str, path: &str) -> bool {
+    use std::io::{Read, Write};
+    use std::net::{TcpStream, ToSocketAddrs};
+    use std::time::Duration;
+
+    const CONNECT_TIMEOUT: Duration = Duration::from_millis(800);
+    const IO_TIMEOUT: Duration = Duration::from_millis(800);
+
+    let Some((host, port)) = parse_host_port(endpoint) else { return false };
+    let Ok(mut addrs) = (host.as_str(), port).to_socket_addrs() else { return false };
+    let Some(addr) = addrs.next() else { return false };
+    let Ok(mut stream) = TcpStream::connect_timeout(&addr, CONNECT_TIMEOUT) else { return false };
+    let _ = stream.set_read_timeout(Some(IO_TIMEOUT));
+    let _ = stream.set_write_timeout(Some(IO_TIMEOUT));
+
+    let request =
+        format!("GET {path} HTTP/1.1\r\nHost: {host}:{port}\r\nConnection: close\r\n\r\n");
+    if stream.write_all(request.as_bytes()).is_err() {
+        return false;
+    }
+
+    let mut buf = [0u8; 128];
+    let Ok(n) = stream.read(&mut buf) else { return false };
+    let text = String::from_utf8_lossy(&buf[..n]);
+    // The status line's second whitespace-separated token is the numeric
+    // code (`"HTTP/1.1 200 OK"` → `"200"`).
+    text.split_whitespace()
+        .nth(1)
+        .and_then(|code| code.parse::<u16>().ok())
+        .is_some_and(|code| (200..300).contains(&code))
+}
+
+/// Split `"http://127.0.0.1:4096"` (or `https://…`, or a bare `"host:port"`)
+/// into `(host, port)`. `None` for anything that does not carry an explicit
+/// port — this probe never guesses a default (attach `endpoint`s are always
+/// written with one; see `config.rs`'s own grammar doc).
+fn parse_host_port(endpoint: &str) -> Option<(String, u16)> {
+    let without_scheme = endpoint
+        .split_once("://")
+        .map(|(_, rest)| rest)
+        .unwrap_or(endpoint);
+    let authority = without_scheme.split('/').next().unwrap_or(without_scheme);
+    let (host, port) = authority.rsplit_once(':')?;
+    let port: u16 = port.parse().ok()?;
+    Some((host.to_string(), port))
 }
 
 /// `true` iff `cmd` is directly runnable: an existing file at an absolute or

@@ -7,16 +7,26 @@
 
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex, PoisonError};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use futures_util::StreamExt;
 use holler_proto::docs::{LastTurn, PendingItem};
+use holler_proto::log::{Component, Direction as LogDirection, Event as LogEvent, Severity};
 use holler_proto::{log, SessionName, SessionState};
 use tokio::sync::{broadcast, mpsc, oneshot};
 
+use super::driver::Driver;
 use super::{PromptOutcome, SessionCommand, QUEUE_CAP};
-use crate::acp_driver::{AcpDriver, DriverEvent, DriverEventStream, DriverState, StopReason};
-use crate::config::SessionConfig;
+use crate::acp_driver::{DriverEvent, DriverEventStream, DriverState, StopReason};
+use crate::config::{SessionConfig, SessionMode};
+
+/// How often a session whose initial attach failed retries
+/// [`crate::http_attach_driver::HttpAttachDriver::attach`] (issue #195's own
+/// spec number). A spawn-mode session never uses this — its driver comes up
+/// lazily, on its first `Prompt`/`Replace`, and a spawn failure is reported
+/// straight to that command's own caller rather than retried in the
+/// background.
+const ATTACH_RETRY_INTERVAL: Duration = Duration::from_secs(30);
 
 /// The live, presence-facing snapshot of one session — written only by that
 /// session's own task, read by [`super::SessionManager::presence_doc`] (and
@@ -34,6 +44,15 @@ pub(super) struct SessionPresence {
     /// every time this session transitions to (or stays in)
     /// `InputRequired`, and cleared the moment it leaves that state.
     pub(super) pending: Option<Vec<PendingItem>>,
+    /// `true` while an attach-mode session's *initial*
+    /// [`crate::http_attach_driver::HttpAttachDriver::attach`] has not yet
+    /// succeeded (its first attempt failed, and the [`ATTACH_RETRY_INTERVAL`]
+    /// retry loop has not landed one yet) — [`super::SessionManager::
+    /// presence_doc`] omits the whole row while this is `true` (issue #195).
+    /// Always `false` for a spawn-mode session (never gated — spawning is
+    /// lazy, on the first prompt, not eager at task startup the way an
+    /// attach is).
+    pub(super) omitted_pending_attach: bool,
 }
 
 impl Default for SessionPresence {
@@ -42,7 +61,10 @@ impl Default for SessionPresence {
     /// Hand-written rather than `#[derive(Default)]` because `SessionState`
     /// (a `holler_proto` type) has no `Default` impl of its own to derive
     /// against — implementing one here would be an orphan-rule violation
-    /// (neither this crate's trait nor this crate's type).
+    /// (neither this crate's trait nor this crate's type). `omitted_pending_
+    /// attach` defaults `false`; [`run`] flips it `true` right away for an
+    /// attach-mode session, before its own first attach attempt, so there is
+    /// never a window where a not-yet-attached session is visible.
     fn default() -> Self {
         Self {
             state: SessionState::Idle,
@@ -51,6 +73,7 @@ impl Default for SessionPresence {
             turn_id: None,
             last_turn: None,
             pending: None,
+            omitted_pending_attach: false,
         }
     }
 }
@@ -72,7 +95,7 @@ struct QueuedPrompt {
 pub(super) struct Inner {
     config: SessionConfig,
     name: SessionName,
-    driver: Option<AcpDriver>,
+    driver: Option<Driver>,
     current_stream: Option<DriverEventStream>,
     current_turn_id: Option<String>,
     current_reply: Option<oneshot::Sender<PromptOutcome>>,
@@ -118,35 +141,116 @@ impl Inner {
 /// The session's whole task lifetime: consume commands and driver events
 /// until `Shutdown` (or the mailbox closes because every [`super::SessionManager`]
 /// handle to it was dropped), then gracefully end the driver, if any.
+///
+/// For an attach-mode session (issue #195), this attempts
+/// [`Driver::spawn_or_attach`] **eagerly, right here**, before the command
+/// loop even starts — unlike spawn mode, whose driver comes up lazily on the
+/// first `Prompt`/`Replace` (see [`start_turn`]). A failed initial attach
+/// does not stop this task (and, since every session is its own independent
+/// tokio task with no shared mutable state — see the parent module's own doc
+/// comment — never stops any *other* session's task or the run as a whole):
+/// it logs a `session attach_failed` warning, leaves the row out of every
+/// [`super::SessionManager::presence_doc`] call
+/// (`SessionPresence::omitted_pending_attach`), and retries every
+/// [`ATTACH_RETRY_INTERVAL`] from inside the same `select!` this function's
+/// command loop already runs, so a retry can never race a `Prompt`/`Cancel`/
+/// `Answer` command arriving in the meantime.
 pub(super) async fn run(mut mailbox: mpsc::Receiver<SessionCommand>, mut inner: Inner) {
+    if inner.config.mode == SessionMode::Attach {
+        inner.presence.lock().unwrap_or_else(PoisonError::into_inner).omitted_pending_attach = true;
+        attempt_initial_attach(&mut inner).await;
+    }
+
+    let mut retry = tokio::time::interval(ATTACH_RETRY_INTERVAL);
+    retry.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    // The interval's own first tick fires immediately; this task already ran
+    // one attach attempt above, so consume that first tick right away rather
+    // than firing a redundant immediate retry.
+    retry.reset();
+
     loop {
+        let awaiting_attach = inner.config.mode == SessionMode::Attach && inner.driver.is_none();
         tokio::select! {
             biased;
             cmd = mailbox.recv() => {
-                match cmd {
-                    None | Some(SessionCommand::Shutdown) => {
-                        if let Some(driver) = inner.driver.take() {
-                            let _ = driver.shutdown().await;
-                        }
-                        return;
-                    }
-                    Some(SessionCommand::Prompt { id, text, queue, reply_tx, updates }) => {
-                        handle_prompt(&mut inner, id, text, queue, reply_tx, updates).await;
-                    }
-                    Some(SessionCommand::Cancel { reply_tx }) => {
-                        handle_cancel(&mut inner, reply_tx).await;
-                    }
-                    Some(SessionCommand::Answer { choice, reply_tx }) => {
-                        handle_answer(&mut inner, choice, reply_tx).await;
-                    }
-                    Some(SessionCommand::Replace { text, reply_tx, updates }) => {
-                        handle_replace(&mut inner, text, reply_tx, updates).await;
-                    }
+                if !dispatch_command(&mut inner, cmd).await {
+                    return;
                 }
             }
             event = poll_stream(&mut inner.current_stream) => {
                 handle_stream_event(&mut inner, event).await;
             }
+            _ = retry.tick(), if awaiting_attach => {
+                attempt_initial_attach(&mut inner).await;
+            }
+        }
+    }
+}
+
+/// Dispatch one mailbox command. `false` means the task's `run` loop must end
+/// (a `Shutdown`, or the mailbox closed because every [`super::SessionManager`]
+/// handle to this session was dropped) — split out of [`run`] so that
+/// function's own `select!` branch stays within the workspace's cognitive-
+/// complexity clippy gate.
+async fn dispatch_command(inner: &mut Inner, cmd: Option<SessionCommand>) -> bool {
+    match cmd {
+        None | Some(SessionCommand::Shutdown) => {
+            if let Some(driver) = inner.driver.take() {
+                let _ = driver.shutdown().await;
+            }
+            false
+        }
+        Some(SessionCommand::Prompt { id, text, queue, reply_tx, updates }) => {
+            handle_prompt(inner, id, text, queue, reply_tx, updates).await;
+            true
+        }
+        Some(SessionCommand::Cancel { reply_tx }) => {
+            handle_cancel(inner, reply_tx).await;
+            true
+        }
+        Some(SessionCommand::Answer { choice, reply_tx }) => {
+            handle_answer(inner, choice, reply_tx).await;
+            true
+        }
+        Some(SessionCommand::Replace { text, reply_tx, updates }) => {
+            handle_replace(inner, text, reply_tx, updates).await;
+            true
+        }
+    }
+}
+
+/// One attempt at an attach-mode session's *initial* attach (issue #195):
+/// [`Driver::spawn_or_attach`] against an already-`SessionMode::Attach`
+/// config never spawns anything — it always resolves to
+/// [`crate::http_attach_driver::HttpAttachDriver::attach`]. On success, the
+/// driver is stored and the row's presence gate lifts immediately; on
+/// failure, a `session attach_failed name=… reason=…` warning is logged (the
+/// issue's own line shape) and the row stays gated — [`run`]'s own retry
+/// timer tries again in [`ATTACH_RETRY_INTERVAL`].
+async fn attempt_initial_attach(inner: &mut Inner) {
+    match Driver::spawn_or_attach(&inner.config).await {
+        Ok(driver) => {
+            inner.driver = Some(driver);
+            let mut p = inner.presence.lock().unwrap_or_else(PoisonError::into_inner);
+            p.omitted_pending_attach = false;
+            p.state = SessionState::Idle;
+            drop(p);
+            notify_presence(inner);
+        }
+        Err(e) => {
+            log::emit(&LogEvent {
+                component: Component::Session,
+                severity: Severity::Warn,
+                direction: LogDirection::Local,
+                method: "attach_failed",
+                id: None,
+                peer: None,
+                fields: vec![
+                    ("name", inner.name.as_str().to_string()),
+                    ("reason", e.message()),
+                ],
+                frame: None,
+            });
         }
     }
 }
@@ -345,7 +449,7 @@ async fn start_turn(
     updates: Option<mpsc::UnboundedSender<String>>,
 ) -> bool {
     if inner.driver.is_none() {
-        match AcpDriver::spawn(&inner.config).await {
+        match Driver::spawn_or_attach(&inner.config).await {
             Ok(d) => inner.driver = Some(d),
             Err(e) => {
                 let _ = reply_tx.send(PromptOutcome::Error(e.message()));

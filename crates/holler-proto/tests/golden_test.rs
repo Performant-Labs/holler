@@ -170,7 +170,12 @@ fn docs_instances() -> Vec<(&'static str, Value)> {
             connected: Some(true), token_id: Some("tok_7f3a".into()), listening: None,
             features: vec!["ping".into()], harnesses: Some(vec!["opencode".into()]), harnesses_known: None, harnesses_confirmed: None,
             bodies: None, sessions: None,
-            session_list: Some(vec![StatusSession { name: "alpha".into(), harness: "opencode".into(), state: SessionState::Idle }]),
+            session_list: Some(vec![StatusSession {
+                name: "alpha".into(),
+                harness: "opencode".into(),
+                state: SessionState::Idle,
+                endpoint: None,
+            }]),
         }).unwrap()),
         ("Status.hub", serde_json::to_value(Status {
             role: HelloRole::Hub, protocol: 2, protocol_min: 2, protocol_max: 2, hostname: "uranus".into(),

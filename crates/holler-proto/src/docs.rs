@@ -341,6 +341,11 @@ pub struct StatusSession {
     pub harness: String,
     /// The A2A session state: `idle` | `working` | `input-required`.
     pub state: SessionState,
+    /// The attach endpoint (issue #195: `attach`-mode sessions only —
+    /// `None` for `spawn`). `#[serde(default)]` on deserialize so an older
+    /// peer's response (from before this field existed) still parses.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub endpoint: Option<String>,
 }
 
 /// `query/caps` = `status` plus an explicit `caps` map (docs §5.2).
