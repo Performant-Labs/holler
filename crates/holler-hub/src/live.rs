@@ -127,6 +127,19 @@ pub enum LiveCommand {
     /// sink/stream go out of scope, exactly like a real dropped TCP
     /// connection would look to the body on the other end.
     Drop { reply: oneshot::Sender<()> },
+    /// Issue #184's supersede-on-reauth: a fresh socket just re-authenticated
+    /// for the same token this connection is bound to. The connection sends
+    /// `circuit/superseded` to its body, closes the socket with WS code
+    /// **1000**, and ends its own loop — the new socket then takes the
+    /// token's slot. Never touches the roster (the new connection is about
+    /// to (re)claim it).
+    Supersede { reply: oneshot::Sender<()> },
+    /// Issue #184's `hub token revoke`: the operator revoked this
+    /// connection's token. The connection closes the socket with WS code
+    /// **1008** (policy violation), marks the roster row `gone` immediately
+    /// (not `reconnecting` — a revoked token can never reconnect), acks on
+    /// `reply`, then ends its own loop.
+    Revoke { reply: oneshot::Sender<()> },
 }
 
 /// One outstanding `session/cancel` (issue #191): kept separate from
@@ -198,6 +211,18 @@ pub struct LiveHandle {
     pub client_id: String,
     pub hostname: String,
     pub token_id: String,
+    /// The transport peer address (`ip:port`) this connection was accepted
+    /// from (issue #184: captured at accept, reported in every connection
+    /// log line and in `hub status --json`'s `clients_detail[].peer`).
+    pub peer: String,
+    /// The moment this circuit was registered (issue #184's `connected_at`,
+    /// epoch milliseconds).
+    pub connected_at: u64,
+    /// This registry entry's monotonic generation stamp (issue #184). Not
+    /// exposed on the wire; used by [`Registry::remove_if_current`] so a
+    /// superseded connection's own teardown never evicts the entry that
+    /// replaced it (see that fn's doc for the race it closes).
+    seq: u64,
     tx: tokio::sync::mpsc::UnboundedSender<LiveCommand>,
     /// The priority channel a `session/cancel` travels instead of `tx`
     /// (issue #191) — see [`CancelCommand`]'s own doc.
@@ -319,6 +344,34 @@ impl LiveHandle {
         }
         tokio::time::timeout(std::time::Duration::from_secs(2), reply_rx).await.is_ok()
     }
+
+    /// Issue #184's supersede-on-reauth: ask this (old) connection to notify
+    /// its body of `circuit/superseded`, close with WS code 1000, and end its
+    /// own loop. Waits up to 2s for the ack; `false` means the connection was
+    /// already gone (a send failure) or never acked in time — either way the
+    /// caller proceeds to register the new connection regardless (best
+    /// effort: a superseded body that never got the notification still loses
+    /// its slot the moment the new connection registers).
+    pub async fn supersede(&self) -> bool {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        if self.tx.send(LiveCommand::Supersede { reply: reply_tx }).is_err() {
+            return false;
+        }
+        tokio::time::timeout(std::time::Duration::from_secs(2), reply_rx).await.is_ok()
+    }
+
+    /// Issue #184's `hub token revoke`: ask this connection to close with WS
+    /// code 1008 and end its own loop, marking the roster row `gone` at once.
+    /// Waits up to 2s for the ack; `false` means the connection was already
+    /// gone or never acked in time (the caller reports the revoke as applied
+    /// either way — the token store side already took effect).
+    pub async fn revoke(&self) -> bool {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        if self.tx.send(LiveCommand::Revoke { reply: reply_tx }).is_err() {
+            return false;
+        }
+        tokio::time::timeout(std::time::Duration::from_secs(2), reply_rx).await.is_ok()
+    }
 }
 
 /// The hub-wide table of live circuits, keyed by `client_id`. Shared (an
@@ -328,6 +381,9 @@ impl LiveHandle {
 #[derive(Clone, Default)]
 pub struct Registry {
     inner: Arc<Mutex<HashMap<String, LiveHandle>>>,
+    /// Monotonic counter stamping each registered entry's `seq` (issue #184)
+    /// — see [`Registry::remove_if_current`]'s doc for why this exists.
+    next_seq: Arc<std::sync::atomic::AtomicU64>,
     /// The last-known `(hostname, sessions)` of a body that has since
     /// disconnected, keyed by `client_id` — issue #190's own gap-filler so
     /// `say` can report `not_connected` ("this session exists, its body just
@@ -361,8 +417,11 @@ impl Registry {
     }
 
     /// Register a newly-authenticated circuit, returning the receiver its
-    /// connection task drains for [`LiveCommand`]s, and (issue #191) the
-    /// second, high-priority receiver it drains for [`CancelCommand`]s.
+    /// connection task drains for [`LiveCommand`]s, (issue #191) the second,
+    /// high-priority receiver it drains for [`CancelCommand`]s, and (issue
+    /// #184) this entry's own generation `seq` — the connection task must
+    /// hold onto `seq` and pass it to [`Registry::remove_if_current`] at
+    /// teardown instead of the old unconditional [`Registry::remove`].
     /// Replaces (and thereby supersedes) a prior live handle for the same
     /// `client_id` — a second `body run` reconnecting under the same
     /// identity naturally displaces the stale one rather than leaving two
@@ -372,16 +431,22 @@ impl Registry {
         client_id: &str,
         hostname: &str,
         token_id: &str,
+        peer: &str,
     ) -> (
         tokio::sync::mpsc::UnboundedReceiver<LiveCommand>,
         tokio::sync::mpsc::UnboundedReceiver<CancelCommand>,
+        u64,
     ) {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         let (cancel_tx, cancel_rx) = tokio::sync::mpsc::unbounded_channel();
+        let seq = self.next_seq.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let handle = LiveHandle {
             client_id: client_id.to_string(),
             hostname: hostname.to_string(),
             token_id: token_id.to_string(),
+            peer: peer.to_string(),
+            connected_at: now_millis_u64(),
+            seq,
             tx,
             cancel_tx,
             state: Arc::new(Mutex::new(LiveState::default())),
@@ -392,22 +457,74 @@ impl Registry {
         // exact `client_id` — see the `offline` field's own doc.
         self.offline.lock().await.remove(client_id);
         log_registry("register", client_id, Some(hostname));
-        (rx, cancel_rx)
+        (rx, cancel_rx, seq)
     }
 
-    /// Drop a circuit's live entry (the connection ended). A no-op if it was
-    /// already replaced or removed (never an error — teardown is best-effort).
-    /// Snapshots the handle's last-known presence into `offline` first (issue
-    /// #190's `not_connected`-vs-`unknown_session` gap-filler — see that
-    /// field's own doc).
+    /// Drop a circuit's live entry (the connection ended) **unconditionally**
+    /// — kept for callers that know they hold the sole reference to this
+    /// slot (the test suite's own direct `Registry` unit tests below). Every
+    /// production connection path uses [`Registry::remove_if_current`]
+    /// instead, so a superseded connection's own (possibly-delayed) teardown
+    /// can never evict the entry that replaced it.
     pub async fn remove(&self, client_id: &str) {
         let removed = self.inner.lock().await.remove(client_id);
+        self.snapshot_offline(client_id, removed).await;
+    }
+
+    /// Remove `client_id`'s live entry **only if it is still the entry
+    /// stamped `seq`** (issue #184). A connection's own teardown always
+    /// calls this with the `seq` [`Registry::insert`] handed it, rather than
+    /// the unconditional [`Registry::remove`]: supersede-on-reauth registers
+    /// the *new* connection under the same `client_id` (a body's client id is
+    /// stable across reconnects — it is minted once, at redeem) before the
+    /// *old* connection's task has necessarily finished unwinding. If the old
+    /// connection's teardown ran an unconditional `remove(client_id)` after
+    /// the new one had already registered, it would silently evict the new,
+    /// live entry out from under it. Comparing `seq` closes that race
+    /// regardless of which task's teardown happens to run first: an entry
+    /// whose `seq` no longer matches has already been superseded, so this is
+    /// a no-op.
+    pub async fn remove_if_current(&self, client_id: &str, seq: u64) {
+        let mut inner = self.inner.lock().await;
+        let is_current = inner.get(client_id).is_some_and(|h| h.seq == seq);
+        let removed = if is_current { inner.remove(client_id) } else { None };
+        drop(inner);
+        self.snapshot_offline(client_id, removed).await;
+    }
+
+    /// Shared teardown tail for [`Registry::remove`]/[`Registry::remove_if_current`]:
+    /// log the removal and snapshot the handle's last-known presence into
+    /// `offline` (issue #190's `not_connected`-vs-`unknown_session`
+    /// gap-filler — see that field's own doc). A no-op if there was nothing
+    /// to remove (already superseded, or a race with a concurrent teardown).
+    async fn snapshot_offline(&self, client_id: &str, removed: Option<LiveHandle>) {
         if let Some(handle) = removed {
             log_registry("remove", client_id, Some(&handle.hostname));
             if let Some(sessions) = handle.presence.lock().await.clone() {
                 self.offline.lock().await.insert(client_id.to_string(), (handle.hostname.clone(), sessions));
             }
         }
+    }
+
+    /// One row per live circuit for `hub status --json`'s `clients_detail`
+    /// (issue #184): `{token_id, client_id, hostname, peer, connected_at}`.
+    /// (`clients` itself stays the plain live count other tests already
+    /// depend on — this is an additive field, not a replacement.)
+    pub async fn clients_detail(&self) -> Vec<serde_json::Value> {
+        self.inner
+            .lock()
+            .await
+            .values()
+            .map(|h| {
+                serde_json::json!({
+                    "token_id": h.token_id,
+                    "client_id": h.client_id,
+                    "hostname": h.hostname,
+                    "peer": h.peer,
+                    "connected_at": h.connected_at,
+                })
+            })
+            .collect()
     }
 
     /// The number of currently-live circuits (`hub status`'s `clients`).
@@ -609,6 +726,14 @@ impl Registry {
     }
 }
 
+/// The current unix epoch in milliseconds (issue #184's `connected_at`).
+fn now_millis_u64() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
+        .unwrap_or(0)
+}
+
 /// The outcome of [`Registry::resolve_session`].
 pub enum ResolveOutcome {
     /// Exactly one live session matched.
@@ -631,7 +756,7 @@ mod tests {
     #[tokio::test]
     async fn find_target_matches_by_token_id_client_id_or_label() {
         let registry = Registry::new();
-        let (mut rx, mut cancel_rx) = registry.insert("cli_1", "kiwi", "tok_1").await;
+        let (mut rx, mut cancel_rx, _seq) = registry.insert("cli_1", "kiwi", "tok_1", "127.0.0.1:1").await;
 
         assert!(matches!(registry.find_target("tok_1").await, TargetLookup::Found(_)));
         assert!(matches!(registry.find_target("cli_1").await, TargetLookup::Found(_)));
@@ -651,8 +776,8 @@ mod tests {
     #[tokio::test]
     async fn ambiguous_target_is_reported_as_ambiguous() {
         let registry = Registry::new();
-        let (mut rx1, mut cancel_rx1) = registry.insert("cli_1", "kiwi", "tok_1").await;
-        let (mut rx2, mut cancel_rx2) = registry.insert("cli_2", "kiwi", "tok_2").await;
+        let (mut rx1, mut cancel_rx1, _seq) = registry.insert("cli_1", "kiwi", "tok_1", "127.0.0.1:1").await;
+        let (mut rx2, mut cancel_rx2, _seq) = registry.insert("cli_2", "kiwi", "tok_2", "127.0.0.1:1").await;
 
         assert!(matches!(registry.find_target("kiwi").await, TargetLookup::Ambiguous));
         // Each body's own token/client id still resolves unambiguously.
@@ -667,7 +792,7 @@ mod tests {
     #[tokio::test]
     async fn confirm_harness_and_advertised_are_independent() {
         let registry = Registry::new();
-        let (mut rx, mut cancel_rx) = registry.insert("cli_1", "kiwi", "tok_1").await;
+        let (mut rx, mut cancel_rx, _seq) = registry.insert("cli_1", "kiwi", "tok_1", "127.0.0.1:1").await;
         registry.set_harnesses_advertised("cli_1", vec!["opencode".to_string(), "claude".to_string()]).await;
         assert_eq!(registry.harnesses_known().await, vec!["claude".to_string(), "opencode".to_string()]);
         assert!(registry.harnesses_confirmed().await.is_empty(), "advertising alone confirms nothing");
@@ -685,8 +810,8 @@ mod tests {
     #[tokio::test]
     async fn session_count_sums_across_bodies() {
         let registry = Registry::new();
-        let (mut rx1, mut cancel_rx1) = registry.insert("cli_1", "kiwi", "tok_1").await;
-        let (mut rx2, mut cancel_rx2) = registry.insert("cli_2", "mango", "tok_2").await;
+        let (mut rx1, mut cancel_rx1, _seq) = registry.insert("cli_1", "kiwi", "tok_1", "127.0.0.1:1").await;
+        let (mut rx2, mut cancel_rx2, _seq) = registry.insert("cli_2", "mango", "tok_2", "127.0.0.1:1").await;
         registry.set_session_count("cli_1", 2).await;
         registry.set_session_count("cli_2", 3).await;
         assert_eq!(registry.total_sessions().await, 5);

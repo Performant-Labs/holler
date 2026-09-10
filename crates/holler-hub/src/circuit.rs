@@ -55,7 +55,7 @@ use holler_proto::{
 use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 
 use crate::live::{CancelCommand, CancelReply, LiveCommand, Registry, SayReply};
-use crate::serve::{close, send_error};
+use crate::serve::{close, close_with_code, send_error};
 use crate::state::HubState;
 use dispatch::PendingSay;
 
@@ -143,39 +143,93 @@ fn log_frame(direction: LogDirection, method: &'static str, id: Option<&str>, ra
 /// path replies with the matching error and closes the socket; a bad
 /// credential is always `-32002 unauthenticated` (the body's connection loop
 /// treats that code, and only that code, as "do not retry").
-pub async fn handle_authenticated<Snk, St>(
+/// [`handle_authenticated`]'s shared hub-wide dependencies, bundled purely to
+/// keep that fn's own argument count under clippy's `too_many_arguments`
+/// gate (issue #184 added `peer`/`lockout` alongside the pre-existing
+/// `registry`/`roster` — the same "bundle unrelated shared state into one
+/// struct" discipline [`CommandChannels`] already uses in this file). Every
+/// field is a shared reference, so `AuthDeps` itself is `Copy` — passing it
+/// to a helper never moves it out of the caller.
+#[derive(Clone, Copy)]
+pub struct AuthDeps<'a> {
+    pub registry: &'a Registry,
+    pub roster: &'a std::sync::Arc<crate::roster::Roster>,
+    pub peer: &'a str,
+    pub lockout: &'a std::sync::Arc<crate::lockout::Lockout>,
+}
+
+/// The credential-check half of [`handle_authenticated`]: verify, record a
+/// lockout failure or reset on the outcome, and (on failure) send the
+/// refusal, close, and clear the roster row. Split out purely to keep
+/// `handle_authenticated`'s own cognitive complexity under the workspace
+/// threshold — no behavior change.
+async fn verify_and_authenticate<Snk>(
     sink: &mut Snk,
-    stream: &mut St,
     id: Option<&str>,
-    params: Authenticate,
+    params: &Authenticate,
     state: &HubState,
-    registry: &Registry,
-    roster: &std::sync::Arc<crate::roster::Roster>,
-) where
+    deps: &AuthDeps<'_>,
+) -> Option<crate::token::Record>
+where
     Snk: Sink<Message, Error = WsError> + Unpin,
-    St: Stream<Item = Result<Message, WsError>> + Unpin,
 {
+    let peer_ip = deps.peer.rsplit_once(':').map(|(ip, _)| ip).unwrap_or(deps.peer);
     let record = match crate::token::verify_credential_async(&params.token_id, &params.credential, state).await {
         Ok(r) => r,
         Err(e) => {
+            // Issue #184: every failed `circuit/authenticate` counts toward
+            // this peer's lockout, keyed by the transport IP (never the
+            // claimed hostname — that is unauthenticated input).
+            if let Ok(ip) = peer_ip.parse() {
+                deps.lockout.record_failure(&ip);
+            }
             send_error(sink, id, Code::Unauthenticated, &format!("authentication failed: {e}")).await;
             close(sink).await;
             // The credentials are no longer valid, so the body is permanently
             // gone — drop it from the roster outright (it can never re-auth
             // with the same token, so the TTL would only keep a stale row
             // around). Issue #186.
-            roster.clear(&params.token_id);
-            return;
+            deps.roster.clear(&params.token_id);
+            return None;
         }
     };
-    let Some(client_id) = record.client_id.clone() else {
+    if record.client_id.is_none() {
         // Defensive: `verify_credential` only returns `Bound` records, which
         // always carry a `client_id`. Treated the same as a bad credential.
         send_error(sink, id, Code::Unauthenticated, "authentication failed: no client id on record").await;
         close(sink).await;
-        roster.clear(&params.token_id);
+        deps.roster.clear(&params.token_id);
+        return None;
+    }
+    // A successful credential check clears this peer's failure count (issue
+    // #184's spec: "a successful auth resets the counter").
+    if let Ok(ip) = peer_ip.parse() {
+        deps.lockout.reset(&ip);
+    }
+    Some(record)
+}
+
+pub async fn handle_authenticated<Snk, St>(
+    sink: &mut Snk,
+    stream: &mut St,
+    id: Option<&str>,
+    params: Authenticate,
+    state: &HubState,
+    deps: AuthDeps<'_>,
+    preauth_permit: Option<tokio::sync::OwnedSemaphorePermit>,
+) where
+    Snk: Sink<Message, Error = WsError> + Unpin,
+    St: Stream<Item = Result<Message, WsError>> + Unpin,
+{
+    let mut preauth_permit = preauth_permit;
+    let Some(record) = verify_and_authenticate(sink, id, &params, state, &deps).await else {
         return;
     };
+    let AuthDeps { registry, roster, peer, .. } = deps;
+    // `verify_and_authenticate` only ever returns a `Bound` record, which
+    // always carries a `client_id` (the `None` case above already refused
+    // and returned) — safe to unwrap the invariant here.
+    let client_id = record.client_id.clone().unwrap_or_default();
 
     let ok = serde_json::to_value(holler_proto::AuthOk { ok: true }).unwrap_or_default();
     if reply(sink, id, ok).await.is_err() {
@@ -186,14 +240,33 @@ pub async fn handle_authenticated<Snk, St>(
         Ok(harnesses) => harnesses,
         Err(()) => return,
     };
+    // Issue #184: the pre-auth phase (and this token's pre-auth-connection
+    // slot) ends here — the hello exchange just completed, so this socket is
+    // now a fully live, authenticated circuit. Dropping the permit frees the
+    // slot for a fresh connection; the live session loop below can run
+    // indefinitely without holding it.
+    preauth_permit.take();
 
     log(
         Severity::Info,
         "conn_connected",
-        vec![("client_id", client_id.clone()), ("hostname", params.hostname.clone())],
+        vec![("client_id", client_id.clone()), ("hostname", params.hostname.clone()), ("peer", peer.to_string())],
     );
 
-    let (mut cmd_rx, mut cancel_rx) = registry.insert(&client_id, &params.hostname, &params.token_id).await;
+    // Issue #184's supersede-on-reauth: if this token already has a live
+    // socket (a stale connection this same body left behind, or a genuine
+    // concurrent second `body run`), tell it to notify its peer with
+    // `circuit/superseded`, close with WS code 1000, and end its own loop —
+    // *before* this connection takes the token's slot. Best-effort: `bool`
+    // result is not itself actionable here (a `false` just means the old
+    // connection was already gone), it is bounded by `LiveHandle::supersede`'s
+    // own 2s wait so a stuck old peer never blocks this connection forever.
+    if let Some(old) = registry.find_by_token(&params.token_id).await {
+        old.supersede().await;
+    }
+
+    let (mut cmd_rx, mut cancel_rx, seq) =
+        registry.insert(&client_id, &params.hostname, &params.token_id, peer).await;
     registry.set_harnesses_advertised(&client_id, body_harnesses.clone()).await;
     // Issue #236 (ADR 0005 §2): the label travels with the authenticated
     // token, never on the wire, so this is the one place the hub can read it
@@ -230,8 +303,10 @@ pub async fn handle_authenticated<Snk, St>(
         )
         .await;
     conn.run().await;
-    registry.remove(&client_id).await;
-    log(Severity::Warn, "conn_dropped", vec![("client_id", client_id)]);
+    // Issue #184: `remove_if_current` (not the unconditional `remove`) — see
+    // its own doc for the supersede race this closes.
+    registry.remove_if_current(&client_id, seq).await;
+    log(Severity::Warn, "conn_dropped", vec![("client_id", client_id), ("peer", peer.to_string())]);
 }
 
 /// Send one `query/support {feature: harness}` request per harness, returning
@@ -610,6 +685,30 @@ where
             LiveCommand::Drop { reply } => {
                 self.fail_pending();
                 self.mark_reconnecting();
+                let _ = reply.send(());
+                Err(())
+            }
+            // Issue #184's supersede-on-reauth: a fresh socket just
+            // re-authenticated for the same token. Notify this connection's
+            // own body, close 1000, and end — the roster is deliberately
+            // left untouched (the new connection is about to claim it).
+            LiveCommand::Supersede { reply } => {
+                let note = Envelope::notification("circuit/superseded", None);
+                let text = holler_proto::encode(&note).unwrap_or_default();
+                let _ = self.sink.send(Message::text(text)).await;
+                let _ = self.sink.flush().await;
+                close_with_code(self.sink, 1000, "superseded").await;
+                self.fail_pending();
+                let _ = reply.send(());
+                Err(())
+            }
+            // Issue #184's `hub token revoke`: close 1008 and mark the
+            // roster row `gone` immediately — a revoked token can never
+            // reconnect, so this is never `reconnecting`.
+            LiveCommand::Revoke { reply } => {
+                close_with_code(self.sink, 1008, "revoked").await;
+                self.fail_pending();
+                self.clear_from_roster();
                 let _ = reply.send(());
                 Err(())
             }
