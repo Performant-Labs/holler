@@ -226,9 +226,24 @@ impl Drop for LockGuard {
     }
 }
 
+// Positioned write at offset 0 (the file was just truncated, so a plain
+// `Write` would also land at 0 — `write_at`/`seek_write` are used anyway so
+// this never depends on the file's current cursor position). The two traits
+// are unix's `std::os::unix::fs::FileExt::write_at` and windows'
+// `std::os::windows::fs::FileExt::seek_write` — same effect, different
+// names, so the OS is picked by `cfg` rather than importing an absent trait
+// unconditionally (the compile break this mirrors: holler-client#60).
+#[cfg(unix)]
 fn write_pid(file: &std::fs::File) -> std::io::Result<()> {
     use std::os::unix::fs::FileExt;
     file.write_at(std::process::id().to_string().as_bytes(), 0)?;
+    Ok(())
+}
+
+#[cfg(windows)]
+fn write_pid(file: &std::fs::File) -> std::io::Result<()> {
+    use std::os::windows::fs::FileExt;
+    file.seek_write(std::process::id().to_string().as_bytes(), 0)?;
     Ok(())
 }
 
