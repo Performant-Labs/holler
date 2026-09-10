@@ -78,11 +78,42 @@ fn row_connected(v: &Value, row_name: &str) -> bool {
         })
 }
 
-/// Poll `say session text` until it stops failing with `unknown session`
-/// (mirrors `reconnect_contract_test.rs`'s own `say_ready`: the hub caches a
+/// Per-peer join budget for [`warm_up_peers`]. Widened 150s -> 240s
+/// (2026-09-10, issue #296 follow-up) on real evidence from `main`'s own CI,
+/// not a guess:
+///
+/// * CI run 34483221433 (`ubuntu-latest`, 2026-09-10T13:31Z, on `main`
+///   itself) failed with exactly this test's own panic — `say s2` and
+///   `say s10` each "never got past unknown_session within 150s" — while
+///   THREE other `ci` runs were in flight on shared runners at the same time
+///   (two `test/296-299-roster-scale-and-churn` runs and one
+///   `test/297-298-coalescer-and-queue-scale` run, all between 13:01Z and
+///   13:19Z; see `gh run list --repo Performant-Labs/holler --limit 30`).
+///   That is real, evidenced shared-runner contention, not a one-off.
+/// * Reproduced locally (10-core dev box, far more headroom than
+///   `ubuntu-latest`'s shared vCPUs) by running 4 copies of this test binary
+///   concurrently — the same kind of contention multiple simultaneous CI
+///   jobs create. 2 of 4 finished in single-digit seconds; the other 2 each
+///   hit the *exact* panic and message from run 34483221433, timing out at
+///   150s on a *different*, randomly-selected peer each time (`s2`/`s6`/`s3`
+///   across runs) — proof this is scheduler/contention noise on which peer's
+///   subprocess loses the CPU race, not a bug tied to a specific peer index
+///   or a correctness defect in the hub's join/registration path (see
+///   `control_server::say`'s `UnknownSession` mapping and `talk::say`: it is
+///   a plain "not yet in the registry" lookup miss, exactly what a body
+///   process still waiting for CPU time to spawn/connect/register would
+///   produce — not a stuck or wedged state).
+/// * NOTE: this same investigation also found CI run 34481502593 — initially
+///   suspected as a second `load_roster_scale_test.rs` failure — actually
+///   failed on the unrelated `roster_cli_test.rs::roster_cli_prefix_filters_by_label`
+///   (a different flake, out of this test's scope). Evidence here is scoped
+///   to what was actually verified, not repeated from an unverified premise.
+///
+/// (Mirrors `reconnect_contract_test.rs`'s own `say_ready`: the hub caches a
 /// body's first presence asynchronously, so the very first `say` after `body
-/// run` starts can race it — with 24 bodies starting concurrently that race
-/// window is wider, not narrower).
+/// run` starts can race it — with `PEER_COUNT` bodies starting concurrently,
+/// *and* other CI jobs contending for the same shared runner, that race
+/// window is wider, not narrower.)
 fn say_ready(hub_state: &StateDir, session: &str, text: &str, timeout: Duration) -> Output {
     wait_for(timeout, || {
         let out = support::say(hub_state, session, text);
@@ -149,7 +180,7 @@ fn bring_up_peers(hub_state: &StateDir, hub: &Hub) -> Vec<Peer> {
 /// by another's" failure mode issue #296 exists to catch, so the warm-up
 /// itself must not (re-)introduce it.
 fn warm_up_peers(hub_state: &StateDir, peers: &[Peer]) {
-    let warm_timeout = Duration::from_secs(150);
+    let warm_timeout = Duration::from_secs(240);
     std::thread::scope(|warm_scope| {
         let handles: Vec<_> = peers
             .iter()
@@ -239,9 +270,15 @@ fn run_concurrent_load(hub_state: &StateDir, peers: &[Peer]) {
         // Generous bound: PEER_COUNT*ROUNDS_PER_PEER real subprocess round
         // trips against fast (--chunks 2) stub turns, run concurrently — this
         // is a "did the hub stall/serialize under load" guard, not a tight
-        // perf budget.
+        // perf budget. Widened 120s -> 180s alongside `warm_timeout` above
+        // (2026-09-10, issue #296 follow-up, CI run 34483221433 + local
+        // concurrent-contention repro documented on `say_ready`): peers are
+        // already connected by this point, but the same shared-runner CPU
+        // contention that stalls the join phase can just as well stretch the
+        // load phase, and 120s left effectively no margin once warm-up alone
+        // was observed eating the full 150s budget under load.
         assert!(
-            elapsed < Duration::from_secs(120),
+            elapsed < Duration::from_secs(180),
             "concurrent load across {PEER_COUNT} peers took {elapsed:?} — the hub may be serializing traffic instead of fanning it out"
         );
 
