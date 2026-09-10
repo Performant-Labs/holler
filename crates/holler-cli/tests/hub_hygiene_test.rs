@@ -584,9 +584,24 @@ async fn five_bad_auths_lock_out_peer_for_window() {
 
     // The 5th strike has tripped the lockout: a *fresh* connection is now
     // refused with 1008 **before the peer may even send a frame**. (The
-    // handshake still completes; the refusal is the first frame the hub sends.)
-    let (mut sink, mut stream) = connect_split(&url).await;
-    let refused = next_frame(&mut sink, &mut stream, Message::Close(None)).await;
+    // handshake still completes; the refusal is the first frame the hub
+    // sends.) The client must not send its own close here: the hub's
+    // refusal is unprompted (queued before it reads anything), so sending a
+    // `Close` frame from this side races the hub's own close on the wire —
+    // tokio-tungstenite can then report a bare EOF instead of surfacing the
+    // hub's close frame, since the client's own outbound close makes it
+    // treat the connection as already closing on its side. Just listen, the
+    // same passive pattern the re-admission check below already uses.
+    //
+    // Keep `sink` alive (don't `drop` it) rather than just not sending on
+    // it: dropping the write half can itself trigger a half-close that
+    // still races the hub's own close frame under a fast/lean runner
+    // (confirmed via a real CI failure — `got Eof` instead of the close
+    // code — on a leaner runner where local repeated runs never reproduced
+    // it). Holding the whole split connection open until the test function
+    // returns removes the write-half-drop race entirely.
+    let (_sink, mut stream) = connect_split(&url).await;
+    let refused = decode_next(&mut stream).await;
     assert_eq!(
         refused.close_code(),
         Some(<u16>::from(CloseCode::Policy)),
