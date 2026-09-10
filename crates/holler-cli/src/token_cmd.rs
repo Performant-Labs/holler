@@ -181,6 +181,12 @@ fn run_inactivate(id: &str, verb: &str, json: bool) -> i32 {
             return token_err(e);
         }
     };
+    // Issue #184: force-close the live socket, if `id` currently has one —
+    // best-effort (a `NoLiveHub`/any other `ControlError` is silently
+    // ignored: the store-side revoke just above already took effect either
+    // way, and the spec's "closes the socket immediately" only applies when
+    // there is a live hub process to ask).
+    let _ = holler_hub::control::revoke_live(id);
     let word = if was_bound { "revoked" } else { "invalidated" };
     let suffix = match &record.hostname {
         Some(host) => format!("{}, {host}", record.label),

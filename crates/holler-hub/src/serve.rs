@@ -27,17 +27,9 @@ use std::task::{Context, Poll};
 
 use futures_util::{Future, Sink, SinkExt, Stream, StreamExt};
 use holler_proto::{decode, Envelope, Join, WireError};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream, UnixListener};
 use tokio::signal::unix::{signal, SignalKind};
-use tokio_tungstenite::{
-    tungstenite::{
-        handshake::server::{create_response, Request as WsRequest, Response as WsResponse},
-        protocol::Role,
-        Error as WsError, Message,
-    },
-    WebSocketStream,
-};
+use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 
 use crate::state::{
     advertise_path, control_sock_path, ensure_dirs, resolve_state_dir, serve_lock_path, HubState,
@@ -240,6 +232,70 @@ fn write_pid(file: &std::fs::File) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Bind every WS listen address in `addrs`, returning the bound
+/// [`TcpListener`]s and their actual `addr:port` strings. Split out of
+/// [`serve_forever`] (issue #184) purely to keep that fn under clippy's
+/// `too_many_lines` gate once the connection-hygiene setup grew it — no
+/// behavior change.
+async fn bind_ws_listeners(addrs: &[SocketAddr]) -> Result<(Vec<TcpListener>, Vec<String>), i32> {
+    let mut ws_listeners = Vec::new();
+    let mut bound_addrs = Vec::new();
+    for addr in addrs {
+        match TcpListener::bind(addr).await {
+            Ok(l) => match l.local_addr() {
+                Ok(actual) => {
+                    bound_addrs.push(actual.to_string());
+                    ws_listeners.push(l);
+                }
+                Err(e) => {
+                    warn(Component::Wire, "bind_addr_report_failed", format!("cannot report the bound address: {e}"));
+                    return Err(1);
+                }
+            },
+            Err(e) => {
+                warn(Component::Wire, "bind_failed", format!("failed to bind {addr}: {e}"));
+                return Err(1);
+            }
+        }
+    }
+    Ok((ws_listeners, bound_addrs))
+}
+
+/// The per-process hub-wide handles the accept loop shares across every
+/// connection: the live registry, connection-hygiene limits/lockout/
+/// pre-auth semaphore (issue #184), and the roster. Split out of
+/// [`serve_forever`] purely to keep that fn under clippy's `too_many_lines`
+/// gate — no behavior change.
+struct SharedState {
+    registry: crate::live::Registry,
+    hygiene: crate::hygiene::HygieneLimits,
+    lockout: std::sync::Arc<crate::lockout::Lockout>,
+    preauth_semaphore: std::sync::Arc<tokio::sync::Semaphore>,
+    roster: std::sync::Arc<crate::roster::Roster>,
+}
+
+fn build_shared_state() -> SharedState {
+    // The live-circuit registry (issue #182): one per hub process, shared by
+    // every accepted WS connection (recording/removing itself as it
+    // authenticates/disconnects) and every control-socket connection (`hub
+    // token ping` reaches a body's socket through it).
+    let registry = crate::live::Registry::new();
+    // Issue #184's connection hygiene: resolved once per process (the same
+    // "fixed for the hub's whole life" discipline the roster's `Config`
+    // already uses), then shared by every accepted socket.
+    let hygiene = crate::hygiene::HygieneLimits::resolve();
+    let lockout = crate::lockout::Lockout::new();
+    let preauth_semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(hygiene.max_preauth_connections));
+    // The roster (issue #186): one per hub process, shared by every accepted
+    // WS connection (which advertises/touches/clears it as presence and frames
+    // arrive and circuits open/close), the control socket (which reads it for
+    // `holler roster`), and the periodic sweep task (issue #255). The system
+    // clock drives the 45/180/360 s sweep in production (the unit tests
+    // inject a manual clock).
+    let roster = std::sync::Arc::new(crate::roster::Roster::with_system_clock(&crate::roster::Config::from_env()));
+    SharedState { registry, hygiene, lockout, preauth_semaphore, roster }
+}
+
 /// Bind the listeners and serve until a signal. Runs inside the tokio runtime
 /// (tokio's TCP bind is async). Returns the exit code: 0 on a clean signal
 /// shutdown (the caller tears down), 1 on a fatal bind error. A helper returns
@@ -260,34 +316,10 @@ async fn serve_forever(
     // hub is *fully* ready (control socket up, accept loop running) so a caller
     // that observes the event can immediately use the control socket without a
     // "file not found" race. The event is emitted once, after both are up.
-    let mut ws_listeners = Vec::new();
-    let mut bound_addrs = Vec::new();
-    for addr in &addrs {
-        match TcpListener::bind(addr).await {
-            Ok(l) => match l.local_addr() {
-                Ok(actual) => {
-                    bound_addrs.push(actual.to_string());
-                    ws_listeners.push(l);
-                }
-                Err(e) => {
-                    warn(
-                        Component::Wire,
-                        "bind_addr_report_failed",
-                        format!("cannot report the bound address: {e}"),
-                    );
-                    return 1;
-                }
-            },
-            Err(e) => {
-                warn(
-                    Component::Wire,
-                    "bind_failed",
-                    format!("failed to bind {addr}: {e}"),
-                );
-                return 1;
-            }
-        }
-    }
+    let (ws_listeners, bound_addrs) = match bind_ws_listeners(&addrs).await {
+        Ok(pair) => pair,
+        Err(code) => return code,
+    };
 
     // Record the bound addresses so a `control/status` (same process) can
     // report them in its `listening` array.
@@ -342,18 +374,7 @@ async fn serve_forever(
     let mut sig_term = signal(SignalKind::terminate()).expect("install SIGTERM handler");
 
     let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
-    // The live-circuit registry (issue #182): one per hub process, shared by
-    // every accepted WS connection (recording/removing itself as it
-    // authenticates/disconnects) and every control-socket connection (`hub
-    // token ping` reaches a body's socket through it).
-    let registry = crate::live::Registry::new();
-    // The roster (issue #186): one per hub process, shared by every accepted
-    // WS connection (which advertises/touches/clears it as presence and frames
-    // arrive and circuits open/close), the control socket (which reads it for
-    // `holler roster`), and the periodic sweep task spawned just below (issue
-    // #255). The system clock drives the 45/180/360 s sweep in production
-    // (the unit tests inject a manual clock).
-    let roster = std::sync::Arc::new(crate::roster::Roster::with_system_clock(&crate::roster::Config::from_env()));
+    let SharedState { registry, hygiene, lockout, preauth_semaphore, roster } = build_shared_state();
 
     // The roster TTL sweep task (issue #255): `Roster::sweep()` was
     // previously only exercised by the unit tests against an injected clock
@@ -371,7 +392,7 @@ async fn serve_forever(
         })
     };
     let accept_handle = tokio::spawn(async move {
-        accept_loop(uds, ws_listeners, state, registry, roster, stop_rx).await;
+        accept_loop(uds, ws_listeners, state, registry, roster, hygiene, lockout, preauth_semaphore, stop_rx).await;
     });
 
     // 6. Only now — WS listeners bound, control socket bound + mode 0600,
@@ -435,12 +456,16 @@ async fn sweep_loop(
 
 /// Poll the WS and control listeners, spawning a task per connection, until
 /// the stop channel is tripped (a SIGINT/SIGTERM arrived) or a listener fails.
+#[allow(clippy::too_many_arguments)] // #184: 5 shared hub-wide handles, threaded straight to the connection tasks
 async fn accept_loop(
     uds: UnixListener,
     ws_listeners: Vec<TcpListener>,
     state: HubState,
     registry: crate::live::Registry,
     roster: std::sync::Arc<crate::roster::Roster>,
+    hygiene: crate::hygiene::HygieneLimits,
+    lockout: std::sync::Arc<crate::lockout::Lockout>,
+    preauth_semaphore: std::sync::Arc<tokio::sync::Semaphore>,
     mut stop_rx: tokio::sync::oneshot::Receiver<()>,
 ) {
     let mut accept_any = AcceptAny {
@@ -459,11 +484,20 @@ async fn accept_loop(
                 tokio::spawn(crate::control_server::handle_control_conn(stream, registry.clone(), roster.clone()));
             }
             res = (&mut accept_any) => {
-                let stream = match res {
-                    Ok(s) => s,
+                let (stream, addr) = match res {
+                    Ok(pair) => pair,
                     Err(_) => continue,
                 };
-                tokio::spawn(handle_ws_conn(stream, state.clone(), registry.clone(), roster.clone()));
+                tokio::spawn(handle_ws_conn(
+                    stream,
+                    addr,
+                    state.clone(),
+                    registry.clone(),
+                    roster.clone(),
+                    hygiene,
+                    lockout.clone(),
+                    preauth_semaphore.clone(),
+                ));
             }
         }
     }
@@ -479,16 +513,16 @@ struct AcceptAny<'a> {
 }
 
 impl Future for AcceptAny<'_> {
-    type Output = Result<TcpStream, std::io::Error>;
+    type Output = Result<(TcpStream, SocketAddr), std::io::Error>;
     fn poll(mut self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let n = self.listeners.len().max(1);
         let mut idx = self.idx;
         for _ in 0..n {
             let l = &self.listeners[idx % n];
             match l.poll_accept(cx) {
-                Poll::Ready(Ok((stream, _addr))) => {
+                Poll::Ready(Ok((stream, addr))) => {
                     self.idx = (idx + 1) % n;
-                    return Poll::Ready(Ok(stream));
+                    return Poll::Ready(Ok((stream, addr)));
                 }
                 Poll::Ready(Err(e)) => {
                     self.idx = (idx + 1) % n;
@@ -520,135 +554,11 @@ impl Future for AcceptAny<'_> {
 /// The socket is **always** closed after the first frame on this story: a join
 /// is a one-shot bootstrap (docs §3), so there is no talk yet.
 ///
-/// Perform the **server side** of the WebSocket opening handshake over an
-/// already-accepted loopback `TcpStream`, and return the upgraded
-/// `WebSocketStream`.
-///
-/// tokio-tungstenite ships only a *client* async handshake (`connect_async`);
-/// its `handshake::server` machine is blocking (`std::io::Read`/`Write`), which
-/// a tokio `TcpStream` does not implement. So we do the handshake by hand on
-/// the async socket: read the upgrade `GET` (until the blank line), parse it,
-/// compute the `Sec-WebSocket-Accept` via tungstenite's own (tested)
-/// `create_response`, write the `101` back with `AsyncWrite`, and hand the
-/// socket — plus any bytes we over-read — to `from_partially_read` so no frame
-/// data is lost. A client that sends a non-WebSocket `GET` (or nothing) is
-/// dropped (returns `None`).
-async fn server_handshake(mut stream: TcpStream) -> Option<WebSocketStream<TcpStream>> {
-    // 1. Drain the HTTP upgrade request: read until the end of the header
-    //    section (`\r\n\r\n`). A WebSocket `GET` has no body, so the bytes
-    //    after the blank line (if any) are already the first WS frame.
-    let mut buf: Vec<u8> = Vec::new();
-    let mut tmp = [0u8; 1024];
-    let header_end = loop {
-        match stream.read(&mut tmp).await {
-            Ok(0) => return None, // peer closed before sending a request.
-            Ok(n) => buf.extend_from_slice(&tmp[..n]),
-            Err(_) => return None,
-        }
-        // The header section ends at the first `\r\n\r\n`.
-        if let Some(pos) = find_blank_line(&buf) {
-            break pos;
-        }
-        if buf.len() > 64 * 1024 {
-            return None; // header too large: not a sane upgrade request.
-        }
-    };
-
-    // `head` is the request (up to and including the blank line); `rest` is
-    // any bytes already received past the blank line (the start of a frame).
-    let (head, rest) = buf.split_at(header_end);
-
-    // 2. Parse the request and build the 101 response via tungstenite's own
-    //    (correct-GUID) accept-key computation.
-    let request: WsRequest = match parse_upgrade_request(head) {
-        Some(r) => r,
-        None => return None, // not a parseable HTTP request (or bad method/headers).
-    };
-    let response: WsResponse = match create_response(&request) {
-        Ok(r) => r,
-        Err(_) => return None, // rejected the upgrade (bad key/headers/method).
-    };
-
-    // 3. Serialise the 101 response to bytes and write it to the peer.
-    let bytes = serialize_response(&response);
-    if stream.write_all(&bytes).await.is_err() {
-        return None;
-    }
-    if stream.flush().await.is_err() {
-        return None;
-    }
-
-    // 4. Wrap the (already-upgraded) socket, folding in any over-read bytes so
-    //    the first frame is not lost. No handshake is repeated.
-    Some(WebSocketStream::from_partially_read(stream, rest.to_vec(), Role::Server, None).await)
-}
-
-/// The offset (exclusive) just past the first `\r\n\r\n` in `buf`, or `None`.
-fn find_blank_line(buf: &[u8]) -> Option<usize> {
-    buf.windows(4).position(|w| w == b"\r\n\r\n").map(|p| p + 4)
-}
-
-/// Parse a raw HTTP upgrade request (the bytes up to the blank line) into a
-/// tungstenite server `Request`. Returns `None` if it does not parse as an
-/// HTTP/1.1 `GET` with headers (a non-WebSocket peer).
-fn parse_upgrade_request(head: &[u8]) -> Option<WsRequest> {
-    use httparse::Request as RawRequest;
-    // httparse parses in place; the header fields borrow from `head`, so the
-    // scratch buffer must outlive the `Request` we build. 64 headers is far
-    // more than a WebSocket upgrade carries (Host/Connection/Upgrade/Version/Key).
-    let mut headers = [httparse::EMPTY_HEADER; 64];
-    let mut raw = RawRequest::new(&mut headers);
-    match raw.parse(head).ok()? {
-        httparse::Status::Complete(_) => {}
-        // An incomplete parse (a header line we read too early) is not a
-        // usable request.
-        httparse::Status::Partial => return None,
-    }
-    let method = raw.method?;
-    let path = raw.path.unwrap_or("/");
-    // A WebSocket upgrade is always HTTP/1.1 (httparse reports the numeric
-    // version, `1`); the response below is emitted as HTTP/1.1.
-    let mut builder = http::Request::builder()
-        .method(method)
-        .uri(path)
-        .version(http::Version::HTTP_11);
-    for h in raw.headers.iter() {
-        // httparse's header name/value borrow from `head`; the `http` crate
-        // wants owned (or `'static`) header parts, so copy via `from_bytes`
-        // (the same route tungstenite's own handshake takes).
-        let name = match http::header::HeaderName::from_bytes(h.name.as_bytes()) {
-            Ok(n) => n,
-            Err(_) => continue,
-        };
-        let value = match http::header::HeaderValue::from_bytes(h.value) {
-            Ok(v) => v,
-            Err(_) => continue,
-        };
-        builder = builder.header(name, value);
-    }
-    builder.body(()).ok()
-}
-
-/// Serialise a tungstenite `101` `Response<()>` to the exact bytes an HTTP
-/// writer would emit (status line, each header, then a blank line). We avoid
-/// tungstenite's `write_response` (it needs a *sync* `Write`, which a tokio
-/// `TcpStream` is not) by emitting the bytes ourselves and writing with
-/// `AsyncWrite`.
-fn serialize_response(response: &WsResponse) -> Vec<u8> {
-    use http::header::HeaderName;
-    let mut out = Vec::new();
-    out.extend_from_slice(b"HTTP/1.1 101 Switching Protocols\r\n");
-    for (name, value) in response.headers() {
-        let name: &HeaderName = name;
-        let value = value.as_bytes();
-        out.extend_from_slice(name.as_str().as_bytes());
-        out.extend_from_slice(b": ");
-        out.extend_from_slice(value);
-        out.extend_from_slice(b"\r\n");
-    }
-    out.extend_from_slice(b"\r\n");
-    out
-}
+/// The server-side WebSocket opening handshake itself lives in
+/// [`crate::ws_handshake`] (issue #184 — split out of this file once the
+/// connection-hygiene accept-path additions pushed it past the 900-line
+/// build guard).
+use crate::ws_handshake::server_handshake;
 
 /// Read frames off a freshly-upgraded socket until a *text* frame arrives,
 /// skipping ping/pong (and the untyped `Frame`), replying to a `Binary` first
@@ -678,7 +588,20 @@ where
             Some(Ok(Message::Ping(_)))
             | Some(Ok(Message::Pong(_)))
             | Some(Ok(Message::Frame(_))) => continue,
-            Some(Ok(Message::Close(_))) | Some(Err(_)) => {
+            Some(Ok(Message::Close(_))) => {
+                close(sink).await;
+                return None;
+            }
+            // Issue #184: a frame/message over the hygiene cap surfaces here
+            // as tungstenite's own `Capacity` error (it does not itself send
+            // a close frame on this path — see `WebSocketConfig::max_frame_size`'s
+            // own doc) — close explicitly with **1009** (message too big).
+            // Any other stream error is an ordinary abrupt teardown.
+            Some(Err(WsError::Capacity(_))) => {
+                close_with_code(sink, 1009, "message too big").await;
+                return None;
+            }
+            Some(Err(_)) => {
                 close(sink).await;
                 return None;
             }
@@ -686,23 +609,82 @@ where
     }
 }
 
+/// The three hygiene gates a fresh socket passes through, in order, before
+/// its first frame is even decoded (issue #184): the failed-auth lockout,
+/// the unauthenticated-connection-cap semaphore, then the pre-auth-timeout
+/// read of the first frame. `Err(())` means the caller (`handle_ws_conn`)
+/// should stop — this fn has already sent (and flushed) whatever close the
+/// refusal called for. Split out purely to keep `handle_ws_conn`'s own
+/// cognitive complexity under the workspace threshold.
+async fn admit_preauth(
+    sink: &mut (impl Sink<Message, Error = WsError> + Unpin),
+    stream: &mut (impl Stream<Item = Result<Message, WsError>> + Unpin),
+    addr: SocketAddr,
+    peer: &str,
+    hygiene: crate::hygiene::HygieneLimits,
+    lockout: &std::sync::Arc<crate::lockout::Lockout>,
+    preauth_semaphore: &std::sync::Arc<tokio::sync::Semaphore>,
+) -> Result<(String, tokio::sync::OwnedSemaphorePermit), ()> {
+    // Issue #184's failed-auth lockout: refused *before reading a frame* —
+    // the WS upgrade itself is not a "frame" in this sense (a close code is
+    // only expressible once the socket has upgraded, so the handshake must
+    // still have completed by the time this runs), but nothing past that
+    // point is read from a locked-out peer.
+    if lockout.is_locked_out(&addr.ip()) {
+        warn(Component::Wire, "lockout_refused", format!("peer={peer} refused: locked out"));
+        close_with_code(sink, 1008, "auth refused: too many failures").await;
+        return Err(());
+    }
+
+    // Issue #184's unauthenticated-connection cap: a semaphore around the
+    // whole pre-auth phase (this point through the end of the auth
+    // handshake — `circuit::handle_authenticated` releases it the moment
+    // `hello_exchange` succeeds, or it is dropped here on any refusal/error
+    // path below). Over the cap: refuse at once, before reading a frame.
+    let preauth_permit = match preauth_semaphore.clone().try_acquire_owned() {
+        Ok(permit) => permit,
+        Err(_) => {
+            close_with_code(sink, 1013, "try again later: too many unauthenticated connections").await;
+            return Err(());
+        }
+    };
+
+    // Issue #184's pre-auth timeout: a socket that has sent nothing at all
+    // within this budget is closed. Read the first frame (skipping
+    // ping/pong; a close or EOF ends the socket) under that bound.
+    match tokio::time::timeout(hygiene.pre_auth_timeout(), read_first_text_frame(sink, stream)).await {
+        Ok(Some(t)) => Ok((t, preauth_permit)),
+        Ok(None) => Err(()),
+        Err(_) => {
+            close(sink).await;
+            Err(())
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)] // #184: 4 shared hub-wide handles, unavoidable at the accept boundary
 async fn handle_ws_conn(
     stream: TcpStream,
+    addr: SocketAddr,
     state: HubState,
     registry: crate::live::Registry,
     roster: std::sync::Arc<crate::roster::Roster>,
+    hygiene: crate::hygiene::HygieneLimits,
+    lockout: std::sync::Arc<crate::lockout::Lockout>,
+    preauth_semaphore: std::sync::Arc<tokio::sync::Semaphore>,
 ) {
-    let ws = match server_handshake(stream).await {
+    let peer = addr.to_string();
+    let ws = match server_handshake(stream, hygiene.ws_config()).await {
         Some(ws) => ws,
         None => return, // not a WebSocket client (or it left mid-handshake).
     };
     let (mut sink, mut stream) = ws.split();
 
-    // Read the first frame (skipping ping/pong; a close or EOF ends the socket).
-    let first = match read_first_text_frame(&mut sink, &mut stream).await {
-        Some(t) => t,
-        None => return,
-    };
+    let (first, preauth_permit) =
+        match admit_preauth(&mut sink, &mut stream, addr, &peer, hygiene, &lockout, &preauth_semaphore).await {
+            Ok(pair) => pair,
+            Err(()) => return,
+        };
 
     // `first` is a text frame; run it through the codec.
     let env = match decode(&first) {
@@ -742,7 +724,7 @@ async fn handle_ws_conn(
         // circuit ends. Split into its own fn to keep this dispatch's
         // cognitive complexity under the workspace threshold.
         Some("circuit/authenticate") => {
-            dispatch_authenticate(&mut sink, &mut stream, &env, &state, &registry, &roster).await;
+            dispatch_authenticate(&mut sink, &mut stream, &env, &state, &registry, &roster, &peer, &lockout, preauth_permit).await;
         }
         // Any other method on a fresh socket, or a response/error where a
         // request is expected: unauthenticated.
@@ -764,6 +746,7 @@ async fn handle_ws_conn(
 /// the params (a bad shape is `-32602 invalid_params`) and hands off to
 /// [`crate::circuit::handle_authenticated`], which owns the entire live
 /// session from here.
+#[allow(clippy::too_many_arguments)] // #184: threads the hygiene/lockout/permit straight from `handle_ws_conn`
 async fn dispatch_authenticate(
     sink: &mut (impl Sink<Message, Error = WsError> + Unpin),
     stream: &mut (impl Stream<Item = Result<Message, WsError>> + Unpin),
@@ -771,6 +754,9 @@ async fn dispatch_authenticate(
     state: &HubState,
     registry: &crate::live::Registry,
     roster: &std::sync::Arc<crate::roster::Roster>,
+    peer: &str,
+    lockout: &std::sync::Arc<crate::lockout::Lockout>,
+    preauth_permit: tokio::sync::OwnedSemaphorePermit,
 ) {
     let params = match holler_proto::typed_params::<holler_proto::Authenticate>(env) {
         Ok(p) => p,
@@ -780,8 +766,8 @@ async fn dispatch_authenticate(
             return;
         }
     };
-    crate::circuit::handle_authenticated(sink, stream, env.id(), params, state, registry, roster)
-        .await;
+    let deps = crate::circuit::AuthDeps { registry, roster, peer, lockout };
+    crate::circuit::handle_authenticated(sink, stream, env.id(), params, state, deps, Some(preauth_permit)).await;
 }
 
 /// Send an error envelope (echoing `id` when given) as a text frame, then let
@@ -810,6 +796,19 @@ pub(crate) async fn send_error(
 /// to a close frame; flushing guarantees ours is on the wire before we drop).
 pub(crate) async fn close(sink: &mut (impl Sink<Message, Error = WsError> + Unpin)) {
     let _ = sink.send(Message::Close(None)).await;
+    let _ = sink.flush().await;
+}
+
+/// Send a WS close frame carrying an explicit close `code`/`reason` and flush
+/// it (issue #184: an oversized frame closes **1009**, a pre-auth-cap refusal
+/// **1013**, a lockout refusal **1008**, supersede **1000**, revoke **1008**
+/// — the plain [`close`] above only ever sends a codeless close, which is
+/// right for every *other* teardown path but not these operator/registry/
+/// hygiene-initiated ones).
+pub(crate) async fn close_with_code(sink: &mut (impl Sink<Message, Error = WsError> + Unpin), code: u16, reason: &'static str) {
+    use tokio_tungstenite::tungstenite::protocol::frame::{coding::CloseCode, CloseFrame};
+    let frame = Message::Close(Some(CloseFrame { code: CloseCode::from(code), reason: reason.into() }));
+    let _ = sink.send(frame).await;
     let _ = sink.flush().await;
 }
 

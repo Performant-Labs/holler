@@ -147,6 +147,12 @@ async fn dispatch_session_control(
         // `params.timeout_ms` elapses. Edge-triggered on `Roster::subscribe`
         // — no polling loop anywhere in this path.
         "control/wait" => wait(cid, obj, roster).await,
+        // `control/revoke` (issue #184): `hub token revoke`/`delete`'s own
+        // process already flipped the token store to `revoked`; this call
+        // (from that same CLI invocation) force-closes the live socket, if
+        // any, so the spec's "closes the socket immediately" is not left
+        // waiting on the body's own liveness timeout.
+        "control/revoke" => revoke(cid, obj, registry).await,
         other => encode_error(cid, Code::MethodNotFound, format!("unknown control method: {other}")),
     }
 }
@@ -599,6 +605,25 @@ async fn test_drop(cid: &holler_proto::CorrelationId, obj: &serde_json::Value, r
         }
     }
 }
+/// `control/revoke {token_id}` (issue #184): if `token_id` currently has a
+/// live socket, ask it to close with WS code 1008 and mark the roster row
+/// `gone` at once. `{closed: bool}` reports whether a live socket was found
+/// (`false` is not an error — the token may simply not have been connected,
+/// which is the common case; the store-side revoke already took effect in
+/// the CLI process that called this).
+async fn revoke(cid: &holler_proto::CorrelationId, obj: &serde_json::Value, registry: &Registry) -> String {
+    let Some(token_id) = obj.get("params").and_then(|p| p.get("token_id")).and_then(|v| v.as_str()) else {
+        return encode_error(cid, Code::InvalidParams, "control/revoke needs params.token_id".to_string());
+    };
+    match registry.find_by_token(token_id).await {
+        Some(handle) => {
+            let closed = handle.revoke().await;
+            encode_response(cid, serde_json::json!({ "closed": closed }))
+        }
+        None => encode_response(cid, serde_json::json!({ "closed": false })),
+    }
+}
+
 /// `control/token_ping {token_id}` (issue #182): find the live circuit bound
 /// to `token_id` in the registry and ask it to answer a `circuit/ping`,
 /// returning `{hostname, rtt_ms}`. No live socket for that token is
@@ -705,9 +730,17 @@ async fn status_doc(registry: &Registry) -> serde_json::Value {
         "listening": listening,
         "advertise": advertise,
         "clients": registry.len().await,
+        // Issue #184: the per-connection detail (`token_id`/`client_id`/
+        // `hostname`/`peer`/`connected_at`) `hub status --json` now also
+        // reports. Additive — `clients` itself stays the plain live count
+        // the existing test suite already asserts `as_u64()` against.
+        "clients_detail": registry.clients_detail().await,
         "sessions": registry.total_sessions().await,
         "harnesses_known": registry.harnesses_known().await,
         "harnesses_confirmed": registry.harnesses_confirmed().await,
+        // Issue #184's acceptance: the hygiene/lockout limits documented in
+        // `hub status --json`'s `limits{}`.
+        "limits": crate::hygiene::HygieneLimits::resolve().to_json(crate::lockout::LockoutLimits::resolve()),
     })
 }
 

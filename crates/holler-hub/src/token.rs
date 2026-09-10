@@ -37,7 +37,6 @@ use hmac::Hmac;
 use hmac::Mac;
 use sha2::Sha256;
 use subtle::ConstantTimeEq;
-use tokio::task::block_in_place;
 
 use holler_proto::log::Component;
 use holler_proto::log::Direction;
@@ -620,14 +619,30 @@ pub fn touch_last_seen(token_id: &str, state: &HubState) -> Result<(), TokenErro
 // The hub's serve loop is a tokio runtime; running the blocking `flock` +
 // file I/O above directly on an executor thread would starve it. Every
 // operation the serve path needs therefore has an async twin that runs the
-// same synchronous work in `tokio::task::spawn_blocking`. (The CLI's
-// one-shot leaves have no runtime and call the synchronous fns directly.)
+// same synchronous work in `tokio::task::spawn_blocking` — a dedicated
+// blocking-pool thread, never the calling task's own executor thread (issue
+// #184's spec test, `slow_token_store_does_not_stall_sibling_ping`, is what
+// pins this: these wrappers previously used `block_in_place`, which runs the
+// blocking work *on the current worker thread* and only compensates by
+// spinning up a replacement worker — correct on a multi-threaded runtime in
+// practice, but not what the spec asks for, and one more thing to get subtly
+// wrong under a constrained worker-thread count. `spawn_blocking` is the
+// unambiguous version of "never runs on an executor thread"). The CLI's
+// one-shot leaves have no runtime and call the synchronous fns directly.
+//
+// A `spawn_blocking` join failure (the blocking task panicked) is
+// unreachable in practice — none of `mint`/`redeem`/`verify_credential` ever
+// panics, they return `Result` — so it is mapped to a fail-closed
+// `TokenError`/`RedeemError::NotFound` rather than surfaced as a distinct
+// variant nobody could usefully handle.
 
 /// `mint` on the blocking pool (the spec: "all locked operations run in
 /// `tokio::task::spawn_blocking` when called from async code").
 pub async fn mint_async(label: &str, ttl_secs: u64, state: &HubState) -> Result<Minted, TokenError> {
     let (label, state) = (label.to_string(), state.clone());
-    block_in_place(|| mint(&label, ttl_secs, &state))
+    tokio::task::spawn_blocking(move || mint(&label, ttl_secs, &state))
+        .await
+        .unwrap_or_else(|_| Err(TokenError::new("token store task panicked")))
 }
 
 /// `redeem` on the blocking pool.
@@ -638,7 +653,9 @@ pub async fn redeem_async(
 ) -> Result<(String, String), RedeemError> {
     let (secret, hostname) = (secret.to_string(), hostname.to_string());
     let state = state.clone();
-    block_in_place(|| redeem(&secret, &hostname, &state))
+    tokio::task::spawn_blocking(move || redeem(&secret, &hostname, &state))
+        .await
+        .unwrap_or(Err(RedeemError::NotFound))
 }
 
 /// `verify_credential` on the blocking pool.
@@ -649,5 +666,20 @@ pub async fn verify_credential_async(
 ) -> Result<Record, TokenError> {
     let (token_id, credential) = (token_id.to_string(), credential.to_string());
     let state = state.clone();
-    block_in_place(|| verify_credential(&token_id, &credential, &state))
+    tokio::task::spawn_blocking(move || {
+        // Issue #184's `slow_token_store_does_not_stall_sibling_ping` test
+        // hook: an artificial delay on the *blocking-pool* thread only,
+        // gated behind the same `HOLLER_TEST_HOOKS=1` flag issue #192's
+        // `control/test_drop` uses — a production hub never reads this var
+        // as anything but absent. Simulates a slow store (e.g. contended
+        // disk) without needing a real one.
+        if std::env::var("HOLLER_TEST_HOOKS").as_deref() == Ok("1") {
+            if let Some(ms) = std::env::var("HOLLER_TEST_TOKEN_STORE_DELAY_MS").ok().and_then(|s| s.parse().ok()) {
+                std::thread::sleep(std::time::Duration::from_millis(ms));
+            }
+        }
+        verify_credential(&token_id, &credential, &state)
+    })
+    .await
+    .unwrap_or_else(|_| Err(TokenError::new("token store task panicked")))
 }

@@ -68,6 +68,17 @@ pub fn token_ping(token_id: &str) -> Result<serde_json::Value, ControlError> {
     exchange("b-token-ping", "control/token_ping", Some(params))
 }
 
+/// `hub token revoke`/`delete ID` (issue #184): ask the live hub to
+/// force-close `token_id`'s socket, if it currently has one. Best-effort —
+/// [`ControlError::NoLiveHub`] (no hub running) is expected and harmless
+/// here: the token store side of the revoke already took effect (the caller
+/// runs this only *after* `token::delete` succeeds), so there is simply
+/// nothing live to close.
+pub fn revoke_live(token_id: &str) -> Result<serde_json::Value, ControlError> {
+    let params = serde_json::json!({ "token_id": token_id });
+    exchange("b-revoke", "control/revoke", Some(params))
+}
+
 /// `hub caps` (issue #185): the live hub's `query/caps` document.
 pub fn caps() -> Result<serde_json::Value, ControlError> {
     exchange("b-caps", "control/caps", None)
