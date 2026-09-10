@@ -708,3 +708,78 @@ async fn peer_addr_present_in_status_json() {
 
     hub.stop(Duration::from_secs(5));
 }
+
+// ---------------------------------------------------------------------------
+// 9. issue #224 regression: a failed auth must not panic the hub's
+//    connection task, and must not spuriously lock the peer out.
+// ---------------------------------------------------------------------------
+
+/// Issue #224: on a **fresh** hub (no prior activity), a single failed
+/// `circuit/authenticate` (bad token id — never bound) used to be able to
+/// panic the hub's connection task with tokio's oneshot "called after
+/// complete", because `handle_ws_conn` awaited `ConnCtx::finish()` twice for
+/// the refusal path: once inside `refuse_auth`, and again, unconditionally,
+/// right after `dispatch_auth` returned. Whenever the writer task raced
+/// ahead and flushed the queued close before the *first* `finish()` call was
+/// polled, that first call completed via the `flushed` oneshot, and the
+/// *second* call polled the now-already-completed `flushed` receiver again —
+/// which tokio's oneshot panics on, since `Receiver::poll` drops its inner
+/// state the first time it returns `Ready`.
+///
+/// A single failed auth attempt is also, independently, not "too many
+/// failures": this asserts the peer is not locked out after just one
+/// (`max_failures` defaults to 5), and that a *second*, legitimate
+/// connection from the same peer still authenticates normally — proving the
+/// hub's connection-handling task survived the first refusal intact (a
+/// panicked task would have left the writer/registry in a state that could
+/// plausibly wedge a following connection, even though the panic itself is
+/// scoped to one tokio task) and that the peer's IP was not prematurely
+/// locked out by the first (of up to `max_failures`) strike.
+#[tokio::test]
+async fn single_bad_auth_on_fresh_hub_does_not_panic_hub_or_lock_out_peer() {
+    let state = StateDir::new();
+    let hub = Hub::start(&state);
+
+    // One connection, one bad `circuit/authenticate` (a token id that was
+    // never minted, so `verify_credential` fails "not bound" / "unknown
+    // token" — a legitimate refusal, not a lockout trip).
+    let (mut sink, mut stream) = connect_split(&hub.ws_url()).await;
+    let bad_auth = Message::text(
+        holler_proto::encode(
+            &holler_proto::Envelope::request(
+                &holler_proto::CorrelationId::mint_hub(),
+                "circuit/authenticate",
+                Some(json!({
+                    "token_id": "nonexistent-b224",
+                    "credential": "wrong",
+                })),
+            ),
+        )
+            .unwrap_or_default()
+    );
+    let refused = next_frame(&mut sink, &mut stream, bad_auth).await;
+    assert_eq!(
+        refused.close_code(),
+        Some(<u16>::from(CloseCode::Policy)),
+        "a single failed authenticate must still be refused with 1008 (got {refused:?})"
+    );
+
+    // The hub's connection task must not have panicked: the process itself
+    // is still alive (a task panic under `panic = "unwind"` does not by
+    // itself kill the process, but asserting liveness here catches any
+    // regression that upgrades this to a hard crash, and documents the
+    // invariant this test protects).
+    let mut hub = hub;
+    assert!(
+        matches!(hub.child_mut().try_wait(), Ok(None)),
+        "the hub process must still be running after a single failed auth"
+    );
+
+    // And the hub itself is not just alive but healthy: a second, fully
+    // legitimate connection from the same (loopback) peer authenticates
+    // normally right away — this one strike must not have tripped the
+    // lockout (`HOLLER_LOCKOUT_MAX_FAILURES` defaults to 5).
+    let (_sink2, _stream2, _tid) = auth_client(&state, &hub, "b224-regression").await;
+
+    hub.stop(Duration::from_secs(5));
+}
