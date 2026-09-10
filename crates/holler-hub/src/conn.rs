@@ -41,11 +41,21 @@ fn warn(component: Component, method: &'static str, msg: String) {
 /// refusal, not a codec error, so the wire contract for an auth failure is the
 /// close alone; the peer's own client does not surface an error frame it was
 /// not expecting. Any other pre-auth refusal — a framing/codec failure —
-/// roundtrips the codec's error frame *and* a close.) The writer task delivers
-/// the queued frames.
-async fn refuse_auth(ctx: &mut ConnCtx<'_>, id: Option<&str>, wire: holler_proto::WireError) {
+/// roundtrips the codec's error frame *and* a close.)
+///
+/// This only **queues** the close (`ctx.close_pending = true`) — it does
+/// **not** await `ctx.finish()`. Every dispatch path (join / wrong-method /
+/// auth-failure / auth-success) queues its close (if any) and returns; the
+/// *single* call to `ctx.finish()` at the end of `handle_ws_conn`, after
+/// `dispatch_auth` returns, is what waits for the writer to flush it (see
+/// that call site's comment — issue #224: a second, redundant `finish()` call
+/// here used to double-poll the already-completed `flushed` oneshot whenever
+/// the writer raced ahead and flushed the close before this function's first
+/// `finish()` call got polled, panicking the connection task with tokio's
+/// "called after complete").
+fn refuse_auth(ctx: &mut ConnCtx<'_>, id: Option<&str>, wire: holler_proto::WireError) {
     if wire.code == Code::Unauthenticated.jsonrpc() {
-        close_code(ctx.tx, 1008, "auth refused: too many failures");
+        close_code(ctx.tx, 1008, &wire.message);
     } else {
         send_error(
             ctx.tx,
@@ -56,7 +66,6 @@ async fn refuse_auth(ctx: &mut ConnCtx<'_>, id: Option<&str>, wire: holler_proto
         close(ctx.tx);
     }
     ctx.close_pending = true;
-    ctx.finish().await;
 }
 
 /// Handle one WebSocket (circuit) connection end to end (story #184).
@@ -183,8 +192,10 @@ async fn dispatch_auth(
         ctx.guard.armed = false;
         send_error(ctx.tx, env.id(), Code::Unauthenticated, "not authenticated");
         close(ctx.tx);
+        // Queue the close only — `handle_ws_conn`'s single trailing
+        // `ctx.finish()` call (after `dispatch_auth` returns) is what waits
+        // for the flush. See `refuse_auth`'s doc comment (issue #224).
         ctx.close_pending = true;
-        ctx.finish().await;
         return None;
     }
     match crate::auth_io::handle_auth(env, ctx, ctx.tx, ctx.state, ctx.registry, ctx.peer).await {
@@ -214,7 +225,7 @@ async fn dispatch_auth(
             } else {
                 holler_proto::WireError::new(code, message, None)
             };
-            refuse_auth(ctx, env.id(), wire).await;
+            refuse_auth(ctx, env.id(), wire);
             None
         }
     }
@@ -345,6 +356,27 @@ pub async fn handle_ws_conn(
             return;
         }
     };
+    // `dispatch_auth` never awaits `ctx.finish()` itself on any of its
+    // (join / wrong-method / auth-failure / auth-success) paths — it only
+    // queues a close (`ctx.close_pending = true`) where one applies. This is
+    // the *one* call to `ctx.finish()` for the whole connection lifecycle
+    // past the first frame: it waits for the writer to flush whatever close
+    // `dispatch_auth` queued (a refusal) before the read half is dropped
+    // below (FIN after the frame), or returns immediately if the auth
+    // succeeded and `post_auth_loop` already ran to completion (no close was
+    // queued on that path; a clean disconnect resolves the select immediately
+    // — see `finish`'s doc comment).
+    //
+    // Issue #224: this call used to run unconditionally *in addition to* an
+    // internal `ctx.finish().await` inside `refuse_auth` (the refusal path),
+    // so a single failed `circuit/authenticate` polled the already-completed
+    // `flushed` oneshot a second time here whenever the writer had already
+    // flushed the close by the time the first `finish()` call ran — tokio's
+    // oneshot `Receiver::poll` panics ("called after complete") on a second
+    // poll after it has returned `Ready` once, since it drops its internal
+    // state right after resolving. `refuse_auth` (and the wrong-method arm
+    // above) now only queue the close; this is the only place that awaits the
+    // flush, so `ctx.finish()` runs exactly once per connection.
     let _dropped_rx = dispatch_auth(&env, method, &mut ctx).await;
     ctx.finish().await;
 }
