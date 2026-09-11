@@ -29,7 +29,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
-use support::{join, kill_tree, mint_token, roster_json, wait_for, write_sessions_toml, Body, Hub, StateDir};
+use support::{join, kill_tree, mint_token, roster_json, wait_for, write_sessions_toml, Body, Hub, StateDir, STARTUP_WAIT};
 
 fn stdout_of(out: &Output) -> String {
     String::from_utf8_lossy(&out.stdout).into_owned()
@@ -225,18 +225,65 @@ fn say_ambiguous_exit_2_lists_candidates() {
     let _a = start_body_labeled(&hub_state, &body_a, &hub, "b1", &[("alpha", &["--chunks", "1"])]);
     let _b = start_body_labeled(&hub_state, &body_b, &hub, "b2", &[("alpha", &["--chunks", "1"])]);
 
-    // Wait until *both* bodies' presence has landed: poll until the refusal
-    // settles into "ambiguous" (one body registering first would still read
-    // as `unknown session`-then-success, never ambiguous). 30s (not the 10s
-    // every other `say_ready`-style wait in this file uses): this is the one
-    // case that needs *two* full body join+run sequences to complete, not
-    // one, and was observed to need more headroom under CI's slower/shared
-    // runners than a single-body wait does.
-    let out = wait_for(Duration::from_secs(30), || {
+    // Issue #220 root cause (CI-run audit, 2026-09-11 — see
+    // `gh run list --repo Performant-Labs/holler` cross-referenced against
+    // `git log`): every historical `never observed an ambiguous refusal
+    // within 30s` failure (CI runs 34394497782, 34398919457, 34399321243,
+    // 34399370884, 34403124491, 34413808866 — all on 2026-09-09, all before
+    // 22:53 UTC) traces to `mint_token`/`join` racing the live hub's own
+    // token-store file while a *previous* body from the same test is already
+    // connected and mid-authenticate — exactly the race PR #282
+    // (6e5e3f3, merged 2026-09-09 22:53 UTC) fixed by adding the retry loops
+    // `mint_token`/`join` (in `support/mod.rs`) now carry. The one
+    // apparently-post-fix hit (run 34416051217, 23:20 UTC) is a false
+    // positive: `git merge-base` shows that PR's branch
+    // (`feat/192-reconnect-contract`, `fa5948f`) forked from `cb7efdf`,
+    // *before* #282 landed on `main`, so its CI run never had the retry
+    // fix in the first place. Auditing every CI run since #282 landed
+    // (dozens, through 2026-09-11) turned up zero further occurrences: the
+    // token-store race was the actual bug, and it is already fixed.
+    //
+    // This test previously polled `say` itself in the wait loop: each poll
+    // forks a full `holler say` subprocess (CLI startup, control-socket
+    // connect, session resolution) even on the many iterations before both
+    // bodies have registered, burning part of the budget on wasted
+    // subprocess overhead rather than on the thing actually being waited
+    // for. Splitting the wait — poll the roster (a single lightweight
+    // subprocess per check) for *both* `alpha` rows to appear, the same
+    // "observed outcome, not a blind guess" pattern
+    // `say_full_in_background`/`wait_for_roster_row` already use elsewhere
+    // in this suite — makes the precondition explicit and leaves the final
+    // `say` a single confirming call rather than a polled guess. Belt and
+    // suspenders on top of the already-merged #282 fix; kept at
+    // `STARTUP_WAIT` (30s, the shared multi-body-convergence budget every
+    // other test in this file's family uses) since two full body
+    // join+run sequences is still the most convergence work any test here
+    // does.
+    wait_for(STARTUP_WAIT, || {
+        let rows = roster_json(&hub_state)["rows"].as_array()?.clone();
+        (rows
+            .iter()
+            .filter(|r| r["name"].as_str().is_some_and(|n| n.ends_with("/alpha")))
+            .count()
+            >= 2)
+        .then_some(())
+    })
+    .unwrap_or_else(|| {
+        panic!(
+            "never observed both bodies' `alpha` sessions on the roster within {STARTUP_WAIT:?}: {:?}",
+            roster_json(&hub_state)
+        )
+    });
+
+    // Both rows are confirmed present, so `say alpha` should read as
+    // ambiguous immediately; a short bounded retry (not the full
+    // `STARTUP_WAIT`) only absorbs the one remaining sub-second gap between
+    // the roster read above and this `say` invocation.
+    let out = wait_for(Duration::from_secs(5), || {
         let out = support::say(&hub_state, "alpha", "hi");
         stderr_of(&out).contains("ambiguous").then_some(out)
     })
-    .unwrap_or_else(|| panic!("never observed an ambiguous refusal within 30s"));
+    .unwrap_or_else(|| panic!("never observed an ambiguous refusal within 5s of both `alpha` rows appearing on the roster"));
 
     assert_eq!(out.status.code(), Some(2), "ambiguous session must exit 2; stderr: {}", stderr_of(&out));
     let err = stderr_of(&out);
