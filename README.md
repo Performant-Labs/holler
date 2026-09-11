@@ -8,6 +8,15 @@ This repository is under construction — see the [Phase 0 epic](https://github.
 
 See [docs/README.md](docs/README.md) — the index. For testing: [the harness design](docs/testing.md) and [how to run the tests](docs/running-tests.md).
 
+## Where Holler fits
+
+Holler is a composition, not a green-field protocol: a self-hosted, outbound-only circuit for
+interactive coding sessions on machines you own, with per-machine minted, revocable identity and
+a hub that can supervise. See [docs/research/positioning.md](docs/research/positioning.md) for
+the full honest statement — the three-layer table (A2A semantics / Holler transport+identity /
+ACP v2 harness), what is not claimed, and the risk register — and
+[docs/research/](docs/research/README.md) for the dated research it's built on.
+
 ## Attach convenience
 
 `holler body attach` removes the "curl the endpoint and hand-edit a TOML" dance for attaching to an OpenCode session another process already owns (a Herdr pane, or a bare `opencode serve`):
