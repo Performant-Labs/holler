@@ -25,3 +25,7 @@ Index of everything under `docs/`.
 
 - [**orchestrating.md**](orchestrating.md) — the orchestrator pattern: dispatch with `say`, don't poll `roster`, block on a deterministic `wait`, redirect with `interrupt`, resolve with `answer` (issue #142).
 - [**guidance-effective-agent-monitoring.md**](guidance-effective-agent-monitoring.md) — how to monitor a body/agent effectively (operating guidance, not a protocol or an ADR).
+
+## Handoffs
+
+- [**handoff-2026-09-11.md**](handoff-2026-09-11.md) — distilled state for an agent picking up where a session left off: the one open PR and why it's blocked, the CI infrastructure changes (self-hosted Uranus/Jupiter fleet, `pl-runner` image history), the still-unresolved `roster_stays_accurate_under_concurrent_body_load` flake and what's already been tried, and three deliberately-deferred security issues with their sequencing constraint. Not a durable doc — read it once, then it's historical.
