@@ -1,0 +1,365 @@
+name: interop
+
+# Manual dispatch only (issue #193). This is the expensive, real-network,
+# cross-OS proof — a real hub on Linux talking to a real body on macOS over
+# a real public wss:// tunnel (a Cloudflare quick tunnel). It never runs on
+# push/pull_request. Whether to also fire it on a release tag is a later
+# decision (the issue's own spec note) — not made here.
+on:
+  workflow_dispatch:
+
+env:
+  # Fixed, NON-secret pepper for this run's ephemeral hub only.
+  # holler-hub's `resolve_pepper_uncached` (crates/holler-hub/src/token.rs)
+  # takes HOLLER_PEPPER (hex) over the on-disk `hub/.pepper` file — setting
+  # it here just removes any dependency on a generated pepper file surviving
+  # between the `hub serve` step and the `hub token mint` step (both already
+  # share HOLLER_STATE_DIR, so this is belt-and-suspenders, not
+  # load-bearing). NEVER reuse this value, or any fixed pepper, outside a
+  # single throwaway CI run: the pepper is the HMAC key that makes a stolen
+  # token-store dump useless without it, and a fixed public value defeats
+  # that entirely. This hub is created and destroyed inside one job.
+  HOLLER_PEPPER: "a11ce0ffee0b501edeadbeefcafefeed10adedfeed5eed5deadc0de5eedf00d"
+  HOLLER_STATE_DIR: ${{ github.workspace }}/.holler-state
+  TUNNEL_LOG: ${{ github.workspace }}/cloudflared.log
+  HUB_LOG: ${{ github.workspace }}/hub.log
+  HANDOFF_DIR: ${{ github.workspace }}/interop-handoff
+
+jobs:
+  # ---------------------------------------------------------------------
+  # linux-server: builds the same `holler` binary, runs a real hub, fronts
+  # it with a real public wss:// (Cloudflare quick tunnel), mints a join
+  # token, hands both to macos-client via a workflow artifact (no `needs:`
+  # — see macos-client's own comment for why), then waits for the body to
+  # show up on the roster and drives it (`say` + `interrupt`).
+  # ---------------------------------------------------------------------
+  linux-server:
+    # workflow_dispatch is a manual, repo-scoped dispatch — fundamentally
+    # different from `pull_request`, which is why ci.yml's fork gate
+    # (`head.repo.full_name == github.repository`) does not need to be
+    # replicated here:
+    #
+    #   - `pull_request` runs the BASE repo's workflow file against a
+    #     fork's code automatically, on every push to the fork branch —
+    #     that's exactly the vector ci.yml's gate closes (a fork PR must
+    #     never land on Performant-Labs' self-hosted runners/secrets).
+    #   - `workflow_dispatch` has no such automatic path. It can only be
+    #     fired against THIS repository, from THIS repository's own
+    #     Actions UI/API, by an actor with write access to it (GitHub's
+    #     dispatch permission model). A stranger's fork of holler has its
+    #     own, separate `workflow_dispatch` — clicking "Run workflow"
+    #     there runs in the FORK's own Actions context (its own
+    #     `github.repository`, no access to Performant-Labs' org
+    #     `vars.CI_RUNNER`, no access to the self-hosted runner pool, no
+    #     access to org/repo secrets). There is no way to ride this
+    #     trigger from a fork onto Performant-Labs' owned hardware.
+    #
+    # Conclusion: `vars.CI_RUNNER` is safe to use directly here, unguarded,
+    # because only a trusted (write-access) actor can ever cause this job
+    # to run against the real Performant-Labs/holler repository in the
+    # first place.
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      # GitHub-hosted `ubuntu-latest` ships rustup preinstalled. The
+      # self-hosted Uranus/Jupiter `pl-runner` image now bakes rustup in
+      # too (image tag 1.69.0, 2026-09-11) — this guard is expected to be a
+      # no-op there today; it stays as defense-in-depth, matching ci.yml's
+      # own bootstrap-if-missing pattern, in case a runner image regresses
+      # or `vars.CI_RUNNER` points at something older.
+      - name: Install Rust (if missing)
+        run: |
+          if ! command -v rustup >/dev/null 2>&1; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain none
+            echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+            export PATH="$HOME/.cargo/bin:$PATH"
+          fi
+          rustup toolchain install stable
+        shell: bash
+
+      - uses: Swatinem/rust-cache@v2
+
+      # One repo, one binary: both jobs build the same `holler` (and its
+      # sibling `stub-acp`, a real `[[bin]]` target in
+      # crates/holler-cli/Cargo.toml) from this checkout.
+      - name: Build holler
+        run: cargo build --release -p holler-cli
+        shell: bash
+
+      # cloudflared is not preinstalled on either GitHub-hosted `ubuntu-latest`
+      # or the self-hosted `pl-runner` image; install the official static
+      # binary directly (no apt repo pin to maintain). Guarded the same
+      # if-missing way as the Rust bootstrap above, so a future image that
+      # does bundle it skips straight past this step.
+      - name: Install cloudflared (if missing)
+        run: |
+          if ! command -v cloudflared >/dev/null 2>&1; then
+            curl -L --output /tmp/cloudflared \
+              https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
+            chmod +x /tmp/cloudflared
+            sudo mv /tmp/cloudflared /usr/local/bin/cloudflared
+          fi
+          cloudflared --version
+        shell: bash
+
+      - name: Start hub
+        run: |
+          mkdir -p "$HOLLER_STATE_DIR"
+          nohup ./target/release/holler hub serve --listen 127.0.0.1:41807 \
+            > "$HUB_LOG" 2>&1 &
+          echo $! > hub.pid
+          # `wait_for`-style poll (see docs/testing.md) on the hub's own
+          # `listening` JSON line, bounded instead of a blind sleep.
+          for _ in $(seq 1 100); do
+            grep -q '"event":"listening"' "$HUB_LOG" 2>/dev/null && break
+            sleep 0.1
+          done
+          grep -q '"event":"listening"' "$HUB_LOG" || {
+            echo "::error::hub never reported listening"; cat "$HUB_LOG"; exit 1;
+          }
+        shell: bash
+
+      - name: Start Cloudflare quick tunnel
+        run: |
+          nohup cloudflared tunnel --url http://127.0.0.1:41807 \
+            > "$TUNNEL_LOG" 2>&1 &
+          echo $! > tunnel.pid
+          # A quick tunnel is TLS-terminating at Cloudflare's edge, so the
+          # body on macOS dials a real public `wss://…trycloudflare.com:443`
+          # — not loopback, not plaintext.
+          for _ in $(seq 1 150); do
+            grep -qoE 'https://[a-zA-Z0-9.-]+\.trycloudflare\.com' "$TUNNEL_LOG" 2>/dev/null && break
+            sleep 0.2
+          done
+          url=$(grep -oE 'https://[a-zA-Z0-9.-]+\.trycloudflare\.com' "$TUNNEL_LOG" | head -n1)
+          if [ -z "$url" ]; then
+            echo "::error::cloudflared never printed a trycloudflare.com URL"
+            cat "$TUNNEL_LOG"
+            exit 1
+          fi
+          echo "tunnel_url=$url" >> "$GITHUB_OUTPUT"
+        id: tunnel
+        shell: bash
+
+      # `hub token mint --json` prints `{token_id, secret, expires,
+      # join_command}` (crates/holler-cli/src/token_cmd.rs) — `body join
+      # --token` wants the combined `<token_id>:<secret>` form (the same
+      # form `join_command` already builds), not a single `token` field.
+      - name: Mint join token for macos
+        id: mint
+        run: |
+          out=$(./target/release/holler hub token mint --label macos --ttl 15m --json)
+          token_id=$(printf '%s' "$out" | python3 -c 'import json,sys; print(json.load(sys.stdin)["token_id"])')
+          secret=$(printf '%s' "$out" | python3 -c 'import json,sys; print(json.load(sys.stdin)["secret"])')
+          echo "::add-mask::$secret"
+          token="${token_id}:${secret}"
+          echo "::add-mask::$token"
+          echo "token=$token" >> "$GITHUB_OUTPUT"
+        shell: bash
+
+      - name: Write handoff artifact
+        run: |
+          mkdir -p "$HANDOFF_DIR"
+          python3 -c '
+          import json, os
+          data = {
+              "tunnel_url": os.environ["TUNNEL_URL"],
+              "token": os.environ["TOKEN"],
+          }
+          with open(os.path.join(os.environ["HANDOFF_DIR"], "handoff.json"), "w") as f:
+              json.dump(data, f)
+          '
+        env:
+          TUNNEL_URL: ${{ steps.tunnel.outputs.tunnel_url }}
+          TOKEN: ${{ steps.mint.outputs.token }}
+        shell: bash
+
+      # macos-client has no `needs:` on this job (see its own comment) and
+      # polls the run's artifact list for this name instead — upload it as
+      # early as the tunnel + token exist so the concurrent job isn't stuck
+      # waiting on the rest of this job (roster poll, say, interrupt).
+      - name: Upload interop-handoff artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: interop-handoff
+          path: ${{ env.HANDOFF_DIR }}/handoff.json
+          retention-days: 1
+
+      - name: Wait for macos/macos-session to connect (<= 3 min)
+        run: |
+          deadline=$((SECONDS + 180))
+          while [ "$SECONDS" -lt "$deadline" ]; do
+            out=$(./target/release/holler roster --json 2>/dev/null || true)
+            state=$(printf '%s' "$out" | python3 -c '
+          import json, sys
+          try:
+              d = json.load(sys.stdin)
+          except Exception:
+              print("")
+              raise SystemExit
+          for row in d.get("rows", []):
+              if row.get("name") == "macos/macos-session":
+                  print(row.get("conn_state", ""))
+                  break
+          else:
+              print("")
+          ' 2>/dev/null || true)
+            if [ "$state" = "connected" ]; then
+              echo "macos/macos-session is connected"
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "::error::macos/macos-session never reached conn_state=connected within 3 minutes"
+          ./target/release/holler roster --json || true
+          exit 1
+        shell: bash
+
+      - name: Say + interrupt the macOS session
+        run: |
+          ./target/release/holler say macos/macos-session "ping"
+          ./target/release/holler interrupt macos/macos-session
+        shell: bash
+
+      - name: Stop hub + tunnel
+        if: always()
+        run: |
+          [ -f tunnel.pid ] && kill "$(cat tunnel.pid)" 2>/dev/null || true
+          [ -f hub.pid ] && kill "$(cat hub.pid)" 2>/dev/null || true
+        shell: bash
+
+      - name: Show hub + tunnel logs
+        if: always()
+        run: |
+          echo "::group::hub.log"; cat "$HUB_LOG" 2>/dev/null || true; echo "::endgroup::"
+          echo "::group::cloudflared.log"; cat "$TUNNEL_LOG" 2>/dev/null || true; echo "::endgroup::"
+        shell: bash
+
+  # ---------------------------------------------------------------------
+  # macos-client: builds the same checkout on a GitHub-hosted macOS runner,
+  # then polls for the linux-server job's artifact instead of declaring
+  # `needs: linux-server`. `needs:` would serialize the two jobs (macos
+  # would not even start building until linux-server's entire job —
+  # including the roster wait, say, and interrupt — finished), which both
+  # defeats the point of proving concurrent cross-OS operation and adds
+  # minutes of dead time the macOS runner would spend idle. Instead this
+  # job starts immediately, builds in parallel with linux-server's hub/
+  # tunnel/token setup, and only blocks (via its own poll loop below) on
+  # the one real dependency: the artifact actually existing.
+  # ---------------------------------------------------------------------
+  macos-client:
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      # GitHub-hosted macOS images ship rustup preinstalled; kept as the
+      # same if-missing guard as linux-server for symmetry and in case a
+      # future image drops it.
+      - name: Install Rust (if missing)
+        run: |
+          if ! command -v rustup >/dev/null 2>&1; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain none
+            echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+            export PATH="$HOME/.cargo/bin:$PATH"
+          fi
+          rustup toolchain install stable
+        shell: bash
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build holler + stub-acp
+        run: cargo build --release -p holler-cli
+        shell: bash
+
+      # Poll the run's own artifact list via `gh api` until linux-server has
+      # uploaded `interop-handoff`, then download it. Bounded at 10 minutes
+      # (build + hub + tunnel + token-mint on the Linux side should take
+      # well under that); this is the RED case the issue's "Tests first"
+      # section describes in miniature — if linux-server never publishes
+      # the artifact (e.g. it failed before that step), this job fails
+      # loudly here instead of hanging forever.
+      - name: Wait for interop-handoff artifact
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p "$HANDOFF_DIR"
+          deadline=$((SECONDS + 600))
+          found=""
+          while [ "$SECONDS" -lt "$deadline" ]; do
+            id=$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts" \
+              --jq '.artifacts[] | select(.name=="interop-handoff") | .id' | head -n1)
+            if [ -n "$id" ]; then
+              found="$id"
+              break
+            fi
+            sleep 5
+          done
+          if [ -z "$found" ]; then
+            echo "::error::interop-handoff artifact never appeared within 10 minutes"
+            exit 1
+          fi
+          gh run download "${{ github.run_id }}" \
+            --repo "${{ github.repository }}" \
+            -n interop-handoff \
+            -D "$HANDOFF_DIR"
+          cat "$HANDOFF_DIR/handoff.json"
+        shell: bash
+
+      - name: Join the hub
+        id: join
+        run: |
+          tunnel_url=$(python3 -c 'import json; print(json.load(open("'"$HANDOFF_DIR"'/handoff.json"))["tunnel_url"])')
+          token=$(python3 -c 'import json; print(json.load(open("'"$HANDOFF_DIR"'/handoff.json"))["token"])')
+          echo "::add-mask::$token"
+          host=$(printf '%s' "$tunnel_url" | sed -E 's#^https?://##')
+          server="wss://${host}:443"
+          echo "server=$server" >> "$GITHUB_OUTPUT"
+          ./target/release/holler body join --server "$server" --token "$token"
+        shell: bash
+
+      - name: Write sessions.toml
+        run: |
+          stub="$(pwd)/target/release/stub-acp"
+          cat > sessions.toml <<EOF
+          [[session]]
+          name = "macos-session"
+          harness = "stub"
+          command = ["${stub}"]
+          EOF
+          cat sessions.toml
+        shell: bash
+
+      - name: Run the body (backgrounded, 300s)
+        run: |
+          nohup ./target/release/holler body run --config sessions.toml \
+            > body.log 2>&1 &
+          echo $! > body.pid
+          sleep 300
+        shell: bash
+
+      - name: Show body log
+        if: always()
+        run: cat body.log 2>/dev/null || true
+        shell: bash
+
+      - name: Stop the body
+        if: always()
+        run: |
+          [ -f body.pid ] && kill "$(cat body.pid)" 2>/dev/null || true
+        shell: bash
+
+  # windows-client stays off entirely (ADR 0002: "Windows on the CI matrix"
+  # is retired — see docs/testing.md's "Windows is deferred" section and
+  # ci.yml's own matrix comment). There is no self-hosted or GitHub-hosted
+  # Windows leg here for the same reasons ci.yml's matrix excludes it:
+  # a real compile break (old holler-client#60) and runner timing (old
+  # holler-server#302) that made Windows not-v1. Re-adding a Windows body
+  # to this interop workflow is gated on the same fix that re-adds it to
+  # ci.yml's matrix.
+  #
+  # windows-client:
+  #   runs-on: windows-latest
+  #   ...
