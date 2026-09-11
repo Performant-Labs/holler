@@ -68,12 +68,26 @@ ADR 0006 treats `tailscale serve` as the documented v1 path, but any
 TLS-terminating reverse proxy in front of the loopback listener is equally
 acceptable — Caddy, Traefik, and nginx are all fine as long as they:
 
+- **run on a machine you control** (see the warning below),
 - terminate TLS 1.3 themselves,
 - forward the WebSocket upgrade to `ws://127.0.0.1:41807` (or whatever port
   the hub is bound to), and
 - hold connections open well past the hub's 15 s presence beat — set the
   proxy's idle/read timeout to **at least 120 s** so a proxy timeout doesn't
   masquerade as a dropped body.
+
+> **The proxy is a trusted component, not merely a transport.** TLS terminates
+> *at the proxy*, and the proxy→hub hop is plaintext `ws` on loopback — so the
+> proxy sees every frame in the clear: the join secret, the body credential,
+> and every prompt and reply. The `tailscale serve` path above is safe by
+> construction because it runs **on the hub machine itself**; the proxy and the
+> hub are one trust domain.
+>
+> That property does not survive moving the proxy somewhere else. Do **not**
+> terminate Holler's TLS on a host you do not control — a shared ingress, a
+> managed load balancer, or a third-party edge — because doing so hands that
+> operator your credentials and your conversations. This is ADR 0006 point 6;
+> nothing in the hub can detect or enforce it for you.
 
 ### Example: Caddy
 

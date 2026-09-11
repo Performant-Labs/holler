@@ -40,8 +40,8 @@ The issue is the canonical record; the markdown file is a copy for browsing and 
 | 0013 | Body protocol is ACP v2 via the official Rust SDK (2.1.0) | accepted | [#14](https://github.com/Performant-Labs/holler/issues/14) |
 | 0014 | Attach mode: the body is not the parent of the harness | accepted | [#15](https://github.com/Performant-Labs/holler/issues/15) |
 | 0015 | License AGPL-3.0-or-later; outside PRs welcome; AI-disclosure policy | accepted | [#16](https://github.com/Performant-Labs/holler/issues/16) |
-| 0016 | | reserved | [#17](https://github.com/Performant-Labs/holler/issues/17) |
-| 0017 | | reserved | [#18](https://github.com/Performant-Labs/holler/issues/18) |
+| 0016 | Hub-enforced turn and spend caps | draft | [#17](https://github.com/Performant-Labs/holler/issues/17) |
+| 0017 | A2A bridge at the hub: agent cards, task mapping, artifacts/data plane | draft | [#18](https://github.com/Performant-Labs/holler/issues/18) |
 | 0018 | | reserved | [#19](https://github.com/Performant-Labs/holler/issues/19) |
 | 0019 | | reserved | [#20](https://github.com/Performant-Labs/holler/issues/20) |
 | 0020 | | reserved | [#21](https://github.com/Performant-Labs/holler/issues/21) |
