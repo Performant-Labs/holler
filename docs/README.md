@@ -15,6 +15,12 @@ Index of everything under `docs/`.
 
 - [**adr/**](adr/README.md) — Architecture Decision Records: one row per ADR, numbered in order, each pointing at the issue that carries it. [ADR 0002](adr/ADR-0002.md) is the one the testing docs lean on most (it retires the old two-repo decisions and records why Windows is off the CI matrix).
 
+## Research
+
+- [**research/**](research/README.md) — dated research memos and competitive/landscape surveys
+  (research memos are not decisions — ADRs are). [`research/positioning.md`](research/positioning.md)
+  is the "Where Holler fits" page: a composition, not a green-field protocol.
+
 ## Guidance
 
 - [**orchestrating.md**](orchestrating.md) — the orchestrator pattern: dispatch with `say`, don't poll `roster`, block on a deterministic `wait`, redirect with `interrupt`, resolve with `answer` (issue #142).
