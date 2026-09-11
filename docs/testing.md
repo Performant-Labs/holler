@@ -153,7 +153,13 @@ Everything in this harness runs on loopback (ADR 0002: "loopback-`ws`-only" is *
 
 The opt-in is the **`test-tag-interop`** label. A catalog case carrying it is run with `cargo test … -- --ignored`, i.e. it is *excluded from the normal suite* and only runs when explicitly invoked (a real cross-process, possibly cross-host run). On the single binary, `interop` needs no sibling build and no `HOLLER_SERVER_BIN` env var threaded in — `cargo_bin` finds `holler` itself (the old two-repo layout required both). The selection/runner layer knows about this tag: `--tag-invert interop` is the default "skip the cross-host cases" for a normal run (see `running-tests.md`).
 
-The catalog's interop cases are described in the master testing issue [#168](https://github.com/Performant-Labs/holler/issues/168) (the `protocol` group, range 2000). There is no `interop.yml` data file in-tree yet; the *mechanism* (a label + `-- --ignored` + a separate opt-in run) is what this story documents, and the cases will attach to it as they land.
+The catalog's interop cases are described in the master testing issue [#168](https://github.com/Performant-Labs/holler/issues/168) (the `protocol` group, range 2000). There is no catalog *data file* for this tag in-tree yet; the *mechanism* (a label + `-- --ignored` + a separate opt-in run) is what this story documents, and the cases will attach to it as they land.
+
+### The manual cross-OS proof: `.github/workflows/interop.yml`
+
+One rung further out than `test-tag-interop` (which still runs the catalog's `cargo test` harness, possibly cross-host but not necessarily cross-OS or over a real public network) is [`.github/workflows/interop.yml`](../.github/workflows/interop.yml) (issue [#193](https://github.com/Performant-Labs/holler/issues/193)): a manual-`workflow_dispatch`-only GitHub Actions workflow that proves a real hub on Linux talks to a real body on macOS over a real public `wss://` tunnel (a Cloudflare quick tunnel, TLS-terminating at Cloudflare's edge). Both jobs build the same `holler` binary from the same checkout — one repo, one binary, one proof that it works cross-OS and cross-network, not just cross-process on loopback.
+
+It never runs on `push`/`pull_request` — only a maintainer dispatching it by hand, from the repository's own Actions tab — because it spends real wall-clock time (a hub + tunnel + a 5-minute macOS body run) and reaches out to real Cloudflare infrastructure. This is the cross-OS evidence catalog case **`hlr-1608`** (interop) points to: run the workflow, then paste the green run's URL as that case's evidence.
 
 ## Windows is deferred (off the CI matrix)
 
