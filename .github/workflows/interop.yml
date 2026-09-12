@@ -30,7 +30,14 @@ env:
   # single throwaway CI run: the pepper is the HMAC key that makes a stolen
   # token-store dump useless without it, and a fixed public value defeats
   # that entirely. This hub is created and destroyed inside one job.
-  HOLLER_PEPPER: "a11ce0ffee0b501edeadbeefcafefeed10adedfeed5eed5deadc0de5eedf00d"
+  # Fixed 2026-09-12: the original value here was 63 hex characters (an odd
+  # length — invalid hex), so `holler hub token mint` failed outright with
+  # "HOLLER_PEPPER is not valid hex" every time this workflow ran. `hub
+  # serve` itself never touched it (the pepper is only read on token
+  # mint/redeem, not at hub startup), which is why this was invisible until
+  # the first real dispatch actually reached the mint step. This is a fresh
+  # 64-hex-char (32-byte) value with no other significance.
+  HOLLER_PEPPER: "613d5644c6141386306f56cf1a91cbe7fbe09f17f8be0cc76e461df6a3cef887"
   HOLLER_STATE_DIR: ${{ github.workspace }}/.holler-state
   TUNNEL_LOG: ${{ github.workspace }}/cloudflared.log
   HUB_LOG: ${{ github.workspace }}/hub.log
