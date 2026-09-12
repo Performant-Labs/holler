@@ -152,7 +152,7 @@ fn write_mixed_sessions_toml(state: &StateDir, blocks: &[String]) -> PathBuf {
 /// since that one lives in a different test binary target).
 fn join_fresh(state: &StateDir, ws_url: &str, label: &str) {
     let (token_id, secret) = support::mint_token(state, label);
-    support::join(state, ws_url, &token_id, &secret);
+    support::join(state, state, ws_url, &token_id, &secret);
 }
 
 /// Poll `holler roster --json`'s rows until one whose name ends with

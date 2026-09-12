@@ -197,6 +197,13 @@ pub struct Hello {
     /// **Body**: the sessions this body hosts.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sessions: Option<Vec<HelloSession>>,
+    /// **Hub only** (issue #322): the hub's long-lived X25519 static public
+    /// key, hex-encoded. A body pins this at `body join` (from the join
+    /// line's out-of-band copy, never from the wire) and compares it here on
+    /// every subsequent hello — a mismatch is a hard failure, never a prompt,
+    /// never trust-on-first-use.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hub_pubkey: Option<String>,
 }
 
 /// One session advertised in a **body**'s hello.
@@ -703,6 +710,10 @@ pub struct AnswerResult {
 }
 
 /// The `params` of `circuit/join` (docs §3) — the one-time bootstrap.
+///
+/// Issue #323: the body registers its own long-lived **public** key at join
+/// instead of receiving a bearer credential back — the private half never
+/// leaves the body (generated and persisted locally, `holler_body::identity`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Join {
@@ -710,30 +721,70 @@ pub struct Join {
     pub secret: String,
     /// The hostname / label to claim.
     pub hostname: String,
+    /// The body's Ed25519 public key, hex-encoded (32 bytes). Stored against
+    /// the token; used to verify every later `circuit/prove`.
+    pub body_pubkey: String,
 }
 
-/// The `result` of `circuit/join` — `{client_id, credential}`; the hub then
-/// **closes the socket**.
+/// The `result` of `circuit/join` — `{client_id}`; the hub then **closes the
+/// socket**. Issue #323: no `credential` — proof of possession of the
+/// registered `body_pubkey` (via `circuit/authenticate` → `circuit/prove`)
+/// replaces presenting a bearer secret on every reconnect.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct JoinResult {
     pub client_id: String,
-    pub credential: String,
 }
 
-/// The `params` of `circuit/authenticate` (docs §3) — the normal (re)connect.
+/// The `params` of `circuit/authenticate` (docs §3) — the **first** frame of
+/// the normal (re)connect's now two-step challenge-response (issue #323): the
+/// body names the token and the address it believes it is dialing; the hub's
+/// **result** is not a bare ack but an [`AuthChallenge`] — a fresh nonce the
+/// body must sign and return via `circuit/prove`. No secret crosses the wire
+/// here (the join secret is spent, one-time, at `circuit/join`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Authenticate {
     /// The short token id.
     pub token_id: String,
-    /// The long-lived credential (not the join secret).
-    pub credential: String,
     /// The hostname / label to claim.
     pub hostname: String,
+    /// The URL this body believes it is dialing (its own configured
+    /// `--server` / persisted `server_url`) — bound into the
+    /// [`crate::transcript::build`] transcript `circuit/prove` signs, so a
+    /// captured proof cannot be replayed against a different endpoint.
+    pub advertised_url: String,
 }
 
-/// The `result` of `circuit/authenticate`.
+/// The `result` of `circuit/authenticate` (issue #323) — a fresh, single-use
+/// challenge, not an ack. The body must answer with `circuit/prove`
+/// (params: [`Prove`]) within the hub's prove timeout, or the socket is
+/// closed as unauthenticated.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AuthChallenge {
+    /// A fresh, hex-encoded random nonce, unique to this connection attempt
+    /// and never persisted or reused — a signature over one nonce cannot be
+    /// replayed against a challenge minted for a different attempt.
+    pub nonce: String,
+}
+
+/// The `params` of `circuit/prove` (issue #323) — the **second** frame of the
+/// authenticate handshake: the body proves possession of the private key
+/// matching the `body_pubkey` it registered at join, by signing the
+/// [`crate::transcript::build`] transcript over the hub's own
+/// [`AuthChallenge::nonce`] (never a value the body chooses).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Prove {
+    /// The short token id (must match the preceding `circuit/authenticate`).
+    pub token_id: String,
+    /// The Ed25519 signature over the transcript, hex-encoded (64 bytes).
+    pub signature: String,
+}
+
+/// The `result` of `circuit/authenticate`'s handshake — sent as the response
+/// to `circuit/prove`, once the signature verifies.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AuthOk {

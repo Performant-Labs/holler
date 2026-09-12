@@ -70,7 +70,7 @@ fn talklog_survives_large_accumulated_log_without_corruption() {
     let body_state = StateDir::new();
     let hub = Hub::start(&hub_state);
     let (token_id, secret) = mint_token(&hub_state, "b");
-    join(&body_state, &hub.ws_url(), &token_id, &secret);
+    join(&body_state, &hub_state, &hub.ws_url(), &token_id, &secret);
     let config = write_sessions_toml(&body_state, &[("alpha", &["--chunks", "1"])]);
     let _body = Body::start(&body_state, &config);
 

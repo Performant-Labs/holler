@@ -90,6 +90,16 @@ pub fn run(listen: &[String], advertise: Option<&str>) -> i32 {
         return 1;
     }
 
+    // Issue #322: generate (or load) the hub's long-lived X25519 identity
+    // keypair before anything binds — `hub token mint` also calls this
+    // (whichever runs first creates the file), so a hub that has never
+    // served yet but has already minted a token still answers with the same
+    // key a body pinned earlier.
+    if let Err(e) = crate::identity::ensure(&state) {
+        warn(Component::Control, "hub_identity_failed", format!("cannot resolve hub identity: {e}"));
+        return 1;
+    }
+
     // 1. Refuse any non-loopback listen address before anything binds.
     let addrs: Vec<SocketAddr> = match listen.iter().map(|s| validate_loopback(s)).collect() {
         Some(a) => a,
@@ -607,8 +617,8 @@ impl Future for AcceptAny<'_> {
 /// - **not a v2 message** (garbage / batch / shape error) → the matching
 ///   `-32700`/`-32600` error, then close.
 /// - **`circuit/join`** → redeemed via [`crate::join::redeem_join`], which
-///   replies with the `{client_id, credential}` (or a `join_failed` error) and
-///   closes the one-shot socket.
+///   replies with `{client_id}` (issue #323: no credential; or a
+///   `join_failed` error) and closes the one-shot socket.
 /// - **anything else** (a request or notification that is not join) →
 ///   `-32002 unauthenticated`, then close.
 ///
@@ -764,10 +774,10 @@ async fn handle_ws_conn(
     // unauthenticated (the `None` arm).
     match env.method() {
         // The one-shot bootstrap (docs §3): the body presents a one-time join
-        // secret; the hub redeems it for a `client_id` + long-lived
-        // `credential`, replies, and closes the socket. (The normal
-        // `circuit/authenticate` path — re-authenticating an existing body —
-        // is a later story; on a fresh socket it is still refused below.)
+        // secret and registers its Ed25519 public key; the hub redeems it for
+        // a `client_id` (issue #323: no credential), replies, and closes the
+        // socket. (The normal `circuit/authenticate` → `circuit/prove` path —
+        // re-authenticating an existing body — is dispatched below.)
         Some("circuit/join") => {
             let params = match holler_proto::typed_params::<Join>(&env) {
                 Ok(p) => p,
@@ -779,11 +789,13 @@ async fn handle_ws_conn(
             };
             crate::join::redeem_join(&mut sink, env.id(), params, &state).await;
         }
-        // A returning body re-authenticating with its persisted credential
-        // (issue #182). On success this holds the socket for the whole live
-        // session (hello exchange, presence, ping); it only returns once the
-        // circuit ends. Split into its own fn to keep this dispatch's
-        // cognitive complexity under the workspace threshold.
+        // A returning body re-authenticating by proving possession of its
+        // registered private key (issue #323's `circuit/authenticate` →
+        // `circuit/prove` challenge-response). On success this holds the
+        // socket for the whole live session (hello exchange, presence, ping);
+        // it only returns once the circuit ends. Split into its own fn to
+        // keep this dispatch's cognitive complexity under the workspace
+        // threshold.
         Some("circuit/authenticate") => {
             dispatch_authenticate(&mut sink, &mut stream, &env, &state, &registry, &roster, &peer, &lockout, preauth_permit).await;
         }

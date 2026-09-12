@@ -107,7 +107,7 @@ fn wait_row_matches(row: &serde_json::Value, session: &str) -> bool {
 /// `hub_state`, join `body_state`, and start `holler body run`.
 fn start_body(hub_state: &StateDir, body_state: &StateDir, hub: &Hub, sessions: &[(&str, &[&str])]) -> Body {
     let (token_id, secret) = mint_token(hub_state, "b");
-    join(body_state, &hub.ws_url(), &token_id, &secret);
+    join(body_state, hub_state, &hub.ws_url(), &token_id, &secret);
     let config = write_sessions_toml(body_state, sessions);
     Body::start(body_state, &config)
 }

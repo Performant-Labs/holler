@@ -27,6 +27,7 @@
 //! threading 7-15 loose positional parameters — a pure refactor, no behavior
 //! change.
 
+mod handshake;
 mod session_dispatch;
 
 use std::path::{Path, PathBuf};
@@ -35,7 +36,7 @@ use std::time::Duration;
 
 use futures_util::{Sink, SinkExt, Stream, StreamExt};
 use holler_proto::log::{Component, Direction as LogDirection, Event, Severity};
-use holler_proto::{Authenticate, Code, CorrelationId, Envelope, Hello, HelloRole, PingAck, Presence};
+use holler_proto::{Code, CorrelationId, Envelope, PingAck, Presence};
 use tokio::signal::unix::{signal, SignalKind};
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::{Error as WsError, Message};
@@ -134,7 +135,10 @@ pub fn run(state_root: &Path, registry: SessionRegistry) -> RunExit {
 enum Attempt {
     /// `detach` fired, or a signal arrived: stop for good.
     Ended(RunExit),
-    /// The hub rejected the credential: stop for good, no retry.
+    /// The hub rejected the authentication proof, or this connection's hub
+    /// `circuit/hello` carried a public key that does not match the one
+    /// pinned at `body join` (issue #322: a hard failure, never a prompt,
+    /// never trust-on-first-use): stop for good, no retry.
     AuthFailed(String),
     /// The socket dropped (connect failure, decode error, liveness timeout,
     /// hub close): back off and retry.
@@ -325,11 +329,11 @@ async fn connect_and_serve(
     };
     let (mut sink, mut stream) = ws.split();
 
-    if let Err(reason) = authenticate(&mut sink, &mut stream, identity).await {
+    if let Err(reason) = handshake::authenticate(&mut sink, &mut stream, identity).await {
         return reason;
     }
-    if hello_exchange(&mut sink, &mut stream, identity, configs).await.is_err() {
-        return Attempt::Dropped("hello exchange failed".to_string());
+    if let Err(reason) = handshake::hello_exchange(&mut sink, &mut stream, identity, configs).await {
+        return reason;
     }
 
     // Live: the next drop, whenever it comes, must back off from 0 (#299).
@@ -348,92 +352,6 @@ async fn connect_and_serve(
 
     let mut conn = LiveConnection::new(state_root, &mut sink, &mut stream, identity, session_manager, configs);
     conn.run(sigint, sigterm).await
-}
-
-/// Send `circuit/authenticate` and await the answer. `-32002` maps to
-/// [`Attempt::AuthFailed`] (no retry, per the issue); every other failure
-/// (connect-adjacent decode errors, a foreign error code, a closed socket, a
-/// 10s timeout) maps to [`Attempt::Dropped`] (retry with backoff).
-async fn authenticate<Snk, St>(sink: &mut Snk, stream: &mut St, identity: &BodyIdentity) -> Result<(), Attempt>
-where
-    Snk: Sink<Message, Error = WsError> + Unpin,
-    St: Stream<Item = Result<Message, WsError>> + Unpin,
-{
-    let cid = CorrelationId::mint_body();
-    let params = Authenticate {
-        token_id: identity.token_id.clone(),
-        credential: identity.credential.clone(),
-        hostname: identity.hostname.clone(),
-    };
-    let params = serde_json::to_value(params).map_err(|e| Attempt::Dropped(format!("encode auth: {e}")))?;
-    let req = Envelope::request(&cid, "circuit/authenticate", Some(params));
-    send(sink, &req).await.map_err(|_| Attempt::Dropped("send auth: socket closed".to_string()))?;
-
-    let env = timeout_next_envelope(stream)
-        .await
-        .ok_or_else(|| Attempt::Dropped("no answer to circuit/authenticate".to_string()))?;
-    match env {
-        Envelope::Response { id, .. } if id == cid.as_str() => Ok(()),
-        Envelope::Error { error, .. } if error.code == Code::Unauthenticated.jsonrpc() => {
-            Err(Attempt::AuthFailed(error.message))
-        }
-        Envelope::Error { error, .. } => Err(Attempt::Dropped(format!("authenticate refused: {}", error.message))),
-        _ => Err(Attempt::Dropped("unexpected reply to circuit/authenticate".to_string())),
-    }
-}
-
-/// The bidirectional hello exchange (see the module doc's "Decisions made").
-/// `configs` (issue #185) is this body's own session config — its harness
-/// ids populate the hello's `harnesses` field, which is what the hub's
-/// confirmation pass ([`crate::query`]'s hub-side counterpart, `holler_hub::
-/// circuit::confirm_harnesses`) probes right after this exchange completes.
-async fn hello_exchange<Snk, St>(
-    sink: &mut Snk,
-    stream: &mut St,
-    identity: &BodyIdentity,
-    configs: &[SessionConfig],
-) -> Result<(), ()>
-where
-    Snk: Sink<Message, Error = WsError> + Unpin,
-    St: Stream<Item = Result<Message, WsError>> + Unpin,
-{
-    let mut harnesses: Vec<String> = configs.iter().map(|c| c.harness.clone()).collect();
-    harnesses.sort();
-    harnesses.dedup();
-
-    let cid = CorrelationId::mint_body();
-    let hello = Hello {
-        protocol: holler_proto::PROTOCOL_VERSION,
-        protocol_min: holler_proto::PROTOCOL_MIN,
-        protocol_max: holler_proto::PROTOCOL_MAX,
-        role: HelloRole::Body,
-        hostname: identity.hostname.clone(),
-        token_id: Some(identity.token_id.clone()),
-        client_id: Some(identity.client_id.clone()),
-        features: Vec::new(),
-        harnesses: Some(harnesses),
-        harnesses_known: None,
-        harnesses_confirmed: None,
-        sessions: Some(Vec::new()),
-    };
-    let params = serde_json::to_value(hello).map_err(|_| ())?;
-    let req = Envelope::request(&cid, "circuit/hello", Some(params));
-    send(sink, &req).await.map_err(|_| ())?;
-
-    match timeout_next_envelope(stream).await {
-        Some(Envelope::Response { id, .. }) if id == cid.as_str() => {}
-        _ => return Err(()),
-    }
-
-    // The hub's own hello: a request we must answer with `{}`.
-    match timeout_next_envelope(stream).await {
-        Some(Envelope::Request { id, method, .. }) if method == "circuit/hello" => {
-            let cid = CorrelationId::parse(&id).map_err(|_| ())?;
-            let ack = Envelope::response(&cid, Some(serde_json::json!({})));
-            send(sink, &ack).await.map_err(|_| ())
-        }
-        _ => Err(()),
-    }
 }
 
 /// Read the next envelope with a 10s timeout, skipping ping/pong/raw frames.

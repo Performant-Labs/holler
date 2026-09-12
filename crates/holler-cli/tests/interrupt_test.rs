@@ -97,7 +97,7 @@ fn start_body_with_env(
     envs: &[(&str, &str)],
 ) -> Body {
     let (token_id, secret) = mint_token(hub_state, label);
-    join(body_state, &hub.ws_url(), &token_id, &secret);
+    join(body_state, hub_state, &hub.ws_url(), &token_id, &secret);
     let config = write_sessions_toml(body_state, sessions);
     Body::start_with_env(body_state, &config, envs)
 }
@@ -393,7 +393,7 @@ fn full_journey_with_stub() {
     let hub = Hub::start(&hub_state);
 
     let (token_id, secret) = mint_token(&hub_state, "t");
-    join(&body_state, &hub.ws_url(), &token_id, &secret);
+    join(&body_state, &hub_state, &hub.ws_url(), &token_id, &secret);
     let config = write_sessions_toml(&body_state, &[("alpha", &["--slow", "--chunks", "10"]), ("beta", &["--chunks", "3"])]);
     let mut body = Body::start(&body_state, &config);
     let body_pid = body.child_mut().id();

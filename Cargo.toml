@@ -108,6 +108,25 @@ subtle = "2"
 # (queries `rustls::crypto::CryptoProvider::get_default` to fail a `wss`
 # connect closed when no provider is installed).
 rustls = "0.23"
+# x25519-dalek: the hub's long-lived X25519 static identity keypair (issue
+# #322) — pinned by `body join` from the join line, the pre-message key for a
+# future Noise XK handshake (#321). `static_secrets` is the feature that
+# exposes `StaticSecret` (a key used across many connections, not the
+# single-use `EphemeralSecret`); keys are built from this crate's own
+# `getrandom`-drawn bytes (`StaticSecret::from([u8; 32])`), so the crate's own
+# `getrandom`/`reusable_secrets`/rng-object-construction features are not
+# needed. Consumed by holler-hub.
+x25519-dalek = { version = "3", features = ["static_secrets"] } # for holler-hub
+# ed25519-dalek: the body's long-lived Ed25519 signing keypair (issue #323) —
+# registered (public half only) at `circuit/join`, used to sign the
+# `circuit/authenticate` → `circuit/prove` challenge transcript. Keys are
+# built from this crate's own `getrandom`-drawn bytes
+# (`SigningKey::from_bytes(&[u8; 32])`), so the crate's own `rand_core`
+# feature is not needed. Consumed by holler-body (signs) and holler-hub
+# (verifies against the registered public key — `VerifyingKey`/`Signature`
+# are always available, `rand_core` gates only key *generation* helpers this
+# crate does not use).
+ed25519-dalek = { version = "3" } # for holler-body, holler-hub
 # POSIX process-group control for the test harness's kill_tree.
 libc = "0.2"
 # scratch state dirs for the test harness.

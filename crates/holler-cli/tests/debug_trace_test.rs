@@ -124,11 +124,12 @@ fn start_body_capturing(state: &StateDir, config: &Path, debug_level: &str) -> (
 fn join_fresh(state: &StateDir, ws_url: &str, label: &str) {
     let (token_id, secret) = mint_token(state, label);
     let token = format!("{token_id}:{secret}");
+    let hub_key = support::hub_pubkey(state);
     let out = Command::new(holler_bin())
         .env("HOLLER_STATE_DIR", state.path())
         .env("HOLLER_DEBUG", "quiet")
         .env("HOLLER_LOG_FORMAT", "json")
-        .args(["body", "join", "--server", ws_url, "--token", &token])
+        .args(["body", "join", "--server", ws_url, "--token", &token, "--hub-key", &hub_key])
         .output()
         .expect("run `body join`");
     assert!(out.status.success(), "body join failed: {}", String::from_utf8_lossy(&out.stderr));

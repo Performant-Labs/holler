@@ -42,10 +42,11 @@ fn token_err(e: TokenError) -> i32 {
 /// seconds — see `crate::time_fmt::format_epoch`.
 /// `holler hub token mint --label L [--ttl 24h] [--json]` — mint a join
 /// token and hand the operator the one-time secret. Human output prints
-/// `token_id`, `secret`, `expires`, and a ready-to-paste `holler body join`
-/// line; `--json` prints `{token_id, secret, expires, join_command}`. A
-/// duplicate label or an invalid label is a fail-closed refusal (exit 3); an
-/// I/O failure is exit 1.
+/// `token_id`, `secret`, `expires`, `hub_pubkey` (issue #322), and a
+/// ready-to-paste `holler body join … --hub-key HEX` line; `--json` prints
+/// `{token_id, secret, expires, hub_pubkey, join_command}`. A duplicate label
+/// or an invalid label is a fail-closed refusal (exit 3); an I/O failure is
+/// exit 1.
 pub fn mint(mint: &Mint, json: bool) -> i32 {
     let state = match token_state() {
         Ok(s) => s,
@@ -56,6 +57,16 @@ pub fn mint(mint: &Mint, json: bool) -> i32 {
         None => {
             eprintln!("error: invalid --ttl {:?} (use e.g. 15m, 2h, 24h)", mint.ttl);
             return 3;
+        }
+    };
+    // Issue #322: resolve (generating on first use, same as `hub serve`) the
+    // hub's identity keypair *before* minting — the join line this command
+    // prints must carry a real key even on a hub that has never `serve`d yet.
+    let hub_pubkey = match holler_hub::identity::ensure(&state) {
+        Ok(identity) => identity.public_hex(),
+        Err(e) => {
+            eprintln!("error: {e}");
+            return 1;
         }
     };
     let minted = match holler_hub::token::mint(&mint.label, ttl_secs, &state) {
@@ -70,12 +81,13 @@ pub fn mint(mint: &Mint, json: bool) -> i32 {
             return token_err(e);
         }
     };
-    let join_command = join_command(&state, &minted.record.token_id, &minted.secret);
+    let join_command = join_command(&state, &minted.record.token_id, &minted.secret, &hub_pubkey);
     if json {
         let doc = serde_json::json!({
             "token_id": minted.record.token_id,
             "secret": minted.secret,
             "expires": minted.record.expires,
+            "hub_pubkey": hub_pubkey,
             "join_command": join_command,
         });
         println!("{}", doc);
@@ -83,6 +95,7 @@ pub fn mint(mint: &Mint, json: bool) -> i32 {
         println!("token_id:    {}", minted.record.token_id);
         println!("secret:      {}   (shown once; not stored)", minted.secret);
         println!("expires:     {}", format_epoch(minted.record.expires));
+        println!("hub_pubkey:  {hub_pubkey}");
         println!();
         println!("  {join_command}");
     }
@@ -308,15 +321,19 @@ fn parse_ttl(ttl: &str) -> Option<u64> {
     }
 }
 
-/// The ready-to-paste `holler body join --server <adv> --token <id>:<secret>`
-/// line `mint` prints (and `--json`'s `join_command`). The server is the
-/// hub's persisted advertise address if `hub serve --advertise` set one, else
-/// the spec's loopback default `ws://127.0.0.1:41807`.
-fn join_command(state: &holler_hub::state::HubState, token_id: &str, secret: &str) -> String {
+/// The ready-to-paste `holler body join --server <adv> --token <id>:<secret>
+/// --hub-key <hex>` line `mint` prints (and `--json`'s `join_command`). The
+/// server is the hub's persisted advertise address if `hub serve --advertise`
+/// set one, else the spec's loopback default `ws://127.0.0.1:41807`.
+/// `--hub-key` (issue #322) is the hub's X25519 public key: the operator
+/// carries it over the same out-of-band channel as the secret, and `body
+/// join` pins it — this is the physical channel that makes the pin
+/// meaningful, so the join line is where it belongs, not a separate step.
+fn join_command(state: &holler_hub::state::HubState, token_id: &str, secret: &str, hub_pubkey: &str) -> String {
     let server = std::fs::read_to_string(holler_hub::state::advertise_path(state))
         .ok()
         .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
         .and_then(|v| v.get("advertise").and_then(|a| a.as_str()).map(String::from))
         .unwrap_or_else(|| "ws://127.0.0.1:41807".into());
-    format!("holler body join --server {server} --token {token_id}:{secret}")
+    format!("holler body join --server {server} --token {token_id}:{secret} --hub-key {hub_pubkey}")
 }

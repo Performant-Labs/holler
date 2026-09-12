@@ -84,7 +84,8 @@ fn resolve_invalid_env_value_is_err() {
 #[test]
 fn redact_key_substrings_are_case_insensitive() {
     // The story's rule: any key containing secret|credential|ticket|
-    // authorization|pepper (case-insensitive) is redacted.
+    // authorization|pepper|private_key|signing_key (case-insensitive) is
+    // redacted.
     let inputs = [
         "secret", "SECRET", "Secret",
         "client_secret", "x-api-key-secret", "SECRET_KEY",
@@ -92,6 +93,11 @@ fn redact_key_substrings_are_case_insensitive() {
         "ticket", "TICKET", "auth_ticket",
         "authorization", "Authorization", "AUTHORIZATION",
         "pepper", "Pepper", "HOLLER_PEPPER",
+        // issue #322: the hub's X25519 private key.
+        "private_key", "PRIVATE_KEY", "hub_private_key", "body_private_key",
+        // issue #323: `BodyIdentity::signing_key` is the field's literal
+        // name (not `*private_key*`), so it needs its own substring.
+        "signing_key", "SIGNING_KEY", "body_signing_key",
     ];
     for key in inputs {
         let v = json!({ key: "some-value" });

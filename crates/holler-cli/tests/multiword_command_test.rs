@@ -155,7 +155,7 @@ fn say_round_trip_over_multiword_bare_name_command() {
     let hub = Hub::start(&hub_state);
 
     let (token_id, secret) = mint_token(&hub_state, "b");
-    join(&body_state, &hub.ws_url(), &token_id, &secret);
+    join(&body_state, &hub_state, &hub.ws_url(), &token_id, &secret);
     let config = write_multiword_claude_sessions_toml(&body_state, "alpha", &["--chunks", "2"]);
     let _body = Body::start(&body_state, &config);
 
