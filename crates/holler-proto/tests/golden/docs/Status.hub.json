@@ -20,5 +20,6 @@
   "protocol_max": 2,
   "protocol_min": 2,
   "role": "hub",
-  "sessions": 2
+  "sessions": 2,
+  "version": "0.1.0"
 }

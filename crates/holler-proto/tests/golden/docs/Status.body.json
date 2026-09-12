@@ -18,5 +18,6 @@
       "state": "idle"
     }
   ],
-  "token_id": "tok_7f3a"
+  "token_id": "tok_7f3a",
+  "version": "0.1.0"
 }
