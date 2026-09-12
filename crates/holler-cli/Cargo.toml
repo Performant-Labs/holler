@@ -272,6 +272,16 @@ path = "tests/token_load_test.rs"
 name = "load_roster_scale_test"
 path = "tests/load_roster_scale_test.rs"
 
+# Platform & machine parity (issue #315, catalog group `platform`,
+# hlr-1400-1404): `--listen localhost:0` refusal, IPv6 `[::1]` end-to-end-or-
+# skip, `wss://` failing closed on a self-signed cert, state-dir/lock-file/
+# 0600-permission parity (rstest), and the control-socket-unavailable
+# message path. Lives here for the same `CARGO_BIN_EXE_holler` reason as
+# every other real-subprocess integration test in this file.
+[[test]]
+name = "platform_test"
+path = "tests/platform_test.rs"
+
 # Declare only what is consumed (issue #155 §7 — `cargo machete` fails CI
 # otherwise). A story that starts using a workspace dependency adds it here in
 # the same PR; the skeleton's speculative list was removed in #155.
@@ -327,6 +337,16 @@ futures-util = { workspace = true }  # hub_serve_test Sink/Stream traits
 # transcript itself rather than through a `holler_body` process.
 ed25519-dalek = { workspace = true }
 hex = { workspace = true }
+# Issue #315 (platform_test.rs's self_signed_wss_fails_closed): generates a
+# throwaway local self-signed cert so the test can stand up a TLS-terminating
+# listener and assert `body join --server wss://…` fails closed against it
+# (the OS trust store never accepts it) — no real CA involved, dev-only.
+rcgen = "0.13"
+# Same test: the TLS-terminating listener side, built on the self-signed
+# `rcgen` cert with the workspace's own rustls 0.23 (matching the client
+# `tokio-tungstenite`/`rustls-tls-native-roots` stack this test is proving
+# fails closed against).
+tokio-rustls = "0.26"
 
 # Workspace lints (issue #149): inherit [workspace.lints] from the root
 # Cargo.toml — deny dead_code, clippy unwrap/expect/panic/unreachable, and the
