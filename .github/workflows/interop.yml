@@ -7,6 +7,17 @@ name: interop
 # decision (the issue's own spec note) — not made here.
 on:
   workflow_dispatch:
+    inputs:
+      bad_token:
+        description: >-
+          RED test (issue #193's "Tests first"): deliberately corrupt the
+          token macos-client joins with, so the run proves the body fails
+          closed on a bad token instead of silently connecting. The hub +
+          tunnel still come up for real either way — there is no cheaper
+          way to exercise this path, since the tunnel starts before any
+          token exists. Leave unset/false for the real GREEN run.
+        type: boolean
+        default: false
 
 env:
   # Fixed, NON-secret pepper for this run's ephemeral hub only.
@@ -310,6 +321,8 @@ jobs:
 
       - name: Join the hub
         id: join
+        env:
+          BAD_TOKEN: ${{ inputs.bad_token }}
         run: |
           tunnel_url=$(python3 -c 'import json; print(json.load(open("'"$HANDOFF_DIR"'/handoff.json"))["tunnel_url"])')
           token=$(python3 -c 'import json; print(json.load(open("'"$HANDOFF_DIR"'/handoff.json"))["token"])')
@@ -317,6 +330,15 @@ jobs:
           host=$(printf '%s' "$tunnel_url" | sed -E 's#^https?://##')
           server="wss://${host}:443"
           echo "server=$server" >> "$GITHUB_OUTPUT"
+          # RED test (issue #193's "Tests first"): deliberately present a
+          # well-formed but wrong secret, so this step is expected to fail —
+          # proving the body fails closed on a bad token rather than
+          # connecting. The hub/tunnel above are already real regardless of
+          # this input (see the workflow_dispatch input's own doc).
+          if [ "$BAD_TOKEN" = "true" ]; then
+            token="${token%:*}:0000000000000000000000000000000000000000000000000000000000000000"
+            echo "::notice::RED run: using a deliberately wrong secret; this step is expected to fail closed."
+          fi
           ./target/release/holler body join --server "$server" --token "$token"
         shell: bash
 
