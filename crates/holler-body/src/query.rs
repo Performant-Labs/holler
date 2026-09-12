@@ -66,6 +66,7 @@ pub fn local_status(state_root: &Path, identity: Option<&BodyIdentity>, configs:
         protocol: PROTOCOL_VERSION,
         protocol_min: PROTOCOL_MIN,
         protocol_max: PROTOCOL_MAX,
+        version: env!("CARGO_PKG_VERSION").to_string(),
         hostname,
         connected: Some(connected),
         token_id,

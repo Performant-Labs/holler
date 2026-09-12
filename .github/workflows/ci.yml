@@ -74,6 +74,13 @@ jobs:
         run: bash scripts/lint.sh
         shell: bash
 
+      # Issue #319: CHANGELOG.md must always carry an `## [Unreleased]`
+      # heading — cheap, no-compiler-needed check, so it runs right after
+      # scripts/lint.sh and before anything that touches the compiler.
+      - name: Changelog (scripts/changelog-check.sh)
+        run: bash scripts/changelog-check.sh
+        shell: bash
+
       # 1. The canary is the first gate that touches the compiler.
       # `--test wire_selftest` alone (not `cargo test`, which also builds
       # the libs) so CI goes red as early as possible if the runner ever

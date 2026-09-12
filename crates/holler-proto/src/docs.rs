@@ -225,6 +225,9 @@ pub struct Status {
     pub protocol: u32,
     pub protocol_min: u32,
     pub protocol_max: u32,
+    /// The running binary's version (issue #319), `env!("CARGO_PKG_VERSION")` —
+    /// never hand-rolled or hardcoded independently.
+    pub version: String,
     pub hostname: String,
     /// **Body**: whether this body currently has a live socket.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -312,6 +315,7 @@ impl<'de> Deserialize<'de> for Status {
             protocol: require(obj, "protocol")?,
             protocol_min: require(obj, "protocol_min")?,
             protocol_max: require(obj, "protocol_max")?,
+            version: require(obj, "version")?,
             hostname: require(obj, "hostname")?,
             connected: take(obj, "connected")?,
             token_id: take(obj, "token_id")?,

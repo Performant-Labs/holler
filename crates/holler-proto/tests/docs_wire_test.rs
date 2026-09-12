@@ -80,6 +80,7 @@ mod status_sessions_wire_tests {
             protocol: 2,
             protocol_min: 2,
             protocol_max: 2,
+            version: "0.1.0".into(),
             hostname: "kiwi".into(),
             connected: Some(true),
             token_id: Some("tok_1".into()),
@@ -110,6 +111,7 @@ mod status_sessions_wire_tests {
             protocol: 2,
             protocol_min: 2,
             protocol_max: 2,
+            version: "0.1.0".into(),
             hostname: "uranus".into(),
             connected: None,
             token_id: None,
@@ -131,7 +133,7 @@ mod status_sessions_wire_tests {
     #[test]
     fn missing_sessions_key_deserializes_to_neither() {
         let wire = serde_json::json!({
-            "role": "body", "protocol": 2, "protocol_min": 2, "protocol_max": 2,
+            "role": "body", "protocol": 2, "protocol_min": 2, "protocol_max": 2, "version": "0.1.0",
             "hostname": "kiwi", "features": [],
         });
         let status: Status = serde_json::from_value(wire).unwrap();
@@ -142,7 +144,7 @@ mod status_sessions_wire_tests {
     #[test]
     fn sessions_wrong_shape_is_rejected() {
         let wire = serde_json::json!({
-            "role": "body", "protocol": 2, "protocol_min": 2, "protocol_max": 2,
+            "role": "body", "protocol": 2, "protocol_min": 2, "protocol_max": 2, "version": "0.1.0",
             "hostname": "kiwi", "features": [], "sessions": "nope",
         });
         assert!(serde_json::from_value::<Status>(wire).is_err());
