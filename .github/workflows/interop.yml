@@ -162,19 +162,24 @@ jobs:
         shell: bash
 
       # `hub token mint --json` prints `{token_id, secret, expires,
-      # join_command}` (crates/holler-cli/src/token_cmd.rs) — `body join
-      # --token` wants the combined `<token_id>:<secret>` form (the same
-      # form `join_command` already builds), not a single `token` field.
+      # hub_pubkey, join_command}` (crates/holler-cli/src/token_cmd.rs) —
+      # `body join --token` wants the combined `<token_id>:<secret>` form
+      # (the same form `join_command` already builds), not a single `token`
+      # field. `hub_pubkey` (issue #322) is required separately: `body join`
+      # now takes `--hub-key HEX` to pin the hub's identity, a wire break
+      # this workflow predates.
       - name: Mint join token for macos
         id: mint
         run: |
           out=$(./target/release/holler hub token mint --label macos --ttl 15m --json)
           token_id=$(printf '%s' "$out" | python3 -c 'import json,sys; print(json.load(sys.stdin)["token_id"])')
           secret=$(printf '%s' "$out" | python3 -c 'import json,sys; print(json.load(sys.stdin)["secret"])')
+          hub_pubkey=$(printf '%s' "$out" | python3 -c 'import json,sys; print(json.load(sys.stdin)["hub_pubkey"])')
           echo "::add-mask::$secret"
           token="${token_id}:${secret}"
           echo "::add-mask::$token"
           echo "token=$token" >> "$GITHUB_OUTPUT"
+          echo "hub_pubkey=$hub_pubkey" >> "$GITHUB_OUTPUT"
         shell: bash
 
       - name: Write handoff artifact
@@ -185,6 +190,7 @@ jobs:
           data = {
               "tunnel_url": os.environ["TUNNEL_URL"],
               "token": os.environ["TOKEN"],
+              "hub_pubkey": os.environ["HUB_PUBKEY"],
           }
           with open(os.path.join(os.environ["HANDOFF_DIR"], "handoff.json"), "w") as f:
               json.dump(data, f)
@@ -192,6 +198,7 @@ jobs:
         env:
           TUNNEL_URL: ${{ steps.tunnel.outputs.tunnel_url }}
           TOKEN: ${{ steps.mint.outputs.token }}
+          HUB_PUBKEY: ${{ steps.mint.outputs.hub_pubkey }}
         shell: bash
 
       # macos-client has no `needs:` on this job (see its own comment) and
@@ -333,6 +340,7 @@ jobs:
         run: |
           tunnel_url=$(python3 -c 'import json; print(json.load(open("'"$HANDOFF_DIR"'/handoff.json"))["tunnel_url"])')
           token=$(python3 -c 'import json; print(json.load(open("'"$HANDOFF_DIR"'/handoff.json"))["token"])')
+          hub_pubkey=$(python3 -c 'import json; print(json.load(open("'"$HANDOFF_DIR"'/handoff.json"))["hub_pubkey"])')
           echo "::add-mask::$token"
           host=$(printf '%s' "$tunnel_url" | sed -E 's#^https?://##')
           server="wss://${host}:443"
@@ -346,7 +354,7 @@ jobs:
             token="${token%:*}:0000000000000000000000000000000000000000000000000000000000000000"
             echo "::notice::RED run: using a deliberately wrong secret; this step is expected to fail closed."
           fi
-          ./target/release/holler body join --server "$server" --token "$token"
+          ./target/release/holler body join --server "$server" --token "$token" --hub-key "$hub_pubkey"
         shell: bash
 
       - name: Write sessions.toml
