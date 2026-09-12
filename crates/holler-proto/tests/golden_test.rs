@@ -166,7 +166,7 @@ fn docs_instances() -> Vec<(&'static str, Value)> {
             harnesses: None, harnesses_known: Some(vec!["opencode".into()]), harnesses_confirmed: Some(vec!["opencode".into()]), sessions: None,
         }).unwrap()),
         ("Status.body", serde_json::to_value(Status {
-            role: HelloRole::Body, protocol: 2, protocol_min: 2, protocol_max: 2, hostname: "kiwi".into(),
+            role: HelloRole::Body, protocol: 2, protocol_min: 2, protocol_max: 2, version: "0.1.0".into(), hostname: "kiwi".into(),
             connected: Some(true), token_id: Some("tok_7f3a".into()), listening: None,
             features: vec!["ping".into()], harnesses: Some(vec!["opencode".into()]), harnesses_known: None, harnesses_confirmed: None,
             bodies: None, sessions: None,
@@ -178,7 +178,7 @@ fn docs_instances() -> Vec<(&'static str, Value)> {
             }]),
         }).unwrap()),
         ("Status.hub", serde_json::to_value(Status {
-            role: HelloRole::Hub, protocol: 2, protocol_min: 2, protocol_max: 2, hostname: "uranus".into(),
+            role: HelloRole::Hub, protocol: 2, protocol_min: 2, protocol_max: 2, version: "0.1.0".into(), hostname: "uranus".into(),
             connected: None, token_id: None, listening: Some("ws://127.0.0.1:41807".into()),
             features: vec!["roster".into()], harnesses: None, harnesses_known: Some(vec!["opencode".into()]),
             harnesses_confirmed: Some(vec![ConfirmedHarness { id: "opencode".into(), bodies: vec!["kiwi".into()] }]),
@@ -186,7 +186,7 @@ fn docs_instances() -> Vec<(&'static str, Value)> {
         }).unwrap()),
         ("Caps", serde_json::to_value(Caps {
             status: Status {
-                role: HelloRole::Body, protocol: 2, protocol_min: 2, protocol_max: 2, hostname: "kiwi".into(),
+                role: HelloRole::Body, protocol: 2, protocol_min: 2, protocol_max: 2, version: "0.1.0".into(), hostname: "kiwi".into(),
                 connected: Some(false), token_id: None, listening: None, features: vec![], harnesses: None,
                 harnesses_known: None, harnesses_confirmed: None, bodies: None, sessions: None, session_list: None,
             },

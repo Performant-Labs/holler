@@ -14,6 +14,7 @@
     "protocol": 2,
     "protocol_max": 2,
     "protocol_min": 2,
-    "role": "body"
+    "role": "body",
+    "version": "0.1.0"
   }
 }

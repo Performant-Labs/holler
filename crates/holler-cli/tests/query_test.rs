@@ -75,6 +75,33 @@ fn body_status_local_without_run() {
     assert_eq!(doc["protocol"].as_u64(), Some(2));
 }
 
+/// `query/status` documents carry the running binary's version (issue
+/// #319) — `env!("CARGO_PKG_VERSION")`, not hardcoded — on both roles: the
+/// body's local answer and the hub's local answer.
+#[test]
+fn status_docs_carry_version() {
+    let state = StateDir::new();
+    let (code, stdout, stderr) = run(&state, &["--json", "body", "query", "status"]);
+    assert_eq!(code, 0, "stderr: {stderr}");
+    let doc: Value = serde_json::from_str(&stdout).expect("body query status --json is valid JSON");
+    assert_eq!(
+        doc["version"].as_str(),
+        Some(env!("CARGO_PKG_VERSION")),
+        "body query status must carry the running version: {doc}"
+    );
+
+    let hub = Hub::start(&state);
+    let (code, stdout, stderr) = run(&state, &["--json", "hub", "query", "status"]);
+    assert_eq!(code, 0, "stderr: {stderr}");
+    let doc: Value = serde_json::from_str(&stdout).expect("hub query status --json is valid JSON");
+    assert_eq!(
+        doc["version"].as_str(),
+        Some(env!("CARGO_PKG_VERSION")),
+        "hub query status must carry the running version: {doc}"
+    );
+    hub.stop(Duration::from_secs(5));
+}
+
 /// `body caps` answers the same way, with no run active.
 #[test]
 fn body_caps_local_without_run() {
