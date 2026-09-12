@@ -227,6 +227,18 @@ fn exchange_with_timeout(
     params: Option<serde_json::Value>,
     timeout: std::time::Duration,
 ) -> Result<serde_json::Value, ControlError> {
+    // Issue #315's `no_control_socket_message` test hook: simulate the
+    // control socket being unavailable (a platform where the socket cannot
+    // be opened, or one just gone missing under the CLI) without needing to
+    // actually break OS-level socket availability. Same
+    // `HOLLER_TEST_HOOKS=1`-style gate issue #192's `control/test_drop` and
+    // #184's `HOLLER_TEST_TOKEN_STORE_DELAY_MS` use, checked at call time
+    // (never cached) so it only ever affects the one CLI invocation that
+    // sets it — a production client never reads this var as anything but
+    // absent.
+    if std::env::var("HOLLER_TEST_NO_CONTROL_SOCKET").as_deref() == Ok("1") {
+        return Err(ControlError::NoLiveHub);
+    }
     // No resolvable state dir means there is no control socket to connect to —
     // the same "no live hub" condition as an absent socket.
     let path = match resolve_state_dir() {

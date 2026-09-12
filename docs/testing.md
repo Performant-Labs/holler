@@ -174,6 +174,12 @@ Two concrete facts, both cited by `wire_selftest` itself:
 
 The harness's *code* is already cross-OS at the seams (`#[cfg(unix)]` vs `#[cfg(windows)]` spawn commands in `wire_selftest`; the process-group signal fallbacks). Windows is a *deferred story*, not a gap — when the compile break is fixed and a runner with deterministic refusal timing is in place, re-adding it to the matrix is a one-line matrix change.
 
+### Platform parity: `platform_test.rs`
+
+`crates/holler-cli/tests/platform_test.rs` (issue [#315](https://github.com/Performant-Labs/holler/issues/315)) is the small `platform` catalog group's automated half (`hlr-1400`–`1404`, `Type: auto`): it pins the Linux/macOS parity this harness *does* guarantee now that Windows is off the matrix. Five cases: a `--listen localhost:0` name is refused (only a numeric loopback literal is ever accepted — `localhost` is never resolved); IPv6 loopback `[::1]` joins end to end when the environment can bind it and **skips**, never fails, when it cannot; a `wss://` dial fails closed against a local `rcgen`-generated self-signed cert (the OS trust store is never bypassed); state-dir paths, lock files, and 0600 permissions are checked (`rstest`) over the file set that actually carries a permission contract; and an unavailable control socket reports the spec's clear message, exercised deterministically via the test-only `HOLLER_TEST_NO_CONTROL_SOCKET=1` env override.
+
+This file does **not** cover the platform group's two manual, real-hardware cases — `hlr-1405`/`1406`, the cross-machine checkpoints (join/run/ping/roster/reconnect/revoke over a tailnet, and the say/interrupt/reprompt session checkpoints) tagged `test-tag-remote` — those are tracked separately in issue [#316](https://github.com/Performant-Labs/holler/issues/316) and are out of scope for `cargo test`.
+
 ## Secrets are never in the logs
 
 The harness talks to real processes that (in CI, and in a real deployment) will have credentials — the hub's token store, ACP agent API keys, the GitHub token the runner uses. Two rules keep them out of the log:
