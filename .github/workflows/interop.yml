@@ -244,7 +244,26 @@ jobs:
 
       - name: Say + interrupt the macOS session
         run: |
-          ./target/release/holler say macos/macos-session "ping"
+          # The previous step's roster poll only proves the *circuit*
+          # (conn_state=connected) is up, not that the body's first
+          # session/presence for macos-session has landed yet -- confirmed
+          # in a real run: `say` hit "unknown session: macos/macos-session"
+          # ~1s after roster reported connected, and the hub's own log had
+          # only ever emitted `conn_connected`, no presence event, at that
+          # point. Retry `say` itself, bounded, the same wait_for idiom this
+          # workflow already uses elsewhere -- this is a real, sub-second-
+          # to-a-few-seconds startup race, not a fake "add a sleep" patch.
+          deadline=$((SECONDS + 30))
+          while true; do
+            if ./target/release/holler say macos/macos-session "ping"; then
+              break
+            fi
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              echo "::error::say macos/macos-session never succeeded within 30s of the circuit connecting"
+              exit 1
+            fi
+            sleep 1
+          done
           ./target/release/holler interrupt macos/macos-session
         shell: bash
 
