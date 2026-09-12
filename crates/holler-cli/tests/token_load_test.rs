@@ -51,21 +51,28 @@ fn concurrent_distinct_token_redemptions_are_isolated_and_uncorrupted() {
     // real binary and blocks on its real exit) against its own isolated
     // state dir, launched at (as close as this harness gets to) the same
     // moment — not a single process simulating N redeemers in-loop.
-    let handles: Vec<_> = minted
-        .iter()
-        .cloned()
-        .map(|(label, token_id, secret)| {
-            let ws_url = ws_url.clone();
-            std::thread::spawn(move || {
-                let body_state = StateDir::new();
-                join(&body_state, &ws_url, &token_id, &secret);
-                (label, token_id, body_state)
+    //
+    // A scoped thread (rather than `thread::spawn`) so each closure can
+    // borrow `hub_state` directly for `join`'s hub-pubkey lookup (issue
+    // #322: pinning reads the *hub's* state dir, not the body's) instead of
+    // needing a `'static` clone of it.
+    let results: Vec<(String, String, StateDir)> = std::thread::scope(|scope| {
+        let handles: Vec<_> = minted
+            .iter()
+            .cloned()
+            .map(|(label, token_id, secret)| {
+                let ws_url = ws_url.clone();
+                let hub_state = &hub_state;
+                scope.spawn(move || {
+                    let body_state = StateDir::new();
+                    join(&body_state, hub_state, &ws_url, &token_id, &secret);
+                    (label, token_id, body_state)
+                })
             })
-        })
-        .collect();
+            .collect();
 
-    let results: Vec<(String, String, StateDir)> =
-        handles.into_iter().map(|h| h.join().expect("body join thread")).collect();
+        handles.into_iter().map(|h| h.join().expect("body join thread")).collect()
+    });
     assert_eq!(results.len(), TOKENS, "every one of the {TOKENS} concurrent joins completed");
 
     let client_ids = assert_every_body_joined_its_own_token(&results);
@@ -110,7 +117,7 @@ fn assert_every_body_joined_its_own_token(results: &[(String, String, StateDir)]
 /// `holler-hub/tests/token_store_test.rs` inspects) rather than `hub token
 /// list --json`: that CLI document is a deliberately curated view
 /// (`token_cmd.rs::list` — `token_id, label, state, machine, last_seen,
-/// expires`) that never carries `client_id`/`credential_hmac`, so it can't
+/// expires`) that never carries `client_id`/`body_pubkey`, so it can't
 /// answer the cross-token-corruption question this test asks.
 fn assert_store_is_uncorrupted(hub_state: &StateDir, results: &[(String, String, StateDir)], client_ids: &HashSet<String>) {
     let raw = std::fs::read_to_string(hub_state.hub().join("tokens.json")).expect("read tokens.json");

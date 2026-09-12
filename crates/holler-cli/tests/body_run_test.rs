@@ -65,13 +65,15 @@ fn conn_state(state: &StateDir) -> Option<String> {
 }
 
 /// Join `state`'s body to the hub at `ws_url` with a freshly-minted token,
-/// returning the token id (tests that revoke it, or want to name it in `hub
-/// token ping`, need it back).
+/// pinning the hub's real public key (issue #322), and returning the token id
+/// (tests that revoke it, or want to name it in `hub token ping`, need it
+/// back).
 fn join_fresh(state: &StateDir, ws_url: &str, label: &str) -> String {
     let (token_id, secret) = support::mint_token(state, label);
+    let hub_key = support::hub_pubkey(state);
     let (code, _, stderr) = run(
         state,
-        &["body", "join", "--server", ws_url, "--token", &format!("{token_id}:{secret}")],
+        &["body", "join", "--server", ws_url, "--token", &format!("{token_id}:{secret}"), "--hub-key", &hub_key],
     );
     assert_eq!(code, 0, "body join must exit 0; stderr: {stderr}");
     token_id
@@ -259,12 +261,14 @@ fn detach_closes_live_run_and_hub_client_count_drops_to_0() {
     hub.stop(Duration::from_secs(5));
 }
 
-/// A credential the hub has since revoked is refused with `-32002` on the
-/// very first `circuit/authenticate` — the body's connection loop treats that
+/// A token the hub has since revoked is refused with `-32002` on the very
+/// first `circuit/authenticate` — the body's connection loop treats that
 /// (and only that) code as unretryable: exit 1, immediately, no reconnect
-/// loop spun up first.
+/// loop spun up first. Issue #323's `revoked_token_still_fails_closed_
+/// with_32002`: existing behaviour survives the credential → public-key
+/// challenge-response redesign.
 #[test]
-fn revoked_credential_exit_1_no_retry() {
+fn revoked_token_still_fails_closed_with_32002() {
     let state = StateDir::new();
     let hub = Hub::start(&state);
     let token_id = join_fresh(&state, &hub.ws_url(), "kiwi");
@@ -289,6 +293,51 @@ fn revoked_credential_exit_1_no_retry() {
     assert!(
         stderr.contains("authentication failed"),
         "stderr names the auth failure: {stderr}"
+    );
+
+    hub.stop(Duration::from_secs(5));
+}
+
+/// Issue #322's `body_refuses_connect_on_hub_key_mismatch`: a body that
+/// joined pinning one hub key refuses to proceed past `circuit/hello` when
+/// the hub it is now talking to presents a *different* key — a hard failure
+/// (exit 1, no reconnect loop, no prompt, no trust-on-first-use), even though
+/// the token/signature side of the handshake is perfectly valid.
+#[test]
+fn body_refuses_connect_on_hub_key_mismatch() {
+    let state = StateDir::new();
+    let hub = Hub::start(&state);
+    let ws_url = hub.ws_url();
+    let (token_id, secret) = support::mint_token(&state, "kiwi");
+
+    // Join with a syntactically-valid but *wrong* hub key (64 hex chars, not
+    // the hub's real one) — this never touches the wire, so the join itself
+    // still succeeds (issue #322: the pin is enforced on connect, not here).
+    let wrong_key = "ab".repeat(32);
+    assert_ne!(wrong_key, support::hub_pubkey(&state), "the wrong key must not coincidentally be the real one");
+    let (code, _, stderr) = run(
+        &state,
+        &["body", "join", "--server", &ws_url, "--token", &format!("{token_id}:{secret}"), "--hub-key", &wrong_key],
+    );
+    assert_eq!(code, 0, "body join with a mistaken (but well-formed) --hub-key still succeeds; stderr: {stderr}");
+
+    let config = support::write_sessions_toml(&state, &[]);
+    let out = holler_cmd(&state)
+        .arg("body")
+        .arg("run")
+        .arg("--config")
+        .arg(&config)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn body run against a pinned-but-wrong hub key")
+        .wait_with_output()
+        .expect("wait on body run");
+    assert_eq!(out.status.code(), Some(1), "a hub key mismatch is exit 1, not a retry loop");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("hub public key mismatch") || stderr.contains("hub_pubkey") || stderr.contains("mismatch"),
+        "stderr names the hub-key mismatch: {stderr}"
     );
 
     hub.stop(Duration::from_secs(5));

@@ -35,18 +35,20 @@ fn body_state() -> Result<holler_hub::state::HubState, i32> {
     }
 }
 
-/// `holler body join --server <url> --token <ID:SECRET>` — redeem a minted
-/// one-time join secret over the wire and persist the body's identity. The
-/// helper prints its own one-line result (a stderr reason on a refusal; a
-/// success line naming the `client_id`, never the secret) and returns the
-/// exit code (ADR 0003: 0 joined, 1 a runtime failure incl. a refused
-/// redeem, 3 a plaintext non-loopback `ws://`).
-pub fn join(server: &str, token: &str) -> i32 {
+/// `holler body join --server <url> --token <ID:SECRET> --hub-key <HEX>` —
+/// generate this body's Ed25519 signing keypair, redeem a minted one-time
+/// join secret over the wire, and persist the body's identity (including the
+/// hub's X25519 public key pinned from `--hub-key`, issue #322). The helper
+/// prints its own one-line result (a stderr reason on a refusal; a success
+/// line naming the `client_id`, never the secret) and returns the exit code
+/// (ADR 0003: 0 joined, 1 a runtime failure incl. a refused redeem, 3 a
+/// plaintext non-loopback `ws://` or a malformed `--hub-key`).
+pub fn join(server: &str, token: &str, hub_key: &str) -> i32 {
     let state = match body_state() {
         Ok(s) => s,
         Err(code) => return code,
     };
-    let exit = holler_body::join::join(&state.root, server, token, "default");
+    let exit = holler_body::join::join(&state.root, server, token, "default", hub_key);
     match exit {
         holler_body::join::JoinExit::Ok => 0,
         holler_body::join::JoinExit::Refused(_) => 1,

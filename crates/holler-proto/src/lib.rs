@@ -8,7 +8,7 @@
 //!   no batches, `method_not_found`).
 //! - [`id`] — correlation ids (`h-`/`b-` prefixed ULIDs; the two sides never
 //!   collide).
-//! - [`methods`] — the method catalog (14 methods, their kinds and
+//! - [`methods`] — the method catalog (15 methods, their kinds and
 //!   directions).
 //! - [`error`] — the error table (JSON-RPC codes + Holler `data.code`).
 //! - [`docs`] — the per-method `params`/`result` types (hello, status,
@@ -33,6 +33,7 @@ pub mod id;
 pub mod log;
 pub mod methods;
 pub mod token;
+pub mod transcript;
 pub mod version;
 pub mod vocab;
 
@@ -40,11 +41,11 @@ pub mod vocab;
 pub use a2a::{Content, Message, Part, Role, TaskState};
 pub use clock::{now_millis, now_secs};
 pub use docs::{
-    state_for_stop_reason, Answer, AnswerResult, AuthOk, Authenticate, Cancel, CancelResult, Caps,
-    ConfirmedHarness, Hello, HelloRole, HelloSession, Join, JoinResult, Mode, PendingItem,
-    PendingKind, PingAck, Presence, Prompt, PromptResult, ProtocolAnswer, ProtocolParams,
-    SessionAd, SessionState, Status, StatusSession, Support, SupportKind, SupportParams, Update,
-    A2A_TERMINAL_STATES, STOP_TO_STATE,
+    state_for_stop_reason, Answer, AnswerResult, AuthChallenge, AuthOk, Authenticate, Cancel,
+    CancelResult, Caps, ConfirmedHarness, Hello, HelloRole, HelloSession, Join, JoinResult, Mode,
+    PendingItem, PendingKind, PingAck, Presence, Prompt, PromptResult, ProtocolAnswer,
+    ProtocolParams, Prove, SessionAd, SessionState, Status, StatusSession, Support, SupportKind,
+    SupportParams, Update, A2A_TERMINAL_STATES, STOP_TO_STATE,
 };
 pub use envelope::{decode, encode, Envelope, EnvelopeError, typed_params};
 pub use error::{Code, Error as WireError, ErrorData};

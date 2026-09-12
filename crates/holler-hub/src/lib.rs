@@ -9,6 +9,7 @@ pub mod circuit;
 pub mod control;
 pub mod control_server;
 pub mod hygiene;
+pub mod identity;
 pub mod interrupt;
 pub mod join;
 pub mod live;

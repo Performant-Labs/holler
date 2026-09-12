@@ -37,6 +37,13 @@ fs4 = { workspace = true }
 # the reconnect backoff's jitter (issue #182): a 64-bit CSPRNG draw, the same
 # primitive the hub's token store uses for secrets.
 getrandom = { workspace = true }
+# Issue #323: the body's own long-lived Ed25519 signing keypair, registered
+# (public half only) at `circuit/join`; the private half never leaves the
+# body. Signs the `circuit/authenticate` → `circuit/prove` challenge.
+ed25519-dalek = { workspace = true }
+# hex: encodes the body's Ed25519 public key / signature and decodes the
+# hub's pinned X25519 public key (issue #322) on the wire.
+hex = { workspace = true }
 # the body's session config file (issue #187): `sessions.toml`/`session.toml`.
 toml = { workspace = true }
 # the ACP v2 spawn driver (issue #188): the typed client SDK owns spawning the

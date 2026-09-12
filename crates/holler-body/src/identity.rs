@@ -1,7 +1,16 @@
 //! The body's persisted identity: `<state>/body/credential.json` (story #176).
 //!
-//! A `body join` redeems a one-time join secret over the wire for a `client_id` + a long-lived `credential`; the body then persists **the credential** (and the identity it names) in this file, mode 0600, so a later `body run` can re-authenticate with it.
-//! The file holds the **credential, never the join secret** — the secret is one-time bootstrap and is never written to disk (the hub's token store keeps only its HMAC).
+//! A `body join` generates a long-lived **Ed25519 signing keypair** locally
+//! (issue #323), sends the *public* half in `circuit/join`, and redeems a
+//! one-time join secret over the wire for a `client_id`. The body then
+//! persists the **private signing key** (never the join secret, never sent
+//! anywhere) alongside the identity it names in this file, mode 0600, so a
+//! later `body run` can prove possession of it on every reconnect
+//! (`circuit/authenticate` → `circuit/prove`) instead of presenting a bearer
+//! credential. It also persists the hub's X25519 public key (issue #322),
+//! **pinned** from the operator's out-of-band `--hub-key` at join — every
+//! later connection's hub hello must carry the exact same key, or the body
+//! refuses to proceed (no prompt, no trust-on-first-use).
 //!
 //! Everything here is **synchronous** (plain `std::fs`): `body join` is a
 //! short-lived CLI process with no tokio runtime in scope, so a blocking file
@@ -20,26 +29,51 @@ pub const STALE_AFTER_SECS: i64 = 45;
 /// The body's identity, as persisted in `<state>/body/credential.json`.
 ///
 /// This is the file the spec pins: after a successful join it exists, is mode
-/// 0600, and names the token the body joined with. `client_id` + `credential`
-/// are exactly what the hub returns from `circuit/join`; `token_id` is what
+/// 0600, and names the token the body joined with. `client_id` is what the
+/// hub returns from `circuit/join` (issue #323: no `credential` any more —
+/// `signing_key` is this body's own, never sent anywhere); `token_id` is what
 /// the CLI's `--token ID:SECRET` carried (the body needs it later to
-/// re-authenticate); `hostname` is what the body claimed on the wire.
+/// re-authenticate); `hostname` is what the body claimed on the wire;
+/// `hub_pubkey` (issue #322) is the hub's X25519 public key, pinned from the
+/// operator's out-of-band `--hub-key` at join.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BodyIdentity {
     pub client_id: String,
-    /// The long-lived credential (never the one-time join secret).
-    pub credential: String,
+    /// This body's own long-lived Ed25519 signing private key, hex-encoded
+    /// (32 bytes) — generated locally at join, never sent to the hub (only
+    /// the matching public key is, in `circuit/join`'s `body_pubkey`). Signs
+    /// the `circuit/authenticate` → `circuit/prove` challenge transcript on
+    /// every (re)connect.
+    pub signing_key: String,
     /// The token id the body joined with.
     pub token_id: String,
     /// The hostname the body claimed.
     #[serde(default)]
     pub hostname: String,
-    /// The hub address the body joined (`ws://…` / `wss://…`), for `status`.
+    /// The hub address the body joined (`ws://…` / `wss://…`), for `status`
+    /// and for the `circuit/authenticate` transcript's `advertised_url`.
     #[serde(default)]
     pub server_url: String,
     /// Unix seconds the join succeeded (the last time this body was seen).
     #[serde(default)]
     pub joined_at: i64,
+    /// The hub's X25519 public key, hex-encoded — pinned at join from the
+    /// operator's out-of-band `--hub-key`. Compared against every
+    /// subsequent hub `circuit/hello`; a mismatch is a hard failure (no
+    /// prompt, no trust-on-first-use).
+    #[serde(default)]
+    pub hub_pubkey: String,
+}
+
+impl BodyIdentity {
+    /// This body's Ed25519 signing keypair, reconstructed from the persisted
+    /// private key. `None` on a corrupt/wrong-length `signing_key` (a
+    /// defensive case — `join` only ever persists a well-formed one).
+    pub fn signing_key(&self) -> Option<ed25519_dalek::SigningKey> {
+        let bytes = hex::decode(&self.signing_key).ok()?;
+        let arr: [u8; 32] = bytes.try_into().ok()?;
+        Some(ed25519_dalek::SigningKey::from_bytes(&arr))
+    }
 }
 
 impl BodyIdentity {

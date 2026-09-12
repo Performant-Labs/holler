@@ -322,6 +322,11 @@ rstest = { workspace = true }
 libc = { workspace = true }         # tests/support kill_tree
 tokio-tungstenite = { workspace = true }  # hub_serve_test WS client
 futures-util = { workspace = true }  # hub_serve_test Sink/Stream traits
+# hub_hygiene_test.rs drives the `circuit/authenticate` -> `circuit/prove`
+# challenge-response (issue #323) with a raw WS client, signing the
+# transcript itself rather than through a `holler_body` process.
+ed25519-dalek = { workspace = true }
+hex = { workspace = true }
 
 # Workspace lints (issue #149): inherit [workspace.lints] from the root
 # Cargo.toml — deny dead_code, clippy unwrap/expect/panic/unreachable, and the

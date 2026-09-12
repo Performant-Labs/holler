@@ -128,7 +128,8 @@ These run the *real* `holler` CLI (in the given state dir) and parse its `--json
 | `roster_json(state)` | `holler roster --json` → the hub's roster as a `Value` |
 | `hub_status_json(state)` / `body_status_json(state)` | `hub status --json` / `body status --json` → a `Value` |
 | `mint_token(state, label)` | `hub token mint --label <label> --json` → the `(token_id, secret)` join pair (no live hub needed — the token is persisted under the state dir) |
-| `join(state, ws_url, token_id, secret)` | `body join --server <ws_url> --token <id:secret>` and assert exit 0 |
+| `join(state, ws_url, token_id, secret)` | `body join --server <ws_url> --token <id:secret> --hub-key <hex>` (the hub's real public key, read via `hub status --json` — the harness's stand-in for the operator's out-of-band copy, issue #322) and assert exit 0 |
+| `hub_pubkey(state)` | `hub status --json` → the hub's X25519 public key (hex), for a test that wants to pass a *wrong* `--hub-key` |
 | `say(state, session, text)` / `interrupt(state, session)` | the CLI verbs; return the raw `Output` for the test to assert on |
 
 ### The cross-OS plumbing

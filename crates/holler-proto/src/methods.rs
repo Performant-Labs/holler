@@ -1,6 +1,6 @@
 //! The v2 method catalog (docs §4).
 //!
-//! Fourteen methods, four kinds, two directions. `catalog()` is the single
+//! Fifteen methods, four kinds, two directions. `catalog()` is the single
 //! source of truth — the body/hub dispatch and the codec's
 //! `method_not_found` path both read from it.
 //!
@@ -43,12 +43,15 @@ pub enum Direction {
     HubToBody,
 }
 
-/// The complete, closed v2 method catalog (14 rows).
+/// The complete, closed v2 method catalog (15 rows).
 #[rustfmt::skip]
 pub const CATALOG: &[Method] = &[
     // name                 kind          direction   (docs §4)
     Method { name: "circuit/join",        kind: MethodKind::Request,      dir: Direction::BodyToHub },
     Method { name: "circuit/authenticate",kind: MethodKind::Request,      dir: Direction::BodyToHub },
+    // `circuit/prove` (issue #323): the second frame of the authenticate
+    // challenge-response — the body signs the hub's nonce and answers here.
+    Method { name: "circuit/prove",       kind: MethodKind::Request,      dir: Direction::BodyToHub },
     Method { name: "circuit/hello",       kind: MethodKind::Request,      dir: Direction::Both      },
     Method { name: "circuit/ping",        kind: MethodKind::Request,      dir: Direction::Both      },
     Method { name: "circuit/superseded",  kind: MethodKind::Notification, dir: Direction::HubToBody },

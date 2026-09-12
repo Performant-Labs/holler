@@ -33,6 +33,12 @@ hex = { workspace = true }
 # subtle: constant-time HMAC comparison (a timing side-channel on secret
 # comparison is a fail-closed defect — #163).
 subtle = { workspace = true }
+# Issue #322: the hub's long-lived X25519 static identity keypair (pinned by
+# `body join` from the join line).
+x25519-dalek = { workspace = true }
+# Issue #323: verifies a body's Ed25519 `circuit/prove` signature against its
+# registered `body_pubkey`.
+ed25519-dalek = { workspace = true }
 # Issue #190: `talk::say`'s own pre-send busy check parses a cached
 # `SessionAd`'s RFC 3339 `turn_started_at`/`last_update_at` into the ages the
 # spec's `session_busy` hint prints — the same crate holler-proto's `log`

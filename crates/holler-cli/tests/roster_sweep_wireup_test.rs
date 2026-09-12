@@ -92,7 +92,7 @@ fn roster_sweep_runs_in_production_hub_without_being_called_directly() {
         ],
     );
     let (token_id, secret) = mint_token(&hub_state, "body-1");
-    join(&hub_state, &hub.ws_url(), &token_id, &secret);
+    join(&hub_state, &hub_state, &hub.ws_url(), &token_id, &secret);
     let config = write_sessions_toml(&hub_state, &[("alpha", &[])]);
     // `Body::start` (the plain, no-env form) leaves the body's own presence
     // heartbeat at its 15s production default. That default is *slower* than

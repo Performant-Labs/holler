@@ -721,6 +721,12 @@ async fn status_doc(registry: &Registry) -> serde_json::Value {
     let hostname = hostname::get()
         .map(|h| h.to_string_lossy().into_owned())
         .unwrap_or_else(|_| "unknown".to_string());
+    // Issue #322: the hub's X25519 public key, so an operator can compare it
+    // out-of-band without re-minting a token. `identity::ensure` is
+    // idempotent (loads the existing key once `hub serve`/`hub token mint`
+    // generated one); `None` only if it cannot even be resolved (an
+    // unwritable state dir), which `hub status` should still answer despite.
+    let hub_pubkey = crate::identity::ensure(&state).ok().map(|i| i.public_hex());
 
     serde_json::json!({
         "role": "hub",
@@ -729,6 +735,7 @@ async fn status_doc(registry: &Registry) -> serde_json::Value {
         "hostname": hostname,
         "listening": listening,
         "advertise": advertise,
+        "hub_pubkey": hub_pubkey,
         "clients": registry.len().await,
         // Issue #184: the per-connection detail (`token_id`/`client_id`/
         // `hostname`/`peer`/`connected_at`) `hub status --json` now also

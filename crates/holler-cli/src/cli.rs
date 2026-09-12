@@ -479,6 +479,12 @@ pub struct Join {
     /// Join token, as ID:SECRET.
     #[arg(long)]
     pub token: String,
+    /// The hub's X25519 public key, hex-encoded (issue #322) — copied
+    /// out-of-band from `hub token mint`'s join line, alongside the token.
+    /// Pinned and checked on every later connection; a mismatch is a hard
+    /// failure, never a prompt.
+    #[arg(long = "hub-key")]
+    pub hub_key: String,
 }
 
 #[derive(Parser, Debug)]

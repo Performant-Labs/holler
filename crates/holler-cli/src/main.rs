@@ -168,7 +168,7 @@ fn main() {
     if let Command::Body(body) = &cli.command {
         match &body.command {
             BodyCommand::Join(join) => {
-                std::process::exit(holler_cli::body_cmd::join(&join.server, &join.token));
+                std::process::exit(holler_cli::body_cmd::join(&join.server, &join.token, &join.hub_key));
             }
             BodyCommand::Detach(_) => std::process::exit(holler_cli::body_cmd::detach()),
             BodyCommand::Status(_) => std::process::exit(holler_cli::body_cmd::status(cli.json)),

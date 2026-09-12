@@ -52,8 +52,13 @@ no certificate to distribute by hand.
 
 Tailscale is strictly an underlay and a proxy here — never identity. A
 tailnet IP or MagicDNS name is never treated as authentication; a body
-still has to `body join` with a minted join token over the connection.
-Holler itself never calls the Tailscale API.
+still has to `body join` with a minted join token **and the hub's public
+key** (`--hub-key`, from the same `hub token mint` join line — issue #322)
+over the connection. Pinning that key is what actually authenticates the
+hub, independent of the tailnet/certificate path: a mis-issued certificate
+or a hijacked MagicDNS name would still not match the pinned key, and a
+body refuses to proceed if it ever doesn't. Holler itself never calls the
+Tailscale API.
 
 On the hub side, start the hub bound to loopback as usual and let the proxy
 do the rest:

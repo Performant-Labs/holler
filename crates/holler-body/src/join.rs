@@ -1,23 +1,34 @@
-//! `body join` (story #176): redeem a one-time join secret over the wire and
-//! persist the body's identity.
+//! `body join` (story #176, issue #322/#323): generate this body's Ed25519
+//! signing keypair, redeem a one-time join secret over the wire, and persist
+//! the body's identity — including the hub's X25519 public key, **pinned**
+//! from the operator's out-of-band `--hub-key`.
 //!
 //! The flow is the protocol's one-shot bootstrap (docs §3): the body opens a
 //! **fresh** WebSocket, sends **one** `circuit/join` request (`{secret,
-//! hostname}`), and awaits **one** response — the hub's `{client_id,
-//! credential}` — after which the hub **closes the socket**. Join never leads
-//! into talk on the same socket.
+//! hostname, body_pubkey}`), and awaits **one** response — the hub's
+//! `{client_id}` (issue #323: no credential is minted) — after which the hub
+//! **closes the socket**. Join never leads into talk on the same socket.
+//!
+//! `--hub-key` is never sent to the hub or checked against anything the wire
+//! says during join itself — it is the out-of-band pin, taken verbatim from
+//! what the operator copied off `hub token mint`'s join line, the same
+//! physical channel that already carries the one-time secret. It is enforced
+//! later, on every `body run` (re)connect, by comparing it against the hub's
+//! `circuit/hello` (`holler_body::connection`) — checking it here, against
+//! the very connection it is supposed to authenticate, would defeat the
+//! point.
 //!
 //! The exit-code semantics are the CLI's (ADR 0003), applied here:
 //! - exit 0 — the join succeeded; the identity is persisted (0600) and the
 //!   operator is told. The one-time join **secret is never printed or
-//!   persisted** — the success line names the `client_id` and `token_id`,
-//!   never the secret.
+//!   persisted**, and neither is the body's own signing private key — the
+//!   success line names the `client_id` and `token_id` only.
 //! - exit 1 — a runtime failure: the hub refused the redeem (its
 //!   `join_failed` message reaches stderr), the hub was unreachable, the
 //!   socket closed early, or the state dir could not be written.
 //! - exit 3 — a fail-closed **policy** refusal: a plaintext `ws://` to a
-//!   non-loopback host (ADR 0002). This is checked **before** any connection
-//!   is attempted.
+//!   non-loopback host (ADR 0002), or a malformed `--hub-key`. Both are
+//!   checked **before** any connection is attempted.
 //!
 //! The `ws://` client transport is plain TCP; `wss://` is rustls with the
 //! system native root CAs (pinned at the workspace) and **fails closed** on any
@@ -45,13 +56,13 @@ pub enum JoinExit {
     Policy,
 }
 
-/// `body join --server <url> --token <ID:SECRET>`.
+/// `body join --server <url> --token <ID:SECRET> --hub-key <HEX>`.
 ///
 /// Returns the [`JoinExit`] the CLI bin turns into an exit code. A
 /// [`JoinExit::Ok`] has already persisted `<state>/body/credential.json`
 /// (0600). A `Refused` carries the one-line reason for stderr. A `Policy`
 /// refusal made no connection and wrote nothing.
-pub fn join(state_root: &std::path::Path, server: &str, token: &str, hostname: &str) -> JoinExit {
+pub fn join(state_root: &std::path::Path, server: &str, token: &str, hostname: &str, hub_key: &str) -> JoinExit {
     // 1. Parse + policy-check the address *before* any I/O: a plaintext
     //    non-loopback `ws://` is exit 3, with no connection attempted.
     let addr = match parse(server) {
@@ -77,6 +88,15 @@ pub fn join(state_root: &std::path::Path, server: &str, token: &str, hostname: &
         }
     };
 
+    // 2b. `--hub-key` must be a well-formed X25519 public key (issue #322):
+    //     64 lowercase hex chars. Checked before any connection — a
+    //     malformed pin is a policy refusal (exit 3), same class as the
+    //     plaintext-non-loopback check above.
+    if !is_valid_hex_pubkey(hub_key) {
+        eprintln!("error: --hub-key must be 64 lowercase hex chars (a 32-byte X25519 public key)");
+        return JoinExit::Policy;
+    }
+
     // 3. Rebuild the canonical URL (explicit port, default 41807 when absent)
     //    so the connect uses what `parse` resolved, not the operator's raw arg.
     let url = format!("{}://{}:{}", addr.scheme, addr.host, addr.port);
@@ -93,7 +113,7 @@ pub fn join(state_root: &std::path::Path, server: &str, token: &str, hostname: &
             JoinExit::Refused(e)
         }
         Ok(rt) => {
-            rt.block_on(connect_and_join(state_root, &url, token_id, secret, hostname, &url))
+            rt.block_on(connect_and_join(state_root, &url, token_id, secret, hostname, &url, hub_key))
         }
     }
 }
@@ -106,8 +126,22 @@ fn split_token(token: &str) -> Option<(&str, &str)> {
     Some((id, secret))
 }
 
-/// Connect to `url`, send the `circuit/join` request, await the (single)
-/// response, and — on success — persist the identity. Returns a [`JoinExit`].
+/// Whether `s` is 64 lowercase hex chars (a 32-byte key's hex encoding) —
+/// shared shape check for both the hub's `--hub-key` pin (X25519) and the
+/// body's own generated public key (Ed25519); this function only checks
+/// length/alphabet, not curve validity (the hub independently validates the
+/// body's own key at `circuit/join`, and there is nothing this body can do
+/// about an operator-mistyped `--hub-key` beyond this shape check — a wrong
+/// but well-formed key is caught later, on first connect, by the hard
+/// mismatch failure in `holler_body::connection`).
+fn is_valid_hex_pubkey(s: &str) -> bool {
+    s.len() == 64 && s.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
+}
+
+/// Connect to `url`, send the `circuit/join` request (registering this
+/// body's freshly-generated Ed25519 public key), await the (single) response,
+/// and — on success — persist the identity (including the pinned hub key).
+/// Returns a [`JoinExit`].
 async fn connect_and_join(
     state_root: &std::path::Path,
     url: &str,
@@ -115,6 +149,7 @@ async fn connect_and_join(
     secret: &str,
     hostname: &str,
     server_url: &str,
+    hub_key: &str,
 ) -> JoinExit {
     // `wss://` is TLS: rustls 0.23 takes its crypto from a process-global
     // provider that the CLI installs in `main` before the runtime. If none is
@@ -128,6 +163,21 @@ async fn connect_and_join(
         eprintln!("error: {}", e.message());
         return JoinExit::Refused(e);
     }
+
+    // Issue #323: this body's own long-lived Ed25519 signing keypair,
+    // generated fresh for this join — the private half never leaves this
+    // process (it is persisted locally on success, in `on_response`; it is
+    // never sent to the hub or printed).
+    let mut signing_key_bytes = [0u8; 32];
+    if let Err(e) = getrandom::fill(&mut signing_key_bytes) {
+        let e = JoinError::Io(format!("could not generate a signing key: {e}"));
+        eprintln!("error: {}", e.message());
+        return JoinExit::Refused(e);
+    }
+    let signing_key = ed25519_dalek::SigningKey::from_bytes(&signing_key_bytes);
+    let signing_key_hex = hex::encode(signing_key_bytes);
+    let body_pubkey = hex::encode(signing_key.verifying_key().to_bytes());
+
     let ws = match connect_async(url).await {
         Ok((ws, _)) => ws,
         Err(e) => {
@@ -142,6 +192,7 @@ async fn connect_and_join(
     let params = match serde_json::to_value(Join {
         secret: secret.to_string(),
         hostname: hostname.to_string(),
+        body_pubkey,
     }) {
         Ok(p) => p,
         Err(e) => {
@@ -210,7 +261,7 @@ async fn connect_and_join(
         // Decode the frame and act on its shape.
         match holler_proto::decode(next) {
             Ok(Envelope::Response { id, result }) if id == cid.as_str() => {
-                return on_response(state_root, token_id, hostname, server_url, result)
+                return on_response(state_root, token_id, hostname, server_url, &signing_key_hex, hub_key, result)
             }
             Ok(Envelope::Error { error, .. }) => {
                 // A `join_failed` (or any other) error: report the hub's
@@ -229,13 +280,16 @@ async fn connect_and_join(
 }
 
 /// Handle the hub's `circuit/join` response: on a result, deserialize
-/// `{client_id, credential}`, persist the identity (0600), and report success
-/// (without ever printing the secret).
+/// `{client_id}` (issue #323: no credential), persist the identity (0600) —
+/// including this body's own `signing_key` and the pinned `hub_key` — and
+/// report success (without ever printing the secret or the signing key).
 fn on_response(
     state_root: &std::path::Path,
     token_id: &str,
     hostname: &str,
     server_url: &str,
+    signing_key_hex: &str,
+    hub_key: &str,
     result: Option<serde_json::Value>,
 ) -> JoinExit {
     let result = match result {
@@ -258,11 +312,12 @@ fn on_response(
     };
     let identity = crate::identity::BodyIdentity {
         client_id: join_result.client_id.clone(),
-        credential: join_result.credential,
+        signing_key: signing_key_hex.to_string(),
         token_id: token_id.to_string(),
         hostname: hostname.to_string(),
         server_url: server_url.to_string(),
         joined_at: holler_proto::now_secs(),
+        hub_pubkey: hub_key.to_string(),
     };
     if let Err(e) = crate::identity::save(&identity, state_root) {
         let e = JoinError::Io(e.to_string());
