@@ -388,8 +388,37 @@ fn run_mint(state: &StateDir, label: &str) -> Output {
         .expect("run `hub token mint`")
 }
 
+/// The hub's X25519 public key (issue #322), read via `hub status --json`
+/// against `state`'s own hub state dir — the test harness's stand-in for the
+/// out-of-band channel a real operator copies the join line's `--hub-key`
+/// over: it never asks the body's own connection for this, only the hub's
+/// local control surface, which is exactly the "physically carried" trust
+/// model `body join --hub-key` is built to require.
+pub fn hub_pubkey(state: &StateDir) -> String {
+    let out = holler_cmd(state)
+        .args(["--json", "hub", "status"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .and_then(|c| c.wait_with_output())
+        .expect("run `hub status`");
+    assert!(out.status.success(), "hub status --json failed: {}", String::from_utf8_lossy(&out.stderr));
+    let v: Value = serde_json::from_slice(&out.stdout).expect("hub status --json is valid JSON");
+    v["hub_pubkey"]
+        .as_str()
+        .expect("hub status --json carries hub_pubkey (issue #322)")
+        .to_string()
+}
+
 /// Join `state`'s body to the hub at `ws_url` using the minted token, and
-/// assert the join succeeded (exit 0).
+/// assert the join succeeded (exit 0). Pins the hub's real public key (read
+/// via [`hub_pubkey`] against `hub_state` — the hub's *own* state dir, which
+/// is where the live hub's control socket lives; `hub_state` and `state` are
+/// the same directory in the tests that share one dir for hub+body, and
+/// different directories in the tests that keep the body isolated) — the
+/// correct-key path every caller of this helper wants; a test that
+/// specifically wants to exercise a *wrong* key builds its own `body join
+/// --hub-key` invocation instead of using this helper.
 ///
 /// Retries the join a few times before failing. `body join` reads the hub's
 /// `tokens.json` (in the hub's state dir) to redeem the one-time secret, and a
@@ -401,9 +430,10 @@ fn run_mint(state: &StateDir, label: &str) -> Output {
 /// the race and still surfaces every genuine join failure. (Issue #186 CI
 /// hardening — this is what kept `say_ambiguous*` flapping on the shared
 /// ubuntu runner.)
-pub fn join(state: &StateDir, ws_url: &str, token_id: &str, secret: &str) {
+pub fn join(state: &StateDir, hub_state: &StateDir, ws_url: &str, token_id: &str, secret: &str) {
     let token = format!("{token_id}:{secret}");
-    let mut out = run_join(state, ws_url, &token);
+    let hub_key = hub_pubkey(hub_state);
+    let mut out = run_join(state, ws_url, &token, &hub_key);
     for attempt in 1..=5 {
         if out.status.success() {
             return;
@@ -420,14 +450,14 @@ pub fn join(state: &StateDir, ws_url: &str, token_id: &str, secret: &str) {
             );
         }
         std::thread::sleep(Duration::from_millis(200 * attempt as u64));
-        out = run_join(state, ws_url, &token);
+        out = run_join(state, ws_url, &token, &hub_key);
     }
 }
 
 /// One attempt at `body join` (see [`join`]'s retry loop).
-fn run_join(state: &StateDir, ws_url: &str, token: &str) -> Output {
+fn run_join(state: &StateDir, ws_url: &str, token: &str, hub_key: &str) -> Output {
     holler_cmd(state)
-        .args(["body", "join", "--server", ws_url, "--token", token])
+        .args(["body", "join", "--server", ws_url, "--token", token, "--hub-key", hub_key])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()

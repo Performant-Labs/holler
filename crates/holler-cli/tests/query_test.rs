@@ -36,9 +36,10 @@ fn run(state: &StateDir, args: &[&str]) -> (i32, String, String) {
 
 fn join_fresh(state: &StateDir, ws_url: &str, label: &str) -> String {
     let (token_id, secret) = support::mint_token(state, label);
+    let hub_key = support::hub_pubkey(state);
     let (code, _, stderr) = run(
         state,
-        &["body", "join", "--server", ws_url, "--token", &format!("{token_id}:{secret}")],
+        &["body", "join", "--server", ws_url, "--token", &format!("{token_id}:{secret}"), "--hub-key", &hub_key],
     );
     assert_eq!(code, 0, "body join must exit 0; stderr: {stderr}");
     token_id

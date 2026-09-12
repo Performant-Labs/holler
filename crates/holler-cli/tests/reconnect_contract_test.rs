@@ -144,7 +144,7 @@ fn start_body_with_token(
     sessions: &[(&str, &[&str])],
 ) -> (String, Body) {
     let (token_id, secret) = mint_token(hub_state, label);
-    join(body_state, &hub.ws_url(), &token_id, &secret);
+    join(body_state, hub_state, &hub.ws_url(), &token_id, &secret);
     let config = write_sessions_toml(body_state, sessions);
     (token_id, Body::start(body_state, &config))
 }

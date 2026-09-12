@@ -1,5 +1,5 @@
 {
-  "credential": "hlr_live_x",
+  "advertised_url": "wss://uranus.example",
   "hostname": "kiwi",
   "token_id": "tok_7f3a"
 }

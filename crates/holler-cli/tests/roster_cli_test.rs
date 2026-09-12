@@ -41,7 +41,7 @@ fn roster_cli_shows_two_sessions_from_one_body() {
     let state = StateDir::new();
     let hub = Hub::start(&state);
     let (token_id, secret) = mint_token(&state, "body-1");
-    join(&state, &hub.ws_url(), &token_id, &secret);
+    join(&state, &state, &hub.ws_url(), &token_id, &secret);
     // Two spawn-mode sessions for the one body (pointed at the stub agent so
     // the body can actually bring them up if it spawns).
     let config = support::write_sessions_toml(&state, &[("alpha", &[]), ("beta", &[])]);
@@ -85,7 +85,7 @@ fn roster_json_shape() {
     let state = StateDir::new();
     let hub = Hub::start(&state);
     let (token_id, secret) = mint_token(&state, "body-1");
-    join(&state, &hub.ws_url(), &token_id, &secret);
+    join(&state, &state, &hub.ws_url(), &token_id, &secret);
     let config = support::write_sessions_toml(&state, &[("alpha", &[])]);
     let body = Body::start(&state, &config);
 
@@ -130,13 +130,13 @@ fn roster_cli_prefix_filters_by_label() {
 
     let io_body_state = StateDir::new();
     let (io_token, io_secret) = mint_token(&hub_state, "io");
-    join(&io_body_state, &hub.ws_url(), &io_token, &io_secret);
+    join(&io_body_state, &hub_state, &hub.ws_url(), &io_token, &io_secret);
     let io_config = support::write_sessions_toml(&io_body_state, &[("alpha", &[])]);
     let io_body = Body::start(&io_body_state, &io_config);
 
     let media_body_state = StateDir::new();
     let (media_token, media_secret) = mint_token(&hub_state, "media");
-    join(&media_body_state, &hub.ws_url(), &media_token, &media_secret);
+    join(&media_body_state, &hub_state, &hub.ws_url(), &media_token, &media_secret);
     let media_config = support::write_sessions_toml(&media_body_state, &[("gamma", &[])]);
     let media_body = Body::start(&media_body_state, &media_config);
 

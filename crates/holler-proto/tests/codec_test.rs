@@ -28,10 +28,15 @@ fn canonical_frame(method: &str) -> String {
     let a2a_user = r#"{"messageId":"m-1","parts":[{"text":"hi"}],"role":"ROLE_USER"}"#;
     match method {
         "circuit/join" => format!(
-            r#"{{"jsonrpc":"2.0","id":"{id}","method":"circuit/join","params":{{"secret":"s3cr3t","hostname":"kiwi"}}}}"#
+            r#"{{"jsonrpc":"2.0","id":"{id}","method":"circuit/join","params":{{"secret":"s3cr3t","hostname":"kiwi","body_pubkey":"{}"}}}}"#,
+            "b".repeat(64)
         ),
         "circuit/authenticate" => format!(
-            r#"{{"jsonrpc":"2.0","id":"{id}","method":"circuit/authenticate","params":{{"token_id":"tok_7f3a","credential":"cred_1","hostname":"kiwi"}}}}"#
+            r#"{{"jsonrpc":"2.0","id":"{id}","method":"circuit/authenticate","params":{{"token_id":"tok_7f3a","hostname":"kiwi","advertised_url":"wss://uranus.example"}}}}"#
+        ),
+        "circuit/prove" => format!(
+            r#"{{"jsonrpc":"2.0","id":"{id}","method":"circuit/prove","params":{{"token_id":"tok_7f3a","signature":"{}"}}}}"#,
+            "d".repeat(128)
         ),
         "circuit/hello" => format!(
             r#"{{"jsonrpc":"2.0","id":"{id}","method":"circuit/hello","params":{{"protocol":2,"protocol_min":2,"protocol_max":2,"role":"body","hostname":"kiwi","token_id":"tok_7f3a","client_id":"cli_19","features":["presence","ping"],"harnesses":["opencode"],"sessions":[]}}}}"#

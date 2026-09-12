@@ -42,6 +42,13 @@ impl Tdir {
     }
 }
 
+/// A well-formed (real, curve-valid), deterministic Ed25519 public key hex —
+/// what a body would send as `circuit/join`'s `body_pubkey` (issue #323).
+fn pubkey(seed: u8) -> String {
+    let signing_key = ed25519_dalek::SigningKey::from_bytes(&[seed; 32]);
+    hex::encode(signing_key.verifying_key().to_bytes())
+}
+
 impl Drop for Tdir {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.root);
@@ -91,17 +98,18 @@ fn redeem_binds_and_consumes_secret() {
     let dir = Tdir::new();
     let state = prep(&dir);
     let minted = token::mint("io", 3600, &state).expect("mint");
-    let (client_id, credential) = token::redeem(&minted.secret, "myhost", &state).expect("first redeem");
+    let body_pubkey = pubkey(1);
+    let client_id = token::redeem(&minted.secret, "myhost", &body_pubkey, &state).expect("first redeem");
     assert!(client_id.starts_with("cli_"));
-    assert!(credential.starts_with("hlr_live_"));
     // The secret is now consumed: a second redeem is AlreadyBound.
-    let again = token::redeem(&minted.secret, "myhost", &state);
+    let again = token::redeem(&minted.secret, "myhost", &pubkey(2), &state);
     assert_eq!(again, Err(RedeemError::AlreadyBound), "the second redeem is refused");
-    // The record is now bound to the client.
+    // The record is now bound to the client, with its public key registered.
     let row = token::list(&state).expect("list")[0].clone();
     assert_eq!(row.state, holler_hub::token::TokenState::Bound);
     assert_eq!(row.client_id.as_deref(), Some(client_id.as_str()));
     assert_eq!(row.hostname.as_deref(), Some("myhost"));
+    assert_eq!(row.body_pubkey.as_deref(), Some(body_pubkey.as_str()));
 }
 
 /// Model a "concurrent second client" redeeming the same secret. Two CLIs on
@@ -110,20 +118,20 @@ fn redeem_binds_and_consumes_secret() {
 /// serializes them. We exercise the consumption invariant (a secret is
 /// single-use) through the public API: the first redeem wins and binds the
 /// token; the second is refused `AlreadyBound`, never handed a second
-/// credential. (True multi-process contention over one `flock` is covered by
-/// the CLI tests, which run real separate processes.)
+/// registered key. (True multi-process contention over one `flock` is
+/// covered by the CLI tests, which run real separate processes.)
 #[test]
 fn concurrent_redeem_has_exactly_one_winner() {
     let dir = Tdir::new();
     let state = prep(&dir);
     let minted = token::mint("io", 3600, &state).expect("mint");
     // First client redeems and wins.
-    let (client_id, _credential) =
-        token::redeem(&minted.secret, "host-a", &state).expect("first client redeems and wins");
+    let client_id =
+        token::redeem(&minted.secret, "host-a", &pubkey(3), &state).expect("first client redeems and wins");
     assert!(client_id.starts_with("cli_"));
     // The second client presents the same (already-consumed) secret: refused
-    // AlreadyBound, not handed a second credential.
-    let again = token::redeem(&minted.secret, "host-b", &state);
+    // AlreadyBound, not handed a second registered key.
+    let again = token::redeem(&minted.secret, "host-b", &pubkey(4), &state);
     assert_eq!(again, Err(RedeemError::AlreadyBound), "a second client cannot redeem a consumed secret");
 }
 
@@ -164,19 +172,26 @@ fn concurrent_mint_delete_do_not_lose_writes() {
     assert_eq!(rows.len(), 9, "9 rows: 8 mints + 1 revoked victim (no row lost, none duplicated)");
 }
 
+/// Issue #323's RED test: a bound token's row holds no secret material — the
+/// join secret's HMAC only (the pepper-keyed digest of an already-spent,
+/// one-time value ADR 0008 explicitly keeps), never the secret itself and
+/// never a credential (there is none to store any more — only the body's
+/// public key, which is not a secret).
 #[test]
-fn raw_secret_never_persisted() {
+fn hub_store_contains_no_secret_material_for_a_bound_token() {
     let dir = Tdir::new();
     let state = prep(&dir);
     let minted = token::mint("io", 3600, &state).expect("mint");
-    let (_client_id, credential) = token::redeem(&minted.secret, "myhost", &state).expect("redeem");
+    let body_pubkey = pubkey(5);
+    let _client_id = token::redeem(&minted.secret, "myhost", &body_pubkey, &state).expect("redeem");
     let raw = std::fs::read_to_string(dir.tokens_path()).expect("read tokens.json");
     assert!(!raw.contains(&minted.secret), "the join secret is not in tokens.json");
-    assert!(!raw.contains(&credential), "the credential is not in tokens.json");
-    // The at-rest forms (HMAC digests) are present, not the secrets.
+    // The at-rest forms (HMAC digest for the spent secret) are present, not
+    // the secret itself; the public key is a public key, so it is present in
+    // the clear (issue #323 — a stolen store yields no secret material).
     assert!(raw.contains(&minted.record.secret_hmac), "the at-rest secret_hmac is present");
     let row = token::list(&state).expect("list")[0].clone();
-    assert!(row.credential_hmac.is_some(), "the at-rest credential_hmac is present once bound");
+    assert_eq!(row.body_pubkey.as_deref(), Some(body_pubkey.as_str()), "the registered public key is present once bound");
 }
 
 #[test]
@@ -214,7 +229,7 @@ fn expired_secret_fails_closed() {
     let obj = row.as_object_mut().expect("row object");
     obj.insert("expires".to_string(), serde_json::json!(1)); // in the past
     std::fs::write(&path, doc.to_string()).expect("write");
-    let err = token::redeem(&minted.secret, "myhost", &state);
+    let err = token::redeem(&minted.secret, "myhost", &pubkey(6), &state);
     assert_eq!(err, Err(RedeemError::Expired), "an expired secret fails closed with Expired");
 }
 
@@ -225,7 +240,7 @@ fn delete_unused_then_redeem_fails() {
     let minted = token::mint("io", 3600, &state).expect("mint");
     token::delete(&minted.record.token_id, &state).expect("invalidate the unused token");
     // A revoked token's secret is no longer redeemable.
-    let err = token::redeem(&minted.secret, "myhost", &state);
+    let err = token::redeem(&minted.secret, "myhost", &pubkey(7), &state);
     assert_eq!(err, Err(RedeemError::Revoked), "a revoked (deleted) token's secret is refused");
 }
 
@@ -234,7 +249,7 @@ fn list_json_shape() {
     let dir = Tdir::new();
     let state = prep(&dir);
     let minted = token::mint("io", 3600, &state).expect("mint");
-    let _ = token::redeem(&minted.secret, "myhost", &state).expect("redeem");
+    let _ = token::redeem(&minted.secret, "myhost", &pubkey(8), &state).expect("redeem");
     let raw = std::fs::read_to_string(dir.tokens_path()).expect("read tokens.json");
     let doc: serde_json::Value = serde_json::from_str(&raw).expect("parse");
     let arr = doc.as_array().expect("tokens.json is a JSON array");
@@ -242,11 +257,11 @@ fn list_json_shape() {
     let obj = row.as_object().expect("row is an object");
     // The exact keys the spec pins on the record (the bound ones are present
     // after the redeem; the optional ones that are absent are omitted).
-    for k in ["token_id", "label", "created", "expires", "state", "secret_hmac", "credential_hmac", "client_id", "hostname", "bound_at"] {
+    for k in ["token_id", "label", "created", "expires", "state", "secret_hmac", "body_pubkey", "client_id", "hostname", "bound_at"] {
         assert!(obj.get(k).is_some(), "record has key {k:?}");
     }
     assert_eq!(obj["state"].as_str(), Some("bound"));
     // No secret ever appears as a top-level key.
     assert!(obj.get("secret").is_none(), "there is no raw `secret` key");
-    assert!(obj.get("credential").is_none(), "there is no raw `credential` key");
+    assert!(obj.get("credential").is_none(), "there is no raw `credential` key (issue #323: none is ever minted)");
 }

@@ -45,23 +45,42 @@ fn run(state: &StateDir, args: &[&str]) -> (i32, String, String) {
     )
 }
 
-/// `body join` against a live hub, with a valid minted token: exit 0, the
-/// credential is persisted at mode 0600 (and names the token), and `body
-/// status` now reports this process joined with the credential's client id.
+/// `body join` against a live hub, with a valid minted token: exit 0, and the
+/// success line never echoes the join secret back.
 #[test]
-fn join_persists_credential_0600_and_status_reports_joined() {
+fn join_exits_0_and_does_not_echo_the_secret() {
     let state = StateDir::new();
     let hub = Hub::start(&state);
     let (token_id, secret) = support::mint_token(&state, "kiwi");
+    let hub_key = support::hub_pubkey(&state);
 
     let (code, stdout, stderr) = run(
         &state,
-        &["body", "join", "--server", &hub.ws_url(), "--token", &format!("{token_id}:{secret}")],
+        &["body", "join", "--server", &hub.ws_url(), "--token", &format!("{token_id}:{secret}"), "--hub-key", &hub_key],
+    );
+    assert_eq!(code, 0, "body join must exit 0; stderr: {stderr}");
+    assert!(!stdout.contains(&secret), "the join success line must not print the secret; got: {stdout}");
+
+    hub.stop(Duration::from_secs(5));
+}
+
+/// `body join` persists `body/credential.json` at mode 0600, naming the
+/// token — carrying issue #322's pinned hub key and issue #323's own signing
+/// key, never the join secret nor a `credential` field (there is none any
+/// more).
+#[test]
+fn join_persists_credential_0600_and_pins_hub_key() {
+    let state = StateDir::new();
+    let hub = Hub::start(&state);
+    let (token_id, secret) = support::mint_token(&state, "kiwi");
+    let hub_key = support::hub_pubkey(&state);
+
+    let (code, _stdout, stderr) = run(
+        &state,
+        &["body", "join", "--server", &hub.ws_url(), "--token", &format!("{token_id}:{secret}"), "--hub-key", &hub_key],
     );
     assert_eq!(code, 0, "body join must exit 0; stderr: {stderr}");
 
-    // The one-time join secret is shown on stdout at mint, and join reports
-    // success — but neither the secret nor its hmac is what is persisted.
     let cred_path = credential_path(&state);
     assert!(cred_path.exists(), "body join must persist body/credential.json");
     let mode = file_mode(&cred_path);
@@ -83,9 +102,39 @@ fn join_persists_credential_0600_and_status_reports_joined() {
         !doc.to_string().contains(&secret),
         "the join secret must not be persisted: {doc}"
     );
+    // Issue #322: the pinned hub key is persisted verbatim.
+    assert_eq!(
+        doc["hub_pubkey"].as_str(),
+        Some(hub_key.as_str()),
+        "credential.json pins the hub's public key: {doc}"
+    );
+    // Issue #323: this body's own signing private key is persisted (never
+    // sent to the hub), never a `credential` field (there is none any more).
+    assert!(doc.get("signing_key").and_then(|v| v.as_str()).is_some_and(|s| s.len() == 64), "credential.json carries this body's own signing_key: {doc}");
+    assert!(doc.get("credential").is_none(), "there is no `credential` field any more (issue #323): {doc}");
 
-    // …and the process's own view of itself now reports joined, with the same
-    // identity (the status document is local — no live hub is consulted here).
+    hub.stop(Duration::from_secs(5));
+}
+
+/// After a successful `body join`, `body status` reports this process
+/// joined with the same identity persisted in `credential.json` — the status
+/// document is local, so no live hub is consulted here.
+#[test]
+fn status_reports_joined_with_same_identity_after_join() {
+    let state = StateDir::new();
+    let hub = Hub::start(&state);
+    let (token_id, secret) = support::mint_token(&state, "kiwi");
+    let hub_key = support::hub_pubkey(&state);
+
+    let (code, _stdout, stderr) = run(
+        &state,
+        &["body", "join", "--server", &hub.ws_url(), "--token", &format!("{token_id}:{secret}"), "--hub-key", &hub_key],
+    );
+    assert_eq!(code, 0, "body join must exit 0; stderr: {stderr}");
+    let doc: Value = serde_json::from_str(&std::fs::read_to_string(credential_path(&state)).unwrap())
+        .expect("credential.json is JSON");
+    let client_id = doc["client_id"].as_str().expect("credential.json carries a client_id");
+
     let (sc, sstd, ssterr) = run(&state, &["--json", "body", "status"]);
     assert_eq!(sc, 0, "body status must exit 0; stderr: {ssterr}");
     let sdoc: Value = serde_json::from_str(&sstd).expect("body status --json is valid JSON");
@@ -102,9 +151,6 @@ fn join_persists_credential_0600_and_status_reports_joined() {
         "status token_id matches the minted one: {sdoc}"
     );
 
-    // The success line does not echo the secret back.
-    assert!(!stdout.contains(&secret), "the join success line must not print the secret; got: {stdout}");
-
     hub.stop(Duration::from_secs(5));
 }
 
@@ -117,9 +163,10 @@ fn join_with_bad_secret_exit_1_message_from_hub() {
     // Mint a real token so the store has a pepper, but present a secret that
     // matches nothing (a well-formed secret with no corresponding token).
     support::mint_token(&state, "kiwi");
+    let hub_key = support::hub_pubkey(&state);
     let bogus = "hlr_join_00000000000000000000000000000000000000000000000000000000000000";
 
-    let (code, _, stderr) = run(&state, &["body", "join", "--server", &hub.ws_url(), "--token", &format!("tok_nope:{bogus}")]);
+    let (code, _, stderr) = run(&state, &["body", "join", "--server", &hub.ws_url(), "--token", &format!("tok_nope:{bogus}"), "--hub-key", &hub_key]);
     assert_eq!(code, 1, "a refused redeem must exit 1; stderr: {stderr}");
     assert!(!stderr.is_empty(), "the hub's refusal message reaches stderr");
     assert!(!stderr.contains("not implemented"), "this is a real refusal, not the skeleton: {stderr}");
@@ -137,10 +184,11 @@ fn join_with_bad_secret_exit_1_message_from_hub() {
 #[test]
 fn join_plain_ws_to_non_loopback_refused_exit_3() {
     let state = StateDir::new();
-    // No hub is started: the refusal must fire at URL-parse time, not on connect.
+    // No hub is started: the refusal must fire at URL-parse time, not on
+    // connect — `--hub-key` is a placeholder here, never even inspected.
     let (code, _, stderr) = run(
         &state,
-        &["body", "join", "--server", "ws://10.0.0.5:41807", "--token", "tok_7f3a:hlr_join_deadbeef"],
+        &["body", "join", "--server", "ws://10.0.0.5:41807", "--token", "tok_7f3a:hlr_join_deadbeef", "--hub-key", &"a".repeat(64)],
     );
     assert_eq!(code, 3, "a plaintext ws:// to a non-loopback host must exit 3; stderr: {stderr}");
     assert!(!stderr.is_empty(), "the refusal is explained on stderr: {stderr}");
@@ -158,15 +206,17 @@ fn secret_never_written_to_disk() {
     let hub = Hub::start(&state);
     let (token_id, secret) = support::mint_token(&state, "kiwi");
     let ws_url = hub.ws_url();
+    let hub_key = support::hub_pubkey(&state);
     let (code, _, stderr) = run(
         &state,
-        &["body", "join", "--server", &ws_url, "--token", &format!("{token_id}:{secret}")],
+        &["body", "join", "--server", &ws_url, "--token", &format!("{token_id}:{secret}"), "--hub-key", &hub_key],
     );
     assert_eq!(code, 0, "body join must exit 0; stderr: {stderr}");
 
-    // Scan every file under the state dir for the raw secret. (The at-rest token
-    // store keeps only the HMAC, and credential.json keeps only the credential —
-    // so the raw secret appears in no file.)
+    // Scan every file under the state dir for the raw secret. (The at-rest
+    // token store keeps only the HMAC, and credential.json keeps only this
+    // body's own signing key and the pinned hub key — so the raw join secret
+    // appears in no file.)
     for path in walk_files(state.path()) {
         let bytes = std::fs::read(&path).unwrap_or_default();
         let hay = String::from_utf8_lossy(&bytes).into_owned();
@@ -188,9 +238,10 @@ fn detach_without_run_removes_credential() {
     let state = StateDir::new();
     let hub = Hub::start(&state);
     let (token_id, secret) = support::mint_token(&state, "kiwi");
+    let hub_key = support::hub_pubkey(&state);
     let (code, _, stderr) = run(
         &state,
-        &["body", "join", "--server", &hub.ws_url(), "--token", &format!("{token_id}:{secret}")],
+        &["body", "join", "--server", &hub.ws_url(), "--token", &format!("{token_id}:{secret}"), "--hub-key", &hub_key],
     );
     assert_eq!(code, 0, "body join must exit 0; stderr: {stderr}");
     assert!(credential_path(&state).exists(), "joined body has a credential");
@@ -228,6 +279,82 @@ fn status_unjoined_is_exit_0_joined_false() {
     let doc: Value = serde_json::from_str(&stdout).expect("body status --json is valid JSON");
     assert_eq!(doc["role"].as_str(), Some("body"), "the status document is a body's: {doc}");
     assert_eq!(doc["joined"].as_bool(), Some(false), "an unjoined body reports joined:false: {doc}");
+}
+
+// --- issue #322: hub identity / join-line pinning -----------------------------
+
+/// Issue #322's `join_line_carries_hub_pubkey`: `hub token mint`'s human
+/// output and its `--json` document both carry the hub's real X25519 public
+/// key, and the ready-to-paste join line embeds it as `--hub-key`.
+#[test]
+fn join_line_carries_hub_pubkey() {
+    let state = StateDir::new();
+    let hub = Hub::start(&state);
+    let real_key = support::hub_pubkey(&state);
+
+    let (code, stdout, stderr) = run(&state, &["--json", "hub", "token", "mint", "--label", "kiwi"]);
+    assert_eq!(code, 0, "hub token mint must exit 0; stderr: {stderr}");
+    let doc: Value = serde_json::from_str(&stdout).expect("mint --json is valid JSON");
+    assert_eq!(doc["hub_pubkey"].as_str(), Some(real_key.as_str()), "mint --json carries the real hub_pubkey: {doc}");
+    let join_command = doc["join_command"].as_str().expect("mint --json carries join_command");
+    assert!(
+        join_command.contains(&format!("--hub-key {real_key}")),
+        "the join line embeds --hub-key <the real key>: {join_command}"
+    );
+
+    // Human output: the same key appears both as its own line and inside the
+    // ready-to-paste join line.
+    let (code2, stdout2, stderr2) = run(&state, &["hub", "token", "mint", "--label", "web"]);
+    assert_eq!(code2, 0, "hub token mint (human) must exit 0; stderr: {stderr2}");
+    assert!(stdout2.contains(&format!("hub_pubkey:  {real_key}")), "human output names hub_pubkey: {stdout2}");
+    assert!(stdout2.contains(&format!("--hub-key {real_key}")), "human output's join line embeds --hub-key: {stdout2}");
+
+    hub.stop(Duration::from_secs(5));
+}
+
+/// Issue #322's `body_join_pins_hub_key_and_persists_it`: `body join
+/// --hub-key HEX` persists exactly that key in `credential.json`, verbatim —
+/// this is the pin a later `body run` compares every hub hello against
+/// (`holler_body::connection::hello_exchange`), and it is taken purely from
+/// the CLI argument, never negotiated or confirmed over the wire during join
+/// itself (the whole point of an out-of-band pin).
+#[test]
+fn body_join_pins_hub_key_and_persists_it() {
+    let state = StateDir::new();
+    let hub = Hub::start(&state);
+    let (token_id, secret) = support::mint_token(&state, "kiwi");
+    let real_key = support::hub_pubkey(&state);
+
+    let (code, _, stderr) = run(
+        &state,
+        &["body", "join", "--server", &hub.ws_url(), "--token", &format!("{token_id}:{secret}"), "--hub-key", &real_key],
+    );
+    assert_eq!(code, 0, "body join must exit 0; stderr: {stderr}");
+
+    let doc: Value = serde_json::from_str(&std::fs::read_to_string(credential_path(&state)).unwrap())
+        .expect("credential.json is JSON");
+    assert_eq!(doc["hub_pubkey"].as_str(), Some(real_key.as_str()), "the pinned hub key is persisted verbatim: {doc}");
+
+    hub.stop(Duration::from_secs(5));
+}
+
+/// A malformed `--hub-key` (not 64 lowercase hex chars) is a fail-closed
+/// policy refusal — exit 3, before any connection is attempted, the same
+/// class of refusal as a plaintext non-loopback `ws://`.
+#[test]
+fn body_join_malformed_hub_key_refused_exit_3() {
+    let state = StateDir::new();
+    let hub = Hub::start(&state);
+    let (token_id, secret) = support::mint_token(&state, "kiwi");
+
+    let (code, _, stderr) = run(
+        &state,
+        &["body", "join", "--server", &hub.ws_url(), "--token", &format!("{token_id}:{secret}"), "--hub-key", "not-hex"],
+    );
+    assert_eq!(code, 3, "a malformed --hub-key must exit 3; stderr: {stderr}");
+    assert!(!credential_path(&state).exists(), "a refused join must not persist an identity");
+
+    hub.stop(Duration::from_secs(5));
 }
 
 // --- small local helpers ------------------------------------------------------

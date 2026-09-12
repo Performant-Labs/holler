@@ -358,8 +358,16 @@ pub fn timestamp() -> String {
 pub const REDACTED: &str = "[redacted]";
 
 /// Field-name substrings that mark a value as a secret (matched
-/// case-insensitively against the key).
-const SECRET_KEY_SUBSTRINGS: &[&str] = &["secret", "credential", "ticket", "authorization", "pepper"];
+/// case-insensitively against the key). `private_key` (issue #322) covers the
+/// hub's X25519 static private key; `signing_key` (issue #323) covers the
+/// body's persisted Ed25519 signing private key (`BodyIdentity::signing_key`
+/// — that field is literally named `signing_key`, not `private_key`, so it
+/// needs its own substring here) — defense in depth: production code never
+/// hands either to `emit` in the first place (mirroring how the pepper
+/// itself is never logged), but a field named this way is redacted the
+/// instant anything ever does.
+const SECRET_KEY_SUBSTRINGS: &[&str] =
+    &["secret", "credential", "ticket", "authorization", "pepper", "private_key", "signing_key"];
 
 /// String-value prefixes that mark a value as a token, regardless of key.
 const SECRET_VALUE_PREFIXES: &[&str] = &["hlr_join_", "hlr_live_"];

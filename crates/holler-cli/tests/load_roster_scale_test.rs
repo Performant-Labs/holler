@@ -190,7 +190,7 @@ fn bring_up_peers(hub_state: &StateDir, hub: &Hub) -> Vec<Peer> {
         let session = format!("s{i}");
         let (token_id, secret) = mint_token(hub_state, &label);
         let body_state = StateDir::new();
-        join(&body_state, &hub.ws_url(), &token_id, &secret);
+        join(&body_state, hub_state, &hub.ws_url(), &token_id, &secret);
         let config = write_sessions_toml(&body_state, &[(session.as_str(), &["--chunks", "2"])]);
         let body = Body::start(&body_state, &config);
         peers.push(Peer {

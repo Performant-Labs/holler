@@ -1,7 +1,9 @@
 //! The hub side of a **re-authenticated** circuit (issue #182): the
-//! `circuit/authenticate` → `circuit/hello` handshake, then the live session
-//! loop that answers presence notifications and lets the control socket
-//! (`hub token ping`) reach the body over this exact connection.
+//! `circuit/authenticate` → `circuit/prove` → `circuit/hello` handshake
+//! (issue #323's nonce challenge-response replaced a bare credential check),
+//! then the live session loop that answers presence notifications and lets
+//! the control socket (`hub token ping`) reach the body over this exact
+//! connection.
 //!
 //! `circuit/join` (story #176, [`crate::join`]) is the one-shot bootstrap and
 //! stays completely separate: it never leads into talk on the same socket.
@@ -45,7 +47,10 @@
 //! "Reconnect contract" section for the full six-point contract this
 //! implements.
 
+mod auth;
 mod dispatch;
+
+pub use auth::AuthDeps;
 
 use futures_util::{Sink, SinkExt, Stream, StreamExt};
 use holler_proto::{
@@ -62,6 +67,12 @@ use dispatch::PendingSay;
 /// How long the hub waits for the body's half of the hello exchange, and for
 /// the body's answer to the hub's own hello, before giving up on the socket.
 const HELLO_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// How long the hub waits, after issuing a `circuit/authenticate` nonce
+/// challenge, for the body's `circuit/prove` (issue #323, [`auth`]). Same
+/// budget as [`HELLO_TIMEOUT`] — both are "one more round trip before we
+/// give up on a socket that has not yet proven anything."
+const PROVE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// The heartbeat/presence interval a body is expected to keep to (mirrors
 /// `holler-body`'s own `heartbeat_interval()`): 15s, or
@@ -137,78 +148,60 @@ fn log_frame(direction: LogDirection, method: &'static str, id: Option<&str>, ra
     });
 }
 
-/// Handle a freshly-accepted socket whose first frame was `circuit/
-/// authenticate`: verify the credential, run the hello exchange, and — on
-/// success — hold the session loop until the body disconnects. Every failure
-/// path replies with the matching error and closes the socket; a bad
-/// credential is always `-32002 unauthenticated` (the body's connection loop
-/// treats that code, and only that code, as "do not retry").
-/// [`handle_authenticated`]'s shared hub-wide dependencies, bundled purely to
-/// keep that fn's own argument count under clippy's `too_many_arguments`
-/// gate (issue #184 added `peer`/`lockout` alongside the pre-existing
-/// `registry`/`roster` — the same "bundle unrelated shared state into one
-/// struct" discipline [`CommandChannels`] already uses in this file). Every
-/// field is a shared reference, so `AuthDeps` itself is `Copy` — passing it
-/// to a helper never moves it out of the caller.
-#[derive(Clone, Copy)]
-pub struct AuthDeps<'a> {
-    pub registry: &'a Registry,
-    pub roster: &'a std::sync::Arc<crate::roster::Roster>,
-    pub peer: &'a str,
-    pub lockout: &'a std::sync::Arc<crate::lockout::Lockout>,
-}
-
-/// The credential-check half of [`handle_authenticated`]: verify, record a
-/// lockout failure or reset on the outcome, and (on failure) send the
-/// refusal, close, and clear the roster row. Split out purely to keep
-/// `handle_authenticated`'s own cognitive complexity under the workspace
-/// threshold — no behavior change.
-async fn verify_and_authenticate<Snk>(
+/// Run the `circuit/authenticate` → `circuit/prove` challenge-response
+/// (issue #323, [`auth`]) followed by the hello exchange. Every failure path
+/// has already replied with the matching error (always `-32002
+/// unauthenticated` for the challenge-response itself — the body's
+/// connection loop treats that code, and only that code, as "do not retry")
+/// and closed the socket by the time this returns `None`. On success,
+/// returns the bound token's client id, its record, and the harnesses the
+/// body advertised in its hello — [`handle_authenticated`] takes it from
+/// there to bring the session live.
+async fn authenticate_and_hello<Snk, St>(
     sink: &mut Snk,
+    stream: &mut St,
     id: Option<&str>,
     params: &Authenticate,
     state: &HubState,
     deps: &AuthDeps<'_>,
-) -> Option<crate::token::Record>
+) -> Option<(String, crate::token::Record, Vec<String>)>
 where
     Snk: Sink<Message, Error = WsError> + Unpin,
+    St: Stream<Item = Result<Message, WsError>> + Unpin,
 {
     let peer_ip = deps.peer.rsplit_once(':').map(|(ip, _)| ip).unwrap_or(deps.peer);
-    let record = match crate::token::verify_credential_async(&params.token_id, &params.credential, state).await {
-        Ok(r) => r,
-        Err(e) => {
-            // Issue #184: every failed `circuit/authenticate` counts toward
-            // this peer's lockout, keyed by the transport IP (never the
-            // claimed hostname — that is unauthenticated input).
-            if let Ok(ip) = peer_ip.parse() {
-                deps.lockout.record_failure(&ip);
-            }
-            send_error(sink, id, Code::Unauthenticated, &format!("authentication failed: {e}")).await;
-            close(sink).await;
-            // The credentials are no longer valid, so the body is permanently
-            // gone — drop it from the roster outright (it can never re-auth
-            // with the same token, so the TTL would only keep a stale row
-            // around). Issue #186.
-            deps.roster.clear(&params.token_id);
+
+    auth::begin_authenticate(sink, id, params, state, peer_ip, deps).await?;
+
+    let nonce = match auth::random_nonce() {
+        Ok(n) => n,
+        Err(_) => {
+            auth::refuse_unauthenticated(sink, id, "authentication failed: could not mint a challenge", &params.token_id, peer_ip, deps).await;
             return None;
         }
     };
-    if record.client_id.is_none() {
-        // Defensive: `verify_credential` only returns `Bound` records, which
-        // always carry a `client_id`. Treated the same as a bad credential.
-        send_error(sink, id, Code::Unauthenticated, "authentication failed: no client id on record").await;
-        close(sink).await;
-        deps.roster.clear(&params.token_id);
-        return None;
-    }
-    // A successful credential check clears this peer's failure count (issue
-    // #184's spec: "a successful auth resets the counter").
-    if let Ok(ip) = peer_ip.parse() {
-        deps.lockout.reset(&ip);
-    }
-    Some(record)
+    let nonce_hex = hex::encode(nonce);
+    let challenge = serde_json::to_value(holler_proto::AuthChallenge { nonce: nonce_hex.clone() }).unwrap_or_default();
+    reply(sink, id, challenge).await.ok()?;
+
+    let (prove_id, prove) = auth::await_prove(sink, stream, &params.token_id, peer_ip, deps).await?;
+    let record = auth::finish_prove(sink, &prove_id, params, &prove, &nonce_hex, state, deps).await?;
+
+    let ok = serde_json::to_value(holler_proto::AuthOk { ok: true }).unwrap_or_default();
+    reply(sink, Some(prove_id.as_str()), ok).await.ok()?;
+
+    let body_harnesses = hello_exchange(sink, stream, &params.hostname, state).await.ok()?;
+
+    // `finish_prove` only ever returns a `Bound` record (from `bound_record`,
+    // which requires a `client_id` to be `bound`) — safe to unwrap the
+    // invariant here.
+    let client_id = record.client_id.clone().unwrap_or_default();
+    Some((client_id, record, body_harnesses))
 }
 
+/// Handle a freshly-accepted socket whose first frame was `circuit/
+/// authenticate`: run [`authenticate_and_hello`], and — on success — hold
+/// the session loop until the body disconnects.
 pub async fn handle_authenticated<Snk, St>(
     sink: &mut Snk,
     stream: &mut St,
@@ -222,23 +215,11 @@ pub async fn handle_authenticated<Snk, St>(
     St: Stream<Item = Result<Message, WsError>> + Unpin,
 {
     let mut preauth_permit = preauth_permit;
-    let Some(record) = verify_and_authenticate(sink, id, &params, state, &deps).await else {
-        return;
-    };
-    let AuthDeps { registry, roster, peer, .. } = deps;
-    // `verify_and_authenticate` only ever returns a `Bound` record, which
-    // always carries a `client_id` (the `None` case above already refused
-    // and returned) — safe to unwrap the invariant here.
-    let client_id = record.client_id.clone().unwrap_or_default();
 
-    let ok = serde_json::to_value(holler_proto::AuthOk { ok: true }).unwrap_or_default();
-    if reply(sink, id, ok).await.is_err() {
+    let Some((client_id, record, body_harnesses)) =
+        authenticate_and_hello(sink, stream, id, &params, state, &deps).await
+    else {
         return;
-    }
-
-    let body_harnesses = match hello_exchange(sink, stream, &params.hostname).await {
-        Ok(harnesses) => harnesses,
-        Err(()) => return,
     };
     // Issue #184: the pre-auth phase (and this token's pre-auth-connection
     // slot) ends here — the hello exchange just completed, so this socket is
@@ -246,6 +227,8 @@ pub async fn handle_authenticated<Snk, St>(
     // slot for a fresh connection; the live session loop below can run
     // indefinitely without holding it.
     preauth_permit.take();
+
+    let AuthDeps { registry, roster, peer, .. } = deps;
 
     log(
         Severity::Info,
@@ -357,7 +340,7 @@ where
 /// body's hello carried none or failed to parse as a [`Hello`] (a body that
 /// sends a malformed `harnesses` field just gets nothing confirmed, never a
 /// reason to refuse the whole handshake here).
-async fn hello_exchange<Snk, St>(sink: &mut Snk, stream: &mut St, hostname: &str) -> Result<Vec<String>, ()>
+async fn hello_exchange<Snk, St>(sink: &mut Snk, stream: &mut St, hostname: &str, state: &HubState) -> Result<Vec<String>, ()>
 where
     Snk: Sink<Message, Error = WsError> + Unpin,
     St: Stream<Item = Result<Message, WsError>> + Unpin,
@@ -382,7 +365,12 @@ where
         .and_then(|h| h.harnesses)
         .unwrap_or_default();
 
-    let hub_hello = hub_hello_doc(hostname);
+    // Issue #322: the hub's identity keypair is resolved (generated on first
+    // use, else loaded) fresh per hello — cheap (a 32-byte file read) and
+    // guarantees a hub that somehow started without one still answers with a
+    // real key rather than silently omitting `hub_pubkey`.
+    let hub_pubkey = crate::identity::ensure(state).ok().map(|i| i.public_hex());
+    let hub_hello = hub_hello_doc(hostname, hub_pubkey);
     let result = serde_json::to_value(hub_hello).unwrap_or_default();
     reply(sink, Some(id), result).await?;
 
@@ -418,7 +406,9 @@ fn hub_hostname() -> String {
 }
 
 /// The hub's `circuit/hello` document answering the body's own hello.
-fn hub_hello_doc(_body_hostname: &str) -> Hello {
+/// `hub_pubkey` (issue #322) is the hub's X25519 static public key, hex —
+/// what a body pins at `body join` and compares here on every reconnect.
+fn hub_hello_doc(_body_hostname: &str, hub_pubkey: Option<String>) -> Hello {
     Hello {
         protocol: holler_proto::PROTOCOL_VERSION,
         protocol_min: holler_proto::PROTOCOL_MIN,
@@ -432,6 +422,7 @@ fn hub_hello_doc(_body_hostname: &str) -> Hello {
         harnesses_known: Some(Vec::new()),
         harnesses_confirmed: Some(Vec::new()),
         sessions: None,
+        hub_pubkey,
     }
 }
 
