@@ -46,7 +46,28 @@ use support::{join, mint_token, wait_for, write_sessions_toml, Body, Hub, StateD
 /// suite including this test cleanly — the mechanism itself is not the
 /// problem, shared-runner CPU headroom is. 8 is the new low end for
 /// GitHub-hosted; self-hosted is not budget-constrained the same way.
-const PEER_COUNT: usize = 8;
+///
+/// Reduced again, 8 -> 6, on 2026-09-12 (issue #296 follow-up, PR #313's own
+/// staggered-warm-up fix + 240s budget still wasn't enough on especially
+/// heavy concurrent-CI nights): this is deliberately the timeout/deadline
+/// constants left untouched (240s `warm_timeout`, 180s load-window bound
+/// below) — only concurrency drops, per explicit direction not to keep
+/// widening timeouts. Verified locally (10-core dev box) at `PEER_COUNT = 6`:
+/// a solo run passed cleanly, and a concurrent-copy stress repro (4 copies
+/// of this test binary launched at once, matching [`say_ready`]'s own
+/// concurrent-contention methodology, repeated across 4 trials = 16 copy
+/// runs) passed 15/16. The one failure (`say s4` timing out past 240s) was
+/// during the single heaviest-contention window of the session — another
+/// full `cargo test --workspace` run was compiling/executing concurrently on
+/// the same machine at the time — and is the same shared-CPU-starvation
+/// shape this whole reduction targets, not a reproducible logic defect;
+/// three other trials at the same concurrency were clean before and after
+/// it. Real CI on this PR is the authoritative result for the actual target
+/// `ubuntu-latest`/`macos-latest` matrix. 6 stays within issue #296's own
+/// bounded-scope intent (still "dozens" at the low end); 5 is the documented
+/// floor if further reduction is ever needed — do not go lower than 5
+/// without re-scoping #296 itself.
+const PEER_COUNT: usize = 6;
 
 /// `say` rounds each peer's session runs *after* warm-up, to prove sustained
 /// traffic under concurrency (not just a single first prompt each). Kept at 2
