@@ -180,6 +180,19 @@ The harness's *code* is already cross-OS at the seams (`#[cfg(unix)]` vs `#[cfg(
 
 This file does **not** cover the platform group's two manual, real-hardware cases — `hlr-1405`/`1406`, the cross-machine checkpoints (join/run/ping/roster/reconnect/revoke over a tailnet, and the say/interrupt/reprompt session checkpoints) tagged `test-tag-remote` — those are tracked separately in issue [#316](https://github.com/Performant-Labs/holler/issues/316) and are out of scope for `cargo test`.
 
+## Known upstream-blocked tests: `agent-client-protocol` lost-wakeup (issue #272)
+
+Four tests in this suite are permanently `#[ignore]`d — not because the behavior they check is wrong, but because they all depend on the same real, well-diagnosed bug in the upstream `agent-client-protocol` crate (a lost-wakeup in that crate's own task composition: the crashed child's stdout EOF never wakes the SDK's own crash-watcher task, so a driver never observes a mid-turn crash within any bounded time). [Issue #272](https://github.com/Performant-Labs/holler/issues/272) is the tracking record — it is the audit trail this table summarizes, not the other way around — and cross-references the upstream evidence: [`agentclientprotocol/rust-sdk` PR #261](https://github.com/agentclientprotocol/rust-sdk/pull/261) and issues [#250](https://github.com/agentclientprotocol/rust-sdk/issues/250)/[#254](https://github.com/agentclientprotocol/rust-sdk/issues/254). Per this repo's external-contribution policy, filing anything against that upstream repo needs a separate, explicit go-ahead that has not been given — do not do it without checking issue #272 first.
+
+| Test | Location |
+|---|---|
+| `crash_mid_turn_is_error_not_hang` | `crates/holler-cli/tests/acp_driver_crash_test.rs:171` (full investigation in this file's own module doc) |
+| `driver_crash_isolated_and_restarts_on_next_prompt` | `crates/holler-cli/tests/session_manager_test.rs:513` |
+| `driver_crash_in_one_session_does_not_affect_concurrent_sibling_session` | `crates/holler-cli/tests/session_manager_test.rs:756` |
+| `wait_fires_on_failed_when_stub_crashes` | `crates/holler-cli/tests/wait_test.rs:346` |
+
+Close #272 (and un-ignore all four) once either the upstream crate ships a fix, or a local mitigation inside `holler-body`/`holler-cli` lets them pass reliably without waiting on upstream. Before adding a *new* test with a hard dependency on this same crash-detection path, check this table first — it would just be a fifth flake/hang on the same already-tracked defect, not new information.
+
 ## Secrets are never in the logs
 
 The harness talks to real processes that (in CI, and in a real deployment) will have credentials — the hub's token store, ACP agent API keys, the GitHub token the runner uses. Two rules keep them out of the log:
