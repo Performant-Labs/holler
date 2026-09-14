@@ -218,6 +218,6 @@ several PRs.
     downloading and running the real thing is.
 
 For the actual checklist to run through each time (not just the narrative above), copy
-[the reusable, versionless **Release checklist (template)**](https://github.com/Performant-Labs/holler/issues/326)
-into a new issue titled `Release checklist: vX.Y.Z`, and fill in that copy. Don't check boxes on
-the template itself.
+[`docs/release-checklist-template.md`](release-checklist-template.md) into a new issue titled
+`Release checklist: vX.Y.Z`, and fill in that copy. Don't check boxes on the template file
+itself.
