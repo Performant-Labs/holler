@@ -153,6 +153,11 @@ pub struct Record {
     /// at `circuit/join`, never a secret. Present once bound (omitted from
     /// the wire shape when `None` — see `record_to_value`).
     pub body_pubkey: Option<String>,
+    /// The body's X25519 public key, hex-encoded (issue #337) — registered
+    /// at `circuit/join` alongside `body_pubkey`, never a secret. Plumbing
+    /// for the future Noise XK handshake (#338); not consumed yet. Present
+    /// once bound (omitted from the wire shape when `None`).
+    pub body_x25519_pubkey: Option<String>,
     /// The body's client id (`cli_<32hex>`). Present once bound.
     pub client_id: Option<String>,
     /// The body's hostname (redeem / live-credential path). Present once bound.
@@ -195,6 +200,9 @@ fn record_to_value(r: &Record) -> serde_json::Value {
     if let Some(k) = &r.body_pubkey {
         m.insert("body_pubkey".into(), serde_json::Value::String(k.clone()));
     }
+    if let Some(k) = &r.body_x25519_pubkey {
+        m.insert("body_x25519_pubkey".into(), serde_json::Value::String(k.clone()));
+    }
     if let Some(c) = &r.client_id {
         m.insert("client_id".into(), serde_json::Value::String(c.clone()));
     }
@@ -221,6 +229,7 @@ fn record_from_value(v: &serde_json::Value) -> Option<Record> {
         state: get("state").map(|s| parse_state(&s)).unwrap_or(TokenState::Unused),
         secret_hmac: get("secret_hmac")?,
         body_pubkey: get("body_pubkey"),
+        body_x25519_pubkey: get("body_x25519_pubkey"),
         client_id: get("client_id"),
         hostname: get("hostname"),
         bound_at: get_u64("bound_at"),
@@ -536,6 +545,7 @@ pub fn mint(label: &str, ttl_secs: u64, state: &HubState) -> Result<Minted, Toke
         state: TokenState::Unused,
         secret_hmac,
         body_pubkey: None,
+        body_x25519_pubkey: None,
         client_id: None,
         hostname: None,
         bound_at: None,
@@ -579,7 +589,8 @@ pub fn delete(token_id: &str, state: &HubState) -> Result<Record, TokenError> {
 /// `secret_hmac` in constant time.
 ///
 /// On success the token moves to `bound` (its `client_id`, `hostname`,
-/// `body_pubkey`, and `bound_at` are set) and the join secret is **consumed**
+/// `body_pubkey`, `body_x25519_pubkey`, and `bound_at` are set) and the join
+/// secret is **consumed**
 /// (a second redeem is [`RedeemError::AlreadyBound`]). Issue #323: the hub
 /// mints no credential — the returned `client_id` is all the body needs; it
 /// authenticates every later reconnect by proving possession of the private
@@ -598,6 +609,7 @@ pub fn redeem(
     secret: &str,
     hostname: &str,
     body_pubkey: &str,
+    body_x25519_pubkey: &str,
     state: &HubState,
 ) -> Result<String, RedeemError> {
     let _lock = match acquire_lock_retrying(state) {
@@ -632,6 +644,7 @@ pub fn redeem(
                     Err(_) => return Err(RedeemError::NotFound),
                 };
                 record.body_pubkey = Some(body_pubkey.to_string());
+                record.body_x25519_pubkey = Some(body_x25519_pubkey.to_string());
                 record.client_id = Some(client_id.clone());
                 record.hostname = Some(hostname.to_string());
                 record.bound_at = Some(now);
@@ -730,11 +743,13 @@ pub async fn redeem_async(
     secret: &str,
     hostname: &str,
     body_pubkey: &str,
+    body_x25519_pubkey: &str,
     state: &HubState,
 ) -> Result<String, RedeemError> {
-    let (secret, hostname, body_pubkey) = (secret.to_string(), hostname.to_string(), body_pubkey.to_string());
+    let (secret, hostname, body_pubkey, body_x25519_pubkey) =
+        (secret.to_string(), hostname.to_string(), body_pubkey.to_string(), body_x25519_pubkey.to_string());
     let state = state.clone();
-    tokio::task::spawn_blocking(move || redeem(&secret, &hostname, &body_pubkey, &state))
+    tokio::task::spawn_blocking(move || redeem(&secret, &hostname, &body_pubkey, &body_x25519_pubkey, &state))
         .await
         .unwrap_or(Err(RedeemError::NotFound))
 }

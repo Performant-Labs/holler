@@ -25,3 +25,4 @@ pub mod reply_coalescer;
 pub mod server_address;
 pub mod session_manager;
 pub mod status;
+pub mod x25519_identity;

@@ -54,7 +54,13 @@ fn mint_and_redeem(state: &StateDir, label: &str) -> (String, SigningKey) {
     let seed = label.bytes().fold(0u8, |a, b| a.wrapping_add(b)).wrapping_add(1);
     let signing_key = fresh_signing_key(seed);
     let body_pubkey = hex::encode(signing_key.verifying_key().to_bytes());
-    let client_id = holler_hub::token::redeem(&minted.secret, label, &body_pubkey, &hub_state)
+    // Issue #337: `circuit/join` also registers a distinct X25519 public key
+    // (plumbing for the future Noise XK handshake, #338) — not exercised by
+    // this file's authenticate/prove scenarios, so a deterministic
+    // well-formed placeholder derived from the same seed is enough.
+    let x25519_secret = x25519_dalek::StaticSecret::from([seed; 32]);
+    let body_x25519_pubkey = hex::encode(x25519_dalek::PublicKey::from(&x25519_secret).as_bytes());
+    let client_id = holler_hub::token::redeem(&minted.secret, label, &body_pubkey, &body_x25519_pubkey, &hub_state)
         .expect("redeem the just-minted token");
     let _ = client_id;
     (minted.record.token_id, signing_key)
