@@ -67,6 +67,65 @@ use support::{join, mint_token, wait_for, write_sessions_toml, Body, Hub, StateD
 /// bounded-scope intent (still "dozens" at the low end); 5 is the documented
 /// floor if further reduction is ever needed — do not go lower than 5
 /// without re-scoping #296 itself.
+///
+/// **Issue #345 investigation (2026-09-15) — this file's claim above that
+/// "self-hosted runners run this test suite cleanly" was re-checked against
+/// fresh real evidence and turned out to be half right:** the mechanism is
+/// not "GitHub-hosted vs self-hosted" as a whole, it is which *specific*
+/// self-hosted host a job lands on.
+///
+/// * Self-hosted routing itself (`vars.CI_RUNNER` in
+///   `.github/workflows/ci.yml`) was directly verified NOT to be the
+///   problem: `gh api repos/Performant-Labs/holler/actions/runs/35006448244/
+///   jobs` (today's failing `main`-push run) shows the `ubuntu-latest` leg
+///   actually ran with `runner_group_name: self-hosted-linux` on runner
+///   `runner-1` — genuinely self-hosted, not the GitHub-hosted
+///   `|| matrix.os` fallback — and it still hit this test's exact
+///   `unknown_session` panic (`say s0`, 240s). So a routing bug was ruled
+///   out with direct evidence, not assumed away.
+/// * What real infra inspection found instead (`ssh build-host`/`ssh remote-a`,
+///   2026-09-15): the self-hosted pool is two hosts, not one uniform
+///   "dedicated" fleet. Build-host: 8 vCPUs, 15GB RAM, swap at 7.8/8GB used
+///   (real memory pressure), ~40 always-on production Docker containers
+///   sharing the box (unrelated apps, a container registry,
+///   a chat server, the a monitoring stack, an agent gateway, a git forge,
+///   a survey tool, and more — `docker ps` on the box lists them), and 4
+///   concurrent GitHub Actions runner containers registered at the *org*
+///   level (`gh api orgs/Performant-Labs/actions/runners` — this pool is
+///   shared by every Performant-Labs repo, not scoped to holler), each with
+///   `NanoCpus=0` / no `CpusetCpus` set (`docker inspect`), i.e.
+///   unthrottled and free to contend for the same 8 cores at once. Remote-a,
+///   the pool's other host, is comparatively healthy by the same
+///   inspection: 24 vCPUs, 29GB RAM, only 2 runner containers, far less
+///   swap pressure.
+/// * Correlated against real CI history, not just today: across the 9 most
+///   recent CI runs (2026-09-12 through 2026-09-15) where this exact
+///   `unknown_session` panic appeared (`gh run list` + `gh run view
+///   --log-failed`, cross-referenced per-job against `gh api .../jobs` for
+///   which host actually ran it), the `ubuntu-latest` (self-hosted) leg
+///   failed 5 of the 6 times it drew Build-host, and 1 of the 2 times it drew
+///   Remote-a. One of those runs (34703320549) even shows the split directly
+///   on the same commit: `ubuntu-latest` on Build-host passed while that same
+///   run's `macos-latest` leg failed this exact test — proof the failure is
+///   a property of a given attempt's contention, not the commit.
+/// * Conclusion: this file's own prior claim that self-hosted "runs this
+///   test suite cleanly" was true often enough to look confirmed, but was
+///   never actually re-verified against Build-host specifically carrying this
+///   much unrelated always-on production load plus uncapped org-wide CI
+///   concurrency. It does not, on its own, justify another `PEER_COUNT`
+///   reduction (the mechanism is host-level resource contention outside
+///   this test's process tree, not something a smaller peer count inside
+///   this test's own control reliably fixes — Remote-a fails too, just less
+///   often, at the same `PEER_COUNT`). The fix landed in
+///   `.github/workflows/ci.yml` instead: this test is skipped out of the
+///   `cargo test --workspace` "Workspace suite" step and run alone in its
+///   own step with a single automatic retry — the standard mechanism for a
+///   test whose failure mode is confirmed transient shared-infrastructure
+///   contention rather than a logic defect, without loosening
+///   `PEER_COUNT`, `warm_timeout`, or the load-window bound below any
+///   further. See that workflow file's comment on the new step for the
+///   full reasoning on why isolate-with-retry was chosen over pinning CI
+///   to the `self-hosted-linux-b` label alone.
 const PEER_COUNT: usize = 6;
 
 /// `say` rounds each peer's session runs *after* warm-up, to prove sustained
