@@ -2,9 +2,20 @@ name: interop
 
 # Manual dispatch only (issue #193). This is the expensive, real-network,
 # cross-OS proof — a real hub on Linux talking to a real body on macOS over
-# a real public wss:// tunnel (a Cloudflare quick tunnel). It never runs on
-# push/pull_request. Whether to also fire it on a release tag is a later
-# decision (the issue's own spec note) — not made here.
+# a real public wss:// tunnel (a named Cloudflare tunnel on the org's own
+# account, updated 2026-09-15 — the original quick-tunnel design's ephemeral
+# hostnames and rate limits blocked a repeatable green run; see #193's
+# update comment). It never runs on push/pull_request. Whether to also fire
+# it on a release tag is a later decision (the issue's own spec note) — not
+# made here.
+#
+# Requires one-time setup on the Cloudflare account (see #193): a named
+# tunnel (`cloudflared tunnel create holler-interop`), a DNS route to it,
+# the tunnel's run-token in this repo's Actions secrets as CF_TUNNEL_TOKEN,
+# and the chosen hostname in this repo's Actions variables as
+# CF_INTEROP_HOST. Until CF_INTEROP_HOST is set, the preflight job below
+# skips linux-server and macos-client with a clear reason instead of
+# failing — this workflow is safe to leave wired up before that setup lands.
 on:
   workflow_dispatch:
     inputs:
@@ -45,13 +56,49 @@ env:
 
 jobs:
   # ---------------------------------------------------------------------
+  # preflight: a fast, always-run check of whether the named-tunnel setup
+  # (CF_INTEROP_HOST) exists yet. Both real jobs `needs: preflight` and gate
+  # on its output — this is a tiny (<10s), non-serializing dependency for
+  # both (they still start together immediately after it, so it does not
+  # reintroduce the linux-server/macos-client serialization macos-client's
+  # own comment below explains avoiding). Without this, an unset
+  # CF_INTEROP_HOST would just show both jobs as silently "Skipped" with no
+  # visible reason in the run summary.
+  # ---------------------------------------------------------------------
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      configured: ${{ steps.check.outputs.configured }}
+    steps:
+      - name: Check CF_INTEROP_HOST is configured
+        id: check
+        run: |
+          if [ -n "${{ vars.CF_INTEROP_HOST }}" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+            echo "Named Cloudflare tunnel host is configured: \`${{ vars.CF_INTEROP_HOST }}\`. Proceeding with linux-server and macos-client." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            {
+              echo "### interop workflow skipped"
+              echo "\`CF_INTEROP_HOST\` repo variable is not set — skipping \`linux-server\` and \`macos-client\`."
+              echo "See issue #193's 2026-09-15 update for the one-time Cloudflare setup: a named tunnel, its DNS route, the \`CF_TUNNEL_TOKEN\` secret, and this \`CF_INTEROP_HOST\` variable."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::notice::CF_INTEROP_HOST is unset; interop workflow's linux-server/macos-client jobs are skipped. See #193."
+          fi
+        shell: bash
+
+  # ---------------------------------------------------------------------
   # linux-server: builds the same `holler` binary, runs a real hub, fronts
-  # it with a real public wss:// (Cloudflare quick tunnel), mints a join
-  # token, hands both to macos-client via a workflow artifact (no `needs:`
-  # — see macos-client's own comment for why), then waits for the body to
-  # show up on the roster and drives it (`say` + `interrupt`).
+  # it with a real public wss:// (a named Cloudflare tunnel), mints a join
+  # token, hands both to macos-client via a workflow artifact (no direct
+  # `needs:` on macos-client — see macos-client's own comment for why),
+  # then waits for the body to show up on the roster and drives it (`say` +
+  # `interrupt`).
   # ---------------------------------------------------------------------
   linux-server:
+    needs: preflight
+    if: needs.preflight.outputs.configured == 'true'
     # workflow_dispatch is a manual, repo-scoped dispatch — fundamentally
     # different from `pull_request`, which is why ci.yml's fork gate
     # (`head.repo.full_name == github.repository`) does not need to be
@@ -139,25 +186,28 @@ jobs:
           }
         shell: bash
 
-      - name: Start Cloudflare quick tunnel
+      - name: Start named Cloudflare tunnel
+        env:
+          CF_TUNNEL_TOKEN: [REDACTED]
         run: |
-          nohup cloudflared tunnel --url http://127.0.0.1:41807 \
+          nohup cloudflared tunnel --token "$CF_TUNNEL_TOKEN" run holler-interop \
             > "$TUNNEL_LOG" 2>&1 &
           echo $! > tunnel.pid
-          # A quick tunnel is TLS-terminating at Cloudflare's edge, so the
-          # body on macOS dials a real public `wss://…trycloudflare.com:443`
-          # — not loopback, not plaintext.
+          # A named tunnel's hostname is the stable CF_INTEROP_HOST repo
+          # variable, already known — nothing to parse out of the log. Just
+          # wait for cloudflared's own readiness line (it is idempotent
+          # across runs: no re-provisioning per run, unlike the retired
+          # quick tunnel). Still TLS-terminating at Cloudflare's edge, so
+          # `hub serve` keeps binding plaintext to loopback unchanged.
           for _ in $(seq 1 150); do
-            grep -qoE 'https://[a-zA-Z0-9.-]+\.trycloudflare\.com' "$TUNNEL_LOG" 2>/dev/null && break
+            grep -q 'Registered tunnel connection' "$TUNNEL_LOG" 2>/dev/null && break
             sleep 0.2
           done
-          url=$(grep -oE 'https://[a-zA-Z0-9.-]+\.trycloudflare\.com' "$TUNNEL_LOG" | head -n1)
-          if [ -z "$url" ]; then
-            echo "::error::cloudflared never printed a trycloudflare.com URL"
+          grep -q 'Registered tunnel connection' "$TUNNEL_LOG" || {
+            echo "::error::cloudflared never reported a registered tunnel connection"
             cat "$TUNNEL_LOG"
             exit 1
-          fi
-          echo "tunnel_url=$url" >> "$GITHUB_OUTPUT"
+          }
         id: tunnel
         shell: bash
 
@@ -188,7 +238,6 @@ jobs:
           python3 -c '
           import json, os
           data = {
-              "tunnel_url": os.environ["TUNNEL_URL"],
               "token": os.environ["TOKEN"],
               "hub_pubkey": os.environ["HUB_PUBKEY"],
           }
@@ -196,7 +245,6 @@ jobs:
               json.dump(data, f)
           '
         env:
-          TUNNEL_URL: ${{ steps.tunnel.outputs.tunnel_url }}
           TOKEN: ${{ steps.mint.outputs.token }}
           HUB_PUBKEY: ${{ steps.mint.outputs.hub_pubkey }}
         shell: bash
@@ -284,16 +332,20 @@ jobs:
   # ---------------------------------------------------------------------
   # macos-client: builds the same checkout on a GitHub-hosted macOS runner,
   # then polls for the linux-server job's artifact instead of declaring
-  # `needs: linux-server`. `needs:` would serialize the two jobs (macos
-  # would not even start building until linux-server's entire job —
-  # including the roster wait, say, and interrupt — finished), which both
-  # defeats the point of proving concurrent cross-OS operation and adds
-  # minutes of dead time the macOS runner would spend idle. Instead this
-  # job starts immediately, builds in parallel with linux-server's hub/
-  # tunnel/token setup, and only blocks (via its own poll loop below) on
-  # the one real dependency: the artifact actually existing.
+  # `needs: linux-server`. A direct `needs: linux-server` would serialize
+  # the two jobs (macos would not even start building until linux-server's
+  # entire job — including the roster wait, say, and interrupt — finished),
+  # which both defeats the point of proving concurrent cross-OS operation
+  # and adds minutes of dead time the macOS runner would spend idle. It
+  # does `needs: preflight` (a <10s check, not linux-server) so both real
+  # jobs start together immediately afterward — that does not reintroduce
+  # the serialization problem this comment is about. Beyond that, this job
+  # only blocks (via its own poll loop below) on the one real dependency:
+  # the artifact actually existing.
   # ---------------------------------------------------------------------
   macos-client:
+    needs: preflight
+    if: needs.preflight.outputs.configured == 'true'
     runs-on: macos-latest
     timeout-minutes: 20
     steps:
@@ -356,13 +408,16 @@ jobs:
         id: join
         env:
           BAD_TOKEN: ${{ inputs.bad_token }}
+          CF_INTEROP_HOST: ${{ vars.CF_INTEROP_HOST }}
         run: |
-          tunnel_url=$(python3 -c 'import json; print(json.load(open("'"$HANDOFF_DIR"'/handoff.json"))["tunnel_url"])')
           token=$(python3 -c 'import json; print(json.load(open("'"$HANDOFF_DIR"'/handoff.json"))["token"])')
           hub_pubkey=$(python3 -c 'import json; print(json.load(open("'"$HANDOFF_DIR"'/handoff.json"))["hub_pubkey"])')
           echo "::add-mask::$token"
-          host=$(printf '%s' "$tunnel_url" | sed -E 's#^https?://##')
-          server="wss://${host}:443"
+          # The hostname is the stable CF_INTEROP_HOST repo variable, not
+          # parsed from the tunnel log — a named tunnel's hostname is known
+          # up front (unlike the retired quick tunnel's per-run
+          # trycloudflare.com hostname).
+          server="wss://${CF_INTEROP_HOST}:443"
           echo "server=$server" >> "$GITHUB_OUTPUT"
           # RED test (issue #193's "Tests first"): deliberately present a
           # well-formed but wrong secret, so this step is expected to fail —
