@@ -188,7 +188,7 @@ jobs:
 
       - name: Start named Cloudflare tunnel
         env:
-          CF_TUNNEL_TOKEN: [REDACTED]
+          CF_TUNNEL_TOKEN: ${{ secrets.CF_TUNNEL_TOKEN }}
         run: |
           nohup cloudflared tunnel --token "$CF_TUNNEL_TOKEN" run holler-interop \
             > "$TUNNEL_LOG" 2>&1 &
