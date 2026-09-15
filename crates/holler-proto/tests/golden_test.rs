@@ -221,7 +221,7 @@ fn docs_instances() -> Vec<(&'static str, Value)> {
         ("Update", serde_json::to_value(Update { session: "io/alpha".into(), prompt_id: id(), seq: 1, parts: vec![Part::text_part("AL")] }).unwrap()),
         ("Cancel", serde_json::to_value(Cancel { session: "io/alpha".into() }).unwrap()),
         ("CancelResult", serde_json::to_value(CancelResult { applied: true }).unwrap()),
-        ("Join", serde_json::to_value(Join { secret: "hlr_join_x".into(), hostname: "kiwi".into(), body_pubkey: "b".repeat(64) }).unwrap()),
+        ("Join", serde_json::to_value(Join { secret: "hlr_join_x".into(), hostname: "kiwi".into(), body_pubkey: "b".repeat(64), body_x25519_pubkey: "e".repeat(64) }).unwrap()),
         ("JoinResult", serde_json::to_value(JoinResult { client_id: "cli_19".into() }).unwrap()),
         ("Authenticate", serde_json::to_value(Authenticate { token_id: "tok_7f3a".into(), hostname: "kiwi".into(), advertised_url: "wss://hub.example.ts.net".into() }).unwrap()),
         ("AuthChallenge", serde_json::to_value(AuthChallenge { nonce: "c".repeat(64) }).unwrap()),

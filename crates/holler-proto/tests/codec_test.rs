@@ -28,8 +28,9 @@ fn canonical_frame(method: &str) -> String {
     let a2a_user = r#"{"messageId":"m-1","parts":[{"text":"hi"}],"role":"ROLE_USER"}"#;
     match method {
         "circuit/join" => format!(
-            r#"{{"jsonrpc":"2.0","id":"{id}","method":"circuit/join","params":{{"secret":"s3cr3t","hostname":"kiwi","body_pubkey":"{}"}}}}"#,
-            "b".repeat(64)
+            r#"{{"jsonrpc":"2.0","id":"{id}","method":"circuit/join","params":{{"secret":"s3cr3t","hostname":"kiwi","body_pubkey":"{}","body_x25519_pubkey":"{}"}}}}"#,
+            "b".repeat(64),
+            "e".repeat(64)
         ),
         "circuit/authenticate" => format!(
             r#"{{"jsonrpc":"2.0","id":"{id}","method":"circuit/authenticate","params":{{"token_id":"tok_7f3a","hostname":"kiwi","advertised_url":"wss://hub.example.ts.net"}}}}"#

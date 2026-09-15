@@ -2,6 +2,11 @@
 //! register the body's Ed25519 public key, reply `{client_id}` (issue #323:
 //! no credential is minted), and close the one-shot socket.
 //!
+//! Issue #337: the body also registers a second, distinct **X25519** public
+//! key (`body_x25519_pubkey`) alongside the Ed25519 one — plumbing for the
+//! future Noise XK handshake (#338); this module stores it against the token
+//! record but does not otherwise consume it.
+//!
 //! This is the hub's half of the body's `body join` bootstrap (story #176). It
 //! lives in its own module (out of `serve.rs`) so the `serve` lifecycle file
 //! stays under the 900-line lint budget while the join machinery grows. The
@@ -39,7 +44,11 @@ pub(crate) async fn redeem_join<S>(
         method: "circuit/join",
         id: None,
         peer: None,
-        fields: vec![("secret", holler_proto::REDACTED.to_string()), ("body_pubkey", params.body_pubkey.clone())],
+        fields: vec![
+            ("secret", holler_proto::REDACTED.to_string()),
+            ("body_pubkey", params.body_pubkey.clone()),
+            ("body_x25519_pubkey", params.body_x25519_pubkey.clone()),
+        ],
         frame: None,
     });
     if !is_valid_ed25519_pubkey_hex(&params.body_pubkey) {
@@ -47,7 +56,12 @@ pub(crate) async fn redeem_join<S>(
         crate::serve::close(sink).await;
         return;
     }
-    let outcome = crate::token::redeem_async(&params.secret, &params.hostname, &params.body_pubkey, state).await;
+    if !is_valid_x25519_pubkey_hex(&params.body_x25519_pubkey) {
+        crate::serve::send_error(sink, id, Code::InvalidParams, "body_x25519_pubkey must be 64 lowercase hex chars (a 32-byte X25519 public key)").await;
+        crate::serve::close(sink).await;
+        return;
+    }
+    let outcome = crate::token::redeem_async(&params.secret, &params.hostname, &params.body_pubkey, &params.body_x25519_pubkey, state).await;
     match outcome {
         // Success: echo the join request's id and the `{client_id}` result,
         // then close (docs §3).
@@ -84,6 +98,15 @@ fn is_valid_ed25519_pubkey_hex(s: &str) -> bool {
     let Ok(bytes) = hex::decode(s) else { return false };
     let Ok(arr) = <[u8; 32]>::try_from(bytes.as_slice()) else { return false };
     ed25519_dalek::VerifyingKey::from_bytes(&arr).is_ok()
+}
+
+/// Whether `s` is 64 lowercase hex chars (a 32-byte X25519 public key's
+/// shape). Unlike Ed25519, every 32-byte string is a well-formed Montgomery-
+/// form X25519 public key — there is no curve-membership check to make, only
+/// the shape check (the same convention `holler_body::join`'s own
+/// `is_valid_hex_pubkey` uses for the hub's pinned `--hub-key`, issue #322).
+fn is_valid_x25519_pubkey_hex(s: &str) -> bool {
+    s.len() == 64 && s.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
 }
 
 #[cfg(test)]
@@ -143,6 +166,14 @@ mod tests {
         hex::encode(signing_key.verifying_key().to_bytes())
     }
 
+    /// A well-formed X25519 public key, hex-encoded — what a body would send
+    /// as `Join::body_x25519_pubkey` (issue #337).
+    fn test_body_x25519_pubkey_hex(seed: u8) -> String {
+        let secret = x25519_dalek::StaticSecret::from([seed; 32]);
+        let public = x25519_dalek::PublicKey::from(&secret);
+        hex::encode(public.as_bytes())
+    }
+
     /// Issue #323's RED test: `redeem_join` against a freshly-minted, valid
     /// join secret registers the body's public key on the token record and
     /// replies with **only** `{client_id}` — no `credential` field exists on
@@ -156,12 +187,14 @@ mod tests {
         let state = HubState::from_root(dir.root.clone());
         let minted = crate::token::mint("kiwi", 3600, &state).expect("mint");
         let body_pubkey = test_body_pubkey_hex(7);
+        let body_x25519_pubkey = test_body_x25519_pubkey_hex(7);
 
         let (mut sink, sent) = recording_sink();
         let params = Join {
             secret: minted.secret.clone(),
             hostname: "myhost".to_string(),
             body_pubkey: body_pubkey.clone(),
+            body_x25519_pubkey: body_x25519_pubkey.clone(),
         };
         redeem_join(&mut sink, Some("b-req-1"), params, &state).await;
 
@@ -185,6 +218,7 @@ mod tests {
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].state, crate::token::TokenState::Bound);
         assert_eq!(records[0].body_pubkey.as_deref(), Some(body_pubkey.as_str()));
+        assert_eq!(records[0].body_x25519_pubkey.as_deref(), Some(body_x25519_pubkey.as_str()));
     }
 
     /// A malformed `body_pubkey` is `-32602 invalid_params`, before the store
@@ -200,6 +234,7 @@ mod tests {
             secret: minted.secret.clone(),
             hostname: "myhost".to_string(),
             body_pubkey: "not-hex".to_string(),
+            body_x25519_pubkey: test_body_x25519_pubkey_hex(9),
         };
         redeem_join(&mut sink, Some("b-req-3"), params, &state).await;
 
@@ -232,6 +267,7 @@ mod tests {
             secret: "hlr_join_0000000000000000000000000000000000000000000000000000000000000000".to_string(),
             hostname: "myhost".to_string(),
             body_pubkey: test_body_pubkey_hex(9),
+            body_x25519_pubkey: test_body_x25519_pubkey_hex(9),
         };
         redeem_join(&mut sink, Some("b-req-2"), params, &state).await;
 
@@ -245,5 +281,116 @@ mod tests {
         assert_eq!(id, Some("b-req-2".to_string()));
         assert_eq!(error.code, Code::JoinFailed.jsonrpc());
         assert!(frames[1].is_close());
+    }
+
+    /// Issue #337: a malformed `body_x25519_pubkey` is `-32602 invalid_params`
+    /// before the store is ever touched, mirroring the Ed25519 sibling check
+    /// above — the same defect class, checked for the new field too.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn malformed_x25519_pubkey_is_invalid_params_and_token_stays_unused() {
+        let dir = Tdir::new("badx25519key");
+        let state = HubState::from_root(dir.root.clone());
+        let minted = crate::token::mint("kiwi", 3600, &state).expect("mint");
+
+        let (mut sink, sent) = recording_sink();
+        let params = Join {
+            secret: minted.secret.clone(),
+            hostname: "myhost".to_string(),
+            body_pubkey: test_body_pubkey_hex(11),
+            body_x25519_pubkey: "not-hex".to_string(),
+        };
+        redeem_join(&mut sink, Some("b-req-4"), params, &state).await;
+
+        let frames = sent.lock().unwrap_or_else(|p| p.into_inner());
+        assert_eq!(frames.len(), 2, "an error frame, then a close frame: {frames:?}");
+        let text = frames[0].to_text().expect("first frame is text");
+        let env: Envelope = holler_proto::decode(text).expect("first frame decodes as an envelope");
+        let Envelope::Error { error, .. } = env else {
+            panic!("expected an Error envelope, got {env:?}");
+        };
+        assert_eq!(error.code, Code::InvalidParams.jsonrpc());
+
+        let records = crate::token::list(&state).expect("list");
+        assert_eq!(records[0].state, crate::token::TokenState::Unused, "a malformed X25519 pubkey must not consume the join secret");
+        assert!(records[0].body_x25519_pubkey.is_none(), "a rejected join must not register anything");
+    }
+
+    /// Issue #337's acceptance: "a test confirms the private key is never
+    /// present in any wire frame or log line". Generates a *real* body X25519
+    /// keypair (the same primitive `holler_body::x25519_identity` uses),
+    /// drives it through the real `redeem_join` path, and asserts the
+    /// private key's hex never appears in: the frames the hub actually sent
+    /// back over the wire, nor in the exact `circuit/join` debug-wire event
+    /// this module emits (rendered at every debug level/format, mirroring
+    /// `holler_hub::identity`'s `hub_private_key_never_appears_in_noisy_
+    /// debug_output` and `circuit::auth`'s `authenticate_is_challenge_
+    /// response_no_secret_on_wire`). Only the *public* key ever reaches
+    /// either surface — proven by construction, since `redeem_join` is only
+    /// ever handed the public half (`Join::body_x25519_pubkey`); the private
+    /// half stays local to this test, exactly as it would to the real body.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn redeem_join_never_exposes_body_x25519_private_key_on_wire_or_log() {
+        let dir = Tdir::new("nolog");
+        let state = HubState::from_root(dir.root.clone());
+        let minted = crate::token::mint("kiwi", 3600, &state).expect("mint");
+
+        // A real X25519 keypair — the private half never crosses into
+        // `Join` (which only has a `body_x25519_pubkey: String` field, a
+        // compile-time guarantee as much as a runtime one).
+        let secret = x25519_dalek::StaticSecret::from([13u8; 32]);
+        let secret_hex = hex::encode(secret.to_bytes());
+        let public_hex = hex::encode(x25519_dalek::PublicKey::from(&secret).as_bytes());
+
+        let (mut sink, sent) = recording_sink();
+        let params = Join {
+            secret: minted.secret.clone(),
+            hostname: "myhost".to_string(),
+            body_pubkey: test_body_pubkey_hex(13),
+            body_x25519_pubkey: public_hex.clone(),
+        };
+        redeem_join(&mut sink, Some("b-req-5"), params, &state).await;
+
+        // 1. Every wire frame the hub actually sent is free of the private key.
+        let frames = sent.lock().unwrap_or_else(|p| p.into_inner());
+        for frame in frames.iter() {
+            if let Ok(text) = frame.to_text() {
+                assert!(!text.contains(&secret_hex), "the X25519 private key must never appear in a wire frame: {text}");
+            }
+        }
+
+        // 2. The store holds only the public key.
+        let records = crate::token::list(&state).expect("list");
+        assert_eq!(records[0].body_x25519_pubkey.as_deref(), Some(public_hex.as_str()));
+        let stored = serde_json::to_string(&records[0].body_x25519_pubkey).unwrap_or_default();
+        assert!(!stored.contains(&secret_hex), "the store must never hold the private key");
+
+        // 3. The exact `circuit/join` debug-wire event this module emits
+        //    (this file's own `holler_proto::emit(...)` call, replicated
+        //    here field-for-field) never carries the private key at any
+        //    debug level/format.
+        let event = holler_proto::Event {
+            component: holler_proto::Component::Wire,
+            severity: holler_proto::Severity::Debug,
+            direction: holler_proto::LogDirection::In,
+            method: "circuit/join",
+            id: None,
+            peer: None,
+            fields: vec![
+                ("secret", holler_proto::REDACTED.to_string()),
+                ("body_pubkey", test_body_pubkey_hex(13)),
+                ("body_x25519_pubkey", public_hex.clone()),
+            ],
+            frame: None,
+        };
+        for debug in [holler_proto::log::DebugLevel::None, holler_proto::log::DebugLevel::Quiet, holler_proto::log::DebugLevel::Noisy] {
+            for format in [holler_proto::log::LogFormat::Text, holler_proto::log::LogFormat::Json] {
+                let config = holler_proto::log::Config { debug, format };
+                let rendered = event.render(&config);
+                assert!(
+                    !rendered.contains(&secret_hex),
+                    "the X25519 private key must never appear in a rendered log line (debug={debug:?}, format={format:?}): {rendered}"
+                );
+            }
+        }
     }
 }
