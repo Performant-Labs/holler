@@ -216,6 +216,7 @@ fn verify_signature(pubkey_hex: &str, transcript: &[u8], signature_hex: &str) ->
 mod tests {
     use super::verify_signature;
     use ed25519_dalek::{Signer, SigningKey};
+    use holler_proto::{AuthChallenge, Authenticate, Prove};
 
     fn keypair(seed: u8) -> SigningKey {
         SigningKey::from_bytes(&[seed; 32])
@@ -251,6 +252,105 @@ mod tests {
         assert!(
             !verify_signature(&pubkey_hex, &real_transcript, &hex::encode(sig_wrong_role.to_bytes())),
             "a signature over a mismatched role must not verify against the real transcript"
+        );
+    }
+
+    /// Issue #323's `authenticate_is_challenge_response_no_secret_on_wire`:
+    /// serialize the actual `circuit/authenticate` → `circuit/prove` wire
+    /// frames — the body's `Authenticate` request, the hub's `AuthChallenge`
+    /// result, and the body's `Prove` reply — with real (non-mock) values: a
+    /// nonce drawn from [`random_nonce`] and a genuine Ed25519 signature over
+    /// the real [`holler_proto::transcript::build`] transcript. None of the
+    /// three frames may carry a field or a string value shaped like a bearer
+    /// secret/credential. This uses the same `key_is_secret`/`value_is_secret`
+    /// gate `holler_proto::log`'s wire-frame redactor uses to decide what must
+    /// never reach a debug log (mirroring how
+    /// `hub_store_contains_no_secret_material_for_a_bound_token`,
+    /// `token_store_test.rs`, checks the store record for a `credential` key)
+    /// — applied here to the frames themselves, live, not just "the struct
+    /// definition has no `credential` field" by inspection.
+    #[test]
+    fn authenticate_is_challenge_response_no_secret_on_wire() {
+        let authenticate = Authenticate {
+            token_id: "tok_1".into(),
+            hostname: "kiwi".into(),
+            advertised_url: "wss://hub".into(),
+        };
+
+        // This module denies `unwrap`/`expect`/`panic!` (its other tests
+        // never need them, so there is no blanket allow attribute on this
+        // `mod tests`, unlike `join.rs`'s) — every fallible step below is
+        // surfaced through `assert!` instead, with `unwrap_or_default`
+        // supplying a harmless placeholder for the (never-taken, in a
+        // passing run) failure path.
+        let nonce_result = super::random_nonce();
+        assert!(nonce_result.is_ok(), "draw a real challenge nonce: {nonce_result:?}");
+        let nonce_hex = hex::encode(nonce_result.unwrap_or_default());
+        let challenge = AuthChallenge { nonce: nonce_hex.clone() };
+
+        let signing_key = keypair(7);
+        let transcript = holler_proto::transcript::build(
+            holler_proto::PROTOCOL_VERSION,
+            "body",
+            &nonce_hex,
+            &authenticate.token_id,
+            &authenticate.advertised_url,
+        );
+        let signature = signing_key.sign(&transcript);
+        let prove = Prove { token_id: authenticate.token_id.clone(), signature: hex::encode(signature.to_bytes()) };
+
+        let raw_frames = [
+            ("circuit/authenticate params", serde_json::to_value(&authenticate)),
+            ("circuit/authenticate result", serde_json::to_value(&challenge)),
+            ("circuit/prove params", serde_json::to_value(&prove)),
+        ];
+        for (name, result) in raw_frames {
+            assert!(result.is_ok(), "{name} failed to serialize: {result:?}");
+            let wire = result.unwrap_or_default();
+            let obj = wire.as_object();
+            assert!(obj.is_some(), "{name} did not serialize as a JSON object: {wire}");
+            let obj = obj.cloned().unwrap_or_default();
+            assert!(!obj.is_empty(), "{name} serialized to an empty object");
+            for (key, value) in &obj {
+                assert!(!holler_proto::key_is_secret(key), "{name} carries a secret-shaped field {key:?}");
+                if let Some(s) = value.as_str() {
+                    assert!(!holler_proto::value_is_secret(s), "{name}.{key} looks like a bearer token: {s:?}");
+                }
+            }
+        }
+    }
+
+    /// Issue #323's `replayed_proof_from_a_different_nonce_is_rejected`: a
+    /// signature that is valid over one challenge's transcript (nonce 1) must
+    /// be rejected when replayed against a *second*, later challenge minted
+    /// for the same token/client (nonce 2). This is distinct from
+    /// [`proof_bound_to_transcript_rejects_role_or_version_mismatch`] above,
+    /// which fixes the transcript and varies role/version — here the
+    /// transcript's only difference is the nonce, proving that nonce
+    /// freshness alone (not merely role/version binding) defeats replay of a
+    /// previously-valid proof.
+    #[test]
+    fn replayed_proof_from_a_different_nonce_is_rejected() {
+        let signing_key = keypair(9);
+        let pubkey_hex = hex::encode(signing_key.verifying_key().to_bytes());
+
+        // Cycle 1: a genuine, successful challenge/prove.
+        let first_transcript = holler_proto::transcript::build(2, "body", "aaaaaaaa", "tok_1", "wss://hub");
+        let first_signature = signing_key.sign(&first_transcript);
+        assert!(
+            verify_signature(&pubkey_hex, &first_transcript, &hex::encode(first_signature.to_bytes())),
+            "sanity: the first proof verifies against its own (first) transcript"
+        );
+
+        // Cycle 2: a fresh challenge for the same token/client mints a new nonce.
+        let second_transcript = holler_proto::transcript::build(2, "body", "bbbbbbbb", "tok_1", "wss://hub");
+
+        // Replaying cycle 1's signature against cycle 2's transcript must fail
+        // — a captured proof from one connection attempt is useless against a
+        // later one, because each attempt's nonce is unique and never reused.
+        assert!(
+            !verify_signature(&pubkey_hex, &second_transcript, &hex::encode(first_signature.to_bytes())),
+            "a proof signed over an earlier nonce must not verify against a later challenge's transcript"
         );
     }
 
