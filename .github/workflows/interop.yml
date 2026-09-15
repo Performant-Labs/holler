@@ -2,20 +2,19 @@ name: interop
 
 # Manual dispatch only (issue #193). This is the expensive, real-network,
 # cross-OS proof — a real hub on Linux talking to a real body on macOS over
-# a real public wss:// tunnel (a named Cloudflare tunnel on the org's own
-# account, updated 2026-09-15 — the original quick-tunnel design's ephemeral
-# hostnames and rate limits blocked a repeatable green run; see #193's
-# update comment). It never runs on push/pull_request. Whether to also fire
-# it on a release tag is a later decision (the issue's own spec note) — not
-# made here.
+# a real public wss:// tunnel (a reserved ngrok domain on the org's own
+# account, updated 2026-09-15 — switched from the named-Cloudflare-tunnel
+# design). It never runs on push/pull_request. Whether to also fire it on a
+# release tag is a later decision (the issue's own spec note) — not made
+# here.
 #
-# Requires one-time setup on the Cloudflare account (see #193): a named
-# tunnel (`cloudflared tunnel create holler-interop`), a DNS route to it,
-# the tunnel's run-token in this repo's Actions secrets as CF_TUNNEL_TOKEN,
-# and the chosen hostname in this repo's Actions variables as
-# CF_INTEROP_HOST. Until CF_INTEROP_HOST is set, the preflight job below
-# skips linux-server and macos-client with a clear reason instead of
-# failing — this workflow is safe to leave wired up before that setup lands.
+# The reserved domain (unburned-pseudorhombohedral-cooper.ngrok-free.dev)
+# already exists on the org's ngrok account, so it's hardcoded below rather
+# than a repo variable — nothing to configure per-repo. The one remaining
+# one-time setup is the account's auth token in this repo's Actions secrets
+# as NGROK_AUTHTOKEN. Until that's set, the preflight job below skips
+# linux-server and macos-client with a clear reason instead of failing —
+# this workflow is safe to leave wired up before that setup lands.
 on:
   workflow_dispatch:
     inputs:
@@ -50,20 +49,22 @@ env:
   # 64-hex-char (32-byte) value with no other significance.
   HOLLER_PEPPER: "613d5644c6141386306f56cf1a91cbe7fbe09f17f8be0cc76e461df6a3cef887"
   HOLLER_STATE_DIR: ${{ github.workspace }}/.holler-state
-  TUNNEL_LOG: ${{ github.workspace }}/cloudflared.log
+  TUNNEL_LOG: ${{ github.workspace }}/ngrok.log
   HUB_LOG: ${{ github.workspace }}/hub.log
   HANDOFF_DIR: ${{ github.workspace }}/interop-handoff
 
 jobs:
   # ---------------------------------------------------------------------
-  # preflight: a fast, always-run check of whether the named-tunnel setup
-  # (CF_INTEROP_HOST) exists yet. Both real jobs `needs: preflight` and gate
-  # on its output — this is a tiny (<10s), non-serializing dependency for
-  # both (they still start together immediately after it, so it does not
-  # reintroduce the linux-server/macos-client serialization macos-client's
-  # own comment below explains avoiding). Without this, an unset
-  # CF_INTEROP_HOST would just show both jobs as silently "Skipped" with no
-  # visible reason in the run summary.
+  # preflight: a fast, always-run check of whether NGROK_AUTHTOKEN exists
+  # yet — the reserved domain itself is a fixed, already-provisioned value
+  # (hardcoded below), so this secret is the only remaining one-time-setup
+  # gap. Both real jobs `needs: preflight` and gate on its output — this is
+  # a tiny (<10s), non-serializing dependency for both (they still start
+  # together immediately after it, so it does not reintroduce the
+  # linux-server/macos-client serialization macos-client's own comment
+  # below explains avoiding). Without this, a missing NGROK_AUTHTOKEN would
+  # just show both jobs as silently "Skipped" with no visible reason in the
+  # run summary.
   # ---------------------------------------------------------------------
   preflight:
     runs-on: ubuntu-latest
@@ -71,26 +72,28 @@ jobs:
     outputs:
       configured: ${{ steps.check.outputs.configured }}
     steps:
-      - name: Check CF_INTEROP_HOST is configured
+      - name: Check NGROK_AUTHTOKEN is configured
         id: check
+        env:
+          NGROK_AUTHTOKEN: ${{ secrets.NGROK_AUTHTOKEN }}
         run: |
-          if [ -n "${{ vars.CF_INTEROP_HOST }}" ]; then
+          if [ -n "$NGROK_AUTHTOKEN" ]; then
             echo "configured=true" >> "$GITHUB_OUTPUT"
-            echo "Named Cloudflare tunnel host is configured: \`${{ vars.CF_INTEROP_HOST }}\`. Proceeding with linux-server and macos-client." >> "$GITHUB_STEP_SUMMARY"
+            echo "NGROK_AUTHTOKEN is configured. Proceeding with linux-server and macos-client." >> "$GITHUB_STEP_SUMMARY"
           else
             echo "configured=false" >> "$GITHUB_OUTPUT"
             {
               echo "### interop workflow skipped"
-              echo "\`CF_INTEROP_HOST\` repo variable is not set — skipping \`linux-server\` and \`macos-client\`."
-              echo "See issue #193's 2026-09-15 update for the one-time Cloudflare setup: a named tunnel, its DNS route, the \`CF_TUNNEL_TOKEN\` secret, and this \`CF_INTEROP_HOST\` variable."
+              echo "\`NGROK_AUTHTOKEN\` repo secret is not set — skipping \`linux-server\` and \`macos-client\`."
+              echo "See issue #193's 2026-09-15 update for the one-time ngrok setup: the reserved domain is already provisioned (unburned-pseudorhombohedral-cooper.ngrok-free.dev); only the \`NGROK_AUTHTOKEN\` secret remains."
             } >> "$GITHUB_STEP_SUMMARY"
-            echo "::notice::CF_INTEROP_HOST is unset; interop workflow's linux-server/macos-client jobs are skipped. See #193."
+            echo "::notice::NGROK_AUTHTOKEN is unset; interop workflow's linux-server/macos-client jobs are skipped. See #193."
           fi
         shell: bash
 
   # ---------------------------------------------------------------------
   # linux-server: builds the same `holler` binary, runs a real hub, fronts
-  # it with a real public wss:// (a named Cloudflare tunnel), mints a join
+  # it with a real public wss:// (a reserved ngrok tunnel), mints a join
   # token, hands both to macos-client via a workflow artifact (no direct
   # `needs:` on macos-client — see macos-client's own comment for why),
   # then waits for the body to show up on the roster and drives it (`say` +
@@ -153,20 +156,21 @@ jobs:
         run: cargo build --release -p holler-cli
         shell: bash
 
-      # cloudflared is not preinstalled on either GitHub-hosted `ubuntu-latest`
-      # or the self-hosted `runner` image; install the official static
-      # binary directly (no apt repo pin to maintain). Guarded the same
-      # if-missing way as the Rust bootstrap above, so a future image that
-      # does bundle it skips straight past this step.
-      - name: Install cloudflared (if missing)
+      # ngrok is not preinstalled on either GitHub-hosted `ubuntu-latest` or
+      # the self-hosted `runner` image. Using the direct-download tarball
+      # (ngrok's own S3 bucket) over the apt-repo route (also valid — see
+      # #193 — but slower and carries a repo pin to maintain) to match the
+      # cloudflared/rustup if-missing pattern already established in this
+      # file. Guarded the same way, so a future image that does bundle it
+      # skips straight past this step.
+      - name: Install ngrok (if missing)
         run: |
-          if ! command -v cloudflared >/dev/null 2>&1; then
-            curl -L --output /tmp/cloudflared \
-              https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
-            chmod +x /tmp/cloudflared
-            sudo mv /tmp/cloudflared /usr/local/bin/cloudflared
+          if ! command -v ngrok >/dev/null 2>&1; then
+            curl -sSLo /tmp/ngrok.tgz \
+              "https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.tgz"
+            sudo tar -xzf /tmp/ngrok.tgz -C /usr/local/bin
           fi
-          cloudflared --version
+          ngrok version
         shell: bash
 
       - name: Start hub
@@ -186,25 +190,25 @@ jobs:
           }
         shell: bash
 
-      - name: Start named Cloudflare tunnel
-        env:
-          CF_TUNNEL_TOKEN: ${{ secrets.CF_TUNNEL_TOKEN }}
+      - name: Start reserved ngrok tunnel
         run: |
-          nohup cloudflared tunnel --token "$CF_TUNNEL_TOKEN" run holler-interop \
+          nohup ngrok http --authtoken "${{ secrets.NGROK_AUTHTOKEN }}" \
+            --url https://unburned-pseudorhombohedral-cooper.ngrok-free.dev 41807 \
             > "$TUNNEL_LOG" 2>&1 &
           echo $! > tunnel.pid
-          # A named tunnel's hostname is the stable CF_INTEROP_HOST repo
-          # variable, already known — nothing to parse out of the log. Just
-          # wait for cloudflared's own readiness line (it is idempotent
-          # across runs: no re-provisioning per run, unlike the retired
-          # quick tunnel). Still TLS-terminating at Cloudflare's edge, so
-          # `hub serve` keeps binding plaintext to loopback unchanged.
+          # The reserved domain is fixed/hardcoded (see this file's header
+          # comment) — nothing to parse out of the log. Poll ngrok's own
+          # local inspection API (a documented, stable interface) for
+          # readiness rather than grepping log text, whose format has
+          # changed across ngrok versions. Still TLS-terminating at ngrok's
+          # edge, so `hub serve` keeps binding plaintext to loopback
+          # unchanged.
           for _ in $(seq 1 150); do
-            grep -q 'Registered tunnel connection' "$TUNNEL_LOG" 2>/dev/null && break
+            curl -sf http://127.0.0.1:4040/api/tunnels 2>/dev/null | grep -q '"public_url"' && break
             sleep 0.2
           done
-          grep -q 'Registered tunnel connection' "$TUNNEL_LOG" || {
-            echo "::error::cloudflared never reported a registered tunnel connection"
+          curl -sf http://127.0.0.1:4040/api/tunnels 2>/dev/null | grep -q '"public_url"' || {
+            echo "::error::ngrok never reported an active tunnel on its local API"
             cat "$TUNNEL_LOG"
             exit 1
           }
@@ -326,7 +330,7 @@ jobs:
         if: always()
         run: |
           echo "::group::hub.log"; cat "$HUB_LOG" 2>/dev/null || true; echo "::endgroup::"
-          echo "::group::cloudflared.log"; cat "$TUNNEL_LOG" 2>/dev/null || true; echo "::endgroup::"
+          echo "::group::ngrok.log"; cat "$TUNNEL_LOG" 2>/dev/null || true; echo "::endgroup::"
         shell: bash
 
   # ---------------------------------------------------------------------
@@ -408,16 +412,14 @@ jobs:
         id: join
         env:
           BAD_TOKEN: ${{ inputs.bad_token }}
-          CF_INTEROP_HOST: ${{ vars.CF_INTEROP_HOST }}
         run: |
           token=$(python3 -c 'import json; print(json.load(open("'"$HANDOFF_DIR"'/handoff.json"))["token"])')
           hub_pubkey=$(python3 -c 'import json; print(json.load(open("'"$HANDOFF_DIR"'/handoff.json"))["hub_pubkey"])')
           echo "::add-mask::$token"
-          # The hostname is the stable CF_INTEROP_HOST repo variable, not
-          # parsed from the tunnel log — a named tunnel's hostname is known
-          # up front (unlike the retired quick tunnel's per-run
-          # trycloudflare.com hostname).
-          server="wss://${CF_INTEROP_HOST}:443"
+          # The reserved domain is fixed/hardcoded (see this file's header
+          # comment) — no repo variable needed, nothing parsed from the
+          # tunnel log.
+          server="wss://unburned-pseudorhombohedral-cooper.ngrok-free.dev:443"
           echo "server=$server" >> "$GITHUB_OUTPUT"
           # RED test (issue #193's "Tests first"): deliberately present a
           # well-formed but wrong secret, so this step is expected to fail —
