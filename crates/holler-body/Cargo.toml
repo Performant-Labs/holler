@@ -41,6 +41,11 @@ getrandom = { workspace = true }
 # (public half only) at `circuit/join`; the private half never leaves the
 # body. Signs the `circuit/authenticate` → `circuit/prove` challenge.
 ed25519-dalek = { workspace = true }
+# Issue #337: the body's own long-lived X25519 static keypair (plumbing for
+# the future Noise XK handshake, #338) — registered (public half only) at
+# `circuit/join`, alongside the existing Ed25519 signing key. Mirrors the
+# hub's own #322 identity, which already depends on this crate.
+x25519-dalek = { workspace = true }
 # hex: encodes the body's Ed25519 public key / signature and decodes the
 # hub's pinned X25519 public key (issue #322) on the wire.
 hex = { workspace = true }
