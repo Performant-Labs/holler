@@ -303,12 +303,22 @@ fn wait_fires_on_gone_when_body_detaches() {
     // sweep's own interval) the same way `roster_sweep_wireup_test.rs` does,
     // rather than expecting an immediate transition a hard kill no longer
     // produces.
+    //
+    // Issue #333: the sweep's clock (`roster.rs::now_secs`) is whole-second
+    // (`SystemTime::as_secs()`), and `reconnect_secs`/`gone_secs` truncate
+    // their `_MS` env var to whole seconds too — so a 1000ms threshold has
+    // an effective floor as low as ~0ms whenever `last_seen` lands just
+    // before a wall-clock second boundary (age reads `1` the instant the
+    // clock ticks over, real elapsed time notwithstanding). That raced the
+    // 300ms "still connected" assertion below and could reach `gone` before
+    // the kill even ran. 3000ms leaves a full 2s of margin over that ≤1s
+    // rounding error, which the 300ms assertion window can't touch.
     let hub = Hub::start_with_env(
         &hub_state,
         &[
             ("HOLLER_ROSTER_SWEEP_MS", "200"),
-            ("HOLLER_ROSTER_RECONNECT_MS", "1000"),
-            ("HOLLER_ROSTER_GONE_MS", "1000"),
+            ("HOLLER_ROSTER_RECONNECT_MS", "3000"),
+            ("HOLLER_ROSTER_GONE_MS", "3000"),
         ],
     );
     let mut body = start_body(&hub_state, &body_state, &hub, &[("alpha", &["--chunks", "1"])]);
