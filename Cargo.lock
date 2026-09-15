@@ -1052,6 +1052,7 @@ dependencies = [
  "tokio",
  "tokio-tungstenite",
  "toml",
+ "x25519-dalek",
 ]
 
 [[package]]
@@ -1078,6 +1079,7 @@ dependencies = [
  "tokio-rustls",
  "tokio-tungstenite",
  "toml",
+ "x25519-dalek",
 ]
 
 [[package]]

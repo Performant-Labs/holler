@@ -337,6 +337,10 @@ futures-util = { workspace = true }  # hub_serve_test Sink/Stream traits
 # transcript itself rather than through a `holler_body` process.
 ed25519-dalek = { workspace = true }
 hex = { workspace = true }
+# hub_hygiene_test.rs's in-process `mint_and_redeem` also registers the body's
+# X25519 public key (issue #337) alongside the Ed25519 one, via
+# `holler_hub::token::redeem` directly.
+x25519-dalek = { workspace = true }
 # Issue #315 (platform_test.rs's self_signed_wss_fails_closed): generates a
 # throwaway local self-signed cert so the test can stand up a TLS-terminating
 # listener and assert `body join --server wss://…` fails closed against it

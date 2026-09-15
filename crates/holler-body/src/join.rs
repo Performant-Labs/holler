@@ -5,9 +5,17 @@
 //!
 //! The flow is the protocol's one-shot bootstrap (docs §3): the body opens a
 //! **fresh** WebSocket, sends **one** `circuit/join` request (`{secret,
-//! hostname, body_pubkey}`), and awaits **one** response — the hub's
-//! `{client_id}` (issue #323: no credential is minted) — after which the hub
-//! **closes the socket**. Join never leads into talk on the same socket.
+//! hostname, body_pubkey, body_x25519_pubkey}`), and awaits **one**
+//! response — the hub's `{client_id}` (issue #323: no credential is minted)
+//! — after which the hub **closes the socket**. Join never leads into talk
+//! on the same socket.
+//!
+//! Issue #337: `body_x25519_pubkey` is a second, distinct long-lived public
+//! key — plumbing for the future Noise XK handshake (#338). Unlike
+//! `body_pubkey` (a fresh Ed25519 keypair every join, tied to this
+//! pairing), the X25519 keypair is a per-device identity
+//! (`crate::x25519_identity`): generated once, persisted `0600`, and loaded
+//! back unchanged on every later call.
 //!
 //! `--hub-key` is never sent to the hub or checked against anything the wire
 //! says during join itself — it is the out-of-band pin, taken verbatim from
@@ -138,6 +146,26 @@ fn is_valid_hex_pubkey(s: &str) -> bool {
     s.len() == 64 && s.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
 }
 
+/// Issue #337: this body's own long-lived X25519 static keypair — plumbing
+/// for the future Noise XK handshake (#338). Unlike the Ed25519 signing key
+/// `connect_and_join` mints fresh every join (tied to this pairing), this is
+/// a per-device identity: `ensure` loads it back unchanged if a previous
+/// join (or any other prior use) already generated it, and only
+/// generates+persists (0600) on the very first call. The private half never
+/// leaves this process — only the returned public hex is ever sent, in
+/// `Join::body_x25519_pubkey`. Split out of `connect_and_join` to keep it
+/// under clippy's line budget.
+fn resolve_x25519_pubkey(state_root: &std::path::Path) -> Result<String, JoinExit> {
+    match crate::x25519_identity::ensure(state_root) {
+        Ok(identity) => Ok(identity.public_hex()),
+        Err(e) => {
+            let e = JoinError::Io(format!("could not resolve the X25519 identity: {e}"));
+            eprintln!("error: {}", e.message());
+            Err(JoinExit::Refused(e))
+        }
+    }
+}
+
 /// Connect to `url`, send the `circuit/join` request (registering this
 /// body's freshly-generated Ed25519 public key), await the (single) response,
 /// and — on success — persist the identity (including the pinned hub key).
@@ -178,6 +206,11 @@ async fn connect_and_join(
     let signing_key_hex = hex::encode(signing_key_bytes);
     let body_pubkey = hex::encode(signing_key.verifying_key().to_bytes());
 
+    let body_x25519_pubkey = match resolve_x25519_pubkey(state_root) {
+        Ok(pubkey) => pubkey,
+        Err(exit) => return exit,
+    };
+
     let ws = match connect_async(url).await {
         Ok((ws, _)) => ws,
         Err(e) => {
@@ -193,6 +226,7 @@ async fn connect_and_join(
         secret: secret.to_string(),
         hostname: hostname.to_string(),
         body_pubkey,
+        body_x25519_pubkey,
     }) {
         Ok(p) => p,
         Err(e) => {

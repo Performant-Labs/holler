@@ -714,6 +714,15 @@ pub struct AnswerResult {
 /// Issue #323: the body registers its own long-lived **public** key at join
 /// instead of receiving a bearer credential back — the private half never
 /// leaves the body (generated and persisted locally, `holler_body::identity`).
+///
+/// Issue #337: the body additionally registers a **second, distinct**
+/// long-lived public key, `body_x25519_pubkey` — plumbing for the future
+/// Noise XK handshake (#338). `body_pubkey` (Ed25519) and `body_x25519_
+/// pubkey` (X25519) serve different purposes and are not interchangeable:
+/// Ed25519 signs the `circuit/authenticate` → `circuit/prove` proof of
+/// possession; X25519 is Noise XK's static DH key. Both are generated and
+/// persisted locally (`holler_body::identity` / `holler_body::
+/// x25519_identity`); neither private half ever leaves the body.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Join {
@@ -724,6 +733,11 @@ pub struct Join {
     /// The body's Ed25519 public key, hex-encoded (32 bytes). Stored against
     /// the token; used to verify every later `circuit/prove`.
     pub body_pubkey: String,
+    /// The body's X25519 public key, hex-encoded (32 bytes; issue #337).
+    /// Stored against the token; the future Noise XK handshake (#338) will
+    /// use it as this body's static DH identity. Distinct from `body_pubkey`
+    /// above — an Ed25519 signing key cannot perform a Diffie-Hellman.
+    pub body_x25519_pubkey: String,
 }
 
 /// The `result` of `circuit/join` — `{client_id}`; the hub then **closes the
