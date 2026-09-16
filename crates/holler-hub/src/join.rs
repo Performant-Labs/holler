@@ -3,9 +3,9 @@
 //! no credential is minted), and close the one-shot socket.
 //!
 //! Issue #337: the body also registers a second, distinct **X25519** public
-//! key (`body_x25519_pubkey`) alongside the Ed25519 one — plumbing for the
-//! future Noise XK handshake (#338); this module stores it against the token
-//! record but does not otherwise consume it.
+//! key (`body_x25519_pubkey`) alongside the Ed25519 one — this body's Noise
+//! XK static identity (issue #338, `circuit::auth`); this module stores it
+//! against the token record but does not otherwise consume it.
 //!
 //! This is the hub's half of the body's `body join` bootstrap (story #176). It
 //! lives in its own module (out of `serve.rs`) so the `serve` lifecycle file

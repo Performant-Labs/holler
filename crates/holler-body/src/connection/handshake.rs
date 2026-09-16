@@ -1,11 +1,21 @@
-//! The `circuit/authenticate` → `circuit/prove` challenge-response (issue
-//! #323) and the bidirectional `circuit/hello` exchange with hub-key pinning
-//! (issue #322): split out of `connection.rs` proper once this file's own
-//! growth pushed it past the workspace's 900-line build guard
-//! (`scripts/lint.sh` check 4) — a pure relocation, no behavior change of
-//! its own. Mirrors this crate's own `connection/session_dispatch.rs` split,
-//! and `holler-hub`'s `circuit/auth.rs` split for the hub side of the same
-//! handshake.
+//! The `circuit/authenticate` → `circuit/prove` Noise XK handshake (issue
+//! #338, replacing #323's Ed25519-signed transcript challenge-response) and
+//! the bidirectional `circuit/hello` exchange with hub-key pinning (issue
+//! #322): split out of `connection.rs` proper once this file's own growth
+//! pushed it past the workspace's 900-line build guard (`scripts/lint.sh`
+//! check 4) — a pure relocation, no behavior change of its own. Mirrors this
+//! crate's own `connection/session_dispatch.rs` split, and `holler-hub`'s
+//! `circuit/auth.rs` split for the hub side of the same handshake.
+//!
+//! This body is the Noise **initiator**: per XK's own `K`, it already knows
+//! the hub's static public key — `identity.hub_pubkey`, pinned at `body
+//! join` (issue #322) — so it can build message 1 before ever hearing from
+//! the hub. A hub that presents a different real key than what was pinned
+//! (a rotated key, or an impersonator) makes the *hub's* own message 1
+//! processing fail, surfacing here as a wire `-32002` from `circuit/
+//! authenticate` — see [`holler_proto::noise`]'s own module doc for why.
+
+use std::path::Path;
 
 use futures_util::{Sink, Stream};
 use holler_proto::{Authenticate, Code, CorrelationId, Envelope, Hello, HelloRole};
@@ -16,34 +26,45 @@ use crate::identity::BodyIdentity;
 
 use super::{send, timeout_next_envelope, Attempt};
 
-/// Run the `circuit/authenticate` → `circuit/prove` challenge-response
-/// (issue #323) and await the final answer. `-32002` at either step maps to
-/// [`Attempt::AuthFailed`] (no retry, per the issue — the body's connection
-/// loop treats that code, and only that code, as "do not retry"); every
-/// other failure (connect-adjacent decode errors, a foreign error code, a
-/// closed socket, a 10s timeout, a corrupt local signing key) maps to
-/// [`Attempt::Dropped`] (retry with backoff) except the corrupt-key case,
-/// which is also unretryable (re-running `body join` is the only fix, so
-/// backing off and trying the same broken key again would just spin).
-pub(super) async fn authenticate<Snk, St>(sink: &mut Snk, stream: &mut St, identity: &BodyIdentity) -> Result<(), Attempt>
+/// Run the `circuit/authenticate` → `circuit/prove` Noise XK handshake
+/// (issue #338) and await the final answer. `-32002` at either step maps to
+/// [`Attempt::AuthFailed`] (no retry — the body's connection loop treats
+/// that code, and only that code, as "do not retry"), as does a corrupt
+/// local X25519 identity or pinned hub key (re-running `body join` is the
+/// only fix, so backing off and retrying the same broken local state would
+/// just spin). Every other failure (connect-adjacent decode errors, a
+/// foreign error code, a closed socket, a 10s timeout, a local handshake
+/// step failing to process the hub's own message) maps to
+/// [`Attempt::Dropped`] (retry with backoff).
+pub(super) async fn authenticate<Snk, St>(sink: &mut Snk, stream: &mut St, identity: &BodyIdentity, state_root: &Path) -> Result<(), Attempt>
 where
     Snk: Sink<Message, Error = WsError> + Unpin,
     St: Stream<Item = Result<Message, WsError>> + Unpin,
 {
-    let Some(signing_key) = identity.signing_key() else {
-        return Err(Attempt::AuthFailed(
-            "this body's persisted signing key is corrupt or missing — re-run `body join`".to_string(),
-        ));
-    };
+    let x25519_identity = crate::x25519_identity::ensure(state_root).map_err(|e| {
+        Attempt::AuthFailed(format!("this body's X25519 identity is corrupt or could not be resolved: {e} — re-run `body join`"))
+    })?;
+    let body_secret = x25519_identity.secret_bytes();
 
-    // Step 1: `circuit/authenticate` names the token and this body's own
-    // belief of the address it is dialing; the hub's result is a fresh
-    // nonce challenge, not an ack.
+    let hub_pubkey: [u8; 32] = hex::decode(&identity.hub_pubkey)
+        .ok()
+        .and_then(|bytes| bytes.try_into().ok())
+        .ok_or_else(|| Attempt::AuthFailed("this body's pinned hub public key is corrupt — re-run `body join`".to_string()))?;
+
+    let prologue = holler_proto::noise::build_prologue(holler_proto::PROTOCOL_VERSION, &identity.token_id, &identity.server_url);
+    let mut handshake = holler_proto::noise::HandshakeXk::initiator(&body_secret, &hub_pubkey, &prologue)
+        .map_err(|e| Attempt::Dropped(format!("could not start the handshake: {e}")))?;
+
+    // Step 1: `circuit/authenticate` names the token, this body's own belief
+    // of the address it is dialing, and Noise message 1 (`e, es`); the hub's
+    // result is message 2 (`e, ee`), not an ack.
     let cid = CorrelationId::mint_body();
+    let msg1 = handshake.write_message().map_err(|e| Attempt::Dropped(format!("write handshake message 1: {e}")))?;
     let params = Authenticate {
         token_id: identity.token_id.clone(),
         hostname: identity.hostname.clone(),
         advertised_url: identity.server_url.clone(),
+        message: hex::encode(msg1),
     };
     let params = serde_json::to_value(params).map_err(|e| Attempt::Dropped(format!("encode auth: {e}")))?;
     let req = Envelope::request(&cid, "circuit/authenticate", Some(params));
@@ -52,15 +73,37 @@ where
     let env = timeout_next_envelope(stream)
         .await
         .ok_or_else(|| Attempt::Dropped("no answer to circuit/authenticate".to_string()))?;
-    let nonce = match env {
+    let msg2 = match env {
         Envelope::Response { id, result } if id == cid.as_str() => {
             let challenge: holler_proto::AuthChallenge = result
                 .and_then(|v| serde_json::from_value(v).ok())
                 .ok_or_else(|| Attempt::Dropped("malformed circuit/authenticate challenge".to_string()))?;
-            challenge.nonce
+            hex::decode(&challenge.message).map_err(|e| Attempt::Dropped(format!("malformed handshake message 2: {e}")))?
         }
         Envelope::Error { error, .. } if error.code == Code::Unauthenticated.jsonrpc() => {
-            return Err(Attempt::AuthFailed(error.message));
+            // A `-32002` refusal of `circuit/authenticate` itself (as opposed
+            // to `circuit/prove`, below) can only mean the hub rejected Noise
+            // message 1 — this body's very first handshake message. Per
+            // `holler_proto::noise`'s own module doc, that specific rejection
+            // has exactly one cause: this body built message 1 against a hub
+            // static key that does not match the hub it is actually talking
+            // to. The hub marks that one cause with `error.data.reason` (see
+            // `holler_proto::noise::NOISE_MESSAGE_ONE_REJECTED_REASON`) so
+            // this disambiguates on a structured value, not `error.message`
+            // text the hub is free to reword.
+            let is_hub_key_mismatch = error
+                .data
+                .as_deref()
+                .and_then(|d| d.reason.as_deref())
+                == Some(holler_proto::noise::NOISE_MESSAGE_ONE_REJECTED_REASON);
+            return Err(Attempt::AuthFailed(if is_hub_key_mismatch {
+                format!(
+                    "hub public key mismatch: this hub rejected this body's handshake — its real key does not match the one pinned at `body join` ({}) — refusing to connect (re-pair with `body join` only if you trust this is an intentional hub key rotation)",
+                    identity.hub_pubkey
+                )
+            } else {
+                error.message
+            }));
         }
         Envelope::Error { error, .. } => {
             return Err(Attempt::Dropped(format!("authenticate refused: {}", error.message)));
@@ -68,20 +111,15 @@ where
         _ => return Err(Attempt::Dropped("unexpected reply to circuit/authenticate".to_string())),
     };
 
-    // Step 2: sign the transcript over the hub's own nonce and answer
-    // `circuit/prove`. The private key never leaves this function.
-    let transcript = holler_proto::transcript::build(
-        holler_proto::PROTOCOL_VERSION,
-        "body",
-        &nonce,
-        &identity.token_id,
-        &identity.server_url,
-    );
-    let signature = ed25519_dalek::Signer::sign(&signing_key, &transcript);
+    // Step 2: process message 2, write message 3 (`s, se`, carrying this
+    // body's own static key encrypted), and answer `circuit/prove`. The
+    // private key never leaves this function.
+    handshake.read_message(&msg2).map_err(|e| Attempt::Dropped(format!("handshake message 2 rejected: {e}")))?;
+    let msg3 = handshake.write_message().map_err(|e| Attempt::Dropped(format!("write handshake message 3: {e}")))?;
     let prove_cid = CorrelationId::mint_body();
     let prove_params = holler_proto::Prove {
         token_id: identity.token_id.clone(),
-        signature: hex::encode(signature.to_bytes()),
+        message: hex::encode(msg3),
     };
     let prove_params = serde_json::to_value(prove_params).map_err(|e| Attempt::Dropped(format!("encode prove: {e}")))?;
     let prove_req = Envelope::request(&prove_cid, "circuit/prove", Some(prove_params));

@@ -41,9 +41,13 @@ pub struct BodyIdentity {
     pub client_id: String,
     /// This body's own long-lived Ed25519 signing private key, hex-encoded
     /// (32 bytes) — generated locally at join, never sent to the hub (only
-    /// the matching public key is, in `circuit/join`'s `body_pubkey`). Signs
-    /// the `circuit/authenticate` → `circuit/prove` challenge transcript on
-    /// every (re)connect.
+    /// the matching public key is, in `circuit/join`'s `body_pubkey`). Issue
+    /// #323's original design signed the `circuit/authenticate` →
+    /// `circuit/prove` challenge transcript with it on every (re)connect;
+    /// issue #338 replaced that scheme with a Noise XK handshake keyed off
+    /// `crate::x25519_identity` instead, so this key is registered but no
+    /// longer consumed by the authenticate flow (removing it is a separate,
+    /// out-of-scope decision).
     pub signing_key: String,
     /// The token id the body joined with.
     pub token_id: String,
@@ -51,7 +55,8 @@ pub struct BodyIdentity {
     #[serde(default)]
     pub hostname: String,
     /// The hub address the body joined (`ws://…` / `wss://…`), for `status`
-    /// and for the `circuit/authenticate` transcript's `advertised_url`.
+    /// and for the `circuit/authenticate` Noise handshake prologue's
+    /// `advertised_url` (issue #338).
     #[serde(default)]
     pub server_url: String,
     /// Unix seconds the join succeeded (the last time this body was seen).

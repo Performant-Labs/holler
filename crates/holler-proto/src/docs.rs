@@ -709,20 +709,12 @@ pub struct AnswerResult {
     pub applied: bool,
 }
 
-/// The `params` of `circuit/join` (docs §3) — the one-time bootstrap.
-///
-/// Issue #323: the body registers its own long-lived **public** key at join
-/// instead of receiving a bearer credential back — the private half never
-/// leaves the body (generated and persisted locally, `holler_body::identity`).
-///
-/// Issue #337: the body additionally registers a **second, distinct**
-/// long-lived public key, `body_x25519_pubkey` — plumbing for the future
-/// Noise XK handshake (#338). `body_pubkey` (Ed25519) and `body_x25519_
-/// pubkey` (X25519) serve different purposes and are not interchangeable:
-/// Ed25519 signs the `circuit/authenticate` → `circuit/prove` proof of
-/// possession; X25519 is Noise XK's static DH key. Both are generated and
-/// persisted locally (`holler_body::identity` / `holler_body::
-/// x25519_identity`); neither private half ever leaves the body.
+/// The `params` of `circuit/join` (docs §3) — the one-time bootstrap. The
+/// body registers two long-lived **public** keys (issues #323/#337); neither
+/// private half ever leaves the body. `body_pubkey` (Ed25519) predates the
+/// Noise handshake and is now unused by the authenticate flow (issue #338
+/// replaced its role with `body_x25519_pubkey`) — kept registered; removing
+/// it is a separate, out-of-scope decision.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Join {
@@ -730,20 +722,16 @@ pub struct Join {
     pub secret: String,
     /// The hostname / label to claim.
     pub hostname: String,
-    /// The body's Ed25519 public key, hex-encoded (32 bytes). Stored against
-    /// the token; used to verify every later `circuit/prove`.
+    /// The body's Ed25519 public key, hex-encoded (32 bytes).
     pub body_pubkey: String,
-    /// The body's X25519 public key, hex-encoded (32 bytes; issue #337).
-    /// Stored against the token; the future Noise XK handshake (#338) will
-    /// use it as this body's static DH identity. Distinct from `body_pubkey`
-    /// above — an Ed25519 signing key cannot perform a Diffie-Hellman.
+    /// The body's X25519 public key, hex-encoded (32 bytes; issue #337) —
+    /// this body's Noise XK static DH identity (issue #338).
     pub body_x25519_pubkey: String,
 }
 
 /// The `result` of `circuit/join` — `{client_id}`; the hub then **closes the
-/// socket**. Issue #323: no `credential` — proof of possession of the
-/// registered `body_pubkey` (via `circuit/authenticate` → `circuit/prove`)
-/// replaces presenting a bearer secret on every reconnect.
+/// socket**. No `credential` — proof of possession replaces a bearer secret
+/// on every reconnect (`circuit/authenticate` → `circuit/prove`, issue #338).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct JoinResult {
@@ -751,11 +739,14 @@ pub struct JoinResult {
 }
 
 /// The `params` of `circuit/authenticate` (docs §3) — the **first** frame of
-/// the normal (re)connect's now two-step challenge-response (issue #323): the
-/// body names the token and the address it believes it is dialing; the hub's
-/// **result** is not a bare ack but an [`AuthChallenge`] — a fresh nonce the
-/// body must sign and return via `circuit/prove`. No secret crosses the wire
-/// here (the join secret is spent, one-time, at `circuit/join`).
+/// the normal (re)connect, and message 1 (`e, es`) of the Noise XK handshake
+/// (issue #338, replacing #323's transcript-signing challenge-response),
+/// built against the hub's pinned X25519 key (from `body join`, #322) and a
+/// prologue binding `token_id`/`advertised_url`/`protocol_version`
+/// ([`crate::noise::build_prologue`]). The hub's **result** is not a bare
+/// ack but an [`AuthChallenge`] carrying message 2; `circuit/prove`
+/// (message 3) completes the handshake. Neither party's static private key
+/// crosses the wire — only Noise ciphertext.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Authenticate {
@@ -763,42 +754,46 @@ pub struct Authenticate {
     pub token_id: String,
     /// The hostname / label to claim.
     pub hostname: String,
-    /// The URL this body believes it is dialing (its own configured
-    /// `--server` / persisted `server_url`) — bound into the
-    /// [`crate::transcript::build`] transcript `circuit/prove` signs, so a
-    /// captured proof cannot be replayed against a different endpoint.
+    /// The URL this body believes it is dialing — bound into the Noise
+    /// handshake prologue ([`crate::noise::build_prologue`]).
     pub advertised_url: String,
+    /// Noise XK message 1 (`e, es`), hex-encoded.
+    pub message: String,
 }
 
-/// The `result` of `circuit/authenticate` (issue #323) — a fresh, single-use
-/// challenge, not an ack. The body must answer with `circuit/prove`
-/// (params: [`Prove`]) within the hub's prove timeout, or the socket is
-/// closed as unauthenticated.
+/// The `result` of `circuit/authenticate` (issue #338) — Noise XK message 2
+/// (`e, ee`), not a bare ack; `circuit/prove` (message 3) must follow within
+/// the hub's prove timeout, or the socket is closed as unauthenticated.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AuthChallenge {
-    /// A fresh, hex-encoded random nonce, unique to this connection attempt
-    /// and never persisted or reused — a signature over one nonce cannot be
-    /// replayed against a challenge minted for a different attempt.
-    pub nonce: String,
+    /// Noise XK message 2 (`e, ee`), hex-encoded. Always carries a
+    /// freshly-drawn responder ephemeral key, so a captured message 3 from
+    /// an earlier attempt can never replay against a fresh one
+    /// (`crate::noise`'s own module doc).
+    pub message: String,
 }
 
-/// The `params` of `circuit/prove` (issue #323) — the **second** frame of the
-/// authenticate handshake: the body proves possession of the private key
-/// matching the `body_pubkey` it registered at join, by signing the
-/// [`crate::transcript::build`] transcript over the hub's own
-/// [`AuthChallenge::nonce`] (never a value the body chooses).
+/// The `params` of `circuit/prove` (issue #338) — the **third and final**
+/// frame: Noise XK message 3 (`s, se`), carrying the body's static X25519
+/// key (registered at `circuit/join`, #337) encrypted and DH-authenticated.
+/// The hub learns it via [`crate::noise::HandshakeXk::remote_static_hex`]
+/// and compares it against the token's registered `body_x25519_pubkey` —
+/// this application-level check, not the handshake completing, is what ties
+/// the proof to a specific token (Noise XK's responder never knows the
+/// initiator's key in advance).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Prove {
     /// The short token id (must match the preceding `circuit/authenticate`).
     pub token_id: String,
-    /// The Ed25519 signature over the transcript, hex-encoded (64 bytes).
-    pub signature: String,
+    /// Noise XK message 3 (`s, se`), hex-encoded.
+    pub message: String,
 }
 
 /// The `result` of `circuit/authenticate`'s handshake — sent as the response
-/// to `circuit/prove`, once the signature verifies.
+/// to `circuit/prove`, once the handshake completes and the learned static
+/// key matches the registered `body_x25519_pubkey`.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AuthOk {

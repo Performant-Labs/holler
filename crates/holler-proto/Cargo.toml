@@ -3,7 +3,7 @@ name = "holler-proto"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Holler protocol v2: JSON-RPC 2.0 envelope codec, method catalog, error table, name/id newtypes, and the A2A object model (no I/O deps)"
+description = "Holler protocol v2: JSON-RPC 2.0 envelope codec, method catalog, error table, name/id newtypes, the A2A object model, and the Noise XK handshake core (no I/O deps)"
 
 [lib]
 name = "holler_proto"
@@ -21,9 +21,23 @@ ulid = { workspace = true }
 # time: RFC3339 emission timestamps for the debug-logging banner/events
 # (story #144) — the one non-OS, non-network addition to the "no I/O" crate.
 time = { workspace = true }
+# snow: the Noise_XK_25519_ChaChaPoly_BLAKE2s handshake core (issue #338) —
+# pure computation, no I/O, so it fits this crate's charter the same way
+# `time` does. See the root Cargo.toml's own comment for the feature choice.
+snow = { workspace = true }
+# hex: `noise::HandshakeXk`'s public API is hex strings (the wire-facing
+# form every other module in this crate and its consumers already use for
+# keys/ids), never raw `snow` types (issue #338).
+hex = { workspace = true }
 
 [dev-dependencies]
 rstest = { workspace = true }
+# x25519-dalek: `noise`'s own tests derive a keypair's public half the same
+# way `holler_hub::identity`/`holler_body::x25519_identity` do, to pin the
+# interop this issue's design depends on (issue #338). Test-only — no
+# production code in this crate performs a Diffie-Hellman itself; `snow`
+# does that internally.
+x25519-dalek = { workspace = true }
 
 # Workspace lints (issue #149): inherit [workspace.lints] from the root
 # Cargo.toml — deny dead_code, clippy unwrap/expect/panic/unreachable, and the
