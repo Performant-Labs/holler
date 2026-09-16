@@ -166,7 +166,7 @@ impl std::fmt::Display for Mode {
 /// and closes the socket (no silent downgrade).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Hello {
-    /// The protocol version this endpoint speaks. Must be `2` in v2.
+    /// The protocol version this endpoint speaks. Must be [`crate::PROTOCOL_VERSION`].
     pub protocol: u32,
     /// The lowest protocol version this endpoint can also speak.
     pub protocol_min: u32,
@@ -439,7 +439,7 @@ impl ProtocolParams {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProtocolAnswer {
-    /// The current protocol major version. Always `2` in v2.
+    /// The current protocol major version — [`crate::PROTOCOL_VERSION`].
     pub session: u32,
     /// The lowest protocol version this endpoint can also speak.
     pub min: u32,
@@ -750,6 +750,11 @@ pub struct JoinResult {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Authenticate {
+    /// This body's protocol version claim (issue #340) — checked before any
+    /// Noise processing begins. `#[serde(default)]` so a pre-#340 frame
+    /// that never sent this field still parses, as `0` (always unsupported).
+    #[serde(default)]
+    pub protocol: u32,
     /// The short token id.
     pub token_id: String,
     /// The hostname / label to claim.

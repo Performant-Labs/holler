@@ -72,6 +72,7 @@ where
     let cid = CorrelationId::mint_body();
     let msg1 = handshake.write_message().map_err(|e| Attempt::Dropped(format!("write handshake message 1: {e}")))?;
     let params = Authenticate {
+        protocol: holler_proto::PROTOCOL_VERSION,
         token_id: identity.token_id.clone(),
         hostname: identity.hostname.clone(),
         advertised_url: identity.server_url.clone(),
@@ -115,6 +116,15 @@ where
             } else {
                 error.message
             }));
+        }
+        // Issue #340: a `-32000` here means this hub's protocol floor is
+        // higher than what this body claimed — a hard re-pair event (#321's
+        // "Protocol break handling"), not a transient drop. The hub's own
+        // message already names the mismatch and the fix (re-run `body
+        // join` on an upgraded body), so it is surfaced verbatim rather than
+        // retried with backoff.
+        Envelope::Error { error, .. } if error.code == Code::UnsupportedVersion.jsonrpc() => {
+            return Err(Attempt::AuthFailed(error.message));
         }
         Envelope::Error { error, .. } => {
             return Err(Attempt::Dropped(format!("authenticate refused: {}", error.message)));
@@ -201,8 +211,23 @@ where
         Some(Envelope::Response { id, result }) if id == cid.as_str() => result
             .and_then(|v| serde_json::from_value::<Hello>(v).ok())
             .ok_or_else(|| Attempt::Dropped("malformed hub circuit/hello reply".to_string()))?,
+        // Issue #340: defense-in-depth mirror of the hub's own hello-level
+        // check (a genuine version mismatch normally never reaches this far
+        // — it is already caught at `circuit/authenticate`, above — but this
+        // stays for the same reason the hub_pubkey check stays even though
+        // Noise already enforces it: belt and suspenders).
+        Some(Envelope::Error { error, .. }) if error.code == Code::UnsupportedVersion.jsonrpc() => {
+            return Err(Attempt::AuthFailed(error.message));
+        }
         _ => return Err(Attempt::Dropped("no answer to circuit/hello".to_string())),
     };
+    if !holler_proto::is_supported_version(hub_hello.protocol) {
+        return Err(Attempt::AuthFailed(format!(
+            "protocol mismatch: this hub speaks protocol {}, this body requires protocol {} — upgrade this body (or the hub) so both sides speak a matching protocol, then re-pair with `body join`",
+            hub_hello.protocol,
+            holler_proto::PROTOCOL_MIN
+        )));
+    }
     match hub_hello.hub_pubkey {
         Some(seen) if seen == identity.hub_pubkey => {}
         Some(seen) => {

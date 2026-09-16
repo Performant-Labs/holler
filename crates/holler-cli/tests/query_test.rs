@@ -73,7 +73,7 @@ fn body_status_local_without_run() {
     let doc: Value = serde_json::from_str(&stdout).expect("body query status --json is valid JSON");
     assert_eq!(doc["role"].as_str(), Some("body"));
     assert_eq!(doc["connected"].as_bool(), Some(false), "no run/join means not connected: {doc}");
-    assert_eq!(doc["protocol"].as_u64(), Some(2));
+    assert_eq!(doc["protocol"].as_u64(), Some(3));
 }
 
 /// `query/status` documents carry the running binary's version (issue
@@ -160,7 +160,8 @@ fn unknown_feature_is_32006() {
     assert!(stderr.contains("unknown"), "stderr names the failure: {stderr}");
 }
 
-/// `query/protocol {version:1}` is `ok:false` (v2 only speaks version 2).
+/// `query/protocol {version:1}` is `ok:false` (v2 only speaks version 3,
+/// issue #340).
 #[test]
 fn query_protocol_with_version_1_is_ok_false() {
     let state = StateDir::new();
@@ -171,16 +172,16 @@ fn query_protocol_with_version_1_is_ok_false() {
     assert_eq!(doc["ok"].as_bool(), Some(false));
 }
 
-/// `query/protocol {version:2}` (the current, in-range version) is a normal
+/// `query/protocol {version:3}` (the current, in-range version) is a normal
 /// `ok:true` answer, not a rejection — issue #251's fix must not touch the
 /// happy path.
 #[test]
 fn query_protocol_with_current_version_is_ok_true() {
     let state = StateDir::new();
-    let (code, stdout, stderr) = run(&state, &["--json", "body", "query", "protocol", "2"]);
+    let (code, stdout, stderr) = run(&state, &["--json", "body", "query", "protocol", "3"]);
     assert_eq!(code, 0, "stderr: {stderr}");
     let doc: Value = serde_json::from_str(&stdout).expect("valid JSON");
-    assert_eq!(doc["asked"].as_u64(), Some(2));
+    assert_eq!(doc["asked"].as_u64(), Some(3));
     assert_eq!(doc["ok"].as_bool(), Some(true));
 }
 
@@ -265,7 +266,7 @@ fn hub_query_protocol_valid_and_absent_version_are_not_rejected() {
     let state = StateDir::new();
     let hub = Hub::start(&state);
 
-    let (code, stdout, stderr) = run(&state, &["--json", "hub", "query", "protocol", "2"]);
+    let (code, stdout, stderr) = run(&state, &["--json", "hub", "query", "protocol", "3"]);
     assert_eq!(code, 0, "stderr: {stderr}");
     let doc: Value = serde_json::from_str(&stdout).expect("valid JSON");
     assert_eq!(doc["ok"].as_bool(), Some(true));
@@ -393,7 +394,7 @@ fn remote_query_protocol_version_zero_is_unknown_feature() {
     assert_eq!(code, 1, "version:0 forwarded to a live body must be a refusal: {stderr}");
     assert!(stderr.contains("positive integer"), "stderr names the failure: {stderr}");
 
-    let (code, stdout, stderr) = run(&state, &["--json", "hub", "query", "default", "protocol", "2"]);
+    let (code, stdout, stderr) = run(&state, &["--json", "hub", "query", "default", "protocol", "3"]);
     assert_eq!(code, 0, "a valid version must still work normally; stderr: {stderr}");
     let doc: Value = serde_json::from_str(&stdout).expect("valid JSON");
     assert_eq!(doc["ok"].as_bool(), Some(true));

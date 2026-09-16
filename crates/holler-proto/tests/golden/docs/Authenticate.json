@@ -2,5 +2,6 @@
   "advertised_url": "wss://uranus.example",
   "hostname": "kiwi",
   "message": "111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111",
+  "protocol": 3,
   "token_id": "tok_7f3a"
 }

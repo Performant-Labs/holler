@@ -174,6 +174,7 @@ where
 {
     let peer_ip = deps.peer.rsplit_once(':').map(|(ip, _)| ip).unwrap_or(deps.peer);
 
+    auth::check_protocol_version(sink, id, params).await?;
     auth::begin_authenticate(sink, id, params, state, peer_ip, deps).await?;
 
     let mut handshake = auth::begin_noise_handshake(sink, id, params, state, peer_ip, deps).await?;
@@ -371,11 +372,35 @@ where
         close(sink).await;
         return Err(());
     }
-    let body_harnesses = params
-        .clone()
-        .and_then(|v| serde_json::from_value::<Hello>(v).ok())
-        .and_then(|h| h.harnesses)
-        .unwrap_or_default();
+    let body_hello = params.clone().and_then(|v| serde_json::from_value::<Hello>(v).ok());
+
+    // Issue #340: defense-in-depth mirror of `circuit/auth::check_protocol_
+    // version` — a genuine mismatch is already refused there, before this
+    // body could ever reach `circuit/hello` at all, so this branch is not
+    // normally reachable. It stays anyway, for the same reason the
+    // `hub_pubkey` pinning check below stays even though Noise's own crypto
+    // already enforces it: docs/protocol/v2.md §3's no-silent-downgrade rule
+    // is a property of `circuit/hello` on the wire, not an implementation
+    // detail of *where* the enforcement happens to live today. A body whose
+    // hello fails to parse as a `Hello` at all carries no protocol claim to
+    // check, so it falls through unrefused here (the pre-#340 behavior).
+    if let Some(protocol) = body_hello.as_ref().map(|h| h.protocol) {
+        if !holler_proto::is_supported_version(protocol) {
+            send_error(
+                sink,
+                Some(id),
+                Code::UnsupportedVersion,
+                &format!(
+                    "protocol {protocol} is not supported (this hub requires protocol {}) — upgrade this body and re-run `body join` to re-pair",
+                    holler_proto::PROTOCOL_MIN
+                ),
+            )
+            .await;
+            close(sink).await;
+            return Err(());
+        }
+    }
+    let body_harnesses = body_hello.and_then(|h| h.harnesses).unwrap_or_default();
 
     // Issue #322: the hub's identity keypair is resolved (generated on first
     // use, else loaded) fresh per hello — cheap (a 32-byte file read) and
