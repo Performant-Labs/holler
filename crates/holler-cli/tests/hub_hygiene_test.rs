@@ -19,8 +19,9 @@
 
 use std::time::Duration;
 
-use ed25519_dalek::{Signer, SigningKey};
+use ed25519_dalek::SigningKey;
 use futures_util::{SinkExt, StreamExt};
+use holler_proto::noise::{build_prologue, HandshakeXk};
 use holler_proto::{decode, Envelope};
 use serde_json::json;
 use tokio_tungstenite::{tungstenite::Message, MaybeTlsStream};
@@ -35,18 +36,22 @@ async fn connect_ws(url: &str) -> WsClient {
 }
 
 /// A fresh Ed25519 signing keypair, deterministic per `seed` (so tests stay
-/// reproducible) — what a raw test client registers at join and signs
-/// `circuit/prove` with (issue #323).
+/// reproducible) — no longer used to authenticate (issue #338 replaced the
+/// Ed25519-signed challenge-response with Noise XK), but `circuit/join`
+/// still registers a `body_pubkey` (issue #323's field, kept — see
+/// `holler_proto::docs::Join`'s own doc for why removing it is a separate,
+/// out-of-scope decision), so redeeming a token still needs one.
 fn fresh_signing_key(seed: u8) -> SigningKey {
     SigningKey::from_bytes(&[seed; 32])
 }
 
 /// Mint a token and redeem it in-process (no subprocess, no live hub
 /// required for this half) via the `holler_hub` library directly — generates
-/// a fresh Ed25519 keypair, registers its public half, and returns
-/// `(token_id, signing_key)`, the pair a raw client authenticates with
-/// (issue #323: no more bearer credential).
-fn mint_and_redeem(state: &StateDir, label: &str) -> (String, SigningKey) {
+/// a fresh Ed25519 keypair (registered but unused for authentication, see
+/// [`fresh_signing_key`]) and a fresh X25519 keypair (issue #337/#338: this
+/// is what a raw client actually authenticates with, via the Noise XK
+/// handshake), and returns `(token_id, x25519_secret_bytes)`.
+fn mint_and_redeem(state: &StateDir, label: &str) -> (String, [u8; 32]) {
     let hub_state = holler_hub::state::HubState::from_root(state.path().to_path_buf());
     let minted = holler_hub::token::mint(label, 24 * 3600, &hub_state).expect("mint a token");
     // Deterministic-but-distinct seed per label so concurrently-minted tokens
@@ -54,55 +59,73 @@ fn mint_and_redeem(state: &StateDir, label: &str) -> (String, SigningKey) {
     let seed = label.bytes().fold(0u8, |a, b| a.wrapping_add(b)).wrapping_add(1);
     let signing_key = fresh_signing_key(seed);
     let body_pubkey = hex::encode(signing_key.verifying_key().to_bytes());
-    // Issue #337: `circuit/join` also registers a distinct X25519 public key
-    // (plumbing for the future Noise XK handshake, #338) — not exercised by
-    // this file's authenticate/prove scenarios, so a deterministic
-    // well-formed placeholder derived from the same seed is enough.
-    let x25519_secret = x25519_dalek::StaticSecret::from([seed; 32]);
+    let x25519_secret_bytes = [seed; 32];
+    let x25519_secret = x25519_dalek::StaticSecret::from(x25519_secret_bytes);
     let body_x25519_pubkey = hex::encode(x25519_dalek::PublicKey::from(&x25519_secret).as_bytes());
     let client_id = holler_hub::token::redeem(&minted.secret, label, &body_pubkey, &body_x25519_pubkey, &hub_state)
         .expect("redeem the just-minted token");
     let _ = client_id;
-    (minted.record.token_id, signing_key)
+    (minted.record.token_id, x25519_secret_bytes)
 }
 
-/// Run the `circuit/authenticate` → `circuit/prove` challenge-response
-/// (issue #323) and read back the final answer. `Ok(())` is `{ok:true}`;
+/// This test binary's own resolved copy of the hub's X25519 static public
+/// key (issue #322) — a raw test client needs it in advance to build a
+/// Noise XK initiator (the `K` in XK), the same way a real body gets it from
+/// `body join`'s out-of-band `--hub-key` pin. Safe to call after
+/// `Hub::start`/`Hub::start_with_env` return (readiness implies the hub's
+/// own startup, including any identity generation, has already run) —
+/// `holler_hub::identity::ensure` is idempotent and loads back whatever key
+/// is already persisted rather than generating a second, different one.
+fn hub_x25519_pubkey(state: &StateDir) -> [u8; 32] {
+    let hub_state = holler_hub::state::HubState::from_root(state.path().to_path_buf());
+    let identity = holler_hub::identity::ensure(&hub_state).expect("resolve the hub's X25519 identity");
+    let bytes = hex::decode(identity.public_hex()).expect("hub pubkey is valid hex");
+    bytes.try_into().expect("hub pubkey is 32 bytes")
+}
+
+/// Run the `circuit/authenticate` → `circuit/prove` Noise XK handshake
+/// (issue #338) and read back the final answer. `Ok(())` is `{ok:true}`;
 /// `Err(WireError)` is the hub's refusal at either step (still followed by a
 /// close in every case — the caller decides whether to keep draining).
-/// `advertised_url` is bound into the signed transcript — real callers here
-/// always use the hub's own `ws://` URL (there is no MITM/relay in this
-/// test's topology, only good/bad-signature scenarios).
+/// `advertised_url` is bound into the handshake's prologue — real callers
+/// here always use the hub's own `ws://` URL (there is no MITM/relay in this
+/// test's topology, only good/bad-key scenarios).
 async fn send_authenticate(
     ws: &mut WsClient,
     token_id: &str,
-    signing_key: &SigningKey,
+    body_x25519_secret: &[u8; 32],
+    hub_x25519_pubkey: &[u8; 32],
     hostname: &str,
     advertised_url: &str,
 ) -> Result<(), holler_proto::WireError> {
+    let prologue = build_prologue(holler_proto::PROTOCOL_VERSION, token_id, advertised_url);
+    let mut handshake = HandshakeXk::initiator(body_x25519_secret, hub_x25519_pubkey, &prologue).expect("build noise initiator");
+    let msg1 = handshake.write_message().expect("write handshake message 1");
+
     let req = json!({
         "jsonrpc": "2.0",
         "id": "b-auth1",
         "method": "circuit/authenticate",
-        "params": { "token_id": token_id, "hostname": hostname, "advertised_url": advertised_url },
+        "params": { "token_id": token_id, "hostname": hostname, "advertised_url": advertised_url, "message": hex::encode(msg1) },
     });
     ws.send(Message::text(req.to_string())).await.expect("send circuit/authenticate");
     let env = decode_next(ws).await.expect("an answer to circuit/authenticate");
-    let nonce = match env {
+    let msg2_hex = match env {
         Envelope::Response { result, .. } => result
-            .and_then(|v| v.get("nonce").and_then(|n| n.as_str()).map(String::from))
-            .expect("circuit/authenticate result carries a nonce challenge"),
+            .and_then(|v| v.get("message").and_then(|n| n.as_str()).map(String::from))
+            .expect("circuit/authenticate result carries a noise handshake message"),
         Envelope::Error { error, .. } => return Err(error),
         other => panic!("unexpected reply to circuit/authenticate: {other:?}"),
     };
+    let msg2 = hex::decode(&msg2_hex).expect("hex-decode handshake message 2");
+    handshake.read_message(&msg2).expect("process handshake message 2");
+    let msg3 = handshake.write_message().expect("write handshake message 3");
 
-    let transcript = holler_proto::transcript::build(holler_proto::PROTOCOL_VERSION, "body", &nonce, token_id, advertised_url);
-    let signature = signing_key.sign(&transcript);
     let prove = json!({
         "jsonrpc": "2.0",
         "id": "b-prove1",
         "method": "circuit/prove",
-        "params": { "token_id": token_id, "signature": hex::encode(signature.to_bytes()) },
+        "params": { "token_id": token_id, "message": hex::encode(msg3) },
     });
     ws.send(Message::text(prove.to_string())).await.expect("send circuit/prove");
     let env = decode_next(ws).await.expect("an answer to circuit/prove");
@@ -137,8 +160,8 @@ async fn run_hello(ws: &mut WsClient, hostname: &str) {
 
 /// Authenticate + hello in one call: the full handshake a real body runs to
 /// reach the live session loop.
-async fn go_live(ws: &mut WsClient, token_id: &str, signing_key: &SigningKey, hostname: &str, advertised_url: &str) {
-    send_authenticate(ws, token_id, signing_key, hostname, advertised_url)
+async fn go_live(ws: &mut WsClient, token_id: &str, body_x25519_secret: &[u8; 32], hub_x25519_pubkey: &[u8; 32], hostname: &str, advertised_url: &str) {
+    send_authenticate(ws, token_id, body_x25519_secret, hub_x25519_pubkey, hostname, advertised_url)
         .await
         .expect("authenticate must succeed");
     run_hello(ws, hostname).await;
@@ -185,14 +208,15 @@ async fn wait_for_close(ws: &mut WsClient) -> Option<u16> {
 async fn reauth_supersedes_and_closes_old_socket_with_notification() {
     let state = StateDir::new();
     let hub = Hub::start(&state);
-    let (token_id, signing_key) = mint_and_redeem(&state, "reauth-body");
+    let (token_id, body_x25519_secret) = mint_and_redeem(&state, "reauth-body");
+    let hub_pubkey = hub_x25519_pubkey(&state);
     let ws_url = hub.ws_url();
 
     let mut old = connect_ws(&ws_url).await;
-    go_live(&mut old, &token_id, &signing_key, "reauth-body", &ws_url).await;
+    go_live(&mut old, &token_id, &body_x25519_secret, &hub_pubkey, "reauth-body", &ws_url).await;
 
     let mut fresh = connect_ws(&ws_url).await;
-    go_live(&mut fresh, &token_id, &signing_key, "reauth-body", &ws_url).await;
+    go_live(&mut fresh, &token_id, &body_x25519_secret, &hub_pubkey, "reauth-body", &ws_url).await;
 
     // The old socket must see the notification, then a 1000 close.
     let note = decode_next(&mut old).await.expect("the old socket must receive circuit/superseded");
@@ -218,11 +242,12 @@ async fn reauth_supersedes_and_closes_old_socket_with_notification() {
 async fn revoke_force_closes_live_connection() {
     let state = StateDir::new();
     let hub = Hub::start(&state);
-    let (token_id, signing_key) = mint_and_redeem(&state, "revoke-body");
+    let (token_id, body_x25519_secret) = mint_and_redeem(&state, "revoke-body");
+    let hub_pubkey = hub_x25519_pubkey(&state);
     let ws_url = hub.ws_url();
 
     let mut ws = connect_ws(&ws_url).await;
-    go_live(&mut ws, &token_id, &signing_key, "revoke-body", &ws_url).await;
+    go_live(&mut ws, &token_id, &body_x25519_secret, &hub_pubkey, "revoke-body", &ws_url).await;
 
     let out = holler_cmd(&state)
         .args(["hub", "token", "revoke", &token_id])
@@ -235,9 +260,10 @@ async fn revoke_force_closes_live_connection() {
 
     // Reconnecting to a revoked token fails `-32002` (issue #323's
     // `revoked_token_still_fails_closed_with_32002`: existing behaviour
-    // survives the credential → public-key redesign).
+    // survives the credential → public-key redesign, and now the public-key
+    // → Noise XK redesign, issue #338).
     let mut retry = connect_ws(&ws_url).await;
-    let err = send_authenticate(&mut retry, &token_id, &signing_key, "revoke-body", &ws_url)
+    let err = send_authenticate(&mut retry, &token_id, &body_x25519_secret, &hub_pubkey, "revoke-body", &ws_url)
         .await
         .expect_err("re-authenticating a revoked token must fail");
     assert_eq!(err.code, -32002, "a revoked token must fail closed: {err:?}");
@@ -334,18 +360,21 @@ async fn five_bad_auths_lock_out_peer_for_window() {
         &state,
         &[("HOLLER_LOCKOUT_MAX_FAILURES", "5"), ("HOLLER_LOCKOUT_WINDOW_MS", "2000"), ("HOLLER_LOCKOUT_DURATION_MS", "2000")],
     );
-    let (token_id, _signing_key) = mint_and_redeem(&state, "lockout-body");
+    let (token_id, _body_x25519_secret) = mint_and_redeem(&state, "lockout-body");
+    let hub_pubkey = hub_x25519_pubkey(&state);
     let ws_url = hub.ws_url();
-    // A signature-proving keypair that was never registered on `token_id` —
-    // the issue #323 equivalent of "wrong credential": the signature it
-    // produces can never verify against the record's real `body_pubkey`.
-    let wrong_key = fresh_signing_key(200);
+    // An X25519 keypair that was never registered on `token_id` — issue
+    // #338's equivalent of "wrong credential": the handshake completes
+    // cryptographically (any self-consistent keypair can complete Noise XK),
+    // but the static key it learns can never match the record's real
+    // `body_x25519_pubkey` — see `circuit::auth::finish_prove`.
+    let wrong_key = [200u8; 32];
 
     for i in 0..5 {
         let mut ws = connect_ws(&ws_url).await;
-        let err = send_authenticate(&mut ws, &token_id, &wrong_key, "lockout-body", &ws_url)
+        let err = send_authenticate(&mut ws, &token_id, &wrong_key, &hub_pubkey, "lockout-body", &ws_url)
             .await
-            .expect_err("a bad signature must fail authentication");
+            .expect_err("a wrong key must fail authentication");
         assert_eq!(err.code, -32002, "bad-auth attempt {i} must be -32002: {err:?}");
     }
 
@@ -366,9 +395,9 @@ async fn five_bad_auths_lock_out_peer_for_window() {
     // not just that this one attempt happened to look different.
     tokio::time::sleep(Duration::from_millis(2100)).await;
     let mut retry = connect_ws(&ws_url).await;
-    let err = send_authenticate(&mut retry, &token_id, &wrong_key, "lockout-body", &ws_url)
+    let err = send_authenticate(&mut retry, &token_id, &wrong_key, &hub_pubkey, "lockout-body", &ws_url)
         .await
-        .expect_err("still a bad signature");
+        .expect_err("still the wrong key");
     assert_eq!(err.code, -32002, "after the cooldown, auth failures are answered normally again: {err:?}");
 }
 
@@ -387,20 +416,21 @@ async fn slow_token_store_does_not_stall_sibling_ping() {
     let hub = Hub::start_with_env(&state, &[("HOLLER_TEST_HOOKS", "1"), ("HOLLER_TEST_TOKEN_STORE_DELAY_MS", "200")]);
     let (sibling_token, sibling_key) = mint_and_redeem(&state, "sibling-body");
     let (slow_token, slow_key) = mint_and_redeem(&state, "slow-body");
+    let hub_pubkey = hub_x25519_pubkey(&state);
     let ws_url = hub.ws_url();
 
     // Bring the sibling fully live first (its own authenticate also pays the
     // store delay — twice, once per `circuit/authenticate`/`circuit/prove`
     // step — that is not what is being measured).
     let mut sibling = connect_ws(&ws_url).await;
-    go_live(&mut sibling, &sibling_token, &sibling_key, "sibling-body", &ws_url).await;
+    go_live(&mut sibling, &sibling_token, &sibling_key, &hub_pubkey, "sibling-body", &ws_url).await;
 
     // Start a second connection's authenticate concurrently (it will sit on
     // the delayed store for ~200ms per step) without awaiting it yet.
     let slow_url = ws_url.clone();
     let slow_handle = tokio::spawn(async move {
         let mut ws = connect_ws(&slow_url).await;
-        go_live(&mut ws, &slow_token, &slow_key, "slow-body", &slow_url).await;
+        go_live(&mut ws, &slow_token, &slow_key, &hub_pubkey, "slow-body", &slow_url).await;
         ws
     });
 
@@ -433,11 +463,12 @@ async fn slow_token_store_does_not_stall_sibling_ping() {
 async fn peer_addr_present_in_status_json() {
     let state = StateDir::new();
     let hub = Hub::start(&state);
-    let (token_id, signing_key) = mint_and_redeem(&state, "peer-body");
+    let (token_id, body_x25519_secret) = mint_and_redeem(&state, "peer-body");
+    let hub_pubkey = hub_x25519_pubkey(&state);
     let ws_url = hub.ws_url();
 
     let mut ws = connect_ws(&ws_url).await;
-    go_live(&mut ws, &token_id, &signing_key, "peer-body", &ws_url).await;
+    go_live(&mut ws, &token_id, &body_x25519_secret, &hub_pubkey, "peer-body", &ws_url).await;
 
     let doc = wait_for(STARTUP_WAIT, || {
         let d = hub_status_json(&state);
@@ -462,11 +493,12 @@ async fn peer_addr_present_in_status_json() {
 async fn fresh_hub_single_authenticate_does_not_panic() {
     let state = StateDir::new();
     let hub = Hub::start(&state);
-    let (token_id, signing_key) = mint_and_redeem(&state, "solo-body");
+    let (token_id, body_x25519_secret) = mint_and_redeem(&state, "solo-body");
+    let hub_pubkey = hub_x25519_pubkey(&state);
     let ws_url = hub.ws_url();
 
     let mut ws = connect_ws(&ws_url).await;
-    send_authenticate(&mut ws, &token_id, &signing_key, "solo-body", &ws_url)
+    send_authenticate(&mut ws, &token_id, &body_x25519_secret, &hub_pubkey, "solo-body", &ws_url)
         .await
         .expect("a legitimate authenticate must succeed with no panic");
 

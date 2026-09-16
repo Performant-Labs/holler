@@ -154,9 +154,10 @@ pub struct Record {
     /// the wire shape when `None` — see `record_to_value`).
     pub body_pubkey: Option<String>,
     /// The body's X25519 public key, hex-encoded (issue #337) — registered
-    /// at `circuit/join` alongside `body_pubkey`, never a secret. Plumbing
-    /// for the future Noise XK handshake (#338); not consumed yet. Present
-    /// once bound (omitted from the wire shape when `None`).
+    /// at `circuit/join` alongside `body_pubkey`, never a secret. The body's
+    /// Noise XK static identity, checked against what `circuit/prove`
+    /// reveals (issue #338, `circuit::auth::finish_prove`). Present once
+    /// bound (omitted from the wire shape when `None`).
     pub body_x25519_pubkey: Option<String>,
     /// The body's client id (`cli_<32hex>`). Present once bound.
     pub client_id: Option<String>,
@@ -688,6 +689,15 @@ pub fn bound_record(token_id: &str, state: &HubState) -> Result<Record, TokenErr
     }
     if record.body_pubkey.is_none() {
         return Err(TokenError::new(format!("token {token_id} has no public key on record")));
+    }
+    // Issue #338: the Noise XK handshake needs the body's X25519 identity
+    // (registered alongside `body_pubkey` at `circuit/join`, issue #337) — a
+    // bound record without one (impossible via a normal `circuit/join` today,
+    // but defensive against corrupt/hand-edited store data) fails closed here
+    // rather than reaching `circuit/auth`'s handshake setup with nothing to
+    // compare the learned remote static key against.
+    if record.body_x25519_pubkey.is_none() {
+        return Err(TokenError::new(format!("token {token_id} has no X25519 public key on record")));
     }
     Ok(record.clone())
 }
