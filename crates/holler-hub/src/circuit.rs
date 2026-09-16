@@ -155,9 +155,11 @@ fn log_frame(direction: LogDirection, method: &'static str, id: Option<&str>, ra
 /// unauthenticated` for the handshake itself — the body's connection loop
 /// treats that code, and only that code, as "do not retry") and closed the
 /// socket by the time this returns `None`. On success,
-/// returns the bound token's client id, its record, and the harnesses the
-/// body advertised in its hello — [`handle_authenticated`] takes it from
-/// there to bring the session live.
+/// returns the bound token's client id, its record, the harnesses the body
+/// advertised in its hello, and the pairing SAS (issue #339,
+/// [`holler_proto::sas::derive_sas`]) derived from this now-completed
+/// handshake's hash — [`handle_authenticated`] logs the SAS alongside
+/// `conn_connected` and takes the rest to bring the session live.
 async fn authenticate_and_hello<Snk, St>(
     sink: &mut Snk,
     stream: &mut St,
@@ -165,7 +167,7 @@ async fn authenticate_and_hello<Snk, St>(
     params: &Authenticate,
     state: &HubState,
     deps: &AuthDeps<'_>,
-) -> Option<(String, crate::token::Record, Vec<String>)>
+) -> Option<(String, crate::token::Record, Vec<String>, String)>
 where
     Snk: Sink<Message, Error = WsError> + Unpin,
     St: Stream<Item = Result<Message, WsError>> + Unpin,
@@ -185,6 +187,15 @@ where
     let (prove_id, prove) = auth::await_prove(sink, stream, &params.token_id, peer_ip, deps).await?;
     let record = auth::finish_prove(sink, &prove_id, params, &prove, &mut handshake, state, deps).await?;
 
+    // Issue #339: derived (never transmitted) before the `ok` reply, so a
+    // (structurally near-impossible — `handshake_hash_hex` is always real
+    // hex once `finish_prove` succeeded) derivation failure still fails
+    // closed rather than telling the body `ok` first.
+    let Ok(sas) = holler_proto::sas::derive_sas(&handshake.handshake_hash_hex()) else {
+        auth::refuse_unauthenticated(sink, Some(&prove_id), "authentication failed: could not derive the pairing SAS", None, &params.token_id, peer_ip, deps).await;
+        return None;
+    };
+
     let ok = serde_json::to_value(holler_proto::AuthOk { ok: true }).unwrap_or_default();
     reply(sink, Some(prove_id.as_str()), ok).await.ok()?;
 
@@ -194,7 +205,7 @@ where
     // which requires a `client_id` to be `bound`) — safe to unwrap the
     // invariant here.
     let client_id = record.client_id.clone().unwrap_or_default();
-    Some((client_id, record, body_harnesses))
+    Some((client_id, record, body_harnesses, sas))
 }
 
 /// Handle a freshly-accepted socket whose first frame was `circuit/
@@ -214,7 +225,7 @@ pub async fn handle_authenticated<Snk, St>(
 {
     let mut preauth_permit = preauth_permit;
 
-    let Some((client_id, record, body_harnesses)) =
+    let Some((client_id, record, body_harnesses, sas)) =
         authenticate_and_hello(sink, stream, id, &params, state, &deps).await
     else {
         return;
@@ -228,10 +239,13 @@ pub async fn handle_authenticated<Snk, St>(
 
     let AuthDeps { registry, roster, peer, .. } = deps;
 
+    // Issue #339: the pairing SAS, derived independently on this side from
+    // the handshake just completed — logged (never sent) so the operator can
+    // compare it by eye against what this body's own console shows.
     log(
         Severity::Info,
         "conn_connected",
-        vec![("client_id", client_id.clone()), ("hostname", params.hostname.clone()), ("peer", peer.to_string())],
+        vec![("client_id", client_id.clone()), ("hostname", params.hostname.clone()), ("peer", peer.to_string()), ("sas", sas)],
     );
 
     // Issue #184's supersede-on-reauth: if this token already has a live
