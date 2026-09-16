@@ -473,22 +473,116 @@ fn say_to_disconnected_body_is_not_connected() {
     assert!(err.contains("not connected") || err.contains("not_connected"), "got: {err:?}");
 }
 
+/// Issue #347 investigation (2026-09-15): this test failed once on
+/// GitHub-hosted `macos-latest` CI (`gh run view 35032427100 --log-failed`,
+/// job 104593758252, a genuinely GitHub-hosted leg — `gh api .../jobs/
+/// 104593758252` shows `runner_name: "GitHub Actions 1000015017"`, labels
+/// `["macos-latest"]`, not a self-hosted runner) —
+/// `assertion left == right failed: … left: Some(0) right: Some(1)`, i.e.
+/// `say` exited 0 (success) instead of 1/`connection_lost`. A same-commit
+/// rerun (job 104594999262) passed. No prior history for this test existed
+/// (unlike #345), so the first question was whether this was a genuine
+/// one-off or a silently-recurring flake: `gh run list --workflow ci.yml
+/// --limit 100` plus `gh run view --log-failed` on all 46 failed runs found
+/// in that window shows this test appearing (and passing) in 15 of them and
+/// failing in exactly one — a real one-off, not a hidden pattern.
+///
+/// **Root cause, confirmed by reading the code, not guessed:** the old
+/// version of this test used `say_full_in_background` (the same helper
+/// every busy/queue test in this file shares) to wait for the roster to
+/// report `alpha` as `working`/`stalled` before calling `kill_tree` — but
+/// that wait is not free: each poll iteration (`roster_json`, in
+/// `support/cmds.rs`) spawns a brand-new `holler roster --json` *subprocess*
+/// and waits for a full hub round trip, not an in-memory check. The old
+/// `--slow --chunks 10` turn gives only a **fixed** ~2000ms (10 × 200ms)
+/// window between turn-start and natural completion, and `holler-hub`'s
+/// `circuit.rs` (`pending_says`/`fail_pending`, `circuit/dispatch.rs`
+/// `handle_response`) only reports `connection_lost` for a `say` still
+/// pending when the body's socket read fails — a `say` whose turn already
+/// resolved (the body sent its terminal response and `pending_says.remove`
+/// already fired) legitimately, correctly exits 0 no matter when the body
+/// is killed afterward. So the real race was never "does `kill_tree` land
+/// fast enough after the confirmation poll returns" (that gap is one
+/// synchronous call, effectively instant) — it was "does the *poll itself*,
+/// whose own per-call cost is unbounded under contention, finish confirming
+/// `working` before eating into the fixed 2000ms budget the turn needs to
+/// stay incomplete." The failing job's own log
+/// (`gh api .../jobs/104593758252/logs`) shows exactly that contention:
+/// `cargo test --workspace`'s "Workspace suite" step runs every test
+/// *within* one integration-test binary concurrently (issue #345's own
+/// investigation already established binaries themselves run strictly
+/// sequentially, but not the tests inside one) — the failing run's log shows
+/// four other `talk_test.rs` tests (each spinning up its own hub/body/
+/// `stub-acp`/CLI subprocesses) completing within the same ~1.3s window
+/// this test's `say` process logged its own startup line and then failed,
+/// on a shared, historically ~2-4 vCPU GitHub-hosted `macos-latest` runner.
+///
+/// **The fix:** stop competing against a fixed-duration natural-completion
+/// window at all. `alpha` now runs stub-acp's `--ask-permission` gate
+/// (`crates/holler-cli/tests/stub-acp/main.rs`'s `advance`, already used by
+/// `answer_cli_test.rs`/`session_manager_test.rs`/`wait_test.rs`): every
+/// turn to a gated session announces `running` (→ roster `working`), streams
+/// exactly one chunk, then raises a permission request and parks at
+/// `input-required` **forever** — it cannot resolve to anything else on its
+/// own; only an `answer` (never sent here) or a cancel can move it, and this
+/// test does neither. Once the roster is observed to be `working`/`stalled`/
+/// `input-required` for `alpha`, the `say` is therefore *provably* still in
+/// `holler-hub`'s `pending_says` — no amount of scheduler delay in the poll
+/// that observes it can let the turn complete before `kill_tree` fires,
+/// closing the race rather than merely narrowing it (unlike widening
+/// `--chunks`/`--slow` further, which the #347 brief explicitly ruled out
+/// without evidence it was the real mechanism — and per the analysis above,
+/// it never was: the missing piece was always the poll's own unbounded
+/// cost, not too-short a turn).
+///
+/// One consequence of switching to `--ask-permission`: `answer_cli_test.rs`'s
+/// own doc already discovered that a gated session's *every* turn (including
+/// the first) raises the gate, so the usual `say_ready`-based warm-up (which
+/// waits for a *completed* reply) would itself park forever. This test
+/// instead waits for `alpha`'s bare presence on the roster first (mirroring
+/// `answer_cli_test.rs::wait_until_session_present`), then, after firing the
+/// background `say`, waits for `working`/`stalled`/`input-required` (a
+/// superset of what `say_full_in_background` accepts, since that shared
+/// helper's own doc deliberately excludes `input-required` for its other,
+/// non-gated callers — so this test polls the roster directly rather than
+/// reusing it).
 #[test]
 fn body_drop_mid_turn_is_connection_lost_not_unreachable() {
     let hub_state = StateDir::new();
     let body_state = StateDir::new();
     let hub = Hub::start(&hub_state);
-    let mut body = start_body(&hub_state, &body_state, &hub, &[("alpha", &["--slow", "--chunks", "10"])]);
+    let mut body = start_body(&hub_state, &body_state, &hub, &[("alpha", &["--ask-permission", "--chunks", "2"])]);
 
-    let warm = say_ready(&hub_state, "alpha", "warm up", Duration::from_secs(10));
-    assert!(warm.status.success(), "stderr: {}", stderr_of(&warm));
+    let suffix = "/alpha";
+    wait_for(Duration::from_secs(10), || {
+        let rows = roster_json(&hub_state)["rows"].as_array()?.clone();
+        rows.iter().any(|r| r["name"].as_str().is_some_and(|n| n.ends_with(suffix))).then_some(())
+    })
+    .unwrap_or_else(|| panic!("`alpha` never appeared on the roster within 10s: {:?}", roster_json(&hub_state)));
 
-    let handle = say_full_in_background(
-        &hub_state,
-        "alpha",
-        owned(&["--timeout", "20s", "alpha", "a long turn, about to be cut off"]),
-        Duration::from_secs(10),
-    );
+    let state_path = hub_state.path().to_path_buf();
+    let handle = std::thread::spawn(move || {
+        say_full(&state_path, &["--timeout", "20s", "alpha", "a long turn, about to be cut off"])
+    });
+
+    // `input-required` (the gate `--ask-permission` parks the turn in after
+    // its first chunk) is a quiescent dead end this test never answers, so
+    // — unlike the old `working`/`stalled`-only wait — observing it here is
+    // not a snapshot of a narrowing window: it stays true until `kill_tree`
+    // below, no matter how long this poll itself took to land.
+    wait_for(Duration::from_secs(10), || {
+        let rows = roster_json(&hub_state)["rows"].as_array()?.clone();
+        rows.iter()
+            .any(|r| {
+                r["name"].as_str().is_some_and(|n| n.ends_with(suffix))
+                    && matches!(r["state"].as_str(), Some("working") | Some("stalled") | Some("input-required"))
+            })
+            .then_some(())
+    })
+    .unwrap_or_else(|| {
+        panic!("background `say alpha` never reached a pending state on the roster within 10s: {:?}", roster_json(&hub_state))
+    });
+
     support::kill_tree(body.child_mut());
 
     let out = handle.join().expect("say thread");
