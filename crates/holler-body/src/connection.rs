@@ -329,7 +329,7 @@ async fn connect_and_serve(
     };
     let (mut sink, mut stream) = ws.split();
 
-    if let Err(reason) = handshake::authenticate(&mut sink, &mut stream, identity).await {
+    if let Err(reason) = handshake::authenticate(&mut sink, &mut stream, identity, state_root).await {
         return reason;
     }
     if let Err(reason) = handshake::hello_exchange(&mut sink, &mut stream, identity, configs).await {

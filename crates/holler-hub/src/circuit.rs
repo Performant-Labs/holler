@@ -1,9 +1,10 @@
 //! The hub side of a **re-authenticated** circuit (issue #182): the
 //! `circuit/authenticate` → `circuit/prove` → `circuit/hello` handshake
-//! (issue #323's nonce challenge-response replaced a bare credential check),
-//! then the live session loop that answers presence notifications and lets
-//! the control socket (`hub token ping`) reach the body over this exact
-//! connection.
+//! (issue #338's Noise XK handshake replaced #323's Ed25519-signed
+//! transcript challenge-response, which had itself replaced a bare
+//! credential check), then the live session loop that answers presence
+//! notifications and lets the control socket (`hub token ping`) reach the
+//! body over this exact connection.
 //!
 //! `circuit/join` (story #176, [`crate::join`]) is the one-shot bootstrap and
 //! stays completely separate: it never leads into talk on the same socket.
@@ -68,10 +69,10 @@ use dispatch::PendingSay;
 /// the body's answer to the hub's own hello, before giving up on the socket.
 const HELLO_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
-/// How long the hub waits, after issuing a `circuit/authenticate` nonce
-/// challenge, for the body's `circuit/prove` (issue #323, [`auth`]). Same
-/// budget as [`HELLO_TIMEOUT`] — both are "one more round trip before we
-/// give up on a socket that has not yet proven anything."
+/// How long the hub waits, after issuing message 2 of the Noise XK
+/// handshake, for the body's `circuit/prove` (message 3, issue #338,
+/// [`auth`]). Same budget as [`HELLO_TIMEOUT`] — both are "one more round
+/// trip before we give up on a socket that has not yet proven anything."
 const PROVE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// The heartbeat/presence interval a body is expected to keep to (mirrors
@@ -148,12 +149,12 @@ fn log_frame(direction: LogDirection, method: &'static str, id: Option<&str>, ra
     });
 }
 
-/// Run the `circuit/authenticate` → `circuit/prove` challenge-response
-/// (issue #323, [`auth`]) followed by the hello exchange. Every failure path
+/// Run the `circuit/authenticate` → `circuit/prove` Noise XK handshake
+/// (issue #338, [`auth`]) followed by the hello exchange. Every failure path
 /// has already replied with the matching error (always `-32002
-/// unauthenticated` for the challenge-response itself — the body's
-/// connection loop treats that code, and only that code, as "do not retry")
-/// and closed the socket by the time this returns `None`. On success,
+/// unauthenticated` for the handshake itself — the body's connection loop
+/// treats that code, and only that code, as "do not retry") and closed the
+/// socket by the time this returns `None`. On success,
 /// returns the bound token's client id, its record, and the harnesses the
 /// body advertised in its hello — [`handle_authenticated`] takes it from
 /// there to bring the session live.
@@ -173,19 +174,16 @@ where
 
     auth::begin_authenticate(sink, id, params, state, peer_ip, deps).await?;
 
-    let nonce = match auth::random_nonce() {
-        Ok(n) => n,
-        Err(_) => {
-            auth::refuse_unauthenticated(sink, id, "authentication failed: could not mint a challenge", &params.token_id, peer_ip, deps).await;
-            return None;
-        }
+    let mut handshake = auth::begin_noise_handshake(sink, id, params, state, peer_ip, deps).await?;
+    let Ok(msg2) = handshake.write_message() else {
+        auth::refuse_unauthenticated(sink, id, "authentication failed: could not continue the handshake", &params.token_id, peer_ip, deps).await;
+        return None;
     };
-    let nonce_hex = hex::encode(nonce);
-    let challenge = serde_json::to_value(holler_proto::AuthChallenge { nonce: nonce_hex.clone() }).unwrap_or_default();
+    let challenge = serde_json::to_value(holler_proto::AuthChallenge { message: hex::encode(msg2) }).unwrap_or_default();
     reply(sink, id, challenge).await.ok()?;
 
     let (prove_id, prove) = auth::await_prove(sink, stream, &params.token_id, peer_ip, deps).await?;
-    let record = auth::finish_prove(sink, &prove_id, params, &prove, &nonce_hex, state, deps).await?;
+    let record = auth::finish_prove(sink, &prove_id, params, &prove, &mut handshake, state, deps).await?;
 
     let ok = serde_json::to_value(holler_proto::AuthOk { ok: true }).unwrap_or_default();
     reply(sink, Some(prove_id.as_str()), ok).await.ok()?;

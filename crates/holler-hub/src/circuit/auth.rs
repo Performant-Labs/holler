@@ -1,16 +1,26 @@
-//! The `circuit/authenticate` → `circuit/prove` challenge-response (issue
-//! #323): split out of `circuit.rs` proper once this file's own growth (the
-//! nonce challenge, the proof verification, and their shared failure-funnel)
+//! The `circuit/authenticate` → `circuit/prove` Noise XK handshake (issue
+//! #338): split out of `circuit.rs` proper once this file's own growth (the
+//! handshake setup, the proof verification, and their shared failure-funnel)
 //! pushed it past the workspace's 900-line build guard (`scripts/lint.sh`
 //! check 4) — a pure relocation, no behavior change of its own. Mirrors
 //! `circuit/dispatch.rs`'s own split for the same reason.
 //!
+//! Replaces issue #323's Ed25519-signed transcript challenge-response with
+//! `Noise_XK_25519_ChaChaPoly_BLAKE2s` (`holler_proto::noise`): message 1
+//! (`e, es`) arrives as `circuit/authenticate`'s own params, message 2 (`e,
+//! ee`) is that request's result, and message 3 (`s, se`) is `circuit/
+//! prove`'s params. The hub is the Noise **responder** — it does not know
+//! the body's static key in advance (that is what `K` in XK means for the
+//! *initiator* only), so it learns it from message 3 and compares it against
+//! the token's registered `body_x25519_pubkey` ([`finish_prove`]) — the
+//! DH-authenticated equivalent of the old Ed25519 signature check.
+//!
 //! [`handle_authenticated`] (still in `circuit.rs`) orchestrates the three
 //! steps here plus the hello exchange and the live session loop; this module
-//! owns only the challenge-response itself.
+//! owns only the handshake itself.
 
-use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use futures_util::{Sink, Stream};
+use holler_proto::noise::HandshakeXk;
 use holler_proto::{Authenticate, Code};
 use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 
@@ -39,14 +49,15 @@ pub struct AuthDeps<'a> {
 /// failure (keyed by the transport IP, never the claimed hostname — that is
 /// unauthenticated input), send the wire refusal, close the socket, and drop
 /// the roster row (issue #186: an unauthenticated body is permanently gone —
-/// a bad token id/signature can never succeed on retry with the same
+/// a bad token id/handshake can never succeed on retry with the same
 /// material, so the TTL would only keep a stale row around).
 ///
 /// The single funnel every failure branch of the `circuit/authenticate` →
-/// `circuit/prove` handshake (issue #323) goes through, so the four-plus
-/// distinct failure points in [`begin_authenticate`]/[`await_prove`]/
-/// [`finish_prove`] don't each repeat this five-line sequence (keeping every
-/// one of those under clippy's cognitive-complexity gate).
+/// `circuit/prove` handshake goes through, so the several distinct failure
+/// points in [`begin_authenticate`]/[`begin_noise_handshake`]/
+/// [`await_prove`]/[`finish_prove`] don't each repeat this five-line
+/// sequence (keeping every one of those under clippy's cognitive-complexity
+/// gate).
 pub(super) async fn refuse_unauthenticated<Snk>(
     sink: &mut Snk,
     id: Option<&str>,
@@ -65,14 +76,14 @@ pub(super) async fn refuse_unauthenticated<Snk>(
     deps.roster.clear(token_id);
 }
 
-/// Step 1 of `circuit/authenticate` → `circuit/prove` (issue #323): resolve
-/// the bound token record for `params.token_id` — an unknown, unbound,
-/// expired, or revoked token, or one with no registered public key, is
-/// `-32002` via [`refuse_unauthenticated`] (the same fail-shape the old
-/// credential check had: the body's connection loop treats that code, and
-/// only that code, as "do not retry"). No lockout success/reset happens
-/// here — resolving a *token id* proves nothing yet; only a verified
-/// signature does ([`finish_prove`]).
+/// Step 1 of `circuit/authenticate` → `circuit/prove`: resolve the bound
+/// token record for `params.token_id` — an unknown, unbound, expired, or
+/// revoked token, or one with no registered X25519 public key, is `-32002`
+/// via [`refuse_unauthenticated`] (the same fail-shape the old credential
+/// check had: the body's connection loop treats that code, and only that
+/// code, as "do not retry"). No lockout success/reset happens here —
+/// resolving a *token id* proves nothing yet; only a completed, key-matched
+/// handshake does ([`finish_prove`]).
 pub(super) async fn begin_authenticate<Snk>(
     sink: &mut Snk,
     id: Option<&str>,
@@ -93,18 +104,53 @@ where
     }
 }
 
-/// The length, in bytes, of a `circuit/authenticate` challenge nonce.
-const NONCE_BYTES: usize = 32;
-
-/// Draw a fresh, single-use `circuit/authenticate` challenge nonce from the
-/// OS CSPRNG.
-pub(super) fn random_nonce() -> Result<[u8; NONCE_BYTES], getrandom::Error> {
-    let mut buf = [0u8; NONCE_BYTES];
-    getrandom::fill(&mut buf)?;
-    Ok(buf)
+/// Step 2: build this hub's Noise XK **responder** — its own long-lived
+/// X25519 identity (issue #322) as the local key, and a prologue binding
+/// `token_id` ‖ `advertised_url` ‖ [`holler_proto::PROTOCOL_VERSION`]
+/// ([`holler_proto::noise::build_prologue`]) — and process `params.message`
+/// (message 1, `e, es`). Any failure (a malformed hex message, or a
+/// handshake error — most notably a body that pinned the wrong hub key,
+/// which fails right here per [`holler_proto::noise`]'s own module doc) is
+/// `-32002` via [`refuse_unauthenticated`], collapsed to one outcome like
+/// every other shape of "not a valid handshake."
+pub(super) async fn begin_noise_handshake<Snk>(
+    sink: &mut Snk,
+    id: Option<&str>,
+    params: &Authenticate,
+    state: &HubState,
+    peer_ip: &str,
+    deps: &AuthDeps<'_>,
+) -> Option<HandshakeXk>
+where
+    Snk: Sink<Message, Error = WsError> + Unpin,
+{
+    let hub_secret = match crate::identity::ensure(state) {
+        Ok(identity) => identity.secret_bytes(),
+        Err(e) => {
+            refuse_unauthenticated(sink, id, &format!("authentication failed: could not resolve hub identity: {e}"), &params.token_id, peer_ip, deps).await;
+            return None;
+        }
+    };
+    let Ok(msg1) = hex::decode(&params.message) else {
+        refuse_unauthenticated(sink, id, "authentication failed: malformed handshake message", &params.token_id, peer_ip, deps).await;
+        return None;
+    };
+    let prologue = holler_proto::noise::build_prologue(holler_proto::PROTOCOL_VERSION, &params.token_id, &params.advertised_url);
+    let mut handshake = match HandshakeXk::responder(&hub_secret, &prologue) {
+        Ok(h) => h,
+        Err(_) => {
+            refuse_unauthenticated(sink, id, "authentication failed: could not start the handshake", &params.token_id, peer_ip, deps).await;
+            return None;
+        }
+    };
+    if handshake.read_message(&msg1).is_err() {
+        refuse_unauthenticated(sink, id, "authentication failed: bad handshake message", &params.token_id, peer_ip, deps).await;
+        return None;
+    }
+    Some(handshake)
 }
 
-/// Step 2: await the body's `circuit/prove` (the second and last frame of
+/// Step 3: await the body's `circuit/prove` (the third and final frame of
 /// this handshake) within [`PROVE_TIMEOUT`], and return its parsed params.
 /// Any shape failure (timeout, wrong method, unparsable params, or a
 /// `token_id` that does not match the preceding `circuit/authenticate`) is
@@ -147,20 +193,26 @@ where
     Some((prove_id.clone(), prove))
 }
 
-/// Step 3: verify the body's proof — re-fetch the bound record (catching a
-/// revoke/expiry race between the challenge and the proof: the nonce
-/// challenge itself carries no authority), rebuild the exact transcript this
-/// connection's nonce/hostname/`advertised_url` imply
-/// ([`holler_proto::transcript::build`]), and check the Ed25519 signature
-/// against the record's registered `body_pubkey`. Success resets this peer's
-/// lockout count (issue #184: "a successful auth resets the counter") — the
-/// first point in the whole handshake where that is actually earned.
+/// Step 4: complete the handshake — re-fetch the bound record (catching a
+/// revoke/expiry race between message 1 and message 3: [`begin_noise_
+/// handshake`] carries no authority of its own), process `prove.message`
+/// (message 3, `s, se`) against the in-progress `handshake`, and — once
+/// finished — compare the static key it learned
+/// ([`HandshakeXk::remote_static_hex`]) against the record's registered
+/// `body_x25519_pubkey`. This comparison is what actually ties the proof to
+/// *this* token: Noise XK's responder never knows the initiator's key in
+/// advance, so a handshake can complete successfully with *any* self-
+/// consistent keypair — only the equality check below makes it a proof of
+/// possession of the *expected* key, not just *a* key. Success resets this
+/// peer's lockout count (issue #184: "a successful auth resets the
+/// counter") — the first point in the whole handshake where that is
+/// actually earned.
 pub(super) async fn finish_prove<Snk>(
     sink: &mut Snk,
     prove_id: &str,
     params: &Authenticate,
     prove: &holler_proto::Prove,
-    nonce_hex: &str,
+    handshake: &mut HandshakeXk,
     state: &HubState,
     deps: &AuthDeps<'_>,
 ) -> Option<crate::token::Record>
@@ -175,21 +227,26 @@ where
             return None;
         }
     };
-    // `bound_record` only ever returns a record with `Some(body_pubkey)` —
-    // `is_none` is unreachable defensively (see that function's own check).
-    let Some(pubkey_hex) = record.body_pubkey.clone() else {
-        refuse_unauthenticated(sink, Some(prove_id), "authentication failed: no public key on record", &params.token_id, peer_ip, deps).await;
+    // `bound_record` only ever returns a record with `Some(body_x25519_pubkey)`
+    // — `is_none` is unreachable defensively (see that function's own check).
+    let Some(expected_pubkey_hex) = record.body_x25519_pubkey.clone() else {
+        refuse_unauthenticated(sink, Some(prove_id), "authentication failed: no X25519 public key on record", &params.token_id, peer_ip, deps).await;
         return None;
     };
-    let transcript = holler_proto::transcript::build(
-        holler_proto::PROTOCOL_VERSION,
-        "body",
-        nonce_hex,
-        &params.token_id,
-        &params.advertised_url,
-    );
-    if !verify_signature(&pubkey_hex, &transcript, &prove.signature) {
-        refuse_unauthenticated(sink, Some(prove_id), "authentication failed: bad signature", &params.token_id, peer_ip, deps).await;
+    let Ok(msg3) = hex::decode(&prove.message) else {
+        refuse_unauthenticated(sink, Some(prove_id), "authentication failed: malformed handshake message", &params.token_id, peer_ip, deps).await;
+        return None;
+    };
+    if handshake.read_message(&msg3).is_err() {
+        refuse_unauthenticated(sink, Some(prove_id), "authentication failed: bad handshake message", &params.token_id, peer_ip, deps).await;
+        return None;
+    }
+    if !handshake.is_finished() {
+        refuse_unauthenticated(sink, Some(prove_id), "authentication failed: incomplete handshake", &params.token_id, peer_ip, deps).await;
+        return None;
+    }
+    if handshake.remote_static_hex().as_deref() != Some(expected_pubkey_hex.as_str()) {
+        refuse_unauthenticated(sink, Some(prove_id), "authentication failed: static key mismatch", &params.token_id, peer_ip, deps).await;
         return None;
     }
     if let Ok(ip) = peer_ip.parse() {
@@ -198,112 +255,68 @@ where
     Some(record)
 }
 
-/// Verify an Ed25519 signature (hex) over `transcript` against a hex-encoded
-/// public key. `false` on any malformed input (bad hex, wrong length, an
-/// invalid curve point) as well as a genuine signature mismatch — every
-/// shape of "not a valid proof" is one outcome to the caller.
-fn verify_signature(pubkey_hex: &str, transcript: &[u8], signature_hex: &str) -> bool {
-    let Ok(pubkey_bytes) = hex::decode(pubkey_hex) else { return false };
-    let Ok(pubkey_arr) = <[u8; 32]>::try_from(pubkey_bytes.as_slice()) else { return false };
-    let Ok(verifying_key) = VerifyingKey::from_bytes(&pubkey_arr) else { return false };
-    let Ok(sig_bytes) = hex::decode(signature_hex) else { return false };
-    let Ok(sig_arr) = <[u8; 64]>::try_from(sig_bytes.as_slice()) else { return false };
-    let signature = Signature::from_bytes(&sig_arr);
-    verifying_key.verify(transcript, &signature).is_ok()
-}
-
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable)] // #338
 mod tests {
-    use super::verify_signature;
-    use ed25519_dalek::{Signer, SigningKey};
-    use holler_proto::{AuthChallenge, Authenticate, Prove};
+    use holler_proto::noise::{build_prologue, HandshakeXk};
+    use holler_proto::{Authenticate, AuthChallenge, Prove};
+    use x25519_dalek::{PublicKey, StaticSecret};
 
-    fn keypair(seed: u8) -> SigningKey {
-        SigningKey::from_bytes(&[seed; 32])
+    fn keypair(seed: u8) -> ([u8; 32], [u8; 32]) {
+        let private = [seed; 32];
+        let secret = StaticSecret::from(private);
+        let public = *PublicKey::from(&secret).as_bytes();
+        (private, public)
     }
 
-    /// Issue #323's `proof_bound_to_transcript_rejects_role_or_version_
-    /// mismatch`: a signature computed over a transcript with a different
-    /// protocol version or role than the hub itself reconstructs (always
-    /// [`holler_proto::PROTOCOL_VERSION`] and `"body"`) must fail to verify —
-    /// the hub never trusts a version/role the peer claims, only the ones it
-    /// builds itself.
+    /// Issue #338's Noise-XK-equivalent of #323's `authenticate_is_
+    /// challenge_response_no_secret_on_wire`: serialize the actual `circuit/
+    /// authenticate` → `circuit/prove` wire frames — the body's `Authenticate`
+    /// request, the hub's `AuthChallenge` result, and the body's `Prove`
+    /// reply — from a real, completed Noise XK handshake between real hub and
+    /// body keypairs (not mocks). Neither frame carries a field or value
+    /// shaped like a bearer secret ([`holler_proto::key_is_secret`]/
+    /// [`holler_proto::value_is_secret`], the same gate the wire-logging
+    /// redactor uses), and — the direct check this scheme actually needs, per
+    /// [`holler_proto::noise`]'s own module doc — neither party's private key
+    /// hex ever appears in any of the three frames.
     #[test]
-    fn proof_bound_to_transcript_rejects_role_or_version_mismatch() {
-        let signing_key = keypair(42);
-        let pubkey_hex = hex::encode(signing_key.verifying_key().to_bytes());
-        let real_transcript = holler_proto::transcript::build(2, "body", "deadbeef", "tok_1", "wss://hub");
+    fn authenticate_is_noise_handshake_no_secret_on_wire() {
+        let (hub_secret, hub_public) = keypair(1);
+        let (body_secret, body_public) = keypair(2);
+        let advertised_url = "wss://hub.example";
+        let token_id = "tok_1";
+        let prologue = build_prologue(holler_proto::PROTOCOL_VERSION, token_id, advertised_url);
 
-        // A signature over the *right* transcript verifies.
-        let good_sig = signing_key.sign(&real_transcript);
-        assert!(verify_signature(&pubkey_hex, &real_transcript, &hex::encode(good_sig.to_bytes())));
+        let mut initiator = HandshakeXk::initiator(&body_secret, &hub_public, &prologue).expect("build initiator");
+        let mut responder = HandshakeXk::responder(&hub_secret, &prologue).expect("build responder");
 
-        // A signature over a transcript with a different protocol version…
-        let wrong_version = holler_proto::transcript::build(3, "body", "deadbeef", "tok_1", "wss://hub");
-        let sig_wrong_version = signing_key.sign(&wrong_version);
-        assert!(
-            !verify_signature(&pubkey_hex, &real_transcript, &hex::encode(sig_wrong_version.to_bytes())),
-            "a signature over a mismatched protocol_version must not verify against the real transcript"
-        );
-
-        // …or a different role (e.g. a future "hub" signature)…
-        let wrong_role = holler_proto::transcript::build(2, "hub", "deadbeef", "tok_1", "wss://hub");
-        let sig_wrong_role = signing_key.sign(&wrong_role);
-        assert!(
-            !verify_signature(&pubkey_hex, &real_transcript, &hex::encode(sig_wrong_role.to_bytes())),
-            "a signature over a mismatched role must not verify against the real transcript"
-        );
-    }
-
-    /// Issue #323's `authenticate_is_challenge_response_no_secret_on_wire`:
-    /// serialize the actual `circuit/authenticate` → `circuit/prove` wire
-    /// frames — the body's `Authenticate` request, the hub's `AuthChallenge`
-    /// result, and the body's `Prove` reply — with real (non-mock) values: a
-    /// nonce drawn from [`random_nonce`] and a genuine Ed25519 signature over
-    /// the real [`holler_proto::transcript::build`] transcript. None of the
-    /// three frames may carry a field or a string value shaped like a bearer
-    /// secret/credential. This uses the same `key_is_secret`/`value_is_secret`
-    /// gate `holler_proto::log`'s wire-frame redactor uses to decide what must
-    /// never reach a debug log (mirroring how
-    /// `hub_store_contains_no_secret_material_for_a_bound_token`,
-    /// `token_store_test.rs`, checks the store record for a `credential` key)
-    /// — applied here to the frames themselves, live, not just "the struct
-    /// definition has no `credential` field" by inspection.
-    #[test]
-    fn authenticate_is_challenge_response_no_secret_on_wire() {
+        let msg1 = initiator.write_message().expect("write message 1");
         let authenticate = Authenticate {
-            token_id: "tok_1".into(),
+            token_id: token_id.into(),
             hostname: "kiwi".into(),
-            advertised_url: "wss://hub".into(),
+            advertised_url: advertised_url.into(),
+            message: hex::encode(&msg1),
         };
+        responder.read_message(&msg1).expect("process message 1");
 
-        // This module denies `unwrap`/`expect`/`panic!` (its other tests
-        // never need them, so there is no blanket allow attribute on this
-        // `mod tests`, unlike `join.rs`'s) — every fallible step below is
-        // surfaced through `assert!` instead, with `unwrap_or_default`
-        // supplying a harmless placeholder for the (never-taken, in a
-        // passing run) failure path.
-        let nonce_result = super::random_nonce();
-        assert!(nonce_result.is_ok(), "draw a real challenge nonce: {nonce_result:?}");
-        let nonce_hex = hex::encode(nonce_result.unwrap_or_default());
-        let challenge = AuthChallenge { nonce: nonce_hex.clone() };
+        let msg2 = responder.write_message().expect("write message 2");
+        let challenge = AuthChallenge { message: hex::encode(&msg2) };
+        initiator.read_message(&msg2).expect("process message 2");
 
-        let signing_key = keypair(7);
-        let transcript = holler_proto::transcript::build(
-            holler_proto::PROTOCOL_VERSION,
-            "body",
-            &nonce_hex,
-            &authenticate.token_id,
-            &authenticate.advertised_url,
-        );
-        let signature = signing_key.sign(&transcript);
-        let prove = Prove { token_id: authenticate.token_id.clone(), signature: hex::encode(signature.to_bytes()) };
+        let msg3 = initiator.write_message().expect("write message 3");
+        let prove = Prove { token_id: token_id.into(), message: hex::encode(&msg3) };
+        responder.read_message(&msg3).expect("process message 3");
+
+        assert!(responder.is_finished(), "sanity: the handshake must complete");
+        assert_eq!(responder.remote_static_hex(), Some(hex::encode(body_public)), "sanity: the responder must learn the real body key");
 
         let raw_frames = [
             ("circuit/authenticate params", serde_json::to_value(&authenticate)),
             ("circuit/authenticate result", serde_json::to_value(&challenge)),
             ("circuit/prove params", serde_json::to_value(&prove)),
         ];
+        let secrets = [hex::encode(hub_secret), hex::encode(body_secret)];
         for (name, result) in raw_frames {
             assert!(result.is_ok(), "{name} failed to serialize: {result:?}");
             let wire = result.unwrap_or_default();
@@ -311,6 +324,10 @@ mod tests {
             assert!(obj.is_some(), "{name} did not serialize as a JSON object: {wire}");
             let obj = obj.cloned().unwrap_or_default();
             assert!(!obj.is_empty(), "{name} serialized to an empty object");
+            let wire_str = wire.to_string();
+            for secret_hex in &secrets {
+                assert!(!wire_str.contains(secret_hex), "{name} must never contain private key hex: {wire_str}");
+            }
             for (key, value) in &obj {
                 assert!(!holler_proto::key_is_secret(key), "{name} carries a secret-shaped field {key:?}");
                 if let Some(s) = value.as_str() {
@@ -320,49 +337,81 @@ mod tests {
         }
     }
 
-    /// Issue #323's `replayed_proof_from_a_different_nonce_is_rejected`: a
-    /// signature that is valid over one challenge's transcript (nonce 1) must
-    /// be rejected when replayed against a *second*, later challenge minted
-    /// for the same token/client (nonce 2). This is distinct from
-    /// [`proof_bound_to_transcript_rejects_role_or_version_mismatch`] above,
-    /// which fixes the transcript and varies role/version — here the
-    /// transcript's only difference is the nonce, proving that nonce
-    /// freshness alone (not merely role/version binding) defeats replay of a
-    /// previously-valid proof.
+    /// Issue #338's Noise-XK-equivalent of #323's `replayed_proof_from_a_
+    /// different_nonce_is_rejected`: a full transcript captured from one
+    /// completed handshake attempt is replayed against a **fresh** hub-side
+    /// responder for the same token/keys — the shape of a real reconnect
+    /// attempt an attacker later replays into. Message 1 alone replays
+    /// harmlessly, but the fresh responder's own message 2 always carries a
+    /// newly-drawn ephemeral key (nothing before it in the transcript
+    /// determines it), so the captured message 3 — bound via the running
+    /// transcript hash to the *original* message 2 — cannot verify against
+    /// this attempt's different one. See `holler_proto::noise`'s own
+    /// `replay_rejected_by_fresh_responder_ephemeral` for the crypto-layer
+    /// pin this test exercises end to end through this module's own
+    /// `begin_noise_handshake`-shaped construction.
     #[test]
-    fn replayed_proof_from_a_different_nonce_is_rejected() {
-        let signing_key = keypair(9);
-        let pubkey_hex = hex::encode(signing_key.verifying_key().to_bytes());
+    fn replayed_handshake_from_an_earlier_attempt_is_rejected() {
+        let (hub_secret, hub_public) = keypair(3);
+        let (body_secret, _body_public) = keypair(4);
+        let advertised_url = "wss://hub.example";
+        let token_id = "tok_1";
+        let prologue = build_prologue(holler_proto::PROTOCOL_VERSION, token_id, advertised_url);
 
-        // Cycle 1: a genuine, successful challenge/prove.
-        let first_transcript = holler_proto::transcript::build(2, "body", "aaaaaaaa", "tok_1", "wss://hub");
-        let first_signature = signing_key.sign(&first_transcript);
+        // Attempt 1: a genuine, successful handshake. Capture messages 1 and 3.
+        let mut initiator_1 = HandshakeXk::initiator(&body_secret, &hub_public, &prologue).expect("build initiator");
+        let mut responder_1 = HandshakeXk::responder(&hub_secret, &prologue).expect("build responder");
+        let captured_msg1 = initiator_1.write_message().expect("write message 1");
+        responder_1.read_message(&captured_msg1).expect("attempt 1 message 1 accepted");
+        let msg2_1 = responder_1.write_message().expect("write message 2");
+        initiator_1.read_message(&msg2_1).expect("attempt 1 message 2 accepted");
+        let captured_msg3 = initiator_1.write_message().expect("write message 3");
+        responder_1.read_message(&captured_msg3).expect("attempt 1 completes cleanly");
+
+        // Attempt 2: a brand-new connection (the shape of `begin_noise_
+        // handshake` building a fresh responder per socket) — the attacker
+        // replays attempt 1's captured message 1 and message 3 into it.
+        let mut responder_2 = HandshakeXk::responder(&hub_secret, &prologue).expect("build responder");
+        assert!(responder_2.read_message(&captured_msg1).is_ok(), "message 1 alone replays harmlessly");
+        let _fresh_msg2 = responder_2.write_message().expect("write message 2");
         assert!(
-            verify_signature(&pubkey_hex, &first_transcript, &hex::encode(first_signature.to_bytes())),
-            "sanity: the first proof verifies against its own (first) transcript"
+            responder_2.read_message(&captured_msg3).is_err(),
+            "a captured message 3 from an earlier attempt must not verify against a fresh attempt's different message 2"
         );
-
-        // Cycle 2: a fresh challenge for the same token/client mints a new nonce.
-        let second_transcript = holler_proto::transcript::build(2, "body", "bbbbbbbb", "tok_1", "wss://hub");
-
-        // Replaying cycle 1's signature against cycle 2's transcript must fail
-        // — a captured proof from one connection attempt is useless against a
-        // later one, because each attempt's nonce is unique and never reused.
-        assert!(
-            !verify_signature(&pubkey_hex, &second_transcript, &hex::encode(first_signature.to_bytes())),
-            "a proof signed over an earlier nonce must not verify against a later challenge's transcript"
-        );
+        assert!(!responder_2.is_finished(), "the replayed attempt must never report finished");
     }
 
-    /// A signature from a keypair other than the one whose public key is on
-    /// record never verifies — the base case every other rejection builds on.
+    /// A handshake that completes cryptographically with a *self-consistent*
+    /// but *unregistered* keypair must still be rejected — pins the
+    /// application-level comparison [`super::finish_prove`] performs
+    /// (`remote_static_hex` vs. the token's registered `body_x25519_pubkey`),
+    /// the property this module's own doc calls out as the piece Noise XK's
+    /// crypto layer alone does not provide.
     #[test]
-    fn wrong_keypair_never_verifies() {
-        let registered = keypair(1);
-        let attacker = keypair(2);
-        let pubkey_hex = hex::encode(registered.verifying_key().to_bytes());
-        let transcript = holler_proto::transcript::build(2, "body", "aa", "tok_1", "wss://hub");
-        let sig = attacker.sign(&transcript);
-        assert!(!verify_signature(&pubkey_hex, &transcript, &hex::encode(sig.to_bytes())));
+    fn wrong_body_key_completes_the_handshake_but_fails_the_registered_key_comparison() {
+        let (hub_secret, hub_public) = keypair(5);
+        let (attacker_secret, attacker_public) = keypair(50);
+        let registered_body_public = keypair(6).1;
+        let advertised_url = "wss://hub.example";
+        let token_id = "tok_1";
+        let prologue = build_prologue(holler_proto::PROTOCOL_VERSION, token_id, advertised_url);
+
+        let mut initiator = HandshakeXk::initiator(&attacker_secret, &hub_public, &prologue).expect("build initiator");
+        let mut responder = HandshakeXk::responder(&hub_secret, &prologue).expect("build responder");
+        let msg1 = initiator.write_message().expect("write message 1");
+        responder.read_message(&msg1).expect("message 1 accepted");
+        let msg2 = responder.write_message().expect("write message 2");
+        initiator.read_message(&msg2).expect("message 2 accepted");
+        let msg3 = initiator.write_message().expect("write message 3");
+        responder.read_message(&msg3).expect("message 3 accepted — the crypto handshake itself completes");
+
+        assert!(responder.is_finished(), "the handshake itself completes with any self-consistent keypair");
+        let learned = responder.remote_static_hex();
+        assert_eq!(learned, Some(hex::encode(attacker_public)), "the responder learns the attacker's real key, not a claim");
+        assert_ne!(
+            learned,
+            Some(hex::encode(registered_body_public)),
+            "the application-level comparison against the token's registered key is what actually rejects this — mirrored by finish_prove"
+        );
     }
 }

@@ -11,11 +11,11 @@
 //! on the same socket.
 //!
 //! Issue #337: `body_x25519_pubkey` is a second, distinct long-lived public
-//! key — plumbing for the future Noise XK handshake (#338). Unlike
-//! `body_pubkey` (a fresh Ed25519 keypair every join, tied to this
-//! pairing), the X25519 keypair is a per-device identity
-//! (`crate::x25519_identity`): generated once, persisted `0600`, and loaded
-//! back unchanged on every later call.
+//! key — this body's Noise XK static identity (issue #338,
+//! `connection::handshake`). Unlike `body_pubkey` (a fresh Ed25519 keypair
+//! every join, tied to this pairing), the X25519 keypair is a per-device
+//! identity (`crate::x25519_identity`): generated once, persisted `0600`,
+//! and loaded back unchanged on every later call.
 //!
 //! `--hub-key` is never sent to the hub or checked against anything the wire
 //! says during join itself — it is the out-of-band pin, taken verbatim from
@@ -146,8 +146,9 @@ fn is_valid_hex_pubkey(s: &str) -> bool {
     s.len() == 64 && s.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
 }
 
-/// Issue #337: this body's own long-lived X25519 static keypair — plumbing
-/// for the future Noise XK handshake (#338). Unlike the Ed25519 signing key
+/// Issue #337: this body's own long-lived X25519 static keypair — its Noise
+/// XK static identity (issue #338, `connection::handshake`). Unlike the
+/// Ed25519 signing key
 /// `connect_and_join` mints fresh every join (tied to this pairing), this is
 /// a per-device identity: `ensure` loads it back unchanged if a previous
 /// join (or any other prior use) already generated it, and only
