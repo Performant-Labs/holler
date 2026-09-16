@@ -699,7 +699,9 @@ fn resolve_cid(id: Option<&str>) -> holler_proto::CorrelationId {
 /// Build the hub's status document for a `control/status` answer. Per the
 /// story spec the doc has `role:"hub"`, a `listening` **array** of bound
 /// addresses, an optional `advertise`, `clients` (bodies), `sessions`,
-/// `harnesses_known`, `harnesses_confirmed`, `protocol:2`, and `version`.
+/// `harnesses_known`, `harnesses_confirmed`, `protocol` (the running
+/// build's `holler_proto::PROTOCOL_VERSION`, issue #340 — not a hardcoded
+/// literal, so this doc never lags a version bump), and `version`.
 /// `clients`/`sessions`/`harnesses_known`/`harnesses_confirmed` are now the
 /// live registry's real counts (issue #182 landed `clients`; issue #185 adds
 /// the rest — previously always `0`/`[]`, since no body could yet report a
@@ -730,7 +732,7 @@ async fn status_doc(registry: &Registry) -> serde_json::Value {
 
     serde_json::json!({
         "role": "hub",
-        "protocol": 2,
+        "protocol": holler_proto::PROTOCOL_VERSION,
         "version": version,
         "hostname": hostname,
         "listening": listening,

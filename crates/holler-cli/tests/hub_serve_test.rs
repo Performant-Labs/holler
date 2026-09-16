@@ -264,8 +264,8 @@ fn serve_logs_listening_and_status_answers() {
     );
     assert_eq!(
         doc["protocol"].as_u64(),
-        Some(2),
-        "the hub speaks protocol 2"
+        Some(u64::from(holler_proto::PROTOCOL_VERSION)),
+        "the hub speaks the current protocol version"
     );
 
     hub.stop(Duration::from_secs(5));
