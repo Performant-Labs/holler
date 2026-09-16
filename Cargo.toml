@@ -86,9 +86,18 @@ agent-client-protocol = { version = "2.1.0", features = ["unstable_protocol_v2"]
 # ULID correlation ids and token ids.
 ulid = "1"
 # hmac + sha2: the hub's token store (story #163) stores secrets at rest as
-# HMAC-SHA-256(pepper, secret), never raw. Both consumed by holler-hub.
+# HMAC-SHA-256(pepper, secret), never raw. Consumed by holler-hub. sha2 is
+# also consumed by holler-proto (below) as hkdf's hash parameter.
 hmac = "0.12"
 sha2 = "0.10"
+# hkdf: HKDF-SHA256 derivation of the pairing short authentication string
+# (SAS) from the Noise XK handshake hash under a versioned, distinct label
+# (`holler-sas-v1`, issue #339 per #321's domain-separation principle) —
+# pure computation, no I/O, so it lives in holler-proto alongside `noise`
+# rather than holler-hub's token store (which uses HMAC, not HKDF, and
+# already owns hmac + sha2 above for an unrelated purpose: at-rest secret
+# digests, not key derivation). Consumed by holler-proto.
+hkdf = "0.12"
 # getrandom: 256-bit CSPRNG for join secrets, credentials, token ids, client
 # ids, and the autogen pepper (story #163). Consumed by holler-hub.
 getrandom = "0.3"

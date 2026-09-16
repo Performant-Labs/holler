@@ -36,7 +36,18 @@ use super::{send, timeout_next_envelope, Attempt};
 /// foreign error code, a closed socket, a 10s timeout, a local handshake
 /// step failing to process the hub's own message) maps to
 /// [`Attempt::Dropped`] (retry with backoff).
-pub(super) async fn authenticate<Snk, St>(sink: &mut Snk, stream: &mut St, identity: &BodyIdentity, state_root: &Path) -> Result<(), Attempt>
+///
+/// On success, returns the pairing SAS (issue #339,
+/// [`holler_proto::sas::derive_sas`]) derived from this now-completed
+/// handshake's hash — the caller ([`super::connect_and_serve`]) logs it
+/// alongside `conn_connected` so the operator can compare it against the
+/// hub's own console. A [`holler_proto::sas::SasError`] here would mean this
+/// handshake's own `handshake_hash_hex` was malformed, which cannot happen
+/// for a real, just-finished [`holler_proto::noise::HandshakeXk`] — still
+/// mapped to [`Attempt::Dropped`] (retry) rather than unwrapped, the same
+/// fail-closed discipline every other near-impossible step in this fn
+/// follows.
+pub(super) async fn authenticate<Snk, St>(sink: &mut Snk, stream: &mut St, identity: &BodyIdentity, state_root: &Path) -> Result<String, Attempt>
 where
     Snk: Sink<Message, Error = WsError> + Unpin,
     St: Stream<Item = Result<Message, WsError>> + Unpin,
@@ -129,7 +140,8 @@ where
         .await
         .ok_or_else(|| Attempt::Dropped("no answer to circuit/prove".to_string()))?;
     match env {
-        Envelope::Response { id, .. } if id == prove_cid.as_str() => Ok(()),
+        Envelope::Response { id, .. } if id == prove_cid.as_str() => holler_proto::sas::derive_sas(&handshake.handshake_hash_hex())
+            .map_err(|e| Attempt::Dropped(format!("could not derive the pairing SAS: {e}"))),
         Envelope::Error { error, .. } if error.code == Code::Unauthenticated.jsonrpc() => {
             Err(Attempt::AuthFailed(error.message))
         }
