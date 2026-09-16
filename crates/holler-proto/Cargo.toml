@@ -27,8 +27,16 @@ time = { workspace = true }
 snow = { workspace = true }
 # hex: `noise::HandshakeXk`'s public API is hex strings (the wire-facing
 # form every other module in this crate and its consumers already use for
-# keys/ids), never raw `snow` types (issue #338).
+# keys/ids), never raw `snow` types (issue #338). `sas::derive_sas` follows
+# the same convention (issue #339): its input is the hex handshake hash
+# `noise::HandshakeXk::handshake_hash_hex` already returns.
 hex = { workspace = true }
+# sha2 + hkdf: `sas::derive_sas` (issue #339) derives the pairing SAS via
+# HKDF-SHA256 under a versioned label. See the root Cargo.toml's own comment
+# for why this is a second, distinct consumer of sha2 (holler-hub's token
+# store uses HMAC, not HKDF, for an unrelated purpose).
+sha2 = { workspace = true }
+hkdf = { workspace = true }
 
 [dev-dependencies]
 rstest = { workspace = true }

@@ -33,6 +33,7 @@ pub mod id;
 pub mod log;
 pub mod methods;
 pub mod noise;
+pub mod sas;
 pub mod token;
 pub mod version;
 pub mod vocab;
