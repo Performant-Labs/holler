@@ -15,10 +15,9 @@
 //! afterward — `body_x25519_keypair_survives_restart_and_is_0600` pins this.
 //! The public half rides `circuit/join`'s `body_x25519_pubkey` field
 //! alongside the existing Ed25519 `body_pubkey`; the hub stores it against
-//! the token record. Both keys coexist: Ed25519 for #323's proof-of-
-//! possession, X25519 for the future #338 Noise XK handshake — this issue
-//! is plumbing only (keygen, persistence, registration), not the handshake
-//! state machine itself.
+//! the token record. Issue #338 wires the private half into this body's
+//! Noise XK initiator, replacing the Ed25519-signed challenge-response
+//! `body_pubkey` used to serve in `circuit/authenticate` → `circuit/prove`.
 //!
 //! The private key is **never logged** — this module never hands it to
 //! [`holler_proto::log::emit`] (only the fact that a keypair was generated,
@@ -37,16 +36,11 @@ use x25519_dalek::{PublicKey, StaticSecret};
 const KEY_BYTES: usize = 32;
 
 /// The body's resolved X25519 identity: the public key (hex, the
-/// `circuit/join`-facing form) plus the keypair itself, for the future
-/// Noise XK handshake (#338) to consume.
+/// `circuit/join`-facing form) plus the keypair itself — the private half is
+/// consumed by `holler_body::connection::handshake` to build this body's
+/// Noise XK initiator (issue #338).
 #[derive(Clone)]
 pub struct BodyX25519Identity {
-    // Forward-declared for the future Noise XK handshake (#338): this issue
-    // only ever publishes `public` (`circuit/join`'s `body_x25519_pubkey`);
-    // nothing in this story performs a Diffie-Hellman with the secret half
-    // yet. Read only by this module's own tests (`secret_bytes`,
-    // `#[cfg(test)]`) to prove restart persistence and the no-leak guarantee.
-    #[allow(dead_code)] // #338 (Noise XK will read this; nothing does yet)
     secret: StaticSecret,
     public: PublicKey,
 }
@@ -58,13 +52,12 @@ impl BodyX25519Identity {
         hex::encode(self.public.as_bytes())
     }
 
-    /// The private key's raw bytes. Exposed only for this module's own
-    /// persistence round-trip and no-leak tests — no current caller needs to
-    /// perform a Diffie-Hellman with it (this issue only pins the public
-    /// half; the exchange itself is Noise XK, issue #338, not yet
-    /// implemented).
-    #[cfg(test)]
-    fn secret_bytes(&self) -> [u8; KEY_BYTES] {
+    /// The private key's raw bytes — handed straight into
+    /// [`holler_proto::noise::HandshakeXk::initiator`] to build this body's
+    /// side of the Noise XK handshake (issue #338); never logged, never
+    /// serialized, never handed to anything else. `pub(crate)`: only
+    /// `connection::handshake`, in this same crate, needs it.
+    pub(crate) fn secret_bytes(&self) -> [u8; KEY_BYTES] {
         self.secret.to_bytes()
     }
 }

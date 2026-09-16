@@ -117,6 +117,25 @@ rustls = "0.23"
 # `getrandom`/`reusable_secrets`/rng-object-construction features are not
 # needed. Consumed by holler-hub.
 x25519-dalek = { version = "3", features = ["static_secrets"] } # for holler-hub
+# snow: a pure-Rust Noise Protocol Framework implementation — the
+# `Noise_XK_25519_ChaChaPoly_BLAKE2s` handshake core (issue #338), wired into
+# `circuit/authenticate` → `circuit/prove` in place of the old transcript-
+# signing challenge-response. The crate's default features are turned off
+# below, selecting only the primitives that pattern needs: `use-curve25519` (the DH function),
+# `use-chacha20poly1305` (the AEAD cipher), `use-blake2` (the hash), and
+# `use-getrandom` (the CSPRNG `write_message` draws a fresh ephemeral key
+# from on every handshake message). Deliberately omits the upstream "std"
+# feature: that feature list includes `ring/std`, which is Cargo's
+# `optional-dep/feature` syntax — it silently activates the optional `ring`
+# dependency (and its C-toolchain-adjacent build) even though `ring-resolver`
+# itself is never enabled here; the crate does not need `std` beyond what its
+# `default-resolver` primitives above already pull in. Verified interoperable
+# with this crate's existing `x25519-dalek` keys (same RFC 7748 X25519, byte-
+# for-byte identical public keys from the same private key). Consumed by
+# holler-proto (the handshake core itself); holler-hub and holler-body only
+# ever hand it raw key bytes and hex-encoded messages, never touching `snow`
+# types directly.
+snow = { version = "0.10", default-features = false, features = ["default-resolver", "use-curve25519", "use-chacha20poly1305", "use-blake2", "use-getrandom"] } # for holler-proto
 # ed25519-dalek: the body's long-lived Ed25519 signing keypair (issue #323) —
 # registered (public half only) at `circuit/join`, used to sign the
 # `circuit/authenticate` → `circuit/prove` challenge transcript. Keys are

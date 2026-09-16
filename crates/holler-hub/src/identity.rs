@@ -10,11 +10,11 @@
 //! connection`).
 //!
 //! This is **X25519**, not Ed25519: the hub never signs anything in this
-//! design (it issues `circuit/authenticate` nonces and verifies a body's
-//! `circuit/prove` signature — see [`crate::circuit`] and issue #323's own
-//! ADR amendment). X25519 is deliberately chosen as the pre-message key for
-//! a future Noise XK handshake ([#321](https://github.com/Performant-Labs/holler/issues/321)) —
-//! landing the identity now, ahead of Noise itself, is what makes that later
+//! design. X25519 is the responder's static key in the Noise XK handshake
+//! ([#321](https://github.com/Performant-Labs/holler/issues/321)) issue #338
+//! wires into `circuit/authenticate` → `circuit/prove`, replacing the
+//! Ed25519-signed challenge-response that predated it — landing this
+//! identity ahead of Noise itself (#322, before #338) is what made that
 //! handshake an incremental addition rather than a redesign.
 //!
 //! The private key is **never logged** — this module never hands it to
@@ -36,17 +36,11 @@ use crate::state::{ensure_dirs, HubState};
 const KEY_BYTES: usize = 32;
 
 /// The hub's resolved identity: the public key (hex, the wire/CLI-facing
-/// form) plus the keypair itself if a future caller ever needs the private
-/// half (no current caller does — the hub only ever publishes the public
-/// half; it never performs a Diffie-Hellman in v2).
+/// form) plus the keypair itself — the private half is consumed by
+/// `holler_hub::circuit::auth` to build this hub's Noise XK responder
+/// (issue #338).
 #[derive(Clone)]
 pub struct HubIdentity {
-    // Forward-declared for the future Noise XK handshake (#321): v2 only
-    // ever publishes `public` (the join line, `circuit/hello`, `hub
-    // status`); nothing in this story performs a Diffie-Hellman with the
-    // secret half yet. Read only by this module's own tests
-    // (`secret_bytes`, `#[cfg(test)]`) to prove restart persistence.
-    #[allow(dead_code)] // #321 (Noise XK will read this; nothing does yet)
     secret: StaticSecret,
     public: PublicKey,
 }
@@ -58,12 +52,12 @@ impl HubIdentity {
         hex::encode(self.public.as_bytes())
     }
 
-    /// The private key's raw bytes. Exposed only for this module's own
-    /// persistence round-trip and tests — no current caller needs to perform
-    /// a Diffie-Hellman with it (v2 only pins the public half; the exchange
-    /// itself is Noise XK, issue #321, not yet implemented).
-    #[cfg(test)]
-    fn secret_bytes(&self) -> [u8; KEY_BYTES] {
+    /// The private key's raw bytes — handed straight into
+    /// [`holler_proto::noise::HandshakeXk::responder`] to build this hub's
+    /// side of the Noise XK handshake (issue #338); never logged, never
+    /// serialized, never handed to anything else. `pub(crate)`: only
+    /// `circuit::auth`, in this same crate, needs it.
+    pub(crate) fn secret_bytes(&self) -> [u8; KEY_BYTES] {
         self.secret.to_bytes()
     }
 }

@@ -32,8 +32,8 @@ pub mod error;
 pub mod id;
 pub mod log;
 pub mod methods;
+pub mod noise;
 pub mod token;
-pub mod transcript;
 pub mod version;
 pub mod vocab;
 
