@@ -25,8 +25,8 @@ use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
 use std::task::{Context, Poll};
 
-use futures_util::{Future, Sink, SinkExt, Stream, StreamExt};
-use holler_proto::{decode, Envelope, Join, WireError};
+use futures_util::{Future, Sink, Stream, StreamExt};
+use holler_proto::{decode, Envelope, Join};
 use tokio::net::{TcpListener, TcpSocket, TcpStream, UnixListener};
 use tokio::signal::unix::{signal, SignalKind};
 use tokio_tungstenite::tungstenite::{Error as WsError, Message};
@@ -843,47 +843,12 @@ async fn dispatch_authenticate(
     crate::circuit::handle_authenticated(sink, stream, env.id(), params, state, deps, Some(preauth_permit)).await;
 }
 
-/// Send an error envelope (echoing `id` when given) as a text frame, then let
-/// the sink flush.
-pub(crate) async fn send_error(
-    sink: &mut (impl Sink<Message, Error = WsError> + Unpin),
-    id: Option<&str>,
-    code: Code,
-    message: &str,
-) {
-    let frame = match id.and_then(|s| holler_proto::CorrelationId::parse(s).ok()) {
-        Some(cid) => Envelope::error_frame(&cid, &WireError::new(code, message, None)),
-        None => Envelope::Error {
-            id: id.map(str::to_owned),
-            error: WireError::new(code, message, None),
-        },
-    };
-    let text = holler_proto::encode(&frame).unwrap_or_default();
-    if sink.send(Message::text(text)).await.is_err() {
-        return;
-    }
-    let _ = sink.flush().await;
-}
-
-/// Send a WS close frame and flush it to the peer (the peer's client auto-replies
-/// to a close frame; flushing guarantees ours is on the wire before we drop).
-pub(crate) async fn close(sink: &mut (impl Sink<Message, Error = WsError> + Unpin)) {
-    let _ = sink.send(Message::Close(None)).await;
-    let _ = sink.flush().await;
-}
-
-/// Send a WS close frame carrying an explicit close `code`/`reason` and flush
-/// it (issue #184: an oversized frame closes **1009**, a pre-auth-cap refusal
-/// **1013**, a lockout refusal **1008**, supersede **1000**, revoke **1008**
-/// — the plain [`close`] above only ever sends a codeless close, which is
-/// right for every *other* teardown path but not these operator/registry/
-/// hygiene-initiated ones).
-pub(crate) async fn close_with_code(sink: &mut (impl Sink<Message, Error = WsError> + Unpin), code: u16, reason: &'static str) {
-    use tokio_tungstenite::tungstenite::protocol::frame::{coding::CloseCode, CloseFrame};
-    let frame = Message::Close(Some(CloseFrame { code: CloseCode::from(code), reason: reason.into() }));
-    let _ = sink.send(frame).await;
-    let _ = sink.flush().await;
-}
+// The four WS wire-frame helpers (`send_error`, `send_error_with_reason`,
+// `close`, `close_with_code`) live in `crate::wire` (split out here for the
+// same file-size-guard reason `control_server.rs` was split out, issue
+// #182) — re-exported so existing `crate::serve::send_error(...)` /
+// `use crate::serve::{close, send_error}` call sites keep working unchanged.
+pub(crate) use crate::wire::{close, close_with_code, send_error, send_error_with_reason};
 
 // The control-socket **server** side (its own dispatch and the `hub token
 // ping` live probe) lives in [`crate::control_server`] — moved out of this

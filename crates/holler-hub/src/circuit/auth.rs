@@ -20,12 +20,12 @@
 //! owns only the handshake itself.
 
 use futures_util::{Sink, Stream};
-use holler_proto::noise::HandshakeXk;
+use holler_proto::noise::{HandshakeXk, NOISE_MESSAGE_ONE_REJECTED_REASON};
 use holler_proto::{Authenticate, Code};
 use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 
 use crate::live::Registry;
-use crate::serve::{close, send_error};
+use crate::serve::{close, send_error_with_reason};
 use crate::state::HubState;
 
 use super::{next_envelope, PROVE_TIMEOUT};
@@ -57,11 +57,15 @@ pub struct AuthDeps<'a> {
 /// points in [`begin_authenticate`]/[`begin_noise_handshake`]/
 /// [`await_prove`]/[`finish_prove`] don't each repeat this five-line
 /// sequence (keeping every one of those under clippy's cognitive-complexity
-/// gate).
+/// gate). `reason` rides in `error.data.reason` (docs §8) — `None` for every
+/// branch except [`begin_noise_handshake`]'s message-1 rejection, which is
+/// the one shape a caller (the body) needs to tell apart from every other
+/// `-32002`.
 pub(super) async fn refuse_unauthenticated<Snk>(
     sink: &mut Snk,
     id: Option<&str>,
     message: &str,
+    reason: Option<&'static str>,
     token_id: &str,
     peer_ip: &str,
     deps: &AuthDeps<'_>,
@@ -71,7 +75,7 @@ pub(super) async fn refuse_unauthenticated<Snk>(
     if let Ok(ip) = peer_ip.parse() {
         deps.lockout.record_failure(&ip);
     }
-    send_error(sink, id, Code::Unauthenticated, message).await;
+    send_error_with_reason(sink, id, Code::Unauthenticated, message, reason).await;
     close(sink).await;
     deps.roster.clear(token_id);
 }
@@ -98,7 +102,7 @@ where
     match crate::token::bound_record_async(&params.token_id, state).await {
         Ok(record) => Some(record),
         Err(e) => {
-            refuse_unauthenticated(sink, id, &format!("authentication failed: {e}"), &params.token_id, peer_ip, deps).await;
+            refuse_unauthenticated(sink, id, &format!("authentication failed: {e}"), None, &params.token_id, peer_ip, deps).await;
             None
         }
     }
@@ -111,8 +115,11 @@ where
 /// (message 1, `e, es`). Any failure (a malformed hex message, or a
 /// handshake error — most notably a body that pinned the wrong hub key,
 /// which fails right here per [`holler_proto::noise`]'s own module doc) is
-/// `-32002` via [`refuse_unauthenticated`], collapsed to one outcome like
-/// every other shape of "not a valid handshake."
+/// `-32002` via [`refuse_unauthenticated`] — the same JSON-RPC code as every
+/// other shape of "not a valid handshake", but the `read_message` rejection
+/// specifically also carries [`NOISE_MESSAGE_ONE_REJECTED_REASON`] in
+/// `error.data.reason`, since it is the one branch here that means
+/// specifically "this body's pinned hub key does not match this hub."
 pub(super) async fn begin_noise_handshake<Snk>(
     sink: &mut Snk,
     id: Option<&str>,
@@ -127,24 +134,33 @@ where
     let hub_secret = match crate::identity::ensure(state) {
         Ok(identity) => identity.secret_bytes(),
         Err(e) => {
-            refuse_unauthenticated(sink, id, &format!("authentication failed: could not resolve hub identity: {e}"), &params.token_id, peer_ip, deps).await;
+            refuse_unauthenticated(sink, id, &format!("authentication failed: could not resolve hub identity: {e}"), None, &params.token_id, peer_ip, deps).await;
             return None;
         }
     };
     let Ok(msg1) = hex::decode(&params.message) else {
-        refuse_unauthenticated(sink, id, "authentication failed: malformed handshake message", &params.token_id, peer_ip, deps).await;
+        refuse_unauthenticated(sink, id, "authentication failed: malformed handshake message", None, &params.token_id, peer_ip, deps).await;
         return None;
     };
     let prologue = holler_proto::noise::build_prologue(holler_proto::PROTOCOL_VERSION, &params.token_id, &params.advertised_url);
     let mut handshake = match HandshakeXk::responder(&hub_secret, &prologue) {
         Ok(h) => h,
         Err(_) => {
-            refuse_unauthenticated(sink, id, "authentication failed: could not start the handshake", &params.token_id, peer_ip, deps).await;
+            refuse_unauthenticated(sink, id, "authentication failed: could not start the handshake", None, &params.token_id, peer_ip, deps).await;
             return None;
         }
     };
     if handshake.read_message(&msg1).is_err() {
-        refuse_unauthenticated(sink, id, "authentication failed: bad handshake message", &params.token_id, peer_ip, deps).await;
+        refuse_unauthenticated(
+            sink,
+            id,
+            "authentication failed: bad handshake message",
+            Some(NOISE_MESSAGE_ONE_REJECTED_REASON),
+            &params.token_id,
+            peer_ip,
+            deps,
+        )
+        .await;
         return None;
     }
     Some(handshake)
@@ -170,24 +186,24 @@ where
     let env = match tokio::time::timeout(PROVE_TIMEOUT, next_envelope(stream)).await {
         Ok(Some(env)) => env,
         _ => {
-            refuse_unauthenticated(sink, None, "authentication failed: no circuit/prove within the timeout", token_id, peer_ip, deps).await;
+            refuse_unauthenticated(sink, None, "authentication failed: no circuit/prove within the timeout", None, token_id, peer_ip, deps).await;
             return None;
         }
     };
     let holler_proto::Envelope::Request { id: prove_id, method, params } = &env else {
-        refuse_unauthenticated(sink, env.id(), "authentication failed: expected circuit/prove", token_id, peer_ip, deps).await;
+        refuse_unauthenticated(sink, env.id(), "authentication failed: expected circuit/prove", None, token_id, peer_ip, deps).await;
         return None;
     };
     if method != "circuit/prove" {
-        refuse_unauthenticated(sink, Some(prove_id), "authentication failed: expected circuit/prove", token_id, peer_ip, deps).await;
+        refuse_unauthenticated(sink, Some(prove_id), "authentication failed: expected circuit/prove", None, token_id, peer_ip, deps).await;
         return None;
     }
     let Some(prove) = params.clone().and_then(|v| serde_json::from_value::<holler_proto::Prove>(v).ok()) else {
-        refuse_unauthenticated(sink, Some(prove_id), "authentication failed: malformed circuit/prove params", token_id, peer_ip, deps).await;
+        refuse_unauthenticated(sink, Some(prove_id), "authentication failed: malformed circuit/prove params", None, token_id, peer_ip, deps).await;
         return None;
     };
     if prove.token_id != token_id {
-        refuse_unauthenticated(sink, Some(prove_id), "authentication failed: circuit/prove token_id mismatch", token_id, peer_ip, deps).await;
+        refuse_unauthenticated(sink, Some(prove_id), "authentication failed: circuit/prove token_id mismatch", None, token_id, peer_ip, deps).await;
         return None;
     }
     Some((prove_id.clone(), prove))
@@ -223,30 +239,30 @@ where
     let record = match crate::token::bound_record_async(&params.token_id, state).await {
         Ok(r) => r,
         Err(e) => {
-            refuse_unauthenticated(sink, Some(prove_id), &format!("authentication failed: {e}"), &params.token_id, peer_ip, deps).await;
+            refuse_unauthenticated(sink, Some(prove_id), &format!("authentication failed: {e}"), None, &params.token_id, peer_ip, deps).await;
             return None;
         }
     };
     // `bound_record` only ever returns a record with `Some(body_x25519_pubkey)`
     // — `is_none` is unreachable defensively (see that function's own check).
     let Some(expected_pubkey_hex) = record.body_x25519_pubkey.clone() else {
-        refuse_unauthenticated(sink, Some(prove_id), "authentication failed: no X25519 public key on record", &params.token_id, peer_ip, deps).await;
+        refuse_unauthenticated(sink, Some(prove_id), "authentication failed: no X25519 public key on record", None, &params.token_id, peer_ip, deps).await;
         return None;
     };
     let Ok(msg3) = hex::decode(&prove.message) else {
-        refuse_unauthenticated(sink, Some(prove_id), "authentication failed: malformed handshake message", &params.token_id, peer_ip, deps).await;
+        refuse_unauthenticated(sink, Some(prove_id), "authentication failed: malformed handshake message", None, &params.token_id, peer_ip, deps).await;
         return None;
     };
     if handshake.read_message(&msg3).is_err() {
-        refuse_unauthenticated(sink, Some(prove_id), "authentication failed: bad handshake message", &params.token_id, peer_ip, deps).await;
+        refuse_unauthenticated(sink, Some(prove_id), "authentication failed: bad handshake message", None, &params.token_id, peer_ip, deps).await;
         return None;
     }
     if !handshake.is_finished() {
-        refuse_unauthenticated(sink, Some(prove_id), "authentication failed: incomplete handshake", &params.token_id, peer_ip, deps).await;
+        refuse_unauthenticated(sink, Some(prove_id), "authentication failed: incomplete handshake", None, &params.token_id, peer_ip, deps).await;
         return None;
     }
     if handshake.remote_static_hex().as_deref() != Some(expected_pubkey_hex.as_str()) {
-        refuse_unauthenticated(sink, Some(prove_id), "authentication failed: static key mismatch", &params.token_id, peer_ip, deps).await;
+        refuse_unauthenticated(sink, Some(prove_id), "authentication failed: static key mismatch", None, &params.token_id, peer_ip, deps).await;
         return None;
     }
     if let Ok(ip) = peer_ip.parse() {
