@@ -329,9 +329,10 @@ async fn connect_and_serve(
     };
     let (mut sink, mut stream) = ws.split();
 
-    if let Err(reason) = handshake::authenticate(&mut sink, &mut stream, identity, state_root).await {
-        return reason;
-    }
+    let sas = match handshake::authenticate(&mut sink, &mut stream, identity, state_root).await {
+        Ok(sas) => sas,
+        Err(reason) => return reason,
+    };
     if let Err(reason) = handshake::hello_exchange(&mut sink, &mut stream, identity, configs).await {
         return reason;
     }
@@ -339,7 +340,11 @@ async fn connect_and_serve(
     // Live: the next drop, whenever it comes, must back off from 0 (#299).
     *attempt = 0;
 
-    info("conn_connected", vec![("server", identity.server_url.clone())]);
+    // Issue #339: the pairing SAS, derived independently on this side from
+    // the handshake just completed — logged (never sent) alongside
+    // `conn_connected` so the operator can compare it by eye against what
+    // the hub's own console shows for this same connection.
+    info("conn_connected", vec![("server", identity.server_url.clone()), ("sas", sas)]);
     let _ = crate::connection_state::write(
         state_root,
         &crate::connection_state::ConnectionState {
