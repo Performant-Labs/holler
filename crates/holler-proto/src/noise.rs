@@ -59,6 +59,22 @@ pub const NOISE_PARAMS_STR: &str = "Noise_XK_25519_ChaChaPoly_BLAKE2s";
 /// The length, in bytes, of an X25519 private or public key.
 const KEY_LEN: usize = 32;
 
+/// `error.data.reason` (docs §8) for a `-32002 unauthenticated` refusal that
+/// is specifically a rejected Noise message 1 — i.e. the hub failed to
+/// process the *initiator's* (body's) own `circuit/authenticate` message.
+/// Per this module's own doc, that failure shape means one thing on the
+/// wire: the body built message 1 against a hub static key that does not
+/// match what the hub it is actually talking to holds (a stale pin, or an
+/// impersonator) — never a revoked token, a malformed frame, or any other
+/// `-32002` cause, all of which carry no `reason` (or a different one).
+///
+/// Lives here, in the crate both `holler-hub` (`circuit/auth.rs`, which sets
+/// it) and `holler-body` (`connection/handshake.rs`, which reads it to
+/// surface "hub public key mismatch" wording) already depend on, so the two
+/// sides share one constant instead of the body re-typing a string literal
+/// that could silently drift from what the hub actually sends.
+pub const NOISE_MESSAGE_ONE_REJECTED_REASON: &str = "noise_message_one_rejected";
+
 /// A scratch buffer large enough for any message this pattern produces with
 /// an empty payload (measured: message 1 and 2 are 48 bytes, message 3 is 64
 /// — the `e`/`ee`/`es`/`se` tokens plus one AEAD tag each), with generous

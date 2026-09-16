@@ -176,7 +176,7 @@ where
 
     let mut handshake = auth::begin_noise_handshake(sink, id, params, state, peer_ip, deps).await?;
     let Ok(msg2) = handshake.write_message() else {
-        auth::refuse_unauthenticated(sink, id, "authentication failed: could not continue the handshake", &params.token_id, peer_ip, deps).await;
+        auth::refuse_unauthenticated(sink, id, "authentication failed: could not continue the handshake", None, &params.token_id, peer_ip, deps).await;
         return None;
     };
     let challenge = serde_json::to_value(holler_proto::AuthChallenge { message: hex::encode(msg2) }).unwrap_or_default();

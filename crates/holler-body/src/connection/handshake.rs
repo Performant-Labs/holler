@@ -81,7 +81,29 @@ where
             hex::decode(&challenge.message).map_err(|e| Attempt::Dropped(format!("malformed handshake message 2: {e}")))?
         }
         Envelope::Error { error, .. } if error.code == Code::Unauthenticated.jsonrpc() => {
-            return Err(Attempt::AuthFailed(error.message));
+            // A `-32002` refusal of `circuit/authenticate` itself (as opposed
+            // to `circuit/prove`, below) can only mean the hub rejected Noise
+            // message 1 — this body's very first handshake message. Per
+            // `holler_proto::noise`'s own module doc, that specific rejection
+            // has exactly one cause: this body built message 1 against a hub
+            // static key that does not match the hub it is actually talking
+            // to. The hub marks that one cause with `error.data.reason` (see
+            // `holler_proto::noise::NOISE_MESSAGE_ONE_REJECTED_REASON`) so
+            // this disambiguates on a structured value, not `error.message`
+            // text the hub is free to reword.
+            let is_hub_key_mismatch = error
+                .data
+                .as_deref()
+                .and_then(|d| d.reason.as_deref())
+                == Some(holler_proto::noise::NOISE_MESSAGE_ONE_REJECTED_REASON);
+            return Err(Attempt::AuthFailed(if is_hub_key_mismatch {
+                format!(
+                    "hub public key mismatch: this hub rejected this body's handshake — its real key does not match the one pinned at `body join` ({}) — refusing to connect (re-pair with `body join` only if you trust this is an intentional hub key rotation)",
+                    identity.hub_pubkey
+                )
+            } else {
+                error.message
+            }));
         }
         Envelope::Error { error, .. } => {
             return Err(Attempt::Dropped(format!("authenticate refused: {}", error.message)));

@@ -20,4 +20,5 @@ pub mod serve;
 pub mod state;
 pub mod talk;
 pub mod token;
+pub(crate) mod wire;
 mod ws_handshake;
