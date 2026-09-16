@@ -376,19 +376,23 @@ fn session_name_rejects_a_slash() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn hello_requires_protocol_2() {
-    // protocol 2 is supported.
-    assert!(holler_proto::version::is_supported_version(2));
-    // protocol 1 and 3 are not — the hub answers -32000 and closes.
+fn hello_requires_protocol_3() {
+    // Issue #340: the Noise XK bump past the pre-Noise-XK version (2) — a
+    // hard re-pair event (#321's "Protocol break handling").
+    // protocol 3 is supported.
+    assert!(holler_proto::version::is_supported_version(3));
+    // protocol 2 (the pre-Noise-XK version) and 1/4 are not — the hub
+    // answers -32000 and closes.
     assert!(!holler_proto::version::is_supported_version(1));
-    assert!(!holler_proto::version::is_supported_version(3));
-    // The advertised range is exactly [2, 2] (ADR 0003).
+    assert!(!holler_proto::version::is_supported_version(2));
+    assert!(!holler_proto::version::is_supported_version(4));
+    // The advertised range is exactly [3, 3] (ADR 0003).
     assert_eq!(
         (
             holler_proto::version::PROTOCOL_MIN,
             holler_proto::version::PROTOCOL_MAX
         ),
-        (2, 2)
+        (3, 3)
     );
 }
 

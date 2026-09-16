@@ -106,7 +106,10 @@ async fn send_authenticate(
         "jsonrpc": "2.0",
         "id": "b-auth1",
         "method": "circuit/authenticate",
-        "params": { "token_id": token_id, "hostname": hostname, "advertised_url": advertised_url, "message": hex::encode(msg1) },
+        "params": {
+            "protocol": holler_proto::PROTOCOL_VERSION,
+            "token_id": token_id, "hostname": hostname, "advertised_url": advertised_url, "message": hex::encode(msg1),
+        },
     });
     ws.send(Message::text(req.to_string())).await.expect("send circuit/authenticate");
     let env = decode_next(ws).await.expect("an answer to circuit/authenticate");
@@ -144,7 +147,12 @@ async fn run_hello(ws: &mut WsClient, hostname: &str) {
         "jsonrpc": "2.0",
         "id": "b-hello1",
         "method": "circuit/hello",
-        "params": { "protocol": 2, "protocol_min": 2, "protocol_max": 2, "role": "body", "hostname": hostname, "harnesses": [] },
+        "params": {
+            "protocol": holler_proto::PROTOCOL_VERSION,
+            "protocol_min": holler_proto::PROTOCOL_MIN,
+            "protocol_max": holler_proto::PROTOCOL_MAX,
+            "role": "body", "hostname": hostname, "harnesses": [],
+        },
     });
     ws.send(Message::text(hello.to_string())).await.expect("send circuit/hello");
     let _ = decode_next(ws).await.expect("the hub's answer to our circuit/hello");
@@ -505,4 +513,153 @@ async fn fresh_hub_single_authenticate_does_not_panic() {
     // The hub process must still be alive and answering afterward.
     let doc = hub_status_json(&state);
     assert_eq!(doc["role"], "hub", "the hub must still be responsive: {doc}");
+}
+
+// ---------------------------------------------------------------------------
+// issue #340: protocol-version enforcement
+// ---------------------------------------------------------------------------
+
+/// Issue #340's core acceptance test: `circuit/authenticate.protocol` below
+/// this hub's floor is refused with a specific `-32000 unsupported_version`
+/// — not silently downgraded, not an opaque Noise handshake failure (the
+/// prologue also binds `protocol_version`, so this same mismatch would
+/// otherwise only surface deep in `circuit/prove` as a generic "bad
+/// handshake message"), and not the generic `-32002 unauthenticated` every
+/// other authenticate failure gets. The socket closes immediately (no
+/// `AuthChallenge`, no hang), and the message names both the mismatch and
+/// the fix — the acceptance criteria's "clear re-pair path", not "an
+/// unhelpful generic error".
+#[tokio::test]
+async fn authenticate_with_old_protocol_is_refused_with_unsupported_version() {
+    let state = StateDir::new();
+    let hub = Hub::start(&state);
+    let (token_id, body_x25519_secret) = mint_and_redeem(&state, "old-proto-body");
+    let hub_pubkey = hub_x25519_pubkey(&state);
+    let ws_url = hub.ws_url();
+
+    let prologue = build_prologue(holler_proto::PROTOCOL_VERSION, &token_id, &ws_url);
+    let mut handshake = HandshakeXk::initiator(&body_x25519_secret, &hub_pubkey, &prologue).expect("build noise initiator");
+    let msg1 = handshake.write_message().expect("write handshake message 1");
+
+    let mut ws = connect_ws(&ws_url).await;
+    let old_protocol = holler_proto::PROTOCOL_VERSION - 1;
+    let req = json!({
+        "jsonrpc": "2.0",
+        "id": "b-auth1",
+        "method": "circuit/authenticate",
+        "params": {
+            "protocol": old_protocol,
+            "token_id": token_id, "hostname": "old-proto-body", "advertised_url": ws_url, "message": hex::encode(msg1),
+        },
+    });
+    ws.send(Message::text(req.to_string())).await.expect("send circuit/authenticate");
+
+    let env = decode_next(&mut ws).await.expect("the hub must answer, not hang");
+    let Envelope::Error { error, .. } = env else {
+        panic!("an old-protocol body must be refused, not answered with an AuthChallenge: {env:?}");
+    };
+    assert_eq!(
+        error.code,
+        holler_proto::Code::UnsupportedVersion.jsonrpc(),
+        "must be -32000 unsupported_version, not a generic auth failure: {error:?}"
+    );
+    assert!(
+        error.message.contains(&old_protocol.to_string()) && error.message.to_lowercase().contains("protocol"),
+        "the message must name the mismatch: {error:?}"
+    );
+    assert!(
+        error.message.contains("body join") || error.message.to_lowercase().contains("re-pair") || error.message.to_lowercase().contains("upgrade"),
+        "the message must give an actionable re-pair path, not a bare refusal: {error:?}"
+    );
+
+    // No silent downgrade, no hang: the socket closes right after — no
+    // further frame (a real `AuthChallenge`) ever follows.
+    assert!(decode_next(&mut ws).await.is_none(), "the hub must close the socket, not leave it open");
+}
+
+/// The literal "pre-Noise-XK bodies are refused cleanly" acceptance
+/// criterion: a `circuit/authenticate` frame that never sends `protocol` at
+/// all (the exact shape a body built before this issue landed — including
+/// today's pre-#340 `main`, which is already Noise-XK-capable but has no
+/// `protocol` field — would send) still gets the same specific `-32000`
+/// refusal: `#[serde(default)]` defaults the missing field to `0` (always
+/// unsupported) rather than failing with a generic `invalid_params`
+/// deserialize error the operator would have to puzzle out.
+#[tokio::test]
+async fn authenticate_missing_protocol_field_is_refused_with_unsupported_version() {
+    let state = StateDir::new();
+    let hub = Hub::start(&state);
+    let (token_id, body_x25519_secret) = mint_and_redeem(&state, "no-proto-field-body");
+    let hub_pubkey = hub_x25519_pubkey(&state);
+    let ws_url = hub.ws_url();
+
+    let prologue = build_prologue(holler_proto::PROTOCOL_VERSION, &token_id, &ws_url);
+    let mut handshake = HandshakeXk::initiator(&body_x25519_secret, &hub_pubkey, &prologue).expect("build noise initiator");
+    let msg1 = handshake.write_message().expect("write handshake message 1");
+
+    let mut ws = connect_ws(&ws_url).await;
+    let req = json!({
+        "jsonrpc": "2.0",
+        "id": "b-auth1",
+        "method": "circuit/authenticate",
+        "params": {
+            "token_id": token_id, "hostname": "no-proto-field-body", "advertised_url": ws_url, "message": hex::encode(msg1),
+        },
+    });
+    ws.send(Message::text(req.to_string())).await.expect("send circuit/authenticate");
+
+    let env = decode_next(&mut ws).await.expect("the hub must answer, not hang");
+    let Envelope::Error { error, .. } = env else {
+        panic!("a pre-#340-shaped body (no `protocol` field) must be refused, not answered with an AuthChallenge: {env:?}");
+    };
+    assert_eq!(
+        error.code,
+        holler_proto::Code::UnsupportedVersion.jsonrpc(),
+        "a missing `protocol` field must parse (via #[serde(default)]) and be refused as unsupported, not fail as invalid_params: {error:?}"
+    );
+}
+
+/// Issue #340's second, defense-in-depth layer: `circuit/hello.protocol`
+/// outside this hub's supported range is refused the same way, even after a
+/// successful Noise handshake — mirrors the `hub_pubkey` pinning check's own
+/// "the crypto already enforces this, but the check stays" precedent
+/// (docs/protocol/v2.md §3). Not normally reachable for a real mismatch
+/// (that is refused earlier, at `circuit/authenticate` — the test above),
+/// but proves the wire-level mechanism `docs/protocol/v2.md` §3 documents
+/// actually exists rather than being a tested-but-unwired pure function.
+#[tokio::test]
+async fn hello_with_old_protocol_is_refused_with_unsupported_version() {
+    let state = StateDir::new();
+    let hub = Hub::start(&state);
+    let (token_id, body_x25519_secret) = mint_and_redeem(&state, "old-hello-body");
+    let hub_pubkey = hub_x25519_pubkey(&state);
+    let ws_url = hub.ws_url();
+
+    let mut ws = connect_ws(&ws_url).await;
+    send_authenticate(&mut ws, &token_id, &body_x25519_secret, &hub_pubkey, "old-hello-body", &ws_url)
+        .await
+        .expect("a legitimate handshake must succeed");
+
+    let old_protocol = holler_proto::PROTOCOL_VERSION - 1;
+    let hello = json!({
+        "jsonrpc": "2.0",
+        "id": "b-hello1",
+        "method": "circuit/hello",
+        "params": {
+            "protocol": old_protocol, "protocol_min": old_protocol, "protocol_max": old_protocol,
+            "role": "body", "hostname": "old-hello-body", "harnesses": [],
+        },
+    });
+    ws.send(Message::text(hello.to_string())).await.expect("send circuit/hello");
+
+    let env = decode_next(&mut ws).await.expect("the hub must answer, not hang");
+    let Envelope::Error { error, .. } = env else {
+        panic!("an old-protocol hello must be refused, not answered normally: {env:?}");
+    };
+    assert_eq!(
+        error.code,
+        holler_proto::Code::UnsupportedVersion.jsonrpc(),
+        "must be -32000 unsupported_version: {error:?}"
+    );
+    assert!(decode_next(&mut ws).await.is_none(), "the hub must close the socket after refusing the hello");
 }

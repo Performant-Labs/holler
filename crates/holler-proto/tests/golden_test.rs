@@ -223,7 +223,7 @@ fn docs_instances() -> Vec<(&'static str, Value)> {
         ("CancelResult", serde_json::to_value(CancelResult { applied: true }).unwrap()),
         ("Join", serde_json::to_value(Join { secret: "hlr_join_x".into(), hostname: "kiwi".into(), body_pubkey: "b".repeat(64), body_x25519_pubkey: "e".repeat(64) }).unwrap()),
         ("JoinResult", serde_json::to_value(JoinResult { client_id: "cli_19".into() }).unwrap()),
-        ("Authenticate", serde_json::to_value(Authenticate { token_id: "tok_7f3a".into(), hostname: "kiwi".into(), advertised_url: "wss://hub.example.ts.net".into(), message: "1".repeat(96) }).unwrap()),
+        ("Authenticate", serde_json::to_value(Authenticate { protocol: 3, token_id: "tok_7f3a".into(), hostname: "kiwi".into(), advertised_url: "wss://hub.example.ts.net".into(), message: "1".repeat(96) }).unwrap()),
         ("AuthChallenge", serde_json::to_value(AuthChallenge { message: "2".repeat(96) }).unwrap()),
         ("Prove", serde_json::to_value(Prove { token_id: "tok_7f3a".into(), message: "3".repeat(128) }).unwrap()),
         ("AuthOk", serde_json::to_value(AuthOk { ok: true }).unwrap()),

@@ -80,6 +80,43 @@ pub(super) async fn refuse_unauthenticated<Snk>(
     deps.roster.clear(token_id);
 }
 
+/// Step 0 of `circuit/authenticate` → `circuit/prove` (issue #340): check
+/// this body's claimed `protocol` *before* touching Noise at all. A genuine
+/// version mismatch would also eventually fail Noise message 3 (the
+/// prologue binds `protocol_version` too, so [`finish_prove`]'s
+/// `read_message` would reject it) — but only as an opaque "bad handshake
+/// message", exactly the "unhelpful generic error" #340's acceptance
+/// criteria rule out for a body that predates a protocol bump. Checking
+/// here first turns that into a specific, actionable `-32000` naming the
+/// mismatch and the fix, before any handshake state is even built.
+///
+/// No lockout, nothing to clear from the roster — a version claim proves
+/// nothing about this peer's trustworthiness (it is not an auth attempt),
+/// so it must not count against this peer's lockout budget the way a
+/// genuine failed proof does.
+pub(super) async fn check_protocol_version<Snk>(sink: &mut Snk, id: Option<&str>, params: &Authenticate) -> Option<()>
+where
+    Snk: Sink<Message, Error = WsError> + Unpin,
+{
+    if holler_proto::is_supported_version(params.protocol) {
+        return Some(());
+    }
+    send_error_with_reason(
+        sink,
+        id,
+        Code::UnsupportedVersion,
+        &format!(
+            "protocol {} is not supported (this hub requires protocol {}) — upgrade this body and re-run `body join` to re-pair",
+            params.protocol,
+            holler_proto::PROTOCOL_MIN
+        ),
+        None,
+    )
+    .await;
+    close(sink).await;
+    None
+}
+
 /// Step 1 of `circuit/authenticate` → `circuit/prove`: resolve the bound
 /// token record for `params.token_id` — an unknown, unbound, expired, or
 /// revoked token, or one with no registered X25519 public key, is `-32002`
@@ -309,6 +346,7 @@ mod tests {
 
         let msg1 = initiator.write_message().expect("write message 1");
         let authenticate = Authenticate {
+            protocol: holler_proto::PROTOCOL_VERSION,
             token_id: token_id.into(),
             hostname: "kiwi".into(),
             advertised_url: advertised_url.into(),

@@ -29,7 +29,9 @@ use std::path::PathBuf;
 use std::process::Stdio;
 use std::time::Duration;
 
+use futures_util::{SinkExt, StreamExt};
 use serde_json::Value;
+use tokio_tungstenite::tungstenite::Message;
 
 use support::{holler_cmd, kill_tree, make_own_process_group, wait_for, Body, Hub, StateDir};
 
@@ -341,6 +343,115 @@ fn body_refuses_connect_on_hub_key_mismatch() {
     );
 
     hub.stop(Duration::from_secs(5));
+}
+
+/// A minimal fake hub for [`body_refuses_connect_on_hub_protocol_mismatch`]:
+/// no real `holler_hub` state, no Noise — just enough raw wire to (1) answer
+/// one `circuit/join` with a `client_id` so the real `body join` binary
+/// persists a working local identity, then (2) on the body's very next
+/// connection (`body run`'s reconnect), answer `circuit/authenticate` with a
+/// `-32000 unsupported_version` refusal immediately — the shape a real hub
+/// bumped past this body's protocol floor (issue #340) would produce. Runs
+/// on its own OS thread with its own tiny Tokio runtime so it can accept
+/// connections concurrently with the test's synchronous `Command::spawn`/
+/// `wait_with_output` calls (this file's established style — no
+/// `#[tokio::test]` elsewhere in it).
+fn spawn_fake_hub_that_refuses_the_protocol_version() -> (u16, std::thread::JoinHandle<()>) {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind the fake hub's listener");
+    let port = listener.local_addr().expect("the fake hub's bound local addr").port();
+    listener.set_nonblocking(true).expect("the fake hub's listener must be nonblocking for Tokio");
+
+    let handle = std::thread::spawn(move || {
+        let rt = tokio::runtime::Runtime::new().expect("build a Tokio runtime for the fake hub");
+        rt.block_on(async move {
+            let listener = tokio::net::TcpListener::from_std(listener).expect("adopt the std listener into Tokio");
+
+            // Connection 1 (`body join`): answer `circuit/join` with a
+            // client_id, mirroring what a real hub's redeem does — this test
+            // does not exercise `circuit/join` itself, only what `body run`
+            // does with the identity it leaves behind.
+            let (stream, _) = listener.accept().await.expect("accept the join connection");
+            let mut ws = tokio_tungstenite::accept_async(stream).await.expect("WS handshake (join)");
+            if let Some(Ok(Message::Text(t))) = ws.next().await {
+                let env = holler_proto::decode(&t).expect("decode circuit/join");
+                if let Some(id) = env.id() {
+                    let cid = holler_proto::CorrelationId::parse(id).expect("parse the join request id");
+                    let result = serde_json::json!({"client_id": "cli_fakehub0000000000000000000000"});
+                    let resp = holler_proto::Envelope::response(&cid, Some(result));
+                    let _ = ws.send(Message::text(holler_proto::encode(&resp).expect("encode join result"))).await;
+                }
+            }
+            let _ = ws.close(None).await;
+
+            // Connection 2 (`body run`'s reconnect): refuse `circuit/
+            // authenticate` outright with `-32000 unsupported_version` — no
+            // Noise message 2, no `AuthChallenge` — exactly what issue
+            // #340's hub-side `check_protocol_version` sends a body whose
+            // claimed protocol is below this hub's floor.
+            let (stream, _) = listener.accept().await.expect("accept the authenticate connection");
+            let mut ws = tokio_tungstenite::accept_async(stream).await.expect("WS handshake (authenticate)");
+            if let Some(Ok(Message::Text(t))) = ws.next().await {
+                let env = holler_proto::decode(&t).expect("decode circuit/authenticate");
+                if let Some(id) = env.id() {
+                    let cid = holler_proto::CorrelationId::parse(id).expect("parse the authenticate request id");
+                    let err = holler_proto::WireError::new(
+                        holler_proto::Code::UnsupportedVersion,
+                        "protocol 2 is not supported (this hub requires protocol 3) — upgrade this body and re-run `body join` to re-pair",
+                        None,
+                    );
+                    let resp = holler_proto::Envelope::error_frame(&cid, &err);
+                    let _ = ws.send(Message::text(holler_proto::encode(&resp).expect("encode the refusal"))).await;
+                }
+            }
+            let _ = ws.close(None).await;
+        });
+    });
+    (port, handle)
+}
+
+/// Issue #340's body-side acceptance test: a hub that answers `circuit/
+/// authenticate` with `-32000 unsupported_version` (a real hub bumped past
+/// this body's protocol floor) is a hard failure — exit 1, immediately, no
+/// reconnect loop spun up first (the same "AuthFailed, no retry" contract
+/// [`body_refuses_connect_on_hub_key_mismatch`] and `revoked_token_still_
+/// fails_closed_with_32002` already pin for the other unretryable auth
+/// failures) — and stderr gives a clear, actionable re-pair path, not a bare
+/// "authentication failed" with no next step.
+#[test]
+fn body_refuses_connect_on_hub_protocol_mismatch() {
+    let state = StateDir::new();
+    let (port, fake_hub) = spawn_fake_hub_that_refuses_the_protocol_version();
+    let ws_url = format!("ws://127.0.0.1:{port}");
+    let fake_hub_key = "a".repeat(64);
+
+    let (code, _, stderr) = run(
+        &state,
+        &["body", "join", "--server", &ws_url, "--token", "tok_fake0:deadbeefcafe", "--hub-key", &fake_hub_key],
+    );
+    assert_eq!(code, 0, "body join against the fake hub must still succeed; stderr: {stderr}");
+
+    let config = support::write_sessions_toml(&state, &[]);
+    let out = holler_cmd(&state)
+        .arg("body")
+        .arg("run")
+        .arg("--config")
+        .arg(&config)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn body run against a hub that refuses this body's protocol version")
+        .wait_with_output()
+        .expect("wait on body run");
+    assert_eq!(out.status.code(), Some(1), "a protocol-version refusal is exit 1, not a retry loop");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("authentication failed"), "stderr names the auth failure: {stderr}");
+    assert!(
+        stderr.to_lowercase().contains("protocol")
+            && (stderr.contains("body join") || stderr.to_lowercase().contains("re-pair") || stderr.to_lowercase().contains("upgrade")),
+        "stderr must give a clear re-pair path, not a generic error: {stderr}"
+    );
+
+    fake_hub.join().expect("the fake hub thread must not panic");
 }
 
 // --- real hub restart / real reconnect timing --------------------------------
