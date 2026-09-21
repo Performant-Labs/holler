@@ -48,6 +48,18 @@ use crate::session_manager::SessionManager;
 
 /// The heartbeat/presence interval (issue #182 step 3): 15s, or
 /// `HOLLER_HEARTBEAT_INTERVAL_MS` for tests that cannot wait 15s for real.
+///
+/// Every tick also sends a WS-level Ping control frame alongside
+/// `session/presence` (see [`send_presence_or_drop`]) — issue #193's
+/// 2026-09-21 real-tunnel dispatch findings: three unrelated real tunnels (a
+/// Cloudflare quick tunnel, a reserved ngrok domain, and a properly
+/// DNS-routed named Cloudflare tunnel) each reset this connection at almost
+/// exactly T+30s despite `session/presence` already having crossed the wire
+/// at T+15s as a WS Text frame — evidence those edges key idle-connection
+/// detection off RFC 6455 control-frame Ping/Pong specifically, not
+/// arbitrary payload. Piggybacking on this existing 15s cadence (comfortably
+/// under the observed ~30s edge horizon) needed no new timer or `select!`
+/// arm.
 fn heartbeat_interval() -> Duration {
     std::env::var("HOLLER_HEARTBEAT_INTERVAL_MS")
         .ok()
@@ -702,10 +714,17 @@ where
     Snk: Sink<Message, Error = WsError> + Unpin,
 {
     if send_presence(sink, identity, session_manager).await.is_err() {
-        Some(Attempt::Dropped("send presence: socket closed".to_string()))
-    } else {
-        None
+        return Some(Attempt::Dropped("send presence: socket closed".to_string()));
     }
+    // A real WS-level Ping alongside the presence Text frame (see
+    // `heartbeat_interval`'s own doc for why: several real tunnel edges
+    // reset an idle connection at ~T+30s regardless of Text-frame traffic,
+    // evidently keying off control-frame Ping/Pong specifically). An empty
+    // payload is enough — the point is the opcode, not any data it carries.
+    if sink.send(Message::Ping(Vec::new().into())).await.is_err() || sink.flush().await.is_err() {
+        return Some(Attempt::Dropped("send ws ping: socket closed".to_string()));
+    }
+    None
 }
 
 /// Whether a `presence_changed` broadcast result is worth an immediate

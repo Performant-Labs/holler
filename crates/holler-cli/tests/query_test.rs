@@ -351,14 +351,16 @@ fn remote_query_status_by_label_and_by_token_id() {
     });
     assert!(ready.is_some(), "the body must be live before it can be queried");
 
-    // NOTE: every body currently joins under the hardcoded hostname
-    // `"default"` (`body_join`'s `holler_body::join::join(..., "default")`
-    // call in `holler-cli/src/main.rs` — there is no `--hostname` flag on
-    // `body join` yet; the token's own `--label` is a *token* label, not the
-    // wire hostname a body claims). So the label target here is `"default"`,
-    // not the token's mint label (`"kiwi"`) — a real per-body `--hostname`
-    // is out of this story's scope.
-    let (code, stdout, stderr) = run(&state, &["--json", "hub", "query", "default", "status"]);
+    // Target-resolution routes by the token's own `--label` (`"kiwi"`
+    // here), not by the hostname a body claims in its hello — every body
+    // currently joins under the hardcoded hostname `"default"` (there is
+    // no `--hostname` flag on `body join` yet), but issue #193's
+    // 2026-09-21 fix keys `holler-hub`'s `Registry` on the verified token
+    // label instead, matching the roster's own routing key. `doc["hostname"]`
+    // below is still `"default"` because that field reflects the body's own
+    // self-reported identity (`crates/holler-body/src/status.rs`), which is
+    // an entirely separate thing from the routing target used to reach it.
+    let (code, stdout, stderr) = run(&state, &["--json", "hub", "query", "kiwi", "status"]);
     assert_eq!(code, 0, "query by label must exit 0; stderr: {stderr}");
     let doc: Value = serde_json::from_str(&stdout).expect("valid JSON");
     assert_eq!(doc["role"].as_str(), Some("body"), "the answer is the BODY's status doc: {doc}");
@@ -390,11 +392,11 @@ fn remote_query_protocol_version_zero_is_unknown_feature() {
     });
     assert!(ready.is_some(), "the body must be live before it can be queried");
 
-    let (code, _, stderr) = run(&state, &["hub", "query", "default", "protocol", "0"]);
+    let (code, _, stderr) = run(&state, &["hub", "query", "kiwi", "protocol", "0"]);
     assert_eq!(code, 1, "version:0 forwarded to a live body must be a refusal: {stderr}");
     assert!(stderr.contains("positive integer"), "stderr names the failure: {stderr}");
 
-    let (code, stdout, stderr) = run(&state, &["--json", "hub", "query", "default", "protocol", "3"]);
+    let (code, stdout, stderr) = run(&state, &["--json", "hub", "query", "kiwi", "protocol", "3"]);
     assert_eq!(code, 0, "a valid version must still work normally; stderr: {stderr}");
     let doc: Value = serde_json::from_str(&stdout).expect("valid JSON");
     assert_eq!(doc["ok"].as_bool(), Some(true));
