@@ -222,6 +222,15 @@ async fn queued_prompt_runs_after_current_turn() {
     assert_result_ok(&queued_res, "a2", "end_turn", SessionState::Completed);
 }
 
+// The `queue_dispatch_never_publishes_transient_idle` regression test (the
+// `finish_turn`-publishes-a-transient-`Idle` race behind the
+// `queued_prompt_runs_after_drop_and_reply_is_discarded` reconnect-contract
+// flake) lives in its own `session_manager_queue_race_test.rs` file — this
+// file is already at the repo's 900-line file-size gate (`scripts/lint.sh`),
+// and that test needs its own small slice of this file's fixtures anyway
+// (duplicated there with a doc pointer back here, per that file's own module
+// doc) rather than growing this one further.
+
 #[tokio::test]
 async fn queue_survives_cancel() {
     let manager = SessionManager::start(&registry_of(&[("alpha", &["--slow", "--chunks", "5"])]));
