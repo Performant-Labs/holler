@@ -18,9 +18,9 @@ pub mod token_cmd;
 pub mod wait_cmd;
 
 pub use crate::cli::{
-    Answer, Attach, AttachCommand, Body, BodyCommand, Cli, Cmd, Command, Delete, Hub, HubCommand,
-    Init, Interrupt, Join, List, Mint, Ping, Query, QueryResolution, Revoke, Roster, Run, Say,
-    Serve, Sessions, Status, Support, Target, Token, TokenCommand, Usage, Wait,
+    Answer, Attach, AttachCommand, Body, BodyCommand, Cli, Cmd, Command, Confirm, Delete, Hub,
+    HubCommand, Init, Interrupt, Join, List, Mint, Ping, Query, QueryResolution, Revoke, Roster,
+    Run, Say, Serve, Sessions, Status, Support, Target, Token, TokenCommand, Usage, Wait,
 };
 // NOTE (story #144): the global `--debug` / `--log-format` values are
 // captured on `Cli` as `Option<String>` (not typed enums) so the logging

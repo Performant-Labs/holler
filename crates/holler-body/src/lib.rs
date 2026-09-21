@@ -10,6 +10,7 @@
 pub mod acp_driver;
 pub mod backoff;
 pub mod config;
+pub mod confirm;
 pub mod connection;
 pub mod connection_state;
 pub mod detach;

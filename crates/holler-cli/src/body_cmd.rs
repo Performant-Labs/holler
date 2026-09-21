@@ -1,4 +1,4 @@
-//! `holler body join|detach|status|run|caps|support|query` (stories #176,
+//! `holler body join|confirm|detach|status|run|caps|support|query` (stories #176,
 //! #182, #185, #187), split out of `main.rs` to keep that file under the
 //! workspace's 900-line build guard (`scripts/lint.sh` check 4) — issue
 //! #228, the same split `say_cmd.rs`/`roster_cmd.rs`/`token_cmd.rs`/
@@ -53,6 +53,42 @@ pub fn join(server: &str, token: &str, hub_key: &str) -> i32 {
         holler_body::join::JoinExit::Ok => 0,
         holler_body::join::JoinExit::Refused(_) => 1,
         holler_body::join::JoinExit::Policy => 3,
+    }
+}
+
+/// `holler body confirm` (issue #351) — the one-time, interactive operator
+/// confirmation gate for a pairing's SAS: connects, runs the same
+/// `circuit/authenticate` → `circuit/prove` handshake `body run` does,
+/// prints the resulting SAS, reads the operator's y/n answer off real stdin,
+/// and — only on "yes" — persists `sas_confirmed: true` (`crate::identity::
+/// BodyIdentity`). Idempotent: a pairing already confirmed short-circuits
+/// (no connection attempted) and still exits 0. See `holler_body::confirm`'s
+/// module doc for why this is a separate command from `body join`/`body run`.
+pub fn confirm() -> i32 {
+    let state = match body_state() {
+        Ok(s) => s,
+        Err(code) => return code,
+    };
+    let read_answer = || -> std::io::Result<String> {
+        let mut line = String::new();
+        std::io::stdin().read_line(&mut line)?;
+        Ok(line)
+    };
+    match holler_body::confirm::confirm(&state.root, read_answer) {
+        holler_body::confirm::ConfirmExit::AlreadyConfirmed => {
+            println!("already confirmed — nothing to do.");
+            0
+        }
+        holler_body::confirm::ConfirmExit::Confirmed => 0,
+        holler_body::confirm::ConfirmExit::Declined => 1,
+        holler_body::confirm::ConfirmExit::NotJoined => {
+            eprintln!("error: not joined; run `holler body join` first");
+            1
+        }
+        holler_body::confirm::ConfirmExit::Refused(reason) => {
+            eprintln!("error: {reason}");
+            1
+        }
     }
 }
 
