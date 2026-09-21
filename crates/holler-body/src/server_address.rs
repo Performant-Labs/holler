@@ -16,9 +16,16 @@
 use std::net::IpAddr;
 
 /// The protocol's default body-join port (ADR 0002 / docs §3:
-/// "default `127.0.0.1:41807`"). A bare `ws://host` / `wss://host` with no
-/// explicit port uses this.
+/// "default `127.0.0.1:41807`"). A bare `ws://host` with no explicit port
+/// uses this — the loopback dev convenience the doc describes.
 pub const DEFAULT_PORT: u16 = 41807;
+
+/// The default port for a bare `wss://host` with no explicit port. Every
+/// real off-loopback deployment fronts the hub with a standard
+/// TLS-terminating proxy (`tailscale serve`, a reverse proxy — see
+/// ADR 0006), which listens on the standard HTTPS port, not the hub's own
+/// loopback-only [`DEFAULT_PORT`].
+pub const DEFAULT_WSS_PORT: u16 = 443;
 
 /// A parsed hub WebSocket address.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -95,6 +102,7 @@ pub fn parse(input: &str) -> Result<ServerAddress, AddressError> {
     if authority.is_empty() {
         return Err(AddressError::MissingHost);
     }
+    let default_port = if scheme == "wss" { DEFAULT_WSS_PORT } else { DEFAULT_PORT };
     // An IPv6 literal is bracketed (`[::1]` / `[::1]:port`). The colons *inside*
     // the brackets are part of the address, so the host/port separator is the
     // colon *after* the closing `]` — not the last colon in the string (which,
@@ -108,7 +116,7 @@ pub fn parse(input: &str) -> Result<ServerAddress, AddressError> {
                 let remainder = &authority[close + 1..];
                 let port = match remainder.strip_prefix(':') {
                     Some(p) => parse_port(p)?,
-                    None => DEFAULT_PORT,
+                    None => default_port,
                 };
                 (ip_literal.to_string(), port)
             }
@@ -128,7 +136,7 @@ pub fn parse(input: &str) -> Result<ServerAddress, AddressError> {
                 }
                 (host.to_string(), parse_port(port_str)?)
             }
-            None => (authority.to_string(), DEFAULT_PORT),
+            None => (authority.to_string(), default_port),
         }
     };
     Ok(ServerAddress {
@@ -181,11 +189,23 @@ mod tests {
     }
 
     #[test]
-    fn wss_defaults_port() {
+    fn wss_defaults_port_to_443() {
         let a = parse("wss://hub.example.ts.net").unwrap();
         assert_eq!(a.scheme, "wss");
-        assert_eq!(a.port, 41807);
+        assert_eq!(a.port, 443);
         assert!(!a.is_loopback());
+    }
+
+    #[test]
+    fn wss_explicit_port_wins_over_443_default() {
+        let a = parse("wss://hub.example.ts.net:41807").unwrap();
+        assert_eq!(a.port, 41807);
+    }
+
+    #[test]
+    fn wss_ipv6_defaults_port_to_443() {
+        let a = parse("wss://[2001:db8::1]").unwrap();
+        assert_eq!(a.port, 443);
     }
 
     #[test]
