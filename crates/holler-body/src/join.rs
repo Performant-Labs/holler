@@ -105,8 +105,9 @@ pub fn join(state_root: &std::path::Path, server: &str, token: &str, hostname: &
         return JoinExit::Policy;
     }
 
-    // 3. Rebuild the canonical URL (explicit port, default 41807 when absent)
-    //    so the connect uses what `parse` resolved, not the operator's raw arg.
+    // 3. Rebuild the canonical URL (explicit port, or the scheme's default
+    //    when absent — see `server_address::parse`) so the connect uses what
+    //    `parse` resolved, not the operator's raw arg.
     let url = format!("{}://{}:{}", addr.scheme, addr.host, addr.port);
 
     // 4. Connect and drive the one-shot handshake on a throwaway runtime

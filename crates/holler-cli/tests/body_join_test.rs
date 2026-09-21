@@ -416,10 +416,13 @@ mod unit {
         assert_eq!(addr.port, 4321);
     }
 
-    // `wss://` is accepted (the TLS transport) and defaults to 41807 too.
+    // `wss://` is accepted (the TLS transport) and defaults to the standard
+    // HTTPS port 443 — every real off-loopback deployment fronts the hub
+    // with a TLS-terminating proxy (`tailscale serve`, a reverse proxy) that
+    // listens there, not on the hub's own loopback-only 41807 (issue #357).
     #[test]
     fn url_wss_default_port() {
         let addr = parse("wss://loopback.example").expect("a bare wss:// is valid");
-        assert_eq!(addr.port, 41807);
+        assert_eq!(addr.port, 443);
     }
 }
