@@ -45,7 +45,7 @@ doesn't speak ACP — there is no `claude acp` subcommand — so a session that 
 [[session]]
 name = "reviewer"
 harness = "claude"
-command = ["npx", "-y", "@agentclientprotocol/claude-agent-acp@0.1.5"]
+command = ["npx", "-y", "@agentclientprotocol/claude-agent-acp@0.79.0"]
 ```
 
 - This package is maintained by the ACP project, **not shipped or endorsed by Anthropic**.
@@ -60,6 +60,12 @@ command = ["npx", "-y", "@agentclientprotocol/claude-agent-acp@0.1.5"]
   is a real round trip against Claude Code itself. That's tracked as a separate, manual acceptance
   gate — [issue #294](https://github.com/Performant-Labs/holler/issues/294) — run by a human with
   real Claude Code credentials, not something CI or a background agent attempts.
+- **Currently blocked, not just untested:** a real attempt (2026-09-21, logged on #294) confirms
+  the spawn works, but the ACP `initialize` handshake fails — Holler requires ACP protocol **v2**
+  (`unstable_protocol_v2`, [ADR 0013](docs/adr/ADR-0013.md)), and neither this adapter nor the
+  newest published `@agentclientprotocol/sdk` (`1.5.0` as of this writing) implements anything
+  past protocol v1 yet. This is an upstream ecosystem gap, not a Holler config or code bug —
+  revisit once the TS SDK ships v2.
 
 ## Debug output
 
