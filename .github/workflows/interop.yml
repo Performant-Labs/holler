@@ -200,7 +200,7 @@ jobs:
         env:
           CF_TUNNEL_TOKEN: ${{ secrets.CF_TUNNEL_TOKEN }}
         run: |
-          nohup cloudflared tunnel --token "$CF_TUNNEL_TOKEN" run holler-interop \
+          nohup cloudflared tunnel run --token "$CF_TUNNEL_TOKEN" \
             > "$TUNNEL_LOG" 2>&1 &
           echo $! > tunnel.pid
           # The hostname is fixed/hardcoded (CF_INTEROP_HOST, this file's
