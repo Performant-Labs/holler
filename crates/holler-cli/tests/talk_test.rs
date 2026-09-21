@@ -338,9 +338,13 @@ fn talklog_has_prompt_updates_done() {
     let out = say_ready(&hub_state, "alpha", "hi", Duration::from_secs(10));
     assert!(out.status.success(), "stderr: {}", stderr_of(&out));
 
-    // The body's advertised hostname is always "default" (no `--hostname`
-    // flag exists yet on `body join`), so the log path is deterministic.
-    let path = hub_state.hub().join("talklog").join("default__alpha.jsonl");
+    // The talklog filename is `<label>__<session>.jsonl` — issue #193's
+    // 2026-09-21 fix keys this on the token's verified mint label (`"b"`,
+    // [`start_body`]'s hardcoded label), not the body's self-claimed
+    // hostname (always the literal `"default"`, since no `--hostname` flag
+    // exists yet on `body join` — that value is a separate thing, see
+    // `query_test.rs`'s own note on the same distinction).
+    let path = hub_state.hub().join("talklog").join("b__alpha.jsonl");
     let content = wait_for(Duration::from_secs(5), || std::fs::read_to_string(&path).ok())
         .unwrap_or_else(|| panic!("talklog never appeared at {}", path.display()));
     let lines: Vec<Value> = content.lines().map(|l| serde_json::from_str(l).expect("valid jsonl line")).collect();
