@@ -47,7 +47,7 @@ use super::{send, timeout_next_envelope, Attempt};
 /// mapped to [`Attempt::Dropped`] (retry) rather than unwrapped, the same
 /// fail-closed discipline every other near-impossible step in this fn
 /// follows.
-pub(super) async fn authenticate<Snk, St>(sink: &mut Snk, stream: &mut St, identity: &BodyIdentity, state_root: &Path) -> Result<String, Attempt>
+pub(crate) async fn authenticate<Snk, St>(sink: &mut Snk, stream: &mut St, identity: &BodyIdentity, state_root: &Path) -> Result<String, Attempt>
 where
     Snk: Sink<Message, Error = WsError> + Unpin,
     St: Stream<Item = Result<Message, WsError>> + Unpin,

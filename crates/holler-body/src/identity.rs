@@ -68,6 +68,20 @@ pub struct BodyIdentity {
     /// prompt, no trust-on-first-use).
     #[serde(default)]
     pub hub_pubkey: String,
+    /// Issue #351: whether an operator has explicitly confirmed this
+    /// pairing's Short Authentication String (issue #339,
+    /// `holler_proto::sas::derive_sas`) at least once. Set **only** by
+    /// `body confirm` (an interactive, one-time, operator-facing command) —
+    /// never by `body join` (which completes before any Noise handshake, and
+    /// therefore before a SAS exists) and never by `body run`'s automatic
+    /// (re)connect loop, which must stay non-interactive and non-blocking
+    /// regardless of this flag's state (see `connection::connect_and_serve`'s
+    /// `sas_unconfirmed` warning). `#[serde(default)]` so a credential file
+    /// persisted by a pre-#351 build (#339/#350) — which has no such field —
+    /// deserializes as `false` ("not yet confirmed") rather than failing to
+    /// load.
+    #[serde(default)]
+    pub sas_confirmed: bool,
 }
 
 impl BodyIdentity {
@@ -174,6 +188,28 @@ pub fn load(state_root: &Path) -> Option<Result<BodyIdentity, std::io::Error>> {
         Err(e) => return Some(Err(io_err(e))),
     };
     Some(serde_json::from_slice::<BodyIdentity>(&bytes).map_err(io_err))
+}
+
+/// Issue #351: mark the persisted identity's pairing SAS confirmed and
+/// re-save it (0600, same as [`save`]). Reloads fresh from disk (rather than
+/// taking a caller-held `&BodyIdentity`) so `body confirm` — a short-lived
+/// CLI process that does its own connect+authenticate round trip before
+/// calling this — always writes against the identity's current on-disk
+/// state, not a copy that may have gone stale during that round trip.
+///
+/// `None` if there is no persisted identity to confirm (an unjoined body —
+/// the caller should tell the operator to `body join` first); `Some(Err)` on
+/// a corrupt file or a write failure.
+pub fn mark_sas_confirmed(state_root: &Path) -> Option<Result<BodyIdentity, std::io::Error>> {
+    let mut identity = match load(state_root)? {
+        Ok(identity) => identity,
+        Err(e) => return Some(Err(e)),
+    };
+    identity.sas_confirmed = true;
+    if let Err(e) = save(&identity, state_root) {
+        return Some(Err(e));
+    }
+    Some(Ok(identity))
 }
 
 /// Delete the persisted identity (the no-run `body detach` path). A missing
