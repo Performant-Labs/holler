@@ -447,7 +447,13 @@ async fn handle_replace(
             // real stop reason (issue #238), not a hardcoded `Cancelled` —
             // the turn being replaced may have already settled some other
             // way right as this `Replace` was processed.
-            finish_turn_no_dispatch(inner, reason).await;
+            //
+            // `publish_idle: false` — a replacement turn always starts right
+            // after this (the unconditional `start_turn` call just below), so
+            // this session is never actually free; publishing `Idle` here
+            // would be a real, externally-observable lie (see
+            // `finish_turn_no_dispatch`'s own doc for the race this closes).
+            finish_turn_no_dispatch(inner, reason, false).await;
         }
         Some(Ok(_)) | None => {}
     }
@@ -589,12 +595,34 @@ fn touch_last_update(inner: &mut Inner) {
     notify_presence(inner);
 }
 
-/// Close out the current turn (mark idle, record `last_turn`, fire its
-/// caller's `reply_tx`) without dispatching the next queued prompt. Split
-/// out of [`finish_turn`] for `Replace`, which needs this half only — it
-/// dispatches its *own* replacement turn immediately after, ahead of the
-/// queue, rather than letting the queue go first.
-async fn finish_turn_no_dispatch(inner: &mut Inner, reason: StopReason) {
+/// Close out the current turn (record `last_turn`, fire its caller's
+/// `reply_tx`) without dispatching the next queued prompt. Split out of
+/// [`finish_turn`] for `Replace`, which needs this half only — it dispatches
+/// its *own* replacement turn immediately after, ahead of the queue, rather
+/// than letting the queue go first.
+///
+/// `publish_idle` controls whether this turn's end is allowed to flip the
+/// **externally observable** presence state to `Idle` at all. Pass `false`
+/// when the caller already knows another turn starts immediately after this
+/// one settles ([`handle_replace`]'s unconditional redirect, or
+/// [`finish_turn`] when its own FIFO queue is non-empty) — publishing `Idle`
+/// in that case would be a real lie, not a harmless formality: this session's
+/// [`broadcast`] presence-changed notice fans out to the connection loop,
+/// which pushes it straight onto the wire as a `session/presence` update, so
+/// the hub's roster (and its own fast-path busy check, `holler-hub`'s
+/// `talk::say`) can observe "idle" during the gap and let a fresh `say`
+/// through — only for the body's *own* [`SessionManager`] to correctly
+/// refuse it moments later once the queued turn actually starts (`turn 0s
+/// ago`), because the queued turn was already about to run all along. The gap
+/// is normally sub-millisecond, but [`start_turn`]'s own await (spawning a
+/// fresh driver, or just the initial `driver.prompt` round trip) can stretch
+/// it arbitrarily far under real scheduling/CPU pressure — a genuine,
+/// load-widened race, not test impatience. When `publish_idle` is `false`,
+/// `state`/`turn_started_at`/`last_update_at`/`pending` are left exactly as
+/// the just-finished turn set them; [`start_turn`] overwrites all of them
+/// again (and republishes presence) before anything outside this task's own
+/// mailbox loop gets a chance to observe the gap.
+async fn finish_turn_no_dispatch(inner: &mut Inner, reason: StopReason, publish_idle: bool) {
     let a2a_state = holler_proto::state_for_stop_reason(reason.as_wire_str())
         .unwrap_or(SessionState::Failed);
     let turn_id = inner.current_turn_id.take().unwrap_or_default();
@@ -607,17 +635,23 @@ async fn finish_turn_no_dispatch(inner: &mut Inner, reason: StopReason) {
     };
     {
         let mut p = inner.presence.lock().unwrap_or_else(PoisonError::into_inner);
-        p.state = SessionState::Idle;
-        p.turn_started_at = None;
-        p.last_update_at = None;
-        p.pending = None;
+        if publish_idle {
+            p.state = SessionState::Idle;
+            p.turn_started_at = None;
+            p.last_update_at = None;
+            p.pending = None;
+        }
         p.turn_id = Some(turn_id.clone());
         p.last_turn = Some(last_turn.clone());
     }
     log_session(
         "state_transition",
         &inner.name,
-        vec![("state", "Idle".to_string()), ("turn_id", turn_id.clone()), ("stop_reason", reason.as_wire_str().to_string())],
+        vec![
+            ("state", if publish_idle { "Idle".to_string() } else { "Working (queued next)".to_string() }),
+            ("turn_id", turn_id.clone()),
+            ("stop_reason", reason.as_wire_str().to_string()),
+        ],
     );
     inner.current_stream = None;
     inner.current_updates = None;
@@ -628,7 +662,9 @@ async fn finish_turn_no_dispatch(inner: &mut Inner, reason: StopReason) {
     if matches!(reason, StopReason::Error) {
         inner.driver = None;
     }
-    notify_presence(inner);
+    if publish_idle {
+        notify_presence(inner);
+    }
     if let Some(reply_tx) = inner.current_reply.take() {
         let _ = reply_tx.send(PromptOutcome::Result {
             turn_id: last_turn.turn_id,
@@ -639,7 +675,11 @@ async fn finish_turn_no_dispatch(inner: &mut Inner, reason: StopReason) {
 }
 
 async fn finish_turn(inner: &mut Inner, reason: StopReason) {
-    finish_turn_no_dispatch(inner, reason).await;
+    // Never publish a transient `Idle` when a queued turn is about to run
+    // immediately after — see `finish_turn_no_dispatch`'s own doc for the
+    // externally-observable race this avoids.
+    let publish_idle = inner.queue.is_empty();
+    finish_turn_no_dispatch(inner, reason, publish_idle).await;
     dispatch_next_queued(inner).await;
 }
 
