@@ -53,6 +53,11 @@ pub struct StatusDoc {
     /// Whether the join is recent (within [`STALE_AFTER_SECS`]); `false` when
     /// unjoined or stale.
     connected: bool,
+    /// Issue #351: whether an operator has run `body confirm` and confirmed
+    /// this pairing's SAS at least once. `false` for an unjoined body (there
+    /// is no pairing to confirm) as well as a joined-but-not-yet-confirmed
+    /// one — the two are told apart by `joined`.
+    sas_confirmed: bool,
 }
 
 impl StatusDoc {
@@ -67,6 +72,7 @@ impl StatusDoc {
                 server: None,
                 hostname: None,
                 connected: false,
+                sas_confirmed: false,
             },
             Some(i) => StatusDoc {
                 role: "body",
@@ -76,6 +82,7 @@ impl StatusDoc {
                 server: (!i.server_url.is_empty()).then(|| i.server_url.clone()),
                 hostname: (!i.hostname.is_empty()).then(|| i.hostname.clone()),
                 connected: i.connected(holler_proto::now_secs()),
+                sas_confirmed: i.sas_confirmed,
             },
         }
     }
@@ -121,6 +128,11 @@ pub fn render_human(doc: &StatusDoc) -> String {
             } else {
                 " [stale]"
             });
+            // Issue #351: surfaced here (not just in `body run`'s log) so an
+            // operator can check confirmation status without tailing logs.
+            if !doc.sas_confirmed {
+                s.push_str(" [sas unconfirmed — run `holler body confirm`]");
+            }
             s
         }
     }
