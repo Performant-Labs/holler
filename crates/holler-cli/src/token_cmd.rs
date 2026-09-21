@@ -329,11 +329,80 @@ fn parse_ttl(ttl: &str) -> Option<u64> {
 /// carries it over the same out-of-band channel as the secret, and `body
 /// join` pins it — this is the physical channel that makes the pin
 /// meaningful, so the join line is where it belongs, not a separate step.
+///
+/// Real-hardware finding (issue #316's `hlr-1405` checkpoint, run against Io
+/// over the tailnet, 2026-09-21): `--advertise`'s own `--help` text ("Address
+/// (host[:port]) to advertise to bodies") never asked for a scheme, so a
+/// hub started exactly as the checkpoint's own instructions say
+/// (`--advertise hub.example.ts.net`) persisted that bare host verbatim —
+/// and this function printed it unchanged as `--server hub.example.ts.net`,
+/// a value `server_address::parse` fail-closed *refuses* (no scheme is not
+/// `ws://`/`wss://`; the checkpoint's own text anticipated only the
+/// `ws://` failure mode, not this stricter one). Off-loopback addresses are
+/// always `wss://` per ADR 0002/docs §3, so a persisted advertise value with
+/// no scheme already present gets one prepended here, at the one place that
+/// turns it into a URL a body actually dials — `--advertise`'s own
+/// persistence (`serve.rs`) and its read-only echo in `hub status`
+/// (`control_server.rs`) are left as the raw host[:port] the operator typed,
+/// since only this join line needs to be a valid `body join --server` value.
 fn join_command(state: &holler_hub::state::HubState, token_id: &str, secret: &str, hub_pubkey: &str) -> String {
     let server = std::fs::read_to_string(holler_hub::state::advertise_path(state))
         .ok()
         .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
         .and_then(|v| v.get("advertise").and_then(|a| a.as_str()).map(String::from))
+        .map(|adv| if adv.contains("://") { adv } else { format!("wss://{adv}") })
         .unwrap_or_else(|| "ws://127.0.0.1:41807".into());
     format!("holler body join --server {server} --token {token_id}:{secret} --hub-key {hub_pubkey}")
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)] // #316's join_command test module
+mod tests {
+    use super::join_command;
+
+    fn state_with_advertise(advertise_json_body: &str) -> (tempfile::TempDir, holler_hub::state::HubState) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let state = holler_hub::state::HubState::from_root(dir.path().to_path_buf());
+        holler_hub::state::ensure_dirs(&state).expect("ensure_dirs");
+        std::fs::write(holler_hub::state::advertise_path(&state), advertise_json_body).expect("write advertise.json");
+        (dir, state)
+    }
+
+    /// Real-hardware regression (issue #316's `hlr-1405` checkpoint, 2026-09-21):
+    /// `hub serve --advertise hub.example.ts.net` (exactly as that
+    /// checkpoint's own instructions say — no scheme) used to produce a join
+    /// line `body join` itself would refuse (`server_address::parse` requires
+    /// `ws://`/`wss://`). A bare host now gets `wss://` prepended.
+    #[test]
+    fn bare_advertise_host_gets_wss_scheme() {
+        let (_dir, state) = state_with_advertise(r#"{"advertise":"hub.example.ts.net"}"#);
+        let cmd = join_command(&state, "tok_1", "secret_1", "deadbeef");
+        assert!(
+            cmd.contains("--server wss://hub.example.ts.net"),
+            "expected a wss:// scheme prepended to a bare advertise host: {cmd}"
+        );
+    }
+
+    /// An advertise value that already carries an explicit scheme (an
+    /// operator relaying through a loopback proxy on `ws://`, say) is passed
+    /// through unchanged rather than double-prefixed.
+    #[test]
+    fn advertise_host_with_explicit_scheme_is_unchanged() {
+        let (_dir, state) = state_with_advertise(r#"{"advertise":"ws://127.0.0.1:9999"}"#);
+        let cmd = join_command(&state, "tok_1", "secret_1", "deadbeef");
+        assert!(
+            cmd.contains("--server ws://127.0.0.1:9999"),
+            "expected the explicit scheme kept as-is, not double-prefixed: {cmd}"
+        );
+    }
+
+    /// No `--advertise` at all: the spec's loopback default, unchanged.
+    #[test]
+    fn no_advertise_file_falls_back_to_loopback_default() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let state = holler_hub::state::HubState::from_root(dir.path().to_path_buf());
+        holler_hub::state::ensure_dirs(&state).expect("ensure_dirs");
+        let cmd = join_command(&state, "tok_1", "secret_1", "deadbeef");
+        assert!(cmd.contains("--server ws://127.0.0.1:41807"), "expected the loopback default: {cmd}");
+    }
 }

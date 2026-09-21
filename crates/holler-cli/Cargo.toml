@@ -335,6 +335,9 @@ toml = { workspace = true }
 assert_cmd = { workspace = true }
 predicates = { workspace = true }
 rstest = { workspace = true }
+# token_cmd.rs's in-file unit tests (issue #316's hlr-1405 join_command fix)
+# build a throwaway HubState against a real temp dir.
+tempfile = { workspace = true }
 # tokio moved to [dependencies] (issue #196: attach_cmd.rs's throwaway
 # runtime is now on the normal command path, not just wire_selftest's canary).
 libc = { workspace = true }         # tests/support kill_tree
