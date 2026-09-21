@@ -101,6 +101,21 @@ fn liveness_timeout() -> std::time::Duration {
         .unwrap_or(heartbeat_interval() * 3)
 }
 
+/// The WS-level Ping interval (mirrors `holler-body`'s own
+/// `ws_ping_interval()` — see that function's doc for the 2026-09-21
+/// real-tunnel evidence this responds to). The body already sends one
+/// direction's worth of control-frame traffic; this sends the hub's own, so
+/// neither leg of a multi-hop tunnel path is left depending on the other
+/// direction's frames to stay under whatever edge's idle-connection horizon.
+/// `HOLLER_WS_PING_INTERVAL_MS` overrides it for tests.
+fn ws_ping_interval() -> std::time::Duration {
+    std::env::var("HOLLER_WS_PING_INTERVAL_MS")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .map(std::time::Duration::from_millis)
+        .unwrap_or(std::time::Duration::from_secs(10))
+}
+
 fn log(severity: Severity, method: &'static str, fields: Vec<(&'static str, String)>) {
     holler_proto::log::emit(&Event {
         component: Component::Wire,
@@ -261,8 +276,18 @@ pub async fn handle_authenticated<Snk, St>(
         old.supersede().await;
     }
 
+    // Issue #193's real-tunnel dispatch findings (2026-09-21): `say`/
+    // `interrupt` target-resolution (`live.rs`'s `Registry`, keyed on
+    // `LiveHandle.hostname`) must agree with the roster's own routing key
+    // (`record.label`, set on the next line via `roster.set_label`) — not
+    // the body's self-claimed `params.hostname` from its hello, which
+    // `holler body join` currently hardcodes to the literal `"default"`
+    // (no `--hostname` flag exists). Keying this registry on the verified
+    // token label instead means `say macos/macos-session` finds what the
+    // roster already correctly reports as connected, instead of comparing
+    // against a hostname no session was ever actually filed under.
     let (mut cmd_rx, mut cancel_rx, seq) =
-        registry.insert(&client_id, &params.hostname, &params.token_id, peer).await;
+        registry.insert(&client_id, &record.label, &params.token_id, peer).await;
     registry.set_harnesses_advertised(&client_id, body_harnesses.clone()).await;
     // Issue #236 (ADR 0005 §2): the label travels with the authenticated
     // token, never on the wire, so this is the one place the hub can read it
@@ -508,6 +533,7 @@ struct SessionConnection<'a, Snk, St> {
     /// regression: a sibling's own `say` and this cancel can be concurrent).
     pending_cancels: std::collections::HashMap<String, tokio::sync::oneshot::Sender<CancelReply>>,
     last_frame_at: tokio::time::Instant,
+    ws_ping: tokio::time::Interval,
 }
 
 /// The two command channels a live connection's task drains (issue #191):
@@ -550,6 +576,7 @@ where
             pending_says: std::collections::HashMap::new(),
             pending_cancels: std::collections::HashMap::new(),
             last_frame_at: tokio::time::Instant::now(),
+            ws_ping: tokio::time::interval(ws_ping_interval()),
         }
     }
 
@@ -595,6 +622,20 @@ where
         }
     }
 
+    /// Send a WS-level Ping control frame (see [`ws_ping_interval`]'s own
+    /// doc for why), tearing the connection down the same way every other
+    /// abrupt send failure does — split out purely to keep [`Self::run`]'s
+    /// `select!` arm bodies uniformly small (matching
+    /// [`Self::handle_cancel_command`]/[`Self::handle_live_command`]).
+    async fn send_ws_ping(&mut self) -> Result<(), ()> {
+        if self.sink.send(Message::Ping(Vec::new().into())).await.is_err() || self.sink.flush().await.is_err() {
+            self.fail_pending();
+            self.mark_reconnecting();
+            return Err(());
+        }
+        Ok(())
+    }
+
     /// The live session loop: answer presence heartbeats and `circuit/ping`
     /// requests from the body, service [`LiveCommand`]s from the registry
     /// (`hub token ping`'s probe, issue #185's `hub query TARGET …` forward,
@@ -604,6 +645,7 @@ where
     /// always applied in the other direction. Returns when the socket
     /// closes, errors, decodes fail, or the liveness timeout fires.
     async fn run(&mut self) {
+        self.ws_ping.tick().await; // the first tick fires immediately; consume it.
         loop {
             tokio::select! {
                 // `biased` (issue #191): `cancel_rx` is listed ahead of
@@ -654,6 +696,11 @@ where
                     self.fail_pending();
                     self.mark_reconnecting();
                     return;
+                }
+                _ = self.ws_ping.tick() => {
+                    if self.send_ws_ping().await.is_err() {
+                        return;
+                    }
                 }
                 cancel_cmd = self.cancel_rx.recv() => {
                     if self.handle_cancel_command(cancel_cmd).await.is_err() {
