@@ -276,8 +276,18 @@ pub async fn handle_authenticated<Snk, St>(
         old.supersede().await;
     }
 
+    // Issue #193's real-tunnel dispatch findings (2026-09-21): `say`/
+    // `interrupt` target-resolution (`live.rs`'s `Registry`, keyed on
+    // `LiveHandle.hostname`) must agree with the roster's own routing key
+    // (`record.label`, set on the next line via `roster.set_label`) — not
+    // the body's self-claimed `params.hostname` from its hello, which
+    // `holler body join` currently hardcodes to the literal `"default"`
+    // (no `--hostname` flag exists). Keying this registry on the verified
+    // token label instead means `say macos/macos-session` finds what the
+    // roster already correctly reports as connected, instead of comparing
+    // against a hostname no session was ever actually filed under.
     let (mut cmd_rx, mut cancel_rx, seq) =
-        registry.insert(&client_id, &params.hostname, &params.token_id, peer).await;
+        registry.insert(&client_id, &record.label, &params.token_id, peer).await;
     registry.set_harnesses_advertised(&client_id, body_harnesses.clone()).await;
     // Issue #236 (ADR 0005 §2): the label travels with the authenticated
     // token, never on the wire, so this is the one place the hub can read it

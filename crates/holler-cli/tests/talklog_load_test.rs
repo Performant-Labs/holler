@@ -83,7 +83,7 @@ fn talklog_survives_large_accumulated_log_without_corruption() {
     .unwrap_or_else(|| panic!("warm-up say never got past unknown_session within 10s"));
     assert!(warm.status.success(), "warm-up say must succeed: {}", stderr_of(&warm));
 
-    let path = hub_state.hub().join("talklog").join("default__alpha.jsonl");
+    let path = hub_state.hub().join("talklog").join("b__alpha.jsonl");
     wait_for(Duration::from_secs(5), || std::fs::metadata(&path).ok())
         .unwrap_or_else(|| panic!("talklog never appeared at {}", path.display()));
 
