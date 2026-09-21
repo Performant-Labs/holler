@@ -353,6 +353,11 @@ fn on_response(
         server_url: server_url.to_string(),
         joined_at: holler_proto::now_secs(),
         hub_pubkey: hub_key.to_string(),
+        // Issue #351: a freshly-joined pairing has never had its SAS shown
+        // to an operator (the SAS does not even exist yet — it is derived
+        // from the Noise handshake `body run` performs later, not from
+        // `circuit/join`). `body confirm` is the only thing that flips this.
+        sas_confirmed: false,
     };
     if let Err(e) = crate::identity::save(&identity, state_root) {
         let e = JoinError::Io(e.to_string());

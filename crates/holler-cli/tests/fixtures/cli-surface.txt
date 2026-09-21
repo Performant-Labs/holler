@@ -56,6 +56,7 @@ wait | --prefix io/ --until gone --timeout 5s
 
 # --- body ------------------------------------------------------------------
 body join | --server wss://hub.example.ts.net --token tok_7f3a:hlr_join_x --hub-key aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+body confirm |
 body run |
 body run | --config sessions.toml
 body detach |

@@ -18,7 +18,7 @@
 //! gate (issue #228) by pushing every leaf's actual logic into a sibling
 //! module — `token_cmd.rs` (`hub token …`), `hub_cmd.rs` (`hub
 //! status|caps|support|query`), `body_cmd.rs` (`body
-//! join|detach|status|run|caps|support|query`), `attach_cmd.rs` (`body attach
+//! join|confirm|detach|status|run|caps|support|query`), `attach_cmd.rs` (`body attach
 //! sessions|init`, issue #196), plus the pre-existing
 //! `say_cmd.rs`/`roster_cmd.rs`/`query_cmd.rs`. Every one of those modules
 //! returns a plain ADR 0003 exit code (already having printed its own
@@ -170,6 +170,7 @@ fn main() {
             BodyCommand::Join(join) => {
                 std::process::exit(holler_cli::body_cmd::join(&join.server, &join.token, &join.hub_key));
             }
+            BodyCommand::Confirm(_) => std::process::exit(holler_cli::body_cmd::confirm()),
             BodyCommand::Detach(_) => std::process::exit(holler_cli::body_cmd::detach()),
             BodyCommand::Status(_) => std::process::exit(holler_cli::body_cmd::status(cli.json)),
             BodyCommand::Run(run) => std::process::exit(holler_cli::body_cmd::run(run.config.as_deref())),

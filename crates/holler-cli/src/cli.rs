@@ -110,6 +110,10 @@ pub struct Hub {
 pub enum BodyCommand {
     /// Join a hub as a body using a minted token.
     Join(Join),
+    /// Interactively confirm this pairing's Short Authentication String
+    /// (issue #351) — a one-time, operator-facing gate, separate from the
+    /// fully-automated `run`.
+    Confirm(Confirm),
     /// Run the body (live agent session).
     Run(Run),
     /// Detach the body from the hub.
@@ -486,6 +490,9 @@ pub struct Join {
     #[arg(long = "hub-key")]
     pub hub_key: String,
 }
+
+#[derive(Parser, Debug)]
+pub struct Confirm {}
 
 #[derive(Parser, Debug)]
 pub struct Run {

@@ -27,7 +27,11 @@
 //! threading 7-15 loose positional parameters — a pure refactor, no behavior
 //! change.
 
-mod handshake;
+// `pub(crate)` (not private): issue #351's `crate::confirm` reuses
+// `handshake::authenticate` directly, on its own short-lived connection, to
+// derive the same SAS a `body run` would show — see that module's doc for why
+// the confirmation step cannot just read the SAS `body run` already logs.
+pub(crate) mod handshake;
 mod session_dispatch;
 
 use std::path::{Path, PathBuf};
@@ -144,7 +148,11 @@ pub fn run(state_root: &Path, registry: SessionRegistry) -> RunExit {
 
 /// One reconnect attempt's outcome: what the caller (the reconnect loop)
 /// should do next.
-enum Attempt {
+///
+/// `pub(crate)` (not private): issue #351's `crate::confirm` calls
+/// `handshake::authenticate` directly on its own short-lived connection, so
+/// it needs to name this type too.
+pub(crate) enum Attempt {
     /// `detach` fired, or a signal arrived: stop for good.
     Ended(RunExit),
     /// The hub rejected the authentication proof, or this connection's hub
@@ -356,7 +364,34 @@ async fn connect_and_serve(
     // the handshake just completed — logged (never sent) alongside
     // `conn_connected` so the operator can compare it by eye against what
     // the hub's own console shows for this same connection.
-    info("conn_connected", vec![("server", identity.server_url.clone()), ("sas", sas)]);
+    info("conn_connected", vec![("server", identity.server_url.clone()), ("sas", sas.clone())]);
+
+    // Issue #351 design decision: an unconfirmed pairing is a **soft
+    // warning**, never a hard refusal, here. This loop is the same
+    // fully-automated path every e2e/interop test and unattended daemon
+    // depends on (#339/#350's own reason for not gating it at all). A hard
+    // refusal would not literally block on stdin, but it would still fail
+    // every fresh, never-yet-confirmed pairing's first `body run` — the exact
+    // regression class this issue's acceptance criteria forbid ("no
+    // regression to #339/#350's reconnect behavior"). So the connection
+    // always proceeds; the actual gate ("requires an explicit operator
+    // confirmation step before the body is treated as fully paired") is
+    // enforced entirely by `body confirm` (`crate::confirm`) being the only
+    // thing that ever sets `sas_confirmed`, surfaced via `body status` — not
+    // by refusing traffic here.
+    if !identity.sas_confirmed {
+        warn(
+            "sas_unconfirmed",
+            vec![
+                ("server", identity.server_url.clone()),
+                ("sas", sas),
+                (
+                    "hint",
+                    "run `holler body confirm` to verify this SAS and mark the pairing trusted".to_string(),
+                ),
+            ],
+        );
+    }
     let _ = crate::connection_state::write(
         state_root,
         &crate::connection_state::ConnectionState {
