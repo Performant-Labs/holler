@@ -92,7 +92,9 @@
 
 mod answerable;
 mod connection;
+mod connection_v1;
 mod pending;
+mod spawn;
 
 use std::path::PathBuf;
 use std::pin::Pin;
@@ -100,8 +102,8 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::task::{Context as TaskContext, Poll};
 use std::time::Duration;
 
-use agent_client_protocol::schema::v2;
-use agent_client_protocol::{AcpAgentConfig, Agent, V2ConnectionTo};
+use agent_client_protocol::schema::{v1, v2};
+use agent_client_protocol::{AcpAgentConfig, Agent, ConnectionTo, V2ConnectionTo};
 use futures_util::Stream;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
@@ -111,8 +113,9 @@ use holler_proto::log::{Component, Direction as LogDirection, Event as LogEvent,
 
 use crate::config::{SessionConfig, SessionMode};
 use answerable::{resolve_choice, OptionSet};
-use connection::{lock, Ready, Shared};
+use connection::{lock, Shared};
 use pending::{pending_items, reply_cancelled, send_resolved_reply};
+use spawn::SpawnAttempt;
 
 /// `component=acp` debug event: an outbound request/notification to the
 /// child, or a local lifecycle event (spawn attempt, shutdown). Mirrors
@@ -212,6 +215,24 @@ impl StopReason {
             Some(v2::StopReason::Other(_)) | None => Self::EndTurn,
             #[allow(unreachable_patterns)] // #188: `v2::StopReason` is #[non_exhaustive]
             Some(_) => Self::EndTurn,
+        }
+    }
+
+    /// The ACP v1 fallback's own [`Self::from_acp`] (issue #362): v1's
+    /// `PromptResponse::stop_reason` is not optional (v1's response carries
+    /// the outcome directly, unlike v2's separate `idle` state_update) and
+    /// `v1::StopReason` has no `Other` catch-all, but is still
+    /// `#[non_exhaustive]` — a future variant this driver has never heard of
+    /// gets the same "plain end-of-turn" treatment as v2's unknown reasons.
+    fn from_acp_v1(reason: v1::StopReason) -> Self {
+        match reason {
+            v1::StopReason::EndTurn => Self::EndTurn,
+            v1::StopReason::Cancelled => Self::Cancelled,
+            v1::StopReason::MaxTokens => Self::MaxTokens,
+            v1::StopReason::MaxTurnRequests => Self::MaxTurnRequests,
+            v1::StopReason::Refusal => Self::Refusal,
+            #[allow(unreachable_patterns)] // #362: `v1::StopReason` is #[non_exhaustive]
+            _ => Self::EndTurn,
         }
     }
 
@@ -318,11 +339,26 @@ impl Stream for DriverEventStream {
     }
 }
 
-/// A live ACP v2 spawn-mode driver: one spawned harness child, one ACP
-/// session, for the lifetime of this value.
+/// The live connection handle: ACP v2 (the target protocol, ADR 0013), or
+/// the v1 fallback (issue #362) this driver falls back to when the spawned
+/// harness only negotiates v1 — currently every real one (see
+/// `connection_v1`'s module doc).
+pub(super) enum Conn {
+    V2 {
+        session: v2::SessionId,
+        connection: V2ConnectionTo<Agent>,
+    },
+    V1 {
+        session: v1::SessionId,
+        connection: ConnectionTo<Agent>,
+    },
+}
+
+/// A live ACP spawn-mode driver: one spawned harness child, one ACP
+/// session, for the lifetime of this value. Speaks ACP v2 when the harness
+/// negotiates it, or the v1 fallback otherwise (issue #362) — [`Conn`].
 pub struct AcpDriver {
-    session: v2::SessionId,
-    connection: V2ConnectionTo<Agent>,
+    conn: Conn,
     shared: Arc<Mutex<Shared>>,
     // `Mutex<Option<..>>`, mirroring `shutdown_tx` right above, so
     // `shutdown()` can `.take()` the handle and `.await` it *by value*
@@ -407,72 +443,36 @@ impl AcpDriver {
             })?,
         };
 
-        let shared = Arc::new(Mutex::new(Shared {
-            status: Status::Idle,
-            pending: None,
-            current_events: None,
-            awaiting_done: None,
-            last_stop_reason: None,
-        }));
-
-        let (ready_tx, ready_rx) = oneshot::channel::<Result<Ready, String>>();
-        let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
-
-        let task_shared = shared.clone();
-        let join_handle: JoinHandle<()> = tokio::spawn(async move {
-            connection::run(
-                agent_config,
-                session_cwd,
-                task_shared,
-                ready_tx,
-                shutdown_rx,
-            )
-            .await;
-        });
-
         let timeout_ms: u64 = std::env::var("HOLLER_ACP_TIMEOUT_MS")
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(DEFAULT_STARTUP_TIMEOUT_MS);
 
-        match tokio::time::timeout(Duration::from_millis(timeout_ms), ready_rx).await {
-            Ok(Ok(Ok(ready))) => {
-                log_debug(
-                    LogDirection::In,
+        // Try ACP v2 first (ADR 0013's target protocol). Fall back to v1
+        // (issue #362) only on that exact negotiation failure — every other
+        // startup error (a bad command, a timeout, a crash) is fatal in
+        // either mode, so it is reported as-is rather than triggering a
+        // second, redundant spawn attempt.
+        match Self::spawn_v2(agent_config.clone(), session_cwd.clone(), timeout_ms).await {
+            Ok(driver) => Ok(driver),
+            Err(SpawnAttempt::Fatal(e)) => Err(e),
+            Err(SpawnAttempt::FallbackToV1 { reason }) => {
+                log_warn(
                     "spawn",
-                    vec![("event", "spawned".to_string())],
-                    None,
+                    vec![
+                        ("event", "acp_v2_negotiation_failed".to_string()),
+                        ("reason", reason),
+                        ("fallback", "v1".to_string()),
+                    ],
                 );
-                Ok(Self {
-                    session: ready.session_id,
-                    connection: ready.connection,
-                    shared,
-                    join_handle: Mutex::new(Some(join_handle)),
-                    shutdown_tx: Mutex::new(Some(shutdown_tx)),
-                })
-            }
-            Ok(Ok(Err(reason))) => {
-                join_handle.abort();
-                log_warn("spawn", vec![("event", format!("startup_failed: {reason}"))]);
-                Err(DriverError::Startup(reason))
-            }
-            Ok(Err(_dropped)) => {
-                join_handle.abort();
-                log_warn("spawn", vec![("event", "connection task ended before readiness".to_string())]);
-                Err(DriverError::Startup(
-                    "connection task ended before signalling readiness".to_string(),
-                ))
-            }
-            Err(_timed_out) => {
-                // Kill the still-hung child by ending its owning task; the
-                // SDK's `AcpAgent` transport installs a guard that tears down
-                // the spawned process group when the connection future is
-                // dropped (which `abort` forces).
-                join_handle.abort();
-                log_warn("spawn", vec![("event", format!("startup_timeout: {timeout_ms}ms"))]);
-                Err(DriverError::Startup(format!(
-                    "no response within {timeout_ms}ms (HOLLER_ACP_TIMEOUT_MS)"
-                )))
+                Self::spawn_v1(agent_config, session_cwd, timeout_ms)
+                    .await
+                    .map_err(|attempt| match attempt {
+                        SpawnAttempt::Fatal(e) => e,
+                        // v1 is the last protocol this driver knows; a v1
+                        // attempt has no further fallback to offer.
+                        SpawnAttempt::FallbackToV1 { reason } => DriverError::Startup(reason),
+                    })
             }
         }
     }
@@ -491,28 +491,69 @@ impl AcpDriver {
             guard.current_events = Some(tx);
             guard.status = Status::Working;
         }
-        let session = self.session();
         log_debug(
             LogDirection::Out,
             "session/prompt",
             vec![],
             holler_proto::log::frame_at_noisy(&serde_json::json!({ "text": text }).to_string()),
         );
-        // Fire-and-forget the acceptance ack: v2's `session/prompt` response
-        // only means "accepted", not "done" (see the module doc). A failure
-        // here (e.g. the child already died) surfaces as a `Done(Error)` on
-        // the stream via the crash watcher, not as a hang.
-        let result = self
-            .connection
-            .send_request_to(Agent, v2::PromptRequest::new(session, vec![text.into()]))
-            .block_task()
-            .await;
-        if result.is_err() {
-            log_warn("session/prompt", vec![("event", "send failed".to_string())]);
-            let mut guard = lock(&self.shared);
-            guard.status = Status::Idle;
-            if let Some(tx) = guard.current_events.take() {
-                let _ = tx.send(DriverEvent::Done(StopReason::Error));
+        match &self.conn {
+            Conn::V2 { session, connection } => {
+                // Fire-and-forget the acceptance ack: v2's `session/prompt`
+                // response only means "accepted", not "done" (see the module
+                // doc). A failure here (e.g. the child already died)
+                // surfaces as a `Done(Error)` on the stream via the crash
+                // watcher, not as a hang.
+                let result = connection
+                    .send_request_to(Agent, v2::PromptRequest::new(session.clone(), vec![text.into()]))
+                    .block_task()
+                    .await;
+                if result.is_err() {
+                    log_warn("session/prompt", vec![("event", "send failed".to_string())]);
+                    let mut guard = lock(&self.shared);
+                    guard.status = Status::Idle;
+                    if let Some(tx) = guard.current_events.take() {
+                        let _ = tx.send(DriverEvent::Done(StopReason::Error));
+                    }
+                }
+            }
+            Conn::V1 { session, connection } => {
+                // Unlike v2, a v1 `session/prompt` response IS completion —
+                // it carries `stop_reason` directly (see `connection_v1`'s
+                // module doc). Await it in a background task rather than
+                // blocking `prompt()` on the whole turn.
+                let session = session.clone();
+                let connection = connection.clone();
+                let prompt_text = text.to_string();
+                let shared = self.shared.clone();
+                tokio::spawn(async move {
+                    let result = connection
+                        .send_request_to(
+                            Agent,
+                            v1::PromptRequest::new(
+                                session,
+                                vec![v1::ContentBlock::Text(v1::TextContent::new(prompt_text))],
+                            ),
+                        )
+                        .block_task()
+                        .await;
+                    let stop_reason = match result {
+                        Ok(response) => StopReason::from_acp_v1(response.stop_reason),
+                        Err(_) => {
+                            log_warn("session/prompt", vec![("event", "send failed (v1)".to_string())]);
+                            StopReason::Error
+                        }
+                    };
+                    let mut guard = lock(&shared);
+                    guard.status = Status::Idle;
+                    guard.last_stop_reason = Some(stop_reason);
+                    if let Some(tx) = guard.current_events.take() {
+                        let _ = tx.send(DriverEvent::Done(stop_reason));
+                    }
+                    if let Some(done_tx) = guard.awaiting_done.take() {
+                        let _ = done_tx.send(stop_reason);
+                    }
+                });
             }
         }
         DriverEventStream { rx }
@@ -700,22 +741,28 @@ impl AcpDriver {
         }
     }
 
-    fn session(&self) -> v2::SessionId {
-        self.session.clone()
-    }
-
     fn session_cancel(&self) -> Result<(), agent_client_protocol::Error> {
-        self.connection
-            .send_notification_to(Agent, v2::CancelSessionNotification::new(self.session()))
+        match &self.conn {
+            Conn::V2 { session, connection } => connection
+                .send_notification_to(Agent, v2::CancelSessionNotification::new(session.clone())),
+            Conn::V1 { session, connection } => connection
+                .send_notification_to(Agent, v1::CancelNotification::new(session.clone())),
+        }
     }
 
-    async fn session_close(
-        &self,
-    ) -> Result<v2::CloseSessionResponse, agent_client_protocol::Error> {
-        self.connection
-            .send_request_to(Agent, v2::CloseSessionRequest::new(self.session()))
-            .block_task()
-            .await
+    async fn session_close(&self) -> Result<(), agent_client_protocol::Error> {
+        match &self.conn {
+            Conn::V2 { session, connection } => connection
+                .send_request_to(Agent, v2::CloseSessionRequest::new(session.clone()))
+                .block_task()
+                .await
+                .map(|_response| ()),
+            Conn::V1 { session, connection } => connection
+                .send_request_to(Agent, v1::CloseSessionRequest::new(session.clone()))
+                .block_task()
+                .await
+                .map(|_response| ()),
+        }
     }
 }
 

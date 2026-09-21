@@ -10,7 +10,7 @@
 
 use std::collections::BTreeMap;
 
-use agent_client_protocol::schema::v2;
+use agent_client_protocol::schema::{v1, v2};
 use agent_client_protocol::Responder;
 use holler_proto::docs::{PendingItem, PendingKind};
 
@@ -30,9 +30,14 @@ pub(super) struct PendingField {
 /// Which typed inbound request this pending block holds open. Distinct
 /// `Responder<T>` types (the SDK's own design — a `Responder` is bound to its
 /// request's exact response type) mean this can't just be one generic slot.
+///
+/// `PermissionV1` is the ACP v1 fallback's own permission-request shape
+/// (issue #362): v1 has no `elicitation/create` at all — that is a v2-only
+/// extension — so a v1 session can only ever hold a permission request open.
 pub(super) enum PendingResponder {
     Permission(Responder<v2::RequestPermissionResponse>),
     Elicitation(Responder<v2::CreateElicitationResponse>),
+    PermissionV1(Responder<v1::RequestPermissionResponse>),
 }
 
 /// A held-open `session/request_permission` or `elicitation/create` request:
@@ -72,6 +77,11 @@ pub(super) fn reply_cancelled(responder: PendingResponder) {
         PendingResponder::Elicitation(r) => {
             let _ = r.respond(v2::CreateElicitationResponse::new(
                 v2::ElicitationAction::Cancel,
+            ));
+        }
+        PendingResponder::PermissionV1(r) => {
+            let _ = r.respond(v1::RequestPermissionResponse::new(
+                v1::RequestPermissionOutcome::Cancelled,
             ));
         }
     }
@@ -115,6 +125,18 @@ pub(super) fn send_resolved_reply(
             ))
             .map_err(|e| DriverError::Rpc(e.to_string()))
         }
+        PendingResponder::PermissionV1(r) => {
+            let option_id = resolved
+                .into_iter()
+                .next()
+                .ok_or_else(|| DriverError::Answer("no option resolved".to_string()))?;
+            r.respond(v1::RequestPermissionResponse::new(
+                v1::RequestPermissionOutcome::Selected(v1::SelectedPermissionOutcome::new(
+                    v1::PermissionOptionId::new(option_id),
+                )),
+            ))
+            .map_err(|e| DriverError::Rpc(e.to_string()))
+        }
     }
 }
 
@@ -128,11 +150,49 @@ pub(super) fn chunk_text(content: &v2::ContentBlock) -> Option<String> {
     }
 }
 
+/// The ACP v1 fallback's own [`chunk_text`] — v1's `ContentBlock` is a
+/// distinct type from v2's, but shares the same `Text` variant shape.
+pub(super) fn chunk_text_v1(content: &v1::ContentBlock) -> Option<String> {
+    match content {
+        v1::ContentBlock::Text(text) => Some(text.text.clone()),
+        _ => None,
+    }
+}
+
 /// Build the pending fields + unsupported-reason for one
 /// `session/request_permission` request: a single field whose options are the
 /// request's own `options`, in order.
 pub(super) fn permission_fields(
     request: &v2::RequestPermissionRequest,
+) -> (Vec<PendingField>, Option<String>) {
+    let options: Vec<(String, String)> = request
+        .options
+        .iter()
+        .map(|o| (o.option_id.0.to_string(), o.name.clone()))
+        .collect();
+    if options.is_empty() {
+        return (
+            Vec::new(),
+            Some("session/request_permission carried zero options".to_string()),
+        );
+    }
+    (
+        vec![PendingField {
+            name: String::new(),
+            options: OptionSet::new(options),
+            multi: false,
+        }],
+        None,
+    )
+}
+
+/// The ACP v1 fallback's own [`permission_fields`] — v1's
+/// `RequestPermissionRequest` has no direct `title` field (only a
+/// `tool_call` update, whose own optional `title` this driver's caller reads
+/// separately for the pending block's `prompt`); the option-shape logic
+/// itself is otherwise identical to v2's.
+pub(super) fn permission_fields_v1(
+    request: &v1::RequestPermissionRequest,
 ) -> (Vec<PendingField>, Option<String>) {
     let options: Vec<(String, String)> = request
         .options

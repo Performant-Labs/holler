@@ -150,7 +150,7 @@ fn handle_state_update(shared: &Arc<Mutex<Shared>>, state: v2::StateUpdate) {
 /// flip status to `InputRequired`, and — if a turn is in flight — emit the
 /// transition immediately (before this handler returns), per the issue's own
 /// "surfaced immediately, not after a poll" requirement.
-fn store_pending(shared: &Arc<Mutex<Shared>>, block: PendingBlock) {
+pub(super) fn store_pending(shared: &Arc<Mutex<Shared>>, block: PendingBlock) {
     log_debug(
         LogDirection::In,
         "request_permission_or_elicitation",
