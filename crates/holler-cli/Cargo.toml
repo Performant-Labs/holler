@@ -133,6 +133,13 @@ path = "tests/acp_driver_crash_test.rs"
 name = "session_manager_test"
 path = "tests/session_manager_test.rs"
 
+# Split out of `session_manager_test` purely to keep that file under the
+# repo's 900-line file-size gate (`scripts/lint.sh`) — see this file's own
+# module doc for the reconnect-contract race it guards.
+[[test]]
+name = "session_manager_queue_race_test"
+path = "tests/session_manager_queue_race_test.rs"
+
 # `status`/`caps`/`support`/`protocol` — local and remote, both peers (issue
 # #185): the hub's live-registry-backed counts and confirmation pass, the
 # body's local probes (no run required), and `hub query TARGET …`'s
