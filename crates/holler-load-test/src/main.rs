@@ -46,6 +46,7 @@ mod metrics;
 mod proc;
 mod scenario;
 mod session_scale;
+mod sustained_throughput;
 mod wire;
 
 use std::path::PathBuf;
@@ -73,6 +74,13 @@ pub enum Scenario {
     /// propagation latency, the `hub status --json` `sessions` invariant
     /// (hard-failed on mismatch), and `holler roster --json` read latency.
     SessionScale,
+    /// Issue #372: a real body fleet, driven with a sustained `say --queue`
+    /// rate across every session concurrently for a real, non-trivial
+    /// duration — not a burst. Measures `say` round-trip latency
+    /// (p50/p90/p99), whether `SessionManager`'s FIFO queue depth grows
+    /// unbounded or drains once load eases, and hub RSS sampled repeatedly
+    /// across the run (flat after warmup vs. monotonic growth).
+    SustainedThroughput,
 }
 
 #[derive(Parser, Debug)]
@@ -139,6 +147,20 @@ struct Cli {
     #[arg(long, default_value_t = 20)]
     roster_reads: usize,
 
+    /// `sustained-throughput`: how long (seconds) to drive the sustained
+    /// `say --queue` rate once the fleet is up. #372's own framing is
+    /// explicit that this must be "long enough to observe steady-state
+    /// behavior, not just a burst" — see `sustained_throughput.rs`'s module
+    /// doc for why 60s is the chosen default.
+    #[arg(long, default_value_t = 60)]
+    sustained_secs: u64,
+
+    /// `sustained-throughput`: how often (ms) to sample the hub's RSS
+    /// during the sustained run, so "flat after warmup" vs. "monotonic
+    /// growth" is a real time series rather than one before/after snapshot.
+    #[arg(long, default_value_t = 2000)]
+    rss_sample_ms: u64,
+
     /// Path to the `holler` binary (default: next to this one).
     #[arg(long)]
     holler_bin: Option<PathBuf>,
@@ -182,6 +204,8 @@ pub struct Config {
     pub session_ramp: Vec<usize>,
     pub fanout_samples: usize,
     pub roster_reads: usize,
+    pub sustained: Duration,
+    pub rss_sample_interval: Duration,
 }
 
 fn main() -> Res<()> {
@@ -211,6 +235,8 @@ fn main() -> Res<()> {
         session_ramp,
         fanout_samples: cli.fanout_samples,
         roster_reads: cli.roster_reads,
+        sustained: Duration::from_secs(cli.sustained_secs),
+        rss_sample_interval: Duration::from_millis(cli.rss_sample_ms),
     };
 
     let hub_env = parse_env(&cli.hub_env)?;
@@ -226,6 +252,7 @@ fn main() -> Res<()> {
             Scenario::ConnectionScale => "#370".to_string(),
             Scenario::BodyFleet => "#369".to_string(),
             Scenario::SessionScale => "#371".to_string(),
+            Scenario::SustainedThroughput => "#372".to_string(),
         },
         started_at: rfc3339_utc_now(),
         host: metrics::HostInfo::detect(),
@@ -240,6 +267,7 @@ fn main() -> Res<()> {
             Scenario::ConnectionScale => scenario::run(&cfg, &hub, &mut report).await,
             Scenario::BodyFleet => scenario::run_body_fleet(&cfg, &hub, &mut report).await,
             Scenario::SessionScale => session_scale::run(&cfg, &hub, &mut report).await,
+            Scenario::SustainedThroughput => sustained_throughput::run(&cfg, &hub, &mut report).await,
         }
     });
     hub.stop();
@@ -292,6 +320,8 @@ fn config_json(cfg: &Config, hub_env: &[(String, String)]) -> serde_json::Value 
         "session_ramp": cfg.session_ramp,
         "fanout_samples": cfg.fanout_samples,
         "roster_reads": cfg.roster_reads,
+        "sustained_secs": cfg.sustained.as_secs(),
+        "rss_sample_ms": cfg.rss_sample_interval.as_millis() as u64,
         "hub_env": hub_env.iter().map(|(k, v)| format!("{k}={v}")).collect::<Vec<_>>(),
     })
 }
