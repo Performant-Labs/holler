@@ -69,7 +69,7 @@ failure doesn't hold this release up. The one hard requirement is that an overri
 | --- | --- | --- | --- |
 | `ubuntu-latest` | Yes | Yes | Full support |
 | `macos-latest` | Yes | Yes | Full support |
-| Windows | No | No | Excluded from CI (ADR 0002 retires Windows from the CI matrix) — tracked in [#308](https://github.com/Performant-Labs/holler/issues/308); add a row here (and to CI's matrix) once that's resolved |
+| Windows | No | No | Excluded from CI (ADR 0002 retires Windows from the CI matrix). [#308](https://github.com/Performant-Labs/holler/issues/308) fixed the instance-lock Unix-only compile break but found the real blocker to be the control-socket transport (Unix domain sockets end to end) — tracked in [#378](https://github.com/Performant-Labs/holler/issues/378); add a row here (and to CI's matrix) once that's resolved |
 
 This table is the one place platform status is recorded — the checklist and any other doc
 mentioning target platforms should link here rather than repeat/restate it.
