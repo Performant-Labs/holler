@@ -104,6 +104,10 @@ binary passing steps 16-17 is not evidence the uploaded one works.
   - `gh release download vX.Y.Z` into a clean directory
   - `./holler-<os> --version` against *that* downloaded file, for each platform
   - Confirms the upload isn't corrupted, is the right architecture, has its executable bit set, and actually reports `X.Y.Z`
-- [ ] 23. **Close out**
+- [ ] 23. **Bump the Homebrew tap**
+  - In a checkout of [Performant-Labs/homebrew-tap](https://github.com/Performant-Labs/homebrew-tap): `scripts/update-formula.sh vX.Y.Z && git push`
+  - Downloads the real published assets and computes real sha256s — never hand-copy checksums
+  - Verify: `brew upgrade holler` (or a fresh `brew install Performant-Labs/tap/holler`) actually reports `X.Y.Z`
+- [ ] 24. **Close out**
   - Link this checklist issue from the GitHub Release
   - Tick every box above, then close this issue

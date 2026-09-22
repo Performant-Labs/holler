@@ -6,6 +6,19 @@ This repository is under construction — see the [Phase 0 epic](https://github.
 
 ## Install
 
+**Homebrew** (macOS/Apple Silicon or Linux/x86_64 — via [Homebrew on Linux](https://docs.brew.sh/Homebrew-on-Linux)):
+
+```bash
+brew tap Performant-Labs/tap
+brew install holler
+```
+
+From [Performant-Labs/homebrew-tap](https://github.com/Performant-Labs/homebrew-tap), a
+self-hosted tap — not (yet) in `homebrew-core`. `brew upgrade holler` picks up new releases
+once the tap's formula is bumped.
+
+**One-line installer**, if you don't use Homebrew:
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Performant-Labs/holler/main/install.sh | sh
 ```
@@ -16,8 +29,7 @@ your platform (macOS/Apple Silicon or Linux/x86_64 — Windows isn't a supported
 specific version with `HOLLER_VERSION=v0.2.0`, or change the install directory with
 `HOLLER_INSTALL_DIR=/usr/local/bin` (prefix either as an env var before the command above).
 
-Or build from source: `cargo build --release -p holler-cli`, binary at
-`target/release/holler`.
+**From source:** `cargo build --release -p holler-cli`, binary at `target/release/holler`.
 
 ## Documentation
 
