@@ -66,7 +66,7 @@ One PR, one merge.
 ## Tag & build
 
 Target platforms: see [`docs/releasing.md`](releasing.md)'s platform table (currently
-`ubuntu-latest` + `macos-latest`; no Windows binary — [#308](https://github.com/Performant-Labs/holler/issues/308) is closed and confirmed out of scope for this).
+`ubuntu-latest` + `macos-latest`; no Windows binary — [#308](https://github.com/Performant-Labs/holler/issues/308) fixed the instance-lock Unix-only compile break but explicitly deferred the real blocker (the control-socket transport is Unix domain sockets end to end); tracked separately in [#378](https://github.com/Performant-Labs/holler/issues/378)).
 
 - [ ] 14. **Tag the bump commit**
   - `git tag -s vX.Y.Z -m "vX.Y.Z"` (signed, annotated)
