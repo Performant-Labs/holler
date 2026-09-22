@@ -34,7 +34,7 @@ specific version with `HOLLER_VERSION=v0.2.0`, or change the install directory w
 
 ## Documentation
 
-See [docs/README.md](docs/README.md) — the index. For testing: [the harness design](docs/testing.md) and [how to run the tests](docs/running-tests.md).
+See [docs/README.md](docs/README.md) — the index. For testing: [the harness design](docs/testing.md) and [how to run the tests](docs/running-tests.md). For watching multiple attach-mode sessions in one local terminal workspace: [docs/herdr-workspace.md](docs/herdr-workspace.md).
 
 ## Where Holler fits
 
