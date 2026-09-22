@@ -120,6 +120,13 @@ pub async fn run(cfg: &Config, hub: &Hub, report: &mut Report) -> Res<()> {
             sessions_match: None,
             presence_fanout: None,
             roster_read: None,
+            sustained_seconds: None,
+            say_failures: None,
+            queue_depth_max: None,
+            queue_depth_final: None,
+            queue_events_observed: None,
+            queue_full_refusals: None,
+            rss_series: Vec::new(),
         });
 
         // Tear this rung down completely before the next one: #370's ramp is
@@ -264,6 +271,13 @@ pub async fn run_body_fleet(cfg: &Config, hub: &Hub, report: &mut Report) -> Res
         sessions_match: None,
         presence_fanout: None,
         roster_read: None,
+        sustained_seconds: None,
+        say_failures: None,
+        queue_depth_max: None,
+        queue_depth_final: None,
+        queue_events_observed: None,
+        queue_full_refusals: None,
+        rss_series: Vec::new(),
     });
 
     for member in members {
