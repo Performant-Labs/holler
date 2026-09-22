@@ -22,6 +22,13 @@ it isn't lost, not silently closing it.
   when a real harness only negotiates ACP protocol v1 (as of 2026-09-21, every real
   implementation checked does) — previously every real harness (`opencode`, the Claude Code
   ACP bridge) was completely unusable ([#363](https://github.com/Performant-Labs/holler/pull/363), root cause [#362](https://github.com/Performant-Labs/holler/issues/362)).
+- Load/performance harness (`holler-load-test`): a dedicated workspace binary that starts a real
+  hub, opens N concurrent real circuit connections (or a fleet of real `holler body run`
+  processes driving `stub-acp` sessions), drives a controlled `say`/`interrupt`/`roster` rate,
+  and reports per-call latency plus the hub's own RSS/thread/CPU usage as a human table and JSON.
+  Scenario 1 (connection scale) and its first measured baseline — 200 of 200 concurrent
+  connections, handshake p50 9-12ms / p99 500-518ms on a 10-core macOS box — are documented in
+  [`docs/testing.md`](docs/testing.md) ([#369](https://github.com/Performant-Labs/holler/issues/369), [#370](https://github.com/Performant-Labs/holler/issues/370)).
 
 ### Bug Fixes
 - `hub token mint`'s printed `join_command` omitted the `wss://`/`ws://` scheme entirely,
@@ -36,6 +43,13 @@ it isn't lost, not silently closing it.
   to correctly refuse it moments later because the queued turn had actually started. Widens
   under real CPU/scheduling pressure, which is why it only reproduced on a loaded CI runner, not
   locally ([#359](https://github.com/Performant-Labs/holler/pull/359)).
+- Concurrent authentication failed against itself: the hub read its token store under a
+  non-retrying `flock` on both the `circuit/authenticate` and presence paths, so bodies
+  connecting at the same time refused each other with `-32002 unauthenticated` — and, because a
+  refusal also counts as a failed auth, cascaded into an IP lockout that force-closed further
+  connections mid-handshake. Measured by the new load harness: 3 of 50 and 7 of 200 concurrent
+  connections completed the handshake before the fix; 50 of 50 and 200 of 200 after. Extends
+  [#301](https://github.com/Performant-Labs/holler/issues/301)'s fix to the two sibling call sites it missed ([#370](https://github.com/Performant-Labs/holler/issues/370)).
 
 ### Known Issues
 - `http_attach_driver`'s real permission/question wire shape (the JSON payload OpenCode sends

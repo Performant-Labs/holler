@@ -148,6 +148,54 @@ These run the *real* `holler` CLI (in the given state dir) and parse its `--json
 - **Each spawned process gets its own process group.** This is what lets `Hub::stop` / `Body::stop` signal the *whole* subtree (the hub + the body it spawned + the stub) and reap it — otherwise a panic mid-test would orphan the hub (reparented to init) and leak it.
 - **No blind sleeps.** Every "is it ready?" check goes through `wait_for` on an *observable* (the hub's `listening` log line on stderr, the body's stdin/stdout, a protocol frame) — never `thread::sleep` guessing. `wire_selftest` uses a deadline-bounded `sleep` only because it is *proving the runtime drives time*, not waiting on readiness.
 
+## Load testing: `holler-load-test`
+
+The harness above answers *does it work*. The load harness — the `holler-load-test` binary in [`crates/holler-load-test`](../crates/holler-load-test) (issue [#369](https://github.com/Performant-Labs/holler/issues/369)) — answers *what does it cost*, in numbers.
+
+It exists as a purpose-built binary rather than a third-party tool for the same reason `stub-acp` does: Holler's wire is JSON-RPC 2.0 over a WebSocket ([ADR 0004](adr/ADR-0004.md)), not HTTP REST, and k6/wrk/vegeta/Locust cannot speak it at all. It is built by `cargo build --workspace` alongside `holler` and `stub-acp`, and finds those two binaries beside itself (override with `--holler-bin` / `--stub-acp-bin`).
+
+```bash
+cargo build --workspace --release
+./target/release/holler-load-test --scenario connection-scale --ramp 1,50,200 --json-out report.json
+```
+
+Every run prints a human table to stdout and, with `--json-out`, writes the same measurements as JSON. It starts a real `holler hub serve` on a free loopback port (or drives an existing one via `--hub-url` + `--hub-state`), and samples that hub process's own RSS / thread count / CPU (`ps` on both platforms, `/proc` for the Linux-only fd count — see `src/proc.rs` for why CPU is a delta, never `ps %cpu`).
+
+### The two client modes
+
+| Mode | Scenario | What a "client" is |
+|---|---|---|
+| wire | `connection-scale` | An in-process client running the **real** circuit handshake — Noise XK `circuit/authenticate` → `circuit/prove`, then the bidirectional `circuit/hello` — held open with the same `session/presence` + WS-Ping heartbeat a live body emits. Indistinguishable from a body to the hub: it occupies a registry slot and counts in `hub status --json`'s `clients`. |
+| body fleet | `body-fleet` | A real `holler body run` **process**, hosting M spawn-mode `stub-acp` sessions, with a rate-driven `say`/`interrupt`/`roster` call mix against it. |
+
+Wire mode is not a shortcut around real processes — it is the only way to get the metric issue [#370](https://github.com/Performant-Labs/holler/issues/370) asks for. A subprocess cannot report the timing of its own internal handshake steps, and 200 bodies plus their 200 `stub-acp` children would swamp the machine being measured. Body-fleet mode is the process-level path, at the scale processes actually reach.
+
+### Scenario 1 baseline: connection scale (issue #370)
+
+Measured 2026-09-21 on macOS 15 / aarch64, 10 logical cores, release build, loopback, `--connect-concurrency 32`. Two independent runs; the spread between them is shown where it matters. **These are a baseline, not thresholds** — #370 is explicit that thresholds are TBD *from* this measurement, so nothing in the harness asserts one.
+
+| N | live / target | `hub status` `clients` | handshake p50 | p90 | p99 | max | hub RSS | hub threads | hub CPU |
+|---:|---|---|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 1 / 1 | 1 ✓ | 1.5–2.3 ms | — | — | 2.3 ms | 8.0–9.4 MiB | 11 | ~0% |
+| 50 | 50 / 50 | 50 ✓ | 18.4–18.6 ms | 132–181 ms | 236 ms | 236 ms | 10.1–18.2 MiB | 42 | 1.8% |
+| 200 | 200 / 200 | 200 ✓ | 9.1–12.3 ms | 234–281 ms | 500–518 ms | 559–611 ms | 28.0–41.9 MiB | 42 | ~11% |
+
+The WebSocket dial itself is flat and sub-millisecond throughout (p50 0.29–1.86 ms at every rung); everything above is the circuit handshake on top of it. Three things the numbers say:
+
+- **Threads do not scale with connections.** 10 idle → 42 at N=50 → **42 at N=200**. The hub's per-connection unit is a tokio task, not an OS thread; the step from 10 to 42 is the blocking pool the token store's `spawn_blocking` wrappers grow, and it plateaus.
+- **RSS per connection is small and roughly flat** — ~80–200 KiB/client over the idle baseline at both N=50 and N=200. The run-to-run RSS spread at N=200 (28 vs 42 MiB) is allocator behaviour, not a per-client difference.
+- **Handshake latency is dominated by lock serialization, not by connection count.** The p99 rises 236 ms → ~500 ms from N=50 to N=200 while the median stays in the 9–18 ms band: connections are queueing behind the token store's `flock`, not saturating a CPU.
+
+### What the baseline found: concurrent authentication defeated itself
+
+The first run of this scenario did not produce a baseline — it produced a defect. At N=50 only **3 of 50** connections completed the handshake, and at N=200 only **7 of 200**. The rest were refused `-32002 unauthenticated`, carrying the token store's own text: *"another holler process holds the token lock; retry"*.
+
+`token::bound_record` (called twice per `circuit/authenticate`) and `token::touch_last_seen` (once per presence beat) both ran under the non-retrying `acquire_lock`, whose contention outcome is an error. Since `circuit/authenticate` maps any token-store failure to `-32002`, and the lockout counts a `-32002` as a *failed auth*, the hub's contention with itself cascaded into an IP lockout that force-closed further connections mid-handshake. Issue [#301](https://github.com/Performant-Labs/holler/issues/301) had already diagnosed and fixed this exact defect class one call site over, at `redeem`; both siblings now use the same `acquire_lock_retrying`, and `crates/holler-hub/tests/token_store_test.rs::concurrent_live_path_reads_never_lose_the_lock_race` is the regression guard (358 of 384 calls fail without the fix; 0 with it). The table above is the post-fix measurement.
+
+### It is not in CI, deliberately
+
+`holler-load-test` is not wired into any workflow. Issue [#345](https://github.com/Performant-Labs/holler/issues/345) documents, with per-job evidence, that the shared self-hosted pool carries enough unrelated always-on load to make even the six-peer `load_roster_scale_test.rs` flap — a harness whose entire output is *timing numbers* would report that contention as a Holler regression. Run it on a dedicated or lightly-loaded machine and record what else was running, as #369 requires. Scheduling it (nightly, on a pinned host) is tracked on #369, not here.
+
 ## Beyond loopback: `interop.yml`
 
 Everything in this harness runs on loopback (ADR 0002: "loopback-`ws`-only" is *kept, not retired*). Testing a *remote* body — hub on one host, body on another, across a tailnet or reverse proxy (the pattern ADR 0002 replaces the old SSH-tunnel stopgap with; the forward ADR that owns the remote pattern is reserved slot [#0006](adr/README.md) ↔ [issue #7](https://github.com/Performant-Labs/holler/issues/7)) — is a separate, opt-in path and is **not** part of the loopback matrix.
