@@ -1,8 +1,45 @@
+<div align="center">
+
 # holler
 
-Your agents are just a holler away — one binary, hub or body.
+[![CI](https://img.shields.io/github/actions/workflow/status/Performant-Labs/holler/ci.yml?branch=main&label=CI)](https://github.com/Performant-Labs/holler/actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/Performant-Labs/holler)](https://github.com/Performant-Labs/holler/releases)
+[![License](https://img.shields.io/github/license/Performant-Labs/holler)](./LICENSE)
 
-This repository is under construction — see the [Phase 0 epic](https://github.com/Performant-Labs/holler-server/issues/320) for what is being built here and why.
+**Your agents are just a holler away — one binary, hub or body.**
+
+**English** | [中文](README.zh-CN.md) | [日本語](README.ja.md) | [Español](README.es.md) | [Deutsch](README.de.md)
+
+</div>
+
+> The translated READMEs cover only the front door (Why Holler?, Install, Quick Start) and are
+> AI-assisted — everything else, including this full page, is the English-language source of
+> truth. See each translation's own note for why the rest isn't translated.
+
+A self-hosted, outbound-only circuit for interactive coding sessions on machines you own — a
+`hub` that can supervise, and a `body` that runs alongside the real coding agent, connected by
+one binary in either role.
+
+## Why Holler?
+
+- **Self-hosted, not a vendor relay** — you run the hub, you run the bodies. No cloud
+  middle-man routing your sessions.
+- **Outbound-only** — a body dials out to the hub; the hub never needs an inbound listener
+  reachable from the body's own network. Works behind NAT/firewalls by construction.
+- **Per-machine minted, revocable identity** — a join token becomes a bound credential
+  ([ADR 0007](docs/adr/ADR-0007.md)); no shared secret, no "the tailnet IP is who I say it is"
+  (a tailnet or VPN is underlay, never identity — [ADR 0006](docs/adr/ADR-0006.md)).
+- **A hub that can supervise, if you want that** — an audit log and, where it matters, turn/spend
+  caps, without forcing every deployment to opt in.
+- **Config, not code, for new harnesses** — pointing a `[[session]]` row at a new
+  ACP-speaking adapter needs no Holler code change or release ([ADR 0012](docs/adr/ADR-0012.md)).
+- **Composition, not a green-field protocol** — Holler doesn't reinvent agent messaging or
+  interrupt semantics; it adopts ACP v2 for the body↔harness hop and stays out of the
+  agent-to-agent layer. See [Where Holler fits](#where-holler-fits) below.
+
+This project is under active development — the core hub/body circuit, attach mode, and the CLI
+surface are real and released (see [Install](#install)); the [testing epic](https://github.com/Performant-Labs/holler/issues/366)
+tracking coverage and load-testing work is still open.
 
 ## Install
 
@@ -17,6 +54,9 @@ From [Performant-Labs/homebrew-tap](https://github.com/Performant-Labs/homebrew-
 self-hosted tap — not (yet) in `homebrew-core`. `brew upgrade holler` picks up new releases
 once the tap's formula is bumped.
 
+<details>
+<summary>One-line installer, or build from source</summary>
+
 **One-line installer**, if you don't use Homebrew:
 
 ```bash
@@ -26,11 +66,42 @@ curl -fsSL https://raw.githubusercontent.com/Performant-Labs/holler/main/install
 Downloads the latest [release](https://github.com/Performant-Labs/holler/releases) binary for
 your platform (macOS/Apple Silicon, Linux/x86_64, or Linux/arm64 — Windows isn't a supported
 target, see [#378](https://github.com/Performant-Labs/holler/issues/378)) to
-`~/.local/bin/holler`. Pin a
-specific version with `HOLLER_VERSION=v0.2.0`, or change the install directory with
-`HOLLER_INSTALL_DIR=/usr/local/bin` (prefix either as an env var before the command above).
+`~/.local/bin/holler`. Pin a specific version with `HOLLER_VERSION=v0.2.0`, or change the
+install directory with `HOLLER_INSTALL_DIR=/usr/local/bin` (prefix either as an env var before
+the command above).
 
 **From source:** `cargo build --release -p holler-cli`, binary at `target/release/holler`.
+
+</details>
+
+## Quick Start
+
+One binary, two roles. On the machine that should be reachable (the **hub**):
+
+```bash
+holler hub serve --listen 127.0.0.1:41807 --advertise <this-machine's-address>
+holler hub token mint --label my-first-body
+```
+
+`token mint` prints a ready-to-run `body join` command — run that on the machine where the real
+coding agent runs (the **body**), then start it:
+
+```bash
+holler body join --server wss://<hub-address> --token <token> --hub-key <hub-key>
+holler body run --config sessions.toml
+```
+
+Back on the hub side, talk to a session:
+
+```bash
+holler roster                          # see what's connected
+holler say <session-name> "hello"      # one-shot prompt, print the reply
+```
+
+`sessions.toml`'s shape — what harness each session runs, spawn vs. attach mode — is config, not
+code (see [Harness recipes](#harness-recipes) below and [ADR 0012](docs/adr/ADR-0012.md)). For a
+single local orchestrator plus one or more remote attach-mode sessions in one terminal
+workspace, see [Set up a Herdr workspace with an agent](#set-up-a-herdr-workspace-with-an-agent).
 
 ## Documentation
 
@@ -142,3 +213,14 @@ Every event carries a `component`, identifying which layer of a `say`/`interrupt
 | `cli`          | either | The process's own startup/parsing (the `logging_started` banner, fail-closed refusals). |
 
 Because the ACP SDK holler pins (`agent-client-protocol` 2.1.0) spawns and owns its child process internally, it exposes no pid or exit-status accessor to this codebase — `acp`'s spawn/child-exit events report `command`/`args`/`cwd` and "connection closed", not a pid, which is the most this driver can observe without forking the SDK.
+
+## Contributing
+
+Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for the flow (fork, PR
+against `main`, CI must pass, a maintainer reviews and merges — no CLA, no RFC process).
+AI-assisted contributions are explicitly welcome too; see CONTRIBUTING.md for how commits from
+agent sessions are expected to say so.
+
+## License
+
+[AGPL-3.0-or-later](LICENSE).
