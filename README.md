@@ -4,6 +4,21 @@ Your agents are just a holler away — one binary, hub or body.
 
 This repository is under construction — see the [Phase 0 epic](https://github.com/Performant-Labs/holler-server/issues/320) for what is being built here and why.
 
+## Install
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Performant-Labs/holler/main/install.sh | sh
+```
+
+Downloads the latest [release](https://github.com/Performant-Labs/holler/releases) binary for
+your platform (macOS/Apple Silicon or Linux/x86_64 — Windows isn't a supported target, see
+[#378](https://github.com/Performant-Labs/holler/issues/378)) to `~/.local/bin/holler`. Pin a
+specific version with `HOLLER_VERSION=v0.2.0`, or change the install directory with
+`HOLLER_INSTALL_DIR=/usr/local/bin` (prefix either as an env var before the command above).
+
+Or build from source: `cargo build --release -p holler-cli`, binary at
+`target/release/holler`.
+
 ## Documentation
 
 See [docs/README.md](docs/README.md) — the index. For testing: [the harness design](docs/testing.md) and [how to run the tests](docs/running-tests.md).
