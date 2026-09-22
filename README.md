@@ -36,6 +36,33 @@ specific version with `HOLLER_VERSION=v0.2.0`, or change the install directory w
 
 See [docs/README.md](docs/README.md) — the index. For testing: [the harness design](docs/testing.md) and [how to run the tests](docs/running-tests.md). For watching multiple attach-mode sessions in one local terminal workspace: [docs/herdr-workspace.md](docs/herdr-workspace.md).
 
+## Set up a Herdr workspace with an agent
+
+To have an agent (Claude Code or similar) drive the [Herdr workspace setup](docs/herdr-workspace.md)
+for you — one or more local orchestrator panes plus one live view pane per remote Holler
+session — give it this prompt. If you have the `herdr-workspace` Claude Code skill installed
+(it's a personal/global skill, not shipped in this repo), it'll use that directly; otherwise it
+follows `docs/herdr-workspace.md` on its own:
+
+```
+Set up a Herdr workspace for me, per Performant-Labs/holler's docs/herdr-workspace.md.
+
+If you have the `herdr-workspace` Claude Code skill installed, invoke it directly
+(/herdr-workspace, optionally with --config <path>) and follow its staged wizard exactly.
+
+Otherwise, read docs/herdr-workspace.md in full and replicate its "Automated setup" flow
+yourself: load my session config (an explicit path I give you, else ./sessions.toml, else
+~/.config/herdr-workspace/sessions.toml — creating a template at the global fallback path if
+none exists, and telling me so before you do), preflight every distinct remote host (SSH
+reachability, the `holler` binary, each session's model endpoint), present the concrete plan
+you're about to execute and get my explicit yes before changing anything, start the remote
+OpenCode backends, capture real session IDs, bring up the Holler hub locally, migrate a
+Holler-only derived config and join/run one body per distinct remote host, build the Herdr
+panes per the config's `layout`, attach each session pane, and verify every session end to end
+with a real round-trip `holler say` reply. Stop and tell me plainly if any stage fails instead
+of guessing a fix.
+```
+
 ## Where Holler fits
 
 Holler is a composition, not a green-field protocol: a self-hosted, outbound-only circuit for
