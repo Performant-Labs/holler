@@ -222,6 +222,55 @@ pub struct StepReport {
     /// warmup" vs "monotonic growth" is a real series, not one snapshot.
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub rss_series: Vec<RssPoint>,
+    /// `churn` (#373): everything that scenario measures, in one place.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub churn: Option<ChurnReport>,
+}
+
+/// Scenario 4 (#373): repeated join → run → detach cycles, plus the
+/// dead-backend detection probe.
+#[derive(Debug, Clone, Serialize)]
+pub struct ChurnReport {
+    pub cycles_target: usize,
+    /// Every completed cycle returned the hub to baseline; a cycle that did
+    /// not aborts the run, so this equals `cycles_target` in any report.
+    pub cycles_completed: usize,
+    pub bodies_per_cycle: usize,
+    pub sessions_per_body: usize,
+    /// Starting a wave → the hub reporting every body and session, per cycle.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub join_to_registered: Option<LatencyStats>,
+    /// One real `say` per session per cycle.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub say: Option<LatencyStats>,
+    pub say_failures: usize,
+    /// The harness detaching and killing every body in a cycle, run
+    /// sequentially (`holler body detach`, then SIGKILL of its process group).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detach: Option<LatencyStats>,
+    /// Last body killed → `hub status --json` `clients` and `sessions` both
+    /// back to baseline, per cycle: the hub's own cleanup latency.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cleanup: Option<LatencyStats>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hub_rss_before_mib: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hub_rss_after_mib: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dead_backend: Option<DeadBackendProbe>,
+}
+
+/// An attach-mode session whose backend process is killed from outside
+/// Holler: how long until the hub's roster stops showing it healthy.
+#[derive(Debug, Clone, Serialize)]
+pub struct DeadBackendProbe {
+    pub window_secs: u64,
+    pub detected: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detection_ms: Option<f64>,
+    /// The session's roster row (state/conn) when detection fired, or when
+    /// the window ran out.
+    pub roster_after: String,
 }
 
 /// The whole run.
@@ -375,6 +424,40 @@ fn step_extra_lines(step: &StepReport) -> String {
         ));
     }
     out.push_str(&sustained_throughput_lines(step));
+    if let Some(churn) = &step.churn {
+        out.push_str(&churn_lines(churn));
+    }
+    out
+}
+
+/// Scenario 4's (#373) own detail lines.
+fn churn_lines(c: &ChurnReport) -> String {
+    let lat = |s: Option<LatencyStats>| {
+        s.map_or_else(
+            || "n=0".to_string(),
+            |s| format!("n={} p50={:.1}ms p90={:.1}ms p99={:.1}ms max={:.1}ms", s.count, s.p50_ms, s.p90_ms, s.p99_ms, s.max_ms),
+        )
+    };
+    let mut out = format!(
+        "  churn: {}/{} cycles returned the hub to baseline ({} bodies x {} sessions each)\n",
+        c.cycles_completed, c.cycles_target, c.bodies_per_cycle, c.sessions_per_body,
+    );
+    out.push_str(&format!("  join -> registered: {}\n", lat(c.join_to_registered)));
+    out.push_str(&format!("  say:                {} (failures={})\n", lat(c.say), c.say_failures));
+    out.push_str(&format!("  detach all bodies:  {}\n", lat(c.detach)));
+    out.push_str(&format!("  killed -> baseline: {}\n", lat(c.cleanup)));
+    out.push_str(&format!(
+        "  hub rss: before={} after={}\n",
+        opt_f(c.hub_rss_before_mib, "MiB"),
+        opt_f(c.hub_rss_after_mib, "MiB"),
+    ));
+    if let Some(d) = &c.dead_backend {
+        let verdict = match d.detection_ms {
+            Some(ms) if d.detected => format!("detected after {ms:.0}ms"),
+            _ => format!("NOT detected within {}s", d.window_secs),
+        };
+        out.push_str(&format!("  dead attach backend: {verdict}; roster then showed: {}\n", d.roster_after));
+    }
     out
 }
 

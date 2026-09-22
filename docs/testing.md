@@ -191,6 +191,8 @@ Wire mode is not a shortcut around real processes — it is the only way to get 
 
 `--scenario sustained-throughput` (issue [#372](https://github.com/Performant-Labs/holler/issues/372)) also reuses body-fleet mode's real fleet, but holds both N and M fixed and instead drives a **sustained** `say --queue` rate across every session concurrently for a real, non-trivial duration (`--sustained-secs`, default 60s) — a steady-state measurement, not a ramp. See its own baseline write-up below.
 
+`--scenario churn` (issue [#373](https://github.com/Performant-Labs/holler/issues/373)) repeats real join → run → detach cycles, hard-checking that the hub returns to baseline after every one, and measures whether the roster ever notices an attach-mode backend killed from outside Holler. See its own baseline write-up below.
+
 ### Scenario 1 baseline: connection scale (issue #370)
 
 Measured 2026-09-21 on macOS 15 / aarch64, 10 logical cores, release build, loopback, `--connect-concurrency 32`. Two independent runs; the spread between them is shown where it matters. **These are a baseline, not thresholds** — #370 is explicit that thresholds are TBD *from* this measurement, so nothing in the harness asserts one.
@@ -278,6 +280,36 @@ Four things the numbers say:
 No Holler defect and no harness bug surfaced while building or running this scenario — the FIFO behaved exactly as its own hard cap and drain-on-completion design promise, at a real sustained rate. Unlike scenario 1's real concurrency defect or scenario 2's real harness label-reuse bug, there is nothing to report here beyond the measurement itself.
 
 **Caveats, stated plainly:** 60 seconds is long enough to see the shape (rise, plateau, drain) but not long enough to rule out a slow leak that only shows up over many minutes or hours; RSS is sampled every 2s at the process level (`ps`), which cannot distinguish "genuinely flat" from "growing and shrinking within the sampling interval"; and the rate/session-count combination above was chosen specifically to produce *some* real queueing (see the module doc in `crates/holler-load-test/src/sustained_throughput.rs` for the reasoning) — a rate comfortably under a session's own completion rate would show `queue_depth_max: None` (nothing to observe) rather than a bounded backlog, which is also a legitimate, honestly-reported outcome the harness supports.
+
+### Scenario 4 baseline: churn (issue #373)
+
+`--scenario churn` measures two things.
+
+**Churn cycles.** `--churn-cycles` times (default 20), it starts `--bodies` real `holler body run` processes (default 3, each hosting `--sessions-per-body` spawn-mode `stub-acp` sessions, default 1), waits until `hub status --json` reports every body and session, drives one real `say` per session, then detaches and kills every body. After each cycle, `clients` and `sessions` must return to their pre-run baseline within 30s. That's #373's correctness invariant ("no leaked `client_id`/session/token state"), so a cycle that misses it aborts the run with a non-zero exit rather than being reported as a slow number.
+
+**Dead-backend detection.** This reproduces the 2026-09-21 incident #373 cites: an attach-mode backend (`opencode`) killed outside Holler's control while `holler roster` kept reporting its session `connected`/`idle`. The harness re-runs itself with the hidden `--fake-opencode` flag, which serves the same fake OpenCode HTTP server `holler-body`'s attach tests use, as a real separate process. It attaches a body session to that process, `SIGKILL`s it, and polls the roster (`--dead-backend-window-secs`, default 60) for the session to stop showing `conn_state=connected` with `state` idle or working. Not detecting it within the window is recorded as a result, not treated as a harness failure, since that's the bug being measured.
+
+Measured 2026-09-22 on macOS 26 / aarch64, 10 logical cores, release build, loopback, defaults (`--churn-cycles 20 --bodies 3 --sessions-per-body 1 --dead-backend-window-secs 60`), 93s wall clock. **This is a baseline, not a threshold.**
+
+| | result |
+|---|---:|
+| cycles that returned the hub to baseline | **20 / 20** |
+| wave start → hub reports every body + session, p50 / p99 | 72.4 / 86.0 ms |
+| `say` (60 calls), p50 / p99 / max | 183.2 / 313.3 / 313.4 ms |
+| `say` failures | 0 |
+| last body killed → hub back to baseline, p50 / p99 / max | **11.6 / 13.9 / 13.9 ms** |
+| harness detaching all 3 bodies (sequential `body detach` + kill), p50 | 1332 ms |
+| hub RSS before / after 20 cycles | 7.9 / 11.7 MiB |
+| dead attach backend detected | **no, not within 60s** (roster still `state=idle conn_state=connected`) |
+| same, re-run with `--churn-cycles 1 --dead-backend-window-secs 240` | **no, not within 240s**, past the roster's 180s `gone` threshold |
+
+What the numbers say:
+
+- **Hub-side cleanup is correct and effectively immediate.** Every cycle returned `clients` and `sessions` to baseline, and the hub got there within about one poll interval (the 25ms poll plus a `hub status` round trip) of the last body dying. The 1.3s per cycle is the harness's own sequential `body detach` calls, measured separately so it doesn't masquerade as hub latency.
+- **The dead-backend bug is still present, and it isn't slow detection; it's none.** SIGKILLing an attach-mode backend leaves its session `connected`/`idle` on the roster for the full window, including a 240s run that outlasts the roster's 180s `gone` threshold. The roster's own `reconnecting`/`gone` timers age rows by the *body's* last heartbeat, and the body is still alive and heartbeating (only its backend died), so those timers never fire. Detection has to come from the body noticing its backend is gone. That fix belongs to #373's "once it's fixed" follow-up, and this probe is its regression check.
+- **RSS rose 3.8 MiB over the run.** That isn't proof of a leak: `gone` roster rows are retained by design until they're pruned 360s after going `gone` (`crates/holler-hub/src/roster.rs`), and this run is shorter than that. A run longer than the prune TTL would tell bounded retention from a real leak.
+
+**Caveats, stated plainly:** timings come from polling, so they're only as precise as the poll interval plus one CLI round trip (tens of ms). Only spawn-mode sessions are churned. The dead-backend probe uses the fake OpenCode server, not a real `opencode`, so it proves the detection gap for any attach backend that dies, not anything specific to OpenCode itself.
 
 ### It is not in CI, deliberately
 

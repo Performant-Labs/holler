@@ -356,6 +356,7 @@ fn build_step_report(
         queue_events_observed: Some(queue.events_observed),
         queue_full_refusals: Some(queue.full_refusals),
         rss_series,
+        churn: None,
     }
 }
 
