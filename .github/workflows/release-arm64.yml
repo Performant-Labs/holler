@@ -1,0 +1,79 @@
+name: release-arm64
+
+# Builds the holler-cli release binary on real Linux arm64 hardware.
+#
+# GitHub now offers hosted Linux ARM64 runners (ubuntu-24.04-arm et al.),
+# free for public repositories exactly like ubuntu-latest/macos-latest. holler
+# is public, and docs/releasing.md's own philosophy is "build on a real
+# machine of the target OS/arch, never cross-compile" — an ubuntu-24.04-arm
+# hosted runner IS a real arm64 Linux machine, it just isn't one in this
+# org's own fleet (Uranus/Jupiter are both x86_64).
+#
+# Deliberately a separate, narrowly-scoped workflow rather than adding
+# ubuntu-24.04-arm to ci.yml's matrix:
+#   - ci.yml's steps are all `shell: pwsh` (PowerShell). That is NOT a safe
+#     assumption to carry onto a brand-new runner image without checking —
+#     this workflow uses plain `bash` throughout instead of trusting pwsh is
+#     preinstalled on ubuntu-24.04-arm.
+#   - This workflow's job is narrower: prove the release binary builds and
+#     runs on real arm64 hardware. It reuses the repo's own "cheapest real
+#     canary" (`cargo test -p holler-cli --test wire_selftest`) as a sanity
+#     check, not the full lint/clippy/workspace-suite/interop matrix ci.yml
+#     already runs on ubuntu-latest/macos-latest for every push and PR.
+#
+# Trigger is workflow_dispatch only, matching how this repo already treats
+# the *release* steps (tagging, publishing) as a deliberate, non-automatic
+# act distinct from CI proving tests pass (see docs/releasing.md).
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-arm64:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        run: |
+          if ! command -v rustup >/dev/null 2>&1; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain none
+            echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+            export PATH="$HOME/.cargo/bin:$PATH"
+          fi
+          rustup toolchain install stable
+        shell: bash
+
+      - uses: Swatinem/rust-cache@v2
+
+      # Cheapest real canary (same one ci.yml uses as its first compiler-
+      # touching gate) — proves the toolchain and harness work at all on
+      # this runner image before spending time on a release build.
+      - name: Canary (fail-fast)
+        run: cargo test -p holler-cli --test wire_selftest
+        shell: bash
+
+      - name: Build release binary
+        run: cargo build --release -p holler-cli
+        shell: bash
+
+      # The real verification: run the actual built binary on this real
+      # arm64 Linux runner and confirm it reports the version it should.
+      # This is the one machine in the whole pipeline that can execute an
+      # aarch64 Linux ELF binary — there is no persistent arm64 Linux box
+      # in this org's fleet to double-check it on afterward.
+      - name: Verify binary on real arm64 Linux
+        run: |
+          file ./target/release/holler
+          ./target/release/holler --version
+        shell: bash
+
+      - name: Rename for release asset convention
+        run: cp ./target/release/holler ./holler-ubuntu-arm64
+        shell: bash
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: holler-ubuntu-arm64
+          path: holler-ubuntu-arm64
+          if-no-files-found: error
