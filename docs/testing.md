@@ -172,6 +172,8 @@ Wire mode is not a shortcut around real processes — it is the only way to get 
 
 `--scenario session-scale` (issue [#371](https://github.com/Performant-Labs/holler/issues/371)) reuses body-fleet mode's real `holler body run` fleet, holding the body count N fixed and ramping the *sessions-per-body* count M instead — 10 → 100 → 500 — to isolate what scales with session count rather than connection count. See its own baseline table below.
 
+`--scenario sustained-throughput` (issue [#372](https://github.com/Performant-Labs/holler/issues/372)) also reuses body-fleet mode's real fleet, but holds both N and M fixed and instead drives a **sustained** `say --queue` rate across every session concurrently for a real, non-trivial duration (`--sustained-secs`, default 60s) — a steady-state measurement, not a ramp. See its own baseline write-up below.
+
 ### Scenario 1 baseline: connection scale (issue #370)
 
 Measured 2026-09-21 on macOS 15 / aarch64, 10 logical cores, release build, loopback, `--connect-concurrency 32`. Two independent runs; the spread between them is shown where it matters. **These are a baseline, not thresholds** — #370 is explicit that thresholds are TBD *from* this measurement, so nothing in the harness asserts one.
@@ -219,6 +221,46 @@ Three things the numbers say:
 #### What this found: a harness bug, not a hub defect
 
 Unlike scenario 1, this scenario did not surface a Holler defect — but building it did surface a real bug in the harness itself. The first draft reused the same body labels (`ss0`, `ss1`, …) on every rung; the hub's token store refuses a second mint under a label already on file (`label "ss0" already in use`), so every body after the first rung failed to (re)join, `hub status --json` correctly reported `sessions=0`, and the scenario's own hard-fail invariant fired exactly as designed — a clear, non-zero-exit error naming both the mismatch and the underlying body-start failures. The fix is a run-scoped, monotonically increasing body-label counter in `session_scale.rs` instead of restarting the label index at 0 each rung. Recorded here, in the same spirit as #370's own "what the baseline found" entry, because the check that caught it is exactly the one #371 asked to be a hard failure rather than a soft one — and it was.
+
+### Scenario 3 baseline: sustained throughput (issue #372)
+
+`--scenario sustained-throughput` starts a real body fleet (`--bodies`, default 3, each hosting `--sessions-per-body` spawn-mode `stub-acp` sessions, default 1) and drives a **sustained** `say --queue` rate across every session concurrently — round-robin, at `--rate` calls/sec total — for a real, non-trivial wall-clock duration (`--sustained-secs`, default 60s). `--queue` is not incidental: a plain `say` against a busy session is refused outright with `-32009 session_busy`, which would just turn a rate above one session's own completion rate into a wall of harness failures instead of the real thing #372 asks about — whether `SessionManager`'s FIFO queue (`crates/holler-body/src/session_manager.rs`, hard-capped at `QUEUE_CAP = 64` by construction) grows unbounded under sustained load, or drains once load eases. A fixed `COOLDOWN` (8s) after the drive stops, with no new calls sent, is what lets "drains" actually happen before the run reads a "final" depth.
+
+The queue-depth signal itself is not new instrumentation: `holler-body` already emits `component=session` `queue_enqueue`/`queue_dequeue`/`queue_full` debug events, each carrying the queue's own depth, at `HOLLER_DEBUG=quiet` — the level every scenario already runs bodies at (issue #197's instrumentation, `session_manager/task.rs::log_session`). This scenario's only new code is reading that existing line: `FleetMember::start_watched` (`crates/holler-load-test/src/fleet.rs`) pipes each watched body's stderr and relays those three event kinds as `QueueEvent`s, which a background aggregator thread sums across every session this run started (each session has its own independent FIFO). Zero new instrumentation landed in `holler-body` itself.
+
+RSS is sampled repeatedly across the whole run (`--rss-sample-ms`, default 2s) rather than once at steady state, specifically so "flat after warmup" vs. "monotonic growth" is a real series (`metrics::RssPoint`), not a two-point guess.
+
+Measured 2026-09-22 on macOS 26 / aarch64, 10 logical cores, release build, loopback: `--bodies 3 --sessions-per-body 1 --rate 20 --sustained-secs 60 --rss-sample-ms 2000` (3 sessions total; 20 calls/sec round-robin is ≈6.7 calls/sec/session against a measured no-queue turn latency of ~172–176ms/call, i.e. deliberately a little over one session's own completion rate, so a real backlog has something to build from). Two independent runs; the spread between them is shown where it matters. **This is a baseline, not a threshold** — #372, like #370/#371 before it, is explicit that thresholds are TBD *from* this measurement.
+
+| | run 1 | run 2 |
+|---|---:|---:|
+| `say` calls driven | 1200 | 1200 |
+| `say` latency p50 | 1686.9 ms | 1633.3 ms |
+| `say` latency p90 | 1749.6 ms | 1779.9 ms |
+| `say` latency p99 | 1769.3 ms | 1803.8 ms |
+| `say` latency max | 1780.7 ms | 1830.2 ms |
+| `say` latency min | 172.6 ms | 175.7 ms |
+| `say` failures | 0 | 0 |
+| queue depth, max observed | 29 | 29 |
+| queue depth, final (post-cooldown) | 0 | 0 |
+| queue-depth events observed | 2394 | 2394 |
+| `queue_full` refusals (hit the 64 cap) | 0 | 0 |
+| hub RSS, idle baseline | 8.0 MiB | 7.9 MiB |
+| hub RSS, peak during drive | 10.5 MiB | 10.5 MiB |
+| hub RSS, ~10s after cooldown | 9.3 MiB | 9.4 MiB |
+| hub threads | 10 (steady) | 10 (steady) |
+| hub RSS/client over baseline | 443 KiB | 501 KiB |
+
+Four things the numbers say:
+
+- **The FIFO queue is bounded by construction, and this run never got close to that bound.** `QUEUE_CAP = 64` is a compile-time constant on the session's own `VecDeque`; the largest total depth this run observed (summed across all 3 sessions) was 29 — well under a *single* session's own cap — and it never once triggered a `queue_full` refusal. "Grows unbounded" therefore has both a code-level answer (no — the type cannot hold more than 64 per session) and, now, an empirical one at a real sustained rate ~1.3× a session's own completion rate: the backlog grows, but slowly and boundedly, not runaway.
+- **The queue drains completely once load eases.** Both runs' `queue_depth_final` (read after the 8s post-drive cooldown, before any process is torn down) is exactly 0 — every one of the ~1200 queued/dispatched turns this run pushed through eventually ran and cleared. This is the direct answer to #372's "or drains correctly once load eases".
+- **`say` latency is queue-wait latency, not Holler overhead, once a backlog exists.** The no-queue floor (the `min_ms` — the first call into each session, before any backlog) is 172.6–175.7 ms, consistent with the stub's own ~100ms of chunk delay plus real process/wire overhead. Once a session has a few queued turns ahead of a new one, the p50 climbs to ~1.6–1.7s — that is the real time spent *waiting in the FIFO*, exactly what `--queue`'s own contract promises (append behind the current turn instead of refusing), not a hub regression.
+- **Hub RSS is flat, not growing, once load eases — and both runs land within ~0.2 MiB of each other at every comparable point.** RSS climbs modestly during the drive (8.0 → 10.5 MiB, consistent with buffering ~1200 in-flight/queued `say` calls' state) and then **drops** to 9.3–9.4 MiB and stays flat there for the whole 8s+ cooldown window — below its own drive-time peak, not above it. Two independent 60-second runs showing the same shape (rise during load, fall and flatten once it eases, no post-cooldown climb) is the "no obvious leak under sustained throughput" #372 asks for; it is not proof no slower leak exists at a longer duration, which this scenario's own module doc and the caveat below are explicit about.
+
+No Holler defect and no harness bug surfaced while building or running this scenario — the FIFO behaved exactly as its own hard cap and drain-on-completion design promise, at a real sustained rate. Unlike scenario 1's real concurrency defect or scenario 2's real harness label-reuse bug, there is nothing to report here beyond the measurement itself.
+
+**Caveats, stated plainly:** 60 seconds is long enough to see the shape (rise, plateau, drain) but not long enough to rule out a slow leak that only shows up over many minutes or hours; RSS is sampled every 2s at the process level (`ps`), which cannot distinguish "genuinely flat" from "growing and shrinking within the sampling interval"; and the rate/session-count combination above was chosen specifically to produce *some* real queueing (see the module doc in `crates/holler-load-test/src/sustained_throughput.rs` for the reasoning) — a rate comfortably under a session's own completion rate would show `queue_depth_max: None` (nothing to observe) rather than a bounded backlog, which is also a legitimate, honestly-reported outcome the harness supports.
 
 ### It is not in CI, deliberately
 

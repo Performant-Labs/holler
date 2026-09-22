@@ -135,37 +135,20 @@ pub async fn run(cfg: &Config, hub: &Hub, report: &mut Report) -> Res<()> {
         };
 
         let steady = meter.sample();
-        let hub_status_clients = hub.client_count().ok();
-        let rss_delta_per_client_kib = match (baseline.rss_mib, steady.rss_mib) {
-            (Some(b), Some(s)) if !members.is_empty() => Some(((s - b) * 1024.0) / members.len() as f64),
-            _ => None,
-        };
-        let threads_delta = match (baseline.threads, steady.threads) {
-            (Some(b), Some(s)) => Some(s as i64 - b as i64),
-            _ => None,
-        };
-
-        report.steps.push(StepReport {
-            clients_target: cfg.bodies,
-            clients_live: members.len(),
-            hub_status_clients,
-            hub_status_matches: hub_status_clients == Some(members.len() as u64),
-            connect_failures: failures,
-            ws_connect: None,
-            handshake: None,
-            connect_total: None,
-            calls: None,
-            hub_at_steady_state: steady,
-            rss_delta_per_client_kib,
-            threads_delta,
-            step_seconds: step_started.elapsed().as_secs_f64(),
-            sessions_per_body: Some(sessions_per_body),
-            sessions_expected: Some(expected_sessions),
+        report.steps.push(build_step_report(
+            cfg,
+            hub,
+            &members,
+            failures,
+            baseline,
+            steady,
+            step_started,
+            sessions_per_body,
+            expected_sessions,
             sessions_actual,
-            sessions_match: Some(sessions_actual == Some(expected_sessions)),
-            presence_fanout: fanout.stats(),
-            roster_read: roster_read.stats(),
-        });
+            &fanout,
+            &roster_read,
+        ));
 
         for member in members {
             member.stop();
@@ -173,6 +156,64 @@ pub async fn run(cfg: &Config, hub: &Hub, report: &mut Report) -> Res<()> {
         wait_for_client_count(hub, 0, Duration::from_secs(30)).await;
     }
     Ok(())
+}
+
+/// Build one rung's [`StepReport`]: the rss/threads-over-baseline deltas
+/// plus the struct literal itself. Split out of [`run`] so that function
+/// stays under this workspace's line-count lint as the shared `StepReport`
+/// shape keeps growing new scenario-specific fields.
+#[allow(clippy::too_many_arguments)] // #372: split out of `run` purely to satisfy the line-count lint
+fn build_step_report(
+    cfg: &Config,
+    hub: &Hub,
+    members: &[FleetMember],
+    failures: Vec<String>,
+    baseline: crate::metrics::ResourceSample,
+    steady: crate::metrics::ResourceSample,
+    step_started: Instant,
+    sessions_per_body: usize,
+    expected_sessions: u64,
+    sessions_actual: Option<u64>,
+    fanout: &Samples,
+    roster_read: &Samples,
+) -> StepReport {
+    let hub_status_clients = hub.client_count().ok();
+    let rss_delta_per_client_kib = match (baseline.rss_mib, steady.rss_mib) {
+        (Some(b), Some(s)) if !members.is_empty() => Some(((s - b) * 1024.0) / members.len() as f64),
+        _ => None,
+    };
+    let threads_delta = match (baseline.threads, steady.threads) {
+        (Some(b), Some(s)) => Some(s as i64 - b as i64),
+        _ => None,
+    };
+    StepReport {
+        clients_target: cfg.bodies,
+        clients_live: members.len(),
+        hub_status_clients,
+        hub_status_matches: hub_status_clients == Some(members.len() as u64),
+        connect_failures: failures,
+        ws_connect: None,
+        handshake: None,
+        connect_total: None,
+        calls: None,
+        hub_at_steady_state: steady,
+        rss_delta_per_client_kib,
+        threads_delta,
+        step_seconds: step_started.elapsed().as_secs_f64(),
+        sessions_per_body: Some(sessions_per_body),
+        sessions_expected: Some(expected_sessions),
+        sessions_actual,
+        sessions_match: Some(sessions_actual == Some(expected_sessions)),
+        presence_fanout: fanout.stats(),
+        roster_read: roster_read.stats(),
+        sustained_seconds: None,
+        say_failures: None,
+        queue_depth_max: None,
+        queue_depth_final: None,
+        queue_events_observed: None,
+        queue_full_refusals: None,
+        rss_series: Vec::new(),
+    }
 }
 
 /// Poll `hub status --json`'s `sessions` until it reaches `want` or the
