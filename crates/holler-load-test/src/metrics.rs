@@ -6,6 +6,7 @@
 //! split keeps the measurement code (`wire.rs`, `fleet.rs`, `proc.rs`) free of
 //! any opinion about how a number is later summarized or rendered.
 
+use std::collections::BTreeMap;
 use std::time::Duration;
 
 use serde::Serialize;
@@ -258,6 +259,95 @@ pub struct ChurnReport {
     pub hub_rss_after_mib: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dead_backend: Option<DeadBackendProbe>,
+    /// Teardown modes rotated through, in order (Run #2 onward).
+    pub teardown_modes: Vec<String>,
+    pub parallel_teardown: bool,
+    /// `cleanup`, split by the teardown mode that preceded it.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub cleanup_by_mode: BTreeMap<String, LatencyStats>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hang: Option<HangOutcome>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub restart: Option<RestartOutcome>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resident: Option<ResidentOutcome>,
+    /// Mints that had to be retried because the hub held the token store's
+    /// lock (`holler_hub::token::mint` does not retry; the hub's own redeem
+    /// path does).
+    pub mint_lock_retries: usize,
+    /// What happened when re-minting a gracefully detached body's label.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label_reuse: Option<String>,
+    /// Hub resources and roster size sampled after every cycle.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub series: Vec<CycleSample>,
+}
+
+/// `hang` teardown: bodies SIGSTOPped, connected but silent.
+#[derive(Debug, Clone, Serialize)]
+pub struct HangOutcome {
+    pub cycles: usize,
+    pub budget_secs: u64,
+    /// Cycles where the hub returned to baseline on its own, while the
+    /// bodies were still frozen.
+    pub cleaned_within_budget: usize,
+    /// SIGSTOP → hub back to baseline, for the cycles that got there.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub latency: Option<LatencyStats>,
+    /// The hung sessions' roster rows when the budget ran out, for cycles
+    /// that didn't clean up on their own (first cycle only; they repeat).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub roster_when_not_cleaned: Option<String>,
+}
+
+/// `restart` teardown: crash without detach, then `body run` again on the
+/// same saved credential.
+#[derive(Debug, Clone, Serialize)]
+pub struct RestartOutcome {
+    pub cycles: usize,
+    /// Respawn → hub reports every body and session again.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rejoin: Option<LatencyStats>,
+    /// Sessions whose `client_id` changed across the restart, i.e. came back
+    /// as a different identity.
+    pub identity_changed: usize,
+    /// Sessions with other than exactly one roster row after rejoining
+    /// (ghost or missing rows).
+    pub ghost_or_missing_rows: usize,
+    /// Sessions not `connected` after rejoining.
+    pub not_connected: usize,
+}
+
+/// The resident body: up for the whole run, `say` traffic every cycle while
+/// the cycle's bodies are torn down around it.
+#[derive(Debug, Clone, Serialize)]
+pub struct ResidentOutcome {
+    pub sessions: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub say: Option<LatencyStats>,
+    pub say_failures: usize,
+    /// After-cycle health checks run (one per resident session per cycle).
+    pub checks: usize,
+    /// Checks that found a resident session not `connected` + idle/working.
+    pub disturbances: usize,
+}
+
+/// One per-cycle sample of hub state, after that cycle's cleanup.
+#[derive(Debug, Clone, Serialize)]
+pub struct CycleSample {
+    pub cycle: usize,
+    pub mode: String,
+    pub elapsed_s: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rss_mib: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub threads: Option<usize>,
+    /// Roster rows including `gone` ones: what pruning should bound.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub roster_rows: Option<usize>,
+    /// Join-credential records in the hub's store (every join mints one).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub minted_records: Option<usize>,
 }
 
 /// An attach-mode session whose backend process is killed from outside
@@ -444,7 +534,7 @@ fn churn_lines(c: &ChurnReport) -> String {
     );
     out.push_str(&format!("  join -> registered: {}\n", lat(c.join_to_registered)));
     out.push_str(&format!("  say:                {} (failures={})\n", lat(c.say), c.say_failures));
-    out.push_str(&format!("  detach all bodies:  {}\n", lat(c.detach)));
+    out.push_str(&format!("  tear down wave:     {} (graceful/crash cycles)\n", lat(c.detach)));
     out.push_str(&format!("  killed -> baseline: {}\n", lat(c.cleanup)));
     out.push_str(&format!(
         "  hub rss: before={} after={}\n",
@@ -457,6 +547,70 @@ fn churn_lines(c: &ChurnReport) -> String {
             _ => format!("NOT detected within {}s", d.window_secs),
         };
         out.push_str(&format!("  dead attach backend: {verdict}; roster then showed: {}\n", d.roster_after));
+    }
+    out.push_str(&churn_run2_lines(c));
+    out
+}
+
+/// The Run #2 additions to [`churn_lines`]; empty for a Run #1-style run.
+fn churn_run2_lines(c: &ChurnReport) -> String {
+    let lat = |s: Option<LatencyStats>| {
+        s.map_or_else(|| "n=0".to_string(), |s| format!("n={} p50={:.1}ms p99={:.1}ms max={:.1}ms", s.count, s.p50_ms, s.p99_ms, s.max_ms))
+    };
+    let mut out = String::new();
+    if c.teardown_modes.len() > 1 || c.parallel_teardown {
+        out.push_str(&format!("  teardown modes: {} (parallel={})\n", c.teardown_modes.join(","), c.parallel_teardown));
+    }
+    for (mode, stats) in &c.cleanup_by_mode {
+        out.push_str(&format!("    {mode:<9} killed -> baseline: {}\n", lat(Some(*stats))));
+    }
+    if let Some(h) = &c.hang {
+        out.push_str(&format!(
+            "  hang: {}/{} cycles cleaned up on their own within {}s; SIGSTOP -> baseline {}\n",
+            h.cleaned_within_budget, h.cycles, h.budget_secs, lat(h.latency),
+        ));
+        if let Some(r) = &h.roster_when_not_cleaned {
+            out.push_str(&format!("    not cleaned: roster showed {r}\n"));
+        }
+    }
+    if let Some(r) = &c.restart {
+        out.push_str(&format!(
+            "  restart: {} cycles; respawn -> rejoined {}; identity changed={} ghost/missing rows={} not connected={}\n",
+            r.cycles, lat(r.rejoin), r.identity_changed, r.ghost_or_missing_rows, r.not_connected,
+        ));
+    }
+    if let Some(r) = &c.resident {
+        out.push_str(&format!(
+            "  resident ({} sessions): say {} (failures={}); disturbances={}/{} checks\n",
+            r.sessions, lat(r.say), r.say_failures, r.disturbances, r.checks,
+        ));
+    }
+    if c.mint_lock_retries > 0 {
+        out.push_str(&format!("  token-store lock: {} mint retries under contention\n", c.mint_lock_retries));
+    }
+    if let Some(l) = &c.label_reuse {
+        out.push_str(&format!("  label reuse: {l}\n"));
+    }
+    out.push_str(&series_lines(&c.series));
+    out
+}
+
+/// Ten evenly spaced samples of the per-cycle series, plus its extremes.
+fn series_lines(series: &[CycleSample]) -> String {
+    if series.is_empty() {
+        return String::new();
+    }
+    let max_rss = series.iter().filter_map(|p| p.rss_mib).fold(f64::MIN, f64::max);
+    let max_rows = series.iter().filter_map(|p| p.roster_rows).max().unwrap_or(0);
+    let mut out = format!("  per-cycle series ({} samples; max rss={max_rss:.1}MiB, max roster rows={max_rows}):\n", series.len());
+    let step = (series.len() / 10).max(1);
+    let last_on_step = (series.len() - 1).is_multiple_of(step);
+    let tail = if last_on_step { None } else { series.last() };
+    for p in series.iter().step_by(step).chain(tail) {
+        out.push_str(&format!(
+            "    cycle={:>4} t={:>7.1}s mode={:<9} rss={} threads={} roster_rows={} minted={}\n",
+            p.cycle, p.elapsed_s, p.mode, opt_f(p.rss_mib, "MiB"), opt_u(p.threads), opt_u(p.roster_rows), opt_u(p.minted_records),
+        ));
     }
     out
 }

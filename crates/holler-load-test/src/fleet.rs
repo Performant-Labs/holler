@@ -20,6 +20,8 @@ use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::Sender;
 use std::time::{Duration, Instant};
 
+use std::sync::atomic::{AtomicUsize, Ordering};
+
 use crate::hub::{own_process_group, Hub, StateDir};
 use crate::metrics::Samples;
 use crate::{kill_tree, Res};
@@ -104,6 +106,7 @@ pub struct FleetMember {
     pub session_names: Vec<String>,
     child: Child,
     state: StateDir,
+    config: PathBuf,
     holler_bin: PathBuf,
 }
 
@@ -119,6 +122,7 @@ impl FleetMember {
             session_names: (0..sessions).map(|i| format!("{label}/s{i}")).collect(),
             child,
             state,
+            config,
             holler_bin: holler_bin.to_path_buf(),
         })
     }
@@ -147,6 +151,7 @@ impl FleetMember {
             session_names: vec![format!("{label}/{name}")],
             child,
             state,
+            config,
             holler_bin: holler_bin.to_path_buf(),
         })
     }
@@ -158,7 +163,7 @@ impl FleetMember {
 /// `wire.rs`'s clients can.
 fn join_body(hub: &Hub, holler_bin: &Path, label: &str) -> Res<StateDir> {
     let hub_state = holler_hub::state::HubState::from_root(hub.state().path().to_path_buf());
-    let minted = holler_hub::token::mint(label, 24 * 3600, &hub_state)?;
+    let minted = mint_retrying(label, &hub_state)?;
     let hub_key = hex::encode(hub.x25519_pubkey()?);
 
     let state = StateDir::fresh()?;
@@ -182,6 +187,39 @@ fn join_body(hub: &Hub, holler_bin: &Path, label: &str) -> Res<StateDir> {
         return Err(format!("`body join` for {label} failed: {}", String::from_utf8_lossy(&join.stderr)).into());
     }
     Ok(state)
+}
+
+/// How many times a mint had to be retried because the hub held the token
+/// store's lock (see [`mint_retrying`]).
+static MINT_LOCK_RETRIES: AtomicUsize = AtomicUsize::new(0);
+
+pub fn mint_lock_retries() -> usize {
+    MINT_LOCK_RETRIES.load(Ordering::Relaxed)
+}
+
+/// Mint a join token, retrying while the hub itself holds the token store's
+/// lock.
+///
+/// `holler_hub::token::mint` takes that lock without retrying, so under churn
+/// it races the hub's own redeem path and fails with "another holler process
+/// holds the token lock; retry" — the error text tells the caller to do
+/// exactly this. (The hub's internal redeem path already retries, via
+/// `acquire_lock_retrying`; `mint`, the operator-facing path, does not.)
+/// Retries are counted so a run can report how often it happened.
+fn mint_retrying(label: &str, hub_state: &holler_hub::state::HubState) -> Res<holler_hub::token::Minted> {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut delay = Duration::from_millis(5);
+    loop {
+        match holler_hub::token::mint(label, 24 * 3600, hub_state) {
+            Ok(minted) => return Ok(minted),
+            Err(e) if e.message.contains("holds the token lock") && Instant::now() < deadline => {
+                MINT_LOCK_RETRIES.fetch_add(1, Ordering::Relaxed);
+                std::thread::sleep(delay);
+                delay = (delay * 2).min(Duration::from_millis(50));
+            }
+            Err(e) => return Err(e.into()),
+        }
+    }
 }
 
 /// Spawn `holler body run --config <config>` in its own process group, with
@@ -236,8 +274,49 @@ impl FleetMember {
             session_names: (0..sessions).map(|i| format!("{label}/s{i}")).collect(),
             child,
             state,
+            config,
             holler_bin: holler_bin.to_path_buf(),
         })
+    }
+
+    /// Crash: SIGKILL the whole process tree without detaching first. The
+    /// credential stays on disk, as it would after a real crash.
+    pub fn crash(mut self) {
+        kill_tree(&mut self.child);
+    }
+
+    /// Hang: SIGSTOP the whole process group. Its sockets stay open but it
+    /// sends nothing, which is a different failure from a crash. [`Self::crash`]
+    /// (or [`Self::stop`]) still reaps it afterwards; SIGKILL works on a
+    /// stopped process.
+    pub fn hang(&self) -> Res<()> {
+        #[cfg(unix)]
+        {
+            // SAFETY: signals the process group this child leads (it was put in
+            // its own group at spawn by `own_process_group`); no memory is touched.
+            let rc = unsafe { libc::kill(-(self.child.id() as i32), libc::SIGSTOP) };
+            if rc != 0 {
+                return Err(std::io::Error::last_os_error().into());
+            }
+            Ok(())
+        }
+        #[cfg(not(unix))]
+        {
+            Err("the hang teardown mode needs SIGSTOP, which is Unix-only".into())
+        }
+    }
+
+    /// Kill the process tree without detaching, keeping the on-disk
+    /// credential, so [`Self::respawn`] can bring the same identity back.
+    pub fn kill_keep_identity(&mut self) {
+        kill_tree(&mut self.child);
+    }
+
+    /// Start `body run` again from the same state dir and config, so the body
+    /// reconnects on its existing credential rather than joining fresh.
+    pub fn respawn(&mut self) -> Res<()> {
+        self.child = spawn_body_run(&self.holler_bin, &self.state, &self.config, Stdio::null())?;
+        Ok(())
     }
 
     /// Ask the body to detach, then reap its whole process tree (it owns
