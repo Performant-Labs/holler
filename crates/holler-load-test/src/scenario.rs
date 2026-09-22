@@ -127,6 +127,7 @@ pub async fn run(cfg: &Config, hub: &Hub, report: &mut Report) -> Res<()> {
             queue_events_observed: None,
             queue_full_refusals: None,
             rss_series: Vec::new(),
+            churn: None,
         });
 
         // Tear this rung down completely before the next one: #370's ramp is
@@ -278,6 +279,7 @@ pub async fn run_body_fleet(cfg: &Config, hub: &Hub, report: &mut Report) -> Res
         queue_events_observed: None,
         queue_full_refusals: None,
         rss_series: Vec::new(),
+        churn: None,
     });
 
     for member in members {

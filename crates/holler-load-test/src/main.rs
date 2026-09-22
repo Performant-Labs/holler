@@ -48,6 +48,13 @@
 //! `docs/testing.md` § "Building it" for why, and for the full flag surface
 //! and recorded baselines.
 
+mod churn;
+// The fake OpenCode HTTP server holler-body's attach tests use; the churn
+// scenario runs it as a real child process (`--fake-opencode`) so it can
+// kill it the way the 2026-09-21 incident's backend died.
+#[path = "../../holler-body/tests/http_attach_driver_test/fake_server.rs"]
+#[allow(dead_code, clippy::expect_used, clippy::unwrap_used, clippy::panic)] // #373: reused test fixture; its unused helpers and bind-failure panics are fine here
+mod fake_opencode;
 mod fleet;
 mod hub;
 mod metrics;
@@ -89,6 +96,10 @@ pub enum Scenario {
     /// unbounded or drains once load eases, and hub RSS sampled repeatedly
     /// across the run (flat after warmup vs. monotonic growth).
     SustainedThroughput,
+    /// Issue #373: repeated join -> run -> detach cycles, hard-checking the
+    /// hub returns to baseline after each, plus how long the roster takes to
+    /// notice an attach-mode backend killed from outside Holler.
+    Churn,
 }
 
 #[derive(Parser, Debug)]
@@ -169,6 +180,20 @@ struct Cli {
     #[arg(long, default_value_t = 2000)]
     rss_sample_ms: u64,
 
+    /// `churn`: how many join -> run -> detach cycles to drive.
+    #[arg(long, default_value_t = 20)]
+    churn_cycles: usize,
+
+    /// `churn`: how long (seconds) to watch the roster after killing the
+    /// attach-mode backend before recording it as not detected.
+    #[arg(long, default_value_t = 60)]
+    dead_backend_window_secs: u64,
+
+    /// Internal: serve the fake OpenCode HTTP server, print its endpoint, and
+    /// run until killed. The churn scenario spawns this; not for direct use.
+    #[arg(long, hide = true)]
+    fake_opencode: bool,
+
     /// Path to the `holler` binary (default: next to this one).
     #[arg(long)]
     holler_bin: Option<PathBuf>,
@@ -214,10 +239,15 @@ pub struct Config {
     pub roster_reads: usize,
     pub sustained: Duration,
     pub rss_sample_interval: Duration,
+    pub churn_cycles: usize,
+    pub dead_backend_window: Duration,
 }
 
 fn main() -> Res<()> {
     let cli = Cli::parse();
+    if cli.fake_opencode {
+        return serve_fake_opencode();
+    }
 
     let ramp = parse_ramp(&cli.ramp)?;
     let session_ramp = parse_ramp(&cli.session_ramp)?;
@@ -245,6 +275,8 @@ fn main() -> Res<()> {
         roster_reads: cli.roster_reads,
         sustained: Duration::from_secs(cli.sustained_secs),
         rss_sample_interval: Duration::from_millis(cli.rss_sample_ms),
+        churn_cycles: cli.churn_cycles,
+        dead_backend_window: Duration::from_secs(cli.dead_backend_window_secs),
     };
 
     let hub_env = parse_env(&cli.hub_env)?;
@@ -261,6 +293,7 @@ fn main() -> Res<()> {
             Scenario::BodyFleet => "#369".to_string(),
             Scenario::SessionScale => "#371".to_string(),
             Scenario::SustainedThroughput => "#372".to_string(),
+            Scenario::Churn => "#373".to_string(),
         },
         started_at: rfc3339_utc_now(),
         host: metrics::HostInfo::detect(),
@@ -276,6 +309,7 @@ fn main() -> Res<()> {
             Scenario::BodyFleet => scenario::run_body_fleet(&cfg, &hub, &mut report).await,
             Scenario::SessionScale => session_scale::run(&cfg, &hub, &mut report).await,
             Scenario::SustainedThroughput => sustained_throughput::run(&cfg, &hub, &mut report).await,
+            Scenario::Churn => churn::run(&cfg, &hub, &mut report).await,
         }
     });
     hub.stop();
@@ -286,6 +320,19 @@ fn main() -> Res<()> {
         std::fs::write(&path, serde_json::to_string_pretty(&report)?)?;
         eprintln!("json report: {}", path.display());
     }
+    Ok(())
+}
+
+/// `--fake-opencode`: serve the fake, print its endpoint, run until killed.
+fn serve_fake_opencode() -> Res<()> {
+    use std::io::Write;
+    let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
+    runtime.block_on(async {
+        let server = fake_opencode::FakeServer::start().await;
+        println!("{}", server.endpoint());
+        let _ = std::io::stdout().flush();
+        std::future::pending::<()>().await;
+    });
     Ok(())
 }
 
@@ -330,6 +377,8 @@ fn config_json(cfg: &Config, hub_env: &[(String, String)]) -> serde_json::Value 
         "roster_reads": cfg.roster_reads,
         "sustained_secs": cfg.sustained.as_secs(),
         "rss_sample_ms": cfg.rss_sample_interval.as_millis() as u64,
+        "churn_cycles": cfg.churn_cycles,
+        "dead_backend_window_secs": cfg.dead_backend_window.as_secs(),
         "hub_env": hub_env.iter().map(|(k, v)| format!("{k}={v}")).collect::<Vec<_>>(),
     })
 }

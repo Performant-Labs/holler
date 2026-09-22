@@ -112,48 +112,9 @@ impl FleetMember {
     /// on-disk identity), its own token, its own `sessions.toml` pointing every
     /// session at the real `stub-acp` binary.
     pub fn start(hub: &Hub, holler_bin: &Path, stub_acp: &Path, label: &str, sessions: usize) -> Res<Self> {
-        // Mint through the hub's own store, then let the real `body join`
-        // redeem it — the body must generate and persist *its own* keypair, so
-        // this half cannot be short-circuited in-process the way `wire.rs`'s
-        // clients can.
-        let hub_state = holler_hub::state::HubState::from_root(hub.state().path().to_path_buf());
-        let minted = holler_hub::token::mint(label, 24 * 3600, &hub_state)?;
-        let hub_key = hex::encode(hub.x25519_pubkey()?);
-
-        let state = StateDir::fresh()?;
-        let join = Command::new(holler_bin)
-            .env("HOLLER_STATE_DIR", state.path())
-            .env("HOLLER_DEBUG", "quiet")
-            .args([
-                "body",
-                "join",
-                "--server",
-                &hub.ws_url,
-                "--token",
-                &format!("{}:{}", minted.record.token_id, minted.secret),
-                "--hub-key",
-                &hub_key,
-            ])
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .output()?;
-        if !join.status.success() {
-            return Err(format!("`body join` for {label} failed: {}", String::from_utf8_lossy(&join.stderr)).into());
-        }
-
+        let state = join_body(hub, holler_bin, label)?;
         let config = write_sessions_toml(&state, stub_acp, sessions)?;
-        let mut cmd = Command::new(holler_bin);
-        cmd.env("HOLLER_STATE_DIR", state.path())
-            .env("HOLLER_DEBUG", "quiet")
-            .env("HOLLER_LOG_FORMAT", "json")
-            .args(["body", "run", "--config"])
-            .arg(&config)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
-        own_process_group(&mut cmd);
-        let child = cmd.spawn()?;
-
+        let child = spawn_body_run(holler_bin, &state, &config, Stdio::null())?;
         Ok(Self {
             session_names: (0..sessions).map(|i| format!("{label}/s{i}")).collect(),
             child,
@@ -162,6 +123,84 @@ impl FleetMember {
         })
     }
 
+    /// Like [`Self::start`], but hosting one `mode = "attach"` session named
+    /// `name`, attached to an already-running OpenCode-shaped HTTP server at
+    /// `endpoint` (scenario 4's dead-backend probe, issue #373).
+    pub fn start_attach(
+        hub: &Hub,
+        holler_bin: &Path,
+        label: &str,
+        name: &str,
+        endpoint: &str,
+        session_id: &str,
+    ) -> Res<Self> {
+        let state = join_body(hub, holler_bin, label)?;
+        let toml = format!(
+            "[[session]]\nname = {}\nharness = \"opencode\"\nmode = \"attach\"\nendpoint = {}\nsession_id = {}\n",
+            serde_json::to_string(name)?,
+            serde_json::to_string(endpoint)?,
+            serde_json::to_string(session_id)?,
+        );
+        let config = write_config(&state, &toml)?;
+        let child = spawn_body_run(holler_bin, &state, &config, Stdio::null())?;
+        Ok(Self {
+            session_names: vec![format!("{label}/{name}")],
+            child,
+            state,
+            holler_bin: holler_bin.to_path_buf(),
+        })
+    }
+}
+
+/// Mint a token through the hub's own store, then let the real `body join`
+/// redeem it in a fresh state dir — the body must generate and persist *its
+/// own* keypair, so this half cannot be short-circuited in-process the way
+/// `wire.rs`'s clients can.
+fn join_body(hub: &Hub, holler_bin: &Path, label: &str) -> Res<StateDir> {
+    let hub_state = holler_hub::state::HubState::from_root(hub.state().path().to_path_buf());
+    let minted = holler_hub::token::mint(label, 24 * 3600, &hub_state)?;
+    let hub_key = hex::encode(hub.x25519_pubkey()?);
+
+    let state = StateDir::fresh()?;
+    let join = Command::new(holler_bin)
+        .env("HOLLER_STATE_DIR", state.path())
+        .env("HOLLER_DEBUG", "quiet")
+        .args([
+            "body",
+            "join",
+            "--server",
+            &hub.ws_url,
+            "--token",
+            &format!("{}:{}", minted.record.token_id, minted.secret),
+            "--hub-key",
+            &hub_key,
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()?;
+    if !join.status.success() {
+        return Err(format!("`body join` for {label} failed: {}", String::from_utf8_lossy(&join.stderr)).into());
+    }
+    Ok(state)
+}
+
+/// Spawn `holler body run --config <config>` in its own process group, with
+/// its stderr routed to `stderr`.
+fn spawn_body_run(holler_bin: &Path, state: &StateDir, config: &Path, stderr: Stdio) -> Res<Child> {
+    let mut cmd = Command::new(holler_bin);
+    cmd.env("HOLLER_STATE_DIR", state.path())
+        .env("HOLLER_DEBUG", "quiet")
+        .env("HOLLER_LOG_FORMAT", "json")
+        .args(["body", "run", "--config"])
+        .arg(config)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(stderr);
+    own_process_group(&mut cmd);
+    Ok(cmd.spawn()?)
+}
+
+impl FleetMember {
     /// Like [`Self::start`], but pipes the body's stderr and relays its
     /// `component=session` `queue_enqueue`/`queue_dequeue`/`queue_full`
     /// debug events (issue #197's own instrumentation — see
@@ -185,43 +224,9 @@ impl FleetMember {
         sessions: usize,
         events: Sender<QueueEvent>,
     ) -> Res<Self> {
-        let hub_state = holler_hub::state::HubState::from_root(hub.state().path().to_path_buf());
-        let minted = holler_hub::token::mint(label, 24 * 3600, &hub_state)?;
-        let hub_key = hex::encode(hub.x25519_pubkey()?);
-
-        let state = StateDir::fresh()?;
-        let join = Command::new(holler_bin)
-            .env("HOLLER_STATE_DIR", state.path())
-            .env("HOLLER_DEBUG", "quiet")
-            .args([
-                "body",
-                "join",
-                "--server",
-                &hub.ws_url,
-                "--token",
-                &format!("{}:{}", minted.record.token_id, minted.secret),
-                "--hub-key",
-                &hub_key,
-            ])
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .output()?;
-        if !join.status.success() {
-            return Err(format!("`body join` for {label} failed: {}", String::from_utf8_lossy(&join.stderr)).into());
-        }
-
+        let state = join_body(hub, holler_bin, label)?;
         let config = write_sessions_toml(&state, stub_acp, sessions)?;
-        let mut cmd = Command::new(holler_bin);
-        cmd.env("HOLLER_STATE_DIR", state.path())
-            .env("HOLLER_DEBUG", "quiet")
-            .env("HOLLER_LOG_FORMAT", "json")
-            .args(["body", "run", "--config"])
-            .arg(&config)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::piped());
-        own_process_group(&mut cmd);
-        let mut child = cmd.spawn()?;
+        let mut child = spawn_body_run(holler_bin, &state, &config, Stdio::piped())?;
 
         let stderr = child.stderr.take().ok_or("watched body's stderr was not piped")?;
         let label_owned = label.to_string();
@@ -266,6 +271,11 @@ fn write_sessions_toml(state: &StateDir, stub_acp: &Path, sessions: usize) -> Re
             "[[session]]\nname = \"s{i}\"\nharness = \"opencode\"\ncommand = [{argv}]\n"
         ));
     }
+    write_config(state, &toml)
+}
+
+/// Write `toml` to `<state>/body/sessions.toml`.
+fn write_config(state: &StateDir, toml: &str) -> Res<PathBuf> {
     let dir = state.path().join("body");
     std::fs::create_dir_all(&dir)?;
     let path = dir.join("sessions.toml");
