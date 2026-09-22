@@ -259,6 +259,16 @@ impl Hub {
             .ok_or_else(|| "hub status --json carries no numeric `clients`".into())
     }
 
+    /// The live session count the hub itself reports — #371's cross-check
+    /// against the real total (`bodies * sessions_per_body`) that rung
+    /// configured.
+    pub fn sessions_count(&self) -> Res<u64> {
+        self.status_json()?
+            .get("sessions")
+            .and_then(serde_json::Value::as_u64)
+            .ok_or_else(|| "hub status --json carries no numeric `sessions`".into())
+    }
+
     /// Stop the hub (only if this harness started it).
     pub fn stop(&mut self) {
         if let Some(mut child) = self.child.take() {

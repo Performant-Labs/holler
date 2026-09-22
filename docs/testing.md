@@ -170,6 +170,8 @@ Every run prints a human table to stdout and, with `--json-out`, writes the same
 
 Wire mode is not a shortcut around real processes — it is the only way to get the metric issue [#370](https://github.com/Performant-Labs/holler/issues/370) asks for. A subprocess cannot report the timing of its own internal handshake steps, and 200 bodies plus their 200 `stub-acp` children would swamp the machine being measured. Body-fleet mode is the process-level path, at the scale processes actually reach.
 
+`--scenario session-scale` (issue [#371](https://github.com/Performant-Labs/holler/issues/371)) reuses body-fleet mode's real `holler body run` fleet, holding the body count N fixed and ramping the *sessions-per-body* count M instead — 10 → 100 → 500 — to isolate what scales with session count rather than connection count. See its own baseline table below.
+
 ### Scenario 1 baseline: connection scale (issue #370)
 
 Measured 2026-09-21 on macOS 15 / aarch64, 10 logical cores, release build, loopback, `--connect-concurrency 32`. Two independent runs; the spread between them is shown where it matters. **These are a baseline, not thresholds** — #370 is explicit that thresholds are TBD *from* this measurement, so nothing in the harness asserts one.
@@ -191,6 +193,32 @@ The WebSocket dial itself is flat and sub-millisecond throughout (p50 0.29–1.8
 The first run of this scenario did not produce a baseline — it produced a defect. At N=50 only **3 of 50** connections completed the handshake, and at N=200 only **7 of 200**. The rest were refused `-32002 unauthenticated`, carrying the token store's own text: *"another holler process holds the token lock; retry"*.
 
 `token::bound_record` (called twice per `circuit/authenticate`) and `token::touch_last_seen` (once per presence beat) both ran under the non-retrying `acquire_lock`, whose contention outcome is an error. Since `circuit/authenticate` maps any token-store failure to `-32002`, and the lockout counts a `-32002` as a *failed auth*, the hub's contention with itself cascaded into an IP lockout that force-closed further connections mid-handshake. Issue [#301](https://github.com/Performant-Labs/holler/issues/301) had already diagnosed and fixed this exact defect class one call site over, at `redeem`; both siblings now use the same `acquire_lock_retrying`, and `crates/holler-hub/tests/token_store_test.rs::concurrent_live_path_reads_never_lose_the_lock_race` is the regression guard (358 of 384 calls fail without the fix; 0 with it). The table above is the post-fix measurement.
+
+### Scenario 2 baseline: session scale (issue #371)
+
+`--scenario session-scale` fixes N (`--bodies`, default rung 5) real `holler body run` processes and ramps M (`--session-ramp`, default `10,100,500`) spawn-mode `stub-acp` sessions **per body** — the issue's own wording ("M (`stub-acp` sessions per body)") read literally — so the real total session count is `N * M`: 50 → 500 → 2500 at N=5. Each rung restarts every body fresh with that rung's own M, exactly like scenario 1 tears its ramp steps down between rungs.
+
+Starting M sessions per body is cheap even at M=500: `SessionManager::start` (`crates/holler-body/src/session_manager.rs`) spawns one lightweight tokio task per session, not a real `stub-acp` process — a driver only spawns the real child on that session's first prompt ("restarts the driver on the next prompt … not eagerly", that module's own doc). So the M=500 rung is still 5 real OS processes hosting 2500 idle in-process tasks, plus a handful of real `stub-acp` children for the sessions this scenario actually drives a turn on (the fan-out probes below) — not 2500 real child processes.
+
+Measured 2026-09-21 on macOS 26 / aarch64, 10 logical cores, release build, loopback: `--bodies 5 --session-ramp 10,100,500 --fanout-samples 5 --roster-reads 20`. Two independent runs; the spread between them is shown where it matters. **These are a baseline, not thresholds** — #371, like #370 before it, is explicit that thresholds are TBD *from* this measurement.
+
+| M (sessions/body) | total sessions | `hub status` `sessions` | fan-out p50 | fan-out p90 | fan-out max | roster read p50 | roster read p90 | roster read max | hub RSS | hub threads |
+|---:|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| 10 | 50 | 50 ✓ | 10.7–10.9 ms | 16.7–17.8 ms | 16.7–17.8 ms | 6.3 ms | 6.5–6.6 ms | 6.7–7.0 ms | 11.5 MiB | 12 |
+| 100 | 500 | 500 ✓ | 14.9–15.2 ms | 15.8–21.8 ms | 15.8–21.8 ms | 11.4–11.7 ms | 11.9–12.0 ms | 12.4–13.9 ms | 17.6–17.7 MiB | 12 |
+| 500 | 2500 | 2500 ✓ | 39.1–40.8 ms | 40.3–42.3 ms | 40.3–42.3 ms | 34.3–34.7 ms | 34.7–36.5 ms | 37.1–43.2 ms | 44.1–44.6 MiB | 12 |
+
+"Fan-out" here means real `session/presence` propagation latency, not a per-connection push — see `crates/holler-load-test/src/session_scale.rs`'s own module doc for why a pull-based hub with a single shared roster table has nothing to fan a presence change *out* to, and why measuring the real propagation latency into that table (a real `say` driving a real `stub-acp` turn from `idle` to `working`, timed until the hub's roster observes it) is the honest reading of the issue's ask. This is the same propagation path issue #359 fixed a real race in (2026-09-21, a body publishing a transient `idle` presence between queued turns), so this measurement doubles as a standing regression guard for that fix.
+
+Three things the numbers say:
+
+- **The `sessions` invariant held at every rung, both runs.** `hub status --json`'s `sessions` matched the real configured total (50/500/2500) exactly. The scenario hard-fails (non-zero exit, no report emitted) on any mismatch rather than merely reporting one — see "What this found" below for that path firing for real.
+- **Both latencies scale with session count, not body count.** N stayed fixed at 5 throughout; presence fan-out roughly quadrupled (≈11 ms → ≈40 ms) and roster read latency grew ≈5.5× (≈6 ms → ≈35 ms) from M=10 to M=500. Both operations walk the hub's roster table, consistent with an O(sessions) cost rather than an O(bodies) one.
+- **Fan-out and roster read track each other closely at every rung** (10.7 vs 6.3 ms, 14.9 vs 11.4 ms, 39.1 vs 34.3 ms) — the dominant cost in both is the same roster-table read; the remaining ~4–5 ms gap is the real `say`-then-observe round trip on top of it.
+
+#### What this found: a harness bug, not a hub defect
+
+Unlike scenario 1, this scenario did not surface a Holler defect — but building it did surface a real bug in the harness itself. The first draft reused the same body labels (`ss0`, `ss1`, …) on every rung; the hub's token store refuses a second mint under a label already on file (`label "ss0" already in use`), so every body after the first rung failed to (re)join, `hub status --json` correctly reported `sessions=0`, and the scenario's own hard-fail invariant fired exactly as designed — a clear, non-zero-exit error naming both the mismatch and the underlying body-start failures. The fix is a run-scoped, monotonically increasing body-label counter in `session_scale.rs` instead of restarting the label index at 0 each rung. Recorded here, in the same spirit as #370's own "what the baseline found" entry, because the check that caught it is exactly the one #371 asked to be a hard failure rather than a soft one — and it was.
 
 ### It is not in CI, deliberately
 

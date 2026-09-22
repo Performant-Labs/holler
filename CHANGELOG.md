@@ -7,6 +7,19 @@ fills this file in at release time.
 
 ## [Unreleased]
 
+### Enhancements
+- Load harness scenario 2 (`--scenario session-scale`): fixes N real `holler body run`
+  processes and ramps M spawn-mode `stub-acp` sessions per body — 10 → 100 → 500, so the real
+  total session count is 50 → 500 → 2500 at the default N=5 — and measures real
+  `session/presence` propagation latency (a real `say`-driven state change timed until the
+  hub's roster observes it — the same propagation path issue #359 fixed a race in, so this is
+  also a standing regression guard for that fix), `holler roster --json` read latency as
+  session count grows, and hard-fails (non-zero exit) if `hub status --json`'s `sessions`
+  count ever disagrees with the real configured total. First measured baseline — fan-out
+  p50 10.7ms → 40.8ms and roster-read p50 6.3ms → 34.7ms from 50 to 2500 sessions, both
+  scaling with session count rather than body count — is documented in
+  [`docs/testing.md`](docs/testing.md) ([#369](https://github.com/Performant-Labs/holler/issues/369), [#371](https://github.com/Performant-Labs/holler/issues/371)).
+
 ## [0.2.0] - 2026-09-21
 
 **Note:** this section had gone unpopulated since #327 (the release-process
