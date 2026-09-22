@@ -8,12 +8,10 @@
 //! 2. `wait_for` returns `None` cleanly and fast on timeout (no hang),
 //! 3. `kill_tree` reaps a child *and its grandchildren* (no orphaned agents).
 //!
-//! The `Body::*` helpers are deliberately *not* exercised here: they drive
-//! `holler body join` / `body run`, which the body story implements. That
-//! selftest lands with that story. `Hub`, by contrast, **is** exercised: story
-//! #143 implemented `hub serve`, so `hub_dropped_without_stop_reaps_its_tree`
-//! below pins that a `Hub` dropped without `stop` still reaps its process tree
-//! (no orphaned hub).
+//! `Hub` and `Body` are both exercised here: `hub_dropped_without_stop_reaps_its_tree`
+//! pins that a `Hub` dropped without `stop` still reaps its process tree (no
+//! orphaned hub), and `body_dropped_without_stop_reaps_its_tree` pins the same
+//! for `Body` (no orphaned `holler body run` / `stub-acp`).
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable, dead_code)] // #138
 
@@ -174,6 +172,43 @@ fn hub_dropped_without_stop_reaps_its_tree() {
     assert!(
         reaped.is_some(),
         "dropping a `Hub` without calling `stop` leaked its process (pgid {pgid} \
+         still alive after 5s) — the harness `Drop` impl must reap the tree"
+    );
+    drop(state);
+}
+
+/// A `Body` dropped *without* calling [`support::Body::stop`] must still reap
+/// its process tree — otherwise the body (and any agent it spawned, e.g.
+/// `stub-acp`) is orphaned (reparented to init) and leaks. `Hub` has exactly
+/// this protection (`hub_dropped_without_stop_reaps_its_tree` above); `Body`
+/// did not (issue: orphaned `holler body run` / `stub-acp` processes observed
+/// surviving well after `cargo test --workspace` exited — the
+/// `holler-test-<pid>-<hash>-<n>` state-dir naming pins them to this harness,
+/// not `holler-load-test`'s separately-verified `hlr-lt-*` cleanup). Any test
+/// that panics, early-returns, or otherwise lets its `Body` fall out of scope
+/// before reaching its own `body.stop(...)` call hit exactly this gap.
+#[cfg(unix)]
+#[test]
+fn body_dropped_without_stop_reaps_its_tree() {
+    use support::{write_sessions_toml, Body};
+    let state = StateDir::new();
+    let sessions = write_sessions_toml(&state, &[("s1", &["--chunks", "1"])]);
+    let mut body = Body::start(&state, &sessions);
+    // The body is its own process-group leader (Body::start calls
+    // make_own_process_group), so pgid == pid.
+    let pgid = body.child_mut().id() as i64;
+    assert!(
+        grandchildren_of(pgid) > 0,
+        "the body we just started is not visible in its own process group"
+    );
+    // Let it drop *without* calling stop — the `Drop` impl must reap the tree.
+    drop(body);
+    let reaped = wait_for(Duration::from_secs(5), || {
+        (grandchildren_of(pgid) == 0).then_some(())
+    });
+    assert!(
+        reaped.is_some(),
+        "dropping a `Body` without calling `stop` leaked its process (pgid {pgid} \
          still alive after 5s) — the harness `Drop` impl must reap the tree"
     );
     drop(state);
