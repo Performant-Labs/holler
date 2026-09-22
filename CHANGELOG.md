@@ -35,6 +35,23 @@ fills this file in at release time.
   p50 10.7ms → 40.8ms and roster-read p50 6.3ms → 34.7ms from 50 to 2500 sessions, both
   scaling with session count rather than body count — is documented in
   [`docs/testing.md`](docs/testing.md) ([#369](https://github.com/Performant-Labs/holler/issues/369), [#371](https://github.com/Performant-Labs/holler/issues/371)).
+- Load harness scenario 3 (`--scenario sustained-throughput`): starts a real body fleet and
+  drives a **sustained** `say --queue` rate across every session concurrently for a real,
+  non-trivial duration (`--sustained-secs`, default 60s — not a burst), measuring real `say`
+  round-trip latency (p50/p90/p99), whether `SessionManager`'s FIFO queue
+  (`QUEUE_CAP = 64`, `crates/holler-body/src/session_manager.rs`) grows unbounded under
+  sustained load or drains once load eases, and hub RSS sampled repeatedly across the run
+  (not just before/after) so "flat after warmup" vs. "monotonic growth" is a real series. The
+  queue-depth signal reuses `holler-body`'s existing `queue_enqueue`/`queue_dequeue`/
+  `queue_full` debug events (issue #197) via a new `FleetMember::start_watched` that pipes and
+  relays a watched body's stderr (`crates/holler-load-test/src/fleet.rs`) — zero new
+  instrumentation landed in `holler-body` itself. First measured baseline (two independent
+  60s runs, `--bodies 3 --sessions-per-body 1 --rate 20`): `say` latency p50 ~1.6–1.7s once a
+  real backlog exists (vs. a ~173–176ms no-queue floor), queue depth peaked at 29 (well under
+  the 64 cap, never refused) and drained to exactly 0 both runs after an 8s cooldown, and hub
+  RSS rose 8.0→10.5 MiB during the drive then fell and flattened at 9.3–9.4 MiB afterward — no
+  post-cooldown growth in either run. No Holler defect or harness bug surfaced. Documented in
+  [`docs/testing.md`](docs/testing.md) ([#369](https://github.com/Performant-Labs/holler/issues/369), [#372](https://github.com/Performant-Labs/holler/issues/372)).
 
 ## [0.2.0] - 2026-09-21
 

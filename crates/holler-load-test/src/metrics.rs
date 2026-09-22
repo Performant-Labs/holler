@@ -104,6 +104,19 @@ pub struct ResourceSample {
     pub cpu_percent: Option<f64>,
 }
 
+/// One RSS/thread observation taken at a known offset into a sustained run
+/// (`sustained_throughput.rs`, issue #372) — a single before/after snapshot
+/// cannot show "flat after warmup" vs "monotonic growth"; a series can.
+#[derive(Debug, Clone, Copy, Serialize)]
+pub struct RssPoint {
+    /// Seconds since the sustained run's load-driving phase started.
+    pub elapsed_s: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rss_mib: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub threads: Option<usize>,
+}
+
 /// One rung of a ramp: everything measured at a given concurrent-client count.
 #[derive(Debug, Clone, Serialize)]
 pub struct StepReport {
@@ -172,6 +185,43 @@ pub struct StepReport {
     /// session count.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub roster_read: Option<LatencyStats>,
+    /// `sustained-throughput` (#372): how long, in seconds, the sustained
+    /// `say --queue` drive itself ran (excludes warmup settle and the
+    /// post-load cooldown — `step_seconds` above covers the whole step).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sustained_seconds: Option<f64>,
+    /// `sustained-throughput`: real `say --queue` calls the driver could not
+    /// complete (a `-32009`/`-32007`/transport failure) — excluded from
+    /// `calls`'s latency distribution, never smoothed into it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub say_failures: Option<usize>,
+    /// `sustained-throughput`: the largest total FIFO queue depth (summed
+    /// across every session) observed at any point during the run, from the
+    /// real `queue_enqueue`/`queue_dequeue` debug events — see
+    /// `fleet.rs::QueueEvent`. `None` when no fleet member's stderr was
+    /// watched (every other scenario).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub queue_depth_max: Option<usize>,
+    /// `sustained-throughput`: the total FIFO queue depth at the run's very
+    /// last observed queue event (after the post-load cooldown) — 0 means
+    /// every session's queue fully drained.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub queue_depth_final: Option<usize>,
+    /// `sustained-throughput`: how many `queue_enqueue`/`queue_dequeue`
+    /// events were observed in total (the series' own sample count).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub queue_events_observed: Option<usize>,
+    /// `sustained-throughput`: how many `--queue` calls were refused
+    /// outright with `queue_full` (the FIFO's hard `QUEUE_CAP` was already
+    /// reached for that session) — a real, bounded-by-design ceiling, not a
+    /// harness failure.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub queue_full_refusals: Option<usize>,
+    /// `sustained-throughput`: the hub's own RSS/thread count sampled
+    /// repeatedly across the sustained run (see `RssPoint`), so "flat after
+    /// warmup" vs "monotonic growth" is a real series, not one snapshot.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub rss_series: Vec<RssPoint>,
 }
 
 /// The whole run.
@@ -259,57 +309,112 @@ pub fn human_table(report: &Report) -> String {
     out.push_str(" status: hub status --json's `clients`; a trailing `!` means it did NOT match `live`.)\n");
 
     for step in &report.steps {
-        if let Some(per) = step.rss_delta_per_client_kib {
-            out.push_str(&format!(
-                "  N={:<4} rss over baseline: {:.0} KiB/client",
-                step.clients_target, per
-            ));
-            if let Some(td) = step.threads_delta {
-                out.push_str(&format!("; threads over baseline: {td:+}"));
-            }
-            out.push('\n');
+        out.push_str(&step_extra_lines(step));
+    }
+    out
+}
+
+/// The per-step detail lines under the main table: everything a step
+/// measured that the fixed-width table above has no column for (rss/client,
+/// connect failures, driven-call latency, session-scale's own rows, and
+/// scenario 3's sustained-throughput rows — sustained drive time, `say`
+/// latency, queue depth, and the RSS-over-time series). Split out of
+/// [`human_table`] itself so that function stays under this workspace's
+/// line-count/cognitive-complexity lints as scenarios keep adding their own
+/// rows here.
+fn step_extra_lines(step: &StepReport) -> String {
+    let mut out = String::new();
+    if let Some(per) = step.rss_delta_per_client_kib {
+        out.push_str(&format!("  N={:<4} rss over baseline: {:.0} KiB/client", step.clients_target, per));
+        if let Some(td) = step.threads_delta {
+            out.push_str(&format!("; threads over baseline: {td:+}"));
         }
-        if !step.connect_failures.is_empty() {
+        out.push('\n');
+    }
+    if !step.connect_failures.is_empty() {
+        out.push_str(&format!(
+            "  N={:<4} connect failures ({}): {}\n",
+            step.clients_target,
+            step.connect_failures.len(),
+            summarize_failures(&step.connect_failures),
+        ));
+    }
+    if let Some(calls) = step.calls {
+        out.push_str(&format!(
+            "  N={:<4} driven calls: n={} p50={:.1}ms p90={:.1}ms max={:.1}ms\n",
+            step.clients_target, calls.count, calls.p50_ms, calls.p90_ms, calls.max_ms,
+        ));
+    }
+    if let Some(spb) = step.sessions_per_body {
+        out.push_str(&format!(
+            "  M={:<4} sessions: expected={} actual={}{} \n",
+            spb,
+            step.sessions_expected.map_or_else(|| "?".to_string(), |v| v.to_string()),
+            step.sessions_actual.map_or_else(|| "?".to_string(), |v| v.to_string()),
+            if step.sessions_match == Some(true) { " (match)" } else { " (MISMATCH)" },
+        ));
+    }
+    if let Some(fanout) = step.presence_fanout {
+        out.push_str(&format!(
+            "  M={:<4} presence fan-out: n={} p50={:.1}ms p90={:.1}ms max={:.1}ms\n",
+            step.sessions_per_body.unwrap_or(0),
+            fanout.count,
+            fanout.p50_ms,
+            fanout.p90_ms,
+            fanout.max_ms,
+        ));
+    }
+    if let Some(roster_read) = step.roster_read {
+        out.push_str(&format!(
+            "  M={:<4} roster read: n={} p50={:.1}ms p90={:.1}ms max={:.1}ms\n",
+            step.sessions_per_body.unwrap_or(0),
+            roster_read.count,
+            roster_read.p50_ms,
+            roster_read.p90_ms,
+            roster_read.max_ms,
+        ));
+    }
+    out.push_str(&sustained_throughput_lines(step));
+    out
+}
+
+/// Scenario 3's (#372) own detail lines: sustained drive time, `say`
+/// latency, queue depth, and the RSS-over-time series. Split out of
+/// [`step_extra_lines`] for the same line-count/complexity reason that
+/// function was split out of [`human_table`].
+fn sustained_throughput_lines(step: &StepReport) -> String {
+    let mut out = String::new();
+    if let Some(secs) = step.sustained_seconds {
+        out.push_str(&format!("  sustained drive: {secs:.1}s\n"));
+    }
+    if let Some(calls) = step.calls {
+        out.push_str(&format!(
+            "  say latency: n={} p50={:.1}ms p90={:.1}ms p99={:.1}ms max={:.1}ms (failures={})\n",
+            calls.count,
+            calls.p50_ms,
+            calls.p90_ms,
+            calls.p99_ms,
+            calls.max_ms,
+            step.say_failures.unwrap_or(0),
+        ));
+    }
+    if step.queue_depth_max.is_some() || step.queue_depth_final.is_some() {
+        out.push_str(&format!(
+            "  queue depth: max={} final={} events={} queue_full_refusals={}\n",
+            step.queue_depth_max.map_or_else(|| "?".to_string(), |v| v.to_string()),
+            step.queue_depth_final.map_or_else(|| "?".to_string(), |v| v.to_string()),
+            step.queue_events_observed.map_or_else(|| "?".to_string(), |v| v.to_string()),
+            step.queue_full_refusals.map_or_else(|| "?".to_string(), |v| v.to_string()),
+        ));
+    }
+    if !step.rss_series.is_empty() {
+        out.push_str(&format!("  hub RSS over time ({} samples):\n", step.rss_series.len()));
+        for point in &step.rss_series {
             out.push_str(&format!(
-                "  N={:<4} connect failures ({}): {}\n",
-                step.clients_target,
-                step.connect_failures.len(),
-                summarize_failures(&step.connect_failures),
-            ));
-        }
-        if let Some(calls) = step.calls {
-            out.push_str(&format!(
-                "  N={:<4} driven calls: n={} p50={:.1}ms p90={:.1}ms max={:.1}ms\n",
-                step.clients_target, calls.count, calls.p50_ms, calls.p90_ms, calls.max_ms,
-            ));
-        }
-        if let Some(spb) = step.sessions_per_body {
-            out.push_str(&format!(
-                "  M={:<4} sessions: expected={} actual={}{} \n",
-                spb,
-                step.sessions_expected.map_or_else(|| "?".to_string(), |v| v.to_string()),
-                step.sessions_actual.map_or_else(|| "?".to_string(), |v| v.to_string()),
-                if step.sessions_match == Some(true) { " (match)" } else { " (MISMATCH)" },
-            ));
-        }
-        if let Some(fanout) = step.presence_fanout {
-            out.push_str(&format!(
-                "  M={:<4} presence fan-out: n={} p50={:.1}ms p90={:.1}ms max={:.1}ms\n",
-                step.sessions_per_body.unwrap_or(0),
-                fanout.count,
-                fanout.p50_ms,
-                fanout.p90_ms,
-                fanout.max_ms,
-            ));
-        }
-        if let Some(roster_read) = step.roster_read {
-            out.push_str(&format!(
-                "  M={:<4} roster read: n={} p50={:.1}ms p90={:.1}ms max={:.1}ms\n",
-                step.sessions_per_body.unwrap_or(0),
-                roster_read.count,
-                roster_read.p50_ms,
-                roster_read.p90_ms,
-                roster_read.max_ms,
+                "    t={:>6.1}s rss={} threads={}\n",
+                point.elapsed_s,
+                opt_f(point.rss_mib, "MiB"),
+                opt_u(point.threads),
             ));
         }
     }
