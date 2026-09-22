@@ -84,8 +84,10 @@ pub fn sibling_bin(name: &str) -> Res<PathBuf> {
         return Ok(candidate);
     }
     Err(format!(
-        "could not find `{name}` next to this binary ({}) — build the workspace \
-         (`cargo build --workspace`) or pass an explicit path",
+        "could not find `{name}` next to this binary ({}) — build the whole \
+         workspace into one target dir (`cargo build --workspace --release`, with \
+         CARGO_TARGET_DIR pointing at a warm one if you have it) or pass an explicit \
+         path (`--holler-bin` / `--stub-acp-bin`); see docs/testing.md \"Building it\"",
         dir.display()
     )
     .into())

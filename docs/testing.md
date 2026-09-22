@@ -152,12 +152,28 @@ These run the *real* `holler` CLI (in the given state dir) and parse its `--json
 
 The harness above answers *does it work*. The load harness — the `holler-load-test` binary in [`crates/holler-load-test`](../crates/holler-load-test) (issue [#369](https://github.com/Performant-Labs/holler/issues/369)) — answers *what does it cost*, in numbers.
 
-It exists as a purpose-built binary rather than a third-party tool for the same reason `stub-acp` does: Holler's wire is JSON-RPC 2.0 over a WebSocket ([ADR 0004](adr/ADR-0004.md)), not HTTP REST, and k6/wrk/vegeta/Locust cannot speak it at all. It is built by `cargo build --workspace` alongside `holler` and `stub-acp`, and finds those two binaries beside itself (override with `--holler-bin` / `--stub-acp-bin`).
+It exists as a purpose-built binary rather than a third-party tool for the same reason `stub-acp` does: Holler's wire is JSON-RPC 2.0 over a WebSocket ([ADR 0004](adr/ADR-0004.md)), not HTTP REST, and k6/wrk/vegeta/Locust cannot speak it at all. It drives two other binaries, `holler` and `stub-acp`, and by default finds them beside itself in the same `target/<profile>/` directory (override with `--holler-bin` / `--stub-acp-bin`).
+
+### Building it: point at a warm target dir
+
+What's expensive is compiling the third-party dependency graph, not Holler's own crates. That graph includes `aws-lc-sys`'s hundreds of C files, pulled in through `rustls`. A new `git worktree` starts with an empty `target/`, so a plain workspace build there compiles all of it from zero. That can take hours on a loaded machine.
+
+So reuse a target dir that already has a release workspace build in it, such as the main checkout's or another worktree's:
 
 ```bash
-cargo build --workspace --release
-./target/release/holler-load-test --scenario connection-scale --ramp 1,50,200 --json-out report.json
+CARGO_TARGET_DIR=/path/to/warm/target cargo build --workspace --release
+/path/to/warm/target/release/holler-load-test --scenario connection-scale --ramp 1,50,200 --json-out report.json
 ```
+
+Against a warm dir, this recompiles only Holler's own workspace crates. Measured: 17 seconds, with zero third-party dependencies rebuilt. `holler` and `stub-acp` are rebuilt from your own source in the same pass, so they always match what you're measuring, and the harness finds them next to itself by default. Use `--holler-bin` / `--stub-acp-bin` only to point at binaries elsewhere. A Homebrew-installed `holler` can lag `main`, so don't substitute it unless you've confirmed it matches your source.
+
+**Keep `--workspace`. Don't narrow it to `-p holler-load-test`.** Cargo unifies dependency features across the packages you select. A `--workspace` build compiles `rustls` with `aws_lc_rs`, `logging`, and `tls12`, `tokio` with `fs`, and `serde_json` with `preserve_order` and `raw_value`. A `-p holler-load-test` build compiles them with a smaller feature set. Different features mean different fingerprints, so a warm dir built with `--workspace` has nothing a `-p holler-load-test` build can reuse, and `tokio`, `rustls`, and everything downstream recompile from scratch.
+
+With no warm target dir anywhere, `cargo build --workspace --release` without `CARGO_TARGET_DIR` is the from-scratch fallback. Budget for the full first build.
+
+Two builds sharing one `CARGO_TARGET_DIR` serialize on cargo's build lock. That's safe, but concurrent agents building in the same target dir will wait on each other.
+
+### What a run reports
 
 Every run prints a human table to stdout and, with `--json-out`, writes the same measurements as JSON. It starts a real `holler hub serve` on a free loopback port (or drives an existing one via `--hub-url` + `--hub-state`), and samples that hub process's own RSS / thread count / CPU (`ps` on both platforms, `/proc` for the Linux-only fd count — see `src/proc.rs` for why CPU is a delta, never `ps %cpu`).
 
