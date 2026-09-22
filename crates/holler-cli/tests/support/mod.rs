@@ -714,6 +714,15 @@ impl Drop for Stub {
 /// A running body subprocess.
 pub struct Body {
     child: Child,
+    /// Set once [`Body::stop`] has torn the process down. The `Drop` impl
+    /// re-runs a hard `kill_tree` if a test lets the `Body` fall out of scope
+    /// *without* calling `stop` (a test that panics or returns early between
+    /// spawning the body and reaching its own `stop(...)` call). Without this,
+    /// dropping the `Child` handle would orphan the body process (reparented
+    /// to init) — and, because the body spawns its agent (`stub-acp`) as a
+    /// child in the *same* process group, orphan that too. Mirrors [`Hub`]'s
+    /// identical `stopped` flag / `Drop` pair.
+    stopped: bool,
 }
 
 impl Body {
@@ -740,7 +749,10 @@ impl Body {
             .stderr(Stdio::null());
         make_own_process_group(&mut cmd);
         let child = cmd.spawn().expect("spawn `holler body run`");
-        Body { child }
+        Body {
+            child,
+            stopped: false,
+        }
     }
 
     /// A mutable handle to the body child, for tests that need to
@@ -753,12 +765,29 @@ impl Body {
 
     /// Detach the body from its hub and wait for it to exit; if it is still up
     /// after `timeout`, `kill_tree` it.
-    pub fn stop(self, state: &StateDir, timeout: Duration) {
-        let mut child = self.child;
+    ///
+    /// Flips `stopped` *before* tearing down so that the `Drop` impl that runs
+    /// when `self` is dropped at the end of this function is a no-op (the
+    /// child is already reaped) — the same pattern as [`Hub::stop`].
+    pub fn stop(mut self, state: &StateDir, timeout: Duration) {
+        self.stopped = true;
         // Graceful: ask the body to detach, then wait, then hard-kill the tree.
         let _ = holler_cmd(state).args(["body", "detach"]).status();
-        wait_for(timeout, || child.try_wait().ok().flatten());
-        kill_tree(&mut child);
+        wait_for(timeout, || self.child.try_wait().ok().flatten());
+        kill_tree(&mut self.child);
+    }
+}
+
+impl Drop for Body {
+    fn drop(&mut self) {
+        // `stop()` flips `stopped` before tearing down; if it's already true
+        // the child was reaped there and there is nothing left to do.
+        // Otherwise (a test let the `Body` drop without calling `stop`, or
+        // panicked) hard-kill the whole tree so no body process — or the
+        // agent it spawned — is ever orphaned.
+        if !self.stopped {
+            kill_tree(&mut self.child);
+        }
     }
 }
 
