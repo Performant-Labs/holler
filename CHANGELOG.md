@@ -77,6 +77,17 @@ fills this file in at release time.
   5,781 mints needed a retry) though the hub's own redeem path does. Documented in
   [`docs/testing.md`](docs/testing.md) ([#373](https://github.com/Performant-Labs/holler/issues/373)).
 
+- Fix (#404): `hub token mint`'s printed `body join` command always suggested `wss://`,
+  even for a loopback `--advertise` (e.g. `127.0.0.1:41807`, exactly what the README's own
+  Quick Start produces on a single machine). The hub only binds plain `ws://` on loopback, so
+  the printed command hung indefinitely on a TLS handshake the hub never answers. Now uses
+  `holler_body::server_address::ServerAddress::is_loopback` to pick `ws://` for a bare loopback
+  advertise host and `wss://` for everything else, matching the body's own `--server` parsing.
+- README Quick Start: adds a real, verified `sessions.toml` (spawn-mode, pointed at `stub-acp`
+  for anyone building from source) instead of only referencing config shape in the abstract, and
+  points at [Harness recipes](README.md#harness-recipes) / [Attach convenience](README.md#attach-convenience)
+  for the other two real paths (a real coding agent; attaching to an already-running session).
+
 ## [0.2.0] - 2026-09-21
 
 **Note:** this section had gone unpopulated since #327 (the release-process

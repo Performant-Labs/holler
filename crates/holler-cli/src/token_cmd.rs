@@ -338,21 +338,45 @@ fn parse_ttl(ttl: &str) -> Option<u64> {
 /// and this function printed it unchanged as `--server io.tail26a498.ts.net`,
 /// a value `server_address::parse` fail-closed *refuses* (no scheme is not
 /// `ws://`/`wss://`; the checkpoint's own text anticipated only the
-/// `ws://` failure mode, not this stricter one). Off-loopback addresses are
-/// always `wss://` per ADR 0002/docs §3, so a persisted advertise value with
-/// no scheme already present gets one prepended here, at the one place that
-/// turns it into a URL a body actually dials — `--advertise`'s own
+/// `ws://` failure mode, not this stricter one). A persisted advertise value
+/// with no scheme already present gets one prepended here, at the one place
+/// that turns it into a URL a body actually dials — `--advertise`'s own
 /// persistence (`serve.rs`) and its read-only echo in `hub status`
 /// (`control_server.rs`) are left as the raw host[:port] the operator typed,
 /// since only this join line needs to be a valid `body join --server` value.
+///
+/// Real-usage finding (this repo's own README Quick Start, tried end to end
+/// 2026-09-22): `--advertise <this-machine's-address>`, followed verbatim
+/// for the common loopback case (`--advertise 127.0.0.1:41807`), used to
+/// always get `wss://` — the off-loopback scheme (ADR 0006) — even though
+/// the hub itself only ever binds plain `ws://` on loopback with no TLS in
+/// front (ADR 0006 point 1). `body join --server wss://127.0.0.1:...`
+/// against that hub does not fail; it hangs indefinitely attempting a TLS
+/// handshake against a plaintext listener. The scheme is now chosen by
+/// [`holler_body::server_address::ServerAddress::is_loopback`] on the
+/// advertise host — the same loopback/off-loopback line the body's own
+/// `--server` parsing enforces — so a bare loopback host gets `ws://` and
+/// every off-loopback host keeps `wss://`, unchanged from before.
 fn join_command(state: &holler_hub::state::HubState, token_id: &str, secret: &str, hub_pubkey: &str) -> String {
     let server = std::fs::read_to_string(holler_hub::state::advertise_path(state))
         .ok()
         .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
         .and_then(|v| v.get("advertise").and_then(|a| a.as_str()).map(String::from))
-        .map(|adv| if adv.contains("://") { adv } else { format!("wss://{adv}") })
+        .map(|adv| if adv.contains("://") { adv } else { format!("{}://{adv}", scheme_for(&adv)) })
         .unwrap_or_else(|| "ws://127.0.0.1:41807".into());
     format!("holler body join --server {server} --token {token_id}:{secret} --hub-key {hub_pubkey}")
+}
+
+/// `ws` for a bare (schemeless) advertise host that resolves to loopback,
+/// `wss` for everything else — parsed by prefixing `ws://` first only to
+/// reuse [`holler_body::server_address::ServerAddress`]'s existing
+/// host-parsing and `is_loopback` check; the scheme this returns, not that
+/// placeholder prefix, is what actually gets used.
+fn scheme_for(bare_host: &str) -> &'static str {
+    match holler_body::server_address::parse(&format!("ws://{bare_host}")) {
+        Ok(addr) if addr.is_loopback() => "ws",
+        _ => "wss",
+    }
 }
 
 #[cfg(test)]
@@ -404,5 +428,21 @@ mod tests {
         holler_hub::state::ensure_dirs(&state).expect("ensure_dirs");
         let cmd = join_command(&state, "tok_1", "secret_1", "deadbeef");
         assert!(cmd.contains("--server ws://127.0.0.1:41807"), "expected the loopback default: {cmd}");
+    }
+
+    /// Real-usage regression (README Quick Start, run end to end 2026-09-22):
+    /// a bare loopback advertise host — exactly what `--advertise
+    /// <this-machine's-address>` produces on the common single-machine
+    /// quickstart — must get `ws://`, not `wss://`. The hub only ever binds
+    /// plain `ws://` on loopback (ADR 0006 point 1); a `wss://` join against
+    /// it hangs on a TLS handshake the hub never answers, rather than
+    /// failing fast.
+    #[test]
+    fn bare_loopback_advertise_host_gets_ws_scheme() {
+        for host in ["127.0.0.1:41807", "127.0.0.1", "[::1]:41807", "localhost:41807"] {
+            let (_dir, state) = state_with_advertise(&format!(r#"{{"advertise":{host:?}}}"#));
+            let cmd = join_command(&state, "tok_1", "secret_1", "deadbeef");
+            assert!(cmd.contains(&format!("--server ws://{host}")), "host {host:?}: expected ws://, got: {cmd}");
+        }
     }
 }

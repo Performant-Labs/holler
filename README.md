@@ -87,20 +87,54 @@ holler hub token mint --label my-first-body
 coding agent runs (the **body**), then start it:
 
 ```bash
-holler body join --server wss://<hub-address> --token <token> --hub-key <hub-key>
+holler body join --server <scheme>://<hub-address> --token <token> --hub-key <hub-key>
 holler body run --config sessions.toml
 ```
 
-Back on the hub side, talk to a session:
+`<scheme>` is whatever `token mint`'s printed command already said — `ws://` for a loopback
+`--advertise` (the single-machine case below), `wss://` for anything else (ADR 0006). Back on
+the hub side, talk to a session:
 
 ```bash
 holler roster                          # see what's connected
 holler say <session-name> "hello"      # one-shot prompt, print the reply
 ```
 
+### A real, working `sessions.toml`
+
 `sessions.toml`'s shape — what harness each session runs, spawn vs. attach mode — is config, not
-code (see [Harness recipes](#harness-recipes) below and [ADR 0012](docs/adr/ADR-0012.md)). For a
-single local orchestrator plus one or more remote attach-mode sessions in one terminal
+code ([ADR 0012](docs/adr/ADR-0012.md)). Three real starting points, depending on how you got
+`holler` and what you're pointing it at:
+
+**Built from source** (`cargo build --workspace`, not the Homebrew/`install.sh` binary alone):
+the workspace also builds `stub-acp`, a real, deterministic test agent — no model, no API key,
+no network — which is the fastest way to see a session actually run:
+
+```toml
+[[session]]
+name = "hello"
+harness = "opencode"
+command = ["/absolute/path/to/target/release/stub-acp"]
+```
+
+```bash
+holler roster
+holler say my-first-body/hello "hello"
+# -> a real reply, e.g. "stub chunk 0stub chunk 1stub chunk 2"
+```
+
+(Verified against a real `hub serve` → `token mint` → `body join` → `body run` → `say` run,
+2026-09-22.)
+
+**A real coding agent**, on any install: see [Harness recipes](#harness-recipes) below for the
+`command` shape (e.g. the `claude`/ACP-bridge recipe — currently blocked, see that section's own
+note) and how `harness`/`command` map to a real subprocess.
+
+**Attaching to a session you already have running** (no `sessions.toml` authored by hand at
+all): see [Attach convenience](#attach-convenience) below — `holler body attach init` writes the
+`[[session]]` row for you from a live OpenCode endpoint.
+
+For a single local orchestrator plus one or more remote attach-mode sessions in one terminal
 workspace, see [Set up a Herdr workspace with an agent](#set-up-a-herdr-workspace-with-an-agent).
 
 ## Documentation
