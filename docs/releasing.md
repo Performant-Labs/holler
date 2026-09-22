@@ -62,23 +62,52 @@ failure doesn't hold this release up. The one hard requirement is that an overri
 
 ## Which platforms does a release target?
 
-**Don't ship a binary for a platform CI never ran the suite on.** Only `ubuntu-latest` and
-`macos-latest` qualify today:
+**Don't ship a binary for a platform CI/the release process never actually ran and verified a
+build on.** Four platform rows today, three of them shipped:
 
-| Platform | CI-tested | Released | Status |
-| --- | --- | --- | --- |
-| `ubuntu-latest` | Yes | Yes | Full support |
-| `macos-latest` | Yes | Yes | Full support |
-| Windows | No | No | Excluded from CI (ADR 0002 retires Windows from the CI matrix). [#308](https://github.com/Performant-Labs/holler/issues/308) fixed the instance-lock Unix-only compile break but found the real blocker to be the control-socket transport (Unix domain sockets end to end) — tracked in [#378](https://github.com/Performant-Labs/holler/issues/378); add a row here (and to CI's matrix) once that's resolved |
+| Platform | Arch | CI-tested | Released | Status |
+| --- | --- | --- | --- | --- |
+| `ubuntu-latest` | x86_64 | Yes (`ci.yml`'s matrix) | Yes | Full support |
+| `macos-latest` | Apple Silicon (arm64) | Yes (`ci.yml`'s matrix) | Yes | Full support |
+| `ubuntu-24.04-arm` | Linux arm64 (aarch64) | No — `ci.yml`'s matrix doesn't cover it; verified via the dedicated `release-arm64.yml` workflow's own real-binary check instead | Yes | Full support — real binary, built and `--version`-verified on real hosted arm64 Linux hardware (see below), just not part of `ci.yml`'s test/lint/clippy matrix |
+| Windows | x86_64/arm64 | No | No | Excluded from CI (ADR 0002 retires Windows from the CI matrix). [#308](https://github.com/Performant-Labs/holler/issues/308) fixed the instance-lock Unix-only compile break but found the real blocker to be the control-socket transport (Unix domain sockets end to end) — tracked in [#378](https://github.com/Performant-Labs/holler/issues/378); add a row here (and to CI's matrix) once that's resolved |
 
 This table is the one place platform status is recorded — the checklist and any other doc
 mentioning target platforms should link here rather than repeat/restate it.
 
+**Linux arm64 is real, not aspirational.** GitHub now offers hosted Linux ARM64 runners
+(`ubuntu-24.04-arm`, also `ubuntu-22.04-arm`/`ubuntu-26.04-arm`), free for public repositories
+exactly like `ubuntu-latest`/`macos-latest` — `holler` is public, so this costs nothing extra.
+`.github/workflows/release-arm64.yml` (`workflow_dispatch`-triggered, matching this doc's own
+"CI proves tests pass, publishing is a separate deliberate act" philosophy) builds
+`cargo build --release -p holler-cli` on that runner, runs the repo's own cheapest real canary
+(`cargo test -p holler-cli --test wire_selftest`) as a sanity check, and verifies
+`./target/release/holler --version` on that same real arm64 machine — satisfying "build on a
+real machine of the target OS/arch, never cross-compile" below even though the machine is a
+GitHub-hosted runner, not a box in this org's own fleet (Build-host/Remote-a are both x86_64, so
+neither can build or run an aarch64 Linux binary). It is a separate, narrower workflow from
+`ci.yml` rather than an added matrix entry there, because `ci.yml`'s steps are all `shell: pwsh`
+and that should not be assumed to carry over to a new runner image untested; `release-arm64.yml`
+uses plain `bash` throughout.
+
 ## Building for a platform you don't have locally
 
 You're usually cutting a release from one machine (a Mac, say), but the platform table above
-requires a binary for Linux too. For a platform you can't build on locally, the proven recipe is
+requires binaries for Linux too. For a platform you can't build on locally, the proven recipe is
 to **build on a real machine of that OS, never cross-compile**:
+
+**Linux arm64 is the one exception to "SSH to a machine in this org's fleet"** — this org's
+Linux hosts (Build-host, Remote-a) are both x86_64, so neither can build or run an aarch64 Linux
+binary. Instead, dispatch `.github/workflows/release-arm64.yml`
+(`gh workflow run release-arm64.yml --repo Performant-Labs/holler`), wait for it to complete
+(`gh run watch` or poll `gh run list --workflow release-arm64.yml`), and download the
+`holler-ubuntu-arm64` artifact it produces (`gh run download <run-id>`). That workflow already
+does steps 4-5 below (build + on-machine `--version`/`file` verification) on real, hosted
+`ubuntu-24.04-arm` hardware — a real arm64 Linux machine, just not one in this org's own fleet.
+Skip straight to step 6 (scp/copy the verified artifact into wherever you're assembling the
+release) for this platform.
+
+For macOS and Linux x86_64, the manual SSH recipe still applies:
 
 1. SSH to a real machine running that OS — this org's Build-host or Remote-a for Linux. Doesn't need
    to be dedicated to this, just needs to exist and be reachable.
@@ -109,10 +138,11 @@ Two tiers — the first is required, the second is a deliberate extra:
    summarizing everything merged since the last tag (Keep a Changelog format, hand-written per
    release — not generated from commit messages).
 2. **A GitHub Release**, with one binary attached per platform, named `holler-<os>`
-   (`holler-ubuntu-latest`, `holler-macos-latest`) — built via `cargo build --release` on each
-   platform, from the exact tagged commit, then renamed to that convention before attaching. This
-   is a **public, outward-facing artifact** — confirm with whoever's driving the release before
-   publishing it, every time; it's not something to automate past without a look.
+   (`holler-ubuntu-latest`, `holler-macos-latest`, `holler-ubuntu-arm64`) — built via
+   `cargo build --release` on each platform, from the exact tagged commit, then renamed to that
+   convention before attaching. This is a **public, outward-facing artifact** — confirm with
+   whoever's driving the release before publishing it, every time; it's not something to
+   automate past without a look.
 
 ## CHANGELOG entry structure
 

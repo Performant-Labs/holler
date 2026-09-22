@@ -66,21 +66,35 @@ One PR, one merge.
 ## Tag & build
 
 Target platforms: see [`docs/releasing.md`](releasing.md)'s platform table (currently
-`ubuntu-latest` + `macos-latest`; no Windows binary — [#308](https://github.com/Performant-Labs/holler/issues/308) fixed the instance-lock Unix-only compile break but explicitly deferred the real blocker (the control-socket transport is Unix domain sockets end to end); tracked separately in [#378](https://github.com/Performant-Labs/holler/issues/378)).
+`ubuntu-latest` (x86_64), `macos-latest` (Apple Silicon), and `ubuntu-24.04-arm` (Linux arm64);
+no Windows binary — [#308](https://github.com/Performant-Labs/holler/issues/308) fixed the
+instance-lock Unix-only compile break but explicitly deferred the real blocker (the
+control-socket transport is Unix domain sockets end to end); tracked separately in
+[#378](https://github.com/Performant-Labs/holler/issues/378)).
 
 - [ ] 14. **Tag the bump commit**
   - `git tag -s vX.Y.Z -m "vX.Y.Z"` (signed, annotated)
 - [ ] 15. **Push the tag**
   - `git push origin vX.Y.Z`
 - [ ] 16. **Build the release binaries**
-  - `cargo build --release` on each target platform — build on a real machine of that OS
-    (Build-host/Remote-a for Linux), never cross-compile
+  - macOS + Linux x86_64: `cargo build --release` on each target platform — build on a real
+    machine of that OS (Build-host/Remote-a for Linux), never cross-compile
   - No local machine for a platform? See [`docs/releasing.md`](releasing.md)'s "Building for a
     platform you don't have locally" (the real recipe: SSH to a real machine of that OS, clone
     at the exact tag, build, verify, scp back)
-- [ ] 17. **Verify the local build's version, then rename** before attaching anything
-  - `./target/release/holler --version` actually reports `X.Y.Z`
-  - Rename each binary to `holler-<os>` (`holler-ubuntu-latest`, `holler-macos-latest`)
+  - **Linux arm64**: this org's Linux fleet (Build-host/Remote-a) is x86_64-only, so there's no SSH
+    target for this one. Instead, dispatch the `release-arm64.yml` GitHub Actions workflow
+    (`gh workflow run release-arm64.yml --repo Performant-Labs/holler`) — it builds and
+    `--version`-verifies the binary on a real, hosted `ubuntu-24.04-arm` runner, which satisfies
+    "real machine of that OS/arch" even though it isn't a machine in this org's own fleet.
+    Poll it to completion (`gh run watch` or `gh run list --workflow release-arm64.yml`), then
+    download the artifact: `gh run download <run-id> -n holler-ubuntu-arm64`
+- [ ] 17. **Verify each build's version, then rename** before attaching anything
+  - macOS/Linux x86_64: `./target/release/holler --version` actually reports `X.Y.Z`, then
+    rename to `holler-<os>` (`holler-ubuntu-latest`, `holler-macos-latest`)
+  - Linux arm64: the `release-arm64.yml` run already verified `--version` and `file` (real
+    ELF aarch64 binary) on-runner as part of the workflow; the downloaded artifact is already
+    named `holler-ubuntu-arm64`, no rename needed
 
 ## Publish (confirm before doing — public, outward-facing)
 
@@ -91,7 +105,7 @@ Target platforms: see [`docs/releasing.md`](releasing.md)'s platform table (curr
   - Pull just that section into a standalone file, e.g. `/tmp/release-notes-vX.Y.Z.md` — no new content, this is extraction only
   - Read it once as a stranger would: does it stand alone without needing the rest of the CHANGELOG for context?
 - [ ] 20. **Create the GitHub Release from the tag**
-  - `gh release create vX.Y.Z holler-ubuntu-latest holler-macos-latest --notes-file /tmp/release-notes-vX.Y.Z.md`
+  - `gh release create vX.Y.Z holler-ubuntu-latest holler-macos-latest holler-ubuntu-arm64 --notes-file /tmp/release-notes-vX.Y.Z.md`
 - [ ] 21. **Review the published Release page**
   - Binaries present, notes render correctly, known-issues section visible
 
@@ -102,8 +116,13 @@ binary passing steps 16-17 is not evidence the uploaded one works.
 
 - [ ] 22. **Download and run the actual published binary**
   - `gh release download vX.Y.Z` into a clean directory
-  - `./holler-<os> --version` against *that* downloaded file, for each platform
+  - `./holler-<os> --version` against *that* downloaded file, for macOS and Linux x86_64
   - Confirms the upload isn't corrupted, is the right architecture, has its executable bit set, and actually reports `X.Y.Z`
+  - Linux arm64 (`holler-ubuntu-arm64`): this repo's fleet has no persistent arm64 Linux machine
+    to execute it on after the CI runner is gone, so `--version` can't be re-run here. Instead
+    confirm `file holler-ubuntu-arm64` reports a real `ELF 64-bit ... ARM aarch64` binary (proves
+    architecture and that the upload isn't corrupted/truncated) — the `--version` check for this
+    platform already happened for real on the `release-arm64.yml` runner in step 16
 - [ ] 23. **Bump the Homebrew tap**
   - In a checkout of [Performant-Labs/homebrew-tap](https://github.com/Performant-Labs/homebrew-tap): `scripts/update-formula.sh vX.Y.Z && git push`
   - Downloads the real published assets and computes real sha256s — never hand-copy checksums
