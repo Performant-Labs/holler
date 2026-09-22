@@ -277,3 +277,61 @@ fn list_json_shape() {
     assert!(obj.get("secret").is_none(), "there is no raw `secret` key");
     assert!(obj.get("credential").is_none(), "there is no raw `credential` key (issue #323: none is ever minted)");
 }
+
+/// **Regression (issue #370's load baseline).** The hub's own live paths must
+/// not fail each other on the token store's `flock`.
+///
+/// `bound_record` (twice per `circuit/authenticate`) and `touch_last_seen`
+/// (once per presence heartbeat) both run *inside the hub*, on per-connection
+/// tasks, so N connected bodies contend for this one lock continuously. Both
+/// used the non-retrying `acquire_lock`, whose contention outcome is an
+/// `Err` — which `circuit/authenticate` maps to `-32002 unauthenticated`, and
+/// which the lockout then counts as a *failed auth*. The issue #370 harness
+/// (`crates/holler-load-test`) measured the result directly: 3 of 50 and 7 of
+/// 200 concurrent connections completed the handshake, the rest refused with
+/// the lock's own "another holler process holds the token lock; retry" text,
+/// and the spurious failures cascaded into an IP lockout. Issue #301 had
+/// already fixed exactly this defect class at `redeem`'s call site; these are
+/// its two siblings.
+///
+/// The assertion is specifically that *no* call fails for lock contention —
+/// not that they are fast. A retry that waits is correct; an error is not.
+#[test]
+fn concurrent_live_path_reads_never_lose_the_lock_race() {
+    let dir = Tdir::new();
+    let state = prep(&dir);
+    let minted = token::mint("conc", 3600, &state).expect("mint");
+    let _ = token::redeem(&minted.secret, "myhost", &pubkey(9), &x25519_pubkey(9), &state).expect("redeem");
+    let token_id = minted.record.token_id;
+
+    // Deliberately more threads than cores: the failure this pins is a lost
+    // `try_lock` race, which needs real simultaneity to reproduce.
+    const THREADS: usize = 24;
+    const ROUNDS: usize = 8;
+    let errors = std::sync::Mutex::new(Vec::<String>::new());
+    std::thread::scope(|scope| {
+        for _ in 0..THREADS {
+            scope.spawn(|| {
+                for _ in 0..ROUNDS {
+                    if let Err(e) = token::bound_record(&token_id, &state) {
+                        errors.lock().expect("errors lock").push(format!("bound_record: {}", e.message));
+                    }
+                    if let Err(e) = token::touch_last_seen(&token_id, &state) {
+                        errors.lock().expect("errors lock").push(format!("touch_last_seen: {}", e.message));
+                    }
+                }
+            });
+        }
+    });
+
+    let errors = errors.lock().expect("errors lock");
+    assert!(
+        errors.is_empty(),
+        "{} of {} live-path token-store calls failed under concurrency — \
+         a bound, live token must never read as unavailable because a sibling \
+         connection held the lock: {:?}",
+        errors.len(),
+        THREADS * ROUNDS * 2,
+        errors.iter().take(5).collect::<Vec<_>>(),
+    );
+}
