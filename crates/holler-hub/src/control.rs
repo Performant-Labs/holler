@@ -166,6 +166,19 @@ pub fn roster(all: bool, prefix: Option<&str>) -> Result<serde_json::Value, Cont
     exchange("b-roster", "control/roster", Some(serde_json::json!({ "all": all, "prefix": prefix })))
 }
 
+/// [`roster`], but against an explicit state root rather than the ambient
+/// `HOLLER_STATE_DIR` — the same reason [`test_drop_at`] takes one: a caller
+/// that already knows exactly which hub it means (issue #371's
+/// `holler-load-test session-scale` presence-propagation probe) must not
+/// race a process-wide env var by mutating it, and paying one Unix-socket
+/// round trip per poll instead of one `holler roster --json` subprocess per
+/// poll is what makes a sub-100ms propagation window observable at all.
+pub fn roster_at(state_root: &std::path::Path, all: bool, prefix: Option<&str>) -> Result<serde_json::Value, ControlError> {
+    let path = control_sock_path(&HubState::from_root(state_root.to_path_buf()));
+    let params = serde_json::json!({ "all": all, "prefix": prefix });
+    send_over(&path, "b-roster", "control/roster", Some(params), CLIENT_TIMEOUT)
+}
+
 /// Issue #192's `control/test_drop` test hook: ask the hub whose state dir
 /// is `state_root` to forcibly end `token`'s live connection, simulating an
 /// abrupt network drop. Takes an explicit state root (not the ambient

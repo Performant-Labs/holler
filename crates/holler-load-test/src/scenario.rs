@@ -114,6 +114,12 @@ pub async fn run(cfg: &Config, hub: &Hub, report: &mut Report) -> Res<()> {
             rss_delta_per_client_kib,
             threads_delta,
             step_seconds: step_started.elapsed().as_secs_f64(),
+            sessions_per_body: None,
+            sessions_expected: None,
+            sessions_actual: None,
+            sessions_match: None,
+            presence_fanout: None,
+            roster_read: None,
         });
 
         // Tear this rung down completely before the next one: #370's ramp is
@@ -252,6 +258,12 @@ pub async fn run_body_fleet(cfg: &Config, hub: &Hub, report: &mut Report) -> Res
         rss_delta_per_client_kib,
         threads_delta,
         step_seconds: step_started.elapsed().as_secs_f64(),
+        sessions_per_body: None,
+        sessions_expected: None,
+        sessions_actual: None,
+        sessions_match: None,
+        presence_fanout: None,
+        roster_read: None,
     });
 
     for member in members {
@@ -263,7 +275,11 @@ pub async fn run_body_fleet(cfg: &Config, hub: &Hub, report: &mut Report) -> Res
 /// Poll `hub status --json` until `clients` reaches `want` (or the budget
 /// runs out). Used between rungs so a rung starts from a genuinely empty hub
 /// rather than from whatever the previous teardown had not finished reaping.
-async fn wait_for_client_count(hub: &Hub, want: u64, budget: Duration) {
+///
+/// `pub(crate)`: `session_scale.rs` (#371) reuses this exact wait rather than
+/// re-implementing the same poll, for both "N bodies have registered" and
+/// "the hub is empty again before the next rung".
+pub(crate) async fn wait_for_client_count(hub: &Hub, want: u64, budget: Duration) {
     let deadline = Instant::now() + budget;
     loop {
         if hub.client_count().ok() == Some(want) {
