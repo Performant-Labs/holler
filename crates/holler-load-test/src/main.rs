@@ -189,6 +189,9 @@ struct Cli {
     #[arg(long, default_value_t = 60)]
     dead_backend_window_secs: u64,
 
+    #[command(flatten)]
+    churn: ChurnArgs,
+
     /// Internal: serve the fake OpenCode HTTP server, print its endpoint, and
     /// run until killed. The churn scenario spawns this; not for direct use.
     #[arg(long, hide = true)]
@@ -222,6 +225,39 @@ struct Cli {
     json_out: Option<PathBuf>,
 }
 
+/// `churn` scenario flags added for Run #2 of #373, grouped so `Cli` keeps
+/// within the workspace's bools-per-struct lint.
+#[derive(clap::Args, Debug)]
+struct ChurnArgs {
+    /// `churn`: teardown modes to rotate through, one per cycle, comma-separated
+    /// (graceful, crash, hang, restart). The default reproduces Run #1.
+    #[arg(long, value_enum, value_delimiter = ',', default_value = "graceful")]
+    teardown_modes: Vec<churn::TeardownMode>,
+
+    /// `churn`: tear each wave's bodies down all at once rather than one by one.
+    #[arg(long)]
+    parallel_teardown: bool,
+
+    /// `churn`: keep one extra body up for the whole run and send it `say`
+    /// traffic while each wave is torn down.
+    #[arg(long)]
+    resident: bool,
+
+    /// `churn`: after the run, try to re-mint a gracefully detached body's label.
+    #[arg(long)]
+    label_reuse_probe: bool,
+
+    /// `churn`: run cycles until this many seconds have passed, instead of a
+    /// fixed `--churn-cycles` count.
+    #[arg(long)]
+    churn_secs: Option<u64>,
+
+    /// `churn`, `hang` mode: how long (seconds) to wait for the hub to clean up
+    /// SIGSTOPped bodies on its own before killing them.
+    #[arg(long, default_value_t = 30)]
+    hang_budget_secs: u64,
+}
+
 /// The resolved run configuration the scenarios read.
 pub struct Config {
     pub ramp: Vec<usize>,
@@ -241,6 +277,12 @@ pub struct Config {
     pub rss_sample_interval: Duration,
     pub churn_cycles: usize,
     pub dead_backend_window: Duration,
+    pub teardown_modes: Vec<churn::TeardownMode>,
+    pub parallel_teardown: bool,
+    pub resident: bool,
+    pub label_reuse_probe: bool,
+    pub churn_secs: Option<Duration>,
+    pub hang_budget: Duration,
 }
 
 fn main() -> Res<()> {
@@ -277,6 +319,12 @@ fn main() -> Res<()> {
         rss_sample_interval: Duration::from_millis(cli.rss_sample_ms),
         churn_cycles: cli.churn_cycles,
         dead_backend_window: Duration::from_secs(cli.dead_backend_window_secs),
+        teardown_modes: cli.churn.teardown_modes,
+        parallel_teardown: cli.churn.parallel_teardown,
+        resident: cli.churn.resident,
+        label_reuse_probe: cli.churn.label_reuse_probe,
+        churn_secs: cli.churn.churn_secs.map(Duration::from_secs),
+        hang_budget: Duration::from_secs(cli.churn.hang_budget_secs),
     };
 
     let hub_env = parse_env(&cli.hub_env)?;
@@ -379,7 +427,16 @@ fn config_json(cfg: &Config, hub_env: &[(String, String)]) -> serde_json::Value 
         "rss_sample_ms": cfg.rss_sample_interval.as_millis() as u64,
         "churn_cycles": cfg.churn_cycles,
         "dead_backend_window_secs": cfg.dead_backend_window.as_secs(),
+        "teardown_modes": cfg.teardown_modes.iter().map(|m| m.name()).collect::<Vec<_>>(),
+        "parallel_teardown": cfg.parallel_teardown,
+        "resident": cfg.resident,
+        "label_reuse_probe": cfg.label_reuse_probe,
+        "churn_secs": cfg.churn_secs.map(|d| d.as_secs()),
+        "hang_budget_secs": cfg.hang_budget.as_secs(),
         "hub_env": hub_env.iter().map(|(k, v)| format!("{k}={v}")).collect::<Vec<_>>(),
+        // HOLLER_* vars the harness itself was run with; the hub and every body
+        // it spawns inherit them (e.g. a compressed heartbeat + roster timers).
+        "inherited_env": std::env::vars().filter(|(k, _)| k.starts_with("HOLLER_")).map(|(k, v)| format!("{k}={v}")).collect::<Vec<_>>(),
     })
 }
 

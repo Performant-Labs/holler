@@ -287,6 +287,19 @@ No Holler defect and no harness bug surfaced while building or running this scen
 
 **Churn cycles.** `--churn-cycles` times (default 20), it starts `--bodies` real `holler body run` processes (default 3, each hosting `--sessions-per-body` spawn-mode `stub-acp` sessions, default 1), waits until `hub status --json` reports every body and session, drives one real `say` per session, then detaches and kills every body. After each cycle, `clients` and `sessions` must return to their pre-run baseline within 30s. That's #373's correctness invariant ("no leaked `client_id`/session/token state"), so a cycle that misses it aborts the run with a non-zero exit rather than being reported as a slow number.
 
+**Teardown modes** (`--teardown-modes`, rotated one per cycle; the default, `graceful`, is what Run #1 used):
+
+| mode | how the wave dies | invariant |
+|---|---|---|
+| `graceful` | `body detach`, then SIGKILL of the process tree | hub back to baseline (hard) |
+| `crash` | SIGKILL, no detach: the body never says goodbye | hub back to baseline (hard) |
+| `hang` | SIGSTOP: sockets stay open, the body goes silent; then SIGKILL | self-cleanup within `--hang-budget-secs` is *recorded*, not required; after the SIGKILL, back to baseline is hard |
+| `restart` | crash, wait for the hub to notice, then `body run` again on the same saved credential | rejoin, same `client_id`, exactly one connected roster row per session (all hard) |
+
+Also: `--parallel-teardown` (tear a wave down all at once), `--resident` (one extra body stays up for the whole run and takes `say` traffic while each wave is torn down, so churn happens next to live traffic), `--label-reuse-probe` (after the run, try re-minting a gracefully detached body's label), `--churn-secs` (run for a wall-clock duration instead of a fixed cycle count), and a per-cycle series of hub RSS, threads, roster rows and minted credential records.
+
+**Compressing the timers.** The roster's thresholds are overridable (`HOLLER_ROSTER_RECONNECT_MS`, `_GONE_MS`, `_PRUNE_MS`, `_SWEEP_MS`), which makes `hang` and pruning observable in minutes rather than hours. **Compress the body's heartbeat in the same proportion** (`HOLLER_HEARTBEAT_INTERVAL_MS`, default 15s): the hub ages rows by when it last heard from the body, so a reconnect threshold below the heartbeat interval sends *healthy* rows to `reconnecting` between beats. A first Run #2 attempt did exactly that (hub timers 5s/10s, heartbeat left at 15s) and produced two false positives — a "detected" dead backend and "disturbed" resident sessions — that vanished once the heartbeat was compressed to match. Production's ratio is 15s : 45s : 180s : 360s; divide all four by the same factor. The harness's hub and every body it spawns inherit its own environment, so exporting these before the run is enough, and the JSON report records them under `config.inherited_env`.
+
 **Dead-backend detection.** This reproduces the 2026-09-21 incident #373 cites: an attach-mode backend (`opencode`) killed outside Holler's control while `holler roster` kept reporting its session `connected`/`idle`. The harness re-runs itself with the hidden `--fake-opencode` flag, which serves the same fake OpenCode HTTP server `holler-body`'s attach tests use, as a real separate process. It attaches a body session to that process, `SIGKILL`s it, and polls the roster (`--dead-backend-window-secs`, default 60) for the session to stop showing `conn_state=connected` with `state` idle or working. Not detecting it within the window is recorded as a result, not treated as a harness failure, since that's the bug being measured.
 
 Measured 2026-09-22 on macOS 26 / aarch64, 10 logical cores, release build, loopback, defaults (`--churn-cycles 20 --bodies 3 --sessions-per-body 1 --dead-backend-window-secs 60`), 93s wall clock. **This is a baseline, not a threshold.**
@@ -310,6 +323,43 @@ What the numbers say:
 - **RSS rose 3.8 MiB over the run.** That isn't proof of a leak: `gone` roster rows are retained by design until they're pruned 360s after going `gone` (`crates/holler-hub/src/roster.rs`), and this run is shorter than that. A run longer than the prune TTL would tell bounded retention from a real leak.
 
 **Caveats, stated plainly:** timings come from polling, so they're only as precise as the poll interval plus one CLI round trip (tens of ms). Only spawn-mode sessions are churned. The dead-backend probe uses the fake OpenCode server, not a real `opencode`, so it proves the detection gap for any attach backend that dies, not anything specific to OpenCode itself.
+
+#### Run #2: longer, larger, all four teardown modes
+
+Measured 2026-09-22, 11:52 AM MDT, same host, release build. 20 minutes wall clock; 10 bodies × 10 sessions per cycle (100 sessions), the four modes rotating, parallel teardown, a resident body with 10 sessions, and compressed timers (heartbeat 1s, reconnect 3s, gone 12s, prune 24s, sweep 1s — production's ratios ÷15).
+
+```
+HOLLER_HEARTBEAT_INTERVAL_MS=1000 HOLLER_ROSTER_RECONNECT_MS=3000 HOLLER_ROSTER_GONE_MS=12000 \
+HOLLER_ROSTER_PRUNE_MS=24000 HOLLER_ROSTER_SWEEP_MS=1000 HOLLER_STALL_MS=20000 \
+holler-load-test --scenario churn --bodies 10 --sessions-per-body 10 \
+  --teardown-modes graceful,crash,hang,restart --parallel-teardown --resident --label-reuse-probe \
+  --churn-secs 1200 --hang-budget-secs 30 --dead-backend-window-secs 60
+```
+
+**578 cycles. 57,800 `say` calls, zero failures. 578/578 returned the hub to baseline.**
+
+| | n | p50 | p99 | max |
+|---|---:|---:|---:|---:|
+| wave start → hub reports 10 bodies + 100 sessions | 578 | 521.7 ms | 982.7 ms | 1019.0 ms |
+| `say` (one per session per cycle) | 57,800 | 244.1 ms | 342.6 ms | 469.0 ms |
+| killed → hub back to baseline, all modes | 578 | 7.1 ms | 23.2 ms | 27.9 ms |
+| … `crash` / `graceful` / `hang` / `restart` | 145/145/144/144 | 6.7 / 7.6 / 19.8 / 6.7 ms | 9.5 / 15.3 / 26.5 / 8.7 ms | |
+| resident body's `say`, during teardowns | 5,780 | 173.6 ms | 194.8 ms | 252.0 ms |
+| `restart`: respawn → rejoined on the saved credential | 144 | 447.2 ms | 528.7 ms | 533.8 ms |
+
+What it establishes:
+
+- **Cleanup is correct however a body dies.** Crash without detach and SIGKILL-after-hang clean up as fast as a graceful detach (all p50 under 20ms, all p99 under 27ms). #373's invariant held 578 times at 100 sessions per cycle.
+- **Rejoining on a saved credential is clean.** Across 144 restart cycles: `identity changed = 0` (same `client_id`), `ghost/missing rows = 0` (exactly one roster row per session), `not connected = 0`.
+- **A hung body is dropped at the reconnect threshold.** 144/144 hang cycles cleaned up on their own without being killed, p50 2846 ms against a compressed 3s threshold. A single confirming cycle at **production timers** took **45,024 ms**, i.e. exactly the 45s `reconnect` threshold, and 45.02 / 2.85 ≈ 15.8 matches the ÷15 compression. So: a body that goes silent stays counted in `hub status` for ~45s, then drops.
+- **Churn doesn't disturb a live neighbour.** The resident body logged 0 disturbances across 5,780 post-cycle checks, and its `say` p50 (173.6 ms) stayed at the no-contention floor while the churning wave's own 100-way concurrent `say` p50 was 244.1 ms.
+
+Two findings worth acting on:
+
+- **A detached body's label is never freed.** Re-minting a gracefully detached body's label is refused (`label "ch0-0" already in use`), and the store grew to **5,781 credential records** over the run, one per join, none reclaimed. Roster rows *are* bounded — they oscillated around 900–1,710 and never grew monotonically, so pruning works — but the credential store is unbounded under churn. That's the "leaked token state" clause of #373's own metric, and the reason `hub token delete`/`revoke` currently has to be an operator chore.
+- **`hub token mint` doesn't retry under lock contention.** 864 of 5,781 mints (~15%) had to be retried after `another holler process holds the token lock; retry`. The hub's internal redeem path already retries (`acquire_lock_retrying`, `crates/holler-hub/src/token.rs`); the operator-facing `mint` doesn't, so a scripted join racing a busy hub fails and the caller must implement the backoff. The harness now does, and counts the retries.
+
+**Hub RSS is the open question.** It went 7.9 → 102.1 MiB (peak 135.9 MiB) over 578 cycles, rising steeply for the first ~10 minutes and then oscillating roughly 90–113 MiB for the rest. Threads settled at 20 and stayed. With roster rows bounded, the unbounded credential store is the obvious suspect, but this run neither proves a leak nor rules one out: a longer run, or a run holding credential count fixed, would separate "bounded but large" from "still growing".
 
 ### It is not in CI, deliberately
 
