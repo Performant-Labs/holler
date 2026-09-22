@@ -466,3 +466,99 @@ fn hub_caps_without_live_hub_exit_1() {
     assert_eq!(code, 1);
     assert!(stderr.contains("no live holler hub reachable"), "stderr: {stderr}");
 }
+
+// --- issue #368: `hub status`/`caps`/`support`'s own success-path formatting
+// (hub_cmd.rs), never exercised via the real CLI binary against a live hub
+// anywhere else in this suite — every prior "success" test either talked to
+// the raw control socket directly (hub_serve_test.rs's
+// control_status_over_ud_socket), bypassing hub_cmd.rs's own print/format
+// code entirely, or only ever passed --json (query_test.rs's own
+// hub_query_local_status above). hub_cmd.rs's non-json human-readable
+// branches (`status`'s 4-line summary, `caps`'s "hub: N caps known",
+// `support`'s "<feature>: ok"/"not ok") had zero coverage until now.
+
+/// `holler hub status` (no `--json`) against a real live hub prints the
+/// spec's own 4-line human summary, not just a non-empty string.
+#[test]
+fn hub_status_live_human_readable_format() {
+    let state = StateDir::new();
+    let hub = Hub::start(&state);
+    let (code, stdout, stderr) = run(&state, &["hub", "status"]);
+    assert_eq!(code, 0, "stderr: {stderr}");
+    let lines: Vec<&str> = stdout.lines().collect();
+    assert_eq!(lines.len(), 4, "hub {{version}} (protocol 2) / listening / clients / sessions: {stdout:?}");
+    assert!(lines[0].starts_with("hub ") && lines[0].contains("(protocol 2)"), "line 1: {lines:?}");
+    assert!(lines[1].trim_start().starts_with("listening:"), "line 2: {lines:?}");
+    assert!(lines[2].trim_start().starts_with("clients:") && lines[2].contains('0'), "line 3: {lines:?}");
+    assert!(lines[3].trim_start().starts_with("sessions:") && lines[3].contains('0'), "line 4: {lines:?}");
+    hub.stop(Duration::from_secs(5));
+}
+
+/// `holler --json hub status` against a real live hub prints the raw
+/// `StatusDoc` — same document shape `control_status_over_ud_socket`
+/// confirms at the wire level, but this time through the real CLI leaf.
+#[test]
+fn hub_status_live_json() {
+    let state = StateDir::new();
+    let hub = Hub::start(&state);
+    let (code, stdout, stderr) = run(&state, &["--json", "hub", "status"]);
+    assert_eq!(code, 0, "stderr: {stderr}");
+    let doc: Value = serde_json::from_str(&stdout).expect("hub status --json is valid JSON");
+    assert_eq!(doc["role"].as_str(), Some("hub"));
+    assert_eq!(doc["clients"].as_u64(), Some(0));
+    hub.stop(Duration::from_secs(5));
+}
+
+/// `holler hub caps` (no `--json`) against a real live hub prints
+/// `"hub: N caps known"` — `caps`'s success path had no test at all before
+/// this (only the no-live-hub refusal above did).
+#[test]
+fn hub_caps_live_human_readable_format() {
+    let state = StateDir::new();
+    let hub = Hub::start(&state);
+    let (code, stdout, stderr) = run(&state, &["hub", "caps"]);
+    assert_eq!(code, 0, "stderr: {stderr}");
+    let line = stdout.trim_end();
+    assert!(line.starts_with("hub: ") && line.ends_with(" caps known"), "got: {line:?}");
+    let n: u32 = line.trim_start_matches("hub: ").trim_end_matches(" caps known").parse().expect("a number of caps");
+    assert!(n > 0, "a live hub must know at least one cap: {line:?}");
+    hub.stop(Duration::from_secs(5));
+}
+
+/// `holler --json hub caps` against a real live hub — the raw `caps` object,
+/// not just the human count line above.
+#[test]
+fn hub_caps_live_json() {
+    let state = StateDir::new();
+    let hub = Hub::start(&state);
+    let (code, stdout, stderr) = run(&state, &["--json", "hub", "caps"]);
+    assert_eq!(code, 0, "stderr: {stderr}");
+    let doc: Value = serde_json::from_str(&stdout).expect("hub caps --json is valid JSON");
+    let caps = doc["caps"].as_object().expect("caps is an object");
+    assert!(!caps.is_empty(), "a live hub must report at least one cap: {doc}");
+    hub.stop(Duration::from_secs(5));
+}
+
+/// `holler hub support FEATURE` (no `--json`) prints `"FEATURE: ok"` /
+/// `"FEATURE: not ok"` — the human line had zero coverage; every existing
+/// `hub support` test (this file's `hub_support_opencode_ok` and siblings)
+/// only ever passes `--json`.
+#[test]
+fn hub_support_live_human_readable_format() {
+    let state = StateDir::new();
+    let hub = Hub::start(&state);
+    let (code, stdout, stderr) = run(&state, &["hub", "support", "opencode"]);
+    assert_eq!(code, 0, "stderr: {stderr}");
+    assert!(
+        stdout.trim_end() == "opencode: ok" || stdout.trim_end() == "opencode: not ok",
+        "got: {stdout:?}"
+    );
+
+    // An unrecognized feature/harness id is a real refusal (exit 1), not a
+    // normal ok=false answer — confirmed by running this for real rather
+    // than assumed from reading the source.
+    let (code, _, stderr) = run(&state, &["hub", "support", "definitely-not-a-real-feature"]);
+    assert_eq!(code, 1, "an unknown feature id is a refusal, not a false answer; stderr: {stderr}");
+    assert!(stderr.contains("unknown feature/harness id"), "stderr: {stderr}");
+    hub.stop(Duration::from_secs(5));
+}

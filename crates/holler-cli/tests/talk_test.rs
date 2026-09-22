@@ -596,6 +596,76 @@ fn body_drop_mid_turn_is_connection_lost_not_unreachable() {
     assert!(!err.contains("no live holler hub reachable"), "must never report the hub itself as unreachable: {err:?}");
 }
 
+/// `--timeout`'s grammar is `<number><s|m|h>` (`say_cmd.rs::parse_duration`,
+/// checked before any hub contact) — a malformed value is a fail-closed
+/// exit 3. This exact path (as opposed to a well-formed timeout that
+/// genuinely elapses, `say_timeout_message` below) had no test until now
+/// (issue #368).
+#[test]
+fn say_malformed_timeout_exit_3() {
+    // No hub started at all: the malformed-timeout check must fail before
+    // ever touching the control socket.
+    let out = say_full(std::env::temp_dir().join(format!("holler-say-bad-timeout-{}", std::process::id())).as_path(), &["--timeout", "notaduration", "alpha", "hi"]);
+    assert_eq!(out.status.code(), Some(3), "a malformed --timeout is exit 3; stderr: {}", stderr_of(&out));
+    assert!(stderr_of(&out).contains("invalid --timeout"), "stderr: {}", stderr_of(&out));
+}
+
+/// `--parts-file`'s two failure modes (`say_cmd.rs::resolve_say_text`) — a
+/// missing file and a file that isn't a valid A2A `Message` — both fail
+/// closed at exit 3, before any hub contact. Neither `--parts-file` path had
+/// any test at all until now (issue #368).
+#[test]
+fn say_parts_file_missing_exit_3() {
+    let state_path = std::env::temp_dir().join(format!("holler-say-parts-missing-{}", std::process::id()));
+    let out = say_full(&state_path, &["--parts-file", "/nonexistent/path/does-not-exist.json", "alpha"]);
+    assert_eq!(out.status.code(), Some(3), "a missing --parts-file is exit 3; stderr: {}", stderr_of(&out));
+    assert!(stderr_of(&out).contains("cannot read --parts-file"), "stderr: {}", stderr_of(&out));
+}
+
+#[test]
+fn say_parts_file_malformed_json_exit_3() {
+    let state_path = std::env::temp_dir().join(format!("holler-say-parts-bad-json-{}", std::process::id()));
+    std::fs::create_dir_all(&state_path).expect("create state dir");
+    let bad_path = state_path.join("bad.json");
+    std::fs::write(&bad_path, "not json at all").expect("write bad parts-file");
+    let out = say_full(&state_path, &["--parts-file", bad_path.to_str().expect("utf8 path"), "alpha"]);
+    assert_eq!(out.status.code(), Some(3), "a malformed --parts-file is exit 3; stderr: {}", stderr_of(&out));
+    assert!(stderr_of(&out).contains("is not a valid A2A Message"), "stderr: {}", stderr_of(&out));
+    let _ = std::fs::remove_dir_all(&state_path);
+}
+
+/// The success path: a real, well-formed A2A `Message` file resolves to its
+/// text parts joined together and runs as a real prompt — proving
+/// `resolve_say_text`'s happy path actually feeds the turn, not just that it
+/// parses (issue #368).
+#[test]
+fn say_parts_file_success() {
+    let hub_state = StateDir::new();
+    let body_state = StateDir::new();
+    let hub = Hub::start(&hub_state);
+    let _body = start_body(&hub_state, &body_state, &hub, &[("alpha", &["--chunks", "1"])]);
+    say_ready(&hub_state, "alpha", "warm up", Duration::from_secs(10));
+
+    let message = holler_proto::Message {
+        message_id: "m-test".to_string(),
+        context_id: None,
+        task_id: None,
+        role: holler_proto::Role::RoleUser,
+        parts: vec![
+            holler_proto::Part { content: Some(holler_proto::Content::Text("hello ".to_string())), filename: None, media_type: None, metadata: None },
+            holler_proto::Part { content: Some(holler_proto::Content::Text("from a parts file".to_string())), filename: None, media_type: None, metadata: None },
+        ],
+        metadata: None,
+        extensions: None,
+        reference_task_ids: None,
+    };
+    let parts_path = hub_state.path().join("parts.json");
+    std::fs::write(&parts_path, serde_json::to_string(&message).expect("serialize Message")).expect("write parts-file");
+
+    let out = say_full(hub_state.path(), &["--parts-file", parts_path.to_str().expect("utf8 path"), "alpha"]);
+    assert!(out.status.success(), "a well-formed --parts-file must run the turn; stderr: {}", stderr_of(&out));
+}
+
 #[test]
 fn say_timeout_message() {
     let hub_state = StateDir::new();
