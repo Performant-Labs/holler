@@ -52,6 +52,16 @@ fills this file in at release time.
   RSS rose 8.0→10.5 MiB during the drive then fell and flattened at 9.3–9.4 MiB afterward — no
   post-cooldown growth in either run. No Holler defect or harness bug surfaced. Documented in
   [`docs/testing.md`](docs/testing.md) ([#369](https://github.com/Performant-Labs/holler/issues/369), [#372](https://github.com/Performant-Labs/holler/issues/372)).
+- Load harness scenario 4 (`--scenario churn`): repeated real join → run → detach cycles
+  (`--churn-cycles`, default 20), hard-failing the run if `hub status --json`'s `clients` or
+  `sessions` doesn't return to baseline after any cycle, plus a dead-backend probe that
+  attaches a body session to a real fake-OpenCode process, `SIGKILL`s it, and times how long
+  the roster takes to notice. First baseline: 20/20 cycles clean, the hub back to baseline
+  11.6ms (p50) after the last body dies. The dead attach backend is **never detected**: the
+  roster still shows `connected`/`idle` after 240s, past its own 180s `gone` threshold,
+  because the body keeps heartbeating. Also adds `FleetMember::start_attach` and collapses
+  `fleet.rs`'s duplicated join/spawn logic into shared helpers. Documented in
+  [`docs/testing.md`](docs/testing.md) ([#373](https://github.com/Performant-Labs/holler/issues/373)).
 
 ## [0.2.0] - 2026-09-21
 

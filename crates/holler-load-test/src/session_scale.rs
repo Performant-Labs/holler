@@ -213,6 +213,7 @@ fn build_step_report(
         queue_events_observed: None,
         queue_full_refusals: None,
         rss_series: Vec::new(),
+        churn: None,
     }
 }
 
