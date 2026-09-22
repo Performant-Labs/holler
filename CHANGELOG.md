@@ -8,6 +8,9 @@ fills this file in at release time.
 ## [Unreleased]
 
 ### Enhancements
+- `install.sh`: a one-line installer (`curl -fsSL .../install.sh | sh`) that downloads the
+  right platform binary from the latest (or a pinned, `HOLLER_VERSION=`) GitHub release —
+  no `cargo build` required to just use `holler`. Documented in the README.
 - Load harness scenario 2 (`--scenario session-scale`): fixes N real `holler body run`
   processes and ramps M spawn-mode `stub-acp` sessions per body — 10 → 100 → 500, so the real
   total session count is 50 → 500 → 2500 at the default N=5 — and measures real
