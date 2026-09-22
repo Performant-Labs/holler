@@ -143,6 +143,35 @@ pub struct StepReport {
     pub threads_delta: Option<i64>,
     /// Wall-clock the whole step took.
     pub step_seconds: f64,
+    /// `session-scale` (#371): stub-acp sessions per body this rung ramped
+    /// to (10 / 100 / 500 — the issue's own ramp).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sessions_per_body: Option<usize>,
+    /// `session-scale`: the real total session count this rung configured
+    /// (`bodies * sessions_per_body`) — the invariant `hub status --json`'s
+    /// `sessions` must equal.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sessions_expected: Option<u64>,
+    /// `session-scale`: what `hub status --json` actually reported for
+    /// `sessions` once the rung settled.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sessions_actual: Option<u64>,
+    /// `session-scale`: `sessions_expected == sessions_actual` — #371's hard
+    /// correctness invariant, not just a reported metric. A run whose last
+    /// poll still disagreed never reaches this struct: the scenario returns
+    /// an error and the process exits non-zero instead.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sessions_match: Option<bool>,
+    /// `session-scale`: `session/presence` propagation latency — real time
+    /// from triggering a session's own state change to the hub's shared
+    /// roster table reflecting it (see `session_scale.rs`'s module doc for
+    /// why that is the honest reading of "fan-out" on a pull-based hub).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub presence_fanout: Option<LatencyStats>,
+    /// `session-scale`: `holler roster --json` read latency at this rung's
+    /// session count.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub roster_read: Option<LatencyStats>,
 }
 
 /// The whole run.
@@ -252,6 +281,35 @@ pub fn human_table(report: &Report) -> String {
             out.push_str(&format!(
                 "  N={:<4} driven calls: n={} p50={:.1}ms p90={:.1}ms max={:.1}ms\n",
                 step.clients_target, calls.count, calls.p50_ms, calls.p90_ms, calls.max_ms,
+            ));
+        }
+        if let Some(spb) = step.sessions_per_body {
+            out.push_str(&format!(
+                "  M={:<4} sessions: expected={} actual={}{} \n",
+                spb,
+                step.sessions_expected.map_or_else(|| "?".to_string(), |v| v.to_string()),
+                step.sessions_actual.map_or_else(|| "?".to_string(), |v| v.to_string()),
+                if step.sessions_match == Some(true) { " (match)" } else { " (MISMATCH)" },
+            ));
+        }
+        if let Some(fanout) = step.presence_fanout {
+            out.push_str(&format!(
+                "  M={:<4} presence fan-out: n={} p50={:.1}ms p90={:.1}ms max={:.1}ms\n",
+                step.sessions_per_body.unwrap_or(0),
+                fanout.count,
+                fanout.p50_ms,
+                fanout.p90_ms,
+                fanout.max_ms,
+            ));
+        }
+        if let Some(roster_read) = step.roster_read {
+            out.push_str(&format!(
+                "  M={:<4} roster read: n={} p50={:.1}ms p90={:.1}ms max={:.1}ms\n",
+                step.sessions_per_body.unwrap_or(0),
+                roster_read.count,
+                roster_read.p50_ms,
+                roster_read.p90_ms,
+                roster_read.max_ms,
             ));
         }
     }

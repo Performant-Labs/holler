@@ -45,6 +45,7 @@ mod hub;
 mod metrics;
 mod proc;
 mod scenario;
+mod session_scale;
 mod wire;
 
 use std::path::PathBuf;
@@ -67,6 +68,11 @@ pub enum Scenario {
     /// #369's process-fleet half: real body processes with real `stub-acp`
     /// sessions, driven at a controlled request rate.
     BodyFleet,
+    /// Issue #371: fix N real body processes, ramp M spawn-mode `stub-acp`
+    /// sessions per body — 10 → 100 → 500 — and measure `session/presence`
+    /// propagation latency, the `hub status --json` `sessions` invariant
+    /// (hard-failed on mismatch), and `holler roster --json` read latency.
+    SessionScale,
 }
 
 #[derive(Parser, Debug)]
@@ -117,6 +123,22 @@ struct Cli {
     #[arg(long, default_value_t = 4.0)]
     rate: f64,
 
+    /// `session-scale`: spawn-mode `stub-acp` sessions *per body* to ramp
+    /// through — #371's own ramp is the default. The real total session
+    /// count at each rung is `--bodies * <this rung's count>`.
+    #[arg(long, default_value = "10,100,500")]
+    session_ramp: String,
+
+    /// `session-scale`: how many sample sessions (spread across all bodies)
+    /// to probe for `session/presence` propagation latency, per rung.
+    #[arg(long, default_value_t = 5)]
+    fanout_samples: usize,
+
+    /// `session-scale`: how many real `holler roster --json` invocations to
+    /// time, per rung.
+    #[arg(long, default_value_t = 20)]
+    roster_reads: usize,
+
     /// Path to the `holler` binary (default: next to this one).
     #[arg(long)]
     holler_bin: Option<PathBuf>,
@@ -157,12 +179,16 @@ pub struct Config {
     pub rate: f64,
     pub holler_bin: PathBuf,
     pub stub_acp_bin: PathBuf,
+    pub session_ramp: Vec<usize>,
+    pub fanout_samples: usize,
+    pub roster_reads: usize,
 }
 
 fn main() -> Res<()> {
     let cli = Cli::parse();
 
     let ramp = parse_ramp(&cli.ramp)?;
+    let session_ramp = parse_ramp(&cli.session_ramp)?;
     let holler_bin = match cli.holler_bin {
         Some(p) => p,
         None => hub::sibling_bin(holler_exe_name())?,
@@ -182,6 +208,9 @@ fn main() -> Res<()> {
         rate: cli.rate,
         holler_bin: holler_bin.clone(),
         stub_acp_bin,
+        session_ramp,
+        fanout_samples: cli.fanout_samples,
+        roster_reads: cli.roster_reads,
     };
 
     let hub_env = parse_env(&cli.hub_env)?;
@@ -196,6 +225,7 @@ fn main() -> Res<()> {
         issue: match cli.scenario {
             Scenario::ConnectionScale => "#370".to_string(),
             Scenario::BodyFleet => "#369".to_string(),
+            Scenario::SessionScale => "#371".to_string(),
         },
         started_at: rfc3339_utc_now(),
         host: metrics::HostInfo::detect(),
@@ -209,6 +239,7 @@ fn main() -> Res<()> {
         match cli.scenario {
             Scenario::ConnectionScale => scenario::run(&cfg, &hub, &mut report).await,
             Scenario::BodyFleet => scenario::run_body_fleet(&cfg, &hub, &mut report).await,
+            Scenario::SessionScale => session_scale::run(&cfg, &hub, &mut report).await,
         }
     });
     hub.stop();
@@ -258,6 +289,9 @@ fn config_json(cfg: &Config, hub_env: &[(String, String)]) -> serde_json::Value 
         "sessions_per_body": cfg.sessions_per_body,
         "calls": cfg.calls,
         "rate_per_sec": cfg.rate,
+        "session_ramp": cfg.session_ramp,
+        "fanout_samples": cfg.fanout_samples,
+        "roster_reads": cfg.roster_reads,
         "hub_env": hub_env.iter().map(|(k, v)| format!("{k}={v}")).collect::<Vec<_>>(),
     })
 }
