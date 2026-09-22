@@ -7,7 +7,9 @@ fills this file in at release time.
 
 ## [Unreleased]
 
-**Note (2026-09-21):** this section had gone unpopulated since #327 (the release-process
+## [0.2.0] - 2026-09-21
+
+**Note:** this section had gone unpopulated since #327 (the release-process
 infrastructure itself landed) despite many real merged PRs since — `scripts/changelog-check.sh`
 only enforces that the `## [Unreleased]` heading exists, not that anyone actually adds an entry
 per PR. The entries below cover this session's own work (2026-09-21), verified first-hand.
