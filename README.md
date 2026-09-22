@@ -157,11 +157,29 @@ If you have the `herdr-workspace` Claude Code skill installed, invoke it directl
 
 Otherwise, read docs/herdr-workspace.md in full and replicate its "Automated setup" flow
 yourself: load my session config (an explicit path I give you, else ./sessions.toml, else
-~/.config/herdr-workspace/sessions.toml). If none of those exist, stop and ask me for real
-values instead of inventing or auto-filling anything — the doc's own example config is
+~/.config/herdr-workspace/sessions.toml).
+
+If none of those exist, don't invent or auto-fill anything — the doc's own example config is
 illustrative, not a template to write verbatim; using it as-is would set up whatever
-infrastructure happens to be named in that example, not mine. Once a real config exists,
-preflight every distinct remote host (SSH
+infrastructure happens to be named in that example, not mine. But also don't just dump the
+whole schema on me and ask me to fill it in cold. Instead:
+
+1. Check whether `tailscale` is installed (`command -v tailscale`) before assuming it. If it
+   is, use `tailscale status --self --json`'s `.Self.DNSName` to read my own machine's
+   `hub_host` for me, and `tailscale status`'s peer list to let me pick a real remote host by
+   name instead of typing one blind. If it isn't installed or isn't logged in, just ask me for
+   `hub_host`/`remote_host`/`remote_tailnet_host` directly — that's a completely normal path,
+   and Tailscale isn't a requirement, only something to use for discovery when it's there.
+2. Offer me a short choice instead of an open-ended question: (A) just a local orchestrator,
+   nothing remote yet — propose `name = "o1"`, `dir` = my current directory, `cmd = "claude"`
+   as one confirm-or-override, and compute `layout` for me; (B) that plus one or more remote
+   attach-mode sessions — same orchestrator default, then ask only for what's genuinely
+   unknowable per session (how many, each one's name, its host, its OpenCode port); (C) let me
+   write or paste my own `sessions.toml` myself; (D) something more complex — a real interview,
+   but still using Tailscale for discovery per step 1 wherever it applies.
+3. Write the file from my answers and show it to me before treating it as the real config.
+
+Once a real config exists, preflight every distinct remote host (SSH
 reachability, the `holler` binary, each session's model endpoint), present the concrete plan
 you're about to execute and get my explicit yes before changing anything, start the remote
 OpenCode backends, capture real session IDs, bring up the Holler hub locally, migrate a
