@@ -675,7 +675,25 @@ pub fn redeem(
 /// that is *still* bound at the moment the signature is checked lets the
 /// connection through.
 pub fn bound_record(token_id: &str, state: &HubState) -> Result<Record, TokenError> {
-    let _lock = acquire_lock(state)?;
+    // [`acquire_lock_retrying`], not the bare [`acquire_lock`], for exactly
+    // the reason issue #301 gave `redeem`: this runs *inside the live hub*, on
+    // the per-connection task, twice per `circuit/authenticate` — so N bodies
+    // connecting at once race each other for this same flock, every one of
+    // them a legitimate, bound token. Measured directly by the issue #370
+    // load harness (`crates/holler-load-test`, scenario `connection-scale`,
+    // macOS/aarch64, 10 cores): with the non-retrying `acquire_lock` here,
+    // **3 of 50 and 7 of 200** concurrent connections completed the
+    // handshake. The rest were refused `-32002 unauthenticated` carrying the
+    // lock's own "another holler process holds the token lock; retry" text —
+    // and because a refusal is also a *failed auth*, those spurious failures
+    // then tripped [`crate::lockout`] for the peer IP and force-closed
+    // further connections mid-handshake, turning self-contention into a
+    // cascading lockout of every client on that address. With the retry, 50
+    // of 50 and 200 of 200 connect. #301 fixed this defect class at
+    // `redeem`'s call site only; this is its sibling on the authenticate
+    // path (and [`touch_last_seen`] below is the third, on the presence
+    // path).
+    let _lock = acquire_lock_retrying(state)?;
     let store = Store::load(&tokens_path(state))?;
     let now = now_secs();
     let Some(record) = store.records.iter().find(|r| r.token_id == token_id) else {
@@ -705,7 +723,13 @@ pub fn bound_record(token_id: &str, state: &HubState) -> Result<Record, TokenErr
 /// Bump a token's `last_seen` (a live presence beat from the bound body).
 /// Fails closed if the token is missing or not bound.
 pub fn touch_last_seen(token_id: &str, state: &HubState) -> Result<(), TokenError> {
-    let _lock = acquire_lock(state)?;
+    // Retrying, for the same reason as [`bound_record`] above: this is a
+    // live-hub, per-connection call (one per presence heartbeat), so every
+    // connected body contends with every other one — and here the contention
+    // is *sustained*, not just at connect, since the beat repeats for the
+    // connection's whole life. A lost race silently skips a `last_seen`
+    // update, which is the timestamp a later liveness/expiry decision reads.
+    let _lock = acquire_lock_retrying(state)?;
     let mut store = Store::load(&tokens_path(state))?;
     let Some(record) = store.by_mut(token_id) else {
         return Err(TokenError::new(format!("no such token {token_id}")));
