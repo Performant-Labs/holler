@@ -53,13 +53,15 @@ Herdr's point of view, invisible to `herdr agent list` even while fully live and
 
 ## Automated setup
 
-A Claude Code skill drives this end to end — `herdr-three-agents`
-(`~/.claude/skills/herdr-three-agents/SKILL.md`), a 10-stage wizard: load a session config,
+A Claude Code skill drives this end to end — `herdr-workspace`
+(`~/.claude/skills/herdr-workspace/SKILL.md`), a 10-stage wizard: load a session config,
 preflight, present the plan and get explicit assent before touching anything, start the remote
 OpenCode backends, capture real session IDs, bring up the hub, join and run the body, build the
 Herdr workspace, attach each pane, and verify every session end to end with a real round-trip
-reply. It is config-driven — however many `[[session]]` entries the config lists is however
-many panes get built, not a hardcoded pair — and the config is the same shape `holler body run
+reply. It is config-driven — however many `[[orchestrator]]` and `[[session]]` entries the
+config lists is however many panes get built (one or more orchestrators, each any CLI agent,
+not just Claude; any number of sessions), never a hardcoded pair — and the session shape is the
+same one `holler body run
 --config` consumes (Holler's own config parser is `#[serde(deny_unknown_fields)]`, so any
 wizard-only settings are migrated out of a derived copy before that file reaches Holler, never
 sent to it directly).
