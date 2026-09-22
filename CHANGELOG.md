@@ -8,6 +8,12 @@ fills this file in at release time.
 ## [Unreleased]
 
 ### Enhancements
+- Homebrew install: `brew tap Performant-Labs/tap && brew install holler`, via the new
+  self-hosted [Performant-Labs/homebrew-tap](https://github.com/Performant-Labs/homebrew-tap)
+  (fetches the real published release binary, real sha256-verified — not a source build). A
+  `scripts/update-formula.sh` there bumps it for future releases; wired into
+  [`docs/release-checklist-template.md`](docs/release-checklist-template.md) as its own step so
+  it can't silently fall behind a release.
 - `install.sh`: a one-line installer (`curl -fsSL .../install.sh | sh`) that downloads the
   right platform binary from the latest (or a pinned, `HOLLER_VERSION=`) GitHub release —
   no `cargo build` required to just use `holler`. Documented in the README.
