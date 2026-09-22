@@ -62,6 +62,20 @@ fills this file in at release time.
   because the body keeps heartbeating. Also adds `FleetMember::start_attach` and collapses
   `fleet.rs`'s duplicated join/spawn logic into shared helpers. Documented in
   [`docs/testing.md`](docs/testing.md) ([#373](https://github.com/Performant-Labs/holler/issues/373)).
+- Load harness scenario 4, Run #2 additions: `--teardown-modes` (rotate `graceful`/`crash`/
+  `hang`/`restart` per cycle, so a wave can die without detaching, go silent under SIGSTOP, or
+  crash and rejoin on its saved credential), `--parallel-teardown`, `--resident` (a body kept up
+  for the whole run, taking `say` traffic while each wave is torn down), `--label-reuse-probe`,
+  `--churn-secs`, `--hang-budget-secs`, and a per-cycle series of hub RSS/threads/roster rows/
+  credential records. 20-minute baseline (578 cycles, 10 bodies x 10 sessions, 57,800 `say`
+  calls, zero failures): cleanup correct 578/578 in every mode (p50 6.7-19.8ms); rejoining on a
+  saved credential kept the same `client_id` with no ghost rows across 144 cycles; a hung body
+  is dropped at the roster's `reconnect` threshold (45.0s measured at production timers); a
+  resident body saw 0 disturbances in 5,780 checks. Two findings: a gracefully detached body's
+  label is never freed (the credential store grew to 5,781 records, unbounded, while roster rows
+  stayed bounded), and `hub token mint` does not retry under token-store lock contention (864 of
+  5,781 mints needed a retry) though the hub's own redeem path does. Documented in
+  [`docs/testing.md`](docs/testing.md) ([#373](https://github.com/Performant-Labs/holler/issues/373)).
 
 ## [0.2.0] - 2026-09-21
 
