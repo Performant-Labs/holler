@@ -23,12 +23,13 @@ fn holler() -> Command {
 // --version (and -V) print exactly `holler <workspace version>` and exit 0.
 #[test]
 fn version_flag_prints_crate_version() {
+    let expected = format!("holler {}\n", env!("CARGO_PKG_VERSION"));
     for flag in ["--version", "-V"] {
         holler()
             .arg(flag)
             .assert()
             .success()
-            .stdout(predicate::eq("holler 0.1.0\n"));
+            .stdout(predicate::eq(expected.clone()));
     }
 }
 
