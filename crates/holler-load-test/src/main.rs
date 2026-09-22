@@ -32,17 +32,19 @@
 //!
 //! # Running it
 //!
-//! Point the workspace build at a target dir that already holds a release
-//! workspace build, so only Holler's own crates recompile:
+//! In a fresh worktree, seed its own target dir from a warm one first, so
+//! only Holler's own crates recompile:
 //!
 //! ```text
-//! CARGO_TARGET_DIR=/path/to/warm/target cargo build --workspace --release
-//! /path/to/warm/target/release/holler-load-test --scenario connection-scale --ramp 1,50,200
+//! scripts/seed-target-dir.sh /path/to/warm/checkout/target
+//! cargo build --workspace --release
+//! ./target/release/holler-load-test --scenario connection-scale --ramp 1,50,200
 //! ```
 //!
-//! Keep `--workspace`: `-p holler-load-test` resolves different dependency
-//! features, so it can't reuse a warm workspace build. Without a warm dir,
-//! a fresh worktree compiles the whole dependency graph from zero. See
+//! Don't share one target dir across worktrees: cargo can't tell two
+//! checkouts apart and may silently keep a binary built from the other
+//! tree. Keep `--workspace`: `-p holler-load-test` resolves different
+//! dependency features and can't reuse the seeded artifacts. See
 //! `docs/testing.md` § "Building it" for why, and for the full flag surface
 //! and recorded baselines.
 

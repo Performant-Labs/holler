@@ -154,24 +154,25 @@ The harness above answers *does it work*. The load harness — the `holler-load-
 
 It exists as a purpose-built binary rather than a third-party tool for the same reason `stub-acp` does: Holler's wire is JSON-RPC 2.0 over a WebSocket ([ADR 0004](adr/ADR-0004.md)), not HTTP REST, and k6/wrk/vegeta/Locust cannot speak it at all. It drives two other binaries, `holler` and `stub-acp`, and by default finds them beside itself in the same `target/<profile>/` directory (override with `--holler-bin` / `--stub-acp-bin`).
 
-### Building it: point at a warm target dir
+### Building it: seed your own target dir from a warm one
 
 What's expensive is compiling the third-party dependency graph, not Holler's own crates. That graph includes `aws-lc-sys`'s hundreds of C files, pulled in through `rustls`. A new `git worktree` starts with an empty `target/`, so a plain workspace build there compiles all of it from zero. That can take hours on a loaded machine.
 
-So reuse a target dir that already has a release workspace build in it, such as the main checkout's or another worktree's:
+So give the new worktree its own `target/`, seeded from one that already has a release workspace build, such as the main checkout's or another worktree's:
 
 ```bash
-CARGO_TARGET_DIR=/path/to/warm/target cargo build --workspace --release
-/path/to/warm/target/release/holler-load-test --scenario connection-scale --ramp 1,50,200 --json-out report.json
+scripts/seed-target-dir.sh /path/to/warm/checkout/target
+cargo build --workspace --release
+./target/release/holler-load-test --scenario connection-scale --ramp 1,50,200 --json-out report.json
 ```
 
-Against a warm dir, this recompiles only Holler's own workspace crates. Measured: 17 seconds, with zero third-party dependencies rebuilt. `holler` and `stub-acp` are rebuilt from your own source in the same pass, so they always match what you're measuring, and the harness finds them next to itself by default. Use `--holler-bin` / `--stub-acp-bin` only to point at binaries elsewhere. A Homebrew-installed `holler` can lag `main`, so don't substitute it unless you've confirmed it matches your source.
+The script copy-on-write clones the warm dir, which is instant and uses no extra disk on APFS (macOS) and btrfs/xfs. It then deletes the cloned artifacts for Holler's own workspace crates, so those rebuild from your source while every dependency is reused. Measured: 7s to seed, then 17s for the release build (only Holler's five crates compile) and 10s for `cargo test`. `holler` and `stub-acp` are rebuilt from your source in the same pass and land next to the harness, so the defaults find them. A Homebrew-installed `holler` can lag `main`, so don't pass it via `--holler-bin` unless you've confirmed it matches your source.
 
-**Keep `--workspace`. Don't narrow it to `-p holler-load-test`.** Cargo unifies dependency features across the packages you select. A `--workspace` build compiles `rustls` with `aws_lc_rs`, `logging`, and `tls12`, `tokio` with `fs`, and `serde_json` with `preserve_order` and `raw_value`. A `-p holler-load-test` build compiles them with a smaller feature set. Different features mean different fingerprints, so a warm dir built with `--workspace` has nothing a `-p holler-load-test` build can reuse, and `tokio`, `rustls`, and everything downstream recompile from scratch.
+**Don't share a target dir between worktrees**, whether by `CARGO_TARGET_DIR=<another worktree>/target` or by building in another checkout. Cargo fingerprints workspace crates by *workspace-relative* paths plus source mtimes, and it can't tell two checkouts apart. If your sources are older than the artifacts already in that dir, which is common for a branch whose edits predate someone else's build, cargo judges them fresh, compiles nothing, and leaves you a binary built from the other tree's source. It reports no error, and files new since that build, such as a new scenario module, are never checked at all. (Reproduced: a shared-dir build "finished" in 0.46s with the change missing from the binary.) Sharing also lets concurrent builds overwrite each other's final binaries.
 
-With no warm target dir anywhere, `cargo build --workspace --release` without `CARGO_TARGET_DIR` is the from-scratch fallback. Budget for the full first build.
+**Keep `--workspace`. Don't narrow it to `-p holler-load-test`.** Cargo unifies dependency features across the packages you select, so a `-p holler-load-test` build compiles `rustls`, `tokio`, and `serde_json` with smaller feature sets than the seeded `--workspace` artifacts. Different features mean different fingerprints, and all of them recompile from scratch.
 
-Two builds sharing one `CARGO_TARGET_DIR` serialize on cargo's build lock. That's safe, but concurrent agents building in the same target dir will wait on each other.
+With no warm target dir anywhere, a plain `cargo build --workspace --release` is the from-scratch fallback. Budget for the full first build.
 
 ### What a run reports
 
