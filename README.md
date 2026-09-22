@@ -157,8 +157,11 @@ If you have the `herdr-workspace` Claude Code skill installed, invoke it directl
 
 Otherwise, read docs/herdr-workspace.md in full and replicate its "Automated setup" flow
 yourself: load my session config (an explicit path I give you, else ./sessions.toml, else
-~/.config/herdr-workspace/sessions.toml — creating a template at the global fallback path if
-none exists, and telling me so before you do), preflight every distinct remote host (SSH
+~/.config/herdr-workspace/sessions.toml). If none of those exist, stop and ask me for real
+values instead of inventing or auto-filling anything — the doc's own example config is
+illustrative, not a template to write verbatim; using it as-is would set up whatever
+infrastructure happens to be named in that example, not mine. Once a real config exists,
+preflight every distinct remote host (SSH
 reachability, the `holler` binary, each session's model endpoint), present the concrete plan
 you're about to execute and get my explicit yes before changing anything, start the remote
 OpenCode backends, capture real session IDs, bring up the Holler hub locally, migrate a
