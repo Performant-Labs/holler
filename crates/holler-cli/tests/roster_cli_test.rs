@@ -80,6 +80,67 @@ fn roster_cli_shows_two_sessions_from_one_body() {
     drop(hub);
 }
 
+/// `render_table`'s empty-roster case (issue #368): a hub with zero sessions
+/// prints the spec's friendly one-liner, not a bare (or missing) table
+/// header — had no test at all before this.
+#[test]
+fn roster_empty_prints_friendly_message() {
+    let state = StateDir::new();
+    let hub = Hub::start(&state);
+    let (code, stdout, stderr) = run(&state, &["roster"]);
+    assert_eq!(code, 0, "roster with zero sessions still exits 0: {stderr}");
+    assert_eq!(stdout, "(no sessions on the hub)\n");
+    drop(hub);
+}
+
+/// `roster --all` in the human (non-`--json`) table — every existing use of
+/// `--all` in this suite only ever pairs it with `--json`
+/// (`roster_sweep_wireup_test.rs`), so the human table's own `gone` row
+/// rendering had no coverage (issue #368).
+#[test]
+fn roster_all_shows_gone_row_in_human_table() {
+    let state = StateDir::new();
+    let hub = Hub::start(&state);
+    let (token_id, secret) = mint_token(&state, "body-1");
+    join(&state, &state, &hub.ws_url(), &token_id, &secret);
+    let config = support::write_sessions_toml(&state, &[("alpha", &[])]);
+    let body = Body::start(&state, &config);
+    wait_for(STARTUP_WAIT, || {
+        let v = roster_json(&state);
+        (v.get("rows").and_then(|r| r.as_array()).map(Vec::len) == Some(1)).then_some(())
+    })
+    .expect("the roster shows alpha");
+
+    // A plain (non-`--all`) roster shows nothing once the body detaches —
+    // `gone` rows are hidden by default.
+    body.stop(&state, Duration::from_secs(10));
+    wait_for(Duration::from_secs(10), || {
+        let (_, stdout, _) = run(&state, &["--json", "roster", "--all"]);
+        let v: Value = serde_json::from_str(&stdout).ok()?;
+        v.get("rows")
+            .and_then(|r| r.as_array())
+            .and_then(|rows| rows.first())
+            .and_then(|row| row.get("conn_state"))
+            .and_then(|c| c.as_str())
+            .filter(|c| *c == "gone")
+            .map(|_| ())
+    })
+    .expect("alpha reaches conn_state=gone after detach");
+
+    let (code, stdout, stderr) = run(&state, &["roster"]);
+    assert_eq!(code, 0, "stderr: {stderr}");
+    assert_eq!(stdout, "(no sessions on the hub)\n", "gone rows are hidden without --all:\n{stdout}");
+
+    let (code, stdout, stderr) = run(&state, &["roster", "--all"]);
+    assert_eq!(code, 0, "stderr: {stderr}");
+    assert!(stdout.contains("alpha"), "human table with --all shows the gone row:\n{stdout}");
+    // The session name is `<label>/alpha` (e.g. `body-1/alpha`), not bare
+    // `alpha` — match on that shape rather than a bare prefix.
+    let alpha_line = stdout.lines().find(|l| l.contains("/alpha")).unwrap_or_else(|| panic!("an alpha row:\n{stdout}"));
+    assert!(alpha_line.contains("gone"), "the CONN column reads gone: {alpha_line:?}");
+    drop(hub);
+}
+
 #[test]
 fn roster_json_shape() {
     let state = StateDir::new();

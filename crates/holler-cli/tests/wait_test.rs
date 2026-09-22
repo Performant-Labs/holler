@@ -278,6 +278,24 @@ fn wait_timeout_exit_2() {
     assert!(stdout_of(&out).is_empty(), "a timeout prints nothing on stdout");
 }
 
+/// `--timeout`'s grammar is `<number><s|m|h>` (`wait_cmd.rs::parse_duration`)
+/// — a malformed value is a fail-closed exit 3, checked *before* any hub
+/// contact (issue #368: this exact path had no test at all until now).
+#[test]
+fn wait_malformed_timeout_exit_3() {
+    let state = StateDir::new();
+    // No `Hub::start` at all: the malformed-timeout check must fail before
+    // ever touching the control socket, so this must NOT be exit 1 (no live
+    // hub) even though none is running.
+    let out = support::wait_cmd(&state, &["alpha", "--timeout", "notaduration"]);
+    assert_eq!(out.status.code(), Some(3), "a malformed --timeout is exit 3; stderr: {}", stderr_of(&out));
+    assert!(
+        stderr_of(&out).contains("invalid --timeout"),
+        "must carry the spec's own wording: {}",
+        stderr_of(&out)
+    );
+}
+
 #[test]
 fn wait_no_hub_exit_1() {
     let state = StateDir::new();
@@ -341,6 +359,41 @@ fn wait_fires_on_gone_when_body_detaches() {
     assert!(out.status.success(), "stderr: {}", stderr_of(&out));
     let doc: serde_json::Value = serde_json::from_slice(&out.stdout).expect("wait --json is valid JSON");
     assert_eq!(doc["rows"][0]["conn_state"].as_str(), Some("gone"));
+}
+
+/// Every other match-path test in this file passes `--json`, so
+/// `wait_cmd.rs::render_matches` — the human-readable
+/// `SESSION STATE TURN_ID STOP_REASON AGE` line `wait` prints without
+/// `--json` — had zero direct coverage (issue #368). Confirms the real
+/// format, not just that *some* text is non-empty.
+#[test]
+fn wait_without_json_prints_human_readable_line() {
+    let hub_state = StateDir::new();
+    let body_state = StateDir::new();
+    let hub = Hub::start(&hub_state);
+    let _body = start_body(&hub_state, &body_state, &hub, &[("alpha", &["--chunks", "1"])]);
+    wait_until_sessions_present(&hub_state, &["alpha"], Duration::from_secs(10));
+
+    let said = support::say(&hub_state, "alpha", "hi");
+    assert!(said.status.success(), "stderr: {}", stderr_of(&said));
+
+    // No --json this time: the match already settled, so this returns the
+    // human-readable line straight away.
+    let out = support::wait_cmd(&hub_state, &["alpha", "--timeout", "10s"]);
+    assert!(out.status.success(), "stderr: {}", stderr_of(&out));
+    let line = stdout_of(&out);
+    // SESSION STATE TURN_ID STOP_REASON AGE — AGE itself is two space-separated
+    // tokens (`<n>s ago` / `<n>m ago`), so the line is 6 tokens wide, not 5.
+    let fields: Vec<&str> = line.trim_end().split(' ').collect();
+    assert_eq!(fields.len(), 6, "SESSION STATE TURN_ID STOP_REASON <n><unit> ago, got: {line:?}");
+    assert!(fields[0].ends_with("/alpha"), "field 1 is the session name: {line:?}");
+    assert_eq!(fields[1], "idle", "field 2 is the matched state: {line:?}");
+    assert_eq!(fields[3], "end_turn", "field 4 is the stop reason: {line:?}");
+    assert!(
+        fields[4].ends_with('s') || fields[4].ends_with('m'),
+        "field 5 is the age number+unit (`<n>s`/`<n>m`): {line:?}"
+    );
+    assert_eq!(fields[5], "ago", "field 6 is the literal word \"ago\": {line:?}");
 }
 
 /// See this file's module doc: depends on the same upstream `agent-client-
