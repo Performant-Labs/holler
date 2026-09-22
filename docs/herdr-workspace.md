@@ -28,7 +28,80 @@ Local machine                              Remote machine (e.g. Jupiter)
 The hub sits on whichever machine should be reachable from anywhere with tailnet access; the
 body must be co-located with the real `opencode serve`/`opencode --port` processes it attaches
 to, since attach mode talks to them over `127.0.0.1` loopback HTTP by construction — there is
-no remote-OpenCode-endpoint mode.
+no remote-OpenCode-endpoint mode. The diagram above shows the common one-orchestrator,
+one-remote-host case; the config below is what actually decides how many orchestrators, how
+many sessions, and how many distinct remote hosts a given run has — none of that is hardcoded.
+
+## The config file
+
+One TOML file is the source of truth for a run — every orchestrator, every session, and the
+whole pane layout. The wizard resolves it in this order, using whichever it finds first (no
+merging across tiers):
+
+1. An explicit `--config <path>` passed to the wizard's invocation.
+2. `./sessions.toml` — a project-local config, when the wizard is run from a project directory.
+3. `~/.config/herdr-workspace/sessions.toml` — the global fallback.
+
+Shape:
+
+```toml
+# LAYOUT — a nested array: outer = columns left to right, inner = each column's panes top to
+# bottom. Every [[orchestrator]] name and every [[session]] name must appear exactly once. Must
+# come before any table header below (a bare key after a [table]/[[array]] header silently
+# becomes a member of that table in TOML, not a top-level key).
+layout = [["o1"], ["alpha", "beta"]]
+
+# This machine's own tailnet FQDN — where the hub advertises itself.
+hub_host = "macbookpro.tail26a498.ts.net"
+
+# One or more orchestrators — each a real CLI agent (commonly "claude", but not required to
+# be), with its own working directory. Which sessions an orchestrator actually drives is a
+# matter of how it's briefed, not something layout or this table encodes.
+[[orchestrator]]
+name = "o1"
+dir = "~/Projects/holler"
+cmd = "claude"
+
+# One or more sessions. remote_host/remote_tailnet_host are PER-SESSION, not global — different
+# sessions can live on different remote machines, so nothing here assumes a single shared host.
+[[session]]
+name = "alpha"
+harness = "opencode"
+mode = "attach"
+endpoint = "http://127.0.0.1:47001"
+remote_host = "jupiter"                              # for ssh — an entry in ~/.ssh/config
+remote_tailnet_host = "jupiter.tail26a498.ts.net"     # for the attach pane's URL
+# session_id filled in by the wizard once a real session exists — leave absent in a template
+
+[[session]]
+name = "beta"
+harness = "opencode"
+mode = "attach"
+endpoint = "http://127.0.0.1:47002"
+remote_host = "jupiter"
+remote_tailnet_host = "jupiter.tail26a498.ts.net"
+```
+
+Sessions on different hosts are just more entries with a different `remote_host`/
+`remote_tailnet_host` — the wizard groups sessions by host and runs one Holler body per distinct
+host, rather than assuming everything lives on one remote machine. Multiple orchestrators work
+the same way: more `[[orchestrator]]` entries, each with its own `dir`/`cmd`, each a real slot
+in `layout`.
+
+**This file is not what `holler body run`'s `--config` flag consumes directly.** Holler's own config
+parser (`crates/holler-body/src/config.rs`) is `#[serde(deny_unknown_fields)]` at both the
+top level and per-session — `[[orchestrator]]`, `layout`, `hub_host`, and each session's
+`remote_host`/`remote_tailnet_host` would all make `holler body run` refuse to start. The wizard
+migrates a derived copy — every `[[orchestrator]]`, `layout`, and those wizard-only per-session
+fields stripped, only the `[[session]]` tables Holler actually accepts left — and hands *that*
+to `scp`/`--config`. The master file (whichever of the three sources above was actually loaded)
+keeps every field, including the real captured `session_id`s, for the next run.
+
+**No local `ssh` client?** The wizard detects this and switches into a manual-relay mode: every
+command it would otherwise run over `ssh` is printed for you to run yourself (or relay to a
+shell that has `ssh`), with your pasted-back output driving the same verification it would do
+directly. This isn't a config setting — it's a fallback based on whether `ssh` is actually
+present, so no config change is required either way.
 
 ## The viewing mechanism: plain panes, not `herdr-mirror`
 
@@ -54,17 +127,14 @@ Herdr's point of view, invisible to `herdr agent list` even while fully live and
 ## Automated setup
 
 A Claude Code skill drives this end to end — `herdr-workspace`
-(`~/.claude/skills/herdr-workspace/SKILL.md`), a 10-stage wizard: load a session config,
-preflight, present the plan and get explicit assent before touching anything, start the remote
-OpenCode backends, capture real session IDs, bring up the hub, join and run the body, build the
-Herdr workspace, attach each pane, and verify every session end to end with a real round-trip
-reply. It is config-driven — however many `[[orchestrator]]` and `[[session]]` entries the
-config lists is however many panes get built (one or more orchestrators, each any CLI agent,
-not just Claude; any number of sessions), never a hardcoded pair — and the session shape is the
-same one `holler body run
---config` consumes (Holler's own config parser is `#[serde(deny_unknown_fields)]`, so any
-wizard-only settings are migrated out of a derived copy before that file reaches Holler, never
-sent to it directly).
+(`~/.claude/skills/herdr-workspace/SKILL.md`), a 10-stage wizard: load the config described
+above, preflight (including per-host SSH reachability, with a manual-relay fallback when no
+local `ssh` client exists), present the plan and get explicit assent before touching anything,
+start the remote OpenCode backends, capture real session IDs, bring up the hub, migrate the
+config and join/run one body per distinct remote host, build the Herdr workspace, attach each
+pane, and verify every session end to end with a real round-trip reply. It's config-driven
+throughout — however many orchestrators, sessions, and distinct remote hosts the config lists is
+however many panes and bodies get built, never a hardcoded pair.
 
 ## Related
 
