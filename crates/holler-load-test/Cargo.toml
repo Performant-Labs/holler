@@ -1,0 +1,65 @@
+[package]
+name = "holler-load-test"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "The holler-load-test binary — the dedicated load/performance harness (issue #369)"
+
+# The harness is a binary, not an integration test (issue #369's own design:
+# "a new binary … mirroring `stub-acp`'s convention"): it is driven with flags,
+# runs for minutes, and emits a report. It deliberately does NOT live as a
+# `[[bin]]` inside `holler-cli` the way `stub-acp` does, for one concrete
+# manifest reason: `stub-acp` needs only `serde_json`, which `holler-cli`
+# already declares as a *runtime* dependency of the shipping `holler` binary,
+# whereas this harness needs `tokio-tungstenite`, `futures-util`, `hex`,
+# `ed25519-dalek` and `x25519-dalek` — which `holler-cli` declares as
+# **dev**-dependencies. A `[[bin]]` target cannot see dev-dependencies, so
+# hosting the harness there would mean promoting five test-only crates into the
+# shipping CLI package's `[dependencies]`, in direct conflict with that
+# manifest's own "declare only what is consumed" rule (#155 §7). Its own crate
+# keeps the shipping package's dependency declaration honest.
+[[bin]]
+name = "holler-load-test"
+path = "src/main.rs"
+
+# Declare only what is consumed (#155 §7).
+[dependencies]
+# The harness's own flag surface (`--ramp`, `--client-mode`, …).
+clap = { workspace = true }
+# The report documents (`Report`/`StepReport`/`LatencyStats`) derive Serialize.
+serde = { workspace = true }
+# The JSON report, the raw JSON-RPC frames the wire client sends/reads, and
+# parsing `hub status --json` / `roster --json` out of the real CLI.
+serde_json = { workspace = true }
+# The harness's async runtime: N concurrent WebSocket clients are N tasks.
+tokio = { workspace = true }
+# The real WebSocket transport every wire client dials the hub over — the same
+# client stack `hub_hygiene_test.rs` drives the hub with.
+tokio-tungstenite = { workspace = true }
+# `SinkExt`/`StreamExt` for the WebSocket send/receive halves.
+futures-util = { workspace = true }
+# The Noise XK handshake core (`circuit/authenticate` → `circuit/prove`) and
+# the protocol version constants the `circuit/hello` frame carries.
+holler-proto = { path = "../holler-proto" }
+# Minting and redeeming each client's join token in-process (against the hub's
+# own on-disk token store) and resolving the hub's X25519 static public key —
+# the same two library entry points `hub_hygiene_test.rs` uses, so the harness
+# pays one subprocess per *hub*, not one per client.
+holler-hub = { path = "../holler-hub" }
+# Handshake messages and public keys cross the wire hex-encoded.
+hex = { workspace = true }
+# Each client's X25519 static keypair — what it actually authenticates with.
+x25519-dalek = { workspace = true }
+# Each client's Ed25519 keypair: registered at redeem as `body_pubkey` (the
+# hub validates it is a real curve point), unused for authentication since
+# issue #338 moved that to Noise XK.
+ed25519-dalek = { workspace = true }
+# POSIX process-group control: the harness spawns real `holler body run`
+# processes that themselves spawn `stub-acp` children, so teardown must signal
+# the whole group — the same `kill(-pgid, …)` the integration-test harness
+# (`crates/holler-cli/tests/support/mod.rs`) uses for exactly this reason.
+libc = { workspace = true }
+
+# Workspace lints (issue #149).
+[lints]
+workspace = true
