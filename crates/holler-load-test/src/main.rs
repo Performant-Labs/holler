@@ -7,8 +7,8 @@
 //! HTTP REST, so the generic load tools (k6, wrk, vegeta, Locust) cannot speak
 //! to it at all. #369's answer is the same one this repo already reached for
 //! its deterministic agent double: a purpose-built binary that lives in the
-//! workspace, is built by `cargo build --workspace`, and drives the *real*
-//! shipping binaries — `stub-acp`'s convention, applied to load.
+//! workspace and drives the *real* shipping binaries — `stub-acp`'s
+//! convention, applied to load.
 //!
 //! # What it drives
 //!
@@ -32,13 +32,19 @@
 //!
 //! # Running it
 //!
+//! Point the workspace build at a target dir that already holds a release
+//! workspace build, so only Holler's own crates recompile:
+//!
 //! ```text
-//! cargo build --workspace --release
-//! ./target/release/holler-load-test --scenario connection-scale --ramp 1,50,200
+//! CARGO_TARGET_DIR=/path/to/warm/target cargo build --workspace --release
+//! /path/to/warm/target/release/holler-load-test --scenario connection-scale --ramp 1,50,200
 //! ```
 //!
-//! See `docs/testing.md` § "Load testing" for the full flag surface and the
-//! recorded baselines.
+//! Keep `--workspace`: `-p holler-load-test` resolves different dependency
+//! features, so it can't reuse a warm workspace build. Without a warm dir,
+//! a fresh worktree compiles the whole dependency graph from zero. See
+//! `docs/testing.md` § "Building it" for why, and for the full flag surface
+//! and recorded baselines.
 
 mod fleet;
 mod hub;
