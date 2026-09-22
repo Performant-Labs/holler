@@ -8,6 +8,13 @@ fills this file in at release time.
 ## [Unreleased]
 
 ### Enhancements
+- Linux arm64 (aarch64) release binary: `holler-ubuntu-arm64`, published alongside the existing
+  macOS and Linux x86_64 assets on the [v0.2.0 release](https://github.com/Performant-Labs/holler/releases/tag/v0.2.0),
+  built and verified on GitHub's hosted `ubuntu-24.04-arm` runner via the new
+  `.github/workflows/release-arm64.yml` (`workflow_dispatch`-triggered). `install.sh` and the
+  [Homebrew tap](https://github.com/Performant-Labs/homebrew-tap)'s formula both detect and
+  install it automatically on Linux arm64. See [`docs/releasing.md`](docs/releasing.md)'s
+  platform table.
 - Homebrew install: `brew tap Performant-Labs/tap && brew install holler`, via the new
   self-hosted [Performant-Labs/homebrew-tap](https://github.com/Performant-Labs/homebrew-tap)
   (fetches the real published release binary, real sha256-verified — not a source build). A
