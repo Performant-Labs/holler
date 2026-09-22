@@ -8,7 +8,13 @@
 
 **Your agents are just a holler away — one binary, hub or body.**
 
+**English** | [中文](README.zh-CN.md) | [日本語](README.ja.md) | [Español](README.es.md) | [Deutsch](README.de.md)
+
 </div>
+
+> The translated READMEs cover only the front door (Why Holler?, Install, Quick Start) and are
+> AI-assisted — everything else, including this full page, is the English-language source of
+> truth. See each translation's own note for why the rest isn't translated.
 
 A self-hosted, outbound-only circuit for interactive coding sessions on machines you own — a
 `hub` that can supervise, and a `body` that runs alongside the real coding agent, connected by
