@@ -167,6 +167,26 @@ anything already there, not merely a different string. The goal is that a roster
 *which hub* it belongs to on sight — not just that it's "the Jupiter one," when there may be
 more than one.
 
+**Two mechanical gotchas worth knowing before minting, confirmed live 2026-09-23:**
+
+- **Labels are permanent, even for a `revoke`d or `delete`d token.** `revoke` deliberately keeps
+  the record (it's an audit trail); `delete` only invalidates the secret. Neither frees the
+  label — minting against a label you've used before, ever, fails with `label "..." already in
+  use`, even if that token is long gone. If you're confident the old pairing is genuinely done
+  (per the "never kill" section above), don't try to reclaim the label: just append a counter
+  and mint `io-jupiter-2`, `-3`, and so on.
+- **The token's own `expires` timestamp is a redeem-immediately window, not an ongoing validity
+  period.** It can print as already at, or even slightly past, "now" by the time you read the
+  mint output — that's normal, not a failure. Go straight to `body join` with no pause; only a
+  real `token expired`/`invalid token` error *from `body join` itself* means the window was
+  actually missed.
+- **A real Homebrew/Linuxbrew-installed `herdr` or `holler` can still report `not found` even
+  in a login shell** — some machines never add the brew prefix's `bin` dir to `$PATH` at all,
+  not just a login-vs-non-login gap. Before concluding either binary is genuinely missing, check
+  `~/.local/bin/<binary>`, `/home/linuxbrew/.linuxbrew/bin/<binary>`, and
+  `/opt/homebrew/bin/<binary>` directly; if one resolves, use that absolute path for the rest of
+  the run rather than fixing the shell profile as part of setup.
+
 ## Automated setup
 
 A Claude Code skill drives this end to end — `setup-wizard`
