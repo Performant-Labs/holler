@@ -8,7 +8,7 @@
 
 **Deine Agenten sind nur einen Ruf entfernt — eine einzige Binärdatei, als Hub oder als Body.**
 
-[English](README.md) | [中文](README.zh-CN.md) | [日本語](README.ja.md) | [Español](README.es.md) | **Deutsch**
+[English](README.md) | [中文](README.zh-CN.md) | [日本語](README.ja.md) | [Español](README.es.md) | **Deutsch** | [Français](README.fr.md)
 
 </div>
 

@@ -8,7 +8,7 @@
 
 **Your agents are just a holler away — one binary, hub or body.**
 
-**English** | [中文](README.zh-CN.md) | [日本語](README.ja.md) | [Español](README.es.md) | [Deutsch](README.de.md)
+**English** | [中文](README.zh-CN.md) | [日本語](README.ja.md) | [Español](README.es.md) | [Deutsch](README.de.md) | [Français](README.fr.md)
 
 </div>
 

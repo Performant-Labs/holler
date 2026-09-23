@@ -8,7 +8,7 @@
 
 **「holler」と呼びかければ、あなたのエージェントはすぐそこに —— 1 つのバイナリが hub にも body にもなる。**
 
-[English](README.md) | [中文](README.zh-CN.md) | **日本語** | [Español](README.es.md) | [Deutsch](README.de.md)
+[English](README.md) | [中文](README.zh-CN.md) | **日本語** | [Español](README.es.md) | [Deutsch](README.de.md) | [Français](README.fr.md)
 
 </div>
 

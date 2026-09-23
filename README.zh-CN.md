@@ -8,7 +8,7 @@
 
 **只需一声“holler”，你的智能体就在身边 —— 一个二进制文件，身兼 hub 与 body 两种角色。**
 
-[English](README.md) | **中文** | [日本語](README.ja.md) | [Español](README.es.md) | [Deutsch](README.de.md)
+[English](README.md) | **中文** | [日本語](README.ja.md) | [Español](README.es.md) | [Deutsch](README.de.md) | [Français](README.fr.md)
 
 </div>
 
