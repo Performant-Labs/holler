@@ -88,6 +88,13 @@ fills this file in at release time.
   points at [Harness recipes](README.md#harness-recipes) / [Attach convenience](README.md#attach-convenience)
   for the other two real paths (a real coding agent; attaching to an already-running session).
 
+### Bug Fixes
+- Fix: every human-readable timestamp printed through `format_epoch` was **one day early** —
+  the day-of-month term of its civil-date conversion was missing a `+ 1` (epoch 0 printed as
+  `1970-01-00`). Affected `hub token mint`/`list`/`ping`'s `expires` and `last_seen`, and
+  `body attach sessions`' `UPDATED` column; `--json` output was always correct (epoch seconds).
+  Also corrects the helper's doc comment, which said local time when it formats UTC.
+
 ## [0.2.0] - 2026-09-21
 
 **Note:** this section had gone unpopulated since #327 (the release-process
