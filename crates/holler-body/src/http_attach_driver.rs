@@ -47,6 +47,10 @@
 //!   the real route (`204`); the bare `POST {endpoint}/session/{id}/interrupt`
 //!   also fell through to the SPA's HTML shell (`200`, not a real interrupt).
 //!   This driver always calls the `/api`-prefixed form.
+//!   Against real `opencode` v1.18.32 that route was later observed to answer
+//!   `204` yet leave the turn streaming (1 of 2 controlled trials), so `cancel`
+//!   also sends the classic `POST {endpoint}/session/{id}/abort`, which stopped
+//!   the turn every time; it is best-effort and never fails the cancel.
 //!
 //!   Together these two confirm the legacy driver's own doc comment was
 //!   right about *which* form each individual route needs, but a
@@ -290,6 +294,7 @@ impl HttpAttachDriver {
         connection::post_interrupt(&self.client, &self.endpoint, &self.session_id)
             .await
             .map_err(|e| DriverError::Cancel(format!("sending interrupt: {e}")))?;
+        connection::post_abort(&self.client, &self.endpoint, &self.session_id).await;
 
         match tokio::time::timeout(CANCEL_TIMEOUT, done_rx).await {
             Ok(Ok(reason)) => Ok(reason),

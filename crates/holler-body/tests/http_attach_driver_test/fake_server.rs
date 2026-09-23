@@ -315,6 +315,10 @@ fn route(method: &str, path: &str, body: &str, state: &Arc<Mutex<FakeState>>) ->
         // route).
         ("POST", ["session", _id, "prompt_async"]) => no_content(),
         ("POST", ["api", "session", _id, "interrupt"]) => no_content(),
+        // OpenCode's classic abort route. Real `opencode` v1.18.32 was observed
+        // to accept `/api/.../interrupt` with a 204 yet keep streaming, while
+        // this route stopped the turn every time.
+        ("POST", ["session", _id, "abort"]) => ok_json("true"),
         ("GET", ["question"]) => ok_json(&Value::Array(state.questions.clone()).to_string()),
         ("GET", ["permission"]) => ok_json(&Value::Array(state.permissions.clone()).to_string()),
         ("POST", ["question", _id, "reply"]) => ok_json("{}"),

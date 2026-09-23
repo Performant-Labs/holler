@@ -154,6 +154,56 @@ async fn cancel_posts_interrupt_and_yields_cancelled() {
 }
 
 #[tokio::test]
+async fn cancel_also_posts_classic_abort_after_interrupt() {
+    let server = FakeServer::start().await;
+    let driver = HttpAttachDriver::attach(&config(&server.endpoint(), "ses_abort"))
+        .await
+        .expect("attach must succeed");
+
+    let mut stream = driver.prompt("do a long thing").await;
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    server.push_event(message_updated_assistant("m1", "ses_abort"));
+    server.push_event(part_updated_text("m1", "ses_abort", "working..."));
+    assert_eq!(
+        next_event_within(&mut stream, WAIT).await,
+        DriverEvent::Chunk("working...".to_string())
+    );
+
+    let cancel_task = tokio::spawn(async move {
+        let result = driver.cancel().await;
+        (driver, result)
+    });
+
+    let deadline = tokio::time::Instant::now() + WAIT;
+    loop {
+        let posts: Vec<String> = server
+            .requests()
+            .iter()
+            .filter(|r| r.method == "POST")
+            .map(|r| r.path.clone())
+            .collect();
+        if posts.iter().any(|p| p == "/session/ses_abort/abort") {
+            let interrupt_at = posts.iter().position(|p| p == "/api/session/ses_abort/interrupt");
+            let abort_at = posts.iter().position(|p| p == "/session/ses_abort/abort");
+            assert!(
+                interrupt_at < abort_at,
+                "interrupt must be sent before the abort fallback: {posts:?}"
+            );
+            break;
+        }
+        assert!(tokio::time::Instant::now() < deadline, "abort POST never arrived");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    server.push_event(session_idle("ses_abort"));
+
+    let (_driver, result) = tokio::time::timeout(WAIT, cancel_task)
+        .await
+        .expect("cancel task should finish")
+        .expect("cancel task should not panic");
+    assert_eq!(result, Ok(StopReason::Cancelled));
+}
+
+#[tokio::test]
 async fn sse_drop_mid_turn_reconnects_and_completes() {
     let server = FakeServer::start().await;
     let driver = HttpAttachDriver::attach(&config(&server.endpoint(), "ses_3"))
