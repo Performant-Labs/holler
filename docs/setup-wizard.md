@@ -185,6 +185,12 @@ real round-trip reply. It's config-driven throughout — however many orchestrat
 distinct remote hosts the config lists is however many panes and bodies get built, never a
 hardcoded pair.
 
+**A failed check is a prompt to ask, not a reason to stop.** The wizard is meant to push through
+to a fully working install — when a stage's Gate fails or something is genuinely ambiguous, it
+asks the operator one concrete, answerable question about exactly what's blocking it, then acts
+on the answer and keeps going through the rest of the stages. Reporting a broken stage and
+leaving the run there isn't the goal; a complete, verified workspace is.
+
 ## Related
 
 - [ADR 0005](adr/ADR-0005.md) — attach mode's normative design.

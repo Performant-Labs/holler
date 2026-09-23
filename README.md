@@ -210,8 +210,10 @@ you're about to execute and get my explicit yes before changing anything, start 
 OpenCode backends, capture real session IDs, bring up the Holler hub locally, migrate a
 Holler-only derived config and join/run one body per distinct remote host, build the Herdr
 panes per the config's `layout`, attach each session pane, and verify every session end to end
-with a real round-trip `holler say` reply. Stop and tell me plainly if any stage fails instead
-of guessing a fix.
+with a real round-trip `holler say` reply. If any stage fails, don't just stop and report it and
+leave things unfinished — tell me plainly what broke, ask me the one concrete question that
+unblocks it, and once I answer, keep going through the rest of the stages until the workspace is
+actually up and verified. Don't guess a fix silently; do push through to a finished result.
 
 Before stopping, killing, or reusing ANY process, port, or credential on a remote host — never
 just to free up something a step needs or "to be able to run this" — identify what it actually
