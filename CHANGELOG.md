@@ -7,6 +7,8 @@ fills this file in at release time.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-23
+
 ### Enhancements
 - Linux arm64 (aarch64) release binary: `holler-ubuntu-arm64`, published alongside the existing
   macOS and Linux x86_64 assets on the [v0.2.0 release](https://github.com/Performant-Labs/holler/releases/tag/v0.2.0),
@@ -77,29 +79,72 @@ fills this file in at release time.
   5,781 mints needed a retry) though the hub's own redeem path does. Documented in
   [`docs/testing.md`](docs/testing.md) ([#373](https://github.com/Performant-Labs/holler/issues/373)).
 
+- README Quick Start: adds a real, verified `sessions.toml` (spawn-mode, pointed at `stub-acp`
+  for anyone building from source) instead of only referencing config shape in the abstract, and
+  points at [Harness recipes](README.md#harness-recipes) / [Attach convenience](README.md#attach-convenience)
+  for the other two real paths (a real coding agent; attaching to an already-running session).
+- Docs: the README is reworked (Why Holler?, Install, Quick Start, "The most practical way to run
+  Holler", and translated front doors in zh-CN/ja/es/de), and [`docs/setup-wizard.md`](docs/setup-wizard.md)
+  documents an agent-driven setup of one or more local orchestrator panes plus a live pane per
+  remote Holler session in a [Herdr](https://herdr.dev) workspace: install Herdr, then (as a
+  separate step) configure and launch it. Includes the operational rules learned the hard way:
+  never kill a process on a shared host without identifying it first, label every token by its hub
+  as well as its remote host, and that token labels are permanent.
+- `scripts/seed-target-dir.sh`: gives a git worktree its own `target/` seeded copy-on-write from a
+  warm one, so a build recompiles only this tree's crates instead of every dependency, without
+  sharing a `CARGO_TARGET_DIR` across worktrees (which silently reuses stale binaries)
+  ([#396](https://github.com/Performant-Labs/holler/pull/396)).
+
+### Bug Fixes
 - Fix (#404): `hub token mint`'s printed `body join` command always suggested `wss://`,
   even for a loopback `--advertise` (e.g. `127.0.0.1:41807`, exactly what the README's own
   Quick Start produces on a single machine). The hub only binds plain `ws://` on loopback, so
   the printed command hung indefinitely on a TLS handshake the hub never answers. Now uses
   `holler_body::server_address::ServerAddress::is_loopback` to pick `ws://` for a bare loopback
   advertise host and `wss://` for everything else, matching the body's own `--server` parsing.
-- README Quick Start: adds a real, verified `sessions.toml` (spawn-mode, pointed at `stub-acp`
-  for anyone building from source) instead of only referencing config shape in the abstract, and
-  points at [Harness recipes](README.md#harness-recipes) / [Attach convenience](README.md#attach-convenience)
-  for the other two real paths (a real coding agent; attaching to an already-running session).
-
-### Bug Fixes
 - Fix: `holler interrupt` on an attach-mode session could leave the turn running. Against real
   OpenCode 1.18.32, `POST /api/session/<id>/interrupt` answered `204` but the session stayed `busy`
   in 1 of 2 controlled trials (and for minutes in the acceptance-gate run), while
   `POST /session/<id>/abort` stopped it every time. `HttpAttachDriver::cancel` now sends the abort
   after the interrupt (best effort). With the fix, interrupts of a genuinely running turn confirmed
-  in under a second in every valid trial, and `say` returned `prompt was interrupted`.
+  in under a second in every valid trial, and `say` returned `prompt was interrupted`
+  ([#417](https://github.com/Performant-Labs/holler/pull/417)).
 - Fix: every human-readable timestamp printed through `format_epoch` was **one day early** —
   the day-of-month term of its civil-date conversion was missing a `+ 1` (epoch 0 printed as
   `1970-01-00`). Affected `hub token mint`/`list`/`ping`'s `expires` and `last_seen`, and
   `body attach sessions`' `UPDATED` column; `--json` output was always correct (epoch seconds).
-  Also corrects the helper's doc comment, which said local time when it formats UTC.
+  Also corrects the helper's doc comment, which said local time when it formats UTC
+  ([#416](https://github.com/Performant-Labs/holler/pull/416)).
+- Fix: a panicking or early-returning test could orphan its `Body` child process; `Body` now has a
+  `Drop` impl ([#391](https://github.com/Performant-Labs/holler/pull/391)).
+
+### Known Issues
+- A body's ACP child crashing mid-turn may not surface as an error promptly (a hang instead of
+  `Done(Error)`): a confirmed defect in `agent-client-protocol` 2.1.0's crash detection, not fixable
+  in this crate. Four `#[ignore]`d tests document it and still fail when forced
+  (`cargo test --workspace -- --ignored`) ([#272](https://github.com/Performant-Labs/holler/issues/272),
+  upstream [rust-sdk#250](https://github.com/agentclientprotocol/rust-sdk/issues/250) /
+  [#254](https://github.com/agentclientprotocol/rust-sdk/issues/254)).
+- Spawn-mode `interrupt` cancels the model turn but not a shell command the harness already started;
+  the next `say` blocks until that command finishes (52 s observed with a 40 s loop)
+  ([#418](https://github.com/Performant-Labs/holler/issues/418)).
+- A body never detects that its attach-mode backend died: the roster keeps showing `connected`/`idle`
+  because the body itself keeps heartbeating ([#397](https://github.com/Performant-Labs/holler/issues/397)).
+- A detached body's token label is never freed, and the credential store grows without bound under
+  churn (5,781 records over 578 cycles) ([#400](https://github.com/Performant-Labs/holler/issues/400)).
+- `hub token mint` does not retry under token-store lock contention, though the hub's redeem path
+  does ([#401](https://github.com/Performant-Labs/holler/issues/401)).
+- Hub RSS grew 7.9 to 102 MiB over 578 churn cycles; leak versus bounded-but-large is unresolved
+  ([#402](https://github.com/Performant-Labs/holler/issues/402)).
+- `hub token list`'s `LAST_SEEN` is always empty: `touch_last_seen` is never called outside tests
+  ([#419](https://github.com/Performant-Labs/holler/issues/419)).
+- Flaky on Linux CI: `interrupt_test::ack_timeout_message_when_body_stalls`
+  ([#420](https://github.com/Performant-Labs/holler/issues/420)).
+- `http_attach_driver`'s real permission/question wire shape has never been independently confirmed
+  against a real OpenCode instance, only against hand-authored fake-server fixtures
+  ([#365](https://github.com/Performant-Labs/holler/issues/365)).
+- Windows is not a supported target: the control-socket transport is Unix domain sockets end to end
+  ([#378](https://github.com/Performant-Labs/holler/issues/378)).
 
 ## [0.2.0] - 2026-09-21
 
