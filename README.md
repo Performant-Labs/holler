@@ -212,6 +212,12 @@ is first (its config, its cwd, what it's connected to). If it wasn't started by 
 it as my real, unrelated production until I've explicitly confirmed, by name, that it's safe to
 touch. A real incident did exactly the unsafe version of this once already: killed a live
 production Holler session on the assumption a used port/process was fair game for a test.
+
+When minting a token for a remote host, label it with this hub's own identity too, not just the
+remote host — `<this-hub>-<remote_host>` (e.g. `io-jupiter`), never a bare `<remote_host>-body`
+like `jupiter-body`. The same remote host can be paired to more than one hub; a generic label is
+how two real, unrelated pairings become indistinguishable later, which is exactly what almost
+caused the incident above.
 ```
 
 ## Where Holler fits

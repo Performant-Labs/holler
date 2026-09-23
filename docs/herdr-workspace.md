@@ -148,6 +148,25 @@ mid-turn, would not have been recoverable the same way.
 on it costs seconds. Guessing, or asking forgiveness after, does not undo a killed production
 process.
 
+## Label every token by its hub, not just its remote host
+
+**A remote host can be paired to more than one hub at once, or over time** — the same real
+scenario the section above describes. `holler hub token mint --label <remote_host>-body` (e.g.
+`jupiter-body`) names only the remote side of the pairing, so two different hubs both talking to
+the same remote host end up with tokens/bodies that look identical to a human — or another
+agent — reading a process list or a token store later. That ambiguity is exactly what made the
+incident above possible in the first place: nobody could tell which `jupiter`-something belonged
+to which hub without digging.
+
+Fold the hub's own identity into the label instead: `<hub_host's short name>-<remote_host>` —
+`io-jupiter`, not `jupiter-body`. Before minting, check what's already on the remote host
+(`ssh <remote_host> "ps -ef | grep holler"` — the same check "Never kill a process you didn't
+identify first" already has you running) and make sure your new label is visibly distinct from
+anything already there, not merely a different string. The goal is that a roster entry, a
+`hub token list` row, or a process someone inspects six months from now on a shared host names
+*which hub* it belongs to on sight — not just that it's "the Jupiter one," when there may be
+more than one.
+
 ## Automated setup
 
 A Claude Code skill drives this end to end — `herdr-workspace`
