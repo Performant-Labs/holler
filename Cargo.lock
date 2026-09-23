@@ -1117,7 +1117,7 @@ dependencies = [
 
 [[package]]
 name = "holler-body"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "agent-client-protocol",
  "ed25519-dalek",
@@ -1140,7 +1140,7 @@ dependencies = [
 
 [[package]]
 name = "holler-cli"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "assert_cmd",
  "clap",
@@ -1168,7 +1168,7 @@ dependencies = [
 
 [[package]]
 name = "holler-hub"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "ed25519-dalek",
  "fs4",
@@ -1194,7 +1194,7 @@ dependencies = [
 
 [[package]]
 name = "holler-load-test"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "clap",
  "ed25519-dalek",
@@ -1212,7 +1212,7 @@ dependencies = [
 
 [[package]]
 name = "holler-proto"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "base64 0.22.1",
  "hex",
