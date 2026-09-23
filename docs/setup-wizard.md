@@ -203,8 +203,12 @@ more than one.
 
 ## Automated setup
 
-A Claude Code skill drives this end to end — `setup-wizard`
-(`~/.claude/skills/setup-wizard/SKILL.md`), an 11-stage wizard (Stage 0 through Stage 10). Stage
+A Claude Code skill drives this end to end — `setup-wizard`, an 11-stage wizard (Stage 0 through
+Stage 10). The skill ships in this repo at
+[`agent-skills/setup-wizard/SKILL.md`](../agent-skills/setup-wizard/SKILL.md), which is its source
+of truth: install it by copying that file to `~/.claude/skills/setup-wizard/SKILL.md` (the README
+has a one-line `curl` for it), or let the README's agent prompt fetch it on a machine that doesn't
+have it. Stage
 0 stands apart from the rest: it only installs the `herdr` binary itself (via
 [herdr.dev's install script](https://herdr.dev/install.sh) or `brew install herdr`), asked as
 its own up-front yes/no, and ends with a second, separate yes/no — "configure Herdr now and

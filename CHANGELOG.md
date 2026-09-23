@@ -7,6 +7,14 @@ fills this file in at release time.
 
 ## [Unreleased]
 
+### Enhancements
+- The `setup-wizard` Claude Code skill now ships in the repo at
+  [`agent-skills/setup-wizard/SKILL.md`](agent-skills/setup-wizard/SKILL.md) instead of living only
+  in one operator's home directory. The README's agent prompt uses the skill if it is installed and
+  otherwise fetches it from the repo, so it launches the real wizard on a machine that has never seen
+  it (it previously fell back to an approximation rebuilt from `docs/setup-wizard.md`). The README
+  also has a one-line install for Claude Code.
+
 ## [0.3.0] - 2026-09-23
 
 ### Enhancements
