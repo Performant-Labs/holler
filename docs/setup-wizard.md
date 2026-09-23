@@ -186,6 +186,18 @@ more than one.
   `~/.local/bin/<binary>`, `/home/linuxbrew/.linuxbrew/bin/<binary>`, and
   `/opt/homebrew/bin/<binary>` directly; if one resolves, use that absolute path for the rest of
   the run rather than fixing the shell profile as part of setup.
+- **A restarted Herdr server does not start blank — it restores its saved session, including
+  resuming agents.** After killing the server and starting a fresh one, all the previous run's
+  panes were already there, the orchestrator pane's Claude conversation had auto-resumed
+  (`claude --resume <id>`), and the two viewer panes had come back as dead shells running
+  `opencode --session <old id>` → `Session not found`. Check `herdr pane list` before splitting:
+  if the pane count already equals orchestrators + sessions, reuse the structure, leave a
+  healthy resumed orchestrator alone, and re-attach only the dead viewer panes using the new run's
+  session ids.
+- **A resumed orchestrator can't prove the `AGENTS.md` briefing works.** It may already know about
+  Holler from its own past turns. To test the briefing, exit that session, launch a fresh
+  `claude` (no `--resume`), and ask it something with no Holler context, like "Send a hello to
+  alpha" — it should find the roster, resolve the namespaced session name, and get a real reply.
 
 ## Automated setup
 
