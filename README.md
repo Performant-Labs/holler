@@ -163,19 +163,33 @@ See [docs/README.md](docs/README.md) — the index. For testing: [the harness de
 
 To have an agent (Claude Code or similar) drive the [Herdr workspace setup](docs/setup-wizard.md)
 for you — one or more local orchestrator panes plus one live view pane per remote Holler
-session — give it this prompt. If you have the `setup-wizard` Claude Code skill installed
-(it's a personal/global skill, not shipped in this repo), it'll use that directly; otherwise it
-follows `docs/setup-wizard.md` on its own:
+session — give it the prompt below. The wizard is a Claude Code skill that ships in this repo at
+[`agent-skills/setup-wizard/SKILL.md`](agent-skills/setup-wizard/SKILL.md); the prompt uses it if it's
+installed and otherwise fetches it from this repo, so it works on a machine that has never seen it.
+To install it permanently for Claude Code instead:
+
+```bash
+mkdir -p ~/.claude/skills/setup-wizard && curl -fsSL https://raw.githubusercontent.com/Performant-Labs/holler/main/agent-skills/setup-wizard/SKILL.md -o ~/.claude/skills/setup-wizard/SKILL.md
+```
+
+The prompt:
 
 ```
 Set up a Herdr workspace for me, per Performant-Labs/holler's docs/setup-wizard.md.
 
-If you have the `setup-wizard` Claude Code skill installed, invoke it directly
-(/setup-wizard, optionally with --config <path>) and follow its staged wizard exactly — starting
-with its own Stage 0, which only installs the `herdr` binary (asked as its own yes/no) and then
-asks a second, separate yes/no before configuring anything or launching a workspace.
+Use the setup-wizard procedure and follow its stages exactly — starting with its own Stage 0,
+which only installs the `herdr` binary (asked as its own yes/no) and then asks a second,
+separate yes/no before configuring anything or launching a workspace.
 
-Otherwise, read docs/setup-wizard.md in full and replicate its flow yourself. First, check
+1. If you have the `setup-wizard` Claude Code skill installed, invoke it directly
+   (/setup-wizard, optionally with --config <path>).
+2. Otherwise get the same procedure from the repo: read agent-skills/setup-wizard/SKILL.md in a
+   local checkout, or fetch
+   https://raw.githubusercontent.com/Performant-Labs/holler/main/agent-skills/setup-wizard/SKILL.md
+   — and execute it stage by stage, as if it were that skill (treat "/setup-wizard" in it as this
+   very task, and its optional --config <path> as the config path I give you).
+3. Only if you cannot get that file, read docs/setup-wizard.md in full and replicate its flow
+   yourself. First, check
 whether `herdr` is already installed (`command -v herdr`); if not, ask me whether to install it
 (via `curl -fsSL https://herdr.dev/install.sh | sh` or `brew install herdr`) before doing
 anything else — and treat that as its own decision, not a green light to also configure and
