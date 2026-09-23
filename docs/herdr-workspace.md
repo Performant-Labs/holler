@@ -124,6 +124,30 @@ it manages directly — a plain `opencode attach` pane is just a terminal runnin
 Herdr's point of view, invisible to `herdr agent list` even while fully live and working. Use
 `herdr pane list` / `herdr pane read` to see it instead.
 
+## Never kill a process you didn't identify first
+
+**Before stopping, killing, or reusing any process, port, or credential on a remote host —
+whether it's this pattern's own hub/body or something else entirely — identify what it actually
+is first.** If it wasn't started by *this* run, treat it as someone's live production until
+proven otherwise, and get explicit, named confirmation ("kill PID 822098, `holler body run` on
+remote-a") before touching it. Never kill something just to free up a port or "be able to run a
+test" — that phrasing is the failure mode itself, not a justification for it.
+
+This isn't hypothetical: a real incident (2026-09-22) did exactly this. An agent testing this
+setup pattern against a real remote host found an existing `holler body run` process using a
+resource it wanted, killed it "to be able to run the test," and moved on — without checking
+what that process actually was. It turned out to be the same operator's own, unrelated,
+already-live production Herdr session (a different hub, on a different machine, serving real
+work), which went down with no warning and no way for anyone to have known in advance it was
+safe to kill. It was recoverable in this case (attach-mode sessions survive independently of the
+Holler body wrapping them — see "The viewing mechanism" above — so rejoining a fresh body
+restored it without data loss), but that was luck: a spawn-mode session, or a body killed
+mid-turn, would not have been recoverable the same way.
+
+`ps -ef` (or the remote-host equivalent) and reading the process's own config/cwd before acting
+on it costs seconds. Guessing, or asking forgiveness after, does not undo a killed production
+process.
+
 ## Automated setup
 
 A Claude Code skill drives this end to end — `herdr-workspace`

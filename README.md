@@ -187,6 +187,13 @@ Holler-only derived config and join/run one body per distinct remote host, build
 panes per the config's `layout`, attach each session pane, and verify every session end to end
 with a real round-trip `holler say` reply. Stop and tell me plainly if any stage fails instead
 of guessing a fix.
+
+Before stopping, killing, or reusing ANY process, port, or credential on a remote host — never
+just to free up something a step needs or "to be able to run this" — identify what it actually
+is first (its config, its cwd, what it's connected to). If it wasn't started by this run, treat
+it as my real, unrelated production until I've explicitly confirmed, by name, that it's safe to
+touch. A real incident did exactly the unsafe version of this once already: killed a live
+production Holler session on the assumption a used port/process was fair game for a test.
 ```
 
 ## Where Holler fits
