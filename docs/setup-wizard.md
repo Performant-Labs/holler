@@ -40,7 +40,7 @@ merging across tiers):
 
 1. An explicit `--config <path>` passed to the wizard's invocation.
 2. `./sessions.toml` — a project-local config, when the wizard is run from a project directory.
-3. `~/.config/herdr-workspace/sessions.toml` — the global fallback.
+3. `~/.config/setup-wizard/sessions.toml` — the global fallback.
 
 Shape:
 
@@ -169,15 +169,21 @@ more than one.
 
 ## Automated setup
 
-A Claude Code skill drives this end to end — `herdr-workspace`
-(`~/.claude/skills/herdr-workspace/SKILL.md`), a 10-stage wizard: load the config described
-above, preflight (including per-host SSH reachability, with a manual-relay fallback when no
-local `ssh` client exists), present the plan and get explicit assent before touching anything,
-start the remote OpenCode backends, capture real session IDs, bring up the hub, migrate the
-config and join/run one body per distinct remote host, build the Herdr workspace, attach each
-pane, and verify every session end to end with a real round-trip reply. It's config-driven
-throughout — however many orchestrators, sessions, and distinct remote hosts the config lists is
-however many panes and bodies get built, never a hardcoded pair.
+A Claude Code skill drives this end to end — `setup-wizard`
+(`~/.claude/skills/setup-wizard/SKILL.md`), an 11-stage wizard (Stage 0 through Stage 10). Stage
+0 stands apart from the rest: it only installs the `herdr` binary itself (via
+[herdr.dev's install script](https://herdr.dev/install.sh) or `brew install herdr`), asked as
+its own up-front yes/no, and ends with a second, separate yes/no — "configure Herdr now and
+launch a workspace?" — before anything past it runs; a yes to installing Herdr is never treated
+as a yes to also building a workspace in the same run. Only once that second question gets a
+yes does Stage 1 onward run: load the config described above, preflight (including per-host SSH
+reachability, with a manual-relay fallback when no local `ssh` client exists), present the plan
+and get explicit assent before touching anything, start the remote OpenCode backends, capture
+real session IDs, bring up the hub, migrate the config and join/run one body per distinct remote
+host, build the Herdr workspace, attach each pane, and verify every session end to end with a
+real round-trip reply. It's config-driven throughout — however many orchestrators, sessions, and
+distinct remote hosts the config lists is however many panes and bodies get built, never a
+hardcoded pair.
 
 ## Related
 
