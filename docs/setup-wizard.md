@@ -175,11 +175,13 @@ more than one.
   use`, even if that token is long gone. If you're confident the old pairing is genuinely done
   (per the "never kill" section above), don't try to reclaim the label: just append a counter
   and mint `io-jupiter-2`, `-3`, and so on.
-- **The token's own `expires` timestamp is a redeem-immediately window, not an ongoing validity
-  period.** It can print as already at, or even slightly past, "now" by the time you read the
-  mint output — that's normal, not a failure. Go straight to `body join` with no pause; only a
-  real `token expired`/`invalid token` error *from `body join` itself* means the window was
-  actually missed.
+- **A minted token is valid for 24 hours by default (`--ttl`), even though releases before v0.3.0
+  printed its `expires` a day early.** A freshly minted token showed `expires` equal to "now", which
+  looked like a zero-length window; it was a display bug in `format_epoch` (fixed in v0.3.0), and the
+  real expiry — visible in `--json` — was always `now + ttl`. There is no rush between `mint` and
+  `body join`; only a real `token expired`/`invalid token` error *from `body join` itself* means the
+  token actually lapsed. (An earlier version of this page called it a "redeem-immediately window";
+  that was wrong.)
 - **A real Homebrew/Linuxbrew-installed `herdr` or `holler` can still report `not found` even
   in a login shell** — some machines never add the brew prefix's `bin` dir to `$PATH` at all,
   not just a login-vs-non-login gap. Before concluding either binary is genuinely missing, check
