@@ -137,6 +137,24 @@ all): see [Attach convenience](#attach-convenience) below — `holler body attac
 For a single local orchestrator plus one or more remote attach-mode sessions in one terminal
 workspace, see [Set up a Herdr workspace with an agent](#set-up-a-herdr-workspace-with-an-agent).
 
+## The most practical way to run Holler
+
+Quick Start above shows the mechanism — every command, one at a time, so you understand what
+each one does. You shouldn't actually type that sequence by hand every day.
+
+The practical path: **let an agent drive it.** Author your `sessions.toml` once — [Set up a
+Herdr workspace with an agent](#set-up-a-herdr-workspace-with-an-agent) walks you through that
+the first time, with an agent asking only for what it genuinely can't know (your real remote
+hosts) rather than the whole schema cold. After that, every time you want the environment up —
+hub, bodies, sessions, a live terminal workspace to actually talk to them — give the agent that
+same prompt again. It checks what's already running before touching anything, reuses a working
+setup instead of rebuilding it, and refuses to guess at infrastructure it doesn't recognize (see
+["Never kill a process you didn't identify first"](docs/herdr-workspace.md#never-kill-a-process-you-didnt-identify-first)).
+
+You still get the plain CLI (`holler roster`, `holler say <session-name> "hello"`, `holler
+interrupt <session-name>`) for actually driving sessions once they're up — the agent builds the
+environment, it doesn't replace talking to it.
+
 ## Documentation
 
 See [docs/README.md](docs/README.md) — the index. For testing: [the harness design](docs/testing.md) and [how to run the tests](docs/running-tests.md). For watching multiple attach-mode sessions in one local terminal workspace: [docs/herdr-workspace.md](docs/herdr-workspace.md).
