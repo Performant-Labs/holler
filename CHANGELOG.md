@@ -89,6 +89,12 @@ fills this file in at release time.
   for the other two real paths (a real coding agent; attaching to an already-running session).
 
 ### Bug Fixes
+- Fix: `holler interrupt` on an attach-mode session could leave the turn running. Against real
+  OpenCode 1.18.32, `POST /api/session/<id>/interrupt` answered `204` but the session stayed `busy`
+  in 1 of 2 controlled trials (and for minutes in the acceptance-gate run), while
+  `POST /session/<id>/abort` stopped it every time. `HttpAttachDriver::cancel` now sends the abort
+  after the interrupt (best effort). With the fix, interrupts of a genuinely running turn confirmed
+  in under a second in every valid trial, and `say` returned `prompt was interrupted`.
 - Fix: every human-readable timestamp printed through `format_epoch` was **one day early** —
   the day-of-month term of its civil-date conversion was missing a `+ 1` (epoch 0 printed as
   `1970-01-00`). Affected `hub token mint`/`list`/`ping`'s `expires` and `last_seen`, and

@@ -566,6 +566,25 @@ async fn post_reply(
     Ok(())
 }
 
+/// Best-effort `POST {endpoint}/session/{id}/abort`, OpenCode's classic abort
+/// route, sent right after the `/api`-prefixed interrupt. Real `opencode`
+/// v1.18.32 answered that interrupt with a `204` yet kept streaming in 1 of 2
+/// controlled trials, while this route stopped the turn every time. Failure
+/// is deliberately not an error: the interrupt already went out, and older
+/// servers may not expose this route.
+pub(super) async fn post_abort(client: &reqwest::Client, endpoint: &str, session_id: &str) {
+    let url = format!("{}/session/{session_id}/abort", endpoint.trim_end_matches('/'));
+    let started = Instant::now();
+    match client.post(&url).send().await {
+        Ok(response) => log_debug(
+            "abort",
+            vec![("status", response.status().as_str().to_string()), ("ms", elapsed_ms(started))],
+            None,
+        ),
+        Err(err) => log_debug("abort", vec![("error", err.to_string())], None),
+    }
+}
+
 /// Direct POST for [`super::HttpAttachDriver::cancel`]'s interrupt call.
 pub(super) async fn post_interrupt(
     client: &reqwest::Client,
