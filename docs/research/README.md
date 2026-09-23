@@ -34,9 +34,9 @@ this repo, written directly against the current rebuild.
 
 ## Design-question memos
 
-Three memos, each answering one specific design question the team raised, each independently
+Four memos, each answering one specific design question the team raised, each independently
 surveying comparable tools and primary sources (RFCs, vendor docs) before making a recommendation.
-All three predate the hub/body, protocol v2 rebuild — ported verbatim with a terminology note and
+All four predate the hub/body, protocol v2 rebuild — ported verbatim with a terminology note and
 links repointed at the exact `holler-server` commit each was verified against, since neither the
 ADR numbers nor the code paths they cite exist on `holler-server`'s current `main`.
 
@@ -54,6 +54,13 @@ ADR numbers nor the code paths they cite exist on `holler-server`'s current `mai
 - [**message-integrity.md**](message-integrity.md) (2026-09-05) — what TCP/TLS actually guarantee
   for "arrived intact," survey of ack/QoS patterns in JSON-RPC, MQTT, and gRPC, and a
   recommendation to add a minimal ack scoped to `interrupt` only (MQTT QoS 1's shape, not QoS 2's).
+- [**session-status-and-wait.md**](session-status-and-wait.md) (2026-09-08) — how to tell an
+  orchestrator that a session went idle, blocked, or failed without a webhook and without relying on
+  the operator agent's own discipline: wire push plus a blocking CLI `wait` versus A2A push
+  notifications, edge-triggered waits with a `turn_id`, why `idle` is not `done`, the proposed state
+  set, and "event in, LLM only for judgment." Ported from the never-merged
+  `research/session-status-and-wait` branch; the `wait` verb it argued for shipped (see
+  [`../orchestrating.md`](../orchestrating.md)), the rest is unverified against current code.
 
 ## Positioning
 

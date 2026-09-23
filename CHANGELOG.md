@@ -8,6 +8,10 @@ fills this file in at release time.
 ## [Unreleased]
 
 ### Enhancements
+- Research memo `docs/research/session-status-and-wait.md`, ported from the retired `holler-server`
+  repo's never-merged `research/session-status-and-wait` branch (2026-09-08): why a wire push plus a
+  blocking `wait` beats an A2A-style webhook for telling an orchestrator a session went idle, blocked,
+  or failed, and why `idle` is not `done`. Indexed in `docs/research/README.md`. Not a decision record.
 - The `setup-wizard` Claude Code skill now ships in the repo at
   [`agent-skills/setup-wizard/SKILL.md`](agent-skills/setup-wizard/SKILL.md) instead of living only
   in one operator's home directory. The README's agent prompt uses the skill if it is installed and
