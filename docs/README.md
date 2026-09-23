@@ -25,4 +25,4 @@ Index of everything under `docs/`.
 
 - [**orchestrating.md**](orchestrating.md) — the orchestrator pattern: dispatch with `say`, don't poll `roster`, block on a deterministic `wait`, redirect with `interrupt`, resolve with `answer` (issue #142).
 - [**guidance-effective-agent-monitoring.md**](guidance-effective-agent-monitoring.md) — how to monitor a body/agent effectively (operating guidance, not a protocol or an ADR).
-- [**herdr-workspace.md**](herdr-workspace.md) — watching multiple attach-mode sessions in one local [Herdr](https://herdr.dev) workspace: plain `opencode attach` panes (not `herdr-mirror`), and the config-driven setup wizard that automates it.
+- [**setup-wizard.md**](setup-wizard.md) — watching multiple attach-mode sessions in one local [Herdr](https://herdr.dev) workspace: plain `opencode attach` panes (not `herdr-mirror`), and the config-driven setup wizard (installs Herdr itself, then optionally configures and launches a workspace) that automates it.

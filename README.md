@@ -149,7 +149,7 @@ hosts) rather than the whole schema cold. After that, every time you want the en
 hub, bodies, sessions, a live terminal workspace to actually talk to them — give the agent that
 same prompt again. It checks what's already running before touching anything, reuses a working
 setup instead of rebuilding it, and refuses to guess at infrastructure it doesn't recognize (see
-["Never kill a process you didn't identify first"](docs/herdr-workspace.md#never-kill-a-process-you-didnt-identify-first)).
+["Never kill a process you didn't identify first"](docs/setup-wizard.md#never-kill-a-process-you-didnt-identify-first)).
 
 You still get the plain CLI (`holler roster`, `holler say <session-name> "hello"`, `holler
 interrupt <session-name>`) for actually driving sessions once they're up — the agent builds the
@@ -157,25 +157,32 @@ environment, it doesn't replace talking to it.
 
 ## Documentation
 
-See [docs/README.md](docs/README.md) — the index. For testing: [the harness design](docs/testing.md) and [how to run the tests](docs/running-tests.md). For watching multiple attach-mode sessions in one local terminal workspace: [docs/herdr-workspace.md](docs/herdr-workspace.md).
+See [docs/README.md](docs/README.md) — the index. For testing: [the harness design](docs/testing.md) and [how to run the tests](docs/running-tests.md). For watching multiple attach-mode sessions in one local terminal workspace: [docs/setup-wizard.md](docs/setup-wizard.md).
 
 ## Set up a Herdr workspace with an agent
 
-To have an agent (Claude Code or similar) drive the [Herdr workspace setup](docs/herdr-workspace.md)
+To have an agent (Claude Code or similar) drive the [Herdr workspace setup](docs/setup-wizard.md)
 for you — one or more local orchestrator panes plus one live view pane per remote Holler
-session — give it this prompt. If you have the `herdr-workspace` Claude Code skill installed
+session — give it this prompt. If you have the `setup-wizard` Claude Code skill installed
 (it's a personal/global skill, not shipped in this repo), it'll use that directly; otherwise it
-follows `docs/herdr-workspace.md` on its own:
+follows `docs/setup-wizard.md` on its own:
 
 ```
-Set up a Herdr workspace for me, per Performant-Labs/holler's docs/herdr-workspace.md.
+Set up a Herdr workspace for me, per Performant-Labs/holler's docs/setup-wizard.md.
 
-If you have the `herdr-workspace` Claude Code skill installed, invoke it directly
-(/herdr-workspace, optionally with --config <path>) and follow its staged wizard exactly.
+If you have the `setup-wizard` Claude Code skill installed, invoke it directly
+(/setup-wizard, optionally with --config <path>) and follow its staged wizard exactly — starting
+with its own Stage 0, which only installs the `herdr` binary (asked as its own yes/no) and then
+asks a second, separate yes/no before configuring anything or launching a workspace.
 
-Otherwise, read docs/herdr-workspace.md in full and replicate its "Automated setup" flow
-yourself: load my session config (an explicit path I give you, else ./sessions.toml, else
-~/.config/herdr-workspace/sessions.toml).
+Otherwise, read docs/setup-wizard.md in full and replicate its flow yourself. First, check
+whether `herdr` is already installed (`command -v herdr`); if not, ask me whether to install it
+(via `curl -fsSL https://herdr.dev/install.sh | sh` or `brew install herdr`) before doing
+anything else — and treat that as its own decision, not a green light to also configure and
+launch a workspace in the same breath. Only once `herdr` is confirmed present, ask me separately
+whether to configure Holler and launch a workspace now. If yes, replicate the doc's "Automated
+setup" flow: load my session config (an explicit path I give you, else ./sessions.toml, else
+~/.config/setup-wizard/sessions.toml).
 
 If none of those exist, don't invent or auto-fill anything — the doc's own example config is
 illustrative, not a template to write verbatim; using it as-is would set up whatever
