@@ -63,7 +63,7 @@ curl -fsSL https://raw.githubusercontent.com/Performant-Labs/holler/main/install
 会把适配你平台的最新[发行版](https://github.com/Performant-Labs/holler/releases)二进制文件
 （macOS/Apple Silicon、Linux/x86_64，或 Linux/arm64 —— Windows 目前不是受支持的目标平台，
 参见 [#378](https://github.com/Performant-Labs/holler/issues/378)）下载到
-`~/.local/bin/holler`。可以用 `HOLLER_VERSION=v0.2.0` 固定某个特定版本，或用
+`~/.local/bin/holler`。可以用 `HOLLER_VERSION=v0.3.0` 固定某个特定版本，或用
 `HOLLER_INSTALL_DIR=/usr/local/bin` 改变安装目录（在上面的命令前加上这个环境变量即可）。
 
 **从源码构建：** `cargo build --release -p holler-cli`，二进制文件位于 `target/release/holler`。

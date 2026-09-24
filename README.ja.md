@@ -70,7 +70,7 @@ curl -fsSL https://raw.githubusercontent.com/Performant-Labs/holler/main/install
 お使いのプラットフォーム（macOS/Apple Silicon、Linux/x86_64、または Linux/arm64 —— Windows は
 サポート対象外です。[#378](https://github.com/Performant-Labs/holler/issues/378) を参照）向けの
 最新の[リリース](https://github.com/Performant-Labs/holler/releases)バイナリを `~/.local/bin/holler`
-にダウンロードします。`HOLLER_VERSION=v0.2.0` で特定バージョンを固定したり、
+にダウンロードします。`HOLLER_VERSION=v0.3.0` で特定バージョンを固定したり、
 `HOLLER_INSTALL_DIR=/usr/local/bin` でインストール先を変更したりできます（上記コマンドの前に
 環境変数として指定してください）。
 

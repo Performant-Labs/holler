@@ -4,7 +4,7 @@
 #   curl -fsSL https://raw.githubusercontent.com/Performant-Labs/holler/main/install.sh | sh
 #
 # Env overrides:
-#   HOLLER_VERSION   release tag to install, e.g. v0.2.0 (default: latest)
+#   HOLLER_VERSION   release tag to install, e.g. v0.3.0 (default: latest)
 #   HOLLER_INSTALL_DIR   where to place the binary (default: $HOME/.local/bin)
 #
 # Release assets today: macos-latest (Apple Silicon), ubuntu-latest
