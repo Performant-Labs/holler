@@ -324,6 +324,27 @@ Every event carries a `component`, identifying which layer of a `say`/`interrupt
 
 Because the ACP SDK holler pins (`agent-client-protocol` 2.1.0) spawns and owns its child process internally, it exposes no pid or exit-status accessor to this codebase — `acp`'s spawn/child-exit events report `command`/`args`/`cwd` and "connection closed", not a pid, which is the most this driver can observe without forking the SDK.
 
+## Dev scripts
+
+From a source checkout, `./scripts/run <name>` runs the org-convention
+`object:sub-object:verb` dev commands for a single-machine setup (no tunnel; the hub listens and
+advertises on loopback):
+
+| Command | What it does |
+|---|---|
+| `./scripts/run build` | `cargo build --release` |
+| `./scripts/run app:hub:run` | Build, then run `holler hub serve` in the foreground |
+| `./scripts/run app:hub:launch` | Build, then start the hub in the background (log: `$HOLLER_STATE_DIR/hub/serve.log`); refuses if a hub already holds the state dir's `hub/serve.lock`; prints next steps |
+| `./scripts/run app:hub:stop` | Stop the hub whose pid is in `hub/serve.lock` (refuses if that pid is not a `holler hub serve` process) |
+| `./scripts/run app:hub:status` | `holler roster` plus `holler hub status` |
+| `./scripts/run app:body:run` | Build, then run `holler body run --config <config>` in the foreground; the body must already be joined (see Quick Start) |
+| `./scripts/run app:body:stop` | `holler body detach` |
+
+Environment: `HOLLER_STATE_DIR` (default `~/.holler`), `HOLLER_HUB_LISTEN` (default
+`127.0.0.1:41807`), `HOLLER_HUB_ADVERTISE` (default: the listen address), `HOLLER_CONFIG` (body
+config; default `sessions.toml`, else `session.toml`), `HOLLER_BIN` (use this `holler` binary and
+skip the build).
+
 ## Contributing
 
 Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for the flow (fork, PR
