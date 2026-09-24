@@ -8,6 +8,11 @@ fills this file in at release time.
 ## [Unreleased]
 
 ### Enhancements
+- Dev scripts: `./scripts/run app:hub:run|launch|stop|status` and `app:body:run|stop` (no tunnel),
+  ported from the retired `holler-server` repo ([#425](https://github.com/Performant-Labs/holler/issues/425)).
+  `app:hub:stop` refuses to signal a pid that is not a `holler hub serve` process. Address and binary
+  are overridable via `HOLLER_HUB_LISTEN`, `HOLLER_HUB_ADVERTISE`, `HOLLER_BIN`. `scripts/run` no longer
+  uses the bash-4-only `;&` fallthrough.
 - Research memo `docs/research/session-status-and-wait.md`, ported from the retired `holler-server`
   repo's never-merged `research/session-status-and-wait` branch (2026-09-08): why a wire push plus a
   blocking `wait` beats an A2A-style webhook for telling an orchestrator a session went idle, blocked,
