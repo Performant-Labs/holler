@@ -261,6 +261,12 @@ path = "tests/multiword_command_test.rs"
 name = "hub_hygiene_test"
 path = "tests/hub_hygiene_test.rs"
 
+# Dev scripts (issue #425): drives the real `scripts/run app:hub:*` / `app:body:*`
+# dispatcher against the real binary, in a temp state dir on an OS-picked port.
+[[test]]
+name = "dev_scripts_test"
+path = "tests/dev_scripts_test.rs"
+
 # Load test (issue #300): TalkLog behavior at a large accumulated log size —
 # several hundred real prompt/reply exchanges driven through `say` against a
 # real hub + body + `stub-acp`, with per-append latency/file-size

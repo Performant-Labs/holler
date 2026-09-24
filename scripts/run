@@ -5,26 +5,38 @@
 # The npm-native equivalent of this file is `npm run <name>`; this crate
 # has no package.json, so this is that entry point instead.
 #
-# Ported from holler-server's scripts/run (holler-client#128). The
-# app:local:* names are added by the Dev scripts story -- for now only
-# `build` and the usage line exist.
+# Ported from holler-server's scripts/run (holler-client#128); the app:hub:*
+# and app:body:* names were added by the Dev scripts story (#425). They are
+# no-tunnel, single-repo scripts (ADR 0002); each lives in scripts/local-*.sh
+# and shares scripts/local-lib.sh.
 #
-# Usage: ./scripts/run build
+# Environment: HOLLER_STATE_DIR (default ~/.holler), HOLLER_HUB_LISTEN
+# (default 127.0.0.1:41807), HOLLER_HUB_ADVERTISE (default: the listen
+# address), HOLLER_CONFIG (body config), HOLLER_BIN (use this holler binary
+# and skip the release build).
+#
+# Usage: ./scripts/run <command>
 
 set -euo pipefail
 
 dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cmd="${1:-}"
 
+usage() {
+  echo "usage: ./scripts/run <command>" >&2
+  echo "known commands: build app:hub:run app:hub:launch app:hub:stop app:hub:status app:body:run app:body:stop" >&2
+  exit 1
+}
+
 case "$cmd" in
   # Bare lifecycle verb (playbook convention: build/dev/start/test/... stay
   # unnamespaced) -- cargo build --release, standalone.
   build)             cd "$dir/.." && exec cargo build --release ;;
-  "")
-    echo "usage: ./scripts/run <command>" >&2
-    ;&
-  *)
-    echo "known commands: build" >&2
-    exit 1
-    ;;
+  app:hub:run)       exec "$dir/local-hub-run.sh" ;;
+  app:hub:launch)    exec "$dir/local-hub-launch.sh" ;;
+  app:hub:stop)      exec "$dir/local-hub-stop.sh" ;;
+  app:hub:status)    exec "$dir/local-hub-status.sh" ;;
+  app:body:run)      exec "$dir/local-body-run.sh" ;;
+  app:body:stop)     exec "$dir/local-body-stop.sh" ;;
+  *)                 usage ;;
 esac
