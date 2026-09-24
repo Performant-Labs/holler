@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Dispatches an org-convention command name (object:sub-object:verb, see
-# org/workflow-repo frameworks/node/npm-scripts.md) to its script.
+# the org's npm-scripts convention) to its script.
 # The npm-native equivalent of this file is `npm run <name>`; this crate
 # has no package.json, so this is that entry point instead.
 #
@@ -29,7 +29,7 @@ usage() {
 }
 
 case "$cmd" in
-  # Bare lifecycle verb (workflow repo convention: build/dev/start/test/... stay
+  # Bare lifecycle verb (org convention: build/dev/start/test/... stay
   # unnamespaced) -- cargo build --release, standalone.
   build)             cd "$dir/.." && exec cargo build --release ;;
   app:hub:run)       exec "$dir/local-hub-run.sh" ;;

@@ -139,8 +139,8 @@ jobs:
       - uses: actions/checkout@v4
 
       # GitHub-hosted `ubuntu-latest` ships rustup preinstalled. The
-      # self-hosted Build-host/Remote-a `runner` image now bakes rustup in
-      # too (image tag 1.69.0, 2026-09-11) — this guard is expected to be a
+      # self-hosted runner image now bakes rustup in
+      # too (as of 2026-09-11) — this guard is expected to be a
       # no-op there today; it stays as defense-in-depth, matching ci.yml's
       # own bootstrap-if-missing pattern, in case a runner image regresses
       # or `vars.CI_RUNNER` points at something older.
@@ -164,7 +164,7 @@ jobs:
         shell: bash
 
       # cloudflared is not preinstalled on either GitHub-hosted `ubuntu-latest`
-      # or the self-hosted `runner` image; install the official static
+      # or the self-hosted runner image; install the official static
       # binary directly (no apt repo pin to maintain). Guarded the same
       # if-missing way as the Rust bootstrap above, so a future image that
       # does bundle it skips straight past this step.

@@ -7,7 +7,7 @@ name: release-arm64
 # is public, and docs/releasing.md's own philosophy is "build on a real
 # machine of the target OS/arch, never cross-compile" — an ubuntu-24.04-arm
 # hosted runner IS a real arm64 Linux machine, it just isn't one in this
-# org's own fleet (Build-host/Remote-a are both x86_64).
+# org's own fleet (its self-hosted Linux machines are all x86_64).
 #
 # Deliberately a separate, narrowly-scoped workflow rather than adding
 # ubuntu-24.04-arm to ci.yml's matrix:

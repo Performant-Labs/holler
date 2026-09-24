@@ -330,8 +330,8 @@ fn parse_ttl(ttl: &str) -> Option<u64> {
 /// join` pins it — this is the physical channel that makes the pin
 /// meaningful, so the join line is where it belongs, not a separate step.
 ///
-/// Real-hardware finding (issue #316's `hlr-1405` checkpoint, run against Io
-/// over the tailnet, 2026-09-21): `--advertise`'s own `--help` text ("Address
+/// Real-hardware finding (issue #316's `hlr-1405` checkpoint, run against a real
+/// hub over a tailnet, 2026-09-21): `--advertise`'s own `--help` text ("Address
 /// (host[:port]) to advertise to bodies") never asked for a scheme, so a
 /// hub started exactly as the checkpoint's own instructions say
 /// (`--advertise hub.example.ts.net`) persisted that bare host verbatim —

@@ -12,12 +12,11 @@
 //! ## 2026-09-09 follow-up: reproduced live on the actual CI runner, root cause
 //! identified inside `agent-client-protocol` 2.1.0 itself
 //!
-//! Got shell access to the real CI environment this time (`ssh build-host`; the
-//! runner is a Docker container, image
-//! `registry.example.com/org/runner:1.0`, entrypoint
-//! `dumb-init` → `Runner.Listener`, `cap_sys_ptrace` dropped, no `docker
-//! --init`/tini beyond the baked-in `dumb-init`). Built a byte-identical
-//! container from that image, installed the pinned toolchain, and reproduced
+//! Got shell access to the real CI environment this time (the self-hosted
+//! runner is a Docker container, entrypoint `dumb-init` → `Runner.Listener`,
+//! `cap_sys_ptrace` dropped, no `docker --init`/tini beyond the baked-in
+//! `dumb-init`). Built a byte-identical container from the runner's image,
+//! installed the pinned toolchain, and reproduced
 //! the hang deterministically (3/3 runs) running *only*
 //! `acp_driver_crash_test` `--ignored`, exactly the CI command line — so this
 //! is not cross-process contention, not a container-supervisor

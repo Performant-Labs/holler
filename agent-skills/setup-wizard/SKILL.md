@@ -5,12 +5,9 @@ description: Install Herdr (if not already present, asked as its own up-front ye
 
 # Herdr: M local orchestrators + N remote agent sessions — wizard
 
-Rebuilds the working setup verified live 2026-09-21/22 and documented in
-Performant Labs' ops-handbook page `holler-herdr-hub1-remote-a.md` (section "Viewing remote OpenCode
-sessions in one local workspace — the simple, safe way"; an internal doc — if you don't have it,
-this repo's `docs/setup-wizard.md` carries the same operational rules). That page is the source of
-truth for *why* each step is shaped this way and has the full incident history — read it if anything
-here looks surprising. The doc's own examples use one
+Rebuilds a working Herdr + Holler setup verified live 2026-09-21/22 on a real two-machine
+deployment. This repo's `docs/setup-wizard.md` carries the operational rules and the reasoning
+behind each step's shape — read it if anything here looks surprising. The examples use one
 Claude orchestrator and OpenCode session harnesses because that's what was verified live —
 **don't read that as a hardcoded requirement.** Nothing about the Herdr/Holler mechanism itself
 is Claude- or OpenCode-specific, and nothing about it requires exactly one orchestrator either —
@@ -68,9 +65,9 @@ rather than assumed:
    its own body process; that's exactly what each session's own `remote_host` field controls
    (see "The config file" below) and what Stage 7 groups by, rather than assuming one host for
    everything.
-3. **The backend agent ↔ its model** — e.g. OpenCode ↔ vLLM, `http://127.0.0.1:8095` in this
-   setup's default config. This is the backend's own concern (its `opencode.jsonc` provider
-   config), not part of Holler's wire protocol at all — Stage 2 checks it only because a
+3. **The backend agent ↔ its model** — e.g. OpenCode ↔ a local or hosted model provider, as
+   configured on each remote host (its `opencode.jsonc` provider block). This is the backend's
+   own concern, not part of Holler's wire protocol at all — Stage 2 checks it only because a
    session can't do anything useful without it.
 4. **This wizard's own Herdr control** — a **local Unix socket**
    (`~/.config/herdr/herdr.sock`), never a network connection, and entirely unrelated to
@@ -176,19 +173,19 @@ cmd = "claude"
 
 [[orchestrator]]
 name = "o2"
-dir = "~/Projects/holler-load-harness"
+dir = "~/Projects/other-project"
 cmd = "claude"
 
-# alpha, beta: remote_host = "remote-a" (both on Remote-a, one body)
+# alpha, beta: remote_host = "remote-a" (both on the same remote machine, one body)
 # gamma, delta: remote_host = "remote-b" (both on a different machine, a second body)
 # ... [[session]] entries for alpha, beta, gamma, delta, each with its own remote_host/
 #     remote_tailnet_host ...
 ```
 That's 4 columns: o1 alone, alpha/beta stacked, o2 alone, gamma/delta stacked — 6 panes total,
 2 orchestrators + 4 sessions, all real data in one file — and **2 real Holler bodies**, one on
-Remote-a (hosting alpha/beta) and one on Remote-b (hosting gamma/delta), because Stage 7 groups by
+`remote-a` (hosting alpha/beta) and one on `remote-b` (hosting gamma/delta), because Stage 7 groups by
 `remote_host`. Which sessions o1 vs. o2 actually *drive* is up to how each is briefed (its own
-`AGENTS.md`/prompt, per the ops-handbook's "MO" pattern) — `layout` only controls where
+`AGENTS.md`/prompt, per the "MO" (multiple-orchestrator) pattern) — `layout` only controls where
 panes sit on screen, not who talks to whom over Holler, and is independent of which host each
 session's body actually runs on.
 
@@ -326,11 +323,11 @@ command -v herdr >/dev/null 2>&1 && herdr --version || echo "herdr: still not fo
 report `not found` here even in a login shell (`bash -lc`)** — this isn't just the
 login-vs-non-login PATH gap noted elsewhere; some machines simply never added the brew prefix's
 `bin` dir to `$PATH` at all. Confirmed live 2026-09-23: `herdr` was a real, working
-Linuxbrew-managed install (`/home/linuxbrew/.linuxbrew/bin/herdr`, a valid symlink into
-`../Cellar/herdr/...`) on a machine whose `bash -lc 'which herdr'` still came back empty. Before
+Linuxbrew-managed install (a valid symlink into `../Cellar/herdr/...` under the Linuxbrew
+prefix) on a machine whose `bash -lc 'which herdr'` still came back empty. Before
 concluding it's genuinely missing, check the common install locations directly:
 ```bash
-ls -la ~/.local/bin/herdr /home/linuxbrew/.linuxbrew/bin/herdr /opt/homebrew/bin/herdr 2>/dev/null
+ls -la ~/.local/bin/herdr "$(brew --prefix 2>/dev/null)/bin/herdr" /opt/homebrew/bin/herdr /home/linuxbrew/.linuxbrew/bin/herdr 2>/dev/null
 ```
 If one of those resolves to a real binary, it *is* installed — just not on this shell's `$PATH`.
 Don't fix the shell profile as part of this wizard; simplest is to use that absolute path for
@@ -393,7 +390,7 @@ cat "$CONFIG" 2>&1
 **If neither exists, this is a hard stop before writing anything — but it is NOT a four-category
 interrogation either.** Two failure modes to avoid, both seen live: (1) auto-writing the
 example's own values (`hub_host = "hub.example.ts.net"`, `remote_host = "remote-a"`) —
-those are **this operator's real infrastructure**, copied verbatim from documentation, and on a
+those are **placeholder values, not the user's real infrastructure**, copied verbatim from documentation, and on a
 genuinely fresh setup the wizard would sail through validation and Stage 3 could end up trying
 to actually SSH into a real host the new user never chose. (2) swinging the other way and asking
 a brand-new user to compose the *entire* schema cold — orchestrators, every session's four
@@ -566,17 +563,28 @@ which holler
 for host in <distinct remote_host values>; do
   ssh "$host" "which holler"
 done
-# for every session on a host whose harness is opencode, check that host's model endpoint:
-ssh <that session's remote_host> "curl -s http://localhost:8095/v1/models" | head -c 200
-ssh <that session's remote_host> "grep -A5 '\"vllm\"' ~/.config/opencode/opencode.jsonc" 2>&1
+# for every session on a host whose harness is opencode, resolve that host's model and check
+# its endpoint. First read the host's OpenCode config to learn <provider>/<model> and the
+# provider's baseURL (see "Resolving <provider>/<model>" below):
+ssh <that session's remote_host> "cat ~/.config/opencode/opencode.jsonc" 2>&1
+# then probe the provider's model-list endpoint at the baseURL that config names:
+ssh <that session's remote_host> "curl -s <baseURL>/models" | head -c 200
 holler hub status 2>&1
 herdr status 2>&1
 ```
 The last two calls are read-only status checks (they tell Stage 3 what already exists so its
-plan is accurate) — neither starts, stops, nor changes anything. The vLLM-specific checks
-assume the config's `opencode`-harness sessions target that specific host/model setup — if a
-session's host runs a different model server, adjust that session's own check to match what
-the config actually says rather than assuming <provider>/<model> are always the target everywhere.
+plan is accurate) — neither starts, stops, nor changes anything. The model-endpoint checks
+are driven by what each host's own OpenCode config says — never assume every host uses the same
+provider or model.
+
+**Resolving `<provider>/<model>` (do this once per distinct `remote_host`, here in Stage 2).**
+Stages 4 and 5 need the OpenCode model a session should use, written `<provider>/<model>`
+(e.g. the provider key from the config's `provider` block plus one of that provider's model
+ids). Read it from the host's `~/.config/opencode/opencode.jsonc` — the top-level `model` key
+if present, otherwise the single provider/model pair the `provider` block defines. If the config
+doesn't name a default or defines several candidates, **ask the user once** which
+`<provider>/<model>` to use for that host, and reuse the answer for every session on it. Never
+invent one or copy a value from this document.
 
 **Verify:** every orchestrator's `dir` exists and its `cmd`'s first token resolves on `$PATH`
 (locally — orchestrators always run on the hub machine, never remote); every host's SSH check
@@ -597,13 +605,15 @@ every `opencode`-harness session, its own host's model endpoint returns real JSO
 not a connection error, and the relevant provider block exists on that host's OpenCode config;
 and you now know whether a hub and a Herdr server are already running, for Stage 3's summary.
 
-**If the provider block is missing** (opencode-harness sessions only), add it before
-continuing — don't proceed without it, the session's model will fail to resolve:
+**If the provider block is missing** (opencode-harness sessions only), don't proceed — the
+session's model will fail to resolve. Stop and ask the user which provider/model that host
+should use and where its endpoint lives, then add a block of this shape (values are the user's,
+not yours to guess):
 ```json
-"vllm": {
-  "name": "vLLM (Remote-a GPU, direct 8095)",
+"<provider>": {
+  "name": "<display name>",
   "npm": "@ai-sdk/openai-compatible",
-  "options": { "baseURL": "http://127.0.0.1:8095/v1", "apiKey": "none" },
+  "options": { "baseURL": "<endpoint base URL>", "apiKey": "<key, if the endpoint needs one>" },
   "models": { "<model>": { "tool_call": true, "reasoning": true } }
 }
 ```
@@ -630,7 +640,7 @@ plan and show it before touching anything:
 
 - **Orchestrators (from the config):** the real M, each one's name/dir/cmd — e.g. "2
   orchestrators: o1 (`claude`, `~/Projects/holler`), o2 (`claude`,
-  `~/Projects/holler-load-harness`)." Not assumed to be exactly one, not assumed to be Claude.
+  `~/Projects/other-project`)." Not assumed to be exactly one, not assumed to be Claude.
 - **Sessions (from the config), grouped by their own `remote_host`** — the real N, names,
   ports, and **harnesses**, organized per host, not as one flat list — e.g. "2 hosts: remote-a
   (alpha opencode 127.0.0.1:47001, beta opencode 127.0.0.1:47002), remote-b (gamma opencode
@@ -722,7 +732,7 @@ ssh <that entry's remote_host> "curl -s http://127.0.0.1:<port>/session >/dev/nu
 five verbs are explicitly **hub-only** — they talk to the hub's own local control socket, which
 doesn't exist on a session's `remote_host`. A session trying one gets a real, permanent failure
 ("no live hub reachable"), not a transient one; earlier drafts of this skill (and a live
-`AGENTS.md` briefly deployed to remote-a) got this wrong before being corrected. The only
+`AGENTS.md` briefly deployed to a remote host) got this wrong before being corrected. The only
 Holler-aware command that *does* work from a session's own host is `holler body status`, and it
 reports the body process's own hub connection state (joined/stale/confirmed), not any one
 session's task state — not useful for a session answering "what are you doing." A session
@@ -741,7 +751,7 @@ response, for every entry:
 
 ```bash
 <NAME>_ID=$(ssh <that session's remote_host> "curl -s -X POST http://127.0.0.1:<port>/session -H 'Content-Type: application/json' \
-  -d '{\"directory\":\"'\$HOME'\",\"model\":{\"id\":\"<model>\",\"providerID\":\"vllm\"}}'" \
+  -d '{\"directory\":\"'\$HOME'\",\"model\":{\"id\":\"<model>\",\"providerID\":\"<provider>\"}}'" \
   | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
 ```
 
@@ -749,8 +759,8 @@ response, for every entry:
 your in-memory/working copy of the config's `session_id` field (you'll persist the completed
 file in Stage 7) — every later stage that references a session needs the exact id, not a guess.
 
-**Gate:** an empty id means that entry's POST failed (wrong provider name, vLLM down for that
-port) — check the raw response body before moving on to the next entry.
+**Gate:** an empty id means that entry's POST failed (wrong provider/model name, the model endpoint down
+for that host) — check the raw response body before moving on to the next entry.
 
 ## Stage 6 — Bring up the Holler hub locally
 
@@ -815,10 +825,10 @@ Third, **for each distinct `remote_host`** (looping, not just doing this once):
    never a copy containing another host's sessions.
 2. **Mint a token for this host specifically, with a label that names *this hub too*, not just
    the remote host** — never `<remote_host>-body` alone. Real incident, 2026-09-22: a token
-   labeled plain `remote-a-body` (this exact pattern) was indistinguishable from a completely
-   different, unrelated, already-live production pairing to the same remote host from a
-   *different* hub — a human reading `remote-a-body` had no way to tell which hub it belonged to,
-   and nearly killed the wrong one. A remote host can be paired to more than one hub over its
+   labeled plain `<remote_host>-body` (this exact pattern) was indistinguishable from a
+   completely different, unrelated, already-live pairing to the same remote host from a
+   *different* hub — a human reading the label had no way to tell which hub it belonged to,
+   and nearly killed the wrong process. A remote host can be paired to more than one hub over its
    lifetime (or the same host runs bodies for two different setups at once, as happened here);
    the label is the only thing a human or another agent has to tell them apart later.
 
@@ -1149,9 +1159,7 @@ everything above ran headlessly over Herdr's socket API — nothing was visible 
 
 ## Related
 
-- Full incident history and every gotcha hit building this:
-  Performant Labs' ops-handbook page `holler-herdr-hub1-remote-a.md` (internal; see this repo's
-  `docs/setup-wizard.md` if you don't have it)
+- Operational rules and the reasoning behind each step: this repo's `docs/setup-wizard.md`
 - Holler repo: `Performant-Labs/holler` — `docs/adr/ADR-0005.md` (attach mode's normative design,
   the per-session `harness` field, and the session-config TOML shape this wizard's config file
   matches), `ADR-0006` (the `wss://`/TLS-proxy hub design this recipe relies on).

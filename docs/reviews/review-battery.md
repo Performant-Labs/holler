@@ -150,13 +150,13 @@ Canonical copies: `$WORKFLOW_ROOT/workflow/skills/`. Sync stubs: `bash $WORKFLOW
 
 | Pass | Skill | Source |
 |---|---|---|
-| 1 Shape | `thermo-nuclear-code-quality-review` | cursor/plugins → workflow repo |
-| 2 Truth+Safety | `thermo-nuclear-review` | cursor/plugins → workflow repo |
-| 1+2 | `thermos` | cursor/plugins → workflow repo |
-| 3 Spec | `code-review` (Spec axis only) | mattpocock/skills → workflow repo |
-| 4 Exploitability | `security-review` | getsentry/skills → workflow repo |
-| 5 Tests | `tests-as-evidence` | workflow repo + `docs/reviews/overlays/tests-as-evidence.md` |
+| 1 Shape | `thermo-nuclear-code-quality-review` | cursor/plugins → shared workflow repo |
+| 2 Truth+Safety | `thermo-nuclear-review` | cursor/plugins → shared workflow repo |
+| 1+2 | `thermos` | cursor/plugins → shared workflow repo |
+| 3 Spec | `code-review` (Spec axis only) | mattpocock/skills → shared workflow repo |
+| 4 Exploitability | `security-review` | getsentry/skills → shared workflow repo |
+| 5 Tests | `tests-as-evidence` | shared workflow repo + `docs/reviews/overlays/tests-as-evidence.md` |
 
 Do not install a second generic code-review skill next to Thermos. Superpowers `requesting-code-review` / `receiving-code-review` are meta (how to ask, how to take a review), not a Truth pass.
 
-Trail of Bits `differential-review` is the alternate for pass 4 when the diff is auth, the ACP subprocess boundary, or the wire handshake and you want a tie-break — not installed. Add on demand into **workflow repo**, then re-run `install-stubs.sh`. Do not `npx skills add` into this repo.
+Trail of Bits `differential-review` is the alternate for pass 4 when the diff is auth, the ACP subprocess boundary, or the wire handshake and you want a tie-break — not installed. Add on demand into **the shared workflow repo**, then re-run `install-stubs.sh`. Do not `npx skills add` into this repo.

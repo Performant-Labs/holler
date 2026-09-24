@@ -8,18 +8,18 @@ Phase 1 is a hard gate. Run every pre-flight check; do not stop at the first fai
 
 ---
 
-Filing rules, Phase 2's plan/run mechanics, and Phase 3 (Findings report) are canonical in workflow repo — read and follow `$WORKFLOW_ROOT/workflow/review-battery-all.md` verbatim for those sections; do not hand-copy them here, they will drift.
+Filing rules, Phase 2's plan/run mechanics, and Phase 3 (Findings report) are canonical in the shared workflow repo — read and follow `$WORKFLOW_ROOT/workflow/review-battery-all.md` verbatim for those sections; do not hand-copy them here, they will drift.
 
 ---
 
 ## Phase 1 — repo-specific deltas
 
-Workflow repo's canonical Phase 1 pre-flight table is npm-flavored; Holler is a Rust workspace, so these
-rows differ from workflow repo's canonical Phase 1 table. Everything else in Phase 1 (the icon/color
+The shared workflow repo's canonical Phase 1 pre-flight table is npm-flavored; Holler is a Rust workspace, so these
+rows differ from the shared workflow repo's canonical Phase 1 table. Everything else in Phase 1 (the icon/color
 printing spec, the general table structure, the output rules) is canonical there — follow it
 verbatim.
 
-- ADR range: `docs/adr/ADR-0001.md`–`docs/adr/ADR-0006.md` (not workflow repo's `0001.md`–`0013.md`).
+- ADR range: `docs/adr/ADR-0001.md`–`docs/adr/ADR-0006.md` (not the shared workflow repo's `0001.md`–`0013.md`).
 - Product suite: `cargo test`, `cargo clippy`, `cargo fmt --check` (not `npm test`, `npm run
   check`, `npm run test:e2e`).
 - Build-junk / detritus patterns: `target/`, `holler-state/`, `*.log`, `sessions.toml`,
@@ -35,7 +35,7 @@ verbatim.
 
 ## Default battery pass prompts (Holler)
 
-Use these verbatim as the five default-battery passes in workflow repo's Phase 2b. Conditional prompts (only if the trigger-matrix row fired) are in docs/reviews/review-battery.md under "Conditional — run only when the matrix row fires". Use those verbatim. Do not invent extra reviewers.
+Use these verbatim as the five default-battery passes in the shared workflow repo's Phase 2b. Conditional prompts (only if the trigger-matrix row fired) are in docs/reviews/review-battery.md under "Conditional — run only when the matrix row fires". Use those verbatim. Do not invent extra reviewers.
 
 1. Shape — skill /thermo-nuclear-code-quality-review
    Create an epic and issues with the results of the following review: run thermo-nuclear-code-quality-review on git diff origin/main...HEAD. Allowed to ignore bugs, exploits, missing tests, and ticket fidelity. Binding evidence: docs/adr/ (crate boundaries — holler-proto/holler-hub/holler-body/holler-cli), scripts/lint.sh and clippy.toml thresholds. File epic [review] Shape — <branch> vs origin/main.
@@ -52,4 +52,4 @@ Use these verbatim as the five default-battery passes in workflow repo's Phase 2
 5. Tests as evidence — skill /tests-as-evidence
    Create an epic and issues with the results of the following review: run tests-as-evidence on git diff origin/main...HEAD. docs/reviews/overlays/tests-as-evidence.md: real hub+body processes for integration/e2e claims, golden-file blessing must not launder unrelated drift, #[ignore]d tests are not evidence. Death modes the diff can actually hit: session actor panic/silent exit, hub/body liveness-timeout asymmetry, dropped-WebSocket reconnect/resume, ACP subprocess crash/hang. Allowed to ignore structure and speculative refactors. File epic [review] Tests — <branch> vs origin/main.
 
-Skills live in $WORKFLOW_ROOT/workflow/skills. Harness stubs in ~/.claude/skills, ~/.grok/skills, ~/.config/opencode/skills, and ~/.agents/skills point there. If a skill cannot be invoked as a slash command, read the workflow repo SKILL.md (via the stub) and follow it. Apply docs/reviews/overlays/<name>.md when present.
+Skills live in $WORKFLOW_ROOT/workflow/skills. Harness stubs in ~/.claude/skills, ~/.grok/skills, ~/.config/opencode/skills, and ~/.agents/skills point there. If a skill cannot be invoked as a slash command, read the canonical SKILL.md (via the stub) and follow it. Apply docs/reviews/overlays/<name>.md when present.

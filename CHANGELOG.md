@@ -8,6 +8,7 @@ fills this file in at release time.
 ## [Unreleased]
 
 ### Enhancements
+- Docs, tests, fixtures and CI comments: replaced machine names, a tailnet name and account names with generic placeholders, and made the setup wizard read the OpenCode model from each host's own config instead of a hardcoded one.
 - Dev scripts: `./scripts/run app:hub:run|launch|stop|status` and `app:body:run|stop` (no tunnel),
   ported from the retired `holler-server` repo ([#425](https://github.com/Performant-Labs/holler/issues/425)).
   `app:hub:stop` refuses to signal a pid that is not a `holler hub serve` process. Address and binary

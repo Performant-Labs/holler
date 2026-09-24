@@ -11,7 +11,7 @@
  * Holler is a Rust workspace, not npm — the ADR range, product suite, and
  * build-junk/detritus patterns below differ from the npm-flavored canonical
  * defaults. Everything else (icon/color printing spec, table structure,
- * output rules) is canonical in workflow repo and unchanged here.
+ * output rules) is canonical in the shared workflow repo and unchanged here.
  *
  * Exit: 0 PASS (nothing to clean), 1 FAIL, 2 PASS/WARN with a cleanup offer.
  */
@@ -22,7 +22,7 @@ import path from 'node:path';
 
 const ROOT = findGitRoot(process.cwd());
 const HOME = os.homedir();
-const WORKFLOW_REPO = process.env.WORKFLOW_ROOT ?? path.join(HOME, 'Projects', 'workflow repo');
+const WORKFLOW_REPO = process.env.WORKFLOW_ROOT ?? path.join(HOME, 'Projects', 'workflow-repo');
 const BASE = process.env.REVIEW_BASE ?? 'origin/main';
 const TZ = 'America/Boise';
 
@@ -260,7 +260,7 @@ function addDoc(rel) {
 addDoc('docs/reviews/review-battery.md');
 addDoc('docs/agents/issue-tracker.md');
 
-// Holler's ADR range is ADR-0001.md–ADR-0006.md (not workflow repo's canonical
+// Holler's ADR range is ADR-0001.md–ADR-0006.md (not the shared workflow repo's canonical
 // 0001.md–0013.md — a smaller, differently-named set for this repo).
 const adrDir = path.join(ROOT, 'docs', 'adr');
 if (exists(adrDir)) {
@@ -274,7 +274,7 @@ for (const [name, needed, optional] of SKILLS) {
   const canonical = path.join(WORKFLOW_REPO, 'workflow', 'skills', name, 'SKILL.md');
   const have = exists(canonical);
   addTool(
-    `workflow repo/workflow/skills/${name}/SKILL.md`,
+    `workflow/skills/${name}/SKILL.md`,
     KIND.skill,
     have ? RESULT.PASS : optional ? RESULT.WARN : RESULT.FAIL,
     have ? needed : optional ? `missing (WARN — run 1 and 2 separately)` : `missing — needed for ${needed}`,
@@ -301,7 +301,7 @@ addTool(
   stubMiss.length === 0 ? RESULT.PASS : RESULT.WARN,
   stubMiss.length === 0
     ? `thin pointers present for ${SKILLS.length} skills`
-    : `no thin pointer for: ${stubMiss.join(', ')} — canonical still wins if workflow repo exists`,
+    : `no thin pointer for: ${stubMiss.join(', ')} — canonical still wins if the shared workflow repo exists`,
 );
 
 const localSkillDirs = ['.agents/skills', '.claude/skills', '.grok/skills'];
@@ -311,8 +311,8 @@ addTool(
   KIND.skill,
   localPresent.length === 0 ? RESULT.PASS : RESULT.WARN,
   localPresent.length === 0
-    ? 'absent — skills live in workflow repo; missing here is expected, not a fail'
-    : `vendored copies still in ${localPresent.join(', ')} — delete; canonical is workflow repo/workflow/skills`,
+    ? 'absent — skills live in the shared workflow repo; missing here is expected, not a fail'
+    : `vendored copies still in ${localPresent.join(', ')} — delete; canonical is workflow/skills in the shared workflow repo`,
 );
 
 // Holler-specific: scripts/lint.sh is the build guard gate (dead-code allows
