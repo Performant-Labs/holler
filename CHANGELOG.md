@@ -22,6 +22,13 @@ fills this file in at release time.
   it (it previously fell back to an approximation rebuilt from `docs/setup-wizard.md`). The README
   also has a one-line install for Claude Code.
 
+### Bug Fixes
+- Docs: the README said the Claude Code (`claude-agent-acp`) recipe was "currently blocked" on an
+  ACP v2 handshake failure. That stopped being true when the v1-compatibility fallback landed
+  ([#363](https://github.com/Performant-Labs/holler/pull/363)); a real `say` round trip against
+  Claude Code passes ([#294](https://github.com/Performant-Labs/holler/issues/294)). The README now
+  says so, and says which parts of that gate (`interrupt`, detach) have not been run.
+
 ## [0.3.0] - 2026-09-23
 
 ### Enhancements
