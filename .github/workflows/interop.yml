@@ -13,12 +13,11 @@ name: interop
 # It never runs on push/pull_request. Whether to also fire it on a release
 # tag is a later decision (the issue's own spec note) — not made here.
 #
-# The named tunnel (`holler-interop`, hostname
-# holler-interop.performantlabs.com) and its DNS route already exist on the
-# org's Cloudflare account, so the hostname is hardcoded below rather than a
-# repo variable — nothing to configure per-repo. The one remaining
-# one-time setup is the tunnel's run-token in this repo's Actions secrets as
-# CF_TUNNEL_TOKEN. Until that's set, the preflight job below skips
+# The named tunnel and its DNS route are provisioned once on a Cloudflare
+# account. Two repo-level settings tell this workflow about them, so no
+# hostname lives in the repository: the tunnel's public hostname in the
+# Actions variable CF_INTEROP_HOST, and the tunnel's run-token in the Actions
+# secret CF_TUNNEL_TOKEN. Until both are set, the preflight job below skips
 # linux-server and macos-client with a clear reason instead of failing —
 # this workflow is safe to leave wired up before that setup lands.
 on:
@@ -58,19 +57,18 @@ env:
   TUNNEL_LOG: ${{ github.workspace }}/cloudflared.log
   HUB_LOG: ${{ github.workspace }}/hub.log
   HANDOFF_DIR: ${{ github.workspace }}/interop-handoff
-  CF_INTEROP_HOST: holler-interop.performantlabs.com
+  CF_INTEROP_HOST: ${{ vars.CF_INTEROP_HOST }}
 
 jobs:
   # ---------------------------------------------------------------------
-  # preflight: a fast, always-run check of whether CF_TUNNEL_TOKEN exists
-  # yet — the tunnel + DNS route themselves are fixed, already-provisioned
-  # values (hardcoded below via CF_INTEROP_HOST), so this secret is the
-  # only remaining one-time-setup gap. Both real jobs `needs: preflight`
+  # preflight: a fast, always-run check of whether the one-time setup
+  # exists yet: the CF_TUNNEL_TOKEN secret and the CF_INTEROP_HOST
+  # variable. Both real jobs `needs: preflight`
   # and gate on its output — this is a tiny (<10s), non-serializing
   # dependency for both (they still start together immediately after it,
   # so it does not reintroduce the linux-server/macos-client serialization
   # macos-client's own comment below explains avoiding). Without this, a
-  # missing CF_TUNNEL_TOKEN would just show both jobs as silently
+  # missing setting would just show both jobs as silently
   # "Skipped" with no visible reason in the run summary.
   # ---------------------------------------------------------------------
   preflight:
@@ -79,22 +77,22 @@ jobs:
     outputs:
       configured: ${{ steps.check.outputs.configured }}
     steps:
-      - name: Check CF_TUNNEL_TOKEN is configured
+      - name: Check CF_TUNNEL_TOKEN and CF_INTEROP_HOST are configured
         id: check
         env:
           CF_TUNNEL_TOKEN: ${{ secrets.CF_TUNNEL_TOKEN }}
         run: |
-          if [ -n "$CF_TUNNEL_TOKEN" ]; then
+          if [ -n "$CF_TUNNEL_TOKEN" ] && [ -n "$CF_INTEROP_HOST" ]; then
             echo "configured=true" >> "$GITHUB_OUTPUT"
-            echo "CF_TUNNEL_TOKEN is configured. Proceeding with linux-server and macos-client." >> "$GITHUB_STEP_SUMMARY"
+            echo "CF_TUNNEL_TOKEN and CF_INTEROP_HOST are configured. Proceeding with linux-server and macos-client." >> "$GITHUB_STEP_SUMMARY"
           else
             echo "configured=false" >> "$GITHUB_OUTPUT"
             {
               echo "### interop workflow skipped"
-              echo "\`CF_TUNNEL_TOKEN\` repo secret is not set — skipping \`linux-server\` and \`macos-client\`."
-              echo "See issue #193's 2026-09-21 update for the one-time Cloudflare setup: the named tunnel \`holler-interop\` and its DNS route to \`${CF_INTEROP_HOST}\` are already provisioned; only the \`CF_TUNNEL_TOKEN\` secret remains."
+              echo "The \`CF_TUNNEL_TOKEN\` repo secret and/or the \`CF_INTEROP_HOST\` repo variable is not set — skipping \`linux-server\` and \`macos-client\`."
+              echo "See issue #193's 2026-09-21 update for the one-time Cloudflare setup."
             } >> "$GITHUB_STEP_SUMMARY"
-            echo "::notice::CF_TUNNEL_TOKEN is unset; interop workflow's linux-server/macos-client jobs are skipped. See #193."
+            echo "::notice::CF_TUNNEL_TOKEN or CF_INTEROP_HOST is unset; interop workflow's linux-server/macos-client jobs are skipped. See #193."
           fi
         shell: bash
 
