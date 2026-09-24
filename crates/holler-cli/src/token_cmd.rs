@@ -330,12 +330,12 @@ fn parse_ttl(ttl: &str) -> Option<u64> {
 /// join` pins it — this is the physical channel that makes the pin
 /// meaningful, so the join line is where it belongs, not a separate step.
 ///
-/// Real-hardware finding (issue #316's `hlr-1405` checkpoint, run against Io
-/// over the tailnet, 2026-09-21): `--advertise`'s own `--help` text ("Address
+/// Real-hardware finding (issue #316's `hlr-1405` checkpoint, run against a real
+/// hub over a tailnet, 2026-09-21): `--advertise`'s own `--help` text ("Address
 /// (host[:port]) to advertise to bodies") never asked for a scheme, so a
 /// hub started exactly as the checkpoint's own instructions say
-/// (`--advertise io.tail26a498.ts.net`) persisted that bare host verbatim —
-/// and this function printed it unchanged as `--server io.tail26a498.ts.net`,
+/// (`--advertise hub.example.ts.net`) persisted that bare host verbatim —
+/// and this function printed it unchanged as `--server hub.example.ts.net`,
 /// a value `server_address::parse` fail-closed *refuses* (no scheme is not
 /// `ws://`/`wss://`; the checkpoint's own text anticipated only the
 /// `ws://` failure mode, not this stricter one). A persisted advertise value
@@ -393,16 +393,16 @@ mod tests {
     }
 
     /// Real-hardware regression (issue #316's `hlr-1405` checkpoint, 2026-09-21):
-    /// `hub serve --advertise io.tail26a498.ts.net` (exactly as that
+    /// `hub serve --advertise hub.example.ts.net` (exactly as that
     /// checkpoint's own instructions say — no scheme) used to produce a join
     /// line `body join` itself would refuse (`server_address::parse` requires
     /// `ws://`/`wss://`). A bare host now gets `wss://` prepended.
     #[test]
     fn bare_advertise_host_gets_wss_scheme() {
-        let (_dir, state) = state_with_advertise(r#"{"advertise":"io.tail26a498.ts.net"}"#);
+        let (_dir, state) = state_with_advertise(r#"{"advertise":"hub.example.ts.net"}"#);
         let cmd = join_command(&state, "tok_1", "secret_1", "deadbeef");
         assert!(
-            cmd.contains("--server wss://io.tail26a498.ts.net"),
+            cmd.contains("--server wss://hub.example.ts.net"),
             "expected a wss:// scheme prepended to a bare advertise host: {cmd}"
         );
     }

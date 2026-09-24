@@ -68,7 +68,7 @@ fn envelopes() -> Vec<Envelope> {
         },
         Envelope::Response {
             id: id(),
-            result: Some(json!({"hostname":"uranus","ts":"2026-09-08T12:00:00Z"})),
+            result: Some(json!({"hostname":"hub-host","ts":"2026-09-08T12:00:00Z"})),
         },
         Envelope::Error {
             id: Some(id()),
@@ -161,7 +161,7 @@ fn docs_instances() -> Vec<(&'static str, Value)> {
             hub_pubkey: None,
         }).unwrap()),
         ("Hello.hub", serde_json::to_value(Hello {
-            protocol: 2, protocol_min: 2, protocol_max: 2, role: HelloRole::Hub, hostname: "uranus".into(),
+            protocol: 2, protocol_min: 2, protocol_max: 2, role: HelloRole::Hub, hostname: "hub-host".into(),
             token_id: None, client_id: None,
             features: vec!["interrupt".into(), "presence".into(), "ping".into(), "query".into(), "roster".into(), "token".into()],
             harnesses: None, harnesses_known: Some(vec!["opencode".into()]), harnesses_confirmed: Some(vec!["opencode".into()]), sessions: None,
@@ -180,7 +180,7 @@ fn docs_instances() -> Vec<(&'static str, Value)> {
             }]),
         }).unwrap()),
         ("Status.hub", serde_json::to_value(Status {
-            role: HelloRole::Hub, protocol: 2, protocol_min: 2, protocol_max: 2, version: "0.1.0".into(), hostname: "uranus".into(),
+            role: HelloRole::Hub, protocol: 2, protocol_min: 2, protocol_max: 2, version: "0.1.0".into(), hostname: "hub-host".into(),
             connected: None, token_id: None, listening: Some("ws://127.0.0.1:41807".into()),
             features: vec!["roster".into()], harnesses: None, harnesses_known: Some(vec!["opencode".into()]),
             harnesses_confirmed: Some(vec![ConfirmedHarness { id: "opencode".into(), bodies: vec!["kiwi".into()] }]),
@@ -223,7 +223,7 @@ fn docs_instances() -> Vec<(&'static str, Value)> {
         ("CancelResult", serde_json::to_value(CancelResult { applied: true }).unwrap()),
         ("Join", serde_json::to_value(Join { secret: "hlr_join_x".into(), hostname: "kiwi".into(), body_pubkey: "b".repeat(64), body_x25519_pubkey: "e".repeat(64) }).unwrap()),
         ("JoinResult", serde_json::to_value(JoinResult { client_id: "cli_19".into() }).unwrap()),
-        ("Authenticate", serde_json::to_value(Authenticate { protocol: 3, token_id: "tok_7f3a".into(), hostname: "kiwi".into(), advertised_url: "wss://uranus.example".into(), message: "1".repeat(96) }).unwrap()),
+        ("Authenticate", serde_json::to_value(Authenticate { protocol: 3, token_id: "tok_7f3a".into(), hostname: "kiwi".into(), advertised_url: "wss://hub.example.ts.net".into(), message: "1".repeat(96) }).unwrap()),
         ("AuthChallenge", serde_json::to_value(AuthChallenge { message: "2".repeat(96) }).unwrap()),
         ("Prove", serde_json::to_value(Prove { token_id: "tok_7f3a".into(), message: "3".repeat(128) }).unwrap()),
         ("AuthOk", serde_json::to_value(AuthOk { ok: true }).unwrap()),

@@ -2,7 +2,7 @@
   "id": "h-01HTESTGOLDEN000000000000",
   "jsonrpc": "2.0",
   "result": {
-    "hostname": "uranus",
+    "hostname": "hub-host",
     "ts": "2026-09-08T12:00:00Z"
   }
 }

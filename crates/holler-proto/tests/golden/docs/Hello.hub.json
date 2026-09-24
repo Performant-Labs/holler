@@ -13,7 +13,7 @@
   "harnesses_known": [
     "opencode"
   ],
-  "hostname": "uranus",
+  "hostname": "hub-host",
   "hub_pubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   "protocol": 2,
   "protocol_max": 2,

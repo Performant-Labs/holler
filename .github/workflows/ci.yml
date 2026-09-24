@@ -21,14 +21,14 @@ jobs:
         os: [ubuntu-latest, macos-latest]
     # holler is a PUBLIC repo with outside PRs welcome (ADR 0004), so the org
     # `CI_RUNNER` self-hosted variable must never drive a fork PR's job — per
-    # the org convention (playbook infrastructure/ci-platform.md), a fork PR
-    # must never execute on owned hardware. macOS has no self-hosted fleet
+    # the org's CI convention, a fork PR must never execute on owned
+    # hardware. macOS has no self-hosted fleet
     # here, so it always stays on GitHub-hosted `macos-latest`. The ubuntu
     # leg uses the self-hosted runner ONLY for a same-repo push or a
     # same-repo (non-fork) pull_request — a fork PR's `head.repo.full_name`
     # never equals `github.repository`, so it falls through to
-    # `ubuntu-latest`. Unlike the XPU fleet's intentionally-no-fallback
-    # `vars.CI_RUNNER` wiring (FreeToken-Intel's ci.yml), the `|| matrix.os`
+    # `ubuntu-latest`. Unlike an intentionally-no-fallback `vars.CI_RUNNER`
+    # wiring (as used for private, hardware-specific repos), the `|| matrix.os`
     # fallback here is a deliberate safety net for the fork-PR case, not an
     # accident to guard against — a missing/stale `CI_RUNNER` on a *trusted*
     # run just costs speed, never safety.
@@ -43,8 +43,7 @@ jobs:
       - uses: actions/checkout@v4
 
       # GitHub-hosted images ship rustup preinstalled; the self-hosted
-      # Uranus/Jupiter runner image (pl-runner, layered on
-      # myoung34/github-runner) does not (confirmed 2026-09-10, PR #312's
+      # runner image does not (confirmed 2026-09-10, PR #312's
       # first CI run: `rustup: command not found`) — bootstrap it via the
       # official installer when missing instead of assuming it's there.
       - name: Install Rust
@@ -124,55 +123,43 @@ jobs:
       # Issue #345: `roster_stays_accurate_under_concurrent_body_load`
       # isolated into its own step with a single automatic retry.
       #
-      # Investigated live against real CI + real infra evidence (not
-      # guessed): `vars.CI_RUNNER` routing above is *correctly* wired and
-      # *correctly* applied — `gh api repos/Performant-Labs/holler/actions/
-      # runs/<id>/jobs` on today's (2026-09-15) failing runs (e.g. run
-      # 35006448244) shows the `ubuntu-latest` leg actually executed on
-      # `runner_group_name: self-hosted-linux` (runner `uranus-IvuH9nbcqWFr9`)
-      # — not the `matrix.os` GitHub-hosted fallback the routing-bug
-      # hypothesis predicted — and it still hit this test's exact
-      # `unknown_session` panic. So self-hosted routing itself was ruled
-      # out as the mechanism.
+      # Investigated live against real CI evidence (not guessed): the
+      # `vars.CI_RUNNER` routing above is *correctly* wired and *correctly*
+      # applied — the job records of failing runs show the `ubuntu-latest`
+      # leg actually executed on a self-hosted runner, not the `matrix.os`
+      # GitHub-hosted fallback the routing-bug hypothesis predicted — and it
+      # still hit this test's exact `unknown_session` panic. So self-hosted
+      # routing itself was ruled out as the mechanism.
       #
       # What the evidence *does* implicate: the self-hosted pool is two
-      # hosts (`gh api orgs/Performant-Labs/actions/runners` shows runner
-      # labels `self-hosted-linux-uranus` / `self-hosted-linux-jupiter`,
-      # both members of the `self-hosted-linux` group `vars.CI_RUNNER`
-      # resolves to), and they are not equally "dedicated, more headroom"
-      # as this file previously assumed. Direct inspection of Uranus
-      # (`ssh uranus`, 2026-09-15) found: 8 vCPUs / 15GB RAM, swap at
-      # 7.8/8GB used (real memory pressure), ~40 always-on production
-      # Docker containers unrelated to CI (Coolify-deployed apps, Harbor
-      # registry, Mattermost, the Grafana/Loki/Mimir/Tempo stack, Hermes,
-      # Forgejo, LimeSurvey, etc.), and 4 concurrent GitHub Actions runner
-      # containers registered at the *org* level (`/orgs/Performant-Labs/
-      # actions/runners` — shared by every Performant-Labs repo, not just
-      # holler), each with `NanoCpus=0`/no `CpusetCpus` (i.e. unthrottled,
-      # free to contend for the same 8 cores). Jupiter, the pool's other
-      # host, is far healthier by the same inspection: 24 vCPUs, 29GB RAM,
-      # only 2 runner containers, comparatively little swap pressure.
-      # Correlating real CI history (2026-09-12 through 2026-09-15, `gh run
-      # list`/`gh run view --log-failed` across 9 runs where this panic
-      # appeared) against which host each `ubuntu-latest` leg actually ran
-      # on: Uranus failed 5 of the 6 times it drew this test; Jupiter
-      # failed 1 of 2. That is Uranus specifically under-resourced for a
-      # real-dozens-of-OS-processes load test, not "self-hosted" broadly —
-      # the doc comments in load_roster_scale_test.rs below have been
-      # extended with the same evidence.
+      # hosts of very different size, and they are not equally "dedicated,
+      # more headroom" as this file previously assumed. One of them is a
+      # small shared machine (8 vCPUs / 15GB RAM, swap nearly exhausted,
+      # dozens of unrelated always-on containers, and several concurrent
+      # runner containers registered at the *org* level — shared by every
+      # repo in the org, not just this one — each unthrottled and free to
+      # contend for the same 8 cores). The pool's other host is far
+      # healthier (24 vCPUs, 29GB RAM, only 2 runner containers).
+      # Correlating real CI history (9 runs where this panic appeared)
+      # against which host each `ubuntu-latest` leg actually ran on: the
+      # small host failed 5 of the 6 times it drew this test; the larger
+      # host failed 1 of 2. That is the small host specifically being
+      # under-resourced for a real-dozens-of-OS-processes load test, not
+      # "self-hosted" broadly — the doc comments in
+      # load_roster_scale_test.rs have been extended with the same evidence.
       #
-      # Fix chosen: isolate + retry once, not pin to Jupiter's label. Uranus
-      # is a shared, org-wide box outside this repo's/issue's scope to
-      # reconfigure, and Jupiter itself still failed 1 of 2 times it drew
-      # this test — neither host is immune to transient contention, so the
-      # fix has to tolerate that on either host rather than dodge one of
-      # them. A same-commit A/B in the evidence above (run 34703320549:
-      # `ubuntu-latest` on Uranus passed while the *same run's*
-      # `macos-latest` leg failed this exact test) already shows the
-      # failure is transient per-attempt, not a deterministic property of
-      # the commit — exactly what a bounded retry is for. This does not
-      # touch PEER_COUNT, the per-peer join budget, or the load-window
-      # bound; those stay at their last-evidenced values.
+      # Fix chosen: isolate + retry once, not pin to the larger host's
+      # label. The small host is a shared, org-wide machine outside this
+      # repo's/issue's scope to reconfigure, and the larger host itself still
+      # failed 1 of 2 times it drew this test — neither host is immune to
+      # transient contention, so the fix has to tolerate that on either host
+      # rather than dodge one of them. A same-commit A/B in the evidence
+      # above: the `ubuntu-latest` leg on the small host passed while the
+      # *same run's* `macos-latest` leg failed this exact test — which
+      # already shows the failure is transient per-attempt, not a
+      # deterministic property of the commit — exactly what a bounded retry
+      # is for. This does not touch PEER_COUNT, the per-peer join budget, or
+      # the load-window bound; those stay at their last-evidenced values.
       - name: "Load-roster scale test (isolated retry — issue #345)"
         run: |
           $ErrorActionPreference = 'Stop'
@@ -209,9 +196,8 @@ jobs:
       # this step is skipped until that file exists. It runs on the
       # runners' preinstalled Ruby (2.6 on macOS) -- the selection core is
       # deliberately stdlib-only so no gem install is needed. GitHub-hosted
-      # images ship Ruby; the self-hosted Uranus/Jupiter pl-runner image
-      # doesn't (same gap class as rustup above, confirmed 2026-09-10 on
-      # PR #312) -- bootstrap via apt when missing, same no-op-on-hosted
+      # images ship Ruby; the self-hosted runner image doesn't (same gap
+      # class as rustup above, confirmed 2026-09-10 on PR #312) -- bootstrap via apt when missing, same no-op-on-hosted
       # shape as the Rust step.
       - name: test_selection_test (runner port)
         if: hashFiles('scripts/test_selection_test.rb') != ''

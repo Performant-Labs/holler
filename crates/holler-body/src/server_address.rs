@@ -216,7 +216,7 @@ mod tests {
 
     #[test]
     fn non_loopback_ip_is_not_loopback() {
-        let a = parse("ws://10.0.0.5").unwrap();
+        let a = parse("ws://192.0.2.5").unwrap();
         assert!(!a.is_loopback());
     }
 
@@ -237,7 +237,7 @@ mod tests {
 
     #[test]
     fn loopback_only_refuses_plain_non_loopback() {
-        let a = parse("ws://10.0.0.5").unwrap();
+        let a = parse("ws://192.0.2.5").unwrap();
         assert!(loopback_only_check(&a).is_some());
     }
 
