@@ -1,10 +1,4 @@
-#![allow(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::panic,
-    clippy::unreachable,
-    dead_code
-)] // #138
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable, dead_code)] // #138
 //! Shared test harness (story #138).
 //!
 //! One hand-written Rust module every integration test composes from: real
@@ -287,7 +281,9 @@ impl Hub {
                         Ok(v) => v,
                         Err(_) => continue,
                     };
-                    if v.get("event").and_then(|e| e.as_str()) == Some("listening") && !sent {
+                    if v.get("event").and_then(|e| e.as_str()) == Some("listening")
+                        && !sent
+                    {
                         let p = parse_port(&v);
                         sent = true;
                         // Signal the port; the drainer keeps running so the
@@ -361,10 +357,7 @@ pub fn mint_token(state: &StateDir, label: &str) -> (String, String) {
         }
         let stderr = String::from_utf8_lossy(&out.stderr);
         if !stderr.contains("holds the token lock") || attempt == 5 {
-            assert!(
-                out.status.success(),
-                "hub token mint failed (after {attempt} attempts): {stderr}"
-            );
+            assert!(out.status.success(), "hub token mint failed (after {attempt} attempts): {stderr}");
         }
         std::thread::sleep(Duration::from_millis(200 * attempt as u64));
         out = run_mint(state, label);
@@ -409,11 +402,7 @@ pub fn hub_pubkey(state: &StateDir) -> String {
         .spawn()
         .and_then(|c| c.wait_with_output())
         .expect("run `hub status`");
-    assert!(
-        out.status.success(),
-        "hub status --json failed: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
+    assert!(out.status.success(), "hub status --json failed: {}", String::from_utf8_lossy(&out.stderr));
     let v: Value = serde_json::from_slice(&out.stdout).expect("hub status --json is valid JSON");
     v["hub_pubkey"]
         .as_str()
@@ -468,16 +457,7 @@ pub fn join(state: &StateDir, hub_state: &StateDir, ws_url: &str, token_id: &str
 /// One attempt at `body join` (see [`join`]'s retry loop).
 fn run_join(state: &StateDir, ws_url: &str, token: &str, hub_key: &str) -> Output {
     holler_cmd(state)
-        .args([
-            "body",
-            "join",
-            "--server",
-            ws_url,
-            "--token",
-            token,
-            "--hub-key",
-            hub_key,
-        ])
+        .args(["body", "join", "--server", ws_url, "--token", token, "--hub-key", hub_key])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
