@@ -29,7 +29,7 @@ Every word in that sentence is load-bearing and excludes something a reader migh
   AgentCore Gateway, both of which route to agents that are themselves reachable endpoints (see
   [`landscape-2026-09-07.md`](landscape-2026-09-07.md) §1, §3).
 - **Circuit, not a mux** — no PTY attach, no typing into someone else's terminal. See
-  [holler-server ADR-0001](https://github.com/Performant-Labs/holler-server/blob/main/docs/adr/ADR-0001.md),
+  holler-server ADR-0001,
   ported as [`prior-art-2026-09-05.md`](prior-art-2026-09-05.md).
 - **Interactive coding sessions** — not a general agent bus, not a workflow engine, not an
   MCP-tools plane.
@@ -47,13 +47,13 @@ Every word in that sentence is load-bearing and excludes something a reader migh
 
 | Layer | Owns | Example primitives | Holler's relationship to it |
 | --- | --- | --- | --- |
-| **A2A semantics** | Cross-agent discovery, task lifecycle, blocked state | Agent Cards, `Task`, `Part` (`text\|file\|data`), `INPUT_REQUIRED` | Not adopted as the wire protocol (Holler's own [protocol v2](../protocol/v2.md) is JSON-RPC 2.0, deliberately simpler than A2A's discovery/task model for a single-operator scope). Referenced as the semantics other agent-interop tooling expects — see the reserved A2A-bridge ADR slot ([holler-server#376](https://github.com/Performant-Labs/holler-server/issues/376)) for whether/how Holler ever speaks A2A at the hub boundary. |
+| **A2A semantics** | Cross-agent discovery, task lifecycle, blocked state | Agent Cards, `Task`, `Part` (`text\|file\|data`), `INPUT_REQUIRED` | Not adopted as the wire protocol (Holler's own [protocol v2](../protocol/v2.md) is JSON-RPC 2.0, deliberately simpler than A2A's discovery/task model for a single-operator scope). Referenced as the semantics other agent-interop tooling expects — see the reserved A2A-bridge ADR slot (holler-server#376) for whether/how Holler ever speaks A2A at the hub boundary. |
 | **Holler transport + identity** | Hub↔body circuit, join tokens, credentials, presence/roster | `circuit/join`, `session/prompt`, `session/presence`, [ADR 0004](../adr/ADR-0004.md)'s JSON-RPC 2.0 over WebSocket, [ADR 0007](../adr/ADR-0007.md)'s token→credential flow | **This is Holler's actual layer.** Everything else in this table is either upstream (ACP, the harness) or downstream (A2A, other agents) of it. |
 | **ACP v2 harness** | Driving one coding-agent subprocess or attached endpoint | `session/prompt`, `session/cancel`, `session/update`, the new `requires_action` state ([`landscape-2026-09-07.md`](landscape-2026-09-07.md) §7) | Adopted directly — [ADR 0013](../adr/ADR-0013.md): the body speaks ACP v2 via the official Rust SDK. Holler's `interrupt` maps onto ACP `session/cancel` ([ADR 0009](../adr/ADR-0009.md)). |
 
 Read top to bottom: an A2A-speaking caller elsewhere in an org's agent fleet could, in principle,
 reach a Holler-supervised session through a future A2A bridge at the hub (reserved,
-[holler-server#376](https://github.com/Performant-Labs/holler-server/issues/376)) — but the
+holler-server#376) — but the
 session itself is driven by ACP v2 talking to a real harness, and the hop in between, hub↔body
 over an outbound-only, token-identified circuit, is the part nothing else in this survey does.
 

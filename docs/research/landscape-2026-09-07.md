@@ -3,7 +3,7 @@
 > **This is a research memo, not a decision record — ADRs are.** New for this repo, written from
 > the 2026-09-07 exploration referenced by
 > [issue #307](https://github.com/Performant-Labs/holler/issues/307) (mirroring
-> [holler-server#372](https://github.com/Performant-Labs/holler-server/issues/372)). It follows
+> holler-server#372). It follows
 > [`prior-art-2026-09-05.md`](prior-art-2026-09-05.md) and
 > [`competitive-landscape-2026-09-05.md`](competitive-landscape-2026-09-05.md) two days later, but
 > looks at a different layer: not "who else built a talk circuit," but "what has the wider
@@ -123,7 +123,7 @@ read agent-to-agent traffic. **You cannot have both end-to-end encryption and a 
 hub.** A hub that audits every turn, enforces spend/turn caps, or logs prompts for review (the
 kind of supervision [ADR 0016](https://github.com/Performant-Labs/holler/issues/17), a reserved
 ADR slot as of this writing, will presumably cover — see
-[holler-server#375](https://github.com/Performant-Labs/holler-server/issues/375) for the
+holler-server#375 for the
 turn/spend-caps story that will land it) is *structurally* a man-in-the-middle relative to an MLS-secured SLIM session — not an
 implementation gap, an architectural choice on the opposite end of the same spectrum. Holler's
 honest position (see [`positioning.md`](positioning.md)) is that it deliberately sits on the

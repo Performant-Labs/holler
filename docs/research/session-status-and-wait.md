@@ -1,8 +1,9 @@
 > **Ported from `holler-server`, this repo's legacy predecessor.** Dated 2026-09-08. Source: branch
 > `research/session-status-and-wait`, commit
-> [`0f03009`](https://github.com/Performant-Labs/holler-server/commit/0f030095bf3a0fd114f8a06e0e55b750880cbda8) (never merged to
-> `holler-server`'s `main`). ADR and protocol links in the "Related" line point at that commit's copies
-> of `adr/ADR-000X.md` and `protocol/v1.md`, because those ADR numbers mean different things under
+> `0f03009` (never merged to
+> `holler-server`'s `main`). ADR and protocol references in the "Related" line mean that commit's copies
+> of `adr/ADR-000X.md` and `protocol/v1.md` (the legacy repo is retired, so they are historical
+> references, not links), because those ADR numbers mean different things under
 > this repo's own numbering (see [`../adr/README.md`](../adr/README.md)). The sibling memo it builds on
 > is ported as [`dropped-connections.md`](dropped-connections.md). This is a **research memo, not a
 > decision record — ADRs are.** Terminology note: written before the hub/body, protocol v2 rebuild —
@@ -13,14 +14,14 @@
 > ([`../orchestrating.md`](../orchestrating.md), issue #142). The memo's *other* proposals (an `ack`
 > verb and a `done` vs `idle` "seen" watermark, a `session_status` delta frame, a named `watch`
 > session) are **not re-verified against current `holler` code** and should not be assumed built
-> without checking. Issue links below (`holler-client#139`, `holler-server#388`, ...) point at the
-> legacy repos.
+> without checking. Issue references below (`holler-client#139`, `holler-server#388`, ...) are to the
+> retired legacy repos.
 
 # Research memo — notifying an idle/blocked/failed session without a webhook or a "more disciplined" operator
 
 **Status:** research / discussion memo — **not an ADR, not a decision**. Written to inform a future numbered ADR once the team has actually discussed and decided.
 **Date:** 2026-09-08
-**Related:** [ADR-0005](https://github.com/Performant-Labs/holler-server/blob/0f030095bf3a0fd114f8a06e0e55b750880cbda8/docs/adr/ADR-0005.md) (interrupt is control, session survives), [ADR-0006](https://github.com/Performant-Labs/holler-server/blob/0f030095bf3a0fd114f8a06e0e55b750880cbda8/docs/adr/ADR-0006.md) (presence is status), [ADR-0007](https://github.com/Performant-Labs/holler-server/blob/0f030095bf3a0fd114f8a06e0e55b750880cbda8/docs/adr/ADR-0007.md) (session addressing), [protocol v1](https://github.com/Performant-Labs/holler-server/blob/0f030095bf3a0fd114f8a06e0e55b750880cbda8/docs/protocol/v1.md), [research-dropped-connections.md](dropped-connections.md) (heartbeat/reconnect numbers this memo builds on), issue [#139](https://github.com/Performant-Labs/holler-client/issues/139) (the `session_blocked` push this memo generalizes, shipped in [holler-client#141](https://github.com/Performant-Labs/holler-client/pull/141)/[holler-server#388](https://github.com/Performant-Labs/holler-server/pull/388)).
+**Related:** holler-server ADR-0005 (interrupt is control, session survives), holler-server ADR-0006 (presence is status), holler-server ADR-0007 (session addressing), holler-server protocol v1, [research-dropped-connections.md](dropped-connections.md) (heartbeat/reconnect numbers this memo builds on), issue holler-client#139 (the `session_blocked` push this memo generalizes, shipped in holler-client#141/holler-server#388).
 
 ## 1. Scope
 
@@ -39,7 +40,7 @@ Two agent-interop protocols were checked directly for prior art (not assumed fro
 
 A2A's feature validates the *event* — "push on completion/significant-state-change" is a legitimate, previously-solved protocol concern, not something invented here. But its *transport* (a webhook — a new inbound HTTP listener Holler would need to stand up to receive its own callbacks) exists to solve a **disconnected listener** problem: a client that isn't holding a live stream open. Holler's hub and bodies already share a persistent, bidirectional WebSocket. A webhook here would mean SSRF checks, retries, and a second listener just so the hub could learn what the body already told it over the connection both sides already hold open. That's solving a problem Holler doesn't have.
 
-The right move is to reuse the mechanism already shipped for exactly this shape of problem — `session_blocked` (client → hub push, sent live on a real transition, not just at connect/reconnect the way `presence` is; see [protocol v1](https://github.com/Performant-Labs/holler-server/blob/0f030095bf3a0fd114f8a06e0e55b750880cbda8/docs/protocol/v1.md) and the merged PRs above) — generalized into a full state-transition frame, plus a blocking CLI verb on the hub side so any caller (not just something watching the roster) can wait on it directly without polling:
+The right move is to reuse the mechanism already shipped for exactly this shape of problem — `session_blocked` (client → hub push, sent live on a real transition, not just at connect/reconnect the way `presence` is; see holler-server protocol v1 and the merged PRs above) — generalized into a full state-transition frame, plus a blocking CLI verb on the hub side so any caller (not just something watching the roster) can wait on it directly without polling:
 
 ```
 holler-server wait alpha,beta --until idle,done,blocked,failed --timeout 600000

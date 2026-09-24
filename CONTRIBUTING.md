@@ -49,6 +49,5 @@ required checkbox for this — it won't let you submit without it.
 ## Related repos
 
 This is the single `holler` repository — the binary that runs as either the hub or the body.
-The [holler-server](https://github.com/Performant-Labs/holler-server) and
-[holler-client](https://github.com/Performant-Labs/holler-client) repos follow the same
-contribution and AI-disclosure policy.
+It replaces the retired `holler-server` and `holler-client` repos; the contribution and
+AI-disclosure policy above is the only one.

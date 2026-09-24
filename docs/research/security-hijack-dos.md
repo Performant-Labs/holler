@@ -1,9 +1,9 @@
 > **Ported from `holler-server`, this repo's legacy predecessor.** Dated 2026-09-05. Verified at
-> the time against `holler-server` commit `ada4435` (as stated in the memo) — links above and
-> inline below to `adr/ADR-000X.md` point at the `holler-server` commit this memo was actually
-> written against
-> ([`749aa80`](https://github.com/Performant-Labs/holler-server/commit/749aa80d0869185a086d9be4708940aeef2007db)),
-> since those ADR numbers no longer exist on `holler-server`'s current `main` and mean different
+> the time against `holler-server` commit `ada4435` (as stated in the memo) — references above and
+> inline below to `adr/ADR-000X.md` mean the copies in the `holler-server` commit this memo was
+> actually written against
+> (`749aa80`); the legacy repo is retired, so these are historical references, not links,
+> and those ADR numbers no longer exist on `holler-server`'s current `main` and mean different
 > things under this repo's own ADR numbering (see [`../adr/README.md`](../adr/README.md)). This is
 > a **research memo, not a decision record — ADRs are.** Terminology note: written before the
 > hub/body, protocol v2 rebuild — "server" below is today's hub, "client" is today's body. All
@@ -16,7 +16,7 @@
 # Research memo — hijacking and denial of service: can the circuit be taken over or knocked over?
 
 **Status:** research / discussion — not a decision record. This is not an ADR; ADR slots
-[#14–26](https://github.com/Performant-Labs/holler-server/issues) stay reserved for future
+holler-server#14–26 stay reserved for future
 decisions, and any recommendation below the team adopts should become its own ADR.
 
 **Question asked (verbatim):** "we need to discuss how to ensure the communication stream
@@ -29,7 +29,7 @@ impersonate, or inject into an established, authenticated connection; **(2) deni
 attempts, or messages.
 
 **Scope note — sibling research.** Two related memos were commissioned in parallel:
-`research/message-integrity` (pushed, [`docs/research-message-integrity.md`](https://github.com/Performant-Labs/holler-server/blob/research/message-integrity/docs/research-message-integrity.md))
+`research/message-integrity` (pushed, holler-server `docs/research-message-integrity.md`)
 covers whether bytes arrive *intact* — a different question from whether they arrive from the
 *right party* or arrive *too fast to handle*. It already did the legwork on what TLS 1.3's AEAD
 ciphers guarantee and why loopback `ws` doesn't meaningfully expose TCP's weak checksum to a
@@ -49,7 +49,7 @@ listener + holler status — first talk (server) (issue #31)"), not guessed or t
 
 ## 1. Hijacking: where the real boundary is, and what's already solved
 
-Holler's auth model is deliberately **not** network-trust-based — [ADR-0010](https://github.com/Performant-Labs/holler-server/blob/749aa80d0869185a086d9be4708940aeef2007db/docs/adr/ADR-0010.md) is
+Holler's auth model is deliberately **not** network-trust-based — holler-server ADR-0010 is
 explicit that Tailscale/SSH/LAN are underlay, not identity, and the credential presented in the
 `auth` frame is the actual security boundary. That framing is the right one to evaluate hijacking
 against: the question isn't "is the network trusted," it's "does possessing the credential (or
@@ -57,7 +57,7 @@ sitting on the path) let an attacker act as the legitimate peer."
 
 ### 1.1 `wss` (non-loopback, TLS 1.3) — solved by TLS itself
 
-[ADR-0004](https://github.com/Performant-Labs/holler-server/blob/749aa80d0869185a086d9be4708940aeef2007db/docs/adr/ADR-0004.md)/[ADR-0010](https://github.com/Performant-Labs/holler-server/blob/749aa80d0869185a086d9be4708940aeef2007db/docs/adr/ADR-0010.md) already require `wss` off loopback, with
+holler-server ADR-0004/ADR-0010 already require `wss` off loopback, with
 AES-256-GCM or ChaCha20-Poly1305 records. An AEAD-protected TLS 1.3 connection is
 authenticated *and* encrypted for its whole lifetime — an on-path attacker can't inject frames
 into it, replay a captured ciphertext record into a live session, or splice their own traffic in
@@ -91,7 +91,7 @@ this analysis doesn't transfer to it for free.
 
 `ws` carries no confidentiality or per-record authentication at all. The question is what stops
 another party from reading or injecting into that TCP stream, given it's loopback-restricted by
-[ADR-0004](https://github.com/Performant-Labs/holler-server/blob/749aa80d0869185a086d9be4708940aeef2007db/docs/adr/ADR-0004.md) and the listener code (`src/wire/mod.rs`) fails closed
+holler-server ADR-0004 and the listener code (`src/wire/mod.rs`) fails closed
 (`NonLoopbackWithoutTls`) on any non-loopback bind.
 
 On a real OS (Linux/BSD/macOS/Windows), loopback traffic between two processes is not
@@ -110,7 +110,7 @@ controls a peer OS security boundary Holler explicitly sits *above*, not *instea
 **Conclusion: for the stated threat model (single operator, homelab-or-workstation box,
 "resist casual/automated attack"), loopback `ws`'s residual hijack risk is bounded by OS process
 isolation, which is already doing real work and isn't a gap this project needs to close in v1.**
-This is consistent with — not a stretch beyond — what [ADR-0009](https://github.com/Performant-Labs/holler-server/blob/749aa80d0869185a086d9be4708940aeef2007db/docs/adr/ADR-0009.md)'s fail-closed
+This is consistent with — not a stretch beyond — what holler-server ADR-0009's fail-closed
 philosophy already assumes about the trust boundary. If Holler's threat model ever needs to
 include "an untrusted, unprivileged co-tenant process on the same box" (e.g. a genuinely
 multi-tenant shared server), that's a materially different problem than what v1 is built for and
@@ -118,7 +118,7 @@ would deserve its own ADR at that time — flagging it as a real future boundary
 
 ### 1.3 Replay of the `auth` credential
 
-Per [ADR-0003](https://github.com/Performant-Labs/holler-server/blob/749aa80d0869185a086d9be4708940aeef2007db/docs/adr/ADR-0003.md), reconnect intentionally reuses the same long-lived client
+Per holler-server ADR-0003, reconnect intentionally reuses the same long-lived client
 credential — "Reconnect uses the credential again. A new join token is only for a new pairing."
 Reading `token/mod.rs::verify_credential`, this is confirmed exactly as documented: it's a
 constant-time HMAC comparison against a stored hash, it does **not** consume or rotate anything
@@ -132,7 +132,7 @@ PAT, a Stripe secret key), and the join-token half of the design already applies
 standard mitigation where it actually matters: the short-lived **join secret** is genuinely
 single-use and TTL-bound (`redeem` fails closed on `AlreadyBound`/`Stale`/`Revoked` — verified in
 `token/mod.rs`), which is exactly the device-pairing pattern
-[ADR-0003](https://github.com/Performant-Labs/holler-server/blob/749aa80d0869185a086d9be4708940aeef2007db/docs/adr/ADR-0003.md) cites Cloudflare's agent-WS guidance for. A long-lived credential's
+holler-server ADR-0003 cites Cloudflare's agent-WS guidance for. A long-lived credential's
 replay resistance, industry-wide, doesn't come from adding a nonce to the bearer secret itself
 (that just moves the problem to "now the nonce store needs to be replay-proof") — it comes from
 (a) **channel confidentiality** while the secret is in transit (TLS for `wss` — already solved,
@@ -221,20 +221,20 @@ Read directly: `src/wire/mod.rs` (`accept_loop`, `serve`), `src/wire/connection.
 
 **Confirmed present and already correct** (worth naming so the gaps above read as targeted, not
 as "the whole thing is unhardened"): constant-time credential/secret comparison via
-`Mac::verify_slice` ([issue #30](https://github.com/Performant-Labs/holler-server/issues/30)),
+`Mac::verify_slice` (holler-server issue #30),
 fail-closed error responses (not silent drops) on bad auth/unknown type/unsupported version per
-[ADR-0009](https://github.com/Performant-Labs/holler-server/blob/749aa80d0869185a086d9be4708940aeef2007db/docs/adr/ADR-0009.md), no state mutation on any failed auth/redeem path, and binary frames
+holler-server ADR-0009, no state mutation on any failed auth/redeem path, and binary frames
 rejected outright rather than silently buffered.
 
 ## 3. What comparable tools and the closest real-world analog (SSH) actually do
 
 ### 3.1 SSH — the closest fit for Holler's actual threat model
 
-Holler's own [ADR-0001](https://github.com/Performant-Labs/holler-server/blob/749aa80d0869185a086d9be4708940aeef2007db/docs/adr/ADR-0001.md) explicitly distinguishes itself from SSH ("Do not
+Holler's own holler-server ADR-0001 explicitly distinguishes itself from SSH ("Do not
 become... SSH as the app protocol"), but as a **hardening precedent** SSH is the much closer
 analog than any multi-tenant public API: a listening daemon on a box, authenticated by a
 credential, meant to resist casual/automated attack rather than a nation-state adversary — which
-is exactly [ADR-0010](https://github.com/Performant-Labs/holler-server/blob/749aa80d0869185a086d9be4708940aeef2007db/docs/adr/ADR-0010.md)'s own framing. `sshd`'s documented defaults
+is exactly holler-server ADR-0010's own framing. `sshd`'s documented defaults
 ([`sshd_config(5)`](https://man7.org/linux/man-pages/man5/sshd_config.5.html)):
 
 | Control | Default | What it bounds |
@@ -275,7 +275,7 @@ Holler-specific — they're generic starting points, cited as calibration, not a
 
 ## 4. Recommendations, right-sized to a single-operator, self-hosted control plane
 
-The epic's own [non-goals](https://github.com/Performant-Labs/holler-server/issues/27) list
+The epic's own non-goals (holler-server#27) list
 (PTY mux, Buzz clone, LLM-answered `support`, browser e2e, killing remote processes) says
 nothing about hardening or DoS protection either way — this is genuinely **undecided scope**,
 not something already ruled in or out. The recommendations below are sorted by how confidently
@@ -320,7 +320,7 @@ because anyone decided against them.
    connection cap and item 4's throttling infrastructure already substantially cover), not
    credential guessing per se. Worth doing if Holler ever runs somewhere genuinely reachable by
    strangers; a smaller incremental win than items 1–5 if it stays loopback-or-trusted-LAN as
-   [ADR-0004](https://github.com/Performant-Labs/holler-server/blob/749aa80d0869185a086d9be4708940aeef2007db/docs/adr/ADR-0004.md) currently defaults it.
+   holler-server ADR-0004 currently defaults it.
 
 ### Explicitly out of scope for v1 — belongs to the operator's network layer, not this app
 
@@ -342,7 +342,7 @@ because anyone decided against them.
 
 | Question | Verdict |
 | --- | --- |
-| Is `wss`/TLS-only-for-non-loopback ([ADR-0004](https://github.com/Performant-Labs/holler-server/blob/749aa80d0869185a086d9be4708940aeef2007db/docs/adr/ADR-0004.md)) sufficient for hijacking? | **Yes** — hijacking a `wss` session requires breaking TLS 1.3 itself, out of scope for the stated threat model. |
+| Is `wss`/TLS-only-for-non-loopback (holler-server ADR-0004) sufficient for hijacking? | **Yes** — hijacking a `wss` session requires breaking TLS 1.3 itself, out of scope for the stated threat model. |
 | Is loopback `ws`'s lack of TLS a hijacking gap? | **No** for the stated single-operator threat model — the residual risk is bounded by OS process/user isolation, which the design already sits above rather than instead of. |
 | Is credential replay a design flaw? | **No** — it's the standard bearer-credential shape; the correct mitigations (channel confidentiality, revocability) already exist. The join-secret half (single-use + TTL) already goes further than the credential half needs to. |
 | Is there a concrete, currently-real hijack-adjacent gap? | **Yes, one:** §1.4's silent-supersede-without-closing-the-old-socket. Small, cheap fix. |

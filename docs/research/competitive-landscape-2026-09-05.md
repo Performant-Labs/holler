@@ -1,11 +1,11 @@
 # Prior art: self-hosted heterogeneous "talk circuit" for coding agents — competitive landscape (2026-09-05)
 
 > **This is a research memo, not a decision record — ADRs are.** Ported verbatim from
-> `holler-server`'s [`docs/research-competitive-landscape.md`](https://github.com/Performant-Labs/holler-server/blob/research/grok-competitive-landscape/docs/research-competitive-landscape.md)
+> `holler-server`'s `docs/research-competitive-landscape.md`
 > (branch `research/grok-competitive-landscape`, commit `8db0a97`, 2026-09-05), Grok's follow-up
 > vendor survey to holler-server's ADR-0001. Dated as of 2026-09-05 — vendor behavior described
 > below may have moved on since. The internal `ADR-0001` reference below is to
-> [holler-server's ADR-0001](https://github.com/Performant-Labs/holler-server/blob/main/docs/adr/ADR-0001.md)
+> holler-server's ADR-0001
 > (the survey this memo follows up on); its table is separately ported into this repo as
 > [`prior-art-2026-09-05.md`](prior-art-2026-09-05.md). Terminology note: this memo predates the
 > hub/body, protocol v2 rebuild and uses holler-server's original "server"/"client" framing where

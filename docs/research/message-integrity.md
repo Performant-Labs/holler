@@ -1,8 +1,8 @@
-> **Ported from `holler-server`, this repo's legacy predecessor.** Dated 2026-09-05. Links above
-> and inline below to `adr/ADR-0010.md`, `protocol/v1.md` point at the `holler-server` commit
-> this memo was actually written against
-> ([`b7059cf`](https://github.com/Performant-Labs/holler-server/commit/b7059cfacef148174de4eee12a033a4b1e2aa887)),
-> since those files and ADR numbers no longer exist on `holler-server`'s current `main` and mean
+> **Ported from `holler-server`, this repo's legacy predecessor.** Dated 2026-09-05. References above
+> and inline below to `adr/ADR-0010.md`, `protocol/v1.md` mean the copies in the `holler-server`
+> commit this memo was actually written against
+> (`b7059cf`); the legacy repo is retired, so these are historical references, not links,
+> and those files and ADR numbers no longer exist on `holler-server`'s current `main` and mean
 > different things under this repo's own ADR numbering (see [`../adr/README.md`](../adr/README.md)).
 > This is a **research memo, not a decision record — ADRs are.** Terminology note: written before
 > the hub/body, protocol v2 rebuild — "server" below is today's hub, "client" is today's body. The
@@ -13,7 +13,7 @@
 # Research memo — message integrity: did the exact bytes arrive, and were they processed?
 
 **Status:** research / discussion — not a decision record. This is not an ADR; ADR slots
-[#14–26](https://github.com/Performant-Labs/holler-server/issues) stay reserved for future
+holler-server#14–26 stay reserved for future
 decisions, and any of the recommendations below that the team adopts should become its own ADR.
 
 **Question asked:** "we also haven't discussed how to ensure the communication arrived at its
@@ -52,7 +52,7 @@ approachable restatements of the same finding.
 
 **TLS 1.3's AEAD ciphers give you real, cryptographic integrity as a side effect of
 confidentiality** — this is not a coincidence, it's the point of an AEAD construction.
-AES-256-GCM and ChaCha20-Poly1305 (both named in [ADR-0010](https://github.com/Performant-Labs/holler-server/blob/b7059cfacef148174de4eee12a033a4b1e2aa887/docs/adr/ADR-0010.md)) each produce an
+AES-256-GCM and ChaCha20-Poly1305 (both named in holler-server ADR-0010) each produce an
 authentication tag over the ciphertext; a receiver that doesn't recompute a matching tag rejects
 the record outright, before ever handing plaintext to the application. Poly1305 (paired with
 ChaCha20) and GHASH (paired with AES-GCM) are the MAC step; unlike a bolted-on non-cryptographic

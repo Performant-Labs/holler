@@ -1,9 +1,9 @@
 > **Ported from `holler-server`, this repo's legacy predecessor.** Dated 2026-09-05. Verified at
-> the time against `holler-server` commit `ada4435` (as stated in the memo) — links above and
-> inline below to `adr/ADR-000X.md`, `protocol/v1.md`, and `talk.md` point at the
+> the time against `holler-server` commit `ada4435` (as stated in the memo) — references above and
+> inline below to `adr/ADR-000X.md`, `protocol/v1.md`, and `talk.md` mean the copies in the
 > `holler-server` commit this memo was actually written against
-> ([`ecc4c2a`](https://github.com/Performant-Labs/holler-server/commit/ecc4c2af6b2e443e661fb4037117454d481b0387)),
-> since those files and ADR numbers no longer exist on `holler-server`'s current `main` and mean
+> (`ecc4c2a`); the legacy repo is retired, so these are historical references, not links,
+> and those files and ADR numbers no longer exist on `holler-server`'s current `main` and mean
 > different things under this repo's own ADR numbering (see [`../adr/README.md`](../adr/README.md)).
 > This is a **research memo, not a decision record — ADRs are.** Terminology note: written before
 > the hub/body, protocol v2 rebuild — "server" below is today's hub, "client" is today's body.
@@ -14,7 +14,7 @@
 
 **Status:** research / discussion memo — **not an ADR, not a decision**. Written to inform a future numbered ADR once the team has actually discussed and decided.
 **Date:** 2026-09-05
-**Related:** [ADR-0004](https://github.com/Performant-Labs/holler-server/blob/ecc4c2af6b2e443e661fb4037117454d481b0387/docs/adr/ADR-0004.md) (transport), [ADR-0005](https://github.com/Performant-Labs/holler-server/blob/ecc4c2af6b2e443e661fb4037117454d481b0387/docs/adr/ADR-0005.md) (interrupt is control, session survives), [ADR-0006](https://github.com/Performant-Labs/holler-server/blob/ecc4c2af6b2e443e661fb4037117454d481b0387/docs/adr/ADR-0006.md) (presence is status), [ADR-0007](https://github.com/Performant-Labs/holler-server/blob/ecc4c2af6b2e443e661fb4037117454d481b0387/docs/adr/ADR-0007.md) (session addressing), [protocol v1](https://github.com/Performant-Labs/holler-server/blob/ecc4c2af6b2e443e661fb4037117454d481b0387/docs/protocol/v1.md), [talk.md](https://github.com/Performant-Labs/holler-server/blob/ecc4c2af6b2e443e661fb4037117454d481b0387/docs/protocol/talk.md), holler-client issue [#24](https://github.com/Performant-Labs/holler-client/issues/24), holler-server issue [#32](https://github.com/Performant-Labs/holler-server/issues/32).
+**Related:** holler-server ADR-0004 (transport), holler-server ADR-0005 (interrupt is control, session survives), holler-server ADR-0006 (presence is status), holler-server ADR-0007 (session addressing), holler-server protocol v1, holler-server talk.md, holler-client#24, holler-server#32.
 
 ## 1. Scope
 

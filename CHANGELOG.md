@@ -39,6 +39,11 @@ fills this file in at release time.
   `scripts/release-build.sh` builds with path remapping and symbol stripping, and
   `scripts/check-binary-paths.sh` fails on any personal path; both are wired into the release
   procedure and checklist. The two `v0.3.0` assets were rebuilt with them and replaced.
+- Documentation no longer links to the retired `holler-server` and `holler-client` repositories.
+  The 53 links (ADR and protocol references, issue and pull-request references, and commit
+  permalinks in the ported research memos) are now plain-text provenance such as
+  `holler-server#319` or `holler-server ADR-0004`, and the memo headers say so, so nothing breaks
+  when those repositories are deleted.
 - Docs: the README said the Claude Code (`claude-agent-acp`) recipe was "currently blocked" on an
   ACP v2 handshake failure. That stopped being true when the v1-compatibility fallback landed
   ([#363](https://github.com/Performant-Labs/holler/pull/363)); a real `say` round trip against
