@@ -41,7 +41,7 @@ use support::{join, mint_token, wait_for, write_sessions_toml, Body, Hub, StateD
 /// every peer's first `say` as one simultaneous burst (see
 /// [`warm_up_peers`]'s staggered start below, added in the same fix), which
 /// is exactly the shape that starves a 2-core scheduler. Confirmed
-/// self-hosted (4-8 vCPU dedicated Uranus/Jupiter runners, see
+/// self-hosted (4-8 vCPU dedicated runners, see
 /// `.github/workflows/ci.yml`'s `vars.CI_RUNNER` routing) runs the full
 /// suite including this test cleanly — the mechanism itself is not the
 /// problem, shared-runner CPU headroom is. 8 is the new low end for
@@ -76,46 +76,40 @@ use support::{join, mint_token, wait_for, write_sessions_toml, Body, Hub, StateD
 ///
 /// * Self-hosted routing itself (`vars.CI_RUNNER` in
 ///   `.github/workflows/ci.yml`) was directly verified NOT to be the
-///   problem: `gh api repos/Performant-Labs/holler/actions/runs/35006448244/
-///   jobs` (today's failing `main`-push run) shows the `ubuntu-latest` leg
-///   actually ran with `runner_group_name: self-hosted-linux` on runner
-///   `uranus-IvuH9nbcqWFr9` — genuinely self-hosted, not the GitHub-hosted
-///   `|| matrix.os` fallback — and it still hit this test's exact
-///   `unknown_session` panic (`say s0`, 240s). So a routing bug was ruled
-///   out with direct evidence, not assumed away.
-/// * What real infra inspection found instead (`ssh uranus`/`ssh jupiter`,
-///   2026-09-15): the self-hosted pool is two hosts, not one uniform
-///   "dedicated" fleet. Uranus: 8 vCPUs, 15GB RAM, swap at 7.8/8GB used
-///   (real memory pressure), ~40 always-on production Docker containers
-///   sharing the box (Coolify-deployed apps, the Harbor registry,
-///   Mattermost, the Grafana/Loki/Mimir/Tempo stack, Hermes, Forgejo,
-///   LimeSurvey, and more — `docker ps` on the box lists them), and 4
-///   concurrent GitHub Actions runner containers registered at the *org*
-///   level (`gh api orgs/Performant-Labs/actions/runners` — this pool is
-///   shared by every Performant-Labs repo, not scoped to holler), each with
-///   `NanoCpus=0` / no `CpusetCpus` set (`docker inspect`), i.e.
-///   unthrottled and free to contend for the same 8 cores at once. Jupiter,
-///   the pool's other host, is comparatively healthy by the same
-///   inspection: 24 vCPUs, 29GB RAM, only 2 runner containers, far less
-///   swap pressure.
+///   problem: the job records of a failing `main`-push run showed the
+///   `ubuntu-latest` leg actually ran on a self-hosted runner — genuinely
+///   self-hosted, not the GitHub-hosted `|| matrix.os` fallback — and it
+///   still hit this test's exact `unknown_session` panic (`say s0`, 240s).
+///   So a routing bug was ruled out with direct evidence, not assumed away.
+/// * What real infra inspection found instead (2026-09-15): the
+///   self-hosted pool is two hosts, not one uniform "dedicated" fleet. One
+///   is a small shared machine: 8 vCPUs, 15GB RAM, swap nearly exhausted
+///   (real memory pressure), dozens of unrelated always-on containers
+///   sharing the box, and 4 concurrent GitHub Actions runner containers
+///   registered at the *org* level (this pool is shared by every repo in the
+///   org, not scoped to holler), each with no CPU limit set
+///   (`docker inspect`), i.e. unthrottled and free to contend for the same
+///   8 cores at once. The pool's other host is comparatively healthy by the
+///   same inspection: 24 vCPUs, 29GB RAM, only 2 runner containers, far
+///   less swap pressure.
 /// * Correlated against real CI history, not just today: across the 9 most
 ///   recent CI runs (2026-09-12 through 2026-09-15) where this exact
 ///   `unknown_session` panic appeared (`gh run list` + `gh run view
 ///   --log-failed`, cross-referenced per-job against `gh api .../jobs` for
 ///   which host actually ran it), the `ubuntu-latest` (self-hosted) leg
-///   failed 5 of the 6 times it drew Uranus, and 1 of the 2 times it drew
-///   Jupiter. One of those runs (34703320549) even shows the split directly
-///   on the same commit: `ubuntu-latest` on Uranus passed while that same
-///   run's `macos-latest` leg failed this exact test — proof the failure is
-///   a property of a given attempt's contention, not the commit.
+///   failed 5 of the 6 times it drew the small host, and 1 of the 2 times it
+///   drew the larger one. One of those runs even shows the split directly
+///   on the same commit: `ubuntu-latest` on the small host passed while that
+///   same run's `macos-latest` leg failed this exact test — proof the
+///   failure is a property of a given attempt's contention, not the commit.
 /// * Conclusion: this file's own prior claim that self-hosted "runs this
 ///   test suite cleanly" was true often enough to look confirmed, but was
-///   never actually re-verified against Uranus specifically carrying this
-///   much unrelated always-on production load plus uncapped org-wide CI
-///   concurrency. It does not, on its own, justify another `PEER_COUNT`
-///   reduction (the mechanism is host-level resource contention outside
-///   this test's process tree, not something a smaller peer count inside
-///   this test's own control reliably fixes — Jupiter fails too, just less
+///   never actually re-verified against the small host carrying this much
+///   unrelated always-on load plus uncapped org-wide CI concurrency. It
+///   does not, on its own, justify another `PEER_COUNT` reduction (the
+///   mechanism is host-level resource contention outside this test's
+///   process tree, not something a smaller peer count inside this test's
+///   own control reliably fixes — the larger host fails too, just less
 ///   often, at the same `PEER_COUNT`). The fix landed in
 ///   `.github/workflows/ci.yml` instead: this test is skipped out of the
 ///   `cargo test --workspace` "Workspace suite" step and run alone in its
@@ -125,7 +119,7 @@ use support::{join, mint_token, wait_for, write_sessions_toml, Body, Hub, StateD
 ///   `PEER_COUNT`, `warm_timeout`, or the load-window bound below any
 ///   further. See that workflow file's comment on the new step for the
 ///   full reasoning on why isolate-with-retry was chosen over pinning CI
-///   to the `self-hosted-linux-jupiter` label alone.
+///   to a single self-hosted host's label.
 const PEER_COUNT: usize = 6;
 
 /// `say` rounds each peer's session runs *after* warm-up, to prove sustained

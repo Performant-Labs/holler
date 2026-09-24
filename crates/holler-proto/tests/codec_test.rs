@@ -33,7 +33,7 @@ fn canonical_frame(method: &str) -> String {
             "e".repeat(64)
         ),
         "circuit/authenticate" => format!(
-            r#"{{"jsonrpc":"2.0","id":"{id}","method":"circuit/authenticate","params":{{"token_id":"tok_7f3a","hostname":"kiwi","advertised_url":"wss://uranus.example"}}}}"#
+            r#"{{"jsonrpc":"2.0","id":"{id}","method":"circuit/authenticate","params":{{"token_id":"tok_7f3a","hostname":"kiwi","advertised_url":"wss://hub.example.ts.net"}}}}"#
         ),
         "circuit/prove" => format!(
             r#"{{"jsonrpc":"2.0","id":"{id}","method":"circuit/prove","params":{{"token_id":"tok_7f3a","signature":"{}"}}}}"#,

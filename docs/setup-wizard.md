@@ -13,7 +13,7 @@ setup itself is unaffected; this page only concerns the *viewing* layer on top o
 ## Shape
 
 ```
-Local machine                              Remote machine (e.g. Jupiter)
+Local machine                              Remote machine
 ├─ Herdr workspace                          ├─ opencode --port 47001 --hostname 0.0.0.0
 │  ├─ pane: local orchestrator (Claude/      │    (session "alpha" backend)
 │  │        opencode, driving `holler`       ├─ opencode --port 47002 --hostname 0.0.0.0
@@ -52,7 +52,7 @@ Shape:
 layout = [["o1"], ["alpha", "beta"]]
 
 # This machine's own tailnet FQDN — where the hub advertises itself.
-hub_host = "macbookpro.tail26a498.ts.net"
+hub_host = "hub.example.ts.net"
 
 # One or more orchestrators — each a real CLI agent (commonly "claude", but not required to
 # be), with its own working directory. Which sessions an orchestrator actually drives is a
@@ -69,8 +69,8 @@ name = "alpha"
 harness = "opencode"
 mode = "attach"
 endpoint = "http://127.0.0.1:47001"
-remote_host = "jupiter"                              # for ssh — an entry in ~/.ssh/config
-remote_tailnet_host = "jupiter.tail26a498.ts.net"     # for the attach pane's URL
+remote_host = "remote-a"                              # for ssh — an entry in ~/.ssh/config
+remote_tailnet_host = "remote-a.example.ts.net"     # for the attach pane's URL
 # session_id filled in by the wizard once a real session exists — leave absent in a template
 
 [[session]]
@@ -78,8 +78,8 @@ name = "beta"
 harness = "opencode"
 mode = "attach"
 endpoint = "http://127.0.0.1:47002"
-remote_host = "jupiter"
-remote_tailnet_host = "jupiter.tail26a498.ts.net"
+remote_host = "remote-a"
+remote_tailnet_host = "remote-a.example.ts.net"
 ```
 
 Sessions on different hosts are just more entries with a different `remote_host`/
@@ -116,8 +116,7 @@ panes carries no special risk, because there is no cross-machine mirror relation
 `herdr-mirror` (a plugin for live-streaming a remote *workspace*, not just a session) is a
 different, heavier mechanism with real documented failure modes — including the mirror
 daemon's own reconciliation killing the real remote processes it was only supposed to be
-viewing, not just their local viewer panes. Full incident history:
-[pl-ops-handbook's Holler+Herdr page](https://github.com/Performant-Labs/pl-ops-handbook/blob/main/src/content/docs/infrastructure/services/holler-herdr-io-jupiter.md).
+viewing, not just their local viewer panes.
 The tradeoff for the simpler `opencode attach` approach: you lose Herdr's own agent-status
 tracking (`idle`/`working`/`blocked`) for the remote session, since Herdr only classifies panes
 it manages directly — a plain `opencode attach` pane is just a terminal running a program from
@@ -130,14 +129,14 @@ Herdr's point of view, invisible to `herdr agent list` even while fully live and
 whether it's this pattern's own hub/body or something else entirely — identify what it actually
 is first.** If it wasn't started by *this* run, treat it as someone's live production until
 proven otherwise, and get explicit, named confirmation ("kill PID 822098, `holler body run` on
-jupiter") before touching it. Never kill something just to free up a port or "be able to run a
+the remote host") before touching it. Never kill something just to free up a port or "be able to run a
 test" — that phrasing is the failure mode itself, not a justification for it.
 
-This isn't hypothetical: a real incident (2026-09-22) did exactly this. An agent testing this
+This isn't hypothetical: a real incident did exactly this. An agent testing this
 setup pattern against a real remote host found an existing `holler body run` process using a
 resource it wanted, killed it "to be able to run the test," and moved on — without checking
-what that process actually was. It turned out to be the same operator's own, unrelated,
-already-live production Herdr session (a different hub, on a different machine, serving real
+what that process actually was. It turned out to be an unrelated,
+already-live Herdr session (a different hub, on a different machine, serving real
 work), which went down with no warning and no way for anyone to have known in advance it was
 safe to kill. It was recoverable in this case (attach-mode sessions survive independently of the
 Holler body wrapping them — see "The viewing mechanism" above — so rejoining a fresh body
@@ -152,19 +151,19 @@ process.
 
 **A remote host can be paired to more than one hub at once, or over time** — the same real
 scenario the section above describes. `holler hub token mint --label <remote_host>-body` (e.g.
-`jupiter-body`) names only the remote side of the pairing, so two different hubs both talking to
+`remote-a-body`) names only the remote side of the pairing, so two different hubs both talking to
 the same remote host end up with tokens/bodies that look identical to a human — or another
 agent — reading a process list or a token store later. That ambiguity is exactly what made the
-incident above possible in the first place: nobody could tell which `jupiter`-something belonged
+incident above possible in the first place: nobody could tell which `remote-a`-something belonged
 to which hub without digging.
 
 Fold the hub's own identity into the label instead: `<hub_host's short name>-<remote_host>` —
-`io-jupiter`, not `jupiter-body`. Before minting, check what's already on the remote host
+`hub1-remote-a`, not `remote-a-body`. Before minting, check what's already on the remote host
 (`ssh <remote_host> "ps -ef | grep holler"` — the same check "Never kill a process you didn't
 identify first" already has you running) and make sure your new label is visibly distinct from
 anything already there, not merely a different string. The goal is that a roster entry, a
 `hub token list` row, or a process someone inspects six months from now on a shared host names
-*which hub* it belongs to on sight — not just that it's "the Jupiter one," when there may be
+*which hub* it belongs to on sight — not just that it's "the remote-a one," when there may be
 more than one.
 
 **Two mechanical gotchas worth knowing before minting, confirmed live 2026-09-23:**
@@ -174,7 +173,7 @@ more than one.
   label — minting against a label you've used before, ever, fails with `label "..." already in
   use`, even if that token is long gone. If you're confident the old pairing is genuinely done
   (per the "never kill" section above), don't try to reclaim the label: just append a counter
-  and mint `io-jupiter-2`, `-3`, and so on.
+  and mint `hub1-remote-a-2`, `-3`, and so on.
 - **A minted token is valid for 24 hours by default (`--ttl`), even though releases before v0.3.0
   printed its `expires` a day early.** A freshly minted token showed `expires` equal to "now", which
   looked like a zero-length window; it was a display bug in `format_epoch` (fixed in v0.3.0), and the
@@ -234,6 +233,3 @@ leaving the run there isn't the goal; a complete, verified workspace is.
 - [ADR 0005](adr/ADR-0005.md) — attach mode's normative design.
 - [ADR 0006](adr/ADR-0006.md) — the `wss://`/TLS-proxy hub design this pattern's `tailscale
   serve` step relies on.
-- [pl-ops-handbook: Holler + Herdr on a real two-machine setup](https://github.com/Performant-Labs/pl-ops-handbook/blob/main/src/content/docs/infrastructure/services/holler-herdr-io-jupiter.md) —
-  the full incident history and every gotcha hit building this, kept up to date as the primary
-  source of truth for *why* each step is shaped the way it is.

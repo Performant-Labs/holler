@@ -237,8 +237,8 @@ touch. A real incident did exactly the unsafe version of this once already: kill
 production Holler session on the assumption a used port/process was fair game for a test.
 
 When minting a token for a remote host, label it with this hub's own identity too, not just the
-remote host — `<this-hub>-<remote_host>` (e.g. `io-jupiter`), never a bare `<remote_host>-body`
-like `jupiter-body`. The same remote host can be paired to more than one hub; a generic label is
+remote host — `<this-hub>-<remote_host>` (e.g. `hub1-remote-a`), never a bare `<remote_host>-body`
+like `remote-a-body`. The same remote host can be paired to more than one hub; a generic label is
 how two real, unrelated pairings become indistinguishable later, which is exactly what almost
 caused the incident above.
 ```

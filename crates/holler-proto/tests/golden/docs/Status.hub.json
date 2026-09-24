@@ -14,7 +14,7 @@
   "harnesses_known": [
     "opencode"
   ],
-  "hostname": "uranus",
+  "hostname": "hub-host",
   "listening": "ws://127.0.0.1:41807",
   "protocol": 2,
   "protocol_max": 2,

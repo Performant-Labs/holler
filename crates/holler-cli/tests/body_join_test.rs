@@ -188,7 +188,7 @@ fn join_plain_ws_to_non_loopback_refused_exit_3() {
     // connect — `--hub-key` is a placeholder here, never even inspected.
     let (code, _, stderr) = run(
         &state,
-        &["body", "join", "--server", "ws://10.0.0.5:41807", "--token", "tok_7f3a:hlr_join_deadbeef", "--hub-key", &"a".repeat(64)],
+        &["body", "join", "--server", "ws://192.0.2.5:41807", "--token", "tok_7f3a:hlr_join_deadbeef", "--hub-key", &"a".repeat(64)],
     );
     assert_eq!(code, 3, "a plaintext ws:// to a non-loopback host must exit 3; stderr: {stderr}");
     assert!(!stderr.is_empty(), "the refusal is explained on stderr: {stderr}");

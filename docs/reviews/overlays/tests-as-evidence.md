@@ -1,6 +1,6 @@
 # Holler overlay — tests-as-evidence
 
-Project delta on `~/Projects/playbook/workflow/skills/tests-as-evidence/SKILL.md`.
+Project delta on `$WORKFLOW_ROOT/workflow/skills/tests-as-evidence/SKILL.md`.
 Where this file conflicts, this file wins.
 
 - Real hub + body processes only for anything claiming "integration" or "e2e" coverage.

@@ -78,11 +78,11 @@ control-socket transport is Unix domain sockets end to end); tracked separately 
   - `git push origin vX.Y.Z`
 - [ ] 16. **Build the release binaries**
   - macOS + Linux x86_64: `cargo build --release` on each target platform — build on a real
-    machine of that OS (Uranus/Jupiter for Linux), never cross-compile
+    machine of that OS (a self-hosted Linux x86_64 machine for Linux), never cross-compile
   - No local machine for a platform? See [`docs/releasing.md`](releasing.md)'s "Building for a
     platform you don't have locally" (the real recipe: SSH to a real machine of that OS, clone
     at the exact tag, build, verify, scp back)
-  - **Linux arm64**: this org's Linux fleet (Uranus/Jupiter) is x86_64-only, so there's no SSH
+  - **Linux arm64**: this org's self-hosted Linux fleet is x86_64-only, so there's no SSH
     target for this one. Instead, dispatch the `release-arm64.yml` GitHub Actions workflow
     (`gh workflow run release-arm64.yml --repo Performant-Labs/holler`) — it builds and
     `--version`-verifies the binary on a real, hosted `ubuntu-24.04-arm` runner, which satisfies

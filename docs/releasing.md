@@ -84,8 +84,8 @@ exactly like `ubuntu-latest`/`macos-latest` — `holler` is public, so this cost
 (`cargo test -p holler-cli --test wire_selftest`) as a sanity check, and verifies
 `./target/release/holler --version` on that same real arm64 machine — satisfying "build on a
 real machine of the target OS/arch, never cross-compile" below even though the machine is a
-GitHub-hosted runner, not a box in this org's own fleet (Uranus/Jupiter are both x86_64, so
-neither can build or run an aarch64 Linux binary). It is a separate, narrower workflow from
+GitHub-hosted runner, not a box in this org's own fleet (the self-hosted Linux machines are all x86_64, so
+none can build or run an aarch64 Linux binary). It is a separate, narrower workflow from
 `ci.yml` rather than an added matrix entry there, because `ci.yml`'s steps are all `shell: pwsh`
 and that should not be assumed to carry over to a new runner image untested; `release-arm64.yml`
 uses plain `bash` throughout.
@@ -97,7 +97,7 @@ requires binaries for Linux too. For a platform you can't build on locally, the 
 to **build on a real machine of that OS, never cross-compile**:
 
 **Linux arm64 is the one exception to "SSH to a machine in this org's fleet"** — this org's
-Linux hosts (Uranus, Jupiter) are both x86_64, so neither can build or run an aarch64 Linux
+self-hosted Linux hosts are all x86_64, so none can build or run an aarch64 Linux
 binary. Instead, dispatch `.github/workflows/release-arm64.yml`
 (`gh workflow run release-arm64.yml --repo Performant-Labs/holler`), wait for it to complete
 (`gh run watch` or poll `gh run list --workflow release-arm64.yml`), and download the
@@ -109,7 +109,7 @@ release) for this platform.
 
 For macOS and Linux x86_64, the manual SSH recipe still applies:
 
-1. SSH to a real machine running that OS — this org's Uranus or Jupiter for Linux. Doesn't need
+1. SSH to a real machine running that OS — for Linux, a self-hosted Linux x86_64 machine. Doesn't need
    to be dedicated to this, just needs to exist and be reachable.
 2. If Rust isn't already installed there: `curl --proto '=https' --tlsv1.2 -sSf
    https://sh.rustup.rs | sh -s -- -y --default-toolchain stable`.

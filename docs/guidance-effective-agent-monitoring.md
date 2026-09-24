@@ -5,8 +5,8 @@ Practical guidance for an orchestrator (a "meta-O") driving one or more Holler
 the first live orchestration run against this repo, and what fixed it. This
 is operational guidance, not a wire-level ADR: nothing here changes the
 protocol. See [`docs/adr/ADR-0001.md`](adr/ADR-0001.md) for the hub/body
-split and [the MO pattern](https://github.com/Performant-Labs/pl-ops-handbook)
-in the ops handbook for how a meta-O session is set up.
+split and the multiple-orchestrator ("MO") pattern
+for how a meta-O session is set up.
 
 ## The problem
 

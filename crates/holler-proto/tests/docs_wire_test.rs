@@ -112,7 +112,7 @@ mod status_sessions_wire_tests {
             protocol_min: 2,
             protocol_max: 2,
             version: "0.1.0".into(),
-            hostname: "uranus".into(),
+            hostname: "hub-host".into(),
             connected: None,
             token_id: None,
             listening: Some("ws://127.0.0.1:41807".into()),
