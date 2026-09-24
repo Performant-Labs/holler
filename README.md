@@ -127,8 +127,8 @@ holler say my-first-body/hello "hello"
 2026-09-22.)
 
 **A real coding agent**, on any install: see [Harness recipes](#harness-recipes) below for the
-`command` shape (e.g. the `claude`/ACP-bridge recipe — currently blocked, see that section's own
-note) and how `harness`/`command` map to a real subprocess.
+`command` shape (e.g. the `claude`/ACP-bridge recipe — a real `say` round trip is verified; see that
+section for what is and isn't) and how `harness`/`command` map to a real subprocess.
 
 **Attaching to a session you already have running** (no `sessions.toml` authored by hand at
 all): see [Attach convenience](#attach-convenience) below — `holler body attach init` writes the
@@ -295,12 +295,13 @@ command = ["npx", "-y", "@agentclientprotocol/claude-agent-acp@0.79.0"]
   is a real round trip against Claude Code itself. That's tracked as a separate, manual acceptance
   gate — [issue #294](https://github.com/Performant-Labs/holler/issues/294) — run by a human with
   real Claude Code credentials, not something CI or a background agent attempts.
-- **Currently blocked, not just untested:** a real attempt (2026-09-21, logged on #294) confirms
-  the spawn works, but the ACP `initialize` handshake fails — Holler requires ACP protocol **v2**
-  (`unstable_protocol_v2`, [ADR 0013](docs/adr/ADR-0013.md)), and neither this adapter nor the
-  newest published `@agentclientprotocol/sdk` (`1.5.0` as of this writing) implements anything
-  past protocol v1 yet. This is an upstream ecosystem gap, not a Holler config or code bug —
-  revisit once the TS SDK ships v2.
+- **Verified: a real `say` round trip works** ([issue #294](https://github.com/Performant-Labs/holler/issues/294),
+  re-run after [#363](https://github.com/Performant-Labs/holler/pull/363) merged). Holler asks for
+  ACP protocol **v2** first ([ADR 0013](docs/adr/ADR-0013.md)); neither this adapter nor the newest
+  published `@agentclientprotocol/sdk` (`1.5.0` as of this writing) implements anything past
+  protocol v1 yet, so the body falls back to v1 on its own (its log shows
+  `acp_v2_negotiation_failed ... fallback=v1`). Not yet run against real Claude Code: `interrupt`
+  cancelling a turn cleanly with a later `say` still working, and detach tearing down the adapter.
 
 ## Debug output
 
