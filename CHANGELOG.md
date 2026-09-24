@@ -29,6 +29,12 @@ fills this file in at release time.
   also has a one-line install for Claude Code.
 
 ### Bug Fixes
+- Release binaries no longer embed the builder's home directory. A plain `cargo build --release`
+  bakes absolute source and registry paths (panic locations) into the binary, so the published
+  macOS and Linux x86_64 `v0.3.0` assets carried the builder's OS username. New
+  `scripts/release-build.sh` builds with path remapping and symbol stripping, and
+  `scripts/check-binary-paths.sh` fails on any personal path; both are wired into the release
+  procedure and checklist. The two `v0.3.0` assets were rebuilt with them and replaced.
 - Docs: the README said the Claude Code (`claude-agent-acp`) recipe was "currently blocked" on an
   ACP v2 handshake failure. That stopped being true when the v1-compatibility fallback landed
   ([#363](https://github.com/Performant-Labs/holler/pull/363)); a real `say` round trip against

@@ -116,7 +116,10 @@ For macOS and Linux x86_64, the manual SSH recipe still applies:
 3. Clone the repo fresh **at the exact tag**, not `main`: `git clone --branch vX.Y.Z --depth 1
    https://github.com/Performant-Labs/holler.git ~/holler-build` — a shallow, tag-pinned clone,
    not a checkout of whatever that machine happened to have lying around.
-4. `cargo build --release` there, for real — not cross-compiled from the Mac.
+4. `scripts/release-build.sh` there, for real — not cross-compiled from the Mac. Use this instead of a
+   bare `cargo build --release`: a plain release build embeds the builder's absolute source and registry
+   paths (so their OS username and home directory) in the binary. The script remaps those paths, strips
+   symbols, and fails if a personal path is still visible (`scripts/check-binary-paths.sh`).
 5. Verify on the remote machine before pulling anything back: `--version` reports the right
    version, and `file target/release/holler` confirms it's a real binary for that platform (e.g.
    `ELF 64-bit LSB pie executable, x86-64` for Linux).
@@ -232,7 +235,9 @@ several PRs.
    PR, get it merged, confirm CI is green on the merge commit itself too.
 10. `git tag -s vX.Y.Z -m "vX.Y.Z"` (signed, annotated) on the merge commit, `git push origin
     vX.Y.Z`.
-11. `cargo build --release` on each target platform (see the platform table above); verify
+11. `scripts/release-build.sh` on each target platform (see the platform table above); it wraps
+    `cargo build --release` with path remapping so the binary does not embed the builder's home
+    directory, and runs `scripts/check-binary-paths.sh` on the result. Verify
     `./target/release/holler --version` actually reports `X.Y.Z` before attaching anything, then
     rename each to `holler-<os>` for attaching.
 12. Extract `CHANGELOG.md`'s `## [X.Y.Z]` section (already complete, including Known Issues) into
@@ -242,7 +247,7 @@ several PRs.
     <binaries...> --notes-file <that extracted file>`).
 14. **Verify the published artifact, not just the local build.** Download the binaries actually
     attached to the GitHub Release (`gh release download vX.Y.Z`), from a clean directory, and
-    run `./holler-<os> --version` against *that* file for each platform — confirms the upload
+    run `scripts/check-binary-paths.sh` and `./holler-<os> --version` against *that* file for each platform — confirms the upload
     isn't corrupted, is the right architecture, has its executable bit set, and actually reports
     `X.Y.Z`. A local build passing step 11 is not evidence the uploaded artifact works; only
     downloading and running the real thing is.
