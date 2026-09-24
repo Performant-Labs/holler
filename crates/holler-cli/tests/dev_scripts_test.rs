@@ -9,13 +9,7 @@
 //!
 //! Unix-only: the scripts are bash and the hub's control socket is a Unix socket.
 #![cfg(unix)]
-#![allow(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::panic,
-    clippy::unreachable,
-    dead_code
-)] // #425
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, dead_code)] // #425
 
 use std::path::PathBuf;
 use std::process::{Command, Output, Stdio};
