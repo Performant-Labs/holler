@@ -29,6 +29,16 @@ fills this file in at release time.
   also has a one-line install for Claude Code.
 
 ### Bug Fixes
+- The `v0.2.0` release's binary assets were withdrawn because they embedded the builder's home
+  directory; the release page and its notes remain. Use `v0.3.0` or later (`install.sh` and the
+  Homebrew formula already do). Documentation examples that pinned `HOLLER_VERSION=v0.2.0` now
+  show `v0.3.0`.
+- Release binaries no longer embed the builder's home directory. A plain `cargo build --release`
+  bakes absolute source and registry paths (panic locations) into the binary, so the published
+  macOS and Linux x86_64 `v0.3.0` assets carried the builder's OS username. New
+  `scripts/release-build.sh` builds with path remapping and symbol stripping, and
+  `scripts/check-binary-paths.sh` fails on any personal path; both are wired into the release
+  procedure and checklist. The two `v0.3.0` assets were rebuilt with them and replaced.
 - Docs: the README said the Claude Code (`claude-agent-acp`) recipe was "currently blocked" on an
   ACP v2 handshake failure. That stopped being true when the v1-compatibility fallback landed
   ([#363](https://github.com/Performant-Labs/holler/pull/363)); a real `say` round trip against
@@ -38,8 +48,8 @@ fills this file in at release time.
 ## [0.3.0] - 2026-09-23
 
 ### Enhancements
-- Linux arm64 (aarch64) release binary: `holler-ubuntu-arm64`, published alongside the existing
-  macOS and Linux x86_64 assets on the [v0.2.0 release](https://github.com/Performant-Labs/holler/releases/tag/v0.2.0),
+- Linux arm64 (aarch64) release binary: `holler-ubuntu-arm64`, published alongside the macOS and
+  Linux x86_64 assets (originally attached to the [v0.2.0 release](https://github.com/Performant-Labs/holler/releases/tag/v0.2.0), since withdrawn),
   built and verified on GitHub's hosted `ubuntu-24.04-arm` runner via the new
   `.github/workflows/release-arm64.yml` (`workflow_dispatch`-triggered). `install.sh` and the
   [Homebrew tap](https://github.com/Performant-Labs/homebrew-tap)'s formula both detect and

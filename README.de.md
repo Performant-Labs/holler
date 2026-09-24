@@ -74,7 +74,7 @@ curl -fsSL https://raw.githubusercontent.com/Performant-Labs/holler/main/install
 Lädt die neueste [Release](https://github.com/Performant-Labs/holler/releases)-Binärdatei für
 deine Plattform (macOS/Apple Silicon, Linux/x86_64, oder Linux/arm64 — Windows wird nicht
 unterstützt, siehe [#378](https://github.com/Performant-Labs/holler/issues/378)) nach
-`~/.local/bin/holler` herunter. Eine bestimmte Version lässt sich mit `HOLLER_VERSION=v0.2.0`
+`~/.local/bin/holler` herunter. Eine bestimmte Version lässt sich mit `HOLLER_VERSION=v0.3.0`
 festlegen, das Installationsverzeichnis mit `HOLLER_INSTALL_DIR=/usr/local/bin` ändern (jeweils
 als Umgebungsvariable vor dem obigen Befehl setzen).
 

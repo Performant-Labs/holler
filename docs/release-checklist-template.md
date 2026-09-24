@@ -77,7 +77,8 @@ control-socket transport is Unix domain sockets end to end); tracked separately 
 - [ ] 15. **Push the tag**
   - `git push origin vX.Y.Z`
 - [ ] 16. **Build the release binaries**
-  - macOS + Linux x86_64: `cargo build --release` on each target platform — build on a real
+  - macOS + Linux x86_64: `scripts/release-build.sh` on each target platform (a bare
+    `cargo build --release` embeds the builder's home directory in the binary) — build on a real
     machine of that OS (a self-hosted Linux x86_64 machine for Linux), never cross-compile
   - No local machine for a platform? See [`docs/releasing.md`](releasing.md)'s "Building for a
     platform you don't have locally" (the real recipe: SSH to a real machine of that OS, clone
@@ -115,6 +116,7 @@ Verify the *published* artifact, not just the local build that produced it — a
 binary passing steps 16-17 is not evidence the uploaded one works.
 
 - [ ] 22. **Download and run the actual published binary**
+  - `scripts/check-binary-paths.sh` on each downloaded asset: no personal home-directory path may be embedded
   - `gh release download vX.Y.Z` into a clean directory
   - `./holler-<os> --version` against *that* downloaded file, for macOS and Linux x86_64
   - Confirms the upload isn't corrupted, is the right architecture, has its executable bit set, and actually reports `X.Y.Z`
