@@ -8,7 +8,7 @@
 
 **Tus agentes están a un grito de distancia — un solo binario, hub o body.**
 
-[English](README.md) | [中文](README.zh-CN.md) | [日本語](README.ja.md) | **Español** | [Deutsch](README.de.md)
+[English](README.md) | [中文](README.zh-CN.md) | [日本語](README.ja.md) | **Español** | [Deutsch](README.de.md) | [Français](README.fr.md)
 
 </div>
 
