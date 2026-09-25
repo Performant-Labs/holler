@@ -88,14 +88,17 @@ host, rather than assuming everything lives on one remote machine. Multiple orch
 the same way: more `[[orchestrator]]` entries, each with its own `dir`/`cmd`, each a real slot
 in `layout`.
 
-**This file is not what `holler body run`'s `--config` flag consumes directly.** Holler's own config
-parser (`crates/holler-body/src/config.rs`) is `#[serde(deny_unknown_fields)]` at both the
-top level and per-session — `[[orchestrator]]`, `layout`, `hub_host`, and each session's
-`remote_host`/`remote_tailnet_host` would all make `holler body run` refuse to start. The wizard
-migrates a derived copy — every `[[orchestrator]]`, `layout`, and those wizard-only per-session
-fields stripped, only the `[[session]]` tables Holler actually accepts left — and hands *that*
-to `scp`/`--config`. The master file (whichever of the three sources above was actually loaded)
-keeps every field, including the real captured `session_id`s, for the next run.
+**The body now accepts this file directly as its `--config`.** Holler's config parser
+(`crates/holler-body/src/config.rs`) still denies unknown keys, so a typo like `harnes` is an
+error, but it knows the wizard's master-file keys (`hub_host`, `layout`, `[[orchestrator]]`, and each
+session's `remote_host`/`remote_tailnet_host`) and ignores them, checking only their types. Other tools
+can keep their own data in the same file under an explicit namespace: a top-level `[ext.<namespace>]`
+table and a per-session `[session.ext.<namespace>]` table, each an arbitrary TOML table the body never
+interprets (an `ext` or `ext.<namespace>` that is not a table is refused). The wizard may still
+write a derived, stripped copy per remote host (only that host's `[[session]]` tables) to `scp`, so a
+remote host's copy carries only its own sessions; the body no longer requires the stripping. The master file
+(whichever of the three sources above was actually loaded) keeps every field, including the real
+captured `session_id`s, for the next run.
 
 **No local `ssh` client?** The wizard detects this and switches into a manual-relay mode: every
 command it would otherwise run over `ssh` is printed for you to run yourself (or relay to a
