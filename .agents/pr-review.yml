@@ -1,0 +1,30 @@
+# PR reviewer config. Drives the organisation's shared reusable PR-review workflow (called by .github/workflows/pr-review.yml).
+project:
+  name: "holler"
+  timezone: "America/Boise"
+
+pr_agent:
+  model: "deepseek/deepseek-v4-pro"
+  high_stakes_label: "high-stakes"   # protocol, authentication, credential store, or anything that changes what crosses the wire
+  skip_docs_only: true
+  score_labels: true
+  score_banner: true
+  status_check: true
+
+local_review:
+  enabled: false
+
+dual_review:
+  enabled: false
+
+dco:
+  required: false
+
+pr_template:
+  enabled: false
+
+test_tiers:
+  t1_headless: true
+  t2_aria: false
+  t2_5_authenticated: false
+  t3_visual: false
