@@ -34,10 +34,10 @@ env:
 jobs:
   pr-review:
     # Public repository: the shared workflow runs on a self-hosted runner, so it must never start for a fork's pull request (a fork
-    # controls its own copy of the workflow file), and a comment command is honoured only from people with write-level association.
+    # controls its own copy of the workflow file), and a comment command is honoured only on a pull request and only from people with write-level association.
     if: >-
       (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) ||
-      (github.event_name == 'issue_comment' && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association))
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association))
     uses: ./.github/workflows/pr-review-reusable.yml
     with:
       aftersight_pr_review_enabled: false
