@@ -123,6 +123,28 @@ fn unknown_key_exit_3() {
 }
 
 #[test]
+fn non_table_session_ext_names_row_and_field_exit_3() {
+    let toml = r#"
+        [[session]]
+        name = "alpha"
+        harness = "opencode"
+        command = ["opencode", "acp"]
+
+        [[session]]
+        name = "beta"
+        harness = "opencode"
+        command = ["opencode", "acp"]
+        ext = 5
+    "#;
+    match config::parse(toml).expect_err("non-table ext must be refused") {
+        ConfigError::Invalid { row, name, field, .. } => {
+            assert_eq!((row, name.as_str(), field), (1, "beta", "ext"));
+        }
+        other => panic!("wrong error variant: {other:?}"),
+    }
+}
+
+#[test]
 fn unknown_top_level_key_exit_3() {
     let toml = r#"
         not_a_real_key = true
