@@ -1,7 +1,7 @@
 # Thin caller — copy this to .github/workflows/pr-review.yml in the consuming repo.
 #
 # Post-centralization (#120), all review LOGIC lives in the reusable workflow:
-#   Performant-Labs/playbook/.github/workflows/pr-review-reusable.yml
+#   .github/workflows/pr-review-reusable.yml (a vendored copy; see its header)
 # This caller only owns the two things a caller MUST own: the event triggers and
 # the concurrency group. All behaviour is driven by .agents/pr-review.yml in the
 # calling repo. Do not inline the reusable's logic here.
@@ -38,7 +38,9 @@ jobs:
     if: >-
       (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) ||
       (github.event_name == 'issue_comment' && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association))
-    uses: Performant-Labs/playbook/.github/workflows/pr-review-reusable.yml@main
+    uses: ./.github/workflows/pr-review-reusable.yml
+    with:
+      aftersight_pr_review_enabled: false
     permissions:
       contents: read
       pull-requests: write
