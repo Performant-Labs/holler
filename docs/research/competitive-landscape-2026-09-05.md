@@ -231,8 +231,9 @@ None of these is a major vendor's GA product.
 | [IAP v1.0](https://github.com/MMVFIRM/iap-v1.0) | Policy-packet transfer between teacher and recipient models. README: not a universal agent-communication standard. Missed on the first pass | None. A packet is absorbed, then removed | Fly circuit, MLP, Transformer recipients in the experiments | Research repo. License not chosen |
 | [SAIHM](https://saihm.net/) | Encrypted shared memory. One item, one recipient, read later. Their page says this is not messaging. Missed on the first pass | `npx -y @saihm/mcp-server-pro free-join` | Any MCP agent | Hosted (free tier and paid). Site states Apache-2.0 |
 | [Collie](https://github.com/AltanS/collie) | Phone PWA that types into a live Herdr, tmux, or zellij pane. Not found in the thread search | Paired device token; tailnet user | Whatever is already in the mux | Yes, loopback. Default ingress is `tailscale serve`. MIT |
+| [herdrup](https://github.com/jerryfane/herdrup) | iOS client for the jerryfane/herdr fork. Gram file share, SSH federation of other hosts, per-agent harness-login swap. [@jerry543](https://x.com/jerry543/status/2097579596505817575) | SSH to your own daemon | Agents already in that Herdr | Yes, on your machine. Client is Apache-2.0. Needs their Herdr fork |
 
-The October Bus through Collie rows were added 2026-09-25. They were not part of the 2026-09-05 pass. The longer "vs Holler" notes, and the replies that are not a bus (Beads, AuthBoundry, Converso), are in [`prior-art-2026-09-05.md`](prior-art-2026-09-05.md).
+The October Bus through herdrup rows were added 2026-09-25. They were not part of the 2026-09-05 pass. The longer "vs Holler" notes, and the replies that are not a bus (Beads, AuthBoundry, Converso), are in [`prior-art-2026-09-05.md`](prior-art-2026-09-05.md).
 
 **Adjacent, not the thing**
 - Speakeasy session portability — same-machine handoff via on-disk transcripts, no network
