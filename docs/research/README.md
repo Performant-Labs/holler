@@ -19,7 +19,11 @@ this repo, written directly against the current rebuild.
 - [**prior-art-2026-09-05.md**](prior-art-2026-09-05.md) — the survey table from `holler-server`
   ADR-0001 (2026-09-05): c2c, ai-crew-sync, swarmcode, Harness Remote, opencode-orchestrator,
   Claude Code cross-session messaging, Buzz, Herdr, plus the same-machine cluster and sampled X
-  posts. Ported, dated as of 2026-09-05.
+  posts. Ported, dated as of 2026-09-05. A 2026-09-25 addendum records tools named in
+  [Bustamante's shared-board thread](https://x.com/nicbstme/status/2103355485973848128):
+  October Bus, MCP Agent Mail, SW4RM, Paperclip, and five named-but-unpublished claims. The
+  same rows are on the comparison chart in
+  [competitive-landscape-2026-09-05.md](competitive-landscape-2026-09-05.md).
 - [**competitive-landscape-2026-09-05.md**](competitive-landscape-2026-09-05.md) — Grok's
   follow-up vendor survey (2026-09-05): Google/Antigravity, Cursor, Windsurf, Devin, Replit,
   GitHub Copilot/VS Code Agent Host, Amazon Q, Zed, Warp, Continue.dev, Amp, OpenCode, and an

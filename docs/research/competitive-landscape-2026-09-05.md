@@ -219,6 +219,17 @@ None of these is a major vendor's GA product.
 | [open-remote-control / Pilot](https://github.com/lesquel/open-remote-control) | Dashboard + QR for OpenCode/Codex | `/pilot-token` rotate | OpenCode + Codex | Local plugin |
 | [Zedra](https://github.com/tanlethanh/zedra) | Mobile editor/agent remote over Iroh | QR pair | Agent-agnostic desktop daemon | P2P |
 | Tactic Remote / CodeAgent Mobile | Phone companions | Pairing codes | Multi-agent (vendor-specific apps) | Companion server on the desktop |
+| [October Bus](https://github.com/october-dev/october-bus) | Local Go daemon; durable request/reply and shared tasks. Added 2026-09-25 from the [Bustamante thread](https://x.com/nicbstme/status/2103355485973848128) | Scope token | Codex verified; Claude Code, Cursor, OpenCode early | Yes, loopback-first. Cross-machine not in the open tree |
+| [MCP Agent Mail](https://mcpagentmail.com/) | Inbox, file reservations, audit log on SQLite + Git. Same thread | Project-scoped agent name | Claude Code, Codex, Gemini (author) | Yes, one machine |
+| [SW4RM](https://github.com/rahulrajaram/sw4rm) | gRPC registry/router/scheduler plus an A2A gateway. Same thread; author says docs are stale | Register an `agent_id` | SDK agents, not a harness attach | Yes (Compose) |
+| [Paperclip](https://paperclip.ing/) | Org chart, tickets, budgets, heartbeats. Same thread | Onboard into a company | Any agent that can take a heartbeat | Yes (Node + embedded Postgres) |
+| Staff directory ([@nkeilar](https://x.com/nkeilar/status/2103432715714584602)) | Claim only: lookup-and-chat directory, NATS broker | Not published | Claude, Grok, Codex (claim) | Claim: across machines over Tailscale |
+| Blackboard ([@CLecates10299](https://x.com/CLecates10299/status/2103491441209065908)) | Claim only: signed board, CLI/MCP. Repo private | Not published | CLI/MCP (claim) | Claim: Cloudflare pilot |
+| COC ([@moatarchitect](https://x.com/moatarchitect/status/2103478897132322882)) | Claim only: `DEPOSIT` / `POST` / `COLLECT` / `GET` on a ledger | Not published | Claude, Grok, Qwen, DeepSeek (claim) | Not published |
+| Swarm ([@ivanciraj](https://x.com/ivanciraj/status/2103467576961462272)) | Claim only: spaces, tasks, runs, leases under existing harnesses. No URL in the reply | Not published | Codex, Hermes, Claude Code (claim) | Not published |
+| AXON ([@annapurnaagntic](https://x.com/annapurnaagntic/status/2103403146035044835)) | Claim only: agent language one layer above the transport. No URL | Not published | Not stated | Not published |
+
+The October Bus through AXON rows were added 2026-09-25. They were not part of the 2026-09-05 pass. The longer "vs Holler" notes, and the replies that are not a bus (Beads, AuthBoundry, Converso), are in [`prior-art-2026-09-05.md`](prior-art-2026-09-05.md).
 
 **Adjacent, not the thing**
 - Speakeasy session portability — same-machine handoff via on-disk transcripts, no network
@@ -239,4 +250,4 @@ No vendor engineer found saying "install agents-party / agent-room / harness-rem
 - **Warp** is the exception on axis 2 (publishes CC/Codex/OpenCode) but fails axes 3–5: Warp cloud, share link, not a self-hosted mint/list/delete/ping server, not a roster of independent machines you own.
 - **Microsoft Agent Host** is the exception on "sessions live in a host process clients attach to," but the host is VS Code's, auth is GitHub/SSH, and adoption of foreign harnesses is "discover then swallow," not a minted join token those harnesses present to *your* circuit.
 - The exact tuple — **self-hosted server + revocable join tokens with mint/list/delete/ping + join an already-running session on a headless box + prompt + cooperative interrupt without kill + roster + any harness** — is not a GA feature of Google, Cursor, Windsurf, Devin, Replit, GitHub, Amazon, Zed, Warp, Continue, or Amp.
-- Prior art to distinguish in a writeup: **Warp Remote Control**, **VS Code Agent Host / AHP**, **agents-party / agent-room / harness-remote / remote-agent**, **OpenCode serve+attach**. Pieces of the design space; none is the whole circuit.
+- Prior art to distinguish in a writeup: **Warp Remote Control**, **VS Code Agent Host / AHP**, **agents-party / agent-room / harness-remote / remote-agent**, **OpenCode serve+attach**, and (added 2026-09-25) **October Bus**. Pieces of the design space; none is the whole circuit. October Bus is the closest new board, and it still pulls instead of interrupting a live turn, and it still does not join a session on another machine.
