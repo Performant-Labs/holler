@@ -8,6 +8,12 @@ fills this file in at release time.
 ## [Unreleased]
 
 ### Enhancements
+- The body's session config now accepts an explicit `[ext.<namespace>]` table (top level) and
+  `[session.ext.<namespace>]` table (per session) for other tools' own data, and the setup wizard's
+  master-file keys (`hub_host`, `layout`, `[[orchestrator]]`, per-session `remote_host` and
+  `remote_tailnet_host`); all are ignored by the body and only type-checked, so the master file can be
+  passed to `holler body run --config` directly. Unknown keys elsewhere are still refused, and a
+  non-table `ext` is refused ([#436](https://github.com/Performant-Labs/holler/issues/436)).
 - Docs, tests, fixtures and CI comments: replaced machine names, a tailnet name and account names with generic placeholders, and made the setup wizard read the OpenCode model from each host's own config instead of a hardcoded one.
 - Dev scripts: `./scripts/run app:hub:run|launch|stop|status` and `app:body:run|stop` (no tunnel),
   ported from the retired `holler-server` repo ([#425](https://github.com/Performant-Labs/holler/issues/425)).

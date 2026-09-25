@@ -18,6 +18,21 @@
 //! session_id = "ses_..."               # attach: required
 //! ```
 //!
+//! Sharing one file with other tools (issue #436). Unknown keys are still
+//! refused, but two things are accepted and **ignored** by the body:
+//!
+//! - an explicit, namespaced extension point: an optional top-level
+//!   `[ext.<namespace>]` and per-session `[session.ext.<namespace>]`, each
+//!   namespace an arbitrary TOML table the body never interprets;
+//! - the setup wizard's master-file keys, type-checked only: top-level
+//!   `hub_host` (string), `layout` (array of arrays of strings) and
+//!   `[[orchestrator]]` (`name`, `dir`, `cmd`, strings), plus per-session
+//!   `remote_host` and `remote_tailnet_host` (strings).
+//!
+//! So the wizard's master file can be passed to `body run --config`
+//! directly, and a scheduler can keep a session's model or capabilities under
+//! `[session.ext.scheduler]` without the body seeing them.
+//!
 //! A `command` is any argv, not just a single token — `command[0]` is all
 //! this module (and [`crate::query`]'s PATH-resolution probe) ever looks at,
 //! so a multi-word spawn command works with zero special-casing. For
@@ -153,6 +168,33 @@ impl ConfigError {
 struct RawFile {
     #[serde(default, rename = "session")]
     session: Vec<RawSession>,
+    /// Known and ignored: the setup wizard's master-file keys (issue #436).
+    /// Only their TYPES are validated; the body never reads the values.
+    #[serde(default)]
+    #[allow(dead_code)] // #436 type-checked at parse time, deliberately never read
+    hub_host: Option<String>,
+    #[serde(default)]
+    #[allow(dead_code)] // #436 type-checked at parse time, deliberately never read
+    layout: Option<Vec<Vec<String>>>,
+    #[serde(default)]
+    #[allow(dead_code)] // #436 type-checked at parse time, deliberately never read
+    orchestrator: Vec<RawOrchestrator>,
+    /// The namespaced extension point (`[ext.<namespace>]`): opaque, ignored.
+    #[serde(default)]
+    ext: Option<toml::Value>,
+}
+
+/// One wizard `[[orchestrator]]` table: opaque to the body, types only.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+#[allow(dead_code)] // #436 type-checked at parse time, deliberately never read
+struct RawOrchestrator {
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    dir: Option<String>,
+    #[serde(default)]
+    cmd: Option<String>,
 }
 
 /// One raw `[[session]]` table, before validation. `deny_unknown_fields`
@@ -177,6 +219,36 @@ struct RawSession {
     endpoint: Option<String>,
     #[serde(default)]
     session_id: Option<String>,
+    /// Known and ignored: wizard-only per-session keys (issue #436).
+    #[serde(default)]
+    #[allow(dead_code)] // #436 type-checked at parse time, deliberately never read
+    remote_host: Option<String>,
+    #[serde(default)]
+    #[allow(dead_code)] // #436 type-checked at parse time, deliberately never read
+    remote_tailnet_host: Option<String>,
+    /// The namespaced extension point (`[session.ext.<namespace>]`): opaque, ignored.
+    #[serde(default)]
+    ext: Option<toml::Value>,
+}
+
+/// Check that an `ext` value is a table of tables (`ext.<namespace>` each a
+/// table). Returns the human-readable reason on failure.
+fn check_ext(ext: &toml::Value) -> Result<(), String> {
+    let toml::Value::Table(namespaces) = ext else {
+        return Err(format!(
+            "`ext` must be a table of namespaces, found {}",
+            ext.type_str()
+        ));
+    };
+    for (ns, v) in namespaces {
+        if !v.is_table() {
+            return Err(format!(
+                "`ext.{ns}` must be a table, found {}",
+                v.type_str()
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// Parse + validate a config file's contents (the TOML text, already read).
@@ -188,6 +260,9 @@ struct RawSession {
 /// [`ParsedConfig::warnings`] rather than refused.
 pub fn parse(contents: &str) -> Result<ParsedConfig, ConfigError> {
     let raw: RawFile = toml::from_str(contents).map_err(|e| ConfigError::Toml(e.to_string()))?;
+    if let Some(ext) = &raw.ext {
+        check_ext(ext).map_err(ConfigError::Toml)?;
+    }
 
     let mut seen = std::collections::BTreeSet::new();
     let mut sessions = Vec::with_capacity(raw.session.len());
@@ -195,6 +270,14 @@ pub fn parse(contents: &str) -> Result<ParsedConfig, ConfigError> {
 
     for (row, r) in raw.session.into_iter().enumerate() {
         let name = parse_name(row, &r.name)?;
+        if let Some(ext) = &r.ext {
+            check_ext(ext).map_err(|reason| ConfigError::Invalid {
+                row,
+                name: r.name.clone(),
+                field: "ext",
+                reason,
+            })?;
+        }
         if !seen.insert(name.as_str().to_string()) {
             return Err(ConfigError::Invalid {
                 row,
@@ -377,5 +460,102 @@ mod tests {
         let m = ConfigError::NoConfigFound.message();
         assert!(m.contains("sessions.toml"));
         assert!(m.contains("--config"));
+    }
+
+    const ONE: &str = "[[session]]\nname = \"alpha\"\nharness = \"opencode\"\ncommand = [\"opencode\", \"acp\"]\n";
+
+    fn err_msg(toml_text: &str) -> String {
+        parse(toml_text).expect_err("must be refused").message()
+    }
+
+    // (a) `ext` at both levels is accepted and ignored.
+    #[test]
+    fn ext_namespaces_at_both_levels_are_accepted_and_ignored() {
+        let with_ext = "[ext.scheduler]\nweight = 3\n[ext.other]\nk = \"v\"\n\
+            [[session]]\nname = \"alpha\"\nharness = \"opencode\"\ncommand = [\"opencode\", \"acp\"]\n\
+            [session.ext.scheduler]\nmodel = \"m\"\nctx = 8192\ncaps = [\"a\", \"b\"]\n\
+            [session.ext.other.nested]\nx = 1\n";
+        let got = parse(with_ext).expect("ext accepted");
+        assert_eq!(got, parse(ONE).unwrap());
+        assert!(got.warnings.is_empty());
+    }
+
+    // (b) non-table `ext` / `ext.<ns>` is refused, naming the row and field.
+    #[test]
+    fn non_table_ext_is_refused() {
+        let m =
+            err_msg("[[session]]\nname = \"alpha\"\nharness = \"x\"\ncommand = [\"x\"]\next = 5\n");
+        assert!(m.contains("`ext`") && m.contains("must be a table"), "{m}");
+        let m = err_msg(&format!(
+            "{ONE}[[session]]\nname = \"beta\"\nharness = \"x\"\ncommand = [\"x\"]\n[session.ext]\nsched = \"no\"\n"
+        ));
+        assert!(
+            m.contains("session[1]") && m.contains("beta") && m.contains("`ext`"),
+            "{m}"
+        );
+        assert!(m.contains("sched"), "{m}");
+        let m = err_msg(&format!("ext = \"x\"\n{ONE}"));
+        assert!(m.contains("ext"), "{m}");
+        let m = err_msg(&format!("[ext]\nsched = 1\n{ONE}"));
+        assert!(m.contains("ext") && m.contains("sched"), "{m}");
+    }
+
+    // (c) a typo next to a valid `ext` is still refused (both levels).
+    #[test]
+    fn typo_next_to_ext_is_still_refused() {
+        let m = err_msg(
+            "[[session]]\nname = \"alpha\"\nharnes = \"x\"\nharness = \"x\"\ncommand = [\"x\"]\n[session.ext.s]\na = 1\n",
+        );
+        assert!(m.contains("harnes"), "{m}");
+        let m = err_msg(&format!("hub_hsot = \"h\"\n[ext.s]\na = 1\n{ONE}"));
+        assert!(m.contains("hub_hsot"), "{m}");
+        let m = err_msg(&format!(
+            "[[orchestrator]]\nname = \"o\"\ndri = \"d\"\n{ONE}"
+        ));
+        assert!(m.contains("dri"), "{m}");
+    }
+
+    // (d) a full wizard master file yields the same sessions as its stripped copy.
+    #[test]
+    fn wizard_master_file_matches_stripped_equivalent() {
+        let master =
+            "layout = [[\"o1\"], [\"alpha\", \"beta\"]]\nhub_host = \"hub.example.ts.net\"\n\
+            [[orchestrator]]\nname = \"o1\"\ndir = \"/work/a\"\ncmd = \"claude\"\n\
+            [[orchestrator]]\nname = \"o2\"\ndir = \"/work/b\"\ncmd = \"claude\"\n\
+            [[session]]\nname = \"alpha\"\nharness = \"opencode\"\nmode = \"attach\"\n\
+            endpoint = \"http://127.0.0.1:47001\"\nsession_id = \"ses_1\"\n\
+            remote_host = \"remote-a\"\nremote_tailnet_host = \"remote-a.example.ts.net\"\n\
+            [[session]]\nname = \"beta\"\nharness = \"opencode\"\nmode = \"attach\"\n\
+            endpoint = \"http://127.0.0.1:47002\"\nsession_id = \"ses_2\"\n\
+            remote_host = \"remote-b\"\nremote_tailnet_host = \"remote-b.example.ts.net\"\n";
+        let stripped = "[[session]]\nname = \"alpha\"\nharness = \"opencode\"\nmode = \"attach\"\n\
+            endpoint = \"http://127.0.0.1:47001\"\nsession_id = \"ses_1\"\n\
+            [[session]]\nname = \"beta\"\nharness = \"opencode\"\nmode = \"attach\"\n\
+            endpoint = \"http://127.0.0.1:47002\"\nsession_id = \"ses_2\"\n";
+        let got = parse(master).expect("master accepted");
+        assert_eq!(got.sessions.len(), 2);
+        assert_eq!(got, parse(stripped).unwrap());
+    }
+
+    // (e) wrong types on the newly known keys are refused.
+    #[test]
+    fn wrong_types_on_master_keys_are_refused() {
+        for (bad, key) in [
+            ("hub_host = 5\n", "hub_host"),
+            ("layout = \"x\"\n", "layout"),
+            ("layout = [\"a\", \"b\"]\n", "layout"),
+            ("layout = [[1]]\n", "layout"),
+            ("orchestrator = \"x\"\n", "orchestrator"),
+            ("[[orchestrator]]\nname = 1\n", "name"),
+            ("[[orchestrator]]\ndir = 1\n", "dir"),
+            ("[[orchestrator]]\ncmd = [\"c\"]\n", "cmd"),
+        ] {
+            let m = err_msg(&format!("{bad}{ONE}"));
+            assert!(m.contains(key), "{bad}: {m}");
+        }
+        for key in ["remote_host", "remote_tailnet_host"] {
+            let m = err_msg(&format!("{ONE}{key} = 7\n"));
+            assert!(m.contains(key), "{key}: {m}");
+        }
     }
 }

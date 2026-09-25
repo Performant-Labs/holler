@@ -194,24 +194,21 @@ for whatever's missing — don't default `cmd` to `"claude"` silently just becau
 common case; state the default you're proposing and let them confirm or override it, and write
 the answer back into this same file — don't ask again on every run.
 
-**This file is *not* what gets passed to `holler body run --config` directly.** Verified
-against the real source in the `holler` repo: `crates/holler-body/src/config.rs`'s top-level
-`RawFile` struct (line 152) is `#[serde(deny_unknown_fields)]` and only declares a `session`
-key — so `hub_host`, every `[[orchestrator]]` table, and `layout` would *all* make
-`holler body run` refuse to start, not just ignore them. Its per-`[[session]]` `RawSession`
-struct (line 162) is *also* `deny_unknown_fields` and does **not** know about `remote_host` or
-`remote_tailnet_host` — those two are wizard-only per-session fields and must be stripped from
-each session row too, not just from the top level. The wizard's job (Stage 7) is to **migrate**
-this one authored file into the strict subset Holler actually accepts — for **each distinct
-`remote_host`** among the sessions, write out a *separate* derived copy containing only that
-host's `[[session]]` tables, with `remote_host`/`remote_tailnet_host` stripped from each row
-and `hub_host`/every `[[orchestrator]]`/`layout` dropped entirely — and use each derived copy
-for that host's own `scp`/`--config` (one file, one `holler body run`, per distinct
-`remote_host` — see Stage 7). The master file — whichever of the three sources Stage 1 actually
-loaded (explicit `--config` flag, cwd, or the global fallback) — keeps every field, including
+**This file can be passed to `holler body run --config` as-is.** Holler's parser
+(`crates/holler-body/src/config.rs`) still denies unknown keys at the top level and per session
+(typos stay errors), but it knows `hub_host`, `layout`, `[[orchestrator]]` and each session's
+`remote_host`/`remote_tailnet_host` and ignores them, validating only their types (strings; `layout`
+an array of arrays of strings). Other tools may add their own data under a top-level
+`[ext.<namespace>]` or per-session `[session.ext.<namespace>]` table, which the body also ignores.
+Stripping is therefore no longer required, but the wizard still writes a derived copy per distinct
+`remote_host` (Stage 7) so each remote host receives only its own `[[session]]` tables: for **each
+distinct `remote_host`**, a *separate* copy containing only that host's `[[session]]` tables (the
+wizard-only keys may be dropped), used for that host's own `scp`/`--config` (one file, one
+`holler body run`, per distinct `remote_host`). The master file — whichever of the three sources
+Stage 1 actually loaded (explicit `--config` flag, cwd, or the global fallback) — keeps every field, including
 `hub_host`, every `[[orchestrator]]`, `layout`, every session's `remote_host`/
 `remote_tailnet_host`, and the real `session_id`s once captured, for next time. Don't
-hand-author separate files by hand — one master file in, the strict Holler-shaped files (one
+hand-author separate files by hand — one master file in, the per-host files (one
 per host) are *generated*, every run.
 
 ## How to run this: one stage at a time, gated on real verification
@@ -815,14 +812,10 @@ not an afterthought: a config with sessions on 2 distinct hosts needs 2 separate
 configs, 2 separate tokens, and 2 separate `holler body run` processes, not one of each.
 
 Third, **for each distinct `remote_host`** (looping, not just doing this once):
-1. **Migrate** that host's sessions into the strict subset Holler's own parser accepts —
-   `[[session]]` tables for *only this host's* sessions, with `remote_host`/
-   `remote_tailnet_host` stripped from each row (Holler's per-session `RawSession` struct,
-   `crates/holler-body/src/config.rs:162`, is `#[serde(deny_unknown_fields)]` and doesn't know
-   these two fields — they'd break parsing the same way a top-level wizard-only key would) —
-   and every wizard-only top-level key (`hub_host`, `[[orchestrator]]`, `layout`) dropped
-   entirely. Use *that* derived, per-host copy for `scp`/`--config` — never the master file, and
-   never a copy containing another host's sessions.
+1. **Derive** a per-host copy: `[[session]]` tables for *only this host's* sessions (the body
+   ignores `remote_host`/`remote_tailnet_host`, `hub_host`, `[[orchestrator]]`, `layout` and `ext`
+   tables, so they may stay or be dropped; dropping them keeps the copy small). Use *that* per-host
+   copy for `scp`/`--config`, never a copy containing another host's sessions.
 2. **Mint a token for this host specifically, with a label that names *this hub too*, not just
    the remote host** — never `<remote_host>-body` alone. Real incident, 2026-09-22: a token
    labeled plain `<remote_host>-body` (this exact pattern) was indistinguishable from a
