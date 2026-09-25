@@ -1,4 +1,4 @@
-# Vendored copy of the organisation's shared PR-review workflow (source commit 5106bfeb of the shared workflow repository, which is private,
+# Vendored copy of the organisation's shared PR-review workflow (source commit 1bc21ffd of the shared workflow repository, which is private,
 # so a public repository cannot call it directly). Differences from the original: it runs on a GitHub-hosted runner, not a
 # self-hosted one, so no runner name appears in this repository's public logs and no fork-controlled code reaches self-hosted
 # infrastructure. Re-sync by copying the original and re-applying that one change; do not edit the logic here.
@@ -230,8 +230,8 @@ jobs:
           fi
 
           for ISSUE_NUM in $ISSUES; do
-            HAS_LABEL=$(gh issue view "$ISSUE_NUM" --repo "$REPO" --json labels \
-              --jq --arg l "$HS_LABEL" '[.labels[].name] | index($l) != null' 2>/dev/null || echo "false")
+            HAS_LABEL=$(HS_LABEL="$HS_LABEL" gh issue view "$ISSUE_NUM" --repo "$REPO" --json labels \
+              --jq '[.labels[].name] | index($ENV.HS_LABEL) != null' 2>/dev/null || echo "false")
             if [[ "$HAS_LABEL" == "true" ]]; then
               echo "Issue #$ISSUE_NUM carries '$HS_LABEL' — applying to PR #$PR_NUM"
               gh label create "$HS_LABEL" --color '5319e7' \
@@ -557,7 +557,7 @@ jobs:
           gh label create 'score-90+'      --color '0e8a16' --description 'PR-Agent score 90-100 (ship)'                --repo "${{ github.repository }}" 2>/dev/null || true
           gh label create 'score-80-89'    --color 'fbca04' --description 'PR-Agent score 80-89 (review carefully)'     --repo "${{ github.repository }}" 2>/dev/null || true
           gh label create 'score-70-79'    --color 'e99695' --description 'PR-Agent score 70-79 (address suggestions)'  --repo "${{ github.repository }}" 2>/dev/null || true
-          gh label create 'score-below-70' --color 'b60205' --description 'PR-Agent score <70 (probable blocking issues)'--repo "${{ github.repository }}" 2>/dev/null || true
+          gh label create 'score-below-70' --color 'b60205' --description 'PR-Agent score <70 (probable blocking issues)' --repo "${{ github.repository }}" 2>/dev/null || true
 
           # #433: bound by this run's anchor, and require the comment to be an
           # actual review ("Reviewer Guide") rather than any bot comment — the
