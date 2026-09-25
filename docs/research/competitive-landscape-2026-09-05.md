@@ -229,8 +229,9 @@ None of these is a major vendor's GA product.
 | Swarm ([@ivanciraj](https://x.com/ivanciraj/status/2103467576961462272)) | Claim only: spaces, tasks, runs, leases under existing harnesses. No URL in the reply | Not published | Codex, Hermes, Claude Code (claim) | Not published |
 | AXON ([@annapurnaagntic](https://x.com/annapurnaagntic/status/2103403146035044835)) | Claim only: agent language one layer above the transport. No URL | Not published | Not stated | Not published |
 | [IAP v1.0](https://github.com/MMVFIRM/iap-v1.0) | Policy-packet transfer between teacher and recipient models. README: not a universal agent-communication standard. Missed on the first pass | None. A packet is absorbed, then removed | Fly circuit, MLP, Transformer recipients in the experiments | Research repo. License not chosen |
+| [SAIHM](https://saihm.net/) | Encrypted shared memory. One item, one recipient, read later. Their page says this is not messaging. Missed on the first pass | `npx -y @saihm/mcp-server-pro free-join` | Any MCP agent | Hosted (free tier and paid). Site states Apache-2.0 |
 
-The October Bus through IAP rows were added 2026-09-25. They were not part of the 2026-09-05 pass. The longer "vs Holler" notes, and the replies that are not a bus (Beads, AuthBoundry, Converso), are in [`prior-art-2026-09-05.md`](prior-art-2026-09-05.md).
+The October Bus through SAIHM rows were added 2026-09-25. They were not part of the 2026-09-05 pass. The longer "vs Holler" notes, and the replies that are not a bus (Beads, AuthBoundry, Converso), are in [`prior-art-2026-09-05.md`](prior-art-2026-09-05.md).
 
 **Adjacent, not the thing**
 - Speakeasy session portability — same-machine handoff via on-disk transcripts, no network

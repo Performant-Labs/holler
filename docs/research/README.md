@@ -21,7 +21,7 @@ this repo, written directly against the current rebuild.
   Claude Code cross-session messaging, Buzz, Herdr, plus the same-machine cluster and sampled X
   posts. Ported, dated as of 2026-09-05. A 2026-09-25 addendum records tools named in
   [Bustamante's shared-board thread](https://x.com/nicbstme/status/2103355485973848128):
-  October Bus, MCP Agent Mail, SW4RM, Paperclip, IAP v1.0, and five named-but-unpublished claims. The
+  October Bus, MCP Agent Mail, SW4RM, Paperclip, IAP v1.0, SAIHM, and five named-but-unpublished claims. The
   same rows are on the comparison chart in
   [competitive-landscape-2026-09-05.md](competitive-landscape-2026-09-05.md).
 - [**competitive-landscape-2026-09-05.md**](competitive-landscape-2026-09-05.md) — Grok's
