@@ -335,3 +335,67 @@ fn concurrent_live_path_reads_never_lose_the_lock_race() {
         errors.iter().take(5).collect::<Vec<_>>(),
     );
 }
+
+/// **Regression (issue #401).** The operator-facing store operations — `mint`,
+/// `list` and `delete`, i.e. what `holler hub token mint|list|delete` run —
+/// must not fail with the lock's "retry" error just because a live hub is
+/// touching the same store. #373's churn run measured ~15% of mints failing
+/// that way; `list` and `delete` used the same non-retrying lock.
+///
+/// Live-path threads hammer `touch_last_seen` (the per-heartbeat write) while
+/// operator threads mint, list and delete distinct tokens. As with the
+/// live-path test above, the assertion is that *no* call fails for lock
+/// contention, not that any is fast: waiting is correct, an error is not.
+#[test]
+fn concurrent_operator_paths_never_lose_the_lock_race() {
+    let dir = Tdir::new();
+    let state = prep(&dir);
+    let bound = token::mint("bound-body", 3600, &state).expect("mint");
+    let _ = token::redeem(&bound.secret, "myhost", &pubkey(9), &x25519_pubkey(9), &state).expect("redeem");
+    let bound_id = bound.record.token_id.clone();
+
+    const LIVE_THREADS: usize = 8;
+    const OPERATOR_THREADS: usize = 16;
+    const ROUNDS: usize = 6;
+    let errors = std::sync::Mutex::new(Vec::<String>::new());
+    let note = |what: &str, e: TokenError| errors.lock().expect("errors lock").push(format!("{what}: {}", e.message));
+    std::thread::scope(|scope| {
+        for _ in 0..LIVE_THREADS {
+            scope.spawn(|| {
+                for _ in 0..ROUNDS * 4 {
+                    if let Err(e) = token::touch_last_seen(&bound_id, &state) {
+                        note("touch_last_seen", e);
+                    }
+                }
+            });
+        }
+        for t in 0..OPERATOR_THREADS {
+            let (state, note) = (&state, &note);
+            scope.spawn(move || {
+                for r in 0..ROUNDS {
+                    let label = format!("op-{t}-{r}");
+                    match token::mint(&label, 3600, state) {
+                        Ok(m) => {
+                            if let Err(e) = token::delete(&m.record.token_id, state) {
+                                note("delete", e);
+                            }
+                        }
+                        Err(e) => note("mint", e),
+                    }
+                    if let Err(e) = token::list(state) {
+                        note("list", e);
+                    }
+                }
+            });
+        }
+    });
+
+    let errors = errors.lock().expect("errors lock");
+    assert!(
+        errors.is_empty(),
+        "{} operator-path token-store calls failed under concurrency — an operator \
+         command must wait out a busy store, not ask its caller to retry: {:?}",
+        errors.len(),
+        errors.iter().take(5).collect::<Vec<_>>(),
+    );
+}

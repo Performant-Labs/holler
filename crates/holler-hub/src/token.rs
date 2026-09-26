@@ -316,11 +316,11 @@ fn acquire_lock(state: &HubState) -> Result<StoreLock, TokenError> {
 
 /// [`acquire_lock`] with a short bounded retry on contention (issue #301).
 ///
-/// `acquire_lock`'s own "an error, not a wait" policy is correct for a
-/// one-shot CLI invocation (`hub token mint`/`delete`/`revoke`): a human (or
-/// the CLI's own caller-level retry — see `holler-cli/tests/support/mod.rs`'s
-/// `mint_token`/`join`) is already in the loop and can just try again a
-/// moment later. `redeem` is different: it runs *inside the live hub*, once
+/// Every token-store operation takes the lock this way (issue #401 moved the
+/// operator-facing `mint`/`list`/`delete` onto it): `acquire_lock` alone is a
+/// non-blocking try, and its "retry" error under a busy hub pushed the same
+/// backoff onto every scripted caller (#373 measured ~15% of mints failing).
+/// It was first needed by `redeem`, which runs *inside the live hub*, once
 /// per `circuit/join`, and a real onboarding batch can legitimately land
 /// dozens of those on the hub's own concurrent connection tasks within the
 /// same instant — every one of them a distinct, perfectly valid token, not a
@@ -520,7 +520,7 @@ pub struct Minted {
 /// grammar (ADR 0005) and the uniqueness rule are both enforced here, at mint,
 /// under the lock. On success the operator is handed the one-time secret.
 pub fn mint(label: &str, ttl_secs: u64, state: &HubState) -> Result<Minted, TokenError> {
-    let _lock = acquire_lock(state)?;
+    let _lock = acquire_lock_retrying(state)?;
     let pepper = effective_pepper(state)?;
     let mut store = Store::load(&tokens_path(state))?;
 
@@ -561,7 +561,7 @@ pub fn mint(label: &str, ttl_secs: u64, state: &HubState) -> Result<Minted, Toke
 
 /// List every record (no secrets — the store never holds them).
 pub fn list(state: &HubState) -> Result<Vec<Record>, TokenError> {
-    let _lock = acquire_lock(state)?;
+    let _lock = acquire_lock_retrying(state)?;
     let store = Store::load(&tokens_path(state))?;
     Ok(store.records)
 }
@@ -574,7 +574,7 @@ pub fn list(state: &HubState) -> Result<Vec<Record>, TokenError> {
 /// Returns the record's new shape. The operator-facing message distinguishes
 /// `invalidated` (unused) from `revoked` (bound) in the CLI, not here.
 pub fn delete(token_id: &str, state: &HubState) -> Result<Record, TokenError> {
-    let _lock = acquire_lock(state)?;
+    let _lock = acquire_lock_retrying(state)?;
     let mut store = Store::load(&tokens_path(state))?;
     let Some(record) = store.by_mut(token_id) else {
         return Err(TokenError::new(format!("no such token {token_id}")));
