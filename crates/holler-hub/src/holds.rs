@@ -182,9 +182,11 @@ struct Persist {
 struct State {
     operator: BTreeMap<String, HoldInfo>,
     default: BTreeMap<String, HoldInfo>,
-    /// Session keys this hub process has seen in a presence: a session
-    /// "joins" the first time it is seen, which is when `--join-held` applies.
-    seen: HashSet<String>,
+    /// Keys whose default hold was released in this hub process: a release is
+    /// not undone by the next presence. Bounded by the operator's own releases;
+    /// nothing is recorded for the sessions that merely join. Empty again after
+    /// a restart, when `--join-held` applies to them afresh.
+    released: HashSet<String>,
     grants: Grants,
 }
 
@@ -390,6 +392,7 @@ impl Holds {
             if st.operator.remove(key).is_some() {
                 (Some(Kind::Operator), st.default.contains_key(key))
             } else if st.default.remove(key).is_some() {
+                st.released.insert(key.to_owned());
                 (Some(Kind::Default), false)
             } else {
                 (None, false)
@@ -422,9 +425,11 @@ impl Holds {
         self.state().grants.live_for(key, Instant::now())
     }
 
-    /// A body advertised these sessions (issue #460). Each key the hub has not
-    /// seen before *joins*: if it matches a `--join-held` pattern and has no
-    /// default hold yet, it gets one (reason [`JOIN_REASON`]). Returns how many
+    /// A body advertised these sessions (issue #460). A session *joins* when it
+    /// matches a `--join-held` pattern and has no default hold, unless one was
+    /// released in this process: it then gets a default hold (reason
+    /// [`JOIN_REASON`]). Nothing is remembered about sessions that do not
+    /// match, so memory grows only with the holds themselves. Returns how many
     /// were held. Cheap when `--join-held` is off: no lock is taken.
     pub fn note_joined(&self, keys: impl IntoIterator<Item = String>) -> usize {
         let patterns = self.shared.join_held.lock().unwrap_or_else(PoisonError::into_inner).clone();
@@ -435,10 +440,10 @@ impl Holds {
         {
             let mut st = self.state();
             for key in keys {
-                if !st.seen.insert(key.clone()) {
+                if st.default.contains_key(&key) || st.released.contains(&key) {
                     continue;
                 }
-                if patterns.iter().any(|pat| glob_match(pat, &key)) && !st.default.contains_key(&key) {
+                if patterns.iter().any(|pat| glob_match(pat, &key)) {
                     st.default.insert(key.clone(), HoldInfo { reason: Some(JOIN_REASON.to_owned()), since: log::timestamp() });
                     newly.push(key);
                 }

@@ -378,3 +378,14 @@ fn racing_senders_with_one_grant_get_exactly_one_prompt_through() {
         assert_eq!(admitted.load(std::sync::atomic::Ordering::SeqCst), 1, "exactly one prompt is delivered");
     }
 }
+
+#[test]
+fn sessions_that_do_not_match_leave_nothing_behind() {
+    let h = Holds::in_memory();
+    h.set_join_held(vec!["io/*".into()]);
+    for i in 0..5_000 {
+        h.note_joined([format!("other/s{i}")]);
+    }
+    let st = h.state();
+    assert!(st.default.is_empty() && st.released.is_empty(), "no per-session state is kept for names that do not match a pattern");
+}
