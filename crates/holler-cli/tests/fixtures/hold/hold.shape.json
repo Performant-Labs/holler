@@ -1,8 +1,0 @@
-{
-  "session": "string",
-  "hold": "bool",
-  "reason": "string",
-  "since": "string",
-  "newly_held": "bool",
-  "persisted": "bool"
-}
