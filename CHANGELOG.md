@@ -8,6 +8,7 @@ fills this file in at release time.
 ## [Unreleased]
 
 ### Enhancements
+- Docs: the README has a Codex recipe, `docs/compatibility.md` records the Codex results (three authentication routes, permission requests, a multi-turn session with a hub restart) with their limits, and the monitoring guidance's Codex section describes how a permission request is surfaced and answered ([#474](https://github.com/Performant-Labs/holler/issues/474), [#303](https://github.com/Performant-Labs/holler/issues/303)).
 - The body's ACP driver now also authenticates to an ACP v2 adapter that requires it. When a v2
   adapter refuses `session/new` as unauthenticated (JSON-RPC `-32000`) and the session's
   `auth_method` names a method the adapter advertised (not a terminal-type method, nor one of a

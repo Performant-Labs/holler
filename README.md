@@ -320,6 +320,47 @@ command = ["npx", "-y", "@agentclientprotocol/claude-agent-acp@0.79.0"]
   `acp_v2_negotiation_failed ... fallback=v1`). Not yet run against real Claude Code: `interrupt`
   cancelling a turn cleanly with a later `say` still working, and detach tearing down the adapter.
 
+### Codex
+
+OpenAI's Codex CLI doesn't speak ACP either, so a session goes through
+[`@agentclientprotocol/codex-acp`](https://www.npmjs.com/package/@agentclientprotocol/codex-acp)
+(npm, maintained by the ACP project, **not shipped or endorsed by OpenAI**). Its predecessor,
+`@zed-industries/codex-acp`, is archived: don't use it in new config.
+
+```toml
+[[session]]
+name = "coder"
+harness = "codex"
+command = ["npx", "-y", "@agentclientprotocol/codex-acp@1.13.1"]
+auth_method = "api-key"
+```
+
+- **Pin the adapter version**, as for Claude Code. It negotiates ACP v1, so the body falls back
+  from v2 on its own (its log shows `acp_v2_negotiation_failed ... fallback=v1`).
+- **Authentication, three ways, all run against the real adapter** ([#303](https://github.com/Performant-Labs/holler/issues/303)):
+  1. `auth_method = "api-key"` as above, with `CODEX_API_KEY` in the environment of the process
+     the body launches (the session's `env` table or the body's own). No prior login is needed:
+     the body answers the adapter's auth-required error ([#439](https://github.com/Performant-Labs/holler/issues/439)).
+  2. The adapter's own `DEFAULT_AUTH_REQUEST='{"methodId":"api-key"}'` in that environment,
+     without `auth_method`: the adapter authenticates itself and Holler never sees the error.
+  3. A ChatGPT login done **once, outside Holler**, in the adapter's home directory
+     (`CODEX_HOME`, by running `codex login` there), with no API key and no `auth_method`.
+     Holler cannot start that login: headless, the adapter advertised only `api-key`. It worked
+     with an account that had no active subscription; what a plan allows is OpenAI's rule and can
+     change.
+- **Model.** The adapter's default depends on the account and credential, and an account's
+  default may not be available to an API key (one model returned 404 for the key used). Pin a
+  model with the `model` setting in Codex's `config.toml` in the adapter's home directory.
+- **Approvals.** Whether Codex asks before acting is set by the adapter's `INITIAL_AGENT_MODE`
+  environment variable (`read-only`, `agent` or `agent-full-access`), not by `approval_policy`
+  in `config.toml`. A permission request shows as `input-required` in `holler roster` and is
+  answered with `holler answer <session> <choice>`; see the Codex section of the
+  [monitoring guidance](docs/guidance-effective-agent-monitoring.md).
+- **Verified** (say, interrupt, detach, permission requests, a 16-turn session with a 25 s tool
+  turn, an interrupted long turn and a hub restart in the middle): see the
+  [compatibility page](docs/compatibility.md). Not yet run: a single turn longer than about
+  30 s of model time, and sessions of hundreds of turns.
+
 ### Adapters that require authentication (`auth_method`)
 
 Some ACP adapters refuse `session/new` until the client sends `authenticate`, even when their
@@ -362,12 +403,12 @@ auth_method = "api-key"
 - **Timeout budget.** The auth path is four round trips (`initialize`, `session/new`,
   `authenticate` or `auth/login`, `session/new`) inside the single `HOLLER_ACP_TIMEOUT_MS` window
   (default 10000 ms) of one protocol attempt. A slow adapter may need a larger value.
-- **Codex.** Read from `@agentclientprotocol/codex-acp` 1.13.1's source, not yet from a live run:
-  it advertises `api-key` and, when authenticated with it, reads its API key from its own
-  environment. That adapter also accepts `DEFAULT_AUTH_REQUEST = '{"methodId":"api-key"}'` in its
-  environment and then authenticates by itself, without `auth_method`.
+- **Codex.** Verified against the real adapter: it advertises `api-key` and reads its API key from
+  its own environment once authenticated. See the [Codex recipe](#codex) above, including the
+  adapter's own `DEFAULT_AUTH_REQUEST` route that needs no `auth_method`.
 - **Manual login stays the fallback** for anything this does not cover, such as a terminal-type
-  method or an interactive login: see [#440](https://github.com/Performant-Labs/holler/issues/440).
+  method or an interactive login (a ChatGPT login is done once in the adapter's home directory,
+  as the [Codex recipe](#codex) describes).
 
 ## Debug output
 
