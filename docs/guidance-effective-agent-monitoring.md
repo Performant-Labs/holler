@@ -248,31 +248,42 @@ carries:
   session's own question/permission status changes (`session_blocked`), not
   just at the next reconnect the way `presence` is — this is what makes the
   fast-check half of the watchdog above actually work in near-real-time.
-- Known gap as of this writing: spawn-mode (ACP) sessions cannot be answered
-  this way yet — only attach-mode. Multi-question requests where the
-  question count itself is unknown ahead of time still require reading
-  `/question` directly to discover the shape before answering.
+- Spawn-mode (ACP) sessions are answered the same way but by option index
+  (`holler answer SESSION 0`), not by the `once`/`always`/`reject` shorthands, which
+  only the attach driver understands ([#476](https://github.com/Performant-Labs/holler/issues/476)).
+  Multi-question requests where the question count itself is unknown ahead of
+  time still require reading `/question` directly to discover the shape before
+  answering.
 
 ## Section: Codex
 
-Not yet exercised in this repo's build-out, so treat the specifics below as
-**unverified** rather than load-bearing — the general principles (a
-deterministic external watchdog, transition-only alerting, a real push
-interrupt on the orchestrator's side rather than a polling habit) carry over
-regardless of harness. What's specific to Codex should be filled in once a
-Codex `body` session is actually run through Holler:
+Verified against `@agentclientprotocol/codex-acp` 1.13.1 driven through Holler
+([#473](https://github.com/Performant-Labs/holler/issues/473), tracked under
+[#303](https://github.com/Performant-Labs/holler/issues/303)). The general
+principles above (a deterministic external watchdog, transition-only alerting, a
+real push interrupt on the orchestrator's side) carry over unchanged.
 
-- Confirm whether Codex exposes an equivalent structured-question/permission
-  surface analogous to OpenCode's `/question` and `/permission`, and whether
-  Holler's `blocked` roster field is wired to it the same way.
-- Confirm whether `holler answer SESSION CHOICE` works against a
-  Codex-driven session, or whether Codex's tool-approval model needs a
-  different answer shape.
-- Until confirmed, treat a Codex session's `blocked` state (if `roster` ever
-  reports one) as needing direct investigation against whatever surface
-  Codex actually exposes, rather than assuming the OpenCode answer path
-  applies unchanged.
-
-**Update this section with real findings the first time a Codex body session
-is actually driven through Holler** — don't extrapolate further from here
-without live verification.
+- **Codex does surface permission requests, and Holler reports them as
+  `blocked`.** The session shows `input-required` in `roster`, and
+  `roster --json` lists a pending item of `kind: permission` with the prompt
+  (for example `Run command`) and its options, such as `Yes, proceed`, a
+  "don't ask again for commands that start with ..." option, and `No, and tell
+  Codex what to do differently`.
+- **Whether Codex asks depends on the adapter's mode, not on `config.toml`.**
+  Set `INITIAL_AGENT_MODE` in the body's environment: `read-only` ("Ask for
+  approval") asks before editing files outside the workspace or using the
+  network, `agent` (the default) only asks for actions it judges unsafe, and
+  `agent-full-access` never asks. A write inside the workspace ran without a
+  prompt in both the default and `read-only` modes. The adapter ignores
+  `approval_policy` in `config.toml`, and a Codex build that no longer supports
+  a value exits at startup instead of ignoring it.
+- **Answer with the option's index.** `holler answer SESSION 0` approves once;
+  `holler answer SESSION 2` rejects. The `once`/`always`/`reject` shorthands do
+  not work for an ACP session
+  ([#476](https://github.com/Performant-Labs/holler/issues/476)), and an option
+  label that contains a comma, such as the reject option, cannot be selected by
+  label ([#477](https://github.com/Performant-Labs/holler/issues/477)).
+- **Rejecting ends the turn.** The waiting `say` returns `prompt was interrupted
+  before it completed` and the session goes back to `idle`.
+- **`holler interrupt SESSION` clears a pending request.** The session returns
+  to `idle`, the guarded action does not run, and the next `say` works.

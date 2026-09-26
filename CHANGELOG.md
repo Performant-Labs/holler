@@ -8,6 +8,7 @@ fills this file in at release time.
 ## [Unreleased]
 
 ### Enhancements
+- The monitoring guidance's Codex section is now filled in from a real run: Codex permission requests show as `input-required`, are answered by option index rather than the OpenCode-only `once`/`always`/`reject` shorthands, and which adapter mode decides whether Codex asks ([#473](https://github.com/Performant-Labs/holler/issues/473)).
 - Wire vocabulary for the session hold (wire and docs half; no hub behavior yet): the new error code
   `-32011 session_held`, carrying `data.reason` (the operator's text, when given) and `data.since`
   (RFC 3339), and the additive optional roster fields `hold`, `hold_reason` and `held_since`
