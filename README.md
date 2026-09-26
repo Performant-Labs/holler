@@ -100,6 +100,17 @@ holler roster                          # see what's connected
 holler say <session-name> "hello"      # one-shot prompt, print the reply
 ```
 
+To stop new work reaching a session (its current turn finishes) and later allow it again:
+
+```bash
+holler hold <session-name> --reason "deploy freeze"   # say to it is now refused (exit 4) with the reason
+holler roster                                          # the HOLD column shows it
+holler release <session-name>
+```
+
+The hold is kept by the hub per session name and survives a body reconnect and a hub restart;
+`interrupt` still works on a held session. See `docs/protocol/v2.md` §7 and §10.
+
 ### A real, working `sessions.toml`
 
 `sessions.toml`'s shape — what harness each session runs, spawn vs. attach mode — is config, not

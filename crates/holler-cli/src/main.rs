@@ -206,6 +206,14 @@ fn main() {
         let result = holler_cli::answer_cmd::run(answer, cli.json);
         print_leaf_result_and_exit(&result.message, result.to_stderr, result.exit_code, true);
     }
+    if let Command::Hold(hold) = &cli.command {
+        let result = holler_cli::hold_cmd::hold(hold, cli.json);
+        print_leaf_result_and_exit(&result.message, result.to_stderr, result.exit_code, true);
+    }
+    if let Command::Release(release) = &cli.command {
+        let result = holler_cli::hold_cmd::release(release, cli.json);
+        print_leaf_result_and_exit(&result.message, result.to_stderr, result.exit_code, true);
+    }
     if let Command::Wait(wait) = &cli.command {
         let result = holler_cli::wait_cmd::run(wait, cli.json);
         print_leaf_result_and_exit(&result.message, result.to_stderr, result.exit_code, false);

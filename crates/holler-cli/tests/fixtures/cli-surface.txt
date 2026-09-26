@@ -53,6 +53,11 @@ wait | io/alpha
 wait | io/alpha,io/beta --until completed,failed --after h-01H --timeout 120s --json
 wait | --prefix io
 wait | --prefix io/ --until gone --timeout 5s
+hold | io/alpha
+hold | io/alpha --reason "deploy freeze"
+hold | io/alpha --reason "deploy freeze" --json
+release | io/alpha
+release | io/alpha --json
 
 # --- body ------------------------------------------------------------------
 body join | --server wss://hub.example.ts.net --token tok_7f3a:hlr_join_x --hub-key aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa

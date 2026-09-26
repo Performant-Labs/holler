@@ -136,6 +136,10 @@ pub fn run(say: &Say, json: bool) -> SayResult {
             // (unknown session, session_busy, not_connected, connection_lost,
             // cancelled) is a runtime failure (exit 1).
             let is_ambiguous = e.data.as_ref().and_then(|d| d.reason.as_deref()) == Some("ambiguous");
+            if crate::hold_cmd::is_held(&e) {
+                let (message, to_stderr) = crate::hold_cmd::held_refusal(&say.session, &e, json);
+                return SayResult { message, to_stderr, exit_code: crate::hold_cmd::HELD_EXIT_CODE };
+            }
             let message = if e.code == holler_proto::Code::SessionBusy.jsonrpc() {
                 busy_hint(&say.session, &e)
             } else {

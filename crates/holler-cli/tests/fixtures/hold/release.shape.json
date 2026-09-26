@@ -1,0 +1,6 @@
+{
+  "session": "string",
+  "hold": "bool",
+  "was_held": "bool",
+  "persisted": "bool"
+}
