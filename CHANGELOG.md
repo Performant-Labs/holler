@@ -104,6 +104,13 @@ fills this file in at release time.
   flake's cause is still open ([#420](https://github.com/Performant-Labs/holler/issues/420)).
 
 ### Bug Fixes
+- A second `holler hub serve` or `holler body run` started against a running one no longer blanks the
+  running instance's lock file (`hub/serve.lock`, `body/run.lock`). The loser emptied the file before it
+  found the lock held, so its refusal read `(pid )` instead of naming the running process, and the file
+  lost that PID; `holler body detach`, which checks the body's lock to see whether a run is live, blanked it
+  the same way. Only the instance that takes the lock now empties the file and writes its own PID, so the
+  refusal names the holder and the file keeps its PID. The refusal text and exit code are unchanged
+  ([#489](https://github.com/Performant-Labs/holler/issues/489)).
 - `holler hub serve` with no `--listen` now listens on `127.0.0.1:41807`, the loopback default the protocol
   documents and the address `hub token mint`'s join line already pointed at. Before, the hub started and
   then panicked in its accept loop (`index out of bounds: the len is 0 but the index is 0`), leaving nothing

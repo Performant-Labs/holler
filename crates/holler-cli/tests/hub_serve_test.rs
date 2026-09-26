@@ -298,6 +298,15 @@ fn second_serve_refuses_exit_3() {
         stderr.contains("another holler hub is running"),
         "refusal must say another holler hub is running; got: {stderr}"
     );
+    // #489: the loser must not blank the holder's pid: the refusal quotes the
+    // running hub's pid and `serve.lock` still holds it afterwards.
+    let holder = hub.pid().to_string();
+    assert!(
+        stderr.contains(&format!("(pid {holder})")),
+        "refusal must name the running hub's pid {holder}; got: {stderr}"
+    );
+    let on_disk = std::fs::read_to_string(serve_lock(&state)).expect("read serve.lock");
+    assert_eq!(on_disk, holder, "a losing hub must leave the holder's pid in serve.lock");
     hub.stop(Duration::from_secs(5));
 }
 
@@ -313,9 +322,14 @@ fn crashed_lock_is_reclaimed() {
     // so the lock file is left behind).
     kill_tree(hub.child_mut());
     drop(hub);
+    // #489: leave a *longer* stale pid than any real one, so leftover bytes
+    // would show if the winner did not truncate after taking the lock.
+    std::fs::write(serve_lock(&state), "99999999999999999999").expect("seed a stale pid");
 
     // A fresh hub in the same state dir must start (reclaiming the stale lock).
     let again = Hub::start(&state);
+    let on_disk = std::fs::read_to_string(serve_lock(&state)).expect("read serve.lock");
+    assert_eq!(on_disk, again.pid().to_string(), "the reclaiming hub must write exactly its own pid");
     again.stop(Duration::from_secs(5));
 }
 

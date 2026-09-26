@@ -57,7 +57,8 @@ pub fn acquire(state_root: &Path) -> Result<RunLockGuard, LockError> {
     }
     let file = std::fs::OpenOptions::new()
         .create(true)
-        .truncate(true) // the file holds only the *current* holder's PID.
+        .truncate(false) // #489: only the winner truncates, once locked (`write_pid`).
+        .read(true)
         .write(true)
         .open(&path)
         .map_err(|e| LockError::Io(e.to_string()))?;
@@ -65,7 +66,8 @@ pub fn acquire(state_root: &Path) -> Result<RunLockGuard, LockError> {
     match fs4::FileExt::try_lock(&file) {
         Ok(()) => {}
         Err(fs4::TryLockError::WouldBlock) => {
-            let pid = std::fs::read_to_string(&path).unwrap_or_default();
+            // The holder's PID, read untouched from the file we failed to lock.
+            let pid = std::io::read_to_string(&file).unwrap_or_default();
             return Err(LockError::Held(pid));
         }
         Err(e) => return Err(LockError::Io(e.to_string())),
@@ -74,17 +76,15 @@ pub fn acquire(state_root: &Path) -> Result<RunLockGuard, LockError> {
     Ok(RunLockGuard { file, path })
 }
 
-// Positioned write at offset 0 (the file was just truncated, so a plain
-// `Write` would also land at 0 — `write_at`/`seek_write` are used anyway so
-// this never depends on the file's current cursor position). The two traits
-// are unix's `std::os::unix::fs::FileExt::write_at` and windows'
-// `std::os::windows::fs::FileExt::seek_write` — same effect, different
-// names, so the OS is picked by `cfg` rather than importing an absent trait
-// unconditionally (the compile break this mirrors: holler-client#60; see
-// `holler_hub::serve`'s twin `write_pid`, which had the same gap).
+// Replace the content with our PID: truncate, then one positioned write at offset 0 (no
+// rewind needed). Only once the flock is held (#489: truncating on open let a loser blank the
+// holder's PID); a loser reading in between sees an empty PID, never a garbled one. unix's
+// `write_at` / windows' `seek_write` by `cfg`, not an unconditional import (holler-client#60).
+// Twin of `holler_hub::serve`'s `write_pid`: keep the two in step.
 #[cfg(unix)]
 fn write_pid(file: &std::fs::File) -> std::io::Result<()> {
     use std::os::unix::fs::FileExt;
+    file.set_len(0)?;
     file.write_at(std::process::id().to_string().as_bytes(), 0)?;
     Ok(())
 }
@@ -92,6 +92,7 @@ fn write_pid(file: &std::fs::File) -> std::io::Result<()> {
 #[cfg(windows)]
 fn write_pid(file: &std::fs::File) -> std::io::Result<()> {
     use std::os::windows::fs::FileExt;
+    file.set_len(0)?;
     file.seek_write(std::process::id().to_string().as_bytes(), 0)?;
     Ok(())
 }
@@ -117,5 +118,39 @@ mod tests {
         } // dropped: the flock (and the file) are released here.
         let second = acquire(dir.path());
         assert!(second.is_ok(), "a released lock must be reclaimable");
+    }
+
+    /// #489: a losing `acquire` must leave the holder's PID in the file, so
+    /// its refusal names the holder. An `flock` is per open file description,
+    /// so a second `acquire` in this same process loses. Unix only: Windows'
+    /// mandatory `LockFileEx` blocks the loser's read regardless (not in CI).
+    #[cfg(unix)]
+    #[test]
+    fn loser_names_holder_pid_and_leaves_it_in_the_file() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let _first = acquire(dir.path()).expect("first acquire");
+        let me = std::process::id().to_string();
+
+        let second = acquire(dir.path());
+        assert_eq!(second.err(), Some(LockError::Held(me.clone())), "the refusal must name the holder's pid");
+
+        let on_disk = std::fs::read_to_string(lock_path(dir.path())).expect("read lock file");
+        assert_eq!(on_disk, me, "a losing acquire must not blank the holder's pid");
+    }
+
+    /// #489: the winner writes exactly its own PID, even over a longer PID a
+    /// dead holder left behind (the OS released its flock), with no trailing
+    /// bytes from the stale content.
+    #[cfg(unix)]
+    #[test]
+    fn winner_overwrites_a_longer_stale_pid_exactly() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = lock_path(dir.path());
+        std::fs::create_dir_all(path.parent().expect("parent")).expect("mkdir body/");
+        std::fs::write(&path, "99999999999999999999").expect("seed a stale pid");
+
+        let _g = acquire(dir.path()).expect("a dead holder's lock file must be reclaimed");
+        let on_disk = std::fs::read_to_string(&path).expect("read lock file");
+        assert_eq!(on_disk, std::process::id().to_string(), "the file must hold exactly the winner's pid");
     }
 }
