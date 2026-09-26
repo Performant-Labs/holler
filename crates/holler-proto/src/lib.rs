@@ -29,6 +29,7 @@ pub mod clock;
 pub mod docs;
 pub mod envelope;
 pub mod error;
+pub mod hold;
 pub mod id;
 pub mod log;
 pub mod methods;
@@ -50,6 +51,7 @@ pub use docs::{
 };
 pub use envelope::{decode, encode, Envelope, EnvelopeError, typed_params};
 pub use error::{Code, Error as WireError, ErrorData};
+pub use hold::SessionHold;
 pub use id::{CorrelationId, CorrelationIdError};
 pub use token::RedeemError;
 pub use token::TokenError;

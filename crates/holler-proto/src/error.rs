@@ -41,6 +41,7 @@ pub enum Code {
     ConnectionLost,
     SessionBusy,
     NothingPending,
+    SessionHeld,
 }
 
 impl Code {
@@ -48,7 +49,7 @@ impl Code {
     ///
     /// The codec and tests iterate this to assert uniqueness and range over
     /// the one source of truth (there is no separate table to check).
-    pub const ALL: [Code; 15] = [
+    pub const ALL: [Code; 16] = [
         Code::ParseError,
         Code::InvalidRequest,
         Code::MethodNotFound,
@@ -64,6 +65,7 @@ impl Code {
         Code::ConnectionLost,
         Code::SessionBusy,
         Code::NothingPending,
+        Code::SessionHeld,
     ];
 
     /// The JSON-RPC numeric code for this Holler code (docs §8).
@@ -85,6 +87,7 @@ impl Code {
             Code::ConnectionLost => -32008,
             Code::SessionBusy => -32009,
             Code::NothingPending => -32010,
+            Code::SessionHeld => -32011,
         }
     }
 
@@ -107,6 +110,7 @@ impl Code {
             Code::ConnectionLost => "connection_lost",
             Code::SessionBusy => "session_busy",
             Code::NothingPending => "nothing_pending",
+            Code::SessionHeld => "session_held",
         }
     }
 
@@ -141,6 +145,11 @@ pub struct ErrorData {
     /// `session_busy` only: milliseconds since the last `session/update`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_update_age_ms: Option<u64>,
+    /// `session_held` only: when the hold was set (RFC 3339), so the caller
+    /// can say how long the session has been held. The operator's free-text
+    /// reason, if any, rides in `reason` like every other refusal's.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub since: Option<String>,
 }
 
 /// The JSON-RPC `error` object (docs §8 / JSON-RPC 2.0 §6).
@@ -179,6 +188,7 @@ impl Error {
                 state: None,
                 turn_age_ms: None,
                 last_update_age_ms: None,
+                since: None,
             })),
         }
     }
@@ -196,6 +206,7 @@ impl Error {
                 state: Some(state.into()),
                 turn_age_ms: Some(turn_age_ms),
                 last_update_age_ms: Some(last_update_age_ms),
+                since: None,
             })),
         }
     }
@@ -207,6 +218,31 @@ impl Error {
     /// that returns it lives in the session-manager story (#342).
     pub fn nothing_pending() -> Self {
         Self::new(Code::NothingPending, "no held permission or elicitation to answer", None)
+    }
+
+    /// Build a `-32011 session_held` refusal (issue #441, umbrella #437): the
+    /// hub refuses new work (`say`, `say --queue`, `say --replace`) to a
+    /// session an operator has held. `reason` is the operator's free text
+    /// (absent when none was given) and `since` is when the hold was set
+    /// (RFC 3339), so the caller's message can name both. The message itself
+    /// names the reason, so a caller that prints only `message` still says why.
+    pub fn session_held(reason: Option<&str>, since: &str) -> Self {
+        let message = match reason {
+            Some(r) => format!("session is held: {r}"),
+            None => "session is held".to_owned(),
+        };
+        Self {
+            code: Code::SessionHeld.jsonrpc(),
+            message,
+            data: Some(Box::new(ErrorData {
+                code: Code::SessionHeld.data_code().to_owned(),
+                reason: reason.map(str::to_owned),
+                state: None,
+                turn_age_ms: None,
+                last_update_age_ms: None,
+                since: Some(since.to_owned()),
+            })),
+        }
     }
 }
 
@@ -223,6 +259,7 @@ impl From<Code> for Error {
                 state: None,
                 turn_age_ms: None,
                 last_update_age_ms: None,
+                since: None,
             })),
         }
     }

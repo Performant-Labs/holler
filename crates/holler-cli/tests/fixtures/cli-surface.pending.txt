@@ -7,3 +7,7 @@
 # documented command whose leaf path is listed here, and nowhere else.
 #
 # Each line names its story.
+hold | io/alpha                            # session hold (#437): wire and docs land first (#441); the verb is #443
+hold | io/alpha --reason "deploy freeze" --json
+release | io/alpha                         # session hold (#437), #443
+release | io/alpha --json
