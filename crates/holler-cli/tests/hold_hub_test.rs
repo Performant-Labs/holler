@@ -446,10 +446,15 @@ fn an_unwritable_state_directory_keeps_the_hold_in_force() {
     std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o500)).unwrap();
     let can_write_anyway = std::fs::File::create(dir.join("probe")).is_ok(); // running as root
     let out = rig.hold(SESSION, Some("in memory only")).unwrap();
+    let repeat = rig.hold(SESSION, Some("in memory only")).unwrap();
     std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
     if !can_write_anyway {
         assert_eq!(out["persisted"], false, "the caller is told the hold will not survive a restart");
+        assert_eq!(repeat["persisted"], false, "and a repeat does not claim otherwise");
     }
+    // Once the directory is writable, the next hold or release call saves it.
+    assert_eq!(rig.hold(SESSION, None).unwrap()["persisted"], true);
+    assert!(rig.hold_file()["holds"].get(SESSION).is_some());
     assert_held(rig.say(SESSION, false), Some("in memory only"));
     assert_eq!(rig.row(SESSION).unwrap()["hold"], true);
 }

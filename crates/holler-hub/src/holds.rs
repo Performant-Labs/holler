@@ -65,6 +65,13 @@ pub const MAX_REASON_CHARS: usize = 200;
 /// The on-disk format version this build reads and writes.
 const FILE_VERSION: u32 = 1;
 
+/// The registry key for a session: `<label>/<session>`, where `label` is the
+/// token label its body authenticated as. Every place that checks or sets a
+/// hold builds the key with this one function.
+pub fn session_key(label: &str, session: &str) -> String {
+    format!("{label}/{session}")
+}
+
 /// One hold: the operator's reason (if any) and when it was set (RFC 3339).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HoldInfo {
@@ -112,6 +119,11 @@ struct Persist {
     /// Set when the existing file could not be read or moved aside: writing
     /// would overwrite holds this hub could not see.
     blocked: bool,
+    /// Set while the file on disk is behind memory (a write failed). Every
+    /// later change, including an idempotent repeat, retries the write and
+    /// reports `persisted` from this, never from whether the call changed
+    /// anything.
+    unsaved: bool,
 }
 
 struct Shared {
@@ -159,7 +171,7 @@ fn emit(severity: Severity, method: &'static str, fields: Vec<(&'static str, Str
 impl Holds {
     /// A registry that never touches disk.
     pub fn in_memory() -> Self {
-        Self::with_persist(BTreeMap::new(), Persist { path: None, blocked: false })
+        Self::with_persist(BTreeMap::new(), Persist { path: None, blocked: false, unsaved: false })
     }
 
     fn with_persist(map: BTreeMap<String, HoldInfo>, persist: Persist) -> Self {
@@ -171,7 +183,7 @@ impl Holds {
     pub fn load(state: &HubState) -> Self {
         let path = state.hub_dir.join("holds.json");
         let (map, blocked) = read_file(&path);
-        Self::with_persist(map, Persist { path: Some(path), blocked })
+        Self::with_persist(map, Persist { path: Some(path), blocked, unsaved: blocked })
     }
 
     /// The hold on `key`, if any. The only thing the prompt path calls.
@@ -205,7 +217,7 @@ impl Holds {
                 }
             }
         };
-        let persisted = if newly_held { self.persist() } else { true };
+        let persisted = self.sync(newly_held);
         if newly_held {
             emit(Severity::Info, "session_held", vec![("session", key.to_owned())]);
         }
@@ -215,26 +227,42 @@ impl Holds {
     /// Release `key`. Releasing a session that is not held is a no-op.
     pub fn release(&self, key: &str) -> ReleaseOutcome {
         let was_held = self.shared.map.lock().unwrap_or_else(PoisonError::into_inner).remove(key).is_some();
-        let persisted = if was_held { self.persist() } else { true };
+        let persisted = self.sync(was_held);
         if was_held {
             emit(Severity::Info, "session_released", vec![("session", key.to_owned())]);
         }
         ReleaseOutcome { was_held, persisted }
     }
 
+    /// Bring the file up to date with memory when `changed` (or when an earlier
+    /// write failed and the file is still behind), and report whether it is.
+    fn sync(&self, changed: bool) -> bool {
+        let behind = self.shared.persist.lock().unwrap_or_else(PoisonError::into_inner).unsaved;
+        if changed || behind {
+            self.persist()
+        } else {
+            true
+        }
+    }
+
     /// Write the current map. Serialised by the persistence lock, and the
     /// snapshot is taken *after* acquiring it, so whichever writer runs last
     /// writes the newest state no matter how the writers interleaved.
     fn persist(&self) -> bool {
-        let persist = self.shared.persist.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut persist = self.shared.persist.lock().unwrap_or_else(PoisonError::into_inner);
         let Some(path) = persist.path.clone() else { return true };
         if persist.blocked {
+            persist.unsaved = true;
             return false;
         }
         let doc = FileDoc { version: FILE_VERSION, holds: self.snapshot() };
         match write_atomic(&path, &doc) {
-            Ok(()) => true,
+            Ok(()) => {
+                persist.unsaved = false;
+                true
+            }
             Err(e) => {
+                persist.unsaved = true;
                 emit(
                     Severity::Warn,
                     "hold_state_write_failed",
@@ -360,6 +388,29 @@ mod tests {
         assert!(!h.release("io/alpha").was_held);
         assert!(!h.release("io/never-held").was_held);
         assert!(h.check("io/alpha").is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_repeated_hold_after_a_failed_write_retries_and_reports_the_truth() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let state = state_in(dir.path());
+        let h = Holds::load(&state);
+        std::fs::set_permissions(&state.hub_dir, std::fs::Permissions::from_mode(0o500)).unwrap();
+        let can_write_anyway = std::fs::File::create(state.hub_dir.join("probe")).is_ok();
+        let first = h.hold("io/alpha", Some("x"));
+        let repeat = h.hold("io/alpha", Some("x"));
+        let rel_repeat = h.release("io/never");
+        if !can_write_anyway {
+            assert!(!first.persisted);
+            assert!(!repeat.persisted, "a repeat must not claim the hold is on disk when it is not");
+            assert!(!rel_repeat.persisted, "nor may a no-op release");
+        }
+        std::fs::set_permissions(&state.hub_dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let healed = h.hold("io/alpha", Some("x"));
+        assert!(healed.persisted && !healed.newly_held, "the repeat retries the write once the directory is writable");
+        assert!(Holds::load(&state).check("io/alpha").is_some());
     }
 
     #[test]
