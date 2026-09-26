@@ -107,6 +107,18 @@ pub async fn interrupt(
         ResolveOutcome::Ambiguous(candidates) => return Err(InterruptError::Ambiguous(candidates)),
     };
 
+    // Issue #442: `interrupt` keeps working on a held session, but its
+    // redirect half delivers a new prompt, which a hold refuses. Refuse the
+    // whole redirect up front rather than cancel the turn and then fail to
+    // deliver what was meant to replace it. (The refusal that cannot be raced
+    // is still `send_prompt`'s; a hold set between this check and the redirect
+    // surfaces as `PromptFailed`.)
+    if text.is_some() {
+        if let Some(hold) = registry.holds().check(&format!("{}/{}", handle.hostname, ad.name)) {
+            return Err(InterruptError::Refused(hold.refusal()));
+        }
+    }
+
     apply_cancel(&handle, ad.name.as_str()).await?;
 
     let session_full = format!("{}/{}", handle.hostname, ad.name);

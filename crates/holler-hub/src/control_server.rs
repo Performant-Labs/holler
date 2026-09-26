@@ -135,7 +135,10 @@ async fn dispatch_session_control(
         // `control/roster` (issue #186): read the hub's own roster and return
         // `{rows: [...]}` (the live-only view; the CLI's `--all` reads the
         // same socket and asks for the full set, which the server honors here).
-        "control/roster" => roster_control(cid, obj, roster).await,
+        "control/roster" => roster_control(cid, obj, roster, registry).await,
+        // `control/hold` / `control/release` (issue #442): the session hold.
+        "control/hold" => crate::control_hold::hold(cid, obj, registry, roster),
+        "control/release" => crate::control_hold::release(cid, obj, registry, roster),
         // Issue #192's test-only hook: forcibly end a body's live connection
         // to simulate an abrupt drop. Gated behind `HOLLER_TEST_HOOKS=1` (an
         // env var, not `cfg(test)`, since this dispatch runs inside the real
@@ -361,6 +364,7 @@ async fn interrupt(cid: &holler_proto::CorrelationId, obj: &serde_json::Value, r
         Err(crate::interrupt::InterruptError::ConnectionLost) => {
             encode_error(cid, Code::ConnectionLost, format!("{session} io disconnected mid-turn; ask again"))
         }
+        Err(crate::interrupt::InterruptError::PromptFailed(crate::talk::SayError::Refused(err))) => encode_error_frame(cid, &err),
         Err(crate::interrupt::InterruptError::PromptFailed(e)) => encode_error(cid, Code::NotConnected, e.message()),
     }
 }
@@ -414,11 +418,16 @@ async fn answer(cid: &holler_proto::CorrelationId, obj: &serde_json::Value, regi
 /// `stalled` is not a filter dimension here (it is a display-only column in
 /// the CLI), and `hostname` narrowing is still the CLI's job (it can read the
 /// roster once and filter locally).
-async fn roster_control(cid: &holler_proto::CorrelationId, obj: &serde_json::Value, roster: &Roster) -> String {
+async fn roster_control(cid: &holler_proto::CorrelationId, obj: &serde_json::Value, roster: &Roster, registry: &Registry) -> String {
     let params = obj.get("params");
     let all = params.and_then(|p| p.get("all")).and_then(|v| v.as_bool()).unwrap_or(false);
     let prefix = params.and_then(|p| p.get("prefix")).and_then(|v| v.as_str());
-    let rows = roster.rows_matching(Option::from(all), prefix);
+    let mut rows = roster.rows_matching(Option::from(all), prefix);
+    // Issue #442: the hold is hub state keyed by session name, so it is read
+    // here from the registry rather than stored on the (presence-driven) row.
+    for row in &mut rows {
+        row.hold = registry.holds().row_hold(&row.name);
+    }
     encode_response(
         cid,
         serde_json::json!({ "rows": rows }),
@@ -652,12 +661,12 @@ async fn token_ping(cid: &holler_proto::CorrelationId, obj: &serde_json::Value, 
     }
 }
 
-fn encode_response(cid: &holler_proto::CorrelationId, result: serde_json::Value) -> String {
+pub(crate) fn encode_response(cid: &holler_proto::CorrelationId, result: serde_json::Value) -> String {
     let env = Envelope::response(cid, Some(result));
     holler_proto::encode(&env).unwrap_or_default()
 }
 
-fn encode_error(cid: &holler_proto::CorrelationId, code: Code, message: String) -> String {
+pub(crate) fn encode_error(cid: &holler_proto::CorrelationId, code: Code, message: String) -> String {
     let env = Envelope::error_frame(cid, &WireError::new(code, message, None));
     holler_proto::encode(&env).unwrap_or_default()
 }
@@ -665,7 +674,7 @@ fn encode_error(cid: &holler_proto::CorrelationId, code: Code, message: String) 
 /// Encode an already-built [`WireError`] verbatim (issue #190: `say`'s own
 /// `session_busy`/body-refused errors already carry the exact `data` the CLI
 /// needs — `encode_error` would flatten that away).
-fn encode_error_frame(cid: &holler_proto::CorrelationId, error: &WireError) -> String {
+pub(crate) fn encode_error_frame(cid: &holler_proto::CorrelationId, error: &WireError) -> String {
     let env = Envelope::error_frame(cid, error);
     holler_proto::encode(&env).unwrap_or_default()
 }

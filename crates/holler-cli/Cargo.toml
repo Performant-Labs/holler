@@ -273,6 +273,19 @@ path = "tests/multiword_command_test.rs"
 name = "hub_hygiene_test"
 path = "tests/hub_hygiene_test.rs"
 
+# Session hold, hub side (issue #442, umbrella #437; tags test-grp-concurrency
+# and lifecycle): a real hub, body and `stub-acp`, including a real hub restart
+# and the say-vs-hold race matrix.
+[[test]]
+name = "hold_hub_test"
+path = "tests/hold_hub_test.rs"
+
+# The hold's single enforcement point (issue #442): a source-level guard that
+# no second sender of `session/prompt` appears in holler-hub.
+[[test]]
+name = "hold_single_path_test"
+path = "tests/hold_single_path_test.rs"
+
 # Dev scripts (issue #425): drives the real `scripts/run app:hub:*` / `app:body:*`
 # dispatcher against the real binary, in a temp state dir on an OS-picked port.
 [[test]]

@@ -198,6 +198,14 @@ pub async fn say(
         ResolveOutcome::Ambiguous(candidates) => return Err(SayError::Ambiguous(candidates)),
     };
 
+    // Issue #442: a held session refuses new work before anything else is
+    // done for it (no turn id moved, no TalkLog line). This is a fast path
+    // only: the enforcement that cannot be raced is the check in
+    // `circuit::dispatch::send_prompt`, which every prompt passes through.
+    if let Some(hold) = registry.holds().check(&format!("{}/{}", handle.hostname, ad.name)) {
+        return Err(SayError::Refused(hold.refusal()));
+    }
+
     // The busy check (issue #150's policy, enforced here as the hub's own
     // fail-closed gate — the body's `SessionManager` enforces it again,
     // independently, so a race still fails closed).
@@ -334,6 +342,14 @@ async fn send_turn(
                     .unwrap_or_default();
                 Err(SayError::Busy { state: state_str, turn_age_ms, last_update_age_ms })
             } else {
+                if err.code == holler_proto::Code::SessionHeld.jsonrpc() {
+                    // The hold was set after `say`'s own pre-check but before
+                    // the prompt reached `send_prompt` (issue #442): nothing
+                    // was delivered, so undo the turn id moved above.
+                    if let Some(prev) = &ad.turn_id {
+                        roster.set_turn_id(&handle.token_id, ad.name.as_str(), prev);
+                    }
+                }
                 Err(SayError::Refused(err))
             }
         }
@@ -414,6 +430,11 @@ fn age_ms(rfc3339: Option<&str>) -> u64 {
     };
     let now = time::OffsetDateTime::now_utc();
     u64::try_from((now - then).whole_milliseconds()).unwrap_or(0)
+}
+
+#[cfg(test)]
+pub(crate) fn test_user_message(request_id: &str, text: &str) -> Message {
+    user_message(request_id, text)
 }
 
 fn user_message(request_id: &str, text: &str) -> Message {

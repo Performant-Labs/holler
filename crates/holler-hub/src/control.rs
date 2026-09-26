@@ -220,6 +220,76 @@ pub fn wait(
     exchange_with_timeout("b-wait", "control/wait", Some(params), timeout + std::time::Duration::from_secs(5))
 }
 
+/// `holler hold SESSION [--reason TEXT]` (issue #442): ask the live hub to
+/// stop new work reaching `session`. Idempotent. Returns `{session, hold,
+/// reason?, since, newly_held, persisted}`; an unknown session is
+/// [`ControlError::Refused`] carrying `-32003 unknown_session`.
+pub fn hold(session: &str, reason: Option<&str>) -> Result<serde_json::Value, ControlError> {
+    let params = serde_json::json!({ "session": session, "reason": reason });
+    exchange("b-hold", "control/hold", Some(params))
+}
+
+/// `holler release SESSION` (issue #442): lift a hold. Idempotent. Returns
+/// `{session, hold: false, was_held, persisted}`.
+pub fn release(session: &str) -> Result<serde_json::Value, ControlError> {
+    exchange("b-release", "control/release", Some(serde_json::json!({ "session": session })))
+}
+
+/// [`hold`] against an explicit state root rather than the ambient
+/// `HOLLER_STATE_DIR` (the same reason [`roster_at`] takes one: a test that
+/// drives several hubs from one process must not race a process-wide env var).
+pub fn hold_at(state_root: &std::path::Path, session: &str, reason: Option<&str>) -> Result<serde_json::Value, ControlError> {
+    let path = control_sock_path(&HubState::from_root(state_root.to_path_buf()));
+    let params = serde_json::json!({ "session": session, "reason": reason });
+    send_over(&path, "b-hold", "control/hold", Some(params), CLIENT_TIMEOUT)
+}
+
+/// [`release`] against an explicit state root (see [`hold_at`]).
+pub fn release_at(state_root: &std::path::Path, session: &str) -> Result<serde_json::Value, ControlError> {
+    let path = control_sock_path(&HubState::from_root(state_root.to_path_buf()));
+    send_over(&path, "b-release", "control/release", Some(serde_json::json!({ "session": session })), CLIENT_TIMEOUT)
+}
+
+/// [`say`] against an explicit state root (see [`hold_at`]): the concurrency
+/// tests race many of these from threads against `hold_at`.
+pub fn say_at(
+    state_root: &std::path::Path,
+    session: &str,
+    text: &str,
+    queue: bool,
+    timeout: std::time::Duration,
+) -> Result<serde_json::Value, ControlError> {
+    let path = control_sock_path(&HubState::from_root(state_root.to_path_buf()));
+    let params = serde_json::json!({
+        "session": session,
+        "text": text,
+        "queue": queue,
+        "timeout_ms": u64::try_from(timeout.as_millis()).unwrap_or(u64::MAX),
+    });
+    send_over(&path, "b-say", "control/say", Some(params), timeout + std::time::Duration::from_secs(5))
+}
+
+/// [`interrupt`] against an explicit state root (see [`hold_at`]).
+pub fn interrupt_at(state_root: &std::path::Path, session: &str, text: Option<&str>) -> Result<serde_json::Value, ControlError> {
+    let path = control_sock_path(&HubState::from_root(state_root.to_path_buf()));
+    let params = serde_json::json!({ "session": session, "text": text });
+    send_over(&path, "b-interrupt", "control/interrupt", Some(params), std::time::Duration::from_secs(60 + 600 + 5))
+}
+
+/// `hub query TARGET METHOD` against an explicit state root, with `method`
+/// passed through unvalidated (see [`hold_at`]); exists so a test can prove
+/// the hub refuses to forward a `session/prompt` this way.
+pub fn query_remote_at(
+    state_root: &std::path::Path,
+    target: &str,
+    method: &str,
+    params: Option<serde_json::Value>,
+) -> Result<serde_json::Value, ControlError> {
+    let path = control_sock_path(&HubState::from_root(state_root.to_path_buf()));
+    let outer = serde_json::json!({ "target": target, "method": method, "params": params });
+    send_over(&path, "b-query-remote", "control/query_remote", Some(outer), CLIENT_TIMEOUT)
+}
+
 /// Send one `method`/`params` request over the control socket and return its
 /// `result` — the shared body of every one-shot control exchange (`status`,
 /// `token_ping`, …). `id_literal` is a fixed, well-formed `b-` id (each
