@@ -328,3 +328,68 @@ fn render_json_already_escapes_control_characters() {
     let v: serde_json::Value = serde_json::from_str(&line).expect("valid JSON despite the embedded newline");
     assert_eq!(v["hostname"], "evil\nforged line", "serde_json round-trips the raw value safely");
 }
+
+// --- emission timestamp: the real microsecond fraction (issue #461) ----------
+//
+// The fraction used to be `(nanosecond / 1000) % 1000` printed as three digits,
+// i.e. the microsecond-within-millisecond digits: 18.372988 s printed `.988`,
+// and lines within one second came out non-monotonic. The spec (#144) and the
+// `timestamp()` doc comment want microseconds, fixed width: `.372988`.
+// Expected values are literal strings, never re-derived by the same arithmetic.
+
+use holler_proto::log::{format_timestamp, timestamp};
+use time::macros::datetime;
+
+#[test]
+fn format_timestamp_prints_the_real_microsecond_fraction() {
+    assert_eq!(
+        format_timestamp(datetime!(2026-09-26 12:00:18.372988 UTC)),
+        "2026-09-26T12:00:18.372988Z",
+    );
+}
+
+#[test]
+fn format_timestamp_keeps_six_digits_for_small_and_zero_fractions() {
+    assert_eq!(
+        format_timestamp(datetime!(2026-09-26 12:00:18.000008 UTC)),
+        "2026-09-26T12:00:18.000008Z",
+        "a sub-millisecond fraction must keep its leading zeros",
+    );
+    assert_eq!(
+        format_timestamp(datetime!(2026-09-26 12:00:18 UTC)),
+        "2026-09-26T12:00:18.000000Z",
+        "a zero fraction must still print six digits",
+    );
+}
+
+#[test]
+fn format_timestamp_orders_instants_within_one_second() {
+    // 18.372988 then 18.408001: under the old formula these printed `.988`
+    // and `.001`, sorting backwards.
+    let earlier = format_timestamp(datetime!(2026-09-26 12:00:18.372988 UTC));
+    let later = format_timestamp(datetime!(2026-09-26 12:00:18.408001 UTC));
+    assert!(earlier < later, "string order must follow time order: {earlier} vs {later}");
+}
+
+#[test]
+fn timestamp_has_the_fixed_microsecond_shape() {
+    // YYYY-MM-DDTHH:MM:SS.ffffffZ on the real emission path.
+    let ts = timestamp();
+    let b = ts.as_bytes();
+    assert_eq!(b.len(), 27, "fixed width, six fraction digits: {ts:?}");
+    for (i, sep) in [(4, b'-'), (7, b'-'), (10, b'T'), (13, b':'), (16, b':'), (19, b'.'), (26, b'Z')] {
+        assert_eq!(b[i], sep, "separator at offset {i} in {ts:?}");
+    }
+    for i in (0..26).filter(|i| ![4, 7, 10, 13, 16, 19].contains(i)) {
+        assert!(b[i].is_ascii_digit(), "digit expected at offset {i} in {ts:?}");
+    }
+}
+
+#[test]
+fn format_timestamp_converts_a_non_utc_offset_so_the_z_holds() {
+    assert_eq!(
+        format_timestamp(datetime!(2026-09-26 14:00:18.372988 +02:00)),
+        "2026-09-26T12:00:18.372988Z",
+        "a +02:00 wall time must print as its UTC instant, not be relabelled Z",
+    );
+}

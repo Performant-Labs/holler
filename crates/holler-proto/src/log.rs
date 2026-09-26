@@ -33,6 +33,7 @@ use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::OnceLock;
 
 use serde_json::{Map, Value};
+use time::{OffsetDateTime, UtcOffset};
 
 // --- dials -----------------------------------------------------------------
 
@@ -336,20 +337,30 @@ pub fn emit_banner() -> String {
 /// trailing `Z` (e.g. `2026-09-06T20:59:54.712345Z`). This is the wall-clock
 /// moment the event is *logged*, independent of any frame's own timestamp.
 pub fn timestamp() -> String {
-    use time::OffsetDateTime;
-    // `time`'s built-in Rfc3339 formatter is second-precision; the spec wants
-    // microsecond precision, so the parts are composed explicitly (all UTC).
-    let now = OffsetDateTime::now_utc();
-    let year = now.year() as u32;
-    let month = now.month() as u32;
-    let day = now.day() as u32;
-    let hour = now.hour();
-    let minute = now.minute();
-    let second = now.second();
-    let micros = (now.time().nanosecond() / 1000) % 1000;
-    format!(
-        "{year:02}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}.{micros:03}Z"
-    )
+    format_timestamp(OffsetDateTime::now_utc())
+}
+
+/// Format `at` as the emission timestamp `YYYY-MM-DDTHH:MM:SS.ffffffZ`: UTC,
+/// with exactly six fraction digits (the microseconds within the second,
+/// zero-padded), so the width is fixed and timestamps from one clock sort in
+/// time order as plain strings (issue #461). A value with a non-UTC offset is
+/// converted to UTC first, so the `Z` always holds. Pure (it reads no clock),
+/// so a known instant can be tested; [`timestamp`] applies it to the current
+/// time.
+pub fn format_timestamp(at: OffsetDateTime) -> String {
+    // `None` only when the UTC equivalent falls outside `time`'s ±9999-year
+    // range, which no clock produces; format the value as given, never panic.
+    let at = at.checked_to_offset(UtcOffset::UTC).unwrap_or(at);
+    // `time`'s well-known Rfc3339 format drops a zero fraction and trims
+    // trailing zeros, so its width varies; the parts are composed explicitly.
+    let year = at.year() as u32;
+    let month = at.month() as u32;
+    let day = at.day() as u32;
+    let hour = at.hour();
+    let minute = at.minute();
+    let second = at.second();
+    let micros = at.microsecond();
+    format!("{year:02}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}.{micros:06}Z")
 }
 
 // --- redaction ---------------------------------------------------------------
