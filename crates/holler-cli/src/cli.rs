@@ -148,7 +148,8 @@ pub struct Body {
 
 #[derive(Parser, Debug)]
 pub struct Serve {
-    /// Address (host:port) to listen on. May be given more than once.
+    /// Address (host:port) to listen on (default 127.0.0.1:41807). May be
+    /// given more than once; the addresses given replace the default.
     #[arg(long)]
     pub listen: Vec<String>,
     /// Address (host[:port]) to advertise to bodies.

@@ -333,7 +333,8 @@ fn parse_ttl(ttl: &str) -> Option<u64> {
 /// The ready-to-paste `holler body join --server <adv> --token <id>:<secret>
 /// --hub-key <hex>` line `mint` prints (and `--json`'s `join_command`). The
 /// server is the hub's persisted advertise address if `hub serve --advertise`
-/// set one, else the spec's loopback default `ws://127.0.0.1:41807`.
+/// set one, else `ws://` and the hub's own default listen address,
+/// [`holler_hub::serve_listen::DEFAULT_LISTEN`].
 /// `--hub-key` (issue #322) is the hub's X25519 public key: the operator
 /// carries it over the same out-of-band channel as the secret, and `body
 /// join` pins it — this is the physical channel that makes the pin
@@ -372,7 +373,7 @@ fn join_command(state: &holler_hub::state::HubState, token_id: &str, secret: &st
         .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
         .and_then(|v| v.get("advertise").and_then(|a| a.as_str()).map(String::from))
         .map(|adv| if adv.contains("://") { adv } else { format!("{}://{adv}", scheme_for(&adv)) })
-        .unwrap_or_else(|| "ws://127.0.0.1:41807".into());
+        .unwrap_or_else(|| format!("ws://{}", holler_hub::serve_listen::DEFAULT_LISTEN));
     format!("holler body join --server {server} --token {token_id}:{secret} --hub-key {hub_pubkey}")
 }
 

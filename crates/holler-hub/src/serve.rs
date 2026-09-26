@@ -4,7 +4,8 @@
 //! The hub listens on **loopback plain `ws` only** (ADR 0006). A non-loopback
 //! `--listen` address is refused with exit 3 before anything binds; off-loopbox
 //! reachability is a TLS-terminating proxy in front of a loopback listener, not
-//! a flag.
+//! a flag. With no `--listen` at all the hub listens on
+//! [`crate::serve_listen::DEFAULT_LISTEN`] (issue #469).
 //!
 //! One `hub serve` per state dir: an advisory `flock` on `<state>/hub/serve.lock`
 //! (holding the hub's PID) makes a second `hub serve` in the same state dir
@@ -23,14 +24,14 @@
 
 use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
-use std::task::{Context, Poll};
 
-use futures_util::{Future, Sink, Stream, StreamExt};
+use futures_util::{Sink, Stream, StreamExt};
 use holler_proto::{decode, Envelope, Join};
 use tokio::net::{TcpListener, TcpSocket, TcpStream, UnixListener};
 use tokio::signal::unix::{signal, SignalKind};
 use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 
+use crate::serve_listen::{effective_listen, AcceptAny};
 use crate::state::{
     advertise_path, control_sock_path, ensure_dirs, resolve_state_dir, serve_lock_path, HubState,
 };
@@ -100,7 +101,9 @@ pub fn run(listen: &[String], advertise: Option<&str>, join_held: &[String]) -> 
         return 1;
     }
 
-    // 1. Refuse any non-loopback listen address before anything binds.
+    // 1. Refuse any non-loopback listen address before anything binds. No
+    // `--listen` means the loopback default (issue #469); any given replace it.
+    let listen = effective_listen(listen);
     let addrs: Vec<SocketAddr> = match listen.iter().map(|s| validate_loopback(s)).collect() {
         Some(a) => a,
         None => return 3,
@@ -375,8 +378,9 @@ fn build_shared_state(state: &HubState, join_held: Vec<String>) -> SharedState {
 
 /// Bind the listeners and serve until a signal. Runs inside the tokio runtime
 /// (tokio's TCP bind is async). Returns the exit code: 0 on a clean signal
-/// shutdown (the caller tears down), 1 on a fatal bind error. A helper returns
-/// the code rather than exiting (exiting is the bin's job).
+/// shutdown (the caller tears down), 1 on a fatal bind error or with no WS
+/// listener to serve. A helper returns the code rather than exiting (exiting
+/// is the bin's job).
 // Installing the SIGINT/SIGTERM handlers only fails if the OS refuses, so the
 // two `.expect`s are unreachable.
 #[allow(clippy::expect_used)] // #143
@@ -397,6 +401,13 @@ async fn serve_forever(
     let (ws_listeners, bound_addrs) = match bind_ws_listeners(&addrs).await {
         Ok(pair) => pair,
         Err(code) => return code,
+    };
+    // Issue #469: the accept future refuses an empty listener list (it would
+    // have nothing to accept on), and that refusal becomes this exit code
+    // before the hub ever reports `listening`.
+    let Some(accept_any) = AcceptAny::new(ws_listeners) else {
+        warn(Component::Control, "no_ws_listener", "no WebSocket listener is bound; nothing to serve".into());
+        return 1;
     };
 
     // Record the bound addresses so a `control/status` (same process) can
@@ -470,7 +481,7 @@ async fn serve_forever(
         })
     };
     let accept_handle = tokio::spawn(async move {
-        accept_loop(uds, ws_listeners, state, registry, roster, hygiene, lockout, preauth_semaphore, stop_rx).await;
+        accept_loop(uds, accept_any, state, registry, roster, hygiene, lockout, preauth_semaphore, stop_rx).await;
     });
 
     // 6. Only now — WS listeners bound, control socket bound + mode 0600,
@@ -537,7 +548,7 @@ async fn sweep_loop(
 #[allow(clippy::too_many_arguments)] // #184: 5 shared hub-wide handles, threaded straight to the connection tasks
 async fn accept_loop(
     uds: UnixListener,
-    ws_listeners: Vec<TcpListener>,
+    mut accept_any: AcceptAny<Vec<TcpListener>>,
     state: HubState,
     registry: crate::live::Registry,
     roster: std::sync::Arc<crate::roster::Roster>,
@@ -546,10 +557,6 @@ async fn accept_loop(
     preauth_semaphore: std::sync::Arc<tokio::sync::Semaphore>,
     mut stop_rx: tokio::sync::oneshot::Receiver<()>,
 ) {
-    let mut accept_any = AcceptAny {
-        listeners: &ws_listeners,
-        idx: 0,
-    };
     loop {
         tokio::select! {
             // A signal arrived: wind down (stop accepting) and return.
@@ -578,43 +585,6 @@ async fn accept_loop(
                 ));
             }
         }
-    }
-}
-
-/// A future that resolves when **any** of the WS listeners has a pending
-/// accept. We poll the listeners round-robin: `tokio::select!` in the caller
-/// drives this, and a `TcpListener::try_accept` returning `WouldBlock` means
-/// "nothing pending on this one yet", so we move to the next.
-struct AcceptAny<'a> {
-    listeners: &'a Vec<TcpListener>,
-    idx: usize,
-}
-
-impl Future for AcceptAny<'_> {
-    type Output = Result<(TcpStream, SocketAddr), std::io::Error>;
-    fn poll(mut self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let n = self.listeners.len().max(1);
-        let mut idx = self.idx;
-        for _ in 0..n {
-            let l = &self.listeners[idx % n];
-            match l.poll_accept(cx) {
-                Poll::Ready(Ok((stream, addr))) => {
-                    self.idx = (idx + 1) % n;
-                    return Poll::Ready(Ok((stream, addr)));
-                }
-                Poll::Ready(Err(e)) => {
-                    self.idx = (idx + 1) % n;
-                    return Poll::Ready(Err(e));
-                }
-                // No connection pending on this listener; `poll_accept`
-                // registered `cx` with the reactor, so we will be woken when
-                // one arrives.
-                Poll::Pending => {}
-            }
-            idx += 1;
-        }
-        self.idx = idx % n;
-        Poll::Pending
     }
 }
 

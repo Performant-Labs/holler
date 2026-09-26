@@ -497,6 +497,53 @@ fn status_without_live_hub_exit_1() {
     );
 }
 
+/// Issue #469: `hub serve` with **no `--listen`** starts a working hub on the
+/// documented default `127.0.0.1:41807` (ADR 0006) instead of panicking in the
+/// accept loop. The hub must report that address as listening (the harness's
+/// readiness signal), answer a real WebSocket first frame on it, and still be
+/// running afterwards. The port is fixed, so the test skips (never fails) when
+/// another process holds it: probed before the spawn, and an address-in-use
+/// bind failure from the hub itself covers the window after the probe. No
+/// other test binds this port.
+#[tokio::test]
+async fn serve_without_listen_serves_the_default_loopback_address() {
+    const DEFAULT_LISTEN: &str = "127.0.0.1:41807";
+    if let Err(e) = std::net::TcpListener::bind(DEFAULT_LISTEN) {
+        eprintln!("SKIP serve_without_listen_serves_the_default_loopback_address: {DEFAULT_LISTEN} is in use ({e})");
+        return;
+    }
+    let state = StateDir::new();
+    let mut hub = match Hub::try_start_with_args(&state, &[], &[]) {
+        Ok(hub) => hub,
+        Err(log) if log.contains("bind_failed") && log.to_lowercase().contains("in use") => {
+            eprintln!("SKIP serve_without_listen_serves_the_default_loopback_address: {DEFAULT_LISTEN} was taken after the probe: {log}");
+            return;
+        }
+        Err(log) => panic!("`hub serve` with no --listen must report listening on {DEFAULT_LISTEN}; hub stderr:\n{log}"),
+    };
+    assert_eq!(hub.port, 41807, "no --listen binds the default port; hub stderr:\n{}", hub.log_text());
+    assert_eq!(hub.ws_url(), format!("ws://{DEFAULT_LISTEN}"));
+
+    // The default listener really serves the wire: a non-join first frame is
+    // refused with -32002, exactly as on an explicit --listen.
+    let mut ws = connect_ws(&hub.ws_url()).await;
+    ws.send(Message::text(
+        json!({"jsonrpc":"2.0","id":"b-469","method":"query/status","params":{}}).to_string(),
+    ))
+    .await
+    .expect("send the first frame");
+    let err = next_frame_err(&mut ws).await.expect("hub must reply with an error frame");
+    assert_eq!(err.code, -32002, "the default listener runs the fail-closed accept path");
+    assert!(closed_next(&mut ws).await, "hub closes the socket after refusing");
+
+    assert!(
+        hub.child_mut().try_wait().expect("poll the hub child").is_none(),
+        "the hub must still be running after serving a connection; stderr:\n{}",
+        hub.log_text()
+    );
+    hub.stop(Duration::from_secs(5));
+}
+
 // ---------------------------------------------------------------------------
 // ws client helpers (async)
 // ---------------------------------------------------------------------------

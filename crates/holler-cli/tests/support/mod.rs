@@ -244,13 +244,37 @@ impl Hub {
     /// has no effect, since the check runs inside the hub over the control
     /// socket).
     pub fn start_with_env(state: &StateDir, envs: &[(&str, &str)]) -> Hub {
+        Self::start_with_args(state, envs, &["--listen", "127.0.0.1:0"])
+    }
+
+    /// [`Hub::try_start_with_args`], panicking (with the hub's stderr) if the
+    /// hub never reports a listening address.
+    pub fn start_with_args(state: &StateDir, envs: &[(&str, &str)], serve_args: &[&str]) -> Hub {
+        Self::try_start_with_args(state, envs, serve_args).unwrap_or_else(|log| {
+            panic!(
+                "hub did not report a listening port within 10s \
+                 (`hub serve` is not implemented yet?); hub stderr:\n{log}"
+            )
+        })
+    }
+
+    /// The one hub spawner (issue #469): `holler hub serve <serve_args>` with
+    /// `envs` on the hub process, waiting (≤10 s, or until the hub exits) for
+    /// its `listening` event. `Err` carries everything the hub wrote to stderr,
+    /// so a caller can classify the failure (e.g. an address-in-use skip).
+    pub fn try_start_with_args(
+        state: &StateDir,
+        envs: &[(&str, &str)],
+        serve_args: &[&str],
+    ) -> Result<Hub, String> {
         let log_lines = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         // Bind the base `Command` to a name first (rather than chaining on the
         // `holler_cmd` temporary) so we can keep it alive long enough to call
         // `make_own_process_group` on it — see the note below.
         let mut cmd = holler_cmd(state);
         cmd.envs(envs.iter().copied());
-        cmd.args(["hub", "serve", "--listen", "127.0.0.1:0"])
+        cmd.args(["hub", "serve"])
+            .args(serve_args)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::piped());
@@ -312,25 +336,24 @@ impl Hub {
                 }
             });
             // Block until the drainer sees the `listening` event (or 10 s).
-            std::sync::Mutex::new(found_rx)
-                .lock()
-                .unwrap()
-                .recv_timeout(Duration::from_secs(10))
-                .unwrap_or_else(|_| {
-                    let _ = child.kill();
-                    panic!(
-                        "hub did not report a listening port within 10s \
-                         (`hub serve` is not implemented yet?)"
-                    );
-                })
+            // A hub that exits first closes its stderr, which ends the drainer
+            // and drops `found_tx`, so this returns at once rather than at 10 s.
+            match found_rx.recv_timeout(Duration::from_secs(10)) {
+                Ok(p) => p,
+                Err(_) => {
+                    kill_tree(&mut child);
+                    let log = log_lines.lock().map(|l| l.join("\n")).unwrap_or_default();
+                    return Err(log);
+                }
+            }
         };
 
-        Hub {
+        Ok(Hub {
             port,
             child,
             log_lines,
             stopped: false,
-        }
+        })
     }
 
     /// Everything the hub has written to stderr so far, one line per event.

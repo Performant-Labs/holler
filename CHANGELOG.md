@@ -91,6 +91,12 @@ fills this file in at release time.
   flake's cause is still open ([#420](https://github.com/Performant-Labs/holler/issues/420)).
 
 ### Bug Fixes
+- `holler hub serve` with no `--listen` now listens on `127.0.0.1:41807`, the loopback default the protocol
+  documents and the address `hub token mint`'s join line already pointed at. Before, the hub started and
+  then panicked in its accept loop (`index out of bounds: the len is 0 but the index is 0`), leaving nothing
+  listening. Any `--listen` replaces the default rather than adding to it, `hub serve --help` states the
+  default, and the accept loop can no longer be built over an empty listener list
+  ([#469](https://github.com/Performant-Labs/holler/issues/469)).
 - `holler answer SESSION once|always|reject` now works for a spawn-mode (ACP) session held on a permission
   request, as `holler answer --help` already said; before, only OpenCode attach sessions accepted these
   words and an ACP session refused them with `does not resolve to any of this field's options`. `once`
