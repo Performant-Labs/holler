@@ -11,3 +11,17 @@ attach.toml
 .claude/skills/
 .grok/skills/
 .cursor/skills/
+
+# Coding pipeline (playbook workflow): per-story worktrees, the generated role docs
+# (copies of private playbook templates; regenerate per clone with sync-role-docs) and
+# repo-local model config never enter git. Handoffs are tracked, but their debug
+# artifacts are not.
+.claude/worktrees/
+.claude/agents/
+.env
+docs/handoffs/**/*.prompt.txt
+docs/handoffs/**/*.usage.json
+docs/handoffs/**/*-sidecar*.md
+docs/handoffs/**/*-result-r*.md
+docs/handoffs/**/screenshots/
+docs/handoffs/**/*-report.html

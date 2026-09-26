@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Deterministic commit-msg guard: Conventional Commit subject, as this repo's
+# history uses (feat(hub): ..., fix: ..., docs: ..., ci: ..., release: ...).
+set -euo pipefail
+subject=$(head -n1 "$1")
+case "$subject" in
+  Merge\ *|Revert\ *|fixup!\ *|squash!\ *) exit 0 ;;
+esac
+if ! printf '%s\n' "$subject" | grep -Eq '^(feat|fix|docs|ci|release|chore|refactor|test|perf|build|style)(\([^)]+\))?!?: .+'; then
+  echo "commit-msg: subject must be a Conventional Commit, e.g. 'fix(hub): retry the token lock' (got: $subject)" >&2
+  exit 1
+fi

@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# CONTRIBUTING.md: every commit that came out of an agent session says so with a
+# Co-Authored-By trailer. Add it when the commit is made inside a Claude Code
+# session (CLAUDECODE is set there) and the message does not already have one.
+set -euo pipefail
+[ "${CLAUDECODE:-}" = "1" ] || exit 0
+case "${2:-}" in merge|squash) exit 0 ;; esac
+grep -qi '^Co-Authored-By:' "$1" || printf '\nCo-Authored-By: Claude <noreply@anthropic.com>\n' >> "$1"

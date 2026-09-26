@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Deterministic pre-commit guard: no secrets in a public repository.
+# Fails closed: a missing scanner blocks the commit rather than silently skipping
+# the scan. HOLLER_SKIP_GITLEAKS=1 is the explicit, visible opt-out.
+set -euo pipefail
+bin="${HOLLER_GITLEAKS_BIN:-gitleaks}"
+if command -v "$bin" >/dev/null 2>&1; then
+  "$bin" protect --staged --redact --no-banner
+elif [ "${HOLLER_SKIP_GITLEAKS:-}" = "1" ]; then
+  echo "pre-commit: HOLLER_SKIP_GITLEAKS=1, secret scan skipped" >&2
+else
+  echo "pre-commit: gitleaks is not installed, so the secret scan cannot run (brew install gitleaks). Set HOLLER_SKIP_GITLEAKS=1 to skip it explicitly." >&2
+  exit 1
+fi

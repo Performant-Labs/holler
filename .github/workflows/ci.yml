@@ -273,6 +273,13 @@ jobs:
         run: cargo test -p holler-cli --test docs_cli_test
         shell: pwsh
 
+      # The tracked git hooks (.githooks/) are deterministic guards, so they are
+      # tested: real `git commit`s in a throwaway repo. Runs once (ubuntu).
+      - name: Hooks (scripts/test-hooks.sh)
+        if: matrix.os == 'ubuntu-latest'
+        run: bash scripts/test-hooks.sh
+        shell: bash
+
       # Unused dependencies fail the build (issue #155 §7): a crate must
       # declare only what it consumes. Runs once (ubuntu) — the answer does
       # not depend on the OS.
