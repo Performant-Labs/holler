@@ -91,6 +91,7 @@
 //!   test without a synchronization hook this driver doesn't have).
 
 mod answerable;
+mod auth;
 mod connection;
 mod connection_v1;
 mod pending;
@@ -391,9 +392,11 @@ impl AcpDriver {
     /// Spawn the configured harness and bring up one ACP v2 session.
     ///
     /// Only `SessionMode::Spawn` is supported (see the module doc). Startup
-    /// (the child process coming up, `initialize`, and `session/new`) is
-    /// bounded by `HOLLER_ACP_TIMEOUT_MS` (default 10s); a hang there kills
-    /// the child and returns `DriverError::Startup`.
+    /// (the child process coming up, `initialize`, and `session/new`, plus
+    /// on the v1 path any `authenticate` for `auth_method` and its one
+    /// retried `session/new`, issue #439) is bounded by
+    /// `HOLLER_ACP_TIMEOUT_MS` (default 10s) per protocol attempt; a hang
+    /// there kills the child and returns `DriverError::Startup`.
     pub async fn spawn(config: &SessionConfig) -> Result<Self, DriverError> {
         if config.mode != SessionMode::Spawn {
             return Err(DriverError::Startup(
@@ -455,6 +458,12 @@ impl AcpDriver {
         // second, redundant spawn attempt.
         match Self::spawn_v2(agent_config.clone(), session_cwd.clone(), timeout_ms).await {
             Ok(driver) => Ok(driver),
+            // The v2 handshake never authenticates (`auth/login` is #459), so
+            // a configured `auth_method` is named as not applied (#439).
+            Err(SpawnAttempt::Fatal(DriverError::Startup(reason))) => {
+                let suffix = config.auth_method.as_deref().map(auth::not_applied_v2_suffix).unwrap_or_default();
+                Err(DriverError::Startup(format!("{reason}{suffix}")))
+            }
             Err(SpawnAttempt::Fatal(e)) => Err(e),
             Err(SpawnAttempt::FallbackToV1 { reason }) => {
                 log_warn(
@@ -465,7 +474,7 @@ impl AcpDriver {
                         ("fallback", "v1".to_string()),
                     ],
                 );
-                Self::spawn_v1(agent_config, session_cwd, timeout_ms)
+                Self::spawn_v1(agent_config, session_cwd, timeout_ms, config.auth_method.clone())
                     .await
                     .map_err(|attempt| match attempt {
                         SpawnAttempt::Fatal(e) => e,

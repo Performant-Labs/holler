@@ -34,6 +34,7 @@ fn stub_v1_config(name: &str) -> SessionConfig {
         interrupt: Interrupt::Acp,
         endpoint: None,
         session_id: None,
+        auth_method: None,
     }
 }
 

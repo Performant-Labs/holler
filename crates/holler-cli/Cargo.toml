@@ -326,6 +326,11 @@ path = "tests/platform_test.rs"
 name = "acp_driver_v1_fallback_test"
 path = "tests/acp_driver_v1_fallback_test.rs"
 
+# ACP v1 `authenticate` flow (issue #439), against stub-acp-v1's auth modes.
+[[test]]
+name = "acp_driver_auth_test"
+path = "tests/acp_driver_auth_test.rs"
+
 # Declare only what is consumed (issue #155 §7 — `cargo machete` fails CI
 # otherwise). A story that starts using a workspace dependency adds it here in
 # the same PR; the skeleton's speculative list was removed in #155.

@@ -74,6 +74,7 @@ fn stub_config(name: &str, extra: &[&str]) -> SessionConfig {
         interrupt: Interrupt::Acp,
         endpoint: None,
         session_id: None,
+        auth_method: None,
     }
 }
 
@@ -134,6 +135,7 @@ async fn startup_timeout_on_hung_command() {
         interrupt: Interrupt::Acp,
         endpoint: None,
         session_id: None,
+        auth_method: None,
     };
     let started = tokio::time::Instant::now();
     let result = AcpDriver::spawn(&config).await;

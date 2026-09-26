@@ -31,6 +31,7 @@ fn config(endpoint: &str, session_id: &str) -> SessionConfig {
         interrupt: Interrupt::Http,
         endpoint: Some(endpoint.to_string()),
         session_id: Some(session_id.to_string()),
+        auth_method: None,
     }
 }
 

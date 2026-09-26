@@ -16,6 +16,8 @@
 //! interrupt = "acp"                    # optional: "acp" (default) | "http"; http needs endpoint
 //! endpoint = "http://127.0.0.1:4096"   # attach: required; spawn: optional (HTTP interrupt fallback)
 //! session_id = "ses_..."               # attach: required
+//! auth_method = "api-key"              # optional, spawn only: ACP auth method id sent in `authenticate`
+//!                                       # when session/new answers auth-required (ACP v1 only, #439)
 //! ```
 //!
 //! Sharing one file with other tools (issue #436). Unknown keys are still
@@ -114,10 +116,17 @@ pub struct SessionConfig {
     pub endpoint: Option<String>,
     /// The existing harness session id being attached to (attach only).
     pub session_id: Option<String>,
+    /// The ACP auth method id the driver sends in `authenticate` when the
+    /// adapter answers `session/new` with auth-required (spawn only, ACP v1
+    /// only; issue #439). Only an id: the credential itself stays in the
+    /// spawned process's environment. Kept exactly as written (compared
+    /// case-sensitively, untrimmed); `None` for `attach`.
+    pub auth_method: Option<String>,
 }
 
 /// The result of parsing + validating one config file: the session list plus
-/// any non-fatal warnings (currently just "attach with `command`: ignored").
+/// any non-fatal warnings (currently an attach row's ignored `command` or
+/// `auth_method`).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ParsedConfig {
     pub sessions: Vec<SessionConfig>,
@@ -219,6 +228,8 @@ struct RawSession {
     endpoint: Option<String>,
     #[serde(default)]
     session_id: Option<String>,
+    #[serde(default)]
+    auth_method: Option<String>,
     /// Known and ignored: wizard-only per-session keys (issue #436).
     #[serde(default)]
     #[allow(dead_code)] // #436 type-checked at parse time, deliberately never read
@@ -255,9 +266,9 @@ fn check_ext(ext: &toml::Value) -> Result<(), String> {
 ///
 /// Validation happens in file order, row by row, and stops at the first
 /// failure (the issue's spec: "exit 3 with the offending row and field
-/// named" — one refusal, not an accumulated list). The one non-fatal case —
-/// `attach` with a `command` set — is dropped and recorded in
-/// [`ParsedConfig::warnings`] rather than refused.
+/// named" — one refusal, not an accumulated list). The non-fatal cases —
+/// `attach` with a `command` or an `auth_method` set — are dropped and
+/// recorded in [`ParsedConfig::warnings`] rather than refused.
 pub fn parse(contents: &str) -> Result<ParsedConfig, ConfigError> {
     let raw: RawFile = toml::from_str(contents).map_err(|e| ConfigError::Toml(e.to_string()))?;
     if let Some(ext) = &raw.ext {
@@ -336,6 +347,7 @@ pub fn parse(contents: &str) -> Result<ParsedConfig, ConfigError> {
                 reason: "interrupt=\"http\" requires `endpoint`".to_string(),
             });
         }
+        let auth_method = parse_auth_method(row, &r.name, mode, r.auth_method, &mut warnings)?;
 
         sessions.push(SessionConfig {
             name,
@@ -347,10 +359,42 @@ pub fn parse(contents: &str) -> Result<ParsedConfig, ConfigError> {
             interrupt,
             endpoint: r.endpoint,
             session_id: r.session_id,
+            auth_method,
         });
     }
 
     Ok(ParsedConfig { sessions, warnings })
+}
+
+/// `auth_method` (issue #439). Spawn only: an attach row never spawns, so the
+/// value is dropped with a warning (the `command` precedent). On a spawn row
+/// an empty or whitespace-only value is refused; any other value is kept
+/// exactly as written, since ids compare case-sensitively and untrimmed.
+fn parse_auth_method(
+    row: usize,
+    raw_name: &str,
+    mode: SessionMode,
+    auth_method: Option<String>,
+    warnings: &mut Vec<String>,
+) -> Result<Option<String>, ConfigError> {
+    let Some(value) = auth_method else {
+        return Ok(None);
+    };
+    if mode == SessionMode::Attach {
+        warnings.push(format!(
+            "session {raw_name:?} (row {row}): attach mode ignores `auth_method` — never spawned"
+        ));
+        return Ok(None);
+    }
+    if value.trim().is_empty() {
+        return Err(ConfigError::Invalid {
+            row,
+            name: raw_name.to_string(),
+            field: "auth_method",
+            reason: "must name an ACP auth method id, not be empty or whitespace-only".to_string(),
+        });
+    }
+    Ok(Some(value))
 }
 
 fn parse_name(row: usize, raw: &str) -> Result<SessionName, ConfigError> {
@@ -557,5 +601,68 @@ mod tests {
             let m = err_msg(&format!("{ONE}{key} = 7\n"));
             assert!(m.contains(key), "{key}: {m}");
         }
+    }
+
+    // Issue #439: the optional per-session `auth_method` (spawn mode only).
+    fn one_with(extra: &str) -> Result<ParsedConfig, ConfigError> {
+        parse(&format!("{ONE}{extra}"))
+    }
+
+    const ATTACH: &str = "[[session]]\nname = \"alpha\"\nharness = \"opencode\"\nmode = \"attach\"\n\
+        endpoint = \"http://127.0.0.1:4096\"\nsession_id = \"ses_1\"\n";
+
+    #[test]
+    fn auth_method_parses_on_a_spawn_session() {
+        let got = one_with("auth_method = \"stub-key\"\n").expect("accepted");
+        assert_eq!(got.sessions[0].auth_method.as_deref(), Some("stub-key"));
+        assert!(got.warnings.is_empty());
+    }
+
+    #[test]
+    fn auth_method_absent_is_none() {
+        assert_eq!(parse(ONE).unwrap().sessions[0].auth_method, None);
+    }
+
+    #[test]
+    fn auth_method_is_stored_untrimmed() {
+        let got = one_with("auth_method = \" stub-key \"\n").expect("accepted");
+        assert_eq!(got.sessions[0].auth_method.as_deref(), Some(" stub-key "));
+    }
+
+    #[test]
+    fn empty_or_whitespace_auth_method_is_refused_naming_row_and_field() {
+        for value in ["\"\"", "\"   \"", "\" \\t \""] {
+            let err = one_with(&format!("auth_method = {value}\n")).expect_err("refused");
+            let ConfigError::Invalid { row, name, field, .. } = &err else {
+                panic!("{value}: expected Invalid, got {err:?}");
+            };
+            assert_eq!((*row, name.as_str(), *field), (0, "alpha", "auth_method"), "{value}");
+        }
+    }
+
+    #[test]
+    fn attach_mode_auth_method_is_ignored_with_a_warning() {
+        let got = parse(&format!("{ATTACH}auth_method = \"stub-key\"\n")).expect("accepted");
+        assert_eq!(got.sessions[0].auth_method, None);
+        assert!(got.warnings.iter().any(|w| w.contains("auth_method")), "{:?}", got.warnings);
+    }
+
+    #[test]
+    fn auth_method_is_kept_on_a_spawn_session_with_remote_host() {
+        let got = one_with("auth_method = \"stub-key\"\nremote_host = \"r\"\nremote_tailnet_host = \"r.example\"\n")
+            .expect("accepted");
+        assert_eq!(got.sessions[0].auth_method.as_deref(), Some("stub-key"));
+    }
+
+    #[test]
+    fn auth_method_under_ext_is_not_used() {
+        let got = one_with("[session.ext.x]\nauth_method = \"a\"\n").expect("accepted");
+        assert_eq!(got.sessions[0].auth_method, None);
+    }
+
+    #[test]
+    fn misspelled_auth_method_is_still_refused() {
+        let m = err_msg(&format!("{ONE}auth_metod = \"stub-key\"\n"));
+        assert!(m.contains("auth_metod"), "{m}");
     }
 }

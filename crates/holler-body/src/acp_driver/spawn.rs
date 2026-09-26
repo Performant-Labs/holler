@@ -15,6 +15,7 @@ use tokio::task::JoinHandle;
 
 use holler_proto::log::Direction as LogDirection;
 
+use super::auth::{self, AuthProgress};
 use super::connection::{self, Ready, Shared};
 use super::connection_v1::{self, ReadyV1};
 use super::{log_debug, log_warn, AcpDriver, Conn, DriverError, Status};
@@ -128,11 +129,15 @@ impl AcpDriver {
     /// The ACP v1 fallback's own [`Self::spawn_v2`] (issue #362) — spawns a
     /// **fresh** child (the v2 attempt's child already exited or was
     /// force-killed by that attempt's own `join_handle.abort()`) and runs
-    /// `connection_v1::run` instead.
+    /// `connection_v1::run` instead. `auth_method` is the session's
+    /// configured ACP auth method id (issue #439); the whole handshake,
+    /// including any `authenticate` and the one retried `session/new`, stays
+    /// inside this attempt's single `timeout_ms` window.
     pub(super) async fn spawn_v1(
         agent_config: AcpAgentConfig,
         session_cwd: PathBuf,
         timeout_ms: u64,
+        auth_method: Option<String>,
     ) -> Result<Self, SpawnAttempt> {
         let shared = Arc::new(Mutex::new(Shared {
             status: Status::Idle,
@@ -145,11 +150,24 @@ impl AcpDriver {
         let (ready_tx, ready_rx) = oneshot::channel::<Result<ReadyV1, String>>();
         let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
 
+        let progress = Arc::new(AuthProgress::default());
+        // The one place every v1 startup failure passes through: what became
+        // of a configured `auth_method` is appended here, from how far the
+        // handshake's auth flow got, so no failure path is silent about it.
+        let configured = auth_method.clone();
+        let stage_progress = progress.clone();
+        let annotate = move |reason: String| match &configured {
+            Some(id) => format!("{reason}{}", auth::v1_stage_suffix(id, stage_progress.get())),
+            None => reason,
+        };
+
         let task_shared = shared.clone();
         let join_handle: JoinHandle<()> = tokio::spawn(async move {
             connection_v1::run(
                 agent_config,
                 session_cwd,
+                auth_method,
+                progress,
                 task_shared,
                 ready_tx,
                 shutdown_rx,
@@ -177,23 +195,55 @@ impl AcpDriver {
             }
             Ok(Ok(Err(reason))) => {
                 join_handle.abort();
+                let reason = annotate(reason);
                 log_warn("spawn", vec![("event", format!("startup_failed (v1 fallback): {reason}"))]);
                 Err(SpawnAttempt::Fatal(DriverError::Startup(reason)))
             }
             Ok(Err(_dropped)) => {
                 join_handle.abort();
                 log_warn("spawn", vec![("event", "v1 fallback connection task ended before readiness".to_string())]);
-                Err(SpawnAttempt::Fatal(DriverError::Startup(
+                Err(SpawnAttempt::Fatal(DriverError::Startup(annotate(
                     "connection task ended before signalling readiness (v1 fallback)".to_string(),
-                )))
+                ))))
             }
             Err(_timed_out) => {
                 join_handle.abort();
                 log_warn("spawn", vec![("event", format!("startup_timeout (v1 fallback): {timeout_ms}ms"))]);
-                Err(SpawnAttempt::Fatal(DriverError::Startup(format!(
+                Err(SpawnAttempt::Fatal(DriverError::Startup(annotate(format!(
                     "no response within {timeout_ms}ms (HOLLER_ACP_TIMEOUT_MS, v1 fallback)"
-                ))))
+                )))))
             }
         }
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable)] // #439
+mod tests {
+    use super::is_v1_negotiation_failure;
+
+    /// Issue #439: an auth-required failure must never be classified as the v1
+    /// negotiation failure, or a v2 auth failure would silently fall back to
+    /// v1 and authenticate there.
+    #[test]
+    fn auth_required_is_never_a_v1_negotiation_failure() {
+        let canonical = agent_client_protocol::Error::auth_required();
+        let with_data = agent_client_protocol::Error::auth_required()
+            .data(serde_json::json!({ "hint": "required ACP protocol version" }));
+        // Only `data` carrying BOTH phrases the classifier needs would defeat
+        // it; that is adapter-controlled text and out of scope here (the
+        // classifier predates #439), so the test asserts the realistic shapes.
+        let with_both = agent_client_protocol::Error::auth_required()
+            .data(serde_json::json!({ "hint": "required ACP protocol version; peer negotiated 1" }));
+        assert!(
+            is_v1_negotiation_failure(&with_both.to_string()),
+            "documents the known limit: adapter `data` with both phrases matches the classifier"
+        );
+        for reason in ["Authentication required".to_string(), canonical.to_string(), with_data.to_string()] {
+            assert!(!is_v1_negotiation_failure(&reason), "{reason}");
+        }
+        assert!(is_v1_negotiation_failure(
+            "required ACP protocol version 2 but peer negotiated 1; use a matching implementation"
+        ));
     }
 }

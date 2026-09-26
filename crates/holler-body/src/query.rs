@@ -324,6 +324,7 @@ mod tests {
             interrupt: crate::config::Interrupt::Acp,
             endpoint: None,
             session_id: None,
+            auth_method: None,
         }
     }
 

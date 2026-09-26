@@ -9,6 +9,15 @@ fills this file in at release time.
 
 ### Enhancements
 - The docs doc-test (`every_documented_holler_command_parses`) skips `docs/handoffs/`, the coding pipeline's per-story scratch, so a handoff that quotes a command fragment can no longer fail `cargo test --workspace` in a pipeline worktree; every other `docs/` directory is still scanned ([#462](https://github.com/Performant-Labs/holler/issues/462)).
+- The body's ACP driver can now authenticate to an adapter that requires it. A spawn-mode session
+  names the adapter's auth method with the new optional `auth_method` key; when a v1 adapter refuses
+  `session/new` as unauthenticated (JSON-RPC `-32000`), the body sends one `authenticate` for that
+  method and retries `session/new` once, or fails startup with a reason that names `auth_method`
+  and the advertised method ids. The credential stays in the adapter's environment (the session's
+  `env` or the body's own); only the method id is sent or logged. ACP v1 only: on a v2 adapter a
+  configured `auth_method` is reported as not applied ([#459](https://github.com/Performant-Labs/holler/issues/459)).
+  Attach mode ignores the key with a warning, and an empty value is a config error
+  ([#439](https://github.com/Performant-Labs/holler/issues/439), for [#303](https://github.com/Performant-Labs/holler/issues/303)).
 - The repository is wired to the Performant Labs coding pipeline: project role overlays in `docs/agent-overlays/` (the role docs themselves are generated per clone and gitignored), a Pipeline section in `CLAUDE.md`, and tracked git hooks (`.githooks/`, enabled with `scripts/setup-hooks.sh`) for a secret scan, a Conventional Commit subject check and the agent `Co-Authored-By` trailer.
 - The hub now logs every rejected authentication (`auth_rejected`, with a stable `reason` such as `token_not_bound`, the token id and the failure count) and the lockout lifecycle (`lockout_tripped`, `lockout_cleared`) as `warn` events, visible at the default log level. Previously an expired token silently tripped a peer-wide lockout and only `lockout_refused` was ever logged ([#450](https://github.com/Performant-Labs/holler/issues/450), part of [#431](https://github.com/Performant-Labs/holler/issues/431)).
 - `hub status` now shows the live lockout state: which peers are locked out or have failures building up, the time left on each cooldown, the failure reasons, and the token ids each peer named with their labels. `hub status --json` gains a top-level `lockout.peers` list (`{"peers": []}` when nothing is failing); every existing field is unchanged, and `hub status` without `--json` gets a short `lockout:` section only while there is a peer to show ([#451](https://github.com/Performant-Labs/holler/issues/451), part of [#431](https://github.com/Performant-Labs/holler/issues/431)).

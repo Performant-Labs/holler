@@ -303,6 +303,54 @@ command = ["npx", "-y", "@agentclientprotocol/claude-agent-acp@0.79.0"]
   `acp_v2_negotiation_failed ... fallback=v1`). Not yet run against real Claude Code: `interrupt`
   cancelling a turn cleanly with a later `say` still working, and detach tearing down the adapter.
 
+### Adapters that require authentication (`auth_method`)
+
+Some ACP adapters refuse `session/new` until the client sends `authenticate`, even when their
+credential is already in their environment ([#303](https://github.com/Performant-Labs/holler/issues/303)).
+Name the adapter's auth method on the session row:
+
+```toml
+[[session]]
+name = "coder"
+harness = "codex"
+command = ["npx", "-y", "@agentclientprotocol/codex-acp@1.13.1"]
+auth_method = "api-key"
+```
+
+- **Reactive, and bounded to one retry.** The body sends `authenticate` only when `session/new`
+  fails with the JSON-RPC auth-required code (`-32000`), only for the id `auth_method` names, and
+  only if the adapter advertised that id in its `initialize` response and it is not a terminal-type
+  method. It then retries `session/new` exactly once. Otherwise startup fails with a reason that
+  names `auth_method` and lists the advertised ids. An adapter that needs no authentication never
+  receives `authenticate`, even with `auth_method` set.
+- **The credential is never a config field.** `auth_method` is only a method id, and the request
+  carries nothing else: the adapter reads its credential from its own environment. So the
+  credential must be in the environment of the process `command` launches: the session's `env`
+  table, or the body's own environment, which the adapter inherits. The same holds for a row with
+  `remote_host`: the body launches `command` itself, so a wrapper such as `ssh` that does not
+  forward the environment does not carry the credential.
+- **ACP v1 adapters only.** A v2-negotiating adapter that needs authentication still fails startup
+  with `Authentication required`; with `auth_method` set, the reason adds `auth_method "<id>" was
+  configured but not applied: ACP v2 auth support is not implemented yet (#459)`
+  ([#459](https://github.com/Performant-Labs/holler/issues/459)). On the v1 path, with `auth_method`
+  set, every startup failure says what became of it: not applied (the failure came before
+  `session/new` answered auth-required, e.g. a failed `initialize`, another error code, or a
+  timeout), or `authenticate` was pending / its retried `session/new` unfinished when startup
+  ended. Adapter text in these reasons is limited to the error message, control characters
+  replaced and cut to 200 characters; the error's `data` is never echoed. (Without `auth_method`
+  a non-auth startup failure keeps its earlier text unchanged.)
+- **Spawn mode only.** An attach row's `auth_method` is ignored with a config warning: attach never
+  launches anything.
+- **Timeout budget.** The auth path is four round trips (`initialize`, `session/new`,
+  `authenticate`, `session/new`) inside the single `HOLLER_ACP_TIMEOUT_MS` window (default
+  10000 ms) of one protocol attempt. A slow adapter may need a larger value.
+- **Codex.** Read from `@agentclientprotocol/codex-acp` 1.13.1's source, not yet from a live run:
+  it advertises `api-key` and, when authenticated with it, reads its API key from its own
+  environment. That adapter also accepts `DEFAULT_AUTH_REQUEST = '{"methodId":"api-key"}'` in its
+  environment and then authenticates by itself, without `auth_method`.
+- **Manual login stays the fallback** for anything this does not cover, such as a terminal-type
+  method or an interactive login: see [#440](https://github.com/Performant-Labs/holler/issues/440).
+
 ## Debug output
 
 Every `holler` role (`hub serve`, `body run`, and every one-shot CLI leaf) accepts `--debug none|quiet|noisy` (or `HOLLER_DEBUG`; the flag wins) and `--log-format text|json` (or `HOLLER_LOG_FORMAT`). Logging always goes to **stderr** — stdout stays reserved for command output (`--json`, `say`'s reply, …). `none` (the default) emits no debug lines; `quiet` emits one line per event with the frame's *shape* only (component, direction, method, id); `noisy` adds the full **redacted** JSON-RPC/HTTP frame body. `info`/`warn` events (connects, drops, refusals) are always emitted regardless of the debug level.
@@ -323,6 +371,8 @@ Every event carries a `component`, identifying which layer of a `say`/`interrupt
 | `cli`          | either | The process's own startup/parsing (the `logging_started` banner, fail-closed refusals). |
 
 Because the ACP SDK holler pins (`agent-client-protocol` 2.1.0) spawns and owns its child process internally, it exposes no pid or exit-status accessor to this codebase — `acp`'s spawn/child-exit events report `command`/`args`/`cwd` and "connection closed", not a pid, which is the most this driver can observe without forking the SDK.
+
+**ACP authentication events (body, debug).** When a v1 adapter answers `session/new` with auth-required, `acp` logs `session/new event=auth_required` with `advertised` (the adapter's advertised method ids, at most 8, quoted), then `authenticate` with `method_id` if the session's `auth_method` is sent ([#439](https://github.com/Performant-Labs/holler/issues/439)). Only ids are logged: never a credential, a method's description, or an error's `data`.
 
 **Authentication events (hub, always emitted).** A rejected `circuit/authenticate` and the lockout it feeds are `warn` events, so they appear at the default level with no `--debug`:
 

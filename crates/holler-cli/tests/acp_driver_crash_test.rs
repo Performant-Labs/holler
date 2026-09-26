@@ -142,6 +142,7 @@ fn stub_config(name: &str, extra: &[&str]) -> SessionConfig {
         interrupt: Interrupt::Acp,
         endpoint: None,
         session_id: None,
+        auth_method: None,
     }
 }
 
