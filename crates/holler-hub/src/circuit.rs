@@ -728,7 +728,7 @@ where
                 }
             }
             LiveCommand::Say { request_id, session, message, queue, replace, reply } => {
-                let key = format!("{}/{session}", self.label);
+                let key = crate::holds::session_key(self.label, &session);
                 let gate = HoldGate { holds: self.registry.holds(), key: &key };
                 match dispatch::send_prompt(self.sink, gate, &request_id, &session, message, queue, replace).await {
                     Ok(()) => {

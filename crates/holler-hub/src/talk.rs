@@ -202,7 +202,7 @@ pub async fn say(
     // done for it (no turn id moved, no TalkLog line). This is a fast path
     // only: the enforcement that cannot be raced is the check in
     // `circuit::dispatch::send_prompt`, which every prompt passes through.
-    if let Some(hold) = registry.holds().check(&format!("{}/{}", handle.hostname, ad.name)) {
+    if let Some(hold) = registry.holds().check(&crate::holds::session_key(&handle.hostname, ad.name.as_str())) {
         return Err(SayError::Refused(hold.refusal()));
     }
 
