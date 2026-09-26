@@ -552,7 +552,7 @@ async fn accept_loop(
                     Ok(pair) => pair,
                     Err(_) => continue,
                 };
-                tokio::spawn(crate::control_server::handle_control_conn(stream, registry.clone(), roster.clone()));
+                tokio::spawn(crate::control_server::handle_control_conn(stream, registry.clone(), roster.clone(), lockout.clone()));
             }
             res = (&mut accept_any) => {
                 let (stream, addr) = match res {

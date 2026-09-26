@@ -45,6 +45,10 @@ name = "auth_rejection_log_test"
 path = "tests/auth_rejection_log_test.rs"
 
 [[test]]
+name = "hub_status_lockout_test"
+path = "tests/hub_status_lockout_test.rs"
+
+[[test]]
 name = "cli_invocation_test"
 path = "tests/cli_invocation_test.rs"
 

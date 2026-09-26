@@ -20,8 +20,9 @@ use crate::Query;
 /// `holler hub status [--json]` — read the live hub's status document over
 /// the control socket and print it (story #143). With `--json`, the raw
 /// `StatusDoc` JSON goes to stdout (machine-readable). Without, a short
-/// human-readable summary goes to stdout. If no live hub is reachable, the
-/// spec's exact message goes to stderr and the exit code is 1.
+/// human-readable summary goes to stdout, followed by a lockout section while
+/// any peer is locked out or failing (issue #451). If no live hub is
+/// reachable, the spec's exact message goes to stderr and the exit code is 1.
 pub fn status(json: bool) -> i32 {
     // The state dir may be unresolvable (no `HOLLER_STATE_DIR`/`$HOME`); then
     // there is no live hub and the error message below just has no path to name.
@@ -48,6 +49,9 @@ pub fn status(json: bool) -> i32 {
                 println!("  listening: {listening}");
                 println!("  clients:   {clients}");
                 println!("  sessions:  {sessions}");
+                for line in lockout_lines(&doc) {
+                    println!("{line}");
+                }
             }
             0
         }
@@ -63,6 +67,62 @@ pub fn status(json: bool) -> i32 {
             1
         }
     }
+}
+
+/// The lockout section of `hub status`'s text output (issue #451), read from
+/// the document's `lockout.peers`: a header, then one line per peer that is
+/// locked out or has failures building up. Empty when there are none, so a
+/// quiet hub's summary stays the four lines it always was.
+fn lockout_lines(doc: &serde_json::Value) -> Vec<String> {
+    let Some(peers) = doc.pointer("/lockout/peers").and_then(|p| p.as_array()).filter(|p| !p.is_empty()) else {
+        return Vec::new();
+    };
+    let locked = peers.iter().filter(|p| p["locked_out"] == true).count();
+    let mut lines = vec![format!("  lockout:   {locked} locked out, {} with failures building", peers.len() - locked)];
+    lines.extend(peers.iter().map(lockout_peer_line));
+    lines
+}
+
+/// One peer's line in [`lockout_lines`]: its address, whether (and for how
+/// much longer) it is locked out, its failure count with the reasons, and the
+/// token ids it named with their labels.
+fn lockout_peer_line(p: &serde_json::Value) -> String {
+    let failures = p["failures"].as_u64().unwrap_or(0);
+    let state = if p["locked_out"] == true {
+        format!("locked out, retry in {}s", p["retry_after_secs"].as_u64().unwrap_or(0))
+    } else {
+        "not locked out".to_string()
+    };
+    let reasons = p["reasons"].as_object().map_or_else(String::new, |m| {
+        m.iter().map(|(code, n)| format!("{} x{n}", printable(code))).collect::<Vec<_>>().join(", ")
+    });
+    let mut parts = vec![
+        printable(p["peer"].as_str().unwrap_or("?")),
+        state,
+        format!("{failures} failure{} ({reasons})", if failures == 1 { "" } else { "s" }),
+    ];
+    let tokens: Vec<String> = p["token_ids"].as_array().map_or_else(Vec::new, |ids| ids.iter().map(lockout_token).collect());
+    if !tokens.is_empty() {
+        parts.push(format!("tokens {}", tokens.join(", ")));
+    }
+    format!("    {}", parts.join("  "))
+}
+
+/// A token the peer named, as `id (label)`, or `id (no label)` when the id is
+/// not a token in the store.
+fn lockout_token(t: &serde_json::Value) -> String {
+    let id = printable(t["id"].as_str().unwrap_or("?"));
+    match t["label"].as_str() {
+        Some(label) => format!("{id} ({})", printable(label)),
+        None => format!("{id} (no label)"),
+    }
+}
+
+/// `s` with everything but printable ASCII replaced by `?`. A token id in the
+/// lockout section was typed by an unauthenticated peer, so it must not be
+/// able to put control sequences on the operator's terminal.
+fn printable(s: &str) -> String {
+    s.chars().map(|c| if c.is_ascii_graphic() { c } else { '?' }).collect()
 }
 
 // --- `holler hub caps|support|query` (issue #185) ---------------------------

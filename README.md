@@ -335,6 +335,8 @@ Because the ACP SDK holler pins (`agent-client-protocol` 2.1.0) spawns and owns 
 
 The lockout is keyed by the peer's transport address, so behind a reverse proxy every client shares one bucket ([#455](https://github.com/Performant-Labs/holler/issues/455)).
 
+**Lockout state in `hub status`.** The log says what happened; `holler hub status` says what is true now. `holler hub status --json` carries a top-level `lockout.peers` list of every peer that is locked out or has failures building up, each with `locked_out`, `failures`, the time left on its cooldown (`retry_after_secs`, rounded up, `0` while not locked out), `reasons` (the codes above, counted), and the `token_ids` the peer named, each with the token's `label` (`null` when no such token exists). It is `{"peers": []}` when nothing is failing, and every other field is unchanged. Without `--json`, `holler hub status` prints the same as a short `lockout:` section while there is a peer to show. See [`docs/protocol/v2.md`](docs/protocol/v2.md) §3.1.
+
 
 ## Dev scripts
 

@@ -796,6 +796,15 @@ pub async fn touch_last_seen_async(token_id: &str, state: &HubState) -> Result<(
         .unwrap_or_else(|_| Err(TokenError::new("token store task panicked")))
 }
 
+/// `list` on the blocking pool (issue #451: `hub status` resolves the token ids
+/// a failing peer named to their labels, off the authentication path).
+pub async fn list_async(state: &HubState) -> Result<Vec<Record>, TokenError> {
+    let state = state.clone();
+    tokio::task::spawn_blocking(move || list(&state))
+        .await
+        .unwrap_or_else(|_| Err(TokenError::new("token store task panicked")))
+}
+
 /// `bound_record` on the blocking pool.
 pub async fn bound_record_async(token_id: &str, state: &HubState) -> Result<Record, TokenError> {
     let token_id = token_id.to_string();

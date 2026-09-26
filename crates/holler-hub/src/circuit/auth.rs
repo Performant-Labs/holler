@@ -48,10 +48,12 @@ pub struct AuthDeps<'a> {
 
 /// Refuse this connection as `-32002 unauthenticated`: record a lockout
 /// failure (keyed by the transport IP, never the claimed hostname — that is
-/// unauthenticated input), send the wire refusal, close the socket, and drop
-/// the roster row (issue #186: an unauthenticated body is permanently gone —
-/// a bad token id/handshake can never succeed on retry with the same
-/// material, so the TTL would only keep a stale row around).
+/// unauthenticated input — and carrying the reason and the token id the peer
+/// named, which `hub status` reports, issue #451), send the wire refusal,
+/// close the socket, and drop the roster row (issue #186: an unauthenticated
+/// body is permanently gone — a bad token id/handshake can never succeed on
+/// retry with the same material, so the TTL would only keep a stale row
+/// around).
 ///
 /// The single funnel every failure branch of the `circuit/authenticate` →
 /// `circuit/prove` handshake goes through, so the several distinct failure
@@ -74,7 +76,7 @@ pub(super) async fn refuse_unauthenticated<Snk>(
     Snk: Sink<Message, Error = WsError> + Unpin,
 {
     let code = rejection_reason(message);
-    let outcome = peer_ip.parse().ok().map(|ip| deps.lockout.record_failure_detailed(&ip, code));
+    let outcome = peer_ip.parse().ok().map(|ip| deps.lockout.record_failure_detailed(&ip, code, token_id));
     log_rejection(peer_ip, token_id, code, outcome.as_ref());
     send_error_with_reason(sink, id, Code::Unauthenticated, message, reason).await;
     close(sink).await;
@@ -113,14 +115,7 @@ fn log_rejection(peer_ip: &str, token_id: &str, reason: &'static str, outcome: O
     );
     let Some(o) = outcome else { return };
     if o.newly_tripped {
-        let mut grouped: Vec<(&str, usize)> = Vec::new();
-        for r in &o.reasons {
-            match grouped.iter_mut().find(|(g, _)| g == r) {
-                Some((_, n)) => *n += 1,
-                None => grouped.push((r, 1)),
-            }
-        }
-        let reasons = grouped.iter().map(|(r, n)| format!("{r}x{n}")).collect::<Vec<_>>().join(",");
+        let reasons = crate::lockout::group_reasons(&o.reasons).iter().map(|(r, n)| format!("{r}x{n}")).collect::<Vec<_>>().join(",");
         log(
             Severity::Warn,
             "lockout_tripped",

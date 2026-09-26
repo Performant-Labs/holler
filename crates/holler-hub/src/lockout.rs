@@ -22,7 +22,7 @@
 //! the `peers` field doc below for the full account. Loopback is **not**
 //! exempt (the spec is explicit, and the test suite relies on it).
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::net::IpAddr;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -78,15 +78,56 @@ struct PeerState {
     window_start: u64,
     count: u64,
     tripped_since: Option<u64>,
-    /// The reason code of each counted failure (bounded by
-    /// [`MAX_RECORDED_REASONS`]), so the trip can be logged with *why* the
-    /// peer was locked out (issue #450).
-    reasons: Vec<&'static str>,
+    /// Each counted failure (bounded by [`MAX_RECORDED_REASONS`]): its reason
+    /// code, so the trip can be logged with *why* the peer was locked out
+    /// (issue #450), and the token id the peer named, so `hub status` can say
+    /// which credentials it is failing with (issue #451).
+    failures: Vec<Failure>,
 }
 
-/// Cap on the per-peer reason list; a peer hammering past its trip keeps the
-/// most recent entries only.
+/// One counted failure, as remembered for reporting.
+#[derive(Debug, Clone)]
+struct Failure {
+    reason: &'static str,
+    /// The token id the peer named in `circuit/authenticate`: unauthenticated
+    /// client input, so it is clipped to [`MAX_TOKEN_ID_BYTES`] before it is
+    /// stored. Empty when the failure named none.
+    token_id: String,
+}
+
+/// Cap on the per-peer failure list. Only failures that count towards the trip
+/// are recorded (one that arrives while the peer is already locked out just
+/// restarts the cooldown), so the cap bites when the trip limit exceeds it;
+/// the oldest entries are dropped first.
 const MAX_RECORDED_REASONS: usize = 16;
+
+/// The longest token id kept per recorded failure, in bytes. A minted id
+/// (`tok_` plus 64 hex digits, see `token::mint_id`) is 68 bytes and is never
+/// clipped; a clipped id is longer than any real one, so it cannot equal one
+/// and never resolves to a label.
+const MAX_TOKEN_ID_BYTES: usize = 128;
+
+/// `id` cut to at most [`MAX_TOKEN_ID_BYTES`], on a character boundary.
+fn clip_token_id(id: &str) -> &str {
+    let mut end = id.len().min(MAX_TOKEN_ID_BYTES);
+    while !id.is_char_boundary(end) {
+        end -= 1;
+    }
+    &id[..end]
+}
+
+impl PeerState {
+    /// Whether this entry still counts at `now`: a tripped peer until its
+    /// cooldown lapses, an accumulating peer until its window lapses. The rule
+    /// [`Lockout::drop_stale`] removes by and [`Lockout::snapshot`] hides by, so
+    /// a snapshot never shows what the next `sweep` would drop.
+    fn is_live(&self, now: u64, limits: LockoutLimits) -> bool {
+        match self.tripped_since {
+            Some(since) => now.saturating_sub(since) < limits.duration_ms,
+            None => now.saturating_sub(self.window_start) < limits.window_ms,
+        }
+    }
+}
 
 /// What one recorded failure did to its peer's lockout state (issue #450).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -173,14 +214,17 @@ impl Lockout {
     /// failure **tripped** the lockout (the peer is now refused for the
     /// cooldown).
     pub fn record_failure(&self, peer: &IpAddr) -> bool {
-        let o = self.record_failure_detailed(peer, "unspecified");
+        let o = self.record_failure_detailed(peer, "unspecified", "");
         o.locked_out
     }
 
     /// [`Self::record_failure`], reporting what happened (issue #450): the
     /// failure count in the window, whether this failure newly tripped the
     /// lockout, the recorded reasons, and any peers whose cooldown lapsed.
-    pub fn record_failure_detailed(&self, peer: &IpAddr, reason: &'static str) -> FailureOutcome {
+    /// `token_id` is the id the peer named (issue #451), remembered for
+    /// `hub status` and clipped to [`MAX_TOKEN_ID_BYTES`]; pass an empty
+    /// string when there was none.
+    pub fn record_failure_detailed(&self, peer: &IpAddr, reason: &'static str, token_id: &str) -> FailureOutcome {
         let now = self.clock.now_ms();
         let mut map = self.peers.lock().unwrap_or_else(|e| e.into_inner());
         let cleared = Self::drop_stale(&mut map, now, self.limits);
@@ -189,7 +233,7 @@ impl Lockout {
             window_start: now,
             count: 0,
             tripped_since: None,
-            reasons: Vec::new(),
+            failures: Vec::new(),
         });
 
         let mut newly_tripped = false;
@@ -199,14 +243,14 @@ impl Lockout {
             if now.saturating_sub(entry.window_start) >= self.limits.window_ms {
                 entry.window_start = now;
                 entry.count = 1;
-                entry.reasons.clear();
+                entry.failures.clear();
             } else {
                 entry.count += 1;
             }
-            if entry.reasons.len() >= MAX_RECORDED_REASONS {
-                entry.reasons.remove(0);
+            if entry.failures.len() >= MAX_RECORDED_REASONS {
+                entry.failures.remove(0);
             }
-            entry.reasons.push(reason);
+            entry.failures.push(Failure { reason, token_id: clip_token_id(token_id).to_owned() });
             if entry.count >= self.limits.max_failures {
                 entry.tripped_since = Some(now);
                 newly_tripped = true;
@@ -217,7 +261,7 @@ impl Lockout {
             max: self.limits.max_failures,
             newly_tripped,
             locked_out: entry.tripped_since.is_some(),
-            reasons: entry.reasons.clone(),
+            reasons: entry.failures.iter().map(|f| f.reason).collect(),
             duration_ms: self.limits.duration_ms,
             retry_after_ms: entry
                 .tripped_since
@@ -236,21 +280,124 @@ impl Lockout {
         Self::drop_stale(&mut map, now, self.limits)
     }
 
+    /// A read-only view of the peers this lockout is tracking right now, for
+    /// `hub status` (issue #451): who is locked out and for how much longer,
+    /// and who has failures building up towards a trip.
+    ///
+    /// A pure read under the mutex. An entry whose cooldown or window has
+    /// lapsed is left out by the rule [`Self::sweep`] drops it by, but it is
+    /// never removed here, so looking at the state cannot swallow the
+    /// `lockout_cleared why=expired` event `sweep` owes the log (issue #450).
+    pub fn snapshot(&self) -> LockoutSnapshot {
+        let now = self.clock.now_ms();
+        let map = self.peers.lock().unwrap_or_else(|e| e.into_inner());
+        let mut peers: Vec<PeerRow> = map
+            .iter()
+            .filter(|(_, s)| s.is_live(now, self.limits))
+            .map(|(ip, s)| PeerRow::of(ip, s, now, self.limits))
+            .collect();
+        peers.sort_by(|a, b| a.peer.cmp(&b.peer));
+        LockoutSnapshot { peers }
+    }
+
     /// Remove tripped peers whose cooldown has lapsed and accumulating peers
     /// whose window has lapsed with no trip; return the former.
     fn drop_stale(map: &mut HashMap<IpAddr, PeerState>, now: u64, limits: LockoutLimits) -> Vec<IpAddr> {
         let mut cleared = Vec::new();
-        map.retain(|ip, s| match s.tripped_since {
-            Some(since) => {
-                let live = now.saturating_sub(since) < limits.duration_ms;
-                if !live {
-                    cleared.push(*ip);
-                }
-                live
+        map.retain(|ip, s| {
+            let live = s.is_live(now, limits);
+            if !live && s.tripped_since.is_some() {
+                cleared.push(*ip);
             }
-            None => now.saturating_sub(s.window_start) < limits.window_ms,
+            live
         });
         cleared
+    }
+}
+
+/// Group reason codes into `(code, count)` pairs, in the order each code first
+/// appears. The one grouping shared by the `lockout_tripped` log line
+/// (`token_expiredx3`) and `hub status` (issue #451).
+pub fn group_reasons(reasons: &[&'static str]) -> Vec<(&'static str, usize)> {
+    let mut grouped: Vec<(&'static str, usize)> = Vec::new();
+    for &reason in reasons {
+        match grouped.iter_mut().find(|(seen, _)| *seen == reason) {
+            Some((_, n)) => *n += 1,
+            None => grouped.push((reason, 1)),
+        }
+    }
+    grouped
+}
+
+/// A point-in-time, read-only view of the lockout state (issue #451), taken by
+/// [`Lockout::snapshot`]: every peer that is locked out or has failures
+/// accumulating in its window, sorted by peer address.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LockoutSnapshot {
+    peers: Vec<PeerRow>,
+}
+
+/// One peer's row in a [`LockoutSnapshot`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PeerRow {
+    peer: String,
+    locked_out: bool,
+    failures: u64,
+    retry_after_secs: u64,
+    reasons: Vec<(&'static str, usize)>,
+    token_ids: Vec<String>,
+}
+
+impl PeerRow {
+    /// The row for a peer that [`PeerState::is_live`] at `now`.
+    fn of(ip: &IpAddr, s: &PeerState, now: u64, limits: LockoutLimits) -> Self {
+        let retry_after_ms =
+            s.tripped_since.map_or(0, |since| limits.duration_ms.saturating_sub(now.saturating_sub(since)));
+        let reasons: Vec<&'static str> = s.failures.iter().map(|f| f.reason).collect();
+        let token_ids: BTreeSet<&str> =
+            s.failures.iter().map(|f| f.token_id.as_str()).filter(|id| !id.is_empty()).collect();
+        Self {
+            peer: ip.to_string(),
+            locked_out: s.tripped_since.is_some(),
+            failures: s.count,
+            // Rounded up: a peer that is still locked out never reads 0.
+            retry_after_secs: retry_after_ms.div_ceil(1000),
+            reasons: group_reasons(&reasons),
+            token_ids: token_ids.into_iter().map(str::to_owned).collect(),
+        }
+    }
+
+    fn to_json(&self, labels: &HashMap<String, String>) -> serde_json::Value {
+        let reasons: serde_json::Map<String, serde_json::Value> =
+            self.reasons.iter().map(|(code, n)| ((*code).to_owned(), serde_json::Value::from(*n))).collect();
+        let token_ids: Vec<serde_json::Value> =
+            self.token_ids.iter().map(|id| serde_json::json!({ "id": id, "label": labels.get(id) })).collect();
+        serde_json::json!({
+            "peer": self.peer,
+            "locked_out": self.locked_out,
+            "failures": self.failures,
+            "retry_after_secs": self.retry_after_secs,
+            "reasons": reasons,
+            "token_ids": token_ids,
+        })
+    }
+}
+
+impl LockoutSnapshot {
+    /// No peer is locked out or failing.
+    pub fn is_empty(&self) -> bool {
+        self.peers.is_empty()
+    }
+
+    /// The `lockout` document of `hub status --json`: `{"peers": [...]}`,
+    /// sorted by peer address. Each entry is `{peer, locked_out, failures,
+    /// retry_after_secs, reasons: {code: count}, token_ids: [{id, label}]}`;
+    /// `retry_after_secs` is 0 unless the peer is locked out. `labels` maps a
+    /// token id to its label, and an id it does not hold (a token that is gone,
+    /// or one the peer made up) gets `label: null`.
+    pub fn to_json(&self, labels: &HashMap<String, String>) -> serde_json::Value {
+        let peers: Vec<serde_json::Value> = self.peers.iter().map(|p| p.to_json(labels)).collect();
+        serde_json::json!({ "peers": peers })
     }
 }
 
@@ -383,14 +530,14 @@ mod tests {
         let lockout = lockout_with(FakeClock::new());
         let ip = peer();
         for n in 1..5u64 {
-            let o = lockout.record_failure_detailed(&ip, "token_expired");
+            let o = lockout.record_failure_detailed(&ip, "token_expired", "tok_a");
             assert_eq!((o.count, o.max, o.newly_tripped, o.locked_out), (n, 5, false, false));
         }
-        let o = lockout.record_failure_detailed(&ip, "bad_proof");
+        let o = lockout.record_failure_detailed(&ip, "bad_proof", "tok_a");
         assert!(o.newly_tripped && o.locked_out, "the 5th failure trips");
         assert_eq!(o.reasons, vec!["token_expired", "token_expired", "token_expired", "token_expired", "bad_proof"]);
         assert_eq!((o.duration_ms, o.retry_after_ms), (10_000, 10_000));
-        let again = lockout.record_failure_detailed(&ip, "token_expired");
+        let again = lockout.record_failure_detailed(&ip, "token_expired", "tok_a");
         assert!(again.locked_out && !again.newly_tripped, "a failure while locked out is not a second trip");
     }
 
@@ -402,14 +549,14 @@ mod tests {
         let lockout = lockout_with(clock.clone());
         let ip = peer();
         for _ in 0..5 {
-            lockout.record_failure_detailed(&ip, "token_expired");
+            lockout.record_failure_detailed(&ip, "token_expired", "tok_a");
         }
         assert!(lockout.sweep().is_empty(), "still locked out: nothing has lapsed");
         clock.advance(10_000);
         assert_eq!(lockout.sweep(), vec![ip], "the lapsed cooldown is reported");
         assert!(lockout.sweep().is_empty(), "and only once");
         assert!(!lockout.is_locked_out(&ip));
-        assert_eq!(lockout.record_failure_detailed(&ip, "token_expired").count, 1, "a fresh window");
+        assert_eq!(lockout.record_failure_detailed(&ip, "token_expired", "tok_a").count, 1, "a fresh window");
     }
 
     /// Issue #450: `reset` says whether it lifted a real lockout, not just
@@ -418,11 +565,141 @@ mod tests {
     fn reset_reports_only_a_lifted_lockout() {
         let lockout = lockout_with(FakeClock::new());
         let ip = peer();
-        lockout.record_failure_detailed(&ip, "token_expired");
+        lockout.record_failure_detailed(&ip, "token_expired", "tok_a");
         assert!(!lockout.reset(&ip), "one strike is not a lockout");
         for _ in 0..5 {
-            lockout.record_failure_detailed(&ip, "token_expired");
+            lockout.record_failure_detailed(&ip, "token_expired", "tok_a");
         }
         assert!(lockout.reset(&ip), "a tripped peer's lockout is lifted");
+    }
+
+    // ---- Issue #451: read-only snapshot for `hub status` ----
+
+    use serde_json::{json, Value};
+
+    fn no_labels() -> HashMap<String, String> {
+        HashMap::new()
+    }
+
+    fn peers_of(l: &Lockout, labels: &HashMap<String, String>) -> Vec<Value> {
+        l.snapshot().to_json(labels)["peers"].as_array().unwrap().clone()
+    }
+
+    #[test]
+    fn snapshot_of_a_quiet_hub_is_an_empty_peers_list() {
+        let lockout = lockout_with(FakeClock::new());
+        assert_eq!(lockout.snapshot().to_json(&no_labels()), json!({ "peers": [] }));
+        assert!(lockout.snapshot().is_empty());
+    }
+
+    #[test]
+    fn snapshot_shows_an_accumulating_peer_as_not_locked_out() {
+        let lockout = lockout_with(FakeClock::new());
+        let ip = peer();
+        lockout.record_failure_detailed(&ip, "token_expired", "tok_a");
+        lockout.record_failure_detailed(&ip, "token_unknown", "tok_b");
+        let peers = peers_of(&lockout, &no_labels());
+        assert_eq!(peers.len(), 1);
+        let p = &peers[0];
+        assert_eq!(p["peer"], "127.0.0.1");
+        assert_eq!(p["locked_out"], false);
+        assert_eq!(p["failures"], 2);
+        assert_eq!(p["retry_after_secs"], 0);
+        assert_eq!(p["reasons"], json!({ "token_expired": 1, "token_unknown": 1 }));
+        assert_eq!(p["token_ids"], json!([{"id": "tok_a", "label": null}, {"id": "tok_b", "label": null}]));
+    }
+
+    #[test]
+    fn snapshot_shows_a_tripped_peer_with_the_remaining_cooldown_rounded_up() {
+        let clock = FakeClock::new();
+        let lockout = lockout_with(clock.clone());
+        let ip = peer();
+        for _ in 0..5 {
+            lockout.record_failure_detailed(&ip, "token_expired", "tok_a");
+        }
+        clock.advance(3_500); // 6_500 ms remain -> 7 s
+        let labels = HashMap::from([("tok_a".to_string(), "body-1".to_string())]);
+        let p = &peers_of(&lockout, &labels)[0];
+        assert_eq!(p["locked_out"], true);
+        assert_eq!(p["failures"], 5);
+        assert_eq!(p["retry_after_secs"], 7);
+        assert_eq!(p["reasons"], json!({ "token_expired": 5 }));
+        assert_eq!(p["token_ids"], json!([{"id": "tok_a", "label": "body-1"}]), "distinct ids only");
+    }
+
+    #[test]
+    fn retry_after_secs_is_never_zero_while_locked_out() {
+        let clock = FakeClock::new();
+        let lockout = lockout_with(clock.clone());
+        let ip = peer();
+        for _ in 0..5 {
+            lockout.record_failure_detailed(&ip, "token_expired", "tok_a");
+        }
+        assert_eq!(peers_of(&lockout, &no_labels())[0]["retry_after_secs"], 10);
+        clock.advance(9_999); // 1 ms remains
+        let p = &peers_of(&lockout, &no_labels())[0];
+        assert_eq!((p["locked_out"].clone(), p["retry_after_secs"].clone()), (json!(true), json!(1)));
+    }
+
+    #[test]
+    fn a_lapsed_cooldown_or_window_no_longer_appears_in_the_snapshot() {
+        let clock = FakeClock::new();
+        let lockout = lockout_with(clock.clone());
+        let tripped: IpAddr = "10.0.0.1".parse().unwrap();
+        let accumulating: IpAddr = "10.0.0.2".parse().unwrap();
+        for _ in 0..5 {
+            lockout.record_failure_detailed(&tripped, "token_expired", "tok_a");
+        }
+        lockout.record_failure_detailed(&accumulating, "token_expired", "tok_a");
+        clock.advance(10_000);
+        assert!(peers_of(&lockout, &no_labels()).is_empty(), "both the cooldown and the window have lapsed");
+    }
+
+    /// The snapshot is a pure read: it must not consume the lapse that
+    /// `sweep` reports as `lockout_cleared why=expired` (#450).
+    #[test]
+    fn taking_a_snapshot_does_not_consume_the_sweep_clear_event() {
+        let clock = FakeClock::new();
+        let lockout = lockout_with(clock.clone());
+        let ip = peer();
+        for _ in 0..5 {
+            lockout.record_failure_detailed(&ip, "token_expired", "tok_a");
+        }
+        clock.advance(10_000);
+        assert!(peers_of(&lockout, &no_labels()).is_empty());
+        assert_eq!(lockout.sweep(), vec![ip], "sweep still reports the lapsed peer after a snapshot");
+    }
+
+    #[test]
+    fn snapshot_peers_are_sorted_by_address() {
+        let lockout = lockout_with(FakeClock::new());
+        for ip in ["10.0.0.9", "10.0.0.10", "10.0.0.2"] {
+            lockout.record_failure_detailed(&ip.parse().unwrap(), "token_expired", "tok_a");
+        }
+        let order: Vec<String> = peers_of(&lockout, &no_labels()).iter().map(|p| p["peer"].as_str().unwrap().to_string()).collect();
+        let mut sorted = order.clone();
+        sorted.sort();
+        assert_eq!(order, sorted, "deterministic order by peer string");
+        assert_eq!(order.len(), 3);
+    }
+
+    #[test]
+    fn recorded_token_ids_stay_bounded_by_the_reason_cap() {
+        // Trip limit above the cap so all 40 failures are recorded, not just those before the trip.
+        let lockout = Arc::new(Lockout {
+            limits: LockoutLimits { max_failures: 100, window_ms: 10_000, duration_ms: 10_000 },
+            peers: Mutex::new(HashMap::new()),
+            clock: Box::new(FakeClock::new()),
+        });
+        let ip = peer();
+        let ids: Vec<String> = (0..40).map(|n| format!("tok_{n:02}")).collect();
+        for id in &ids {
+            lockout.record_failure_detailed(&ip, "token_unknown", id);
+        }
+        let p = &peers_of(&lockout, &no_labels())[0];
+        let listed = p["token_ids"].as_array().unwrap();
+        assert!(listed.len() <= MAX_RECORDED_REASONS, "unauthenticated ids are capped: {}", listed.len());
+        assert!(listed.iter().any(|v| v["id"] == "tok_39"), "the most recent id is kept");
+        assert!(!listed.iter().any(|v| v["id"] == "tok_00"), "the oldest id is dropped");
     }
 }

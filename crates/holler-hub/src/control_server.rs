@@ -14,6 +14,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 use tokio::net::UnixStream;
 
 use crate::live::Registry;
+use crate::lockout::Lockout;
 use crate::roster::Roster;
 use crate::state::{advertise_path, resolve_state_dir, HubState};
 
@@ -24,6 +25,7 @@ pub async fn handle_control_conn(
     stream: UnixStream,
     registry: Registry,
     roster: std::sync::Arc<Roster>,
+    lockout: std::sync::Arc<Lockout>,
 ) {
     let (read_half, write_half) = tokio::io::split(stream);
     let mut write_half = write_half;
@@ -35,7 +37,7 @@ pub async fn handle_control_conn(
                 if line.is_empty() {
                     continue;
                 }
-                let reply = dispatch_control(&line, &registry, &roster).await;
+                let reply = dispatch_control(&line, &registry, &roster, &lockout).await;
                 let bytes = format!("{reply}\n");
                 if write_half.write_all(bytes.as_bytes()).await.is_err() {
                     return; // client went away.
@@ -71,7 +73,7 @@ fn log_control(method: &str, id: Option<&str>) {
 
 /// Parse one control frame, dispatch it, and return the reply as a single
 /// line (no trailing newline; the caller adds it).
-async fn dispatch_control(line: &str, registry: &Registry, roster: &Roster) -> String {
+async fn dispatch_control(line: &str, registry: &Registry, roster: &Roster, lockout: &Lockout) -> String {
     // The control socket is **internal, non-wire**: it is not validated
     // against the v2 wire catalog (those are the `control/…` methods, which
     // live only here). We still parse the frame as a JSON-RPC object so we can
@@ -92,7 +94,7 @@ async fn dispatch_control(line: &str, registry: &Registry, roster: &Roster) -> S
 
     match method {
         Some("control/status") => {
-            let doc = status_doc(registry).await;
+            let doc = status_doc(registry, lockout).await;
             encode_response(&cid, doc)
         }
         Some("control/token_ping") => token_ping(&cid, &obj, registry).await,
@@ -706,10 +708,19 @@ fn resolve_cid(id: Option<&str>) -> holler_proto::CorrelationId {
 /// live registry's real counts (issue #182 landed `clients`; issue #185 adds
 /// the rest — previously always `0`/`[]`, since no body could yet report a
 /// session count or a confirmed harness).
-async fn status_doc(registry: &Registry) -> serde_json::Value {
+async fn status_doc(registry: &Registry, lockout: &Lockout) -> serde_json::Value {
     // Only ever called by the live hub's own control dispatch, where the state
     // dir is always resolvable; `unwrap_or_default` is a defensive no-op.
     let state = HubState::from_root(resolve_state_dir().unwrap_or_default());
+    // Issue #451: the live lockout state. The labels of the token ids it names
+    // are looked up here, never on the authentication path, and only when a
+    // peer is listed; a store that cannot be read costs the labels, not the status.
+    let lockout_now = lockout.snapshot();
+    let mut labels = std::collections::HashMap::new();
+    if !lockout_now.is_empty() {
+        let records = crate::token::list_async(&state).await.unwrap_or_default();
+        labels.extend(records.into_iter().map(|r| (r.token_id, r.label)));
+    }
     let listening = read_listening(&state);
     let advertise = std::fs::read_to_string(advertise_path(&state))
         .ok()
@@ -750,6 +761,7 @@ async fn status_doc(registry: &Registry) -> serde_json::Value {
         // Issue #184's acceptance: the hygiene/lockout limits documented in
         // `hub status --json`'s `limits{}`.
         "limits": crate::hygiene::HygieneLimits::resolve().to_json(crate::lockout::LockoutLimits::resolve()),
+        "lockout": lockout_now.to_json(&labels),
     })
 }
 
