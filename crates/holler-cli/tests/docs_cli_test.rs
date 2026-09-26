@@ -30,20 +30,48 @@ fn workspace_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap()
 }
 
+/// Whether a path relative to the workspace root (a markdown file such as
+/// `docs/testing.md`, or a directory the walk would enter) holds CLI
+/// documentation the doc-test must scan (#462).
+///
+/// Skipped: `docs/handoffs/`, the coding pipeline's per-story scratch
+/// (briefs, handoffs, decision journals, gate output). It exists only in a
+/// pipeline worktree while a story is in flight and is deleted before the PR
+/// is pushed, so CI never sees it, but `cargo test --workspace` in that
+/// worktree does, and a handoff that quotes a `holler …` fragment (on #420's
+/// branch, a Rust format string) failed the whole run on text that is not
+/// CLI documentation.
+///
+/// Scanned, deliberately: every other directory under `docs/`. They hold
+/// tracked, hand-written documents. That includes `docs/reviews/`, which is
+/// the review battery's runbook, prompts, overlays and pre-flight script, not
+/// its output: the battery files its findings as GitHub issues and writes
+/// nothing under `docs/`.
+///
+/// `Path::starts_with` compares whole components, so a page whose name merely
+/// contains `handoffs` (e.g. `docs/research/handoffs-notes.md`) is scanned.
+fn is_cli_doc(rel: &Path) -> bool {
+    !rel.starts_with("docs/handoffs")
+}
+
 fn markdown_files() -> Vec<PathBuf> {
     let root = workspace_root();
     let mut out = vec![root.join("README.md")];
-    fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
+    fn walk(root: &Path, dir: &Path, out: &mut Vec<PathBuf>) {
         for e in std::fs::read_dir(dir).unwrap() {
             let p = e.unwrap().path();
+            // Filters directories too, so the walk never enters `docs/handoffs/`.
+            if !is_cli_doc(p.strip_prefix(root).unwrap()) {
+                continue;
+            }
             if p.is_dir() {
-                walk(&p, out);
+                walk(root, &p, out);
             } else if p.extension().is_some_and(|x| x == "md") {
                 out.push(p);
             }
         }
     }
-    walk(&root.join("docs"), &mut out);
+    walk(&root, &root.join("docs"), &mut out);
     out.sort();
     out
 }
@@ -181,4 +209,39 @@ fn every_documented_holler_command_parses() {
         failures.len(),
         failures.join("\n")
     );
+}
+
+/// #462: the coding pipeline's per-story scratch under `docs/handoffs/`
+/// (briefs, handoffs, decision journals, at any depth) is not CLI
+/// documentation and is excluded; every other docs page, including one whose
+/// name merely contains `handoffs`, stays scanned.
+#[test]
+fn doc_filter_skips_pipeline_handoffs_only() {
+    for excluded in ["docs/handoffs/462-brief.md", "docs/handoffs/462/handoff-A.md", "docs/handoffs/decisions.md"] {
+        assert!(!is_cli_doc(Path::new(excluded)), "{excluded} is pipeline scratch and must not be scanned");
+    }
+    for included in [
+        "README.md",
+        "docs/testing.md",
+        "docs/protocol/v2.md",
+        "docs/adr/ADR-0004.md",
+        "docs/reviews/review-battery.md",
+        "docs/research/handoffs-notes.md",
+    ] {
+        assert!(is_cli_doc(Path::new(included)), "{included} is documentation and must be scanned");
+    }
+}
+
+/// #462: the walk itself applies the filter, so a pipeline worktree with
+/// files under `docs/handoffs/` never feeds them to the doc-test, while the
+/// real docs pages are still returned.
+#[test]
+fn markdown_files_excludes_pipeline_handoffs() {
+    let root = workspace_root();
+    let rel: Vec<PathBuf> = markdown_files().iter().map(|p| p.strip_prefix(&root).unwrap().to_path_buf()).collect();
+    let leaked: Vec<_> = rel.iter().filter(|p| p.starts_with("docs/handoffs")).collect();
+    assert!(leaked.is_empty(), "markdown_files() returned pipeline scratch: {leaked:?}");
+    for must in ["README.md", "docs/testing.md", "docs/protocol/v2.md"] {
+        assert!(rel.iter().any(|p| p == Path::new(must)), "markdown_files() lost {must}");
+    }
 }
