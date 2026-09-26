@@ -36,7 +36,7 @@ use std::time::{Duration, Instant};
 
 use holler_proto::{Content, Message, Part, Role, SessionState};
 
-use crate::live::{LiveHandle, Registry, ResolveOutcome, SayReply};
+use crate::live::{LiveHandle, Registry, ResolveOutcome, SayOpts, SayReply};
 use crate::roster::Roster;
 use crate::state::{talklog_dir, talklog_path, HubState};
 
@@ -171,6 +171,18 @@ pub struct SayOutcome {
     pub elapsed_ms: u64,
 }
 
+/// What one `say` asks for (bundled to keep [`say`]'s argument count under
+/// the workspace's clippy limit).
+pub struct SayArgs<'a> {
+    pub session: &'a str,
+    pub text: &'a str,
+    /// `--queue`.
+    pub queue: bool,
+    /// `--grant ID` (issue #460): a one-time release grant.
+    pub grant: Option<&'a str>,
+    pub timeout: Duration,
+}
+
 /// Send one prompt to `session` and wait for its reply. `state` is the
 /// live hub's own `HubState` (for the TalkLog path); `label` is this call's
 /// own request id source (an `h-…` [`holler_proto::CorrelationId`] is minted
@@ -185,11 +197,9 @@ pub async fn say(
     registry: &Registry,
     roster: &Roster,
     state: &HubState,
-    session: &str,
-    text: &str,
-    queue: bool,
-    timeout: Duration,
+    args: SayArgs<'_>,
 ) -> Result<SayOutcome, SayError> {
+    let SayArgs { session, text, queue, grant, timeout } = args;
     let name = holler_proto::RoutableName::parse(session).map_err(|_| SayError::UnknownSession)?;
     let (handle, ad) = match registry.resolve_session(&name).await {
         ResolveOutcome::Found(h, ad) => (h, ad),
@@ -202,8 +212,8 @@ pub async fn say(
     // done for it (no turn id moved, no TalkLog line). This is a fast path
     // only: the enforcement that cannot be raced is the check in
     // `circuit::dispatch::send_prompt`, which every prompt passes through.
-    if let Some(hold) = registry.holds().check(&crate::holds::session_key(&handle.hostname, ad.name.as_str())) {
-        return Err(SayError::Refused(hold.refusal()));
+    if let Some(refusal) = registry.holds().would_refuse(&crate::holds::session_key(&handle.hostname, ad.name.as_str()), grant) {
+        return Err(SayError::Refused(refusal));
     }
 
     // The busy check (issue #150's policy, enforced here as the hub's own
@@ -232,7 +242,7 @@ pub async fn say(
     }
 
     let kind = if queue { TurnKind::Queue } else { TurnKind::Plain };
-    send_turn(&TurnCtx { registry, roster, state }, &handle, &ad, text, kind, timeout).await
+    send_turn(&TurnCtx { registry, roster, state, grant }, &handle, &ad, text, kind, timeout).await
 }
 
 /// `interrupt SESSION TEXT`'s own redirect turn (issue #191): unlike [`say`],
@@ -251,7 +261,7 @@ pub async fn send_replace_turn(
     text: &str,
     timeout: Duration,
 ) -> Result<SayOutcome, SayError> {
-    send_turn(&TurnCtx { registry, roster, state }, handle, ad, text, TurnKind::Replace, timeout).await
+    send_turn(&TurnCtx { registry, roster, state, grant: None }, handle, ad, text, TurnKind::Replace, timeout).await
 }
 
 /// `queue`/`replace` collapsed into one enum purely to keep [`send_turn`]
@@ -287,6 +297,7 @@ struct TurnCtx<'a> {
     registry: &'a Registry,
     roster: &'a Roster,
     state: &'a HubState,
+    grant: Option<&'a str>,
 }
 
 /// The shared tail of [`say`]/[`send_replace_turn`]: mint a request id, send
@@ -302,7 +313,7 @@ async fn send_turn(
     kind: TurnKind,
     timeout: Duration,
 ) -> Result<SayOutcome, SayError> {
-    let TurnCtx { registry, roster, state } = *ctx;
+    let TurnCtx { registry, roster, state, grant } = *ctx;
     let request_id = holler_proto::CorrelationId::mint_hub().as_str().to_string();
     let message = user_message(&request_id, text);
     let started = Instant::now();
@@ -319,7 +330,13 @@ async fn send_turn(
     });
 
     let reply = handle
-        .say(request_id.clone(), ad.name.clone(), Box::new(message), kind.queue(), kind.replace(), timeout)
+        .say(
+            request_id.clone(),
+            ad.name.clone(),
+            Box::new(message),
+            SayOpts { queue: kind.queue(), replace: kind.replace(), grant: grant.map(str::to_owned) },
+            timeout,
+        )
         .await;
 
     let elapsed_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
@@ -342,7 +359,7 @@ async fn send_turn(
                     .unwrap_or_default();
                 Err(SayError::Busy { state: state_str, turn_age_ms, last_update_age_ms })
             } else {
-                if err.code == holler_proto::Code::SessionHeld.jsonrpc() {
+                if err.code == holler_proto::Code::SessionHeld.jsonrpc() || err.code == holler_proto::Code::InvalidGrant.jsonrpc() {
                     // The hold was set after `say`'s own pre-check but before
                     // the prompt reached `send_prompt` (issue #442): nothing
                     // was delivered, so undo the turn id moved above (only if it

@@ -62,7 +62,7 @@ fn session_prompt_is_built_in_exactly_one_place_and_the_hold_is_checked_there() 
     let dispatch = code_of(&hub_src().join("circuit/dispatch.rs"));
     let start = dispatch.find("async fn send_prompt").expect("send_prompt exists");
     let body = &dispatch[start..];
-    let check = body.find("gate.holds.check(").expect("send_prompt checks the hold");
+    let check = body.find("gate.holds.admit(").expect("send_prompt checks the hold");
     let build = body.find("Envelope::request").expect("send_prompt builds the request");
     assert!(check < build, "the hold must be checked before the prompt is built or sent");
 }

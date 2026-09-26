@@ -74,7 +74,7 @@ pub const CONTROL_METHODS: &[&str] = &["control/status"];
 // Building the tokio runtime is infallible in practice (it only fails if the
 // OS refuses to allocate the thread pool), so the `.expect` is unreachable.
 #[allow(clippy::expect_used)] // #143
-pub fn run(listen: &[String], advertise: Option<&str>) -> i32 {
+pub fn run(listen: &[String], advertise: Option<&str>, join_held: &[String]) -> i32 {
     // A missing state dir (no `HOLLER_STATE_DIR` and no `$HOME`) is a
     // fail-closed refusal (the bin will exit 3 on this 3).
     let state = match resolve_state_dir() {
@@ -120,7 +120,7 @@ pub fn run(listen: &[String], advertise: Option<&str>) -> i32 {
         .enable_all()
         .build()
         .expect("build the tokio runtime");
-    let code = rt.block_on(serve_forever(addrs, advertise, state.clone(), lock));
+    let code = rt.block_on(serve_forever(addrs, advertise, state.clone(), lock, join_held.to_vec()));
 
     if code == 0 {
         // Graceful teardown: remove both artifacts. (The lock guard is dropped
@@ -345,7 +345,7 @@ struct SharedState {
     roster: std::sync::Arc<crate::roster::Roster>,
 }
 
-fn build_shared_state(state: &HubState) -> SharedState {
+fn build_shared_state(state: &HubState, join_held: Vec<String>) -> SharedState {
     // The live-circuit registry (issue #182): one per hub process, shared by
     // every accepted WS connection (recording/removing itself as it
     // authenticates/disconnects) and every control-socket connection (`hub
@@ -353,7 +353,10 @@ fn build_shared_state(state: &HubState) -> SharedState {
     // The session hold registry (issue #442) is loaded from the state dir
     // here, so holds set before a restart are in force before the first
     // connection is accepted.
-    let registry = crate::live::Registry::new().with_holds(crate::holds::Holds::load(state));
+    let holds = crate::holds::Holds::load(state);
+    // `hub serve --join-held` (issue #460): off unless given.
+    holds.set_join_held(join_held);
+    let registry = crate::live::Registry::new().with_holds(holds);
     // Issue #184's connection hygiene: resolved once per process (the same
     // "fixed for the hub's whole life" discipline the roster's `Config`
     // already uses), then shared by every accepted socket.
@@ -382,6 +385,7 @@ async fn serve_forever(
     advertise: Option<&str>,
     state: HubState,
     _lock: LockGuard,
+    join_held: Vec<String>,
 ) -> i32 {
     // 3. Bind the WebSocket listeners (port 0 → the OS picks a free port).
     //
@@ -448,7 +452,7 @@ async fn serve_forever(
     let mut sig_term = signal(SignalKind::terminate()).expect("install SIGTERM handler");
 
     let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
-    let SharedState { registry, hygiene, lockout, preauth_semaphore, roster } = build_shared_state(&state);
+    let SharedState { registry, hygiene, lockout, preauth_semaphore, roster } = build_shared_state(&state, join_held);
 
     // The roster TTL sweep task (issue #255): `Roster::sweep()` was
     // previously only exercised by the unit tests against an injected clock

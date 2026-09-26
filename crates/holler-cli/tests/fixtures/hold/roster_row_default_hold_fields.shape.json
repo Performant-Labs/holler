@@ -1,0 +1,6 @@
+{
+  "hold": "bool",
+  "hold_reason": "string",
+  "held_since": "string",
+  "hold_kind": "string"
+}

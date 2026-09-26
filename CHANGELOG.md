@@ -8,6 +8,17 @@ fills this file in at release time.
 ## [Unreleased]
 
 ### Enhancements
+- Join held and a one-time release grant, on top of the session hold. `holler hub serve --join-held [GLOB]`
+  (off by default) makes sessions join held: a default hold with the reason `held on join`, shown in
+  `roster` as `held (default)`. `holler release SESSION --once [--ttl DURATION]` mints a grant for exactly
+  one prompt and prints its id; `holler say --grant ID` gets that one prompt through, and the session is
+  held again in the same step the hub accepts it (of two racing senders, exactly one gets through). An
+  unused grant expires; a hub restart voids it while the default hold persists. A grant lifts only a
+  default hold: an operator hold still refuses, and says so (`data.hold_kind`). Plain `release` peels the
+  operator hold first, then the default hold. New wire error `-32012 invalid_grant` (`unknown`, `expired`,
+  `used`, `other_session`), exit code 5 for `say --grant`. `hub query` and every other path are unchanged;
+  with neither option used nothing changes ([#460](https://github.com/Performant-Labs/holler/issues/460),
+  on [#437](https://github.com/Performant-Labs/holler/issues/437)).
 - `holler hold SESSION [--reason TEXT]` and `holler release SESSION` (both idempotent, both take `--json`)
   set and lift the session hold; `holler roster` gains a `HOLD` column and `roster --json` rows carry
   `hold`, `hold_reason` and `held_since` while a session is held. `holler say` (and `interrupt SESSION

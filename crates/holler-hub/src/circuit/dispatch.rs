@@ -45,8 +45,10 @@ pub(super) struct PendingSay {
 
 /// Why [`send_prompt`] did not send.
 pub(super) enum SendPromptError {
-    /// The session is held (issue #442): nothing was sent.
-    Held(crate::holds::HoldInfo),
+    /// The session hold refused the prompt (issue #442, #460): nothing was
+    /// sent. Carries the wire error to answer with (`session_held`, or
+    /// `invalid_grant` for a grant that was not honoured).
+    Refused(holler_proto::WireError),
     /// The frame could not be built or the socket is gone.
     Io,
 }
@@ -57,6 +59,8 @@ pub(super) enum SendPromptError {
 pub(super) struct HoldGate<'a> {
     pub(super) holds: &'a crate::holds::Holds,
     pub(super) key: &'a str,
+    /// The one-time release grant the sender presented, if any (issue #460).
+    pub(super) grant: Option<&'a str>,
 }
 
 /// Send a `session/prompt {session, message, queue, replace}` request to the
@@ -86,9 +90,9 @@ pub(super) async fn send_prompt<Snk>(
 where
     Snk: Sink<Message, Error = WsError> + Unpin,
 {
-    if let Some(hold) = gate.holds.check(gate.key) {
-        return Err(SendPromptError::Held(hold));
-    }
+    // `admit` decides and, for a valid grant, consumes it in one critical
+    // section: the prompt is accepted here, so the grant is spent here.
+    gate.holds.admit(gate.key, gate.grant).map_err(SendPromptError::Refused)?;
     let cid = holler_proto::CorrelationId::parse(request_id).map_err(|_| SendPromptError::Io)?;
     let params = holler_proto::Prompt { session: session.to_string(), message: *message, meta: None, queue, replace };
     let req = Envelope::request(&cid, "session/prompt", Some(serde_json::to_value(params).map_err(|_| SendPromptError::Io)?));
@@ -150,11 +154,17 @@ where
 pub(super) async fn handle_presence_notification(
     client_id: &str,
     params: Option<serde_json::Value>,
+    label: &str,
     registry: &Registry,
     roster: &std::sync::Arc<crate::roster::Roster>,
     last_seen: &mut LastSeenFlusher,
 ) {
     let Some(p) = params.and_then(|v| serde_json::from_value::<Presence>(v).ok()) else { return };
+    // Issue #460: a session seen for the first time joins held when the hub
+    // was started with `--join-held`. Done before the session becomes
+    // resolvable (`update_presence` below), so there is no moment at which it
+    // can be sent to but is not yet held.
+    registry.holds().note_joined(p.sessions.iter().map(|s| crate::holds::session_key(label, &s.name)));
     // Clone `p.hostname` into the log line (issue #186): `roster.advertise`
     // below borrows the whole `Presence`, so the log must not move a field out.
     super::log(Severity::Debug, "presence", vec![("client_id", client_id.to_string()), ("hostname", p.hostname.clone())]);
@@ -394,9 +404,9 @@ mod hold_tests {
         holds.hold("io/alpha", Some("freeze"));
         for (queue, replace) in [(false, false), (true, false), (false, true), (true, true)] {
             let mut sink = Recording::default();
-            let gate = HoldGate { holds: &holds, key: "io/alpha" };
+            let gate = HoldGate { holds: &holds, key: "io/alpha", grant: None };
             let res = send_prompt(&mut sink, gate, "h-01HTESTHOLD00000000000000", "alpha", message(), queue, replace).await;
-            assert!(matches!(res, Err(SendPromptError::Held(ref h)) if h.reason.as_deref() == Some("freeze")), "queue={queue} replace={replace}");
+            assert!(matches!(res, Err(SendPromptError::Refused(ref e)) if e.code == -32011 && e.message.contains("freeze")), "queue={queue} replace={replace}");
             assert!(sink.0.is_empty(), "a refused prompt must put nothing on the socket");
         }
     }
@@ -407,10 +417,10 @@ mod hold_tests {
         holds.hold("io/alpha", None);
         let mut sink = Recording::default();
         // A different session is never affected.
-        let other = HoldGate { holds: &holds, key: "io/beta" };
+        let other = HoldGate { holds: &holds, key: "io/beta", grant: None };
         assert!(send_prompt(&mut sink, other, "h-01HTESTHOLD00000000000000", "beta", message(), false, false).await.is_ok());
         holds.release("io/alpha");
-        let gate = HoldGate { holds: &holds, key: "io/alpha" };
+        let gate = HoldGate { holds: &holds, key: "io/alpha", grant: None };
         assert!(send_prompt(&mut sink, gate, "h-01HTESTHOLD00000000000001", "alpha", message(), true, false).await.is_ok());
         assert_eq!(sink.0.len(), 2);
     }

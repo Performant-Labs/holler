@@ -111,6 +111,12 @@ holler release <session-name>
 The hold is kept by the hub per session name and survives a body reconnect and a hub restart;
 `interrupt` still works on a held session. See `docs/protocol/v2.md` §7 and §10.
 
+A policy layer that wants every prompt to a worker to go through it can start the hub with
+`holler hub serve --join-held` (all sessions) or `--join-held 'io/*'` (matching `<label>/<session>`):
+sessions then join held, and `holler release <session> --once` prints a one-time grant that lets exactly
+one `holler say <session-name> "text" --grant <id>` through before the session is held again (an operator `hold` still wins).
+Off unless given.
+
 ### A real, working `sessions.toml`
 
 `sessions.toml`'s shape — what harness each session runs, spawn vs. attach mode — is config, not

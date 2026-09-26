@@ -286,6 +286,19 @@ path = "tests/hold_hub_test.rs"
 name = "hold_cli_test"
 path = "tests/hold_cli_test.rs"
 
+# Join held and the one-time release grant, hub side (issue #460; tags
+# test-grp-concurrency and lifecycle): a real hub started with `--join-held`,
+# a real body and `stub-acp`, a real hub restart and the grant race matrix.
+[[test]]
+name = "join_held_test"
+path = "tests/join_held_test.rs"
+
+# Join held and `release --once` / `say --grant`, CLI (issue #460; tag
+# test-grp-invoc): the real binary, text and `--json`, exit codes.
+[[test]]
+name = "grant_cli_test"
+path = "tests/grant_cli_test.rs"
+
 # The hold's single enforcement point (issue #442): a source-level guard that
 # no second sender of `session/prompt` appears in holler-hub.
 [[test]]

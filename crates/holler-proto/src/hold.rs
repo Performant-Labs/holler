@@ -36,12 +36,29 @@ pub struct SessionHold {
     /// When the hold was set (RFC 3339).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub held_since: Option<String>,
+    /// Which hold the three fields above describe (issue #460): `operator`
+    /// (`holler hold`) or `default` (the session joined held). Present whenever
+    /// `hold` is; a hub that predates default holds never sends it, which means
+    /// `operator`. When both holds are on a session it names the operator hold
+    /// (the one that beats a release grant).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hold_kind: Option<String>,
+    /// `true` only when a default hold sits under an operator hold (releasing
+    /// the operator hold then leaves the session held by default).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub hold_default: bool,
 }
 
 impl SessionHold {
+    /// This hold, labelled with its kind (`operator` or `default`).
+    pub fn of_kind(mut self, kind: &str) -> Self {
+        self.hold_kind = Some(kind.to_owned());
+        self
+    }
+
     /// A held session: `reason` is the operator's text (if any), `since` the
     /// RFC 3339 time the hold was set.
     pub fn held(reason: Option<String>, since: String) -> Self {
-        Self { hold: true, hold_reason: reason, held_since: Some(since) }
+        Self { hold: true, hold_reason: reason, held_since: Some(since), hold_kind: None, hold_default: false }
     }
 }

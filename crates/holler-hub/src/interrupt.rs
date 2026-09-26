@@ -114,8 +114,8 @@ pub async fn interrupt(
     // is still `send_prompt`'s; a hold set between this check and the redirect
     // surfaces as `PromptFailed`.)
     if text.is_some() {
-        if let Some(hold) = registry.holds().check(&crate::holds::session_key(&handle.hostname, ad.name.as_str())) {
-            return Err(InterruptError::Refused(hold.refusal()));
+        if let Some(refusal) = registry.holds().would_refuse(&crate::holds::session_key(&handle.hostname, ad.name.as_str()), None) {
+            return Err(InterruptError::Refused(refusal));
         }
     }
 

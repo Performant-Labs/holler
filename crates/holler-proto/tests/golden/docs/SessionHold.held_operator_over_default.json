@@ -1,0 +1,7 @@
+{
+  "held_since": "2026-09-08T12:00:00Z",
+  "hold": true,
+  "hold_default": true,
+  "hold_kind": "operator",
+  "hold_reason": "deploy freeze"
+}

@@ -109,10 +109,11 @@ fn last_turn_display(last_turn: Option<&serde_json::Value>) -> String {
     format!("{state} {stop_reason} {age}")
 }
 
-/// The `HOLD` column (issue #443): `-` for a session that is not held, else
-/// `held <age> ago` and the operator's reason when there is one. The row's
-/// `hold` / `hold_reason` / `held_since` fields are absent unless held;
-/// `--json` carries the exact since-time.
+/// The `HOLD` column (issues #443, #460): `-` for a session that is not held,
+/// else `held <age> ago` (`held (default) <age> ago` for a session that joined
+/// held) and the reason when there is one, and `[+default]` when a default hold
+/// sits under an operator hold. The row's `hold*` fields are absent unless
+/// held; `--json` carries the exact since-time.
 fn hold_display(row: &serde_json::Value) -> String {
     if row.get("hold").and_then(|v| v.as_bool()) != Some(true) {
         return "-".to_string();
@@ -123,8 +124,10 @@ fn hold_display(row: &serde_json::Value) -> String {
         .and_then(holler_hub::roster::parse_rfc3339_secs_since)
         .map(|secs| if secs < 60 { format!("{secs}s ago") } else { format!("{}m ago", secs / 60) })
         .unwrap_or_else(|| "-".to_string());
+    let kind = if row.get("hold_kind").and_then(|v| v.as_str()) == Some("default") { " (default)" } else { "" };
+    let under = if row.get("hold_default").and_then(|v| v.as_bool()) == Some(true) { " [+default]" } else { "" };
     match row.get("hold_reason").and_then(|v| v.as_str()) {
-        Some(reason) => format!("held {age}: {reason}"),
-        None => format!("held {age}"),
+        Some(reason) => format!("held{kind} {age}{under}: {reason}"),
+        None => format!("held{kind} {age}{under}"),
     }
 }

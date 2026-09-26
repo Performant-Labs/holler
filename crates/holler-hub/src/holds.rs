@@ -48,9 +48,14 @@
 //! persistence lock (never the map lock, so a slow disk never delays the
 //! `say` path's `check`).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, PoisonError};
+use std::time::{Duration, Instant};
+
+mod grants;
+use grants::Grants;
+pub use grants::{GrantError, MintError, DEFAULT_TTL, MAX_TTL};
 
 use holler_proto::log::{self, Component, Direction, Event, Severity};
 use serde::{Deserialize, Serialize};
@@ -103,14 +108,60 @@ pub struct HoldOutcome {
 pub struct ReleaseOutcome {
     /// `false` when the session was not held (an idempotent repeat).
     pub was_held: bool,
+    /// Which hold this call lifted (`operator` or `default`), if any. A release
+    /// lifts the top hold only: the operator hold when there is one, else the
+    /// default hold.
+    pub lifted: Option<Kind>,
+    /// `true` when the session is still held after this call (a default hold
+    /// was under the operator hold that was just lifted).
+    pub still_held: bool,
     /// Whether the change was written to disk.
     pub persisted: bool,
 }
 
+/// Which layer of hold is meant.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Kind {
+    /// Set by `holler hold` (issue #437).
+    Operator,
+    /// Applied when a session joins (`hub serve --join-held`, issue #460).
+    Default,
+}
+
+impl Kind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Kind::Operator => "operator",
+            Kind::Default => "default",
+        }
+    }
+}
+
+/// The reason recorded on a default hold.
+pub const JOIN_REASON: &str = "held on join";
+
+/// The result of [`Holds::mint_grant`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GrantOutcome {
+    pub grant: String,
+    pub ttl: Duration,
+    /// `true` when the session carries a default hold, i.e. the grant does
+    /// something. A grant for a session with no default hold is still valid but
+    /// unnecessary.
+    pub default_held: bool,
+    /// `true` when an operator hold is also set: a grant cannot lift that, so
+    /// the prompt it is meant for will still be refused.
+    pub operator_held: bool,
+}
+
+/// The state file. `holds` is the operator layer (its original shape);
+/// `default_holds` (issue #460) is additive.
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct FileDoc {
     version: u32,
     holds: BTreeMap<String, HoldInfo>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    default_holds: BTreeMap<String, HoldInfo>,
 }
 
 struct Persist {
@@ -126,9 +177,22 @@ struct Persist {
     unsaved: bool,
 }
 
+/// Everything the map lock guards.
+#[derive(Default)]
+struct State {
+    operator: BTreeMap<String, HoldInfo>,
+    default: BTreeMap<String, HoldInfo>,
+    /// Session keys this hub process has seen in a presence: a session
+    /// "joins" the first time it is seen, which is when `--join-held` applies.
+    seen: HashSet<String>,
+    grants: Grants,
+}
+
 struct Shared {
-    map: Mutex<BTreeMap<String, HoldInfo>>,
+    state: Mutex<State>,
     persist: Mutex<Persist>,
+    /// `--join-held` patterns (empty: sessions do not join held).
+    join_held: Mutex<Vec<String>>,
 }
 
 /// The hold registry. Cheap to clone (shared behind an `Arc`).
@@ -155,6 +219,30 @@ pub fn sanitize_reason(raw: &str) -> Option<String> {
     Some(cleaned.chars().take(MAX_REASON_CHARS).collect())
 }
 
+/// `*` (any run of characters, `/` included) and `?` (any one character)
+/// against the whole of `text`. The only wildcards `--join-held` supports.
+pub fn glob_match(pattern: &str, text: &str) -> bool {
+    let (p, t): (Vec<char>, Vec<char>) = (pattern.chars().collect(), text.chars().collect());
+    let (mut pi, mut ti, mut star, mut mark) = (0, 0, None, 0);
+    while ti < t.len() {
+        if pi < p.len() && (p[pi] == '?' || p[pi] == t[ti]) {
+            pi += 1;
+            ti += 1;
+        } else if pi < p.len() && p[pi] == '*' {
+            star = Some(pi);
+            mark = ti;
+            pi += 1;
+        } else if let Some(sp) = star {
+            pi = sp + 1;
+            mark += 1;
+            ti = mark;
+        } else {
+            return false;
+        }
+    }
+    p[pi..].iter().all(|c| *c == '*')
+}
+
 fn emit(severity: Severity, method: &'static str, fields: Vec<(&'static str, String)>) {
     log::emit(&Event {
         component: Component::Control,
@@ -168,70 +256,201 @@ fn emit(severity: Severity, method: &'static str, fields: Vec<(&'static str, Str
     });
 }
 
+/// Which hold refuses `key`, and why it does (or the grant that was not
+/// honoured). `consume` decides whether a valid grant is used up.
+fn decide(state: &mut State, key: &str, grant: Option<&str>, consume: bool) -> Result<(), holler_proto::WireError> {
+    // An operator hold beats a grant: a valid grant is neither honoured nor consumed.
+    if let Some(op) = state.operator.get(key) {
+        return Err(op.refusal().with_hold_kind(Kind::Operator.as_str()));
+    }
+    if let Some(id) = grant {
+        let now = Instant::now();
+        let verdict = if consume { state.grants.consume(id, key, now) } else { state.grants.check(id, key, now) };
+        return verdict.map_err(|e| holler_proto::WireError::invalid_grant(e.reason()));
+    }
+    if let Some(def) = state.default.get(key) {
+        return Err(def.refusal().with_hold_kind(Kind::Default.as_str()));
+    }
+    Ok(())
+}
+
 impl Holds {
     /// A registry that never touches disk.
     pub fn in_memory() -> Self {
-        Self::with_persist(BTreeMap::new(), Persist { path: None, blocked: false, unsaved: false })
+        Self::with_persist(State::default(), Persist { path: None, blocked: false, unsaved: false })
     }
 
-    fn with_persist(map: BTreeMap<String, HoldInfo>, persist: Persist) -> Self {
-        Self { shared: Arc::new(Shared { map: Mutex::new(map), persist: Mutex::new(persist) }) }
+    fn with_persist(state: State, persist: Persist) -> Self {
+        Self {
+            shared: Arc::new(Shared { state: Mutex::new(state), persist: Mutex::new(persist), join_held: Mutex::new(Vec::new()) }),
+        }
+    }
+
+    fn state(&self) -> std::sync::MutexGuard<'_, State> {
+        self.shared.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     /// Load the registry from `<state dir>/hub/holds.json`. Never fails: see
     /// the module docs for what a missing, corrupt or unreadable file means.
     pub fn load(state: &HubState) -> Self {
         let path = state.hub_dir.join("holds.json");
-        let (map, blocked) = read_file(&path);
-        Self::with_persist(map, Persist { path: Some(path), blocked, unsaved: blocked })
+        let (doc, blocked) = read_file(&path);
+        let st = State { operator: doc.holds, default: doc.default_holds, ..State::default() };
+        Self::with_persist(st, Persist { path: Some(path), blocked, unsaved: blocked })
     }
 
-    /// The hold on `key`, if any. The only thing the prompt path calls.
-    pub fn check(&self, key: &str) -> Option<HoldInfo> {
-        self.shared.map.lock().unwrap_or_else(PoisonError::into_inner).get(key).cloned()
+    /// Make sessions whose `<label>/<session>` name matches any of `patterns`
+    /// join held (issue #460). Call once, at startup; an empty list is the
+    /// default (sessions join open).
+    pub fn set_join_held(&self, patterns: Vec<String>) {
+        *self.shared.join_held.lock().unwrap_or_else(PoisonError::into_inner) = patterns;
     }
 
-    /// Every key currently held, with its hold (sorted by key).
+    /// The hold that is refusing `key` (operator first), if any.
+    pub fn check(&self, key: &str) -> Option<(HoldInfo, Kind)> {
+        let st = self.state();
+        match (st.operator.get(key), st.default.get(key)) {
+            (Some(op), _) => Some((op.clone(), Kind::Operator)),
+            (None, Some(def)) => Some((def.clone(), Kind::Default)),
+            (None, None) => None,
+        }
+    }
+
+    /// Every key with any hold (sorted).
+    pub fn keys(&self) -> Vec<String> {
+        let st = self.state();
+        let mut keys: Vec<String> = st.operator.keys().chain(st.default.keys()).cloned().collect();
+        keys.sort();
+        keys.dedup();
+        keys
+    }
+
+    /// The operator holds (the state file's original layer).
     pub fn snapshot(&self) -> BTreeMap<String, HoldInfo> {
-        self.shared.map.lock().unwrap_or_else(PoisonError::into_inner).clone()
+        self.state().operator.clone()
     }
 
     /// The roster fields for `key`.
     pub fn row_hold(&self, key: &str) -> holler_proto::SessionHold {
-        match self.check(key) {
-            Some(h) => holler_proto::SessionHold::held(h.reason, h.since),
-            None => holler_proto::SessionHold::default(),
+        let st = self.state();
+        match (st.operator.get(key), st.default.get(key)) {
+            (Some(op), def) => {
+                let mut h = holler_proto::SessionHold::held(op.reason.clone(), op.since.clone()).of_kind(Kind::Operator.as_str());
+                h.hold_default = def.is_some();
+                h
+            }
+            (None, Some(def)) => holler_proto::SessionHold::held(def.reason.clone(), def.since.clone()).of_kind(Kind::Default.as_str()),
+            (None, None) => holler_proto::SessionHold::default(),
         }
     }
 
-    /// Hold `key`. Repeating keeps the original reason and since-time.
+    /// **The enforcement decision** (issue #442, #460), called from
+    /// `circuit::dispatch::send_prompt` and nowhere else that delivers: `Ok` to
+    /// deliver the prompt, or the refusal to send instead. A valid `grant` for
+    /// this session is consumed here, in the same critical section that
+    /// decides, so of two racing senders only one can be admitted with it.
+    pub fn admit(&self, key: &str, grant: Option<&str>) -> Result<(), holler_proto::WireError> {
+        decide(&mut self.state(), key, grant, true)
+    }
+
+    /// What [`Holds::admit`] would answer right now, without consuming
+    /// anything: the fast path that keeps a refused prompt from leaving
+    /// side effects behind. Never the authority (a grant can be consumed
+    /// between this and `admit`).
+    pub fn would_refuse(&self, key: &str, grant: Option<&str>) -> Option<holler_proto::WireError> {
+        decide(&mut self.state(), key, grant, false).err()
+    }
+
+    /// Hold `key` (the operator layer). Repeating keeps the original reason and
+    /// since-time.
     pub fn hold(&self, key: &str, reason: Option<&str>) -> HoldOutcome {
         let (info, newly_held) = {
-            let mut map = self.shared.map.lock().unwrap_or_else(PoisonError::into_inner);
-            match map.get(key) {
+            let mut st = self.state();
+            match st.operator.get(key) {
                 Some(existing) => (existing.clone(), false),
                 None => {
                     let info = HoldInfo { reason: reason.and_then(sanitize_reason), since: log::timestamp() };
-                    map.insert(key.to_owned(), info.clone());
+                    st.operator.insert(key.to_owned(), info.clone());
                     (info, true)
                 }
             }
         };
         let persisted = self.sync(newly_held);
         if newly_held {
-            emit(Severity::Info, "session_held", vec![("session", key.to_owned())]);
+            emit(Severity::Info, "session_held", vec![("session", key.to_owned()), ("kind", "operator".to_owned())]);
         }
         HoldOutcome { info, newly_held, persisted }
     }
 
-    /// Release `key`. Releasing a session that is not held is a no-op.
+    /// Release `key`: lift the operator hold if there is one, else the default
+    /// hold. Releasing a session that is not held is a no-op.
     pub fn release(&self, key: &str) -> ReleaseOutcome {
-        let was_held = self.shared.map.lock().unwrap_or_else(PoisonError::into_inner).remove(key).is_some();
-        let persisted = self.sync(was_held);
-        if was_held {
-            emit(Severity::Info, "session_released", vec![("session", key.to_owned())]);
+        let (lifted, still_held) = {
+            let mut st = self.state();
+            if st.operator.remove(key).is_some() {
+                (Some(Kind::Operator), st.default.contains_key(key))
+            } else if st.default.remove(key).is_some() {
+                (Some(Kind::Default), false)
+            } else {
+                (None, false)
+            }
+        };
+        let persisted = self.sync(lifted.is_some());
+        if let Some(kind) = lifted {
+            emit(Severity::Info, "session_released", vec![("session", key.to_owned()), ("kind", kind.as_str().to_owned())]);
         }
-        ReleaseOutcome { was_held, persisted }
+        ReleaseOutcome { was_held: lifted.is_some(), lifted, still_held, persisted }
+    }
+
+    /// Mint a one-time grant for `key` valid for `ttl` (issue #460).
+    pub fn mint_grant(&self, key: &str, ttl: Duration) -> Result<GrantOutcome, MintError> {
+        let mut st = self.state();
+        let grant = st.grants.mint(key, ttl, Instant::now())?;
+        let out = GrantOutcome {
+            grant,
+            ttl: ttl.min(grants::MAX_TTL),
+            default_held: st.default.contains_key(key),
+            operator_held: st.operator.contains_key(key),
+        };
+        drop(st);
+        emit(Severity::Info, "grant_minted", vec![("session", key.to_owned()), ("ttl_ms", out.ttl.as_millis().to_string())]);
+        Ok(out)
+    }
+
+    /// Live grants for `key` (for tests and status).
+    pub fn live_grants(&self, key: &str) -> usize {
+        self.state().grants.live_for(key, Instant::now())
+    }
+
+    /// A body advertised these sessions (issue #460). Each key the hub has not
+    /// seen before *joins*: if it matches a `--join-held` pattern and has no
+    /// default hold yet, it gets one (reason [`JOIN_REASON`]). Returns how many
+    /// were held. Cheap when `--join-held` is off: no lock is taken.
+    pub fn note_joined(&self, keys: impl IntoIterator<Item = String>) -> usize {
+        let patterns = self.shared.join_held.lock().unwrap_or_else(PoisonError::into_inner).clone();
+        if patterns.is_empty() {
+            return 0;
+        }
+        let mut newly = Vec::new();
+        {
+            let mut st = self.state();
+            for key in keys {
+                if !st.seen.insert(key.clone()) {
+                    continue;
+                }
+                if patterns.iter().any(|pat| glob_match(pat, &key)) && !st.default.contains_key(&key) {
+                    st.default.insert(key.clone(), HoldInfo { reason: Some(JOIN_REASON.to_owned()), since: log::timestamp() });
+                    newly.push(key);
+                }
+            }
+        }
+        if !newly.is_empty() {
+            self.sync(true);
+            for key in &newly {
+                emit(Severity::Info, "session_held", vec![("session", key.clone()), ("kind", "default".to_owned())]);
+            }
+        }
+        newly.len()
     }
 
     /// Bring the file up to date with memory when `changed` (or when an earlier
@@ -245,7 +464,7 @@ impl Holds {
         }
     }
 
-    /// Write the current map. Serialised by the persistence lock, and the
+    /// Write the current holds. Serialised by the persistence lock, and the
     /// snapshot is taken *after* acquiring it, so whichever writer runs last
     /// writes the newest state no matter how the writers interleaved.
     fn persist(&self) -> bool {
@@ -255,7 +474,10 @@ impl Holds {
             persist.unsaved = true;
             return false;
         }
-        let doc = FileDoc { version: FILE_VERSION, holds: self.snapshot() };
+        let doc = {
+            let st = self.state();
+            FileDoc { version: FILE_VERSION, holds: st.operator.clone(), default_holds: st.default.clone() }
+        };
         match write_atomic(&path, &doc) {
             Ok(()) => {
                 persist.unsaved = false;
@@ -280,10 +502,10 @@ impl Holds {
 
 /// Read the state file. Returns the holds and whether writing must stay
 /// blocked (the file exists but could not be read or set aside).
-fn read_file(path: &std::path::Path) -> (BTreeMap<String, HoldInfo>, bool) {
+fn read_file(path: &std::path::Path) -> (FileDoc, bool) {
     let bytes = match std::fs::read(path) {
         Ok(b) => b,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return (BTreeMap::new(), false),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return (FileDoc::default(), false),
         Err(e) => {
             emit(
                 Severity::Warn,
@@ -294,18 +516,18 @@ fn read_file(path: &std::path::Path) -> (BTreeMap<String, HoldInfo>, bool) {
                     ("effect", "starting with no holds; the file will not be overwritten".to_owned()),
                 ],
             );
-            return (BTreeMap::new(), true);
+            return (FileDoc::default(), true);
         }
     };
     match serde_json::from_slice::<FileDoc>(&bytes) {
-        Ok(doc) if doc.version == FILE_VERSION => (doc.holds, false),
+        Ok(doc) if doc.version == FILE_VERSION => (doc, false),
         Ok(doc) => set_aside(path, &format!("unknown hold state version {}", doc.version)),
         Err(e) => set_aside(path, &format!("not valid hold state: {e}")),
     }
 }
 
 /// Move an unusable file out of the way (never overwriting an earlier one).
-fn set_aside(path: &std::path::Path, why: &str) -> (BTreeMap<String, HoldInfo>, bool) {
+fn set_aside(path: &std::path::Path, why: &str) -> (FileDoc, bool) {
     let stamp = holler_proto::now_secs();
     let mut target = path.with_extension(format!("json.corrupt-{stamp}"));
     let mut n = 1u32;
@@ -325,7 +547,7 @@ fn set_aside(path: &std::path::Path, why: &str) -> (BTreeMap<String, HoldInfo>, 
                     ("effect", "starting with no holds; re-hold the sessions that need it".to_owned()),
                 ],
             );
-            (BTreeMap::new(), false)
+            (FileDoc::default(), false)
         }
         Err(e) => {
             emit(
@@ -338,7 +560,7 @@ fn set_aside(path: &std::path::Path, why: &str) -> (BTreeMap<String, HoldInfo>, 
                     ("effect", "starting with no holds; the file will not be overwritten".to_owned()),
                 ],
             );
-            (BTreeMap::new(), true)
+            (FileDoc::default(), true)
         }
     }
 }
@@ -366,222 +588,4 @@ fn write_atomic(path: &std::path::Path, doc: &FileDoc) -> std::io::Result<()> {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)] // #442
-mod tests {
-    use super::*;
-
-    fn state_in(dir: &std::path::Path) -> HubState {
-        let s = HubState::from_root(dir.to_path_buf());
-        std::fs::create_dir_all(&s.hub_dir).unwrap();
-        s
-    }
-
-    #[test]
-    fn hold_and_release_are_idempotent_and_keep_the_first_reason() {
-        let h = Holds::in_memory();
-        let first = h.hold("io/alpha", Some("freeze"));
-        assert!(first.newly_held);
-        let again = h.hold("io/alpha", Some("a different reason"));
-        assert!(!again.newly_held);
-        assert_eq!(again.info, first.info, "a repeat keeps the original reason and since");
-        assert!(h.release("io/alpha").was_held);
-        assert!(!h.release("io/alpha").was_held);
-        assert!(!h.release("io/never-held").was_held);
-        assert!(h.check("io/alpha").is_none());
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn a_repeated_hold_after_a_failed_write_retries_and_reports_the_truth() {
-        use std::os::unix::fs::PermissionsExt;
-        let dir = tempfile::tempdir().unwrap();
-        let state = state_in(dir.path());
-        let h = Holds::load(&state);
-        std::fs::set_permissions(&state.hub_dir, std::fs::Permissions::from_mode(0o500)).unwrap();
-        let can_write_anyway = std::fs::File::create(state.hub_dir.join("probe")).is_ok();
-        let first = h.hold("io/alpha", Some("x"));
-        let repeat = h.hold("io/alpha", Some("x"));
-        let rel_repeat = h.release("io/never");
-        if !can_write_anyway {
-            assert!(!first.persisted);
-            assert!(!repeat.persisted, "a repeat must not claim the hold is on disk when it is not");
-            assert!(!rel_repeat.persisted, "nor may a no-op release");
-        }
-        std::fs::set_permissions(&state.hub_dir, std::fs::Permissions::from_mode(0o700)).unwrap();
-        let healed = h.hold("io/alpha", Some("x"));
-        assert!(healed.persisted && !healed.newly_held, "the repeat retries the write once the directory is writable");
-        assert!(Holds::load(&state).check("io/alpha").is_some());
-    }
-
-    #[test]
-    fn a_hold_is_per_session() {
-        let h = Holds::in_memory();
-        h.hold("io/alpha", None);
-        assert!(h.check("io/alpha").is_some());
-        assert!(h.check("io/beta").is_none());
-        assert!(h.check("other/alpha").is_none());
-    }
-
-    #[test]
-    fn reason_is_sanitised() {
-        assert_eq!(sanitize_reason("  freeze  "), Some("freeze".into()));
-        assert_eq!(sanitize_reason("\u{1b}[31mred\u{7}"), Some("[31mred".into()));
-        assert_eq!(sanitize_reason("   "), None);
-        assert_eq!(sanitize_reason(&"x".repeat(500)).map(|r| r.chars().count()), Some(MAX_REASON_CHARS));
-    }
-
-    #[test]
-    fn holds_survive_a_reload_and_the_file_is_private() {
-        let dir = tempfile::tempdir().unwrap();
-        let state = state_in(dir.path());
-        let h = Holds::load(&state);
-        let out = h.hold("io/alpha", Some("freeze"));
-        assert!(out.persisted);
-        h.hold("io/beta", None);
-        h.release("io/beta");
-        let reloaded = Holds::load(&state);
-        assert_eq!(reloaded.check("io/alpha"), Some(out.info));
-        assert!(reloaded.check("io/beta").is_none());
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mode = std::fs::metadata(state.hub_dir.join("holds.json")).unwrap().permissions().mode();
-            assert_eq!(mode & 0o777, 0o600);
-        }
-        assert!(!state.hub_dir.join("holds.json.tmp").exists(), "no temp file is left behind");
-    }
-
-    #[test]
-    fn a_corrupt_file_is_moved_aside_and_the_hub_starts() {
-        let dir = tempfile::tempdir().unwrap();
-        let state = state_in(dir.path());
-        std::fs::write(state.hub_dir.join("holds.json"), b"{ not json").unwrap();
-        let h = Holds::load(&state);
-        assert!(h.snapshot().is_empty());
-        let aside: Vec<_> = std::fs::read_dir(&state.hub_dir)
-            .unwrap()
-            .filter_map(Result::ok)
-            .filter(|e| e.file_name().to_string_lossy().starts_with("holds.json.corrupt-"))
-            .collect();
-        assert_eq!(aside.len(), 1, "the corrupt file is kept, not discarded");
-        assert_eq!(std::fs::read(aside[0].path()).unwrap(), b"{ not json");
-        // The registry works and writes a fresh, valid file.
-        assert!(h.hold("io/alpha", None).persisted);
-        assert!(Holds::load(&state).check("io/alpha").is_some());
-    }
-
-    #[test]
-    fn an_unknown_version_is_treated_as_corrupt_not_silently_read() {
-        let dir = tempfile::tempdir().unwrap();
-        let state = state_in(dir.path());
-        std::fs::write(state.hub_dir.join("holds.json"), br#"{"version":99,"holds":{}}"#).unwrap();
-        let h = Holds::load(&state);
-        assert!(h.snapshot().is_empty());
-        assert!(!state.hub_dir.join("holds.json").exists(), "moved aside");
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn an_unwritable_directory_keeps_the_hold_in_memory_and_says_so() {
-        use std::os::unix::fs::PermissionsExt;
-        let dir = tempfile::tempdir().unwrap();
-        let state = state_in(dir.path());
-        let h = Holds::load(&state);
-        std::fs::set_permissions(&state.hub_dir, std::fs::Permissions::from_mode(0o500)).unwrap();
-        // Root ignores directory modes; skip the assertion there.
-        let writable_anyway = std::fs::File::create(state.hub_dir.join("probe")).is_ok();
-        let out = h.hold("io/alpha", Some("freeze"));
-        std::fs::set_permissions(&state.hub_dir, std::fs::Permissions::from_mode(0o700)).unwrap();
-        assert!(h.check("io/alpha").is_some(), "the hold is in force even though it could not be saved");
-        if !writable_anyway {
-            assert!(!out.persisted);
-        }
-        // Once the directory is writable again the next change persists everything.
-        assert!(h.hold("io/beta", None).persisted);
-        let reloaded = Holds::load(&state);
-        assert!(reloaded.check("io/alpha").is_some() && reloaded.check("io/beta").is_some());
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn an_unreadable_file_is_never_overwritten() {
-        use std::os::unix::fs::PermissionsExt;
-        let dir = tempfile::tempdir().unwrap();
-        let state = state_in(dir.path());
-        let file = state.hub_dir.join("holds.json");
-        std::fs::write(&file, br#"{"version":1,"holds":{"io/old":{"since":"2026-01-01T00:00:00Z"}}}"#).unwrap();
-        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o000)).unwrap();
-        if std::fs::read(&file).is_ok() {
-            return; // running as a user that can read anything
-        }
-        let h = Holds::load(&state);
-        assert!(h.snapshot().is_empty());
-        assert!(!h.hold("io/alpha", None).persisted, "writing is blocked so the unreadable holds are not lost");
-        assert!(h.check("io/alpha").is_some());
-        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();
-        assert!(std::fs::read_to_string(&file).unwrap().contains("io/old"));
-    }
-
-    /// A `check` that runs after a `hold` has returned always sees it, and one
-    /// that ran before it may not; racing threads never observe a hold that
-    /// then disappears without a release. Repeated many times.
-    #[test]
-    fn concurrent_checks_and_holds_are_totally_ordered() {
-        for round in 0..200 {
-            let h = Holds::in_memory();
-            let barrier = Arc::new(std::sync::Barrier::new(5));
-            let held_at = Arc::new(std::sync::atomic::AtomicBool::new(false));
-            let mut checkers = Vec::new();
-            for _ in 0..4 {
-                let (h, b, flag) = (h.clone(), barrier.clone(), held_at.clone());
-                checkers.push(std::thread::spawn(move || {
-                    b.wait();
-                    let mut seen_held = false;
-                    for _ in 0..200 {
-                        // Read the flag *before* the check: if `hold` had already
-                        // returned, the check must see it.
-                        let returned = flag.load(std::sync::atomic::Ordering::SeqCst);
-                        let now = h.check("io/alpha").is_some();
-                        assert!(!returned || now, "a check after hold() returned missed the hold (round {round})");
-                        assert!(!seen_held || now, "a hold vanished without a release (round {round})");
-                        seen_held |= now;
-                    }
-                }));
-            }
-            barrier.wait();
-            h.hold("io/alpha", None);
-            held_at.store(true, std::sync::atomic::Ordering::SeqCst);
-            for c in checkers {
-                c.join().unwrap();
-            }
-        }
-    }
-
-    /// Two writers holding and releasing the same session at once leave the
-    /// file equal to the final in-memory state.
-    #[test]
-    fn racing_writers_leave_the_file_equal_to_memory() {
-        let dir = tempfile::tempdir().unwrap();
-        let state = state_in(dir.path());
-        for _ in 0..30 {
-            let h = Holds::load(&state);
-            let mut joins = Vec::new();
-            for t in 0..4 {
-                let h = h.clone();
-                joins.push(std::thread::spawn(move || {
-                    for i in 0..10 {
-                        if (i + t) % 2 == 0 {
-                            h.hold("io/alpha", Some("x"));
-                        } else {
-                            h.release("io/alpha");
-                        }
-                    }
-                }));
-            }
-            for j in joins {
-                j.join().unwrap();
-            }
-            assert_eq!(Holds::load(&state).snapshot(), h.snapshot());
-        }
-    }
-}
+mod tests;
