@@ -38,21 +38,22 @@
 //! (ids and kinds only). Only when `session/new` fails with auth-required
 //! (`-32000`) does it send one `authenticate` for the session's configured
 //! `auth_method`, if [`super::auth::select`] accepts it, and retry
-//! `session/new` exactly once. The credential never crosses the wire: the
-//! request carries only the method id, and the adapter reads its credential
-//! from its own environment.
+//! `session/new` exactly once. That sequence is [`super::auth::open_session`],
+//! shared with the v2 path's `auth/login` (#459). The credential never
+//! crosses the wire: the request carries only the method id, and the adapter
+//! reads its credential from its own environment.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use agent_client_protocol::schema::v1;
-use agent_client_protocol::{AcpAgent, AcpAgentConfig, Agent, Client, ConnectionTo, ErrorCode, Responder};
+use agent_client_protocol::{AcpAgent, AcpAgentConfig, Agent, Client, ConnectionTo, Responder};
 use holler_proto::docs::PendingKind;
 use tokio::sync::oneshot;
 
 use holler_proto::log::Direction as LogDirection;
 
-use super::auth::{self, AdvertisedMethod, AuthProgress, AuthStage, MethodKind};
+use super::auth::{self, AdvertisedMethod, AuthProgress, MethodKind};
 use super::connection::{lock, store_pending, Shared};
 use super::pending::{chunk_text_v1, permission_fields_v1, PendingBlock, PendingResponder};
 use super::{log_debug, log_warn, DriverEvent, Status, StopReason};
@@ -138,76 +139,16 @@ async fn new_session(
         .map(|response| response.session_id)
 }
 
-/// The one `authenticate` request (issue #439). Only the method id is sent
-/// or logged; a failure is fatal and its reason carries only the adapter's
-/// code and capped message.
-async fn authenticate(connection: &ConnectionTo<Agent>, method_id: &str) -> Result<(), String> {
-    log_debug(LogDirection::Out, "authenticate", vec![("method_id", auth::quote_id(method_id))], None);
+/// The one `authenticate` request (issue #439), [`auth::open_session`]'s
+/// login step on v1. Only the method id is sent or logged; the caller builds
+/// the failure reason from the error's code and message.
+async fn authenticate(connection: &ConnectionTo<Agent>, method_id: String) -> Result<(), agent_client_protocol::Error> {
+    log_debug(LogDirection::Out, "authenticate", vec![("method_id", auth::quote_id(&method_id))], None);
     connection
-        .send_request(v1::AuthenticateRequest::new(method_id.to_string()))
+        .send_request(v1::AuthenticateRequest::new(method_id))
         .block_task()
         .await
         .map(|_response| ())
-        .map_err(|e| auth::authenticate_failed_reason(method_id, i32::from(e.code), &e.message))
-}
-
-/// `session/new` plus the issue #439 auth flow (see the module doc). The
-/// trigger is the JSON-RPC code alone, never message text. Without
-/// `auth_method` a first failure with any other code keeps today's reason
-/// byte for byte; with it set, that reason (like every auth-flow reason) is
-/// built from the error's code and capped, sanitized message, never its
-/// `data`. `spawn_v1` adds the not-applied clause from `progress`.
-async fn open_session(
-    connection: &ConnectionTo<Agent>,
-    cwd: &Path,
-    advertised: &[AdvertisedMethod],
-    auth_method: Option<&str>,
-    progress: &AuthProgress,
-) -> Result<v1::SessionId, String> {
-    let first = match new_session(connection, cwd).await {
-        Ok(session_id) => {
-            progress.set(AuthStage::Settled);
-            return Ok(session_id);
-        }
-        Err(e) => e,
-    };
-    if first.code != ErrorCode::AuthRequired {
-        return Err(startup_error_text(&first, auth_method));
-    }
-    log_debug(
-        LogDirection::In,
-        "session/new",
-        vec![("event", "auth_required".to_string()), ("advertised", auth::list_ids(advertised))],
-        None,
-    );
-    let method_id = auth::select(advertised, auth_method).map_err(|refusal| {
-        progress.set(AuthStage::Settled);
-        auth::refused_reason(&first.message, &refusal)
-    })?;
-    progress.set(AuthStage::AuthenticatePending);
-    if let Err(reason) = authenticate(connection, &method_id).await {
-        progress.set(AuthStage::Settled);
-        return Err(reason);
-    }
-    progress.set(AuthStage::RetryPending);
-    let retried = new_session(connection, cwd).await;
-    progress.set(AuthStage::Settled);
-    match retried {
-        Ok(session_id) => Ok(session_id),
-        Err(e) if e.code == ErrorCode::AuthRequired => Err(auth::did_not_clear_reason(&method_id, &e.message)),
-        Err(e) => Err(auth::retry_failed_reason(&method_id, i32::from(e.code), &e.message)),
-    }
-}
-
-/// A non-auth v1 startup error as its reason. With no `auth_method` this is
-/// today's `Error` display, byte for byte. With one set, the display would
-/// carry the adapter's `data` (newlines, no length limit), so the reason is
-/// rebuilt from the code and the capped, sanitized message alone.
-fn startup_error_text(e: &agent_client_protocol::Error, auth_method: Option<&str>) -> String {
-    match auth_method {
-        None => e.to_string(),
-        Some(_) => auth::rpc_error(&e.message, i32::from(e.code)),
-    }
 }
 
 /// `initialize`, `session/new` (with the issue #439 auth flow), then the
@@ -227,10 +168,17 @@ async fn do_handshake(
         ))
         .block_task()
         .await
-        .map_err(|e| startup_error_text(&e, auth_method))?;
+        .map_err(|e| auth::startup_error_text(&e, auth_method))?;
     let advertised = advertised_methods(&initialize.auth_methods);
 
-    let session_id = open_session(connection, cwd, &advertised, auth_method, progress).await?;
+    let session_id = auth::open_session(
+        &advertised,
+        auth_method,
+        progress,
+        || new_session(connection, cwd),
+        |method_id| authenticate(connection, method_id),
+    )
+    .await?;
 
     // Crash watcher: identical shape to `connection.rs::do_handshake`'s own —
     // see that function's comment for why this reports `Done(Error)` rather
@@ -251,7 +199,7 @@ async fn do_handshake(
         guard.status = Status::Idle;
         Ok(())
     })
-    .map_err(|e| startup_error_text(&e, auth_method))?;
+    .map_err(|e| auth::startup_error_text(&e, auth_method))?;
 
     Ok(session_id)
 }

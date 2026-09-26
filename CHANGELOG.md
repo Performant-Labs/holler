@@ -8,6 +8,17 @@ fills this file in at release time.
 ## [Unreleased]
 
 ### Enhancements
+- The body's ACP driver now also authenticates to an ACP v2 adapter that requires it. When a v2
+  adapter refuses `session/new` as unauthenticated (JSON-RPC `-32000`) and the session's
+  `auth_method` names a method the adapter advertised (not a terminal-type method, nor one of a
+  type the body does not know), the body sends one `auth/login` (v2's `authenticate`) for it and
+  retries `session/new` once, with the v1 path's guarantees and failure wording: only the method
+  id is sent or logged, adapter text in a reason is capped and never includes the error's `data`,
+  and a failure is fatal and never falls back to v1. A v2 startup failure with `auth_method` set
+  says whether it was not applied, pending, or sent without the retry completing; without
+  `auth_method` the v2 path and its errors are unchanged
+  ([#459](https://github.com/Performant-Labs/holler/issues/459), follow-up to
+  [#439](https://github.com/Performant-Labs/holler/issues/439)).
 - Join held and a one-time release grant, on top of the session hold. `holler hub serve --join-held [GLOB]`
   (off by default) makes sessions join held: a default hold with the reason `held on join`, shown in
   `roster` as `held (default)`. `holler release SESSION --once [--ttl DURATION]` mints a grant for exactly
@@ -51,9 +62,8 @@ fills this file in at release time.
   `session/new` as unauthenticated (JSON-RPC `-32000`), the body sends one `authenticate` for that
   method and retries `session/new` once, or fails startup with a reason that names `auth_method`
   and the advertised method ids. The credential stays in the adapter's environment (the session's
-  `env` or the body's own); only the method id is sent or logged. ACP v1 only: on a v2 adapter a
-  configured `auth_method` is reported as not applied ([#459](https://github.com/Performant-Labs/holler/issues/459)).
-  Attach mode ignores the key with a warning, and an empty value is a config error
+  `env` or the body's own); only the method id is sent or logged. Attach mode ignores the key with
+  a warning, and an empty value is a config error
   ([#439](https://github.com/Performant-Labs/holler/issues/439), for [#303](https://github.com/Performant-Labs/holler/issues/303)).
 - The repository is wired to the Performant Labs coding pipeline: project role overlays in `docs/agent-overlays/` (the role docs themselves are generated per clone and gitignored), a Pipeline section in `CLAUDE.md`, and tracked git hooks (`.githooks/`, enabled with `scripts/setup-hooks.sh`) for a secret scan, a Conventional Commit subject check and the agent `Co-Authored-By` trailer.
 - The hub now logs every rejected authentication (`auth_rejected`, with a stable `reason` such as `token_not_bound`, the token id and the failure count) and the lockout lifecycle (`lockout_tripped`, `lockout_cleared`) as `warn` events, visible at the default log level. Previously an expired token silently tripped a peer-wide lockout and only `lockout_refused` was ever logged ([#450](https://github.com/Performant-Labs/holler/issues/450), part of [#431](https://github.com/Performant-Labs/holler/issues/431)).

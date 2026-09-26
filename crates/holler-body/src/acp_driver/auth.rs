@@ -1,21 +1,34 @@
-//! ACP auth-method selection and the text of every auth-related startup
-//! reason (issue #439). Version-neutral: pure functions over advertised
-//! method ids/kinds and strings, so the v2 `auth/login` follow-up (#459) can
-//! reuse them unchanged.
+//! ACP auth-method selection, the `session/new` auth sequence and the text of
+//! every auth-related startup reason (issues #439, #459). Version-neutral:
+//! both protocol paths run the same code. `connection_v1.rs` sends v1's
+//! `authenticate`, `connection.rs` sends v2's `auth/login` (v2 has no
+//! `authenticate`); each reduces its `initialize` response's advertised
+//! methods to [`AdvertisedMethod`]s and hands its own `session/new` and login
+//! requests to [`open_session`], so the trigger (a `session/new` that failed
+//! with auth-required, JSON-RPC `-32000`), [`select`], the request order and
+//! the [`AuthStage`] transitions exist once. `spawn.rs` appends
+//! [`stage_suffix`] at each spawn attempt's one common failure point.
 //!
-//! `connection_v1.rs` reduces the v1 `initialize` response's `authMethods` to
-//! [`AdvertisedMethod`]s and calls [`select`] only after `session/new` failed
-//! with auth-required (JSON-RPC `-32000`); every reason that path reports is
-//! built here. `acp_driver.rs` appends [`not_applied_v2_suffix`] to a fatal
-//! v2 startup failure when the session sets `auth_method`.
+//! The reasons call the login step `authenticate` on both protocols (the
+//! existing wording, which v2 keeps); the debug log names the wire request
+//! each path actually sends.
 //!
 //! Every string in a reason that is not the driver's own text goes through
 //! [`quote_id`] (a method id, advertised or configured) or
 //! [`cap_adapter_message`] (an adapter's JSON-RPC error message): control
 //! characters become a space and the length is capped, so a hostile adapter
 //! can neither flood a startup error nor forge a log line through it. A
-//! JSON-RPC error's `data` and a method's `description`/`_meta` never reach
-//! this module at all.
+//! method's `description`/`_meta` never reach this module, and a JSON-RPC
+//! error's `data` never reaches a reason built here, except through
+//! [`startup_error_text`] with no `auth_method` set, which keeps an error's
+//! display byte for byte.
+
+use std::future::Future;
+
+use agent_client_protocol::ErrorCode;
+use holler_proto::log::Direction as LogDirection;
+
+use super::log_debug;
 
 /// At most this many advertised ids are listed in a refusal; the rest are
 /// counted as `(+N more)`.
@@ -31,18 +44,24 @@ const AUTH_REQUIRED: i32 = -32000;
 /// What selection needs to know about an advertised method's kind.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum MethodKind {
-    /// The adapter authenticates itself when sent `authenticate` (v1's
-    /// default when a method carries no `type`).
+    /// The adapter authenticates itself when sent the login request (v1
+    /// `authenticate`, v2 `auth/login`); v1's default when a method carries
+    /// no `type`.
     Agent,
     /// The client must run an interactive login instead; the protocol says a
-    /// client never passes it to `authenticate`, so it is never selected.
+    /// client never passes it to the login request, so it is never selected.
     Terminal,
-    /// A kind this driver does not know (a variant a newer SDK adds). Only
-    /// `Terminal` is refused, so this is selectable like `Agent`. Not
-    /// produced with the pinned SDK: its `AuthMethod::Agent` variant is
-    /// untagged, so an advertised method with an unrecognised `type` value
-    /// deserializes as `Agent`, and the "never send a terminal-type method"
-    /// guard can only recognise the literal `terminal` type.
+    /// A v1 kind this driver does not know (a variant a newer SDK adds to the
+    /// `#[non_exhaustive]` `v1::AuthMethod`). Only `Terminal` is refused, so
+    /// this is selectable like `Agent`. Not produced with the pinned SDK:
+    /// v1's `AuthMethod::Agent` variant is untagged, so a v1 method with an
+    /// unrecognised `type` value deserializes as `Agent`, and the "never send
+    /// a terminal-type method" guard can only recognise the literal
+    /// `terminal` type. Never produced on v2 (#459): v2 tags `Agent`, so an
+    /// unrecognised `type` deserializes as `v2::AuthMethod::Other`, which
+    /// `connection.rs` drops before selection (fail closed, as for any
+    /// variant a newer SDK adds): it is never selected or sent, and a
+    /// configured id that only it carries is unadvertised.
     Other,
 }
 
@@ -55,12 +74,12 @@ pub(super) struct AdvertisedMethod {
     pub(super) kind: MethodKind,
 }
 
-/// Choose the method id to send in `authenticate`, after `session/new`
-/// failed with auth-required. `Ok` only when `configured` exactly equals
-/// (case-sensitive, untrimmed) an advertised id and no advertised entry with
-/// that id is terminal-type; the id returned is the configured string.
-/// Otherwise `Err` with the refusal, which always names `auth_method`, and no
-/// `authenticate` is sent.
+/// Choose the method id to send in the login request (v1 `authenticate`, v2
+/// `auth/login`), after `session/new` failed with auth-required. `Ok` only
+/// when `configured` exactly equals (case-sensitive, untrimmed) an advertised
+/// id and no advertised entry with that id is terminal-type; the id returned
+/// is the configured string. Otherwise `Err` with the refusal, which always
+/// names `auth_method`, and no login request is sent.
 pub(super) fn select(advertised: &[AdvertisedMethod], configured: Option<&str>) -> Result<String, String> {
     if advertised.is_empty() {
         return Err(match configured {
@@ -156,8 +175,8 @@ pub(super) fn refused_reason(adapter_message: &str, refusal: &str) -> String {
     format!("session/new: {}; {refusal}", rpc_error(adapter_message, AUTH_REQUIRED))
 }
 
-/// The reason when `authenticate` itself failed. Fatal: `session/new` is not
-/// retried.
+/// The reason when the login request (`authenticate` or `auth/login`) itself
+/// failed. Fatal: `session/new` is not retried.
 pub(super) fn authenticate_failed_reason(configured: &str, code: i32, adapter_message: &str) -> String {
     format!(
         "authenticate with auth_method {} failed: {}",
@@ -166,7 +185,7 @@ pub(super) fn authenticate_failed_reason(configured: &str, code: i32, adapter_me
     )
 }
 
-/// The reason when `authenticate` succeeded but the one retried
+/// The reason when the login request succeeded but the one retried
 /// `session/new` answered auth-required again.
 pub(super) fn did_not_clear_reason(configured: &str, adapter_message: &str) -> String {
     format!(
@@ -176,7 +195,7 @@ pub(super) fn did_not_clear_reason(configured: &str, adapter_message: &str) -> S
     )
 }
 
-/// The reason when `authenticate` succeeded but the one retried
+/// The reason when the login request succeeded but the one retried
 /// `session/new` failed with any other code.
 pub(super) fn retry_failed_reason(configured: &str, code: i32, adapter_message: &str) -> String {
     format!(
@@ -186,19 +205,22 @@ pub(super) fn retry_failed_reason(configured: &str, code: i32, adapter_message: 
     )
 }
 
-/// How far the v1 handshake's auth flow got. Written by `connection_v1`, read
-/// by `spawn_v1` at its one common failure point, so every v1 startup failure
-/// (a failed `initialize`, a timeout, a dead connection task, an error from
-/// the first `session/new`) can say what happened to a configured
-/// `auth_method` without each path building its own text.
+/// How far a handshake's auth flow got. Written by [`open_session`], read by
+/// the spawn attempt (`spawn_v1` or `spawn_v2`) at its one common failure
+/// point, so every startup failure (a failed `initialize`, a timeout, a dead
+/// connection task, an error from the first `session/new`) can say what
+/// happened to a configured `auth_method` without each path building its own
+/// text.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum AuthStage {
-    /// `authenticate` was never sent (startup ended in `initialize` or the
+    /// The login request was never sent (startup ended in `initialize` or the
     /// first `session/new`).
     NotReached,
-    /// `authenticate` was sent and unanswered.
+    /// The login request (`authenticate` or `auth/login`) was sent and is
+    /// unanswered.
     AuthenticatePending,
-    /// `authenticate` succeeded; the one retried `session/new` is unanswered.
+    /// The login request succeeded; the one retried `session/new` is
+    /// unanswered.
     RetryPending,
     /// The flow ended and any failure already carries its own reason (an
     /// auth-flow refusal or error), or startup succeeded.
@@ -224,10 +246,10 @@ impl AuthProgress {
     }
 }
 
-/// Appended (v1 path) to any startup failure whose text does not already say
-/// what happened to the configured `auth_method`; empty once the stage is
-/// [`AuthStage::Settled`].
-pub(super) fn v1_stage_suffix(configured: &str, stage: AuthStage) -> String {
+/// Appended by both spawn attempts to any startup failure whose text does
+/// not already say what happened to the configured `auth_method`; empty once
+/// the stage is [`AuthStage::Settled`].
+pub(super) fn stage_suffix(configured: &str, stage: AuthStage) -> String {
     let id = quote_id(configured);
     match stage {
         AuthStage::NotReached => format!(
@@ -244,13 +266,73 @@ pub(super) fn v1_stage_suffix(configured: &str, stage: AuthStage) -> String {
     }
 }
 
-/// Appended to a fatal v2 startup failure when `auth_method` is set: the v2
-/// handshake never authenticates (`auth/login` is #459).
-pub(super) fn not_applied_v2_suffix(configured: &str) -> String {
-    format!(
-        "; auth_method {} was configured but not applied: ACP v2 auth support is not implemented yet (#459)",
-        quote_id(configured)
-    )
+/// A startup error outside the auth flow, as its reason. With no
+/// `auth_method` this is the error's display, byte for byte, the text such a
+/// failure has always had. With one set, the display would carry the
+/// adapter's `data` (newlines, no length limit), so the reason is rebuilt from
+/// the code and the capped, sanitized message alone. `spawn_v2` applies it to
+/// a failed v2 `initialize` only after checking the raw error for the v1
+/// negotiation failure, whose phrase the SDK puts only in `data` (#459).
+pub(super) fn startup_error_text(e: &agent_client_protocol::Error, auth_method: Option<&str>) -> String {
+    match auth_method {
+        None => e.to_string(),
+        Some(_) => rpc_error(&e.message, i32::from(e.code)),
+    }
+}
+
+/// `session/new` plus the auth flow: the one sequence both protocols run (see
+/// the module doc). `new_session` sends one `session/new` and is called at
+/// most twice; `login` sends the one login request for the id [`select`]
+/// chose, only after the first `session/new` failed with auth-required. The
+/// trigger is the JSON-RPC code alone, never message text. A first failure
+/// with any other code is [`startup_error_text`]; every auth-flow reason is
+/// built from an error's code and capped, sanitized message, never its
+/// `data`. The spawn attempt adds the not-applied/pending clause from
+/// `progress`.
+pub(super) async fn open_session<S, N, L>(
+    advertised: &[AdvertisedMethod],
+    auth_method: Option<&str>,
+    progress: &AuthProgress,
+    mut new_session: impl FnMut() -> N,
+    login: impl FnOnce(String) -> L,
+) -> Result<S, String>
+where
+    N: Future<Output = Result<S, agent_client_protocol::Error>>,
+    L: Future<Output = Result<(), agent_client_protocol::Error>>,
+{
+    let first = match new_session().await {
+        Ok(session) => {
+            progress.set(AuthStage::Settled);
+            return Ok(session);
+        }
+        Err(e) => e,
+    };
+    if first.code != ErrorCode::AuthRequired {
+        return Err(startup_error_text(&first, auth_method));
+    }
+    log_debug(
+        LogDirection::In,
+        "session/new",
+        vec![("event", "auth_required".to_string()), ("advertised", list_ids(advertised))],
+        None,
+    );
+    let method_id = select(advertised, auth_method).map_err(|refusal| {
+        progress.set(AuthStage::Settled);
+        refused_reason(&first.message, &refusal)
+    })?;
+    progress.set(AuthStage::AuthenticatePending);
+    if let Err(e) = login(method_id.clone()).await {
+        progress.set(AuthStage::Settled);
+        return Err(authenticate_failed_reason(&method_id, i32::from(e.code), &e.message));
+    }
+    progress.set(AuthStage::RetryPending);
+    let retried = new_session().await;
+    progress.set(AuthStage::Settled);
+    match retried {
+        Ok(session) => Ok(session),
+        Err(e) if e.code == ErrorCode::AuthRequired => Err(did_not_clear_reason(&method_id, &e.message)),
+        Err(e) => Err(retry_failed_reason(&method_id, i32::from(e.code), &e.message)),
+    }
 }
 
 #[cfg(test)]
@@ -386,12 +468,12 @@ mod tests {
     #[test]
     fn v1_stage_suffixes_are_exact_and_settled_is_empty() {
         assert_eq!(
-            v1_stage_suffix("stub-key", AuthStage::NotReached),
+            stage_suffix("stub-key", AuthStage::NotReached),
             "; auth_method \"stub-key\" was configured but not applied (startup ended before session/new answered auth-required -32000)"
         );
-        assert!(v1_stage_suffix("k", AuthStage::AuthenticatePending).contains("authenticate with auth_method \"k\" was pending"));
-        assert!(v1_stage_suffix("k", AuthStage::RetryPending).contains("retried session/new"));
-        assert_eq!(v1_stage_suffix("k", AuthStage::Settled), "");
+        assert!(stage_suffix("k", AuthStage::AuthenticatePending).contains("authenticate with auth_method \"k\" was pending"));
+        assert!(stage_suffix("k", AuthStage::RetryPending).contains("retried session/new"));
+        assert_eq!(stage_suffix("k", AuthStage::Settled), "");
     }
 
     #[test]
@@ -405,22 +487,12 @@ mod tests {
     }
 
     #[test]
-    fn v2_not_applied_suffix_is_exact() {
-        assert_eq!(
-            not_applied_v2_suffix("stub-key"),
-            "; auth_method \"stub-key\" was configured but not applied: ACP v2 auth support is not implemented yet (#459)"
-        );
-    }
-
-    #[test]
     fn suffixes_render_the_configured_id_through_quote_id() {
         let id = "a\nb";
         for stage in [AuthStage::NotReached, AuthStage::AuthenticatePending, AuthStage::RetryPending] {
-            let suffix = v1_stage_suffix(id, stage);
+            let suffix = stage_suffix(id, stage);
             assert!(suffix.contains("auth_method \"a b\""), "{suffix}");
             assert!(!suffix.chars().any(char::is_control));
         }
-        assert!(not_applied_v2_suffix(id).contains("auth_method \"a b\" was configured"));
-        assert!(!not_applied_v2_suffix(id).chars().any(char::is_control));
     }
 }

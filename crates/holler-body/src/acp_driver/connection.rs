@@ -7,6 +7,16 @@
 //! file-size guard — this half owns "how do we talk to the SDK", while the
 //! parent owns the public `AcpDriver` API and `pending.rs` owns "what does a
 //! held-open request mean".
+//!
+//! # Authentication (issue #459)
+//!
+//! With the session's `auth_method` set, `session/new` runs through the auth
+//! sequence both protocols share, [`super::auth::open_session`]: only when it
+//! fails with auth-required (`-32000`) is one `auth/login` sent (ACP v2 has no
+//! `authenticate`) for the configured, advertised method, and `session/new`
+//! retried once. The request carries only the method id. Without
+//! `auth_method` the handshake and its startup text are what they were
+//! before, byte for byte.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -18,6 +28,7 @@ use tokio::sync::{mpsc, oneshot};
 
 use holler_proto::log::Direction as LogDirection;
 
+use super::auth::{self, AdvertisedMethod, AuthProgress, MethodKind};
 use super::pending::{
     chunk_text, elicitation_fields, permission_fields, PendingBlock, PendingResponder,
 };
@@ -61,10 +72,21 @@ pub(super) fn lock(shared: &Mutex<Shared>) -> MutexGuard<'_, Shared> {
 }
 
 /// What the background connection task hands back once `initialize` +
-/// `session/new` succeed (or the reason they didn't).
+/// `session/new` succeed (or the reason they didn't, a [`HandshakeError`]).
 pub(super) struct Ready {
     pub(super) session_id: v2::SessionId,
     pub(super) connection: V2ConnectionTo<Agent>,
+}
+
+/// Why the v2 handshake produced no session (#459). A failed `initialize`
+/// travels as the raw SDK error, so `spawn_v2` checks it for the v1
+/// negotiation failure (whose phrase the SDK puts only in `data`) before
+/// anything sanitizes it. Every later failure is already its startup reason.
+pub(super) enum HandshakeError {
+    /// `initialize` failed: the SDK error as received.
+    Initialize(agent_client_protocol::Error),
+    /// Any later failure, as its startup reason.
+    Reason(String),
 }
 
 /// Route one inbound `session/update` notification: a text chunk feeds the
@@ -201,14 +223,68 @@ fn handle_elicitation_request(
     );
 }
 
-/// `initialize` + `session/new`, plus the crash watcher. Split out of
-/// [`run`] so the handshake's own error path is a plain `?` rather than
-/// hand-threading a result through the outer `tokio::select!` shell.
+/// The `initialize` response's advertised auth methods, reduced to ids and
+/// kinds (#459; `connection_v1::advertised_methods` is the v1 twin):
+/// descriptions and `_meta` are dropped here, unread. A method of a type
+/// this driver does not know is dropped too, failing closed: it is never
+/// selected or sent, and a configured id that only it carries is
+/// unadvertised.
+fn advertised_methods(methods: &[v2::AuthMethod]) -> Vec<AdvertisedMethod> {
+    methods
+        .iter()
+        .filter_map(|method| {
+            let kind = match method {
+                v2::AuthMethod::Agent(_) => MethodKind::Agent,
+                v2::AuthMethod::Terminal(_) => MethodKind::Terminal,
+                // `Other` (untagged: any unrecognised `type`), and any variant
+                // a newer SDK adds to the `#[non_exhaustive]` enum.
+                _ => return None,
+            };
+            Some(AdvertisedMethod { id: method.method_id().0.to_string(), kind })
+        })
+        .collect()
+}
+
+/// One `session/new`: at most two per attempt, when the adapter needs auth.
+async fn new_session(
+    connection: &V2ConnectionTo<Agent>,
+    cwd: &Path,
+) -> Result<v2::SessionId, agent_client_protocol::Error> {
+    log_debug(LogDirection::Out, "session/new", vec![], None);
+    let opened = connection
+        .build_session(cwd)
+        .start_session()
+        .block_task()
+        .await?;
+    Ok(opened.into_session().session_id().clone())
+}
+
+/// The one `auth/login` request (#459), [`auth::open_session`]'s login step
+/// on v2. Only the method id is sent or logged; the caller builds the failure
+/// reason from the error's code and message.
+async fn login(connection: &V2ConnectionTo<Agent>, method_id: String) -> Result<(), agent_client_protocol::Error> {
+    log_debug(LogDirection::Out, "auth/login", vec![("method_id", auth::quote_id(&method_id))], None);
+    connection
+        .send_request(v2::LoginAuthRequest::new(method_id))
+        .block_task()
+        .await
+        .map(|_response| ())
+}
+
+/// `initialize` + `session/new` (through the #459 auth flow when
+/// `auth_method` is set), plus the crash watcher. Split out of [`run`] so the
+/// handshake's own error path is a plain `?` rather than hand-threading a
+/// result through the outer `tokio::select!` shell. With `auth_method` set,
+/// the `session/new`, `auth/login` and crash-watcher failures are rebuilt
+/// without `data`; `initialize`'s error always travels raw
+/// ([`HandshakeError`]).
 async fn do_handshake(
     connection: &V2ConnectionTo<Agent>,
     cwd: &Path,
     shared: &Arc<Mutex<Shared>>,
-) -> Result<v2::SessionId, agent_client_protocol::Error> {
+    auth_method: Option<&str>,
+    progress: &AuthProgress,
+) -> Result<v2::SessionId, HandshakeError> {
     log_debug(LogDirection::Out, "initialize", vec![], None);
     let initialize = connection
         .send_request(v2::InitializeRequest::new(
@@ -216,21 +292,32 @@ async fn do_handshake(
             v2::Implementation::new("holler-body", env!("CARGO_PKG_VERSION")),
         ))
         .block_task()
-        .await?;
+        .await
+        .map_err(HandshakeError::Initialize)?;
     if initialize.capabilities.session.is_none() {
         log_warn("initialize", vec![("event", "agent did not advertise the v2 session capability".to_string())]);
-        return Err(agent_client_protocol::Error::invalid_params()
-            .data("agent did not advertise the v2 session capability"));
+        // The driver's own text, no adapter content: kept as it was.
+        return Err(HandshakeError::Reason(
+            agent_client_protocol::Error::invalid_params()
+                .data("agent did not advertise the v2 session capability")
+                .to_string(),
+        ));
     }
 
-    log_debug(LogDirection::Out, "session/new", vec![], None);
-    let opened = connection
-        .build_session(cwd)
-        .start_session()
-        .block_task()
-        .await?;
-    let session = opened.into_session();
-    let session_id = session.session_id().clone();
+    let session_id = match auth_method {
+        // No `auth_method`: the handshake and its startup text are what they
+        // were before #459, byte for byte.
+        None => new_session(connection, cwd).await.map_err(|e| HandshakeError::Reason(e.to_string()))?,
+        Some(_) => auth::open_session(
+            &advertised_methods(&initialize.auth_methods),
+            auth_method,
+            progress,
+            || new_session(connection, cwd),
+            |method_id| login(connection, method_id),
+        )
+        .await
+        .map_err(HandshakeError::Reason)?,
+    };
 
     // Crash watcher: if the transport closes at any point (mid-turn, or while
     // a caller is waiting), surface it as `Done(Error)` / a resolved `cancel`
@@ -254,7 +341,8 @@ async fn do_handshake(
         }
         guard.status = Status::Idle;
         Ok(())
-    })?;
+    })
+    .map_err(|e| HandshakeError::Reason(auth::startup_error_text(&e, auth_method)))?;
 
     Ok(session_id)
 }
@@ -263,12 +351,16 @@ async fn do_handshake(
 /// the typed v2 client (notification + the two answerable-blocking request
 /// handlers), spawns the child, brings up the session, reports readiness (or
 /// the startup failure) through `ready_tx`, then idles until `shutdown_rx`
-/// fires or the transport closes on its own.
+/// fires or the transport closes on its own. `auth_method` is the session's
+/// configured ACP auth method id; `progress` records how far its auth flow
+/// got, for `spawn_v2`'s failure reason (#459).
 pub(super) async fn run(
     agent_config: AcpAgentConfig,
     cwd: PathBuf,
+    auth_method: Option<String>,
+    progress: Arc<AuthProgress>,
     shared: Arc<Mutex<Shared>>,
-    ready_tx: oneshot::Sender<Result<Ready, String>>,
+    ready_tx: oneshot::Sender<Result<Ready, HandshakeError>>,
     shutdown_rx: oneshot::Receiver<()>,
 ) {
     let agent = AcpAgent::new(agent_config);
@@ -316,7 +408,7 @@ pub(super) async fn run(
             agent_client_protocol::on_receive_request!(),
         )
         .connect_with(agent, move |connection: V2ConnectionTo<Agent>| async move {
-            match do_handshake(&connection, &cwd, &handshake_shared).await {
+            match do_handshake(&connection, &cwd, &handshake_shared, auth_method.as_deref(), &progress).await {
                 Ok(session_id) => {
                     let _ = ready_tx.send(Ok(Ready {
                         session_id,
@@ -327,8 +419,8 @@ pub(super) async fn run(
                         _ = connection.incoming_closed() => {}
                     }
                 }
-                Err(e) => {
-                    let _ = ready_tx.send(Err(e.to_string()));
+                Err(failure) => {
+                    let _ = ready_tx.send(Err(failure));
                 }
             }
             Ok(())

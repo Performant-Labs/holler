@@ -52,6 +52,7 @@ use std::time::Duration;
 
 use serde_json::{json, Value};
 
+mod auth;
 mod gates;
 use gates::{selected_option_id, send_gate_request};
 
@@ -294,8 +295,8 @@ fn parse_args() -> Config {
             "--ask-elicitation-url" => cfg.ask_elicitation_url = true,
             "--crash-after-prompt" => cfg.crash_after_prompt = true,
             "--ignore-cancel" => cfg.ignore_cancel = true,
-            // Unknown / positional args are ignored.
-            _ => {}
+            // Auth flags (#459) live in `auth.rs`; anything else is ignored.
+            other => i += auth::parse_flag(other, args.get(i + 1)),
         }
         i += 1;
     }
@@ -453,19 +454,22 @@ fn route(
                     // default to `None` and refuse the connection). `{}` for
                     // `session` means "the baseline session/* methods are
                     // supported" per the schema's own doc comment.
-                    json!({
+                    auth::initialize_result(json!({
                         "protocolVersion": PROTOCOL_VERSION,
                         "info": { "name": "stub-acp", "version": "0" },
                         "capabilities": { "session": {} }
-                    }),
+                    })),
                 );
             }
         }
         Some("session/new") => {
             if let Some(id) = msg.get("id") {
-                send_response(lock, id.clone(), json!({ "sessionId": SESSION_ID }));
+                if !auth::session_new(lock, id) {
+                    send_response(lock, id.clone(), json!({ "sessionId": SESSION_ID }));
+                }
             }
         }
+        Some("auth/login") => auth::login(lock, msg),
         Some("session/prompt") => {
             // Real ACP v2 decouples a `session/prompt` response from turn
             // completion: the response only means "accepted" (`v2::PromptResponse`

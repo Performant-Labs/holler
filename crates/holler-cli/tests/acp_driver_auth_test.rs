@@ -282,27 +282,8 @@ async fn v1_hostile_non_auth_first_failure_with_auth_method_is_bounded() {
     assert!(msg.chars().count() < 600, "{} chars", msg.chars().count());
 }
 
-// ---- criterion 6: not applied (v2 fatal arm) --------------------------------
-
-const V2_SUFFIX: &str =
-    "; auth_method \"stub-key\" was configured but not applied: ACP v2 auth support is not implemented yet (#459)";
-
-/// A command that cannot be launched fails the **v2** attempt fatally (the
-/// connection task ends before readiness; no v1 fallback is tried).
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn v2_fatal_startup_failure_with_auth_method_reports_not_applied() {
-    let _serial = SERIAL.lock().await;
-    let fx = Fixture::new();
-    let mut config = fx.config(&[], None);
-    config.command = Some(vec!["/nonexistent/holler-439-no-such-adapter".to_string()]);
-    let bare = spawn_err(&config).await;
-    assert!(!bare.contains("v1 fallback"), "must take the v2 Fatal arm: {bare}");
-    assert!(!bare.contains("not applied"), "{bare}");
-
-    config.auth_method = Some("stub-key".to_string());
-    let with = spawn_err(&config).await;
-    assert_eq!(with, format!("{bare}{V2_SUFFIX}"));
-}
+// ---- criterion 6: the v2 fatal arm moved to acp_driver_auth_v2_test.rs ------
+// (#459: v2 now authenticates, so its "not implemented yet" suffix is gone.)
 
 // ---- criterion 7: no auth needed --------------------------------------------
 

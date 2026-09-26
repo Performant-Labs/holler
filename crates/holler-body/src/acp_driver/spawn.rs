@@ -16,7 +16,7 @@ use tokio::task::JoinHandle;
 use holler_proto::log::Direction as LogDirection;
 
 use super::auth::{self, AuthProgress};
-use super::connection::{self, Ready, Shared};
+use super::connection::{self, HandshakeError, Ready, Shared};
 use super::connection_v1::{self, ReadyV1};
 use super::{log_debug, log_warn, AcpDriver, Conn, DriverError, Status};
 
@@ -37,23 +37,43 @@ pub(super) enum SpawnAttempt {
 /// to a transport failure, a crash, or any other startup error, which are
 /// fatal regardless of protocol. Matches the exact wording of
 /// `agent_client_protocol`'s `required_protocol_version` error (the crate's
-/// own `V2ConnectionTo::send_request`/`send_request_to` version guard,
+/// own version guard on the `initialize` response,
 /// `jsonrpc/protocol_compat.rs`) — narrowly scoped to this one call site
-/// (`connection::do_handshake`'s `initialize` request) rather than a general
+/// (`connection::do_handshake`'s `initialize` request, which reaches
+/// `spawn_v2` raw as `HandshakeError::Initialize`) rather than a general
 /// error-classification rule, since that is the only place this driver can
-/// observe this specific failure.
+/// observe this specific failure. The phrase is only in the error's `data`,
+/// so it runs before anything rebuilds that error without it (#459).
 pub(super) fn is_v1_negotiation_failure(reason: &str) -> bool {
     reason.contains("required ACP protocol version") && reason.contains("peer negotiated")
+}
+
+/// The one "what became of `auth_method`" annotation both spawn attempts
+/// apply at their common failure point (#439, #459): the startup reason plus
+/// the [`auth::stage_suffix`] for how far the auth flow got when
+/// `auth_method` is set, the reason unchanged when it is not.
+fn auth_annotation(auth_method: Option<String>, progress: Arc<AuthProgress>) -> impl Fn(String) -> String {
+    move |reason| match &auth_method {
+        Some(id) => format!("{reason}{}", auth::stage_suffix(id, progress.get())),
+        None => reason,
+    }
 }
 
 impl AcpDriver {
     /// One ACP v2 spawn attempt: builds a fresh `Shared`, runs
     /// `connection::run` in a background task, and waits (bounded by
     /// `timeout_ms`) for it to signal readiness or a startup failure.
+    /// `auth_method` is the session's configured ACP auth method id (#459);
+    /// the whole handshake, including any `auth/login` and the one retried
+    /// `session/new`, stays inside this attempt's single `timeout_ms` window.
+    /// This is the one place a v2 startup failure gets the `auth_method`
+    /// clause; the v1 negotiation failure never does, since it is not a
+    /// failure of this session's startup but a reason to try v1.
     pub(super) async fn spawn_v2(
         agent_config: AcpAgentConfig,
         session_cwd: PathBuf,
         timeout_ms: u64,
+        auth_method: Option<String>,
     ) -> Result<Self, SpawnAttempt> {
         let shared = Arc::new(Mutex::new(Shared {
             status: Status::Idle,
@@ -63,14 +83,20 @@ impl AcpDriver {
             last_stop_reason: None,
         }));
 
-        let (ready_tx, ready_rx) = oneshot::channel::<Result<Ready, String>>();
+        let (ready_tx, ready_rx) = oneshot::channel::<Result<Ready, HandshakeError>>();
         let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
 
+        let progress = Arc::new(AuthProgress::default());
+        let annotate = auth_annotation(auth_method.clone(), progress.clone());
+
         let task_shared = shared.clone();
+        let task_auth_method = auth_method.clone();
         let join_handle: JoinHandle<()> = tokio::spawn(async move {
             connection::run(
                 agent_config,
                 session_cwd,
+                task_auth_method,
+                progress,
                 task_shared,
                 ready_tx,
                 shutdown_rx,
@@ -96,21 +122,30 @@ impl AcpDriver {
                     shutdown_tx: Mutex::new(Some(shutdown_tx)),
                 })
             }
-            Ok(Ok(Err(reason))) => {
+            Ok(Ok(Err(failure))) => {
                 join_handle.abort();
-                if is_v1_negotiation_failure(&reason) {
-                    Err(SpawnAttempt::FallbackToV1 { reason })
-                } else {
-                    log_warn("spawn", vec![("event", format!("startup_failed: {reason}"))]);
-                    Err(SpawnAttempt::Fatal(DriverError::Startup(reason)))
-                }
+                let reason = match failure {
+                    // Classified on the raw error before anything rebuilds it:
+                    // the SDK puts the negotiation phrase only in `data` (#459).
+                    HandshakeError::Initialize(e) => {
+                        let raw = e.to_string();
+                        if is_v1_negotiation_failure(&raw) {
+                            return Err(SpawnAttempt::FallbackToV1 { reason: raw });
+                        }
+                        auth::startup_error_text(&e, auth_method.as_deref())
+                    }
+                    HandshakeError::Reason(reason) => reason,
+                };
+                let reason = annotate(reason);
+                log_warn("spawn", vec![("event", format!("startup_failed: {reason}"))]);
+                Err(SpawnAttempt::Fatal(DriverError::Startup(reason)))
             }
             Ok(Err(_dropped)) => {
                 join_handle.abort();
                 log_warn("spawn", vec![("event", "connection task ended before readiness".to_string())]);
-                Err(SpawnAttempt::Fatal(DriverError::Startup(
+                Err(SpawnAttempt::Fatal(DriverError::Startup(annotate(
                     "connection task ended before signalling readiness".to_string(),
-                )))
+                ))))
             }
             Err(_timed_out) => {
                 // Kill the still-hung child by ending its owning task; the
@@ -119,9 +154,9 @@ impl AcpDriver {
                 // dropped (which `abort` forces).
                 join_handle.abort();
                 log_warn("spawn", vec![("event", format!("startup_timeout: {timeout_ms}ms"))]);
-                Err(SpawnAttempt::Fatal(DriverError::Startup(format!(
+                Err(SpawnAttempt::Fatal(DriverError::Startup(annotate(format!(
                     "no response within {timeout_ms}ms (HOLLER_ACP_TIMEOUT_MS)"
-                ))))
+                )))))
             }
         }
     }
@@ -154,12 +189,7 @@ impl AcpDriver {
         // The one place every v1 startup failure passes through: what became
         // of a configured `auth_method` is appended here, from how far the
         // handshake's auth flow got, so no failure path is silent about it.
-        let configured = auth_method.clone();
-        let stage_progress = progress.clone();
-        let annotate = move |reason: String| match &configured {
-            Some(id) => format!("{reason}{}", auth::v1_stage_suffix(id, stage_progress.get())),
-            None => reason,
-        };
+        let annotate = auth_annotation(auth_method.clone(), progress.clone());
 
         let task_shared = shared.clone();
         let join_handle: JoinHandle<()> = tokio::spawn(async move {

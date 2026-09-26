@@ -393,8 +393,8 @@ impl AcpDriver {
     ///
     /// Only `SessionMode::Spawn` is supported (see the module doc). Startup
     /// (the child process coming up, `initialize`, and `session/new`, plus
-    /// on the v1 path any `authenticate` for `auth_method` and its one
-    /// retried `session/new`, issue #439) is bounded by
+    /// any `authenticate` (v1, issue #439) or `auth/login` (v2, issue #459)
+    /// for `auth_method` and its one retried `session/new`) is bounded by
     /// `HOLLER_ACP_TIMEOUT_MS` (default 10s) per protocol attempt; a hang
     /// there kills the child and returns `DriverError::Startup`.
     pub async fn spawn(config: &SessionConfig) -> Result<Self, DriverError> {
@@ -453,17 +453,12 @@ impl AcpDriver {
 
         // Try ACP v2 first (ADR 0013's target protocol). Fall back to v1
         // (issue #362) only on that exact negotiation failure — every other
-        // startup error (a bad command, a timeout, a crash) is fatal in
-        // either mode, so it is reported as-is rather than triggering a
-        // second, redundant spawn attempt.
-        match Self::spawn_v2(agent_config.clone(), session_cwd.clone(), timeout_ms).await {
+        // startup error (a bad command, a timeout, a crash, an auth failure)
+        // is fatal in either mode, so it is reported as-is rather than
+        // triggering a second, redundant spawn attempt. Each attempt says
+        // what became of a configured `auth_method` itself (#459).
+        match Self::spawn_v2(agent_config.clone(), session_cwd.clone(), timeout_ms, config.auth_method.clone()).await {
             Ok(driver) => Ok(driver),
-            // The v2 handshake never authenticates (`auth/login` is #459), so
-            // a configured `auth_method` is named as not applied (#439).
-            Err(SpawnAttempt::Fatal(DriverError::Startup(reason))) => {
-                let suffix = config.auth_method.as_deref().map(auth::not_applied_v2_suffix).unwrap_or_default();
-                Err(DriverError::Startup(format!("{reason}{suffix}")))
-            }
             Err(SpawnAttempt::Fatal(e)) => Err(e),
             Err(SpawnAttempt::FallbackToV1 { reason }) => {
                 log_warn(

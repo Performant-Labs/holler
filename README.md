@@ -334,33 +334,34 @@ command = ["npx", "-y", "@agentclientprotocol/codex-acp@1.13.1"]
 auth_method = "api-key"
 ```
 
-- **Reactive, and bounded to one retry.** The body sends `authenticate` only when `session/new`
-  fails with the JSON-RPC auth-required code (`-32000`), only for the id `auth_method` names, and
-  only if the adapter advertised that id in its `initialize` response and it is not a terminal-type
-  method. It then retries `session/new` exactly once. Otherwise startup fails with a reason that
-  names `auth_method` and lists the advertised ids. An adapter that needs no authentication never
-  receives `authenticate`, even with `auth_method` set.
+- **Reactive, and bounded to one retry.** The body sends `authenticate` (ACP v1) or `auth/login`
+  (ACP v2, which has no `authenticate`) only when `session/new` fails with the JSON-RPC
+  auth-required code (`-32000`), only for the id `auth_method` names, and only if the adapter
+  advertised that id in its `initialize` response and it is not a terminal-type method. It then
+  retries `session/new` exactly once. Otherwise startup fails with a reason that names
+  `auth_method` and lists the advertised ids; on a v2 adapter with no `auth_method` set, the
+  failure keeps its earlier `Authentication required` text. An adapter that needs no
+  authentication never receives either request, even with `auth_method` set.
 - **The credential is never a config field.** `auth_method` is only a method id, and the request
   carries nothing else: the adapter reads its credential from its own environment. So the
   credential must be in the environment of the process `command` launches: the session's `env`
   table, or the body's own environment, which the adapter inherits. The same holds for a row with
   `remote_host`: the body launches `command` itself, so a wrapper such as `ssh` that does not
   forward the environment does not carry the credential.
-- **ACP v1 adapters only.** A v2-negotiating adapter that needs authentication still fails startup
-  with `Authentication required`; with `auth_method` set, the reason adds `auth_method "<id>" was
-  configured but not applied: ACP v2 auth support is not implemented yet (#459)`
-  ([#459](https://github.com/Performant-Labs/holler/issues/459)). On the v1 path, with `auth_method`
-  set, every startup failure says what became of it: not applied (the failure came before
-  `session/new` answered auth-required, e.g. a failed `initialize`, another error code, or a
-  timeout), or `authenticate` was pending / its retried `session/new` unfinished when startup
-  ended. Adapter text in these reasons is limited to the error message, control characters
-  replaced and cut to 200 characters; the error's `data` is never echoed. (Without `auth_method`
-  a non-auth startup failure keeps its earlier text unchanged.)
+- **ACP v1 and v2.** A v2-negotiating adapter gets the same flow with `auth/login`
+  ([#459](https://github.com/Performant-Labs/holler/issues/459)); a failed `auth/login` or retried
+  `session/new` is fatal and never falls back to v1. With `auth_method` set, every startup failure
+  says what became of it: not applied (the failure came before `session/new` answered
+  auth-required, e.g. a failed `initialize`, another error code, or a timeout), or `authenticate` /
+  `auth/login` was pending / its retried `session/new` unfinished when startup ended. Adapter text
+  in these reasons is limited to the error message, control characters replaced and cut to 200
+  characters; the error's `data` is never echoed. (Without `auth_method` a non-auth startup
+  failure keeps its earlier text unchanged.)
 - **Spawn mode only.** An attach row's `auth_method` is ignored with a config warning: attach never
   launches anything.
 - **Timeout budget.** The auth path is four round trips (`initialize`, `session/new`,
-  `authenticate`, `session/new`) inside the single `HOLLER_ACP_TIMEOUT_MS` window (default
-  10000 ms) of one protocol attempt. A slow adapter may need a larger value.
+  `authenticate` or `auth/login`, `session/new`) inside the single `HOLLER_ACP_TIMEOUT_MS` window
+  (default 10000 ms) of one protocol attempt. A slow adapter may need a larger value.
 - **Codex.** Read from `@agentclientprotocol/codex-acp` 1.13.1's source, not yet from a live run:
   it advertises `api-key` and, when authenticated with it, reads its API key from its own
   environment. That adapter also accepts `DEFAULT_AUTH_REQUEST = '{"methodId":"api-key"}'` in its
@@ -389,7 +390,7 @@ Every event carries a `component`, identifying which layer of a `say`/`interrupt
 
 Because the ACP SDK holler pins (`agent-client-protocol` 2.1.0) spawns and owns its child process internally, it exposes no pid or exit-status accessor to this codebase — `acp`'s spawn/child-exit events report `command`/`args`/`cwd` and "connection closed", not a pid, which is the most this driver can observe without forking the SDK.
 
-**ACP authentication events (body, debug).** When a v1 adapter answers `session/new` with auth-required, `acp` logs `session/new event=auth_required` with `advertised` (the adapter's advertised method ids, at most 8, quoted), then `authenticate` with `method_id` if the session's `auth_method` is sent ([#439](https://github.com/Performant-Labs/holler/issues/439)). Only ids are logged: never a credential, a method's description, or an error's `data`.
+**ACP authentication events (body, debug).** When an adapter answers `session/new` with auth-required (on v2, only for a session that sets `auth_method`), `acp` logs `session/new event=auth_required` with `advertised` (the adapter's advertised method ids, at most 8, quoted), then `authenticate` (v1) or `auth/login` (v2) with `method_id` if the session's `auth_method` is sent ([#439](https://github.com/Performant-Labs/holler/issues/439), [#459](https://github.com/Performant-Labs/holler/issues/459)). Only ids are logged: never a credential, a method's description, or an error's `data`.
 
 **Authentication events (hub, always emitted).** A rejected `circuit/authenticate` and the lockout it feeds are `warn` events, so they appear at the default level with no `--debug`:
 
