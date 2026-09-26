@@ -667,9 +667,11 @@ impl AcpDriver {
         }
     }
 
-    /// Resolve a pending permission/elicitation. `choice` is a 0-based index
-    /// or an exact (case-insensitive) label/key match for a single pending
-    /// item; for a multi-field elicitation it is comma-separated, one segment
+    /// Resolve a pending permission/elicitation with `choice`, which
+    /// `answerable::resolve_choice` parses (its module doc has the grammar): a
+    /// 0-based index, an exact (case-insensitive) label/key, or on a
+    /// permission a `once`/`always`/`reject` shorthand for the option of that
+    /// ACP kind; a multi-field elicitation takes one comma-separated segment
     /// per field, resolved independently and in order. Fails closed: any
     /// unresolved segment, or a segment-count mismatch, sends no reply at all
     /// (the pending item stays open and can be retried).

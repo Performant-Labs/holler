@@ -91,6 +91,19 @@ fills this file in at release time.
   flake's cause is still open ([#420](https://github.com/Performant-Labs/holler/issues/420)).
 
 ### Bug Fixes
+- `holler answer SESSION once|always|reject` now works for a spawn-mode (ACP) session held on a permission
+  request, as `holler answer --help` already said; before, only OpenCode attach sessions accepted these
+  words and an ACP session refused them with `does not resolve to any of this field's options`. `once`
+  selects the adapter's option of kind `allow_once`, `always` the one of kind `allow_always`, and `reject`
+  the one of kind `reject_once`, or `reject_always` when there is no `reject_once` option. A shorthand never
+  selects an option of another kind: when the adapter offers none of the right kind, the answer is refused
+  with the option labels and nothing is sent. An index, or an option whose key or label is literally the
+  word, still takes precedence. `holler answer` can also select an option whose label contains a comma,
+  such as Codex's `No, and tell Codex what to do differently`, by that label: a single-question prompt now
+  tries the whole choice before splitting it on commas, where it used to fail with `expected 1
+  comma-separated choice segment(s)`. Prompts with several questions still take one comma-separated
+  segment per question ([#476](https://github.com/Performant-Labs/holler/issues/476),
+  [#477](https://github.com/Performant-Labs/holler/issues/477)).
 - Log timestamps now carry the real sub-second fraction, six digits of microseconds: 18.372988 s prints as `18.372988Z`. They used to print the microsecond-within-millisecond digits as a three-digit fraction (`18.988Z`), so lines from one process within the same second came out of order and hub and body logs could not be lined up ([#461](https://github.com/Performant-Labs/holler/issues/461)). Values taken from the same clock (`last_turn.ended_at`, the talk log's `ts`, and a working session's `turn_started_at`/`last_update_at`) now carry six fraction digits too; every reader in holler already accepted any number of digits.
 - A joined body no longer loses access when its token's `expires` passes. The hub checked `expires` (`hub token mint --ttl`, 24h after the mint by default) on every re-authentication, so a long-running body was refused the first time it reconnected after that deadline, and its retries could lock out every client sharing its address. `expires` now bounds only how long the join secret can be redeemed; a bound token lasts until `hub token revoke` ends it. `hub token ping` no longer reports a bound token as `expired`, and `hub token list` prints `-` in EXPIRES for bound and revoked tokens (`--json` output is unchanged). The `token_expired` rejection reason is retired. Tokens already past `expires` work again after the upgrade, with no new join. Upgrade note: that includes any body you cut off only by letting its token expire. Before upgrading, check `holler hub token list --json` for `bound` rows whose `expires` is in the past, and `hub token revoke` any whose body must stay cut off; the text output shows `-` in EXPIRES for bound rows, so only `--json` shows those dates ([#453](https://github.com/Performant-Labs/holler/issues/453), part of [#431](https://github.com/Performant-Labs/holler/issues/431)).
 - `hub token list` now shows a real `LAST_SEEN` for a bound token whose body is connected: the hub persists it on the presence heartbeat, at most once every 30 seconds per connection ([#419](https://github.com/Performant-Labs/holler/issues/419)). It was always empty before because nothing called `touch_last_seen` outside tests.

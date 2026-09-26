@@ -52,6 +52,9 @@ use std::time::Duration;
 
 use serde_json::{json, Value};
 
+mod gates;
+use gates::{selected_option_id, send_gate_request};
+
 /// ACP v2 protocol version (the `initialize` negotiation constant).
 const PROTOCOL_VERSION: u8 = 2;
 /// Every session the stub creates is addressed as this.
@@ -83,6 +86,8 @@ impl Config {
     fn gate(&self) -> Option<GateKind> {
         if self.ask_permission {
             Some(GateKind::Permission)
+        } else if self.ask_permission_kinds {
+            Some(GateKind::PermissionKinds)
         } else if self.ask_elicitation {
             Some(GateKind::Elicitation)
         } else if self.ask_elicitation_url {
@@ -93,11 +98,11 @@ impl Config {
     }
 }
 
-// Four independent CLI switches (`--ask-permission`/`--ask-elicitation`/
-// `--ask-elicitation-url`/`--crash-after-prompt`), each a simple on/off flag a
-// test passes in isolation — not overlapping machine states (`Config::gate`
-// already picks at most one of the first three), so an enum would just move
-// the same four booleans one level down without adding meaning. Same
+// Independent CLI switches (`--ask-permission`/`--ask-permission-kinds`/
+// `--ask-elicitation`/`--ask-elicitation-url`/`--crash-after-prompt`), each a
+// simple on/off flag a test passes in isolation — not overlapping machine
+// states (`Config::gate` already picks at most one of the first four), so an enum would just move
+// the same booleans one level down without adding meaning. Same
 // reasoning as `Turn`'s allow just below.
 #[allow(clippy::struct_excessive_bools)] // #188
 #[derive(Clone)]
@@ -113,6 +118,9 @@ struct Config {
     /// `session/cancel` can land mid-turn and be observed between chunks.
     chunk_delay_ms: u64,
     ask_permission: bool,
+    /// Issue #476: raise a permission request offering one option of every
+    /// ACP kind (and a comma-containing label), echoing the selected option.
+    ask_permission_kinds: bool,
     /// Raise a real multi-field `elicitation/create` (form mode, two enum
     /// properties: `color` single-select, `toppings` multi-select) instead of
     /// a permission request (story #188's answerable-blocking coverage).
@@ -179,6 +187,9 @@ struct Turn {
     /// been sent, so the remaining chunks then stream out without a second
     /// `running`.
     resumed_running: bool,
+    /// The `optionId` the client's permission answer selected (issue #476),
+    /// echoed on resume under `--ask-permission-kinds`.
+    selected: Option<String>,
 }
 
 /// Which gate (if any) this stub invocation raises mid-turn, and the fixed
@@ -186,6 +197,7 @@ struct Turn {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum GateKind {
     Permission,
+    PermissionKinds,
     Elicitation,
     ElicitationUrl,
 }
@@ -256,6 +268,7 @@ fn parse_args() -> Config {
         chunks: 3,
         chunk_delay_ms: 50,
         ask_permission: false,
+        ask_permission_kinds: false,
         ask_elicitation: false,
         ask_elicitation_url: false,
         crash_after_prompt: false,
@@ -276,6 +289,7 @@ fn parse_args() -> Config {
             }
             "--slow" => cfg.chunk_delay_ms = 200,
             "--ask-permission" => cfg.ask_permission = true,
+            "--ask-permission-kinds" => cfg.ask_permission_kinds = true,
             "--ask-elicitation" => cfg.ask_elicitation = true,
             "--ask-elicitation-url" => cfg.ask_elicitation_url = true,
             "--crash-after-prompt" => cfg.crash_after_prompt = true,
@@ -472,6 +486,7 @@ fn route(
                     awaiting_gate: false,
                     gate_raised: false,
                     resumed_running: false,
+                    selected: None,
                 });
             }
         }
@@ -523,6 +538,7 @@ fn route(
                 if let Some(t) = turn.as_mut() {
                     if t.awaiting_gate {
                         t.awaiting_gate = false;
+                        t.selected = selected_option_id(msg);
                     }
                 }
             } else {
@@ -570,6 +586,7 @@ fn drain(
                 if let Some(t) = turn.as_mut() {
                     if t.awaiting_gate {
                         t.awaiting_gate = false;
+                        t.selected = selected_option_id(&front);
                     }
                 }
                 continue;
@@ -603,65 +620,6 @@ fn drain(
         if advance(cfg, lock, t) {
             *turn = None;
         }
-    }
-}
-
-/// Send the one outbound request that raises `kind`'s gate (the permission or
-/// elicitation ask). Split out of `advance` purely to keep that function under
-/// the workspace's 100-line-per-function guard (`clippy::too_many_lines`) —
-/// this is a single `match` with no state of its own.
-fn send_gate_request(lock: &mut impl Write, kind: GateKind) {
-    match kind {
-        GateKind::Permission => send_request(
-            lock,
-            PERMISSION_REQUEST_ID,
-            "session/request_permission",
-            json!({
-                "sessionId": SESSION_ID,
-                "title": "stub tool wants to run",
-                "toolCall": { "title": "stub tool" },
-                "options": [
-                    { "optionId": "allow", "name": "Allow", "kind": "allow_once" },
-                    { "optionId": "deny",  "name": "Deny",  "kind": "reject_once" }
-                ]
-            }),
-        ),
-        GateKind::Elicitation => send_request(
-            lock,
-            ELICITATION_REQUEST_ID,
-            "elicitation/create",
-            json!({
-                "mode": "form",
-                "sessionId": SESSION_ID,
-                "message": "pick your options",
-                "requestedSchema": {
-                    "type": "object",
-                    "properties": {
-                        "color": { "type": "string", "enum": ["red", "blue"] },
-                        "size": {
-                            "type": "string",
-                            "oneOf": [
-                                { "const": "s", "title": "Small" },
-                                { "const": "m", "title": "Medium" }
-                            ]
-                        }
-                    },
-                    "required": ["color", "size"]
-                }
-            }),
-        ),
-        GateKind::ElicitationUrl => send_request(
-            lock,
-            ELICITATION_REQUEST_ID,
-            "elicitation/create",
-            json!({
-                "mode": "url",
-                "sessionId": SESSION_ID,
-                "elicitationId": "elic-1",
-                "url": "https://example.invalid/consent",
-                "message": "open this url to continue"
-            }),
-        ),
     }
 }
 
@@ -732,6 +690,7 @@ fn advance(cfg: &Config, lock: &mut impl Write, t: &mut Turn) -> bool {
                 awaiting_gate: false,
                 gate_raised: false,
                 resumed_running: false,
+                selected: None,
             };
             true
         }
@@ -793,6 +752,20 @@ fn advance(cfg: &Config, lock: &mut impl Write, t: &mut Turn) -> bool {
                     "update": { "sessionUpdate": "state_update", "state": "running" }
                 }),
             );
+            if cfg.gate() == Some(GateKind::PermissionKinds) {
+                let selected = t.selected.clone().unwrap_or_else(|| "<none>".to_string());
+                send_notification(
+                    lock,
+                    json!({
+                        "sessionId": SESSION_ID,
+                        "update": {
+                            "sessionUpdate": "agent_message_chunk",
+                            "messageId": "stub-message",
+                            "content": { "type": "text", "text": format!("stub selected {selected} ") }
+                        }
+                    }),
+                );
+            }
             false
         }
         // Streaming (started, not parked, not yet done): emit the next
