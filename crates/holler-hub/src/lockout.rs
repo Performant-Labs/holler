@@ -73,11 +73,39 @@ impl LockoutLimits {
 /// while the peer merely has failures accumulating in the current window —
 /// distinct from `count` reaching `max_failures`, which is when the peer
 /// actually trips.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct PeerState {
     window_start: u64,
     count: u64,
     tripped_since: Option<u64>,
+    /// The reason code of each counted failure (bounded by
+    /// [`MAX_RECORDED_REASONS`]), so the trip can be logged with *why* the
+    /// peer was locked out (issue #450).
+    reasons: Vec<&'static str>,
+}
+
+/// Cap on the per-peer reason list; a peer hammering past its trip keeps the
+/// most recent entries only.
+const MAX_RECORDED_REASONS: usize = 16;
+
+/// What one recorded failure did to its peer's lockout state (issue #450).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FailureOutcome {
+    /// Failures counted in the current window, including this one.
+    pub count: u64,
+    /// The limit at which the peer trips.
+    pub max: u64,
+    /// This failure moved the peer from accumulating to locked out.
+    pub newly_tripped: bool,
+    /// The peer is locked out after this failure (newly or already).
+    pub locked_out: bool,
+    /// The reasons of the failures counted so far, oldest first.
+    pub reasons: Vec<&'static str>,
+    /// Cooldown length, and how long until it lapses, in milliseconds.
+    pub duration_ms: u64,
+    pub retry_after_ms: u64,
+    /// Peers whose cooldown had lapsed and were dropped by this call.
+    pub cleared: Vec<IpAddr>,
 }
 
 /// The shared lockout state.
@@ -134,46 +162,95 @@ impl Lockout {
     /// Reset the failure count for `peer` (a successful authentication
     /// clears any in-window strikes). If the peer is currently locked out,
     /// the cooldown is also lifted.
-    pub fn reset(&self, peer: &IpAddr) {
-        self.peers.lock().unwrap_or_else(|e| e.into_inner()).remove(peer);
+    /// Returns `true` if a lockout (a trip, not mere accumulating strikes)
+    /// was lifted.
+    pub fn reset(&self, peer: &IpAddr) -> bool {
+        let removed = self.peers.lock().unwrap_or_else(|e| e.into_inner()).remove(peer);
+        removed.is_some_and(|s| s.tripped_since.is_some())
     }
 
     /// Record an authentication failure for `peer`. Returns `true` if this
     /// failure **tripped** the lockout (the peer is now refused for the
     /// cooldown).
     pub fn record_failure(&self, peer: &IpAddr) -> bool {
+        let o = self.record_failure_detailed(peer, "unspecified");
+        o.locked_out
+    }
+
+    /// [`Self::record_failure`], reporting what happened (issue #450): the
+    /// failure count in the window, whether this failure newly tripped the
+    /// lockout, the recorded reasons, and any peers whose cooldown lapsed.
+    pub fn record_failure_detailed(&self, peer: &IpAddr, reason: &'static str) -> FailureOutcome {
         let now = self.clock.now_ms();
         let mut map = self.peers.lock().unwrap_or_else(|e| e.into_inner());
-        // Drop stale entries: a tripped peer whose cooldown has lapsed, or a
-        // merely-accumulating peer whose window has lapsed with no trip.
-        map.retain(|_, s| match s.tripped_since {
-            Some(since) => now.saturating_sub(since) < self.limits.duration_ms,
-            None => now.saturating_sub(s.window_start) < self.limits.window_ms,
-        });
+        let cleared = Self::drop_stale(&mut map, now, self.limits);
 
         let entry = map.entry(*peer).or_insert(PeerState {
             window_start: now,
             count: 0,
             tripped_since: None,
+            reasons: Vec::new(),
         });
 
+        let mut newly_tripped = false;
         if entry.tripped_since.is_some() {
             entry.tripped_since = Some(now);
-            return true;
+        } else {
+            if now.saturating_sub(entry.window_start) >= self.limits.window_ms {
+                entry.window_start = now;
+                entry.count = 1;
+                entry.reasons.clear();
+            } else {
+                entry.count += 1;
+            }
+            if entry.reasons.len() >= MAX_RECORDED_REASONS {
+                entry.reasons.remove(0);
+            }
+            entry.reasons.push(reason);
+            if entry.count >= self.limits.max_failures {
+                entry.tripped_since = Some(now);
+                newly_tripped = true;
+            }
         }
+        FailureOutcome {
+            count: entry.count,
+            max: self.limits.max_failures,
+            newly_tripped,
+            locked_out: entry.tripped_since.is_some(),
+            reasons: entry.reasons.clone(),
+            duration_ms: self.limits.duration_ms,
+            retry_after_ms: entry
+                .tripped_since
+                .map_or(0, |since| self.limits.duration_ms.saturating_sub(now.saturating_sub(since))),
+            cleared,
+        }
+    }
 
-        if now.saturating_sub(entry.window_start) >= self.limits.window_ms {
-            entry.window_start = now;
-            entry.count = 1;
-        } else {
-            entry.count += 1;
-        }
-        if entry.count >= self.limits.max_failures {
-            entry.tripped_since = Some(now);
-            true
-        } else {
-            false
-        }
+    /// Drop lapsed entries now and report the peers whose *cooldown* lapsed
+    /// (issue #450's `lockout_cleared reason=expired`). Called on every
+    /// accepted connection, so a lapse is reported promptly even if the
+    /// peer never returns.
+    pub fn sweep(&self) -> Vec<IpAddr> {
+        let now = self.clock.now_ms();
+        let mut map = self.peers.lock().unwrap_or_else(|e| e.into_inner());
+        Self::drop_stale(&mut map, now, self.limits)
+    }
+
+    /// Remove tripped peers whose cooldown has lapsed and accumulating peers
+    /// whose window has lapsed with no trip; return the former.
+    fn drop_stale(map: &mut HashMap<IpAddr, PeerState>, now: u64, limits: LockoutLimits) -> Vec<IpAddr> {
+        let mut cleared = Vec::new();
+        map.retain(|ip, s| match s.tripped_since {
+            Some(since) => {
+                let live = now.saturating_sub(since) < limits.duration_ms;
+                if !live {
+                    cleared.push(*ip);
+                }
+                live
+            }
+            None => now.saturating_sub(s.window_start) < limits.window_ms,
+        });
+        cleared
     }
 }
 
@@ -297,5 +374,55 @@ mod tests {
             assert!(!lockout.record_failure(&ip));
         }
         assert!(!lockout.is_locked_out(&ip));
+    }
+
+    /// Issue #450: the detailed outcome reports the in-window count, the
+    /// reasons, and exactly one `newly_tripped` at the trip.
+    #[test]
+    fn detailed_outcome_counts_reasons_and_reports_the_trip_once() {
+        let lockout = lockout_with(FakeClock::new());
+        let ip = peer();
+        for n in 1..5u64 {
+            let o = lockout.record_failure_detailed(&ip, "token_expired");
+            assert_eq!((o.count, o.max, o.newly_tripped, o.locked_out), (n, 5, false, false));
+        }
+        let o = lockout.record_failure_detailed(&ip, "bad_proof");
+        assert!(o.newly_tripped && o.locked_out, "the 5th failure trips");
+        assert_eq!(o.reasons, vec!["token_expired", "token_expired", "token_expired", "token_expired", "bad_proof"]);
+        assert_eq!((o.duration_ms, o.retry_after_ms), (10_000, 10_000));
+        let again = lockout.record_failure_detailed(&ip, "token_expired");
+        assert!(again.locked_out && !again.newly_tripped, "a failure while locked out is not a second trip");
+    }
+
+    /// Issue #450: a lapsed cooldown is reported once, by `sweep`, and the
+    /// peer starts a fresh window afterwards.
+    #[test]
+    fn a_lapsed_cooldown_is_reported_once_by_sweep() {
+        let clock = FakeClock::new();
+        let lockout = lockout_with(clock.clone());
+        let ip = peer();
+        for _ in 0..5 {
+            lockout.record_failure_detailed(&ip, "token_expired");
+        }
+        assert!(lockout.sweep().is_empty(), "still locked out: nothing has lapsed");
+        clock.advance(10_000);
+        assert_eq!(lockout.sweep(), vec![ip], "the lapsed cooldown is reported");
+        assert!(lockout.sweep().is_empty(), "and only once");
+        assert!(!lockout.is_locked_out(&ip));
+        assert_eq!(lockout.record_failure_detailed(&ip, "token_expired").count, 1, "a fresh window");
+    }
+
+    /// Issue #450: `reset` says whether it lifted a real lockout, not just
+    /// mere accumulating strikes.
+    #[test]
+    fn reset_reports_only_a_lifted_lockout() {
+        let lockout = lockout_with(FakeClock::new());
+        let ip = peer();
+        lockout.record_failure_detailed(&ip, "token_expired");
+        assert!(!lockout.reset(&ip), "one strike is not a lockout");
+        for _ in 0..5 {
+            lockout.record_failure_detailed(&ip, "token_expired");
+        }
+        assert!(lockout.reset(&ip), "a tripped peer's lockout is lifted");
     }
 }

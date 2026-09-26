@@ -324,6 +324,18 @@ Every event carries a `component`, identifying which layer of a `say`/`interrupt
 
 Because the ACP SDK holler pins (`agent-client-protocol` 2.1.0) spawns and owns its child process internally, it exposes no pid or exit-status accessor to this codebase — `acp`'s spawn/child-exit events report `command`/`args`/`cwd` and "connection closed", not a pid, which is the most this driver can observe without forking the SDK.
 
+**Authentication events (hub, always emitted).** A rejected `circuit/authenticate` and the lockout it feeds are `warn` events, so they appear at the default level with no `--debug`:
+
+| event | fields | meaning |
+| ----- | ------ | ------- |
+| `auth_rejected` | `peer`, `token_id`, `reason`, `failures` (`n/max` in the current window) | One refused authentication. `reason` is a stable code: `token_expired`, `token_unknown`, `token_not_bound` (revoked or never joined), `no_public_key`, `key_mismatch`, `prove_timeout`, `protocol_error`, `handshake_failed`, or the catch-all `auth_failed`. Only the public token id is logged, never a secret. |
+| `lockout_tripped` | `peer`, `failures`, `reasons` (e.g. `token_expiredx5`), `duration_ms`, `retry_after_s` | The peer reached the failure limit (5 in 10 minutes by default) and is refused for the cooldown. Logged once per trip. |
+| `lockout_cleared` | `peer`, `why` (`expired` or `authenticated`) | A lockout ended: the cooldown lapsed, or the peer authenticated successfully. |
+| `lockout_refused` | `peer` | A connection from a locked-out peer was refused before any frame was read. |
+
+The lockout is keyed by the peer's transport address, so behind a reverse proxy every client shares one bucket ([#455](https://github.com/Performant-Labs/holler/issues/455)).
+
+
 ## Dev scripts
 
 From a source checkout, `./scripts/run <name>` runs the org-convention

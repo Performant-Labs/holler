@@ -21,6 +21,7 @@
 
 use futures_util::{Sink, Stream};
 use holler_proto::noise::{HandshakeXk, NOISE_MESSAGE_ONE_REJECTED_REASON};
+use holler_proto::log::Severity;
 use holler_proto::{Authenticate, Code};
 use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 
@@ -28,7 +29,7 @@ use crate::live::Registry;
 use crate::serve::{close, send_error_with_reason};
 use crate::state::HubState;
 
-use super::{next_envelope, PROVE_TIMEOUT};
+use super::{log, next_envelope, PROVE_TIMEOUT};
 
 /// [`super::handle_authenticated`]'s shared hub-wide dependencies, bundled
 /// purely to keep that fn's own argument count under clippy's
@@ -72,12 +73,69 @@ pub(super) async fn refuse_unauthenticated<Snk>(
 ) where
     Snk: Sink<Message, Error = WsError> + Unpin,
 {
-    if let Ok(ip) = peer_ip.parse() {
-        deps.lockout.record_failure(&ip);
-    }
+    let code = rejection_reason(message);
+    let outcome = peer_ip.parse().ok().map(|ip| deps.lockout.record_failure_detailed(&ip, code));
+    log_rejection(peer_ip, token_id, code, outcome.as_ref());
     send_error_with_reason(sink, id, Code::Unauthenticated, message, reason).await;
     close(sink).await;
     deps.roster.clear(token_id);
+}
+
+/// A stable reason code for a rejected `circuit/authenticate`, derived from
+/// the refusal message (issue #450). Codes are what operators grep for, so
+/// they never change with the message wording; anything unrecognized is
+/// `auth_failed`.
+pub(super) fn rejection_reason(message: &str) -> &'static str {
+    const RULES: &[(&str, &str)] = &[
+        ("is expired", "token_expired"),
+        ("no such token", "token_unknown"),
+        ("is not bound", "token_not_bound"),
+        ("no public key on record", "no_public_key"),
+        ("no X25519 public key on record", "no_public_key"),
+        ("static key mismatch", "key_mismatch"),
+        ("no circuit/prove within the timeout", "prove_timeout"),
+        ("circuit/prove", "protocol_error"),
+        ("handshake", "handshake_failed"),
+        ("pairing SAS", "handshake_failed"),
+    ];
+    RULES.iter().find(|(needle, _)| message.contains(needle)).map_or("auth_failed", |(_, code)| code)
+}
+
+/// Log one rejected authentication at `Warn` (visible at the default log
+/// level) and, when it moved the peer into a lockout, the trip itself
+/// (issue #450). Only the public token id is logged, never a secret.
+fn log_rejection(peer_ip: &str, token_id: &str, reason: &'static str, outcome: Option<&crate::lockout::FailureOutcome>) {
+    let failures = outcome.map_or_else(|| "?".to_string(), |o| format!("{}/{}", o.count, o.max));
+    log(
+        Severity::Warn,
+        "auth_rejected",
+        vec![("peer", peer_ip.to_string()), ("token_id", token_id.to_string()), ("reason", reason.to_string()), ("failures", failures)],
+    );
+    let Some(o) = outcome else { return };
+    if o.newly_tripped {
+        let mut grouped: Vec<(&str, usize)> = Vec::new();
+        for r in &o.reasons {
+            match grouped.iter_mut().find(|(g, _)| g == r) {
+                Some((_, n)) => *n += 1,
+                None => grouped.push((r, 1)),
+            }
+        }
+        let reasons = grouped.iter().map(|(r, n)| format!("{r}x{n}")).collect::<Vec<_>>().join(",");
+        log(
+            Severity::Warn,
+            "lockout_tripped",
+            vec![
+                ("peer", peer_ip.to_string()),
+                ("failures", o.count.to_string()),
+                ("reasons", reasons),
+                ("duration_ms", o.duration_ms.to_string()),
+                ("retry_after_s", (o.retry_after_ms / 1000).to_string()),
+            ],
+        );
+    }
+    for ip in &o.cleared {
+        log(Severity::Warn, "lockout_cleared", vec![("peer", ip.to_string()), ("why", "expired".to_string())]);
+    }
 }
 
 /// Step 0 of `circuit/authenticate` → `circuit/prove` (issue #340): check
@@ -303,7 +361,9 @@ where
         return None;
     }
     if let Ok(ip) = peer_ip.parse() {
-        deps.lockout.reset(&ip);
+        if deps.lockout.reset(&ip) {
+            log(Severity::Warn, "lockout_cleared", vec![("peer", ip.to_string()), ("why", "authenticated".to_string())]);
+        }
     }
     Some(record)
 }
@@ -311,6 +371,7 @@ where
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable)] // #338
 mod tests {
+    use super::rejection_reason;
     use holler_proto::noise::{build_prologue, HandshakeXk};
     use holler_proto::{Authenticate, AuthChallenge, Prove};
     use x25519_dalek::{PublicKey, StaticSecret};
@@ -467,5 +528,29 @@ mod tests {
             Some(hex::encode(registered_body_public)),
             "the application-level comparison against the token's registered key is what actually rejects this — mirrored by finish_prove"
         );
+    }
+
+    /// Issue #450: every refusal the hub can produce maps to a stable code;
+    /// the token errors are the ones operators actually hit.
+    #[test]
+    fn rejection_reasons_are_stable_codes() {
+        let cases = [
+            ("authentication failed: token tok_x is expired", "token_expired"),
+            ("authentication failed: no such token tok_x", "token_unknown"),
+            ("authentication failed: token tok_x is not bound", "token_not_bound"),
+            ("authentication failed: token tok_x has no public key on record", "no_public_key"),
+            ("authentication failed: no X25519 public key on record", "no_public_key"),
+            ("authentication failed: static key mismatch", "key_mismatch"),
+            ("authentication failed: no circuit/prove within the timeout", "prove_timeout"),
+            ("authentication failed: expected circuit/prove", "protocol_error"),
+            ("authentication failed: circuit/prove token_id mismatch", "protocol_error"),
+            ("authentication failed: bad handshake message", "handshake_failed"),
+            ("authentication failed: incomplete handshake", "handshake_failed"),
+            ("authentication failed: could not derive the pairing SAS", "handshake_failed"),
+            ("something the hub has never said", "auth_failed"),
+        ];
+        for (message, code) in cases {
+            assert_eq!(rejection_reason(message), code, "{message}");
+        }
     }
 }

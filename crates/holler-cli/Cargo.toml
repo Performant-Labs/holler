@@ -41,6 +41,10 @@ path = "tests/stub-acp-v1/main.rs"
 # the stub-acp dir from spawning a colliding auto-detected target), every real
 # test under tests/ must be declared here or it silently stops building.
 [[test]]
+name = "auth_rejection_log_test"
+path = "tests/auth_rejection_log_test.rs"
+
+[[test]]
 name = "cli_invocation_test"
 path = "tests/cli_invocation_test.rs"
 

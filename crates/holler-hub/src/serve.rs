@@ -701,6 +701,9 @@ async fn admit_preauth(
     // only expressible once the socket has upgraded, so the handshake must
     // still have completed by the time this runs), but nothing past that
     // point is read from a locked-out peer.
+    for ip in lockout.sweep() {
+        warn(Component::Wire, "lockout_cleared", format!("peer={ip} why=expired"));
+    }
     if lockout.is_locked_out(&addr.ip()) {
         warn(Component::Wire, "lockout_refused", format!("peer={peer} refused: locked out"));
         close_with_code(sink, 1008, "auth refused: too many failures").await;

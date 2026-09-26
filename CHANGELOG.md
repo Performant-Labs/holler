@@ -8,6 +8,7 @@ fills this file in at release time.
 ## [Unreleased]
 
 ### Enhancements
+- The hub now logs every rejected authentication (`auth_rejected`, with a stable `reason` such as `token_expired`, the token id and the failure count) and the lockout lifecycle (`lockout_tripped`, `lockout_cleared`) as `warn` events, visible at the default log level. Previously an expired token silently tripped a peer-wide lockout and only `lockout_refused` was ever logged ([#450](https://github.com/Performant-Labs/holler/issues/450), part of [#431](https://github.com/Performant-Labs/holler/issues/431)).
 - The body's session config now accepts an explicit `[ext.<namespace>]` table (top level) and
   `[session.ext.<namespace>]` table (per session) for other tools' own data, and the setup wizard's
   master-file keys (`hub_host`, `layout`, `[[orchestrator]]`, per-session `remote_host` and
