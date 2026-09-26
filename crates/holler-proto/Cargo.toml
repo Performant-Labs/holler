@@ -3,7 +3,7 @@ name = "holler-proto"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Holler protocol v2: JSON-RPC 2.0 envelope codec, method catalog, error table, name/id newtypes, the A2A object model, and the Noise XK handshake core (no I/O deps)"
+description = "Holler protocol v2: JSON-RPC 2.0 envelope codec, method catalog, error table, name/id newtypes, the A2A object model, the Noise XK handshake core, and the crash-safe state-file writer both roles share (std file I/O only; no network or async deps)"
 
 [lib]
 name = "holler_proto"

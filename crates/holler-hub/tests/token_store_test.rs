@@ -440,3 +440,118 @@ fn bound_record_rejects_unused_token() {
         assert!(err.message.contains("is not bound"), "expires={expires}: {}", err.message);
     }
 }
+
+// --- #483: a kill during a save never corrupts the store --------------------
+
+const SAVE_LOOP_ROOT_ENV: &str = "HOLLER_483_SAVE_LOOP_ROOT";
+const SAVE_LOOP_TOKEN_ENV: &str = "HOLLER_483_SAVE_LOOP_TOKEN";
+
+/// Kills its child on drop, so a failing assertion never leaves a stray
+/// save-loop process behind.
+struct KillOnDrop(std::process::Child);
+
+impl Drop for KillOnDrop {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+/// The child half of `a_kill_during_save_never_leaves_the_store_empty_or_corrupt`:
+/// the parent re-executes this test binary to run only this test, with the
+/// state dir in the environment. It rewrites the whole store in a tight loop
+/// (each `token::delete` is a load-modify-save under the lock) until it is
+/// SIGKILLed. Without the environment it does nothing.
+#[test]
+#[ignore = "child process of a_kill_during_save_never_leaves_the_store_empty_or_corrupt (#483)"]
+fn kill_during_save_child_loop() {
+    let (Ok(root), Ok(token_id)) = (std::env::var(SAVE_LOOP_ROOT_ENV), std::env::var(SAVE_LOOP_TOKEN_ENV)) else {
+        return;
+    };
+    let root = std::path::PathBuf::from(root);
+    let state = HubState::from_root(root.clone());
+    token::delete(&token_id, &state).expect("child: first save");
+    std::fs::write(root.join("child-ready"), b"").expect("child: ready marker");
+    loop {
+        token::delete(&token_id, &state).expect("child: save");
+    }
+}
+
+/// Issue #483: the hub persists `tokens.json` on mint, revoke, bind and the
+/// presence heartbeat. A hub killed in the middle of a save must leave the
+/// old store or the new one, never an empty or partial file (an empty file
+/// made every later authentication fail with "tokens store is corrupted").
+///
+/// A child process saves a padded store in a tight loop and is SIGKILLed at
+/// varied moments, and at once whenever the file is seen empty. The file must
+/// never be seen empty, and after every kill it must be non-empty, parse, and
+/// still hold every record. (A truncate-then-write save fails the first
+/// assertion within a few kills.)
+#[test]
+fn a_kill_during_save_never_leaves_the_store_empty_or_corrupt() {
+    const PADDING: usize = 500;
+    const KILLS: u64 = 40;
+    let dir = Tdir::new();
+    let state = prep(&dir);
+    let minted = token::mint("victim", 3600, &state).expect("mint");
+
+    // Pad the store so every save rewrites a large file (a wider window).
+    let path = dir.tokens_path();
+    let mut rows: Vec<serde_json::Value> =
+        serde_json::from_str(&std::fs::read_to_string(&path).expect("read")).expect("parse");
+    let template = rows[0].clone();
+    for i in 0..PADDING {
+        let mut row = template.clone();
+        row["token_id"] = serde_json::json!(format!("tok_pad{i:06}"));
+        row["label"] = serde_json::json!(format!("pad-{i}"));
+        rows.push(row);
+    }
+    std::fs::write(&path, serde_json::to_string_pretty(&rows).expect("serialize")).expect("write padded store");
+    let expected = token::list(&state).expect("padded store loads").len();
+    assert_eq!(expected, PADDING + 1);
+
+    let exe = std::env::current_exe().expect("current test binary");
+    let ready = dir.root.join("child-ready");
+    for i in 0..KILLS {
+        let _ = std::fs::remove_file(&ready);
+        let child = std::process::Command::new(&exe)
+            .args(["kill_during_save_child_loop", "--exact", "--ignored", "--nocapture", "--test-threads=1"])
+            .env(SAVE_LOOP_ROOT_ENV, &dir.root)
+            .env(SAVE_LOOP_TOKEN_ENV, &minted.record.token_id)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("spawn save-loop child");
+        let mut child = KillOnDrop(child);
+
+        // Wait (bounded) for the child's first completed save.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while !ready.exists() {
+            if let Ok(Some(status)) = child.0.try_wait() {
+                panic!("kill {i}: the save-loop child exited early ({status}); store size {:?}",
+                    std::fs::metadata(&path).map(|m| m.len()));
+            }
+            assert!(std::time::Instant::now() < deadline, "kill {i}: the save-loop child never became ready");
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        // Watch the file for a varied stretch of the save loop, and kill the
+        // child the instant the file is seen empty (the worst moment to die),
+        // or at the end of the stretch. The stretch varies the kill moment.
+        let watch_until = std::time::Instant::now() + std::time::Duration::from_micros(2_000 + (i * 1_777) % 9_000);
+        let mut seen_empty = false;
+        while std::time::Instant::now() < watch_until {
+            if std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0) == 0 {
+                seen_empty = true;
+                break;
+            }
+        }
+        drop(child); // SIGKILL + reap
+
+        let len = std::fs::metadata(&path).expect("tokens.json must still exist").len();
+        assert!(!seen_empty, "kill {i}: tokens.json was observed empty (0 bytes) during a save (killed there; {len} bytes after the kill)");
+        assert!(len > 0, "kill {i}: a kill during a save left tokens.json empty (0 bytes)");
+        let records = token::list(&state)
+            .unwrap_or_else(|e| panic!("kill {i}: the store no longer loads after a kill ({len} bytes): {}", e.message));
+        assert_eq!(records.len(), expected, "kill {i}: a kill during a save lost records");
+    }
+}

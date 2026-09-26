@@ -27,6 +27,7 @@
 
 use std::path::{Path, PathBuf};
 
+use holler_proto::atomic_file::create_atomic;
 use holler_proto::log::{Component, Direction, Event, Severity};
 use x25519_dalek::{PublicKey, StaticSecret};
 
@@ -94,28 +95,42 @@ impl std::error::Error for IdentityError {}
 /// Idempotent and safe to call from both `hub serve` and `hub token mint`
 /// (whichever runs first creates the file; every later caller, including a
 /// restart, loads the same bytes back — `hub_keypair_survives_restart_and_
-/// is_0600` is exactly this round-trip).
+/// is_0600` is exactly this round-trip). The file is created once and
+/// atomically (#483): concurrent first callers all get the one key that was
+/// persisted, and none can read a half-written file.
 pub fn ensure(state: &HubState) -> Result<HubIdentity, IdentityError> {
     ensure_dirs(state).map_err(|e| IdentityError::new(format!("cannot create state dir: {e}")))?;
     let path = identity_path(state);
-    if path.exists() {
-        let bytes = std::fs::read(&path)
-            .map_err(|e| IdentityError::new(format!("cannot read hub identity {}: {e}", path.display())))?;
-        let arr: [u8; KEY_BYTES] = bytes
-            .try_into()
-            .map_err(|_| IdentityError::new(format!("hub identity {} is corrupt (wrong length)", path.display())))?;
-        return Ok(from_bytes(arr));
+    if let Some(identity) = read_key(&path)? {
+        return Ok(identity);
     }
     let mut buf = [0u8; KEY_BYTES];
     getrandom::fill(&mut buf).map_err(|e| IdentityError::new(format!("CSPRNG failure: {e}")))?;
-    std::fs::File::create(&path)
-        .map_err(|e| IdentityError::new(format!("cannot create hub identity {}: {e}", path.display())))?;
-    set_mode_0600(&path);
-    std::fs::write(&path, buf)
-        .map_err(|e| IdentityError::new(format!("cannot write hub identity {}: {e}", path.display())))?;
+    match create_atomic(&path, &buf, 0o600) {
+        Ok(()) => {}
+        // A concurrent caller created the key first: its key is the hub's.
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            return read_key(&path)?
+                .ok_or_else(|| IdentityError::new(format!("hub identity {} exists but could not be read back", path.display())));
+        }
+        Err(e) => return Err(IdentityError::new(format!("cannot create hub identity {}: {e}", path.display()))),
+    }
     let identity = from_bytes(buf);
     emit_identity_generated(&path, &identity.public_hex());
     Ok(identity)
+}
+
+/// Read the persisted keypair, or `None` when there is none yet.
+fn read_key(path: &Path) -> Result<Option<HubIdentity>, IdentityError> {
+    let bytes = match std::fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(IdentityError::new(format!("cannot read hub identity {}: {e}", path.display()))),
+    };
+    let arr: [u8; KEY_BYTES] = bytes
+        .try_into()
+        .map_err(|_| IdentityError::new(format!("hub identity {} is corrupt (wrong length)", path.display())))?;
+    Ok(Some(from_bytes(arr)))
 }
 
 fn from_bytes(bytes: [u8; KEY_BYTES]) -> HubIdentity {
@@ -123,14 +138,6 @@ fn from_bytes(bytes: [u8; KEY_BYTES]) -> HubIdentity {
     let public = PublicKey::from(&secret);
     HubIdentity { secret, public }
 }
-
-#[cfg(unix)]
-fn set_mode_0600(path: &Path) {
-    use std::os::unix::fs::PermissionsExt;
-    let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
-}
-#[cfg(not(unix))]
-fn set_mode_0600(_path: &Path) {}
 
 /// Emit the `hub_identity_generated` info event: the path and the (public,
 /// safe-to-log) fingerprint only — the private key is never handed to this

@@ -29,6 +29,7 @@
 
 use std::path::{Path, PathBuf};
 
+use holler_proto::atomic_file::create_atomic;
 use holler_proto::log::{Component, Direction, Event, Severity};
 use x25519_dalek::{PublicKey, StaticSecret};
 
@@ -96,30 +97,49 @@ impl std::error::Error for X25519IdentityError {}
 /// Idempotent and safe to call on every `body join`: the first call creates
 /// the file; every later call, including across a process restart, loads
 /// the same bytes back — `body_x25519_keypair_survives_restart_and_is_0600`
-/// is exactly this round-trip.
+/// is exactly this round-trip. The file is created once and atomically
+/// (#483): concurrent first callers all get the one key that was persisted,
+/// and none can read a half-written file.
 pub fn ensure(state_root: &Path) -> Result<BodyX25519Identity, X25519IdentityError> {
     let dir = state_root.join("body");
     std::fs::create_dir_all(&dir)
         .map_err(|e| X25519IdentityError::new(format!("cannot create state dir: {e}")))?;
     let path = identity_path(state_root);
-    if path.exists() {
-        let bytes = std::fs::read(&path)
-            .map_err(|e| X25519IdentityError::new(format!("cannot read body X25519 identity {}: {e}", path.display())))?;
-        let arr: [u8; KEY_BYTES] = bytes.try_into().map_err(|_| {
-            X25519IdentityError::new(format!("body X25519 identity {} is corrupt (wrong length)", path.display()))
-        })?;
-        return Ok(from_bytes(arr));
+    if let Some(identity) = read_key(&path)? {
+        return Ok(identity);
     }
     let mut buf = [0u8; KEY_BYTES];
     getrandom::fill(&mut buf).map_err(|e| X25519IdentityError::new(format!("CSPRNG failure: {e}")))?;
-    std::fs::File::create(&path)
-        .map_err(|e| X25519IdentityError::new(format!("cannot create body X25519 identity {}: {e}", path.display())))?;
-    set_mode_0600(&path);
-    std::fs::write(&path, buf)
-        .map_err(|e| X25519IdentityError::new(format!("cannot write body X25519 identity {}: {e}", path.display())))?;
+    match create_atomic(&path, &buf, 0o600) {
+        Ok(()) => {}
+        // A concurrent caller created the key first: its key is this body's.
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            return read_key(&path)?.ok_or_else(|| {
+                X25519IdentityError::new(format!("body X25519 identity {} exists but could not be read back", path.display()))
+            });
+        }
+        Err(e) => {
+            return Err(X25519IdentityError::new(format!("cannot create body X25519 identity {}: {e}", path.display())));
+        }
+    }
     let identity = from_bytes(buf);
     emit_identity_generated(&path, &identity.public_hex());
     Ok(identity)
+}
+
+/// Read the persisted keypair, or `None` when there is none yet.
+fn read_key(path: &Path) -> Result<Option<BodyX25519Identity>, X25519IdentityError> {
+    let bytes = match std::fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => {
+            return Err(X25519IdentityError::new(format!("cannot read body X25519 identity {}: {e}", path.display())));
+        }
+    };
+    let arr: [u8; KEY_BYTES] = bytes.try_into().map_err(|_| {
+        X25519IdentityError::new(format!("body X25519 identity {} is corrupt (wrong length)", path.display()))
+    })?;
+    Ok(Some(from_bytes(arr)))
 }
 
 fn from_bytes(bytes: [u8; KEY_BYTES]) -> BodyX25519Identity {
@@ -127,14 +147,6 @@ fn from_bytes(bytes: [u8; KEY_BYTES]) -> BodyX25519Identity {
     let public = PublicKey::from(&secret);
     BodyX25519Identity { secret, public }
 }
-
-#[cfg(unix)]
-fn set_mode_0600(path: &Path) {
-    use std::os::unix::fs::PermissionsExt;
-    let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
-}
-#[cfg(not(unix))]
-fn set_mode_0600(_path: &Path) {}
 
 /// Emit the `body_x25519_identity_generated` info event: the path and the
 /// (public, safe-to-log) fingerprint only — the private key is never handed

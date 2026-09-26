@@ -49,19 +49,19 @@ pub fn path(state_root: &Path) -> PathBuf {
     state_root.join("body").join("connection_state.json")
 }
 
-/// Write `doc` atomically: serialize to a sibling temp file, then rename over
-/// the real path (a rename within the same directory is atomic on every OS
-/// this project targets). `body status` never observes a partial write.
+/// Write `doc` atomically at mode 0644, through the hub's and the body's one
+/// state-file writer, `holler_proto::atomic_file::write_atomic` (#483): a
+/// sibling temp file, renamed over the real path (a rename within the same
+/// directory is atomic on every OS this project targets). `body status` never
+/// observes a partial write.
 pub fn write(state_root: &Path, doc: &ConnectionState) -> std::io::Result<()> {
     let final_path = path(state_root);
     let Some(parent) = final_path.parent() else {
         return Err(std::io::Error::other("connection state path has no parent"));
     };
     std::fs::create_dir_all(parent)?;
-    let tmp_path = parent.join(format!(".connection_state.json.{}.tmp", std::process::id()));
     let json = serde_json::to_vec_pretty(doc).map_err(|e| std::io::Error::other(e.to_string()))?;
-    std::fs::write(&tmp_path, json)?;
-    std::fs::rename(&tmp_path, &final_path)
+    holler_proto::atomic_file::write_atomic(&final_path, &json, 0o644)
 }
 
 /// Read the persisted connection state, if any (`None` if the file is absent

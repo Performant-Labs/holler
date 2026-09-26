@@ -45,6 +45,7 @@ use hmac::Mac;
 use sha2::Sha256;
 use subtle::ConstantTimeEq;
 
+use holler_proto::atomic_file::{create_atomic, write_atomic};
 use holler_proto::log::Component;
 use holler_proto::log::Direction;
 use holler_proto::log::Event;
@@ -269,13 +270,15 @@ impl Store {
         })
     }
 
-    /// Persist `records` to `path` (the caller holds the lock).
+    /// Persist `records` to `path` (the caller holds the lock), atomically at
+    /// 0600: a hub killed mid-save leaves the old store or the new one, never
+    /// an empty file (#483).
     fn save(&self, path: &Path) -> Result<(), TokenError> {
         let values: Vec<serde_json::Value> = self.records.iter().map(record_to_value).collect();
         let raw = serde_json::to_string_pretty(&values)
             .map_err(|e| TokenError::new(format!("cannot serialize tokens store: {e}")))?;
-        std::fs::write(path, format!("{raw}\n")).map_err(|e| TokenError::new(format!("cannot write tokens store: {e}")))?;
-        Ok(())
+        write_atomic(path, format!("{raw}\n").as_bytes(), 0o600)
+            .map_err(|e| TokenError::new(format!("cannot write tokens store: {e}")))
     }
 
     fn by_mut(&mut self, token_id: &str) -> Option<&mut Record> {
@@ -458,35 +461,22 @@ fn resolve_pepper_uncached(state: &HubState) -> Result<Vec<u8>, TokenError> {
         return Ok(bytes);
     }
     let path = pepper_path(state);
-    if path.exists() {
-        let bytes = std::fs::read(&path)
-            .map_err(|e| TokenError::new(format!("cannot read pepper {}: {e}", path.display())))?;
-        return Ok(bytes);
+    let read_failed = |e: std::io::Error| TokenError::new(format!("cannot read pepper {}: {e}", path.display()));
+    match std::fs::read(&path) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        read => return read.map_err(read_failed),
     }
-    // Neither env nor file: autogenerate. This is the spec's replacement for
-    // the old shell-script step.
+    // Neither env nor file: autogenerate (the spec's replacement for the old
+    // shell-script step), created once and atomically at 0600 (#483). When a
+    // concurrent creator won, its pepper is the one on disk: use that.
     let bytes = random_bytes()?;
-    std::fs::File::create(&path)
-        .map_err(|e| TokenError::new(format!("cannot create pepper {}: {e}", path.display())))?;
-    set_mode_0600(&path);
-    std::fs::write(&path, &bytes)
-        .map_err(|e| TokenError::new(format!("cannot write pepper {}: {e}", path.display())))?;
-    emit_pepper_generated();
+    match create_atomic(&path, &bytes, 0o600) {
+        Ok(()) => emit_pepper_generated(),
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => return std::fs::read(&path).map_err(read_failed),
+        Err(e) => return Err(TokenError::new(format!("cannot create pepper {}: {e}", path.display()))),
+    }
     Ok(bytes)
 }
-
-/// Set a just-created file's mode to 0600 (the pepper is a secret).
-#[cfg(unix)]
-fn set_mode_0600(path: &Path) {
-    use std::os::unix::fs::PermissionsExt;
-    // `File::create` leaves the mode at the default (0644 & umask); tighten it
-    // to owner-only so the pepper is readable by no one else.
-    let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
-}
-
-/// No-op on non-Unix (the spec pins 0600 on Unix; elsewhere the OS default stands).
-#[cfg(not(unix))]
-fn set_mode_0600(_path: &Path) {}
 
 /// Emit the spec's `info pepper_generated` event. The pepper itself is never
 /// logged (the redaction in #144 would hide it, but we never hand it to the

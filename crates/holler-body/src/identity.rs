@@ -147,31 +147,17 @@ impl JoinError {
 }
 
 /// Persist `identity` to `<state>/body/credential.json`, creating the
-/// `body/` directory as needed and setting the file mode to 0600.
+/// `body/` directory as needed. The file is replaced atomically at mode 0600
+/// (#483): a body killed mid-save (a join, a re-join, `body confirm`) leaves
+/// the old credential or the new one, never an empty or partial file, and the
+/// secret signing key is never readable by anyone else, not even briefly.
 pub fn save(identity: &BodyIdentity, state_root: &Path) -> std::io::Result<()> {
     let path = BodyIdentity::path(state_root);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
     let json = serde_json::to_vec_pretty(identity).map_err(io_err)?;
-    std::fs::write(&path, json)?;
-    set_mode_600(&path)?;
-    Ok(())
-}
-
-/// Set `path` to mode 0600 (owner read/write only) — the credential is
-/// secret material and must not be world/group-readable.
-#[cfg(unix)]
-fn set_mode_600(path: &Path) -> std::io::Result<()> {
-    use std::os::unix::fs::PermissionsExt;
-    // Set the mode to 0600 (owner read/write only) via the `mode`-based
-    // constructor. (The test harness asserts `file.mode() & 0o777 == 0o600`,
-    // which is exactly what a 0600 file reports on Unix.)
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
-}
-#[cfg(not(unix))]
-fn set_mode_600(_path: &Path) -> std::io::Result<()> {
-    Ok(())
+    holler_proto::atomic_file::write_atomic(&path, &json, 0o600)
 }
 
 /// Read the persisted identity from `<state>/body/credential.json`; `None` if

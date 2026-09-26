@@ -7,6 +7,7 @@
 
 use std::path::Path;
 use std::process::{Child, Stdio};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use holler_hub::control::{self, ControlError};
@@ -28,7 +29,13 @@ pub struct Rig {
     config: std::path::PathBuf,
     hub_env: Vec<(String, String)>,
     hub_args: Vec<String>,
+    /// Everything the current hub has written to stderr (issue #483), so a
+    /// failed wait can say what the hub was doing.
+    hub_log: HubLog,
 }
+
+/// The lines a hub has written to stderr, shared with the thread draining its pipe.
+type HubLog = Arc<Mutex<Vec<String>>>;
 
 /// A loopback address for a hub that will be **restarted on the same port**.
 /// An OS-assigned ephemeral port would do for a hub that never restarts, but
@@ -56,7 +63,7 @@ pub fn start_hub_on_free_port(state: &StateDir, env: &[(String, String)], args: 
     for _ in 0..8 {
         let addr = free_addr();
         match try_start_hub_at(state, &addr, env, args) {
-            Ok(child) => return (child, addr),
+            Ok((child, _log)) => return (child, addr),
             Err(why) => last = why,
         }
     }
@@ -64,10 +71,15 @@ pub fn start_hub_on_free_port(state: &StateDir, env: &[(String, String)], args: 
 }
 
 pub fn start_hub_at(state: &StateDir, addr: &str, env: &[(String, String)], args: &[String]) -> Child {
+    start_hub_at_logged(state, addr, env, args).0
+}
+
+/// [`start_hub_at`], also returning the hub's stderr history.
+fn start_hub_at_logged(state: &StateDir, addr: &str, env: &[(String, String)], args: &[String]) -> (Child, HubLog) {
     try_start_hub_at(state, addr, env, args).unwrap_or_else(|why| panic!("{why}"))
 }
 
-fn try_start_hub_at(state: &StateDir, addr: &str, env: &[(String, String)], args: &[String]) -> Result<Child, String> {
+fn try_start_hub_at(state: &StateDir, addr: &str, env: &[(String, String)], args: &[String]) -> Result<(Child, HubLog), String> {
     let mut cmd = holler_cmd(state);
     cmd.envs(env.iter().map(|(k, v)| (k.as_str(), v.as_str())));
     cmd.args(["hub", "serve", "--listen", addr]).args(args).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped());
@@ -76,8 +88,8 @@ fn try_start_hub_at(state: &StateDir, addr: &str, env: &[(String, String)], args
     let stderr = child.stderr.take().expect("hub stderr is piped");
     let (tx, rx) = std::sync::mpsc::channel::<()>();
     // Everything the hub wrote to stderr, so a hub that dies at startup says why.
-    let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
-    let seen_w = std::sync::Arc::clone(&seen);
+    let seen: HubLog = Arc::new(Mutex::new(Vec::new()));
+    let seen_w = Arc::clone(&seen);
     std::thread::spawn(move || {
         use std::io::BufRead;
         let mut reader = std::io::BufReader::new(stderr);
@@ -104,7 +116,7 @@ fn try_start_hub_at(state: &StateDir, addr: &str, env: &[(String, String)], args
         let _ = child.wait();
         return Err(format!("hub did not report listening within 10s (listen {addr}; exit status {status:?}); its stderr:\n{log}"));
     }
-    Ok(child)
+    Ok((child, seen))
 }
 
 impl Rig {
@@ -124,10 +136,11 @@ impl Rig {
         let hub_env: Vec<(String, String)> = hub_env.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
         let hub_args: Vec<String> = hub_args.iter().map(|s| s.to_string()).collect();
         let (hub, addr) = start_hub_on_free_port(&hub_state, &hub_env, &hub_args);
+        let hub_log = HubLog::default();
         let (token_id, secret) = mint_token(&hub_state, "b");
         join(&body_state, &hub_state, &format!("ws://{addr}"), &token_id, &secret);
         let config = write_sessions_toml(&body_state, sessions);
-        let mut rig = Rig { hub_state, body_state, addr, hub: Some(hub), body: None, config, hub_env, hub_args };
+        let mut rig = Rig { hub_state, body_state, addr, hub: Some(hub), body: None, config, hub_env, hub_args, hub_log };
         rig.start_body();
         for (name, _) in sessions {
             rig.wait_row(&format!("b/{name}"), |r| r["state"] == "idle");
@@ -157,7 +170,18 @@ impl Rig {
         if let Some(mut h) = self.hub.take() {
             kill_tree(&mut h);
         }
-        self.hub = Some(start_hub_at(&self.hub_state, &self.addr, &self.hub_env, &self.hub_args));
+        let (hub, log) = start_hub_at_logged(&self.hub_state, &self.addr, &self.hub_env, &self.hub_args);
+        self.hub = Some(hub);
+        self.hub_log = log;
+    }
+
+    /// What to print when a wait fails (issue #483): the hub's stderr since its
+    /// last (re)start, the body's log, and the roster as the hub reports it.
+    pub fn diagnostics(&self) -> String {
+        let hub = self.hub_log.lock().map(|v| v.join("\n")).unwrap_or_default();
+        let body = self.body.as_ref().map(Body::log_text).unwrap_or_else(|| "<no body running>".to_string());
+        let tokens = std::fs::metadata(self.hub_state.hub().join("tokens.json")).map(|m| format!("{} bytes", m.len())).unwrap_or_else(|e| format!("unreadable: {e}"));
+        format!("--- hub stderr ({}) ---\n{hub}\n--- body log ---\n{body}\n--- tokens.json: {tokens} ---\n--- roster ---\n{:?}", self.addr, self.rows())
     }
 
     pub fn root(&self) -> &Path {

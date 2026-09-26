@@ -109,6 +109,16 @@ fills this file in at release time.
   listening. Any `--listen` replaces the default rather than adding to it, `hub serve --help` states the
   default, and the accept loop can no longer be built over an empty listener list
   ([#469](https://github.com/Performant-Labs/holler/issues/469)).
+- A hub killed while saving its token store can no longer leave `hub/tokens.json` empty. The store was
+  truncated and then rewritten, so a kill in between left a 0-byte file, and from then on every body's
+  authentication failed with `tokens store is corrupted: EOF while parsing a value` until an operator
+  repaired the file. It is now written to a temporary file in the same directory and renamed into place, so
+  a kill leaves the old store or the new one. The hub's and the body's other state files get the same
+  treatment: `holds.json`, `listening.json`, `advertise.json`, the body's `credential.json` and
+  `connection_state.json`. The token pepper and the hub's and the body's X25519 identity keys are created
+  once, atomically: a process that races another to create one gets the winner's key rather than a second
+  key or a half-written file. `tokens.json` is now mode 0600, like the hub's other private state
+  ([#483](https://github.com/Performant-Labs/holler/issues/483)).
 - `holler answer SESSION once|always|reject` now works for a spawn-mode (ACP) session held on a permission
   request, as `holler answer --help` already said; before, only OpenCode attach sessions accepted these
   words and an ACP session refused them with `does not resolve to any of this field's options`. `once`

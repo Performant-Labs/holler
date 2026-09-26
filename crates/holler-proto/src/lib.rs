@@ -1,7 +1,12 @@
-//! `holler_proto` — the v2 protocol core: types and codec only, no I/O.
+//! `holler_proto` — the v2 protocol core (types and codec), plus the one
+//! crash-safe state-file writer both roles share.
 //!
 //! This crate is the Rust side of `docs/protocol/v2.md`. It owns:
 //!
+//! - [`atomic_file`] — crash-safe writes of the hub's and the body's state
+//!   files (issue #483): `write_atomic` replaces a file, `create_atomic`
+//!   creates one only if it is absent. Its `std::fs` calls are the crate's
+//!   only filesystem access.
 //! - [`a2a`] — the A2A 1.0 object model (`Message`, `Part`, `Role`,
 //!   `TaskState`), reused verbatim on the inward wire (ADR 0004).
 //! - [`envelope`] — the JSON-RPC 2.0 envelope and its codec (framing checks,
@@ -25,6 +30,7 @@
 //! hub and body both link it.
 
 pub mod a2a;
+pub mod atomic_file;
 pub mod clock;
 pub mod docs;
 pub mod envelope;

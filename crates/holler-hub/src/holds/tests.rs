@@ -82,7 +82,13 @@ fn holds_survive_a_reload_and_the_file_is_private() {
         let mode = std::fs::metadata(state.hub_dir.join("holds.json")).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o600);
     }
-    assert!(!state.hub_dir.join("holds.json.tmp").exists(), "no temp file is left behind");
+    let temps: Vec<_> = std::fs::read_dir(&state.hub_dir)
+        .unwrap()
+        .filter_map(Result::ok)
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| n.ends_with(".tmp"))
+        .collect();
+    assert!(temps.is_empty(), "no temp file is left behind: {temps:?}");
 }
 
 #[test]

@@ -411,18 +411,14 @@ async fn serve_forever(
     };
 
     // Record the bound addresses so a `control/status` (same process) can
-    // report them in its `listening` array.
-    let _ = std::fs::write(
-        state.hub_dir.join("listening.json"),
-        serde_json::to_string_pretty(&bound_addrs).unwrap_or_default(),
-    );
+    // report them in its `listening` array. Best effort, and atomic (#483).
+    let listening = serde_json::to_string_pretty(&bound_addrs).unwrap_or_default();
+    let _ = holler_proto::atomic_file::write_atomic(&state.hub_dir.join("listening.json"), listening.as_bytes(), 0o644);
 
-    // Persist the advertise address (used by `token mint`'s join line).
+    // Persist the advertise address (used by `token mint`'s join line), atomically (#483).
     if let Some(adv) = advertise {
-        if let Err(e) = std::fs::write(
-            advertise_path(&state),
-            format!("{{\"advertise\":\"{adv}\"}}\n"),
-        ) {
+        let doc = format!("{{\"advertise\":\"{adv}\"}}\n");
+        if let Err(e) = holler_proto::atomic_file::write_atomic(&advertise_path(&state), doc.as_bytes(), 0o644) {
             warn(
                 Component::Control,
                 "advertise_persist_failed",

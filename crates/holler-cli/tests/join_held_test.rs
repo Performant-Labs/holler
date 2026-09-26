@@ -146,7 +146,7 @@ fn a_hub_restart_voids_a_live_grant_and_keeps_the_session_held() {
     let mut rig = Rig::start_with_args(&[("alpha", &["--chunks", "1"])], &[], JOIN_HELD);
     let g = control::release_once_at(rig.root(), SESSION, Some(Duration::from_secs(600))).unwrap()["grant"].as_str().unwrap().to_string();
     rig.restart_hub();
-    support::wait_for(Duration::from_secs(90), || rig.row(SESSION).filter(|r| r["conn_state"] == "connected")).expect("the body re-joined");
+    support::wait_for(Duration::from_secs(90), || rig.row(SESSION).filter(|r| r["conn_state"] == "connected")).unwrap_or_else(|| panic!("the body re-joined\n{}", rig.diagnostics()));
     let row = rig.row(SESSION).unwrap();
     assert_eq!((row["hold"].as_bool(), row["hold_kind"].as_str()), (Some(true), Some("default")), "the default hold persisted");
     let res = say_with(&rig, SESSION, false, &g);

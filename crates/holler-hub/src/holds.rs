@@ -28,9 +28,10 @@
 //!
 //! # Persistence
 //!
-//! Holds live in `<state dir>/hub/holds.json`, written atomically (a `0600`
-//! temp file in the same directory, then `rename`) the same way the hub's
-//! other state files are kept private. The hub never fails to start over it:
+//! Holds live in `<state dir>/hub/holds.json`, written atomically at `0600`
+//! through the hub's one state-file writer,
+//! `holler_proto::atomic_file::write_atomic` (a temp file in the same
+//! directory, then `rename`; #483). The hub never fails to start over it:
 //!
 //! - **Corrupt file** (unparseable, or a shape this version does not know):
 //!   it is moved aside to `holds.json.corrupt-<unix time>` (never
@@ -483,7 +484,8 @@ impl Holds {
             let st = self.state();
             FileDoc { version: FILE_VERSION, holds: st.operator.clone(), default_holds: st.default.clone() }
         };
-        match write_atomic(&path, &doc) {
+        let body = serde_json::to_vec_pretty(&doc).map_err(std::io::Error::other);
+        match body.and_then(|body| holler_proto::atomic_file::write_atomic(&path, &body, 0o600)) {
             Ok(()) => {
                 persist.unsaved = false;
                 true
@@ -568,28 +570,6 @@ fn set_aside(path: &std::path::Path, why: &str) -> (FileDoc, bool) {
             (FileDoc::default(), true)
         }
     }
-}
-
-/// Write `doc` to `path` atomically: a `0600` temp file beside it, synced,
-/// then renamed over it.
-fn write_atomic(path: &std::path::Path, doc: &FileDoc) -> std::io::Result<()> {
-    use std::io::Write;
-    let tmp = path.with_extension("json.tmp");
-    let mut opts = std::fs::OpenOptions::new();
-    opts.write(true).create(true).truncate(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        opts.mode(0o600);
-    }
-    let mut file = opts.open(&tmp)?;
-    let body = serde_json::to_vec_pretty(doc).map_err(std::io::Error::other)?;
-    file.write_all(&body)?;
-    file.sync_all()?;
-    drop(file);
-    std::fs::rename(&tmp, path).inspect_err(|_| {
-        let _ = std::fs::remove_file(&tmp);
-    })
 }
 
 #[cfg(test)]
