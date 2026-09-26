@@ -589,6 +589,39 @@ impl Roster {
         }
     }
 
+    /// [`Roster::set_turn_id`], returning the `turn_id` the row had before (issue
+    /// #442), so a prompt the session hold then refuses can undo exactly its own
+    /// change with [`Roster::undo_turn_id`]. `None` when no row matched.
+    pub fn replace_turn_id(&self, token_id: &str, bare_name: &str, turn_id: &str) -> Option<Option<String>> {
+        let mut inner = self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut prev = None;
+        for row in inner.rows.values_mut() {
+            if row.token_id == token_id && row_matches_bare(&row.name, bare_name) {
+                prev = Some(row.turn_id.replace(turn_id.to_string()));
+            }
+        }
+        if prev.is_some() {
+            inner.bump_gen();
+        }
+        prev
+    }
+
+    /// Put `prev` back as the row's `turn_id`, but only if it is still `ours`: a
+    /// newer turn's id is never overwritten (issue #442).
+    pub fn undo_turn_id(&self, token_id: &str, bare_name: &str, ours: &str, prev: Option<String>) {
+        let mut inner = self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut changed = false;
+        for row in inner.rows.values_mut() {
+            if row.token_id == token_id && row_matches_bare(&row.name, bare_name) && row.turn_id.as_deref() == Some(ours) {
+                row.turn_id = prev.clone();
+                changed = true;
+            }
+        }
+        if changed {
+            inner.bump_gen();
+        }
+    }
+
     /// Set a row's `last_turn` directly (issue #142): called the instant a
     /// turn's `session/prompt` response lands, so the roster row is
     /// authoritative even between presence beats (the hub also receives the

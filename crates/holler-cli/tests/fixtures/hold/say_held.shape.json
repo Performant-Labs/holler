@@ -1,0 +1,6 @@
+{
+  "error": "string",
+  "session": "string",
+  "reason": "string",
+  "since": "string"
+}

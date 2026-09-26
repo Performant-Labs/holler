@@ -311,7 +311,7 @@ async fn send_turn(
     // dispatched, ahead of the body's next presence heartbeat — so a `wait
     // --after <prev turn_id>` started right after this call already sees a
     // fresh in-flight turn rather than the stale one it was watermarked on.
-    roster.set_turn_id(&handle.token_id, ad.name.as_str(), &request_id);
+    let prev_turn_id = roster.replace_turn_id(&handle.token_id, ad.name.as_str(), &request_id).flatten();
 
     append_talklog(state, &handle.hostname, ad.name.as_str(), &TalkLine::Prompt {
         prompt_id: request_id.clone(),
@@ -345,10 +345,9 @@ async fn send_turn(
                 if err.code == holler_proto::Code::SessionHeld.jsonrpc() {
                     // The hold was set after `say`'s own pre-check but before
                     // the prompt reached `send_prompt` (issue #442): nothing
-                    // was delivered, so undo the turn id moved above.
-                    if let Some(prev) = &ad.turn_id {
-                        roster.set_turn_id(&handle.token_id, ad.name.as_str(), prev);
-                    }
+                    // was delivered, so undo the turn id moved above (only if it
+                    // is still ours: a newer turn's id is left alone).
+                    roster.undo_turn_id(&handle.token_id, ad.name.as_str(), &request_id, prev_turn_id);
                 }
                 Err(SayError::Refused(err))
             }
