@@ -32,6 +32,16 @@ impl Samples {
         self.micros.push(d.as_micros().min(u128::from(u64::MAX)) as u64);
     }
 
+    /// Fold another collector's observations into this one.
+    pub fn extend(&mut self, other: &Samples) {
+        self.micros.extend_from_slice(&other.micros);
+    }
+
+    /// How many observations were recorded.
+    pub fn count(&self) -> usize {
+        self.micros.len()
+    }
+
     /// Summarize. `None` for an empty collector — a statistic over nothing is
     /// a fabricated number, and this harness exists to not publish those.
     pub fn stats(&self) -> Option<LatencyStats> {
@@ -376,6 +386,9 @@ pub struct Report {
     /// `*_delta_*` field is relative to this.
     pub hub_baseline: ResourceSample,
     pub steps: Vec<StepReport>,
+    /// The `session-hold` scenario's own report (issue #444).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hold: Option<crate::hold_report::HoldReport>,
 }
 
 /// Where the numbers were measured. #369 is explicit that a load number
@@ -449,6 +462,9 @@ pub fn human_table(report: &Report) -> String {
 
     for step in &report.steps {
         out.push_str(&step_extra_lines(step));
+    }
+    if let Some(hold) = &report.hold {
+        out.push_str(&crate::hold_report::lines(hold));
     }
     out
 }
