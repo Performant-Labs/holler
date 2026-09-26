@@ -768,7 +768,7 @@ async fn a_corrupt_token_store_is_hub_unavailable_and_never_locks_the_peer_out()
     drop(ws);
     let mut ws = connect_ws(&ws_url).await;
     let err = send_authenticate(&mut ws, &token_id, &[200u8; 32], &hub_pubkey, "fault-body", &ws_url).await.expect_err("a wrong key");
-    assert_eq!(err.data.as_ref().and_then(|d| d.reason.as_deref()), None, "a credential failure is not hub_unavailable: {err:?}");
+    assert_eq!(err.data.as_ref().and_then(|d| d.reason.as_deref()), Some("key_mismatch"), "a credential failure names its code: {err:?}");
     let doc = hub_status_json(&state);
     let peers = &doc["lockout"]["peers"];
     assert_eq!(peers[0]["failures"], 1, "a credential failure is still counted: {doc}");

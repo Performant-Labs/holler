@@ -79,7 +79,7 @@ pub enum RunExit {
     Ok,
     /// This body has never joined: the bin exits 1.
     NotJoined,
-    /// The hub rejected the credential (`-32002`): the bin exits 1, no retry.
+    /// The hub rejected the credential (`-32002` except `hub_unavailable`): the bin exits 1, no retry.
     AuthFailed(String),
     /// A state-dir I/O failure: the bin exits 1.
     Io(String),
@@ -155,10 +155,11 @@ pub fn run(state_root: &Path, registry: SessionRegistry) -> RunExit {
 pub(crate) enum Attempt {
     /// `detach` fired, or a signal arrived: stop for good.
     Ended(RunExit),
-    /// The hub rejected the authentication proof, or this connection's hub
-    /// `circuit/hello` carried a public key that does not match the one
-    /// pinned at `body join` (issue #322: a hard failure, never a prompt,
-    /// never trust-on-first-use): stop for good, no retry.
+    /// The hub refused the authentication (a `-32002` other than
+    /// `hub_unavailable`, which is `Dropped`, issue #486), or this
+    /// connection's hub `circuit/hello` carried a public key that does not
+    /// match the one pinned at `body join` (issue #322: a hard failure, never
+    /// a prompt, never trust-on-first-use): stop for good, no retry.
     AuthFailed(String),
     /// The socket dropped (connect failure, decode error, liveness timeout,
     /// hub close): back off and retry.
@@ -166,8 +167,9 @@ pub(crate) enum Attempt {
 }
 
 /// The reconnect loop: connect, authenticate, hello, then live until the
-/// circuit ends. A dropped circuit backs off (full jitter, 1s..30s) and
-/// tries again, forever, until a clean end or an unretryable auth failure.
+/// circuit ends. A dropped circuit, or a `hub_unavailable` refusal (issue
+/// #486), backs off (full jitter, 1s..30s) and tries again, forever, until a
+/// clean end or an unretryable auth failure (any other `-32002`).
 async fn run_loop(
     state_root: &Path,
     identity: &BodyIdentity,

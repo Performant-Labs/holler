@@ -1,0 +1,12 @@
+{
+  "error": {
+    "code": -32002,
+    "data": {
+      "code": "unauthenticated",
+      "reason": "token_not_bound"
+    },
+    "message": "authentication failed: token tok_x is not bound"
+  },
+  "id": "h-01HTESTGOLDEN000000000000",
+  "jsonrpc": "2.0"
+}

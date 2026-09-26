@@ -45,3 +45,15 @@ fn session_held_data_and_roster_fields_are_documented() {
         assert!(doc.contains(&format!("`{field}`")), "docs must name the roster field `{field}`");
     }
 }
+
+/// #486: §8 names every `-32002` `data.reason` a hub can send, so a body
+/// author can map each one to "retry" or "stop".
+#[test]
+fn every_unauthenticated_reason_is_documented_in_section_8() {
+    use holler_proto::noise::{AUTH_REJECTION_REASONS, HUB_UNAVAILABLE_REASON, NOISE_MESSAGE_ONE_REJECTED_REASON};
+    let doc = v2_md();
+    let section = errors_section(&doc);
+    for reason in AUTH_REJECTION_REASONS.iter().chain([&HUB_UNAVAILABLE_REASON, &NOISE_MESSAGE_ONE_REJECTED_REASON]) {
+        assert!(section.contains(&format!("`{reason}`")), "docs §8 does not name the -32002 reason `{reason}`");
+    }
+}

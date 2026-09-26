@@ -1,0 +1,12 @@
+{
+  "error": {
+    "code": -32002,
+    "data": {
+      "code": "unauthenticated",
+      "reason": "hub_unavailable"
+    },
+    "message": "authentication failed: the token store could not be read"
+  },
+  "id": "h-01HTESTGOLDEN000000000000",
+  "jsonrpc": "2.0"
+}

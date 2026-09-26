@@ -18,7 +18,11 @@
 use std::path::Path;
 
 use futures_util::{Sink, Stream};
-use holler_proto::{Authenticate, Code, CorrelationId, Envelope, Hello, HelloRole};
+use holler_proto::noise::{
+    HUB_UNAVAILABLE_REASON, KEY_MISMATCH_REASON, NOISE_MESSAGE_ONE_REJECTED_REASON, NO_PUBLIC_KEY_REASON, TOKEN_NOT_BOUND_REASON,
+    TOKEN_UNKNOWN_REASON,
+};
+use holler_proto::{Authenticate, Code, CorrelationId, Envelope, Hello, HelloRole, WireError};
 use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 
 use crate::config::SessionConfig;
@@ -27,9 +31,10 @@ use crate::identity::BodyIdentity;
 use super::{send, timeout_next_envelope, Attempt};
 
 /// Run the `circuit/authenticate` → `circuit/prove` Noise XK handshake
-/// (issue #338) and await the final answer. `-32002` at either step maps to
-/// [`Attempt::AuthFailed`] (no retry — the body's connection loop treats
-/// that code, and only that code, as "do not retry"), as does a corrupt
+/// (issue #338) and await the final answer. A `-32002` at either step is
+/// classified by [`refusal_attempt`] on its `error.data.reason` (issue #486):
+/// `hub_unavailable` maps to [`Attempt::Dropped`] (retry with backoff), every
+/// other refusal to [`Attempt::AuthFailed`] (no retry), as does a corrupt
 /// local X25519 identity or pinned hub key (re-running `body join` is the
 /// only fix, so backing off and retrying the same broken local state would
 /// just spin). Every other failure (connect-adjacent decode errors, a
@@ -92,30 +97,10 @@ where
                 .ok_or_else(|| Attempt::Dropped("malformed circuit/authenticate challenge".to_string()))?;
             hex::decode(&challenge.message).map_err(|e| Attempt::Dropped(format!("malformed handshake message 2: {e}")))?
         }
+        // Issue #486: one classifier for a `-32002` at either step, on the
+        // structured `error.data.reason`, never on `message` text.
         Envelope::Error { error, .. } if error.code == Code::Unauthenticated.jsonrpc() => {
-            // A `-32002` refusal of `circuit/authenticate` itself (as opposed
-            // to `circuit/prove`, below) can only mean the hub rejected Noise
-            // message 1 — this body's very first handshake message. Per
-            // `holler_proto::noise`'s own module doc, that specific rejection
-            // has exactly one cause: this body built message 1 against a hub
-            // static key that does not match the hub it is actually talking
-            // to. The hub marks that one cause with `error.data.reason` (see
-            // `holler_proto::noise::NOISE_MESSAGE_ONE_REJECTED_REASON`) so
-            // this disambiguates on a structured value, not `error.message`
-            // text the hub is free to reword.
-            let is_hub_key_mismatch = error
-                .data
-                .as_deref()
-                .and_then(|d| d.reason.as_deref())
-                == Some(holler_proto::noise::NOISE_MESSAGE_ONE_REJECTED_REASON);
-            return Err(Attempt::AuthFailed(if is_hub_key_mismatch {
-                format!(
-                    "hub public key mismatch: this hub rejected this body's handshake — its real key does not match the one pinned at `body join` ({}) — refusing to connect (re-pair with `body join` only if you trust this is an intentional hub key rotation)",
-                    identity.hub_pubkey
-                )
-            } else {
-                error.message
-            }));
+            return Err(refusal_attempt(error, &identity.hub_pubkey));
         }
         // Issue #340: a `-32000` here means this hub's protocol floor is
         // higher than what this body claimed — a hard re-pair event (#321's
@@ -152,11 +137,58 @@ where
     match env {
         Envelope::Response { id, .. } if id == prove_cid.as_str() => holler_proto::sas::derive_sas(&handshake.handshake_hash_hex())
             .map_err(|e| Attempt::Dropped(format!("could not derive the pairing SAS: {e}"))),
-        Envelope::Error { error, .. } if error.code == Code::Unauthenticated.jsonrpc() => {
-            Err(Attempt::AuthFailed(error.message))
-        }
+        Envelope::Error { error, .. } if error.code == Code::Unauthenticated.jsonrpc() => Err(refusal_attempt(error, &identity.hub_pubkey)),
         Envelope::Error { error, .. } => Err(Attempt::Dropped(format!("prove refused: {}", error.message))),
         _ => Err(Attempt::Dropped("unexpected reply to circuit/prove".to_string())),
+    }
+}
+
+/// What the reconnect loop does with a `-32002 unauthenticated` refusal of
+/// `circuit/authenticate` or `circuit/prove` (issue #486), decided on its
+/// `error.data.reason` (docs §8), never on `error.message`, which the hub is
+/// free to reword:
+///
+/// - `hub_unavailable` is the hub's own fault (issue #485: its token store or
+///   identity key), says nothing about this body's credential, and is not
+///   counted toward its lockout: [`Attempt::Dropped`], so the loop backs off,
+///   reports `reconnecting` and tries again until the hub recovers.
+/// - `noise_message_one_rejected` has exactly one cause (see
+///   [`holler_proto::noise`]'s module doc): the hub key this body pinned at
+///   `body join` is not the key of the hub it is talking to, so it stops as a
+///   hub public key mismatch.
+/// - Every other code stops the body, in plain words ([`refusal_words`]) with
+///   the code and the hub's message: each one counts toward this peer's
+///   lockout, so a retry would only lock the body out. That includes a code
+///   this body does not know yet, from a newer hub.
+/// - No reason at all (a hub older than #486) stops it with the hub's message
+///   verbatim, as before.
+fn refusal_attempt(error: WireError, pinned_hub_pubkey: &str) -> Attempt {
+    let Some(code) = error.data.and_then(|data| data.reason) else {
+        return Attempt::AuthFailed(error.message);
+    };
+    match code.as_str() {
+        HUB_UNAVAILABLE_REASON => Attempt::Dropped(format!("hub unavailable (reason {code}): {}", error.message)),
+        NOISE_MESSAGE_ONE_REJECTED_REASON => Attempt::AuthFailed(format!(
+            "hub public key mismatch: this hub rejected this body's handshake — its real key does not match the one pinned at `body join` ({pinned_hub_pubkey}) — refusing to connect (re-pair with `body join` only if you trust this is an intentional hub key rotation)"
+        )),
+        _ => Attempt::AuthFailed(format!("{} (reason {code}); the hub said: {}", refusal_words(&code), error.message)),
+    }
+}
+
+/// Plain words for a counted refusal code (issue #486): what happened and what
+/// fixes it, so an operator does not have to decode the code. `body run`
+/// prints them after `error: authentication failed: `, `body confirm` after
+/// `error: `.
+fn refusal_words(code: &str) -> &'static str {
+    match code {
+        TOKEN_NOT_BOUND_REASON => {
+            "this hub no longer accepts this body's token: it was revoked, or never joined; mint a new token and re-run `body join`"
+        }
+        TOKEN_UNKNOWN_REASON => {
+            "this hub has no such token: it was deleted, or this body is joined to a different hub; mint a new token and re-run `body join`"
+        }
+        NO_PUBLIC_KEY_REASON | KEY_MISMATCH_REASON => "this body's key does not match the key the hub registered at join; re-run `body join`",
+        _ => "the hub refused this body's authentication",
     }
 }
 
@@ -251,5 +283,101 @@ where
             send(sink, &ack).await.map_err(|_| Attempt::Dropped("send hello ack: socket closed".to_string()))
         }
         _ => Err(Attempt::Dropped("no hub-initiated circuit/hello".to_string())),
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable)] // #486
+mod tests {
+    use super::*;
+    use holler_proto::WireError;
+
+    const PINNED: &str = "aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11";
+
+    fn refusal(message: &str, reason: Option<&'static str>) -> WireError {
+        WireError::new(Code::Unauthenticated, message, reason)
+    }
+
+    /// The text of an `AuthFailed`; panics (naming what it was) on anything else.
+    fn auth_failed(a: Attempt) -> String {
+        match a {
+            Attempt::AuthFailed(m) => m,
+            Attempt::Dropped(m) => panic!("expected AuthFailed (stop), got Dropped (retry): {m}"),
+            Attempt::Ended(_) => panic!("expected AuthFailed, got Ended"),
+        }
+    }
+
+    /// #486: a hub-side fault is the hub's, not the credential's, so the body
+    /// backs off and retries through the existing `Dropped` arm.
+    #[test]
+    fn hub_unavailable_is_dropped_and_retried() {
+        let msg = "authentication failed: the token store could not be read";
+        match refusal_attempt(refusal(msg, Some(holler_proto::noise::HUB_UNAVAILABLE_REASON)), PINNED) {
+            Attempt::Dropped(text) => {
+                assert!(text.starts_with("hub unavailable (reason hub_unavailable): "), "{text}");
+                assert!(text.ends_with(msg), "the hub's message follows verbatim: {text}");
+            }
+            Attempt::AuthFailed(m) => panic!("hub_unavailable must be retried, not a stop: {m}"),
+            Attempt::Ended(_) => panic!("hub_unavailable must be retried, got Ended"),
+        }
+    }
+
+    /// #452 slice: a revoked token stops the body and says so in plain words,
+    /// with the stable code and the hub's own message.
+    #[test]
+    fn token_not_bound_stops_with_plain_words_and_the_code() {
+        let msg = "authentication failed: token tok_x is not bound";
+        let text = auth_failed(refusal_attempt(refusal(msg, Some("token_not_bound")), PINNED));
+        assert!(text.contains("this hub no longer accepts this body's token"), "{text}");
+        assert!(text.contains("was revoked, or never joined"), "{text}");
+        assert!(text.contains("mint a new token and re-run `body join`"), "{text}");
+        assert!(text.contains(&format!("(reason token_not_bound); the hub said: {msg}")), "{text}");
+    }
+
+    #[test]
+    fn token_unknown_stops_with_plain_words_and_the_code() {
+        let msg = "authentication failed: no such token tok_x";
+        let text = auth_failed(refusal_attempt(refusal(msg, Some("token_unknown")), PINNED));
+        assert!(text.contains("this hub has no such token"), "{text}");
+        assert!(text.contains("this body is joined to a different hub"), "{text}");
+        assert!(text.contains(&format!("(reason token_unknown); the hub said: {msg}")), "{text}");
+    }
+
+    #[test]
+    fn key_codes_stop_and_say_the_key_does_not_match() {
+        for code in ["no_public_key", "key_mismatch"] {
+            let msg = "authentication failed: static key mismatch";
+            let text = auth_failed(refusal_attempt(refusal(msg, Some(code)), PINNED));
+            assert!(text.contains("this body's key does not match the key the hub registered at join"), "{code}: {text}");
+            assert!(text.contains(&format!("(reason {code}); the hub said: {msg}")), "{code}: {text}");
+        }
+    }
+
+    /// Every other counted code stops too (Decision 5: a retry would be a
+    /// counted failure and trip the body's own lockout), including a code a
+    /// newer hub might add.
+    #[test]
+    fn every_other_reason_stops_with_the_generic_words() {
+        for code in ["prove_timeout", "protocol_error", "handshake_failed", "auth_failed", "token_expired", "a_future_code"] {
+            let msg = "authentication failed: something";
+            let text = auth_failed(refusal_attempt(refusal(msg, Some(code)), PINNED));
+            assert!(text.contains("the hub refused this body's authentication"), "{code}: {text}");
+            assert!(text.contains(&format!("(reason {code}); the hub said: {msg}")), "{code}: {text}");
+        }
+    }
+
+    /// A hub older than #486 sends no reason: stop with its message, today's behaviour.
+    #[test]
+    fn no_reason_stops_with_the_hubs_message_verbatim() {
+        let msg = "authentication failed: token tok_x is not bound";
+        assert_eq!(auth_failed(refusal_attempt(refusal(msg, None), PINNED)), msg);
+    }
+
+    #[test]
+    fn noise_message_one_rejected_is_the_hub_key_mismatch() {
+        let reason = Some(holler_proto::noise::NOISE_MESSAGE_ONE_REJECTED_REASON);
+        let text = auth_failed(refusal_attempt(refusal("authentication failed: bad handshake message", reason), PINNED));
+        assert!(text.starts_with("hub public key mismatch"), "{text}");
+        assert!(text.contains(PINNED), "the text names the pinned key: {text}");
     }
 }

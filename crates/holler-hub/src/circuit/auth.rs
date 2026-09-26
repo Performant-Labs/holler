@@ -20,7 +20,10 @@
 //! owns only the handshake itself.
 
 use futures_util::{Sink, Stream};
-use holler_proto::noise::{HandshakeXk, HUB_UNAVAILABLE_REASON, NOISE_MESSAGE_ONE_REJECTED_REASON};
+use holler_proto::noise::{
+    HandshakeXk, AUTH_FAILED_REASON, HANDSHAKE_FAILED_REASON, HUB_UNAVAILABLE_REASON, KEY_MISMATCH_REASON, NOISE_MESSAGE_ONE_REJECTED_REASON,
+    NO_PUBLIC_KEY_REASON, PROTOCOL_ERROR_REASON, PROVE_TIMEOUT_REASON, TOKEN_EXPIRED_REASON, TOKEN_NOT_BOUND_REASON, TOKEN_UNKNOWN_REASON,
+};
 use holler_proto::log::Severity;
 use holler_proto::{Authenticate, Code};
 use tokio_tungstenite::tungstenite::{Error as WsError, Message};
@@ -53,10 +56,11 @@ pub struct AuthDeps<'a> {
 /// `auth_rejected`, then [`refuse_and_close`]. The funnel every *counted*
 /// failure branch of the handshake goes through, so the failure points in
 /// [`begin_authenticate`]/[`begin_noise_handshake`]/[`await_prove`]/
-/// [`finish_prove`] stay under clippy's cognitive-complexity gate. `reason`
-/// rides in `error.data.reason` (docs §8) — `None` for every branch except
-/// [`begin_noise_handshake`]'s message-1 rejection, the one counted shape a
-/// caller (the body) needs to tell apart from every other `-32002`.
+/// [`finish_prove`] stay under clippy's cognitive-complexity gate. The peer
+/// gets the same stable code in `error.data.reason` (docs §8, issue #486), so
+/// a body can say why it was refused without parsing `message`. A caller's
+/// own `reason` wins: only [`begin_noise_handshake`]'s message-1 rejection
+/// passes one, the one counted shape the body reports as a hub key mismatch.
 pub(super) async fn refuse_unauthenticated<Snk>(
     sink: &mut Snk,
     id: Option<&str>,
@@ -71,7 +75,7 @@ pub(super) async fn refuse_unauthenticated<Snk>(
     let code = rejection_reason(message);
     let outcome = peer_ip.parse().ok().map(|ip| deps.lockout.record_failure_detailed(&ip, code, token_id));
     log_rejection(peer_ip, token_id, code, outcome.as_ref());
-    refuse_and_close(sink, id, message, reason, token_id, deps).await;
+    refuse_and_close(sink, id, message, Some(reason.unwrap_or(code)), token_id, deps).await;
 }
 
 /// The tail every `-32002` refusal shares, counted or not: send it, close
@@ -116,27 +120,29 @@ async fn refuse_failed_step<Snk>(
 /// A stable reason code for a rejected `circuit/authenticate`, derived from
 /// the refusal message (issue #450). Codes are what operators grep for, so
 /// they never change with the message wording; anything unrecognized is
-/// `auth_failed`.
+/// `auth_failed`. Each code is a shared `holler_proto::noise` constant, one of
+/// [`holler_proto::noise::AUTH_REJECTION_REASONS`], because the body reads it
+/// too: [`refuse_unauthenticated`] sends it as `error.data.reason` (#486).
 pub(super) fn rejection_reason(message: &str) -> &'static str {
     // First match wins. "no such token" must stay first: that refusal embeds
     // the client-supplied token id, so an unknown id containing another
     // rule's phrase (say "x is expired") would otherwise take that rule's
     // code. Every other message embeds only a server-minted id or none.
     const RULES: &[(&str, &str)] = &[
-        ("no such token", "token_unknown"),
+        ("no such token", TOKEN_UNKNOWN_REASON),
         // Retired by #453: a bound token no longer expires, so no refusal says
         // "is expired". Kept reserved so the code never changes meaning.
-        ("is expired", "token_expired"),
-        ("is not bound", "token_not_bound"),
-        ("no public key on record", "no_public_key"),
-        ("no X25519 public key on record", "no_public_key"),
-        ("static key mismatch", "key_mismatch"),
-        ("no circuit/prove within the timeout", "prove_timeout"),
-        ("circuit/prove", "protocol_error"),
-        ("handshake", "handshake_failed"),
-        ("pairing SAS", "handshake_failed"),
+        ("is expired", TOKEN_EXPIRED_REASON),
+        ("is not bound", TOKEN_NOT_BOUND_REASON),
+        ("no public key on record", NO_PUBLIC_KEY_REASON),
+        ("no X25519 public key on record", NO_PUBLIC_KEY_REASON),
+        ("static key mismatch", KEY_MISMATCH_REASON),
+        ("no circuit/prove within the timeout", PROVE_TIMEOUT_REASON),
+        ("circuit/prove", PROTOCOL_ERROR_REASON),
+        ("handshake", HANDSHAKE_FAILED_REASON),
+        ("pairing SAS", HANDSHAKE_FAILED_REASON),
     ];
-    RULES.iter().find(|(needle, _)| message.contains(needle)).map_or("auth_failed", |(_, code)| code)
+    RULES.iter().find(|(needle, _)| message.contains(needle)).map_or(AUTH_FAILED_REASON, |(_, code)| code)
 }
 
 /// Log one rejected authentication at `Warn` (visible at the default log
@@ -210,9 +216,9 @@ where
 /// token record for `params.token_id` — an unknown, unbound, or revoked
 /// token, or one with no registered X25519 public key, is `-32002`
 /// via [`refuse_failed_step`] (the same fail-shape the old credential
-/// check had: the body's connection loop treats that code, and only that
-/// code, as "do not retry"), as is a store the hub cannot read, marked
-/// `hub_unavailable` and not counted (issue #485). No lockout success/reset
+/// check had: the body's connection loop does not retry it), as is a store
+/// the hub cannot read, marked `hub_unavailable` and not counted (issue
+/// #485), which the body does retry (issue #486). No lockout success/reset
 /// happens here — resolving a *token id* proves nothing yet; only a
 /// completed, key-matched handshake does ([`finish_prove`]).
 pub(super) async fn begin_authenticate<Snk>(
@@ -244,8 +250,8 @@ where
 /// which fails right here per [`holler_proto::noise`]'s own module doc) is
 /// `-32002` via [`refuse_unauthenticated`] — the same JSON-RPC code as every
 /// other shape of "not a valid handshake", but the `read_message` rejection
-/// specifically also carries [`NOISE_MESSAGE_ONE_REJECTED_REASON`] in
-/// `error.data.reason`, since it is the one branch here that means
+/// carries [`NOISE_MESSAGE_ONE_REJECTED_REASON`] in `error.data.reason` in
+/// place of its stable code, since it is the one branch here that means
 /// specifically "this body's pinned hub key does not match this hub." An
 /// identity the hub cannot resolve is its own fault: `hub_unavailable` via
 /// [`refuse_failed_step`], never counted (issue #485).
@@ -566,26 +572,65 @@ mod tests {
     }
 
     /// Issue #450: every refusal the hub can produce maps to a stable code;
-    /// the token errors are the ones operators actually hit.
+    /// the token errors are the ones operators actually hit. #486: the codes
+    /// are the shared `holler_proto::noise` constants (the body reads them
+    /// too), and each constant still spells the string operators grep for.
     #[test]
     fn rejection_reasons_are_stable_codes() {
+        use holler_proto::noise::{
+            AUTH_FAILED_REASON, HANDSHAKE_FAILED_REASON, KEY_MISMATCH_REASON, NO_PUBLIC_KEY_REASON, PROTOCOL_ERROR_REASON,
+            PROVE_TIMEOUT_REASON, TOKEN_EXPIRED_REASON, TOKEN_NOT_BOUND_REASON, TOKEN_UNKNOWN_REASON,
+        };
         let cases = [
-            ("authentication failed: token tok_x is expired", "token_expired"),
-            ("authentication failed: no such token tok_x", "token_unknown"),
-            ("authentication failed: token tok_x is not bound", "token_not_bound"),
-            ("authentication failed: token tok_x has no public key on record", "no_public_key"),
-            ("authentication failed: no X25519 public key on record", "no_public_key"),
-            ("authentication failed: static key mismatch", "key_mismatch"),
-            ("authentication failed: no circuit/prove within the timeout", "prove_timeout"),
-            ("authentication failed: expected circuit/prove", "protocol_error"),
-            ("authentication failed: circuit/prove token_id mismatch", "protocol_error"),
-            ("authentication failed: bad handshake message", "handshake_failed"),
-            ("authentication failed: incomplete handshake", "handshake_failed"),
-            ("authentication failed: could not derive the pairing SAS", "handshake_failed"),
-            ("something the hub has never said", "auth_failed"),
+            ("authentication failed: token tok_x is expired", TOKEN_EXPIRED_REASON, "token_expired"),
+            ("authentication failed: no such token tok_x", TOKEN_UNKNOWN_REASON, "token_unknown"),
+            ("authentication failed: token tok_x is not bound", TOKEN_NOT_BOUND_REASON, "token_not_bound"),
+            ("authentication failed: token tok_x has no public key on record", NO_PUBLIC_KEY_REASON, "no_public_key"),
+            ("authentication failed: no X25519 public key on record", NO_PUBLIC_KEY_REASON, "no_public_key"),
+            ("authentication failed: static key mismatch", KEY_MISMATCH_REASON, "key_mismatch"),
+            ("authentication failed: no circuit/prove within the timeout", PROVE_TIMEOUT_REASON, "prove_timeout"),
+            ("authentication failed: expected circuit/prove", PROTOCOL_ERROR_REASON, "protocol_error"),
+            ("authentication failed: circuit/prove token_id mismatch", PROTOCOL_ERROR_REASON, "protocol_error"),
+            ("authentication failed: bad handshake message", HANDSHAKE_FAILED_REASON, "handshake_failed"),
+            ("authentication failed: incomplete handshake", HANDSHAKE_FAILED_REASON, "handshake_failed"),
+            ("authentication failed: could not derive the pairing SAS", HANDSHAKE_FAILED_REASON, "handshake_failed"),
+            ("something the hub has never said", AUTH_FAILED_REASON, "auth_failed"),
         ];
-        for (message, code) in cases {
-            assert_eq!(rejection_reason(message), code, "{message}");
+        for (message, constant, spelled) in cases {
+            assert_eq!(constant, spelled, "the shared constant for {message:?} changed its wire spelling");
+            assert_eq!(rejection_reason(message), constant, "{message}");
+        }
+    }
+
+    /// #486: every code `rejection_reason` can return is in the shared
+    /// `AUTH_REJECTION_REASONS` vocabulary, and the vocabulary holds nothing
+    /// the classifier cannot return (nine codes, no duplicates).
+    #[test]
+    fn every_rejection_reason_is_in_the_shared_vocabulary() {
+        use holler_proto::noise::AUTH_REJECTION_REASONS;
+        let messages = [
+            "authentication failed: no such token tok_x",
+            "authentication failed: token tok_x is expired",
+            "authentication failed: token tok_x is not bound",
+            "authentication failed: token tok_x has no public key on record",
+            "authentication failed: no X25519 public key on record",
+            "authentication failed: static key mismatch",
+            "authentication failed: no circuit/prove within the timeout",
+            "authentication failed: expected circuit/prove",
+            "authentication failed: bad handshake message",
+            "authentication failed: could not derive the pairing SAS",
+            "something the hub has never said",
+        ];
+        let returned: std::collections::BTreeSet<&str> = messages.iter().map(|m| rejection_reason(m)).collect();
+        for code in &returned {
+            assert!(AUTH_REJECTION_REASONS.contains(code), "{code} is sent on the wire but missing from AUTH_REJECTION_REASONS");
+        }
+        let listed: std::collections::BTreeSet<&str> = AUTH_REJECTION_REASONS.iter().copied().collect();
+        assert_eq!(AUTH_REJECTION_REASONS.len(), 9, "{AUTH_REJECTION_REASONS:?}");
+        assert_eq!(listed.len(), AUTH_REJECTION_REASONS.len(), "duplicates in {AUTH_REJECTION_REASONS:?}");
+        assert_eq!(listed, returned, "the vocabulary and the classifier disagree");
+        for fixed in [holler_proto::noise::HUB_UNAVAILABLE_REASON, holler_proto::noise::NOISE_MESSAGE_ONE_REJECTED_REASON] {
+            assert!(!listed.contains(fixed), "{fixed} is not a counted rejection code");
         }
     }
 

@@ -150,6 +150,22 @@ fills this file in at release time.
   so a body can tell it apart. One behaviour change: token-store lock contention that outlasts the store's
   2 s bounded retry is now reported this way and no longer counted. A wrong token or a failed handshake is
   refused, counted and logged as before ([#485](https://github.com/Performant-Labs/holler/issues/485)).
+- `holler body run` keeps reconnecting when the hub refuses it for a fault of its own, and says why when it
+  stops on a refused credential. A `-32002` carrying `error.data.reason: "hub_unavailable"` (the hub could
+  not read its token store or resolve its identity key, [#485](https://github.com/Performant-Labs/holler/issues/485))
+  stopped the body for good with exit 1, so it stayed down after the hub was repaired. The body now retries
+  it like a dropped connection, with the same backoff: it reports `reconnecting`, logs `conn_dropped` naming
+  `hub_unavailable`, and connects once the hub recovers. The hub never counts these refusals, so the
+  retries cannot lock the body out. Every other `-32002` still stops the body with exit 1, since each one is
+  counted and a retry would lock it out. The hub now sends each counted refusal's stable code in
+  `error.data.reason` (the code its `auth_rejected` event logs, such as `token_not_bound`; a rejected Noise
+  message 1 keeps `noise_message_one_rejected`), and `body run` and `body confirm` print it with the reason
+  in plain words, for a revoked token "this hub no longer accepts this body's token: it was revoked, or never
+  joined; mint a new token and re-run `body join`". The codes are shared constants in `holler_proto::noise`,
+  listed in `docs/protocol/v2.md` §8. No new error code and no protocol version bump: an older body ignores
+  the new reasons, and a body talking to an older hub stops as before
+  ([#486](https://github.com/Performant-Labs/holler/issues/486), part of
+  [#452](https://github.com/Performant-Labs/holler/issues/452)).
 - `holler answer SESSION once|always|reject` now works for a spawn-mode (ACP) session held on a permission
   request, as `holler answer --help` already said; before, only OpenCode attach sessions accepted these
   words and an ACP session refused them with `does not resolve to any of this field's options`. `once`

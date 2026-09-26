@@ -111,6 +111,14 @@ path = "tests/body_join_test.rs"
 name = "body_run_test"
 path = "tests/body_run_test.rs"
 
+# What `holler body run` does with each `-32002` refusal (issue #486, #452's
+# permanent-rejection slice): retry through `hub_unavailable`, stop with the
+# reason in plain words on a credential refusal. Real binaries, real loopback
+# hub, like `body_run_test.rs` above.
+[[test]]
+name = "body_auth_refusal_test"
+path = "tests/body_auth_refusal_test.rs"
+
 # `holler body confirm` e2e (issue #351): the one-time, interactive operator
 # confirmation gate for the pairing SAS — driven the same way as
 # `body_run_test.rs`, above (real binaries, real loopback hub, an isolated

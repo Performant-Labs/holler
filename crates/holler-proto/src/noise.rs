@@ -66,7 +66,8 @@ const KEY_LEN: usize = 32;
 /// wire: the body built message 1 against a hub static key that does not
 /// match what the hub it is actually talking to holds (a stale pin, or an
 /// impersonator) — never a revoked token, a malformed frame, or any other
-/// `-32002` cause, all of which carry no `reason` (or a different one).
+/// `-32002` cause, each of which carries its own code instead (see
+/// [`AUTH_REJECTION_REASONS`]; a hub older than issue #486 sends none).
 ///
 /// Lives here, in the crate both `holler-hub` (`circuit/auth.rs`, which sets
 /// it) and `holler-body` (`connection/handshake.rs`, which reads it to
@@ -82,6 +83,53 @@ pub const NOISE_MESSAGE_ONE_REJECTED_REASON: &str = "noise_message_one_rejected"
 /// not count it toward the peer's lockout. Shared here for the same reason as
 /// [`NOISE_MESSAGE_ONE_REJECTED_REASON`]: the body reads it too (#486).
 pub const HUB_UNAVAILABLE_REASON: &str = "hub_unavailable";
+
+/// Counted `-32002` reason: the hub has no token with the id the peer named.
+pub const TOKEN_UNKNOWN_REASON: &str = "token_unknown";
+/// Counted `-32002` reason, reserved: retired by issue #453 (a bound token no
+/// longer expires), so never sent, and never reused for anything else.
+pub const TOKEN_EXPIRED_REASON: &str = "token_expired";
+/// Counted `-32002` reason: the token was revoked, or never joined.
+pub const TOKEN_NOT_BOUND_REASON: &str = "token_not_bound";
+/// Counted `-32002` reason: the token has no public key (Ed25519 or X25519) on
+/// record.
+pub const NO_PUBLIC_KEY_REASON: &str = "no_public_key";
+/// Counted `-32002` reason: the static key the handshake proved is not the one
+/// the token registered at join.
+pub const KEY_MISMATCH_REASON: &str = "key_mismatch";
+/// Counted `-32002` reason: no `circuit/prove` arrived within the timeout.
+pub const PROVE_TIMEOUT_REASON: &str = "prove_timeout";
+/// Counted `-32002` reason: the peer broke the handshake's frame order (a
+/// frame other than a well-formed `circuit/prove` for the same token).
+pub const PROTOCOL_ERROR_REASON: &str = "protocol_error";
+/// Counted `-32002` reason: a handshake message could not be processed, or the
+/// handshake did not complete.
+pub const HANDSHAKE_FAILED_REASON: &str = "handshake_failed";
+/// Counted `-32002` reason: the catch-all for a refusal no other code names.
+pub const AUTH_FAILED_REASON: &str = "auth_failed";
+
+/// Every stable code the hub sends in `error.data.reason` on a *counted*
+/// `-32002 unauthenticated` refusal of `circuit/authenticate` or
+/// `circuit/prove` (issue #486). Each is also the `reason` of the hub's
+/// `auth_rejected` log event and a key of `hub status`'s
+/// `lockout.peers[].reasons` (issue #450), so operators and bodies read one
+/// vocabulary. Together with [`HUB_UNAVAILABLE_REASON`] (never counted) and
+/// [`NOISE_MESSAGE_ONE_REJECTED_REASON`] (counted, and sent in place of the
+/// code for a rejected message 1), this is the whole `-32002` `data.reason`
+/// vocabulary; `docs/protocol/v2.md` §8 is its public contract. A body retries
+/// only `hub_unavailable`: every code here stops it, since each one counts
+/// toward its lockout and a retry would lock it out.
+pub const AUTH_REJECTION_REASONS: &[&str] = &[
+    TOKEN_UNKNOWN_REASON,
+    TOKEN_EXPIRED_REASON,
+    TOKEN_NOT_BOUND_REASON,
+    NO_PUBLIC_KEY_REASON,
+    KEY_MISMATCH_REASON,
+    PROVE_TIMEOUT_REASON,
+    PROTOCOL_ERROR_REASON,
+    HANDSHAKE_FAILED_REASON,
+    AUTH_FAILED_REASON,
+];
 
 /// A scratch buffer large enough for any message this pattern produces with
 /// an empty payload (measured: message 1 and 2 are 48 bytes, message 3 is 64

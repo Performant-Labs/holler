@@ -134,6 +134,22 @@ fn session_held_error_frames_match_golden() {
     }
 }
 
+/// `-32002 unauthenticated` with the #486 `data.reason` a body acts on: the
+/// hub-fault code it retries, and the two credential codes it names in plain
+/// words before it stops.
+#[test]
+fn unauthenticated_error_frames_match_golden() {
+    use holler_proto::noise::{HUB_UNAVAILABLE_REASON, TOKEN_NOT_BOUND_REASON, TOKEN_UNKNOWN_REASON};
+    for (file, message, reason) in [
+        ("hub_unavailable", "authentication failed: the token store could not be read", HUB_UNAVAILABLE_REASON),
+        ("token_not_bound", "authentication failed: token tok_x is not bound", TOKEN_NOT_BOUND_REASON),
+        ("token_unknown", "authentication failed: no such token tok_x", TOKEN_UNKNOWN_REASON),
+    ] {
+        let env = Envelope::Error { id: Some(id()), error: WireError::new(Code::Unauthenticated, message, Some(reason)) };
+        assert_golden(&format!("envelope/error.unauthenticated_{file}.json"), &encode(&env).unwrap());
+    }
+}
+
 /// A roster row's hold fields (issue #441) are flattened into the hub's row:
 /// a held row gains `hold`/`hold_reason`/`held_since`, and a row that is not
 /// held is byte-identical to one that predates the feature.
