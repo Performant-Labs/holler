@@ -52,6 +52,13 @@ fn fresh_signing_key(seed: u8) -> SigningKey {
 /// is what a raw client actually authenticates with, via the Noise XK
 /// handshake), and returns `(token_id, x25519_secret_bytes)`.
 fn mint_and_redeem(state: &StateDir, label: &str) -> (String, [u8; 32]) {
+    let (token_id, x25519_secret_bytes, _join_secret) = mint_and_redeem_keeping_secret(state, label);
+    (token_id, x25519_secret_bytes)
+}
+
+/// [`mint_and_redeem`], also returning the one-time join secret, so a test can
+/// assert it never reaches a log line (issue #485).
+fn mint_and_redeem_keeping_secret(state: &StateDir, label: &str) -> (String, [u8; 32], String) {
     let hub_state = holler_hub::state::HubState::from_root(state.path().to_path_buf());
     let minted = holler_hub::token::mint(label, 24 * 3600, &hub_state).expect("mint a token");
     // Deterministic-but-distinct seed per label so concurrently-minted tokens
@@ -65,7 +72,7 @@ fn mint_and_redeem(state: &StateDir, label: &str) -> (String, [u8; 32]) {
     let client_id = holler_hub::token::redeem(&minted.secret, label, &body_pubkey, &body_x25519_pubkey, &hub_state)
         .expect("redeem the just-minted token");
     let _ = client_id;
-    (minted.record.token_id, x25519_secret_bytes)
+    (minted.record.token_id, x25519_secret_bytes, minted.secret)
 }
 
 /// This test binary's own resolved copy of the hub's X25519 static public
@@ -81,6 +88,19 @@ fn hub_x25519_pubkey(state: &StateDir) -> [u8; 32] {
     let identity = holler_hub::identity::ensure(&hub_state).expect("resolve the hub's X25519 identity");
     let bytes = hex::decode(identity.public_hex()).expect("hub pubkey is valid hex");
     bytes.try_into().expect("hub pubkey is 32 bytes")
+}
+
+/// A `circuit/authenticate` request frame carrying Noise message 1.
+fn authenticate_request(token_id: &str, hostname: &str, advertised_url: &str, msg1: &[u8]) -> serde_json::Value {
+    json!({
+        "jsonrpc": "2.0",
+        "id": "b-auth1",
+        "method": "circuit/authenticate",
+        "params": {
+            "protocol": holler_proto::PROTOCOL_VERSION,
+            "token_id": token_id, "hostname": hostname, "advertised_url": advertised_url, "message": hex::encode(msg1),
+        },
+    })
 }
 
 /// Run the `circuit/authenticate` → `circuit/prove` Noise XK handshake
@@ -102,15 +122,7 @@ async fn send_authenticate(
     let mut handshake = HandshakeXk::initiator(body_x25519_secret, hub_x25519_pubkey, &prologue).expect("build noise initiator");
     let msg1 = handshake.write_message().expect("write handshake message 1");
 
-    let req = json!({
-        "jsonrpc": "2.0",
-        "id": "b-auth1",
-        "method": "circuit/authenticate",
-        "params": {
-            "protocol": holler_proto::PROTOCOL_VERSION,
-            "token_id": token_id, "hostname": hostname, "advertised_url": advertised_url, "message": hex::encode(msg1),
-        },
-    });
+    let req = authenticate_request(token_id, hostname, advertised_url, &msg1);
     ws.send(Message::text(req.to_string())).await.expect("send circuit/authenticate");
     let env = decode_next(ws).await.expect("an answer to circuit/authenticate");
     let msg2_hex = match env {
@@ -662,4 +674,143 @@ async fn hello_with_old_protocol_is_refused_with_unsupported_version() {
         "must be -32000 unsupported_version: {error:?}"
     );
     assert!(decode_next(&mut ws).await.is_none(), "the hub must close the socket after refusing the hello");
+}
+
+// ---------------------------------------------------------------------------
+// issue #485: a hub-side authentication fault is not the peer's failure
+// ---------------------------------------------------------------------------
+
+/// Send one `circuit/authenticate` on a fresh socket and read one frame. A
+/// refusal is `Ok(error)`; anything else (a 1008 lockout close, a challenge)
+/// is `Err(description)`, so a caller can collect every attempt and assert on
+/// them together instead of dying on the first unexpected shape.
+async fn authenticate_once(ws_url: &str, token_id: &str, key: &[u8; 32], hub_pubkey: &[u8; 32]) -> Result<holler_proto::WireError, String> {
+    let mut ws = connect_ws(ws_url).await;
+    let prologue = build_prologue(holler_proto::PROTOCOL_VERSION, token_id, ws_url);
+    let msg1 = HandshakeXk::initiator(key, hub_pubkey, &prologue).and_then(|mut h| h.write_message()).expect("write handshake message 1");
+    if let Err(e) = ws.send(Message::text(authenticate_request(token_id, "fault-body", ws_url, &msg1).to_string())).await {
+        return Err(format!("send failed: {e}"));
+    }
+    match tokio::time::timeout(Duration::from_secs(10), ws.next()).await {
+        Ok(Some(Ok(Message::Text(t)))) => match decode(t.as_str()) {
+            Ok(Envelope::Error { error, .. }) => Ok(error),
+            other => Err(format!("not a refusal: {other:?}")),
+        },
+        other => Err(format!("no refusal frame: {other:?}")),
+    }
+}
+
+/// A hub-fault refusal: still `-32002` with the `authentication failed:`
+/// prefix, marked `error.data.reason = "hub_unavailable"`.
+fn assert_hub_unavailable(outcome: &Result<holler_proto::WireError, String>, what: &str) {
+    let err = outcome.as_ref().unwrap_or_else(|e| panic!("{what}: not refused as -32002: {e}"));
+    assert_eq!(err.code, -32002, "{what}: {err:?}");
+    assert!(err.message.starts_with("authentication failed:"), "{what}: {err:?}");
+    assert_eq!(err.data.as_ref().and_then(|d| d.reason.as_deref()), Some("hub_unavailable"), "{what}: {err:?}");
+}
+
+/// `hub status` shows no lockout and no counted failure for any peer.
+fn assert_nothing_counted(state: &StateDir, what: &str) {
+    let doc = hub_status_json(state);
+    assert_eq!(doc["lockout"], json!({ "peers": [] }), "{what}: a hub fault must never count toward the lockout: {doc}");
+}
+
+/// The hub's JSON log lines whose `type` is `ty`.
+fn log_events(hub: &Hub, ty: &str) -> Vec<serde_json::Value> {
+    hub.log_text().lines().filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok()).filter(|v| v["type"] == ty).collect()
+}
+
+/// Issue #485, acceptance criteria 2 to 4: a hub whose `tokens.json` is
+/// corrupt (empty, as in the #483 trace) refuses twice the lockout threshold
+/// of attempts from one peer as `hub_unavailable`, counts none of them, logs
+/// each as `auth_unavailable` at `ERROR` with no secret, and once the file is
+/// repaired the same peer authenticates. A wrong key afterwards is still
+/// counted: the fault path did not switch counting off.
+#[tokio::test]
+async fn a_corrupt_token_store_is_hub_unavailable_and_never_locks_the_peer_out() {
+    let state = StateDir::new();
+    let hub = Hub::start_with_env(&state, &[("HOLLER_LOCKOUT_MAX_FAILURES", "3"), ("HOLLER_DEBUG", "none")]);
+    let (token_id, key, join_secret) = mint_and_redeem_keeping_secret(&state, "fault-body");
+    let hub_pubkey = hub_x25519_pubkey(&state);
+    let ws_url = hub.ws_url();
+    let tokens = state.hub().join("tokens.json");
+    let good = std::fs::read(&tokens).expect("read the valid store");
+    std::fs::write(&tokens, b"").expect("corrupt the store");
+
+    let mut outcomes = Vec::new();
+    for _ in 0..6 {
+        outcomes.push(authenticate_once(&ws_url, &token_id, &key, &hub_pubkey).await);
+    }
+    assert_nothing_counted(&state, &format!("6 attempts on a corrupt store, outcomes {outcomes:?}"));
+    for (i, o) in outcomes.iter().enumerate() {
+        assert_hub_unavailable(o, &format!("attempt {i}"));
+    }
+
+    let events = wait_for(STARTUP_WAIT, || Some(log_events(&hub, "auth_unavailable")).filter(|e| e.len() >= 6))
+        .unwrap_or_else(|| panic!("six auth_unavailable events were never logged:\n{}", hub.log_text()));
+    for e in &events {
+        assert_eq!(e["level"], "ERROR", "{e}");
+        assert_eq!(e["token_id"], token_id.as_str(), "{e}");
+        assert!(e["peer"].as_str().is_some_and(|p| p.starts_with("127.0.0.1")), "the event names the peer: {e}");
+        assert!(e.to_string().contains("corrupted"), "the event carries the cause: {e}");
+    }
+    assert!(log_events(&hub, "auth_rejected").is_empty(), "a hub fault is not an auth rejection:\n{}", hub.log_text());
+    assert!(log_events(&hub, "lockout_tripped").is_empty(), "no lockout trip:\n{}", hub.log_text());
+    let identity_hex = hex::encode(std::fs::read(state.hub().join("identity.key")).expect("read the hub identity"));
+    let log = hub.log_text();
+    for (name, secret) in [("join secret", join_secret), ("body key", hex::encode(key)), ("hub identity", identity_hex)] {
+        assert!(!log.contains(&secret), "the {name} must never appear in the hub log");
+    }
+
+    std::fs::write(&tokens, &good).expect("repair the store");
+    let mut ws = connect_ws(&ws_url).await;
+    send_authenticate(&mut ws, &token_id, &key, &hub_pubkey, "fault-body", &ws_url).await.expect("after repair the same peer authenticates");
+    drop(ws);
+    let mut ws = connect_ws(&ws_url).await;
+    let err = send_authenticate(&mut ws, &token_id, &[200u8; 32], &hub_pubkey, "fault-body", &ws_url).await.expect_err("a wrong key");
+    assert_eq!(err.data.as_ref().and_then(|d| d.reason.as_deref()), None, "a credential failure is not hub_unavailable: {err:?}");
+    let doc = hub_status_json(&state);
+    let peers = &doc["lockout"]["peers"];
+    assert_eq!(peers[0]["failures"], 1, "a credential failure is still counted: {doc}");
+    assert_eq!(peers[0]["reasons"], json!({ "key_mismatch": 1 }), "{doc}");
+}
+
+/// Issue #485, the other two hub-fault sites, each with a lockout of one so a
+/// single counted failure would show: the hub identity cannot be resolved
+/// (a wrong-length `identity.key`), and the store turns corrupt between
+/// `circuit/authenticate` and `circuit/prove` (the revoke-race re-fetch).
+#[tokio::test]
+async fn identity_and_prove_time_store_faults_are_hub_unavailable_and_not_counted() {
+    let state = StateDir::new();
+    let hub = Hub::start_with_env(&state, &[("HOLLER_LOCKOUT_MAX_FAILURES", "1"), ("HOLLER_DEBUG", "none")]);
+    let (token_id, key) = mint_and_redeem(&state, "fault-body");
+    let hub_pubkey = hub_x25519_pubkey(&state);
+    let ws_url = hub.ws_url();
+
+    // Site 3: corrupt the store after message 2, before `circuit/prove`.
+    let tokens = state.hub().join("tokens.json");
+    let good = std::fs::read(&tokens).expect("read the valid store");
+    let prologue = build_prologue(holler_proto::PROTOCOL_VERSION, &token_id, &ws_url);
+    let mut handshake = HandshakeXk::initiator(&key, &hub_pubkey, &prologue).expect("build noise initiator");
+    let msg1 = handshake.write_message().expect("write handshake message 1");
+    let mut ws = connect_ws(&ws_url).await;
+    ws.send(Message::text(authenticate_request(&token_id, "fault-body", &ws_url, &msg1).to_string())).await.expect("send authenticate");
+    let Some(Envelope::Response { result, .. }) = decode_next(&mut ws).await else { panic!("expected the challenge") };
+    let msg2 = hex::decode(result.as_ref().and_then(|v| v["message"].as_str()).expect("message 2")).expect("hex message 2");
+    handshake.read_message(&msg2).expect("process handshake message 2");
+    let msg3 = handshake.write_message().expect("write handshake message 3");
+    std::fs::write(&tokens, b"not json {").expect("corrupt the store mid-handshake");
+    let prove = json!({ "jsonrpc": "2.0", "id": "b-prove1", "method": "circuit/prove", "params": { "token_id": token_id, "message": hex::encode(msg3) } });
+    ws.send(Message::text(prove.to_string())).await.expect("send circuit/prove");
+    let refusal = decode_next(&mut ws).await.and_then(|e| e.error().cloned()).ok_or_else(|| "no refusal".to_string());
+    assert_nothing_counted(&state, "store fault at circuit/prove");
+    assert_hub_unavailable(&refusal, "store fault at circuit/prove");
+    std::fs::write(&tokens, &good).expect("repair the store");
+
+    // Site 2: the store is valid again, but the hub identity is unreadable
+    // (`hub_pubkey` was resolved above, before the corruption).
+    std::fs::write(state.hub().join("identity.key"), b"bad").expect("corrupt the hub identity");
+    let outcome = authenticate_once(&ws_url, &token_id, &key, &hub_pubkey).await;
+    assert_nothing_counted(&state, "unresolvable hub identity");
+    assert_hub_unavailable(&outcome, "unresolvable hub identity");
 }

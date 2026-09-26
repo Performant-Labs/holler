@@ -654,55 +654,61 @@ pub fn redeem(
     Err(RedeemError::NotFound)
 }
 
-/// The step-1 half of `circuit/authenticate` (issue #323): resolve a bound,
-/// live-eligible token record. Fails closed: a token that is unknown or not
-/// `bound` (never redeemed, or revoked) is a no-match, folded into one
-/// [`TokenError`] (the callers in `circuit::auth` map any failure here to the
-/// wire's `-32002 unauthenticated`, never distinguishing *why* to a peer that
-/// has not yet proven anything). `expires` is not checked: it bounds only the
-/// join secret, and a bound token ends only by revoke (issue #453).
-///
-/// Called again after the body's `circuit/prove` to catch a revoke racing the
-/// handshake: step 1 carries no authority of its own; only a record that is
-/// *still* bound when the proof is checked lets the connection through.
-pub fn bound_record(token_id: &str, state: &HubState) -> Result<Record, TokenError> {
-    // [`acquire_lock_retrying`], not the bare [`acquire_lock`], for exactly
-    // the reason issue #301 gave `redeem`: this runs *inside the live hub*, on
-    // the per-connection task, twice per `circuit/authenticate` — so N bodies
-    // connecting at once race each other for this same flock, every one of
-    // them a legitimate, bound token. Measured directly by the issue #370
-    // load harness (`crates/holler-load-test`, scenario `connection-scale`,
-    // macOS/aarch64, 10 cores): with the non-retrying `acquire_lock` here,
-    // **3 of 50 and 7 of 200** concurrent connections completed the
-    // handshake. The rest were refused `-32002 unauthenticated` carrying the
-    // lock's own "another holler process holds the token lock; retry" text —
-    // and because a refusal is also a *failed auth*, those spurious failures
-    // then tripped [`crate::lockout`] for the peer IP and force-closed
-    // further connections mid-handshake, turning self-contention into a
-    // cascading lockout of every client on that address. With the retry, 50
-    // of 50 and 200 of 200 connect. #301 fixed this defect class at
-    // `redeem`'s call site only; this is its sibling on the authenticate
-    // path (and [`touch_last_seen`] below is the third, on the presence
-    // path).
-    let _lock = acquire_lock_retrying(state)?;
-    let store = Store::load(&tokens_path(state))?;
+/// Why [`bound_record`] refused (issue #485): `HubFault` when the hub could not
+/// lock, read or parse its own store, which is never the peer's doing and is
+/// not counted toward the peer's lockout; anything else is `Credential`.
+#[derive(Debug)]
+pub enum LookupError {
+    HubFault(TokenError),
+    Credential(TokenError),
+}
+
+impl LookupError {
+    /// Whether the hub, not the peer, is why the lookup failed.
+    pub fn is_hub_fault(&self) -> bool {
+        matches!(self, Self::HubFault(_))
+    }
+}
+
+impl std::fmt::Display for LookupError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let (Self::HubFault(e) | Self::Credential(e)) = self;
+        e.fmt(f)
+    }
+}
+
+impl From<tokio::task::JoinError> for LookupError {
+    fn from(_: tokio::task::JoinError) -> Self {
+        Self::HubFault(TokenError::new("token store task panicked"))
+    }
+}
+
+/// The step-1 half of `circuit/authenticate` (issue #323): resolve a bound
+/// token record, failing closed. An unknown token, one not `bound` (never
+/// redeemed, or revoked) or one without its public keys is a `Credential`
+/// failure; `expires` is not checked (it bounds only the join secret, #453).
+/// Called again after `circuit/prove` to catch a revoke racing the handshake:
+/// only a record *still* bound then lets the connection through.
+pub fn bound_record(token_id: &str, state: &HubState) -> Result<Record, LookupError> {
+    // Retrying, as `redeem` does (#301): this runs in the live hub, twice per
+    // `circuit/authenticate`, so concurrent bodies race for the flock. Without
+    // it the #370 load harness got 3 of 50 and 7 of 200 connections through
+    // (all with it), and the refused rest cascaded into a lockout of the peer.
+    let _lock = acquire_lock_retrying(state).map_err(LookupError::HubFault)?;
+    let store = Store::load(&tokens_path(state)).map_err(LookupError::HubFault)?;
     let Some(record) = store.records.iter().find(|r| r.token_id == token_id) else {
-        return Err(TokenError::new(format!("no such token {token_id}")));
+        return Err(LookupError::Credential(TokenError::new(format!("no such token {token_id}"))));
     };
     if record.state != TokenState::Bound {
-        return Err(TokenError::new(format!("token {token_id} is not bound")));
+        return Err(LookupError::Credential(TokenError::new(format!("token {token_id} is not bound"))));
     }
     if record.body_pubkey.is_none() {
-        return Err(TokenError::new(format!("token {token_id} has no public key on record")));
+        return Err(LookupError::Credential(TokenError::new(format!("token {token_id} has no public key on record"))));
     }
-    // Issue #338: the Noise XK handshake needs the body's X25519 identity
-    // (registered alongside `body_pubkey` at `circuit/join`, issue #337) — a
-    // bound record without one (impossible via a normal `circuit/join` today,
-    // but defensive against corrupt/hand-edited store data) fails closed here
-    // rather than reaching `circuit/auth`'s handshake setup with nothing to
-    // compare the learned remote static key against.
+    // Issue #338: the Noise XK handshake needs the body's X25519 key (#337); a
+    // bound record without one (corrupt or hand-edited data) fails closed here.
     if record.body_x25519_pubkey.is_none() {
-        return Err(TokenError::new(format!("token {token_id} has no X25519 public key on record")));
+        return Err(LookupError::Credential(TokenError::new(format!("token {token_id} has no X25519 public key on record"))));
     }
     Ok(record.clone())
 }
@@ -744,11 +750,8 @@ pub fn touch_last_seen(token_id: &str, state: &HubState) -> Result<(), TokenErro
 // unambiguous version of "never runs on an executor thread"). The CLI's
 // one-shot leaves have no runtime and call the synchronous fns directly.
 //
-// A `spawn_blocking` join failure (the blocking task panicked) is
-// unreachable in practice — none of `mint`/`redeem`/`bound_record` ever
-// panics, they return `Result` — so it is mapped to a fail-closed
-// `TokenError`/`RedeemError::NotFound` rather than surfaced as a distinct
-// variant nobody could usefully handle.
+// A `spawn_blocking` join failure is unreachable in practice (nothing here
+// panics) and fails closed; `bound_record_async` tags it a hub fault (#485).
 
 /// `mint` on the blocking pool (the spec: "all locked operations run in
 /// `tokio::task::spawn_blocking` when called from async code").
@@ -793,16 +796,13 @@ pub async fn list_async(state: &HubState) -> Result<Vec<Record>, TokenError> {
 }
 
 /// `bound_record` on the blocking pool.
-pub async fn bound_record_async(token_id: &str, state: &HubState) -> Result<Record, TokenError> {
+pub async fn bound_record_async(token_id: &str, state: &HubState) -> Result<Record, LookupError> {
     let token_id = token_id.to_string();
     let state = state.clone();
     tokio::task::spawn_blocking(move || {
-        // Issue #184's `slow_token_store_does_not_stall_sibling_ping` test
-        // hook: an artificial delay on the *blocking-pool* thread only,
-        // gated behind the same `HOLLER_TEST_HOOKS=1` flag issue #192's
-        // `control/test_drop` uses — a production hub never reads this var
-        // as anything but absent. Simulates a slow store (e.g. contended
-        // disk) without needing a real one.
+        // Issue #184's `slow_token_store_does_not_stall_sibling_ping` hook: a
+        // delay on the *blocking-pool* thread only, behind issue #192's
+        // `HOLLER_TEST_HOOKS=1` flag (never set on a production hub).
         if std::env::var("HOLLER_TEST_HOOKS").as_deref() == Ok("1") {
             if let Some(ms) = std::env::var("HOLLER_TEST_TOKEN_STORE_DELAY_MS").ok().and_then(|s| s.parse().ok()) {
                 std::thread::sleep(std::time::Duration::from_millis(ms));
@@ -811,5 +811,5 @@ pub async fn bound_record_async(token_id: &str, state: &HubState) -> Result<Reco
         bound_record(&token_id, &state)
     })
     .await
-    .unwrap_or_else(|_| Err(TokenError::new("token store task panicked")))
+    .unwrap_or_else(|e| Err(e.into()))
 }

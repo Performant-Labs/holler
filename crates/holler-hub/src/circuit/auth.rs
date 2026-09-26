@@ -20,7 +20,7 @@
 //! owns only the handshake itself.
 
 use futures_util::{Sink, Stream};
-use holler_proto::noise::{HandshakeXk, NOISE_MESSAGE_ONE_REJECTED_REASON};
+use holler_proto::noise::{HandshakeXk, HUB_UNAVAILABLE_REASON, NOISE_MESSAGE_ONE_REJECTED_REASON};
 use holler_proto::log::Severity;
 use holler_proto::{Authenticate, Code};
 use tokio_tungstenite::tungstenite::{Error as WsError, Message};
@@ -46,24 +46,17 @@ pub struct AuthDeps<'a> {
     pub lockout: &'a std::sync::Arc<crate::lockout::Lockout>,
 }
 
-/// Refuse this connection as `-32002 unauthenticated`: record a lockout
-/// failure (keyed by the transport IP, never the claimed hostname — that is
-/// unauthenticated input — and carrying the reason and the token id the peer
-/// named, which `hub status` reports, issue #451), send the wire refusal,
-/// close the socket, and drop the roster row (issue #186: an unauthenticated
-/// body is permanently gone — a bad token id/handshake can never succeed on
-/// retry with the same material, so the TTL would only keep a stale row
-/// around).
-///
-/// The single funnel every failure branch of the `circuit/authenticate` →
-/// `circuit/prove` handshake goes through, so the several distinct failure
-/// points in [`begin_authenticate`]/[`begin_noise_handshake`]/
-/// [`await_prove`]/[`finish_prove`] don't each repeat this five-line
-/// sequence (keeping every one of those under clippy's cognitive-complexity
-/// gate). `reason` rides in `error.data.reason` (docs §8) — `None` for every
-/// branch except [`begin_noise_handshake`]'s message-1 rejection, which is
-/// the one shape a caller (the body) needs to tell apart from every other
-/// `-32002`.
+/// Refuse this connection as the peer's failed authentication: record a
+/// lockout failure (keyed by the transport IP, never the claimed hostname —
+/// that is unauthenticated input — and carrying the reason and the token id
+/// the peer named, which `hub status` reports, issue #451), log it
+/// `auth_rejected`, then [`refuse_and_close`]. The funnel every *counted*
+/// failure branch of the handshake goes through, so the failure points in
+/// [`begin_authenticate`]/[`begin_noise_handshake`]/[`await_prove`]/
+/// [`finish_prove`] stay under clippy's cognitive-complexity gate. `reason`
+/// rides in `error.data.reason` (docs §8) — `None` for every branch except
+/// [`begin_noise_handshake`]'s message-1 rejection, the one counted shape a
+/// caller (the body) needs to tell apart from every other `-32002`.
 pub(super) async fn refuse_unauthenticated<Snk>(
     sink: &mut Snk,
     id: Option<&str>,
@@ -78,9 +71,46 @@ pub(super) async fn refuse_unauthenticated<Snk>(
     let code = rejection_reason(message);
     let outcome = peer_ip.parse().ok().map(|ip| deps.lockout.record_failure_detailed(&ip, code, token_id));
     log_rejection(peer_ip, token_id, code, outcome.as_ref());
+    refuse_and_close(sink, id, message, reason, token_id, deps).await;
+}
+
+/// The tail every `-32002` refusal shares, counted or not: send it, close
+/// the socket, and drop the roster row (issue #186: an unauthenticated body
+/// is gone, and the TTL would only keep a stale row around).
+async fn refuse_and_close<Snk>(sink: &mut Snk, id: Option<&str>, message: &str, reason: Option<&'static str>, token_id: &str, deps: &AuthDeps<'_>)
+where
+    Snk: Sink<Message, Error = WsError> + Unpin,
+{
     send_error_with_reason(sink, id, Code::Unauthenticated, message, reason).await;
     close(sink).await;
     deps.roster.clear(token_id);
+}
+
+/// Refuse a step that can fail for the hub's own reasons: the one place those
+/// failures are classified (issue #485). The two token lookups (tagged by
+/// [`crate::token::LookupError::is_hub_fault`]) and the hub identity (always
+/// the hub's) arrive here. A credential failure is the peer's, counted via
+/// [`refuse_unauthenticated`]; a hub fault is logged `auth_unavailable` at
+/// `Error`, refused with [`HUB_UNAVAILABLE_REASON`] and never counted.
+async fn refuse_failed_step<Snk>(
+    sink: &mut Snk,
+    id: Option<&str>,
+    cause: &str,
+    hub_fault: bool,
+    token_id: &str,
+    peer_ip: &str,
+    deps: &AuthDeps<'_>,
+) where
+    Snk: Sink<Message, Error = WsError> + Unpin,
+{
+    let message = format!("authentication failed: {cause}");
+    if hub_fault {
+        let fields = vec![("peer", peer_ip.to_string()), ("token_id", token_id.to_string()), ("cause", cause.to_string())];
+        log(Severity::Error, "auth_unavailable", fields);
+        refuse_and_close(sink, id, &message, Some(HUB_UNAVAILABLE_REASON), token_id, deps).await;
+    } else {
+        refuse_unauthenticated(sink, id, &message, None, token_id, peer_ip, deps).await;
+    }
 }
 
 /// A stable reason code for a rejected `circuit/authenticate`, derived from
@@ -179,11 +209,12 @@ where
 /// Step 1 of `circuit/authenticate` → `circuit/prove`: resolve the bound
 /// token record for `params.token_id` — an unknown, unbound, or revoked
 /// token, or one with no registered X25519 public key, is `-32002`
-/// via [`refuse_unauthenticated`] (the same fail-shape the old credential
+/// via [`refuse_failed_step`] (the same fail-shape the old credential
 /// check had: the body's connection loop treats that code, and only that
-/// code, as "do not retry"). No lockout success/reset happens here —
-/// resolving a *token id* proves nothing yet; only a completed, key-matched
-/// handshake does ([`finish_prove`]).
+/// code, as "do not retry"), as is a store the hub cannot read, marked
+/// `hub_unavailable` and not counted (issue #485). No lockout success/reset
+/// happens here — resolving a *token id* proves nothing yet; only a
+/// completed, key-matched handshake does ([`finish_prove`]).
 pub(super) async fn begin_authenticate<Snk>(
     sink: &mut Snk,
     id: Option<&str>,
@@ -198,7 +229,7 @@ where
     match crate::token::bound_record_async(&params.token_id, state).await {
         Ok(record) => Some(record),
         Err(e) => {
-            refuse_unauthenticated(sink, id, &format!("authentication failed: {e}"), None, &params.token_id, peer_ip, deps).await;
+            refuse_failed_step(sink, id, &e.to_string(), e.is_hub_fault(), &params.token_id, peer_ip, deps).await;
             None
         }
     }
@@ -215,7 +246,9 @@ where
 /// other shape of "not a valid handshake", but the `read_message` rejection
 /// specifically also carries [`NOISE_MESSAGE_ONE_REJECTED_REASON`] in
 /// `error.data.reason`, since it is the one branch here that means
-/// specifically "this body's pinned hub key does not match this hub."
+/// specifically "this body's pinned hub key does not match this hub." An
+/// identity the hub cannot resolve is its own fault: `hub_unavailable` via
+/// [`refuse_failed_step`], never counted (issue #485).
 pub(super) async fn begin_noise_handshake<Snk>(
     sink: &mut Snk,
     id: Option<&str>,
@@ -230,7 +263,8 @@ where
     let hub_secret = match crate::identity::ensure(state) {
         Ok(identity) => identity.secret_bytes(),
         Err(e) => {
-            refuse_unauthenticated(sink, id, &format!("authentication failed: could not resolve hub identity: {e}"), None, &params.token_id, peer_ip, deps).await;
+            // The hub's own identity key, never the peer's credential: a hub fault.
+            refuse_failed_step(sink, id, &format!("could not resolve hub identity: {e}"), true, &params.token_id, peer_ip, deps).await;
             return None;
         }
     };
@@ -335,7 +369,7 @@ where
     let record = match crate::token::bound_record_async(&params.token_id, state).await {
         Ok(r) => r,
         Err(e) => {
-            refuse_unauthenticated(sink, Some(prove_id), &format!("authentication failed: {e}"), None, &params.token_id, peer_ip, deps).await;
+            refuse_failed_step(sink, Some(prove_id), &e.to_string(), e.is_hub_fault(), &params.token_id, peer_ip, deps).await;
             return None;
         }
     };

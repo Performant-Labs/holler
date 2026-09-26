@@ -314,7 +314,7 @@ fn concurrent_live_path_reads_never_lose_the_lock_race() {
             scope.spawn(|| {
                 for _ in 0..ROUNDS {
                     if let Err(e) = token::bound_record(&token_id, &state) {
-                        errors.lock().expect("errors lock").push(format!("bound_record: {}", e.message));
+                        errors.lock().expect("errors lock").push(format!("bound_record: {e}"));
                     }
                     if let Err(e) = token::touch_last_seen(&token_id, &state) {
                         errors.lock().expect("errors lock").push(format!("touch_last_seen: {}", e.message));
@@ -422,7 +422,7 @@ fn bound_record_ignores_expires() {
     token::redeem(&minted.secret, "myhost", &pubkey(20), &x25519_pubkey(20), &state).expect("redeem");
     set_only_expires(&dir, 1); // long past
     let record = token::bound_record(&minted.record.token_id, &state)
-        .unwrap_or_else(|e| panic!("a bound token past its expires must still authenticate: {}", e.message));
+        .unwrap_or_else(|e| panic!("a bound token past its expires must still authenticate: {e}"));
     assert_eq!(record.token_id, minted.record.token_id);
     assert_eq!(record.body_pubkey.as_deref(), Some(pubkey(20).as_str()), "the bound key is returned");
 }
@@ -437,8 +437,111 @@ fn bound_record_rejects_unused_token() {
     for expires in [u64::MAX / 2, 1] {
         set_only_expires(&dir, expires);
         let err = token::bound_record(&minted.record.token_id, &state).expect_err("an unused token must not authenticate");
-        assert!(err.message.contains("is not bound"), "expires={expires}: {}", err.message);
+        assert!(err.to_string().contains("is not bound"), "expires={expires}: {err}");
     }
+}
+
+// --- #485: a hub-side store fault is tagged apart from a credential failure --
+
+/// A bound token for the #485 cases; returns its token id.
+fn bound_token(state: &HubState) -> String {
+    let minted = token::mint("fault", 3600, state).expect("mint");
+    token::redeem(&minted.secret, "myhost", &pubkey(30), &x25519_pubkey(30), state).expect("redeem");
+    minted.record.token_id
+}
+
+/// Assert `bound_record` fails for `token_id` with the hub-fault tag set as
+/// `hub_fault` says, and that its message still names `needle`.
+fn assert_lookup(token_id: &str, state: &HubState, hub_fault: bool, needle: &str) {
+    let err = match token::bound_record(token_id, state) {
+        Ok(r) => panic!("expected a refusal naming {needle:?}, got the record {r:?}"),
+        Err(e) => e,
+    };
+    assert!(err.to_string().contains(needle), "the refusal keeps its cause text ({needle:?}): {err}");
+    assert_eq!(err.is_hub_fault(), hub_fault, "hub-fault tag for {needle:?}: {err}");
+}
+
+/// Issue #485: when the hub cannot read its own `tokens.json`, the refusal is
+/// the hub's fault, not the peer's, so the authenticate path must not count
+/// it toward the lockout. The live trace was an empty file (EOF).
+#[test]
+fn unreadable_or_corrupt_store_is_a_hub_fault() {
+    let dir = Tdir::new();
+    let state = prep(&dir);
+    let token_id = bound_token(&state);
+    for (what, bytes) in [("empty", &b""[..]), ("garbage", &b"not json {"[..])] {
+        std::fs::write(dir.tokens_path(), bytes).expect("corrupt tokens.json");
+        let err = token::bound_record(&token_id, &state).expect_err(what);
+        assert!(err.to_string().contains("corrupted"), "{what}: {err}");
+        assert!(err.is_hub_fault(), "a {what} tokens.json must be tagged a hub fault: {err}");
+    }
+    // Unreadable: a directory where the file should be fails the read itself
+    // (and does so even when the test runs as root, unlike a mode-000 file).
+    std::fs::remove_file(dir.tokens_path()).expect("remove tokens.json");
+    std::fs::create_dir(dir.tokens_path()).expect("make tokens.json a directory");
+    assert_lookup(&token_id, &state, true, "cannot read tokens store");
+}
+
+/// Issue #485 (and the #370 behaviour change the brief names): lock
+/// contention that outlasts `acquire_lock_retrying`'s bounded retry is a hub
+/// fault. The test holds the store's real `flock` for the whole call.
+#[test]
+fn lock_held_past_the_retry_is_a_hub_fault() {
+    let dir = Tdir::new();
+    let state = prep(&dir);
+    let token_id = bound_token(&state);
+    let held = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(token::tokens_lock_path(&state)).expect("open lock file");
+    // std's `try_lock` is flock(2) on unix: the same lock fs4 takes in the store.
+    held.try_lock().expect("the test must hold the token lock");
+    assert_lookup(&token_id, &state, true, "holds the token lock");
+    drop(held);
+    token::bound_record(&token_id, &state).expect("with the lock released the same token resolves");
+}
+
+/// Issue #485: a `spawn_blocking` join failure in `bound_record_async` is a
+/// hub fault. The conversion is taken from `bound_record`'s own error type
+/// (inferred, so this test does not name it) via `From<JoinError>`.
+#[test]
+fn a_join_failure_is_a_hub_fault() {
+    fn from_join<E: From<tokio::task::JoinError>>(_like: &Result<token::Record, E>, e: tokio::task::JoinError) -> E {
+        e.into()
+    }
+    let dir = Tdir::new();
+    let state = prep(&dir);
+    let like = token::bound_record("tok_missing", &state);
+    let rt = tokio::runtime::Builder::new_current_thread().build().expect("runtime");
+    let join_err = rt.block_on(async {
+        let handle = tokio::spawn(std::future::pending::<()>());
+        handle.abort();
+        handle.await.expect_err("an aborted task yields a JoinError")
+    });
+    let err = from_join(&like, join_err);
+    assert!(err.is_hub_fault(), "a join failure must be tagged a hub fault: {err}");
+}
+
+/// Issue #485, the risk the brief names: every credential outcome stays
+/// untagged, so it is still counted. Unknown, not bound, and each missing key.
+#[test]
+fn credential_failures_are_not_hub_faults() {
+    let dir = Tdir::new();
+    let state = prep(&dir);
+    assert_lookup("tok_nope", &state, false, "no such token");
+    let unused = token::mint("unused", 3600, &state).expect("mint").record.token_id;
+    assert_lookup(&unused, &state, false, "is not bound");
+
+    let token_id = bound_token(&state);
+    for (field, needle) in [("body_x25519_pubkey", "no X25519 public key on record"), ("body_pubkey", "no public key on record")] {
+        let path = dir.tokens_path();
+        let mut doc: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).expect("read")).expect("parse");
+        let rows = doc.as_array_mut().expect("tokens.json is an array");
+        let row = rows.iter_mut().find(|r| r["token_id"] == token_id.as_str()).expect("the bound row");
+        row[field] = serde_json::Value::Null;
+        std::fs::write(&path, doc.to_string()).expect("write");
+        assert_lookup(&token_id, &state, false, needle);
+    }
+    // A revoked token is a credential outcome too (the #450 reproduction).
+    token::delete(&token_id, &state).expect("revoke the bound token");
+    assert_lookup(&token_id, &state, false, "is not bound");
 }
 
 // --- #483: a kill during a save never corrupts the store --------------------

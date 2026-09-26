@@ -412,7 +412,7 @@ auth_method = "api-key"
 
 ## Debug output
 
-Every `holler` role (`hub serve`, `body run`, and every one-shot CLI leaf) accepts `--debug none|quiet|noisy` (or `HOLLER_DEBUG`; the flag wins) and `--log-format text|json` (or `HOLLER_LOG_FORMAT`). Logging always goes to **stderr** — stdout stays reserved for command output (`--json`, `say`'s reply, …). `none` (the default) emits no debug lines; `quiet` emits one line per event with the frame's *shape* only (component, direction, method, id); `noisy` adds the full **redacted** JSON-RPC/HTTP frame body. `info`/`warn` events (connects, drops, refusals) are always emitted regardless of the debug level.
+Every `holler` role (`hub serve`, `body run`, and every one-shot CLI leaf) accepts `--debug none|quiet|noisy` (or `HOLLER_DEBUG`; the flag wins) and `--log-format text|json` (or `HOLLER_LOG_FORMAT`). Logging always goes to **stderr** — stdout stays reserved for command output (`--json`, `say`'s reply, …). `none` (the default) emits no debug lines; `quiet` emits one line per event with the frame's *shape* only (component, direction, method, id); `noisy` adds the full **redacted** JSON-RPC/HTTP frame body. `info`/`warn`/`error` events (connects, drops, refusals, the hub's own faults) are always emitted regardless of the debug level.
 
 Every event carries a `component`, identifying which layer of a `say`/`interrupt` round trip produced it — so a slow reply can be diagnosed as "HTTP not landed" vs. "model still streaming" without reading code:
 
@@ -433,11 +433,12 @@ Because the ACP SDK holler pins (`agent-client-protocol` 2.1.0) spawns and owns 
 
 **ACP authentication events (body, debug).** When an adapter answers `session/new` with auth-required (on v2, only for a session that sets `auth_method`), `acp` logs `session/new event=auth_required` with `advertised` (the adapter's advertised method ids, at most 8, quoted), then `authenticate` (v1) or `auth/login` (v2) with `method_id` if the session's `auth_method` is sent ([#439](https://github.com/Performant-Labs/holler/issues/439), [#459](https://github.com/Performant-Labs/holler/issues/459)). Only ids are logged: never a credential, a method's description, or an error's `data`.
 
-**Authentication events (hub, always emitted).** A rejected `circuit/authenticate` and the lockout it feeds are `warn` events, so they appear at the default level with no `--debug`:
+**Authentication events (hub, always emitted).** A rejected `circuit/authenticate` and the lockout it feeds are `warn` events, and an authentication the hub could not complete for a fault of its own is an `error` event, so all of them appear at the default level with no `--debug`:
 
 | event | fields | meaning |
 | ----- | ------ | ------- |
 | `auth_rejected` | `peer`, `token_id`, `reason`, `failures` (`n/max` in the current window) | One refused authentication. `reason` is a stable code: `token_unknown`, `token_not_bound` (revoked or never joined), `no_public_key`, `key_mismatch`, `prove_timeout`, `protocol_error`, `handshake_failed`, or the catch-all `auth_failed`. `token_expired` is retired (see "Token lifetime" below). Only the public token id is logged, never a secret. |
+| `auth_unavailable` | `peer`, `token_id`, `cause` | The hub refused an authentication for a fault of its own, not the peer's: its token store could not be locked, read or parsed (for example `cause=tokens store is corrupted: …`), or its identity key could not be resolved. The peer gets `-32002` with `error.data.reason` `hub_unavailable`, and the refusal is not counted toward its lockout ([#485](https://github.com/Performant-Labs/holler/issues/485)). Logged at `error`; never a secret or key material. |
 | `lockout_tripped` | `peer`, `failures`, `reasons` (e.g. `token_not_boundx5`), `duration_ms`, `retry_after_s` | The peer reached the failure limit (5 in 10 minutes by default) and is refused for the cooldown. Logged once per trip. |
 | `lockout_cleared` | `peer`, `why` (`expired` or `authenticated`) | A lockout ended: the cooldown lapsed, or the peer authenticated successfully. |
 | `lockout_refused` | `peer` | A connection from a locked-out peer was refused before any frame was read. |

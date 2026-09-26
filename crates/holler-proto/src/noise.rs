@@ -75,6 +75,14 @@ const KEY_LEN: usize = 32;
 /// that could silently drift from what the hub actually sends.
 pub const NOISE_MESSAGE_ONE_REJECTED_REASON: &str = "noise_message_one_rejected";
 
+/// `error.data.reason` (docs §8) for a `-32002 unauthenticated` refusal the
+/// hub could not decide for a reason of its own (issue #485): its token store
+/// could not be locked, read or parsed, or its identity key could not be
+/// resolved. It says nothing about the body's credential, and the hub does
+/// not count it toward the peer's lockout. Shared here for the same reason as
+/// [`NOISE_MESSAGE_ONE_REJECTED_REASON`]: the body reads it too (#486).
+pub const HUB_UNAVAILABLE_REASON: &str = "hub_unavailable";
+
 /// A scratch buffer large enough for any message this pattern produces with
 /// an empty payload (measured: message 1 and 2 are 48 bytes, message 3 is 64
 /// — the `e`/`ee`/`es`/`se` tokens plus one AEAD tag each), with generous

@@ -13,10 +13,11 @@
 //!   the *shape* of a frame (direction, method, short ids); `noisy` adds the
 //!   full **redacted** JSON-RPC frame.
 //! - **`LogFormat`** — `text` / `json` — the *rendering* of every line. The
-//!   severity of an event (`debug`/`info`/`warn`) is **independent** of the
-//!   debug level: `info`/`warn` are always emitted (operational facts like
-//!   *listening, connected, dropped, lockout, pepper_generated*); only
-//!   `debug` events are gated by the level.
+//!   severity of an event (`debug`/`info`/`warn`/`error`) is **independent**
+//!   of the debug level: `info`/`warn`/`error` are always emitted
+//!   (operational facts like *listening, connected, dropped, lockout,
+//!   pepper_generated*, and faults on the emitter's own side); only `debug`
+//!   events are gated by the level.
 //!
 //! Both dials are resolved the same way: the **CLI flag wins over the
 //! environment** (`HOLLER_DEBUG`, `HOLLER_LOG_FORMAT`), defaults
@@ -37,7 +38,8 @@ use time::{OffsetDateTime, UtcOffset};
 
 // --- dials -----------------------------------------------------------------
 
-/// How much *debug* detail to emit. `info`/`warn` are unaffected (always on).
+/// How much *debug* detail to emit. `info`/`warn`/`error` are unaffected
+/// (always on).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DebugLevel {
     /// No debug output (the default).
@@ -108,12 +110,15 @@ impl LogFormat {
 // --- severity ----------------------------------------------------------------
 
 /// The severity of a single event. Independent of [`DebugLevel`]: `Debug`
-/// events are gated by the level, `Info`/`Warn` are always emitted.
+/// events are gated by the level, `Info`/`Warn`/`Error` are always emitted.
+/// `Error` is a fault on the emitter's own side, such as a hub that cannot
+/// read its own token store (issue #485), where `Warn` is a peer's failure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Severity {
     Debug,
     Info,
     Warn,
+    Error,
 }
 
 impl Severity {
@@ -122,6 +127,7 @@ impl Severity {
             Severity::Debug => "DEBUG",
             Severity::Info => "INFO",
             Severity::Warn => "WARN",
+            Severity::Error => "ERROR",
         }
     }
 }

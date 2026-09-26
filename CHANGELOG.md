@@ -127,6 +127,16 @@ fills this file in at release time.
   once, atomically: a process that races another to create one gets the winner's key rather than a second
   key or a half-written file. `tokens.json` is now mode 0600, like the hub's other private state
   ([#483](https://github.com/Performant-Labs/holler/issues/483)).
+- A hub that cannot complete an authentication for a fault of its own no longer counts it against the
+  peer. When its token store could not be locked, read or parsed (such as the empty `tokens.json` of
+  [#483](https://github.com/Performant-Labs/holler/issues/483)), or its identity key could not be resolved,
+  the refusal was logged `auth_rejected ... reason=auth_failed` and counted toward the peer-IP lockout, so
+  five of them locked out a body that never presented a wrong credential. Such a refusal is now logged as
+  `auth_unavailable` at the new `ERROR` level with its cause, is not counted, and carries
+  `error.data.reason: "hub_unavailable"` (still `-32002`, with the same `authentication failed:` message),
+  so a body can tell it apart. One behaviour change: token-store lock contention that outlasts the store's
+  2 s bounded retry is now reported this way and no longer counted. A wrong token or a failed handshake is
+  refused, counted and logged as before ([#485](https://github.com/Performant-Labs/holler/issues/485)).
 - `holler answer SESSION once|always|reject` now works for a spawn-mode (ACP) session held on a permission
   request, as `holler answer --help` already said; before, only OpenCode attach sessions accepted these
   words and an ACP session refused them with `does not resolve to any of this field's options`. `once`
