@@ -41,7 +41,7 @@ cargo test -p holler-cli --test <file>
 | `cli_surface_test` | every ADR-0003 CLI command parses (and the pending ones don't) |
 | `docs_cli_test` | every `holler …` command the docs show parses against the real clap tree |
 | `logging_test` | hub/body JSON structured-logging behaviour |
-| `token_cli_test` | `hub token list` / `delete` CLI surface |
+| `token_cli_test` | `hub token mint` / `list` / `revoke` / `delete` / `ping` CLI surface; `delete` frees an unused or revoked token's label and refuses a bound one, and a mint/join/detach/revoke/delete churn leaves no records (#454) |
 | `bound_token_lifetime_test` | a bound token outlives its `expires`; `hub token revoke` ends it; `ping`/`list` follow the same rule (#453) |
 | `cli_invocation_test` | CLI invocation/arg-handling behaviour |
 

@@ -3,7 +3,8 @@
 //! The pairing model (ADR 0005, unchanged): the operator mints a one-time
 //! **join secret** for a unique **label**; a body redeems that secret for a
 //! long-lived **credential** and is bound to the token; the operator can
-//! list, invalidate, or revoke. The store is a single JSON file,
+//! list, invalidate, or revoke, and delete an unused or revoked record to
+//! free its label (#454, [`purge`]). The store is a single JSON file,
 //! `HOLLER_STATE_DIR/hub/tokens.json`, guarded by an advisory `flock`
 //! (`hub/tokens.json.lock`, via `fs4`) around every load-modify-save, so
 //! concurrent CLIs and the live hub can never interleave a read and a write
@@ -54,6 +55,9 @@ use holler_proto::RedeemError;
 use holler_proto::TokenError;
 
 use crate::state::{ensure_dirs, HubState};
+
+mod lifecycle;
+pub use lifecycle::{delete, purge};
 
 /// The token store file: `<root>/hub/tokens.json`.
 pub fn tokens_path(state: &HubState) -> PathBuf {
@@ -123,7 +127,8 @@ pub enum TokenState {
     Unused,
     /// Redeemed by a body; the join secret is consumed.
     Bound,
-    /// Inactivated by `delete` / `revoke`.
+    /// Inactivated by `hub token revoke` ([`delete`]). The row is kept, and
+    /// holds its label, until `hub token delete` ([`purge`]) removes it.
     Revoked,
 }
 
@@ -521,9 +526,7 @@ pub fn mint(label: &str, ttl_secs: u64, state: &HubState) -> Result<Minted, Toke
             "invalid label {label:?}: must match [a-z0-9][a-z0-9-]{{0,31}}"
         )));
     }
-    if store.label_to_key.contains_key(label) {
-        return Err(TokenError::new(format!("label {label:?} already in use")));
-    }
+    lifecycle::ensure_label_free(&store, label)?;
 
     let now = now_secs();
     let token_id = mint_id("tok_")?;
@@ -556,25 +559,6 @@ pub fn list(state: &HubState) -> Result<Vec<Record>, TokenError> {
     let _lock = acquire_lock_retrying(state)?;
     let store = Store::load(&tokens_path(state))?;
     Ok(store.records)
-}
-
-/// Inactivate a token: if it is `unused` the join secret is invalid; if it is
-/// `bound` the credential is invalid **but the row is kept** (with its
-/// hostname / last_seen) so `list` shows who was cut off. The CLI then asks a
-/// live hub to close the socket (`control::revoke_live`, best-effort).
-///
-/// Returns the record's new shape. The operator-facing message distinguishes
-/// `invalidated` (unused) from `revoked` (bound) in the CLI, not here.
-pub fn delete(token_id: &str, state: &HubState) -> Result<Record, TokenError> {
-    let _lock = acquire_lock_retrying(state)?;
-    let mut store = Store::load(&tokens_path(state))?;
-    let Some(record) = store.by_mut(token_id) else {
-        return Err(TokenError::new(format!("no such token {token_id}")));
-    };
-    record.state = TokenState::Revoked;
-    let out = record.clone();
-    store.save(&tokens_path(state))?;
-    Ok(out)
 }
 
 /// Redeem a join secret for a body, registering the body's public key. The

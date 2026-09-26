@@ -841,14 +841,21 @@ Third, **for each distinct `remote_host`** (looping, not just doing this once):
    inspected later on the remote host all carry which hub it's paired to, not just which remote
    host it runs on.
 
-   **Labels are permanent, even for a token that's `revoke`d or `delete`d — a mint against an
-   already-used label always fails.** Confirmed live 2026-09-23: minting `hub1-remote-a` a second
-   time (after the first pairing's process was killed and its token `revoke`d, then `delete`d)
-   still errored `label "hub1-remote-a" already in use` — `revoke` keeps the record by design (an
-   audit trail), and `delete` only invalidates the secret, it does not free the label either.
-   Don't spend time trying to reclaim a label. If the first mint attempt for a host you've
-   confirmed is safe to reuse (step above) fails this way, just append a counter and re-mint —
-   `hub1-remote-a-2`, then `-3`, etc. — rather than hunting for a way to delete the old label.
+   **A label stays taken until its token's record is deleted.** `revoke` keeps the record by
+   design (an audit trail of which machine was cut off), so a revoked token still holds its
+   label; `hub token delete` removes an `unused` or `revoked` token's record and frees the label
+   (holler #454, releases after v0.3.0). A mint over a taken label fails with `label
+   "hub1-remote-a" already in use by <state> token <token_id>; free it with: ...`, naming the
+   exact commands. To reuse the label of a pairing you've confirmed is done (step above), revoke
+   the old token if `holler hub token list` still shows it `bound`, delete it, then mint again:
+   ```bash
+   holler hub token revoke <old_token_id>   # only if it is still bound
+   holler hub token delete <old_token_id>
+   holler hub token mint --label hub1-remote-a
+   ```
+   The new token has a new token id, so the body joins again with the new join line. On holler
+   v0.3.0 and earlier nothing frees a label (`delete` only invalidated the secret; confirmed live
+   2026-09-23): there, append a counter and mint `hub1-remote-a-2`, then `-3`, and so on.
 
    **A minted token's join secret is valid for 24 hours by default (`--ttl`); the human-readable
    `expires` that `hub token mint` prints is one day early on holler releases before v0.3.0.** Confirmed

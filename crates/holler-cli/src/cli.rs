@@ -176,9 +176,13 @@ pub enum TokenCommand {
     Mint(Mint),
     /// List join tokens and their state.
     List(List),
-    /// Invalidate an unused token's secret (aliases: rm, remove).
+    /// Remove an unused or revoked token, freeing its label (aliases: rm, remove).
+    ///
+    /// A bound token is refused: revoke it first, then delete it.
     Delete(Delete),
-    /// Cut a bound token's body's access now, keeping its record.
+    /// Cut a token's access now, keeping its record and its label.
+    ///
+    /// `hub token delete` then removes the record and frees the label.
     Revoke(Revoke),
     /// Check whether a token is still valid.
     Ping(Ping),

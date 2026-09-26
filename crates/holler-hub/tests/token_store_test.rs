@@ -658,3 +658,122 @@ fn a_kill_during_save_never_leaves_the_store_empty_or_corrupt() {
         assert_eq!(records.len(), expected, "kill {i}: a kill during a save lost records");
     }
 }
+
+// --- #454: `hub token delete` removes an unused or revoked record ------------
+
+/// The exact refusal `mint` gives over a held label (#454 Decision 3): it names
+/// the holder and the commands that free the label.
+fn held_message(label: &str, state_word: &str, id: &str) -> String {
+    let fix = match state_word {
+        "bound" => format!("holler hub token revoke {id}, then holler hub token delete {id}"),
+        _ => format!("holler hub token delete {id}"),
+    };
+    format!("label {label:?} already in use by {state_word} token {id}; free it with: {fix}")
+}
+
+#[test]
+fn purge_unused_removes_the_row_and_frees_the_label() {
+    let dir = Tdir::new();
+    let state = prep(&dir);
+    let minted = token::mint("io", 3600, &state).expect("mint");
+    let gone = token::purge(&minted.record.token_id, &state).expect("purge an unused token");
+    assert_eq!((gone.token_id.as_str(), gone.label.as_str()), (minted.record.token_id.as_str(), "io"));
+    assert_eq!(gone.state, token::TokenState::Unused, "purge returns the removed record as it was");
+    assert!(token::list(&state).expect("list").is_empty(), "the row is removed from the store");
+    token::mint("io", 3600, &state).expect("the label is free for a new mint");
+}
+
+#[test]
+fn revoke_then_purge_frees_a_bound_label_for_a_new_token() {
+    let dir = Tdir::new();
+    let state = prep(&dir);
+    let old = token::mint("io", 3600, &state).expect("mint");
+    token::redeem(&old.secret, "myhost", &pubkey(40), &x25519_pubkey(40), &state).expect("redeem");
+    token::delete(&old.record.token_id, &state).expect("revoke the bound token");
+    let gone = token::purge(&old.record.token_id, &state).expect("purge a revoked token");
+    assert_eq!(gone.state, token::TokenState::Revoked);
+    let new = token::mint("io", 3600, &state).expect("the label is free for a new mint");
+    assert_ne!(new.record.token_id, old.record.token_id, "the re-minted label is a new token");
+    let rows = token::list(&state).expect("list");
+    assert_eq!(rows.len(), 1, "only the new row is on file: {rows:?}");
+    assert_eq!((rows[0].token_id.as_str(), rows[0].state), (new.record.token_id.as_str(), token::TokenState::Unused));
+}
+
+#[test]
+fn purge_of_a_bound_token_is_refused_and_keeps_the_label() {
+    let dir = Tdir::new();
+    let state = prep(&dir);
+    let minted = token::mint("io", 3600, &state).expect("mint");
+    let id = minted.record.token_id.clone();
+    token::redeem(&minted.secret, "myhost", &pubkey(41), &x25519_pubkey(41), &state).expect("redeem");
+    let err = token::purge(&id, &state).expect_err("a bound token must be revoked first");
+    assert!(err.message.contains("is bound"), "{err}");
+    assert!(err.message.contains(&format!("holler hub token revoke {id}")), "the refusal names the revoke: {err}");
+    let rows = token::list(&state).expect("list");
+    assert_eq!(rows.len(), 1, "the row is kept: {rows:?}");
+    assert_eq!((rows[0].token_id.as_str(), rows[0].state), (id.as_str(), token::TokenState::Bound));
+    let err = token::mint("io", 3600, &state).expect_err("the label is still held");
+    assert_eq!(err.message, held_message("io", "bound", &id));
+}
+
+#[test]
+fn mint_over_a_held_label_names_the_holder_and_the_fix() {
+    let dir = Tdir::new();
+    let state = prep(&dir);
+    let unused = token::mint("u", 3600, &state).expect("mint u").record.token_id;
+    let bound = token::mint("b", 3600, &state).expect("mint b");
+    token::redeem(&bound.secret, "myhost", &pubkey(42), &x25519_pubkey(42), &state).expect("redeem b");
+    let revoked = token::mint("r", 3600, &state).expect("mint r").record.token_id;
+    token::delete(&revoked, &state).expect("revoke r");
+    for (label, word, id) in [("u", "unused", &unused), ("b", "bound", &bound.record.token_id), ("r", "revoked", &revoked)] {
+        let err = token::mint(label, 3600, &state).expect_err("a held label is refused");
+        assert_eq!(err.message, held_message(label, word, id), "the {word} holder");
+    }
+}
+
+#[test]
+fn purge_of_an_unknown_id_is_refused() {
+    let dir = Tdir::new();
+    let state = prep(&dir);
+    let err = token::purge("tok_nope", &state).expect_err("an unknown id");
+    assert!(err.message.contains("no such token"), "{err}");
+}
+
+/// Fail closed: a corrupt store is never rewritten by `purge` or `mint`.
+#[test]
+fn purge_and_mint_on_a_corrupt_store_fail_without_writing() {
+    let dir = Tdir::new();
+    let state = prep(&dir);
+    let id = token::mint("io", 3600, &state).expect("mint").record.token_id;
+    std::fs::write(dir.tokens_path(), b"not json {").expect("corrupt tokens.json");
+    let err = token::purge(&id, &state).expect_err("purge on a corrupt store");
+    assert!(err.message.contains("corrupted"), "{err}");
+    let err = token::mint("io", 3600, &state).expect_err("mint on a corrupt store");
+    assert!(err.message.contains("corrupted"), "{err}");
+    assert_eq!(std::fs::read(dir.tokens_path()).expect("read"), b"not json {", "the corrupt file is left byte-identical");
+}
+
+#[test]
+fn a_purged_tokens_secret_is_not_found() {
+    let dir = Tdir::new();
+    let state = prep(&dir);
+    let minted = token::mint("io", 3600, &state).expect("mint");
+    token::purge(&minted.record.token_id, &state).expect("purge");
+    let err = token::redeem(&minted.secret, "myhost", &pubkey(43), &x25519_pubkey(43), &state);
+    assert_eq!(err, Err(RedeemError::NotFound), "a purged token's secret matches no record");
+}
+
+/// #454's churn at store level: every cycle on one label leaves nothing behind.
+#[test]
+fn label_churn_cycles_leave_an_empty_store() {
+    let dir = Tdir::new();
+    let state = prep(&dir);
+    for n in 0..20u8 {
+        let minted = token::mint("churn", 3600, &state).unwrap_or_else(|e| panic!("cycle {n}: mint: {e}"));
+        token::redeem(&minted.secret, "myhost", &pubkey(n), &x25519_pubkey(n), &state).expect("redeem");
+        token::delete(&minted.record.token_id, &state).expect("revoke");
+        token::purge(&minted.record.token_id, &state).unwrap_or_else(|e| panic!("cycle {n}: purge: {e}"));
+    }
+    let doc: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(dir.tokens_path()).expect("read")).expect("parse");
+    assert_eq!(doc, serde_json::json!([]), "20 cycles leave no records on file");
+}

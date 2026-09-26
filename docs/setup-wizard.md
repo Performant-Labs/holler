@@ -171,12 +171,17 @@ more than one.
 
 **Two mechanical gotchas worth knowing before minting, confirmed live 2026-09-23:**
 
-- **Labels are permanent, even for a `revoke`d or `delete`d token.** `revoke` deliberately keeps
-  the record (it's an audit trail); `delete` only invalidates the secret. Neither frees the
-  label — minting against a label you've used before, ever, fails with `label "..." already in
-  use`, even if that token is long gone. If you're confident the old pairing is genuinely done
-  (per the "never kill" section above), don't try to reclaim the label: just append a counter
-  and mint `hub1-remote-a-2`, `-3`, and so on.
+- **A label stays taken until its token's record is deleted**
+  ([#454](https://github.com/Performant-Labs/holler/issues/454)). `revoke` deliberately keeps
+  the record (it's an audit trail), so a revoked token still holds its label; `delete` removes
+  an `unused` or `revoked` token's record and frees the label. A mint over a taken label fails
+  with `label "..." already in use by <state> token <token_id>`, followed by the exact commands
+  that free it. If you're confident the old pairing is genuinely done (per the "never kill"
+  section above), revoke its token if it is still `bound`
+  (`holler hub token revoke <token_id>`), delete it (`holler hub token delete <token_id>`), and
+  mint the label again; the new token has a new id, so the body joins with the new join line.
+  On holler v0.3.0 and earlier nothing frees a label (`delete` only invalidated the secret):
+  there, append a counter and mint `hub1-remote-a-2`, `-3`, and so on.
 - **A minted token's join secret is valid for 24 hours by default (`--ttl`), even though releases before v0.3.0
   printed its `expires` a day early.** A freshly minted token showed `expires` equal to "now", which
   looked like a zero-length window; it was a display bug in `format_epoch` (fixed in v0.3.0), and the

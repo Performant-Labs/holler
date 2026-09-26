@@ -15,8 +15,9 @@
 
 mod support;
 
-use support::{holler_cmd, join, mint_token, wait_for, Body, Hub, StateDir, STARTUP_WAIT};
+use support::{holler_cmd, join, mint_token, roster_json, wait_for, Body, Hub, StateDir, STARTUP_WAIT};
 use std::process::Stdio;
+use std::time::Duration;
 
 use serde_json::Value;
 
@@ -146,8 +147,9 @@ fn list_json_exit_0() {
     );
 }
 
-/// `hub token delete <id>` on an **unused** token: exit 0, prints
-/// `invalidated <id> (alice, unused)`.
+/// `hub token delete <id>` on an **unused** token (#454): exit 0, prints
+/// `deleted <id> (alice, unused)`, the row is gone from `hub token list`, and
+/// the label `alice` can be minted again.
 #[test]
 fn delete_unused_exit_0() {
     let state = StateDir::new();
@@ -161,9 +163,20 @@ fn delete_unused_exit_0() {
     let (code2, stdout2, stderr2) = run(&state, &["hub", "token", "delete", &id]);
     assert_eq!(code2, 0, "delete of an unused token must exit 0; stderr: {stderr2}");
     assert!(
-        stdout2.contains(&format!("invalidated {id} (alice, unused)")),
-        "the human line is 'invalidated {id} (alice, unused)'; got: {stdout2}"
+        stdout2.contains(&format!("deleted {id} (alice, unused)")),
+        "the human line is 'deleted {id} (alice, unused)'; got: {stdout2}"
     );
+    assert!(token_rows(&state).is_empty(), "the deleted row is gone from `hub token list --json`");
+    let (code3, _, stderr3) = run(&state, &["hub", "token", "mint", "--label", "alice"]);
+    assert_eq!(code3, 0, "the freed label can be minted again; stderr: {stderr3}");
+}
+
+/// The rows of `--json hub token list`.
+fn token_rows(state: &StateDir) -> Vec<Value> {
+    let (code, stdout, stderr) = run(state, &["--json", "hub", "token", "list"]);
+    assert_eq!(code, 0, "list --json must exit 0; stderr: {stderr}");
+    let doc: Value = serde_json::from_str(&stdout).expect("list --json is valid JSON");
+    doc["tokens"].as_array().expect("a tokens array").clone()
 }
 
 /// `hub token revoke <id>` on an **unused** token: exit 0. The store flips both
@@ -262,4 +275,82 @@ fn token_list_last_seen_is_set_once_a_body_heartbeats() {
         row["last_seen"].as_u64()
     });
     assert!(last_seen.is_some(), "a connected, heartbeating body's token must show a non-null last_seen");
+}
+
+/// #454: `hub token delete` on a **bound** token is refused (exit 3) and names
+/// the revoke that must come first; the row stays `bound` and keeps holding
+/// its label, and the mint refusal names the holder and the revoke.
+#[test]
+fn delete_bound_is_refused_and_keeps_the_label() {
+    let state = StateDir::new();
+    let hub = Hub::start(&state);
+    let (token_id, secret) = mint_token(&state, "body-1");
+    join(&state, &state, &hub.ws_url(), &token_id, &secret);
+
+    let (code, _, stderr) = run(&state, &["hub", "token", "delete", &token_id]);
+    assert_eq!(code, 3, "delete of a bound token must exit 3; stderr: {stderr}");
+    assert!(
+        stderr.contains(&format!("hub token revoke {token_id}")),
+        "the refusal names the revoke; stderr: {stderr}"
+    );
+    let rows = token_rows(&state);
+    let row = rows.iter().find(|r| r["token_id"].as_str() == Some(token_id.as_str()));
+    assert_eq!(
+        row.and_then(|r| r["state"].as_str()),
+        Some("bound"),
+        "the refused delete leaves the row bound: {rows:?}"
+    );
+    let (code2, _, stderr2) = run(&state, &["hub", "token", "mint", "--label", "body-1"]);
+    assert_eq!(code2, 3, "the label is still held; stderr: {stderr2}");
+    assert!(
+        stderr2.contains(&token_id) && stderr2.contains("revoke"),
+        "the mint refusal names the holder and the revoke; stderr: {stderr2}"
+    );
+    assert!(!format!("{stderr}{stderr2}").contains(&secret), "no refusal carries the join secret");
+}
+
+/// #454 (the #373 churn cycle): mint -> join -> run -> detach -> revoke ->
+/// delete, three times on one label. Every re-mint succeeds and reaches
+/// `connected` under its own new token, and every cycle leaves `tokens.json`
+/// an empty array. Readiness is observed through the roster, never slept for.
+#[test]
+fn label_churn_cycle_leaves_no_records() {
+    let hub_state = StateDir::new();
+    let body_state = StateDir::new();
+    let hub = Hub::start(&hub_state);
+    let config = support::write_sessions_toml(&body_state, &[("alpha", &[])]);
+    for n in 1..=3 {
+        let (token_id, secret) = mint_token(&hub_state, "churn");
+        join(&body_state, &hub_state, &hub.ws_url(), &token_id, &secret);
+        let body = Body::start(&body_state, &config);
+        // The row must be connected under *this* cycle's token, not a stale
+        // row of the previous one.
+        wait_for(STARTUP_WAIT, || {
+            let roster = roster_json(&hub_state);
+            let rows = roster["rows"].as_array()?;
+            rows.iter()
+                .any(|r| {
+                    r["name"].as_str() == Some("churn/alpha")
+                        && r["conn_state"].as_str() == Some("connected")
+                        && r["token_id"].as_str() == Some(token_id.as_str())
+                })
+                .then_some(())
+        })
+        .unwrap_or_else(|| panic!("cycle {n}: churn/alpha never connected: {}\n{}", roster_json(&hub_state), hub.log_text()));
+        body.stop(&body_state, Duration::from_secs(15));
+
+        let (code, _, stderr) = run(&hub_state, &["hub", "token", "revoke", &token_id]);
+        assert_eq!(code, 0, "cycle {n}: revoke must exit 0; stderr: {stderr}");
+        let (code, stdout, stderr) = run(&hub_state, &["--json", "hub", "token", "delete", &token_id]);
+        assert_eq!(code, 0, "cycle {n}: delete of the revoked token must exit 0; stderr: {stderr}");
+        let doc: Value = serde_json::from_str(&stdout).expect("delete --json is JSON");
+        assert_eq!(
+            (doc["token_id"].as_str(), doc["label"].as_str(), doc["state"].as_str(), doc["verb"].as_str()),
+            (Some(token_id.as_str()), Some("churn"), Some("deleted"), Some("delete")),
+            "cycle {n}: delete --json document: {doc}"
+        );
+        let raw = std::fs::read_to_string(hub_state.hub().join("tokens.json")).expect("read tokens.json");
+        let store: Value = serde_json::from_str(&raw).expect("tokens.json is JSON");
+        assert_eq!(store, serde_json::json!([]), "cycle {n}: tokens.json holds no leftover records");
+    }
 }

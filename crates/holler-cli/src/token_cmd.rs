@@ -28,9 +28,9 @@ fn token_state() -> Result<holler_hub::state::HubState, i32> {
 
 /// The one shared error path for the token verbs: print the store's message
 /// to stderr and report exit 1 (a store refusal such as an I/O failure). The
-/// fail-closed *policy* refusals (duplicate label, unknown id) are mapped to
-/// exit 3 at the call sites — see `token_delete`/`token_mint` — because
-/// those are the spec's "exit 3" cases.
+/// fail-closed *policy* refusals (duplicate label, unknown id, deleting a
+/// bound token) are mapped to exit 3 at the call sites — see `delete`/`mint`
+/// — because those are the spec's "exit 3" cases.
 fn token_err(e: TokenError) -> i32 {
     eprintln!("error: {e}");
     1
@@ -162,25 +162,62 @@ pub fn list(json: bool) -> i32 {
     0
 }
 
-/// `holler hub token delete ID` (aliases `rm`/`remove`) and
-/// `holler hub token revoke ID` share one operation (the store's
-/// `delete`): an `unused` token is invalidated (secret void), a `bound`
-/// token is revoked (credential void, **row kept**). Both print the spec's
-/// shape: `revoked <id> (<label>, <hostname>)` or `invalidated <id> (<label>,
-/// unused)`. An unknown id is a fail-closed refusal (exit 3); an I/O failure
-/// is exit 1.
+/// `holler hub token delete ID` (aliases `rm`/`remove`, issue #454): remove
+/// an `unused` or `revoked` token's record (the store's `purge`), which frees
+/// its label for a new mint. Prints `deleted <id> (<label>, <prior state>)`;
+/// `--json` prints `{token_id, label, state: "deleted", hostname, verb:
+/// "delete"}`. A `bound` token is a fail-closed refusal (exit 3) that names
+/// the `hub token revoke` to run first, and the store is unchanged; an
+/// unknown id is exit 3; an I/O failure is exit 1. No live socket is closed:
+/// an unused or revoked token has none.
 pub fn delete(id: &str, json: bool) -> i32 {
-    run_inactivate(id, "delete", json)
+    let state = match token_state() {
+        Ok(s) => s,
+        Err(code) => return code,
+    };
+    let record = match holler_hub::token::purge(id, &state) {
+        Ok(r) => r,
+        Err(e) => {
+            // An unknown id or a bound token is a policy refusal (exit 3);
+            // an I/O failure is 1.
+            if e.message.contains("no such token") || e.message.contains("is bound") {
+                eprintln!("error: {e}");
+                return 3;
+            }
+            return token_err(e);
+        }
+    };
+    let prior = holler_hub::token::state_str(record.state);
+    if json {
+        let doc = serde_json::json!({
+            "token_id": record.token_id,
+            "label": record.label,
+            "state": "deleted",
+            "hostname": record.hostname,
+            "verb": "delete",
+        });
+        println!("{}", doc);
+    } else {
+        println!("deleted {} ({}, {prior})", record.token_id, record.label);
+    }
+    0
 }
 
+/// `holler hub token revoke ID`: cut a token off and **keep its record**
+/// (the store's `delete`), which still holds its label until `hub token
+/// delete` removes it. An `unused` token is invalidated (secret void), a
+/// `bound` token is revoked (credential void) and its live socket, if any, is
+/// closed. Prints the spec's shape: `revoked <id> (<label>, <hostname>)` or
+/// `invalidated <id> (<label>, unused)`. An unknown id is a fail-closed
+/// refusal (exit 3); an I/O failure is exit 1.
 pub fn revoke(id: &str, json: bool) -> i32 {
     run_inactivate(id, "revoke", json)
 }
 
-/// The shared delete/revoke body (the store treats them identically). `verb`
-/// is only used in the `--json` document (so a machine can tell which
-/// spelling was used); the human line's verb word comes from the record's
-/// pre-state via `word` (unused→"invalidated", bound→"revoked").
+/// The revoke body. `verb` is only used in the `--json` document (so a
+/// machine can tell which spelling was used); the human line's verb word
+/// comes from the record's pre-state via `word` (unused→"invalidated",
+/// bound→"revoked").
 fn run_inactivate(id: &str, verb: &str, json: bool) -> i32 {
     let state = match token_state() {
         Ok(s) => s,

@@ -104,6 +104,19 @@ fills this file in at release time.
   flake's cause is still open ([#420](https://github.com/Performant-Labs/holler/issues/420)).
 
 ### Bug Fixes
+- A token's label can be reused. `holler hub token delete ID` (and its aliases `rm`/`remove`) now removes
+  an `unused` or `revoked` token's record from `hub/tokens.json`, which frees its label for a new
+  `hub token mint`; it prints `deleted <id> (<label>, <prior state>)`, and `--json` reports
+  `"state": "deleted"`. Before, `delete` did the same as `revoke` (it printed `invalidated` or `revoked`
+  and kept the record), so nothing ever removed a record and a label, once minted, could never be minted
+  again. `hub token revoke` is unchanged: it cuts a token off and keeps its record, which keeps holding the
+  label. **Behaviour change:** `delete` on a `bound` token no longer revokes it: it exits 3, changes
+  nothing, and names the command to run first (`holler hub token revoke <id>`). A mint over a held label
+  still exits 3 with `already in use`, and the message now names the token that holds the label and the
+  commands that free it. A body that was only detached still holds its token and label until the token is
+  revoked and deleted, so the store growth under join/detach churn that #400 measured remains
+  ([#454](https://github.com/Performant-Labs/holler/issues/454), refs
+  [#400](https://github.com/Performant-Labs/holler/issues/400)).
 - A second `holler hub serve` or `holler body run` started against a running one no longer blanks the
   running instance's lock file (`hub/serve.lock`, `body/run.lock`). The loser emptied the file before it
   found the lock held, so its refusal read `(pid )` instead of naming the running process, and the file
