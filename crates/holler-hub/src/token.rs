@@ -143,7 +143,8 @@ pub struct Record {
     /// `created` as unix epoch seconds (RFC3339 on the wire is optional; the
     /// spec pins the record to a number).
     pub created: u64,
-    /// `expires` as unix epoch seconds.
+    /// `expires` as unix epoch seconds: the join secret's deadline, checked only
+    /// by [`redeem`]. A bound token does not expire; revoke ends it (issue #453).
     pub expires: u64,
     /// `unused` / `bound` / `revoked`.
     pub state: TokenState,
@@ -514,7 +515,8 @@ pub struct Minted {
     pub secret: String,
 }
 
-/// Mint a join token for `label` with a TTL of `ttl` seconds.
+/// Mint a join token for `label` whose secret can be redeemed for `ttl_secs`
+/// seconds (the record's `expires`).
 ///
 /// Fails closed: an invalid or duplicate label is a [`TokenError`]; the label
 /// grammar (ADR 0005) and the uniqueness rule are both enforced here, at mint,
@@ -568,8 +570,8 @@ pub fn list(state: &HubState) -> Result<Vec<Record>, TokenError> {
 
 /// Inactivate a token: if it is `unused` the join secret is invalid; if it is
 /// `bound` the credential is invalid **but the row is kept** (with its
-/// hostname / last_seen) so `list` shows who was cut off. The registry story
-/// will additionally close the live socket at once.
+/// hostname / last_seen) so `list` shows who was cut off. The CLI then asks a
+/// live hub to close the socket (`control::revoke_live`, best-effort).
 ///
 /// Returns the record's new shape. The operator-facing message distinguishes
 /// `invalidated` (unused) from `revoked` (bound) in the CLI, not here.
@@ -663,17 +665,16 @@ pub fn redeem(
 }
 
 /// The step-1 half of `circuit/authenticate` (issue #323): resolve a bound,
-/// live-eligible token record. Fails closed: a token that is unknown, not
-/// `bound`, expired, or `revoked` is a no-match, folded into one
-/// [`TokenError`] (the caller — [`crate::circuit::verify_and_authenticate`] —
-/// maps any failure here to the wire's `-32002 unauthenticated`, never
-/// distinguishing *why* to a peer that has not yet proven anything).
+/// live-eligible token record. Fails closed: a token that is unknown or not
+/// `bound` (never redeemed, or revoked) is a no-match, folded into one
+/// [`TokenError`] (the callers in `circuit::auth` map any failure here to the
+/// wire's `-32002 unauthenticated`, never distinguishing *why* to a peer that
+/// has not yet proven anything). `expires` is not checked: it bounds only the
+/// join secret, and a bound token ends only by revoke (issue #453).
 ///
-/// Called again at step 2 (after the body's `circuit/prove`) to catch a
-/// revoke/expiry race between the challenge and the proof — the nonce
-/// challenge issued at step 1 carries no authority of its own; only a record
-/// that is *still* bound at the moment the signature is checked lets the
-/// connection through.
+/// Called again after the body's `circuit/prove` to catch a revoke racing the
+/// handshake: step 1 carries no authority of its own; only a record that is
+/// *still* bound when the proof is checked lets the connection through.
 pub fn bound_record(token_id: &str, state: &HubState) -> Result<Record, TokenError> {
     // [`acquire_lock_retrying`], not the bare [`acquire_lock`], for exactly
     // the reason issue #301 gave `redeem`: this runs *inside the live hub*, on
@@ -695,15 +696,11 @@ pub fn bound_record(token_id: &str, state: &HubState) -> Result<Record, TokenErr
     // path).
     let _lock = acquire_lock_retrying(state)?;
     let store = Store::load(&tokens_path(state))?;
-    let now = now_secs();
     let Some(record) = store.records.iter().find(|r| r.token_id == token_id) else {
         return Err(TokenError::new(format!("no such token {token_id}")));
     };
     if record.state != TokenState::Bound {
         return Err(TokenError::new(format!("token {token_id} is not bound")));
-    }
-    if record.expires < now {
-        return Err(TokenError::new(format!("token {token_id} is expired")));
     }
     if record.body_pubkey.is_none() {
         return Err(TokenError::new(format!("token {token_id} has no public key on record")));
@@ -728,7 +725,7 @@ pub fn touch_last_seen(token_id: &str, state: &HubState) -> Result<(), TokenErro
     // connected body contends with every other one — and here the contention
     // is *sustained*, not just at connect, since the beat repeats for the
     // connection's whole life. A lost race silently skips a `last_seen`
-    // update, which is the timestamp a later liveness/expiry decision reads.
+    // update, the timestamp `hub token list` shows operators as LAST_SEEN.
     let _lock = acquire_lock_retrying(state)?;
     let mut store = Store::load(&tokens_path(state))?;
     let Some(record) = store.by_mut(token_id) else {

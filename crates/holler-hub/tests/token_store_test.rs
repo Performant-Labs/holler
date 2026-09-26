@@ -399,3 +399,44 @@ fn concurrent_operator_paths_never_lose_the_lock_race() {
         errors.iter().take(5).collect::<Vec<_>>(),
     );
 }
+
+/// Rewrite the only record's `expires` in tokens.json (the store re-reads the
+/// file on every call, so the next `bound_record` sees it).
+fn set_only_expires(dir: &Tdir, expires: u64) {
+    let path = dir.tokens_path();
+    let mut doc: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).expect("read")).expect("parse");
+    let rows = doc.as_array_mut().expect("tokens.json is an array");
+    assert_eq!(rows.len(), 1, "exactly one record: {rows:?}");
+    rows[0]["expires"] = serde_json::json!(expires);
+    std::fs::write(&path, doc.to_string()).expect("write");
+}
+
+/// Issue #453: `expires` bounds only the unredeemed join secret. A bound
+/// token whose `expires` has passed still yields its record to the
+/// authenticate path.
+#[test]
+fn bound_record_ignores_expires() {
+    let dir = Tdir::new();
+    let state = prep(&dir);
+    let minted = token::mint("io", 3600, &state).expect("mint");
+    token::redeem(&minted.secret, "myhost", &pubkey(20), &x25519_pubkey(20), &state).expect("redeem");
+    set_only_expires(&dir, 1); // long past
+    let record = token::bound_record(&minted.record.token_id, &state)
+        .unwrap_or_else(|e| panic!("a bound token past its expires must still authenticate: {}", e.message));
+    assert_eq!(record.token_id, minted.record.token_id);
+    assert_eq!(record.body_pubkey.as_deref(), Some(pubkey(20).as_str()), "the bound key is returned");
+}
+
+/// Issue #453: removing the bound-token expiry check must not let a token
+/// that was never redeemed authenticate, whatever its `expires`.
+#[test]
+fn bound_record_rejects_unused_token() {
+    let dir = Tdir::new();
+    let state = prep(&dir);
+    let minted = token::mint("io", 3600, &state).expect("mint");
+    for expires in [u64::MAX / 2, 1] {
+        set_only_expires(&dir, expires);
+        let err = token::bound_record(&minted.record.token_id, &state).expect_err("an unused token must not authenticate");
+        assert!(err.message.contains("is not bound"), "expires={expires}: {}", err.message);
+    }
+}

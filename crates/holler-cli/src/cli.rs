@@ -177,7 +177,8 @@ pub struct Mint {
     /// Label the token is minted for.
     #[arg(long)]
     pub label: String,
-    /// Token time-to-live (default 24h).
+    /// Join-secret lifetime: how long `body join` can redeem the token
+    /// (default 24h). A joined body does not expire; `hub token revoke` ends it.
     #[arg(long, default_value = "24h")]
     pub ttl: String,
 }

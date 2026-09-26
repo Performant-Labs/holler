@@ -88,9 +88,15 @@ pub(super) async fn refuse_unauthenticated<Snk>(
 /// they never change with the message wording; anything unrecognized is
 /// `auth_failed`.
 pub(super) fn rejection_reason(message: &str) -> &'static str {
+    // First match wins. "no such token" must stay first: that refusal embeds
+    // the client-supplied token id, so an unknown id containing another
+    // rule's phrase (say "x is expired") would otherwise take that rule's
+    // code. Every other message embeds only a server-minted id or none.
     const RULES: &[(&str, &str)] = &[
-        ("is expired", "token_expired"),
         ("no such token", "token_unknown"),
+        // Retired by #453: a bound token no longer expires, so no refusal says
+        // "is expired". Kept reserved so the code never changes meaning.
+        ("is expired", "token_expired"),
         ("is not bound", "token_not_bound"),
         ("no public key on record", "no_public_key"),
         ("no X25519 public key on record", "no_public_key"),
@@ -171,8 +177,8 @@ where
 }
 
 /// Step 1 of `circuit/authenticate` → `circuit/prove`: resolve the bound
-/// token record for `params.token_id` — an unknown, unbound, expired, or
-/// revoked token, or one with no registered X25519 public key, is `-32002`
+/// token record for `params.token_id` — an unknown, unbound, or revoked
+/// token, or one with no registered X25519 public key, is `-32002`
 /// via [`refuse_unauthenticated`] (the same fail-shape the old credential
 /// check had: the body's connection loop treats that code, and only that
 /// code, as "do not retry"). No lockout success/reset happens here —
@@ -300,7 +306,7 @@ where
 }
 
 /// Step 4: complete the handshake — re-fetch the bound record (catching a
-/// revoke/expiry race between message 1 and message 3: [`begin_noise_
+/// revoke race between message 1 and message 3: [`begin_noise_
 /// handshake`] carries no authority of its own), process `prove.message`
 /// (message 3, `s, se`) against the in-progress `handshake`, and — once
 /// finished — compare the static key it learned
@@ -546,6 +552,24 @@ mod tests {
         ];
         for (message, code) in cases {
             assert_eq!(rejection_reason(message), code, "{message}");
+        }
+    }
+
+    /// An unknown token id is client input and is echoed into the refusal
+    /// message. An id that spells out another rule's phrase must still be
+    /// classified `token_unknown`, never the retired `token_expired` or any
+    /// other code.
+    #[test]
+    fn unknown_token_id_cannot_spoof_another_reason() {
+        let cases = [
+            "authentication failed: no such token x is expired",
+            "authentication failed: no such token x is not bound",
+            "authentication failed: no such token static key mismatch",
+            "authentication failed: no such token no circuit/prove within the timeout",
+            "authentication failed: no such token bad handshake message",
+        ];
+        for message in cases {
+            assert_eq!(rejection_reason(message), "token_unknown", "{message}");
         }
     }
 }

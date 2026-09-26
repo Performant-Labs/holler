@@ -317,7 +317,7 @@ impl Lockout {
 
 /// Group reason codes into `(code, count)` pairs, in the order each code first
 /// appears. The one grouping shared by the `lockout_tripped` log line
-/// (`token_expiredx3`) and `hub status` (issue #451).
+/// (`token_not_boundx3`) and `hub status` (issue #451).
 pub fn group_reasons(reasons: &[&'static str]) -> Vec<(&'static str, usize)> {
     let mut grouped: Vec<(&'static str, usize)> = Vec::new();
     for &reason in reasons {
@@ -530,14 +530,14 @@ mod tests {
         let lockout = lockout_with(FakeClock::new());
         let ip = peer();
         for n in 1..5u64 {
-            let o = lockout.record_failure_detailed(&ip, "token_expired", "tok_a");
+            let o = lockout.record_failure_detailed(&ip, "token_not_bound", "tok_a");
             assert_eq!((o.count, o.max, o.newly_tripped, o.locked_out), (n, 5, false, false));
         }
         let o = lockout.record_failure_detailed(&ip, "bad_proof", "tok_a");
         assert!(o.newly_tripped && o.locked_out, "the 5th failure trips");
-        assert_eq!(o.reasons, vec!["token_expired", "token_expired", "token_expired", "token_expired", "bad_proof"]);
+        assert_eq!(o.reasons, vec!["token_not_bound", "token_not_bound", "token_not_bound", "token_not_bound", "bad_proof"]);
         assert_eq!((o.duration_ms, o.retry_after_ms), (10_000, 10_000));
-        let again = lockout.record_failure_detailed(&ip, "token_expired", "tok_a");
+        let again = lockout.record_failure_detailed(&ip, "token_not_bound", "tok_a");
         assert!(again.locked_out && !again.newly_tripped, "a failure while locked out is not a second trip");
     }
 
@@ -549,14 +549,14 @@ mod tests {
         let lockout = lockout_with(clock.clone());
         let ip = peer();
         for _ in 0..5 {
-            lockout.record_failure_detailed(&ip, "token_expired", "tok_a");
+            lockout.record_failure_detailed(&ip, "token_not_bound", "tok_a");
         }
         assert!(lockout.sweep().is_empty(), "still locked out: nothing has lapsed");
         clock.advance(10_000);
         assert_eq!(lockout.sweep(), vec![ip], "the lapsed cooldown is reported");
         assert!(lockout.sweep().is_empty(), "and only once");
         assert!(!lockout.is_locked_out(&ip));
-        assert_eq!(lockout.record_failure_detailed(&ip, "token_expired", "tok_a").count, 1, "a fresh window");
+        assert_eq!(lockout.record_failure_detailed(&ip, "token_not_bound", "tok_a").count, 1, "a fresh window");
     }
 
     /// Issue #450: `reset` says whether it lifted a real lockout, not just
@@ -565,10 +565,10 @@ mod tests {
     fn reset_reports_only_a_lifted_lockout() {
         let lockout = lockout_with(FakeClock::new());
         let ip = peer();
-        lockout.record_failure_detailed(&ip, "token_expired", "tok_a");
+        lockout.record_failure_detailed(&ip, "token_not_bound", "tok_a");
         assert!(!lockout.reset(&ip), "one strike is not a lockout");
         for _ in 0..5 {
-            lockout.record_failure_detailed(&ip, "token_expired", "tok_a");
+            lockout.record_failure_detailed(&ip, "token_not_bound", "tok_a");
         }
         assert!(lockout.reset(&ip), "a tripped peer's lockout is lifted");
     }
@@ -596,7 +596,7 @@ mod tests {
     fn snapshot_shows_an_accumulating_peer_as_not_locked_out() {
         let lockout = lockout_with(FakeClock::new());
         let ip = peer();
-        lockout.record_failure_detailed(&ip, "token_expired", "tok_a");
+        lockout.record_failure_detailed(&ip, "token_not_bound", "tok_a");
         lockout.record_failure_detailed(&ip, "token_unknown", "tok_b");
         let peers = peers_of(&lockout, &no_labels());
         assert_eq!(peers.len(), 1);
@@ -605,7 +605,7 @@ mod tests {
         assert_eq!(p["locked_out"], false);
         assert_eq!(p["failures"], 2);
         assert_eq!(p["retry_after_secs"], 0);
-        assert_eq!(p["reasons"], json!({ "token_expired": 1, "token_unknown": 1 }));
+        assert_eq!(p["reasons"], json!({ "token_not_bound": 1, "token_unknown": 1 }));
         assert_eq!(p["token_ids"], json!([{"id": "tok_a", "label": null}, {"id": "tok_b", "label": null}]));
     }
 
@@ -615,7 +615,7 @@ mod tests {
         let lockout = lockout_with(clock.clone());
         let ip = peer();
         for _ in 0..5 {
-            lockout.record_failure_detailed(&ip, "token_expired", "tok_a");
+            lockout.record_failure_detailed(&ip, "token_not_bound", "tok_a");
         }
         clock.advance(3_500); // 6_500 ms remain -> 7 s
         let labels = HashMap::from([("tok_a".to_string(), "body-1".to_string())]);
@@ -623,7 +623,7 @@ mod tests {
         assert_eq!(p["locked_out"], true);
         assert_eq!(p["failures"], 5);
         assert_eq!(p["retry_after_secs"], 7);
-        assert_eq!(p["reasons"], json!({ "token_expired": 5 }));
+        assert_eq!(p["reasons"], json!({ "token_not_bound": 5 }));
         assert_eq!(p["token_ids"], json!([{"id": "tok_a", "label": "body-1"}]), "distinct ids only");
     }
 
@@ -633,7 +633,7 @@ mod tests {
         let lockout = lockout_with(clock.clone());
         let ip = peer();
         for _ in 0..5 {
-            lockout.record_failure_detailed(&ip, "token_expired", "tok_a");
+            lockout.record_failure_detailed(&ip, "token_not_bound", "tok_a");
         }
         assert_eq!(peers_of(&lockout, &no_labels())[0]["retry_after_secs"], 10);
         clock.advance(9_999); // 1 ms remains
@@ -648,9 +648,9 @@ mod tests {
         let tripped: IpAddr = "10.0.0.1".parse().unwrap();
         let accumulating: IpAddr = "10.0.0.2".parse().unwrap();
         for _ in 0..5 {
-            lockout.record_failure_detailed(&tripped, "token_expired", "tok_a");
+            lockout.record_failure_detailed(&tripped, "token_not_bound", "tok_a");
         }
-        lockout.record_failure_detailed(&accumulating, "token_expired", "tok_a");
+        lockout.record_failure_detailed(&accumulating, "token_not_bound", "tok_a");
         clock.advance(10_000);
         assert!(peers_of(&lockout, &no_labels()).is_empty(), "both the cooldown and the window have lapsed");
     }
@@ -663,7 +663,7 @@ mod tests {
         let lockout = lockout_with(clock.clone());
         let ip = peer();
         for _ in 0..5 {
-            lockout.record_failure_detailed(&ip, "token_expired", "tok_a");
+            lockout.record_failure_detailed(&ip, "token_not_bound", "tok_a");
         }
         clock.advance(10_000);
         assert!(peers_of(&lockout, &no_labels()).is_empty());
@@ -674,7 +674,7 @@ mod tests {
     fn snapshot_peers_are_sorted_by_address() {
         let lockout = lockout_with(FakeClock::new());
         for ip in ["10.0.0.9", "10.0.0.10", "10.0.0.2"] {
-            lockout.record_failure_detailed(&ip.parse().unwrap(), "token_expired", "tok_a");
+            lockout.record_failure_detailed(&ip.parse().unwrap(), "token_not_bound", "tok_a");
         }
         let order: Vec<String> = peers_of(&lockout, &no_labels()).iter().map(|p| p["peer"].as_str().unwrap().to_string()).collect();
         let mut sorted = order.clone();

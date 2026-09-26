@@ -850,13 +850,16 @@ Third, **for each distinct `remote_host`** (looping, not just doing this once):
    confirmed is safe to reuse (step above) fails this way, just append a counter and re-mint —
    `hub1-remote-a-2`, then `-3`, etc. — rather than hunting for a way to delete the old label.
 
-   **A minted token is valid for 24 hours by default (`--ttl`); the human-readable `expires` that
-   `hub token mint` prints is one day early on holler releases before v0.3.0.** Confirmed
+   **A minted token's join secret is valid for 24 hours by default (`--ttl`); the human-readable
+   `expires` that `hub token mint` prints is one day early on holler releases before v0.3.0.** Confirmed
    2026-09-23: a fresh token printed `expires` equal to the mint time, but `--json` showed
    `expires - now = 86400s`, and `format_epoch` was missing a `+ 1` in its day term (fixed in
    holler v0.3.0). So a same-second `expires` is a display bug, not a zero-length window — there is
    no rush before `body join`; only a real `token expired`/`invalid token` error from `body join`
    means the token lapsed. (This skill previously called it a "redeem-immediately window" — wrong.)
+   From holler #453 on (releases after v0.3.0), a joined body's token does not expire: the body
+   keeps authenticating until `holler hub token revoke <token_id>` ends it, so a working pairing
+   never needs a new mint just because a day has passed.
 3. **Join and run the body on this host**, using *this host's own* derived config:
    ```bash
    scp <this-host-derived-sessions.toml> <remote_host>:~/sessions.toml

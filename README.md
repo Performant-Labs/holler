@@ -328,10 +328,12 @@ Because the ACP SDK holler pins (`agent-client-protocol` 2.1.0) spawns and owns 
 
 | event | fields | meaning |
 | ----- | ------ | ------- |
-| `auth_rejected` | `peer`, `token_id`, `reason`, `failures` (`n/max` in the current window) | One refused authentication. `reason` is a stable code: `token_expired`, `token_unknown`, `token_not_bound` (revoked or never joined), `no_public_key`, `key_mismatch`, `prove_timeout`, `protocol_error`, `handshake_failed`, or the catch-all `auth_failed`. Only the public token id is logged, never a secret. |
-| `lockout_tripped` | `peer`, `failures`, `reasons` (e.g. `token_expiredx5`), `duration_ms`, `retry_after_s` | The peer reached the failure limit (5 in 10 minutes by default) and is refused for the cooldown. Logged once per trip. |
+| `auth_rejected` | `peer`, `token_id`, `reason`, `failures` (`n/max` in the current window) | One refused authentication. `reason` is a stable code: `token_unknown`, `token_not_bound` (revoked or never joined), `no_public_key`, `key_mismatch`, `prove_timeout`, `protocol_error`, `handshake_failed`, or the catch-all `auth_failed`. `token_expired` is retired (see "Token lifetime" below). Only the public token id is logged, never a secret. |
+| `lockout_tripped` | `peer`, `failures`, `reasons` (e.g. `token_not_boundx5`), `duration_ms`, `retry_after_s` | The peer reached the failure limit (5 in 10 minutes by default) and is refused for the cooldown. Logged once per trip. |
 | `lockout_cleared` | `peer`, `why` (`expired` or `authenticated`) | A lockout ended: the cooldown lapsed, or the peer authenticated successfully. |
 | `lockout_refused` | `peer` | A connection from a locked-out peer was refused before any frame was read. |
+
+**Token lifetime.** A token's `expires` (`hub token mint --ttl`, default 24h) bounds only how long its join secret can be redeemed with `body join`. Once a body has joined, its token does not expire: it keeps authenticating until `holler hub token revoke <token_id>` ends it, and `LAST_SEEN` in `holler hub token list` shows when each bound token last checked in (its EXPIRES column reads `-`). Releases before [#453](https://github.com/Performant-Labs/holler/issues/453) refused a joined body once `expires` had passed, with `reason` `token_expired`; that code is retired and no longer emitted. Such a body needs no new join: its next authentication against an upgraded hub succeeds. **Before upgrading**, if you cut a body off only by letting its token expire rather than with `hub token revoke`, that body will authenticate again: check `holler hub token list --json` for `bound` rows whose `expires` is in the past (the text output shows `-` in EXPIRES for bound rows) and revoke any that must stay cut off.
 
 The lockout is keyed by the peer's transport address, so behind a reverse proxy every client shares one bucket ([#455](https://github.com/Performant-Labs/holler/issues/455)).
 

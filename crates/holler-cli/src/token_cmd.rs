@@ -104,9 +104,11 @@ pub fn mint(mint: &Mint, json: bool) -> i32 {
 
 /// `holler hub token list [--json]` — list every token. Human output prints
 /// a `TOKEN_ID LABEL STATE MACHINE LAST_SEEN EXPIRES` table; secrets are
-/// never printed. `--json` prints a `{"tokens":[{token_id,label,state,
-/// machine,last_seen,expires}...]}` document (machine = hostname, last_seen/
-/// expires as epoch seconds).
+/// never printed. EXPIRES is the join secret's deadline, so a `bound` or
+/// `revoked` row prints `-` there (issue #453). `--json` prints a
+/// `{"tokens":[{token_id,label,state,machine,last_seen,expires}...]}`
+/// document (machine = hostname, last_seen/expires as epoch seconds; every
+/// row's `expires` is the stored number, whatever its state).
 pub fn list(json: bool) -> i32 {
     let state = match token_state() {
         Ok(s) => s,
@@ -139,6 +141,13 @@ pub fn list(json: bool) -> i32 {
         for r in &rows {
             let machine = r.hostname.as_deref().unwrap_or("-");
             let last_seen = r.last_seen.map(format_epoch).unwrap_or_else(|| "-".into());
+            // Issue #453: `expires` only bounds redeeming the join secret, so
+            // it is moot once the token is bound or revoked.
+            let expires = if r.state == holler_hub::token::TokenState::Unused {
+                format_epoch(r.expires)
+            } else {
+                "-".into()
+            };
             println!(
                 "{:<14} {:<10} {:<8} {:<10} {:<10} {}",
                 r.token_id,
@@ -146,7 +155,7 @@ pub fn list(json: bool) -> i32 {
                 holler_hub::token::state_str(r.state),
                 machine,
                 last_seen,
-                format_epoch(r.expires)
+                expires
             );
         }
     }
@@ -221,15 +230,16 @@ fn run_inactivate(id: &str, verb: &str, json: bool) -> i32 {
 }
 
 /// `holler hub token ping ID` (issue #182): first the store's own record
-/// check — a `revoked`/`expired`/`not_found` token can never be live, so
-/// those stay a fail-closed policy refusal (exit 3) without ever touching
-/// the live hub. An **unused** (not-yet-redeemed) token has never had a
-/// socket to begin with, so it keeps the pre-#182 behaviour: `valid`, exit
-/// 0 (there is nothing live to probe). Only a **bound** token is actually
-/// probed: the control socket asks the live hub to send a `circuit/ping`
-/// over that token's socket and report `{hostname, rtt_ms}`. No live socket
-/// for it — including no live hub at all — is the spec's `-32004
-/// not_connected` (exit 1); a genuine answer is exit 0.
+/// check — a `revoked`/`not_found` token, or an unused one past its join
+/// deadline (`expired`), can never be live, so those stay a fail-closed
+/// policy refusal (exit 3) without ever touching the live hub. An **unused**
+/// (not-yet-redeemed) token has never had a socket to begin with, so it keeps
+/// the pre-#182 behaviour: `valid`, exit 0 (there is nothing live to probe).
+/// Only a **bound** token is actually probed, whatever its `expires` (a bound
+/// token does not expire, issue #453): the control socket asks the live hub
+/// to send a `circuit/ping` over that token's socket and report `{hostname,
+/// rtt_ms}`. No live socket for it — including no live hub at all — is the
+/// spec's `-32004 not_connected` (exit 1); a genuine answer is exit 0.
 pub fn ping(id: &str, json: bool) -> i32 {
     let state = match token_state() {
         Ok(s) => s,
@@ -250,9 +260,8 @@ pub fn ping(id: &str, json: bool) -> i32 {
     let refusal = match record.state {
         holler_hub::token::TokenState::Revoked => Some("revoked"),
         holler_hub::token::TokenState::Unused if record.expires < now => Some("expired"),
-        holler_hub::token::TokenState::Bound if record.expires < now => Some("expired"),
         holler_hub::token::TokenState::Unused => None, // never redeemed: nothing to probe, `valid`.
-        holler_hub::token::TokenState::Bound => None,  // worth probing live.
+        holler_hub::token::TokenState::Bound => None,  // worth probing live, whatever its `expires` (#453).
     };
     if let Some(status) = refusal {
         if json {

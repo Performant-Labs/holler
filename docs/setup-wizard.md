@@ -177,13 +177,21 @@ more than one.
   use`, even if that token is long gone. If you're confident the old pairing is genuinely done
   (per the "never kill" section above), don't try to reclaim the label: just append a counter
   and mint `hub1-remote-a-2`, `-3`, and so on.
-- **A minted token is valid for 24 hours by default (`--ttl`), even though releases before v0.3.0
+- **A minted token's join secret is valid for 24 hours by default (`--ttl`), even though releases before v0.3.0
   printed its `expires` a day early.** A freshly minted token showed `expires` equal to "now", which
   looked like a zero-length window; it was a display bug in `format_epoch` (fixed in v0.3.0), and the
   real expiry — visible in `--json` — was always `now + ttl`. There is no rush between `mint` and
   `body join`; only a real `token expired`/`invalid token` error *from `body join` itself* means the
   token actually lapsed. (An earlier version of this page called it a "redeem-immediately window";
   that was wrong.)
+- **Once a body has joined, its token does not expire**
+  ([#453](https://github.com/Performant-Labs/holler/issues/453)). `expires` bounds only the join
+  window, so `hub token list` shows `-` in EXPIRES for a bound token, and a long-running body keeps
+  authenticating on every reconnect. `holler hub token revoke <token_id>` is what ends it. Releases
+  before #453 refused a joined body's reconnect once `expires` had passed (hub log reason
+  `token_expired`, now retired); against an upgraded hub such a body authenticates again with no new
+  join. Before upgrading, revoke any such token whose body must stay cut off: find them with
+  `holler hub token list --json` (`bound` rows with a past `expires`; the text output shows `-`).
 - **A real Homebrew/Linuxbrew-installed `herdr` or `holler` can still report `not found` even
   in a login shell** — some machines never add the brew prefix's `bin` dir to `$PATH` at all,
   not just a login-vs-non-login gap. Before concluding either binary is genuinely missing, check

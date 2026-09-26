@@ -42,6 +42,7 @@ cargo test -p holler-cli --test <file>
 | `docs_cli_test` | every `holler …` command the docs show parses against the real clap tree |
 | `logging_test` | hub/body JSON structured-logging behaviour |
 | `token_cli_test` | `hub token list` / `delete` CLI surface |
+| `bound_token_lifetime_test` | a bound token outlives its `expires`; `hub token revoke` ends it; `ping`/`list` follow the same rule (#453) |
 | `cli_invocation_test` | CLI invocation/arg-handling behaviour |
 
 ### One test (function)
