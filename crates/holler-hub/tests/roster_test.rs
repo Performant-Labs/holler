@@ -551,3 +551,31 @@ fn last_turn_survives_reconnect_via_presence() {
     assert_eq!(after_last.turn_id, "h-000000000000000000000041");
     assert_eq!(after_last.state.as_str(), "completed");
 }
+
+/// Issue #442: a prompt the session hold refuses undoes its own `turn_id`
+/// change (`replace_turn_id` / `undo_turn_id`) — and only its own: a newer
+/// turn's id is never overwritten by a stale rollback.
+#[test]
+fn a_refused_prompt_undoes_only_its_own_turn_id() {
+    let r = Roster::new(&Config::default());
+    r.set_token(T, C);
+    r.set_label(T, "io");
+    r.advertise(T, &presence("h1", &["alpha"]));
+
+    // First turn dispatched: no previous id.
+    assert_eq!(r.replace_turn_id(T, "alpha", "h-000000000000000000000001"), Some(None));
+    // A second prompt is dispatched, then refused: its id is rolled back to the first's.
+    let prev = r.replace_turn_id(T, "alpha", "h-000000000000000000000002").unwrap();
+    assert_eq!(prev.as_deref(), Some("h-000000000000000000000001"));
+    r.undo_turn_id(T, "alpha", "h-000000000000000000000002", prev);
+    assert_eq!(r.rows(None)[0].turn_id.as_deref(), Some("h-000000000000000000000001"));
+
+    // A stale rollback never clobbers a newer turn: #3 replaced #2 before #2's undo ran.
+    let prev2 = r.replace_turn_id(T, "alpha", "h-000000000000000000000002").unwrap();
+    r.replace_turn_id(T, "alpha", "h-000000000000000000000003");
+    r.undo_turn_id(T, "alpha", "h-000000000000000000000002", prev2);
+    assert_eq!(r.rows(None)[0].turn_id.as_deref(), Some("h-000000000000000000000003"));
+
+    // No row: no answer.
+    assert_eq!(r.replace_turn_id(T, "nope", "h-000000000000000000000004"), None);
+}
