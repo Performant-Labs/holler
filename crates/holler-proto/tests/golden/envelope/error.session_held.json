@@ -1,0 +1,13 @@
+{
+  "error": {
+    "code": -32011,
+    "data": {
+      "code": "session_held",
+      "reason": "deploy freeze",
+      "since": "2026-09-08T12:00:00Z"
+    },
+    "message": "session is held: deploy freeze"
+  },
+  "id": "h-01HTESTGOLDEN000000000000",
+  "jsonrpc": "2.0"
+}

@@ -27,6 +27,7 @@ use holler_proto::a2a::{Message, Part, Role};
 use holler_proto::docs::*;
 use holler_proto::envelope::{decode, encode, Envelope, EnvelopeError};
 use holler_proto::error::{Code, Error as WireError};
+use holler_proto::hold::SessionHold;
 use serde_json::{json, Value};
 
 fn golden_dir() -> PathBuf {
@@ -114,6 +115,35 @@ fn envelope_error_matches_golden() {
     let env = envelopes().into_iter().find(|e| e.shape_name() == "error").unwrap();
     let wire = encode(&env).unwrap();
     assert_golden("envelope/error.json", &wire);
+}
+
+/// `session_held` (issue #441) with and without a reason, as the encoder emits
+/// the whole error frame.
+#[test]
+fn session_held_error_frames_match_golden() {
+    for (file, reason) in [("error.session_held.json", Some("deploy freeze")), ("error.session_held_no_reason.json", None)] {
+        let env = Envelope::Error { id: Some(id()), error: WireError::session_held(reason, "2026-09-08T12:00:00Z") };
+        assert_golden(&format!("envelope/{file}"), &encode(&env).unwrap());
+    }
+}
+
+/// A roster row's hold fields (issue #441) are flattened into the hub's row:
+/// a held row gains `hold`/`hold_reason`/`held_since`, and a row that is not
+/// held is byte-identical to one that predates the feature.
+#[test]
+fn roster_row_with_hold_fields_matches_golden() {
+    #[derive(serde::Serialize)]
+    struct Row {
+        name: &'static str,
+        state: &'static str,
+        #[serde(flatten)]
+        hold: SessionHold,
+    }
+    let held = Row { name: "io/alpha", state: "idle", hold: SessionHold::held(Some("deploy freeze".into()), "2026-09-08T12:00:00Z".into()) };
+    assert_golden("docs/RosterRow.held.json", &serde_json::to_string(&held).unwrap());
+    let open = Row { name: "io/alpha", state: "idle", hold: SessionHold::default() };
+    assert_golden("docs/RosterRow.not_held.json", &serde_json::to_string(&open).unwrap());
+    assert_eq!(serde_json::to_value(&open).unwrap(), json!({"name":"io/alpha","state":"idle"}));
 }
 
 // --- one instance of every docs.rs wire type ----------------------------------
@@ -227,6 +257,9 @@ fn docs_instances() -> Vec<(&'static str, Value)> {
         ("AuthChallenge", serde_json::to_value(AuthChallenge { message: "2".repeat(96) }).unwrap()),
         ("Prove", serde_json::to_value(Prove { token_id: "tok_7f3a".into(), message: "3".repeat(128) }).unwrap()),
         ("AuthOk", serde_json::to_value(AuthOk { ok: true }).unwrap()),
+        ("SessionHold.held", serde_json::to_value(SessionHold::held(Some("deploy freeze".into()), "2026-09-08T12:00:00Z".into())).unwrap()),
+        ("SessionHold.held_no_reason", serde_json::to_value(SessionHold::held(None, "2026-09-08T12:00:00Z".into())).unwrap()),
+        ("SessionHold.not_held", serde_json::to_value(SessionHold::default()).unwrap()),
         ("PingAck", serde_json::to_value(PingAck { hostname: "kiwi".into(), ts: 1_757_000_000_000 }).unwrap()),
     ]
 }

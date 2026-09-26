@@ -267,6 +267,47 @@ fn nothing_pending_error_encodes_code_and_data_code() {
     assert_eq!(Code::from_jsonrpc(back.error().unwrap().code), Some(Code::NothingPending));
 }
 
+/// The session hold's refusal (issue #441): `say` to a held session encodes
+/// `-32011 session_held` with the reason and the time the hold was set in
+/// `data`, and the message names the reason. It is the next free code after
+/// `nothing_pending` (`-32010`).
+#[test]
+fn session_held_error_carries_reason_and_since() {
+    let env = Envelope::Error {
+        id: Some("h-01HTEST00000000000000000003".into()),
+        error: WireError::session_held(Some("deploy freeze"), "2026-09-08T12:00:00Z"),
+    };
+    let wire = encode(&env).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&wire).unwrap();
+    let err = v.get("error").expect("error object present");
+    assert_eq!(err.get("code"), Some(&serde_json::json!(-32011)));
+    assert_eq!(err.get("message"), Some(&serde_json::json!("session is held: deploy freeze")));
+    let data = err.get("data").expect("session_held carries data");
+    assert_eq!(data.get("code"), Some(&serde_json::json!("session_held")));
+    assert_eq!(data.get("reason"), Some(&serde_json::json!("deploy freeze")));
+    assert_eq!(data.get("since"), Some(&serde_json::json!("2026-09-08T12:00:00Z")));
+    // The session_busy-only fields stay off the wire here.
+    assert!(data.get("state").is_none());
+    assert!(data.get("turn_age_ms").is_none());
+    // Round-trips to the named code and back to the same error object.
+    let back = decode(&wire).unwrap();
+    let e = back.error().unwrap();
+    assert_eq!(Code::from_jsonrpc(e.code), Some(Code::SessionHeld));
+    assert_eq!(e, &WireError::session_held(Some("deploy freeze"), "2026-09-08T12:00:00Z"));
+}
+
+/// A hold set without a reason: `data.reason` is absent (never an empty
+/// string) and the message is the bare "session is held".
+#[test]
+fn session_held_error_without_reason_omits_it() {
+    let err = WireError::session_held(None, "2026-09-08T12:00:00Z");
+    assert_eq!(err.message, "session is held");
+    let v = serde_json::to_value(&err).unwrap();
+    let data = v.get("data").unwrap();
+    assert!(data.get("reason").is_none());
+    assert_eq!(data.get("since"), Some(&serde_json::json!("2026-09-08T12:00:00Z")));
+}
+
 /// A conformant error from a foreign peer — numeric `-32601`, no `data` —
 /// must decode and map back to the matching `Code` by number.
 #[test]
@@ -298,6 +339,7 @@ fn foreign_jsonrpc_error_decodes() {
 #[case::connection_lost(Code::ConnectionLost)]
 #[case::session_busy(Code::SessionBusy)]
 #[case::nothing_pending(Code::NothingPending)]
+#[case::session_held(Code::SessionHeld)]
 fn every_code_round_trips_through_wire(#[case] code: Code) {
     let env = Envelope::Error {
         id: None,
