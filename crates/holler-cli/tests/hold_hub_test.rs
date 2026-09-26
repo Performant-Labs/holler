@@ -131,7 +131,7 @@ impl Rig {
         control::release_at(self.root(), s)
     }
     fn say(&self, s: &str, queue: bool) -> Result<Value, ControlError> {
-        control::say_at(self.root(), s, "hi", queue, Duration::from_secs(60))
+        say_at_retrying(self.root(), s, "hi", queue)
     }
     fn rows(&self) -> Vec<Value> {
         control::roster_at(self.root(), true, None).map(|v| v["rows"].as_array().cloned().unwrap_or_default()).unwrap_or_default()
@@ -147,7 +147,7 @@ impl Rig {
     /// `turn_id` moves the instant the hub sends the prompt, so unlike
     /// `state == working` this cannot be missed by a slow poller).
     fn wait_dispatched(&self, name: &str, prev: Option<Value>) {
-        self.wait_row(name, |r| !r["turn_id"].is_null() && Some(&r["turn_id"]) != prev.as_ref());
+        self.wait_row(name, |r| turn_accepted(r, prev.as_ref()));
     }
     fn turn_id(&self, name: &str) -> Option<Value> {
         self.row(name).map(|r| r["turn_id"].clone()).filter(|v| !v.is_null())
@@ -165,6 +165,33 @@ impl Drop for Rig {
             kill_tree(&mut h);
         }
     }
+}
+
+/// `say`, retried while the hub answers `session_busy`. A busy refusal means
+/// nothing was delivered, so a retry can never deliver twice; it is needed
+/// because the hub's own presence cache can trail the roster row by a moment
+/// after a turn ends, so a session the roster shows `idle` may still be
+/// refused as `working` for that moment.
+fn say_at_retrying(root: &Path, session: &str, text: &str, queue: bool) -> Result<Value, ControlError> {
+    let deadline = std::time::Instant::now() + READY;
+    loop {
+        let res = control::say_at(root, session, text, queue, Duration::from_secs(60));
+        let busy = matches!(&res, Err(ControlError::Refused(e)) if e.code == -32009);
+        if !busy || std::time::Instant::now() >= deadline {
+            return res;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+/// A turn newer than `prev` has been *accepted* by the body: the roster shows
+/// it `working` (or already finished). Seeing only that the hub moved the row's
+/// `turn_id` is not enough: that happens just before the prompt is sent, and a
+/// hold set in that instant still refuses it.
+fn turn_accepted(row: &Value, prev: Option<&Value>) -> bool {
+    let moved = !row["turn_id"].is_null() && Some(&row["turn_id"]) != prev;
+    let finished = row["last_turn"]["turn_id"] == row["turn_id"];
+    moved && (row["state"] == "working" || finished)
 }
 
 fn assert_held(res: Result<Value, ControlError>, reason: Option<&str>) {
@@ -243,12 +270,12 @@ fn the_running_turn_the_accepted_queue_and_interrupt_are_not_touched() {
     let prev = rig.turn_id(SESSION);
     let first = std::thread::spawn({
         let root = root.clone();
-        move || control::say_at(&root, SESSION, "long turn", false, Duration::from_secs(60))
+        move || say_at_retrying(&root, SESSION, "long turn", false)
     });
     rig.wait_dispatched(SESSION, prev);
     let queued = std::thread::spawn({
         let root = root.clone();
-        move || control::say_at(&root, SESSION, "queued before the hold", true, Duration::from_secs(60))
+        move || say_at_retrying(&root, SESSION, "queued before the hold", true)
     });
     // The queued prompt was accepted (forwarded to the body) once the body's
     // own presence shows the session still working after a queue call was
@@ -424,7 +451,7 @@ fn a_corrupt_hold_file_does_not_stop_the_hub_and_is_kept() {
     });
     assert!(ready.is_some());
     // The hub works, the corrupt file was moved aside intact, and a new hold persists.
-    assert!(is_delivered(&control::say_at(hub_state.path(), SESSION, "hi", false, Duration::from_secs(30))));
+    assert!(is_delivered(&say_at_retrying(hub_state.path(), SESSION, "hi", false)));
     let aside: Vec<_> = std::fs::read_dir(hub_state.hub())
         .unwrap()
         .filter_map(Result::ok)
@@ -476,7 +503,7 @@ fn say_racing_hold_is_delivered_or_refused_never_lost() {
             let (root, b) = (rig.root().to_path_buf(), barrier.clone());
             move || {
                 b.wait();
-                control::say_at(&root, SESSION, "race", false, Duration::from_secs(60))
+                say_at_retrying(&root, SESSION, "race", false)
             }
         });
         barrier.wait();
@@ -508,7 +535,7 @@ fn say_racing_release_is_delivered_or_refused_never_lost() {
             let (root, b) = (rig.root().to_path_buf(), barrier.clone());
             move || {
                 b.wait();
-                control::say_at(&root, SESSION, "race", false, Duration::from_secs(60))
+                say_at_retrying(&root, SESSION, "race", false)
             }
         });
         barrier.wait();
@@ -532,22 +559,32 @@ fn hold_while_a_queued_prompt_is_in_flight() {
         let prev = rig.turn_id(SESSION);
         let running = std::thread::spawn({
             let root = root.clone();
-            move || control::say_at(&root, SESSION, "running", false, Duration::from_secs(60))
+            move || say_at_retrying(&root, SESSION, "running", false)
         });
-        rig.wait_dispatched(SESSION, prev);
+        let dispatched = wait_for(READY, || {
+            if running.is_finished() {
+                return Some(false);
+            }
+            rig.row(SESSION).filter(|r| turn_accepted(r, prev.as_ref())).map(|_| true)
+        });
+        if dispatched != Some(true) {
+            let res = if running.is_finished() { format!("{:?}", running.join().unwrap()) } else { "still running".into() };
+            panic!("round {round}: the running say never dispatched a new turn; its result: {res}; roster: {:?}", rig.rows());
+        }
         let barrier = Arc::new(Barrier::new(2));
         let queued = std::thread::spawn({
             let b = barrier.clone();
             move || {
                 b.wait();
-                control::say_at(&root, SESSION, "queued", true, Duration::from_secs(60))
+                say_at_retrying(&root, SESSION, "queued", true)
             }
         });
         barrier.wait();
         rig.hold(SESSION, None).unwrap();
         let q = queued.join().unwrap();
         assert!(is_delivered(&q) || is_held(&q), "round {round}: the queued say was lost: {q:?}");
-        assert!(is_delivered(&running.join().unwrap()), "round {round}: the running turn was affected by the hold");
+        let r = running.join().unwrap();
+        assert!(is_delivered(&r), "round {round}: the running turn was affected by the hold: {r:?}");
         rig.release(SESSION).unwrap();
         rig.wait_row(SESSION, |r| r["state"] == "idle");
     }
