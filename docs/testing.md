@@ -203,6 +203,8 @@ Wire mode is not a shortcut around real processes — it is the only way to get 
 
 `--scenario sustained-throughput` (issue [#372](https://github.com/Performant-Labs/holler/issues/372)) also reuses body-fleet mode's real fleet, but holds both N and M fixed and instead drives a **sustained** `say --queue` rate across every session concurrently for a real, non-trivial duration (`--sustained-secs`, default 60s) — a steady-state measurement, not a ramp. See its own baseline write-up below.
 
+`--scenario session-hold` (issue [#444](https://github.com/Performant-Labs/holler/issues/444)) measures the session hold's cost: the say path with 0/10/50% of sessions held against a twice-measured baseline, refusal cost, roster scale, hold/release churn and a hub restart with thousands of persisted holds. It hard-fails on a correctness violation and on the thresholds written down in its baseline below.
+
 `--scenario churn` (issue [#373](https://github.com/Performant-Labs/holler/issues/373)) repeats real join → run → detach cycles, hard-checking that the hub returns to baseline after every one, and measures whether the roster ever notices an attach-mode backend killed from outside Holler. See its own baseline write-up below.
 
 ### Scenario 1 baseline: connection scale (issue #370)
@@ -372,6 +374,49 @@ Two findings worth acting on, each now tracked on its own:
 - **`hub token mint` doesn't retry under lock contention** ([#401](https://github.com/Performant-Labs/holler/issues/401)). 864 of 5,781 mints (~15%) had to be retried after `another holler process holds the token lock; retry`. The hub's internal redeem path already retries (`acquire_lock_retrying`, `crates/holler-hub/src/token.rs`); the operator-facing `mint` doesn't, so a scripted join racing a busy hub fails and the caller must implement the backoff. The harness now does, and counts the retries.
 
 **Hub RSS is the open question** ([#402](https://github.com/Performant-Labs/holler/issues/402)). It went 7.9 → 102.1 MiB (peak 135.9 MiB) over 578 cycles, rising steeply for the first ~10 minutes and then oscillating roughly 90–113 MiB for the rest. Threads settled at 20 and stayed. With roster rows bounded, the unbounded credential store is the obvious suspect, but this run neither proves a leak nor rules one out: a longer run, or one holding the credential count fixed (the `restart` mode rejoins on saved credentials instead of minting), would separate "bounded but large" from "still growing". The JSON report's `churn.series` carries the per-cycle `rss_mib` / `roster_rows` / `minted_records` that question needs.
+
+### Scenario 5 baseline: session hold (issue #444)
+
+`--scenario session-hold` measures what the session hold ([#437](https://github.com/Performant-Labs/holler/issues/437)) costs. The hold check sits on the hub's per-prompt hot path and holds are persisted state, so this is the proof the feature is cheap; the functional and concurrency tests ([#442](https://github.com/Performant-Labs/holler/issues/442)) prove it is correct. It starts one hub and `--bodies` (default 3) real bodies hosting `--hold-total` (default 2,000) `stub-acp` sessions in all, then runs, in order:
+
+1. **Say path with holds.** `--hold-sessions` (default 40) sessions each loop a sequential `say` for `--hold-secs` (default 20). Two hold-free runs (their difference is the noise floor), then the same run with 0%, 10% and 50% of the driven sessions held. The unheld sessions' latency and throughput are compared with the baseline.
+2. **Refusal cost.** Every driven session held; the refusals are sustained (one every `--hold-refusal-pause-ms`, default 20, per session). Refusal latency, and the hub's RSS before and after (a refusal must not queue anything).
+3. **Roster scale.** `roster` read latency with all sessions, none held and then all held.
+4. **Hold/release churn.** `--hold-churn-workers` (default 8) workers cycle hold and release over all sessions for `--hold-secs`: operation latency, hub CPU, and hub RSS after a 5 s cooldown (a leak shows as growth that survives it).
+5. **Restart with many holds.** Hold every session, restart the hub on the same port and state dir, and measure time to `listening` (with and without the persisted holds), how long until every session is back on the roster and shown held, and that the state file still holds every one and a `say` is refused.
+
+Prompts go over the control socket in-process (`holler_hub::control::say_at`, the call the CLI's say verb makes), so the numbers are the hub's, not the cost of a CLI process per call. **Correctness is hard-failed, not measured:** a `say` delivered to a held session, a hold lost across the restart, or a missing refusal after it aborts the run.
+
+**Thresholds** (in `crates/holler-load-test/src/hold_load.rs`, `judge`) were set from the first measured baseline below and fail the run (non-zero exit) when exceeded; `--report-only` prints the verdicts without failing. They are deliberately wide (several times the measured value on a busy machine) so that a quiet run passes comfortably and only a real regression trips one. `judge` has unit tests that break each threshold in turn and check exactly that one fails.
+
+Measured 2026-09-26 on macOS 26 / aarch64, 10 logical cores, release build, loopback, defaults (2,001 sessions on the hub, 40 driven, 20 s per phase). **The machine was not quiet**: a developer Mac running other Rust builds and full test suites for concurrent sessions (load average 16 to 56 during run 1 and 93 at the start of run 2), so absolute latencies are inflated and noisy. Run 1 used `--report-only` (its churn p99 exceeded the first guess for a limit, which is how the limits above were calibrated); run 2 was enforced and passed.
+
+| | run 1 | run 2 |
+|---|---:|---:|
+| baseline `say` p50 / p99, run A (ms) | 353.5 / 662.8 | 374.7 / 826.8 |
+| baseline `say` p50 / p99, run B (the noise floor) | 338.9 / 642.6 | 368.1 / 708.4 |
+| unheld `say` p50, 0% / 10% / 50% held (ms) | 361.5 / 332.5 / 208.8 | 354.2 / 329.6 / 176.2 |
+| unheld throughput, baseline / 50% held (per s) | 104.3 / 80.6 | 96.6 / 111.3 |
+| refusal p50 / p99 / max, all held (ms) | 0.3 / 2.1 / 85.9 | 0.2 / 1.8 / 33.2 |
+| refusals sustained (per s) | 1,676 | 1,698 |
+| hub RSS across the refusal phase (MiB) | 22.0 to 16.5 | 23.0 to 20.5 |
+| `roster` read p50, 2,001 sessions, none / all held (ms) | 17.6 / 49.2 | 15.3 / 17.2 |
+| churn: ops per s, hold p50 / p99 (ms), timed-out ops | 156, 30.9 / 472.8, 5 of 3,134 | 176, 27.6 / 58.0, 3 of 3,528 |
+| churn: hub CPU mean, RSS before / after cooldown (MiB) | 40%, 23.2 / 25.1 | 38%, 22.0 / 24.8 |
+| holding all 2,001 sessions (s) / state file | 17.5 / 198 KB | 15.8 / 198 KB |
+| restart to `listening`, 2,001 holds / none (ms) | 7 / 16 | 7 / 6 |
+| restart until every session is back and held | 1.0 s | 1.0 s |
+
+What the numbers say:
+
+- **The hold is free on the say path.** Unheld sessions were not slower with a hold on half the sessions (the 50% runs are faster only because fewer stub agents were competing for the machine; the ratio to baseline is 0.5 to 0.6). The two baseline runs differ by 1 to 15 ms at p50, so the check is within run-to-run noise.
+- **A refusal is about a thousand times cheaper than a delivery** (0.2 to 0.3 ms against 340 to 375 ms), holds at 1,700 refusals a second, queues nothing and does not grow the hub (RSS went down).
+- **`roster` cost is the size of the reply.** Each held row carries four more fields; run 1's 49 ms against 17.6 ms was on a machine at load 50, and run 2 measured 17.2 against 15.3 ms.
+- **Persistence is the cost, and it is a synced write.** A hold or release rewrites the whole state file and syncs it (about 28 to 31 ms at p50 on macOS, where a sync is a full flush), serialised behind one lock, so churn is bound to roughly 150 to 180 operations a second. Holding 2,001 sessions took 16 to 18 s (about 8 ms each). A few operations per run (3 to 5 in about 3,300) waited past the 5 s control-socket limit: the hold and release handlers do that blocking write on a runtime thread, which under a heavily loaded machine can starve other work. That is a finding for a follow-up, not something this scenario asserts beyond its 2% failure limit.
+- **Restart is instant and lossless.** With 2,001 persisted holds (198 KB) the hub reached `listening` in 7 ms, every hold was still in the file, every session was back on the roster and shown held within 1.0 s of the bodies reconnecting, and a `say` was refused.
+- **No leak in the hold path.** RSS after churn plus cooldown rose 1.9 to 2.8 MiB, inside the hub's normal wobble at this size.
+
+**Caveats, stated plainly:** timings are wall-clock on a shared machine and will move; the thresholds are guards against a regression an order of magnitude large, not performance targets. One hub, three bodies and stub agents on loopback: no network. Only spawn-mode `stub-acp` sessions are driven.
 
 ### It is not in CI, deliberately
 

@@ -103,6 +103,10 @@ pub struct Hub {
     child: Option<Child>,
     holler_bin: PathBuf,
     state: StateDir,
+    /// The env the hub was started with, replayed by [`Hub::restart`].
+    env: Vec<(String, String)>,
+    /// The port the hub is listening on (0 for an attached hub).
+    port: u16,
 }
 
 impl Hub {
@@ -115,75 +119,33 @@ impl Hub {
     /// background thread for the hub's whole life: stopping at the `listening`
     /// line would let the pipe fill and block the hub's runtime.
     pub fn start(holler_bin: PathBuf, state: StateDir, env: &[(String, String)]) -> Res<Self> {
-        let mut cmd = Command::new(&holler_bin);
-        cmd.env("HOLLER_STATE_DIR", state.path())
-            .env("HOLLER_DEBUG", "quiet")
-            .env("HOLLER_LOG_FORMAT", "json");
-        for (k, v) in env {
-            cmd.env(k, v);
-        }
-        cmd.args(["hub", "serve", "--listen", "127.0.0.1:0"])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::piped());
-        own_process_group(&mut cmd);
-        let mut child = cmd.spawn()?;
-
-        let stderr = child.stderr.take().ok_or("hub stderr was not piped")?;
-        let (tx, rx) = std::sync::mpsc::channel::<u16>();
-        // The hub's own log stream is invisible by default (it would drown the
-        // report), but a hub that fails to come up leaves nothing to diagnose
-        // from — `HOLLER_LOAD_TEST_ECHO_HUB=1` relays it to this process's
-        // stderr.
-        let echo = std::env::var("HOLLER_LOAD_TEST_ECHO_HUB").is_ok();
-        std::thread::spawn(move || {
-            let mut reader = std::io::BufReader::new(stderr);
-            let mut line = String::new();
-            let mut sent = false;
-            loop {
-                line.clear();
-                match reader.read_line(&mut line) {
-                    Ok(0) | Err(_) => break,
-                    Ok(_) => {}
-                }
-                if echo {
-                    eprint!("[hub] {line}");
-                }
-                if sent {
-                    continue;
-                }
-                let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) else { continue };
-                if v.get("event").and_then(serde_json::Value::as_str) != Some("listening") {
-                    continue;
-                }
-                if let Some(port) = v
-                    .get("addr")
-                    .or_else(|| v.get("address"))
-                    .and_then(serde_json::Value::as_str)
-                    .and_then(|a| a.rsplit(':').next())
-                    .and_then(|p| p.parse::<u16>().ok())
-                {
-                    sent = true;
-                    let _ = tx.send(port);
-                }
-            }
-        });
-
-        let port = match rx.recv_timeout(Duration::from_secs(20)) {
-            Ok(p) => p,
-            Err(e) => {
-                kill_tree(&mut child);
-                return Err(format!("hub never reported a listening port: {e}").into());
-            }
-        };
-
+        let (child, port) = spawn_hub(&holler_bin, state.path(), env, "127.0.0.1:0")?;
         Ok(Self {
             ws_url: format!("ws://127.0.0.1:{port}"),
             pid: Some(child.id()),
             child: Some(child),
             holler_bin,
             state,
+            env: env.to_vec(),
+            port,
         })
+    }
+
+    /// Kill the hub and start a new one on the **same state dir and port**
+    /// (issue #444: restart with many persisted holds — bodies reconnect to the
+    /// address they already know). Returns how long the new process took to
+    /// report `listening`, which is when it has loaded its persisted state.
+    pub fn restart(&mut self) -> Res<Duration> {
+        if self.child.is_none() {
+            return Err("cannot restart a hub this harness did not start".into());
+        }
+        self.stop();
+        let started = std::time::Instant::now();
+        let (child, _) = spawn_hub(&self.holler_bin, self.state.path(), &self.env, &format!("127.0.0.1:{}", self.port))?;
+        let took = started.elapsed();
+        self.pid = Some(child.id());
+        self.child = Some(child);
+        Ok(took)
     }
 
     /// Point at a hub someone else is running. Its state dir is still needed:
@@ -195,6 +157,8 @@ impl Hub {
             child: None,
             holler_bin,
             state,
+            env: Vec::new(),
+            port: 0,
         }
     }
 
@@ -283,6 +247,79 @@ impl Drop for Hub {
     fn drop(&mut self) {
         self.stop();
     }
+}
+
+/// Spawn a real `holler hub serve` on `listen` and wait for the port it bound.
+///
+/// Readiness is *observed* (the hub's own `listening` event on stderr), never
+/// slept on — ADR 0002's rule, and the same mechanism `tests/support/mod.rs`
+/// uses. The stderr pipe keeps being drained on a background thread for the
+/// hub's whole life: stopping at the `listening` line would let the pipe fill
+/// and block the hub's runtime.
+fn spawn_hub(holler_bin: &Path, state_path: &Path, env: &[(String, String)], listen: &str) -> Res<(Child, u16)> {
+        let mut cmd = Command::new(holler_bin);
+        cmd.env("HOLLER_STATE_DIR", state_path)
+            .env("HOLLER_DEBUG", "quiet")
+            .env("HOLLER_LOG_FORMAT", "json");
+        for (k, v) in env {
+            cmd.env(k, v);
+        }
+        cmd.args(["hub", "serve", "--listen", listen])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped());
+        own_process_group(&mut cmd);
+        let mut child = cmd.spawn()?;
+
+        let stderr = child.stderr.take().ok_or("hub stderr was not piped")?;
+        let (tx, rx) = std::sync::mpsc::channel::<u16>();
+        // The hub's own log stream is invisible by default (it would drown the
+        // report), but a hub that fails to come up leaves nothing to diagnose
+        // from — `HOLLER_LOAD_TEST_ECHO_HUB=1` relays it to this process's
+        // stderr.
+        let echo = std::env::var("HOLLER_LOAD_TEST_ECHO_HUB").is_ok();
+        std::thread::spawn(move || {
+            let mut reader = std::io::BufReader::new(stderr);
+            let mut line = String::new();
+            let mut sent = false;
+            loop {
+                line.clear();
+                match reader.read_line(&mut line) {
+                    Ok(0) | Err(_) => break,
+                    Ok(_) => {}
+                }
+                if echo {
+                    eprint!("[hub] {line}");
+                }
+                if sent {
+                    continue;
+                }
+                let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) else { continue };
+                if v.get("event").and_then(serde_json::Value::as_str) != Some("listening") {
+                    continue;
+                }
+                if let Some(port) = v
+                    .get("addr")
+                    .or_else(|| v.get("address"))
+                    .and_then(serde_json::Value::as_str)
+                    .and_then(|a| a.rsplit(':').next())
+                    .and_then(|p| p.parse::<u16>().ok())
+                {
+                    sent = true;
+                    let _ = tx.send(port);
+                }
+            }
+        });
+
+        let port = match rx.recv_timeout(Duration::from_secs(20)) {
+            Ok(p) => p,
+            Err(e) => {
+                kill_tree(&mut child);
+                return Err(format!("hub never reported a listening port: {e}").into());
+            }
+        };
+
+    Ok((child, port))
 }
 
 /// Put a spawned child in its own process group so [`kill_tree`] can reap the

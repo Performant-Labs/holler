@@ -27,6 +27,7 @@ fills this file in at release time.
   `docs/protocol/v2.md` §10 and the README ([#443](https://github.com/Performant-Labs/holler/issues/443),
   part of [#437](https://github.com/Performant-Labs/holler/issues/437)). `hold --all` and a hold line in
   `hub status` are not part of this change.
+- `holler-load-test --scenario session-hold`: the session hold's cost under load — the say path with 0/10/50% of sessions held against a twice-measured baseline, refusal cost, `roster` scale, hold/release churn and a hub restart with 2,000 persisted holds. It hard-fails if a `say` is delivered to a held session or a hold is lost, and fails when a threshold written down from its first baseline is exceeded (`--report-only` to just print). Documented, with the measured baseline, in `docs/testing.md` ([#444](https://github.com/Performant-Labs/holler/issues/444), part of [#437](https://github.com/Performant-Labs/holler/issues/437) and [#366](https://github.com/Performant-Labs/holler/issues/366)).
 - The hub enforces the session hold: `send_prompt`, the one place the hub sends a `session/prompt`, refuses
   a held session with `-32011 session_held` for plain `say`, `say --queue` and `say --replace`, while the
   running turn, turns already accepted into the body's queue, `interrupt` and `roster` are untouched. Holds

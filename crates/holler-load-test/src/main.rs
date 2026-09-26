@@ -56,6 +56,8 @@ mod churn;
 #[allow(dead_code, clippy::expect_used, clippy::unwrap_used, clippy::panic)] // #373: reused test fixture; its unused helpers and bind-failure panics are fine here
 mod fake_opencode;
 mod fleet;
+mod hold_load;
+mod hold_report;
 mod hub;
 mod metrics;
 mod proc;
@@ -100,6 +102,12 @@ pub enum Scenario {
     /// hub returns to baseline after each, plus how long the roster takes to
     /// notice an attach-mode backend killed from outside Holler.
     Churn,
+    /// Issue #444: the session hold's cost — say path with 0/10/50% of
+    /// sessions held (against a twice-measured baseline), refusal cost, roster
+    /// scale, hold/release churn, and a hub restart with thousands of
+    /// persisted holds. Fails when a threshold in `hold_load.rs` is exceeded
+    /// (`--report-only` prints them without failing).
+    SessionHold,
 }
 
 #[derive(Parser, Debug)]
@@ -188,6 +196,36 @@ struct Cli {
     /// attach-mode backend before recording it as not detected.
     #[arg(long, default_value_t = 60)]
     dead_backend_window_secs: u64,
+
+    /// `session-hold`: how many sessions to drive with a sequential `say`
+    /// loop each (a fraction of them held per phase).
+    #[arg(long, default_value_t = 40)]
+    hold_sessions: usize,
+
+    /// `session-hold`: how many sessions exist in total (spread over
+    /// `--bodies`), which is also the number of holds the roster-scale and
+    /// restart phases use.
+    #[arg(long, default_value_t = 2000)]
+    hold_total: usize,
+
+    /// `session-hold`: seconds per driven phase (baseline x2, 0/10/50% held,
+    /// refusal-only, churn).
+    #[arg(long, default_value_t = 20)]
+    hold_secs: u64,
+
+    /// `session-hold`: concurrent workers cycling hold/release in the churn phase.
+    #[arg(long, default_value_t = 8)]
+    hold_churn_workers: usize,
+
+    /// `session-hold`: pause (ms) between refusals from one held session, so
+    /// the refusal rate is sustained rather than a tight loop.
+    #[arg(long, default_value_t = 20)]
+    hold_refusal_pause_ms: u64,
+
+    /// `session-hold`: print the threshold verdicts but do not fail the run
+    /// on one (for exploring on a machine that is not quiet).
+    #[arg(long)]
+    report_only: bool,
 
     #[command(flatten)]
     churn: ChurnArgs,
@@ -283,6 +321,11 @@ pub struct Config {
     pub label_reuse_probe: bool,
     pub churn_secs: Option<Duration>,
     pub hang_budget: Duration,
+    pub hold_sessions: usize,
+    pub hold_total: usize,
+    pub hold_secs: u64,
+    pub hold_churn_workers: usize,
+    pub hold_refusal_pause: Duration,
 }
 
 fn main() -> Res<()> {
@@ -325,6 +368,11 @@ fn main() -> Res<()> {
         label_reuse_probe: cli.churn.label_reuse_probe,
         churn_secs: cli.churn.churn_secs.map(Duration::from_secs),
         hang_budget: Duration::from_secs(cli.churn.hang_budget_secs),
+        hold_sessions: cli.hold_sessions,
+        hold_total: cli.hold_total,
+        hold_secs: cli.hold_secs,
+        hold_churn_workers: cli.hold_churn_workers,
+        hold_refusal_pause: Duration::from_millis(cli.hold_refusal_pause_ms),
     };
 
     let hub_env = parse_env(&cli.hub_env)?;
@@ -342,12 +390,14 @@ fn main() -> Res<()> {
             Scenario::SessionScale => "#371".to_string(),
             Scenario::SustainedThroughput => "#372".to_string(),
             Scenario::Churn => "#373".to_string(),
+            Scenario::SessionHold => "#444".to_string(),
         },
         started_at: rfc3339_utc_now(),
         host: metrics::HostInfo::detect(),
         config: config_json(&cfg, &hub_env),
         hub_baseline: metrics::ResourceSample::default(),
         steps: Vec::new(),
+        hold: None,
     };
 
     let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
@@ -358,6 +408,7 @@ fn main() -> Res<()> {
             Scenario::SessionScale => session_scale::run(&cfg, &hub, &mut report).await,
             Scenario::SustainedThroughput => sustained_throughput::run(&cfg, &hub, &mut report).await,
             Scenario::Churn => churn::run(&cfg, &hub, &mut report).await,
+            Scenario::SessionHold => hold_load::run(&cfg, &mut hub, &mut report).await,
         }
     });
     hub.stop();
@@ -367,6 +418,13 @@ fn main() -> Res<()> {
     if let Some(path) = cli.json_out {
         std::fs::write(&path, serde_json::to_string_pretty(&report)?)?;
         eprintln!("json report: {}", path.display());
+    }
+    // Issue #444: the scenario fails when a threshold is exceeded.
+    if let Some(hold) = &report.hold {
+        let failed: Vec<String> = hold.failed().iter().map(|t| t.name.clone()).collect();
+        if !failed.is_empty() && !cli.report_only {
+            return Err(format!("session-hold thresholds exceeded: {}", failed.join("; ")).into());
+        }
     }
     Ok(())
 }
@@ -433,6 +491,11 @@ fn config_json(cfg: &Config, hub_env: &[(String, String)]) -> serde_json::Value 
         "label_reuse_probe": cfg.label_reuse_probe,
         "churn_secs": cfg.churn_secs.map(|d| d.as_secs()),
         "hang_budget_secs": cfg.hang_budget.as_secs(),
+        "hold_sessions": cfg.hold_sessions,
+        "hold_total": cfg.hold_total,
+        "hold_secs": cfg.hold_secs,
+        "hold_churn_workers": cfg.hold_churn_workers,
+        "hold_refusal_pause_ms": cfg.hold_refusal_pause.as_millis() as u64,
         "hub_env": hub_env.iter().map(|(k, v)| format!("{k}={v}")).collect::<Vec<_>>(),
         // HOLLER_* vars the harness itself was run with; the hub and every body
         // it spawns inherit them (e.g. a compressed heartbeat + roster timers).
