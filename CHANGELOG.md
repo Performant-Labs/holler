@@ -8,6 +8,7 @@ fills this file in at release time.
 ## [Unreleased]
 
 ### Enhancements
+- CI: the Clippy step retries once from a clean build directory when, and only when, it fails with `could not parse/generate dep info` (a half-written file in the self-hosted runner's persistent build directory); any other failure, including every real lint, still fails on the first attempt ([#492](https://github.com/Performant-Labs/holler/issues/492)).
 - Docs: the README has a Codex recipe, `docs/compatibility.md` records the Codex results (three authentication routes, permission requests, a multi-turn session with a hub restart) with their limits, and the monitoring guidance's Codex section describes how a permission request is surfaced and answered ([#474](https://github.com/Performant-Labs/holler/issues/474), [#303](https://github.com/Performant-Labs/holler/issues/303)).
 - The body's ACP driver now also authenticates to an ACP v2 adapter that requires it. When a v2
   adapter refuses `session/new` as unauthenticated (JSON-RPC `-32000`) and the session's
