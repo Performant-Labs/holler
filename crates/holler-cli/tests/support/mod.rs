@@ -48,7 +48,11 @@ pub use onboard::{hub_pubkey, join, mint_token};
 // per-binary warning, not a dead API) — allowed rather than importing a
 // different subset per call site.
 #[allow(unused_imports)] // #142
-pub use cmds::{answer, body_status_json, hub_status_json, interrupt, roster_json, say, wait_cmd};
+pub use cmds::{answer, body_status_json, hub_status_json, interrupt, roster_json, say, try_roster_json, wait_cmd};
+// Warm-up readiness (`wait_warm` and its two classifiers, issue #420).
+mod warmup;
+#[allow(unused_imports)] // #420
+pub use warmup::{roster_row_connected, say_failure_is_retryable, wait_warm};
 
 /// A per-test scratch directory for holler state.
 ///
@@ -611,6 +615,8 @@ impl Drop for Stub {
 /// A running body subprocess.
 pub struct Body {
     child: Child,
+    /// `<state>/body.log`, where the body's stdout and stderr go (issue #420).
+    log_path: PathBuf,
     /// Set once [`Body::stop`] has torn the process down. The `Drop` impl
     /// re-runs a hard `kill_tree` if a test lets the `Body` fall out of scope
     /// *without* calling `stop` (a test that panics or returns early between
@@ -623,8 +629,8 @@ pub struct Body {
 }
 
 impl Body {
-    /// Spawn a body running the config at `config` (its `sessions.toml`), in
-    /// its own process group so [`kill_tree`] can reap the agents it spawns.
+    /// Spawn a body running `config` (its `sessions.toml`) in its own process group,
+    /// so [`kill_tree`] can reap its agents; its output goes to [`Body::log_path`].
     pub fn start(state: &StateDir, config: &Path) -> Body {
         Self::start_with_env(state, config, &[])
     }
@@ -635,6 +641,10 @@ impl Body {
     /// on this body's heartbeat; the 15s production default is far too slow
     /// for a test to observe a state change within its own timeout budget).
     pub fn start_with_env(state: &StateDir, config: &Path, envs: &[(&str, &str)]) -> Body {
+        let log_path = state.path().join("body.log");
+        let mut log = std::fs::OpenOptions::new().create(true).append(true).open(&log_path).expect("open body.log");
+        // One banner per start, so several starts in one state dir stay attributable.
+        writeln!(log, "--- body start {} ---", SystemTimeNanos::now() / 1_000_000).expect("write body.log banner");
         let mut cmd = holler_cmd(state);
         cmd.envs(envs.iter().copied());
         cmd.arg("body")
@@ -642,14 +652,28 @@ impl Body {
             .arg("--config")
             .arg(config)
             .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
+            .stdout(log.try_clone().expect("clone the body.log handle"))
+            .stderr(log);
         make_own_process_group(&mut cmd);
         let child = cmd.spawn().expect("spawn `holler body run`");
         Body {
             child,
+            log_path,
             stopped: false,
         }
+    }
+
+    /// The file this body's stdout and stderr go to: `<state>/body.log`.
+    pub fn log_path(&self) -> &Path {
+        &self.log_path
+    }
+
+    /// The body log so far: a `--- body start <unix_ms> ---` banner per start,
+    /// each followed by that run's output. An unreadable log reads as its error.
+    pub fn log_text(&self) -> String {
+        std::fs::read(&self.log_path)
+            .map(|b| String::from_utf8_lossy(&b).into_owned())
+            .unwrap_or_else(|e| format!("<cannot read {}: {e}>", self.log_path.display()))
     }
 
     /// A mutable handle to the body child, for tests that need to

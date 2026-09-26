@@ -104,7 +104,8 @@ The shared harness is a public Rust module every integration test in `crates/hol
 |---|---|---|
 | `Hub::start` | `(state: &StateDir) -> Hub` | spawn `holler hub serve --listen 127.0.0.1:0` in its own process group, then `wait_for` (≤10 s) the `{"event":"listening"}` JSON line on stderr to learn the bound port. |
 | `Hub::stop` | `(self, timeout: Duration)` | consume the `Hub`; graceful SIGINT to the process group, wait up to `timeout`, then `kill_tree`. The `Drop` impl re-runs the same teardown (5 s) if a test lets the `Hub` fall out of scope or panics — so a hub is **never orphaned**. |
-| `Body::start` | `(state: &StateDir, config: &Path) -> Body` | spawn `holler body run --config <sessions.toml>` in its own process group. |
+| `Body::start` | `(state: &StateDir, config: &Path) -> Body` | spawn `holler body run --config <sessions.toml>` in its own process group, appending its stdout and stderr to `<state>/body.log` after a `--- body start <unix_ms> ---` banner. |
+| `Body::log_path` / `Body::log_text` | `(&self) -> &Path` / `(&self) -> String` | where the body's output goes (`<state>/body.log`, outside the production `hub/` and `body/` subtrees) / everything in it so far, one banner per start, for a failure message. |
 | `Body::stop` | `(self, state: &StateDir, timeout: Duration)` | ask the body to `body detach`, wait up to `timeout`, then `kill_tree` the whole tree (the body + the agents it spawned). |
 
 ### The stub driver
@@ -126,11 +127,22 @@ These run the *real* `holler` CLI (in the given state dir) and parse its `--json
 | Function | Runs / returns |
 |---|---|
 | `roster_json(state)` | `holler roster --json` → the hub's roster as a `Value` |
+| `try_roster_json(state)` | the same, as `Result<Value, String>`: an unreadable roster (no hub yet, a failed command, non-JSON output) is an `Err` naming the command with its exit status and stderr, for a poll that treats it as "not yet" (`roster_json` panics instead) |
 | `hub_status_json(state)` / `body_status_json(state)` | `hub status --json` / `body status --json` → a `Value` |
 | `mint_token(state, label)` | `hub token mint --label <label> --json` → the `(token_id, secret)` join pair (no live hub needed — the token is persisted under the state dir) |
 | `join(state, ws_url, token_id, secret)` | `body join --server <ws_url> --token <id:secret> --hub-key <hex>` (the hub's real public key, read via `hub status --json` — the harness's stand-in for the operator's out-of-band copy, issue #322) and assert exit 0 |
 | `hub_pubkey(state)` | `hub status --json` → the hub's X25519 public key (hex), for a test that wants to pass a *wrong* `--hub-key` |
 | `say(state, session, text)` / `interrupt(state, session)` | the CLI verbs; return the raw `Output` for the test to assert on |
+
+### Warm-up readiness
+
+`wait_warm` is the warm-up readiness idiom: a test's first prompt to a freshly started body goes through it, not through a hand-rolled `say` retry (issue [#420](https://github.com/Performant-Labs/holler/issues/420)).
+
+| Function | Signature | Does |
+|---|---|---|
+| `wait_warm` | `(state, session, timeout, hub: &Hub, body: Option<&Body>, attempt: impl FnMut() -> Output) -> Output` | under one `timeout`, `wait_for` a `connected` roster row for `session` (read with `try_roster_json`; an `Err` is "not yet"), then run `attempt` (usually a `say`) until it succeeds, retrying **only** `unknown session`. Any other failure, and running out of time in either phase, panics with the cause, `roster:` (the last roster read), `hub log:` and `body log:`. It never returns a failed `Output`. |
+| `roster_row_connected` | `(roster: &Value, session: &str) -> bool` | the `roster --json` document has a `connected` row named `session` or `<label>/<session>`; a bare name matches any label, which is enough with one body per test |
+| `say_failure_is_retryable` | `(stderr: &str) -> bool` | the failure is `unknown session`, the one transient warm-up failure: the hub writes a `connected` row before it caches the presence `say` resolves against. `reconnecting`, `not connected` and everything else are real failures. |
 
 ### The cross-OS plumbing
 

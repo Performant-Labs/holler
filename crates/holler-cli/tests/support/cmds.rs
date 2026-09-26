@@ -18,6 +18,13 @@ pub fn roster_json(state: &StateDir) -> Value {
     status_json_of(state, &["roster"])
 }
 
+/// [`roster_json`], but an unreadable roster (no hub yet, a failed command,
+/// non-JSON output) is an `Err` describing it instead of a panic, for a poll
+/// that treats "no roster yet" as "not yet" (issue #420's `wait_warm`).
+pub fn try_roster_json(state: &StateDir) -> Result<Value, String> {
+    try_status_json_of(state, &["roster"])
+}
+
 /// The hub's status as JSON (parsed from `holler hub status --json`).
 pub fn hub_status_json(state: &StateDir) -> Value {
     status_json_of(state, &["hub", "status"])
@@ -29,25 +36,33 @@ pub fn body_status_json(state: &StateDir) -> Value {
 }
 
 fn status_json_of(state: &StateDir, sub: &[&str]) -> Value {
+    try_status_json_of(state, sub).unwrap_or_else(|e| panic!("{e}"))
+}
+
+/// Run `holler <sub> --json` and parse its stdout. The `Err` text names the
+/// command and carries its exit status and stderr, or the spawn or parse error.
+fn try_status_json_of(state: &StateDir, sub: &[&str]) -> Result<Value, String> {
     let args: Vec<String> = sub
         .iter()
         .map(|s| s.to_string())
         .chain(["--json".to_string()])
         .collect();
+    let cmd = sub.join(" ");
     let out = holler_cmd(state)
         .args(&args)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .and_then(|c| c.wait_with_output())
-        .expect("run status command");
-    assert!(
-        out.status.success(),
-        "`holler {}` failed: {}",
-        sub.join(" "),
-        String::from_utf8_lossy(&out.stderr)
-    );
-    serde_json::from_slice(&out.stdout).expect("status --json is valid JSON")
+        .map_err(|e| format!("run status command `holler {cmd}`: {e}"))?;
+    if !out.status.success() {
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        return Err(format!("`holler {cmd}` failed: {} ({})", stderr.trim_end(), out.status));
+    }
+    serde_json::from_slice(&out.stdout).map_err(|e| {
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        format!("`holler {cmd} --json` printed invalid JSON ({e}): {stdout}")
+    })
 }
 
 /// Send a one-shot prompt to `session` on the hub and return the raw `Output`

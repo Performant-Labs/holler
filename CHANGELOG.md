@@ -37,6 +37,12 @@ fills this file in at release time.
   otherwise fetches it from the repo, so it launches the real wizard on a machine that has never seen
   it (it previously fell back to an approximation rebuilt from `docs/setup-wizard.md`). The README
   also has a one-line install for Claude Code.
+- Test harness: a started body's stdout and stderr are now kept in `<state>/body.log`, and
+  `interrupt_test` warms each session up through the new shared `wait_warm`, which waits for a
+  `connected` roster row and retries only `unknown session`. Any other warm-up failure, such as
+  `reconnecting`, now fails at once with the roster, the hub log and the body log in the panic
+  message, so the next CI failure of the flaky interrupt test carries its own evidence. The
+  flake's cause is still open ([#420](https://github.com/Performant-Labs/holler/issues/420)).
 
 ### Bug Fixes
 - Log timestamps now carry the real sub-second fraction, six digits of microseconds: 18.372988 s prints as `18.372988Z`. They used to print the microsecond-within-millisecond digits as a three-digit fraction (`18.988Z`), so lines from one process within the same second came out of order and hub and body logs could not be lined up ([#461](https://github.com/Performant-Labs/holler/issues/461)). Values taken from the same clock (`last_turn.ended_at`, the talk log's `ts`, and a working session's `turn_started_at`/`last_update_at`) now carry six fraction digits too; every reader in holler already accepted any number of digits.

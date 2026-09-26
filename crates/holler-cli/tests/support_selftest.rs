@@ -12,6 +12,11 @@
 //! pins that a `Hub` dropped without `stop` still reaps its process tree (no
 //! orphaned hub), and `body_dropped_without_stop_reaps_its_tree` pins the same
 //! for `Body` (no orphaned `holler body run` / `stub-acp`).
+//!
+//! Issue #420 adds the warm-up diagnostics: the body's retained log
+//! (`Body::log_path`/`log_text`), the pure roster/`say` classifiers, the
+//! fallible `try_roster_json`, and `wait_warm`'s retry-only-`unknown session`
+//! contract and its three-section (`roster:` / `hub log:` / `body log:`) panic.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable, dead_code)] // #138
 
@@ -212,6 +217,369 @@ fn body_dropped_without_stop_reaps_its_tree() {
          still alive after 5s) — the harness `Drop` impl must reap the tree"
     );
     drop(state);
+}
+
+// --- #420: warm-up diagnostics ----------------------------------------------
+
+/// Start a body with one `stub-acp` session `session`, joined to `hub` under
+/// label `t`, in its own state dir (the same setup `interrupt_test` uses).
+fn start_joined_body(
+    hub_state: &StateDir,
+    body_state: &StateDir,
+    hub: &support::Hub,
+    session: &str,
+) -> support::Body {
+    use support::{join, mint_token, write_sessions_toml, Body};
+    let (token_id, secret) = mint_token(hub_state, "t");
+    join(body_state, hub_state, &hub.ws_url(), &token_id, &secret);
+    let config = write_sessions_toml(body_state, &[(session, &["--chunks", "1"])]);
+    Body::start(body_state, &config)
+}
+
+/// The panic payload of `f` as text (`String`, falling back to `&str`), or a
+/// test failure if `f` returned instead of panicking.
+fn panic_text_of<R>(f: impl FnOnce() -> R) -> String {
+    let payload = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)) {
+        Ok(_) => panic!("expected the call to panic, but it returned"),
+        Err(p) => p,
+    };
+    if let Some(s) = payload.downcast_ref::<String>() {
+        s.clone()
+    } else if let Some(s) = payload.downcast_ref::<&str>() {
+        (*s).to_string()
+    } else {
+        panic!("panic payload is neither String nor &str")
+    }
+}
+
+/// Byte offsets of `roster:`, `hub log:` and `body log:` in `msg`, asserting
+/// all three are present and in that order.
+fn section_offsets(msg: &str) -> (usize, usize, usize) {
+    let r = msg
+        .find("roster:")
+        .unwrap_or_else(|| panic!("no `roster:` section in: {msg}"));
+    let h = msg
+        .find("hub log:")
+        .unwrap_or_else(|| panic!("no `hub log:` section in: {msg}"));
+    let b = msg
+        .find("body log:")
+        .unwrap_or_else(|| panic!("no `body log:` section in: {msg}"));
+    assert!(
+        r < h && h < b,
+        "sections out of order (roster:{r} hub log:{h} body log:{b}) in: {msg}"
+    );
+    (r, h, b)
+}
+
+/// A fake `say` result with the given exit code and stderr (Unix: the raw wait
+/// status of exit code `c` is `c << 8`).
+#[cfg(unix)]
+fn fake_output(code: i32, stderr: &str) -> std::process::Output {
+    use std::os::unix::process::ExitStatusExt;
+    std::process::Output {
+        status: std::process::ExitStatus::from_raw(code << 8),
+        stdout: if code == 0 {
+            b"reply\n".to_vec()
+        } else {
+            Vec::new()
+        },
+        stderr: stderr.as_bytes().to_vec(),
+    }
+}
+
+/// A `roster --json` document with one row per `(name, conn_state)`, each row
+/// carrying the full field set the real `holler roster --json` prints (shape
+/// confirmed live at RED for #420).
+fn roster_fixture(rows: &[(&str, &str)]) -> serde_json::Value {
+    let rows: Vec<serde_json::Value> = rows
+        .iter()
+        .map(|(name, conn)| {
+            serde_json::json!({
+                "name": name, "harness": "opencode", "mode": "spawn", "state": "idle",
+                "conn_state": conn, "token_id": "tok", "client_id": "cid", "hostname": "h",
+                "harness_session_id": null, "first_seen": 1, "last_seen": 1,
+                "last_update_at": 1, "pending": null, "turn_id": null, "last_turn": null,
+            })
+        })
+        .collect();
+    serde_json::json!({ "rows": rows })
+}
+
+/// #420 criterion 1: the body's stdout/stderr are retained in `<state>/body.log`
+/// (under the body's own state dir) with a start banner, and readable through
+/// the `Body` handle.
+#[test]
+fn body_log_is_retained_and_readable() {
+    use support::{roster_json, roster_row_connected, Hub};
+    let hub_state = StateDir::new();
+    let body_state = StateDir::new();
+    let hub = Hub::start(&hub_state);
+    let body = start_joined_body(&hub_state, &body_state, &hub, "alpha");
+
+    assert!(
+        body.log_path().starts_with(body_state.path()),
+        "body log {:?} is not under the body's state dir {:?}",
+        body.log_path(),
+        body_state.path()
+    );
+    assert_eq!(
+        body.log_path(),
+        body_state.path().join("body.log"),
+        "body log lives at <state>/body.log"
+    );
+    assert!(
+        body.log_path().is_file(),
+        "body log {:?} does not exist",
+        body.log_path()
+    );
+
+    // The harness's banner, then the body's own stderr (its `logging_started` line).
+    wait_for(Duration::from_secs(10), || {
+        let t = body.log_text();
+        (t.contains("--- body start") && t.contains("logging_started")).then_some(())
+    })
+    .unwrap_or_else(|| {
+        panic!(
+            "body log never showed the banner and `logging_started`: {:?}",
+            body.log_text()
+        )
+    });
+
+    // The predicate agrees with the real `roster --json` once the body is up.
+    wait_for(Duration::from_secs(10), || {
+        roster_row_connected(&roster_json(&hub_state), "alpha").then_some(())
+    })
+    .unwrap_or_else(|| {
+        panic!(
+            "alpha never connected per the real roster: {}",
+            roster_json(&hub_state)
+        )
+    });
+}
+
+/// #420 criterion 2: only a `connected` row matching the session counts.
+#[test]
+fn roster_row_connected_rejects_reconnecting_gone_and_absent() {
+    use support::roster_row_connected;
+    assert!(!roster_row_connected(
+        &roster_fixture(&[("b/alpha", "reconnecting")]),
+        "alpha"
+    ));
+    assert!(!roster_row_connected(
+        &roster_fixture(&[("b/alpha", "gone")]),
+        "alpha"
+    ));
+    assert!(
+        !roster_row_connected(&roster_fixture(&[]), "alpha"),
+        "empty roster"
+    );
+    assert!(
+        !roster_row_connected(&serde_json::json!({}), "alpha"),
+        "no `rows` key"
+    );
+    assert!(
+        !roster_row_connected(&roster_fixture(&[("b/beta", "connected")]), "alpha"),
+        "other session"
+    );
+    assert!(
+        !roster_row_connected(&roster_fixture(&[("b/xalpha", "connected")]), "alpha"),
+        "suffix without `/`"
+    );
+    assert!(
+        !roster_row_connected(&roster_fixture(&[("b/alpha", "connected")]), "c/alpha"),
+        "other label"
+    );
+}
+
+/// #420 criterion 2: a `connected` row matches by bare session or `label/session`.
+#[test]
+fn roster_row_connected_accepts_connected_qualified_and_bare() {
+    use support::roster_row_connected;
+    let roster = roster_fixture(&[("b/beta", "gone"), ("t/alpha", "connected")]);
+    assert!(roster_row_connected(&roster, "alpha"), "bare session");
+    assert!(roster_row_connected(&roster, "t/alpha"), "label/session");
+    assert!(
+        roster_row_connected(&roster_fixture(&[("alpha", "connected")]), "alpha"),
+        "unlabelled row"
+    );
+}
+
+/// #420 criterion 2: only `unknown session` is a retryable `say` failure.
+#[test]
+fn say_failure_retries_only_unknown_session() {
+    use support::say_failure_is_retryable;
+    assert!(say_failure_is_retryable("error: unknown session"));
+    assert!(say_failure_is_retryable("unknown session: alpha"));
+    assert!(!say_failure_is_retryable(
+        "error: b/alpha is reconnecting (last seen 0s ago)"
+    ));
+    assert!(!say_failure_is_retryable(
+        "error: b/alpha is not connected (gone)"
+    ));
+    assert!(!say_failure_is_retryable(""));
+}
+
+/// #420 criterion 3: with no hub, `try_roster_json` returns an `Err` naming the
+/// command and carrying its stderr, instead of panicking like `roster_json`.
+#[test]
+fn try_roster_json_is_err_without_a_hub() {
+    let state = StateDir::new();
+    let err = support::try_roster_json(&state)
+        .expect_err("no hub is running, so the roster must be an Err");
+    assert!(
+        err.contains("roster"),
+        "error does not name the command: {err}"
+    );
+    assert!(
+        err.contains("no live holler hub"),
+        "error does not carry the CLI's stderr: {err}"
+    );
+}
+
+/// #420 criterion 4: an expired deadline panics with `roster:`, `hub log:` and
+/// `body log: <no body handle>`, in order, with the hub's real log inside.
+#[test]
+fn warmup_panic_carries_roster_hub_and_body_sections() {
+    use support::{say, wait_warm, Hub};
+    let hub_state = StateDir::new();
+    let hub = Hub::start(&hub_state);
+    let msg = panic_text_of(|| {
+        wait_warm(
+            &hub_state,
+            "alpha",
+            Duration::from_secs(1),
+            &hub,
+            None,
+            || say(&hub_state, "alpha", "x"),
+        )
+    });
+    let (_, h, b) = section_offsets(&msg);
+    assert!(
+        msg[h..b].contains(r#""event":"listening""#),
+        "hub section lacks the hub log: {msg}"
+    );
+    assert!(
+        msg[b..].contains("body log: <no body handle>"),
+        "body section wrong: {msg}"
+    );
+}
+
+/// #420 criterion 4, with a real body: the `body log:` section carries that
+/// body's retained log (its start banner).
+#[test]
+fn warmup_panic_with_body_carries_body_log() {
+    use support::{say, wait_warm, Hub};
+    let hub_state = StateDir::new();
+    let body_state = StateDir::new();
+    let hub = Hub::start(&hub_state);
+    let body = start_joined_body(&hub_state, &body_state, &hub, "alpha");
+    let msg = panic_text_of(|| {
+        wait_warm(
+            &hub_state,
+            "never-advertised",
+            Duration::from_secs(2),
+            &hub,
+            Some(&body),
+            || say(&hub_state, "never-advertised", "x"),
+        )
+    });
+    let (_, h, b) = section_offsets(&msg);
+    assert!(
+        msg[h..b].contains(r#""event":"listening""#),
+        "hub section lacks the hub log: {msg}"
+    );
+    assert!(
+        msg[b..].contains("--- body start"),
+        "body section lacks the body log: {msg}"
+    );
+}
+
+/// #420 criterion 3: the attempt waits for a `connected` roster row. With no
+/// row for the session, even an attempt that would succeed is never made, and
+/// the deadline panics instead of returning its output.
+#[cfg(unix)]
+#[test]
+fn wait_warm_never_attempts_before_the_row_is_connected() {
+    use support::{wait_warm, Hub};
+    let hub_state = StateDir::new();
+    let hub = Hub::start(&hub_state);
+    let mut calls = 0u32;
+    let msg = panic_text_of(|| {
+        wait_warm(&hub_state, "alpha", Duration::from_secs(1), &hub, None, || {
+            calls += 1;
+            fake_output(0, "")
+        })
+    });
+    assert_eq!(calls, 0, "attempted {calls} times before any connected row");
+    section_offsets(&msg);
+}
+
+/// #420 criteria 3/5: once connected, a non-`unknown session` failure (the CI
+/// flake's `reconnecting`) is fatal at once, never retried and never returned.
+#[cfg(unix)]
+#[test]
+fn wait_warm_panics_at_once_on_non_retryable_failure() {
+    use support::{wait_warm, Hub};
+    let hub_state = StateDir::new();
+    let body_state = StateDir::new();
+    let hub = Hub::start(&hub_state);
+    let body = start_joined_body(&hub_state, &body_state, &hub, "alpha");
+    let mut calls = 0u32;
+    let msg = panic_text_of(|| {
+        wait_warm(
+            &hub_state,
+            "alpha",
+            Duration::from_secs(10),
+            &hub,
+            Some(&body),
+            || {
+                calls += 1;
+                fake_output(1, "error: b/alpha is reconnecting (last seen 0s ago)")
+            },
+        )
+    });
+    assert_eq!(
+        calls, 1,
+        "a non-retryable failure was retried ({calls} attempts)"
+    );
+    let (_, _, b) = section_offsets(&msg);
+    assert!(
+        msg[b..].contains("--- body start"),
+        "body section lacks the body log: {msg}"
+    );
+}
+
+/// #420 criterion 3: `unknown session` is retried until the attempt succeeds,
+/// and the successful output is what comes back.
+#[cfg(unix)]
+#[test]
+fn wait_warm_retries_unknown_session_then_returns_success() {
+    use support::{wait_warm, Hub};
+    let hub_state = StateDir::new();
+    let body_state = StateDir::new();
+    let hub = Hub::start(&hub_state);
+    let body = start_joined_body(&hub_state, &body_state, &hub, "alpha");
+    let mut calls = 0u32;
+    let out = wait_warm(
+        &hub_state,
+        "alpha",
+        Duration::from_secs(10),
+        &hub,
+        Some(&body),
+        || {
+            calls += 1;
+            if calls < 3 {
+                fake_output(1, "error: unknown session")
+            } else {
+                fake_output(0, "")
+            }
+        },
+    );
+    assert!(out.status.success(), "wait_warm returned a failed output");
+    assert_eq!(
+        calls, 3,
+        "expected two `unknown session` retries then success"
+    );
 }
 
 // --- helpers (test-local; not part of the public harness API) ---------------

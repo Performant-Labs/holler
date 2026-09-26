@@ -5,9 +5,11 @@
 //! subprocesses — no mocks of the circuit.
 //!
 //! Helper split from `talk_test.rs`: this file needs its own
-//! `start_body`/`say_ready`/background-thread helpers (rather than `use
+//! `start_body`/background-thread helpers (rather than `use
 //! talk_test::*`, which is not a thing between two independent integration
-//! test binaries), so they are duplicated here in the same shape.
+//! test binaries), so they are duplicated here in the same shape. The
+//! warm-up is the shared `support::wait_warm` (issue #420), through the thin
+//! `warm_say` wrapper.
 
 mod support;
 
@@ -17,7 +19,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
-use support::{join, mint_token, wait_for, write_sessions_toml, Body, Hub, StateDir};
+use support::{join, mint_token, roster_row_connected, wait_for, wait_warm, write_sessions_toml, Body, Hub, StateDir};
 
 fn stdout_of(out: &Output) -> String {
     String::from_utf8_lossy(&out.stdout).into_owned()
@@ -102,17 +104,12 @@ fn start_body_with_env(
     Body::start_with_env(body_state, &config, envs)
 }
 
-/// Poll `say session TEXT` until it stops failing with `unknown session`.
-fn say_ready(state: &StateDir, session: &str, text: &str, timeout: Duration) -> Output {
-    wait_for(timeout, || {
-        let out = support::say(state, session, text);
-        if out.status.success() || !stderr_of(&out).contains("unknown session") {
-            Some(out)
-        } else {
-            None
-        }
-    })
-    .unwrap_or_else(|| panic!("`say {session}` never got past unknown_session within {timeout:?}"))
+/// Warm `session` up with a real `say session TEXT` ([`wait_warm`], issue
+/// #420): wait for its `connected` roster row, then retry only `unknown
+/// session`; any other failure panics with the roster, hub log and body log.
+/// Never returns a failed `Output`.
+fn warm_say(state: &StateDir, session: &str, text: &str, timeout: Duration, hub: &Hub, body: &Body) -> Output {
+    wait_warm(state, session, timeout, hub, Some(body), || support::say(state, session, text))
 }
 
 #[test]
@@ -120,15 +117,15 @@ fn interrupt_cancels_only_target_sibling_completes() {
     let hub_state = StateDir::new();
     let body_state = StateDir::new();
     let hub = Hub::start(&hub_state);
-    let _body = start_body(
+    let body = start_body(
         &hub_state,
         &body_state,
         &hub,
         &[("alpha", &["--slow", "--chunks", "10"]), ("beta", &["--chunks", "3"])],
     );
 
-    let warm = say_ready(&hub_state, "alpha", "warm up", Duration::from_secs(10));
-    assert!(warm.status.success(), "stderr: {}", stderr_of(&warm));
+    let warm = warm_say(&hub_state, "alpha", "warm up", Duration::from_secs(10), &hub, &body);
+    assert!(warm.status.success(), "stderr: {}", stderr_of(&warm)); // implied by wait_warm; kept as characterization
 
     let alpha_handle =
         say_full_in_background(&hub_state, owned(&["alpha", "a long turn"]), Duration::from_millis(200));
@@ -154,10 +151,10 @@ fn interrupted_say_exits_1_with_clear_message() {
     let hub_state = StateDir::new();
     let body_state = StateDir::new();
     let hub = Hub::start(&hub_state);
-    let _body = start_body(&hub_state, &body_state, &hub, &[("alpha", &["--slow", "--chunks", "10"])]);
+    let body = start_body(&hub_state, &body_state, &hub, &[("alpha", &["--slow", "--chunks", "10"])]);
 
-    let warm = say_ready(&hub_state, "alpha", "warm up", Duration::from_secs(10));
-    assert!(warm.status.success(), "stderr: {}", stderr_of(&warm));
+    let warm = warm_say(&hub_state, "alpha", "warm up", Duration::from_secs(10), &hub, &body);
+    assert!(warm.status.success(), "stderr: {}", stderr_of(&warm)); // implied by wait_warm; kept as characterization
 
     let handle = say_full_in_background(&hub_state, owned(&["alpha", "a long turn"]), Duration::from_millis(200));
     let interrupted = support::interrupt(&hub_state, "alpha");
@@ -177,10 +174,10 @@ fn session_accepts_new_prompt_immediately_after_interrupt_and_reply_is_fresh() {
     let hub_state = StateDir::new();
     let body_state = StateDir::new();
     let hub = Hub::start(&hub_state);
-    let _body = start_body(&hub_state, &body_state, &hub, &[("alpha", &["--slow", "--chunks", "10"])]);
+    let body = start_body(&hub_state, &body_state, &hub, &[("alpha", &["--slow", "--chunks", "10"])]);
 
-    let warm = say_ready(&hub_state, "alpha", "warm up", Duration::from_secs(10));
-    assert!(warm.status.success(), "stderr: {}", stderr_of(&warm));
+    let warm = warm_say(&hub_state, "alpha", "warm up", Duration::from_secs(10), &hub, &body);
+    assert!(warm.status.success(), "stderr: {}", stderr_of(&warm)); // implied by wait_warm; kept as characterization
 
     let handle = say_full_in_background(&hub_state, owned(&["alpha", "a long turn"]), Duration::from_millis(200));
     let interrupted = support::interrupt(&hub_state, "alpha");
@@ -202,10 +199,10 @@ fn interrupt_with_text_cancels_then_prompts_and_returns_new_reply() {
     let hub_state = StateDir::new();
     let body_state = StateDir::new();
     let hub = Hub::start(&hub_state);
-    let _body = start_body(&hub_state, &body_state, &hub, &[("alpha", &["--slow", "--chunks", "10"])]);
+    let body = start_body(&hub_state, &body_state, &hub, &[("alpha", &["--slow", "--chunks", "10"])]);
 
-    let warm = say_ready(&hub_state, "alpha", "warm up", Duration::from_secs(10));
-    assert!(warm.status.success(), "stderr: {}", stderr_of(&warm));
+    let warm = warm_say(&hub_state, "alpha", "warm up", Duration::from_secs(10), &hub, &body);
+    assert!(warm.status.success(), "stderr: {}", stderr_of(&warm)); // implied by wait_warm; kept as characterization
 
     let handle =
         say_full_in_background(&hub_state, owned(&["alpha", "the turn about to be cancelled"]), Duration::from_millis(200));
@@ -223,14 +220,13 @@ fn interrupt_with_text_on_idle_session_just_prompts() {
     let hub_state = StateDir::new();
     let body_state = StateDir::new();
     let hub = Hub::start(&hub_state);
-    let _body = start_body(&hub_state, &body_state, &hub, &[("alpha", &["--chunks", "2"])]);
+    let body = start_body(&hub_state, &body_state, &hub, &[("alpha", &["--chunks", "2"])]);
 
-    let out = wait_for(Duration::from_secs(10), || {
-        let out = interrupt_full(hub_state.path(), &["alpha", "hello, idle session"]);
-        (out.status.success() || !stderr_of(&out).contains("unknown session")).then_some(out)
-    })
-    .expect("interrupt with text on an idle session eventually succeeds");
-    assert!(out.status.success(), "stderr: {}", stderr_of(&out));
+    // The `interrupt SESSION TEXT` under test is itself the warm-up attempt.
+    let out = wait_warm(&hub_state, "alpha", Duration::from_secs(10), &hub, Some(&body), || {
+        interrupt_full(hub_state.path(), &["alpha", "hello, idle session"])
+    });
+    assert!(out.status.success(), "stderr: {}", stderr_of(&out)); // implied by wait_warm; kept as characterization
     assert!(stdout_of(&out).contains("stub chunk"), "must just prompt and reply: {:?}", stdout_of(&out));
 }
 
@@ -239,12 +235,12 @@ fn interrupt_idle_session_is_ok_noop() {
     let hub_state = StateDir::new();
     let body_state = StateDir::new();
     let hub = Hub::start(&hub_state);
-    let _body = start_body(&hub_state, &body_state, &hub, &[("alpha", &["--chunks", "1"])]);
+    let body = start_body(&hub_state, &body_state, &hub, &[("alpha", &["--chunks", "1"])]);
 
     // Warm the session up once so it is a real, known, idle session (rather
     // than racing the hub's very first presence).
-    let warm = say_ready(&hub_state, "alpha", "warm up", Duration::from_secs(10));
-    assert!(warm.status.success(), "stderr: {}", stderr_of(&warm));
+    let warm = warm_say(&hub_state, "alpha", "warm up", Duration::from_secs(10), &hub, &body);
+    assert!(warm.status.success(), "stderr: {}", stderr_of(&warm)); // implied by wait_warm; kept as characterization
 
     let out = support::interrupt(&hub_state, "alpha");
     assert_eq!(out.status.code(), Some(0), "an idle session's cancel must be a no-op success; stderr: {}", stderr_of(&out));
@@ -256,8 +252,8 @@ fn interrupt_unknown_session_exit_1() {
     let hub_state = StateDir::new();
     let body_state = StateDir::new();
     let hub = Hub::start(&hub_state);
-    let _body = start_body(&hub_state, &body_state, &hub, &[("alpha", &["--chunks", "1"])]);
-    let _ = say_ready(&hub_state, "alpha", "warm up", Duration::from_secs(10));
+    let body = start_body(&hub_state, &body_state, &hub, &[("alpha", &["--chunks", "1"])]);
+    let _ = warm_say(&hub_state, "alpha", "warm up", Duration::from_secs(10), &hub, &body);
 
     let out = support::interrupt(&hub_state, "no-such-session");
     assert_eq!(out.status.code(), Some(1), "unknown session must exit 1; stderr: {}", stderr_of(&out));
@@ -283,8 +279,8 @@ fn ack_timeout_message_when_body_stalls() {
         &[("alpha", &["--slow", "--chunks", "20", "--ignore-cancel"])],
     );
 
-    let warm = say_ready(&hub_state, "alpha", "warm up", Duration::from_secs(10));
-    assert!(warm.status.success(), "stderr: {}", stderr_of(&warm));
+    let warm = warm_say(&hub_state, "alpha", "warm up", Duration::from_secs(10), &hub, &body);
+    assert!(warm.status.success(), "stderr: {}", stderr_of(&warm)); // implied by wait_warm; kept as characterization
 
     let handle = say_full_in_background(
         &hub_state,
@@ -326,10 +322,7 @@ fn cancel_not_queued_behind_large_update_flush() {
     // Poll the roster instead: it observes presence without running a turn.
     let _body = start_body(&hub_state, &body_state, &hub, &[("alpha", &["--chunks", "5000"])]);
     wait_for(Duration::from_secs(10), || {
-        let rows = support::roster_json(&hub_state)["rows"].as_array()?.clone();
-        rows.iter()
-            .any(|r| r["name"].as_str() == Some("b/alpha") && r["conn_state"].as_str() == Some("connected"))
-            .then_some(())
+        roster_row_connected(&support::roster_json(&hub_state), "b/alpha").then_some(())
     })
     .expect("roster must observe alpha connected");
 
@@ -400,13 +393,8 @@ fn full_journey_with_stub() {
 
     // `roster` shows both connected.
     wait_for(Duration::from_secs(10), || {
-        let rows = support::roster_json(&hub_state)["rows"].as_array()?.clone();
-        let connected: Vec<&str> = rows
-            .iter()
-            .filter(|r| r["conn_state"].as_str() == Some("connected"))
-            .filter_map(|r| r["name"].as_str())
-            .collect();
-        (connected.contains(&"t/alpha") && connected.contains(&"t/beta")).then_some(())
+        let roster = support::roster_json(&hub_state);
+        (roster_row_connected(&roster, "t/alpha") && roster_row_connected(&roster, "t/beta")).then_some(())
     })
     .expect("roster must show both t/alpha and t/beta connected");
 
@@ -416,8 +404,8 @@ fn full_journey_with_stub() {
     // routable `<label>/<session>` address `resolve_session` matches
     // against; with one body live, the bare name is unambiguous either
     // way.)
-    let a = say_ready(&hub_state, "alpha", "hi alpha", Duration::from_secs(10));
-    assert!(a.status.success(), "stderr: {}", stderr_of(&a));
+    let a = warm_say(&hub_state, "alpha", "hi alpha", Duration::from_secs(10), &hub, &body);
+    assert!(a.status.success(), "stderr: {}", stderr_of(&a)); // implied by wait_warm; kept as characterization
     assert!(stdout_of(&a).contains("stub chunk"));
     let b = support::say(&hub_state, "beta", "hi beta");
     assert!(b.status.success(), "stderr: {}", stderr_of(&b));
