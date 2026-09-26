@@ -48,7 +48,26 @@ pub fn free_addr() -> String {
     }
 }
 
+/// A hub on a free loopback port, retrying with another port when the bind
+/// loses a race (another process on the machine took the port between the
+/// probe in [`free_addr`] and the hub's own bind). Returns the hub and its address.
+pub fn start_hub_on_free_port(state: &StateDir, env: &[(String, String)], args: &[String]) -> (Child, String) {
+    let mut last = String::new();
+    for _ in 0..8 {
+        let addr = free_addr();
+        match try_start_hub_at(state, &addr, env, args) {
+            Ok(child) => return (child, addr),
+            Err(why) => last = why,
+        }
+    }
+    panic!("no hub could be started on a free port after 8 attempts; last failure:\n{last}");
+}
+
 pub fn start_hub_at(state: &StateDir, addr: &str, env: &[(String, String)], args: &[String]) -> Child {
+    try_start_hub_at(state, addr, env, args).unwrap_or_else(|why| panic!("{why}"))
+}
+
+fn try_start_hub_at(state: &StateDir, addr: &str, env: &[(String, String)], args: &[String]) -> Result<Child, String> {
     let mut cmd = holler_cmd(state);
     cmd.envs(env.iter().map(|(k, v)| (k.as_str(), v.as_str())));
     cmd.args(["hub", "serve", "--listen", addr]).args(args).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped());
@@ -56,6 +75,9 @@ pub fn start_hub_at(state: &StateDir, addr: &str, env: &[(String, String)], args
     let mut child = cmd.spawn().expect("spawn `holler hub serve`");
     let stderr = child.stderr.take().expect("hub stderr is piped");
     let (tx, rx) = std::sync::mpsc::channel::<()>();
+    // Everything the hub wrote to stderr, so a hub that dies at startup says why.
+    let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    let seen_w = std::sync::Arc::clone(&seen);
     std::thread::spawn(move || {
         use std::io::BufRead;
         let mut reader = std::io::BufReader::new(stderr);
@@ -63,6 +85,11 @@ pub fn start_hub_at(state: &StateDir, addr: &str, env: &[(String, String)], args
         let mut sent = false;
         // Keep draining for the hub's whole life so its stderr pipe never fills.
         while reader.read_line(&mut line).is_ok_and(|n| n > 0) {
+            if let Ok(mut v) = seen_w.lock() {
+                if v.len() < 200 {
+                    v.push(line.trim_end().to_string());
+                }
+            }
             if !sent && serde_json::from_str::<Value>(&line).is_ok_and(|v| v["event"] == "listening") {
                 sent = true;
                 let _ = tx.send(());
@@ -70,8 +97,14 @@ pub fn start_hub_at(state: &StateDir, addr: &str, env: &[(String, String)], args
             line.clear();
         }
     });
-    rx.recv_timeout(Duration::from_secs(10)).expect("hub did not report listening within 10s");
-    child
+    if rx.recv_timeout(Duration::from_secs(10)).is_err() {
+        let status = child.try_wait().ok().flatten();
+        let log = seen.lock().map(|v| v.join("\n")).unwrap_or_default();
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(format!("hub did not report listening within 10s (listen {addr}; exit status {status:?}); its stderr:\n{log}"));
+    }
+    Ok(child)
 }
 
 impl Rig {
@@ -88,10 +121,9 @@ impl Rig {
     pub fn start_with_args(sessions: &[(&str, &[&str])], hub_env: &[(&str, &str)], hub_args: &[&str]) -> Rig {
         let hub_state = StateDir::new();
         let body_state = StateDir::new();
-        let addr = free_addr();
         let hub_env: Vec<(String, String)> = hub_env.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
         let hub_args: Vec<String> = hub_args.iter().map(|s| s.to_string()).collect();
-        let hub = start_hub_at(&hub_state, &addr, &hub_env, &hub_args);
+        let (hub, addr) = start_hub_on_free_port(&hub_state, &hub_env, &hub_args);
         let (token_id, secret) = mint_token(&hub_state, "b");
         join(&body_state, &hub_state, &format!("ws://{addr}"), &token_id, &secret);
         let config = write_sessions_toml(&body_state, sessions);

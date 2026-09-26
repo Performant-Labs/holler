@@ -21,7 +21,7 @@ use std::time::Duration;
 
 use holler_hub::control::{self, ControlError};
 use support::hold_rig::{
-    assert_held, free_addr, is_delivered, is_held, say_at_retrying, start_hub_at, turn_accepted, Rig, READY, SESSION,
+    assert_held, is_delivered, is_held, say_at_retrying, start_hub_on_free_port, turn_accepted, Rig, READY, SESSION,
 };
 use support::{join, kill_tree, mint_token, wait_for, write_sessions_toml, Body, StateDir};
 
@@ -244,8 +244,7 @@ fn a_corrupt_hold_file_does_not_stop_the_hub_and_is_kept() {
     let hub_state = StateDir::new();
     std::fs::create_dir_all(hub_state.hub()).unwrap();
     std::fs::write(hub_state.hub().join("holds.json"), b"{ this is not json").unwrap();
-    let addr = free_addr();
-    let mut hub = start_hub_at(&hub_state, &addr, &[], &[]); // panics if the hub does not come up
+    let (mut hub, addr) = start_hub_on_free_port(&hub_state, &[], &[]); // panics if no hub comes up
     let (token_id, secret) = mint_token(&hub_state, "b");
     let body_state = StateDir::new();
     join(&body_state, &hub_state, &format!("ws://{addr}"), &token_id, &secret);
