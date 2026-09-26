@@ -19,6 +19,8 @@
 //! steps here plus the hello exchange and the live session loop; this module
 //! owns only the handshake itself.
 
+use std::net::IpAddr;
+
 use futures_util::{Sink, Stream};
 use holler_proto::noise::{
     HandshakeXk, AUTH_FAILED_REASON, HANDSHAKE_FAILED_REASON, HUB_UNAVAILABLE_REASON, KEY_MISMATCH_REASON, NOISE_MESSAGE_ONE_REJECTED_REASON,
@@ -29,7 +31,8 @@ use holler_proto::{Authenticate, Code};
 use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 
 use crate::live::Registry;
-use crate::serve::{close, send_error_with_reason};
+use crate::lockout::{LockoutKey, Scope};
+use crate::serve::{close, close_with_code, send_error_with_reason};
 use crate::state::HubState;
 
 use super::{log, next_envelope, PROVE_TIMEOUT};
@@ -49,18 +52,33 @@ pub struct AuthDeps<'a> {
     pub lockout: &'a std::sync::Arc<crate::lockout::Lockout>,
 }
 
+/// The address a lockout call on this path is keyed by (issue #455): `peer_ip`
+/// as it is derived from the transport `SocketAddr`, which is `127.0.0.1`, or
+/// an IPv6 address inside brackets (`[::1]`). One surrounding `[`/`]` is
+/// stripped before the parse; before #455 the brackets failed it, so an IPv6
+/// peer's failures were never counted. The one parse behind every lockout
+/// call here: [`refuse_unauthenticated`], the check in [`begin_authenticate`]
+/// and the reset in [`finish_prove`]. `None` does not happen for a peer a hub
+/// accepts (a loopback `SocketAddr`, ADR 0006); if it ever did, that attempt
+/// would skip the lockout (fail-open), as an unparsable peer always has.
+fn key_ip(peer_ip: &str) -> Option<IpAddr> {
+    let bare = peer_ip.strip_prefix('[').and_then(|s| s.strip_suffix(']')).unwrap_or(peer_ip);
+    bare.parse().ok()
+}
+
 /// Refuse this connection as the peer's failed authentication: record a
-/// lockout failure (keyed by the transport IP, never the claimed hostname —
-/// that is unauthenticated input — and carrying the reason and the token id
-/// the peer named, which `hub status` reports, issue #451), log it
-/// `auth_rejected`, then [`refuse_and_close`]. The funnel every *counted*
-/// failure branch of the handshake goes through, so the failure points in
-/// [`begin_authenticate`]/[`begin_noise_handshake`]/[`await_prove`]/
-/// [`finish_prove`] stay under clippy's cognitive-complexity gate. The peer
-/// gets the same stable code in `error.data.reason` (docs §8, issue #486), so
-/// a body can say why it was refused without parsing `message`. A caller's
-/// own `reason` wins: only [`begin_noise_handshake`]'s message-1 rejection
-/// passes one, the one counted shape the body reports as a hub key mismatch.
+/// lockout failure (keyed by the transport IP and the token id the peer
+/// named, issue #455, never the claimed hostname — that is unauthenticated
+/// input — and carrying the reason, which `hub status` reports with the id,
+/// issue #451), log it `auth_rejected`, then [`refuse_and_close`]. The
+/// funnel every *counted* failure branch of the handshake goes through, so
+/// the failure points in [`begin_authenticate`]/[`begin_noise_handshake`]/
+/// [`await_prove`]/[`finish_prove`] stay under clippy's cognitive-complexity
+/// gate. The peer gets the same stable code in `error.data.reason` (docs §8,
+/// issue #486), so a body can say why it was refused without parsing
+/// `message`. A caller's own `reason` wins: only [`begin_noise_handshake`]'s
+/// message-1 rejection passes one, the one counted shape the body reports as
+/// a hub key mismatch.
 pub(super) async fn refuse_unauthenticated<Snk>(
     sink: &mut Snk,
     id: Option<&str>,
@@ -73,7 +91,7 @@ pub(super) async fn refuse_unauthenticated<Snk>(
     Snk: Sink<Message, Error = WsError> + Unpin,
 {
     let code = rejection_reason(message);
-    let outcome = peer_ip.parse().ok().map(|ip| deps.lockout.record_failure_detailed(&ip, code, token_id));
+    let outcome = key_ip(peer_ip).map(|ip| deps.lockout.record_failure_detailed(&ip, code, token_id));
     log_rejection(peer_ip, token_id, code, outcome.as_ref());
     refuse_and_close(sink, id, message, Some(reason.unwrap_or(code)), token_id, deps).await;
 }
@@ -146,8 +164,10 @@ pub(super) fn rejection_reason(message: &str) -> &'static str {
 }
 
 /// Log one rejected authentication at `Warn` (visible at the default log
-/// level) and, when it moved the peer into a lockout, the trip itself
-/// (issue #450). Only the public token id is logged, never a secret.
+/// level) and, when it moved a token or the whole peer into a lockout, the
+/// trip itself (issue #450), with its `scope` (issue #455; `token_id` is the
+/// id the tripping failure named). Only the public token id is logged, never
+/// a secret.
 fn log_rejection(peer_ip: &str, token_id: &str, reason: &'static str, outcome: Option<&crate::lockout::FailureOutcome>) {
     let failures = outcome.map_or_else(|| "?".to_string(), |o| format!("{}/{}", o.count, o.max));
     log(
@@ -163,6 +183,8 @@ fn log_rejection(peer_ip: &str, token_id: &str, reason: &'static str, outcome: O
             "lockout_tripped",
             vec![
                 ("peer", peer_ip.to_string()),
+                ("token_id", token_id.to_string()),
+                ("scope", Scope::of(o.peer_wide).as_str().to_string()),
                 ("failures", o.count.to_string()),
                 ("reasons", reasons),
                 ("duration_ms", o.duration_ms.to_string()),
@@ -170,9 +192,19 @@ fn log_rejection(peer_ip: &str, token_id: &str, reason: &'static str, outcome: O
             ],
         );
     }
-    for ip in &o.cleared {
-        log(Severity::Warn, "lockout_cleared", vec![("peer", ip.to_string()), ("why", "expired".to_string())]);
+    for key in &o.cleared {
+        log_cleared(key, "expired");
     }
+}
+
+/// Log `lockout_cleared` for the entry `key` names (issue #455): a token
+/// bucket's `token_id`, and the entry's `scope`.
+fn log_cleared(key: &LockoutKey, why: &str) {
+    let mut fields = vec![("peer", key.peer.to_string())];
+    fields.extend(key.token_id.clone().map(|id| ("token_id", id)));
+    fields.push(("scope", Scope::of(key.token_id.is_none()).as_str().to_string()));
+    fields.push(("why", why.to_string()));
+    log(Severity::Warn, "lockout_cleared", fields);
 }
 
 /// Step 0 of `circuit/authenticate` → `circuit/prove` (issue #340): check
@@ -221,6 +253,13 @@ where
 /// #485), which the body does retry (issue #486). No lockout success/reset
 /// happens here — resolving a *token id* proves nothing yet; only a
 /// completed, key-matched handshake does ([`finish_prove`]).
+///
+/// Before the lookup, the token-scoped lockout (issue #455): a token locked
+/// out from this peer, or a peer locked out as a whole after this socket was
+/// admitted, is refused with the same close **1008** as the pre-frame refusal
+/// in `serve.rs`, logged `lockout_refused`. It sends no error frame, counts
+/// nothing and clears no roster row; the refusal fires for a known and an
+/// unknown id alike, so it tells the peer nothing about which ids exist.
 pub(super) async fn begin_authenticate<Snk>(
     sink: &mut Snk,
     id: Option<&str>,
@@ -232,6 +271,13 @@ pub(super) async fn begin_authenticate<Snk>(
 where
     Snk: Sink<Message, Error = WsError> + Unpin,
 {
+    if let Some(ip) = key_ip(peer_ip).filter(|ip| deps.lockout.is_token_locked_out(ip, &params.token_id)) {
+        let scope = Scope::of(deps.lockout.is_locked_out(&ip)).as_str().to_string();
+        let fields = vec![("peer", peer_ip.to_string()), ("token_id", params.token_id.clone()), ("scope", scope)];
+        log(Severity::Warn, "lockout_refused", fields);
+        close_with_code(sink, 1008, "auth refused: too many failures").await;
+        return None;
+    }
     match crate::token::bound_record_async(&params.token_id, state).await {
         Ok(record) => Some(record),
         Err(e) => {
@@ -356,9 +402,10 @@ where
 /// advance, so a handshake can complete successfully with *any* self-
 /// consistent keypair — only the equality check below makes it a proof of
 /// possession of the *expected* key, not just *a* key. Success resets this
-/// peer's lockout count (issue #184: "a successful auth resets the
-/// counter") — the first point in the whole handshake where that is
-/// actually earned.
+/// token's lockout count from this peer (issue #184: "a successful auth
+/// resets the counter"; issue #455: that token's bucket only, never another
+/// token's, nor a peer-wide lockout) — the first point in the whole
+/// handshake where that is actually earned.
 pub(super) async fn finish_prove<Snk>(
     sink: &mut Snk,
     prove_id: &str,
@@ -401,9 +448,9 @@ where
         refuse_unauthenticated(sink, Some(prove_id), "authentication failed: static key mismatch", None, &params.token_id, peer_ip, deps).await;
         return None;
     }
-    if let Ok(ip) = peer_ip.parse() {
-        if deps.lockout.reset(&ip) {
-            log(Severity::Warn, "lockout_cleared", vec![("peer", ip.to_string()), ("why", "authenticated".to_string())]);
+    if let Some(ip) = key_ip(peer_ip) {
+        if deps.lockout.reset(&ip, &params.token_id) {
+            log_cleared(&LockoutKey { peer: ip, token_id: Some(params.token_id.clone()) }, "authenticated");
         }
     }
     Some(record)
@@ -650,5 +697,18 @@ mod tests {
         for message in cases {
             assert_eq!(rejection_reason(message), "token_unknown", "{message}");
         }
+    }
+
+    /// Issue #455, criterion 4: the lockout key's address parses from both
+    /// `SocketAddr` renderings, bracketed IPv6 included (before #455 an IPv6
+    /// peer's failures were never counted), and nothing else.
+    #[test]
+    fn key_ip_parses_ipv4_and_bracketed_or_bare_ipv6() {
+        use super::key_ip;
+        let v6: std::net::IpAddr = "::1".parse().unwrap();
+        assert_eq!(key_ip("[::1]"), Some(v6));
+        assert_eq!(key_ip("::1"), Some(v6));
+        assert_eq!(key_ip("127.0.0.1"), Some("127.0.0.1".parse().unwrap()));
+        assert_eq!(key_ip("nope"), None);
     }
 }

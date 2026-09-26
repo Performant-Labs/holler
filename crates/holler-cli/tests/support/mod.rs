@@ -51,6 +51,8 @@ pub use onboard::{hub_pubkey, join, mint_token};
 pub use cmds::{answer, body_status_json, hub_status_json, interrupt, roster_json, say, try_roster_json, wait_cmd};
 // The session-hold rig (issues #442, #460), shared by two test files.
 pub mod hold_rig;
+// Raw WebSocket clients against a real hub (issue #455).
+pub mod raw_ws;
 // Warm-up readiness (`wait_warm` and its two classifiers, issue #420).
 mod warmup;
 #[allow(unused_imports)] // #420

@@ -117,6 +117,21 @@ fills this file in at release time.
   revoked and deleted, so the store growth under join/detach churn that #400 measured remains
   ([#454](https://github.com/Performant-Labs/holler/issues/454), refs
   [#400](https://github.com/Performant-Labs/holler/issues/400)).
+- One body's bad token no longer locks out every body behind the same reverse proxy. The failed-authentication
+  lockout was keyed by the peer's address alone, and behind a proxy every body arrives from the proxy's
+  address, so one body's retries locked out all of them. The lockout is now keyed by the address and the
+  token id the connection names: a token that fails 5 times in 10 minutes (the defaults) is refused from that
+  address for the cooldown, still with close 1008 but now once its `circuit/authenticate` is read, while other
+  tokens from the address keep connecting. A peer whose failures name 8 distinct token ids within the window
+  is still locked out as a whole, before any frame is read (the [#184](https://github.com/Performant-Labs/holler/issues/184)
+  flood guard); 8 is fixed. A successful authentication clears only that token's failures. No forwarded-address
+  header is ever read. `hub status --json` `lockout.peers` now has one entry per token id (or one per peer
+  locked out as a whole), each with a new `scope` (`token` or `peer`), sorted by peer, scope and id; the text
+  view shows a whole-peer entry as `all tokens locked out`. The `lockout_tripped` log event gains `token_id` and
+  `scope`, `lockout_cleared` names the token, and a token's refusal is logged `lockout_refused` with `peer`,
+  `token_id` and `scope`. A failed authentication from an IPv6 peer is now counted; it never was before
+  ([#455](https://github.com/Performant-Labs/holler/issues/455), part of
+  [#431](https://github.com/Performant-Labs/holler/issues/431)).
 - A second `holler hub serve` or `holler body run` started against a running one no longer blanks the
   running instance's lock file (`hub/serve.lock`, `body/run.lock`). The loser emptied the file before it
   found the lock held, so its refusal read `(pid )` instead of naming the running process, and the file

@@ -70,9 +70,10 @@ pub fn status(json: bool) -> i32 {
 }
 
 /// The lockout section of `hub status`'s text output (issue #451), read from
-/// the document's `lockout.peers`: a header, then one line per peer that is
-/// locked out or has failures building up. Empty when there are none, so a
-/// quiet hub's summary stays the four lines it always was.
+/// the document's `lockout.peers`: a header, then one line per entry (a token
+/// from a peer, or a whole peer, issue #455) that is locked out or has
+/// failures building up. Empty when there are none, so a quiet hub's summary
+/// stays the four lines it always was.
 fn lockout_lines(doc: &serde_json::Value) -> Vec<String> {
     let Some(peers) = doc.pointer("/lockout/peers").and_then(|p| p.as_array()).filter(|p| !p.is_empty()) else {
         return Vec::new();
@@ -83,9 +84,10 @@ fn lockout_lines(doc: &serde_json::Value) -> Vec<String> {
     lines
 }
 
-/// One peer's line in [`lockout_lines`]: its address, whether (and for how
-/// much longer) it is locked out, its failure count with the reasons, and the
-/// token ids it named with their labels.
+/// One entry's line in [`lockout_lines`]: its address, whether (and for how
+/// much longer) it is locked out, prefixed `all tokens` when the entry is the
+/// whole peer (`scope` `peer`, issue #455), its failure count with the
+/// reasons, and the token ids it named with their labels.
 fn lockout_peer_line(p: &serde_json::Value) -> String {
     let failures = p["failures"].as_u64().unwrap_or(0);
     let state = if p["locked_out"] == true {
@@ -93,6 +95,7 @@ fn lockout_peer_line(p: &serde_json::Value) -> String {
     } else {
         "not locked out".to_string()
     };
+    let state = if p["scope"] == "peer" { format!("all tokens {state}") } else { state };
     let reasons = p["reasons"].as_object().map_or_else(String::new, |m| {
         m.iter().map(|(code, n)| format!("{} x{n}", printable(code))).collect::<Vec<_>>().join(", ")
     });

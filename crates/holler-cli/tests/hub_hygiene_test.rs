@@ -22,18 +22,16 @@ use std::time::Duration;
 use ed25519_dalek::SigningKey;
 use futures_util::{SinkExt, StreamExt};
 use holler_proto::noise::{build_prologue, HandshakeXk};
-use holler_proto::{decode, Envelope};
+use holler_proto::Envelope;
 use serde_json::json;
-use tokio_tungstenite::{tungstenite::Message, MaybeTlsStream};
+use tokio_tungstenite::tungstenite::Message;
 
 mod support;
+use support::raw_ws::{
+    authenticate_expecting_bare_close, authenticate_once, authenticate_request, connect_ws, decode_next, hub_x25519_pubkey, log_events,
+    wait_for_close, WsClient,
+};
 use support::{holler_cmd, hub_status_json, wait_for, Hub, StateDir, STARTUP_WAIT};
-
-type WsClient = tokio_tungstenite::WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>;
-
-async fn connect_ws(url: &str) -> WsClient {
-    tokio_tungstenite::connect_async(url).await.expect("dial the hub's WebSocket listener").0
-}
 
 /// A fresh Ed25519 signing keypair, deterministic per `seed` (so tests stay
 /// reproducible) — no longer used to authenticate (issue #338 replaced the
@@ -73,34 +71,6 @@ fn mint_and_redeem_keeping_secret(state: &StateDir, label: &str) -> (String, [u8
         .expect("redeem the just-minted token");
     let _ = client_id;
     (minted.record.token_id, x25519_secret_bytes, minted.secret)
-}
-
-/// This test binary's own resolved copy of the hub's X25519 static public
-/// key (issue #322) — a raw test client needs it in advance to build a
-/// Noise XK initiator (the `K` in XK), the same way a real body gets it from
-/// `body join`'s out-of-band `--hub-key` pin. Safe to call after
-/// `Hub::start`/`Hub::start_with_env` return (readiness implies the hub's
-/// own startup, including any identity generation, has already run) —
-/// `holler_hub::identity::ensure` is idempotent and loads back whatever key
-/// is already persisted rather than generating a second, different one.
-fn hub_x25519_pubkey(state: &StateDir) -> [u8; 32] {
-    let hub_state = holler_hub::state::HubState::from_root(state.path().to_path_buf());
-    let identity = holler_hub::identity::ensure(&hub_state).expect("resolve the hub's X25519 identity");
-    let bytes = hex::decode(identity.public_hex()).expect("hub pubkey is valid hex");
-    bytes.try_into().expect("hub pubkey is 32 bytes")
-}
-
-/// A `circuit/authenticate` request frame carrying Noise message 1.
-fn authenticate_request(token_id: &str, hostname: &str, advertised_url: &str, msg1: &[u8]) -> serde_json::Value {
-    json!({
-        "jsonrpc": "2.0",
-        "id": "b-auth1",
-        "method": "circuit/authenticate",
-        "params": {
-            "protocol": holler_proto::PROTOCOL_VERSION,
-            "token_id": token_id, "hostname": hostname, "advertised_url": advertised_url, "message": hex::encode(msg1),
-        },
-    })
 }
 
 /// Run the `circuit/authenticate` → `circuit/prove` Noise XK handshake
@@ -185,36 +155,6 @@ async fn go_live(ws: &mut WsClient, token_id: &str, body_x25519_secret: &[u8; 32
         .await
         .expect("authenticate must succeed");
     run_hello(ws, hostname).await;
-}
-
-/// Read the next frame and decode it as a v2 envelope, skipping ping/pong.
-/// `None` on close or EOF.
-async fn decode_next(ws: &mut WsClient) -> Option<Envelope> {
-    loop {
-        match ws.next().await {
-            None => return None,
-            Some(Ok(Message::Text(t))) => return Some(decode(t.as_str()).expect("a valid v2 frame")),
-            Some(Ok(Message::Ping(_))) | Some(Ok(Message::Pong(_))) | Some(Ok(Message::Frame(_))) => continue,
-            Some(Ok(Message::Close(_))) => return None,
-            Some(Ok(Message::Binary(_))) => panic!("unexpected binary frame"),
-            Some(Err(e)) => panic!("ws stream error: {e:?}"),
-        }
-    }
-}
-
-/// Read frames until a WS Close arrives (or EOF), returning the close code if
-/// the peer sent one. Skips any application frames along the way (a
-/// superseded/revoked connection may have one pending notification first).
-async fn wait_for_close(ws: &mut WsClient) -> Option<u16> {
-    loop {
-        match ws.next().await {
-            None => return None, // EOF with no explicit close frame.
-            Some(Ok(Message::Close(Some(frame)))) => return Some(frame.code.into()),
-            Some(Ok(Message::Close(None))) => return None,
-            Some(Ok(_)) => continue, // an application frame (e.g. circuit/superseded) — keep draining.
-            Some(Err(_)) => return None,
-        }
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -369,10 +309,11 @@ async fn preauth_cap_rejects_65th_socket() {
 // hygiene: failed-auth lockout
 // ---------------------------------------------------------------------------
 
-/// 5 failed `circuit/authenticate`s from one peer lock that peer out for the
-/// configured window; a 6th connection attempt is refused with **1008**
-/// before the hub reads a frame; after the window lapses, connections are
-/// accepted again.
+/// 5 failed `circuit/authenticate`s for one token lock that token out for the
+/// configured window: a 6th `circuit/authenticate` naming it is refused with a
+/// bare close **1008** (issue #455: after the first frame, not before), while
+/// a second token from the same peer still goes live; after the window
+/// lapses, the locked token is answered normally again.
 #[tokio::test]
 async fn five_bad_auths_lock_out_peer_for_window() {
     let state = StateDir::new();
@@ -398,16 +339,26 @@ async fn five_bad_auths_lock_out_peer_for_window() {
         assert_eq!(err.code, -32002, "bad-auth attempt {i} must be -32002: {err:?}");
     }
 
-    // The 6th connection attempt from the same peer (loopback — NOT exempt)
-    // must be refused immediately, before the hub ever reads a frame from
-    // it. Per PR #289's own CI-only-race fix: do not send or drop anything
-    // from this connection — hold the whole split socket open and only
-    // *listen* for the hub's unprompted close (sending our own close first
-    // races the hub's close on a fast/lean CI runner).
-    let mut sixth = connect_ws(&hub.ws_url()).await;
-    let code = wait_for_close(&mut sixth).await;
-    assert_eq!(code, Some(1008), "a locked-out peer's connection must be refused with code 1008");
+    // Issue #455: the lockout is keyed by (peer, token id), so the 6th
+    // connection is admitted (no peer-wide trip: one token id is far below
+    // `MAX_TOKEN_IDS_PER_PEER`) and refused only once it names the locked
+    // token: a bare close 1008 with no JSON-RPC error frame first.
+    let mut sixth = connect_ws(&ws_url).await;
+    let code = authenticate_expecting_bare_close(&mut sixth, &ws_url, &token_id, &wrong_key, &hub_pubkey).await;
+    assert_eq!(code, Ok(1008), "the locked token's authenticate must be refused with a bare close 1008");
     drop(sixth);
+
+    // A different token from the same peer is not locked out: it completes
+    // the whole handshake and reaches the live session.
+    let (other_token, other_key) = mint_and_redeem(&state, "lockout-other");
+    let mut other = connect_ws(&ws_url).await;
+    go_live(&mut other, &other_token, &other_key, &hub_pubkey, "lockout-other", &ws_url).await;
+    drop(other);
+    // The refusal is logged with the token it refused (fields `peer`, `token_id`).
+    let refused = wait_for(STARTUP_WAIT, || log_events(&hub, "lockout_refused").into_iter().find(|e| e["token_id"] == token_id.as_str()))
+        .unwrap_or_else(|| panic!("the token-scoped refusal was never logged:\n{}", hub.log_text()));
+    assert!(refused["peer"].as_str().is_some_and(|p| p.starts_with("127.0.0.1")), "the refusal names the peer: {refused}");
+    assert_eq!(refused["scope"], "token", "a one-token lockout is refused with scope token: {refused}");
 
     // After the window lapses, the peer is admitted again: a bad-credential
     // attempt now gets the *normal* auth-failure roundtrip (an error frame,
@@ -680,26 +631,6 @@ async fn hello_with_old_protocol_is_refused_with_unsupported_version() {
 // issue #485: a hub-side authentication fault is not the peer's failure
 // ---------------------------------------------------------------------------
 
-/// Send one `circuit/authenticate` on a fresh socket and read one frame. A
-/// refusal is `Ok(error)`; anything else (a 1008 lockout close, a challenge)
-/// is `Err(description)`, so a caller can collect every attempt and assert on
-/// them together instead of dying on the first unexpected shape.
-async fn authenticate_once(ws_url: &str, token_id: &str, key: &[u8; 32], hub_pubkey: &[u8; 32]) -> Result<holler_proto::WireError, String> {
-    let mut ws = connect_ws(ws_url).await;
-    let prologue = build_prologue(holler_proto::PROTOCOL_VERSION, token_id, ws_url);
-    let msg1 = HandshakeXk::initiator(key, hub_pubkey, &prologue).and_then(|mut h| h.write_message()).expect("write handshake message 1");
-    if let Err(e) = ws.send(Message::text(authenticate_request(token_id, "fault-body", ws_url, &msg1).to_string())).await {
-        return Err(format!("send failed: {e}"));
-    }
-    match tokio::time::timeout(Duration::from_secs(10), ws.next()).await {
-        Ok(Some(Ok(Message::Text(t)))) => match decode(t.as_str()) {
-            Ok(Envelope::Error { error, .. }) => Ok(error),
-            other => Err(format!("not a refusal: {other:?}")),
-        },
-        other => Err(format!("no refusal frame: {other:?}")),
-    }
-}
-
 /// A hub-fault refusal: still `-32002` with the `authentication failed:`
 /// prefix, marked `error.data.reason = "hub_unavailable"`.
 fn assert_hub_unavailable(outcome: &Result<holler_proto::WireError, String>, what: &str) {
@@ -713,11 +644,6 @@ fn assert_hub_unavailable(outcome: &Result<holler_proto::WireError, String>, wha
 fn assert_nothing_counted(state: &StateDir, what: &str) {
     let doc = hub_status_json(state);
     assert_eq!(doc["lockout"], json!({ "peers": [] }), "{what}: a hub fault must never count toward the lockout: {doc}");
-}
-
-/// The hub's JSON log lines whose `type` is `ty`.
-fn log_events(hub: &Hub, ty: &str) -> Vec<serde_json::Value> {
-    hub.log_text().lines().filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok()).filter(|v| v["type"] == ty).collect()
 }
 
 /// Issue #485, acceptance criteria 2 to 4: a hub whose `tokens.json` is

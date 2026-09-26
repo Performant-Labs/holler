@@ -144,3 +144,14 @@ addresses in hub logs are the proxy's, not the body's real origin.
 Authentication and authorization are by join token, not by source address,
 so this doesn't weaken anything — but don't expect hub logs to tell you
 where a body is actually connecting from.
+
+## A note on the failed-authentication lockout
+
+Behind any proxy, every body shares the proxy's address, so the hub counts
+failed authentications per address *and* token id. One body's bad token
+locks out only that token, and the other bodies keep connecting. A client
+that names 8 or more distinct bad token ids from one address within the
+lockout window (10 minutes by default) locks out that whole address, which
+behind a proxy means every body until the cooldown lapses. The hub never
+reads `X-Forwarded-For` or `Forwarded`, so nothing the proxy adds changes
+this.
