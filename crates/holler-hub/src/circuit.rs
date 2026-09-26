@@ -63,7 +63,7 @@ use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 use crate::live::{CancelCommand, CancelReply, LiveCommand, Registry, SayReply};
 use crate::serve::{close, close_with_code, send_error};
 use crate::state::HubState;
-use dispatch::PendingSay;
+use dispatch::{HoldGate, PendingSay, SendPromptError};
 
 /// How long the hub waits for the body's half of the hello exchange, and for
 /// the body's answer to the hub's own hello, before giving up on the socket.
@@ -318,6 +318,7 @@ pub async fn handle_authenticated<Snk, St>(
             stream,
             CommandChannels { cmd_rx: &mut cmd_rx, cancel_rx: &mut cancel_rx },
             &client_id,
+            &record.label,
             registry,
             roster,
             state,
@@ -498,6 +499,9 @@ struct SessionConnection<'a, Snk, St> {
     /// (and with priority over) `cmd_rx`.
     cancel_rx: &'a mut tokio::sync::mpsc::UnboundedReceiver<CancelCommand>,
     client_id: &'a str,
+    /// The token label this connection authenticated as: the `<label>` of
+    /// every session it hosts (the hold registry's key, issue #442).
+    label: &'a str,
     registry: &'a Registry,
     roster: &'a std::sync::Arc<crate::roster::Roster>,
     last_seen: dispatch::LastSeenFlusher,
@@ -536,6 +540,7 @@ where
         stream: &'a mut St,
         channels: CommandChannels<'a>,
         client_id: &'a str,
+        label: &'a str,
         registry: &'a Registry,
         roster: &'a std::sync::Arc<crate::roster::Roster>,
         state: &'a HubState,
@@ -548,6 +553,7 @@ where
             cmd_rx: channels.cmd_rx,
             cancel_rx: channels.cancel_rx,
             client_id,
+            label,
             registry,
             roster,
             last_seen: dispatch::LastSeenFlusher::new(state),
@@ -722,12 +728,20 @@ where
                 }
             }
             LiveCommand::Say { request_id, session, message, queue, replace, reply } => {
-                match dispatch::send_prompt(self.sink, &request_id, &session, message, queue, replace).await {
+                let key = format!("{}/{session}", self.label);
+                let gate = HoldGate { holds: self.registry.holds(), key: &key };
+                match dispatch::send_prompt(self.sink, gate, &request_id, &session, message, queue, replace).await {
                     Ok(()) => {
                         self.pending_says.insert(request_id, PendingSay { reply, updates: Vec::new() });
                         Ok(())
                     }
-                    Err(()) => {
+                    // Issue #442: a held session refuses the prompt (nothing
+                    // was sent); the connection itself is fine.
+                    Err(SendPromptError::Held(hold)) => {
+                        let _ = reply.send(SayReply::Refused(hold.refusal()));
+                        Ok(())
+                    }
+                    Err(SendPromptError::Io) => {
                         let _ = reply.send(SayReply::ConnectionLost);
                         Err(())
                     }

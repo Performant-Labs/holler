@@ -8,6 +8,16 @@ fills this file in at release time.
 ## [Unreleased]
 
 ### Enhancements
+- The hub enforces the session hold: `send_prompt`, the one place the hub sends a `session/prompt`, refuses
+  a held session with `-32011 session_held` for plain `say`, `say --queue` and `say --replace`, while the
+  running turn, turns already accepted into the body's queue, `interrupt` and `roster` are untouched. Holds
+  are kept per session name in `hub/holds.json` (atomic, mode 0600), survive a body re-join, a roster prune
+  and a hub restart, are refused for a session the hub has never seen, and fail safe on a corrupt or
+  unwritable state file. The control socket gains `control/hold` and `control/release` and `control/roster`
+  rows carry the hold fields; the CLI verbs follow in #443. `hub query TARGET` can no longer forward a
+  method other than `query/*` to a body, which closes a way to deliver a prompt around a hold
+  ([#442](https://github.com/Performant-Labs/holler/issues/442), part of
+  [#437](https://github.com/Performant-Labs/holler/issues/437)).
 - Wire vocabulary for the session hold (wire and docs half; no hub behavior yet): the new error code
   `-32011 session_held`, carrying `data.reason` (the operator's text, when given) and `data.since`
   (RFC 3339), and the additive optional roster fields `hold`, `hold_reason` and `held_since`

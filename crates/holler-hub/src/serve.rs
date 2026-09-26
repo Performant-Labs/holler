@@ -345,12 +345,15 @@ struct SharedState {
     roster: std::sync::Arc<crate::roster::Roster>,
 }
 
-fn build_shared_state() -> SharedState {
+fn build_shared_state(state: &HubState) -> SharedState {
     // The live-circuit registry (issue #182): one per hub process, shared by
     // every accepted WS connection (recording/removing itself as it
     // authenticates/disconnects) and every control-socket connection (`hub
     // token ping` reaches a body's socket through it).
-    let registry = crate::live::Registry::new();
+    // The session hold registry (issue #442) is loaded from the state dir
+    // here, so holds set before a restart are in force before the first
+    // connection is accepted.
+    let registry = crate::live::Registry::new().with_holds(crate::holds::Holds::load(state));
     // Issue #184's connection hygiene: resolved once per process (the same
     // "fixed for the hub's whole life" discipline the roster's `Config`
     // already uses), then shared by every accepted socket.
@@ -445,7 +448,7 @@ async fn serve_forever(
     let mut sig_term = signal(SignalKind::terminate()).expect("install SIGTERM handler");
 
     let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
-    let SharedState { registry, hygiene, lockout, preauth_semaphore, roster } = build_shared_state();
+    let SharedState { registry, hygiene, lockout, preauth_semaphore, roster } = build_shared_state(&state);
 
     // The roster TTL sweep task (issue #255): `Roster::sweep()` was
     // previously only exercised by the unit tests against an injected clock

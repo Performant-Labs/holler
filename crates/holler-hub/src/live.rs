@@ -260,6 +260,18 @@ impl LiveHandle {
         params: Option<Value>,
         timeout: std::time::Duration,
     ) -> Option<Result<Value, WireError>> {
+        // Issue #442: this is a generic request forward, so it must not be a
+        // second way to deliver a prompt. Only the `query/*` family and the
+        // hub's own `session/answer` (which resolves a held question, it does
+        // not start a turn) may pass; `session/prompt` goes through `say`,
+        // where the session hold is enforced.
+        if !(method.starts_with("query/") || method == "session/answer") {
+            return Some(Err(WireError::new(
+                holler_proto::Code::MethodNotFound,
+                format!("{method} cannot be forwarded to a body"),
+                None,
+            )));
+        }
         let (reply_tx, reply_rx) = oneshot::channel();
         if self
             .tx
@@ -395,6 +407,11 @@ pub struct Registry {
     /// reconnect naturally supersedes the stale offline snapshot with a live
     /// one again).
     offline: Arc<Mutex<OfflineSnapshots>>,
+    /// The session hold registry (issue #442). It rides on the registry
+    /// because every task that sends or resolves a prompt already has one;
+    /// `Registry::new()` gets an in-memory registry, the running hub swaps in
+    /// the persisted one via [`Registry::with_holds`].
+    holds: crate::holds::Holds,
 }
 
 /// The result of resolving a `hub query TARGET …` target against the live
@@ -414,6 +431,18 @@ pub enum TargetLookup {
 impl Registry {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// This registry with `holds` as its hold registry (the running hub's
+    /// persisted one, issue #442).
+    pub fn with_holds(mut self, holds: crate::holds::Holds) -> Self {
+        self.holds = holds;
+        self
+    }
+
+    /// The session hold registry (issue #442).
+    pub fn holds(&self) -> &crate::holds::Holds {
+        &self.holds
     }
 
     /// Register a newly-authenticated circuit, returning the receiver its

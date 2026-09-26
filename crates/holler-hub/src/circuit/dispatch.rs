@@ -43,28 +43,59 @@ pub(super) struct PendingSay {
     pub(super) updates: Vec<SeenUpdate>,
 }
 
+/// Why [`send_prompt`] did not send.
+pub(super) enum SendPromptError {
+    /// The session is held (issue #442): nothing was sent.
+    Held(crate::holds::HoldInfo),
+    /// The frame could not be built or the socket is gone.
+    Io,
+}
+
+/// The hold registry and the key [`send_prompt`] checks it with
+/// (`<label>/<session>`, built from the connection's own authenticated label).
+#[derive(Clone, Copy)]
+pub(super) struct HoldGate<'a> {
+    pub(super) holds: &'a crate::holds::Holds,
+    pub(super) key: &'a str,
+}
+
 /// Send a `session/prompt {session, message, queue, replace}` request to the
 /// body under `request_id`. `replace` (issue #191) is set only by
 /// `interrupt SESSION TEXT`, after the matching cancel's own `{applied:true}`
 /// — see `crate::interrupt`.
+///
+/// **This is the hub's one enforcement point for the session hold** (issue
+/// #442). It is the only function in the hub that puts a `session/prompt` on
+/// a socket, so checking here, before anything is built or sent, covers
+/// `say`, `say --queue` and `say --replace` alike; a hold checked anywhere
+/// else would be a bypass. `gate.key` is `<label>/<session>` built by the
+/// caller from the connection's own authenticated label and the session name
+/// it is about to send. The check is one synchronous map lookup with no
+/// `await`, so it is totally ordered against `hold`/`release` (see
+/// `crate::holds`). `crates/holler-cli/tests/hold_single_path_test.rs` fails
+/// if a second sender of `session/prompt` appears.
 pub(super) async fn send_prompt<Snk>(
     sink: &mut Snk,
+    gate: HoldGate<'_>,
     request_id: &str,
     session: &str,
     message: Box<holler_proto::Message>,
     queue: bool,
     replace: bool,
-) -> Result<(), ()>
+) -> Result<(), SendPromptError>
 where
     Snk: Sink<Message, Error = WsError> + Unpin,
 {
-    let cid = holler_proto::CorrelationId::parse(request_id).map_err(|_| ())?;
+    if let Some(hold) = gate.holds.check(gate.key) {
+        return Err(SendPromptError::Held(hold));
+    }
+    let cid = holler_proto::CorrelationId::parse(request_id).map_err(|_| SendPromptError::Io)?;
     let params = holler_proto::Prompt { session: session.to_string(), message: *message, meta: None, queue, replace };
-    let req = Envelope::request(&cid, "session/prompt", Some(serde_json::to_value(params).map_err(|_| ())?));
-    let text = holler_proto::encode(&req).map_err(|_| ())?;
+    let req = Envelope::request(&cid, "session/prompt", Some(serde_json::to_value(params).map_err(|_| SendPromptError::Io)?));
+    let text = holler_proto::encode(&req).map_err(|_| SendPromptError::Io)?;
     super::log_frame(super::LogDirection::Out, "session/prompt", Some(request_id), &text);
-    sink.send(Message::text(text)).await.map_err(|_| ())?;
-    sink.flush().await.map_err(|_| ())
+    sink.send(Message::text(text)).await.map_err(|_| SendPromptError::Io)?;
+    sink.flush().await.map_err(|_| SendPromptError::Io)
 }
 
 /// Send a `session/cancel {session}` request to the body under `request_id`
@@ -324,5 +355,63 @@ impl LastSeenFlusher {
                 super::log(Severity::Warn, "last_seen_touch_failed", vec![("error", e.to_string())]);
             }
         });
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)] // #442
+mod hold_tests {
+    use super::*;
+
+    /// A sink that records what is written to it and cannot fail.
+    #[derive(Default)]
+    struct Recording(Vec<Message>);
+
+    impl Sink<Message> for Recording {
+        type Error = WsError;
+        fn poll_ready(self: std::pin::Pin<&mut Self>, _: &mut std::task::Context<'_>) -> std::task::Poll<Result<(), WsError>> {
+            std::task::Poll::Ready(Ok(()))
+        }
+        fn start_send(mut self: std::pin::Pin<&mut Self>, item: Message) -> Result<(), WsError> {
+            self.0.push(item);
+            Ok(())
+        }
+        fn poll_flush(self: std::pin::Pin<&mut Self>, _: &mut std::task::Context<'_>) -> std::task::Poll<Result<(), WsError>> {
+            std::task::Poll::Ready(Ok(()))
+        }
+        fn poll_close(self: std::pin::Pin<&mut Self>, _: &mut std::task::Context<'_>) -> std::task::Poll<Result<(), WsError>> {
+            std::task::Poll::Ready(Ok(()))
+        }
+    }
+
+    fn message() -> Box<holler_proto::Message> {
+        Box::new(crate::talk::test_user_message("h-01HTESTHOLD00000000000000", "hi"))
+    }
+
+    #[tokio::test]
+    async fn a_held_session_is_refused_in_every_variant_and_nothing_is_sent() {
+        let holds = crate::holds::Holds::in_memory();
+        holds.hold("io/alpha", Some("freeze"));
+        for (queue, replace) in [(false, false), (true, false), (false, true), (true, true)] {
+            let mut sink = Recording::default();
+            let gate = HoldGate { holds: &holds, key: "io/alpha" };
+            let res = send_prompt(&mut sink, gate, "h-01HTESTHOLD00000000000000", "alpha", message(), queue, replace).await;
+            assert!(matches!(res, Err(SendPromptError::Held(ref h)) if h.reason.as_deref() == Some("freeze")), "queue={queue} replace={replace}");
+            assert!(sink.0.is_empty(), "a refused prompt must put nothing on the socket");
+        }
+    }
+
+    #[tokio::test]
+    async fn an_unheld_session_and_a_released_one_are_sent() {
+        let holds = crate::holds::Holds::in_memory();
+        holds.hold("io/alpha", None);
+        let mut sink = Recording::default();
+        // A different session is never affected.
+        let other = HoldGate { holds: &holds, key: "io/beta" };
+        assert!(send_prompt(&mut sink, other, "h-01HTESTHOLD00000000000000", "beta", message(), false, false).await.is_ok());
+        holds.release("io/alpha");
+        let gate = HoldGate { holds: &holds, key: "io/alpha" };
+        assert!(send_prompt(&mut sink, gate, "h-01HTESTHOLD00000000000001", "alpha", message(), true, false).await.is_ok());
+        assert_eq!(sink.0.len(), 2);
     }
 }

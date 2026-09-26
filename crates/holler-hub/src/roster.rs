@@ -171,6 +171,12 @@ pub struct Row {
     pub turn_id: Option<String>,
     /// The most recently completed turn (issue #142) — the `LAST TURN` column.
     pub last_turn: Option<LastTurn>,
+    /// The session hold (issue #442), filled in from the hub's hold registry
+    /// when the row is read by `control/roster`; the roster itself never holds
+    /// it (a hold belongs to the session name, not to a row). Flattened, and
+    /// absent for a session that is not held.
+    #[serde(flatten)]
+    pub hold: holler_proto::SessionHold,
 }
 
 /// The token → client-id / hostname / label binding a roster needs to
@@ -742,6 +748,7 @@ impl Inner {
             pending: s.pending.clone(),
             turn_id: s.turn_id.clone(),
             last_turn: s.last_turn.clone(),
+            hold: holler_proto::SessionHold::default(),
         }
     }
 
