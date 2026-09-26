@@ -32,7 +32,7 @@ one binary in either role.
 - **A hub that can supervise, if you want that** — an audit log and, where it matters, turn/spend
   caps, without forcing every deployment to opt in.
 - **Config, not code, for new harnesses** — pointing a `[[session]]` row at a new
-  ACP-speaking adapter needs no Holler code change or release ([ADR 0012](docs/adr/ADR-0012.md)).
+  ACP-speaking adapter needs no Holler code change or release ([ADR 0012](docs/adr/ADR-0012.md)); see [what has actually been tested](docs/compatibility.md).
 - **Composition, not a green-field protocol** — Holler doesn't reinvent agent messaging or
   interrupt semantics; it adopts ACP v2 for the body↔harness hop and stays out of the
   agent-to-agent layer. See [Where Holler fits](#where-holler-fits) below.
