@@ -788,6 +788,14 @@ pub async fn redeem_async(
         .unwrap_or(Err(RedeemError::NotFound))
 }
 
+/// `touch_last_seen` on the blocking pool (issue #419).
+pub async fn touch_last_seen_async(token_id: &str, state: &HubState) -> Result<(), TokenError> {
+    let (token_id, state) = (token_id.to_string(), state.clone());
+    tokio::task::spawn_blocking(move || touch_last_seen(&token_id, &state))
+        .await
+        .unwrap_or_else(|_| Err(TokenError::new("token store task panicked")))
+}
+
 /// `bound_record` on the blocking pool.
 pub async fn bound_record_async(token_id: &str, state: &HubState) -> Result<Record, TokenError> {
     let token_id = token_id.to_string();

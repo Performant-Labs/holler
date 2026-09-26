@@ -310,7 +310,7 @@ pub async fn handle_authenticated<Snk, St>(
     // the confirmation). A body that lies in its hello (or whose harness
     // stops resolving) simply never gets confirmed — `hub status`'s
     // `harnesses_confirmed` stays the trustworthy subset of `harnesses_known`.
-    let pending_confirms = send_confirm_probes(sink, &body_harnesses).await;
+    let pending_confirms = dispatch::send_confirm_probes(sink, &body_harnesses).await;
 
     let mut conn =
         SessionConnection::new(
@@ -320,6 +320,7 @@ pub async fn handle_authenticated<Snk, St>(
             &client_id,
             registry,
             roster,
+            state,
             pending_confirms,
         )
         .await;
@@ -328,29 +329,6 @@ pub async fn handle_authenticated<Snk, St>(
     // its own doc for the supersede race this closes.
     registry.remove_if_current(&client_id, seq).await;
     log(Severity::Warn, "conn_dropped", vec![("client_id", client_id), ("peer", peer.to_string())]);
-}
-
-/// Send one `query/support {feature: harness}` request per harness, returning
-/// the correlation id → harness map `session_loop` matches answers against.
-/// A send failure (the socket is already gone) just stops early — whatever
-/// was sent still gets a chance to be answered before the socket is
-/// discovered dead in the loop proper.
-async fn send_confirm_probes<Snk>(sink: &mut Snk, harnesses: &[String]) -> std::collections::HashMap<String, String>
-where
-    Snk: Sink<Message, Error = WsError> + Unpin,
-{
-    let mut pending = std::collections::HashMap::new();
-    for harness in harnesses {
-        let cid = holler_proto::CorrelationId::mint_hub();
-        let params = serde_json::json!({ "feature": harness });
-        let req = Envelope::request(&cid, "query/support", Some(params));
-        let text = holler_proto::encode(&req).unwrap_or_default();
-        if sink.send(Message::text(text)).await.is_err() || sink.flush().await.is_err() {
-            break;
-        }
-        pending.insert(cid.as_str().to_string(), harness.clone());
-    }
-    pending
 }
 
 /// Send a response envelope; `Err` means the socket is already gone (the
@@ -522,6 +500,7 @@ struct SessionConnection<'a, Snk, St> {
     client_id: &'a str,
     registry: &'a Registry,
     roster: &'a std::sync::Arc<crate::roster::Roster>,
+    last_seen: dispatch::LastSeenFlusher,
     roster_token: Option<String>,
     pending_ping: PendingPing,
     pending_query: PendingQuery,
@@ -551,6 +530,7 @@ where
     Snk: Sink<Message, Error = WsError> + Unpin,
     St: Stream<Item = Result<Message, WsError>> + Unpin,
 {
+    #[allow(clippy::too_many_arguments)] // #419: `state` joins the shared hub handles this connection is built from
     async fn new(
         sink: &'a mut Snk,
         stream: &'a mut St,
@@ -558,6 +538,7 @@ where
         client_id: &'a str,
         registry: &'a Registry,
         roster: &'a std::sync::Arc<crate::roster::Roster>,
+        state: &'a HubState,
         pending_confirms: std::collections::HashMap<String, String>,
     ) -> Self {
         let roster_token = registry.token_id_for_client(client_id).await;
@@ -569,6 +550,7 @@ where
             client_id,
             registry,
             roster,
+            last_seen: dispatch::LastSeenFlusher::new(state),
             roster_token,
             pending_ping: None,
             pending_query: None,
@@ -832,7 +814,7 @@ where
         }
         match &env {
             Envelope::Notification { method, params } if method == "session/presence" => {
-                dispatch::handle_presence_notification(self.client_id, params.clone(), self.registry, self.roster).await;
+                dispatch::handle_presence_notification(self.client_id, params.clone(), self.registry, self.roster, &mut self.last_seen).await;
                 Ok(())
             }
             Envelope::Notification { method, params } if method == "session/update" => {

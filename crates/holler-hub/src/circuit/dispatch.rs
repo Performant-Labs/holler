@@ -21,6 +21,8 @@ use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 
 use crate::live::{CancelReply, Registry, SayReply, SeenUpdate};
 
+use crate::state::HubState;
+
 use super::{PendingPing, PendingQuery};
 
 /// One `say` still awaiting its `session/prompt` response on this
@@ -119,6 +121,7 @@ pub(super) async fn handle_presence_notification(
     params: Option<serde_json::Value>,
     registry: &Registry,
     roster: &std::sync::Arc<crate::roster::Roster>,
+    last_seen: &mut LastSeenFlusher,
 ) {
     let Some(p) = params.and_then(|v| serde_json::from_value::<Presence>(v).ok()) else { return };
     // Clone `p.hostname` into the log line (issue #186): `roster.advertise`
@@ -132,6 +135,7 @@ pub(super) async fn handle_presence_notification(
     // returns, and this stale socket's own teardown clears its (old) token.
     if let Some(token_id) = registry.token_id_for_client(client_id).await {
         roster.advertise(&token_id, &p);
+        last_seen.beat(&token_id);
     }
     registry.set_session_count(client_id, p.sessions.len() as u32).await;
     registry.update_presence(client_id, p.sessions).await;
@@ -259,5 +263,66 @@ pub(super) fn handle_error_response(
         if let Some((_, tx)) = pending_query.take() {
             let _ = tx.send(Err(error.clone()));
         }
+    }
+}
+/// Send one `query/support {feature: harness}` request per harness, returning
+/// the correlation id → harness map `session_loop` matches answers against.
+/// A send failure (the socket is already gone) just stops early — whatever
+/// was sent still gets a chance to be answered before the socket is
+/// discovered dead in the loop proper.
+pub(super) async fn send_confirm_probes<Snk>(sink: &mut Snk, harnesses: &[String]) -> std::collections::HashMap<String, String>
+where
+    Snk: Sink<Message, Error = WsError> + Unpin,
+{
+    let mut pending = std::collections::HashMap::new();
+    for harness in harnesses {
+        let cid = holler_proto::CorrelationId::mint_hub();
+        let params = serde_json::json!({ "feature": harness });
+        let req = Envelope::request(&cid, "query/support", Some(params));
+        let text = holler_proto::encode(&req).unwrap_or_default();
+        if sink.send(Message::text(text)).await.is_err() || sink.flush().await.is_err() {
+            break;
+        }
+        pending.insert(cid.as_str().to_string(), harness.clone());
+    }
+    pending
+}
+
+/// Issue #419: how often a connection persists its token's `last_seen` (the
+/// column `hub token list` prints). The presence heartbeat repeats for the
+/// connection's whole life and every bump rewrites the whole token store under
+/// its lock, so persisting on every beat would make every connected body
+/// contend with every other one and with `mint`/`redeem`. Minute-level
+/// freshness is all an operator reading `token list` needs.
+const LAST_SEEN_FLUSH_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Per-connection throttle for persisting a bound token's `last_seen` on the
+/// presence heartbeat (issue #419).
+pub(super) struct LastSeenFlusher {
+    state: HubState,
+    flushed_at: Option<tokio::time::Instant>,
+}
+
+impl LastSeenFlusher {
+    pub(super) fn new(state: &HubState) -> Self {
+        Self { state: state.clone(), flushed_at: None }
+    }
+
+    /// Persist `token_id`'s `last_seen` unless this connection already did so
+    /// within [`LAST_SEEN_FLUSH_INTERVAL`]. Detached, so a contended token store
+    /// never stalls the connection's frame loop; a failure is logged and dropped
+    /// (the roster, not the token store, is the liveness source).
+    fn beat(&mut self, token_id: &str) {
+        let now = tokio::time::Instant::now();
+        if self.flushed_at.is_some_and(|t| now.duration_since(t) < LAST_SEEN_FLUSH_INTERVAL) {
+            return;
+        }
+        self.flushed_at = Some(now);
+        let (token_id, state) = (token_id.to_string(), self.state.clone());
+        tokio::spawn(async move {
+            if let Err(e) = crate::token::touch_last_seen_async(&token_id, &state).await {
+                super::log(Severity::Warn, "last_seen_touch_failed", vec![("error", e.to_string())]);
+            }
+        });
     }
 }

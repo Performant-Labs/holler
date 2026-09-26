@@ -35,6 +35,7 @@ fills this file in at release time.
   also has a one-line install for Claude Code.
 
 ### Bug Fixes
+- `hub token list` now shows a real `LAST_SEEN` for a bound token whose body is connected: the hub persists it on the presence heartbeat, at most once every 30 seconds per connection ([#419](https://github.com/Performant-Labs/holler/issues/419)). It was always empty before because nothing called `touch_last_seen` outside tests.
 - The `v0.2.0` release's binary assets were withdrawn because they embedded the builder's home
   directory; the release page and its notes remain. Use `v0.3.0` or later (`install.sh` and the
   Homebrew formula already do). Documentation examples that pinned `HOLLER_VERSION=v0.2.0` now

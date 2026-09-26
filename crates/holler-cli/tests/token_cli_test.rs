@@ -15,7 +15,7 @@
 
 mod support;
 
-use support::{holler_cmd, StateDir};
+use support::{holler_cmd, join, mint_token, wait_for, Body, Hub, StateDir, STARTUP_WAIT};
 use std::process::Stdio;
 
 use serde_json::Value;
@@ -237,4 +237,29 @@ fn ping_unknown_id_exit_3() {
         stdout.trim().starts_with("not_found") || stderr.contains("not_found"),
         "ping reports not_found; stdout: {stdout}, stderr: {stderr}"
     );
+}
+
+/// Issue #419: a bound token whose body is connected and heartbeating shows a
+/// real `last_seen` in `hub token list --json` (it used to stay `null` forever,
+/// because nothing outside the unit tests ever bumped it). Readiness is
+/// observed, never slept for.
+#[test]
+fn token_list_last_seen_is_set_once_a_body_heartbeats() {
+    let state = StateDir::new();
+    let hub = Hub::start(&state);
+    let (token_id, secret) = mint_token(&state, "body-1");
+    join(&state, &state, &hub.ws_url(), &token_id, &secret);
+    let config = support::write_sessions_toml(&state, &[("alpha", &[])]);
+    let _body = Body::start(&state, &config);
+
+    let last_seen = wait_for(STARTUP_WAIT, || {
+        let (code, stdout, _) = run(&state, &["--json", "hub", "token", "list"]);
+        if code != 0 {
+            return None;
+        }
+        let doc: Value = serde_json::from_str(&stdout).ok()?;
+        let row = doc["tokens"].as_array()?.iter().find(|t| t["token_id"].as_str() == Some(token_id.as_str()))?;
+        row["last_seen"].as_u64()
+    });
+    assert!(last_seen.is_some(), "a connected, heartbeating body's token must show a non-null last_seen");
 }
