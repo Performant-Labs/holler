@@ -8,6 +8,14 @@ fills this file in at release time.
 ## [Unreleased]
 
 ### Enhancements
+- `holler hold SESSION [--reason TEXT]` and `holler release SESSION` (both idempotent, both take `--json`)
+  set and lift the session hold; `holler roster` gains a `HOLD` column and `roster --json` rows carry
+  `hold`, `hold_reason` and `held_since` while a session is held. `holler say` (and `interrupt SESSION
+  TEXT`, whose redirect is a prompt) to a held session prints the reason and the since-time and exits **4**,
+  distinct from a failed say (1); with `--json` the refusal is one JSON object on stdout. Documented in
+  `docs/protocol/v2.md` §10 and the README ([#443](https://github.com/Performant-Labs/holler/issues/443),
+  part of [#437](https://github.com/Performant-Labs/holler/issues/437)). `hold --all` and a hold line in
+  `hub status` are not part of this change.
 - The hub enforces the session hold: `send_prompt`, the one place the hub sends a `session/prompt`, refuses
   a held session with `-32011 session_held` for plain `say`, `say --queue` and `say --replace`, while the
   running turn, turns already accepted into the body's queue, `interrupt` and `roster` are untouched. Holds

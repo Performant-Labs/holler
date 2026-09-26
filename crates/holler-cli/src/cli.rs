@@ -82,6 +82,10 @@ pub enum Command {
     Answer(Answer),
     /// Block until a session settles/blocks/fails/vanishes. (hub-only)
     Wait(Wait),
+    /// Refuse new work to a session until it is released. (hub-only)
+    Hold(Hold),
+    /// Lift a hold set with `hold`. (hub-only)
+    Release(Release),
 }
 
 #[derive(Subcommand, Debug)]
@@ -435,6 +439,22 @@ pub struct Interrupt {
     /// Redirect text (issue #191): cancel, then run this prompt ahead of
     /// the queue, streaming its reply exactly like `say`.
     pub text: Option<String>,
+}
+
+#[derive(Parser, Debug)]
+pub struct Hold {
+    /// Session address, <label>/<session> (or a bare <session>).
+    pub session: String,
+    /// Why the session is held; shown to whoever `say`s to it and in
+    /// `roster`. Repeating a hold keeps the original reason.
+    #[arg(long)]
+    pub reason: Option<String>,
+}
+
+#[derive(Parser, Debug)]
+pub struct Release {
+    /// Session address, <label>/<session> (or a bare <session>).
+    pub session: String,
 }
 
 #[derive(Parser, Debug)]

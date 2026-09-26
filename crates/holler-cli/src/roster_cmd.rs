@@ -64,8 +64,8 @@ fn render_table(doc: &serde_json::Value) -> String {
     }
     let mut out = String::new();
     out.push_str(&format!(
-        "{:<20} {:<10} {:<8} {:<10} {:<10} {:<8} {:<8} LAST TURN\n",
-        "SESSION", "HARNESS", "MODE", "STATE", "CONN", "HOSTNAME", "PENDING"
+        "{:<20} {:<10} {:<8} {:<10} {:<10} {:<8} {:<8} {:<20} HOLD\n",
+        "SESSION", "HARNESS", "MODE", "STATE", "CONN", "HOSTNAME", "PENDING", "LAST TURN"
     ));
     for row in &rows {
         let pending = row
@@ -74,7 +74,7 @@ fn render_table(doc: &serde_json::Value) -> String {
             .map(|items| items.len().to_string())
             .unwrap_or_else(|| "-".into());
         out.push_str(&format!(
-            "{:<20} {:<10} {:<8} {:<10} {:<10} {:<8} {:<8} {}\n",
+            "{:<20} {:<10} {:<8} {:<10} {:<10} {:<8} {:<8} {:<20} {}\n",
             row.get("name").and_then(|v| v.as_str()).unwrap_or("-"),
             row.get("harness").and_then(|v| v.as_str()).unwrap_or("-"),
             row.get("mode").and_then(|v| v.as_str()).unwrap_or("-"),
@@ -82,7 +82,8 @@ fn render_table(doc: &serde_json::Value) -> String {
             row.get("conn_state").and_then(|v| v.as_str()).unwrap_or("-"),
             row.get("hostname").and_then(|v| v.as_str()).unwrap_or("-"),
             pending,
-            last_turn_display(row.get("last_turn"))
+            last_turn_display(row.get("last_turn")),
+            hold_display(row)
         ));
     }
     out
@@ -106,4 +107,24 @@ fn last_turn_display(last_turn: Option<&serde_json::Value>) -> String {
         .map(|secs| if secs < 60 { format!("{secs}s ago") } else { format!("{}m ago", secs / 60) })
         .unwrap_or_else(|| "-".to_string());
     format!("{state} {stop_reason} {age}")
+}
+
+/// The `HOLD` column (issue #443): `-` for a session that is not held, else
+/// `held <age> ago` and the operator's reason when there is one. The row's
+/// `hold` / `hold_reason` / `held_since` fields are absent unless held;
+/// `--json` carries the exact since-time.
+fn hold_display(row: &serde_json::Value) -> String {
+    if row.get("hold").and_then(|v| v.as_bool()) != Some(true) {
+        return "-".to_string();
+    }
+    let age = row
+        .get("held_since")
+        .and_then(|v| v.as_str())
+        .and_then(holler_hub::roster::parse_rfc3339_secs_since)
+        .map(|secs| if secs < 60 { format!("{secs}s ago") } else { format!("{}m ago", secs / 60) })
+        .unwrap_or_else(|| "-".to_string());
+    match row.get("hold_reason").and_then(|v| v.as_str()) {
+        Some(reason) => format!("held {age}: {reason}"),
+        None => format!("held {age}"),
+    }
 }

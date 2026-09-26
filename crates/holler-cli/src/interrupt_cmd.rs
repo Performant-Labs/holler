@@ -50,6 +50,10 @@ pub fn run(interrupt: &Interrupt, json: bool) -> InterruptResult {
             err(format!("no live holler hub reachable at {}", state_root.display()), 1)
         }
         Err(holler_hub::control::ControlError::Refused(e)) => {
+            if crate::hold_cmd::is_held(&e) {
+                let (message, to_stderr) = crate::hold_cmd::held_refusal(&interrupt.session, &e, json);
+                return InterruptResult { message, to_stderr, exit_code: crate::hold_cmd::HELD_EXIT_CODE };
+            }
             let is_ambiguous = e.data.as_ref().and_then(|d| d.reason.as_deref()) == Some("ambiguous");
             err(e.message.clone(), if is_ambiguous { 2 } else { 1 })
         }
