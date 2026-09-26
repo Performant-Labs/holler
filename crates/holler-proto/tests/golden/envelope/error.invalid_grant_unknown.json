@@ -1,0 +1,12 @@
+{
+  "error": {
+    "code": -32012,
+    "data": {
+      "code": "invalid_grant",
+      "reason": "unknown"
+    },
+    "message": "unknown grant"
+  },
+  "id": "h-01HTESTGOLDEN000000000000",
+  "jsonrpc": "2.0"
+}

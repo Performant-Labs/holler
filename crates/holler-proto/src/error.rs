@@ -42,6 +42,7 @@ pub enum Code {
     SessionBusy,
     NothingPending,
     SessionHeld,
+    InvalidGrant,
 }
 
 impl Code {
@@ -49,7 +50,7 @@ impl Code {
     ///
     /// The codec and tests iterate this to assert uniqueness and range over
     /// the one source of truth (there is no separate table to check).
-    pub const ALL: [Code; 16] = [
+    pub const ALL: [Code; 17] = [
         Code::ParseError,
         Code::InvalidRequest,
         Code::MethodNotFound,
@@ -66,6 +67,7 @@ impl Code {
         Code::SessionBusy,
         Code::NothingPending,
         Code::SessionHeld,
+        Code::InvalidGrant,
     ];
 
     /// The JSON-RPC numeric code for this Holler code (docs §8).
@@ -88,6 +90,7 @@ impl Code {
             Code::SessionBusy => -32009,
             Code::NothingPending => -32010,
             Code::SessionHeld => -32011,
+            Code::InvalidGrant => -32012,
         }
     }
 
@@ -111,6 +114,7 @@ impl Code {
             Code::SessionBusy => "session_busy",
             Code::NothingPending => "nothing_pending",
             Code::SessionHeld => "session_held",
+            Code::InvalidGrant => "invalid_grant",
         }
     }
 
@@ -150,6 +154,11 @@ pub struct ErrorData {
     /// reason, if any, rides in `reason` like every other refusal's.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub since: Option<String>,
+    /// `session_held` only (issue #460): which hold is refusing, `operator`
+    /// (`holler hold`) or `default` (the session joined held). Absent on a
+    /// refusal from a hub that predates default holds, which means `operator`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hold_kind: Option<String>,
 }
 
 /// The JSON-RPC `error` object (docs §8 / JSON-RPC 2.0 §6).
@@ -189,6 +198,7 @@ impl Error {
                 turn_age_ms: None,
                 last_update_age_ms: None,
                 since: None,
+                hold_kind: None,
             })),
         }
     }
@@ -207,6 +217,7 @@ impl Error {
                 turn_age_ms: Some(turn_age_ms),
                 last_update_age_ms: Some(last_update_age_ms),
                 since: None,
+                hold_kind: None,
             })),
         }
     }
@@ -241,8 +252,33 @@ impl Error {
                 turn_age_ms: None,
                 last_update_age_ms: None,
                 since: Some(since.to_owned()),
+                hold_kind: None,
             })),
         }
+    }
+}
+
+impl Error {
+    /// This `session_held` refusal, naming which hold is refusing (issue #460):
+    /// `operator` or `default`.
+    pub fn with_hold_kind(mut self, kind: &str) -> Self {
+        if let Some(d) = self.data.as_mut() {
+            d.hold_kind = Some(kind.to_owned());
+        }
+        self
+    }
+
+    /// Build a `-32012 invalid_grant` refusal (issue #460): `say --grant ID`
+    /// carried a grant the hub will not honour. `reason` is one of `unknown`,
+    /// `expired`, `used` or `other_session`.
+    pub fn invalid_grant(reason: &'static str) -> Self {
+        let message = match reason {
+            "expired" => "grant has expired",
+            "used" => "grant has already been used",
+            "other_session" => "grant was issued for a different session",
+            _ => "unknown grant",
+        };
+        Self::new(Code::InvalidGrant, message, Some(reason))
     }
 }
 
@@ -260,6 +296,7 @@ impl From<Code> for Error {
                 turn_age_ms: None,
                 last_update_age_ms: None,
                 since: None,
+                hold_kind: None,
             })),
         }
     }

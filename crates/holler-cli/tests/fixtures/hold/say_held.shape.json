@@ -2,5 +2,6 @@
   "error": "string",
   "session": "string",
   "reason": "string",
-  "since": "string"
+  "since": "string",
+  "hold_kind": "string"
 }

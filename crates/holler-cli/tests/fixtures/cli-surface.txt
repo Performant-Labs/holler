@@ -14,6 +14,9 @@
 hub serve |
 hub serve | --listen 127.0.0.1:41807
 hub serve | --listen 127.0.0.1:41807 --listen [::1]:41807 --advertise hub.example.ts.net:443
+hub serve | --join-held
+hub serve | --join-held --listen 127.0.0.1:41807
+hub serve | --join-held io/* --join-held ops/worker-?
 hub token mint | --label io
 hub token mint | --label io --ttl 2h --json
 hub token list |
@@ -44,6 +47,7 @@ roster | --prefix io/ --all --json
 say | io/alpha "reply with the word ALPHA"
 say | alpha "hi" --timeout 30s --json
 say | io/alpha "hi" --queue
+say | io/alpha "hi" --grant gnt_0123456789abcdef0123456789abcdef --json
 interrupt | io/alpha
 interrupt | io/alpha "stop; do X instead"
 answer | io/alpha yes
@@ -58,6 +62,8 @@ hold | io/alpha --reason "deploy freeze"
 hold | io/alpha --reason "deploy freeze" --json
 release | io/alpha
 release | io/alpha --json
+release | io/alpha --once
+release | io/alpha --once --ttl 30s --json
 
 # --- body ------------------------------------------------------------------
 body join | --server wss://hub.example.ts.net --token tok_7f3a:hlr_join_x --hub-key aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa

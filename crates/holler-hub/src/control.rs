@@ -120,10 +120,22 @@ pub fn query_remote(
 /// small fixed margin for the control-socket round trip itself, since the
 /// hub's own exchange already applies `timeout` to the live socket wait.
 pub fn say(session: &str, text: &str, queue: bool, timeout: std::time::Duration) -> Result<serde_json::Value, ControlError> {
+    say_with(session, text, queue, None, timeout)
+}
+
+/// [`say`], presenting a one-time release grant (issue #460: `say --grant`).
+pub fn say_with(
+    session: &str,
+    text: &str,
+    queue: bool,
+    grant: Option<&str>,
+    timeout: std::time::Duration,
+) -> Result<serde_json::Value, ControlError> {
     let params = serde_json::json!({
         "session": session,
         "text": text,
         "queue": queue,
+        "grant": grant,
         "timeout_ms": u64::try_from(timeout.as_millis()).unwrap_or(u64::MAX),
     });
     exchange_with_timeout("b-say", "control/say", Some(params), timeout + std::time::Duration::from_secs(5))
@@ -259,14 +271,50 @@ pub fn say_at(
     queue: bool,
     timeout: std::time::Duration,
 ) -> Result<serde_json::Value, ControlError> {
+    say_with_at(state_root, session, text, queue, None, timeout)
+}
+
+/// [`say_at`], presenting a one-time release grant (issue #460).
+pub fn say_with_at(
+    state_root: &std::path::Path,
+    session: &str,
+    text: &str,
+    queue: bool,
+    grant: Option<&str>,
+    timeout: std::time::Duration,
+) -> Result<serde_json::Value, ControlError> {
     let path = control_sock_path(&HubState::from_root(state_root.to_path_buf()));
     let params = serde_json::json!({
         "session": session,
         "text": text,
         "queue": queue,
+        "grant": grant,
         "timeout_ms": u64::try_from(timeout.as_millis()).unwrap_or(u64::MAX),
     });
     send_over(&path, "b-say", "control/say", Some(params), timeout + std::time::Duration::from_secs(5))
+}
+
+/// `holler release SESSION --once [--ttl DURATION]` (issue #460): mint a
+/// one-time release grant for exactly one prompt to `session`. `ttl` of `None`
+/// is the hub's default (60 s). Returns `{session, grant, ttl_ms,
+/// default_held, operator_held}`.
+pub fn release_once(session: &str, ttl: Option<std::time::Duration>) -> Result<serde_json::Value, ControlError> {
+    exchange("b-release", "control/release", Some(release_once_params(session, ttl)))
+}
+
+/// [`release_once`] against an explicit state root (see [`hold_at`]).
+pub fn release_once_at(
+    state_root: &std::path::Path,
+    session: &str,
+    ttl: Option<std::time::Duration>,
+) -> Result<serde_json::Value, ControlError> {
+    let path = control_sock_path(&HubState::from_root(state_root.to_path_buf()));
+    send_over(&path, "b-release", "control/release", Some(release_once_params(session, ttl)), CLIENT_TIMEOUT)
+}
+
+fn release_once_params(session: &str, ttl: Option<std::time::Duration>) -> serde_json::Value {
+    let ttl_ms = ttl.map(|d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX));
+    serde_json::json!({ "session": session, "once": true, "ttl_ms": ttl_ms })
 }
 
 /// [`interrupt`] against an explicit state root (see [`hold_at`]).

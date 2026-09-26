@@ -114,6 +114,9 @@ pub enum LiveCommand {
         /// only after the hub has itself observed the matching cancel's
         /// `{applied:true}`.
         replace: bool,
+        /// A one-time release grant id (issue #460), presented by `say
+        /// --grant`; checked and consumed by the session hold.
+        grant: Option<String>,
         reply: oneshot::Sender<SayReply>,
     },
     /// Issue #192's `control/test_drop` test hook: forcibly end this
@@ -187,6 +190,18 @@ pub struct SeenUpdate {
     pub ts: String,
     pub seq: u64,
     pub parts: Vec<holler_proto::Part>,
+}
+
+/// The delivery options of one [`LiveHandle::say`] (bundled to keep its
+/// argument count under the workspace's clippy limit).
+#[derive(Default)]
+pub struct SayOpts {
+    /// `say --queue`.
+    pub queue: bool,
+    /// `interrupt SESSION TEXT`'s redirect.
+    pub replace: bool,
+    /// A one-time release grant id (issue #460).
+    pub grant: Option<String>,
 }
 
 /// How a [`LiveCommand::Say`] resolved.
@@ -293,12 +308,12 @@ impl LiveHandle {
         request_id: String,
         session: String,
         message: Box<Message>,
-        queue: bool,
-        replace: bool,
+        opts: SayOpts,
         timeout: std::time::Duration,
     ) -> Option<SayReply> {
         let (reply_tx, reply_rx) = oneshot::channel();
-        let cmd = LiveCommand::Say { request_id, session, message, queue, replace, reply: reply_tx };
+        let SayOpts { queue, replace, grant } = opts;
+        let cmd = LiveCommand::Say { request_id, session, message, queue, replace, grant, reply: reply_tx };
         if self.tx.send(cmd).is_err() {
             return None;
         }

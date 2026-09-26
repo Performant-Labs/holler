@@ -262,7 +262,8 @@ async fn say(cid: &holler_proto::CorrelationId, obj: &serde_json::Value, registr
     let timeout = std::time::Duration::from_millis(timeout_ms);
 
     let state = HubState::from_root(resolve_state_dir().unwrap_or_default());
-    match crate::talk::say(registry, roster, &state, session, text, queue, timeout).await {
+    let grant = params.and_then(|p| p.get("grant")).and_then(|v| v.as_str());
+    match crate::talk::say(registry, roster, &state, crate::talk::SayArgs { session, text, queue, grant, timeout }).await {
         Ok(outcome) => encode_response(cid, serde_json::json!({
             "session": outcome.session,
             "stop_reason": outcome.stop_reason,

@@ -178,7 +178,9 @@ fn error_table_codes_are_unique_and_in_range() {
             assert_eq!(c.jsonrpc(), -32602);
         } else if data_code.starts_with("parse_error") {
             assert_eq!(c.jsonrpc(), -32700);
-        } else if data_code.starts_with("invalid") {
+        } else if data_code == "invalid_request" {
+            // Exact match (not a prefix): `invalid_grant` (issue #460) is an
+            // application code, not the JSON-RPC `-32600`.
             assert_eq!(c.jsonrpc(), -32600);
         } else if data_code.starts_with("method") {
             assert_eq!(c.jsonrpc(), -32601);
@@ -296,6 +298,31 @@ fn session_held_error_carries_reason_and_since() {
     assert_eq!(e, &WireError::session_held(Some("deploy freeze"), "2026-09-08T12:00:00Z"));
 }
 
+/// Issue #460: a refusal names which hold is refusing, and `-32012
+/// invalid_grant` carries why the grant was not honoured.
+#[test]
+fn session_held_names_its_kind_and_invalid_grant_names_its_reason() {
+    let held = WireError::session_held(Some("held on join"), "2026-09-08T12:00:00Z").with_hold_kind("default");
+    let v = serde_json::to_value(&held).unwrap();
+    assert_eq!(v["data"]["hold_kind"], serde_json::json!("default"));
+    // Absent when not set: an error from a hub that predates default holds is unchanged.
+    let plain = serde_json::to_value(WireError::session_held(None, "2026-09-08T12:00:00Z")).unwrap();
+    assert!(plain["data"].get("hold_kind").is_none());
+
+    for reason in ["unknown", "expired", "used", "other_session"] {
+        let e = WireError::invalid_grant(reason);
+        assert_eq!(e.code, -32012);
+        assert_eq!(e.data.as_ref().unwrap().code, "invalid_grant");
+        assert_eq!(e.data.as_ref().unwrap().reason.as_deref(), Some(reason));
+        let back = decode(&encode(&Envelope::Error { id: Some("h-01HTEST00000000000000000004".into()), error: e.clone() }).unwrap()).unwrap();
+        assert_eq!(back.error().unwrap(), &e);
+    }
+    // Each reason has its own message.
+    let msgs: std::collections::BTreeSet<_> =
+        ["unknown", "expired", "used", "other_session"].iter().map(|r| WireError::invalid_grant(r).message).collect();
+    assert_eq!(msgs.len(), 4);
+}
+
 /// A hold set without a reason: `data.reason` is absent (never an empty
 /// string) and the message is the bare "session is held".
 #[test]
@@ -340,6 +367,7 @@ fn foreign_jsonrpc_error_decodes() {
 #[case::session_busy(Code::SessionBusy)]
 #[case::nothing_pending(Code::NothingPending)]
 #[case::session_held(Code::SessionHeld)]
+#[case::invalid_grant(Code::InvalidGrant)]
 fn every_code_round_trips_through_wire(#[case] code: Code) {
     let env = Envelope::Error {
         id: None,

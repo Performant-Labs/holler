@@ -154,6 +154,13 @@ pub struct Serve {
     /// Address (host[:port]) to advertise to bodies.
     #[arg(long)]
     pub advertise: Option<String>,
+    /// Make sessions join *held* (issue #460): new work is refused until a
+    /// one-time grant (`release --once`) or a plain `release` lifts it. With
+    /// no value every session joins held; with GLOB (`*` and `?`, matched
+    /// against `<label>/<session>`) only matching sessions do. May be given
+    /// more than once. Off by default.
+    #[arg(long, value_name = "GLOB", num_args = 0..=1, default_missing_value = "*")]
+    pub join_held: Vec<String>,
 }
 
 #[derive(Parser, Debug)]
@@ -430,6 +437,10 @@ pub struct Say {
     /// `session_busy`.
     #[arg(long)]
     pub queue: bool,
+    /// A one-time release grant from `release --once` (issue #460): lets this
+    /// one prompt through a session that joined held.
+    #[arg(long, value_name = "ID")]
+    pub grant: Option<String>,
 }
 
 #[derive(Parser, Debug)]
@@ -455,6 +466,16 @@ pub struct Hold {
 pub struct Release {
     /// Session address, <label>/<session> (or a bare <session>).
     pub session: String,
+    /// Instead of lifting the hold, lift it for exactly one prompt: prints a
+    /// grant id, and only `say --grant ID` gets through while it is live. The
+    /// session is held again the moment that prompt is accepted, or when the
+    /// grant expires. It lifts a default hold (a session that joined held);
+    /// an operator hold (`hold`) still refuses.
+    #[arg(long)]
+    pub once: bool,
+    /// How long an unused grant stays valid (default 60s; e.g. 30s, 5m).
+    #[arg(long, requires = "once")]
+    pub ttl: Option<String>,
 }
 
 #[derive(Parser, Debug)]

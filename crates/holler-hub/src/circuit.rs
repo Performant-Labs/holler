@@ -727,9 +727,9 @@ where
                     Err(()) => Err(()),
                 }
             }
-            LiveCommand::Say { request_id, session, message, queue, replace, reply } => {
+            LiveCommand::Say { request_id, session, message, queue, replace, grant, reply } => {
                 let key = crate::holds::session_key(self.label, &session);
-                let gate = HoldGate { holds: self.registry.holds(), key: &key };
+                let gate = HoldGate { holds: self.registry.holds(), key: &key, grant: grant.as_deref() };
                 match dispatch::send_prompt(self.sink, gate, &request_id, &session, message, queue, replace).await {
                     Ok(()) => {
                         self.pending_says.insert(request_id, PendingSay { reply, updates: Vec::new() });
@@ -737,8 +737,8 @@ where
                     }
                     // Issue #442: a held session refuses the prompt (nothing
                     // was sent); the connection itself is fine.
-                    Err(SendPromptError::Held(hold)) => {
-                        let _ = reply.send(SayReply::Refused(hold.refusal()));
+                    Err(SendPromptError::Refused(err)) => {
+                        let _ = reply.send(SayReply::Refused(err));
                         Ok(())
                     }
                     Err(SendPromptError::Io) => {
@@ -828,7 +828,7 @@ where
         }
         match &env {
             Envelope::Notification { method, params } if method == "session/presence" => {
-                dispatch::handle_presence_notification(self.client_id, params.clone(), self.registry, self.roster, &mut self.last_seen).await;
+                dispatch::handle_presence_notification(self.client_id, params.clone(), self.label, self.registry, self.roster, &mut self.last_seen).await;
                 Ok(())
             }
             Envelope::Notification { method, params } if method == "session/update" => {

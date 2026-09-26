@@ -29,7 +29,7 @@ fn err(message: String, exit_code: i32) -> SayResult {
 /// Parse a `<number><s|m|h>` duration (the `say --timeout` grammar). `None`
 /// on anything else — the call site fails closed (exit 3) on `None`, same
 /// discipline as `main.rs`'s own `parse_ttl`.
-fn parse_duration(s: &str) -> Option<Duration> {
+pub(crate) fn parse_duration(s: &str) -> Option<Duration> {
     let digits: &str = s.split(|c: char| !c.is_ascii_digit()).next()?;
     if digits.is_empty() {
         return None;
@@ -118,7 +118,7 @@ pub fn run(say: &Say, json: bool) -> SayResult {
         Err(msg) => return err(msg, 3),
     };
     let state_root = holler_hub::state::resolve_state_dir().unwrap_or_default();
-    match holler_hub::control::say(&say.session, &text, say.queue, timeout) {
+    match holler_hub::control::say_with(&say.session, &text, say.queue, say.grant.as_deref(), timeout) {
         Ok(doc) => {
             if json {
                 ok(doc.to_string())
@@ -139,6 +139,10 @@ pub fn run(say: &Say, json: bool) -> SayResult {
             if crate::hold_cmd::is_held(&e) {
                 let (message, to_stderr) = crate::hold_cmd::held_refusal(&say.session, &e, json);
                 return SayResult { message, to_stderr, exit_code: crate::hold_cmd::HELD_EXIT_CODE };
+            }
+            if crate::hold_cmd::is_invalid_grant(&e) {
+                let (message, to_stderr) = crate::hold_cmd::invalid_grant_refusal(&say.session, &e, json);
+                return SayResult { message, to_stderr, exit_code: crate::hold_cmd::INVALID_GRANT_EXIT_CODE };
             }
             let message = if e.code == holler_proto::Code::SessionBusy.jsonrpc() {
                 busy_hint(&say.session, &e)

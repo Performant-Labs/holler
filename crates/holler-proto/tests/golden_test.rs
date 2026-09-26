@@ -125,6 +125,13 @@ fn session_held_error_frames_match_golden() {
         let env = Envelope::Error { id: Some(id()), error: WireError::session_held(reason, "2026-09-08T12:00:00Z") };
         assert_golden(&format!("envelope/{file}"), &encode(&env).unwrap());
     }
+    // Issue #460: the refusal names its kind, and a grant refusal names why.
+    let kinded = WireError::session_held(Some("held on join"), "2026-09-08T12:00:00Z").with_hold_kind("default");
+    assert_golden("envelope/error.session_held_default.json", &encode(&Envelope::Error { id: Some(id()), error: kinded }).unwrap());
+    for reason in ["unknown", "expired", "used", "other_session"] {
+        let env = Envelope::Error { id: Some(id()), error: WireError::invalid_grant(reason) };
+        assert_golden(&format!("envelope/error.invalid_grant_{reason}.json"), &encode(&env).unwrap());
+    }
 }
 
 /// A roster row's hold fields (issue #441) are flattened into the hub's row:
@@ -259,6 +266,8 @@ fn docs_instances() -> Vec<(&'static str, Value)> {
         ("AuthOk", serde_json::to_value(AuthOk { ok: true }).unwrap()),
         ("SessionHold.held", serde_json::to_value(SessionHold::held(Some("deploy freeze".into()), "2026-09-08T12:00:00Z".into())).unwrap()),
         ("SessionHold.held_no_reason", serde_json::to_value(SessionHold::held(None, "2026-09-08T12:00:00Z".into())).unwrap()),
+        ("SessionHold.held_default", serde_json::to_value(SessionHold::held(Some("held on join".into()), "2026-09-08T12:00:00Z".into()).of_kind("default")).unwrap()),
+        ("SessionHold.held_operator_over_default", serde_json::to_value({ let mut h = SessionHold::held(Some("deploy freeze".into()), "2026-09-08T12:00:00Z".into()).of_kind("operator"); h.hold_default = true; h }).unwrap()),
         ("SessionHold.not_held", serde_json::to_value(SessionHold::default()).unwrap()),
         ("PingAck", serde_json::to_value(PingAck { hostname: "kiwi".into(), ts: 1_757_000_000_000 }).unwrap()),
     ]

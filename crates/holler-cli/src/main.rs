@@ -72,6 +72,15 @@ fn print_leaf_result_and_exit(message: &str, to_stderr: bool, exit_code: i32, ne
     std::process::exit(exit_code);
 }
 
+/// [`print_leaf_result_and_exit`] for `hold`/`release`, which can also carry a
+/// warning to stderr alongside a success.
+fn print_hold_result_and_exit(result: &holler_cli::hold_cmd::HoldResult) -> ! {
+    if let Some(w) = &result.warning {
+        eprintln!("warning: {w}");
+    }
+    print_leaf_result_and_exit(&result.message, result.to_stderr, result.exit_code, true)
+}
+
 fn main() {
     // Install the rustls crypto provider before any I/O: a `wss://` (TLS)
     // WebSocket needs a process-global provider set up ahead of the first
@@ -127,6 +136,7 @@ fn main() {
                 std::process::exit(holler_hub::serve::run(
                     &serve.listen,
                     serve.advertise.as_deref(),
+                    &serve.join_held,
                 ));
             }
             HubCommand::Status(_) => {
@@ -208,11 +218,11 @@ fn main() {
     }
     if let Command::Hold(hold) = &cli.command {
         let result = holler_cli::hold_cmd::hold(hold, cli.json);
-        print_leaf_result_and_exit(&result.message, result.to_stderr, result.exit_code, true);
+        print_hold_result_and_exit(&result);
     }
     if let Command::Release(release) = &cli.command {
         let result = holler_cli::hold_cmd::release(release, cli.json);
-        print_leaf_result_and_exit(&result.message, result.to_stderr, result.exit_code, true);
+        print_hold_result_and_exit(&result);
     }
     if let Command::Wait(wait) = &cli.command {
         let result = holler_cli::wait_cmd::run(wait, cli.json);

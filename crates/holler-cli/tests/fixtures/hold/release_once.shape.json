@@ -1,0 +1,7 @@
+{
+  "session": "string",
+  "grant": "string",
+  "ttl_ms": "number",
+  "default_held": "bool",
+  "operator_held": "bool"
+}
