@@ -257,9 +257,29 @@ jobs:
 
       # 5. Clippy over the whole workspace, including test/bench targets —
       # a `#[cfg(test)]`-only lint violation must fail CI too.
+      #
+      # The self-hosted Linux runner keeps its build directory between runs,
+      # and a run cancelled mid-build can leave a half-written dependency-info
+      # file that only surfaces here, as `could not parse/generate dep info`
+      # (issue #492; seen on two unrelated PRs and cleared by a re-run). That
+      # one error, and only that one, is retried once from a clean build
+      # directory. Every other failure, including every real lint, fails the
+      # step on the first attempt.
       - name: Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
-        shell: pwsh
+        run: |
+          set -o pipefail
+          log="$(mktemp)"
+          if cargo clippy --workspace --all-targets -- -D warnings 2>&1 | tee "$log"; then
+            exit 0
+          fi
+          if grep -q 'could not parse/generate dep info' "$log"; then
+            echo "::warning::build directory corrupted (issue #492): cleaning it and retrying Clippy once"
+            cargo clean
+            cargo clippy --workspace --all-targets -- -D warnings
+          else
+            exit 1
+          fi
+        shell: bash
 
       # 6. Docs: docs_cli_test.rs parses every `holler …` command shown in
       # README.md and docs/**/*.md against the real CLI and fails if one no
