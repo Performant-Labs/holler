@@ -150,3 +150,43 @@ mod status_sessions_wire_tests {
         assert!(serde_json::from_value::<Status>(wire).is_err());
     }
 }
+
+mod admin_role_wire_test {
+    //! #508/#509 (remote hub-admin client, epic #506) AC 2: `HelloRole::
+    //! Admin` must serialize as `"admin"` and round-trip through `Hello`.
+    //! Written against the wire form only (never `HelloRole::Admin` itself,
+    //! which does not exist on current `main`) so this test compiles today
+    //! and fails on the real assertion — not a compile error — exactly the
+    //! Tier-2 rule this stack's `CLAUDE.md` states: "RED means the new test
+    //! fails on an assertion about the missing behavior, not on a compile
+    //! error."
+    use holler_proto::docs::Hello;
+
+    fn admin_hello_wire() -> serde_json::Value {
+        serde_json::json!({
+            "protocol": holler_proto::PROTOCOL_VERSION,
+            "protocol_min": holler_proto::PROTOCOL_MIN,
+            "protocol_max": holler_proto::PROTOCOL_MAX,
+            "role": "admin",
+            "hostname": "admin-client",
+            "features": [],
+        })
+    }
+
+    /// AC 2: a `circuit/hello` document with `role: "admin"` must
+    /// deserialize into a `Hello` (today it fails: `"admin"` is not a
+    /// `HelloRole` variant, so `serde_json::from_value` errors with
+    /// "unknown variant `admin`, expected `body` or `hub`").
+    #[test]
+    fn hello_role_admin_deserializes() {
+        let hello: Hello = serde_json::from_value(admin_hello_wire()).expect(
+            "AC 2: `role: \"admin\"` must deserialize into `Hello` once `HelloRole::Admin` exists; \
+             on current main this fails because `admin` is not a known `HelloRole` variant",
+        );
+        assert_eq!(
+            serde_json::to_value(&hello).unwrap()["role"],
+            serde_json::json!("admin"),
+            "AC 2: the role must round-trip back out as the wire string \"admin\""
+        );
+    }
+}

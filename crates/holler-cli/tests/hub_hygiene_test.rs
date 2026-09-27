@@ -28,8 +28,8 @@ use tokio_tungstenite::tungstenite::Message;
 
 mod support;
 use support::raw_ws::{
-    authenticate_expecting_bare_close, authenticate_once, authenticate_request, connect_ws, decode_next, hub_x25519_pubkey, log_events,
-    wait_for_close, WsClient,
+    authenticate_expecting_bare_close, authenticate_once, authenticate_request, connect_ws, decode_next, go_live, hub_x25519_pubkey, log_events,
+    send_authenticate, wait_for_close,
 };
 use support::{holler_cmd, hub_status_json, wait_for, Hub, StateDir, STARTUP_WAIT};
 
@@ -73,89 +73,9 @@ fn mint_and_redeem_keeping_secret(state: &StateDir, label: &str) -> (String, [u8
     (minted.record.token_id, x25519_secret_bytes, minted.secret)
 }
 
-/// Run the `circuit/authenticate` → `circuit/prove` Noise XK handshake
-/// (issue #338) and read back the final answer. `Ok(())` is `{ok:true}`;
-/// `Err(WireError)` is the hub's refusal at either step (still followed by a
-/// close in every case — the caller decides whether to keep draining).
-/// `advertised_url` is bound into the handshake's prologue — real callers
-/// here always use the hub's own `ws://` URL (there is no MITM/relay in this
-/// test's topology, only good/bad-key scenarios).
-async fn send_authenticate(
-    ws: &mut WsClient,
-    token_id: &str,
-    body_x25519_secret: &[u8; 32],
-    hub_x25519_pubkey: &[u8; 32],
-    hostname: &str,
-    advertised_url: &str,
-) -> Result<(), holler_proto::WireError> {
-    let prologue = build_prologue(holler_proto::PROTOCOL_VERSION, token_id, advertised_url);
-    let mut handshake = HandshakeXk::initiator(body_x25519_secret, hub_x25519_pubkey, &prologue).expect("build noise initiator");
-    let msg1 = handshake.write_message().expect("write handshake message 1");
-
-    let req = authenticate_request(token_id, hostname, advertised_url, &msg1);
-    ws.send(Message::text(req.to_string())).await.expect("send circuit/authenticate");
-    let env = decode_next(ws).await.expect("an answer to circuit/authenticate");
-    let msg2_hex = match env {
-        Envelope::Response { result, .. } => result
-            .and_then(|v| v.get("message").and_then(|n| n.as_str()).map(String::from))
-            .expect("circuit/authenticate result carries a noise handshake message"),
-        Envelope::Error { error, .. } => return Err(error),
-        other => panic!("unexpected reply to circuit/authenticate: {other:?}"),
-    };
-    let msg2 = hex::decode(&msg2_hex).expect("hex-decode handshake message 2");
-    handshake.read_message(&msg2).expect("process handshake message 2");
-    let msg3 = handshake.write_message().expect("write handshake message 3");
-
-    let prove = json!({
-        "jsonrpc": "2.0",
-        "id": "b-prove1",
-        "method": "circuit/prove",
-        "params": { "token_id": token_id, "message": hex::encode(msg3) },
-    });
-    ws.send(Message::text(prove.to_string())).await.expect("send circuit/prove");
-    let env = decode_next(ws).await.expect("an answer to circuit/prove");
-    match env.error() {
-        Some(e) => Err(e.clone()),
-        None => Ok(()),
-    }
-}
-
-/// The bidirectional `circuit/hello` exchange a live body runs right after a
-/// successful `circuit/authenticate` (see `circuit::hello_exchange`): send
-/// ours, read the hub's answer, then answer the hub's own hello request with
-/// `{}`. Panics (test failure) if either half does not arrive.
-async fn run_hello(ws: &mut WsClient, hostname: &str) {
-    let hello = json!({
-        "jsonrpc": "2.0",
-        "id": "b-hello1",
-        "method": "circuit/hello",
-        "params": {
-            "protocol": holler_proto::PROTOCOL_VERSION,
-            "protocol_min": holler_proto::PROTOCOL_MIN,
-            "protocol_max": holler_proto::PROTOCOL_MAX,
-            "role": "body", "hostname": hostname, "harnesses": [],
-        },
-    });
-    ws.send(Message::text(hello.to_string())).await.expect("send circuit/hello");
-    let _ = decode_next(ws).await.expect("the hub's answer to our circuit/hello");
-
-    // The hub's own half: a request we must answer with `{}`.
-    let hub_hello = decode_next(ws).await.expect("the hub's own circuit/hello request");
-    let Envelope::Request { id, .. } = hub_hello else {
-        panic!("expected the hub's circuit/hello request, got {hub_hello:?}");
-    };
-    let ack = json!({ "jsonrpc": "2.0", "id": id, "result": {} });
-    ws.send(Message::text(ack.to_string())).await.expect("ack the hub's hello");
-}
-
-/// Authenticate + hello in one call: the full handshake a real body runs to
-/// reach the live session loop.
-async fn go_live(ws: &mut WsClient, token_id: &str, body_x25519_secret: &[u8; 32], hub_x25519_pubkey: &[u8; 32], hostname: &str, advertised_url: &str) {
-    send_authenticate(ws, token_id, body_x25519_secret, hub_x25519_pubkey, hostname, advertised_url)
-        .await
-        .expect("authenticate must succeed");
-    run_hello(ws, hostname).await;
-}
+// `send_authenticate`, `run_hello` and `go_live` moved to
+// `support::raw_ws` (issue #508's clarifications: one initiator, reused by
+// `remote_admin_test.rs` with a caller-chosen `circuit/hello` role).
 
 // ---------------------------------------------------------------------------
 // registry: supersede-on-reauth

@@ -831,3 +831,52 @@ fn a2a_part_wire_form_is_flat_and_stable() {
     let text = Part::text_part("hi");
     assert_eq!(serde_json::to_string(&text).unwrap(), r#"{"text":"hi"}"#);
 }
+
+// ---------------------------------------------------------------------------
+// #508 (remote hub-admin client, epic #506) — RED, authored before the
+// seven `admin/*` catalog rows exist.
+// ---------------------------------------------------------------------------
+
+/// AC 1: `holler_proto::methods::CATALOG` must carry the seven `admin/*`
+/// rows (`admin/status`, `admin/roster`, `admin/say`, `admin/interrupt`,
+/// `admin/answer`, `admin/wait`, `admin/query`), so a well-formed
+/// `admin/roster` request decodes instead of failing `UnknownMethod`. On
+/// current `main` none of the seven rows exist yet, so this fails with
+/// exactly that error — the RED the brief's Test plan calls for
+/// ("`codec_test::every_method_round_trips` and new `admin/*` decode tests
+/// fail: `UnknownMethod("admin/roster")`").
+#[test]
+fn admin_roster_method_decodes_once_catalogued() {
+    let frame = r#"{"jsonrpc":"2.0","id":"h-01HTEST00000000000000000001","method":"admin/roster","params":{"all":false,"prefix":null}}"#;
+    let env = decode(frame).expect(
+        "AC 1: `admin/roster` must decode as a known method once the seven \
+         `admin/*` catalog rows exist; on current main this fails with \
+         UnknownMethod(\"admin/roster\") — that is this RED's failure",
+    );
+    assert_eq!(env.method(), Some("admin/roster"));
+}
+
+/// AC 1, restated against the catalog directly: every one of the seven
+/// `admin/*` names must be present in `CATALOG` once implemented. Fails
+/// today (the list is empty) — not a duplicate of `every_method_round_
+/// trips`, which only walks whatever rows already exist and so cannot pin
+/// rows that are still missing.
+#[test]
+fn catalog_has_all_seven_admin_rows() {
+    let names: Vec<&str> = CATALOG.iter().map(|e| e.name).collect();
+    for expected in [
+        "admin/status",
+        "admin/roster",
+        "admin/say",
+        "admin/interrupt",
+        "admin/answer",
+        "admin/wait",
+        "admin/query",
+    ] {
+        assert!(
+            names.contains(&expected),
+            "AC 1: CATALOG must contain `{expected}` (found: {names:?}) — \
+             not catalogued yet on current main"
+        );
+    }
+}
