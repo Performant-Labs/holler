@@ -38,8 +38,14 @@ on Z.ai's hosted chat endpoint (also the cross-vendor arm at `panel`). It is set
 `bash $WORKFLOW_ROOT/workflow/review-models.sh --tier outside-review=glm-5.3-flash`, which writes a
 managed block into the gitignored `.env`; also set `DUAL_REVIEW=1` there, or the runner exits 0 having
 done nothing. `OPENAI_API_KEY` must be the Z.ai key, comes from the operator's secret store, and is
-passed in the environment of the run: never write it to `.env` or the repo, and never print it. A
-worktree needs a copy of the clone's `.env` (it is gitignored, so `git worktree add` does not carry it).
+never printed. A worktree needs a copy of the clone's `.env` (it is gitignored, so `git worktree
+add` does not carry it).
+
+**Secrets-in-files rule (general, not just this key):** put a key or other sensitive value in a
+file, hidden or not, only after verifying that file is git-ignored (`git check-ignore -v <path>`
+confirms it) — `.env` already is, so writing `OPENAI_API_KEY` there for a run is fine once
+verified. Writing a secret to a file that is *not* git-ignored, or overriding this check at all,
+needs the operator's express consent first, every time.
 Before journalling any run above `in-session`, prove the gate can actually run with one real
 completion against the configured endpoint; a model that is listed is not a model that works.
 
