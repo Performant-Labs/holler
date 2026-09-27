@@ -7,6 +7,7 @@ Rigor: second-opinion (see "Review rigor" below; the outside-review `.env` must 
 **Forward-compat:** done, see table below (this story adds a wire contract that #437 hold/release and a later credential-separation story will use).
 **Design (Phase 3):** N/A (no UI surface).
 **Decision record:** ADR 0020 (`docs/adr/ADR-0020.md`) settles #507. This brief builds on it and does not reopen it.
+**ADR 0020 clarification already on main:** commit `b7a517c` ("docs(adr): clarify ADR 0020 — remote admin credential is read locally, not a --token"), which landed after this brief was drafted and before this worktree branched, rewrote ADR 0020 §Decision/§Consequences to the `--server`-only shape (quoted under Evidence). This PR therefore does **not** edit `docs/adr/ADR-0020.md`.
 
 ## Problem
 
@@ -108,6 +109,114 @@ crates/holler-hub/src/circuit.rs:862-865   (any other inbound request today)
 ```
 `authenticate_and_hello` (circuit.rs:178-225) runs the Noise handshake and `hello_exchange` and returns before any of the above. That is the branch point. `hello_exchange` (circuit.rs:360) already parses the peer's `Hello` and currently keeps only `harnesses`.
 
+Verified at `daf6633` (no file under `crates/` changed since `00d6120`). The signature and tail of the branch point:
+```
+crates/holler-hub/src/circuit.rs:178-185
+async fn authenticate_and_hello<Snk, St>(
+    sink: &mut Snk,
+    stream: &mut St,
+    id: Option<&str>,
+    params: &Authenticate,
+    state: &HubState,
+    deps: &AuthDeps<'_>,
+) -> Option<(String, crate::token::Record, Vec<String>, String)>
+crates/holler-hub/src/circuit.rs:218-224
+    let body_harnesses = hello_exchange(sink, stream, &params.hostname, state).await.ok()?;
+
+    // `finish_prove` only ever returns a `Bound` record (from `bound_record`,
+    // which requires a `client_id` to be `bound`) — safe to unwrap the
+    // invariant here.
+    let client_id = record.client_id.clone().unwrap_or_default();
+    Some((client_id, record, body_harnesses, sas))
+crates/holler-hub/src/circuit.rs:360
+async fn hello_exchange<Snk, St>(sink: &mut Snk, stream: &mut St, hostname: &str, state: &HubState) -> Result<Vec<String>, ()>
+crates/holler-hub/src/circuit.rs:379
+    let body_hello = params.clone().and_then(|v| serde_json::from_value::<Hello>(v).ok());
+```
+No `registry.insert`, supersede or `roster.set_*` runs before the branch point. **Two side effects do run before it, on the shared auth path**, and they apply to an admin connection exactly as to a body, because the hub cannot know the role until the hello:
+```
+crates/holler-hub/src/circuit/auth.rs:94   (every counted -32002 refusal, via refuse_unauthenticated)
+    let outcome = key_ip(peer_ip).map(|ip| deps.lockout.record_failure_detailed(&ip, code, token_id));
+crates/holler-hub/src/circuit/auth.rs:102-108   (the tail every -32002 refusal shares)
+async fn refuse_and_close<Snk>(sink: &mut Snk, id: Option<&str>, message: &str, reason: Option<&'static str>, token_id: &str, deps: &AuthDeps<'_>)
+...
+    send_error_with_reason(sink, id, Code::Unauthenticated, message, reason).await;
+    close(sink).await;
+    deps.roster.clear(token_id);
+crates/holler-hub/src/circuit/auth.rs:451-455   (a successful prove resets that (peer, token) lockout bucket)
+    if let Some(ip) = key_ip(peer_ip) {
+        if deps.lockout.reset(&ip, &params.token_id) {
+            log_cleared(&LockoutKey { peer: ip, token_id: Some(params.token_id.clone()) }, "authenticated");
+        }
+    }
+```
+`Roster::clear(token_id)` (roster.rs:413-423) sets `conn_state = "gone"` on **every** row with that `token_id`. So a refused admin authentication marks the rows of the live body that owns the same credential `gone`. See Risks.
+
+The lockout key (verbatim module doc):
+```
+crates/holler-hub/src/lockout.rs:9-21
+//! **The key (issue #455)** is the peer's transport IP address and the token
+//! id it claimed, so one token's failures lock out only that token from that
+//! address: behind a reverse proxy (ADR 0006) every body shares the proxy's
+//! address. Both are abuse-control inputs, never identity: the address is the
+//! accept-time peer (no forwarded-address header is ever read), and the id is
+//! unauthenticated input that only partitions a counter (clipped to
+//! [`MAX_TOKEN_ID_BYTES`]); the claimed hostname is never part of the key.
+//! The #184 flood guard stays: the failure that would create an address's
+//! [`MAX_TOKEN_IDS_PER_PEER`]th live token bucket folds its buckets into one
+//! **peer-wide** entry, tripped at once, which refuses every id from that
+//! address and bounds the map. A peer-wide lockout refuses a new socket before
+//! a frame is read ([`Lockout::is_locked_out`]); a token lockout, once the
+//! peer names the token ([`Lockout::is_token_locked_out`]).
+```
+Defaults (lockout.rs:1-7): 5 failures in 10 min trip a 10 min lockout; loopback is not exempt (lockout.rs:26).
+
+Liveness on the body path is "no frame of any kind from the peer within `liveness_timeout`", and pongs count as frames. Both timers have test overrides:
+```
+crates/holler-hub/src/circuit.rs:96-103
+fn liveness_timeout() -> std::time::Duration {
+    std::env::var("HOLLER_HUB_LIVENESS_TIMEOUT_MS")
+        ...
+        .unwrap_or(heartbeat_interval() * 3)
+}
+crates/holler-hub/src/circuit.rs:111-117
+fn ws_ping_interval() -> std::time::Duration {
+    std::env::var("HOLLER_WS_PING_INTERVAL_MS")
+        ...
+        .unwrap_or(std::time::Duration::from_secs(10))
+}
+crates/holler-hub/src/circuit.rs:656-658, 678, 688-689   (the body loop's select arms)
+                        Some(Ok(Message::Ping(_))) | Some(Ok(Message::Pong(_))) | Some(Ok(Message::Frame(_))) => {
+                            self.last_frame_at = tokio::time::Instant::now();
+                        }
+                _ = tokio::time::sleep_until(self.last_frame_at + liveness_timeout()) => {
+                _ = self.ws_ping.tick() => {
+                    if self.send_ws_ping().await.is_err() {
+```
+
+The Unix control socket does **not** cancel a request when its client goes away. The handler awaits `dispatch_control` to completion and only notices the disconnect when the reply write fails, so a CLI killed mid-`say` today lets the turn finish and the reply is discarded (the MO 5 precedent):
+```
+crates/holler-hub/src/control_server.rs:24-50 (abridged to the loop)
+pub async fn handle_control_conn(
+    ...
+    loop {
+        match lines.next_line().await {
+            Ok(Some(line)) => {
+                ...
+                let reply = dispatch_control(&line, &registry, &roster, &lockout).await;
+                let bytes = format!("{reply}\n");
+                if write_half.write_all(bytes.as_bytes()).await.is_err() {
+                    return; // client went away.
+                }
+            }
+            Ok(None) => return, // client closed.
+            Err(_) => return,
+        }
+    }
+}
+```
+It is spawned per connection (`serve.rs:565`, `tokio::spawn(crate::control_server::handle_control_conn(...))`). Note that it serves one request at a time per connection; MO 5's concurrent requests on one admin socket are new behaviour on the WS side only.
+
 The hello carries a role, and today it is closed to two values:
 ```
 crates/holler-proto/src/docs.rs:30-37
@@ -119,6 +228,9 @@ pub enum HelloRole {
     Hub,
 }
 ```
+Other doc comments that state the two-role closure and must be updated with `HelloRole::Admin`: `docs.rs:175` (`/// The endpoint role: \`"body"\` or \`"hub"\`.`), `docs.rs:227-228` (`query/status` "One shape, two \`role\` values", since `Status.role` is also a `HelloRole`), and `methods.rs:40` (`/// Only the body may send (join / authenticate).` on `Direction::BodyToHub`, which the `admin/*` rows will use).
+
+The codec does **not** enforce `Direction`. `holler_proto::methods::Direction` is referenced only by the `CATALOG` rows (no use in `crates/holler-proto/src` or `crates/holler-hub/src` outside `methods.rs`), and `decode_request` checks only catalog membership, the notification flag and the id form (frame.rs:117-140). So a `session/prompt` request sent by a peer decodes, and the `-32601` it gets comes from the hub's dispatch, not the decoder.
 
 The codec rejects any method missing from the catalog, so the new methods need catalog rows:
 ```
@@ -170,10 +282,76 @@ pub(super) async fn hello_exchange<Snk, St>(
    (builds `Hello { role: HelloRole::Body, ... }`, then compares hub_hello.hub_pubkey against identity.hub_pubkey; a mismatch is AuthFailed)
 ```
 `crates/holler-body/src/join.rs` uses `server_address::{parse, loopback_only_check}`: a plaintext `ws://` to a non-loopback host is an exit-3 policy refusal, checked before any connect.
+```
+crates/holler-body/src/server_address.rs:160-168
+pub fn loopback_only_check(addr: &ServerAddress) -> Option<&'static str> {
+    if addr.scheme == "ws" && !addr.is_loopback() {
+        Some(
+            "a plaintext ws:// to a non-loopback host is refused; \
+             off-loopback pairing is wss:// (ADR 0002)",
+        )
+    } else {
+        None
+    }
+crates/holler-body/src/join.rs:84-87
+    if let Some(reason) = loopback_only_check(&addr) {
+        eprintln!("error: {reason}");
+        return JoinExit::Policy;
+    }
+```
+`parse` accepts `ws://` and `wss://` only (server_address.rs:87-95), so the loopback `ws://127.0.0.1:<port>` URL a test hub's `ws_url()` returns passes, and `ws://10.0.0.5:1` is refused.
+
+The hub-side Noise prologue binds whatever `advertised_url` the client sends. The hub does not compare it with its own listen address:
+```
+crates/holler-hub/src/circuit/auth.rs:327
+    let prologue = holler_proto::noise::build_prologue(holler_proto::PROTOCOL_VERSION, &params.token_id, &params.advertised_url);
+crates/holler-body/src/connection/handshake.rs:70, 83   (the client side takes both from the identity)
+    let prologue = holler_proto::noise::build_prologue(holler_proto::PROTOCOL_VERSION, &identity.token_id, &identity.server_url);
+        advertised_url: identity.server_url.clone(),
+```
+
+The join secret is consumed on redeem, and ADR 0020 as it now stands on main takes no credential flag:
+```
+crates/holler-hub/src/token.rs:126-129
+    /// Minted, not yet redeemed.
+    Unused,
+    /// Redeemed by a body; the join secret is consumed.
+    Bound,
+docs/adr/ADR-0020.md (Consequences, as of b7a517c)
+- The remote forms of `roster`/`say`/`interrupt`/`answer`/`wait`/`hub status`/`hub query` (#509) take `--server URL` only; there is no `--token`/`--hub-key` flag on them, unlike `body join` — they read the local body identity instead of taking one on the command line.
+```
+(ADR 0019 contains no sentence saying "no reusable credential string". That phrase in the MO section below is O's summary of the credential model, not a quotation.)
+
+Errors: `Refused` already exists, and the `*_cmd` renderers already branch on it:
+```
+crates/holler-hub/src/control.rs:18-31
+/// Why a control exchange could not reach the live hub.
+#[derive(Debug)]
+pub enum ControlError {
+    /// No socket at the expected path (the hub is not running, or the state
+    /// dir is wrong) — the spec's `no live holler hub reachable at <dir>`.
+    NoLiveHub,
+    /// The socket was present but the exchange failed (I/O or a bad reply).
+    Io(std::io::Error),
+    /// The reply did not parse as a v2 envelope.
+    BadReply(String),
+    /// The hub answered with a JSON-RPC error (issue #182: `control/
+    /// token_ping`'s `-32004 not_connected` is reported this way).
+    Refused(holler_proto::WireError),
+}
+crates/holler-cli/src/say_cmd.rs:130-138
+        Err(holler_hub::control::ControlError::NoLiveHub) => {
+            err(format!("no live holler hub reachable at {}", state_root.display()), 1)
+        }
+        Err(holler_hub::control::ControlError::Refused(e)) => {
+            ...
+            let is_ambiguous = e.data.as_ref().and_then(|d| d.reason.as_deref()) == Some("ambiguous");
+```
+`say_cmd.rs` then routes `is_held` to `HELD_EXIT_CODE` (4, hold_cmd.rs:19), `SessionBusy` to `busy_hint`, and ambiguity to exit 2. `interrupt_cmd.rs:52`, `answer_cmd.rs:48`, `hold_cmd.rs:58` and `hub_cmd.rs:190` (`Refused(e) if is_ambiguous(&e)` → exit 2) match `Refused` the same way.
 
 The only place a prompt is sent (hold enforcement) is guarded by a source-level test:
 ```
-crates/holler-cli/tests/hold_single_path_test.rs:1-5
+crates/holler-cli/tests/hold_single_path_test.rs:2-6   (line 1 is the `#![allow(...)]` attribute)
 //! The session hold has one enforcement point (issue #442, umbrella decision
 //! 3): every prompt reaches a body through `send_prompt` in
 //! `crates/holler-hub/src/circuit/dispatch.rs`, and the hold is checked there.
@@ -188,6 +366,11 @@ crates/holler-cli/tests/cli_surface_test.rs:1-13 (fixture parses; pending file d
 ```
 
 Test rigs that already exist: `tests/support/mod.rs` (`StateDir::hub()`/`body()`, `Hub::start`, `ws_url`, the `roster_json`/`say` runners) and `tests/support/raw_ws.rs` (`connect_ws`, `authenticate_on`, which runs a hand-rolled Noise handshake against a real hub).
+
+What those rigs actually do (verified):
+- `StateDir::hub()`/`body()` are the `hub/` and `body/` **subdirectories of one root** (`support/mod.rs:93-100`), and `HOLLER_STATE_DIR` is that root. A body state dir with no hub files therefore means a **separate** `StateDir` for the body, as the existing two-machine-style tests already do (`roster_cli_test.rs:189-193`: `let hub_state = StateDir::new(); ... let io_body_state = StateDir::new(); ... join(&io_body_state, &hub_state, &hub.ws_url(), ...)`). The control socket is `<root>/hub/control.sock` (`holler-hub/src/state.rs:67-68`).
+- `raw_ws::authenticate_on` (`raw_ws.rs:104-119`) sends **only** `circuit/authenticate` message 1 and reads one frame, expecting a refusal. It never completes `circuit/prove` or the hello, so it cannot open a live admin socket by itself. The complete initiator (authenticate → prove → hello) exists only as private helpers in `hub_hygiene_test.rs` (`send_authenticate` at :83, `run_hello` at :127, `go_live` at :153), with the hello's `role` fixed to a body.
+- A slow session: `stub-acp --slow` sets a 200 ms inter-chunk gap and `--chunks N` sets the chunk count (`tests/stub-acp/main.rs:287-291`), passed as `write_sessions_toml`'s extra argv (as `talk_test.rs:368` does with `&["--slow", "--chunks", "5"]`).
 
 ## Decisions already made (MO)
 
@@ -214,34 +397,49 @@ Filled in by O for this story (the A gate confirms or BLOCKs):
 - **CLI credential flags. ADR 0020's Consequences are wrong on the facts here.** The ADR says remote verbs take "`--token` … the same credential `body join` uses". But `body join --token ID:SECRET` is a **one-time join secret** that `circuit/join` consumes. Since ADR 0019 there is no reusable credential string: the bound credential is the body's `credential.json` plus `x25519_identity.key`. A `--token ID:SECRET` on `roster` therefore cannot authenticate anything. **Recommended:** remote mode is selected by `--server <URL>` alone. The credential is **always** the body identity under the invoking process's `HOLLER_STATE_DIR` (the machine-B body's own state). The hub key is the one already pinned in that identity. **No `--token` and no `--hub-key`** on these verbs. `--server` goes through `server_address::parse` + `loopback_only_check` (exit 3 on plaintext non-loopback, the same as `body join`) and is used as the dial URL and the Noise `advertised_url`. If the operator agrees, a one-line clarifying amendment to ADR 0020 §Consequences (and to #509's wording) belongs in this PR. If the operator wants a different shape, amend this section before A runs.
 - **The epic and #511 acceptance text conflict with ADR 0020.** #506's "a credential minted for this purpose cannot be used to join as a body…" and "read-only/read-write split … enforced by the hub", and #511 ACs 3–4, describe the **deferred** credential separation and scope split. This story does not satisfy them and must not claim to. The operator should edit #506/#511 to point those items at the follow-up issue ADR 0020 says will be filed. That is a GitHub edit, not code.
 
+**Status of the flag decision (added at brief review round 1; the text above is unchanged):** ADR 0020 on main (commit `b7a517c`, quoted under Evidence) now states the `--server URL`-only shape with no `--token`/`--hub-key`, which is the same as O's recommended default. That ADR edit is therefore **not** part of this PR. The #509 wording edit and the #506/#511 edits are GitHub issue edits by the operator, not files in this PR (see Out of scope). The A gate must still get the operator's explicit confirmation that `b7a517c` is their decision before T starts. This amendment does not make that call.
+
+### Clarifications (brief review round 1)
+
+These add mechanism the decisions above leave implicit. They do not change any decision.
+
+- **`--server` vs the joined URL (MO 7 + the flag default).** `connection::handshake::authenticate` stays unchanged. It takes the Noise prologue and `advertised_url` from `identity.server_url` (handshake.rs:70, 83). `admin_client` loads the `BodyIdentity`, clones it, and sets the clone's `server_url` to the parsed `--server` URL before calling `authenticate`. The same URL is dialled and advertised. The identity file on disk is never rewritten. A `--server` that differs from the URL the body joined with is allowed: the hub binds the prologue to whatever `advertised_url` the client sends and never compares it to its own address (auth.rs:327). The hub key still comes from the identity's pin.
+- **Lockout and roster side effects are shared with the body (W-3).** Auth refusals happen before the hello, so the hub cannot tell an admin client from a body when it refuses one. An admin client on machine B uses machine B's body credential, so it has the same `(peer IP, token_id)` lockout key as machine B's body (lockout.rs:9-21). Five refused admin attempts in 10 min therefore lock that body's token out from that address. Every counted refusal also runs `roster.clear(token_id)` (auth.rs:108), which marks that body's live rows `gone`. The Risks section records this. Whether to mitigate it in this PR needs an operator decision, because a mitigation would change the shared auth path, and Out of scope excludes changes to the Noise handshake.
+- **Line budget for the 900-line guard (W-4).** `scripts/lint.sh:46` fails at `>= 900` lines. circuit.rs is 891 lines, so it may grow by **at most 8 lines** net: the `hello_exchange` return-type change plus a single `if role == Admin { return admin::run(...).await; }` style branch, with everything else in `circuit/admin.rs`. control_server.rs is 879 lines, so it may grow by **at most 20 lines** net for the `pub(crate)` entry. If either budget is exceeded, the pre-agreed move is: for circuit.rs, move `hello_exchange` and `hub_hello_doc` (circuit.rs:360-468) into a new `circuit/hello.rs`; for control_server.rs, move `status_doc` and `read_listening` (control_server.rs:721-791) into a new `control_status.rs` sibling, following the `control_hold.rs` precedent. Both moves are verbatim, with no behaviour change.
+- **Test rig for a hand-rolled admin socket (AC 4, 5, 16).** `raw_ws::authenticate_on` cannot finish a handshake (see Evidence). Add one helper to `tests/support/raw_ws.rs` that runs authenticate → prove → hello with a caller-chosen `role`. Build it by moving `hub_hygiene_test.rs`'s private `send_authenticate`/`run_hello` into `raw_ws.rs` and giving `run_hello` a role parameter, the same "moved verbatim" pattern #455 used for `raw_ws.rs`. Do not write a third copy of the initiator.
+
 ## Acceptance criteria (each observable)
 
 Hub / wire:
 1. `holler_proto::methods::CATALOG` contains the seven `admin/*` rows, and `codec_test::every_method_round_trips` passes with a canonical frame for each.
 2. `HelloRole::Admin` serializes as `"admin"` and round-trips (a `docs_wire_test`/`golden_test` case).
 3. **No supersede, no roster hijack.** With a body connected and one session live, a remote `holler roster --server <ws_url>` run from the **body's** state dir exits 0 and lists that session. Afterwards the body is still connected: the roster row stays `connected`, the body log has no `circuit/superseded`, and a later `say` to the session still gets its reply. Test: `remote_admin_does_not_supersede_the_body`.
-4. An admin connection never creates, changes or refreshes a roster row. A hand-rolled admin socket (`raw_ws::authenticate_on` + hello `role:"admin"`) that sends `session/presence` produces no roster row, and `last_heard` of the body's row is not moved by admin traffic.
-5. Allowlist: on an admin socket, `control/revoke`, `control/test_drop`, `admin/revoke`, `admin/hold`, `admin/release` and `session/prompt` each get a `-32601` error (or a decode `UnknownMethod`). A body-role socket that sends `admin/roster` gets `-32601`. Plus a unit test that the hub's admin allowlist is exactly the seven names.
+4. An admin connection never creates, changes or refreshes a roster row. A hand-rolled admin socket (the new full-handshake `raw_ws` helper with hello `role:"admin"`, see Clarifications; `raw_ws::authenticate_on` alone cannot finish a handshake) that sends `session/presence` produces no roster row, and `last_heard` of the body's row (the roster `Row`'s `last_seen` field, roster.rs:162) is not moved by admin traffic.
+5. Allowlist: on an admin socket, `control/revoke`, `control/test_drop`, `admin/revoke`, `admin/hold`, `admin/release` and `session/prompt` each get a `-32601` error (or a decode `UnknownMethod`). For `session/prompt` it is the dispatch-level `-32601`, because the codec does not enforce `Direction` (see Evidence). A body-role socket that sends `admin/roster` gets `-32601`. Plus a unit test that the hub's admin allowlist is exactly the seven names.
 6. Hold still has one enforcement point: `hold_single_path_test` passes unmodified, and a remote `say` to a locally `hold`-ed session exits with the same `session_held` refusal text and code as the local `say`.
 7. An unknown token, a wrong X25519 key, or a revoked token on the admin path is refused with `-32002` exactly as a body is, and counts toward the existing lockout (`hub status --json` lockout entry). There is no new code path around the lockout.
-8. Concurrency: two remote admin clients plus one local `say` to the same session behave like today's local-only story. One gets the reply, the other gets `session_busy`, or both succeed with `--queue`. No panic and no hang.
+8. Concurrency: two remote admin clients plus one local `say` to the same session behave like today's local-only story. One gets the reply, the other gets `session_busy`, or both succeed with `--queue`. No panic and no hang. Per contender: without `--queue`, **each** of the three (remote A, remote B, local) exits either 0 with a reply or 1 with the `session_busy` refusal, at least one exits 0, and none runs past its own timeout. With `--queue` on all three, all three exit 0 with a reply. Afterwards the body is still connected and a fourth `say` succeeds.
 
 CLI:
 9. Each verb accepts `--server <URL>` and nothing else new: `roster`, `say`, `interrupt`, `answer`, `wait`, `hub status`, `hub query`. New lines in `tests/fixtures/cli-surface.txt` (at least one per verb, for example `roster | --server wss://hub.example.ts.net --json`), and `cli_surface_test` passes.
-10. **Parity.** For each verb, `--json` stdout from the remote form is byte-identical to the local form against the same hub state. Tested at least for `roster --json`, `say --json`, `hub status --json` (after masking volatile fields such as elapsed times), `wait --json` and `hub query status --json`.
+10. **Parity.** For each verb, `--json` stdout from the remote form is byte-identical to the local form against the same hub state. Tested at least for `roster --json`, `say --json`, `hub status --json` (after masking volatile fields such as elapsed times), `wait --json` and `hub query status --json`. Also tested for `interrupt --json` and `answer --json`, including one refusal each (for example an unknown session), whose stderr and exit code must match the local form. The masked set is exactly these fields, replaced with a fixed placeholder by one helper in `remote_admin_test.rs` before comparison: `roster` → `rows[*].last_seen`, `rows[*].last_update_at` (roster.rs:162-165); `say` → `elapsed_ms` (control_server.rs:272); `wait` → `rows[*].age_secs` (control_server.rs:575); `hub status` → `lockout.peers[*].retry_after_secs` (lockout.rs:541); `hub query status` → none. Every other field is compared byte for byte. If T finds another field that differs between two identical **local** runs, T names it with its source line in the T-red handoff, and the masked set is extended by that one field only.
 11. The remote form needs **no hub state**. Every remote test runs the CLI with `HOLLER_STATE_DIR` set to the **body** state dir, which has no control socket and no hub files.
 12. Omitting `--server` keeps today's behaviour. The existing `roster_cli_test`, `talk_test`, `interrupt_test`, `answer_cli_test`, `wait_test` and `query_test` pass unchanged.
-13. Failure words and exit codes: `--server ws://10.0.0.5:1` gives exit 3 (plaintext non-loopback, the same message family as `body join`). A missing `body/credential.json` gives exit 1 with a message naming the path and `holler body join`. An unreachable server gives exit 1, "could not reach the hub at <url>: …". A hub-key mismatch gives exit 1, with the same words `body run` uses.
+13. Failure words and exit codes: `--server ws://10.0.0.5:1` gives exit 3 (plaintext non-loopback, the same message family as `body join`). A missing `body/credential.json` gives exit 1 with a message naming the path and `holler body join`. An unreachable server gives exit 1, "could not reach the hub at <url>: …". A hub-key mismatch gives exit 1, with the same words `body run` uses. An ambiguous session name on the remote path (`say`, and `hub query` with an ambiguous target) exits 2 with the same text as the local form (decision 9; say_cmd.rs:138, hub_cmd.rs:190).
 14. `cargo test --workspace`, `bash scripts/lint.sh` (including the 900-line file guard) and `cargo clippy --workspace --all-targets -- -D warnings` are green.
 
 Docs (in this PR because they are the standing spec, per CLAUDE.md):
-15. `docs/protocol/v2.md` §3 (roles) and §4 (catalog table) document `role:"admin"` and the seven `admin/*` methods, with params and results given as "identical to the local control form". They state plainly that any bound credential can use them (ADR 0020). `docs/deploy.md`, the migration note and the forge cross-link stay in #510.
+15. `docs/protocol/v2.md` §3 (roles) and §4 (catalog table) document `role:"admin"` and the seven `admin/*` methods, with params and results given as "identical to the local control form". They state plainly that any bound credential can use them (ADR 0020). They also state that an admin client's failed authentications count against the same `(peer address, token_id)` lockout bucket as the body whose credential it uses, and that a refused authentication clears that token's roster rows. In other words, a misconfigured admin client on a body's machine can lock that body out (see Risks). `docs/deploy.md`, the migration note and the forge cross-link stay in #510.
+
+Admin-loop liveness (MO 5), all in `remote_admin_test.rs`. The hub runs with `HOLLER_WS_PING_INTERVAL_MS` and `HOLLER_HUB_LIVENESS_TIMEOUT_MS` set low (for example 200 and 1000), and the target session is `stub-acp --slow --chunks N`, with N chosen so the turn lasts well over the liveness timeout:
+16. (a) **Pings during an in-flight request.** On a hand-rolled admin socket, while an `admin/say` to the slow session is in flight, the client receives at least one WS `Ping` frame from the hub before the `admin/say` response, and the pongs it sends are accepted (the socket stays open and the response arrives). (b) **In-flight is never timed out.** A second admin socket sends `admin/say` to the slow session and then sends nothing and reads nothing (so it sends no pongs) for longer than the liveness timeout. It still receives the `admin/say` response afterwards. (c) **Idle is closed.** An admin socket that completes its hello, then sends no request and does not read, is closed by the hub within liveness timeout plus a bounded margin, and the hub logs `admin_dropped` for it. (d) **Concurrent requests on one socket.** One admin socket sends two `admin/*` requests with different ids without waiting (for example `admin/say` to the slow session and `admin/roster`). The `admin/roster` response arrives **before** the `admin/say` response, and each response carries its own request's id. (e) **Client drop mid-`say`.** An admin client that closes its socket (clean close, and separately an abrupt TCP drop) while its `admin/say` is in flight leaves the hub healthy. The body still receives the prompt, the turn completes (the session's roster row returns to its idle state with that turn in `last_turn`), no reply is written to the closed socket, and a subsequent remote `roster --server` and `say --server` both exit 0.
+17. **Admin connection logs.** A successful remote verb produces exactly one `admin_connected` and one `admin_dropped` hub log event, each with `token_id`, `label`, `peer` and `sas` fields. It produces no `conn_connected` event for that connection. The body's own `conn_connected` count is unchanged by admin traffic.
 
 ## Files
 
 Production:
-- `crates/holler-proto/src/docs.rs` (`HelloRole::Admin`)
-- `crates/holler-proto/src/methods.rs` (7 rows, doc comment count)
+- `crates/holler-proto/src/docs.rs` (`HelloRole::Admin`; also update the two-role doc comments at docs.rs:28-29, 175 and 227-228)
+- `crates/holler-proto/src/methods.rs` (7 rows, doc comment count; `Direction::BodyToHub`'s "Only the body may send (join / authenticate)" at methods.rs:40 gains the admin client)
 - `crates/holler-hub/src/circuit.rs` (branch in `handle_authenticated`; `hello_exchange` returns the role)
 - new `crates/holler-hub/src/circuit/admin.rs` (the admin loop), so circuit.rs stays under 900 lines
 - `crates/holler-hub/src/control_server.rs` (expose one `pub(crate)` entry that runs an allowlisted `control/*` method with parsed params and returns the reply, used by both the Unix socket and the admin loop)
@@ -252,9 +450,12 @@ Production:
 - new `crates/holler-cli/src/transport.rs`
 - `crates/holler-cli/src/{roster,say,interrupt,answer,wait,query,hub}_cmd.rs` (route through transport)
 - `docs/protocol/v2.md`
+- Not touched: `docs/adr/ADR-0020.md`. Its `--server`-only clarification already landed on main at `b7a517c`.
+- Only if a W-4 budget in Clarifications is exceeded: new `crates/holler-hub/src/circuit/hello.rs` and/or `crates/holler-hub/src/control_status.rs` (verbatim moves)
 
 Tests:
-- new `crates/holler-cli/tests/remote_admin_test.rs` (AC 3–8, 10–13)
+- new `crates/holler-cli/tests/remote_admin_test.rs` (AC 3–8, 10–13, 16–17)
+- `crates/holler-cli/tests/support/raw_ws.rs` (full-handshake helper with a `role` parameter) and `crates/holler-cli/tests/hub_hygiene_test.rs` (its private `send_authenticate`/`run_hello` move out to `raw_ws.rs`)
 - `crates/holler-cli/tests/fixtures/cli-surface.txt`
 - `crates/holler-proto/tests/codec_test.rs` (canonical frames)
 - `crates/holler-proto/tests/docs_wire_test.rs` / `golden_test.rs` (Admin role)
@@ -266,7 +467,7 @@ Reuse map (extend, do not duplicate):
 - Client handshake: `connection::handshake::authenticate` unchanged; `hello_exchange` gains a role parameter, with no second copy of the pinning logic.
 - Address policy: `server_address::{parse, loopback_only_check}`.
 - Output rendering: the existing `*_cmd.rs` render fns, unchanged.
-- Test rigs: `support::{StateDir, Hub, …}`, `support::raw_ws::{connect_ws, authenticate_on}`.
+- Test rigs: `support::{StateDir, Hub, …}`, `support::raw_ws::{connect_ws, authenticate_on}`. Use a separate `StateDir` for hub and body. The admin-role full handshake goes in `raw_ws.rs` (see Clarifications).
 - `hold_single_path_test`: must stay green without edits. If it needs editing, a second prompt path was added, and that is a BLOCK.
 
 ## Forward-compat
@@ -275,7 +476,7 @@ Reuse map (extend, do not duplicate):
 | --- | --- | --- |
 | #437 hold/release remote (ADR 0020 Consequences) | add `admin/hold`, `admin/release` by extending the allowlist and adding catalog rows, no new mechanism | yes |
 | future credential-separation / scope story (ADR 0020 "Not decided") | a single point where an admin request is authorised (the admin loop's allowlist dispatch) so a scope/credential-type check slots in without touching handlers; `HelloRole::Admin` marks admin sockets | yes |
-| #510 docs | stable method names and flag shape | yes, once the MO flag decision above is recorded |
+| #510 docs | stable method names and flag shape | yes, once the MO flag decision above is recorded (ADR 0020 at `b7a517c` already states `--server` only; the operator's confirmation is pending, see MO) |
 | #511 two-machine acceptance | `roster`/`say` from machine B with no SSH | yes for ACs 1–2; ACs 3–4 need the operator's edit (see MO) |
 
 ## Out of scope
@@ -285,6 +486,8 @@ Reuse map (extend, do not duplicate):
 - `docs/deploy.md`, the migration note and the forge cross-link (#510). The manual two-machine run (#511).
 - Any change to `body join`, `body run`, the Noise handshake, or the token store.
 - `--token`/`--hub-key` flags on the admin verbs (unless the MO decision above changes the default).
+- Editing `docs/adr/ADR-0020.md`. The clarification it needed landed on main at `b7a517c`.
+- The #509 wording edit and the #506/#511 acceptance-text edits. These are GitHub issue edits by the operator, not files in this PR.
 
 ## Test plan
 
@@ -294,7 +497,7 @@ RED first (T):
 - `remote_admin_does_not_supersede_the_body` pins the **supersede hazard**. T writes it so that it would fail against a naive implementation that just sends `admin/*` over a normal body-path socket (body row flips to `reconnecting`, or the body log shows `circuit/superseded`).
 - An allowlist test drives a hand-rolled admin socket with `admin/revoke` and `control/test_drop`, expecting `-32601`. (Run the hub with `HOLLER_TEST_HOOKS=1` so that `test_drop` would exist locally. The test proves it is still not reachable remotely.)
 
-GREEN: all of AC 1–14, plus the full existing suite unchanged. T's Tier-2 check: revert the role branch in spirit (send admin through the body path) and confirm AC 3/4 fail.
+GREEN: all of AC 1–17, plus the full existing suite unchanged. T's Tier-2 check: revert the role branch in spirit (send admin through the body path) and confirm AC 3/4 fail.
 
 ## Risks
 
@@ -302,9 +505,10 @@ GREEN: all of AC 1–14, plus the full existing suite unchanged. T's Tier-2 chec
 - **Accidental widening of the network surface.** If `admin/*` is implemented as a generic passthrough to `dispatch_control`, `control/revoke` and `control/test_drop` become network-reachable. Pinned by AC 5 and the allowlist unit test.
 - **Hold bypass.** Any second `session/prompt` sender. Pinned by the unchanged `hold_single_path_test` and AC 6.
 - **Accepted and documented, not mitigated (ADR 0020):** any holder of any bound body credential can drive every in-scope verb against every session on the hub, including `say` into other labels' sessions. `hub status` over the network exposes the lockout table (peer IPs, token labels) to any bound credential. v2.md must say this plainly (AC 15).
-- **Long-request liveness through proxies.** `tailscale serve` may idle-close a silent socket during a 600 s `say`. The hub's WS pings on the admin loop cover this (MO 5), and #511 is where it gets verified for real.
-- **File-size guard.** circuit.rs is 891 lines and control_server.rs 879. New code goes in new modules or the check fails.
-- **Flag-shape decision pending** (MO). If it flips to `--token`/`--hub-key`, AC 9/13 and the Files list change before T starts.
+- **Long-request liveness through proxies.** `tailscale serve` may idle-close a silent socket during a 600 s `say`. The hub's WS pings on the admin loop cover this (MO 5), and #511 is where it gets verified for real. The hub-side half (pings flow during an in-flight request, in-flight is never timed out, idle is closed, a client drop mid-`say` is harmless) is pinned locally by AC 16. A sequential admin loop that blocks on the `say` reply fails AC 16(a) and 16(d).
+- **File-size guard.** circuit.rs is 891 lines and control_server.rs 879. New code goes in new modules or the check fails. The line budget and the pre-agreed fallback moves are in Clarifications.
+- **Shared lockout and roster fate with the body (verified; mitigation needs an operator decision).** An admin client's refused authentications land in the same `(peer IP, token_id)` lockout bucket as the body whose credential it uses, and each one runs `roster.clear(token_id)` on that body's rows (auth.rs:94, 108). A stale or misconfigured admin client on machine B can mark B's body `gone` and, after 5 failures in 10 min, lock B's token out from B's address. This has the same blast radius as the supersede hazard, but only after an authentication failure, never on success. AC 15 requires v2.md to say this. Changing it would touch the shared auth path, which Out of scope excludes, so it is left to the operator.
+- **Flag-shape decision pending** (MO). If it flips to `--token`/`--hub-key`, AC 9/13 and the Files list change before T starts. ADR 0020 at `b7a517c` already records `--server` only, so a flip would also mean reverting that ADR text.
 
 ## Review rigor
 
