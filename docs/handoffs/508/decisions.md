@@ -1,0 +1,7 @@
+# Decisions — #508 (+ #509) remote hub-admin client
+
+## A (Phase 3, up-front plan review) — 2026-09-27T17:22:32-06:00
+- **Decided:** PASS on docs/handoffs/506-brief.md at 12a6681, with 8 warns (see handoff-A.md). The plan extends the right objects. The admin branch sits after `authenticate_and_hello` and before `conn_connected`, supersede, registry and roster writes. The allowlist dispatches to the existing `control_server` handlers, so `send_prompt` stays the only prompt path. The body's `authenticate`/`hello_exchange` are reused with a role parameter. The holler-cli transport glue keeps holler-hub free of any holler-body dependency.
+- **Assumed:** ADR 0020 as committed on main (b7a517c) is the operator's decision on the `--server`-only flag shape. A cannot confirm operator consent (W-8). Rigor was downgraded to in-session per the operator's "downgrade and proceed" after the outside-model brief gate timed out (508-brief-result-r2.md: curl exit 28). O should journal that downgrade formally.
+- **Hedged:** W-5: ADR 0020 says "same authenticated connection", but the plan uses a separate admin-role socket. I read this as a refinement, not a contradiction, so it's a warn rather than a block. The operator decides whether to add a one-line ADR clarification. W-1: docs.rs is 896 lines and has no line budget in the brief.
+- **Evidence:** read circuit.rs:120-480, control_server.rs:1-322, control.rs fn list, handshake.rs:40-287, x25519_identity.rs:92-128, methods.rs, docs.rs:20-40/170-232, ADR-0020.md, lint.sh:43-52. `wc -l` on every file the plan touches.
