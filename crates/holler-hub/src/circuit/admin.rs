@@ -81,7 +81,7 @@ where
         ],
     );
 
-    let (reply_tx, mut reply_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    let (reply_tx, mut reply_rx) = tokio::sync::mpsc::unbounded_channel::<Reply>();
     let mut ws_ping = tokio::time::interval(ws_ping_interval());
     ws_ping.tick().await; // the first tick fires immediately; consume it.
     let mut last_frame_at = tokio::time::Instant::now();
@@ -111,8 +111,22 @@ where
             }
             reply = reply_rx.recv() => {
                 let Some(reply) = reply else { continue };
-                inflight = inflight.saturating_sub(1);
-                if send_reply(sink, reply).await.is_err() { break; }
+                // Only a `Spawned` reply corresponds to something that
+                // incremented `inflight` above (a `circuit/ping` ack, a
+                // `-32601` and a decode-error reply are all `Inline` and
+                // never touched the counter) — decrementing on every reply,
+                // regardless of kind, could zero `inflight` while a real
+                // spawned request (e.g. a slow `admin/say`) was still
+                // outstanding, re-arming the liveness-timeout arm above and
+                // breaking the AC 16(b) guarantee.
+                let body = match reply {
+                    Reply::Spawned(body) => {
+                        inflight = inflight.saturating_sub(1);
+                        body
+                    }
+                    Reply::Inline(body) => body,
+                };
+                if send_reply(sink, body).await.is_err() { break; }
             }
         }
     }
@@ -127,6 +141,19 @@ where
             ("sas", sas.to_string()),
         ],
     );
+}
+
+/// A reply queued back to [`run`]'s own `select!` loop over `reply_tx`,
+/// distinguishing whether it corresponds to something that incremented
+/// `inflight` (a [`RequestOutcome::Spawned`] task) or not (an inline
+/// `circuit/ping` ack, a `-32601`, or [`reply_decode_error`]'s reply) — the
+/// loop must only decrement `inflight` for the former (see `run`'s
+/// `reply_rx.recv()` arm).
+enum Reply {
+    /// From a spawned request's own task — decrements `inflight`.
+    Spawned(String),
+    /// Answered directly, inline, never having touched `inflight`.
+    Inline(String),
 }
 
 /// One inbound WS poll's outcome for [`run`]'s own `select!` arm — split out
@@ -148,7 +175,7 @@ enum FrameOutcome {
     Ended,
 }
 
-fn frame_outcome(frame: Option<Result<Message, WsError>>, deps: &AdminDeps, reply_tx: &tokio::sync::mpsc::UnboundedSender<String>) -> FrameOutcome {
+fn frame_outcome(frame: Option<Result<Message, WsError>>, deps: &AdminDeps, reply_tx: &tokio::sync::mpsc::UnboundedSender<Reply>) -> FrameOutcome {
     let now = tokio::time::Instant::now();
     match frame {
         Some(Ok(Message::Text(t))) => match handle_request(&t, deps, reply_tx) {
@@ -204,7 +231,7 @@ enum RequestOutcome {
 /// `session/presence`/`session/update` included — has no `id` and is
 /// dropped without being serviced or touching the roster (MO 4: an admin
 /// socket can never publish presence).
-fn handle_request(text: &str, deps: &AdminDeps, reply_tx: &tokio::sync::mpsc::UnboundedSender<String>) -> RequestOutcome {
+fn handle_request(text: &str, deps: &AdminDeps, reply_tx: &tokio::sync::mpsc::UnboundedSender<Reply>) -> RequestOutcome {
     let env = match holler_proto::decode(text) {
         Ok(env) => env,
         Err(e) => {
@@ -222,7 +249,7 @@ fn handle_request(text: &str, deps: &AdminDeps, reply_tx: &tokio::sync::mpsc::Un
     if method == "circuit/ping" {
         let ack = PingAck { hostname: "hub-admin".to_string(), ts: holler_proto::now_millis() };
         let body = holler_proto::encode(&Envelope::response(&cid, serde_json::to_value(ack).ok())).unwrap_or_default();
-        let _ = reply_tx.send(body);
+        let _ = reply_tx.send(Reply::Inline(body));
         return RequestOutcome::Inline;
     }
 
@@ -240,7 +267,7 @@ fn handle_request(text: &str, deps: &AdminDeps, reply_tx: &tokio::sync::mpsc::Un
     let Some(verb) = verb else {
         let err = WireError::new(Code::MethodNotFound, "unknown method", None);
         let body = holler_proto::encode(&Envelope::error_frame(&cid, &err)).unwrap_or_default();
-        let _ = reply_tx.send(body);
+        let _ = reply_tx.send(Reply::Inline(body));
         return RequestOutcome::Inline;
     };
 
@@ -252,7 +279,7 @@ fn handle_request(text: &str, deps: &AdminDeps, reply_tx: &tokio::sync::mpsc::Un
         // Discarded (never observed) once the loop above has already ended
         // and dropped its receiver — MO 5's "if the client disconnects
         // mid-`say`, the hub finishes the turn and discards the reply".
-        let _ = reply_tx.send(body);
+        let _ = reply_tx.send(Reply::Spawned(body));
     });
     RequestOutcome::Spawned
 }
@@ -273,7 +300,7 @@ fn handle_request(text: &str, deps: &AdminDeps, reply_tx: &tokio::sync::mpsc::Un
 /// reply does at `circuit.rs:812-817` (that path always sends an unkeyed
 /// error; this one recovers the id when it can, since an admin client has no
 /// other way to correlate the reply with its request).
-fn reply_decode_error(text: &str, err: &EnvelopeError, reply_tx: &tokio::sync::mpsc::UnboundedSender<String>) {
+fn reply_decode_error(text: &str, err: &EnvelopeError, reply_tx: &tokio::sync::mpsc::UnboundedSender<Reply>) {
     let id = serde_json::from_str::<serde_json::Value>(text)
         .ok()
         .and_then(|v| v.get("id").and_then(|i| i.as_str()).map(str::to_owned));
@@ -283,7 +310,7 @@ fn reply_decode_error(text: &str, err: &EnvelopeError, reply_tx: &tokio::sync::m
         None => Envelope::Error { id, error },
     };
     let body = holler_proto::encode(&frame).unwrap_or_default();
-    let _ = reply_tx.send(body);
+    let _ = reply_tx.send(Reply::Inline(body));
 }
 
 #[cfg(test)]

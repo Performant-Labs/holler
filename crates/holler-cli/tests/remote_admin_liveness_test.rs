@@ -104,6 +104,56 @@ async fn inflight_request_is_never_timed_out() {
     let _ = hub_state;
 }
 
+/// **AC 16(b) regression (PR-Agent review, 2026-09-28).** An inline-answered
+/// request (`circuit/ping`) arriving while an `admin/say` is still spawned
+/// must not reset `inflight` to 0 — only a reply from the spawned task
+/// itself may decrement it (`admin.rs`'s `Reply::Spawned` vs `Reply::Inline`).
+/// Before this was fixed, every reply on the shared channel decremented the
+/// counter regardless of origin, so an inline reply arriving mid-flight
+/// could re-arm the liveness-timeout arm and close the socket before the
+/// slow `admin/say`'s real response ever came back.
+#[tokio::test]
+async fn an_inline_reply_does_not_reset_inflight_while_a_spawned_request_is_pending() {
+    let (hub_state, body_state, hub, body, token_id, _ws_url) = liveness_rig(&[("alpha", &["--slow", "--chunks", "8"])]);
+    let mut admin = live_socket(&body_state, &hub, &token_id, "admin-f", "admin").await;
+    send_admin_say(&mut admin, "b-say-f", "b/alpha").await;
+
+    // An inline-answered circuit/ping, sent right after the spawned
+    // admin/say — its reply travels the same reply channel and arrives
+    // well before the slow say's.
+    let ping_req = serde_json::json!({ "jsonrpc": "2.0", "id": "b-ping-f", "method": "circuit/ping", "params": {} });
+    futures_util::SinkExt::send(&mut admin, tokio_tungstenite::tungstenite::Message::text(ping_req.to_string()))
+        .await
+        .expect("send circuit/ping");
+    let ping_reply = tokio::time::timeout(Duration::from_secs(5), decode_next(&mut admin))
+        .await
+        .expect("circuit/ping answered")
+        .expect("a response frame");
+    let holler_proto::Envelope::Response { id, .. } = ping_reply else {
+        panic!("expected the circuit/ping response, got {ping_reply:?}");
+    };
+    assert_eq!(id, "b-ping-f");
+
+    // Deliberately silent for longer than the rig's 1000ms liveness
+    // timeout, exactly as `inflight_request_is_never_timed_out` does — if
+    // the ping's inline reply wrongly zeroed `inflight`, the hub closes
+    // this socket here instead of waiting for the say to finish.
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+
+    let reply = tokio::time::timeout(Duration::from_secs(10), decode_next(&mut admin))
+        .await
+        .unwrap_or_else(|_| panic!("the admin/say response never arrived — an inline reply falsely reset inflight"))
+        .expect("a response frame");
+    let holler_proto::Envelope::Response { id, .. } = reply else {
+        panic!("expected the admin/say response, got {reply:?}");
+    };
+    assert_eq!(id, "b-say-f");
+
+    body.stop(&body_state, Duration::from_secs(10));
+    drop(hub);
+    let _ = hub_state;
+}
+
 /// **AC 16(c).** An admin socket that completes its hello and then sends and
 /// reads nothing is closed within the liveness timeout plus a bounded
 /// margin, and the hub logs `admin_dropped` for it.
