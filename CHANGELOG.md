@@ -114,6 +114,10 @@ fills this file in at release time.
   flake's cause is still open ([#420](https://github.com/Performant-Labs/holler/issues/420)).
 
 ### Bug Fixes
+- `holler hub status`'s human-readable output no longer prints a hardcoded `(protocol 2)` — the protocol
+  bump to 3 (#340/#352, ADR 0019's Noise XK hard re-pair) never updated this display string, so it lied
+  about the running hub's actual protocol version. Now reads the real value from the status document, the
+  same way `version`/`clients`/`sessions` already do — no longer goes stale on the next protocol bump.
 - A token's label can be reused. `holler hub token delete ID` (and its aliases `rm`/`remove`) now removes
   an `unused` or `revoked` token's record from `hub/tokens.json`, which frees its label for a new
   `hub token mint`; it prints `deleted <id> (<label>, <prior state>)`, and `--json` reports

@@ -45,7 +45,8 @@ pub fn status(server: Option<&str>, json: bool) -> i32 {
                 let clients = doc.get("clients").and_then(|v| v.as_u64()).unwrap_or(0);
                 let sessions = doc.get("sessions").and_then(|v| v.as_u64()).unwrap_or(0);
                 let version = doc.get("version").and_then(|v| v.as_str()).unwrap_or("?");
-                println!("hub {version} (protocol 2)");
+                let protocol = doc.get("protocol").and_then(|v| v.as_u64()).map_or_else(|| "?".to_string(), |p| p.to_string());
+                println!("hub {version} (protocol {protocol})");
                 println!("  listening: {listening}");
                 println!("  clients:   {clients}");
                 println!("  sessions:  {sessions}");

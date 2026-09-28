@@ -486,8 +486,9 @@ fn hub_status_live_human_readable_format() {
     let (code, stdout, stderr) = run(&state, &["hub", "status"]);
     assert_eq!(code, 0, "stderr: {stderr}");
     let lines: Vec<&str> = stdout.lines().collect();
-    assert_eq!(lines.len(), 4, "hub {{version}} (protocol 2) / listening / clients / sessions: {stdout:?}");
-    assert!(lines[0].starts_with("hub ") && lines[0].contains("(protocol 2)"), "line 1: {lines:?}");
+    assert_eq!(lines.len(), 4, "hub {{version}} (protocol {{N}}) / listening / clients / sessions: {stdout:?}");
+    let want_protocol = format!("(protocol {})", holler_proto::PROTOCOL_VERSION);
+    assert!(lines[0].starts_with("hub ") && lines[0].contains(&want_protocol), "line 1: {lines:?}");
     assert!(lines[1].trim_start().starts_with("listening:"), "line 2: {lines:?}");
     assert!(lines[2].trim_start().starts_with("clients:") && lines[2].contains('0'), "line 3: {lines:?}");
     assert!(lines[3].trim_start().starts_with("sessions:") && lines[3].contains('0'), "line 4: {lines:?}");
