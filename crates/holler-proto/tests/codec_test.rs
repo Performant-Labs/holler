@@ -75,6 +75,13 @@ fn canonical_frame(method: &str) -> String {
         "session/answer" => format!(
             r#"{{"jsonrpc":"2.0","id":"{id}","method":"session/answer","params":{{"session":"io/alpha","choice":"0"}}}}"#
         ),
+        "admin/status" => format!(r#"{{"jsonrpc":"2.0","id":"{id}","method":"admin/status","params":{{}}}}"#),
+        "admin/roster" => format!(r#"{{"jsonrpc":"2.0","id":"{id}","method":"admin/roster","params":{{"all":false,"prefix":null}}}}"#),
+        "admin/say" => format!(r#"{{"jsonrpc":"2.0","id":"{id}","method":"admin/say","params":{{"session":"io/alpha","text":"hi","queue":false,"grant":null,"timeout_ms":600000}}}}"#),
+        "admin/interrupt" => format!(r#"{{"jsonrpc":"2.0","id":"{id}","method":"admin/interrupt","params":{{"session":"io/alpha","text":null}}}}"#),
+        "admin/answer" => format!(r#"{{"jsonrpc":"2.0","id":"{id}","method":"admin/answer","params":{{"session":"io/alpha","choice":"0"}}}}"#),
+        "admin/wait" => format!(r#"{{"jsonrpc":"2.0","id":"{id}","method":"admin/wait","params":{{"sessions":"io/alpha","prefix":null,"until":null,"after":null,"timeout_ms":600000}}}}"#),
+        "admin/query" => format!(r#"{{"jsonrpc":"2.0","id":"{id}","method":"admin/query","params":{{"target":null,"method":"query/status","params":null}}}}"#),
         _ => panic!("no canonical frame for {method:?}"),
     }
 }

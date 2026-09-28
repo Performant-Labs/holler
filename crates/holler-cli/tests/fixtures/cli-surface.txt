@@ -37,6 +37,8 @@ hub query | status
 hub query | protocol 2 --json
 hub query | io status
 hub query | io/alpha support opencode --json
+hub status | --server wss://hub.example.ts.net --json
+hub query | --server wss://hub.example.ts.net status
 
 # --- top-level daily verbs (hub-only) --------------------------------------
 roster |
@@ -44,19 +46,24 @@ roster | --json
 roster | --all
 roster | --prefix io
 roster | --prefix io/ --all --json
+roster | --server wss://hub.example.ts.net --json
 say | io/alpha "reply with the word ALPHA"
 say | alpha "hi" --timeout 30s --json
 say | io/alpha "hi" --queue
 say | io/alpha "hi" --grant gnt_0123456789abcdef0123456789abcdef --json
+say | --server wss://hub.example.ts.net alpha "hi"
 interrupt | io/alpha
 interrupt | io/alpha "stop; do X instead"
+interrupt | --server wss://hub.example.ts.net alpha
 answer | io/alpha yes
 answer | io/alpha 0
 answer | io/alpha red,m --json
+answer | --server wss://hub.example.ts.net alpha yes
 wait | io/alpha
 wait | io/alpha,io/beta --until completed,failed --after h-01H --timeout 120s --json
 wait | --prefix io
 wait | --prefix io/ --until gone --timeout 5s
+wait | --server wss://hub.example.ts.net alpha
 hold | io/alpha
 hold | io/alpha --reason "deploy freeze"
 hold | io/alpha --reason "deploy freeze" --json

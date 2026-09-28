@@ -33,12 +33,13 @@ use support::{join, mint_token, roster_json, wait_for, write_sessions_toml, Body
 // AC 9 — CLI surface: `--server` does not exist yet.
 // ---------------------------------------------------------------------------
 
-/// `holler roster --server <url>` must be rejected by `clap` as an unknown
-/// flag on current `main` — there is no `--server` on any of the seven verbs
-/// yet (brief `Files`: `crates/holler-cli/src/cli.rs`, "`--server` on 7
-/// structs", not yet applied). Once AC 9 lands this exact invocation must
-/// instead fail differently (dial a real hub, or a clean "could not reach"),
-/// never with a clap usage error — this test's failure mode is the pin.
+/// `holler roster --server <url>` against an unjoined state dir must fail
+/// cleanly with a "not joined" error, never succeed and never fail with a
+/// clap usage error naming `--server` as unrecognized. AC 9 landed `--server`
+/// on `roster` (and the other six admin-eligible verbs); this test now pins
+/// the post-AC-9 failure mode against a body identity that was never
+/// joined — `admin_client::load_identity`'s `NotJoined` error, per
+/// `BodyIdentity::path` (`crates/holler-body/src/identity.rs`).
 #[test]
 fn roster_remote_server_flag_is_not_yet_recognized() {
     let state = StateDir::new();
@@ -57,11 +58,15 @@ fn roster_remote_server_flag_is_not_yet_recognized() {
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
         !out.status.success(),
-        "AC 9 is not implemented yet — `roster --server` must not succeed on current main: {stderr}"
+        "`roster --server` against an unjoined state dir must not succeed: {stderr}"
     );
     assert!(
-        stderr.contains("--server") || stderr.to_lowercase().contains("unexpected argument"),
-        "expected a clap usage error naming the unrecognized `--server` flag, got: {stderr}"
+        !stderr.contains("--server") && !stderr.to_lowercase().contains("unexpected argument"),
+        "`--server` is a recognized flag now (AC 9) — clap must not refuse it as unknown: {stderr}"
+    );
+    assert!(
+        stderr.contains("credential.json") || stderr.to_lowercase().contains("not joined") || stderr.to_lowercase().contains("run `holler body join`"),
+        "expected a clean 'not joined' error naming the missing body credential, got: {stderr}"
     );
 }
 

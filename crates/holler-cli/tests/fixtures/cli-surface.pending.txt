@@ -8,13 +8,3 @@
 #
 # Each line names its story.
 
-# #508/#509 (remote hub-admin client, epic #506) AC 9: `--server <URL>` on
-# each of the seven admin-eligible verbs. Move each line to cli-surface.txt
-# once `crates/holler-cli/src/cli.rs` adds `--server`.
-roster | --server wss://hub.example.ts.net --json
-say | --server wss://hub.example.ts.net alpha "hi"
-interrupt | --server wss://hub.example.ts.net alpha
-answer | --server wss://hub.example.ts.net alpha yes
-wait | --server wss://hub.example.ts.net alpha
-hub status | --server wss://hub.example.ts.net --json
-hub query | --server wss://hub.example.ts.net status
