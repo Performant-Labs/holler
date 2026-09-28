@@ -454,11 +454,11 @@ The harness's *code* is already cross-OS at the seams (`#[cfg(unix)]` vs `#[cfg(
 
 This file does **not** cover the platform group's two manual, real-hardware cases — `hlr-1405`/`1406`, the cross-machine checkpoints (join/run/ping/roster/reconnect/revoke over a tailnet, and the say/interrupt/reprompt session checkpoints) tagged `test-tag-remote` — those are tracked separately in issue [#316](https://github.com/Performant-Labs/holler/issues/316) and are out of scope for `cargo test`.
 
-### The capstone stubs never replace: `hlr-1103` (issue #317)
+### The capstone stubs never replace: `hlr-1408` (issue #317)
 
 Every automated test in this harness — including `hlr-1405`/`1406` above, which are genuinely cross-machine — still drives `stub-acp`, a deterministic fake agent that always claims ACP protocol v2 (see `stub-acp`'s own module doc). No amount of loopback or cross-machine *wire* coverage against that stub proves a *real* harness (`opencode acp`, the Claude Code ACP bridge, …) actually works — and until [issue #363](https://github.com/Performant-Labs/holler/pull/363) added a v1-compatibility fallback, none of them did: every real ACP implementation checked (the newest `opencode`, the newest published `@agentclientprotocol/sdk`) negotiates protocol v1, never v2 (full writeup on [issue #362](https://github.com/Performant-Labs/holler/issues/362)).
 
-**hlr-1103** (issue [#317](https://github.com/Performant-Labs/holler/issues/317)) is the gate that closes that hole: two real `opencode acp` sessions, on a real second machine, over a real tailnet — full run recorded on that issue, including the `roster`/`hub status --json` output and both log files. It is manual and real-hardware for the same reason `hlr-1405`/`1406` are: no stub, however faithful, is evidence that Holler's ACP driver actually works against something a real user would run.
+**hlr-1408** (issue [#317](https://github.com/Performant-Labs/holler/issues/317)) is the gate that closes that hole: two real `opencode acp` sessions, on a real second machine, over a real tailnet — full run recorded on that issue, including the `roster`/`hub status --json` output and both log files. It is manual and real-hardware for the same reason `hlr-1405`/`1406` are: no stub, however faithful, is evidence that Holler's ACP driver actually works against something a real user would run.
 
 ## Known upstream-blocked tests: `agent-client-protocol` lost-wakeup (issue #272)
 

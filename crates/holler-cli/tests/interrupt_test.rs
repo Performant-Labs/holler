@@ -376,7 +376,7 @@ fn interrupt_ack_timeout_is_independent_of_heartbeat() {
     assert_eq!(scaled_baseline, Duration::from_secs(5));
 }
 
-/// The automated counterpart of the manual acceptance gate `hlr-1103`
+/// The automated counterpart of the manual acceptance gate `hlr-1408`
 /// (catalogued as `hlr-1107`: lifecycle, auto, smoke, alters-db) — the full
 /// operator journey through the real CLI binary against the real stub.
 #[test]

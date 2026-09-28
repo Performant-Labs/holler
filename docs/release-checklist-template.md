@@ -28,7 +28,7 @@ test-case catalog, which includes manual and acceptance-gate cases CI never runs
 - [ ] 5. **Every failure accounted for** — fixed, or explicitly overridden
   - A red test does **not** automatically block a release; it can be knowingly overridden
   - But the override must be recorded here, not silently skipped: `___` (which test, why, whether it also needs a "Known issues" line below)
-- [ ] 6. **Run the manual acceptance gates** — [#317](https://github.com/Performant-Labs/holler/issues/317) (hlr-1103) and [#318](https://github.com/Performant-Labs/holler/issues/318) (hlr-1104)
+- [ ] 6. **Run the manual acceptance gates** — [#317](https://github.com/Performant-Labs/holler/issues/317) (hlr-1408) and [#318](https://github.com/Performant-Labs/holler/issues/318) (hlr-1409)
   - Both must **run and pass** for a real release — this project exists to prove the rebuild; do not silently skip them
   - Result: `___`
 
