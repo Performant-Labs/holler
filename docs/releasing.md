@@ -51,7 +51,7 @@ which includes manual and acceptance-gate cases outside CI's reach. Before taggi
 catalog itself — `ruby scripts/test-run.rb run <test-run-issue>` (or `discover`/`exec <ID>` per
 case; see [`running-tests.md`](running-tests.md) for the full flag reference), **run from the
 repo root** — and make a deliberate call on whether this release warrants the full manual
-acceptance gates ([#317](https://github.com/Performant-Labs/holler/issues/317)/[#318](https://github.com/Performant-Labs/holler/issues/318)).
+acceptance gates ([#317](https://github.com/Performant-Labs/holler/issues/317)/[#318](https://github.com/Performant-Labs/holler/issues/318)/[#125](https://github.com/Performant-Labs/holler/issues/125)).
 A release note this doc, or the checklist, ever says "tests passed" off CI alone is wrong.
 
 **A red test does not automatically block a release — it can be knowingly overridden.** This is
@@ -186,6 +186,10 @@ with real gaps rather than holding a release hostage to a fix. Before finalizing
 - Skim open `bug`-labeled issues (`gh issue list --repo Performant-Labs/holler --label bug
   --state open`) — a real defect doesn't need the `bug` label to be worth mentioning (e.g. a
   plainly-titled defect report with no label yet).
+- Also skim open `known-issue`-labeled issues (`gh issue list --repo Performant-Labs/holler
+  --label known-issue --state open`) — a real, accepted gap that isn't a defect at all (an ADR's
+  own deferral, a scope narrowed on purpose) still belongs in the release notes; `bug` alone
+  misses these because they were never filed as bugs.
 - For anything real and still open, add one line to the release notes: what it is, roughly when
   it bites, and a link to the issue. Silence is the failure mode here, not the bug itself — a
   user who hits a documented known issue is annoyed for a minute; a user who hits an undocumented
@@ -212,12 +216,12 @@ several PRs.
 1. Confirm the release commit (usually `main`'s tip) has a green CI run on both platforms — see
    above.
 2. Run the full test-case catalog against that commit (`test-run.rb run`/`exec`), and decide
-   whether this release warrants the full manual acceptance gates (#317/#318) — see "Were the
+   whether this release warrants the full manual acceptance gates (#317/#318/#125) — see "Were the
    tests run?" above. CI green alone is not this step.
-3. Gather known issues **now, before writing the CHANGELOG** — skim open `bug`-labeled (and
-   otherwise plainly real) issues, write down the exact list. This list goes into the
-   CHANGELOG's Known Issues subsection verbatim in step 7 — gathering it after would mean
-   writing that subsection twice, or worse, from memory.
+3. Gather known issues **now, before writing the CHANGELOG** — skim open `bug`- and
+   `known-issue`-labeled (and otherwise plainly real) issues, write down the exact list. This
+   list goes into the CHANGELOG's Known Issues subsection verbatim in step 7 — gathering it after
+   would mean writing that subsection twice, or worse, from memory.
 4. Branch `release/vX.Y.Z` off the release commit. Everything below (steps 5-8) happens on this
    one branch.
 5. Decide the version bump (PATCH/MINOR/MAJOR) from everything accumulated in `CHANGELOG.md`'s
