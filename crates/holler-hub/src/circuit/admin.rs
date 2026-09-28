@@ -294,12 +294,13 @@ mod tests {
     /// own `admin/query` special-case (not listed here — it never reaches
     /// this function, see its own doc comment) is the complete admin
     /// allowlist: exactly the seven `admin/*` catalog rows `methods.rs`
-    /// defines for issue #508/#509, no more and no fewer. This pins the
-    /// allowlist's shape directly, so a future accidental addition (or
-    /// removal) of a mapped verb fails here instead of only being visible as
-    /// a missing/extra wire refusal.
+    /// defines for issue #508/#509 (six mapped directly by this function,
+    /// plus `admin/query`'s own special case), no more and no fewer. This
+    /// pins the allowlist's shape directly, so a future accidental addition
+    /// (or removal) of a mapped verb fails here instead of only being
+    /// visible as a missing/extra wire refusal.
     #[test]
-    fn allowlist_is_exactly_the_six_delegated_admin_verbs() {
+    fn allowlist_is_exactly_the_six_mapped_verbs_plus_query() {
         let mapped: Vec<(&str, &str)> = [
             ("admin/status", "status"),
             ("admin/roster", "roster"),

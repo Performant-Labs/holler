@@ -53,6 +53,9 @@ pub use cmds::{answer, body_status_json, hub_status_json, interrupt, roster_json
 pub mod hold_rig;
 // Raw WebSocket clients against a real hub (issue #455).
 pub mod raw_ws;
+// The remote-admin rig (issue #508/#509, epic #506), shared by
+// `remote_admin_test.rs` and `remote_admin_liveness_test.rs`.
+pub mod remote_admin_rig;
 // Warm-up readiness (`wait_warm` and its two classifiers, issue #420).
 mod warmup;
 #[allow(unused_imports)] // #420

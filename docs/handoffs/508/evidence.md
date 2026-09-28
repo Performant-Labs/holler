@@ -95,3 +95,55 @@
   >                 Ok(())
   >             }
   > ```
+
+## T round-2 (test-only rework, #678: AC 3/4/6/7/8/10/11/13/16 coverage)
+
+- **Fact:** the roster `Row`'s `last_seen: u64` field is a plain epoch-seconds clock, touched by `Registry::mark_connected`/`touch`/etc. — `remote_admin_traffic_never_moves_the_bodys_last_seen` (AC 4) reads it straight off `roster --json` and asserts it is bit-identical before/after admin traffic, relying on this field being the one and only clock the "must never move" claim is about.
+  **Source:** `crates/holler-hub/src/roster.rs:162`
+  **Verbatim excerpt:**
+  > ```
+  >     pub last_seen: u64,
+  > ```
+
+- **Fact:** `refusal_words` gives the exact plain-words prefix for each counted `-32002` reason code this rework's AC 7/13 tests assert on verbatim: `token_unknown` → "this hub has no such token…", `token_not_bound` → "this hub no longer accepts this body's token…", and `no_public_key`/`key_mismatch` → "this body's key does not match the key the hub registered at join…". These strings are produced by the existing body-path handshake code the admin client reuses unchanged (MO 7), not anything this rework's tests or F's admin-path code define themselves.
+  **Source:** `crates/holler-body/src/connection/handshake.rs:182-193`
+  **Verbatim excerpt:**
+  > ```
+  > fn refusal_words(code: &str) -> &'static str {
+  >     match code {
+  >         TOKEN_NOT_BOUND_REASON => {
+  >             "this hub no longer accepts this body's token: it was revoked, or never joined; mint a new token and re-run `body join`"
+  >         }
+  >         TOKEN_UNKNOWN_REASON => {
+  >             "this hub has no such token: it was deleted, or this body is joined to a different hub; mint a new token and re-run `body join`"
+  >         }
+  >         NO_PUBLIC_KEY_REASON | KEY_MISMATCH_REASON => "this body's key does not match the key the hub registered at join; re-run `body join`",
+  > ```
+
+- **Fact:** `token_cmd::revoke` calls `holler_hub::control::revoke_live(id)` — a revoked token's *already-live* connection (this rework's `remote_admin_revoked_token_is_refused_and_counted_in_lockout` joins and connects a real body **before** revoking its token) is actively torn down by `hub token revoke` itself, not left dangling until its next reconnect attempt.
+  **Source:** `crates/holler-cli/src/token_cmd.rs:248`
+  **Verbatim excerpt:**
+  > ```
+  >     let _ = holler_hub::control::revoke_live(id);
+  > ```
+
+- **Fact:** `talk::say`'s reply `message_id` is `format!("m-{request_id}")`, where `request_id` is a freshly minted `CorrelationId` per call — so it is never stable across two otherwise-identical `say` invocations, local or remote. `remote_say_wait_and_hub_query_json_match_local_after_masking` (AC 10) masks `message.messageId` on this basis, per the brief's own rule for a newly discovered volatile field.
+  **Source:** `crates/holler-hub/src/talk.rs:458`
+  **Verbatim excerpt:**
+  > ```
+  >         message_id: format!("m-{request_id}"),
+  > ```
+
+- **Fact:** `circuit/admin.rs`'s own `frame_outcome` treats **any** inbound WS `Ping`/`Pong`/`Frame` as `FrameOutcome::Continue { fresh_frame: now }`, which refreshes `last_frame_at` exactly like a real request would — so a raw test socket that *reads* during the idle window (even only to observe a keepalive Ping) has this WS client library auto-answer with a Pong, which itself refreshes the hub's liveness clock and would prevent the idle-close AC 16(c) pins. `idle_admin_socket_is_closed_within_the_liveness_timeout` therefore reads nothing at all until after sleeping past the configured timeout.
+  **Source:** `crates/holler-hub/src/circuit/admin.rs:159`
+  **Verbatim excerpt:**
+  > ```
+  >         Some(Ok(Message::Ping(_) | Message::Pong(_) | Message::Frame(_))) => FrameOutcome::Continue { fresh_frame: now },
+  > ```
+
+- **Fact:** `stub-acp`'s streamed chunk text is the fixed, deterministic `format!("stub chunk {index}")` — no timestamp, no random id — so two identical `say` turns (same chunk count) against the same session always produce byte-identical `text`/`message.parts[].text`, which is what lets `remote_say_wait_and_hub_query_json_match_local_after_masking` (AC 10) compare local vs. remote `say --json` for equality once only `elapsed_ms`/`message.messageId` are masked.
+  **Source:** `crates/holler-cli/tests/stub-acp/main.rs:798`
+  **Verbatim excerpt:**
+  > ```
+  >                         "content": { "type": "text", "text": format!("stub chunk {index}") }
+  > ```

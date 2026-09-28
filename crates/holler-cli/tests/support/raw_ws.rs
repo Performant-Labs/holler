@@ -239,6 +239,36 @@ pub fn log_events(hub: &Hub, ty: &str) -> Vec<serde_json::Value> {
     hub.log_text().lines().filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok()).filter(|v| v["type"] == ty).collect()
 }
 
+/// One full-handshake admin (or body) socket already past the
+/// `circuit/hello` exchange (issue #508): reads the joined credential's
+/// x25519 identity off `state` (the body's own dir — `state/body/
+/// x25519_identity.key`), reads the hub's pubkey from that **same joined
+/// credential's own pinned `hub_pubkey`** (never `hub_x25519_pubkey`, which
+/// resolves a hub identity from `state`'s `hub/` subtree — wrong, and
+/// silently *generates a fresh, different* hub identity, once `state` is a
+/// body-only dir with no hub state of its own, AC 11's whole point), dials
+/// and runs [`go_live_as`] with `role`. Shared by `remote_admin_test.rs` and
+/// `remote_admin_liveness_test.rs` (handoff-S round-2, A-dup W-2: previously
+/// duplicated five times in one file, and the same shape a sixth/seventh
+/// time would need in the other).
+pub async fn live_socket(state: &StateDir, hub: &Hub, token_id: &str, hostname: &str, role: &str) -> WsClient {
+    let identity = holler_body::identity::load(state.path())
+        .expect("this state dir has a joined body/credential.json")
+        .expect("credential.json is readable");
+    let secret_bytes: [u8; 32] = std::fs::read(holler_body::x25519_identity::identity_path(state.path()))
+        .expect("read the joined credential's x25519 identity")
+        .try_into()
+        .expect("the identity key file is exactly 32 raw bytes");
+    let hub_pubkey: [u8; 32] = hex::decode(&identity.hub_pubkey)
+        .ok()
+        .and_then(|b| b.try_into().ok())
+        .expect("the joined credential's pinned hub_pubkey is 32 bytes of hex");
+    let ws_url = hub.ws_url();
+    let mut ws = connect_ws(&ws_url).await;
+    go_live_as(&mut ws, token_id, &secret_bytes, &hub_pubkey, hostname, &ws_url, role).await;
+    ws
+}
+
 /// Send `circuit/authenticate` for `token_id` on `ws` and read what comes
 /// back, skipping ping/pong. `Ok(code)` is a close that arrived **before any
 /// application frame** (issue #455: the token-scoped lockout answers with a

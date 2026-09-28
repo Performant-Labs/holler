@@ -26,8 +26,9 @@ mod support;
 
 use std::time::Duration;
 
-use support::raw_ws::{connect_ws, go_live_as, hub_x25519_pubkey};
-use support::{join, mint_token, roster_json, wait_for, write_sessions_toml, Body, Hub, StateDir, STARTUP_WAIT};
+use support::raw_ws::live_socket;
+use support::remote_admin_rig::{mutate_credential, run, spawn_cmd, two_dir_rig};
+use support::{hub_status_json, join, mint_token, roster_json, wait_for, write_sessions_toml, Body, Hub, StateDir, STARTUP_WAIT};
 
 // ---------------------------------------------------------------------------
 // AC 9 — CLI surface: `--server` does not exist yet.
@@ -105,15 +106,9 @@ async fn remote_admin_hello_must_not_supersede_the_connected_body() {
     // The credential an `admin_client` (brief MO 7) is specced to reuse:
     // this body's own persisted X25519 identity, read straight off disk —
     // never a second, separately-minted credential.
-    let secret_bytes: [u8; 32] = std::fs::read(holler_body::x25519_identity::identity_path(state.path()))
-        .expect("read the body's persisted x25519 identity")
-        .try_into()
-        .expect("the identity key file is exactly 32 raw bytes");
-    let hub_pubkey = hub_x25519_pubkey(&state);
-    let ws_url = hub.ws_url();
-
-    let mut admin = connect_ws(&ws_url).await;
-    go_live_as(&mut admin, &token_id, &secret_bytes, &hub_pubkey, "admin-client", &ws_url, "admin").await;
+    // Held alive (never read from again) for the rest of the test: its mere
+    // presence, past the hello, is the hazard AC 3 pins.
+    let _admin = live_socket(&state, &hub, &token_id, "admin-client", "admin").await;
 
     // Give a real supersede (if the hub does one) time to land, then check
     // the body is still the one holding the roster row and can still serve
@@ -169,15 +164,7 @@ async fn remote_admin_hello_must_not_create_a_roster_row_from_presence() {
     // socket is the *only* connection this token ever makes.
     join(&state, &state, &hub.ws_url(), &token_id, &secret);
 
-    let secret_bytes: [u8; 32] = std::fs::read(holler_body::x25519_identity::identity_path(state.path()))
-        .expect("read the joined credential's x25519 identity")
-        .try_into()
-        .expect("the identity key file is exactly 32 raw bytes");
-    let hub_pubkey = hub_x25519_pubkey(&state);
-    let ws_url = hub.ws_url();
-
-    let mut admin = connect_ws(&ws_url).await;
-    go_live_as(&mut admin, &token_id, &secret_bytes, &hub_pubkey, "admin-only", &ws_url, "admin").await;
+    let mut admin = live_socket(&state, &hub, &token_id, "admin-only", "admin").await;
 
     assert!(
         roster_json(&state)["rows"].as_array().expect("rows array").is_empty(),
@@ -233,26 +220,21 @@ async fn admin_socket_refuses_every_non_admin_method_with_method_not_found() {
     let (token_id, secret) = mint_token(&state, "admin-refusals");
     join(&state, &state, &hub.ws_url(), &token_id, &secret);
 
-    let secret_bytes: [u8; 32] = std::fs::read(holler_body::x25519_identity::identity_path(state.path()))
-        .expect("read the joined credential's x25519 identity")
-        .try_into()
-        .expect("the identity key file is exactly 32 raw bytes");
-    let hub_pubkey = hub_x25519_pubkey(&state);
-    let ws_url = hub.ws_url();
+    let mut admin = live_socket(&state, &hub, &token_id, "admin-refusals", "admin").await;
 
-    let mut admin = connect_ws(&ws_url).await;
-    go_live_as(&mut admin, &token_id, &secret_bytes, &hub_pubkey, "admin-refusals", &ws_url, "admin").await;
-
-    for (idx, method) in ["control/revoke", "control/test_drop", "session/prompt"].iter().enumerate() {
+    for (idx, method) in ["control/revoke", "control/test_drop", "session/prompt", "admin/revoke", "admin/hold", "admin/release"].iter().enumerate() {
         let id = format!("b-refuse{idx:03}");
         let req = serde_json::json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": {} });
         futures_util::SinkExt::send(&mut admin, tokio_tungstenite::tungstenite::Message::text(req.to_string()))
             .await
             .unwrap_or_else(|e| panic!("send {method} on the admin socket: {e}"));
 
-        let reply = support::raw_ws::decode_next(&mut admin)
+        // Advisory (handoff-S): wrapped in a timeout so a regression that
+        // reverts the fix fails fast instead of hanging this test forever.
+        let reply = tokio::time::timeout(Duration::from_secs(10), support::raw_ws::decode_next(&mut admin))
             .await
-            .unwrap_or_else(|| panic!("admin socket must reply to {method}, not hang or close"));
+            .unwrap_or_else(|_| panic!("admin socket must reply to {method} within 10s, not hang"))
+            .unwrap_or_else(|| panic!("admin socket must reply to {method}, not close"));
         let holler_proto::Envelope::Error { id: reply_id, error } = reply else {
             panic!("AC 5: {method} on an admin socket must get an error frame, got {reply:?}");
         };
@@ -276,15 +258,7 @@ async fn body_socket_sending_admin_roster_gets_method_not_found() {
     let (token_id, secret) = mint_token(&state, "body-not-admin");
     join(&state, &state, &hub.ws_url(), &token_id, &secret);
 
-    let secret_bytes: [u8; 32] = std::fs::read(holler_body::x25519_identity::identity_path(state.path()))
-        .expect("read the joined credential's x25519 identity")
-        .try_into()
-        .expect("the identity key file is exactly 32 raw bytes");
-    let hub_pubkey = hub_x25519_pubkey(&state);
-    let ws_url = hub.ws_url();
-
-    let mut body_socket = connect_ws(&ws_url).await;
-    go_live_as(&mut body_socket, &token_id, &secret_bytes, &hub_pubkey, "body-not-admin", &ws_url, "body").await;
+    let mut body_socket = live_socket(&state, &hub, &token_id, "body-not-admin", "body").await;
 
     let req = serde_json::json!({ "jsonrpc": "2.0", "id": "b-notadmin1", "method": "admin/roster", "params": {} });
     futures_util::SinkExt::send(&mut body_socket, tokio_tungstenite::tungstenite::Message::text(req.to_string()))
@@ -318,15 +292,7 @@ async fn admin_connected_and_dropped_log_lines_carry_all_four_fields() {
     let (token_id, secret) = mint_token(&state, "admin-log-fields");
     join(&state, &state, &hub.ws_url(), &token_id, &secret);
 
-    let secret_bytes: [u8; 32] = std::fs::read(holler_body::x25519_identity::identity_path(state.path()))
-        .expect("read the joined credential's x25519 identity")
-        .try_into()
-        .expect("the identity key file is exactly 32 raw bytes");
-    let hub_pubkey = hub_x25519_pubkey(&state);
-    let ws_url = hub.ws_url();
-
-    let mut admin = connect_ws(&ws_url).await;
-    go_live_as(&mut admin, &token_id, &secret_bytes, &hub_pubkey, "admin-log-fields", &ws_url, "admin").await;
+    let admin = live_socket(&state, &hub, &token_id, "admin-log-fields", "admin").await;
 
     wait_for(Duration::from_secs(5), || hub.log_text().contains("admin_connected").then_some(())).expect("admin_connected must be logged once the admin hello completes");
 
@@ -336,16 +302,478 @@ async fn admin_connected_and_dropped_log_lines_carry_all_four_fields() {
     wait_for(Duration::from_secs(5), || hub.log_text().contains("admin_dropped").then_some(())).expect("admin_dropped must be logged once the admin socket closes");
 
     let log = hub.log_text();
-    let connected_line = log.lines().find(|l| l.contains("admin_connected")).expect("an admin_connected line exists");
-    let dropped_line = log.lines().find(|l| l.contains("admin_dropped")).expect("an admin_dropped line exists");
+    let connected_lines: Vec<&str> = log.lines().filter(|l| l.contains("admin_connected")).collect();
+    let dropped_lines: Vec<&str> = log.lines().filter(|l| l.contains("admin_dropped")).collect();
+    assert_eq!(connected_lines.len(), 1, "AC 17: exactly one admin_connected line: {log}");
+    assert_eq!(dropped_lines.len(), 1, "AC 17: exactly one admin_dropped line: {log}");
     for field in ["token_id", "label", "peer", "sas"] {
-        assert!(connected_line.contains(field), "AC 17: admin_connected must carry `{field}`: {connected_line}");
-        assert!(dropped_line.contains(field), "AC 17: admin_dropped must carry `{field}`: {dropped_line}");
+        assert!(connected_lines[0].contains(field), "AC 17: admin_connected must carry `{field}`: {}", connected_lines[0]);
+        assert!(dropped_lines[0].contains(field), "AC 17: admin_dropped must carry `{field}`: {}", dropped_lines[0]);
     }
     assert!(
         !log.contains("conn_connected"),
         "AC 17: an admin socket must never produce a body-path `conn_connected` line: {log}"
     );
 
+    drop(hub);
+}
+
+// ---------------------------------------------------------------------------
+// AC 3 (end-to-end) / AC 4 (last_seen) / AC 11 — handoff-S round-2, required
+// item 1-2 and its own dedicated AC 11 check.
+// ---------------------------------------------------------------------------
+
+/// **AC 3 end-to-end.** With a body connected and one session live, a real
+/// `holler roster --server <ws>` run **from the body's own state dir**
+/// exits 0 and lists that session; afterward the body is still connected,
+/// and a later `say` to it still gets its reply — the brief's own named
+/// test (`remote_admin_does_not_supersede_the_body`).
+#[test]
+fn remote_admin_does_not_supersede_the_body() {
+    let (hub_state, body_state, hub, body, _token_id, ws_url) = two_dir_rig(&[("alpha", &[])]);
+
+    let out = run(&body_state, &["roster", "--server", &ws_url, "--json"]);
+    assert!(out.status.success(), "AC 3: `roster --server` must exit 0: {}", String::from_utf8_lossy(&out.stderr));
+    let doc: serde_json::Value = serde_json::from_slice(&out.stdout).expect("roster --json is valid JSON");
+    let rows = doc["rows"].as_array().expect("rows array");
+    assert!(rows.iter().any(|r| r["name"] == "b/alpha"), "AC 3: the remote roster must list the body's session: {doc}");
+
+    let after = roster_json(&hub_state);
+    assert_eq!(after["rows"][0]["conn_state"], "connected", "AC 3: the body stays connected after the remote roster: {after}");
+
+    let say_out = run(&hub_state, &["say", "b/alpha", "ping-after-remote-roster"]);
+    assert!(say_out.status.success(), "AC 3: `say` after the remote roster must still get a reply: {}", String::from_utf8_lossy(&say_out.stderr));
+
+    body.stop(&body_state, Duration::from_secs(10));
+    drop(hub);
+}
+
+/// **AC 4 (second half).** Admin traffic (`admin/roster`, `admin/status`, run
+/// twice each with a pause between) must never move the body's own roster
+/// row's `last_seen` (roster.rs:162) — the hazard-free half AC 4 pins beyond
+/// "no row is created" (already covered by
+/// `remote_admin_hello_must_not_create_a_roster_row_from_presence`).
+#[test]
+fn remote_admin_traffic_never_moves_the_bodys_last_seen() {
+    let (hub_state, body_state, hub, body, _token_id, ws_url) = two_dir_rig(&[("alpha", &[])]);
+
+    let before = roster_json(&hub_state);
+    let last_seen_before = before["rows"][0]["last_seen"].as_u64().expect("last_seen is a number");
+
+    std::thread::sleep(Duration::from_secs(2)); // last_seen is whole seconds; make a moved value observable.
+
+    let roster_out = run(&body_state, &["roster", "--server", &ws_url, "--json"]);
+    assert!(roster_out.status.success(), "{}", String::from_utf8_lossy(&roster_out.stderr));
+    let status_out = run(&body_state, &["hub", "status", "--server", &ws_url, "--json"]);
+    assert!(status_out.status.success(), "{}", String::from_utf8_lossy(&status_out.stderr));
+
+    let after = roster_json(&hub_state);
+    let last_seen_after = after["rows"][0]["last_seen"].as_u64().expect("last_seen is a number");
+    assert_eq!(
+        last_seen_before, last_seen_after,
+        "AC 4: admin/roster and admin/status traffic must never touch the body's last_seen: before={before} after={after}"
+    );
+
+    body.stop(&body_state, Duration::from_secs(10));
+    drop(hub);
+}
+
+/// **AC 11.** The remote form needs no hub state at all: the body dir this
+/// test runs the remote CLI against has no `hub/` subtree (never created —
+/// only `join` ever wrote to it, and `join` writes only `body/`), and the
+/// remote call still succeeds.
+#[test]
+fn remote_form_needs_no_hub_state() {
+    let (_hub_state, body_state, hub, body, _token_id, ws_url) = two_dir_rig(&[("alpha", &[])]);
+
+    assert!(!body_state.hub().exists(), "AC 11: the body dir must have no hub/ subtree: {}", body_state.hub().display());
+
+    let out = run(&body_state, &["roster", "--server", &ws_url, "--json"]);
+    assert!(out.status.success(), "AC 11: the remote form must succeed with only body state present: {}", String::from_utf8_lossy(&out.stderr));
+
+    body.stop(&body_state, Duration::from_secs(10));
+    drop(hub);
+}
+
+// ---------------------------------------------------------------------------
+// AC 6 — hold parity.
+// ---------------------------------------------------------------------------
+
+/// **AC 6.** A remote `say --server` to a locally `hold`-ed session gets the
+/// same `session_held` refusal text and exit code as the local form (hold
+/// itself stays local-only — out of scope per the brief — only the say path
+/// is remote here).
+#[test]
+fn remote_say_to_a_held_session_gets_the_same_session_held_refusal_as_local() {
+    let (hub_state, body_state, hub, body, _token_id, ws_url) = two_dir_rig(&[("alpha", &[])]);
+
+    let held = run(&hub_state, &["hold", "b/alpha", "--reason", "deploy freeze"]);
+    assert!(held.status.success(), "{}", String::from_utf8_lossy(&held.stderr));
+
+    let local = run(&hub_state, &["say", "b/alpha", "hi"]);
+    let remote = run(&body_state, &["say", "b/alpha", "hi", "--server", &ws_url]);
+
+    assert_eq!(local.status.code(), remote.status.code(), "AC 6: local vs remote exit code must match for a held session");
+    let local_err = String::from_utf8_lossy(&local.stderr);
+    let remote_err = String::from_utf8_lossy(&remote.stderr);
+    assert!(local_err.contains("session_held") && remote_err.contains("session_held"), "local={local_err} remote={remote_err}");
+    assert!(remote_err.contains("deploy freeze"), "AC 6: the remote refusal must carry the hold reason: {remote_err}");
+
+    body.stop(&body_state, Duration::from_secs(10));
+    drop(hub);
+}
+
+// ---------------------------------------------------------------------------
+// AC 7 — an unknown token, a wrong X25519 key, and a revoked token on the
+// admin path each get -32002 exactly as the body path does, and count
+// toward the existing lockout — no new code path around it.
+// ---------------------------------------------------------------------------
+
+/// **AC 7 (unknown token).** Corrupting the joined credential's `token_id`
+/// to one the hub never minted reproduces the body path's own
+/// `token_unknown` refusal on the admin path: exit 1, the same plain words,
+/// and a lockout entry naming it.
+#[test]
+fn remote_admin_unknown_token_is_refused_and_counted_in_lockout() {
+    let (hub_state, body_state, hub, body, _token_id, ws_url) = two_dir_rig(&[("alpha", &[])]);
+    mutate_credential(&body_state, |v| v["token_id"] = serde_json::json!("tok_does_not_exist"));
+
+    let out = run(&body_state, &["roster", "--server", &ws_url, "--json"]);
+    assert_eq!(out.status.code(), Some(1), "AC 7/13: exit 1 for an unknown token");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("this hub has no such token"), "{stderr}");
+
+    let doc = hub_status_json(&hub_state);
+    let peers = doc["lockout"]["peers"].as_array().expect("lockout.peers");
+    assert!(
+        peers.iter().any(|p| p["reasons"].get("token_unknown").is_some()),
+        "AC 7: the refusal must count toward the existing lockout table: {doc}"
+    );
+
+    body.stop(&body_state, Duration::from_secs(10));
+    drop(hub);
+}
+
+/// **AC 7 (wrong X25519 key) / AC 13.** Overwriting the joined credential's
+/// x25519 identity key reproduces a `static key mismatch` refusal: exit 1,
+/// the body path's own words, and a lockout entry.
+#[test]
+fn remote_admin_wrong_key_is_refused_and_counted_in_lockout() {
+    let (hub_state, body_state, hub, body, _token_id, ws_url) = two_dir_rig(&[("alpha", &[])]);
+    let key_path = holler_body::x25519_identity::identity_path(body_state.path());
+    std::fs::write(&key_path, [9u8; 32]).expect("overwrite the x25519 identity key");
+
+    let out = run(&body_state, &["roster", "--server", &ws_url, "--json"]);
+    assert_eq!(out.status.code(), Some(1), "AC 7/13: exit 1 for a wrong X25519 key");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("does not match the key the hub registered at join") || stderr.contains("hub public key mismatch"),
+        "{stderr}"
+    );
+
+    let doc = hub_status_json(&hub_state);
+    let peers = doc["lockout"]["peers"].as_array().expect("lockout.peers");
+    assert!(!peers.is_empty(), "AC 7: the refusal must count toward the existing lockout table: {doc}");
+
+    body.stop(&body_state, Duration::from_secs(10));
+    drop(hub);
+}
+
+/// **AC 7 (revoked token).** `hub token revoke` on a token an admin client is
+/// still using reproduces `token_not_bound`: exit 1, the body path's own
+/// words, and a lockout entry naming this token.
+#[test]
+fn remote_admin_revoked_token_is_refused_and_counted_in_lockout() {
+    let (hub_state, body_state, hub, _body, token_id, ws_url) = two_dir_rig(&[("alpha", &[])]);
+    let revoke = run(&hub_state, &["hub", "token", "revoke", &token_id]);
+    assert!(revoke.status.success(), "{}", String::from_utf8_lossy(&revoke.stderr));
+
+    let out = run(&body_state, &["roster", "--server", &ws_url, "--json"]);
+    assert_eq!(out.status.code(), Some(1), "AC 7/13: exit 1 for a revoked token");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("no longer accepts this body's token"), "{stderr}");
+
+    let doc = hub_status_json(&hub_state);
+    let peers = doc["lockout"]["peers"].as_array().expect("lockout.peers");
+    assert!(
+        peers.iter().any(|p| p["token_ids"].as_array().is_some_and(|ids| ids.iter().any(|t| t["id"] == token_id.as_str()))),
+        "AC 7: the revoked token's refusal must count toward its own lockout entry: {doc}"
+    );
+
+    drop(hub);
+}
+
+// ---------------------------------------------------------------------------
+// AC 8 — concurrency: 2 remote + 1 local `say`, with and without `--queue`.
+// ---------------------------------------------------------------------------
+
+/// **AC 8 (no `--queue`).** Two remote `say`s plus one local `say`, all
+/// racing the same session: each contender exits either 0 with a reply or 1
+/// with `session_busy`, at least one exits 0, none panics or hangs past its
+/// own timeout, and afterward the body is still connected and a fourth
+/// `say` succeeds.
+#[test]
+fn remote_and_local_say_concurrency_matches_local_only_story() {
+    let (hub_state, body_state, hub, body, _token_id, ws_url) = two_dir_rig(&[("alpha", &["--slow", "--chunks", "5"])]);
+
+    let a = spawn_cmd(&body_state, &["say", "b/alpha", "hi-A", "--server", &ws_url]);
+    let b = spawn_cmd(&body_state, &["say", "b/alpha", "hi-B", "--server", &ws_url]);
+    let c = spawn_cmd(&hub_state, &["say", "b/alpha", "hi-C"]);
+
+    let outs: Vec<_> = [a, b, c].into_iter().map(|ch| ch.wait_with_output().expect("wait on holler")).collect();
+    let mut ok = 0;
+    for (label, o) in ["remote A", "remote B", "local"].iter().zip(&outs) {
+        let stderr = String::from_utf8_lossy(&o.stderr);
+        match o.status.code() {
+            Some(0) => ok += 1,
+            Some(1) => assert!(stderr.contains("session_busy"), "AC 8: {label} refused for a reason other than session_busy: {stderr}"),
+            other => panic!("AC 8: {label} exited unexpectedly ({other:?}): {stderr}"),
+        }
+    }
+    assert!(ok >= 1, "AC 8: at least one of the three contenders must get the reply");
+
+    wait_for(STARTUP_WAIT, || {
+        roster_json(&hub_state)["rows"].as_array()?.iter().any(|r| r["name"] == "b/alpha" && r["state"] == "idle").then_some(())
+    })
+    .expect("AC 8: the session settles back to idle after the contention");
+    let fourth = run(&hub_state, &["say", "b/alpha", "hi-D"]);
+    assert!(fourth.status.success(), "AC 8: a fourth say after the contention must succeed: {}", String::from_utf8_lossy(&fourth.stderr));
+
+    body.stop(&body_state, Duration::from_secs(10));
+    drop(hub);
+}
+
+/// **AC 8 (`--queue` on all three).** All three contenders exit 0 with a
+/// reply.
+#[test]
+fn remote_and_local_say_with_queue_all_three_succeed() {
+    let (hub_state, body_state, hub, body, _token_id, ws_url) = two_dir_rig(&[("alpha", &["--slow", "--chunks", "3"])]);
+
+    let a = spawn_cmd(&body_state, &["say", "b/alpha", "hi-A", "--server", &ws_url, "--queue"]);
+    let b = spawn_cmd(&body_state, &["say", "b/alpha", "hi-B", "--server", &ws_url, "--queue"]);
+    let c = spawn_cmd(&hub_state, &["say", "b/alpha", "hi-C", "--queue"]);
+
+    let outs: Vec<_> = [a, b, c].into_iter().map(|ch| ch.wait_with_output().expect("wait on holler")).collect();
+    for (label, o) in ["remote A", "remote B", "local"].iter().zip(&outs) {
+        assert!(o.status.success(), "AC 8: with --queue, {label} must exit 0: {}", String::from_utf8_lossy(&o.stderr));
+    }
+
+    body.stop(&body_state, Duration::from_secs(10));
+    drop(hub);
+}
+
+// ---------------------------------------------------------------------------
+// AC 10 — `--json` byte parity between the remote and local forms, masking
+// exactly the brief's named volatile fields.
+// ---------------------------------------------------------------------------
+
+/// The last non-empty line of `stderr` — the `error: …` line every `*_cmd.rs`
+/// refusal prints, after this process's own `logging_started` banner and (on
+/// the remote/WS path only) the transport's own per-frame `component: wire`
+/// debug lines (`HOLLER_DEBUG=quiet`'s "shape only" debug logging, `log.rs`'s
+/// module doc) — a real, expected difference between the local Unix-socket
+/// client (no per-frame wire logging at all) and the remote WS client, not
+/// part of AC 10's own parity claim (the *rendered refusal*, not this
+/// process's own diagnostic noise).
+fn error_line(out: &std::process::Output) -> String {
+    String::from_utf8_lossy(&out.stderr)
+        .lines()
+        .last()
+        .unwrap_or_default()
+        .to_string()
+}
+
+/// Replace the brief's named volatile field(s) with a fixed placeholder so
+/// two otherwise-identical `--json` documents compare equal.
+fn masked(verb: &str, mut v: serde_json::Value) -> serde_json::Value {
+    let mask_field = |row: &mut serde_json::Value, field: &str| {
+        if let Some(o) = row.as_object_mut() {
+            if o.contains_key(field) {
+                o.insert(field.to_string(), serde_json::json!("<masked>"));
+            }
+        }
+    };
+    match verb {
+        "roster" => {
+            if let Some(rows) = v.get_mut("rows").and_then(|r| r.as_array_mut()) {
+                for row in rows.iter_mut() {
+                    mask_field(row, "last_seen");
+                    mask_field(row, "last_update_at");
+                }
+            }
+        }
+        "wait" => {
+            if let Some(rows) = v.get_mut("rows").and_then(|r| r.as_array_mut()) {
+                for row in rows.iter_mut() {
+                    mask_field(row, "age_secs");
+                }
+            }
+        }
+        "hub_status" => {
+            if let Some(peers) = v.pointer_mut("/lockout/peers").and_then(|p| p.as_array_mut()) {
+                for p in peers.iter_mut() {
+                    mask_field(p, "retry_after_secs");
+                }
+            }
+        }
+        _ => {}
+    }
+    v
+}
+
+fn json_body(out: &std::process::Output) -> serde_json::Value {
+    serde_json::from_slice(&out.stdout).unwrap_or_else(|e| panic!("invalid --json stdout ({e}): {}", String::from_utf8_lossy(&out.stdout)))
+}
+
+/// **AC 10.** `roster --json` and `hub status --json` from the remote form
+/// are byte-identical to the local form against the same hub state, once
+/// each verb's own named volatile field is masked.
+#[test]
+fn remote_roster_and_hub_status_json_match_local_after_masking() {
+    let (hub_state, body_state, hub, body, _token_id, ws_url) = two_dir_rig(&[("alpha", &[])]);
+
+    let local = run(&hub_state, &["roster", "--json"]);
+    let remote = run(&body_state, &["roster", "--server", &ws_url, "--json"]);
+    assert!(local.status.success() && remote.status.success());
+    assert_eq!(masked("roster", json_body(&local)), masked("roster", json_body(&remote)), "AC 10: roster --json parity");
+
+    let local = run(&hub_state, &["hub", "status", "--json"]);
+    let remote = run(&body_state, &["hub", "status", "--server", &ws_url, "--json"]);
+    assert!(local.status.success() && remote.status.success());
+    assert_eq!(masked("hub_status", json_body(&local)), masked("hub_status", json_body(&remote)), "AC 10: hub status --json parity");
+
+    body.stop(&body_state, Duration::from_secs(10));
+    drop(hub);
+}
+
+/// **AC 10.** `say --json` from the remote form matches the local form
+/// (stub-acp's reply text is deterministic per chunk count, so only
+/// `elapsed_ms` needs masking), and `wait --json`/`hub query status --json`
+/// match too.
+#[test]
+fn remote_say_wait_and_hub_query_json_match_local_after_masking() {
+    let (hub_state, body_state, hub, body, _token_id, ws_url) = two_dir_rig(&[("alpha", &["--chunks", "2"])]);
+
+    let local = run(&hub_state, &["say", "b/alpha", "parity-ping", "--json"]);
+    assert!(local.status.success(), "{}", String::from_utf8_lossy(&local.stderr));
+    wait_for(STARTUP_WAIT, || {
+        roster_json(&hub_state)["rows"].as_array()?.iter().any(|r| r["name"] == "b/alpha" && r["state"] == "idle").then_some(())
+    })
+    .expect("idle before the remote say");
+    let remote = run(&body_state, &["say", "b/alpha", "parity-ping", "--server", &ws_url, "--json"]);
+    assert!(remote.status.success(), "{}", String::from_utf8_lossy(&remote.stderr));
+    // `message.messageId` is a fresh random id per turn even for two
+    // identical **local** runs (confirmed: it is not stable), so per the
+    // brief's own AC 10 rule ("if T finds another field that differs
+    // between two identical local runs... the masked set is extended by
+    // that one field only") it joins `elapsed_ms` in the masked set here.
+    let mut l = json_body(&local);
+    let mut r = json_body(&remote);
+    for doc in [&mut l, &mut r] {
+        doc["elapsed_ms"] = serde_json::json!("<masked>");
+        doc["message"]["messageId"] = serde_json::json!("<masked>");
+    }
+    assert_eq!(l, r, "AC 10: say --json parity (elapsed_ms/message.messageId masked)");
+
+    let local = run(&hub_state, &["--json", "wait", "b/alpha"]);
+    let remote = run(&body_state, &["--json", "wait", "b/alpha", "--server", &ws_url]);
+    assert!(local.status.success() && remote.status.success());
+    assert_eq!(masked("wait", json_body(&local)), masked("wait", json_body(&remote)), "AC 10: wait --json parity");
+
+    let local = run(&hub_state, &["--json", "hub", "query", "status"]);
+    let remote = run(&body_state, &["--json", "hub", "query", "--server", &ws_url, "status"]);
+    assert!(local.status.success() && remote.status.success());
+    assert_eq!(json_body(&local), json_body(&remote), "AC 10: hub query status --json parity (no field is masked)");
+
+    body.stop(&body_state, Duration::from_secs(10));
+    drop(hub);
+}
+
+/// **AC 10.** `interrupt --json` and `answer --json` refusals (an unknown
+/// session, in both cases) match the local form byte for byte on stderr and
+/// exit code.
+#[test]
+fn remote_interrupt_and_answer_refusals_match_local() {
+    let (hub_state, body_state, hub, body, _token_id, ws_url) = two_dir_rig(&[("alpha", &[])]);
+
+    let local = run(&hub_state, &["--json", "interrupt", "b/nonexistent"]);
+    let remote = run(&body_state, &["--json", "interrupt", "b/nonexistent", "--server", &ws_url]);
+    assert_eq!(local.status.code(), remote.status.code(), "AC 10: interrupt refusal exit code parity");
+    assert_eq!(error_line(&local), error_line(&remote), "AC 10: interrupt refusal message parity");
+
+    let local = run(&hub_state, &["--json", "answer", "b/nonexistent", "yes"]);
+    let remote = run(&body_state, &["--json", "answer", "b/nonexistent", "yes", "--server", &ws_url]);
+    assert_eq!(local.status.code(), remote.status.code(), "AC 10: answer refusal exit code parity");
+    assert_eq!(error_line(&local), error_line(&remote), "AC 10: answer refusal message parity");
+
+    body.stop(&body_state, Duration::from_secs(10));
+    drop(hub);
+}
+
+// ---------------------------------------------------------------------------
+// AC 13 — the remaining failure words and exit codes (the not-joined and
+// session_held cases are already pinned above/elsewhere).
+// ---------------------------------------------------------------------------
+
+/// **AC 13.** `--server ws://10.0.0.5:1` (plaintext, non-loopback) is refused
+/// before any dial, exit 3, even against a state dir that was never joined.
+/// A loopback address nothing is listening on gets exit 1, "could not reach
+/// the hub at …".
+#[test]
+fn remote_server_policy_and_unreachable_failures_get_the_documented_exit_codes() {
+    let unjoined = StateDir::new();
+    let out = run(&unjoined, &["roster", "--server", "ws://10.0.0.5:1", "--json"]);
+    assert_eq!(out.status.code(), Some(3), "AC 13: a non-loopback plaintext --server is exit 3: {}", String::from_utf8_lossy(&out.stderr));
+
+    let (_hub_state, body_state, hub, body, _token_id, _ws_url) = two_dir_rig(&[("alpha", &[])]);
+    let dead_addr = support::hold_rig::free_addr();
+    let out = run(&body_state, &["roster", "--server", &format!("ws://{dead_addr}"), "--json"]);
+    assert_eq!(out.status.code(), Some(1), "AC 13: an unreachable server is exit 1: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("could not reach the hub at"),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    body.stop(&body_state, Duration::from_secs(10));
+    drop(hub);
+}
+
+/// **AC 13.** An ambiguous session name on the remote path exits 2, matching
+/// the local form's exact wording (two bodies, each hosting a session named
+/// `alpha`).
+#[test]
+fn remote_ambiguous_session_exits_2_matching_local() {
+    let hub_state = StateDir::new();
+    let hub = Hub::start(&hub_state);
+
+    let body1_state = StateDir::new();
+    let (token1, secret1) = mint_token(&hub_state, "b1");
+    join(&body1_state, &hub_state, &hub.ws_url(), &token1, &secret1);
+    let config1 = write_sessions_toml(&body1_state, &[("alpha", &[])]);
+    let body1 = Body::start(&body1_state, &config1);
+
+    let body2_state = StateDir::new();
+    let (token2, secret2) = mint_token(&hub_state, "b2");
+    join(&body2_state, &hub_state, &hub.ws_url(), &token2, &secret2);
+    let config2 = write_sessions_toml(&body2_state, &[("alpha", &[])]);
+    let body2 = Body::start(&body2_state, &config2);
+
+    for want in ["b1/alpha", "b2/alpha"] {
+        wait_for(STARTUP_WAIT, || {
+            roster_json(&hub_state)["rows"].as_array()?.iter().any(|r| r["name"] == want && r["state"] == "idle").then_some(())
+        })
+        .unwrap_or_else(|| panic!("{want} never came up idle"));
+    }
+
+    let ws_url = hub.ws_url();
+    let local = run(&hub_state, &["say", "alpha", "hi"]);
+    let remote = run(&body1_state, &["say", "alpha", "hi", "--server", &ws_url]);
+    assert_eq!(local.status.code(), Some(2), "local ambiguous form must exit 2: {}", String::from_utf8_lossy(&local.stderr));
+    assert_eq!(remote.status.code(), Some(2), "AC 13: remote ambiguous form must exit 2 matching local: {}", String::from_utf8_lossy(&remote.stderr));
+    assert_eq!(error_line(&local), error_line(&remote), "AC 13: ambiguous stderr text must match local");
+
+    body1.stop(&body1_state, Duration::from_secs(10));
+    body2.stop(&body2_state, Duration::from_secs(10));
     drop(hub);
 }
