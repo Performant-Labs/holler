@@ -83,3 +83,15 @@
   >             }
   >             EnvelopeError::UnknownMethod(_) => Code::MethodNotFound,
   > ```
+
+## T re-entry (Phase 6 verify/GREEN, addressing handoff-S REWORK item 4)
+
+- **Fact:** `circuit.rs`'s body-role session loop already refuses any decoded-but-unrecognised `Envelope::Request` with `-32601` (`Code::MethodNotFound`) via its own trailing catch-all match arm in `handle_inbound` — unchanged by this feature. `body_socket_sending_admin_roster_gets_method_not_found` (AC 5, second bullet) relies on this existing arm to prove a body-role socket sending `admin/roster` is refused, without needing any new hub-side role check.
+  **Source:** `crates/holler-hub/src/circuit.rs:869-872`
+  **Verbatim excerpt:**
+  > ```
+  >             Envelope::Request { id, .. } => {
+  >                 send_error(self.sink, Some(id), Code::MethodNotFound, "unknown method").await;
+  >                 Ok(())
+  >             }
+  > ```

@@ -285,3 +285,49 @@ fn reply_decode_error(text: &str, err: &EnvelopeError, reply_tx: &tokio::sync::m
     let body = holler_proto::encode(&frame).unwrap_or_default();
     let _ = reply_tx.send(body);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::allowlisted_verb;
+
+    /// **AC 5 (third bullet).** [`allowlisted_verb`] plus `handle_request`'s
+    /// own `admin/query` special-case (not listed here — it never reaches
+    /// this function, see its own doc comment) is the complete admin
+    /// allowlist: exactly the seven `admin/*` catalog rows `methods.rs`
+    /// defines for issue #508/#509, no more and no fewer. This pins the
+    /// allowlist's shape directly, so a future accidental addition (or
+    /// removal) of a mapped verb fails here instead of only being visible as
+    /// a missing/extra wire refusal.
+    #[test]
+    fn allowlist_is_exactly_the_six_delegated_admin_verbs() {
+        let mapped: Vec<(&str, &str)> = [
+            ("admin/status", "status"),
+            ("admin/roster", "roster"),
+            ("admin/say", "say"),
+            ("admin/interrupt", "interrupt"),
+            ("admin/answer", "answer"),
+            ("admin/wait", "wait"),
+        ]
+        .to_vec();
+        for (method, verb) in &mapped {
+            assert_eq!(allowlisted_verb(method), Some(*verb), "{method} must map to allowlisted verb {verb}");
+        }
+
+        // Nothing else — not `admin/query` (handled separately in
+        // `handle_request`), not a plain `control/*` name, not a body-shaped
+        // method — is in this map.
+        for other in [
+            "admin/query",
+            "admin/revoke",
+            "admin/hold",
+            "admin/release",
+            "control/revoke",
+            "control/test_drop",
+            "session/prompt",
+            "circuit/ping",
+            "",
+        ] {
+            assert_eq!(allowlisted_verb(other), None, "{other} must not be in the allowlisted-verb map");
+        }
+    }
+}

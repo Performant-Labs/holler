@@ -210,3 +210,142 @@ async fn remote_admin_hello_must_not_create_a_roster_row_from_presence() {
 
     drop(hub);
 }
+
+// ---------------------------------------------------------------------------
+// AC 5 — the allowlist: `-32601` for anything else, including on a decode
+// failure (handoff-S REWORK item 1 / Q-1's fix in `circuit/admin.rs`).
+// ---------------------------------------------------------------------------
+
+/// **AC 5.** An admin socket sending any of three non-admin methods (two of
+/// which are not in the wire catalog at all, and so previously failed to
+/// decode and got silently dropped — handoff-S's Q-1, fixed by
+/// `circuit/admin.rs::reply_decode_error`) must get an explicit `-32601`
+/// reply carrying the request's own id, never a hang and never a bare
+/// disconnect. Un-catalogued names (`control/revoke`, `control/test_drop`)
+/// exercise the decode-failure reply path directly; a catalogued-but-wrong-
+/// direction name (`session/prompt`, hub-to-body) exercises the
+/// decodes-fine-but-unrecognised path (`handle_request`'s own `-32601` at
+/// admin.rs:241-244).
+#[tokio::test]
+async fn admin_socket_refuses_every_non_admin_method_with_method_not_found() {
+    let state = StateDir::new();
+    let hub = Hub::start(&state);
+    let (token_id, secret) = mint_token(&state, "admin-refusals");
+    join(&state, &state, &hub.ws_url(), &token_id, &secret);
+
+    let secret_bytes: [u8; 32] = std::fs::read(holler_body::x25519_identity::identity_path(state.path()))
+        .expect("read the joined credential's x25519 identity")
+        .try_into()
+        .expect("the identity key file is exactly 32 raw bytes");
+    let hub_pubkey = hub_x25519_pubkey(&state);
+    let ws_url = hub.ws_url();
+
+    let mut admin = connect_ws(&ws_url).await;
+    go_live_as(&mut admin, &token_id, &secret_bytes, &hub_pubkey, "admin-refusals", &ws_url, "admin").await;
+
+    for (idx, method) in ["control/revoke", "control/test_drop", "session/prompt"].iter().enumerate() {
+        let id = format!("b-refuse{idx:03}");
+        let req = serde_json::json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": {} });
+        futures_util::SinkExt::send(&mut admin, tokio_tungstenite::tungstenite::Message::text(req.to_string()))
+            .await
+            .unwrap_or_else(|e| panic!("send {method} on the admin socket: {e}"));
+
+        let reply = support::raw_ws::decode_next(&mut admin)
+            .await
+            .unwrap_or_else(|| panic!("admin socket must reply to {method}, not hang or close"));
+        let holler_proto::Envelope::Error { id: reply_id, error } = reply else {
+            panic!("AC 5: {method} on an admin socket must get an error frame, got {reply:?}");
+        };
+        assert_eq!(error.code, -32601, "AC 5: {method} on an admin socket must be refused with -32601, got {error:?}");
+        assert_eq!(reply_id.as_deref(), Some(id.as_str()), "AC 5: the refusal for {method} must carry back the request's own id");
+    }
+
+    drop(hub);
+}
+
+/// **AC 5 (second bullet).** `admin/roster` is legal only on an admin-role
+/// connection (catalog `Direction::BodyToHub`, meaning "an admin client to
+/// the hub" per `methods.rs`'s own doc comment — never a plain body). A
+/// body-role socket sending it must get `-32601`, the same catch-all
+/// `circuit.rs::handle_inbound`'s trailing `Envelope::Request { id, .. }` arm
+/// already gives any other unrecognised-for-this-role request.
+#[tokio::test]
+async fn body_socket_sending_admin_roster_gets_method_not_found() {
+    let state = StateDir::new();
+    let hub = Hub::start(&state);
+    let (token_id, secret) = mint_token(&state, "body-not-admin");
+    join(&state, &state, &hub.ws_url(), &token_id, &secret);
+
+    let secret_bytes: [u8; 32] = std::fs::read(holler_body::x25519_identity::identity_path(state.path()))
+        .expect("read the joined credential's x25519 identity")
+        .try_into()
+        .expect("the identity key file is exactly 32 raw bytes");
+    let hub_pubkey = hub_x25519_pubkey(&state);
+    let ws_url = hub.ws_url();
+
+    let mut body_socket = connect_ws(&ws_url).await;
+    go_live_as(&mut body_socket, &token_id, &secret_bytes, &hub_pubkey, "body-not-admin", &ws_url, "body").await;
+
+    let req = serde_json::json!({ "jsonrpc": "2.0", "id": "b-notadmin1", "method": "admin/roster", "params": {} });
+    futures_util::SinkExt::send(&mut body_socket, tokio_tungstenite::tungstenite::Message::text(req.to_string()))
+        .await
+        .expect("send admin/roster on a body-role socket");
+
+    let reply = support::raw_ws::decode_next(&mut body_socket)
+        .await
+        .expect("the body socket must reply to admin/roster, not hang");
+    let holler_proto::Envelope::Error { error, .. } = reply else {
+        panic!("AC 5: admin/roster on a body-role socket must get an error frame, got {reply:?}");
+    };
+    assert_eq!(error.code, -32601, "AC 5: admin/roster on a body-role socket must be refused with -32601, got {error:?}");
+
+    drop(hub);
+}
+
+// ---------------------------------------------------------------------------
+// AC 17 — `admin_connected`/`admin_dropped` log lines.
+// ---------------------------------------------------------------------------
+
+/// **AC 17.** Both the `admin_connected` and `admin_dropped` hub log lines
+/// must each carry all four fields (`token_id`, `label`, `peer`, `sas`), and
+/// an admin socket must never produce a `conn_connected` line — that event
+/// name is the body-path connection log (`circuit.rs:271`), and an admin
+/// socket never reaches that branch (MO 3-4).
+#[tokio::test]
+async fn admin_connected_and_dropped_log_lines_carry_all_four_fields() {
+    let state = StateDir::new();
+    let hub = Hub::start(&state);
+    let (token_id, secret) = mint_token(&state, "admin-log-fields");
+    join(&state, &state, &hub.ws_url(), &token_id, &secret);
+
+    let secret_bytes: [u8; 32] = std::fs::read(holler_body::x25519_identity::identity_path(state.path()))
+        .expect("read the joined credential's x25519 identity")
+        .try_into()
+        .expect("the identity key file is exactly 32 raw bytes");
+    let hub_pubkey = hub_x25519_pubkey(&state);
+    let ws_url = hub.ws_url();
+
+    let mut admin = connect_ws(&ws_url).await;
+    go_live_as(&mut admin, &token_id, &secret_bytes, &hub_pubkey, "admin-log-fields", &ws_url, "admin").await;
+
+    wait_for(Duration::from_secs(5), || hub.log_text().contains("admin_connected").then_some(())).expect("admin_connected must be logged once the admin hello completes");
+
+    // Close the socket cleanly so `run`'s loop ends and `admin_dropped` logs.
+    drop(admin);
+
+    wait_for(Duration::from_secs(5), || hub.log_text().contains("admin_dropped").then_some(())).expect("admin_dropped must be logged once the admin socket closes");
+
+    let log = hub.log_text();
+    let connected_line = log.lines().find(|l| l.contains("admin_connected")).expect("an admin_connected line exists");
+    let dropped_line = log.lines().find(|l| l.contains("admin_dropped")).expect("an admin_dropped line exists");
+    for field in ["token_id", "label", "peer", "sas"] {
+        assert!(connected_line.contains(field), "AC 17: admin_connected must carry `{field}`: {connected_line}");
+        assert!(dropped_line.contains(field), "AC 17: admin_dropped must carry `{field}`: {dropped_line}");
+    }
+    assert!(
+        !log.contains("conn_connected"),
+        "AC 17: an admin socket must never produce a body-path `conn_connected` line: {log}"
+    );
+
+    drop(hub);
+}
