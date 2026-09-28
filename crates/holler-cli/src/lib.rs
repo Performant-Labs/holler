@@ -16,6 +16,7 @@ pub mod roster_cmd;
 pub mod say_cmd;
 pub mod time_fmt;
 pub mod token_cmd;
+pub mod transport;
 pub mod wait_cmd;
 
 pub use crate::cli::{

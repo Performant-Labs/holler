@@ -1,7 +1,7 @@
 //! The v2 method catalog (docs §4).
 //!
-//! Fifteen methods, four kinds, two directions. `catalog()` is the single
-//! source of truth — the body/hub dispatch and the codec's
+//! Twenty-two methods, four kinds, three directions. `catalog()` is the
+//! single source of truth — the body/hub dispatch and the codec's
 //! `method_not_found` path both read from it.
 //!
 //! Kinds:
@@ -11,7 +11,8 @@
 //! Directions:
 //! - **Both** — legal on either side (the two endpoints differ only by
 //!   `hello.role`).
-//! - **body→hub** — join / authenticate.
+//! - **body→hub** — join / authenticate, and (issue #508) the seven
+//!   `admin/*` rows, legal only on an admin-role connection.
 //! - **hub→body** — prompt / cancel (and the hub's superseded).
 
 /// One row of the catalog.
@@ -37,13 +38,14 @@ pub enum MethodKind {
 pub enum Direction {
     /// Legal from either endpoint (distinguished only by `hello.role`).
     Both,
-    /// Only the body may send (join / authenticate).
+    /// Only the body may send (join / authenticate), or — issue #508 — an
+    /// admin client sending one of the seven `admin/*` rows below.
     BodyToHub,
     /// Only the hub may send (prompt / cancel).
     HubToBody,
 }
 
-/// The complete, closed v2 method catalog (15 rows).
+/// The complete, closed v2 method catalog (22 rows).
 #[rustfmt::skip]
 pub const CATALOG: &[Method] = &[
     // name                 kind          direction   (docs §4)
@@ -67,6 +69,18 @@ pub const CATALOG: &[Method] = &[
     // permission/elicitation — same direction/kind as `session/cancel`, the
     // request it's modeled on.
     Method { name: "session/answer",      kind: MethodKind::Request,      dir: Direction::HubToBody },
+    // `admin/*` (issue #508/#509, epic #506): the remote hub-admin control
+    // channel. Params/results are byte-for-byte the same as the matching
+    // `control/*` local form (docs v2.md §3-4); legal only on an admin-role
+    // connection, dispatched through the hub's admin allowlist
+    // (`circuit/admin.rs`), never a generic passthrough.
+    Method { name: "admin/status",        kind: MethodKind::Request,      dir: Direction::BodyToHub },
+    Method { name: "admin/roster",        kind: MethodKind::Request,      dir: Direction::BodyToHub },
+    Method { name: "admin/say",           kind: MethodKind::Request,      dir: Direction::BodyToHub },
+    Method { name: "admin/interrupt",     kind: MethodKind::Request,      dir: Direction::BodyToHub },
+    Method { name: "admin/answer",        kind: MethodKind::Request,      dir: Direction::BodyToHub },
+    Method { name: "admin/wait",          kind: MethodKind::Request,      dir: Direction::BodyToHub },
+    Method { name: "admin/query",         kind: MethodKind::Request,      dir: Direction::BodyToHub },
 ];
 
 /// Look up a method by its exact wire name.

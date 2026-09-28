@@ -38,7 +38,8 @@ fn err(message: String, exit_code: i32) -> RosterResult {
 /// reachable, a control-socket I/O error, or a bad reply).
 pub fn run(roster: &Roster, json: bool) -> RosterResult {
     let state_root = holler_hub::state::resolve_state_dir().unwrap_or_default();
-    match holler_hub::control::roster(roster.all, roster.prefix.as_deref()) {
+    let call = holler_hub::control::ControlCall::roster(roster.all, roster.prefix.as_deref());
+    match crate::transport::call(roster.server.as_deref(), &call) {
         Ok(doc) => {
             if json {
                 ok(doc.to_string())
@@ -49,6 +50,10 @@ pub fn run(roster: &Roster, json: bool) -> RosterResult {
         Err(holler_hub::control::ControlError::NoLiveHub) => {
             err(format!("no live holler hub reachable at {}", state_root.display()), 1)
         }
+        // Issue #508 AC 13: `--server ws://…` to a non-loopback host, exit 3
+        // (the same fail-closed policy `body join` applies) — checked before
+        // any dial, never reachable when `roster.server` is `None`.
+        Err(holler_hub::control::ControlError::RemotePolicyRefused(msg)) => err(msg, 3),
         Err(e) => err(e.to_string(), 1),
     }
 }

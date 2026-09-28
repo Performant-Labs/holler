@@ -16,7 +16,7 @@ use tokio::net::UnixStream;
 use crate::live::Registry;
 use crate::lockout::Lockout;
 use crate::roster::Roster;
-use crate::state::{advertise_path, resolve_state_dir, HubState};
+use crate::state::{resolve_state_dir, HubState};
 
 /// Handle one control-socket connection: newline-delimited JSON-RPC. A frame
 /// that does not decode is `-32700`/`-32600`; an unknown `control/…` method is
@@ -93,10 +93,7 @@ async fn dispatch_control(line: &str, registry: &Registry, roster: &Roster, lock
     log_control(method.unwrap_or("<none>"), id.as_deref());
 
     match method {
-        Some("control/status") => {
-            let doc = status_doc(registry, lockout).await;
-            encode_response(&cid, doc)
-        }
+        Some("control/status") => dispatch_allowlisted("status", &cid, &obj, registry, roster, lockout).await.unwrap_or_default(),
         Some("control/token_ping") => token_ping(&cid, &obj, registry).await,
         Some("control/caps") => {
             let listening = read_listening_here();
@@ -104,10 +101,14 @@ async fn dispatch_control(line: &str, registry: &Registry, roster: &Roster, lock
             encode_response(&cid, serde_json::to_value(doc).unwrap_or_default())
         }
         Some("control/support") => hub_support(&cid, &obj, registry).await,
-        Some("control/query_local") => hub_query_local(&cid, &obj, registry).await,
-        Some("control/query_remote") => hub_query_remote(&cid, &obj, registry).await,
+        Some("control/query_local") => {
+            dispatch_allowlisted("query_local", &cid, &obj, registry, roster, lockout).await.unwrap_or_default()
+        }
+        Some("control/query_remote") => {
+            dispatch_allowlisted("query_remote", &cid, &obj, registry, roster, lockout).await.unwrap_or_default()
+        }
         Some(other) if other.starts_with("control/") => {
-            dispatch_session_control(other, &cid, &obj, registry, roster).await
+            dispatch_session_control(other, &cid, &obj, registry, roster, lockout).await
         }
         Some(other) => encode_error(&cid, Code::MethodNotFound, format!("unknown control method: {other}")),
         // No method: not a call (a stray response/notification or empty frame).
@@ -126,16 +127,17 @@ async fn dispatch_session_control(
     obj: &serde_json::Value,
     registry: &Registry,
     roster: &Roster,
+    lockout: &Lockout,
 ) -> String {
     match method {
-        "control/say" => say(cid, obj, registry, roster).await,
+        "control/say" => dispatch_allowlisted("say", cid, obj, registry, roster, lockout).await.unwrap_or_default(),
         // `control/interrupt` (issue #191): the CLI's `interrupt` verb.
-        "control/interrupt" => interrupt(cid, obj, registry, roster).await,
-        "control/answer" => answer(cid, obj, registry).await,
+        "control/interrupt" => dispatch_allowlisted("interrupt", cid, obj, registry, roster, lockout).await.unwrap_or_default(),
+        "control/answer" => dispatch_allowlisted("answer", cid, obj, registry, roster, lockout).await.unwrap_or_default(),
         // `control/roster` (issue #186): read the hub's own roster and return
         // `{rows: [...]}` (the live-only view; the CLI's `--all` reads the
         // same socket and asks for the full set, which the server honors here).
-        "control/roster" => roster_control(cid, obj, roster, registry).await,
+        "control/roster" => dispatch_allowlisted("roster", cid, obj, registry, roster, lockout).await.unwrap_or_default(),
         // `control/hold` / `control/release` (issue #442): the session hold.
         "control/hold" => crate::control_hold::hold(cid, obj, registry, roster),
         "control/release" => crate::control_hold::release(cid, obj, registry, roster),
@@ -151,7 +153,7 @@ async fn dispatch_session_control(
         // every row under `--prefix`) matches one of the target states, or
         // `params.timeout_ms` elapses. Edge-triggered on `Roster::subscribe`
         // — no polling loop anywhere in this path.
-        "control/wait" => wait(cid, obj, roster).await,
+        "control/wait" => dispatch_allowlisted("wait", cid, obj, registry, roster, lockout).await.unwrap_or_default(),
         // `control/revoke` (issue #184): `hub token revoke`/`delete`'s own
         // process already flipped the token store to `revoked`; this call
         // (from that same CLI invocation) force-closes the live socket, if
@@ -160,6 +162,35 @@ async fn dispatch_session_control(
         "control/revoke" => revoke(cid, obj, registry).await,
         other => encode_error(cid, Code::MethodNotFound, format!("unknown control method: {other}")),
     }
+}
+
+/// The allowlisted-verb entry every admin request must go through (issue
+/// #508's admin loop, `circuit/admin.rs`), and the one every matching
+/// `control/*` arm above now routes through too — so there is exactly one
+/// implementation of each verb's param/result mapping, not two parallel
+/// ones. `verb` is the bare name (`"status"`, `"query_local"`, …, i.e.
+/// without the `control/`/`admin/` prefix each caller already stripped);
+/// `None` for anything else is unreachable from either caller today (each
+/// names one of these verbatim) but kept total rather than panicking.
+pub(crate) async fn dispatch_allowlisted(
+    verb: &str,
+    cid: &holler_proto::CorrelationId,
+    obj: &serde_json::Value,
+    registry: &Registry,
+    roster: &Roster,
+    lockout: &Lockout,
+) -> Option<String> {
+    Some(match verb {
+        "status" => encode_response(cid, crate::control_status::status_doc(registry, lockout).await),
+        "roster" => roster_control(cid, obj, roster, registry).await,
+        "say" => say(cid, obj, registry, roster).await,
+        "interrupt" => interrupt(cid, obj, registry, roster).await,
+        "answer" => answer(cid, obj, registry).await,
+        "wait" => wait(cid, obj, roster).await,
+        "query_local" => hub_query_local(cid, obj, registry).await,
+        "query_remote" => hub_query_remote(cid, obj, registry).await,
+        _ => return None,
+    })
 }
 
 /// `control/support {feature}` (issue #185): a single `query/support` answer
@@ -576,13 +607,14 @@ fn row_to_json(row: crate::roster::Row) -> serde_json::Value {
     })
 }
 
-/// The bound listen addresses, read the same way [`status_doc`] does (from
-/// `hub/listening.json`, written once at `hub serve` startup) — the shared
-/// helper both `control/status` and the new `control/caps`/`control/
-/// query_local {method:"query/status"}` need.
+/// The bound listen addresses, read the same way
+/// [`crate::control_status::status_doc`] does (from `hub/listening.json`,
+/// written once at `hub serve` startup) — the shared helper both
+/// `control/status` and the new `control/caps`/`control/query_local
+/// {method:"query/status"}` need.
 fn read_listening_here() -> Vec<String> {
     let state = HubState::from_root(resolve_state_dir().unwrap_or_default());
-    read_listening(&state)
+    crate::control_status::read_listening(&state)
 }
 
 /// Whether the issue #192 test-only control hooks (`control/test_drop`) are
@@ -705,88 +737,6 @@ fn resolve_cid(id: Option<&str>) -> holler_proto::CorrelationId {
     match id.and_then(|s| holler_proto::CorrelationId::parse(s).ok()) {
         Some(cid) => cid,
         None => fallback_id(),
-    }
-}
-
-/// Build the hub's status document for a `control/status` answer. Per the
-/// story spec the doc has `role:"hub"`, a `listening` **array** of bound
-/// addresses, an optional `advertise`, `clients` (bodies), `sessions`,
-/// `harnesses_known`, `harnesses_confirmed`, `protocol` (the running
-/// build's `holler_proto::PROTOCOL_VERSION`, issue #340 — not a hardcoded
-/// literal, so this doc never lags a version bump), and `version`.
-/// `clients`/`sessions`/`harnesses_known`/`harnesses_confirmed` are now the
-/// live registry's real counts (issue #182 landed `clients`; issue #185 adds
-/// the rest — previously always `0`/`[]`, since no body could yet report a
-/// session count or a confirmed harness).
-async fn status_doc(registry: &Registry, lockout: &Lockout) -> serde_json::Value {
-    // Only ever called by the live hub's own control dispatch, where the state
-    // dir is always resolvable; `unwrap_or_default` is a defensive no-op.
-    let state = HubState::from_root(resolve_state_dir().unwrap_or_default());
-    // Issue #451: the live lockout state. The labels of the token ids it names
-    // are looked up here, never on the authentication path, and only when a
-    // peer is listed; a store that cannot be read costs the labels, not the status.
-    let lockout_now = lockout.snapshot();
-    let mut labels = std::collections::HashMap::new();
-    if !lockout_now.is_empty() {
-        let records = crate::token::list_async(&state).await.unwrap_or_default();
-        labels.extend(records.into_iter().map(|r| (r.token_id, r.label)));
-    }
-    let listening = read_listening(&state);
-    let advertise = std::fs::read_to_string(advertise_path(&state))
-        .ok()
-        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
-        .and_then(|v| {
-            v.get("advertise")
-                .and_then(|a| a.as_str())
-                .map(str::to_owned)
-        });
-    let version = env!("CARGO_PKG_VERSION");
-    let hostname = hostname::get()
-        .map(|h| h.to_string_lossy().into_owned())
-        .unwrap_or_else(|_| "unknown".to_string());
-    // Issue #322: the hub's X25519 public key, so an operator can compare it
-    // out-of-band without re-minting a token. `identity::ensure` is
-    // idempotent (loads the existing key once `hub serve`/`hub token mint`
-    // generated one); `None` only if it cannot even be resolved (an
-    // unwritable state dir), which `hub status` should still answer despite.
-    let hub_pubkey = crate::identity::ensure(&state).ok().map(|i| i.public_hex());
-
-    serde_json::json!({
-        "role": "hub",
-        "protocol": holler_proto::PROTOCOL_VERSION,
-        "version": version,
-        "hostname": hostname,
-        "listening": listening,
-        "advertise": advertise,
-        "hub_pubkey": hub_pubkey,
-        "clients": registry.len().await,
-        // Issue #184: the per-connection detail (`token_id`/`client_id`/
-        // `hostname`/`peer`/`connected_at`) `hub status --json` now also
-        // reports. Additive — `clients` itself stays the plain live count
-        // the existing test suite already asserts `as_u64()` against.
-        "clients_detail": registry.clients_detail().await,
-        "sessions": registry.total_sessions().await,
-        "harnesses_known": registry.harnesses_known().await,
-        "harnesses_confirmed": registry.harnesses_confirmed().await,
-        // Issue #184's acceptance: the hygiene/lockout limits documented in
-        // `hub status --json`'s `limits{}`.
-        "limits": crate::hygiene::HygieneLimits::resolve().to_json(crate::lockout::LockoutLimits::resolve()),
-        "lockout": lockout_now.to_json(&labels),
-    })
-}
-
-/// The bound listen addresses for the live hub, read from the listening event
-/// we already emitted on stderr at startup. We re-derive them from the live
-/// listeners' state: there is no persisted listener list, so a re-bind is
-/// wrong. Instead the hub records its bound addrs in memory; `status_doc` runs
-/// on the same process, so we read them from a file the start path writes.
-fn read_listening(state: &HubState) -> Vec<String> {
-    // The start path writes the bound addresses to `hub/listening.json` so a
-    // `control/status` (running in the same process) can report them.
-    let path = state.hub_dir.join("listening.json");
-    match std::fs::read_to_string(&path) {
-        Ok(s) => serde_json::from_str(&s).unwrap_or_default(),
-        Err(_) => Vec::new(),
     }
 }
 

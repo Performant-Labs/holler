@@ -355,7 +355,7 @@ async fn connect_and_serve(
         Ok(sas) => sas,
         Err(reason) => return reason,
     };
-    if let Err(reason) = handshake::hello_exchange(&mut sink, &mut stream, identity, configs).await {
+    if let Err(reason) = handshake::hello_exchange(&mut sink, &mut stream, identity, configs, holler_proto::HelloRole::Body).await {
         return reason;
     }
 

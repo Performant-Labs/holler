@@ -139,10 +139,10 @@ fn main() {
                     &serve.join_held,
                 ));
             }
-            HubCommand::Status(_) => {
+            HubCommand::Status(status) => {
                 // `--json` is the root-level global flag (issue #147/#155), not
-                // a per-leaf field: `Status` is empty, so read `cli.json`.
-                std::process::exit(holler_cli::hub_cmd::status(cli.json));
+                // a per-leaf field. `--server` (issue #508) is per-leaf.
+                std::process::exit(holler_cli::hub_cmd::status(status.server.as_deref(), cli.json));
             }
             // Story #163: the `hub token` leaf operates the hub's token store
             // (the file-backed store behind the loopback listener). Each verb

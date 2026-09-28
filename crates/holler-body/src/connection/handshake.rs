@@ -197,6 +197,14 @@ fn refusal_words(code: &str) -> &'static str {
 /// ids populate the hello's `harnesses` field, which is what the hub's
 /// confirmation pass ([`crate::query`]'s hub-side counterpart, `holler_hub::
 /// circuit::confirm_harnesses`) probes right after this exchange completes.
+/// `role` (issue #508) is `Body` for the normal live loop
+/// (`connection::connect_and_serve`, which always passes it explicitly) or
+/// `Admin` for `crate::admin_client`'s one-shot hello — an admin hello
+/// advertises no harnesses and no sessions (MO 7): it is a control client,
+/// never a body a `session/prompt` could be routed to. `pub(crate)` (not
+/// `pub(super)`) so `admin_client`, a sibling module of `connection` in this
+/// crate, can call it too, without a second copy of the hub-key pinning
+/// logic below.
 ///
 /// Issue #322: the hub's own `Hello` document (the *result* of this body's
 /// `circuit/hello` request) carries `hub_pubkey` — the hub's X25519 public
@@ -205,34 +213,44 @@ fn refusal_words(code: &str) -> &'static str {
 /// answers with none at all, once this body has ever pinned one — is a hard
 /// failure ([`Attempt::AuthFailed`], no retry, no prompt): the whole point of
 /// pinning is that this body never silently talks to a different hub.
-pub(super) async fn hello_exchange<Snk, St>(
+pub(crate) async fn hello_exchange<Snk, St>(
     sink: &mut Snk,
     stream: &mut St,
     identity: &BodyIdentity,
     configs: &[SessionConfig],
+    role: HelloRole,
 ) -> Result<(), Attempt>
 where
     Snk: Sink<Message, Error = WsError> + Unpin,
     St: Stream<Item = Result<Message, WsError>> + Unpin,
 {
-    let mut harnesses: Vec<String> = configs.iter().map(|c| c.harness.clone()).collect();
-    harnesses.sort();
-    harnesses.dedup();
+    // Issue #508: only a body hello advertises harnesses/sessions at all —
+    // an admin client is a control connection, not a box that can host a
+    // spawned/attached session (MO 7's exact wire shape).
+    let harnesses = if role == HelloRole::Body {
+        let mut h: Vec<String> = configs.iter().map(|c| c.harness.clone()).collect();
+        h.sort();
+        h.dedup();
+        Some(h)
+    } else {
+        None
+    };
+    let sessions = (role == HelloRole::Body).then(Vec::new);
 
     let cid = CorrelationId::mint_body();
     let hello = Hello {
         protocol: holler_proto::PROTOCOL_VERSION,
         protocol_min: holler_proto::PROTOCOL_MIN,
         protocol_max: holler_proto::PROTOCOL_MAX,
-        role: HelloRole::Body,
+        role,
         hostname: identity.hostname.clone(),
         token_id: Some(identity.token_id.clone()),
         client_id: Some(identity.client_id.clone()),
         features: Vec::new(),
-        harnesses: Some(harnesses),
+        harnesses,
         harnesses_known: None,
         harnesses_confirmed: None,
-        sessions: Some(Vec::new()),
+        sessions,
         hub_pubkey: None,
     };
     let params = serde_json::to_value(hello).map_err(|e| Attempt::Dropped(format!("encode hello: {e}")))?;

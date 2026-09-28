@@ -48,6 +48,7 @@
 //! "Reconnect contract" section for the full six-point contract this
 //! implements.
 
+mod admin;
 mod auth;
 mod dispatch;
 
@@ -182,7 +183,7 @@ async fn authenticate_and_hello<Snk, St>(
     params: &Authenticate,
     state: &HubState,
     deps: &AuthDeps<'_>,
-) -> Option<(String, crate::token::Record, Vec<String>, String)>
+) -> Option<(String, crate::token::Record, Vec<String>, String, HelloRole)>
 where
     Snk: Sink<Message, Error = WsError> + Unpin,
     St: Stream<Item = Result<Message, WsError>> + Unpin,
@@ -215,13 +216,13 @@ where
     let ok = serde_json::to_value(holler_proto::AuthOk { ok: true }).unwrap_or_default();
     reply(sink, Some(prove_id.as_str()), ok).await.ok()?;
 
-    let body_harnesses = hello_exchange(sink, stream, &params.hostname, state).await.ok()?;
+    let (body_harnesses, role) = hello_exchange(sink, stream, &params.hostname, state).await.ok()?;
 
     // `finish_prove` only ever returns a `Bound` record (from `bound_record`,
     // which requires a `client_id` to be `bound`) — safe to unwrap the
     // invariant here.
     let client_id = record.client_id.clone().unwrap_or_default();
-    Some((client_id, record, body_harnesses, sas))
+    Some((client_id, record, body_harnesses, sas, role))
 }
 
 /// Handle a freshly-accepted socket whose first frame was `circuit/
@@ -241,7 +242,7 @@ pub async fn handle_authenticated<Snk, St>(
 {
     let mut preauth_permit = preauth_permit;
 
-    let Some((client_id, record, body_harnesses, sas)) =
+    let Some((client_id, record, body_harnesses, sas, role)) =
         authenticate_and_hello(sink, stream, id, &params, state, &deps).await
     else {
         return;
@@ -253,7 +254,14 @@ pub async fn handle_authenticated<Snk, St>(
     // indefinitely without holding it.
     preauth_permit.take();
 
-    let AuthDeps { registry, roster, peer, .. } = deps;
+    let AuthDeps { registry, roster, peer, lockout } = deps;
+
+    // AC 3-4: admin branches before supersede/insert/roster writes.
+    if role == HelloRole::Admin {
+        let deps = admin::AdminDeps { registry: registry.clone(), roster: roster.clone(), lockout: lockout.clone() };
+        admin::run(sink, stream, &record, peer, &sas, deps).await;
+        return;
+    }
 
     // Issue #339: the pairing SAS, derived independently on this side from
     // the handshake just completed — logged (never sent) so the operator can
@@ -353,11 +361,9 @@ where
 /// with `{}`. Either half timing out or failing to parse ends the socket.
 ///
 /// Returns the body's advertised harness ids (issue #185's `harnesses_known`
-/// input, and the confirmation pass's probe list) — an empty vec if the
-/// body's hello carried none or failed to parse as a [`Hello`] (a body that
-/// sends a malformed `harnesses` field just gets nothing confirmed, never a
-/// reason to refuse the whole handshake here).
-async fn hello_exchange<Snk, St>(sink: &mut Snk, stream: &mut St, hostname: &str, state: &HubState) -> Result<Vec<String>, ()>
+/// input) — empty if none, or unparsable — alongside its claimed
+/// `hello.role` (issue #508; unparsable defaults to `Body`).
+async fn hello_exchange<Snk, St>(sink: &mut Snk, stream: &mut St, hostname: &str, state: &HubState) -> Result<(Vec<String>, HelloRole), ()>
 where
     Snk: Sink<Message, Error = WsError> + Unpin,
     St: Stream<Item = Result<Message, WsError>> + Unpin,
@@ -404,6 +410,7 @@ where
             return Err(());
         }
     }
+    let role = body_hello.as_ref().map(|h| h.role).unwrap_or(HelloRole::Body);
     let body_harnesses = body_hello.and_then(|h| h.harnesses).unwrap_or_default();
 
     // Issue #322: the hub's identity keypair is resolved (generated on first
@@ -433,7 +440,7 @@ where
         .map_err(|_| ())?
         .ok_or(())?;
     match ack {
-        Envelope::Response { id, .. } if id == hub_cid.as_str() => Ok(body_harnesses),
+        Envelope::Response { id, .. } if id == hub_cid.as_str() => Ok((body_harnesses, role)),
         _ => Err(()),
     }
 }

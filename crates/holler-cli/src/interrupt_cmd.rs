@@ -32,7 +32,8 @@ fn err(message: String, exit_code: i32) -> InterruptResult {
 /// the spec's own wording; `2` an ambiguous session.
 pub fn run(interrupt: &Interrupt, json: bool) -> InterruptResult {
     let state_root = holler_hub::state::resolve_state_dir().unwrap_or_default();
-    match holler_hub::control::interrupt(&interrupt.session, interrupt.text.as_deref()) {
+    let call = holler_hub::control::ControlCall::interrupt(&interrupt.session, interrupt.text.as_deref());
+    match crate::transport::call(interrupt.server.as_deref(), &call) {
         Ok(doc) => {
             if json {
                 return ok(doc.to_string());
@@ -49,6 +50,7 @@ pub fn run(interrupt: &Interrupt, json: bool) -> InterruptResult {
         Err(holler_hub::control::ControlError::NoLiveHub) => {
             err(format!("no live holler hub reachable at {}", state_root.display()), 1)
         }
+        Err(holler_hub::control::ControlError::RemotePolicyRefused(msg)) => err(msg, 3),
         Err(holler_hub::control::ControlError::Refused(e)) => {
             if crate::hold_cmd::is_held(&e) {
                 let (message, to_stderr) = crate::hold_cmd::held_refusal(&interrupt.session, &e, json);

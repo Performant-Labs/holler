@@ -9,6 +9,7 @@ pub mod circuit;
 pub mod control;
 pub mod control_hold;
 pub mod control_server;
+pub mod control_status;
 pub mod holds;
 pub mod hygiene;
 pub mod identity;

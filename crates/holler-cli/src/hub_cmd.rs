@@ -23,11 +23,11 @@ use crate::Query;
 /// human-readable summary goes to stdout, followed by a lockout section while
 /// any peer is locked out or failing (issue #451). If no live hub is
 /// reachable, the spec's exact message goes to stderr and the exit code is 1.
-pub fn status(json: bool) -> i32 {
+pub fn status(server: Option<&str>, json: bool) -> i32 {
     // The state dir may be unresolvable (no `HOLLER_STATE_DIR`/`$HOME`); then
     // there is no live hub and the error message below just has no path to name.
     let state_root = holler_hub::state::resolve_state_dir().unwrap_or_default();
-    match holler_hub::control::status() {
+    match crate::transport::call(server, &holler_hub::control::ControlCall::status()) {
         Ok(doc) => {
             if json {
                 println!("{}", doc);
@@ -61,6 +61,10 @@ pub fn status(json: bool) -> i32 {
                 state_root.display()
             );
             1
+        }
+        Err(holler_hub::control::ControlError::RemotePolicyRefused(msg)) => {
+            eprintln!("error: {msg}");
+            3
         }
         Err(e) => {
             eprintln!("error: {e}");
@@ -181,15 +185,19 @@ pub fn query(q: &Query, json: bool) -> i32 {
     let method = resolved.cmd().method();
     let params = query_cmd_params(resolved.cmd(), resolved.args());
 
-    let result = match resolved.target() {
-        None => holler_hub::control::query_local(method, params),
-        Some(target) => holler_hub::control::query_remote(target.as_str(), method, params),
+    let call = match resolved.target() {
+        None => holler_hub::control::ControlCall::query_local(method, params),
+        Some(target) => holler_hub::control::ControlCall::query_remote(target.as_str(), method, params),
     };
-    let outcome = match result {
+    let outcome = match crate::transport::call(q.server.as_deref(), &call) {
         Ok(doc) => FetchOutcome::Doc { json_text: doc.to_string(), human: format!("{method}: ok") },
         Err(holler_hub::control::ControlError::Refused(e)) if is_ambiguous(&e) => {
             eprintln!("error: {}", e.message);
             return 2;
+        }
+        Err(holler_hub::control::ControlError::RemotePolicyRefused(msg)) => {
+            eprintln!("error: {msg}");
+            return 3;
         }
         Err(e) => control_error(e),
     };

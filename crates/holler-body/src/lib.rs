@@ -8,6 +8,7 @@
 //! protocol/body talk stories fill the rest in.
 
 pub mod acp_driver;
+pub mod admin_client;
 pub mod backoff;
 pub mod config;
 pub mod confirm;

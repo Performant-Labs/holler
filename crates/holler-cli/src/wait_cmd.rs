@@ -61,13 +61,14 @@ pub fn run(wait: &Wait, json: bool) -> WaitResult {
         None => return err(format!("invalid --timeout {:?} (use e.g. 30s, 5m, 1h)", wait.timeout), 3),
     };
     let state_root = holler_hub::state::resolve_state_dir().unwrap_or_default();
-    match holler_hub::control::wait(
+    let call = holler_hub::control::ControlCall::wait(
         wait.sessions.as_deref(),
         wait.prefix.as_deref(),
         wait.until.as_deref(),
         wait.after.as_deref(),
         timeout,
-    ) {
+    );
+    match crate::transport::call(wait.server.as_deref(), &call) {
         Ok(doc) => {
             let matched = doc.get("matched").and_then(serde_json::Value::as_bool).unwrap_or(false);
             if json {
@@ -82,6 +83,7 @@ pub fn run(wait: &Wait, json: bool) -> WaitResult {
         Err(holler_hub::control::ControlError::NoLiveHub) => {
             err(format!("no live holler hub reachable at {}", state_root.display()), 1)
         }
+        Err(holler_hub::control::ControlError::RemotePolicyRefused(msg)) => err(msg, 3),
         Err(e) => err(e.to_string(), 1),
     }
 }

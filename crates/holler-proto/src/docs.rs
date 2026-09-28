@@ -25,8 +25,8 @@ use crate::error::{Code, Error as WireError};
 // enums (docs §3–7): closed string vocabularies as real types
 // ---------------------------------------------------------------------------
 
-/// The two endpoint roles a `circuit/hello` (or `query/status`) document is
-/// sent from. Wire values `"body"` / `"hub"` (docs §3).
+/// The three endpoint roles a `circuit/hello` (or `query/status`) document
+/// can be sent from. Wire values `"body"` / `"hub"` / `"admin"` (docs §3–4).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum HelloRole {
@@ -34,6 +34,8 @@ pub enum HelloRole {
     Body,
     /// The hub (the router that bodies connect to).
     Hub,
+    /// A remote admin client (issue #508); never in the roster/registry.
+    Admin,
 }
 
 /// A `query/support` answer's subject class (docs §5.3). Wire values
@@ -90,6 +92,7 @@ impl HelloRole {
         match self {
             HelloRole::Body => "body",
             HelloRole::Hub => "hub",
+            HelloRole::Admin => "admin",
         }
     }
 }
@@ -172,7 +175,7 @@ pub struct Hello {
     pub protocol_min: u32,
     /// The highest protocol version this endpoint can also speak.
     pub protocol_max: u32,
-    /// The endpoint role: `"body"` or `"hub"`.
+    /// The endpoint role: `"body"`, `"hub"`, or `"admin"` (issue #508).
     pub role: HelloRole,
     /// The hostname / label this endpoint is reachable by.
     pub hostname: String,
@@ -225,7 +228,7 @@ pub struct HelloSession {
 // ---------------------------------------------------------------------------
 
 /// A `query/status` answer (and the base for a `query/caps` answer). One
-/// shape, two `role` values.
+/// shape; `role` is [`HelloRole`] but a status document is only ever a body's or the hub's own.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Status {
     pub role: HelloRole,

@@ -222,7 +222,13 @@ pub struct Ping {
 }
 
 #[derive(Parser, Debug)]
-pub struct Status {}
+pub struct Status {
+    /// Run against a remote hub instead of the local one (issue #508): reads
+    /// this process's own body identity from `HOLLER_STATE_DIR` rather than
+    /// the ambient control socket. `hub status` only; ignored on `body status`.
+    #[arg(long)]
+    pub server: Option<String>,
+}
 
 #[derive(Parser, Debug)]
 pub struct Caps {}
@@ -242,6 +248,10 @@ pub struct Support {
 /// as one variadic and split in code by [`Query::resolve`].
 #[derive(Parser, Debug)]
 pub struct Query {
+    /// Run against a remote hub instead of the local one (issue #508). `hub
+    /// query` only; ignored on `body query`. See [`Status::server`].
+    #[arg(long)]
+    pub server: Option<String>,
     /// The query tail: CMD [ARGS...] (local) or TARGET CMD [ARGS...] (remote).
     #[arg(required = true, trailing_var_arg = true)]
     pub rest: Vec<String>,
@@ -423,6 +433,10 @@ pub struct Roster {
     /// `io/<session>` (ADR 0005 §4).
     #[arg(long)]
     pub prefix: Option<String>,
+    /// Run against a remote hub instead of the local one (issue #508). See
+    /// [`Status::server`].
+    #[arg(long)]
+    pub server: Option<String>,
 }
 
 #[derive(Parser, Debug)]
@@ -446,6 +460,10 @@ pub struct Say {
     /// one prompt through a session that joined held.
     #[arg(long, value_name = "ID")]
     pub grant: Option<String>,
+    /// Run against a remote hub instead of the local one (issue #508). See
+    /// [`Status::server`].
+    #[arg(long)]
+    pub server: Option<String>,
 }
 
 #[derive(Parser, Debug)]
@@ -455,6 +473,10 @@ pub struct Interrupt {
     /// Redirect text (issue #191): cancel, then run this prompt ahead of
     /// the queue, streaming its reply exactly like `say`.
     pub text: Option<String>,
+    /// Run against a remote hub instead of the local one (issue #508). See
+    /// [`Status::server`].
+    #[arg(long)]
+    pub server: Option<String>,
 }
 
 #[derive(Parser, Debug)]
@@ -492,6 +514,10 @@ pub struct Answer {
     /// elicitation), or one of `once`/`always`/`reject` for a permission
     /// prompt that offers them.
     pub choice: String,
+    /// Run against a remote hub instead of the local one (issue #508). See
+    /// [`Status::server`].
+    #[arg(long)]
+    pub server: Option<String>,
 }
 
 #[derive(Parser, Debug)]
@@ -518,6 +544,10 @@ pub struct Wait {
     /// Give up (exit 2) after this long with no match (default 600s).
     #[arg(long, default_value = "600s")]
     pub timeout: String,
+    /// Run against a remote hub instead of the local one (issue #508). See
+    /// [`Status::server`].
+    #[arg(long)]
+    pub server: Option<String>,
 }
 
 // --- body ----------------------------------------------------------------
@@ -601,7 +631,7 @@ mod tests {
     use super::*;
 
     fn query(rest: &[&str]) -> Query {
-        Query { rest: rest.iter().map(|s| s.to_string()).collect() }
+        Query { server: None, rest: rest.iter().map(|s| s.to_string()).collect() }
     }
 
     /// The four shapes the old accessors got wrong (issue #148): `status`,

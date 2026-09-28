@@ -118,7 +118,8 @@ pub fn run(say: &Say, json: bool) -> SayResult {
         Err(msg) => return err(msg, 3),
     };
     let state_root = holler_hub::state::resolve_state_dir().unwrap_or_default();
-    match holler_hub::control::say_with(&say.session, &text, say.queue, say.grant.as_deref(), timeout) {
+    let call = holler_hub::control::ControlCall::say_with(&say.session, &text, say.queue, say.grant.as_deref(), timeout);
+    match crate::transport::call(say.server.as_deref(), &call) {
         Ok(doc) => {
             if json {
                 ok(doc.to_string())
@@ -130,6 +131,7 @@ pub fn run(say: &Say, json: bool) -> SayResult {
         Err(holler_hub::control::ControlError::NoLiveHub) => {
             err(format!("no live holler hub reachable at {}", state_root.display()), 1)
         }
+        Err(holler_hub::control::ControlError::RemotePolicyRefused(msg)) => err(msg, 3),
         Err(holler_hub::control::ControlError::Refused(e)) => {
             // `ambiguous` (issue #190 spec: "lists candidates") is the one
             // `say` refusal that exits 2, not 1 — every other refusal

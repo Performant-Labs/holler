@@ -8,6 +8,16 @@ fills this file in at release time.
 ## [Unreleased]
 
 ### Enhancements
+- `roster`, `say`, `interrupt`, `answer`, `wait`, `hub status` and `hub query` all take `--server URL`
+  to run against a remote hub instead of the local one, over the existing hub WebSocket circuit
+  (no new port, no new credential type). The remote form authenticates with this machine's own
+  bound body credential and sends `circuit/hello role:"admin"` instead of `"body"`; the hub
+  services the seven `admin/*` methods this adds without ever superseding the credential's live
+  body connection or creating a roster row for the admin socket. `--json` output is byte-identical
+  to the local form. A plaintext `ws://` to a non-loopback host is refused (exit 3), matching
+  `body join`'s own policy ([#508](https://github.com/Performant-Labs/holler/issues/508),
+  [#509](https://github.com/Performant-Labs/holler/issues/509), part of epic
+  [#506](https://github.com/Performant-Labs/holler/issues/506); see [ADR 0020](docs/adr/ADR-0020.md)).
 - CI: the Clippy step retries once from a clean build directory when, and only when, it fails with `could not parse/generate dep info` (a half-written file in the self-hosted runner's persistent build directory); any other failure, including every real lint, still fails on the first attempt ([#492](https://github.com/Performant-Labs/holler/issues/492)).
 - Docs: the README has a Codex recipe, `docs/compatibility.md` records the Codex results (three authentication routes, permission requests, a multi-turn session with a hub restart) with their limits, and the monitoring guidance's Codex section describes how a permission request is surfaced and answered ([#474](https://github.com/Performant-Labs/holler/issues/474), [#303](https://github.com/Performant-Labs/holler/issues/303)).
 - The body's ACP driver now also authenticates to an ACP v2 adapter that requires it. When a v2
