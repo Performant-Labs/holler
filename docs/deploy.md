@@ -67,6 +67,51 @@ do the rest:
 holler hub serve --listen 127.0.0.1:41807
 ```
 
+## Remote admin clients
+
+Everything above describes how a **body** reaches a hub on another machine.
+As of the remote admin channel (epic #506, [ADR 0020](adr/ADR-0020.md)), an
+**admin client** — `roster`, `say`, `interrupt`, `answer`, `wait`, `hub
+status`, `hub query`, invoked with `--server URL` — reaches the hub the
+exact same way, over the exact same path, with nothing new to stand up:
+
+```
+holler roster --server wss://<hub-machine>.<your-tailnet>.ts.net
+```
+
+Nothing about the proxy trust model changes for this client type. The
+`tailscale serve` (or other TLS-terminating proxy) hop still terminates TLS
+in front of the hub's loopback listener, the proxy still sees every frame
+in the clear, and the same warning above about only running the proxy on a
+machine you control applies identically to admin traffic — it carries the
+same body credential and the same prompts/replies an ordinary body
+connection would.
+
+There is no separate admin credential in v1: `--server URL` reads the
+*local* machine's own already-joined body credential from
+`<state>/body/credential.json` (and its paired `x25519_identity.key`) and
+uses it to open an `admin`-role session on the remote hub over that
+connection — so a machine can issue admin commands against a hub only if
+it has already `body join`ed that hub itself. There's no `--token` or
+`--hub-key` flag on the remote admin form (unlike `body join`); those apply
+to minting a *new* body credential, and an admin client is reusing one that
+already exists locally. Credential separation, a read/write scope split,
+rate-limiting, and dedicated admin error codes are deferred follow-up work
+([#616](https://github.com/Performant-Labs/holler/issues/616)–[#619](https://github.com/Performant-Labs/holler/issues/619)),
+not v1 scope.
+
+**Migration note:** this is purely additive. Existing local-only usage —
+`roster`, `say`, etc. run on the hub machine itself with no `--server`
+flag — is unaffected and needs no changes; `--server` is opt-in.
+
+This is the same shape of problem Performant-Labs/forge's ADR-0029
+(multi-host lanes) solves for its own agents: driving a control plane from
+a machine other than the one it runs on, over a tailnet, without an SSH
+hop standing in for real remote authentication. The remote admin channel
+is Holler's version of that same move — one dispatcher (or operator) can
+now run `roster`/`say`/etc. against a hub on another machine directly, the
+same way a forge lane already reaches its own remote host.
+
 ## Other proxies work too
 
 ADR 0006 treats `tailscale serve` as the documented v1 path, but any
