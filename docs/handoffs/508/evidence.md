@@ -147,3 +147,27 @@
   > ```
   >                         "content": { "type": "text", "text": format!("stub chunk {index}") }
   > ```
+
+## T round-3 (test-only rework, #678: S round-3 closing gaps)
+
+- **Fact:** when the hub's advertised `circuit/hello.hub_pubkey` (`seen`) does not equal the body's own pinned `identity.hub_pubkey`, the body's handshake code itself refuses with the exact words `"hub public key mismatch: pinned {…} but this hub presented {…}"` — never the body-side `KEY_MISMATCH_REASON` wording (`"does not match the key the hub registered at join"`), which is the *hub's* refusal for a wrong *body* key. This is the source fact `remote_admin_hub_key_mismatch_is_refused` (new, AC 13) relies on to assert on `"hub public key mismatch"` after corrupting only the credential's `hub_pubkey` field via `mutate_credential`, in code this rework does not touch.
+  **Source:** `crates/holler-body/src/connection/handshake.rs:280-287`
+  **Verbatim excerpt:**
+  > ```
+  >     match hub_hello.hub_pubkey {
+  >         Some(seen) if seen == identity.hub_pubkey => {}
+  >         Some(seen) => {
+  >             return Err(Attempt::AuthFailed(format!(
+  >                 "hub public key mismatch: pinned {} but this hub presented {seen} — refusing to connect (re-pair with `body join` only if you trust this is an intentional hub key rotation)",
+  >                 identity.hub_pubkey
+  >             )));
+  >         }
+  > ```
+
+- **Fact:** a missing body credential (`AdminClientError::NotJoined`) prints both the credential path (which always ends in `credential.json`, per `BodyIdentity::path`) and the literal words `` run `holler body join` first `` in one message — the source fact `roster_remote_server_flag_is_not_yet_recognized`'s tightened assertion (both substrings, not an either-or) relies on.
+  **Source:** `crates/holler-body/src/admin_client.rs:55`
+  **Verbatim excerpt:**
+  > ```
+  >             AdminClientError::NotJoined(p) => write!(f, "{} not found; run `holler body join` first", p.display()),
+  > ```
+  > ```

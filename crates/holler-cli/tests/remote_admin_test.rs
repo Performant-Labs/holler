@@ -57,17 +57,18 @@ fn roster_remote_server_flag_is_not_yet_recognized() {
         .expect("wait on holler");
 
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(
-        !out.status.success(),
-        "`roster --server` against an unjoined state dir must not succeed: {stderr}"
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "`roster --server` against an unjoined state dir must exit 1, not clap's own usage-error code: {stderr}"
     );
     assert!(
         !stderr.contains("--server") && !stderr.to_lowercase().contains("unexpected argument"),
         "`--server` is a recognized flag now (AC 9) — clap must not refuse it as unknown: {stderr}"
     );
     assert!(
-        stderr.contains("credential.json") || stderr.to_lowercase().contains("not joined") || stderr.to_lowercase().contains("run `holler body join`"),
-        "expected a clean 'not joined' error naming the missing body credential, got: {stderr}"
+        stderr.contains("credential.json") && stderr.contains("holler body join"),
+        "expected a clean 'not joined' error naming the missing body credential and the fix, got: {stderr}"
     );
 }
 
@@ -344,6 +345,13 @@ fn remote_admin_does_not_supersede_the_body() {
     let say_out = run(&hub_state, &["say", "b/alpha", "ping-after-remote-roster"]);
     assert!(say_out.status.success(), "AC 3: `say` after the remote roster must still get a reply: {}", String::from_utf8_lossy(&say_out.stderr));
 
+    assert!(
+        !body.log_text().contains("conn_superseded"),
+        "AC 3: the end-to-end remote roster call must never supersede the body's own connection, \
+         but the body's log shows `conn_superseded`:\n{}",
+        body.log_text()
+    );
+
     body.stop(&body_state, Duration::from_secs(10));
     drop(hub);
 }
@@ -467,13 +475,35 @@ fn remote_admin_wrong_key_is_refused_and_counted_in_lockout() {
     assert_eq!(out.status.code(), Some(1), "AC 7/13: exit 1 for a wrong X25519 key");
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        stderr.contains("does not match the key the hub registered at join") || stderr.contains("hub public key mismatch"),
+        stderr.contains("does not match the key the hub registered at join"),
         "{stderr}"
     );
 
     let doc = hub_status_json(&hub_state);
     let peers = doc["lockout"]["peers"].as_array().expect("lockout.peers");
     assert!(!peers.is_empty(), "AC 7: the refusal must count toward the existing lockout table: {doc}");
+
+    body.stop(&body_state, Duration::from_secs(10));
+    drop(hub);
+}
+
+/// **AC 13 (hub-key mismatch).** Corrupting the joined credential's own
+/// pinned `hub_pubkey` (the *hub's* static key, not the body's) is a
+/// distinct failure mode from `remote_admin_wrong_key_is_refused_and_
+/// counted_in_lockout` above: the body's own key is fine, but the pinned
+/// hub key it dials no longer matches the real hub's, so the body itself
+/// refuses the handshake with `hub public key mismatch` (never the hub's
+/// own `does not match the key the hub registered at join`, which is the
+/// hub-side refusal for a wrong *body* key).
+#[test]
+fn remote_admin_hub_key_mismatch_is_refused() {
+    let (_hub_state, body_state, hub, body, _token_id, ws_url) = two_dir_rig(&[("alpha", &[])]);
+    mutate_credential(&body_state, |v| v["hub_pubkey"] = serde_json::json!("00".repeat(32)));
+
+    let out = run(&body_state, &["roster", "--server", &ws_url, "--json"]);
+    assert_eq!(out.status.code(), Some(1), "AC 13: exit 1 for a mismatched hub public key");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("hub public key mismatch"), "{stderr}");
 
     body.stop(&body_state, Duration::from_secs(10));
     drop(hub);
@@ -616,6 +646,12 @@ fn masked(verb: &str, mut v: serde_json::Value) -> serde_json::Value {
                 }
             }
         }
+        "say" => {
+            mask_field(&mut v, "elapsed_ms");
+            if let Some(message) = v.get_mut("message") {
+                mask_field(message, "messageId");
+            }
+        }
         _ => {}
     }
     v
@@ -667,13 +703,11 @@ fn remote_say_wait_and_hub_query_json_match_local_after_masking() {
     // brief's own AC 10 rule ("if T finds another field that differs
     // between two identical local runs... the masked set is extended by
     // that one field only") it joins `elapsed_ms` in the masked set here.
-    let mut l = json_body(&local);
-    let mut r = json_body(&remote);
-    for doc in [&mut l, &mut r] {
-        doc["elapsed_ms"] = serde_json::json!("<masked>");
-        doc["message"]["messageId"] = serde_json::json!("<masked>");
-    }
-    assert_eq!(l, r, "AC 10: say --json parity (elapsed_ms/message.messageId masked)");
+    assert_eq!(
+        masked("say", json_body(&local)),
+        masked("say", json_body(&remote)),
+        "AC 10: say --json parity (elapsed_ms/message.messageId masked)"
+    );
 
     let local = run(&hub_state, &["--json", "wait", "b/alpha"]);
     let remote = run(&body_state, &["--json", "wait", "b/alpha", "--server", &ws_url]);
