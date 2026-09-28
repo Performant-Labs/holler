@@ -15,7 +15,7 @@ local_review:
   enabled: false
 
 dual_review:
-  enabled: true
+  enabled: false
 
 dco:
   required: false
