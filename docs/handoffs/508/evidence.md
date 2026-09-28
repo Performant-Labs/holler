@@ -55,3 +55,31 @@
   >         state_root.join("body").join("credential.json")
   >     }
   > ```
+
+## Rework round 1 (F, Phase 6 redo — handoff-S REWORK item 1)
+
+- **Fact:** `holler_hub::wire::send_error_with_reason` (a different module in this same crate, `holler-hub`) already builds an unkeyed `Envelope::Error { id, error }` struct literal directly — proof that `Envelope`'s `Error` variant fields are constructible from outside the `holler-proto` crate, not only through `Envelope::error_frame` (which requires a valid `&CorrelationId` and always sets `id: Some(..)`). `circuit/admin.rs`'s new `reply_decode_error` (handoff-S item 1) reuses this exact pattern to send an unkeyed error frame when a decode-failed frame's raw JSON has no usable `id`.
+  **Source:** `crates/holler-hub/src/wire.rs:33-39`
+  **Verbatim excerpt:**
+  > ```
+  >     let frame = match id.and_then(|s| holler_proto::CorrelationId::parse(s).ok()) {
+  >         Some(cid) => Envelope::error_frame(&cid, &WireError::new(code, message, reason)),
+  >         None => Envelope::Error {
+  >             id: id.map(str::to_owned),
+  >             error: WireError::new(code, message, reason),
+  >         },
+  >     };
+  > ```
+
+- **Fact:** `EnvelopeError::code()` maps `UnknownMethod` to `Code::MethodNotFound` (the `-32601` handoff-S item 1 calls for) — this mapping is unchanged source `reply_decode_error` calls into via `err.code()`, not something the rework diff itself defines.
+  **Source:** `crates/holler-proto/src/envelope.rs:176-190`
+  **Verbatim excerpt:**
+  > ```
+  >     pub fn code(&self) -> Code {
+  >         match self {
+  >             EnvelopeError::Json(_) => Code::ParseError,
+  >             EnvelopeError::Batch | EnvelopeError::Shape | EnvelopeError::Version => {
+  >                 Code::InvalidRequest
+  >             }
+  >             EnvelopeError::UnknownMethod(_) => Code::MethodNotFound,
+  > ```

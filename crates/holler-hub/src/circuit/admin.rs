@@ -24,7 +24,7 @@
 
 use futures_util::{Sink, SinkExt, Stream, StreamExt};
 use holler_proto::log::Severity;
-use holler_proto::{Code, CorrelationId, Envelope, PingAck, WireError};
+use holler_proto::{Code, CorrelationId, Envelope, EnvelopeError, PingAck, WireError};
 use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 
 use crate::live::Registry;
@@ -101,6 +101,7 @@ where
                         last_frame_at = fresh_frame;
                         inflight = inflight.saturating_add(1);
                     }
+                    FrameOutcome::Rejected => {}
                     FrameOutcome::Ended => break,
                 }
             }
@@ -116,7 +117,16 @@ where
         }
     }
 
-    log(Severity::Warn, "admin_dropped", vec![("token_id", record.token_id.clone()), ("peer", peer.to_string())]);
+    log(
+        Severity::Warn,
+        "admin_dropped",
+        vec![
+            ("token_id", record.token_id.clone()),
+            ("label", record.label.clone()),
+            ("peer", peer.to_string()),
+            ("sas", sas.to_string()),
+        ],
+    );
 }
 
 /// One inbound WS poll's outcome for [`run`]'s own `select!` arm — split out
@@ -129,6 +139,11 @@ enum FrameOutcome {
     Continue { fresh_frame: tokio::time::Instant },
     /// A request frame was serviced (directly, or as a spawned task).
     Spawned { fresh_frame: tokio::time::Instant },
+    /// Not a decodable JSON-RPC frame (issue #508, handoff-S REWORK item 1):
+    /// [`handle_request`] already answered it with an error reply, but the
+    /// liveness clock deliberately does not move — untrusted noise a client
+    /// never meant as a request must not keep an otherwise-idle socket alive.
+    Rejected,
     /// The socket closed, errored, or hit EOF.
     Ended,
 }
@@ -136,13 +151,11 @@ enum FrameOutcome {
 fn frame_outcome(frame: Option<Result<Message, WsError>>, deps: &AdminDeps, reply_tx: &tokio::sync::mpsc::UnboundedSender<String>) -> FrameOutcome {
     let now = tokio::time::Instant::now();
     match frame {
-        Some(Ok(Message::Text(t))) => {
-            if handle_request(&t, deps, reply_tx) {
-                FrameOutcome::Spawned { fresh_frame: now }
-            } else {
-                FrameOutcome::Continue { fresh_frame: now }
-            }
-        }
+        Some(Ok(Message::Text(t))) => match handle_request(&t, deps, reply_tx) {
+            RequestOutcome::Spawned => FrameOutcome::Spawned { fresh_frame: now },
+            RequestOutcome::Inline => FrameOutcome::Continue { fresh_frame: now },
+            RequestOutcome::Rejected => FrameOutcome::Rejected,
+        },
         Some(Ok(Message::Ping(_) | Message::Pong(_) | Message::Frame(_))) => FrameOutcome::Continue { fresh_frame: now },
         _ => FrameOutcome::Ended,
     }
@@ -167,18 +180,41 @@ where
     sink.flush().await.map_err(|_| ())
 }
 
+/// [`handle_request`]'s outcome, for [`frame_outcome`] to turn into a
+/// [`FrameOutcome`]. Distinct from `FrameOutcome` because a ping/pong/raw WS
+/// frame (handled directly in `frame_outcome`) never reaches `handle_request`
+/// at all.
+enum RequestOutcome {
+    /// A task was spawned (the caller's `inflight` counter tracks exactly
+    /// these).
+    Spawned,
+    /// Answered without spawning a task (a `circuit/ping`, or a decodable
+    /// request naming a method outside the allowlist).
+    Inline,
+    /// Not a decodable JSON-RPC frame at all (issue #508, handoff-S REWORK
+    /// item 1) — answered with an error reply by [`reply_decode_error`], but
+    /// the caller must not treat this as proof of a live request.
+    Rejected,
+}
+
 /// Decode one inbound text frame and either answer it directly (a
-/// `circuit/ping`, or an unrecognised method's `-32601`) or spawn it as its
-/// own task (A's Phase 3 finding #4). Returns `true` iff a task was spawned
-/// (the caller's `inflight` counter tracks exactly those). A notification —
+/// `circuit/ping`, a decodable-but-unrecognised method's `-32601`, or an
+/// undecodable frame's own error reply, issue #508 handoff-S REWORK item 1)
+/// or spawn it as its own task (A's Phase 3 finding #4). A notification —
 /// `session/presence`/`session/update` included — has no `id` and is
 /// dropped without being serviced or touching the roster (MO 4: an admin
 /// socket can never publish presence).
-fn handle_request(text: &str, deps: &AdminDeps, reply_tx: &tokio::sync::mpsc::UnboundedSender<String>) -> bool {
-    let Ok(env) = holler_proto::decode(text) else { return false };
-    let Some(id) = env.id() else { return false };
-    let Some(method) = env.method() else { return false };
-    let Ok(cid) = CorrelationId::parse(id) else { return false };
+fn handle_request(text: &str, deps: &AdminDeps, reply_tx: &tokio::sync::mpsc::UnboundedSender<String>) -> RequestOutcome {
+    let env = match holler_proto::decode(text) {
+        Ok(env) => env,
+        Err(e) => {
+            reply_decode_error(text, &e, reply_tx);
+            return RequestOutcome::Rejected;
+        }
+    };
+    let Some(id) = env.id() else { return RequestOutcome::Inline };
+    let Some(method) = env.method() else { return RequestOutcome::Inline };
+    let Ok(cid) = CorrelationId::parse(id) else { return RequestOutcome::Inline };
 
     // MO 4: anything other than `admin/*` and `circuit/ping` is `-32601` on
     // an admin connection — a body-shaped request (`session/prompt`, a bare
@@ -187,10 +223,10 @@ fn handle_request(text: &str, deps: &AdminDeps, reply_tx: &tokio::sync::mpsc::Un
         let ack = PingAck { hostname: "hub-admin".to_string(), ts: holler_proto::now_millis() };
         let body = holler_proto::encode(&Envelope::response(&cid, serde_json::to_value(ack).ok())).unwrap_or_default();
         let _ = reply_tx.send(body);
-        return false;
+        return RequestOutcome::Inline;
     }
 
-    let Ok(obj) = serde_json::from_str::<serde_json::Value>(text) else { return false };
+    let Ok(obj) = serde_json::from_str::<serde_json::Value>(text) else { return RequestOutcome::Inline };
     let verb = if method == "admin/query" {
         // MO 2: maps to `control/query_remote` when `params.target` is
         // present, `control/query_local` when it is absent — the same
@@ -205,7 +241,7 @@ fn handle_request(text: &str, deps: &AdminDeps, reply_tx: &tokio::sync::mpsc::Un
         let err = WireError::new(Code::MethodNotFound, "unknown method", None);
         let body = holler_proto::encode(&Envelope::error_frame(&cid, &err)).unwrap_or_default();
         let _ = reply_tx.send(body);
-        return false;
+        return RequestOutcome::Inline;
     };
 
     let (deps, reply_tx, verb) = (deps.clone(), reply_tx.clone(), verb.to_string());
@@ -218,5 +254,34 @@ fn handle_request(text: &str, deps: &AdminDeps, reply_tx: &tokio::sync::mpsc::Un
         // mid-`say`, the hub finishes the turn and discards the reply".
         let _ = reply_tx.send(body);
     });
-    true
+    RequestOutcome::Spawned
+}
+
+/// Reply to a frame `holler_proto::decode` could not turn into an
+/// [`Envelope`] at all (issue #508, handoff-S REWORK item 1) instead of
+/// dropping it silently. Five of the six methods AC 5 names —
+/// `control/revoke`, `control/test_drop`, `admin/revoke`, `admin/hold`,
+/// `admin/release` — are not in `methods.rs`'s `CATALOG`, so `decode` fails
+/// them with [`EnvelopeError::UnknownMethod`] before a method-name `match`
+/// ever runs; without this, a hand-rolled client sending one got no reply at
+/// all and hung on its own timeout. Carries the request `id` back when the
+/// raw JSON has one — a well-formed request naming an uncatalogued method
+/// still has a valid id — via a plain best-effort read of the raw text,
+/// since `decode` already failed and there is no [`Envelope`] to read an id
+/// off. Uses the code the decode failure itself maps to (docs §8; `-32601`
+/// for an unlisted method), the same way the body loop's own decode-failure
+/// reply does at `circuit.rs:812-817` (that path always sends an unkeyed
+/// error; this one recovers the id when it can, since an admin client has no
+/// other way to correlate the reply with its request).
+fn reply_decode_error(text: &str, err: &EnvelopeError, reply_tx: &tokio::sync::mpsc::UnboundedSender<String>) {
+    let id = serde_json::from_str::<serde_json::Value>(text)
+        .ok()
+        .and_then(|v| v.get("id").and_then(|i| i.as_str()).map(str::to_owned));
+    let error = WireError::new(err.code(), err.to_string(), None);
+    let frame = match id.as_deref().and_then(|s| CorrelationId::parse(s).ok()) {
+        Some(cid) => Envelope::error_frame(&cid, &error),
+        None => Envelope::Error { id, error },
+    };
+    let body = holler_proto::encode(&frame).unwrap_or_default();
+    let _ = reply_tx.send(body);
 }
