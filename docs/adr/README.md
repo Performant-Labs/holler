@@ -51,7 +51,14 @@ The issue is the canonical record; the markdown file is a copy for browsing and 
 | 0024 | | reserved | [#25](https://github.com/Performant-Labs/holler/issues/25) |
 | 0025 | | reserved | [#26](https://github.com/Performant-Labs/holler/issues/26) |
 
-Reserved test-case slots follow the ADRs: [#27](https://github.com/Performant-Labs/holler/issues/27)–[#126](https://github.com/Performant-Labs/holler/issues/126).
+Reserved test-case slots follow the ADRs: [#27](https://github.com/Performant-Labs/holler/issues/27)–[#126](https://github.com/Performant-Labs/holler/issues/126) (100 slots). The contract these slots implement — the `hlr-NNNN` ID scheme, the eleven test groups, the label axes, and the `Automation` grammar `discover`/`exec` parse — is not an ADR; it is the [master testing issue (#168)](https://github.com/Performant-Labs/holler/issues/168), the single source of truth for how a catalog entry is written. A catalog entry is a case **definition** (reusable, one per distinct behavior), not a run: an actual execution is either its own `Test run: <timestamp>` issue (automated cases, §6 of #168) or evidence pasted directly onto the case's own issue before it closes (manual cases — see `hlr-1103`/`hlr-1405`/`hlr-1406`/`hlr-1407`).
+
+That first block of 100 is a **fixed, one-time allocation**, not an auto-extending range — GitHub issue numbers are monotonic, so a second block cannot be contiguous with the first once real issues have been filed in between. When a block fills, the next one is a fresh reservation at the current high-water mark, recorded here as its own row:
+
+| Block | Slots | Reserved |
+|---|---|---|
+| 1 | [#27](https://github.com/Performant-Labs/holler/issues/27)–[#126](https://github.com/Performant-Labs/holler/issues/126) | at project start |
+| 2 | [#514](https://github.com/Performant-Labs/holler/issues/514)–[#613](https://github.com/Performant-Labs/holler/issues/613) | 2026-09-28 (issue #511/#506 follow-up) |
 
 ## Superseded
 
