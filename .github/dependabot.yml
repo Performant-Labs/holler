@@ -1,0 +1,48 @@
+# Dependabot configuration for holler.
+#
+# Policy: Performant-Labs/playbook#442, decision D4 (settled 2026-08-02 in
+# #421) — weekly / patch + minor accepted / majors never.
+# "Majors never" is NOT the default — every entry below carries an explicit
+# ignore block for version-update:semver-major.
+#
+# Accepted cost of that ignore (documented so nobody rediscovers it as a
+# bug): ignore conditions apply to security updates too. A security fix that
+# ships only in a major version will produce an alert with NO PR behind it
+# and must be handled by hand. That is a deliberate trade, not a Dependabot
+# failure.
+#
+# cargo directory "/" covers the whole workspace (Cargo.toml: members =
+# ["crates/*"]) — Dependabot resolves workspace members automatically, no
+# per-crate entry needed.
+#
+# Grouping: each ecosystem's weekly patch/minor updates land as ONE PR
+# instead of one per crate, and (combined with
+# .github/workflows/dependabot-auto-merge.yml + this repo's existing
+# required status checks) merge themselves once CI passes.
+version: 2
+updates:
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    groups:
+      all:
+        applies-to: version-updates
+        patterns: ["*"]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    groups:
+      all:
+        applies-to: version-updates
+        patterns: ["*"]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
