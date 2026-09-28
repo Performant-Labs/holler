@@ -28,8 +28,8 @@ test-case catalog, which includes manual and acceptance-gate cases CI never runs
 - [ ] 5. **Every failure accounted for** — fixed, or explicitly overridden
   - A red test does **not** automatically block a release; it can be knowingly overridden
   - But the override must be recorded here, not silently skipped: `___` (which test, why, whether it also needs a "Known issues" line below)
-- [ ] 6. **Run the manual acceptance gates** — [#317](https://github.com/Performant-Labs/holler/issues/317) (hlr-1408) and [#318](https://github.com/Performant-Labs/holler/issues/318) (hlr-1409)
-  - Both must **run and pass** for a real release — this project exists to prove the rebuild; do not silently skip them
+- [ ] 6. **Run the manual acceptance gates** — [#317](https://github.com/Performant-Labs/holler/issues/317) (hlr-1408), [#318](https://github.com/Performant-Labs/holler/issues/318) (hlr-1409), and [#125](https://github.com/Performant-Labs/holler/issues/125) (hlr-1407, the remote admin channel — epic #506)
+  - All three must **run and pass** for a real release — this project exists to prove the rebuild; do not silently skip them. A newer catalog case belongs in this list the moment it exists, not just these three forever — check the master testing issue (#168) for any acceptance-gate case added since this template was last touched
   - Result: `___`
 
 ## Known issues
@@ -39,8 +39,11 @@ must be checked and named, not silently omitted. Gathered here, **before** the C
 written below, so nothing gets missed by writing the CHANGELOG's Known Issues subsection before
 this list exists.
 
-- [ ] 7. **Skim open `bug`-labeled issues in this repo**
+- [ ] 7. **Skim open `bug`- and `known-issue`-labeled issues in this repo**
   - `gh issue list --repo Performant-Labs/holler --label bug --state open`
+  - `gh issue list --repo Performant-Labs/holler --label known-issue --state open` — a real, accepted gap
+    that isn't a defect (a documented ADR deferral, a scope narrowing) still belongs in the next
+    section's list; `bug` alone misses these because they were never filed as bugs
 - [ ] 8. **Write one line per real, still-open issue** relevant to this release, with a link
   - List them here — this exact list goes into `CHANGELOG.md`'s Known Issues subsection in step 11, verbatim: `___`
 
