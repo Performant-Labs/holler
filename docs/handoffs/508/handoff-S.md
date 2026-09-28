@@ -75,7 +75,7 @@ All four round-3 REWORK items are closed. For each one I checked the actual asse
 
 **Documentation:** `CHANGELOG.md` has an `## [Unreleased]` → Enhancements entry that links #508, #509, #506 and ADR 0020. Its "byte-identical `--json`" claim is backed by AC 10.
 
-**Privacy:** I grepped the added lines for tailnet and host names, personal names, RFC 1918 and CGNAT ranges, and key or secret patterns. The only hits are the brief's placeholders (`hub.example.ts.net`, `10.0.0.5`) and prior S prose. Nothing is personal and there are no secrets.
+**Privacy:** I grepped the added lines for tailnet and host names, personal names, RFC 1918 and CGNAT ranges, and key or secret patterns. PR-Agent's review flagged a literal RFC 1918 address (`10.0.0.5`) in `remote_admin_test.rs`, which the round-3/round-4 audits had wrongly excused as "the brief's own placeholder" — a policy carve-out this repo's privacy rule does not grant. Fixed post-audit: both the test and the brief's matching prose now use `192.0.2.7` (IANA TEST-NET-1, RFC 5737 — reserved for documentation, never routable to a real host), consistent with the placeholder already used elsewhere in this diff. The only remaining hit is `hub.example.ts.net`, a non-resolving example hostname. Nothing is personal and there are no secrets.
 
 **Commit and PR hygiene (advisory):**
 - The subjects follow Conventional Commits (`chore(#508): …`, `test(#508): …`).

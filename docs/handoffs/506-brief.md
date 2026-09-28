@@ -299,7 +299,7 @@ crates/holler-body/src/join.rs:84-87
         return JoinExit::Policy;
     }
 ```
-`parse` accepts `ws://` and `wss://` only (server_address.rs:87-95), so the loopback `ws://127.0.0.1:<port>` URL a test hub's `ws_url()` returns passes, and `ws://10.0.0.5:1` is refused.
+`parse` accepts `ws://` and `wss://` only (server_address.rs:87-95), so the loopback `ws://127.0.0.1:<port>` URL a test hub's `ws_url()` returns passes, and `ws://192.0.2.7:1` is refused.
 
 The hub-side Noise prologue binds whatever `advertised_url` the client sends. The hub does not compare it with its own listen address:
 ```
@@ -425,7 +425,7 @@ CLI:
 10. **Parity.** For each verb, `--json` stdout from the remote form is byte-identical to the local form against the same hub state. Tested at least for `roster --json`, `say --json`, `hub status --json` (after masking volatile fields such as elapsed times), `wait --json` and `hub query status --json`. Also tested for `interrupt --json` and `answer --json`, including one refusal each (for example an unknown session), whose stderr and exit code must match the local form. The masked set is exactly these fields, replaced with a fixed placeholder by one helper in `remote_admin_test.rs` before comparison: `roster` → `rows[*].last_seen`, `rows[*].last_update_at` (roster.rs:162-165); `say` → `elapsed_ms` (control_server.rs:272); `wait` → `rows[*].age_secs` (control_server.rs:575); `hub status` → `lockout.peers[*].retry_after_secs` (lockout.rs:541); `hub query status` → none. Every other field is compared byte for byte. If T finds another field that differs between two identical **local** runs, T names it with its source line in the T-red handoff, and the masked set is extended by that one field only.
 11. The remote form needs **no hub state**. Every remote test runs the CLI with `HOLLER_STATE_DIR` set to the **body** state dir, which has no control socket and no hub files.
 12. Omitting `--server` keeps today's behaviour. The existing `roster_cli_test`, `talk_test`, `interrupt_test`, `answer_cli_test`, `wait_test` and `query_test` pass unchanged.
-13. Failure words and exit codes: `--server ws://10.0.0.5:1` gives exit 3 (plaintext non-loopback, the same message family as `body join`). A missing `body/credential.json` gives exit 1 with a message naming the path and `holler body join`. An unreachable server gives exit 1, "could not reach the hub at <url>: …". A hub-key mismatch gives exit 1, with the same words `body run` uses. An ambiguous session name on the remote path (`say`, and `hub query` with an ambiguous target) exits 2 with the same text as the local form (decision 9; say_cmd.rs:138, hub_cmd.rs:190).
+13. Failure words and exit codes: `--server ws://192.0.2.7:1` gives exit 3 (plaintext non-loopback, the same message family as `body join`). A missing `body/credential.json` gives exit 1 with a message naming the path and `holler body join`. An unreachable server gives exit 1, "could not reach the hub at <url>: …". A hub-key mismatch gives exit 1, with the same words `body run` uses. An ambiguous session name on the remote path (`say`, and `hub query` with an ambiguous target) exits 2 with the same text as the local form (decision 9; say_cmd.rs:138, hub_cmd.rs:190).
 14. `cargo test --workspace`, `bash scripts/lint.sh` (including the 900-line file guard) and `cargo clippy --workspace --all-targets -- -D warnings` are green.
 
 Docs (in this PR because they are the standing spec, per CLAUDE.md):

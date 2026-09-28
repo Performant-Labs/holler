@@ -749,14 +749,15 @@ fn remote_interrupt_and_answer_refusals_match_local() {
 // session_held cases are already pinned above/elsewhere).
 // ---------------------------------------------------------------------------
 
-/// **AC 13.** `--server ws://10.0.0.5:1` (plaintext, non-loopback) is refused
+/// **AC 13.** `--server ws://192.0.2.7:1` (plaintext, non-loopback) is refused
 /// before any dial, exit 3, even against a state dir that was never joined.
 /// A loopback address nothing is listening on gets exit 1, "could not reach
-/// the hub at …".
+/// the hub at …". `192.0.2.0/24` is IANA's TEST-NET-1 (RFC 5737): reserved for
+/// documentation and examples, never routable to a real host.
 #[test]
 fn remote_server_policy_and_unreachable_failures_get_the_documented_exit_codes() {
     let unjoined = StateDir::new();
-    let out = run(&unjoined, &["roster", "--server", "ws://10.0.0.5:1", "--json"]);
+    let out = run(&unjoined, &["roster", "--server", "ws://192.0.2.7:1", "--json"]);
     assert_eq!(out.status.code(), Some(3), "AC 13: a non-loopback plaintext --server is exit 3: {}", String::from_utf8_lossy(&out.stderr));
 
     let (_hub_state, body_state, hub, body, _token_id, _ws_url) = two_dir_rig(&[("alpha", &[])]);
