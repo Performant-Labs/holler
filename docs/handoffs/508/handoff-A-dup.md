@@ -1,25 +1,25 @@
-# Handoff-A-dup: Phase 7 - #508/#509 remote hub-admin client  (anti-duplication gate)
+# Handoff-A-dup: Phase 7 - #508/#509 remote hub-admin client  (anti-duplication gate, round 2 after S REWORK)
 
 **Date:** 2026-09-27
 **Branch:** issue-508-implementation
-**Diff base:** daf6633   **Diff head:** 9760ba4
+**Diff base:** daf6633 (full feature); rework delta ac4e002..a8f39d9   **Diff head:** a8f39d9
 **Reuse map:** docs/handoffs/506-brief.md §Files "Reuse map"
 **Verdict:** PASS
 
+Supersedes the round-1 gate (PASS on daf6633..9760ba4, committed at ac4e002; still in git history). The four round-1 warns stand unchanged: `read_reply` compared with `next_envelope`, `send_ping` and the `circuit/ping` answer, two `ControlError` variants, and the 898/899-line headroom. The rework touched none of them. This pass reviews the rework delta: F-rework's Q-1/Q-2/Q-3 fixes and T's four new tests.
+
 ## Summary
 
-PASS. F extended every object the Reuse map named and did not build a parallel path. The admin loop calls the existing `control_server` handlers through one new `dispatch_allowlisted` entry, and the Unix socket's own `control/*` arms now go through that same entry, so each verb still has one implementation. `send_prompt` is still the only prompt path, and `hold_single_path_test` is unmodified. The hub-key pinning has one copy: the body's `hello_exchange` gained a `role` parameter. `authenticate`/`authenticate_and_hello` are unchanged, the address policy reuses `server_address::{parse, loopback_only_check}`, and the `*_cmd.rs` rendering is shared. The test initiator was moved into `raw_ws.rs` rather than copied (hub_hygiene_test.rs lost 90 lines). What remains are three small local helpers that look like existing ones. Each is `warn` only.
+PASS. The rework stays inside the one new object the brief called for (`circuit/admin.rs`) and adds no module and no public surface. `RequestOutcome` and `FrameOutcome::Rejected` follow the file's existing small-enum-per-decision-point style. The `admin_dropped` fix makes that line match `admin_connected`'s four-field vec and uses the existing `log(Severity, ...)` helper. The `send_prompt` choke point, `dispatch_allowlisted` and `circuit.rs` are all untouched, and circuit.rs is still 898 lines. There are two new near-copies. Both are small, local and warn-only: `reply_decode_error` rebuilds `wire.rs::send_error_with_reason`'s frame-building logic, and the new tests repeat the identity-file read boilerplate a fifth time.
 
 ## Findings
 
 | # | Severity | File:line | Finding | Suggested fix |
 |---|---|---|---|---|
-| 1 | warn | `crates/holler-body/src/admin_client.rs` (`read_reply`) | Frame-skipping read loop resembles `connection::next_envelope` (connection.rs:432). It is not a copy: it matches the reply by correlation id, turns an `Error` envelope into `Wire`, and gives each close/error a distinct message, which `next_envelope`'s `Option` return cannot express. Its doc says so. | None required. If a third one-shot client appears, have `read_reply` call `next_envelope` in a loop (widen it to `pub(crate)`) and keep only the cid match local. |
-| 2 | warn | `crates/holler-hub/src/circuit/admin.rs` (`send_ping`, `circuit/ping` arm) | `send_ping` repeats `SessionConnection::send_ws_ping`'s two sink calls without its reconnect side effects. The `circuit/ping` answer re-creates circuit.rs:845's `PingAck` build with a fixed `hostname:"hub-admin"`. Both are 2–3 lines, and the body-side versions are tied to `SessionConnection` state, so the admin loop cannot call them. | None required. Optional: a free `ws_ping(sink)` helper in circuit.rs that both call. |
-| 3 | warn | `crates/holler-hub/src/control.rs` (`ControlError::{RemotePolicyRefused, RemoteUnavailable}`) | MO 9 said to add **one** variant. F added two, because the exit-3 policy refusal needs its own arm in every `*_cmd.rs`. This is a new variant on the existing enum, not a parallel error type, and exit 3 matches `body join`. It departs from the brief's wording, so I'm recording it here instead of passing over it. | O/S decide whether to amend MO 9's wording or accept. No code change needed for duplication. |
-| 4 | warn | `crates/holler-hub/src/circuit.rs` (898), `crates/holler-proto/src/docs.rs` (899) | Both are within 1–2 lines of the 900-line `lint.sh` guard. That is inside the budget, but there is no headroom. `control_server.rs` fell to 829 because `status_doc`/`read_listening` moved verbatim to `control_status.rs`, the fallback the brief had pre-agreed. | The next story to touch either file should do the pre-agreed move first (`hello_exchange`/`hub_hello_doc` → `circuit/hello.rs`; the enums section of docs.rs → a sibling module). |
+| 1 | warn | `crates/holler-hub/src/circuit/admin.rs:276-287` (`reply_decode_error`) | The frame-building half (parse `id` as `CorrelationId`, then `Envelope::error_frame` if it parses, else an unkeyed `Envelope::Error { id, error }`, then `encode`) is a line-for-line copy of `wire.rs:33-40` (`send_error_with_reason`). F's handoff calls this "reusing a proven pattern", but the code copies it. It does not call it. The copy is justified in part: `wire.rs` writes to a WS `Sink`, while the admin loop replies through an `mpsc::UnboundedSender<String>`, so the admin loop cannot call `send_error` itself. The raw-JSON id recovery is new and belongs in admin.rs. `control_server.rs:716` `unkeyed_error_line` is a third, older variant of the same idea. This is not in this stack's reject list (token store, Lockout, Roster, `log`, test harness), and it is about 6 lines. | No change required for this issue. Optional follow-up: add `pub(crate) fn error_frame_text(id: Option<&str>, code, message, reason) -> String` to `wire.rs`. `send_error_with_reason` and `reply_decode_error` would both call it, and `unkeyed_error_line` could fold in later. |
+| 2 | warn | `crates/holler-cli/tests/remote_admin_test.rs:236, 279, 321` (plus the existing 108, 172) | Each new test repeats the same five-line "read `identity_path` → 32-byte array → `hub_x25519_pubkey` → `connect_ws` → `go_live_as(..., role)`" setup. The file now has five copies. No shared helper existed for it before, so this is local repetition, not a near-copy of `support::{Hub, StateDir, join, mint_token, wait_for}`. Those are reused correctly, and so are `raw_ws::{connect_ws, go_live_as, hub_x25519_pubkey, decode_next}`. | When T adds the remaining AC 6/7/8/13/16 tests (still open per S item 4), first extract a local `async fn live_socket(state, hub, token_id, label, role) -> WsClient` in `remote_admin_test.rs`, or put it in `support::raw_ws` if a second test file needs it. The copy count will roughly double otherwise. |
 
-No duplication; extension is clean. I found no architectural drift introduced during rework. T's GREEN pass only edited test/fixture files.
+No parallel path. The extension is clean. The rework introduced no architectural drift. F correctly left `circuit.rs::handle_inbound`'s decode-failure path and the Unix-socket dispatch alone, because they are separate code paths. That is not a partial fix of a shared bug. The new `#[cfg(test)]` allowlist unit test calls the real `allowlisted_verb` and does not re-implement the map. (Its name says "six" and its doc says "seven". That wording mismatch is T/S's to settle, not a duplication issue.) The v2.md change moves and adds prose only. There are no catalog, error-code or golden-file changes.
 
 ## Notes for F
 
@@ -27,8 +27,8 @@ None (PASS).
 
 ## Patterns referenced
 
-- `crates/holler-hub/src/control_server.rs` (`dispatch_control`, `dispatch_session_control`, new `dispatch_allowlisted`)
-- `crates/holler-hub/src/circuit.rs:97-149, 625-632, 845-848` (liveness/ping helpers, `circuit/ping` answer)
-- `crates/holler-body/src/connection.rs:432-458` (`next_envelope`, `send`), `connection/handshake.rs` (`hello_exchange`)
-- `crates/holler-body/src/server_address.rs` (`parse`, `loopback_only_check`)
-- `crates/holler-cli/tests/support/raw_ws.rs`, `crates/holler-cli/tests/hub_hygiene_test.rs` (moved initiator)
+- `crates/holler-hub/src/wire.rs:13-45` (`send_error`, `send_error_with_reason`)
+- `crates/holler-hub/src/control_server.rs:704-721` (`encode_error_frame`, `unkeyed_error_line`)
+- `crates/holler-hub/src/circuit.rs:810-817` (`handle_inbound` decode-failure reply)
+- `crates/holler-cli/tests/support/raw_ws.rs` (`connect_ws`, `hub_x25519_pubkey`, `decode_next`, `go_live_as`)
+- Round-1 baseline: this file at ac4e002
