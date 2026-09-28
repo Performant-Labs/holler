@@ -460,7 +460,7 @@ jobs:
           steps.gate.outputs.should_skip != 'true' &&
           steps.labels.outputs.high_stakes != 'true'
         continue-on-error: true
-        uses: qodo-ai/pr-agent@4ebd5c5333c6ef21509e7304d27969eb825e6f22  # v0.43.0
+        uses: qodo-ai/pr-agent@1d01f24f455bb879c1d9c557ad7de3d72dcc7975  # v0.46.0
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -483,7 +483,7 @@ jobs:
           steps.gate.outputs.should_skip != 'true' &&
           steps.labels.outputs.high_stakes == 'true'
         continue-on-error: true
-        uses: qodo-ai/pr-agent@4ebd5c5333c6ef21509e7304d27969eb825e6f22  # v0.43.0
+        uses: qodo-ai/pr-agent@1d01f24f455bb879c1d9c557ad7de3d72dcc7975  # v0.46.0
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
