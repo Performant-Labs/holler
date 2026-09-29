@@ -142,10 +142,12 @@ Two tiers — the first is required, the second is a deliberate extra:
    release — not generated from commit messages).
 2. **A GitHub Release**, with one binary attached per platform, named `holler-<os>`
    (`holler-ubuntu-latest`, `holler-macos-latest`, `holler-ubuntu-arm64`) — built via
-   `cargo build --release` on each platform, from the exact tagged commit, then renamed to that
-   convention before attaching. This is a **public, outward-facing artifact** — confirm with
-   whoever's driving the release before publishing it, every time; it's not something to
-   automate past without a look.
+   `scripts/release-build.sh` on each platform, from the exact tagged commit, then renamed to that
+   convention before attaching. This is a **public, outward-facing artifact** — publishing it
+   proceeds automatically once every step through the builds is real and green (changed
+   2026-09-29; no separate per-release go-ahead is required anymore). What actually gates a
+   release is steps 1-17 themselves being genuinely green, not a confirmation step layered on
+   top of them.
 
 ## CHANGELOG entry structure
 
@@ -246,9 +248,10 @@ several PRs.
     rename each to `holler-<os>` for attaching.
 12. Extract `CHANGELOG.md`'s `## [X.Y.Z]` section (already complete, including Known Issues) into
     a standalone file — that's the release notes, no new content to write.
-13. **Confirm before publishing** — this is a public, outward-facing artifact. Get an explicit
-    go-ahead, then create the GitHub Release from the tag (`gh release create vX.Y.Z
-    <binaries...> --notes-file <that extracted file>`).
+13. **Publish** — this is a public, outward-facing artifact, and creating the GitHub Release from
+    the tag (`gh release create vX.Y.Z <binaries...> --notes-file <that extracted file>`) proceeds
+    directly once steps 1-12 are real and green; no separate go-ahead step gates it (changed
+    2026-09-29).
 14. **Verify the published artifact, not just the local build.** Download the binaries actually
     attached to the GitHub Release (`gh release download vX.Y.Z`), from a clean directory, and
     run `scripts/check-binary-paths.sh` and `./holler-<os> --version` against *that* file for each platform — confirms the upload

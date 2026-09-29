@@ -100,10 +100,14 @@ control-socket transport is Unix domain sockets end to end); tracked separately 
     ELF aarch64 binary) on-runner as part of the workflow; the downloaded artifact is already
     named `holler-ubuntu-arm64`, no rename needed
 
-## Publish (confirm before doing — public, outward-facing)
+## Publish (public, outward-facing — no separate go-ahead required)
 
-- [ ] 18. **Explicit go-ahead obtained** to actually publish
-  - This step is outward-facing — don't run it on autopilot even if every step above is green
+- [ ] 18. **Confirm publish readiness**: steps 1-17 all green, nothing outstanding
+  - Publishing proceeds automatically once this is true — no separate operator go-ahead is
+    required (changed 2026-09-29; earlier releases, e.g. v0.4.0, gated here on an explicit human
+    confirmation before this step). What still stops a release: any real red in steps 1-17, or the
+    operator saying so explicitly before this point — this step doesn't create a new stopping point
+    of its own.
 - [ ] 19. **Extract the release notes**
   - `CHANGELOG.md`'s `## [X.Y.Z]` section (step 11) is already complete — including Known Issues, since that was fed in from step 8, not written separately here
   - Pull just that section into a standalone file, e.g. `/tmp/release-notes-vX.Y.Z.md` — no new content, this is extraction only
