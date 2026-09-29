@@ -7,6 +7,8 @@ fills this file in at release time.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-09-29
+
 ### Enhancements
 - `roster`, `say`, `interrupt`, `answer`, `wait`, `hub status` and `hub query` all take `--server URL`
   to run against a remote hub instead of the local one, over the existing hub WebSocket circuit
@@ -232,6 +234,39 @@ fills this file in at release time.
   ([#363](https://github.com/Performant-Labs/holler/pull/363)); a real `say` round trip against
   Claude Code passes ([#294](https://github.com/Performant-Labs/holler/issues/294)). The README now
   says so, and says which parts of that gate (`interrupt`, detach) have not been run.
+
+### Known Issues
+
+- The remote admin channel (`--server URL`) reuses the existing body join credential; there is no
+  separate admin credential type yet ([#616](https://github.com/Performant-Labs/holler/issues/616)).
+- No read-only/read-write scope split on the remote admin channel: every verb is available to any
+  valid credential over it ([#617](https://github.com/Performant-Labs/holler/issues/617)).
+- No dedicated rate-limiting or abuse posture on the remote admin channel — no cap on concurrent or
+  queued admin requests per socket ([#618](https://github.com/Performant-Labs/holler/issues/618)).
+- No new error codes for admin scope/credential-type failures, meaningless while the two items above
+  stand as deferred ([#619](https://github.com/Performant-Labs/holler/issues/619)).
+- The body does not tell the operator why the hub rejected it (expired, revoked, locked out) and
+  keeps hammering the hub with the same doomed credential
+  ([#452](https://github.com/Performant-Labs/holler/issues/452)).
+- Flaky on Ubuntu CI: `interrupt_test::ack_timeout_message_when_body_stalls` sees `reconnecting`
+  instead of the ack-timeout message ([#420](https://github.com/Performant-Labs/holler/issues/420)).
+- Spawn-mode `interrupt` cancels the model turn but not a shell command the harness already started;
+  the next `say` blocks until that command finishes
+  ([#418](https://github.com/Performant-Labs/holler/issues/418)).
+- Hub RSS grew 7.9 to 102 MiB over 578 churn cycles; leak versus bounded-but-large is unresolved
+  ([#402](https://github.com/Performant-Labs/holler/issues/402)).
+- A detached body's token label is never freed, and the credential store grows without bound under
+  churn ([#400](https://github.com/Performant-Labs/holler/issues/400)).
+- A body never detects that its attach-mode backend died: the roster keeps showing
+  `connected`/`idle` because the body itself keeps heartbeating
+  ([#397](https://github.com/Performant-Labs/holler/issues/397)).
+- Windows is not a supported target: the control-socket transport is Unix domain sockets end to end
+  ([#378](https://github.com/Performant-Labs/holler/issues/378)).
+- `http_attach_driver`'s real permission/question wire shape has never been independently confirmed
+  against a real OpenCode instance, only against hand-authored fake-server fixtures
+  ([#365](https://github.com/Performant-Labs/holler/issues/365)).
+- `session_manager_test::large_backlog_drains_in_strict_fifo_order_no_loss` failed once under load;
+  not yet reproduced ([#491](https://github.com/Performant-Labs/holler/issues/491)).
 
 ## [0.3.0] - 2026-09-23
 
