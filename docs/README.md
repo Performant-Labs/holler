@@ -21,6 +21,16 @@ Index of everything under `docs/`.
   (research memos are not decisions — ADRs are). [`research/positioning.md`](research/positioning.md)
   is the "Where Holler fits" page: a composition, not a green-field protocol.
 
+## Deployment
+
+- [**deploy.md**](deploy.md) — why the hub only ever binds loopback, the supported Tailscale
+  tailnet path (and other TLS-terminating proxies), and how a remote admin client (`--server URL`
+  on `roster`/`say`/`hub status`/etc., ADR 0020) reaches the hub the same way a body already does.
+- [**releasing.md**](releasing.md) — the release process narrative: version bumps, the CHANGELOG
+  entry structure, the manual acceptance gates, and building for a platform you don't have locally.
+  [**release-checklist-template.md**](release-checklist-template.md) is the copy-per-release
+  checklist that follows it.
+
 ## Guidance
 
 - [**orchestrating.md**](orchestrating.md) — the orchestrator pattern: dispatch with `say`, don't poll `roster`, block on a deterministic `wait`, redirect with `interrupt`, resolve with `answer` (issue #142).
