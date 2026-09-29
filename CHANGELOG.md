@@ -267,6 +267,9 @@ fills this file in at release time.
   ([#365](https://github.com/Performant-Labs/holler/issues/365)).
 - `session_manager_test::large_backlog_drains_in_strict_fifo_order_no_loss` failed once under load;
   not yet reproduced ([#491](https://github.com/Performant-Labs/holler/issues/491)).
+- Flaky on macOS CI: `token_store_test::concurrent_operator_paths_never_lose_the_lock_race` failed
+  once under CI-runner load, passed on an immediate rerun of the same commit; not yet reproduced
+  locally ([#629](https://github.com/Performant-Labs/holler/issues/629)).
 
 ## [0.3.0] - 2026-09-23
 
