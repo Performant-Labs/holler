@@ -87,8 +87,9 @@ Workflow({
 })
 ```
 
-After the script opens the PR, the MO verifies CI and the run's gates and merges it (squash, branch
-deleted) — merging is the MO's job, not a human gate. It stops on a named reason
+After the script opens the PR, the run's own agent verifies CI and the run's gates, then merges the
+PR itself (squash, branch deleted) and reports the merge — merging is agent work, not a human gate
+and not MO work. It stops on a named reason
 (`escalate`, `gate-unavailable`, `preflight-failed`, ...) rather than working around it. A stopped run
 is resumed from the worktree and its git history (`resumeFromRunId` works only within the same session).
 The script's own commit messages and PR body do not carry this repo's AI disclosure: after it opens the
