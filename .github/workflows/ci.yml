@@ -54,7 +54,15 @@ jobs:
             Add-Content -Path $env:GITHUB_PATH -Value "$HOME/.cargo/bin"
             $env:PATH = "$HOME/.cargo/bin:$env:PATH"
           }
-          rustup toolchain install stable
+          # Install only when no toolchain satisfies rust-toolchain.toml. A persistent
+          # runner keeps its toolchain, and updating it in place can fail: with a
+          # shared root-owned RUSTUP_HOME the update dies with `could not rename
+          # 'component' file ... rolling back changes` (every ubuntu run since
+          # stable 1.99.0 shipped, 2026-10-01). A present toolchain is used as is.
+          rustup show active-toolchain *> $null
+          if ($LASTEXITCODE -ne 0) {
+            rustup toolchain install stable
+          }
         shell: pwsh
 
       # ~/.cargo (registry/git) and target/ across runs, keyed on the OS,
