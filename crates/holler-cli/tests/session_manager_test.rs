@@ -361,10 +361,19 @@ async fn large_backlog_drains_in_strict_fifo_order_no_loss() {
                     );
                     break; // no room right now — drain some before topping up further
                 }
-                () = tokio::time::sleep(Duration::from_millis(2)) => {
+                () = tokio::time::sleep(Duration::from_millis(100)) => {
                     // Accepted (queued, or dispatched immediately if alpha
                     // had already gone idle) — hand it to the completion
                     // stream and move on to the next index right away.
+                    //
+                    // 100 ms, not 2: a prompt that finds the queue full resolves to
+                    // `QueueFull` almost at once, but on a loaded shared runner a
+                    // 2 ms window can expire first. The prompt is then taken for an
+                    // accepted one, resolves to `QueueFull` later and trips the
+                    // `unexpected queued outcome` panic below (seen on the
+                    // self-hosted ubuntu runner, 2026-10-08). The wait is paid only
+                    // by prompts that are really accepted, so the 120-prompt test
+                    // stays well inside its 120 s deadline.
                     pending.push(fut);
                     next_to_submit += 1;
                 }
