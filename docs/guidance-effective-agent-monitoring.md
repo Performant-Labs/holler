@@ -179,7 +179,7 @@ happened; the detailed catalogue is pfleet's `docs/multi-agent-operating-issues.
    running, a part written in the last few minutes, or a turn the store shows as not completed (a long generation writes no part, so a
    thinking pane looks quiet) means working and restarts the idle clock; bound the open-turn rule (30 minutes) so a dead turn is
    still caught. A pane first seen quiet is idle from its
-   last activity. When the transcript cannot be read, fall back to the label (a broken lookup must not hide a real idle pane). Keep the
+   last activity. When the transcript cannot be read, fall back to the label (a broken lookup must not hide a real idle pane). Make sure the transcript is collected for the labelled-idle panes at all: the first version of this rule never saw one, because only working-labelled rows were read. Keep the
    roster's own clock for anything that already measures from it (the automatic reset).
 2. **A monitor must not depend on the session it monitors.** A timer that only fires while the monitored session is idle did not fire for
    hours. Put the watch in the deterministic watchdog: a heartbeat file the operator session touches, and an alarm when it goes stale.
