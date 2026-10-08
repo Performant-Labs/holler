@@ -169,6 +169,37 @@ for the second.
 
 ---
 
+## Lessons from the 2026-10 multi-epic run
+
+Added after several days of a four-pane fleet driven by an orchestrator and an external watchdog. Each lesson is a failure that
+happened; the detailed catalogue is pfleet's `docs/multi-agent-operating-issues.md` (entries G1 to G7 are the monitoring ones).
+
+1. **Never trust a status label alone.** The roster's `idle` lags a running turn (a long shell wait, a full test run, a stage subagent), so
+   "idle N min, unassigned" alerts fired on working panes and were wrong every time they were checked. Cross-check the transcript: a tool
+   running, or a part written in the last few minutes, means working and restarts the idle clock. A pane first seen quiet is idle from its
+   last activity. When the transcript cannot be read, fall back to the label (a broken lookup must not hide a real idle pane). Keep the
+   roster's own clock for anything that already measures from it (the automatic reset).
+2. **A monitor must not depend on the session it monitors.** A timer that only fires while the monitored session is idle did not fire for
+   hours. Put the watch in the deterministic watchdog: a heartbeat file the operator session touches, and an alarm when it goes stale.
+3. **Notices to a busy orchestrator must be queued.** A blocking `say` is refused (`session_busy`) while a turn runs, so the notices piled
+   up undelivered exactly when the orchestrator was busiest. Use `say --queue`; it lands at the end of the turn. Never rely on a queued
+   message to stop something that is about to happen.
+4. **Watch for work waiting on a person or a reviewer.** Every pane was parked for a good reason while a finished fix waited for review.
+   Alarm on an open PR head with no verdict, and on a hold waiting on the operator. Scope the review alarm to the PRs that still need a
+   human or proxy verdict, or every self-reviewing PR raises it.
+5. **An epic can stall while every pane looks fine.** Watch epic-level progress: open stories and no story closed and no PR merged for a
+   set time raises an alert to the orchestrator and to the human. Start the clock when the epic is first seen, or an epic whose last merge
+   was days ago is "stalled" the moment it is watched. Remove an epic from the list when the operator puts it on hold, or the watchdog
+   nudges the orchestrator to move work it was told not to touch.
+6. **An alert that only writes a file nobody reads is not an alert.** The human channel here was an alerts file and a status line. The
+   operator session now tails it, but a real push channel is still missing.
+7. **Pausing a monitor can lose state.** In pfleet's watchdog a paused pass resets its whole state (outbox, de-duplication, clocks and the
+   context check's action flags), so a pause is not a hold. While paused, context ceilings are not enforced. Pause only for a short time.
+8. **Test the monitor without touching the world.** Stub every external lookup (the forge, the hub) in the monitor's tests: an unstubbed
+   call made the suite hang. Never use file-permission tests (CI runs as root and ignores them); inject the failure in-process.
+9. **Do not let a helper leave load behind.** A review harness that started CPU-burning background loops and was never cleaned up kept
+   eight cores busy for six hours and slowed everything. Any helper that starts background load must clean it up in a trap.
+
 ## Section: Claude (Claude Code)
 
 Claude Code sessions have two native event-driven primitives worth knowing
