@@ -176,7 +176,9 @@ happened; the detailed catalogue is pfleet's `docs/multi-agent-operating-issues.
 
 1. **Never trust a status label alone.** The roster's `idle` lags a running turn (a long shell wait, a full test run, a stage subagent), so
    "idle N min, unassigned" alerts fired on working panes and were wrong every time they were checked. Cross-check the transcript: a tool
-   running, or a part written in the last few minutes, means working and restarts the idle clock. A pane first seen quiet is idle from its
+   running, a part written in the last few minutes, or a turn the store shows as not completed (a long generation writes no part, so a
+   thinking pane looks quiet) means working and restarts the idle clock; bound the open-turn rule (30 minutes) so a dead turn is
+   still caught. A pane first seen quiet is idle from its
    last activity. When the transcript cannot be read, fall back to the label (a broken lookup must not hide a real idle pane). Keep the
    roster's own clock for anything that already measures from it (the automatic reset).
 2. **A monitor must not depend on the session it monitors.** A timer that only fires while the monitored session is idle did not fire for
