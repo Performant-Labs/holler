@@ -20,3 +20,13 @@
   - Repo docs and config: `scripts/lint.sh`, `clippy.toml`, `docs/testing.md` (layout and rules), `docs/adr/README.md`, `ADR-0006.md`, `ADR-0020.md`.
   - Issues #669, #633 (epic, including the Skeleton split), #639, #649 and #661 via `gh issue view`. `docs/handoffs/670-brief.md` in the #670 worktree.
   - Searches: `find crates -path '*/src/*' -name mod.rs` returned none. `grep -rn UnixStream::pair crates` returned none. Line counts are from `wc -l` on every file the plan touches.
+
+## T (Phase 4, author/RED) — 2026-10-09
+- **Decided:**
+  - One test file, `crates/holler-hub/tests/pane_dispatch_test.rs`, 10 tests, in process over `UnixStream::pair()` (real `Registry`/`Roster`/`Lockout`, no binary, no sleep). RED is a build failure (missing modules, missing manifest lines, `handle_control_conn` arity), as the brief's test plan allows.
+  - Took A's names for the open API: `PaneDeps { panes, profiles }` (`Clone`, pub `Arc` fields) in `pane_dispatch.rs`, passed as the last parameter of `handle_control_conn` (A finding 4). `panes::dispatch` and `profile::dispatch` are `pub` and async so their AC 4 signatures can be called from the test.
+  - AC 3's "not `Clone`" is pinned with a stable-Rust autoref probe in the test file, not the `compile_fail` doctest A suggested, because a doctest would have to live in F's production files. The pointer-equality check runs at the bundle seam (`Arc::ptr_eq` and `strong_count == 3` across two live connections), as A finding 3 advised, so `serve.rs` gains no `pub` and no test hook.
+  - Left out: `CATALOG.len() == 22` (already in `holler-proto`'s own tests), and any test of the stub's treatment of `params` or of "load writes nothing", which #639 and #661 would have to delete.
+- **Assumed:** `control/status` is a fair stand-in for "existing control methods behave as before" (it goes through the same `dispatch_control` and needs only registry and lockout); the existing hub and CLI suites cover the rest in GREEN.
+- **Hedged:** a compile-time RED cannot show the assertions are right, so T ran the file against a throwaway stub in a scratch worktree (10/10 pass x3; clippy clean; with the arm disabled the three forwarding tests fail on assertions). The scratch worktree is removed.
+- **Evidence:** `cargo test -p holler-hub --test pane_dispatch_test` in the 0669 worktree (12 errors: E0432 x5, E0061, E0277 x5 plus the summary); scratch run output as above; `crates/holler-proto/src/id.rs:46-56` (correlation ids need an `h-`/`b-` prefix); `crates/holler-pane/src/reply.rs:59-110` (`PaneReply`, `into_result`).
