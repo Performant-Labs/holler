@@ -165,3 +165,44 @@ cited lines.
   > ```rust
   >     let pane_deps = crate::pane_dispatch::PaneDeps::load(state);
   > ```
+
+## F (Phase 6, rework after the diff gate's round-1 BLOCK)
+
+- **Fact:** `Condvar::wait_timeout` unlocks the mutex for the wait and re-acquires it before it returns, so a watcher
+  waiting in `Store::poll` holds no lock. This is the Rust standard library (1.98.1, the `stable` toolchain that
+  `rust-toolchain.toml` selects), outside this repo, so the gate cannot attach it. The lines are copied from that
+  toolchain's own std source.
+  **Source:** `library/std/src/sync/poison/condvar.rs:71-75`, `library/std/src/sync/poison/condvar.rs:264-265` and
+  `library/std/src/sync/poison/condvar.rs:283-284`
+  **Verbatim excerpt:**
+  > ```rust
+  >     /// This function will atomically unlock the mutex specified (represented by
+  >     /// `guard`) and block the current thread. This means that any calls
+  >     /// to [`notify_one`] or [`notify_all`] which happen logically after the
+  >     /// mutex is unlocked are candidates to wake this thread up. When this
+  >     /// function call returns, the lock specified will have been re-acquired.
+  > ```
+  > ```rust
+  >     /// The semantics of this function are equivalent to [`wait`] except that
+  >     /// the thread will be blocked for roughly no longer than `dur`. This
+  > ```
+  > ```rust
+  >     /// Like [`wait`], the lock specified will be re-acquired when this function
+  >     /// returns, regardless of whether the timeout elapsed or not.
+  > ```
+
+- **Fact:** A `pane/watch` request decodes any `u64` as its `since`, because the params type does no range check. The
+  rule-1 check in `feed::select`, which `Store::poll` runs on every pass, is therefore the only thing that refuses a
+  cursor ahead of the head on the wire.
+  **Source:** `crates/holler-pane/src/reply.rs:146-149` and `crates/holler-pane/src/ports.rs:33-34`
+  **Verbatim excerpt:**
+  > ```rust
+  > pub struct WatchParams {
+  >     #[serde(default)]
+  >     pub since: Cursor,
+  > }
+  > ```
+  > ```rust
+  > #[serde(transparent)]
+  > pub struct Cursor(pub u64);
+  > ```

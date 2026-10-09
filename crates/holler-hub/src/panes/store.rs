@@ -1,9 +1,10 @@
 //! The pane registry's store (D1, D4): the table of records behind one lock, its file, and
 //! the long-poll wait of its change feed.
 //!
-//! One `std::sync::Mutex` guards the whole table, and one `Condvar` wakes the watchers.
-//! Every method is synchronous. The handlers reach the store through `spawn_blocking`, and
-//! no `.await` ever happens while the lock is held.
+//! One `std::sync::Mutex` guards the whole table, and one `Condvar` wakes the watchers,
+//! which wait without holding the lock ([`Store::poll`]). Every method is synchronous. The
+//! handlers reach the store through `spawn_blocking`, and no `.await` ever happens while
+//! the lock is held.
 //!
 //! # Writes
 //!
@@ -246,6 +247,17 @@ impl Store {
     /// One long-poll of the feed from `since` (D6): the events owed now, or, when there are
     /// none, the first ones written within the window. When the window ends first, the
     /// batch is empty. The reply's cursor is the head when the reply is made.
+    ///
+    /// The wait does not hold the lock: `Condvar::wait_timeout` releases it while the thread
+    /// waits and takes it back before it returns. Every other method, and every other
+    /// watcher, runs during the window. `a_waiting_watch_wakes_on_the_next_write`
+    /// (`tests/pane_feed_test.rs`) writes while a watcher waits out a window far longer than
+    /// the test.
+    ///
+    /// Rule 1 (a cursor ahead of the head is `usage`) is checked by `feed::select` on every
+    /// pass. `pane/watch` passes the client's cursor straight here, so for that method this
+    /// is the only check. A cursor that passed it once never fails it later, because the
+    /// head only grows: each write takes `head + 1`.
     pub(crate) fn poll(&self, since: Cursor) -> Result<WatchReply<PaneEvent>, PaneError> {
         let window = self.options.watch_wait;
         let deadline = Instant::now().checked_add(window);

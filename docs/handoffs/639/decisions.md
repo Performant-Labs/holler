@@ -90,3 +90,31 @@
 - **Assumed:** The `roster_stays_accurate_under_concurrent_body_load` skip is the one CI applies.
 - **Hedged:** The new edge-case test's non-vacuity rests on O's recorded mutation; I did not re-apply it.
 - **Evidence:** Four pane binaries 10/7/7/14 passed, 15 repeat runs with 0 failures; workspace 1068 passed, 0 failed; clippy, `lint.sh`, `changelog-check.sh`, `cargo machete`, `docs_cli_test` and `wire_selftest` all clean.
+
+## F (Phase 6, rework after the diff gate's round-1 BLOCK) — 2026-10-09T10:42:09-06:00
+- **Decided:**
+  - The outside gate's B-1 (with W-1 and W-4) and W-2 are false positives, and no logic changed (see handoff-F-rework.md).
+  - The only production edit is to the doc comments in `store.rs`. They state, at the lines the reviewer misread, that the
+    `Condvar` wait releases the lock, and that rule 1 is re-checked on every pass because `pane/watch` hands the client's
+    cursor straight to `poll`.
+  - I rejected W-2's remediation, because it breaks D6 rule 1 on the wire. I also rejected B-1's remediation (a second lock,
+    or `Notify`): it contradicts D1 and reopens a lost-wake-up window.
+- **Assumed:**
+  - The next diff-gate round reads the diff and `evidence.md`, not this handoff. That is how `dual-review.sh` assembles its
+    prompt.
+  - The std `Condvar` entry cites a file outside the repo, so the gate cannot attach it, and the reviewer weighs it as an
+    author's claim.
+- **Hedged:**
+  - The outside model may raise B-1 again. If it does, the operator should rule on it rather than loop F.
+  - The coverage gap (D6 rule 1 is not pinned on `pane/watch`) is flagged for T and not filled here, because F writes no tests.
+- **Evidence:**
+  - All probes ran in a throwaway test file, never staged and now deleted.
+    - A watcher parked in a 30 s window: `get`, `list`, a second watch and `cas_put` all answered within 178 µs.
+    - Under M1 (the lock held across the wait), `get` blocked for 2.70 s, and the delivered
+      `a_waiting_watch_wakes_on_the_next_write` FAILED.
+    - With 4 racing writers, 1000 events arrived with consecutive cursors and no error.
+    - Under M2 (W-2's remediation), `pane/watch {since: head + 1}` answered an empty batch with cursor 1, and all 38 pane
+      tests still passed.
+  - Tier 1 is green: the workspace ran 1068 passed, 0 failed; clippy, `lint.sh`, `changelog-check.sh`, `cargo machete`,
+    rustfmt and `cargo doc` (`panes/`) are all clean.
+  - `evidence.md` has 14 entries. A script checked the 2 new ones and found 0 mismatches.
