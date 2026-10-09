@@ -46,3 +46,41 @@
   - Fetched #633-#667 with `gh issue view`, and grepped every kebab-case code they name.
   - Counted `main()`'s lines the way clippy does (99).
   - Ran a scratch crate on clap 4.6.6 to test the `--pane` tail with and without `trailing_var_arg`. No worktree files were touched.
+
+## A (Phase 3 re-review, brief revision 3) — 2026-10-09T02:30:25-06:00
+- **Decided:** BLOCK on docs/handoffs/637-brief.md at bbc28ee (revision 3), with 3 blocks and 7 warns. See handoff-A.md, which replaces the revision-2 review (kept in git at c33c255).
+  - Both revision-2 blocks are answered: per-verb clap structs in their own verb files, and the completed error taxonomy. Both were re-verified against the code and issues #633-#667.
+  - Block 1: the frozen verb/output seam does not type-check and cannot reach stderr.
+    - `run(args, ctx: &VerbCtx)` cannot write to its writers (E0596).
+    - `emit`, `emit_stream` and `emit_usage_error` take no error writer.
+    - #660 must keep these signatures beside six wave-3 verb stories.
+    - The missing writer came from my own revision-2 row 6 suggestion.
+  - Block 2: `ProfileScope::resolve` requires a pane and returns one membership bit. #643, #646, #647, #648, #663 and #638 all need "no pane name = every pane of P" from this frozen trait.
+  - Block 3: AC 1's `cargo fmt --check` cannot pass.
+    - 176 of 195 `.rs` files fail it on origin/main, and CI does not run it.
+    - Formatting `control_server.rs` and `serve.rs` puts them at 1161 and 949 lines, past the 900-line gate.
+    - It has been in every revision; both earlier reviews missed it.
+- **Decided:** row 4 (`PaneError` wire parse-back) is a warn, not a block. Its only consumer, #649, runs in wave 4, after the server stories, so the gap blocks no parallel work.
+- **Decided:** row 7 (no path from `PaneState` to `send_prompt`) is a warn. The directive is right under the stack's choke-point rule; only the amendment draft must name the plumbing and #646's radius.
+- **Assumed:**
+  - The sibling issue texts are as fetched with `gh issue view` on 2026-10-09. The latest edit to any of them was on 2026-10-08 at 19:06 MDT, before revision 3 was committed at 02:04 MDT on 2026-10-09.
+  - The issue and epic amendments are drafted, not posted.
+- **Hedged:**
+  - Block 3 could be called an AC wording issue. I kept it a block for three reasons: AC 1 cannot be met by any implementation; it contradicts AC 1's own 900-line gate on two hot-spot files (the stack overlay's size rule); and a forced reformat would push whole-file churn into the files every sibling rebases onto.
+  - Row 5: I confirmed the adjacent-line merge conflict in a scratch git repo. The separator layout is a suggestion; any layout that leaves one unchanged line between owners works.
+- **Evidence:**
+  - Read:
+    - the brief (revision 3, plus the revision 2-to-3 diff), and the earlier handoff and decisions;
+    - in holler-cli: `main.rs`, `cli.rs`, `lib.rs` and `say_cmd.rs`;
+    - in holler-hub: `control_server.rs` :1-200 and :697-740, `serve.rs` :330-590, `state.rs`, the `holds.rs` `load` path, `live.rs` (Registry), `circuit/dispatch.rs` (the `send_prompt` header), `control.rs` (`ControlCall`, `run`) and the hub `Cargo.toml`;
+    - in holler-proto: `methods.rs`, `vocab.rs` (`SessionName`) and `clock.rs`;
+    - config and gates: the workspace `Cargo.toml`, `clippy.toml`, `scripts/lint.sh`, `scripts/changelog-check.sh` and the `ci.yml` steps;
+    - CLI tests: `cli_surface_test.rs`, `docs_cli_test.rs`, `cli_invocation_test.rs`, the `fixtures/cli-surface*.txt` files and the `support/mod.rs` API;
+    - docs: `ADR-0003.md`, and `v2.md` §4 and §10.
+  - Fetched #633-#667 with `gh issue view`, and grepped every kebab-case code they name.
+  - Ran, in the scratchpad only (no worktree files touched):
+    - `cargo fmt --check` (176 dirty files), and rustfmt on scratch copies of the hub files;
+    - `bash scripts/lint.sh` and `cargo machete` (both clean on the base);
+    - a rustc probe of the `VerbCtx`/`run` shapes (E0596);
+    - a clap 4.6.6 crate testing the tail with flags between the positionals (all parse);
+    - a git repo testing adjacent-line merges (conflict) against a one-line gap (clean).
