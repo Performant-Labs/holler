@@ -168,3 +168,14 @@
     - A diff of the public and derive lines, stubs against HEAD: only private items added.
     - A privacy grep of every added line: no personal data.
     - `gh issue list` for the W-7 and W-9 follow-ups: none filed.
+
+### T (Phase 7 test-only rework, #678)
+
+- **Decided:** fix S's finding by asserting `message.contains("protocol 99")` in the AC 17 test, replacing the
+  assertion implied by the version-string check. Test only; no production change.
+- **Assumed:** the `protocol {n}` wording of `check_supported`'s message is the contract AC 17 means by "names the
+  protocol" (it is the only place the protocol appears; the test now pins it).
+- **Hedged:** I did not also touch S's advisory 2 (AC 16 fixture id) since the required change was one assertion.
+- **Evidence:** mutant `Some(_) => "an unsupported protocol".to_owned()` at `protocol.rs` check_supported: suite
+  32 passed / 1 failed (the AC 17 test) with the new assertion; it passed everything before. Reverted. Full
+  `cargo test --workspace`, clippy and lint.sh clean afterwards.

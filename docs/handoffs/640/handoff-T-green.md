@@ -69,3 +69,27 @@ None.
   already been asked to judge the duplicated helper. If a later part wants the bound pinned, it needs one test that feeds a
   long Herdr code or label and asserts the message length. I did not add one, because the bound is not in the brief.
 - `protocol_test.rs` is 678 lines, which draws a `lint.sh` warning at 600 but is well below the 900 failure line.
+
+## Test-only rework (#678): S finding on AC 17
+
+**Finding:** in `ac17_another_protocol_is_refused_naming_the_version_the_protocol_and_the_supported`,
+`assert!(message.contains("99"))` was implied by the preceding `contains("99.0.0-fake")`, so it could never fail
+and the "names the protocol" clause of AC 17 was unproven.
+
+**Change (test only, `crates/holler-adapter-herdr/tests/protocol_test.rs`):** replaced it with
+`assert!(message.contains("protocol 99"), "{message}")`, with a comment saying why. The message format is
+`... with protocol {n}; ...`, so this checks the protocol on its own, independent of the version string. No `src/` change.
+
+**Mutant check (local, reverted, not committed):** changed `check_supported` in `protocol.rs` to
+`Some(_) => "an unsupported protocol".to_owned()`.
+- Result: `protocol_test` ran 32 passed, 1 failed. The one failure was
+  `ac17_another_protocol_is_refused_naming_the_version_the_protocol_and_the_supported`, at the new assertion
+  (`protocol_test.rs:399`). Before the change that mutant passed the whole suite.
+- `git checkout` restored `protocol.rs`; `git status` shows only `protocol_test.rs` modified.
+
+**Re-run after revert:** `cargo test --workspace` passes with no failures (`protocol_test` 33/33 and the
+herdr adapter's other targets unchanged), `cargo clippy --workspace --all-targets -- -D warnings` clean, `bash scripts/lint.sh`
+exits with only the existing size warnings (`protocol_test.rs` is 679 lines, below the 900 failure line).
+
+**Not done (advisory, left as is):** S's advisory 2 (AC 16 fixture message naming the same id as the request) and
+advisory 3 (mutant names). Neither is a required fix.

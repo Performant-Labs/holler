@@ -395,7 +395,8 @@ fn ac17_another_protocol_is_refused_naming_the_version_the_protocol_and_the_supp
     };
 
     assert!(message.contains("99.0.0-fake"), "{message}");
-    assert!(message.contains("99"), "{message}");
+    // The version string also contains "99", so the protocol is checked on its own.
+    assert!(message.contains("protocol 99"), "{message}");
     assert!(message.contains(SUPPORTED_VERSIONS), "{message}");
     assert!(!message.contains('\n'), "{message}");
 }
