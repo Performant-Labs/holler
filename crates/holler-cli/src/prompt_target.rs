@@ -149,7 +149,10 @@ impl Tail {
 /// Split a verb's tail into its target and argument.
 ///
 /// With `--pane NAME` the tail holds at most the argument. Without it, the first positional is the
-/// SESSION and the second the argument; clap has already refused a third.
+/// SESSION and the second the argument. Any further positional is refused here: clap's `num_args`
+/// bounds the values of one occurrence of the tail only, and a flag between positionals
+/// (`say io/alpha hello --queue extra`) starts another occurrence, so clap lets the surplus
+/// through. Dropping it would run a malformed command with part of its input ignored.
 fn resolve_tail(rest: &[String], pane: Option<&str>, tail: &Tail) -> Result<PromptArgs, Usage> {
     let (target, arg) = match pane {
         Some(name) => {
@@ -165,7 +168,17 @@ fn resolve_tail(rest: &[String], pane: Option<&str>, tail: &Tail) -> Result<Prom
             (PromptTarget::Pane(name.to_owned()), rest.first())
         }
         None => match rest.first() {
-            Some(session) => (PromptTarget::Session(session.clone()), rest.get(1)),
+            Some(session) => {
+                if rest.len() > 2 {
+                    return Err(Usage::new(format!(
+                        "only SESSION and {} may be given, got {} positionals: {}",
+                        tail.arg,
+                        rest.len(),
+                        tail.forms()
+                    )));
+                }
+                (PromptTarget::Session(session.clone()), rest.get(1))
+            }
             None => {
                 return Err(Usage::new(format!(
                     "a SESSION is required: {}",

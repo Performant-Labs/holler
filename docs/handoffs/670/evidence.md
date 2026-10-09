@@ -116,3 +116,31 @@ verbatim from the file at the line given.
   >     while let Some(close) = s.find(']') {
   >         let Some(open) = s[..close].rfind('[') else { break };
   >         s.replace_range(open..=close, "");
+
+## Rework 1 (F, after S pass 2, item 1)
+
+Source facts in **unchanged** code that the `resolve_tail` fix relies on. The clap behaviour behind
+it (`num_args` bounds the values of one occurrence of a positional, and a flag between positionals
+starts another) is the crate's, not this repo's, so it is not quoted: it is shown by running the
+built binary before and after the fix (handoff-F.md, "Proof").
+
+- **Fact:** The tail of `say` is bounded only by `num_args = 0..=2`, which is the whole of clap's
+  limit on its positionals (`interrupt` has the same attribute at `cli.rs:536`, `answer` has
+  `1..=2` at `cli.rs:587`), so nothing in the clap tree itself stops a third value that arrives
+  in a later occurrence of `rest`.
+  **Source:** `crates/holler-cli/src/cli.rs:499-500`
+  **Verbatim excerpt:**
+  > #[arg(value_names = ["SESSION", "TEXT"], num_args = 0..=2)]
+  > pub rest: Vec<String>,
+
+- **Fact:** Each prompt verb calls `route(x.resolve(), ...)` as its first statement and returns the
+  `Stop`'s message and exit code at once, so a `Usage` from `resolve_tail` ends the run with exit 2
+  before the `--pane`/`--profile` refusal, the `--timeout` check, `--parts-file` or any hub. (`say`
+  is quoted; `interrupt_cmd.rs:39-42` and `answer_cmd.rs:39-42` are the same four lines with their
+  own names.)
+  **Source:** `crates/holler-cli/src/say_cmd.rs:116-119`
+  **Verbatim excerpt:**
+  > let Routed { session, arg } = match route(say.resolve(), &say.profile) {
+  >     Ok(routed) => routed,
+  >     Err(stop) => return err(stop.message, stop.exit_code),
+  > };

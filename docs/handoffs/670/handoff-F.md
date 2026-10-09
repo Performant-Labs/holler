@@ -1,8 +1,142 @@
 # Handoff-F: Phase 6 - #670 the pane/profile CLI skeleton (skeleton slice c)
 
 **Date:** 2026-10-09
-**Branch:** issue-670-implementation (at 0afbb93, F's work uncommitted)
+**Branch:** issue-670-implementation (pass 2 is uncommitted on top of 7939b54; pass 1 is commit 016eeaa)
 **Issue:** #670
+**Pass:** 2, the rework after S pass 2 (`handoff-S.md`, REWORK, item 1). "Rework 1" below is this pass. "Pass 1" after it is the original handoff, kept as written: its files, decisions and Tier 1 numbers still stand, except for `prompt_target.rs`, which this pass edits.
+
+## Rework 1: refuse an extra positional in the SESSION form (S pass 2, item 1)
+
+The run is non-interactive, so the confirmation table of the role doc is recorded here instead of waited on:
+
+| Field | Value |
+|-------|-------|
+| GitHub issue | #670 |
+| Working branch | issue-670-implementation (worktree `.claude/worktrees/0670-cli-skeleton`), HEAD 7939b54 |
+| Build plan phase | pipeline Phase 6 (F), rework after S pass 2; the issue is the source of truth, there is no BUILD_PLAN |
+| Input documents read | issue #670 (Scope: "Missing or extra positionals return the existing `cli::Usage` (exit 2)"), `docs/handoffs/670-brief.md`, `handoff-S.md` (pass 2) and the other handoffs of this run, `decisions.md`, `evidence.md`, `prompt_target.rs`, `cli.rs`, the three `*_cmd.rs`, `target_flags.rs`, `legacy_verbs.rs`, and `origin/main`'s `cli.rs` |
+| Acceptance criteria count | 8 (the brief's numbering); this pass addresses AC 4, the one S marked NOT MET (S re-audits it once T's tests are in) |
+| Handoff document path | `docs/handoffs/670/handoff-F.md` |
+
+Scope: item 1 is the only production item of S's verdict. Items 2-4 are test files and manifest comments, which S assigned to T; F does not touch them.
+
+### What was done
+
+- `crates/holler-cli/src/prompt_target.rs`, `resolve_tail`:
+  - The SESSION arm now returns `Usage` when the tail holds more than two positionals: `only SESSION and TEXT may be given, got 3 positionals: <forms>` (`CHOICE` in place of `TEXT` for `answer`). The `--pane` arm is unchanged.
+  - The doc comment no longer says that "clap has already refused a third". It says that `num_args` bounds one occurrence, that a flag between positionals starts another, and that the check therefore lives here. The module doc's sentence ("a missing or surplus positional is the existing `Usage` error (exit 2)") is now true and is unchanged.
+- That is the whole production change: one file, +15 / -2 lines, no signature changed.
+
+### Proof (the built binary, an isolated empty state dir, no hub)
+
+"Before" is the binary built at 07:29 MDT from the pass-1 sources (F's last `src` commit is from 07:21 MDT); "after" is the rebuild at 08:35 MDT (the key forms were run again on the final build at 08:41 MDT, after the last edit, with the same results). The `origin/main` column is read from `origin/main`'s `cli.rs` (`Say`, `Interrupt` and `Answer` declare fixed `session` + `text`/`choice` positionals there, so a third positional is clap's `UnknownArgument`) and from S's scratch-crate probe of `say`; I did not build and run `origin/main`.
+
+| argv | `origin/main` | before | after |
+|---|---|---|---|
+| `say io/alpha hello --queue extra` | exit 2 (clap) | exit 1, `no live holler hub reachable` (it parsed `rest = [io/alpha, hello, extra]` and went on to the hub; S notes that a live hub would be sent `hello`) | exit 2, `only SESSION and TEXT may be given, got 3 positionals: ...`, stdout empty, no hub line |
+| `say io/alpha --timeout 5m fix it` | exit 2 | exit 1, hub path | exit 2, same message |
+| `interrupt io/alpha --server ws://127.0.0.1:1 stop now` | exit 2 | exit 1, `credential.json not found` (the remote path) | exit 2, same message with `holler interrupt SESSION [TEXT]` forms |
+| `answer io/alpha --server ws://127.0.0.1:1 1 2` | exit 2 | exit 1, remote path | exit 2, `only SESSION and CHOICE may be given, got 3 positionals: ...` |
+| `say io/alpha hello extra` (contiguous) | exit 2 | exit 2 (clap `TooManyValues`) | exit 2 (clap), unchanged |
+| `say io/alpha --queue hello` (the valid split form) | session `io/alpha`, text `hello` | exit 1, `no live holler hub reachable` | the same, unchanged |
+| `say --pane demo-c1r1 hello --queue extra` | n/a (new form) | exit 2, `--pane` arm | exit 2, unchanged |
+
+The valid forms still reach the hub or the remote path (`interrupt io/alpha --server ws://127.0.0.1:1 stop`, `answer io/alpha --server ws://127.0.0.1:1 1`, `say io/alpha hello --queue`), and `say --pane demo-c1r1 hello` is still the #646 refusal (exit 1).
+
+Order, after: each of these is exit 2 with the positional message, and none is the #646 refusal or an exit-3 error. So the usage error comes first, as S asked.
+- `say --profile demo io/alpha hello --queue extra`
+- `say io/alpha hello --queue extra --timeout bogus`
+- `say io/alpha --parts-file /nonexistent.json hello extra`
+
+`answer io/alpha 1 --server ws://127.0.0.1:1 2 3` reports `got 4 positionals`.
+
+### Design decisions
+
+1. **The count stays in code, in the SESSION arm of `resolve_tail`, as S prescribed.** Clap cannot bound the tail as a whole: `num_args` limits one occurrence. The alternatives are the shapes the brief ruled out: fixed positionals (`say --pane NAME TEXT` cannot parse) and `trailing_var_arg` (it swallows `--parts-file`, `--queue`, `--grant` and `--server`).
+2. **One check per arm, not one before the `match`.** The two arms say different things: the `--pane` arm explains that `--pane` takes the place of SESSION, the SESSION arm names the two arguments that are allowed.
+3. **The message gives the count and the forms, not the surplus values**, as the `--pane` arm does. The surplus words are the user's prompt text, and a usage error should not copy them into a log.
+4. **The argument is named from `Tail::arg`:** `TEXT` for `say` and `interrupt`, `CHOICE` for `answer`. For `interrupt` the TEXT is optional, and the forms after the colon show the brackets.
+5. **Order unchanged.** `route()` is the first statement of each verb's `run`, and a `Usage` from `resolve()` becomes `Stop { exit_code: 2 }` before the #646 refusal, `--timeout`, `--parts-file` or any hub (evidence.md, and the probes above).
+6. **Not touched:** items 2-4 of S's list (the `STUBS` doc and the two refusal constants in `process/stub.rs`, the `use` line in `process/legacy_verbs.rs`, the comments in `process/main.rs` and `Cargo.toml`).
+
+### Reuse / extend-vs-new
+
+Extended `resolve_tail` and the existing `cli::Usage`. No new function, type or error, and nothing is duplicated.
+
+### Architecture notes for A
+
+None. One private function's error condition changed. `Say`/`Interrupt`/`Answer::resolve()` keep their signatures; they return `Err` where they returned `Ok` for a third positional, which is what `origin/main` did through clap. No module boundary, public interface or dependency direction changed (`archChanged: false`).
+
+### Deviations from spec / wireframe
+
+None. Pass 1's assumption in `decisions.md` ("a third positional a clap error") held only for the contiguous form. The correction is in the new F entry there.
+
+### Tests T adds in T-green (S item 1; F writes none)
+
+Names are suggestions. The argv forms and the expected results are S's.
+
+1. **`crates/holler-cli/tests/pane_verbs/target_flags.rs`** (in process), for example `an_extra_positional_split_off_the_session_form_by_a_flag_is_refused`:
+   - For each of `say io/alpha hello --queue extra`, `say io/alpha --timeout 5m fix it`, `interrupt io/alpha --server ws://127.0.0.1:1 stop now` and `answer io/alpha --server ws://127.0.0.1:1 1 2`: assert `parse(args).is_ok()` (clap accepts it; that is the premise), and that `resolve(args)` is an `Err` whose message contains `positionals` (so it is the accessor's `Usage`, not a parse error).
+2. **The same file**, for example `a_flag_between_session_and_text_still_resolves_to_both`:
+   - `resolve(&["say", "io/alpha", "--queue", "hello"])` is `Ok(expect(session("io/alpha"), Some("hello")))`, as it is on `origin/main`. The same for `interrupt io/alpha --server ws://127.0.0.1:1 stop` and `answer io/alpha --server ws://127.0.0.1:1 1`.
+3. **`crates/holler-cli/tests/pane_verbs/process/legacy_verbs.rs`**, in `a_malformed_pane_form_is_a_usage_error_not_a_refusal` or beside it (the binary):
+   - `say io/alpha hello --queue extra` exits 2, stdout empty, stderr names `positionals`, stderr is not the #646 refusal, and stderr has no `no live holler hub` line.
+   - Optional, it pins the order S asked to keep: `say --profile demo io/alpha hello --queue extra` is the same (exit 2, not the refusal).
+
+F checked the in-process shape of tests 1 and 2 by value with a scratch test kept outside the repo (compiled with `rustc --test` against the built `holler_cli` and `clap` rlibs, on the final build). The four split forms parse in clap and are refused by the accessor with the `positionals` message; the valid split forms for `say`, `interrupt` and `answer` resolve to both values; the `--pane` arm is unchanged. So the tests are right against the fix. The red side is T's to show.
+
+Proof that the tests prove something (T): run them against the pass-1 `resolve_tail` (51f3bed; `git show 51f3bed:crates/holler-cli/src/prompt_target.rs`, or take the new `rest.len() > 2` check out). Tests 1 and 3 must fail there (`resolve` returns the session and the text; the binary exits 1 on the hub line). Test 2 passes before and after: it guards the valid split form.
+
+### Tier 1 self-check (incl. tests now GREEN)
+
+Run in the worktree after the last code edit:
+
+```
+rustfmt --check --edition 2021 crates/holler-cli/src/prompt_target.rs   clean (a new file, so it must be)
+cargo build -p holler-cli                                               ok
+cargo clippy --workspace --all-targets -- -D warnings                   ok, no warnings
+cargo machete                                                           "didn't find any unused dependencies"
+bash scripts/lint.sh                                                    exit 0 (only the 600-line warns; cli.rs is 780)
+bash scripts/changelog-check.sh                                         changelog-check: ok
+bash scripts/test-hooks.sh                                              all ok
+cargo test -p holler-cli --test pane_verbs --test profile_verbs --test pane_cli_process --test talk_test --test interrupt_test --test answer_cli_test --test cli_invocation_test --test cli_surface_test --test docs_cli_test
+  pane_verbs 59, profile_verbs 8, pane_cli_process 34, talk_test 18, interrupt_test 11, answer_cli_test 11,
+  cli_invocation_test 14, cli_surface_test 3, docs_cli_test 3: all passed, 0 failed
+  (pane_verbs, profile_verbs, pane_cli_process, cli_surface_test and docs_cli_test match T-green's counts)
+```
+
+The whole workspace, last, after the final edit, with nothing else running alongside it:
+
+```
+cargo test --workspace --no-fail-fast
+  exit 0; 98 test binaries with results, 1029 passed, 0 failed, 5 ignored (the ignored tests are in other crates and are unchanged)
+```
+
+That is T-green's total (1029 passed, 0 failed); this rework adds no test. Two earlier full runs, for the record:
+- Before the last edit (a rewording of the doc comment of `resolve_tail`): exit 0, 98 binaries, 1029 passed, 0 failed, 5 ignored.
+- A run after that edit failed 14 tests in `hold_hub_test` (1), `hub_hygiene_test` (4) and `interrupt_test` (9). I caused it: while that run was in its hub-test stretch I compiled a scratch probe (`rustc --test`, a 188 MB binary) into the session scratchpad on `/tmp`, which is a tmpfs mounted with `usrquota`. In 12 of the 14 failures the output says `Disk quota exceeded (os error 122)` (creating a `holler-test-*` state file, a body identity key, `sessions.toml`). One is a knock-on `NotFound` in `hub_hygiene_test`. One is a `connection_lost` race in `hold_hub_test` (`say_racing_release_is_delivered_or_refused_never_lost`). All of them fall within 20 seconds of the compile. I deleted the probe binary; the three targets then passed alone (16, 14 and 11 tests), and the full run above passed. None of the failures involves the #670 code.
+
+### Evidence appendix
+
+`docs/handoffs/670/evidence.md`, section "Rework 1": two facts in unchanged code, each with a verbatim excerpt (`cli.rs:499-500`, `say_cmd.rs:116-119`). The clap behaviour behind the defect is the crate's, so it is shown by the before/after run above and not quoted.
+
+### Tests that look wrong (for T)
+
+None. `target_flags.rs` and `legacy_verbs.rs` pass unchanged; they did not cover the split form, which is the gap S found.
+
+### Known issues
+
+None for item 1. Items 2-4 of S's verdict are open for T. S's advisory notes (rebase onto `origin/main` before the PR, the PR-body disclosure, and the notes for #649, #634, #644, #646 and #648) are unchanged and are not F's.
+
+Environment, for T's workspace run: `/tmp` here is a 30 GB tmpfs mounted with `usrquota`, and this session's scratchpad on it already holds about 8 GB from earlier phases (one throwaway cargo target dir alone is 4 GB). A full `cargo test --workspace` writes its `holler-test-*` state dirs to `/tmp`, so with a heavy build running next to it the hub tests fail with `Disk quota exceeded`, as in the disturbed run above. Running nothing else during the workspace run, or clearing disposable scratch from earlier phases first, avoids it. I do not know the size of the quota.
+
+### Files changed
+
+- Production, modified: `crates/holler-cli/src/prompt_target.rs`.
+- Pipeline artifacts: `docs/handoffs/670/handoff-F.md`, `docs/handoffs/670/evidence.md` (the "Rework 1" section), `docs/handoffs/670/decisions.md` (a new F entry).
+- No test file, manifest, fixture or lockfile was edited.
+
+## Pass 1: the original handoff (kept as written)
 
 The run is non-interactive, so the confirmation table of the role doc is recorded here instead of waited on:
 
