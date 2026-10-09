@@ -220,7 +220,9 @@ impl Change for PaneEvent {
 /// The membership rule of a `cas_put` (ADR-0021 section 8, decided to run inside the
 /// registry's compare-and-swap): a pane stored with profile P cannot be written with
 /// another profile Q. Leaving (`None`), joining from `None` and keeping P are allowed.
-fn check_membership(stored: Option<&Pane>, submitted: &Pane) -> Result<(), PaneError> {
+/// Its second caller is `FakeProfileScope`, which runs it for a `SpecEdit::Set` before
+/// it writes the profile.
+pub(crate) fn check_membership(stored: Option<&Pane>, submitted: &Pane) -> Result<(), PaneError> {
     let current = stored.and_then(|pane| pane.profile.as_ref());
     match (current, submitted.profile.as_ref()) {
         (Some(current), Some(next)) if current.slug() != next.slug() => {

@@ -55,20 +55,21 @@ use crate::fixture::sample_profile;
 type Case = fn(&dyn ProfileStore) -> Result<(), String>;
 
 /// What `get` of one name, `list` (sorted by slug) and `log` of that name show,
-/// compared before and after a refused write.
-type Shown = (Option<Profile>, Vec<Profile>, Vec<ProfileLogEntry>);
+/// compared before and after a refused write. The profile scope suite reuses it.
+pub(super) type Shown = (Option<Profile>, Vec<Profile>, Vec<ProfileLogEntry>);
 
 /// One log entry as a case reads it: the generation, the actor and the kind of change.
-type Step = (u64, Actor, &'static str);
+/// The profile scope suite reuses it.
+pub(super) type Step = (u64, Actor, &'static str);
 
 const CONFLICT: &str = "generation-conflict";
 const NOT_FOUND: &str = "profile-not-found";
 const EXISTS: &str = "profile-exists";
 const NOT_IMPLEMENTED: &str = "not-implemented";
 
-/// The kinds of change a case reads in a log.
+/// The kinds of change a case reads in a log. The profile scope suite reuses `UPDATED`.
 const CREATED: &str = "created";
-const UPDATED: &str = "updated";
+pub(super) const UPDATED: &str = "updated";
 const RENAMED: &str = "renamed";
 const DELETED: &str = "deleted";
 
@@ -76,15 +77,17 @@ const DELETED: &str = "deleted";
 const ACTOR: &str = "conformance";
 
 /// The profile names of the cases: neutral ones. `ALPHA_SHOUTED` has `ALPHA`'s slug.
-const ALPHA: &str = "Demo Alpha";
+/// The profile scope suite reuses `ALPHA`, `BETA` and `GAMMA`.
+pub(super) const ALPHA: &str = "Demo Alpha";
 const ALPHA_SHOUTED: &str = "DEMO-ALPHA";
-const BETA: &str = "Demo Beta";
-const GAMMA: &str = "Demo Gamma";
+pub(super) const BETA: &str = "Demo Beta";
+pub(super) const GAMMA: &str = "Demo Gamma";
 
-/// The pane names of the specs: neutral ones, never a live session's.
-const C1: &str = "demo-c1r1";
-const C2: &str = "demo-c2r1";
-const C3: &str = "demo-c3r1";
+/// The pane names of the specs: neutral ones, never a live session's. The profile scope
+/// suite reuses them.
+pub(super) const C1: &str = "demo-c1r1";
+pub(super) const C2: &str = "demo-c2r1";
+pub(super) const C3: &str = "demo-c3r1";
 
 /// The suite, in order: the one table that the runner iterates and
 /// [`profile_store_cases`] lists.
@@ -417,13 +420,14 @@ fn recreate_after_delete_starts_at_one(store: &dyn ProfileStore) -> Result<(), S
 
 // --- helpers (the cases of `log` and `watch` use them too) ---
 
-/// The actor of every write of the suite.
-fn actor() -> Result<Actor, String> {
+/// The actor of every write of the suite. The profile scope suite reuses it.
+pub(super) fn actor() -> Result<Actor, String> {
     Actor::parse(ACTOR).map_err(|e| format!("{ACTOR:?} is not an actor: {e}"))
 }
 
-/// The fixture profile named `name`, with one sample spec per entry of `panes`.
-fn sample(name: &str, panes: &[&str]) -> Result<Profile, String> {
+/// The fixture profile named `name`, with one sample spec per entry of `panes`. The
+/// profile scope suite reuses it.
+pub(super) fn sample(name: &str, panes: &[&str]) -> Result<Profile, String> {
     sample_profile(name, panes)
         .map_err(|e| format!("the fixture profile {name:?} cannot be built: {e}"))
 }
@@ -476,8 +480,8 @@ fn entries(store: &dyn ProfileStore, name: &ProfileName) -> Result<Vec<ProfileLo
 }
 
 /// The log of `name` as `(generation, actor, kind)`. An `Updated` summary that is
-/// empty or more than one line fails.
-fn history(store: &dyn ProfileStore, name: &ProfileName) -> Result<Vec<Step>, String> {
+/// empty or more than one line fails. The profile scope suite reuses it.
+pub(super) fn history(store: &dyn ProfileStore, name: &ProfileName) -> Result<Vec<Step>, String> {
     entries(store, name)?.iter().map(step).collect()
 }
 
@@ -501,7 +505,8 @@ fn step(entry: &ProfileLogEntry) -> Result<Step, String> {
 }
 
 /// `get` and `log` of `name` and `list` (sorted by slug), as the store shows them now.
-fn shown(store: &dyn ProfileStore, name: &ProfileName) -> Result<Shown, String> {
+/// The profile scope suite reuses it.
+pub(super) fn shown(store: &dyn ProfileStore, name: &ProfileName) -> Result<Shown, String> {
     Ok((
         succeeds("get", store.get(name))?,
         listed(store)?,
@@ -509,8 +514,9 @@ fn shown(store: &dyn ProfileStore, name: &ProfileName) -> Result<Shown, String> 
     ))
 }
 
-/// `Ok` when the store shows `before` again after the refused `call`.
-fn unchanged(
+/// `Ok` when the store shows `before` again after the refused `call`. The profile scope
+/// suite reuses it.
+pub(super) fn unchanged(
     store: &dyn ProfileStore,
     name: &ProfileName,
     before: &Shown,
