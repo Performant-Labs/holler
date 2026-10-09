@@ -4,6 +4,7 @@
 //! returns a plain [`AnswerResult`]; only the bin (`main.rs`, the one file
 //! allowed to exit the process) turns that into an actual exit.
 
+use crate::prompt_target::{route, Routed};
 use crate::Answer;
 
 /// What `answer_command` (in `main.rs`) should print and exit with.
@@ -30,10 +31,18 @@ fn err(message: String, exit_code: i32) -> AnswerResult {
 /// applied; `1` every runtime refusal (no live hub, not connected, unknown
 /// session, nothing pending, the choice did not resolve, connection lost);
 /// `2` an ambiguous session (lists candidates, matching `say`'s own
-/// convention).
+/// convention) or a malformed positional tail.
+///
+/// `--pane` and `--profile` (epic #633) are refused with exit 1 and `not
+/// implemented (story #646)` before any hub is contacted: see `prompt_target.rs`.
 pub fn run(answer: &Answer, json: bool) -> AnswerResult {
+    let Routed { session, arg } = match route(answer.resolve(), &answer.profile) {
+        Ok(routed) => routed,
+        Err(stop) => return err(stop.message, stop.exit_code),
+    };
+    let choice = arg.as_deref().unwrap_or_default();
     let state_root = holler_hub::state::resolve_state_dir().unwrap_or_default();
-    let call = holler_hub::control::ControlCall::answer(&answer.session, &answer.choice);
+    let call = holler_hub::control::ControlCall::answer(&session, choice);
     match crate::transport::call(answer.server.as_deref(), &call) {
         Ok(doc) => {
             if json {

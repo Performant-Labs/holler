@@ -20,6 +20,22 @@ fills this file in at release time.
   `pane/*` and `profile/*` method names, outside the closed 22-row wire catalog, so protocol v2 and
   every golden file are unchanged. Types and traits only: no CLI, hub or adapter behaviour yet
   ([#637](https://github.com/Performant-Labs/holler/issues/637)).
+- Pane control, slice c of the skeleton (epic [#633](https://github.com/Performant-Labs/holler/issues/633)):
+  the CLI side. `holler pane` (`list get watch launch relaunch switch reset park unpark close doctor
+  import`) and `holler profile` (`create delete list show apply rename export import`) are in the
+  clap tree, one file and one set of arguments per verb, with the shared flags: `--profile`,
+  `--spec-only`, `--take-over` and the spec flags (`--project --workspace --grid --model --effort
+  --role --env --ctx-soft --ctx-hard --port-policy --command-arg/--command-json
+  --check-arg/--check-json --expect`). Each verb refuses with `error: not implemented (story #NNN)`
+  and exit 1 until its story lands. The global `--format text|json` is new: `--format=json` is
+  `--json`, and `--json` with `--format=text` is a usage error. Under `pane` and `profile` JSON mode
+  prints one envelope, `{"schema_version":1,"ok":false,"data":null,"error":{"code":...,"message":...}}`,
+  and a usage error there is an envelope with code `usage` (exit 2); every other verb's output and
+  usage errors are unchanged. `say`, `interrupt` and `answer` take a SESSION or `--pane NAME` (the
+  existing forms parse and resolve as before), and with `--pane` or `--profile` they refuse with
+  `not implemented (story #646)`, as does `roster --profile` (`#648`), in plain text before any hub
+  is contacted. ADR 0003 has the new rows
+  ([#670](https://github.com/Performant-Labs/holler/issues/670)).
 
 ## [0.4.0] - 2026-09-29
 

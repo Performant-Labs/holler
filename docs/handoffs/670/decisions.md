@@ -43,3 +43,40 @@
   - `--test cli_surface_test`: 2 failed, the 20 new leaves unknown to clap.
   - Throwaway prototype in the scratchpad (not in the repo): `pane_verbs` 53/53, `profile_verbs` 9/9, `cli_surface_test` 3/3, `pane_cli_process` 30/33.
   - `rustfmt --check --edition 2021` clean on every new `.rs` file; no existing file touched.
+
+## F (Phase 6, implement) — 2026-10-09T07:20:18-06:00
+- **Decided:** #670 is built against T's RED and is GREEN (handoff-F.md). `pane_cli_process` 33/33, `pane_verbs` 53/53, `profile_verbs` 9/9, `cli_surface_test` and `docs_cli_test` pass; `cargo test --workspace` is green (1023 passed, 0 failed). No test, fixture, manifest or lockfile was edited, and no name or signature that T pinned changed.
+- **Decided (A's warns, settled as handoff-A.md asked):**
+  - W-1: `emit` takes the exit code from the error's code (`usage` gives 2, any other error 1, ok 0), in both formats.
+  - W-2: the JSON usage message is clap's reason on one line (no `error: `, no `Usage:` block, no closing hint); a bare namespace gets its own message because clap answers it with the whole help.
+  - W-5: `Wiring::connect() -> Result<Wiring, PaneError>` and `Wiring::ports(&self) -> Ports<'_>`; `Unwired` is the one not-implemented port set (all seven traits), `pub`, and kept by #649.
+  - W-7: `VerbCtx` is in `output.rs` and holds `Ports` by value.
+  - W-8: a failed parse is read by `output::scan_args` over the raw argv, with the value-taking global flags taken from the clap tree (`Cli::global_value_flags()`), so no second copy of the global-flag grammar; `resolve_format(json, format)` takes the flag values, not `&Cli`, so `output.rs` does not import `cli.rs`. This changes the brief's `resolve_format(&Cli)`.
+  - W-9: `main.rs` dispatch is one exhaustive `match` with no catch-all; the hub and body chains moved verbatim into `run_hub`/`run_body`; `print_leaf_result_and_exit` became `print_leaf_result` returning the code. The `roster --profile` refusal stays in `main.rs` (`run_roster`), so `roster_cmd.rs` is untouched for #648.
+  - W-10: `pane/mod.rs` and `profile/mod.rs` kept (the operator accepted it; each module root sits inside its owner's blast-radius glob).
+  - W-11: the #665 verbs are marked proposed in their clap docs (so in `--help`), in ADR 0003 and in the fixture. `docs/protocol/v2.md` §10 ("reproduces the ADR 0003 table verbatim") is not edited: #634 owns v2.md and should resync §10 or drop the word.
+  - W-3, W-4, W-6, W-12 were T's and are followed. W-13: no split was needed.
+- **Decided (F's own choices):**
+  - `--format=json` is `--json` on every verb (decision 9): `dispatch` passes the legacy verbs `json = (format == Json)`; `FormatChoice.json_explicit` is for #648 and unused until then.
+  - `Format` derives clap's `ValueEnum` and `Cli.format` is `Option<Format>`, so a bad `--format` is a clap error (exit 2).
+  - `emit` also puts the JSON message on one line, never writes half an envelope (an encode failure goes to `err`, exit 1), flushes each line, ends text with a newline, writes nothing for empty text, and turns a failed write into exit 1; `emit_stream` stops at the first failed write or error item (Rust ignores SIGPIPE, so without this `pane watch | head` would never end).
+  - `SpecFlags::validate()` returns a `SpecValues` (my type; the brief names none). `--ctx-soft`/`--ctx-hard` are `u32` in clap (the brief says values stay strings at clap time; for numbers the outward result is the same, exit 2 and code `usage`). `--role` is typed through `PaneRole`'s serde names (no second list). `--command-arg` with `--command-json` is refused in `validate()` too, for a caller that builds the flags by hand. The stubs do not call `validate()`, because T's flag matrix needs a bad `--grid` to reach the stub.
+  - `prompt_target::route` is the one guard and the one place that knows the exit codes of the `--pane` forms (malformed tail 2, unrouted `--pane`/`--profile` 1, `not implemented (story #646)`). The three verbs call it first, before `--timeout`, `--parts-file` or any hub, and usage wins over the refusal.
+  - `--command-arg`/`--check-arg` keep clap's default of no hyphen-leading values (`--command-arg=--port` works); #644 owns the choice.
+  - ADR 0003: the `--pane` forms of `say`/`interrupt`/`answer` are their own rows under #646's block, because `docs_cli_test` keeps the first alternative of `a|b` and drops `[...]`, so one "SESSION or --pane" row cannot parse; `roster` gets `[--profile NAME]` in place.
+  - Formatting: every new `.rs` file is `rustfmt --check` clean; in existing files no line I added or changed deviates, and `main.rs` (nearly all changed) is clean as a whole. Doc placeholders in my docs are in backticks, so I add no rustdoc warning (the 9 that exist were there).
+- **Assumed:**
+  - The clap 4.6.6 behaviours the design leans on: `#[command(subcommand)]` on a tuple variant nests the group with `subcommand_required` and `arg_required_else_help`; `num_args = 0..=2` without `trailing_var_arg` keeps the flags after SESSION parsing and a third positional a clap error; `Error`'s `Display` is plain text (checked with `CLICOLOR_FORCE=1`); `Arg::is_global_set` and `get_action().takes_values()` are public. All checked by compiling, by T's process tests and by hand, not from the clap docs.
+  - `std::process::exit` flushes stdout (the roster table is printed with `print!`); it is the same path as before.
+  - The operator wants `roster --format=json` to print the legacy `--json` document until #648 (decision 9), and not the envelope.
+- **Hedged:**
+  - `SpecValues` and `validate()` freeze with `pane/args.rs`. `model` and `effort` stay raw strings (splitting PROVIDER/ID is #644's call, in its own file); if #644 needs another shape it goes through the amend rule.
+  - `emit`'s write-failure and encode-failure paths, `resolve_format`, `scan_args`, `route` and `Unwired` are exercised only through the binary or not at all: F writes no tests, so T may want unit cases in Phase 7 (listed in handoff-F.md).
+  - `Unwired::run_probe` answers `ProbeResult::Error("not implemented")` without a story number, because `ProbeResult` is not a `PaneError`.
+  - `cli.rs` is 780 lines (warn at 600, fail at 900): the next story that adds to it should know.
+- **Evidence:**
+  - `cargo build --workspace`; `cargo clippy --workspace --all-targets -- -D warnings` (no warnings); `cargo machete` (clean); `bash scripts/lint.sh` (exit 0); `bash scripts/changelog-check.sh` (ok); `bash scripts/test-hooks.sh` (all ok).
+  - `cargo test --workspace --no-fail-fast`: exit 0, 98 binaries, 1023 passed, 0 failed, 5 ignored (other crates', unchanged). Run twice; the second run is after the last code edit.
+  - By hand on the real binary with an empty state dir: the stub text and JSON forms, the `usage` envelope under `pane`/`profile` and plain clap output under `roster`/`say`, `--pane` usage errors against the refusal, `hub token list --json` against `--format=json` (byte-identical), closed stdout/stderr and a pipe to `head`.
+  - Read: the brief, handoff-A.md, handoff-T-red.md, decisions.md, issue #670, epic #633, ADR 0003, `holler-pane` (`lib`, `error`, `ports`, `argv`, `grid`, `profile`, `pane`, `probe`), the testkit crate, `holler-cli` (`main`, `cli`, `lib`, `say_cmd`, `interrupt_cmd`, `answer_cmd`, `roster_cmd`) and T's tests and fixture.
+  - Source facts F relies on: docs/handoffs/670/evidence.md.

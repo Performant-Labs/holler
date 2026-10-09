@@ -1,17 +1,23 @@
 //! The clap derive tree — the normative CLI surface from ADR 0003.
 //!
 //! Rules from ADR 0003 this encodes:
-//! - Global flags (`--debug`, `--log-format`, `--json`) are on the root and
-//!   therefore reachable on every subcommand. `--debug`/`--log-format` are
-//!   parsed but unused until the logging story.
+//! - Global flags (`--debug`, `--log-format`, `--json`, `--format`) are on the
+//!   root and therefore reachable on every subcommand. `--debug`/`--log-format`
+//!   are parsed but unused until the logging story.
 //! - `say`, `interrupt`, `answer`, `roster` are top-level (hub-only daily
-//!   verbs);
-//!   everything else is namespaced under `hub` or `body`.
+//!   verbs); everything else is namespaced under `hub`, `body`, `pane` or
+//!   `profile` (the last two are epic #633's pane control; ADR-0021, #634,
+//!   ratifies them).
 //! - No aliases are added beyond the ones ADR 0003 names (`rm`/`remove`).
 //!   In particular `body status` is `status` only (the `st` alias is a
 //!   rejected spelling).
 
-use clap::{ArgAction, Parser, Subcommand};
+use clap::{ArgAction, CommandFactory, Parser, Subcommand};
+
+use crate::output::Format;
+use crate::pane::args::ProfileOpt;
+use crate::pane::PaneCmd;
+use crate::profile::ProfileCmd;
 
 /// `holler` — one binary, two roles (hub and body). ADR 0001.
 #[derive(Parser, Debug)]
@@ -54,7 +60,7 @@ pub struct Cli {
     )]
     pub log_format: Option<String>,
 
-    /// Print machine-readable output.
+    /// Print machine-readable output. The same as `--format=json`.
     ///
     /// Global (issue #147/#155): reachable after any leaf, including
     /// `hub token mint --label x --json` — which the per-struct copies this
@@ -62,8 +68,34 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub json: bool,
 
+    /// Output format: `text` (the default) or `json`.
+    ///
+    /// `--format=json` is the same as `--json`, and `--json` with
+    /// `--format=text` is a usage error. Under `holler pane` and `holler
+    /// profile` JSON mode prints one envelope; the other verbs keep their own
+    /// `--json` shape (ADR 0003).
+    // Global (epic #633, story #670). Captured as an `Option` so that an
+    // explicit `--format=json` can be told from a bare `--json` (`roster` keeps
+    // its legacy `--json` shape and prints the envelope only for the former).
+    #[arg(long, global = true, value_enum)]
+    pub format: Option<Format>,
+
     #[command(subcommand)]
     pub command: Command,
+}
+
+impl Cli {
+    /// The long names (with their `--`) of the global flags that take a value:
+    /// `--debug`, `--log-format` and `--format`, read from the clap tree so a
+    /// new one cannot be missed. After a failed parse `output::scan_args` needs
+    /// them to tell a flag's value from the subcommand.
+    pub fn global_value_flags() -> Vec<String> {
+        Cli::command()
+            .get_arguments()
+            .filter(|arg| arg.is_global_set() && arg.get_action().takes_values())
+            .filter_map(|arg| arg.get_long().map(|long| format!("--{long}")))
+            .collect()
+    }
 }
 
 #[derive(Subcommand, Debug)]
@@ -86,6 +118,12 @@ pub enum Command {
     Hold(Hold),
     /// Lift a hold set with `hold`. (hub-only)
     Release(Release),
+    /// Control panes: launch, switch, park, close, doctor, import. (epic #633)
+    #[command(subcommand)]
+    Pane(PaneCmd),
+    /// Manage profiles, the named sets of pane specs. (epic #633)
+    #[command(subcommand)]
+    Profile(ProfileCmd),
 }
 
 #[derive(Subcommand, Debug)]
@@ -385,14 +423,16 @@ impl Cmd {
 }
 
 /// A usage error from [`Query::resolve`] — the tail names a target but no
-/// command (ADR 0003: exit 2). The message is what `main` prints to stderr.
+/// command (ADR 0003: exit 2) — or from the `--pane` accessors of `say`,
+/// `interrupt` and `answer` (`prompt_target.rs`). The message is what `main`
+/// prints to stderr.
 #[derive(Debug)]
 pub struct Usage {
     message: String,
 }
 
 impl Usage {
-    fn new(message: String) -> Self {
+    pub(crate) fn new(message: String) -> Self {
         Self { message }
     }
 }
@@ -437,15 +477,27 @@ pub struct Roster {
     /// [`Status::server`].
     #[arg(long)]
     pub server: Option<String>,
+    // `--profile NAME` (epic #633): parsed here and refused by `main.rs` until
+    // story #648 (the roster story) renders it.
+    #[command(flatten)]
+    pub profile: ProfileOpt,
 }
 
+/// `say [SESSION] [TEXT]`, or `say --pane NAME [TEXT]` (epic #633).
+///
+/// The positionals are one optional tail, resolved in code by [`Say::resolve`]
+/// (`prompt_target.rs`) — the [`Query::resolve`] pattern — because clap cannot
+/// parse `say --pane NAME TEXT` and `say SESSION TEXT` with fixed positionals
+/// (`TEXT` would bind to `SESSION`). The tail has no `trailing_var_arg`, so
+/// `--parts-file`, `--queue`, `--grant` and `--server` after `SESSION` still
+/// parse. `say`, `interrupt` and `answer` share this shape.
 #[derive(Parser, Debug)]
 pub struct Say {
-    /// Session address, <label>/<session> (or a bare <session>).
-    pub session: String,
-    /// Prompt text. Omit when `--parts-file` supplies the full A2A message.
-    #[arg(required_unless_present = "parts_file")]
-    pub text: Option<String>,
+    /// `SESSION TEXT`: the session address (`<label>/<session>`, or a bare
+    /// `<session>`) and the prompt text. With `--pane` the tail is `TEXT` alone,
+    /// and either shape drops `TEXT` when `--parts-file` supplies the message.
+    #[arg(value_names = ["SESSION", "TEXT"], num_args = 0..=2)]
+    pub rest: Vec<String>,
     /// A full A2A `Message` (non-text parts) instead of a plain-text `TEXT`.
     #[arg(long)]
     pub parts_file: Option<String>,
@@ -460,19 +512,36 @@ pub struct Say {
     /// one prompt through a session that joined held.
     #[arg(long, value_name = "ID")]
     pub grant: Option<String>,
+    /// Send to this pane instead of a SESSION (epic #633; refused until #646).
+    #[arg(long, value_name = "NAME")]
+    pub pane: Option<String>,
+    // `--profile NAME` (epic #633): parsed here and refused by `say_cmd.rs`
+    // until story #646 routes it.
+    #[command(flatten)]
+    pub profile: ProfileOpt,
     /// Run against a remote hub instead of the local one (issue #508). See
     /// [`Status::server`].
     #[arg(long)]
     pub server: Option<String>,
 }
 
+/// `interrupt [SESSION [TEXT]]`, or `interrupt --pane NAME [TEXT]`; the tail
+/// is resolved by [`Interrupt::resolve`], see [`Say`].
 #[derive(Parser, Debug)]
 pub struct Interrupt {
-    /// Session address, <label>/<session> (or a bare <session>).
-    pub session: String,
-    /// Redirect text (issue #191): cancel, then run this prompt ahead of
-    /// the queue, streaming its reply exactly like `say`.
-    pub text: Option<String>,
+    /// `SESSION [TEXT]`: the session address (`<label>/<session>`, or a bare
+    /// `<session>`), then optional redirect text (issue #191): cancel, then run
+    /// this prompt ahead of the queue, streaming its reply exactly like `say`.
+    /// With `--pane` the tail is the optional `TEXT` alone.
+    #[arg(value_names = ["SESSION", "TEXT"], num_args = 0..=2)]
+    pub rest: Vec<String>,
+    /// Interrupt this pane instead of a SESSION (epic #633; refused until #646).
+    #[arg(long, value_name = "NAME")]
+    pub pane: Option<String>,
+    // `--profile NAME` (epic #633): parsed here and refused by
+    // `interrupt_cmd.rs` until story #646 routes it.
+    #[command(flatten)]
+    pub profile: ProfileOpt,
     /// Run against a remote hub instead of the local one (issue #508). See
     /// [`Status::server`].
     #[arg(long)]
@@ -505,15 +574,25 @@ pub struct Release {
     pub ttl: Option<String>,
 }
 
+/// `answer SESSION CHOICE`, or `answer --pane NAME CHOICE`; the tail is
+/// resolved by [`Answer::resolve`], see [`Say`].
 #[derive(Parser, Debug)]
 pub struct Answer {
-    /// Session address, <label>/<session> (or a bare <session>).
-    pub session: String,
-    /// The choice: a 0-based index, an option's label/key (case-insensitive),
-    /// a comma-separated list (one segment per question, for a multi-field
-    /// elicitation), or one of `once`/`always`/`reject` for a permission
-    /// prompt that offers them.
-    pub choice: String,
+    /// `SESSION CHOICE`: the session address (`<label>/<session>`, or a bare
+    /// `<session>`), then the choice: a 0-based index, an option's label/key
+    /// (case-insensitive), a comma-separated list (one segment per question,
+    /// for a multi-field elicitation), or one of `once`/`always`/`reject` for a
+    /// permission prompt that offers them. With `--pane` the tail is `CHOICE`
+    /// alone.
+    #[arg(value_names = ["SESSION", "CHOICE"], num_args = 1..=2)]
+    pub rest: Vec<String>,
+    /// Answer on this pane instead of a SESSION (epic #633; refused until #646).
+    #[arg(long, value_name = "NAME")]
+    pub pane: Option<String>,
+    // `--profile NAME` (epic #633): parsed here and refused by `answer_cmd.rs`
+    // until story #646 routes it.
+    #[command(flatten)]
+    pub profile: ProfileOpt,
     /// Run against a remote hub instead of the local one (issue #508). See
     /// [`Status::server`].
     #[arg(long)]
