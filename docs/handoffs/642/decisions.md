@@ -1,0 +1,17 @@
+# Decisions — #642 the OpenCode adapter (`HarnessPort`)
+
+## A (Phase 3, up-front plan review) — 2026-10-09T14:52:40-06:00
+- **Decided:** BLOCK on docs/handoffs/642-brief.md at 53237d4, with 2 blocks and 9 warns (see handoff-A.md).
+  - The plan's choice of objects is otherwise right: `HarnessPort`, the closed codes and the conformance suite are reused unchanged; `FakeHarness`'s `op` strings are mirrored with no test-kit runtime dependency; the hand-rolled blocking HTTP client over `httparse` and the new stub server are justified in writing; the crate depends only on `holler-pane`, `serde_json` and `httparse`.
+  - B-1: decision 7 and AC 22 forbid any ADR-0021 edit, although ADR-0021 defers `HarnessPort`'s final form to #642 by name (line 530). The brief's decisions 1, 2, 3 and 6 are contract facts the verb stories need, and the established practice, #639, #676, #692 and the sibling #640 brief, is to amend ADR-0021 in the same change.
+  - B-2: `tui_target` is a bare tmux target (fed `Pane.host.tmux`) passed to `respawn-pane -k` and `display-message`. tmux prefix-matches bare targets (#641's tmux 3.7c evidence), so a missing session can resolve to another pane's: the TUI is killed and the title is read from the wrong pane. It also pushes tmux target syntax into holler-cli's wiring.
+- **Assumed:** #641's brief (`.claude/worktrees/0641-host-adapter/docs/handoffs/641-brief.md`) and #640's brief are the current plans of those parallel stories. Neither has passed its own A, so their conventions (exact `=NAME` targets, removing `TMUX`/`TMUX_PANE`, ADR and `ports.rs` doc updates, `Cargo.lock` as mechanical) may still change. I used them as evidence of how the same tmux server and the same deferred ADR item are being treated, not as merged code. The issue (#642), the epic (#633), ADR-0021 and the merged test kit are the authority.
+- **Hedged:**
+  - W-1 (nothing stops the server `serve` starts) is a warn, not a block. The conflict lives in #641's brief, which narrows its issue's "by recorded pid and port". #642's process model already fits a stop by recorded pid. It is still the most consequential finding: with decision 2 (never adopt), #644's relaunch and the spike's wedge recovery cannot work until the MO names an owner.
+  - B-1 differs from #508's W-5 (an ADR-not-updated warn) because here the ADR names this story for the decision and the brief explicitly forbids the update. The amend-first channel (a separate docs PR) is offered as an alternative.
+  - W-7 (child sessions in `list_sessions`) rests on holler-body's verified reading of `GET /session` (`parentID`, issue #382), not on a run of my own.
+- **Evidence:**
+  - Read in full: the brief; `holler-pane/src/{ports,error,probe,argv,lib}.rs` and `pane.rs:1-140`; `holler-pane-testkit/src/{harness,lib}.rs`, `conformance/{harness,mod}.rs` and `tests/harness_conformance_test.rs`; `docs/adr/ADR-0021.md`; `docs/research/opencode-pane-spike.md`.
+  - Also read: `herdr-api-spike.md:120-180`, `holler-cli/src/pane/wiring.rs:1-80`, `holler-body/src/http_attach_driver.rs:1-112` and `connection.rs:66-90, 300-330`, `holler-hub/src/ws_handshake.rs` (`httparse` use), `scripts/lint.sh`, `clippy.toml`, `scripts/spikes/opencode-lib.sh:1-80`, `.github/workflows/ci.yml` (test steps), and the 641 and 640 briefs.
+  - Issues read with `gh issue view`: 642, 633, 641, 644, 649, 639, 683.
+  - Git: `git show --stat` of 9d61c9f, 316b8e3, 434a1b5 and 90997a2 (each added a CHANGELOG entry); the ADR-0021 diffs of 316b8e3 and 2a6f349; `git log -- docs/adr/ADR-0021.md`. `Cargo.lock:1127-1128`.
