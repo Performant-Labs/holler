@@ -178,3 +178,50 @@
   - Scanned the added lines for personal or infrastructure names (none) and checked the seven branch commits' identities
     (all GitHub no-reply).
   - Ran `gh issue view 694`.
+
+## S (Phase 8, spec audit) — 2026-10-09T15:27:37-06:00
+- **Decided:** PASS on 9d61c9f..7114c33 (see handoff-S.md).
+  - Every clause of the issue and AC1 to AC10 of the brief has a proving test or a check I verified. The 15 case ids
+    match the brief one for one, and I traced the three mutants through their named cases by reading.
+  - The fake follows the brief's "Fake behaviour" step for step. The suite asserts each row of the case table. No case
+    passes against a do-nothing scope.
+  - F's four deviations are documented and sanctioned. The ADR sentence carries the W-7 clause that A asked for.
+  - Seven advisory notes, none blocking. N-1 (amend #688's stale body) should be done before the merge.
+- **Assumed:**
+  - T-green's Tier 1 output (clippy, workspace tests, lint, changelog-check, machete) and F's (build, rustfmt,
+    test-hooks, `cargo tree`) are accurate. By role I did not re-run them. No `crates/` file changed after F (628bcab) and
+    no test after T-red (b0bf1ee), so T-green's run at 05d7262 covers HEAD.
+  - The script's handoff cleanup removes `docs/handoffs/688*` before the push, as it did for #682 (95c44d2). That is why
+    N-1 matters.
+- **Hedged:**
+  - **The over-delivery against the issue body is not a REWORK or a HOLD.** The issue body still says 14 cases, 2
+    mutants and about 1,020 lines. The run delivers those 14 case ids and both mutants, plus case 15, a third mutant, the
+    hook and the ADR sentence. Each addition is a documented plan-review fix (B-1, W-1, W-4, W-7), and none is unrelated
+    work. Only the issue's text is stale, and amending it is O's job (N-1).
+  - **The `--spec-only` clause in the ADR is accepted as descriptive.** The scope cannot see an empty act, so case 14
+    already implies the refusal. #644 inherits it, and the brief's Risks rule keeps it reversible (N-5).
+  - **N-4 and N-6 are test-strength notes, not REWORK.** In N-4 the generation and the exact error already tell the
+    behaviours apart. In N-6 the brief's table deliberately leaves the pane store out of case 12.
+- **Evidence:**
+  - Read the issue, #663, #694, the amended brief, all six handoffs and `evidence.md`, the whole diff (src, tests, ADR and
+    CHANGELOG), and the #682 appendix at `95c44d2^:docs/handoffs/682-brief.md:489-565`.
+  - Ran these checks:
+    - `git diff --quiet` on the manifests and `Cargo.lock`;
+    - AC7's two greps;
+    - `git diff --name-only` (AC5 and AC8);
+    - `wc -l` on the eight touched `.rs` files (max 535);
+    - a scan of the added `src/` lines for panics and `#[allow]`;
+    - a privacy grep of every added line;
+    - `git log` for the subjects, trailers and identities, against `.githooks/commit-msg` and `prepare-commit-msg`;
+    - `gh pr list` (no PR yet).
+  - Read these to check facts the suite relies on:
+    - ADR-0021 section 8 and section 9's table;
+    - `profile.rs:255-275`;
+    - `ports.rs` (`list`);
+    - `feed.rs` (the `BTreeMap` records);
+    - `fixture.rs`;
+    - `conformance/mod.rs`;
+    - part 1's `shown` and `unchanged`;
+    - the `lints` table in the test kit's `Cargo.toml`;
+    - `lib.rs:15-29`;
+    - CONTRIBUTING.md.
