@@ -5,10 +5,11 @@ Repo: Performant-Labs/holler. Issue: #637 (story of epic #633). Rigor: in-sessio
 **Branch:** `issue-637-implementation`. **Design (D):** N/A (no UI). **Decision record:** the contract section of epic #633 is
 fixed and ADR-0021 (#634) ratifies it later; this story builds against the epic text and does not wait for #634.
 
-**Revision 2.** Amended after the up-front architecture review (`docs/handoffs/637/handoff-A.md`, BLOCK, 6 blocks and 11
-warns, at brief revision 1). Every block and the cheap warns are answered below. The operator accepted the eight decisions
-listed under "Decisions already made (MO)" on 2026-10-08. Where this brief and the issue body differ, the brief names the
-difference under "Blast-radius amendments".
+**Revision 3.** Revision 1 drew a BLOCK (6 blocks, 11 warns), revision 2 a second BLOCK (2 blocks, 9 warns; review at
+`docs/handoffs/637/handoff-A.md`, earlier review in git at 16c27d7). Revision 3 answers both new blocks (each verb's clap
+struct lives in its own verb file; the error taxonomy gains the infrastructure and open variants) and the warns. The operator
+accepted decisions 0-8 on 2026-10-08 and chose to amend and re-run (Option A) on 2026-10-09. Where this brief and the issue
+body differ, the brief names the difference under "Blast-radius amendments".
 
 ## Problem
 
@@ -121,7 +122,9 @@ pub fn find(name: &str) -> Option<&'static Method> { CATALOG.iter().find(|m| m.n
 ```
 `holler_proto::vocab::SessionName` (`vocab.rs:70-98`, re-exported at `lib.rs:71-73`) is the ADR 0005 name grammar; `holler-proto`
 declares itself async-free (`lib.rs:28-30`). Time in this codebase is `holler_proto::clock::now_millis() -> i64`
-(`clock.rs:35`); `SessionHold.held_since` (hold.rs) is the one RFC 3339 precedent.
+(`clock.rs:35`). Timestamps elsewhere are mixed (RFC 3339 in `holds.json` `since` and in `docs.rs`, u64 seconds in the token
+store), so there is no dominant pattern and i64 milliseconds is a choice, recorded in decision 3. Exit code 5
+(`INVALID_GRANT_EXIT_CODE`, `hold_cmd.rs:141`) exists beside 4; pane and profile verbs use only 0, 1, 2.
 
 **ADR 0003 fixes the complete CLI surface** and must move with it:
 ```
@@ -129,7 +132,8 @@ docs/adr/ADR-0003.md:12
 This ADR fixes the **complete CLI surface** and the **versioning policy** ... Later stories implement exactly this surface
 docs/adr/ADR-0003.md:21     global flags on every subcommand:  --debug none|quiet|noisy   --log-format text|json   --json
 docs/adr/ADR-0003.md:61     **Exit codes:** `0` ok; `1` runtime failure ...; `2` usage/ambiguity; `3` fail-closed policy refusal
-docs/adr/ADR-0003.md:69     `--json` prints **exactly one JSON object** to stdout; **all diagnostics go to stderr.**
+docs/adr/ADR-0003.md:62     `--json` prints **exactly one JSON object** to stdout; **all diagnostics go to stderr.**
+docs/adr/ADR-0003.md:69     "Breaking" = the CLI surface, the `--json` shape, the on-disk formats ...
 docs/adr/ADR-0003.md:75     `say`/`interrupt`/`roster` are the only top-level verbs
 ```
 Earlier verb-adding stories (2bbc96c, db76a6b, d8b2d62, 7e2f595) each updated ADR 0003 in the same change. `docs_cli_test` parses
@@ -140,7 +144,7 @@ The CLI surface fixture is checked in both directions, and `holler-cli` declares
 crates/holler-cli/tests/cli_surface_test.rs:1-15 (header)
 //! 3. the set of leaf verbs in the fixture equals the set clap knows — a verb
 //!    added to the tree without a fixture line (or vice versa) fails here.
-crates/holler-cli/Cargo.toml:14  autotests = false     (51 [[test]] entries today)
+crates/holler-cli/Cargo.toml:14  autotests = false     (48 [[test]] entries today)
 ```
 
 ## Acceptance criteria
@@ -156,7 +160,8 @@ All must be observable by command. Names below are the test names T should autho
    `--json`) it prints exactly one envelope on stdout and nothing else:
    `{"schema_version":1,"ok":false,"data":null,"error":{"code":"not-implemented","message":"<the same one line>"}}`; exit 1.
    A bare `holler pane` / `holler profile` is a clap usage error, exit 2. `holler pane list --debug bogus` still exits 3.
-3. Usage errors exit 2, and in JSON mode are an envelope with code `usage` (`emit_usage_error`): `pane launch X --spec-only`
+3. Usage errors exit 2, and in JSON mode **under the `pane` and `profile` subcommands only** are an envelope with code `usage`
+   (`emit_usage_error`; decision 1(d) and 9 keep every legacy verb's `--json` usage-error output as it is today): `pane launch X --spec-only`
    without `--profile` (`spec_only_requires_profile`); a bad `--format` value; `--json --format=text` (`json_conflicts_text`);
    `--command-arg` with `--command-json` and `--check-arg` with `--check-json` (mutually exclusive). `--help` and `--version` still
    exit 0 and print what they print today; a text-mode clap usage error still prints clap's own message to stderr.
@@ -165,12 +170,20 @@ All must be observable by command. Names below are the test names T should autho
    `say --pane NAME --profile P TEXT`; `interrupt SESSION [TEXT]`, `interrupt --pane NAME [TEXT]`; `answer SESSION CHOICE`,
    `answer --pane NAME CHOICE`; `roster --profile P`. Tests assert the resolved target (session or pane), the prompt text, and
    that the existing forms resolve to the same values as before. Given `--pane` or `--profile`, each of the three verbs refuses
-   with exit 1 and `error: not implemented (story #646)` on stderr (envelope under JSON), before contacting any hub (a
-   `--pane` that parses and is ignored would deliver a prompt unchecked). The existing say/interrupt/answer tests pass unchanged.
+   with exit 1 and `error: not implemented (story #646)` on stderr, **plain text under any format** (they are legacy verbs;
+   no envelope, so #646 inherits one shape), before contacting any hub (a `--pane` that parses and is ignored would deliver a
+   prompt unchecked); `roster --profile P` likewise refuses with `error: not implemented (story #648)`, exit 1. The accessor
+   returns a usage error (exit 2, clap's wording) when SESSION, TEXT or CHOICE is missing, when `--pane` is given together
+   with a SESSION, and when an extra positional follows `--pane NAME TEXT` (`say`, `answer --pane NAME`, bare `say`,
+   `say --pane X a b`). Flags after SESSION still parse (`say io/alpha hello --queue`, `say io/alpha --parts-file f`).
+   The existing say/interrupt/answer tests pass unchanged.
 5. Every spec flag parses on `pane launch` and `pane relaunch`: `--project --workspace --grid --model --effort --role --env
    (repeatable) --ctx-soft --ctx-hard --port-policy --command-arg (repeatable) --command-json --check-arg (repeatable)
    --check-json --expect (repeatable)`. `--profile` parses on every `pane` verb except `import`, and on `roster`; `--spec-only` on
-   `launch`, `relaunch`, `close` only; `--take-over` on `profile apply` only. The values stay strings at clap time; the shared
+   `launch`, `relaunch`, `close` only; `--take-over` on `profile apply` only. **Only these shared flags are declared by #637**
+   (decision 10): the verb-specific positionals and flags of the sibling issues are not, because each verb's clap struct lives
+   in that verb's own file and its owning story adds them (so `pane get hj-c1r1` is a usage error, exit 2, until #643 lands;
+   the stubs take what #637 declares). The values stay strings at clap time; the shared
    `SpecFlags::validate()` in `pane/args.rs` turns them into typed values: a bad `--grid` is a refusal (exit 1, code
    `grid-ambiguous` or `grid-out-of-range`), a bad `--env` is a refusal (exit 1, code `env-name-invalid`), a malformed
    `--command-json` or `--check-json` that is not an array of strings is `command-not-argv`. Tests call `validate()` directly.
@@ -186,22 +199,32 @@ All must be observable by command. Names below are the test names T should autho
 8. Serde round-trip tests: `Pane` (full), `Pane` without `profile` (loads as `None`), `Profile`, `ProfileSpec`. CAS: a `cas_put`
    with a stale `expected_generation` returns `PaneError::Conflict` whose `code()` is `generation-conflict` (test against a trivial
    in-test `PaneStore`).
-9. Error codes: `PaneError` and the code list in `holler-pane/src/error.rs` hold every domain code the epic contract names (see
-   decision 2), each a `pub const` kebab-case string; a test (`error_codes_unique_and_kebab`) asserts uniqueness and that each
-   matches `^[a-z]+(-[a-z]+)*$`; `output::ErrorCode::new` rejects anything else.
+9. Error codes: `PaneError` and `ALL_CODES` in `holler-pane/src/error.rs` hold every code in decision 2, each a `pub const`
+   kebab-case string; a test (`error_codes_unique_and_kebab`) asserts uniqueness and that each matches `^[a-z]+(-[a-z]+)*$`
+   using the one validator `error::is_valid_code`; `output::ErrorCode::new` calls that same validator and rejects anything
+   else (holler-cli has no second validator); `ErrorCode::from(&PaneError)` is infallible, including for the open `Refused`
+   variant. A test covers every variant's `code()` and `Display`.
 10. The ports compile against a trivial in-test implementation: `PaneStore`, `ProfileStore`, `ProfileScope`, `HerdrPort` (incl.
     `version()`), `HostPort`, `HarnessPort`, `Prober`; `run_probe` and `ProbeResult` exist with the fixed signature. One test file
-    implements every trait, so a later signature change breaks it (`ports_compile_in_test_impl`).
+    implements every trait (each `Send + Sync`) and calls `ProfileScope::edit_spec` with a trait-object `act`, so a later
+    signature change breaks it (`ports_compile_in_test_impl`). `PaneName`, `ProfileName` and `ProfileName::slug()` have
+    table tests (`pane_name_grammar`, `profile_name_slug`).
 11. Hub: a `pane/list` (and one `profile/list`) request over the control socket reaches the stub and returns a JSON-RPC **result**
-    carrying the not-implemented envelope, not MethodNotFound (test in `crates/holler-hub/tests/`, using the existing harness
-    style); an unknown `control/x` and an unknown `foo/bar` still return MethodNotFound; `check_membership` returns `Ok(())` for
-    any pane. `holler-hub` links `holler-pane`, and `cargo machete` is clean.
+    that parses back into `holler_pane::PaneReply` as `{ok:false, data:null, error:{code:"not-implemented", message}}` (decision 8;
+    no `schema_version`, not the CLI's `output::Envelope`), not MethodNotFound. The test lives in
+    `crates/holler-hub/tests/pane_dispatch_test.rs` and drives `handle_control_conn` over `tokio::net::UnixStream::pair()`
+    (`Registry::new`, `Roster::with_system_clock`, `Lockout::new` are `pub`); it does not spawn the `holler` binary and does not copy
+    `support::Hub`. An unknown `control/x` and an unknown `foo/bar` still return MethodNotFound; `PaneState::load` and
+    `ProfileState::load` return empty state; `check_membership` returns `Ok(())` for any pane. `holler-hub` links `holler-pane`,
+    and `cargo machete` is clean.
 12. `pane_methods_not_in_wire_catalog`: `methods::find("pane/list")` and `find("profile/list")` are `None`, `CATALOG.len()` is
     still 22, and `PANE_METHODS` / `PROFILE_METHODS` list exactly the names in decision 8. No golden file changes.
-13. ADR 0003 carries the new rows (decision 6) and `cargo test -p holler-cli --test docs_cli_test` and `cli_surface_test` pass; every
-    new leaf verb and every new flag (the spec flags, `--profile`, `--spec-only`, `--take-over`, `--format`, `--pane`) appears on
-    at least one line of `crates/holler-cli/tests/fixtures/cli-surface.txt`, plus the regression lines `say io/alpha --parts-file f`
-    and `interrupt io/alpha`.
+13. ADR 0003 carries the new rows (decision 6): **one row per verb, in the bare form #637 declares**, so a verb story edits only
+    its own row (and its own `cli-surface.txt` line). `cargo test -p holler-cli --test docs_cli_test` and `cli_surface_test` pass
+    (the first alternative of each `a|b` in an ADR row must parse). Every new leaf verb and every shared flag (the spec flags,
+    `--profile`, `--spec-only`, `--take-over`, `--format`, `--pane`) appears on at least one line of
+    `crates/holler-cli/tests/fixtures/cli-surface.txt`, plus the regression lines `say io/alpha --parts-file f` and
+    `interrupt io/alpha`.
 14. `git diff --name-only origin/main...HEAD` lists only paths in the Blast radius below (grep-able check for S).
 
 ## Files
@@ -210,18 +233,20 @@ Production (new unless noted):
 - `crates/holler-pane/` (`Cargo.toml`, `src/lib.rs`, `error.rs`, `pane.rs`, `generation.rs`, `ports.rs`, `grid.rs`, `profile.rs`,
   `argv.rs`, `probe.rs`, and the empty declared stubs `profile_snapshot.rs`, `profile_diff.rs`, `tx_apply.rs`, `tx_launch.rs`,
   `tx_switch.rs`, `reconcile.rs`, `findings.rs`, `import.rs`); `lib.rs` declares every module so no later story edits it.
-  Dependencies: `serde`, `serde_json`, `holler-proto` (path). No async runtime.
+  Dependencies: `serde`, `serde_json` (consumed by `PaneReply.data`), `holler-proto` (path). No async runtime.
+  `reply.rs` (new): `PaneReply` and the shared `pane/*` / `profile/*` params structs (decision 8).
 - `crates/holler-adapter-herdr/`, `holler-adapter-host/`, `holler-adapter-opencode/`, `holler-pane-testkit/`: `Cargo.toml` +
   `src/lib.rs` (a crate doc comment only; the testkit may re-export nothing yet).
 - `crates/holler-proto/src/methods.rs` (edit): `PANE_METHODS`, `PROFILE_METHODS` (name lists), `is_pane_method()`,
   `is_profile_method()`; outside `CATALOG`. `vocab.rs`: **no edit** (see decision 2 and 8; recorded in decisions.md).
 - `crates/holler-cli/src/cli.rs` (edit, small): `Pane(PaneCmd)` and `Profile(ProfileCmd)` variants, global `--format`, the
   `--pane`/`--profile` fields and accessors on `Say`/`Interrupt`/`Answer`, `--profile` on `Roster`; update the namespace comment at
-  `cli.rs:7-9`. New `crates/holler-cli/src/pane/mod.rs` + `args.rs` (clap structs, spec flags declared once, `SpecFlags::validate`)
-  + one stub per verb (`list.rs get.rs watch.rs launch.rs relaunch.rs switch.rs reset.rs park.rs unpark.rs close.rs doctor.rs
-  import.rs`) + `wiring.rs` (stub: `pub fn ports() -> OwnedPorts` whose every port returns `PaneError::NotImplemented`; #649 replaces
-  the body only) + `profile_scope.rs`; new `crates/holler-cli/src/profile/mod.rs` + `args.rs` + `create.rs delete.rs list.rs show.rs
-  apply.rs rename.rs export.rs import.rs`; new `crates/holler-cli/src/output.rs`; `lib.rs` (edit): module declarations.
+  `cli.rs:7-9`. New `crates/holler-cli/src/prompt_target.rs` (the `--pane`/`--profile` accessors for say/interrupt/answer; keeps `cli.rs`
+  near 740 lines). New `crates/holler-cli/src/pane/mod.rs` (`PaneCmd`, the dispatch) + `args.rs` (**only** the shared flag groups:
+  `SpecFlags` with `validate()`, `ProfileOpt`, `SpecOnly`) + one stub per verb, each holding **its own clap `Args` struct** and
+  `run` (`list.rs get.rs watch.rs launch.rs relaunch.rs switch.rs reset.rs park.rs unpark.rs close.rs doctor.rs import.rs`) + `wiring.rs` (stub: `pub fn ports() -> OwnedPorts` whose every port returns `PaneError::NotImplemented`; #649 replaces
+  the body only) + `profile_scope.rs`; new `crates/holler-cli/src/profile/mod.rs` (`ProfileCmd`) + `args.rs` (`ProfileOpt` only) + `create.rs delete.rs list.rs show.rs
+  apply.rs rename.rs export.rs import.rs` (each with its own `Args` struct; `--take-over` lives in `apply.rs`); new `crates/holler-cli/src/output.rs`; `lib.rs` (edit): module declarations.
 - `crates/holler-cli/src/main.rs` (edit): see decision 1.
 - `crates/holler-cli/src/say_cmd.rs`, `interrupt_cmd.rs`, `answer_cmd.rs` (edit, accessor change and the fail-closed guard only).
 - `crates/holler-hub/src/lib.rs` (declarations: `panes`, `profile`, `pane_wiring`), `src/panes/mod.rs` (stub `dispatch` and the
@@ -229,11 +254,13 @@ Production (new unless noted):
   `check_membership`), `src/control_server.rs` and `src/serve.rs` (forwarding and handle plumbing only), `Cargo.toml` (see decision 4).
 - `docs/adr/ADR-0003.md` (edit): decision 6. `CHANGELOG.md`: an `## [Unreleased]` entry linking #637.
 Tests: `crates/holler-pane/tests/*.rs` (default autotests there), `crates/holler-cli/tests/pane_verbs/main.rs` and
-`profile_verbs/main.rs` (one `[[test]]` each, one `mod` per verb so later stories add a file, not a manifest line), placeholder
+`profile_verbs/main.rs` (one `[[test]]` each) **plus every per-verb file now**: `pane_verbs/<verb>.rs` x12 and
+`profile_verbs/<verb>.rs` x8, each holding that verb's stub case and declared in `main.rs`, so a later story edits only its own
+file and never `main.rs` or the manifest. Placeholder
 `pane_integration/main.rs` (#649) and `profile_apply_scenario/main.rs` (#667) `[[test]]` targets hosted by `holler-cli` (there is no
-root package), `crates/holler-cli/tests/fixtures/cli-surface.txt` (edit), `crates/holler-hub/tests/pane_dispatch_test.rs`.
+root package), `crates/holler-cli/tests/fixtures/cli-surface.txt` (edit), `crates/holler-hub/tests/pane_dispatch_test.rs` (drives `handle_control_conn` over `UnixStream::pair()`, AC 11).
 Reuse map (extend, do not duplicate): the clap `Cli` and global-flag pattern in `cli.rs`; the `Query::resolve` pattern for the
-`--pane` shapes; `holler_proto::vocab::SessionName` for pane names (do not copy the grammar); `holler_proto::clock::now_millis`
+`--pane` shapes (its variadic tail, but **without** `trailing_var_arg`); `holler_proto::vocab::SessionName` for pane names (do not copy the grammar); `holler_proto::clock::now_millis`
 for time; the `control_hold.rs` precedent of a plain-function module the control dispatcher calls; `print_leaf_result_and_exit`
 and the existing stub wording; `tempfile`, `assert_cmd`, `predicates`, `rstest` for tests.
 
@@ -246,78 +273,137 @@ Accepted by the operator, 2026-10-08, in this order.
    the store, not adapters.
 1. **`main.rs` is in the blast radius**, scoped to: (a) one dispatch arm each for `Pane` and `Profile`, delegating to
    `holler_cli::pane::run` / `profile::run`, which return an exit code; (b) extract the existing top-level-verb chain
-   (`main.rs:203-238`) into one helper so `main()` is at or under 100 code lines; (c) call the single format resolver once after
-   parsing; (d) switch `Cli::parse()` to `Cli::try_parse()`: `--help` and `--version` exit 0 as today, a text-mode usage error
-   prints clap's own message and exits 2 as today, and in JSON mode (a pure helper in `output.rs` scans the raw argv for
-   `--format=json`, `--format json` or `--json`) the usage error is `output::emit_usage_error` (an envelope with code `usage`,
-   exit 2). `output.rs` never calls `process::exit`; it returns the code. #660 therefore never needs `main.rs`.
-2. **Error codes live in `holler-pane/src/error.rs`**, not in `vocab.rs`. `PaneError` has one variant per domain code and a
-   `code() -> &'static str`; `pub const ALL_CODES` lists them. The set is every code the epic and sibling issues name:
-   `not-implemented`, `usage`, `grid-ambiguous`, `grid-out-of-range`, `command-not-argv`, `env-name-invalid`,
-   `generation-conflict` (the CAS conflict), `probe-failed`, `profile-conflict`, `profile-not-found`, `pane-not-in-profile`,
-   `pane-in-other-profile`, `profile-secret-refused`, `herdr-version-unsupported`, `profile-drift`. The owning story of each is a
-   doc comment on its variant (#644/#663: `probe-failed`, `profile-conflict`, `profile-not-found`; #643/#663: `pane-not-in-profile`;
-   #661: `pane-in-other-profile`, `profile-secret-refused`; #640: `herdr-version-unsupported`; #665: `profile-drift`). A later story
-   fills behaviour, never the list. `output::ErrorCode` is a validated kebab-case newtype (per #660), built from
-   `PaneError::code()` or from a verb-local const. `vocab.rs` is untouched.
-3. **`holler-pane` depends on `serde`, `serde_json` and `holler-proto` (path); no async runtime.** Pane names are
-   `holler_proto::vocab::SessionName`-shaped (no second copy of the grammar). Every timestamp in the records (`last_observed.at`,
+   (`main.rs:203-238`) into one helper so `main()` is at or under 100 code lines (the helper also holds the `roster --profile`
+   refusal, `not implemented (story #648)`); (c) call the single format resolver once after parsing and pass `roster_cmd::run`
+   the same `json` bool as today (#648 takes the one-line `main.rs` edit it needs for the explicit-`--format=json` bit); (d)
+   switch `Cli::parse()` to `Cli::try_parse()`: `--help` and `--version` exit 0 as today, a text-mode usage error prints clap's
+   own message and exits 2 as today, and in JSON mode **only when the first non-flag argv token is `pane` or `profile`** (a pure
+   helper in `output.rs` scans the raw argv for `--format=json`, `--format json` or `--json`) the usage error is
+   `output::emit_usage_error` (an envelope with code `usage`, exit 2). Every legacy verb's usage error is untouched (no change
+   to its `--json` output, ADR-0003:69). `output.rs` never calls `process::exit`; it returns the code. #660 therefore never
+   needs `main.rs`.
+2. **Error codes live in `holler-pane/src/error.rs`**, not in `vocab.rs`. `PaneError` has one variant per domain code, a
+   `code() -> &'static str`, and `Display`; `pub const ALL_CODES` lists the closed codes; one validator
+   `pub fn is_valid_code(&str) -> bool` (kebab-case, `^[a-z]+(-[a-z]+)*$`) is the only one in the workspace. The closed set is
+   every code the epic and sibling issues name, plus the infrastructure failures the port implementers must return:
+   - domain: `not-implemented`, `usage`, `grid-ambiguous`, `grid-out-of-range`, `command-not-argv`, `env-name-invalid`,
+     `generation-conflict` (the CAS conflict), `probe-failed`, `profile-conflict`, `profile-not-found`, `profile-exists`,
+     `profile-has-live-panes`, `pane-not-in-profile`, `pane-in-other-profile`, `profile-secret-refused`,
+     `herdr-version-unsupported`;
+   - infrastructure: `timeout` (`Timeout { op }`), `pane-not-found` and `session-not-found` (`NotFound { what }`),
+     `store-corrupt` (`StoreCorrupt { .. }`, the fail-closed read), `unavailable` (`Unavailable { what }`: hub, Herdr socket,
+     harness unreachable);
+   - `profile-drift`: listed for convenience; it is a reconcile **finding kind** (#647/#665 put it in `findings.rs`), not an
+     error a port returns.
+   - **open variant** `Refused { code: &'static str, message: String }`: an adapter crate or a verb returns a code it owns
+     without editing the enum (matches #660's "codes are constants in each verb's own file"). It is not in `ALL_CODES`; the
+     owning story tests its constants with `is_valid_code`.
+   The owning story of each closed code is a doc comment on its variant (#644/#663: `probe-failed`, `profile-conflict`,
+   `profile-not-found`; #643/#663: `pane-not-in-profile`; #661: `pane-in-other-profile`, `profile-secret-refused`,
+   `profile-exists`; #662: `profile-has-live-panes`; #640: `herdr-version-unsupported`; #665: `profile-drift`; #638-#642: the
+   infrastructure variants). A later story fills behaviour, never the list. `output::ErrorCode` is a validated kebab-case
+   newtype (per #660): `ErrorCode::new(&str) -> Result` calls `error::is_valid_code`, and `From<&PaneError>` is infallible, so
+   a verb never has dead error handling for a constant. `vocab.rs` is untouched.
+3. **`holler-pane` depends on `serde`, `serde_json` and `holler-proto` (path); no async runtime.** `PaneName` is a newtype over
+   `holler_proto::vocab::SessionName` (no second copy of the grammar; serde through `SessionName::parse`, because `SessionName`
+   has no serde). `ProfileName` is a display name (spaces allowed, trimmed, non-empty, no control characters, at most 64 chars)
+   with its own rule and the one `ProfileName::slug() -> String` in `profile.rs` (lower-case, runs of non-alphanumerics become
+   one `-`); #661 enforces unique name and unique slug with `profile-exists`. Every timestamp in the records (`last_observed.at`,
    `Parked.since`, `Profile.created`/`updated`, log entries) is **milliseconds since the Unix epoch as `i64`**, the type
    `holler_proto::clock::now_millis()` returns; the text layer converts to local time for display. `GridPos` accepts upper and lower
    case and surrounding ASCII whitespace, refuses interior whitespace; zero is `grid-out-of-range`; a missing half, a repeated
    label or a mix such as `r2c1c3` is `grid-ambiguous`; bounds are `u16`.
 4. **#637 owns the hub plumbing**, in plain functions (no function-pointer registry): in `dispatch_control` one new arm
    `Some(m) if is_pane_method(m) || is_profile_method(m)` calling a helper (to keep cognitive complexity under the limit) that
-   forwards to `crate::panes::dispatch` or `crate::profile::dispatch`; each is a `pub async fn` stub answering the not-implemented
-   envelope as a JSON-RPC **result** (the closed error-code table is untouched). `serve.rs` builds an empty `PaneState` and
-   `ProfileState` handle and passes them through `handle_control_conn` and `dispatch_control`. `check_membership(&holler_pane::Pane,
+   forwards to `crate::panes::dispatch` or `crate::profile::dispatch`. Pinned signatures (the precedent is
+   `Holds::load(&HubState)` in `build_shared_state`, `serve.rs:351-377`):
+   `PaneState::load(&HubState) -> PaneState` and `ProfileState::load(&HubState) -> ProfileState` (stubs return empty state;
+   corrupt-file behaviour stays inside `load`, owned by #639 and #661); both are built in `build_shared_state` next to
+   `Holds::load`, carried in `SharedState`, and passed through `handle_control_conn` and `dispatch_control`;
+   `panes::dispatch(method, &cid, &obj, &PaneState, &ProfileState) -> String` and
+   `profile::dispatch(method, &cid, &obj, &ProfileState, &PaneState) -> String` (each receives both handles, so a membership
+   check cannot fail open and `profile/rename` can reach the pane store). Each is a `pub async fn` stub answering the
+   not-implemented reply (decision 8) as a JSON-RPC **result** (the closed error-code table is untouched). `check_membership(&holler_pane::Pane,
    &ProfileState) -> Result<(), PaneError>` is a plain function returning `Ok(())`; #639's `cas_put` calls it, #661 fills it. The
    `holler-pane` dependency in `holler-hub/Cargo.toml` is consumed by it. `holler-pane-testkit` is pre-added as a dev-dependency of
    `holler-hub` and `holler-cli`, each with a one-line consumer test (`testkit_links`), so #638/#639/#661 add no manifest line.
    Later stories declare any new dependency crate-locally with the `# for <consumer>` marker.
 5. **`--pane` shapes by redesign now.** `Say`, `Interrupt` and `Answer` keep their existing behaviour for `SESSION` forms and gain
-   `--pane NAME` and `--profile P`, resolved in code behind accessors in the `Query::resolve` style (a variadic tail), so
-   `say --pane NAME TEXT` parses. `say_cmd.rs`, `interrupt_cmd.rs` and `answer_cmd.rs` change only to read the accessors, and to
-   refuse `--pane`/`--profile` with exit 1 `error: not implemented (story #646)` until #646 lands. Accessor names must not
-   collide with existing root exports (`Target`, `List`, `Delete`). (The earlier brief's "existing positional/`--session` forms"
-   was inaccurate: these verbs have no `--session`.)
+   `--pane NAME` and `--profile P`. SESSION/TEXT/CHOICE become one variadic tail resolved in code behind accessors in the
+   `Query::resolve` style, so `say --pane NAME TEXT` parses. Verified by the reviewer in a scratch crate on clap 4.6.6: use
+   `#[arg(value_names = ["SESSION","TEXT"], num_args = 0..=2)] rest: Vec<String>` (`1..=2` for `answer`) **without**
+   `trailing_var_arg` (`Query`'s `trailing_var_arg = true` would swallow `--parts-file`, `--queue`, `--grant`, `--server` into the
+   tail); flags after SESSION still parse and `say io/alpha hello extra` stays clap's exit 2. Because the tail is optional the
+   accessor returns a usage error (exit 2) for a missing SESSION/TEXT/CHOICE and for an extra positional with `--pane` (AC 4).
+   The accessors live in the new `crates/holler-cli/src/prompt_target.rs`. `say_cmd.rs`, `interrupt_cmd.rs` and
+   `answer_cmd.rs` change only to read the accessors and to refuse `--pane`/`--profile` with exit 1
+   `error: not implemented (story #646)`, plain stderr text under any format. Accessor names must not collide with existing root
+   exports (`Target`, `List`, `Delete`). (The earlier brief's "existing positional/`--session` forms" was inaccurate: these verbs
+   have no `--session`.)
 6. **ADR 0003 is edited by #637**: rows for `holler pane ...` and `holler profile ...`, `--format` on the global-flags line,
    `--pane`/`--profile` on the say/interrupt/answer/roster rows, the amended "only top-level verbs" sentence, citing epic #633 and
    ADR-0021 (#634); `cli.rs:7-9` matches. ADR-0021 stays #634's.
-7. **Frozen contracts, spelled out** (answers warns 7-10; HerdrPort and HarnessPort are **provisional** until spikes #636 and #635
-   report, under the epic's amend-first rule):
-   - Every port is synchronous and blocking; each trait carries the doc rule "call from `spawn_blocking` (or a thread) in async
-     code; return within I5's bound (default 10 s) or with a timeout error".
+7. **Frozen contracts, spelled out** (HerdrPort and HarnessPort are **provisional** until spikes #636 and #635 report, under
+   the epic's amend-first rule):
+   - Every port is synchronous and blocking, declared `Send + Sync`; each trait carries the doc rule "call from
+     `spawn_blocking` (or a thread) in async code; return within I5's bound (default 10 s) or with `PaneError::Timeout`".
    - `PaneStore { get(&self, &PaneName) -> Result<Option<Pane>, PaneError>; list(&self) -> Result<Vec<Pane>, PaneError>;
      cas_put(&self, &Pane, expected_generation: u64) -> Result<Pane, PaneError>; watch(&self, since: Cursor) -> Result<Watch<PaneEvent>, PaneError> }`
      with `Cursor(u64)` a store-wide change sequence number and `Watch<T> = Box<dyn Iterator<Item = Result<T, PaneError>> + Send>`
      (one watch shape for both stores).
-   - `ProfileStore { get; list; cas_put(&Profile, expected_generation); delete(&ProfileName, expected_generation); watch(Cursor); log(&ProfileName) -> Result<Vec<ProfileLogEntry>, PaneError> }`.
+   - `ProfileStore { get; list; cas_put(&Profile, expected_generation); delete(&ProfileName, expected_generation); watch(Cursor);
+     log(&ProfileName) -> Result<Vec<ProfileLogEntry>, PaneError>; rename(&ProfileName, &ProfileName, expected_generation)
+     -> Result<Profile, PaneError> }` (`rename` is PROPOSED, with #665; the stub returns `NotImplemented`).
+   - `ProfileScope: Send + Sync { resolve(&self, &ProfileName, &PaneName) -> Result<ResolvedScope, PaneError>;
+     edit_spec(&self, &ProfileName, &PaneName, edit: &SpecEdit, act: &mut dyn FnMut() -> Result<(), PaneError>) -> Result<Profile, PaneError> }`
+     with `act` a trait object so `Ports` can hold `&dyn ProfileScope`; `ResolvedScope { profile: Profile, member: bool }` and
+     `SpecEdit` (set or remove the pane's entry) are minimal types F defines in `profile.rs`.
    - `HerdrPort { ensure_pane(&self, &HerdrSpec) -> Result<HerdrPane, _>; send_text(&self, &PaneId, &str); send_keys(&self, &PaneId, &[Key]);
      read(&self, &PaneId, max_lines: usize) -> Result<String, _>; close(&self, &PaneId); snapshot(&self) -> Result<HerdrSnapshot, _>; version(&self) -> Result<String, _> }`;
      `HostPort { ensure_session; run(&self, &PaneName, &Argv) ; stop_owned; ps }`; `HarnessPort { serve; health; create_session; list_sessions;
      abort; attach_tui; select_session; shown_session }`, each taking and returning the minimal data types F defines in `ports.rs`.
-   - `trait Prober { fn run_probe(&self, &Argv, &[String], Duration) -> ProbeResult }`, a `SystemProber` that calls the free
+   - `trait Prober: Send + Sync { fn run_probe(&self, &Argv, &[String], Duration) -> ProbeResult }`, a `SystemProber` that calls the free
      `run_probe` stub (signature fixed by the epic; #663 builds the body), so #638's fake and AC 10 have something to swap.
-   - Verb entry: every stub is `pub fn run(args: &XArgs, ctx: &VerbCtx) -> i32` with `VerbCtx { format, ports: &Ports }` and
-     `Ports { pane_store, profile_store, herdr, host, harness, scope, prober }` (one `&dyn` each) defined in `holler-pane`;
-     `wiring.rs` builds the real bundle, #638 the fake, and `pane/mod.rs` and `profile/mod.rs` never change after this story.
-8. **Methods.** `PANE_METHODS = [pane/get, pane/list, pane/cas_put, pane/watch]`; `PROFILE_METHODS = [profile/get, profile/list,
+   - Verb entry: every stub is `pub fn run(args: &XArgs, ctx: &VerbCtx) -> i32`. `Ports { pane_store, profile_store, herdr, host,
+     harness, scope, prober }` (one `&dyn` each) is defined in **holler-pane**; `VerbCtx { format: output::Format, ports: &Ports,
+     out: &mut dyn Write, err: &mut dyn Write }` is defined in **holler-cli** (it holds a holler-cli type), so verbs write to
+     injected writers and #638's fakes run in-process. `wiring.rs` builds the real bundle, #638 the fake, and `pane/mod.rs` and
+     `profile/mod.rs` never change after this story.
+   - `output.rs` API (frozen; #660 fills behaviour without changing a signature): `Format { Text, Json }`; `Envelope<T>`;
+     `ErrorBody { code: ErrorCode, message }`; `emit<T: Serialize>(out: &mut dyn Write, format: Format, result: Result<T, ErrorBody>,
+     text: impl FnOnce(&T) -> String) -> i32` (0 on ok, 1 on error; the per-verb `text` closure renders text mode);
+     `emit_stream<T: Serialize>(out: &mut dyn Write, format: Format, items: impl Iterator<Item = Result<T, ErrorBody>>,
+     text: impl Fn(&T) -> String) -> i32` (one line per item); `emit_usage_error(out: &mut dyn Write, format: Format, message: &str)
+     -> i32` (returns 2); `resolve_format(&Cli) -> Result<FormatChoice, ErrorBody>` and the raw-argv scan. Stub text mode writes
+     `error: not implemented (story #NNN)` to `err`, nothing to `out`.
+8. **Methods and replies.** `PANE_METHODS = [pane/get, pane/list, pane/cas_put, pane/watch]`; `PROFILE_METHODS = [profile/get, profile/list,
    profile/cas_put, profile/delete, profile/watch, profile/log, profile/rename]` (`profile/rename` is the PROPOSED one). They are hub
    control methods, outside `CATALOG`, so the v2 wire protocol is unchanged and a body connection still gets `method_not_found`.
-   The params structs live in `holler-pane` next to `Pane`, shared by #639 (server) and #649 (client); `holler-proto` holds names
-   only, because it cannot depend on `holler-pane`.
+   The params structs and the reply type live in `holler-pane` (`reply.rs`), shared by #639/#661 (server) and #649 (client);
+   `holler-proto` holds names only, because it cannot depend on `holler-pane`. **Reply encoding:** a JSON-RPC **result**
+   `PaneReply { ok: bool, data: Option<serde_json::Value>, error: Option<{code, message}> }` with **no** `schema_version`,
+   built from a `PaneError` and parsed back into one; `output::Envelope` stays CLI-only and the CLI maps a `PaneReply` error
+   into it. This deviates from the existing control methods (JSON-RPC errors with a `data.reason` sub-code,
+   `control_server.rs:316,697-713`) because the domain codes do not fit the closed `Code` table; recorded in decisions.md.
 9. **`--format` and `--json`.** One resolver in `output.rs` applies to every verb. `--format=json` is equivalent to `--json` on every
-   verb; `--json --format=text` is a usage error (exit 2). Legacy verbs keep their legacy JSON shape. The resolver also reports
-   whether `--format=json` was explicit, so #648 can emit the envelope for `roster` only on explicit `--format=json` and keep
-   `roster --json` byte-compatible (no break under ADR-0003:69). Pane and profile verbs treat either flag as the envelope. Exit
+   verb; `--json --format=text` is a usage error (exit 2). Legacy verbs keep their legacy JSON shape and their legacy usage-error output (decision 1(d)). The resolver also
+   reports whether `--format=json` was explicit (`FormatChoice { format, json_explicit }`), so #648 can emit the envelope for
+   `roster` only on explicit `--format=json` and keep `roster --json` byte-compatible (no break under ADR-0003:69); #648 takes
+   the one `main.rs` line that passes the bit (decision 1(c)). Pane and profile verbs treat either flag as the envelope. Exit
    codes: pane/profile verbs return 0 ok, 1 refused or failed, 2 usage; 3 (policy refusal) stays in `main.rs`; 4
    (`HELD_EXIT_CODE`) belongs to `hold`/`release` and is not touched.
-10. **Smaller rulings.** `pane/args.rs` and `profile/args.rs` are frozen together with `cli.rs`. Clap type names are `PaneCmd`,
-    `ProfileCmd`, `PaneList`, `ProfileDelete` and so on, path-qualified (`output::Envelope`, never the `holler_proto::Envelope`
-    root re-export). `src/**/mod.rs` is new to this codebase and kept because each module root sits inside its owner's blast-radius
-    glob; recorded in decisions.md. `Pane.hold` is doc-commented as a pane-record state, not a prompt hold; #646's brief must put
-    any prompt refusal derived from pane state at `send_prompt` (the stack's choke-point rule), not in the verb.
+10. **Smaller rulings.** **Each verb's clap `Args` struct lives in its own verb file** (`pane/<verb>.rs`, `profile/<verb>.rs`),
+    named `PaneList`, `ProfileDelete` and so on, and is referenced from the frozen `PaneCmd`/`ProfileCmd` enums in `mod.rs`. Only
+    the shared groups (`SpecFlags`, `ProfileOpt`, `SpecOnly`) live in the frozen `args.rs`. #637 declares each verb with what it
+    is already known to need (shared groups only), and **does not** guess the positionals or verb-specific flags of the sibling
+    stories (`pane get PANE`, `pane switch PANE SESSION`, `pane park` reason and release condition, `pane doctor [--fix]`,
+    `pane import --from`, `profile create/delete/show NAME`, `profile rename OLD NEW`, `--take-over` on apply and so on): each
+    owning story adds them in its own file, edits its own ADR 0003 row and its own `cli-surface.txt` line, and no frozen file.
+    This follows the epic's "one verb, one file, one owning story" rule and is the reviewer's accepted alternative; recorded in
+    decisions.md. Path-qualify `output::Envelope`, never the `holler_proto::Envelope` root re-export. `src/**/mod.rs` is new to
+    this codebase and kept because each module root sits inside its owner's blast-radius glob; recorded in decisions.md.
+    `Pane.hold` is doc-commented as a pane-record state, not a prompt hold; #646's brief must put any prompt refusal derived from
+    pane state at `send_prompt` (the stack's choke-point rule), not in the verb.
 
 ## Out of scope
 
@@ -353,7 +439,15 @@ Added to the issue's list: `crates/holler-cli/src/main.rs` (decision 1); `crates
 `docs/adr/ADR-0003.md` (decision 6); `crates/holler-cli/Cargo.toml` (`[[test]]` targets, the `holler-pane` dependency and the
 testkit dev-dependency); `CHANGELOG.md`; `crates/holler-cli/tests/fixtures/cli-surface.txt`; the new test files and placeholder
 `[[test]]` targets under `crates/holler-cli/tests/` and `crates/holler-pane/tests/` and `crates/holler-hub/tests/`;
-`crates/holler-cli/src/pane/args.rs` and `profile/args.rs` (inside `pane/**`, `profile/**`, to keep `cli.rs` under the gate).
+`crates/holler-cli/src/pane/args.rs` and `profile/args.rs` (inside `pane/**`, `profile/**`, to keep `cli.rs` under the gate);
+`crates/holler-cli/src/prompt_target.rs`; `crates/holler-pane/src/reply.rs`.
 Removed from the issue's list: `crates/holler-proto/src/vocab.rs` (no edit needed, decision 2). Not changed: workspace
 `Cargo.toml` (the `crates/*` glob already covers the new crates); `Cargo.lock` updates for them only. The epic's ownership table
-(shared hot spots) needs the same additions; the issue and epic edits are drafted separately and not posted by this run.
+(shared hot spots) needs the same additions; the issue and epic edits are drafted separately and not posted by this run. The draft must also cover
+what decision 0 contradicts in sibling text: #647 "also callable by the hub on a timer"; #649 "wire the real adapters into the hub's
+`pane/*` handlers" and its `tests/pane_integration/**` and #667's `tests/profile_apply_scenario/**` (both now under
+`crates/holler-cli/tests/`); the adapter crates as holler-cli dependencies (add `crates/holler-cli/Cargo.toml` to #649's and
+#667's radii); I5 and #644 "an operation id for long work" (nothing executes long work once the CLI exits and the hub runs no
+adapters: #634 decides where it runs); #648 "`--json` becomes a deprecated alias" (contradicts decision 9) and its `main.rs` line;
+#639's hook "in `control.rs`" (the dispatch is `control_server.rs`); and the per-verb-file ruling of decision 10 for #643-#647, #650,
+#662, #664, #665 (each adds its positionals, ADR row and fixture line).
