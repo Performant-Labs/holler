@@ -31,6 +31,30 @@ fills this file in at release time.
   method still answers `method_not_found`, the `control/*` methods behave as before, and the closed 22-row wire
   catalog and every golden file are unchanged. Plumbing only: no registry, persistence, CLI verb or adapter
   yet ([#669](https://github.com/Performant-Labs/holler/issues/669)).
+- [ADR 0021](docs/adr/ADR-0021.md), the pane control plane (epic [#633](https://github.com/Performant-Labs/holler/issues/633)):
+  ratifies the pane and profile records, the ports, the verbs and invariants I1 to I8 as merged, and decides what the epic
+  left open: where the two registries persist on the hub (`panes.json` and `profiles.json`, failing closed when corrupt), how
+  generations fence concurrent writers, the write order of an edit made through `--profile`, the two error-code casings and
+  how they are kept apart, the `--format=json` envelope and its exit codes, how attach mode relates, and the migration from
+  the launcher's files. The operation id for long work is deferred to #644, and the points that need the operator are listed.
+  Protocol v2 is unchanged; its "Not in v2" section now notes that the `pane/*` and `profile/*` methods are control-socket
+  methods outside the wire catalog ([#634](https://github.com/Performant-Labs/holler/issues/634)).
+- Pane control, slice c of the skeleton (epic [#633](https://github.com/Performant-Labs/holler/issues/633)):
+  the CLI side. `holler pane` (`list get watch launch relaunch switch reset park unpark close doctor
+  import`) and `holler profile` (`create delete list show apply rename export import`) are in the
+  clap tree, one file and one set of arguments per verb, with the shared flags: `--profile`,
+  `--spec-only`, `--take-over` and the spec flags (`--project --workspace --grid --model --effort
+  --role --env --ctx-soft --ctx-hard --port-policy --command-arg/--command-json
+  --check-arg/--check-json --expect`). Each verb refuses with `error: not implemented (story #NNN)`
+  and exit 1 until its story lands. The global `--format text|json` is new: `--format=json` is
+  `--json`, and `--json` with `--format=text` is a usage error. Under `pane` and `profile` JSON mode
+  prints one envelope, `{"schema_version":1,"ok":false,"data":null,"error":{"code":...,"message":...}}`,
+  and a usage error there is an envelope with code `usage` (exit 2); every other verb's output and
+  usage errors are unchanged. `say`, `interrupt` and `answer` take a SESSION or `--pane NAME` (the
+  existing forms parse and resolve as before), and with `--pane` or `--profile` they refuse with
+  `not implemented (story #646)`, as does `roster --profile` (`#648`), in plain text before any hub
+  is contacted. ADR 0003 has the new rows
+  ([#670](https://github.com/Performant-Labs/holler/issues/670)).
 - Pane control, the hub's pane registry (epic [#633](https://github.com/Performant-Labs/holler/issues/633)):
   `pane/get`, `pane/list`, `pane/cas_put`, `pane/delete` and `pane/watch` now answer from a real registry
   instead of `not-implemented`. The hub keeps one record per pane in `<state dir>/hub/panes.json`, written

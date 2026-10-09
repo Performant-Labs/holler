@@ -2,6 +2,7 @@
 //! way `say_cmd.rs` (issue #190) is — this file returns a plain
 //! [`InterruptResult`]; only the bin turns that into an actual exit.
 
+use crate::prompt_target::{route, Routed};
 use crate::Interrupt;
 
 /// What `main.rs` should print and exit with.
@@ -29,22 +30,30 @@ fn err(message: String, exit_code: i32) -> InterruptResult {
 /// Exit codes: `0` interrupted (and, with `TEXT`, a reply arrived); `1`
 /// every runtime refusal (no live hub, not connected, unknown session, ack
 /// timeout, connection lost, the redirect prompt itself failing) — each with
-/// the spec's own wording; `2` an ambiguous session.
+/// the spec's own wording; `2` an ambiguous session or a malformed positional
+/// tail.
+///
+/// `--pane` and `--profile` (epic #633) are refused with exit 1 and `not
+/// implemented (story #646)` before any hub is contacted: see `prompt_target.rs`.
 pub fn run(interrupt: &Interrupt, json: bool) -> InterruptResult {
+    let Routed { session, arg } = match route(interrupt.resolve(), &interrupt.profile) {
+        Ok(routed) => routed,
+        Err(stop) => return err(stop.message, stop.exit_code),
+    };
     let state_root = holler_hub::state::resolve_state_dir().unwrap_or_default();
-    let call = holler_hub::control::ControlCall::interrupt(&interrupt.session, interrupt.text.as_deref());
+    let call = holler_hub::control::ControlCall::interrupt(&session, arg.as_deref());
     match crate::transport::call(interrupt.server.as_deref(), &call) {
         Ok(doc) => {
             if json {
                 return ok(doc.to_string());
             }
-            match interrupt.text {
+            match arg {
                 // The redirect form streams its reply exactly like `say`.
                 Some(_) => {
                     let text = doc.get("text").and_then(|v| v.as_str()).unwrap_or("");
                     ok(text.to_string())
                 }
-                None => ok(format!("interrupted {}", interrupt.session)),
+                None => ok(format!("interrupted {session}")),
             }
         }
         Err(holler_hub::control::ControlError::NoLiveHub) => {
@@ -53,7 +62,7 @@ pub fn run(interrupt: &Interrupt, json: bool) -> InterruptResult {
         Err(holler_hub::control::ControlError::RemotePolicyRefused(msg)) => err(msg, 3),
         Err(holler_hub::control::ControlError::Refused(e)) => {
             if crate::hold_cmd::is_held(&e) {
-                let (message, to_stderr) = crate::hold_cmd::held_refusal(&interrupt.session, &e, json);
+                let (message, to_stderr) = crate::hold_cmd::held_refusal(&session, &e, json);
                 return InterruptResult { message, to_stderr, exit_code: crate::hold_cmd::HELD_EXIT_CODE };
             }
             let is_ambiguous = e.data.as_ref().and_then(|d| d.reason.as_deref()) == Some("ambiguous");

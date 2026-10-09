@@ -33,17 +33,19 @@ brief at `docs/handoffs/<issue>-brief.md` from the issue, using the playbook's `
 Declared per story in the brief: `direct` (one agent, self-check only; one-line or cosmetic
 changes), `in-session` (the pipeline's own agents review, no outside model), `second-opinion`
 (+ one outside model at the brief and diff gates; the playbook's default minimum for non-trivial
-work), `panel` (+ a cross-vendor pair). The outside review model for this repo is **`glm-5.3-flash`**
-on Z.ai's hosted chat endpoint (also the cross-vendor arm at `panel`). It is set per clone with
-`bash $WORKFLOW_ROOT/workflow/review-models.sh --tier outside-review=glm-5.3-flash`, which writes a
+work), `panel` (+ a cross-vendor pair). The outside review model for this repo is **`deepseek-v4-pro`**
+on DeepSeek's hosted chat endpoint (also the cross-vendor arm at `panel`). It is set per clone with
+`bash $WORKFLOW_ROOT/workflow/review-models.sh --tier outside-review=deepseek-v4-pro`, which writes a
 managed block into the gitignored `.env`; also set `DUAL_REVIEW=1` there, or the runner exits 0 having
-done nothing. `OPENAI_API_KEY` must be the Z.ai key, comes from the operator's secret store, and is
-never printed. A worktree needs a copy of the clone's `.env` (it is gitignored, so `git worktree
-add` does not carry it).
+done nothing. `DEEPSEEK_API_KEY` (the variable the script names in `DUAL_REVIEW_API_KEY_VAR`) must be
+the DeepSeek key, comes from the operator's secret store, and is never printed. A worktree needs a copy of the
+clone's `.env` (it is gitignored, so `git worktree add` does not carry it).
+The Workflow's pre-flight reads only `OPENAI_API_KEY` (checked 2026-10-09), not the variable
+`DUAL_REVIEW_API_KEY_VAR` names, so until the playbook honors it, set `OPENAI_API_KEY` to the same value in `.env`.
 
 **Secrets-in-files rule (general, not just this key):** put a key or other sensitive value in a
 file, hidden or not, only after verifying that file is git-ignored (`git check-ignore -v <path>`
-confirms it) — `.env` already is, so writing `OPENAI_API_KEY` there for a run is fine once
+confirms it) — `.env` already is, so writing `DEEPSEEK_API_KEY` there for a run is fine once
 verified. Writing a secret to a file that is *not* git-ignored, or overriding this check at all,
 needs the operator's express consent first, every time.
 Before journalling any run above `in-session`, prove the gate can actually run with one real
@@ -52,7 +54,20 @@ completion against the configured endpoint; a model that is listed is not a mode
 ### Models and roles (resolved, never hardcoded here)
 
 - Models per phase come from `bash $WORKFLOW_ROOT/workflow/review-models.sh resolve --project . --json`
-  (a repo-local `.env`, gitignored, can override tiers). Pass its output as the workflow's `models` argument.
+  (a repo-local `.env`, gitignored, can override tiers). Pass its output as the workflow's `models` argument,
+  and each phase letter's effort as `effort` (next bullet).
+- Effort comes from the same output: for each phase letter (O, D, A, T, F, U, S), the `effort` value of its
+  `phases[]` entries; a letter with none is left out of `effort`, never `null`. The driver reads effort only from
+  this argument (without it F runs at `max` and every other phase at the session default), so the efforts set in
+  `.env` reach a run only if the call passes them.
+- **Holler's stage-model table** (a fresh clone or a new account has no `.env`, so set it once; it rewrites only the
+  managed block of `.env`): every phase on Opus, with efforts O `max`, D `high`, A `max`, T `high`, F `max`, U `medium`,
+  S `max`:
+
+  ```bash
+  bash $WORKFLOW_ROOT/workflow/review-models.sh --tier reasoning=opus --tier throughput=opus \
+    --effort O=max --effort D=high --effort A=max --effort T=high --effort F=max --effort U=medium --effort S=max
+  ```
 - `.claude/agents/*.md` are **generated and gitignored**: they are copies of the playbook's role templates
   (which are private), so they are regenerated in each clone and worktree and never committed. Never hand-edit
   them. Project-specific role content lives in
@@ -83,7 +98,8 @@ Workflow({
   scriptPath: '$WORKFLOW_ROOT/workflow/coding-pipeline.workflow.mjs',
   args: { argsVersion: 1, repoPath: '<absolute worktree path>', issueNumber: N,
           briefPath: 'docs/handoffs/N-brief.md', uiSurface: false, rigor: 'in-session',
-          models: { /* review-models.sh resolve */ }, roles: { /* content of .claude/agents/*.md */ } },
+          models: { /* review-models.sh resolve */ },
+          effort: { /* review-models.sh resolve: one level per letter that has one */ }, roles: { /* content of .claude/agents/*.md */ } },
 })
 ```
 

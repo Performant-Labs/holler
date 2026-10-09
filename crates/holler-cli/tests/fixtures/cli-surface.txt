@@ -94,3 +94,85 @@ body attach init | --endpoint http://127.0.0.1:4096 --session ses_1 --name alpha
 # --- global flags, on a leaf that has none of its own --------------------
 roster | --debug noisy --log-format json --json
 body detach | --debug none
+
+# --- pane control (epic #633; story #670 declared the surface) ----------------
+# One block per owning story, so a verb story edits only its own block. A story adds
+# its positionals and flags to its own lines; #670 declares only the shared flags
+# (--format, --profile, --spec-only, --take-over, the spec flags, --pane).
+# Names below are neutral placeholders, not the live fleet's pane names.
+
+# #643
+pane list |
+pane list | --profile demo
+pane list | --format=json
+pane get |
+pane get | --profile demo --format json
+pane watch |
+pane watch | --profile demo --json
+
+# #644
+pane launch |
+pane launch | --profile demo
+pane launch | --profile demo --spec-only
+pane launch | --project /srv/demo --workspace main --grid r2c1 --model provider/model-id --effort high --role agent
+pane launch | --env ALPHA_TOKEN --env BETA_URL --ctx-soft 100000 --ctx-hard 150000 --port-policy fixed
+pane launch | --command-arg opencode --command-arg serve --check-arg curl --check-arg http://127.0.0.1:1/health --expect ok --expect ready
+pane launch | --command-json [] --check-json [] --format=json
+pane relaunch |
+pane relaunch | --profile demo --spec-only --grid c1r2
+pane relaunch | --command-json [] --check-json []
+
+# #645
+pane switch |
+pane switch | --profile demo
+pane reset |
+pane reset | --profile demo --format=json
+
+# #646
+pane park |
+pane park | --profile demo
+pane unpark |
+pane unpark | --profile demo
+pane close |
+pane close | --profile demo
+pane close | --profile demo --spec-only
+say | --pane demo-c1r1 hello
+say | --pane demo-c1r1 --parts-file f
+say | --pane demo-c1r1 --profile demo hello
+interrupt | --pane demo-c1r1
+interrupt | --pane demo-c1r1 "stop; do X instead"
+answer | --pane demo-c1r1 yes
+
+# #647
+pane doctor |
+pane doctor | --profile demo --format=json
+
+# #648
+roster | --profile demo
+
+# #650
+pane import |
+pane import | --format=json
+
+# #662
+profile create |
+profile delete |
+profile list |
+profile list | --format=json
+profile show |
+profile show | --json
+
+# #664
+profile apply |
+profile apply | --take-over
+profile apply | --take-over --format=json
+
+# #665
+# (proposed: the operator confirms #665 first)
+profile rename |
+profile export |
+profile import |
+
+# --- regression: the --pane redesign must not break the SESSION forms ----------
+say | io/alpha --parts-file f
+interrupt | io/alpha
