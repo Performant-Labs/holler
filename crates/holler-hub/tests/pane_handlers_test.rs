@@ -276,7 +276,7 @@ async fn pane_watch_answers_one_batch_and_its_cursor() {
     assert_eq!(batch.events.len(), 2);
     assert_eq!(batch.cursor, Cursor(2), "the cursor to resume from");
 
-    // Idle: the reply comes after the window, empty, with the cursor the caller sent.
+    // Idle: the reply comes after the window, empty, with the head (here equal to `since`).
     let idle = rig
         .call("pane/watch", Some(json!({"since": 2})))
         .await
@@ -298,6 +298,64 @@ async fn pane_watch_answers_one_batch_and_its_cursor() {
     let batch: WatchReply<PaneEvent> = serde_json::from_value(data).unwrap();
     assert_eq!((batch.events.len(), batch.cursor), (1, Cursor(3)));
     assert_eq!(batch.events[0].name.as_str(), "hj-c1r3");
+}
+
+/// AC 25's one edge (ADR-0021 §6, "Decisions taken" item 7): an idle window answers the
+/// head, not `since`. They differ only for a watch from 0 over an all-deleted registry.
+/// Resuming from 0 would keep the watcher in snapshot mode, so a pane created and deleted
+/// between two polls would never reach it; resuming from the head delivers both events.
+#[tokio::test]
+async fn an_idle_watch_from_zero_over_an_all_deleted_registry_answers_the_head() {
+    let rig = Rig::new();
+    let a = sample_pane("hj-c1r1", None);
+    rig.call("pane/cas_put", Some(cas_put_params(&a, 0)))
+        .await
+        .unwrap();
+    rig.call(
+        "pane/delete",
+        Some(json!({"name": "hj-c1r1", "expected_generation": 1})),
+    )
+    .await
+    .unwrap();
+
+    let idle = rig
+        .call("pane/watch", Some(json!({"since": 0})))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        idle,
+        json!({"events": [], "cursor": 2}),
+        "an idle window answers the head, which is not `since` here"
+    );
+
+    let b = sample_pane("hj-c1r2", None);
+    rig.call("pane/cas_put", Some(cas_put_params(&b, 0)))
+        .await
+        .unwrap();
+    rig.call(
+        "pane/delete",
+        Some(json!({"name": "hj-c1r2", "expected_generation": 1})),
+    )
+    .await
+    .unwrap();
+    let data = rig
+        .call("pane/watch", Some(json!({"since": 2})))
+        .await
+        .unwrap()
+        .unwrap();
+    let batch: WatchReply<PaneEvent> = serde_json::from_value(data).unwrap();
+    let seen: Vec<(Cursor, &str, bool)> = batch
+        .events
+        .iter()
+        .map(|e| (e.cursor, e.name.as_str(), e.pane.is_some()))
+        .collect();
+    assert_eq!(
+        seen,
+        [(Cursor(3), "hj-c1r2", true), (Cursor(4), "hj-c1r2", false)],
+        "B's create and its delete both reach the watcher"
+    );
+    assert_eq!(batch.cursor, Cursor(4));
 }
 
 // --- AC 26: a corrupt registry --------------------------------------------------------
