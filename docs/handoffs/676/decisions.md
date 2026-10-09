@@ -49,3 +49,20 @@
 - **Assumed:** Not re-running `test-hooks.sh` and `cargo doc` is safe: neither covers anything changed after F, and this phase edits only a test-file comment.
 - **Hedged:** AC 4's ADR content (table wording, close-calls paragraph) is left to S's audit; T checked only that the docs tests and lints pass and that the table has the 22 closed-code rows.
 - **Evidence:** `cargo test --workspace` exit 0 (1048 passed, 0 failed, 5 ignored). Mutating `output.rs::exit_code` to the old rule fails 6 `pane_verbs` tests; moving `PaneInOtherProfile` to the Failure arm fails `every_closed_code_has_the_decided_class`. Both mutations were reverted and `git status` shows only `spec_flags.rs` changed. clippy, machete, lint.sh, changelog-check, docs_cli_test and wire_selftest all clean.
+
+## A (Phase 8 of the script, anti-duplication gate) — 2026-10-09T11:04:52-06:00
+- **Decided:** PASS on the diff 55dba00..38eac7a, with 0 blocks and 4 warns (see handoff-A-dup.md).
+  - F extended `holler-pane/src/error.rs`, the object the Reuse map named.
+  - `class_of` has exactly one exhaustive `match` over `PaneCode`, with no `_` arm and 22 variants (1 usage, 14 refusal, 7 failure). Its lookup is `PaneCode::parse` plus `is_valid_code`.
+  - `output.rs::exit_code` is one line and holds no table.
+  - The tests reuse `error_body`, `with_sink` and `one_envelope` and iterate `ALL_CODES`.
+  - There is no new module, no re-export and no manifest or `main.rs` change, and `error.rs` loses no line.
+- **Assumed:** Two things stand as Phase 3 accepted them: brief decision 4 (the exit numbers live on `ErrorClass` in `holler-pane`) and the separate test file. AC 4 requires the ADR table, so the table itself is not drift. Only the fact that no test checks it is a warn.
+- **Hedged:**
+  - W-1 (no conformance test pins the ADR-0021 §9 table, and the ADR's instruction for moving a close call at `:397` omits the table) is a warn, not a block. The repo's docs-conformance pattern (`docs_errors_test.rs`, the hold/grant exit checks, `docs_rows.rs`) does not cover every ADR table.
+  - W-2 (four `output_api.rs` routing tests assert close-call codes as literal 3s, so "one arm and one test row" understates the cost of a move) is a warn. AC 2 mandated three of the four.
+  - W-3 (`main.rs:253-255`, for #649) and W-4 (`prompt_target.rs:58-61`, for #646) are carried from Phase 3 and need no change in #676.
+- **Evidence:**
+  - Files read: `error.rs` (all), `output.rs` (all), `output_api.rs` (all), `error_class_test.rs` (all), the `spec_flags.rs` diff, the ADR-0021, ADR-0003 and CHANGELOG diffs, `main.rs:245-272`, `pane/wiring.rs:31-32`, `prompt_target.rs:50-95`, `holler-pane-testkit/src/lib.rs`, `docs_errors_test.rs:1-59`, `docs_rows.rs:1-50`, and `error_test.rs:19` and `:80-86`.
+  - Greps: definitions and uses of `ErrorClass`/`class_of` (one definition), exit-code constants across crates, classifier-like enums, "refused or failed" repo-wide (none), and exit wording in ADR-0021 and ADR-0003 (consistent with the table).
+  - Diff checks: `git diff --quiet` on `lib.rs`, `main.rs`, every manifest and `Cargo.lock` (unchanged); 0 removed lines in `error.rs`; `wc -l` on the touched files (all ≤ 710); the newer `origin/main` commits overlap nothing in this branch.
