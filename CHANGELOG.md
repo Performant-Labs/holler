@@ -96,6 +96,17 @@ fills this file in at release time.
   `unavailable`). One function, `holler_pane::error::class_of`, decides which code is which, and the table of
   every code is in [ADR 0021](docs/adr/ADR-0021.md) section 9. The stubs still exit 1: `not-implemented` is a
   failure ([#676](https://github.com/Performant-Labs/holler/issues/676)).
+- Pane control, the test kit's Herdr and probe fakes (epic [#633](https://github.com/Performant-Labs/holler/issues/633)):
+  `holler-pane-testkit` now has a fake Herdr that pane-control tests run against instead of a Herdr server. It places
+  panes in the row-and-column cells of a workspace the test declares with a size, and gives each pane an id that is
+  never reused and does not change when another pane closes. A test can switch it to a split-only mode, pick a
+  supported or an unsupported Herdr version, wedge the server, make a pane's shell exit or a call slow, and read back
+  everything typed into a pane. A fake health probe answers a scripted result per command and records every run. A
+  conformance suite that the Herdr adapter runs against itself comes with them: 11 cases, which the fake passes and
+  which reject an adapter that swaps rows and columns. [ADR 0021](docs/adr/ADR-0021.md) now records that
+  `grid-out-of-range` also covers a cell outside its workspace. Test code only: nothing a user runs changes
+  ([#683](https://github.com/Performant-Labs/holler/issues/683)).
+
 - Pane control, the test kit's envelope checker (epic [#633](https://github.com/Performant-Labs/holler/issues/633)):
   `holler-pane-testkit` can now check the `--format=json` output of a `holler pane` or `holler profile` verb against
   its exit code, as one envelope or as an NDJSON stream (`pane watch`) in which only the last line may be a failure.
