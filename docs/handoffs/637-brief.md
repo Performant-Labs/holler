@@ -6,6 +6,8 @@ skeleton). Rigor: in-session. UI surface: no. Kind: feature.
 **Branch:** `issue-637-implementation`. **Design (D):** N/A (no UI). **Decision record:** the contract section of epic #633 is
 fixed and ADR-0021 (#634) ratifies it later; this story builds against the epic text and does not wait for #634.
 
+**Revision 6 (2026-10-09, after the architecture PASS on revision 5).** The operator decided three warns before tests were written: `NAME=value` in an env entry is `profile-secret-refused` and an empty or whitespace name is `env-name-invalid` (AC 3, decision 2); the profile write methods take an `actor` (decision 7); `PaneStore` gets `delete` and `pane/delete` joins `PANE_METHODS` (decisions 7 and 8, AC 7). The reviewer's other warns that change what T writes first are folded in: the `RefusalCode` newtype (decision 2, AC 5), the methods test inside `methods.rs` (AC 7, Files), and the `Ports` seam test (AC 6). Revision 5 text follows, with those edits.
+
 **Revision 5.** The single-story brief (revisions 1-4, in git at `182a69f`) drew three architecture BLOCKs and was split on
 2026-10-09, with the operator's approval, into #637 (this), #669 and #670. This brief carries only slice a. Everything about
 `holler-hub`, `holler-cli`, ADR 0003 and the CLI fixture is out of scope here. The issue text of #637 was amended the same day
@@ -68,21 +70,19 @@ Names are the test names T should author (RED first).
    `parse(format(x)) == x` for every cell of a 12 x 12 grid; serde writes `{"row":2,"col":1,"pos":"r2c1"}` in that key order and
    reads the same back (a `pos` that disagrees with `row`/`col` is refused).
 3. `Argv` round-trips as a JSON array of strings; a bare JSON string where an `Argv` is expected is refused with `command-not-argv`
-   (`argv_bare_string_refused`). `EnvVarName` refuses a string containing `=`, an empty string and whitespace (`env-name-invalid`);
+   (`argv_bare_string_refused`). `EnvVarName` is the one guard for env entries: a string containing `=` (it carries a value, I7) is refused with `profile-secret-refused`; an empty string or a name containing whitespace is refused with `env-name-invalid`;
    no `ProfileSpec` field can hold an environment value.
 4. Serde round-trip tests: `Pane` (full), `Pane` without `profile` (loads as `None`), `Profile`, `ProfileSpec`. A `cas_put` with a
    stale `expected_generation` returns `PaneError::Conflict` whose `code()` is `generation-conflict` (against a trivial in-test
    `PaneStore`).
 5. `error_codes_unique_and_kebab`: `ALL_CODES` are unique and each satisfies the one validator `error::is_valid_code`
-   (`^[a-z]+(-[a-z]+)*$`); every variant's `code()` and `Display` are covered; `PaneError::refused(code, message)` rejects an
-   invalid code; a `PaneReply` built from a `PaneError` round-trips through JSON and an unknown code parses to `Refused`.
+   (`^[a-z]+(-[a-z]+)*$`); every variant's `code()` and `Display` are covered; `RefusalCode::parse` rejects an invalid wire code and a code that is in `ALL_CODES` (each code has one representation), and a `compile_fail` doctest shows that `Refused { code: "Not A Code".into(), .. }` cannot be built outside the crate; a `PaneReply` built from a `PaneError` round-trips through JSON and an unknown code parses to `Refused`.
 6. `ports_compile_in_test_impl`: one test file implements every port (`PaneStore`, `ProfileStore`, `ProfileScope`, `HerdrPort`
    including `version()`, `HostPort`, `HarnessPort`, `Prober`; each `Send + Sync`), calls `ProfileScope::resolve` with and without
-   a pane and `edit_spec` with and without a profile (trait-object `act`), and uses `run_probe`/`ProbeResult`; a later signature
-   change breaks it. `pane_name_grammar` and `profile_name_slug` table tests (leading/trailing separators trimmed, a name with no
+   a pane and `edit_spec` with and without a profile (trait-object `act`), and uses `run_probe`/`ProbeResult`; it also builds a `Ports` from the in-test impls and drives it from a verb-shaped function holding `&Ports` and two `&mut dyn Write` that calls `edit_spec` with an `act` using another port (the shape #670's verbs use); a later signature change breaks it. `pane_name_grammar` and `profile_name_slug` table tests (leading/trailing separators trimmed, a name with no
    alphanumerics refused when parsed, two names with the same slug have the same `slug()`).
 7. `pane_methods_not_in_wire_catalog`: `methods::find("pane/list")` and `find("profile/list")` are `None`, `CATALOG.len()` is 22,
-   and `PANE_METHODS`/`PROFILE_METHODS` list exactly the names in decision 8. No golden file changes (`scripts/golden-diff-summary.sh`
+   and `PANE_METHODS`/`PROFILE_METHODS` list exactly the names in decision 8 (five pane methods, including `pane/delete`). The test lives in a `#[cfg(test)] mod tests` inside `methods.rs` (the neighbouring `crates/holler-proto/tests/codec_test.rs` is at 889 lines, so a test there would cross the 900-line gate). No golden file changes (`scripts/golden-diff-summary.sh`
    shows no drift).
 8. `git diff --name-only origin/main...HEAD` lists only paths in the Blast radius below (grep-able check for S).
 
@@ -96,11 +96,10 @@ Production (new unless noted):
 - `crates/holler-adapter-herdr/`, `holler-adapter-host/`, `holler-adapter-opencode/`, `holler-pane-testkit/`: `Cargo.toml` +
   `src/lib.rs` (a crate doc comment only). Each `Cargo.toml` has `[lints] workspace = true` and no dependency.
 - `crates/holler-proto/src/methods.rs` (edit): `PANE_METHODS`, `PROFILE_METHODS` (name lists), `is_pane_method()`,
-  `is_profile_method()`; outside `CATALOG`. `vocab.rs`: **no edit**.
+  `is_profile_method()`; outside `CATALOG`; extend the module doc: the two lists are hub control-socket names, outside `CATALOG` and not in v2.md, and `holler_hub::serve::CONTROL_METHODS` holds the `control/*` names; add no root re-export (`lib.rs` is outside the radius). `vocab.rs`: **no edit**.
 - `CHANGELOG.md`: an `## [Unreleased]` entry linking #637. `Cargo.lock`: entries for the new crates only.
 
-Tests: `crates/holler-pane/tests/*.rs` (default autotests there), and a `methods.rs` unit test in `holler-proto` (or
-`crates/holler-proto/tests/`, whichever neighbours the existing catalog tests).
+Tests: `crates/holler-pane/tests/*.rs` (default autotests there), and the `methods.rs` in-file test module in `holler-proto`.
 
 Reuse map (extend, do not duplicate): `holler_proto::vocab::SessionName` for `PaneName` (do not copy the grammar);
 `holler_proto::clock::now_millis` for time; the `holler-proto` crate layout and error-type style as the pattern for
@@ -114,18 +113,17 @@ Numbers follow the original brief; those that belong to slices b and c are omitt
 2. **Error codes live in `holler-pane/src/error.rs`**, not in `vocab.rs`. `PaneError` has one variant per closed code, a
    `code() -> &'static str` and `Display`; `pub const ALL_CODES` lists them; one validator `pub fn is_valid_code(&str) -> bool`
    (`^[a-z]+(-[a-z]+)*$`) is the only one in the workspace (#670's `output::ErrorCode::new` calls it).
-   - domain: `not-implemented`, `usage`, `grid-ambiguous`, `grid-out-of-range`, `command-not-argv`, `env-name-invalid`,
+   - domain: `not-implemented`, `usage`, `grid-ambiguous`, `grid-out-of-range`, `command-not-argv`, `env-name-invalid` (an empty or whitespace env name),
      `generation-conflict` (the CAS conflict, variant `Conflict`), `probe-failed`, `profile-conflict`, `profile-not-found`,
-     `profile-exists`, `profile-has-live-panes`, `pane-not-in-profile`, `pane-in-other-profile`, `profile-secret-refused`,
+     `profile-exists`, `profile-has-live-panes`, `pane-not-in-profile`, `pane-in-other-profile`, `profile-secret-refused` (also raised by `EnvVarName` for a `NAME=value` entry),
      `herdr-version-unsupported`;
    - infrastructure: `timeout` (`Timeout { op }`), `pane-not-found` and `session-not-found` (`NotFound { what }`),
      `store-corrupt`, `unavailable` (`Unavailable { what }`: hub, Herdr socket or harness unreachable);
    - `profile-drift`: listed for convenience; it is a reconcile **finding kind** (#647/#665 put it in `findings.rs`), not an
      error a port returns.
-   - **open variant** `Refused { code: Cow<'static, str>, message: String }` with `code(&self) -> &str`: an adapter crate or a
+   - **open variant** `Refused { code: RefusalCode, message: String }` with `code(&self) -> &str`, where `RefusalCode` is a validated newtype with a private field: `pub const fn from_static(&'static str)` const-asserts the grammar (an invalid literal in a `const` fails the build, so verb constants need no `Result`), and `parse(String) -> Result<..>` is for wire codes (an invalid wire code, or one already in `ALL_CODES`, falls back to `Unavailable`). `is_valid_code` is a `const fn`: an adapter crate or a
      verb returns a code it owns without editing the enum, and a reply code read off the wire that is not in `ALL_CODES` lands
-     here. Built only through `PaneError::refused(code, message) -> Result<PaneError, ...>` which calls `is_valid_code`, so the
-     validation is enforced, not conventional. Not in `ALL_CODES`.
+     here. Not in `ALL_CODES`. Record the shape in decisions.md.
    The owning story of each closed code is a doc comment on its variant (#644/#663: `probe-failed`, `profile-conflict`,
    `profile-not-found`; #643/#663: `pane-not-in-profile`; #661: `pane-in-other-profile`, `profile-secret-refused`,
    `profile-exists`; #662: `profile-has-live-panes`; #640: `herdr-version-unsupported`; #665: `profile-drift`; #638-#642:
@@ -144,12 +142,12 @@ Numbers follow the original brief; those that belong to slices b and c are omitt
    spikes #636 and #635 report.
    - Every port is synchronous and blocking and `Send + Sync`; each trait carries the doc rule "call from `spawn_blocking` (or a
      thread) in async code; return within I5's bound (default 10 s) or with `PaneError::Timeout`".
-   - `PaneStore { get(&self, &PaneName) -> Result<Option<Pane>, PaneError>; list(&self) -> Result<Vec<Pane>, PaneError>;
+   - `PaneStore { delete(&self, &PaneName, expected_generation: u64) -> Result<(), PaneError> (removes a pane's record, used by `close`; a stale generation is `generation-conflict`); get(&self, &PaneName) -> Result<Option<Pane>, PaneError>; list(&self) -> Result<Vec<Pane>, PaneError>;
      cas_put(&self, &Pane, expected_generation: u64) -> Result<Pane, PaneError>; watch(&self, since: Cursor) -> Result<Watch<PaneEvent>, PaneError> }`
      with `Cursor(u64)` a store-wide change sequence number and `Watch<T> = Box<dyn Iterator<Item = Result<T, PaneError>> + Send>`.
-   - `ProfileStore { get; list; cas_put(&Profile, expected_generation); delete(&ProfileName, expected_generation); watch(Cursor);
-     log(&ProfileName) -> Result<Vec<ProfileLogEntry>, PaneError>; rename(&ProfileName, &ProfileName, expected_generation)
-     -> Result<Profile, PaneError> }` (`rename` is PROPOSED, with #665; the test impl returns `NotImplemented`).
+   - `ProfileStore { get; list; cas_put(&Profile, expected_generation, &Actor); delete(&ProfileName, expected_generation, &Actor); watch(Cursor);
+     log(&ProfileName) -> Result<Vec<ProfileLogEntry>, PaneError>; rename(&ProfileName, &ProfileName, expected_generation, &Actor)
+     -> Result<Profile, PaneError> }`, with `Actor` a validated non-empty newtype (at most 64 chars) naming who made the write and `ProfileLogEntry { at: i64, generation: u64, actor: Actor, change }` (`change` a minimal type F defines). `Profile` has **no `log` field**: the append-only log (#661) is read only through `log()`, so `cas_put` cannot rewrite history (`rename` is PROPOSED, with #665; the test impl returns `NotImplemented`).
    - `ProfileScope { resolve(&self, profile: &ProfileName, pane: Option<&PaneName>) -> Result<ResolvedScope, PaneError>;
      edit_spec(&self, profile: Option<&ProfileName>, &PaneName, edit: &SpecEdit, act: &mut dyn FnMut() -> Result<(), PaneError>) -> Result<Option<Profile>, PaneError> }`.
      `resolve` with no pane means every pane of the profile; a named pane outside the profile is `pane-not-in-profile`, a missing
@@ -163,7 +161,7 @@ Numbers follow the original brief; those that belong to slices b and c are omitt
      `run_probe` stub (signature fixed by the epic; #663 builds the body), so #638's fake and AC 6 have something to swap.
    - `Ports { pane_store, profile_store, herdr, host, harness, scope, prober }` (one `&dyn` each) is defined here; `VerbCtx` is
      #670's.
-8. **Methods and replies.** `PANE_METHODS = [pane/get, pane/list, pane/cas_put, pane/watch]`; `PROFILE_METHODS = [profile/get,
+8. **Methods and replies.** `PANE_METHODS = [pane/get, pane/list, pane/cas_put, pane/delete, pane/watch]`; `PROFILE_METHODS = [profile/get,
    profile/list, profile/cas_put, profile/delete, profile/watch, profile/log, profile/rename]` (`profile/rename` PROPOSED). They
    are hub control methods, outside `CATALOG`, so the v2 wire protocol is unchanged and a body connection still gets
    `method_not_found`. The params structs and `PaneReply { ok: bool, data: Option<serde_json::Value>, error: Option<{code,
@@ -199,6 +197,5 @@ each new `.rs` file (not the whole tree), `cargo machete`, `bash scripts/lint.sh
 ## Blast radius
 
 `Cargo.lock`; `crates/holler-pane/**`; `crates/holler-adapter-herdr/**`, `crates/holler-adapter-host/**`,
-`crates/holler-adapter-opencode/**`, `crates/holler-pane-testkit/**` (skeletons only); `crates/holler-proto/src/methods.rs` and a test
-beside the existing catalog tests; `CHANGELOG.md`; `docs/handoffs/637*` (pipeline artifacts). Not changed: workspace `Cargo.toml` (the
+`crates/holler-adapter-opencode/**`, `crates/holler-pane-testkit/**` (skeletons only); `crates/holler-proto/src/methods.rs` (with its in-file tests); `CHANGELOG.md`; `docs/handoffs/637*` (pipeline artifacts). Not changed: workspace `Cargo.toml` (the
 `crates/*` glob covers the new crates), `vocab.rs`, any golden file, `holler-hub`, `holler-cli`, `docs/`.
