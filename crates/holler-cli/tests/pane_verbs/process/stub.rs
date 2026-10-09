@@ -6,21 +6,74 @@ use serde_json::Value;
 
 use crate::{assert_no_failures, holler, PANE_VERBS, PROFILE_VERBS};
 
-fn all_verbs() -> impl Iterator<Item = (&'static str, &'static str, u32)> {
-    let pane = PANE_VERBS
-        .iter()
-        .map(|&(verb, story)| ("pane", verb, story));
-    let profile = PROFILE_VERBS
-        .iter()
-        .map(|&(verb, story)| ("profile", verb, story));
-    pane.chain(profile)
+/// Every verb that is still a stub, with the story that owns it. The only place in the
+/// shared process tests that names a stub's owning story.
+///
+/// Grouped by story, each group under its own `// #NNN` comment line, so a verb story
+/// deletes exactly its own group when its verb stops being a stub and no one else's
+/// lines move. (`PANE_VERBS` and `PROFILE_VERBS` keep the verb itself.)
+pub const STUBS: &[(&str, &str, u32)] = &[
+    // #643
+    ("pane", "list", 643),
+    ("pane", "get", 643),
+    ("pane", "watch", 643),
+    // #644
+    ("pane", "launch", 644),
+    ("pane", "relaunch", 644),
+    // #645
+    ("pane", "switch", 645),
+    ("pane", "reset", 645),
+    // #646
+    ("pane", "park", 646),
+    ("pane", "unpark", 646),
+    ("pane", "close", 646),
+    // #647
+    ("pane", "doctor", 647),
+    // #650
+    ("pane", "import", 650),
+    // #662
+    ("profile", "create", 662),
+    ("profile", "delete", 662),
+    ("profile", "list", 662),
+    ("profile", "show", 662),
+    // #664
+    ("profile", "apply", 664),
+    // #665 (proposed: the operator confirms it)
+    ("profile", "rename", 665),
+    ("profile", "export", 665),
+    ("profile", "import", 665),
+];
+
+/// The refusal of `say`/`interrupt`/`answer` with `--pane` or `--profile`, until story #646.
+// #646
+pub const PANE_FORM_REFUSAL: &str = "error: not implemented (story #646)";
+
+/// The refusal of `roster --profile`, until story #648.
+// #648
+pub const ROSTER_PROFILE_REFUSAL: &str = "error: not implemented (story #648)";
+
+/// The table and the permanent verb lists agree: every stub is a known verb, and a verb
+/// missing from the table is simply no longer a stub (so this checks only the first half).
+#[test]
+fn every_stub_names_a_known_verb() {
+    for &(namespace, verb, _) in STUBS {
+        let verbs = if namespace == "pane" {
+            PANE_VERBS
+        } else {
+            PROFILE_VERBS
+        };
+        assert!(
+            verbs.contains(&verb),
+            "`{namespace} {verb}` is in STUBS but not in the verb list"
+        );
+    }
 }
 
 /// Text mode: `error: not implemented (story #NNN)` on stderr, nothing on stdout, exit 1.
 #[test]
 fn stub_verb_not_implemented() {
     let mut failures = Vec::new();
-    for (namespace, verb, story) in all_verbs() {
+    for &(namespace, verb, story) in STUBS {
         let out = holler(&[namespace, verb]);
         let line = format!("error: not implemented (story #{story})");
         if out.code != 1 || !out.stdout.is_empty() || !out.stderr_has_line(&line) {
@@ -35,7 +88,7 @@ fn stub_verb_not_implemented() {
 #[test]
 fn stub_verb_not_implemented_json_is_one_envelope() {
     let mut failures = Vec::new();
-    for (namespace, verb, story) in all_verbs() {
+    for &(namespace, verb, story) in STUBS {
         let phrase = format!("not implemented (story #{story})");
         let spellings: [Vec<&str>; 4] = [
             vec![namespace, verb, "--format=json"],
@@ -108,7 +161,7 @@ fn help_lists_every_verb_and_exits_0() {
             argv.extend_from_slice(flags);
             let out = holler(&argv);
             assert_eq!(out.code, 0, "{argv:?}: {out:?}");
-            for &(verb, _) in verbs {
+            for &verb in verbs {
                 assert!(
                     out.stdout.contains(verb),
                     "{argv:?}: help names `{verb}`: {}",

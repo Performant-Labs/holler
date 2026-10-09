@@ -21,6 +21,10 @@
 #[path = "../../support/mod.rs"]
 mod support;
 
+// Parse-only checks against the clap tree (shared with the in-process targets).
+#[path = "../../verb_harness/parse.rs"]
+mod parse;
+
 mod docs_rows;
 mod flags;
 mod legacy_verbs;
@@ -29,33 +33,17 @@ mod usage;
 
 use serde_json::Value;
 
-/// The verbs of `holler pane` and the story that owns each (epic #633).
-pub const PANE_VERBS: &[(&str, u32)] = &[
-    ("list", 643),
-    ("get", 643),
-    ("watch", 643),
-    ("launch", 644),
-    ("relaunch", 644),
-    ("switch", 645),
-    ("reset", 645),
-    ("park", 646),
-    ("unpark", 646),
-    ("close", 646),
-    ("doctor", 647),
-    ("import", 650),
+/// The verbs of `holler pane`. Permanent: the help, flag-matrix and ADR/fixture tests use
+/// it, and it outlives every stub (the story that owns a verb is in `stub::STUBS` for as
+/// long as the verb is a stub, and in `docs_rows::STORY_GROUPS` for the layout checks).
+pub const PANE_VERBS: &[&str] = &[
+    "list", "get", "watch", "launch", "relaunch", "switch", "reset", "park", "unpark", "close",
+    "doctor", "import",
 ];
 
-/// The verbs of `holler profile` and the story that owns each (#665 is proposed: the
-/// operator confirms it).
-pub const PROFILE_VERBS: &[(&str, u32)] = &[
-    ("create", 662),
-    ("delete", 662),
-    ("list", 662),
-    ("show", 662),
-    ("apply", 664),
-    ("rename", 665),
-    ("export", 665),
-    ("import", 665),
+/// The verbs of `holler profile` (permanent, like [`PANE_VERBS`]).
+pub const PROFILE_VERBS: &[&str] = &[
+    "create", "delete", "list", "show", "apply", "rename", "export", "import",
 ];
 
 /// What one run of the binary produced.

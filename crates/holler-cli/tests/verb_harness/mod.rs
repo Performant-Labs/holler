@@ -1,18 +1,39 @@
 //! The in-process harness for the pane and profile verbs (story #670).
 //!
 //! Included by `pane_verbs` and `profile_verbs` through `#[path]`. It runs one verb
-//! **in this process** over the stub wiring's `Ports` and two captured writers, so a
-//! verb story tests its routing (text goes to `err`/`out`, JSON is one envelope on
-//! `out`) without a subprocess. Subprocess helpers stay in `tests/support/`; the
+//! **in this process** over given `Ports` and two captured writers, so a verb story
+//! tests its routing (text goes to `err`/`out`, JSON is one envelope on `out`) without
+//! a subprocess. `run_verb_with` takes the ports (a verb story passes the fakes of
+//! #638); `run_verb` is the same over [`Unwired`], the not-implemented port set, and is
+//! what a stub verb's case uses. Neither builds the real wiring, so #649 never
+//! changes what these tests run over. Subprocess helpers stay in `tests/support/`; the
 //! envelope checks here are deliberately minimal (a `serde_json` parse plus
 //! `schema_version`, `ok` and `error.code`), and the conformance helper of #638 is
 //! what later verb stories use for full envelope validation.
 
 use clap::Parser;
 use holler_cli::output::{Format, Sink, VerbCtx};
-use holler_cli::pane::wiring::Wiring;
+use holler_cli::pane::wiring::Unwired;
 use holler_cli::{pane, profile, Cli, Command};
+use holler_pane::Ports;
 use serde_json::Value;
+
+pub mod parse;
+
+static UNWIRED: Unwired = Unwired;
+
+/// The ports every method of which answers `not-implemented` (see [`Unwired`]).
+pub fn unwired_ports() -> Ports<'static> {
+    Ports {
+        pane_store: &UNWIRED,
+        profile_store: &UNWIRED,
+        herdr: &UNWIRED,
+        host: &UNWIRED,
+        harness: &UNWIRED,
+        scope: &UNWIRED,
+        prober: &UNWIRED,
+    }
+}
 
 /// What one verb run produced.
 #[derive(Debug)]
@@ -22,18 +43,23 @@ pub struct Outcome {
     pub err: String,
 }
 
-/// Run `holler <argv...>` in-process through `pane::run` or `profile::run`, with the
-/// given output format and the stub wiring's ports.
+/// Run `holler <argv...>` in-process over [`unwired_ports`]: the case of a verb that is
+/// still a stub.
 pub fn run_verb(argv: &[&str], format: Format) -> Outcome {
+    run_verb_with(argv, format, unwired_ports())
+}
+
+/// Run `holler <argv...>` in-process through `pane::run` or `profile::run`, with the
+/// given output format and ports.
+pub fn run_verb_with(argv: &[&str], format: Format, ports: Ports<'_>) -> Outcome {
     let mut full = vec!["holler"];
     full.extend_from_slice(argv);
     let cli = Cli::try_parse_from(&full).unwrap_or_else(|e| panic!("{full:?} must parse: {e}"));
-    let wiring = Wiring::connect().expect("the stub wiring connects without a hub");
     let (mut out, mut err) = (Vec::new(), Vec::new());
     let code = {
         let mut ctx = VerbCtx {
             format,
-            ports: wiring.ports(),
+            ports,
             sink: Sink {
                 out: &mut out,
                 err: &mut err,

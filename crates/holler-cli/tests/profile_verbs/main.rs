@@ -21,10 +21,3 @@ mod import;
 mod list;
 mod rename;
 mod show;
-
-/// The seam: a stub's `run` reached through `profile::run`, over the stub wiring's
-/// `Ports` and captured writers (the profile half of the seam test).
-#[test]
-fn seam_profile_stub_routes_text_to_err_and_json_to_out() {
-    verb_harness::assert_stub_routes(&["profile", "list"], 662);
-}

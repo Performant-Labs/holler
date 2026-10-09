@@ -10,6 +10,51 @@ use std::path::{Path, PathBuf};
 
 use crate::{assert_no_failures, PANE_VERBS, PROFILE_VERBS};
 
+/// The verbs each story owns, for the layout checks below (ADR rows and fixture lines are
+/// grouped by owner). Permanent, unlike `stub::STUBS`: it does not shrink when a verb stops
+/// being a stub. #648 (`roster`) has no verb here, only a fixture header.
+const STORY_GROUPS: &[(u32, &[&str])] = &[
+    (643, &["pane list", "pane get", "pane watch"]),
+    (644, &["pane launch", "pane relaunch"]),
+    (645, &["pane switch", "pane reset"]),
+    (646, &["pane park", "pane unpark", "pane close"]),
+    (647, &["pane doctor"]),
+    (650, &["pane import"]),
+    (
+        662,
+        &[
+            "profile create",
+            "profile delete",
+            "profile list",
+            "profile show",
+        ],
+    ),
+    (664, &["profile apply"]),
+    (665, &["profile rename", "profile export", "profile import"]),
+];
+
+/// The story that owns `<namespace> <verb>`.
+fn story_of(namespace: &str, verb: &str) -> u32 {
+    let words = format!("{namespace} {verb}");
+    STORY_GROUPS
+        .iter()
+        .find(|(_, verbs)| verbs.contains(&words.as_str()))
+        .map(|&(story, _)| story)
+        .unwrap_or_else(|| panic!("`{words}` is in no STORY_GROUPS group"))
+}
+
+/// The permanent verb lists and `STORY_GROUPS` name the same verbs.
+#[test]
+fn every_verb_has_exactly_one_owning_story() {
+    let listed: usize = STORY_GROUPS.iter().map(|(_, verbs)| verbs.len()).sum();
+    assert_eq!(listed, PANE_VERBS.len() + PROFILE_VERBS.len());
+    for (namespace, verbs) in [("pane", PANE_VERBS), ("profile", PROFILE_VERBS)] {
+        for &verb in verbs {
+            story_of(namespace, verb);
+        }
+    }
+}
+
 fn workspace_file(rel: &str) -> String {
     let path: PathBuf = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
@@ -36,7 +81,7 @@ fn adr_0003_has_one_row_per_pane_and_profile_verb() {
     let adr = workspace_file("docs/adr/ADR-0003.md");
     let mut failures = Vec::new();
     for (namespace, verbs) in [("pane", PANE_VERBS), ("profile", PROFILE_VERBS)] {
-        for &(verb, _) in verbs {
+        for &verb in verbs {
             let rows = adr_rows(&adr, &format!("{namespace} {verb}"));
             if rows.len() != 1 {
                 failures.push(format!("ADR-0003 must have exactly one `holler {namespace} {verb}` row, found {}: {rows:?}", rows.len()));
@@ -53,24 +98,8 @@ fn adr_0003_has_one_row_per_pane_and_profile_verb() {
 fn adr_0003_rows_of_different_stories_are_never_adjacent() {
     let adr = workspace_file("docs/adr/ADR-0003.md");
     let lines: Vec<&str> = adr.lines().collect();
-    let groups: [&[&str]; 9] = [
-        &["pane list", "pane get", "pane watch"],    // #643
-        &["pane launch", "pane relaunch"],           // #644
-        &["pane switch", "pane reset"],              // #645
-        &["pane park", "pane unpark", "pane close"], // #646
-        &["pane doctor"],                            // #647
-        &["pane import"],                            // #650
-        &[
-            "profile create",
-            "profile delete",
-            "profile list",
-            "profile show",
-        ], // #662
-        &["profile apply"],                          // #664
-        &["profile rename", "profile export", "profile import"], // #665
-    ];
     let group_of = |line: &str| {
-        groups.iter().position(|g| {
+        STORY_GROUPS.iter().position(|(_, g)| {
             g.iter().any(|words| {
                 line.trim_start()
                     .strip_prefix(&format!("holler {words}"))
@@ -143,7 +172,7 @@ fn the_fixture_covers_every_new_leaf_and_every_shared_flag() {
     let fixture = fixture();
     let mut failures = Vec::new();
     for (namespace, verbs) in [("pane", PANE_VERBS), ("profile", PROFILE_VERBS)] {
-        for &(verb, _) in verbs {
+        for &verb in verbs {
             let leaf = format!("{namespace} {verb} |");
             if !fixture.lines().any(|l| l.trim_start().starts_with(&leaf)) {
                 failures.push(format!("cli-surface.txt has no `{leaf}` line"));
@@ -205,8 +234,8 @@ fn the_fixture_groups_new_lines_by_owning_story() {
     }
     // Each pane/profile leaf line sits under the header of its owning story.
     for (namespace, verbs) in [("pane", PANE_VERBS), ("profile", PROFILE_VERBS)] {
-        for &(verb, story) in verbs {
-            let header = format!("# #{story}");
+        for &verb in verbs {
+            let header = format!("# #{}", story_of(namespace, verb));
             let leaf = format!("{namespace} {verb} |");
             let Some(at) = lines.iter().position(|l| l.trim_start().starts_with(&leaf)) else {
                 continue;

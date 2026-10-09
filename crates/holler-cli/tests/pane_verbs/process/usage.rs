@@ -7,6 +7,9 @@
 //! no parsed flags; the namespace is the first non-flag token, so a flag's value (`--debug
 //! pane`) is never mistaken for it.
 
+use holler_cli::output::Format;
+
+use crate::parse::{accepted, resolved_format};
 use crate::{holler, Out};
 
 /// The `usage` envelope of a run: exit 2, one line on stdout, a one-line message that
@@ -67,13 +70,10 @@ fn spec_only_requires_profile() {
 }
 
 #[test]
-fn spec_only_with_a_profile_parses_and_reaches_the_stub() {
-    let out = holler(&["pane", "launch", "--spec-only", "--profile", "demo"]);
-    assert_eq!(out.code, 1, "{out:?}");
-    assert!(
-        out.stderr_has_line("error: not implemented (story #644)"),
-        "{out:?}"
-    );
+fn spec_only_with_a_profile_parses() {
+    for verb in ["launch", "relaunch", "close"] {
+        accepted(&["pane", verb, "--spec-only", "--profile", "demo"]).unwrap();
+    }
 }
 
 // --- --format ------------------------------------------------------------------
@@ -108,13 +108,13 @@ fn json_conflicts_text() {
 
 #[test]
 fn format_text_alone_is_the_default_text_mode() {
-    let out = holler(&["pane", "list", "--format=text"]);
-    assert_eq!(out.code, 1, "{out:?}");
-    assert!(out.stdout.is_empty(), "{out:?}");
-    assert!(
-        out.stderr_has_line("error: not implemented (story #643)"),
-        "{out:?}"
-    );
+    for argv in [
+        &["pane", "list", "--format=text"][..],
+        &["pane", "list"],
+        &["profile", "list", "--format", "text"],
+    ] {
+        assert_eq!(resolved_format(argv).unwrap(), Format::Text, "{argv:?}");
+    }
 }
 
 // --- mutually exclusive argv forms ---------------------------------------------
@@ -145,25 +145,22 @@ fn command_arg_and_command_json_are_mutually_exclusive() {
 
 #[test]
 fn each_argv_form_alone_parses() {
-    for args in [
-        &["--command-arg", "opencode", "--command-arg", "serve"][..],
-        &["--command-json", "[]"],
-        &[
-            "--check-arg",
-            "curl",
-            "--check-arg",
-            "http://127.0.0.1:1/health",
-        ],
-        &["--check-json", "[]"],
-    ] {
-        let mut argv = vec!["pane", "launch"];
-        argv.extend_from_slice(args);
-        let out = holler(&argv);
-        assert_eq!(out.code, 1, "{argv:?}: {out:?}");
-        assert!(
-            out.stderr_has_line("error: not implemented (story #644)"),
-            "{argv:?}: {out:?}"
-        );
+    for verb in ["launch", "relaunch"] {
+        for args in [
+            &["--command-arg", "opencode", "--command-arg", "serve"][..],
+            &["--command-json", "[]"],
+            &[
+                "--check-arg",
+                "curl",
+                "--check-arg",
+                "http://127.0.0.1:1/health",
+            ],
+            &["--check-json", "[]"],
+        ] {
+            let mut argv = vec!["pane", verb];
+            argv.extend_from_slice(args);
+            accepted(&argv).unwrap();
+        }
     }
 }
 

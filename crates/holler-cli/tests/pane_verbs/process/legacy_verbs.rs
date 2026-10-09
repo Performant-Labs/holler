@@ -7,10 +7,8 @@
 //! here holds no hub, so a verb that went on to contact one would fail with a different
 //! message, and these assert the refusal line itself.
 
+use crate::stub::{PANE_FORM_REFUSAL as PANE_REFUSAL, ROSTER_PROFILE_REFUSAL as ROSTER_REFUSAL};
 use crate::{assert_no_failures, holler};
-
-const PANE_REFUSAL: &str = "error: not implemented (story #646)";
-const ROSTER_REFUSAL: &str = "error: not implemented (story #648)";
 
 /// Every form that names a pane or a profile on `say`, `interrupt` and `answer`.
 const REFUSED_FORMS: &[&[&str]] = &[

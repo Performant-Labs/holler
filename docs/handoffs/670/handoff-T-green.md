@@ -67,3 +67,19 @@ None.
 - `Unwired::run_probe` answers `ProbeResult::Error("not implemented")` with no story number (F's hedge); #649 replaces it.
 - `cli.rs` is 780 lines (fail at 900).
 - T's test addition is uncommitted in the worktree; O/the script commits it.
+
+## Test-only rework (S: REWORK, test-only, #678)
+
+S asked that the shared test scaffolding stop pinning sibling stubs and `Wiring::connect`'s body, so the wave-3 stories (#643-#647, #649, #650, #662, #664, #665) edit only their own files. No `src/` change. What changed:
+
+1. **Harness** (`tests/verb_harness/mod.rs`): added `run_verb_with(argv, format, ports: Ports<'_>)`; `run_verb` delegates with `unwired_ports()` (a `static UNWIRED: Unwired`). The `Wiring` import is gone, so #649 replacing `connect()` cannot break any in-process verb test, and #643/#644/#662 can pass the fakes of #638. New `tests/verb_harness/parse.rs` (included by the two in-process targets through `verb_harness`, and by `pane_cli_process` through `#[path]`): `try_parse`, `accepted` (parses, or only a required positional is missing, so sibling positionals do not break flag checks), `unknown_argument` (`ErrorKind::UnknownArgument`), `resolved_format` (through `output::resolve_format`), and the `SPEC_FLAG_SETS` matrix.
+2. **Frozen roots**: deleted `seam_pane_stub_routes_text_to_err_and_json_to_out` and `seam_profile_stub_routes_text_to_err_and_json_to_out` (exact duplicates of `pane_verbs/list.rs` and `profile_verbs/list.rs`); moved the JSON-with-shared-flags case to `pane_verbs/launch.rs`; rewrote the ports test as `unwired_ports_answer_not_implemented` over `unwired_ports()`. AC 6 stays covered by the per-verb harness cases.
+3. **`pane_cli_process`**:
+   - `flags.rs` now parses in-process (`Cli::try_parse_from`) and asserts refused flags as `UnknownArgument`; no subprocess, no stub line. `format_is_a_global_flag` checks `Cli.format` and `resolve_format`.
+   - The positive launch/relaunch spec-flag matrix moved to `pane_verbs/launch.rs` and `relaunch.rs` (`pane_*_accepts_every_spec_flag`, one shared `SPEC_FLAG_SETS`), which also covers every flag on `relaunch`.
+   - `usage.rs`: the three cases that pinned #643/#644 stub lines now check the parse (`accepted`) or the resolved format, not a stub line.
+   - `stub.rs`: `STUBS` is the only story-numbered table, grouped under `// #NNN` lines (rustfmt removes blank separators); `stub_verb_not_implemented` and its JSON twin iterate it, so a story deletes only its group. The two legacy-refusal lines (#646, #648) moved there as named constants that `legacy_verbs.rs` imports. `PANE_VERBS`/`PROFILE_VERBS` are now permanent name lists; `docs_rows.rs` has its own permanent `STORY_GROUPS` (used by the ADR-adjacency and fixture-header tests, and checked against the verb lists).
+
+Verification (worktree, after the rework): `cargo test --workspace` 1029 passed, 0 failed (was 1023; net +6 from the new parse, matrix and consistency tests, minus the two deleted duplicates); `pane_verbs` 59, `profile_verbs` 8, `pane_cli_process` 34, `cli_surface_test` 3, `docs_cli_test` 3, `wire_selftest` 3 all pass; `cargo clippy --workspace --all-targets -- -D warnings` clean; `scripts/lint.sh` and `changelog-check.sh` clean; `cargo machete` clean; the touched test files are rustfmt-clean. Grep over `crates/holler-cli/tests` finds `not implemented (story #` only in `stub.rs` (the stub table and the two legacy-refusal constants) and the story-parameterised `assert_stub_routes` format string, and no `Wiring` anywhere. Largest touched test file is `docs_rows.rs` at 256 lines.
+
+Not done (S advisory, outside T's remit): rebase onto `origin/main` (#669; CHANGELOG conflict), PR-body AI disclosure, and the #649/#634/#644/#648 notes.

@@ -34,26 +34,13 @@ mod switch;
 mod unpark;
 mod watch;
 
-use holler_cli::output::Format;
-use holler_cli::pane::wiring::Wiring;
-use verb_harness::{one_envelope, run_verb};
-
-/// The seam: a stub's `run` reached through `pane::run`, over the stub wiring's
-/// `Ports` and captured writers. Text mode refuses on `err` only; JSON mode writes one
-/// envelope to `out` only. (The signatures of `VerbCtx`, `Sink` and `emit*` are
-/// provisional until this compiles.)
+/// The unwired port set is the one not-implemented port set (#649 builds the real wiring
+/// and keeps `Unwired`): every port it hands a verb answers
+/// `not-implemented`, so a verb that runs before its ports exist fails loudly instead of
+/// acting. The harness's `run_verb` runs over it, and nothing here builds the real wiring.
 #[test]
-fn seam_pane_stub_routes_text_to_err_and_json_to_out() {
-    verb_harness::assert_stub_routes(&["pane", "list"], 643);
-}
-
-/// The stub wiring is the one not-implemented port set (#649 replaces the body of its
-/// constructor): every port it hands a verb answers `not-implemented`, so a verb that
-/// runs before its wiring exists fails loudly instead of acting.
-#[test]
-fn stub_wiring_ports_answer_not_implemented() {
-    let wiring = Wiring::connect().expect("the stub wiring connects without a hub");
-    let ports = wiring.ports();
+fn unwired_ports_answer_not_implemented() {
+    let ports = verb_harness::unwired_ports();
     let codes = [
         ports.pane_store.list().err().map(|e| e.code().to_string()),
         ports.herdr.version().err().map(|e| e.code().to_string()),
@@ -62,17 +49,4 @@ fn stub_wiring_ports_answer_not_implemented() {
     for code in codes {
         assert_eq!(code.as_deref(), Some("not-implemented"));
     }
-}
-
-/// A verb reached with `--format` JSON never writes a second line: the seam holds for
-/// a verb that is given its shared flags too.
-#[test]
-fn seam_json_mode_with_shared_flags_is_still_one_envelope() {
-    let run = run_verb(
-        &["pane", "launch", "--profile", "demo", "--spec-only"],
-        Format::Json,
-    );
-    assert_eq!(run.code, 1);
-    assert_eq!(one_envelope(&run.out)["error"]["code"], "not-implemented");
-    assert!(run.err.is_empty(), "{run:?}");
 }

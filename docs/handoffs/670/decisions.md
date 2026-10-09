@@ -124,3 +124,15 @@
     - PROVIDER/ID parsers (none) and message flattening;
     - users of `Wiring::connect` and `Unwired`;
     - `hj-` names in the diff (none).
+
+## T (test-only rework after S, #678)
+
+- **Decided:**
+  - `run_verb_with(ports)` is the harness's one entry point and `run_verb` is the unwired case.
+  - Flag acceptance is asked of clap in-process; a flag is accepted unless clap says `UnknownArgument` or the verb is unknown, so a sibling story adding a required positional does not break these tests.
+  - The positive spec-flag matrix lives in `launch.rs`/`relaunch.rs`.
+  - `STUBS` (in `stub.rs`) is the only table of stub owners. The two legacy-refusal lines sit beside it.
+  - The ADR/fixture layout tests use their own permanent `STORY_GROUPS`.
+- **Assumed:** the `parse.rs` helper shared by three targets through `#[path]` is acceptable (it needs only `holler_cli::Cli`, which `cli_surface_test` already uses). The `pane_cli_process` comment in `Cargo.toml` stays true.
+- **Hedged:** rustfmt strips blank lines between `STUBS` groups, so the `// #NNN` comments are the separators (S allowed either). `STORY_GROUPS` repeats the story numbers the ADR/fixture checks need, so a new story must add itself there; `every_verb_has_exactly_one_owning_story` fails if it does not.
+- **Evidence:** `cargo test --workspace` (1029/0), clippy `-D warnings`, `scripts/lint.sh`, grep for `not implemented (story #` and `Wiring` under `crates/holler-cli/tests`.
