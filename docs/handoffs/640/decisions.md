@@ -213,3 +213,45 @@
     `git grep origin/main` finds no new public `excerpt`, `count` or `last_lines`.
   - **Hygiene:** no `unsafe` or `#[allow]` in `src/`; no sleep, socket or process in the tests; files of 39 to 679
     lines.
+
+## S (spec audit, round 2 after the test-only REWORK) — 2026-10-09T16:01:36-06:00
+- **Decided:**
+  - **Verdict: PASS.** The findings are in handoff-S.md, which replaces round 1 (a5e0fef, in git history).
+  - **Round 1's finding is resolved.** `protocol_test.rs:399` now asserts `contains("protocol 99")`. That string can
+    come only from `check_supported`'s protocol clause, so AC 17 is proven. The delta is that one line, and the
+    production code is still F's 78f5274 byte for byte.
+  - **Everything else passes.** AC 1-22 each have a test or evidence that would fail if the behaviour were wrong.
+    The pinned API matches the stubs, Decisions 1-12 hold, and the build guards, scope and privacy sweep are clean.
+  - **The new advisory: rebase before merge.** Since round 1, `origin/main` gained the #661 and #688 CHANGELOG
+    entries at the same place as this branch's entry. `git merge-tree` shows a conflict in `CHANGELOG.md` only. The
+    fix is to keep all three entries, then run `changelog-check`. It is advisory, not REWORK: F's work is correct,
+    and the rebase belongs to the PR step.
+- **Assumed:**
+  - **The handoff name.** A round-2 audit overwrites `handoff-S.md`, as A-dup round 2 did (the #508 precedent).
+  - **The trailer.** `Co-Authored-By` with no session link is acceptable on the branch commits. Recent squash merges
+    on `main` (cd635c0, c76bbed) carry none either, and the squash commit replaces these commits.
+- **Hedged:**
+  - **Still not a hold.** Issue #640's split-only acceptance line contradicts AC 12 and Decision 6. So does its
+    `host.herdr_api_version` Scope line, which contradicts Decision 8 (A's W-7 and W-11). This PR is `Part of
+    #640` and closes nothing. The brief's choice is evidence-backed (spike section 7, VERIFIED), so it does not hold
+    part 1. Both lines need the "(amended …)" edit, and the W-7 and W-9 follow-ups need filing, before the part 2
+    brief (advisory 2).
+- **Evidence:**
+  - **Read:** the brief, all seven phase handoffs and the journal, `evidence.md`, issue #640 (`gh issue view`), the
+    full diff, all four test files and all four `src/` files.
+  - **Test kit:** `fake_herdr_test.rs:191-249`, traced step by step against `plan_splits`. The two diverge only at
+    `r2c2` and `r2c1` after `r1c2` exists. Also `conformance/herdr.rs`, whose cells (r1c1, r2c1; r1c2 and r3c1 out
+    of range) are all reachable.
+  - **Spike:** section 13's pong (lines 415-416), which matches the fixture verbatim. Section 7's nesting rule
+    (lines 236-239, VERIFIED).
+  - **Read-only checks:**
+    - `git diff a5e0fef HEAD -- crates/`: one test file, +2/-1.
+    - `git diff --stat 78f5274 HEAD` over `src/`, `Cargo.toml`, `Cargo.lock` and `CHANGELOG.md`: empty.
+    - `rustfmt --check --edition 2021` on the eight new `.rs` files: exit 0.
+    - `wc -l` on the touched files: the largest is 679 lines.
+    - Greps of `src/` for the guards, and of the tests for sleep, sockets, processes, threads and env: none.
+    - The public and derive lines, stubs against HEAD: only parameter names, private derives and W-2's `Debug`
+      differ.
+    - A privacy grep of all 4,355 added lines: no personal data.
+    - `git merge-tree 9d61c9f HEAD origin/main`: a conflict in `CHANGELOG.md` only.
+    - `gh issue list` for the W-7, W-9 and W-11 follow-ups: none filed. `gh pr list`: no PR yet.
