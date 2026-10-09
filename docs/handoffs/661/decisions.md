@@ -53,3 +53,9 @@
   - The AC 41 and AC 28 greps and the AC 45 path check hold.
   - Disabling each of `entry.rs`'s five load checks in turn made `a_corrupt_file_fails_closed_and_is_never_rewritten` fail every time; the file was restored byte-identical.
   - Handoff: `handoff-F.md`. Facts: `evidence.md`.
+
+## T (Phase 7, verify GREEN + Tier 2)
+- **Decided:** No test repair needed; suite is GREEN and Tier 2 is clean. Verdict PASS.
+- **Assumed:** CI's own `--skip roster_stays_accurate_under_concurrent_body_load` is the right workspace invocation.
+- **Hedged:** AC 6 timing windows depend on a non-stepping wall clock (accepted in RED).
+- **Evidence:** workspace 1297 passed / 0 failed; five new binaries green over 5 repeats; mutation of `refuse_profile_move` and `check_name` each turned tests RED (production restored, tree clean); clippy, lint, changelog-check, docs_cli_test, wire_selftest, machete all clean. Handoff: `handoff-T-green.md`.
