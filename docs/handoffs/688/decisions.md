@@ -140,3 +140,41 @@
 - **Assumed:** F's AC6-AC8 git/grep outputs are accurate; I re-ran the workspace-level guards (clippy, test, lint, changelog, machete, docs_cli, wire_selftest) rather than each grep.
 - **Hedged:** Ran the two new targets 5 extra times to look for flakes; none.
 - **Evidence:** a no-op restore mutation failed 6 of 18 `fake_profile_scope_test` tests; reverted, tree clean. Details in handoff-T-green.md.
+
+## A (Phase 7, anti-duplication gate) — 2026-10-09T15:15:38-06:00
+- **Decided:** PASS on the diff 9d61c9f..05d7262, with no block and two warns (see handoff-A-dup.md).
+  - **F extended the stubs and built no parallel path.** It composes the two fakes through their ports and reuses
+    `check_membership`, which stays the only `PaneInOtherProfile` producer in `src/` and is called on the `Set` path
+    only. It also reuses `feed::lock`, part 1's suite helpers, constants and `Step`, slice a's name helpers, and the
+    shared runner and expectation helpers. The three mutants delegate to the fake.
+  - **The new objects are the ones the brief justifies.** `with_edit`, `belongs` and the restore step have no equivalent
+    in the workspace. The only other spec-edit applier is `holler-pane`'s test-local `MemScope`, which the brief
+    excludes. `belongs` answers a different question from `check_membership`.
+  - **W-1:** `lib.rs:28-29` still calls the slices' modules empty stubs, and #694, which Phase 3 asked to own it, does
+    not list it.
+  - **W-2:** `changed_spec` makes the same change as part 1's `revised` (a spec's `context.soft`). The brief planned
+    it, so it is a candidate for #694, not this run's work.
+- **Assumed:**
+  - The brief's "Evidence", "Reuse refactors" and "Reuse map" sections are the Reuse map, as at Phase 3.
+  - Test-local helpers in the two new integration test files are the accepted near-duplicates of Phase 3. There is no
+    `tests/common`, and integration tests cannot reach `pub(super)` items.
+- **Hedged:**
+  - **W-2 is a warn, not a block.** The brief named the helper as new, the two helpers act at different levels (a bare
+    spec, a profile's first spec), and nothing couples them.
+  - **The per-suite code constants are not flagged.** `CONFLICT` and `PROFILE_NOT_FOUND` repeat part 1's private ones,
+    but the pane, profile and harness suites each keep their own, so that is the dominant pattern.
+  - **Runtime is T's.** I did not re-run the build or the tests, since T-green verified 05d7262 and the tree is clean.
+- **Evidence:**
+  - Read `git diff origin/main...HEAD`, every changed file in full, and F's, T's and Phase 3's handoffs.
+  - Read the whole of these, for comparison:
+    - the profile and pane store suites (with `log.rs` and `watch.rs`) and both fakes;
+    - `fixture.rs`, `fault.rs`, `prober.rs`, `feed::lock` and `conformance/mod.rs`;
+    - the herdr and harness suites' runners;
+    - `tests/profile_store_conformance_test.rs`, and the threaded tests in the two fake-store test files.
+  - Grepped the workspace for `SpecEdit`, `PaneNotInProfile`, `ProfileConflict` and `PaneInOtherProfile`, for slug
+    comparisons and membership predicates, and for spec mutators and `panes.retain`. Read `holler-pane`'s `Profile` and
+    `Pane` methods, `MemScope`, the CLI's `Unwired` scope and the hub's `check_membership` stub.
+  - Re-ran the AC6, AC7 and AC8 checks (each clean) and a scan for panics and `#[allow]` in the new `src/` code.
+  - Scanned the added lines for personal or infrastructure names (none) and checked the seven branch commits' identities
+    (all GitHub no-reply).
+  - Ran `gh issue view 694`.
