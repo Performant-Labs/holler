@@ -1,66 +1,103 @@
-# Handoff-A-dup: Phase 7 - #639 the hub pane registry  (anti-duplication gate)
+# Handoff-A-dup: Phase 7 - #639 the hub pane registry  (anti-duplication gate, re-review after rework)
 
 **Date:** 2026-10-09
 **Branch:** issue-639-implementation
-**Diff base:** af3d8df (merge base with `origin/main`)   **Diff head:** 2188fe7
+**Diff base:** 55dba00 (merge base with `origin/main`, after merge 1d67ef3)   **Diff head:** 9289d30
+**This cycle's delta:** 2188fe7..9289d30. The earlier pass reviewed `af3d8df...2188fe7` (31d2102); see "Earlier pass" below.
 **Reuse map:** docs/handoffs/639-brief.md §Files "Reuse map"
 **Verdict:** PASS
 
 ## Summary
 
-PASS. F extended every object the Reuse map named and built no parallel path:
+PASS. This cycle added no production object and no parallel path. Its whole story delta is:
 
-- `write_atomic` saves the file (`persist.rs:154`).
-- `next_generation` is the only CAS rule, used by both `cas_put` and `delete` (`store.rs:171`, `store.rs:193`).
-- `decode_params` and the `reply.rs` params structs decode requests.
-- `PaneReply` reaches the wire through `reply_line`.
-- The poison-tolerant lock is the `holds.rs:293` idiom.
-- The log event has the `holds.rs` shape.
+- doc comments in the four `panes/` files: `store.rs` (F's rework: the `Condvar` wait releases the lock, and rule 1 is
+  re-checked on every poll), plus `mod.rs`, `persist.rs` and `feed.rs` (O's refresh after ADR-0021 merged);
+- two handler tests in `pane_handlers_test.rs`, which reuse the file's existing `Rig`, `call`, `cas_put_params` and
+  `sample_pane`;
+- the ADR-0021 amendment (§6 and "Decisions taken" item 7), the brief's AC 25 and radius, and the `CHANGELOG.md` entry
+  carried through the merge.
 
-The three things the brief rejects in advance are absent: a second CAS helper, a second code validator, and a per-file copy of `sample_pane`. None of the overlay's Phase-7 candidates was copied: the token store operations, `Lockout`, `Roster`, the `log(Severity, ..)` helpers, and the test harness helpers. The new objects (`Store`, `Doc<E>`, `Ring<E>`, `handlers::run`, `RegistryEntry`) are the brief's own file split, or what A asked for at Phase 3 (W-4, W-5, W-6). ADR-0021 §7 also requires the two registries to share one generic load and save.
+Every object the Reuse map named is still the only implementation. F rejected the outside gate's round-1 remediation (a
+second lock, or `tokio::sync::Notify`), and that rejection kept the architecture intact: a second lock would have been the
+drift, because D1 and ADR-0021 §7 ("One lock per registry") both require one lock.
 
-There are three warns and no blocks. The one to settle before merge is W-1. ADR-0021 was merged to `main` during this run (094ebfa) and is not yet on this branch. Its §6 says an idle long-poll answers `cursor: since`. The code answers the head, which differs in one edge case.
+My earlier W-1 is resolved: the code and ADR-0021 now agree on the idle cursor, in the same change, and a test pins the
+edge case. Three warns remain, and none blocks:
+
+- the rest of the earlier W-2 (#661's reuse seams);
+- a new, low one: a `JoinError`'s text reaches the client;
+- the earlier W-3 (test-helper near-copies), unchanged.
 
 ## Findings
 
 | # | Severity | File:line | Finding | Suggested fix |
 |---|---|---|---|---|
-| 1 | warn | `crates/holler-hub/src/panes/store.rs:260-264`; `crates/holler-hub/src/panes/feed.rs:35-38` | **Drift from the merged ADR-0021.** §6 (`origin/main`, line 219) says: "An idle window answers `{"events": [], "cursor": since}`". `Store::poll` always answers `cursor: table.head`. The two differ only when `since` is 0 and every record has been deleted (head > 0, no live record). Both resume correctly, F and T documented the divergence (it follows the brief's D6, written before the ADR merged), and no test covers that case. The overlay still requires the code and the ADR to agree in the same change. Separately, `feed.rs:37` cites "the draft ADR-0021 §7". §7 is merged and does ratify rule 4 (ADR lines 255-257), so only the word "draft" is stale. | S/O decide before merge. Either (a) answer `since` when the window ends with no events (one line in `Store::poll`; every idle case the tests pin has `since == head`, so they still hold), or (b) amend the §6 sentence in this PR, which adds `docs/adr/ADR-0021.md` to the radius. Drop "draft" in `feed.rs:37`. |
-| 2 | warn | `crates/holler-hub/src/panes/mod.rs:19-20`; `persist.rs:17-19`, `69-75`; `store.rs:249-307`; `handlers.rs:37-40` | **The claim that #661 "edits nothing here" no longer holds.** (a) ADR §7 (lines 241-243) persists the profile change log in `profiles.json` with the records, through "the same generic load and save helpers". `Doc<E>` is `{version, cursor, entries}` with `deny_unknown_fields`, so `load_doc::<ProfileEvent>` would refuse a file that carries the log. (b) ADR "Decisions taken" item 2 (lines 498-501) puts `pane-in-other-profile` inside the pane CAS, so #661 edits `Store::cas_put`, with its radius widened for that. (c) The `Condvar` long-poll (`Store::poll`) and the `Feed` iterator are typed on `PaneEvent` in `store.rs`, and `profile/watch` and `ProfileStore::watch` need both. #661 must lift them to a generic form or copy about 60 lines, and a copy is a Phase-7 rejection for #661. (d) `NoParams` is private, and `profile/list` needs the same type. This is not a #639 defect: no parallel path exists today. | F (optional, cheap): reword `mod.rs:19-20` and `persist.rs:17-19` to say what #661 extends, and make `NoParams` `pub(crate)`. O: put `panes/{persist,store,handlers}.rs` in #661's radius. Its brief says to extend `Doc` for (a) and to lift, not copy, for (c) and (d). Since #661 edits `panes/` anyway, that story can also consider moving the shared parts (`persist`, `feed`, `handlers::run`, `RegistryEntry`) to a neutral module, so `profile/` stops importing registry machinery from `panes::`. |
-| 3 | warn | `crates/holler-hub/tests/pane_handlers_test.rs:27-45`; `pane_dispatch_test.rs:104-111`, `327-328`; `pane_support/mod.rs:6-7` | **Small test-helper near-copies.** `Rig::on` and `fresh_deps` both build the same `(Arc<PaneState>, Arc<ProfileState>)` pair with `short_opts()`. `Rig` repeats `PaneDeps`'s two public fields, and neither builder uses `pane_support::load`, which is exactly `PaneState::load_with(state, short_opts())`. `check_membership_accepts_any_pane` (which T edited) still builds its own temp dir and `HubState`, although its file imports `temp_state`. The `pane_support` doc names three includers, but `pane_feed_test.rs` is a fourth. This is not a block. The copies are a few lines each, test-only, and built on the shared `temp_state` and `short_opts`. Nothing on the brief's rejection list or the overlay's harness list was copied. | Add `pane_support::deps(&HubState) -> PaneDeps` (short window) and use it in `fresh_deps` and in `Rig`, which can hold a `PaneDeps`. Use `temp_state()` in `check_membership_accepts_any_pane`. Fix the doc line. T can fold this into any later edit. |
+| 1 | warn | `crates/holler-hub/src/panes/mod.rs:19-22`; `persist.rs:17-21`, `71-77`, `165-166`; `store.rs:261`, `287-319`; `handlers.rs:37-40`; `crates/holler-hub/src/profile/mod.rs:61-63` | **The rest of the earlier W-2: #661's reuse seams.** The refreshed docs now record the one edit that ADR-0021 "Decisions taken" item 2 (lines 501-504) sanctions: `pane-in-other-profile` inside `Store::cas_put`. That resolves part (b). They still read as if it is #661's only edit in `panes/` ("also adds one comparison here"), and three seams are open. **(a)** ADR §7 (lines 244-246) keeps the profile change log in `profiles.json`. `Doc<E>` is `{version, cursor, entries}` with `deny_unknown_fields`, and `check` refuses a name filed twice, so the log fits neither as a new member nor as entries: #661 must extend `Doc`. **(c)** `Store::poll` (the `Condvar` wait loop) and the `Feed` iterator are typed on `PaneEvent` and the pane `Store`, and `ProfileStore::watch` (`holler-pane/src/profile.rs:356`) needs both. **(d)** `NoParams` is private. Outside this radius, #669's doc on `check_membership` (`profile/mod.rs:61-63`) still says #661 fills it with `pane-in-other-profile`, which item 2 moved into the pane CAS. That stale sentence explains the outside gate's round-2 W-1. No parallel path exists in #639 today. | O: #661's brief puts `panes/{persist,store,handlers}.rs` in its radius. It extends `Doc` for the log, lifts `poll` and `Feed` to a generic form instead of copying them (a copy is a Phase-7 rejection for #661), makes `NoParams` `pub(crate)`, and corrects `profile/mod.rs:61-63`. Optional here: one clause in `mod.rs:19-22` that names the `poll`/`Feed` lift. |
+| 2 | warn (low) | `crates/holler-hub/src/panes/handlers.rs:81-83` | **A `JoinError`'s text reaches the client.** `answer` builds `what: format!("the registry task did not finish ({join})")`. In the locked tokio (1.53.1, `src/runtime/task/error.rs:135-151`), a panicked task displays as `task {id} panicked with message {payload:?}`, so a panic payload would reach the control-socket client. The hub's precedent at the same boundary discards the `JoinError` for a fixed message (`token.rs:664-667`, "token store task panicked"). The module's own rule (`persist.rs:45-48`) is that a `what` is built only from safe parts. **It cannot happen today:** the hub denies `unwrap_used`, `expect_used` and `panic` (`Cargo.toml:19-22`), `panes/` has no indexing, and `check_membership` is `Ok(())`. The control server logs only the method and the id (`control_server.rs:61-66`), so no log line carries the text. #661's `check_membership` will run inside this closure. The outside gate's round-2 W-3 raised this, but hedged it on a tokio feature flag. The payload is rendered whenever it is a string. | Use a fixed message, as `token.rs` does. If wanted, add "panicked" or "was cancelled" from `join.is_panic()`, without the payload. This is one line, in any later edit of `handlers.rs`, #661's included. |
+| 3 | warn | `crates/holler-hub/tests/pane_handlers_test.rs:39-45`; `pane_dispatch_test.rs:104-111`, `325-328`; `pane_support/mod.rs:6-7`, `63-66` | **The earlier W-3, unchanged: small test-helper near-copies.** `Rig::on` and `fresh_deps` both rebuild `(PaneState::load_with(.., short_opts()), ProfileState::load(..))` instead of using `pane_support::load`. `check_membership_accepts_any_pane` builds its own temp dir and `HubState`, beside the imported `temp_state()`. The `pane_support` doc names three includers, but `pane_feed_test.rs:10` is a fourth. This cycle's two tests reuse `Rig`, so they add no new copy. | Add `pane_support::deps(&HubState) -> PaneDeps` with the short window, and use it in `fresh_deps` and `Rig`. Use `temp_state()` in `check_membership_accepts_any_pane`, and fix the doc line. T can fold this into any later edit. |
 
-No other duplication; apart from these, the extension is clean. Rework introduced no drift: F's departures from the brief (the `&Arc<ProfileState>` widening, `poll` and `Feed` in `store.rs`, `PaneEvent` as the file entry, `Problem`, distinct cursors, logging the failed save) are all A's Phase-3 warns, acted on as routed.
+Apart from these, there is no duplication and the extension is clean. Rework introduced no drift.
 
-### Checked and clean
+### Earlier pass (`af3d8df...2188fe7`, PASS with three warns): what became of each
 
-- **Reuse map, row by row:**
-  - `write_atomic`: `persist.rs:154`.
-  - `next_generation`: `store.rs:171`, `store.rs:193`. The only other `checked_add` calls are the cursor (`store.rs:88`) and the deadline (`store.rs:251`).
-  - `decode_params` and the params structs: `handlers.rs:25`, `handlers.rs:50`.
-  - `PaneReply` and `reply_line`: `handlers.rs:57`, `handlers.rs:77-85`, and `mod.rs:200`.
-  - The lock idiom: `store.rs:134`, `store.rs:269`.
-  - The `Component::Control`/`Direction::Local` event shape: `store.rs:325-340`.
-  - Timestamps: the store adds none.
-- **`log_fault`** is not a copy of the generic `emit`/`log(Severity, ..)` wrappers (`holds.rs:249`, `circuit.rs:120`, `serve.rs:48`). Its severity and fields are fixed, it serves exactly two events, and it follows the hub's per-module helper pattern (`live.rs:58`, `control_server.rs:61`, `circuit/auth.rs:171`). This is the case W-3 allowed at Phase 3.
-- **`handlers::run`** is the first generic blocking runner in the hub. `token.rs:739-799` has per-function `*_async` wrappers and no shared helper, so there was nothing to extend.
-- **`params_of`** is not a copy of `holler_proto::typed_params`, which takes an `Envelope` and returns `WireError`. The control socket hands over a raw `&Value`, and `decode_params`'s doc gives the "absent means `{}`" step to the caller (`reply.rs:111-114`).
-- **`Problem::parse`** is not a copy of `PaneError::from_decode` (`holler-pane/src/error.rs:534`). `from_decode` is crate-private and keeps serde's message on purpose, while `Problem::parse` drops it on purpose (D3).
-- **`save_doc`'s `create_dir_all(parent)`** matches the hub's `ensure_dirs` (no mode is set) and the body-side precedent (`holler-body/src/identity.rs:157-160`, `connection_state.rs:62-64`).
-- **No feed, cursor or watch** existed in the hub before this diff, so `feed.rs` and `Store::poll` duplicate nothing.
-- **`RegistryEntry` fits `ProfileEvent`.** `ProfileEvent { cursor, name, profile: Option<Box<Profile>> }` has a `Profile { name, generation, .. }`, so the abstraction has its second user and is not speculative.
-- **The port is not bypassed.** `PaneState` implements `PaneStore` by delegating to `Store`, and the handlers call the same `Store` methods through the inner `Arc`, plus `poll`, which the port does not expose. That is one implementation with two thin entry points.
-- **Tests.** There is one `sample_pane` (`pane_support/mod.rs:18`). `sample_pane_at` wraps it. There is one reply parse-back (`pane_outcome`, with `outcome` over it). `temp_state` is not a copy of `StateDir`, which lives in holler-cli's test support, out of the hub tests' reach. #669's test already used `tempfile`.
-- **Radius.** The diff touches only `panes/**`, the five pane test files, `CHANGELOG.md` and `docs/handoffs/639*`. `serve.rs`, `control_server.rs`, `pane_dispatch.rs`, `lib.rs`, `profile/**`, `holler-pane`, `holler-proto`, every `Cargo.toml` and `Cargo.lock` are unchanged (`git diff --quiet`). The largest file is 523 lines, and no file is near the 800-line mark.
+- **W-1 (the idle cursor against the merged ADR-0021 §6): resolved.**
+  - §6 (lines 218-223) and "Decisions taken" item 7 (line 513) were amended in this change (639f130). They are the ADR's
+    only two hunks, both inside the widened radius.
+  - `Store::poll` answers the head (`store.rs:273-276`), and the ADR now says the same.
+  - `an_idle_watch_from_zero_over_an_all_deleted_registry_answers_the_head` (`pane_handlers_test.rs:307-359`) pins the
+    one case where the head and `since` differ.
+  - "draft" is gone from `feed.rs:37-38`; ADR-0021 is `accepted` (line 3).
+- **W-2 (#661's reuse seams): part (b) resolved.** The rest is carried forward as finding 1.
+- **W-3 (test-helper near-copies): unchanged.** It is carried forward as finding 3.
+
+### Checked and clean (this cycle)
+
+- **F's rework (476ad22) is doc comments only, and they are accurate.**
+  - `wait_timeout` takes the guard and hands it back (`store.rs:278-282`).
+  - The head is assigned only at load (`store.rs:69`) and in `commit` (`store.rs:206`), always to `head + 1`
+    (`store.rs:86-94`). "A cursor that passed rule 1 never fails it later" therefore holds.
+  - `handlers::watch` passes `params.since` straight to `poll` (`handlers.rs:126-131`), so `select`'s rule-1 check is the
+    only one on that path.
+- **T's new test (9289d30) is not a duplicate.** `pane_watch_with_a_cursor_ahead_of_the_head_is_usage`
+  (`pane_handlers_test.rs:361-386`) pins rule 1 on the `poll` path. `a_cursor_ahead_of_the_store_is_usage` pins the
+  `Store::watch` path, which refuses the cursor before `poll` runs.
+- **The Reuse map, row by row:**
+  - `write_atomic`: `persist.rs:156`.
+  - `next_generation`: `store.rs:172` and `store.rs:194`. Nothing else in `crates/holler-hub/src/` compares generations.
+  - `decode_params`: `handlers.rs:50`.
+  - `reply_line`: `handlers.rs:57` and `mod.rs:202`.
+  - The poison-tolerant lock: `store.rs:135` and `store.rs:281`.
+  - The `holds.rs` event shape: `store.rs:337-352`.
+- **No second feed.** No `Condvar`, long-poll or watch window exists anywhere else in `crates/*/src/`. The CLI surface
+  merged from `main` (#670) adds no `WATCH_WAIT` copy, no reply parse-back and no watch logic.
+- **Radius.** `git diff --name-only 55dba00...HEAD` lists only radius paths: `panes/**`, the five pane test files,
+  ADR-0021, `CHANGELOG.md` and `docs/handoffs/639*`. `git diff --quiet` confirms these are unchanged: `serve.rs`,
+  `control_server.rs`, `pane_dispatch.rs`, `lib.rs`, `profile/**`, `holler-pane`, `holler-proto`, `holler-cli`, every
+  `Cargo.toml`, `Cargo.lock` and `docs/protocol/v2.md`.
+- **Merge.** `git merge-tree` against the current `origin/main` (939d79c, two research-doc commits ahead) is clean.
+- **Size.** The largest file is 523 lines (`pane_registry_test.rs`). The largest production file is 352 (`store.rs`).
+- **Public repository.**
+  - All 17 branch commits carry the GitHub no-reply address as both author and committer.
+  - This cycle's delta names no private host or person.
+  - Every `#[allow]` in the diff carries `// #NNN`.
 
 ## Notes for O
 
-- **The merge with `main` conflicts in `CHANGELOG.md`.** `main` added the ADR-0021 entry at the same place (`git merge-tree` reports one conflict). Keep both entries. Merging `main` also brings ADR-0021 onto the branch, which W-1 needs for S's audit.
-- **`pane_feed_test.rs`** still needs O's radius approval in `decisions.md` for AC 30. T and F both raised it, and I see no entry yet. On the architecture side there is no objection: it is the split A asked for at Phase 3 (W-9). `pane_support/mod.rs` is already in the brief's list.
-- **Out of scope, but noticed:** `pane_support::sample_pane` and holler-pane's `tests/common/mod.rs` `pane_json()` hold the same fixture. Both are older than #639. Once #638 fills `holler-pane-testkit`, both should move to one test-kit fixture.
+- **Route finding 1 into #661's brief.** Item 2 already widens #661's radius into `store.rs`. The brief should also name
+  `persist.rs` (the log in `Doc`), plus `store.rs` and `handlers.rs` (the generic `poll`/`Feed` lift and `NoParams`).
+  The profile registry then extends these objects rather than copying them.
+- **Finding 2 is a one-line change.** Leaving it to #661, which edits `handlers.rs` anyway, is reasonable.
+- **The outside gate's round 2 (PASS).** Its NV-3 (a spurious wake-up could end the window early) does not hold.
+  `poll` re-runs `select` and recomputes the time left after every wake (`store.rs:265-283`), so a spurious wake only
+  loops.
 
 ## Patterns referenced
 
-- `crates/holler-hub/src/holds.rs` (persistence, lock idiom, `emit`); `crates/holler-hub/src/token.rs:255-300`, `655-670`, `715-799` (store save, `JoinError`, `spawn_blocking` wrappers)
-- `crates/holler-proto/src/envelope/dispatch.rs` (`typed_params`); `crates/holler-pane/src/{reply.rs, error.rs:532-540, profile.rs:304-317, pane.rs:256-268}`
-- `crates/holler-hub/src/{pane_dispatch.rs, profile/mod.rs, state.rs}`; `crates/holler-cli/tests/support/mod.rs` (`StateDir`); `crates/holler-pane/tests/common/mod.rs`
-- `docs/adr/ADR-0021.md` as merged on `origin/main` (094ebfa): §6, §7, "Decisions taken" item 2
+- `crates/holler-hub/src/token.rs:664-667` (the `JoinError` at the blocking-pool boundary); `crates/holler-hub/src/holds.rs`
+  (persistence, the lock idiom, `emit`)
+- `crates/holler-hub/src/{pane_dispatch.rs, profile/mod.rs, control_server.rs:44-66}`;
+  `crates/holler-pane/src/profile.rs:295-359` (`ProfileLogEntry`, `ProfileEvent`, `ProfileStore`)
+- `docs/adr/ADR-0021.md`: §6 (lines 218-223), §7 (lines 237-262), and "Decisions taken" items 2 and 7 (lines 501-504
+  and 513)
+- tokio 1.53.1, `src/runtime/task/error.rs:135-151` (the `Display` of `JoinError`)

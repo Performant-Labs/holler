@@ -124,3 +124,18 @@
 - **Assumed:** The `roster_stays_accurate_under_concurrent_body_load` skip is the one CI applies.
 - **Hedged:** None.
 - **Evidence:** The new test FAILED under F's M2 mutation (`poll` answers an empty batch for `since > head`) and passes on the real code; mutation reverted. Four pane binaries 10/7/8/14, 15 repeat runs with 0 failures; workspace 1069 passed, 0 failed; clippy, `lint.sh`, `changelog-check.sh`, `cargo machete`, `docs_cli_test`, `wire_selftest` clean.
+
+## A (Phase 7, anti-duplication re-review after F's rework) — 2026-10-09T10:54:23-06:00
+- **Decided:** PASS on `55dba00...9289d30`, with three warns and no blocks (see handoff-A-dup.md).
+  - This cycle (2188fe7..9289d30) added no production object and no parallel path. It added doc comments in `panes/` (F's rework in `store.rs`; O's refresh in `mod.rs`, `persist.rs` and `feed.rs`), two handler tests that reuse the existing `Rig`, and the ADR-0021 amendment (§6 and item 7).
+  - My earlier W-1 is resolved: the code and ADR-0021 agree on the idle cursor, and a test pins the edge case.
+  - F was right to reject the outside gate's second-lock remediation. Keeping one lock keeps D1 and ADR-0021 §7's "One lock per registry".
+- **Assumed:** The workflow script commits this handoff and this entry, as it did for the earlier phases. I made no commit.
+- **Hedged:**
+  - Finding 1 carries the rest of my earlier W-2 forward: the `Doc` layout for the profile log, the `poll`/`Feed` lift, `NoParams`, and #669's stale `check_membership` doc at `profile/mod.rs:61-63`. These are reuse risks for #661, not #639 defects, so they are warns routed to O for #661's brief.
+  - Finding 2 is new and low. `handlers::answer` puts the `JoinError`'s text, which in tokio 1.53.1 carries a panic payload, into the client's `what`, against the `token.rs:664-667` precedent. It cannot happen today, so it is a warn.
+  - Finding 3 (test-helper near-copies) is unchanged from my earlier pass.
+- **Evidence:**
+  - Read in full: every file in the feature diff (the five `panes/` files, the five pane test files, the ADR-0021 hunks, the brief and the CHANGELOG entry), handoff-F-rework, handoff-T-green, my earlier handoff-A-dup, this journal, and the outside gate's rounds 1 and 2.
+  - Also read: ADR-0021 lines 194-303 and 478-515, `token.rs:650-674`, `control_server.rs:36-77`, `profile/mod.rs:38-70`, and tokio 1.53.1 `src/runtime/task/error.rs:135-151`. I grepped `holler-pane/src/profile.rs` for the `ProfileStore` port.
+  - Checks: `git diff --quiet` on every out-of-radius path; `git merge-tree` against `origin/main` (clean); `wc -l` on the touched files (max 523); greps for the Reuse-map call sites, for any other generation compare, for `Condvar`, long-poll and `WATCH_WAIT` across `crates/*/src/`, and for `#[allow]` links; the author and committer identities of the 17 branch commits (all no-reply); and a scan of the delta for private names (none).
