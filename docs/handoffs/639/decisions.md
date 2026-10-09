@@ -84,3 +84,9 @@
   - `crates/holler-hub/tests/pane_feed_test.rs` is approved in the radius (AC 30, A W-9): the split was forced by AC 29's 600-line cap (one file measured 726 lines).
   - `origin/main` is merged into the branch; the `CHANGELOG.md` conflict keeps every entry (#669, ADR-0021 #634, #670, #639).
 - **Evidence:** merge 1d67ef3; ADR and brief 639f130; the edge-case handler test `an_idle_watch_from_zero_over_an_all_deleted_registry_answers_the_head` 4a75b54 (passes on the code; a mutation answering `since` on an idle window fails it, `left: {"cursor": 0, ...}` against `right: {"cursor": 2, ...}`, and no other test, then reverted); the stale `mod.rs`, `persist.rs` and `feed.rs` notes refreshed in 3b5e7ee.
+
+## T (Phase 7 re-verification at 95b7724) — 2026-10-09
+- **Decided:** PASS. The suite is GREEN and no Tier 2 issue blocks. I changed no test.
+- **Assumed:** The `roster_stays_accurate_under_concurrent_body_load` skip is the one CI applies.
+- **Hedged:** The new edge-case test's non-vacuity rests on O's recorded mutation; I did not re-apply it.
+- **Evidence:** Four pane binaries 10/7/7/14 passed, 15 repeat runs with 0 failures; workspace 1068 passed, 0 failed; clippy, `lint.sh`, `changelog-check.sh`, `cargo machete`, `docs_cli_test` and `wire_selftest` all clean.

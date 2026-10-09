@@ -48,3 +48,13 @@ None.
 ## Advisory notes
 - Tombstones stay in `entries` with `pane: None`; behavior is correct per tests (list filters them).
 - Idle reply for `since = 0` against an all-deleted registry returns `cursor: head`, not `since`; the draft ADR-0021 sentence says `since`. Both resume correctly; S or O may reconcile the ADR text.
+
+## Re-verification at HEAD 95b7724 (after the S hold: ADR-0021 amendment, merge of origin/main, new edge-case test)
+No test was wrong and I changed none. Commits since the previous pass: 1d67ef3 (merge), 639f130 (ADR/brief), 4a75b54 (new test), 3b5e7ee (doc comments in `feed.rs`, `mod.rs`, `persist.rs`), 95b7724 (journal).
+- New test `an_idle_watch_from_zero_over_an_all_deleted_registry_answers_the_head` (`pane_handlers_test.rs:308`): handler tier, no sleep, asserts `{"events": [], "cursor": 2}` for the idle window; O's recorded mutation (idle window answering `since`) fails it alone. It pins AC 25 as amended and S's edge case. PASS.
+- Pane binaries: `pane_dispatch_test` 10, `pane_feed_test` 7, `pane_handlers_test` 7, `pane_registry_test` 14, all passed. 15 repeat runs of the four binaries: 0 failures.
+- `cargo clippy --workspace --all-targets -- -D warnings`: PASS. `cargo test --workspace --no-fail-fast -- --skip roster_stays_accurate_under_concurrent_body_load`: 1068 passed, 0 failed (the count includes the merged-in origin/main tests). `scripts/lint.sh`, `scripts/changelog-check.sh`, `cargo machete`, `docs_cli_test`, `wire_selftest`: all exit 0.
+- Files: tests max 523 lines, `panes/` max 340. Every `#[allow]` carries a `// #NNN` link. AC 27: `check_membership(` still matches `handlers.rs:111`. AC 30: the `pane_feed_test.rs` approval is journalled in decisions.md (O entry).
+- The advisory note above about the ADR sentence is resolved: ADR-0021 §6 now says the head.
+
+Blocking issues: None. Verdict: PASS.
