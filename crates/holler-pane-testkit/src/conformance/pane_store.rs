@@ -415,7 +415,8 @@ fn sample(name: &str) -> Result<Pane, String> {
     sample_pane(name).map_err(|e| format!("the fixture pane {name:?} cannot be built: {e}"))
 }
 
-fn pane_name(text: &str) -> Result<PaneName, String> {
+/// The pane name `text`. The profile scope suite reuses it.
+pub(super) fn pane_name(text: &str) -> Result<PaneName, String> {
     PaneName::parse(text).map_err(|e| format!("{text:?} is not a pane name: {e}"))
 }
 
