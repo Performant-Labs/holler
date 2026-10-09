@@ -134,3 +134,9 @@
     right reason. Two extra mutants failed too: retrying the first write fails case 10, and swallowing the act's error
     fails case 9.
   - Source facts are in `docs/handoffs/688/evidence.md`.
+
+## T (phase 7, verify GREEN + Tier 2)
+- **Decided:** PASS. Suite GREEN, Tier 1 matches F's report, no test repaired, no production change requested.
+- **Assumed:** F's AC6-AC8 git/grep outputs are accurate; I re-ran the workspace-level guards (clippy, test, lint, changelog, machete, docs_cli, wire_selftest) rather than each grep.
+- **Hedged:** Ran the two new targets 5 extra times to look for flakes; none.
+- **Evidence:** a no-op restore mutation failed 6 of 18 `fake_profile_scope_test` tests; reverted, tree clean. Details in handoff-T-green.md.
