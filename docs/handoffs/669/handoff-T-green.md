@@ -17,7 +17,7 @@ Spot-check that the tests pin behavior: temporarily guarding the new `is_pane_me
 ## Test repair (F's "Tests that look wrong" item 1)
 
 `crates/holler-hub/tests/pane_dispatch_test.rs` lines 1-6: the multi-line `#![allow(...)] // #669` failed lint check 1 (link not on the `#![allow(` line). Replaced by two single-line attributes, each with `// #669`:
-`#![allow(clippy::unwrap_used, clippy::expect_used)] // #669` and `#![allow(clippy::panic, clippy::unreachable)] // #669`. `rustfmt --check --edition 2021` is clean; same four lints, no behavior change. Item 2 (control/status reads `listening.json`, not hermetic for one read) is correct as written: read-only, shape-only assertion.
+`#![allow(clippy::unwrap_used, clippy::expect_used)] // #669` and `#![allow(clippy::panic, clippy::unreachable)] // #669`. `rustfmt --check --edition 2021` is clean; same four lints, no behavior change. Item 2 (control/status not hermetic) was first judged acceptable as read-only; S showed that is wrong, see the rework section below.
 
 ## Tier 1 results
 
@@ -56,3 +56,18 @@ None.
 - `serve.rs` wiring (`build_shared_state` -> `accept_loop`) has no automated test (private; A finding 3). F's live-hub check covers it; the holler-cli suites also run through the changed `serve_forever`.
 - Open for O, unchanged from F: A finding 2 (`check_membership` cannot see the stored record) and finding 7 (`pane_wiring.rs` placeholder); `rename.rs` stub deviates from the issue's word "empty" (reasoned in F's handoff).
 - CI's separately retried load-roster test and `--ignored` interop step were not run (the latter matches 0 tests per F).
+
+## Test-only rework (S, #678)
+
+S found that `an_existing_control_method_still_answers_through_the_new_dispatcher` sent `control/status`. That handler resolves `$HOME/.holler` (the test sets no `HOLLER_STATE_DIR`) and calls `identity::ensure`, which creates `$HOME/.holler/hub/identity.key` when none exists: the test wrote a private key into the real state dir of whoever ran it. Its match arm (control_server.rs:100) also precedes the new pane arm, so the probe could never fail because of this change.
+
+Changed in `crates/holler-hub/tests/pane_dispatch_test.rs` (no production code touched):
+- The probe now sends `control/roster` (in-memory only; reaches the `control/` prefix arm right after the new pane arm). It asserts no `error`, `result.rows == []`, and that the result does not parse as a `PaneReply`.
+- Comments naming `control/status` updated; the `connect()` doc comment ("the methods these tests send never resolve the state dir") is now true.
+- Fold-in (A-dup W2): `fresh_deps` calls `PaneDeps::load`, so that constructor is exercised.
+- Fold-in: the comment in the forwarding table test no longer implies a request follows `pane/watch`; it is the last entry of `PANE_METHODS`.
+
+Verification:
+- Ran `pane_dispatch_test` with `HOME` set to an empty scratch dir: 10/10 pass and `$HOME/.holler` is NOT created.
+- `rustfmt --check --edition 2021` on the file: clean; file is 360 lines.
+- `bash scripts/lint.sh` and `cargo clippy --workspace --all-targets -- -D warnings`: clean (final workspace test count recorded in the return message).

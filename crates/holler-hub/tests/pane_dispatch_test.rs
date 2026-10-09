@@ -54,7 +54,7 @@ struct Conn {
 }
 
 /// Start a connection served with `deps`. Registry, roster and lockout are fresh and
-/// real; a connection never needs the state dir, so none is touched.
+/// real; the methods these tests send never resolve the state dir, so none is touched.
 fn connect(deps: PaneDeps) -> Conn {
     let (client, server) = UnixStream::pair().unwrap();
     let registry = Registry::new();
@@ -95,11 +95,7 @@ impl Conn {
 fn fresh_deps() -> (PaneDeps, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
     let state = HubState::from_root(dir.path().to_path_buf());
-    let deps = PaneDeps {
-        panes: Arc::new(PaneState::load(&state)),
-        profiles: Arc::new(ProfileState::load(&state)),
-    };
-    (deps, dir)
+    (PaneDeps::load(&state), dir)
 }
 
 /// The reply's `result` parsed as a `PaneReply` and read back as a `Result`: this is
@@ -130,8 +126,9 @@ fn error_code(reply: &Value) -> i64 {
 async fn every_pane_method_is_forwarded_to_the_stub_not_method_not_found() {
     let (deps, _dir) = fresh_deps();
     let mut conn = connect(deps);
-    // One connection for the whole table: `pane/watch` is long-poll, so it answers
-    // once like the rest and the next request still gets its own reply.
+    // One connection for the whole table: every method, `pane/watch` (long-poll, last
+    // in the list) included, answers once and the connection stays usable for the
+    // next request.
     for (i, method) in PANE_METHODS.iter().enumerate() {
         let id = format!("h-pane-{i}");
         let reply = conn.call(&id, method).await;
@@ -185,19 +182,24 @@ async fn unknown_methods_still_answer_method_not_found() {
 async fn an_existing_control_method_still_answers_through_the_new_dispatcher() {
     let (deps, _dir) = fresh_deps();
     let mut conn = connect(deps);
-    let reply = conn.call("h-status-1", "control/status").await;
+    // `control/roster` reads only the in-memory roster, and it sits in the `control/`
+    // arm right behind the new pane arm. The other control handlers resolve the state
+    // dir from the environment (and `control/status` can mint a hub identity key
+    // there), which an in-process test must not touch.
+    let reply = conn.call("h-roster-1", "control/roster").await;
     assert!(
         reply.get("error").is_none(),
-        "control/status must still succeed: {reply}"
+        "control/roster must still succeed: {reply}"
     );
-    assert!(
-        reply.get("result").is_some(),
-        "control/status must still carry a result: {reply}"
+    assert_eq!(
+        reply["result"]["rows"],
+        json!([]),
+        "control/roster on a fresh roster must list no rows: {reply}"
     );
     // The control reply is the hub's own document, not a PaneReply.
     assert!(
         serde_json::from_value::<PaneReply>(reply["result"].clone()).is_err(),
-        "control/status was swallowed by the pane arm: {reply}"
+        "control/roster was swallowed by the pane arm: {reply}"
     );
 }
 

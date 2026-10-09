@@ -116,3 +116,9 @@
     - A privacy grep of all added lines (`kiwi` is an existing fixture label on 94 lines of main; otherwise loopback and an env var name).
     - `git log` of the branch commits (Conventional subjects; trailers without a session link).
   - Ran (targeted reproduction, not a Tier 1 re-run): built `pane_dispatch_test` and ran only `an_existing_control_method_still_answers_through_the_new_dispatcher` with `HOME` set to an empty scratch dir and `HOLLER_STATE_DIR` unset. It passed and left `.holler/hub/identity.key` (`-rw-------`); the scratch dir was then deleted.
+
+## T (test-only rework, #678)
+- Decided: switched the control-method probe in `pane_dispatch_test.rs` from `control/status` to `control/roster`; it is in-memory only, so the test no longer writes `$HOME/.holler/hub/identity.key`.
+- Assumed: S's reproduction is right; I confirmed the new test leaves a scratch `$HOME` untouched.
+- Hedged: none. Also folded in `fresh_deps` -> `PaneDeps::load` and a corrected comment on `pane/watch`.
+- Evidence: `HOME=<scratch> cargo test -p holler-hub --test pane_dispatch_test` -> 10 passed, no `.holler` dir created.
