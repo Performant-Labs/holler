@@ -59,3 +59,22 @@
 - **Assumed:** CI's own `--skip roster_stays_accurate_under_concurrent_body_load` is the right workspace invocation.
 - **Hedged:** AC 6 timing windows depend on a non-stepping wall clock (accepted in RED).
 - **Evidence:** workspace 1297 passed / 0 failed; five new binaries green over 5 repeats; mutation of `refuse_profile_move` and `check_name` each turned tests RED (production restored, tree clean); clippy, lint, changelog-check, docs_cli_test, wire_selftest, machete all clean. Handoff: `handoff-T-green.md`.
+
+## A (Phase 7, anti-duplication gate) — 2026-10-09T15:22:36-06:00
+- **Decided:** PASS on diff 9d61c9f..9026762, with 4 warns and no blocks (see handoff-A-dup.md).
+  - F extended the #639 pane registry through its documented seam and copied none of its shared parts (`persist`, `feed`, `run`/`NoParams`, the options, `log_fault`, `next_generation`, `reply_line`).
+  - The `profile::store::Store` mirror is the brief's written justification (D10). Its twins differ from `panes::store` only in the key, the entry type and `poll`'s event projection.
+  - `Table::from_doc` is ruled inside the accepted mirror (finding 1), although my Phase 3 list omitted it. It is the half of `load_table` that builds the table, and `load_table` was on the list.
+- **Assumed:**
+  - The testkit fake's near-verbatim twins of `refuse_profile_move`, `check_name` and `log_entry` are by design: the fake is dev-only, and #637 left these rules out of the port, so each implementation keeps its own and one conformance suite checks both.
+  - The per-binary local `Rig` follows #639's test convention.
+- **Hedged:**
+  - The A-dup gate has no channel to open an issue. The generalisation follow-up (Phase 3 finding 1, now finding 2) still does not exist, and a BLOCK would send F to fold the twin past the issue's `panes/**` limit. So it stays a warn, addressed to the run's merging agent or the operator before merge.
+  - The test-side copies (`pname` x3, `who` x2, the handler `Rig`) are warns, not blocks: none copies an existing `pane_support` helper, which is the brief's block rule.
+- **Evidence:**
+  - Read in full: `profile/{mod,store,entry,handlers}.rs`, `panes/{mod,store,persist,feed,handlers}.rs`, `tests/pane_support/mod.rs`, the five new test files and `pane_handlers_test.rs`.
+  - Diffs: `pane_dispatch_test.rs`, `pane_handlers_test.rs`, `CHANGELOG.md` and the three `panes/` files.
+  - Testkit `profile_store.rs:170-361` and `pane_store.rs` (the fake's `put` and `check_membership`).
+  - Normalised diff of `panes/store.rs` against `profile/store.rs`.
+  - Grep sweep of `profile/` for re-implemented pipeline, persist or feed pieces and for direct logging (none found).
+  - Survey of local helpers across the hub test binaries; `wc -l` on every touched file (max 415 production, 577 test).
