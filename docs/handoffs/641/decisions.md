@@ -19,3 +19,19 @@
   - Source read: `holler-pane/src/{ports,probe,argv,lib}.rs`, `error.rs:380-510`, `holler-pane-testkit/src/{host,lib}.rs`, `conformance/host.rs`, `tests/host_conformance_test.rs`, `holler-cli/src/pane/wiring.rs`, the precedent guard tests, `scripts/lint.sh`, `clippy.toml`, `.github/workflows/ci.yml`, `CHANGELOG.md` and the agent overlays.
   - `grep` checks: no production code spawns a process, nothing depends on `holler-adapter-host`, and no personal host name appears anywhere in the tree.
   - Three tmux 3.7c probes on private `-S` servers under `/tmp/hlr-a641-*`, each killed and deleted on exit. Commands and results are under "Probe evidence" in handoff-A.md.
+
+## O (brief amendment after A's BLOCK) — 2026-10-09
+- **Decided:** amended docs/handoffs/641-brief.md, applying A's Notes for O verbatim; no earlier decision reversed.
+  - B-1, B-2: Decision 13 (one pure escape for every value the adapter did not author; `#` doubled in the cwd; tmux output validated), AC 6d and 6g extended, AC 11 (real tmux) added, a Risks line.
+  - B-3: `with_kill_binary` (Decision 1), Decision 14 (no default-run test signals a pid it did not spawn), AC 6h.
+  - W-1: three deliberate narrowings listed in Decision 12; the cwd is checked only when the session would be created (`has-session` on a bad cwd).
+  - W-2: the `argv[0]`-contains-`=` refusal never echoes the element; `Unavailable.what` is never argv or cwd.
+  - W-3: on a non-window-gone `set-option` failure, `run` KILLs the printed pid's group through the kill seam first (AC 6i).
+  - W-4: AC 7's guard walks `CARGO_MANIFEST_DIR/src` at runtime, skipping `//` comments.
+  - W-5: AC 8 adds `scripts/lint.sh`, `scripts/changelog-check.sh`, workspace clippy; RED is T-landed signature-only stubs answering `not-implemented`.
+  - W-6: Decision 15 and two forward-compat rows (#646; #650/#654).
+  - W-7: follow-up for #663 to expose its bounded runner from holler-pane (the orchestrator files it).
+  - W-8: `pane_dead` 1 counts as gone; the tag invocation also sets the window's `remain-on-exit off`.
+  - W-9: the personal host name in the issue title stays out of every public artifact.
+- **Evidence:** O re-probed on a private `-S` server under `/tmp` (killed and deleted afterwards, no operator session touched): `-c "<dir>/q\;"` and `-c "<dir>/p##S"` give the exact session_path; `set-option ... @holler-pid N ; set-option ... remain-on-exit off` in one invocation sets both; with global `remain-on-exit on` a TERMed window lingers with `pane_dead` 1, while the window with its own `remain-on-exit off` is gone.
+- **Size:** ~+255 lines (~1,455 in all), same six crate files plus two mechanical; still one run.
