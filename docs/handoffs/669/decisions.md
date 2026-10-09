@@ -89,3 +89,30 @@
   - Read in full: `pane_dispatch.rs`, `panes/mod.rs`, `profile/mod.rs`, `profile/rename.rs`, `pane_wiring.rs`, `control_server.rs`, `tests/pane_dispatch_test.rs`; the `serve.rs` hunks and `serve.rs:337-381`.
   - Compared against: `control_hold.rs:1-80`, `holds.rs:280-330`, `circuit/admin.rs:36-44`, `circuit/auth.rs:40-53`, `control.rs:418-518` (`send_over` is private and opens by path), `holler-pane/src/reply.rs`, `holler-pane/src/error.rs` (22 codes), `holler-pane/tests/common/mod.rs`, `holler-cli/tests/support/mod.rs` (`StateDir`, `Hub`), and the existing hub tests' temp-dir setup.
   - Searches: `struct *Deps`, `handle_control_conn` callers, `is_pane_method`/`PANE_METHODS` users, `-32601` in tests, `as _;` dev-dependency links, `compile_fail`/`IS_CLONE` probes, the `hj-c1r1`/`sample_pane`/`pane_json` fixtures. ADR-0003 and ADR-0006 contain no rule on control-socket error replies. Issue #669 was read with `gh issue view`. The sibling #670 diff touches only `holler-cli` and `Cargo.lock`, so it does not overlap this slice's hub code.
+
+## S (Phase 10, spec audit) — 2026-10-09T06:56:49-06:00
+- **Decided:**
+  - REWORK, test-only (no `src/` change); see handoff-S.md. All 8 acceptance criteria are met; MO decisions 0-5 are implemented as stated; build guards, protocol, docs, privacy and scope are clean.
+  - The one required change: `pane_dispatch_test.rs:184-202` (`an_existing_control_method_still_answers_through_the_new_dispatcher`) must send `control/roster`, not `control/status`.
+    - `control/status` runs `status_doc`, which resolves `$HOME/.holler` (the test sets no `HOLLER_STATE_DIR`) and calls `identity::ensure`. That creates `$HOME/.holler/hub/` and, when absent, persists a new hub private key `identity.key` in the real state dir of whoever runs `cargo test`.
+    - Its exact arm (`control_server.rs:100`) also precedes the new arm (`:117`), so the probe cannot fail because of the change.
+    - `control/roster` is in memory, and it goes through the `control/` arm that follows the new one.
+  - Accepted F's `rename.rs` deviation (a routed `not-implemented` stub instead of an empty file). The issue texts conflict: #665's "empty, so you edit none of #661's files" versus #661's six-handler scope without `profile/rename`. The deviation is recorded, behaviour-neutral, and the smallest fix; not a hold, since reverting it would restore the defect.
+  - Accepted the `mod.rs` exception (recorded) and the bundle-seam reading of AC 3 (A Phase 3 W3).
+- **Assumed:**
+  - The holler-cli suites in T-green's 937-pass run exercise the session `control/*` methods through `holler hub serve`, so AC 2's "existing control methods unchanged" rests on them, not on the in-file probe.
+  - The workflow script commits this entry and the handoff; S commits nothing.
+- **Hedged:**
+  - The key-minting side effect is low in security impact: a random key, mode 0600. It is still a write of a long-lived secret into operator state outside the test sandbox. On a hub host, the test reads the live hub's state dir. That is why it is REWORK, not advisory.
+  - `profile_dispatch_takes_both_handles_and_routes_rename_to_the_stub` cannot distinguish the rename route from the `_` arm (both answer `not-implemented`). The route is checked by reading only; advisory.
+  - A Phase 3 W2 (`check_membership` inputs) and W7 (`pane_wiring.rs` placeholder) remain open for O.
+- **Evidence:**
+  - Read: the brief, issue #669 (and #661 and #665 for the rename seam) via `gh issue view`, all handoffs in `docs/handoffs/669/`, and the full diff `origin/main...HEAD` (20 paths).
+  - Read: `control_server.rs:1-200, 461-475, 703-713`, `serve.rs:338-590`, `control_status.rs:23-63`, `identity.rs:90-121`, `state.rs:33-65`, `roster.rs:536-555`, `holler-pane/src/reply.rs:48-102`, `holler-proto/src/methods.rs:112-143`, `docs/testing.md:1-175`, `CONTRIBUTING.md:15-37`.
+  - Ran (read-only fact checks):
+    - `wc -l` on the touched files (control_server.rs 837, serve.rs 838).
+    - `rustfmt --check --edition 2021` on the six new `.rs` files (exit 0).
+    - Greps of the added production lines for unwrap/expect/panic/unreachable/allow/unsafe (only the `#184` note).
+    - A privacy grep of all added lines (`kiwi` is an existing fixture label on 94 lines of main; otherwise loopback and an env var name).
+    - `git log` of the branch commits (Conventional subjects; trailers without a session link).
+  - Ran (targeted reproduction, not a Tier 1 re-run): built `pane_dispatch_test` and ran only `an_existing_control_method_still_answers_through_the_new_dispatcher` with `HOME` set to an empty scratch dir and `HOLLER_STATE_DIR` unset. It passed and left `.holler/hub/identity.key` (`-rw-------`); the scratch dir was then deleted.
