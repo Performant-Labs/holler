@@ -3,16 +3,18 @@ name = "holler-pane-testkit"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Fake ports and a conformance suite every pane adapter must pass (empty in the workspace skeleton)"
+description = "Fake ports and the conformance suites every pane adapter and store must pass"
 
 [lib]
 name = "holler_pane_testkit"
 path = "src/lib.rs"
 
 # Declare only what is consumed (issue #155 §7 — `cargo machete` fails CI
-# otherwise). The crate is an empty skeleton; its owning story adds the
-# dependencies it uses.
+# otherwise).
 [dependencies]
+# The ports the fakes implement and the suites drive (`PaneStore`, `Pane`, `PaneError`,
+# `next_generation`); for every fake and suite in this crate.
+holler-pane = { path = "../holler-pane" }
 
 # Workspace lints (issue #149).
 [lints]

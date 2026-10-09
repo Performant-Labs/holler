@@ -1238,6 +1238,9 @@ dependencies = [
 [[package]]
 name = "holler-pane-testkit"
 version = "0.4.0"
+dependencies = [
+ "holler-pane",
+]
 
 [[package]]
 name = "holler-proto"
