@@ -83,3 +83,63 @@ S asked that the shared test scaffolding stop pinning sibling stubs and `Wiring:
 Verification (worktree, after the rework): `cargo test --workspace` 1029 passed, 0 failed (was 1023; net +6 from the new parse, matrix and consistency tests, minus the two deleted duplicates); `pane_verbs` 59, `profile_verbs` 8, `pane_cli_process` 34, `cli_surface_test` 3, `docs_cli_test` 3, `wire_selftest` 3 all pass; `cargo clippy --workspace --all-targets -- -D warnings` clean; `scripts/lint.sh` and `changelog-check.sh` clean; `cargo machete` clean; the touched test files are rustfmt-clean. Grep over `crates/holler-cli/tests` finds `not implemented (story #` only in `stub.rs` (the stub table and the two legacy-refusal constants) and the story-parameterised `assert_stub_routes` format string, and no `Wiring` anywhere. Largest touched test file is `docs_rows.rs` at 256 lines.
 
 Not done (S advisory, outside T's remit): rebase onto `origin/main` (#669; CHANGELOG conflict), PR-body AI disclosure, and the #649/#634/#644/#648 notes.
+
+## Rework 2: S pass 2 (REWORK: one production item, three test items)
+
+**Date:** 2026-10-09. **Branch:** issue-670-implementation at 02a3655 (F's `prompt_target.rs` fix is committed; T's edits below are uncommitted). **Handoff-F reviewed:** the "Rework 1" section of `handoff-F.md`. F listed no test as wrong.
+
+### What T changed (tests and manifest comments only; no `src/` file)
+
+1. **S item 1, the proving tests** (F's fix: `resolve_tail` refuses more than two positionals in the SESSION form):
+   - `crates/holler-cli/tests/pane_verbs/target_flags.rs`: `an_extra_positional_split_off_the_session_form_by_a_flag_is_refused` (the four argv forms S named; asserts `parse` is Ok, the premise, then that `resolve` is an `Err` containing `positionals`, so it is the accessor's `Usage` and not a clap error) and `a_flag_between_session_and_text_still_resolves_to_both` (`say`, `interrupt`, `answer` valid split forms resolve by value; the guard).
+   - `crates/holler-cli/tests/pane_verbs/process/legacy_verbs.rs`: two rows added to the table of `a_malformed_pane_form_is_a_usage_error_not_a_refusal` (9 to 11 cases): `say io/alpha hello --queue extra` and `say --profile demo io/alpha hello --queue extra` exit 2, stdout empty, stderr names `positionals`, is not the #646 refusal and has no `no live holler hub` text (the second row pins that usage wins over the refusal). The loop now also fails on a `no live holler hub` line for every row.
+2. **S item 2** (`process/stub.rs`): the `STUBS` doc now says a story deletes its own entries and keeps its `// #NNN` line, with the reason (adjacent deletions conflict); the doc of `PANE_FORM_REFUSAL` says #646 keeps its `// #646` line and the blank line below. Comments only.
+3. **S item 3** (`process/legacy_verbs.rs`): the one `use` line importing both refusal constants is two lines, `PANE_FORM_REFUSAL as PANE_REFUSAL` and `ROSTER_PROFILE_REFUSAL as ROSTER_REFUSAL`, so #646 and #648 each touch only their own `use` line (rustfmt keeps them separate; they are adjacent lines, but each story edits its own line only).
+4. **S item 4, stale comments:** `process/main.rs` module doc no longer lists the flag matrix among what only the binary can show (it points to `flags.rs` and `pane_verbs/{launch,relaunch}.rs`); `Cargo.toml` comments now say the in-process targets run over the ports a test gives them (`Unwired` by default), and that `pane_cli_process` is its own target so a change to the in-process harness cannot break it, and that it builds only `verb_harness/parse.rs`.
+
+### RED proof (the new tests against the pass-1 `resolve_tail`)
+
+With `prompt_target.rs` temporarily replaced by `git show 51f3bed:crates/holler-cli/src/prompt_target.rs` (restored with `git checkout`; tree confirmed free of any `src/` change):
+
+```
+cargo test -p holler-cli --test pane_verbs target_flags
+  an_extra_positional_split_off_the_session_form_by_a_flag_is_refused ... FAILED   (resolve returned Ok for the first argv: the assertion about the missing refusal)
+  a_flag_between_session_and_text_still_resolves_to_both ... ok                    (guard: passes before and after)
+  17 passed; 1 failed
+cargo test -p holler-cli --test pane_cli_process
+  a_malformed_pane_form_is_a_usage_error_not_a_refusal ... FAILED
+    holler ["say","io/alpha","hello","--queue","extra"]: want exit 2 naming "positionals"; got code 1, stderr "error: no live holler hub reachable at /tmp/holler-test-..."
+    holler ["say","--profile","demo","io/alpha","hello","--queue","extra"]: want exit 2 naming "positionals"; got code 1, stderr "error: not implemented (story #646)"
+  33 passed; 1 failed
+```
+
+Both fail on the missing behaviour (not a compile or setup error), exactly the "before" F recorded.
+
+### GREEN (the fixed code, 02a3655)
+
+```
+cargo test -p holler-cli --test pane_verbs --test profile_verbs --test pane_cli_process --test docs_cli_test --test cli_surface_test
+  pane_verbs 61, profile_verbs 8, pane_cli_process 34, docs_cli_test 3, cli_surface_test 3: all passed
+cargo test --workspace --no-fail-fast      (run 2, nothing else running)
+  exit 0; 98 binaries, 1031 passed, 0 failed, 5 ignored   (T-green's 1029 + the 2 new in-process tests; the process test is a table row)
+cargo clippy --workspace --all-targets -- -D warnings    clean
+bash scripts/lint.sh                                      exit 0 (600-line warns only; no file near 900)
+bash scripts/changelog-check.sh                           ok
+cargo machete                                             no unused dependencies
+rustfmt --check --edition 2021 on the touched test files  clean (only the pre-existing diffs in tests/support/{cmds,hold_rig}.rs, which this branch does not touch)
+```
+
+F's Tier 1 numbers reproduce (`pane_verbs` 59 became 61 with my two tests). The earlier targets F listed (`talk_test` 18, `interrupt_test` 11, `answer_cli_test` 11, `cli_invocation_test` 14) pass inside the workspace run.
+
+### Flake observed (not #670)
+
+Workspace run 1 (right after a full rebuild) failed 7 of the 11 tests in `interrupt_test`, each in `wait_warm` with the body `reconnecting` / `io disconnected mid-turn` (`support/warmup.rs:136`). No quota error (`/tmp` had 7.5 GB free). `interrupt_test` alone passed 3 of 3 (11/11 each), and the second full workspace run was fully green. The failing path is hub/body reconnection under load, which this change does not touch (`interrupt_cmd.rs` runs after the warm-up, which is where it failed). Worth knowing for the run's CI check: this target has a load-sensitive warm-up; I did not diagnose it.
+
+### Blocking issues
+
+None. Production code is unchanged by T.
+
+### Advisory notes
+
+- S re-audits AC 4 against the two new tests plus the table rows.
+- The earlier advisory list above stands. The three T edits are uncommitted; O/the script commits them.

@@ -7,7 +7,8 @@
 //! here holds no hub, so a verb that went on to contact one would fail with a different
 //! message, and these assert the refusal line itself.
 
-use crate::stub::{PANE_FORM_REFUSAL as PANE_REFUSAL, ROSTER_PROFILE_REFUSAL as ROSTER_REFUSAL};
+use crate::stub::PANE_FORM_REFUSAL as PANE_REFUSAL;
+use crate::stub::ROSTER_PROFILE_REFUSAL as ROSTER_REFUSAL;
 use crate::{assert_no_failures, holler};
 
 /// Every form that names a pane or a profile on `say`, `interrupt` and `answer`.
@@ -74,7 +75,7 @@ fn roster_profile_is_refused_with_the_roster_story() {
 /// its message is not the story-646 refusal.
 #[test]
 fn a_malformed_pane_form_is_a_usage_error_not_a_refusal() {
-    let cases: [(&[&str], &str); 9] = [
+    let cases: [(&[&str], &str); 11] = [
         (&["say"], "session"),
         (&["say", "io/alpha"], "text"),
         (&["say", "--pane", "demo-c1r1"], "text"),
@@ -84,6 +85,24 @@ fn a_malformed_pane_form_is_a_usage_error_not_a_refusal() {
         (&["answer"], "session"),
         (&["answer", "io/alpha"], "choice"),
         (&["answer", "--pane", "demo-c1r1"], "choice"),
+        // A flag between positionals lets clap accept a third one; the accessor refuses it,
+        // before the #646 refusal and before any hub is contacted.
+        (
+            &["say", "io/alpha", "hello", "--queue", "extra"],
+            "positionals",
+        ),
+        (
+            &[
+                "say",
+                "--profile",
+                "demo",
+                "io/alpha",
+                "hello",
+                "--queue",
+                "extra",
+            ],
+            "positionals",
+        ),
     ];
     let mut failures = Vec::new();
     for (argv, names) in cases {
@@ -92,6 +111,7 @@ fn a_malformed_pane_form_is_a_usage_error_not_a_refusal() {
         if out.code != 2
             || !out.stdout.is_empty()
             || out.stderr_has_line(PANE_REFUSAL)
+            || lower.contains("no live holler hub")
             || !lower.contains(names)
         {
             failures.push(format!(

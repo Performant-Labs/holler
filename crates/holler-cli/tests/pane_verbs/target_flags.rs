@@ -90,6 +90,69 @@ fn say_with_a_third_positional_is_still_refused_by_clap() {
     assert!(parse(&["say", "io/alpha", "hello", "extra"]).is_err());
 }
 
+/// `num_args` bounds the values of one occurrence only, so a flag between positionals
+/// starts another and clap accepts a third positional there. The accessor must refuse it
+/// (the issue: "missing or extra positionals return the existing `cli::Usage`"), as
+/// `origin/main`'s fixed `session` + `text` positionals did through clap. Parsing is
+/// asserted first: that clap accepts the argv is the premise of the test.
+#[test]
+fn an_extra_positional_split_off_the_session_form_by_a_flag_is_refused() {
+    for args in [
+        &["say", "io/alpha", "hello", "--queue", "extra"][..],
+        &["say", "io/alpha", "--timeout", "5m", "fix", "it"],
+        &[
+            "interrupt",
+            "io/alpha",
+            "--server",
+            "ws://127.0.0.1:1",
+            "stop",
+            "now",
+        ],
+        &[
+            "answer",
+            "io/alpha",
+            "--server",
+            "ws://127.0.0.1:1",
+            "1",
+            "2",
+        ],
+    ] {
+        assert!(
+            parse(args).is_ok(),
+            "{args:?}: clap accepts the split form (the premise of this test)"
+        );
+        let err = resolve(args).expect_err(&format!("{args:?}: a third positional is refused"));
+        assert!(
+            err.contains("positionals"),
+            "{args:?}: refused by the accessor's Usage, not by a parse error: {err}"
+        );
+    }
+}
+
+/// The valid split form is unchanged: a flag between SESSION and TEXT still resolves to
+/// both, as it does on `origin/main`.
+#[test]
+fn a_flag_between_session_and_text_still_resolves_to_both() {
+    assert_eq!(
+        resolve(&["say", "io/alpha", "--queue", "hello"]),
+        Ok(expect(session("io/alpha"), Some("hello")))
+    );
+    assert_eq!(
+        resolve(&[
+            "interrupt",
+            "io/alpha",
+            "--server",
+            "ws://127.0.0.1:1",
+            "stop"
+        ]),
+        Ok(expect(session("io/alpha"), Some("stop")))
+    );
+    assert_eq!(
+        resolve(&["answer", "io/alpha", "--server", "ws://127.0.0.1:1", "1"]),
+        Ok(expect(session("io/alpha"), Some("1")))
+    );
+}
+
 #[test]
 fn interrupt_session_resolves_with_and_without_redirect_text() {
     assert_eq!(

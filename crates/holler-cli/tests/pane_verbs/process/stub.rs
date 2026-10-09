@@ -9,9 +9,11 @@ use crate::{assert_no_failures, holler, PANE_VERBS, PROFILE_VERBS};
 /// Every verb that is still a stub, with the story that owns it. The only place in the
 /// shared process tests that names a stub's owning story.
 ///
-/// Grouped by story, each group under its own `// #NNN` comment line, so a verb story
-/// deletes exactly its own group when its verb stops being a stub and no one else's
-/// lines move. (`PANE_VERBS` and `PROFILE_VERBS` keep the verb itself.)
+/// Grouped by story, each group under its own `// #NNN` comment line. A verb story
+/// deletes its own entries when its verb stops being a stub and **keeps its `// #NNN`
+/// line**: two stories that delete whole groups, header included, delete adjacent lines,
+/// and git reports that as a conflict. (`PANE_VERBS` and `PROFILE_VERBS` keep the verb
+/// itself.)
 pub const STUBS: &[(&str, &str, u32)] = &[
     // #643
     ("pane", "list", 643),
@@ -45,6 +47,8 @@ pub const STUBS: &[(&str, &str, u32)] = &[
 ];
 
 /// The refusal of `say`/`interrupt`/`answer` with `--pane` or `--profile`, until story #646.
+/// That story deletes the constant and keeps its `// #646` line and the blank line below,
+/// so the two stories' deletions do not touch adjacent lines.
 // #646
 pub const PANE_FORM_REFUSAL: &str = "error: not implemented (story #646)";
 

@@ -234,3 +234,15 @@
     - Two earlier full runs: one green before a comment-only edit, and one with 14 failures that I caused by compiling a scratch probe into the quota-limited `/tmp` while it ran (12 print `Disk quota exceeded`, one is a knock-on `NotFound`, one is a `connection_lost` race). Its three targets (`hold_hub_test`, `hub_hygiene_test`, `interrupt_test`) pass alone (16, 14, 11), and so did the clean run above. Logs: the scratchpad's `workspace-test*.log`.
   - **Read:** handoff-S.md (pass 2) and the other handoffs of this run, the brief, issue #670, `prompt_target.rs`, `cli.rs`, the three `*_cmd.rs`, `target_flags.rs`, `legacy_verbs.rs`, `origin/main`'s `cli.rs`.
   - Source facts F relies on: `docs/handoffs/670/evidence.md`, section "Rework 1".
+
+## T (phase 7, rework 2): S pass 2 items 1-4
+
+- **Decided:**
+  - **Item 1 proof at the cheapest tier, plus one binary row.** Two in-process tests in `target_flags.rs` (refusal of the four split forms, asserting clap accepts them first; the valid split form as a guard), and two rows in the existing malformed-form table of `legacy_verbs.rs`, not a new process test (cheaper, no duplication). The second row (`--profile demo ... --queue extra`) pins usage-before-refusal.
+  - **Assert on `positionals`** in the message, the substring F named, so the test tells the accessor's `Usage` from a clap parse error without pinning the full wording.
+  - **Items 2-4 done as S worded them:** the doc/comment rewrites for `STUBS`, the two refusal constants, `process/main.rs` and the `Cargo.toml` comments; one `use` line per refusal constant.
+- **Assumed:** adjacent `use` lines are acceptable for item 3: each story edits only its own line, and git conflicts only on overlapping or adjacent *changed* hunks of the same line pair; S asked for "its own `use` line", not a separating unchanged line, and rustfmt would not keep a blank line. Hedge: if S meant a separating line, the `use` lines can be separated by a comment line.
+- **Hedged:**
+  - The `interrupt_test` warm-up failures in workspace run 1 are a load flake I did not diagnose; evidence is run 1 vs run 2 and the three solo passes.
+  - The Cargo.toml reason "a change to the in-process harness cannot break it" is true of `verb_harness/mod.rs`; `pane_cli_process` still compiles `verb_harness/parse.rs`, which the in-process targets share.
+- **Evidence:** RED against `git show 51f3bed:crates/holler-cli/src/prompt_target.rs` (1 failing in-process test, 1 failing process test with the two new rows), GREEN on 02a3655: 1031 passed, 0 failed, 5 ignored; clippy, lint, changelog-check, machete clean. Details in `handoff-T-green.md`, "Rework 2".

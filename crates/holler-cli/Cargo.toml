@@ -474,8 +474,9 @@ workspace = true
 # under these directories so a verb story edits only its own file, never this
 # manifest.
 #
-# In-process verb tests: a stub's `run` over captured writers and the stub
-# wiring's `Ports` (tests/verb_harness/mod.rs). One target per namespace.
+# In-process verb tests: a verb's `run` over captured writers and the `Ports`
+# the test gives it, `Unwired` by default (tests/verb_harness/mod.rs). One
+# target per namespace.
 [[test]]
 name = "pane_verbs"
 path = "tests/pane_verbs/main.rs"
@@ -485,11 +486,12 @@ name = "profile_verbs"
 path = "tests/profile_verbs/main.rs"
 
 # Process-level tests of the whole pane/profile surface: the real `holler`
-# binary, every stub verb, `--format`/`--json`, usage errors, the flag matrix,
-# the legacy verbs' `--pane`/`--profile` refusal, and the ADR 0003 and fixture
-# rows. Lives under tests/pane_verbs/ (the story's blast radius) but is its own
-# target so that it builds without the in-process API the two targets above
-# exercise.
+# binary, every stub verb, `--format`/`--json`, usage errors, which flag parses
+# where, the legacy verbs' `--pane`/`--profile` refusal, and the ADR 0003 and
+# fixture rows. Lives under tests/pane_verbs/ (the story's blast radius) but is
+# its own target so that a verb story's change to the in-process harness
+# (tests/verb_harness/mod.rs) cannot break it; it builds only the parse-only
+# helpers (tests/verb_harness/parse.rs).
 [[test]]
 name = "pane_cli_process"
 path = "tests/pane_verbs/process/main.rs"

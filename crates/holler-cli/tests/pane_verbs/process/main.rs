@@ -8,11 +8,12 @@
 //!
 //! What lives here is what only the binary can show: that `main.rs` dispatches `pane`
 //! and `profile`, that `--format`/`--json` choose the output, that a usage error under
-//! those two subcommands (and only those) is an envelope, that the flag matrix parses,
-//! that `say`/`interrupt`/`answer`/`roster` refuse `--pane` and `--profile` before they
-//! contact a hub, and that ADR 0003 and the CLI fixture carry the new rows. The
-//! per-verb routing inside a stub is tested in-process by `pane_verbs` and
-//! `profile_verbs`.
+//! those two subcommands (and only those) is an envelope, that `say`/`interrupt`/
+//! `answer`/`roster` refuse `--pane` and `--profile` before they contact a hub, and that
+//! ADR 0003 and the CLI fixture carry the new rows. The per-verb routing inside a stub
+//! is tested in-process by `pane_verbs` and `profile_verbs`. Which flag parses where is
+//! asked of the clap tree in-process (`flags.rs`; the positive spec-flag matrix is in
+//! `pane_verbs/{launch,relaunch}.rs`).
 //!
 //! Stderr is never asserted empty: the `logging_started` banner is always on it. What
 //! is asserted is the refusal line, and that stdout holds exactly what the contract
