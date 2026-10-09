@@ -31,6 +31,14 @@ fills this file in at release time.
   method still answers `method_not_found`, the `control/*` methods behave as before, and the closed 22-row wire
   catalog and every golden file are unchanged. Plumbing only: no registry, persistence, CLI verb or adapter
   yet ([#669](https://github.com/Performant-Labs/holler/issues/669)).
+- [ADR 0021](docs/adr/ADR-0021.md), the pane control plane (epic [#633](https://github.com/Performant-Labs/holler/issues/633)):
+  ratifies the pane and profile records, the ports, the verbs and invariants I1 to I8 as merged, and decides what the epic
+  left open: where the two registries persist on the hub (`panes.json` and `profiles.json`, failing closed when corrupt), how
+  generations fence concurrent writers, the write order of an edit made through `--profile`, the two error-code casings and
+  how they are kept apart, the `--format=json` envelope and its exit codes, how attach mode relates, and the migration from
+  the launcher's files. The operation id for long work is deferred to #644, and the points that need the operator are listed.
+  Protocol v2 is unchanged; its "Not in v2" section now notes that the `pane/*` and `profile/*` methods are control-socket
+  methods outside the wire catalog ([#634](https://github.com/Performant-Labs/holler/issues/634)).
 
 ## [0.4.0] - 2026-09-29
 
