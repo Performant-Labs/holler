@@ -246,3 +246,32 @@
   - The `interrupt_test` warm-up failures in workspace run 1 are a load flake I did not diagnose; evidence is run 1 vs run 2 and the three solo passes.
   - The Cargo.toml reason "a change to the in-process harness cannot break it" is true of `verb_harness/mod.rs`; `pane_cli_process` still compiles `verb_harness/parse.rs`, which the in-process targets share.
 - **Evidence:** RED against `git show 51f3bed:crates/holler-cli/src/prompt_target.rs` (1 failing in-process test, 1 failing process test with the two new rows), GREEN on 02a3655: 1031 passed, 0 failed, 5 ignored; clippy, lint, changelog-check, machete clean. Details in `handoff-T-green.md`, "Rework 2".
+
+## A (Phase 7, anti-duplication gate, pass 3) — 2026-10-09T09:06:17-06:00
+- **Decided:** PASS on f2602ba...4876a4c, with 1 warn and no blocks. handoff-A-dup.md is rewritten for this pass; pass 2 is that file at 51f3bed. This cycle is 51f3bed..4876a4c.
+  - **F extended what the map named.** `resolve_tail` in `prompt_target.rs` refuses a third positional in the SESSION form with the existing `cli::Usage`. The check was added in place, beside the `--pane` arm's check, and reuses `Tail::forms()`. There is no new function, type or error type, and no signature changed.
+  - **T's proving tests reuse what was there.** The in-process tests use `target_flags.rs`'s own `parse`/`resolve`/`expect`/`session`. The binary cases are two rows in the existing table of `legacy_verbs.rs`.
+  - **Settled from pass 2:** W-1(a) (keep the `// #NNN` line in `STUBS`) and W-3 (out-of-date comments).
+- **Decided (warn):**
+  - **W-1: S pass 2's item 3 (pass-2 W-1(b)) is not settled.** The two refusal imports at `legacy_verbs.rs:10-11` are separate lines, but adjacent ones. #646 and #648 must each delete theirs, and git reports deletions on adjacent lines as a conflict.
+  - **The fix:** a `// #646` line above the first `use` and a `// #648` line above the second, the convention `stub.rs` uses. Each story keeps its comment line. Owner: T.
+  - **This corrects the "Assumed" of T's rework-2 entry above.** That entry says adjacent `use` lines do not conflict and rustfmt would not keep a separating line. Both are wrong (Evidence).
+- **Assumed:**
+  - #646 and #648 can land in parallel. Each deletes its refusal constant (the `stub.rs` doc says so for #646, and "until story #648" for #648) or its last use, so each must delete its own `use` line.
+  - Phase 7 blocks only a parallel path. This finding is a layout issue in a test file, so it is a warn, as in pass 2.
+- **Hedged:**
+  - I did not run the test suite. GREEN rests on T's rework-2 run: 1031 passed, 0 failed.
+  - The two-positional limit is stated twice, in clap's `num_args` and in `resolve_tail`. I did not flag it. Both are needed (clap refuses the contiguous form, the accessor the split form), F recorded the coupling, and changing `num_args` alone still refuses the extra positional.
+- **Evidence:**
+  - **Diff:** `git diff 51f3bed..4876a4c`. The only `src/` file is `prompt_target.rs`; the rest is four test files, two manifest comments and handoffs.
+  - **Read in full:** `prompt_target.rs`, `target_flags.rs`, `process/{legacy_verbs,main,stub}.rs`, the manifest's test-target comments, `cli.rs:280-600` (`Query::resolve`, `Usage`, `Say`, `Interrupt`, `Answer`), the head of `verb_harness/parse.rs`, and handoff-S, handoff-F and the T-green "Rework 2" section.
+  - **Scratch git repo** (in the session scratchpad, deleted afterwards), on copies of this branch's files:
+    - deleting `legacy_verbs.rs` line 10 on one side and line 11 on the other gives `CONFLICT (content)`;
+    - the same deletions with a blank line, or a `// #NNN` line above each `use`, merge cleanly, and both layouts pass `rustfmt --check --edition 2021`. The `// #NNN` layout also passes inside the repo, which has no rustfmt config;
+    - `STUBS` entries-only deletions (#643 against #644) merge cleanly;
+    - the two refusal constants deleted as the new `stub.rs` doc says merge cleanly.
+  - **Greps:**
+    - `no live holler hub` (11 existing CLI tests match the literal; there is no shared constant);
+    - `positionals` and `num_args` in `src`;
+    - the blast radius over `git diff --name-only f2602ba...HEAD` (82 paths, all inside).
+  - **Merge with main:** `git merge-tree` against `origin/main` (1c48c30) conflicts in `CHANGELOG.md` only, and `origin/main` changes nothing in `holler-cli`.
