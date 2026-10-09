@@ -79,9 +79,9 @@ impl ProfileStore for MemProfileStore {
         Ok(())
     }
     fn watch(&self, _since: Cursor) -> Result<Watch<ProfileEvent>, PaneError> {
-        Ok(Box::new(
-            std::iter::empty::<Result<ProfileEvent, PaneError>>(),
-        ))
+        Ok(Box::new(std::iter::empty::<
+            Result<Option<ProfileEvent>, PaneError>,
+        >()))
     }
     fn log(&self, _name: &ProfileName) -> Result<Vec<ProfileLogEntry>, PaneError> {
         Ok(Vec::new())

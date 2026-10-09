@@ -40,12 +40,22 @@ pub struct Cursor(pub u64);
 ///   current state), then every later change.
 /// - Passing the cursor of the last event seen back as `since` resumes without a
 ///   gap or a repeat.
-/// - `next()` blocks for at most I5's bound. When nothing happened in that time it
-///   yields `Err(PaneError::Timeout)` and the stream stays usable; any other error
-///   ends it (call `watch` again). The hub's long-poll answers one batch per request.
-pub type Watch<T> = Box<dyn Iterator<Item = Result<T, PaneError>> + Send>;
+/// - `next()` blocks for at most I5's bound and yields one of three things:
+///   - `Ok(Some(change))`: the next change;
+///   - `Ok(None)` (the item, not the end of the iterator): **idle**, nothing happened
+///     within the bound. This is an ordinary outcome, as in the hub's `control/wait`,
+///     and the stream stays usable. A hub long-poll that sees it answers
+///     `{events: [], cursor}`;
+///   - `Err(..)`: a failure. `Err(PaneError::Timeout)` means the store did not
+///     answer within the bound (a wedged store), never "idle". Any error ends the
+///     stream (call `watch` again).
+pub type Watch<T> = Box<dyn Iterator<Item = Result<Option<T>, PaneError>> + Send>;
 
 /// The registry of panes, kept by the hub (#639) and faked by the test kit (#638).
+///
+/// **Blocking.** Every method is synchronous. Call from `spawn_blocking` (or a
+/// thread) in async code. Every method returns within I5's bound (default 10 s) or
+/// with [`PaneError::Timeout`]. An implementation is `Send + Sync`.
 ///
 /// Every write is a compare-and-swap on the pane's `generation` (see
 /// [`crate::generation`]); a stale one is `generation-conflict`.
@@ -62,7 +72,9 @@ pub trait PaneStore: Send + Sync {
 
     /// Remove a pane's record if it is still at `expected_generation`. `close`
     /// uses it, so a closed pane's record does not outlive the pane. A stale
-    /// generation is `generation-conflict`.
+    /// generation is `generation-conflict`; a record that does not exist is
+    /// `pane-not-found`, whatever `expected_generation` is (a missing record is
+    /// checked first, so no store has to guess which of the two to answer).
     fn delete(&self, name: &PaneName, expected_generation: u64) -> Result<(), PaneError>;
 
     /// The changes after `since`, in order (see [`Watch`] for the cursor rules).
@@ -106,6 +118,10 @@ impl Key {
 /// Herdr, reached over its local socket (the adapter is `holler-adapter-herdr`,
 /// #640). **Provisional** until spike #636 reports.
 ///
+/// **Blocking.** Every method is synchronous. Call from `spawn_blocking` (or a
+/// thread) in async code. Every method returns within I5's bound (default 10 s) or
+/// with [`PaneError::Timeout`]. An implementation is `Send + Sync`.
+///
 /// Only the adapter converts a [`GridPos`] to Herdr's own order and base.
 pub trait HerdrPort: Send + Sync {
     /// Make a pane exist at `spec.grid` by issuing right/down splits, or fail
@@ -133,6 +149,10 @@ pub trait HerdrPort: Send + Sync {
 
 /// The machine a pane lives on: tmux sessions and the processes in them (the adapter
 /// is `holler-adapter-host`, #641).
+///
+/// **Blocking.** Every method is synchronous. Call from `spawn_blocking` (or a
+/// thread) in async code. Every method returns within I5's bound (default 10 s) or
+/// with [`PaneError::Timeout`]. An implementation is `Send + Sync`.
 pub trait HostPort: Send + Sync {
     /// Make the tmux session `name` exist, working in `cwd`.
     fn ensure_session(&self, name: &PaneName, cwd: &str) -> Result<(), PaneError>;
@@ -149,6 +169,10 @@ pub trait HostPort: Send + Sync {
 
 /// The harness server of a pane and its sessions (the adapter is
 /// `holler-adapter-opencode`, #642). **Provisional** until spike #635 reports.
+///
+/// **Blocking.** Every method is synchronous. Call from `spawn_blocking` (or a
+/// thread) in async code. Every method returns within I5's bound (default 10 s) or
+/// with [`PaneError::Timeout`]. An implementation is `Send + Sync`.
 pub trait HarnessPort: Send + Sync {
     /// Start the harness server for `name` on `port`; returns its process id.
     fn serve(&self, name: &PaneName, port: u16) -> Result<u32, PaneError>;
@@ -176,6 +200,11 @@ pub trait HarnessPort: Send + Sync {
 }
 
 /// Runs a health probe. [`SystemProber`] is the real one; a test swaps in a fake.
+///
+/// **Blocking.** The method is synchronous. Call from `spawn_blocking` (or a thread)
+/// in async code. It returns within the `timeout` it is given (a timeout is
+/// [`ProbeResult::Error`], not a [`PaneError`], because the method returns a
+/// [`ProbeResult`]). An implementation is `Send + Sync`.
 pub trait Prober: Send + Sync {
     /// Run `argv` (never through a shell) and look for every string of `expect` in
     /// its output, giving up after `timeout` (see [`crate::run_probe`]).

@@ -166,3 +166,115 @@ Production (modified):
 - Cargo.lock
 
 Pipeline artifacts: docs/handoffs/637/handoff-F.md, docs/handoffs/637/evidence.md, docs/handoffs/637/decisions.md (F entry appended).
+
+---
+
+# Rework pass (after S's REWORK, handoff-S.md) - 2026-10-09, 05:05 MDT
+
+**Result:** done. Both S-required changes are made, the two contract decisions S surfaced (D1, D2) were answered by the coordinator under the operator's delegation ("drive this issue to completion"): D1=a, D2=a, both reversible until #637 merges. The A-dup doc lines were folded in. Nothing was committed or staged. The test work this pass creates is T's (list below).
+
+## What was done
+
+- **REWORK 1 (decision 7 doc rule).** `crates/holler-pane/src/ports.rs`: `PaneStore`, `HerdrPort`, `HostPort` and `HarnessPort` now carry the "Blocking ... `spawn_blocking` ... I5's bound (default 10 s) or `PaneError::Timeout` ... `Send + Sync`" paragraph in their own doc, in the form `ProfileStore` already used. `Prober` carries the S-suggested variant (returns within the `timeout` it is given; a timeout is `ProbeResult::Error`). Doc only.
+- **REWORK 2 (env echo).** `crates/holler-pane/src/argv.rs`: new `pub(crate) fn deserialize_env_names`, used as `#[serde(default, deserialize_with = "crate::argv::deserialize_env_names")]` on `Pane.env` (`pane.rs`) and `ProfileSpec.env` (`profile.rs`). It reads a `serde_json::Value` first, as `Argv` does. An array runs each string through `EnvVarName::parse` (codes unchanged; a non-string element is `env-name-invalid`). A bare string containing `=` is `profile-secret-refused`; any other shape is `env-name-invalid`. All refusals are the fixed-text unit variants, so nothing echoes input. The field type is still `Vec<EnvVarName>`, so the frozen contract does not change.
+- **D1=a.** `ports.rs`: `Watch<T>` is now `Box<dyn Iterator<Item = Result<Option<T>, PaneError>> + Send>`. `Ok(None)` is idle (nothing within the bound; the stream stays usable; a hub long-poll answers `{events: [], cursor}`); `Err(Timeout)` now means only that the store did not answer; any error ends the stream. The alias doc says so. The two test lines that spell the item type were updated (see "Tests" below).
+- **D2=a.** `pane.rs`: `HarnessKind` keeps the closed enum, and its doc records why and that every serde name must be in `holler_proto::vocab::HARNESS_IDS` (a test pins it; T adds it).
+- **A-dup row 2.** `PaneStore::delete` (`ports.rs`) and `ProfileStore::delete` (`profile.rs`) now say a missing record is `pane-not-found` / `profile-not-found`, **whatever `expected_generation` is** (a missing record is checked first, so #638's fakes and #639's and #661's stores do not have to guess which of the two errors a missing record with a stale generation gets). #639's text decides the code; the check order is this pass's addition, and T's double follows it.
+- **A-dup row 3.** `decode_params` (`reply.rs`) now says a request without `params` decodes from `{}` (the caller passes an empty object), as `holler_proto::typed_params` does. Doc only; the signature is unchanged.
+- **T-green advisory 1.** `error.rs`: a third `compile_fail,E0423` doctest on `PaneError::Refused` shows that `RefusalCode(Cow::Borrowed("Not A Code"))` cannot be built outside the crate, which pins field privacy. Per S advisory 1, stable rustdoc does not check the `E0423` code, so it proves only that the line does not compile; privacy is the only thing that could make it compile.
+- Skipped, as instructed: the optional `SpecHerdr`/`SpecHost`/`SpecHarness` rename (A-dup row 6).
+
+## Design decisions
+
+- **Doc-only versus signature for `decode_params` (row 3).** A-dup allowed either a doc line or an `Option<Value>` parameter. I chose the doc line: the signature is already pinned by T's tests and a changed parameter would need T to rewrite them for no new behavior.
+- **Env helper beside `Argv` in `argv.rs`**, not in `error.rs` (already 617 lines): it is the env guard's reader, next to `EnvVarName`.
+- **Bare string without `=`** (`"env": "TOKEN"`) is `env-name-invalid`, not accepted as a one-element list: the shape is wrong, and accepting it would hide a caller bug.
+
+## Reuse / extend-vs-new
+
+Extended `argv.rs` (`EnvVarName::parse`, `coded_message`, the Value-first pattern of `Argv`). No new module, type or dependency.
+
+## Architecture notes for A
+
+`Watch<T>`'s item type changed (a public alias that freezes at merge), so `archChanged` is `true`. No new module, dependency or layer; `holler-proto` is untouched.
+
+## Deviations from spec / wireframe
+
+- `Watch<T>` differs from the brief's fixed alias (decision 7). The coordinator chose it under the operator's delegation (D1=a); decisions.md records it. The brief (`docs/handoffs/637-brief.md:147`) still spells the old alias; decisions.md says this supersedes it, and O may want a revision note there.
+- **F edited two test lines**, against the role's "F never edits tests", because the coordinator instructed it with the D1 answer ("amend ... the 2 test lines") and the change is a type annotation that keeps the suite compiling: `crates/holler-pane/tests/common/mod.rs:124` (`empty_watch`) and `crates/holler-pane/tests/ports_test.rs:83-85` (`MemProfileStore::watch`; line wrapped as rustfmt wants). No assertion was touched.
+
+## Tier 1 self-check (incl. tests now GREEN)
+
+The run that made the edits ran the build, clippy, test, doc, machete, lint, changelog, golden and rustfmt gates and got the same results. The numbers below are from the second run (see "Process note"), which ran every command listed here on the final tree, in the worktree, after the three small corrections:
+
+```
+$ cargo build --workspace                                        (exit 0)
+$ cargo clippy --workspace --all-targets -- -D warnings          (exit 0, no warning)
+$ cargo test -p holler-pane --no-fail-fast
+    adopted 9, argv_env 6, error 12, grid 5, names 8, ports 6, records 11 (57 tests), all ok
+    Doc-tests holler_pane: 3 passed (all compile_fail, including the new E0423 one)
+$ cargo test -p holler-proto --lib methods                       (2 passed)
+$ cargo test --workspace --no-fail-fast                          (exit 0)
+    92 "test result" lines: 921 passed, 0 failed, 5 ignored
+$ RUSTDOCFLAGS="-D warnings" cargo doc -p holler-pane --no-deps  (clean)
+$ cargo machete                                                  (no unused dependency)
+$ bash scripts/lint.sh                                           (exit 0; error.rs warn at 617 lines, limit 900)
+$ bash scripts/changelog-check.sh                                (ok)
+$ bash scripts/golden-diff-summary.sh                            (no output, exit 0: no golden drift)
+$ rustfmt --check --edition 2021 <every .rs file this branch adds under crates/, and methods.rs> (all pass)
+$ git diff --check                                               (clean)
+$ git diff --name-only origin/main (plus untracked)              (only Blast-radius paths)
+$ git diff origin/main | gitleaks stdin                          (no leaks)
+$ gitleaks dir <crates/holler-pane | methods.rs | docs/handoffs/637>   (0 findings each)
+```
+
+A gitleaks scan of the whole worktree root reports 6 findings, all in files this pass does not touch: two in the existing tracked fixture `crates/holler-proto/tests/log_test.rs` and four in git-ignored build artifacts under `target/`. They are not part of the branch diff.
+
+Checked in scratch crates in the session scratchpad (nothing in the worktree):
+- **Env refusal, independent probe.** 19 `env` shapes, each in a `ProfileSpec` and in a `Pane`: `"TOKEN=hunter2"`, `"=sk-live"` and `["A","B=hunter2"]` give `profile-secret-refused`; `"TOKEN"`, `""`, `["A",5]`, `[12345]`, `[{"k":"hunter2"}]`, `[["x=hunter2"]]`, `{"k":"hunter2"}`, `{"TOKEN=hunter2":1}`, `12345`, `true`, `null`, `["A b"]` and `[""]` give `env-name-invalid`; `["OK","TWO"]`, `[]` and an absent `env` load. For each: the serde error from a JSON value and from JSON text, the `decode_params` code, the serialized `PaneReply::failure` and its parse-back to the same code. No error text or reply contains `hunter2`, `12345` or `sk-live`; the wire reply is `{code, message}` with the fixed sentence and no `detail`. The same probe checked the new `Watch` item type (`Ok(Some)`, `Ok(None)`, `Err(Timeout)` in order) and the two `decode_params` doc claims (`{}` gives `WatchParams { since: Cursor(0) }`; `Value::Null` is `usage`).
+- **The new doctest pins field privacy.** In a detached copy of the crate with `RefusalCode`'s field made `pub`, the new `compile_fail` doctest (`error.rs:394`) fails ("compiled successfully, but it's marked `compile_fail`") and the other two still pass; with the field private all three pass. The same three lines as a program fail with `error[E0423]: cannot initialize a tuple struct which contains private fields`, so the annotation names the real error even though stable rustdoc does not check it.
+
+## Evidence appendix
+
+docs/handoffs/637/evidence.md: four entries appended for this pass (the fixed-text `coded_message()` refusals that make the env guard echo-free, `Argv`'s value-first pattern that `deserialize_env_names` follows, serde's quoting `Unexpected::Str` display that made the derived reader unsafe for `env`, and the `control/wait` precedent for the `Ok(None)` idle signal).
+
+## Tests that look wrong (for T)
+
+None is wrong. T's work for this pass (F does not write tests):
+1. **Env echo (S REWORK 2):** `"env": "TOKEN=hunter2"` in a `ProfileSpec` and in a `Pane`, both directly and through `decode_params`: code `profile-secret-refused`, and `serde_json::to_string(&PaneReply::failure(&err))` does not contain `hunter2`. Also: a bare string without `=`, a non-array and a non-string element give `env-name-invalid`; arrays still pass each element through the old codes.
+2. **D1:** the `Watch` item is `Result<Option<T>, PaneError>`; add a double that yields `Ok(None)` then `Ok(Some(..))` and one that yields `Err(Timeout)`, and pin that `Ok(None)` is not an error. Decide whether the empty-iterator assertions at `ports_test.rs:286-304` still say what they mean.
+3. **D2:** every serde name of `HarnessKind` is in `holler_proto::HARNESS_IDS`.
+4. **A-dup row 2:** make `MemPaneStore::delete` (`tests/common/mod.rs:148-156`) return `pane-not-found` for a missing record whatever `expected_generation` is (it returns `Ok(())` today for a missing record at generation 0), and make `MemProfileStore::delete` (`tests/ports_test.rs`, a one-profile double) answer `profile-not-found` for a name it does not hold; test both.
+5. **A-dup row 3:** absent params, decoded as `WatchParams` from `{}`, give `Cursor(0)`.
+6. **A-dup row 4:** route both doubles' CAS (`cas_put`, `delete`) through `holler_pane::next_generation`.
+
+## Process note
+
+The coordinator's reply to the D1/D2 message reached this agent while it was reading. The agent's transcript shows two interleaved executions from that point:
+- one acted on the reply: it made the edits (the docs in `ports.rs`, `profile.rs`, `reply.rs`, `pane.rs` and `error.rs`, the env helper in `argv.rs`, and the two test type annotations), ran the gates and wrote the first version of this section; its `StructuredOutput` call failed because the tool was not available to it;
+- the other never saw the reply. It found the unexplained changes when the edit tool refused a stale write, reviewed the whole diff, re-ran every gate, made three small corrections (the `delete` docs of `PaneStore` and `ProfileStore` now fix the check order, a missing record before the generation; one inline comment in `deserialize_env_names` moved to the arm it describes), appended the four evidence entries and finalized these records.
+
+The two runs never wrote the same file at the same time. If a later phase finds that a number here disagrees with its own re-run, trust the re-run and tell O.
+
+## Known issues
+
+- The Known issues of the first F pass still hold, except that the `Watch` idle signal is now `Ok(None)`.
+- `compile_fail,E0423` is not verified for the error code on stable rustdoc (S advisory 1); it only proves the line fails to compile.
+
+## Files changed
+
+Production (modified in this pass):
+- crates/holler-pane/src/argv.rs
+- crates/holler-pane/src/error.rs
+- crates/holler-pane/src/pane.rs
+- crates/holler-pane/src/ports.rs
+- crates/holler-pane/src/profile.rs
+- crates/holler-pane/src/reply.rs
+
+Tests (two type-annotation lines, at the coordinator's instruction; see Deviations): crates/holler-pane/tests/common/mod.rs, crates/holler-pane/tests/ports_test.rs.
+
+Pipeline artifacts: docs/handoffs/637/handoff-F.md (this section), docs/handoffs/637/decisions.md (F rework entry), docs/handoffs/637/evidence.md (four entries appended).
+
+```json
+{ "done": true, "archChanged": true }
+```

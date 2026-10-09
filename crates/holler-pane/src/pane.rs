@@ -116,6 +116,12 @@ pub struct HostInfo {
 
 /// The harness a pane runs. Only OpenCode exists; the `HarnessPort` is the seam for
 /// another.
+///
+/// This is a closed enum on purpose (epic #633: no new harness; a stored record with
+/// an unknown harness fails to load rather than being driven blindly). It is a second
+/// list beside `holler_proto::vocab::HARNESS_IDS`; every serde name of this enum must
+/// be in that list, which a test pins. Adding a harness to panes adds a variant here
+/// and goes through the epic's amend-first rule.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum HarnessKind {
@@ -238,7 +244,7 @@ pub struct Pane {
     /// `profile create --from-current` copies them from the store.
     pub model: ModelSpec,
     /// Environment variable NAMES only, never values.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::argv::deserialize_env_names")]
     pub env: Vec<EnvVarName>,
     pub context: ContextCeilings,
     /// The launch command: an argv array, never a shell string.

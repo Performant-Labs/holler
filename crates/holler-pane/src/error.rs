@@ -386,6 +386,15 @@ pub enum PaneError {
     /// use holler_pane::PaneError;
     /// let _ = PaneError::Refused { code: "Not A Code".into(), message: String::new() };
     /// ```
+    ///
+    /// Nor can a [`RefusalCode`] be built around the private field (this pins field
+    /// privacy; the stable toolchain checks only that it fails to compile, not the
+    /// error code):
+    ///
+    /// ```compile_fail,E0423
+    /// use holler_pane::error::RefusalCode;
+    /// let _ = RefusalCode(std::borrow::Cow::Borrowed("Not A Code"));
+    /// ```
     Refused { code: RefusalCode, message: String },
 }
 

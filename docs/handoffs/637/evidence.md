@@ -55,3 +55,49 @@ Appended by F (Phase 6). The diff gate's reviewer sees the diff and bounded exce
   **Source:** `Cargo.toml:44`
   **Verbatim excerpt:**
   > serde = { version = "1", features = ["derive"] } # for holler-proto, holler-body
+
+Appended by F (Phase 6, rework pass after S's REWORK). Each entry quotes unchanged source that the rework relies on.
+
+- **Fact:** a guard turns a refusal into the serde error text with `coded_message()` (`"<code>: <payload, or the Display text when the variant has none>"`), and the two env refusals are unit variants whose `Display` is one fixed sentence, so a refusal built from them cannot carry the input it refused. `deserialize_env_names` builds only those two variants, which is why no env refusal echoes its input.
+  **Source:** `crates/holler-pane/src/error.rs:524-530`, `:555-557` and `:574-576`
+  **Verbatim excerpt:**
+  > pub(crate) fn coded_message(&self) -> String {
+  >     let text = match self.detail() {
+  >         Some(detail) => detail.to_owned(),
+  >         None => self.to_string(),
+  >     };
+  >     format!("{}: {}", self.code(), text)
+  > }
+  >
+  > PaneError::EnvNameInvalid => f.write_str(
+  >     "an environment variable name must be non-empty and contain no whitespace",
+  > ),
+  >
+  > PaneError::ProfileSecretRefused => f.write_str(
+  >     "a profile holds environment variable names only, never a value (an entry with '=' was refused)",
+  > ),
+
+- **Fact:** `Argv` already reads a `serde_json::Value` first and refuses every non-array shape with this crate's own error, never serde's type error; `deserialize_env_names` follows the same pattern for `env`.
+  **Source:** `crates/holler-pane/src/argv.rs:76-81`
+  **Verbatim excerpt:**
+  > impl<'de> Deserialize<'de> for Argv {
+  >     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+  >         let value = Value::deserialize(deserializer)?;
+  >         Argv::from_value(value).map_err(|e| de::Error::custom(e.coded_message()))
+  >     }
+  > }
+
+- **Fact:** serde's own type error quotes the rejected string, which is why the derived `Vec<EnvVarName>` reader could not stay: a bare `"env": "TOKEN=hunter2"` produced `invalid type: string "TOKEN=hunter2", expected a sequence`, and `decode_params` put that text in both `message` and `detail` of the reply. This is third-party source (the pinned `serde_core` 1.0.229 in the cargo registry, so the path is outside the repo); S reproduced the echo in a scratch crate before the fix (handoff-S.md, "Quality audit").
+  **Source:** `serde_core-1.0.229/src/de/mod.rs:214` and `:410`
+  **Verbatim excerpt:**
+  > Error::custom(format_args!("invalid type: {}, expected {}", unexp, exp))
+  >
+  > Str(s) => write!(formatter, "string {:?}", s),
+
+- **Fact:** the hub's own long-poll, `control/wait`, answers "nothing happened in this window" as an ordinary success, not as an error; the `Watch` idle signal (`Ok(None)`, operator decision D1=a) follows that precedent, and `Err(Timeout)` is left to mean only that the store did not answer.
+  **Source:** `crates/holler-hub/src/control_server.rs:477-480`
+  **Verbatim excerpt:**
+  > /// The result is always a **success** envelope, `{matched, rows}`: a timeout
+  > /// is `matched:false, rows:[]`, not a JSON-RPC error — "nothing happened in
+  > /// this window" is an ordinary outcome of a wait, not a hub-side refusal, and
+  > /// giving it its own wire error code would be one more code the CLI has to

@@ -115,3 +115,35 @@ impl<'de> Deserialize<'de> for EnvVarName {
         deserialize_parsed(deserializer, EnvVarName::parse)
     }
 }
+
+/// Read an `env` field: a JSON array of [`EnvVarName`]s.
+///
+/// Used by `Pane.env` and `ProfileSpec.env` (beside `#[serde(default)]`) instead of
+/// the derived `Vec` impl, whose type error would repeat the value it was given. The
+/// field is read as a JSON value first, as [`Argv`] is, so no refusal echoes input:
+///
+/// - an array: each element goes through [`EnvVarName::parse`], codes unchanged (a
+///   non-string element is `env-name-invalid`);
+/// - a bare string (the shape a shell `NAME=value` has): `profile-secret-refused` if
+///   it contains `=`, else `env-name-invalid`;
+/// - any other shape: `env-name-invalid`.
+pub(crate) fn deserialize_env_names<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Vec<EnvVarName>, D::Error> {
+    let refuse = |e: PaneError| de::Error::custom(e.coded_message());
+    match Value::deserialize(deserializer)? {
+        Value::Array(items) => items
+            .into_iter()
+            .map(|item| match item {
+                Value::String(name) => EnvVarName::parse(&name),
+                _ => Err(PaneError::EnvNameInvalid),
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(refuse),
+        // A bare string with a `=` is a `NAME=value` entry that lost its list.
+        Value::String(text) if text.contains('=') => Err(refuse(PaneError::ProfileSecretRefused)),
+        // Anything else is not a list of names: a bare string without a `=` (the
+        // wrong shape even when it is a valid name), a map, a number, `null`.
+        _ => Err(refuse(PaneError::EnvNameInvalid)),
+    }
+}

@@ -107,6 +107,11 @@ impl PaneReply {
 /// A guard of this crate that refuses its input (a bare-string command, an env entry
 /// with a value, a zero grid cell, ...) maps to its own code; any other failure to
 /// decode is `usage`. The handler answers the error with [`PaneReply::failure`].
+///
+/// A request that carries no `params` decodes from `{}`, as
+/// `holler_proto::typed_params` does: the caller passes an empty JSON object for it,
+/// so `pane/list`, `profile/list` and the `*/watch` methods (whose `since` defaults
+/// to `Cursor(0)`) accept a request without `params`.
 pub fn decode_params<T: DeserializeOwned>(params: Value) -> Result<T, PaneError> {
     serde_json::from_value(params).map_err(|e| PaneError::from_decode(&e))
 }

@@ -121,7 +121,7 @@ impl MemPaneStore {
 }
 
 fn empty_watch<T: Send + 'static>() -> Watch<T> {
-    Box::new(std::iter::empty::<Result<T, PaneError>>())
+    Box::new(std::iter::empty::<Result<Option<T>, PaneError>>())
 }
 
 impl PaneStore for MemPaneStore {

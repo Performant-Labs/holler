@@ -185,7 +185,7 @@ pub struct ProfileSpec {
     pub model: ModelSpec,
     pub role: PaneRole,
     /// Environment variable NAMES only, never values.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::argv::deserialize_env_names")]
     pub env: Vec<EnvVarName>,
     pub context: ContextCeilings,
     /// The launch command: an argv array, never a shell string.
@@ -341,7 +341,10 @@ pub trait ProfileStore: Send + Sync {
         actor: &Actor,
     ) -> Result<Profile, PaneError>;
 
-    /// Delete the profile `name` if it is still at `expected_generation`.
+    /// Delete the profile `name` if it is still at `expected_generation`. A stale
+    /// generation is `generation-conflict`; a profile that does not exist is
+    /// `profile-not-found`, whatever `expected_generation` is (a missing profile is
+    /// checked first, so no store has to guess which of the two to answer).
     fn delete(
         &self,
         name: &ProfileName,
