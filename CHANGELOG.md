@@ -136,6 +136,34 @@ fills this file in at release time.
   protocol version (22; any other is `herdr-version-unsupported`). No I/O yet: the socket adapter follows in part 2,
   so nothing a user runs changes ([#640](https://github.com/Performant-Labs/holler/issues/640)).
 
+- Pane control, the hub's profile registry (epic [#633](https://github.com/Performant-Labs/holler/issues/633)):
+  `profile/get`, `profile/list`, `profile/cas_put`, `profile/delete`, `profile/watch` and `profile/log` now answer from
+  a real registry instead of `not-implemented`. Profiles are kept in `<state dir>/hub/profiles.json` (mode `0600`,
+  written atomically), filed by slug, and every write is a compare-and-swap on the generation, with an append-only
+  change log per profile (who, when, the new generation and what changed) and a change feed. A second name with a
+  stored profile's slug is refused (`profile-exists`), and an environment entry that carries a value is refused
+  (`profile-secret-refused`) without echoing it. A corrupt or unreadable file fails closed (`store-corrupt`) and is
+  never rewritten, and the `error` event `profile_registry_corrupt` names the file and the problem without quoting
+  its content; a file written by a newer build with an unknown field fails closed too. A write the hub cannot save
+  answers `unavailable`, changes nothing, and logs the `error` event `profile_registry_write_failed`. A pane write
+  that names a profile that does not exist is refused (`profile-not-found`), and moving a pane from one profile to
+  another in one write is refused (`pane-in-other-profile`): it must leave its profile first. `profile/rename` still
+  answers `not-implemented` ([#661](https://github.com/Performant-Labs/holler/issues/661)).
+
+- Pane control, the test kit's fake profile scope (epic [#633](https://github.com/Performant-Labs/holler/issues/633)):
+  `holler-pane-testkit` now has a fake of the helper every `--profile` verb uses to scope itself to a profile and to
+  edit a pane's spec and make the live change as one transaction. It keeps the order of
+  [ADR 0021](docs/adr/ADR-0021.md): the profile is written first; a live change that fails puts the specs back by a
+  second write, so the generation moves by two and the profile's log shows the edit and its reversal; and another
+  writer's change in between is `profile-conflict`. It works over the fake profile and pane registries, so a test
+  injects faults into them, and a one-shot hook lets another writer move the profile just before the specs are put
+  back. A conformance suite that the real profile scope runs against itself comes with it: 15 cases, which the fake
+  passes and which reject a scope that writes the profile after the live change, one that does not put the specs
+  back, and one that refuses to remove a spec for a pane of another profile. ADR 0021 now records that the scope
+  refuses to set a spec for a pane of another profile before anything is written, and that removing a spec is never
+  refused for that reason. Test code only: nothing a user runs changes
+  ([#688](https://github.com/Performant-Labs/holler/issues/688)).
+
 ## [0.4.0] - 2026-09-29
 
 ### Enhancements

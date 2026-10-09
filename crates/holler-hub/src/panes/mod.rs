@@ -16,8 +16,9 @@
 //! - `feed.rs`: the ring of recent events, and the rule of what a watcher is owed (D5, D6).
 //! - `handlers.rs`: the five handlers and the one pipeline they share.
 //!
-//! #661's profile registry reuses `persist`, `feed` and `handlers::run` from `profile/`,
-//! through the crate-private `RegistryEntry` trait. #661 also adds one comparison here: the
+//! #661's profile registry reuses `persist`, `feed`, `handlers::run` and `NoParams` from
+//! `profile/`, through the crate-private `RegistryEntry` trait, with [`PaneStoreOptions`],
+//! [`WATCH_WAIT`] and `log_fault`. #661 also adds one comparison here: the
 //! `pane-in-other-profile` check runs inside the pane registry's compare-and-swap
 //! (`store.rs`), under the pane lock (ADR-0021 §8 and "Decisions taken", item 2).
 //!
@@ -59,14 +60,19 @@ use crate::profile::ProfileState;
 use crate::state::HubState;
 use store::Store;
 
+/// The fault log the profile registry shares (#661). Only this item of the store module is
+/// opened to the crate: the pane `Store` and its writes stay behind `PaneState`.
+pub(crate) use store::log_fault;
+
 /// The registry file, in the hub's state dir (`<state dir>/hub/`).
 const FILE_NAME: &str = "panes.json";
 
 /// How many recent events the change feed keeps by default (D5).
 const FEED_RETAINED: usize = 1024;
 
-/// The long-poll window of `pane/watch`, and of `next()` on a `Watch` iterator: how long a
-/// request waits for a change before it answers an empty batch (D5).
+/// The long-poll window of `pane/watch` and `profile/watch` (#661), and of `next()` on a
+/// `Watch` iterator of either registry: how long a request waits for a change before it
+/// answers an empty batch (D5).
 ///
 /// It is below the control client's default timeout (5 s) and within I5's 10 s. A client
 /// that sends `pane/watch` must set its own timeout to this window plus a margin. The
@@ -75,8 +81,9 @@ const FEED_RETAINED: usize = 1024;
 /// reads this constant to size `ControlCall.timeout`.
 pub const WATCH_WAIT: Duration = Duration::from_secs(4);
 
-/// The tunable limits of a registry. [`PaneState::load`] uses the defaults. Tests use a
-/// short window and a small ring.
+/// The tunable limits of a registry, the pane one or the profile one (#661).
+/// [`PaneState::load`] and `ProfileState::load` use the defaults. Tests use a short window
+/// and a small ring.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PaneStoreOptions {
     /// The long-poll window ([`WATCH_WAIT`] by default).
@@ -148,7 +155,9 @@ impl PaneStore for PaneState {
 /// and the feed replays them. A put carries the record, and a delete leaves a tombstone.
 ///
 /// `persist` checks entries and `feed` selects them only through this trait. #661's
-/// profile registry reuses both by implementing it for `ProfileEvent`.
+/// profile registry reuses both by implementing it twice: for its file's entries
+/// (`ProfileEntry`, a record or tombstone filed by slug with the profile's change log) and
+/// for its feed's events (`ProfileEvent`).
 pub(crate) trait RegistryEntry: Clone {
     /// The name the entry is filed under.
     fn name(&self) -> &str;

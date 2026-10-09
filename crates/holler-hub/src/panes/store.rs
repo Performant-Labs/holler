@@ -10,7 +10,8 @@
 //!
 //! A write runs entirely under the lock, in this order:
 //!
-//! 1. the compare-and-swap (`holler_pane::next_generation`);
+//! 1. the compare-and-swap (`holler_pane::next_generation`), then, for a put, the
+//!    membership rule (`refuse_profile_move`, #661);
 //! 2. the next document;
 //! 3. the save;
 //! 4. only then, the commit to memory, the event and the wake-up.
@@ -162,14 +163,18 @@ impl Store {
     /// Store `pane` if the stored record is still at `expected` (0 for a new pane). The
     /// stored record is `pane` with only its generation replaced: the submitted generation
     /// is ignored and nothing else is inferred. Returns the stored record.
+    ///
+    /// The membership rule runs here, after the generation and under the lock (#661, see
+    /// [`refuse_profile_move`]), so it holds on every path into the registry, the port and
+    /// `pane/cas_put` alike, and no writer can slip in between the check and the write.
     pub(crate) fn cas_put(&self, pane: &Pane, expected: u64) -> Result<Pane, PaneError> {
         let mut guard = self.lock();
         let table = guard.as_mut().map_err(|err| err.clone())?;
-        let current = table
-            .record(&pane.name)
-            .map_or(0, |stored| stored.generation);
+        let current = table.record(&pane.name);
+        let generation = next_generation(current.map_or(0, |stored| stored.generation), expected)?;
+        refuse_profile_move(current, pane)?;
         let stored = Pane {
-            generation: next_generation(current, expected)?,
+            generation,
             ..pane.clone()
         };
         let change = PaneEvent {
@@ -330,11 +335,36 @@ fn load_table(path: &Path, retained: usize) -> Result<Table, PaneError> {
     Ok(Table::from_doc(doc, retained))
 }
 
-/// Log one of the registry's two faults: `pane_registry_corrupt` when the file cannot be
-/// loaded, and `pane_registry_write_failed` when a write cannot be saved. Both are faults on
-/// the hub's own side, so both are `error` events. The two events share every field but
-/// the event name and the effect, so they share this one helper.
-fn log_fault(method: &'static str, path: &Path, problem: &Problem, effect: &str) {
+/// The membership rule of a write (#661; ADR-0021 §8 and "Decisions taken", item 2): a
+/// pane stored in one profile cannot be written into another, `pane-in-other-profile`.
+/// Leaving (`None`), joining from `None` and keeping the profile are allowed, so a move
+/// takes two writes, leave and then join. Profiles are compared by slug, the profile
+/// registry's identity, so another spelling of the same profile keeps it. Whether the
+/// profile exists is the `pane/cas_put` hook's check (`crate::profile::check_membership`).
+fn refuse_profile_move(stored: Option<&Pane>, next: &Pane) -> Result<(), PaneError> {
+    let current = stored.and_then(|pane| pane.profile.as_ref());
+    match (current, next.profile.as_ref()) {
+        (Some(current), Some(other)) if current.slug() != other.slug() => {
+            Err(PaneError::PaneInOtherProfile {
+                what: format!(
+                    "{} is in profile {:?}, not {:?}",
+                    next.name,
+                    current.as_str(),
+                    other.as_str()
+                ),
+            })
+        }
+        _ => Ok(()),
+    }
+}
+
+/// Log one of a registry's two faults: `<registry>_corrupt` when its file cannot be loaded,
+/// and `<registry>_write_failed` when a write cannot be saved. The pane registry logs
+/// `pane_registry_corrupt` and `pane_registry_write_failed`, and the profile registry (#661)
+/// `profile_registry_corrupt` and `profile_registry_write_failed`. Each is a fault on the
+/// hub's own side, so each is an `error` event. The events share every field but the event
+/// name and the effect, so they share this one helper.
+pub(crate) fn log_fault(method: &'static str, path: &Path, problem: &Problem, effect: &str) {
     log::emit(&Event {
         component: Component::Control,
         severity: Severity::Error,
