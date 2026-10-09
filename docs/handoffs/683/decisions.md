@@ -74,3 +74,20 @@
   - No test or lint parses ADR-0021's prose. `docs_rows.rs` reads ADR-0003, `docs_cli_test` parses only `holler …`
     commands, and there is no markdown line-length lint.
   - Spike lines 413-454: support is decided by `protocol`, and the version string is what gets recorded.
+
+## T (Phase 4, author the RED tests) — 2026-10-09T12:57:06-06:00
+- **Decided:**
+  - Wrote three test files (`herdr_conformance_test.rs`, `fake_herdr_test.rs`, `fake_prober_test.rs`) for AC 1 to 4; RED is valid.
+  - RED is a build failure of only unresolved imports (E0432), as the brief's test plan fixes it, since the stubs hold no items.
+  - Type-checked the tests against throwaway signature-only stubs, then reverted them, so no compile error in the tests hides behind the E0432s.
+  - Added four tests beyond the brief's list, each pinning a stated behaviour: the 36th-pane carry, an occupied cell in split-only mode, `print` to an unknown pane, and the unscripted-argv message.
+  - Every mutant test names a list of cases (all must appear), so the two-case mutants of AC 2 assert both.
+- **Assumed:**
+  - `str::lines` semantics for `read` (a trailing empty line survives a double `enter`), and `vanish` never reusing an id, follow from the brief's counter rule; F may read them otherwise and T-green would then repair the test.
+  - The crate has no `autotests = false`, so no `[[test]]` entry (the stack note applies to `holler-cli`).
+- **Hedged:**
+  - The mutants cannot run before the suite exists, so whether each fails on its named case is unproven until T-green.
+- **Evidence:**
+  - `cargo test -p holler-pane-testkit --no-run`: four E0432 groups, nothing else.
+  - With stubs: build clean; 22 `fake_herdr_test` tests failed in the stubs; clippy over the tests did not complete (a stub-only lint), left to T-green.
+  - Slice a's two test files: 22 and 10 passed. `bash scripts/lint.sh` exit 0.
