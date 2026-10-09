@@ -22,3 +22,18 @@
   - **#670 precedent:** its brief and handoff-A at `fa895ac^`.
   - **Greps:** module layout (12 `name.rs` + `name/` directories against 4 `mod.rs`), `#[path]` only in tests, `as_str` against `name` (26 to 1), `kiwi` and `demo-c*r*` fixtures.
   - **Scratch check:** a two-crate cargo workspace for the dev-dependency cycle. Its integration test passes, and its `--lib` unit test fails with E0308.
+
+## T-red (Phase 4, author tests) -- 2026-10-09T12:15:00-06:00
+- **Decided:** RED is valid. Two test files, `tests/pane_store_conformance_test.rs` (10 tests: suite, case ids, guard, a no-break control and six mutants) and `tests/fake_pane_store_test.rs` (22 tests: faults, call log, another writer, idle wait, seeding, fixture, bounds).
+  - Applied A's W-5 (a direct test that `watch(0)` resumes from the head as of the snapshot), W-6 (`demo-*` names, no `hj*` fixture field), W-3 (`seeded` leaves the call log empty) and W-12 (`PortOp::as_str`).
+  - Added a control test (the unbroken mutant wrapper passes) so a mutant cannot fail because of the wrapper.
+  - Added `seeding_the_same_name_twice_is_a_conflict` and `a_watch_at_the_head_is_idle_not_usage`, derived from the brief's "each created at expected 0" and "ahead of the head".
+- **Assumed:**
+  - A compile failure on missing items is the RED the brief prescribes (Test plan), since no production stub may be written by T.
+  - Integration tests reach `holler_pane` through the crate's normal dependency, so F adds it to the manifest first.
+  - `PaneStoreOp` derives `Debug` and `PartialEq` (the call-log test compares `Vec<PaneStoreOp>`).
+- **Hedged:**
+  - The six mutants were never run against a real suite (none exists). T-green must run them and repair any that fails on a different case.
+  - W-10 (membership versus generation order) is not pinned: A left it to O, and no run has an O.
+  - `the_fake_is_send_and_sync_and_its_watch_is_send` cannot be RED at run time (a compile-time check).
+- **Evidence:** `cargo test -p holler-pane-testkit` fails with 7 E0432/E0433 errors, all missing items. A throwaway stub crate in the scratchpad (outside the repository) type-checked both files and showed assertion failures; a throwaway working fake passed all 22 fake tests. `rustfmt --check` clean.
