@@ -45,7 +45,7 @@ The issue is the canonical record; the markdown file is a copy for browsing and 
 | 0018 | Hub identity (X25519) and body proof-of-possession (Ed25519) replace the join credential | accepted | [#19](https://github.com/Performant-Labs/holler/issues/19) |
 | 0019 | Noise XK mutual-authentication handshake, a pairing SAS, and the protocol 3 hard re-pair | accepted | [#20](https://github.com/Performant-Labs/holler/issues/20) |
 | 0020 | Remote hub-admin control: same channel, existing credential, no scope split yet | accepted | [#21](https://github.com/Performant-Labs/holler/issues/21) |
-| 0021 | | reserved | [#22](https://github.com/Performant-Labs/holler/issues/22) |
+| 0021 | The pane control plane: one registry on the hub, verbs on the CLI, Herdr, tmux and OpenCode behind ports ([#634](https://github.com/Performant-Labs/holler/issues/634)) | accepted | [#22](https://github.com/Performant-Labs/holler/issues/22) |
 | 0022 | | reserved | [#23](https://github.com/Performant-Labs/holler/issues/23) |
 | 0023 | | reserved | [#24](https://github.com/Performant-Labs/holler/issues/24) |
 | 0024 | | reserved | [#25](https://github.com/Performant-Labs/holler/issues/25) |
