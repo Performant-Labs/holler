@@ -28,3 +28,49 @@
   - Ran `gh issue view` on 683, 638 and 633, and `git show` on 2a6f349 and 3f9fbf2 for ADR-0021.
   - Checked `scripts/lint.sh:44-53` (warn at 600, fail at 900) and the CHANGELOG head (#676 entry ends at line 89).
   - Grepped for other `impl HerdrPort` and `impl Prober` (only the CLI's `Unwired` and `holler-pane`'s local test stubs), other `from_static` uses (`holler-pane` tests only), base-36 and tail-of-screen helpers (none), and the `tests/*/mod.rs` layout.
+
+## A (Phase 3, up-front plan review, round 2 after the brief amendment) — 2026-10-09T12:52:39-06:00
+- **Decided:**
+  - PASS on docs/handoffs/683-brief.md at 9d79d0e, with 0 blocks and 3 new warns (see handoff-A.md, which this round
+    overwrites; round 1 stays in git at a3e47a4).
+  - AC 8 resolves round 1's block. ADR-0021 records `ensure_pane`'s workspace-extent `grid-out-of-range` in section 10
+    (line 421) and in section 9's class reason (line 377). The class, `ALL_CODES` and `class_of` stay untouched.
+  - Warns 2 to 5 are folded in as suggested. Warn 6 is accepted (Decision 11).
+  - I checked the whole plan again at e410e9d (`origin/main` has not moved). It reuses the same shared pieces as in round 1:
+    - `FaultSwitch<HerdrOp>`;
+    - `run_cases` and the `expect_*` helpers, over one `CASES` table;
+    - test-local mutants;
+    - the closed variants plus one `from_static` code.
+  - The test kit still depends on `holler-pane` only.
+  - The three new warns:
+    - AC 8(c)'s "exactly two lines" conflicts with section 10's wrap at about 125 columns.
+    - Section 9's `profile apply` row should go into #640's hand-off.
+    - Decision 11's follow-up names slices c and e, which run in parallel and copy the scaffolding too. It becomes one
+      cleanup issue after slices b to e merge, combined with #682's W-2.
+- **Assumed:**
+  - S reads AC 8(c) as two items changed. The section 10 bullet may wrap to the file's width.
+  - A re-review overwrites handoff-A.md and adds a round entry here, as the rounds of #508 did.
+- **Hedged:**
+  - Warn 2 (the `profile apply` row) could be read as part of round 1's ADR block. I kept it at warn. Whether `apply` can
+    ask for a cell outside the extent depends on where #640 gets the extent, which is undecided, so editing the row now
+    would be a guess.
+  - Warn 3 retargets Decision 11's follow-up. It is not a Phase 7 rejection for this slice. That includes a local
+    poison-tolerant lock helper in `herdr.rs` or `prober.rs`, since `feed::lock` becomes `pub(crate)` only in #682.
+- **Evidence:**
+  - Diffed the brief from 6cd60be to 9d79d0e, and read the amended brief in full.
+  - Read again in `holler-pane-testkit`:
+    - `fault.rs`, `conformance/mod.rs`, `conformance/pane_store.rs:1-130`, `pane_store.rs`, `lib.rs`, `fixture.rs`
+      and `Cargo.toml`;
+    - the three stubs;
+    - `tests/pane_store_conformance_test.rs`.
+  - Read again in `holler-pane`: `ports.rs:84-235`, `error.rs:255-345 and 400-500`, `grid.rs:1-80`, `probe.rs`,
+    `argv.rs:1-40`, `pane.rs:70-102` and the `lib.rs` re-exports.
+  - In ADR-0021, read the header, sections 2-3, 9 and 10, and "Deferred to named stories". Ran `git show 2a6f349 3f9fbf2`
+    for the ADR hunks, and measured the line widths of section 10.
+  - Ran `gh issue view` on 683, unchanged since 10:48 MDT, and on 638, which has the grid amendment of 2026-10-08.
+  - `git ls-remote origin main` is e410e9d, and the only open PR is from dependabot.
+  - The sibling worktrees (0681, 0682, 0684) have no edits to ADR-0021 or to the shared files.
+  - Grepped their briefs for the copied scaffolding and for `feed::lock`.
+  - No test or lint parses ADR-0021's prose. `docs_rows.rs` reads ADR-0003, `docs_cli_test` parses only `holler …`
+    commands, and there is no markdown line-length lint.
+  - Spike lines 413-454: support is decided by `protocol`, and the version string is what gets recorded.
