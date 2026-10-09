@@ -18,3 +18,28 @@
 - **Assumed:** A compile-time RED on the new `class_of`/`ErrorClass` API is unavoidable and accepted by the brief's test plan; the assertion-level RED is shown with a throwaway skeleton in `error.rs`, reverted.
 - **Hedged:** `a_malformed_code_is_a_failure` passes against the all-Failure skeleton, so it is a regression guard, not a RED driver; it fails only if F routes malformed codes into the open-code (Refusal) arm. AC 3-5 (text residue, ADRs, CHANGELOG) have no new test; they are covered by the guard commands at Phase 6.
 - **Evidence:** error E0432 from both targets as authored; skeleton run: holler-pane 3 failed / 1 passed, holler-cli `output_api` 6 failed / 15 passed (assertion output in handoff-T-red.md); `git status` shows only the two test files changed after the revert.
+
+## F (Phase 6 of the script, implement) — 2026-10-09T10:47:54-06:00
+- **Decided:**
+  - `ErrorClass`, `ErrorClass::exit_code` (const, 2/3/1) and `class_of(&str)` go in `holler-pane/src/error.rs`. `class_of` does a `PaneCode::parse` let-else, then one exhaustive `match` over `PaneCode` with grouped arms and no `_`. An open well-formed code is a Refusal and a malformed code is a Failure.
+  - `output.rs::exit_code` is now `class_of(code).exit_code()`.
+  - Doc residue fixed in `output.rs`, `pane/mod.rs`, `profile/mod.rs` and `pane/args.rs`.
+  - ADR-0021 §9 gets the 24-row table nested in the exit-codes bullet, plus item 5's "(done in #676)". ADR 0003 gets its line-97 sentence. The CHANGELOG gets its entry.
+  - Applied A's doc warns that fall inside the blast radius:
+    - W-1: the open-code sentence in §9, and the I3 code recorded under "Deferred to named stories" for #644 and #645.
+    - W-3: ADR 0003's `Clarified by: #676` header line.
+    - W-4: the `class_of` doc says it is not `PaneError::classify`.
+  - The `not_implemented` doc in `output.rs` no longer calls a stub's error a refusal.
+- **Assumed:**
+  - The brief's literal "Not changed: `main.rs`" (decision 7, AC 7) outranks A's W-2, which asked O to widen the blast radius. O never amended the brief.
+  - A `//!` doc line in a test file (`spec_flags.rs:3`) is T's to change, even though AC 3 lists it ("you stage no test files").
+- **Hedged:**
+  - `main.rs:253-255` still says "(exit 1, ...)" for a wiring error. It is accurate today because `Wiring::connect` cannot fail, and #649 must fix it. This is noted in handoff-F "Known issues" so the PR body or #649 carries it.
+  - `spec_flags.rs:3-4` is flagged for T at T-green with suggested text.
+  - I reported `archChanged: true` because the change adds public items to `holler_pane::error`. The addition was planned and A-reviewed at Phase 3.
+- **Evidence:**
+  - Tests: `cargo test -p holler-pane --test error_class_test` 4/4. `cargo test -p holler-cli --test pane_verbs` 64/64 (`output_api` 21/21). `cargo test --workspace` exit 0, with 1048 passed, 0 failed and 5 ignored.
+  - Guards: `cargo build`, `cargo clippy --workspace --all-targets -D warnings`, `cargo machete`, `scripts/lint.sh` (exit 0), `changelog-check.sh`, `test-hooks.sh`, `docs_cli_test`, `cargo doc -D warnings` (holler-pane) and `rustfmt --check` on every changed `.rs` file all clean.
+  - `grep -rn "refused or failed" crates/ docs/adr/` returns nothing.
+  - The markdown-it GFM render shows a 25-row table inside the list item.
+  - Source facts are in `evidence.md`.

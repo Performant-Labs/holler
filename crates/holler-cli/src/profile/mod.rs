@@ -36,7 +36,7 @@ pub enum ProfileCmd {
     Import(import::ProfileImport),
 }
 
-/// Run a `holler profile` verb and return its exit code (0 ok, 1 refused or failed, 2 usage).
+/// Run a `holler profile` verb and return its exit code (0 ok, 1 failure, 2 usage, 3 refusal).
 pub fn run(cmd: &ProfileCmd, ctx: &mut VerbCtx<'_>) -> i32 {
     match cmd {
         ProfileCmd::Create(args) => create::run(args, ctx),

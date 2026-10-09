@@ -55,6 +55,14 @@ fills this file in at release time.
   `not implemented (story #646)`, as does `roster --profile` (`#648`), in plain text before any hub
   is contacted. ADR 0003 has the new rows
   ([#670](https://github.com/Performant-Labs/holler/issues/670)).
+- `holler pane` and `holler profile` now exit 3 for a refusal and 1 for a runtime failure, the same in text
+  and JSON mode, and the envelope's `ok` is false for both (as it is for a usage error, exit 2). A refusal is a
+  request the system understood and declined, working as designed (`pane-in-other-profile`,
+  `profile-secret-refused`, `command-not-argv`, `grid-ambiguous`, and any code a verb or adapter declares as
+  its own); a failure is something that went wrong while doing the work (`timeout`, `generation-conflict`,
+  `unavailable`). One function, `holler_pane::error::class_of`, decides which code is which, and the table of
+  every code is in [ADR 0021](docs/adr/ADR-0021.md) section 9. The stubs still exit 1: `not-implemented` is a
+  failure ([#676](https://github.com/Performant-Labs/holler/issues/676)).
 
 ## [0.4.0] - 2026-09-29
 

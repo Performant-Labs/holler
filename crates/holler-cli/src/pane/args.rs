@@ -3,7 +3,7 @@
 //! - [`SpecFlags`]: one flag per field of a pane spec, used by `launch` and `relaunch` (and by
 //!   the profile spec). Every value stays a string at clap time; [`SpecFlags::validate`] types
 //!   them, with the guards of `holler-pane` and their stable error codes, so a bad `--grid` is a
-//!   refusal with a code a script can match (exit 1) and not a clap usage error.
+//!   refusal with a code a script can match (exit 3) and not a clap usage error.
 //! - [`ProfileOpt`]: `--profile NAME`, on every `pane` verb but `import`, and on `roster`,
 //!   `say`, `interrupt` and `answer`.
 //! - [`SpecOnly`]: `--spec-only`, on `launch`, `relaunch` and `close`.
