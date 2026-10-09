@@ -68,3 +68,42 @@
   - Sibling plans: `643-brief.md` (Decisions 10-12) and `643/handoff-A.md`; `644-brief.md` (excerpts) and
     `644/handoff-A.md`; `663-brief.md` (excerpts); `642/decisions.md` (for the journal format).
   - Issues read with `gh issue view`: 647, 633 (with comments), 644, 645, 646, 648, 649, 650, 665, 694.
+
+## T (Phase 4, author tests / RED) — 2026-10-09T17:34:29-06:00
+- **Decided:**
+  - **The scaffold.** Following the brief's test plan, T landed only the Decision 10 types and the Decision 11
+    args, so that RED fails on an assertion and not on a compile error: `findings.rs`, `reconcile.rs` (`reconcile()`
+    returns `NotImplemented`) and `doctor.rs` (still the stub `run`).
+  - **The suite.** It is 31 tests in `pane_verbs` (`doctor.rs`, `doctor/read_only.rs`, `doctor/surface.rs`, built on
+    `doctor/rig.rs`) plus one unit test.
+  - **AC 25's placement.** It lives in `crates/holler-pane/tests/findings_test.rs`, per A's W-6(a): it needs no fake,
+    and that is the cheapest sufficient tier.
+  - **AC 26's parser.** It parses through `verb_harness::parse::try_parse`, per A's W-6(c).
+  - **AC 24's order.** It reads the in-flight maximum before it unwraps the result, so its RED shows the invariant
+    (`left: 0`).
+  - **One test outside the numbered ACs:** `record_write_conflict_is_reported_not_retried` (Decision 6, R-6).
+  - **The test files are split** so that each stays under lint's 600-line warning.
+- **Assumed:**
+  - The fakes' documented semantics are the contract (C-2): `list_sessions` answers `timeout` on a frozen server and
+    `unavailable` on a killed one, `shown_session` never reaches the server, and every port shares the `"default"`
+    data directory until `set_data_dir`.
+  - Remedy strings are exactly Decision 3's.
+  - A finding's `session` is pinned only where an AC names it: the shown S2 in AC 1, and the foreign session in AC 3.
+  - Exact-set assertions (for example, AC 2 is exactly `[server-wedged]`) follow from Decision 4: an unhealthy
+    server's list is not trusted.
+- **Hedged:**
+  - The added `findings_test.rs` is not in the brief's Files list or AC 33. O should amend both, as A's W-6(a)
+    suggests.
+  - `ObservedHealth`'s value spellings and the text summary line are deliberately unpinned, so F can act on A's
+    W-5(b).
+  - The scaffold keeps the serde derive on `FindingKind`, as the brief specifies; A's W-5(a) is F's to take.
+- **Evidence:**
+  - RED run: `cargo test -p holler-cli --test pane_verbs doctor` gives 0 passed and 31 failed. The failures:
+    - 21 engine tests: `reconcile must complete the pass and report: not implemented`;
+    - AC 24: `left: 0 right: 4`;
+    - the verb tests: exit `1` where `0` is expected, or `not-implemented` where `unavailable` is expected.
+  - Passing at RED:
+    - `findings_test`: 1 passed;
+    - `cli_surface_test`, `docs_cli_test` and `pane_cli_process`: 3, 3 and 34 passed;
+    - the other 63 `pane_verbs` tests.
+  - Clean at RED: clippy (`-D warnings`), `lint.sh` (exit 0), `rustfmt --check` on the touched files, and gitleaks.

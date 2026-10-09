@@ -146,6 +146,9 @@ answer | --pane demo-c1r1 yes
 # #647
 pane doctor |
 pane doctor | --profile demo --format=json
+pane doctor | demo-c1r1
+pane doctor | demo-c1r1 --fix
+pane doctor | --fix --profile demo
 
 # #648
 roster | --profile demo
