@@ -1,7 +1,7 @@
 # Brief: #639 the hub pane registry (persistent, generation-fenced, with the `pane/*` handlers)
 
 Repo: Performant-Labs/holler. Issue: #639 (wave 2 of epic #633; depends on #637, merged at `f2602ba`, and #669, merged at
-`af3d8df`). Rigor: in-session. UI surface: no. Kind: feature.
+`af3d8df`). Rigor: second-opinion. UI surface: no. Kind: feature.
 
 **Branch:** `issue-639-implementation`. **Design (D):** N/A (no UI). **Decision record:** the contract section of epic #633,
 its "Skeleton split" rulings 1-9, and the merged `holler-pane` crate are fixed. The issue text of #639 is the source of truth
