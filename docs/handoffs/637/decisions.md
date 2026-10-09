@@ -257,3 +257,23 @@
 - **Assumed:** a test of a type alias (D1) can only be a contract pin through a consumer function; there is no production behavior to mutate.
 - **Hedged:** the empty-iterator assertions in `ports_test.rs` were left as "stream ended", which stays true under the new item type.
 - **Evidence:** 64 holler-pane tests + 3 doctests pass; workspace 928 passed, 0 failed; removing the `deserialize_with` on `Pane.env` fails the env test; lint, changelog, machete, clippy, golden, doc all clean. Verdict PASS, no production change needed.
+
+## A (Phase 7 re-entry, anti-duplication gate after S's REWORK) — 2026-10-09T05:23:53-06:00
+- **Decided:** PASS on the diff 27da2da..19d5817, with 0 blocks and 3 warns. The code delta since my last review is 40b722b..19d5817. See handoff-A-dup.md, which replaces the first-pass review (kept in git at af72b6d) and carries forward the status of that review's six rows.
+  - No parallel path. `deserialize_env_names` extends `argv.rs` beside `EnvVarName`, calls `EnvVarName::parse` for every element, raises only the two existing fixed-text variants, and copies `Argv`'s value-first pattern; this is S's suggested shape. Both doubles now call `next_generation`. `HarnessKind` stays one enum, tied to `HARNESS_IDS` by a test. `Watch<T>` changed in place.
+  - First-pass rows 1-5 are resolved. Row 6 (the `Spec*` rename) was skipped on the coordinator's instruction and stays optional.
+- **Decided:** row 1, the env reader being field-level and `pub(crate)`, is a warn, not a block. F extended the right object as S directed, and nothing is broken today. But a `Vec<EnvVarName>` field defined outside the crate silently brings back the echo S's REWORK 2 fixed, and #661, #665 and #638 were told the guard is the type's decode. The suggested fix needs no decision: make the function `pub` and add a doc line. A type-level container is more robust, but it changes the epic's field type, so it is not recommended now.
+- **Decided:** row 3 (test files named `adopted_test.rs` and `rework_test.rs`, plus near-copy reply helpers) is a warn and optional. It drifts from `docs/testing.md`'s one-file-per-behaviour layout, but nothing in it freezes. I missed `adopted_test.rs` in the first pass and say so in the handoff.
+- **Decided:** D1 and D2 go to the operator as confirmations, not as open choices. Both are A's own first-pass recommendations, both are implemented, and neither needs an issue or epic amendment: #637's text names `Watch<T>` without its item type. They are surfaced because the coordinator, not the operator, chose them, and the relayed operator request asks for decisions now.
+- **Assumed:**
+  - The run's phase commit stages this entry and handoff-A-dup.md; I committed nothing.
+  - The issue texts are as fetched with `gh issue view` at about 05:18 MDT. The latest edit to any of them was at 03:40 MDT, so none reflects D1 or D2.
+- **Hedged:**
+  - Row 2(a), the undefined end of a `Watch` iterator, predates the rework. I list it now because D1 made the three items explicit and #638, #639, #643, #649 and #661 implement it in parallel.
+  - Row 1's echo is latent: today only `Pane.env` and `ProfileSpec.env` hold env names, and both use the reader.
+- **Evidence:**
+  - Read in full: `argv.rs`, `error.rs`, `ports.rs`, `reply.rs`, `generation.rs` and `lib.rs`; `profile.rs` (`:1-60`, `:170-404`) and `pane.rs` (`:100-269`); the test files `common/mod.rs`, `argv_env_test.rs`, `adopted_test.rs` and `rework_test.rs`, the helpers and doubles of `error_test.rs` and `ports_test.rs`, and the delete tests of `records_test.rs`; the brief, handoff-S.md, handoff-F.md (both passes), handoff-T-green.md (both passes), this file and evidence.md.
+  - Compared against `holler_proto::typed_params` (`envelope/dispatch.rs`), `HARNESS_IDS` (`vocab.rs:269-275`), `control/wait` (`control_server.rs:469-481`) and `docs/testing.md` (Layout), and searched `crates/` for other `deserialize_with` helpers (none).
+  - Ran: `git diff 5f69488..HEAD -- crates/`; `git diff --stat 40b722b..5f69488` (handoff files only); a blast-radius filter over `git diff --name-only 27da2da...HEAD` (nothing outside it); `bash scripts/golden-diff-summary.sh` (no drift); `wc -l` on every touched file (the largest is 617).
+  - Fetched #633, #634, #637, #638, #639, #643, #647, #649, #661, #665, #669 and #670.
+  - Scratchpad only (no worktree file touched): a scratch crate with a path dependency on `holler-pane` at this head. A struct with `env: Vec<EnvVarName>` refused `"TOKEN=hunter2"` and `[12345]` through `decode_params` as `usage`, with the value in `message` and `detail`. `ProfileSpec` refused the same input as `profile-secret-refused`, with no echo.
