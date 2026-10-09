@@ -1,83 +1,110 @@
-# Handoff-A-dup: Phase 7 - #640 part 1 of 3, the pure Herdr protocol and grid core  (anti-duplication gate)
+# Handoff-A-dup: Phase 7 - #640 part 1 of 3, the pure Herdr protocol and grid core  (anti-duplication gate, round 2 after S REWORK)
 
 **Date:** 2026-10-09
 **Branch:** issue-640-implementation
-**Diff base:** 9d61c9f (origin/main)   **Diff head:** 22cef15 (F's code is 78f5274, on T-red's stubs at 09ada91)
+**Diff base:** 9d61c9f (origin/main, the full feature); rework delta a5e0fef..df48467   **Diff head:** df48467
 **Reuse map:** docs/handoffs/640-brief.md §"Reuse map (extend, do not duplicate)"
 **Verdict:** PASS
 
+This round replaces the round-1 gate. Round 1 passed at 22cef15, was committed as d9e19e3, and stays in git history.
+Its three warns still stand, because this rework touched none of the code they cite. They are restated below as W-1 to
+W-3.
+
+This pass reviews the delta from S's test-only REWORK. That delta changes one file of code,
+`crates/holler-adapter-herdr/tests/protocol_test.rs` (+2/-1), plus the T-green handoff and the journal. The production
+code is still exactly F's: `git diff 78f5274 HEAD -- crates/holler-adapter-herdr/src crates/holler-adapter-herdr/Cargo.toml
+Cargo.lock CHANGELOG.md` is empty.
+
 ## Summary
 
-PASS. F extended or mirrored every object the Reuse map named and built no parallel path:
+PASS. The rework adds no production code, helper, type or dependency.
 
-- **Shared types.** Every error is a `holler_pane::PaneError` variant, and every cell, id and key is `holler_pane`'s
-  `GridPos`, `PaneId` or `Key`. The one open code, `grid-unreachable`, goes through `RefusalCode::from_static`.
-- **Testkit vocabulary.** `GRID_UNREACHABLE` and `SUPPORTED_VERSIONS` are declared once each in production. Tests pin
-  both equal to the test kit's (AC 13). The message shapes match `FakeHerdr`'s.
-- **The conversion.** `grid_of` is the spike's `derive()` walk. No second conversion rule exists.
-- **The parallel copies.** The copies outside this crate are `last_lines` (the brief sanctions it), `count` and
-  `excerpt`. Each has its original in a private item of a frozen or dev-only crate, and F declared each one in writing.
+- **What changed.** One assertion could not fail: `contains("99")` was already implied by `contains("99.0.0-fake")`. It
+  is now `contains("protocol 99")`, which pins the wording that `check_supported` already produces (`protocol.rs:323`
+  and `:328`). That narrows an existing assertion and adds no structure, so it cannot create a parallel path.
+- **What I re-checked.** I ran the round-1 duplicate checks again against HEAD, and against the two newer commits on
+  origin/main (c76bbed and cd635c0). Neither changes the picture. Those commits touch neither `holler-pane`, the test
+  kit's Herdr fake nor this crate. They also add no public helper that could replace the crate's three private copies.
 
-The three findings are all `warn`. They cover one helper copied from another crate and two small rules repeated within
-this crate. None of them changes the pinned API.
+There is no new finding. The three warns are carried over from round 1.
 
 ## Findings
 
 | # | Severity | File:line | Finding | Suggested fix |
 |---|---|---|---|---|
-| 1 | warn | `crates/holler-adapter-herdr/src/protocol.rs:580` | **`excerpt` is a second copy of `holler_pane::error::excerpt`** (`error.rs:688`). That function is `pub(crate)`, and `holler-pane` is frozen (#637) and outside this brief's blast radius, so making it public would be an amend-first API change. The copy is justified for part 1. It behaves the same: 64 characters, `{:?}` quoting and a trailing `...`. Its byte-length test after `take(64)` is equivalent to the original's character count. The risk: the host adapter (#641) and the OpenCode adapter (#642) will also quote what a peer sends in one-line messages, so the number of copies is likely to reach three. No test here pins the 64-character limit either: T-green's `EXCERPT_LIMIT` mutant survived. | No change in part 1. Record a follow-up: the next amend-first change to `holler-pane` (for example the Phase 3 W-9 `HerdrSnapshot` amendment) makes `error::excerpt` public, and each adapter then uses it instead of its own copy. Until then, #641 and #642 copy this one rather than write a third rule. |
-| 2 | warn | `crates/holler-adapter-herdr/src/plan.rs:122-124, 209, 214` | **`Widths` repeats two of `layout.rs`'s private helpers.** It writes the row-to-index rule `usize::from(row).checked_sub(1)` twice, and the length saturation `u16::try_from(len).unwrap_or(u16::MAX)` once. These are `layout::index` (`layout.rs:215`) and `layout::saturate` (`layout.rs:220`). The layout module doc (`layout.rs:21-23`) says the base is applied in "exactly two places", which is now true of `layout.rs` alone. `Widths` itself is not a parallel path. It is built from `GridMap`'s public `rows()` and `cols_in()`, it never walks the tree again, and it stays in `GridPos` terms, with no Herdr conversion. | Make `layout::index` and `layout::saturate` `pub(crate)`, and call them from `Widths::add`, `Widths::width` and `Widths::rows`. Then the 1-based rule has one home in the whole crate, which is what the brief's "off-by-one impossible to merge" asks for. Part 2 edits this crate anyway, so it can make the change. |
-| 3 | warn (low) | `crates/holler-adapter-herdr/src/protocol.rs:473-483` | **`direction()` keeps its own list of `Direction`'s variants**, `[Direction::Right, Direction::Down]`. That list is separate from `Direction::as_str` (`layout.rs:36-44`), so the two halves of the wire-name mapping sit in two modules. This is the same kind of problem as Phase 3 W-3, which F fixed for methods with `Method::ALL`. The risk is low, because Herdr has exactly two directions (spike §7). | Optional: add a `Direction::ALL` const next to `as_str` (the `PaneCode::ALL` and `Method::ALL` pattern) and have `direction()` use it. Part 2 can do this if it touches either file. |
+| 1 | warn (carried, round 1 W-1) | `crates/holler-adapter-herdr/src/protocol.rs:580` | **`excerpt` is a copy of `holler_pane::error::excerpt`** (`error.rs:688`). The original is `pub(crate)` in the frozen contract crate, so the copy is justified for part 1. They behave the same: 64 characters, `{:?}` quoting and a trailing `...`. The copy's byte-length test after `take(64)` is equivalent to the original's character count. Two risks remain. No test pins the 64-character limit (T-green's `EXCERPT_LIMIT` mutant survived). And the host adapter (#641) and the OpenCode adapter (#642) are likely to make a third and fourth copy. No issue tracks this yet (`gh issue list --search excerpt`: none). | No change in part 1. The next amend-first change to `holler-pane` makes `error::excerpt` public, and each adapter calls it instead of keeping a copy. That change could be the Phase 3 W-9 `HerdrSnapshot` amendment. Until then, #641 and #642 copy this one rather than write a third rule. O or the MO files the follow-up or adds it to that amendment's scope. |
+| 2 | warn (carried, round 1 W-2) | `crates/holler-adapter-herdr/src/plan.rs:122-124, 209, 214` | **`Widths` repeats two of `layout.rs`'s private helpers.** The row-to-index rule `usize::from(row).checked_sub(1)` appears twice, and the length saturation `u16::try_from(len).unwrap_or(u16::MAX)` once. These are `layout::index` (`layout.rs:215`) and `layout::saturate` (`layout.rs:220`). The module doc at `layout.rs:21-23` says the base is applied in "exactly two places", which is true of `layout.rs` alone. `Widths` is not a parallel path. It is built from `GridMap`'s public `rows()` and `cols_in()`, does not walk the tree again, and does no Herdr conversion. | Make `layout::index` and `layout::saturate` `pub(crate)`, and call them from `Widths::add`, `Widths::width` and `Widths::rows`. Then the 1-based rule has one home in the crate. Part 2 edits this crate anyway, so it can make the change. |
+| 3 | warn (low, carried, round 1 W-3) | `crates/holler-adapter-herdr/src/protocol.rs:473-483` | **`direction()` keeps its own list of `Direction`'s variants**, `[Direction::Right, Direction::Down]`, apart from `Direction::as_str` (`layout.rs:36-44`). The two halves of the wire-name mapping therefore sit in two modules. The risk is low, because Herdr has exactly two directions (spike §7). | Optional: add a `Direction::ALL` const next to `as_str`, following the `Method::ALL` and `PaneCode::ALL` pattern, and have `direction()` use it. Part 2 can do this if it touches either file. |
 
-The copies were checked and need no change. So was the drift that could have come in during F's work:
+No duplication, and the extension is clean. The rework introduced no architectural drift. Evidence:
 
-- **Reuse map row 1 (the port, its types, every error).** There is no new error, grid or key type.
-  - The new public types are all pinned by the brief, and the workspace has nothing equivalent: `Direction`, `LayoutNode`,
-    `GridMap`, `Extent`, `Target`, `Step`, `Request`, `ServerVersion`, `WorkspaceRef`, `PaneRef` and `SessionState`. I
-    searched for each name.
-  - `holler_proto` also has a `Direction`, a `log::Direction` and a `SessionState`, but they mean other things. This
-    crate does not re-export them at its root (Phase 3 W-1).
-  - `PaneRef` and `SessionState` are Herdr's own records: Herdr's ids, with no grid. They do not duplicate `HerdrPane`
-    or `HerdrSnapshot`. Part 2 builds those from them.
-- **Row 2 (`FakeHerdr`'s vocabulary).** The adapter's messages take the fake's shapes:
-  - a refusal: `"<cell> cannot be reached: <why>"`;
-  - a cell out of range: `"<cell> is outside the workspace, which is N rows by M columns"`;
-  - an unsupported version: `"Herdr reports version …; the supported one is …"`.
+- **The rework delta (`protocol_test.rs:397-400`).**
+  - **The change.** It adds the assertion `message.contains("protocol 99")` and a one-line comment.
+  - **Why it cannot pass by accident.** The assertion can match only `check_supported`'s protocol clause. The version
+    is quoted (`"99.0.0-fake"`) and follows the word "version", and `SUPPORTED_VERSIONS` reads "protocol 22".
+  - **What it adds.** It checks the production wording and does not re-implement the gate. That is the same shape as
+    the test-only rework in the #508 run.
+  - **What it leaves alone.** No helper, fixture or builder is added. `tests/common/mod.rs` is unchanged since T-red
+    (`git diff --stat 09ada91 HEAD -- crates/holler-adapter-herdr/tests` lists only this one file).
+  - **Size.** The file is 679 lines, up from 678, so it stays under the stack's ~800-line flag.
+- **Reuse map row 2, the vocabulary mirror.**
+  - **The frame.** The adapter's refusal uses `FakeHerdr`'s frame (`holler-pane-testkit/src/herdr.rs:321-324`): "Herdr
+    reports version …; the supported one is {SUPPORTED_VERSIONS}". It adds the one clause that AC 17 requires, "with
+    protocol N".
+  - **The difference.** The rework pins that clause. It is the only place the two messages differ, and the difference
+    is older than this round.
+  - **The constants.** No shared constant changes, and AC 13 still pins `SUPPORTED_VERSIONS` and `GRID_UNREACHABLE`
+    equal to the test kit's.
+  - **For verb tests.** They should assert the code `herdr-version-unsupported`, not the wording.
+- **Re-verified at HEAD (unchanged since round 1).**
+  - **Shared types.** Every error is a `holler_pane::PaneError` variant. Every cell, id and key is `GridPos`, `PaneId` or
+    `Key`. The one open code goes through `RefusalCode::from_static` (`plan.rs:39`).
+  - **The conversion.** `grid_of` and `chain` (`layout.rs:145-185`) are the spike's `derive()` walk. They match the
+    brief's verbatim copy of `herdr-grid.sh:32-39`. Nothing reads the rectangles.
+  - **New public items.** None of them exists elsewhere in `crates/`: `LayoutNode`, `GridMap`, `Extent`, `Request`,
+    `ServerVersion`, `WorkspaceRef`, `PaneRef`, `grid_of`, `plan_splits`, `decode_reply` and every `parse_*`.
+  - **Name-only collisions.** These carry unrelated meanings:
+    - `holler_proto::methods::Direction` is a circuit side;
+    - `holler_proto::log::Direction` is a wire-event direction;
+    - `holler_proto::docs::SessionState` is an A2A session state;
+    - `holler_cli::cli::Target` is a CLI target string;
+    - a `Step` type alias in the test kit's `conformance/profile_store.rs`.
 
-  The test kit is a dev-dependency only (`Cargo.toml:22-25`).
-- **Row 4 (the tree walk).** `grid_of` and `chain` follow `herdr-grid.sh:32-39` exactly: the same chain rule, and rows
-  then slots, counted from 1. The one addition, which puts the panes of a nested slot in `unplaced`, is what AC 5 and
-  AC 6 require. Nothing reads positions from the rectangles.
-- **Row 5 (`last_lines`, `protocol.rs:592`).** The body matches the test kit's (`herdr.rs:522-525`) line for line. The
-  brief sanctions this copy.
-- **`count` (`plan.rs:262`).** It is a five-line copy of the test kit's private, dev-only `count` (`herdr.rs:498`). It
-  keeps the range message's wording equal to `FakeHerdr`'s, and no production code has one to reuse. Justified.
-- **Row 6 (the socket client).** There is no import of `holler-hub` or `holler-proto`, and no I/O. `decode_reply`
-  reads Herdr's own wire: string error codes and `holler:<method>` ids. `holler_proto::Envelope` and `send_over` do not
-  model that wire, and ADR-0021 §5 does not let an adapter depend on them.
-- **Pattern consistency.**
-  - `Method::ALL` and the `const`-built `ALLOWED_METHODS` copy the `PaneCode::ALL` and `CLOSED_CODES` pattern
-    (`error.rs:72`, `error.rs:148`).
-  - `Request`'s hand-written `Debug` follows `PaneName`'s (`pane.rs:56`).
-  - The parsers read `Value` by hand, not through serde derives. The test kit's envelope checker does the same
-    (`envelope.rs:42`). handoff-F gives the reason: a serde type error quotes the value, which for `pane_read` is a
-    pane's screen.
-- **No drift from F's work.**
-  - F's commit changes only the five production files, `CHANGELOG.md` and the handoff documents. It changes no test.
-  - The public items are the T-red stubs' items. Only two things changed: the `_` prefixes on the stubs' parameter
-    names are gone, and `ALLOWED_METHODS` is built by a `const` block, still as `[&str; 9]`.
-  - The new derives are on private types only.
-  - The dependencies are the same as at T-red.
-  - There is no `unsafe` and no `#[allow]` in `src/`.
-  - The files are 39, 222, 268 and 595 lines long.
-  - No other crate, ADR, golden file or protocol doc is touched.
-  - There are no personal infrastructure names.
-- **The Phase 7 checklist for this stack.** None of the listed candidates is touched or copied: the `token.rs`
-  operations, `Lockout`, `Roster`, `log(Severity, …)`, and the test helpers `Hub`, `Body`, `mint_token`, `join`,
-  `wait_for` and `StateDir`. The builders in `tests/common/mod.rs` build Herdr trees only, and nothing in the workspace
-  does the same.
+    The crate re-exports nothing at its root (`lib.rs:32-35`), so none of them clashes.
+  - **The three private copies.** Their only originals are `holler_pane::error::excerpt` (`pub(crate)`), and the test
+    kit's private, dev-only `count` (`herdr.rs:498`) and `last_lines` (`herdr.rs:522`).
+    - The bodies of the two `last_lines` are equal, and the brief sanctions that copy.
+    - `count` takes a `usize` where the original takes a `u16`, with the same wording.
+    - A workspace-wide search for quote-and-cut, plural-count and last-N-lines helpers finds no public original. The one
+      other quote-and-cut site, `holler-hub/src/holds.rs:222`, trims a reason without quoting it, and it lives in a crate
+      that an adapter may not depend on (ADR-0021 §5).
+  - **The stack's Phase 7 candidates.** None is touched or copied in `src/` or `tests/`: the `token.rs` operations,
+    `Lockout`, `Roster`, `log(Severity, …)`, `Hub`, `Body`, `mint_token`, `join`, `wait_for` and `StateDir`. The
+    builders in `tests/common/mod.rs` have no public equivalent in `holler-pane` or `holler-pane-testkit`.
+  - **Hygiene.**
+    - There is no `unsafe` or `#[allow]` in `src/`.
+    - No test sleeps, opens a socket or spawns a process or thread.
+    - The production files are 39, 222, 268 and 595 lines long.
+    - The dependencies are `holler-pane` and `serde_json`, with the test kit as a dev-dependency only. There is no
+      `holler-hub` or `holler-proto`.
+- **origin/main since the merge base, 9d61c9f.**
+  - **What the newer commits change.** c76bbed and cd635c0 change the hub's profile registry, the test kit's profile
+    scope, ADR-0021 and the CHANGELOG. The ADR-0021 change is one `pane-in-other-profile` sentence in the spec-editing
+    flow.
+  - **What they leave alone.** They do not touch `crates/holler-pane/`, `holler-pane-testkit/src/herdr.rs`,
+    `conformance/herdr.rs` or this crate.
+  - **Helpers.** `git grep` on origin/main finds no new public `excerpt`, `count` or `last_lines`.
+  - **Result.** Merging this branch creates no new duplicate.
 
 ## Notes for F
 
-PASS, so nothing is required. W-2 and W-3 are small edits within this crate that part 2 can make, since it edits this
-crate anyway. W-1 is a follow-up for O and the MO, tied to the next amend-first change to `holler-pane`.
+None, since the verdict is PASS. W-2 and W-3 are small edits within this crate, and part 2 can make them. W-1 is a
+follow-up for O and the MO, tied to the next amend-first change to `holler-pane`.
+
+## Patterns referenced
+
+- `crates/holler-pane/src/error.rs:688`: `excerpt`, `pub(crate)`.
+- `crates/holler-pane-testkit/src/herdr.rs:36, 51, 321-324, 498, 522`: the shared constants, the version-refusal
+  wording, `count` and `last_lines`.
+- `docs/handoffs/640-brief.md` §Evidence: the verbatim `herdr-grid.sh:32-39` walk, and the Reuse map.
+- `docs/handoffs/508/handoff-A-dup.md`: this repo's precedent for a round-N gate after a test-only S REWORK.

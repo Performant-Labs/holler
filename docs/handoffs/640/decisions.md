@@ -179,3 +179,37 @@
 - **Evidence:** mutant `Some(_) => "an unsupported protocol".to_owned()` at `protocol.rs` check_supported: suite
   32 passed / 1 failed (the AC 17 test) with the new assertion; it passed everything before. Reverted. Full
   `cargo test --workspace`, clippy and lint.sh clean afterwards.
+
+## A (Phase 7, anti-duplication, round 2 after S REWORK) — 2026-10-09T15:54:13-06:00
+- **Decided:**
+  - **Verdict.** PASS on the rework delta a5e0fef..df48467, with the full feature re-checked from 9d61c9f. There is no
+    new finding. Round 1's three warns (W-1 to W-3) are carried over unchanged. The findings are in handoff-A-dup.md,
+    which replaces round 1 (d9e19e3, in git history).
+  - **The rework is not a parallel path.** It replaces one assertion that could not fail in `protocol_test.rs:399`
+    with `contains("protocol 99")`. That pins the wording `check_supported` already produces. It adds no helper,
+    builder, fixture, type or dependency, and the production code is still F's 78f5274 byte for byte.
+  - **The vocabulary mirror holds.** The adapter's version refusal is `FakeHerdr`'s frame plus the protocol clause
+    that AC 17 requires. The rework pins that clause, and no shared constant changed.
+- **Assumed:**
+  - **Same file name.** A round-2 gate overwrites `handoff-A-dup.md` rather than writing a `-rework` file. The role
+    doc allows A only that one file name, and the #508 run sets the precedent.
+  - **Committing.** The Workflow script commits this phase, as it did every earlier phase, so A does not commit.
+- **Hedged:**
+  - **W-1 is still unfiled.** No issue tracks making `holler_pane::error::excerpt` public (`gh issue list --search
+    excerpt`: none). It stays a warn, because the copies in #641 and #642 are a forecast and not in this diff.
+- **Evidence:**
+  - **The diffs.**
+    - `git diff a5e0fef HEAD -- crates/` and the T-green rework section.
+    - `git diff --stat 78f5274 HEAD -- src Cargo.toml Cargo.lock CHANGELOG.md`: empty.
+    - `git diff --stat 09ada91 HEAD -- tests`: only `protocol_test.rs`.
+  - **Read in full:** `src/{lib,layout,plan,protocol}.rs`, `Cargo.toml`, the reworked AC 17 test, the brief, and the
+    handoffs A-dup (round 1), S and T-green.
+  - **The analogous objects:** `holler-pane` `error.rs:686-697` (`excerpt`), and the test kit's `herdr.rs:30-51`,
+    `:312-330` and `:490-525`.
+  - **The duplicate searches:** every new public type, function and constant name across `crates/`; quote-and-cut,
+    plural-count and last-N-lines patterns; the stack's Phase 7 candidates in `src/` and `tests/`; and public builders
+    in `holler-pane` and the test kit.
+  - **origin/main.** c76bbed and cd635c0 touch neither `holler-pane`, the test kit's Herdr files nor this crate. A
+    `git grep origin/main` finds no new public `excerpt`, `count` or `last_lines`.
+  - **Hygiene:** no `unsafe` or `#[allow]` in `src/`; no sleep, socket or process in the tests; files of 39 to 679
+    lines.
