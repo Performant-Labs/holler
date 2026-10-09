@@ -3,6 +3,8 @@
 Repo: Performant-Labs/holler. Issue: #642 (epic #633, wave 3). Rigor: second-opinion. UI surface: no. Kind: feature (adapter).
 
 **THIS RUN IS 642a ONLY (server side).** Implement only the 642a row of the split table below; 642b (TUI side, the ADR-0021 edit) is a later run on the same branch name. The PR says `Part of #642`, not `Closes #642`. Rigor: second-opinion (operator, 2026-10-09; the outside model is deepseek-v4-pro).
+The exact AC subset this run writes, runs and is audited against is listed at the top of "Acceptance criteria" ("This run's
+ACs (642a)"); every other AC is 642b's and is neither written nor run here.
 
 **Branch:** `issue-642-implementation`, based on `9d61c9f` (`origin/main`: #637 slice a, ADR-0021, the OpenCode spike #635,
 and every slice of the test kit #638, including slice e #684 with `FakeHarness` and the harness conformance suite).
@@ -19,6 +21,12 @@ the `Resolver` docs, decision 14 and Forward-compat; W-3 in decision 15, AC 25 a
 10 and AC 11c; W-5 in decision 11, Files, the Reuse map and Follow-ups; W-6 in Behaviour, decision 12 and AC 11d; W-7 in
 Behaviour, decision 13 and AC 11e; W-8 on `ProcessEnv` and in decision 10; W-9 in Files, AC 22 and Blast radius. The size
 check now trips F's file cap; the split it names is proposed there.
+
+**Amended 2026-10-09 after the outside brief review, round 1** (0 BLOCK; needs-verification and WARN findings). Additions
+and clarifications only; no decision, AC or scope item is changed or removed: the sources the reviewer could not see are
+quoted in Evidence ("Added after the outside brief review"); the 642a AC subset is stated at the top of "Acceptance
+criteria"; `http.rs`'s reply reading, `serve`'s `Child` ownership, `attach_tui`'s dead-pane handling and poll, the
+`no such pane` stderr and `#{pane_dead_status}` are spelled out; AC 8 and AC 10 gain one clause each.
 
 ## Size check
 
@@ -57,6 +65,7 @@ For scale: #684 (slice e of the test kit) landed at about 2,500 lines in one pas
 642b carries the ADR and doc edits because their facts (SHOWN through tmux, one TUI per server) hold only once the TUI
 half exists, and the conformance suite (AC 12) needs all eight methods. 642b touches seven files, three of them doc-only.
 If the MO waives the cap instead (the three doc files total ~35 lines of prose), this brief runs as one story unchanged.
+(For this run the split is taken, not the waiver: the header names 642a.)
 
 Within either shape: if `lib.rs` nears 600 lines, move `serve` and its boot poll to `src/server.rs` (`mod server;` in
 `lib.rs`); if `real_opencode_test.rs` nears 600, move its rig to `tests/real_opencode/rig.rs` (`#[path]` module); if
@@ -287,6 +296,8 @@ Cargo.toml:66-72
 # only ships a *client* async handshake). `httparse` parses the upgrade GET;
 ...
 httparse = "1.10.1"
+Cargo.toml:40      [workspace.dependencies]
+Cargo.toml:48      serde_json = { version = "1" } # for holler-proto, holler-cli
 Cargo.toml:161     tempfile = "3"
 crates/holler-hub/Cargo.toml:23    httparse = { workspace = true }      (the analogous hand-rolled HTTP)
 scripts/lint.sh:54-60   # 5. Dependency features must name their consumer ... (a member `features = [...]` needs a comment)
@@ -296,6 +307,12 @@ Test conventions:
 crates/holler-pane-testkit/tests/harness_conformance_test.rs:1
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)] // #684
 clippy.toml: too-many-lines-threshold = 100, cognitive-complexity-threshold = 15  (denied in [workspace.lints.clippy])
+clippy.toml:6-7    cognitive-complexity-threshold = 15 / too-many-lines-threshold = 100
+Cargo.toml:24-25   cognitive_complexity = "deny" / too_many_lines = "deny"
+scripts/lint.sh:43-46   # 4. File-size gate: warn at 600 lines, fail at 900 ...
+                        if [ "$n" -ge 900 ]; then
+rust-toolchain.toml     [toolchain] channel = "stable"   (no `rust-version` anywhere in the workspace `Cargo.toml`)
+.github/workflows/ci.yml:61   ... (every ubuntu run since stable 1.99.0 shipped, 2026-10-01) ...
 .github/workflows/ci.yml:21    os: [ubuntu-latest, macos-latest]
 .github/workflows/ci.yml:128   run: cargo test --workspace -- --skip roster_stays_accurate_under_concurrent_body_load
 crates/holler-cli/tests/reconnect_contract_test.rs:15   gated behind `HOLLER_TEST_HOOKS=1`  (the HOLLER_TEST_* opt-in convention)
@@ -328,6 +345,147 @@ respawn-pane ... -- env -- sh -c '<print args>' f 'x\;' 'a b' rename-session pwn
 TMUX=/nonexistent,1,0 tmux -f /dev/null display-message -p x
                                                       -> "error connecting to /nonexistent ...": with no -S/-L, an inherited
                                                          $TMUX picks the server
+```
+Added after the outside brief review (round 1, NV-1 to NV-13, NV-15, W-3, W-5, W-6), each read or probed by the amender:
+
+#641's `TmuxSocket` and rules, which `tui.rs` mirrors (NV-1). #641's crate has no code yet: its branch
+(`origin/issue-641-implementation`, `dd5e99b`) holds only the brief, so the mirror is against that brief:
+```
+docs/handoffs/641-brief.md:368-369 (at dd5e99b)
+1. **Type and constructor.** `pub struct TmuxHost` (plain data, so `Send + Sync`), `pub enum TmuxSocket { Default,
+   Name(String), Path(PathBuf) }`, `TmuxHost::new(socket)`; ...
+docs/handoffs/641-brief.md:262-264
+   - f. **Socket flags:** `TmuxSocket::Path(p)` puts `-S p` and `TmuxSocket::Name(n)` puts `-L n` before the subcommand;
+     `TmuxSocket::Default` puts neither; a configured config file adds `-f <path>`. Every spawned tmux has `TMUX` and
+     `TMUX_PANE` removed from its environment: ...
+docs/handoffs/641-brief.md:419-421
+9. **Environment.** Every spawned `tmux` has `TMUX` and `TMUX_PANE` removed, so a hub or test running inside a tmux pane never
+   addresses that pane's server by inheritance; only the configured socket is used (with `TmuxSocket::Default` that means
+   tmux's own default socket, never `$TMUX`'s). ...
+docs/handoffs/641-brief.md:437-442
+      final `;` (`x;` -> `x\;`, `y\;` -> `y\\;`, `;` -> `\;`); nothing else changes (R1: `{`, `}`, `#{...}`, `~`, `-t`, `a b`,
+      `""` pass through literally).
+    - The cwd first has every `#` doubled (`##` is a literal `#`), then gets the same escape. ...
+```
+The toolchain the `Command` assertions and `process_group` need (NV-2, NV-15): the workspace sets no `rust-version` and
+pins `channel = "stable"` (above); CI runs on `ubuntu-latest` and `macos-latest` (`ci.yml:21`). On the local stable
+`rustc 1.98.1`, a program calling `Command::env_remove("TMUX")`, `env_remove("TMUX_PANE")` and
+`std::os::unix::process::CommandExt::process_group(0)` compiles, and `get_envs()` prints `[("TMUX", None), ("TMUX_PANE",
+None)]`. `std::os::unix` exists on both CI targets.
+
+The hand-rolled HTTP precedent and `httparse`'s API (NV-3):
+```
+crates/holler-hub/src/ws_handshake.rs:92-102
+    use httparse::Request as RawRequest;
+    ...
+    let mut headers = [httparse::EMPTY_HEADER; 64];
+    ...
+        httparse::Status::Complete(_) => {}
+    ...
+        httparse::Status::Partial => return None,
+Cargo.lock:1313-1314   name = "httparse" / version = "1.10.1"
+httparse-1.10.1/src/lib.rs:617, 630   impl<'h, 'b> Response<'h, 'b> { ... pub fn parse(&mut self, buf: &'b [u8]) -> Result<usize>
+httparse-1.10.1/src/lib.rs:1263       pub fn parse_chunk_size(buf: &[u8])
+```
+The suite reads session lists as sets (NV-4): cases 3-5 compare a fresh server's list with the empty list and otherwise only
+test membership:
+```
+crates/holler-pane-testkit/src/conformance/harness.rs:183     expect_eq("the sessions of a fresh server", list(h, p0)?, Vec::new())
+crates/holler-pane-testkit/src/conformance/harness.rs:199-200 holds("list_sessions after two creates", &listed, &a)?; ... &b)
+crates/holler-pane-testkit/src/conformance/harness.rs:401-403
+fn holds(what: &str, ids: &[String], id: &str) -> Result<(), String> {
+    if ids.iter().any(|held| held == id) {
+        Ok(())
+```
+OpenCode's web app answers a route it does not serve with `200` HTML (NV-6; observed live against real OpenCode by
+`holler-body`'s driver work; these lines do not name the version):
+```
+crates/holler-body/src/http_attach_driver.rs:39-42
+//!   (bare, **not** `/api`-prefixed) is the real route — `204` immediately,
+//!   genuinely fire-and-forget. `POST {endpoint}/api/session/{id}/prompt_async`
+//!   is **not** a real route: it fell through to the SPA's catch-all and
+//!   returned a `200` of the web UI's own `index.html`, not a driver success.
+crates/holler-body/src/http_attach_driver.rs:47-48
+//!   the real route (`204`); the bare `POST {endpoint}/session/{id}/interrupt`
+//!   also fell through to the SPA's HTML shell (`200`, not a real interrupt).
+```
+The session id alphabet (NV-7), read from the installed OpenCode 1.18.35 bundle (`opencode-ai/bin/opencode.exe`): an id
+is the prefix, `_`, 12 hex digits (a timestamp counter) and 14 characters drawn from
+`0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz`, so every character after `ses_` is in `[0-9A-Za-z]` and
+there are 26 of them (spike 150-151):
+```
+var J={job:"job",event:"evt",session:"ses",...},V=26, ...
+function Y(j){let z="",C=U(j);for(let A=0;A<j;A++)z+="0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"[C[A]%62];return z}
+... return j+"_"+O.toString("hex")+Y(V-12)}
+```
+A malformed id (NV-8): the spike's `400` is for `POST /tui/select-session`, not for `GET /session/:id`:
+```
+docs/research/opencode-pane-spike.md:117-118  An unknown id answers `404 NotFoundError` and the TUI stays where it was. A malformed id (not `ses…`) answers `400`.
+scripts/spikes/opencode-tui.sh:57   check "select-session with a malformed id -> 400 (got $HTTP_CODE)" test "$HTTP_CODE" = 400
+```
+What `GET /session/<malformed>` answers is not recorded anywhere in the spike.
+
+The dead-end provider and the model guard the rig lifts (NV-9):
+```
+scripts/spikes/opencode-lib.sh:64-67
+  if (exec 3<>/dev/tcp/127.0.0.1/9) 2>/dev/null; then
+    echo "127.0.0.1:9 accepts connections; the dead-end provider would not be dead. Refusing." >&2
+    exit 2
+  fi
+scripts/spikes/opencode-lib.sh:69-85   (written to "$OC_DIR/config/opencode/opencode.json" by line 68)
+{
+  "$schema": "https://opencode.ai/config.json",
+  "enabled_providers": ["deadend"],
+  "disabled_providers": ["opencode"],
+  "model": "deadend/none",
+  "small_model": "deadend/none",
+  "autoupdate": false,
+  "share": "disabled",
+  "provider": {
+    "deadend": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "dead end (closed local port)",
+      "options": { "baseURL": "http://127.0.0.1:9/v1" },
+      "models": { "none": { "name": "none" } }
+    }
+  }
+}
+scripts/spikes/opencode-lib.sh:189-194
+oc_guard_no_model() { # port
+  oc_http GET "$1" /config/providers
+  local got
+  got=$(printf '%s' "$HTTP_BODY" | jq -c '[.providers[] | {id, url: .options.baseURL}]' 2>/dev/null || echo "?")
+  if [ "$got" = '[{"id":"deadend","url":"http://127.0.0.1:9/v1"}]' ] \
+    && ! (exec 3<>/dev/tcp/127.0.0.1/9) 2>/dev/null; then
+```
+The `PaneName` grammar (NV-10):
+```
+docs/adr/ADR-0005.md:18   - **Grammar:** `^[a-z0-9][a-z0-9-]{0,31}$` — one to 32 characters, starting alphanumeric, then lowercase letters, digits, or hyphens.
+crates/holler-pane/src/pane.rs:25-27   /// The name of a pane, e.g. `hj-c1r1` (the tmux session name). It is a
+                                       /// `holler_proto::vocab::SessionName`: the ADR 0005 name grammar is reused, not
+                                       /// copied, so a pane name is exactly a valid session name. ...
+```
+Ports 48100-48199 elsewhere in the repo (NV-12; `grep -rnE '\b481[0-9]{2}\b'`, outside this brief): only the test kit
+(`fixture.rs:19`, `conformance/harness.rs:62-67`, `tests/fake_harness_test.rs:14-15`, `tests/harness_conformance_test.rs:52,
+101`, `tests/fake_pane_store_test.rs:397`, `tests/fake_host_test.rs:119`) as in-memory values, and the spike scripts. No file
+in `crates/holler-pane-testkit` names `TcpListener`, `TcpStream` or `bind(`, so nothing else binds a port in the range.
+
+The raw abort reply (W-3):
+```
+docs/research/opencode-pane-spike.md:163   **Call (verified).** `POST /session/:id/abort` → `200 true`.
+docs/research/opencode-pane-spike.md:166-168  - Idle session: `200 true`, no effect. - Busy session: ... `abort` then answers `200 true`, ...
+```
+Dead panes and a missing session for `set-option` (W-5, W-6), probed by the amender on tmux 3.7c on a private server
+(`tmux -L hlr642probe<pid> -f /dev/null`, session `demo-c1r1`), killed afterwards; never the default socket:
+```
+set-option -p -t =demo-c1r1: remain-on-exit on; respawn-pane -k -t =demo-c1r1: -- sh -c "exit 7"
+display-message -p -t =demo-c1r1: '[#{session_name}|#{pane_dead}|#{pane_dead_status}|#{pane_start_command}]'
+                                                      -> "[demo-c1r1|1|7|sh -c "exit 7"]", exit 0   a dead pane still answers
+                                                         with its session name; #{pane_dead_status} is the exit status
+respawn-pane -k -t =demo-c1r1: -- sleep 3601          -> exit 0; the query then reads "[demo-c1r1|0||sleep 3601]"
+                                                         (respawn-pane revives a dead pane; the status field is empty)
+set-option -p -t =nope: remain-on-exit on             -> "no such pane: =nope:", exit 1   (a missing session; note the
+                                                         wording is not "can't find session")
 ```
 
 ## The public API (fixed here, so T can write RED tests against it)
@@ -390,10 +548,17 @@ pub enum HttpError {
 pub fn request(port: u16, method: &str, path: &str, body: Option<&serde_json::Value>, timeout: Duration)
     -> Result<Reply, HttpError>;
 ```
+How `request` reads a reply (NV-3; `httparse` 1.10.1's API, Evidence): the head is parsed with `httparse::Response::parse`
+(`Status::Partial` means read more, within the timeout); the client sends no `Expect` header, but an interim `1xx` head is
+skipped and the next head read (RFC 9110 §15.2); the body is then read by `Transfer-Encoding: chunked` (each size line through
+`httparse::parse_chunk_size`, trailers discarded, up to the `0` chunk), else by `Content-Length`, else to EOF (the request
+sends `Connection: close`). A head with no headers at all is valid and its body runs to EOF. A version other than HTTP/1.x, a
+malformed head or chunk, or a connection closed before the declared length is `Garbled`.
 `src/tui.rs` (the builders are public and pure so the hermetic tests pin the exact argv without running tmux):
 ```rust
-/// Which tmux server to address; the same variants as #641's `TmuxSocket`, so #649 configures one value and hands it
-/// to both adapters (decision 10). An adapter cannot depend on another adapter crate, hence a mirror, not a re-export.
+/// Which tmux server to address; the same variants as #641's `TmuxSocket` (641-brief.md:368-369 and 262-264 at `dd5e99b`,
+/// Evidence), so #649 configures one value and hands it to both adapters (decision 10). An adapter cannot depend on
+/// another adapter crate, hence a mirror, not a re-export.
 pub enum TmuxSocket { Default, Name(String), Path(PathBuf) }   // Default: no flag; Name: `-L n`; Path: `-S p`
 
 pub struct TmuxConfig {
@@ -421,11 +586,13 @@ pub fn respawn_args(session: &PaneName, dir: &str, tui_argv: &[String]) -> Vec<S
 /// `set-option -p -t =<session>: remain-on-exit on`.
 pub fn remain_on_exit_args(session: &PaneName) -> Vec<String>;
 /// `display-message -p -t =<session>: <FORMAT>`, where FORMAT is a constant that starts with `#{session_name}` and
-/// carries `#{pane_dead}`, `#{pane_start_command}` and `#{pane_title}` (separator and order are F's choice).
+/// carries `#{pane_dead}`, `#{pane_dead_status}`, `#{pane_start_command}` and `#{pane_title}` (separator and order are
+/// F's choice; `#{pane_dead_status}` is the exit status of a dead pane and empty for a live one, Evidence, W-5).
 pub fn query_args(session: &PaneName) -> Vec<String>;
 
 pub enum TitleShows { Session(String), Home, Unrecognised }
-/// `OC | <id>` with a whole session id (`ses_` then [0-9A-Za-z]+, no `…`) -> Session(id);
+/// `OC | <id>` with a whole session id (`ses_` then [0-9A-Za-z]+, no `…`; OpenCode's own ids are 26 such characters,
+/// Evidence, NV-7) -> Session(id);
 /// exactly `OpenCode` -> Home; anything else (the host name tmux shows by default, a truncated or
 /// non-id title, empty) -> Unrecognised.
 pub fn parse_title(title: &str) -> TitleShows;
@@ -436,8 +603,9 @@ pub fn attach_port(command_line: &str) -> Option<u16>;
 `src/exec.rs` (private, not API; decision 11): run one child with a deadline (stdin null, stdout and stderr drained on
 threads, `try_wait` polling, `Child::kill` and `wait` on the deadline) returning status, stdout and stderr or a timeout; a spawn
 `NotFound` maps to `unavailable` naming the binary. Classify a failed tmux call's stderr: `can't find session`, `can't find
-window`, `can't find pane`, `no server running`, or `error connecting to` with `No such file or directory` or `Connection
-refused` = **missing**; anything else = **other**, carrying tmux's first stderr line. And the `kill -s KILL -- -<pgid>` call
+window`, `can't find pane`, `no such pane` (what `set-option -p` prints for a missing exact target, Evidence, W-6),
+`no server running`, or `error connecting to` with `No such file or directory` or `Connection refused` = **missing**;
+anything else = **other**, carrying tmux's first stderr line. And the `kill -s KILL -- -<pgid>` call
 (the `kill` binary, no `unsafe`). Shaped like #641's `exec.rs`, so a later consolidation is a move (Follow-ups).
 
 ## Behaviour (what each method does; F implements, T tests)
@@ -449,7 +617,7 @@ strings above). HTTP outcomes map the same way everywhere: `Refused` -> `unavail
 Only `127.0.0.1` is ever contacted (epic decision 3).
 
 **Reply shapes are required, not assumed (W-6, decision 12).** OpenCode answers an unknown route with its web app (`200`,
-`text/html`; `holler-body/src/http_attach_driver.rs:38-49`), so a `200` alone never counts as success. Each step requires the
+`text/html`; `holler-body/src/http_attach_driver.rs:39-48`, Evidence), so a `200` alone never counts as success. Each step requires the
 JSON it relies on: `GET /global/health` an object with `"healthy": true`; `POST /session` an object whose string `id` starts
 with `ses`; `PATCH /session/<id>` an object whose `title` equals the id; `GET /session` an array of objects each with a string
 `id`; `GET /session/<id>` an object whose `id` equals the requested id; `POST /session/<id>/abort` and
@@ -457,7 +625,9 @@ with `ses`; `PATCH /session/<id>` an object whose `title` equals the id; `GET /s
 JSON) is `unavailable`, with a one-line message that names the route and the status and quotes at most 60 bytes of the body,
 control characters replaced (ADR-0021 §9: one-line messages). A session id enters a URL path percent-encoded (every byte
 outside `[A-Za-z0-9_-]`), so no id can change the request line; for the existence check `GET /session/<id>`, a `400` (a
-malformed id; spike 117-118) reads as `404`, i.e. `session-not-found`.
+malformed id; spike 117-118) reads as `404`, i.e. `session-not-found`. (The spike's `400` was observed for
+`POST /tui/select-session`; what `GET /session/<malformed>` answers is unrecorded (Evidence, NV-8). The rule holds either
+way: a `400` or a `404` from the existence check means no session of that id, and the step that follows is never sent.)
 
 **Every tmux call (B-2, W-4, decisions 9 and 10)** is built by `tui::tmux_command` from one of the `tui.rs` builders, and its
 `-t` is always `exact_target(session)` = `=<session>:`, where `session` is what `tui_session(pane)` returned. The adapter never
@@ -480,6 +650,11 @@ element, a directory or an env value).
   `timeout { op: "harness.serve" }`. On success return the child's pid (which is also its process group id). The child is
   not killed when the adapter is dropped (it outlives the CLI); reap it on a detached thread so a long-lived caller keeps no
   zombie. `HarnessPort` has no stop: the server is stopped by the host adapter (#641) by this recorded pid (decision 2).
+  **Who owns the `Child` (W-4):** `serve` alone, until it returns. The boot poll checks `try_wait` between health tries; if
+  the child has exited, that `try_wait` has reaped it and `serve` answers `unavailable` with the status. On the deadline,
+  `serve` kills the group and then calls `wait` on the child itself before answering `timeout`. Only on success is the
+  `Child` moved into the detached thread, which is then its one owner and calls `wait` once. So every child is reaped exactly
+  once, and no thread waits on a child another path already reaped.
 - **`health(port)`**: `GET /global/health` with `timeouts.health`. `Ok(true)` only for status 200 with JSON
   `"healthy": true`; `Ok(false)` for refused, timed out, garbled or anything else. Never `Err`.
 - **`create_session(port)`**: `POST /session` with body `{}` -> the id (must start with `ses`); then
@@ -496,7 +671,10 @@ element, a directory or an env value).
 - **`attach_tui(pane, port, session)`**: `GET /session/<id>` first: refused -> `unavailable`, 404 -> `session-not-found`;
   a 200 that is not that session -> `unavailable`; in all three cases the pane is not touched (cases 6, 11). Take `directory`
   from that reply. Resolve `tui_session(pane)` (an `Err` is returned as is). Run `remain_on_exit_args(session)`; a missing
-  session -> `unavailable` ("no tmux session for pane P"). Then `respawn_args(session, directory, tui_argv(...))`, i.e.
+  session -> `unavailable` ("no tmux session for pane P"). (On a missing exact target `set-option -p` exits 1 with `no such
+  pane: =<session>:`, which `exec.rs` classifies as missing. A dead pane, kept by an earlier `remain-on-exit on`, is still a
+  pane: `set-option` succeeds on it and the `respawn-pane -k` below revives it, so a dead pane is respawned, never reported
+  as "no tmux session". Evidence, W-6.) Then `respawn_args(session, directory, tui_argv(...))`, i.e.
   `respawn-pane -k -t =<session>: -c <directory> -- <TUI argv>`, an **argv of several arguments** (tmux then execs it
   without a shell): `env -i K=V ... <opencode_bin> attach http://127.0.0.1:<port> --dir <directory> --session <id>` under
   `Isolated`, or `env -u OPENCODE_DISABLE_TERMINAL_TITLE <opencode_bin> attach ...` under `Inherit` (the title channel must
@@ -505,6 +683,11 @@ element, a directory or an env value).
   `shown_session(pane)` until it is `Some(id)`, within `settle` -> `Ok`. If the pane's process dies first: re-`GET` the
   session; 404 -> `session-not-found`, otherwise `unavailable` ("the TUI in pane P exited with status N"). Deadline ->
   `timeout { op: "harness.attach_tui" }`.
+  **How the poll sees a death (W-5, W-7):** each poll runs `query_args(session)` once and reads the reply itself rather than
+  calling `shown_session` (whose `Ok(None)` cannot tell "not started yet" from "dead"). A reply whose first field is not the
+  session name -> `unavailable` ("no tmux session for pane P"); `#{pane_dead}` = `1` -> the death branch above, with N taken
+  from `#{pane_dead_status}` (the pane stays because of `remain-on-exit on`, decision 5); otherwise `parse_title(#{pane_title})`
+  as `shown_session` reads it: `Session(id)` for the requested id -> `Ok`, anything else -> poll again.
 - **`select_session(pane, session)`**: find the pane's TUI first (case 14): resolve `tui_session(pane)` (an `Err` is returned
   as is) and run `query_args(session)` (`#{session_name}`, `#{pane_dead}`, `#{pane_start_command}` and `#{pane_title}` in one
   `display-message -p` on `=<session>:`); no tmux pane (as defined above), a dead pane, or a start command for which
@@ -520,6 +703,23 @@ element, a directory or an env value).
   `unavailable`.
 
 ## Acceptance criteria
+
+**This run's ACs (642a) (W-1, W-2).** This list is canonical for this run; it restates the 642a row of the split table and
+removes no AC from the story. T writes RED tests for, F makes GREEN, and S audits exactly:
+
+- AC 1, 2, 3, 4, 5, 7, 8 and 11 in full;
+- AC 6 without its `attach_tui` clause (only `create_session`, `list_sessions` and `abort` on an unbound port);
+- AC 11d without its `attach_tui` clause (the `abort` and `list_sessions` clauses, the message rule and the percent-encoded
+  request line);
+- AC 11e in full;
+- AC 20's hermetic half only (`cargo test --workspace` passes; no real-OpenCode run is required here);
+- AC 21, 22, 23 and 24. For AC 22 this run changes none of `docs/adr/ADR-0021.md` or the two `holler-pane` files (they
+  stay allowed by the AC, and are 642b's to change). For AC 24 the rig clause applies to whatever test code this run adds.
+
+In this run `attach_tui`, `select_session` and `shown_session` answer `PaneError::NotImplemented` (split table), and
+`src/tui.rs` holds only `TmuxSocket` and `TmuxConfig`. **642b's ACs, not written or run here:** AC 9, 10, 11a, 11b, 11c, 11f,
+12-19a, 25 and 26, the `attach_tui` clauses of AC 6 and 11d, and AC 20's real-OpenCode half. They stay in this brief
+unchanged for the 642b run.
 
 Hermetic (in `tests/hermetic_test.rs`, no OpenCode, no tmux; they run in CI on Linux and macOS under
 `cargo test --workspace`). The stub server is a `std::net::TcpListener` on `127.0.0.1:0` in a thread, with routes and a
@@ -541,13 +741,17 @@ Hermetic (in `tests/hermetic_test.rs`, no OpenCode, no tmux; they run in CI on L
    returns in under 1.5 s (the call bound caps the request timeout).
 8. `serve` on a port where the stub answers healthy is `unavailable` and its message contains the port; `serve` on a free port
    with `opencode_bin` = a path that does not exist is `unavailable` and its message names that path; `serve` on a frozen
-   stub is `timeout` with `op == "harness.serve"`.
+   stub is `timeout` with `op == "harness.serve"`. `serve` on a free port with `opencode_bin` = a program that exits at once
+   (`false`, found on `PATH` under `ProcessEnv::Inherit`; it ignores the `serve` arguments and exits 1 on Linux and macOS)
+   is `unavailable`, its message holds the exit status, and it returns well before `timeouts.call` (W-4).
 9. `parse_title`: `"OC | ses_0123456789abcdefABCDEFghij"` -> `Session`; `"OpenCode"` -> `Home`; `"OC | ses_ede8…"`,
    `"OC | New session - 2026-10-09T00:00:00Z"`, `"OC | my notes"`, `"somehost"` and `""` -> `Unrecognised`.
 10. `attach_port`: `"env -u OPENCODE_DISABLE_TERMINAL_TITLE /usr/local/bin/opencode attach http://127.0.0.1:48123 --dir /p
     --session ses_1"` -> `Some(48123)`; the same through `env -i A=b ...` -> `Some(48123)`; `"bash"`,
     `"opencode serve --port 48123"` and `"opencode attach http://192.0.2.1:48123"` -> `None`. Include the quoted form tmux
-    prints for `#{pane_start_command}` when an argument holds a space.
+    prints for `#{pane_start_command}` when an argument holds a space. Also `"/bin/oc attach http://127.0.0.1:48123"` (no
+    `--dir` or `--session`) and the same with a flag after the URL (`... attach http://127.0.0.1:48123 --session ses_1
+    --dir /p`) -> `Some(48123)`, so the parser does not depend on the flags that follow (NIT-2).
 11. `OpenCodeHarness` is `Send + Sync + 'static` (a compile-time assertion) and `Timeouts::default()` is
     10 s / 5 s / 2 s / 500 ms / 5 s.
 
