@@ -10,6 +10,14 @@ taken" items 1 and 2. The issue is the source of truth; its settled design is th
 brief, which is carried inline below because that brief never reached `main` (the issue's pointer to
 `docs/handoffs/682-brief.md` is dead). Where this brief differs from that appendix, "Where the appendix is stale" says so.
 
+**Amended after the plan review** (`docs/handoffs/688/handoff-A.md`, BLOCK on B-1, warns W-1 to W-6): the scope's
+`pane-in-other-profile` check runs for a `Set` only, and a new case 15 pins that a `Remove` of a detached spec is not
+refused (B-1); ADR-0021 section 8 step 1 gains one sentence stating the scope's check (W-1); the act cases go in
+`conformance/profile_scope/act.rs` from the start (W-2); #663's acceptance bullets are mapped to case ids (W-3); the fake
+gains a one-shot `before_next_restore` hook so a verb story can reach `profile-conflict` (W-4); a restore that fails with
+anything but a conflict is listed for #663 to decide (W-5). W-6 (moving the shared suite helpers into
+`conformance/mod.rs`) is a follow-up issue (filed alongside this amendment), not this run's work.
+
 **Needs operator:** none.
 
 ## Problem
@@ -150,7 +158,8 @@ scripts/lint.sh:42-52         warn at 600 lines per .rs file, fail at 900
 tests/*_test.rs line 1        #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)] // #682
 ```
 Today's sizes of the files this run touches: `src/profile_scope.rs` 3, `src/conformance/profile_scope.rs` 2,
-`src/conformance/profile_store.rs` 521, `src/conformance/pane_store.rs` 534, `src/pane_store.rs` 238, `CHANGELOG.md`.
+`src/conformance/profile_store.rs` 521, `src/conformance/pane_store.rs` 534, `src/pane_store.rs` 238,
+`docs/adr/ADR-0021.md` 555, `CHANGELOG.md`.
 
 ## Where the appendix is stale (the merged code wins)
 
@@ -161,7 +170,8 @@ Today's sizes of the files this run touches: `src/profile_scope.rs` 3, `src/conf
 3. **`FakePaneStore` already has the membership rule** (`check_membership`, slug comparison). The scope's
    `pane-in-other-profile` check reuses it instead of restating it.
 4. **The estimate.** The appendix said ~1,020 lines. Part 1 came in about 18% over its estimate (tests about 30% over), so
-   this brief re-estimates bottom-up at ~1,500 (see "Size").
+   this brief re-estimates bottom-up at ~1,750 (see "Size"; ~1,500 before the plan-review amendment added case 15, a
+   third mutant, two fake tests, the restore hook and the ADR sentence).
 5. The stubs' doc lines say "slice c (#682) fills it"; the filled modules say #688.
 
 ## Public API (exact; T writes tests against these, F implements them)
@@ -172,15 +182,24 @@ No flat re-exports; `lib.rs` and `conformance/mod.rs` are not edited.
 // crates/holler-pane-testkit/src/profile_scope.rs
 /// A `ProfileScope` over any `ProfileStore` and `PaneStore`, keeping ADR-0021's I8 write order.
 /// It never writes a pane record: recording the pane (ADR-0021 section 8, step 4) is the verb's, inside its act.
-/// It has no fault switch of its own: a test injects faults into the stores it wraps.
+/// It has no fault switch of its own: it is not a port's boundary but a composition of two ports, so a test injects
+/// faults into the stores it wraps (as `FakeProber` gives its own reason for having none).
 pub struct FakeProfileScope {
     profiles: Arc<dyn ProfileStore>,
     panes: Arc<dyn PaneStore>,
     /// Who every profile write of this scope is logged as.
     actor: Actor,
+    /// The one-shot hook of `before_next_restore`, if armed.
+    restore_hook: Mutex<Option<Box<dyn FnOnce() + Send>>>,
 }
 impl FakeProfileScope {
     pub fn new(profiles: Arc<dyn ProfileStore>, panes: Arc<dyn PaneStore>, actor: Actor) -> Self;
+    /// Run `hook` once, after the next act that fails and before the scope's restoring write; then it is dropped (an act
+    /// that succeeds leaves it armed). A verb test makes another writer move the profile there, typically
+    /// `move || { profiles.concurrent_put(&other, &other_actor).unwrap(); }` over its own `Arc<FakeProfileStore>`, so
+    /// the restore really conflicts and `edit_spec` answers `profile-conflict` (ADR-0021 section 8 step 6). Arming it
+    /// again replaces an unused hook.
+    pub fn before_next_restore(&self, hook: impl FnOnce() + Send + 'static);
 }
 impl ProfileScope for FakeProfileScope { /* see "Fake behaviour" */ }
 
@@ -221,29 +240,38 @@ Returns `ResolvedScope { profile: the stored P, panes }`.
 1. `stored = profiles.get(P)?`; `None` is `ProfileNotFound { what: P }`, before anything else (no pane call, no act).
 2. A `Set(spec)` whose `spec.pane != pane.as_str()` is `Usage { message }` (the fake's own guard against a verb that files
    a spec under the wrong pane), before any write.
-3. `panes.get(pane)?`. A record whose profile is `Some(Q)` with `Q.slug() != P.slug()` is `PaneInOtherProfile`, through
+3. `panes.get(pane)?` **for every edit** (section 8 step 1 reads the pane record; AC3's `[Get]` call shape stays). For a
+   **`Set` only**, a record whose profile is `Some(Q)` with `Q.slug() != P.slug()` is `PaneInOtherProfile`, through
    `crate::pane_store::check_membership(Some(&record), &Pane { profile: Some(P.clone()), ..record.clone() })`. No record, or
-   `profile: None`, passes.
+   `profile: None`, passes. A **`Remove` is never refused for membership**: it is what `pane close --profile P` sends,
+   ADR-0021:338 gives `pane close` no `pane-in-other-profile`, and ADR-0021:282-283 allows a detached spec (a spec of P
+   naming a pane of another profile), which must stay removable through `edit_spec` (case 15).
 4. `edited` = `stored` with the edit: `Set(spec)` replaces the entry whose `spec.pane == pane.as_str()` **in place** (same
    index), or appends one; `Remove` drops it (the others keep their order). A `Remove` of an absent entry still writes
    (the I8 order stays uniform; the specs are unchanged and the generation moves by one).
 5. `written = profiles.cas_put(&edited, stored.generation, &actor)?` — **the profile is written first**. A conflict here is
    `generation-conflict` and the act is never called. The scope does not retry.
 6. `act()`. If it succeeds, return `Ok(Some(written))`.
-7. If it fails with `e`: write `Profile { panes: stored.panes, ..written }` back with `profiles.cas_put(.., written.generation,
-   &actor)`. If that succeeds, return `Err(e)`: the specs equal the ones before, the generation has moved by two, and the
-   log shows the edit and its reversal. A `Conflict` there is `ProfileConflict { what }`, naming P and saying its specs
-   were not restored after a failed act (the other writer's version stays). Any other error of the restoring write is
-   returned as it is (the act's error is then lost; P keeps the edit).
+7. If it fails with `e`: take and run the `before_next_restore` hook if one is armed (it makes no call through the
+   scope's ports itself). Then write `Profile { panes: stored.panes, ..written }` back with `profiles.cas_put(..,
+   written.generation, &actor)`. If that succeeds, return `Err(e)`: the specs equal the ones before, the generation has
+   moved by two, and the log shows the edit and its reversal. A `Conflict` there is `ProfileConflict { what }`, naming P
+   and saying its specs were not restored after a failed act (the other writer's version stays). Any other error of the
+   restoring write is returned as it is (the act's error is then lost; P keeps the edit). That last rule is the fake's
+   choice, not the ADR's: it is listed for #663 to decide (see the `ASSUMPTION (#663)` list).
 
 **`edit_spec(None, ..)`** calls only `act()`, returns `Ok(None)` or the act's error, and makes no profile store call and no
 pane store call.
 
 Profile calls, in order: a successful edit is `[Get, CasPut]`, a failed act `[Get, CasPut, CasPut]`; the pane store sees
-one `Get`. Each step is a small private function so that no function passes complexity 15 or 100 lines. Every path returns
-`Result`: no `unwrap`, `expect`, `panic` or `assert!` in `src/`.
+one `Get` (for a `Set` and a `Remove` alike). Each step is a small private function so that no function passes complexity
+15 or 100 lines. Every path returns `Result`: no `unwrap`, `expect`, `panic` or `assert!` in `src/`; the hook's `Mutex` is
+read with `lock().unwrap_or_else(PoisonError::into_inner)`, as `FakeProber` does.
 
-## Conformance cases: `run_profile_scope_conformance` (14)
+## Conformance cases: `run_profile_scope_conformance` (15)
+
+Cases 1 to 8 live in `src/conformance/profile_scope.rs`; cases 9 to 15 (the act and refusal cases) in its child module
+`src/conformance/profile_scope/act.rs` from the start.
 
 **Seed fixture (per case).** `FakeProfileStore::seeded([Demo Alpha with specs [c1, c2, c3], Demo Beta with specs [c3]],
 conformance)` — Alpha's c3 entry is a detached spec. `FakePaneStore::seeded` with panes (from `sample_pane`) `demo-c1r1` and
@@ -267,8 +295,9 @@ kind)`.
 | 10 | `first-write-conflict-is-generation-conflict` | After `profiles.faults().fail_next(CasPut, Conflict)`, `edit_spec(Some(Alpha), c1, Set(s'), ok)` is `generation-conflict`. The act ran 0 times and Alpha is unchanged. |
 | 11 | `restore-conflict-is-profile-conflict` | The act calls `profiles.concurrent_put(alpha_other, other)` (Alpha with other specs) and then fails. `edit_spec` is `profile-conflict` and its message contains `Demo Alpha`; `get(Alpha)` is the other writer's version (g + 2, its specs); the act ran once. |
 | 12 | `no-profile-runs-only-the-act` | `edit_spec(None, c1, Set(s'), ok)` is `Ok(None)`, the act ran once and `profiles.faults().calls()` is empty. With a failing act it returns the act's error and `calls()` is still empty. |
-| 13 | `missing-profile-is-profile-not-found-before-the-act` | `edit_spec(Some(Gamma), c4, ..)` and `edit_spec(Some(Gamma), c1, ..)` (c1 belongs to Alpha) are each `profile-not-found`: the profile is checked before the pane. The act ran 0 times and `calls()` holds no `CasPut`. |
+| 13 | `missing-profile-is-profile-not-found-before-the-act` | `edit_spec(Some(Gamma), c4, Set(sample_spec(c4)), ok)` and `edit_spec(Some(Gamma), c1, Set(sample_spec(c1)), ok)` (c1 belongs to Alpha) are each `profile-not-found`: the profile is checked before the pane. The c1 call must be a `Set`, the only edit the membership check runs for, so that the case tells the two check orders apart. The act ran 0 times and `calls()` holds no `CasPut`. |
 | 14 | `pane-in-other-profile-before-any-write` | `edit_spec(Some(Alpha), c3, Set(sample_spec(c3)), ok)` is `pane-in-other-profile`. The act ran 0 times, `calls()` holds no `CasPut`, and Alpha is unchanged. |
+| 15 | `remove-of-a-detached-spec-is-not-refused` | `edit_spec(Some(Alpha), c3, Remove, ok)` (c3's record belongs to Beta; Alpha's c3 entry is a detached spec) returns `Some(r)` with `r == get(Alpha)`: Alpha's specs are `[c1, c2]` at g + 1, the act ran once, Beta and `panes.list()` are unchanged. ADR-0021:282-283 and :338, not an assumption. |
 
 **`ASSUMPTION (#663)` comments** (the repo's form, `// ASSUMPTION (#640): ...`), each in the suite at the case or helper
 concerned, and summarised in the suite's module docs; the fake carries the same comment at its code:
@@ -277,14 +306,42 @@ concerned, and summarised in the suite's module docs; the fake carries the same 
 - `Set` replaces an entry in place, keeping its index (case 5);
 - the first write is not retried on a conflict (case 10), and a restore is one `cas_put` at g + 1 (cases 9, 11);
 - `profile-not-found` comes before `pane-in-other-profile` (case 13);
-- `edit_spec(None)` makes no profile store call (case 12).
+- `edit_spec(None)` makes no profile store call (case 12);
+- **open, for #663 to decide (not pinned by any case):** a restoring write that fails with anything but a conflict
+  (`timeout`, `store-corrupt`, `unavailable`). The fake returns that error as it is, so P keeps an edit nothing live
+  matches, the error does not name P, and the act's error is lost; ADR-0021 section 8 decides only the `Conflict` case
+  (step 6). #663 may instead name P and its unrestored specs, or print the reconcile step; whichever it picks, the fake
+  and this list are amended to match.
 
-**`ASSUMPTION (#661/#663)`:** the scope checks `pane-in-other-profile` itself before the profile write (case 14), as well
-as the pane registry doing so inside its compare-and-swap (ADR-0021 "Decisions taken" item 2), so that nothing is written
-to P and nothing live moves for a pane that cannot join P; membership compares slugs, as `FakePaneStore` does.
+**`ASSUMPTION (#661/#663)`:** for a `Set` for a pane of another profile, the scope checks `pane-in-other-profile` itself
+before the profile write (case 14), as well as the pane registry doing so inside its compare-and-swap (ADR-0021 "Decisions
+taken" item 2), so that nothing is written to P and nothing live moves for a pane that cannot join P; membership compares
+slugs, as `FakePaneStore` does. ADR-0021 section 8 step 1 states it after this run (see "ADR edit"). A `Remove` is not
+checked (case 15).
+
+**Mapping #663's acceptance bullets to case ids** (in the suite's module doc too, so #663 does not read case 10 as a
+contradiction): "membership refusal" is cases 3 and 14; "every-pane scope" is case 1 (and 2 for a named pane); "a failed
+act leaves the profile's specs equal to before (the generation has moved by two)" is case 9; "a successful act bumps it
+once" is case 5 (and 6, 7, 15); "a stale generation gives `profile-conflict`" is **case 11**, a stale *restore*; a stale
+*first write* is `generation-conflict` (case 10) under ADR-0021 section 8 step 2; "no profile is touched without
+`--profile`" is case 12. `profile-not-found` (the issue's "the profile must exist") is cases 4 and 13.
 
 The suite pins no `what` text beyond case 11's profile name, no actor value (only that the edit and its reversal share
 one), and no order between the scope's two pane-store calls.
+
+## ADR edit
+
+Case 14 pins a refusal ADR-0021 does not yet state (section 8 has no refusal before step 2; "Decisions taken" item 2 puts
+the check in the pane registry's compare-and-swap). The repo's rule is that an extension updates the ADR in the same
+change, as #683's PR did (316b8e3). So F appends one sentence to `docs/adr/ADR-0021.md` section 8, step 1 ("**Plan.**",
+line 288), after "compute P with the edit (`SpecEdit::Set` or `SpecEdit::Remove`).":
+
+> A `Set` for a pane whose record belongs to another profile is refused here with `pane-in-other-profile`, before
+> anything is written or moved; a `Remove` is not (a detached spec stays removable), and the pane registry's check
+> ("Decisions taken", item 2) stays the authority.
+
+Nothing else in the ADR changes: section 9's per-verb codes already agree (launch and relaunch list
+`pane-in-other-profile`; close does not).
 
 ## Acceptance criteria
 
@@ -294,17 +351,21 @@ T authors these tests (RED first). Every test file starts with
 - [ ] **AC1 The fake passes its suite.** `tests/profile_scope_conformance_test.rs`:
   `the_fake_passes_the_profile_scope_conformance_suite`:
   `run_profile_scope_conformance(|p, q| FakeProfileScope::new(p, q, actor))` is `Ok(())`.
-  `the_suite_runs_the_documented_cases`: `profile_scope_cases()` equals the 14 ids above, in order.
-- [ ] **AC2 Mutation check: the two scope mutants fail on the named cases.** Same file, following
-  `tests/profile_store_conformance_test.rs:58-196`: `enum Break { Nothing, WritesAfterAct, NoRestore }`, `struct Mutant {
-  inner: FakeProfileScope, broken: Break }` (`resolve` delegates), and `assert_suite_fails_on(broken, case)`. The mutants
-  delegate to the fake and change only the order, so the test file holds no copy of the edit logic:
+  `the_suite_runs_the_documented_cases`: `profile_scope_cases()` equals the 15 ids above, in order.
+- [ ] **AC2 Mutation check: the three scope mutants fail on the named cases.** Same file, following
+  `tests/profile_store_conformance_test.rs:58-196`: `enum Break { Nothing, WritesAfterAct, NoRestore, MembershipOnRemove }`,
+  `struct Mutant { inner: FakeProfileScope, broken: Break }` (`resolve` delegates), and `assert_suite_fails_on(broken,
+  case)`. The mutants delegate to the fake and change only the order or add one delegated refusal, so the test file holds
+  no copy of the edit logic:
   - `the_unbroken_wrapper_passes_so_a_mutant_fails_for_its_break_alone` (`Break::Nothing`) is `Ok(())`.
   - `a_scope_that_writes_the_profile_after_the_act_fails` (`WritesAfterAct`: with a profile, run `act()?` first, then
     `inner.edit_spec(profile, pane, edit, &mut || Ok(()))`): fails on `the-act-sees-the-edit` **and** on
     `failed-act-restores-the-specs` (the generation moves by 0, not 2).
   - `a_scope_that_does_not_restore_on_a_failed_act_fails` (`NoRestore`: `inner.edit_spec(.., &mut || Ok(()))?`, then
     `act()?`): fails on `failed-act-restores-the-specs`.
+  - `a_scope_that_checks_membership_on_a_remove_fails` (`MembershipOnRemove`: for a `Remove` with a profile, first
+    `inner.resolve(P, Some(pane))`, and a `pane-not-in-profile` answer becomes `PaneInOtherProfile`, standing in for a
+    membership check run on every edit; then delegate): fails on `remove-of-a-detached-spec-is-not-refused`.
 - [ ] **AC3 Faults reach the scope through its stores.** `tests/fake_profile_scope_test.rs`:
   - `a_wedged_profile_store_times_out_resolve_and_edit_spec`: `Fault::Wedged` on the profile store makes both answer
     `Timeout { op: "profile_store.get" }`; the act ran 0 times. After `set(None)` both work.
@@ -323,7 +384,15 @@ T authors these tests (RED first). Every test file starts with
   - `a_set_whose_spec_names_another_pane_is_usage`: `Set(sample_spec(c2))` for c1 is `usage`; act 0 times, no `CasPut`.
   - `removing_an_absent_entry_still_writes_the_profile`: `Remove` for c4 on Alpha gives g + 1 with the specs unchanged.
   - `membership_compares_slugs`: a pane whose profile is `DEMO-ALPHA` is in `resolve(Demo Alpha, None)` and its
-    `edit_spec(Some(Demo Alpha), ..)` passes the membership check.
+    `edit_spec(Some(Demo Alpha), pane, Set(sample_spec(pane)), ok)` passes the membership check (a `Set`: a `Remove` is
+    never checked, so it would not exercise the comparison).
+  - `removing_a_detached_spec_is_not_refused`: `Remove` for c3 (Beta's pane) on Alpha, whose specs name c3, is
+    `Ok(Some(_))`: Alpha drops its c3 entry at g + 1, the act ran once, and the pane calls are `[Get]` (the record is
+    still read).
+  - `a_hook_before_the_restore_makes_it_profile_conflict`: `before_next_restore(move || concurrent_put(Alpha with other
+    specs, other))`, then a failing act. `edit_spec` is `profile-conflict` naming `Demo Alpha`; `get(Alpha)` is the other
+    writer's version at g + 2; the hook ran once. A second edit with a failing act then restores normally (the hook was
+    one-shot), and a hook armed before a succeeding act is still armed for the next failing one.
   - `resolve_of_a_pane_with_no_record_is_pane_not_in_profile`.
   - `the_refusals_name_the_pane_and_the_profile`: the messages of `pane-not-in-profile` and `pane-in-other-profile`
     contain the pane's name and the profile's.
@@ -336,33 +405,43 @@ T authors these tests (RED first). Every test file starts with
   succeeds. `cargo tree -p holler-pane-testkit -e normal --prefix none | grep -E '^holler-(cli|hub|adapter)'` prints nothing.
 - [ ] **AC7 One rule, one place.** Each prints nothing:
   - `grep -rn "PaneInOtherProfile" crates/holler-pane-testkit/src | grep -v pane_store.rs` (the scope reuses
-    `check_membership`);
+    `check_membership`, and calls it only on the `SpecEdit::Set` path: A-dup and S confirm that by reading, case 15
+    and the `MembershipOnRemove` mutant by test);
   - `grep -rnE "^(pub\(super\) )?fn (actor|sample|history|shown|unchanged|pane_name|profile_name)\b" crates/holler-pane-testkit/src/conformance/profile_scope*`
     (the scope suite reuses part 1's helpers).
-- [ ] **AC8 Layout.** `git diff --name-only origin/main...HEAD` lists only the files under "Blast radius"; `src/lib.rs`
-  and `src/conformance/mod.rs` are absent.
+- [ ] **AC8 Layout.** `git diff --name-only origin/main...HEAD` lists only the files under "Blast radius", including
+  `docs/adr/ADR-0021.md`; `src/lib.rs` and `src/conformance/mod.rs` are absent. `git diff origin/main...HEAD --
+  docs/adr/ADR-0021.md` is the one sentence of "ADR edit", in section 8 step 1, and nothing else.
 - [ ] **AC9 CHANGELOG.** One entry at the end of `## [Unreleased]` / `### Enhancements` (after the #681 entry): the test
   kit's fake profile scope, which edits a profile's spec and makes the live change as one transaction in ADR-0021's
   order (profile written first; a failed live change restores the specs, so the generation moves by two; another
-  writer's change in between is `profile-conflict`), and a 14-case conformance suite the real profile scope runs against
-  itself, with the two broken scopes it rejects. Test code only: nothing a user runs changes. Link
+  writer's change in between is `profile-conflict`), and a 15-case conformance suite the real profile scope runs against
+  itself, with the three broken scopes it rejects. It says that [ADR 0021](docs/adr/ADR-0021.md) now records that the
+  scope refuses setting a spec for a pane of another profile before any write, and that removing a spec is never refused
+  for that reason (as the #683 entry mentions its ADR line). Test code only: nothing a user runs changes. Link
   [#688](https://github.com/Performant-Labs/holler/issues/688). `bash scripts/changelog-check.sh` passes.
 - [ ] **AC10 Guards.** `cargo build --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`,
   `cargo test -p holler-pane-testkit`, `cargo test --workspace`, `cargo machete`, `bash scripts/lint.sh` and
   `bash scripts/test-hooks.sh` pass. `rustfmt --check --edition 2021` passes on every new or changed `.rs` file. No `.rs`
-  file in the diff reaches 800 lines (lint fails at 900). No function exceeds 100 lines or complexity 15.
+  file in the diff reaches 800 lines (lint fails at 900), and the two suite files (`conformance/profile_scope.rs`,
+  `conformance/profile_scope/act.rs`) stay under the 600-line lint warn. No function exceeds 100 lines or complexity 15.
 
 ## Files
 
 Filled stubs (under `crates/holler-pane-testkit/`):
-- `src/profile_scope.rs` (~230): `FakeProfileScope`, its `ProfileScope` impl, private step functions (`edited`, `restore`,
-  the membership check call).
-- `src/conformance/profile_scope.rs` (~650): module docs with the assumptions, the 14-row `CASES` table,
-  `profile_scope_cases`, `run_profile_scope_conformance`, the bench and seed, the 14 cases, small helpers (`spec_of`,
-  `counting` act). **If it nears 800**, move cases 9 to 14 into a child module `src/conformance/profile_scope/act.rs`
-  (declared `mod act;` in the same file, case functions `pub(super)`), as part 1 did with `profile_store/log.rs`.
+- `src/profile_scope.rs` (~270): `FakeProfileScope`, its `ProfileScope` impl, `before_next_restore`, private step
+  functions (`edited`, `restore`, the `Set`-only membership check call).
+- `src/conformance/profile_scope.rs` (~420): module docs with the assumptions, the open restore-failure point and the
+  #663 acceptance-to-case mapping, the 15-row `CASES` table, `profile_scope_cases`, `run_profile_scope_conformance`, the
+  bench and seed, cases 1 to 8, small helpers (`spec_of`, `counting` act), and `mod act;`.
 
-New: `tests/profile_scope_conformance_test.rs` (~220), `tests/fake_profile_scope_test.rs` (~380).
+New:
+- `src/conformance/profile_scope/act.rs` (~330), planned from the start, not on a size trigger: cases 9 to 15, as
+  `pub(super)` case functions, as part 1 did with `profile_store/log.rs` ("so that no file of the suite nears the
+  600-line lint"). Neither suite file should pass the 600-line lint warn.
+- `tests/profile_scope_conformance_test.rs` (~250), `tests/fake_profile_scope_test.rs` (~450).
+
+ADR: `docs/adr/ADR-0021.md` (+2 lines), the one sentence of "ADR edit".
 
 Reuse refactors (visibility only, behaviour-neutral):
 - `src/conformance/profile_store.rs` (~+10): `actor`, `sample`, `history`, `shown`, `unchanged`, the types `Shown` and
@@ -394,33 +473,35 @@ harness of `tests/profile_store_conformance_test.rs`.
 
 | Part | Files | Lines (est.) |
 |---|---|---|
-| `FakeProfileScope` | `src/profile_scope.rs` | ~230 |
-| `ProfileScope` suite, 14 cases | `src/conformance/profile_scope.rs` | ~650 |
+| `FakeProfileScope` (with the restore hook) | `src/profile_scope.rs` | ~270 |
+| `ProfileScope` suite, 15 cases | `src/conformance/profile_scope.rs` (cases 1-8), `src/conformance/profile_scope/act.rs` (cases 9-15) | ~420 + ~330 |
 | visibility refactors | `conformance/profile_store.rs`, `conformance/pane_store.rs`, `pane_store.rs` | ~+15 |
-| tests: the suite + 2 mutants; the fake's own (13 tests) | 2 test files | ~600 |
-| CHANGELOG | `CHANGELOG.md` | ~10 |
-| **Total** | | **~1,500** |
+| tests: the suite + 3 mutants; the fake's own (15 tests) | 2 test files | ~700 |
+| ADR sentence; CHANGELOG | `docs/adr/ADR-0021.md`, `CHANGELOG.md` | ~2 + ~12 |
+| **Total** | | **~1,750** |
 
-**Fits one run.** Part 1 merged at ~2,100 lines in one run. The diff touches 8 files, but three are one-word to
-ten-line visibility changes inside the same crate and one is the CHANGELOG: substantive code is 4 files in one component
-family (the test kit's profile scope), within the F scope cap's intent. No split is proposed.
+**Fits one run.** Part 1 merged at ~2,100 lines in one run. The diff touches 10 files, but three are one-word to
+ten-line visibility changes inside the same crate, one is a one-sentence ADR edit and one is the CHANGELOG: substantive
+code is 5 files in one component family (the test kit's profile scope), within the F scope cap's intent. No split is
+proposed.
 
 ## Forward-compat
 
 | Consumer | Needs | Satisfied |
 |---|---|---|
-| #663 (the real `ProfileScope`) | runs the suite over the two fakes via `build` | yes, subject to the `ASSUMPTION (#663)` points, which #663 confirms or amends here first |
-| spec-editing verb stories (launch, relaunch, close) | an in-memory scope over fakes they already seed, with faults through the stores | yes (`FakeProfileScope::new` over `Arc<dyn …>`) |
+| #663 (the real `ProfileScope`) | runs the suite over the two fakes via `build`; its acceptance bullets map to case ids | yes, subject to the `ASSUMPTION (#663)` points (including the open restore-failure point), which #663 confirms or amends here first. Its bullets map to cases as "Mapping #663's acceptance bullets" says: "a stale generation gives `profile-conflict`" is case 11 (a stale restore); a stale first write is `generation-conflict` (case 10), per ADR-0021 section 8 step 2 |
+| spec-editing verb stories (launch, relaunch, close) | an in-memory scope over fakes they already seed, with faults through the stores, and every `edit_spec` outcome, `profile-conflict` included | yes (`FakeProfileScope::new` over `Arc<dyn …>`). `fail_next(CasPut, Conflict)` fails only the first write (`generation-conflict`); for `profile-conflict` the story arms `before_next_restore` with a `concurrent_put` on its own `Arc<FakeProfileStore>` and makes its act fail. A `close --profile` of a detached spec is not refused (case 15) |
 | scoping verb stories | `resolve` over seeded fakes | yes |
 
 ## Decisions already made (operator, epic, ADR)
 
 - Profile written first; a failed act restores the specs by a second write, the generation moves by two, and the log shows
   the edit and its reversal; a conflict on the restoring write is `profile-conflict` (ADR-0021 section 8, "Decisions
-  taken" item 1). **No ADR change:** the ADR already says this, and the trait's "nothing is recorded" reads as "P's specs
-  restored and no pane record written" in its light.
-- `pane-in-other-profile` is enforced in the pane registry's CAS (item 2); the scope's earlier check is an addition, not a
-  replacement.
+  taken" item 1). The ADR already says this, and the trait's "nothing is recorded" reads as "P's specs restored and no
+  pane record written" in its light.
+- `pane-in-other-profile` is enforced in the pane registry's CAS (item 2); the scope's earlier check, for a `Set` only,
+  is an addition, not a replacement. **ADR change:** one sentence in section 8 step 1 records it (see "ADR edit"; the
+  plan review's W-1, following #683's precedent). A `Remove` is never refused for membership (ADR-0021:282-283, :338).
 - The fake lives in `holler-pane-testkit`, the real scope in `holler-cli` (#663) (ADR-0021:190-192). The testkit never
   names `holler-cli` or `holler-hub`.
 - No slice edits `lib.rs` or `conformance/mod.rs`.
@@ -428,12 +509,16 @@ family (the test kit's profile scope), within the F scope cap's intent. No split
 ## Decisions made in this brief (operator may review)
 
 1. **No fault switch on `FakeProfileScope`.** It composes two ports; faults are injected into the stores it wraps, which
-   also exercises how a real scope fails (AC3). Every other fake has its own switch because it *is* a port's boundary.
+   also exercises how a real scope fails (AC3). The module doc gives this, the scope's own reason, as `FakeProber`'s does
+   for having none (`prober.rs:7-9`); it makes no general claim about the other fakes. Its one piece of state is the
+   one-shot `before_next_restore` hook, which is not a fault switch: it lets another writer move the profile at the one
+   moment no store fault can reach (between the act and the restore), so a verb story can get `profile-conflict` (W-4).
+   It is pinned by an AC4 test, not by the suite, since the real scope has no such hook.
 2. **`profile-not-found` before `pane-in-other-profile`** (case 13 pins it with c1): "P must exist" is the first thing a
    `--profile` verb learns.
 3. **The fake's own guards, not pinned by the suite:** a `Set` whose spec names another pane is `usage`; a `Remove` of an
    absent entry still writes; a pane with no record is `pane-not-in-profile` in `resolve`; a restoring write that fails
-   with anything but `Conflict` returns its own error.
+   with anything but `Conflict` returns its own error (listed as open for #663, see the `ASSUMPTION (#663)` list).
 4. **The ADR's I8 row's success half** ("the pane record names P") is the verb's, inside its act; the suite pins that the
    scope itself writes no pane record (cases 5 and 9).
 5. **Reuse goes through part 1's and slice a's files by visibility only** (three files), as part 1 did.
@@ -441,7 +526,8 @@ family (the test kit's profile scope), within the F scope cap's intent. No split
 ## Out of scope
 
 The real `ProfileScope` (#663); any verb; any change to `holler-pane`, `holler-hub`, `holler-cli` or any manifest;
-`rename` (#665); protocol v2 and golden files; ADR-0021.
+`rename` (#665); protocol v2 and golden files; any ADR-0021 change beyond the one sentence of "ADR edit"; moving the
+shared suite helpers into `conformance/mod.rs` (a follow-up issue, filed alongside this amendment, W-6).
 
 ## Test plan
 
@@ -449,12 +535,13 @@ RED (T): write the two test files against the API above. They fail to build beca
 `run_profile_scope_conformance` and `profile_scope_cases` do not exist; confirm with `cargo test -p holler-pane-testkit`
 that the errors are those missing items and not a typo, and that every other test target still builds and passes.
 GREEN (F): first the three visibility refactors (earlier slices' tests green after them), then `profile_scope.rs`, then
-the suite, then the CHANGELOG and AC10's guards. A (anti-duplication) checks AC7 and that the suite calls part 1's helpers
+the suite (`profile_scope.rs` and `profile_scope/act.rs`), then the ADR sentence, the CHANGELOG and AC10's guards. A (anti-duplication) checks AC7 and that the suite calls part 1's helpers
 rather than local copies. S audits against AC1-AC10 and the issue.
 
 ## Risks
 
-- **Suite size.** If `conformance/profile_scope.rs` nears 800 lines, use the `profile_scope/act.rs` child module above.
+- **Suite size.** Part 1's tests ran about 30% over estimate. The suite is split in two files from the start; if either
+  still nears the 600-line lint warn, move helpers or more cases into `act.rs` rather than adding a third file.
 - **`CHANGELOG.md` conflicts** with any sibling #638 PR: textual, resolved by rebase.
 - **#663 may want different answers** on the `ASSUMPTION (#663)` points. The suite fixes them now, as the store suites did
   for #639 and #661; a change is an amendment to this suite, made first.
@@ -463,11 +550,13 @@ rather than local copies. S audits against AC1-AC10 and the issue.
 
 ## Blast radius
 
-`crates/holler-pane-testkit/src/{profile_scope.rs, conformance/profile_scope.rs, conformance/profile_scope/act.rs (only if
-needed), conformance/profile_store.rs, conformance/pane_store.rs, pane_store.rs}`,
-`crates/holler-pane-testkit/tests/{profile_scope_conformance_test.rs, fake_profile_scope_test.rs}`, `CHANGELOG.md`, and
-`docs/handoffs/688*` (pipeline artifacts). All inside #638's radius, `crates/holler-pane-testkit/**`. Not changed: any
-`Cargo.toml`, `Cargo.lock`, `src/lib.rs`, `src/conformance/mod.rs`, any other crate, ADR, protocol doc or golden file. The
+`crates/holler-pane-testkit/src/{profile_scope.rs, conformance/profile_scope.rs, conformance/profile_scope/act.rs,
+conformance/profile_store.rs, conformance/pane_store.rs, pane_store.rs}`,
+`crates/holler-pane-testkit/tests/{profile_scope_conformance_test.rs, fake_profile_scope_test.rs}`,
+`docs/adr/ADR-0021.md` (one sentence, section 8 step 1), `CHANGELOG.md`, and `docs/handoffs/688*` (pipeline artifacts).
+The code is inside #638's radius, `crates/holler-pane-testkit/**`; the ADR line follows slice d's precedent (316b8e3).
+Not changed: any `Cargo.toml`, `Cargo.lock`, `src/lib.rs`, `src/conformance/mod.rs`, any other crate, any other ADR or
+ADR-0021 section, protocol doc or golden file. The
 repository is public, so no personal or infrastructure names appear in code, comments, tests or the changelog; fixtures use
 the neutral `Demo *` and `demo-c*r1` names.
 
