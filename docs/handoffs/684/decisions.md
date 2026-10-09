@@ -57,3 +57,9 @@
   - Clean: `cargo clippy --workspace --all-targets -- -D warnings` (exit 0, no diagnostics), `bash scripts/lint.sh` (exit 0, no testkit warning), `rustfmt --check --edition 2021` on the four files, `cargo machete`, `scripts/changelog-check.sh`. The `cargo tree` dependency rule printed nothing; `grep -c` of the ASSUMPTION prefix printed 3.
   - A throwaway crate outside the repo ran every mutant through the suites and printed every failing case with its detail. Each mutant fails its named case for the intended reason. The extra failures are expected knock-ons: `RunIsNoop` fails every case that needs a started process, `PsOfMissingIsEmpty` also fails case 2's re-check, and a separate data dir also fails case 15's attach on the second port.
   - Facts in unchanged code that the diff relies on are in `evidence.md`.
+
+## T-green (Workflow Phase 7; Phase 6 in the role doc) — 2026-10-09
+- **Decided:** Phase 7 is GREEN with no blocking Tier 2 issue; no test was changed (F flagged none as wrong) and no production code was touched.
+- **Assumed:** F's two "advisory" items (two-line ASSUMPTION comments, two `holds` helpers) are not blocking: the AC `grep -c` prints 3 and the helpers are suite-private.
+- **Hedged:** Mutation spot-check covered three behaviors (frozen, killed, stop_owned) by hand; F's wider mutant readout was not re-run.
+- **Evidence:** `cargo test -p holler-pane-testkit` all GREEN (56 new + 32 slice a); workspace CI command 1164 passed / 0 failed / 5 ignored; clippy, lint, changelog-check, machete, dependency grep, ASSUMPTION grep all as expected; three mutants each failed a named test and were reverted.
