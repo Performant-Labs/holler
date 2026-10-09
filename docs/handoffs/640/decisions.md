@@ -101,3 +101,32 @@
     lint, changelog-check, machete, `docs_cli_test` and `wire_selftest` all pass.
   - Four of five mutants were caught: transposition, count-from-0, the `SendText` `Debug` leak and the ratio denominator.
     The `EXCERPT_LIMIT` mutant survived.
+
+## A (Phase 7, anti-duplication) — 2026-10-09T15:34:15-06:00
+- **Decided:**
+  - **Verdict.** PASS on 9d61c9f..22cef15, with 3 warns and no block. The findings are in handoff-A-dup.md.
+  - **No parallel path.** F used `holler_pane`'s `PaneError`, `GridPos`, `PaneId`, `Key` and `RefusalCode::from_static`.
+    It mirrored `FakeHerdr`'s constants and message shapes, ported the spike's `derive()` walk as the only conversion,
+    and imported nothing from `holler-hub` or `holler-proto`.
+  - **The copied helpers.** `last_lines` is sanctioned by the brief. `count` copies a private, dev-only test kit helper.
+    `excerpt` copies `holler_pane::error::excerpt`, which is `pub(crate)` in a frozen crate. All three are justified
+    and declared in handoff-F. `excerpt` is W-1, a follow-up for the next amend-first change to `holler-pane`.
+  - **Within the crate.** W-2: `Widths` in `plan.rs` repeats `layout::index` and `layout::saturate`. W-3:
+    `protocol::direction` keeps its own list of `Direction`'s variants. Both are small, and part 2 can fix them.
+- **Assumed:**
+  - **Amend-first.** Making `holler_pane::error::excerpt` public counts as an API change to the frozen contract crate.
+    So it is amend-first and out of part 1's scope, not a drive-by edit.
+- **Hedged:**
+  - **W-1 and later adapters.** I expect #641 and #642 to need the same quoting helper. That is a forecast, not
+    something in this diff, so W-1 is a warn.
+- **Evidence:**
+  - **Read in full:** `src/{lib,layout,plan,protocol}.rs`, `Cargo.toml`, `tests/common/mod.rs` and the CHANGELOG and
+    Cargo.lock diffs.
+  - **The analogous objects:** the test kit's `herdr.rs` (all of it), `envelope.rs` (header), and `holler-pane`'s
+    `error.rs`, `grid.rs`, `lib.rs`, `ports.rs` and `reply.rs`. Also `holler-hub`'s `control.rs` (`send_over`) and
+    `herdr-grid.sh:32-39`.
+  - **The diff checks:** the stubs and the final code have the same public lines and the same public derives. F's commit
+    touches no test.
+  - **The duplicate searches:** `excerpt`/`one_line`, `count`/`plural`, `last_lines`, every new type name, and JSON
+    field readers across `crates/`.
+  - **Hygiene:** a grep for personal infrastructure names, and for `unsafe` and `#[allow]` in `src/`.
