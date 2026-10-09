@@ -19,3 +19,17 @@
   §2, §5, §7, §8 and "Decisions taken"; and `holler-hub/src/panes/mod.rs`, `panes/feed.rs` and `profile/mod.rs`. Checked
   the workspace's `foo.rs` + `foo/` layout precedent, `wc -l` on every touched file, that no open PR touches the test kit,
   and the PR-body code in `$WORKFLOW_ROOT/workflow/coding-pipeline.workflow.mjs` (lines 4097 and 4822).
+
+## T-red (Phase 4, author the RED) — 2026-10-09T13:20:00-06:00
+- **Decided:** Authored `tests/profile_store_conformance_test.rs` (AC1, AC2: suite pass, 23 case ids, unbroken wrapper, six
+  mutants) and `tests/fake_profile_store_test.rs` (AC3, AC4, plus one fixture-agreement test for A's W-5). RED is valid:
+  both targets fail to build on the six missing public items only. Dropped a copy of the pane suite's guard-lifetime test
+  because the runner is shared with the pane suite, which already pins it.
+- **Assumed:** The brief's g + 1 for a `Deleted` entry's generation stands, since O did not re-settle A's W-1 before this
+  phase. The `what` of `profile-not-found` is the display name. Seeding one name twice is `generation-conflict`.
+- **Hedged:** A compile error is a weaker RED than a failing assertion, but it is the shape the brief's test plan names
+  for a story whose whole API is new. To make sure a typo of mine would not surface only in F's phase, compiled both files
+  against a throwaway stub and reverted it; nothing of it is staged. `fake_profile_store_test.rs` is 593 lines, 7 under
+  the lint warn threshold.
+- **Evidence:** `cargo test -p holler-pane-testkit --no-run` (E0432 only); stubbed build clean; slice-a tests 22 + 10 pass;
+  `rustfmt --edition 2021 --check tests/*.rs` clean.
