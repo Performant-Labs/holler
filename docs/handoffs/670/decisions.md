@@ -25,3 +25,21 @@
   - **Build and logging:** `scripts/lint.sh`, `clippy.toml`, holler-proto `log.rs` `emit_banner`.
   - **Clap probe:** clap 4.6.6 in a scratch crate outside the repo (`cargo run --offline`). It covered the `rest`/`num_args` shapes for say/interrupt/answer, `pane launch [X] --spec-only`, the `ignore_errors` lenient re-parse, and the full text of multi-line usage errors.
   - **Checks:** `find` for `src/**/mod.rs` (none) and module directories (12, all `name.rs` + `name/`); grep for outside builders of `Say`/`Interrupt`/`Answer` (none); `git show --stat f2602ba` (39 files, 4,567 insertions); `main()` code-line count, about 99.
+
+## T-red (Phase 4, author tests, RED) — 2026-10-09T06:36:00-06:00
+- **Decided:** RED is valid (handoff-T-red.md). Four test targets (`pane_cli_process` on the real binary, `pane_verbs` and `profile_verbs` in-process, two placeholders) plus `tests/verb_harness/mod.rs`, all declared in `holler-cli/Cargo.toml`. `pane_cli_process`: 28 of 33 fail on assertions about missing behaviour. The in-process targets fail to build only on the API the brief commits F to create. Process-level tests got their own target so a valid assertion-level RED exists even before the in-process API compiles. T pinned: `VerbCtx` in `output.rs` holding `Ports` by value (A W-7), `Wiring::connect()` plus `Wiring::ports()` (W-5), `emit` exit 2 for a `usage` code (W-1), a one-line flattened JSON usage message (W-2), `Say`/`Interrupt`/`Answer::resolve() -> Result<PromptArgs, Usage>`, and `SpecFlags` as a `clap::Args` group with `validate()`.
+- **Assumed:**
+  - The verb-to-story table (unpark #646, get/watch #643, import #650, apply #664, rename/export/import #665) comes from the epic's wave table and the stories' own file lists.
+  - A JSON usage error for `--json --format=text` is an envelope under pane/profile (AC 3 lists it among the JSON cases).
+  - The `error: ` prefix is not part of the JSON message; the tests check the message contains `not implemented (story #NNN)`.
+  - `--check-arg`/`--command-arg` values that begin with `-` need `allow_hyphen_values`; the tests do not use them.
+- **Hedged:**
+  - The pinned names are provisional (decision 7). If F changes one, T fixes the test in Phase 6 and F records it.
+  - ADR 0003 is not edited by T; `docs_rows.rs` pins its rows instead (the three ADR tests stay red until F edits it).
+  - A verb-specific positional (`pane get PANE`) is deliberately not asserted either way, so #643 does not have to delete a test.
+- **Evidence:**
+  - `cargo test -p holler-cli --test pane_cli_process`: 5 passed, 28 failed.
+  - `--test pane_verbs --test profile_verbs`: unresolved imports of `holler_cli::{output, pane, profile, prompt_target}`, missing `Command::Pane`/`Profile`, missing `resolve`.
+  - `--test cli_surface_test`: 2 failed, the 20 new leaves unknown to clap.
+  - Throwaway prototype in the scratchpad (not in the repo): `pane_verbs` 53/53, `profile_verbs` 9/9, `cli_surface_test` 3/3, `pane_cli_process` 30/33.
+  - `rustfmt --check --edition 2021` clean on every new `.rs` file; no existing file touched.
