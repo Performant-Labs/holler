@@ -46,3 +46,14 @@
 - **Assumed:** CI's `--skip roster_stays_accurate_under_concurrent_body_load` still applies (ci.yml:128, per F).
 - **Hedged:** two mutations (no notify; ignored save error) both killed by the intended tests.
 - **Evidence:** docs/handoffs/639/handoff-T-green.md; workspace 964 passed, 0 failed.
+
+## A (Phase 7, anti-duplication gate) — 2026-10-09T09:55:10-06:00
+- **Decided:** PASS on `af3d8df...2188fe7`, with 3 warns and no blocks (see handoff-A-dup.md).
+  - F extended every Reuse-map object: `write_atomic`, `next_generation` (the only CAS rule, used by `cas_put` and `delete`), `decode_params` and the params structs, `PaneReply` via `reply_line`, the lock idiom, and the `holds.rs` event shape.
+  - The diff has no second CAS helper, no code validator and no `sample_pane` copy.
+  - No overlay Phase-7 candidate was copied.
+- **Assumed:** ADR-0021 was merged to `origin/main` during this run (094ebfa) and is not on the branch. I reviewed against the merged text, not the draft.
+  - W-1: its §6 says an idle long-poll answers `cursor: since`, but `Store::poll` answers the head. The two differ only when `since` is 0 and every record has been deleted.
+  - W-2: its §7 (the profile log lives in `profiles.json`) and "Decisions taken" item 2 (`pane-in-other-profile` inside the pane CAS) mean #661 will edit `panes/`, against the module docs' claim.
+- **Hedged:** I made W-1 a warn, not a block. It is drift against an ADR, not a parallel path, which is what a Phase-7 block is for. F and T documented it, and S owns spec conformance. It still has to be settled before merge, by a one-line code change or a §6 amendment. W-2's poll/`Feed` and `NoParams` gaps are #661 reuse risks, partly the result of my own Phase-3 W-4, and are not #639 defects. W-3 is minor duplication of test builders.
+- **Evidence:** I read every changed file in full, plus handoff-F, handoff-T-red, handoff-T-green, the brief, `holds.rs`, `token.rs:255-300,655-670,715-799`, `state.rs`, `pane_dispatch.rs`, `profile/mod.rs`, `holler-proto/src/envelope/dispatch.rs`, `holler-pane/src/{reply.rs,error.rs:380-540,profile.rs:300-332,pane.rs:251-268}`, `holler-pane/tests/common/mod.rs`, `holler-cli/tests/support/mod.rs` (`StateDir`), and ADR-0021 on `origin/main`. I grepped the hub for `spawn_blocking`, `JoinError`, serde `classify()`/`Category::`, `write_atomic`, `create_dir_all`/`ensure_dirs`, logging helpers, `Condvar`/`VecDeque`/cursor/watch, `params` extraction and `sample_pane` builders. `git diff --quiet` confirms the out-of-radius files are untouched, and `git merge-tree` shows a `CHANGELOG.md` conflict with `main`.
