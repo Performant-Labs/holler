@@ -101,3 +101,39 @@
     and `Cargo.lock`.
   - Grepped `holler-pane` and `holler-hub` for a name-rule, log-entry or summary helper (none), read ADR-0021:53-62, and
     searched GitHub issues for the W-1 follow-up (none; part 2 is #688, and #682 is open).
+
+## S (Phase 8, spec audit) — 2026-10-09T13:40:15-06:00
+- **Decided:** PASS on e410e9d..ab27aea (see handoff-S.md).
+  - Every acceptance item of the issue that part 1 owns, and AC1 to AC10, has a proving test or a check I verified.
+  - The brief's ten decisions are implemented as stated.
+  - The two deviations from the issue are documented with reasons: the split (brief decision 1, part 2 is #688) and the
+    env leg without JSON (decision 8).
+  - F's `log.rs` is the split the brief's Risks section prescribes.
+  - Eight advisory notes, none blocking.
+- **Assumed:**
+  - T's Tier 1 output (clippy, build, test, lint, machete, rustfmt, doc) is accurate. I did not re-run it, by role; no
+    `src/` file changed after F.
+  - The squash-merge message lists commit subjects, as e410e9d's does, so no closing keyword reaches main through it.
+- **Hedged:**
+  - "Ahead generation, no event" is pinned only through the stale path, which uses the same `next_generation` branch.
+    That is advisory N-4, not a block, because ADR-0021 sections 7 and 8 put the CAS check before any publish.
+  - `Deleted` at g + 1 stays as the brief decided; #661 should ratify it (N-6).
+  - #688 points at this brief's appendix, which the script's handoff cleanup removes before the push. The appendix must
+    be copied into #688 before the merge (N-2).
+- **Evidence:**
+  - Read the issue, the brief, all six handoffs, `evidence.md`, and the whole diff (src and tests).
+  - Checks:
+    - `git diff --quiet` on the slice-a tests, the manifests, `Cargo.lock`, `lib.rs`, `conformance/mod.rs` and the
+      scope stubs;
+    - `cargo tree -e normal --offline`;
+    - AC7's three greps;
+    - `wc -l` on the touched `.rs` files (max 597);
+    - greps of the added lines for banned constructs, `#[allow]` links and private identifiers;
+    - `git log` for authorship and trailers.
+  - Read:
+    - ADR-0021 sections 7 and 8;
+    - `profile.rs:270-372`;
+    - `argv_env_test.rs` (serde refusals pinned);
+    - the pane suite's case table (watch cases 14 to 18);
+    - #688's body;
+    - the script's handoff-cleanup step.
