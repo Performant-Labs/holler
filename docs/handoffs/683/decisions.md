@@ -182,3 +182,40 @@
   - `gh issue list` found no cleanup issue. `gh issue view 640` shows a body with no #683 item and no comments.
   - No golden, protocol or manifest change. `cargo tree` direction is clean. The diff names no personal infrastructure, and
     all seven commits use the no-reply address.
+
+## S (Phase 9, spec audit) — 2026-10-09T13:41:52-06:00
+- **Decided:**
+  - PASS on the branch at 4672d78 (base e410e9d). See handoff-S.md.
+  - Both preconditions are met. A passed in round 2 and at A-dup. T-red showed only E0432 errors, T-green is GREEN with no
+    blocking issue, and the commit file lists confirm that T wrote the tests before F wrote the code.
+  - Every acceptance item has a proving test or piece of evidence that asserts the behaviour: AC 1 to 8 and the issue's
+    three.
+  - The public API, the fake's behaviour (`ensure_pane` steps 1 to 5, the faults first, base-36 ids that only go up), the
+    11 cases, the nine ASSUMPTION comments (13 blocks) and the two ADR-0021 items match the brief, with no silent
+    deviation.
+  - T-green's open question: A's optional ADR sentence about the extent is wanted. It records a deferral and sits inside
+    AC 8(a).
+- **Assumed:**
+  - T's Tier 1 output is current for HEAD, since no code commit came after T-green. I did not re-run Tier 1 or Tier 2,
+    per my role.
+  - Following the repo's practice (the last 40 commits on main), commit trailers carry no session link. The AI disclosure
+    belongs in the PR body, which the run's agent adds.
+- **Hedged:**
+  - origin/main moved to 90997a2 (#689, merged 2026-10-09 13:36 MDT) after F finished. A dry-run merge conflicts in
+    CHANGELOG.md only, where both entries were added after #676. This is advisory, not REWORK: F's work matches the brief,
+    and the run's agent rebases at PR time and keeps both entries.
+  - The follow-ups that A-dup handed to the PR step are still unfiled: the hand-off to #640 and the one test-kit cleanup
+    issue. I listed them as advisories, not blocks.
+- **Evidence:**
+  - Read the brief, the issue (`gh issue view 683`), every handoff in docs/handoffs/683, the three `src` files and three
+    test files in full, and the CHANGELOG and ADR hunks.
+  - `wc -l`: the largest file is 538 lines. The grep of `src/` for unwrap, expect, panic, unreachable, assert, todo and
+    allow found only the `text`-fenced doc example.
+  - `git diff --name-only` covers only the blast radius, with no manifest or slice-a file. The ADR section 10 line widths
+    are 125, 118 and 120 against neighbours of 116 to 126.
+  - Spike headings: sections 2, 4, 5, 7 and 13 match the comments.
+  - The privacy grep of the added lines found nothing.
+  - Commits: Conventional subjects that pass `.githooks/commit-msg`, the no-reply author address, and a Co-Authored-By
+    trailer on each.
+  - `git merge-tree --write-tree HEAD origin/main` shows the CHANGELOG conflict.
+  - `gh issue view 640` shows no comments, and `gh issue list` finds no cleanup issue. No PR exists yet.
