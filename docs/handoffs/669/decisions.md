@@ -161,3 +161,54 @@
     - Where `StateDir` and `Hub` are defined: only `holler-cli/tests/support`.
     - `pane_json` and `MemPaneStore` in `holler-pane/tests/common`; the testkit is 6 lines.
     - Probes for overlap in `holler-cli/src` in the #670 worktree: none.
+
+## S (Phase 10, spec audit, pass 2) — 2026-10-09T07:27:07-06:00
+- **Decided:**
+  - PASS at 31fe2bd; see handoff-S.md.
+  - Pass 1's only REWORK item is resolved. The probe at `pane_dispatch_test.rs:181-204` sends `control/roster` and asserts:
+    - no `error` key;
+    - `result.rows == []`;
+    - the result is not a `PaneReply`.
+  - The probe's route goes past the new arm (`control_server.rs:117`), through the `control/` arm (`:118`), to `roster_control` (`:461-475`). That handler is in-memory only. If the guard swallowed `control/` methods, `forward` would answer `-32601` and the probe would fail.
+  - All 8 acceptance criteria are met. MO decisions 0-5 are implemented as stated. The `rename.rs` stub and the `mod.rs` exception are recorded and accepted, as in pass 1.
+  - Production code is unchanged since pass 1: `git diff 8275e73 HEAD -- crates Cargo.lock CHANGELOG.md` shows only the test file.
+  - I rewrote `handoff-S.md` for the current head and added a pass history, instead of adding a `-rework` file. This matches A-dup pass 2 in this run, and the canonical path now carries the current verdict. Pass 1's full text is in commit cc674a0.
+- **Assumed:**
+  - T-green's post-rework Tier 1 claims (`lint.sh`, clippy) are taken as recorded. The post-rework workspace count is only in T's return message. Only the self-contained `pane_dispatch_test` binary changed, and I ran it myself.
+  - The workflow script commits this entry and the handoff; S commits nothing.
+- **Hedged:**
+  - These are advisory, not REWORK:
+    - The probe comment at `:186-188` overstates which handlers resolve the state dir. Only `control/status`, `control/caps`, `control/query_local`, `control/say` and `control/interrupt` do.
+    - `#678` in `handoff-T-green.md` and in this file means playbook#678, not a Holler issue.
+  - These are carried over from pass 1, unchanged, for O:
+    - The rename route is checked by reading only.
+    - The issue texts of #669, #665 and #661 need amending.
+    - A Phase 3 W2 and W7.
+    - A-dup W1 and W3.
+    - The `serve.rs` wiring has no automated test.
+- **Evidence:**
+  - Read:
+    - the brief, and issue #669 via `gh issue view`;
+    - the rename-related text of #665 and #661;
+    - every handoff in `docs/handoffs/669/`;
+    - the full diff `origin/main...HEAD` (21 paths), and the rework diff 8275e73..820e385.
+  - Read in full at HEAD:
+    - `pane_dispatch.rs`, `panes/mod.rs`, `profile/mod.rs`, `profile/rename.rs` and `pane_wiring.rs`;
+    - `tests/pane_dispatch_test.rs`.
+  - Read in part:
+    - `control_server.rs:1-250, 455-480, 666-700`;
+    - the `pane_deps` lines of `serve.rs`;
+    - `holds.rs:282-348`, `live.rs:420-461`, `roster.rs:306-315, 536-551`;
+    - `lockout.rs:59-71, 341-347`, `holler-proto/src/log.rs:548-554`, `holler-proto/src/methods.rs:115-154`;
+    - `CONTRIBUTING.md`, and `pipeline-conventions.md` §1 and §4.
+  - Ran these read-only fact checks:
+    - `wc -l` (control_server.rs 837, serve.rs 838, test 360);
+    - `rustfmt --check --edition 2021` on the six new `.rs` files: exit 0;
+    - a guard grep of the added `src/` lines: only the `#184` allow note;
+    - a privacy grep of all 1,804 added lines: loopback, an env var name, the noreply address, github.com links, and the existing `kiwi` fixture;
+    - `git log` of the branch's subjects and trailers;
+    - `gh pr list` (no PR yet) and `gh issue view 678` (does not exist).
+  - Ran one targeted check, which is not a Tier 1 re-run:
+    - `cargo test -p holler-hub --test pane_dispatch_test --no-run` (already up to date);
+    - then the binary with `HOME` set to an empty scratch directory and `HOLLER_STATE_DIR` unset;
+    - result: 10 passed and the scratch directory stayed empty. I then deleted it.
