@@ -133,3 +133,21 @@
   >   `emit_usage_error()` are in `holler-cli/src/output.rs` (#670 creates it, #660 completes it).
   > - `pane watch` in JSON mode writes NDJSON: one envelope per line, flushed per line.
   > - **Exit codes are the same in both formats (operator, 2026-10-09):** 0 ok, 1 runtime failure, 2 usage, 3 refusal. A
+
+## Added by T (Phase 7)
+
+The `preserve_order` removal order, which the rows `extra-keys-among-known-keys-smallest-first` and
+`error-extra-keys-among-known-keys-smallest-first` depend on. Copied from `serde_json-1.0.151/src/map.rs` below.
+
+```
+serde_json-1.0.151/src/map.rs:150-153,158-163
+    /// If serde_json's "preserve_order" is enabled, `.remove(key)` is
+    /// equivalent to [`.swap_remove(key)`][Self::swap_remove], replacing this
+    /// entry's position with the last element. ...
+    pub fn remove<Q>(&mut self, key: &Q) -> Option<Value>
+    ...
+        #[cfg(feature = "preserve_order")]
+        return self.swap_remove(key);
+        #[cfg(not(feature = "preserve_order"))]
+        return self.map.remove(key);
+```

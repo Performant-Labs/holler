@@ -218,6 +218,30 @@ fn framing_rows() -> Vec<Row> {
     ]
 }
 
+/// Extra keys placed before and among the known ones, so that neither document order nor
+/// the order a map leaves after the known keys are removed is the smallest key
+/// (`serde_json::Map::remove` is a `swap_remove` under `preserve_order`).
+fn extra_key_order_rows() -> Vec<Row> {
+    vec![
+        row(
+            "extra-keys-among-known-keys-smallest-first",
+            r#"{"zz":1,"mm":3,"schema_version":1,"ok":true,"data":null,"error":null,"aa":2}
+"#
+            .to_owned(),
+            0,
+            EnvelopeFault::UnknownKey("aa".into()),
+        ),
+        row(
+            "error-extra-keys-among-known-keys-smallest-first",
+            r#"{"schema_version":1,"ok":false,"data":null,"error":{"zz":1,"mm":3,"code":"timeout","message":"x","aa":2}}
+"#
+            .to_owned(),
+            1,
+            EnvelopeFault::UnknownKey("error.aa".into()),
+        ),
+    ]
+}
+
 /// The four keys, `schema_version` and `ok` against the exit code.
 fn key_rows() -> Vec<Row> {
     let g = good_success();
@@ -465,6 +489,7 @@ fn code_and_message_rows() -> Vec<Row> {
 fn mutant_rows() -> Vec<Row> {
     let mut rows = framing_rows();
     rows.extend(key_rows());
+    rows.extend(extra_key_order_rows());
     rows.extend(failure_rows());
     rows.extend(code_and_message_rows());
     rows
