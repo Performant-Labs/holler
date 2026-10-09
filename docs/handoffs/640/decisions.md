@@ -89,3 +89,15 @@
     `lib`/`error`/`grid`/`pane`/`ports`, the testkit's `herdr.rs` and `conformance/herdr.rs`, and
     `control.rs` `send_over`.
   - The facts are in `evidence.md` (12 entries).
+
+## T (Phase 7, verify GREEN + Tier 2)
+
+- **Decided:** PASS. The suite is GREEN, there is no blocking Tier 2 issue, and no test needed repair (F reported none).
+- **Assumed:** the 64-character excerpt cut is an implementation detail, not an acceptance criterion, so a surviving mutant
+  there is advisory and not a reason to add a test or to block.
+- **Hedged:** none.
+- **Evidence:**
+  - The adapter tests 62/62; clippy exit 0; `cargo test --workspace` 118 targets, 1317 passed, 0 failed, 5 ignored;
+    lint, changelog-check, machete, `docs_cli_test` and `wire_selftest` all pass.
+  - Four of five mutants were caught: transposition, count-from-0, the `SendText` `Debug` leak and the ratio denominator.
+    The `EXCERPT_LIMIT` mutant survived.
