@@ -1,0 +1,19 @@
+[package]
+name = "holler-adapter-opencode"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "The OpenCode adapter: implements holler_pane::HarnessPort over OpenCode's HTTP API (empty in the workspace skeleton)"
+
+[lib]
+name = "holler_adapter_opencode"
+path = "src/lib.rs"
+
+# Declare only what is consumed (issue #155 §7 — `cargo machete` fails CI
+# otherwise). The crate is an empty skeleton; its owning story adds the
+# dependencies it uses.
+[dependencies]
+
+# Workspace lints (issue #149).
+[lints]
+workspace = true

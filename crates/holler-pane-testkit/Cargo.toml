@@ -1,0 +1,19 @@
+[package]
+name = "holler-pane-testkit"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Fake ports and a conformance suite every pane adapter must pass (empty in the workspace skeleton)"
+
+[lib]
+name = "holler_pane_testkit"
+path = "src/lib.rs"
+
+# Declare only what is consumed (issue #155 §7 — `cargo machete` fails CI
+# otherwise). The crate is an empty skeleton; its owning story adds the
+# dependencies it uses.
+[dependencies]
+
+# Workspace lints (issue #149).
+[lints]
+workspace = true

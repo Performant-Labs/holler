@@ -1,0 +1,27 @@
+[package]
+name = "holler-pane"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Holler pane control: the pane and profile records, the error codes, the ports every adapter implements and the reply type of the hub's pane/profile control methods (types and traits only; no async runtime, no I/O)"
+
+[lib]
+name = "holler_pane"
+path = "src/lib.rs"
+
+# Declare only what is consumed (issue #155 §7 — `cargo machete` fails CI
+# otherwise).
+[dependencies]
+# The records, the guards and the reply derive Serialize/Deserialize.
+serde = { workspace = true }
+# `PaneReply.data` and the params structs carry `serde_json::Value`.
+serde_json = { workspace = true }
+# `PaneName` is a newtype over `holler_proto::vocab::SessionName` (the ADR 0005
+# name grammar, reused rather than copied).
+holler-proto = { path = "../holler-proto" }
+
+# Workspace lints (issue #149): inherit [workspace.lints] from the root
+# Cargo.toml — deny dead_code, clippy unwrap/expect/panic/unreachable, and the
+# complexity gates (thresholds in clippy.toml).
+[lints]
+workspace = true

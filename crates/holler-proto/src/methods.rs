@@ -14,6 +14,15 @@
 //! - **body→hub** — join / authenticate, and (issue #508) the seven
 //!   `admin/*` rows, legal only on an admin-role connection.
 //! - **hub→body** — prompt / cancel (and the hub's superseded).
+//!
+//! **Not in the catalog:** the hub's *control-socket* method names. [`PANE_METHODS`]
+//! and [`PROFILE_METHODS`] (issue #637, epic #633) name the `pane/*` and `profile/*`
+//! methods of the pane registry. They are hub control methods, outside [`CATALOG`]
+//! and not in `docs/protocol/v2.md`, so the closed 22-row catalog, the v2 wire
+//! protocol and every golden file are unchanged, and a body connection that sends one
+//! still gets `method_not_found`. `holler_hub::serve::CONTROL_METHODS` holds the
+//! `control/*` names the same way. Only the *names* live here: the params and the
+//! `PaneReply` encoding are in `holler-pane`, which this crate cannot depend on.
 
 /// One row of the catalog.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -99,4 +108,112 @@ pub fn is_request(method: &str) -> bool {
 /// Whether `method` is a notification.
 pub fn is_notification(method: &str) -> bool {
     matches!(find(method).map(|m| m.kind), Some(MethodKind::Notification))
+}
+
+/// The hub's `pane/*` control-socket methods (the pane registry; issue #637). Outside
+/// [`CATALOG`]: see the module docs.
+pub const PANE_METHODS: &[&str] = &[
+    "pane/get",
+    "pane/list",
+    "pane/cas_put",
+    "pane/delete",
+    "pane/watch",
+];
+
+/// The hub's `profile/*` control-socket methods (the profile registry; issue #637).
+/// `profile/rename` is PROPOSED (#665). Outside [`CATALOG`]: see the module docs.
+pub const PROFILE_METHODS: &[&str] = &[
+    "profile/get",
+    "profile/list",
+    "profile/cas_put",
+    "profile/delete",
+    "profile/watch",
+    "profile/log",
+    "profile/rename",
+];
+
+/// Whether `method` is one of [`PANE_METHODS`].
+pub fn is_pane_method(method: &str) -> bool {
+    PANE_METHODS.contains(&method)
+}
+
+/// Whether `method` is one of [`PROFILE_METHODS`].
+pub fn is_profile_method(method: &str) -> bool {
+    PROFILE_METHODS.contains(&method)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The `pane/*` and `profile/*` names are hub control-socket methods (#637,
+    /// epic #633 ruling 6): they stay OUTSIDE the closed v2 catalog, so a body
+    /// connection still gets `method_not_found` for them and no golden file moves.
+    #[test]
+    fn pane_methods_not_in_wire_catalog() {
+        assert_eq!(CATALOG.len(), 22, "the v2 wire catalog is closed");
+        assert!(find("pane/list").is_none());
+        assert!(find("profile/list").is_none());
+
+        assert_eq!(
+            PANE_METHODS.to_vec(),
+            vec![
+                "pane/get",
+                "pane/list",
+                "pane/cas_put",
+                "pane/delete",
+                "pane/watch"
+            ]
+        );
+        assert_eq!(
+            PROFILE_METHODS.to_vec(),
+            vec![
+                "profile/get",
+                "profile/list",
+                "profile/cas_put",
+                "profile/delete",
+                "profile/watch",
+                "profile/log",
+                "profile/rename"
+            ]
+        );
+
+        // No control-socket name may also be a wire method (no shadowing).
+        for name in PANE_METHODS.iter().chain(PROFILE_METHODS.iter()) {
+            assert!(find(name).is_none(), "{name} must not be in CATALOG");
+            assert!(!is_request(name) && !is_notification(name), "{name}");
+        }
+    }
+
+    #[test]
+    fn is_pane_method_and_is_profile_method_classify_by_list() {
+        assert!(is_pane_method("pane/cas_put"));
+        assert!(is_pane_method("pane/delete"));
+        assert!(is_profile_method("profile/rename"));
+        assert!(is_profile_method("profile/log"));
+        for name in PANE_METHODS {
+            assert!(is_pane_method(name), "{name}");
+            assert!(!is_profile_method(name), "{name}");
+        }
+        for name in PROFILE_METHODS {
+            assert!(is_profile_method(name), "{name}");
+            assert!(!is_pane_method(name), "{name}");
+        }
+        // Wire methods, the hub's `control/*` family, near-misses and junk are neither.
+        for name in [
+            "circuit/join",
+            "control/status",
+            "pane",
+            "pane/",
+            "pane/GET",
+            "pane/unknown",
+            "profile/",
+            "profile/unknown",
+            "xpane/get",
+            "",
+        ] {
+            assert!(!is_pane_method(name), "{name:?}");
+            assert!(!is_profile_method(name), "{name:?}");
+        }
+    }
 }
