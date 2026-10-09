@@ -63,3 +63,24 @@
 - **Assumed:** F's two "advisory" items (two-line ASSUMPTION comments, two `holds` helpers) are not blocking: the AC `grep -c` prints 3 and the helpers are suite-private.
 - **Hedged:** Mutation spot-check covered three behaviors (frozen, killed, stop_owned) by hand; F's wider mutant readout was not re-run.
 - **Evidence:** `cargo test -p holler-pane-testkit` all GREEN (56 new + 32 slice a); workspace CI command 1164 passed / 0 failed / 5 ignored; clippy, lint, changelog-check, machete, dependency grep, ASSUMPTION grep all as expected; three mutants each failed a named test and were reverted.
+
+## A (Phase 7, anti-duplication gate) — 2026-10-09T13:25:08-06:00
+- **Decided:**
+  - PASS on `e410e9d...d6f5850`, with no blocks and three `warn`s (see `handoff-A-dup.md`).
+  - F extended slice a and built no parallel path. Both fakes call `FaultSwitch::enter` first in every port method, and both ops implement `PortOp::as_str`. Both suites run on `run_cases`, `succeeds`, `expect_code` and `expect_eq`, unchanged, and the harness suite folds its rig into the subject. Every error is a closed `PaneError` variant, and the frozen `timeout` has the fault switch's shape. The public surface is the brief's API, item for item.
+  - The warns:
+    - W-1 (carried forward from Phase 3): `HarnessRig` here and #683's `HerdrFixture<H>` are two shapes for one idea.
+    - W-2: small copies that the no-edit rule forces (per-fake `lock`, `holds`/`lacks`, the rig's `scratch`/48100, `assert_fails_on`). New since Phase 3: #682 makes `feed::lock` `pub(crate)`, so after the merges there is one shared lock beside five per-struct copies.
+    - W-3: `lib.rs:27-28` ("empty stubs") becomes stale. #681's gates gave it to #684, but this brief's AC 9 forbids the edit.
+  - All three go to one cleanup issue. It does not exist yet, so O opens it.
+- **Assumed:**
+  - Slices b to e merge in some order before #640, #641 or #642 call a suite, so the cleanup can settle the fixture shape before any adapter depends on it.
+  - #682's `feed::lock` promotion and #683's planned move to it land as their worktrees have them now; neither has merged.
+- **Hedged:**
+  - W-1 stays a `warn`, not a `block`. Both shapes are now real, but the brief specifies `HarnessRig` (Decision 8), neither shape is on main, and the role's rule for an inconsistent codebase with no dominant pattern is `warn`.
+  - W-3 is a doc item outside this diff. I recorded it only because a sibling's gate assigned it to this slice.
+- **Evidence:**
+  - Read in full: the four source files and four test files of the diff, the brief, `handoff-A.md`, `handoff-F.md`, `handoff-T-red.md`, `handoff-T-green.md`, `evidence.md` and this journal. Also read slice a's `fault.rs`, `conformance/mod.rs`, `pane_store.rs`, `conformance/pane_store.rs`, `fixture.rs`, the tail of `feed.rs`, `lib.rs` and the mutation part of `tests/pane_store_conformance_test.rs`.
+  - Workspace greps: the only other `HostPort`/`HarnessPort` impls are the CLI's `Unwired` placeholder and `holler-pane`'s signature pins. There are no other `Quirk`, `ServerState`, `ServerView`, `TuiView` or rig types. The added lines touch no overlay candidate and name no personal infrastructure. All five commits use the GitHub no-reply address.
+  - Sibling worktrees (read only): #682's diff to `feed.rs`, `fixture.rs`, `pane_store.rs` and `conformance/pane_store.rs`; #683's `conformance/herdr.rs`, lock helpers and handoff-A row 3; #681's handoff-A W-6, handoff-A-dup row 2 and `lib.rs` diff.
+  - `gh issue list` searches found no test-kit cleanup issue.
