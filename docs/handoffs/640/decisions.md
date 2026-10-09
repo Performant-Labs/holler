@@ -130,3 +130,41 @@
   - **The duplicate searches:** `excerpt`/`one_line`, `count`/`plural`, `last_lines`, every new type name, and JSON
     field readers across `crates/`.
   - **Hygiene:** a grep for personal infrastructure names, and for `unsafe` and `#[allow]` in `src/`.
+
+## S (spec audit) — 2026-10-09T15:46:07-06:00
+- **Decided:**
+  - **Verdict: REWORK (test-only).** The findings are in handoff-S.md.
+  - **The one required change.** `protocol_test.rs:398` asserts `message.contains("99")`, which line 397's
+    `contains("99.0.0-fake")` already implies. AC 17's "names the protocol 99" therefore has no assertion that proves
+    it: a `check_supported` that drops the protocol from its message would survive. T repairs the assertion, and no
+    `src/` change is needed.
+  - **Everything else passes.**
+    - AC 1-16 and AC 18-22 each have a test that would fail if the behaviour were wrong.
+    - The pinned API matches the T-red stubs, and Decisions 1-12 are implemented as stated.
+    - The build guards, the scope and the privacy sweep are clean.
+  - **A deviation, accepted.** `lib.rs` has no flat re-exports. A recommended it (W-1), it is recorded in four
+    places, and nothing pinned is renamed or dropped.
+- **Assumed:**
+  - **AC 2's mutant record.** T-green's "layout 8 fail" for each mutant includes AC 1 and AC 2. S derived the failing
+    sets by tracing both mutants through the ten layout tests, and did not run them: S does not edit `src/`.
+  - **The commit trailer.** `Co-Authored-By: Claude <noreply@anthropic.com>` with no session link is acceptable,
+    because it matches recent commits on `main`.
+- **Hedged:**
+  - **Not a hold.** Issue #640's acceptance line ("passes #638's split-only-mode case") contradicts AC 12 and
+    Decision 6. The brief states its reason (spike section 7, VERIFIED), and this PR is `Part of #640`. The issue line
+    still needs A's W-7 amendment before part 3 closes #640 (advisory 1).
+  - **Unfiled follow-ups.** A's W-7 (tighten the test kit's split-only mode) and W-9 (`HerdrSnapshot` and unplaced
+    panes) have no issue yet. They are not part 1's.
+- **Evidence:**
+  - **Read:** the brief, all six phase handoffs, `evidence.md`, issue #640 (`gh issue view`), the full diff, and all
+    four test files.
+  - **Test kit:** `fake_herdr_test.rs:191-245` (the split-only cases) and `conformance/herdr.rs` (the cells it uses).
+  - **Spike:** the section 13 pong, which matches the test fixture verbatim.
+  - **Read-only checks:**
+    - `rustfmt --check --edition 2021` on the eight new `.rs` files: exit 0.
+    - `wc -l` on every touched file: the largest is 678 lines.
+    - A grep of `src/` for `unwrap`, `expect`, `panic!`, `unsafe` and `#[allow]`: none.
+    - A grep of the tests for sleeps, sockets and processes: none.
+    - A diff of the public and derive lines, stubs against HEAD: only private items added.
+    - A privacy grep of every added line: no personal data.
+    - `gh issue list` for the W-7 and W-9 follow-ups: none filed.
