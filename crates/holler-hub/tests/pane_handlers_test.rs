@@ -358,6 +358,33 @@ async fn an_idle_watch_from_zero_over_an_all_deleted_registry_answers_the_head()
     assert_eq!(batch.cursor, Cursor(4));
 }
 
+/// D6 rule 1 on the wire: `pane/watch` hands the client's cursor straight to the long-poll,
+/// so a cursor ahead of the head is `usage` at once. It is not an empty batch whose cursor
+/// is lower than the one the client sent (that would send the client backwards).
+#[tokio::test]
+async fn pane_watch_with_a_cursor_ahead_of_the_head_is_usage() {
+    let rig = Rig::new();
+    rig.call(
+        "pane/cas_put",
+        Some(cas_put_params(&sample_pane("hj-c1r1", None), 0)),
+    )
+    .await
+    .unwrap();
+
+    let ahead = rig.call("pane/watch", Some(json!({"since": 2}))).await;
+    let err = ahead.expect_err("a cursor ahead of the head must be refused, not answered");
+    assert!(matches!(err, PaneError::Usage { .. }), "got {err:?}");
+    assert_eq!(err.code(), "usage");
+
+    // The head itself is a valid cursor: it is up to date, so the reply is an idle batch.
+    let at_head = rig
+        .call("pane/watch", Some(json!({"since": 1})))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(at_head, json!({"events": [], "cursor": 1}));
+}
+
 // --- AC 26: a corrupt registry --------------------------------------------------------
 
 #[tokio::test]

@@ -58,3 +58,28 @@ No test was wrong and I changed none. Commits since the previous pass: 1d67ef3 (
 - The advisory note above about the ADR sentence is resolved: ADR-0021 §6 now says the head.
 
 Blocking issues: None. Verdict: PASS.
+
+## Re-verification at 476ad22 (F rework round 1, doc comments only in `panes/store.rs`) — 2026-10-09
+
+**Handoff-F reviewed:** `docs/handoffs/639/handoff-F-rework.md`. F changed no logic, only doc comments in `store.rs`.
+
+**Test change (mine; no production code touched).** F flagged a coverage gap: nothing pinned D6 rule 1 on the `pane/watch`
+wire path (`a_cursor_ahead_of_the_store_is_usage` goes through `PaneState::watch`, which refuses before `poll`). I added
+`pane_watch_with_a_cursor_ahead_of_the_head_is_usage` to `crates/holler-hub/tests/pane_handlers_test.rs` (417 lines): with
+head 1, `pane/watch {since: 2}` is `usage`, and `{since: 1}` is an idle `{"events": [], "cursor": 1}`.
+Mutation (F's M2: `poll` answers an empty batch for `since > head`): the new test FAILED, the other seven passed; reverted
+with `git checkout`, so `store.rs` is unchanged.
+
+| Command | Result |
+|---|---|
+| Four pane binaries | PASS: 10, 7, 8, 14 |
+| 15 repeat runs of the four binaries | PASS, 0 failures |
+| `cargo test --workspace --no-fail-fast -- --skip roster_stays_accurate_under_concurrent_body_load` | PASS, 1069 passed, 0 failed (F: 1068, plus my new test) |
+| `cargo clippy --workspace --all-targets -- -D warnings` | PASS |
+| `bash scripts/lint.sh` | PASS (exit 0; warnings name only pre-existing files) |
+| `bash scripts/changelog-check.sh`, `cargo machete` | PASS |
+| `docs_cli_test`, `wire_selftest` | PASS (3 and 3) |
+| `rustfmt --check` on the edited test | PASS |
+
+Blocking issues: None. Advisory: B-1 and W-2 from the outside gate are settled by F's evidence; the Condvar release is pinned
+by `a_waiting_watch_wakes_on_the_next_write`, and rule 1 on the wire is now pinned by the new test.

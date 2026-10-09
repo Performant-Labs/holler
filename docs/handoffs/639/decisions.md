@@ -118,3 +118,9 @@
   - Tier 1 is green: the workspace ran 1068 passed, 0 failed; clippy, `lint.sh`, `changelog-check.sh`, `cargo machete`,
     rustfmt and `cargo doc` (`panes/`) are all clean.
   - `evidence.md` has 14 entries. A script checked the 2 new ones and found 0 mismatches.
+
+## T (Phase 7 re-verification at 476ad22, after F's rework) — 2026-10-09
+- **Decided:** PASS. Added one handler test, `pane_watch_with_a_cursor_ahead_of_the_head_is_usage`, to close the D6-rule-1-on-the-wire gap F flagged; no production code touched.
+- **Assumed:** The `roster_stays_accurate_under_concurrent_body_load` skip is the one CI applies.
+- **Hedged:** None.
+- **Evidence:** The new test FAILED under F's M2 mutation (`poll` answers an empty batch for `since > head`) and passes on the real code; mutation reverted. Four pane binaries 10/7/8/14, 15 repeat runs with 0 failures; workspace 1069 passed, 0 failed; clippy, `lint.sh`, `changelog-check.sh`, `cargo machete`, `docs_cli_test`, `wire_selftest` clean.
