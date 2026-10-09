@@ -176,3 +176,31 @@
 - **Assumed:** a mutation that the suite does not kill is only worth a finding when production code is wrong; the `RefusalCode` field is private today (F's E0423 check), so field privacy is advisory, not a block.
 - **Hedged:** the "remove the privacy" check from the RED handoff does not fail either doctest (they pin `From<&str>` and the const assertion, not field privacy). T cannot edit `src/`, so a third `compile_fail,E0423` doctest is left as an advisory for O or F.
 - **Evidence:** ran `cargo build/clippy/test --workspace`, `docs_cli_test`, `wire_selftest`, `cargo machete`, `lint.sh`, `changelog-check.sh`, `golden-diff-summary.sh`, `rustfmt --check` on all new files; five production mutations, each reverted with `git checkout` and each killed by a named adopted-behavior test; the sixth (privacy) survived; `git diff --name-only origin/main` inside the Blast radius.
+
+## A (Phase 7, anti-duplication gate) — 2026-10-09T04:31:59-06:00
+- **Decided:** PASS on the diff 27da2da..40b722b, with 0 blocks and 6 warns. See handoff-A-dup.md.
+  - F extended every object the Reuse map named: `PaneName` wraps `SessionName`; no second clock; `error.rs` follows `holler_proto::Code`'s single-source table; no new dev-dependency.
+  - No near-copy of the stack's Phase 7 candidates exists: the token store, `Lockout`, `Roster`, `log::emit`, `atomic_file` and the test harness.
+- **Decided:** `decode_params` beside `holler_proto::typed_params` is a justified second helper, not a parallel path.
+  - Control frames are not `Envelope`s, and `typed_params` drops the serde error, which would lose the guard's code.
+  - Phase 3 row 6 asked for it.
+  - Only its rule for absent `params` is missing (row 3).
+- **Decided:** row 1 (`Watch` signals idle with `Err(Timeout)`) is a warn, not a block. It is not duplication. It corrects my own Phase 3 row 4 suggestion, which missed the hub's `control/wait` precedent: "nothing happened in this window" is an ordinary outcome, not an error. It goes to the operator because it changes the brief's fixed `Watch<T>` alias.
+- **Decided:** row 5 (`HarnessKind` beside `HARNESS_IDS`) is a warn. The Reuse map did not name `HARNESS_IDS`, and the epic's non-goals support a closed set. It is still a second vocabulary with nothing linking the two lists.
+- **Assumed:**
+  - The run's phase commit stages this entry and handoff-A-dup.md; I committed nothing.
+  - The sibling issue texts are as fetched with `gh issue view` on 2026-10-09 at about 04:30 MDT. #637, #638, #639 and #661 were last edited at 03:30 MDT.
+- **Hedged:**
+  - Rows 2-4 are doc and test changes with no decision needed, since #639's text already decides row 2.
+  - Row 6 (`HerdrSpec` against `SpecHerdr`) is optional naming.
+  - None blocks, because the verdict rule blocks only an unjustified parallel path.
+- **Evidence:**
+  - Read in full: every changed production file; `tests/common/mod.rs`, `ports_test.rs`, `adopted_test.rs` and `records_test.rs`; the helper lists of the other test files; the methods.rs, CHANGELOG and Cargo.lock diffs; the brief; and the A, F, T-red, T-green and evidence handoffs.
+  - Compared against:
+    - holler-proto: `error.rs`, `vocab.rs`, `lib.rs`, `envelope.rs`, `envelope/dispatch.rs`, `hold.rs`, and `log.rs:455-497`;
+    - holler-hub: `control_server.rs` (`:1-140` and `:466-540`), `serve.rs:55-80`, `roster.rs` (`:190-240` and `:480-520`), `holds.rs:205-230` and `token.rs:405-427`;
+    - holler-body: `config.rs` (`:1-60` and `:95-200`), `acp_driver/auth.rs:140-165`, `query.rs:225-250` and `http_attach_driver.rs`'s module doc;
+    - every crate's `Cargo.toml`.
+  - Grepped `crates/` for analogs of each new helper and type: excerpt or truncate, const string equality, slug, control-character checks, cursor, generation or CAS, watch or long-poll, argv, env names, probe, `try_from` and `deserialize_with`, harness ids and role enums.
+  - Ran `bash scripts/golden-diff-summary.sh` (no drift) and a blast-radius filter over `git diff --name-only origin/main...HEAD` (nothing outside it).
+  - Fetched #633, #637, #638, #639, #642, #643, #649 and #661.
