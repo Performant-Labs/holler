@@ -70,3 +70,40 @@
   whole target gives 62 passed, 28 failed, with no other module regressed. The failing assertions are quoted in
   handoff-T-red.md. Also: `rustfmt --check --edition 2021` on the 7 touched `.rs` files exits 0;
   `cargo clippy -p holler-cli --all-targets -- -D warnings` exits 0; `bash scripts/lint.sh` exits 0.
+
+## F (Phase 5, implement) — 2026-10-09T17:50:31-06:00
+- **Decided:** GREEN. The three `run`s are implemented and the help and the CHANGELOG entry are written. T's 30 cases
+  pass, and so do the whole `pane_verbs` (90), `pane_cli_process` (34), `cli_surface_test` and `docs_cli_test`. T's
+  `Args` fields are unchanged.
+  - The shared view code is in `list.rs`, `pub`, one copy each: `PaneRow`, `SessionSync`, `text_value`,
+    `observed_at`, plus `json_text`, `profile_name`, `optional_text`, `health_word`, `hold_word`, `COLUMNS` and
+    `NO_VALUE`. A `watch` line is built from `COLUMNS` and `PaneRow::cells()`, so it cannot drift from the table.
+  - SYNC follows Decision 3 as AC 3 pins it (`shown` vs `driven`, either `None` is `unobserved`). A's W-1 stays with
+    the MO, and `SessionSync::of` is the one place to change.
+  - `text_value` adopts A's W-8. It quotes and escapes whatever Rust's `{:?}` would write as a `\u{..}` escape
+    (bidi, zero-width, combining, line separators), as well as Decision 11's set and the literal `-`.
+  - The JSON-rendered text fields go through `json_text`: `serde_json`, plus `\u` escapes for DEL, C1 and format
+    characters, which `serde_json` leaves raw. They stay valid JSON, and every AC string is unchanged.
+  - `get`'s `profile` is the record's, not the `--profile` argument's. With `--profile`, a scope answer without the
+    named pane is `pane-not-in-profile`.
+- **Assumed:** `serde_json::to_string` cannot fail for `Argv`, `Vec<String>` or `ProfileSpec`: there is no
+  non-string map key and no `Serialize` that errors. On that basis `json_text`'s `unwrap_or_default()` is
+  unreachable. A production `PaneStore::watch` blocks in `next()` up to its bound before it answers idle (the port's
+  documented rule), so `watch` without `--until-idle` does not spin. Only the test fake's idle wait is zero.
+- **Hedged:**
+  - Deviations 1 to 4 of handoff-F.md are additive hardening or wider error cases, not shape changes. A or S may still
+    prefer the letter of Decisions 2, 5 and 11.
+  - JSON mode (`output.rs`, #660) writes DEL, C1 and format characters raw. That is outside this blast radius, and it
+    is raised for the MO in handoff-F.md.
+  - Decision 7's leave-the-profile event is implemented but untested, as T noted.
+- **Evidence:**
+  - Commands, all exit 0: `cargo test -p holler-cli --test pane_verbs -- list:: get:: watch::` (30 passed); the four
+    `holler-cli` targets above; `cargo clippy --workspace --all-targets -- -D warnings`; `bash scripts/lint.sh`;
+    `bash scripts/changelog-check.sh`; `cargo machete`; `rustfmt --check --edition 2021` on the 7 files.
+  - The AC 17, 21 and 22 greps print nothing.
+  - The workspace suite was run with `HOLLER_STATE_DIR` set to an empty dir and `--no-fail-fast`: 1409 passed,
+    0 failed. Unisolated, `logging_test`'s 4 `roster` cases fail on this host, because the host's live hub answers.
+    The diff does not touch them.
+  - A scratch program outside the repo printed the real text and JSON over the fakes. It also checked rustc 1.98's
+    `{:?}` on bidi, C1, DEL, NBSP, combining and CJK input.
+  - Facts in unchanged code are in `evidence.md`.
