@@ -78,3 +78,34 @@
   - Normalised diff of `panes/store.rs` against `profile/store.rs`.
   - Grep sweep of `profile/` for re-implemented pipeline, persist or feed pieces and for direct logging (none found).
   - Survey of local helpers across the hub test binaries; `wc -l` on every touched file (max 415 production, 577 test).
+
+## S (Phase 8, spec audit) — 2026-10-09T15:31:05-06:00
+- **Decided:**
+  - PASS on 9d61c9f..1329d3b (see handoff-S.md). Both preconditions are met: A and A-dup are PASS, and T-green reports no blocking issue after a recorded RED then GREEN.
+  - All 45 brief ACs and issue #661's acceptance list map to tests that assert behaviour.
+  - The brief, epic and ADR decisions are implemented as stated.
+  - The four deviations are all disclosed and accepted:
+    - D10 narrowed to `pub(crate) use store::log_fault;` (A finding 2);
+    - the CHANGELOG text is a superset of the brief's;
+    - an extra fail-closed check (a live log must not end with `Deleted`);
+    - T's `profile_persistence_test.rs` split for the 600-line warn.
+- **Assumed:**
+  - T's and F's recorded Tier 1 output is accurate. I did not re-run cargo, per the S role.
+  - CI's `--skip roster_stays_accurate_under_concurrent_body_load` (`ci.yml:128`) is the right workspace invocation.
+- **Hedged:**
+  - README "Debug output" gap. The two new `error` events (`profile_registry_corrupt`, `profile_registry_write_failed`) are documented only in CHANGELOG and the module docs, against the F/S overlay rule. I made this an advisory, not REWORK or ADVISORY-HOLD, because:
+    - AC 45's blast radius excludes README;
+    - #639 merged with the identical gap;
+    - no CLI path writes `profiles.json` until #649 and #662.
+
+    The operator may overrule.
+  - AC 17's test skips `watch` on both sides. That is a completeness nit only.
+  - Pre-merge actions are carried for the merging agent or operator:
+    - the store-generalisation follow-up issue (A finding 1, A-dup finding 2);
+    - the cross-story notes on #647, #662, #663 and #664 (A finding 8);
+    - the PR's AI disclosure (the script's commit trailers have no session link).
+- **Evidence:**
+  - Read in full: the production diff, the five new and three amended test files, every #661 handoff, issue #661, epic #633 (the #661 passages), and ADR-0021 §6-§8 plus "Decisions taken".
+  - Also read: unchanged `panes/{mod,store,persist,feed,handlers}.rs`, the test kit's `pane_store.rs:125-140,215-238`, and `atomic_file.rs`'s temp naming.
+  - Greps: AC 41 (`panes/store.rs:348`, one hit; none in `profile/`), AC 28 (no `=` scan in `profile/`), AC 45 (no forbidden path), production panics, `unsafe` and `#[allow]` (none), and privacy over added lines (clean).
+  - Also checked: `wc -l` (max 577), the commit messages against `.githooks/commit-msg`, and the CHANGELOG section placement.
