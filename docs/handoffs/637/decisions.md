@@ -84,3 +84,32 @@
     - a rustc probe of the `VerbCtx`/`run` shapes (E0596);
     - a clap 4.6.6 crate testing the tail with flags between the positionals (all parse);
     - a git repo testing adjacent-line merges (conflict) against a one-line gap (clean).
+
+## A (Phase 3 re-review, brief revision 5) — 2026-10-09T03:20:46-06:00
+- **Decided:** PASS on docs/handoffs/637-brief.md at 98ff7ce (revision 5, slice a only), with 0 blocks and 13 warns. See handoff-A.md, which replaces the revision-3 review (kept in git at ce0e68b). Revision 4 was never reviewed; the split replaced it.
+  - None of the three revision-3 blocks applies to slice a. The verb/output seam moved to #670. `ProfileScope::resolve` takes an optional pane and returns the panes in scope. The fmt gate reads "new files rustfmt-clean".
+  - The plan's shape matches the codebase. A domain crate depends only on serde, serde_json and holler-proto. It reuses `SessionName` and `clock::now_millis`, leaves `CATALOG` and the golden files unchanged, and needs no workspace `Cargo.toml` edit.
+- **Decided:** row 1 (`Refused` can be built around `refused()`) is a warn, not a block.
+  - F can make the brief's own "built only through" rule true inside the radius, with a validated code newtype or `#[non_exhaustive]`.
+  - If it is left as is, #670's validated `ErrorCode` still catches a bad code at the CLI's output boundary, so the gap costs enforcement at construction time, not correctness.
+  - It is still the cheapest row to fix now: a later fix breaks every outside construction site in wave 3.
+- **Decided:** row 12 (no way to remove a pane record) is a warn, not a block. The contract already has a plausible tombstone, `hold: Drained`. Only the "delete" answer changes this story (the trait and AC 7's list), so the decision must come before merge.
+- **Decided:** row 11's placement of `PANE_METHODS` in holler-proto, beside a holler-hub `CONTROL_METHODS` precedent, is a recorded deviation rather than drift. The issue and epic ruling 6 fix the location. Only the module doc and the test location need changing.
+- **Assumed:**
+  - The issue and sibling texts are as fetched with `gh issue view` on 2026-10-09. #637 was last edited at 02:53 MDT, before revision 5 was committed at 02:55 MDT. #639, #646-#649, #665 and #667 were edited at 03:02 MDT, after it, with split notes that do not change slice a.
+  - The operator's "option 1" relayed with this run is the split (#637 slice a); this review covers slice a only.
+- **Hedged:**
+  - Rows 3, 5, 10 and 12 depend on sibling issues (#661, #665, #670) or on an operator decision. They are warns because #637's plan matches its own issue text, and each sibling can work around the gap within its own radius, at the cost of duplication or a breaking change later.
+  - Row 4's event shapes are suggestions. Any shape works that carries a cursor per event and can express a profile deletion.
+- **Evidence:**
+  - Read:
+    - the brief (revision 5, and revision 4's decision 8 at 182a69f), the split proposal, and the earlier handoff and decisions;
+    - holler-proto: `lib.rs`, `methods.rs`, `vocab.rs`, `error.rs`, `hold.rs`, `clock.rs`, and the catalog tests in `tests/codec_test.rs`;
+    - holler-hub: `serve.rs:55-80`, `control_server.rs:1-130` and `:697-730`, and `control_hold.rs`;
+    - config, gates and docs: every crate's `Cargo.toml`, the workspace `Cargo.toml`, `clippy.toml`, `scripts/lint.sh`, `changelog-check.sh`, `golden-diff-summary.sh`, the `ci.yml` steps, `docs/testing.md` (Layout), the ADR index and ADR 0006, and the outline of v2.md.
+  - Fetched #633-#670 with `gh issue view`, and checked that every `holler-pane/src/*.rs` path they name is in the brief's module list.
+  - Ran, in the scratchpad only (no worktree files touched), a two-crate scratch workspace on rustc and clippy 1.98.1:
+    - the plain `Refused` variant built from outside the crate, and with `#[non_exhaustive]` refused (E0639);
+    - a const-validated `RefusalCode` (E0080 on an invalid literal, clean under `-D clippy::panic -D clippy::unwrap_used -D clippy::expect_used -D warnings`);
+    - `Ports`/`VerbCtx`/`edit_spec` with a port-calling `act` closure (compiles, `Send + Sync`);
+    - `empty_docs`, `large_enum_variant` and `result_large_err` all fatal under `-D warnings`.
