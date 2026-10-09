@@ -203,7 +203,8 @@ the line. The socket forwarding is already pinned by #669.
     `pane-not-found`. A stale generation on `pane/cas_put` returns `generation-conflict`.
 25. [ ] `pane_watch_answers_one_batch_and_its_cursor`: `pane/watch {since}` returns
     `data = {"events": [...], "cursor": N}`, which parses as `WatchReply<PaneEvent>`. When the store is idle, the reply comes
-    after the window with `{"events": [], "cursor": since}`.
+    after the window with `{"events": [], "cursor": <head>}` (D6), which equals `since` except for a watch from 0 over a
+    registry whose records have all been deleted.
 26. [ ] `a_corrupt_registry_answers_store_corrupt_on_every_pane_method`: as a JSON-RPC **result** carrying a `PaneReply`, never
     as a JSON-RPC error.
 27. [ ] `pane/cas_put` calls `crate::profile::check_membership` before the CAS. S verifies this with
@@ -369,7 +370,7 @@ A second CAS helper, a second code validator, or a copy of `sample_pane` in each
 - Running #638's `PaneStore` conformance suite. #638 is not merged; once it is, its suite can be pointed at
   `PaneState::load_with` by #638 or #649, with no change here.
 - Any change to `serve.rs`, `control_server.rs`, `pane_dispatch.rs`, the frozen `holler-pane` types, `holler-proto`, ADR-0021
-  (#634) or `docs/protocol/v2.md`. `pane/*` are control-socket methods outside the 22-row catalog.
+  (#634, except the idle-cursor amendment in the blast radius) or `docs/protocol/v2.md`. `pane/*` are control-socket methods outside the 22-row catalog.
 - The client side of `pane/*` (#649), the CLI verbs (#643-#647, #650), and any adapter.
 - Pruning tombstones, and fsync.
 
@@ -409,6 +410,8 @@ Permission-based tests (8, 10, 12) are `#[cfg(unix)]` and follow `holds/tests.rs
 `crates/holler-hub/src/panes/**` (`mod.rs`, `store.rs`, `persist.rs`, `feed.rs`, `handlers.rs`);
 `crates/holler-hub/tests/pane_registry_test.rs`, `pane_handlers_test.rs`, `pane_support/mod.rs` (new);
 `crates/holler-hub/tests/pane_dispatch_test.rs` (D8 only); `CHANGELOG.md`; `docs/handoffs/639*` (pipeline artifacts).
+`docs/adr/ADR-0021.md` (§6 and "Decisions taken" item 7 only): its idle `pane/watch` cursor is amended to D6's head
+(operator, 2026-10-09).
 
 Not changed: `serve.rs`, `control_server.rs`, `pane_dispatch.rs`, `lib.rs`, `profile/**`, `holler-pane`, `holler-proto`,
-`holler-cli`, any `Cargo.toml`, `Cargo.lock`, any golden file, any ADR.
+`holler-cli`, any `Cargo.toml`, `Cargo.lock`, any golden file, any other ADR.
