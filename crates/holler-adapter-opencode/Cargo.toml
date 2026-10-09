@@ -10,9 +10,18 @@ name = "holler_adapter_opencode"
 path = "src/lib.rs"
 
 # Declare only what is consumed (issue #155 §7 — `cargo machete` fails CI
-# otherwise). The crate is an empty skeleton; its owning story adds the
-# dependencies it uses.
+# otherwise).
 [dependencies]
+# The port this crate implements and every type it speaks (`HarnessPort`, `PaneError`,
+# `PaneName`, `PaneId`). The adapter depends on nothing else of Holler (ADR-0021 section 5).
+holler-pane = { path = "../holler-pane" }
+# OpenCode's JSON request and reply bodies (`Value`); for `http` and the port methods.
+serde_json = { workspace = true }
+
+[dev-dependencies]
+# `HarnessOp`, whose `as_str` the hermetic tests pin equal to this crate's own `op`
+# strings (#642, AC 5, 7, 8). A dev-dependency only (ADR-0021 section 5).
+holler-pane-testkit = { path = "../holler-pane-testkit" }
 
 # Workspace lints (issue #149).
 [lints]

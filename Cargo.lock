@@ -1131,6 +1131,11 @@ version = "0.4.0"
 [[package]]
 name = "holler-adapter-opencode"
 version = "0.4.0"
+dependencies = [
+ "holler-pane",
+ "holler-pane-testkit",
+ "serde_json",
+]
 
 [[package]]
 name = "holler-body"
