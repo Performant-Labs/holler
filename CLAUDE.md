@@ -33,17 +33,19 @@ brief at `docs/handoffs/<issue>-brief.md` from the issue, using the playbook's `
 Declared per story in the brief: `direct` (one agent, self-check only; one-line or cosmetic
 changes), `in-session` (the pipeline's own agents review, no outside model), `second-opinion`
 (+ one outside model at the brief and diff gates; the playbook's default minimum for non-trivial
-work), `panel` (+ a cross-vendor pair). The outside review model for this repo is **`glm-5.3-flash`**
-on Z.ai's hosted chat endpoint (also the cross-vendor arm at `panel`). It is set per clone with
-`bash $WORKFLOW_ROOT/workflow/review-models.sh --tier outside-review=glm-5.3-flash`, which writes a
+work), `panel` (+ a cross-vendor pair). The outside review model for this repo is **`deepseek-v4-pro`**
+on DeepSeek's hosted chat endpoint (also the cross-vendor arm at `panel`). It is set per clone with
+`bash $WORKFLOW_ROOT/workflow/review-models.sh --tier outside-review=deepseek-v4-pro`, which writes a
 managed block into the gitignored `.env`; also set `DUAL_REVIEW=1` there, or the runner exits 0 having
-done nothing. `OPENAI_API_KEY` must be the Z.ai key, comes from the operator's secret store, and is
-never printed. A worktree needs a copy of the clone's `.env` (it is gitignored, so `git worktree
-add` does not carry it).
+done nothing. `DEEPSEEK_API_KEY` (the variable the script names in `DUAL_REVIEW_API_KEY_VAR`) must be
+the DeepSeek key, comes from the operator's secret store, and is never printed. A worktree needs a copy of the
+clone's `.env` (it is gitignored, so `git worktree add` does not carry it).
+The Workflow's pre-flight reads only `OPENAI_API_KEY` (checked 2026-10-09), not the variable
+`DUAL_REVIEW_API_KEY_VAR` names, so until the playbook honors it, set `OPENAI_API_KEY` to the same value in `.env`.
 
 **Secrets-in-files rule (general, not just this key):** put a key or other sensitive value in a
 file, hidden or not, only after verifying that file is git-ignored (`git check-ignore -v <path>`
-confirms it) — `.env` already is, so writing `OPENAI_API_KEY` there for a run is fine once
+confirms it) — `.env` already is, so writing `DEEPSEEK_API_KEY` there for a run is fine once
 verified. Writing a secret to a file that is *not* git-ignored, or overriding this check at all,
 needs the operator's express consent first, every time.
 Before journalling any run above `in-session`, prove the gate can actually run with one real
