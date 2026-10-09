@@ -43,3 +43,9 @@
   - `grep -rn "refused or failed" crates/ docs/adr/` returns nothing.
   - The markdown-it GFM render shows a 25-row table inside the list item.
   - Source facts are in `evidence.md`.
+
+## T (Phase 7, verify / GREEN) — 2026-10-09
+- **Decided:** The suite is GREEN with no blocking issue. The one repair is the `//!` doc line at `spec_flags.rs:3` (no test code), which F flagged and AC 3 requires. No other test was wrong, so none changed.
+- **Assumed:** Not re-running `test-hooks.sh` and `cargo doc` is safe: neither covers anything changed after F, and this phase edits only a test-file comment.
+- **Hedged:** AC 4's ADR content (table wording, close-calls paragraph) is left to S's audit; T checked only that the docs tests and lints pass and that the table has the 22 closed-code rows.
+- **Evidence:** `cargo test --workspace` exit 0 (1048 passed, 0 failed, 5 ignored). Mutating `output.rs::exit_code` to the old rule fails 6 `pane_verbs` tests; moving `PaneInOtherProfile` to the Failure arm fails `every_closed_code_has_the_decided_class`. Both mutations were reverted and `git status` shows only `spec_flags.rs` changed. clippy, machete, lint.sh, changelog-check, docs_cli_test and wire_selftest all clean.

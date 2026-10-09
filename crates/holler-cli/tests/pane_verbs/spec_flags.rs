@@ -1,7 +1,8 @@
 //! `SpecFlags::validate()` (story #670): the shared spec-flag group of `pane launch` and
 //! `pane relaunch` keeps every value a string at clap time and types it here, with the
-//! `holler-pane` guards and their stable codes. A refusal is exit 1 in the verb (this is
-//! not a clap usage error, so the code is stable and the message is one line).
+//! `holler-pane` guards and their stable codes. A guard's refusal is exit 3 in the verb (one
+//! coded `usage` exits 2); neither is a clap usage error, so the code is stable and the
+//! message is one line.
 
 use clap::Parser;
 use holler_cli::pane::args::SpecFlags;
