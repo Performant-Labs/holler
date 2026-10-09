@@ -67,3 +67,25 @@
 - **Assumed:** That CI's command in `.github/workflows/ci.yml` is still the one F quoted (skipping `roster_stays_accurate_under_concurrent_body_load`).
 - **Hedged:** `serve.rs`'s wiring has no automated test; accepted per A finding 3, covered by the single call site and F's live-hub run.
 - **Evidence:** Ran `lint.sh` (exit 0), `changelog-check.sh`, clippy `-D warnings`, `cargo machete`, `cargo test --workspace` (937 passed, exit 0), `docs_cli_test`, `wire_selftest`, `pane_dispatch_test` x3 (10/10). Mutation check: disabling the control_server arm fails 3 tests; restored. Evidence excerpts spot-checked against source.
+
+## A (Phase 7, anti-duplication gate) — 2026-10-09T06:47:07-06:00
+- **Decided:**
+  - PASS on the diff f2602ba...851684d, with 3 warns and no blocks; see handoff-A-dup.md.
+  - F extended every object the Reuse map named. One arm hands off to plain-function modules, as `control_hold.rs` does. Every reply goes through `encode_response`/`encode_error`, and `reply_line` is the one thin `PaneReply` wrapper. `PaneState::load`/`ProfileState::load` have the `Holds::load(&HubState) -> Self` shape and are shared as `Arc`s of non-`Clone` types. `PaneDeps` has the `AdminDeps` bundle shape. The method lists come from `holler_proto::methods`.
+  - No production code is a near-copy of the token store, `Lockout`, `Roster`, the log helper, or the test harness on the rejection list (`Hub`, `Body`, `mint_token`, `join`, `wait_for`, `StateDir`). No production code changed after F.
+  - Warns, all in the test file or for the next stories:
+    - W1: `sample_pane` copies `holler-pane`'s `tests/common::pane_json`. It should move to the testkit in #638.
+    - W2: `fresh_deps` builds `PaneDeps` by hand instead of calling `PaneDeps::load`. This is T's one-line fix.
+    - W3: the in-process control harness should move to `crates/holler-hub/tests/common/mod.rs` the first time #639 or #661 needs it, not be copied.
+- **Assumed:**
+  - #638's scope (fill `holler-pane-testkit` with fakes and the conformance suite) is the right home for the shared `Pane` fixture, and O can widen #638's brief to move `pane_json`/`pane`/`MemPaneStore` there.
+  - #639 and #661 will write hub tests that drive `pane/*` and `profile/*` over the control socket, so they need the same harness.
+- **Hedged:**
+  - W1 is a warn and not a block. The copied fixture lives in `holler-pane`'s private `tests/common`, which `holler-hub`'s tests cannot import. Its cross-crate home (the testkit) is empty and belongs to #638, outside this slice's radius, so the test could not have reused it here.
+  - The deviation of `rename.rs` from "empty" applies Phase 3 finding 6, so A does not treat it as drift. Whether it meets the issue's text is S's call.
+  - Phase 3 findings 2 (the `check_membership` inputs) and 7 (the `pane_wiring.rs` placeholder) are still open for O. F did not change them.
+- **Evidence:**
+  - Diff: `git diff origin/main...HEAD` (19 paths, all in the blast radius or `docs/handoffs/669*`). `git show --stat` of 3a7194e, 795b343 and 851684d (T-green touched only the test's `#![allow]` lines).
+  - Read in full: `pane_dispatch.rs`, `panes/mod.rs`, `profile/mod.rs`, `profile/rename.rs`, `pane_wiring.rs`, `control_server.rs`, `tests/pane_dispatch_test.rs`; the `serve.rs` hunks and `serve.rs:337-381`.
+  - Compared against: `control_hold.rs:1-80`, `holds.rs:280-330`, `circuit/admin.rs:36-44`, `circuit/auth.rs:40-53`, `control.rs:418-518` (`send_over` is private and opens by path), `holler-pane/src/reply.rs`, `holler-pane/src/error.rs` (22 codes), `holler-pane/tests/common/mod.rs`, `holler-cli/tests/support/mod.rs` (`StateDir`, `Hub`), and the existing hub tests' temp-dir setup.
+  - Searches: `struct *Deps`, `handle_control_conn` callers, `is_pane_method`/`PANE_METHODS` users, `-32601` in tests, `as _;` dev-dependency links, `compile_fail`/`IS_CLONE` probes, the `hj-c1r1`/`sample_pane`/`pane_json` fixtures. ADR-0003 and ADR-0006 contain no rule on control-socket error replies. Issue #669 was read with `gh issue view`. The sibling #670 diff touches only `holler-cli` and `Cargo.lock`, so it does not overlap this slice's hub code.
