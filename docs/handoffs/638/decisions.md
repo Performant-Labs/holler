@@ -67,3 +67,35 @@
 - **Assumed:** the CHANGELOG placement before the #670 entry is acceptable, since a literal placement would conflict with #639 on main.
 - **Hedged:** case 19 against the hub stays red until #661; not a defect of this slice.
 - **Evidence:** 20 repeated runs with 0 failures; three production-code breaks (no `usage` check, no delay sleep, non-consumed one-shot) each failed the named tests and were reverted; `cargo test --workspace` 1073 passed, 0 failed; `docs/handoffs/638/handoff-T-green.md`.
+
+## A (Phase 7, anti-duplication gate) -- 2026-10-09T11:55:17-06:00
+- **Decided:** PASS on 939d79c..8e38d8f, with 4 warns (see handoff-A-dup.md). No parallel path.
+  - **Extended:** the crate, `PaneStore`, `next_generation` (two call sites, no other generation arithmetic), the closed `PaneError` set and `ProfileName::slug`.
+  - **New and single:** `FaultSwitch` and the feed.
+  - **W-3 holds:** one `put`/`remove` path; every cursor comes from `Log::append`; `seeded` and `concurrent_*` bypass the faults and the call log.
+  - **W-4 holds:** everything generic about the watch is in `feed.rs`, over `Change`.
+  - **The brief's check holds:** the cases share `expect_code` and `drain`.
+  - **Warns:**
+    - (1) Move `increasing` to `conformance/mod.rs` before #682 starts, and decide in #682 whether its profile watch cases copy or share cases 14 to 18.
+    - (2) A third drain-to-idle helper (a test copy here and the hub's on main); a public `conformance::drain` would fold them.
+    - (3) The fake's private `check_membership` makes the other half of the check that the hub's public `check_membership` makes; rename it.
+    - (4) The `usage` rule now exists in the hub and in the testkit; if O makes it a port rule, use the `generation.rs` pattern.
+- **Assumed:**
+  - Brief decision 1 binds #682: it never edits `conformance/mod.rs`. That is why finding 1 matters now.
+  - The hub on `origin/main` (`3f9fbf2`) is what the suite will later run against.
+- **Hedged:**
+  - All four findings are warns. Finding 1 is a forward copy that #682's scope would force, not one in this diff. Findings 2 and 4 are near-copies the brief justified in writing. Finding 3 is a name.
+  - The Phase 3 W-1 issue edits (#681 to #684) remain for the run's agent or the operator.
+- **Evidence:**
+  - **Read in full:** every changed file (`git diff 939d79c 8e38d8f`).
+  - **Hub on `origin/main`:** `panes/{mod,feed}.rs`, `profile/mod.rs`, `tests/pane_support/mod.rs`; ADR-0021 lines 538-551.
+  - **Ports:** `holler-pane` `ports.rs`, `profile.rs:255-420`, `error.rs` (`PaneCode` is `pub(crate)`), `generation.rs:1-16`.
+  - **Issues:** #681 to #684 (their blast radii).
+  - **Greps:**
+    - arithmetic and `next_generation` call sites, and feed terms by file;
+    - lock helpers across the workspace;
+    - `fn drain` and fault mechanisms across the workspace;
+    - code literals in tests: 27 uses, against 0 `PaneCode::` uses;
+    - the overlay's Phase 7 candidates (none hit);
+    - personal names in the diff (only the test that asserts their absence).
+  - **Merge:** `git merge-tree HEAD origin/main` completes with no conflicts.
