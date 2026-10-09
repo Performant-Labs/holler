@@ -52,3 +52,30 @@
   - Source read: `holler-pane/src/{ports,pane}.rs`, `holler-proto/src/vocab.rs`, `holler-pane-testkit/src/{host.rs,conformance/host.rs}` and `holler-adapter-herdr/{Cargo.toml,src/lib.rs}`.
   - Docs and other sources: ADR-0021 §1 to §3 and its import table, issues #641 and #644, the epic, `scripts/lint.sh`, `docs/testing.md` and the CI matrix.
   - Probes: three scripts on tmux 3.7c, each on a private relative-socket server in the session scratchpad, with `TMUX` and `TMUX_PANE` unset. Each killed its server and removed its directory, and a process check afterwards found no probe server left.
+
+## A (Phase 3, up-front plan review, round 3) — 2026-10-09T17:35:41-06:00
+- **Decided:** BLOCK on docs/handoffs/641-brief.md at 95e2260, with 1 new block and 4 warns (handoff-A.md, round 3). Every round-2 finding is applied as asked. This is the third Phase 3 BLOCK, so the escalation to the operator applies.
+  - **B-6.** `run`'s `-c '#{session_path}'` works only while the session's directory is absolute and exists.
+    - tmux keeps a relative `-c` verbatim and resolves it again against each later client's cwd.
+    - tmux falls back to `$HOME` when the directory is missing, as with a removed worktree.
+
+    In both cases `run` is `Ok`. The fix has two parts:
+    - `ensure_session` creates only with an absolute existing directory;
+    - `run` first reads `list-panes -t =NAME: -F '#{session_path}'` and refuses (`unavailable`) unless it is an absolute existing directory. The read replaces `run`'s `has-session`.
+  - **Warns.**
+    - W-14: a TERM-ignoring group member outlives its leader, so escalate by group, not by pane, or document it.
+    - W-15: range-check pids read from tmux (`2..=i32::MAX`) before they reach `kill`.
+    - W-16: AC 6e's "no bare name" contradicts `new-session -s`.
+    - W-17: shared test helpers go in `tests/common/mod.rs`, as the neighbors do.
+- **Assumed:** only tmux 3.7c and procps-ng 4.0.4 were probed. util-linux `kill` was not run here: its `kill -9 -1` behaviour is from its own man page, and the `kill(2)` meanings of `0` and `-1` are from the system call's documentation.
+- **Hedged:**
+  - I graded B-6 a block, not a warn, on the grounds round 2 used for B-5. The brief fixes the exact vector, the failure is silent (`Ok`, and a coding agent works in the wrong directory), no AC or suite case covers it, and the inputs are realistic: `--project` is a plain string that nothing canonicalizes, and worktrees are removed routinely.
+  - Part (b) could in principle be documented instead. But no port call lets a consumer read or end a session, so documentation would leave #644 with no defense.
+  - W-14 is a warn because it is the conservative failure (a process left running), not a signal to a stranger.
+  - W-15 is a warn because a real tmux never prints such a pid.
+- **Evidence:**
+  - Read the brief as amended (the full diff 81b0ddd..95e2260), the round-2 handoff, this journal, and the outside-model results r1 and r2 (both PASS, deepseek-v4-pro).
+  - Read issue #641 and ADR-0021 §1 to §5, §12 and §13.
+  - Source read: `holler-pane/src/{ports,argv,probe}.rs`, `error.rs:395-480`, `pane.rs:105-111`; `holler-pane-testkit/src/host.rs`; `holler-cli/src/pane/args.rs`; `holler-adapter-herdr/{Cargo.toml,src/lib.rs,tests/common/mod.rs}`; the workspace `Cargo.toml` lints and edition; `clippy.toml`; `scripts/lint.sh`; the tester overlay.
+  - `grep` checks: no bounded subprocess runner in any production crate; the existing `kill` calls are test-only `libc::kill`; remote `main` is unchanged at 3bdd129; no tracked file holds the issue title's host name; the outside-model prompt and result files are git-ignored.
+  - Probes: three scripts (PR1 to PR7) on private relative-socket servers in the session scratchpad, with `TMUX` and `TMUX_PANE` unset. The only real signal was one TERM to the probe's own pane group; every other `kill` call used signal 0. Each script killed its server and removed its directory, and a process check afterwards found none left.
