@@ -20,6 +20,17 @@ fills this file in at release time.
   `pane/*` and `profile/*` method names, outside the closed 22-row wire catalog, so protocol v2 and
   every golden file are unchanged. Types and traits only: no CLI, hub or adapter behaviour yet
   ([#637](https://github.com/Performant-Labs/holler/issues/637)).
+- Pane control, slice b of the skeleton (epic [#633](https://github.com/Performant-Labs/holler/issues/633)):
+  the hub's control socket now forwards the `pane/*` and `profile/*` methods to new `panes` and `profile`
+  modules instead of answering `method_not_found`. Both are stubs: every one of those methods answers a
+  `PaneReply` with the code `not-implemented`, as a JSON-RPC result and not a JSON-RPC error (the pane codes do
+  not fit the closed wire code table). The hub builds the state of the two registries once, before it accepts a
+  connection, and every control connection shares the one copy, so the stories that fill them add no
+  forwarding, state-handle or manifest code of their own. A plain `check_membership` hook (it accepts every
+  pane for now) and a `profile/rename` stub of its own are in place for them as well. Nothing else changes: an unknown
+  method still answers `method_not_found`, the `control/*` methods behave as before, and the closed 22-row wire
+  catalog and every golden file are unchanged. Plumbing only: no registry, persistence, CLI verb or adapter
+  yet ([#669](https://github.com/Performant-Labs/holler/issues/669)).
 
 ## [0.4.0] - 2026-09-29
 
