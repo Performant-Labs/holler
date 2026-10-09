@@ -52,7 +52,20 @@ completion against the configured endpoint; a model that is listed is not a mode
 ### Models and roles (resolved, never hardcoded here)
 
 - Models per phase come from `bash $WORKFLOW_ROOT/workflow/review-models.sh resolve --project . --json`
-  (a repo-local `.env`, gitignored, can override tiers). Pass its output as the workflow's `models` argument.
+  (a repo-local `.env`, gitignored, can override tiers). Pass its output as the workflow's `models` argument,
+  and each phase letter's effort as `effort` (next bullet).
+- Effort comes from the same output: for each phase letter (O, D, A, T, F, U, S), the `effort` value of its
+  `phases[]` entries; a letter with none is left out of `effort`, never `null`. The driver reads effort only from
+  this argument (without it F runs at `max` and every other phase at the session default), so the efforts set in
+  `.env` reach a run only if the call passes them.
+- **Holler's stage-model table** (a fresh clone or a new account has no `.env`, so set it once; it rewrites only the
+  managed block of `.env`): every phase on Opus, with efforts O `max`, D `high`, A `max`, T `high`, F `max`, U `medium`,
+  S `max`:
+
+  ```bash
+  bash $WORKFLOW_ROOT/workflow/review-models.sh --tier reasoning=opus --tier throughput=opus \
+    --effort O=max --effort D=high --effort A=max --effort T=high --effort F=max --effort U=medium --effort S=max
+  ```
 - `.claude/agents/*.md` are **generated and gitignored**: they are copies of the playbook's role templates
   (which are private), so they are regenerated in each clone and worktree and never committed. Never hand-edit
   them. Project-specific role content lives in
@@ -83,7 +96,8 @@ Workflow({
   scriptPath: '$WORKFLOW_ROOT/workflow/coding-pipeline.workflow.mjs',
   args: { argsVersion: 1, repoPath: '<absolute worktree path>', issueNumber: N,
           briefPath: 'docs/handoffs/N-brief.md', uiSurface: false, rigor: 'in-session',
-          models: { /* review-models.sh resolve */ }, roles: { /* content of .claude/agents/*.md */ } },
+          models: { /* review-models.sh resolve */ },
+          effort: { /* review-models.sh resolve: one level per letter that has one */ }, roles: { /* content of .claude/agents/*.md */ } },
 })
 ```
 
