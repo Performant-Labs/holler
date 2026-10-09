@@ -1,17 +1,23 @@
 #![allow(dead_code)] // #639 (not every test binary uses every helper)
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)] // #639
-//! Shared helpers of the pane tests (issue #639): the one sample pane, a throwaway state
-//! dir, the short store options, and the parse-back of a `pane/*` reply line.
+//! Shared helpers of the pane and profile tests (issues #639, #661): the one sample pane,
+//! a throwaway state dir, the short store options, the parse-back of a `pane/*` or
+//! `profile/*` reply line, and the profile registry's loader and sample profile.
 //!
-//! Included with `mod pane_support;` by `pane_registry_test.rs`, `pane_handlers_test.rs`
-//! and `pane_dispatch_test.rs`.
+//! Included with `mod pane_support;` by `pane_registry_test.rs`, `pane_feed_test.rs`,
+//! `pane_handlers_test.rs`, `pane_dispatch_test.rs`, `pane_membership_test.rs`,
+//! `profile_registry_test.rs`, `profile_persistence_test.rs`, `profile_feed_test.rs` and
+//! `profile_handlers_test.rs`.
 
 use std::path::PathBuf;
 use std::time::Duration;
 
 use holler_hub::panes::{PaneState, PaneStoreOptions};
+use holler_hub::profile::ProfileState;
 use holler_hub::state::HubState;
-use holler_pane::{Cursor, Pane, PaneError, PaneEvent, PaneReply, PaneStore, Watch};
+use holler_pane::{
+    Actor, Cursor, Pane, PaneError, PaneReply, PaneStore, Profile, ProfileStore, Watch,
+};
 use serde_json::{json, Value};
 
 /// A fully populated pane named `name`, at generation 7, in `profile` when given.
@@ -75,8 +81,9 @@ pub fn create(store: &PaneState, name: &str) -> Pane {
     store.cas_put(&sample_pane(name, None), 0).unwrap()
 }
 
-/// Everything the iterator yields until it reports idle. Any error fails the test.
-pub fn drain(watch: &mut Watch<PaneEvent>) -> Vec<PaneEvent> {
+/// Everything the iterator yields until it reports idle. Any error fails the test. Works
+/// for a pane watch and a profile watch alike.
+pub fn drain<E: std::fmt::Debug>(watch: &mut Watch<E>) -> Vec<E> {
     let mut events = Vec::new();
     loop {
         match watch.next() {
@@ -87,19 +94,30 @@ pub fn drain(watch: &mut Watch<PaneEvent>) -> Vec<PaneEvent> {
     }
 }
 
-/// The head cursor of the feed, found through the public port alone: `watch(n)` is
-/// accepted exactly when `n <= head` (a cursor ahead of the store is `usage`).
-pub fn head(store: &PaneState) -> Cursor {
+/// The head cursor of a feed, found through the public port alone: `opens(n)` is the
+/// registry's `watch(n)` reduced to its verdict, and a watch is accepted exactly when
+/// `n <= head` (a cursor ahead of the store is `usage`).
+pub fn head_by<T>(opens: impl Fn(Cursor) -> Result<T, PaneError>) -> Cursor {
     let (mut lo, mut hi) = (0_u64, 1_u64 << 24);
     while lo < hi {
         let mid = lo + (hi - lo).div_ceil(2);
-        match store.watch(Cursor(mid)) {
+        match opens(Cursor(mid)) {
             Ok(_) => lo = mid,
             Err(PaneError::Usage { .. }) => hi = mid - 1,
             Err(other) => panic!("watch({mid}) failed unexpectedly: {other}"),
         }
     }
     Cursor(lo)
+}
+
+/// The head cursor of the pane feed.
+pub fn head(store: &PaneState) -> Cursor {
+    head_by(|c| store.watch(c))
+}
+
+/// The head cursor of the profile feed.
+pub fn profile_head(store: &ProfileState) -> Cursor {
+    head_by(|c| store.watch(c))
 }
 
 /// The names in `dir`, sorted: used to prove a refused write created or moved nothing.
@@ -133,4 +151,47 @@ pub fn outcome(line: &str, method: &str) -> Result<Option<Value>, PaneError> {
     let reply: Value = serde_json::from_str(line)
         .unwrap_or_else(|e| panic!("the reply to {method} is not JSON ({e}): {line:?}"));
     pane_outcome(&reply, method)
+}
+
+// --- The profile registry (#661) -------------------------------------------------------
+
+/// Load the profile registry of `state` with the short options.
+pub fn load_profiles(state: &HubState) -> ProfileState {
+    ProfileState::load_with(state, short_opts())
+}
+
+/// `<root>/hub/profiles.json`.
+pub fn profiles_file(state: &HubState) -> PathBuf {
+    state.hub_dir.join("profiles.json")
+}
+
+/// The actor of a write the test does not care about.
+pub fn actor() -> Actor {
+    Actor::parse("t661").unwrap()
+}
+
+/// A valid profile named `name` with one sample spec per entry of `panes`, at
+/// generation 0 (the testkit's fixture).
+pub fn profile(name: &str, panes: &[&str]) -> Profile {
+    holler_pane_testkit::fixture::sample_profile(name, panes).unwrap()
+}
+
+/// Create the profile `name` (one spec, for the pane `hj-c1r1`) at generation 1.
+pub fn create_profile(store: &ProfileState, name: &str) -> Profile {
+    store
+        .cas_put(&profile(name, &["hj-c1r1"]), 0, &actor())
+        .unwrap()
+}
+
+/// `profiles.json` parsed as JSON.
+pub fn profiles_doc(state: &HubState) -> Value {
+    serde_json::from_slice(&std::fs::read(profiles_file(state)).unwrap()).unwrap()
+}
+
+/// Write `doc` as `profiles.json` (creating the hub dir) and return the bytes written.
+pub fn write_profiles_doc(state: &HubState, doc: &Value) -> Vec<u8> {
+    std::fs::create_dir_all(&state.hub_dir).unwrap();
+    let bytes = serde_json::to_vec_pretty(doc).unwrap();
+    std::fs::write(profiles_file(state), &bytes).unwrap();
+    bytes
 }
