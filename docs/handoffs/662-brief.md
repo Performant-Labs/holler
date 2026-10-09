@@ -2,6 +2,8 @@
 
 Repo: Performant-Labs/holler. Issue: #662 (epic #633, wave 3). Rigor: second-opinion. UI surface: no. Kind: feature.
 
+**THIS RUN IS 662a ONLY (decided by the MO, 2026-10-09).** Implement only the criteria tagged (a) and the 662a row of the Size check; 662b (`create`, `delete`) is a later run on the same branch name, started from `origin/main` after 662a merges. The PR says `Part of #662`, not `Closes #662`; the issue closes with 662b. Where this brief says "unless the MO keeps one run", the MO has decided: split.
+
 **Branch:** `issue-662-implementation` (worktree `.claude/worktrees/0662-profile-verbs`, from `origin/main` at `3bdd129`).
 **Review-rigor:** second-opinion, set by the operator through the MO (2026-10-09; the outside model is deepseek-v4-pro). The
 issue's own Pipeline line says `rigor: in-session`; the MO's instruction raises it (see "Contradictions found", C1).
