@@ -16,6 +16,11 @@ and no earlier decision is reversed: B-1 and B-2 in Decision 13, AC 6d, 6g, 11 a
 AC 6h; W-1 in Decisions 6, 7, 12; W-2 in Decisions 7, 8 and AC 6c, 6g; W-3 in Decision 3 and AC 6i; W-4 in AC 7; W-5 in
 AC 8 and the Test plan; W-6 in Decision 15 and the forward-compat table; W-7 in the Reuse map and Follow-ups; W-8 in
 Decisions 3, 4, 15 and AC 6h; W-9 in the note below and AC 10.
+**Amended again 2026-10-09 after A's round-2 BLOCK** (`handoff-A.md` round 2, 2 BLOCK + 4 WARN), applying its Notes for O
+items 1-8; additions only, no decision reversed: B-4 in Decisions 4, 5, 10, AC 6e, new AC 12, Risks and Evidence; B-5 in
+Decisions 3, 15, AC 6d, 11, new AC 13, the #644 row and Evidence; W-10 in Decision 4 and AC 6h; W-11 in Decisions 4, 15
+and AC 6h; W-12 in Decisions 4, 9 and AC 6f, 6h; W-13 in Decision 15 and the #644 row. O re-ran every round-2 probe
+(Evidence, "round 2").
 **Public repository (W-9):** the issue's title ends with a personal host name. It stays out of the CHANGELOG entry, the PR
 title and body, commit messages, rustdoc, test names and test data.
 
@@ -169,6 +174,7 @@ tmux behaviour this design relies on, observed by O on tmux 3.7c against a priva
 has-session -t demo            (session "demo-c1r1" exists)  -> exit 0      PREFIX MATCH: the bare target is unsafe
 has-session -t =demo                                         -> "can't find session: demo", exit 1
 list-panes -s -t =nope ...     (server up, no such session)  -> "can't find window: nope", exit 1
+                               (a WINDOW lookup: without ":" the target is not an exact session; see round 2, B-4)
 new-window -t =nope: -- ...                                  -> "can't find session: nope", exit 1
 has-session / list-panes, no server ever started             -> "error connecting to <sock> (No such file or directory)", exit 1
 list-panes after kill-server (stale socket file)             -> "no server running on <sock>", exit 1
@@ -204,6 +210,77 @@ set-option -w -t @2 @holler-pid N \; set-option -w -t @2 remain-on-exit off   (o
 global remain-on-exit on; kill -s TERM -- -<pid>
                                     -> a window without its own remain-on-exit stays listed with pane_dead=1;
                                        the window with remain-on-exit off is gone (O)
+```
+
+Added after the plan review, round 2: A's probes (handoff-A.md round 2, P1-P7, Q1-Q5, R1-R2), re-run by O with the
+transcript below (A's P1 is P2's shape with a shorter prefix; A's Q1-Q4 checks of `has-session -t =NAME`, `new-window -t
+=NAME:` and `list-panes -t =NAME:` are the second to fourth commands of P2 and P4). Setup (reproducible): tmux 3.7c, procps-ng 4.0.4; `unset TMUX TMUX_PANE`; `D=$(mktemp -d
+/tmp/hlr-o641-XXXXXX)`; every call is `tmux -S $D/s -f /dev/null ...`; dirs `$D/A`, `$D/B`, `$D/C`; the probing shell's
+cwd is `$D/C`; an exit trap ran `kill-server` and `rm -rf $D`. `<dir>` is `$D`, `<pid>` a pid tmux printed. Output verbatim:
+```
+## P2 prefix: only demo-c1r10 exists (new-session -d -s demo-c1r10 -c $D/A)
+$ tmux list-panes -s -t =demo-c1r1 -F #{session_name} #{pane_dead}
+demo-c1r10 0                                     -> exit 0   (the WRONG session: prefix match)
+$ tmux list-panes -s -t =demo-c1r1: -F #{session_name} #{pane_dead}
+can't find session: demo-c1r1                    -> exit 1
+$ tmux has-session -t =demo-c1r1
+can't find session: demo-c1r1                    -> exit 1
+$ tmux new-window -d -t =demo-c1r1: -- env -- true
+can't find session: demo-c1r1                    -> exit 1
+## P3 digits: session 1 (made first), then the newest session zz with windows 0 and 1
+$ tmux list-panes -s -t =1 -F #{session_name}:#{window_index}
+zz:0
+zz:1                                             -> exit 0   (window index 1 of the current session)
+$ tmux list-panes -s -t =1: -F #{session_name}:#{window_index}
+1:0                                              -> exit 0
+## P4 window name: no session demo-c2r1; new-window -d -n demo-c2r1 -t =zz:
+$ tmux list-panes -s -t =demo-c2r1 -F #{session_name}:#{window_name}
+zz:tmux
+zz:tmux
+zz:demo-c2r1                                     -> exit 0   (the window named demo-c2r1 in zz)
+$ tmux list-panes -s -t =demo-c2r1: -F #{session_name}:#{window_name}
+can't find session: demo-c2r1                    -> exit 1
+$ tmux has-session -t =demo-c2r1
+can't find session: demo-c2r1                    -> exit 1
+$ tmux new-window -d -t =demo-c2r1: -- env -- true
+can't find session: demo-c2r1                    -> exit 1
+## Q5 list-panes -s -t =demo-c1r10: -F '[#{pane_pid} #{pane_dead} #{@holler-pid}]', after one run + tag
+[<pid> 0 ]                                       (the untagged shell pane: the tag field is EMPTY)
+[<pid> 0 <pid>]
+## P5 cwd: session made in <dir>/A, client cwd <dir>/C; new-window -d -P -F '#{pane_pid}' [-c ...] -t =demo-c1r10: -- env -- sleep 30
+no -c:                   cwd <dir>/C             (readlink /proc/<pid>/cwd: the CLIENT's cwd)
+-c '#{session_path}':    cwd <dir>/A
+## P6 sessions made with -c "$D/p##S" and -c "$D/##(touch $D/ran2)"; then run with -c '#{session_path}'; sleep 1
+demo-c3r1 session_path: <dir>/p#S
+demo-c3r1 run cwd:      <dir>/p#S
+demo-c4r1 session_path: <dir>/#(touch <dir>/ran2)
+demo-c4r1 run cwd:      <dir>/#(touch <dir>/ran2)
+ran2 does not exist                              (#{session_path} is expanded once, not again)
+## R2 set-option -g remain-on-exit on; new-window ... -- env -- true; sleep 0.5; the tag invocation of Decision 3
+tag exit 0
+[<pid> 1 <pid>]                                  (list-panes -t <window_id>: a DEAD pane, still tagged)
+/usr/bin/kill: (<pid>): No such process          (kill -s 0 -- <pid>: the pid is free for reuse)
+## P7 LC_ALL=C /usr/bin/kill -s 0 -- -<pgid of a reaped child>
+/usr/bin/kill: (-<pgid>): No such process        -> exit 1
+## R1 kill-server; HLR_PROBE_VAR=from-first-client tmux ... new-session -d -s demo-c1r1;
+##    then a client WITHOUT the variable: new-window -- sh -c 'printf "%s\n" "${HLR_PROBE_VAR-unset}" > "$0"' $D/env.out
+pane printed: from-first-client                  (a tmux client's environment reaches every later pane)
+```
+Afterwards no `/tmp/hlr-o641-*` dir and no probe server was left.
+
+Why a prefix or an all-digit pane name is legal (so `hj-c1r1` beside `hj-c1r10`, or a session `1`, can exist):
+```
+crates/holler-proto/src/vocab.rs:24        pub const MAX_SEGMENT_LEN: usize = 32;
+crates/holler-proto/src/vocab.rs:212-223   for &c in seg { if !(is_word(c) || c == b'-') { return Err(NameError::BadCharacter); } }
+                                           ... fn is_word(b: u8) -> bool { matches!(b, b'0'..=b'9' | b'a'..=b'z') }
+docs/adr/ADR-0021.md:37                    ... It is also the tmux session name. Names such as `hj-c1r2` are names, not positions.
+```
+Why `run` must work in the session's directory (B-5):
+```
+crates/holler-pane/src/ports.rs:157        /// Make the tmux session `name` exist, working in `cwd`.
+docs/adr/ADR-0021.md:136                   | `--project DIR` | `host.cwd` |
+docs/adr/ADR-0021.md:483                   | the launcher's port and directory table | ... | `harness.port`, `host.cwd`, `command` ...
+epic #633 body                             host:    { cwd }                      // project directory or worktree
 ```
 
 ## Acceptance criteria
@@ -253,7 +330,8 @@ passes and says why.
      the argv and the cwd, `what` lacks it).
    - d. **Argv passed exactly, never through a shell:** `run(demo-c1r1, ["prog", "a b", "$(id);x", "-t"])` makes the fake
      record, as separate arguments and in this order, `-S <sock>` first, then `new-window -d -P -F #{pane_pid} #{window_id}
-     -t =demo-c1r1: -- env -- prog "a b" "$(id);x" -t`; a one-element argv `["prog"]` is also prefixed with `env --` (so tmux
+     -c #{session_path} -t =demo-c1r1: -- env -- prog "a b" "$(id);x" -t` (`-c` and the literal, unescaped `#{session_path}`
+     at exactly that position, B-5); a one-element argv `["prog"]` is also prefixed with `env --` (so tmux
      never sees a single argument, which it would give to a shell). The record shows one tmux call after it, `set-option -w
      -t <window_id> @holler-pid <pid> ; set-option -w -t <window_id> remain-on-exit off` (the `;` a separate element the
      adapter authors), with the pid and window id the fake printed. Precisely (B-2, outside review round 1; Decision 3): the
@@ -263,15 +341,18 @@ passes and says why.
      tells the K2-failing form, the tag chained onto `new-window` in one spawn, apart from the probed one). **Trailing `;` escaped (B-1, Decision 13):**
      `run(demo-c1r1, ["prog", "x;", "y\\;", ";", "kill-server"])` (Rust literals, so the third element is `y\;`) makes the
      fake record, after `env --`, these separate arguments in order: `prog`, `x\;`, `y\\;`, `\;`, `kill-server`.
-   - e. **Exact targets:** every recorded call that names the session uses `=demo-c1r1` (or `=demo-c1r1:`), never the bare
-     name (tmux prefix-matches a bare target). A case here that drives `stop_owned` with a tagged pane uses the fake `kill`.
+   - e. **Exact targets (B-4, Decision 10):** across `ensure_session`, `run` (both the plain and the `has-session` paths),
+     `ps` and `stop_owned` (its first listing and its polls), `has-session` records `-t =demo-c1r1`, and `new-window` and
+     every `list-panes` record `-t =demo-c1r1:`. No recorded call has the bare name, and no `new-window` or `list-panes` has
+     `=demo-c1r1` without the colon. A case here that drives `stop_owned` with a tagged pane uses the fake `kill`.
    - f. **Socket flags:** `TmuxSocket::Path(p)` puts `-S p` and `TmuxSocket::Name(n)` puts `-L n` before the subcommand;
      `TmuxSocket::Default` puts neither; a configured config file adds `-f <path>`. Every spawned tmux has `TMUX` and
      `TMUX_PANE` removed from its environment: the test re-runs its own test binary (`std::env::current_exe()`) as a child
      with `TMUX=/nonexistent,1,0` and `TMUX_PANE=%99` set on that child `Command` and a filter naming one helper test (which
-     returns at once unless a marker variable is set); the helper drives the adapter against the fake, the fake writes
-     `${TMUX-unset} ${TMUX_PANE-unset}` to a file, and the parent asserts the file reads `unset unset`. No `set_var`, no
-     `unsafe`.
+     returns at once unless a marker variable is set), and with `LC_ALL` removed from that child (`env_remove`); the helper
+     drives the adapter against the fake, the fake writes `${TMUX-unset} ${TMUX_PANE-unset} ${LC_ALL-unset}` to a file, and
+     the parent asserts the file reads `unset unset unset` (W-12: nothing is added to a tmux subprocess's environment). No
+     `set_var`, no `unsafe`.
    - g. **Bad input refused, values escaped (Decisions 6, 7, 13):**
      - `ensure_session` with a `cwd` that is not an existing directory asks `has-session -t =demo-c1r1` and nothing else:
        with the fake answering `can't find session: demo-c1r1` (exit 1) it is `usage`; with the fake answering exit 0 it is
@@ -282,12 +363,18 @@ passes and says why.
        exit 0, is `usage`; the calls file holds `has-session` and no `new-window`; the message names the rule and contains
        neither `HLR_SENTINEL_641` nor `s3cr3t` (W-2). With the fake answering `can't find session` it is `pane-not-found`.
    - h. **Stop by ownership, through the kill seam (Decision 4, B-3):** `with_stop_grace(200 ms)`, a fake tmux answering
-     `list-panes` call by call and a fake `kill`. The first listing holds three panes: `101` tagged `101`, `202` untagged,
-     `303` tagged `999`. The kill record holds `-s TERM -- -101` only; `202` and `303` are never signalled. Then:
+     `list-panes` call by call and a fake `kill` that also appends `${LC_ALL-unset}` to a separate env file per call.
+     The first listing holds four panes (format `<pane_pid> <pane_dead> <@holler-pid>`, an untagged pane's third field empty, Q5): `101 0 101`,
+     `202 0 ` (untagged), `303 0 999`, and `404 1 404` (tagged but dead, W-11). The kill record holds `-s TERM -- -101`
+     only; `202`, `303` and `404` are never signalled. Every line of the env file reads `C` (W-12). Then:
      - the listing still shows `101` live (`pane_dead` 0) after the grace: the kill record gains `-s KILL -- -101`, and
        `stop_owned` is `Ok` once a later listing lacks it;
      - a listing that shows `101` with `pane_dead` 1 counts as gone: `Ok`, no `KILL` (W-8);
-     - the fake `kill` answering `kill: (101) - No such process` (exit 1) counts as gone: `Ok`.
+     - the fake `kill` answering the procps-ng 4 text `/usr/bin/kill: (-101): No such process` (exit 1; Evidence round 2,
+       P7) counts as gone: `Ok`; any other `kill` stderr (exit 1) is `Unavailable`;
+     - **one shared grace (W-10):** two owned panes `101 0 101` and `505 0 505`, both still live after the grace: the kill
+       record holds both `TERM` entries before any `KILL`, then exactly one `-s KILL -- -101` and one `-s KILL -- -505`;
+       `stop_owned` is `Ok` once a later listing lacks both, within the grace plus 1 s.
    - i. **No untagged orphan (Decision 3, W-3):** the fake answers `new-window` with `4242 @7` and then fails `set-option`:
      with `can't find window: @7` (exit 1) `run` is `Ok` and the kill record is empty; with any other stderr (exit 1) `run`
      is `Unavailable` and the kill record holds `-s KILL -- -4242`. A malformed `new-window` answer (`abc @7`, `4242 7`,
@@ -298,7 +385,7 @@ passes and says why.
    `crates/holler-hub/tests/logging_guard_test.rs` and `crates/holler-cli/tests/hold_single_path_test.rs` do (W-4). The scope
    is production source only (`src/`); the fake tmux and fake `kill` scripts stay under `tests/` and never move into `src/`
    (outside review round 1, W-4). Signals
-   go only to a process group whose leader pid tmux reports for a window the adapter tagged (Decisions 3, 4), or to the pid
+   go only to a process group whose leader pid tmux reports for a live window the adapter tagged (Decisions 3, 4), or to the pid
    `run` just started when tagging it failed (Decision 3).
 8. **Quality gates** (the tester overlay's Tier 1, as CI runs them, W-5): `bash scripts/lint.sh` (every `#[allow]` and
    `#![allow]`, test files included, carries a trailing `// #641`; no file at 900 lines), `bash scripts/changelog-check.sh`,
@@ -323,6 +410,21 @@ passes and says why.
     - `ensure_session` is called with `<dir>/p#S` (session `demo-c1r1`) and with `<dir>/#(touch <dir>/ran)` (session
       `demo-c2r1`), both made first with `create_dir_all`. Each session's `#{session_path}` equals its cwd exactly, and
       `<dir>/ran` does not exist after a bounded wait (poll for 1 s).
+    - Each of those two sessions then gets a `run` of `["sh", "-c", "pwd -P > \"$0\"", <out file>]` (B-5); each output file
+      holds exactly `fs::canonicalize` of that session's cwd (plus the newline), and `<dir>/ran` still does not exist.
+12. **Targets are exact (real tmux, ignored; B-4):** `targets_are_exact`, built through the AC 9 helper:
+    - ensure `demo-c1r10` and `run` `sleep 30` in it (pid P). With no session `demo-c1r1`: `ps(demo-c1r1)` is
+      `PaneNotFound`, `stop_owned(demo-c1r1)` is `Ok`, and P is still in `ps(demo-c1r10)` and alive (`kill -0` with the
+      `kill` binary);
+    - then ensure `demo-c2r1`, so it is the newest session, and give it a window named `demo-c1r1` with `tmux -S <sock>
+      new-window -d -n demo-c1r1 -t =demo-c2r1:`. `ps(demo-c1r1)` is still `PaneNotFound`, `stop_owned(demo-c1r1)` is still
+      `Ok`, and P is still alive.
+    - The all-digit case (P3) would need a session name outside `demo-*`, which AC 9 forbids; the same colon closes it
+      (Evidence round 2, P3) and AC 6e's pin covers it.
+13. **`run` works in the session's cwd (real tmux, ignored; B-5):** `run_works_in_the_session_cwd`, built through the AC 9
+    helper, calls `ensure_session(demo-c1r1, <dir>/A)`, where `<dir>/A` (made with `create_dir_all`) is not the test
+    process's cwd (asserted). Then `run(demo-c1r1, ["sh", "-c", "pwd -P > \"$0\"", "<dir>/cwd.out"])`; after a bounded wait
+    (poll for 1 s) `<dir>/cwd.out` holds exactly `fs::canonicalize(<dir>/A)` plus the newline.
 
 ## Files
 
@@ -341,16 +443,18 @@ Production (crate `crates/holler-adapter-host/`):
   Missing / WindowGone / Other.
 
 Tests:
-- `tests/fake_tmux_test.rs` (new, ~490 lines): AC 6 (a-i) and AC 7, default run; the fake tmux (with its numbered answer
+- `tests/fake_tmux_test.rs` (new, ~505 lines): AC 6 (a-i) and AC 7, default run; the fake tmux (with its numbered answer
   queue) and the fake `kill` live in this file.
-- `tests/real_tmux_test.rs` (new, ~305 lines): AC 1-5, AC 11 and the AC 9 helper, all `#[ignore]`.
+- `tests/real_tmux_test.rs` (new, ~385 lines): AC 1-5, AC 11-13 and the AC 9 helper, all `#[ignore]`.
 
 Outside the crate (mechanical): `CHANGELOG.md` (AC 10) and `Cargo.lock` (the new path deps).
 
 **Size estimate (amended):** ~660 production lines, ~795 test lines, ~1,455 in all, up ~+255 from the first brief (~+80
 production: the escape, `with_kill_binary`, the cwd fallback, the tag cleanup, strict parsing, the docs; ~+175 tests:
-AC 6d/6g extensions, 6h, 6i, the answer queue and fake `kill`, AC 11). Still six crate files plus two mechanical ones, no new
-file, the largest (`fake_tmux_test.rs`) ~490 lines, well under 900. One component family (one crate behind one trait), at
+AC 6d/6g extensions, 6h, 6i, the answer queue and fake `kill`, AC 11). Round 2 adds ~10 production lines (the colon targets,
+`-c '#{session_path}'`, the shared grace, `LC_ALL=C` on `kill`) and ~95 test lines (AC 6e/6f/6h extensions, AC 11's cwd
+check, AC 12, AC 13): ~670 production, ~890 tests, **~1,560 in all**. Still six crate files plus two mechanical ones, no new
+file, the largest (`fake_tmux_test.rs`) ~505 lines, well under 900. One component family (one crate behind one trait), at
 F's ~6-file cap and not over it: **fits one run**, no split. If F finds the fake-tmux helpers push `fake_tmux_test.rs` past
 ~800 lines, the fallback is a seventh file, `tests/support/fake.rs`, still one family; F journals it rather than splitting
 the story.
@@ -382,8 +486,11 @@ changes; nothing depends on `holler-adapter-host` yet, so no existing test can b
    spawns gets the time remaining; on expiry the child is killed and reaped and the method returns `Timeout { op:
    "host.<method>" }`. A hung call is reported, not waited on. The one exception is the cleanup `kill` of Decision 3, which
    gets at least 250 ms.
-3. **Ownership = what `run` started, by recorded pid.** `run` executes `new-window -d -P -F '#{pane_pid} #{window_id}' -t
-   =NAME: -- env -- <argv...>` (each element escaped, Decision 13), parses its output strictly (`<u32> @<digits>`, else
+3. **Ownership = what `run` started, by recorded pid.** `run` executes `new-window -d -P -F '#{pane_pid} #{window_id}' -c
+   '#{session_path}' -t =NAME: -- env -- <argv...>` (each element escaped, Decision 13). `-c '#{session_path}'` is a
+   constant format the adapter authors (Decision 13: not escaped). tmux expands it once, against the target session, and
+   does not expand the result again (P6). Without it, the program works in the tmux client's cwd, which is the CLI's or the
+   hub's, not `host.cwd` (P5; B-5). `run` parses its output strictly (`<u32> @<digits>`, else
    `unavailable` with no further call), then runs one tmux invocation `set-option -w -t <window_id> @holler-pid <pid> ;
    set-option -w -t <window_id> remain-on-exit off` (the `;` is its own element, authored by the adapter; both values are
    literal; probed, see Evidence). The two invocations stay separate: chaining the tag onto `new-window` tagged nothing (K2).
@@ -403,14 +510,24 @@ changes; nothing depends on `holler-adapter-host` yet, so no existing test can b
    `stop_owned` could never stop is left behind and #644's rollback and retry do not start a second copy (W-3). That cleanup
    `kill` gets the time remaining or 250 ms, whichever is longer, so a method may overrun its timeout by at most 250 ms
    (inside AC 6a's 1 s slack).
-4. **How it stops.** `stop_owned` lists `#{pane_pid} #{pane_dead} #{@holler-pid}` for the session. For each owned pid: `kill -s
-   TERM -- -<pid>` (the pane child is a session and group leader, PGID == pid, so its children go too); poll `list-panes`
-   every 50 ms until the pane is gone or the grace ends; then `kill -s KILL -- -<pid>`; poll until gone or the deadline
-   (`Timeout`). A pane counts as **gone** when it is no longer listed **or** is listed with `pane_dead` 1 (W-8: an operator's
-   `remain-on-exit on` must not make every stop wait out the grace). `kill` reporting "No such process" counts as gone. The
-   `kill` binary (Decision 1's `with_kill_binary`) is used instead of `libc::kill` so the crate stays free of `unsafe` and of
-   new dependencies. Nothing matches by name.
-5. **`ps`** = `list-panes -s -t =NAME -F '#{pane_pid} #{pane_dead}'`: the leader pid of every live pane of the session
+4. **How it stops.** `stop_owned` lists `list-panes -s -t =NAME: -F '#{pane_pid} #{pane_dead} #{@holler-pid}'` (B-4: the
+   colon; every poll below uses the same target; an untagged pane's third field is empty, Q5). A pane is **owned** when its
+   `@holler-pid` equals its `pane_pid` **and** `pane_dead` is 0. A tagged pane listed with `pane_dead` 1 is not owned and is
+   never signalled: its pid may already belong to another process (W-11, R2). The stop runs in two phases inside Decision
+   2's one deadline (W-10), never one cycle per pid:
+   - send `kill -s TERM -- -<pid>` to **every** owned group first (the pane child is a session and group leader, PGID ==
+     pid, so its children go too);
+   - poll `list-panes` every 50 ms until every one is gone or the **one shared** grace ends;
+   - send `kill -s KILL -- -<pid>` to every survivor, then poll until all are gone or the deadline passes (`Timeout`).
+
+   A pane counts as **gone** when it is no longer listed **or** is listed with `pane_dead` 1 (W-8: an operator's
+   `remain-on-exit on` must not make every stop wait out the grace). `kill` is spawned with `LC_ALL=C` (procps-ng `kill`
+   is localized; tmux's messages are not) and only its stderr containing `No such process` counts as gone (the procps-ng 4
+   text is `/usr/bin/kill: (-<pgid>): No such process`, P7); any other `kill` failure is `unavailable` (W-12). The `kill`
+   binary (Decision 1's `with_kill_binary`) is used instead of `libc::kill` so the crate stays free of `unsafe` and of new
+   dependencies. Nothing matches by name.
+5. **`ps`** = `list-panes -s -t =NAME: -F '#{pane_pid} #{pane_dead}'` (B-4: the colon makes the session target exact;
+   P2-P4): the leader pid of every live pane of the session
    (the shell included; descendants not listed), as the port fixes no order. Untagged panes count: `ps` reports what runs
    there; `stop_owned` decides what to stop.
 6. **`ensure_session`.** With a `cwd` that is an existing directory (checked on the unescaped value): `new-session -d -s NAME
@@ -431,9 +548,17 @@ changes; nothing depends on `holler-adapter-host` yet, so no existing test can b
    element or the cwd (W-2).
 9. **Environment.** Every spawned `tmux` has `TMUX` and `TMUX_PANE` removed, so a hub or test running inside a tmux pane never
    addresses that pane's server by inheritance; only the configured socket is used (with `TmuxSocket::Default` that means
-   tmux's own default socket, never `$TMUX`'s). AC 6f checks it with a re-executed child test, not `set_var`.
-10. **Exact targets.** Every session target is `=NAME` or `=NAME:` (tmux prefix-matches a bare name: `has-session -t demo`
-    succeeded for `demo-c1r1`). Pane names are `[a-z0-9-]` (ADR 0005), so no further escaping of names is needed (values
+   tmux's own default socket, never `$TMUX`'s). AC 6f checks it with a re-executed child test, not `set_var`. **No variable
+   is ever added to a tmux subprocess's environment** (W-12): a tmux client's environment reaches every pane started later
+   (R1), so removing `TMUX` and `TMUX_PANE` stays the only change. In particular `LC_ALL` is never set on tmux; only the
+   `kill` subprocess gets `LC_ALL=C` (Decision 4).
+10. **Exact targets (B-4).** Every target that names the session is exact, in one of two forms set by the command's target
+    type. `has-session` takes `-t =NAME` (a session target). Every other command takes `-t =NAME:`: `new-window`, every
+    `list-panes` (in `ps` and in `stop_owned`'s listings and polls), and any command added later. A `=NAME` without the
+    colon, given to a window or pane target, is not exact: tmux tries a window index, then a window name in the current
+    session, then the session with prefix matching (Evidence round 2, P2-P4). A bare name is never used (tmux
+    prefix-matches it: `has-session -t demo` succeeded for `demo-c1r1`). Pane names are `[a-z0-9-]` (ADR 0005), so no
+    further escaping of names is needed (values
     the adapter did not author are escaped per Decision 13).
 11. **Tests, not CI.** Real-tmux tests are `#[ignore]` per the issue and are run by T-green and S with `-- --ignored` on a
     machine that has tmux (the pipeline host has 3.7c). Adding them to CI needs an edit to `.github/workflows/ci.yml`, outside
@@ -454,7 +579,8 @@ changes; nothing depends on `holler-adapter-host` yet, so no existing test can b
       `""` pass through literally).
     - The cwd first has every `#` doubled (`##` is a literal `#`), then gets the same escape. Decision 6's directory check
       runs on the unescaped value.
-    - Constant formats the adapter writes (`-F '#{pane_pid} #{window_id}'`, the list-panes format) and the `;` it authors
+    - Constant formats the adapter writes (`-F '#{pane_pid} #{window_id}'`, `run`'s `-c '#{session_path}'`, the list-panes
+      formats) and the `;` it authors
       between its own commands (Decision 3) are not escaped.
     - Values read back from tmux and reused in a command (the pid and the window id) are parsed and validated first: the pid
       as `u32`, the window id as `@` followed by one or more digits.
@@ -471,12 +597,21 @@ changes; nothing depends on `holler-adapter-host` yet, so no existing test can b
       the first relaunch of an imported pane).
     - tmux defaults the design assumes: `exit-unattached off` (else a server that `new-session -d` just started ends at
       once), `exit-empty` irrelevant while a session exists, and `remain-on-exit` handled per window (Decisions 3, 4).
+    - A session keeps the directory it was made in (B-5). `ensure_session(name, B)` on a session made in A changes nothing
+      (Decision 6, as the fake), so a later `run` still works in A. A relaunch after `host.cwd` changes runs in the old
+      directory until the session is ended, and no port call ends one (#644, #646).
+    - A program that exits before its tag lands, under an operator's global `remain-on-exit on`, leaves a dead tagged window
+      (R2): its own `remain-on-exit off` does not close a pane that is already dead. It is never signalled (Decision 4) and
+      stays until its session ends (W-11).
+    - After `run` returns `Timeout` from `new-window` itself, tmux may still create the window and start the program after
+      the adapter killed its client: an **untagged** process may then run in the session. `ps` lists it and `stop_owned`
+      never stops it; the adapter has no pid for it and never matches by name (W-13).
 
 Forward-compat (consumers of this crate):
 
 | Consumer | Needs | Satisfied |
 |---|---|---|
-| #644 launch/relaunch | `ensure_session` then `run(command argv)`; relaunch = `stop_owned` then `run` without killing the session; a failed `run` leaves no untagged process for a rollback to miss | yes (3, 6) |
+| #644 launch/relaunch | `ensure_session` then `run(command argv)`, the harness working in `host.cwd` (`-c '#{session_path}'`, B-5); relaunch = `stop_owned` then `run` without killing the session; a `run` whose tag fails leaves no untagged process for a rollback to miss | yes (3, 6), with two limits documented in 15: a session keeps the directory it was made in, so a relaunch after `host.cwd` changes runs in the old one until the session is ended; and a `Timeout` of `new-window` itself may leave an untagged process that `stop_owned` never stops (W-13) |
 | #646 close | `stop_owned` that is `Ok` on a crashed/missing session | yes (8) |
 | #646 close | to know the tmux session and its shell survive (no port call ends a session), and `ps` is not empty after a close | documented (15); ending the session is #646's call to make |
 | #650 / #654 import, first relaunch of an imported pane | to know that processes started before cutover are untagged, so `stop_owned` does not stop them | documented (15); handling them is #650/#654's |
@@ -523,11 +658,16 @@ server runs, that is fine).
   tests. Decision 14 and `with_kill_binary` keep every default-run signal inside a recording fake.
 - **tmux single-argument shell path.** tmux runs a one-argument command through `sh -c`; the `env --` prefix (AC 6d) is what
   keeps "never through a shell" true. A refactor that drops it reopens injection; AC 6d pins it.
-- **Prefix matching** would let `stop_owned(demo)` hit `demo-c1r1`; AC 6e pins `=`.
+- **Prefix matching** would let `stop_owned(demo)` hit `demo-c1r1`. A `=NAME` without the colon on a window target is not
+  exact either (B-4): `stop_owned(hj-c1r1)` after that session crashed would signal `hj-c1r10`'s harness. AC 6e pins both
+  the `=` and the colon per command, and AC 12 proves the prefix and window-name cases on real tmux.
+- **Working directory (B-5).** Without `-c '#{session_path}'` every harness would start in the CLI's or hub's cwd. AC 6d
+  pins the flag and AC 11 and 13 read the started process's `pwd -P`.
 - **Socket path length:** `sun_path` is ~104-108 bytes; a long `TMPDIR` gives "File name too long". The test helper uses
   `/tmp` and asserts the length (AC 9).
 - **Pid reuse** between `list-panes` and `kill` is a window of milliseconds; tmux's live `pane_pid` plus the matching
-  `@holler-pid` makes a stale target unlikely. Accepted.
+  `@holler-pid` makes a stale target unlikely. That holds only because a dead tagged pane (`pane_dead` 1, whose pid may be
+  reused for as long as its window lingers, R2) is never signalled (Decision 4, AC 6h pane `404`). Accepted.
 - **`kill` binary portability** (`kill -s TERM -- -PGID`): verified on Linux procps; macOS BSD `kill` accepts the same form.
   Real-tmux tests are opt-in, so a macOS difference cannot break CI.
 - **Shell rc in sessions:** production sessions use the operator's default shell; tests force `/bin/sh` through the config
