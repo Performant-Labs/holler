@@ -77,3 +77,10 @@
   - Read: the brief, issue #639, every handoff in this directory, the outside diff review (`639-diff-result-r1.md`, PASS), the full `git diff origin/main...HEAD`, ADR-0021 on `origin/main` (lines 105-110, 216-222, 238-259 and 494-501), `holler-pane/src/ports.rs:28-52` and `holler-proto/src/atomic_file.rs`.
   - Grepped: `check_membership(` (it matches `handlers.rs:111`); `unwrap`, `expect`, `panic` and `unsafe` in `panes/` (none); `#[allow]` in the diff (all carry `// #639`); `sleep` in the pane tests (none); privacy patterns across the diff (only the existing `kiwi` fixture).
   - Also ran `wc -l` on the touched files (max 523) and `git merge-tree` against `origin/main` (only a `CHANGELOG.md` conflict).
+
+## O (operator decision on S's ADVISORY-HOLD) — 2026-10-09
+- **Decided:**
+  - The idle `pane/watch` cursor is the head (S's option A, chosen by the operator). The code's D6 rule stands and ADR-0021 is amended to match: §6 now answers `{"events": [], "cursor": <head>}`, equal to `since` except for a watch from 0 over an all-deleted registry, and "Decisions taken" item 7 records it. The brief's AC 25 now matches D6, and its blast radius gains `docs/adr/ADR-0021.md` (§6 and item 7 only).
+  - `crates/holler-hub/tests/pane_feed_test.rs` is approved in the radius (AC 30, A W-9): the split was forced by AC 29's 600-line cap (one file measured 726 lines).
+  - `origin/main` is merged into the branch; the `CHANGELOG.md` conflict keeps every entry (#669, ADR-0021 #634, #670, #639).
+- **Evidence:** merge 1d67ef3; ADR and brief 639f130; the edge-case handler test `an_idle_watch_from_zero_over_an_all_deleted_registry_answers_the_head` 4a75b54 (passes on the code; a mutation answering `since` on an idle window fails it, `left: {"cursor": 0, ...}` against `right: {"cursor": 2, ...}`, and no other test, then reverted); the stale `mod.rs`, `persist.rs` and `feed.rs` notes refreshed in 3b5e7ee.
