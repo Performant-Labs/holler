@@ -7,6 +7,20 @@ fills this file in at release time.
 
 ## [Unreleased]
 
+### Enhancements
+- Pane control, slice a of the skeleton (epic [#633](https://github.com/Performant-Labs/holler/issues/633)):
+  the new `holler-pane` crate holds the contract that the pane-control stories build against in
+  parallel. It has the `Pane`, `Profile` and `ProfileSpec` records, `GridPos` (rows and columns from 1),
+  the `Argv` and `EnvVarName` guards (a stored command is an argv array; an environment entry is a
+  name, never a value), the closed set of 22 kebab-case error codes with an open `Refused` variant,
+  the ports an adapter implements (`PaneStore`, `ProfileStore`, `ProfileScope`, `HerdrPort`, `HostPort`,
+  `HarnessPort`, `Prober`) and the `PaneReply` type of the hub's pane and profile control methods.
+  Four empty crates (`holler-adapter-herdr`, `holler-adapter-host`, `holler-adapter-opencode`,
+  `holler-pane-testkit`) are registered for the stories that fill them, and `holler-proto` gains the
+  `pane/*` and `profile/*` method names, outside the closed 22-row wire catalog, so protocol v2 and
+  every golden file are unchanged. Types and traits only: no CLI, hub or adapter behaviour yet
+  ([#637](https://github.com/Performant-Labs/holler/issues/637)).
+
 ## [0.4.0] - 2026-09-29
 
 ### Enhancements

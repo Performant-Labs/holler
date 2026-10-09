@@ -1,0 +1,19 @@
+[package]
+name = "holler-adapter-host"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "The host adapter: implements holler_pane::HostPort over tmux and the local process table (empty in the workspace skeleton)"
+
+[lib]
+name = "holler_adapter_host"
+path = "src/lib.rs"
+
+# Declare only what is consumed (issue #155 §7 — `cargo machete` fails CI
+# otherwise). The crate is an empty skeleton; its owning story adds the
+# dependencies it uses.
+[dependencies]
+
+# Workspace lints (issue #149).
+[lints]
+workspace = true

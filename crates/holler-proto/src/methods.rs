@@ -14,6 +14,15 @@
 //! - **body→hub** — join / authenticate, and (issue #508) the seven
 //!   `admin/*` rows, legal only on an admin-role connection.
 //! - **hub→body** — prompt / cancel (and the hub's superseded).
+//!
+//! **Not in the catalog:** the hub's *control-socket* method names. [`PANE_METHODS`]
+//! and [`PROFILE_METHODS`] (issue #637, epic #633) name the `pane/*` and `profile/*`
+//! methods of the pane registry. They are hub control methods, outside [`CATALOG`]
+//! and not in `docs/protocol/v2.md`, so the closed 22-row catalog, the v2 wire
+//! protocol and every golden file are unchanged, and a body connection that sends one
+//! still gets `method_not_found`. `holler_hub::serve::CONTROL_METHODS` holds the
+//! `control/*` names the same way. Only the *names* live here: the params and the
+//! `PaneReply` encoding are in `holler-pane`, which this crate cannot depend on.
 
 /// One row of the catalog.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -99,6 +108,38 @@ pub fn is_request(method: &str) -> bool {
 /// Whether `method` is a notification.
 pub fn is_notification(method: &str) -> bool {
     matches!(find(method).map(|m| m.kind), Some(MethodKind::Notification))
+}
+
+/// The hub's `pane/*` control-socket methods (the pane registry; issue #637). Outside
+/// [`CATALOG`]: see the module docs.
+pub const PANE_METHODS: &[&str] = &[
+    "pane/get",
+    "pane/list",
+    "pane/cas_put",
+    "pane/delete",
+    "pane/watch",
+];
+
+/// The hub's `profile/*` control-socket methods (the profile registry; issue #637).
+/// `profile/rename` is PROPOSED (#665). Outside [`CATALOG`]: see the module docs.
+pub const PROFILE_METHODS: &[&str] = &[
+    "profile/get",
+    "profile/list",
+    "profile/cas_put",
+    "profile/delete",
+    "profile/watch",
+    "profile/log",
+    "profile/rename",
+];
+
+/// Whether `method` is one of [`PANE_METHODS`].
+pub fn is_pane_method(method: &str) -> bool {
+    PANE_METHODS.contains(&method)
+}
+
+/// Whether `method` is one of [`PROFILE_METHODS`].
+pub fn is_profile_method(method: &str) -> bool {
+    PROFILE_METHODS.contains(&method)
 }
 
 #[cfg(test)]
