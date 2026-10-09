@@ -60,3 +60,10 @@
   - **Mutants:** a scratch probe crate (outside the repository) ran each mutant through the suite. Each fails on its named case, and the unbroken wrapper passes.
   - **Hub:** the suite ran against main's real `PaneState` (`2a6f349`) in a throwaway export. Cases 1 to 18 pass and case 19 fails, as the brief predicts until #661.
   - **Unchanged source relied on:** see `evidence.md`.
+
+## T (Phase 7, verify GREEN + Tier 2)
+
+- **Decided:** PASS. The suite is GREEN (22 + 10), Tier 1 matches F's report, and no authored test needed repair.
+- **Assumed:** the CHANGELOG placement before the #670 entry is acceptable, since a literal placement would conflict with #639 on main.
+- **Hedged:** case 19 against the hub stays red until #661; not a defect of this slice.
+- **Evidence:** 20 repeated runs with 0 failures; three production-code breaks (no `usage` check, no delay sleep, non-consumed one-shot) each failed the named tests and were reverted; `cargo test --workspace` 1073 passed, 0 failed; `docs/handoffs/638/handoff-T-green.md`.
