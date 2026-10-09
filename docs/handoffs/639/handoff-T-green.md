@@ -27,6 +27,8 @@ Spot-check that the tests pin behavior (mutations applied to `panes/store.rs`, t
 
 F's reported numbers (964 passed, 0 failed) match mine.
 
+Re-verified in a second, independent pass on the committed tree (clean `git status`): the four pane binaries 10/7/6/14 green; clippy, `lint.sh`, `changelog-check.sh`, `cargo machete` clean; workspace 964 passed, 0 failed; 15 repeat runs of the three new pane binaries, 0 failures. A third mutation (removing the generation check in `Store::delete`) was killed by `delete_checks_missing_before_generation` and `bad_params_answer_their_code`; reverted.
+
 ## Tier 2 results
 - Test quality: each test names one behavior; no `thread::sleep`; waits are bounded `recv_timeout` or the 100 ms `watch_wait`. Races are asserted as invariants (exactly one winner, no lost update). PASS.
 - Files under 900 lines (tests max 523, `panes/` max 340); every `#[allow]` carries a `// #NNN` link. PASS.
