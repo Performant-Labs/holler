@@ -31,6 +31,21 @@ fills this file in at release time.
   method still answers `method_not_found`, the `control/*` methods behave as before, and the closed 22-row wire
   catalog and every golden file are unchanged. Plumbing only: no registry, persistence, CLI verb or adapter
   yet ([#669](https://github.com/Performant-Labs/holler/issues/669)).
+- Pane control, the hub's pane registry (epic [#633](https://github.com/Performant-Labs/holler/issues/633)):
+  `pane/get`, `pane/list`, `pane/cas_put`, `pane/delete` and `pane/watch` now answer from a real registry
+  instead of `not-implemented`. The hub keeps one record per pane in `<state dir>/hub/panes.json`, written
+  atomically at mode `0600`, so a record survives a hub restart unchanged. Every write is a compare-and-swap
+  on the record's generation: a stale one answers `generation-conflict` and changes nothing, and deleting a
+  pane that has no record answers `pane-not-found`. `pane/watch` is a long-poll with a 4 s window that
+  returns each change once, in order, with a cursor that never goes backwards across a restart. A watcher
+  that resumes across a restart, or falls more than 1024 changes behind, gets the latest state of each pane
+  that changed, deletions included. A corrupt or unreadable file fails closed: every pane method answers
+  `store-corrupt`, the file is left in place and never rewritten, and an `error` event `pane_registry_corrupt`
+  names the file and the problem without quoting its content. A file written by a newer build with a field
+  this build does not know fails closed the same way. A write the hub cannot save answers `unavailable`,
+  changes nothing, and logs the `error` event `pane_registry_write_failed`. Nothing else changes: no CLI
+  verb or adapter yet, and the closed 22-row wire catalog and every golden file are unchanged
+  ([#639](https://github.com/Performant-Labs/holler/issues/639)).
 
 ## [0.4.0] - 2026-09-29
 
