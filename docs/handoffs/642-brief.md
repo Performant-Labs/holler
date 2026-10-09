@@ -1,6 +1,8 @@
 # Brief: #642 the OpenCode adapter: `HarnessPort` over OpenCode's HTTP API and a tmux-hosted TUI
 
-Repo: Performant-Labs/holler. Issue: #642 (epic #633, wave 3). Rigor: in-session. UI surface: no. Kind: feature (adapter).
+Repo: Performant-Labs/holler. Issue: #642 (epic #633, wave 3). Rigor: second-opinion. UI surface: no. Kind: feature (adapter).
+
+**THIS RUN IS 642a ONLY (server side).** Implement only the 642a row of the split table below; 642b (TUI side, the ADR-0021 edit) is a later run on the same branch name. The PR says `Part of #642`, not `Closes #642`. Rigor: second-opinion (operator, 2026-10-09; the outside model is deepseek-v4-pro).
 
 **Branch:** `issue-642-implementation`, based on `9d61c9f` (`origin/main`: #637 slice a, ADR-0021, the OpenCode spike #635,
 and every slice of the test kit #638, including slice e #684 with `FakeHarness` and the harness conformance suite).
