@@ -91,3 +91,43 @@
   - `cargo test -p holler-pane-testkit --no-run`: four E0432 groups, nothing else.
   - With stubs: build clean; 22 `fake_herdr_test` tests failed in the stubs; clippy over the tests did not complete (a stub-only lint), left to T-green.
   - Slice a's two test files: 22 and 10 passed. `bash scripts/lint.sh` exit 0.
+
+## F (Phase 6, implementation) — 2026-10-09T13:17:11-06:00
+- **Decided:**
+  - Filled the three stubs to the brief's exact public API: `herdr.rs` (`FakeHerdr`, `HerdrOp`, `Placement`,
+    `HerdrVersion`, `Sent` and the four constants), `prober.rs` (`FakeProber`, `ProbeCall`) and `conformance/herdr.rs`
+    (`HerdrFixture`, `herdr_cases`, `run_herdr_conformance`, 11 cases in one `CASES` table). Added the CHANGELOG entry
+    and AC 8's two ADR-0021 items. No test file was edited.
+  - `ensure_pane` is a lookup (`State::workspace_mut`) plus `Workspace::place`, which calls `check_range`, `occupant`,
+    `check_split` (split-only placement only) and `mint`. Panes are kept per workspace in a `BTreeMap` keyed by
+    `(row, col)`, so the snapshot order needs no sort (`GridPos` has no `Ord`). The id counter only goes up, with
+    `checked_add`.
+  - Suite case 2 ensures `r1c1` first, per the brief's every-case rule. Case 3 asserts the whole workspace holds
+    exactly `[first]`. Case 4 compares both lists sorted by id.
+  - The ADR section 10 bullet is re-wrapped to its neighbours' width (A's warn 1) and carries A's optional #640
+    extent sentence. The ASSUMPTION 9 comment names section 9's `profile apply` row (A's warn 2).
+  - Each fake has its own poison-tolerant `lock()`, which A accepted in round 2, warn 3.
+  - `archChanged: false`: no new module boundary (slice a declared the stubs), no existing interface changed, and the
+    dependency direction is unchanged.
+- **Assumed:**
+  - Case 3 reads "exactly one pane at `r1c1`" over the whole workspace. This is safe because the fixture holds no pane
+    or only the root at `r1c1`.
+  - One extra CHANGELOG sentence (the ADR 0021 record) is within AC 6, which lists what the entry must contain, not
+    all it may contain.
+- **Hedged:**
+  - `herdr.rs` (525 lines) and `conformance/herdr.rs` (424) exceed the brief's estimates (~370 and ~340), because of
+    docs, the 13 ASSUMPTION comment blocks and rustfmt's layout. Both are under the 600-line warning. Not split
+    further.
+  - The mutant check here is informational. I ran T's wrapper in a throwaway scratchpad crate and printed every
+    failure: each mutant fails its named case for that case's reason. T-green owns the formal verdict.
+- **Evidence:**
+  - `cargo build --workspace`: ok.
+  - `cargo clippy --workspace --all-targets -- -D warnings`: clean, T's test files included.
+  - `cargo test -p holler-pane-testkit`: 22 + 6 + 15 new tests, and slice a's 22 + 10, all pass.
+  - `cargo test --workspace`: 1152 passed, 0 failed, 5 ignored.
+  - `cargo machete`, `scripts/lint.sh`, `scripts/changelog-check.sh` and `scripts/test-hooks.sh`: all exit 0.
+  - rustfmt `--check` on the six files: clean. `cargo doc -D warnings`: clean.
+  - `cargo tree` dependency-direction check: empty.
+  - `git diff --name-only origin/main`: only blast-radius paths, no `Cargo.toml` or `Cargo.lock`.
+  - ADR numstat: 4 lines added, 2 removed.
+  - The evidence file is `docs/handoffs/683/evidence.md`, with 14 quoted facts.
