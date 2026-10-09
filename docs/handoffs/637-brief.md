@@ -222,4 +222,8 @@ whole workspace is green. Then clippy `-D warnings`, `cargo fmt --check`, `bash 
   story's footprint, but the fixture is a shared file and is named here so S does not flag it.
 - Adds `crates/holler-cli/src/pane/args.rs` and `profile/args.rs` (inside `pane/**` and `profile/**`) to keep `cli.rs` under
   the 900-line gate.
+- Adds `crates/holler-cli/Cargo.toml`: `holler-cli` sets `autotests = false`, so every new `crates/holler-cli/tests/*.rs`
+  file (here `pane_profile_stub_test.rs`) must be declared as a `[[test]]` or it silently never builds (a RED that says "no
+  test target named X" is this mistake, not a real RED). The same edit adds the `holler-pane` path dependency the CLI uses.
+- Adds `CHANGELOG.md`: an `## [Unreleased]` entry (Enhancements) linking #637, required by `scripts/changelog-check.sh`.
 - No `Cargo.toml` (workspace) edit is needed: `members = ["crates/*"]` already globs the new crates; `Cargo.lock` is updated.
