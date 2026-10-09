@@ -3,7 +3,7 @@ name = "holler-adapter-herdr"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "The Herdr adapter: implements holler_pane::HerdrPort over Herdr's local socket (empty in the workspace skeleton)"
+description = "The Herdr adapter: implements holler_pane::HerdrPort over Herdr's local socket, and is the only place a GridPos meets Herdr's split tree"
 
 [lib]
 name = "holler_adapter_herdr"

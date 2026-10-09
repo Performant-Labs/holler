@@ -128,6 +128,14 @@ fills this file in at release time.
   `holler_pane::error::class_of`, so it keeps no table of its own. Test code only: nothing a user runs changes
   ([#681](https://github.com/Performant-Labs/holler/issues/681)).
 
+- Herdr adapter, part 1 (epic [#633](https://github.com/Performant-Labs/holler/issues/633)): the pure Herdr protocol
+  and grid core in `holler-adapter-herdr`. It reads a pane's row and column from Herdr's split tree (Herdr has no
+  grid, and this crate is the only place that converts between the two), plans the right and down splits that reach a
+  cell (`grid-unreachable` when Herdr cannot reach it without nesting a split inside a cell, `grid-out-of-range`
+  outside the workspace's configured size), builds Herdr's socket requests and decodes its replies, and gates Herdr's
+  protocol version (22; any other is `herdr-version-unsupported`). No I/O yet: the socket adapter follows in part 2,
+  so nothing a user runs changes ([#640](https://github.com/Performant-Labs/holler/issues/640)).
+
 ## [0.4.0] - 2026-09-29
 
 ### Enhancements

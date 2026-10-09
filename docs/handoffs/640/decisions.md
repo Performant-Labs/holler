@@ -46,3 +46,46 @@
   - `cargo test -p holler-adapter-herdr --no-fail-fast`: layout 1 passed and 9 failed; plan_splits 1 passed and 18 failed; protocol 3 passed and 30 failed.
   - Clippy, machete, lint.sh and changelog-check are green on the RED tree.
   - All files read: brief, handoff-A, holler-pane `error.rs`, `ports.rs`, `pane.rs`, `grid.rs`, the testkit's `herdr.rs`, the spike §5-§7 and §13 passages, and `Cargo.toml` and `clippy.toml`.
+
+## F (Phase 6, implement) — 2026-10-09T15:21:37-06:00
+- **Decided:**
+  - **The conversion.** `grid_of` ports the spike's `derive()` walk exactly, into rows of slots. The order is applied in
+    `grid_of`'s two `chain` calls and in `cell_at`. The base is applied in `number` and `index`. A pane past `u16::MAX`
+    is unplaced, never dropped.
+  - **The planner.** Range first, then the cells that exist, then 11d, then a rows-first simulation over row widths. A
+    step only ever appends: to the end of a row, or below the last row when it holds one pane. A refusal returns no
+    plan. The ratios use the extent's `rows` and `cols`.
+  - **r2c2 below a row of two is 11c ("one pane"), not a gap.** It is in a new row, and a new row can only come from a
+    `down` split under a row of one pane. I checked it and kept T's test as written.
+  - **A's warns in code:**
+    - W-2: a hand-written `Debug` for `Request`, which shows `SendText` as `<N bytes>`.
+    - W-3: one private `Method` table builds both `ALLOWED_METHODS` and `Request::method`.
+    - W-4: `is_empty()` means no row, which means no pane, and `CreateRoot` comes only from an empty grid.
+    - W-5: `pane_not_found` for a request with no pane is `unavailable`.
+    - W-6: the parsers walk `Value` by hand, with no `serde` dependency. That also keeps serde's value-quoting type
+      errors, which could quote a pane's screen, out of every message.
+    - W-13: the grid-tab rule and the way it fails are documented in `protocol.rs`.
+  - **Messages** are one line. Herdr's code, the result type, the version, the label and workspace ids are quoted by a
+    private `excerpt` (`{:?}`, at most 64 characters). Herdr's `message` is never echoed.
+- **Assumed:**
+  - **Version and protocol.** A pong `protocol` that is not a `u32` is unknown (`None`, refused by the gate), not
+    garbled. A missing `version` is garbled (`unavailable`).
+  - **Ties.** On a tie for the lowest tab `number`, the first tab in snapshot order wins.
+  - **Wire depth.** Part 2 parses wire lines only through `decode_reply`, whose `serde_json::from_str` limits recursion
+    to 128, so the recursive tree parse and walk are bounded.
+- **Hedged:**
+  - **Three private helpers are duplicated.** `last_lines` is sanctioned by the brief. `excerpt` copies
+    `holler_pane::error::excerpt`, which is `pub(crate)` in a frozen crate. `count` copies the test kit's private,
+    dev-only helper and keeps the range wording equal. Each is small and cannot be imported. A judges them at Phase 7.
+  - **No flat re-exports.** The brief asks for re-exports, but A's W-1 and T-red settled on none.
+  - **`archChanged` is reported false.** The public surface is exactly T-red's pinned stubs (no new public item or
+    derive), I added no module, and no dependency changed.
+- **Evidence:**
+  - `cargo test -p holler-adapter-herdr`: layout 10/10, planner 19/19, protocol 33/33 (RED was 1/10, 1/19, 3/33).
+  - `cargo clippy --workspace --all-targets -- -D warnings`: exit 0.
+  - `cargo test --workspace --no-fail-fast`: 118 targets, 1317 passed, 0 failed, 5 ignored (the existing ones).
+  - `rustfmt --check --edition 2021`: clean. `cargo machete`: clean. `lint.sh`: exit 0. `changelog-check`: ok.
+  - Read: the brief, handoff-A, handoff-T-red, the spike (all of it), `herdr-grid.sh`, holler-pane
+    `lib`/`error`/`grid`/`pane`/`ports`, the testkit's `herdr.rs` and `conformance/herdr.rs`, and
+    `control.rs` `send_over`.
+  - The facts are in `evidence.md` (12 entries).
