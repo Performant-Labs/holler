@@ -1,9 +1,5 @@
-#![allow(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::panic,
-    clippy::unreachable
-)] // #669
+#![allow(clippy::unwrap_used, clippy::expect_used)] // #669
+#![allow(clippy::panic, clippy::unreachable)] // #669
 //! Issue #669: the hub's plumbing for the `pane/*` and `profile/*` control methods
 //! (epic #633, skeleton slice b).
 //!
