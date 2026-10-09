@@ -12,3 +12,9 @@
   - Issues read: #676, #633, #638, #644, #645 and #646 via `gh issue view`.
   - Greps: exit-code constants across `holler-cli` (no shared vocabulary), "refused or failed" and exit-1 wording across crates and docs, and `ErrorClass`/`class_of` collisions (none).
   - Sizes: `wc -l` on every touched file.
+
+## T (Phase 4, author / RED) — 2026-10-09
+- **Decided:** Authored `crates/holler-pane/tests/error_class_test.rs` (4 tests) and extended `output_api.rs` (3 new tests, 3 updated, header fixed). The exit-code numbers are pinned twice: through `class_of` over all `ALL_CODES` (catches a code added without a class) and through literal spot checks that do not call `class_of` (so a wrong table and a matching wrong test cannot both pass). I rustfmt-formatted `output_api.rs` (it was clean at HEAD).
+- **Assumed:** A compile-time RED on the new `class_of`/`ErrorClass` API is unavoidable and accepted by the brief's test plan; the assertion-level RED is shown with a throwaway skeleton in `error.rs`, reverted.
+- **Hedged:** `a_malformed_code_is_a_failure` passes against the all-Failure skeleton, so it is a regression guard, not a RED driver; it fails only if F routes malformed codes into the open-code (Refusal) arm. AC 3-5 (text residue, ADRs, CHANGELOG) have no new test; they are covered by the guard commands at Phase 6.
+- **Evidence:** error E0432 from both targets as authored; skeleton run: holler-pane 3 failed / 1 passed, holler-cli `output_api` 6 failed / 15 passed (assertion output in handoff-T-red.md); `git status` shows only the two test files changed after the revert.
