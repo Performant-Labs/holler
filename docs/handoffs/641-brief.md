@@ -1,9 +1,9 @@
 # Brief: #641 host-adapter (tmux sessions, process control, the launcher primitive)
 
-Repo: Performant-Labs/holler. Issue: #641 (epic #633, wave 3). Rigor: in-session. UI surface: no. Kind: feature.
+Repo: Performant-Labs/holler. Issue: #641 (epic #633, wave 3). Rigor: second-opinion. UI surface: no. Kind: feature.
 
 **Branch:** `issue-641-implementation` (worktree `.claude/worktrees/0641-host-adapter`, from `origin/main` at `9d61c9f`).
-**Review-rigor:** in-session (the issue and the epic fix it; the change is one new adapter crate behind a frozen trait and a
+**Review-rigor:** second-opinion (operator, 2026-10-09; the outside model is deepseek-v4-pro; the issue and the epic fix it; the change is one new adapter crate behind a frozen trait and a
 conformance suite that already exists).
 **Forward-compat:** done, see the table under "Decisions". **Design:** N/A (no UI surface).
 **Decision record:** ADR-0021 (`docs/adr/ADR-0021.md`) section 2 and the epic's contract. This brief does **not** edit the ADR:
