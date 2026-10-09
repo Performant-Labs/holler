@@ -10,6 +10,11 @@
 //! #639 (panes) and #661 (profiles) replace the stubs; these tests pin the plumbing
 //! they build on.
 //!
+//! Issue #639 filled the `pane/*` stub, so the pane-method assertions below now expect
+//! the real registry's answers (an empty list, a decode error, an empty batch) rather
+//! than `not-implemented`; every `profile/*` assertion is unchanged. The registry is
+//! loaded with the short long-poll window, so no test here waits the real one.
+//!
 //! The tests drive `handle_control_conn` in process over a `UnixStream::pair()`
 //! with a real `Registry`, `Roster` and `Lockout`. They spawn no `holler` binary,
 //! set no `HOLLER_STATE_DIR` and never sleep: every read is a bounded wait on the
@@ -27,13 +32,16 @@ use holler_hub::panes::{self, PaneState};
 use holler_hub::profile::{self, check_membership, ProfileState};
 use holler_hub::roster::{Config, Roster};
 use holler_hub::state::HubState;
-use holler_pane::{Pane, PaneError, PaneReply};
+use holler_pane::{PaneError, PaneReply};
 use holler_proto::methods::{PANE_METHODS, PROFILE_METHODS};
 use holler_proto::CorrelationId;
 use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
 use tokio::task::JoinHandle;
+
+mod pane_support;
+use pane_support::{pane_outcome, sample_pane, short_opts, temp_state};
 
 // The test-kit crate is an empty skeleton today; linking it here is what makes the
 // dev-dependency real, so #638, #639 and #661 add no manifest line.
@@ -91,26 +99,15 @@ impl Conn {
     }
 }
 
-/// Fresh, empty state handles loaded from a throwaway state dir.
+/// Fresh, empty state handles loaded from a throwaway state dir. The pane registry has
+/// the short long-poll window.
 fn fresh_deps() -> (PaneDeps, tempfile::TempDir) {
-    let dir = tempfile::tempdir().unwrap();
-    let state = HubState::from_root(dir.path().to_path_buf());
-    (PaneDeps::load(&state), dir)
-}
-
-/// The reply's `result` parsed as a `PaneReply` and read back as a `Result`: this is
-/// the parse-back a client does, so it also pins the code on the wire.
-fn pane_outcome(reply: &Value, method: &str) -> Result<Option<Value>, PaneError> {
-    assert!(
-        reply.get("error").is_none(),
-        "{method} must be a JSON-RPC result carrying a PaneReply, not a JSON-RPC error: {reply}"
-    );
-    let result = reply
-        .get("result")
-        .unwrap_or_else(|| panic!("{method} has no result: {reply}"));
-    let pane_reply: PaneReply = serde_json::from_value(result.clone())
-        .unwrap_or_else(|e| panic!("the result of {method} is not a PaneReply ({e}): {result}"));
-    pane_reply.into_result()
+    let (dir, state) = temp_state();
+    let deps = PaneDeps {
+        panes: Arc::new(PaneState::load_with(&state, short_opts())),
+        profiles: Arc::new(ProfileState::load(&state)),
+    };
+    (deps, dir)
 }
 
 fn error_code(reply: &Value) -> i64 {
@@ -122,8 +119,27 @@ fn error_code(reply: &Value) -> i64 {
 
 // --- AC 1: forwarding -------------------------------------------------------------
 
+/// What each pane method answers to a request that carries no `params`, now that the
+/// registry is real: a decode error, an empty list, or an empty batch. Never
+/// `not-implemented`, never `method_not_found`.
+fn assert_answers_an_empty_request(method: &str, outcome: Result<Option<Value>, PaneError>) {
+    match method {
+        "pane/list" => assert_eq!(outcome, Ok(Some(json!([]))), "{method}"),
+        "pane/watch" => assert_eq!(
+            outcome,
+            Ok(Some(json!({"events": [], "cursor": 0}))),
+            "{method}"
+        ),
+        "pane/get" | "pane/cas_put" | "pane/delete" => assert!(
+            matches!(outcome, Err(PaneError::Usage { .. })),
+            "{method} without params must be a usage error, got {outcome:?}"
+        ),
+        other => panic!("{other} is a new pane method: add its expectation here"),
+    }
+}
+
 #[tokio::test]
-async fn every_pane_method_is_forwarded_to_the_stub_not_method_not_found() {
+async fn every_pane_method_is_forwarded_to_the_registry_not_method_not_found() {
     let (deps, _dir) = fresh_deps();
     let mut conn = connect(deps);
     // One connection for the whole table: every method, `pane/watch` (long-poll, last
@@ -133,10 +149,7 @@ async fn every_pane_method_is_forwarded_to_the_stub_not_method_not_found() {
         let id = format!("h-pane-{i}");
         let reply = conn.call(&id, method).await;
         assert_eq!(reply["id"], json!(id), "{method} must echo the request id");
-        assert!(
-            matches!(pane_outcome(&reply, method), Err(PaneError::NotImplemented)),
-            "{method} must answer not-implemented, got {reply}"
-        );
+        assert_answers_an_empty_request(method, pane_outcome(&reply, method));
     }
 }
 
@@ -225,10 +238,7 @@ async fn two_connections_share_the_one_pair_of_state_handles() {
     // Both connections are live and each serves a request off the shared handles.
     let a = conn_a.call("h-a-1", "pane/list").await;
     let b = conn_b.call("h-b-1", "profile/list").await;
-    assert!(matches!(
-        pane_outcome(&a, "pane/list"),
-        Err(PaneError::NotImplemented)
-    ));
+    assert_eq!(pane_outcome(&a, "pane/list"), Ok(Some(json!([]))));
     assert!(matches!(
         pane_outcome(&b, "profile/list"),
         Err(PaneError::NotImplemented)
@@ -282,17 +292,15 @@ fn the_state_types_do_not_derive_clone_so_a_connection_cannot_fork_a_copy() {
 // --- AC 4: the dispatcher signatures ---------------------------------------------
 
 #[tokio::test]
-async fn panes_dispatch_takes_both_handles_and_answers_not_implemented_as_a_result() {
+async fn panes_dispatch_takes_both_handles_and_answers_as_a_result() {
     let (deps, _dir) = fresh_deps();
     let cid = CorrelationId::parse("h-direct-1").unwrap();
     let line = panes::dispatch("pane/watch", &cid, &json!({}), &deps.panes, &deps.profiles).await;
     let reply: Value = serde_json::from_str(&line).unwrap();
-    assert!(
-        matches!(
-            pane_outcome(&reply, "pane/watch"),
-            Err(PaneError::NotImplemented)
-        ),
-        "{reply}"
+    assert_eq!(
+        pane_outcome(&reply, "pane/watch"),
+        Ok(Some(json!({"events": [], "cursor": 0}))),
+        "an idle registry answers an empty batch: {reply}"
     );
 }
 
@@ -314,38 +322,18 @@ async fn profile_dispatch_takes_both_handles_and_routes_rename_to_the_stub() {
 
 // --- AC 5: the membership hook ----------------------------------------------------
 
-fn sample_pane(profile: Option<&str>) -> Pane {
-    let mut pane = json!({
-        "name": "hj-c1r1",
-        "generation": 7,
-        "herdr": {"session": "hj", "workspace": "main", "pane_id": "p_12",
-                  "grid": {"row": 1, "col": 1, "pos": "r1c1"}},
-        "host": {"name": "kiwi", "tmux": "hj-c1r1", "cwd": "/work/holler", "herdr_api_version": "0.9.1"},
-        "harness": {"kind": "opencode", "port": 8095, "pid": 4242, "health": "healthy"},
-        "role": "agent",
-        "hold": {"parked": {"reason": "quota", "release_when": "2026-10-10T00:00:00Z", "since": 1_760_000_000_000_i64}},
-        "last_observed": {"shown": "ses_abc", "driven": "ses_abc", "at": 1_760_000_000_123_i64},
-        "model": {"provider": "anthropic", "model_id": "sonnet", "effort": "high"},
-        "env": ["ANTHROPIC_API_KEY"],
-        "context": {"soft": 100_000, "hard": 150_000},
-        "command": ["opencode", "--port", "8095"],
-        "probe": {"check": ["curl", "-s", "http://127.0.0.1:8095/v1/models"], "expect": ["qwen38"]}
-    });
-    if let Some(name) = profile {
-        pane["profile"] = json!(name);
-    }
-    serde_json::from_value(pane).unwrap()
-}
-
 #[test]
 fn check_membership_accepts_any_pane() {
     let dir = tempfile::tempdir().unwrap();
     let profiles = ProfileState::load(&HubState::from_root(dir.path().to_path_buf()));
     // The hook is a plain function and, until #661 fills it, accepts every pane: one
     // outside any profile, and one naming a profile that does not exist.
-    assert_eq!(check_membership(&sample_pane(None), &profiles), Ok(()));
     assert_eq!(
-        check_membership(&sample_pane(Some("No Such Profile")), &profiles),
+        check_membership(&sample_pane("hj-c1r1", None), &profiles),
+        Ok(())
+    );
+    assert_eq!(
+        check_membership(&sample_pane("hj-c1r1", Some("No Such Profile")), &profiles),
         Ok(())
     );
 }
