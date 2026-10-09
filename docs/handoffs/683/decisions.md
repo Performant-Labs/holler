@@ -144,3 +144,41 @@
 - **Evidence:** `cargo test -p holler-pane-testkit` (22/6/15 new, 22/10 slice a, 8 repeats clean);
   `cargo test --workspace --no-fail-fast`: 1152 passed, 0 failed, 5 ignored; clippy, machete, lint, changelog-check,
   test-hooks, docs_cli_test, wire_selftest, rustfmt all clean; 14 of 14 evidence excerpts verified against source.
+
+## A (Phase 7, anti-duplication gate) — 2026-10-09T13:31:11-06:00
+- **Decided:**
+  - PASS on the diff e410e9d...bbe4d89, with 0 blocks and 3 warns (see handoff-A-dup.md).
+  - F extended what the Reuse map named:
+    - `FaultSwitch<HerdrOp>` is entered first in all seven port methods;
+    - the suite runs on `run_cases`, `succeeds`, `expect_code` and `expect_eq` over one `CASES` table;
+    - errors are closed variants plus one `from_static` code;
+    - cells are written with `GridPos`'s `Display`, and the prober is keyed on `Argv`.
+  - Every object that might look like a second path was justified in the brief before code existed: the `BTreeMap` store
+    instead of `feed.rs`, `FakeProber`'s own log, `Sent` beside the call log, and `HerdrFixture`.
+  - Warn 1: copied scaffolding (`CaseGuard`, `assert_suite_fails_on`, `timeout`, the per-fake `lock()`, `NOT_FOUND`). It was
+    accepted at Phase 3 and goes to the one cleanup issue that #684's gate scoped. The shared assertion must cover a
+    mutant that fails two cases.
+  - Warn 2: `HerdrFixture` and #684's `HarnessRig` are two fixture shapes. Settle them in that issue before #640 or #642
+    writes a suite runner.
+  - Warn 3: the hand-off to #640 lives only in code comments. Put it in the PR body and in one comment on #640.
+- **Assumed:**
+  - In the automated run, the run's own agent does O's PR-time follow-ups, since no O agent exists.
+  - The cleanup issue is one issue for slices b to e. #684's gate scoped it, so this gate adds items to it rather than
+    asking for a second.
+- **Hedged:**
+  - Warns 1 and 2 could be read as blocks, being copies and divergent shapes. Neither is: Phase 3 accepted both in
+    writing, the brief's no-edit rule forces the copies, and neither shape is on main, so there is no dominant pattern.
+  - Warn 3 is a tracking gap, not a code defect. It is a warn because no failing test would surface the two
+    `holler-pane` doc lines or the ADR row to #640.
+- **Evidence:**
+  - Read the diff and every changed file in full: three `src` files, three test files, the CHANGELOG and ADR hunks.
+  - Read slice a's `fault.rs`, `feed.rs`, `pane_store.rs`, `fixture.rs`, `lib.rs`, `conformance/mod.rs`,
+    `conformance/pane_store.rs:1-140` and its helper index, and both of slice a's test files.
+  - Searched the workspace for `impl HerdrPort`/`impl Prober` (`Unwired`, `TestHerdr`, `FailingProber`, `SystemProber`;
+    none an analogue), radix-36, tail-of-screen and plural helpers (none), public code constants (`PaneCode` is
+    `pub(crate)`), and the `GridPos`/`Key`/`PaneId` APIs.
+  - Checked the sibling worktrees 0681, 0682 and 0684: none touches this slice's files, #682's `feed.rs:243` makes `lock`
+    `pub(crate)`, the slices copy `assert_suite_fails_on` five times, and I read #684's handoff-A-dup.
+  - `gh issue list` found no cleanup issue. `gh issue view 640` shows a body with no #683 item and no comments.
+  - No golden, protocol or manifest change. `cargo tree` direction is clean. The diff names no personal infrastructure, and
+    all seven commits use the no-reply address.
