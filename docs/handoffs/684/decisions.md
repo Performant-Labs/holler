@@ -84,3 +84,22 @@
   - Workspace greps: the only other `HostPort`/`HarnessPort` impls are the CLI's `Unwired` placeholder and `holler-pane`'s signature pins. There are no other `Quirk`, `ServerState`, `ServerView`, `TuiView` or rig types. The added lines touch no overlay candidate and name no personal infrastructure. All five commits use the GitHub no-reply address.
   - Sibling worktrees (read only): #682's diff to `feed.rs`, `fixture.rs`, `pane_store.rs` and `conformance/pane_store.rs`; #683's `conformance/herdr.rs`, lock helpers and handoff-A row 3; #681's handoff-A W-6, handoff-A-dup row 2 and `lib.rs` diff.
   - `gh issue list` searches found no test-kit cleanup issue.
+
+## S (Phase 10, spec audit) — 2026-10-09T13:33:19-06:00
+- **Decided:**
+  - PASS on `e410e9d...d30873e` (see `handoff-S.md`). Every brief AC (1 to 11) and every acceptance item of issue #684 has a proving test or evidence. The public API, the behaviour tables, the 7 exact error values and decisions 1 to 11 are implemented as the brief states them.
+  - Accepted F's declared deviation: the three ASSUMPTION comments are wrapped at 100 columns, not one physical line. The prefix and text are verbatim, and AC 7's `grep -c` prints 3.
+  - Accepted the brief's two adjustments to the issue's wording as recorded, not silent: `shown_session` keeps answering on a frozen or killed server (decision 1), and `serve` restarts a killed server. Also accepted F's three behaviours that the brief left open: `navigate` does not reach the server, `delete_session` sends TUIs home on any port, and freezing a frozen server or thawing a running one is `Ok`.
+  - The scope matches the brief. The issue's short Blast radius list is not a deviation, because the issue's own scope requires the suites and mutation checks, and slice a's stubs assign `conformance/{host,harness}.rs` to #684.
+- **Assumed:**
+  - F's and T-green's Tier 1 records (clippy, workspace tests, rustfmt, lint, machete, changelog-check, test-hooks) are accurate. I did not re-run Tier 1. Git shows that no file under `crates/` changed after F's commit, so those runs cover HEAD.
+- **Hedged:**
+  - The commit trailers carry no session link. That is the workflow script's commit format, the same on every merged pipeline run, and the squash merge replaces it, so I did not count it against the slice. There is no PR yet, so the PR-body AI disclosure and the list of what binds #641 and #642 are left to the run's agent after `gh pr create` (advisory 1).
+  - The cleanup issue that A-dup asked O to open (one fixture shape, `tests/support`, `holds`/`lacks`, the lock helper, fixture constants, the stale `lib.rs:27-28`) still does not exist. It is advisory for O, and should be settled before #640 or #642 writes its suite runner.
+  - `thaw_brings_a_frozen_server_back` does not call `serve` or `attach_tui` after the thaw. Other tests cover both, so this is not blocking.
+- **Evidence:**
+  - Read in full: issue #684, the brief, every handoff in `docs/handoffs/684/`, the four source files, the four test files and the CHANGELOG diff.
+  - `git diff --name-only` / `--stat` for the scope and untouched files. `git show --name-only` per commit, and `git diff b7d3ce2 HEAD -- tests` / `git diff 75cca26 HEAD -- crates` (both empty), for phase separation. `git show b7d3ce2:<src>` showed the src files were still stubs at RED.
+  - `wc -l` (largest 576). `grep -c` ASSUMPTION = 3. A `grep` for `unwrap`, `expect`, `panic`, `unreachable` and `assert` in `src/` (only the two `text`-fenced usage examples). A `grep` of `pub` items against the brief's API.
+  - `cargo tree --offline` (the only `holler-*` crates are `holler-pane` and its `holler-proto`; the forbidden count is 0).
+  - The privacy grep of added lines (clean). `.githooks/commit-msg` against the six subjects. The spike lines 175-180 and 264-275 for the ASSUMPTION citations. `gh pr list` (no PR yet), and `gh issue list` searches (no cleanup issue).
