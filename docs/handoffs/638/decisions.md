@@ -37,3 +37,26 @@
   - W-10 (membership versus generation order) is not pinned: A left it to O, and no run has an O.
   - `the_fake_is_send_and_sync_and_its_watch_is_send` cannot be RED at run time (a compile-time check).
 - **Evidence:** `cargo test -p holler-pane-testkit` fails with 7 E0432/E0433 errors, all missing items. A throwaway stub crate in the scratchpad (outside the repository) type-checked both files and showed assertion failures; a throwaway working fake passed all 22 fake tests. `rustfmt --check` clean.
+
+## F (Phase 5, implement) -- 2026-10-09T11:40:00-06:00
+- **Decided:** implemented the brief's slice a. All 32 of T's tests are GREEN unchanged, and every AC 8 guard passes (see handoff-F.md).
+  - **Feed (A's W-4).** `feed.rs` owns everything generic about the change feed, over a crate-private `Change` trait shaped like the hub's `RegistryEntry`: the head, the whole history, the live map that `get` and `list` read, cursor allocation, the `Cursor(0)` snapshot, "after `since`", `usage`, the idle wait and the iterator.
+  - **The watch.** Every `next()` passes `faults.enter(WatchNext)` first, and every poll resumes from the head (A's W-5; main's ADR-0021 item 7).
+  - **Write paths (A's W-3).** There is one write path per kind, `put` and `remove` with a `Writer`. Every generation goes through `next_generation`, and every cursor comes from `Log::append`. `seeded` and `concurrent_*` bypass the faults and the call log.
+  - **Membership (A's W-10, unpinned).** It runs for port writes only, after the generation check, compares slugs, and does not check that the profile exists. Both points are written in `FakePaneStore`'s doc.
+  - **Suite (A's W-11).** One `CASES` table, with case 14 reordered (W-5) and neutral `demo-*` names (W-6). The generic helpers (`run_cases`, `succeeds`, `expect_code`, `expect_eq`, `next_item`, `drain`) stay crate-private for slices c to e.
+  - **Names.** `PortOp::as_str` (W-12). The stubs name their issue, #681 to #684 (W-1 wording).
+  - **CHANGELOG.** The entry is placed before the #670 entry, not after it, because #639 (PR #685) merged its own entry at that spot after this branch was cut. A literal placement conflicts, and the Workflow does not rebase.
+- **Assumed:**
+  - The run's agent merges this branch without rebasing first. Either way it is clean: `git merge-file` reports 0 conflicts in `CHANGELOG.md`, and no other path overlaps `2a6f349`.
+  - `concurrent_put` skipping the membership rule matches the brief's "unconditionally".
+- **Hedged:**
+  - A's optional public `drain` was not taken (the brief's API is exact); adding it later is additive.
+  - Failure details print whole records with `{:?}`, which is verbose but complete.
+  - W-1 and W-2 (issues #681 to #684) remain for the run's agent or the operator.
+- **Evidence:**
+  - **Crate guards:** `cargo test -p holler-pane-testkit` (22 + 10 pass; 30 repeated runs, 0 failed).
+  - **Workspace guards:** build, `clippy --workspace --all-targets -D warnings`, `test --workspace` (1073 passed, 0 failed), `cargo machete`, `scripts/lint.sh`, `scripts/changelog-check.sh`, `scripts/test-hooks.sh`, `rustfmt --check`, `cargo tree` (no `holler-cli`, `-hub` or `-adapter` edge), and `rustdoc -D warnings`.
+  - **Mutants:** a scratch probe crate (outside the repository) ran each mutant through the suite. Each fails on its named case, and the unbroken wrapper passes.
+  - **Hub:** the suite ran against main's real `PaneState` (`2a6f349`) in a throwaway export. Cases 1 to 18 pass and case 19 fails, as the brief predicts until #661.
+  - **Unchanged source relied on:** see `evidence.md`.

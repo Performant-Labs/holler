@@ -39,6 +39,15 @@ fills this file in at release time.
   the launcher's files. The operation id for long work is deferred to #644, and the points that need the operator are listed.
   Protocol v2 is unchanged; its "Not in v2" section now notes that the `pane/*` and `profile/*` methods are control-socket
   methods outside the wire catalog ([#634](https://github.com/Performant-Labs/holler/issues/634)).
+- Pane control, the test kit's first part (epic [#633](https://github.com/Performant-Labs/holler/issues/633)):
+  `holler-pane-testkit` now has a fake pane registry that pane-control tests run against instead of a hub. A test can
+  inject faults into it: a wedged store that times out, a corrupt one that fails every call, a one-shot error on one method,
+  a slow call, and another writer's change. It also records every call made through it. A conformance suite that any pane
+  registry runs against itself comes with it: 19 cases covering the compare-and-swap on a pane's generation, delete, list
+  order, the watch stream (from the start, resumed from a cursor, idle) and the rule that a pane belongs to at most one
+  profile. The fake passes all 19, and a registry that breaks one rule fails the case for it. The profile, Herdr, host and
+  harness fakes and the JSON-envelope checker follow in later parts. Test code only: nothing a user runs changes
+  ([#638](https://github.com/Performant-Labs/holler/issues/638)).
 - Pane control, slice c of the skeleton (epic [#633](https://github.com/Performant-Labs/holler/issues/633)):
   the CLI side. `holler pane` (`list get watch launch relaunch switch reset park unpark close doctor
   import`) and `holler profile` (`create delete list show apply rename export import`) are in the
