@@ -29,3 +29,26 @@
 - **Assumed:** The values pinned twice (`SCHEMA_VERSION`, against `holler-cli/src/output.rs:34`, and the four envelope keys) are not duplication. The dependency rule of ADR-0021 section 5 forces them, and a contract checker must not share the producer's constant. `0..=3` is ADR-0021 section 9's contract rather than a code table, as Phase 3 found, and `holler-pane` offers no exit-code set to derive it from. The workflow script commits this handoff, as it did at Phase 3, so I did not commit.
 - **Hedged:** I did not re-run the test suite or clippy. F and T own Tier 1 and Tier 2, and both report GREEN with both `Map` backends. The duplicate-key gap that F reports is a spec question for S or a follow-up issue. Declining a hand-written scanner was what the map required. I did not grade the uncapped `{:?}` in `Display`. `excerpt` would cap the text at 64 characters, but it is `pub(crate)` in `holler-pane`, and `InvalidCode` in the CLI uses plain `{:?}` too, so the codebase has no single pattern here.
 - **Evidence:** I read the brief, handoff-A, handoff-F, handoff-T-green, this journal and issue #681. I read `envelope.rs` and `tests/envelope_test.rs` in full, and the diffs of `Cargo.toml`, `Cargo.lock`, `lib.rs` and `CHANGELOG.md`. I ran `git diff --name-only origin/main...HEAD`, which shows only the blast radius. Workspace greps found no other envelope checker, `exact_members`-like helper, stream deserializer or one-line validator outside the CLI's producer side, and no `conformance/envelope.rs`. `cargo tree --offline -p holler-pane-testkit -e normal --depth 1` lists `holler-pane` and `serde_json` only, with 0 `holler-(cli|hub)` lines. I also read `holler-pane/src/error.rs:1-310, 360-392, 684-700`, `holler-cli/src/output.rs:84-98, 215-350`, `conformance/mod.rs` and ADR-0021 section 9. The CLI placeholder parsers are at `verb_harness/mod.rs:1-16, 76-96`, `process/main.rs:72-92` and `process/usage.rs:1-30`. A scan of the added lines found no personal names and no absolute paths.
+
+## S (Phase 10, spec audit) — 2026-10-09T13:27:22-06:00
+- **Decided:** PASS (see handoff-S.md). Each of the brief's AC1 to AC10 and each of the issue's three acceptance criteria maps to a named test or to evidence I checked. The implementation matches the brief's public API, the order of rules 0 to 13, and decisions 1 to 7. I accepted the re-wrap of the `lib.rs` paragraph against AC7's "line 5 only": it stays inside that one doc paragraph and changes no item, A's W-6 allowed it in advance, and F declared it. The brief rejects a blank message, which is stricter than the issue's "non-empty". I treated that as a documented brief decision, not a silent deviation, and it makes no difference for real CLI output.
+- **Assumed:** I relied on T-green's and F's recorded command output for Tier 1 (build, clippy, the testkit and workspace tests with both `Map` backends, `lint.sh`, `changelog-check`, `test-hooks`, `rustfmt`) and did not re-run it. Squash-merging will replace the branch's commit trailers, and O adds the PR-body AI disclosure after the script opens the PR (CLAUDE.md).
+- **Hedged:** I raised five non-blocking advisories.
+  - (1) A's W-4, W-5 and W-6 follow-ups are recorded only in this run's handoffs, which are removed before the push. #684 does not mention the stale `lib.rs:28-29` sentence, and #660 still has the pre-#676 exit-code text. O should carry them to the issues.
+  - (2) Some adjacent rule pairs have no test that pins their order: 3/4, 4/5, 8/9, 9/10, 10/11, 11/12 and 11/13. A reorder there would only change which fault is named for output that breaks two rules.
+  - (3) Duplicate keys are not detected.
+  - (4) `check_envelope` accepts a pretty-printed single envelope.
+  - (5) The PR disclosure step.
+
+  None of these is a criterion of the issue or the brief, so none is REWORK.
+- **Evidence:**
+  - I read in full: issue #681, the brief, every handoff in this directory, `evidence.md`, `envelope.rs`, `tests/envelope_test.rs`, and the `lib.rs`, `Cargo.toml`, `Cargo.lock` and CHANGELOG diffs. I also read ADR-0021 section 9 and the issue texts of #660 and #684.
+  - `git diff --name-only origin/main...HEAD` lists only the blast radius.
+  - `git show --stat` of each phase commit: F touched no test, and T-green touched only the test file.
+  - The `mod tests` and the doctest are byte-identical between RED (`75ea14e`) and HEAD.
+  - `wc -l` gives 457 for `envelope.rs` and 696 for the test file.
+  - Greps of library code found no unwrap, expect, panic, unreachable or indexing, and the diff adds no `#[allow]`.
+  - `cargo tree --offline` shows only `holler-pane` and `serde_json`, with 0 `holler-(cli|hub)` lines. `preserve_order` is off for `-p holler-pane-testkit` and on for `--workspace`.
+  - `grep -cF` matches the ADR example strings: 1 each in the ADR and in the test.
+  - Greps of every added line for private paths, names, hosts, IPs, e-mail addresses and secrets found nothing.
+  - Commit subjects and trailers were checked against `.githooks/commit-msg` and `CONTRIBUTING.md`. `gh pr list --head issue-681-implementation` is empty.
