@@ -19,8 +19,9 @@ test kit's neutral names (`demo-c1r1`, `scratch`, `/srv/demo`, `demo-provider`).
 
 **F's file cap trips; a split is proposed (the MO decides).** One component family (the profile verbs and their two pure
 helpers), but F edits **six production files** (four verb files, two `holler-pane` files) plus **three mechanical doc files**
-(`CHANGELOG.md`, `docs/adr/ADR-0003.md`, `docs/adr/ADR-0021.md`); T edits **five test files** and the
-fixture. The production size is about 1,000 lines (`profile_diff.rs` ~260, `profile_snapshot.rs` ~70, `show.rs` ~200,
+(`CHANGELOG.md`, `docs/adr/ADR-0003.md`, `docs/adr/ADR-0021.md`); T edits **eight test files** and the
+fixture (662a: `holler-pane/tests/profile_{snapshot,diff}_test.rs`, `profile_verbs/{rig,list,show}.rs`, `stub.rs`; 662b:
+`profile_verbs/{create,delete}.rs`, `stub.rs` again). The production size is about 1,000 lines (`profile_diff.rs` ~260, `profile_snapshot.rs` ~70, `show.rs` ~200,
 `list.rs` ~90, `create.rs` ~260, `delete.rs` ~150); tests about 1,200.
 
 | Run | Scope | F's files | Closes |
@@ -40,7 +41,7 @@ The four `holler profile` verbs that create, delete, list and show a profile are
 made from the running panes, so the migration (#650) cannot create its `fleet` profile, `holler profile apply` (#664) has no
 comparison to plan from, and the PROPOSED `profile-drift` finding (#665) has nothing to call. This story fills the six files
 against the frozen ports, coding only against `PaneStore`, `ProfileStore` and `output::emit()`, and is tested only on the test
-kit's fakes.
+kit's fakes (the verbs) and holler-pane's own fixture records (the two pure modules).
 
 ## Evidence (verbatim, as of `3bdd129`)
 
@@ -1452,6 +1453,7 @@ pub fn fixed_port_policy(port: u16) -> String;
 /// command <- pane.command   check <- pane.probe.check   expect <- pane.probe.expect (in order)
 /// Not copied: generation, herdr.session, herdr.pane_id, host.name, host.tmux, host.herdr_api_version,
 /// harness.pid, harness.health, session_of_record, hold, last_observed, profile, probe.last.
+/// The port is copied as recorded: a record at port 0 gives `fixed:0`, which #644's `port_of_policy` refuses (`usage`).
 pub fn spec_from_pane(pane: &Pane) -> ProfileSpec;
 
 /// A new profile named `name` (slug `name.slug()`, generation 0, `created` and `updated` 0: the store
@@ -1467,7 +1469,7 @@ use serde::Serialize;
 use crate::argv::Argv;
 use crate::grid::GridPos;
 use crate::pane::Pane;
-use crate::profile::{Profile, ProfileSpec};
+use crate::profile::{Profile, ProfileName, ProfileSpec};
 
 /// A field of a `ProfileSpec`, named by its dotted JSON path. Serializes as that path.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
@@ -1490,13 +1492,14 @@ pub enum SpecField {
 }
 
 impl SpecField {
-    /// Every field, in the order `profile show` lists a spec (the order above).
+    /// Every field, in the order `profile show` lists a spec and `diff_spec` compares (the order above).
+    /// `PortPolicy` included (Decision 3).
     pub const ALL: [SpecField; 15];
-    /// The fields a spec and a live pane are compared on: `ALL` without `PortPolicy` (Decision 3).
-    pub const COMPARED: [SpecField; 14];
     /// The dotted path, equal to the serde name (`"herdr.grid"`).
     pub const fn as_str(self) -> &'static str;
-    /// The value of this field in `spec`.
+    /// The value of this field in `spec`. `harness.kind` and `role` take their text from serde
+    /// (`serde_json::to_value(..)`'s string, as `pane/args.rs::parse_role` does; a non-string falls back to
+    /// an empty text, never a panic), so no variant name is written a second time.
     pub fn value(self, spec: &ProfileSpec) -> FieldValue;
 }
 
@@ -1551,11 +1554,11 @@ pub struct PaneDiff {
     pub differences: Vec<FieldDiff>,
 }
 
-/// Whether `pane` is a member of the profile whose slug is `profile_slug`: its `profile` names a
-/// profile with that slug. This is what "live pane of a profile" means (Decision 4).
-pub fn is_member(pane: &Pane, profile_slug: &str) -> bool;
+/// Whether `pane` is a member of `profile`: its `profile` has `profile.slug()` (slugs compared on both
+/// sides, like the test kit's `belongs`). This is what "live pane of a profile" means (Decision 4).
+pub fn is_member(pane: &Pane, profile: &ProfileName) -> bool;
 
-/// Every compared field where `live` differs from `spec`, in `SpecField::COMPARED` order; empty when
+/// Every field where `live` differs from `spec`, in `SpecField::ALL` order; empty when
 /// they match. The names are not compared (the caller pairs them). `env` and `expect` are compared as
 /// sets (sorted, duplicates dropped); every other field by equality. Pure: it compares `spec` with
 /// `profile_snapshot::spec_from_pane(live)`.
@@ -1646,10 +1649,10 @@ passes through with its own code (`unavailable`, `timeout`, `store-corrupt`, `ge
 No verb calls `herdr`, `host`, `harness`, `scope` or `prober`, and none reads the process environment.
 
 **list (662a).** `profile_store.list()`, then one `pane_store.list()`; for each profile (sorted by slug) count its specs and the
-panes for which `is_member(pane, &profile.slug)`.
+panes for which `is_member(pane, &profile.name)`.
 
 **show (662a).** `ProfileName::parse(name)` (`usage`); `profile_store.get` (`None` -> `ProfileNotFound { what: <name {:?}> }`,
-exit 3); `pane_store.list()` filtered by `is_member`; `diff_profile(&profile, &members)`; each row's `probe` is the member's
+exit 3); `pane_store.list()` filtered by `is_member(_, &profile.name)`; `diff_profile(&profile, &members)`; each row's `probe` is the member's
 `probe.last` (`None` for `Missing`). The probe is **read**, never run (Decision 6).
 
 **create (662b).** Common: parse NAME (`usage`); `profile_store.get(NAME)` is `Some` -> `ProfileExists { what: "<name> (slug
@@ -1675,7 +1678,7 @@ through. The actor is `Actor::parse("holler profile create")` (Decision 9).
      reconcile with: holler profile show <name> and holler profile delete <name> --keep-panes" }` (exit 1). One line.
 
 **delete (662b).** Parse NAME (`usage`); `get` (`None` -> `ProfileNotFound`, exit 3); `members = pane_store.list()` filtered by
-`is_member`.
+`is_member(_, &profile.name)`.
 - `members` non-empty and no `--keep-panes` -> `ProfileHasLivePanes { what: "<name> has N live panes (a, b); run holler profile
   delete <name> --keep-panes to detach them" }` (exit 3), nothing written.
 - `--keep-panes`: for each member, `cas_put(&Pane { profile: None, ..member }, member.generation)`. A failure stops the verb with
@@ -1724,15 +1727,17 @@ through. The actor is `Actor::parse("holler profile create")` (Decision 9).
 3. **`harness.port_policy` under `--from-current` is `fixed:<port>`** (ADR-0021's deferred item). The record holds the port in
    use and no policy (E11); `fixed:<port>` keeps that fact, so `apply` (#664) and the recreation (#666) can put the harness back
    on the same port. `fixed` alone (the fixture's value) would lose it. The policy grammar is otherwise #644's; this story
-   defines only this one form, as `FIXED_PORT_POLICY_PREFIX` and `fixed_port_policy`. `port_policy` is **not compared**
-   (`SpecField::COMPARED` omits it), because a live pane has no policy to compare and a spec's `fixed` or `auto` would
-   otherwise always differ.
+   defines only this one form, as `FIXED_PORT_POLICY_PREFIX` and `fixed_port_policy`. `port_policy` **is compared** (it is in
+   `SpecField::ALL`, like every field): the live side is `fixed_port_policy(live.harness.port)`, and #644 (amended, `7195993`)
+   makes `fixed:<port>` the only form, so this is a port comparison. A pane relaunched on another port shows as `differs` in
+   `show`, `apply` (#664) and `profile-drift` (#665). A spec holding the bare `fixed` (the kit's `sample_spec`, E9) differs from
+   every live pane; tests that need a match set `port_policy` to `fixed_port_policy(<port>)` (Follow-ups).
 4. **A profile's live panes are its members**: the pane records whose `profile` has the profile's slug (`is_member`). A closed
    pane's record is removed (epic ruling 9), so a record is the registry's statement that the pane exists; reading Herdr or
    the harness would make `list`, `show` and `delete` depend on adapters this story must not call. `list`'s live count, `show`'s
    comparison and `delete`'s `profile-has-live-panes` all use this one definition. A detached spec naming a pane of another
    profile shows as `missing` (membership is `Pane.profile` only).
-5. **One comparison for show, apply and drift.** `diff_spec` compares `spec` with `spec_from_pane(live)` on `COMPARED`, so
+5. **One comparison for show, apply and drift.** `diff_spec` compares `spec` with `spec_from_pane(live)` on `ALL`, so
    `diff_spec(&spec_from_pane(p), p)` is always empty (AC 2c). That is what makes #650's "`profile show fleet` reports no
    difference" hold. `env` and `expect` compare as sets (a reorder is not drift); `command` and `check` compare as ordered
    argv.
@@ -1750,14 +1755,22 @@ through. The actor is `Actor::parse("holler profile create")` (Decision 9).
    `emit_error`, never unwrapped.
 10. **Output.** Shapes as in "What each verb prints". JSON comes only from derived `Serialize` structs and `FieldValue` (typed),
     so a grid is `{"row":2,"col":1,"pos":"r2c1"}` in every build (E7). `list` sorts by slug itself (the port pins no order).
-11. **Where the pure tests live.** `holler-pane` cannot take the test kit as a dev-dependency (the kit depends on it, so its
-    types would be a second copy of the crate's) and its manifest is #637's. The tests of `profile_snapshot` and `profile_diff`
-    go through their public API in `crates/holler-cli/tests/profile_verbs/show.rs`, with the kit's fixtures.
+11. **Where the pure tests live.** Pure functions over records are tested in their own crate (`docs/testing.md:45`, "per-crate
+    integration tests"), like the nine `crates/holler-pane/tests/<topic>_test.rs` files; only port-driven code needs the test
+    kit, and these two modules call no port. AC 1 is `crates/holler-pane/tests/profile_snapshot_test.rs`, AC 2
+    `crates/holler-pane/tests/profile_diff_test.rs`. Each starts with
+    `#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)] // #662` and `mod common;`, and builds on
+    `common::{pane, spec, profile, pane_name, profile_name}`, overridden per case with the neutral names (`demo-c1r2`, `/srv/demo`,
+    `demo-provider`) wherever a test sets or asserts one. No manifest change: `crates/holler-pane/Cargo.toml` has no `[[test]]`
+    or `autotests`, so a new `tests/*.rs` is discovered, and `serde_json` is already a dependency. `profile_verbs/show.rs` keeps
+    the verb's own AC 5.
 12. **Test rig, without editing `main.rs`.** `tests/profile_verbs/main.rs` is #670's; the shared rig (the fakes, a `ports()`,
-    `run(argv, format)`, `assert_no_adapter_call()`) lives in `tests/profile_verbs/list.rs` as `pub(crate) mod rig` (662a), and
-    `show.rs`, `create.rs`, `delete.rs` `use crate::list::rig`. Each format runs on its own freshly seeded rig. Adapters are
-    `FakeHerdr::new("scratch")`, `FakeHost::new()`, `FakeHarness::new()`, `FakeProber::new()` (asserted uncalled); `scope` is the
-    harness's `Unwired`.
+    `run(argv, format)`, `assert_no_adapter_call()`) is its own file, `tests/profile_verbs/rig.rs`, declared from `list.rs` as
+    `#[path = "rig.rs"] pub(crate) mod rig;` (662a; a `#[path]` in the non-`mod.rs` file `list.rs` resolves against its
+    directory; the way #644 includes `launch_rig.rs`). `show.rs`, `create.rs`, `delete.rs` `use crate::list::rig`; #664/#665
+    extend `rig.rs`, not `list.rs`. Each format runs on its own freshly seeded rig. Adapters are `FakeHerdr::new("scratch")`,
+    `FakeHost::new()`, `FakeHarness::new()`, `FakeProber::new()` (asserted uncalled); `scope` is the harness's `Unwired`. One base
+    rig should be agreed across #643 (`pane_verbs/list.rs`), #644 (`launch_rig.rs`) and this one (Follow-ups).
 13. **A failing-Nth-write seam for the undo tests (662b).** The fakes fail only the *next* call of a method (E9 `fail_next`), so a
     join that fails on the second pane needs a seam: a test-local `PaneStore` in `create.rs` that delegates every method to a
     `FakePaneStore` and fails its N-th `cas_put` (and optionally the M-th) with a given `PaneError`. It holds no state of its own
@@ -1765,7 +1778,7 @@ through. The actor is `Actor::parse("holler profile create")` (Decision 9).
 14. **ADR-0021 doc edit (F; three places, no other ADR text changes):** (i) section 3, lines 153-154: replace "**Deferred to
     #662:** what `--from-current` writes for `harness.port_policy`, which the `Pane` record does not hold (it records the port
     in use, not the policy)." with "`--from-current` writes `harness.port_policy` as `fixed:<port>`, the port the pane's harness
-    uses (#662, `profile_snapshot::fixed_port_policy`); `port_policy` is not compared by `profile_diff`. A profile's **live
+    uses (#662, `profile_snapshot::fixed_port_policy`); `profile_diff` compares it with `fixed:<port>` of the live port. A profile's **live
     panes** are the pane records whose `profile` names it (by slug)." (ii) section 9 table: add `profile-conflict` as the last code of the
     `profile create` row and of the `profile delete` row. (iii) "Deferred to named stories": delete the two bullets that name #662.
     662a makes (i) and (iii), 662b makes (ii).
@@ -1774,29 +1787,35 @@ through. The actor is `Actor::parse("holler profile create")` (Decision 9).
 
 All commands run from the worktree. "Both formats" means the same argv run with `Format::Text` and `Format::Json` on two freshly
 seeded rigs, with equal exit codes, and the JSON `out` passing `check_envelope(&out, code)` (E9). Test names are the ones T
-writes; T may add cases but not drop these.
+writes; T may add cases but not drop these. A verb-test spec meant to match a seeded pane sets `harness.port_policy` to
+`fixed_port_policy(<its port>)` (the kit's `sample_spec` says `fixed`, which differs under Decision 3).
 
-1. **(a) Snapshot.** In `tests/profile_verbs/show.rs`:
+1. **(a) Snapshot.** In `crates/holler-pane/tests/profile_snapshot_test.rs` (Decision 11; over `common::pane()`):
    - a. `snapshot_copies_every_spec_field_from_the_pane_record`: a pane with every field set (grid r2c1, cwd, workspace, model,
      role `orchestrator`, env `["ALPHA_TOKEN","BETA_URL"]`, context 1/2, command, `probe.check`, `probe.expect ["qwen38"]`,
      port 48100) gives a spec equal to one written out by hand per the mapping table, with `port_policy == "fixed:48100"`.
    - b. `snapshot_takes_the_position_from_the_record_not_the_name`: `demo-c1r2` recorded at `{row:2,col:1}` snapshots to
      `r2c1`; `demo-c2r1` recorded at `{row:1,col:1}` snapshots to `r1c1`.
    - c. `profile_from_panes_keeps_order_and_starts_at_generation_zero`.
-2. **(a) Diff.**
-   - a. `diff_reports_each_differing_field_once`: changing grid, cwd and effort on the live pane gives exactly three
-     `FieldDiff`s, in `COMPARED` order, with `spec`/`live` values; the grid one serializes (raw string, not re-parsed) to
+2. **(a) Diff.** In `crates/holler-pane/tests/profile_diff_test.rs` (Decision 11; over `common::{pane, spec, profile}`):
+   - a. `diff_reports_each_differing_field_once`: against `spec_from_pane(&p)`, changing grid, cwd and effort on the live pane
+     gives exactly three `FieldDiff`s, in `ALL` order, with `spec`/`live` values; the grid one serializes (raw string, not re-parsed) to
      `{"field":"herdr.grid","spec":{"row":1,"col":1,"pos":"r1c1"},"live":{"row":2,"col":1,"pos":"r2c1"}}`.
    - b. `diff_compares_env_and_expect_as_sets_and_argv_in_order`.
-   - c. `snapshot_round_trips_to_no_difference`: `diff_spec(&spec_from_pane(&p), &p)` is empty for `sample_pane` and for the
-     fully populated pane of 1a.
+   - c. `snapshot_round_trips_to_no_difference`: `diff_spec(&spec_from_pane(&p), &p)` is empty for `common::pane()` and for the
+     fully populated pane of 1a (the `sample_pane` half is pinned at the verb level by AC 5b).
    - d. `diff_profile_classifies_matches_differs_missing_extra`: rows in spec order then extras; `differences` non-empty
      exactly for `Differs`.
    - e. `spec_field_values_serialize_like_the_spec`: for every `SpecField::ALL` entry, `serde_json::to_value(field.value(&spec))`
      equals the value at the field's dotted path in `serde_json::to_value(&spec)` (an absent `command`/`check` equals `null`),
-     and `field.as_str()` equals its serde name.
+     and `field.as_str()` equals its serde name. And `grep -nE '^[^/]*"(opencode|agent|orchestrator)"'
+     crates/holler-pane/src/profile_diff.rs` prints nothing (no hand-written serde name, Warn 4).
    - f. `field_text_escapes_control_characters`: a cwd `"/srv/a\u{1b}[31mb\nc"` prints as `/srv/a\u{1b}[31mb\nc` (escaped,
      no raw ESC or newline); an argv prints as a JSON array.
+   - g. `diff_compares_port_policy_as_the_live_port`: a spec at `fixed:48100` against a live port 48101 gives exactly one
+     `FieldDiff` (`harness.port_policy`, spec `fixed:48100`, live `fixed:48101`); a spec at the bare `fixed` differs too.
+   - h. `is_member_compares_slugs`: a pane whose `profile` is `SOME-PROFILE` is a member of `Some Profile`; one with `Other` or
+     none is not.
 3. **(a)+(b) No adapter, no probe, no environment.** Every verb test ends with the rig's `assert_no_adapter_call()`: the
    `faults().calls()` of `FakeHerdr`, `FakeHost` and `FakeHarness`, and `FakeProber::calls()`, are all empty (the rig's `scope`
    is `Unwired`, so a call to it would fail the verb). And
@@ -1877,13 +1896,16 @@ writes; T may add cases but not drop these.
 10. **(a)+(b) ADR-0021** carries Decision 14's text: `grep -n 'Deferred to #662' docs/adr/ADR-0021.md` prints nothing;
     `grep -n 'fixed:<port>' docs/adr/ADR-0021.md` prints the section 3 line; (b) `grep -n 'profile create. |.*profile-conflict' docs/adr/ADR-0021.md` and
     `grep -n 'profile delete. |.*profile-conflict' docs/adr/ADR-0021.md` each print one line (the section 9 rows).
-11. **(a)+(b) Crate tests.** `cargo test -p holler-cli --test profile_verbs` and `cargo test -p holler-pane` pass;
-    `cargo test --workspace` passes.
+11. **(a)+(b) Crate tests.** `cargo test -p holler-cli --test profile_verbs` and `cargo test -p holler-pane` pass, the latter
+    running AC 1-2 (a: `cargo test -p holler-pane --test profile_snapshot_test --test profile_diff_test` lists every AC 1-2
+    name); `cargo test --workspace` passes.
 12. **(a)+(b) Lints.** `cargo clippy --workspace --all-targets -- -D warnings` and `bash scripts/lint.sh` pass (every `#[allow]`
-    in a touched test file carries `// #662`; every touched file under 900 lines; every function under 100 lines).
+    in a touched test file, the two `holler-pane/tests/profile_*_test.rs` headers and `profile_verbs/rig.rs` included, carries
+    `// #662`; every touched file under 900 lines; every function under 100 lines).
 13. **(a)+(b) No new `unsafe`, no new dependency.** `git diff origin/main -- '*.rs' | grep -n '^+.*unsafe'` prints nothing;
     `git diff origin/main -- '**/Cargo.toml' Cargo.lock` prints nothing; `cargo machete` reports nothing new.
-14. **(a)+(b) Formatting.** `rustfmt --check --edition 2021` on every `.rs` file this run touched exits 0 (C5).
+14. **(a)+(b) Formatting.** `rustfmt --check --edition 2021` on every `.rs` file this run touched exits 0 (C5), the new
+    `crates/holler-pane/tests/profile_{snapshot,diff}_test.rs` and `crates/holler-cli/tests/profile_verbs/rig.rs` included (a).
 15. **(a)+(b) CHANGELOG.** `CHANGELOG.md` under `## [Unreleased]` / `### Enhancements` gains one entry (662a: the snapshot, the
     comparison, `profile list` and `profile show`; 662b: `profile create` and `profile delete`) linking
     `[#662](https://github.com/Performant-Labs/holler/issues/662)`; `bash scripts/changelog-check.sh` prints `changelog-check: ok`.
@@ -1898,8 +1920,11 @@ Production (F):
 - Docs: `docs/adr/ADR-0003.md` (the four rows), `docs/adr/ADR-0021.md` (Decision 14), `CHANGELOG.md`.
 
 Tests (T):
-- `crates/holler-cli/tests/profile_verbs/list.rs` (a; holds `pub(crate) mod rig`), `show.rs` (a; also the snapshot and diff
-  tests), `create.rs` (b; also the Decision 13 seam), `delete.rs` (b). Each replaces the file's stub case.
+- (a) `crates/holler-pane/tests/profile_snapshot_test.rs` (AC 1) and `profile_diff_test.rs` (AC 2): new, over `tests/common`
+  (Decision 11); `tests/common/mod.rs` is not edited.
+- `crates/holler-cli/tests/profile_verbs/rig.rs` (a; new, the shared rig, Decision 12), `list.rs` (a; AC 4, declares `rig` by
+  `#[path]`), `show.rs` (a; AC 5), `create.rs` (b; also the Decision 13 seam), `delete.rs` (b). Each verb file replaces its stub
+  case.
 - `crates/holler-cli/tests/pane_verbs/process/stub.rs`: delete the #662 STUBS entries, keep `// #662`.
 - `crates/holler-cli/tests/fixtures/cli-surface.txt`: the `# #662` group (AC 9).
 
@@ -1921,9 +1946,10 @@ the STUBS entries), ADR-0021 (Decision 14) and `CHANGELOG.md`.
 | `Argv`, `EnvVarName` (E4) | argv and env values | reuse; argv printed as JSON, never joined |
 | `ProbeResult` serde form (E4) | show's `probe` | reuse as is |
 | `spec_from_pane` | create, `diff_spec`, #650 | new here, one copy |
-| `is_member` | list, show, delete (and #664/#665) | new here, one copy (not three inline filters) |
+| `is_member` | list, show, delete (and #643, #663, #664/#665) | new here, one copy (not three inline filters) |
 | `diff_profile` / `diff_spec` | show, #664, #665 | new here, one copy |
-| test kit fakes, `sample_pane`/`sample_spec`/`sample_profile`, `check_envelope`, `verb_harness::run_verb_with`, `parse::try_parse` | every test | reuse; the only new test seam is the Decision 13 wrapper |
+| `crates/holler-pane/tests/common` (`pane`, `spec`, `profile`, `pane_name`, `profile_name`) | AC 1-2 | reuse; not edited |
+| test kit fakes, `sample_pane`/`sample_spec`/`sample_profile`, `check_envelope`, `verb_harness::run_verb_with`, `parse::try_parse` | every verb test | reuse; the only new test seams are `rig.rs` and the Decision 13 wrapper |
 
 **Forward-compat (consumers of this story's API):**
 
@@ -1933,7 +1959,9 @@ the STUBS entries), ADR-0021 (Decision 14) and `CHANGELOG.md`.
 | #664 `profile apply` | a plan from the comparison, matching `show` on the same fixture, positions rowcol | `diff_profile` (pass the panes apply considers), `PaneStatus` (missing -> create, matches -> adopt, differs -> report), typed `FieldDiff` |
 | #665 `profile-drift` (PROPOSED) | per-pane differences | `diff_spec`, `is_member` |
 | #649 integration scenario | create from current, show, list, delete refused while live then `--keep-panes`, every JSON output parses | the verbs; codes and shapes pinned here |
-| #644 launch (port policy) | to read the policy `--from-current` writes | `FIXED_PORT_POLICY_PREFIX`, `fixed_port_policy`; the rest of the grammar is #644's |
+| #644 launch/relaunch (amended `7195993`; **hard consumer**, merges after 662a) | relaunch's base spec; `port_of_policy` parses with the prefix and needs `port_of_policy(&fixed_port_policy(p)) == Ok(p)`; its T greps for the three signatures verbatim | `spec_from_pane`, `FIXED_PORT_POLICY_PREFIX`, `fixed_port_policy`, signatures **frozen** as written above. A record at port 0 snapshots to `fixed:0`, which #644 refuses (`usage`) |
+| #663 `StoreScope::resolve(P, None)` | its member filter over `PaneStore::list` (slug compared inline today) | `is_member(pane, &P)`, to reuse when 662a merges first |
+| #643 `pane watch --profile P` / `list --profile P` | its member filter (slug compared inline today) | `is_member(pane, &P)`, to reuse when 662a merges first |
 
 ## Out of scope
 
@@ -1942,11 +1970,22 @@ the STUBS entries), ADR-0021 (Decision 14) and `CHANGELOG.md`.
 - Wiring the real stores into the binary (`wiring.rs`, #649): until then the real `holler profile ...` answers `not-implemented`
   from `Unwired`, which `pane_cli_process` no longer asserts for these verbs (AC 8).
 - Any Herdr, tmux or OpenCode call; any live fleet or real session.
-- Comparing `port_policy` with the live port; a pane filter for `--from-current`; redacting argv elements.
+- A pane filter for `--from-current`; redacting argv elements.
 
 ## Follow-ups (not this story; the orchestrator files them if wanted)
 
-- #644: adopt `fixed:<port>` as one form of `--port-policy` (or amend Decision 3 first).
+- **Port policy in the kit.** When the kit's `sample_spec` moves to `fixed:48100` (#644's kit follow-up), the profile_verbs
+  tests drop their `port_policy` override; #664/#665 get the port comparison through `diff_spec` unchanged. A spec stored
+  with a bare `fixed` before #644 shows `harness.port_policy` as differing until rewritten.
+- **One base rig.** #643 (`pane_verbs/list.rs`), #644 (`pane_verbs/launch_rig.rs`) and this story (`profile_verbs/rig.rs`) each
+  build a rig over the same seven fakes in two test targets. O agrees one base with #643's A W-3 and a later story moves it
+  under `tests/verb_harness/`, included by `#[path]` from both targets.
+- **Shared read-verb text forms** (for O to settle with #643's A W-2, before the second of #643, #647, #662 merges). This
+  brief keeps its probe form, the issue's acceptance text. Divergences from #643's `pane get`: probe `failed (missing
+  "qwen38")` here vs `failed missing=["qwen38"]`; absent marker `none` vs `-`; keys `host.cwd`/`herdr.grid` vs
+  `project`/`pos`; escaping control characters only (`char::escape_default`, as `holler_proto::log::escape_field_value`) vs
+  `text_value`'s `{:?}` quoting. JSON already agrees (both use the records' serde). `FieldValue`'s `Display` stays in
+  holler-pane whatever is chosen (that crate cannot import a CLI helper).
 - A cross-registry guard for `delete`: a pane that joins NAME between `delete`'s member listing and its delete leaves a pane
   naming a deleted profile (the two registries share no transaction, ADR-0021 section 8). Reconcile (#647) or doctor should
   report a pane whose `profile` names no profile.
@@ -1959,7 +1998,8 @@ wrong-but-typed values (`fixed_port_policy` -> `String::new()`, `spec_from_pane`
 ceilings, `profile_from_panes` -> no specs, `diff_spec`/`diff_profile` -> `Vec::new()`, `is_member` -> `false`, `value` ->
 `FieldValue::Text(String::new())`, `Display` -> empty); the verb files with their new `Args` structs and `run` still returning
 `emit_error(.., not_implemented(STORY))`. Then every behaviour test fails on its assertion: the verb tests on `exit 1,
-not-implemented` where they expect 0/2/3 and data; the pure tests on wrong values (2c and 5b pass vacuously against the stubs;
+not-implemented` where they expect 0/2/3 and data; the pure tests in `crates/holler-pane/tests/profile_{snapshot,diff}_test.rs`,
+which the `holler-pane/src` signature stubs compile, on wrong values (2c and 5b pass vacuously against the stubs;
 that is expected, and T journals which tests are RED and which pass for want of behaviour). The fixture lines of AC 9 do not parse against
 today's `ProfileShow {}` / `ProfileCreate {}` / `ProfileDelete {}` (no positional) and parse once the signature stubs land;
 they are a surface check, not a RED behaviour test. T journals the RED run with the failing assertions.
@@ -1968,7 +2008,9 @@ GREEN: F replaces the stubs; then `cargo test -p holler-cli --test profile_verbs
 `--test docs_cli_test`, `--test pane_cli_process`, then the AC 11-15 gates.
 
 Every verb test uses only the test kit's fakes and fixtures, in-process through `run_verb_with`; no subprocess except the
-existing `pane_cli_process` target; no temporary directory is needed; no real session name appears.
+existing `pane_cli_process` target; no temporary directory is needed; no real session name appears. The pure tests (AC 1-2)
+call no port, so they need no fake; they use holler-pane's own `tests/common` records (Decision 11), which is the issue's "test
+kit only" in substance: no live fleet, session or adapter.
 
 ## Risks
 
@@ -1987,7 +2029,8 @@ existing `pane_cli_process` target; no temporary directory is needed; no real se
   `show`. Recorded, not changed here.
 - **No shell anywhere.** Argv is printed as a JSON array, never joined into a command line someone could paste into a shell
   with different splitting.
-- **Port policy grammar.** `fixed:<port>` is the first concrete policy string; if #644 chooses a different grammar, ADR-0021 and
-  `profile_snapshot.rs` change together (Follow-ups).
+- **Port policy grammar.** `fixed:<port>` is the first concrete policy string, and #644 (amended, `7195993`) adopts it as the
+  only form and pins the three `profile_snapshot` signatures verbatim; changing them breaks #644's pre-flight grep.
+- **Two text forms for one value** until the read-verb forms are settled with #643 (Follow-ups); JSON is unaffected.
 - **The real binary still answers `not-implemented`** for these verbs until #649 wires the stores; that is by design (E9 wiring
   docs) and not a regression.
