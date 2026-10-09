@@ -87,6 +87,15 @@ fills this file in at release time.
   `unavailable`). One function, `holler_pane::error::class_of`, decides which code is which, and the table of
   every code is in [ADR 0021](docs/adr/ADR-0021.md) section 9. The stubs still exit 1: `not-implemented` is a
   failure ([#676](https://github.com/Performant-Labs/holler/issues/676)).
+- Pane control, the test kit's envelope checker (epic [#633](https://github.com/Performant-Labs/holler/issues/633)):
+  `holler-pane-testkit` can now check the `--format=json` output of a `holler pane` or `holler profile` verb against
+  its exit code, as one envelope or as an NDJSON stream (`pane watch`) in which only the last line may be a failure.
+  It accepts exactly the envelope of [ADR 0021](docs/adr/ADR-0021.md) section 9: `schema_version` 1, `ok` true
+  exactly at exit 0, `error` null exactly when `ok` is true, no other key, a kebab-case code with a one-line message,
+  and an exit code that matches the class of the code. Otherwise it names the first rule the output breaks, such as
+  a log line before the envelope, a `detail` key or a refusal at exit 1. It classifies codes with
+  `holler_pane::error::class_of`, so it keeps no table of its own. Test code only: nothing a user runs changes
+  ([#681](https://github.com/Performant-Labs/holler/issues/681)).
 
 ## [0.4.0] - 2026-09-29
 
