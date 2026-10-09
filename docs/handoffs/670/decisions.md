@@ -275,3 +275,42 @@
     - `positionals` and `num_args` in `src`;
     - the blast radius over `git diff --name-only f2602ba...HEAD` (82 paths, all inside).
   - **Merge with main:** `git merge-tree` against `origin/main` (1c48c30) conflicts in `CHANGELOG.md` only, and `origin/main` changes nothing in `holler-cli`.
+
+## S (spec audit, pass 3) — 2026-10-09T09:16:08-06:00
+- **Decided:** PASS. handoff-S.md is rewritten for this pass; pass 2 is that file at 7939b54.
+  - **AC 1-8 are MET.** The brief's decisions are implemented, and the deviations recorded above are accepted.
+  - **Pass-2 item 1 (F, `src`) is resolved.**
+    - `resolve_tail` refuses a third positional in the SESSION form with the existing `Usage` (exit 2), and the doc comments now hold.
+    - T's two in-process tests and two binary rows fail against 51f3bed and pass on 02a3655.
+  - **Pass-2 items 2 and 4 (T) are resolved:** the `STUBS` doc and the refusal-constant layout, and the comments in `process/main.rs` and the manifest.
+  - **Pass-2 item 3 (T) is not resolved as asked.** The two refusal imports at `process/legacy_verbs.rs:10-11` are separate lines, but adjacent ones; pass 2 asked for "an unchanged line between them". It is not carried as a REWORK:
+    - no acceptance criterion or decision of the brief requires it (AC 7's separator rule covers the ADR rows and fixture lines, which are correct);
+    - pass 2 said items 2-4 would not force a REWORK on their own;
+    - the cost is one trivial rebase conflict for whichever of #646 and #648 lands second.
+
+    The fix, a `// #646` line and a `// #648` line above the two `use` lines, is advisory 1 of handoff-S.
+- **Corrects an earlier entry.** The "Assumed" of T's rework-2 entry above is wrong on both counts:
+  - Adjacent `use` lines do conflict. In a scratch repo, #646 deleting line 10 and #648 deleting line 11 in parallel gives `CONFLICT (content)`.
+  - rustfmt does keep a separating line. With a `// #NNN` line above each `use`, the file passes `rustfmt --check --edition 2021`, and the same deletions merge cleanly.
+  - A-dup pass 3 found the same.
+- **Assumed:**
+  - The built `target/debug/holler` (08:51 MDT) is the audited code: `git diff 02a3655 HEAD -- crates/holler-cli/src` is empty, and the last `src` commit is from 08:50 MDT.
+  - The `interrupt_test` failures in T's first workspace run are the known flake of open issue #420 (`reconnecting` in the warm-up), not this change: `interrupt_cmd.rs` runs after the warm-up.
+- **Hedged:**
+  - I did not re-run Tier 1 or Tier 2. GREEN rests on T's rework-2 run: 1031 passed, 0 failed.
+  - A third consecutive S REWORK would reach the script's `PER_GATE_BLOCK_THRESHOLD` (3) and stop the run. I knew this. The verdict rests on the item's weight, as above, not on the threshold.
+  - Advisory 1 is unowned unless O folds it into this PR or #646 picks it up.
+  - Since #634 merged (094ebfa), the `docs/protocol/v2.md` §10 drift (advisory 5) has no owning story.
+- **Evidence:**
+  - **Diff and documents:** `git diff origin/main...HEAD` (82 paths, all inside the blast radius). Also issue #670, epic #633 ("Decisions taken", item 5), issue #676, and ADR-0021 and v2.md on `origin/main`.
+  - **Read in full:** every new or changed `src` file and the test files listed in handoff-S.
+  - **Built binary:** run over an empty, isolated state dir, with no hub started.
+    - The split forms of `say`, `interrupt` and `answer` exit 2 with the `positionals` message, an empty stdout and no hub line.
+    - `say io/alpha --queue hello` still reaches the hub path.
+    - Also checked: the stub text and JSON forms, `usage` envelopes under `pane`/`profile` only, `--debug bogus` (exit 3), and bare and unknown subcommands.
+  - **Differential probe:** a scratch crate on clap 4.6.6, outside the repo. It compares `origin/main`'s `Say`/`Interrupt`/`Answer` with this branch's shapes plus a copy of `resolve_tail`, over 50 argv forms. Result: 0 differences. Every accepted form resolves to the same values, and every refused form is still refused.
+  - **Formatting:**
+    - `rustfmt --check --edition 2021` on all 62 new `.rs` files: the only diffs are in the pre-existing `tests/support/*`.
+    - In the 6 edited `src` files, no line that rustfmt would change is a line this branch added.
+  - **Greps:** banned calls, `#[allow`, `process::exit`, privacy (including the committed handoffs), and `Envelope` outside `output.rs`.
+  - **Merge with main:** `git merge-tree` against `origin/main` (094ebfa) conflicts in `CHANGELOG.md` only.
