@@ -8,6 +8,11 @@ Repo: Performant-Labs/holler. Issue: #683 (slice d of #638, epic #633). Rigor: i
 the epic's decision 7 (grid notation) and the spike `docs/research/herdr-api-spike.md`. The issue is the source of truth;
 where this brief adjusts its wording to the merged code, the adjustment is listed under "Decisions made in this brief".
 
+**Amended after plan review (A, BLOCK, `docs/handoffs/683/handoff-A.md`):** this change also amends ADR-0021 sections 9
+and 10 so `grid-out-of-range` covers `ensure_pane`'s workspace-extent refusal (AC 8). That records the operator's existing
+decision (#638 amendment 2026-10-08, grid; #683); it is not a new ruling. A's warns 2 to 5 are folded in below, and warn 6
+is accepted for this slice.
+
 ## Size check
 
 **Fits one run.** Honest estimate, in Rust lines including the tests (slice a came in about 35% over its estimate of
@@ -22,6 +27,7 @@ where this brief adjusts its wording to the merged code, the adjustment is liste
 | `tests/fake_herdr_test.rs` (the fake's own mechanisms) | new | ~380 |
 | `tests/fake_prober_test.rs` | new | ~90 |
 | **Total** | 3 modules + 3 test files | **~1,650** |
+| `docs/adr/ADR-0021.md` (sections 9 and 10, AC 8) | doc, two lines edited | ~2 (not Rust; outside the total) |
 
 That is above the ~1,050 the #638 split table gave this slice (that figure under-counted the mutation tests), but under the
 ~2,000-line, six-module limit of one pipeline run, and no file comes near the 600-line warning of `scripts/lint.sh`. No
@@ -103,7 +109,8 @@ crates/holler-pane/src/grid.rs:68-73     impl fmt::Display for GridPos { ... wri
 
 The error codes the fakes return (closed set; no new closed code):
 ```
-crates/holler-pane/src/error.rs:414-416  GridOutOfRange { what: String }          // "grid-out-of-range"
+crates/holler-pane/src/error.rs:414-416  /// `grid-out-of-range`: a row or column of zero, or above `u16::MAX`. ... (#637, `GridPos`.)
+                                         GridOutOfRange { what: String }          // doc names only the GridPos guard (ASSUMPTION 9)
 crates/holler-pane/src/error.rs:451-453  /// `herdr-version-unsupported`: Herdr reports an API version the adapter does not
                                          /// know; `message` names the version and the supported ones. (#640.)
                                          HerdrVersionUnsupported { message: String },
@@ -165,6 +172,9 @@ The decisions the fake and suite enforce (ADR-0021):
 docs/adr/ADR-0021.md:163      | I4 | No verb changes a session by typing into a TUI. | The fake Herdr records every `send_text`/`send_keys`; the
                               switch and reset tests fail if any keystroke was sent (#645). |
 docs/adr/ADR-0021.md:184-186  `holler-pane-testkit` ... may depend on `holler-pane` and `serde_json`, and **must not depend on `holler-cli`**
+docs/adr/ADR-0021.md:377      | `grid-out-of-range` | Refusal (3) | The `GridPos` guard declined a row or column outside its bounds. |
+docs/adr/ADR-0021.md:421      - **`grid-out-of-range`:** a zero (`r0c1`, `c0r1`, `0,1`, `r2c0`) or a number above 65535.
+                              // both name only the GridPos guard; AC 8 adds ensure_pane's workspace-extent condition
 docs/adr/ADR-0021.md:424-430  The Herdr adapter (#640) is the only code that converts a `GridPos` to Herdr's own order and base.
                               `HerdrPort::ensure_pane` reaches a position by right and down splits (B4, `plan_splits`, #640) or fails
                               loudly, and never relocates a healthy pane. ... An unknown version is `herdr-version-unsupported`, and the
@@ -197,11 +207,13 @@ No flat re-exports; every item is reached by its module path (`holler_pane_testk
 
 /// The version string of the one Herdr build the spike tested (protocol 22).
 pub const PROTOCOL_22_VERSION: &str = "0.9.1-preview.2026-09-21-0ff0f27e2226";
-/// What a `herdr-version-unsupported` message names as supported (spike lines 450-453).
+/// What a `herdr-version-unsupported` message names as supported (spike lines 450-453). Provisional test vocabulary
+/// (ASSUMPTION 7): verb tests compare against this constant, never the literal.
 pub const SUPPORTED_VERSIONS: &str = "Herdr protocol 22 (0.9.1)";
 /// The version string of the fake's unsupported build. Invented: no second build was compared (ASSUMPTION, below).
 pub const UNSUPPORTED_VERSION: &str = "99.0.0-fake";
-/// The open code split-only mode refuses an absolute placement with (an `ErrorClass::Refusal`).
+/// The open code split-only mode refuses an absolute placement with (an `ErrorClass::Refusal`). Provisional test
+/// vocabulary (ASSUMPTION 7): verb tests compare against `GRID_UNREACHABLE.as_str()`, never the literal.
 pub const GRID_UNREACHABLE: RefusalCode = RefusalCode::from_static("grid-unreachable");
 
 /// A method of the `HerdrPort`, as a fault targets it and the call log records it.
@@ -228,7 +240,9 @@ pub enum HerdrVersion {
     Unsupported,
 }
 
-/// One `send_text` or `send_keys` that reached a pane, so a verb test can assert I4.
+/// One `send_text` or `send_keys` that reached a pane: its payload. A failed attempt (unknown or closed pane, or stopped
+/// by a fault) is not here; every attempt is in `faults().calls()` as `HerdrOp::SendText`/`HerdrOp::SendKeys`, and that
+/// log is the check for I4's "no keystroke".
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Sent {
     Text { pane: PaneId, text: String },
@@ -247,7 +261,9 @@ impl FakeHerdr {
     pub fn set_version(&self, version: HerdrVersion);
     /// The fault switch of every port method and the log of the calls made through the port.
     pub fn faults(&self) -> &FaultSwitch<HerdrOp>;
-    /// Every `send_text` and `send_keys` that reached a pane, oldest first.
+    /// The payloads of every `send_text` and `send_keys` that reached a pane, oldest first. Omits failed sends: to assert
+    /// I4's "no keystroke", check that `faults().calls()` holds no `HerdrOp::SendText` or `HerdrOp::SendKeys`, not that
+    /// `sent()` is empty (a verb that tried to type and failed would pass that).
     pub fn sent(&self) -> Vec<Sent>;
     /// The pane's shell exited (Herdr's `pane_exited`): the pane is gone, its cell is free, its id is never reused, and
     /// every later call naming it is `pane-not-found`. Bypasses the faults and the call log. `pane-not-found` if unknown.
@@ -333,7 +349,8 @@ pane number, the panes), the placement, the version and the `sent` log. A pane i
 - **`send_text(pane, text)`**: append `text` to the pane's screen (a shell echoes what is typed) and push
   `Sent::Text`. **`send_keys(pane, keys)`**: append `"\n"` for each key whose name is `enter` in any case, nothing for any
   other key, and push one `Sent::Keys` with all the keys. Both: an unknown id is `pane-not-found` and records nothing in
-  `sent` (the attempt is still in `faults().calls()`).
+  `sent` (the attempt is still in `faults().calls()`). So `sent()` omits failed sends, and `faults().calls()` is the check
+  for I4's "no keystroke" (#645 asserts no `SendText`/`SendKeys` op there); both docs say so.
 - **`read(pane, max_lines)`**: the last `max_lines` lines of the screen (`str::lines`), joined with `"\n"`, no trailing
   newline; `max_lines == 0` gives `""`. Unknown id: `pane-not-found`.
 - **`snapshot()`**: every pane, workspaces in declaration order, then by row, then by column, each as
@@ -363,13 +380,23 @@ probe (the same reason `probe.rs:31-36` never answers `Ok`).
    surviving pane can change; the fake keeps every pane in its cell, and the suite asserts ids, not positions, after a
    close. (At `close`.)
 5. **Key names.** The port's doc says `Enter`/`C-c`; Herdr's logical names are `enter`/`ctrl+c` (spike 130). The fake
-   treats `enter` in any case as a line break. (At `send_keys`.)
+   treats `enter` in any case as a line break. (At `send_keys`, and repeated at suite case 10, which presses Herdr's
+   own name `Key::new("enter")` so #640's real adapter needs no case-folding the port does not ask for.)
 6. **A session or workspace the fake does not serve** is `unavailable`; whether the adapter creates a missing workspace
    (`workspace.create`) is #640's. (At `ensure_pane`.)
-7. **`grid-unreachable`** is the fake's code for a placement no single split reaches; #640 adopts or renames it when
-   `plan_splits` fails loudly. (At `GRID_UNREACHABLE`.)
+7. **`GRID_UNREACHABLE` (`grid-unreachable`) and `SUPPORTED_VERSIONS` are provisional test vocabulary:** the fake's own
+   values, raised or named by no verb or adapter yet, and tested by no suite case, so they do not bind #640 today. A merged
+   code is never renamed (ADR-0021 section 9), so a verb test (#644 and later) compares against the constants
+   (`herdr::GRID_UNREACHABLE.as_str()`, `herdr::SUPPORTED_VERSIONS`), never the literal. #640 either declares the same
+   values in its own file and asserts in its dev-tests that they equal the test kit's, or the fake takes #640's values
+   before any verb story pins them. (At `GRID_UNREACHABLE` and `SUPPORTED_VERSIONS`.)
 8. **Only `version()` refuses** an unsupported build; whether the adapter also refuses every other call after a failed
    version check is #640's. (At `version`.)
+9. **`ensure_pane` outside the workspace is `grid-out-of-range`** (ADR-0021 sections 9 and 10, as AC 8 amends them; #638
+   amendment 2026-10-08, grid). The `holler-pane` docs still describe less: the `PaneError::GridOutOfRange` variant doc
+   (`error.rs:414-416`, "a row or column of zero, or above `u16::MAX`") and the `HerdrPort::ensure_pane` doc
+   (`ports.rs:127-128`, "or fail loudly"). `holler-pane` is out of scope here; #640 must update both docs to match when it
+   finalizes `HerdrPort`. (In `conformance/herdr.rs` at suite case 2.)
 
 ## Conformance cases: `run_herdr_conformance`
 
@@ -383,17 +410,19 @@ ensures `r1c1` before any other cell, so the suite also runs against split-only 
 | # | Case id | What it asserts | Mutant it must catch |
 |---|---|---|---|
 | 1 | `ensure-r2c1-reads-back-as-r2c1` | `ensure r1c1` (a), then `ensure r2c1` (b) succeeds; `b.grid` is row 2, col 1 and `b.session`/`b.workspace` are the spec's; the snapshot lists `b.pane_id` with `grid == GridPos { row: 2, col: 1 }` and `grid.to_string() == "r2c1"`. | `Transposes`, `ReadsBackTransposed` |
-| 2 | `ensure-r1c2-is-grid-out-of-range` | `ensure r1c2` is `grid-out-of-range`; `ensure r3c1` is `grid-out-of-range`; the workspace's panes are equal before and after. | `Transposes` |
+| 2 | `ensure-r1c2-is-grid-out-of-range` | `ensure r1c2` is `grid-out-of-range`; `ensure r3c1` is `grid-out-of-range`; the workspace's panes are equal before and after. Carries ASSUMPTION 9. | `Transposes` |
 | 3 | `ensure-is-idempotent` | `ensure r1c1` twice returns equal `HerdrPane`s; the workspace has exactly one pane at `r1c1`, with that id. | `CreatesOnEveryEnsure` |
 | 4 | `ensure-never-moves-another-pane` | a = `r1c1`, b = `r2c1`, then `ensure r1c1` again returns a; the workspace's panes are exactly a and b (any order), each in its cell. | `RebuildsTheWorkspace` |
 | 5 | `closed-id-is-never-reused` | a = `r1c1`, b = `r2c1`, `close b`, c = `ensure r2c1`: `c.pane_id` differs from a's and b's. | `IdsFromPosition` |
 | 6 | `ids-unique-and-stable-when-a-sibling-closes` | a = `r1c1`, b = `r2c1`, ids differ; `close a`; the workspace's panes include `b.pane_id` and not `a.pane_id` (ids only, ASSUMPTION 4). | `IdsFromSnapshotOrder` |
 | 7 | `close-unknown-is-pane-not-found` | `close(PaneId::new("w999:p999"))` is `pane-not-found`. | `CloseIsIdempotent` |
 | 8 | `close-twice-is-pane-not-found` | a = `r1c1`, b = `r2c1`; `close b` is `Ok`; `close b` again is `pane-not-found` (the workspace keeps a, so no case empties a real workspace). | `CloseIsIdempotent` |
-| 9 | `calls-on-a-closed-pane-are-pane-not-found` | a = `r1c1`, b = `r2c1`, `close b`; `send_text(b, "x")`, `send_keys(b, [Enter])` and `read(b, 1)` are each `pane-not-found`. | `ClosedPaneStillAnswers` |
-| 10 | `read-returns-at-most-max-lines` | a = `r1c1`; five times `send_text(a, "echo line<i>")` then `send_keys(a, [Key::new("Enter")])`; `read(a, 2)` succeeds and has at most 2 lines (`str::lines().count()`). | `ReadIgnoresMaxLines` |
+| 9 | `calls-on-a-closed-pane-are-pane-not-found` | a = `r1c1`, b = `r2c1`, `close b`; `send_text(b, "x")`, `send_keys(b, [Key::new("enter")])` and `read(b, 1)` are each `pane-not-found`. | `ClosedPaneStillAnswers` |
+| 10 | `read-returns-at-most-max-lines` | a = `r1c1`; five times `send_text(a, "echo line<i>")` then `send_keys(a, [Key::new("enter")])` (Herdr's own key name, spike 130; ASSUMPTION 5 repeated here); `read(a, 2)` succeeds and has at most 2 lines (`str::lines().count()`). | `ReadIgnoresMaxLines` |
 | 11 | `version-is-reported` | `version()` is `Ok` with a non-empty string holding no `\n` or `\r`. | the fake set to `HerdrVersion::Unsupported` |
 
+The suite presses keys only by Herdr's own names (`enter`), never `Enter`; the fake's own tests (AC 3) may keep `Enter`
+to cover its case-insensitivity.
 Case 10 types into a scratch pane through the port; that is the suite exercising the port, not a verb (I4 binds verbs).
 Against the fake the screen then holds five lines, so a `read` that ignores `max_lines` returns five and fails.
 
@@ -454,7 +483,7 @@ Test names are what T authors (RED first). Every test file starts with
      `pane-not-found`, the snapshot lacks b, a keeps its id; `ensure` at b's cell mints a new id; `vanish` of an unknown id
      is `pane-not-found`; `vanish` adds nothing to `calls()`.
    - `send_text_and_send_keys_are_recorded_in_order`: `sent()` is `[Text { .. }, Keys { .. }]` in call order; a send to an
-     unknown pane is in `calls()` but not in `sent()`; `ensure_pane`, `read` and `print` add nothing to `sent()`.
+     unknown pane, and one stopped by `fail_next`, is in `calls()` but not in `sent()`; `ensure_pane`, `read` and `print` add nothing to `sent()`.
    - `read_returns_the_last_lines_of_the_screen`: after `print(a, "a\nb\nc\n")`, `read(a, 2) == "b\nc"`,
      `read(a, 10) == "a\nb\nc"`, `read(a, 0) == ""`; `send_text(a, "ls")` plus `send_keys(a, [Enter])` adds the line `ls`.
    - `snapshot_lists_panes_by_workspace_then_row_then_col`.
@@ -479,13 +508,25 @@ Test names are what T authors (RED first). Every test file starts with
    or changed `.rs` file passes `rustfmt --check --edition 2021`. No `.rs` file reaches 600 lines; no function exceeds 100
    lines or cognitive complexity 15 (one function per case; `ensure_pane` split into helpers: lookup, range, split rule,
    mint). No `unwrap`/`expect`/`panic!`/`unreachable!`/`assert!` in `src/`; no `dead_code` allow.
+8. **ADR-0021 records `ensure_pane`'s `grid-out-of-range`** (F makes the doc edit in this PR; S checks it). This records the
+   operator's existing decision (#638 amendment 2026-10-08, grid; #683), not a new ruling, and follows #639 and #676, which
+   amended ADR-0021 in the same PR as their code. Minimal wording, in the style of the neighbouring lines:
+   - (a) Section 10's `grid-out-of-range` bullet (line 421) keeps its text and adds the second condition, for example:
+     "a zero (`r0c1`, `c0r1`, `0,1`, `r2c0`) or a number above 65535; or, from `HerdrPort::ensure_pane`, a cell outside its
+     workspace's rows and columns (`r1c2` in a workspace of 2 rows by 1 column), which the `HerdrPort` conformance suite
+     pins (#638 amendment 2026-10-08, grid; #683)."
+   - (b) Section 9's class-table reason for `grid-out-of-range` (line 377) names both sources, for example: "The `GridPos`
+     guard declined a row or column outside its bounds, or the Herdr port declined a cell outside the workspace."
+   - (c) Nothing else changes: the class stays Refusal (exit 3), the closed code list (`ALL_CODES`) and `class_of` and its
+     tests are untouched, and no other ADR line is edited (no new "Decisions taken" item: this is not a new decision).
+     `git diff origin/main...HEAD -- docs/adr/ADR-0021.md` shows exactly those two lines changed.
 
 ## Files
 
 Filled (stubs from slice a; keep each `//!` doc, rewritten to describe the module instead of the stub):
 `crates/holler-pane-testkit/src/herdr.rs`, `src/prober.rs`, `src/conformance/herdr.rs`.
 New: `crates/holler-pane-testkit/tests/herdr_conformance_test.rs`, `tests/fake_herdr_test.rs`, `tests/fake_prober_test.rs`.
-Changed: `CHANGELOG.md`.
+Changed: `CHANGELOG.md`, `docs/adr/ADR-0021.md` (sections 9 and 10, AC 8).
 
 ## Extend vs new
 
@@ -505,6 +546,8 @@ Changed: `CHANGELOG.md`.
 - The fake works in `GridPos` cells only; only #640 knows Herdr's order and base (epic decision 7; ADR-0021:424-427).
 - Workspaces are declared with a size, `ensure_pane` outside it is `grid-out-of-range`, `r2c1` is accepted and `r1c2`
   refused in a 2x1 workspace so a transposing implementation fails (#638 amendments 2026-10-08 grid and review; #683).
+  This extends what ADR-0021 section 10 says `grid-out-of-range` means (there, only the `GridPos` guard's zero or
+  over-65535), so this change records it there and in section 9's reason (AC 8).
 - Ids `w<N>:p<M>`, base 36, never reused, stable across a sibling's close; an occupied cell returns its pane; split-only
   mode; two versions with protocol 22's string and the "Herdr protocol 22 (0.9.1)" message; faults wedged, vanished, slow;
   `send_text`/`send_keys` recorded for I4 (#683, from the spike and ADR-0021:163).
@@ -522,7 +565,8 @@ Changed: `CHANGELOG.md`.
    "split-only-mode case" #640's acceptance names: case 1 run against a split-only Herdr. Refusing an absolute placement is
    a test of the fake's mode, not a port case, because a real adapter may reach more cells with several splits.
 4. **The split-only refusal is an open code, `grid-unreachable`** (a refusal, exit 3), not a closed code: the closed list
-   is frozen, and `Refused` is where an adapter's own code goes. #640 adopts or renames it (ASSUMPTION 7).
+   is frozen, and `Refused` is where an adapter's own code goes. It is provisional test vocabulary, compared by constant,
+   never by literal (ASSUMPTION 7).
 5. **The fake starts every workspace empty** (no root pane), so verb tests see an empty Herdr; ASSUMPTION 3 records the
    difference.
 6. **After a close the suite checks ids, not positions** (ASSUMPTION 4), and the fake keeps every pane in its cell.
@@ -534,6 +578,11 @@ Changed: `CHANGELOG.md`.
    answers `Error`, never `Ok`.
 10. **Blast radius:** the issue lists `herdr.rs`, `prober.rs` and `CHANGELOG.md`; the suite's stub `conformance/herdr.rs`
     (also created by slice a for this slice) and three new test files are added, within #638's `crates/holler-pane-testkit/**`.
+    `docs/adr/ADR-0021.md` is added for AC 8 (plan review, A's block).
+11. **The copied test scaffolding is accepted for this slice** (A's warn 6): `herdr_conformance_test.rs` copies slice a's
+    `CaseGuard` and `assert_suite_fails_on`, because each integration-test file is its own crate. A later slice (#682,
+    #684) that would copy them again moves `CaseGuard` and an `assert_fails_on(result: Conformance, case)` into
+    `crates/holler-pane-testkit/tests/support/mod.rs` instead.
 
 ## Out of scope
 
@@ -549,7 +598,8 @@ RED (T): write the three test files against the API above. They fail to build (`
 missing item (E0432/E0433/E0425), not a typo, and that slice a's two test files still compile on their own
 (`cargo test -p holler-pane-testkit --test fake_pane_store_test --test pane_store_conformance_test`). The mutants cannot be
 run until the suite exists: T-green runs each and repairs any that fails on a different case than its named one.
-GREEN (F): `herdr.rs`, then `conformance/herdr.rs`, then `prober.rs`, then the CHANGELOG; then the guards of AC 7.
+GREEN (F): `herdr.rs`, then `conformance/herdr.rs`, then `prober.rs`, then the CHANGELOG and the ADR-0021 edit of AC 8;
+then the guards of AC 7.
 A (anti-duplication): no second fault switch, runner or `expect_*` helper; the cases call the shared ones.
 
 ## Risks
@@ -567,7 +617,8 @@ A (anti-duplication): no second fault switch, runner or `expect_*` helper; the c
 
 `crates/holler-pane-testkit/src/herdr.rs`, `src/prober.rs`, `src/conformance/herdr.rs`,
 `crates/holler-pane-testkit/tests/{herdr_conformance_test,fake_herdr_test,fake_prober_test}.rs` (and
-`tests/herdr_mutants/mod.rs` only if the risk above applies), `CHANGELOG.md`, `docs/handoffs/683*` (pipeline artifacts).
-Not changed: `lib.rs`, `conformance/mod.rs`, slice a's files, any `Cargo.toml`, `Cargo.lock`, any other crate, ADR, protocol
-doc or golden file. The repository is public: no personal names in code, comments, tests or the changelog; fixture names
+`tests/herdr_mutants/mod.rs` only if the risk above applies), `CHANGELOG.md`, `docs/adr/ADR-0021.md` (the two lines of
+AC 8 only), `docs/handoffs/683*` (pipeline artifacts).
+Not changed: `lib.rs`, `conformance/mod.rs`, slice a's files, any `Cargo.toml`, `Cargo.lock`, any other crate (including
+`holler-pane`: ASSUMPTION 9 hands its two doc lines to #640), any other ADR or ADR-0021 line, protocol doc or golden file. The repository is public: no personal names in code, comments, tests or the changelog; fixture names
 are neutral (`scratch`, `w1:p1`), never a live session's.
