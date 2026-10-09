@@ -122,3 +122,42 @@
 - Assumed: S's reproduction is right; I confirmed the new test leaves a scratch `$HOME` untouched.
 - Hedged: none. Also folded in `fresh_deps` -> `PaneDeps::load` and a corrected comment on `pane/watch`.
 - Evidence: `HOME=<scratch> cargo test -p holler-hub --test pane_dispatch_test` -> 10 passed, no `.holler` dir created.
+
+## A (Phase 7, anti-duplication gate, pass 2) — 2026-10-09T07:18:05-06:00
+- **Decided:**
+  - PASS on the diff f2602ba...820e385, with 2 warns and no blocks; see handoff-A-dup.md. This cycle's diff is
+    8275e73..820e385, T's test-only rework after S's REWORK.
+  - No production code changed this cycle (`git diff 851684d 820e385 -- crates/holler-hub/src` is empty), so pass 1's
+    result stands: F extended every object in the Reuse map.
+  - The rework removed a duplicate and added none:
+    - `fresh_deps` now calls `PaneDeps::load`, which resolves pass 1 W2.
+    - The `control/roster` probe uses the existing harness. It passes the pane arm, goes through the `control/` prefix
+      arm and reads only in-memory state (`Registry::new()` holds `Holds::in_memory()`).
+  - Carried warns: W1 (`sample_pane` copies `pane_json`; its home is #638's testkit) and W3 (the harness moves to
+    `tests/common/mod.rs` the first time #639 or #661 needs it).
+- **Assumed:**
+  - Rewriting `handoff-A-dup.md` for the current head is the right record, rather than adding a `-rework` file
+    (pipeline-conventions §4). S's precondition reads `handoff-A-dup.md` by name. The pass history stays in the file, and
+    pass 1's full text is in commit 8275e73.
+  - T's runtime results (10/10 pass, no `$HOME/.holler` created) are taken as reported; A runs no tests.
+- **Hedged:**
+  - The new probe comment says "the other control handlers resolve the state dir", but only five do. The overstatement
+    errs on the safe side and is wording, not drift, so it is a note in the handoff rather than a finding.
+  - Phase 3 findings 2 (`check_membership` inputs) and 7 (the `pane_wiring.rs` placeholder) are still open for O, unchanged.
+- **Evidence:**
+  - Commits and diffs:
+    - `git show --stat` of 795b343, 851684d, 8275e73, cc674a0 and 820e385.
+    - `git diff 8275e73 820e385` over `crates/`, the manifests and `CHANGELOG.md`: the test file only.
+    - `git diff origin/main...HEAD`: 21 paths, all in the blast radius or `docs/handoffs/669*`.
+    - `git ls-remote origin refs/heads/main`: still f2602ba.
+  - Read in full: `tests/pane_dispatch_test.rs` (360 lines), `src/pane_dispatch.rs`, and the production diff.
+  - Read in part: `control_server.rs:1-240, 461-475, 623-626`, `live.rs:420-461`, `holds.rs:195-224`.
+  - Handoffs read: the brief, decisions.md, handoff-S.md, handoff-T-green.md, and handoff-A-dup.md from pass 1.
+  - Searches:
+    - Users of `UnixStream::pair` and `handle_control_conn(`: only this test and `serve.rs:570`.
+    - Places where the control path resolves the state dir: `control_status.rs:26`, and `control_server.rs:103, 226, 230,
+      303, 370, 624`.
+    - How the hub tests set up temp dirs.
+    - Where `StateDir` and `Hub` are defined: only `holler-cli/tests/support`.
+    - `pane_json` and `MemPaneStore` in `holler-pane/tests/common`; the testkit is 6 lines.
+    - Probes for overlap in `holler-cli/src` in the #670 worktree: none.
