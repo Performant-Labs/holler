@@ -136,3 +136,45 @@
 - **Assumed:** the `parse.rs` helper shared by three targets through `#[path]` is acceptable (it needs only `holler_cli::Cli`, which `cli_surface_test` already uses). The `pane_cli_process` comment in `Cargo.toml` stays true.
 - **Hedged:** rustfmt strips blank lines between `STUBS` groups, so the `// #NNN` comments are the separators (S allowed either). `STORY_GROUPS` repeats the story numbers the ADR/fixture checks need, so a new story must add itself there; `every_verb_has_exactly_one_owning_story` fails if it does not.
 - **Evidence:** `cargo test --workspace` (1029/0), clippy `-D warnings`, `scripts/lint.sh`, grep for `not implemented (story #` and `Wiring` under `crates/holler-cli/tests`.
+
+## A (Phase 7, anti-duplication gate, pass 2) — 2026-10-09T08:19:44-06:00
+- **Decided:** PASS on f2602ba...56883d6, with 3 warns and no blocks (handoff-A-dup.md, rewritten for this pass; pass 1 is at e4365c4).
+  - This cycle is T's test-only rework (56883d6). It extends the shared harness and does not build a second one beside it.
+  - `run_verb_with` takes the ports. `run_verb` runs over the existing `Unwired`, so there is still one not-implemented port set.
+  - No test refers to `Wiring` any more, and no frozen root or shared process file pins another story's stub.
+  - `parse.rs` uses `output::resolve_format`, and `STORY_GROUPS` replaces the inline `groups` copy.
+  - Pass-1 W-1 and W-2 are settled.
+- **Decided (warns):**
+  - W-1: two places where parallel wave-3 stories still conflict.
+    - Deleting a whole `STUBS` group, `// #NNN` header included, makes the deletions of #643 and #644 adjacent.
+    - `legacy_verbs.rs:10` imports the #646 and #648 refusal constants on one `use` line, which both stories must edit.
+    - The fix: delete only the entries, and give each constant its own `use`.
+  - W-2: small test-helper copies:
+    - three spellings of "prepend `holler` + `try_parse_from`";
+    - `assert_no_failures` copied into `parse.rs`;
+    - `usage.rs::spec_only_with_a_profile_parses` repeats a `flags.rs` check;
+    - the one-envelope check, still in three places (pass-1 W-3).
+  - W-3: comments in frozen files are now wrong: `process/main.rs` says "only the binary can show" the flag matrix, and the manifest's comments on the in-process and `pane_cli_process` targets are out of date.
+- **Assumed:**
+  - #643 and #644 (and #646 and #648) can land in parallel, so an edit on an adjacent line is a real conflict.
+  - A story reads "deletes exactly its own group" as including its `// #NNN` header.
+  - Phase 7 blocks only a parallel path. These findings are layout and comment issues, so they are warns.
+- **Hedged:**
+  - W-1(b) depends on `unused_imports` failing clippy `-D warnings` once a story deletes its refusal test. I worked this out from the lint setup (no `rustfmt.toml`; nothing allows `unused_imports`) and did not run it.
+  - I did not run the test suite. GREEN rests on T's run (1029 passed, 0 failed).
+- **Evidence:**
+  - `git diff e4365c4..56883d6`. It touches test files and handoffs only, and is empty for `src/`, the manifest, the fixture, ADR 0003, `Cargo.lock` and `CHANGELOG.md`.
+  - Read in full:
+    - `verb_harness/{mod,parse}.rs`;
+    - `pane_verbs/{main,launch,relaunch}.rs`, `profile_verbs/main.rs`;
+    - `process/{main,stub,flags,usage,docs_rows,legacy_verbs}.rs`;
+    - `src/pane/wiring.rs`;
+    - handoff-S, handoff-T-green and this journal.
+  - Read in part: the head of `target_flags.rs`, `holler-pane` `Ports`, and the parse helpers in `cli_surface_test.rs` and `docs_cli_test.rs`.
+  - Greps:
+    - `not implemented (story #` and `Wiring` under `tests/`;
+    - `try_parse_from` / `ErrorKind` helpers;
+    - `Ports {` construction sites.
+  - Scratch git repo (in the scratchpad, deleted afterwards): deleting two adjacent whole `// #NNN` groups conflicts; deleting only the entries merges cleanly.
+  - `git show af3d8df` (#669): `pane_wiring.rs`, `pane_dispatch.rs`, `panes/mod.rs`, `profile/mod.rs`. No overlap with the CLI.
+  - Blast-radius grep over `git diff --name-only f2602ba..HEAD`: 82 paths, none outside the radius.
