@@ -45,3 +45,46 @@
   - **Greps:** slug comparisons, `port_policy`, `auto`, the escape helpers, and the sibling briefs for `is_member`,
     `spec_from_pane`, the rigs and `fixed:`.
   - **Siblings:** #644's and #643's `handoff-A.md`.
+
+## A (up-front plan review, round 2, fresh run on the amended brief `31062ce`) — 2026-10-09T17:56-06:00
+- **Decided:** PASS, with five warns and no block (handoff-A.md, which replaces round 1's; that one is in git at `ca42de7`).
+  - **Round 1's block is fixed.** AC 1 and 2 now live in `crates/holler-pane/tests/profile_{snapshot,diff}_test.rs` over
+    `tests/common`, as do every place that names them (Decision 11, the Files list, AC 11, 12 and 14, the Size check and the
+    RED note). Round 1's six warns are addressed.
+  - **Decision 3 (`port_policy` now compared)** is consistent with #644's canonical `port_of_policy`, and ADR-0021 is edited
+    in the same change.
+  - **Five warns:**
+    - `SpecField` writes each path twice (serde renames plus `as_str`), against the crate's single-source rule;
+    - the Forward-compat and Follow-up gaps: `is_member` covers only one merge order, the rig list leaves out #647's rig,
+      and #644's I-2 quotes the superseded Decision 3;
+    - Decision 4 does not say why the verbs bypass `ProfileScope::resolve(P, None)`;
+    - a git conflict with #647 on ADR-0021's adjacent "Deferred" lines 524 and 525;
+    - `ProfileSpec.pane` (unchecked text) is left out of `show`'s escaping rule.
+- **Assumed:**
+  - The sibling plans, as read from their worktrees, are what those runs implement: #643 `837718b` (T-red PASS), #644
+    `7195993`, #647 `8d1b199` (T-red PASS), #663 `89b611f` (brief gate overridden by the operator). None has merged;
+    `origin/main` is `3bdd129`.
+  - Git reports deletions on adjacent lines in two branches as a conflict; `stub.rs:12-16` documents this for its own list.
+- **Hedged:**
+  - Finding 1 is a warn, not a block: AC 2e's test pins `as_str` equal to the serde name, so the two copies cannot drift
+    silently, and the fix changes neither the JSON nor the API.
+  - Finding 3 is a warn: the bypass is justified by the issue's own port list and by `list`'s one-pass count; only the
+    rationale is missing.
+  - Findings 2 and 4 depend on a merge order that is the MO's call.
+- **Evidence:**
+  - **This brief:** the whole of `docs/handoffs/662-brief.md` at `31062ce` (2,037 lines), plus the `31062ce` diff.
+  - **ADR-0021:** sections 3, 5 and 8, the failure-mode table and the "Deferred" list.
+  - **holler-pane:** `src/{error,pane,profile,argv,lib}.rs`, `tests/common/mod.rs`, every `tests/*_test.rs` header and the
+    `Cargo.toml`.
+  - **holler-cli:**
+    - `src/pane/{args,mod}.rs` and `src/output.rs`;
+    - `tests/verb_harness/mod.rs` and `tests/profile_verbs/*.rs`;
+    - `tests/pane_verbs/process/{stub,flags,main}.rs`;
+    - the manifest's test targets.
+  - **The test kit:** `profile_scope.rs` (`belongs`).
+  - **holler-proto:** `src/{log,error}.rs`.
+  - **Scripts:** `scripts/lint.sh`.
+  - **Siblings:** 643-brief and `pane_verbs/list.rs`; 644-brief (I-1, I-2, decisions 5, 10, 20 and 25, the pre-flight grep);
+    647-brief and `pane_verbs/doctor/rig.rs`; 663-brief (its Reuse map and Decision 2).
+  - **Greps:** slug comparisons, escape helpers, per-variant serde renames, `port_policy`, spec-pane validation, inline
+    tests, and the sibling briefs for this story's API names.

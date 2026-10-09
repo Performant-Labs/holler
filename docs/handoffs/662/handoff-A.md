@@ -1,181 +1,111 @@
-# Handoff-A: Phase 3 - #662a profile verbs: the pure core and the read verbs  (up-front plan review)
+# Handoff-A: Phase 3 - #662a profile verbs: the pure core and the read verbs  (up-front plan review, round 2)
 
 **Date:** 2026-10-09
-**Branch:** issue-662-implementation (worktree `.claude/worktrees/0662-profile-verbs`, head `5b47d82`; this run is 662a only)
-**Brief reviewed:** `docs/handoffs/662-brief.md`   **Reuse map:** the brief's "Reuse map (extend, do not duplicate)", lines 1912-1926 (there is no separate `survey.md`)   **Wireframe:** N/A (no UI surface)
-**Verdict:** BLOCK
+**Branch:** issue-662-implementation (worktree `.claude/worktrees/0662-profile-verbs`, head `31062ce`; this run is 662a only)
+**Brief reviewed:** `docs/handoffs/662-brief.md` as amended in `31062ce`   **Reuse map:** the brief's "Reuse map (extend, do not duplicate)" (lines 1937-1952; there is no separate `survey.md`)   **Wireframe:** N/A (no UI surface)
+**Verdict:** PASS
+
+This replaces round 1's BLOCK (`ca42de7`, still in git history). It is a fresh review of the whole amended brief, not only of
+the amendment.
 
 ## Summary
 
-BLOCK, on one finding. The production plan is sound:
+PASS. Round 1's one block is fixed, and its six warns are addressed. The pure tests now sit in `crates/holler-pane/tests/`
+over `tests/common`, the convention of `docs/testing.md:45` and of the crate's nine neighbours (#647 is already doing the
+same in flight with `findings_test.rs`). The production plan still fits:
 
-- `profile_snapshot.rs` and `profile_diff.rs` sit where ADR-0021 section 5 puts them. They are pure functions over records
-  of the same crate, and each is the one copy of its job: the snapshot, the comparison and the membership test.
-- #644's brief, amended after its own A (`7195993`), now drops its `spec_of_pane`, depends on #662a merging first, and pins
-  `spec_from_pane`, `FIXED_PORT_POLICY_PREFIX` and `fixed_port_policy` exactly as this brief states them.
-- The verbs reuse `emit`/`emit_error`, `class_of`, the closed `PaneError` set, `ProfileName::parse` and `slug()`, and the
-  serde forms of `GridPos` and `ProbeResult`. JSON comes from derived structs.
-- No verb calls an adapter, the scope or the prober, and no frozen file or manifest is touched.
-- `show` reads `probe.last` and never runs a probe.
-- Both items ADR-0021 defers to #662 are decided and written into the ADR in the same change.
-- The text-escaping rule matches the workspace's existing one (`holler_proto::log::escape_field_value`).
+- placement per ADR-0021 section 5;
+- the reuse of `emit`, `class_of`, the closed codes, the name types and the records' serde forms;
+- no adapter, scope or prober call;
+- the ADR edited in the same change;
+- the three signatures #644 pins, unchanged.
 
-**The block is where the tests go.** Decision 11 puts the tests of holler-pane's two new pure modules in a holler-cli verb
-test file, `tests/profile_verbs/show.rs`, because "holler-pane cannot take the test kit". That premise does not apply to
-pure functions over records:
-
-- `crates/holler-pane/tests/common/mod.rs` already provides a fully populated `Pane`, `ProfileSpec` and `Profile`.
-- Every other holler-pane module is tested inside its crate (docs/testing.md:45).
-
-Six warns follow. Most of them line this plan up with the in-flight #643, #644 and #663 plans. #643's own A (`fafd138`,
-W-2 and W-3) raises the rig and the text-helper seams from the other side.
+Five warns remain. None blocks. Four of them line the plan up with in-flight siblings (#643, #644, #647, #663) or with the
+crate's own conventions, and one closes a gap in the brief's own escaping rule.
 
 ## Findings
 
 | # | Severity | Plan element | Drift dimension | Finding | Suggested fix |
 |---|---|---|---|---|---|
-| 1 | block | Decision 11 (lines 1753-1755); AC 1 "In `tests/profile_verbs/show.rs`" (line 1779) and AC 2; Files (T), lines 1900-1902 | file structure; pattern consistency | The tests of holler-pane's public pure API go into a holler-cli verb's test file. All nine holler-pane test files test that crate's API in `crates/holler-pane/tests/<topic>_test.rs` over `tests/common`, and docs/testing.md:45 documents the convention. The stated premise (no test kit in holler-pane) does not apply: these functions need no fake, and `tests/common/mod.rs` has the fully populated records AC 1a and 2c need. | Move AC 1 and AC 2 to `crates/holler-pane/tests/`: `profile_snapshot_test.rs` and `profile_diff_test.rs`, or one combined file as `argv_env_test.rs` does. Build over `common::{pane, spec, profile}` with the brief's neutral names. No manifest change is needed. `profile_verbs/show.rs` keeps AC 5. |
-| 2 | warn | `is_member(pane: &Pane, profile_slug: &str)` (line 1556) | pattern consistency (typing) | The one definition of "live" takes a bare string, and nothing ties it to a slug. Every analogous check compares `ProfileName::slug()` on both sides: the test kit's `belongs(pane, &ProfileName)` (`holler-pane-testkit/src/profile_scope.rs:235`), its pane store (`pane_store.rs:228`) and the hub's (`panes/store.rs:347`). `is_member(p, profile.name.as_str())` compiles and matches nothing for a name with a space or a capital, which in 662b silently turns off `profile-has-live-panes`. No sibling plan pins this signature. | `pub fn is_member(pane: &Pane, profile: &ProfileName) -> bool`, comparing slugs inside. Callers pass `&profile.name`. |
-| 3 | warn | Forward-compat table (lines 1928-1936) | cross-story contract (parallel paths) | Three in-flight consumers are missing. (a) #644, amended in `7195993`, is now a hard consumer: relaunch's base is `spec_from_pane`; `port_of_policy` parses with `FIXED_PORT_POLICY_PREFIX` and requires `port_of_policy(&fixed_port_policy(p)) == Ok(p)`; after its rebase, T greps for the three signatures verbatim (644-brief lines 28, 1385-1406, 2146-2148). (b) #663's `StoreScope::resolve(P, None)` filters `PaneStore::list` by slug inline (663-brief Decision 2, line 1540), the same predicate as `is_member`. Its Reuse map (line 1525) already says shared membership logic belongs in holler-pane. (c) #643's `watch --profile` filter compares slugs inline (643-brief line 1069; #643's A, "Membership"). | Add the rows: `spec_from_pane`, `fixed_port_policy` and the prefix for #644, with signatures frozen; `is_member` for #663 and #643, to be reused when #662a merges first. In `spec_from_pane`'s doc, say that the port is copied as recorded: a record at port 0 gives `fixed:0`, which #644 treats as `usage` (644-brief line 1486). |
-| 4 | warn | `SpecField::value` gives `FieldValue::Text` for `harness.kind` and `role` (lines 1503-1509) | pattern consistency | The plan does not say how `HarnessKind::Opencode` becomes `"opencode"`. Frozen `pane.rs` has no `as_str`, so the obvious body is one string literal per variant: a second copy of the serde names. The codebase's precedent is `pane/args.rs:142-144`, `parse_role`: "The accepted names are `PaneRole`'s serde names, so they cannot drift". | Take the text from serde (`serde_json::to_value(kind)` and its string, with a non-panicking fallback). Or add `Kind(HarnessKind)` and `Role(PaneRole)` variants that serialize themselves, as `Grid(GridPos)` does. If a literal is unavoidable, use an exhaustive `match` with no wildcard. AC 2e still pins the result. |
-| 5 | warn | Decision 3: `SpecField::COMPARED` leaves out `PortPolicy` (lines 1724-1729, 1495) | forward compatibility | With `port_policy` not compared, a pane relaunched on another port shows as `matches` in `show`, `apply` (#664) and `profile-drift` (#665). Under #644's plan, "Only `FIXED_PORT_POLICY_PREFIX` followed by `<port>` exists" (644-brief lines 1483-1486). Comparing a spec's `fixed:<N>` with `fixed_port_policy(live.harness.port)` is then simply a port comparison. The rationale also cites an `auto` policy that exists nowhere in the code or ADRs (grep: no hits). | Keep the exclusion for 662a, because the kit's `sample_spec` still says `fixed`. Add a Follow-up: when the kit moves to `fixed:<port>` (644-brief line 2130), #664/#665 compare `port_policy` whenever the spec's value has the `fixed:` prefix. Drop `auto` from the rationale. |
-| 6 | warn | Decision 12: `pub(crate) mod rig` inline in `tests/profile_verbs/list.rs` (lines 1756-1760) | duplication (test helpers); file structure | #643 plans a near-identical `Rig` over the same seven fakes in `tests/pane_verbs/list.rs` (643-brief Decision 10, lines 1081-1089). It is a different test target, so it can only be copied, not imported. #643's A (W-3) asks for one rig and a follow-up moving it into `tests/verb_harness/`. An inline rig also makes `list.rs`, #662's own verb file, the place #664 and #665 must edit to extend it. | Put the rig in its own file, `tests/profile_verbs/rig.rs`, declared from `list.rs` as `#[path = "rig.rs"] pub(crate) mod rig;`. This is how #644 handles `launch_rig.rs` (644-brief line 58), and it touches no frozen file. Another target can include it by `#[path]` instead of copying it. O names the base rig for both targets. |
-| 7 | warn | "What each verb prints" (lines 1615-1640) vs #643's `pane get` text (643-brief Decision 5, lines 1035-1052; Decision 11, lines 1090-1097) | pattern consistency (cross-story) | The two read verbs, both in flight, print the same values two ways. Probe: `failed (missing "qwen38")` here, `failed missing=["qwen38"]` there. Absent: `none` here, `-` there. Keys: `host.cwd`/`herdr.grid` here, `project`/`pos` there. Escaping: control characters only here, `text_value`'s `{:?}` quoting there. JSON agrees, because both use the records' serde. #643's A (W-2) asks for one helper and one probe form, settled before the second of #643, #647 and #662 merges. | Keep this brief's probe form: it is the issue's acceptance text. O picks the shared forms and owner for the epic (#643's A suggests `output.rs`, owner #660), or records the divergence in Risks. `FieldValue`'s `Display` stays in holler-pane either way, because that crate cannot import a CLI helper. |
+| 1 | warn | `SpecField`: 15 `#[serde(rename = "...")]` on a derived `Serialize`, plus `const fn as_str` "equal to the serde name" (lines 1474-1499) | pattern consistency (single source) | Every dotted path is written twice, and only AC 2e's test keeps the two copies equal. The crate's rule for a closed set of names is one table that the rest derives from: `PaneCode::ALL` plus one `const fn as_str` ("so the three cannot drift (the same single-source rule as `holler_proto::Code`)", `error.rs:41-43`). A string-form type serializes through `as_str` by hand (`PaneName`, `pane.rs:62-66`). No type in `holler-pane/src` or `holler-cli/src` has a per-variant `#[serde(rename = "...")]` (grep: none). Round 1's warn 4 fixed this for `kind` and `role`, but not for the paths themselves. | Derive `Debug, Clone, Copy, PartialEq, Eq, Hash` without `Serialize`. Write `impl Serialize for SpecField` as `serializer.serialize_str(self.as_str())` and drop the 15 renames. The JSON, the public API and AC 2e are unchanged, and AC 2e becomes true by construction. No sibling plan pins `SpecField`. |
+| 2 | warn | Forward-compat rows for #643, #663 and #644 (lines 1962-1964); Follow-up "One base rig" (lines 1980-1982); Decision 12's last sentence | cross-story contract (parallel paths) | **(a)** `is_member` reuse covers only "662a merges first". #643 (T-red PASS, `837718b`) plans an inline slug filter for `pane watch --profile` (643-brief Decision 7, line 1069). #663 (`89b611f`) filters `PaneStore::list` by slug inline in `StoreScope::resolve` (663-brief Decision 2, line 1540). Neither brief names `is_member`, so if either merges first, its copy stays beside `is_member` and nothing records the switch. **(b)** The rig follow-up leaves out #647's `pane_verbs/doctor/rig.rs` (409 lines at `8d1b199`), a fourth rig over the same fakes; #644's own follow-up (its decision 25) names it. #643's `Rig` (`pane_verbs/list.rs:39-98`) has Decision 12's shape (the seven fakes, `new`, `ports`, `run(argv, format)`), but names the no-adapter check `assert_nothing_observed`. **(c)** #644's evidence I-2 (644-brief lines 1408-1416) quotes the superseded Decision 3 ("`port_policy` is **not compared** (`SpecField::COMPARED` omits it)"). Nothing in #644 depends on it: its pre-flight grep checks only the three unchanged signatures. | **(a)** Add a Follow-up: "whichever of #643 and #663 merges before 662a switches its inline slug filter to `profile_diff::is_member` once both are on `main`". The MO relays the two rows to those runs. **(b)** Add #647's rig to the follow-up and to Decision 12. Name the rig's methods as #643 does (`assert_nothing_observed`), so the later fold is a move, not a rename. **(c)** Add to the #644 row: "Decision 3 now compares `port_policy`; `COMPARED` is gone". #644's O refreshes I-2 at its rebase. |
+| 3 | warn | Decision 4; Behaviour, **show** (lines 1654-1656) and **delete** (662b) | pattern consistency (two seams for one query) | `ProfileScope::resolve(P, None)` is documented as "every pane of the profile ... A missing profile is `profile-not-found`" (`profile.rs:381-384`). That is the query `show` and `delete` build from `profile_store.get` + `pane_store.list()` + `is_member`. The bypass is justified: the issue limits #662 to `ProfileStore`, `PaneStore` and `HerdrPort`; `ProfileScope` is "the helper every `--profile` verb uses", and the profile verbs take NAME as a positional; `list` needs one `pane_store.list()` for every profile; the rig asserts `scope` is never called. But the brief never says so, so a later reader sees two unexplained ways to ask for P's members. | Add one sentence to Decision 4 giving those three reasons. Together with finding 2(a), `StoreScope::resolve` (#663) and `show`/`delete` then share `is_member`, so the two paths cannot diverge. |
+| 4 | warn | Decision 14 (iii): delete the "Deferred" bullets at ADR-0021 lines 525 and 530 | parallel-agent coexistence | #647 (T-red PASS, `8d1b199`; 647-brief line 951) deletes the bullet at line 524, the line just above 662a's 525. Whichever of #647 and 662a merges second gets a git conflict. `stub.rs:12-16` documents the same hazard for its own list ("delete adjacent lines, and git reports that as a conflict"). Marking the bullet decided in place does not help, because any edit to line 525 touches the same hunk. #644 already schedules its ADR edits around both stories (644-brief decision 20). | Add one Risks line: "#647 deletes ADR-0021 line 524 and 662a deletes line 525: the second to merge resolves a one-line conflict by keeping both deletions". The run's own agent can then resolve it at merge instead of stopping. |
+| 5 | warn | Text rule ("stored strings printed through `FieldValue`'s `Display`", line 1618); Risks, "Terminal injection" (lines 2024-2026) | cross-cutting (output escaping) | `ProfileSpec.pane` is plain text with no grammar check (`profile.rs:265-269`). It is not validated in the hub's registry either (grep finds no check). `show`'s text prints it in `spec <pane>` and in a `Missing` row's `pane <pane>: missing`, where `PaneDiff.pane` comes from the spec. A stored spec whose pane carries an ESC sequence reaches the terminal raw. The brief's Risks list names `cwd`, `workspace`, model strings and the probe reason, but not this one. `ProfileName` and `PaneName` refuse control characters, so the other printed names are safe. | Print a spec's `pane` through the same escape, for example through `FieldValue::Text(..)`'s `Display`, which keeps one copy with no API change. Name it in Risks, and pin one case: a spec pane with `\u{1b}` in AC 5e's `Missing` row. |
 
-### Finding detail (the evidence behind each row)
+### Checked and consistent (the evidence behind the PASS)
 
-**1. The pure modules' tests in a verb test file.**
-
-- **The convention.**
-  - `docs/testing.md:45`: "`crates/*/tests/` | per-crate integration tests ... | same convention, no cross-crate deps".
-  - `crates/holler-pane/tests/` holds nine `<topic>_test.rs` files: `grid`, `argv_env`, `names`, `records`, `ports`,
-    `error`, `error_class`, `adopted`, `rework`. Each tests holler-pane's own public API over `tests/common/mod.rs`.
-- **The premise does not hold.** Decision 11 reasons: "holler-pane cannot take the test kit as a dev-dependency ... The
-  tests of `profile_snapshot` and `profile_diff` go through their public API in `crates/holler-cli/tests/profile_verbs/show.rs`,
-  with the kit's fixtures." But AC 1 and AC 2 call no port, so the kit's fakes are never needed. Its fixtures are not needed
-  either:
-  - `common::pane()` is a `Pane` with every field set: grid, cwd, workspace, model, role, env, context, command,
-    `probe.check`, `probe.expect` and `probe.last`. AC 1a overrides only grid, role, the env names, the ceilings and the
-    port.
-  - `common::spec()` and `common::profile()` are fully populated too, which AC 2e needs.
-- **No manifest change.**
-  - `crates/holler-pane/Cargo.toml` has no `[[test]]` and no `autotests` key, so a new file in `tests/` is
-    discovered automatically.
-  - `serde_json`, which AC 2e uses, is a normal dependency; `records_test.rs` already uses it.
-  - The modules are reachable as `holler_pane::profile_snapshot::...` and `holler_pane::profile_diff::...`
-    (`lib.rs:50-51`).
-- **Wave 3's other plans do not set a counter-pattern.** #647 and #644 test their holler-pane engines from holler-cli
-  because those engines are **port-driven** and need the fakes (647-brief Decision 12: "All port-driven tests are in
-  `tests/pane_verbs/doctor.rs`"). `profile_snapshot` and `profile_diff` are pure over records, the same kind of code as
-  `grid.rs` and `argv.rs`.
-- **What the plan as written causes:**
-  - The spec of a shared pure API lives in #662's own verb file (epic ruling 2). #644, #650, #663, #664 and #665 consume
-    `spec_from_pane`, `diff_spec`, `diff_profile` and `is_member`. A story that changes one of them would either edit
-    #662's `profile_verbs/show.rs` or start a second home for the same tests.
-  - `profile_verbs/show.rs` would test `profile_from_panes` (AC 1c), which `show` never calls.
-  - `cargo test -p holler-pane` would not run its own modules' tests, so AC 11's `-p holler-pane` gate is empty for them.
-  - About 16 cases (AC 1, 2 and 5) and a fully populated pane builder land in one file. That pushes it toward the lint's
-    600-line warning, with no fallback named. `scripts/lint.sh` step 4 counts test files too.
-- **The fix is cheapest now.** Moving it costs a few lines in the brief before T writes RED. After merge it means moving
-  tests across crates and swapping their fixtures. The fix does not change the public API, so #644's pinned signatures are
-  untouched.
-
-**2.**
-
-- The analogous helper: `holler-pane-testkit/src/profile_scope.rs:234-239`, `fn belongs(pane: &Pane, profile: &ProfileName)`,
-  "compared by slug".
-- `Profile.slug` is a plain `String` field, which makes the wrong call easy to write.
-- The likely next callers both hold a `ProfileName`: #663's `resolve(profile: &ProfileName, ..)` and #643's
-  `--profile P`.
-
-**3.**
-
-- 644-brief at `7195993`:
-  - line 6, "Depends on #662a and #663, merged to `main` first";
-  - line 28, the dependency row;
-  - lines 1385-1406, evidence I-1, the three signatures pasted verbatim;
-  - lines 1955-1956, the Reuse map;
-  - lines 2146-2148, the post-rebase grep.
-- 663-brief at `ec3a214`: line 1540 (Decision 2) and line 1525 (Reuse map row).
-- 643-brief at `fafd138`: line 1069; `docs/handoffs/643/handoff-A.md`, "Checked and consistent", Membership.
-
-**4.**
-
-- `crates/holler-pane/src/pane.rs:117-130`: `HarnessKind` has no `as_str` or `Display`.
-- `crates/holler-cli/src/pane/args.rs:142-150`: `parse_role` goes through serde.
-
-**5.**
-
-- 644-brief lines 1483-1486 and 1979-1982 (its decision 5) and line 2130 (the kit's `sample_spec` follow-up).
-- This brief's Out of scope (line 1945) lists the comparison but no follow-up.
-
-**6.**
-
-- 643-brief lines 1081-1089.
-- 644-brief line 58 (`launch_rig.rs` by `#[path]`).
-- #643's A W-3 and #644's A warn 6 already count four planned rigs across the two test targets.
-- A `#[path]` on a `mod` in the non-`mod.rs` file `list.rs` resolves against `list.rs`'s directory, so the rig lands at
-  `tests/profile_verbs/rig.rs`. holler-cli's manifest lists its targets, and a file inside a target's directory is not a
-  target.
-
-**7.**
-
-- 643-brief Decision 5 (the `get` text, `probe-last` and the `-` marker) and Decision 11 (`text_value`).
-- #643's A W-2 lists the five existing escape helpers; none is reusable as is.
-- `crates/holler-proto/src/log.rs:474-497`: `escape_field_value` escapes only `char::is_control` characters, with
-  `escape_default`, and passes all other text through. That is exactly the rule this brief gives `FieldValue`'s
-  `Display`, but the function is private.
+- **Round 1's block is fixed.**
+  - Decision 11, AC 1 and 2 (locations), Files (T), AC 11, 12 and 14, the Size check and the RED note all now say
+    `crates/holler-pane/tests/profile_{snapshot,diff}_test.rs` over `tests/common`.
+  - That matches `docs/testing.md:45` and the nine neighbours. Seven of them start with the
+    `#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)] // #637` header and `mod common;`.
+  - `common/mod.rs` carries `#![allow(dead_code)] // #637`, so a file that uses only some of its helpers lints clean.
+  - `common::pane()` is fully populated: grid, cwd, workspace, model, role, env, context, command, check, expect, `last`
+    and `profile`.
+  - No manifest change is needed: there is no `[[test]]` or `autotests`, `serde_json` is a normal dependency, and no
+    dev-dependency is required.
+  - No `holler-pane/src` file has an inline `#[cfg(test)]`, so AC 2e's grep fits the crate's convention.
+  - In flight, #647's `crates/holler-pane/tests/findings_test.rs` follows the same pattern.
+- **Round 1's warns are addressed.**
+  - `is_member(&Pane, &ProfileName)` mirrors the kit's `belongs` (`holler-pane-testkit/src/profile_scope.rs:234-239`).
+  - `harness.kind` and `role` take their text from serde, as `parse_role` does (`holler-cli/src/pane/args.rs:142-150`).
+  - The Forward-compat rows are in place, and so is the port-0 sentence in `spec_from_pane`'s doc.
+  - The non-existent `auto` is dropped.
+  - The rig is in `profile_verbs/rig.rs` through `#[path]`.
+  - The text-form divergence from #643 is recorded in Follow-ups and Risks.
+- **Decision 3 now compares `port_policy`, and that is consistent with #644.**
+  - #644's `port_of_policy` accepts only canonical decimal, and "an accepted policy equals `fixed_port_policy` of its port"
+    (644-brief lines 1483-1486). So the string comparison is a port comparison for every launchable spec.
+  - `diff_spec(&spec_from_pane(p), p)` is still empty.
+  - ADR-0021 is updated in the same change (Decision 14 (i)).
+  - The bare `fixed` of `sample_spec` differing is stated, and the verb tests override it.
+- **The rig mechanics hold.**
+  - A `#[path]` on a non-inline `mod` in the non-mod-rs file `list.rs` resolves against `list.rs`'s own directory.
+  - `crate::list::rig` is reachable from the sibling modules.
+  - `holler_cli::pane::wiring::Unwired` is public, so the rig's `scope` needs no frozen file.
+  - `assert_stub_routes` keeps callers in `profile_verbs` (apply, rename, export, import), so no dead code follows.
+- **The production plan is unchanged and fits.**
+  - Both modules are pure and live where ADR-0021 section 5 puts them. `profile_diff` depends on `profile_snapshot` inside
+    one crate.
+  - The verbs print only through `emit`/`emit_error` and use the closed codes.
+  - `list` makes one `pane_store.list()` call and `show` makes two store calls, so there is no N+1.
+  - `show` reads `probe.last` and never runs a probe.
+  - Text escaping in holler-pane is the one copy of the rule: `holler_proto::log::escape_field_value` is private to the wire
+    crate, and `holler_pane::error::excerpt` is a different rule (it truncates and quotes).
+- **The pins and surfaces are safe.**
+  - The three `profile_snapshot` signatures are byte-identical to the ones #644's pre-flight grep expects.
+  - `SpecField::COMPARED` appears in #644 only inside quoted evidence.
+  - `flags.rs:6-7` already counts "only a required positional is missing" as accepted, so `show`'s new NAME does not break
+    `pane_cli_process`.
+  - The `stub.rs` deletions keep `// #662`, and an unchanged line separates them from `// #664`.
+- **No outside change since `3bdd129`.** `origin/main` is still at `3bdd129`, and no sibling has merged.
 
 ## Notes for O
 
-Amend the brief as follows, then start a **fresh** run (a `resumeFromRunId` would replay this verdict).
+PASS: no amendment is required before T. The warns are cheap to take in the same edit, or the MO can take them as follow-ups:
 
-1. **Finding 1 (block): test placement.**
-   - Rewrite Decision 11. Pure functions over records are tested in their own crate, in `crates/holler-pane/tests/`, over
-     `tests/common` (docs/testing.md:45). Only port-driven code needs the test kit, and these two modules have none.
-   - AC 1 and AC 2 move to `crates/holler-pane/tests/profile_snapshot_test.rs` and
-     `crates/holler-pane/tests/profile_diff_test.rs`. Use one combined file if T's file budget binds; `argv_env_test.rs` is
-     the precedent.
-   - Each new file starts with `mod common;` and carries the neighbours' header
-     `#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)] // #662`.
-   - The fixtures are `common::{pane, spec, profile, pane_name, profile_name}`, overridden per case. Use the brief's
-     neutral names wherever a test sets or asserts a name (`demo-c1r2`, `/srv/demo`, `demo-provider`).
-   - AC 2c's round trip runs on `common::pane()` and on AC 1a's pane. The `sample_pane` half is already pinned at the verb
-     level by AC 5b.
-   - Amend these places to match:
-     - AC 1's lead sentence and AC 2's location;
-     - the Files (T) list: add the new file or files. `profile_verbs/show.rs` keeps AC 5, and `list.rs` keeps AC 4 and the
-       rig;
-     - AC 11, which now really runs AC 1-2 under `cargo test -p holler-pane`;
-     - AC 12 and 14, which now cover the new files (`// #662` allows, `rustfmt --check`);
-     - the Size check's T count;
-     - the test plan's RED note. The signature stubs in `holler-pane/src` compile the new tests, and those fail on their
-       assertions; 2c still passes vacuously, as noted.
-   - Nothing else in the plan changes.
-2. **Do not change** `spec_from_pane`, `FIXED_PORT_POLICY_PREFIX` or `fixed_port_policy`.
-   - #644's amended brief (`7195993`) pastes them verbatim and greps for those exact lines after its rebase.
-   - The other API items, `is_member` included, are not pinned by any sibling plan.
-3. **Warns 2-4 (recommended, cheapest in the same amendment).**
-   - `is_member(pane: &Pane, profile: &ProfileName)`, and update the callers in Behaviour.
-   - Add the three Forward-compat rows, plus the port 0 sentence in `spec_from_pane`'s doc.
-   - Say that `SpecField::value` takes `harness.kind` and `role` from serde, or switch to typed variants.
-4. **Warns 5-7.**
-   - Add the port-policy comparison to Follow-ups, and drop `auto` from Decision 3.
-   - Move the rig to `tests/profile_verbs/rig.rs` through `#[path]`, and say which rig #643 builds on.
-   - Settle the shared text forms (probe result, absent marker, escaping) with #643's W-2 before the second of #643, #647 and
-     #662 merges, or record the divergence in Risks.
+1. **Finding 1.** Make one line of the API block `impl Serialize for SpecField` through `as_str()`, and drop the 15 renames.
+   AC 2e stays as written.
+2. **Findings 2 and 3.**
+   - Add the Follow-up for the other merge order of `is_member`.
+   - Add #647's rig, and use #643's method names in the rig.
+   - Add the `COMPARED` note to the #644 row.
+   - Add one sentence to Decision 4 on why the verbs do not call `ProfileScope::resolve`.
+   - The MO relays the `is_member` rows to #643's and #663's runs: neither brief mentions it today.
+3. **Findings 4 and 5.** Each is one Risks line.
+   - The ADR-0021 line 524/525 conflict with #647.
+   - `ProfileSpec.pane` is escaped like the other stored strings; T can pin it in AC 5e.
 
 ## Patterns referenced
 
-- `docs/testing.md:45`, and `crates/holler-pane/tests/{common/mod.rs,records_test.rs,argv_env_test.rs,grid_test.rs}`.
-- `docs/adr/ADR-0021.md`: section 3 (lines 112-154), section 5 (lines 169-193), section 8 (lines 264-306), section 9's
-  failure-mode table (lines 331-351) and "Deferred to named stories" (lines 521-533).
-- `crates/holler-pane-testkit/src/profile_scope.rs:234-239` (`belongs`), `crates/holler-cli/src/pane/args.rs:142-150`
-  (`parse_role`), `crates/holler-proto/src/log.rs:474-497` (`escape_field_value`).
-- `crates/holler-cli/tests/verb_harness/mod.rs`, `tests/profile_verbs/main.rs`, `tests/pane_verbs/main.rs`.
-- The in-flight sibling plans, read from their worktrees at about 17:20-17:30 MDT. They are evidence of intent, not merged
-  code:
-  - `docs/handoffs/643-brief.md` and `643/handoff-A.md` (`fafd138`, A PASS);
-  - `644-brief.md` (`7195993`, amended after A BLOCK);
-  - `647-brief.md` (`a98258a`);
-  - `663-brief.md` (`ec3a214`).
+- `docs/testing.md:45`; `crates/holler-pane/tests/{common/mod.rs,records_test.rs,argv_env_test.rs}`.
+- `crates/holler-pane/src/error.rs:41-160` (`PaneCode`, the single-source table) and `crates/holler-pane/src/pane.rs:62-66`
+  (`PaneName`'s `Serialize` through `as_str`).
+- `crates/holler-pane/src/profile.rs:265-269` (`ProfileSpec.pane` is plain text) and `profile.rs:373-404` (`ProfileScope::resolve`).
+- `docs/adr/ADR-0021.md`: section 3 (lines 149-154), section 5 (lines 169-193) and "Deferred to named stories" (lines 521-533).
+- The in-flight sibling plans, read from their worktrees at about 17:45-17:55 MDT. They are evidence of intent, not merged code:
+  - 643-brief and `pane_verbs/list.rs` (`837718b`);
+  - 644-brief (`7195993`);
+  - 647-brief and `pane_verbs/doctor/rig.rs` (`8d1b199`);
+  - 663-brief (`89b611f`).
