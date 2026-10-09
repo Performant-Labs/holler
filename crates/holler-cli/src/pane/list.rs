@@ -13,6 +13,9 @@ const STORY: u32 = 643;
 /// List panes.
 #[derive(Args, Debug)]
 pub struct PaneList {
+    /// The one pane to list.
+    #[arg(value_name = "PANE")]
+    pub pane: Option<String>,
     #[command(flatten)]
     pub profile: ProfileOpt,
 }

@@ -13,8 +13,17 @@ const STORY: u32 = 643;
 /// Stream pane changes.
 #[derive(Args, Debug)]
 pub struct PaneWatch {
+    /// The one pane to watch.
+    #[arg(value_name = "PANE")]
+    pub pane: Option<String>,
     #[command(flatten)]
     pub profile: ProfileOpt,
+    /// Print the changes after this cursor.
+    #[arg(long, value_name = "CURSOR")]
+    pub since: Option<u64>,
+    /// Stop when the stream is idle.
+    #[arg(long)]
+    pub until_idle: bool,
 }
 
 /// Run `holler pane watch`: refuse, naming the story that owns it.

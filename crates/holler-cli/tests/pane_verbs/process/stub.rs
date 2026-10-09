@@ -16,9 +16,6 @@ use crate::{assert_no_failures, holler, PANE_VERBS, PROFILE_VERBS};
 /// itself.)
 pub const STUBS: &[(&str, &str, u32)] = &[
     // #643
-    ("pane", "list", 643),
-    ("pane", "get", 643),
-    ("pane", "watch", 643),
     // #644
     ("pane", "launch", 644),
     ("pane", "relaunch", 644),

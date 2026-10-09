@@ -48,3 +48,25 @@
     (lines 911, 940-1010, 1016-1019, 1105-1120, 1146), 662-brief.md (lines 1510-1530, 1630-1645, 1750-1762).
   - Greps: SHOWN/DRIVEN logic across crates, control-character escaping helpers, `slug()` comparisons, `Ports {` builders,
     `#643` in docs, and the brief for personal infrastructure names (none).
+
+## T (Phase 4, author tests / RED) — 2026-10-09T17:27:57-06:00
+- **Decided:** RED is valid. 28 new in-process tests fail on assertions about the missing behaviour. The only two that
+  pass are `testkit_links` (the kept link marker) and `get_requires_a_pane_name` (it pins the `get PANE` surface T
+  landed). T landed the surface first, as the brief's Test plan says: the `Args` fields with one-line docs and the stub
+  `run` untouched (A's W-7), the ADR 0003 rows, the fixture block and the `STUBS` deletions. The surface tests pass
+  (3 + 3 + 34).
+  - AC 3 is pinned as written (`last_observed.shown` vs `.driven`; `None` on either side is `-`/`unobserved`), per A's
+    W-1 note.
+  - The no-write check of Decision 9 is folded into the AC 17 test rather than added as its own test.
+- **Assumed:** The fake feed's first cursor is 1 (`feed.rs:87`, `head + 1` from `Cursor(0)`), so seeding two panes
+  gives cursors 1 and 2, as AC 12 states.
+- **Hedged:**
+  - The `watch` refusal cases (AC 6, AC 10) add `--until-idle` to the AC's argv. A wrong implementation then fails
+    instead of hanging, because the fake's idle wait is zero, and the refusal is pinned the same way.
+  - AC 18's `get` line count is compared with the same pane holding clean strings, not a hard-coded 27.
+  - Decision 7's "a pane leaving P (or deleted while in P) prints that one event" has no AC and no test. Exercising it
+    needs a write after `resolve`, like AC 14's thread. Left for S and A to judge.
+- **Evidence:** `cargo test -p holler-cli --test pane_verbs -- list:: get:: watch::` gives 2 passed, 28 failed. The
+  whole target gives 62 passed, 28 failed, with no other module regressed. The failing assertions are quoted in
+  handoff-T-red.md. Also: `rustfmt --check --edition 2021` on the 7 touched `.rs` files exits 0;
+  `cargo clippy -p holler-cli --all-targets -- -D warnings` exits 0; `bash scripts/lint.sh` exits 0.

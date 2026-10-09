@@ -13,6 +13,9 @@ const STORY: u32 = 643;
 /// Show one pane.
 #[derive(Args, Debug)]
 pub struct PaneGet {
+    /// The pane to show.
+    #[arg(value_name = "PANE")]
+    pub pane: String,
     #[command(flatten)]
     pub profile: ProfileOpt,
 }
