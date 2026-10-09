@@ -80,3 +80,23 @@
     recent issues.
   - Ran `gh pr list`: the only open PR is dependabot #673, and nothing in it is in the radius. Ran `git ls-remote origin`:
     main is still 9d61c9f.
+
+## T (phase 4, author/RED)
+
+- **Decided:**
+  - The RED is the unresolved import of `FakeProfileScope`, `profile_scope_cases` and `run_profile_scope_conformance`;
+    nothing else could fail first for a test kit whose API does not exist.
+  - Three tests beyond the brief's AC4 list (hook stays armed across a profile-less failed act, a conflicting first write
+    and a succeeding act; re-arming replaces; re-arming from inside the hook does not deadlock), all following from the
+    brief's Public API doc and A's W-8.
+  - The `MembershipOnRemove` mutant test asserts only case 15, as the brief says.
+- **Assumed:**
+  - "Armed until a failed act of an edit with a profile" (A's W-8 wording) is the intended hook contract. The brief's step 7
+    is under the `Some(P)` path only, and `edit_spec(None)` "calls only act()".
+  - `sample_profile("Demo Alpha", &[C4])` is a valid "other writer's version" (the spec set differs from every state the
+    scope writes).
+- **Hedged:**
+  - The mutants' targeted cases are checked by reading, not by running, until F's suite exists. T-green re-runs them.
+  - The deadlock test waits 10 s only when it fails; it adds no time when it passes.
+- **Evidence:** `cargo test -p holler-pane-testkit --no-fail-fast` (two E0432 build failures); the reverted probe runs
+  recorded in handoff-T-red.md.
