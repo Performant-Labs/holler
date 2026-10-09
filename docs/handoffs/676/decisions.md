@@ -66,3 +66,20 @@
   - Files read: `error.rs` (all), `output.rs` (all), `output_api.rs` (all), `error_class_test.rs` (all), the `spec_flags.rs` diff, the ADR-0021, ADR-0003 and CHANGELOG diffs, `main.rs:245-272`, `pane/wiring.rs:31-32`, `prompt_target.rs:50-95`, `holler-pane-testkit/src/lib.rs`, `docs_errors_test.rs:1-59`, `docs_rows.rs:1-50`, and `error_test.rs:19` and `:80-86`.
   - Greps: definitions and uses of `ErrorClass`/`class_of` (one definition), exit-code constants across crates, classifier-like enums, "refused or failed" repo-wide (none), and exit wording in ADR-0021 and ADR-0003 (consistent with the table).
   - Diff checks: `git diff --quiet` on `lib.rs`, `main.rs`, every manifest and `Cargo.lock` (unchanged); 0 removed lines in `error.rs`; `wc -l` on the touched files (all ≤ 710); the newer `origin/main` commits overlap nothing in this branch.
+
+## S (Phase 9 of the script, spec audit) — 2026-10-09T11:11:15-06:00
+- **Decided:** PASS on d5734af (see handoff-S.md).
+  - All three of the issue's acceptance criteria and the brief's seven are MET, each with a named test or concrete evidence. T-red showed RED, and T-green's two mutations show the tests are not vacuous.
+  - All eight MO decisions are implemented as stated. `class_of`'s 22 arms (1 usage, 14 refusal, 7 failure) match the brief and the ADR-0021 §9 table row for row.
+  - The scope is exact. The four doc-only extras (A W-1, W-3, W-4, and the `not_implemented` doc) are in blast-radius files and explained by F.
+- **Assumed:** T-green's Tier 1 record (1048 passed, clippy, machete, lint, changelog-check, docs_cli_test, rustfmt) and F's (`cargo build`, `test-hooks.sh`, `cargo doc -D warnings`) reflect d5734af. Per the role I did not re-run them, and the only commit after T-green is A-dup's handoff, which has no code.
+- **Hedged:** Four advisories, none blocking.
+  - ADR-0021 `:397` says moving a close call costs "one arm and one test row". It also costs the ADR row and up to four `output_api.rs` tests (A-dup W-1/W-2, not applied). O can apply the one-phrase fix before merge.
+  - The PR body must carry the AI disclosure, the `main.rs:253-255` note for #649, the legacy `REFUSED_EXIT` wording for #646, and #645's "fails" wording for `session-not-found`.
+  - Three optional test-only nits: a stale "error item ... 1" name at `output_api.rs:353`, a "brief's table" reference in `error_class_test.rs:10`, and a text-only `emit_stream` refusal test.
+  - The stub verbs' "refuse" wording is out of scope.
+- **Evidence:**
+  - Files read: the full branch diff (`git diff origin/main...HEAD`); `output.rs:195-345`; `output_api.rs` (all); ADR-0021 `:296-410` and `:508-549`; `main.rs:100-125` and `:215-290`; `CHANGELOG.md:1-70`; `CONTRIBUTING.md:15-40`; `docs_cli_test.rs` (scan scope, `:1-40` and `:100-140`).
+  - Issues read: #676, #638, #645 and #646 (`gh issue view`).
+  - Greps: "refused or failed" repo-wide (only this run's handoffs); exit and refusal wording in `docs/`, `README.md` and `crates/` (only ADR-0003/0021 describe pane/profile exits); `ErrorBody` and open-code construction in production (none open); `GridPos::parse` error codes (refusals only); privacy patterns over all 1,321 added lines (no hits).
+  - Size and freeze checks: `wc -l` on every touched file (max 710); `git diff --quiet` on `lib.rs`, `main.rs`, the manifests and `Cargo.lock`; 0 removed lines in `error.rs`.
