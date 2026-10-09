@@ -1231,6 +1231,14 @@ crates/holler-cli/Cargo.toml:431-435
 # #643-#647 use it from their own pane_verbs/<verb>.rs files.
 holler-pane-testkit = { path = "../holler-pane-testkit" }
 ```
+A dev-dependency is in scope for a library crate's own `#[cfg(test)]` modules when they are built by `cargo test --lib`, so
+the test module imports the suite as `holler_pane_testkit::conformance::profile_scope::run_profile_scope_conformance`
+(verified at `3bdd129`: `crates/holler-pane-testkit/src/lib.rs:31` is `pub mod conformance;`,
+`crates/holler-pane-testkit/src/conformance/mod.rs:21` is `pub mod profile_scope;`, and the function is `pub fn` at
+`crates/holler-pane-testkit/src/conformance/profile_scope.rs:193`), and the fixture as
+`holler_pane_testkit::fixture::{sample_profile, sample_pane, sample_spec}` (`fixture.rs:121`, `:41`, `:92`), with the
+fault enums `holler_pane_testkit::profile_store::ProfileStoreOp` (`profile_store.rs:27`) and
+`holler_pane_testkit::pane_store::PaneStoreOp` (`pane_store.rs:23`).
 
 ### H. Workspace rules that bind the code
 
@@ -1318,7 +1326,16 @@ bash -c 'set -m; sleep 30 & pid=$!; /bin/kill -s KILL -- -$pid; echo "bin kill e
 -> gone
 ```
 The same `kill -s <SIG> -- -<pgid>` form is what #641's host adapter brief uses through the `kill` binary (it records the
-macOS BSD `kill` accepting it); CI's macOS job runs this story's tests and so checks it there.
+macOS BSD `kill` accepting it); CI's macOS job runs this story's tests and so checks it there. #641's line, verbatim (its
+brief on the unmerged branch `issue-641-implementation`, commit `770c948`):
+```
+docs/handoffs/641-brief.md:531-532 (at 770c948)
+- **`kill` binary portability** (`kill -s TERM -- -PGID`): verified on Linux procps; macOS BSD `kill` accepts the same form.
+  Real-tmux tests are opt-in, so a macOS difference cannot break CI.
+```
+That line is an assertion, not a macOS observation, and #641's tests that use it are opt-in, so nothing has yet run this
+form on macOS. This story's AC 8f and 8g are not opt-in: they run on CI's macOS job and are the first macOS evidence. O
+could not read the macOS `kill(1)` page from this Linux host.
 
 ## Contradictions found
 
@@ -1344,7 +1361,8 @@ macOS BSD `kill` accepting it); CI's macOS job runs this story's tests and so ch
   cannot bound or cancel. Resolution: Decision 11 (a documented narrowing).
 - **C7. "Returns within the timeout it is given" (the `Prober` docs, E) and "a hung command gives `Error` within the
   timeout" (issue).** Giving up at the deadline still takes the kill and the reap. Resolution: Decision 15 (returns at the
-  deadline plus a cleanup bounded to 1 s; the tests allow 2 s of slack).
+  deadline plus a cleanup bounded to 1 s; the tests allow 2 s of slack, which is that 1 s cleanup budget plus 1 s of
+  scheduling margin for the macOS runner, so AC 8e's 2,300 ms is the 300 ms timeout + 1,000 ms cleanup + 1,000 ms margin).
 - **C8. `holler-pane` describes itself as having "no I/O"** (its `Cargo.toml` line 6, quoted in H only in part:
   `description = "... (types and traits only; no async runtime, no I/O)"`, and `src/lib.rs` lines 6-7, "It holds **types and
   traits only**: no async runtime, no I/O, no behaviour behind a stub"), while ADR-0021 section 5 (C, lines 180-181) makes
@@ -1352,6 +1370,20 @@ macOS BSD `kill` accepting it); CI's macOS job runs this story's tests and so ch
 - **C9. "The exact pane doctor command line" (ADR section 8 step 6).** `pane doctor` declares only `--profile NAME` today and
   #647 owns its positionals (C, ADR 0003 line 61). Resolution: Decision 8 names `holler pane doctor --profile '<P>'`, which
   is exact today, and `holler profile show '<P>'` (the epic's `show NAME`; its positional lands with #662).
+- **C10. A probe that exits non-zero with every expected string in its output (Decision 14).** The frozen docs define the
+  outcomes by output and leave the exit status unstated: `ProbeResult::Ok` is "The probe ran and every expected string was
+  in its output" (E, `probe.rs:19`), and the issue's acceptance (A) names `Ok`, `Failed` and `Error` by output and timeout
+  only. `ProbeResult::Error`'s doc is an open list: "The probe could not be run to a verdict (the program is missing, it
+  timed out, ...)" (E, `probe.rs:23-24`). Resolution: "ran" in `Ok`'s doc is read as "ran to completion, exit 0", and a
+  non-zero exit (or an end by a signal) is one more way of not reaching a verdict, so it is `Error` with the reason `the
+  probe exited with status <n>` (Decision 14; AC 8d). What this choice does and does not change for a caller: the epic
+  refuses alike on every non-`Ok` result, "a failing probe refuses launch/relaunch and apply's create/relaunch with
+  probe-failed" (B, epic contract line 80), so `Error` versus `Failed` changes only the persisted `Pane.probe.last` and
+  its reason text, never whether a launch proceeds; `Error` versus `Ok` is the substantive part. Why not `Ok`: `expect`
+  may be empty (`PaneProbe.expect` is a `Vec<String>`, ADR-0021 line 51; AC 8c), so `Ok` on any exit would let `["false"]`
+  pass a health gate, and a check such as `curl -f` reports an HTTP error only by its exit status. Why not `Failed`:
+  `Failed { missing }` names the missing expected strings, and here there are none. The rule is recorded in `probe.rs`'s
+  rustdoc and is part of F3 (ADR-0021 section 2).
 
 ## Acceptance criteria
 
@@ -1372,12 +1404,15 @@ All commands run from the worktree root.
    error's (`timeout`, `unavailable`, `store-corrupt`); its `to_string()` contains `Demo Alpha`, `demo-c1r1`,
    `unavailable: act`, `holler pane doctor --profile 'Demo Alpha'` and `holler profile show 'Demo Alpha'`, and no `\n`; the act
    ran once; `profiles.faults().calls()` is exactly `[Get, CasPut, CasPut]` (one restore, not retried); and `get(Demo Alpha)`
-   is at generation 2 holding `s'` (the edit stayed, which the message says).
+   is at generation 2 holding `s'` (the edit stayed, which the message says). How the two spellings of the name meet these
+   substring checks: the prose part writes the name with `{:?}`, so it reads `profile "Demo Alpha"` (double quotes), which
+   contains `Demo Alpha`; the reconcile step writes it POSIX-single-quoted, `'Demo Alpha'` (Decision 8). The test asserts
+   the unquoted name and the two single-quoted command lines, never a double-quoted form, so both spellings satisfy it.
 3. **The restore conflict prints the reconcile step (Decision 7).** Test `restore_conflict_names_the_act_error_and_the_reconcile_step`:
    the act calls `profiles.concurrent_put(&sample_profile("Demo Alpha", &["demo-c4r1"])?, &actor)` and returns
    `Err(Unavailable { what: "act" })`. The answer's `code()` is `profile-conflict`, and its `to_string()` contains
    `Demo Alpha`, `demo-c1r1`, `unavailable: act`, `holler pane doctor --profile 'Demo Alpha'` and
-   `holler profile show 'Demo Alpha'`, and no `\n`.
+   `holler profile show 'Demo Alpha'`, and no `\n` (the name's two spellings meet these checks as in AC 2).
 4. **A first write that times out (Decision 6).** Test `first_write_timeout_says_the_edit_may_have_landed`: with
    `fail_next(CasPut, Timeout { op: "profile_store.cas_put" })` armed before the call, `edit_spec(Some(Demo Alpha),
    demo-c1r1, Set(s'))` is `Err` with `code()` `timeout`, the act ran 0 times, and the message contains `may hold the edit`
@@ -1442,7 +1477,9 @@ All commands run from the worktree root.
    `sed -n '1,/#\[cfg(test)\]/p' crates/holler-pane/src/probe.rs | grep -vE '^\s*//' | grep -nE '"(/usr)?/bin/(sh|bash|zsh|dash)"|"(zsh|dash)"|"-c"'`
    prints nothing (an absolute shell path, another shell's name, or a `-c` argument). Together with AC 8h (`;`, `$(...)` and
    a space inside an element arrive literally) this is the "no shell" evidence; the greps guard the source, 8h the
-   behaviour.
+   behaviour. The greps are a guard against the plain form only: they cannot see a shell name built at run time
+   (`format!`, string concatenation, `include_str!`, a constant from another file). AC 8h's behavioural test is the
+   evidence that no shell runs.
 10. **Quality gates** (the tester overlay's Tier 1, as CI runs them): `bash scripts/lint.sh`, `bash scripts/changelog-check.sh`,
     `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test -p holler-pane`, `cargo test -p holler-cli --lib`,
     `cargo test -p holler-pane-testkit`, `cargo test --workspace`, `cargo test -p holler-cli --test docs_cli_test` and
@@ -1524,6 +1561,16 @@ files in all, well under F's cap. **Fits one run**, no split.
    write is not retried; a restore is one `cas_put` at g + 1, not retried; `profile-not-found` before `pane-in-other-profile`;
    no store call without a profile; a `Set` for a pane of another profile is refused before any write, with or without
    `--spec-only`, and a `Remove` is not.
+   **Where `StoreScope` deliberately differs from `FakeProfileScope`, and why the suite still passes unchanged.** On three
+   points the two differ in the message only, never in the code: the open point (the fake's `Err(other) => other`, G, versus
+   Decision 5's extended message), the first-write timeout (the fake returns it as is through `?`, versus Decision 6), and
+   the restore conflict (the fake's text, versus Decision 7's text plus the reconcile step). No suite case pins any of the
+   three: case 9 arms no fault, so its restore succeeds and answers the act's error exactly; case 10's first write
+   conflicts, it does not time out; case 11 checks only the code `profile-conflict` and that the message contains
+   `Demo Alpha` (the suite's `ALPHA`), which Decision 7's longer text still does. The suite's open-point note asks that "the
+   fake and this list are amended to match" (G, `conformance/profile_scope.rs` lines 45-47); this story does not make that
+   amendment, because the test kit is outside the issue's blast radius (C5), so until F1 lands the fake and the suite's
+   docs describe the old open point. AC 2-4 pin `StoreScope`'s side.
 5. **The open point: a restoring write that fails with anything but a conflict** (`timeout`, `unavailable`, `store-corrupt`,
    ...). ADR section 8 decides only the conflict. **Decided: keep the restoring write's own code, and extend its message.**
    The code stays because it is the most recent failure and the one that says what is wrong now (a wedged or unreachable or
@@ -1578,7 +1625,8 @@ files in all, well under F's cap. **Fits one run**, no split.
 14. **Verdict, in order.** Empty argv: `Error`, no process. Zero timeout: `Error`, no process. Spawn fails: `Error`. Output
     over the cap: `Error` (group killed). Deadline passes: `Error` (group killed). Exit not success (a non-zero code, or ended
     by a signal): `Error`, whatever the output, because a probe whose program failed has no verdict and a probe with no
-    `expect` must not pass on `false`. Exit 0: `Ok` when every `expect` string is in the output, else `Failed { missing }`.
+    `expect` must not pass on `false` (the reading of the frozen docs this rests on, and why it changes no launch outcome
+    against `Failed`, is C10). Exit 0: `Ok` when every `expect` string is in the output, else `Failed { missing }`.
 15. **Timeout semantics (C7).** One deadline, `start + timeout`, taken before the spawn. The runner first waits, up to the
     deadline, for the reader thread to report end of stdout (`mpsc::Receiver::recv_timeout`), and only then polls
     `Child::try_wait` every 10 ms until the exit or the deadline. When the deadline passes (or the cap is hit) it kills the
@@ -1592,7 +1640,8 @@ files in all, well under F's cap. **Fits one run**, no split.
     group is killed (AC 8f). Signal: `KILL` directly. A probe is a read-only check with nothing to clean up, so there is no
     `TERM` grace.
 16. **The group kill** runs the `kill` binary from `PATH`: `kill -s KILL -- -<pid>` (stdin, stdout and stderr null), waited
-    for with `try_wait` for at most 1 s and then killed and reaped itself. Its outcome is ignored (the group may already be
+    for with `try_wait` within Decision 15's one shared 1 s cleanup budget (the same budget the leader's reap draws on, not
+    a second 1 s), and killed and reaped itself if that budget runs out. Its outcome is ignored (the group may already be
     gone). Why a binary: killing a group needs `kill(2)` with a negative pid, which `std` does not offer; `libc` would need
     `unsafe` (forbidden) and a new dependency of `holler-pane` (not allowed). The target is only ever the group of the child
     this call spawned (Decision 15): no name matching, no other pid.
@@ -1622,7 +1671,7 @@ files in all, well under F's cap. **Fits one run**, no split.
 
 **Process.**
 
-22. **No ADR or test-kit edit.** Decisions 5, 6, 7, 8, 11 and 15 are recorded in the files' rustdoc and in
+22. **No ADR or test-kit edit.** Decisions 5, 6, 7, 8, 11, 14 (C10) and 15 are recorded in the files' rustdoc and in
     `docs/handoffs/663/decisions.md`; the run files the follow-ups below.
 23. **Commit and PR.** Conventional Commit subject (`feat(pane): ...`), the AI-assistance disclosure `CONTRIBUTING.md` asks
     for in the PR body, `Closes #663`.
@@ -1656,7 +1705,7 @@ Forward-compat (consumers):
 - **F2.** Hoist the membership rule into one public `holler-pane` function used by the hub, the test kit and `StoreScope`
   (three private copies after this story).
 - **F3.** ADR-0021 section 8: record Decisions 5, 6, 8 and 11, and section 2's `Prober` row: Decision 15's "deadline plus a
-  bounded cleanup".
+  bounded cleanup" and Decision 14's non-zero-exit rule (C10).
 - **F4.** `holler-pane`'s `Cargo.toml` description and `lib.rs` docs: drop "no I/O" (C8); rename `ports_test.rs`'s
   `run_probe_stub_never_reports_success` (the stub is gone; the test still holds).
 - #696 is unchanged and stays open.
@@ -1689,7 +1738,15 @@ running (`ps -o pid=,args= -u "$(id -u)"`, read-only).
 - **A background child that leaves the group** (`setsid`, or a double fork into a new group) escapes the group kill and
   may keep stdout open. The runner still returns at the deadline (it never joins the reader thread after a kill), but that
   thread stays blocked until the escapee closes the pipe: a leaked thread in a long-lived caller. Accepted: the callers are
-  short-lived CLI verbs; documented in the rustdoc.
+  short-lived CLI verbs; documented in the rustdoc. The `Prober` docs allow an async caller to run the method from
+  `spawn_blocking` or a thread (E, `ports.rs:204-205`), so a long-lived process that reuses `SystemProber` and repeatedly
+  runs a probe that escapes its group would leak one blocked reader thread (and its pipe) per such run, without bound. No
+  long-lived caller exists today (the hub runs no adapters, ruling 1); the rustdoc states the leak so that #696, which
+  exposes the runner for wider use, inherits the warning.
+- **The fake and the real scope differ in three messages until F1** (Decision 4's note: Decisions 5, 6 and 7). The codes
+  are the same on all three paths, so a verb that matches on `code()` behaves alike over either; a verb test written
+  against `FakeProfileScope` sees the fake's shorter texts, without the reconcile step, on those paths. Accepted for this
+  story because the test kit is outside its blast radius (C5); F1 closes the window.
 - **The `kill` binary missing from `PATH`.** The group kill is skipped, `Child::kill` still ends the leader, and its children
   are left. Linux (procps or util-linux) and macOS both ship `/bin/kill`. Accepted and documented.
 - **Pid reuse** is closed by Decision 15's order (signal only before the leader is reaped). A refactor that calls `try_wait`
