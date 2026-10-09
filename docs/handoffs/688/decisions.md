@@ -41,3 +41,42 @@
   - Checked the git history of part 1's Phase 3 review and journal (`95c44d2^:docs/handoffs/682/`) and of slice d's ADR
     edit (316b8e3).
   - Ran `gh issue list` (no follow-up for part 1's W-2) and `gh pr list` (no open PR touches the test kit).
+
+## A (Phase 3, up-front plan review, re-review after the amendment) — 2026-10-09T14:41:53-06:00
+- **Decided:** PASS on docs/handoffs/688-brief.md as amended at 98c250e, with no block and two new warns, W-7 and W-8
+  (see handoff-A.md, which replaces the BLOCK pass of db4cba8).
+  - **B-1 is fixed as asked.** The membership check is `Set`-only, case 15 pins a `Remove` of a detached spec, and case
+    13 and AC4 name a `Set`. The `MembershipOnRemove` mutant shows the new case catches the old behaviour.
+  - **W-1 to W-6 and the minor point are all addressed.** W-6 is #694. The `before_next_restore` hook is the narrowest way
+    to reach `profile-conflict` from a verb test, because `FaultSwitch` can only fail calls. It is not a second fault path.
+  - **W-7:** the scope cannot see that a `--spec-only` act is empty, so the `Set` check refuses `--spec-only` too. The new
+    ADR sentence should say so.
+  - **W-8:** the restore hook must run after its mutex is released (edition 2021 keeps an `if let` guard alive through
+    the block). Its doc should say it fires only on the restore path of `edit_spec` with a profile.
+- **Assumed:**
+  - #663's "`--spec-only` makes `edit_spec` skip the act" means the verb passes an empty act, since `edit_spec` has no flag
+    for it.
+  - ADR-0021:282-283's "a detached spec is not refused" is about the stores, because the paragraph is about `pane/cas_put`
+    and the two registries. So the `Set` check does not contradict it.
+- **Hedged:**
+  - **W-7 is a warn, not a block.** Section 9 line 335 allows `pane-in-other-profile` for launch and relaunch with no
+    `--spec-only` exception, the choice fails closed, and the ADR edit writes it down. Whether `--spec-only` may write a
+    detached spec is an open product point for #644 and the operator, and the brief's Risks rule keeps it reversible.
+  - **W-8 is a warn.** The deadlock needs a hook that re-arms or calls back into the scope, and no planned test does that.
+  - **Noticed for #646, not this run's:** ADR-0021:338 gives `pane close` no membership code. So `close --profile P X`
+    for X in another profile would close that profile's live pane.
+- **Evidence:**
+  - Ran `git diff 9fd9c1b HEAD -- docs/handoffs/688-brief.md`, and read the amended brief in full and the first pass's
+    handoff and journal.
+  - Re-read ADR-0021 lines 60-195, 255-350, 366-400 and 520-555, and 316b8e3's ADR and CHANGELOG diff.
+  - Read these testkit files:
+    - `fault.rs` in full, `prober.rs:1-60`, `profile_store.rs:100-210` and `pane_store.rs:205-238`;
+    - `conformance/mod.rs:25-137`, `conformance/profile_store.rs` (the header and the helpers) and
+      `profile_store/log.rs:1-20`;
+    - `tests/profile_store_conformance_test.rs:50-239`.
+  - Grepped the testkit sources for hooks, closures, mutex patterns and `PaneInOtherProfile`. Grepped the three port
+    traits for `Send + Sync`. Checked `Cargo.toml` for the edition and the lints, and `scripts/lint.sh` for the size gates.
+  - Ran `gh issue view` for 663, 644, 646, 683, 638, 688 and 694, and searched `gh issue list` for spec-only and for
+    recent issues.
+  - Ran `gh pr list`: the only open PR is dependabot #673, and nothing in it is in the radius. Ran `git ls-remote origin`:
+    main is still 9d61c9f.

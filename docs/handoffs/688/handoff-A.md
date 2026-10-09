@@ -1,100 +1,112 @@
 # Handoff-A: Phase 3 - #688 the pane test kit, slice c part 2: `FakeProfileScope` and the `ProfileScope` conformance suite  (up-front plan review)
 
 **Date:** 2026-10-09
-**Branch:** issue-688-implementation (at 9fd9c1b, on origin/main 9d61c9f)
-**Brief reviewed:** docs/handoffs/688-brief.md   **Reuse map:** docs/handoffs/688-brief.md, sections "Evidence", "Reuse refactors" and "Reuse map" (this run has no separate survey.md)   **Wireframe:** N/A (no UI surface)
-**Verdict:** BLOCK
+**Branch:** issue-688-implementation (at 98c250e, on origin/main 9d61c9f)
+**Brief reviewed:** docs/handoffs/688-brief.md, as amended at 98c250e   **Reuse map:** the same brief, sections "Evidence", "Reuse refactors" and "Reuse map" (this run has no separate survey.md)   **Wireframe:** N/A (no UI surface)
+**Verdict:** PASS
+
+This is the re-review after the amendment. It replaces the BLOCK pass at db4cba8, whose handoff stays in git history.
+Finding numbers continue from that pass.
 
 ## Summary
 
-BLOCK, on one finding. The rest of the plan is sound. It fills the two stubs over the existing fakes, which it holds as
-`Arc<dyn …>` ports. It reuses `check_membership`, `run_cases` and part 1's suite helpers by visibility changes only, keeps
-the test kit on `holler-pane` alone, and follows ADR-0021 section 8's I8 order step for step. The blocking problem is in
-the fake's `edit_spec` step 3: it runs the `pane-in-other-profile` check for every edit, `Remove` included. `Remove` is
-`pane close`, and ADR-0021 section 9 says `pane close` never answers that code. It also means a detached spec, which
-section 8 allows, could never be removed through `edit_spec`. The fix also changes which edit case 13 and AC4 must use, so
-it has to go into the brief before T writes tests. There are six warns besides.
+PASS. The amendment fixes B-1 as asked. The `pane-in-other-profile` check now runs for a `Set` only, and the pane record is
+still read for every edit. Case 15 pins that removing a detached spec is not refused. The new `MembershipOnRemove` mutant
+shows that this case catches the old behaviour. Every warn from the first pass is addressed, and the W-6 follow-up is filed
+as #694. Two new warns concern what the amendment added. Neither changes the API that T writes tests against. W-7: the
+`Set` check also refuses a `--spec-only` edit, and the new ADR sentence should say so. W-8: the restore hook must run after
+its mutex has been released.
 
 ## Findings
 
 | # | Severity | Plan element | Drift dimension | Finding | Suggested fix |
 |---|---|---|---|---|---|
-| B-1 | block | "Fake behaviour", `edit_spec` step 3 (brief line 224): `check_membership` for every edit; the `ASSUMPTION (#661/#663)` bullet (line 282) | ADRs; cross-cutting (failure taxonomy) | Step 3 applies the `pane-in-other-profile` check to `SpecEdit::Remove` as well as to `Set`. `Remove` is what `pane close --profile P` sends, and ADR-0021:338 gives `pane close` only `pane-not-found`, `generation-conflict`, `profile-not-found` and `profile-conflict`. ADR-0021:282-283 says a spec naming another profile's pane (a detached spec) "is not refused", and the brief's own fixture has one: Alpha's c3 entry, where c3 belongs to Beta. As written, `edit_spec(Some(Alpha), c3, Remove, ..)` answers `pane-in-other-profile`, so a detached spec can never be removed through `edit_spec`. Every verb story that tests `close --profile` against this fake would get a code the ADR rules out for that verb. The brief's own reason for the check, "nothing is written to P and nothing live moves for a pane that cannot join P", applies only to a `Set`. No case or AC exercises the `Remove` path, so T, A-dup and S would not catch it, and #663 will read the fake as its reference implementation. | Amend the brief. Step 3 still calls `panes.get(pane)?` for every edit, because ADR-0021 section 8 step 1 reads the pane record and AC3's `[Get]` call shape should stay. It calls `check_membership` only for `SpecEdit::Set`. Reword the `ASSUMPTION (#661/#663)` bullet to "a `Set` for a pane of another profile". Pin the other half. The better option is a 15th suite case, for example `remove-of-a-detached-spec-is-not-refused`: `Remove` for c3 on Alpha drops Alpha's c3 entry at g + 1, and the act runs once. A suite case is the better choice because ADR-0021:338 binds #663 too. The minimum is an AC4 test on the fake. Name `Set(sample_spec(c1))` explicitly for case 13's c1 half and use a `Set` in AC4 `membership_compares_slugs`. Once the check is `Set`-only, a `Remove` there no longer tells the two check orders apart. |
-| W-1 | warn | Case 14; the `ASSUMPTION (#661/#663)` bullet; "Decisions already made" ("the scope's earlier check is an addition", line 422); "**No ADR change**" (line 420) | ADRs | Case 14 binds #663 to a refusal the ADR does not state: `edit_spec` answers `pane-in-other-profile` before the profile write. ADR-0021 "Decisions taken" item 2 (lines 540-541) puts this check in the pane registry's compare-and-swap, and section 8's I8 order (lines 285-302) has no refusal before step 2. The check itself is right. Without it, a pane of Beta is relaunched with Alpha's spec before the registry refuses its record, which goes against I3. Precedent is mixed. Part 1's A (W-1) kept an ADR-silent rule in the suite's module doc without an ADR edit. Slice d amended ADR-0021 in its own PR (316b8e3) when its suite pinned a rule the ADR lacked, under the same `crates/holler-pane-testkit/**` blast radius. This repo's rule is that an extension updates the ADR in the same change. | Fold this into B-1's amendment. Add one sentence to ADR-0021 section 8 step 1: "a `Set` for a pane whose record belongs to another profile is refused here with `pane-in-other-profile`, before anything is written or moved; the registry's check (Decisions taken, item 2) stays the authority". Add `docs/adr/ADR-0021.md` to the blast radius and to AC8, and mention the ADR line in the CHANGELOG entry, as #683's entry did. If the operator prefers no ADR edit, state the rule and its reason in the suite's module doc and in decisions.md, as part 1 did with its W-1. |
-| W-2 | warn | Files: `src/conformance/profile_scope.rs` ~650, split into `profile_scope/act.rs` "**If it nears 800**" (line 362) | size and structure | The estimate is already past the 600-line lint warn, and the trigger is looser than part 1's practice. Part 1's one-file suite reached 640 lines, and F split it into 521 + 129 + 144 lines. `profile_store/log.rs:1-2` gives the reason: "so that no file of the suite nears the 600-line lint". Part 1's tests ran about 30% over their estimate, so ~650 could land past 800. No `src/` file in the crate is over 600 today. | Plan the split up front: cases 9 to 14 (the act cases) go in `conformance/profile_scope/act.rs` from the start. Alternatively, set the trigger at the 600-line warn. Either way, list the file in the blast radius unconditionally. |
-| W-3 | warn | Forward-compat row for #663 (line 412); cases 10 and 11 | ADRs; forward-compat | #663's acceptance says "a stale generation gives `profile-conflict`". Under ADR-0021 section 8, steps 2 and 6, a stale first write is `generation-conflict` (case 10) and only a stale restore is `profile-conflict` (case 11). The suite follows the ADR, which is correct. But the forward-compat row says "yes" without mapping #663's wording onto the cases, and #663 may read case 10 as a contradiction. | In the suite's module doc and the forward-compat row, map #663's acceptance bullets to case ids. Say that "a stale generation gives `profile-conflict`" is case 11, and that a stale first write is `generation-conflict` (case 10) under section 8 step 2. |
-| W-4 | warn | Decision 1 (no fault switch on the scope, line 430); forward-compat row for the spec-editing verb stories (line 413) | forward-compat | Using the stores alone, a verb story cannot make `edit_spec` answer `profile-conflict`. That is the outcome after which ADR-0021 section 8 step 6 makes the verb print its reconcile step, which is something a launch, relaunch or close story will want to test. Case 11 gets it by writing the store from inside the act, but in a verb test the act is the verb's own code. `fail_next(CasPut, Conflict)` fails the first write, which gives `generation-conflict`. So the row's "yes" holds for every scope outcome except this one. | Pick one of two fixes. Option 1: add a one-shot hook on `FakeProfileScope`, where another writer stores P (through `concurrent_put`) between the next act and its restore, so the restore really conflicts, plus one AC4 test. Option 2: describe the technique in the forward-compat row, which is a test-local port wrapper whose call moves P and then fails. |
-| W-5 | warn | "Fake behaviour" step 7 and decision 3: a restore that fails with anything but `Conflict` is returned as it is | cross-cutting (error boundaries) | When the restore fails with `timeout`, `store-corrupt` or `unavailable`, P keeps an edit that nothing live matches. Section 8 step 6 says that state must fail loudly with a reconcile step. Here the answer is a bare store error that does not name P, and the act's error is lost. The ADR decides only the `Conflict` case, and the codebase has no earlier compensating write to follow. Leaving it out of the suite is right, but #663 will copy the fake by default. | List it among the points #663 decides, in the suite's module doc. Optionally, the fake's error could name P and say that its specs were not restored. If W-1's ADR edit is made, section 8 step 6 can take one more sentence on it. |
-| W-6 | warn | "Reuse refactors": part 1's helpers, `Shown`, `Step` and the name constants become `pub(super)`, and so does `pane_name` | dependency direction | This is right under the rule that no slice edits `conformance/mod.rs`, and part 1 set the precedent. But the scope suite will import from both sibling suites, `pane_store` and `profile_store`. Part 1's A (W-2) warned about exactly this fan-in. The follow-up it asked for was to move shared suite helpers into `conformance/mod.rs` once the stub slices had merged, and it was never filed (`gh issue list` shows none). #688 is the last stub slice, so the no-edit rule has done its job once it merges. | Build as planned. O files the follow-up now. After #688, it moves `profile_name`, `pane_name`, `actor`, `history`, `shown`, `unchanged`, the watch helpers and the shared `Demo …`/`demo-c*r1` names into `conformance/mod.rs` or a new `conformance/common.rs`. It also refreshes the "empty stubs" line in `lib.rs:28`, which is stale now that slices b, d and e have merged. |
+| W-7 | warn | "Fake behaviour" step 3; the `ASSUMPTION (#661/#663)` bullet; "ADR edit"; case 14 | ADRs; forward-compat | #663 says "`--spec-only` makes `edit_spec` skip the act", and `edit_spec` has no flag for it, so the verb passes an act that does nothing. The scope can't tell that call from a live one. So the `Set` check also refuses `launch --profile P --spec-only X` (and the same `relaunch`) when X belongs to Q. Nothing live would move there, and the result would only be a detached spec. ADR-0021:66-68 and :282-283 treat a detached spec as a normal state, and `profile create --from` makes them. The check also means a detached spec that already exists, such as the fixture's Alpha c3 entry, can be removed through `edit_spec` but never updated. This is not drift. Section 9 (line 335) lists `pane-in-other-profile` for `launch` and `relaunch` with no `--spec-only` exception, the choice fails closed, and `profile apply --take-over` remains the way to adopt a pane. But the new ADR sentence is where this rule gets written down, two paragraphs after "a detached spec is not refused", and as quoted it does not mention `--spec-only`. #644, whose acceptance includes "`--spec-only` changes P and nothing live", would have to work this out on its own. | Extend the same sentence, for example "...before anything is written or moved, with or without `--spec-only`, since the scope cannot see that an act is empty; a `Remove` is not...". Mirror it in the `ASSUMPTION (#661/#663)` bullet and in the forward-compat row for the spec-editing verbs. The ADR edit then stays the one sentence AC8 allows. If the operator would rather let `--spec-only` write a detached spec, the check cannot stay in the scope, because the scope cannot see the flag. It would move to #644's verb, and case 14 would be amended there under the brief's Risks rule. That decision belongs to a later story, not this run. |
+| W-8 | warn | `before_next_restore`; "Fake behaviour" step 7 ("take and run the hook"); Risks | concurrency | (a) The workspace is on edition 2021 (`Cargo.toml:10`). There, the `MutexGuard` in `if let Some(hook) = self.restore_hook.lock()....take() { hook() }` lives to the end of the block, so the hook would run while the scope's own mutex is held. The doc invites re-arming ("Arming it again replaces an unused hook"). A hook that re-arms, or that calls back into the scope, would then deadlock, and in a test a deadlock hangs instead of failing. Risks says "no lock is held across `act()`" but says nothing about the hook. (b) The public doc says "after the next act that fails", but step 7 is on the `Some(P)` path only. It does not say whether a failing act under `edit_spec(None, ..)` uses up the hook. | Take the hook out in a `let` statement of its own, so the guard drops at the `;`, then call it. Extend the Risks line to "nor across the hook". Make the doc say "the next failed act of an `edit_spec` with a profile; a failing act without a profile, and a first write that fails, leave it armed". Optionally, add the `None` half to AC4's hook test (one line). |
 
-Apart from these, the plan is consistent with existing patterns. I verified:
+### The first pass's findings, after the amendment
 
-- **Every line the brief quotes is correct** as of 9d61c9f. This covers the port (`profile.rs:259-273, 373-404`), ADR-0021
-  section 8 and "Decisions taken" items 1 and 2, the error variants and their `Display`, which carries `what` and so makes
-  case 11's and AC4's message checks sound, and every `testkit` line reference.
-- **The `build(Arc<FakeProfileStore>, Arc<FakePaneStore>) -> S` shape fits #663.** `Wiring` owns its ports and lends
-  `Ports<'_>` (`holler-cli/src/pane/wiring.rs:25-46`). A real scope kept there cannot borrow its sibling stores, so it must
-  own them, which is what `build` assumes. The herdr and harness suites already hand cases more than the bare subject, and
-  no guard `K` is needed over two in-memory fakes.
-- **No missed reuse candidate.** `MemScope` (`holler-pane/tests/ports_test.rs:103-158`) is a test-local stand-in in another
-  crate. It writes after the act and moves a `Set` entry to the end, and the brief says so. `Unwired` is a placeholder. The
-  hub has no `pane-in-other-profile` rule yet (#661 adds it), so `check_membership` is the only copy in the workspace, and
-  making it `pub(crate)` keeps it that way.
-- **Naming and layout mirror part 1:** `FakeProfileScope`, `run_profile_scope_conformance`, `profile_scope_cases`, kebab
-  case ids, `tests/{profile_scope_conformance_test.rs, fake_profile_scope_test.rs}`, and the `foo.rs` + `foo/` child
-  module for the split.
-- **Lints:** widening visibility trips nothing. `dead_code` is the only workspace rust lint, and there is no
-  `unreachable_pub`.
-- **Concurrency:** the scope holds no lock across `act()`, and every fake method takes `&self`, so cases 8 and 11, whose
-  acts read and write the store, are re-entrant without deadlock.
-- **The `ASSUMPTION (#N)` form** is the crate's convention (`herdr.rs`, `harness.rs`, `conformance/herdr.rs`).
-- **Smaller points.** "The scope writes no pane record" is the only reading the frozen `act: FnMut() -> Result<(), _>`
-  allows, and it is flagged for #663. Exact `spec.pane == pane.as_str()` matching is correct because `PaneName` is
-  verbatim (`pane.rs:44-47`). No open PR touches the test kit.
+- **B-1 (block): resolved.**
+  - Step 3 reads the pane record for every edit, so AC3's `[Get]` shape stays, and calls `check_membership` only for a
+    `Set`.
+  - Case 15, `remove-of-a-detached-spec-is-not-refused`, pins the other half. It cites ADR-0021:282-283 and :338, and I
+    re-verified both.
+  - Case 13 now uses a `Set` for c1, so it still tells the two check orders apart. AC4 `membership_compares_slugs` uses a
+    `Set`.
+  - `MembershipOnRemove` fails on case 15 alone, because the suite's only other `Remove`, case 7, removes a member. The
+    harness asks only that the named case be among the failures (`profile_store_conformance_test.rs:176-188`). The mutant
+    delegates through `resolve`, so the test file holds no copy of the edit logic. Building the `PaneError` in the test
+    file matches part 1's `ForgetsLogOnDelete`.
+- **W-1: resolved.**
+  - The one-sentence edit goes in section 8 step 1 (line 288, verified), and the blast radius, AC8 and AC9 now list it.
+  - The precedent claim holds. #683's issue radius did not list ADR-0021, yet 316b8e3 edited it, under the stack's rule
+    that an ADR extension lands in the same change.
+  - The sentence agrees with section 9: line 335 lists `pane-in-other-profile` for launch and relaunch, and line 338 leaves
+    it out for close. It keeps "Decisions taken" item 2 as the authority. W-7 suggests one clause to add.
+- **W-2: resolved.** `act.rs` is planned from the start, mirroring `profile_store/log.rs`, whose child `pub(super)` cases
+  import from `super::`. AC10 keeps both suite files under 600 lines. Even part 1's 30% overrun leaves the estimates of
+  ~420 and ~330 lines under that.
+- **W-3: resolved.** The mapping goes in the module doc and in the forward-compat row. I checked it against #663's
+  acceptance text.
+- **W-4: resolved** by `before_next_restore`, the first pass's Option 1.
+  - `FaultSwitch` holds only `Fault` and `PaneError` values (`fault.rs:26-52`). It cannot place another writer's version
+    between the act and the restore, so the hook is the narrowest addition and not a second fault path. It is local to the
+    fake, and an AC4 test pins it.
+  - It keeps `FakeProfileScope: Send + Sync`. `ProfileStore`, `PaneStore` and `ProfileScope` are all `Send + Sync`
+    (`profile.rs:328, 380`; `ports.rs:62`), and the hook is a `Box<dyn FnOnce() + Send>` behind a `Mutex`.
+  - The mutex is read with `unwrap_or_else(PoisonError::into_inner)`, as the brief says `FakeProber` does
+    (`prober.rs:71`). W-8 covers the hook's lock.
+- **W-5: resolved.** A restore that fails with anything but a conflict is listed as open for #663.
+- **W-6: resolved.** Filed as #694.
+- **Minor, Decision 1's claim about `FakeProber`: resolved.** The decision now gives the scope's own reason and cites
+  `prober.rs:7-9`, which I verified.
+
+### Re-verified, unchanged since the first pass
+
+- `origin/main` is still 9d61c9f (`git ls-remote`). The only open PR is dependabot #673, which touches nothing in the
+  blast radius.
+- The Unreleased `### Enhancements` section of `CHANGELOG.md` still ends with the #681 entry, so AC9's placement holds.
+- `expect_code` compares code strings (`conformance/mod.rs:75-90`), so AC7's first grep can pass without contortion.
+
+Apart from W-7 and W-8, the amended plan is consistent with existing patterns.
 
 ## Notes for O
 
-**What to amend before a fresh run.** In the automated path, amend the brief and start a new run. Do not use
-`resumeFromRunId`, which replays this verdict.
+Nothing blocks. These are cheap, and none of them needs another plan review.
 
-1. **B-1 (required).** Make these four changes to the brief:
-   - In "Fake behaviour" step 3, keep `panes.get(pane)?` for every edit and run `check_membership` for `SpecEdit::Set` only.
-   - Reword the `ASSUMPTION (#661/#663)` bullet to "a `Set` for a pane of another profile".
-   - Add the `Remove`-of-a-detached-spec rule. A 15th suite case, `remove-of-a-detached-spec-is-not-refused`, is the
-     better place, because the ADR binds #663 too. If it becomes a case, update AC1's id list, the "14" counts and AC9's
-     wording. The minimum is an AC4 test on the fake.
-   - Spell out `Set(sample_spec(c1))` for case 13's second call and a `Set` for AC4 `membership_compares_slugs`.
-
-   An optional third mutant, `MembershipOnRemove`, would prove that the new case discriminates.
-2. **W-1 (recommended, same amendment).** Add the one-sentence ADR-0021 section 8 step 1 note quoted in the table. Add
-   `docs/adr/ADR-0021.md` to the blast radius and AC8, and replace "**No ADR change**" with what changed.
-3. **W-2 to W-5** can go into the same amendment cheaply: an unconditional `act.rs`, the #663 case mapping, the
-   `profile-conflict` route for verb stories, and the restore-failure point added to #663's list.
-4. **W-6** is a follow-up issue, not a brief change.
-5. **Minor.** Decision 1 gives the reason "Every other fake has its own switch because it *is* a port's boundary". That
-   is not quite true: `FakeProber` has no switch (`prober.rs:7-9`). It is the precedent for a fake without one, so the
-   `FakeProfileScope` module doc should give the scope's own reason, as `FakeProber`'s does, and drop the general claim.
+1. **W-7.** F can add the clause while writing the ADR sentence. It stays one sentence, so AC8 still holds. Optionally,
+   end the sentence with "(#688)", as slice d's ADR edit carried "(#638 amendment 2026-10-08, grid; #683)". That lets
+   #663 find the suite that pins it.
+2. **The issue body.** Issue #688 still says "the 14 cases and 2 scope mutants" and "~1,020 lines", and it mentions
+   neither the hook nor the ADR line. The issue is this repo's source of truth and S audits against it. Add a dated
+   "(amended 2026-10-09, plan review)" note, as #644, #646 and #663 carry.
+3. **#694's scope.** It should also refresh `lib.rs:28-29`, "The modules of slices b to e are empty stubs". After #688,
+   no stub is left.
+4. **Out of scope, noticed for #646.** ADR-0021:338 gives `pane close` no membership code. As written,
+   `close --profile Alpha c3` without `--spec-only` removes Alpha's detached c3 spec and then closes c3's live pane, which
+   belongs to Beta. Case 15 holds whichever way #646 decides, because it pins only the scope. Whether the verb's act should
+   close another profile's live pane is #646's question, and perhaps one for the ADR.
 
 **What Phase 7 will check:**
-- AC7's two greps.
-- `check_membership` is the only producer of `PaneInOtherProfile` in `src/` and is called only for a `Set`.
+- AC7's two greps. The first is literal, so the scope files must not name `PaneInOtherProfile` even in a doc link. The suite
+  checks the code string through `expect_code`.
+- `check_membership` is `pub(crate)`, remains the only producer of `PaneInOtherProfile` in `src/`, and is called only on
+  the `SpecEdit::Set` path. The pane record is read for every edit.
 - The scope suite imports `actor`, `sample`, `history`, `shown`, `unchanged`, `pane_name`, `profile_name`, `run_cases`,
-  `succeeds`, `expect_code` and `expect_eq` and keeps no local copy of any of them.
-- The test files' mutants delegate to `FakeProfileScope` and hold no copy of the edit logic.
-- `lib.rs` and `conformance/mod.rs` are untouched.
+  `succeeds`, `expect_code` and `expect_eq`, and keeps no local copy of any of them.
+- The three mutants delegate to `FakeProfileScope` and hold no copy of the edit logic.
+- The restore hook is taken out of its mutex before it runs (W-8).
+- `lib.rs` and `conformance/mod.rs` are untouched, and the ADR diff is the one sentence in section 8 step 1.
 
-The accepted near-duplicates are the per-file mutant harness and the test-local helpers of the two new test files
-(`actor`, `name`, `timeout`, …), because integration test files share nothing without `tests/common`.
+The accepted near-duplicates are the per-file mutant harness and the test-local helpers of the two new test files.
 
 ## Patterns referenced
 
-- `crates/holler-pane-testkit/src/{profile_store.rs, pane_store.rs, fault.rs, fixture.rs, prober.rs}` and
-  `src/conformance/{mod.rs, pane_store.rs, profile_store.rs, profile_store/log.rs, profile_store/watch.rs, herdr.rs,
-  harness.rs}`; `tests/profile_store_conformance_test.rs` (the mutant harness)
-- `crates/holler-pane/src/profile.rs:175-177, 259-273, 373-404`, `src/error.rs:400-470, 640-690`
-- `docs/adr/ADR-0021.md` sections 4 (I8, line 167), 5 (lines 190-192), 8 (lines 264-302), 9 (lines 326-346, the
-  per-verb codes), and "Decisions taken" items 1 and 2
-- `crates/holler-cli/src/pane/wiring.rs:25-46, 203-220`, `crates/holler-pane/src/ports.rs:227-235`,
-  `crates/holler-pane/tests/ports_test.rs:103-158`
-- Issues #688, #663 and #638. Part 1's Phase 3 review and decision journal (`git show 95c44d2^:docs/handoffs/682/`) and
-  slice d's ADR edit (316b8e3)
+- The brief's amendment (`git diff 9fd9c1b 98c250e -- docs/handoffs/688-brief.md`) and the first pass (db4cba8)
+- `docs/adr/ADR-0021.md`, lines 66-68, 122-130, 167, 190-192, 281-302, 331-346, 384 and 536-541, and slice d's ADR and
+  CHANGELOG edit (316b8e3)
+- `crates/holler-pane-testkit/src/{fault.rs, prober.rs, profile_store.rs:100-210, pane_store.rs:218-238, lib.rs}` and
+  `src/conformance/{mod.rs, profile_store.rs, profile_store/log.rs}`, plus `tests/profile_store_conformance_test.rs:58-239`
+  (the mutant harness)
+- `crates/holler-pane/src/profile.rs:328, 380`, `ports.rs:62`, `Cargo.toml:10, 19-30`, `scripts/lint.sh:42-52`
+- Issues #663, #644, #646, #683, #638, #688 and #694
