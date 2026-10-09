@@ -23,6 +23,10 @@ fs4 = { workspace = true }
 httparse = { workspace = true }
 http = { workspace = true }
 holler-proto = { path = "../holler-proto" }
+# Issue #669 (epic #633): the pane and profile contract. `pane_dispatch.rs`
+# answers `pane/*` and `profile/*` with a `PaneReply`; the registries (#639,
+# #661) are built on its records, ports and error codes.
+holler-pane = { path = "../holler-pane" }
 # Story #163: the token store. fs4 is the whole-file advisory lock around every
 # load-modify-save; getrandom mints secrets/credentials/ids/pepper; hmac + sha2
 # store secrets at rest as HMAC-SHA-256(pepper, secret); hex encodes ids/digests.
@@ -48,6 +52,10 @@ time = { workspace = true }
 [dev-dependencies]
 tempfile = { workspace = true }
 libc = { workspace = true }
+# Issue #669 (epic #633): the fakes and the conformance suite of the pane ports
+# (empty in the skeleton; #638 fills it). Linked by `tests/pane_dispatch_test.rs`
+# (`testkit_links`) so #638, #639 and #661 add no manifest line.
+holler-pane-testkit = { path = "../holler-pane-testkit" }
 
 # Workspace lints (issue #149): inherit [workspace.lints] from the root
 # Cargo.toml — deny dead_code, clippy unwrap/expect/panic/unreachable, and the

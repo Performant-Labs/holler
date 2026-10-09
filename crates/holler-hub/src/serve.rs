@@ -337,7 +337,7 @@ async fn bind_ws_listeners(addrs: &[SocketAddr]) -> Result<(Vec<TcpListener>, Ve
 
 /// The per-process hub-wide handles the accept loop shares across every
 /// connection: the live registry, connection-hygiene limits/lockout/
-/// pre-auth semaphore (issue #184), and the roster. Split out of
+/// pre-auth semaphore (issue #184), the roster, and the pane/profile state (issue #669). Split out of
 /// [`serve_forever`] purely to keep that fn under clippy's `too_many_lines`
 /// gate — no behavior change.
 struct SharedState {
@@ -346,6 +346,7 @@ struct SharedState {
     lockout: std::sync::Arc<crate::lockout::Lockout>,
     preauth_semaphore: std::sync::Arc<tokio::sync::Semaphore>,
     roster: std::sync::Arc<crate::roster::Roster>,
+    pane_deps: crate::pane_dispatch::PaneDeps,
 }
 
 fn build_shared_state(state: &HubState, join_held: Vec<String>) -> SharedState {
@@ -360,6 +361,9 @@ fn build_shared_state(state: &HubState, join_held: Vec<String>) -> SharedState {
     // `hub serve --join-held` (issue #460): off unless given.
     holds.set_join_held(join_held);
     let registry = crate::live::Registry::new().with_holds(holds);
+    // The pane and profile registries' state (issue #669) is loaded here for the same
+    // reason: one `Arc` of each per hub process, in force before the first connection.
+    let pane_deps = crate::pane_dispatch::PaneDeps::load(state);
     // Issue #184's connection hygiene: resolved once per process (the same
     // "fixed for the hub's whole life" discipline the roster's `Config`
     // already uses), then shared by every accepted socket.
@@ -373,7 +377,7 @@ fn build_shared_state(state: &HubState, join_held: Vec<String>) -> SharedState {
     // clock drives the 45/180/360 s sweep in production (the unit tests
     // inject a manual clock).
     let roster = std::sync::Arc::new(crate::roster::Roster::with_system_clock(&crate::roster::Config::from_env()));
-    SharedState { registry, hygiene, lockout, preauth_semaphore, roster }
+    SharedState { registry, hygiene, lockout, preauth_semaphore, roster, pane_deps }
 }
 
 /// Bind the listeners and serve until a signal. Runs inside the tokio runtime
@@ -459,7 +463,7 @@ async fn serve_forever(
     let mut sig_term = signal(SignalKind::terminate()).expect("install SIGTERM handler");
 
     let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
-    let SharedState { registry, hygiene, lockout, preauth_semaphore, roster } = build_shared_state(&state, join_held);
+    let SharedState { registry, hygiene, lockout, preauth_semaphore, roster, pane_deps } = build_shared_state(&state, join_held);
 
     // The roster TTL sweep task (issue #255): `Roster::sweep()` was
     // previously only exercised by the unit tests against an injected clock
@@ -477,7 +481,7 @@ async fn serve_forever(
         })
     };
     let accept_handle = tokio::spawn(async move {
-        accept_loop(uds, accept_any, state, registry, roster, hygiene, lockout, preauth_semaphore, stop_rx).await;
+        accept_loop(uds, accept_any, state, registry, roster, hygiene, lockout, preauth_semaphore, pane_deps, stop_rx).await;
     });
 
     // 6. Only now — WS listeners bound, control socket bound + mode 0600,
@@ -541,7 +545,7 @@ async fn sweep_loop(
 
 /// Poll the WS and control listeners, spawning a task per connection, until
 /// the stop channel is tripped (a SIGINT/SIGTERM arrived) or a listener fails.
-#[allow(clippy::too_many_arguments)] // #184: 5 shared hub-wide handles, threaded straight to the connection tasks
+#[allow(clippy::too_many_arguments)] // #184: 6 shared hub-wide handles (the 6th is #669's), threaded straight to the connection tasks
 async fn accept_loop(
     uds: UnixListener,
     mut accept_any: AcceptAny<Vec<TcpListener>>,
@@ -551,6 +555,7 @@ async fn accept_loop(
     hygiene: crate::hygiene::HygieneLimits,
     lockout: std::sync::Arc<crate::lockout::Lockout>,
     preauth_semaphore: std::sync::Arc<tokio::sync::Semaphore>,
+    pane_deps: crate::pane_dispatch::PaneDeps,
     mut stop_rx: tokio::sync::oneshot::Receiver<()>,
 ) {
     loop {
@@ -562,7 +567,7 @@ async fn accept_loop(
                     Ok(pair) => pair,
                     Err(_) => continue,
                 };
-                tokio::spawn(crate::control_server::handle_control_conn(stream, registry.clone(), roster.clone(), lockout.clone()));
+                tokio::spawn(crate::control_server::handle_control_conn(stream, registry.clone(), roster.clone(), lockout.clone(), pane_deps.clone()));
             }
             res = (&mut accept_any) => {
                 let (stream, addr) = match res {

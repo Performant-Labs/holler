@@ -9,23 +9,27 @@
 //! is the whole control-socket **server**, `serve.rs` is the WS accept loop
 //! and handshake.
 
+use holler_proto::methods::{is_pane_method, is_profile_method};
 use holler_proto::{Code, Envelope, WireError};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 use tokio::net::UnixStream;
 
 use crate::live::Registry;
 use crate::lockout::Lockout;
+use crate::pane_dispatch::PaneDeps;
 use crate::roster::Roster;
 use crate::state::{resolve_state_dir, HubState};
 
 /// Handle one control-socket connection: newline-delimited JSON-RPC. A frame
 /// that does not decode is `-32700`/`-32600`; an unknown `control/…` method is
-/// `-32601 method_not_found`.
+/// `-32601 method_not_found`. A `pane/*` or `profile/*` request (issue #669)
+/// goes to [`crate::pane_dispatch`] with the shared `pane_deps`.
 pub async fn handle_control_conn(
     stream: UnixStream,
     registry: Registry,
     roster: std::sync::Arc<Roster>,
     lockout: std::sync::Arc<Lockout>,
+    pane_deps: PaneDeps,
 ) {
     let (read_half, write_half) = tokio::io::split(stream);
     let mut write_half = write_half;
@@ -37,7 +41,7 @@ pub async fn handle_control_conn(
                 if line.is_empty() {
                     continue;
                 }
-                let reply = dispatch_control(&line, &registry, &roster, &lockout).await;
+                let reply = dispatch_control(&line, &registry, &roster, &lockout, &pane_deps).await;
                 let bytes = format!("{reply}\n");
                 if write_half.write_all(bytes.as_bytes()).await.is_err() {
                     return; // client went away.
@@ -73,7 +77,7 @@ fn log_control(method: &str, id: Option<&str>) {
 
 /// Parse one control frame, dispatch it, and return the reply as a single
 /// line (no trailing newline; the caller adds it).
-async fn dispatch_control(line: &str, registry: &Registry, roster: &Roster, lockout: &Lockout) -> String {
+async fn dispatch_control(line: &str, registry: &Registry, roster: &Roster, lockout: &Lockout, pane_deps: &PaneDeps) -> String {
     // The control socket is **internal, non-wire**: it is not validated
     // against the v2 wire catalog (those are the `control/…` methods, which
     // live only here). We still parse the frame as a JSON-RPC object so we can
@@ -107,6 +111,10 @@ async fn dispatch_control(line: &str, registry: &Registry, roster: &Roster, lock
         Some("control/query_remote") => {
             dispatch_allowlisted("query_remote", &cid, &obj, registry, roster, lockout).await.unwrap_or_default()
         }
+        // `pane/*` and `profile/*` (issue #669): the two method lists, not a
+        // prefix, so `pane/frobnicate` stays `method_not_found`. Ahead of the
+        // `control/` arm so the order is explicit.
+        Some(m) if is_pane_method(m) || is_profile_method(m) => crate::pane_dispatch::forward(m, &cid, &obj, pane_deps).await,
         Some(other) if other.starts_with("control/") => {
             dispatch_session_control(other, &cid, &obj, registry, roster, lockout).await
         }

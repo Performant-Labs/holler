@@ -1190,6 +1190,8 @@ dependencies = [
  "getrandom 0.3.4",
  "hex",
  "hmac",
+ "holler-pane",
+ "holler-pane-testkit",
  "holler-proto",
  "hostname",
  "http",
