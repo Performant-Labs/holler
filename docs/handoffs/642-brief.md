@@ -28,6 +28,13 @@ quoted in Evidence ("Added after the outside brief review"); the 642a AC subset 
 criteria"; `http.rs`'s reply reading, `serve`'s `Child` ownership, `attach_tui`'s dead-pane handling and poll, the
 `no such pane` stderr and `#{pane_dead_status}` are spelled out; AC 8 and AC 10 gain one clause each.
 
+**Amended 2026-10-09 after the outside brief review, round 2** (B-1, B-2, W-1 to W-4, NV-13, NIT-2). Additions and
+clarifications only; no decision, AC or scope item is changed or removed: the `attach_tui` clauses of AC 6 and AC 11d and the
+real-OpenCode half of AC 20 are labelled 642b's inside the AC text itself, and the 642a list restates AC 6 and AC 20 as they
+apply here, so there is one statement of each (B-1, B-2, W-1, W-2); AC 3 gains a mismatched-title clause (W-3); the stub's
+request record is defined as the raw request line (W-4); AC 24 gains the no-raw-title rule of Risk 3 (NIT-2); the ADR-0021
+"Deferred to named stories" line is cited at its real line, 533, with its text (NV-13).
+
 ## Size check
 
 **Amended: F's file cap now trips; split proposed (the MO decides).** Lines still fit one run, but files do not. One
@@ -708,35 +715,46 @@ element, a directory or an env value).
 removes no AC from the story. T writes RED tests for, F makes GREEN, and S audits exactly:
 
 - AC 1, 2, 3, 4, 5, 7, 8 and 11 in full;
-- AC 6 without its `attach_tui` clause (only `create_session`, `list_sessions` and `abort` on an unbound port);
+- AC 6's 642a clause, which for this run is the whole of AC 6: on an unbound port, `create_session`, `list_sessions` and
+  `abort` are `unavailable`. AC 6's `attach_tui` clause is labelled 642b's in the AC text below and is not tested here
+  (B-1, B-2: in 642a `attach_tui` answers `PaneError::NotImplemented` and never consults the resolver, so that clause would
+  be contradictory or vacuous in this run);
 - AC 11d without its `attach_tui` clause (the `abort` and `list_sessions` clauses, the message rule and the percent-encoded
-  request line);
+  request line); the `attach_tui` clause is labelled 642b's in the AC text below;
 - AC 11e in full;
-- AC 20's hermetic half only (`cargo test --workspace` passes; no real-OpenCode run is required here);
+- AC 20's 642a clause, which for this run is the whole of AC 20: `cargo test --workspace` passes. 642a adds no
+  `tests/real_opencode_test.rs` (the split table gives it to 642b), so there is no real-OpenCode run, no version record and
+  no `handoff-T-green.md` real-run summary in this run (W-2);
 - AC 21, 22, 23 and 24. For AC 22 this run changes none of `docs/adr/ADR-0021.md` or the two `holler-pane` files (they
   stay allowed by the AC, and are 642b's to change). For AC 24 the rig clause applies to whatever test code this run adds.
 
 In this run `attach_tui`, `select_session` and `shown_session` answer `PaneError::NotImplemented` (split table), and
-`src/tui.rs` holds only `TmuxSocket` and `TmuxConfig`. **642b's ACs, not written or run here:** AC 9, 10, 11a, 11b, 11c, 11f,
+`src/tui.rs` holds only `TmuxSocket` and `TmuxConfig`. No AC in the 642a list above asserts on `attach_tui`,
+`select_session` or `shown_session`. **642b's ACs, not written or run here:** AC 9, 10, 11a, 11b, 11c, 11f,
 12-19a, 25 and 26, the `attach_tui` clauses of AC 6 and 11d, and AC 20's real-OpenCode half. They stay in this brief
 unchanged for the 642b run.
 
 Hermetic (in `tests/hermetic_test.rs`, no OpenCode, no tmux; they run in CI on Linux and macOS under
 `cargo test --workspace`). The stub server is a `std::net::TcpListener` on `127.0.0.1:0` in a thread, with routes and a
-"frozen" mode (accept, read, never answer) set per test, recording every request line it receives.
+"frozen" mode (accept, read, never answer) set per test, recording every request line it receives. The record is the raw
+request line exactly as received on the wire (method, request target and version, before any URL decoding); every
+assertion on a recorded path, such as AC 11d's percent-encoded one, compares against that raw text (W-4).
 
 1. `http::request` reads a `Content-Length` reply and a `Transfer-Encoding: chunked` reply to the same bytes; a closed port is
    `Refused` within 1 s; a frozen stub is `TimedOut` within the timeout plus 300 ms; a non-HTTP reply is `Garbled`.
 2. `health` is `Ok(true)` for `{"healthy":true,...}`, and `Ok(false)` for an unbound port, a frozen stub (within
    `timeouts.health` plus 300 ms), a 200 that is not that JSON, and a 500.
 3. `create_session` sends `POST /session` then `PATCH /session/<id>` whose body's `title` equals the id, and returns the id;
-   when the PATCH answers 500 it returns `unavailable` and the stub has received `DELETE /session/<id>`.
+   when the PATCH answers 500 it returns `unavailable` and the stub has received `DELETE /session/<id>`; when the PATCH
+   answers 200 with a session object whose `title` is not the id, `create_session` is `unavailable` (W-3; the adapter
+   checks the reply's title, per Behaviour).
 4. `list_sessions` returns the ids of the stub's `GET /session` array.
 5. `abort` of an id whose `GET /session/<id>` is 404 is `session-not-found` and the stub received no `POST .../abort`; of a
    known id with `GET /session/status` = `{}` it is `Ok`, and a status that stays `busy` gives `timeout` with
    `op == "harness.abort"`.
-6. On an unbound port, `create_session`, `list_sessions`, `abort` and `attach_tui` are `unavailable`; for `attach_tui` the
-   `tui_session` resolver is never called (it records calls; the record is empty).
+6. On an unbound port, `create_session`, `list_sessions` and `abort` are `unavailable` (the 642a clause). **642b's clause
+   (not written or run in 642a):** on an unbound port `attach_tui` is `unavailable` and the `tui_session` resolver is never
+   called (it records calls; the record is empty).
 7. On a frozen stub with `Timeouts { call: 1 s, .. }`, `create_session` is `timeout` with `op == "harness.create_session"` and
    returns in under 1.5 s (the call bound caps the request timeout).
 8. `serve` on a port where the stub answers healthy is `unavailable` and its message contains the port; `serve` on a free port
@@ -771,8 +789,8 @@ Added by the amendment (pure builders and stub cases; still no tmux and no OpenC
      arguments `-S p` then the call's; with `Name(n)`, `-L n` then the call's; with `Default`, the call's alone. For all
      three, `Command::get_envs()` holds `("TMUX", None)` and `("TMUX_PANE", None)` (both removed).
 11d. **A 200 is not enough (W-6).** With the stub answering `200` `text/html` (`<!doctype html>...`) for `GET /session/<id>`:
-     `abort` is `unavailable` and the stub received no `POST .../abort`; `attach_tui` is `unavailable` and the `tui_session`
-     resolver is never called. A `GET /session/<id>` whose object's `id` differs is `unavailable` the same way. With a valid
+     `abort` is `unavailable` and the stub received no `POST .../abort`; (**642b's clause, not written or run in 642a:**
+     `attach_tui` is `unavailable` and the `tui_session` resolver is never called). A `GET /session/<id>` whose object's `id` differs is `unavailable` the same way. With a valid
      `GET /session/<id>` and `POST /session/<id>/abort` answering `200` HTML, `abort` is `unavailable`. `list_sessions`
      against a `200` HTML `GET /session` is `unavailable`. Each such message is one line, names the route and the status,
      and is at most 200 bytes. `abort` of the id `ses x/?` sends a request line whose path is
@@ -836,7 +854,8 @@ The rig (one per test, and one per conformance case):
 
 Gates for the whole change:
 
-20. `cargo test --workspace` passes with the real tests skipped; `HOLLER_TEST_OPENCODE=1 cargo test -p
+20. `cargo test --workspace` passes with the real tests skipped (the 642a clause; in 642a there are no real tests yet);
+    **642b's clause (not run in 642a):** `HOLLER_TEST_OPENCODE=1 cargo test -p
     holler-adapter-opencode --test real_opencode_test -- --ignored --test-threads=1` passes on a machine with OpenCode 1.18.x
     and tmux 3.2 or later (record the versions and the run's output summary in `handoff-T-green.md`).
 21. `cargo clippy --workspace --all-targets -- -D warnings` is clean; every new `.rs` file passes
@@ -851,7 +870,9 @@ Gates for the whole change:
 23. `CHANGELOG.md` `[Unreleased]` has one entry under "Enhancements" that links #642 and epic #633 and says what the adapter
     does and that the real-OpenCode tests are opt-in.
 24. Safety: `grep -rn "4700[0-9]\|--continue" crates/holler-adapter-opencode` finds nothing outside comments that forbid them;
-    no test reads a real HOME, the default tmux server or a port outside 48100-48199 (A and S check the rig code).
+    no test reads a real HOME, the default tmux server or a port outside 48100-48199 (A and S check the rig code); no test
+    prints the raw tmux `#{pane_title}` (it can be the machine's host name; Risk 3), and assertions use the parsed value
+    (NIT-2; A and S check the test code).
 25. The PR body says how each of the fake's three `ASSUMPTION (#642 to confirm)` comments stands after this run: the shown
     session is read through **tmux** `#{pane_title}`, not Herdr, so the Herdr half of that assumption no longer applies;
     cross-directory `select-session` and aborting a model turn remain **unverified** (no test exercises them; both need
@@ -883,7 +904,8 @@ each edits only its own port's wording.
 Precedent: #639 (2a6f349), #676 (3f9fbf2) and #692 (316b8e3) each amended ADR-0021 in the change that settled a contract
 point; the #640 brief does the same for `HerdrPort`. About 20-30 lines in all:
 
-- **ADR-0021 "Deferred to named stories"** (line 530): the item becomes `HerdrPort` alone (#636, then #640); `HarnessPort` is
+- **ADR-0021 "Deferred to named stories"** (line 533, which reads verbatim
+  `` - `HerdrPort` and `HarnessPort` in their final form: #636 and #635, then #640 and #642. ``; NV-13): the item becomes `HerdrPort` alone (#636, then #640); `HarnessPort` is
   recorded as confirmed unchanged by spike #635 and built by #642 (section 2).
 - **ADR-0021 section 2**, the "provisional" paragraph (lines 100-103): `HarnessPort` is no longer provisional (spike #635
   confirmed it; #642 implements it). The `HerdrPort` half is left as it is for #640.
