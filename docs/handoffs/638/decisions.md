@@ -99,3 +99,35 @@
     - the overlay's Phase 7 candidates (none hit);
     - personal names in the diff (only the test that asserts their absence).
   - **Merge:** `git merge-tree HEAD origin/main` completes with no conflicts.
+
+## S (Phase 9, spec audit) -- 2026-10-09T12:04:06-06:00
+- **Decided:** PASS on `origin/main...071821a` (see `638-S.md`).
+  - **Preconditions:** A is PASS at Phase 3 and at Phase 7. T confirmed RED, then GREEN, with zero blocking issues.
+  - **Acceptance criteria:** all 8 are met, each with a named test or evidence. AC 7's CHANGELOG position is a documented deviation, and I accept it.
+  - **Public API:** exactly the brief's, with A's W-12 rename (`PortOp::as_str`).
+  - **Decisions:** every recorded decision is implemented as stated.
+  - **Deviations:** W-5, W-6, W-1 (stub wording), W-12 and the CHANGELOG position. Each one was reviewed and recorded; none is silent.
+  - **Quality audit:** nothing blocking. Guards, privacy and scope are all clean.
+- **Assumed:**
+  - T-green's Tier 1 output stands. S does not re-run Tier 1 or Tier 2.
+  - F's runs stand, though nothing was committed from them: the mutant probe and the suite run against the hub on `main`.
+- **Hedged:**
+  - **Names already public.** The `hj-*` and `kiwi` hits in the pipeline docs are not REWORK, because both names are already public on `main` (`holler-pane/src/pane.rs:25`, ADR-0021:37 and the hub's tests).
+  - **Session links.** No branch commit carries one, and neither do `main`'s recent squash commits. The fix belongs to the PR step, not to F.
+  - **Advisory only.** These need no change now:
+    - the untested slug comparison (decision 6);
+    - the vacuous `Watch` `Send` check;
+    - the snapshot taken again at `Cursor(0)` on a store that has never been written, which matches the hub.
+- **Evidence:**
+  - **Read in full:** the diff, both test files and every `src/` file.
+  - **`git grep` and `grep`:**
+    - denied constructs in `src/` (none);
+    - `#[allow]`s (only the two `// #638` ones in the tests);
+    - every `pub` item (exactly the brief's);
+    - `next_generation` and cursor arithmetic;
+    - privacy over the added lines;
+    - `hj-*` and `kiwi` on `main`.
+  - **Sizes (`wc -l`):** at most 518 lines in `src/`, and 426 and 311 in the tests.
+  - **Merge:** `git merge-tree --write-tree HEAD origin/main` (`3f9fbf2`) merges cleanly.
+  - **Issues (`gh issue view`):** #638, and #681 to #684. W-1 and W-2 are still open.
+  - **The Workflow script:** it opens the PR with `Implements #638` / `Closes #638.` (advisory 1 in `638-S.md`).
