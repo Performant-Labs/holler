@@ -15,3 +15,24 @@
   - Also read: `herdr-api-spike.md:120-180`, `holler-cli/src/pane/wiring.rs:1-80`, `holler-body/src/http_attach_driver.rs:1-112` and `connection.rs:66-90, 300-330`, `holler-hub/src/ws_handshake.rs` (`httparse` use), `scripts/lint.sh`, `clippy.toml`, `scripts/spikes/opencode-lib.sh:1-80`, `.github/workflows/ci.yml` (test steps), and the 641 and 640 briefs.
   - Issues read with `gh issue view`: 642, 633, 641, 644, 649, 639, 683.
   - Git: `git show --stat` of 9d61c9f, 316b8e3, 434a1b5 and 90997a2 (each added a CHANGELOG entry); the ADR-0021 diffs of 316b8e3 and 2a6f349; `git log -- docs/adr/ADR-0021.md`. `Cargo.lock:1127-1128`.
+
+## A (Phase 3, up-front plan review: a re-review of the amended brief; this run is 642a) — 2026-10-09T17:27:08-06:00
+- **Decided:** PASS on docs/handoffs/642-brief.md at 5a4d68e, with 0 blocks and 8 warns (see handoff-A.md, which replaces the BLOCK at 4831580).
+  - Both earlier blocks are resolved. B-1's ADR-0021 edit moves to 642b, the closing part, as #640's split does (part 3, 640-brief.md:22). B-2's exact targets are 642b's code, pinned by AC 11a-11c and 19a.
+  - 642a stays consistent with existing patterns. It implements `HarnessPort` with `NotImplemented` for the three TUI methods, the skeleton's documented answer (error.rs:404-406). It depends only on `holler-pane`, `serde_json` and `httparse`, and it justifies `http.rs`, `exec.rs`, the `tui.rs` types and the stub in writing.
+  - W-1 is the warn with the most consequence. This brief's decision 14 says "#644 passes the session name (and directory)", and #644's brief (C-9, at 7195993) rejects that, so #649 gets opposite instructions. `workdir` (642a) can be met by wiring alone, because `ensure_session(name, cwd)` precedes `serve` in #644's act. `tui_session` (642b) has no such source, given #644's C-8.
+- **Assumed:** #644's brief (7195993), #641's (95e2260), #663's (ec3a214) and #640's part 2 brief are the current plans of those in-flight stories, not merged code. #644's brief was amended while I reviewed (d2636ba to 7195993); the lines I cite are the new ones, and their substance did not change. The issue (#642), ADR-0021, the merged test kit and #640 part 1 (3bdd129) are the authority.
+- **Hedged:**
+  - W-1 is a warn, not a block. For 642a, the `Resolver` doc already says meeting the precondition is wiring's job, which matches #644; only decision 14's prose and the Forward-compat row disagree. Whether `tui_session` can be met at all is 642b's question.
+  - W-3 (contract facts on main before the ADR note) is a warn, because #640's split defers its ADR edits the same way and ADR-0021.md:533 stays true while #642 is open.
+  - W-6 assumes that `cargo machete` (bnjbvr/cargo-machete@main, default flags) checks dev-dependencies. Either way, an unused `tempfile` breaks the manifest rule "declare only what is consumed".
+  - The outside-model mismatch (`deepseek-v4-pro` in the brief and the usage files, against `glm-5.3-flash` in CLAUDE.md) is a process note for O, outside A's dimensions.
+- **Evidence:**
+  - Read in full: the brief at 5a4d68e; the earlier handoff-A.md and decisions.md; `holler-cli/tests/attach_cli_test/fake_server.rs`; `holler-adapter-herdr/{Cargo.toml,src/lib.rs}`.
+  - Read in part:
+    - `holler-pane/src/{lib,ports,pane,probe}.rs` and `error.rs:398-410`; `holler-pane-testkit/src/harness.rs:1-160` and `287-310`; `conformance/harness.rs:8-22`.
+    - `docs/adr/ADR-0021.md:1-200`, `473-536`; `docs/research/opencode-pane-spike.md:224-290`.
+    - The workspace `Cargo.toml:1-40` and `150-170`; `ci.yml:305-325`; `holler-cli/src/pane/wiring.rs:1-40`; `holler-cli/tests/support/mod.rs:740-830`.
+    - The 644 brief (C-4 to C-9, the launch and relaunch act tables, decisions 6-7, Forward-compat, Follow-ups, Risks); the 641 brief (grep: `TmuxSocket`, `exec.rs`, the #642 row, `stop_owned`); the 663 brief (grep: runner, #696, `kill -s`); the 640 part 2 brief (header, `HerdrConfig`, transport).
+  - Issues read with `gh issue view`: 642, 644, 633 (grep), 695, 696. I searched open and closed issues for a `FakeHarness` parity follow-up and found none.
+  - Git: `git diff --stat 9d61c9f 3bdd129` over `holler-pane`, the harness fake and suite, and this crate (empty); `git show 3bdd129 -- CHANGELOG.md`; `git ls-files docs/handoffs | grep 642`; the usage.json files of rounds 1-3; and a grep of the brief and handoffs for personal infrastructure names (none).
