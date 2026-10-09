@@ -128,6 +128,20 @@ fills this file in at release time.
   `holler_pane::error::class_of`, so it keeps no table of its own. Test code only: nothing a user runs changes
   ([#681](https://github.com/Performant-Labs/holler/issues/681)).
 
+- Pane control, the test kit's fake profile scope (epic [#633](https://github.com/Performant-Labs/holler/issues/633)):
+  `holler-pane-testkit` now has a fake of the helper every `--profile` verb uses to scope itself to a profile and to
+  edit a pane's spec and make the live change as one transaction. It keeps the order of
+  [ADR 0021](docs/adr/ADR-0021.md): the profile is written first; a live change that fails puts the specs back by a
+  second write, so the generation moves by two and the profile's log shows the edit and its reversal; and another
+  writer's change in between is `profile-conflict`. It works over the fake profile and pane registries, so a test
+  injects faults into them, and a one-shot hook lets another writer move the profile just before the specs are put
+  back. A conformance suite that the real profile scope runs against itself comes with it: 15 cases, which the fake
+  passes and which reject a scope that writes the profile after the live change, one that does not put the specs
+  back, and one that refuses to remove a spec for a pane of another profile. ADR 0021 now records that the scope
+  refuses to set a spec for a pane of another profile before anything is written, and that removing a spec is never
+  refused for that reason. Test code only: nothing a user runs changes
+  ([#688](https://github.com/Performant-Labs/holler/issues/688)).
+
 ## [0.4.0] - 2026-09-29
 
 ### Enhancements

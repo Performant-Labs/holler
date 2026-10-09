@@ -100,3 +100,37 @@
   - The deadlock test waits 10 s only when it fails; it adds no time when it passes.
 - **Evidence:** `cargo test -p holler-pane-testkit --no-fail-fast` (two E0432 build failures); the reverted probe runs
   recorded in handoff-T-red.md.
+
+## F (phase 6 of the script, implementation) — 2026-10-09T15:04:34-06:00
+- **Decided:**
+  - `FakeProfileScope` follows the brief's "Fake behaviour" in order: get P, then the `usage` guard for a `Set`, then
+    the pane-record `get` for every edit, then `check_membership` for a `Set` only, then `cas_put` at g, then the act.
+    A failed act runs the one-shot hook and then the restore `cas_put` at g + 1. `Conflict` there becomes
+    `profile-conflict`, and any other error is returned as it is.
+  - The hook is taken out of its mutex in a `let` statement of its own before it runs (W-8). A replaced hook is dropped
+    after the lock is released. The mutex is read through `crate::feed::lock`, reused rather than restated.
+  - The suite is `Seeded<S>` (owned per case) plus `Bench<'a>` (the `&dyn ProfileScope` view a case gets). Cases 1 to 8
+    are in `conformance/profile_scope.rs` and cases 9 to 15 in `conformance/profile_scope/act.rs`. The log checks read
+    only what the log gained (`gained`), because the suite pins no actor.
+  - The ADR sentence includes A's W-7 clause (with or without `--spec-only`) and `(#688)`. It is one sentence in
+    section 8, step 1, mirrored in the suite's `ASSUMPTION (#661/#663)` paragraph and in the fake's comment.
+  - `CREATED` stays private, because the scope suite does not read it. Every other helper and constant the brief listed
+    is `pub(super)` and reused.
+- **Assumed:**
+  - A `Remove` that drops every entry naming the pane (`retain`) equals the brief's "drops it" for a well-formed
+    profile, which has one entry per pane. No case or test can tell the two apart.
+  - Checking `profile-conflict`'s `Display` for the profile name is the general form of "its message contains
+    `Demo Alpha`", since `Display` is `profile conflict: {what}`.
+- **Hedged:**
+  - Case 12 pins only the profile store's calls, as the brief's table does, though the fake also makes no pane call.
+    Tightening it to the pane store would bind #663 beyond the decided assumption, so I left that to #663.
+  - Issue #688's body is still the pre-review text (14 cases, 2 mutants, about 1,020 lines). Amending it is O's job (A's
+    note 2), and I flagged it for S.
+- **Evidence:**
+  - Every new target is GREEN (18 + 6), and `cargo test -p holler-pane-testkit` has every target ok. Clippy
+    (`--workspace --all-targets -D warnings`) is clean, and `rustfmt --check`, `lint.sh`, `changelog-check.sh`,
+    `cargo machete` and `test-hooks.sh` pass. The AC6 and AC7 commands print nothing.
+  - A throwaway mutant probe, deleted afterwards, showed each of T's three mutants failing on its named case for the
+    right reason. Two extra mutants failed too: retrying the first write fails case 10, and swallowing the act's error
+    fails case 9.
+  - Source facts are in `docs/handoffs/688/evidence.md`.
