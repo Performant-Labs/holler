@@ -139,3 +139,37 @@
   - Read in full: every file in the feature diff (the five `panes/` files, the five pane test files, the ADR-0021 hunks, the brief and the CHANGELOG entry), handoff-F-rework, handoff-T-green, my earlier handoff-A-dup, this journal, and the outside gate's rounds 1 and 2.
   - Also read: ADR-0021 lines 194-303 and 478-515, `token.rs:650-674`, `control_server.rs:36-77`, `profile/mod.rs:38-70`, and tokio 1.53.1 `src/runtime/task/error.rs:135-151`. I grepped `holler-pane/src/profile.rs` for the `ProfileStore` port.
   - Checks: `git diff --quiet` on every out-of-radius path; `git merge-tree` against `origin/main` (clean); `wc -l` on the touched files (max 523); greps for the Reuse-map call sites, for any other generation compare, for `Condvar`, long-poll and `WATCH_WAIT` across `crates/*/src/`, and for `#[allow]` links; the author and committer identities of the 17 branch commits (all no-reply); and a scan of the delta for private names (none).
+
+## S (Phase 10, spec audit, second pass) — 2026-10-09T11:06:39-06:00
+- **Decided:** PASS at 83ed8fe (see handoff-S.md).
+  - All 30 acceptance criteria are met. Each has a named test that asserts the behaviour, except AC 27, which is met by grep
+    and reading, as the brief says.
+  - AC 25 as amended is pinned at its edge by `an_idle_watch_from_zero_over_an_all_deleted_registry_answers_the_head`.
+  - The first pass's ADVISORY-HOLD is resolved. D6, AC 25, ADR-0021 §6 with "Decisions taken" item 7, and `Store::poll` all
+    answer the head. The stale notes are fixed, and the `pane_feed_test.rs` approval is journalled.
+  - D1-D9 are implemented. The six documented deviations were A-routed and stay inside the radius.
+  - The quality, privacy and scope checks are clean.
+- **Assumed:**
+  - T's recorded Tier 1 at 9289d30 covers HEAD, because only `decisions.md` and `handoff-A-dup.md` changed since. I did not
+    re-run it.
+  - ADR-0021 as amended on this branch is the standing spec.
+- **Hedged:**
+  - Nine advisory notes, none blocking. Two are new:
+    - Three D2 load checks have no test: cursor 0, a cursor past the head, and generation 0. AC 9's table did not ask for
+      them.
+    - O, not T and F, made the edge-case test and the doc refresh. Both were verified afterwards.
+  - The rest are carried over: the `JoinError` text in a client `what`, rule 2's collapse within one from-zero poll, #661's
+    reuse seams, the two `error` events not yet in `docs/`, the wedged-save limit, the test-helper near-copies, and the
+    missing session links.
+  - I did not make the test gap REWORK. D2 is a decision, not an acceptance criterion, and its checks are right by reading.
+- **Evidence:**
+  - Read: the brief, issue #639, epic #633 (rulings 1-9), every handoff in this directory, both outside diff-gate rounds,
+    and the full `git diff origin/main...HEAD`. Also ADR-0021 §6-§8 and "Decisions taken", `ports.rs:27-82`,
+    `reply.rs:119-149`, `pane.rs:32-72`, `atomic_file.rs`, `vocab.rs:75-90` and `profile/mod.rs:55-70`.
+  - Grepped: `check_membership(` (it matches `handlers.rs:111`, before `store.cas_put` at `:112`); banned calls in `panes/`
+    (none); `#[allow]` links (all `// #639`); `sleep` in the pane tests (comments only); every AC test name (all present).
+  - Also grepped the 4407-line diff for privacy patterns. The only hits are the existing `kiwi` and `127.0.0.1` fixtures and
+    a generic `~/.cache` path.
+  - Checked: `git diff --quiet` on the out-of-radius paths (unchanged); the ADR hunks (§6 and item 7 only); `git merge-tree`
+    against 939d79c (clean); `wc -l` (max 523); the identities of the 18 branch commits (all no-reply); and #638, #643,
+    #649, #651 and #661 for idle-cursor wording (none).
