@@ -10,9 +10,19 @@ name = "holler_adapter_herdr"
 path = "src/lib.rs"
 
 # Declare only what is consumed (issue #155 §7 — `cargo machete` fails CI
-# otherwise). The crate is an empty skeleton; its owning story adds the
-# dependencies it uses.
+# otherwise).
 [dependencies]
+# The port this crate implements and every type it speaks (`PaneError`, `GridPos`,
+# `PaneId`, `Key`, `RefusalCode`); for `layout`, `plan` and `protocol`. The adapter
+# depends on nothing else of Holler (ADR-0021 section 5).
+holler-pane = { path = "../holler-pane" }
+# Builds and reads Herdr's JSON requests and replies (`Value`); for `protocol`.
+serde_json = { workspace = true }
+
+[dev-dependencies]
+# `GRID_UNREACHABLE` and `SUPPORTED_VERSIONS`, which the tests pin equal to this
+# crate's own constants (#640 part 1, AC 13). A dev-dependency only (ADR-0021 section 5).
+holler-pane-testkit = { path = "../holler-pane-testkit" }
 
 # Workspace lints (issue #149).
 [lints]
