@@ -131,3 +131,16 @@
   - `git diff --name-only origin/main`: only blast-radius paths, no `Cargo.toml` or `Cargo.lock`.
   - ADR numstat: 4 lines added, 2 removed.
   - The evidence file is `docs/handoffs/683/evidence.md`, with 14 quoted facts.
+
+## T (Phase 7, verify GREEN + Tier 2)
+
+- **Decided:**
+  - GREEN and no blocking Tier 2 issue; verdict PASS. No test was repaired (F flagged none).
+  - The `body_run_test` failure seen on this host is environmental, not #683: it fails identically on the main checkout
+    and passed in the `--no-fail-fast` workspace run.
+- **Assumed:** the fixed-port collision (many listeners on this host) causes that failure; I did not root-cause it
+  further, since the diff touches no `holler-cli` code.
+- **Hedged:** the four production mutations ran against the fake's own tests and the suite, not a full mutation tool.
+- **Evidence:** `cargo test -p holler-pane-testkit` (22/6/15 new, 22/10 slice a, 8 repeats clean);
+  `cargo test --workspace --no-fail-fast`: 1152 passed, 0 failed, 5 ignored; clippy, machete, lint, changelog-check,
+  test-hooks, docs_cli_test, wire_selftest, rustfmt all clean; 14 of 14 evidence excerpts verified against source.
