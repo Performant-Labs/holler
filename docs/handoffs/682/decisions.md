@@ -75,3 +75,29 @@
 - **Hedged:** ran the testkit suite 15 times and ran one manual mutation of the generation check to confirm the tests
   fail when behavior is removed.
 - **Evidence:** `cargo test --workspace --no-fail-fast` exit 0, 1141 passed, 0 failed; clippy `-D warnings` clean.
+
+## A (Phase 7, anti-duplication gate) — 2026-10-09T13:32:08-06:00
+- **Decided:** PASS on e410e9d..ad84b41, with four warns and no block (see handoff-A-dup.md). F extended every object
+  the brief named and built no parallel path in `src/`:
+  - the fake uses the shared `FaultSwitch`, `Feed`/`Log`/`Change`/`Watch`, `Writer` and `lock`;
+  - `pane_store.rs` keeps no `Writer`;
+  - the suite calls the `conformance/mod.rs` helpers and the generic pane-suite watch helpers, with no local copy.
+- **Assumed:** a copy the brief prescribes (AC2's mirror of slice a's mutant pattern), or one forced by an AC (AC5 forbids
+  editing slice a's test files, and the scope keeps `conformance/mod.rs` out of every slice's diff), is a reviewed
+  decision and not a parallel path. That covers the test-side helper copies (W-2) and the shared literals (W-1).
+- **Hedged:**
+  - W-1: Phase 3's follow-up (move the five shared helpers into `conformance/mod.rs`) has not been filed, and #688 will
+    reuse the helpers too. Raised again so it gets filed, not as a block.
+  - W-3: F did everything Phase 3's W-5 asked. `HarnessKind::Opencode` and `PaneRole::Agent` are still written inline
+    in both fixtures, so I flagged them for #688.
+  - W-6 from Phase 3 (`Closes #682.` must become `Part of #682.`) is carried forward to the run's agent.
+- **Evidence:**
+  - Read every changed file under `crates/holler-pane-testkit/` in full, plus slice a's `feed.rs`, `fault.rs`,
+    `pane_store.rs`, `conformance/{mod,pane_store}.rs` and both slice-a test files.
+  - Ran AC7's three greps (empty) and checked `fn lock`, `impl Change for`, `next_generation` and the slug and env
+    guards with grep.
+  - Diffed the test helpers against slice a's.
+  - `git diff --quiet origin/main` on `lib.rs`, `conformance/mod.rs`, the scope stubs, slice a's tests, both manifests
+    and `Cargo.lock`.
+  - Grepped `holler-pane` and `holler-hub` for a name-rule, log-entry or summary helper (none), read ADR-0021:53-62, and
+    searched GitHub issues for the W-1 follow-up (none; part 2 is #688, and #682 is open).
