@@ -204,3 +204,29 @@
   - Grepped `crates/` for analogs of each new helper and type: excerpt or truncate, const string equality, slug, control-character checks, cursor, generation or CAS, watch or long-poll, argv, env names, probe, `try_from` and `deserialize_with`, harness ids and role enums.
   - Ran `bash scripts/golden-diff-summary.sh` (no drift) and a blast-radius filter over `git diff --name-only origin/main...HEAD` (nothing outside it).
   - Fetched #633, #637, #638, #639, #642, #643, #649 and #661.
+
+## S (Phase 9, spec audit) — 2026-10-09T04:45:00-06:00
+- **Decided:** REWORK (production), with two required changes. See handoff-S.md.
+  - Preconditions are met: A returned PASS (and A-dup PASS), and T confirmed RED, then GREEN, with no blocking issues.
+  - AC 1, 2 and 4 to 8 are met, each by a named test or a recorded gate.
+  - **Required 1 (decision 7):** five traits in `ports.rs` lack the per-trait doc rule ("call from `spawn_blocking`; return within I5's bound or with `Timeout`"). They are `PaneStore`, `HerdrPort`, `HostPort`, `HarnessPort` and `Prober`. Their only copy is the module doc, while `ProfileStore` and `ProfileScope` carry the rule. The deviation is silent.
+  - **Required 2 (AC 3, ruling 7, I7):** a bare-string `env` such as `"TOKEN=hunter2"` in a `Pane` or `ProfileSpec` is refused as `usage`, and the reply repeats the value in both `message` and `detail`. This contradicts `error.rs:19-21` and `argv.rs:7-12`, and siblings may not pre-scan.
+- **Decided:** two operator decisions are surfaced rather than blocking, because the run can continue on the defaults.
+  - D1 is A-dup row 1 (how `Watch` signals idle); the default is to keep `Err(Timeout)`, documented.
+  - D2 is A-dup row 5 (`HarnessKind`); the default is to keep the enum.
+  - The relayed operator request was "Ask for decisions now before I go back to sleep", so both are listed with options and defaults.
+- **Decided:** A-dup rows 2-4 and T-green's advisory 1 are recommended for the same rework pass, but they do not block.
+- **Assumed:**
+  - T's recorded Tier 1 output reflects the tree at af72b6d. S did not re-run Tier 1 or Tier 2.
+  - The issue and epic texts are as fetched on 2026-10-09 at about 04:35 MDT; both were last edited at 03:30 MDT.
+- **Hedged:**
+  - REWORK 1 is doc-only. It is REWORK, not advisory, because the brief states it as a decision ("each trait carries the doc rule") and the gap is not recorded.
+  - REWORK 2's code for a non-array, non-string `env` (`env-name-invalid` or `usage`) is left to F. Two parts are required: a string carrying `=` is `profile-secret-refused`, and no env refusal repeats its input.
+- **Evidence:**
+  - Read every production file in `crates/holler-pane/src`, all test files, the `methods.rs`, CHANGELOG and Cargo.lock diffs, every handoff, decisions.md, evidence.md, `gh issue view 637`, `633`, `639` and `661`, `CONTRIBUTING.md`, `.githooks/*`, the workspace `Cargo.toml`, and holler-proto's `lib.rs`.
+  - Ran `git diff --name-only origin/main...HEAD` (all paths inside the radius) and `wc -l` (the largest file is 608 lines).
+  - Grepped the added lines for privacy patterns (none found) and ran `gitleaks stdin` over the diff (no leaks).
+  - Checked the repo history: no session links in the last 200 main commits.
+  - Two scratchpad probes, with no worktree file touched:
+    - a scratch crate showed that stable rustdoc 1.98.1 does not check `compile_fail,E0xxx` codes;
+    - a scratch crate with a path dependency on `holler-pane` reproduced the bare-string `env` echo, through serde, `decode_params` and `PaneReply::failure`.
