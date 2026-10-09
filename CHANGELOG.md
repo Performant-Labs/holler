@@ -48,6 +48,15 @@ fills this file in at release time.
   profile. The fake passes all 19, and a registry that breaks one rule fails the case for it. The profile, Herdr, host and
   harness fakes and the JSON-envelope checker follow in later parts. Test code only: nothing a user runs changes
   ([#638](https://github.com/Performant-Labs/holler/issues/638)).
+- Pane control, the test kit's host and harness fakes (epic [#633](https://github.com/Performant-Labs/holler/issues/633)):
+  `holler-pane-testkit` now has a fake host and a fake OpenCode harness. The fake host keeps tmux sessions, the argv of every
+  command run in them exactly as given, and the processes each session owns. The fake harness is modelled on the OpenCode
+  spike: servers that share one data directory, a frozen or killed server, a session deleted under a TUI, and switches for
+  two behaviours of raw OpenCode, a select acknowledged with no TUI and an abort of an unknown session acknowledged. Both
+  take the same injected faults as the fake pane registry and record every call made through them. Each comes with a
+  conformance suite that an adapter runs against itself, 9 host cases and 15 harness cases: the fakes pass every case, a
+  fake with a quirk switched on fails, and a host or harness that breaks one rule fails the case for it. Test code only:
+  nothing a user runs changes ([#684](https://github.com/Performant-Labs/holler/issues/684)).
 - Pane control, slice c of the skeleton (epic [#633](https://github.com/Performant-Labs/holler/issues/633)):
   the CLI side. `holler pane` (`list get watch launch relaunch switch reset park unpark close doctor
   import`) and `holler profile` (`create delete list show apply rename export import`) are in the
@@ -97,6 +106,17 @@ fills this file in at release time.
   change log, `rename` (not implemented yet), environment entries that are names only, and the watch stream. The fake
   passes all 23, and a registry that breaks one rule fails the case for it. The fake profile scope follows in the next
   part. Test code only: nothing a user runs changes ([#682](https://github.com/Performant-Labs/holler/issues/682)).
+
+- Pane control, the test kit's Herdr and probe fakes (epic [#633](https://github.com/Performant-Labs/holler/issues/633)):
+  `holler-pane-testkit` now has a fake Herdr that pane-control tests run against instead of a Herdr server. It places
+  panes in the row-and-column cells of a workspace the test declares with a size, and gives each pane an id that is
+  never reused and does not change when another pane closes. A test can switch it to a split-only mode, pick a
+  supported or an unsupported Herdr version, wedge the server, make a pane's shell exit or a call slow, and read back
+  everything typed into a pane. A fake health probe answers a scripted result per command and records every run. A
+  conformance suite that the Herdr adapter runs against itself comes with them: 11 cases, which the fake passes and
+  which reject an adapter that swaps rows and columns. [ADR 0021](docs/adr/ADR-0021.md) now records that
+  `grid-out-of-range` also covers a cell outside its workspace. Test code only: nothing a user runs changes
+  ([#683](https://github.com/Performant-Labs/holler/issues/683)).
 
 - Pane control, the test kit's envelope checker (epic [#633](https://github.com/Performant-Labs/holler/issues/633)):
   `holler-pane-testkit` can now check the `--format=json` output of a `holler pane` or `holler profile` verb against
