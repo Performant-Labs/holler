@@ -35,3 +35,20 @@
   - W-9: the personal host name in the issue title stays out of every public artifact.
 - **Evidence:** O re-probed on a private `-S` server under `/tmp` (killed and deleted afterwards, no operator session touched): `-c "<dir>/q\;"` and `-c "<dir>/p##S"` give the exact session_path; `set-option ... @holler-pid N ; set-option ... remain-on-exit off` in one invocation sets both; with global `remain-on-exit on` a TERMed window lingers with `pane_dead` 1, while the window with its own `remain-on-exit off` is gone.
 - **Size:** ~+255 lines (~1,455 in all), same six crate files plus two mechanical; still one run.
+
+## A (Phase 3, up-front plan review, round 2) — 2026-10-09T17:15:00-06:00
+- **Decided:** BLOCK on docs/handoffs/641-brief.md at 81b0ddd, with 2 new blocks and 4 warns (handoff-A.md, round 2). Every round-1 finding is applied as asked.
+  - **B-4.** `list-panes -s -t =NAME` (Decisions 4 and 5; AC 6e accepts it) is not exact. tmux reads it as a window target and then falls back to a session prefix match. So `stop_owned` of a crashed pane signals a sibling whose name it prefixes (`hj-c1r1` and `hj-c1r10`). The fix is `=NAME:` for every target except `has-session`'s.
+  - **B-5.** `new-window` without `-c` starts `run`'s program in the tmux client's cwd, that is the CLI's or the hub's, not in the session's `host.cwd`. The fix is `-c '#{session_path}'`, a constant format.
+  - **Warns.**
+    - W-10: one shared grace for all owned panes, not one per pid.
+    - W-11: a dead tagged pane is never signalled.
+    - W-12: `LC_ALL=C` on `kill` only. Never add a variable to a tmux subprocess, because it reaches every pane.
+    - W-13: a `Timeout` of `new-window` can leave an untagged process (documentation only).
+- **Assumed:** only tmux 3.7c was probed. The fixes (`=NAME:`, `-c '#{session_path}'`) are plain documented syntax. They do not depend on how each version falls back on a colon-less window target.
+- **Hedged:** I graded B-5 a block, not a warn, although runtime behaviour belongs to F and T. The reason is that the brief fixes the exact `new-window` vector, AC 6d would pin the defect into a test, and no AC or suite case reads a process's cwd. B-4 is a block for the same reason: AC 6e explicitly accepts the faulty form. W-11 is a warn because Decision 3's word "live" already excludes dead panes; only the explicit rule and its AC are missing.
+- **Evidence:**
+  - Read the amended brief, the round-1 handoff, this journal, and the outside-model rounds r1 and r2.
+  - Source read: `holler-pane/src/{ports,pane}.rs`, `holler-proto/src/vocab.rs`, `holler-pane-testkit/src/{host.rs,conformance/host.rs}` and `holler-adapter-herdr/{Cargo.toml,src/lib.rs}`.
+  - Docs and other sources: ADR-0021 §1 to §3 and its import table, issues #641 and #644, the epic, `scripts/lint.sh`, `docs/testing.md` and the CI matrix.
+  - Probes: three scripts on tmux 3.7c, each on a private relative-socket server in the session scratchpad, with `TMUX` and `TMUX_PANE` unset. Each killed its server and removed its directory, and a process check afterwards found no probe server left.
