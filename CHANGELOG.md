@@ -128,6 +128,20 @@ fills this file in at release time.
   `holler_pane::error::class_of`, so it keeps no table of its own. Test code only: nothing a user runs changes
   ([#681](https://github.com/Performant-Labs/holler/issues/681)).
 
+- Pane control, the hub's profile registry (epic [#633](https://github.com/Performant-Labs/holler/issues/633)):
+  `profile/get`, `profile/list`, `profile/cas_put`, `profile/delete`, `profile/watch` and `profile/log` now answer from
+  a real registry instead of `not-implemented`. Profiles are kept in `<state dir>/hub/profiles.json` (mode `0600`,
+  written atomically), filed by slug, and every write is a compare-and-swap on the generation, with an append-only
+  change log per profile (who, when, the new generation and what changed) and a change feed. A second name with a
+  stored profile's slug is refused (`profile-exists`), and an environment entry that carries a value is refused
+  (`profile-secret-refused`) without echoing it. A corrupt or unreadable file fails closed (`store-corrupt`) and is
+  never rewritten, and the `error` event `profile_registry_corrupt` names the file and the problem without quoting
+  its content; a file written by a newer build with an unknown field fails closed too. A write the hub cannot save
+  answers `unavailable`, changes nothing, and logs the `error` event `profile_registry_write_failed`. A pane write
+  that names a profile that does not exist is refused (`profile-not-found`), and moving a pane from one profile to
+  another in one write is refused (`pane-in-other-profile`): it must leave its profile first. `profile/rename` still
+  answers `not-implemented` ([#661](https://github.com/Performant-Labs/holler/issues/661)).
+
 ## [0.4.0] - 2026-09-29
 
 ### Enhancements

@@ -22,3 +22,34 @@
   - I verified compilation and non-vacuous failure with a throwaway stub (reverted; `git status` shows no production file changed). That does not prove each assertion's expected value: the stricter tests (exact summary wording, `what` prefix, file layout) are checked for the first time when F lands code, and any wrong expectation there is a test bug I fix in the GREEN round.
   - Time assertions (AC 6) use real `now_millis()` windows, per the brief; they are only flaky if the system clock steps backwards mid-test.
 - **Evidence:** `cargo test -p holler-hub --test pane_membership_test` before the helper extension (3 passed, 3 failed, one conformance case `pane-in-other-profile`); `cargo test -p holler-hub --no-run` after (E0599 `load_with`/trait methods and one E0277 only); stubbed run 0/12, 0/8, 0/6, 0/11 on the four new profile binaries, pane_registry_test 14/14, pane_feed_test 7/7; `cargo clippy -p holler-hub --all-targets -- -D warnings -A clippy::drop_non_drop` clean with the stub; `bash scripts/lint.sh` rc 0; `rustfmt --edition 2021 --check` on every new and touched test file.
+
+## F (Phase 5, implement against the RED) — 2026-10-09T15:05:38-06:00
+- **Decided:**
+  - Implemented the brief as written:
+    - `profile/{entry,store,handlers}.rs` are new; `profile/mod.rs` is filled.
+    - D7 is `refuse_profile_move` in `panes::store::Store::cas_put`, after `next_generation` (A finding 6).
+    - D8 is `check_membership`.
+    - Two `pub(crate)` openings in #639's code: `NoParams`, and `log_fault` re-exported as `crate::panes::log_fault`. `mod store` stays private (A finding 2, a departure from D10's literal wording).
+  - D4 is one stamp per write, `max(now, last log at, live updated)`. It is used for `at`, for `updated`, and for a create's `created`.
+  - D5 pairs specs by pane name, in order, so the counts stay consistent even with duplicate pane names.
+  - The D2 load checks plus A finding 5, with one extra condition: a live record's log must not end with `Deleted`.
+  - The name rule applies against the live record only (D6).
+  - Every mirrored store item carries a "Twin of `panes::store::...`" doc line (A finding 1).
+  - Doc lines fixed per A finding 7 in `panes/mod.rs` and `panes/store.rs`.
+  - CHANGELOG entry as the brief gives it, plus the two new `error` events, following #639's entry.
+  - All of T's tests are GREEN with no test edited.
+- **Assumed:**
+  - `Table::from_doc`, the 10-line load-side twin that A finding 1's enumeration omits, is within the accepted mirror. It is the half of `load_table` that builds the table, as in the pane store.
+  - The README "Debug output" table stays out of scope. It is outside AC 45's paths, and #639 left its own events out of it too.
+- **Hedged:**
+  - The A finding 1 follow-up issue does not exist yet, so the "Twin of" lines carry no issue number. That issue should also fix `panes/persist.rs:17-21`, which still says `ProfileEvent` entries.
+  - A finding 8's cross-story notes and the operator-review flags (D4, D9, D10, D12) remain for O and the operator.
+  - archChanged is reported `true`: there are new module boundaries and a new public `load_with` and `ProfileStore` impl, all as planned and reviewed by A.
+- **Evidence:**
+  - `cargo build -p holler-hub` clean.
+  - Nine hub binaries GREEN: 12, 8, 6, 11, 6, 10, 8, 14 and 7 passed; both conformance suites pass in full, 23 and 19 cases.
+  - `cargo test --workspace -- --skip roster_stays_accurate_under_concurrent_body_load`: rc 0, 1297 passed, 0 failed.
+  - `cargo clippy --workspace --all-targets -- -D warnings` clean; `rustfmt --edition 2021 --check` rc 0; `bash scripts/lint.sh` rc 0; `changelog-check` ok; `cargo machete` clean.
+  - The AC 41 and AC 28 greps and the AC 45 path check hold.
+  - Disabling each of `entry.rs`'s five load checks in turn made `a_corrupt_file_fails_closed_and_is_never_rewritten` fail every time; the file was restored byte-identical.
+  - Handoff: `handoff-F.md`. Facts: `evidence.md`.

@@ -34,10 +34,11 @@ use super::store::Store;
 use crate::pane_dispatch::reply_line;
 use crate::profile::{check_membership, ProfileState};
 
-/// The params of a method that takes none (`pane/list`): only `{}`.
+/// The params of a method that takes none (`pane/list`, and `profile/list` from
+/// `profile/`, #661): only `{}`.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct NoParams {}
+pub(crate) struct NoParams {}
 
 /// Answer one request: decode its params into `P`, run `work` on them on the blocking
 /// pool, and turn the outcome into the reply line (see the module docs).
