@@ -250,3 +250,10 @@
   - Read: handoff-S.md, handoff-A-dup.md, handoff-T-green.md, handoff-F.md, the brief, decisions.md, evidence.md, and `argv.rs`, `error.rs`, `reply.rs`, `ports.rs`, `pane.rs`, `profile.rs`, `probe.rs`; the coordinator's reply to the D1/D2 message and the session transcript it was sent in.
   - Ran: the gates listed in handoff-F.md.
   - Scratchpad only (no worktree file touched): (1) a scratch crate (path dependency on `holler-pane`) that sent 19 `env` shapes, each as a `ProfileSpec` and as a `Pane`, through serde (value and text), `decode_params` and `PaneReply::failure`, checking the code, that no reply contains the secret, and the reply's parse-back; it also checked the new `Watch` item type and the two `decode_params` doc claims; (2) a detached copy of `holler-pane` with `RefusalCode`'s field made `pub`, where only the new doctest fails (the other two still pass), and a three-line program that shows the real error is E0423.
+
+## T (Phase 7 re-entry, GREEN + Tier 2 after S's REWORK) - 2026-10-09, 05:14 MDT
+
+- **Decided:** wrote `tests/rework_test.rs` (7 tests) for S REWORK 2, D1, D2 and A-dup rows 2 and 3, and moved both store doubles onto `next_generation` with a missing-record-first `delete` (A-dup rows 2, 4). Dropped a planned test of the `cas_put` double as redundant. Kept F's two test type-annotation edits (types only).
+- **Assumed:** a test of a type alias (D1) can only be a contract pin through a consumer function; there is no production behavior to mutate.
+- **Hedged:** the empty-iterator assertions in `ports_test.rs` were left as "stream ended", which stays true under the new item type.
+- **Evidence:** 64 holler-pane tests + 3 doctests pass; workspace 928 passed, 0 failed; removing the `deserialize_with` on `Pane.env` fails the env test; lint, changelog, machete, clippy, golden, doc all clean. Verdict PASS, no production change needed.

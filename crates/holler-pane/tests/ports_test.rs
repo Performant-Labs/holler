@@ -13,10 +13,10 @@ use std::time::Duration;
 
 use common::{pane, pane_name, profile, profile_name, spec, MemPaneStore};
 use holler_pane::{
-    run_probe, Actor, Argv, Cursor, HarnessPort, HerdrPane, HerdrPort, HerdrSnapshot, HerdrSpec,
-    HostPort, Key, Pane, PaneError, PaneId, PaneName, PaneReply, PaneStore, Ports, ProbeResult,
-    Prober, Profile, ProfileEvent, ProfileLogEntry, ProfileName, ProfileScope, ProfileSpec,
-    ProfileStore, ResolvedScope, SpecEdit, SystemProber, Watch,
+    next_generation, run_probe, Actor, Argv, Cursor, HarnessPort, HerdrPane, HerdrPort,
+    HerdrSnapshot, HerdrSpec, HostPort, Key, Pane, PaneError, PaneId, PaneName, PaneReply,
+    PaneStore, Ports, ProbeResult, Prober, Profile, ProfileEvent, ProfileLogEntry, ProfileName,
+    ProfileScope, ProfileSpec, ProfileStore, ResolvedScope, SpecEdit, SystemProber, Watch,
 };
 use serde_json::json;
 
@@ -60,22 +60,23 @@ impl ProfileStore for MemProfileStore {
         expected_generation: u64,
         _actor: &Actor,
     ) -> Result<Profile, PaneError> {
-        if expected_generation != self.profile.generation {
-            return Err(PaneError::Conflict);
-        }
         let mut next = profile.clone();
-        next.generation = expected_generation + 1;
+        next.generation = next_generation(self.profile.generation, expected_generation)?;
         Ok(next)
     }
     fn delete(
         &self,
-        _name: &ProfileName,
+        name: &ProfileName,
         expected_generation: u64,
         _actor: &Actor,
     ) -> Result<(), PaneError> {
-        if expected_generation != self.profile.generation {
-            return Err(PaneError::Conflict);
+        // A missing record is checked first (the `ProfileStore::delete` doc).
+        if *name != self.profile.name {
+            return Err(PaneError::ProfileNotFound {
+                what: name.as_str().to_owned(),
+            });
         }
+        next_generation(self.profile.generation, expected_generation)?;
         Ok(())
     }
     fn watch(&self, _since: Cursor) -> Result<Watch<ProfileEvent>, PaneError> {

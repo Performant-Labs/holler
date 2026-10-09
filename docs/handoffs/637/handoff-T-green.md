@@ -78,3 +78,81 @@ None.
 3. `error.rs` is 608 lines (lint warn); fine, three exhaustive matches.
 4. `# for` consumer markers on the workspace `serde` / `serde_json` lines do not list `holler-pane`; the workspace `Cargo.toml` is outside the radius and `lint.sh` check 5 passes.
 5. A closed variant without a payload is rebuilt from its code alone on parse-back (peer's message text not kept); documented by F.
+
+---
+
+# Rework pass: Phase 7 re-entry after S's REWORK (2026-10-09, 05:14 MDT)
+
+**Handoff-F reviewed:** docs/handoffs/637/handoff-F.md ("Rework pass" section). F flagged no wrong test; it listed six test jobs for T and said it edited two test type-annotation lines (`tests/common/mod.rs` `empty_watch`, `tests/ports_test.rs` `MemProfileStore::watch`) at the coordinator's instruction. T reviewed both: type annotations only, no assertion changed.
+
+## What T changed (tests only; no production file touched)
+
+New `crates/holler-pane/tests/rework_test.rs` (7 tests, ~190 lines, `// #637` on the one `#[allow]`):
+
+| Test | Pins |
+|---|---|
+| `a_bad_env_in_a_spec_or_a_pane_is_refused_by_code_and_never_echoed` | S REWORK 2. 11 bad `env` shapes (`"TOKEN=hunter2"`, `"=hunter2"`, `["A","B=hunter2"]`, bare name, `""`, non-string element, object element, map, number, null, `["A b"]`), each in a `ProfileSpec` and a `Pane`, directly and through `decode_params`: the code (`profile-secret-refused` or `env-name-invalid`), and `hunter2` absent from the serde error, `Display`, `Debug`, the serialized `PaneReply::failure`, with the reply parsing back to the same code |
+| `a_good_env_is_still_a_list_of_names_and_an_absent_env_is_empty` | the guard did not break the accepted shapes (`[]`, two names, absent) |
+| `an_idle_watch_item_is_not_an_error_and_the_stream_stays_usable` | D1: `Ok(None)` is skipped, later `Ok(Some)` still arrive, no error |
+| `a_timeout_from_the_store_is_a_failure_that_ends_the_stream` | D1: `Err(Timeout)` is a failure, never reported as idle |
+| `watch_params_decode_from_an_empty_object_as_from_the_beginning` | A-dup row 3: `decode_params::<WatchParams>({})` gives `Cursor(0)` |
+| `every_harness_kind_serde_name_is_in_the_protocol_vocabulary` | D2: each `HarnessKind` serde name is in `holler_proto::HARNESS_IDS` (exhaustive match, so a new variant forces an update); an unknown id does not load |
+| `deleting_a_missing_pane_is_pane_not_found_at_any_generation` | A-dup row 2: `pane-not-found` for 0, 1, 7, `u64::MAX`; a present record keeps conflict and not-found apart |
+
+Edited test doubles (my files): `tests/common/mod.rs` `MemPaneStore::cas_put` and `delete`, and `tests/ports_test.rs` `MemProfileStore::cas_put` and `delete`, now go through `holler_pane::next_generation` (A-dup row 4); both `delete`s check a missing record first and return `pane-not-found` / `profile-not-found` (A-dup row 2). The older empty-iterator assertions (`ports_test.rs` `watch.next().is_none()`) still mean "the stream ended" and stay valid under the new item type; idle is now covered by the new Watch tests.
+
+## GREEN confirmation
+
+```
+$ cargo test -p holler-pane --no-fail-fast
+  adopted 9, argv_env 6, error 12, grid 5, names 8, ports 6, records 11, rework 7  (64 tests), all ok
+  Doc-tests holler_pane: 3 passed (all compile_fail)
+$ cargo test -p holler-proto --lib methods                      2 passed
+$ cargo test --workspace --no-fail-fast                         93 result lines: 928 passed, 0 failed, 5 ignored
+```
+
+Mutation spot-check (production line changed, suite run, file restored with `cp`; `git status` confirmed clean afterwards): removing `deserialize_with = "crate::argv::deserialize_env_names"` from `Pane.env` makes `a_bad_env_in_a_spec_or_a_pane_is_refused_by_code_and_never_echoed` fail (the other 7 rework tests pass), so the test pins the behavior. The D1 tests are type-and-contract pins (the production side is a type alias), so they have no production mutation to kill; they fail to compile if the item type reverts to `Result<T, _>`.
+
+## Tier 1 results
+
+| Command | Result |
+|---|---|
+| `cargo build --workspace` | PASS |
+| `cargo clippy --workspace --all-targets -- -D warnings` | PASS (one `single_element_loop` in my new test was fixed first) |
+| `cargo test --workspace --no-fail-fast` | PASS, 928 passed / 0 failed / 5 ignored (F reported 921; the difference is my 7 new tests) |
+| `cargo test -p holler-cli --test docs_cli_test` / `--test wire_selftest` | PASS (3 / 3) |
+| `cargo machete` | PASS |
+| `bash scripts/lint.sh` | PASS (exit 0); warn only: `error.rs` 617 lines (limit 900) and two pre-existing files |
+| `bash scripts/changelog-check.sh` | PASS |
+| `bash scripts/golden-diff-summary.sh` | PASS, no output |
+| `RUSTDOCFLAGS="-D warnings" cargo doc -p holler-pane --no-deps` | PASS |
+| `rustfmt --check --edition 2021` on every `holler-pane/tests` file | PASS |
+| `git diff --check`; `gitleaks dir crates/holler-pane/tests` | clean; no leaks |
+
+## Tier 2 results
+
+| Check | Result |
+|---|---|
+| Test quality: each new test names a behavior, fails in isolation, sits at unit tier, no duplicate | PASS. The `next_generation` double check was dropped as redundant with `next_generation_is_the_one_compare_and_swap_rule` |
+| Suite proportion | PASS: test files 1910 lines in all; largest `ports_test.rs` ~540; none near 900 |
+| Secret never in logs/errors (S REWORK 2) | PASS: asserted absent in 4 renderings |
+| Error paths and API contract | PASS: closed-code table, reply round trip, params JSON |
+| No sleeps, clocks, threads, or processes | PASS: all unit tests |
+| Every `#[allow]` carries `// #NNN` | PASS |
+| Protocol/golden/docs impact | none (control-socket names only) |
+| S's REWORK 1 (trait docs in `ports.rs`) | doc-only; `cargo doc -D warnings` clean; not testable beyond that |
+
+## Acceptance criteria status
+
+AC 1 PASS (gates above). AC 2 PASS (`grid_test.rs`). AC 3 PASS now: the bare-string and `=`-bearing `env` gap S found is closed and pinned by `rework_test.rs`. AC 4 PASS (`records_test.rs`). AC 5 PASS (`error_test.rs`, doctests). AC 6 PASS (`ports_test.rs`, `names_test.rs`). AC 7 PASS (`methods.rs` tests). AC 8 PASS (diff is inside the blast radius; T added only `tests/rework_test.rs` and edited two existing test files).
+
+## Blocking issues
+
+None.
+
+## Advisory notes
+
+1. `HarnessPort::health` still returns `bool` while `Pane.harness.health` can hold `Unhealthy(reason)` (F noted, provisional until #635).
+2. The brief (`docs/handoffs/637-brief.md:147`) still spells the old `Watch<T>` alias; decisions.md says the new one supersedes it. O may want a revision note.
+3. F's Process note says two interleaved executions touched the tree. T re-ran every number from scratch, and they agree except for the +7 tests.
+4. `compile_fail,E0423` is not code-checked by stable rustdoc (S advisory 1); it proves only that the line does not compile, which F showed by making the field `pub`.

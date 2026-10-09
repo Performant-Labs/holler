@@ -7,8 +7,8 @@ use std::collections::BTreeMap;
 use std::sync::Mutex;
 
 use holler_pane::{
-    Cursor, Pane, PaneError, PaneEvent, PaneName, PaneStore, Profile, ProfileName, ProfileSpec,
-    Watch,
+    next_generation, Cursor, Pane, PaneError, PaneEvent, PaneName, PaneStore, Profile, ProfileName,
+    ProfileSpec, Watch,
 };
 use serde_json::{json, Value};
 
@@ -136,21 +136,22 @@ impl PaneStore for MemPaneStore {
     fn cas_put(&self, pane: &Pane, expected_generation: u64) -> Result<Pane, PaneError> {
         let mut panes = self.panes.lock().unwrap();
         let current = panes.get(&pane.name).map_or(0, |p| p.generation);
-        if current != expected_generation {
-            return Err(PaneError::Conflict);
-        }
         let mut next = pane.clone();
-        next.generation = current + 1;
+        next.generation = next_generation(current, expected_generation)?;
         panes.insert(next.name.clone(), next.clone());
         Ok(next)
     }
 
     fn delete(&self, name: &PaneName, expected_generation: u64) -> Result<(), PaneError> {
         let mut panes = self.panes.lock().unwrap();
-        let current = panes.get(name).map_or(0, |p| p.generation);
-        if current != expected_generation {
-            return Err(PaneError::Conflict);
-        }
+        // A missing record is checked first: `pane-not-found` whatever
+        // `expected_generation` is (the `PaneStore::delete` doc).
+        let Some(stored) = panes.get(name) else {
+            return Err(PaneError::PaneNotFound {
+                what: name.as_str().to_owned(),
+            });
+        };
+        next_generation(stored.generation, expected_generation)?;
         panes.remove(name);
         Ok(())
     }
