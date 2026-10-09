@@ -15,7 +15,7 @@ use holler_pane::{
 };
 
 use crate::fault::{FaultSwitch, PortOp};
-use crate::feed::{Change, Feed};
+use crate::feed::{Change, Feed, Writer};
 
 /// A method of the `PaneStore` port, as a fault targets it and the call log records
 /// it.
@@ -76,27 +76,6 @@ impl PortOp for PaneStoreOp {
 pub struct FakePaneStore {
     feed: Arc<Feed<PaneEvent>>,
     faults: Arc<FaultSwitch<PaneStoreOp>>,
-}
-
-/// Who makes a write.
-#[derive(Debug, Clone, Copy)]
-enum Writer {
-    /// A caller of the port, or a seed: a compare-and-swap at the generation it read,
-    /// and the membership rule.
-    Port(u64),
-    /// Another writer (`concurrent_*`): applied to whatever is stored now, without the
-    /// membership rule.
-    Other,
-}
-
-impl Writer {
-    /// The generation the write expects, the record being at `current` now.
-    fn expected(self, current: u64) -> u64 {
-        match self {
-            Writer::Port(expected) => expected,
-            Writer::Other => current,
-        }
-    }
 }
 
 impl FakePaneStore {

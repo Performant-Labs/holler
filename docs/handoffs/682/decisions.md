@@ -33,3 +33,36 @@
   the lint warn threshold.
 - **Evidence:** `cargo test -p holler-pane-testkit --no-run` (E0432 only); stubbed build clean; slice-a tests 22 + 10 pass;
   `rustfmt --edition 2021 --check tests/*.rs` clean.
+
+## F (Phase 6, implement) — 2026-10-09T13:15:47-06:00
+- **Decided:**
+  - Implemented part 1 against T's RED, in the brief's order: first the reuse refactors, with slice a green after
+    them (22 + 10), then the fixtures, the fake, the suite and the CHANGELOG.
+  - `Writer` and `lock` live in `feed.rs`, shared by both fakes.
+  - Five pane-suite helpers are `pub(super)`, and four of them are generic over `Change`.
+  - `sample_pane` and `sample_spec` share their model, context, grid, cwd and workspace (A's W-5).
+  - The fake's per-slug log field is `change_logs`, with the documented lock order "feed first, never the reverse"
+    (A's W-4). The event is published before the log entry, so a refused or unpublishable write logs nothing.
+  - W-1 stays at the brief's g + 1. Both log rules and their reasons are in the suite's module doc (A's W-1 fix).
+  - Applied the brief's Risks mitigation: cases 15 to 18 moved to `conformance/profile_store/log.rs`, because the
+    one-file suite reached 640 lines. The files are now 521, 129 and 144.
+- **Assumed:** The Risks section's named `profile_store/log.rs` overrides AC8's literal file list, because the brief
+  prescribes that exact file for this exact condition. The changed failure-detail text of the generic `expect_change`
+  (`PaneName("x")` where it was `x`) is behaviour-neutral, because no test pins detail text.
+- **Hedged:**
+  - AC10's clippy is red because of T's test `fake_profile_store_test.rs:559` (cognitive complexity 16/15). It is
+    test-only. F did not edit it and flagged it for T with fix options; CI runs that exact clippy command
+    (`ci.yml:280`).
+  - The `log` module's name fits cases 15 and 16. Cases 17 and 18 went with them because the brief says
+    "15 to 18".
+  - `archChanged` is reported true: new module boundaries (`watch.rs`, `log.rs`) and new public items, all planned
+    except `log.rs`.
+- **Evidence:**
+  - Tests: `cargo test -p holler-pane-testkit` (22 + 22 + 10 + 9 pass) and `cargo test --workspace` (exit 0,
+    1140 passed, 0 failed).
+  - Clippy: clean everywhere except T's one function (`--keep-going` shows a single error, and the run with
+    `--exclude holler-pane-testkit` is clean).
+  - Other guards: rustfmt clean, `cargo doc -D warnings` clean, `cargo machete` clean, `lint.sh` exit 0,
+    `test-hooks.sh` exit 0, `changelog-check` ok.
+  - AC5 to AC8: the `git diff --quiet` and `cargo tree` checks and AC7's greps, as listed in handoff-F.md.
+  - `docs/handoffs/682/evidence.md` (11 verbatim entries).

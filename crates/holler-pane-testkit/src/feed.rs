@@ -4,8 +4,10 @@
 //!
 //! It is generic over the event a store publishes ([`Change`]), and nothing here
 //! depends on the record type. `pane_store.rs` implements the trait for `PaneEvent`,
-//! and the fake profile store (#682) implements it for `ProfileEvent`, so the crate
-//! has one feed.
+//! and `profile_store.rs` implements it for `ProfileEvent`, so the crate has one feed.
+//! The two fake stores also share the write-side helpers kept here: [`Writer`], who
+//! makes a write (a caller of the port or another writer), and [`lock`], which takes
+//! over a poisoned lock.
 //!
 //! # Cursors
 //!
@@ -213,9 +215,32 @@ impl<E: Change> Feed<E> {
     }
 }
 
+/// Who makes a write to a fake store.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum Writer {
+    /// A caller of the port, or a seed: a compare-and-swap at the generation it read,
+    /// and the store's port-only rule (membership for panes, the name rule for
+    /// profiles).
+    Port(u64),
+    /// Another writer (`concurrent_*`): applied to whatever is stored now, without the
+    /// store's port-only rule.
+    Other,
+}
+
+impl Writer {
+    /// The generation the write expects, the record being at `current` now.
+    pub(crate) fn expected(self, current: u64) -> u64 {
+        match self {
+            Writer::Port(expected) => expected,
+            Writer::Other => current,
+        }
+    }
+}
+
 /// `mutex`, locked. A poisoned lock is taken over: a test that panicked while holding
-/// it must not wedge every later call.
-fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+/// it must not wedge every later call. A fake store locks its own state beside the
+/// feed with it too.
+pub(crate) fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 

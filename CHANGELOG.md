@@ -87,6 +87,16 @@ fills this file in at release time.
   `unavailable`). One function, `holler_pane::error::class_of`, decides which code is which, and the table of
   every code is in [ADR 0021](docs/adr/ADR-0021.md) section 9. The stubs still exit 1: `not-implemented` is a
   failure ([#676](https://github.com/Performant-Labs/holler/issues/676)).
+- Pane control, the test kit's fake profile registry (epic [#633](https://github.com/Performant-Labs/holler/issues/633)):
+  `holler-pane-testkit` now has a fake profile registry that profile tests run against instead of a hub. A test can
+  inject the same faults as into the fake pane registry: a wedged store that times out, a corrupt one that fails every
+  call, a one-shot error on one method, a slow call, and another writer's change. It has a clock the test sets, and it
+  keeps each profile's append-only change log (who wrote, when, and the generation after the write), which outlives a
+  delete. A conformance suite that any profile registry runs against itself comes with it: 23 cases covering the
+  compare-and-swap on a profile's generation, the refusal of a second name with a stored profile's slug, delete, the
+  change log, `rename` (not implemented yet), environment entries that are names only, and the watch stream. The fake
+  passes all 23, and a registry that breaks one rule fails the case for it. The fake profile scope follows in the next
+  part. Test code only: nothing a user runs changes ([#682](https://github.com/Performant-Labs/holler/issues/682)).
 
 ## [0.4.0] - 2026-09-29
 

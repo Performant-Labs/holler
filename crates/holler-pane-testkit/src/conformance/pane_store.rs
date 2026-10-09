@@ -15,9 +15,12 @@
 //! after each write: a watcher that resumes from `Cursor(0)` gets the current state,
 //! not the writes in between, and that is all every correct store promises.
 
+use std::fmt::Debug;
+
 use holler_pane::{Cursor, Pane, PaneEvent, PaneName, PaneStore, ProfileName, Watch};
 
 use super::{drain, expect_code, expect_eq, next_item, run_cases, succeeds, Conformance};
+use crate::feed::Change;
 use crate::fixture::sample_pane;
 
 /// One case: `Err` with the reason when it does not hold.
@@ -416,7 +419,8 @@ fn pane_name(text: &str) -> Result<PaneName, String> {
     PaneName::parse(text).map_err(|e| format!("{text:?} is not a pane name: {e}"))
 }
 
-fn profile_name(text: &str) -> Result<ProfileName, String> {
+/// The profile name `text`. The profile store suite reuses it.
+pub(super) fn profile_name(text: &str) -> Result<ProfileName, String> {
     ProfileName::parse(text).map_err(|e| format!("{text:?} is not a profile name: {e}"))
 }
 
@@ -474,39 +478,51 @@ fn last_cursor(store: &dyn PaneStore) -> Result<Cursor, String> {
         .ok_or_else(|| "watch(Cursor(0)) yielded nothing on a store holding records".to_owned())
 }
 
-/// The next item of `watch` must be the change of `name` to `record` (`None` for its
-/// delete); returns the change's cursor. `after` names the write, for the detail.
-fn expect_change(
-    watch: &mut Watch<PaneEvent>,
-    name: &PaneName,
-    record: Option<&Pane>,
+/// The next item of `watch` must be the change of the record filed under `key` (a
+/// pane's name, a profile's slug) to `record` (`None` for its delete); returns the
+/// change's cursor. `after` names the write, for the detail. The profile store suite
+/// reuses it.
+pub(super) fn expect_change<E>(
+    watch: &mut Watch<E>,
+    key: &E::Key,
+    record: Option<&E::Record>,
     after: &str,
-) -> Result<Cursor, String> {
+) -> Result<Cursor, String>
+where
+    E: Change + Debug,
+    E::Key: Debug,
+    E::Record: PartialEq + Debug,
+{
     match next_item(watch)? {
-        Some(event) if event.name == *name && event.pane.as_deref() == record => Ok(event.cursor),
+        Some(event) if event.key() == *key && event.record() == record => Ok(event.cursor()),
         other => Err(format!(
-            "next() after {after}: expected the change of {name} to {record:?}, got {other:?}"
+            "next() after {after}: expected the change of {key:?} to {record:?}, got {other:?}"
         )),
     }
 }
 
-/// The changes `events` carry, as `(name, record)` pairs sorted by name (`None` for a
-/// delete).
-fn changes(events: Vec<PaneEvent>) -> Vec<(PaneName, Option<Pane>)> {
+/// The changes `events` carry, as `(key, record)` pairs sorted by key (`None` for a
+/// delete). The profile store suite reuses it.
+pub(super) fn changes<E>(events: Vec<E>) -> Vec<(E::Key, Option<E::Record>)>
+where
+    E: Change,
+    E::Record: Clone,
+{
     let mut changes: Vec<_> = events
         .into_iter()
-        .map(|event| (event.name, event.pane.map(|pane| *pane)))
+        .map(|event| (event.key(), event.record().cloned()))
         .collect();
     changes.sort_by(|x, y| x.0.cmp(&y.0));
     changes
 }
 
-fn cursors(events: &[PaneEvent]) -> Vec<Cursor> {
-    events.iter().map(|event| event.cursor).collect()
+/// The cursors of `events`, in order. The profile store suite reuses it.
+pub(super) fn cursors<E: Change>(events: &[E]) -> Vec<Cursor> {
+    events.iter().map(Change::cursor).collect()
 }
 
-/// `Ok` when `cursors` strictly increase.
-fn increasing(cursors: &[Cursor]) -> Result<(), String> {
+/// `Ok` when `cursors` strictly increase. The profile store suite reuses it.
+pub(super) fn increasing(cursors: &[Cursor]) -> Result<(), String> {
     if cursors
         .windows(2)
         .all(|pair| matches!(pair, [earlier, later] if earlier < later))
