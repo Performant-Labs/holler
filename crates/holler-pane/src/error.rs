@@ -15,6 +15,11 @@
 //! - **One representation per code**: a closed code is never carried by `Refused`
 //!   ([`RefusalCode`] refuses it), so a `match` on the closed variants cannot be
 //!   bypassed.
+//! - **One exit class per code** (ADR-0021 section 9): [`class_of`] sorts any code
+//!   into an [`ErrorClass`] (a usage error, a refusal or a runtime failure), and
+//!   [`ErrorClass::exit_code`] is the exit code a `pane` or `profile` verb ends
+//!   with (2, 3 or 1). It is the one place that decides which code is a refusal
+//!   and which a failure; the CLI calls it, and so will the test kit (#638).
 //!
 //! Every code and message is plain data and none echoes a secret: the
 //! environment-name guards ([`PaneError::ProfileSecretRefused`],
@@ -207,6 +212,94 @@ const fn is_closed_code(code: &str) -> bool {
         i += 1;
     }
     false
+}
+
+/// What kind of error a code stands for, which decides the exit code of a `pane` or
+/// `profile` verb that ends with it (ADR-0021 section 9). [`class_of`] gives the
+/// class of a code.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ErrorClass {
+    /// The request is malformed: a missing or conflicting argument, a bad name, a
+    /// params object that does not decode (`usage`). Exit 2.
+    Usage,
+    /// The request was understood and declined, working as designed, so nothing was
+    /// wrong with the system (`pane-in-other-profile`, `grid-ambiguous`, every open
+    /// code). Exit 3.
+    Refusal,
+    /// Something went wrong while doing the work: a timeout, an unreachable hub or
+    /// adapter, a conflict between writers (`timeout`, `unavailable`,
+    /// `generation-conflict`). Exit 1.
+    Failure,
+}
+
+impl ErrorClass {
+    /// The exit code of a verb that ends with an error of this class, the same in
+    /// text and JSON mode: 2 usage, 3 refusal, 1 runtime failure (ADR 0003's exit
+    /// codes; success is 0 and has no class).
+    pub const fn exit_code(self) -> i32 {
+        match self {
+            ErrorClass::Usage => 2,
+            ErrorClass::Refusal => 3,
+            ErrorClass::Failure => 1,
+        }
+    }
+}
+
+/// The class of the error coded `code`: the one place that decides which code is a
+/// refusal and which a runtime failure. ADR-0021 section 9 has the table, with the
+/// reason for every row. The CLI's output module calls this, and so will the test
+/// kit (#638); neither keeps a table of its own.
+///
+/// It takes the code, not a [`PaneError`], because a code is what an envelope
+/// carries. A caller that holds a `PaneError` passes [`PaneError::code`]:
+/// `class_of(error.code())`. (It is not `PaneError::classify`, a crate-private
+/// helper that only tells a closed code from an open one.)
+///
+/// - A **closed** code has the class of its arm below. The `match` names every
+///   closed code and has no catch-all arm, so a closed code added without a class
+///   does not compile.
+/// - Any other **well-formed** code is an open code, carried by
+///   [`PaneError::Refused`]: a refusal, always. A verb that reports a runtime
+///   failure uses a closed failure code.
+/// - A **malformed** code is a failure: it cannot be trusted, the same rule that
+///   turns a garbled wire reply into `unavailable`.
+pub fn class_of(code: &str) -> ErrorClass {
+    let Some(closed) = PaneCode::parse(code) else {
+        return if is_valid_code(code) {
+            ErrorClass::Refusal
+        } else {
+            ErrorClass::Failure
+        };
+    };
+    match closed {
+        PaneCode::Usage => ErrorClass::Usage,
+        // Understood and declined: a guard, a policy or a gate said no, the name is
+        // taken, or the request named something that does not exist.
+        PaneCode::GridAmbiguous
+        | PaneCode::GridOutOfRange
+        | PaneCode::CommandNotArgv
+        | PaneCode::EnvNameInvalid
+        | PaneCode::ProfileSecretRefused
+        | PaneCode::ProfileExists
+        | PaneCode::ProfileHasLivePanes
+        | PaneCode::PaneNotInProfile
+        | PaneCode::PaneInOtherProfile
+        | PaneCode::ProbeFailed
+        | PaneCode::HerdrVersionUnsupported
+        | PaneCode::ProfileNotFound
+        | PaneCode::PaneNotFound
+        | PaneCode::SessionNotFound => ErrorClass::Refusal,
+        // Went wrong while doing the work: a race between writers, a bound that ran
+        // out, something unreachable or unreadable, live state that disagrees with
+        // its spec, or work the verb cannot do yet.
+        PaneCode::GenerationConflict
+        | PaneCode::ProfileConflict
+        | PaneCode::Timeout
+        | PaneCode::Unavailable
+        | PaneCode::StoreCorrupt
+        | PaneCode::NotImplemented
+        | PaneCode::ProfileDrift => ErrorClass::Failure,
+    }
 }
 
 /// A code an adapter or a verb owns: well-formed ([`is_valid_code`]) and not one

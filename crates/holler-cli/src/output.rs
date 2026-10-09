@@ -7,9 +7,13 @@
 //!   an error included, and nothing goes to `err`. `pane watch` is the one stream: one envelope
 //!   per line ([`emit_stream`]).
 //!
-//! The exit code is the same in both modes: `0` ok, `1` refused or failed, `2` usage. An error
-//! coded `usage` exits 2 however it got here, so a run-time guard of `holler-pane` (a bad pane
-//! name, `--command-json` that is not JSON) is a usage error and not a runtime failure.
+//! The exit code is the same in both modes: `0` ok, `1` runtime failure, `2` usage, `3` refusal
+//! (ADR-0021 section 9). The class of the error's code decides it, through
+//! `holler_pane::error::class_of`, and this module keeps no table of its own. An error coded
+//! `usage` exits 2 however it got here, so a run-time guard of `holler-pane` (a bad pane name,
+//! `--command-json` that is not JSON) is a usage error and not a runtime failure; a request
+//! understood and declined (`pane-in-other-profile`, `grid-ambiguous`) exits 3; something that
+//! went wrong while doing the work (`timeout`, `unavailable`) exits 1.
 //!
 //! Writing goes through an injected [`Sink`], so a test captures both streams. Nothing here exits
 //! the process: every function returns the code and `main.rs`, the one file allowed to exit,
@@ -22,7 +26,7 @@ use std::io::{self, Write};
 
 use clap::error::ErrorKind;
 use clap::ValueEnum;
-use holler_pane::error::is_valid_code;
+use holler_pane::error::{class_of, is_valid_code};
 use holler_pane::{PaneError, Ports};
 use serde::Serialize;
 
@@ -194,7 +198,8 @@ pub struct VerbCtx<'a> {
     pub sink: Sink<'a>,
 }
 
-/// Print one result and return the exit code: 0 ok, 1 error, 2 for an error coded `usage`.
+/// Print one result and return the exit code: 0 ok, else the exit code of the error's class
+/// (1 runtime failure, 2 usage, 3 refusal).
 ///
 /// `text` renders the data for text mode (JSON mode serializes the data itself and never calls
 /// it). The text ends with one newline, which `emit` adds when it is missing; empty text writes
@@ -249,7 +254,8 @@ pub fn not_implemented_message(story: u32) -> String {
     format!("not implemented (story #{story})")
 }
 
-/// The refusal of a stub verb: code `not-implemented`, naming the story that owns the verb.
+/// The error of a stub verb: code `not-implemented` (a runtime failure, exit 1), naming the story
+/// that owns the verb.
 pub fn not_implemented(story: u32) -> ErrorBody {
     ErrorBody {
         code: ErrorCode::from(&PaneError::NotImplemented),
@@ -327,17 +333,10 @@ fn settle(written: io::Result<()>, code: i32) -> i32 {
     }
 }
 
-/// The exit code of an error: 2 for `usage`, 1 for every other.
+/// The exit code of an error: the exit code of its code's class, decided by
+/// `holler_pane::error::class_of` (1 runtime failure, 2 usage, 3 refusal).
 fn exit_code(error: &ErrorBody) -> i32 {
-    if error.code
-        == ErrorCode::from(&PaneError::Usage {
-            message: String::new(),
-        })
-    {
-        2
-    } else {
-        1
-    }
+    class_of(error.code.as_str()).exit_code()
 }
 
 /// `message` on one line, as the envelope requires: each line break becomes a space.

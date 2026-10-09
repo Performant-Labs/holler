@@ -48,7 +48,7 @@ pub enum PaneCmd {
     Import(import::PaneImport),
 }
 
-/// Run a `holler pane` verb and return its exit code (0 ok, 1 refused or failed, 2 usage).
+/// Run a `holler pane` verb and return its exit code (0 ok, 1 failure, 2 usage, 3 refusal).
 pub fn run(cmd: &PaneCmd, ctx: &mut VerbCtx<'_>) -> i32 {
     match cmd {
         PaneCmd::List(args) => list::run(args, ctx),

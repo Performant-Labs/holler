@@ -4,11 +4,12 @@
 //! Routing under test: text mode writes ok data to `out` and any error to `err`
 //! (nothing on `out` for an error); JSON mode writes exactly one envelope to `out`
 //! (error envelopes included) and nothing to `err`. Exit codes are the same in both
-//! formats: 0 ok, 1 refused or failed, 2 usage (an error coded `usage` exits 2, so a
-//! run-time `PaneError::Usage` from a guard does not exit 1).
+//! formats: 0 ok, 1 runtime failure, 2 usage, 3 refusal (an error coded `usage` exits 2,
+//! so a run-time `PaneError::Usage` from a guard does not exit 1; the class of every
+//! other code is `holler_pane::error::class_of`, #676).
 
 use holler_cli::output::{emit, emit_stream, emit_usage_error, ErrorBody, ErrorCode, Format, Sink};
-use holler_pane::error::{is_valid_code, ALL_CODES};
+use holler_pane::error::{class_of, is_valid_code, ALL_CODES};
 use holler_pane::PaneError;
 use serde_json::{json, Value};
 
@@ -141,7 +142,7 @@ fn emit_error_in_text_mode_writes_the_message_to_err_and_nothing_to_out() {
             |_| panic!("an error has no data to render"),
         )
     });
-    assert_eq!(code, 1);
+    assert_eq!(code, 3, "a refusal exits 3");
     assert!(out.is_empty(), "{out:?}");
     assert!(err.contains("no pane named demo-c1r1"), "{err:?}");
 }
@@ -156,7 +157,7 @@ fn emit_error_in_json_mode_writes_one_error_envelope_to_out_and_nothing_to_err()
             |_| panic!("text mode only"),
         )
     });
-    assert_eq!(code, 1);
+    assert_eq!(code, 3, "a refusal exits 3");
     assert!(err.is_empty(), "{err:?}");
     assert_eq!(
         one_envelope(&out),
@@ -189,9 +190,9 @@ fn emit_json_envelope_is_compact_with_schema_version_first() {
 
 /// An error coded `usage` exits 2 in both formats, however it reached `emit` (a
 /// run-time `PaneError::Usage` from `PaneName::parse` or `Argv::from_json`, not only a
-/// clap error); every other error exits 1.
+/// clap error); a refusal exits 3 (`probe-failed` is one: the health gate declined).
 #[test]
-fn emit_exits_2_for_a_usage_coded_error_in_both_formats_and_1_for_any_other() {
+fn emit_exits_2_for_a_usage_coded_error_in_both_formats_and_3_for_a_refusal() {
     for format in [Format::Text, Format::Json] {
         let usage = ErrorBody::from(&PaneError::Usage {
             message: "not valid JSON".to_string(),
@@ -208,8 +209,88 @@ fn emit_exits_2_for_a_usage_coded_error_in_both_formats_and_1_for_any_other() {
                 |_| String::new(),
             )
         });
-        assert_eq!(code, 1, "{format:?}: any other error exits 1");
+        assert_eq!(code, 3, "{format:?}: a refusal exits 3");
     }
+}
+
+// --- Exit code by class (#676) -----------------------------------------------
+
+/// Every closed code exits by its class, the same in text and JSON mode, and a JSON
+/// error envelope has `ok == false` and `data == null` for exit 1, 2 and 3 alike.
+#[test]
+fn every_closed_code_exits_by_its_class_with_the_same_code_in_both_formats() {
+    for code in ALL_CODES {
+        let expected = class_of(code).exit_code();
+        let (text, _, _) = with_sink(|sink| {
+            emit(
+                sink,
+                Format::Text,
+                Err::<Value, _>(error_body(code, "m")),
+                |_| String::new(),
+            )
+        });
+        let (json, out, err) = with_sink(|sink| {
+            emit(
+                sink,
+                Format::Json,
+                Err::<Value, _>(error_body(code, "m")),
+                |_| String::new(),
+            )
+        });
+        assert_eq!(text, expected, "`{code}` in text mode");
+        assert_eq!(json, expected, "`{code}` in JSON mode");
+        assert_eq!(text, json, "`{code}`: the same code in both formats");
+        assert!(
+            err.is_empty(),
+            "`{code}`: JSON mode writes nothing to err: {err:?}"
+        );
+        let envelope = one_envelope(&out);
+        assert_eq!(envelope["ok"], json!(false), "`{code}`");
+        assert_eq!(envelope["data"], Value::Null, "`{code}`");
+        assert_eq!(envelope["error"]["code"], json!(code), "`{code}`");
+    }
+}
+
+/// The decision in plain numbers (ADR-0021 section 9), independent of `class_of`: a
+/// refusal exits 3, a runtime failure 1, `usage` 2, in both formats.
+#[test]
+fn a_refusal_exits_3_and_a_failure_exits_1_in_both_formats() {
+    let expected = [
+        ("pane-in-other-profile", 3),
+        ("profile-secret-refused", 3),
+        ("command-not-argv", 3),
+        ("grid-ambiguous", 3),
+        ("quota-exceeded", 3), // an open code, raised as `PaneError::Refused`
+        ("timeout", 1),
+        ("generation-conflict", 1),
+        ("unavailable", 1),
+        ("usage", 2),
+    ];
+    for format in [Format::Text, Format::Json] {
+        for (code, exit) in expected {
+            let (got, _, _) = with_sink(|sink| {
+                emit(sink, format, Err::<Value, _>(error_body(code, "m")), |_| {
+                    String::new()
+                })
+            });
+            assert_eq!(got, exit, "`{code}` in {format:?} mode");
+        }
+    }
+}
+
+/// A refusal item ends a stream at exit 3, like any error item ends it non-zero; the
+/// items written before it stay written.
+#[test]
+fn emit_stream_exits_3_on_a_refusal_item() {
+    let items = vec![
+        Ok::<_, ErrorBody>("alpha"),
+        Err(error_body("pane-not-found", "no pane named demo-c1r1")),
+    ];
+    let (code, out, err) =
+        with_sink(|sink| emit_stream(sink, Format::Text, items.into_iter(), |s| s.to_string()));
+    assert_eq!(code, 3);
+    assert_eq!(out.lines().collect::<Vec<_>>(), ["alpha"]);
+    assert!(err.contains("no pane named demo-c1r1"), "{err:?}");
 }
 
 // --- emit_usage_error --------------------------------------------------------
