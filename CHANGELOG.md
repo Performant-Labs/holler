@@ -48,6 +48,15 @@ fills this file in at release time.
   profile. The fake passes all 19, and a registry that breaks one rule fails the case for it. The profile, Herdr, host and
   harness fakes and the JSON-envelope checker follow in later parts. Test code only: nothing a user runs changes
   ([#638](https://github.com/Performant-Labs/holler/issues/638)).
+- Pane control, the test kit's host and harness fakes (epic [#633](https://github.com/Performant-Labs/holler/issues/633)):
+  `holler-pane-testkit` now has a fake host and a fake OpenCode harness. The fake host keeps tmux sessions, the argv of every
+  command run in them exactly as given, and the processes each session owns. The fake harness is modelled on the OpenCode
+  spike: servers that share one data directory, a frozen or killed server, a session deleted under a TUI, and switches for
+  two behaviours of raw OpenCode, a select acknowledged with no TUI and an abort of an unknown session acknowledged. Both
+  take the same injected faults as the fake pane registry and record every call made through them. Each comes with a
+  conformance suite that an adapter runs against itself, 9 host cases and 15 harness cases: the fakes pass every case, a
+  fake with a quirk switched on fails, and a host or harness that breaks one rule fails the case for it. Test code only:
+  nothing a user runs changes ([#684](https://github.com/Performant-Labs/holler/issues/684)).
 - Pane control, slice c of the skeleton (epic [#633](https://github.com/Performant-Labs/holler/issues/633)):
   the CLI side. `holler pane` (`list get watch launch relaunch switch reset park unpark close doctor
   import`) and `holler profile` (`create delete list show apply rename export import`) are in the
@@ -97,6 +106,16 @@ fills this file in at release time.
   which reject an adapter that swaps rows and columns. [ADR 0021](docs/adr/ADR-0021.md) now records that
   `grid-out-of-range` also covers a cell outside its workspace. Test code only: nothing a user runs changes
   ([#683](https://github.com/Performant-Labs/holler/issues/683)).
+
+- Pane control, the test kit's envelope checker (epic [#633](https://github.com/Performant-Labs/holler/issues/633)):
+  `holler-pane-testkit` can now check the `--format=json` output of a `holler pane` or `holler profile` verb against
+  its exit code, as one envelope or as an NDJSON stream (`pane watch`) in which only the last line may be a failure.
+  It accepts exactly the envelope of [ADR 0021](docs/adr/ADR-0021.md) section 9: `schema_version` 1, `ok` true
+  exactly at exit 0, `error` null exactly when `ok` is true, no other key, a kebab-case code with a one-line message,
+  and an exit code that matches the class of the code. Otherwise it names the first rule the output breaks, such as
+  a log line before the envelope, a `detail` key or a refusal at exit 1. It classifies codes with
+  `holler_pane::error::class_of`, so it keeps no table of its own. Test code only: nothing a user runs changes
+  ([#681](https://github.com/Performant-Labs/holler/issues/681)).
 
 ## [0.4.0] - 2026-09-29
 

@@ -15,6 +15,9 @@ path = "src/lib.rs"
 # The ports the fakes implement and the suites drive (`PaneStore`, `Pane`, `PaneError`,
 # `next_generation`); for every fake and suite in this crate.
 holler-pane = { path = "../holler-pane" }
+# Parses the verbs' `--format=json` output for `envelope.rs` (`check_envelope`,
+# `check_ndjson`); the testkit cannot use the CLI's own `Envelope` type.
+serde_json = { workspace = true }
 
 # Workspace lints (issue #149).
 [lints]
