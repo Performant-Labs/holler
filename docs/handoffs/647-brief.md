@@ -89,7 +89,7 @@ fn pane_doctor_stub_routes_text_to_err_and_json_to_out() {
 }
 ```
 ```
-crates/holler-cli/tests/pane_verbs/process/stub.rs:9-17, 32-33
+crates/holler-cli/tests/pane_verbs/process/stub.rs:9-33
 /// Every verb that is still a stub, with the story that owns it. The only place in the
 /// shared process tests that names a stub's owning story.
 ///
@@ -99,9 +99,25 @@ crates/holler-cli/tests/pane_verbs/process/stub.rs:9-17, 32-33
 /// and git reports that as a conflict. (`PANE_VERBS` and `PROFILE_VERBS` keep the verb
 /// itself.)
 pub const STUBS: &[(&str, &str, u32)] = &[
+    // #643
+    ("pane", "list", 643),
+    ("pane", "get", 643),
+    ("pane", "watch", 643),
+    // #644
+    ("pane", "launch", 644),
+    ("pane", "relaunch", 644),
+    // #645
+    ("pane", "switch", 645),
+    ("pane", "reset", 645),
+    // #646
+    ("pane", "park", 646),
+    ("pane", "unpark", 646),
+    ("pane", "close", 646),
     // #647
     ("pane", "doctor", 647),
 ```
+So, as of `3bdd129`, both verbs the non-`doctor` remedies name (`relaunch`, #644, and `reset`, #645) are stubs that answer
+`not-implemented` (see "Contradictions found", C-8).
 ```
 crates/holler-cli/tests/fixtures/cli-surface.txt:146-148
 # #647
@@ -428,6 +444,13 @@ pub(crate) fn excerpt(text: &str) -> String {
     let head: String = text.chars().take(LIMIT).collect();
     format!("{head:?}...")
 }
+crates/holler-pane/src/error.rs:158-163 (the validator AC 25 calls; `pub`, so the CLI test target can reach it)
+/// Whether `code` is a well-formed error code: `^[a-z]+(-[a-z]+)*$` (lower-case
+/// ASCII words joined by single hyphens, no leading or trailing hyphen).
+///
+/// This is the only code validator in the workspace; the CLI's output module calls
+/// it. It is a `const fn`, so a verb's code constant can be checked at build time.
+pub const fn is_valid_code(code: &str) -> bool {
 ```
 `RefusalCode::from_static` refuses a closed code (`error.rs:331-337`), so finding kinds whose text equals a closed code
 (`herdr-version-unsupported`, and #665's `profile-drift`) **cannot** be `RefusalCode`s: findings are their own enum.
@@ -485,6 +508,21 @@ crates/holler-cli/tests/verb_harness/mod.rs:52-54
 /// Run `holler <argv...>` in-process through `pane::run` or `profile::run`, with the
 /// given output format and ports.
 pub fn run_verb_with(argv: &[&str], format: Format, ports: Ports<'_>) -> Outcome {
+```
+The parser AC 26 calls (`Cli` derives clap's `Parser`, so `Cli::try_parse_from` exists; the crate re-exports it):
+```
+crates/holler-cli/src/cli.rs:23-30
+#[derive(Parser, Debug)]
+#[command(
+    name = "holler",
+    about = "One binary, two roles: hub and body (ADR 0001)",
+    version,
+    subcommand_required = true
+)]
+pub struct Cli {
+crates/holler-cli/src/lib.rs:26-27
+pub use crate::cli::{
+    Answer, Attach, AttachCommand, Body, BodyCommand, Cli, Cmd, Command, Confirm, Delete, Hold, Hub,
 ```
 `holler-pane-testkit` is already a dev-dependency of `holler-cli` (`crates/holler-cli/Cargo.toml:432-435`, "#638 and
 #643-#647 use it from their own pane_verbs/<verb>.rs files"), and `tests/pane_verbs/main.rs:34` already declares
@@ -557,6 +595,31 @@ crates/holler-pane-testkit/src/harness.rs:195-197, 201-203, 214-216, 221-223, 22
             world.known(port, session)?;
         }
         world.show(pane, session)
+    }
+```
+What `delete_session` does to a TUI showing the session (AC 6's "the TUI goes home"):
+```
+crates/holler-pane-testkit/src/harness.rs:225-228
+    /// Another client deleted `session` (`DELETE /session/:id`): it leaves its data
+    /// directory, and every TUI showing it goes to its home screen and stays attached
+    /// (opencode-pane-spike.md:222). `session-not-found` when no data directory holds
+    /// it.
+crates/holler-pane-testkit/src/harness.rs:442-457
+    /// `delete_session`'s work: the session leaves its data directory, and every TUI
+    /// that shows it goes home.
+    fn delete(&mut self, session: &str) -> Result<(), PaneError> {
+        let ids = self
+            .sessions
+            .values_mut()
+            .find(|ids| ids.iter().any(|id| id == session))
+            .ok_or_else(|| unknown_session(session))?;
+        ids.retain(|id| id != session);
+        for tui in self.tuis.values_mut() {
+            if tui.shown.as_deref() == Some(session) {
+                tui.shown = None;
+            }
+        }
+        Ok(())
     }
 ```
 ```
@@ -1060,6 +1123,14 @@ Forward-compat (consumers):
   touched files only.
 - **C-7 "Raise it on #634".** #634 is closed; the decision is recorded by editing ADR-0021 and, after merge, one comment
   on #634 (Decision 1).
+- **C-8 Remedies that name stub verbs (brief review round 1, B-1/B-5; OPEN, needs a decision by the MO or operator).**
+  The relaunch remedy (`herdr-pane-missing`, `tmux-session-missing`, `server-wedged`, `server-down`,
+  `tui-foreign-session`, and `shown-driven-mismatch` when not fixable or failed; ACs 2, 3, 4, 11) names `holler pane
+  relaunch <pane>`, and the reset remedy (`no-session-of-record`, `session-of-record-missing`; ACs 6, 9) names `holler
+  pane reset <pane>`. Both verbs are stubs on `main` (`process/stub.rs:22-27` above), so until #644 and #645 merge an
+  operator who runs either remedy gets `not-implemented`. The outside reviewer named two ways out: (a) order #644 (and,
+  by the same reasoning, #645) before this story, or (b) give these findings a remedy that exists today. Neither is
+  chosen in this brief; Decisions 3 and AC 2, 3, 4, 6, 9 and 11 stand as written until that decision is recorded.
 
 ## Out of scope
 
