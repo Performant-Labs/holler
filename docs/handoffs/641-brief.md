@@ -220,7 +220,9 @@ passes and says why.
    `pane-not-found` (the fake's order).
 2. **Ensure twice makes one session (real tmux, ignored):** `ensure_session_twice_makes_one_session` calls `ensure_session`
    twice (the second with a different cwd) and asserts `tmux -S <sock> list-sessions -F '#{session_name}'` prints exactly one
-   line, `demo-c1r1`, and the session's `#{session_path}` is still the first cwd.
+   line, `demo-c1r1`, and the session's `#{session_path}` is still the first cwd. A third call, with a cwd that is not an
+   existing directory, returns `Ok` on the real server (Decision 6: the session exists) and leaves the same one session and
+   `#{session_path}` (outside review round 1, W-3).
 3. **Stop kills only the owned process (real tmux, ignored):** `stop_owned_kills_only_the_owned_process` runs `sleep 30` in
    `demo-c1r1` and in `demo-c2r1`, and the test itself spawns a third `sleep 30` outside tmux (`std::process::Command`, killed
    by the test at the end). After `stop_owned(demo-c1r1)`: the c1r1 run's pid is gone from `ps` and from the OS (`kill -0`
@@ -254,7 +256,11 @@ passes and says why.
      -t =demo-c1r1: -- env -- prog "a b" "$(id);x" -t`; a one-element argv `["prog"]` is also prefixed with `env --` (so tmux
      never sees a single argument, which it would give to a shell). The record shows one tmux call after it, `set-option -w
      -t <window_id> @holler-pid <pid> ; set-option -w -t <window_id> remain-on-exit off` (the `;` a separate element the
-     adapter authors), with the pid and window id the fake printed. **Trailing `;` escaped (B-1, Decision 13):**
+     adapter authors), with the pid and window id the fake printed. Precisely (B-2, outside review round 1; Decision 3): the
+     calls file holds exactly **two** entries for this `run`, one per spawn of the fake: the `new-window` entry above, then a
+     second, separate entry whose arguments after the socket flags are that `set-option ... ; set-option ...` vector. The
+     test asserts there are two entries, that the first holds no `set-option` and the second no `new-window` (this is what
+     tells the K2-failing form, the tag chained onto `new-window` in one spawn, apart from the probed one). **Trailing `;` escaped (B-1, Decision 13):**
      `run(demo-c1r1, ["prog", "x;", "y\\;", ";", "kill-server"])` (Rust literals, so the third element is `y\;`) makes the
      fake record, after `env --`, these separate arguments in order: `prog`, `x\;`, `y\\;`, `\;`, `kill-server`.
    - e. **Exact targets:** every recorded call that names the session uses `=demo-c1r1` (or `=demo-c1r1:`), never the bare
@@ -289,7 +295,9 @@ passes and says why.
 7. **No broad kill:** `grep -rnE 'pkill|killall|pgrep|pidof' crates/holler-adapter-host/src | grep -vE ':[0-9]+:\s*//'`
    prints nothing, and a default-run test `no_broad_kill_in_source` asserts the same by walking `CARGO_MANIFEST_DIR/src` at
    runtime (every `.rs` file, so a file added later is covered) and skipping `//` comment text, as
-   `crates/holler-hub/tests/logging_guard_test.rs` and `crates/holler-cli/tests/hold_single_path_test.rs` do (W-4). Signals
+   `crates/holler-hub/tests/logging_guard_test.rs` and `crates/holler-cli/tests/hold_single_path_test.rs` do (W-4). The scope
+   is production source only (`src/`); the fake tmux and fake `kill` scripts stay under `tests/` and never move into `src/`
+   (outside review round 1, W-4). Signals
    go only to a process group whose leader pid tmux reports for a window the adapter tagged (Decisions 3, 4), or to the pid
    `run` just started when tagging it failed (Decision 3).
 8. **Quality gates** (the tester overlay's Tier 1, as CI runs them, W-5): `bash scripts/lint.sh` (every `#[allow]` and
@@ -379,6 +387,11 @@ changes; nothing depends on `holler-adapter-host` yet, so no existing test can b
    `unavailable` with no further call), then runs one tmux invocation `set-option -w -t <window_id> @holler-pid <pid> ;
    set-option -w -t <window_id> remain-on-exit off` (the `;` is its own element, authored by the adapter; both values are
    literal; probed, see Evidence). The two invocations stay separate: chaining the tag onto `new-window` tagged nothing (K2).
+   Spelled out (outside review, round 1, B-2): a successful `run` spawns exactly **two** tmux subprocesses, (1) `new-window`
+   and (2) the tag. The tag is one subprocess whose argv chains its two `set-option` commands with the `;` element; that
+   form, with literal values, is the one O probed as setting both options (Evidence, "(O)" line under K2). What K2 showed
+   failing is a different form: the tag chained onto `new-window` in the same subprocess, reading `#{pane_pid}` by format.
+   So the tag is never merged into the `new-window` subprocess, and its two `set-option` commands are one subprocess, not two.
    `remain-on-exit off` on the tagged window means a stopped run never lingers as a dead pane, whatever the operator's global
    setting (W-8). The record lives in tmux (not in a file,
    I6; the adapter is rebuilt per CLI run so it cannot keep memory). `stop_owned` stops exactly the panes of the session whose
