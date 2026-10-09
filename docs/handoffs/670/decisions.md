@@ -80,3 +80,15 @@
   - By hand on the real binary with an empty state dir: the stub text and JSON forms, the `usage` envelope under `pane`/`profile` and plain clap output under `roster`/`say`, `--pane` usage errors against the refusal, `hub token list --json` against `--format=json` (byte-identical), closed stdout/stderr and a pipe to `head`.
   - Read: the brief, handoff-A.md, handoff-T-red.md, decisions.md, issue #670, epic #633, ADR 0003, `holler-pane` (`lib`, `error`, `ports`, `argv`, `grid`, `profile`, `pane`, `probe`), the testkit crate, `holler-cli` (`main`, `cli`, `lib`, `say_cmd`, `interrupt_cmd`, `answer_cmd`, `roster_cmd`) and T's tests and fixture.
   - Source facts F relies on: docs/handoffs/670/evidence.md.
+
+## T (Phase 7, verify GREEN + Tier 2) - #670
+
+- **Decided:**
+  - GREEN confirmed: workspace 1023 passed / 0 failed; the three RED targets 33/53/9 pass, three repeat runs; `lint.sh`, `changelog-check.sh`, clippy `-D warnings`, `cargo machete`, `docs_cli_test`, `wire_selftest` all clean. Verdict PASS.
+  - Added five in-process tests to `pane_verbs/output_api.rs` for `emit`'s write rules (newline, one-line JSON message, failed write never exit 0, stream stops on failed write, unencodable result) that F listed as uncovered. No production code touched.
+- **Assumed:**
+  - Leaving `resolve_format`, `scan_args`, `route`, `validate()` for role/ctx and `Unwired` without direct unit tests is proportionate for a skeleton slice: the binary tests pin them observably, and #644/#649 own the real behavior.
+- **Hedged:**
+  - A broken-pipe `Write` stub stands in for a closed pipe; the real `| head` case was only checked by F by hand.
+- **Evidence:**
+  - Mutation spot-checks (exit code 2 to 1; stub wording changed) each failed several tests, reverted by `git checkout`/restore, tree clean afterward. Full log in the scratchpad `full.log`. See handoff-T-green.md.

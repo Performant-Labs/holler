@@ -280,3 +280,110 @@ fn emit_stream_exits_1_on_an_error_item_and_keeps_the_earlier_lines() {
     assert_eq!(out.lines().collect::<Vec<_>>(), ["alpha"]);
     assert!(err.contains("the feed closed"), "{err:?}");
 }
+
+// --- Write rules (added by T in Phase 7: the paths the RED did not pin) -----------------
+
+/// A writer that refuses every write, as a closed pipe does.
+struct Broken;
+
+impl std::io::Write for Broken {
+    fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+        Err(std::io::Error::from(std::io::ErrorKind::BrokenPipe))
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+/// Text that does not end in a newline gets one; text that already does is not doubled;
+/// empty text writes nothing at all.
+#[test]
+fn emit_text_ends_with_exactly_one_newline_and_empty_text_writes_nothing() {
+    let run = |text: &'static str| {
+        with_sink(|sink| {
+            emit(sink, Format::Text, Ok::<_, ErrorBody>(1), |_| {
+                text.to_string()
+            })
+        })
+    };
+    assert_eq!(run("row"), (0, "row\n".to_string(), String::new()));
+    assert_eq!(run("row\n"), (0, "row\n".to_string(), String::new()));
+    assert_eq!(run(""), (0, String::new(), String::new()));
+}
+
+/// A message with a line break is one line in the envelope (the contract is one envelope per
+/// line), so a reader that splits on newlines still sees exactly one JSON document.
+#[test]
+fn emit_json_error_message_is_put_on_one_line() {
+    let (code, out, _) = with_sink(|sink| {
+        emit(
+            sink,
+            Format::Json,
+            Err::<(), _>(error_body("unavailable", "first\nsecond")),
+            |()| String::new(),
+        )
+    });
+    assert_eq!(code, 1);
+    assert_eq!(out.lines().count(), 1, "{out:?}");
+    let message = one_envelope(&out)["error"]["message"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(
+        message.contains("first") && message.contains("second"),
+        "{message:?}"
+    );
+    assert!(!message.contains('\n'), "{message:?}");
+}
+
+/// Output nobody received is not a success: a failed write turns exit 0 into 1, in both
+/// formats. An error keeps its own code (a usage error stays 2).
+#[test]
+fn a_failed_write_is_never_exit_0() {
+    for format in [Format::Text, Format::Json] {
+        let mut err = Vec::new();
+        let mut sink = Sink {
+            out: &mut Broken,
+            err: &mut err,
+        };
+        let code = emit(&mut sink, format, Ok::<_, ErrorBody>(1), |n| n.to_string());
+        assert_eq!(code, 1, "{format:?}");
+    }
+    let mut sink = Sink {
+        out: &mut Broken,
+        err: &mut Broken,
+    };
+    assert_eq!(emit_usage_error(&mut sink, Format::Json, "bad"), 2);
+}
+
+/// `pane watch | head` must end: the stream stops at the first write that fails (Rust ignores
+/// SIGPIPE, so an endless iterator would otherwise spin for ever). An infinite iterator that
+/// returns here is the proof.
+#[test]
+fn emit_stream_stops_at_the_first_failed_write() {
+    let mut err = Vec::new();
+    let mut sink = Sink {
+        out: &mut Broken,
+        err: &mut err,
+    };
+    let items = std::iter::repeat_with(|| Ok::<_, ErrorBody>("line"));
+    let code = emit_stream(&mut sink, Format::Text, items, |s| s.to_string());
+    assert_eq!(code, 1);
+}
+
+/// A result that cannot be encoded is reported on `err`, exits 1, and leaves nothing (not half an
+/// envelope) on `out`.
+#[test]
+fn an_unencodable_result_is_reported_on_err_and_leaves_out_empty() {
+    use std::collections::HashMap;
+    // Non-string map keys cannot be JSON object keys.
+    let data: HashMap<Vec<u8>, u8> = HashMap::from([(vec![1u8], 1u8)]);
+    let (code, out, err) = with_sink(|sink| {
+        emit(sink, Format::Json, Ok::<_, ErrorBody>(data), |_| {
+            String::new()
+        })
+    });
+    assert_eq!(code, 1);
+    assert_eq!(out, "");
+    assert!(err.starts_with("error: "), "{err:?}");
+}
