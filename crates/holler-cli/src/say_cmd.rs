@@ -7,6 +7,7 @@
 
 use std::time::Duration;
 
+use crate::prompt_target::{route, Routed};
 use crate::Say;
 
 /// What `say_command` (in `main.rs`) should print and exit with.
@@ -48,17 +49,17 @@ pub(crate) fn parse_duration(s: &str) -> Option<Duration> {
 }
 
 /// `say`'s prompt text (issue #190): `TEXT` normally, or the concatenated
-/// text parts of `--parts-file`'s A2A `Message` when given instead. Clap's
-/// own `required_unless_present` on `Say::text` guarantees exactly one of
-/// the two is present by the time this runs.
-fn resolve_say_text(say: &Say) -> Result<String, String> {
+/// text parts of `--parts-file`'s A2A `Message` when given instead. `Say::resolve`
+/// (the `--pane` accessor, `prompt_target.rs`) guarantees one of the two is
+/// present by the time this runs; `text` is its `TEXT`.
+fn resolve_say_text(say: &Say, text: Option<&str>) -> Result<String, String> {
     if let Some(path) = &say.parts_file {
         let content = std::fs::read_to_string(path).map_err(|e| format!("cannot read --parts-file {path}: {e}"))?;
         let message: holler_proto::Message = serde_json::from_str(&content)
             .map_err(|e| format!("--parts-file {path} is not a valid A2A Message: {e}"))?;
         Ok(message.parts.iter().filter_map(|p| p.text()).collect::<Vec<_>>().join(""))
     } else {
-        Ok(say.text.clone().unwrap_or_default())
+        Ok(text.unwrap_or_default().to_string())
     }
 }
 
@@ -106,19 +107,32 @@ fn fmt_age(ms: u64) -> String {
 /// report the reply (or `--json`'s full result document) — or a refusal.
 /// Exit codes: `0` a reply arrived, `1` every runtime refusal (no live hub,
 /// not connected, unknown/ambiguous session, busy, connection lost, timeout,
-/// cancelled — each with the spec's own wording; `2` an ambiguous session,
-/// `3` a malformed `--timeout`/`--parts-file`.
+/// cancelled — each with the spec's own wording; `2` an ambiguous session or
+/// a malformed positional tail, `3` a malformed `--timeout`/`--parts-file`.
+///
+/// `--pane` and `--profile` (epic #633) are refused with exit 1 and `not
+/// implemented (story #646)` before any hub is contacted: see `prompt_target.rs`.
 pub fn run(say: &Say, json: bool) -> SayResult {
+    let Routed { session, arg } = match route(say.resolve(), &say.profile) {
+        Ok(routed) => routed,
+        Err(stop) => return err(stop.message, stop.exit_code),
+    };
     let timeout = match parse_duration(&say.timeout) {
         Some(d) => d,
         None => return err(format!("invalid --timeout {:?} (use e.g. 30s, 5m, 1h)", say.timeout), 3),
     };
-    let text = match resolve_say_text(say) {
+    let text = match resolve_say_text(say, arg.as_deref()) {
         Ok(t) => t,
         Err(msg) => return err(msg, 3),
     };
     let state_root = holler_hub::state::resolve_state_dir().unwrap_or_default();
-    let call = holler_hub::control::ControlCall::say_with(&say.session, &text, say.queue, say.grant.as_deref(), timeout);
+    let call = holler_hub::control::ControlCall::say_with(
+        &session,
+        &text,
+        say.queue,
+        say.grant.as_deref(),
+        timeout,
+    );
     match crate::transport::call(say.server.as_deref(), &call) {
         Ok(doc) => {
             if json {
@@ -139,15 +153,16 @@ pub fn run(say: &Say, json: bool) -> SayResult {
             // cancelled) is a runtime failure (exit 1).
             let is_ambiguous = e.data.as_ref().and_then(|d| d.reason.as_deref()) == Some("ambiguous");
             if crate::hold_cmd::is_held(&e) {
-                let (message, to_stderr) = crate::hold_cmd::held_refusal(&say.session, &e, json);
+                let (message, to_stderr) = crate::hold_cmd::held_refusal(&session, &e, json);
                 return SayResult { message, to_stderr, exit_code: crate::hold_cmd::HELD_EXIT_CODE };
             }
             if crate::hold_cmd::is_invalid_grant(&e) {
-                let (message, to_stderr) = crate::hold_cmd::invalid_grant_refusal(&say.session, &e, json);
+                let (message, to_stderr) =
+                    crate::hold_cmd::invalid_grant_refusal(&session, &e, json);
                 return SayResult { message, to_stderr, exit_code: crate::hold_cmd::INVALID_GRANT_EXIT_CODE };
             }
             let message = if e.code == holler_proto::Code::SessionBusy.jsonrpc() {
-                busy_hint(&say.session, &e)
+                busy_hint(&session, &e)
             } else {
                 e.message.clone()
             };

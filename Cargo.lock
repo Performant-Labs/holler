@@ -1161,6 +1161,8 @@ dependencies = [
  "hex",
  "holler-body",
  "holler-hub",
+ "holler-pane",
+ "holler-pane-testkit",
  "holler-proto",
  "libc",
  "predicates",

@@ -396,6 +396,9 @@ serde = { workspace = true }
 # `#[cfg(test)]` unit test (decodes the credential/status documents it inspects).
 serde_json = { workspace = true }
 holler-proto = { path = "../holler-proto" }
+# #670: the pane/profile verbs take every error code, guard and port type from
+# the holler-pane crate (`Ports`, `PaneError`, `GridPos`, `Argv`, `EnvVarName`).
+holler-pane = { path = "../holler-pane" }
 # Story #143: the `hub serve` / `hub status` leaves drive the hub crate (the
 # listener + control socket). This is the first story to consume holler-hub
 # from the CLI, so per the #155 §7 rule it is declared here.
@@ -426,6 +429,10 @@ tokio = { workspace = true }
 toml = { workspace = true }
 
 [dev-dependencies]
+# #670: the fakes and conformance suite of holler-pane (empty until #638). Its
+# consumer test is `testkit_links` in tests/pane_verbs/list.rs; #638 and
+# #643-#647 use it from their own pane_verbs/<verb>.rs files.
+holler-pane-testkit = { path = "../holler-pane-testkit" }
 assert_cmd = { workspace = true }
 predicates = { workspace = true }
 rstest = { workspace = true }
@@ -462,3 +469,40 @@ tokio-rustls = "0.26"
 # complexity gates (thresholds in clippy.toml).
 [lints]
 workspace = true
+
+# #670, the pane/profile CLI skeleton (epic #633). Every verb has its own file
+# under these directories so a verb story edits only its own file, never this
+# manifest.
+#
+# In-process verb tests: a verb's `run` over captured writers and the `Ports`
+# the test gives it, `Unwired` by default (tests/verb_harness/mod.rs). One
+# target per namespace.
+[[test]]
+name = "pane_verbs"
+path = "tests/pane_verbs/main.rs"
+
+[[test]]
+name = "profile_verbs"
+path = "tests/profile_verbs/main.rs"
+
+# Process-level tests of the whole pane/profile surface: the real `holler`
+# binary, every stub verb, `--format`/`--json`, usage errors, which flag parses
+# where, the legacy verbs' `--pane`/`--profile` refusal, and the ADR 0003 and
+# fixture rows. Lives under tests/pane_verbs/ (the story's blast radius) but is
+# its own target so that a verb story's change to the in-process harness
+# (tests/verb_harness/mod.rs) cannot break it; it builds only the parse-only
+# helpers (tests/verb_harness/parse.rs).
+[[test]]
+name = "pane_cli_process"
+path = "tests/pane_verbs/process/main.rs"
+
+# Placeholder targets: #649 (hub wiring and integration scenario) and #667
+# (profile apply on scratch instances) fill these in; declared here so neither
+# story edits this manifest.
+[[test]]
+name = "pane_integration"
+path = "tests/pane_integration/main.rs"
+
+[[test]]
+name = "profile_apply_scenario"
+path = "tests/profile_apply_scenario/main.rs"
