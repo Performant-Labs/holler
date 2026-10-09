@@ -1435,7 +1435,14 @@ All commands run from the worktree root.
    line (comments excluded, since the rustdoc explains why there is no `libc`):
    `sed -n '1,/#\[cfg(test)\]/p' crates/holler-pane/src/probe.rs | grep -vE '^\s*//' | grep -nE 'pkill|killall|pgrep|pidof|"sh"|"bash"|libc|unsafe'`
    prints nothing, and the same pipeline with `grep -c 'Command::new'` prints `2`: the probe's program (`argv[0]`) and
-   `"kill"`.
+   `"kill"`. What the shell tokens match: `"sh"` and `"bash"` are matched with their double quotes, so they hit only a
+   string literal that is exactly `sh` or `bash` (the program name a shell spawn would pass), never a word that merely
+   contains the letters (`"finished"`, `"shell"` and `"push"` do not match); no reason text has to avoid any word. The same
+   pipeline also checks the shell-invocation shapes the two tokens miss:
+   `sed -n '1,/#\[cfg(test)\]/p' crates/holler-pane/src/probe.rs | grep -vE '^\s*//' | grep -nE '"(/usr)?/bin/(sh|bash|zsh|dash)"|"(zsh|dash)"|"-c"'`
+   prints nothing (an absolute shell path, another shell's name, or a `-c` argument). Together with AC 8h (`;`, `$(...)` and
+   a space inside an element arrive literally) this is the "no shell" evidence; the greps guard the source, 8h the
+   behaviour.
 10. **Quality gates** (the tester overlay's Tier 1, as CI runs them): `bash scripts/lint.sh`, `bash scripts/changelog-check.sh`,
     `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test -p holler-pane`, `cargo test -p holler-cli --lib`,
     `cargo test -p holler-pane-testkit`, `cargo test --workspace`, `cargo test -p holler-cli --test docs_cli_test` and
