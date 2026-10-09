@@ -40,3 +40,9 @@
   - The fail-closed tests run with `--nocapture` show each AC 9 case failing on its own check (listed in handoff-F's Tier 1).
   - `evidence.md` has 12 entries, each checked by a script against its cited line range, with 0 mismatches.
   - `cargo doc -p holler-hub --no-deps` gives no warning in `panes/`.
+
+## T (Phase 7, GREEN)
+- **Decided:** suite is GREEN; no test edited; PASS.
+- **Assumed:** CI's `--skip roster_stays_accurate_under_concurrent_body_load` still applies (ci.yml:128, per F).
+- **Hedged:** two mutations (no notify; ignored save error) both killed by the intended tests.
+- **Evidence:** docs/handoffs/639/handoff-T-green.md; workspace 964 passed, 0 failed.
