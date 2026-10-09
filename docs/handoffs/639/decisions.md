@@ -57,3 +57,23 @@
   - W-2: its §7 (the profile log lives in `profiles.json`) and "Decisions taken" item 2 (`pane-in-other-profile` inside the pane CAS) mean #661 will edit `panes/`, against the module docs' claim.
 - **Hedged:** I made W-1 a warn, not a block. It is drift against an ADR, not a parallel path, which is what a Phase-7 block is for. F and T documented it, and S owns spec conformance. It still has to be settled before merge, by a one-line code change or a §6 amendment. W-2's poll/`Feed` and `NoParams` gaps are #661 reuse risks, partly the result of my own Phase-3 W-4, and are not #639 defects. W-3 is minor duplication of test builders.
 - **Evidence:** I read every changed file in full, plus handoff-F, handoff-T-red, handoff-T-green, the brief, `holds.rs`, `token.rs:255-300,655-670,715-799`, `state.rs`, `pane_dispatch.rs`, `profile/mod.rs`, `holler-proto/src/envelope/dispatch.rs`, `holler-pane/src/{reply.rs,error.rs:380-540,profile.rs:300-332,pane.rs:251-268}`, `holler-pane/tests/common/mod.rs`, `holler-cli/tests/support/mod.rs` (`StateDir`), and ADR-0021 on `origin/main`. I grepped the hub for `spawn_blocking`, `JoinError`, serde `classify()`/`Category::`, `write_atomic`, `create_dir_all`/`ensure_dirs`, logging helpers, `Condvar`/`VecDeque`/cursor/watch, `params` extraction and `sample_pane` builders. `git diff --quiet` confirms the out-of-radius files are untouched, and `git merge-tree` shows a `CHANGELOG.md` conflict with `main`.
+
+## S (Phase 10, spec audit) — 2026-10-09T10:09:26-06:00
+- **Decided:** ADVISORY-HOLD (see handoff-S.md).
+  - ACs 1-24 and 26-29 are met, each by a named test that asserts the behaviour. AC 27 is met by grep and reading, as the brief says.
+  - AC 25 is met as tested. The brief contradicts itself on the idle long-poll cursor: D6 says "always head" and AC 25 says `cursor: since`. ADR-0021 §6, merged to `main` mid-run (094ebfa), decides the AC 25 form. The code follows D6.
+  - The two differ when `since` is 0 and every record has been deleted, and no test pins either answer.
+  - The brief's radius excludes ADR-0021, so the rule that code and ADR agree in the same change cannot be met inside this story.
+  - Recommended fix (option A): keep the head, amend the §6 sentence in this PR (O widens the radius), have T pin the edge case with a handler test, and have F refresh three doc statements that went stale when the ADR merged (`mod.rs:19-20`, `persist.rs:17-19`, `feed.rs:37`).
+  - AC 30 is met in substance. O still has to journal the approval of `pane_feed_test.rs` (A W-9).
+- **Assumed:**
+  - T's and F's recorded Tier 1 output reflects HEAD 31d2102; I did not re-run it.
+  - The ADR-0021 text on `origin/main` is the standing spec.
+- **Hedged:**
+  - I chose ADVISORY-HOLD, not REWORK, because F faithfully implemented D6, and either way of reconciling it (amend the ADR or change the code) needs a decision outside F's radius.
+  - The divergence is harmless for a client that resumes from the reply's cursor. I recommend amending the ADR rather than the code, because the head keeps the frozen `Watch` contract ("then every later change") for a from-zero watcher on an all-deleted registry.
+  - Rule 2's re-evaluation after each wake can collapse a create-then-delete within one from-zero poll. That is D6 as written and practically unreachable through the verbs, so it is an advisory note only.
+- **Evidence:**
+  - Read: the brief, issue #639, every handoff in this directory, the outside diff review (`639-diff-result-r1.md`, PASS), the full `git diff origin/main...HEAD`, ADR-0021 on `origin/main` (lines 105-110, 216-222, 238-259 and 494-501), `holler-pane/src/ports.rs:28-52` and `holler-proto/src/atomic_file.rs`.
+  - Grepped: `check_membership(` (it matches `handlers.rs:111`); `unwrap`, `expect`, `panic` and `unsafe` in `panes/` (none); `#[allow]` in the diff (all carry `// #639`); `sleep` in the pane tests (none); privacy patterns across the diff (only the existing `kiwi` fixture).
+  - Also ran `wc -l` on the touched files (max 523) and `git merge-tree` against `origin/main` (only a `CHANGELOG.md` conflict).
