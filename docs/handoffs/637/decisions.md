@@ -277,3 +277,34 @@
   - Ran: `git diff 5f69488..HEAD -- crates/`; `git diff --stat 40b722b..5f69488` (handoff files only); a blast-radius filter over `git diff --name-only 27da2da...HEAD` (nothing outside it); `bash scripts/golden-diff-summary.sh` (no drift); `wc -l` on every touched file (the largest is 617).
   - Fetched #633, #634, #637, #638, #639, #643, #647, #649, #661, #665, #669 and #670.
   - Scratchpad only (no worktree file touched): a scratch crate with a path dependency on `holler-pane` at this head. A struct with `env: Vec<EnvVarName>` refused `"TOKEN=hunter2"` and `[12345]` through `decode_params` as `usage`, with the value in `message` and `detail`. `ProfileSpec` refused the same input as `profile-secret-refused`, with no echo.
+
+## S (Phase 9 re-entry, spec audit after the rework) — 2026-10-09T05:35:00-06:00
+- **Decided:** PASS at 127914e. See handoff-S.md, which replaces the first audit (REWORK, kept in git at 5f69488).
+  - **Preconditions are met.** A returned PASS on the plan, and A-dup returned PASS after the rework. T confirmed RED, GREEN and GREEN again after the rework (64 tests and 3 doctests; workspace 928 passed, 0 failed), with no blocking issues.
+  - **All eight ACs are met,** each by a named test or a recorded gate. AC 3 moves from PARTIAL to PASS: `rework_test.rs::a_bad_env_in_a_spec_or_a_pane_is_refused_by_code_and_never_echoed` pins the code and the absence of the value in four renderings, and T's mutation kills it.
+  - **Both first-round REWORK items are fixed:**
+    - the decision-7 doc rule is on all seven ports;
+    - `deserialize_env_names` closes the env echo for every env field in the crate.
+- **Decided:** D1 (`Watch` item `Result<Option<T>, PaneError>`) is a **recorded** deviation from the brief's alias, not a silent one. Decision 7 allows a recorded change to a provisional signature, and neither the issue nor the epic spells the item type. It is still listed for the operator to confirm, because the coordinator chose it and not the operator.
+- **Decided:** A-dup's three warns stay advisory, not REWORK. Rows 1 and 2 are the `pub` env reader and doc lines for the end of a `Watch` and the `delete` order in `generation.rs`. Row 3 is the test files named after pipeline passes.
+  - None is a defect against the issue, the epic or the brief.
+  - The issue says "keep it small and finish it first", because #637 gates waves 2 and 3.
+  - They are surfaced as D3 (fold in now, or follow up), with "merge now" as the default.
+- **Assumed:**
+  - T's Tier 1 output at 19d5817 holds for HEAD, because 127914e changed handoff files only (checked with `git show --stat`). S did not re-run Tier 1 or Tier 2.
+  - The coordinator told the operator about D1 and D2 at 04:32 MDT, as F's rework entry reports. I could not see that exchange.
+- **Hedged:**
+  - The rework tests were written after the fix, as a REWORK loop requires. The env test's mutation kill stands in for RED, and the D1 tests are compile-time pins with no production behaviour to mutate.
+  - I first considered an advisory that an event missing `pane`/`profile` reads as a deletion. I dropped it: serde reads a missing `Option` field as `None` even without `#[serde(default)]`, so the fix is not one attribute, and our serializer always writes the field.
+  - Advisory 4 notes that `command`, `check` and `expect` can carry a secret value that no type can refuse. It is for the epic, not #637: AC 3's intent, the env field, is met.
+- **Evidence:**
+  - Read in full: every `holler-pane/src` file, every test file and `tests/common/mod.rs`, the `methods.rs`, CHANGELOG and Cargo.lock diffs, every handoff, decisions.md, evidence.md, `gh issue view 637` and `633` (both last edited 03:30 MDT), `docs/testing.md` (Layout) and `CONTRIBUTING.md` (AI disclosure).
+  - Ran:
+    - `git diff 5f69488..HEAD -- crates/holler-pane/src/` (the rework's production delta);
+    - `git show --stat` on the last three commits;
+    - a blast-radius filter over `git diff --name-only origin/main...HEAD` (49 paths, none outside);
+    - `wc -l` on every touched file (the largest `.rs` file is 617 lines);
+    - greps for denied constructs, `unsafe` and `#[allow]` links;
+    - privacy greps over the added lines, and `gitleaks stdin` over the branch diff (no leaks);
+    - `git log` for subjects, authors and trailers (the last 200 commits on main have no session links);
+    - the names of every test file on main.
