@@ -2,10 +2,11 @@
 //! suite each implementation must pass, so no test touches a real Herdr, tmux or
 //! OpenCode (epic #633, story #638).
 //!
-//! It depends on `holler-pane` alone and must not depend on `holler-cli`: the hub and
-//! the CLI take it as a dev-dependency, so a normal dependency back would make a cycle
-//! (ADR-0021 section 5). Every item is reached by its module path. There are no flat
-//! re-exports, so a later slice never edits this file.
+//! It depends on `holler-pane` and `serde_json` (for the envelope checker) alone and
+//! must not depend on `holler-cli`: the hub and the CLI take it as a dev-dependency, so
+//! a normal dependency back would make a cycle (ADR-0021 section 5). Every item is
+//! reached by its module path. There are no flat re-exports, so a later slice never
+//! edits this file.
 //!
 //! The modules, and the slice of #638 that fills each:
 //!
