@@ -178,3 +178,31 @@
   - Scratch git repo (in the scratchpad, deleted afterwards): deleting two adjacent whole `// #NNN` groups conflicts; deleting only the entries merges cleanly.
   - `git show af3d8df` (#669): `pane_wiring.rs`, `pane_dispatch.rs`, `panes/mod.rs`, `profile/mod.rs`. No overlap with the CLI.
   - Blast-radius grep over `git diff --name-only f2602ba..HEAD`: 82 paths, none outside the radius.
+
+## S (spec audit, pass 2) — 2026-10-09T08:32:19-06:00
+- **Pass 1, journalled late:** pass 1 of S (4776239) returned REWORK, test-only, but wrote no entry here. The findings were the shared test scaffolding pinning sibling stubs and `Wiring::connect()`. T's rework (56883d6) resolved all three items, and A-dup pass 2 (51f3bed) confirms it.
+- **Decided:** REWORK, production (handoff-S.md, pass 2).
+  - **1 (F, `src`):** `prompt_target.rs` `resolve_tail` must refuse an extra positional in the SESSION form.
+    - The issue says "Missing or extra positionals return the existing `cli::Usage` (exit 2)".
+    - `num_args = 0..=2` bounds one occurrence. A flag between positionals starts another, so `say io/alpha hello --queue extra`, `say io/alpha --timeout 5m fix it`, `interrupt io/alpha --server URL stop now` and `answer io/alpha --server URL 1 2` parse.
+    - The accessor drops everything after the second value. `origin/main` refused these with clap's `UnknownArgument` (exit 2).
+    - T adds the proving tests in `target_flags.rs` and `legacy_verbs.rs`.
+  - **2-3 (T, tests):** two places where parallel wave-3 stories still collide, as A-dup W-1 found:
+    - the `STUBS` doc says to delete the whole group (header included);
+    - `legacy_verbs.rs:10` imports the #646 and #648 refusal constants on one `use` line.
+  - **4 (T):** comments that the rework made wrong (A-dup W-3), in `process/main.rs:9-13` and `Cargo.toml:477-478, 487-492`.
+  - Everything else meets the issue and the brief. AC 1-3 and 5-8 are MET; AC 4 is NOT MET (item 1).
+- **Assumed:**
+  - `interrupt` and `answer` on `origin/main` refuse a third positional the way `say` does. They have the same fixed `session` + `text`/`choice` positionals. I probed only `say`'s shape in the scratch crate.
+  - The built `target/debug/holler` (07:29 MDT) is the audited code: no `src` change since 016eeaa (07:21 MDT).
+- **Hedged:**
+  - Items 2-4 are small and would not have forced a REWORK on their own. They ride along because item 1 forces a loop, and the files freeze when this story merges.
+  - I did not re-run Tier 1 or Tier 2. GREEN rests on T's run: 1029 passed, 0 failed.
+- **Evidence:**
+  - **Diff and docs:** `git diff origin/main...HEAD` (82 paths) and the body of issue #670 (`gh issue view 670`). Read in full: every new or changed `src` file and the reworked test files.
+  - **Built binary:** run over an empty, isolated state dir, with no hub started. The split-tail forms reach the hub path (exit 1), while `say io/alpha hello extra` is exit 2.
+  - **Clap probe:** a scratch crate on clap 4.6.6, outside the repo. The old `Say` shape gives `UnknownArgument` for `say io/alpha hello --queue extra` and `say io/alpha --timeout 5m fix it`; the new shape parses them as `rest = [io/alpha, hello, extra]` and `[io/alpha, fix, it]`.
+  - **Merge probe:** a scratch git repo. Whole `// #NNN` groups deleted in parallel conflict; entries-only deletions merge cleanly.
+  - **Formatting:** `rustfmt --check --edition 2021` on the new and reworked files is clean. Its only diffs are in the pre-existing `tests/support/*`, which this branch does not touch.
+  - **Merge with main:** `git merge-tree` against `origin/main` (1c48c30) conflicts in `CHANGELOG.md` only.
+  - **Greps:** banned calls, `#[allow`, `process::exit`, privacy, `not implemented (story #`, `Wiring`.
