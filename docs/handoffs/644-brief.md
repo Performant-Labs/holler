@@ -3,34 +3,52 @@
 Repo: Performant-Labs/holler. Issue: #644 (epic #633, wave 3, on the critical path #637 -> #638 -> **#644** -> #649).
 Rigor: second-opinion. UI surface: no. Kind: feature.
 
-**Branch:** `issue-644-implementation` (worktree `.claude/worktrees/0644-launch-relaunch`, from `origin/main` at `3bdd129`).
+**Depends on #662a and #663, merged to `main` first** (see "Dependencies"): the run starts from a `main` that contains both.
+**Branch:** `issue-644-implementation` (worktree `.claude/worktrees/0644-launch-relaunch`; the brief was written on `3bdd129`,
+and the branch is rebased onto the `main` that holds #662a and #663 before T starts).
 **Review-rigor:** second-opinion (operator instruction for this run; the outside model is deepseek-v4-pro and sees only this
 brief). The issue's own Pipeline line says `rigor: in-session`; see Contradiction C-1.
 **Design (D):** N/A (no UI surface). **Forward-compat:** done, see the table under "Forward-compat".
-**Decision record:** ADR-0021 (`docs/adr/ADR-0021.md`) sections 3, 8, 9, 10, 11, 12 and "Deferred to named stories", which name
-#644 for two open decisions (the operation id; the code of a mismatch observed after the act). This story **decides both and
-updates ADR-0021 in the same change** (the epic's practice, and the B-1 finding on #642's brief), in the lines listed under Files.
+**Decision record:** ADR-0021 (`docs/adr/ADR-0021.md`) sections 8, 9, 10, 11, 12 and "Deferred to named stories", which name
+#644 for two open decisions (the operation id; the code of a mismatch observed after the act). This story **decides the
+mismatch code and proposes the operation-id answer** (PROPOSED, pending the operator's confirmation, decision 1), and edits
+ADR-0021 in the same change, only in lines no in-flight story edits (decision 20).
+**Amended 2026-10-09 after the plan review** (`docs/handoffs/644/handoff-A.md`, BLOCK on four findings, six warns): every
+finding is resolved below; the decisions it changed are 1, 5, 10, 11, 15 and 20, and 22-26 are new.
 **Handoffs:** `docs/handoffs/644/handoff-<phase>.md`; decision journal `docs/handoffs/644/decisions.md`.
 **Public repository:** no personal host, tailnet or account name goes into code, tests, docs, the CHANGELOG, commits or the PR.
 Test data uses only `demo-c1r1`/`demo-c2r1` (panes), `demo` (profile), `scratch` (Herdr session), `main` (Herdr
 workspace), `/srv/demo` (directory) and ports 48100-48102 (the test kit's scratch range). No test touches a live fleet, a real
 Herdr, tmux or OpenCode: every port is a test-kit fake, and the real binary in the process tests still runs over `Unwired`.
 
+## Dependencies (merged to `main` before this run starts)
+
+| Story | What #644 uses from it | Where it is pasted |
+|---|---|---|
+| **#662a** (profile verbs, pure core + `list`/`show`) | `holler_pane::profile_snapshot::{spec_from_pane, FIXED_PORT_POLICY_PREFIX, fixed_port_policy}`: relaunch's base spec and the one `fixed:` literal | Evidence I-1, I-2 |
+| **#663** (the real `ProfileScope` and the probe runner) | `holler_cli::pane::profile_scope::{reconcile_step, StoreScope}`: the one reconcile step, and which errors already carry it | Evidence I-3, I-4 |
+
+Both are being implemented in parallel with this brief and are **not merged** when it is written. Their APIs are pasted
+verbatim from their reviewed briefs (Evidence I, with the branch and commit) as the contract, **to be re-verified against the
+merged code at RED**: T's first act is to grep the merged `profile_snapshot.rs` and `profile_scope.rs` for each pasted
+signature. A name or signature that differs is a stop (`preflight-failed`, reported to the MO with the diff), not something T
+or F adapts silently. #644 writes no copy of either API, so the order is strict: #662a and #663 merge, then this run starts.
+
 ## Size check
 
 | File | Who | Lines (est.) |
 |---|---|---|
-| `crates/holler-pane/src/tx_launch.rs` (the engine: plan, probe, act, observe, rollback, record; the open codes; `port_of_policy`, `spec_of_pane`) | T-red (stubs), F | ~560 |
-| `crates/holler-cli/src/pane/launch.rs` (Args, flag-to-spec overlay, output, the reconcile step) | T-red (Args), F | ~280 |
-| `crates/holler-cli/src/pane/relaunch.rs` (Args, base selection, the relaunch-only rules; reuses launch.rs helpers) | T-red (Args), F | ~150 |
-| `crates/holler-cli/tests/pane_verbs/launch.rs` (the rig: fakes, the linked host, hook wrappers, the registry-equals-fakes check; launch cases) | T | ~700 |
-| `crates/holler-cli/tests/pane_verbs/relaunch.rs` (relaunch cases; reuses the rig) | T | ~420 |
+| `crates/holler-pane/src/tx_launch.rs` (the engine: plan, the relaunch rules, probe, act, observe, rollback, record; the open codes; `port_of_policy`) | T-red (stubs), F | ~560 |
+| `crates/holler-cli/src/pane/launch.rs` (Args, flag-to-spec overlay, output and the reconcile-step rule) | T-red (Args), F | ~260 |
+| `crates/holler-cli/src/pane/relaunch.rs` (Args, base selection; reuses launch.rs helpers) | T-red (Args), F | ~120 |
+| `crates/holler-cli/tests/pane_verbs/launch.rs` (the rig: fakes, the linked host, hook wrappers, the registry-equals-fakes check; launch cases) | T | ~720 |
+| `crates/holler-cli/tests/pane_verbs/relaunch.rs` (relaunch cases; reuses the rig) | T | ~480 |
 | `crates/holler-cli/tests/pane_verbs/process/stub.rs` (delete the two `#644` entries, keep the `// #644` line) | T-red | -2 |
 | `crates/holler-cli/tests/fixtures/cli-surface.txt` (the `# #644` lines gain the positional; one `--herdr-session` line) | T-red | ~12 |
 | `docs/adr/ADR-0003.md` (rows 48-49) | T-red | 2 |
-| `docs/adr/ADR-0021.md` (section 12, section 9 row 338, a "launch and relaunch as built (#644)" note in section 3, two "Deferred" lines) | F | ~30 |
+| `docs/adr/ADR-0021.md` (a section 8 note, section 9 row 338, a section 12 PROPOSED note, one "Deferred" bullet in place) | F | ~25 |
 | `CHANGELOG.md` (one entry) | F | ~8 |
-| **Total** | | **~2,160** (production ~990, tests ~1,120, docs ~50) |
+| **Total** | | **~2,190** (production ~940, tests ~1,200, docs ~45) |
 
 Three production files of one component family (the launch transaction and its two verbs), two test files, and five small
 surface or doc edits that the epic assigns to the verb story (ruling 2: "its ADR 0003 row, its `cli-surface.txt` line and its own
@@ -85,8 +103,9 @@ P's spec for the pane as one transaction with the live change (I8), and `--spec-
   Forward-compat, Risks.
 - **C-10 The crash-then-doctor acceptance.** "A crash between steps (the next `doctor` finds and reports it)": `pane doctor` is
   #647's and still a stub. #644 can prove only its half: no record is written before the last step, and what a crash leaves is
-  observable from the fakes (AC 7); the next launch refuses the leftover Herdr pane's cell (`grid-occupied`, decision 12), so
-  the recovery is doctor's (#647).
+  observable from the fakes (AC 7); the next launch refuses the leftover Herdr pane's cell (`grid-occupied`, decision 12).
+  #647's plan reports such a pane as `unregistered-herdr-pane` with remedy "none (no holler verb adopts a pane; `pane import`
+  is #650's)" (647-brief line 904), so today **no verb frees that cell**. Follow-up for #647 (Follow-ups).
 - **C-11 Relaunch and the session of record.** "`relaunch`: the same after stopping only what the pane owns" read literally
   creates a new session on every relaunch, which discards the conversation; `reset` (#645) is the verb for a new session.
   Decision 8.
@@ -96,10 +115,25 @@ P's spec for the pane as one transaction with the live change (I8), and `--spec-
 - **C-13 Where the open codes live.** Epic ruling 3 says codes are constants "in each verb's own file". The engine that raises
   them is `holler-pane/src/tx_launch.rs`, which cannot see `holler-cli`. They are declared in `tx_launch.rs` (this story's file)
   and the verbs re-use them.
+- **C-14 "Confirm SHOWN equals DRIVEN"** (issue Scope) against the frozen `LastObserved` ("Written by reconcile, never
+  inferred", C-4; ADR-0021 section 1 and I6). No port can see the hub's DRIVEN session before #649 wires it (ADR-0021 section
+  11, "Deferred to #649 and #654"). Resolution (decision 22): the check is SHOWN == `session_of_record` (I2: the hub drives
+  the session of record), the reading #647's plan uses; launch writes `last_observed.driven = None` and relaunch keeps the
+  stored value, so the record never claims a DRIVEN nobody observed.
+- **C-15 One reconcile step, two owners in the plan.** ADR-0021 section 8 step 6 and section 12 make the reconcile step every
+  acting verb's concern, and #663's plan (I-3, decisions 5-8) makes `profile_scope::reconcile_step` the one copy and adds
+  that step to the scope's own `profile-conflict`, restore-failure and first-write-timeout errors. A verb that also appended
+  its own step would print it twice under the real scope; the fake scope adds none, so tests over the fake alone cannot see
+  it. Resolution (decision 15): #644 calls #663's function, appends the step only to an error that does not already carry
+  it, and pins that with the real `StoreScope` (AC 16k).
+- **C-16 The doctor form.** ADR-0021 asks for "the exact pane doctor command line", but `pane doctor` takes no pane positional
+  until #647 lands, and #663's step names `holler pane doctor --profile '<P>'` (I-3, its C9). Resolution (decision 15): with a
+  profile, #663's text exactly; without one, `holler pane doctor` (the same ADR 0003 row with its optional group dropped).
 
 ## Evidence (verbatim, as of `3bdd129`; the outside reviewer cannot read the repo)
 
 Every excerpt is pasted from the file at the lines named. Labels (A-1, B-2, ...) are what the rest of the brief cites.
+Sections A-H are on `main`; section I is from the two dependencies' reviewed briefs on their branches (not yet merged).
 
 ### A. The stubs this story fills
 
@@ -285,23 +319,12 @@ pub trait HarnessPort: Send + Sync {
 ```
 **B-6** `Prober` and the `Ports` bundle a verb holds:
 ```
-crates/holler-pane/src/ports.rs:208-235
+crates/holler-pane/src/ports.rs:208-212, 224-235 (excerpt; lines 214-222 are `SystemProber`, which calls the free `run_probe`)
 pub trait Prober: Send + Sync {
     /// Run `argv` (never through a shell) and look for every string of `expect` in
     /// its output, giving up after `timeout` (see [`crate::run_probe`]).
     fn run_probe(&self, argv: &Argv, expect: &[String], timeout: Duration) -> ProbeResult;
 }
-
-/// The [`Prober`] that runs the real probe: it calls the free [`run_probe`].
-#[derive(Debug, Clone, Copy, Default)]
-pub struct SystemProber;
-
-impl Prober for SystemProber {
-    fn run_probe(&self, argv: &Argv, expect: &[String], timeout: Duration) -> ProbeResult {
-        run_probe(argv, expect, timeout)
-    }
-}
-
 /// One `&dyn` of each port: what a verb holds. `Ports` is `Copy`, so it is passed
 /// by value or by reference freely, and `Ports<'static>` is `Send + Sync`.
 #[derive(Clone, Copy)]
@@ -391,7 +414,9 @@ pub struct HarnessInfo {
 ```
 **C-4** `LastObserved`:
 ```
-crates/holler-pane/src/pane.rs:181-190
+crates/holler-pane/src/pane.rs:179-190
+/// What reconcile last observed about which session the pane shows and which the hub
+/// drives. Written by reconcile, never inferred.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LastObserved {
@@ -552,21 +577,11 @@ crates/holler-pane/src/argv.rs:45-58
 ```
 **D-3** `GridPos::parse`:
 ```
-crates/holler-pane/src/grid.rs:42-55
+crates/holler-pane/src/grid.rs:42-45 (excerpt; an unreadable or ambiguous text is `GridAmbiguous`, a zero or a number above
+65535 is `GridOutOfRange`)
 impl GridPos {
     /// Parse `r2c1`, `c1r2` or `2,1` (see the module docs for the exact rules).
     pub fn parse(text: &str) -> Result<GridPos, PaneError> {
-        let lower = text.trim_ascii().to_ascii_lowercase();
-        let (row, col) = split_cells(&lower).ok_or_else(|| PaneError::GridAmbiguous {
-            what: format!("{} ({FORMS})", excerpt(text)),
-        })?;
-        match (coordinate(row), coordinate(col)) {
-            (Some(row), Some(col)) => Ok(GridPos { row, col }),
-            _ => Err(PaneError::GridOutOfRange {
-                what: format!("{} ({BOUNDS})", excerpt(text)),
-            }),
-        }
-    }
 ```
 **D-4** `GridPos` display:
 ```
@@ -622,7 +637,7 @@ pub fn class_of(code: &str) -> ErrorClass {
 ```
 **D-6** `RefusalCode`, how a story declares an open code:
 ```
-crates/holler-pane/src/error.rs:305-337
+crates/holler-pane/src/error.rs:305-320, 331 (excerpt; the body asserts the literal is a valid, non-closed code)
 /// A code an adapter or a verb owns: well-formed ([`is_valid_code`]) and not one
 /// of the closed codes ([`ALL_CODES`]), so each code has exactly one representation.
 ///
@@ -639,39 +654,17 @@ impl RefusalCode {
     /// A verb or an adapter declares the code it owns with
     /// `const QUOTA: RefusalCode = RefusalCode::from_static("quota-exceeded");`,
     /// so the call site needs no `Result`.
-    ///
-    /// An invalid literal in a `const` does not compile:
-    ///
-    /// ```compile_fail,E0080
-    /// use holler_pane::error::RefusalCode;
-    /// const BAD: RefusalCode = RefusalCode::from_static("Not A Code");
-    /// ```
-    ///
-    /// Call it from a `const` item. Called at run time with a literal that is not
-    /// an open code it panics, which only a programming error can cause.
     pub const fn from_static(code: &'static str) -> Self {
-        assert!(
-            is_valid_code(code) && !is_closed_code(code),
-            "RefusalCode::from_static: not a kebab-case code, or a closed code"
-        );
-        Self(Cow::Borrowed(code))
-    }
 ```
-**D-7**, **D-8** Two `PaneError` messages the reconcile step is appended to:
+**D-7**, **D-8** Two `PaneError` messages the reconcile step is appended to (a `profile-conflict` from #663's scope already
+carries the step inside `what`, I-3):
 ```
-crates/holler-pane/src/error.rs:651-655
+crates/holler-pane/src/error.rs:651-653, 655, 673
             PaneError::Conflict => f.write_str(
                 "the record changed since it was read (generation conflict); read it again and retry",
             ),
-            PaneError::ProbeFailed { message } => write!(f, "health probe failed: {message}"),
             PaneError::ProfileConflict { what } => write!(f, "profile conflict: {what}"),
-```
-```
-crates/holler-pane/src/error.rs:673-676
             PaneError::Timeout { op } => write!(f, "timed out: {op}"),
-            PaneError::PaneNotFound { what } => write!(f, "pane not found: {what}"),
-            PaneError::SessionNotFound { what } => write!(f, "session not found: {what}"),
-            PaneError::StoreCorrupt { what } => write!(f, "store corrupt: {what}"),
 ```
 
 ### E. The CLI pieces (owned by #670, frozen; this story calls them)
@@ -690,7 +683,7 @@ pub struct SpecOnly {
 **E-2** `SpecValues` and `SpecFlags::validate` (the guards and their codes; `SpecFlags` itself is the flag list in ADR 0003's
 SPEC FLAGS line):
 ```
-crates/holler-cli/src/pane/args.rs:89-140
+crates/holler-cli/src/pane/args.rs:89-119 (excerpt)
 /// The spec flags, typed: what [`SpecFlags::validate`] returns.
 ///
 /// The fields that need no check here (`project`, `workspace`, `model`, `effort`, `port_policy`,
@@ -722,28 +715,9 @@ impl SpecFlags {
     ///   strings, and `usage` for text that is not JSON;
     /// - `--role`: `usage` for anything but `agent` or `orchestrator`.
     pub fn validate(&self) -> Result<SpecValues, PaneError> {
-        Ok(SpecValues {
-            project: self.project.clone(),
-            workspace: self.workspace.clone(),
-            grid: self.grid.as_deref().map(GridPos::parse).transpose()?,
-            model: self.model.clone(),
-            effort: self.effort.clone(),
-            role: self.role.as_deref().map(parse_role).transpose()?,
-            env: self
-                .env
-                .iter()
-                .map(|name| EnvVarName::parse(name))
-                .collect::<Result<_, _>>()?,
-            ctx_soft: self.ctx_soft,
-            ctx_hard: self.ctx_hard,
-            port_policy: self.port_policy.clone(),
-            command: argv_of(&self.command_arg, self.command_json.as_deref(), "command")?,
-            check: argv_of(&self.check_arg, self.check_json.as_deref(), "check")?,
-            expect: self.expect.clone(),
-        })
-    }
-}
 ```
+(The body, lines 120-138, maps each flag to its field, through `GridPos::parse`, `parse_role`, `EnvVarName::parse` and
+`argv_of` for the four guarded ones, and copies the rest as given.)
 **E-3** `ErrorBody` (fields public, so a verb can append to `message`):
 ```
 crates/holler-cli/src/output.rs:125-141
@@ -815,51 +789,20 @@ impl Wiring {
 ```
 **E-7** The in-process harness a verb test uses with the fakes:
 ```
-crates/holler-cli/tests/verb_harness/mod.rs:52-79
+crates/holler-cli/tests/verb_harness/mod.rs:52-54 (excerpt; the body parses with `Cli::try_parse_from`, runs `pane::run`
+or `profile::run` over a `VerbCtx` with the given ports, and returns `Outcome { code, out, err }`)
 /// Run `holler <argv...>` in-process through `pane::run` or `profile::run`, with the
 /// given output format and ports.
 pub fn run_verb_with(argv: &[&str], format: Format, ports: Ports<'_>) -> Outcome {
-    let mut full = vec!["holler"];
-    full.extend_from_slice(argv);
-    let cli = Cli::try_parse_from(&full).unwrap_or_else(|e| panic!("{full:?} must parse: {e}"));
-    let (mut out, mut err) = (Vec::new(), Vec::new());
-    let code = {
-        let mut ctx = VerbCtx {
-            format,
-            ports,
-            sink: Sink {
-                out: &mut out,
-                err: &mut err,
-            },
-        };
-        match &cli.command {
-            Command::Pane(cmd) => pane::run(cmd, &mut ctx),
-            Command::Profile(cmd) => profile::run(cmd, &mut ctx),
-            other => panic!("not a pane or profile verb: {other:?}"),
-        }
-    };
-    Outcome {
-        code,
-        out: String::from_utf8(out).expect("out is UTF-8"),
-        err: String::from_utf8(err).expect("err is UTF-8"),
-    }
-}
 ```
 **E-8** "Accepted" in the shared parse tests tolerates a missing required positional:
 ```
-crates/holler-cli/tests/verb_harness/parse.rs:28-39
+crates/holler-cli/tests/verb_harness/parse.rs:28-33 (excerpt)
 /// `Ok` when `holler <argv...>` is accepted: it parses, or only a required positional is missing.
 pub fn accepted(argv: &[&str]) -> Result<(), String> {
     match try_parse(argv) {
         Ok(_) => Ok(()),
         Err(e) if e.kind() == ErrorKind::MissingRequiredArgument => Ok(()),
-        Err(e) => Err(format!(
-            "{argv:?} should be accepted: {} ({:?})",
-            e.kind(),
-            e.kind()
-        )),
-    }
-}
 ```
 **E-9** The verb test target allows these lints for every module (so the tests may `unwrap` and `panic`):
 ```
@@ -917,36 +860,16 @@ holler pane relaunch [SPEC FLAGS] [--profile NAME] [--spec-only]  #644
 **E-13** `docs_cli_test` turns every `holler ...` row in `docs/**` (except `docs/handoffs/`) into an argv and parses it; optional
 groups `[...]` are dropped, so a required positional must appear bare in the row and must parse as a plain string:
 ```
-crates/holler-cli/tests/docs_cli_test.rs:130-158
+crates/holler-cli/tests/docs_cli_test.rs:130-132, 141-146 (excerpt)
 /// Turn a documented form into an argv: strip prompt/annotation, resolve
 /// placeholders, drop optional groups, pick the first of `a|b` alternatives.
 fn normalise(raw: &str) -> Vec<String> {
-    let mut s = raw.to_string();
-    // Cut a trailing annotation: two+ spaces, " (", or " — ".
-    for sep in ["  ", " (", " — ", " -- "] {
-        if let Some(i) = s.find(sep) {
-            s.truncate(i);
-        }
-    }
     // Drop optional groups [ ... ], innermost first so nesting such as
     // `[--advertise HOST[:PORT]]` collapses cleanly.
     while let Some(close) = s.find(']') {
         let Some(open) = s[..close].rfind('[') else { break };
         s.replace_range(open..=close, "");
     }
-    // <placeholder> -> placeholder
-    s = s.replace(['<', '>'], "");
-    // ellipses
-    s = s.replace('…', "").replace("...", "");
-    // a|b alternatives -> a  (on whole tokens)
-    let toks: Vec<String> = split_args(&s)
-        .into_iter()
-        .map(|t| t.split('|').next().unwrap_or("").to_string())
-        .filter(|t| !t.is_empty())
-        .collect();
-    toks
-}
-
 ```
 
 ### F. The test kit (`holler-pane-testkit`, a dev-dependency of `holler-cli`)
@@ -1262,35 +1185,30 @@ crates/holler-pane-testkit/src/herdr.rs:29-30
 /// The version string of the one Herdr build the spike tested (protocol 22).
 pub const PROTOCOL_22_VERSION: &str = "0.9.1-preview.2026-09-21-0ff0f27e2226";
 ```
-**F-18**, **F-19** `FakeProber` (an unscripted argv answers `Error`, never `Ok`):
+**F-18**, **F-19** `FakeProber` (an unscripted argv answers `Error`, never `Ok`; the earlier citation of lines 283-321 was
+wrong, the file has 95 lines):
 ```
-crates/holler-pane-testkit/src/prober.rs:283-287
+crates/holler-pane-testkit/src/prober.rs:5-6, 56-65 (excerpt)
+//! An argv nobody scripted answers [`ProbeResult::Error`], never [`ProbeResult::Ok`],
+//! so a test that forgot to script a probe cannot pass it (the same reason the stub
+    /// Answer `result` for every run of exactly `argv` (equal element by element).
+    /// Scripting the argv again replaces its result.
+    pub fn script(&self, argv: Argv, result: ProbeResult) {
+        self.lock().scripted.insert(argv, result);
+    }
+
+    /// Every run, oldest first, with its `expect` and `timeout`; the unscripted runs are
+    /// included.
+    pub fn calls(&self) -> Vec<ProbeCall> {
+        self.lock().calls.clone()
+    }
 ```
+**F-20** The envelope checker every `--format=json` test uses (14 numbered rules; the ones this story leans on):
 ```
-crates/holler-pane-testkit/src/prober.rs:308-321
-```
-**F-20** The envelope checker every `--format=json` test uses:
-```
-crates/holler-pane-testkit/src/envelope.rs:12-33
+crates/holler-pane-testkit/src/envelope.rs:12, 25-26, 31-33 (excerpt)
 //! 0. The exit code is 0, 1, 2 or 3. This is checked before stdout is read.
-//! 1. Stdout is one JSON value, followed by at most one `\n`. A value that starts at the
-//!    first byte and is followed by anything else (a `\r`, a blank line, a second
-//!    envelope) is `TextAfter`. Otherwise, output that does not start with `{` but has a
-//!    later `{` that begins valid JSON (a log line or a space before the envelope) is
-//!    `TextBefore`. Anything else (empty, blank, truncated, not JSON) is `NotJson`.
-//! 2. The value is an object.
-//! 3. It has the keys `schema_version`, `ok`, `data` and `error`. The first missing one,
-//!    in that order, is named.
-//! 4. It has no other key. The smallest extra key is named. Map order is not used: it
-//!    differs between builds, because `serde_json/preserve_order` (on in a `--workspace`
-//!    build) keeps document order.
-//! 5. `schema_version` is the JSON integer 1.
 //! 6. `ok` is the boolean `true` when the exit code is 0, and `false` otherwise.
 //! 7. On success, `error` is `null`. `data` may be any value, `null` included.
-//! 8. On failure, `error` is an object.
-//! 9. On failure, `data` is `null`.
-//! 10. `error` has exactly the keys `code` and `message`. A missing one is named first
-//!     (`error.code`, then `error.message`), then the smallest extra one (`error.<key>`).
 //! 11. `code` is a string that [`is_valid_code`] accepts.
 //! 12. `message` is a string that is not blank and has no `\n` or `\r`.
 //! 13. The exit code matches the class of the code, `class_of(code).exit_code()`.
@@ -1338,9 +1256,12 @@ With `profile: None`, `edit_spec` runs only the act and touches no profile. This
 in P before the live change, so a concurrent profile editor is refused before anything live moves. The cost is a second
 profile write on a failed act; see "Decisions taken", item 1.
 ```
-**G-2** Section 9, the codes of these two verbs:
+**G-2** Section 9, the table's preamble and the codes of these two verbs (the `pane switch` row at line 339 shows the
+"open (#645) for ..." form):
 ```
-docs/adr/ADR-0021.md:338-338
+docs/adr/ADR-0021.md:331-332, 338
+**Failure modes by verb.** Every verb can also answer `usage`, `unavailable`, `timeout`, `store-corrupt` and, until its
+story lands, `not-implemented`. "Open (#N)" means codes that story declares as its own constants.
 | `pane launch`, `pane relaunch` | `grid-ambiguous`, `grid-out-of-range`, `command-not-argv`, `env-name-invalid`, `profile-secret-refused`, `probe-failed`, `herdr-version-unsupported`, `session-not-found`, `generation-conflict`, `profile-not-found`, `profile-conflict`, `pane-in-other-profile`; `relaunch` also `pane-not-found` |
 ```
 **G-3** Section 10, positions and versions:
@@ -1445,16 +1366,102 @@ docs/handoffs/642-brief.md:810-813 (same branch)
     before its record exists; #644 passes the session name (and directory) explicitly from its plan, and #649 builds
     resolvers that consult it. Recorded in the `Resolver` doc, the crate docs and the ADR note; the API does not change.
 ```
+**H-3** The one wall-clock helper (#207 folded 5+ hand-written copies into it; `holler-pane` already depends on
+`holler-proto`, `crates/holler-pane/Cargo.toml:21`):
+```
+crates/holler-proto/src/clock.rs:33-40
+/// The current unix epoch in whole milliseconds. `0` on a clock error, same
+/// discipline as [`now_secs`].
+pub fn now_millis() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+```
+
+### I. The dependencies' APIs (the contract; NOT on `main` when this was written; re-verified against merged code at RED)
+
+**I-1** #662a's `profile_snapshot.rs`, the one Pane-to-spec mapping (ADR-0021 section 3 puts it there):
+```
+docs/handoffs/662-brief.md:1436-1455 (branch issue-662-implementation at 5b47d82; the #662 brief, scoped to 662a)
+use crate::pane::Pane;
+use crate::profile::{Profile, ProfileName, ProfileSpec};
+
+/// The prefix of the port policy that pins a harness to one port.
+pub const FIXED_PORT_POLICY_PREFIX: &str = "fixed:";
+
+/// The port policy that pins a pane's harness to `port`: `fixed:<port>`, e.g. `fixed:48100`.
+pub fn fixed_port_policy(port: u16) -> String;
+
+/// The spec that reproduces `pane` as its record holds it. Pure; no port is called.
+/// pane                <- pane.name (as text)          herdr.workspace <- pane.herdr.workspace
+/// herdr.grid          <- pane.herdr.grid (never parsed from the name)
+/// host.cwd            <- pane.host.cwd                harness.kind    <- pane.harness.kind
+/// harness.port_policy <- fixed_port_policy(pane.harness.port)
+/// model <- pane.model   role <- pane.role   env <- pane.env (names, in order)   context <- pane.context
+/// command <- pane.command   check <- pane.probe.check   expect <- pane.probe.expect (in order)
+/// Not copied: generation, herdr.session, herdr.pane_id, host.name, host.tmux, host.herdr_api_version,
+/// harness.pid, harness.health, session_of_record, hold, last_observed, profile, probe.last.
+pub fn spec_from_pane(pane: &Pane) -> ProfileSpec;
+```
+**I-2** #662's decision on the policy, which leaves the rest of the grammar to #644:
+```
+docs/handoffs/662-brief.md:1724-1729 (same branch and commit)
+3. **`harness.port_policy` under `--from-current` is `fixed:<port>`** (ADR-0021's deferred item). The record holds the port in
+   use and no policy (E11); `fixed:<port>` keeps that fact, so `apply` (#664) and the recreation (#666) can put the harness back
+   on the same port. `fixed` alone (the fixture's value) would lose it. The policy grammar is otherwise #644's; this story
+   defines only this one form, as `FIXED_PORT_POLICY_PREFIX` and `fixed_port_policy`. `port_policy` is **not compared**
+   (`SpecField::COMPARED` omits it), because a live pane has no policy to compare and a spec's `fixed` or `auto` would
+   otherwise always differ.
+```
+**I-3** #663's reconcile step and which scope errors already carry it:
+```
+docs/handoffs/663-brief.md:1527-1533, 1540-1555 (branch issue-663-implementation at aaf8fb5; the #663 brief)
+5. **The open point: a restoring write that fails with anything but a conflict** (`timeout`, `unavailable`, `store-corrupt`,
+   ...). ADR section 8 decides only the conflict. **Decided: keep the restoring write's own code, and extend its message.**
+   The code stays because it is the most recent failure and the one that says what is wrong now (a wedged or unreachable or
+   corrupt store), and because each of these codes is already a failure (exit 1) in `class_of` (F). The message gains, after
+   the store's own text: `; profile "<P>" still holds the edit of <pane>, but the live change failed (<failure>); <reconcile
+   step>` (the name in prose is written with `{:?}`, as the fake writes it; only the reconcile step's command line is
+   shell-quoted, Decision 8). So the error names the profile, the unrestored edit, the act's error (which would otherwise be lost) and the
+6. **The first write's failures.** `generation-conflict` is returned as it is: nothing live has moved and the verb can be run
+   again (ADR step 2; case 10). `timeout` gets the same message extension as Decision 5 but worded for an unknown outcome:
+   `; the write may have landed, so profile "<P>" may hold the edit of <pane>, and nothing live was changed; <reconcile
+   step>` (a timed-out write may still have been applied; ADR section 12 asks a timeout to print the reconcile step). Every
+   other first-write error is returned unchanged (`unavailable` and the rest: the store said no). AC 4 pins both.
+7. **The restore conflict** is `PaneError::ProfileConflict { what }` with `what` = `"<P>" was changed by another writer during
+   the live change to <pane>, so its specs were not restored after that change failed (<failure>); the other writer's
+   version stays; <reconcile step>`. This is the fake's text (G, lines 172-179) plus the reconcile step ADR step 6 asks for.
+   AC 3 pins it; case 11 pins the code and the profile name.
+8. **The reconcile step** is one function, `pub fn reconcile_step(profile: &ProfileName) -> String`, returning exactly
+   `to reconcile, run holler pane doctor --profile '<P>' and then holler profile show '<P>'`. It is `pub` because the
+   spec-editing verbs (#644, #646) print the same step for a pane-record conflict (ADR step 4); one copy. The profile name is
+   POSIX-single-quoted (`'` becomes `'\''`, the whole wrapped in `'...'`), always, because a profile name may hold spaces,
+   quotes, `$(...)` or backticks (D, lines 30-61) and an operator pastes this line into a shell. `ProfileName` refuses
+   control characters, so the message stays one line (ADR section 9: every message is one line). The pane name is
+   `[a-z0-9-]` and is not quoted. It names the doctor form that exists today (C9).
+```
+Its decision 3.5 (same brief, line 1518) is the one path where the act's own error comes back with no step: "It succeeds:
+return `Err(failure)` unchanged (case 9)." Its follow-up F1 (line 1654) will later make `FakeProfileScope` add the step too.
+**I-4** #663's real scope, which AC 16k runs the verb over (its file is `crates/holler-cli/src/pane/profile_scope.rs`):
+```
+docs/handoffs/663-brief.md:1499-1500 (same branch and commit)
+1. **Type.** `pub struct StoreScope { profiles: Arc<dyn ProfileStore>, panes: Arc<dyn PaneStore>, actor: Actor }` and
+   `pub fn new(profiles: Arc<dyn ProfileStore>, panes: Arc<dyn PaneStore>, actor: Actor) -> Self`: the fake's shape (G), so
+```
 
 ## The public API (fixed here, so T can write RED tests against it)
 
 `crates/holler-pane/src/tx_launch.rs` (reached as `holler_pane::tx_launch::...`; `lib.rs` already declares `pub mod tx_launch`
-and is not edited). Names, fields and signatures are binding; private helpers are F's choice. No new dependency: `std::time`
-only, and no I/O of its own (every effect goes through `Ports`).
+and is not edited). Names, fields and signatures are binding; private helpers are F's choice. No new dependency (the clock is
+`holler_proto::clock::now_millis`, H-3, a crate `holler-pane` already depends on), and no I/O of its own (every effect goes
+through `Ports`). No Pane-to-spec mapping and no `"fixed:"` literal: both are #662a's (I-1).
 
 ```rust
 use std::time::Duration;
 use crate::error::RefusalCode;
+use crate::profile_snapshot::FIXED_PORT_POLICY_PREFIX; // #662a (I-1)
 use crate::{Pane, PaneError, PaneName, Ports, Profile, ProfileName, ProfileSpec};
 
 /// `pane-exists`: `launch` of a name that already has a record (relaunch it instead). A refusal, exit 3.
@@ -1473,20 +1480,18 @@ pub const HOST_NAME: &str = "localhost";
 pub const OP_LAUNCH: &str = "pane.launch";
 pub const OP_RELAUNCH: &str = "pane.relaunch";
 
-/// The port a policy names. Only `fixed:<port>` exists (decision 5), `<port>` in 1..=65535 written in decimal digits only;
-/// anything else (including the bare `fixed`) is `usage`, and the message names the accepted form.
+/// The port a policy names: the policy's grammar beyond #662a's one form is this story's (I-2). Only
+/// `FIXED_PORT_POLICY_PREFIX` followed by `<port>` exists (decision 5), `<port>` in 1..=65535 in canonical decimal (digits
+/// only, no leading zero), so `port_of_policy(&fixed_port_policy(p)) == Ok(p)` for every such `p` and an accepted policy
+/// equals `fixed_port_policy` of its port. Anything else (the bare `fixed`, `fixed:048100`, `fixed:0`) is `usage`, and the
+/// message names the accepted form.
 pub fn port_of_policy(policy: &str) -> Result<u16, PaneError>;
-
-/// The spec a live pane runs, for relaunch's base (decision 10): `pane` = the name; `herdr` = workspace and grid;
-/// `host.cwd`; `harness` = kind and `fixed:<harness.port>`; `model`, `role`, `env`, `context`, `command`;
-/// `check` and `expect` from `probe`.
-pub fn spec_of_pane(pane: &Pane) -> ProfileSpec;
 
 #[derive(Debug, Clone, Copy)]
 pub struct TxOptions {
     pub budget: Duration,        // DEFAULT_BUDGET
     pub probe_timeout: Duration, // PROBE_TIMEOUT
-    pub now_ms: fn() -> i64,     // milliseconds since the Unix epoch (SystemTime; 0 if before 1970); tests pass a constant
+    pub now_ms: fn() -> i64,     // holler_proto::clock::now_millis (H-3); tests pass a constant
 }
 impl Default for TxOptions { /* the defaults above */ }
 
@@ -1494,16 +1499,16 @@ impl Default for TxOptions { /* the defaults above */ }
 pub struct LaunchRequest {
     pub name: PaneName,
     pub herdr_session: Option<String>, // required for a live launch (usage otherwise); unused with spec_only
-    pub spec: ProfileSpec,             // the effective spec, complete; spec.pane == name
+    pub spec: ProfileSpec,             // the effective spec, complete; the engine checks spec.pane == name (usage)
     pub profile: Option<ProfileName>,
     pub spec_only: bool,               // only with Some(profile); the CLI's clap rule guarantees it, the engine re-checks (usage)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RelaunchRequest {
-    pub record: Pane,                  // as the CLI read it; its generation is the expected generation of the record write
+    pub record: Pane,                  // as the caller read it; its generation is the expected generation of the record write
     pub spec: ProfileSpec,             // the effective spec, complete
-    pub move_grid: bool,               // --grid was given and names another cell (decision 11)
+    pub grid_given: bool,              // the caller was asked to place the pane (`--grid`); the engine derives the move itself (decision 11)
     pub profile: Option<ProfileName>,
     pub spec_only: bool,
 }
@@ -1517,7 +1522,7 @@ pub struct Launched {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TxFailure {
     pub error: PaneError,
-    pub acted: bool,                   // the act started (its first live step was attempted): the CLI prints the reconcile step
+    pub acted: bool,                   // edit_spec entered the act, or a step after it failed (B10): the CLI prints the reconcile step
 }
 impl From<PaneError> for TxFailure { /* acted: false */ }
 
@@ -1544,16 +1549,19 @@ pub fn run(args: &PaneLaunch, ctx: &mut VerbCtx<'_>) -> i32;
 
 /// Overlay the typed flags on `base` (None: every required field must come from the flags). Shared with relaunch.rs.
 pub(crate) fn effective_spec(base: Option<&ProfileSpec>, name: &PaneName, values: &SpecValues) -> Result<ProfileSpec, PaneError>;
-/// Print a run's result through output::emit, appending the reconcile step to the message when `acted` (decision 15).
-pub(crate) fn emit_outcome(ctx: &mut VerbCtx<'_>, verb: Verb, name: &PaneName, result: Result<Launched, TxFailure>) -> i32;
-/// `holler pane doctor <name>`, plus `holler profile show '<P>'` (single-quoted, `'` written as `'\''`) when P is named.
-pub(crate) fn reconcile_step(name: &PaneName, profile: Option<&ProfileName>) -> String;
+/// Print a run's result through output::emit. When `acted`, it appends "; " and the run's reconcile step to the message,
+/// unless the message already contains that exact step (decision 15): with `profile: Some(P)` the step is #663's
+/// `super::profile_scope::reconcile_step(&P)` (I-3), else RECONCILE_STEP_UNSCOPED. No quoting code of its own.
+pub(crate) fn emit_outcome(ctx: &mut VerbCtx<'_>, verb: Verb, name: &PaneName, profile: Option<&ProfileName>,
+                           result: Result<Launched, TxFailure>) -> i32;
+/// The step without a profile: #663's wording with the ADR 0003 row's optional `--profile` group dropped.
+pub(crate) const RECONCILE_STEP_UNSCOPED: &str = "to reconcile, run holler pane doctor";
 pub(crate) enum Verb { Launch, Relaunch }
 ```
 
 `crates/holler-cli/src/pane/relaunch.rs` (replaces A-3): `PaneRelaunch { name: String (positional PANE), spec, profile,
 spec_only }` (no `--herdr-session`: the record names it) and `pub fn run(args: &PaneRelaunch, ctx: &mut VerbCtx<'_>) -> i32`,
-which reuses `launch::{effective_spec, emit_outcome, reconcile_step}` (no copy).
+which reuses `launch::{effective_spec, emit_outcome}` (no copy). Neither file defines a reconcile-step function.
 
 ## Behaviour (what F implements and T tests)
 
@@ -1578,6 +1586,7 @@ engine was entered); when it has run out it stops, rolls back as for a failed st
 
 | # | Step | Port call(s) | On failure |
 |---|---|---|---|
+| 0 | The spec names the pane (also with `spec_only`) | none | `spec.pane != name` -> `usage` (2) "the spec names <spec.pane>, not <name>". Nothing is called. |
 | 1 | The name is free | `pane_store.get(name)` | `Some` -> `Refused { PANE_EXISTS }` (3). Nothing else is called. |
 | 2 | Herdr session given | none | `None` -> `usage` (2) "--herdr-session is required unless --spec-only" |
 | 3 | Probe (only when `spec.check` is `Some`) | `prober.run_probe(check, &spec.expect, options.probe_timeout)` | `Failed { missing }` -> `ProbeFailed { message: "missing \"a\", \"b\"" }`; `Error(r)` -> `ProbeFailed { message: r }` (3). A failing result is **not** stored (the issue: a failing probe "changes nothing"; decision 8). A passing one (`Ok`) is kept in memory and written only at R, as `probe.last: Some(Ok)`; with no check, `probe.last` is `None`. |
@@ -1595,8 +1604,9 @@ do, both are named and the answer is still `grid-occupied` (the duplicate is doc
 choice; a test asserts only that the occupant's id and the record's name, or the "no record" phrase, appear): `r2c1 in main
 holds Herdr pane w1:p2, recorded as demo-c2r1`.
 
-Steps 1-6 make no write and no live change, so a refusal there leaves P and the registry exactly as they were, generation
-included. The **act** (the closure; `acted` becomes true when A1 is attempted):
+Steps 0-6 make no write and no live change, so a refusal there leaves P and the registry exactly as they were, generation
+included. The **act** (the closure; `acted` becomes true when `edit_spec` enters it, so a budget `timeout` always carries the
+reconcile step, as ADR-0021 section 12 asks):
 
 | # | Step (live) | Port call | On failure |
 |---|---|---|---|
@@ -1618,8 +1628,9 @@ Then `edit_spec` restores P's specs (F-5), the record is not written, and the CL
 
 **The record written at R**: `name`; `herdr` = `hp`; `host` = `{ name: HOST_NAME, tmux: name, cwd: spec.host.cwd,
 herdr_api_version: Some(<step 4's string>) }`; `harness` = `{ kind: Opencode, port, pid: Some(pid), health: Healthy }`;
-`session_of_record: Some(sid)`; `role`; `hold: None`; `last_observed: { shown: Some(sid), driven: Some(sid), at: (options.now_ms)() }`;
-`profile: request.profile`; `model`, `env`, `context`, `command` from the spec; `probe: { check, expect, last: check.map(|_| Ok) }`.
+`session_of_record: Some(sid)`; `role`; `hold: None`; `last_observed: { shown: Some(sid), driven: None, at: (options.now_ms)() }`
+(`shown` is O1's observation; `driven` is never inferred, C-14, decision 22); `profile: request.profile`; `model`, `env`,
+`context`, `command` from the spec; `probe: { check, expect, last: check.map(|_| Ok) }`.
 
 **`spec_only`**: `scope.edit_spec(Some(P), &name, &SpecEdit::Set(spec), &mut || Ok(()))` and nothing else: no probe, no Herdr,
 host, harness or pane-store call by the engine, no record. `Launched { pane: None, profile: Some(P) }`.
@@ -1628,19 +1639,27 @@ host, harness or pane-store call by the engine, no record. `Launched { pane: Non
 
 1. As launch's step 1. Then `ports.pane_store.get(&name)`: `None` is `PaneNotFound { what: name }` (3).
 2. With `--profile P`: `profile_store.get(&P)` (`profile-not-found`, 3). Base = P's entry for NAME if any, else
-   `spec_of_pane(&record)`. Without `--profile`: base = `spec_of_pane(&record)`.
-3. `effective_spec(Some(&base), ...)`. Unless `--spec-only` (decision 11): if the effective `host.cwd` differs from
-   `record.host.cwd` -> `usage` "relaunch cannot change a pane's directory; close it and launch it again"; if the effective
-   workspace or grid differs from the record's and `--grid` was not given -> `usage` naming both positions (`r1c2`, `r2c1`).
-   "Both positions" means the **whole** position on each side, whether one field or both differ: the record's
-   `record.herdr.workspace` and `record.herdr.grid`, and the effective `spec.herdr.workspace` and `spec.herdr.grid` (grids in
-   the `rRcC` form, D-4), for example `relaunch moves a pane only with --grid: the record is at main r2c1, the flags give other
-   r2c1`. The case where only the workspace differs (`--workspace` without `--grid`) is one instance of this rule, not a
-   separate one. A "cell" here and in `move_grid` is the pair (workspace, grid) in the record's Herdr session.
-   `move_grid` = `--grid` given and the effective cell differs from the record's.
+   `profile_snapshot::spec_from_pane(&record)` (#662a, I-1). Without `--profile`: base = `spec_from_pane(&record)`.
+3. `effective_spec(Some(&base), ...)`; `grid_given` = `--grid` was given. The CLI checks no relaunch rule itself: the engine
+   does (E0), so every caller (#664's `apply` included) is held to them.
 4. `tx_launch::relaunch(...)`, then `emit_outcome`.
 
 ### `tx_launch::relaunch`, live
+
+**E0, the relaunch rules, the engine's first plan step** (no port call; nothing before it): `spec.pane != record.name` ->
+`usage` "the spec names <spec.pane>, not <name>" (also with `spec_only`). Then, unless `spec_only` (decision 11; with it
+nothing live changes, so P may drift on purpose, AC 16g):
+- the effective `host.cwd` differs from `record.host.cwd` -> `usage` "relaunch cannot change a pane's directory; close it and
+  launch it again";
+- the effective cell differs from the record's and `!grid_given` -> `usage` naming both positions. "Both positions" means the
+  **whole** position on each side, whether one field or both differ: the record's `record.herdr.workspace` and
+  `record.herdr.grid`, and the effective `spec.herdr.workspace` and `spec.herdr.grid` (grids in the `rRcC` form, D-4), for
+  example `relaunch moves a pane only with --grid: the record is at main r2c1, the flags give other r2c1`. `--workspace`
+  without `--grid` is one instance of this rule, not a separate one.
+
+A "cell" is the pair (workspace, grid) in the record's Herdr session. **The move** is derived, never passed: the run moves
+the pane exactly when the effective cell differs from the record's (which E0 allows only with `grid_given`); `--grid` naming
+the record's own cell is no move.
 
 Steps 3 (probe), 4 (version) as launch; step 5 (target cell) as launch with `herdr_session = record.herdr.session` and the
 target = the effective cell (effective workspace and grid), where the record's own pane is not "occupied": a `p` with
@@ -1652,17 +1671,27 @@ Then `edit_spec(...)` with this act:
 |---|---|---|---|
 | B1 | Stop what the pane owns | `host.stop_owned(&name)` | the error (record unchanged) |
 | B2 | Old server gone | `harness.health(record.harness.port)` | `true` -> `Unavailable { what: "the harness server on port N still answers after the pane's processes were stopped (#695)" }` (1); nothing else runs |
-| B3 | Herdr pane | `herdr.ensure_pane(<effective cell>)` -> `hp` | roll back, the error. Without `--grid` this is the record's cell: it answers the record's pane, or, if that pane vanished (F-16), makes a new one there, whose id is recorded. |
+| B3 | Herdr pane | `herdr.ensure_pane(<effective cell>)` -> `hp` | roll back, the error. Without a move this is the record's cell: it answers the record's pane, or, if that pane vanished (F-16), makes a new one there, whose id is recorded. |
 | B4-B7 | as A2-A5 | | as A2-A5 |
 | B8 | Session of record (decision 8) | `harness.list_sessions(port)`; `create_session(port)` only when the record has no session of record or the list lacks it | roll back, the error. B8 fixes this run's `sid`: **kept** = `record.session_of_record` when it is `Some(s)` and the list (at the effective `port`) contains `s`; otherwise **new** = the id `create_session` returns. B9, O1 and R all use that one `sid`. |
 | B9, O1, O2 | as A7, O1, O2, with B8's `sid` (B9 attaches to it; O1 expects `shown_session == Some(sid)`) | | as there |
-| B10 | Old Herdr pane (only `move_grid`) | `herdr.close(&record.herdr.pane_id)` when step 5's snapshot listed it and it is not `hp` | the error, after the live change (`acted`; no rollback) |
 | R | Record | `pane_store.cas_put(&pane, record.generation)` | as launch's R |
+| B10 | Old Herdr pane (only on a move) | `herdr.close(&record.herdr.pane_id)` when step 5's snapshot listed it and it is not `hp`; `pane-not-found` counts as closed | see below: it never fails the act |
 
-The record written keeps `name`, `hold` and (without `--profile`) `profile` from `record`, and takes everything else as launch
-does. With `--profile P` it names P. **`spec_only`** is as launch's. A relaunch that fails after B1 leaves the record unchanged,
-although its processes were stopped: that is what the issue asks ("leaves the record unchanged"), and doctor (#647) reports the
-pane as down.
+**B10 runs after R, on purpose** (decision 23). Before R, a failed close would roll the run back and skip R while the new
+pane already holds the TUI, so the record would keep naming the old pane and cell. After R the record names the pane that
+holds the TUI, and the old pane is a leftover with no record, which doctor (#647) reports. B10 is the act's last call, runs
+even when the budget has run out (one bounded call, after the record), and its error is **captured, not returned by the
+act**: the act answers `Ok`, so `edit_spec` keeps P's edit. The engine then returns `Err(TxFailure { error: Unavailable {
+what: "relaunched NAME at <cell>, but its old Herdr pane <id> was not closed (<close's code>: <close's message>)" }, acted:
+true })`, with the record and P already stored: exit 1 whatever the close's own code (decision 14: the live state is not
+what the verb needs), and the reconcile step is appended.
+
+The record written keeps `name`, `hold`, `last_observed.driven` (decision 22) and (without `--profile`) `profile` from
+`record`, and takes everything else as launch does (`last_observed.shown` is O1's `sid`). With `--profile P` it names P.
+**`spec_only`** is as launch's (after E0's `spec.pane` check). A relaunch that fails after B1 and before R leaves the record
+unchanged, although its processes were stopped: that is what the issue asks ("leaves the record unchanged"), and doctor
+(#647) reports the pane as down.
 
 ### Output (`emit_outcome`)
 
@@ -1673,15 +1702,21 @@ pane as down.
   - `launched demo-c1r1 at r2c1 in main: session ses_…, harness port 48100 (pid 20000)` (`relaunched` for relaunch), then
     `; profile "demo" is at generation 2` when P was named;
   - `--spec-only`: `updated the spec of demo-c1r1 in profile "demo" (generation 2); nothing live changed`.
-- **Errors**: `ErrorBody { code: error.code(), message }` (E-3), `message` = the error's own text, plus, when `acted`,
-  `"; to reconcile, run: " + reconcile_step(...)`. Text mode writes `error: <message>` to stderr; JSON mode one envelope; the
-  exit code is `class_of`'s in both (D-5).
+- **Errors**: `ErrorBody { code: error.code(), message }` (E-3), `message` = the error's own text, plus, when `acted` and
+  the text does not already contain the step, `"; " + step`, where step is `profile_scope::reconcile_step(&P)` (I-3) when the
+  run named P, else `RECONCILE_STEP_UNSCOPED`. So a `profile-conflict`, restore failure or first-write `timeout` from the
+  real scope (I-3, decisions 5-7) prints the scope's step once, and an act error the scope returned unchanged (I-3, "case 9")
+  gets it from the verb. Text mode writes `error: <message>` to stderr; JSON mode one envelope; the exit code is `class_of`'s
+  in both (D-5).
 
 ## Acceptance criteria (each observable: a named test, a command, or a grep with its expected output)
 
 Tests live in `crates/holler-cli/tests/pane_verbs/launch.rs` and `relaunch.rs` (the `pane_verbs` target, E-9) and run with
-`cargo test -p holler-cli --test pane_verbs`. They use only the test-kit fakes and `run_verb_with` (E-7), through a rig in
-`launch.rs` (`pub(crate) mod rig`) that relaunch.rs reuses:
+`cargo test -p holler-cli --test pane_verbs`. They use only the test-kit fakes (and, in AC 16k only, #663's `StoreScope`
+over them, I-4) and `run_verb_with` (E-7), through a rig in `launch.rs` (`pub(crate) mod rig`) that relaunch.rs reuses
+(decision 25: #643 and #647 plan rigs over the same fakes; no shared rig exists on `main` today, so if `crate::list::rig` or
+`Rig` (#643) is on the `main` this run starts from, T builds on its fakes and adds only the linked host and the hooks;
+otherwise this rig stays private to `launch.rs`/`relaunch.rs` and the consolidation is a follow-up):
 
 - `FakePaneStore` and `FakeProfileStore` behind `Arc` (the profile store seeded with `sample_profile("demo", &[])`, so P is at
   generation 1 with no spec), `FakeProfileScope` over both (actor `holler pane`), `FakeHerdr::new("scratch")` with workspace
@@ -1704,8 +1739,8 @@ placing a Herdr pane through a fake's port method, is logged too and is not part
    and the session id. The record (generation 1) has `session_of_record == Some(sid)` where `harness.list_sessions(48100)` is
    exactly `[sid]` (**no ping session**); `harness.pid == Some(FakeHarness::server(48100).pid)`; `herdr.pane_id` is the id
    `FakeHerdr::snapshot()` lists at `r2c1`; `FakeHarness::tui(pane_id).shown == Some(sid)`; `last_observed.shown ==
-   last_observed.driven == Some(sid)`; `harness.health == Healthy`; `host == { name: "localhost", tmux: "demo-c1r1", cwd:
-   "/srv/demo", herdr_api_version: Some(PROTOCOL_22_VERSION) }` (F-17). The harness call log is exactly `[Health, Serve,
+   Some(sid)` and `last_observed.driven == None` (never inferred, decision 22); `harness.health == Healthy`; `host == {
+   name: "localhost", tmux: "demo-c1r1", cwd: "/srv/demo", herdr_api_version: Some(PROTOCOL_22_VERSION) }` (F-17). The harness call log is exactly `[Health, Serve,
    Health, CreateSession, AttachTui, ShownSession]` and the Herdr one `[Version, Snapshot, EnsurePane, Snapshot]`.
 2. **The registry equals the fakes** (`assert_matches`, applied at the end of every case named above): with a record, the
    Herdr snapshot lists `record.herdr.pane_id` at `record.herdr.grid`, `FakeHarness::server(port)` is `Running` with
@@ -1728,9 +1763,10 @@ placing a Herdr pane through a fake's port method, is logged too and is not part
       relaunch holds no `Close`.
 6. **A stale generation.**
    a. `relaunch_fails_on_a_stale_generation`: a hook makes another writer `concurrent_put` the record (F-4) during the act;
-      exit 1, code `generation-conflict`; stderr names `holler pane doctor demo-c1r1`; the stored record is the other writer's.
+      exit 1, code `generation-conflict`; stderr ends with `; to reconcile, run holler pane doctor` (no profile named); the
+      stored record is the other writer's.
    b. `launch_record_conflict_fails_loudly`: a hook makes another writer create `demo-c1r1`'s record during the act; exit 1,
-      `generation-conflict`, stderr names `holler pane doctor demo-c1r1`; the live pane, tmux session and server are left
+      `generation-conflict`, stderr ends with `; to reconcile, run holler pane doctor`; the live pane, tmux session and server are left
       (ADR-0021 section 8: "writes nothing more"). AC 6 and AC 7 are the only cases where the registry may differ from the
       fakes, and each hands the difference to doctor (#647) through the printed reconcile step or the leftovers.
 7. **A crash between steps** (`a_crash_mid_launch_leaves_no_record`): a hook panics inside `serve`; the run, inside
@@ -1738,7 +1774,7 @@ placing a Herdr pane through a fake's port method, is logged too and is not part
    holds no `CasPut`; the snapshot lists the new Herdr pane at `r2c1` and `FakeHost::sessions()` holds `demo-c1r1`: exactly the
    "Herdr pane and tmux session with no record" a doctor run (#647) reports (C-10).
 8. **A failed step rolls back, with a named error** (`a_failed_attach_rolls_back`): `fail_next(AttachTui, SessionNotFound)`;
-   exit 3, code `session-not-found`; stderr carries the reconcile step; the Herdr log holds `Close` of the created pane and the
+   exit 3, code `session-not-found`; stderr carries `to reconcile, run holler pane doctor` once; the Herdr log holds `Close` of the created pane and the
    snapshot is empty; `FakeHost::ps(demo-c1r1)` is `[]`; `server(48100).state == Killed`; no record.
 9. **Name, cell and port guards** (each exits 3 and leaves every store unwritten):
    a. `launch_of_a_recorded_name_is_pane_exists`: the store holds `demo-c1r1`; code `pane-exists`; `assert_untouched()`.
@@ -1773,8 +1809,11 @@ placing a Herdr pane through a fake's port method, is logged too and is not part
     `herdr-version-unsupported`, the message contains `SUPPORTED_VERSIONS`; the Herdr log is `[Version]`.
 15. **Required flags**: `launch_names_every_missing_flag`: `pane launch demo-c1r1 --herdr-session scratch`; exit 2, `usage`,
     one line naming `--project`, `--workspace`, `--grid`, `--model`, `--effort`, `--ctx-soft`, `--ctx-hard`, `--port-policy`;
-    `assert_untouched()`. `--port-policy fixed` (no port) and `--ctx-soft 2 --ctx-hard 1` are each `usage`, exit 2.
-    `a_live_launch_needs_a_herdr_session`: `LAUNCH` without `--herdr-session`; exit 2.
+    `assert_untouched()`. `--port-policy fixed` (no port), `--port-policy fixed:048100` and `--ctx-soft 2 --ctx-hard 1` are
+    each `usage`, exit 2. `a_live_launch_needs_a_herdr_session`: `LAUNCH` without `--herdr-session`; exit 2.
+    `port_policy_round_trips_with_the_snapshot` (engine, decision 5): for p in {1, 80, 48100, 65535},
+    `port_of_policy(&profile_snapshot::fixed_port_policy(p)) == Ok(p)`; `port_of_policy("fixed:0")` and `("fixed:65536")` are
+    `usage`.
 16. **Profiles** (I3, I8):
     a. `launch_with_profile_adds_the_spec_and_bumps_once`: `LAUNCH --profile demo`; exit 0; P at generation 2 holds exactly
        one spec, equal to the effective spec (`pane: "demo-c1r1"`, workspace `main`, grid `r2c1`, cwd `/srv/demo`, harness
@@ -1794,12 +1833,20 @@ placing a Herdr pane through a fake's port method, is logged too and is not part
        demo --spec-only --model demo-provider/m2` on a launched pane: P gains the spec, the record and every fake are unchanged.
     h. `a_profile_conflict_after_the_act_fails_loudly`: `scope.before_next_restore(..)` makes another writer
        `concurrent_put` P (F-6, F-21), and `fail_next(AttachTui, ..)`; exit 1, code `profile-conflict`; the message contains
-       `holler pane doctor demo-c1r1` and `holler profile show 'demo'`; no record.
+       `profile_scope::reconcile_step(&demo)` (I-3: `to reconcile, run holler pane doctor --profile 'demo' and then holler
+       profile show 'demo'`), and `to reconcile, run` occurs in it **exactly once** (no second step of either form); no record.
     i. `relaunch_refuses_a_pane_of_another_profile`: the record of `demo-c1r1` names profile `other` (seeded too);
        `pane relaunch demo-c1r1 --profile demo`; exit 3, `pane-in-other-profile`; the host and harness logs are empty (only the
        plan's Herdr reads ran), and neither store is written.
     j. `the_reconcile_step_quotes_the_profile`: AC 16h's case with a profile named `it's` (seeded); the message contains
-       `holler profile show 'it'\''s'` exactly.
+       `holler pane doctor --profile 'it'\''s'` and `holler profile show 'it'\''s'` exactly once each (the quoting is #663's
+       function's; this pins that the verb uses it and adds no quoting of its own).
+    k. `a_step_the_real_scope_printed_is_not_repeated` (C-15): the rig with `holler_cli::pane::profile_scope::StoreScope::new`
+       (I-4) over the rig's two `Arc` stores (actor `holler pane`) in place of `FakeProfileScope`; a hook after `serve` makes
+       another writer `concurrent_put` P, and `fail_next(AttachTui, ..)`; exit 1, `profile-conflict`; the message contains
+       `reconcile_step(&demo)`, and `to reconcile, run` occurs exactly once (the scope's own step, I-3 decision 7; the verb
+       appended none). With the same rig and no conflict (only the `fail_next`), the restore succeeds, the error is the act's
+       (`session-not-found`, exit 3) and `to reconcile, run` again occurs exactly once (the verb's).
 17. **JSON and exit codes** (`exit_codes_equal_across_formats`): for the cases of AC 1, 8, 9a, 10a, 11a, 13b, 15, 16e and 6a,
     the JSON run's stdout passes `check_envelope(stdout, code)` (F-20), its stderr is empty, and its exit code equals the text
     run's.
@@ -1809,13 +1856,26 @@ placing a Herdr pane through a fake's port method, is logged too and is not part
     record's grid is `r3c1` with the new id the snapshot lists there; the old id is closed and gone from the snapshot; stdout
     contains `r3c1`. `pane relaunch demo-c1r1 --workspace other` (no `--grid`) and `--project /srv/other` are `usage`, exit 2,
     with `assert_untouched()` after the CLI's read; the `--workspace other` message contains `main`, `other` and `r2c1` (both
-    whole positions, the record's and the effective one).
+    whole positions, the record's and the effective one). These usage refusals now come from the engine's E0, with the same
+    text, so this AC is unchanged.
+    b. On the engine, as #664 would call it (`tx_launch::relaunch(rig.ports(), &request, &TxOptions::default())` with the
+       record of a launched pane): `relaunch_engine_refuses_a_cell_change_without_grid` (spec at `r3c1`, `grid_given: false`),
+       `relaunch_engine_refuses_a_cwd_change` (spec `host.cwd` `/srv/other`) and `relaunch_engine_refuses_a_spec_for_another_pane`
+       (`spec.pane` `demo-c2r1`) each return `Err(TxFailure { error: Usage { .. }, acted: false })` with `assert_untouched()`.
+       With `spec_only: true` and a profile, the first two are accepted (P gains the drifted spec, nothing live), the third is
+       still `usage`. `launch_engine_refuses_a_spec_for_another_pane`: the same for `tx_launch::launch`.
+    c. `relaunch_records_the_move_before_closing_the_old_pane` (decision 23): `pane relaunch demo-c1r1 --profile demo --grid
+       c1r3` after `LAUNCH --profile demo`, with `fail_next(HerdrOp::Close, Unavailable { .. })`; exit 1, `unavailable`; the
+       message contains `was not closed` and the old pane's id, and the reconcile step once; the record (generation 2) names
+       the new pane at `r3c1`; P holds the spec at `r3c1` (not restored); the old pane is still listed by the snapshot.
 20. **Relaunch and the session of record** (decision 8): `relaunch_keeps_the_session_of_record`: the record's session is the
     same id after relaunch and `list_sessions(48100)` still has exactly one; `relaunch_replaces_a_deleted_session`: after
     `FakeHarness::delete_session(sid)`, relaunch records a new id and `CreateSession` is in the log. In both, the `sid` B8
     fixes (kept in the first, new in the second) is the one B9 attaches, the one `FakeHarness::tui(pane_id).shown` holds after
-    the run, and `record.session_of_record == record.last_observed.shown == record.last_observed.driven == Some(sid)`; in the
-    first, the relaunch's harness log holds no `CreateSession`.
+    the run, and `record.session_of_record == record.last_observed.shown == Some(sid)`; in the first, the relaunch's harness
+    log holds no `CreateSession`. `relaunch_keeps_the_stored_driven` (decision 22): before the relaunch, another writer
+    `concurrent_put`s the record with `last_observed.driven = Some("ses_driven_by_hub")` (F-4); after it, the record's
+    `last_observed.driven` is still `Some("ses_driven_by_hub")`; after a plain launch then relaunch it stays `None`.
 21. **Relaunch stops only what the pane owns** (`relaunch_leaves_other_panes_alone`): `demo-c1r1` on 48100 and `demo-c2r1`
     (`--grid r1c2 --port-policy fixed:48101`) are launched; relaunching `demo-c1r1` leaves `demo-c2r1`'s `ps`, its server pid
     (still `Running`) and its record (generation) unchanged; `server(48100)` has a new pid.
@@ -1832,9 +1892,12 @@ placing a Herdr pane through a fake's port method, is logged too and is not part
 26. **The surface.** `cargo test -p holler-cli --test cli_surface_test --test docs_cli_test --test pane_cli_process` passes
     (the fixture, ADR 0003 rows and stub table are updated as under Files). `grep -nE '"(re)?launch", 644' crates/holler-cli/tests/pane_verbs/process/stub.rs`
     prints nothing, and `grep -c '^    // #644$' crates/holler-cli/tests/pane_verbs/process/stub.rs` prints `1`.
-27. **ADR-0021 updated** (decision 20): `grep -n 'Decided (#644)' docs/adr/ADR-0021.md` prints the section 12 note;
-    `grep -n '#644, after a contract amendment' docs/adr/ADR-0021.md` prints nothing; `grep -c 'port-in-use' docs/adr/ADR-0021.md`
-    prints at least 1.
+27. **ADR-0021 updated** (decision 20): `grep -n 'PROPOSED (#644' docs/adr/ADR-0021.md` prints the section 12 note;
+    `grep -n 'Launch and relaunch as built (#644)' docs/adr/ADR-0021.md` prints the section 8 note; `grep -n 'open (#644)'
+    docs/adr/ADR-0021.md` prints the section 9 row; `grep -n '#644, after a contract amendment' docs/adr/ADR-0021.md` still
+    prints its "Deferred" bullet (left as is: the deferral stays open until the operator confirms); and
+    `git diff origin/main -- docs/adr/ADR-0021.md` touches no line of sections 3, 11 or the "Deferred to #647" paragraph, nor the
+    "Deferred" bullets of #647 and #662.
 28. **CHANGELOG**: `CHANGELOG.md` `## [Unreleased]` / `### Enhancements` gains one entry linking
     `[#644](https://github.com/Performant-Labs/holler/issues/644)`; `bash scripts/changelog-check.sh` prints `changelog-check: ok`.
 29. **No new `unsafe`, no new dependency**: `git diff origin/main -- crates | grep -nE '^\+.*\bunsafe\b'` prints nothing;
@@ -1871,9 +1934,10 @@ Surface and docs (assigned to the verb story by the epic or the file itself):
 - `docs/adr/ADR-0021.md` (decision 20).
 - `CHANGELOG.md` (AC 28).
 
-**Not touched** (frozen or another story's): `holler-pane/src/{lib,pane,profile,ports,probe,error,grid,argv}.rs`, the test kit,
-`holler-cli/src/{cli,lib,main,output}.rs`, `pane/{mod,args,wiring,profile_scope}.rs`, `tests/pane_verbs/main.rs`,
-`tests/verb_harness/**`, every `Cargo.toml` and `Cargo.lock`.
+**Not touched** (frozen or another story's): `holler-pane/src/{lib,pane,profile,ports,probe,error,grid,argv}.rs`,
+`holler-pane/src/{profile_snapshot,profile_diff}.rs` (#662a's), the test kit, `holler-cli/src/{cli,lib,main,output}.rs`,
+`pane/{mod,args,wiring,profile_scope}.rs` (`profile_scope.rs` is #663's), `tests/pane_verbs/main.rs`, `tests/verb_harness/**`,
+every `Cargo.toml` and `Cargo.lock`.
 
 ### Reuse map (extend, do not duplicate)
 
@@ -1887,17 +1951,22 @@ Surface and docs (assigned to the verb story by the epic or the file itself):
 | `holler_pane::error::{class_of, RefusalCode}` (D-5, D-6) | the three open codes; the exit class | reuse |
 | `ProbeResult`, `Prober` (D-1, B-6) | the probe | reuse; the engine calls `ports.prober`, never the free `run_probe` |
 | `next_generation` | not called: the stores apply it | n/a |
-| `launch::{effective_spec, emit_outcome, reconcile_step}` | shared by relaunch.rs | new in launch.rs, used by both (no copy in relaunch.rs) |
-| `tx_launch::spec_of_pane` | relaunch's base | **new**; it overlaps the Pane-to-spec mapping #662 will put in `profile_snapshot.rs` (`--from-current`). #662 should call or move this one rather than write a second (Forward-compat) |
-| the test kit's fakes, `sample_profile`, `check_envelope`, `run_verb_with` (F-1 to F-21, E-7) | every test | reuse; the rig's linked host and hooks are test-local wrappers, as F-8 recommends |
+| `launch::{effective_spec, emit_outcome, RECONCILE_STEP_UNSCOPED}` | shared by relaunch.rs | new in launch.rs, used by both (no copy in relaunch.rs) |
+| `profile_snapshot::spec_from_pane` (#662a, I-1) | relaunch's base | reuse; no second Pane-to-spec mapping anywhere (ADR-0021 section 3) |
+| `profile_snapshot::{FIXED_PORT_POLICY_PREFIX, fixed_port_policy}` (#662a, I-1) | `port_of_policy`'s prefix; its round-trip test | reuse; `port_of_policy` is the grammar's one parser, with no `"fixed:"` literal of its own |
+| `profile_scope::reconcile_step` (#663, I-3) | the step with a profile | reuse; no quoting helper here |
+| `profile_scope::StoreScope` (#663, I-4) | AC 16k only | reuse in a test |
+| `holler_proto::clock::now_millis` (H-3) | `TxOptions::default().now_ms` | reuse; no clock code here |
+| the test kit's fakes, `sample_profile`, `check_envelope`, `run_verb_with` (F-1 to F-21, E-7) | every test | reuse; the rig's linked host and hooks are test-local wrappers, as F-8 recommends; #643's rig if it is on `main` (decision 25) |
 
 ## Decisions already made (O)
 
-1. **No operation id in this story** (C-2). Both options in ADR-0021 section 12 need frozen files outside this blast radius,
-   and the spikes (H-1) show a launch is short: health 630-740 ms after spawn, the TUI shows its session in 1.6-1.7 s, a
-   restart healthy in about 645 ms, so a launch is about 3 s of a 10 s bound. I5 is met by a per-run budget (decision 17), the
-   per-call bounds and a loud `timeout`. ADR-0021 records this ("Decided (#644)"); if a real launch is later shown to exceed the
-   budget, options (a) and (b) stay on record and a follow-up issue takes the amendment.
+1. **No operation id in this story: PROPOSED, pending the operator's confirmation** (C-2). Both options in ADR-0021 section 12
+   need frozen files outside this blast radius, and the spikes (H-1) show a launch is short: health 630-740 ms after spawn,
+   the TUI shows its session in 1.6-1.7 s, a restart healthy in about 645 ms, so a launch is about 3 s of a 10 s bound. I5 is
+   met by a per-run budget (decision 17), the per-call bounds and a loud `timeout`. "Neither option yet" is not one the
+   operator listed (G-5), so ADR-0021 records it as **PROPOSED (#644)** and its "Deferred" bullet stays; the MO asks the
+   operator, and on a yes a one-line follow-up marks it decided. Nothing in the code depends on the answer.
 2. **Where the work is.** The engine (`tx_launch.rs`) is pure over `Ports` (ADR-0021 section 5: "the pure transaction engines
    ..., which work only through the ports"); the verbs parse, build the effective spec, call the engine with
    `TxOptions::default()`, and print. Both verbs call `edit_spec` with or without a profile (`None` runs only the act, F-7), so
@@ -1907,9 +1976,11 @@ Surface and docs (assigned to the verb story by the epic or the file itself):
 4. **The Herdr session is a launch flag**, `--herdr-session NAME` (C-6; verb-local flags are the owning story's, epic ruling 2),
    required for a live launch, ignored with `--spec-only`. Relaunch takes it from the record. It is not stored in a profile
    spec (`ProfileSpec` has no field for it); #664 needs its own source (Forward-compat).
-5. **Port policy grammar: `fixed:<port>`** (C-7), parsed by `port_of_policy` (1..=65535, digits only), so a spec says which port
-   its server uses and a pane record and its spec agree. Any other text, including the bare `fixed` of the test kit's
-   `sample_spec`, is `usage`. No allocator ("next free port") is built here.
+5. **Port policy grammar: `fixed:<port>` only** (C-7). The form and its prefix are #662a's (`FIXED_PORT_POLICY_PREFIX`,
+   `fixed_port_policy`, I-1, I-2); the grammar beyond it is this story's, and today it is that one form, parsed by
+   `port_of_policy` (1..=65535, canonical decimal), so a spec says which port its server uses, `--from-current`'s output is
+   launchable as is, and `port_of_policy(&fixed_port_policy(p)) == Ok(p)`. Any other text, including the bare `fixed` of the
+   test kit's `sample_spec`, is `usage`. No allocator ("next free port") is built here.
 6. **`command` is an extra argv run in the pane's tmux session** (C-4): when the spec has one, `host.run(name, command)` runs it
    after `ensure_session` and before `serve`, and it is recorded. The harness server itself is started only by
    `HarnessPort::serve` (ADR-0021 section 11, G-4), whose adapter owns OpenCode's own argv. `stop_owned` stops the command on
@@ -1920,22 +1991,30 @@ Surface and docs (assigned to the verb story by the epic or the file itself):
 8. **Relaunch keeps the session of record** (C-11) when the restarted server still lists it (`list_sessions`, observed, never
    "the most recent"); otherwise (no session of record, or it was deleted) it creates one through the API. A new conversation
    is `reset`'s (#645). A **failing probe's result is not stored**: a refusal changes nothing.
-9. **"P unchanged"** (C-3): a refusal before the profile write (steps 1-6, the CLI's checks) leaves P exactly as it was,
+9. **"P unchanged"** (C-3): a refusal before the profile write (steps 0-6 and E0, the CLI's checks) leaves P exactly as it was,
    generation included (AC 16d); a failed act leaves P's specs equal and its generation two higher (G-8, AC 16c).
-10. **The effective spec** (`effective_spec`): the base (P's entry for the pane, or, for relaunch, `spec_of_pane(record)`) with
+10. **The effective spec** (`effective_spec`): the base (P's entry for the pane, or, for relaunch, #662a's
+    `profile_snapshot::spec_from_pane(record)`, I-1: the one mapping, so `profile show` and `apply` never see false drift
+    between two copies) with
     every given flag replacing its field; a repeatable flag given at least once (`--env`, `--expect`, `--command-arg`,
     `--check-arg`) replaces the whole list; `--role` defaults to `agent` for a new spec. With no base, `--project`,
     `--workspace`, `--grid`, `--model`, `--effort`, `--ctx-soft`, `--ctx-hard` and `--port-policy` are required. `--model` is
     split at its first `/` and both halves must be non-empty; `--ctx-soft` must not exceed `--ctx-hard`; `--expect` needs a
     check. Each of these is `usage` (exit 2), one line naming every bad or missing flag.
-11. **Relaunch moves a pane only with `--grid`** (G-3, issue): without it the effective workspace and grid must equal the
-    record's (`usage` otherwise, naming both); `--workspace` alone is refused that way. A different `--project` is refused (the
-    tmux session keeps its directory, #641's `ensure_session`, and a record claiming another would be false). With
-    `--spec-only` none of this applies: nothing live changes.
+11. **Relaunch moves a pane only with `--grid`, and the engine enforces it** (G-3, issue): without it the effective workspace
+    and grid must equal the record's (`usage` otherwise, naming both); `--workspace` alone is refused that way. A different
+    `--project` is refused (the tmux session keeps its directory, #641's `ensure_session`, and a record claiming another would
+    be false). Both rules, and `spec.pane == record.name`, are E0, the engine's first plan step, not CLI checks: #664's `apply`
+    calls the engine with specs that `--spec-only` let drift (AC 16g), and a rule held only by one caller would let another
+    record a false cwd or leave the old Herdr pane open and unrecorded. The request carries `grid_given`, not a computed
+    "move" flag that could contradict the spec; the move is derived (the cell differs). The codebase's pattern agrees: the
+    scope runs its own guards before any write (F-5), and the engine already re-checks `spec_only`. With `--spec-only` the cwd
+    and cell rules do not apply: nothing live changes.
 12. **An occupied target cell is refused, never adopted** (`grid-occupied`, 3), whether or not a record names the occupant:
     a pane no record names may be a crash's leftover or a pane a person made before cutover (#654), and recording it would let a
-    later `close` (#646) close a pane Holler did not make. This matches "never adopt a running server" (H-2). Recovery from a
-    leftover is doctor's (#647). Relaunch treats the record's own pane at its own cell as its pane, not as an occupant. Rollback
+    later `close` (#646) close a pane Holler did not make. This matches "never adopt a running server" (H-2). #647's plan
+    reports such a leftover with no remedy, so today the operator frees the cell by hand in Herdr (C-10, follow-up for #647).
+    Relaunch treats the record's own pane at its own cell as its pane, not as an occupant. Rollback
     closes only a pane the pre-act snapshot did not hold.
 13. **No keystroke, and no Herdr-to-tmux link here** (C-8): the engine never calls `send_text` or `send_keys` (I4; AC 25 and
     every test). Making the Herdr pane show the tmux session needs a port call the contract lacks; it is a follow-up for
@@ -1945,10 +2024,21 @@ Surface and docs (assigned to the verb story by the epic or the file itself):
     `not-implemented` and `profile-drift`, only `unavailable` fits "the live state the verb needs is not there"
     (`profile-drift` is a reconcile finding about profiles). The message names what was expected and what was seen. #645
     should use the same; ADR-0021 records it.
-15. **The reconcile step** is appended to the message whenever the act started (`acted`): `holler pane doctor <pane>`, and with a
-    profile `holler profile show '<P>'`. A profile name may hold shell metacharacters (`ProfileName` allows anything but control
-    characters), so it is single-quoted with `'` written as `'\''`; a pane name is `[a-z0-9-]` and needs no quoting. It assumes
-    #647 gives `pane doctor` a `PANE` positional (ADR-0021 section 9 lists `pane-not-found` for doctor).
+15. **The reconcile step: one function, one owner, one doctor form, one appending rule** (C-15, C-16).
+    - *Function and owner:* #663's `profile_scope::reconcile_step(&P)` (I-3), called as is. #644 adds no function and no
+      quoting of its own (the profile name's POSIX quoting is #663's, AC 16j).
+    - *Doctor form:* #663's, exactly: `to reconcile, run holler pane doctor --profile '<P>' and then holler profile show
+      '<P>'` when the run named P; else `RECONCILE_STEP_UNSCOPED` = `to reconcile, run holler pane doctor` (the same ADR 0003
+      row, `holler pane doctor [--profile NAME]`, with the optional group dropped; it parses today). Neither names the pane:
+      `pane doctor` has no pane positional until #647; naming it then is a change to #663's function (follow-up), not here.
+    - *Who appends:* the scope adds the step to its own `profile-conflict`, restore-failure and first-write-`timeout` errors
+      (I-3, decisions 5-7); the verb appends `"; " + step` to a failure with `acted` only when the message does not already
+      contain that exact step (the same function's output, so the check is exact). So the act's error that the scope returns
+      unchanged after a successful restore (I-3, "case 9"), a record `generation-conflict`, a budget `timeout` and B10's
+      failure get the verb's step; the scope's own errors keep theirs; nothing is printed twice. A first-write
+      `generation-conflict` (`acted: false`, nothing live moved) gets none. AC 16h, 16j and 16k pin it (16k over the real
+      `StoreScope`, because the fake adds no step and could not show a duplicate). When #663's follow-up F1 makes the fake add
+      the step too, the rule still holds.
 16. **A record conflict after the act is not rolled back** (ADR-0021 section 8: "fails loudly, exits 1, writes nothing more");
     another writer owns the record and reconcile is the safety net. With a profile, `edit_spec` still restores P's specs,
     because the act returned an error.
@@ -1960,27 +2050,64 @@ Surface and docs (assigned to the verb story by the epic or the file itself):
     strings or the prober's reason are quoted, never the probe's output.
 19. **Three open codes, all refusals (exit 3)**: `pane-exists`, `grid-occupied`, `port-in-use`, declared in `tx_launch.rs`
     (C-13). The closed list is not edited (ruling 3).
-20. **ADR-0021 is updated in this change** (F, about 30 lines): section 12 gains "Decided (#644)" (decision 1, with the timings);
-    the two "Deferred" items naming #644 are marked decided (operation id: none yet; mismatch code: `unavailable`, #645 to
-    follow); section 9's row for launch and relaunch (G-2) adds `unavailable`, `timeout` and the three open codes; a short
-    "launch and relaunch as built (#644)" note in section 3 records decisions 4-8, 11, 12 and 15.
-    **Formatting trap:** `docs_cli_test` (E-13) parses every inline `holler ...` code span under `docs/`, and today
-    `pane doctor` and `profile show` take no positional (#647 and #662 add them), so the ADR text names the reconcile commands
-    in prose or inside a fenced block whose language is not `text`/`bash`/`sh`/`shell`/`console` (for example ` ```none `),
-    never as an inline `holler pane doctor demo-c1r1` span. `cargo test -p holler-cli --test docs_cli_test` (AC 26) catches a
-    slip.
+20. **ADR-0021 is updated in this change, only in lines no in-flight story edits** (F, about 25 lines). #647 (in flight) edits
+    section 11's end (after lines 452-453), section 12's "Deferred to #647" paragraph (lines 470-471) and removes the
+    "Deferred" bullet at line 524; #662a (merged first) rewrites section 3's lines 153-154 and removes the bullets naming
+    #662; 662b adds `profile-conflict` to the `profile create` and `profile delete` rows of section 9. So this story edits:
+    (a) **section 12**: one new paragraph after line 468 (the operator's paragraph), headed "**PROPOSED (#644, pending the
+    operator's confirmation):**", with decision 1 and the timings; line 469 (blank) separates it from #647's 470-471;
+    (b) **section 9, row 338** only (G-2), in the table's convention (`unavailable` and `timeout` are common, not repeated): it adds
+    "; open (#644) for a name that already has a record, an occupied target cell and a port a server already answers on"
+    (`pane-exists`, `grid-occupied`, `port-in-use`);
+    (c) **section 8**: a short "**Launch and relaunch as built (#644).**" paragraph after line 305 recording decisions 4, 6-8,
+    11, 12, 14, 15, 22 and 23; for the port policy it cites section 3's `fixed:<port>` sentence (#662's) and adds only that
+    launch accepts that one form, never restating it;
+    (d) **the mismatch-code bullet** of "Deferred" (lines 531-532), marked decided in place ("decided by #644: `unavailable`,
+    section 8; #645 to follow"). The operation-id bullet (line 523) is **not** edited: the deferral stays open while decision 1
+    is PROPOSED, and the line is adjacent to #647's line 524.
+    **Formatting trap:** `docs_cli_test` (E-13) parses every inline `holler ...` code span under `docs/`. `pane doctor` takes
+    no pane positional until #647, and a placeholder such as `'<P>'` may not parse as written, so the ADR text names the
+    reconcile commands in prose or inside a fenced block whose language is not `text`/`bash`/`sh`/`shell`/`console` (for
+    example ` ```none `), never as an inline `holler pane doctor ...` span. `cargo test -p holler-cli --test docs_cli_test`
+    (AC 26) catches a slip.
 21. **Test seams** are the fakes and test-local wrappers only (F-8): the linked host, the hooks, `catch_unwind` for a crash, and
     `TxOptions` for the budget. No production test-only switch, no sleep-based race: AC 24 asserts an invariant (`timeout`, no
     record) and a generous upper bound.
+22. **`last_observed.driven` is never inferred** (C-14; the frozen `LastObserved` doc, C-4; ADR-0021 section 1 and I6). Launch
+    writes `driven: None`; relaunch keeps `record.last_observed.driven` as stored; `shown` is O1's observation in both. The
+    issue's "confirm SHOWN equals DRIVEN" is checked as O1's SHOWN == `session_of_record` (I2) until #649 wires DRIVEN, the
+    reading #647's plan uses. Writing `driven` would need an amend-first change to the frozen contract.
+23. **Relaunch records before it closes the old Herdr pane** (B10 after R). Reason: the record must name the pane that holds
+    the TUI. Failure semantics: a failed close never fails the act (P keeps its edit, the record is stored) and the run exits 1
+    with `unavailable` naming the old pane, and the reconcile step; the old pane is a leftover with no record, which doctor reports. The
+    other order would leave the record naming the old pane while the new one holds the TUI, with P restored: a wrong record,
+    which is worse than an extra pane.
+24. **The lost-update window on P is an accepted risk.** The CLI reads P for the base (relaunch step 2, launch step 2) and
+    `edit_spec` reads P again before its compare-and-swap (F-7). The CAS on P's generation guards the window between
+    `edit_spec`'s own read and write; it does **not** guard the earlier window (the CLI's read to `edit_spec`'s read, which
+    the probe alone can stretch to 5 s), because `SpecEdit::Set` carries no expected generation and the frozen trait cannot
+    take one. In that window another writer's change to **this pane's** entry is overwritten with no conflict (other panes'
+    entries are kept: `Set` replaces one entry in place). Accepted because both writes are in P's log (who and when), the
+    overwriting spec is the one the operator just asked for, and closing it needs a trait change; follow-up with #663 for an
+    expected generation on the edit (Risks 6).
+25. **The test rig stays this story's own unless a shared one is on `main`.** #643 (`crate::list::Rig`) and #647
+    (`doctor/rig.rs`) plan rigs over the same fakes in the same test target, and none is on `main` today. If #643's rig is on
+    the `main` this run starts from, T builds on it and adds only the linked host and the hooks; otherwise the rig is private
+    to `launch.rs`/`relaunch.rs` (`pub(crate) mod rig`), #645 and #646 reuse whichever rig is on `main` when they start, and
+    a follow-up consolidates the rigs into one module. No fourth copy is planned here.
+26. **#662a and #663 first** ("Dependencies"). The alternative, #644 writing #662a's `profile_snapshot` API into its own blast
+    radius, would make two stories edit one file at once. Strict order, and no copy of either API here.
 
 ## Forward-compat (the consumers of this story)
 
 | Consumer | Needs | Satisfied |
 |---|---|---|
 | #649 wiring | the verbs over real ports; `TxOptions::default()` | yes; but #649 must (a) make #642's resolvers answer for a pane before its record exists (C-9), from the `PaneName` and `PaneId` the engine passes; (b) close the Herdr-to-tmux link (C-8); (c) apply model, effort and env (decision 7) |
-| #664 `profile apply` | create or relaunch a pane from a spec | `tx_launch::launch` and `relaunch` take a complete spec; apply must supply the Herdr session (decision 4) and specs whose `port_policy` is `fixed:<port>` (decision 5) |
-| #662 `profile create --from-current` | the Pane-to-spec mapping | `spec_of_pane` (reuse map); its `fixed:<port>` answers ADR-0021's item deferred to #662, unless #662 decides otherwise and both converge |
-| #647 doctor | the leftovers of a crash or a record conflict; the reconcile step's command | the leftovers are observable (AC 6b, 7); #647 must accept `pane doctor PANE` (decision 15) and offer the way out of a leftover Herdr pane, which launch refuses (decision 12) |
+| #664 `profile apply` | create or relaunch a pane from a spec | `tx_launch::launch` and `relaunch` take a complete spec and enforce the relaunch rules themselves (E0, decision 11), so apply passes `grid_given` and gets `usage` for a cwd change; apply must supply the Herdr session (decision 4) and specs whose `port_policy` is `fixed:<port>` (decision 5) |
+| #662 (`--from-current`, `show`) | one Pane-to-spec mapping | a dependency, not a consumer: #644 calls `spec_from_pane` and the prefix (I-1) and writes no second mapping, so `diff_spec` and relaunch agree |
+| #663 / #646 | one reconcile step | #644 calls `profile_scope::reconcile_step` and appends only where the scope did not (decision 15); #646 can follow the same rule |
+| #647 doctor | the leftovers of a crash, a record conflict or a failed B10; the reconcile step's command | the leftovers are observable (AC 6b, 7, 19c); the step names `holler pane doctor [--profile '<P>']`, which parses today. **Gap:** #647's plan reports an unrecorded Herdr pane (`unregistered-herdr-pane`) with no remedy, and launch refuses its cell (decision 12), so no verb frees it: follow-up for #647 |
+| #645, #646 tests | a rig over the same fakes | whichever rig is on `main` when they start (decision 25) |
 | #645 switch/reset | the mismatch code | `unavailable` (decision 14) |
 | #695 host adapter | relaunch stops the old server through `stop_owned` | relaunch checks it (B2) and fails loudly until #695 lands (AC 22) |
 | #646 close | a record with `host.tmux`, `harness.pid`, `herdr.pane_id` | yes |
@@ -2002,20 +2129,33 @@ Surface and docs (assigned to the verb story by the epic or the file itself):
   stray until a `HarnessPort` call can delete it.
 - **Test kit**: `sample_spec`'s `port_policy` `"fixed"` is not launchable under decision 5; align it with `fixed:48100` when #664
   needs it. `FakeHarness::serve`'s re-serve of the same pane (H-2) is already a known divergence.
-- **The operation id**, only if a measured launch exceeds the budget (decision 1).
+- **The operation id**: the operator confirms or rejects decision 1's PROPOSED note; on a yes, a one-line edit marks it
+  decided and drops its "Deferred" bullet (after #647's removal of line 524 has merged). If a measured launch later exceeds the
+  budget, options (a) and (b) stay on record.
+- **A cell a crash left** (#647; plan-review finding 8): no verb frees a Herdr pane with no record, and launch refuses its cell.
+  #647 (or #650's `pane import`) should offer the way out, for example a doctor remedy that closes an unrecorded pane the
+  operator names.
+- **An expected generation on `edit_spec`** (#663; decision 24): close the lost-update window between a verb's read of P and
+  the scope's.
+- **The reconcile step names the pane** once #647's `pane doctor [PANE]` lands (#663's function; decision 15).
+- **One `pane_verbs` rig** (decision 25): fold #643's, #644's and #647's rigs into one shared module.
 
 ## Test plan
 
-**RED first (T).** A compile error is not RED (`docs/agent-overlays/tester.md`). T lands, before the tests:
+**RED first (T).** A compile error is not RED (`docs/agent-overlays/tester.md`). T first checks the dependencies on the
+`main` the branch was rebased onto (Dependencies): `grep -n 'pub fn spec_from_pane(pane: &Pane) -> ProfileSpec\|pub const
+FIXED_PORT_POLICY_PREFIX: &str = "fixed:"\|pub fn fixed_port_policy(port: u16) -> String'
+crates/holler-pane/src/profile_snapshot.rs` prints three lines, and `grep -n 'pub fn reconcile_step(profile: &ProfileName)
+-> String\|pub struct StoreScope\|pub fn new(' crates/holler-cli/src/pane/profile_scope.rs` prints each; anything else is a
+stop (`preflight-failed`). Then T lands, before the tests:
 - `tx_launch.rs` with every public item of the API above: the constants with their values, `TxOptions` and its `Default`, the
   request, outcome and failure types, `From<PaneError> for TxFailure`, and stub bodies with no logic: `launch` and `relaunch`
   return `Err(TxFailure { error: PaneError::NotImplemented, acted: false })`, `port_of_policy` returns
-  `Err(PaneError::NotImplemented)`, `spec_of_pane` returns a placeholder spec (empty strings, zeros, `PaneRole::Agent`, no
-  argv). Each stub carries `// stub (#644 RED): F fills`.
+  `Err(PaneError::NotImplemented)`. Each stub carries `// stub (#644 RED): F fills`.
 - `launch.rs` and `relaunch.rs` with the new `Args` (positional `PANE`; `--herdr-session` on launch) and `run` still answering
   `not_implemented(644)`; the fixture lines, ADR 0003 rows and the `stub.rs` deletion (Files), so the surface tests stay green.
-  The `pub(crate)` helpers (`effective_spec`, `emit_outcome`, `reconcile_step`, `Verb`) are F's: a stub of one with no caller
-  would trip `dead_code = "deny"`.
+  The `pub(crate)` items (`effective_spec`, `emit_outcome`, `RECONCILE_STEP_UNSCOPED`, `Verb`) are F's: a stub of one with no
+  caller would trip `dead_code = "deny"`; the tests that need the unscoped text write the literal.
 
 Then every behaviour test fails on its assertion (exit 1 `not-implemented` where 0, 2 or 3 is expected; AC 24 on the stub's
 `NotImplemented`), while AC 26 and the kept flag tests pass. T journals the RED run in `handoff-T-red.md` with each failing
@@ -2032,8 +2172,9 @@ to surface a flake, and confirms the process tests (`pane_cli_process`) still pa
   or re-quotes an element. `HostPort::run` and `Prober::run_probe` get the argv exactly (AC 10c, 11b).
 - **Shell and format expansion.** Nothing here runs a shell (AC 25). Values that reach tmux (`--project` as the session's cwd,
   the command's elements) are passed **raw**: escaping tmux's `;` and `#` is the host adapter's job (#641's Decision 13), and
-  pre-escaping here would double-escape. The one string this story builds for a person to paste, the reconcile step, quotes the
-  only free-text part (the profile name) for a POSIX shell (decision 15, AC 16j).
+  pre-escaping here would double-escape. The one string a person pastes, the reconcile step, comes from #663's
+  `reconcile_step`, which quotes the only free-text part (the profile name) for a POSIX shell (I-3); this story adds no
+  quoting of its own (decision 15, AC 16j).
 - **Secrets in output.** Env entries are names only; `NAME=value` is refused by `EnvVarName` without echoing it (AC 12). No
   message quotes a probe's output, a command's elements or an env value; it may quote session ids, pane ids, ports and the
   operator's own `--expect` strings, none of which is a secret. No credential exists in any test.
@@ -2059,11 +2200,10 @@ to surface a flake, and confirms the process tests (`pane_cli_process`) still pa
    than editing #670's shared test (an edit outside the blast radius needs the MO's decision).
 5. **The budget's upper bound** is the budget plus one call's own bound plus rollback calls, not a hard 10 s. Accepted and
    documented in ADR-0021 (decision 17).
-6. **Two record readers on relaunch**: the CLI reads the record for the base and the engine writes with that generation, so a
-   writer in between is caught by the record's compare-and-swap (AC 6a), after the live change.
-7. **Copy-paste of the reconcile step**: a profile name with shell metacharacters is quoted (decision 15); a test
-   (`the_reconcile_step_quotes_the_profile`) pins `holler profile show 'it'\''s'` for the profile `it's`.
-8. **Secrets**: no message echoes an env value (`EnvVarName` never echoes, AC 12), a probe's output, or a command's elements in
-   an error. Session ids and pane ids are not secrets.
-9. **Size**: the two test files are the largest; the rig's wrappers keep each case short. The 800-line fallback is in the size
+6. **Two readers, two guards**: the record is read by the CLI and written with that generation, so a writer in between is
+   caught by the record's compare-and-swap (AC 6a), after the live change. P is read twice too, and only the second read is
+   guarded: a lost update of this pane's entry in P is possible and accepted (decision 24).
+7. **The dependencies move under this brief**: #662a's and #663's APIs are pasted from reviewed but unmerged briefs (I).
+   T's first RED step re-verifies them and stops on a difference (Test plan).
+8. **Size**: the two test files are the largest; the rig's wrappers keep each case short. The 800-line fallback is in the size
    check.
