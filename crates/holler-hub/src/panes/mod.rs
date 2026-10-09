@@ -17,7 +17,9 @@
 //! - `handlers.rs`: the five handlers and the one pipeline they share.
 //!
 //! #661's profile registry reuses `persist`, `feed` and `handlers::run` from `profile/`,
-//! through the crate-private `RegistryEntry` trait, and edits nothing here.
+//! through the crate-private `RegistryEntry` trait. #661 also adds one comparison here: the
+//! `pane-in-other-profile` check runs inside the pane registry's compare-and-swap
+//! (`store.rs`), under the pane lock (ADR-0021 §8 and "Decisions taken", item 2).
 //!
 //! # Operating limits
 //!

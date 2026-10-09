@@ -16,7 +16,9 @@
 //!
 //! [`load_doc`] and [`save_doc`] are generic over the entry type, and their checks read an
 //! entry through [`RegistryEntry`]. #661's `profiles.json` therefore calls them from
-//! `profile/` with `ProfileEvent` entries, without editing this directory.
+//! `profile/` with `ProfileEvent` entries. #661 does edit the pane registry: it adds the
+//! `pane-in-other-profile` comparison inside the compare-and-swap in `store.rs` (ADR-0021 §8
+//! and "Decisions taken", item 2).
 //!
 //! # Saving
 //!

@@ -34,8 +34,8 @@
 //!
 //! Rule 4 refines the `Watch` contract in `holler_pane::ports`, which says a watch "yields
 //! every change after `since`". For a watcher the ring no longer covers, it delivers every
-//! final state and every deletion, but not every intermediate write. The draft ADR-0021 §7
-//! (#634) ratifies this refinement.
+//! final state and every deletion, but not every intermediate write. ADR-0021 §7 (#634,
+//! accepted) ratifies this refinement.
 
 use std::collections::VecDeque;
 
