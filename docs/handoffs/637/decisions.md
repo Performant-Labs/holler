@@ -113,3 +113,22 @@
     - a const-validated `RefusalCode` (E0080 on an invalid literal, clean under `-D clippy::panic -D clippy::unwrap_used -D clippy::expect_used -D warnings`);
     - `Ports`/`VerbCtx`/`edit_spec` with a port-calling `act` closure (compiles, `Send + Sync`);
     - `empty_docs`, `large_enum_variant` and `result_large_err` all fatal under `-D warnings`.
+
+## T (Phase 4, AUTHOR / RED) — 2026-10-09T03:45:00-06:00
+- **Decided:** RED is valid for brief revision 6. 48 tests in six `crates/holler-pane/tests/*.rs` files plus 2 in `crates/holler-proto/src/methods.rs`; see handoff-T-red.md for the table, the pinned API and the RED output.
+  - The holler-pane RED is a compile failure (E0432 on every item the feature defines). That is unavoidable for a crate that does not exist; it is the RED the brief names. The holler-proto RED is assertion-level against a minimal stub.
+  - Round trips are written as JSON-in/JSON-out against the epic's contract fixtures, so the tests pin the wire form (what #639/#661/#649 depend on) without pinning constructors for the records.
+  - `PaneError` variants are reached through the wire parse-back (a reply with a closed code), not constructed, except the four whose shape the brief states (`NotImplemented`, `Conflict`, `Timeout { op }`, `Unavailable { what }`) and `Refused`. This leaves F free to settle the other variant shapes (A rows 2) and still checks every closed code.
+  - `SpecEdit::Set` takes a `Box<ProfileSpec>`: `large_enum_variant` is fatal under `-D warnings`.
+- **Assumed:**
+  - Root-level re-exports of every public item (the shape #669 already uses: `holler_pane::Pane`, `PaneError`, `PaneReply`), except `error::{is_valid_code, ALL_CODES, RefusalCode}`.
+  - `ProfileName::parse` trims surrounding whitespace; "trimmed" in decision 3 could also mean "refuse padded input". Trimming is the simpler reading and the slug rule already trims separators.
+  - `ALL_CODES` includes `profile-drift` (22 codes), with a `ProfileDrift` variant, so the closed list, `ALL_CODES` and the variants stay one-to-one (A row 2c, first option).
+  - `HostPort`/`HarnessPort`/`SpecEdit`/`PaneReply` method and type shapes as listed in handoff-T-red.md, because the brief names the methods but gives no signatures. They stay provisional until compiled, as decision 7 says.
+- **Hedged:**
+  - The AC 5 `compile_fail` doctest cannot be authored by T (doctests live in `src/`, a production file). The exact text is in the handoff; T verifies it at GREEN. If F writes it differently, T checks it still fails for the right error code (E0277 / E0080).
+  - The stale-CAS test (AC 4) runs against an in-test store, as the brief says, so it proves the contract and the error code, not a library check. A shared `generation::cas` helper (A row 7b) would let the AC test library code; if F adds one, T adds a test for it at GREEN.
+  - The throwaway scaffold used to see the E0432 RED, and the stub for the `methods.rs` items, are removed again; the worktree holds only the test files, the handoff and this entry.
+- **Evidence:**
+  - Read: the brief (revision 6), handoff-A.md, decisions.md, `gh issue view 633` and `637`, `holler-proto` `methods.rs`, `vocab.rs` (`SessionName`, `check_segment`), `clock.rs`, `lib.rs`, `Cargo.toml` (workspace lints), `clippy.toml`, `scripts/lint.sh`, existing test-file `allow` conventions.
+  - Ran: throwaway reference crate in the scratchpad (path dependency on the worktree's `holler-proto`, symlinked `tests/`): `cargo test` 48/48, `cargo clippy --all-targets -- -D warnings` clean, 17 mutations all killed; `rustfmt --check --edition 2021` on every new file; `bash scripts/lint.sh` passes; `cargo test -p holler-pane --no-fail-fast` on an empty-lib scaffold (RED output in the handoff); `cargo test -p holler-proto --lib methods` against an empty stub (RED) and a real stub (GREEN).
