@@ -139,6 +139,9 @@ async fn get_list_cas_put_delete_round_trip() {
     );
     assert_eq!(created_b.generation, 1, "cas_put returns the stored record");
     assert_eq!(created_b, Pane { generation: 1, ..b });
+    // The hook (#661) refuses a pane naming a profile that does not exist, so the profile
+    // is created in the rig's registry first.
+    pane_support::create_profile(&rig.profiles, "Night Shift");
     let a = sample_pane("hj-c1r1", Some("Night Shift"));
     rig.call("pane/cas_put", Some(cas_put_params(&a, 0)))
         .await

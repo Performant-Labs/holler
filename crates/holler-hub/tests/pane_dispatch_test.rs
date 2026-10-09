@@ -10,9 +10,11 @@
 //! #639 (panes) and #661 (profiles) replace the stubs; these tests pin the plumbing
 //! they build on.
 //!
-//! Issue #639 filled the `pane/*` stub, so the pane-method assertions below now expect
-//! the real registry's answers (an empty list, a decode error, an empty batch) rather
-//! than `not-implemented`; every `profile/*` assertion is unchanged. The registry is
+//! Issue #639 filled the `pane/*` stub, so the pane-method assertions below expect the
+//! real registry's answers (an empty list, a decode error, an empty batch) rather than
+//! `not-implemented`. Issue #661 filled the `profile/*` stub the same way, so the
+//! profile-method assertions expect the profile registry's answers too; only
+//! `profile/rename` (PROPOSED, #665) still answers `not-implemented`. Both registries are
 //! loaded with the short long-poll window, so no test here waits the real one.
 //!
 //! The tests drive `handle_control_conn` in process over a `UnixStream::pair()`
@@ -31,7 +33,6 @@ use holler_hub::pane_dispatch::PaneDeps;
 use holler_hub::panes::{self, PaneState};
 use holler_hub::profile::{self, check_membership, ProfileState};
 use holler_hub::roster::{Config, Roster};
-use holler_hub::state::HubState;
 use holler_pane::{PaneError, PaneReply};
 use holler_proto::methods::{PANE_METHODS, PROFILE_METHODS};
 use holler_proto::CorrelationId;
@@ -99,13 +100,13 @@ impl Conn {
     }
 }
 
-/// Fresh, empty state handles loaded from a throwaway state dir. The pane registry has
-/// the short long-poll window.
+/// Fresh, empty state handles loaded from a throwaway state dir. Both registries have the
+/// short long-poll window.
 fn fresh_deps() -> (PaneDeps, tempfile::TempDir) {
     let (dir, state) = temp_state();
     let deps = PaneDeps {
         panes: Arc::new(PaneState::load_with(&state, short_opts())),
-        profiles: Arc::new(ProfileState::load(&state)),
+        profiles: Arc::new(ProfileState::load_with(&state, short_opts())),
     };
     (deps, dir)
 }
@@ -153,18 +154,38 @@ async fn every_pane_method_is_forwarded_to_the_registry_not_method_not_found() {
     }
 }
 
+/// What each profile method answers to a request that carries no `params`, now that the
+/// registry is real: a decode error, an empty list, or an empty batch. Only
+/// `profile/rename` (#665) is still `not-implemented`. Never `method_not_found`.
+fn assert_answers_an_empty_profile_request(
+    method: &str,
+    outcome: Result<Option<Value>, PaneError>,
+) {
+    match method {
+        "profile/list" => assert_eq!(outcome, Ok(Some(json!([]))), "{method}"),
+        "profile/watch" => assert_eq!(
+            outcome,
+            Ok(Some(json!({"events": [], "cursor": 0}))),
+            "{method}"
+        ),
+        "profile/get" | "profile/cas_put" | "profile/delete" | "profile/log" => assert!(
+            matches!(outcome, Err(PaneError::Usage { .. })),
+            "{method} without params must be a usage error, got {outcome:?}"
+        ),
+        "profile/rename" => assert_eq!(outcome, Err(PaneError::NotImplemented), "{method}"),
+        other => panic!("{other} is a new profile method: add its expectation here"),
+    }
+}
+
 #[tokio::test]
-async fn every_profile_method_is_forwarded_to_the_stub_not_method_not_found() {
+async fn every_profile_method_is_forwarded_to_the_registry_not_method_not_found() {
     let (deps, _dir) = fresh_deps();
     let mut conn = connect(deps);
     for (i, method) in PROFILE_METHODS.iter().enumerate() {
         let id = format!("h-profile-{i}");
         let reply = conn.call(&id, method).await;
         assert_eq!(reply["id"], json!(id), "{method} must echo the request id");
-        assert!(
-            matches!(pane_outcome(&reply, method), Err(PaneError::NotImplemented)),
-            "{method} must answer not-implemented, got {reply}"
-        );
+        assert_answers_an_empty_profile_request(method, pane_outcome(&reply, method));
     }
 }
 
@@ -239,10 +260,7 @@ async fn two_connections_share_the_one_pair_of_state_handles() {
     let a = conn_a.call("h-a-1", "pane/list").await;
     let b = conn_b.call("h-b-1", "profile/list").await;
     assert_eq!(pane_outcome(&a, "pane/list"), Ok(Some(json!([]))));
-    assert!(matches!(
-        pane_outcome(&b, "profile/list"),
-        Err(PaneError::NotImplemented)
-    ));
+    assert_eq!(pane_outcome(&b, "profile/list"), Ok(Some(json!([]))));
 
     // The original plus one clone held by each live connection task: three owners of
     // ONE allocation. A per-connection copy of the state would leave this at one.
@@ -309,33 +327,45 @@ async fn profile_dispatch_takes_both_handles_and_routes_rename_to_the_stub() {
     let (deps, _dir) = fresh_deps();
     let cid = CorrelationId::parse("h-direct-2").unwrap();
     // The handles arrive in the opposite order to `panes::dispatch`: the profile
-    // store first, the pane store second (`profile/rename` reaches the panes).
+    // store first, the pane store second (`profile/rename` reaches the panes). With no
+    // params `profile/get` is a usage error from the real registry; `profile/rename` is
+    // still #665's stub.
     for method in ["profile/get", "profile/rename"] {
         let line = profile::dispatch(method, &cid, &json!({}), &deps.profiles, &deps.panes).await;
         let reply: Value = serde_json::from_str(&line).unwrap();
-        assert!(
-            matches!(pane_outcome(&reply, method), Err(PaneError::NotImplemented)),
-            "{method}: {reply}"
-        );
+        let outcome = pane_outcome(&reply, method);
+        match method {
+            "profile/get" => assert!(
+                matches!(outcome, Err(PaneError::Usage { .. })),
+                "{method}: {reply}"
+            ),
+            _ => assert_eq!(outcome, Err(PaneError::NotImplemented), "{method}: {reply}"),
+        }
     }
 }
 
 // --- AC 5: the membership hook ----------------------------------------------------
 
 #[test]
-fn check_membership_accepts_any_pane() {
-    let dir = tempfile::tempdir().unwrap();
-    let profiles = ProfileState::load(&HubState::from_root(dir.path().to_path_buf()));
-    // The hook is a plain function and, until #661 fills it, accepts every pane: one
-    // outside any profile, and one naming a profile that does not exist.
+fn check_membership_requires_the_named_profile_to_exist() {
+    let (_dir, state) = temp_state();
+    let profiles = ProfileState::load_with(&state, short_opts());
+    // A pane outside any profile is accepted without touching the profile registry.
     assert_eq!(
         check_membership(&sample_pane("hj-c1r1", None), &profiles),
         Ok(())
     );
-    assert_eq!(
-        check_membership(&sample_pane("hj-c1r1", Some("No Such Profile")), &profiles),
-        Ok(())
+    // A pane naming a profile that does not exist is refused.
+    let named = sample_pane("hj-c1r1", Some("No Such Profile"));
+    let err = check_membership(&named, &profiles).unwrap_err();
+    assert!(
+        matches!(err, PaneError::ProfileNotFound { .. }),
+        "got {err:?}"
     );
+    assert_eq!(err.code(), "profile-not-found");
+    // Once the profile exists, the same pane is accepted.
+    pane_support::create_profile(&profiles, "No Such Profile");
+    assert_eq!(check_membership(&named, &profiles), Ok(()));
 }
 
 // --- AC 6: the manifest -----------------------------------------------------------
