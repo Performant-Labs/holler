@@ -92,3 +92,35 @@
   - A broken-pipe `Write` stub stands in for a closed pipe; the real `| head` case was only checked by F by hand.
 - **Evidence:**
   - Mutation spot-checks (exit code 2 to 1; stub wording changed) each failed several tests, reverted by `git checkout`/restore, tree clean afterward. Full log in the scratchpad `full.log`. See handoff-T-green.md.
+
+## A (Phase 7, anti-duplication gate) — 2026-10-09T07:41:26-06:00
+- **Decided:** PASS on f2602ba...85444f1, with 5 warns and no blocks (handoff-A-dup.md). F extended what the Reuse map named and built no parallel path:
+  - the `--pane` accessors use `cli::Usage` and the `Query::resolve` tail pattern;
+  - every code, guard and port comes from `holler-pane`;
+  - `print_leaf_result_and_exit` was changed in place.
+
+  The new types copy no existing object. The brief justifies `output::Envelope`, `ErrorBody`, `ErrorCode`, `Format`, `Wiring` and `Unwired` in writing, and `SpecValues` is a partial type with no counterpart in holler-pane. None of them copies `PaneReply`, `RefusalCode`, `LogFormat` or `ProfileSpec`.
+- **Decided (warns):**
+  - W-1: shared test files pin verbs that sibling stories will implement, so the nine verb stories (and #649) must edit #670's shared test files. The files are both in-process `main.rs` files, the `pane_cli_process` verb tables, `flags.rs` and three `usage.rs` cases. Two of the seam tests are exact duplicates of per-verb tests, and the verb tables put lines of different stories next to each other.
+  - W-2: `verb_harness` gets its ports from `Wiring::connect()`, which #649 replaces, instead of from `Unwired`. It also takes no ports, although the brief says it builds a `VerbCtx` "over given ports".
+  - W-3: the one-envelope check is copied (`one_envelope` and `Out::envelope`, plus inline in `stub.rs`).
+  - W-4: `SpecValues` is a flat, partial copy of `ProfileSpec`'s fields. #644 owns one merge and one PROVIDER/ID parser.
+  - W-5: minor rules stated twice: exit codes, the envelope namespaces, `flatten`/`one_line`, the stdio `Sink`, and a duplicate fixture line.
+- **Assumed:**
+  - A verb story replaces its stub's output, so any test that pins `not implemented (story #N)` for that verb fails when the story lands.
+  - #649's `connect` builds real adapters, as `wiring.rs`'s doc says.
+  - Phase 7 blocks only a parallel path (the role's verdict rules), so W-1 and W-2 are warns.
+- **Hedged:**
+  - W-1 is the costliest warn. It does not break this story, but the nine verb stories hit it in parallel. I rated it warn because it is not a parallel path. If S reads the brief's "a later story edits only its own file and never `main.rs` or the manifest" as a requirement, it should be fixed before merge.
+  - W-2's hazard to #649 is inferred from `wiring.rs`'s doc and `main.rs`, not run.
+- **Evidence:**
+  - **Diff and handoffs:** `git diff origin/main...HEAD` (79 files, all inside the blast radius); the brief, handoff-A, handoff-T-red, handoff-F, handoff-T-green and this journal.
+  - **Read in full:** every new or changed `src` file in holler-cli and every new test file.
+  - **Existing tests:** the `tests/support/mod.rs` API, `tests/fixture/mod.rs`, `cli_surface_test.rs` and `docs_cli_test.rs`.
+  - **holler-pane:** `error.rs`, `profile.rs`, `pane.rs`, `ports.rs`, `reply.rs`, `lib.rs`, and the testkit.
+  - **Greps:**
+    - exit-code constants and "not implemented" wording;
+    - argv scanning, `ValueEnum` and `LogFormat`;
+    - PROVIDER/ID parsers (none) and message flattening;
+    - users of `Wiring::connect` and `Unwired`;
+    - `hj-` names in the diff (none).

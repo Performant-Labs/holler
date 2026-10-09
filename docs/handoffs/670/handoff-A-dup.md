@@ -1,0 +1,50 @@
+# Handoff-A-dup: Phase 7 - #670 the pane/profile CLI skeleton (skeleton slice c)  (anti-duplication gate)
+
+**Date:** 2026-10-09
+**Branch:** issue-670-implementation
+**Diff base:** f2602ba (origin/main, merge base)   **Diff head:** 85444f1
+**Reuse map:** docs/handoffs/670-brief.md, the "Reuse map" paragraph under Files (this run has no survey.md)
+**Verdict:** PASS
+
+## Summary
+
+PASS. F extended every object the Reuse map named and built no parallel path:
+
+- The `--pane` accessors use the existing `cli::Usage` and the `Query::resolve` tail pattern.
+- Every code, guard and port type comes from `holler-pane`.
+- `print_leaf_result_and_exit` was changed in place.
+- The new types the brief justified in writing (`output::Envelope`/`ErrorBody`/`ErrorCode`, `Format`, `Wiring`/`Unwired`) do not copy `PaneReply`, `RefusalCode`, `LogFormat` or a testkit fake.
+
+All five findings are warns. **W-1 and W-2 matter most, and they are cheap to fix now.** As written, the tests make the nine verb stories (and #649) edit test files that #670 owns and calls frozen. That works against the one-verb-one-file rule this slice exists to set up.
+
+## Findings
+
+| # | Severity | File:line | Finding | Suggested fix |
+|---|---|---|---|---|
+| 1 | warn | `tests/pane_verbs/main.rs:46,54,70`; `tests/profile_verbs/main.rs:28`; `tests/pane_verbs/process/main.rs:33-59`; `process/flags.rs:25-40`; `process/usage.rs:70,110,147`; `process/docs_rows.rs:56-71` | **Shared test files pin verbs that other stories will implement.** Both in-process `main.rs` files say a verb story never edits them. Yet three of their tests pin `pane list` (#643), `pane launch` (#644) and `profile list` (#662) as stubs. Two of those are exact copies of the tests in `pane_verbs/list.rs:15` and `profile_verbs/list.rs:7`. A fourth test pins the stub body of `Wiring::connect()`, which #649 replaces. In `pane_cli_process`, every `flags.rs` test counts "reaches the stub" as "parses", and three `usage.rs` tests expect a stub's refusal line. So each of #643, #644, #645, #646, #647, #650, #662, #664 and #665 must edit these shared files. The `PANE_VERBS`/`PROFILE_VERBS` tables put lines of different stories next to each other, e.g. `("watch", 643)` then `("launch", 644)`. That causes the rebase conflict that AC 7's grouping rule avoids in ADR 0003 and the fixture. `docs_rows.rs` repeats the same verb-to-story table. | 1. Delete the two duplicate seam tests from the `main.rs` files. 2. Move the `pane launch` seam case to `pane_verbs/launch.rs`. 3. Test `Unwired` directly instead of `Wiring::connect()` (see W-2). 4. In `flags.rs` and the three `usage.rs` cases, check parsing in-process with `Cli::try_parse_from`, following `cli_surface_test::try_parse`. The fixture already covers the positive cases. Check `--format=text` through `resolve_format` directly. 5. Keep the stub loops in `stub.rs` (AC 2). Group `PANE_VERBS`/`PROFILE_VERBS` by owning story with a blank line between groups, and build `docs_rows.rs`'s `groups` from those tables. Each story's only shared edit is then deleting its own group, with no conflict. |
+| 2 | warn | `tests/verb_harness/mod.rs:27-31`; `src/pane/wiring.rs:8-13,36-46`; `src/main.rs:262` | **The harness gets its ports from the production constructor and takes no ports.** `run_verb` calls `Wiring::connect()`. `wiring.rs`'s own doc says #649 replaces that body and that the harness builds its `Ports` from `Unwired`, but nothing uses `Unwired` directly. After #649, every in-process test would run against the real wiring: it would dial a hub, or panic in the `expect`. The brief says the harness builds a `VerbCtx` "over given ports ... so nine stories do not write near-copies". `run_verb(argv, format)` has no ports parameter. So the first story that needs #638's fakes must either edit the shared harness or copy `run_verb`. | Add `Unwired::ports(&self) -> Ports<'_>` in `wiring.rs`, so the seven-field `Ports` construction exists once; `Wiring::ports` delegates to it while it is a stub. Add `run_verb_with(argv, format, ports: Ports<'_>)` to the harness, and make `run_verb` call it with `Unwired`'s ports. **Note for #649:** `main.rs` calls `connect()` before every verb. If `connect` dials eagerly, every verb that is still a stub answers `unavailable` instead of `not implemented (story #N)` when no hub runs, and the process stub tests break. |
+| 3 | warn | `tests/verb_harness/mod.rs:18-23,56-71`; `tests/pane_verbs/process/main.rs:63-67,90-101`; `process/stub.rs:48-67` | **The one-envelope check exists twice in this diff, plus a third inline copy.** `Out::envelope` copies `one_envelope` almost line for line, `Out` mirrors `Outcome`, and `stub.rs` inlines the check again. Phase 3 W-6 allowed minimal inline checks until #638's conformance helper exists, and named this as where a second validator would start. | Include `verb_harness` in `pane_cli_process` with `#[path]`. Have `Out::envelope` call `one_envelope(&self.stdout)` and reuse it in `stub.rs`; #638's helper then replaces it in one place. The subprocess runner (`holler`, `Out`) belongs in `tests/support/cmds.rs` (W-6). It is in `process/main.rs` only because `tests/support/` is outside #670's blast radius, so a later story with that path in scope should move it there. |
+| 4 | warn | `src/pane/args.rs:93-108,144-150`; `holler-pane/src/profile.rs:180-200` | **`SpecValues` is a flat, all-optional copy of `ProfileSpec`'s fields.** `ProfileSpec` nests the same fields in `SpecHerdr`, `SpecHost`, `SpecHarness`, `ModelSpec` and `ContextCeilings`. A partial type is justified: the flags are optional, `ProfileSpec` requires every field, and holler-pane has no patch type (`SpecEdit` only sets or removes a whole spec). So this is not a block. But `--model` stays an unsplit `PROVIDER/ID` string, and `args.rs` freezes when #670 merges. #644 will therefore write the PROVIDER/ID split and the `SpecValues`-to-`ProfileSpec` merge in a verb file, perhaps once in `launch.rs` and again in `relaunch.rs`. `parse_role`'s message also hard-codes "agent or orchestrator", a second list of `PaneRole`'s names. | Record in decisions.md, for #644's brief: one merge and one PROVIDER/ID parser, not one per verb file. The parser should ideally be a `ModelSpec` parse in holler-pane, through the amend-first rule. Build the role message from `PaneRole`'s serde names, or drop the list from the message. |
+| 5 | warn | `src/output.rs:34,331-351,455-468`; `src/prompt_target.rs:48-61`; `src/main.rs:149,167,168,179,257,279`; `tests/fixtures/cli-surface.txt:55,178` | **A few rules are stated twice in the code.** None is a parallel path, and the existing CLI also writes exit codes as literals. (a) Usage gives 2 and a refusal gives 1: this is in `output::exit_code`, again in `prompt_target`'s `USAGE_EXIT`/`REFUSED_EXIT` and its `Stop` type, and as literals in `main.rs`. (b) Which namespaces get the envelope is in `ENVELOPE_NAMESPACES` and again in `matches!(.., Command::Pane(_) \| Command::Profile(_))`. (c) `flatten` repeats `one_line`'s trim-and-join, and the envelope path then applies `one_line` anyway. (d) The stdout/stderr `Sink` is built three times in `main.rs`. (e) `interrupt \| io/alpha` is now in the fixture twice. | Optional cleanup while the API is still unfrozen: (a) make `exit_code` public and have `route` return an `ErrorBody`; (b) derive one namespace check from the other; (c) have `flatten` only strip text, then call `one_line`; (d) add one `with_stdio_sink` helper; (e) drop the second fixture line. |
+
+### Checked: no duplication
+
+- **`output::Envelope`/`ErrorBody` vs `PaneReply`/`ReplyError`:** justified in writing by brief decision 7. `reply.rs` also says `PaneReply` "is not the CLI's `--format=json` envelope".
+- **`ErrorCode` vs `RefusalCode`:** `RefusalCode` cannot carry a closed code (`usage`, `not-implemented`), so the envelope needs its own type. Both validate through the one `is_valid_code`.
+- **`Format` vs `holler_proto::log::LogFormat`:** both have the same two variants, but they control different things. `Format` is the stdout result and a bad value exits 2. `LogFormat` is the stderr log lines and a bad value is a fail-closed exit 3. The brief names `Format`.
+- **`Unwired`:** the testkit is empty until #638, and holler-pane has only `SystemProber`. `Unwired` is the one not-implemented port set Phase 3 W-5 asked for.
+- **`prompt_target`:** reuses `cli::Usage` (`new` is now `pub(crate)`) and the `Query::resolve` tail pattern. `PromptTarget` is a separate concept from the root `Target`.
+- **`SpecFlags::validate`:** uses `GridPos::parse`, `EnvVarName::parse`, `Argv::from_json`/`Argv::new` and `PaneRole`'s serde names, and copies no grammar. The raw-argv scan takes its value flags from the clap tree (`Cli::global_value_flags`).
+- **`main.rs`:** `print_leaf_result` is the old helper changed in place. `run_hub` and `run_body` are the old chains, moved, with `exit` changed to `return`. The `error: ` lines follow the CLI's existing `eprintln!` practice; there is no copy of the `log(Severity, ...)` helper.
+- **Stack candidates:** `pane_cli_process` reuses `support::StateDir` and `support::holler_cmd`. There is no copy of `Hub`, `Body`, `mint_token`, `join`, `wait_for` or `StateDir`. The token store, `Lockout` and `Roster` are untouched.
+- **Choke point:** the `--pane`/`--profile` refusal is one CLI guard, `route`, shared by all three verbs and every `say` form. It refuses because the feature is not implemented; it is not a control-plane rule. Any refusal based on pane state still belongs at `send_prompt` (brief decision 10, for #646).
+- **Blast radius:** every changed path is inside the brief's list. `cli.rs` is 780 lines, under this stack's 800-line attention mark.
+
+## Notes for F
+
+(PASS: nothing is required.) Recommended before merge, because each fix is cheaper now than spread across the verb stories:
+
+- **W-1 and W-3:** test changes, in T's files.
+- **W-2:** split between F and T. `Unwired::ports()` goes in `wiring.rs` (F); `run_verb_with` goes in the harness (T).
+- **W-4:** a decisions.md entry for #644, not a code change.
+- **W-5:** optional.
