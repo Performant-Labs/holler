@@ -36,3 +36,24 @@
   - `fake_harness_test.rs` is 576 lines, near the 600-line `lint.sh` warning; if F's behaviour needs more tests, split rather than grow it.
 - **Evidence:**
   - `cargo test -p holler-pane-testkit --no-run` (RED, E0432 only); the same with signature stubs (builds, six binaries); `cargo clippy -p holler-pane-testkit --tests -- -D warnings` against the stubs (clean); `rustfmt --check --edition 2021` on the four files; `bash scripts/lint.sh` exit 0.
+
+## F (Workflow Phase 6, implement; Phase 5 in the role doc) — 2026-10-09T13:12:43-06:00
+- **Decided:**
+  - Filled the four stubs with the brief's public API exactly, with no extra public item: `host.rs` (`HostOp`, `FakeHost`), `conformance/host.rs` (9 cases), `harness.rs` (`HarnessOp`, `Quirk`, `ServerState`, `ServerView`, `TuiView`, `FakeHarness`) and `conformance/harness.rs` (`HarnessRig`, 15 cases). Added one CHANGELOG entry after slice a's. No `lib.rs`, `conformance/mod.rs`, manifest or lock-file change.
+  - Reused slice a without copying it: each fake holds a `FaultSwitch` and calls `enter` first, the ops implement `PortOp::as_str`, and both suites use `run_cases`, `succeeds`, `expect_code` and `expect_eq`. The harness suite folds the rig into the subject so `run_cases` stays unchanged. The frozen `timeout` uses the fault switch's `Timeout { op: op.as_str() }` shape.
+  - `harness.rs` is 502 lines, so the brief's `harness/world.rs` fallback was not needed. The three ASSUMPTION comments sit on the `impl HarnessPort` methods (A's W-6(c)).
+  - Each state struct derives `Default` and counts what it minted (`FIRST_PID + pids_minted`; the session number is `sessions_minted + 1`), so there is no hand-written state constructor. `freeze`, `thaw` and `kill` share one `World::signal` rule.
+  - Folded A's warnings into the docs: W-2 (the fakes share no state) in both fake module docs; W-3 (decisions 5 and 6 with their reasons, and case 7's reading of #641) in the suite docs; W-4 (`server()` names #644 as its consumer); W-5(c) (pane names parsed with `succeeds("PaneName::parse", ..)`, no third `pane_name`).
+- **Assumed:**
+  - `navigate` (a person moving a TUI by hand) does not reach the server. The brief lists only its no-TUI and unknown-id errors, and no test drives it against a frozen server.
+  - `delete_session` sends every TUI showing the id home, whatever its port. Ids come from one counter, so an id names one session across all data directories.
+  - Freezing a frozen server and thawing a running one are `Ok` (a signal to a process in that state is harmless). The brief left both open.
+- **Hedged:**
+  - The brief asks for each ASSUMPTION comment on "one line". Each is one comment whose first line carries the verbatim prefix, wrapped at the file's 100-column width, so AC 7's `grep -c` prints 3. Joining each onto one ~200-character line is a mechanical change if S wants it.
+  - The host suite's `holds` (pids) and the harness suite's `holds` (session ids) are two six-line suite-local helpers over different element types. A shared generic one would need a `conformance/mod.rs` edit, which this slice may not make. It is a candidate for the W-5 follow-up.
+- **Evidence:**
+  - `cargo test -p holler-pane-testkit`: every test GREEN, including the 56 new ones (host conformance 12, fake host 12, harness conformance 13, fake harness 19) and slice a's 32 unchanged.
+  - `cargo build --workspace` exit 0. `cargo test --workspace -- --skip roster_stays_accurate_under_concurrent_body_load` (CI's command) exit 0: 109 test binaries, 1164 passed, 0 failed, 5 ignored. `bash scripts/test-hooks.sh` exit 0 (11 ok).
+  - Clean: `cargo clippy --workspace --all-targets -- -D warnings` (exit 0, no diagnostics), `bash scripts/lint.sh` (exit 0, no testkit warning), `rustfmt --check --edition 2021` on the four files, `cargo machete`, `scripts/changelog-check.sh`. The `cargo tree` dependency rule printed nothing; `grep -c` of the ASSUMPTION prefix printed 3.
+  - A throwaway crate outside the repo ran every mutant through the suites and printed every failing case with its detail. Each mutant fails its named case for the intended reason. The extra failures are expected knock-ons: `RunIsNoop` fails every case that needs a started process, `PsOfMissingIsEmpty` also fails case 2's re-check, and a separate data dir also fails case 15's attach on the second port.
+  - Facts in unchanged code that the diff relies on are in `evidence.md`.
