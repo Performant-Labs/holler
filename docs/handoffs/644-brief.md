@@ -199,6 +199,16 @@ pub struct HerdrSpec {
     pub grid: GridPos,
 }
 ```
+**B-2a** What `snapshot` returns (each listed pane carries its own `session`, `workspace`, `pane_id` and `grid`, C-1):
+```
+crates/holler-pane/src/ports.rs:93-98
+/// What Herdr reports about every pane it has.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HerdrSnapshot {
+    pub panes: Vec<HerdrPane>,
+}
+```
 **B-3** `HerdrPort`:
 ```
 crates/holler-pane/src/ports.rs:125-148
@@ -1570,11 +1580,20 @@ engine was entered); when it has run out it stops, rolls back as for a failed st
 |---|---|---|---|
 | 1 | The name is free | `pane_store.get(name)` | `Some` -> `Refused { PANE_EXISTS }` (3). Nothing else is called. |
 | 2 | Herdr session given | none | `None` -> `usage` (2) "--herdr-session is required unless --spec-only" |
-| 3 | Probe (only when `spec.check` is `Some`) | `prober.run_probe(check, &spec.expect, options.probe_timeout)` | `Failed { missing }` -> `ProbeFailed { message: "missing \"a\", \"b\"" }`; `Error(r)` -> `ProbeFailed { message: r }` (3). The result is **not** stored (the issue: a failing probe "changes nothing"; decision 8). |
+| 3 | Probe (only when `spec.check` is `Some`) | `prober.run_probe(check, &spec.expect, options.probe_timeout)` | `Failed { missing }` -> `ProbeFailed { message: "missing \"a\", \"b\"" }`; `Error(r)` -> `ProbeFailed { message: r }` (3). A failing result is **not** stored (the issue: a failing probe "changes nothing"; decision 8). A passing one (`Ok`) is kept in memory and written only at R, as `probe.last: Some(Ok)`; with no check, `probe.last` is `None`. |
 | 4 | Herdr version (B5) | `herdr.version()` | the error as is (`herdr-version-unsupported`, 3) |
-| 5 | Target cell | `herdr.snapshot()`, `pane_store.list()` | the cell `(herdr_session, spec.herdr.workspace, spec.herdr.grid)` holds any pane -> `Refused { GRID_OCCUPIED }` (3); the message names the occupant's id and the record that names it, or says no record does (decision 12). So the pane A1 makes is always this run's (`created`). |
+| 5 | Target cell | `herdr.snapshot()`, `pane_store.list()` | an **occupant** is any `p` in `snapshot.panes` with `p.session == herdr_session && p.workspace == spec.herdr.workspace && p.grid == spec.herdr.grid` (a per-pane filter on the fields each `HerdrPane` carries, B-2a/C-1; the snapshot itself is not keyed). Any occupant -> `Refused { GRID_OCCUPIED }` (3); the message names the occupant's id and the record that names it, or says no record does (decision 12; the join rule is under "The occupant's record" below). So the pane A1 makes is always this run's (`created`). |
 | 6 | Port free | `harness.health(port)` | `true` -> `Refused { PORT_IN_USE }` (3), never adopted (H-2) |
 | 7 | Edit P and act (I8) | `scope.edit_spec(profile.as_ref(), &name, &SpecEdit::Set(spec), &mut act)` | P is written first (B-7, G-1). Its errors are returned as is: `profile-not-found`, `pane-in-other-profile`, `generation-conflict` (first write), `profile-conflict` (restore conflicted). |
+
+**The occupant's record** (step 5's message): a record `r` from `pane_store.list()` names an occupant `p` when
+`r.herdr.session == p.session && r.herdr.pane_id == p.pane_id` (`Pane.herdr` is a `HerdrPane`, C-5, so a record carries the
+Herdr session as well as the id; the pane id alone is the join key within one Herdr session). A linear scan of the list is
+enough. The message names, for each occupant in snapshot order, its id and every record naming it in `list()` order (sorted by
+name, F-3), comma-separated; with none it says no record names it. Two records naming one Herdr pane should not exist; if they
+do, both are named and the answer is still `grid-occupied` (the duplicate is doctor's, #647). Illustrative wording (F's
+choice; a test asserts only that the occupant's id and the record's name, or the "no record" phrase, appear): `r2c1 in main
+holds Herdr pane w1:p2, recorded as demo-c2r1`.
 
 Steps 1-6 make no write and no live change, so a refusal there leaves P and the registry exactly as they were, generation
 included. The **act** (the closure; `acted` becomes true when A1 is attempted):
@@ -1613,13 +1632,20 @@ host, harness or pane-store call by the engine, no record. `Launched { pane: Non
 3. `effective_spec(Some(&base), ...)`. Unless `--spec-only` (decision 11): if the effective `host.cwd` differs from
    `record.host.cwd` -> `usage` "relaunch cannot change a pane's directory; close it and launch it again"; if the effective
    workspace or grid differs from the record's and `--grid` was not given -> `usage` naming both positions (`r1c2`, `r2c1`).
+   "Both positions" means the **whole** position on each side, whether one field or both differ: the record's
+   `record.herdr.workspace` and `record.herdr.grid`, and the effective `spec.herdr.workspace` and `spec.herdr.grid` (grids in
+   the `rRcC` form, D-4), for example `relaunch moves a pane only with --grid: the record is at main r2c1, the flags give other
+   r2c1`. The case where only the workspace differs (`--workspace` without `--grid`) is one instance of this rule, not a
+   separate one. A "cell" here and in `move_grid` is the pair (workspace, grid) in the record's Herdr session.
    `move_grid` = `--grid` given and the effective cell differs from the record's.
 4. `tx_launch::relaunch(...)`, then `emit_outcome`.
 
 ### `tx_launch::relaunch`, live
 
-Steps 3 (probe), 4 (version) as launch; step 5 (target cell) as launch with the target = the effective cell, where the record's
-own pane at its own cell is not "occupied"; step 6 (port free) only when the effective port differs from `record.harness.port`.
+Steps 3 (probe), 4 (version) as launch; step 5 (target cell) as launch with `herdr_session = record.herdr.session` and the
+target = the effective cell (effective workspace and grid), where the record's own pane is not "occupied": a `p` with
+`p.session == record.herdr.session && p.pane_id == record.herdr.pane_id` is dropped from the occupants before the check (the
+same join key as "The occupant's record"); step 6 (port free) only when the effective port differs from `record.harness.port`.
 Then `edit_spec(...)` with this act:
 
 | # | Step (live) | Port call | On failure |
@@ -1628,8 +1654,8 @@ Then `edit_spec(...)` with this act:
 | B2 | Old server gone | `harness.health(record.harness.port)` | `true` -> `Unavailable { what: "the harness server on port N still answers after the pane's processes were stopped (#695)" }` (1); nothing else runs |
 | B3 | Herdr pane | `herdr.ensure_pane(<effective cell>)` -> `hp` | roll back, the error. Without `--grid` this is the record's cell: it answers the record's pane, or, if that pane vanished (F-16), makes a new one there, whose id is recorded. |
 | B4-B7 | as A2-A5 | | as A2-A5 |
-| B8 | Session of record (decision 8) | `harness.list_sessions(port)`; `create_session(port)` only when the record has no session of record or the list lacks it | roll back, the error |
-| B9, O1, O2 | as A7, O1, O2 | | as there |
+| B8 | Session of record (decision 8) | `harness.list_sessions(port)`; `create_session(port)` only when the record has no session of record or the list lacks it | roll back, the error. B8 fixes this run's `sid`: **kept** = `record.session_of_record` when it is `Some(s)` and the list (at the effective `port`) contains `s`; otherwise **new** = the id `create_session` returns. B9, O1 and R all use that one `sid`. |
+| B9, O1, O2 | as A7, O1, O2, with B8's `sid` (B9 attaches to it; O1 expects `shown_session == Some(sid)`) | | as there |
 | B10 | Old Herdr pane (only `move_grid`) | `herdr.close(&record.herdr.pane_id)` when step 5's snapshot listed it and it is not `hp` | the error, after the live change (`acted`; no rollback) |
 | R | Record | `pane_store.cas_put(&pane, record.generation)` | as launch's R |
 
@@ -1717,7 +1743,8 @@ placing a Herdr pane through a fake's port method, is logged too and is not part
 9. **Name, cell and port guards** (each exits 3 and leaves every store unwritten):
    a. `launch_of_a_recorded_name_is_pane_exists`: the store holds `demo-c1r1`; code `pane-exists`; `assert_untouched()`.
    b. `launch_refuses_a_cell_another_record_holds`: `demo-c2r1`'s record names the Herdr pane at `r2c1`; code
-      `grid-occupied`; the Herdr log is `[Version, Snapshot]`; no host or harness call.
+      `grid-occupied`; the message contains that Herdr pane's id and `demo-c2r1` (the join rule of "The occupant's record");
+      the Herdr log is `[Version, Snapshot]`; no host or harness call.
    c. `launch_never_adopts_an_unrecorded_pane`: a Herdr pane exists at `r2c1` with no record; code `grid-occupied`, the
       message says no record names it; that pane is still listed (never closed); no host or harness call.
    d. `launch_never_adopts_a_running_server`: 48100 runs for `demo-c2r1`; code `port-in-use`; the harness log is `[Health]`.
@@ -1781,10 +1808,14 @@ placing a Herdr pane through a fake's port method, is logged too and is not part
 19. **Relaunch with `--grid` moves** (`relaunch_with_grid_moves_the_pane`): `pane relaunch demo-c1r1 --grid c1r3`; exit 0; the
     record's grid is `r3c1` with the new id the snapshot lists there; the old id is closed and gone from the snapshot; stdout
     contains `r3c1`. `pane relaunch demo-c1r1 --workspace other` (no `--grid`) and `--project /srv/other` are `usage`, exit 2,
-    with `assert_untouched()` after the CLI's read.
+    with `assert_untouched()` after the CLI's read; the `--workspace other` message contains `main`, `other` and `r2c1` (both
+    whole positions, the record's and the effective one).
 20. **Relaunch and the session of record** (decision 8): `relaunch_keeps_the_session_of_record`: the record's session is the
     same id after relaunch and `list_sessions(48100)` still has exactly one; `relaunch_replaces_a_deleted_session`: after
-    `FakeHarness::delete_session(sid)`, relaunch records a new id and `CreateSession` is in the log.
+    `FakeHarness::delete_session(sid)`, relaunch records a new id and `CreateSession` is in the log. In both, the `sid` B8
+    fixes (kept in the first, new in the second) is the one B9 attaches, the one `FakeHarness::tui(pane_id).shown` holds after
+    the run, and `record.session_of_record == record.last_observed.shown == record.last_observed.driven == Some(sid)`; in the
+    first, the relaunch's harness log holds no `CreateSession`.
 21. **Relaunch stops only what the pane owns** (`relaunch_leaves_other_panes_alone`): `demo-c1r1` on 48100 and `demo-c2r1`
     (`--grid r1c2 --port-policy fixed:48101`) are launched; relaunching `demo-c1r1` leaves `demo-c2r1`'s `ps`, its server pid
     (still `Running`) and its record (generation) unchanged; `server(48100)` has a new pid.
