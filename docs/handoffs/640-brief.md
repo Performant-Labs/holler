@@ -826,6 +826,76 @@ fn ids_unique_and_stable_when_a_sibling_closes(s: &Scratch<'_>) -> Result<(), St
     ))
 }
 ```
+Cases 7 to 9, which depend on what Herdr answers about a closed or unknown pane (added by the amender, round 2,
+review NV-7; verbatim):
+```
+crates/holler-pane-testkit/src/conformance/herdr.rs:280-324
+/// Case 7: closing an id that Herdr never handed out is `pane-not-found`.
+fn close_unknown_is_pane_not_found(s: &Scratch<'_>) -> Result<(), String> {
+    expect_code(
+        &format!("close({UNKNOWN_ID}), an id never handed out"),
+        s.port.close(&PaneId::new(UNKNOWN_ID)),
+        NOT_FOUND,
+    )
+}
+
+/// Case 8: closing a pane succeeds once, and closing it again is `pane-not-found`. The
+/// workspace keeps `a`, so no case empties a real workspace.
+fn close_twice_is_pane_not_found(s: &Scratch<'_>) -> Result<(), String> {
+    s.ensure(R1C1)?;
+    let b = s.ensure(R2C1)?.pane_id;
+    s.close(&b)?;
+    expect_code(
+        &format!("close({}) again", b.as_str()),
+        s.port.close(&b),
+        NOT_FOUND,
+    )
+}
+
+/// Case 9: a closed pane answers nothing: `send_text`, `send_keys` and `read` of it are
+/// each `pane-not-found`.
+fn calls_on_a_closed_pane_are_pane_not_found(s: &Scratch<'_>) -> Result<(), String> {
+    s.ensure(R1C1)?;
+    let b = s.ensure(R2C1)?.pane_id;
+    s.close(&b)?;
+    let closed = b.as_str();
+    expect_code(
+        &format!("send_text({closed}, \"x\") after it closed"),
+        s.port.send_text(&b, "x"),
+        NOT_FOUND,
+    )?;
+    expect_code(
+        &format!("send_keys({closed}, [enter]) after it closed"),
+        s.port.send_keys(&b, &[enter()]),
+        NOT_FOUND,
+    )?;
+    expect_code(
+        &format!("read({closed}, 1) after it closed"),
+        s.port.read(&b, 1),
+        NOT_FOUND,
+    )
+}
+```
+`NOT_FOUND` is `"pane-not-found"`, `UNKNOWN_ID` is `"w999:p999"`, and case 10 types `TYPED_LINES = 5` lines and reads
+`READ_LINES = 2` (`conformance/herdr.rs:40-47`). Case 10 (`:326-354`) presses `Key::new("enter")` after each
+`send_text` and passes when `read` returns at most 2 lines. Case 11 (`:356-365`) passes when `version()` is non-empty
+and holds no `\n` or `\r`. The suite reads a fixture's panes by label:
+```
+crates/holler-pane-testkit/src/conformance/herdr.rs:392-401
+    /// The workspace's panes: those of `snapshot` in the fixture's session and
+    /// workspace, in the order the snapshot lists them.
+    fn panes(&self) -> Result<Vec<HerdrPane>, String> {
+        let snapshot = succeeds("snapshot", self.port.snapshot())?;
+        Ok(snapshot
+            .panes
+            .into_iter()
+            .filter(|pane| pane.session == self.session && pane.workspace == self.workspace)
+            .collect())
+    }
+```
+So case 9 passes only if the wire fake answers `pane_not_found` to `pane.send_text`, `pane.send_keys` and `pane.read`
+of a closed pane, not just to `pane.close` (Decision 15, "Unknown panes").
+
 The test kit's `ASSUMPTION (#640)` comments that this part answers:
 ```
 crates/holler-pane-testkit/src/herdr.rs:26-40
@@ -1161,7 +1231,9 @@ at the short path `<dir>/h.sock`, with a server thread written in the test:
 
 1. `exchange_writes_the_request_line_and_returns_the_reply_line`: the server reads to `\n` and answers
    `{"id":"holler:ping","result":{"type":"pong","version":"v","protocol":22}}\n`. `exchange(&Request::Ping, now+5s)`
-   returns that line without the `\n`. The server received exactly `Request::Ping.to_line()`.
+   returns that line without the `\n`. The test compares the returned `String` with the expected line as text and
+   decodes nothing (Decision 14: `exchange` returns the raw line). The server received exactly
+   `Request::Ping.to_line()`.
 2. `each_request_opens_its_own_connection`: two exchanges give two accepted connections, each carrying exactly one line.
 3. `a_missing_or_non_socket_path_is_unavailable_naming_it`: a path with no file, and a path that is a regular file,
    each give `PaneError::Unavailable` whose `what` contains the path's display form.
@@ -1186,9 +1258,17 @@ at the short path `<dir>/h.sock`, with a server thread written in the test:
 
 12a. `one_wire_condition_gives_one_answer_at_the_deadline` (Decision 3, "One answer per call"): against one silent
     server (it accepts and never writes), 20 sequential exchanges of `Request::Ping`, each with a deadline of
-    now+50ms, so that the worker's socket timeout and the caller's `recv_timeout` expire together. Every result is
-    exactly `PaneError::Timeout { op: "herdr.ping" }` (never `Unavailable`), each call returns in under 50ms plus 2s,
-    and the test ends without a panic on any thread (an abandoned worker's failed send is silent).
+    now+50ms. (The short deadline is the rationale only: it makes Decision 3's two expiries race. The test asserts
+    only observable results, never which expiry fired.) Every result is exactly
+    `PaneError::Timeout { op: "herdr.ping" }` (never `Unavailable`), each call returns in under 50ms plus 2s, and the
+    test ends without a panic on any thread (an abandoned worker's failed send is silent).
+    **Worker lifetime** (amender round 2, review B-5; it checks Decision 3's "a worker abandoned on a timeout ends by
+    itself once its socket timeouts fire", and changes no design: the caller still never joins a worker). The server
+    keeps every connection it accepts. After the 20 exchanges, the test drains the listener with non-blocking
+    `accept()` until `WouldBlock`, then reads each kept connection with a 2s read timeout. Each one must reach EOF
+    (a read of 0 bytes, after at most the one ping line) within that 2s, never a read timeout. EOF means the worker
+    dropped its end of the socket, so no worker outlived its call by more than 2s. At most 20 connections are
+    accepted: a worker that finds no time left does not connect (Decision 3), so fewer is fine.
 
 **The adapter over the wire fake** (`tests/adapter_test.rs`, in-process through `Arc<WireHerdr>` unless named):
 
@@ -1210,7 +1290,13 @@ at the short path `<dir>/h.sock`, with a server thread written in the test:
     - (b) `layout.rs` `number` returning `index` (0-based);
     - (c) the adapter sending `Direction::Right` where the plan says `Down`.
 
-    Each mutant must fail at least AC 13. Mutant (c) must also fail AC 16: the read-back refuses it.
+    Each mutant must fail at least AC 13. Beyond AC 13 (corrected, amender round 2, review B-1: the round-1 text
+    required mutant (c) to fail AC 16, which the derivation below shows cannot happen):
+    - mutant (a) must also fail AC 16 (its swapped `grid_of` accepts the rewritten `right` split as `r2c1`);
+    - mutant (b) must also fail AC 20 (its read-back puts the created root pane at `r0c0`);
+    - mutant (c) fails AC 13 and is **not** required to fail AC 16. AC 16's transport already turns `down` into
+      `right`, so under (c) AC 16 sees the same wire and the same `Unavailable` it expects. T records the observed
+      AC 16 result for (c) all the same.
 
     **The oracle per mutant** (amender, round 1; derived from merged `layout.rs:130-210`, `plan.rs` and Decision 11,
     not from a run). "Fails" means an AC 13 assertion fails on the value below. T records the observed value next to
@@ -1222,8 +1308,8 @@ at the short path `<dir>/h.sock`, with a server thread written in the test:
     | (b) `number` returns the 0-based index | bullet 1: `ensure r1c1` gives `w1:p1` | `Err(PaneError::Unavailable)` whose `what` names `w1:p1` and `r0c0`: `cell_at(0, 0)` is `r0c0`, so the read-back after `workspace.create` puts the root pane at `r0c0`. |
     | (c) the adapter sends `right` for a planned `Down` | bullet 2: `ensure r2c1` gives `w1:p2` at `r2c1` | `Err(PaneError::Unavailable)` whose `what` names `w1:p2` and `r1c2`: Herdr (the fake) makes a `right` split, and the read-back refuses it. |
 
-    Amender's note for the MO (round 1; the sentence above is left as written because an AC is not the amender's to
-    change): by the same derivation, mutant (c) does **not** fail AC 16. AC 16's transport already turns `down` into
+    Derivation behind the AC 16 and AC 20 requirements above (amender round 1, re-checked in round 2 against merged
+    `layout.rs:143-217`): mutant (c) does **not** fail AC 16. AC 16's transport already turns `down` into
     `right`, so under mutant (c) its rewrite has nothing to change, and AC 16 still sees the `Unavailable` it expects.
     The mutant that does fail AC 16 is (a): its swapped `grid_of` reads the rewritten `right` split as rows, puts `w1:p2`
     at `r2c1`, and `ensure r2c1` answers `Ok` where AC 16 expects `Unavailable`. Mutant (b) fails AC 20's second half
@@ -1252,6 +1338,13 @@ at the short path `<dir>/h.sock`, with a server thread written in the test:
     does not list that pane, and `ensure` in `w` still splits only the grid tab (the tab with the lowest `number`).
 22. `snapshot_lists_every_workspace_by_label`: a workspace the config does not name is listed too, with its label and
     tree positions. `session` is the config's on every pane.
+    - **Which string** (clarification, amender round 2, review B-3; Decision 12 already pins it): `HerdrPane.workspace`
+      is the workspace's **label** as Herdr reports it, never its `w<N>` id. The conformance suite's own filter relies on
+      this: `Scratch::panes` keeps the panes whose `workspace == self.workspace`, the label (`conformance/herdr.rs:392-401`).
+    - **Duplicate labels** (an added case, Decision 12 "Duplicate labels do not fail the snapshot"): with two Herdr
+      workspaces labelled `w` (ids `w1` and `w2`, each with a root pane), `snapshot()` is `Ok` and lists both root
+      panes, `w1:p1` then `w2:p1` (Herdr's workspace order), each with `workspace == "w"` and `grid` `r1c1`. The two are
+      told apart by `pane_id` only, whose `w<N>:` prefix Herdr assigns; the adapter does not parse it.
 23. `session_and_workspace_errors_send_nothing`:
     - a `spec.session` other than the config's gives `Unavailable` and records no request;
     - a `spec.workspace` the config does not name gives `Unavailable` naming it, and records no request;
@@ -1277,6 +1370,19 @@ at the short path `<dir>/h.sock`, with a server thread written in the test:
 28. `one_deadline_covers_every_exchange_of_a_call`: a test transport records the `deadline` of every exchange. Every
     exchange of one `ensure_pane` (`r2c1` after `r1c1`), and of one `snapshot()`, carries the same `Instant` `d`, and
     `before + timeout <= d <= after + timeout`.
+    **How it is measured** (amender round 2, review B-2):
+    - The test transport wraps an `Arc<WireHerdr>`, forwards every exchange to it, and pushes each exchange's
+      `deadline` onto a shared `Vec<Instant>` before forwarding.
+    - The config's `timeout` is a known value, `DEFAULT_TIMEOUT` (or any fixed value the test names); `timeout` in the
+      inequality is that value.
+    - For each of the two measured calls, the test clears the `Vec`, takes `before = Instant::now()` on the line
+      immediately before the call and `after = Instant::now()` on the line immediately after it returns, then reads
+      the `Vec`.
+    - `d` is the first recorded deadline. The assertions are: the `Vec` is not empty; every entry equals `d` (`==` on
+      `Instant`); and `before + timeout <= d && d <= after + timeout`. `Instant` is monotonic, and Decision 3 takes
+      the deadline as `Instant::now() + timeout` once on entry, between `before` and `after`, so both bounds hold
+      exactly, with no tolerance and no wall-clock time.
+    - The `ensure r1c1` that sets up the `r2c1` call is not measured.
 29. `a_garbled_reply_is_unavailable_everywhere`: a test transport answers `not json` for every request.
     `connect_with` is `Unavailable`. After a good connect, with garbling switched on, each of the seven methods is
     `Unavailable`, and nothing panics.
@@ -1293,6 +1399,19 @@ at the short path `<dir>/h.sock`, with a server thread written in the test:
 33. `the_adapter_passes_the_suite_over_a_real_socket`: each case serves a fresh `WireHerdr` with `serve()`, and
     `HerdrAdapter::connect(config with socket = served.path())` makes the port, with the `Served` as the guard. Gives
     `Ok(())`.
+    **Construction order inside `fresh`** (amender round 2, review B-4; every step is on the pinned API):
+    1. `let fake = Arc::new(WireHerdr::new());` (empty, as in AC 31), and keep an `Arc::clone(&fake)` in a list that
+       the closure captures, for AC 34;
+    2. `let served = serve(Arc::clone(&fake));` (`serve` binds the `UnixListener` before it spawns its thread and
+       returns, so the `connect` below never races the bind and needs no readiness wait);
+    3. `let config = HerdrConfig::new("scratch", served.path()).with_workspace("scratch", Extent { rows: 2, cols: 1 });`
+       (`served.path()` is a `&Path`, which `impl Into<PathBuf>` copies, so the borrow of `served` ends here);
+    4. `let port = HerdrAdapter::connect(config).expect("connect");` (its `ping` goes over the served socket);
+    5. return `(HerdrFixture { port, session: "scratch".into(), workspace: "scratch".into() }, served)`, moving
+       `served` in as the guard.
+
+    The runner drops the fixture before its guard (`conformance/herdr.rs:122-152`), so the port goes before the server
+    stops. The adapter caches no connection (Decision 2), so nothing outlives the `Served`.
 34. `no_case_calls_a_method_off_the_allow_list`: every method recorded by every fake of AC 31-33 is in
     `protocol::ALLOWED_METHODS`.
 
@@ -1393,6 +1512,11 @@ and the part-1 sources are **not** changed.
    - The caller waits with `mpsc::Receiver::recv_timeout(time left)`. So the call returns by the deadline even when
      `connect` blocks (the full listen backlog of a wedged server, which std cannot bound) or the server drips bytes
      (AC 6). Expiry is `Timeout { op: format!("herdr.{}", request.method()) }`.
+   - **"Time left"** (clarification, amender round 2, review NV-2; it restates the two bullets above and adds no rule):
+     both the worker and the caller compute it the same way, `deadline.saturating_duration_since(Instant::now())`, at
+     the moment of each wait, from the one `deadline` passed to `exchange`. The worker computes it before each socket
+     syscall and the caller before `recv_timeout`. Neither adds a margin or subtracts an epsilon, and neither keeps a
+     timeout of its own.
    - **One answer per call** (clarification, amender round 1; it adds a rule and changes none above; AC 12a):
      - The worker sends at most one result on the channel and then ends. When that send fails because the caller has
        stopped waiting (the receiver is dropped), the worker drops the result silently: no panic, no retry, no log.
@@ -1446,6 +1570,12 @@ and the part-1 sources are **not** changed.
    control character is `unavailable`, so the conformance case "a non-empty string on one line" can only fail for a
    real reason. The other methods do **not** re-check the version (AC 26), which answers the test kit's
    `herdr.rs:318-320` assumption for this adapter: the gate is at connect time and at `version()`.
+   Where the string comes from (clarification, amender round 2, review NV-4; Decision 7 already says nothing is
+   cached): `connect`'s `ServerVersion` is used for `check_supported` only and then dropped. `version()` sends its
+   own `Request::Ping` under its own deadline, runs `decode_reply`, `parse_pong` and `check_supported` on that reply,
+   and returns that reply's `version` field. AC 26's first bullet holds because the wire fake answers every `ping`
+   from its current `set_protocol` setting (Decision 15), so two pings with no `set_protocol` between them report the
+   same version. AC 26's third bullet relies on the same rule in the other direction.
 9. **One adapter serves one session.** A `spec.session` that is not `config.session` is `unavailable`, and no request
    is sent. Every `HerdrPane` the adapter returns carries `config.session`.
 10. **Workspaces, by label.** (Part-1 Decision 11, built on `SessionState::workspace`.)
@@ -1468,7 +1598,11 @@ and the part-1 sources are **not** changed.
          `parse_workspace_created`.
        - `Split { from, direction, ratio, .. }` sends `pane.split { target: map.at(from), direction, ratio }`, and
          `parse_pane_info` gives the new id. A `PaneNotFound` from this split becomes `unavailable` ("the layout
-         changed while the pane was placed"; AC 17). The caller asked for a cell, not for that pane.
+         changed while the pane was placed"; AC 17). The caller asked for a cell, not for that pane. (Clarification,
+         amender round 2, review NV-5: `decode_reply` of the `pane.split` reply already gives
+         `PaneError::PaneNotFound { what }`, so the adapter matches that one variant on that one result and returns
+         `Unavailable` in its place. Every other error from the split passes through unchanged, and a `PaneNotFound`
+         from `send_text`, `send_keys`, `read` or `close` is never rewritten, Decision 13.)
        - A plan of more than one step cannot come from a one-cell target (Evidence, `plan.rs`). If it ever does, it is
          `unavailable` and no step runs.
     6. Observe: `layout.export` of the grid tab again, then `grid_of`. `position_of(new id)` must be `spec.grid`.
@@ -1491,7 +1625,9 @@ and the part-1 sources are **not** changed.
     - `read` sends `pane.read` with `source: "recent"`, `format: "text"` and `lines = max_lines` clamped to
       `1..=u32::MAX`, then `parse_read(result, max_lines)` trims the reply (AC 25). The clamp exists because what Herdr
       does with `lines: 0` is unverified. `read(p, 0)` still makes the call, so a closed pane is still
-      `pane-not-found`.
+      `pane-not-found`. (Clarification, amender round 2, review NV-6: there are two values. `Request::Read.lines` is
+      the clamped `u32`, `max(max_lines, 1)` saturated at `u32::MAX`. `parse_read` gets the caller's own `max_lines`,
+      unclamped. So `read(p, 0)` sends `"lines":1` and `parse_read(result, 0)` gives `""` (`protocol.rs:589-595`).)
     - `pane_not_found` arrives through `decode_reply` as `PaneNotFound { what: <the pane id> }`.
 14. **The transport returns the reply line, not a decoded value.** This changes the part-1 brief's outline, which had
     `call(...) -> Result<Value, _>`. It puts `Request::to_line` and `decode_reply` on every tested path, including the
@@ -1523,6 +1659,11 @@ and the part-1 sources are **not** changed.
     - **The screen.** `send_text` appends the text to the pane's screen. In `send_keys`, `enter` appends `\n` and every
       other key appends nothing. `pane.read` gives `pane_read` with the last `lines` lines of the screen. A `source`
       outside the four names is `invalid_request`.
+    - **Unknown panes** (clarification, amender round 2, review NV-7; conformance case 9 needs it, Evidence
+      `conformance/herdr.rs:280-324`): `pane.send_text`, `pane.send_keys` and `pane.read` of a pane id the fake does not
+      hold (never handed out, or closed) answer `pane_not_found` with the message `pane <id> not found`, as
+      `pane.close` and `pane.split` do. The spike verified this code for `pane.close` only (spike table, "Close"); for
+      the other three it is INFERRED, and part 3's scratch test is the real check.
     - **Forbidden methods.** Any method on the spike's forbidden list is recorded and answered `invalid_request`, and
       AC 34 catches it.
     - **Serving.** `serve()` accepts one connection at a time on `<tempdir>/h.sock`, answers one line, and closes the
@@ -1613,7 +1754,9 @@ and the drip server's pauses (AC 6) simulate a slow peer.
   - Partial writes are handled by `write_all`.
 - **The fake's fidelity.** Where the wire fake models a behaviour the spike did not verify (last-pane close, the
   `tab_not_found` code, the ratio range), it says INFERRED, and no AC depends on it. Part 3's scratch test is the
-  real-server check.
+  real-server check. One exception (amender round 2, review NV-7): `pane_not_found` for `send_text`, `send_keys` and
+  `read` of a closed pane is INFERRED, and AC 31-33 depend on it through conformance case 9. It is what the port
+  requires of every implementation, and part 3 checks it against real Herdr.
 - **The adapter is stricter than `FakeHerdr`** (Decision 20). The adapter follows the spike, and the test kit is not
   changed here.
 - **File size and complexity.** `adapter_test.rs` is the largest file, so T splits it by topic past about 800 lines.
@@ -1678,5 +1821,10 @@ A: `.../handoff-A.md`, `.../handoff-A-dup.md`. S: `.../handoff-S.md`. Journal: `
    other methods trust the gate that passed at connect (see Scope). The reviewer asks that either the issue text be
    amended to say so, or every call refuse after a failed check. Either is a change to an MO decision or to the issue,
    so the amender changed neither. Decision 8 stands unless you rule otherwise.
+5. **"Each supported version ... the fake's two versions"** (raised by the round-2 brief review, W-2; not blocking).
+   The issue's line can be read as "at least two supported versions". This brief reads it as the fake's two builds:
+   protocol 22, which is supported, and protocol 99 (`UNSUPPORTED_VERSION`), which is refused (Scope; AC 26). The
+   adapter supports exactly one protocol (`SUPPORTED_PROTOCOLS = [22]`, spike section 13). If you want the issue text
+   to say so, it could be amended together with item 4. The amender changed neither the issue nor the reading.
 
 Needs operator: item 4 (the round-1 reviewer blocks on it). Nothing else blocks part 2.
