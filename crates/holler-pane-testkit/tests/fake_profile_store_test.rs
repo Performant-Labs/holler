@@ -556,7 +556,7 @@ fn sample_profile_is_valid_and_deterministic() {
 }
 
 #[test]
-fn sample_spec_is_deterministic_harmless_and_agrees_with_sample_pane() {
+fn sample_spec_is_deterministic_and_harmless() {
     let spec = sample_spec("demo-c1r1");
     assert_eq!(spec.pane, "demo-c1r1");
     assert_eq!(spec, sample_spec("demo-c1r1"));
@@ -571,7 +571,11 @@ fn sample_spec_is_deterministic_harmless_and_agrees_with_sample_pane() {
     assert!(spec.env.is_empty());
     assert_eq!((spec.command.as_ref(), spec.check.as_ref()), (None, None));
     assert!(spec.expect.is_empty());
+}
 
+#[test]
+fn sample_spec_agrees_with_sample_pane() {
+    let spec = sample_spec("demo-c1r1");
     // The two fixtures are meant to agree, so a pane snapshot of a sample pane is its sample spec.
     let pane = sample_pane("demo-c1r1").unwrap();
     assert_eq!(spec.model, pane.model);

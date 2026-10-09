@@ -66,3 +66,12 @@
     `test-hooks.sh` exit 0, `changelog-check` ok.
   - AC5 to AC8: the `git diff --quiet` and `cargo tree` checks and AC7's greps, as listed in handoff-F.md.
   - `docs/handoffs/682/evidence.md` (11 verbatim entries).
+
+## T (Phase 7, GREEN + Tier 2)
+- **Decided:** repaired the one flagged test by splitting it in two (same assertions) rather than adding an `#[allow]`; a
+  split keeps the lint guard useful and the file under the 600-line warn.
+- **Assumed:** the `holler-cli` `body_run_test` failure is a pre-existing port flake, because the diff touches no
+  `holler-cli` file and the test passed alone and in a full run after failing in earlier runs.
+- **Hedged:** ran the testkit suite 15 times and ran one manual mutation of the generation check to confirm the tests
+  fail when behavior is removed.
+- **Evidence:** `cargo test --workspace --no-fail-fast` exit 0, 1141 passed, 0 failed; clippy `-D warnings` clean.
