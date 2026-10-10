@@ -7,6 +7,11 @@
 //! - **One deadline per call.** Each port method takes its deadline once, on entry,
 //!   `timeout` from then (I5's bound, [`DEFAULT_TIMEOUT`] unless configured), and every
 //!   exchange of the call runs against that one deadline.
+//! - **A `timeout` names the call that ran out**, as the test kit's fakes and the other
+//!   adapters name theirs: the port method (`herdr.ensure_pane`), or `herdr.connect` for
+//!   [`HerdrAdapter::connect`], which is not a port method. The transport names the wire
+//!   method under it (`herdr.layout.export`); the adapter replaces that `op` once per
+//!   call and changes no other error.
 //! - **The version gate** runs at [`HerdrAdapter::connect`] and in every `version()`,
 //!   so no adapter exists for a Herdr protocol it does not know. The other methods
 //!   trust the gate that passed at connect.
@@ -19,6 +24,10 @@
 //! - **`snapshot` lists every workspace**, configured or not, by its label: the placed
 //!   panes of each workspace's grid tab, by row and then column. A pane nested inside
 //!   one cell, or in another tab, has no cell and is left out.
+//! - **Messages quote what Herdr sent cut to 64 characters.** A pane id or a workspace
+//!   label read from Herdr's reply goes through the protocol's `excerpt`, so a long or
+//!   garbled one can neither lengthen a message nor break it across lines. What the
+//!   caller gave (a session, a workspace, a socket) is quoted as it is.
 //! - **No state.** The adapter holds its config and its transport only, and caches no
 //!   version, pane id or connection between calls.
 
@@ -32,13 +41,25 @@ use serde_json::Value;
 use crate::layout::{grid_of, GridMap};
 use crate::plan::{plan_splits, Extent, Step, Target};
 use crate::protocol::{
-    check_supported, decode_reply, expect_ok, parse_layout_export, parse_pane_info, parse_pong,
-    parse_read, parse_snapshot, parse_workspace_created, Request, ServerVersion, WorkspaceRef,
+    check_supported, decode_reply, excerpt, expect_ok, parse_layout_export, parse_pane_info,
+    parse_pong, parse_read, parse_snapshot, parse_workspace_created, Request, ServerVersion,
+    WorkspaceRef,
 };
 use crate::transport::{Transport, UnixSocketTransport};
 
 /// I5's bound for one `HerdrPort` call.
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
+
+// The `op` of each call's `timeout`: the names `holler_pane_testkit::herdr::HerdrOp` gives
+// the port's methods (the default-run timeout test pins them equal), and `connect`'s own.
+const OP_CONNECT: &str = "herdr.connect";
+const OP_ENSURE_PANE: &str = "herdr.ensure_pane";
+const OP_SEND_TEXT: &str = "herdr.send_text";
+const OP_SEND_KEYS: &str = "herdr.send_keys";
+const OP_READ: &str = "herdr.read";
+const OP_CLOSE: &str = "herdr.close";
+const OP_SNAPSHOT: &str = "herdr.snapshot";
+const OP_VERSION: &str = "herdr.version";
 
 /// What the adapter is told (Herdr has no grid and no discoverable socket of Holler's).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -90,12 +111,13 @@ impl HerdrAdapter<UnixSocketTransport> {
 impl<T: Transport> HerdrAdapter<T> {
     /// Connect over `transport`. A config the adapter cannot serve is `usage`, before
     /// any request. Then one `ping`: a Herdr protocol the adapter does not know is
-    /// `herdr-version-unsupported`, and no adapter is made. Over a transport other than
+    /// `herdr-version-unsupported`, a `ping` that runs out of time is `timeout` naming
+    /// `herdr.connect`, and either way no adapter is made. Over a transport other than
     /// the socket this is a test seam; production uses [`HerdrAdapter::connect`].
     pub fn connect_with(config: HerdrConfig, transport: T) -> Result<Self, PaneError> {
         validate(&config)?;
         let adapter = Self { config, transport };
-        adapter.supported_server(adapter.deadline()?)?;
+        adapter.run_as(OP_CONNECT, |deadline| adapter.supported_server(deadline))?;
         Ok(adapter)
     }
 
@@ -107,6 +129,20 @@ impl<T: Transport> HerdrAdapter<T> {
     /// The deadline of a call that starts now.
     fn deadline(&self) -> Result<Instant, PaneError> {
         deadline_after(self.config.timeout)
+    }
+
+    /// Run `body` as the call `op`: against the one deadline of the call, taken now, and
+    /// with a `timeout` from any exchange of it named `op`, where the transport names the
+    /// wire method that ran out. Every other error passes unchanged.
+    fn run_as<V>(
+        &self,
+        op: &'static str,
+        body: impl FnOnce(Instant) -> Result<V, PaneError>,
+    ) -> Result<V, PaneError> {
+        body(self.deadline()?).map_err(|error| match error {
+            PaneError::Timeout { .. } => PaneError::Timeout { op: op.to_owned() },
+            other => other,
+        })
     }
 
     /// The `result` of Herdr's reply to `request`.
@@ -172,6 +208,50 @@ impl<T: Transport> HerdrAdapter<T> {
         })
     }
 
+    /// `ensure_pane` against `deadline`: plan the one step that makes `spec.grid` (an
+    /// occupied cell needs none), run it, and confirm the new pane sits there.
+    fn ensure(&self, spec: &HerdrSpec, deadline: Instant) -> Result<HerdrPane, PaneError> {
+        let extent = self.extent_of(spec)?;
+        let workspace = self.workspace_grid(&spec.workspace, deadline)?;
+        let target = Target {
+            extent,
+            cells: vec![spec.grid],
+        };
+        let pane_id = match plan_splits(&workspace.map, &target)?.as_slice() {
+            // An occupied cell: its pane, and no request that changes anything.
+            [] => workspace
+                .map
+                .at(spec.grid)
+                .cloned()
+                .ok_or_else(|| PaneError::Unavailable {
+                    what: format!(
+                        "the plan for {} is empty, and workspace {:?} has no pane there",
+                        spec.grid, spec.workspace
+                    ),
+                })?,
+            [step] => {
+                let (tab, made) = self.place(step, &workspace, spec, deadline)?;
+                self.confirm(&tab, &made, spec, deadline)?;
+                made
+            }
+            steps => {
+                return Err(PaneError::Unavailable {
+                    what: format!(
+                        "the plan for {} has {} steps, and ensure_pane makes one pane",
+                        spec.grid,
+                        steps.len()
+                    ),
+                })
+            }
+        };
+        Ok(HerdrPane {
+            session: self.config.session.clone(),
+            workspace: spec.workspace.clone(),
+            pane_id,
+            grid: spec.grid,
+        })
+    }
+
     /// Run `step`, the one step of the plan for `spec.grid`: the grid tab that holds the
     /// new pane, and the new pane.
     fn place(
@@ -228,14 +308,14 @@ impl<T: Transport> HerdrAdapter<T> {
         let what = match self.grid(tab, deadline)?.position_of(made) {
             Some(landed) if landed == spec.grid => return Ok(()),
             Some(landed) => format!(
-                "Herdr put the new pane {:?} at {landed}, not at {}; it is left where it landed",
-                made.as_str(),
+                "Herdr put the new pane {} at {landed}, not at {}; it is left where it landed",
+                excerpt(made.as_str()),
                 spec.grid
             ),
             None => format!(
-                "the new pane {:?} has no cell in workspace {:?}, so it is not at {}; it is left \
+                "the new pane {} has no cell in workspace {:?}, so it is not at {}; it is left \
                  where Herdr put it",
-                made.as_str(),
+                excerpt(made.as_str()),
                 spec.workspace,
                 spec.grid
             ),
@@ -246,112 +326,80 @@ impl<T: Transport> HerdrAdapter<T> {
 
 impl<T: Transport> HerdrPort for HerdrAdapter<T> {
     fn ensure_pane(&self, spec: &HerdrSpec) -> Result<HerdrPane, PaneError> {
-        let deadline = self.deadline()?;
-        let extent = self.extent_of(spec)?;
-        let workspace = self.workspace_grid(&spec.workspace, deadline)?;
-        let target = Target {
-            extent,
-            cells: vec![spec.grid],
-        };
-        let pane_id = match plan_splits(&workspace.map, &target)?.as_slice() {
-            // An occupied cell: its pane, and no request that changes anything.
-            [] => workspace
-                .map
-                .at(spec.grid)
-                .cloned()
-                .ok_or_else(|| PaneError::Unavailable {
-                    what: format!(
-                        "the plan for {} is empty, and workspace {:?} has no pane there",
-                        spec.grid, spec.workspace
-                    ),
-                })?,
-            [step] => {
-                let (tab, made) = self.place(step, &workspace, spec, deadline)?;
-                self.confirm(&tab, &made, spec, deadline)?;
-                made
-            }
-            steps => {
-                return Err(PaneError::Unavailable {
-                    what: format!(
-                        "the plan for {} has {} steps, and ensure_pane makes one pane",
-                        spec.grid,
-                        steps.len()
-                    ),
-                })
-            }
-        };
-        Ok(HerdrPane {
-            session: self.config.session.clone(),
-            workspace: spec.workspace.clone(),
-            pane_id,
-            grid: spec.grid,
-        })
+        self.run_as(OP_ENSURE_PANE, |deadline| self.ensure(spec, deadline))
     }
 
     fn send_text(&self, pane: &PaneId, text: &str) -> Result<(), PaneError> {
-        let deadline = self.deadline()?;
-        let request = Request::SendText {
-            pane: pane.clone(),
-            text: text.to_owned(),
-        };
-        expect_ok(&self.call(&request, deadline)?)
+        self.run_as(OP_SEND_TEXT, |deadline| {
+            let request = Request::SendText {
+                pane: pane.clone(),
+                text: text.to_owned(),
+            };
+            expect_ok(&self.call(&request, deadline)?)
+        })
     }
 
     fn send_keys(&self, pane: &PaneId, keys: &[Key]) -> Result<(), PaneError> {
-        let deadline = self.deadline()?;
-        let request = Request::SendKeys {
-            pane: pane.clone(),
-            keys: keys.to_vec(),
-        };
-        expect_ok(&self.call(&request, deadline)?)
+        self.run_as(OP_SEND_KEYS, |deadline| {
+            let request = Request::SendKeys {
+                pane: pane.clone(),
+                keys: keys.to_vec(),
+            };
+            expect_ok(&self.call(&request, deadline)?)
+        })
     }
 
     fn read(&self, pane: &PaneId, max_lines: usize) -> Result<String, PaneError> {
-        let deadline = self.deadline()?;
-        // What Herdr does with `lines: 0` is unverified, so it is asked for one line at
-        // least, and the reply is cut to `max_lines` all the same.
-        let request = Request::Read {
-            pane: pane.clone(),
-            lines: u32::try_from(max_lines.max(1)).unwrap_or(u32::MAX),
-        };
-        parse_read(&self.call(&request, deadline)?, max_lines)
+        self.run_as(OP_READ, |deadline| {
+            // What Herdr does with `lines: 0` is unverified, so it is asked for one line
+            // at least, and the reply is cut to `max_lines` all the same.
+            let request = Request::Read {
+                pane: pane.clone(),
+                lines: u32::try_from(max_lines.max(1)).unwrap_or(u32::MAX),
+            };
+            parse_read(&self.call(&request, deadline)?, max_lines)
+        })
     }
 
     fn close(&self, pane: &PaneId) -> Result<(), PaneError> {
-        let deadline = self.deadline()?;
-        let request = Request::Close { pane: pane.clone() };
-        expect_ok(&self.call(&request, deadline)?)
+        self.run_as(OP_CLOSE, |deadline| {
+            let request = Request::Close { pane: pane.clone() };
+            expect_ok(&self.call(&request, deadline)?)
+        })
     }
 
     fn snapshot(&self) -> Result<HerdrSnapshot, PaneError> {
-        let deadline = self.deadline()?;
-        let state = parse_snapshot(&self.call(&Request::SessionSnapshot, deadline)?)?;
-        let mut panes = Vec::new();
-        for workspace in &state.workspaces {
-            // A workspace with no tab has no grid, so no pane of it has a cell.
-            let Some(tab) = &workspace.grid_tab else {
-                continue;
-            };
-            let cells = self.grid(tab, deadline)?.cells();
-            panes.extend(cells.into_iter().map(|(grid, pane_id)| HerdrPane {
-                session: self.config.session.clone(),
-                workspace: workspace.label.clone(),
-                pane_id,
-                grid,
-            }));
-        }
-        Ok(HerdrSnapshot { panes })
+        self.run_as(OP_SNAPSHOT, |deadline| {
+            let state = parse_snapshot(&self.call(&Request::SessionSnapshot, deadline)?)?;
+            let mut panes = Vec::new();
+            for workspace in &state.workspaces {
+                // A workspace with no tab has no grid, so no pane of it has a cell.
+                let Some(tab) = &workspace.grid_tab else {
+                    continue;
+                };
+                let cells = self.grid(tab, deadline)?.cells();
+                panes.extend(cells.into_iter().map(|(grid, pane_id)| HerdrPane {
+                    session: self.config.session.clone(),
+                    workspace: workspace.label.clone(),
+                    pane_id,
+                    grid,
+                }));
+            }
+            Ok(HerdrSnapshot { panes })
+        })
     }
 
     fn version(&self) -> Result<String, PaneError> {
-        let version = self.supported_server(self.deadline()?)?.version;
-        if version.is_empty() || version.contains(char::is_control) {
-            return Err(PaneError::Unavailable {
-                what: "Herdr reports a version that is empty or holds a control character"
-                    .to_owned(),
-            });
-        }
-        Ok(version)
+        self.run_as(OP_VERSION, |deadline| {
+            let version = self.supported_server(deadline)?.version;
+            if version.is_empty() || version.contains(char::is_control) {
+                return Err(PaneError::Unavailable {
+                    what: "Herdr reports a version that is empty or holds a control character"
+                        .to_owned(),
+                });
+            }
+            Ok(version)
+        })
     }
 }
 
@@ -370,8 +418,8 @@ fn grid_tab(workspace: &WorkspaceRef) -> Result<String, PaneError> {
         .clone()
         .ok_or_else(|| PaneError::Unavailable {
             what: format!(
-                "Herdr workspace {:?} has no tab, so it has no grid",
-                workspace.label
+                "Herdr workspace {} has no tab, so it has no grid",
+                excerpt(&workspace.label)
             ),
         })
 }
@@ -383,9 +431,9 @@ fn changed_under(error: PaneError, target: &PaneId, spec: &HerdrSpec) -> PaneErr
     match error {
         PaneError::PaneNotFound { .. } => PaneError::Unavailable {
             what: format!(
-                "Herdr no longer has the pane {:?} that {} is split from: workspace {:?} \
+                "Herdr no longer has the pane {} that {} is split from: workspace {:?} \
                  changed while the pane was placed",
-                target.as_str(),
+                excerpt(target.as_str()),
                 spec.grid,
                 spec.workspace
             ),

@@ -412,7 +412,9 @@ pub enum PaneError {
     /// instead. (#637, `GridPos`.)
     GridAmbiguous { what: String },
     /// `grid-out-of-range`: a row or column of zero, or above `u16::MAX`. `what`
-    /// quotes the text that was refused and gives the bounds. (#637, `GridPos`.)
+    /// quotes the text that was refused and gives the bounds. (#637, `GridPos`.) Also,
+    /// from `HerdrPort::ensure_pane`, a cell outside the Herdr workspace's extent; `what`
+    /// then names the cell and the extent. (#640.)
     GridOutOfRange { what: String },
     /// `command-not-argv`: a command given where an argv array is required, such as
     /// a shell string. (#637, `Argv`.)
@@ -452,7 +454,8 @@ pub enum PaneError {
     /// know; `message` names the version and the supported ones. (#640.)
     HerdrVersionUnsupported { message: String },
     /// `timeout`: an operation did not return within the bound of I5 (default 10 s);
-    /// `op` names it. (#638-#642.)
+    /// `op` names the port method, as `<port>.<method>` (`herdr.ensure_pane`).
+    /// (#638-#642.)
     Timeout { op: String },
     /// `pane-not-found`: no pane of that name; `what` is the name. (#638-#642.)
     PaneNotFound { what: String },

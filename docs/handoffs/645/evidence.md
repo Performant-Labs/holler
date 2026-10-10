@@ -3,7 +3,10 @@
 Facts in **unchanged** code that the diff (`tx_switch.rs`, `pane/switch.rs`, `pane/reset.rs`, the ADR-0021 edits) or T's
 tests rely on. Each excerpt is copied from the tree at `a912c4b` plus F's uncommitted change (none of these files is in
 F's change). Round 2 merged `origin/main` (`d9eabbb`), which changed none of the source files quoted here, so every line
-number still holds (`git diff origin/main` on them is empty).
+number still held (`git diff origin/main` on them was empty). Round 4 merged `origin/main` (`abdcbb6`), whose #640 part 3
+added three doc-comment lines to `crates/holler-pane/src/error.rs` (now lines 415-417 and 457-458) and changed no excerpt's text. The
+`error.rs` citations from line 651 on moved down by three and are updated. Every excerpt below was checked against its cited
+lines on the merged tree.
 
 ## What the engine calls in `holler-pane`
 
@@ -45,11 +48,12 @@ number still holds (`git diff origin/main` on them is empty).
 - **Fact:** `findings::quoted` is `error::excerpt`: the text `{:?}`-quoted (so every control character is escaped) and cut
   at 64 characters with `...`. So a typed session id (at most `SESSION_ID_MAX = 64`) is never cut, and the escape case of
   AC 12 prints `\u{1b}`, never a raw ESC.
-  **Source:** `crates/holler-pane/src/findings.rs:332-334` and `crates/holler-pane/src/error.rs:688-695`
+  **Source:** `crates/holler-pane/src/findings.rs:332-334` and `crates/holler-pane/src/error.rs:691-698`
   **Verbatim excerpt:**
   > ```
   > pub fn quoted(text: &str) -> String {
   >     excerpt(text)
+  > }
   > ```
   > ```
   > pub(crate) fn excerpt(text: &str) -> String {
@@ -118,7 +122,7 @@ number still holds (`git diff origin/main` on them is empty).
 
 - **Fact:** how the errors the engine returns display, which is the start of every failure message: `Refused` is its
   message alone, `Unavailable` is prefixed `unavailable: `, and a record conflict has its own fixed text.
-  **Source:** `crates/holler-pane/src/error.rs:651-653`, `:673-679`
+  **Source:** `crates/holler-pane/src/error.rs:654-656`, `:676-682`
   **Verbatim excerpt:**
   > ```
   >             PaneError::Conflict => f.write_str(
@@ -209,6 +213,7 @@ number still holds (`git diff origin/main` on them is empty).
   >                 message: one_line(&error.message),
   >                 ..error
   >             };
+  >             settle(write_envelope(sink, &Envelope::<()>::failure(error)), code)
   > ```
 
 - **Fact:** until #649 the real binary's ports answer `not-implemented`, so the CHANGELOG's "the real verbs answer

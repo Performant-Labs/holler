@@ -436,3 +436,41 @@
     `:605-628`; `git diff d9eabbb origin/main` over `holler-pane/src` (doc comments only) and over `stub.rs`; the ADR-0021
     heading, paragraph and count greps; `wc -l` on every touched file; greps for banned calls, `#[allow]` and sleeps; a
     privacy scan of every added line; the commit trailers and author emails.
+
+## F (rework, round 4: S's REWORK, merge `origin/main`) — 2026-10-10T00:25-06:00
+- **Decided:**
+  - Merged `origin/main` (`abdcbb6`: #713 for #660, and #714 for #640 part 3) with `git merge --no-commit --no-ff`, as in
+    round 2. The merge is staged with `MERGE_HEAD` set, and the Workflow script's phase commit records it with both
+    parents. `CHANGELOG.md` and `process/stub.rs` merged cleanly.
+  - The one conflict, in `docs/adr/ADR-0021.md`, is resolved by keeping both sides, as S's item 1 says:
+    - Section 9: `origin/main`'s `pane launch` row (with `grid-unreachable`) and this branch's `pane switch` row.
+    - "Deferred": this branch's mismatch-code bullet and PROPOSED bullet, then `origin/main`'s rewritten
+      `HarnessPort`/`HerdrPort` bullet in place of the old one.
+  - `git diff origin/main -- docs/adr/ADR-0021.md` again shows exactly the four AC-24 hunks. The paragraph is at `:345`,
+    between `### 8.` (`:285`) and `### 9.` (`:372`), the `unavailable` decision is stated once in section 8 (`:352`), and
+    `#645` occurs 9 times (6 on `origin/main`). `git diff origin/main -- '*Cargo.toml'` is empty again (AC 25).
+  - `evidence.md`: #714's three doc-comment lines in `error.rs` moved three citations down by 3, and I corrected them.
+    I also completed two excerpts (`quoted`, `emit_json`) that had stopped one line short of their cited ranges since
+    round 1. Every excerpt now matches its lines on the merged tree.
+  - I did not edit ADR-0021 `:465` ("#645's and #646's, planned"), although it will be out of date for #645's codes once
+    645a lands. AC 24 allows no other ADR-0021 line. The base `d9eabbb` had the same status ("the open codes planned so
+    far (#645, #646)"), Decision 17 left it, and every gate passed it. It is listed for O in handoff-F's "Known issues".
+  - No code or test change. `archChanged: false`.
+- **Assumed:**
+  - The script's phase commit (`git add -A`, `git commit`) completes a staged merge, as it did for `37f2101`.
+  - `origin/main` at `abdcbb6` (fetched again at 00:23 MDT) is what the PR merges into. The open PRs #715 and #673 touch
+    no file of this story.
+- **Hedged:**
+  - #644 and #642 part b, which are being restarted alongside this run, may land ADR-0021 edits next to this story's lines
+    before 645a merges. Then R-1's rule applies again: whichever lands second resolves the conflict by anchor text.
+- **Evidence:**
+  - handoff-S.md (item 1 and its checks); `git diff d9eabbb origin/main` and `git diff d9eabbb HEAD` over ADR-0021; the
+    conflict hunks at `:403-409` and `:613-626` of the conflicted file; `git diff d9eabbb origin/main` over
+    `holler-pane/src`, `process/stub.rs` and `docs/testing.md`; the merged `STUBS` table and the `[Unreleased]` section;
+    `output_api.rs` (no verb iteration); `gh pr view 715 673 --json files`.
+  - With `CARGO_BUILD_JOBS=4` on the merged tree: workspace clippy with `-D warnings` is clean. `pane_verbs` has 161
+    passed (21 of them switch and reset), `pane_cli_process` 35, `cli_surface_test` 3 and `docs_cli_test` 3. rustfmt on
+    the five story files, `lint.sh` and `changelog-check.sh` pass, and gitleaks finds nothing, staged or unstaged. The
+    workspace in CI's form exits 0, with 1663 passed, 0 failed and 16 ignored over 137 result lines. That is round 3's
+    1642 plus #713's 8 and #714's 13, and the 2 new ignored are #714's opt-in real-Herdr runs.
+  - A scratchpad script compared all 24 `evidence.md` excerpts with their cited lines: 0 mismatches.
