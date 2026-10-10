@@ -31,7 +31,9 @@ case "$1" in
     target=$3; shift 3
     keys="$*"
     case "$keys" in
-      *"/exit"*Enter) [ -e "$FAKE/stuck" ] || rm -f "$FAKE/up" ;;
+      "/exit Enter") echo "race: /exit and Enter in one call" >> "$FAKE/race.log" ;;
+      /exit) : > "$FAKE/typed_exit" ;;
+      Enter) if [ -e "$FAKE/typed_exit" ]; then rm -f "$FAKE/typed_exit"; [ -e "$FAKE/stuck" ] || rm -f "$FAKE/up"; fi ;;
       C-c) [ "$(cat "$FAKE/stuck" 2>/dev/null)" = hard ] || rm -f "$FAKE/up" ;;
       *oc-holler*Enter)
         : > "$FAKE/up"
@@ -63,7 +65,8 @@ cat > "$bin/pfo" <<'EOF'
 #!/usr/bin/env bash
 echo "$*" >> "$FAKE/pfo.log"
 pane=$2
-if [ "$(cat "$HOME/.holler-oc/hj-$pane/last-session")" = ses_new ]; then echo "jupiter-hj-$pane/oc: ok"; else echo "jupiter-hj-$pane/oc: drift"; exit 1; fi
+if [ "${3:-}" = "--set-registration" ]; then [ -e "$FAKE/no_fix" ] || echo "$4" > "$FAKE/registered"; echo "registered jupiter-hj-$pane/oc at $4"; exit 0; fi
+if [ "$(cat "$FAKE/registered" 2>/dev/null)" = ses_new ]; then echo "jupiter-hj-$pane/oc: ok"; else echo "jupiter-hj-$pane/oc: 1 finding(s)"; echo "  drift  registered ses_old, the hub drives ses_new"; exit 1; fi
 EOF
 cat > "$bin/pane-ready" <<'EOF'
 #!/usr/bin/env bash
@@ -93,7 +96,7 @@ ENV
   unset TMUX_PANE FAKE_OWN_SESSION
 }
 run() { # run <args...>: the script under the fakes, fast timeouts; output in $FAKE/out, status in $FAKE/rc
-  PATH="$bin:$PATH" PANE_RESTART_POLL=0 PANE_RESTART_T_STOP=2 PANE_RESTART_T_UP=2 PANE_RESTART_T_REG=2 PANE_RESTART_T_MODEL=2 \
+  PATH="$bin:$PATH" PANE_RESTART_POLL=0 PANE_RESTART_TYPE_DELAY=0 PANE_RESTART_T_STOP=2 PANE_RESTART_T_UP=2 PANE_RESTART_T_REG=2 PANE_RESTART_T_MODEL=2 \
     bash "$script" "$@" > "$FAKE/out" 2>&1
   echo $? > "$FAKE/rc"
 }
@@ -119,14 +122,23 @@ check "happy path prints one OK line naming pane, model and the new session" \
   grep -qx 'c3r1: OK model=anthropic/claude-sonnet-5-5 session=ses_new' "$FAKE/out"
 check "happy path prints exactly one line" test "$(wc -l < "$FAKE/out")" = 1
 check "pane-ready ran for the pane" grep -qx 'c3r1' "$FAKE/pane-ready.log"
+check "the drift is repaired with --set-registration for the new session" grep -qx 'doctor c3r1 --set-registration ses_new' "$FAKE/pfo.log"
 
 # The 2026-10-10 failure: text typed without Enter ------------------------------------------------
-bare=0
+bare=0; prev=""
 while IFS= read -r l; do
-  case "$l" in *Enter) ;; "send-keys -t hj-c3r1 C-c") ;; *) bare=$((bare + 1)) ;; esac
+  case "$l" in
+    *Enter) ;;
+    "send-keys -t hj-c3r1 C-c") ;;
+    "send-keys -t hj-c3r1 /exit") ;;                       # the TUI's /exit: its Enter must be the very next call
+    *) bare=$((bare + 1)) ;;
+  esac
+  [ "$prev" = "send-keys -t hj-c3r1 /exit" ] && [ "$l" != "send-keys -t hj-c3r1 Enter" ] && bare=$((bare + 1))
+  prev=$l
 done < <(send_lines)
-check "every send-keys that carries text also carries Enter" test "$bare" = 0 -a "$(send_lines | wc -l)" -ge 2
-check "text and Enter go in the same send-keys call" bash -c "! grep -q '^send-keys -t hj-c3r1 [^ ].*\$' /dev/null; grep -c 'oc-holler.* Enter\$' '$FAKE/tmux.log' | grep -qx 1"
+check "every text typed into a pane is followed by Enter (the 2026-10-10 failure)" test "$bare" = 0 -a "$(send_lines | wc -l)" -ge 3
+check "/exit and Enter are never in one call (the TUI's autocomplete swallows it)" test ! -e "$FAKE/race.log"
+check "the launch line goes in one call with its Enter" bash -c "grep -c 'oc-holler.* Enter\$' '$FAKE/tmux.log' | grep -qx 1"
 check "the launch line is OC_FRESH=1 oc-holler with the model, the derived session and the project the server had" \
   grep -q "^send-keys -t hj-c3r1 cd /proj/holler && OC_FRESH=1 OC_SESSION_NAME=oc .*oc-holler hj-c3r1 /proj/holler -- -m $model --agent orchestrator Enter\$" "$FAKE/tmux.log"
 check "the session name is derived: no other hj- session is touched" bash -c "! grep -v 'hj-c3r1' '$FAKE/tmux.log' | grep -q 'hj-c3r2'"
@@ -210,8 +222,14 @@ check "a TUI that needs one Ctrl-C still restarts" test "$(rc)" = 0
 
 new_case c3r1; : > "$FAKE/no_register"
 run c3r1 "${good[@]}"
-check "registration that never follows fails at the registration step and prints the fix" \
-  bash -c "[ '$(rc)' = 2 ] && grep -q '^c3r1: FAIL step 7 (registration)' '$FAKE/out' && grep -q 'set-registration' '$FAKE/out'"
+check "a registration that never follows fails at the registration step" \
+  bash -c "[ '$(rc)' = 2 ] && grep -q '^c3r1: FAIL step 7 (registration)' '$FAKE/out'"
+check "no registration repair is attempted when no new session appeared" bash -c "! grep -q set-registration '$FAKE/pfo.log' 2>/dev/null"
+
+new_case c3r1; : > "$FAKE/no_fix"
+run c3r1 "${good[@]}"
+check "a repair that does not take fails at step 7 and names the command" \
+  bash -c "[ '$(rc)' = 2 ] && grep -q '^c3r1: FAIL step 7 (registration)' '$FAKE/out' && grep -q 'set-registration ses_new' '$FAKE/out'"
 
 new_case c3r1; : > "$FAKE/wrong_model"
 run c3r1 "${good[@]}"
@@ -222,12 +240,21 @@ new_case c3r1; : > "$FAKE/not_ready"
 run c3r1 "${good[@]}"
 check "pane-ready failing fails at the readiness step" bash -c "[ '$(rc)' = 2 ] && grep -q '^c3r1: FAIL step 9 (pane-ready)' '$FAKE/out'"
 
+# A pane that is fully down is started, not refused, when --project says where ---------------------
+new_case c3r1; rm -f "$FAKE/up"
+run c3r1 "${good[@]}" --project "$work"
+check "a down pane with --project is started (exit 0)" test "$(rc)" = 0
+check "a down pane is started without typing /exit" bash -c "! grep -q '/exit' '$FAKE/tmux.log' && grep -q 'oc-holler hj-c3r1 $work' '$FAKE/tmux.log'"
+new_case c3r1; rm -f "$FAKE/up"
+run c3r1 "${good[@]}"
+check "a down pane without --project is refused and says so" bash -c "[ '$(rc)' = 1 ] && grep -q 'pass --project' '$FAKE/out'"
+
 # --dry-run ---------------------------------------------------------------------------------------
 new_case c3r1
 run c3r1 "${good[@]}" --dry-run
 check "--dry-run exits 0" test "$(rc)" = 0
 expect_untouched "--dry-run changes nothing and types nothing" c3r1
 check "--dry-run prints the pane.env diff and both send-keys lines" \
-  bash -c "grep -q '^[-+]export OC_MODEL=' '$FAKE/out' && grep -q 'send-keys -t hj-c3r1 /exit Enter' '$FAKE/out' && grep -q 'oc-holler hj-c3r1' '$FAKE/out'"
+  bash -c "grep -q '^[-+]export OC_MODEL=' '$FAKE/out' && grep -q 'send-keys -t hj-c3r1 /exit' '$FAKE/out' && grep -q 'oc-holler hj-c3r1' '$FAKE/out'"
 
 exit $fail

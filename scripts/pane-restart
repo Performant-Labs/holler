@@ -8,9 +8,11 @@
 # script and names the step:
 #   1 refuse unless the pane is idle and reachable   2 back up pane.env   3 set the OC_ lines in pane.env
 #   4 stop the TUI (/exit, then one Ctrl-C)          5 start it fresh      6 wait for the server
-#   7 wait for the hub registration to follow        8 the pane answers on the new model   9 pane-ready says READY
-# Every `tmux send-keys` that types text carries Enter in the same call. Only the key file's PATH is written to
+#   7 wait for the new session to register (and repair pfleet's record with --set-registration)        8 the pane answers on the new model   9 pane-ready says READY
+# Every text typed into a pane is followed by Enter: in the same `tmux send-keys` call for the shell line, as a
+# separate call after a short pause for `/exit` (the TUI's autocomplete popup swallows an Enter sent with it). Only the key file's PATH is written to
 # pane.env; the file is never read or printed. Exit: 0 ok, 1 refused (nothing changed), 2 failed after a change.
+# A pane that is already fully down is started without the stop step; that needs --project.
 # Timeouts (seconds) can be tuned with PANE_RESTART_T_STOP / _T_UP / _T_REG / _T_MODEL and PANE_RESTART_POLL.
 set -uo pipefail
 
@@ -19,6 +21,8 @@ t_stop=${PANE_RESTART_T_STOP:-20}
 t_up=${PANE_RESTART_T_UP:-60}
 t_reg=${PANE_RESTART_T_REG:-90}
 t_model=${PANE_RESTART_T_MODEL:-120}
+# The TUI opens a command-autocomplete popup on `/exit`; an Enter that arrives in the same instant does nothing.
+type_delay=${PANE_RESTART_TYPE_DELAY:-2}
 
 pane=${1:-}
 [ "$#" -gt 0 ] && shift
@@ -75,8 +79,16 @@ if [ -n "${TMUX_PANE:-}" ]; then
   [ "$own" = "$session" ] && refuse "this script is running inside $session"
 fi
 [ -f "$penv" ] || refuse "$penv does not exist"
-status=$(curl -fsS -m 5 "$base/session/status" 2>/dev/null) || refuse "no OpenCode server answering at $base"
-[ "$(printf '%s' "$status" | jq -c . 2>/dev/null)" = '{}' ] || refuse "$pane is busy (/session/status is not {})"
+oc_holler_running() { pgrep -f "^bash [^ ]*/oc-holler $session( |\$)" >/dev/null 2>&1; }
+down=0
+if status=$(curl -fsS -m 5 "$base/session/status" 2>/dev/null); then
+  [ "$(printf '%s' "$status" | jq -c . 2>/dev/null)" = '{}' ] || refuse "$pane is busy (/session/status is not {})"
+else
+  # A pane that is fully down (no server, no oc-holler: crashed, or its TUI was exited) is started, not stopped.
+  oc_holler_running && refuse "no OpenCode server answering at $base, but oc-holler is still running in $session"
+  [ -n "$project" ] || refuse "$pane is down (no server at $base); pass --project DIR to start it"
+  down=1
+fi
 if [ -n "$project" ]; then
   [ -d "$project" ] || refuse "project $project is not a directory"
 else
@@ -113,7 +125,7 @@ launch="cd $q_project && OC_FRESH=1 OC_SESSION_NAME=oc $oc_holler $session $q_pr
 if [ "$dry" = 1 ]; then
   echo "$pane: dry run, nothing changed. pane.env diff:"
   diff -u "$penv" "$new_env" | sed '1,2d'
-  echo "send-keys -t $session /exit Enter"
+  echo "send-keys -t $session /exit   (then, ${type_delay}s later)   send-keys -t $session Enter"
   echo "send-keys -t $session $launch Enter"
   exit 0
 fi
@@ -125,12 +137,16 @@ cat "$new_env" > "$penv" || fail_step 3 pane.env "cannot write $penv"
 
 # 4. Stop the TUI ----------------------------------------------------------------------------------------------
 tui_down() {
-  ! pgrep -f "^bash [^ ]*/oc-holler $session( |\$)" >/dev/null 2>&1 && ! curl -fs -m 3 "$base/session/status" >/dev/null 2>&1
+  ! oc_holler_running && ! curl -fs -m 3 "$base/session/status" >/dev/null 2>&1
 }
-tmux send-keys -t "$session" /exit Enter
-if ! wait_for "$t_stop" tui_down; then
-  tmux send-keys -t "$session" C-c
-  wait_for "$t_stop" tui_down || fail_step 4 stop "the TUI is still running ${t_stop}s after /exit and one Ctrl-C"
+if [ "$down" = 0 ]; then
+  tmux send-keys -t "$session" /exit
+  sleep "$type_delay"
+  tmux send-keys -t "$session" Enter
+  if ! wait_for "$t_stop" tui_down; then
+    tmux send-keys -t "$session" C-c
+    wait_for "$t_stop" tui_down || fail_step 4 stop "the TUI is still running ${t_stop}s after /exit and one Ctrl-C"
+  fi
 fi
 
 # 5. Start it fresh, text and Enter in one call ---------------------------------------------------------------
@@ -138,15 +154,21 @@ tmux send-keys -t "$session" "$launch" Enter
 
 # 6. Server up, 7. registration follows -----------------------------------------------------------------------
 wait_for "$t_up" curl -fs -m 3 "$base/session/status" >/dev/null 2>&1 || fail_step 6 server "no server at $base ${t_up}s after the launch"
-registered() {
+followed() { # oc-holler's watcher wrote the new session to last-session and sessions.toml
   local last; last=$(cat "$state/last-session" 2>/dev/null || true)
-  [ -n "$last" ] && [ "$last" != "$old_session" ] \
-    && grep -q "session_id = \"$last\"" "$state/sessions.toml" 2>/dev/null \
-    && pfo doctor "$pane" 2>&1 | tail -1 | grep -q ': ok$'
+  [ -n "$last" ] && [ "$last" != "$old_session" ] && grep -q "session_id = \"$last\"" "$state/sessions.toml" 2>/dev/null
 }
-if ! wait_for "$t_reg" registered; then
+doctor_ok() { pfo doctor "$pane" 2>&1 | tail -1 | grep -q ': ok$'; }
+if ! wait_for "$t_reg" followed; then
   last=$(cat "$state/last-session" 2>/dev/null || true)
-  fail_step 7 registration "last-session is '${last:-none}' (was '${old_session:-none}') and pfo doctor is not ok after ${t_reg}s; if a new session exists, fix with: pfo doctor $pane --set-registration <session id>"
+  fail_step 7 registration "last-session is '${last:-none}' (was '${old_session:-none}') and no new session was registered after ${t_reg}s"
+fi
+last=$(cat "$state/last-session")
+# oc-holler does not update pfleet's own registration record, so pfo doctor reports drift (registered old, hub drives new).
+# The fix is the one pane-ready names: write the registration for the new session.
+if ! doctor_ok; then
+  pfo doctor "$pane" --set-registration "$last" >/dev/null 2>&1
+  wait_for 10 doctor_ok || fail_step 7 registration "pfo doctor is still not ok after: pfo doctor $pane --set-registration $last"
 fi
 sid=$(cat "$state/last-session")
 
