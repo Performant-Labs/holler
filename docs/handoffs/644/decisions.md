@@ -235,3 +235,23 @@ checked before each live step but not between the last check and the record writ
     three-dot frozen-file and manifest diff; a privacy grep of the added lines and the handoffs; `gitleaks git
     --log-opts=origin/main..HEAD`; `git merge-tree --write-tree HEAD origin/main` (one ADR-0021 conflict); and the
     workflow's PR body template (`coding-pipeline.workflow.mjs:4097`).
+
+## O (S's ADVISORY-HOLD, scope split and doc fixes): 2026-10-10T01:50:00-06:00
+
+**Decided.** S held #644 because the operator-confirmed `--agent KEY` amendment (issue #644, 2026-10-09) depends on #700, which is open,
+and nothing in the brief or code covers it. O took S's option (a): split in place. This run is `Part of #644`, and the agent part is
+#644's last part after #700. The brief carries a dated scope-split note, ADR-0021 "Deferred to named stories" has the agent bullet,
+and the PR body will say `Part of #644` with no closing keyword. This is the same split #642 (642b/642c) and #647 made along the
+same dependency, so it re-scopes nothing the operator did not already confirm.
+
+Also fixed from S's required list: ADR-0021's `timeout` row now says `launch` and `relaunch` name their own `op` (`pane.launch`,
+`pane.relaunch`, section 12), which removes the contradiction with the section 12 text; `origin/main` (#642 part 2) is merged and its
+one conflict (the Deferred list) is resolved by keeping both sides.
+
+**Assumed.** The prompt-ceiling override for the diff-gate rerun (entry of 2026-10-10T01:05) was O's call, made by the session agent
+under the standing order to hand-rerun a gate that cannot run, not an operator decision; the rerun is a complete review, not a skip.
+
+**Hedged.** Left for the operator, not decided here: ADR-0021 line 505 still says `host.herdr_api_version` is PROPOSED although this
+change records it, and decision 1 (no operation id) is still PROPOSED. Both need the operator's OK to flip.
+
+**Evidence.** `docs/handoffs/644/handoff-S.md`, `docs/handoffs/644/handoff-A-dup.md`.

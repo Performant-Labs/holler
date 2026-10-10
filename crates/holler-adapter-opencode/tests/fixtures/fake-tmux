@@ -1,0 +1,33 @@
+#!/bin/sh
+# A fake tmux for the OpenCode adapter's hermetic tests (#642b, AC 32-33). Committed with
+# git mode 100755; the tests never write a script, only the data files below.
+#
+# Contract: it is called as `fake-tmux -S <path> <subcommand> [args...]`.
+#   - It appends one line to <path>.calls: every argument after `-S <path>`, each one
+#     followed by U+001F (also the last), then one newline.
+#   - It prints <path>.<subcommand>.out to stdout and <path>.<subcommand>.err to stderr
+#     when they exist, and exits with the number in <path>.<subcommand>.code (default 0).
+#
+# POSIX sh only, and no program but `cat` (AC 33).
+
+if [ "$#" -lt 3 ] || [ "$1" != "-S" ]; then
+  printf 'fake-tmux: expected -S <path> <subcommand> [args...]\n' >&2
+  exit 64
+fi
+sock=$2
+shift 2
+sub=$1
+
+{ printf '%s\037' "$@"; printf '\n'; } >>"$sock.calls"
+
+if [ -f "$sock.$sub.out" ]; then
+  cat "$sock.$sub.out"
+fi
+if [ -f "$sock.$sub.err" ]; then
+  cat "$sock.$sub.err" >&2
+fi
+code=0
+if [ -f "$sock.$sub.code" ]; then
+  read -r code <"$sock.$sub.code" || :
+fi
+exit "$code"
