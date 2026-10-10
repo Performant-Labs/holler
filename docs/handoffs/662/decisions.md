@@ -137,3 +137,24 @@
   - AC 1's grep prints nothing. AC 6's two greps print one line each, and the ADR-0021 diff is the two rows. AC 9 shows
     no `unsafe` and no manifest change. AC 12's file list is the brief's Files.
   - 16 unchanged-code facts are in `docs/handoffs/662/evidence.md`.
+
+## T (Phase 6, verify / GREEN) — 2026-10-09T20:23:17-06:00
+
+- **Decided:**
+  - **GREEN with no blocking issue.** `profile_verbs` passed 44 of 44 in 10 runs in a row. The isolated workspace run
+    had 1464 passed and 0 failed. Clippy, lint, changelog, machete, the canary, the hooks and fmt are all clean.
+  - **Added one test**, `create_from_current_undoes_the_joined_panes_newest_first`. B2 step (2)'s reverse order
+    survived a mutation (M6: undo oldest first, and all 43 tests still passed), so the order the brief requires was
+    not pinned. The new test kills M6. No other test was changed, and no production code was changed.
+  - **Added three test-kit facts to `evidence.md`**: `list` is sorted by name, `fail_next` fires once, and the call
+    log includes failed calls. The tests rely on all three, and F did not list them.
+- **Assumed:**
+  - An isolated `HOLLER_STATE_DIR` is the right way to run `cargo test --workspace` on this machine, because the shell
+    points at a live hub. F found this; CI has no live hub.
+- **Hedged:**
+  - F's 2 `interrupt_test` failures did not reproduce in T's isolated run (0 failures). T treats them as the flake F
+    diagnosed, in hub liveness code that this story does not touch. T did not investigate them further.
+- **Evidence:**
+  - The 9-mutation table in `handoff-T-green.md`. Each mutation was reverted with `git checkout`, and `git status`
+    shows only T's staged test file plus the handoff files.
+  - The AC 1, 4, 6, 9 and 12 greps and diffs, reproduced as F reported them.

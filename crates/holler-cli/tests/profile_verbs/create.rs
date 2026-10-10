@@ -432,6 +432,48 @@ fn create_from_current_reports_profile_conflict_when_the_undo_fails() {
 }
 
 #[test]
+fn create_from_current_undoes_the_joined_panes_newest_first() {
+    // B2 step (2): in list() order demo-c1r1 joins (1st cas_put), demo-c1r2 joins (2nd), and
+    // demo-c2r1's join fails (3rd, not landed). Newest first, the 4th cas_put clears demo-c1r2
+    // and the 5th, which fails, is demo-c1r1's. So demo-c1r1 alone is left a member.
+    let plan = [
+        (3, NthPut::Fail(PaneError::Conflict)),
+        (
+            5,
+            NthPut::Fail(PaneError::Unavailable {
+                what: "pane store".to_owned(),
+            }),
+        ),
+    ];
+    let ran = run_both_seamed(
+        || Rig::new(three_panes(), []),
+        &plan,
+        &["profile", "create", NAME, "--from-current"],
+    );
+    assert_failure(&ran.both, "profile-conflict", 1);
+    for rig in ran.rigs() {
+        let profile_of = |pane: &str| {
+            rig.panes
+                .get(&PaneName::parse(pane).unwrap())
+                .unwrap()
+                .unwrap()
+                .profile
+        };
+        assert_eq!(
+            profile_of("demo-c1r2"),
+            None,
+            "the newest join is undone first"
+        );
+        assert_eq!(profile_of("demo-c1r1"), Some(name(NAME)), "its undo failed");
+        assert_eq!(profile_of("demo-c2r1"), None, "its join never landed");
+        assert!(
+            stored(rig, NAME).is_some(),
+            "the undo stopped before the delete"
+        );
+    }
+}
+
+#[test]
 fn create_from_current_undoes_a_join_that_landed_but_timed_out() {
     // B2: the second join is applied, then answers `timeout`; the undo re-reads it and
     // clears it too.

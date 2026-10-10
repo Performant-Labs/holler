@@ -336,3 +336,47 @@ Line numbers are the worktree's, branch `issue-662-implementation` (merge base `
   >         Ok(self.feed.read(|log| log.get(&name.slug()).cloned()))
   >     }
   > ```
+
+## T (Phase 6)
+
+Facts in unchanged test-kit code that the tests rely on, each excerpt copied from source by T.
+
+- **Fact:** the fake pane store's `list` is sorted by name, so `list()` order (the join order, `members`, `detached`
+  and the seam's `cas_put` numbering) is name order: `demo-c1r1`, `demo-c1r2`, `demo-c2r1`.
+  **Source:** `crates/holler-pane-testkit/src/pane_store.rs:54` and `:182-185`
+  **Verbatim excerpt:**
+  > ```rust
+  > /// - `list` is sorted by name.
+  > ```
+  > ```rust
+  >     fn list(&self) -> Result<Vec<Pane>, PaneError> {
+  >         self.faults.enter(PaneStoreOp::List)?;
+  >         Ok(self.feed.read(|log| log.records().cloned().collect()))
+  >     }
+  > ```
+
+- **Fact:** `fail_next` fails only the next call of that method, once, so AC 3e-3g's single fault hits the first
+  `cas_put` (or the profile `delete`) and later calls succeed; a failure at a later write needs the `NthCasPut` seam.
+  **Source:** `crates/holler-pane-testkit/src/fault.rs:72-74`
+  **Verbatim excerpt:**
+  > ```rust
+  >     /// Fail the next call of `op` with `error`, once. The errors queued for one method
+  >     /// come out in the order they were queued, and a call of another method leaves them
+  >     /// queued. A standing fault answers first, also leaving them queued.
+  > ```
+
+- **Fact:** the fault switch's call log records every call made through the port, including failed ones, so "no
+  `CasPut` / `Delete` in the call log" means the verb never attempted that write.
+  **Source:** `crates/holler-pane-testkit/src/fault.rs:85-87` and `crates/holler-pane-testkit/src/pane_store.rs:187-190`
+  **Verbatim excerpt:**
+  > ```rust
+  >     /// Every call made through the port, oldest first, the failed ones included.
+  >     pub fn calls(&self) -> Vec<Op> {
+  >         self.lock().calls.clone()
+  > ```
+  > ```rust
+  >     fn cas_put(&self, pane: &Pane, expected_generation: u64) -> Result<Pane, PaneError> {
+  >         self.faults.enter(PaneStoreOp::CasPut)?;
+  >         self.put(pane, Writer::Port(expected_generation))
+  >     }
+  > ```
