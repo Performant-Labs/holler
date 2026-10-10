@@ -465,3 +465,42 @@
     `rustfmt` on the six files, and `wire_selftest`.
   - The AC 17, AC 21 and `unsafe` greps print nothing, and the manifest diff is empty.
   - The blast radius is exactly the brief's ten files.
+
+## A (Phase 7, anti-duplication, amendment 1) — 2026-10-09T20:17:51-06:00
+- **Decided:** PASS, with 0 blocks and no new warn; see handoff-A-dup.md, which replaces round 1's (BLOCK, kept at
+  d6d22d7). The diff is `d525032..c65993b`.
+  - D-1 is folded. `SessionSync::of(&Pane)` calls `holler_pane::reconcile::shown_differs`. It is the only reader of the
+    rule from a record outside reconcile, and it has two call sites, `PaneRow::from` and `get`'s `detail`. The guard
+    `at <= 0 || record.is_none()` decides only that there is nothing to compare, which is `shown_differs`'s reader
+    proviso and doctor's own `let Some(record)`. `last_observed.driven` is only printed. The three variants and their
+    serde names are unchanged.
+  - W-12 is folded. `watch --profile` calls `profile_diff::is_member`, and no slug comparison is left in
+    `holler-cli/src`. W-13's `at <= 0` agrees with `observed_at`.
+  - On the test side, `observed()` was extended in place, one `SYNC_WANT` table serves all three verbs, and the one
+    inline closure (`as_json`) has no matching helper. Neither the test kit nor the doctor rig is copied.
+  - D-2 to D-6, W-14, W-15, W-5, W-6, W-11 and #647's unseen first observation are carried as the brief lists them.
+    D-5's file changed this cycle and T left `help()` alone, which the brief allows.
+- **Assumed:**
+  - The gate judges the diff against `main` as the PR will merge into it. `origin/main` is `e327569` (#641, merged
+    at 20:06:15 MDT), three commits past the merge base.
+  - T-green's runtime results stand. This gate ran no test suite (role: F and T own Tier 1 and Tier 2).
+- **Hedged:**
+  - The two spellings of "never observed" in `list.rs` (`SessionSync::of` and `observed_at`) are not a finding. They
+    are one comparison each and now agree, and W-14 already tracks moving the record-reader rule into `holler-pane`.
+  - The per-event `profile.slug()` that `is_member` now computes (round 1 cached the slug) is CPU-only work on the CLI
+    side, bounded by the feed's event rate. It is not an overlay concurrency concern.
+- **Evidence:**
+  - Read in full: the brief (amendment 1); handoff-A.md, handoff-F.md and handoff-T-green.md (amendment 1);
+    round 1's handoff-A-dup.md; decisions.md; evidence.md; and `pane/{list,get,watch}.rs` at c65993b.
+  - Read: the cycle's test diff in `tests/pane_verbs/{list,get,watch}.rs`, `reconcile.rs:165-185`,
+    `reconcile/observe.rs:225-262`, `profile_diff.rs:251-265`, `verb_harness/parse.rs:1-40`, the test kit's
+    `fixture.rs` exports, and the `doctor/rig.rs` function list.
+  - On `origin/main` (`e327569`): `git show --stat` of 0ad2d8a, dc300ab and e327569, plus a grep of their added lines
+    for escaping, time-format, word-form, SYNC and membership helpers. The only hits were `holler-adapter-host`'s
+    `pub(crate)` `escape` and `escape_cwd` (`tmux.rs:155-172`).
+  - Greps at HEAD: callers of `shown_differs`, `SessionSync` and `is_member`; readers of `last_observed`; comparisons
+    of `driven`; `.slug()` in `holler-cli/src`; builders of observed panes; `DisplayHelp` helpers; and personal names
+    in the branch's added lines (none). Also the AC 17 and AC 21 greps (empty) and the frozen-file and manifest diff
+    since the merge base (empty).
+  - Commands: `git fetch`; `git merge-tree --write-tree origin/main HEAD` (exit 0); `git diff --name-only
+    origin/main...HEAD` (the brief's files plus `docs/handoffs/643*`); `wc -l` on the six files (the largest is 587).
