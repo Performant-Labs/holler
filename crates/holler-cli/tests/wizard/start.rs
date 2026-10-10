@@ -173,11 +173,73 @@ fn record(
     w.ledger(state, &args)
 }
 
+/// `ledger.sh owns <pid>`'s exit code.
+fn owns(w: &World, st: &Path, pid: u32) -> i32 {
+    code(&w.ledger(st, &["owns", &pid.to_string()]))
+}
+
+/// SIGTERM the pid a test started and recorded, and wait until it is no longer running (a
+/// zombie counts as gone: it keeps no command line).
+fn kill_and_wait(pid: u32) {
+    let pid = pid.to_string();
+    assert!(Command::new("kill").arg(&pid).status().unwrap().success());
+    for _ in 0..100 {
+        let ps = Command::new("ps").args(["-o", "stat=", "-p", &pid]).output().unwrap();
+        let stat = text(&ps);
+        if stat.trim().is_empty() || stat.trim().starts_with('Z') {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    panic!("pid {pid} did not exit");
+}
+
+fn pids_of(rows: &[Vec<String>]) -> Vec<String> {
+    rows.iter().map(|r| r[0].clone()).collect()
+}
+
+fn roles_of(rows: &[Vec<String>]) -> Vec<String> {
+    rows.iter().map(|r| r[2].clone()).collect()
+}
+
+fn all_live(rows: &[Vec<String>]) -> bool {
+    rows.iter().all(|r| r[1] == "live")
+}
+
+fn has_row(rows: &[Vec<String>], pid: u32, state: &str) -> bool {
+    rows.iter().any(|r| r[0] == pid.to_string() && r[1] == state)
+}
+
 #[test]
 fn ledger_script_exists_and_parses() {
     assert!(ledger_sh().is_file(), "ledger.sh is missing");
     let o = Command::new("bash").arg("-n").arg(ledger_sh()).output().unwrap();
     assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+}
+
+fn ps_lstart(pid: u32) -> String {
+    let ps = Command::new("ps")
+        .env("LC_ALL", "C")
+        .args(["-o", "lstart=", "-p", &pid.to_string()])
+        .output()
+        .unwrap();
+    text(&ps).trim().to_string()
+}
+
+fn dir_entries(dir: &Path) -> Vec<String> {
+    let names = fs::read_dir(dir).unwrap().map(|e| e.unwrap().file_name());
+    names.map(|n| n.to_string_lossy().into_owned()).collect()
+}
+
+fn assert_contract_fields(body: &str, pid: u32) {
+    assert!(body.contains("[[process]]"));
+    assert!(body.contains(&format!("pid = {pid}\n")));
+    assert!(body.contains("role = \"backend\""));
+    assert!(body.contains("stage = 4\n"));
+    assert!(body.contains("session = \"alpha\""));
+    assert!(body.contains("cmd = \"sleep 601\""));
+    // The recorded start time is exactly `LC_ALL=C ps -o lstart= -p <pid>`, trimmed.
+    assert!(body.contains(&format!("started = \"{}\"", ps_lstart(pid))), "{body}");
 }
 
 #[test]
@@ -189,30 +251,10 @@ fn record_writes_the_contract_fields_atomically_with_mode_0600() {
     assert_eq!(code(&o), 0, "{}", String::from_utf8_lossy(&o.stderr));
 
     let file = st.join("wizard-ledger.toml");
-    let mode = fs::metadata(&file).unwrap().permissions().mode() & 0o777;
-    assert_eq!(mode, 0o600);
-    let body = fs::read_to_string(&file).unwrap();
-    assert!(body.contains("[[process]]"));
-    assert!(body.contains(&format!("pid = {pid}\n")));
-    assert!(body.contains("role = \"backend\""));
-    assert!(body.contains("stage = 4\n"));
-    assert!(body.contains("session = \"alpha\""));
-    assert!(body.contains("cmd = \"sleep 601\""));
-    assert!(body.contains("started = \""));
-    // The recorded start time is exactly `LC_ALL=C ps -o lstart= -p <pid>`, trimmed.
-    let ps = Command::new("ps")
-        .env("LC_ALL", "C")
-        .args(["-o", "lstart=", "-p", &pid.to_string()])
-        .output()
-        .unwrap();
-    let started = text(&ps).trim().to_string();
-    assert!(body.contains(&format!("started = \"{started}\"")), "{body}");
+    assert_eq!(fs::metadata(&file).unwrap().permissions().mode() & 0o777, 0o600);
+    assert_contract_fields(&fs::read_to_string(&file).unwrap(), pid);
     // No temp file is left behind by the atomic write, and no lock.
-    let names: Vec<String> = fs::read_dir(&st)
-        .unwrap()
-        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
-        .collect();
-    assert_eq!(names, vec!["wizard-ledger.toml".to_string()], "{names:?}");
+    assert_eq!(dir_entries(&st), vec!["wizard-ledger.toml".to_string()]);
 }
 
 #[test]
@@ -232,6 +274,15 @@ fn default_state_dir_is_dot_holler_under_home() {
     assert!(home.join(".holler/wizard-ledger.toml").is_file());
 }
 
+fn assert_first_row_is_the_backend(row: &[String], pid: u32) {
+    assert_eq!(row[0], pid.to_string());
+    assert_eq!(row[1], "live");
+    assert_eq!(row[2], "backend");
+    assert_eq!(row[3], "4");
+    assert_eq!(row[4], "alpha");
+    assert_eq!(row[5], "sleep 603");
+}
+
 #[test]
 fn ledger_lists_exactly_what_was_recorded_and_never_a_foreign_process() {
     let w = World::new();
@@ -244,19 +295,14 @@ fn ledger_lists_exactly_what_was_recorded_and_never_a_foreign_process() {
 
     let rows = list(&w, &st);
     assert_eq!(rows.len(), 2, "{rows:?}");
-    assert_eq!(rows[0][0], mine1.to_string());
-    assert_eq!(rows[0][1], "live");
-    assert_eq!(rows[0][2], "backend");
-    assert_eq!(rows[0][3], "4");
-    assert_eq!(rows[0][4], "alpha");
-    assert_eq!(rows[0][5], "sleep 603");
+    assert_first_row_is_the_backend(&rows[0], mine1);
     assert_eq!(rows[1][0], mine2.to_string());
     assert_eq!(rows[1][2], "hub");
     assert_eq!(rows[1][4], "", "an absent session is empty");
-    assert!(rows.iter().all(|r| r[0] != foreign.to_string()));
+    assert!(!pids_of(&rows).contains(&foreign.to_string()));
 
-    assert_eq!(code(&w.ledger(&st, &["owns", &mine1.to_string()])), 0);
-    assert_eq!(code(&w.ledger(&st, &["owns", &foreign.to_string()])), 2);
+    assert_eq!(owns(&w, &st, mine1), 0);
+    assert_eq!(owns(&w, &st, foreign), 2);
 }
 
 #[test]
@@ -280,25 +326,22 @@ fn recording_a_pid_that_does_not_exist_fails_and_writes_nothing() {
     assert!(!st.join("wizard-ledger.toml").exists());
 }
 
+fn assert_usage_error(w: &World, st: &Path, args: &[&str]) {
+    let c = code(&w.ledger(st, args));
+    assert_ne!(c, 0, "{args:?}");
+    assert!(c != 1 && c != 2, "usage errors must not look like stale/foreign: {args:?}");
+}
+
 #[test]
 fn record_rejects_bad_arguments() {
     let w = World::new();
     let st = w.state("a");
     let pid = w.sleeper("606").to_string();
-    for args in [
-        vec!["record", "--pid", "x", "--role", "hub", "--stage", "6"],
-        vec!["record", "--pid", &pid, "--role", "nonsense", "--stage", "6"],
-        vec!["record", "--pid", &pid, "--role", "hub", "--stage", "3"],
-        vec!["record", "--pid", &pid, "--role", "hub"],
-        vec!["frobnicate"],
-    ] {
-        let o = w.ledger(&st, &args);
-        assert_ne!(code(&o), 0, "{args:?}");
-        assert!(
-            !matches!(code(&o), 1 | 2),
-            "usage errors must not look like stale/foreign: {args:?}"
-        );
-    }
+    assert_usage_error(&w, &st, &["record", "--pid", "x", "--role", "hub", "--stage", "6"]);
+    assert_usage_error(&w, &st, &["record", "--pid", &pid, "--role", "nonsense", "--stage", "6"]);
+    assert_usage_error(&w, &st, &["record", "--pid", &pid, "--role", "hub", "--stage", "3"]);
+    assert_usage_error(&w, &st, &["record", "--pid", &pid, "--role", "hub"]);
+    assert_usage_error(&w, &st, &["frobnicate"]);
     assert!(!st.join("wizard-ledger.toml").exists());
 }
 
@@ -308,29 +351,12 @@ fn a_dead_recorded_process_is_stale_and_never_live() {
     let st = w.state("a");
     let pid = w.sleeper("607");
     assert_eq!(code(&record(&w, &st, pid, "backend", "4", Some("alpha"))), 0);
-    assert_eq!(code(&w.ledger(&st, &["owns", &pid.to_string()])), 0);
+    assert_eq!(owns(&w, &st, pid), 0);
 
-    // Kill the very pid we recorded, then wait until it is gone (a zombie still shows in ps
-    // until reaped, so reap it via wait on a fresh handle is not possible; poll `kill -0`/ps).
-    assert!(Command::new("kill").arg(pid.to_string()).status().unwrap().success());
-    let mut gone = false;
-    for _ in 0..100 {
-        let ps = Command::new("ps")
-            .args(["-o", "stat=", "-p", &pid.to_string()])
-            .output()
-            .unwrap();
-        let stat = text(&ps).trim().to_string();
-        if stat.is_empty() || stat.starts_with('Z') {
-            gone = true;
-            break;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(50));
-    }
-    assert!(gone);
-    let owns = code(&w.ledger(&st, &["owns", &pid.to_string()]));
-    // A zombie keeps its start time and an empty command line on some systems; either way it
-    // is not the process that was recorded.
-    assert_eq!(owns, 1);
+    kill_and_wait(pid);
+    // A zombie may keep its start time on some systems; either way it is not the process
+    // that was recorded.
+    assert_eq!(owns(&w, &st, pid), 1);
     let rows = list(&w, &st);
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0][1], "stale");
@@ -440,26 +466,19 @@ fn a_rerun_reuses_a_live_recorded_process_and_restarts_a_dead_one() {
     w.track(pid1);
 
     // Rerun with the process alive and matching: reused, nothing new recorded.
-    let second = run_start(&w, &st, start);
-    assert_eq!(second, format!("reuse {pid1}"));
+    assert_eq!(run_start(&w, &st, start), format!("reuse {pid1}"));
     assert_eq!(list(&w, &st).len(), 1);
 
     // The process dies: a rerun starts a new one and records it.
-    assert!(Command::new("kill").arg(pid1.to_string()).status().unwrap().success());
-    for _ in 0..100 {
-        if code(&w.ledger(&st, &["owns", &pid1.to_string()])) != 0 {
-            break;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(50));
-    }
+    kill_and_wait(pid1);
     let third = run_start(&w, &st, start);
     assert!(third.starts_with("start "), "{third}");
     let pid3 = pid_of(&third);
     w.track(pid3);
     assert_ne!(pid3, pid1);
     let rows = list(&w, &st);
-    assert!(rows.iter().any(|r| r[0] == pid3.to_string() && r[1] == "live"), "{rows:?}");
-    assert!(rows.iter().any(|r| r[0] == pid1.to_string() && r[1] == "stale"), "{rows:?}");
+    assert!(has_row(&rows, pid3, "live"), "{rows:?}");
+    assert!(has_row(&rows, pid1, "stale"), "{rows:?}");
 }
 
 #[test]
@@ -500,9 +519,47 @@ fn start_instance(w: &World, st: &Path, name: &str, hub: &str, serve: &str, back
         .output()
         .unwrap();
     assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
-    for row in list(w, st) {
-        w.track(row[0].parse().unwrap());
+    list(w, st).iter().for_each(|row| w.track(row[0].parse().unwrap()));
+}
+
+const JOIN_ARGS: &str = "--server wss://loopback.example.ts.net --hub-key k";
+
+fn roster(w: &World, st: &Path) -> String {
+    text(&w.bash(st, "holler roster").output().unwrap()).trim().to_string()
+}
+
+fn recorded_arg(st: &Path, file: &str) -> String {
+    fs::read_to_string(st.join(file)).unwrap()
+}
+
+fn assert_ledgers_are_disjoint(w: &World, one: &Path, two: &Path) {
+    let (a, b) = (list(w, one), list(w, two));
+    assert_eq!(roles_of(&a), ["backend", "hub", "body"]);
+    assert_eq!(roles_of(&b), ["backend", "hub", "body"]);
+    assert!(all_live(&a) && all_live(&b));
+    for pid in pids_of(&a) {
+        assert!(!pids_of(&b).contains(&pid), "pid in both ledgers: {pid}");
+        // One instance's ledger does not own the other's processes.
+        assert_eq!(code(&w.ledger(two, &["owns", &pid])), 2);
     }
+}
+
+fn assert_own_ports_and_state(one: &Path, two: &Path) {
+    assert!(recorded_arg(one, "hub-args").contains("127.0.0.1:41807"));
+    assert!(recorded_arg(two, "hub-args").contains("127.0.0.1:41808"));
+    assert!(recorded_arg(one, "opencode-args").contains("--port 47001"));
+    assert!(recorded_arg(two, "opencode-args").contains("--port 47011"));
+    assert!(recorded_arg(one, "tailscale-args").contains("--https 443"));
+    assert!(recorded_arg(two, "tailscale-args").contains("--https 8443"));
+}
+
+/// A body of one instance cannot join the other: the token does not exist there.
+fn assert_foreign_join_is_refused(w: &World, from: &Path, to: &Path) {
+    let join = fs::read_to_string(from.join("join-line")).unwrap();
+    let script = format!("holler body join {JOIN_ARGS} --token {}", join.trim());
+    let o = w.bash(to, &script).output().unwrap();
+    assert!(!o.status.success());
+    assert!(String::from_utf8_lossy(&o.stderr).contains("no such token"));
 }
 
 #[test]
@@ -514,51 +571,14 @@ fn two_instances_on_loopback_keep_separate_rosters_ledgers_and_tokens() {
     // The second instance is told apart by its own ports and state directory alone.
     start_instance(&w, &two, "two", "41808", "8443", "47011");
 
-    // Each ledger lists exactly its own three processes, and only those.
-    let (a, b) = (list(&w, &one), list(&w, &two));
-    assert_eq!(a.len(), 3, "{a:?}");
-    assert_eq!(b.len(), 3, "{b:?}");
-    let roles = |rows: &[Vec<String>]| rows.iter().map(|r| r[2].clone()).collect::<Vec<_>>();
-    assert_eq!(roles(&a), ["backend", "hub", "body"]);
-    assert_eq!(roles(&b), ["backend", "hub", "body"]);
-    for ra in &a {
-        assert!(b.iter().all(|rb| rb[0] != ra[0]), "pid in both ledgers: {ra:?}");
-        // One instance's ledger does not own the other's processes.
-        assert_eq!(code(&w.ledger(&two, &["owns", &ra[0]])), 2);
-    }
-    assert!(a.iter().all(|r| r[1] == "live") && b.iter().all(|r| r[1] == "live"));
-
+    assert_ledgers_are_disjoint(&w, &one, &two);
     // Each hub's roster lists only its own body.
-    let roster = |st: &Path| {
-        text(&w.bash(st, "holler roster").output().unwrap())
-    };
-    assert_eq!(roster(&one).trim(), "tok-one-body connected");
-    assert_eq!(roster(&two).trim(), "tok-two-body connected");
+    assert_eq!(roster(&w, &one), "tok-one-body connected");
+    assert_eq!(roster(&w, &two), "tok-two-body connected");
+    assert_own_ports_and_state(&one, &two);
 
-    // Each instance used its own ports and state directory.
-    let args = |st: &Path, f: &str| fs::read_to_string(st.join(f)).unwrap();
-    assert!(args(&one, "hub-args").contains("127.0.0.1:41807"));
-    assert!(args(&two, "hub-args").contains("127.0.0.1:41808"));
-    assert!(args(&one, "opencode-args").contains("--port 47001"));
-    assert!(args(&two, "opencode-args").contains("--port 47011"));
-    assert!(args(&one, "tailscale-args").contains("--https 443"));
-    assert!(args(&two, "tailscale-args").contains("--https 8443"));
-
-    // A body of one instance cannot join the other: the token does not exist there.
-    let join_one = fs::read_to_string(one.join("join-line")).unwrap();
-    let o = w
-        .bash(
-            &two,
-            &format!(
-                "holler body join --server wss://loopback.example.ts.net --token {} --hub-key k",
-                join_one.trim()
-            ),
-        )
-        .output()
-        .unwrap();
-    assert!(!o.status.success());
-    assert!(String::from_utf8_lossy(&o.stderr).contains("no such token"));
-    assert_eq!(roster(&two).trim(), "tok-two-body connected");
+    assert_foreign_join_is_refused(&w, &one, &two);
+    assert_eq!(roster(&w, &two), "tok-two-body connected");
 }
 
 #[test]
