@@ -514,3 +514,9 @@ path = "tests/profile_apply_scenario/main.rs"
 [[test]]
 name = "pipeline_config_test"
 path = "tests/pipeline_config_test.rs"
+
+# The setup wizard's helper-script tests (epic #726): ONE target, one module per story,
+# so the stories add files and never edit this manifest again.
+[[test]]
+name = "wizard_scripts"
+path = "tests/wizard/main.rs"
