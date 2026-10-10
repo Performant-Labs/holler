@@ -136,6 +136,15 @@ fills this file in at release time.
   protocol version (22; any other is `herdr-version-unsupported`). No I/O yet: the socket adapter follows in part 2,
   so nothing a user runs changes ([#640](https://github.com/Performant-Labs/holler/issues/640)).
 
+- Herdr adapter, part 2 (epic [#633](https://github.com/Performant-Labs/holler/issues/633)): `holler-adapter-herdr`
+  now implements `HerdrPort` over Herdr's local socket, one request per connection with one deadline per call (10 s by
+  default; `timeout` when it runs out, `unavailable` for a missing socket or a garbled or oversized reply). It refuses a
+  Herdr protocol other than 22 when it connects. It places a pane only by the splits the planner decides, reads the
+  tree back to confirm it landed in the cell asked for, and creates a configured workspace that Herdr lacks only for
+  `r1c1`. It passes the `HerdrPort` conformance suite against a simulated Herdr in the default test run. Nothing is
+  wired into a verb yet ([#649](https://github.com/Performant-Labs/holler/issues/649)), so nothing a user runs
+  changes ([#640](https://github.com/Performant-Labs/holler/issues/640)).
+
 - Pane control, the hub's profile registry (epic [#633](https://github.com/Performant-Labs/holler/issues/633)):
   `profile/get`, `profile/list`, `profile/cas_put`, `profile/delete`, `profile/watch` and `profile/log` now answer from
   a real registry instead of `not-implemented`. Profiles are kept in `<state dir>/hub/profiles.json` (mode `0600`,
