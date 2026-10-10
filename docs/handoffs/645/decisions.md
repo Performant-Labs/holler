@@ -135,3 +135,44 @@
     - `cargo clippy --workspace --all-targets -- -D warnings`: clean.
     - rustfmt `--check`: clean. `scripts/lint.sh`: exit 0.
     - The real binary takes each AC 12 argv and answers `not-implemented`, not a clap error.
+
+## F (implement / GREEN) — 2026-10-09T20:40-06:00
+- **Decided:**
+  - `tx_switch.rs` filled as the brief's table: plan (P0-P5, every refusal before any write or live change), act
+    (`create_session` for reset, then `select_session`), observe (`shown_session`, a mismatch is `unavailable`), record
+    (one `cas_put` of the clone-and-set four fields at P1's generation). No Herdr or host call.
+  - The two verbs share one after-clap path, `switch::execute` (type `PANE` and `--profile`, then the target; run the
+    engine; print through `emit_outcome`), so `reset.rs` is the `Args` struct and a one-call `run`, and copies nothing.
+  - P1 takes the resolved pane whose name is the request's (`find`), not blindly the first (`next`): the same pane under
+    `ProfileScope::resolve`'s contract, and `pane-not-found` rather than the wrong pane if a scope ever broke it.
+  - ADR-0021: #644's paragraph is not on `main`, so the section 8 paragraph states the `unavailable` decision, and the
+    "Deferred" bullet takes A's round-2 form ("#645 for switch and reset; #644 to follow for launch and relaunch").
+  - The CHANGELOG entry sits after #647's doctor entry, not at the end of the list, because `origin/main` (now
+    `e327569`) appended #641's entry at the end; this placement merges without a conflict.
+  - The private `screen_text` copy carries a comment naming its original and the fold as a #645 follow-up (A round 2,
+    warn 1). Code comments cite ADR-0021 and issues, never the brief, since `docs/handoffs/` is removed before the push.
+- **Assumed:**
+  - `SwitchFailure::message` uses the error's text as is (no `embedded` pass): the brief says "`error`'s text", every
+    other verb prints a `PaneError` the same way (`ErrorBody::from`), ADR-0021 section 9 makes every port message one
+    line, and JSON mode flattens it anyway. Every value the engine itself puts in a message is quoted.
+  - `switch::run` types `SESSION` before calling `execute`, which reports it only after `PANE` and `--profile`, so the
+    brief's step-1 order holds (the parse is pure, so typing it early is not observable).
+  - `emit_outcome` stays `pub(crate)` as the brief's API gives it, although only `execute` calls it now.
+- **Hedged:**
+  - `cargo test --workspace` stopped once on `join_held_test::racing_senders_get_exactly_one_prompt_through_a_grant`
+    (round 13: a body `connection_lost` mid-turn) with the machine's load average at about 25 on 24 cores. That test
+    drives a real hub, body and stub agent and touches nothing this story changes; the target passed 11/11 on a
+    rerun, and the full suite was rerun with `--no-fail-fast` (handoff-F.md has the result).
+  - `archChanged: false`: the module, its public API (T's RED stub) and the dependency edges (`tx_switch` on
+    `findings` and `reconcile`, the CLI on `tx_switch`, `reset` on `switch`) are all the plan A passed.
+- **Evidence:**
+  - The brief (all of it), handoff-A round 2, handoff-T-red, and every RED test in `switch.rs` and `reset.rs`.
+  - Source read: `holler-pane/src/{lib,error,pane,ports,profile,findings,reconcile}.rs` and `reconcile/observe.rs`;
+    `holler-cli/src/{output.rs,pane/mod.rs,pane/args.rs,pane/doctor.rs,pane/wiring.rs}`; the test kit's `harness.rs`
+    and `profile_scope.rs`; `holler-hub/src/panes/store.rs:163-182, 336-352`; ADR-0021 sections 8, 9, 11 and
+    "Deferred"; #644's brief decisions 14 and 20 on its branch.
+  - A throwaway probe crate in the session scratchpad (outside the repo) ran the engine on the fakes and printed every
+    refusal and failure message; each matched the brief's wording.
+  - The built binary: bad arguments exit 2 `usage` before any port; everything else exits 1 `not-implemented` from
+    the `Unwired` ports, as the CHANGELOG entry says.
+  - The commands and results are in handoff-F.md, "Tier 1 self-check"; the source facts are in evidence.md.

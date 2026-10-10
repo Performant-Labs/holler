@@ -1,15 +1,21 @@
-//! `holler pane reset PANE [--as-operator] [--profile NAME]` (story #645). **RED stub**
-//! (the pipeline's test-first phase): the verb's real arguments, and a body that still
-//! answers `not-implemented`. F replaces the body with the engine call and
-//! `super::switch::emit_outcome`.
+//! `holler pane reset PANE [--as-operator] [--profile NAME]` (story #645): start a pane on a
+//! fresh session. The run creates it on the pane's harness server, shows it in the TUI and
+//! records it, through the engine `pane switch` uses (`holler_pane::tx_switch`, with a
+//! `Target::Fresh`). It is the remedy `pane doctor` names for a pane with no session of record
+//! and for one whose session of record is gone.
+//!
+//! The arguments, the output and the exit codes are `pane switch`'s (`super::switch`), and the
+//! text line is `reset <pane> to a new session "<id>" (was "<id>")`. A failure after the
+//! session was created names it: it stays on the server unrecorded, and doctor reports it as a
+//! stray session. After a successful reset the previous session stays on the server too, as a
+//! stray: no port deletes a session.
 
 use clap::Args;
+use holler_pane::tx_switch::Target;
 
 use super::args::ProfileOpt;
-use crate::output::{emit_error, not_implemented, VerbCtx};
-
-/// The story that owns this verb.
-const STORY: u32 = 645;
+use super::switch::{execute, Verb};
+use crate::output::VerbCtx;
 
 /// Start a pane on a fresh session: create it, show it, record it.
 #[derive(Args, Debug)]
@@ -24,7 +30,14 @@ pub struct PaneReset {
     pub profile: ProfileOpt,
 }
 
-/// Run `holler pane reset` (RED stub: refuse, naming the story that owns it).
-pub fn run(_args: &PaneReset, ctx: &mut VerbCtx<'_>) -> i32 {
-    emit_error(&mut ctx.sink, ctx.format, not_implemented(STORY))
+/// Run `holler pane reset`: move the pane to a session the run creates, then print the result.
+pub fn run(args: &PaneReset, ctx: &mut VerbCtx<'_>) -> i32 {
+    execute(
+        ctx,
+        Verb::Reset,
+        &args.pane,
+        &args.profile,
+        args.as_operator,
+        Ok(Target::Fresh),
+    )
 }
