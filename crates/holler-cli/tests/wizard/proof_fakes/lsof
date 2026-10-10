@@ -1,0 +1,17 @@
+#!/bin/bash
+# Fake lsof: `-iTCP:<port> -sTCP:LISTEN -t` prints the pids that hold the port; any other form
+# prints nothing (inventory.sh only falls back to it when ss is silent).
+. "$FAKE_ROOT/common.sh"
+want=""
+terse=no
+for a in "$@"; do
+  case "$a" in
+    -iTCP:*) want="${a#-iTCP:}" ;;
+    -t) terse=yes ;;
+  esac
+done
+[ "$terse" = yes ] && [ -n "$want" ] && [ -f "$FAKE_ROOT/ports" ] || exit 0
+while read -r port pid _name; do
+  [ "$port" = "$want" ] && alive "$pid" && echo "$pid"
+done <"$FAKE_ROOT/ports"
+exit 0

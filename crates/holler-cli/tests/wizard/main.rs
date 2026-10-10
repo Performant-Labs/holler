@@ -8,4 +8,5 @@ mod herdr;
 mod instance;
 mod ownership;
 mod preflight;
+mod proof;
 mod start;

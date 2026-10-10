@@ -1,0 +1,70 @@
+#!/bin/bash
+# Fake holler: hub serve|status|token mint, body join|run, roster. Everything a hub keeps (its
+# info, identity key, token store, roster) lives under HOLLER_STATE_DIR; when it is unset the
+# default is $HOME/.holler, which the scenario asserts is never created. Every call is logged
+# with the state directory it carried, so the scenario can check that none went without one.
+. "$FAKE_ROOT/common.sh"
+echo "state=${HOLLER_STATE_DIR:-} args=$*" >>"$FAKE_ROOT/calls"
+sd="${HOLLER_STATE_DIR:-$HOME/.holler}"
+
+need_hub() {
+  local pid listen
+  read -r pid listen <"$sd/hub.info" 2>/dev/null || { echo "no live hub reachable" >&2; exit 1; }
+  alive "$pid" || { echo "no live hub reachable" >&2; exit 1; }
+  HUB_PID="$pid"
+  HUB_LISTEN="$listen"
+}
+
+hub_serve() {
+  local listen
+  listen="$(flag_value --listen "$@")"
+  mkdir -p "$sd"
+  echo "$$ $listen" >"$sd/hub.info"
+  echo "fake-identity-key" >"$sd/identity.key"
+  : >"$sd/tokens"
+  : >"$sd/roster"
+  register_pid $$
+  register_port "${listen##*:}" $$ holler
+  exec -a "holler $*" sleep 900
+}
+
+body_join() {
+  local tok id
+  tok="$(flag_value --token "$@")"
+  id="${tok%%:*}"
+  grep -q "^$id:" "$sd/tokens" 2>/dev/null || { echo "no such token" >&2; exit 1; }
+  mkdir -p "$sd"
+  echo "$id" >"$sd/pairing"
+}
+
+body_run() {
+  local cfg n
+  [ -f "$sd/pairing" ] || { echo "not paired" >&2; exit 1; }
+  cfg="$(flag_value --config "$@")"
+  for n in $(sed -n 's/^name *= *"\(.*\)"$/\1/p' "$cfg"); do
+    echo "$n $$" >>"$sd/roster"
+  done
+  register_pid $$
+  exec -a "holler $*" sleep 900
+}
+
+roster() {
+  local n pid
+  need_hub
+  while read -r n pid; do
+    if alive "$pid"; then echo "$n connected"; else echo "$n disconnected"; fi
+  done <"$sd/roster"
+}
+
+case "$1 ${2:-}" in
+  "hub serve") hub_serve "$@" ;;
+  "hub status") need_hub; echo "listening: $HUB_LISTEN pid $HUB_PID" ;;
+  "hub token")
+    need_hub
+    label="$(flag_value --label "$@")"
+    echo "tok-$label:secret-$label" | tee -a "$sd/tokens" ;;
+  "body join") body_join "$@" ;;
+  "body run") body_run "$@" ;;
+  "roster ") roster ;;
+  *) echo "fake holler: unsupported: $*" >&2; exit 2 ;;
+esac
