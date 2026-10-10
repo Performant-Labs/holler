@@ -202,3 +202,52 @@
   - Grepped #663 at `4bbe607` for `single_quoted`, `reconcile_step`, `with_context`, `belongs` and `stored`.
   - Checked file sizes, `#[allow]` additions, frozen files and personal names, and searched GitHub for filed
     follow-ups (none).
+
+## S (Phase 8, spec audit) — 2026-10-09T21:38:22-06:00
+- **Decided:** PASS (see `handoff-S.md`).
+  - The A precondition is met: A and A-dup both PASS. The T precondition is met: RED was 18/25 with every failure an
+    assertion, GREEN is 44/44 and the workspace 1464/0, and there are no blocking issues.
+  - Each issue criterion and each of the brief's ACs 1-12 (2a-2m, 3a-3h) has a test or a check that proves its
+    behaviour.
+  - B1-B8 and the carried decisions are built as stated. I checked the order of the checks, all 11 B4 messages and the
+    undo order against the code. Four changes from the brief are documented, none silent:
+    - the helper is `single_quoted`, not `shell_word`;
+    - `detach` and `pane_list` are shared helpers;
+    - the seam is in `rig.rs`;
+    - the actor's error goes through the one `emit` call.
+  - The quality checks are clean: guards, sizes, no `#[allow]`, no `unsafe`, no manifest change, privacy, gitleaks and
+    the docs.
+- **Assumed:**
+  - The live issue and epic texts, and their GraphQL edit times, are authoritative. #662 last changed at 2026-10-08
+    18:56 MDT and #633 at 2026-10-09 17:39 MDT, both before the brief (19:28 MDT).
+  - I relied on T's recorded results for the Tier 1 and Tier 2 commands and did not re-run them, per S's role. Only docs
+    changed after T-green (`git diff --stat 5396f54..HEAD`).
+- **Hedged:**
+  - The ADR-0021 gap is A's W-2 (Phase 3) and W-4 (Phase 7): the `profile-conflict` Reason at line 395 is narrower than
+    its new use, and section 3 does not record `--keep-panes`. This could have been an ADVISORY-HOLD on AC 6, since the
+    architecture overlay asks for the ADR edit "in the same change". I chose PASS with advisory 1 for three reasons:
+    - A rated it a warn twice and named the follow-up as an acceptable route;
+    - the issue itself lists `profile-conflict` among these verbs' codes;
+    - the real binary answers `not-implemented` until #649, so no script can see the code yet.
+
+    The MO files the follow-up, or relaxes AC 6, before merge. No such issue exists yet: I searched GitHub for
+    `profile-conflict` and `keep-panes`.
+  - AC 2l's test runs `create Fresh --from "   "`, not the AC's `Demo`. It proves the criterion. The tie between two
+    errors that B3 settles is unpinned (advisory 2), so this is not REWORK.
+- **Evidence:**
+  - Read in full:
+    - the brief;
+    - the five phase handoffs, `decisions.md` and the outside model's diff review (`662-diff-result-r1.md`, PASS);
+    - `src/profile/{create,delete}.rs` and `tests/profile_verbs/{create,delete}.rs`;
+    - the diffs of `rig.rs`, `stub.rs`, the fixture, ADR-0003, ADR-0021 and the CHANGELOG.
+  - Read in part: `pane/wiring.rs` (`Unwired` answers `NotImplemented`), and ADR-0021 sections 8 and 9 and lines 149 and
+    161.
+  - Read-only checks I ran:
+    - the AC 1, 4, 5 (column 67), 6, 9 and 12 greps and diffs;
+    - `wc -l` on the touched files;
+    - greps for `unwrap`/`expect`/`panic`, `#[allow]`, sleeps and debug prints;
+    - a privacy grep of the whole diff;
+    - `gitleaks git --log-opts=origin/main..HEAD` (6 commits, no leaks);
+    - `gh issue view` and GraphQL edit history for #662 and #633;
+    - `gh issue list` searches for a filed follow-up;
+    - a read-only `git merge-tree ce12cdb origin/main HEAD` (one conflict, in `CHANGELOG.md`).
