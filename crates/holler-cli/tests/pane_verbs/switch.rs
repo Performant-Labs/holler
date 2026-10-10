@@ -1,5 +1,5 @@
-//! `holler pane switch` (#645, brief ACs 1-13 and 23) and the runner its cases share with
-//! `reset.rs`.
+//! `holler pane switch` (#645, brief ACs 1-13 and 23, plus part 2's seam cases and
+//! doubles) and the runner its cases share with `reset.rs`.
 //!
 //! Every case runs the verb in **both** formats, each on a fresh doctor rig
 //! (`crate::doctor::rig`, brief Decision 16), and [`both`] asserts what holds for every
@@ -9,10 +9,12 @@
 //! keystroke reaches a TUI (I4, AC 2).
 
 use std::collections::BTreeMap;
+use std::sync::{Arc, Mutex};
 
 use holler_cli::output::Format;
 use holler_pane::pane::{Health, Hold};
-use holler_pane::{HarnessPort, Pane, PaneError, PaneId, PaneName};
+use holler_pane::ports::Activity;
+use holler_pane::{HarnessPort, Pane, PaneError, PaneId, PaneName, PaneStore};
 use holler_pane_testkit::envelope::{check_envelope, Envelope};
 use holler_pane_testkit::harness::{FakeHarness, HarnessOp, HarnessOp as H, Quirk, TuiView};
 use holler_pane_testkit::pane_store::{FakePaneStore, PaneStoreOp};
@@ -627,7 +629,8 @@ fn switch_to_the_current_session_is_idempotent() {
     assert_eq!(data["previous"], json.rig.live(P).session.as_str());
 }
 
-/// AC 23: the help names the verbs' arguments; `reset` has no `--first` in 645a.
+/// AC 23 (645a) and AC 1 (part 2): the help names the verbs' arguments, and reset's
+/// names `--first`.
 #[test]
 fn help_names_the_arguments() {
     let help = |verb: &str| {
@@ -642,8 +645,183 @@ fn help_names_the_arguments() {
         );
     }
     let reset = help("reset");
-    for word in ["PANE", "--as-operator"] {
+    for word in ["PANE", "--as-operator", "--first"] {
         assert!(reset.contains(word), "reset --help names {word}: {reset}");
     }
-    assert!(!reset.contains("--first"), "no --first in 645a: {reset}");
+}
+
+/// One prompt a [`SeamHarness`] queued: the port and session it went to, the text,
+/// and the pane's session of record at prompt time — the prompt follows the record
+/// write only if that is the prompted session (#645 part 2's ordering pin).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct QueuedPrompt {
+    pub port: u16,
+    pub session: String,
+    pub text: String,
+    pub then_of_record: Option<String>,
+}
+
+/// What the seam wrappers saw, in order: every prompt queued through
+/// `HarnessPort::send_prompt` and every activity query through
+/// `HarnessPort::session_activity`. Those two run the trait's defaults on the kit's
+/// fake, which do not enter its call log, so this log is their assertion surface.
+#[derive(Default)]
+pub(crate) struct SeamLog {
+    prompts: Mutex<Vec<QueuedPrompt>>,
+    activity: Mutex<Vec<(u16, String)>>,
+}
+
+impl SeamLog {
+    fn prompt(&self, port: u16, session: &str, text: &str, then_of_record: Option<String>) {
+        self.prompts
+            .lock()
+            .expect("the prompt log")
+            .push(QueuedPrompt {
+                port,
+                session: session.to_owned(),
+                text: text.to_owned(),
+                then_of_record,
+            });
+    }
+
+    fn activity_query(&self, port: u16, session: &str) {
+        self.activity
+            .lock()
+            .expect("the activity log")
+            .push((port, session.to_owned()));
+    }
+
+    /// The prompts queued so far, oldest first.
+    pub(crate) fn prompts(&self) -> Vec<QueuedPrompt> {
+        self.prompts.lock().expect("the prompt log").clone()
+    }
+
+    /// The activity queries answered so far, oldest first.
+    pub(crate) fn activity(&self) -> Vec<(u16, String)> {
+        self.activity.lock().expect("the activity log").clone()
+    }
+}
+
+/// A `FakeHarness` wrapper for the two seam methods #645 part 2 adds (the
+/// `WriterInSelect` pattern): it delegates the eight existing methods unchanged and
+/// overrides only `send_prompt` and `session_activity`, recording each call into
+/// `log`, answering every activity query with `activity` (busy for any query, when
+/// the case wants that) and every prompt with `prompt` (`Ok` unless the case faults
+/// it). At prompt time it also reads `pane`'s record, so each queued prompt carries
+/// the ordering pin. It holds no session or TUI state of its own: a wrapper that
+/// starts modelling behaviour is a second `FakeHarness` (#684's, not ours).
+pub(crate) struct SeamHarness<'a> {
+    inner: &'a FakeHarness,
+    panes: &'a FakePaneStore,
+    pane: PaneName,
+    log: &'a SeamLog,
+    activity: Activity,
+    prompt: Option<PaneError>,
+}
+
+impl<'a> SeamHarness<'a> {
+    /// Wrap the rig's own fake for `pane`, answering the seam from that table.
+    pub(crate) fn new(
+        rig: &'a Rig,
+        pane: &str,
+        log: &'a SeamLog,
+        activity: Activity,
+        prompt: Option<PaneError>,
+    ) -> Self {
+        Self {
+            inner: &rig.harness,
+            panes: &rig.panes,
+            pane: PaneName::parse(pane).expect("a pane name"),
+            log,
+            activity,
+            prompt,
+        }
+    }
+}
+
+impl HarnessPort for SeamHarness<'_> {
+    fn serve(&self, name: &PaneName, port: u16) -> Result<u32, PaneError> {
+        self.inner.serve(name, port)
+    }
+    fn health(&self, port: u16) -> Result<bool, PaneError> {
+        self.inner.health(port)
+    }
+    fn create_session(&self, port: u16) -> Result<String, PaneError> {
+        self.inner.create_session(port)
+    }
+    fn list_sessions(&self, port: u16) -> Result<Vec<String>, PaneError> {
+        self.inner.list_sessions(port)
+    }
+    fn abort(&self, port: u16, session: &str) -> Result<(), PaneError> {
+        self.inner.abort(port, session)
+    }
+    fn attach_tui(&self, pane: &PaneId, port: u16, session: &str) -> Result<(), PaneError> {
+        self.inner.attach_tui(pane, port, session)
+    }
+    fn select_session(&self, pane: &PaneId, session: &str) -> Result<(), PaneError> {
+        self.inner.select_session(pane, session)
+    }
+    fn shown_session(&self, pane: &PaneId) -> Result<Option<String>, PaneError> {
+        self.inner.shown_session(pane)
+    }
+    fn send_prompt(&self, port: u16, session: &str, text: &str) -> Result<(), PaneError> {
+        let then = self
+            .panes
+            .get(&self.pane)
+            .expect("the store answers")
+            .and_then(|record| record.session_of_record);
+        self.log.prompt(port, session, text, then);
+        match self.prompt.clone() {
+            Some(error) => Err(error),
+            None => Ok(()),
+        }
+    }
+    fn session_activity(&self, port: u16, session: &str) -> Result<Activity, PaneError> {
+        self.log.activity_query(port, session);
+        Ok(self.activity)
+    }
+}
+
+/// AC 5 (part 2): the seam's port defaults are permissive. A port that has not wired
+/// the seam — here the kit's `FakeHarness`, until #684 wires its recording — answers
+/// idle and refuses a prompt with the stable `prompt-unsupported` code, so no
+/// existing impl changes behavior (the operator's carve-out).
+#[test]
+fn seam_defaults_are_permissive() {
+    let (rig, s2) = one_pane();
+    let port = rig.live(P).port;
+    let activity = rig
+        .harness
+        .session_activity(port, &s2)
+        .expect("the default answers");
+    assert_eq!(activity, Activity::Idle, "the activity default is idle");
+    let refused = rig
+        .harness
+        .send_prompt(port, &s2, "hello")
+        .expect_err("the prompt default refuses");
+    assert_eq!(refused.code().to_string(), "prompt-unsupported");
+}
+
+/// AC 4 (part 2): a switch is unaffected by the activity seam: a wrapper that would
+/// answer busy for any query is never asked (the gate is reset's), and a switch
+/// queues no prompt.
+#[test]
+fn switch_is_unaffected_by_the_activity_seam() {
+    let build = || {
+        let (rig, s2) = one_pane();
+        (rig, (s2, Arc::new(SeamLog::default())))
+    };
+    let words = |_: &Rig, (s2, _): &(String, Arc<SeamLog>)| argv(&["pane", "switch", P, s2]);
+    let exec = |rig: &Rig, (_, log): &(String, Arc<SeamLog>), argv: &[&str], format| {
+        let seam = SeamHarness::new(rig, P, log, Activity::Busy, None);
+        run_verb_with(argv, format, rig.ports_with(&seam))
+    };
+    let cases = both_with(build, words, exec);
+    data(&cases);
+    for case in &cases {
+        case.assert_recorded(&case.setup.0);
+        let log = &case.setup.1;
+        assert!(log.activity().is_empty(), "a switch queries no activity");
+        assert!(log.prompts().is_empty(), "a switch queues no prompt");
+    }
 }

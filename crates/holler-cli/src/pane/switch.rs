@@ -54,6 +54,7 @@ pub fn run(args: &PaneSwitch, ctx: &mut VerbCtx<'_>) -> i32 {
         &args.profile,
         args.as_operator,
         target,
+        None,
     )
 }
 
@@ -68,7 +69,7 @@ pub(crate) enum Verb {
 /// Run one switch or reset and print it; returns the exit code. `pane` and `profile` are the
 /// verb's `PANE` and `--profile`, typed here in that order, then `target` (switch's typed
 /// `SESSION`, or reset's fresh session). The first that fails is printed as `usage` before
-/// any port is called.
+/// any port is called. `first` is reset's `--first` (always `None` for switch).
 pub(crate) fn execute(
     ctx: &mut VerbCtx<'_>,
     verb: Verb,
@@ -76,8 +77,9 @@ pub(crate) fn execute(
     profile: &ProfileOpt,
     as_operator: bool,
     target: Result<Target, PaneError>,
+    first: Option<String>,
 ) -> i32 {
-    match request(pane, profile, as_operator, target) {
+    match request(pane, profile, as_operator, target, first) {
         Ok(request) => {
             let result = tx_switch::switch(ctx.ports, &request);
             emit_outcome(ctx, verb, &request.pane, result)
@@ -92,6 +94,7 @@ fn request(
     profile: &ProfileOpt,
     as_operator: bool,
     target: Result<Target, PaneError>,
+    first: Option<String>,
 ) -> Result<SwitchRequest, PaneError> {
     let pane = PaneName::parse(pane)?;
     let profile = profile
@@ -105,6 +108,7 @@ fn request(
         target: target?,
         as_operator,
         now_ms: now_millis(),
+        first,
     })
 }
 
