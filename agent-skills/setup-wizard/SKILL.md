@@ -116,6 +116,21 @@ layout = [["o1"], ["alpha", "beta"]]
 # (Bare top-level key for the same "must come before any table header" reason as layout.)
 hub_host = "hub.example.ts.net"
 
+# OPTIONAL — an `[instance]` table, to build a second Holler instance beside a running one.
+# Leave it out and everything below behaves exactly as before. It is a table header, so it goes
+# AFTER the bare top-level keys above and BEFORE `[[orchestrator]]`/`[[session]]`. Every value
+# shown is the default. A non-default instance must set `name`, `state_dir` and `herdr_session`.
+# Stage 1 validates it with `lib/instance.sh`. See docs/setup-wizard.md.
+#
+# [instance]
+# name = "default"             # ^[a-z][a-z0-9-]{0,23}$
+# prefix = "default"           # prefixes every log, config and process name; defaults to `name`
+# hub_port = 41807             # 1024 to 65535
+# serve_https_port = 443       # 1 to 65535 (the `tailscale serve` HTTPS port)
+# state_dir = ""               # absolute or ~/ path, same on every host; empty = Holler's default
+# herdr_session = ""           # empty = no named Herdr session
+# backend_port_base = 47001    # session i (0-based) listens on base + i unless it sets backend_port
+
 # Orchestrators — one or more. Each is real, named config: `name` is how `layout` below refers
 # to it, `dir` is its working directory, `cmd` is commonly "claude" but can be any CLI agent (an
 # opencode TUI, a plain shell script, whatever briefing that orchestrator needs). Each drives
@@ -487,7 +502,20 @@ remote-b (gamma, delta)"), and the resolved column/row layout **naming which pan
 orchestrator or session** — this is what every later stage builds from, not raw file order, an
 assumed single fixed orchestrator pane, or a hardcoded/globally-shared hostname.
 
-**Gate:** no config found at any of the three tiers (per the Do step above, this is a hard stop
+**Validate the `[instance]` table.** Run the validator on the loaded config and state its output:
+```bash
+"${WIZARD_LIB:-<this skill's directory>/lib}/instance.sh" "$CONFIG"
+```
+It prints the resolved instance (name, prefix, hub port, serve port, state directory, Herdr
+session, backend port base) and every session's resolved backend port, and exits 1 with one
+message per problem, each naming the key. A config with no `[instance]` table resolves to all
+defaults, which is today's behaviour unchanged. It refuses a malformed value, an `[instance]`
+placed after an `[[orchestrator]]`/`[[session]]` table, a non-default instance missing `name`,
+`state_dir` or `herdr_session`, and two sessions on the same `remote_host` that resolve to one
+backend port (naming both).
+
+**Gate:** `instance.sh` exits non-zero (stop and show the user its messages, never guess a fix);
+no config found at any of the three tiers (per the Do step above, this is a hard stop
 with the user, never an auto-created file), a missing/empty `hub_host`, a missing `name`/`dir`/`cmd` on any orchestrator entry, a
 missing `name`/`harness`/`mode`/`endpoint`/`remote_host`/`remote_tailnet_host` on any session
 entry, a `mode` value other than `attach` (the only mode this wizard's Stage 4/9 implement —

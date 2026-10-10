@@ -216,6 +216,43 @@ more than one.
   `claude` (no `--resume`), and ask it something with no Holler context, like "Send a hello to
   alpha" — it should find the roster, resolve the namespaced session name, and get a real reply.
 
+## Running an instance beside another
+
+By default the wizard builds the only Holler instance: hub port 41807, Holler's default state
+directory, `tailscale serve --bg 41807` and an unnamed Herdr server. To build a second instance
+next to a running one, add an `[instance]` table to `sessions.toml`. It is a table header, so it
+goes after the bare top-level keys (`layout`, `hub_host`) and before `[[orchestrator]]` and
+`[[session]]`. Leave it out and nothing changes.
+
+| Key | Type | Default | Rule |
+|---|---|---|---|
+| `name` | string | `default` | `^[a-z][a-z0-9-]{0,23}$` |
+| `prefix` | string | the value of `name` | prefixes every log, config and process name; same pattern as `name` |
+| `hub_port` | integer | 41807 | 1024 to 65535 |
+| `serve_https_port` | integer | 443 | 1 to 65535 |
+| `state_dir` | string | empty (Holler's own default) | absolute path or one starting with `~/`; the same value on every host the run touches |
+| `herdr_session` | string | empty (no named session) | same pattern as `name` |
+| `backend_port_base` | integer | 47001 | session `i` (0-based, in config order) listens on `base + i` unless it sets its own `backend_port` |
+
+A non-default instance (any key differing from its default) must set `name`, `state_dir` and
+`herdr_session`. Stage 1 runs `agent-skills/setup-wizard/lib/instance.sh <config>`, which refuses a
+malformed value or a missing required key naming the key, and refuses two sessions on the same
+`remote_host` that resolve to one backend port, naming both. A session may set `backend_port`
+to override its `base + i` port.
+
+```toml
+layout = [["o1"], ["alpha", "beta"]]
+hub_host = "hub.example.ts.net"
+
+[instance]
+name = "second"
+hub_port = 41808
+serve_https_port = 8443
+state_dir = "~/.holler-second"
+herdr_session = "second"
+backend_port_base = 47101
+```
+
 ## Automated setup
 
 A Claude Code skill drives this end to end — `setup-wizard`, an 11-stage wizard (Stage 0 through
