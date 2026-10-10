@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # ledger.sh - the setup wizard's per-(host, instance) process ledger (epic #726, story #729).
 #
-# The ledger is <state_dir>/wizard-ledger.toml, where state_dir is $HOLLER_STATE_DIR, or
-# $HOME/.holler when that is unset or empty (Holler's own default). Mode 0600, written
+# The ledger is <state_dir>/wizard-ledger.toml, where state_dir is $HOLLER_STATE_DIR. When
+# that is unset or empty every verb exits 64: a lost variable must never fall back to the
+# default instance's ledger. Mode 0600, written
 # atomically (temp file in the same directory, then rename). One [[process]] table per process
 # the wizard started: pid, started, cmd, role, stage, session.
 #
@@ -26,14 +27,12 @@ set -u
 die() { printf 'ledger.sh: %s\n' "$*" >&2; exit 64; }
 
 state_dir() {
-  if [ -n "${HOLLER_STATE_DIR:-}" ]; then
-    printf '%s' "$HOLLER_STATE_DIR"
-  else
-    [ -n "${HOME:-}" ] || die "neither HOLLER_STATE_DIR nor HOME is set"
-    printf '%s/.holler' "$HOME"
-  fi
+  [ -n "${HOLLER_STATE_DIR:-}" ] || die "HOLLER_STATE_DIR is unset or empty; refusing to guess a state directory (pass the instance's own, the default one included)"
+  printf '%s' "$HOLLER_STATE_DIR"
 }
 
+# A die inside $(...) would only end the subshell, so check before building the path.
+[ -n "${HOLLER_STATE_DIR:-}" ] || die "HOLLER_STATE_DIR is unset or empty; refusing to guess a state directory (pass the instance's own, the default one included)"
 LEDGER="$(state_dir)/wizard-ledger.toml"
 
 trim() { sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'; }

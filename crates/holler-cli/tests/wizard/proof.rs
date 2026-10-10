@@ -236,7 +236,7 @@ impl Inst {
     }
 
     fn first(host: &Host) -> Inst {
-        Inst::new(host, "inst-a", "alpha", 443)
+        Inst::new(host, "inst-a", "alpha", 8444)
     }
 
     fn second(host: &Host) -> Inst {

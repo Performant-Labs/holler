@@ -135,16 +135,22 @@ do_restart() {
 }
 
 do_check_port() {
-  local sd="$1" port="$2" pids p worst=0 rc
+  local sd="$1" port="$2" pids p worst=0 rc have_ss=no
   is_num "$port" || die "not a port: $port"
   pids=""
   # ss first: lsof run as a non-root user cannot see another user's listener and says FREE.
   if command -v ss >/dev/null 2>&1; then
+    have_ss=yes
     pids="$(ss -H -ltnp "sport = :$port" 2>/dev/null | sed -n 's/.*pid=\([0-9][0-9]*\).*/\1/p' | sort -u)"
   elif command -v lsof >/dev/null 2>&1; then
     pids="$(lsof -nP -iTCP:"$port" -sTCP:LISTEN -t 2>/dev/null | sort -u)"
   else
     die "need lsof or ss to look up who holds port $port"
+  fi
+  if [ -z "$pids" ] && [ "$have_ss" = yes ] && ss -H -ltn "sport = :$port" 2>/dev/null | grep -q .; then
+    # A listener owned by another user shows no pid=: it is held, by someone we cannot name.
+    echo "HELD port $port by an unidentified process"
+    return 2
   fi
   if [ -z "$pids" ]; then
     echo "FREE port $port"

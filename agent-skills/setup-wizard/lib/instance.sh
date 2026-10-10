@@ -150,6 +150,11 @@ END {
         if (herdr == "") err("[instance] a non-default instance must set herdr_session")
     }
 
+    if (nondefault) {
+        if (hub_port == D_hub_port) err("[instance] hub_port must not be " D_hub_port " (the default) for a non-default instance: another instance may own it")
+        if (serve == D_serve) err("[instance] serve_https_port must not be " D_serve " (the default) for a non-default instance: another instance may own it")
+    }
+
     # Resolve each session backend port: its own backend_port, else base + index. With no
     # [instance] table the endpoint port is used, exactly as before this table existed.
     for (i = 1; i <= nsess; i++) {
@@ -167,6 +172,11 @@ END {
         }
         rport[i] = p
     }
+    allown = 1
+    for (i = 1; i <= nsess; i++) if (sport[i] == "") allown = 0
+    if (nondefault && !allown) for (i = 1; i <= nsess; i++)
+        if (rport[i] != "" && rport[i] >= D_base && rport[i] < D_base + nsess)
+            err("[instance] backend_port_base must keep session " sname[i] " off port " rport[i] " (the default range " D_base " to " (D_base + nsess - 1) ") unless every session sets its own backend_port")
     for (i = 1; i <= nsess; i++) for (j = i + 1; j <= nsess; j++)
         if (rport[i] != "" && rport[i] == rport[j] && shost[i] == shost[j])
             err("sessions " sname[i] " and " sname[j] " both resolve to backend port " rport[i] " on host " (shost[i] == "" ? "(unset)" : shost[i]))
