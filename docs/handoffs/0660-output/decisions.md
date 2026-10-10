@@ -202,3 +202,30 @@
   post-audit byte change to the handoff docs is editorial (paths only — no verdict, evidence or
   finding altered) and is recorded here; the merge crossing's artifact verification had already
   passed, and a re-statement at merge runs nothing.
+
+## 2026-10-10 ~12:10 AM MDT — Chain Summary (run closed: merged), O
+
+**Outcome: #660 delivered test-only via PR #713 (squash `76ffd0e`, merged 00:05 MDT; issue auto-closed; main CI green).**
+
+- **The chain that mattered:** the survey reframed a dated premise (#670/#676 had already built
+  `output.rs`) into the real deliverable — the conformance layer. T-red proved the reframing right by
+  going **green-on-contact**; the operator's named decision (test-only continuation, no sham F)
+  turned an awkward RED policy into the honest outcome. A-dup held its plan-time checkpoint (the
+  #638 checker is now the one conformance authority; `one_envelope` shrank in use); S verified all
+  seven checkboxes against the tests that actually assert them.
+- **Recovered from:** a dead mid-t-red session (re-rooted to the primary; stale GREEN baseline
+  superseded), mis-routed handoff files (byte-identical, deleted), a stale brief (de-pathed), two
+  workspace-suite flakes under sibling-cargo load (`remote_admin_test`, then `body_run_test` — both
+  pass in isolation, load 31+ with 6 concurrent cargos; diagnosed, journaled, never routed to F), and
+  a pr-agent info-exposure finding (home paths scrubbed in `677dac9`; agent ids kept per 647
+  precedent).
+- **Follow-ups for the next stories:** (1) workspace-suite stability under concurrent cargo load
+  deserves its own story — the skip-list already carries one known flaky load test; (2) the
+  crate-wide fmt drift (~2,916 hunks under rustfmt 1.9.0) predates every current branch — reconcile
+  before it collides with a fmt-gated CI; (3) `output_api.rs` at 753 lines: split the #660 tail into
+  a `pane_verbs/` submodule when next touched; (4) the STUBS-riding diagnostic test expires when the
+  last pane stub goes live; (5) two production advisories deliberately left open (blank-message
+  `one_line()` under rule 12; zero-item `emit_stream` → `EmptyStream`) — candidates for a future
+  brief, not this one.
+- **Wayfinder:** epic #633 wave 3 — #660 was the output-envelope story; unblock the next wave-3
+  story per the map.
