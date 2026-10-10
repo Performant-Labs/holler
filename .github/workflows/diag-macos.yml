@@ -1,0 +1,17 @@
+name: diag-macos
+on: pull_request
+jobs:
+  diag:
+    runs-on: macos-latest
+    steps:
+      - shell: /bin/bash {0}
+        run: |
+          /bin/bash --version | head -1
+          /bin/bash -c 'exec -a "herdr --session x server 900" sleep 5' &
+          sleep 1
+          echo "--- ps -ww -eo (grep herdr)"
+          ps -ww -eo pid=,user=,lstart=,command= | grep -v grep | grep "herdr" | cat -A | head
+          echo "--- ps -p"
+          ps -ww -o pid=,user=,lstart=,command= -p $! | cat -A
+          echo "--- ps -p comma"
+          ps -ww -o pid=,user=,lstart=,command= -p $!,$$ | cat -A
