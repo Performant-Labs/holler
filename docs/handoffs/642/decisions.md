@@ -241,3 +241,19 @@
   `git commit --fixup=5d20f61` and an `--autosquash` rebase onto origin/main, before any push.
 - **Evidence:** `git grep -i` over the branch tree finds no remaining occurrence; `git log --all -S` names only 5d20f61;
   `git ls-remote` shows no `issue-642-implementation` branch on origin.
+
+## O (S rework round, rebase and gate carry-over): 2026-10-10T00:25:00-06:00
+
+**Decided.** S's one REWORK (the operator's machine name in `handoff-T-green.md`) was fixed by T in the working tree; O folded
+the fix into the t-green commit with an autosquash, so no commit on the branch holds the name (checked with `git log -S` over the
+branch). Then `origin/main` (abdcbb6) was merged, with the four conflicts settled as S's advisory 3 and A-dup's W-1 say:
+ADR-0021 "Deferred" keeps main's `HerdrPort` sentence and the #700 and #695 items; `stub.rs` keeps `on_refused_port` as the only
+public refused-port entry point and gives the private `closed_port` #708's held-connection body; `hermetic_test.rs` keeps its
+header; CHANGELOG keeps both entries.
+
+**Assumed.** The diff gate is not re-run for this round. The script's re-run of it after T-green built the same 64,093-token
+prompt and was refused again at the 64,000-token ceiling, and the only change since the hand-run PASS (r3, ff48da5's entry) is
+handoff text and the `stub.rs` merge. Hermetic 30/30, attach 23/23, tui 13/13 and clippy `-D warnings` pass after the merge.
+
+**Evidence.** `cargo test -p holler-adapter-opencode`; `cargo clippy --workspace --all-targets -- -D warnings`; `scripts/lint.sh` exit 0;
+`git diff origin/main -- crates/holler-pane` shows only `//!` and `///` lines.
