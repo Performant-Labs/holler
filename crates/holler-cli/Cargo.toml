@@ -506,3 +506,11 @@ path = "tests/pane_integration/main.rs"
 [[test]]
 name = "profile_apply_scenario"
 path = "tests/profile_apply_scenario/main.rs"
+
+# Pins the committed Aftersight OpenCode pipeline files (issue #704): the pin
+# (and #674's claude entry left whole), the shared config's verify command and
+# the stage-model table, the role models and plugin path in opencode.json, and
+# the machine-independence of every committed pipeline file.
+[[test]]
+name = "pipeline_config_test"
+path = "tests/pipeline_config_test.rs"

@@ -16,9 +16,6 @@ use crate::{assert_no_failures, holler, PANE_VERBS, PROFILE_VERBS};
 /// itself.)
 pub const STUBS: &[(&str, &str, u32)] = &[
     // #643
-    ("pane", "list", 643),
-    ("pane", "get", 643),
-    ("pane", "watch", 643),
     // #644
     ("pane", "launch", 644),
     ("pane", "relaunch", 644),
@@ -26,15 +23,11 @@ pub const STUBS: &[(&str, &str, u32)] = &[
     ("pane", "switch", 645),
     ("pane", "reset", 645),
     // #646
-    ("pane", "park", 646),
-    ("pane", "unpark", 646),
     ("pane", "close", 646),
     // #647
     // #650
     ("pane", "import", 650),
     // #662
-    ("profile", "create", 662),
-    ("profile", "delete", 662),
     // #664
     ("profile", "apply", 664),
     // #665 (proposed: the operator confirms it)

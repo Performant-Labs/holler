@@ -1128,10 +1128,21 @@ dependencies = [
 [[package]]
 name = "holler-adapter-host"
 version = "0.4.0"
+dependencies = [
+ "holler-pane",
+ "holler-pane-testkit",
+ "tempfile",
+]
 
 [[package]]
 name = "holler-adapter-opencode"
 version = "0.4.0"
+dependencies = [
+ "holler-pane",
+ "holler-pane-testkit",
+ "httparse",
+ "serde_json",
+]
 
 [[package]]
 name = "holler-body"
