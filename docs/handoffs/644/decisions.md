@@ -91,3 +91,41 @@
   - The RED run: `cargo test -p holler-cli --test pane_verbs -- launch:: relaunch::` gives 3 passed, 54 failed, and each failure's first assertion is listed in handoff-T-red.md.
   - Clean gates: `cargo clippy --workspace --all-targets -- -D warnings`, `scripts/lint.sh`, rustfmt on the 8 touched files, `cli_surface_test` + `docs_cli_test` + `pane_cli_process`, the other 133 `pane_verbs` tests, `holler-pane`, and `test-hooks.sh`.
   - Sources: `clap_builder-4.6.6/src/derive.rs:366`; the test kit's `harness.rs`, `herdr.rs`, `host.rs`, `prober.rs`, `fixture.rs` and `profile_scope.rs`; `tests/pane_verbs/{list.rs, park/rig.rs, doctor/rig.rs, process/*.rs}`.
+
+## F (implementation) — 2026-10-10T00:15:05-06:00
+- **Decided:**
+  - The engine fills T's stubs behind the brief's binding API (handoff-F.md).
+    - Both verbs run one path: `Plan::new`, `Plan::observe` for steps 3-6, `run` for `edit_spec` with the act, then `act_live`.
+    - A relaunch differs only through `Plan.old`: B1/B2 and B10, the record's generation at R, and it keeps the record's hold, DRIVEN and profile.
+  - The verbs share `launch.rs`'s `effective_spec`, `emit_outcome`, `Verb`, `stored_profile` and `spec_of`. The reconcile step is #663's `reconcile_step`, appended only when the message lacks it.
+  - A's warns applied:
+    - warn 1: untrusted text goes through `findings::quoted` and `embedded`, and the success line through `list::text_value`;
+    - warn 2: O1 uses `reconcile::shown_differs`;
+    - warn 6: the `TxOptions` doc says why `now_ms` is a function;
+    - warn 7: ADR edits anchored by content, the `unavailable` reason amended, the "step names the pane" follow-up dropped;
+    - warns 3 and 5: in the section 8 "as built" note.
+  - Choices within the brief's latitude:
+    - the port policy is parsed before the probe;
+    - `pane_store.list()` runs only to word a `grid-occupied` refusal;
+    - B8 lists sessions only when the record has a session of record;
+    - the rollback note names each failed call;
+    - E0 says "the spec gives";
+    - `with_note` reuses the crate's `detail`/`from_wire` mapping, not a second list of variants.
+- **Assumed:**
+  - A budget that runs out before R rolls back, like a failed step, because R has not run. The brief lists R among the live steps the budget guards.
+  - "Created" means the plan's snapshot did not list the pane, matched by session and pane id, for launch and relaunch alike (decision 12).
+  - A scope that answers `Ok` without running the act is a broken contract and gives `unavailable`. Neither scope can reach this.
+- **Hedged:**
+  - `tx_launch.rs` is 786 lines: past `lint.sh`'s 600-line warning and under the stack's ~850 decompose line. The brief's size fallback applies: one shared step runner, and no new file outside the blast radius.
+  - `origin/main` moved (#713 and #640) after the merge base `d9eabbb`. A merge will conflict in ADR-0021's section 9 launch row and the `timeout`/`unavailable` cells, and probably in `CHANGELOG.md`. The merged #640 docs also say `Timeout.op` names a port method, while the engine's budget `op` is `pane.launch` (binding API, AC 24). Both are listed for S and the MO in handoff-F.md.
+  - The issue's 2026-10-09 `--agent` amendment (#700, open) is not in the brief and cannot be built until #700 lands. S judges it.
+- **Evidence:**
+  - RED to GREEN: `cargo test -p holler-cli --test pane_verbs -- launch:: relaunch::` passes 57 of 57 (RED was 3 passed, 54 failed), and 10 of 10 repeated runs pass.
+  - Gates:
+    - the whole `pane_verbs` target (187), `cli_surface_test`, `docs_cli_test` and `pane_cli_process` (34);
+    - `cargo test -p holler-pane`;
+    - `cargo test --workspace`: 1676 passed, 0 failed, 14 ignored;
+    - `cargo clippy --workspace --all-targets -- -D warnings`;
+    - rustfmt on the 8 touched `.rs` files;
+    - `lint.sh`, `changelog-check.sh`, and the AC 25, 27 and 29 greps.
+  - `docs/handoffs/644/evidence.md` (nine facts, with `file:line`). `git diff d9eabbb origin/main` gave the merge-interaction findings.
