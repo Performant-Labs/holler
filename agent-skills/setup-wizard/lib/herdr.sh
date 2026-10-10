@@ -9,15 +9,20 @@
 # bash 3.2 compatible (no associative arrays, no GNU-only flags): runs on Linux and macOS.
 #
 # Configuration (environment, set from the instance table by the skill):
-#   WIZARD_INSTANCE_NAME    the instance `name` (empty or "default" = the default instance)
+#   WIZARD_INSTANCE_NAME    the instance `name`; REQUIRED. An unset or empty value is refused
+#                           (exit 2): the literal "default" is the default instance
+#   HERDR_BIN               the herdr binary when it is not on PATH (default: herdr)
+#   WIZARD_LIB              where ledger.sh lives (default: this script's own directory)
 #   WIZARD_HERDR_SESSION    the instance `herdr_session` (empty = no named session)
 #   WIZARD_INSTANCE_PREFIX  the instance `prefix` (default: the instance name)
 #   WIZARD_LEDGER           the ledger file (default: ${WIZARD_STATE_DIR}/wizard-ledger.toml)
-#   WIZARD_LOG_DIR          where the server log goes (default: ${TMPDIR:-/tmp})
+#   WIZARD_STATE_DIR        the instance state directory (default: $HOME/.holler)
+#   WIZARD_LOG_DIR          where the server log goes (default: <state dir>/logs, created)
 #
 # Verbs:
 #   run <herdr args...>   run `herdr --session <name> <args...>`
-#   server-start          start the headless server in the background, logging to log-path
+#   server-start          start the headless server in the background, logging to log-path;
+#                         prints the server's pid alone on the first stdout line
 #   check-session         refuse when the named session exists and the ledger did not create it
 #   check-pane            refuse when this process runs in a pane of a different session
 #   log-path              print the server log path for this instance
@@ -28,9 +33,17 @@ die() {
   exit 1
 }
 
-instance="${WIZARD_INSTANCE_NAME:-}"
+# An unset name must never act as the default instance: shell variables do not persist between
+# the agent's commands, and a lost name would otherwise land on the operator's live default Herdr.
+if [ -z "${WIZARD_INSTANCE_NAME:-}" ]; then
+  echo "herdr.sh: WIZARD_INSTANCE_NAME is not set; refusing to run (use the literal 'default' for the default instance)" >&2
+  exit 2
+fi
+instance="$WIZARD_INSTANCE_NAME"
 session="${WIZARD_HERDR_SESSION:-}"
 [ "$instance" = "default" ] && instance=""
+herdr_bin="${HERDR_BIN:-herdr}"
+lib_dir="${WIZARD_LIB:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 
 # A non-default instance must name its Herdr session; never fall back to the default session.
 if [ -n "$instance" ] && [ -z "$session" ]; then
@@ -50,9 +63,9 @@ fi
 # Runs herdr with the session flag when one is configured.
 herdr_cmd() {
   if [ -n "$session" ]; then
-    herdr --session "$session" "$@"
+    "$herdr_bin" --session "$session" "$@"
   else
-    herdr "$@"
+    "$herdr_bin" "$@"
   fi
 }
 
@@ -76,19 +89,31 @@ ledger_file() {
   fi
 }
 
-# Exit 0 when the ledger records a `herdr` process for this session name.
+# The directory `ledger.sh` reads: the ledger file's own directory when WIZARD_LEDGER is set,
+# else the instance state directory.
+ledger_state_dir() {
+  if [ -n "${WIZARD_LEDGER:-}" ]; then
+    dirname "$WIZARD_LEDGER"
+  elif [ -n "${WIZARD_STATE_DIR:-}" ]; then
+    printf '%s\n' "$WIZARD_STATE_DIR"
+  fi
+}
+
+# Exit 0 when `ledger.sh list` shows a LIVE `herdr` row for this session name (a stale row, a
+# row of another role or of another session does not count).
 ledger_created() {
-  f="$(ledger_file)"
-  [ -n "$f" ] && [ -f "$f" ] || return 1
-  awk -v want="$1" '
-    function val(s) { sub(/^[^=]*=[ \t]*/, "", s); gsub(/^"|"[ \t]*$/, "", s); return s }
-    function flush() { if (role == "herdr" && sess == want) found = 1 }
-    /^\[\[process\]\]/ { flush(); role = ""; sess = ""; next }
-    /^\[/ { flush(); role = ""; sess = ""; next }
-    /^role[ \t]*=/ { role = val($0) }
-    /^session[ \t]*=/ { sess = val($0) }
-    END { flush(); exit(found ? 0 : 1) }
-  ' "$f"
+  dir="$(ledger_state_dir)"
+  [ -n "$dir" ] || return 1
+  rows="$(HOLLER_STATE_DIR="$dir" bash "$lib_dir/ledger.sh" list 2>/dev/null)" || return 1
+  tab="$(printf '\t')"
+  while IFS="$tab" read -r _pid state role _stage sess _cmd; do
+    if [ "$state" = "live" ] && [ "$role" = "herdr" ] && [ "$sess" = "$1" ]; then
+      return 0
+    fi
+  done <<EOF3
+$rows
+EOF3
+  return 1
 }
 
 check_session() {
@@ -123,7 +148,13 @@ check_pane() {
 }
 
 log_path() {
-  dir="${WIZARD_LOG_DIR:-${TMPDIR:-/tmp}}"
+  if [ -n "${WIZARD_LOG_DIR:-}" ]; then
+    dir="$WIZARD_LOG_DIR"
+  elif [ -n "${WIZARD_STATE_DIR:-}" ]; then
+    dir="$WIZARD_STATE_DIR/logs"
+  else
+    dir="${HOME:-.}/.holler/logs"
+  fi
   prefix="${WIZARD_INSTANCE_PREFIX:-$instance}"
   if [ -n "$prefix" ]; then
     printf '%s\n' "$dir/$prefix-herdr-server.log"
@@ -157,9 +188,16 @@ case "$verb" in
     herdr_cmd "$@"
     ;;
   server-start)
-    [ -n "$session" ] || die "server-start needs a herdr_session"
+    # The default instance (empty session) starts an unnamed server; a named instance's server
+    # always carries its session (an empty session on a non-default instance is refused above).
     log="$(log_path)"
-    nohup herdr --session "$session" server >"$log" 2>&1 &
+    mkdir -p "$(dirname "$log")" || die "cannot create the log directory for $log"
+    # nohup execs herdr, so $! is the server's own pid, not a wrapper's.
+    if [ -n "$session" ]; then
+      { nohup "$herdr_bin" --session "$session" server >"$log" 2>&1 & echo $!; }
+    else
+      { nohup "$herdr_bin" server >"$log" 2>&1 & echo $!; }
+    fi
     ;;
   check-session) check_session ;;
   check-pane) check_pane ;;

@@ -37,6 +37,7 @@ impl Env {
             &fake,
             "#!/bin/sh\n\
              echo \"$*\" >> \"$FAKE_HERDR_LOG\"\n\
+             echo \"$$\" >> \"$FAKE_HERDR_LOG.pid\"\n\
              case \"$*\" in\n\
              *\"session list\"*) cat \"$FAKE_HERDR_SESSIONS\" ;;\n\
              esac\n\
@@ -75,11 +76,12 @@ impl Env {
         p
     }
 
-    /// `herdr.sh <args>` for the instance `<instance>` / Herdr session `<session>` (empty = none).
-    fn run(&self, instance: &str, session: &str, args: &[&str]) -> Output {
+    /// A `herdr.sh <args>` command with the fake first on `PATH`; `instance` of `None` leaves
+    /// `WIZARD_INSTANCE_NAME` unset. No log directory or state directory is set.
+    fn base(&self, instance: Option<&str>, session: &str, args: &[&str]) -> Command {
         let old_path = std::env::var("PATH").unwrap_or_default();
-        Command::new("bash")
-            .arg(script())
+        let mut c = Command::new("bash");
+        c.arg(script())
             .args(args)
             .env(
                 "PATH",
@@ -87,35 +89,39 @@ impl Env {
             )
             .env("FAKE_HERDR_LOG", self.log_file())
             .env("FAKE_HERDR_SESSIONS", self.path().join("sessions.txt"))
-            .env("WIZARD_INSTANCE_NAME", instance)
             .env("WIZARD_HERDR_SESSION", session)
             .env("WIZARD_LEDGER", self.path().join("wizard-ledger.toml"))
-            .env("WIZARD_LOG_DIR", self.path())
+            .env("HOME", self.path())
+            .env("TMPDIR", self.path().join("tmp"))
+            .env_remove("WIZARD_LOG_DIR")
+            .env_remove("WIZARD_STATE_DIR")
+            .env_remove("WIZARD_INSTANCE_PREFIX")
+            .env_remove("HERDR_BIN")
+            .env_remove("WIZARD_LIB")
+            .env_remove("HOLLER_STATE_DIR")
             .env_remove("HERDR_PANE_ID")
             .env_remove("HERDR_SESSION")
-            .current_dir(self.path())
+            .current_dir(self.path());
+        match instance {
+            Some(i) => c.env("WIZARD_INSTANCE_NAME", i),
+            None => c.env_remove("WIZARD_INSTANCE_NAME"),
+        };
+        c
+    }
+
+    /// `herdr.sh <args>` for the instance `<instance>` / Herdr session `<session>` (empty = none).
+    fn run(&self, instance: &str, session: &str, args: &[&str]) -> Output {
+        self.base(Some(instance), session, args)
+            .env("WIZARD_LOG_DIR", self.path())
             .output()
             .unwrap()
     }
 
     fn run_in_pane(&self, session: &str, pane_session: &str, args: &[&str]) -> Output {
-        let old_path = std::env::var("PATH").unwrap_or_default();
-        Command::new("bash")
-            .arg(script())
-            .args(args)
-            .env(
-                "PATH",
-                format!("{}:{old_path}", self.path().join("bin").display()),
-            )
-            .env("FAKE_HERDR_LOG", self.log_file())
-            .env("FAKE_HERDR_SESSIONS", self.path().join("sessions.txt"))
-            .env("WIZARD_INSTANCE_NAME", "second")
-            .env("WIZARD_HERDR_SESSION", session)
-            .env("WIZARD_LEDGER", self.path().join("wizard-ledger.toml"))
+        self.base(Some("second"), session, args)
             .env("WIZARD_LOG_DIR", self.path())
             .env("HERDR_PANE_ID", "p1")
             .env("HERDR_SESSION", pane_session)
-            .current_dir(self.path())
             .output()
             .unwrap()
     }
@@ -127,6 +133,43 @@ fn text(o: &Output) -> String {
         String::from_utf8_lossy(&o.stdout),
         String::from_utf8_lossy(&o.stderr)
     )
+}
+
+/// A real, harmless process the fixture ledger can describe with `ps` exactly as the ledger does.
+struct LiveProcess {
+    child: std::process::Child,
+}
+
+impl LiveProcess {
+    fn start() -> LiveProcess {
+        let child = Command::new("sleep").arg("60").spawn().unwrap();
+        LiveProcess { child }
+    }
+
+    fn ps(&self, field: &str) -> String {
+        let out = Command::new("ps")
+            .env("LC_ALL", "C")
+            .args(["-o", field, "-p", &self.child.id().to_string()])
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&out.stdout).trim().to_owned()
+    }
+
+    /// The ledger table for this process as a `herdr` row of `session`.
+    fn ledger_row(&self, session: &str) -> String {
+        format!(
+            "[[process]]\npid = {}\nstarted = \"{}\"\ncmd = \"{}\"\nrole = \"herdr\"\n\
+             stage = 8\nsession = \"{session}\"\n",
+            self.child.id(),
+            self.ps("lstart="),
+            self.ps("command=")
+        )
+    }
+
+    fn stop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
 }
 
 fn ledger_with_herdr(session: &str) -> String {
@@ -164,9 +207,39 @@ fn refuses_an_existing_session_when_there_is_no_ledger_at_all() {
 #[test]
 fn a_session_the_ledger_created_is_accepted() {
     let env = Env::new(&["second"]);
-    env.write_ledger(&ledger_with_herdr("second"));
+    let mut live = LiveProcess::start();
+    env.write_ledger(&live.ledger_row("second"));
     let out = env.run("second", "second", &["check-session"]);
+    live.stop();
     assert!(out.status.success(), "{}", text(&out));
+}
+
+#[test]
+fn a_stale_herdr_row_does_not_count_as_created_by_the_wizard() {
+    let env = Env::new(&["second"]);
+    let mut live = LiveProcess::start();
+    // Right pid, but the recorded start time differs: a reused pid, stale.
+    let row = live
+        .ledger_row("second")
+        .replace("started = \"", "started = \"not ");
+    env.write_ledger(&row);
+    let out = env.run("second", "second", &["check-session"]);
+    live.stop();
+    assert!(!out.status.success(), "{}", text(&out));
+    assert!(text(&out).contains("second"), "{}", text(&out));
+}
+
+#[test]
+fn a_live_row_of_another_role_does_not_count() {
+    let env = Env::new(&["second"]);
+    let mut live = LiveProcess::start();
+    let other_role = live
+        .ledger_row("second")
+        .replace("role = \"herdr\"", "role = \"hub\"");
+    env.write_ledger(&other_role);
+    let out = env.run("second", "second", &["check-session"]);
+    live.stop();
+    assert!(!out.status.success(), "{}", text(&out));
 }
 
 #[test]
@@ -184,8 +257,24 @@ fn every_stage_command_carries_the_session_and_no_bare_server_stop_is_issued() {
         &["run", "status"],
         &["run", "pane", "list"],
         &["run", "workspace", "list"],
-        &["run", "pane", "split", "--pane", "p1", "--direction", "right"],
-        &["run", "pane", "split", "--pane", "p2", "--direction", "down"],
+        &[
+            "run",
+            "pane",
+            "split",
+            "--pane",
+            "p1",
+            "--direction",
+            "right",
+        ],
+        &[
+            "run",
+            "pane",
+            "split",
+            "--pane",
+            "p2",
+            "--direction",
+            "down",
+        ],
         &["run", "pane", "run", "p2", "cd /x && cmd"],
         &["run", "pane", "send-keys", "p2", "enter"],
         &["run", "pane", "read", "p2"],
@@ -223,13 +312,148 @@ fn every_stage_command_carries_the_session_and_no_bare_server_stop_is_issued() {
 #[test]
 fn server_stop_without_a_session_is_refused_even_for_the_default_instance() {
     let env = Env::new(&[]);
-    for (instance, session) in [("", ""), ("default", "")] {
-        let out = env.run(instance, session, &["run", "server", "stop"]);
-        assert!(!out.status.success(), "{}", text(&out));
-        let out = env.run(instance, session, &["run", "session", "attach"]);
+    for args in [
+        &["run", "server", "stop"][..],
+        &["run", "session", "attach"],
+    ] {
+        let out = env.run("default", "", args);
         assert!(!out.status.success(), "{}", text(&out));
     }
     assert!(env.recorded().is_empty(), "{:?}", env.recorded());
+}
+
+#[test]
+fn an_unset_instance_name_refuses_every_verb_and_runs_no_herdr() {
+    let env = Env::new(&[]);
+    for args in [
+        &["run", "status"][..],
+        &[
+            "run",
+            "pane",
+            "split",
+            "--pane",
+            "p1",
+            "--direction",
+            "right",
+        ],
+        &["run", "pane", "run", "p1", "x"],
+        &["run", "pane", "send-keys", "p1", "enter"],
+        &["server-start"],
+        &["check-session"],
+        &["check-pane"],
+        &["log-path"],
+    ] {
+        for session in ["", "second"] {
+            let out = env.base(None, session, args).output().unwrap();
+            assert_eq!(out.status.code(), Some(2), "{args:?}: {}", text(&out));
+            let err = String::from_utf8_lossy(&out.stderr).into_owned();
+            assert_eq!(err.trim().lines().count(), 1, "{err}");
+            assert!(err.contains("WIZARD_INSTANCE_NAME"), "{err}");
+        }
+    }
+    assert!(env.recorded().is_empty(), "{:?}", env.recorded());
+}
+
+/// Runs `server-start` and returns (output, the pid the fake recorded for itself last).
+fn start_server(env: &Env, mut c: Command) -> (Output, String) {
+    let pid_file = format!("{}.pid", env.log_file().display());
+    let lines = |f: &str| fs::read_to_string(f).unwrap_or_default().lines().count();
+    let before = lines(&pid_file);
+    let out = c.output().unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while lines(&pid_file) <= before && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let all = fs::read_to_string(&pid_file).unwrap_or_default();
+    let pid = all.lines().last().unwrap_or("").to_owned();
+    (out, pid)
+}
+
+fn first_line(o: &Output) -> String {
+    String::from_utf8_lossy(&o.stdout)
+        .lines()
+        .next()
+        .unwrap_or("")
+        .to_owned()
+}
+
+#[test]
+fn the_default_instance_without_a_session_starts_an_unnamed_server_and_prints_its_pid() {
+    let env = Env::new(&[]);
+    let c = env.base(Some("default"), "", &["server-start"]);
+    let (out, server_pid) = start_server(&env, c);
+    assert!(out.status.success(), "{}", text(&out));
+    let first = first_line(&out);
+    assert!(
+        !first.is_empty() && first.chars().all(|c| c.is_ascii_digit()),
+        "{first:?}"
+    );
+    assert_eq!(first, server_pid, "the printed pid is not the server's");
+    assert_eq!(env.recorded(), vec!["server".to_owned()]);
+}
+
+#[test]
+fn a_named_session_prints_the_servers_pid_alone_on_its_first_line() {
+    let env = Env::new(&[]);
+    let c = env.base(Some("second"), "second", &["server-start"]);
+    let (out, server_pid) = start_server(&env, c);
+    assert!(out.status.success(), "{}", text(&out));
+    assert_eq!(first_line(&out), server_pid);
+    assert_eq!(env.recorded(), vec!["--session second server".to_owned()]);
+}
+
+#[test]
+fn the_server_log_defaults_under_the_state_directory_and_never_under_tmp() {
+    let env = Env::new(&[]);
+    let state = env.path().join("state");
+    let mut c = env.base(Some("second"), "second", &["server-start"]);
+    c.env("WIZARD_STATE_DIR", &state);
+    let (out, _) = start_server(&env, c);
+    assert!(out.status.success(), "{}", text(&out));
+    let log = state.join("logs/second-herdr-server.log");
+    assert!(log.exists(), "{} missing", log.display());
+    assert!(!env.path().join("tmp").exists(), "TMPDIR was used");
+    let mut p = env.base(Some("second"), "second", &["log-path"]);
+    p.env("WIZARD_STATE_DIR", &state);
+    let shown = String::from_utf8_lossy(&p.output().unwrap().stdout)
+        .trim()
+        .to_owned();
+    assert_eq!(shown, log.display().to_string());
+}
+
+#[test]
+fn without_a_state_directory_the_log_goes_under_home_dot_holler_logs() {
+    let env = Env::new(&[]);
+    let c = env.base(Some("second"), "second", &["server-start"]);
+    let (out, _) = start_server(&env, c);
+    assert!(out.status.success(), "{}", text(&out));
+    assert!(env
+        .path()
+        .join(".holler/logs/second-herdr-server.log")
+        .exists());
+    assert!(!env.path().join("tmp").exists(), "TMPDIR was used");
+}
+
+#[test]
+fn herdr_bin_names_the_binary_when_it_is_not_on_path() {
+    let env = Env::new(&[]);
+    let off = env.path().join("off-path");
+    fs::create_dir(&off).unwrap();
+    let named = off.join("herdr-custom");
+    fs::copy(env.path().join("bin/herdr"), &named).unwrap();
+    fs::remove_file(env.path().join("bin/herdr")).unwrap();
+    let mut c = env.base(Some("second"), "second", &["run", "status"]);
+    c.env("HERDR_BIN", &named);
+    let out = c.output().unwrap();
+    assert!(out.status.success(), "{}", text(&out));
+    assert_eq!(env.recorded(), vec!["--session second status".to_owned()]);
+    let mut s = env.base(Some("second"), "second", &["server-start"]);
+    s.env("HERDR_BIN", &named);
+    let (started, _) = start_server(&env, s);
+    assert!(started.status.success(), "{}", text(&started));
+    assert!(env
+        .recorded()
+        .contains(&"--session second server".to_owned()));
 }
 
 #[test]
@@ -251,7 +475,7 @@ fn a_non_default_instance_without_a_session_name_is_refused() {
 #[test]
 fn the_default_instance_runs_commands_as_before() {
     let env = Env::new(&[]);
-    let out = env.run("", "", &["run", "pane", "list"]);
+    let out = env.run("default", "", &["run", "pane", "list"]);
     assert!(out.status.success(), "{}", text(&out));
     assert_eq!(env.recorded(), vec!["pane list".to_owned()]);
 }
@@ -283,7 +507,15 @@ fn a_pane_of_a_different_session_stops_before_any_split() {
     let split = env.run_in_pane(
         "second",
         "other",
-        &["run", "pane", "split", "--pane", "p1", "--direction", "right"],
+        &[
+            "run",
+            "pane",
+            "split",
+            "--pane",
+            "p1",
+            "--direction",
+            "right",
+        ],
     );
     assert!(!split.status.success(), "{}", text(&split));
     assert!(
@@ -317,14 +549,13 @@ fn the_server_log_is_named_for_the_instance() {
     let p = String::from_utf8_lossy(&out.stdout).trim().to_owned();
     assert!(p.contains("second"), "{p}");
     assert!(p.starts_with(env.path().to_str().unwrap()), "{p}");
-    let def = env.run("", "", &["log-path"]);
+    let def = env.run("default", "", &["log-path"]);
     assert!(String::from_utf8_lossy(&def.stdout).contains("herdr-server.log"));
 }
 
 #[test]
 fn the_skill_runs_stages_8_and_9_through_the_wrapper_and_forbids_a_bare_server_stop() {
-    let skill =
-        fs::read_to_string(repo_root().join("agent-skills/setup-wizard/SKILL.md")).unwrap();
+    let skill = fs::read_to_string(repo_root().join("agent-skills/setup-wizard/SKILL.md")).unwrap();
     let start = skill.find("## Stage 8 ").expect("stage 8");
     let end = skill.find("## Stage 10 ").expect("stage 10");
     let section = &skill[start..end];
