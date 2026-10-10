@@ -8,6 +8,19 @@ fills this file in at release time.
 ## [Unreleased]
 
 ### Enhancements
+- Herdr display plugin (epic [#633](https://github.com/Performant-Labs/holler/issues/633)):
+  the new `plugins/herdr-holler` crate is the display-only Herdr sidebar plugin — a
+  `herdr-plugin.toml` plus the `herdr-holler refresh` binary. It reads the hub's pane registry
+  (`pane/list` over the control socket through the merged one-shot client) and reports, per pane,
+  the project, SHOWN against DRIVEN (through the one `shown_differs` rule, mirroring
+  `holler pane list`'s SYNC cell) and the hold as `pane.report_metadata` tokens under the one
+  source id `holler`, with a pane-only TTL; the workspace row carries the profile name. When the
+  hub is unreachable it actively re-reports every token as `unknown` rather than leaving stale
+  facts reading as current. It is display only by construction and by test: its Herdr client's
+  method enum is closed over the two `report_metadata` methods, every action it offers is an argv
+  call to a `holler pane` verb, and an allowlist test fails the build if the crate's sources or
+  manifest name any other Herdr method
+  ([#651](https://github.com/Performant-Labs/holler/issues/651)).
 - Pane control, slice a of the skeleton (epic [#633](https://github.com/Performant-Labs/holler/issues/633)):
   the new `holler-pane` crate holds the contract that the pane-control stories build against in
   parallel. It has the `Pane`, `Profile` and `ProfileSpec` records, `GridPos` (rows and columns from 1),

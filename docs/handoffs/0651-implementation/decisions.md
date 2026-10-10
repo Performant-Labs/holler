@@ -204,3 +204,21 @@ false (D and U are N/A, recorded). Append-only; every phase adds its entry.
   Herdr sidebar escaping, then apply the CLI rule if needed; (3) two wire-level socket fakes now
   exist in test trees — extract to holler-pane-testkit on a third consumer.
 - No second registry, no second hub client, no path later stories would duplicate.
+
+## 2026-10-10 · Phase S — spec audit PASS (O journals; S = spec-auditor)
+
+- Dispatched via the task tool; recorded with `stage run` (STAGE OK, attempt 1). Phase U:
+  N/A, no UI surface — recorded by the advance, never silent.
+- **VERDICT: PASS.** All seven criteria evidenced (S independently re-ran the narrow suite: 10/10).
+  Display-only is structural: the closed two-variant Method enum plus the allowlist scan (12
+  namespaces, fails on unknown names, catch-behavior verified).
+- Five honest limits surfaced for the merge decision, all journaled upstream, none silent:
+  (1) the "unknown" guarantee is in-process per invocation — one-shot binary, TTL 120 s is the
+  cross-invocation backstop; the closing fix (watch loop or persisted last-shown) is epic
+  follow-up; (2) the actions are placeholders until #649 wires the CLI side (bare argv, no pane
+  operand; `resolve_action_pane` has no production caller yet); (3) workspace `profile` tokens
+  carry no TTL by design (spike §4) and persist while the hub is down; (4) token values verbatim —
+  Herdr sidebar escaping unverified (A-dup warn 2); (5) the operator-approved pipeline-config
+  chore rides this PR.
+- CHANGELOG entry added in the house style (O; docs only) — the house pattern is one
+  `## [Unreleased]` bullet per story.
