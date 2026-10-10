@@ -1,0 +1,248 @@
+#!/usr/bin/env bash
+# pane-restart: restart one fleet pane's OpenCode TUI on a new model, in its existing tmux session.
+# A stop-gap (issue #746) until `holler pane relaunch --model` (#644) and the pfleet adoption (#653) land.
+#
+#   pane-restart PANE --model PROVIDER/ID [--effort E] [--key-file PATH] [--project DIR] [--agent KEY] [--dry-run]
+#
+# PANE is cCrR (the tmux session is hj-PANE, derived, never typed). Steps, in order; the first failure stops the
+# script and names the step:
+#   1 refuse unless the pane is idle and reachable   2 back up pane.env   3 set the OC_ lines in pane.env
+#   4 stop the TUI (/exit, then one Ctrl-C)          5 start it fresh      6 wait for the server
+#   7 wait for the new session to register (and repair pfleet's record with --set-registration)        8 the pane answers on the new model   9 pane-ready says READY
+# Every text typed into a pane is followed by Enter: in the same `tmux send-keys` call for the shell line, as a
+# separate call after a short pause for `/exit` (the TUI's autocomplete popup swallows an Enter sent with it). Only the key file's PATH is written to
+# pane.env; the file is never read or printed. Exit: 0 ok, 1 refused (nothing changed), 2 failed after a change.
+# --mo restarts c4r2, the MO pane: it edits opencode-mo/opencode.json and agents/mo.md instead of pane.env, launches
+# with OC_SESSION_NAME=mo and no --agent, needs --key-file, accepts a busy pane, and skips pane-ready.
+# A pane that is already fully down is started without the stop step; that needs --project.
+# Timeouts (seconds) can be tuned with PANE_RESTART_T_STOP / _T_UP / _T_REG / _T_MODEL and PANE_RESTART_POLL.
+set -uo pipefail
+
+poll=${PANE_RESTART_POLL:-2}
+t_stop=${PANE_RESTART_T_STOP:-20}
+t_up=${PANE_RESTART_T_UP:-60}
+t_reg=${PANE_RESTART_T_REG:-90}
+t_model=${PANE_RESTART_T_MODEL:-120}
+# The TUI opens a command-autocomplete popup on `/exit`; an Enter that arrives in the same instant does nothing.
+type_delay=${PANE_RESTART_TYPE_DELAY:-2}
+
+pane=${1:-}
+[ "$#" -gt 0 ] && shift
+model="" effort="" key_file="" project="" agent="" dry=0 mo=0
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --model) model=${2:-}; shift 2 || break ;;
+    --effort) effort=${2:-}; shift 2 || break ;;
+    --key-file) key_file=${2:-}; shift 2 || break ;;
+    --project) project=${2:-}; shift 2 || break ;;
+    --agent) agent=${2:-}; shift 2 || break ;;
+    --dry-run) dry=1; shift ;;
+    --mo) mo=1; shift ;;
+    *) echo "${pane:-?}: REFUSED: unknown argument '$1' (usage: pane-restart PANE --model PROVIDER/ID [--effort E] [--key-file PATH] [--project DIR] [--agent KEY] [--mo] [--dry-run])"; exit 1 ;;
+  esac
+done
+
+refuse() { echo "${pane:-?}: REFUSED: $*"; exit 1; }
+bak="" changed="pane.env"
+fail_step() { # fail_step N name message: after a change, say what changed
+  echo "$pane: FAIL step $1 ($2): $3${bak:+; $changed was changed, backup: $bak}"
+  exit 2
+}
+wait_for() { # wait_for SECONDS cmd...: poll until cmd succeeds or the bound passes
+  local end=$((SECONDS + $1)); shift
+  while :; do
+    "$@" && return 0
+    [ "$SECONDS" -ge "$end" ] && return 1
+    sleep "$poll"
+  done
+}
+
+# 1. Refuse -------------------------------------------------------------------------------------------------
+[[ "$pane" =~ ^c[0-9]r[0-9]$ ]] || refuse "'$pane' is not a pane name (cCrR)"
+if [ "$mo" = 1 ]; then
+  [ "$pane" = c4r2 ] || refuse "--mo is only for c4r2, the MO pane"
+  [ -n "$key_file" ] || refuse "--mo needs --key-file (the provider key file for MO's config)"
+else
+  [ "$pane" != c4r2 ] || refuse "c4r2 is the MO pane: pass --mo (its config is opencode-mo/, not pane.env)"
+fi
+[ -n "$model" ] || refuse "--model PROVIDER/ID is required"
+[[ "$model" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._:-]+$ ]] || refuse "'$model' is not PROVIDER/ID"
+[ -z "$effort" ] || [[ "$effort" =~ ^[A-Za-z0-9_-]+$ ]] || refuse "'$effort' is not an effort name"
+[ -z "$agent" ] || [[ "$agent" =~ ^[A-Za-z0-9_-]+$ ]] || refuse "'$agent' is not an agent key"
+if [ -n "$key_file" ]; then
+  kf=${key_file/#\$HOME/$HOME}; kf=${kf/#\~/$HOME}
+  [ -f "$kf" ] || refuse "key file $key_file does not exist"
+  [[ "$key_file" =~ ^[A-Za-z0-9_./~\$-]+$ ]] || refuse "key file path has unexpected characters"
+fi
+
+session="hj-$pane"
+state="$HOME/.holler-oc/$session"
+penv="$state/pane.env"
+col=${pane:1:1}; row=${pane:3:1}
+base="http://127.0.0.1:$((47000 + col * 10 + row))"
+
+tmux has-session -t "$session" 2>/dev/null || refuse "no tmux session $session"
+if [ -n "${TMUX_PANE:-}" ]; then
+  own=$(tmux display-message -p -t "$TMUX_PANE" '#{session_name}' 2>/dev/null || true)
+  [ "$own" = "$session" ] && refuse "this script is running inside $session"
+fi
+mo_dir="$HOME/fleet-agents/opencode-mo"
+mo_json="$mo_dir/opencode.json"
+mo_md="$mo_dir/agents/mo.md"
+if [ "$mo" = 1 ]; then
+  [ -f "$mo_json" ] && [ -f "$mo_md" ] || refuse "MO's config files are missing ($mo_json, $mo_md)"
+else
+  [ -f "$penv" ] || refuse "$penv does not exist"
+fi
+oc_holler_running() { pgrep -f "^bash [^ ]*/oc-holler $session( |\$)" >/dev/null 2>&1; }
+down=0
+if status=$(curl -fsS -m 5 "$base/session/status" 2>/dev/null); then
+  # MO is almost always mid-turn (the watchdog feeds it); restarting it only aborts that turn, so --mo allows it.
+  [ "$mo" = 1 ] || [ "$(printf '%s' "$status" | jq -c . 2>/dev/null)" = '{}' ] || refuse "$pane is busy (/session/status is not {})"
+else
+  # A pane that is fully down (no server, no oc-holler: crashed, or its TUI was exited) is started, not stopped.
+  oc_holler_running && refuse "no OpenCode server answering at $base, but oc-holler is still running in $session"
+  [ -n "$project" ] || refuse "$pane is down (no server at $base); pass --project DIR to start it"
+  down=1
+fi
+if [ -n "$project" ]; then
+  [ -d "$project" ] || refuse "project $project is not a directory"
+else
+  project=$(curl -fsS -m 5 "$base/path" 2>/dev/null | jq -r '.directory // empty' 2>/dev/null)
+  [ -n "$project" ] || refuse "cannot read the project directory from $base/path; pass --project"
+fi
+if [ "$mo" = 0 ] && [ -z "$agent" ]; then
+  agent=$(sed -n 's/^\(export[[:space:]]\{1,\}\)\{0,1\}OC_DEFAULT_AGENT=\([A-Za-z0-9_-]*\).*/\2/p' "$penv" | head -1)
+fi
+old_session=$(cat "$state/last-session" 2>/dev/null || true)
+
+# The new pane.env, built beside the old one: a replaced line keeps its place, an absent one is appended, a
+# duplicate is dropped, OC_ROLE_MODEL follows the model only when the file already has it.
+new_env=$(mktemp); new_json=$(mktemp); new_md=$(mktemp)
+trap 'rm -f "$new_env" "$new_json" "$new_md"' EXIT
+if [ "$mo" = 0 ]; then
+PR_OC_MODEL="$model" PR_OC_EFFORT="$effort" PR_OC_KEY_FILE="$key_file" PR_OC_ROLE_MODEL="$model" \
+awk '
+BEGIN { n = split("OC_MODEL OC_EFFORT OC_KEY_FILE OC_ROLE_MODEL", V, " "); for (i = 1; i <= n; i++) val[V[i]] = ENVIRON["PR_" V[i]] }
+{
+  if (match($0, /^(export[ \t]+)?OC_[A-Z_]+=/)) {
+    name = $0; sub(/^(export[ \t]+)?/, "", name); sub(/=.*/, "", name)
+    if ((name in val) && val[name] != "") { if (seen[name]++) next; print "export " name "=" val[name]; next }
+  }
+  print
+}
+END { for (i = 1; i <= n; i++) if (V[i] != "OC_ROLE_MODEL" && val[V[i]] != "" && !seen[V[i]]) print "export " V[i] "=" val[V[i]] }
+' "$penv" > "$new_env"
+
+else
+  # MO: the provider key file, the compaction pin and MO's variant go in opencode-mo/opencode.json (its agent.mo.variant
+  # would win over a variant: line in mo.md), the model in agents/mo.md.
+  jq --arg p "${model%%/*}" --arg kf "$kf" --arg m "$model" --arg e "$effort" \
+    '.provider[$p].options.apiKey = "{file:" + $kf + "}" | .agent.compaction.model = $m | if $e != "" then (.agent.compaction.variant = $e | .agent.mo.variant = $e) else . end' \
+    "$mo_json" > "$new_json" || refuse "cannot build the new $mo_json"
+  awk -v m="$model" -v e="$effort" '
+    /^---[ \t]*$/ { fm++; print; next }
+    fm == 1 && /^model:/ { print "model: " m; next }
+    { print }' "$mo_md" > "$new_md"
+  grep -qx "model: $model" "$new_md" || refuse "$mo_md has no model: line in its front matter"
+fi
+
+# shellcheck disable=SC2088  # the tilde is typed into the pane's own shell, which expands it
+oc_holler='~/.local/bin/oc-holler'
+q_project=$(printf '%q' "$project")
+if [ "$mo" = 1 ]; then
+  launch="cd $q_project && OC_FRESH=1 OC_SESSION_NAME=mo $oc_holler $session $q_project -- -m $model"
+else
+  launch="cd $q_project && OC_FRESH=1 OC_SESSION_NAME=oc $oc_holler $session $q_project -- -m $model${agent:+ --agent $agent}"
+fi
+
+if [ "$dry" = 1 ]; then
+  echo "$pane: dry run, nothing changed. config diff:"
+  if [ "$mo" = 1 ]; then
+    diff -u "$mo_json" "$new_json" | sed '1,2d'; diff -u "$mo_md" "$new_md" | sed '1,2d'
+  else
+    diff -u "$penv" "$new_env" | sed '1,2d'
+  fi
+  echo "send-keys -t $session /exit   (then, ${type_delay}s later)   send-keys -t $session Enter"
+  echo "send-keys -t $session $launch Enter"
+  exit 0
+fi
+
+# 2. Back up, 3. set the OC_ lines -----------------------------------------------------------------------------
+stamp="$(date +%Y%m%d-%H%M%S)-$$"
+if [ "$mo" = 1 ]; then
+  if ! { cp "$mo_json" "$mo_json.bak-pre-restart-$stamp" && cp "$mo_md" "$mo_md.bak-pre-restart-$stamp"; }; then refuse "cannot back up MO's config"; fi
+  bak="$mo_json.bak-pre-restart-$stamp and $mo_md.bak-pre-restart-$stamp"; changed="MO's config"
+  if ! { cat "$new_json" > "$mo_json" && cat "$new_md" > "$mo_md"; }; then fail_step 3 config "cannot write MO's config"; fi
+else
+  bak="$penv.bak-pre-restart-$stamp"
+  cp "$penv" "$bak" || refuse "cannot back up $penv"
+  cat "$new_env" > "$penv" || fail_step 3 pane.env "cannot write $penv"
+fi
+
+# 4. Stop the TUI ----------------------------------------------------------------------------------------------
+tui_down() {
+  ! oc_holler_running && ! curl -fs -m 3 "$base/session/status" >/dev/null 2>&1
+}
+if [ "$down" = 0 ]; then
+  tmux send-keys -t "$session" /exit
+  sleep "$type_delay"
+  tmux send-keys -t "$session" Enter
+  if ! wait_for "$t_stop" tui_down; then
+    tmux send-keys -t "$session" C-c
+    wait_for "$t_stop" tui_down || fail_step 4 stop "the TUI is still running ${t_stop}s after /exit and one Ctrl-C"
+  fi
+fi
+
+# 5. Start it fresh, text and Enter in one call ---------------------------------------------------------------
+tmux send-keys -t "$session" "$launch" Enter
+
+# 6. Server up, 7. registration follows -----------------------------------------------------------------------
+wait_for "$t_up" curl -fs -m 3 "$base/session/status" >/dev/null 2>&1 || fail_step 6 server "no server at $base ${t_up}s after the launch"
+followed() { # oc-holler's watcher wrote the new session to last-session and sessions.toml
+  local last; last=$(cat "$state/last-session" 2>/dev/null || true)
+  [ -n "$last" ] && [ "$last" != "$old_session" ] && grep -q "session_id = \"$last\"" "$state/sessions.toml" 2>/dev/null
+}
+doctor_name=$pane; [ "$mo" = 1 ] && doctor_name=jupiter-hj-c4r2/mo
+doctor_ok() { pfo doctor "$doctor_name" 2>&1 | tail -1 | grep -q ': ok$'; }
+if ! wait_for "$t_reg" followed; then
+  last=$(cat "$state/last-session" 2>/dev/null || true)
+  fail_step 7 registration "last-session is '${last:-none}' (was '${old_session:-none}') and no new session was registered after ${t_reg}s"
+fi
+last=$(cat "$state/last-session")
+# oc-holler does not update pfleet's own registration record, so pfo doctor reports drift (registered old, hub drives new).
+# The fix is the one pane-ready names: write the registration for the new session.
+if ! doctor_ok; then
+  pfo doctor "$doctor_name" --set-registration "$last" >/dev/null 2>&1
+  if [ "$mo" = 1 ] && ! wait_for 10 doctor_ok; then
+    # MO's hub body is a detached process still attached to the old session, and pfo refuses to restart the orchestrator's own
+    # body. The reset ladder's helper does it: record the session, rebind the body, wait for the hub to show it.
+    helper=${PANE_RESTART_BODY_HELPER:-$HOME/fleet-agents/cutover/o-restart-body.py}
+    o_env=${PANE_RESTART_O_ENV:-$HOME/fleet-agents/cutover/o-env.sh}
+    if [ -f "$helper" ]; then
+      # shellcheck disable=SC1090  # the instance env file is on Jupiter only
+      ( set -a; [ -f "$o_env" ] && . "$o_env"; set +a; python3 "$helper" "$doctor_name" "$last" >/dev/null 2>&1 )
+    fi
+  fi
+  wait_for 10 doctor_ok || fail_step 7 registration "pfo doctor is still not ok after: pfo doctor $doctor_name --set-registration $last${mo:+ (MO: and the body restart helper)}"
+fi
+sid=$(cat "$state/last-session")
+
+# 8. The pane answers on the new model -------------------------------------------------------------------------
+seen_model=""
+answers_on_model() {
+  seen_model=$(curl -fs -m 5 "$base/session/$sid/message" 2>/dev/null \
+    | jq -r '[.[] | select(.info.role == "assistant") | .info] | last | select(. != null) | "\(.providerID)/\(.modelID)"' 2>/dev/null)
+  [ "$seen_model" = "$model" ]
+}
+wait_for "$t_model" answers_on_model || fail_step 8 model "the pane's last answer in $sid is on '${seen_model:-no answer yet}', not $model"
+
+# 9. pane-ready ---------------------------------------------------------------------------------------------
+if [ "$mo" = 0 ]; then
+  if ! ready=$(pane-ready "$pane" 2>&1); then
+    fail_step 9 pane-ready "$(printf '%s\n' "$ready" | grep -E 'NOT READY|FAIL' | head -3 | tr '\n' ';' | cut -c1-300)"
+  fi
+  echo "$pane: OK model=$model session=$sid"
+else
+  echo "$pane: OK model=$model session=$sid (MO; pane-ready does not apply)"
+fi

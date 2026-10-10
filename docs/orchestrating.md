@@ -104,3 +104,20 @@ Swap the `echo` for whatever wakes the orchestrator's own attention (a
 message send, a task-queue push) — the loop's only job is to hold the
 `--after` watermark across calls and hand back exactly one line when
 something real happens.
+
+## Restarting a pane on another model (interim)
+
+Until holler pane relaunch with --model (#644) and the pfleet adoption (#653) land, `scripts/pane-restart`
+restarts one fleet pane's OpenCode TUI on a new model. Run it on the host that owns the pane's tmux session
+(Jupiter), from any shell except the pane being restarted:
+
+```bash
+scripts/pane-restart c3r1 --model anthropic/claude-sonnet-5-5 --effort medium \
+  --key-file '$HOME/.holler-oc/keys/anthropic.key'      # add --dry-run first to see the plan
+```
+
+It prints one line: `c3r1: OK model=… session=…`, `c3r1: REFUSED: …` (exit 1, nothing changed) or
+`c3r1: FAIL step N (name): …` (exit 2, with the `pane.env` backup path). It refuses the MO pane (`c4r2`) and
+any pane that is not idle. Pause the watchdog yourself first if you do not want it acting on the pane meanwhile.
+Do not type `tmux send-keys` by hand for this: text sent without `Enter` sits unsubmitted in the TUI prompt
+(the 2026-10-10 failure that motivated the script). This section is removed when #644 and #653 have merged.
