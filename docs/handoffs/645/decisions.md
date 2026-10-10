@@ -194,3 +194,49 @@
     used by no verb yet.
 - **Evidence:**
   - handoff-T-green.md (commands, outputs, the mutation table); `git merge-tree --write-tree HEAD origin/main` exit 0.
+
+## A (anti-duplication gate) — 2026-10-09T23:14-06:00
+- **Decided:** BLOCK, on one finding that is not a parallel path (handoff-A-dup.md).
+  - F extended every object of the Reuse map: the stubs, doctor's select, observe and record, `doctor_command`,
+    `quoted`, `shown_differs`, the remedy table, `scope.resolve`, `output::emit`, and the doctor rig declared once. The
+    one copy, `screen_text`, is the one the brief justifies.
+  - The block: #663, on `origin/main` (`d9eabbb`), rewrote ADR-0021 section 8's generations bullet. A verb's reconcile
+    step after a post-act `generation-conflict` now names no pane. The #645 paragraph and AC 9's behaviour print the
+    pane doctor line for the pane with `--fix`. The merge is textually clean, so the merged standing spec would hold
+    both rules unflagged.
+  - Fix: merge `origin/main`, then one sentence in the #645 paragraph (inside AC 24's limits) stating the pane-scoped
+    form and why. No code or test change.
+  - Three warns, all follow-ups for O to file:
+    1. The reconcile-step lead-in and `screen_text` are spelled twice. F-4 is out of date, and the `screen_text` fold has
+       no issue.
+    2. `tx_switch::read` is the third private copy of the scoped-read arms (with reconcile's `resolve` and #646's
+       `in_scope`).
+    3. The test runner is the fourth both-format runner, with names unlike #662's and #646's `run_both`. F-2's trigger
+       has fired.
+- **Assumed:**
+  - `origin/main` at `d9eabbb` (fetched during this review) is what the PR will merge into.
+  - The branch merges `origin/main` before the PR, as T-green notes.
+  - The brief's AC 24 still binds which ADR-0021 lines this change may touch, so the fix goes in the #645 paragraph, not
+    in #663's bullet.
+- **Hedged:**
+  - Finding 1 is a block, not a warn, for three reasons. The contradiction is in the standing spec on the tree that will
+    land. AC 9 pins the code's side of it. Nothing downstream (a clean merge, S on the branch's ACs, a docs CI that only
+    parses commands) would catch it. The fix is one sentence.
+  - Which form should win is O's ruling. I recommend the pane-scoped `--fix` form: step 6's stated reason (a pane with no
+    record) does not apply to a pane the plan read, and `--fix` is the repair. Adopting step 6's form would change
+    behaviour and drop the repair.
+  - I did not build the merged tree. It merges cleanly, and no file `origin/main` changed overlaps this story's code.
+- **Evidence:**
+  - The brief (all of it), handoff-A round 2, handoff-T-red, handoff-F, handoff-T-green and this journal.
+  - The full diff `dc300ab..583e9d4`. Every changed file read in full: `tx_switch.rs`, `pane/switch.rs`, `pane/reset.rs`,
+    `tests/pane_verbs/{switch,reset}.rs`, and the `doctor.rs`, `stub.rs`, fixture, ADR 0003, ADR-0021 and CHANGELOG hunks.
+  - The analogues: `reconcile.rs`, `reconcile/observe.rs`, `findings.rs`, `pane/doctor.rs`, `pane/args.rs`, `doctor/rig.rs`,
+    `doctor/surface.rs`, `profile_verbs/rig.rs`, `verb_harness/`, `error.rs` (`excerpt`).
+  - On `origin/main` (`d9eabbb`), checked against `dc300ab`: the ADR-0021 diff, `pane/profile_scope.rs`
+    (`reconcile_step`, `StoreScope`), `pane/park.rs`, `pane/list.rs`, `tests/pane_verbs/{main,list,park}.rs`,
+    `park/rig.rs` and `holler-pane/src/probe.rs`.
+  - `git merge-tree --write-tree HEAD origin/main` (tree `5bec458`), with the merged ADR-0021 read at lines 285-366 and
+    522.
+  - Greps: production callers of `select_session` and `create_session` (only reconcile's repair and the engine);
+    session-id validators (none; the OpenCode adapter percent-encodes ids, `lib.rs:422-424`); lookups by session of
+    record (none); both-format runners in `tests/`; the hub for any switch path (none).
