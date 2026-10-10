@@ -70,3 +70,42 @@
     `cargo clippy -p holler-adapter-opencode --all-targets -- -D warnings` (clean); `rustfmt --check --edition 2021` (clean);
     `bash scripts/lint.sh` (exit 0); `cargo machete` (clean); a throwaway raw-socket self-check of the stub (deleted) and a
     shell check that `sh serve ...` exits 42 in its cwd and `false serve ...` exits 1.
+
+## F (Phase 6, implement; this run is 642a) — 2026-10-09T18:02:58-06:00
+- **Decided:** `done`. T's 27 hermetic tests are GREEN (from 1 passed / 26 failed), with no test edited. The workspace is clean
+  under clippy `-D warnings`, rustfmt, `lint.sh`, `changelog-check.sh` and `cargo machete`, and `cargo test --workspace`
+  passes with the hub state dir isolated (see handoff-F.md).
+  - `serve` and its boot poll are in `src/server.rs` from the start, by the brief's own split rule, so `lib.rs` is 483 lines.
+    `src/exec.rs` holds only the bounded runner and `kill -s KILL -- -<pgid>` (A's W-6).
+  - Messages name id routes as `/session/:id`, so no message echoes a caller's id, and a reply-shape message stays near 140
+    bytes (AC 11d's bound is 200).
+  - A connect failure other than a refusal or a timeout is `HttpError::Garbled`, not `Refused`, so `serve` never starts a
+    server on a port it cannot then check. The variant's doc comment is widened to say so; the variants are unchanged.
+  - The CHANGELOG entry follows A's W-5: it describes part 1, and says part 2 brings the opt-in real-OpenCode tests.
+- **Assumed:**
+  - `kill` is on the adapter's own `PATH` on both CI targets, and procps-ng's form `kill -s KILL -- -<pgid>` is the BSD
+    `kill`'s too. The 641 brief records the macOS form; I verified Linux (procps-ng 4.0.4) only.
+  - OpenCode accepts `POST /session/<id>/abort` with `Content-Length: 0` and no body. The spike's `curl -X POST` sent no body
+    at all. Only 642b's real-OpenCode rig can confirm this.
+- **Hedged:**
+  - The deadline kill and `serve`'s success path have no hermetic test in 642a. I exercised them once from a throwaway
+    program against a fake server (python `http.server`, a server that never answers), and the output is in handoff-F.md.
+    T may pin them.
+  - The 4 `holler-cli` `logging_test` failures in the first workspace run come from a live local hub answering
+    `holler roster`. All 11 of those tests pass with `HOLLER_STATE_DIR` isolated, and nothing depends on this crate. CI has
+    no hub, so it does not see them.
+  - Issue #642 was amended on 2026-10-09 (the OpenCode agent, depending on #700). The amendment is outside the brief and
+    642a, so it is flagged for O, not built.
+- **Evidence:**
+  - Read: the brief (1-1106), handoff-A.md, handoff-T-red.md, this file, issue #642 (`gh issue view`; #695, #696, #700
+    titles); `holler-pane/src/{lib,ports,pane}.rs`, `error.rs:380-710`; `holler-pane-testkit/src/harness.rs`,
+    `conformance/harness.rs:1-50`; `holler-adapter-herdr/{Cargo.toml,src/lib.rs}`; `holler-hub/src/ws_handshake.rs:80-140`;
+    `httparse-1.10.1/src/lib.rs` (`Response::parse`, `parse_chunk_size`, `parse_version`); the workspace `Cargo.toml:1-80`,
+    `clippy.toml`, `scripts/lint.sh`, `scripts/changelog-check.sh`, the `CHANGELOG.md` `[Unreleased]` section;
+    `scripts/spikes/opencode-{lib,api}.sh` (`oc_http`, the abort calls); `docs/research/opencode-pane-spike.md:50-80,
+    185-205`; ADR-0021:95-110, 175-190, 329, 525-540; the 641 brief's `exec.rs` lines.
+  - Ran: `cargo test -p holler-adapter-opencode` (27/27, 8 repeats plus `--test-threads=1`);
+    `cargo clippy --workspace --all-targets -- -D warnings`; `rustfmt --check`; `cargo doc` with `-D warnings`;
+    `bash scripts/lint.sh`; `cargo machete`; `cargo test --workspace` twice (once with the live hub reachable, once isolated);
+    `cargo tree -i holler-adapter-opencode`; a `setsid` group kill through `/usr/bin/kill`; and the scratch self-checks quoted
+    in handoff-F.md.
