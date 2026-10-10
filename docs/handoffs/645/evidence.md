@@ -8,6 +8,11 @@ added three doc-comment lines to `crates/holler-pane/src/error.rs` (now lines 41
 `error.rs` citations from line 651 on moved down by three and are updated. Every excerpt below was checked against its cited
 lines on the merged tree. Round 5 merges nothing: since `abdcbb6`, `origin/main` has moved only by #715 (`cec1f82`), which
 changes `docs/handoffs/0660-output/decisions.md` alone, and so none of the files quoted here. Every excerpt was checked again.
+Round 6 merges `origin/main` (`bd5e825`, #642 part 2), which changed no excerpt's text but moved four citations: ADR-0021
+by 20 lines (its section 2 gained "`HarnessPort` as built (#642)"), `crates/holler-pane/src/ports.rs` from line 175 on by
+one (a doc line of `HarnessPort`'s), and `crates/holler-adapter-opencode/tests/hermetic_test.rs` by one. They are updated,
+and round 5's `select_session` entry now cites the adapter's built `select_session` (`attach.rs`) in place of the spike's
+plan for it. Every excerpt below was checked against its cited lines on the merged tree.
 
 ## What the engine calls in `holler-pane`
 
@@ -287,13 +292,14 @@ changes `docs/handoffs/0660-output/decisions.md` alone, and so none of the files
 ## Added by F (round 2, after the anti-duplication BLOCK)
 
 These are the facts the four new sentences of the "Switch and reset as built (#645)" paragraph rely on. The paragraph is
-at `docs/adr/ADR-0021.md:345-370`, on the tree with `origin/main` (`d9eabbb`) merged. The ADR lines quoted below are
-#663's text on `origin/main`. This change does not edit them, so the diff does not show them.
+at `docs/adr/ADR-0021.md:365-390` on the tree with `origin/main` (`bd5e825`) merged (`:345-370` when round 2 merged
+`d9eabbb`). The ADR lines quoted below are #663's text on `origin/main`. This change does not edit them, so the diff does
+not show them.
 
 - **Fact:** on `origin/main`, ADR-0021's generations rule says a verb whose record write meets `generation-conflict` after
   the act prints one of the two forms of step 6, which name no pane. The #645 paragraph says how switch and reset differ
   from this, and why.
-  **Source:** `docs/adr/ADR-0021.md:294-299`
+  **Source:** `docs/adr/ADR-0021.md:314-319`
   **Verbatim excerpt:**
   > ```
   > - A verb takes its expected generation when it plans, and writes the record with it after the act. If another writer got in
@@ -306,7 +312,7 @@ at `docs/adr/ADR-0021.md:345-370`, on the tree with `origin/main` (`d9eabbb`) me
 
 - **Fact:** step 6 gives the two forms, and it names no pane because a pane-scoped doctor refuses a pane with no record or
   outside P, which is what a failed launch of a new pane leaves. Its `profile show` part reports a spec with no live pane.
-  **Source:** `docs/adr/ADR-0021.md:331-337`
+  **Source:** `docs/adr/ADR-0021.md:351-357`
   **Verbatim excerpt:**
   > ```
   >    The reconcile step is exactly `to reconcile, run holler pane doctor --profile '<P>' and then holler profile show '<P>'`,
@@ -456,29 +462,61 @@ three files is in this change (`git diff origin/main` on each is empty).
 ## Added by F (round 5, after the outside diff gate's r4 BLOCK)
 
 The r4 gate asked for these under B-1 and W-1 (whether a failed `select_session` counts as "called"), NV-1 (the shape of
-an OpenCode session id) and NV-3 (what the rig's call log covers). They are copied from the tree at `48f2395`. None of
-these files is in this change, and `git diff origin/main` on each is empty.
+an OpenCode session id) and NV-3 (what the rig's call log covers). They are copied from the tree at `48f2395`, apart from
+the `attach.rs` excerpts of the first entry, which round 6 copied from the tree with `bd5e825` merged. None of these files
+is in this change, and `git diff origin/main` on each is empty.
 
-- **Fact:** a failed `select_session` may still have moved the TUI. The port's answer is only `Ok(())` or an error, and the
-  real adapter's planned `select_session` sends the request that moves the screen, then waits for the TUI to confirm. So
-  a timeout, or a failed confirmation, can come after the screen has moved. This is why `acted` is set on the call's own
-  failure as well as on every failure after it.
-  **Source:** `crates/holler-pane/src/ports.rs:198-199`, `docs/research/opencode-pane-spike.md:237-239`
+- **Fact:** a failed `select_session` may still have moved the TUI, and its error does not say whether it did. The port's
+  answer is only `Ok(())` or an error. The OpenCode adapter's `select_session` (#642 part 2, on `origin/main` since
+  `bd5e825`; the spike's plan at `opencode-pane-spike.md:237-239`, built) sends the switch request, then watches the TUI's
+  title until it shows the session. A `timeout` of that watch, or a TUI found gone during it (`no TUI in pane P`), comes
+  after the request that moves the screen. The same `no TUI in pane P`, and a `timeout` under the method's one deadline,
+  can also come before anything is sent. This is why `acted` is set on the call's own failure as well as on every
+  failure after it.
+  **Source:** `crates/holler-pane/src/ports.rs:199-200`, `crates/holler-adapter-opencode/src/attach.rs:7-8`, `:74-95`, `:202-204`
   **Verbatim excerpt:**
   > ```
   >     /// Switch the TUI of `pane` to `session`.
   >     fn select_session(&self, pane: &PaneId, session: &str) -> Result<(), PaneError>;
   > ```
   > ```
-  > 4. **`select_session`:** check `GET /session/:id` (404 means `session-not-found`), call `POST /tui/select-session`,
-  >    then wait (bounded, about 2 s) until `shown_session` equals the id, or fail loudly and record nothing (I3).
-  >    Exactly one TUI per server, so the broadcast reaches only that pane.
+  > //! - **One deadline per method**, taken at its entry: every tmux call and every request of
+  > //!   the method runs within it, and past it the answer is `timeout` with the method's `op`.
+  > ```
+  > ```
+  >     let deadline = deadline_after(config.timeouts.call);
+  >     let tui = Tui::of(harness, pane, OP_SELECT_SESSION, deadline)?;
+  >     let port = match tui.query(deadline)? {
+  >         Query::Live { start_command, .. } => tui::attach_port(&start_command),
+  >         Query::Dead(_) | Query::NoPane => None,
+  >     }
+  >     .ok_or_else(|| tui.no_tui())?;
+  >     let call = harness.call_until(port, OP_SELECT_SESSION, deadline);
+  >     known(&call, &session_path(session), session)?;
+  >     let reply = call.send(SELECT, SELECT.label, Some(&json!({ "sessionID": session })))?;
+  >     if reply.status == 404 {
+  >         return Err(PaneError::SessionNotFound {
+  >             what: session.to_owned(),
+  >         });
+  >     }
+  >     if json_of(&reply) != Some(Value::Bool(true)) {
+  >         return Err(call.unexpected(SELECT, &reply, "true"));
+  >     }
+  >     match tui.watch(port, session, config.timeouts.settle)? {
+  >         Seen::Shown => Ok(()),
+  >         Seen::Dead(_) | Seen::Gone => Err(tui.no_tui()),
+  >     }
+  > ```
+  > ```
+  >     /// Query the pane every `SETTLE_POLL`, through the crate's one poll, until it is a live
+  >     /// attach to the server on `port` whose title shows `id`, a dead pane or no pane, within
+  >     /// `settle` and the method's deadline. None of them in time is `timeout`.
   > ```
 
 - **Fact:** an OpenCode session id is `ses_` and 26 characters, 30 in all (the spike measured this). The OpenCode adapter's
   tests (#642) take the 26 to be `[0-9A-Za-z]`, and the fake mints `ses_` and 26 hex digits. So every id from either
   passes `parse_session_id`'s `[A-Za-z0-9_-]{1,64}`, which is the claim in that function's doc comment.
-  **Source:** `docs/research/opencode-pane-spike.md:149-151`, `crates/holler-adapter-opencode/tests/hermetic_test.rs:25-26`, `crates/holler-pane-testkit/src/harness.rs:122-124`
+  **Source:** `docs/research/opencode-pane-spike.md:149-151`, `crates/holler-adapter-opencode/tests/hermetic_test.rs:26-27`, `crates/holler-pane-testkit/src/harness.rs:122-124`
   **Verbatim excerpt:**
   > ```
   > **So the caveat is a naming rule Holler must own:** give every session of record a unique, non-default title of

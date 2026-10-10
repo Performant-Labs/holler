@@ -1,15 +1,14 @@
-# Handoff-F: Phase 5 (Workflow script Phase 6), rework round 5 - #645a `pane switch` and `pane reset` (the outside diff gate's r4 BLOCK)
+# Handoff-F: Phase 5 (Workflow script Phase 6), rework round 6 - #645a `pane switch` and `pane reset` (T-green round 5's BLOCK: merge `origin/main`)
 
-**Date:** 2026-10-10 (00:50 MDT)
-**Branch:** issue-645-implementation (worktree `.claude/worktrees/0645-switch-reset`). This round starts at `48f2395`, T-green
-round 4. The changes are not committed: the Workflow script's phase commit records them. Round 4's handoff is in git at
-`29fa0ff`, round 3's at `62aae72`, round 2's at `37f2101` and round 1's at `fa59fe7`. Their content that still holds is kept
-below.
+**Date:** 2026-10-10 (01:07 MDT)
+**Branch:** issue-645-implementation (worktree `.claude/worktrees/0645-switch-reset`). This round starts at `7435610`, T-green
+round 5. The merge of `origin/main` is staged, not committed (`MERGE_HEAD` is `bd5e825`): the Workflow script's phase commit
+records it with both parents, as it did in rounds 2 and 4. Round 5's handoff is in git at `a1f01aa`, round 4's at `29fa0ff`,
+round 3's at `62aae72`, round 2's at `37f2101` and round 1's at `fa59fe7`. Their content that still holds is kept below.
 **Issue:** #645 (part 1 of 2, 645a)
-**Rework of:** `docs/handoffs/645-diff-result-r4.md` (gitignored), the outside diff gate's BLOCK at 00:32 MDT on `48f2395`.
-The gate reports "2 blocking finding(s)". B-1 stands. The reviewer also wrote B-2 to B-4 under its BLOCK heading, then
-withdrew B-2, called B-3 not a block, and found no contradiction in B-4. So this round answers all four, as well as W-1,
-NIT-1, NV-1 and NV-3.
+**Rework of:** `docs/handoffs/645/handoff-T-green.md` (round 5), blocking issue 1: `origin/main` moved to `bd5e825` (#642
+part 2, merged 00:50 MDT) and the branch no longer merged, with a conflict in `docs/adr/ADR-0021.md` ("Deferred to named
+stories"), so AC 24 and AC 25 failed on the tree that will land.
 
 **Confirmation table** (the role doc asks for one before implementing; a Workflow run has no human to wait for, so it is
 recorded here):
@@ -19,70 +18,64 @@ recorded here):
 | GitHub issue | #645 (645a) |
 | Working branch | `issue-645-implementation` |
 | Build plan phase | epic #633, wave 3 (the brief's split, part 1 of 2) |
-| Input documents read | the brief (all of it); `645-diff-result-r1.md` to `-r4.md`; handoffs A, T-red, F (round 4), T-green (round 4), A-dup (round 2) and S; `decisions.md`; `evidence.md` |
+| Input documents read | the brief (all of it); handoffs T-green (round 5) and F (round 5); `decisions.md`; `evidence.md`; `git diff HEAD...origin/main` over `holler-pane`, ADR-0021, the CHANGELOG and `Cargo.lock`; the OpenCode adapter's `attach.rs` |
 | Acceptance criteria count | 26 (brief ACs 1-26) |
 | Handoff document path | `docs/handoffs/645/handoff-F.md` |
 
-## What was done (round 5)
+## What was done (round 6)
 
-- **`crates/holler-pane/src/tx_switch.rs`: B-1, the `acted` flag is now tied to the `select_session` call.**
-  - `switch` calls `ports.harness.select_session(&record.herdr.pane_id, &target)` itself, right where the `acted` mapping
-    starts, and maps that call's error with `acted`.
-  - The observation is a function of its own, `observe` (`shown_session`, then `shown_differs`). It runs only after
-    `select_session` has returned `Ok`, and its errors are mapped with `acted` too.
-  - `select_and_observe`, which merged the act with the observation, is gone.
-  - A comment at the call says which failures are `acted` and why the call's own failure is one of them (W-1). The
-    `acted` field doc says the same thing in one sentence, after the brief's sentence, which is kept.
-  - Behaviour is unchanged. The calls are the same and in the same order (AC 2's sequences hold), and so are the errors
-    and the messages.
-- **`tx_switch.rs` `read`: B-3 and NIT-1, a doc comment only.** It says why P1 searches the scope's answer by the pane's
-  name, as `pane get` does (`get.rs:101-105`), instead of taking the first pane. The two are the same pane while
-  `resolve` keeps its contract. A scope that broke the contract cannot make the run act on another pane.
-- **`crates/holler-cli/src/pane/reset.rs`: B-2 (withdrawn), a doc comment only.** `run`'s doc says that it takes
-  switch's own path, `execute`, which prints through `emit_outcome`, so none of switch's code is copied.
-- **`docs/handoffs/645/evidence.md`: three entries for NV-1, NV-3, B-1 and W-1.**
-  - A failed `select_session` may already have moved the screen: `ports.rs:198-199`, and the spike's `select_session`
-    plan at `opencode-pane-spike.md:237-239`.
-  - OpenCode's id shape: spike `:149-151`, the OpenCode adapter's `hermetic_test.rs:25-26` and the fake's
-    `harness.rs:122-124`.
-  - The rig's call log covers every port, keystrokes included: `doctor/rig.rs:249-272` and `:159-170`, the test kit's
-    `fault.rs:85-97`, and `herdr.rs:259-260` and `:270-271`.
-  - The header records that there is no round-5 merge.
-- **`docs/handoffs/645/decisions.md`:** two entries. One records the r4 gate round, since the gate writes none (S's
-  advisory 4). The other is this F round.
-- **No merge.** Since `abdcbb6`, `origin/main` has moved only by #715 (`cec1f82`), which touches
-  `docs/handoffs/0660-output/decisions.md` alone. It conflicts with nothing here and changes no AC-24 or AC-25 input.
+- **Merged `origin/main` (`bd5e825`) with `git merge --no-commit --no-ff`.** Since the branch's last merge (`abdcbb6`),
+  `origin/main` gained #715 (`cec1f82`, a handoff file of #660's) and #642 part 2 (`bd5e825`, the OpenCode adapter's TUI
+  side). `CHANGELOG.md` merged cleanly, and so did every file outside ADR-0021. Nothing in #642 part 2 touches a file of
+  this story apart from ADR-0021: in `holler-pane` it changes doc comments only (`lib.rs:32-33`, `ports.rs:13-15` and
+  `:174-175`).
+- **`docs/adr/ADR-0021.md`: the one conflict, resolved by keeping both sides,** as T-green's blocking issue says. In
+  "Deferred to named stories" the list now reads, in order:
+  - this branch's mismatch-code bullet ("decided, `unavailable` (exit 1), section 8: #645 for switch and reset; #644 to
+    follow for launch and relaunch"), in place of `origin/main`'s still-open form ("... : #644 and #645");
+  - this branch's **PROPOSED (#645, pending the operator)** bullet;
+  - `origin/main`'s `HerdrPort` bullet, which drops "`HarnessPort` in its final form: #635, then #642" now that #642 has
+    made it final, in place of the old combined bullet;
+  - `origin/main`'s two new bullets: applying `Pane.opencode_agent` (#642's last part, after #700) and stopping the
+    harness server (#695).
+  The resolved file is staged (`git add docs/adr/ADR-0021.md`), and no conflict marker is left in any file.
+- **`docs/handoffs/645/evidence.md`: four citations moved, and one entry now cites built code.**
+  - #642 part 2's new section 2 paragraph ("`HarnessPort` as built (#642)") moved ADR-0021 down by 20 lines: `:294-299`
+    is now `:314-319` and `:331-337` is now `:351-357`. The round-2 note on where the #645 paragraph sits now says
+    `:365-390`.
+  - `ports.rs` gained one doc line in `HarnessPort`'s doc, so `select_session` moved from `:198-199` to `:199-200`.
+  - `hermetic_test.rs` gained a line above its `ID` constant, so `:25-26` is now `:26-27`.
+  - Round 5's entry on why a failed `select_session` is `acted` cited the spike's plan for the real adapter. That adapter
+    is now on `origin/main`, so the entry cites its built `select_session` (`attach.rs:7-8`, `:74-95`, `:202-204`): the
+    switch request is sent, then the title is watched, so the watch's `timeout`, or a TUI found gone during it, comes after
+    the request that moves the screen, while the same `no TUI in pane P` or a `timeout` can also come before anything is
+    sent. That is the W-1 reasoning, now shown in source rather than in a plan.
+  - The header records round 6.
+- **`docs/handoffs/645/decisions.md`:** the F round-6 entry.
+- **No production code and no test changed.** `tx_switch.rs`, `pane/switch.rs` and `pane/reset.rs` are as round 5 left them.
 
-## Design decisions (round 5)
+## Design decisions (round 6)
 
-1. **B-1 is fixed in code, not argued.** Before this round `acted` was already right on every path, because every
-   failure of `select_and_observe` came after `select_session` was called. But only the order of lines inside a merged
-   helper made it right. The reviewer's case is a later step added inside that helper before the select: the flag would
-   then say something false, and nothing would catch it. Now the boundary is in `switch`, at the call itself:
-   - every failure above it converts through `From<PaneError>` (`acted: false`);
-   - every failure from it on goes through the `acted` closure.
+1. **Both sides kept, in the order of the two lists.** This branch's two bullets stay where the mismatch bullet was, and
+   `origin/main`'s three follow in `origin/main`'s order, so `git diff origin/main -- docs/adr/ADR-0021.md` shows the
+   "Deferred" hunk as exactly the mismatch bullet rewritten and the PROPOSED bullet added (AC 24's fourth hunk). Taking
+   either side whole was rejected: `origin/main`'s side drops Decision 17(c) and (d), and this branch's side would bring
+   back "`HarnessPort` in its final form: #635, then #642", which is now false, and drop two of #642's bullets.
+2. **No edit to #642's new ADR-0021 text.** AC 24 allows no fifth hunk, and nothing in "`HarnessPort` as built (#642)"
+   contradicts this story. Its item 6 says the adapter's pane lookup answers `pane-not-found` for a `PaneId` it does not
+   know. For switch and reset that would be a `select_session` failure, so under the brief's A2 row it is `acted` and its
+   message carries the reconcile step, which is harmless. Its item 3 (a `None` from `shown_session` means "cannot tell") is
+   the case the brief's R-2 already covers: a mismatch, `unavailable`, which fails safe.
+3. **Evidence entry 25 cites the built adapter instead of the plan.** The fact is unchanged. The source is now code on the
+   PR's base, which the diff gate can attach beside the excerpt, so a reviewer no longer has to trust a plan.
 
-   Considered and rejected:
-   - A type-state token that only the select can produce. It is too heavy for one function's boundary.
-   - Separate error variants for a failed select and a failed observation. They would change the public `SwitchFailure`,
-     whose fields the brief fixes, and both cases need the same message anyway.
-2. **The select's own failure stays `acted` (W-1).** The brief's A2 row says so (`e`, `acted: true`). It is also the safe
-   direction:
-   - The engine cannot tell how far a failed call got. The port answers only `Ok(())` or an error, and the planned real
-     adapter fails after it has sent the request that moves the screen (spike `:237-239`).
-   - A reconcile step printed when the TUI did not move is harmless: doctor `--fix` finds nothing to repair.
-   - A step left out when the TUI did move would leave the operator without the repair.
-3. **P1 keeps `find` (B-3, NIT-1), now explained where the code is.** It is S's accepted deviation (rounds 1-4), and it
-   is how the merged `pane get` reads the same answer. Switching to `next()` would satisfy the brief's wording but drop
-   the guard against acting on a pane the run was not asked about.
-4. **Doc lines, not code, for B-2 and B-4.** Both were withdrawn or found not to be contradictions. The reviewer reads
-   only the diff, so an explanation in the code's own docs is where the next round will see it.
+## What was done (rounds 1-5, still standing)
 
-## What was done (rounds 1-4, still standing)
-
+- **Round 5** (the outside diff gate's r4 BLOCK, B-1). `switch` calls `select_session` itself at the `acted` boundary and
+  maps that call's error with `acted`; the observation is a private `observe`, also mapped with `acted`. Doc comments on
+  `acted`, `read` and `reset::run`. Three `evidence.md` entries for NV-1, NV-3, B-1 and W-1.
 - **Round 4** (S's REWORK). Merged `origin/main` (`abdcbb6`: #713 for #660, and #714 for #640 part 3). The ADR-0021
-  conflict was resolved by keeping both sides: the section 9 rows, and the "Deferred" bullets. Five `evidence.md`
-  citations or excerpts were corrected for #714's three doc-comment lines in `error.rs`.
+  conflict was resolved by keeping both sides. Five `evidence.md` citations were corrected for #714's lines in `error.rs`.
 - **Round 3** (the outside diff gate's r2 B-1). `check_health`'s remedy fallback became an explicit `match`. The
   `SESSION_ID_MAX` doc says why the two limits agree. Two evidence entries settled r2's NV-1.
 - **Round 2** (A-dup round 1's BLOCK). Merged `origin/main` (`d9eabbb`). Four sentences of the "Switch and reset as built
@@ -92,10 +85,10 @@ recorded here):
 
 ## Reuse / extend-vs-new
 
-Unchanged, and round 5 extends nothing new and copies nothing. A-dup round 2's table still holds:
+Unchanged; round 6 adds no code. A-dup round 2's table still holds:
 - The objects extended are the `tx_switch.rs` stub and the two verb stubs, built on doctor's `--fix` repair: select,
-  observe, record. As in reconcile's `select` (`reconcile/observe.rs:318-321`), the port's `select_session` is now
-  called directly, not through a helper.
+  observe, record. As in reconcile's `select` (`reconcile/observe.rs:318-321`), the port's `select_session` is called
+  directly.
 - Reused as they are: `findings::doctor_command(Some(pane), true)`, `findings::quoted`, `reconcile::shown_differs`,
   `FindingKind::ServerDown.remedy(..)` (by `match`), `ports.scope.resolve`, `output::{emit, emit_error, ErrorBody,
   ErrorCode, VerbCtx}`, `ProfileOpt` and `holler_proto::clock::now_millis`.
@@ -103,85 +96,84 @@ Unchanged, and round 5 extends nothing new and copies nothing. A-dup round 2's t
 
 ## Architecture notes for A
 
-- **Round 5:** one private function of `tx_switch.rs` (`select_and_observe`) became a direct port call in `switch` plus a
-  private `observe`. There is no new module, public item, dependency or layer, and no frozen file or #647 file changed.
-  No public item changed in this round, apart from one added sentence in the `acted` field doc. `archChanged: false`.
-- **Rounds 1-4:** the engine is in `holler-pane`, pure over `Ports`, with no I/O, no async and no new dependency.
+- **Round 6:** none. A merge of `origin/main` and a docs conflict resolved by keeping both sides. No module, public item,
+  dependency, layer or frozen file of this story changed. `archChanged: false`.
+- **Rounds 1-5:** the engine is in `holler-pane`, pure over `Ports`, with no I/O, no async and no new dependency.
   `tx_switch` uses `findings` and `reconcile::shown_differs`, `pane/switch.rs` uses `holler_pane::tx_switch`, and
   `pane/reset.rs` uses `pane/switch.rs` (`execute`, `Verb`). No frozen file and no #647 file is touched, apart from
   `doctor.rs:10` (Decision 16, T's).
 
 ## Deviations from spec / wireframe
 
-Round 5: none new. The brief's A2 and O1 rows hold as written. A2 is `select_session`, whose error is `acted: true` with
-`created` as A1's. O1 is `shown_session` and `shown_differs`, whose failures are `acted: true` too.
+Round 6: none new.
 
-Rounds 1-4, still standing and accepted by S:
-- P1 uses `find` by name, where the brief says `into_iter().next()`. `read`'s doc now says why.
+Rounds 1-5, still standing and accepted by S:
+- P1 uses `find` by name, where the brief says `into_iter().next()`. `read`'s doc says why.
 - The "Deferred" bullet takes A's round-2 form, "#644 to follow". #644's paragraph is still not on `origin/main` at
-  `cec1f82`.
-- `reset.rs` reuses `switch::{execute, Verb}`, and `execute` prints through `emit_outcome`. `run`'s doc now says so.
+  `bd5e825`.
+- `reset.rs` reuses `switch::{execute, Verb}`, and `execute` prints through `emit_outcome`. `run`'s doc says so.
 - The #645 paragraph has round 2's four sentences.
 
 No wireframe applies (no UI surface).
 
-## Tier 1 self-check (incl. tests now GREEN), round 5
+## Tier 1 self-check (incl. tests now GREEN), round 6
 
-Every build ran with `CARGO_BUILD_JOBS=4`. `origin/main` was fetched at 00:34 MDT, and it is `cec1f82`.
+Every build ran with `CARGO_BUILD_JOBS=4`, on the merged tree (HEAD `7435610` plus the staged merge of `bd5e825`).
+`origin/main` was fetched at 00:58 MDT, and it is `bd5e825`.
 
 ```
+$ git merge --no-commit --no-ff origin/main     -> CONFLICT (content) in docs/adr/ADR-0021.md only; resolved and staged
+$ git ls-files -u | wc -l                       -> 0 (no unmerged path); git diff --cached --check -> clean
 $ rustfmt --check --edition 2021 tx_switch.rs pane/switch.rs pane/reset.rs \
     tests/pane_verbs/switch.rs tests/pane_verbs/reset.rs                       -> exit 0
-$ cargo clippy --workspace --all-targets -- -D warnings                        -> exit 0 (0 warnings)
-$ cargo test -p holler-cli --test pane_verbs --test pane_cli_process --test cli_surface_test --test docs_cli_test
-   cli_surface_test 3 passed; docs_cli_test 3 passed; pane_cli_process 35 passed; pane_verbs 161 passed; 0 failed
-$ cargo test -p holler-cli --test pane_verbs -- switch:: reset::               -> 21 passed, 0 failed
+$ cargo clippy --workspace --all-targets -- -D warnings                        -> exit 0
+$ cargo test -p holler-cli --test pane_verbs --test pane_cli_process --test cli_surface_test --test docs_cli_test \
+    --test wire_selftest
+   cli_surface_test 3 passed; docs_cli_test 3; pane_cli_process 35; pane_verbs 162; wire_selftest 3; 0 failed
+$ cargo test -p holler-cli --test pane_verbs -- switch:: reset::               -> 22 passed, 0 failed
 $ cargo test -p holler-pane                                                    -> 98 passed, 0 failed
 $ cargo test --workspace --no-fail-fast -- --skip roster_stays_accurate_under_concurrent_body_load   (CI's form)
-   -> on the finished tree, 00:47-00:51 MDT: exit 0; 137 result lines; 1663 passed, 0 failed, 16 ignored
-      (round 4's count; an earlier run at 00:39-00:43, before the last doc-only edit, gave the same)
-$ bash scripts/lint.sh                    -> exit 0 (size warnings only: error.rs 713, tests/pane_verbs/switch.rs 613)
+   -> 01:02-01:06 MDT: exit 0; 140 result lines; 1700 passed, 0 failed, 25 ignored
+      (round 5's 1664 + #642 part 2's attach_test 23 and tui_test 13; its real_opencode_test adds 9 ignored)
+$ bash scripts/lint.sh                    -> exit 0 (size warnings only; tests/pane_verbs/switch.rs 649)
 $ bash scripts/changelog-check.sh         -> changelog-check: ok
-$ gitleaks protect --redact --no-banner   -> no leaks found
-$ git diff origin/main -- '*Cargo.toml' Cargo.lock | wc -l                     -> 0
-$ git diff origin/main -- docs/adr/ADR-0021.md | grep -c '^@@'                  -> 4 (AC 24, unchanged)
-$ grep 'unwrap(|expect(|panic!|unreachable!|todo!|[0]' on the three production files -> none
-$ python3 -I check_evidence.py <worktree> docs/handoffs/645/evidence.md      -> entries: 27, mismatches: 0
+$ cargo machete                           -> no unused dependencies
+$ gitleaks protect --staged / unstaged    -> no leaks found (both)
+$ git diff origin/main -- '*Cargo.toml' Cargo.lock | wc -l                     -> 0 (AC 25; was 26 before the merge)
+$ git diff origin/main -- docs/adr/ADR-0021.md | grep -c '^@@'                  -> 4 (AC 24; was 5 before the merge)
+$ grep -n 'Switch and reset as built (#645)' docs/adr/ADR-0021.md               -> 365 (between ### 8. :305 and ### 9. :392)
+$ grep -c '#645' docs/adr/ADR-0021.md                                           -> 9 (origin/main: 6)
+$ the `unavailable` decision in section 8 (:305-391)                            -> stated once (:372)
+$ python3 -I check_evidence.py <worktree> docs/handoffs/645/evidence.md         -> entries: 27, mismatches: 0
 ```
 
-**Self-check mutations** (F's own sanity check, each restored with `cmp` against a scratch copy; T owns the mutation
-table):
-- Map the select's error with `?` (so `acted: false`) instead of `acted`: `switch_select_failure_names_the_reconcile_step`
-  (AC 8) and `reset_failure_after_create_names_the_unrecorded_session` (AC 18) fail.
-- Do the same for `observe`'s error: `switch_mismatch_after_select_records_nothing` (AC 7) and
-  `reset_mismatch_records_nothing` (AC 19) fail.
-
-Every command above ran on the finished production tree, the three production files as they are handed off.
+Every command above ran on the finished tree as it is handed off. No production file changed in this round, so no
+self-check mutation was run; T's round-5 mutation table covers the code unchanged.
 
 ## Evidence appendix
 
-`docs/handoffs/645/evidence.md` holds 27 facts in unchanged code or text. 15 are from F round 1, 2 from T, 4 from F round
-2, 1 from T round 2, 2 from F round 3 and 3 from F round 5. Every excerpt matches its cited lines on this tree.
+`docs/handoffs/645/evidence.md` holds 27 facts in unchanged code or text: 15 from F round 1, 2 from T, 4 from F round 2,
+1 from T round 2, 2 from F round 3 and 3 from F round 5 (one of them re-sourced in round 6). Every excerpt matches its
+cited lines on the merged tree, and none of the cited files differs from `origin/main`.
 
 ## Tests that look wrong (for T)
 
-None. No test changed, and every test passes.
-
-A coverage note for T, not a wrong test: no case has `shown_session` itself fail (an `Err`, not a mismatch) after a good
-select. The r4 gate's NV-2 points this out. A case with `fail_next(HarnessOp::ShownSession, Timeout { .. })` would pin
-`acted` on that path: exit 1 `timeout`, the message ending with the reconcile step, the record unchanged, and for reset
-the created id named. This round's code maps that path with `acted`, as AC 7's mismatch path is mapped. Adding the case is
-T's call.
+None. No test changed, and every test passes on the merged tree, T's round-5 test
+`switch_observation_failure_names_the_reconcile_step` included.
 
 ## Known issues
 
-- **The next diff-gate round may raise B-2 or B-3 again.** The reviewer saw both in two rounds (r3 NV-1, r4 B-2 and B-3).
-  Each is now answered in the docs next to the code, where the reviewer looks.
-- **Carried from round 4, unchanged:**
-  - ADR-0021 `:465` says "#645's and #646's, planned". Once 645a lands, that is out of date for #645's three codes. It is
-    for O, at the next ADR-0021 edit, because AC 24 allows no fifth hunk.
-  - More ADR-0021 conflicts may come from #644 or #642 part b (R-1). Whichever lands second resolves the conflict by
-    anchor text.
+- **ADR-0021 `:485`** (was `:465` before this merge) says "#645's and #646's, planned". Once 645a lands that is out of date
+  for #645's three codes. It is for O, at the next ADR-0021 edit, because AC 24 allows no fifth hunk.
+- **"its home screen" for a `None` that means "cannot tell".** With the built adapter, `shown_session` answers `None` for
+  the home screen and also whenever it cannot tell (ADR-0021 section 2, "`HarnessPort` as built (#642)", item 3). O1's
+  message then says "shows its home screen", as reconcile's private `screen_text` does, word for word as the brief requires.
+  The run still fails safe (`unavailable`, nothing recorded). The wording belongs to the F-4 fold, which A-dup round 2's
+  warn 3 widened to `screen_text`, so doctor and switch would change together. For O.
+- **More ADR-0021 conflicts may come** from #644 or #642's last part (R-1). Whichever lands second resolves the conflict by
+  anchor text.
+- **Carried from earlier rounds, unchanged:**
+  - The next diff-gate round may raise B-2 or B-3 again; each is answered in the docs next to the code.
   - A-dup's warns and follow-ups F-1 to F-4 are for O to file. Once the `screen_text` fold is filed, the comment in
     `tx_switch.rs` should name its issue.
   - A timed-out `create_session` in reset may leave a session that the message cannot name. That is a 645b question.
@@ -189,16 +181,18 @@ T's call.
 
 ## Files changed
 
-Production (this story, all rounds):
-- `crates/holler-pane/src/tx_switch.rs` (round 5: the act at the `acted` boundary, `observe`, and two doc comments)
-- `crates/holler-cli/src/pane/switch.rs` (unchanged in round 5)
-- `crates/holler-cli/src/pane/reset.rs` (round 5: `run`'s doc only)
+Production (this story, all rounds; none changed in round 6):
+- `crates/holler-pane/src/tx_switch.rs`
+- `crates/holler-cli/src/pane/switch.rs`
+- `crates/holler-cli/src/pane/reset.rs`
 
-Docs (this story; none changed in round 5):
-- `docs/adr/ADR-0021.md`
-- `CHANGELOG.md`
+Docs (this story):
+- `docs/adr/ADR-0021.md` (round 6: the merge conflict in "Deferred to named stories", both sides kept)
+- `CHANGELOG.md` (unchanged in round 6; it merged cleanly)
+
+Merged from `origin/main` (`bd5e825`, staged with the merge, not this story's change): #642 part 2's files and #715's.
 
 Pipeline records:
 - `docs/handoffs/645/handoff-F.md` (this file)
-- `docs/handoffs/645/evidence.md` (round 5: three entries, and the header)
-- `docs/handoffs/645/decisions.md` (round 5: the r4 gate round, and the F round-5 entry)
+- `docs/handoffs/645/evidence.md` (round 6: four moved citations, entry 25's source, the header)
+- `docs/handoffs/645/decisions.md` (round 6: the F entry)

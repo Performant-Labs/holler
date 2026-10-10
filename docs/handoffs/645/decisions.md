@@ -586,3 +586,41 @@
     AC 18.
   - `git merge-tree --write-tree HEAD origin/main`: exit 1, `CONFLICT (content): Merge conflict in docs/adr/ADR-0021.md`.
     Against `origin/main`, the ADR-0021 diff has 5 hunks and the Cargo diff is 26 lines.
+
+## F (rework, round 6: T-green round 5's BLOCK, merge `origin/main`) — 2026-10-10T01:07-06:00
+- **Decided:**
+  - Merged `origin/main` (`bd5e825`: #715, then #642 part 2) with `git merge --no-commit --no-ff`, as in rounds 2 and 4.
+    The merge is staged with `MERGE_HEAD` set, and the Workflow script's phase commit records it with both parents.
+    Every file but ADR-0021 merged cleanly, `CHANGELOG.md` included.
+  - The one conflict, in ADR-0021's "Deferred to named stories", is resolved by keeping both sides, as T-green's
+    blocking issue 1 says: this branch's mismatch-code bullet and PROPOSED bullet, then `origin/main`'s `HerdrPort`
+    bullet (without "`HarnessPort` in its final form", which #642 made true), and its `opencode_agent` and #695
+    bullets. Against `origin/main` the ADR-0021 diff is again AC 24's four hunks, and the Cargo diff is empty (AC 25).
+  - No edit to #642's new section 2 paragraph: AC 24 allows no fifth hunk, and nothing in it contradicts this story.
+  - `evidence.md`: #642 part 2 moved four citations (ADR-0021 by 20 lines, `ports.rs` by one, `hermetic_test.rs` by
+    one), and they are updated. Round 5's `select_session` entry now cites the adapter's built `select_session`
+    (`attach.rs`) instead of the spike's plan for it.
+  - No production code or test change. `archChanged: false`.
+- **Assumed:**
+  - `origin/main` at `bd5e825` (fetched at 00:58 MDT) is what the PR merges into.
+  - The script's phase commit (`git add -A`, `git commit`) completes a staged merge, as it did for `37f2101` and
+    `29fa0ff`.
+- **Hedged:**
+  - With the built adapter, a `None` from `shown_session` also means "cannot tell" (ADR-0021 section 2, item 3), so O1's
+    "shows its home screen" (reconcile's wording, word for word, as the brief requires) can be imprecise. The run still
+    fails safe. It is listed for O under the F-4 fold, which would change doctor's wording with it.
+  - #644 or #642's last part may land the next ADR-0021 edit before 645a merges (R-1). Whichever lands second resolves
+    the conflict by anchor text.
+- **Evidence:**
+  - Read: handoffs T-green (round 5) and F (round 5), the brief, this journal, `evidence.md`;
+    `git diff HEAD...origin/main` over `holler-pane`, ADR-0021, the CHANGELOG and `Cargo.lock`; the conflict hunk at
+    `:628-644` of the conflicted file; `holler-adapter-opencode/src/attach.rs`.
+  - With `CARGO_BUILD_JOBS=4`, on the merged tree: rustfmt `--check` on the five story files and workspace clippy with
+    `-D warnings` exit 0. `pane_verbs` 162 passed (`switch::`/`reset::` 22), `pane_cli_process` 35, `cli_surface_test` 3,
+    `docs_cli_test` 3, `wire_selftest` 3 and `holler-pane` 98. The workspace in CI's form, 01:02-01:06 MDT: exit 0, 140
+    result lines, 1700 passed, 0 failed, 25 ignored. That is round 5's 1664 plus #642 part 2's `attach_test` (23) and
+    `tui_test` (13), and its `real_opencode_test` adds the 9 ignored.
+  - `lint.sh` exit 0 (size warnings only), `changelog-check: ok`, `cargo machete` clean, gitleaks finds nothing staged or
+    unstaged. `git ls-files -u` is empty. ADR-0021: the #645 paragraph at `:365` between `### 8.` (`:305`) and `### 9.`
+    (`:392`), the `unavailable` decision once in section 8 (`:372`), `#645` 9 times (6 on `origin/main`).
+  - `check_evidence.py`: 27 entries, 0 mismatches; none of the cited files differs from `origin/main`.
