@@ -232,3 +232,17 @@
     `profile/store.rs:395-400`, the fake `pane_store.rs:222-240`, `profile.rs:28-100, 150-240`, `argv.rs:18-92`,
     `feed.rs:236-286`, `vocab.rs:185-223`, and serde_json 1.0.151's `src/ser.rs:2135-2165`. Library files fetched into
     the scratchpad: rust-lang/rust 1.98.1's `char/methods.rs:478-505, 545-546, 2428-2445` and `fmt/mod.rs:2916-2956`.
+
+## T (Phase 7, verify GREEN, round 2) — 2026-10-09T18:52:09-06:00
+- **Decided:** GREEN, no blocking issue. The read-verb filter is 35 of 35 and `pane_verbs` 95 of 95. No production file
+  has changed since 06320ad, F flagged no wrong test, and T changed no test. T added nothing to `evidence.md`: the
+  round-2 tests rely only on the facts T-red already entered, and the file stays at 11,696 bytes, under the gate's cap.
+- **Assumed:** Round 1's mutation table (M1 to M11) and T-red round 2's Ma and Mb still hold, because they ran on the
+  same production code. Only Mc was re-run.
+- **Hedged:** F's one workspace failure (`body_run_test::fresh_hello_and_presence_on_every_reconnect`) did not recur in
+  T's run. T treats it as a flake outside this branch and filed nothing from a single sighting.
+- **Evidence:** isolated workspace run, 125 result lines, 1414 passed, 0 failed, 5 ignored, exit 0. `pane_cli_process`
+  34, `cli_surface_test` 3, `docs_cli_test` 3, `wire_selftest` 3. Clippy (`-D warnings`), `lint.sh`,
+  `changelog-check.sh`, `cargo machete` and `rustfmt --check` exit 0. The AC 17, 21 and 22 greps and the manifest diff
+  are empty. `watch` ran 3 times, 11 passed each. Mutation Mc fails `a_stored_dash_prints_apart_from_the_empty_value` at
+  get.rs:362, and `git status --short` was empty after the restore.

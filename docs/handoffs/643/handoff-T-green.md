@@ -1,128 +1,90 @@
-# Handoff-T-green: Phase 7 - #643 the read verbs (`holler pane list`, `get` and `watch`, with SHOWN and DRIVEN)
+# Handoff-T-green: Phase 7 - #643 the read verbs (`holler pane list`, `get` and `watch`, with SHOWN and DRIVEN)  (round 2)
 
 **Date:** 2026-10-09
-**Branch:** issue-643-implementation (on 06320ad, F's commit)
+**Branch:** issue-643-implementation (on f922dd8, F's round-2 commit)
 **Issue:** #643
-**Handoff-F reviewed:** docs/handoffs/643/handoff-F.md
-**Handoff-T-red:** docs/handoffs/643/handoff-T-red.md
+**Handoff-F reviewed:** docs/handoffs/643/handoff-F.md (round 2)
+**Handoff-T-red:** docs/handoffs/643/handoff-T-red.md (round 2)
+
+Round 1 of this handoff is in git: `git show 50bcc83:docs/handoffs/643/handoff-T-green.md`. This file replaces it.
+Its AC table, Tier 2 analysis and mutation table (M1 to M11) still hold, because no production file has changed since
+06320ad (`git diff 06320ad..HEAD -- crates CHANGELOG.md` lists only T's three test files).
 
 ## GREEN confirmation
 
-`cargo test -p holler-cli --test pane_verbs -- list:: get:: watch::`: on F's commit **30 passed, 0 failed**. These are all
-28 RED tests plus the two that passed at RED by design. After the three tests T added this phase (below), **33 passed,
-0 failed**. The whole `pane_verbs` target gives 93 passed, 0 failed.
-
-F listed no tests under "Tests that look wrong (for T)", and T found no wrong test. No authored test was changed.
-
-**Tests added this phase** (T owns test authorship; each one closes a gap the mutation check below exposed, and no
-production code was touched):
-
-| Test | File | Pins |
-|---|---|---|
-| `list_named_pane_lists_only_that_pane` | `tests/pane_verbs/list.rs` | Decision 1: `list PANE` with no `--profile` lists that pane alone; a pane with no record gives the header alone, exit 0, and JSON `"panes": []` |
-| `text_output_escapes_c1_and_bidi_characters` | `tests/pane_verbs/get.rs` | F's deviations 1 and 2 (the security claim in `--help` and the CHANGELOG). U+009B and U+202E never reach the terminal raw. A cwd with U+202E prints as `"/srv/demo\u{202e}x"`, and a `command` argv prints as the still-valid JSON `["opencode","a\u009bb","x\u202ey"]` |
-| `watch_profile_prints_a_pane_leaving_the_profile_once` | `tests/pane_verbs/watch.rs` | Decision 7's membership rule, which T hedged at RED. A pane that leaves the profile prints that one change, and so does a pane deleted while a member. A later change to the pane outside the profile prints nothing. The test replays from `--since 1`, with no thread |
-
-The test files stay under 900 lines (536, 280 and 311), with no `#[allow]`, no `unsafe` and no non-ASCII byte. The
-bidi and C1 characters are written as `\u{..}` escapes, because rustc's `text_direction_codepoint_in_literal` lint
-denies a raw U+202E in source.
-
-**Spot-check: do the tests fail when the behavior is removed?** For each mutation, T applied a `perl` substitution
-to F's code, ran the 33 tests, and restored the file with `git checkout`. Afterwards `git status` shows only the three
-test files.
-
-| Mutation | Caught by |
+| Command | Result |
 |---|---|
-| M1 an unobserved side counts as a mismatch | 5 tests (AC 1, 2, 3 in list/get/watch) |
-| M2 `text_value` never escapes | 4 tests (AC 4, 7, 18) |
-| M3 `watch --profile` admits every event | `watch_profile_prints_only_member_changes`, the new leave test |
-| M4 `watch PANE` filter off | `watch_named_pane_follows_only_that_pane` |
-| M5 `list PANE` (no profile) lists every pane | **survived on F's commit**; caught by the new `list_named_pane_lists_only_that_pane` |
-| M6 `get`'s `profile` always null | `get_profile_member_is_shown`, `get_shows_every_field_of_the_record` |
-| M7 `get` without `--profile` never finds the spec | `get_shows_every_field_of_the_record` |
-| M8 `list` does not sort | **survives**: the fake's `list` and `resolve` already return name order (evidence.md, T entry). Advisory |
-| M9 `acts_on_terminal` reduced to `is_control` (drops bidi) | **survived on F's commit**; caught by the new C1/bidi test |
-| M10 `json_text` leaves terminal characters raw | **survived on F's commit**; caught by the new C1/bidi test |
-| M11 `watch --profile` ignores prior membership | **would have survived**; caught by the new leave test |
+| `cargo test -p holler-cli --test pane_verbs -- list:: get:: watch::` | 35 passed, 0 failed (60 filtered out) |
+| `cargo test -p holler-cli --test pane_verbs` | 95 passed, 0 failed |
+
+That is round 1's 33 read-verb tests plus T-red round 2's two new tests
+(`text_output_escapes_each_hidden_class_and_keeps_plain_unicode` and `a_stored_dash_prints_apart_from_the_empty_value`),
+with `read_verbs_call_no_adapter_or_probe` extended to the profile store.
+
+F listed no tests under "Tests that look wrong (for T)", and T found none. No test was changed this phase.
+
+**Spot-check (behaviour removed, test fails):** T re-ran T-red's mutation Mc on the current tree. It drops
+`&& value != NO_VALUE` from `text_value` (`src/pane/list.rs:263`). Result: 34 passed, 1 failed,
+`get::a_stored_dash_prints_apart_from_the_empty_value` panicked at `get.rs:362`. T restored the file with
+`git checkout`, and `git status --short` was empty afterwards. Ma and Mb (T-red round 2) and M1 to M11 (round 1) were
+run on the same production code and are not repeated here.
 
 ## Tier 1 results
 
 | Check | Expected | Actual | Result |
 |---|---|---|---|
-| `bash scripts/lint.sh` | exit 0 | exit 0 (warnings only, on files outside this story) | PASS |
+| `bash scripts/lint.sh` | exit 0 | exit 0 | PASS |
 | `bash scripts/changelog-check.sh` | ok | `changelog-check: ok` | PASS |
-| `cargo clippy --workspace --all-targets -- -D warnings` | exit 0 | exit 0 (re-run after T's test edits) | PASS |
-| `cargo test --workspace` (as `HOLLER_STATE_DIR=<empty scratch dir> cargo test --workspace --no-fail-fast -- --skip roster_stays_accurate_under_concurrent_body_load`, see note) | 0 failed | 125 result lines: 1409 passed, 0 failed, 5 ignored; exit 0 | PASS |
-| `cargo test -p holler-cli --test pane_verbs` | 0 failed | 93 passed (after T's additions) | PASS |
-| `cargo test -p holler-cli --test docs_cli_test` | 0 failed | 3 passed | PASS |
-| `cargo test -p holler-cli --test cli_surface_test` | 0 failed | 3 passed | PASS |
+| `cargo clippy --workspace --all-targets -- -D warnings` | exit 0 | exit 0 | PASS |
+| `cargo test --workspace` (as `HOLLER_STATE_DIR=<empty scratch dir> cargo test --workspace --no-fail-fast -- --skip roster_stays_accurate_under_concurrent_body_load`) | 0 failed | 125 result lines: 1414 passed, 0 failed, 5 ignored; exit 0 | PASS |
 | `cargo test -p holler-cli --test pane_cli_process` | 0 failed | 34 passed | PASS |
+| `cargo test -p holler-cli --test cli_surface_test` | 0 failed | 3 passed | PASS |
+| `cargo test -p holler-cli --test docs_cli_test` | 0 failed | 3 passed | PASS |
 | `cargo test -p holler-cli --test wire_selftest` (canary) | 0 failed | 3 passed | PASS |
-| `cargo machete` | no unused deps | none found, exit 0 | PASS |
-| `rustfmt --check --edition 2021` on the 7 touched `.rs` files | exit 0 | exit 0 (re-run after T's edits) | PASS |
-| `cargo test -p holler-cli --test pane_verbs watch`, 3 runs (brief's flake check for AC 14) | 0 failed each | 11 passed, 11 passed, 11 passed | PASS |
+| `cargo machete` | no unused deps | none found | PASS |
+| `rustfmt --check --edition 2021` on the 7 touched `.rs` files | exit 0 | exit 0 | PASS |
+| `cargo test -p holler-cli --test pane_verbs watch`, 3 runs (AC 14 flake check) | 0 failed each | 11, 11, 11 passed | PASS |
 
-Note on the workspace run: the workspace suite was isolated from this host's live hub with `HOLLER_STATE_DIR` and run
-with `--no-fail-fast`, as F's handoff advised. The `--skip` is CI's own form. T's numbers match F's exactly (1409 / 0 / 5).
-Server start and API smoke do not apply: until #649, the binary wires `Unwired`, and the verbs are exercised in-process
-over the fakes.
+Server start and API smoke do not apply: until #649 the binary wires `Unwired`, and the verbs run in-process over the
+fakes.
 
 ## Tier 2 results
 
 | Check | Method | Result |
 |---|---|---|
-| Coverage: a test per AC | AC 1-19 each map to a named test (table below); AC 20-24 are command checks, run here | PASS |
-| Test quality | Each test names one behavior, fails in isolation on an assertion, and runs at the in-process tier (the cheapest one that exercises clap, dispatch and `output.rs`). Proportionate: 33 tests for three verbs and 19 behavioral ACs, with no duplicates found. The mutation table shows the tests pin behavior, not implementation | PASS |
-| Type safety | No `as` sign cast (`observed_at` uses `u64::try_from`); exhaustive `match` for role, kind, health and hold; clippy clean under the workspace's deny set | PASS |
-| Error paths | `usage` (AC 10, AC 15 `--since 99`), `profile-not-found` and `pane-not-in-profile` (AC 6), `pane-not-found` (AC 9), `unavailable` and `timeout` (AC 11), an error mid-stream (AC 15). All checked in both formats with matching exit codes | PASS |
-| Data integrity | Read-only. AC 17's test also asserts no `CasPut` or `Delete` call. Each change appears once, in order, including a concurrent write (AC 12-14, 5 in-test repeats, plus 3 reruns) | PASS |
-| API contract | JSON shapes pinned key by key (AC 2, 7, 8, 13). Every JSON check goes through `check_envelope` or `check_ndjson`. Positions print row first (AC 5) | PASS |
-| Security | Text output is terminal-safe for C0 (AC 18) and, newly pinned, for C1 and bidi characters, in stored strings and in JSON-rendered argv. No secret-shaped value in any test or output (neutral `demo-*`, `/srv/demo`, `localhost`). Env prints names only (`EnvVarName`) | PASS |
-| Migration safety | No schema, store or golden change | N/A |
-| Protocol / goldens | No `holler-proto` change, no golden drift (`git diff --name-only` lists none) | N/A |
-| `docs_cli_test` for documented commands | ADR 0003 rows parse (3 passed) | PASS |
-| Blast radius (AC 24) | `git diff --name-only origin/main...HEAD` lists exactly the brief's files plus `docs/handoffs/643*` | PASS |
+| Coverage: a test per AC | Round 1's table stands (AC 1 to 19 each have a named test; AC 20 to 24 are command checks, re-run below). AC 18 now also has the per-class test | PASS |
+| Test quality | The two new tests each name one behaviour, assert T-written literals (not `{:?}` output), run at the in-process tier, and do not duplicate `text_output_escapes_c1_and_bidi_characters`: that one pins C1 and RLO and JSON argv; the new one pins one character per hidden class and that plain Unicode is not escaped. Mutations show each fails when its behaviour is removed. The suite stays proportionate (35 tests for three verbs) | PASS |
+| Type safety | No production change; clippy clean under `-D warnings` | PASS |
+| Error paths, data integrity, API contract | Unchanged from round 1. AC 17's guard now also asserts no `ProfileStoreOp::{CasPut, Delete, Rename}`, and that at least one profile-store read happened, so it is not vacuous | PASS |
+| Security | Text mode escapes every hidden class the gate named (B-3); no secret-shaped value in tests or output (`demo-*`, `/srv/...` only) | PASS |
+| Migration safety, protocol and goldens | No schema, store, `holler-proto` or golden change | N/A |
+| AC 17, 21, 22 greps | `ports\.(herdr\|host\|harness\|prober)`, `not_implemented\|const STORY`, `unsafe` in the touched files | nothing printed; PASS |
+| Manifests (AC 22) | `git diff --stat origin/main -- Cargo.toml Cargo.lock 'crates/*/Cargo.toml'` | empty; PASS |
+| File sizes | `wc -l`: src 316, 275, 227; tests 370, 545, 311; all under 900. Test files are ASCII-only | PASS |
+| Blast radius (AC 24) | `git diff --name-only origin/main...HEAD` lists the brief's files plus `docs/handoffs/643*`, the same set as round 1 | PASS |
 | Playwright / browser | No such surface in this repo | N/A |
 
-**Evidence appendix:** F listed 11 facts. T appended 6 test-kit facts the tests rely on (sample-pane cwd and ceilings,
-seed and cursor order, the `Cursor(0)` vs `--since` rule, the fake `list`'s sort, `check_ndjson`'s empty-stream
-refusal). Each has a `file:line` and an excerpt T copied from source.
+**Evidence appendix:** T added nothing this phase. The round-2 tests rely on unchanged-code facts that T-red already
+entered (`fault.rs:90-98`, `profile_store.rs:27-37` and `:250-251`, `feed.rs:263-269`), and F kept them in the rebuilt
+file. `wc -c docs/handoffs/643/evidence.md` is 11,696 bytes, under the gate's 12,000-byte cap, so the whole file reaches
+the gate.
 
-**F's commands cross-checked:** every command in handoff-F.md's Tier 1 self-check was re-run. The results match: 30 passed on
-the read-verb filter, 90 on `pane_verbs` before T's additions, and 3/3/34 on the other CLI targets. Clippy, lint,
-changelog, machete and rustfmt all exit 0. The AC 17/21/22 greps print nothing, the line counts are 316/275/227, and
-the workspace numbers are identical. No discrepancy.
+**F's commands cross-checked:** every command in handoff-F.md's Tier 1 self-check was re-run, with the same results
+(35 / 95 / 34 / 3 / 3; clippy, lint, changelog, machete and rustfmt exit 0; greps empty; 316/275/227 lines), with one
+difference: F's workspace run had 1 failure (`body_run_test::fresh_hello_and_presence_on_every_reconnect`, "hub did not
+report listening within 10s"). T's run of the same command had 0 failures (1414 passed). That supports F's reading of
+it as a flake in a file this branch does not touch.
 
 ## Acceptance criteria status
 
-| AC | Status | Backed by |
-|---|---|---|
-| 1 List, text | PASS | `list_prints_a_header_and_one_row_per_pane_sorted_by_name` |
-| 2 List, JSON | PASS | `list_json_is_one_envelope_with_a_row_per_pane` |
-| 3 SHOWN/DRIVEN flagged | PASS | `list_flags_a_pane_whose_shown_and_driven_differ`, `get_flags_a_mismatch`, `watch_flags_a_mismatch` |
-| 4 Unhealthy shown | PASS | `list_shows_an_unhealthy_server` |
-| 5 Row first | PASS | `every_verb_prints_positions_row_first` |
-| 6 `--profile` scopes | PASS | `list_profile_lists_only_the_profile_s_members`, `get_profile_member_is_shown`, `watch_profile_prints_only_member_changes`, `profile_refusals_exit_3_in_both_formats` (+ `watch_profile_prints_a_pane_leaving_the_profile_once`, Decision 7) |
-| 7 `get` whole record | PASS | `get_shows_every_field_of_the_record` |
-| 8 `get` no profile, ceilings | PASS | `get_pane_without_a_profile_shows_its_ceilings` |
-| 9 `get` missing pane | PASS | `get_missing_pane_is_pane_not_found_in_both_formats`, `get_requires_a_pane_name` |
-| 10 Bad names usage | PASS | `bad_names_are_usage_in_both_formats` |
-| 11 Store failures exit 1 | PASS | `store_failures_exit_1_in_both_formats` |
-| 12 `watch` from start | PASS | `watch_from_the_start_prints_each_live_pane_once` |
-| 13 `watch --since` | PASS | `watch_since_prints_each_later_change_once` |
-| 14 Concurrent change once | PASS | `watch_prints_a_concurrent_change_exactly_once` (5 in-test repeats, 3 reruns) |
-| 15 Named pane; store error; `--since` ahead | PASS | `watch_named_pane_follows_only_that_pane`, `watch_ends_at_a_store_error`, `watch_since_ahead_of_the_head_is_usage` |
-| 16 Nothing owed | PASS | `watch_with_nothing_owed_prints_nothing` |
-| 17 Observe nothing | PASS | `read_verbs_call_no_adapter_or_probe`; the grep prints nothing |
-| 18 No terminal injection | PASS | `text_output_escapes_control_characters` (+ `text_output_escapes_c1_and_bidi_characters`) |
-| 19 `--help` documents output | PASS | `list_help_…`, `get_help_…`, `watch_help_documents_the_stream` |
-| 20 Surface rows | PASS | ADR 0003 lines 44-46 match exactly; the fixture's `# #643` block is the nine lines of Decision 13; `// #643` kept (one line) and the three `STUBS` rows gone; the three test targets pass |
-| 21 No stub left | PASS | the `not_implemented\|const STORY` grep prints nothing |
-| 22 Quality gates | PASS | Tier 1 table above; no `unsafe`; no manifest or lock diff; files under 900 lines; clippy's `too_many_lines` clean |
-| 23 CHANGELOG | PASS | one `### Enhancements` entry linking #643, naming no host or account; `changelog-check: ok` |
-| 24 Blast radius | PASS | `git diff --name-only origin/main...HEAD` |
+All 24 PASS, backed by the tests and commands in round 1's table (`git show 50bcc83:docs/handoffs/643/handoff-T-green.md`,
+"Acceptance criteria status"). This round adds:
 
-(Decision 1's `list PANE` is now backed by `list_named_pane_lists_only_that_pane`.)
+| AC | Status | New backing |
+|---|---|---|
+| 17 Observe nothing | PASS | `read_verbs_call_no_adapter_or_probe`, now also over the profile store |
+| 18 No terminal injection | PASS | `text_output_escapes_each_hidden_class_and_keeps_plain_unicode` |
+| Decision 11 (`-` for no value) | PASS | `a_stored_dash_prints_apart_from_the_empty_value` |
 
 ## Blocking issues
 
@@ -130,16 +92,8 @@ None.
 
 ## Advisory notes
 
-- **M8 survives by construction.** Decision 4 says the verb sorts rather than relying on the store's order. Every
-  test-kit fake already returns name order, so no fake-backed test can pin the verb's own `sort_by`. It matters only
-  for a real store (#649) that returns a different order. A test would need a store double outside the kit, which the
-  issue rules out.
-- **`watch --profile --since N` replay edge (accepted in the brief's Risks and documented in `--help`).** Membership
-  starts as the profile's panes *now*. A current member whose replayed history includes a change from before it joined
-  prints that pre-join change once, because "was a member" is seeded from `resolve`. The rule as written implies this.
-  It is noted so S can confirm it is the intended reading.
-- **JSON mode passes DEL, C1 and format characters raw** (F's known issue, in `output.rs` under #660). This is outside
-  this blast radius. It is for the MO.
-- A's open warns W-1 to W-6 are unchanged by this phase. They are the MO's to settle.
-- The three test files are ASCII-only. A raw U+202E in a Rust literal is a compile error, so future
-  edits must keep using `\u{..}` escapes.
+- **The `body_run_test` reconnect flake** (F's run only) is outside this blast radius. If it recurs on `main`, it
+  deserves its own issue. T did not file one from a single sighting.
+- **M8 (the verb's own sort) still survives by construction**, as in round 1: every kit fake returns name order.
+- **evidence.md has 304 bytes of headroom.** Any later entry has to fit, or the gate drops the tail.
+- JSON mode writing DEL, C1 and bidi raw (#660, A's W-11) and A's open warns are unchanged and are the MO's.
