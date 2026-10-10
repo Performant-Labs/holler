@@ -129,3 +129,28 @@ in git at `0ad2d8a:docs/handoffs/640/decisions.md`.
     -p holler-pane`; `cargo doc` with `-D warnings`; `bash scripts/lint.sh`; `bash scripts/changelog-check.sh`;
     `cargo machete`; `cargo tree -p holler-adapter-herdr -e normal --depth 1`; the AC 8, 9, 19-27, 29 and 30 greps;
     and `git merge-file` against `origin/main` for the nine edited files.
+
+## T (Phase 7, verify / GREEN) — 2026-10-09T23:25:00-06:00
+
+- **Decided:**
+  - GREEN is valid with no test change: F flagged no test as wrong, changed no test file, and T's read of the diff found
+    nothing to repair. `handoff-T-green.md` replaces part 2's.
+  - The Test plan's two mutants were run and reverted: (a) `EXCERPT_LIMIT` 65 fails exactly the four AC 18 tests;
+    (b) the `op` rename removed fails exactly AC 16. An extra mutant (rename every error) fails AC 17 and AC 18, so
+    AC 17's guard is not vacuous.
+  - AC 14's version line is taken from the scratch server's own `version()` reply, not a hand-run `herdr --version`,
+    because the brief's Operating rules let only the harness run `herdr`.
+- **Assumed:**
+  - AC 25's "no other line of the ADR changes" is S's read; T ran only its greps and the diff stat (+18 / -11).
+  - `pgrep -af 'h640[.]'` is the faithful form of AC 14's `pgrep -f h640\.`: the bracket keeps the check from matching
+    its own shell, which made the unbracketed form print the checking shell at RED and here.
+- **Hedged:**
+  - The opt-in tests are not in CI; their evidence is four local runs on this machine against Herdr
+    `0.9.1-preview.2026-09-21-0ff0f27e2226`.
+- **Evidence:**
+  - Ran, all with `CARGO_BUILD_JOBS=4`: `cargo test -p holler-adapter-herdr --no-fail-fast` (all green, 2 ignored);
+    the two mutants and the extra one; AC 9-11 (`--list --ignored`, `env -i` without and with the gate); AC 12-14
+    opt-in four times (all `ok`, no `h640.` process or directory left); `cargo test --workspace --no-fail-fast`
+    (exit 0, 1519 passed); `cargo test -p holler-pane` (86); `docs_cli_test` (3); `wire_selftest` (3); clippy
+    workspace `-D warnings`; `cargo fmt --check`; `lint.sh`; `changelog-check.sh`; `cargo machete`; `cargo doc`
+    `-D warnings`; `git merge-tree` against `origin/main` `d9eabbb` (clean); the AC 8, 19-27, 29-31 greps.
