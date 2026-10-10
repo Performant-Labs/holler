@@ -88,3 +88,52 @@
   - `docs_cli_test` FAILED only on ADR-0003:65-66 (F's AC 5 rows). This is the intended RED.
   - `cargo clippy -p holler-cli --all-targets -- -D warnings` is clean. `bash scripts/lint.sh` exits 0.
     `rustfmt --check --edition 2021` on the six touched `.rs` files exits 0.
+
+## F (Phase 5, implement) — 2026-10-09T20:12:30-06:00
+- **Decided:**
+  - **Shape.** Both verbs run a plan, then the writes. The plan (`Result<Plan, PaneError>`) runs every B3 check, in
+    B3's order, before the first write. The writes produce the result, and `run` prints it once through `emit`.
+  - **No CLI types in the reusable writes (A's W-1).** `insert_profile`, `join`, `undo` and `detach` take the store
+    ports and return `PaneError`, or for `join` the plain value `JoinFailed`. Only `JoinFailed::body` and `run` build an
+    `ErrorBody`.
+  - **`JoinFailed` holds no profile name.** The caller passes the name to `body`. Clippy's `result_large_err` rejected
+    the struct with the name in it: 144 bytes against a threshold of 128. I dropped the field rather than boxing
+    because it only repeated a value the caller holds.
+  - **The quoting helper is `single_quoted`, B1's body under #663's name (A's W-3).** It is not the brief's
+    `shell_word`. Its home is `delete.rs`, `pub(crate)`. `delete.rs`'s module doc says it is shared, as `list.rs`'s
+    does for `count`. `list.rs` is outside the blast radius.
+  - **Two more shared helpers in `delete.rs`, so neither verb copies the other.**
+    - `pane_list` is B4's `<list>` and `create`'s `members:` line.
+    - `detach` is the one compare-and-swap that clears `Pane.profile`. `delete --keep-panes` and `create`'s undo both
+      use it.
+  - **The undo clears `profile` to none (B2), not to its earlier value.** A pane that named NAME's slug before the
+    create named a profile that did not exist (`get(NAME)` was `None`), and the undo deletes NAME again.
+  - **ADR-0021 changes in the two section 9 rows only (AC 6).** A's W-2 is left for a follow-up: it widens
+    `profile-conflict`'s definition and records `--keep-panes` as an I1 exception.
+- **Assumed:**
+  - A store error that B4 does not map passes through with its own code and text, as the carried text says. Two cases:
+    - `insert_profile` answers `timeout` after its write landed;
+    - a non-`Conflict` error from `delete`'s final profile delete after some detaches.
+  - Running the verb again converges in both cases (`profile-exists`, or a plain delete).
+- **Hedged:**
+  - **`archChanged: true`.** There is no new module and no public interface change. But this cycle adds four
+    `pub(crate)` helpers and a `create -> delete` edge inside `profile/`, and two of the helpers are beyond the brief's
+    Reuse map. The role rule says to report `true` when in doubt.
+  - **`cargo test --workspace` fails on this machine for reasons outside this change.**
+    - *Plain run:* it stops at `holler-cli --test logging_test` (4 failures). Those tests expect `holler roster` to exit
+      1 with no hub, and the shell's `HOLLER_STATE_DIR` points at a live hub.
+    - *Isolated run:* with `HOLLER_STATE_DIR` set to an empty directory, the result is 1463 passed, 2 failed, 5
+      ignored across 128 targets, and `logging_test` passes 11 of 11.
+    - *The 2 failures* are both in `interrupt_test`. The hub's 45 s liveness check expires a few milliseconds after
+      the body connects, in unchanged hub and body code that no profile verb reaches. Run alone, the same isolated
+      way, `interrupt_test` passed 11 of 11 three times in a row: a timing flake under the parallel run.
+- **Evidence:**
+  - `cargo test -p holler-cli --test profile_verbs`: 43 passed, 0 failed. RED before F was 18 passed, 25 failed.
+  - `cli_surface_test` 3 passed, `docs_cli_test` 3 passed (ADR-0003 lines 65-66 now parse), `pane_cli_process` 34
+    passed.
+  - `cargo clippy --workspace --all-targets -- -D warnings` is clean.
+  - `bash scripts/lint.sh` exits 0: `create.rs` has 346 lines and `delete.rs` 218.
+  - `rustfmt --check --edition 2021` on both source files exits 0. `bash scripts/changelog-check.sh` prints ok.
+  - AC 1's grep prints nothing. AC 6's two greps print one line each, and the ADR-0021 diff is the two rows. AC 9 shows
+    no `unsafe` and no manifest change. AC 12's file list is the brief's Files.
+  - 16 unchanged-code facts are in `docs/handoffs/662/evidence.md`.
