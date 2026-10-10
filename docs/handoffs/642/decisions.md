@@ -256,3 +256,25 @@
     - `cargo test --workspace` with `HOLLER_STATE_DIR` isolated;
     - a scratch probe of the bound's edges and peak memory, outside the repo and deleted afterwards (output in
       handoff-F.md).
+
+## T (Phase 7, verify GREEN: round 2, after F's rework for the outside diff gate's round 1) — 2026-10-09T18:51:32-06:00
+- **Decided:**
+  - PASS. The suite is 30/30 GREEN on 9fc44f6, and Tier 1 and Tier 2 are clean.
+  - F's round-2 `taken` count in `http.rs` is pinned from both sides. Disabling it (M6) or counting 1 MiB low (M7) each
+    fails only `ac1_an_unframed_reply_past_64_mib_is_garbled_and_one_under_it_is_read`.
+  - No test was changed in this round. F's "42" fragility note was already addressed in round 1.
+- **Assumed:**
+  - The isolated workspace run (`HOLLER_STATE_DIR` set to scratch) is the faithful form of CI's run, because this machine
+    runs a live hub.
+- **Hedged:**
+  - The macOS group-kill form remains unverified until CI's macOS leg runs.
+- **Evidence:**
+  - Read: handoff-F.md (round 2), handoff-T-red.md, handoff-T-green.md (round 1), and
+    `git diff 4c9b710 9fc44f6 -- crates/`.
+  - Ran:
+    - `cargo test -p holler-adapter-opencode` (30/30), 8 concurrent runs plus one `--test-threads=1` run;
+    - mutations M6 and M7, each restored with `git checkout`;
+    - lint, changelog-check, `cargo clippy --workspace --all-targets -- -D warnings`, rustfmt, rustdoc `-D warnings`,
+      machete and test-hooks;
+    - the isolated `cargo test --workspace` (1413/0/5), `wire_selftest` and `docs_cli_test`;
+    - the AC 24 grep and the `unsafe` count.

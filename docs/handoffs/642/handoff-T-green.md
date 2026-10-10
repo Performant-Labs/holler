@@ -1,10 +1,105 @@
 # Handoff-T-green: Phase 7 - #642a the OpenCode adapter, server side (`serve`, `health`, `create_session`, `list_sessions`, `abort`, `http::request`)
 
 **Date:** 2026-10-09
-**Branch:** issue-642-implementation (on 999d7e3, F's commit)
+**Branch:** issue-642-implementation (round 2 on 9fc44f6, F's round-2 commit; round 1 was on 999d7e3)
 **Issue:** #642, part 1 of 2 (642a)
-**Handoff-F reviewed:** docs/handoffs/642/handoff-F.md
-**Handoff-T-red:** docs/handoffs/642/handoff-T-red.md
+**Handoff-F reviewed:** docs/handoffs/642/handoff-F.md (round 2)
+**Handoff-T-red:** docs/handoffs/642/handoff-T-red.md (round 2, at 4c9b710)
+
+## Round 2: verify after the rework for the outside diff gate's round 1
+
+### What changed since round 1
+
+- F's round-2 commit changes `src/http.rs` (B-1: a `taken` count in `Reader::fill`, checked before a read's bytes are
+  kept), and docs only in `src/server.rs` (W-1) and `src/tui.rs` (A's N-1(e)).
+- F changed no test file: `git diff --stat 4c9b710 9fc44f6 -- crates/holler-adapter-opencode/tests` is empty.
+- F's "Tests that look wrong (for T)" note, the bare `"42"` check in
+  `ac8_serve_of_a_program_that_exits_at_once_is_unavailable_with_its_status`, was already fixed in round 1. The check
+  requires `42` as a whole number. Round 1's mutation M1 confirmed it, so no test change was made in this round.
+
+### GREEN confirmation
+
+```
+$ cargo test -p holler-adapter-opencode
+test result: ok. 30 passed; 0 failed; 0 ignored; finished in 1.05s
+```
+
+- **Flake check.** 8 concurrent runs of the test binary each gave 30/30 (1.02-1.03 s), and a `--test-threads=1` run gave
+  30/30 (3.94 s). No `sleep 30` process and no `hlr642-*` directory was left afterwards.
+- **Mutation spot-checks of F's new code.** Each change below was made by hand in `src/http.rs`, the suite was run, and the
+  file was restored with `git checkout` (the tree is clean afterwards). Each mutation failed exactly the targeted test:
+
+| Mutation | Test that failed |
+|---|---|
+| M6: the `taken` check disabled (`if false && self.taken > MAX_REPLY`) | `ac1_an_unframed_reply_past_64_mib_is_garbled_and_one_under_it_is_read` (29 passed, 1 failed) |
+| M7: the cap counted 1 MiB low (`MAX_REPLY - (1 << 20)`) | the same test, on its under case (29 passed, 1 failed) |
+
+  So the test pins the bound from both sides on F's new counting, which now includes the head. The under case is
+  `64 MiB - 1024` of body plus a short head, and it still reads whole.
+
+### Tier 1 results (round 2)
+
+| Check | Command | Result |
+|---|---|---|
+| Lint | `bash scripts/lint.sh` | exit 0. This crate's only note is the 600-line warning on `hermetic_test.rs` (775, under 900 and under the brief's 800 split point). PASS |
+| Changelog | `bash scripts/changelog-check.sh` | `changelog-check: ok`. PASS |
+| Clippy | `cargo clippy --workspace --all-targets -- -D warnings` | exit 0. PASS |
+| Format | `rustfmt --check --edition 2021` on the crate's `src`, `tests` and `tests/support` files | exit 0. PASS |
+| Rustdoc | `RUSTDOCFLAGS="-D warnings" cargo doc -p holler-adapter-opencode --no-deps` | clean. PASS |
+| Workspace | `HOLLER_STATE_DIR=<scratch> cargo test --workspace -- --skip roster_stays_accurate_under_concurrent_body_load` | exit 0: 126 suites, 1413 passed, 0 failed, 5 ignored. That is round 1's 1410 plus the 3 adapter tests added since. PASS |
+| Canary | `cargo test -p holler-cli --test wire_selftest` | 3 passed. PASS |
+| Docs CLI | `cargo test -p holler-cli --test docs_cli_test` | 3 passed. PASS |
+| Unused deps | `cargo machete` | nothing found. PASS |
+| Hooks | `bash scripts/test-hooks.sh` | exit 0. PASS |
+| AC 24 | `grep -rn "4700[0-9]\|--continue" crates/holler-adapter-opencode` | nothing (exit 1). PASS |
+| No new `unsafe` | `git diff origin/main...HEAD -- crates \| grep '^+' \| grep -c unsafe` | 0. PASS |
+
+**Cross-check against F.** Every command F reported in round 2 gives the same result here: 30/30, clippy, rustfmt,
+rustdoc, lint, changelog, machete, the AC 24 grep and the `unsafe` count. For the workspace I ran only the isolated form.
+The `logging_test` failures F saw without isolation come from a live local hub, and CI has none.
+
+### Tier 2 (round 2 deltas)
+
+- **Coverage.** Unchanged from round 1, plus round 2's tests:
+  - the cap's over and under cases (AC 1, B-1);
+  - the chunk extension and trailer (AC 1, NV-2);
+  - the counting resolver in the two in-use and frozen `serve` tests (AC 8, NV-4).
+
+  **PASS**
+- **Test quality.** No new tests were written in this round. The round-2 tests fail alone for the right reason (T-red's
+  M1-M4, and M6-M7 above). The 64 MiB test costs about 200 MB of transient memory, as T-red recorded. That is acceptable,
+  and the 8 concurrent runs passed on this machine. **PASS**
+- **API contract.** No public surface changed. `MAX_REPLY` stays private, and there is no test-only knob (A's N-3).
+  **PASS**
+- **Scope (AC 22).** `git diff --name-only origin/main...HEAD` still lists only the crate, `CHANGELOG.md`, `Cargo.lock` and
+  `docs/handoffs/642*`. **PASS**
+- **Evidence appendix.** The round-2 tests rely on `MAX_REPLY` and `fill`, which are in the diff, and on `httparse`'s
+  chunk-size parse, which T-red already logged. No entries were added. **PASS**
+
+### Acceptance criteria status (round 2)
+
+The same as the round-1 table below, all PASS. AC 1 is now also backed by
+`ac1_an_unframed_reply_past_64_mib_is_garbled_and_one_under_it_is_read` and
+`ac1_a_chunked_reply_with_an_extension_and_a_trailer_reads_its_body`.
+
+### Blocking issues (round 2)
+
+None.
+
+### Advisory notes (round 2)
+
+- The round-1 advisories still stand:
+  - `serve`'s success path has no hermetic test;
+  - the macOS form of `kill -s KILL -- -<pgid>` is unverified until CI's macOS leg runs;
+  - the port race is #644's.
+- F's B-1 change counts the head and framing toward the cap, so the largest readable body is a little under 64 MiB. That
+  is within the brief's bound, and the under test shows a body of `64 MiB - 1024` is still read.
+
+T-green complete, no blocking issues. No UI surface — U is N/A, ready for S.
+
+---
+
+# Round 1 (kept for the record)
 
 ## GREEN confirmation
 
