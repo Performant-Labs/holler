@@ -226,3 +226,48 @@
     - `issue-643-implementation`: `pane_verbs/list.rs` and `src/pane/list.rs`;
     - `issue-662-implementation`: `profile_verbs/rig.rs`;
     - the #663 and #644 briefs (reconcile step).
+
+## S (Phase 10, spec audit) — 2026-10-09T18:31:36-06:00
+- **Decided:** ADVISORY-HOLD (see handoff-S.md).
+  - The A and T preconditions are met.
+  - Every one of the brief's ACs 1-33 has a test or other proof that asserts behaviour.
+  - Decisions 1-13 are built as stated, or the change from them is documented (A endorsed most of the changes):
+    - dedupe on the whole finding, because AC 21 needs it;
+    - a record's first observation is written;
+    - the serde for `FindingKind`, `FixState` and `ObservedHealth` comes from one string each;
+    - `now_millis()` is the clock.
+  - The quality checks are clean: guards, sizes, privacy, gitleaks and the docs.
+  - The hold: the operator confirmed the "agent" amendment to #647 at 17:40 MDT, after T-red. It requires a typed
+    `agent-cannot-dispatch` finding and adds a dependency on #700 (OPEN). The brief, the ACs and the code know 12 kinds,
+    and AC 25 pins 12. F cannot add the finding: the field is #700's, and no frozen port observes the agent of
+    hub-delivered turns. So the fix is a decision for O or the MO: (a) split the agent part into a later story, or (b)
+    hold until #700 merges and amend the brief.
+  - Eight advisories go to O. The main one: when `select_session` errors but the re-observation shows the session of
+    record, the finding says `failed` with a relaunch remedy while the record says the session is shown. No test covers
+    it, and D5's literal rule would say `fixed`.
+- **Assumed:**
+  - The live issue text and its GraphQL edit history are authoritative for when the amendment landed.
+  - I relied on T's recorded results for the Tier 1 and Tier 2 commands and did not re-run them, per S's role. Only docs
+    changed after T-green (`git diff --stat baf176f..HEAD`).
+- **Hedged:**
+  - The hold could have been a PASS with an advisory. I did not choose that, because the run's agent merges its own PR,
+    and a PASS could close #647 with an operator-confirmed requirement silently dropped.
+  - Advisory 1 is not REWORK, because D5 does not say what happens when the act itself errors.
+  - Option (a) changes the scope of an operator-confirmed amendment, so the MO may need the operator's OK.
+- **Evidence:**
+  - Issues read with `gh`:
+    - `gh issue view 647`, and the issue's `userContentEdits` (amendment edits at 23:38:10Z and 23:40:09Z, which is
+      17:38 and 17:40 MDT);
+    - epic #633's decision 8, the "#700 only; it merges before #642, #644 and #647 start" ruling, and its wave-3 table;
+    - #700 (OPEN, created 17:39 MDT) and #642's agent amendment.
+  - Code and diffs read in full:
+    - `findings.rs`, `reconcile.rs`, `reconcile/observe.rs` and `pane/doctor.rs`;
+    - the tests `doctor.rs`, `doctor/{rig,read_only,surface}.rs` and `findings_test.rs`;
+    - the diffs of the ADRs, the CHANGELOG, the fixture and `stub.rs`;
+    - `ports.rs`, `pane/wiring.rs`, `pane/args.rs`, and the error and name parsers.
+  - Read-only checks I ran:
+    - the AC 27, 28, 29, 32 and 33 greps;
+    - `wc -l` on the touched files;
+    - greps for `unwrap`, `expect`, `panic!`, `unsafe`, `#[allow]` and printing;
+    - a privacy grep of the added lines;
+    - `gitleaks git --log-opts=origin/main..HEAD` (no leaks).
