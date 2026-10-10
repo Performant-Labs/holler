@@ -669,3 +669,53 @@ reconciled by whichever lands second. O treats the section heading as a formatti
 NV-2 `ServerDown` remedy is never `None`; NV-5 the #645 paragraph sits inside section 8).
 
 **Evidence.** `docs/handoffs/645-diff-result-r6.md`, `docs/handoffs/645-diff-result-r6.md.usage.json`.
+
+## A (anti-duplication gate, round 3) — 2026-10-10T01:40-06:00
+- **Decided:** PASS on `cce6f00` (code as of `6dd44f3`). handoff-A-dup.md replaces round 2's, which stays in git at
+  `08d96df`.
+  - This cycle adds no parallel path:
+    - F's round-5 split calls `select_session` directly at the `acted` boundary and has a private `observe`. Both use
+      the same shared pieces (`shown_differs`, `quoted`, `doctor_command`) and the one copied `screen_text`, in the same
+      shape as reconcile's repair.
+    - T's new test extends the story's own runner.
+    - The two merges kept both sides of ADR-0021, which still has exactly four hunks.
+  - Nothing that the merges brought in is something to reuse. #642's `is_session_id` and `session_path` are
+    adapter-private, and they parse a title or encode a path, not typed input.
+  - Seven warns, none needing a change in 645a:
+    1. F-4 and `screen_text`, widened: #642's `None` can mean "cannot tell", and #718 adds a third screen wording and a
+       second "acted, so append the step" rule, in the CLI.
+    2. New: the observation-failure test copies AC 8's build.
+    3. New to A: ADR-0021 `:485`, "#645's ... planned".
+    4. Section 12 is broader than "after a live act". #718 edits section 12 and can narrow it.
+    5. F-2, widened by #718's launch rig and its `Rig::after` hook.
+    6. The four scoped-read copies.
+    7. `list::profile_name`.
+  - The r6 gate's NV-1, NV-2, NV-5 and W-1 to W-3, which O routed here, are checked in the handoff. All hold, and none
+    is a finding.
+- **Assumed:**
+  - `origin/main` at `bd5e825` (fetched again at 01:37 MDT, unchanged) is what the PR merges into. It is the merge base, so the branch is
+    current.
+  - #718 is not merged, so nothing in it can be reused yet. Its overlaps are recorded as warns and notes for whichever
+    PR lands second.
+- **Hedged:**
+  - Warn 3 is a warn, not a block. Row `:424` states the codes correctly, and "are all refusals" stays true. Only the
+    status word goes stale, and AC 24 forbids the edit, so the decision is O's.
+  - Warn 2 is repetition in the story's own test file, on the story's own runner. It is not a second runner.
+  - I did not build or test. T-green round 6's run on `6dd44f3` is the runtime evidence, and `cce6f00` changes handoff
+    docs only.
+- **Evidence:**
+  - Read: the brief (all of it), handoffs A-dup round 2, F round 6 and T-green round 6, this journal from `:361`, and
+    the diff-gate results r5 and r6.
+  - Diffs: `git diff 940e338 HEAD` over the story's code and tests; `git diff origin/main...HEAD` (full story, stat,
+    ADR-0021, CHANGELOG, `stub.rs`, `doctor.rs`); `git diff d9eabbb origin/main` over `holler-pane/src`, `stub.rs` and
+    `docs/testing.md`.
+  - Read in full: `tx_switch.rs`, `pane/{switch,reset}.rs`, `tests/pane_verbs/{switch,reset}.rs`. On the merged tree:
+    `attach.rs` (select, shown, watch), `tui.rs` `parse_title` and `is_session_id`, `lib.rs` `session_path` and `known`,
+    `output_api.rs`, `output.rs` emitters, ADR-0021 sections 2, 8, 9 (`:478-492`), 12 and "Deferred".
+  - Greps over `crates/`: `from_static(`, the callers of `select_session` and `shown_session`, `emit_error(` and
+    `emit_usage_error`, `its home screen`, the both-format runners, `impl HarnessPort for`, `profile_name(` and the
+    scoped-read arms. A privacy scan of the 1,504 added lines, and a scan for `expect`, `sleep`, `#[allow]` and logging.
+  - `gh pr list`: #718 (#644 part 1), #716 and #673 are open. `git merge-tree --write-tree HEAD
+    origin/issue-644-implementation` exits 1, with ADR-0021 the only conflict. Read #718's `tx_launch.rs` `observe_live`,
+    `pane/launch.rs:428-436`, `launch/rig.rs:1-18, 252` and its ADR-0021 diff.
+  - `gh issue list` searches for F-1 to F-4, the scoped-read fold and 645b (01:34 MDT): none filed.
