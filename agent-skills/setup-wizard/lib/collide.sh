@@ -8,14 +8,21 @@
 #   WIZARD_INSTANCE_NAME        name
 #   WIZARD_HUB_PORT             hub_port (the hub host only)
 #   WIZARD_SERVE_HTTPS_PORT     serve_https_port (the hub host only)
-#   WIZARD_STATE_DIR            state_dir (empty = Holler's default; not compared)
+#   WIZARD_STATE_DIR            state_dir (empty = Holler's default; not compared). A state
+#                               directory shown as `-` on a hub or body row is the default one
+#                               ($HOME/.holler) and is compared as such
 #   WIZARD_HERDR_SESSION        herdr_session (the hub host only)
 #   WIZARD_BACKEND_PORTS        space-separated backend ports planned on this host
 #   WIZARD_SESSION_NAMES        space-separated session names whose bodies run on this host
+#                               (listed in the plan only: a body's session is not on its command
+#                               line, so there is no per-session body check)
 #   WIZARD_LEDGER               optional: this instance's wizard-ledger.toml on this host
 #
 # A process is "created by this instance" only if the ledger holds its pid with the same
 # `started` and `cmd` (a live entry, per the epic's contract); every other process is foreign.
+# A planned `tailscale serve` is the instance's own (present, not touched, never refused) when
+# its target is 127.0.0.1:<hub_port>, its port is WIZARD_SERVE_HTTPS_PORT and the ledger has a
+# live hub row.
 # Prints the inventory beside the plan ("present, not touched" for foreign items), then one
 # `REFUSED:` line per collision naming the item and the config key to change.
 # Exit 0 = no collision, 1 = at least one collision, 2 = bad usage.
@@ -36,6 +43,22 @@ herdr_session=${WIZARD_HERDR_SESSION:-}
 backend_ports=${WIZARD_BACKEND_PORTS:-}
 session_names=${WIZARD_SESSION_NAMES:-}
 ledger=${WIZARD_LEDGER:-}
+
+# The default state directory, and a state directory in comparable form: `-` and `~/...` are
+# resolved, a trailing slash dropped.
+default_sd="${HOME:-~}/.holler"
+norm_sd() {
+  local v="$1"
+  [ "$v" = "-" ] && v=$default_sd
+  case "$v" in "~/"*) v="${HOME:-~}/${v#"~/"}" ;; esac
+  while [ "${#v}" -gt 1 ]; do
+    case "$v" in */) v=${v%/} ;; *) break ;; esac
+  done
+  printf '%s' "$v"
+}
+plan_sd=""
+[ -n "$state_dir" ] && plan_sd=$(norm_sd "$state_dir")
+same_sd() { [ -n "$plan_sd" ] && [ "$(norm_sd "$1")" = "$plan_sd" ]; }
 
 # Ledger entries as tab-separated: pid started cmd
 ledger_rows=""
@@ -66,11 +89,13 @@ EOF2
 # Pass 1: which pids and Herdr sessions are ours.
 ours_pids=" "
 ours_sessions=" "
+own_hub=0
 while IFS="$T" read -r kind pid user sd key started cmd; do
   case "$kind" in
     hub | body | opencode | herdr)
       if ours "$pid" "$started" "$cmd"; then
         ours_pids="$ours_pids$pid "
+        [ "$kind" = hub ] && own_hub=1
         [ "$kind" = herdr ] && ours_sessions="$ours_sessions$key "
       fi
       ;;
@@ -90,12 +115,24 @@ NL='
 REFUSALS=""
 refused_ports=" "
 
+# own_serve <target words>: 0 when this is the instance's own serve of its own hub
+own_serve() {
+  local w
+  [ "$own_hub" = 1 ] && [ -n "$hub_port" ] || return 1
+  for w in $1; do
+    case "$w" in "http://127.0.0.1:$hub_port" | "http://127.0.0.1:$hub_port/"*) return 0 ;; esac
+  done
+  return 1
+}
+
 echo "== collision preflight on $host (instance ${WIZARD_INSTANCE_NAME:-default}) =="
 echo "-- already running here:"
 anything=0
 while IFS="$T" read -r kind a b c d e f; do
   anything=1
   case "$kind" in
+    warn)
+      echo "  warning: $a (the inventory is incomplete)" ;;
     port)
       if [ "$b" != "-" ] && is_ours_pid "$b"; then st="created by this instance"
       else st="present, not touched"; fi
@@ -104,7 +141,7 @@ while IFS="$T" read -r kind a b c d e f; do
       if is_ours_pid "$a"; then st="created by this instance"
       else st="present, not touched"; fi
       what="$kind pid $a user $b"
-      [ "$kind" = body ] && what="body for session $d (pid $a, user $b)"
+      [ "$kind" = body ] && what="body with config $d (pid $a, user $b)"
       [ "$kind" = hub ] && what="hub on port $d (pid $a, user $b)"
       [ "$kind" = opencode ] && what="opencode backend on port $d (pid $a, user $b)"
       [ "$c" != "-" ] && what="$what, state dir $c"
@@ -129,17 +166,13 @@ while IFS="$T" read -r kind a b c d e f; do
         refuse "a hub is already listening on port $d (pid $a, user $b)" "hub_port"
         hub_explained=$hub_port
       fi
-      if [ -n "$state_dir" ] && [ "$c" = "$state_dir" ]; then
+      if same_sd "$c"; then
         refuse "state directory $c is already used by a hub (pid $a)" "state_dir"
       fi
       ;;
     body)
       is_ours_pid "$a" && continue
-      if [ -n "$session_names" ] && in_words "$d" "$session_names"; then
-        refuse "a body for session $d is already running (pid $a, user $b)" \
-          "the [[session]] name (and its body's state_dir)"
-      fi
-      if [ -n "$state_dir" ] && [ "$c" = "$state_dir" ]; then
+      if same_sd "$c"; then
         refuse "state directory $c is already used by a body (pid $a)" "state_dir"
       fi
       ;;
@@ -158,6 +191,15 @@ while IFS="$T" read -r kind a b c d e f; do
   esac
 done <"$inv"
 
+# The planned serve port is not a collision when the serve there is our own.
+own_serve_port=""
+while IFS="$T" read -r kind a b c; do
+  [ "$kind" = serve ] || continue
+  if [ -n "$serve_port" ] && [ "$a" = "$serve_port" ] && own_serve "$c"; then
+    own_serve_port=$a
+  fi
+done <"$inv"
+
 # Ports: a busy port that is not ours is a collision, whatever holds it.
 while IFS="$T" read -r kind a b c; do
   [ "$kind" = port ] || continue
@@ -166,7 +208,7 @@ while IFS="$T" read -r kind a b c; do
   if [ -n "$hub_port" ] && [ "$a" = "$hub_port" ] && [ "$hub_explained" != "$a" ]; then
     refuse "port $a is in use by $c (pid $b)" "hub_port"
     refused_ports="$refused_ports$a "
-  elif [ -n "$serve_port" ] && [ "$a" = "$serve_port" ]; then
+  elif [ -n "$serve_port" ] && [ "$a" = "$serve_port" ] && [ "$own_serve_port" != "$a" ]; then
     refuse "port $a is in use by $c (pid $b)" "serve_https_port"
     refused_ports="$refused_ports$a "
   elif [ -n "$backend_ports" ] && in_words "$a" "$backend_ports"; then
@@ -180,6 +222,7 @@ done <"$inv"
 while IFS="$T" read -r kind a b; do
   [ "$kind" = serve ] || continue
   case "$refused_ports" in *" $a "*) continue ;; esac
+  [ "$own_serve_port" = "$a" ] && continue
   if [ -n "$serve_port" ] && [ "$a" = "$serve_port" ]; then
     refuse "tailscale serve already uses https port $a" "serve_https_port"
     refused_ports="$refused_ports$a "
