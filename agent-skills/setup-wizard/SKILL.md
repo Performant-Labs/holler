@@ -32,6 +32,24 @@ doc's "Mirror gotchas" section) include one where the mirror daemon's own reconc
 killed the real remote processes, not just their viewer panes. Everything below uses plain
 local panes + `opencode attach`, which never touches the mirror daemon.
 
+**The ownership rule (the one rule every stop, restart, rejoin and teardown step points at).**
+The wizard signals a process only if this instance's own ledger
+(`<state_dir>/wizard-ledger.toml`) recorded it **and** the process's current start time and
+command still equal the recorded ones. A recorded pid whose start time or command differ is
+**stale** (a reused pid): never signal it, report it. A process in no ledger is **foreign**:
+never signal it, report its pid, owner and command, then stop and ask the user. This holds
+even when a foreign process holds a port or a name the plan needs. Do it with
+`lib/stop-owned.sh` (it asks `ledger.sh` through `$WIZARD_LIB` and signals nothing by name or
+pattern): `stop-owned.sh stop|restart <state_dir> <pid>`, `stop-owned.sh check-port <state_dir>
+<port>`, `stop-owned.sh teardown <state_dir>`. Exit 0 is done, 1 is stale, 2 is foreign (both
+unsignalled: report and ask), 3 is still running, 4 is a usage error. Do not substitute a
+hand-written `kill`, `pkill` or `killall`. `<state_dir>` is the instance's, or `$HOME/.holler`
+when it sets none. The ledger lives on the host the process runs on, so for a remote host run
+the script there, sending it and `ledger.sh` together (no copy is left behind):
+```bash
+tar -C "$WIZARD_LIB" -cf - ledger.sh stop-owned.sh | ssh <remote_host> 'd=$(mktemp -d) && tar -C "$d" -xf - && WIZARD_LIB="$d" bash "$d/stop-owned.sh" <verb> <state_dir> <pid-or-port>; rc=$?; rm -rf "$d"; exit $rc'
+```
+
 **What's genuinely generalized here vs. what's still OpenCode-specific:** every orchestrator
 (command, working directory, and there can be more than one) is fully config-driven and can be
 any CLI agent. The session side already carries a per-entry `harness` field (per
@@ -709,8 +727,10 @@ plan and show it before touching anything:
   one started — and if fresh, flag that any already-connected body process **on any host** will
   be orphaned and need a rejoin, per Stage 6's note); whether a Herdr server/workspace already
   exists (reused/extended) or will be started from scratch.
-- **Anything that would be killed or replaced, named with which host it's on.** Be explicit and
-  specific — "I'll kill the existing body process on remote-a (PID 12345) because the hub's
+- **Anything that would be killed or replaced, named with which host it's on.** Only
+  ledger-recorded processes (ownership rule, top of this file) may be planned for stopping;
+  anything else holding a planned port is reported under this heading as a conflict to ask
+  about. Be explicit and specific — "I'll kill the existing body process on remote-a (PID 12345) because the hub's
   identity key changed and it can no longer reconnect" is a real plan; "I'll clean things up as
   needed" is not. If nothing needs killing, say that plainly too.
 - **The end state**: M orchestrator panes + N session panes in a Herdr workspace, in the
@@ -800,6 +820,13 @@ start another one, and say so in the stage's report. A `stale` row, or no row, m
 new process and record it. Never adopt a process that is not in the ledger, even if its command
 line looks identical (it may belong to another instance) — if the port is taken by an
 unrecorded process, that is Stage 3's collision gate, stop and report it.
+
+**Before starting or restarting any backend, check its port** with the ownership rule (top of
+this file): `stop-owned.sh check-port <state_dir> <port>`, run on that entry's host. Free, or
+held by a live ledger process, means go on (a restart is `stop-owned.sh restart`, which stops
+the recorded process and prints its recorded command to run again). A foreign or stale holder
+(exit 2 or 1) is reported with its owner and command; stop and ask, never kill it. This is the
+check behind "Reuse on a rerun" above.
 
 **Do**, for every `opencode`-harness entry the plan marked as needing a fresh start (its own
 `remote_host` — read per-entry from the config, not a single value shared by all — and its
@@ -892,11 +919,16 @@ Shows `listening: 127.0.0.1:<hub_port>` and a real PID behind it — the hub pro
 started. Then **record** it: `record --pid $HUB_PID --role hub --stage 6`. `tailscale serve
 --bg` hands its work to the tailscale daemon and leaves no process of ours to signal, so it has
 no ledger row; the wizard never turns off a serve config it did not create, and teardown (the
-ownership story) resets only the `<serve_https_port>` entry this run set.
+ownership rule) leaves it in place and says so: turning off the `<serve_https_port>` entry
+is a separate step, taken only with the user's yes.
 
 **Gate:** if `hub serve` fails to start, stop and report the real error (port already bound by
 something else, a stale lock, etc.) — don't proceed to Stage 7's per-host token minting against
 a hub that isn't actually up.
+
+**Never stop or replace a hub or `tailscale serve` that the ledger did not record** (ownership
+rule, top of this file): `stop-owned.sh check-port <state_dir> <hub_port>` first; a foreign or
+stale holder is reported and the run stops and asks.
 
 **If a hub was already running and this is a resume** (its identity key didn't come from a
 fresh `hub_identity_generated` log line): already-live remote body processes from an earlier
@@ -940,6 +972,11 @@ Third, **for each distinct `remote_host`** (looping, not just doing this once):
    and nearly killed the wrong process. A remote host can be paired to more than one hub over its
    lifetime (or the same host runs bodies for two different setups at once, as happened here);
    the label is the only thing a human or another agent has to tell them apart later.
+
+   Rejoining means stopping the old body first, and the ownership rule (top of this file)
+   applies: stop a body only through `stop-owned.sh stop <state_dir> <pid>`, and only if the
+   ledger recorded it. A `holler body run` the ledger does not list is someone else's: report
+   its pid, owner and command, then stop and ask.
 
    First, check what — if anything — is already there, the same way Stage 2's SSH check does,
    so the label you choose is informed by real state, not guessed:
@@ -1302,6 +1339,11 @@ everything above ran headlessly over Herdr's socket API — nothing was visible 
   directly rather than trusting roster alone right after any disruption, then redo Stage 4 for
   that one entry (no need to restart the others) — and tell the user before doing so, the same
   way Stage 3 would have.
+  Restart it through `stop-owned.sh restart` (ownership rule, top of this file), never by name.
+- **Tearing the instance down:** `stop-owned.sh teardown <state_dir>` stops only ledger
+  processes, in reverse start order, removes only this instance's ledger, and prints what it
+  left (stale entries, foreign processes, other files, other instances). Pass `--purge-state`
+  only when the user asked to remove the instance's whole state directory.
 - **A join fails with `no such token` for one host:** that host's own token mint and its join
   must run against the exact same hub state dir and pepper — this is per-host only in the sense
   that each host has its own mint/join pair (Stage 7); the hub's state dir/pepper is still one
