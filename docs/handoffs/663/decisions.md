@@ -127,3 +127,56 @@ Rigor/brief gate: BLOCKED, overridden by Andre Angelantoni: The outside brief ga
   `scripts/lint.sh` exit 0; `rustfmt --check --edition 2021` on both files exits 0. Throwaway cross-check (reverted):
   the scope tests over `FakeProfileScope` pass AC 1, 6, 7 and differ from it only on Decisions 5-7's message text.
   Details in `handoff-T-red.md`.
+
+## F (Phase 5, implementation) — 2026-10-09T19:04:11-06:00
+- **Decided:**
+  - **The scope.** `profile_scope.rs` now has the real `StoreScope`, built in the fake's shape over any `ProfileStore`
+    and `PaneStore`:
+    - `resolve`, and `edit_spec` in ADR-0021 section 8's order;
+    - `reconcile_step` and `RECONCILE_STEP_UNSCOPED`, as briefed (Decisions 1-12);
+    - the append helper `with_context`, one `match &mut error` with no `_` arm.
+  - **The probe runner.** `probe.rs` now has the runner (Decisions 13-20), private and std-only:
+    - mechanics: spawn in its own group, a detached capped reader, one deadline, and a group kill through `kill` before
+      the leader is reaped, within one 1 s budget;
+    - a private `Outcome`, mapped by `verdict` alone.
+  - **Docs.** One CHANGELOG entry, and the five AC 14 ADR edits.
+  - **Taken from Phase 3's warns:**
+    - W-7 (a)-(c): `may still hold` after a timed-out restore, the rule by outcome, and the requirement on #649's store
+      client;
+    - W-8 (1)-(2): the section 12 cross-reference, and the three errors named;
+    - W-9: the fence-bullet clause, and "the live change or its record failed" in both restore messages;
+    - W-10: `#[cfg(unix)]` guards;
+    - W-12 (2): no follow-up number in AC 14b.
+  - **Two more fixed probe reasons, echoing nothing:** "the probe timeout is too large" (refused before a spawn,
+    instead of a panic on `Instant` overflow) and "the probe's exit status could not be read" (a `try_wait` error; no
+    signal follows).
+  - **A `kill` process that outlasts the budget** is killed and reaped without blocking, else left for the caller's
+    exit.
+  - **The tests are not edited.** Both test modules are byte-identical to T's (sha256 checked). `archChanged: true`.
+- **Assumed:**
+  - `io::ErrorKind`'s `Display` (for example `entity not found`) carries no program name or argument. This is std's
+    fixed text per kind, and 8j's absence checks pass.
+  - `kill -s KILL -- -<pgid>` behaves on macOS's BSD `kill` as on Linux procps. The FreeBSD-derived source accepts `-s`,
+    `--` and a negative pid, but nothing here has run it; CI's macOS job is the first evidence.
+  - The Workflow script or the merge step rebases onto the moved `origin/main` and resolves the CHANGELOG conflict. F
+    does not commit or rebase.
+- **Hedged:**
+  - **`profile_scope.rs` is at 597 lines** against the 600-line warning. The docs were tightened to fit; T's 296-line
+    test module is fixed.
+  - **#701 (#647 part 1) merged during this run** and gave `pane doctor` a `[PANE]` positional. The step stays
+    profile-scoped, as AC 5 pins and Decision 8 chose. Naming the pane is a follow-up for O, and the ADR and rustdoc
+    wording reads correctly whichever lands first.
+  - **The 8e-8g timing slack** is unproven on macOS until CI runs. Here: 10 of 10 repeated runs passed, in 1.38 s
+    serially.
+- **Evidence:**
+  - **Tests:** `cargo test -p holler-cli --lib pane::profile_scope` gives 7 passed; `cargo test -p holler-pane --lib
+    probe::tests` gives 12 passed; `ports_test run_probe_stub_never_reports_success` gives 1 passed.
+  - **Workspace:** `HOLLER_STATE_DIR=<scratch> cargo test --workspace --no-fail-fast` (with CI's skip) gives 1402 passed
+    and 0 failed in 125 suites. Without the scratch state dir, four pre-existing `logging_test.rs` cases fail because
+    this host runs a hub on the default socket.
+  - **Gates:** `cargo clippy --workspace --all-targets -- -D warnings`, `scripts/lint.sh`,
+    `scripts/changelog-check.sh`, `cargo machete` and `rustfmt --check --edition 2021` on both files all exit 0.
+  - **AC checks:** the AC 9, 11, 12 and 14 checks hold. AC 12 is measured against the merge base `3bdd129`.
+  - **Merge dry run:** an in-memory `git merge-tree` of the working tree against `origin/main` `e612878` conflicts in
+    `CHANGELOG.md` only.
+  - Details are in `handoff-F.md` and `evidence.md`.

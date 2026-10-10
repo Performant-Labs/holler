@@ -164,6 +164,19 @@ fills this file in at release time.
   refused for that reason. Test code only: nothing a user runs changes
   ([#688](https://github.com/Performant-Labs/holler/issues/688)).
 
+- Pane control, the `--profile` helper and the health-probe runner (epic [#633](https://github.com/Performant-Labs/holler/issues/633)):
+  the CLI now has the real helper every `--profile` verb uses to scope itself to a profile and to edit a pane's spec and
+  make the live change as one transaction, over the pane and profile registries, in the order of
+  [ADR 0021](docs/adr/ADR-0021.md): the profile is written first, and a live change that fails puts the specs back by a
+  second write. It passes the test kit's 15-case conformance suite. When the outcome after the profile write is not clean
+  (the specs could not be put back, another writer changed the profile, or the first write timed out), the error names
+  the profile and the pane and ends with the step to reconcile: `holler pane doctor --profile '<P>'` and then
+  `holler profile show '<P>'`, the name quoted for a shell. The health probe now really runs: the command runs directly,
+  never through a shell, and passes only when it exits 0 and its output holds every expected string. A non-zero exit, more
+  than 1 MiB of output or the timeout is an error, the whole process group the probe started is killed when it gives up,
+  and no error quotes the command or its output. ADR 0021 now records these rules and the time bounds of both. No verb
+  uses either yet; #649 wires them in ([#663](https://github.com/Performant-Labs/holler/issues/663)).
+
 ## [0.4.0] - 2026-09-29
 
 ### Enhancements
