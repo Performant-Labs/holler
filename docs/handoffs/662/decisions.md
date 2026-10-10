@@ -210,3 +210,38 @@
     `fixed` policy, raw C1 in JSON arrays, always-plural count, unquoted probe error: each caught. Removing the
     `list` sort: survives (advisory 1).
   - Four facts appended to `evidence.md` ("Added by T"), copied from source by T.
+
+## A (Phase 7, anti-duplication gate) — 2026-10-09T18:44-06:00
+
+- **Decided:** PASS, with five warns and no block (handoff-A-dup.md; diff `3bdd129..80b59c3`).
+  - F reused every object the Reuse map named, and each "new here" item is one copy: `spec_from_pane`, `is_member`,
+    `diff_spec`/`diff_profile`. No inline membership filter, no second slug rule, no output code beyond the `text`
+    closures, no new code. The public API is exactly the brief's, and no frozen file changed.
+  - **Five warns:**
+    - `count` is the third private pluralizer (adapter `plan.rs:262`, kit `herdr.rs:498`), and no seam is reachable;
+    - `SpecField::ALL` has no completeness test against `ProfileSpec`, and `ModelSpec`/`ContextCeilings` are copied whole;
+    - #647's in-flight `findings::embedded` is a near-copy of `write_escaped`, to settle under the brief's text-forms
+      Follow-up;
+    - merging with #647 conflicts in ADR-0021 (delete both bullets) and CHANGELOG (keep both entries), both mechanical;
+    - three cross-story items from round 2 are still open: #643's `names_profile`, the kit's `belongs`, and #644's stale
+      `COMPARED` quote.
+- **Assumed:**
+  - The in-flight branches, as read from their worktrees at about 18:40 MDT, are what those runs will merge: #643
+    `3140f35` (T-red), #644 `7195993` (brief), #647 `00f7ff2` (PR #701 open, A-dup PASS), #663 `8fe683b` (T-red).
+  - A merge that `git merge-tree` reports as clean is clean at rebase too, given those heads.
+- **Hedged:**
+  - Finding 3 is a warn, not a block. Neither escape is on `main`, the brief records the settlement in writing, and either
+    fold would edit the other story's file.
+  - Finding 2 is a warn: the record types are frozen under the epic's amend-first rule, so a new field is rare and
+    deliberate. The fix is one test.
+- **Evidence:**
+  - **Read in full:** the four production files, `rig.rs`, the brief's API, Behaviour, Reuse map and Follow-ups,
+    handoff-A, handoff-F, handoff-T-green, and the ADR, CHANGELOG, fixture and `stub.rs` diffs.
+  - **Greps:** slug comparisons, membership helpers, escape helpers, pluralizers, `Display` impls,
+    `Value::String` text paths, `Refused` and new codes, new `pub` items, frozen-file and manifest diffs, and the
+    sibling branches' added lines.
+  - **Runs:**
+    - `git merge-tree --write-tree HEAD issue-647-implementation` conflicts in 2 files;
+    - a scratch Rust program over all 65 control characters: `escape_default` and `escape_debug` differ on NUL only;
+    - `cargo clippy -p holler-pane -p holler-cli --all-targets -- -D warnings` is clean; `bash scripts/lint.sh` exits 0;
+    - #644's pre-flight grep matches 3 lines.
