@@ -1,0 +1,57 @@
+# The Holler display plugin's manifest (issue #651), loaded by Herdr. The
+# plugin's library and binary live in this crate; the shapes follow the spike
+# probe (the spike doc sections 12-13 and its plugin probe script).
+#
+# Display only: the plugin reports metadata (pane.report_metadata and
+# workspace.report_metadata) and reads; it never changes a pane, a session or
+# a layout. tests/display_only_allowlist.rs fails the crate if a source or
+# this manifest names any other Herdr method.
+#
+# Every command is an argv array, never a shell string. The actions run the
+# holler pane verbs; the pane an action acts on is resolved at run time from
+# the HERDR_PANE_ID the action process receives, through the hub registry
+# (resolve_action_pane). The event hooks re-run the plugin's refresh entry.
+
+id = "holler"
+name = "Holler"
+version = "0.4.0"
+min_herdr_version = "0.9.1"
+description = "Holler's pane state in the sidebar: project, SHOWN vs DRIVEN, hold"
+
+[[actions]]
+id = "switch"
+title = "Switch this pane to its session of record"
+contexts = ["pane"]
+command = ["holler", "pane", "switch"]
+
+[[actions]]
+id = "reset"
+title = "Reset this pane"
+contexts = ["pane"]
+command = ["holler", "pane", "reset"]
+
+[[actions]]
+id = "doctor"
+title = "Check this pane (read only)"
+contexts = ["pane"]
+command = ["holler", "pane", "doctor"]
+
+[[actions]]
+id = "park"
+title = "Park this pane"
+contexts = ["pane"]
+command = ["holler", "pane", "park"]
+
+[[actions]]
+id = "unpark"
+title = "Unpark this pane"
+contexts = ["pane"]
+command = ["holler", "pane", "unpark"]
+
+[[events]]
+on = "pane.created"
+command = ["herdr-holler", "refresh"]
+
+[[events]]
+on = "layout.updated"
+command = ["herdr-holler", "refresh"]
