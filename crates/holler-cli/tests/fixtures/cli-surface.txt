@@ -141,9 +141,13 @@ pane unpark | --profile demo
 pane close |
 pane close | --profile demo
 pane close | --profile demo --spec-only
+pane close | demo-c1r1
+pane close | demo-c1r1 --profile demo --format=json
+pane close | demo-c1r1 --profile demo --spec-only
 say | --pane demo-c1r1 hello
 say | --pane demo-c1r1 --parts-file f
 say | --pane demo-c1r1 --profile demo hello
+say | --pane demo-c1r1 --profile demo hello --queue
 interrupt | --pane demo-c1r1
 interrupt | --pane demo-c1r1 "stop; do X instead"
 answer | --pane demo-c1r1 yes

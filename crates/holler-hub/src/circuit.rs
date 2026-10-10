@@ -736,7 +736,7 @@ where
             }
             LiveCommand::Say { request_id, session, message, queue, replace, grant, reply } => {
                 let key = crate::holds::session_key(self.label, &session);
-                let gate = HoldGate { holds: self.registry.holds(), key: &key, grant: grant.as_deref() };
+                let gate = HoldGate { holds: self.registry.holds(), key: &key, grant: grant.as_deref(), panes: self.registry.panes().cloned() };
                 match dispatch::send_prompt(self.sink, gate, &request_id, &session, message, queue, replace).await {
                     Ok(()) => {
                         self.pending_says.insert(request_id, PendingSay { reply, updates: Vec::new() });

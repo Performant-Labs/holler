@@ -468,7 +468,7 @@ fn the_engine_refuses_every_routed_case_with_exit_3() {
         let rig = routing_world();
         let error = resolve_pane_target(rig.ports(), pane, *profile)
             .expect_err(&format!("{pane}: refused with {code}"));
-        assert_eq!(error.code(), code, "{pane}: {error}");
+        assert_eq!(error.code(), *code, "{pane}: {error}");
         assert_eq!(
             class_of(error.code()),
             ErrorClass::Refusal,
@@ -490,7 +490,7 @@ fn the_engine_refuses_every_routed_case_with_exit_3() {
 fn the_engine_checks_the_name_the_scope_the_record_then_the_session() {
     let rig = routing_world();
     // A bad pane name is usage (exit 2), before anything else.
-    let usage = resolve_pane_target(rig.ports(), "a/b", None).unwrap();
+    let usage = resolve_pane_target(rig.ports(), "a/b", None).unwrap_err();
     assert_eq!(usage.code(), "usage");
     assert_eq!(class_of(usage.code()), ErrorClass::Usage);
 
@@ -499,7 +499,7 @@ fn the_engine_checks_the_name_the_scope_the_record_then_the_session() {
     let fresh = Rig::new([], [sample_profile("Demo Alpha", &["demo-c1r1"]).unwrap()]).unwrap();
     assert_eq!(
         resolve_pane_target(fresh.ports(), "demo-c9r9", Some("Demo Alpha"))
-            .unwrap()
+            .unwrap_err()
             .code(),
         "pane-not-in-profile"
     );
@@ -508,7 +508,7 @@ fn the_engine_checks_the_name_the_scope_the_record_then_the_session() {
     // of record is `session-not-found`, not `pane-parked`.
     assert_eq!(
         resolve_pane_target(rig.ports(), "demo-c8r1", None)
-            .unwrap()
+            .unwrap_err()
             .code(),
         "session-not-found"
     );
@@ -572,7 +572,7 @@ fn a_pane_hold_renders_one_line_exit_3_with_the_right_remedy() {
         ("pane-unhealthy", "holler pane doctor"),
         ("pane-shown-driven-mismatch", "holler pane doctor"),
     ] {
-        let text = pane_hold_refusal(&pane_held(code), false)
+        let text = pane_hold_refusal("ses-demo-c1r1", &pane_held(code), false)
             .unwrap_or_else(|| panic!("{code}: the pane arm renders"));
         assert_eq!(text.exit_code, 3, "{code}: exit 3, not the held 4");
         assert!(text.to_stderr, "{code}: a refusal goes to stderr");
@@ -589,7 +589,7 @@ fn a_pane_hold_renders_one_line_exit_3_with_the_right_remedy() {
         );
     }
 
-    let json = pane_hold_refusal(&pane_held("pane-parked"), true)
+    let json = pane_hold_refusal("ses-demo-c1r1", &pane_held("pane-parked"), true)
         .unwrap_or_else(|| panic!("json: the pane arm renders"));
     assert_eq!(json.exit_code, 3);
     assert!(
@@ -607,13 +607,14 @@ fn a_pane_hold_renders_one_line_exit_3_with_the_right_remedy() {
 #[test]
 fn every_other_held_error_falls_through_to_the_generic_arm() {
     let mut operator = pane_held("freeze");
-    operator
-        .data
-        .as_mut()
-        .map(|d| d.hold_kind = Some("operator".into()));
-    assert!(pane_hold_refusal(&operator, false).is_none());
+    if let Some(data) = operator.data.as_mut() {
+        data.hold_kind = Some("operator".into());
+    }
+    assert!(pane_hold_refusal("ses-demo-c1r1", &operator, false).is_none());
 
     let mut unkinded = pane_held("freeze");
-    unkinded.data.as_mut().map(|d| d.hold_kind = None);
-    assert!(pane_hold_refusal(&unkinded, false).is_none());
+    if let Some(data) = unkinded.data.as_mut() {
+        data.hold_kind = None;
+    }
+    assert!(pane_hold_refusal("ses-demo-c1r1", &unkinded, false).is_none());
 }

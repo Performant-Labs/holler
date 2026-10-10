@@ -44,23 +44,102 @@ pub(super) struct PendingSay {
 }
 
 /// Why [`send_prompt`] did not send.
+#[derive(Debug)]
 pub(super) enum SendPromptError {
-    /// The session hold refused the prompt (issue #442, #460): nothing was
-    /// sent. Carries the wire error to answer with (`session_held`, or
-    /// `invalid_grant` for a grant that was not honoured).
+    /// The session hold, or the pane-state gate, refused the prompt (issue
+    /// #442, #460, #646): nothing was sent. Carries the wire error to answer
+    /// with (`session_held`, or `invalid_grant` for a grant that was not
+    /// honoured).
     Refused(holler_proto::WireError),
     /// The frame could not be built or the socket is gone.
     Io,
 }
 
 /// The hold registry and the key [`send_prompt`] checks it with
-/// (`<label>/<session>`, built from the connection's own authenticated label).
-#[derive(Clone, Copy)]
+/// (`<label>/<session>`, built from the connection's own authenticated label),
+/// and the pane registry it checks the session against (story #646).
+#[derive(Clone)]
 pub(super) struct HoldGate<'a> {
     pub(super) holds: &'a crate::holds::Holds,
     pub(super) key: &'a str,
     /// The one-time release grant the sender presented, if any (issue #460).
     pub(super) grant: Option<&'a str>,
+    /// The pane registry ([`Registry::panes`]), `None` when the registry was
+    /// built without one: then no prompt is refused for a pane's state.
+    pub(super) panes: Option<std::sync::Arc<crate::panes::PaneState>>,
+}
+
+/// The pane-state refusals of [`send_prompt`] (story #646 part 3), as `data.reason`.
+const PANE_PARKED: &str = "pane-parked";
+const PANE_UNHEALTHY: &str = "pane-unhealthy";
+const PANE_SHOWN_DRIVEN_MISMATCH: &str = "pane-shown-driven-mismatch";
+
+/// What a pane's record says against prompting its session of record: its code and
+/// a few words of why, or `None` when nothing does. The record is the source (the
+/// hold `park` set, the health and the last observation reconcile wrote), never a
+/// live probe: parked; unhealthy; or SHOWN and DRIVEN both observed and differing
+/// (one side absent is not a mismatch). Checked in that order.
+///
+/// Its twin is the CLI's routing engine, `holler_cli::say_cmd::resolve_pane_target`,
+/// which refuses the same three conditions before contacting the hub. The predicate
+/// exists twice only because `holler-pane` is frozen and the hub cannot depend on the
+/// CLI crate; keep the two equal.
+fn pane_state_refusal(pane: &holler_pane::Pane) -> Option<(&'static str, &'static str)> {
+    use holler_pane::pane::{Health, Hold};
+    if matches!(pane.hold, Hold::Parked { .. }) {
+        return Some((PANE_PARKED, "is parked"));
+    }
+    if matches!(pane.harness.health, Health::Unhealthy(_)) {
+        return Some((PANE_UNHEALTHY, "is unhealthy"));
+    }
+    let seen = &pane.last_observed;
+    match (seen.shown.as_deref(), seen.driven.as_deref()) {
+        (Some(shown), Some(driven)) if shown != driven => Some((
+            PANE_SHOWN_DRIVEN_MISMATCH,
+            "shows a session other than the one it drives",
+        )),
+        _ => None,
+    }
+}
+
+/// The pane-state gate: refuse a prompt to `session` (the bare session name being
+/// sent) while any pane whose session of record it is has a refusal
+/// ([`pane_state_refusal`]). Fail-closed across panes on different bodies that
+/// record the same session name: any bad one refuses, and the first bad one in name
+/// order (`list` is name-sorted) is the one named. One synchronous read with no
+/// `await`, so it is totally ordered against a pane write, as `holds.admit` is
+/// against `hold`/`release`.
+///
+/// The refusal is `-32011 session_held` with `data.hold_kind = "pane"` and
+/// `data.reason` the pane code (no `data.since`: the park's is epoch milliseconds,
+/// not the RFC 3339 the field documents). `holler release` does not lift it; the
+/// remedy is `holler pane unpark` or `holler pane doctor`.
+///
+/// A registry that cannot be read (`store-corrupt`, logged by the registry when it
+/// failed to load) refuses nothing, as a hold file that cannot be read leaves the
+/// hub with no holds (`crate::holds`): a broken pane file must not stop every
+/// prompt to every session.
+fn pane_gate(
+    panes: &crate::panes::PaneState,
+    session: &str,
+) -> Result<(), holler_proto::WireError> {
+    use holler_pane::PaneStore as _;
+    let Ok(records) = panes.list() else {
+        return Ok(());
+    };
+    let refused = records
+        .iter()
+        .filter(|pane| pane.session_of_record.as_deref() == Some(session))
+        .find_map(|pane| pane_state_refusal(pane).map(|refusal| (pane, refusal)));
+    match refused {
+        Some((pane, (code, why))) => Err(holler_proto::WireError::new(
+            holler_proto::Code::SessionHeld,
+            format!("pane {} {why}, so it refuses prompts ({code})", pane.name),
+            Some(code),
+        )
+        .with_hold_kind("pane")),
+        None => Ok(()),
+    }
 }
 
 /// Send a `session/prompt {session, message, queue, replace}` request to the
@@ -78,6 +157,9 @@ pub(super) struct HoldGate<'a> {
 /// `await`, so it is totally ordered against `hold`/`release` (see
 /// `crate::holds`). `crates/holler-cli/tests/hold_single_path_test.rs` fails
 /// if a second sender of `session/prompt` appears.
+///
+/// The pane-state gate (story #646, [`pane_gate`]) is checked here too, after
+/// the hold: an operator or default hold refuses first, with its own kind.
 pub(super) async fn send_prompt<Snk>(
     sink: &mut Snk,
     gate: HoldGate<'_>,
@@ -93,6 +175,9 @@ where
     // `admit` decides and, for a valid grant, consumes it in one critical
     // section: the prompt is accepted here, so the grant is spent here.
     gate.holds.admit(gate.key, gate.grant).map_err(SendPromptError::Refused)?;
+    if let Some(panes) = gate.panes.as_deref() {
+        pane_gate(panes, session).map_err(SendPromptError::Refused)?;
+    }
     let cid = holler_proto::CorrelationId::parse(request_id).map_err(|_| SendPromptError::Io)?;
     let params = holler_proto::Prompt { session: session.to_string(), message: *message, meta: None, queue, replace };
     let req = Envelope::request(&cid, "session/prompt", Some(serde_json::to_value(params).map_err(|_| SendPromptError::Io)?));
@@ -369,7 +454,7 @@ impl LastSeenFlusher {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)] // #442
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable)] // #442, #646
 mod hold_tests {
     use super::*;
 

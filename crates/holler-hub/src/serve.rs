@@ -360,10 +360,14 @@ fn build_shared_state(state: &HubState, join_held: Vec<String>) -> SharedState {
     let holds = crate::holds::Holds::load(state);
     // `hub serve --join-held` (issue #460): off unless given.
     holds.set_join_held(join_held);
-    let registry = crate::live::Registry::new().with_holds(holds);
     // The pane and profile registries' state (issue #669) is loaded here for the same
     // reason: one `Arc` of each per hub process, in force before the first connection.
+    // The live registry carries the pane one too, for `send_prompt`'s pane-state gate
+    // (story #646).
     let pane_deps = crate::pane_dispatch::PaneDeps::load(state);
+    let registry = crate::live::Registry::new()
+        .with_holds(holds)
+        .with_panes(std::sync::Arc::clone(&pane_deps.panes));
     // Issue #184's connection hygiene: resolved once per process (the same
     // "fixed for the hub's whole life" discipline the roster's `Config`
     // already uses), then shared by every accepted socket.

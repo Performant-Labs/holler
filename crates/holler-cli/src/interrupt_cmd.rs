@@ -2,7 +2,8 @@
 //! way `say_cmd.rs` (issue #190) is — this file returns a plain
 //! [`InterruptResult`]; only the bin turns that into an actual exit.
 
-use crate::prompt_target::{route, Routed};
+use crate::prompt_target::Routed;
+use crate::say_cmd::{pane_hold_refusal, route_target};
 use crate::Interrupt;
 
 /// What `main.rs` should print and exit with.
@@ -33,10 +34,11 @@ fn err(message: String, exit_code: i32) -> InterruptResult {
 /// the spec's own wording; `2` an ambiguous session or a malformed positional
 /// tail.
 ///
-/// `--pane` and `--profile` (epic #633) are refused with exit 1 and `not
-/// implemented (story #646)` before any hub is contacted: see `prompt_target.rs`.
+/// `--pane NAME [--profile P]` (story #646) interrupts the pane's session of record,
+/// routed by `say`'s engine (`say_cmd::route_target`), with its refusals and exit
+/// codes; a redirect the hub's pane-state gate refuses prints as `say`'s does.
 pub fn run(interrupt: &Interrupt, json: bool) -> InterruptResult {
-    let Routed { session, arg } = match route(interrupt.resolve(), &interrupt.profile) {
+    let Routed { session, arg } = match route_target(interrupt.resolve(), &interrupt.profile) {
         Ok(routed) => routed,
         Err(stop) => return err(stop.message, stop.exit_code),
     };
@@ -61,6 +63,15 @@ pub fn run(interrupt: &Interrupt, json: bool) -> InterruptResult {
         }
         Err(holler_hub::control::ControlError::RemotePolicyRefused(msg)) => err(msg, 3),
         Err(holler_hub::control::ControlError::Refused(e)) => {
+            // The pane arm comes first (story #646): the redirect passes
+            // `send_prompt`, whose pane-state gate is no hold to release.
+            if let Some(refused) = pane_hold_refusal(&session, &e, json) {
+                return InterruptResult {
+                    message: refused.message,
+                    to_stderr: refused.to_stderr,
+                    exit_code: refused.exit_code,
+                };
+            }
             if crate::hold_cmd::is_held(&e) {
                 let (message, to_stderr) = crate::hold_cmd::held_refusal(&session, &e, json);
                 return InterruptResult { message, to_stderr, exit_code: crate::hold_cmd::HELD_EXIT_CODE };

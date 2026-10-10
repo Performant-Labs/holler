@@ -270,6 +270,26 @@ fills this file in at release time.
   prompt is a later part of #646. Until the hub's stores are wired into the binary
   ([#649](https://github.com/Performant-Labs/holler/issues/649)), the real verbs still answer `not-implemented`
   ([#646](https://github.com/Performant-Labs/holler/issues/646), part 1 of 3).
+- Pane control, `holler pane close PANE [--profile NAME] [--spec-only]` (epic [#633](https://github.com/Performant-Labs/holler/issues/633)): stops the
+  pane's owned processes, closes its Herdr pane and deletes its record, in that order, never
+  moving another pane. With `--profile P` the spec removal and the close are one transaction
+  (a failed close puts P's specs back), and P must hold a spec for the pane
+  (`pane-not-in-profile` otherwise, before anything is written). `--spec-only` removes the
+  spec and closes nothing, so it also cleans up a spec whose pane is gone. A failure once the
+  close has started names the step it reached and ends with the `holler pane doctor` command
+  that reconciles. Takes `--format=json` ([#646](https://github.com/Performant-Labs/holler/issues/646), part 2 of 3).
+- Pane control, `say`, `interrupt` and `answer` with `--pane NAME [--profile NAME]` (epic
+  [#633](https://github.com/Performant-Labs/holler/issues/633)): they prompt the pane's session of record instead of refusing with `not implemented
+  (story #646)`. They refuse, with exit 3 and the code in the message, a pane with no record,
+  outside the profile or with no session of record, and one whose record says it is parked
+  (`pane-parked`), unhealthy (`pane-unhealthy`) or showing a session other than the one it
+  drives (`pane-shown-driven-mismatch`). `--profile` without `--pane` is a usage error. The
+  hub refuses a prompt to such a pane's session of record by any route, a bare `say SESSION`
+  included, as `session_held` with `hold_kind: "pane"`, which `holler release` does not lift.
+  `say` and `interrupt` print it as exit 3 with the `holler pane unpark` or `holler pane doctor`
+  remedy. `say --pane NAME --queue` prints `queued <session>` and exits 0 once the hub has
+  accepted the prompt (`say --queue SESSION` still waits for the reply). Until the stores are
+  wired into the binary ([#649](https://github.com/Performant-Labs/holler/issues/649)), `--pane` answers `not implemented` ([#646](https://github.com/Performant-Labs/holler/issues/646), part 3 of 3).
 - Pane control, `holler profile create NAME [--from-current | --from PROFILE]` and `holler profile delete NAME
   [--keep-panes]` (epic [#633](https://github.com/Performant-Labs/holler/issues/633)): `profile create NAME` makes an
   empty profile. `--from PROFILE` copies another profile's specs as they are: a detached copy, which no pane joins, and

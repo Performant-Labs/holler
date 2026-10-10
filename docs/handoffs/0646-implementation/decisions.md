@@ -95,6 +95,39 @@ Append-only. Format per pipeline-conventions §1.
   one only as a contract conversation); not pinned: close of an already-gone Herdr pane, close
   of a parked pane.
 
+## 2026-10-10 — Phase F: accepted on attempt 3 (attempts 1-2 refused mechanically)
+
+- **Attempt 1** (22.2 min, 162 turns): full implementation landed in-radius (8 code files + 2
+  ADRs + handoff-F.md) but refused on the write-boundary check — every offender was `target/**`.
+  Root cause: the plugin symlinks `target/` out of the worktree precisely so cargo's writes stay
+  outside the boundary watcher; this run's de-contaminated *private in-worktree* `target/`
+  made cargo's 18k build writes look like F's out-of-scope writes. Fixed by moving the private
+  target dir to `<cache>/646-target` and symlinking `target -> <cache>/646-target` (keeps the
+  de-contamination AND the boundary contract).
+- **Attempt 2** (6.7 min): refused `git-metadata` / category `runner-input` ("git metadata
+  changed", offender list not computed). No commit was made in the window; HEAD never moved;
+  operator instructed attempt 3.
+- **Attempt 3** (10.05 min, 46 turns): **STAGE OK**, 1 artifact (handoff-F.md) accepted.
+- F's substance (handoff-F.md is the authority): the hub gate (`HoldGate.panes`,
+  `pane_state_refusal`, `pane_gate` — one sync `list()`, first-bad-pane-in-name-order,
+  `SessionHeld` + `hold_kind:"pane"`, no `data.since`, after `holds.admit`), `Registry::
+  with_panes`, the two binding-1 one-liners (circuit.rs 898 lines — under the gate), the CLI
+  routing engine (`resolve_pane_target`, `route_target`, three open-code consts, 2 s
+  `QUEUE_ACCEPT_WAIT` on `ControlCall.timeout` only), close as a real verb with the
+  edit_spec-precheck transaction, ADR-0003/0021 rows drafted. clippy clean (lib+bins);
+  file gates pass; no unsafe, no new deps.
+- **F found four defects in T's red suite** (3 compile classes in `target_flags.rs`, 1
+  self-contradicting `assert_untouched` in `close.rs:232`) + 1 clippy lint in the applied gate
+  tests + the denied-by-scope fixture/CHANGELOG edits (drafted in the handoff for T/O). F
+  verified everything else green in a throwaway copy OUTSIDE the worktree (233/234 pane_verbs,
+  all other binaries green) without ever touching the run's test files — the right call under
+  the write scope. F's one contract deviation: `pane_hold_refusal(session, e, json)` takes the
+  session first, matching `hold_cmd::held_refusal`, because T's own JSON expectation needs
+  `session` in the object — T rules on it at green.
+- F's flagged staleness (cli.rs help strings, prompt_target.rs module doc saying "until #646")
+  is in files frozen to #637/#670 — correctly left; journal as follow-up story material, and S
+  should expect the ADR text to carry the truth instead.
+
 
 ## 2026-10-10 — Phase 4 (t-red): T authors the failing suite; one scope block
 
@@ -128,4 +161,40 @@ Append-only. Format per pipeline-conventions §1.
   final pane_verbs: one compile error naming the four missing `say_cmd` items; pane_cli_process:
   3 FAILED (routing replaced the stub), 33 passed; hub lib 77 passed (gate tests pending paste).
   rustfmt clean and clippy clean on every file T touched.
+
+## 2026-10-10 — Phase T-green: the four test defects repaired; suite GREEN
+
+- **Decided (T, ruling on F's contract change — defect 3)**: ACCEPT
+  `pane_hold_refusal(session: &str, e: &WireError, json: bool)`. T's own pinned JSON
+  (`{"error":"session_held","session":"<s>","reason":"<code>","hold_kind":"pane"}`) requires the
+  session in the object; `WireError`/`ErrorData` carries none (only `hold_kind`, `reason`,
+  `since`), so only the caller can supply it. The 3-arg shape also mirrors
+  `hold_cmd::held_refusal(session, e, json)` — the held form binding 2 says to mirror. Rejecting
+  would mean weakening the pinned JSON (dropping `session`) and diverging from the held form.
+  Session `"ses-demo-c1r1"` passed at the four call sites.
+- **Decided (T, defect 4)**: `close_spec_only_…_touches_nothing_live` now pins "no pane-store
+  write" instead of `assert_untouched` (zero writes everywhere). The original contradicted the
+  test's own generation-2 pin two lines above: a spec removal IS one profile `CasPut` (the log
+  is `[Get, Get, CasPut]`), and `ProfileStoreOp` has no other write op — no production code
+  could ever satisfy both assertions. "Nothing live" stays pinned by the four exact-empty
+  asserts (herdr/host/harness/probes) plus the record-stays assert.
+- **Decided (T, defects 1/2)**: mechanical compile repairs — `*code` at target_flags.rs:471
+  (`&str` vs the loop's `&&str`), `.unwrap_err()` at 493/502/511 (the cases expect usage /
+  `pane-not-in-profile` / `session-not-found` refusals; `.unwrap()` on the `Ok` `String` both
+  fails to compile and contradicts each case's own code assertion). Also applied F's
+  `option_map_unit_fn` rewrite (`.map(|d| …)` → `if let`) in the fall-through test — two
+  CI-gate clippy lints in T's file.
+- **Decided (T, fixture)**: the four `# #646` cli-surface lines added (close with the PANE
+  positional ×3, `say --pane --profile … --queue`), grouped verb-wise; `cli_surface_test` 3/3.
+- **Blocked (needs O, one line)**: the `clippy::unreachable` deny hit by T's gate block at
+  `dispatch.rs:650` (`let … else { unreachable!() }`) — the fix is adding `clippy::unreachable`
+  to the module's existing `#[allow]` line (drafted in handoff-T-green.md); T's write scope
+  denies `src/**`. CI's clippy gate (`--all-targets -D warnings`) fails on exactly this one
+  error until it lands; the suite is unaffected. Also O's: the CHANGELOG entry F drafted.
+- **Evidence**: `cargo test --workspace -- --skip roster_stays_accurate_under_concurrent_body_load`
+  → exit 0, 140 binaries, 1779 passed / 0 failed (identical to F's scratch copy).
+  pane_verbs 234, pane_cli_process 36, hub lib 83 (gate tests in), cli_surface 3.
+  `cargo clippy --workspace --all-targets` → exactly ONE error, the `unreachable!` above;
+  `cargo clippy -p holler-cli --all-targets` (T's files) → clean. `scripts/lint.sh` → exit 0.
+  rustfmt --check --edition 2021 clean on both Rust files T touched.
 

@@ -28,7 +28,7 @@ use holler_pane_testkit::pane_store::PaneStoreOp;
 use holler_pane_testkit::profile_store::ProfileStoreOp;
 use serde_json::json;
 
-use rig::{alpha_world, assert_untouched, bare_step, profile, profile_step, run_both, Rig};
+use rig::{alpha_world, bare_step, profile, profile_step, run_both, Rig};
 
 /// `pane close <name>` with the flags of the case appended.
 fn close<'a>(name: &'a str, flags: &[&'a str]) -> Vec<&'a str> {
@@ -229,7 +229,16 @@ fn close_spec_only_removes_the_spec_and_touches_nothing_live() {
         assert_eq!(run.calls.host, vec![], "no host call");
         assert_eq!(run.calls.harness, vec![], "no harness call");
         assert_eq!(run.calls.probes, vec![], "no probe run");
-        assert_untouched(&run.calls);
+        // The one profile `CasPut` above is the spec removal itself; what must stay
+        // zero is the record: no pane-store write of any kind.
+        assert!(
+            !run.calls
+                .panes
+                .iter()
+                .any(|op| matches!(op, PaneStoreOp::CasPut | PaneStoreOp::Delete)),
+            "no pane-store write: {:?}",
+            run.calls.panes
+        );
     }
 }
 
