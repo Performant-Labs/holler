@@ -15,7 +15,7 @@ use serde::de::Deserializer;
 use serde::ser::Serializer;
 use serde::{Deserialize, Serialize};
 
-use crate::argv::{Argv, EnvVarName};
+use crate::argv::{AgentKey, Argv, EnvVarName};
 use crate::error::{deserialize_parsed, excerpt, PaneError};
 use crate::grid::GridPos;
 use crate::ports::Cursor;
@@ -244,6 +244,10 @@ pub struct Pane {
     /// Recorded by launch/relaunch (#644) and import (#650), so
     /// `profile create --from-current` copies them from the store.
     pub model: ModelSpec,
+    /// The OpenCode agent the pane's hub-delivered messages run as; `None` means the
+    /// server's default agent (#700). A name, never a secret (I7).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opencode_agent: Option<AgentKey>,
     /// Environment variable NAMES only, never values.
     #[serde(default, deserialize_with = "crate::argv::deserialize_env_names")]
     pub env: Vec<EnvVarName>,

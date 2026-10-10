@@ -28,9 +28,9 @@ use holler_pane::pane::{
 use holler_pane::profile::{SpecHarness, SpecHerdr, SpecHost};
 use holler_pane::profile_snapshot::spec_from_pane;
 use holler_pane::{
-    Actor, Argv, GridPos, HarnessPort, HerdrPane, HerdrPort, HerdrSpec, HostPort, Pane, PaneError,
-    PaneId, PaneName, PaneStore, Ports, Profile, ProfileLogEntry, ProfileName, ProfileScope,
-    ProfileSpec, ProfileStore,
+    Actor, AgentKey, Argv, GridPos, HarnessPort, HerdrPane, HerdrPort, HerdrSpec, HostPort, Pane,
+    PaneError, PaneId, PaneName, PaneStore, Ports, Profile, ProfileLogEntry, ProfileName,
+    ProfileScope, ProfileSpec, ProfileStore,
 };
 use holler_pane_testkit::envelope::check_envelope;
 use holler_pane_testkit::fixture::{sample_pane, sample_profile};
@@ -128,6 +128,11 @@ pub(crate) fn name(text: &str) -> PaneName {
 /// A typed profile name (a test's own constant).
 pub(crate) fn profile_name(text: &str) -> ProfileName {
     ProfileName::parse(text).unwrap()
+}
+
+/// An OpenCode agent key (#700; a test's own constant).
+pub(crate) fn agent(text: &str) -> AgentKey {
+    AgentKey::parse(text).unwrap_or_else(|e| panic!("{text}: {e}"))
 }
 
 /// An argv (a test's own constant).
@@ -570,6 +575,8 @@ pub(crate) fn launch_spec() -> ProfileSpec {
             model_id: "demo-model".to_owned(),
             effort: "medium".to_owned(),
         },
+        // #700: `LAUNCH` passes no `--agent`, so the base spec holds none.
+        opencode_agent: None,
         role: PaneRole::Agent,
         env: Vec::new(),
         context: ContextCeilings {

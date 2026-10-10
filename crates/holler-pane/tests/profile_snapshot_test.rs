@@ -11,7 +11,7 @@ use holler_pane::profile::{SpecHarness, SpecHerdr, SpecHost};
 use holler_pane::profile_snapshot::{
     fixed_port_policy, profile_from_panes, spec_from_pane, FIXED_PORT_POLICY_PREFIX,
 };
-use holler_pane::{Argv, EnvVarName, GridPos, Pane, ProfileSpec};
+use holler_pane::{AgentKey, Argv, EnvVarName, GridPos, Pane, ProfileSpec};
 
 fn argv(parts: &[&str]) -> Argv {
     Argv::new(parts.iter().map(|p| (*p).to_owned()).collect())
@@ -22,6 +22,11 @@ fn env(names: &[&str]) -> Vec<EnvVarName> {
         .iter()
         .map(|n| EnvVarName::parse(n).unwrap())
         .collect()
+}
+
+/// An agent key (#700), the `env`/`name` helper style.
+fn agent(text: &str) -> AgentKey {
+    AgentKey::parse(text).unwrap_or_else(|e| panic!("{text}: {e}"))
 }
 
 /// `common::pane()` with every spec-relevant field set to a neutral value of this test.
@@ -37,6 +42,7 @@ fn full_pane() -> Pane {
         model_id: "demo-model".to_owned(),
         effort: "high".to_owned(),
     };
+    p.opencode_agent = Some(agent("orchestrator"));
     p.role = PaneRole::Orchestrator;
     p.env = env(&["ALPHA_TOKEN", "BETA_URL"]);
     p.context = ContextCeilings { soft: 1, hard: 2 };
@@ -66,6 +72,7 @@ fn snapshot_copies_every_spec_field_from_the_pane_record() {
             model_id: "demo-model".to_owned(),
             effort: "high".to_owned(),
         },
+        opencode_agent: Some(agent("orchestrator")),
         role: PaneRole::Orchestrator,
         env: env(&["ALPHA_TOKEN", "BETA_URL"]),
         context: ContextCeilings { soft: 1, hard: 2 },
@@ -74,6 +81,11 @@ fn snapshot_copies_every_spec_field_from_the_pane_record() {
         expect: vec!["qwen38".to_owned()],
     };
     assert_eq!(spec_from_pane(&full_pane()), want);
+
+    // #700 AC 6, the None half: a record with no key snapshots to a spec with none.
+    let mut none = full_pane();
+    none.opencode_agent = None;
+    assert_eq!(spec_from_pane(&none).opencode_agent, None);
 }
 
 #[test]

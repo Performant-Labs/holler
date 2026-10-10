@@ -19,8 +19,9 @@
 //!   [`Actor`], and the [`ProfileStore`] and [`ProfileScope`] traits.
 //! - [`generation`] — the compare-and-swap rule on a record's `generation`.
 //! - [`grid`] — [`GridPos`], the one grid-position type (ROWCOL, 1-based).
-//! - [`argv`] — [`Argv`] and [`EnvVarName`], the guards that keep a stored command an
-//!   array and a stored environment a list of names.
+//! - [`argv`] — [`Argv`], [`EnvVarName`] and [`AgentKey`], the guards that keep a
+//!   stored command an array, a stored environment a list of names and a stored
+//!   agent key a plain token.
 //! - [`ports`] — [`PaneStore`], [`HerdrPort`], [`HostPort`], [`HarnessPort`],
 //!   [`Prober`] and the [`Ports`] bundle a verb holds.
 //! - [`probe`] — [`ProbeResult`] and the [`run_probe`] stub.
@@ -59,7 +60,7 @@ pub mod tx_switch;
 // does it. Nothing here shares a name with a root re-export of `holler_proto`
 // (that crate's `Role` is the A2A role; the pane role is `PaneRole`). The error
 // vocabulary beyond `PaneError` stays under `error::`.
-pub use argv::{Argv, EnvVarName};
+pub use argv::{AgentKey, Argv, EnvVarName};
 pub use error::PaneError;
 pub use generation::next_generation;
 pub use grid::GridPos;
