@@ -1292,7 +1292,11 @@ fault enums `holler_pane_testkit::profile_store::ProfileStoreOp` (`profile_store
 
 ### H. Workspace rules that bind the code
 
-`holler-pane` has three dependencies and no `libc`; nothing may be added (no new dependency, no new `unsafe`):
+`holler-pane` has three dependencies and no `libc`; nothing may be added (no new dependency, no new `unsafe`). The manifest
+is 27 lines, and lines 12-21 below are its whole `[dependencies]` table (its other lines are the `[package]` and `[lib]`
+tables, lines 1-11, and the `[lints]` block, lines 22-27, quoted after it). "No new `unsafe`" is this story's own
+constraint, checked by AC 11: no workspace lint forbids `unsafe` (`[workspace.lints.rust]` holds only `dead_code`, quoted
+below), so AC 11's grep, not the compiler, is what enforces it:
 ```
 crates/holler-pane/Cargo.toml:12-21
 # Declare only what is consumed (issue #155 §7 — `cargo machete` fails CI
@@ -1305,6 +1309,15 @@ serde_json = { workspace = true }
 # `PaneName` is a newtype over `holler_proto::vocab::SessionName` (the ADR 0005
 # name grammar, reused rather than copied).
 holler-proto = { path = "../holler-proto" }
+```
+```
+crates/holler-pane/Cargo.toml:22-27
+
+# Workspace lints (issue #149): inherit [workspace.lints] from the root
+# Cargo.toml — deny dead_code, clippy unwrap/expect/panic/unreachable, and the
+# complexity gates (thresholds in clippy.toml).
+[lints]
+workspace = true
 ```
 ```
 Cargo.toml:19-30
@@ -1443,6 +1456,8 @@ When #663 lands, expose its bounded runner from `holler-pane` and switch the hos
   timeout" (issue).** Giving up at the deadline still takes the kill and the reap. Resolution: Decision 15 (returns at the
   deadline plus a cleanup bounded to 1 s; the tests allow 2 s of slack, which is that 1 s cleanup budget plus 1 s of
   scheduling margin for the macOS runner, so AC 8e's 2,300 ms is the 300 ms timeout + 1,000 ms cleanup + 1,000 ms margin).
+  The "2 s of slack" is measured past the timeout, not the whole bound: the bound is the timeout plus 2,000 ms, and it is
+  exclusive, so AC 8e asserts `elapsed < 2,300 ms` (strictly less; 2,300 ms itself fails).
 - **C8. `holler-pane` describes itself as having "no I/O"** (its `Cargo.toml` line 6, quoted in H only in part:
   `description = "... (types and traits only; no async runtime, no I/O)"`, and `src/lib.rs` lines 6-7, "It holds **types and
   traits only**: no async runtime, no I/O, no behaviour behind a stub"), while ADR-0021 section 5 (C, lines 180-181) makes
@@ -1524,14 +1539,20 @@ All commands run from the worktree root.
      `Error(reason)` with `reason` containing `exited with status 3`. And `["false"]`, `[]`: `Error` containing
      `exited with status 1`.
    - e. `hung_command_is_error_at_the_timeout`: `["sleep", "30"]`, 300 ms: `Error` containing `timed out`; the elapsed time is
-     at least 300 ms and less than 2,300 ms.
+     at least 300 ms and strictly less than 2,300 ms (`elapsed >= 300 ms && elapsed < 2,300 ms`: the 300 ms timeout plus
+     C7's 2 s of slack, an exclusive upper bound).
    - f. `timeout_kills_the_whole_process_group`: `["sh", "-c", "sleep 30 & echo $! > \"$0\"; wait", "<dir>/pid"]`, 500 ms:
      `Error` containing `timed out`; the file `<dir>/pid` exists (an assertion, so a stub fails here, not on a panic), and
      within 2 s of the return the pid it names is gone or a zombie (polled with `ps -o stat= -p <pid>`: empty output, a
-     non-zero exit or a state starting with `Z`). The test sends no signal itself.
+     non-zero exit or a state starting with `Z`). The test sends no signal itself. **Order (so a stub fails RED on the
+     existence assertion):** before the call the test only creates `<dir>` and builds the path `<dir>/pid`; it never
+     creates or writes the pid file itself (only the probe's child can), it asserts `!pid_file.exists()` before calling
+     `run_probe`, and it asserts `pid_file.exists()` only after `run_probe` has returned. A stub that returns `Error` at
+     once without spawning leaves no file, so it fails there.
    - g. `background_child_holding_stdout_is_a_timeout`: `["sh", "-c", "sleep 30 & echo $! > \"$0\"; echo up", "<dir>/pid"]`,
      expect `["up"]`, 500 ms: the shell exits at once but its background `sleep` keeps stdout open, so the answer is `Error`
-     containing `timed out` (never `Ok`), and the `sleep` is gone or a zombie within 2 s, as in f.
+     containing `timed out` (never `Ok`), and the `sleep` is gone or a zombie within 2 s, as in f. The pid file is set up
+     and asserted in f's order (path built, never written by the test, existence asserted only after `run_probe` returns).
    - h. `argv_is_never_given_to_a_shell`: `["printf", "%s|", "a;", "$(touch <dir>/m1)", "x; touch <dir>/m2"]`, expect
      `["a;|$(touch ", "|x; touch "]`: `Ok`, and neither `<dir>/m1` nor `<dir>/m2` exists afterwards. And the one-element argv
      `["printf hello"]` (a space inside the element) is `Error` containing `could not be started` (no shell split it).
@@ -1559,7 +1580,9 @@ All commands run from the worktree root.
    a space inside an element arrive literally) this is the "no shell" evidence; the greps guard the source, 8h the
    behaviour. The greps are a guard against the plain form only: they cannot see a shell name built at run time
    (`format!`, string concatenation, `include_str!`, a constant from another file). AC 8h's behavioural test is the
-   evidence that no shell runs.
+   evidence that no shell runs. **AC 9 is a lint, not a security boundary:** it catches the plain, accidental form in
+   review and CI, and passing it proves nothing about a shell reached by an indirect route; the "no shell" guarantee rests
+   on Decision 13's `Command::new(argv[0]).args(&argv[1..])` and AC 8h, never on AC 9.
 10. **Quality gates** (the tester overlay's Tier 1, as CI runs them): `bash scripts/lint.sh`, `bash scripts/changelog-check.sh`,
     `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test -p holler-pane`, `cargo test -p holler-cli --lib`,
     `cargo test -p holler-pane-testkit`, `cargo test --workspace`, `cargo test -p holler-cli --test docs_cli_test` and
@@ -1723,7 +1746,12 @@ family per file, four files in all, well under F's cap. **Fits one run**, no spl
    `reconcile_step(&ProfileName)` keeps the signature #644 pastes. The profile name is
    POSIX-single-quoted (`'` becomes `'\''`, the whole wrapped in `'...'`), always, because a profile name may hold spaces,
    quotes, `$(...)` or backticks (D, lines 30-61) and an operator pastes this line into a shell. `ProfileName` refuses
-   control characters, so the message stays one line (ADR section 9: every message is one line). The pane name is
+   control characters, so the message stays one line (ADR section 9: every message is one line). The quoting adds no line
+   break of its own: it is a character-by-character copy of the name that writes each `'` as the four characters
+   `'\''` and every other character as itself, between an opening and a closing `'`, so the only characters it adds are
+   `'` and `\`; the rest of the step is the fixed text above. A newline in the output could come only from the name,
+   which `ProfileName::parse` refuses (`\n` and `\r` are control characters). AC 5 asserts no `\n` on a name with a quote,
+   `$(...)` and spaces. The pane name is
    `[a-z0-9-]` and is not quoted. It names the doctor form that exists today (C9).
 9. **A `Set` whose spec names another pane** is `usage` before any write ("a spec for the pane \"<spec.pane>\" cannot be set
    as the spec of <pane>"), as the fake does (G, lines 241-254). No case pins it; AC 6 does.
@@ -1763,12 +1791,17 @@ family per file, four files in all, well under F's cap. **Fits one run**, no spl
     documented: the answer comes at the deadline plus at most 1 s of cleanup (normally a few ms); a
     probe whose background child keeps stdout open after the leader exits is a timeout, never a verdict (AC 8g); the whole
     group is killed (AC 8f). Signal: `KILL` directly. A probe is a read-only check with nothing to clean up, so there is no
-    `TERM` grace.
+    `TERM` grace. **The rustdoc of `run_probe` states the long-lived-caller constraint explicitly** (the Risks' first
+    item): a probe whose child escapes the group (`setsid`, a double fork) and keeps stdout open leaves one reader thread
+    and its pipe blocked per such run after the runner returns, so a long-lived caller (one that reuses `SystemProber`
+    from `spawn_blocking` or a thread, as the `Prober` docs allow) can leak them without bound; today's callers are
+    short-lived CLI verbs. #696, which exposes the runner, inherits this paragraph with it.
 16. **The group kill** runs the `kill` binary from `PATH`: `kill -s KILL -- -<pid>` (stdin, stdout and stderr null), waited
     for with `try_wait` within Decision 15's one shared 1 s cleanup budget (the same budget the leader's reap draws on, not
     a second 1 s), and killed and reaped itself if that budget runs out. Its outcome is ignored (the group may already be
     gone). Why a binary: killing a group needs `kill(2)` with a negative pid, which `std` does not offer; `libc` would need
-    `unsafe` (forbidden) and a new dependency of `holler-pane` (not allowed). The target is only ever the group of the child
+    `unsafe` (forbidden by this story's AC 11, not by a workspace lint: H) and a new dependency of `holler-pane` (not
+    allowed; its whole `[dependencies]` table is H's `Cargo.toml:12-21`, and AC 11 checks no manifest changes). The target is only ever the group of the child
     this call spawned (Decision 15): no name matching, no other pid.
 17. **Output cap: 1 MiB of stdout** (`const MAX_OUTPUT: usize = 1 << 20`). The reader thread reads into a buffer; when the
     output would pass 1 MiB it stops reading and reports `Overflow`, and the runner kills the group and answers `Error`. So
@@ -1784,7 +1817,9 @@ family per file, four files in all, well under F's cap. **Fits one run**, no spl
     a check argv is a stored command and may carry a token (a `curl -H` header); a probe's output may carry anything; and
     the result is persisted in `Pane.probe.last` on the hub and shown by verbs. `Failed.missing` holds only `expect`
     strings, which are spec values and non-secret by I7. The spawn error is reported by its `ErrorKind` only, never by
-    `io::Error`'s text. AC 8j pins it.
+    `io::Error`'s text. The spawn reason is exactly the fixed text `the probe program could not be started: ` followed by
+    the `ErrorKind` alone: it never names the program (`argv[0]`) or any argument, even where an OS error string would
+    (AC 8j's `SENTINELARG` check pins that the program name is absent). AC 8j pins it.
 20. **The runner stays private to `probe.rs`.** No new public item in `holler-pane` (the crate is frozen; ruling 3 and the
     amend-first rule). #696 (open) is where one bounded runner gets exposed and the adapters switch to it; this story does
     not pre-empt its design. Private helpers are split so that no function exceeds clippy's 100-line or complexity-15 gates.
@@ -1851,7 +1886,9 @@ Forward-compat (consumers):
 - **F2.** Hoist into `holler-pane` (amend-first; `holler-pane/**` is #637's): the membership rule, as one public function
   used by the hub, the test kit and `StoreScope` (three private copies after this story); and Decision 5's payload-append
   helper, as a `PaneError` method in `error.rs` beside `code()`. Under F1's route (a), `reconcile_step` and
-  `RECONCILE_STEP_UNSCOPED` too.
+  `RECONCILE_STEP_UNSCOPED` too. The same F2 change amends `error.rs`'s payload-name convention (F, `error.rs:399-401`,
+  "`op` is the operation that timed out") to say that `Timeout.op` may also carry the appended context of Decisions 5
+  and 6, so the convention text and the hoisted helper do not disagree once it lands.
 - **F3.** (Withdrawn: its ADR-0021 items, Decisions 5, 6, 8, 11, 14 and 15, are now AC 14, in this change.)
 - **F4.** `holler-pane`, under the amend-first rule: the `Cargo.toml` description and `lib.rs` docs drop "no I/O" (C8);
   rename `ports_test.rs`'s `run_probe_stub_never_reports_success` (the stub is gone; the test still holds); and amend the two
@@ -1876,7 +1913,8 @@ stub (always `Error`). T then writes the tests, and the RED run shows:
   fails on the asserted code (`not-implemented`, not `unavailable`).
 - AC 8a, 8b, 8c, 8h and 8l fail on their `assert_eq!` (expected `Ok` or `Failed`, got the stub's `Error`); 8d, 8i and 8k fail
   on the reason substring; 8e fails on the elapsed lower bound (the stub returns at once); 8f and 8g fail on
-  `assert!(pid_file.exists())`.
+  `assert!(pid_file.exists())`, which runs after `run_probe` returns; the test never writes that file itself (AC 8f's
+  order), so the stub, which spawns nothing, leaves it absent.
 - AC 8j fails on its positive assertions (`could not be started`, and `Failed { missing: ["absent"] }`); its absence
   assertions hold on the stub too, by design.
 - Green on the stub, by design (a regression guard): AC 8m only.
@@ -1908,7 +1946,8 @@ running (`ps -o pid=,args= -u "$(id -u)"`, read-only).
 - **Pid reuse** is closed by Decision 15's order (signal only before the leader is reaped). A refactor that calls `try_wait`
   before the end of stdout, then signals, reopens it; the module docs say so at the code.
 - **A shell slipping in.** `Command::new(argv[0]).args(&argv[1..])` never invokes a shell; AC 8h proves `;`, `$(...)` and a
-  space inside an element arrive literally, and AC 9 greps the source.
+  space inside an element arrive literally, and AC 9 greps the source (a lint for the plain form, not a security
+  boundary; see AC 9).
 - **Secrets in a probe.** Covered by Decision 19 and AC 8j: no argv element or output byte in any reason.
 - **Three copies of the membership rule** (Reuse map) can drift; the message shape and slug comparison are copied exactly,
   case 14 pins the code, and F2 removes the copies.
