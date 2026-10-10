@@ -131,6 +131,7 @@ pane switch | demo-c1r1 ses_0001 --as-operator --format=json
 pane reset | demo-c1r1
 pane reset | demo-c1r1 --profile demo --format=json
 pane reset | demo-c1r1 --as-operator
+pane reset | demo-c1r1 --first "ship the fix" --format=json
 
 # #646
 pane park | demo-c1r1 --reason "disk full" --release-when "after the cleanup"

@@ -114,3 +114,84 @@
   warm dir) until the sibling artifact is displaced. Env-inheritance reaches the plugin's cargo
   and F's children.
 - **First real commit landed immediately after staging** (standing rule): the suite + handoffs.
+
+## 2026-10-10 ~10:55 AM MDT — t-red crossing: the shared target's STALE-GREEN (odd thing 3), O
+
+- **The first two t-red crossings refused with GREEN while the tree provably did not compile.**
+  Root cause, reproduced: the worktree's plugin-provisioned `target` symlink shares the primary's
+  warm cache; through it `cargo test --workspace` served a STALE `pane_verbs` binary (old hash,
+  exit 0) instead of compiling T's seam sources (7 errors), while the isolated build failed
+  honestly. The plugin scrubs `CARGO_TARGET_DIR` from its spawn, so the env-var isolation T used
+  could not reach the crossings.
+- **Fix (this run):** the worktree's `target` symlink re-pointed to the isolated
+  `<cache>/tmp/opencode/0645-target` (plugin-provisioned machinery, untracked; the primary's cache
+  is untouched). The exact unit command then failed with the seam errors (E0432 `ports::Activity`,
+  E0407 `send_prompt`), and the third crossing measured **RED, exit 101 — confirmed, honest**.
+- **Retro note on run 0660-output:** its local crossings ran through the same shared cache and may
+  have measured stale-green `pane_verbs` binaries; its outcome stands regardless — PR #713's CI on
+  clean runners measured the committed tree green on both OSes. For THIS run the re-pointed
+  symlink keeps every crossing honest; PR CI remains the final arbiter as before.
+- t-red stage recorded (attempt 1) after the confirmed crossing.
+
+## 2026-10-10 ~11:05 AM MDT — implement attempt 1 refused: F is hard-denied tests/**, O
+
+- **The stage refused (permission-denied) on exactly one write attempt:** the brief put the
+  `cli-surface.txt` fixture row in F's boundary, but the fixture lives under `tests/**`, which
+  F's role permissions deny by design. F respected the denial, left the work otherwise complete
+  and fully in-boundary (ports.rs carve-out incl. `Activity`/`PROMPT_UNSUPPORTED`, the engine's
+  `check_idle` gate + `SwitchRequest.first` + prompt-after-record + N-2's third decoration
+  `unprompted`, `--first` plumbing, ADR-0003/0021 rows W-1/N-3), and proposed the exact fixture
+  line in its handoff. A brief bug (O's), not an F failure.
+- **Recovery:** the fixture row moved to T's boundary in the brief (with F's proposed line);
+  implement re-run as attempt 2 over the already-implemented tree.
+- **Noted (F):** T's 219-test baseline was a stale-cache count; the real count at the base is
+  214. Park-vs---first (a parked pane's reset still queues its first message under the
+  carve-out) is recorded in the ADR seam paragraph for #646/#649 — follow-up, not this run.
+
+## 2026-10-10 ~11:12 AM MDT — t-green: GREEN confirmed; the fixture row landed, T+O
+
+- **Decided (the fixture row, T's amended boundary):** added the one line under `# #645` after
+  the `--as-operator` row — `pane reset | demo-c1r1 --first "ship the fix" --format=json` (F's
+  proposed argv, F-verified in the incident case); `cli_surface_test` 3/0 proves it parses and
+  the leaf set still equals clap's. AC 7's fixture half is closed.
+- **Decided (GREEN is behavior-pinned, without mutation):** the brief forbids mutation testing;
+  the pinning evidence stands as the compile-level RED (no seam, no binary) plus outward-behavior
+  assertions only (codes, exits, records, op sequences, prompt log, envelope). No assertion reads
+  F's internals.
+- **Evidence:** through the re-pointed isolated target, `pane_verbs` **221/0** (214 base + the 7
+  new; T-red's 219 confirmed as the odd-thing-3 stale count), contract-named filtered run **8/8**,
+  `holler-pane --lib` **12/0**, whole `holler-cli` **exit 0, 738/0/3-ignored over 59 binaries**,
+  `cli_surface_test` **3/0**; clippy `-D warnings` exit 0 on `-p holler-cli --test pane_verbs -p
+  holler-pane`; rustfmt `--edition 2021 --check` clean on all six touched `.rs`; zero `unsafe`
+  and zero `Cargo.toml` in the whole diff; `git diff --check` clean. Diff spot-check confirmed
+  every F claim hunk-by-hunk (defaults, gate order + Fresh-only + skip-by-None, prompt-after-
+  `cas_put`, the third `unprompted` decoration with `acted:false`/`created:None`, ruling-3 codes,
+  ADR rows W-1/N-3).
+- **Hedged (accepted residuals, journaled in handoff-T-green):** ADR-0021 §9 class-table :534's
+  "#645's and #646's, planned" wording (outside W-1; one-word merge-time edit for O); park-state
+  with `--first` and empty `--first ""` both deliberately unpinned (#646/#649, #642 pt 3); the
+  fixture header's every-flag-once ask is unenforced by any test (future strengthening, out of
+  scope). No blocking issues; nothing committed by T.
+
+## 2026-10-10 ~11:35 AM MDT — audits PASS; close-out; Chain Summary, O
+
+- **A-dup PASS** (extent: exactly the 9 allowed files; wrappers record-and-answer only; the ADR
+  seam paragraph fences #646/#649 onto the one seam; counts independently reproduced 214→221).
+  **S PASS** (8/8 checkboxes, carve-out judged coherent and nowhere silently exceeded). Merge-time
+  ADR-0021:534 clause applied by O (#645's three codes recorded as merged; #646's still planned).
+- **Chain Summary — run 0645-switch-reset (issue #645 part 2).** The issue's remaining acceptance
+  was exactly one bullet wide, port-blocked by the epic's frozen contract; the operator's surgical
+  carve-out (the #700 precedent) added two default-armed `HarnessPort` seams (`send_prompt`,
+  `session_activity` + `Activity`/`prompt-unsupported`) inside the story's radius. Delivered:
+  `reset --first` (prompt strictly after the record write, the wrong-session incident test), the
+  `session-busy`/`session-holds-question` plan-phase refusals with the non-vacuous no-record skip,
+  N-2's third `SwitchFailure` decoration, the ADR/fixture rows, 7 new cases + the flipped pin
+  (221 = 214 + 7). Real HTTP impl → #642 part 3; testkit recording → #684; park-vs-`--first` and
+  empty-`--first` → #646/#649/#642-pt-3 (all recorded in the ADR seam paragraph). Odd things this
+  run, all journaled: (1) the provisioner resumed a by-hand-era worktree path (clean); (2) phantom
+  E0063 from a sibling's unmerged artifact through the shared target; (3) the shared target's
+  STALE-GREEN binary that refused two t-red crossings honestly-measured RED only after the
+  worktree's `target` symlink was re-pointed to an isolated dir (retro note: 0660-output's local
+  crossings ran through the same cache; its CI was the true arbiter). The implement stage's first
+  attempt was refused on the role's hard tests/** denial (a brief bug, fixed; the fixture row is
+  T's). Commits: T-red suite `560a6c0`; this commit closes the implementation.

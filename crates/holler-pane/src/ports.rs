@@ -12,14 +12,17 @@
 //! **Frozen when #637 merges**, after which a change goes through the epic's
 //! amend-first rule. [`HerdrPort`], and the minimal data types it takes and returns,
 //! stay provisional until the spike #636 (Herdr) reports. [`HarnessPort`] is final:
-//! the spike #635 (OpenCode) confirmed it, and #642 built it.
+//! the spike #635 (OpenCode) confirmed it, and #642 built it. The one amendment since is
+//! #645's: two default-armed seam methods, [`HarnessPort::send_prompt`] and
+//! [`HarnessPort::session_activity`], whose defaults keep every impl that does not
+//! override them as it was.
 
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
 use crate::argv::Argv;
-use crate::error::PaneError;
+use crate::error::{PaneError, RefusalCode};
 use crate::grid::GridPos;
 use crate::pane::{HerdrPane, Pane, PaneEvent, PaneId, PaneName};
 use crate::probe::{run_probe, ProbeResult};
@@ -201,6 +204,44 @@ pub trait HarnessPort: Send + Sync {
 
     /// The session the TUI of `pane` shows, if it can tell.
     fn shown_session(&self, pane: &PaneId) -> Result<Option<String>, PaneError>;
+
+    /// Queue `text` as a prompt to `session` on the server at `port`, through the
+    /// harness API, never by typing into a TUI (I4). `pane reset --first` calls it (#645).
+    ///
+    /// The default refuses with [`PROMPT_UNSUPPORTED`]: an impl that does not send
+    /// prompts says so as a stable refusal, which the real adapter replaces (#642).
+    fn send_prompt(&self, port: u16, session: &str, text: &str) -> Result<(), PaneError> {
+        let _ = (port, session, text);
+        Err(PaneError::Refused {
+            code: PROMPT_UNSUPPORTED,
+            message: "this harness does not queue a prompt".to_owned(),
+        })
+    }
+
+    /// What `session` on the server at `port` is doing now (#645: `pane reset` refuses a
+    /// conversation that is not [`Activity::Idle`]).
+    ///
+    /// The default answers [`Activity::Idle`], so an impl that does not report activity
+    /// refuses nothing.
+    fn session_activity(&self, port: u16, session: &str) -> Result<Activity, PaneError> {
+        let _ = (port, session);
+        Ok(Activity::Idle)
+    }
+}
+
+/// `prompt-unsupported`: the default of [`HarnessPort::send_prompt`], for a harness that
+/// does not queue a prompt. Refusal, exit 3.
+pub const PROMPT_UNSUPPORTED: RefusalCode = RefusalCode::from_static("prompt-unsupported");
+
+/// What a harness session is doing, as [`HarnessPort::session_activity`] reports it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Activity {
+    /// Waiting for a prompt.
+    Idle,
+    /// Running a turn.
+    Busy,
+    /// Waiting for an answer to a question it asked.
+    HoldingQuestion,
 }
 
 /// Runs a health probe. [`SystemProber`] is the real one; a test swaps in a fake.

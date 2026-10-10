@@ -53,10 +53,15 @@ no mutation). Engine unit tests in `holler-pane` ride the same rule.
   `holler-cli/src/pane/switch.rs`, this verb's rows in `docs/adr/ADR-0003.md`,
   `docs/adr/ADR-0021.md` (A W-1: the `PROPOSED (645b)` codes row :453, the deferred item
   :669-671, §8's "at most seven port calls / they send no prompt" :376-378 — this story's
-  rows, part 1's precedent) and `crates/holler-cli/tests/fixtures/cli-surface.txt`.
-- **T:** `crates/holler-cli/tests/pane_verbs/reset.rs`, `switch.rs` (their shared runner),
-  and engine unit tests beside `tx_switch.rs` where the fakes allow. Wrapper doubles live in
-  these files only (the `WriterInSelect` pattern).
+  rows, part 1's precedent) — but NOT `cli-surface.txt`: that fixture lives under `tests/`,
+  which F's role permissions hard-deny (implement attempt 1 was refused for exactly one such
+  write); the row is T's (see T's boundary).
+- **T:** `crates/holler-cli/tests/pane_verbs/{reset.rs,switch.rs}` (their shared runner),
+  engine unit tests beside `tx_switch.rs` where the fakes allow, **and the
+  `tests/fixtures/cli-surface.txt` row for `--first`** (F is permission-denied on all of
+  `tests/**`; F's proposed line, under `# #645` after the `--as-operator` row:
+  `pane reset | demo-c1r1 --first "ship the fix" --format=json` — F verified the argv parses
+  and runs in the green incident case). Wrapper doubles live in these files only.
 - **Never:** the testkit (`holler-pane-testkit/**`, #684's), `adapter-opencode/**` (#642's),
   `pane/wiring.rs` (#649's), `doctor/**` incl. `rig.rs` (#647's), `launch/**` (#644's),
   `cli.rs`/`main.rs` (#670's), any `Cargo.toml`, `error.rs`'s enum (closed; `Refused` codes

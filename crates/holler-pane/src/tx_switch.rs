@@ -11,9 +11,13 @@
 //!    scope when the request names one (`pane-not-found`, `profile-not-found`,
 //!    `pane-not-in-profile`). Refuse the orchestrator's pane unless the caller acts as the
 //!    operator ([`ORCHESTRATOR_PANE`]). Check the pane's harness server live (I6), never from
-//!    the stored `harness.health` ([`SERVER_UNHEALTHY`]). For a switch, check that the server
-//!    lists the target (`session-not-found`) and that no other record names it as its session
-//!    of record ([`SESSION_OF_OTHER_PANE`]). That last check is a read, not the authority: the
+//!    the stored `harness.health` ([`SERVER_UNHEALTHY`]). For a reset of a pane that has a
+//!    session of record, ask the server what that session is doing (`session_activity`) and
+//!    refuse one that is running a turn ([`SESSION_BUSY`]) or holds a question
+//!    ([`SESSION_HOLDS_QUESTION`]); a pane with none is not asked, since reset is doctor's
+//!    remedy for it. For a switch, check that the server lists the target
+//!    (`session-not-found`) and that no other record names it as its session of record
+//!    ([`SESSION_OF_OTHER_PANE`]). That last check is a read, not the authority: the
 //!    registry's compare-and-swap does not enforce it, so two concurrent switches of two panes
 //!    to one session can both pass it.
 //! 2. **Act**: for a reset, `create_session` on the pane's server; then `select_session` in
@@ -26,6 +30,9 @@
 //!    compare-and-swap at the generation step 1 read, never retried. `last_observed.driven`
 //!    is left as stored (no port observes DRIVEN before #649), and every other field is the
 //!    read record's, so a field this file does not know is kept.
+//! 5. **Prompt**, only when the request carries a first message (`pane reset --first`):
+//!    `send_prompt` queues it to the target, now the session of record, through the harness
+//!    API.
 //!
 //! No step calls Herdr or the host, so nothing is ever typed into a TUI (I4), and no step
 //! serves, attaches, aborts or deletes anything. A failure once `select_session` has been
@@ -34,16 +41,18 @@
 //! the pane, with `--fix`), which selects that session again. A failure before that, a
 //! reset's `create_session` included, moved neither the TUI nor the record, and its message
 //! has no step. A session a reset created and did not record stays on the server, and the
-//! message names it. After a successful reset the previous session stays on the server
-//! too: no port deletes a session, so doctor reports it as a stray.
+//! message names it. A failed prompt comes after the record: the TUI and the record agree on
+//! the target, so its message has no step, and says that the session was created, shown and
+//! recorded but the first message did not land. After a successful reset the previous
+//! session stays on the server too: no port deletes a session, so doctor reports it as a
+//! stray.
 //!
-//! A run makes at most seven port calls, each bounded by I5, so it needs no budget of its own.
-//! Refusing a pane that is busy or holds a question, and queueing a first message after a
-//! reset, are not here: no port reports a session's activity or sends it a prompt.
+//! A run makes at most eight port calls, each bounded by I5, so it needs no budget of its own.
 
 use crate::error::RefusalCode;
 use crate::findings::{doctor_command, quoted, FindingKind, FixState};
 use crate::pane::{Health, PaneRole};
+use crate::ports::Activity;
 use crate::reconcile::shown_differs;
 use crate::{Pane, PaneError, PaneName, Ports, ProfileName};
 
@@ -55,6 +64,12 @@ pub const SERVER_UNHEALTHY: RefusalCode = RefusalCode::from_static("server-unhea
 /// `session-of-other-pane`: the switch target is another pane's session of record.
 /// Refusal, exit 3.
 pub const SESSION_OF_OTHER_PANE: RefusalCode = RefusalCode::from_static("session-of-other-pane");
+/// `session-busy`: a reset's pane has a session of record that is running a turn.
+/// Refusal, exit 3.
+pub const SESSION_BUSY: RefusalCode = RefusalCode::from_static("session-busy");
+/// `session-holds-question`: a reset's pane has a session of record waiting for an answer
+/// to a question it asked. Refusal, exit 3.
+pub const SESSION_HOLDS_QUESTION: RefusalCode = RefusalCode::from_static("session-holds-question");
 /// The longest session id [`parse_session_id`] accepts. It is the length `findings::quoted`
 /// cuts at. `quoted` counts characters and [`parse_session_id`] counts bytes, which agree
 /// because an accepted id is ASCII, so a typed id is never cut short in a message.
@@ -96,6 +111,8 @@ pub struct SwitchRequest {
     pub as_operator: bool,
     /// Milliseconds since the Unix epoch, written as `last_observed.at`.
     pub now_ms: i64,
+    /// The first message to queue to the target once it is recorded (`reset --first`).
+    pub first: Option<String>,
 }
 
 /// A run that recorded its target.
@@ -117,6 +134,10 @@ pub struct SwitchFailure {
     pub acted: bool,
     /// The session `reset` created and did not record (it stays on the server).
     pub created: Option<String>,
+    /// The session the run created, showed and recorded, whose first message
+    /// (`send_prompt`) then failed. The record is correct, so such a failure is never
+    /// `acted` and never `created`.
+    pub unprompted: Option<String>,
 }
 
 impl From<PaneError> for SwitchFailure {
@@ -125,21 +146,29 @@ impl From<PaneError> for SwitchFailure {
             error,
             acted: false,
             created: None,
+            unprompted: None,
         }
     }
 }
 
 impl SwitchFailure {
     /// The one-line message of the failure for `pane`: `error`'s text, then `; session <id>
-    /// was created and is not recorded` when a reset left a session behind, then `; to
-    /// reconcile, run <the pane doctor command line for pane, with --fix>` once
-    /// `select_session` has been called.
+    /// was created and is not recorded` when a reset left a session behind, or `; session
+    /// <id> was created, shown and recorded, but the first message did not land` when only
+    /// the prompt failed, then `; to reconcile, run <the pane doctor command line for pane,
+    /// with --fix>` once `select_session` has been called.
     pub fn message(&self, pane: &PaneName) -> String {
         let mut message = self.error.to_string();
         if let Some(created) = &self.created {
             message.push_str(&format!(
                 "; session {} was created and is not recorded",
                 quoted(created)
+            ));
+        }
+        if let Some(recorded) = &self.unprompted {
+            message.push_str(&format!(
+                "; session {} was created, shown and recorded, but the first message did not land",
+                quoted(recorded)
             ));
         }
         if self.acted {
@@ -169,6 +198,7 @@ pub fn switch(ports: Ports<'_>, request: &SwitchRequest) -> Result<Switched, Swi
         error,
         acted: true,
         created: created.clone(),
+        unprompted: None,
     };
     ports
         .harness
@@ -180,6 +210,19 @@ pub fn switch(ports: Ports<'_>, request: &SwitchRequest) -> Result<Switched, Swi
         .pane_store
         .cas_put(&next, record.generation)
         .map_err(acted)?;
+    // The prompt goes only to the session just recorded (I2), so a failure here leaves the
+    // TUI and the record in agreement: no reconcile step, nothing unrecorded.
+    if let Some(text) = &request.first {
+        ports
+            .harness
+            .send_prompt(record.harness.port, &target, text)
+            .map_err(|error| SwitchFailure {
+                error,
+                acted: false,
+                created: None,
+                unprompted: Some(target.clone()),
+            })?;
+    }
     Ok(Switched {
         pane,
         previous: record.session_of_record,
@@ -196,9 +239,12 @@ fn plan(ports: Ports<'_>, request: &SwitchRequest) -> Result<Pane, PaneError> {
     let record = read(ports, request)?;
     refuse_orchestrator(&record, request.as_operator)?;
     check_health(ports, &record)?;
-    if let Some(target) = &existing {
-        check_listed(ports, &record, target)?;
-        check_unclaimed(ports, &record.name, target)?;
+    match &existing {
+        Some(target) => {
+            check_listed(ports, &record, target)?;
+            check_unclaimed(ports, &record.name, target)?;
+        }
+        None => check_idle(ports, &record)?,
     }
     Ok(record)
 }
@@ -258,6 +304,27 @@ fn check_health(ports: Ports<'_>, record: &Pane) -> Result<(), PaneError> {
             "the harness server of {} on port {port} does not answer; run {remedy}",
             record.name
         ),
+    })
+}
+
+/// A reset does not drop a conversation that is mid-turn or waiting on an answer: the
+/// pane's session of record must be idle. A pane with no session of record has no
+/// conversation to drop, and is not asked. A query that fails is passed on as it is.
+fn check_idle(ports: Ports<'_>, record: &Pane) -> Result<(), PaneError> {
+    let Some(session) = &record.session_of_record else {
+        return Ok(());
+    };
+    let activity = ports
+        .harness
+        .session_activity(record.harness.port, session)?;
+    let (code, doing) = match activity {
+        Activity::Idle => return Ok(()),
+        Activity::Busy => (SESSION_BUSY, "is running a turn; reset it once it ends"),
+        Activity::HoldingQuestion => (SESSION_HOLDS_QUESTION, "holds a question; answer it first"),
+    };
+    Err(PaneError::Refused {
+        code,
+        message: format!("session {} of {} {doing}", quoted(session), record.name),
     })
 }
 
