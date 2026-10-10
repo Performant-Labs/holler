@@ -762,11 +762,44 @@ improvise a plausible-looking command for an unfamiliar harness.
 the user, not one you run — print it verbatim, wait for them to paste back the real output, then
 apply the matching Verify/Gate to what they pasted exactly as if you'd run it yourself.
 
+**The instance's values.** Stages 4 to 7 take these from the `[instance]` table (loaded and
+validated in Stage 1; an absent table means every default, and then everything below behaves
+exactly as before this section existed): `<state_dir>` (empty = Holler's own default state
+directory, in which case drop every `HOLLER_STATE_DIR=<state_dir>` assignment below),
+`<prefix>` (default: the instance `name`), `<hub_port>`, `<serve_https_port>`. A session's
+backend port is its `backend_port` if it sets one, else `backend_port_base + i` (`i` = its
+0-based position among the `[[session]]` entries, in config order); use that port, not a
+number you pick.
+
+**The ledger.** Every process this wizard starts in Stages 4 to 7 is recorded, once it is up,
+in `<state_dir>/wizard-ledger.toml` on the host it runs on (contract: epic #726; the file is
+the only source for "what this run created"). `$WIZARD_LIB` is `agent-skills/setup-wizard/lib`
+(or wherever the installed skill's `lib/` is); its `ledger.sh` has three verbs:
+```bash
+# on this machine:
+HOLLER_STATE_DIR=<state_dir> bash "$WIZARD_LIB/ledger.sh" record --pid <pid> --role <backend|hub|serve|body|herdr> --stage <4-9> [--session <name>]
+# on a remote host, with no copy of the script there (it is sent on stdin):
+ssh <remote_host> "HOLLER_STATE_DIR=<state_dir> bash -s -- record --pid <pid> --role backend --stage 4 --session <name>" < "$WIZARD_LIB/ledger.sh"
+bash "$WIZARD_LIB/ledger.sh" list        # pid, live|stale, role, stage, session, cmd (tab separated)
+bash "$WIZARD_LIB/ledger.sh" owns <pid>  # exit 0 live, 1 stale (pid reused or process gone), 2 not recorded
+```
+Record **after** the stage's Verify passes for that process, never while it is still starting
+(its command line changes when the shell hands over to the program). Never record a pid you did
+not start, and never signal a pid whose `owns` is not 0.
+
+**Reuse on a rerun.** Before starting anything in Stages 4 to 7, look the process up in that
+host's ledger by role and session (`list`, on the process's own host). A row that is `live`
+and whose command still has the port or arguments you are about to use is **reused**: do not
+start another one, and say so in the stage's report. A `stale` row, or no row, means start a
+new process and record it. Never adopt a process that is not in the ledger, even if its command
+line looks identical (it may belong to another instance) — if the port is taken by an
+unrecorded process, that is Stage 3's collision gate, stop and report it.
+
 **Do**, for every `opencode`-harness entry the plan marked as needing a fresh start (its own
 `remote_host` — read per-entry from the config, not a single value shared by all — and its
-`endpoint`'s port):
+instance backend port `<port>`), printing the new pid:
 ```bash
-ssh <that entry's remote_host> "cd ~ && nohup opencode --port <port> --hostname 0.0.0.0 --model <provider>/<model> > /tmp/opencode-<name>.log 2>&1 &"
+ssh <that entry's remote_host> "cd ~ && nohup opencode --port <port> --hostname 0.0.0.0 --model <provider>/<model> > /tmp/<prefix>-opencode-<name>.log 2>&1 & echo \$!"
 ```
 repeated once per entry, then:
 ```bash
@@ -779,8 +812,11 @@ sleep 2
 ssh <that entry's remote_host> "curl -s http://127.0.0.1:<port>/session >/dev/null && echo <name>-up || echo <name>-DOWN"
 ```
 
+**Record** each freshly started backend, on its own host, with the pid printed above:
+`record --pid <pid> --role backend --stage 4 --session <name>` (remote form above).
+
 **Gate:** every entry must print `-up`. Any `-DOWN` — check that entry's own log file
-(`/tmp/opencode-<name>.log`) before retrying — don't just re-run blind.
+(`/tmp/<prefix>-opencode-<name>.log`) before retrying — don't just re-run blind.
 
 **No session-side `AGENTS.md` briefing is needed, and don't add one that tells a session to run
 `roster`/`say`/`interrupt`/`wait`/`answer`.** Verified live 2026-09-22 via `holler --help`: those
@@ -826,15 +862,25 @@ fresh.
 one) — bringing up the hub itself is host-agnostic, done exactly once regardless of how many
 remote hosts sessions are split across (token minting is per-host and happens in Stage 7):
 ```bash
-holler hub serve --listen 127.0.0.1:41807 --advertise <hub_host> &
-tailscale serve --bg 41807
+HOLLER_STATE_DIR=<state_dir> holler hub serve --listen 127.0.0.1:<hub_port> --advertise <hub_host> > <state_dir or default state dir>/<prefix>-hub.log 2>&1 &
+HUB_PID=$!
+tailscale serve --bg --https <serve_https_port> <hub_port>
 ```
+`<hub_port>` and `<serve_https_port>` are the instance's (defaults 41807 and 443); the hub's
+state — token store, pepper, identity key, control socket — is the instance's own `<state_dir>`,
+so a second instance beside this one shares none of it. Check the ledger first (see Stage 4,
+"Reuse on a rerun"): a `live` `hub` row means the hub is reused, do not start another. If the
+plan's `tailscale serve` is already in place for this exact port pair, leave it alone.
 
 **Verify:**
 ```bash
-holler hub status
+HOLLER_STATE_DIR=<state_dir> holler hub status
 ```
-Shows `listening: 127.0.0.1:41807` and a real PID behind it — the hub process actually started.
+Shows `listening: 127.0.0.1:<hub_port>` and a real PID behind it — the hub process actually
+started. Then **record** it: `record --pid $HUB_PID --role hub --stage 6`. `tailscale serve
+--bg` hands its work to the tailscale daemon and leaves no process of ours to signal, so it has
+no ledger row; the wizard never turns off a serve config it did not create, and teardown (the
+ownership story) resets only the `<serve_https_port>` entry this run set.
 
 **Gate:** if `hub serve` fails to start, stop and report the real error (port already bound by
 something else, a stale lock, etc.) — don't proceed to Stage 7's per-host token minting against
@@ -888,12 +934,13 @@ Third, **for each distinct `remote_host`** (looping, not just doing this once):
    ```bash
    ssh <remote_host> "bash -lc 'ps -ef | grep \"[h]oller body run\"'"
    ```
-   If that shows an existing body (a different pairing, or a leftover from a prior run), your
+   This only looks; the ledger, not `ps`, says which bodies are ours to reuse or stop. If that
+   shows an existing body (a different pairing, or a leftover from a prior run), your
    new label must be visibly distinct from whatever's already there — not just non-colliding as
    a string, but readable at a glance as "a different thing" by someone who didn't run this
    wizard. Then mint, with `hub_host`'s own short name folded into the label:
    ```bash
-   holler hub token mint --label <hub_host's short name>-<remote_host>
+   HOLLER_STATE_DIR=<state_dir> holler hub token mint --label <hub_host's short name>-<remote_host>
    ```
    e.g. `hub1-remote-a`, not `remote-a-body` — so a roster entry, a token list, or a process
    inspected later on the remote host all carry which hub it's paired to, not just which remote
@@ -928,14 +975,32 @@ Third, **for each distinct `remote_host`** (looping, not just doing this once):
 3. **Join and run the body on this host**, using *this host's own* derived config:
    ```bash
    scp <this-host-derived-sessions.toml> <remote_host>:~/sessions.toml
-   ssh <remote_host> "holler body join --server wss://<hub_host> --token <token_id>:<secret> --hub-key <hub_key>"
-   ssh <remote_host> "nohup holler body run --config ~/sessions.toml --debug quiet > /tmp/holler-body.log 2>&1 &"
+   ssh <remote_host> "HOLLER_STATE_DIR=<state_dir> holler body join --server wss://<hub_host> --token <token_id>:<secret> --hub-key <hub_key>"
+   ssh <remote_host> "HOLLER_STATE_DIR=<state_dir> nohup holler body run --config <state_dir>/<prefix>-sessions.toml --debug quiet > /tmp/<prefix>-holler-body.log 2>&1 & echo \$!"
    ```
+   With a non-default instance, the derived config is written under the instance's own
+   directory on that host (`<state_dir>/<prefix>-sessions.toml`, creating `<state_dir>` first
+   with `ssh <remote_host> "mkdir -p <state_dir>"`), not `~/sessions.toml`, so a second instance
+   on the same host cannot overwrite it; scp to that path instead. `body join` and `body run`
+   get the **same** `HOLLER_STATE_DIR` on this host, and it is the same value the hub was
+   started with (the contract uses one `state_dir` on every host the run touches): the
+   token's pairing is stored under it, and a body started with another directory finds no
+   pairing. With an absent `[instance]` table keep `~/sessions.toml` and the default state
+   directory, as before.
+
+   After the body shows up in `holler roster` (Verify, below), **record** its pid on this host:
+   `record --pid <pid> --role body --stage 7 --session <the first session on this host>`
+   (remote form, Stage 4). Reuse rule: a `live` `body` row for this host's config means the body
+   is reused, skip `body run`; a restarted wizard that finds the row `stale` runs it again and
+   records the new pid.
 
 **Verify:**
 ```bash
-holler roster
+HOLLER_STATE_DIR=<state_dir> holler roster
 ```
+Each hub lists only the bodies paired to its own state directory; a body of another instance
+(other state directory, other hub) can neither appear here nor join: its token does not exist
+in this instance's store.
 
 **Gate:** must show **every** session, on **every** host, as `connected` — a partial roster (2
 of 3 connected on host A, host B not connected at all, say) is a real failure for whichever

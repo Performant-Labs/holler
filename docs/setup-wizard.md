@@ -253,6 +253,27 @@ herdr_session = "second"
 backend_port_base = 47101
 ```
 
+## Instance state and the ledger
+
+Stages 4 to 7 start everything on the instance's own ports and in its own state directory (the
+`[instance]` table of `sessions.toml`; an absent table means today's defaults). Backends listen
+on `backend_port_base + i` (or the session's `backend_port`), the hub on `hub_port` with
+`tailscale serve --https <serve_https_port>`, and the hub and every body run with
+`HOLLER_STATE_DIR` set to the instance's `state_dir`, the same value on every host. A second
+instance beside a running one therefore shares no token store, pepper, roster or config file
+with it, and its bodies cannot join the other hub.
+
+Every process the wizard starts is recorded in `<state_dir>/wizard-ledger.toml` on the host it
+runs on (mode 0600, written atomically; with no `state_dir`, in Holler's default state
+directory). One `[[process]]` table per process: `pid`, `started` (`LC_ALL=C ps -o lstart= -p
+<pid>`), `cmd` (`ps -o command= -p <pid>`), `role` (`backend`, `hub`, `serve`, `body`, `herdr`),
+`stage` (4 to 9) and `session`. A row is **live** while a process with that pid exists and its
+start time and command still match; a pid that was reused by another program is **stale**, and
+a process in no ledger is **foreign**. The wizard signals only live rows. On a rerun it reuses
+a live recorded process whose command still matches, starts and records a new one when the old
+one died, and never adopts a process it did not record. `agent-skills/setup-wizard/lib/ledger.sh`
+(`record`, `list`, `owns <pid>`) maintains the file.
+
 ## Automated setup
 
 A Claude Code skill drives this end to end — `setup-wizard`, an 11-stage wizard (Stage 0 through
