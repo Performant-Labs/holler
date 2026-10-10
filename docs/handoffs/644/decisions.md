@@ -26,3 +26,13 @@
   `profile_scope.rs`; `holler-proto/src/clock.rs`; `tests/pane_verbs/main.rs`, `launch.rs` and `verb_harness/mod.rs`; the
   four sibling briefs (`git show origin/issue-<N>-implementation:docs/handoffs/<N>-brief.md`); and greps for open codes, the
   clock helpers and shell-quoting helpers.
+
+## O (brief gate, manual rerun and operator override): 2026-10-09T23:15:00-06:00
+- **Decided:** The outside brief gate is overridden for this run, on the operator's explicit instruction ("Override and resume").
+  - Round 3 of the workflow's own gate hit the reviewer's 8192-token completion cap and returned no Verdict (`gate-unavailable`, `sanity-check-failed`).
+  - A hand rerun of the same round-3 prompt (`docs/handoffs/644-brief-result-r3.md.prompt.txt`) returned a complete review (`docs/handoffs/644-brief-result-r4.md`).
+  - Its verdict line reads `BLOCK — 0 blocking finding(s); no defects demonstrable from the prompt's shown excerpts ... Implementation may proceed.` The label and the finding count contradict each other.
+  - Rounds 1 and 2 returned real BLOCKs that were amended (15 and 13 applied).
+- **Assumed:** The review's own count (0 blocking findings) is the substance and the BLOCK label is a model slip; the architecture review and the diff gate still run.
+- **Hedged:** The override waives the brief gate's formal pass for this one story only; it does not extend to any other story or gate.
+- **Evidence:** `docs/handoffs/644-brief-result-r4.md`; the stop result `{"stopped":"gate-unavailable","reason":"sanity-check-failed","gate":"brief"}` from run wf_323bb0af-347.
