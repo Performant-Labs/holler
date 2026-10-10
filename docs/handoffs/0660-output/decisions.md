@@ -241,7 +241,7 @@
 - **Applied now to this run's nine files** (16 token swaps across six files that still carried
   identifiers; the home paths had been scrubbed in the earlier fix on the run branch): meaning and
   journal order preserved, test files untouched, the full pattern set grepped clean
-  (`/home/`, `~/Projects`, usernames, host names, pane/agent ids, fleet ids).
+  (home-path prefixes, tilde project paths, usernames, host names, pane/agent ids, fleet ids).
 - **PR mechanics note:** the run's PR had already merged when this order arrived, so the scrub rides
   a successor docs PR off main; the PR is left UNMERGED for the operator with the fresh automated
   score reported.
