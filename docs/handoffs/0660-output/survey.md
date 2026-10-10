@@ -1,7 +1,7 @@
 # Survey: #660 — the `--format=json` envelope module and its conformance suite
 
 Run: issue #660 (epic #633, wave 3), rigor **in-session**, no UI surface. Branch `issue-660-implementation`
-from `origin/main` at `519947a`. Run root: the `agent-c4r1` worktree (detached → branch cut at T-red).
+from `origin/main` at `519947a`. Run root: the implementer pane's worktree (detached → branch cut at T-red).
 
 ## What the issue asks
 
@@ -54,7 +54,7 @@ parity through `ALL_CODES`.
 - F edits **only** `crates/holler-cli/src/output.rs`. T edits **only** `crates/holler-cli/tests/**`
   (expected: `pane_verbs/output_api.rs`, `pane_verbs/process/*`).
 - Nobody touches: `Cargo.toml` (any), `holler-pane/**`, `holler-pane-testkit/**`, `cli.rs`, `main.rs`,
-  verb files — the parallel session (c3r1) owns the sibling #633 stories in this same repository.
+  verb files — the parallel session (a sibling pane) owns the sibling #633 stories in this same repository.
 - No mutation testing (Holler rule): RED comes from real gaps against current `output.rs`, never from
   editing tracked files to break them.
 - One cargo at a time (shared `target/` via `worktree.linkDirs`); CI command is

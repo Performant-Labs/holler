@@ -3,7 +3,7 @@
 Repo: `Performant-Labs/holler`. Issue: #660 (epic #633, wave 3). Rigor: **in-session**. UI surface: no
 (D and U are N/A). Branch: `issue-0660-output` (plugin-named) from `origin/main` at `519947a`. Run
 worktree: `.claude/worktrees/0660-output` (repo-relative); session root: the primary
-checkout (re-rooted off `agent-c4r1` — see decisions.md).
+checkout (re-rooted off the implementer pane's worktree — see decisions.md).
 
 ## Objective
 
@@ -49,7 +49,7 @@ green or near-green; the checker may still fault on a rule the local helper neve
   under `pane_verbs/process/` where a real binary is needed. **No `Cargo.toml` edits**
   (`holler-pane-testkit` is already a dev-dep).
 - Do not touch `holler-pane/**`, `holler-pane-testkit/**`, `cli.rs`, `main.rs`, verb files, or any
-  Aftersight/opencode config — the parallel session (c3r1) owns the sibling stories in this repo.
+  Aftersight/opencode config — the parallel session (a sibling pane) owns the sibling stories in this repo.
 - No mutation testing. One cargo at a time. Never touch a live fleet, a running pane or a real Herdr
   session; never print or commit a credential.
 
