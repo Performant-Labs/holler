@@ -2,6 +2,7 @@
 //! (`stub_verb_not_implemented`), plus the bare-namespace, `--help` and policy-refusal
 //! behaviour that `main.rs` keeps.
 
+use holler_pane_testkit::envelope::check_envelope;
 use serde_json::Value;
 
 use crate::{assert_no_failures, holler, PANE_VERBS, PROFILE_VERBS};
@@ -211,4 +212,32 @@ fn a_bad_debug_value_is_still_a_policy_refusal_before_dispatch() {
             "{argv:?}: the stub must not have run: {out:?}"
         );
     }
+}
+
+/// A diagnostic in JSON mode must not disturb the envelope (#660): the logging banner,
+/// forced to a non-default level, is on stderr while stdout stays exactly one envelope
+/// through the #638 checker. The `--debug bogus` refusal above never reaches a verb;
+/// this is the good-path banner-diagnostic + envelope combination, which no test
+/// asserted through the checker.
+#[test]
+fn a_forced_diagnostic_in_json_mode_leaves_stdout_one_envelope() {
+    // Any stub verb answers the same not-implemented envelope; one pane stub stands in
+    // for the table (the whole-table runs are the two tests above).
+    let &(namespace, verb, _) = STUBS
+        .iter()
+        .find(|(ns, _, _)| *ns == "pane")
+        .expect("a pane stub exists while this test lives (#660)");
+    let out = holler(&[namespace, verb, "--debug", "noisy", "--format=json"]);
+    assert_eq!(out.code, 1, "the stub still exits 1: {out:?}");
+    assert!(
+        out.stderr.contains("logging_started level=noisy"),
+        "the forced diagnostic (the banner at the forced level) is on stderr: {out:?}"
+    );
+    let envelope = check_envelope(&out.stdout, out.code)
+        .unwrap_or_else(|f| panic!("stdout is still one envelope: {f}: {out:?}"));
+    assert_eq!(
+        envelope.error.map(|e| e.code),
+        Some("not-implemented".to_string()),
+        "{out:?}"
+    );
 }
