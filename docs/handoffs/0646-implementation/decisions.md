@@ -128,6 +128,50 @@ Append-only. Format per pipeline-conventions §1.
   is in files frozen to #637/#670 — correctly left; journal as follow-up story material, and S
   should expect the ADR text to carry the truth instead.
 
+## 2026-10-10 — Phase T-green: GREEN (plugin-owned), repairs by T, two O items applied
+
+- The advance to t-green ran the suite plugin-side: RED exit 101 — the four test-side defects
+  F had flagged, exactly as its handoff predicted (the plugin's boilerplate said "dispatch F",
+  but `tests/**` is denied to F; the repair was T's by role scope — journal records why T).
+- T accepted F's 3-arg `pane_hold_refusal(session, e, json)` (T's own pinned JSON needs the
+  session; mirrors `hold_cmd::held_refusal` per binding 2), fixed the three compile classes,
+  resolved the `close.rs:232` self-contradiction (explicit no-pane-store-write assert; "nothing
+  live" still pinned by the exact-empty call asserts), added the four `# #646` cli-surface
+  fixture lines, fixed two lints in its own file.
+- O applied the two write-scope-denied edits verbatim: `clippy::unreachable` added to the
+  hold_tests `#[allow]` (#442, #646) — F/T's exact diff — and F's CHANGELOG entries for parts 2
+  and 3 after the park/unpark entry.
+- Verification: T ran the workspace suite (1779 passed / 0 failed, exit 0) and clippy on its
+  files; O's allow-line application verified `cargo clippy --workspace --all-targets` exit 0;
+  the plugin's own advance verdict: **GREEN [exit 0]** (206 s). t-green stage recorded (STAGE OK,
+  1 artifact).
+- Committed `ff32f8d` (feat(cli): #646 pane close + routed prompt verbs; 17 files, +1327/−69;
+  gitleaks + scrub grep clean).
+
+## 2026-10-10 — Phase A-dup: PASS (0 blocks, 4 advisories); U N/A
+
+- A re-reviewed the full run diff against the reuse map: drift PASS on all 11 bindings (the two
+  bound one-liners are the only out-of-radius code; frozen files zero-diff); duplication check
+  clean — F extended (close engine over `edit_spec` verbatim, routing over frozen
+  `prompt_target`, `with_panes` mirroring `with_holds`), never paralleled. Queue verified at
+  wire level (`ControlCall::say_with` puts `--timeout` into `timeout_ms`; the 2 s wait replaces
+  only `call.timeout`).
+- Advisories (recorded, none blocking): legacy_verbs.rs out-of-radius rewrite doubly forced by
+  ruling 9; `SendPromptError` Debug derive (test-enabling); frozen-file staleness (cli.rs help,
+  `route()` now production-unused) left for #670 follow-up; commit journals before merge.
+
+## 2026-10-10 — Phase S: PASS (3 advisories); decision gate -> merge
+
+- S audited the story against the issue + brief v2 at source level (not T's table alone): every
+  AC backed by a named passing test or verified in committed docs; the load-bearing behaviors
+  re-verified in the diff (gate fail-closed order after `holds.admit`, exit 3 + stable codes,
+  `queued <session>` exit 0, close transaction rollback with reconcile step, pre-check before
+  writes, `--spec-only` inert); all five deviations recorded with owners; scope exact; 0 new
+  unsafe/deps/debug prints.
+- Advisories: commit journals before merge (doing now); #670 staleness follow-up (recorded);
+  F-decision-3 interrupt-cancel edge unpinned — note for when `interrupt.rs` reopens.
+- Both gates PASS -> S decision gate: commit, PR, record prNumber, CI + pr-agent, then merge.
+
 
 ## 2026-10-10 — Phase 4 (t-red): T authors the failing suite; one scope block
 
