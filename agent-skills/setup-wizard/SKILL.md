@@ -569,6 +569,21 @@ ssh <that session's remote_host> "curl -s <baseURL>/models" | head -c 200
 holler hub status 2>&1
 herdr status 2>&1
 ```
+**Do (the collision inventory — read-only, per host the run touches: this machine and every
+distinct `remote_host`).** Run `lib/inventory.sh` (in this skill's `lib/` directory, or
+`$WIZARD_LIB`) once per host and keep each host's output for Stage 3. Locally run it directly;
+on a remote host pipe it over ssh (`ssh <remote_host> bash -s < "$WIZARD_LIB/inventory.sh"`;
+in manual-relay mode, hand the user that exact command and have them paste the output back):
+```bash
+bash "${WIZARD_LIB:-<this skill's lib dir>}/inventory.sh" > "<scratch dir>/inventory-<host>.tsv"
+```
+It lists listening TCP ports, running `holler hub`, `holler body`, `opencode` and `herdr`
+processes (pid, owner, state directory where visible — Linux only — and start time), the
+`tailscale serve` configuration, and the Herdr sessions that exist. It only reads: it never
+writes, signals, starts or stops anything (it calls just `ss`/`lsof`, `ps`, `tailscale serve
+status` and `herdr session list`). If a host's inventory cannot be taken, that is a hard
+failure for this stage, not something to skip — the plan cannot be checked without it.
+
 The last two calls are read-only status checks (they tell Stage 3 what already exists so its
 plan is accurate) — neither starts, stops, nor changes anything. The model-endpoint checks
 are driven by what each host's own OpenCode config says — never assume every host uses the same
@@ -645,6 +660,21 @@ plan and show it before touching anything:
   get it right here, not there. If any session's harness isn't `opencode`, say so explicitly
   here and flag that Stages 4/9 don't have implemented logic for it yet — don't silently plan
   as if every entry were OpenCode.
+- **The collision preflight, per host — a refusal, not a warning.** Before anything else in the
+  plan is shown as final, run `lib/collide.sh <host-label> <inventory file>` for each host with
+  the instance's contract values in the environment (`WIZARD_INSTANCE_NAME`, and on the hub
+  host `WIZARD_HUB_PORT`, `WIZARD_SERVE_HTTPS_PORT`, `WIZARD_HERDR_SESSION`; on every host
+  `WIZARD_STATE_DIR`, `WIZARD_BACKEND_PORTS` — session `i` is `backend_port_base + i` unless it
+  sets its own `backend_port` — and `WIZARD_SESSION_NAMES`, the sessions whose bodies run
+  there; `WIZARD_LEDGER` points at that host's `wizard-ledger.toml` when it exists). Its output
+  is the inventory printed beside what the run will create: everything that runs and was not
+  created by this instance is listed as "present, not touched". It exits 1 and prints a
+  `REFUSED:` line — naming the colliding item and the config key to change — when the plan
+  needs a port that is in use, a hub port a hub already listens on, a body for a session name
+  that already has one, a state directory another process uses, or a Herdr session of the same
+  name. On any refusal, show the refusals, **do not ask "Proceed with this plan?"**, and stop
+  until the config is changed and Stage 1 onward is re-run. Never start, stop or kill the
+  colliding thing to make room: it was not created by this run.
 - **What's already live vs. what will be started fresh, per host**, per Stage 2's findings:
   which backend ports already have a process listening (reused, not restarted) vs. which will
   be started new, on which host; whether a Holler hub is already running (reused, or a fresh
