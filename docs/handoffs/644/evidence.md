@@ -112,3 +112,26 @@ Each entry quotes unchanged source at the merge base `d9eabbb` this branch is cu
   > ```rust
   > pub fn optional_text(value: Option<&str>) -> String {
   > ```
+
+## T (tests)
+
+- **Fact:** the launch rig (`tests/pane_verbs/launch/rig.rs`) takes its fakes from #643's `crate::list::Rig`: the two stores are seeded in order (each pane a create, so stored at generation 1, per F's pane-store entry above), the fake scope runs over those same two `Arc` stores, and the rig then replaces only `herdr` (with the `main` workspace) and wraps the host and harness. So the "P at generation 1" and "the record at generation 1" seeds the tests assert from come from this unchanged constructor.
+  **Source:** `crates/holler-cli/tests/pane_verbs/list.rs:39`, `crates/holler-cli/tests/pane_verbs/list.rs:52-59`, `crates/holler-pane-testkit/src/pane_store.rs:93-96`
+  **Verbatim excerpt:**
+  > ```rust
+  > pub(crate) struct Rig {
+  > ```
+  > ```rust
+  >     pub fn new(
+  > ```
+  > ```rust
+  >         let panes = Arc::new(FakePaneStore::seeded(panes)?);
+  >         let profiles = Arc::new(FakeProfileStore::seeded(profiles, &actor)?);
+  >         let scope = FakeProfileScope::new(profiles.clone(), panes.clone(), actor);
+  > ```
+  > ```rust
+  >     pub fn seeded(panes: impl IntoIterator<Item = Pane>) -> Result<Self, PaneError> {
+  >         let store = Self::new();
+  >         for pane in panes {
+  >             store.put(&pane, Writer::Port(0))?;
+  > ```

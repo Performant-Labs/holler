@@ -129,3 +129,21 @@
     - rustfmt on the 8 touched `.rs` files;
     - `lint.sh`, `changelog-check.sh`, and the AC 25, 27 and 29 greps.
   - `docs/handoffs/644/evidence.md` (nine facts, with `file:line`). `git diff d9eabbb origin/main` gave the merge-interaction findings.
+
+## T (verify / GREEN) — 2026-10-10T00:25:39-06:00
+- **Decided:**
+  - GREEN is valid: 57 of 57 launch/relaunch tests pass (RED was 3 of 57), 20 of 20 repeated runs pass, and the whole `pane_verbs` target passes (187).
+  - No test was repaired. F reported none as wrong, and none failed.
+  - Return PASS: no blocking Tier 2 issue.
+- **Assumed:**
+  - The one `remote_admin_test` failure (`updates` 1 vs 2) in the first fail-fast workspace run is a timing flake outside this diff. The branch touches no file on its path, and it passed 5 of 5 alone and in the `--no-fail-fast` workspace run (1676 passed, 0 failed, 14 ignored, matching F).
+  - AC 27 and AC 29 are judged against the merge base `d9eabbb`, as F did (Known issue 6), because `origin/main` has moved.
+- **Hedged:**
+  - AC 24's 100 ms margins could flake under heavy CI load. They did not in 20 runs or under the parallel workspace load. Advisory 2 says how to widen them.
+  - Three paths have no test: the rollback-failure note, the `(Ok, None)` arm and `occupant`'s list-failure branch. They are advisory, and none is in the AC list.
+- **Evidence:**
+  - Six single mutations of F's code (O2, the reconcile-step dedupe, the occupied-cell refusal, B10, B8 and the rollback close) each fail their pinning tests (handoff-T-green.md).
+  - The sources were confirmed identical to `HEAD`, touched and rebuilt green.
+  - Tier 1: clippy, `lint.sh`, `changelog-check.sh`, `cargo machete`, rustfmt, `test-hooks.sh`, and `docs_cli_test`, `wire_selftest`, `cli_surface_test` and `pane_cli_process` all pass.
+  - The greps for AC 25-29 were run here.
+  - One T entry was appended to `evidence.md` (#643's `list::Rig::new` seeds).
