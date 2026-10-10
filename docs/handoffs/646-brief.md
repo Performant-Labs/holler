@@ -592,13 +592,16 @@ panes are `sample_pane` records (stored at generation 1); `R` = `"disk full"`, `
 4. **Every pane of a profile.** Test `park_and_unpark_with_a_profile_take_every_member_in_name_order`. Profile store
    seeded with `sample_profile("Demo Alpha", &["demo-c1r1", "demo-c2r1"])` and `sample_profile("Demo Beta", &["demo-c4r1"])`
    (actor `test`). Pane store seeded with `demo-c2r1` and `demo-c1r1` (in that order) whose `profile` is `Demo Alpha`,
-   `demo-c3r1` with no profile, `demo-c4r1` in `Demo Beta`. `pane park --profile "Demo Alpha" --reason R --release-when W`
+   `demo-c3r1` with no profile, `demo-c4r1` in `Demo Beta`; every one with `sample_pane`'s default `hold: Hold::None`
+   (`crates/holler-pane-testkit/src/fixture.rs:65`). `pane park --profile "Demo Alpha" --reason R --release-when W`
    exits 0; `out` has exactly two lines, `demo-c1r1: parked ...` then `demo-c2r1: parked ...`; both records are parked at
    generation 2; `demo-c3r1` and `demo-c4r1` are unchanged at generation 1; JSON `data.panes` lists the two in name order.
-   `pane unpark --profile "Demo Alpha"` returns both to `Hold::None` (generation 3) and leaves the other two as they were.
+   Then, **on the same rig, after the park run** (so the two members are parked at generation 2),
+   `pane unpark --profile "Demo Alpha"` exits 0, prints `demo-c1r1: unparked` then `demo-c2r1: unparked`, returns both to
+   `Hold::None` (generation 3) and leaves the other two as they were.
    A profile with no member panes (the profile store also seeded with `sample_profile("Demo Empty", &[])`):
-   `pane park --profile "Demo Empty" --reason R --release-when W` exits 0, text `no panes in profile "Demo Empty"\n`, JSON
-   `{"panes":[]}`, and no `CasPut`.
+   `pane park --profile "Demo Empty" --reason R --release-when W` and `pane unpark --profile "Demo Empty"` each exit 0,
+   text `no panes in profile "Demo Empty"\n`, JSON `{"panes":[]}`, and no `CasPut`.
 5. **Membership and missing profile are refusals, and nothing is written.** Test
    `park_and_unpark_refuse_a_pane_outside_the_profile_or_a_missing_profile`, over AC 4's seed, each run in both formats:
    `pane park demo-c3r1 --profile "Demo Alpha" --reason R --release-when W` exits 3 with code `pane-not-in-profile`;
@@ -611,14 +614,18 @@ panes are `sample_pane` records (stored at generation 1); `R` = `"disk full"`, `
 7. **Usage, before any store call.** Test `park_and_unpark_usage_errors_touch_no_store`. Each exits 2 with code `usage`
    (text: `err` starts with `error: `; JSON: `check_envelope(&out, 2)` is `Ok`), and every fake's call log is empty
    (pane store and profile store included): (a) neither PANE nor `--profile` (`pane park --reason R --release-when W`;
-   `pane unpark`), the message saying a PANE or `--profile NAME` is needed; (b) an invalid pane name
+   `pane unpark`), message exactly `pane park needs a PANE or --profile NAME` (`pane unpark needs a PANE or --profile
+   NAME`), so text `err` is exactly `error: pane park needs a PANE or --profile NAME\n` (Decision 5); (b) an invalid pane name
    (`pane park a/b --reason R --release-when W` and `pane unpark a/b`; `PaneName::parse` goes through `SessionName::parse`,
    which refuses a `/`: `crates/holler-proto/src/vocab.rs:86-87`, `if s.contains('/') { return Err(NameError::Slash); }`); (c) an invalid profile name (`--profile "   "`); (d) for park,
    `--reason` or `--release-when` that is blank after trimming, holds a control character (`"a\nb"`, `"a\u{1b}b"`), or is
    longer than 200 characters (201 `x`; 200 `x` is accepted, AC 1's shape), each case run once with the bad value on
    `--reason` and once on `--release-when`, through `run_verb_with` (the guard is the verb's, Decision 5, never clap's);
-   the error's message contains the name of the flag that carried the bad value (`--reason` or `--release-when`) and no
-   newline. A value with surrounding spaces (`"  disk full  "`) is accepted and stored trimmed (`"disk full"`). (e) A missing `--reason` or `--release-when`
+   the error's message is exactly Decision 5's for that flag and case: `--reason must not be blank` (blank),
+   `--reason must not contain a control character` (both control-character values), `--reason must be at most 200
+   characters` (201 `x`), and the same three with `--release-when`. Each message is asserted by equality, so it holds no
+   newline, no ESC and none of the bad value; text `err` is `error: <that message>\n`. The length is counted in
+   characters, not bytes: 200 `é` (400 bytes) is accepted and 201 `é` is refused with the length message. A value with surrounding spaces (`"  disk full  "`) is accepted and stored trimmed (`"disk full"`). (e) A missing `--reason` or `--release-when`
    is clap's: `Cli::try_parse_from(["holler", "pane", "park", "demo-c1r1", "--reason", "r"])` is
    `Err` with kind `MissingRequiredArgument` (asserted directly; `run_verb_with` panics on a clap error, E-7).
 8. **Store failures fail, with the pane named.** Test `park_failures_name_the_pane_and_stop`. (a) `fail_next(CasPut,
@@ -627,7 +634,8 @@ panes are `sample_pane` records (stored at generation 1); `R` = `"disk full"`, `
    again and retry`; the record unchanged. (b) A standing `Fault::Fail(PaneError::Unavailable { what: "pane store".into() })`
    on the pane store: exit 1, code `unavailable`. (c) **Stop at the first error, profile-wide:** three members of `Demo
    Alpha` (`demo-c1r1`, `demo-c2r1`, `demo-c3r1`) over a test-local `PaneStore` wrapper that delegates to the fake and
-   answers `Conflict` on its second `cas_put` (the scope is built over the same wrapper): exit 1, code
+   answers `Conflict` on its second `cas_put` (the scope is built over the same wrapper; `Ports` takes any store,
+   `crates/holler-pane/src/ports.rs:228`, `pub pane_store: &'a dyn PaneStore,`): exit 1, code
    `generation-conflict`, message exactly `demo-c2r1: the record changed since it was read (generation conflict); read it
    again and retry; parked by this run before it: demo-c1r1; not reached: demo-c3r1`; `demo-c1r1` is parked (generation
    2), `demo-c2r1` and `demo-c3r1` are unchanged; the wrapper saw exactly two `cas_put` calls. Running the same command
@@ -751,14 +759,27 @@ existing test crate need no manifest entry.
    order: blank (empty after trimming), any `char::is_control` character, then length over 200 counted as
    `chars().count()` of the trimmed value. A failing value is `PaneError::Usage { message }` (`crates/holler-pane/src/error.rs:409`,
    `Usage { message: String }`, displayed as the message itself, `error.rs:640`), so `class_of` maps it to exit 2, and
-   `run_verb_with` (which panics on a clap error, E-7) can observe it. The message names the offending flag
-   (`--reason` or `--release-when`) and is one line; if it shows the value at all, it does so only through
-   `findings::quoted` (a raw control character would break the one-line rule). The same typing step is where the pane and profile names are parsed and where "neither PANE nor
-   `--profile`" (Decision 2) is refused.
+   `run_verb_with` (which panics on a clap error, E-7) can observe it. The message is exactly one of these three forms (six
+   messages in all), `<flag>` being the literal `--reason` or `--release-when` that carried the bad value, and **never contains the value itself**
+   (so a control character in it cannot reach the output in any form):
+   `<flag> must not be blank`, `<flag> must not contain a control character`, `<flag> must be at most 200 characters`.
+   This follows the CLI's existing usage wording (`crates/holler-cli/src/pane/args.rs:147`,
+   `message: "--role must be agent or orchestrator".to_owned(),`). The same typing step is where the pane and profile
+   names are parsed (their messages are `PaneName::parse`'s and `ProfileName::parse`'s own) and where "neither PANE nor
+   `--profile`" (Decision 2) is refused. The step checks in one fixed order and reports only the first failure: neither
+   PANE nor `--profile`, then the pane name, then the profile name, then `--reason`, then `--release-when`. The "neither"
+   message is exactly `pane park needs a PANE or --profile NAME`
+   (`pane unpark needs a PANE or --profile NAME` for unpark). Text mode prints any of these as `error: <message>\n` on
+   `err` (`crates/holler-cli/src/output.rs:282`, `write_line(sink.err, &format!("error: {}", error.message))`); JSON mode
+   carries the same message in `error.message` with code `usage`.
 6. **`since`** is `now_millis()` at the moment the verb builds the change, once per run (every pane of one run gets the
-   same `since`).
+   same `since`). A rerun after a partial failure (Decision 7) is a new run with its own `since`, so the panes it parks
+   carry a later `since` than those the first run parked; this is expected, and a pane parked by the first run keeps its
+   `since` (Decision 4).
 7. **A profile-wide run stops at the first error.** No transaction spans pane records (ADR-0021 section 8). The verb
-   writes the members one by one in name order; on the first failed write it stops and answers that error's code, with the
+   first obtains the whole ordered list of panes in scope (one `resolve` or `get` call, Decision 3, sorted by name) and
+   only then makes its first write, so the "not reached" list below is known whichever write fails. It writes the members
+   one by one in that order; on the first failed write it stops and answers that error's code, with the
    message `<pane>: <error text>`, followed, when the run had more than one pane, by `; parked by this run before it:
    <names or none>; not reached: <names or none>` (`unparked` for unpark). Precisely: "the run had more than one pane"
    means the resolved scope held two or more panes; a one-pane scope (`PANE` alone, `PANE` with `--profile`, or a profile
@@ -776,7 +797,8 @@ existing test crate need no manifest entry.
    serde form (the report holds the record's `Hold` value itself and serde serializes it, never a hand-built mirror of
    it, so the JSON cannot drift from the record's) and `generation` the record's after the run. Text is one line per pane: `<name>: parked (reason <q>, release
    when <q>)`, `<name>: already parked (reason <q>, release when <q>)`, `<name>: drained, left as it is`, `<name>:
-   unparked`, `<name>: not parked` (`<q>` = `quoted(..)`); an empty scope is `no panes in profile <q>`. Exit codes are
+   unparked`, `<name>: not parked` (`<q>` = `quoted(..)`); an empty scope is `no panes in profile <q>`. The words
+   `release when` in the text are two words, a fixed label for the field `release_when`; JSON keeps the field's own name. Exit codes are
    `class_of`'s (E-4): 0, 2 `usage`, 3 `pane-not-found`/`profile-not-found`/`pane-not-in-profile`, 1 the store failures.
 9. **One engine, in `park.rs`.** `park.rs` holds a `pub(super)` engine taking the typed target (pane, profile), the change
    (`Park { reason, release_when, since }` or `Unpark`) and `Ports`, returning the report or an `ErrorBody`; and the
@@ -800,7 +822,7 @@ existing test crate need no manifest entry.
     > parked pane. Both leave a pane already in that state, or `drained`, as it is and report it unchanged (exit 0). With
     > `--profile` and no pane name they take P's panes in name order and stop at the first failed write, whose message
     > names the panes changed before it and those not reached; the rerun is safe. The reason and the release condition are
-    > one line each, not blank and at most 200 characters (`usage` otherwise). Which verbs and prompts read a parked pane
+    > one line each, hold no control character, are not blank and are at most 200 characters (`usage` otherwise). Which verbs and prompts read a parked pane
     > is decided by their stories (the watchdog, the roster #648, the prompt gate of #646).
 
     Section 9's row 341 stays as it is: the verbs answer only its codes and the common ones. No other ADR-0021 line is
