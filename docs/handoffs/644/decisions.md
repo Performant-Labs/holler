@@ -66,3 +66,28 @@
   - The adapters: `holler-adapter-herdr/src/adapter.rs`, the crate docs of `holler-adapter-opencode` and `holler-adapter-host`.
   - The test rigs: `tests/pane_verbs/{main,list,park,doctor}.rs`, `park/rig.rs` and `doctor/rig.rs`.
   - Checks: greps for the three open codes, `HostInfo.name` and the sanitizer users; T's preflight greps; the derives on the binding types.
+
+## T (RED, test authorship) — 2026-10-09T23:45:59-06:00
+- **Decided:** RED is valid: 57 tests in the `pane_verbs` target. 54 fail on the missing behaviour, and 3 pass: the two kept #670 flag tests and the rig self-check (handoff-T-red.md).
+  - **API stubs.** `tx_launch.rs` holds every public item of the brief's API, with stub bodies. `launch.rs` and `relaunch.rs` hold the new `Args`, and `run` is still `not_implemented(644)`. The fixture, ADR-0003 rows 48-49 and the `stub.rs` deletion are done; the surface, docs and process tests pass.
+  - **`spec: Box<SpecFlags>`** in both `Args`. Unboxed, the frozen `Command` enum fails `clippy::large_enum_variant` (408 vs 176 bytes) once the positional is added. `cli.rs` and `pane/mod.rs` cannot change, and clap 4.6 flattens a `Box<T: Args>`.
+  - **The positional field is `pane`** (A warn 8).
+  - **The rig** builds on `crate::list::Rig` and lives in `launch/rig.rs` (A warn 4). It adds the linked host, harness hooks only (the vanish runs from the `attach_tui` hook, so no Herdr hook is needed), `StoreScope` for AC 16k, a call-log span, and `seed_live`.
+  - **Relaunch's cases start from `seed_live`**, a launched pane built through the fakes' own port methods, not from a `LAUNCH` run. With `LAUNCH` as setup, all 20 relaunch cases failed in setup on the launch stub, so their own assertions were never reached. A self-check pins the seed: `assert_matches` holds, and P's spec equals `LAUNCH`'s.
+  - **Merged, to avoid duplicate scenarios:**
+    - AC 16d into 10a's test;
+    - AC 16f and 11b's "no command" check into AC 1;
+    - AC 19b's six named engine cases into two tests, keeping the brief's names as sub-case labels.
+  - AC 17's 10a case scripts the failing probe, as 10a does.
+- **Assumed:**
+  - Asserting the brief's text-mode "stderr carries the step" on the JSON `error.message` is equivalent, because AC 17 pins text stderr = `error: ` + the JSON message.
+  - AC 8's "Close of the created pane" is shown by `Close` in the log plus an empty snapshot, because the fake's call log carries no arguments.
+- **Hedged:**
+  - The rig is 711 lines, its largest file; it stays under 800, so the size check's split fallback is not needed.
+  - The suite (about 1,960 lines with the rig) is larger than the brief's 1,200-line estimate. That is mostly the rig's eight-method hooked harness and the seed, after rustfmt.
+  - Message assertions use only the brief's contract phrases (`no record`, `was not closed`, `still answers`, `to reconcile, run` once), so F keeps its latitude on wording and on A warn 1's quoting.
+- **Evidence:**
+  - Preflight greps on `profile_snapshot.rs:18,21,46` and `profile_scope.rs:49,59,68`.
+  - The RED run: `cargo test -p holler-cli --test pane_verbs -- launch:: relaunch::` gives 3 passed, 54 failed, and each failure's first assertion is listed in handoff-T-red.md.
+  - Clean gates: `cargo clippy --workspace --all-targets -- -D warnings`, `scripts/lint.sh`, rustfmt on the 8 touched files, `cli_surface_test` + `docs_cli_test` + `pane_cli_process`, the other 133 `pane_verbs` tests, `holler-pane`, and `test-hooks.sh`.
+  - Sources: `clap_builder-4.6.6/src/derive.rs:366`; the test kit's `harness.rs`, `herdr.rs`, `host.rs`, `prober.rs`, `fixture.rs` and `profile_scope.rs`; `tests/pane_verbs/{list.rs, park/rig.rs, doctor/rig.rs, process/*.rs}`.
