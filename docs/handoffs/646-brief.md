@@ -206,6 +206,22 @@ crates/holler-pane-testkit/src/profile_scope.rs:34-36
 ///   order. `resolve(P, Some(n))` is P and n, whose record must name P, or else
 ///   `pane-not-in-profile` (a pane with no record included). A missing P is
 ```
+The real implementation on #663's unmerged branch (`issue-663-implementation`, commit `93fb653`) also returns the members
+in name order, so the verb's own sort (Decision 3) is redundant over both today and kept only so the verb does not rely
+on it:
+```
+crates/holler-cli/src/pane/profile_scope.rs:74-79,156-159 (at 93fb653)
+    /// Every pane whose record names `profile` (by slug), in name order.
+    fn members(&self, profile: &ProfileName) -> Result<Vec<Pane>, PaneError> {
+        let mut members = self.panes.list()?;
+        members.retain(|pane| belongs(pane, profile));
+        members.sort_by(|x, y| x.name.cmp(&y.name));
+        Ok(members)
+        let stored = self.stored(profile)?;
+        let panes = match pane {
+            None => self.members(&stored.name)?,
+            Some(name) => vec![self.member(&stored.name, name)?],
+```
 
 ### E-4. The ADR text this part implements, and the row it keeps
 
@@ -400,6 +416,23 @@ crates/holler-pane-testkit/src/fixture.rs:34-41
 /// `usage` when `name` is not a valid pane name.
 pub fn sample_pane(name: &str) -> Result<Pane, PaneError> {
 ```
+Seeding ignores the seeded pane's own `generation` and stores the next one after the stored record's (no record yet, so
+1), because the fake's one write path replaces it:
+```
+crates/holler-pane-testkit/src/pane_store.rs:132-140
+            let current = stored.map_or(0, |stored| stored.generation);
+            let generation = next_generation(current, writer.expected(current))?;
+            if let Writer::Port(_) = writer {
+                check_membership(stored, pane)?;
+            }
+            let next = Pane {
+                generation,
+                ..pane.clone()
+            };
+```
+So a test builds a pane in a given hold by taking `sample_pane(name)?` (generation 0) and assigning its `pub hold` field
+(E-2) before seeding, e.g. `pane.hold = Hold::Parked { reason: "old".into(), release_when: "later".into(), since: 5 };`;
+`seeded` then stores it at generation 1. No other `Pane` constructor is needed.
 `sample_profile(name: &str, panes: &[&str]) -> Result<Profile, PaneError>` is at `fixture.rs:121`;
 `FakeProfileStore::seeded(profiles, actor: &Actor)` at `profile_store.rs:127-130`.
 ```
@@ -440,7 +473,13 @@ pane park | --profile demo
 pane unpark |
 pane unpark | --profile demo
 ```
-The fixture's rule (`cli-surface.txt:4`): "Every line must parse with `Cli::try_parse_from`". `docs_cli_test` parses every
+The fixture's rule (`cli-surface.txt:4`): "Every line must parse with `Cli::try_parse_from`". `--format` is a global
+flag on the root `Cli` (not edited), so `--format=json` parses after `pane park` without the verb declaring it:
+```
+crates/holler-cli/src/cli.rs:80-81
+    #[arg(long, global = true, value_enum)]
+    pub format: Option<Format>,
+``` `docs_cli_test` parses every
 `holler ...` row in the docs after dropping `[optional]` groups (`tests/docs_cli_test.rs:14`, "Placeholders are normalised
 (`<x>` → `x`, `[optional]` dropped, `a|b` → ..."); `docs/handoffs/` is excluded from that scan
 (`docs_cli_test.rs:219-220`).
@@ -543,7 +582,8 @@ panes are `sample_pane` records (stored at generation 1); `R` = `"disk full"`, `
    `{"panes":[{"name":"demo-c1r1","changed":true,"generation":2,"hold":{"parked":{"reason":"disk full","release_when":"after the cleanup","since":<since>}}}]}`
    (`since` the stored value) and unpark's is `{"panes":[{"name":"demo-c1r1","changed":true,"generation":3,"hold":"none"}]}`.
 3. **Idempotent, nothing written.** Test `park_and_unpark_leave_a_pane_already_in_that_state`. (a) Seed `demo-c1r1`
-   already parked (`reason "old"`, `release_when "later"`, `since 5`): `pane park demo-c1r1 --reason R --release-when W`
+   already parked (`reason "old"`, `release_when "later"`, `since 5`; built as E-7 shows, `sample_pane` with its `hold`
+   assigned, so stored at generation 1; (b) and (c) are built the same way): `pane park demo-c1r1 --reason R --release-when W`
    exits 0; `out` is `demo-c1r1: already parked (reason "old", release when "later")\n`; the record is unchanged
    (generation 1, reason `old`, `since` 5); `faults().calls()` of the pane store holds no `CasPut`; JSON `changed` is
    `false`. (b) Seed `demo-c2r1` with `Hold::None`: `pane unpark demo-c2r1` exits 0, `out` `demo-c2r1: not parked\n`, no
@@ -575,7 +615,10 @@ panes are `sample_pane` records (stored at generation 1); `R` = `"disk full"`, `
    (`pane park a/b --reason R --release-when W` and `pane unpark a/b`; `PaneName::parse` goes through `SessionName::parse`,
    which refuses a `/`: `crates/holler-proto/src/vocab.rs:86-87`, `if s.contains('/') { return Err(NameError::Slash); }`); (c) an invalid profile name (`--profile "   "`); (d) for park,
    `--reason` or `--release-when` that is blank after trimming, holds a control character (`"a\nb"`, `"a\u{1b}b"`), or is
-   longer than 200 characters (201 `x`; 200 `x` is accepted, AC 1's shape). (e) A missing `--reason` or `--release-when`
+   longer than 200 characters (201 `x`; 200 `x` is accepted, AC 1's shape), each case run once with the bad value on
+   `--reason` and once on `--release-when`, through `run_verb_with` (the guard is the verb's, Decision 5, never clap's);
+   the error's message contains the name of the flag that carried the bad value (`--reason` or `--release-when`) and no
+   newline. A value with surrounding spaces (`"  disk full  "`) is accepted and stored trimmed (`"disk full"`). (e) A missing `--reason` or `--release-when`
    is clap's: `Cli::try_parse_from(["holler", "pane", "park", "demo-c1r1", "--reason", "r"])` is
    `Err` with kind `MissingRequiredArgument` (asserted directly; `run_verb_with` panics on a clap error, E-7).
 8. **Store failures fail, with the pane named.** Test `park_failures_name_the_pane_and_stop`. (a) `fail_next(CasPut,
@@ -589,10 +632,24 @@ panes are `sample_pane` records (stored at generation 1); `R` = `"disk full"`, `
    again and retry; parked by this run before it: demo-c1r1; not reached: demo-c3r1`; `demo-c1r1` is parked (generation
    2), `demo-c2r1` and `demo-c3r1` are unchanged; the wrapper saw exactly two `cas_put` calls. Running the same command
    again with no fault exits 0, prints `demo-c1r1: already parked ...` and parks the other two (AC 3's idempotence is what
-   makes the rerun safe). (d) The same three cases for `unpark` (its words: `unparked by this run before it`).
+   makes the rerun safe). **The edges of the suffix (Decision 7)**, same seed and wrapper, each from a fresh rig: the
+   wrapper answering `Conflict` on its **first** `cas_put` gives exit 1, code `generation-conflict`, message exactly
+   `demo-c1r1: the record changed since it was read (generation conflict); read it again and retry; parked by this run before it: none; not reached: demo-c2r1, demo-c3r1`,
+   every record unchanged, one `cas_put` seen; on its **third** `cas_put`, message exactly
+   `demo-c3r1: the record changed since it was read (generation conflict); read it again and retry; parked by this run before it: demo-c1r1, demo-c2r1; not reached: none`,
+   `demo-c1r1` and `demo-c2r1` parked, `demo-c3r1` unchanged. With `demo-c1r1` seeded already parked and the wrapper
+   answering `Conflict` on its first `cas_put` (now `demo-c2r1`'s, since `demo-c1r1` is not written, Decision 4), the
+   message ends `parked by this run before it: none; not reached: demo-c3r1` (an unchanged pane is not listed). A
+   one-member profile (`sample_profile("Demo Solo", &["demo-c5r1"])`, `demo-c5r1` in it) whose only `cas_put` fails
+   gives exactly `demo-c5r1: the record changed since it was read (generation conflict); read it again and retry` with no
+   suffix, as AC 8a. (d) The same cases for `unpark` (its words: `unparked by this run before it`; each seed parked where
+   park's is `Hold::None`, and `Hold::None` where park's is already parked).
 9. **No live act, no profile write.** In every AC above, the call logs of `FakeHerdr`, `FakeHost`, `FakeHarness` and
    `FakeProber` are empty, and the profile store's log has no `CasPut` and no `Delete` (a rig helper,
-   `assert_no_live_call_and_no_profile_write`, is called at the end of each test).
+   `assert_no_live_call_and_no_profile_write`, is called at the end of each test). The helper checks the profile store's
+   log for writes only (`ProfileStoreOp::CasPut`, `Delete` and `Rename`, `crates/holler-pane-testkit/src/profile_store.rs:27-37`);
+   the reads the scope makes for `--profile` runs (`Get`, `List`) are expected and are not a failure. AC 7's "every
+   call log is empty" is the stronger check for the usage cases only.
 10. **Exit codes equal across formats; every JSON output passes the helper.** Every case of AC 5-8 runs in both formats
     and asserts the same exit code; every JSON run's `out` passes `check_envelope(&out, code)` and its `err` is empty.
 11. **The surface.** (a) `docs/adr/ADR-0003.md` rows 54-55 read exactly
@@ -677,16 +734,36 @@ panes are `sample_pane` records (stored at generation 1); `R` = `"disk full"`, `
    one line (ADR-0021 section 9: "Every message is one line"); the cap bounds a value that the hub stores and every reader
    prints. They are not secrets and are not treated as such; text output still quotes them with `findings::quoted` (64
    characters, escaped), JSON carries them raw.
+   **Where and how the guards run.** They are enforced in the verb, not in clap: clap takes `--reason` and
+   `--release-when` as plain `String`s (no `value_parser`), and park's typing step (the analogue of doctor's `pass`, E-6,
+   run after clap parsing and before the engine makes any store or scope call) trims each value, then checks it in this
+   order: blank (empty after trimming), any `char::is_control` character, then length over 200 counted as
+   `chars().count()` of the trimmed value. A failing value is `PaneError::Usage { message }` (`crates/holler-pane/src/error.rs:409`,
+   `Usage { message: String }`, displayed as the message itself, `error.rs:640`), so `class_of` maps it to exit 2, and
+   `run_verb_with` (which panics on a clap error, E-7) can observe it. The message names the offending flag
+   (`--reason` or `--release-when`) and is one line; if it shows the value at all, it does so only through
+   `findings::quoted` (a raw control character would break the one-line rule). The same typing step is where the pane and profile names are parsed and where "neither PANE nor
+   `--profile`" (Decision 2) is refused.
 6. **`since`** is `now_millis()` at the moment the verb builds the change, once per run (every pane of one run gets the
    same `since`).
 7. **A profile-wide run stops at the first error.** No transaction spans pane records (ADR-0021 section 8). The verb
    writes the members one by one in name order; on the first failed write it stops and answers that error's code, with the
    message `<pane>: <error text>`, followed, when the run had more than one pane, by `; parked by this run before it:
-   <names or none>; not reached: <names or none>` (`unparked` for unpark). The envelope cannot carry data with a failure, so
+   <names or none>; not reached: <names or none>` (`unparked` for unpark). Precisely: "the run had more than one pane"
+   means the resolved scope held two or more panes; a one-pane scope (`PANE` alone, `PANE` with `--profile`, or a profile
+   with exactly one member) gets the bare `<pane>: <error text>` and no suffix (AC 8a). With two or more, the suffix is
+   always present, both clauses always appear, and an empty list is the literal word `none` (never an empty string, never
+   a dropped clause). "Parked (unparked) by this run before it" lists, in name order, the panes before the failed one
+   whose write this run made and that succeeded (a pane left unchanged by Decision 4 is not listed: this run did not park
+   it, and Decision 12's ADR text says the message "names the panes changed before it"); "not reached" lists, in name order, every pane after the failed one. Names are joined by `, ` (comma, space),
+   bare as in the text lines. So with members `demo-c1r1`, `demo-c2r1`, `demo-c3r1`: a failure on the first gives
+   `; parked by this run before it: none; not reached: demo-c2r1, demo-c3r1`, and on the last gives
+   `; parked by this run before it: demo-c1r1, demo-c2r1; not reached: none`. The envelope cannot carry data with a failure, so
    the message is where the partial result is reported; Decision 4 makes the rerun safe. A pane's write error is never
    retried. Errors before any write (`resolve`, `get`, `usage`) are answered as they are.
 8. **Output.** `data` is `{"panes": [{"name", "changed", "generation", "hold"}]}` in name order; `hold` is `Hold`'s own
-   serde form and `generation` the record's after the run. Text is one line per pane: `<name>: parked (reason <q>, release
+   serde form (the report holds the record's `Hold` value itself and serde serializes it, never a hand-built mirror of
+   it, so the JSON cannot drift from the record's) and `generation` the record's after the run. Text is one line per pane: `<name>: parked (reason <q>, release
    when <q>)`, `<name>: already parked (reason <q>, release when <q>)`, `<name>: drained, left as it is`, `<name>:
    unparked`, `<name>: not parked` (`<q>` = `quoted(..)`); an empty scope is `no panes in profile <q>`. Exit codes are
    `class_of`'s (E-4): 0, 2 `usage`, 3 `pane-not-found`/`profile-not-found`/`pane-not-in-profile`, 1 the store failures.
