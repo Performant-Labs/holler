@@ -601,6 +601,39 @@ docs/research/herdr-api-spike.md:106-108
 
 The spike's operations table (`herdr-api-spike.md:129`) says `pane.send_text` is "literal text, no Enter".
 
+The rows AC 13 relies on, verbatim (send text, send keys, snapshot):
+
+```
+docs/research/herdr-api-spike.md:129-130
+| Send text | yes | `pane.send_text {pane_id, text}`; `pane send-text ID TEXT` | `{type: "ok"}` | literal text, no Enter |
+| Send keys | yes | `pane.send_keys {pane_id, keys: ["enter"]}`; `pane send-keys ID enter` | `{type: "ok"}` | logical key names (`enter`, `esc`, `ctrl+c`, ...) |
+```
+
+```
+docs/research/herdr-api-spike.md:134
+| Snapshot | yes | `session.snapshot {}`; `api snapshot` | `{type: "session_snapshot", snapshot: {version, protocol, workspaces[], tabs[], panes[PaneInfo], layouts[{workspace_id, tab_id, zoomed, area, focused_pane_id, panes[{pane_id, focused, rect{x,y,width,height}}], splits[{id, direction, ratio, rect}]}], agents[], focused_*}}` | split `id`s (`split_3_011`) encode a tree path and are renumbered on relayout: not stable |
+```
+
+So the key is the lower-case `enter`, which AC 13 step 3 sends as written (Decision 11, D1). The adapter reads that
+snapshot shape with `parse_snapshot` (`protocol.rs:387-405`): the result type `session_snapshot`, then the `snapshot`
+object's `tabs`, `workspaces` and `panes` lists. The spike's table rows are its record of the real server; whether this
+build's replies parse end to end is what AC 12 and 13 check first, and a difference is an AC 15 gap.
+
+What `herdr status server --json` reports (the input of `prove`, AC 6, Decision 4), verbatim:
+
+```
+docs/research/herdr-api-spike.md:415-418
+- From the running server: `ping` returns `{"type":"pong","version":"0.9.1-preview.2026-09-21-0ff0f27e2226",
+  "protocol":22,"capabilities":{"live_handoff":true,"detached_server_daemon":false,"endpoint_protocol_generation":1,"surface_interest":true,"health_check":true}}`.
+  `herdr status server --json` reports the same fields, plus `compatible`, `endpoint_compatible` and
+  `restart_needed`, judged against the CLI binary.
+```
+
+The spike reads its `session` and `socket` fields by name (`jq -r .session`, `jq -r .socket`, `herdr-lib.sh:124-145`
+above), and the spike records the proof's output line (`herdr-api-spike.md:28-29`). `prove` reads the same two fields
+by name, so field order and extra fields do not matter (AC 6). If this build names them differently, `ScratchHerdr::start`
+panics with `prove`'s reason at RED, before any adapter call (Decision 4), and T records it.
+
 ```
 docs/research/herdr-api-spike.md:481
 - Behaviour on macOS (`shell_mode = "auto"` uses login shells there, DOCS). Everything here ran on Linux.
@@ -746,6 +779,9 @@ tempfile = { workspace = true }
 
 So CI never runs an ignored test of this crate (`--ignored` is passed only for `holler-cli`'s `body_run_test`). CI's
 matrix runs Linux and `macos-latest` (`ci.yml:19`, "`test (macos-latest)`").
+Checked over every workflow at `dc300ab`: `grep -n -- '--ignored\|include-ignored' .github/workflows/*.yml` prints only
+`ci.yml:189` (a comment, "Real cross-process interop, run explicitly via `-- --ignored`.") and `ci.yml:200` (above).
+No workflow passes `--include-ignored`.
 
 The macOS lesson from part 2 (the fix that landed in `0ad2d8a`):
 
@@ -840,6 +876,12 @@ harness (AC 1-8). The workspace label in both ignored tests is `holler640-grid`,
 Each is observable: a test name with what it asserts, a command and its expected output, or a grep. "Default run" means
 `cargo test -p holler-adapter-herdr` with no variable set, which is what CI runs.
 
+These criteria describe the tree after this part's T and F phases, not the tree at the brief gate. At the brief gate the
+branch equals `dc300ab` (header). So none of the new files exist yet, and no criterion on new or changed code, tests or
+docs holds yet: AC 1-19 and 21-27 among them, for example AC 8's one `Command::new` line, AC 19's `pub(crate)`, and the
+`holler-pane` and ADR-0021 edits. That is by design: Decision 15 and the Test plan say which criteria are RED at T's RED step and why. The Files table names which
+phase writes each file.
+
 **A. The harness's guards, proven in the default run** (pure functions; no process, socket, file or env read)
 
 1. `the_gate_runs_only_on_exactly_1`: `gate(Some("1")) == Gate::Run`; `gate(None)`, `gate(Some(""))`, `gate(Some("0"))`,
@@ -868,6 +910,10 @@ Each is observable: a test name with what it asserts, a command and its expected
    - sets each of `HOME`, `XDG_CONFIG_HOME`, `XDG_STATE_HOME`, `XDG_DATA_HOME`, `XDG_CACHE_HOME`, `XDG_RUNTIME_DIR` to a
      path under `/r/h640.ab`, each exactly once;
    - sets `SHELL=/bin/sh`, and keeps `PATH=/usr/bin:/bin` and `LANG=C.UTF-8` unchanged.
+
+   The literal pairs are `(&str, &str)`. The test converts them to match the pinned signature, for example
+   `pairs.iter().map(|(k, v)| (OsString::from(k), OsString::from(v)))`. The signature stays as pinned, since
+   `std::env::vars_os()` (AC 8) yields `(OsString, OsString)`.
 8. **One way to run `herdr`.** `grep -rn 'Command::new' crates/holler-adapter-herdr/` prints exactly one line, in
    `tests/scratch_herdr/mod.rs`. S reads that function: its arguments always start `--session <name>` with the name
    checked by `check_name`, it calls `env_clear()` and then sets exactly `scratch_env(root, std::env::vars_os())`, and it
@@ -887,6 +933,8 @@ Each is observable: a test name with what it asserts, a command and its expected
    `#[ignore = "opt-in: a scratch Herdr server; set HOLLER_HERDR_SCRATCH=1 (#640)"]`. The default run reports
    `2 ignored` for that target and runs neither. These are the only `#[ignore` lines in the crate
    (`grep -rn '#\[ignore' crates/holler-adapter-herdr/` prints exactly those two).
+   The exact count is intended. In this story T and F add no other `#[ignore` anywhere in the crate. That includes the
+   harness module and its helper tests (AC 1-8 run in the default run) and any test AC 15 adds (those run by default too).
 10. **Unset gate, `--ignored`.** Run the test binary with an empty environment, so neither the gate nor `PATH` exists:
     `env -i <the scratch_herdr_test binary> --ignored --nocapture` (T finds the binary under `target/debug/deps/`) passes
     both tests, and the output has one line starting `skipped (HOLLER_HERDR_SCRATCH is not 1)` per test. Since there is
@@ -970,11 +1018,18 @@ The command is `HOLLER_HERDR_SCRATCH=1 cargo test -p holler-adapter-herdr --test
       being `LONG` with no tab in the snapshot.
 
     How each reply is rewritten (a `Tapped::Reply` built from `fake.answer(&line)`, for example) is T's choice.
+
+    The expected text is the `Debug` form of the 64-character prefix followed by `...`. That is 66 characters,
+    `"` + 64 `x` + `"`, then 3 dots, 69 in all. It is exactly what `protocol::excerpt(&LONG)` returns
+    (`format!("{head:?}...")`, `protocol.rs:580-587`, E-4). The test may build it either way, as
+    `format!("{:?}...", "x".repeat(64))` or by hand.
 19. **One `excerpt`, shared.** `grep -n 'fn excerpt' crates/holler-adapter-herdr/src/*.rs` prints exactly
     `crates/holler-adapter-herdr/src/protocol.rs:<n>:pub(crate) fn excerpt(text: &str) -> String {`. In `adapter.rs`,
     `grep -nE 'made\.as_str\(\)|target\.as_str\(\)|workspace\.label' crates/holler-adapter-herdr/src/adapter.rs` shows each
     remaining use as an argument of `excerpt(..)`, never of a `{:?}` placeholder. Values from the caller
     (`spec.session`, `spec.workspace`, `config.session`, `config.socket`, the labels in `validate`) keep `{:?}` (Decision 10).
+    The first grep is literal on purpose: a comment or doc line containing `fn excerpt` anywhere in `src/` would also
+    match it, so F adds none (none exists at `dc300ab`).
 20. **The transport is unchanged.** `git diff origin/main -- crates/holler-adapter-herdr/src/transport.rs` is empty.
     Part 2's transport tests still assert `herdr.ping` at the transport level and pass.
 
