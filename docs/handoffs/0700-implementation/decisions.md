@@ -174,3 +174,33 @@
   port 41918 TIME_WAIT race (#242/#259 class). Both pass isolated and in the final full run.
 - Mutation testing barred by the operator for this run; the RED→GREEN transition stands in for
   remove-the-behaviour spot-checks (T hedged this in its handoff).
+
+## 2026-10-10 10:52–11:05 AM MDT — Phases 6–7 (T-green crossed; A-dup), O recording
+
+*(Correction: the previous entry's header said ~11:05; T-green completed ~10:50. Order of events
+unchanged.)*
+- **T-green gate crossed** (a-dup reached, index 7): the plugin re-ran the suite at the boundary —
+  GREEN, no refusal. The diff dual-review gate is DECLARED N/A (in-session rigor), recorded in
+  state.json, never silent.
+- **A-dup PASS** (`handoff-A-dup.md`): duplication none (AgentKey mirrors EnvVarName through the
+  shared `deserialize_parsed`; the open code sits beside its guard; `--agent` rides the `--role`
+  triad; overlay/copy/record are the named one-liner precedents; no second test rig); drift none
+  (DECISION 1 verbatim at tx_launch.rs:350; boundaries held per --stat; lib.rs = pre-blessed
+  deviation 1). The amendment's own rule holds: no later holler-pane edit needed for this field
+  (`SpecField::ALL` carries it zero times — #647's deliverable; import rides `#[serde(default)]`).
+  Warns: ADR-0021's old deferred bullet (~:677) superseded by the dated row, amend when #644 lands;
+  `SPEC_FLAG_SETS`/`docs_rows.rs` lack `--agent` (outside boundary, journalled, W6 residue); twin
+  3-line `agent()` test helpers cleared (each matches its file's convention).
+
+## 2026-10-10 ~11:10 AM MDT — Phase 9 (S: spec audit), O recording
+
+- **S PASS** (`handoff-S.md`): 10/10 acceptance criteria met with diff- and test-verified evidence;
+  blast radius, rules and DECISION 1 held; handoffs hygiene-clean. Advisories (none block):
+  (1) ADR-0021's old deferred bullet (~:677) superseded by the dated row — acceptable under the
+  issue's one-row constraint; #644 amends it when it lands. (2) CHANGELOG untouched per blast
+  radius; operator may want an entry at merge (run does not add it — the issue's edit rule wins).
+  (3) Commit the S/a-dup handoffs and this journal with the run (done, this commit). (4) Optional
+  test-only follow-up: `--agent` in SPEC_FLAG_SETS/docs_rows.rs static lists. (5) Pre-existing
+  flakes (interrupt_test under load; body_run_test TIME_WAIT) deserve a follow-up issue.
+- **Decision gate: S PASS and A-dup PASS → proceed to the PR and the in-session self-merge rule**
+  (CI green first, squash, branch deleted).
