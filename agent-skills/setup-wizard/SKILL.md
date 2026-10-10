@@ -134,6 +134,10 @@ that doesn't exist or fails to parse is a hard failure right there — it does *
 through to tiers 2 or 3; see Stage 1's Gate. State which of the three you're actually using when
 you report Stage 1's result — don't leave it ambiguous which config is in effect.
 
+**Default pane names.** When the user does not name the panes, each one is named for its grid cell,
+row then column, like a spreadsheet cell: `r1c1`, `r1c2`, `r1c3`, `r1c4` for the first row, `r2c1`
+for the first cell of the second row, and so on. `layout` is built as columns of those names.
+
 Everything this wizard needs to know — every orchestrator, every session, the whole layout, and
 which machine everything remote actually runs on — is authored in whichever file that is. The
 user edits one file, not several:
@@ -427,6 +431,11 @@ No release tag contains the whole skill directory yet, so the command fetches `m
 tag once one does. From here on the text writes `$WIZARD_LIB`; as the shell-state rule says, write the literal path
 into each command (it is never set for you). Run the scripts with `bash`, never by path alone.
 
+**First run.** A first run has no skill directory: ask, then install (the paragraph above). An
+existing global `sessions.toml` skips the interview; to start clean, the user moves it aside (for
+example `mv ~/.holler/herdr/setup/sessions.toml ~/.holler/herdr/setup/sessions.toml.old`). The
+wizard never deletes it. The "no config found" message names the config path it looked for.
+
 **Ask:** yes, if no config exists at any of the three tiers — but as a short scenario menu plus
 whatever's genuinely undiscoverable, not a blank "give me the whole schema" ask (see the Do
 step's own note on why, and the scenario menu it walks through). Also ask if any
@@ -506,7 +515,12 @@ invented or guessed; everything else here can be.
    - **(A) Just a local orchestrator, nothing remote yet.** Needs only an orchestrator. Propose
      a default — `name = "o1"`, `dir` = the cwd this wizard is running from, `cmd = "claude"` —
      and ask one confirm-or-override question, not three separate ones. `layout` is then just
-     `[["o1"]]`, computed, not asked. This is a fully valid, complete config: a real Herdr pane
+     `[["o1"]]`, computed, not asked. When the user wants several panes and does not name them,
+     the default names are the grid cells, row then column: `r1c1`, `r1c2`, `r1c3`, `r1c4` for
+     the first row, `r2c1` for the first cell of the second row, and so on, with `layout` built
+     as columns of those names. If they give a pane count and no grid, propose the squarest grid
+     (two rows for more than four panes, for example 8 panes as 2 rows of 4) and ask one confirm.
+     The user's own names always win. This is a fully valid, complete config: a real Herdr pane
      running a real orchestrator, with no SSH/tailnet knowledge required at all — and doesn't
      even touch the `tailscale` question above, since there's nothing remote to look up. Most
      useful as the on-ramp for someone who hasn't set up a remote body yet.
