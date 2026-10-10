@@ -180,3 +180,29 @@ Rigor/brief gate: BLOCKED, overridden by Andre Angelantoni: The outside brief ga
   - **Merge dry run:** an in-memory `git merge-tree` of the working tree against `origin/main` `e612878` conflicts in
     `CHANGELOG.md` only.
   - Details are in `handoff-F.md` and `evidence.md`.
+
+## T (Phase 7, verify / GREEN + Tier 2) — 2026-10-09T19:12:48-06:00
+
+- **Decided:**
+  - **GREEN with no test edit.** Both test modules are byte-identical to the RED commit `8fe683b`. F flagged no test as
+    wrong, and T found none.
+  - **The tests are checked by mutation, not only re-run.** Ten one-behaviour mutations of F's code were each killed by
+    at least one authored test. The first pass reported four survivors; all four were compile errors from
+    `dead_code = "deny"`, which the script had not classified. Redone with `if false` guards, all four were killed.
+  - **Three fixture facts were added to `evidence.md`** (`seeded` at generation 1, `fail_next` one-shot, `concurrent_put`
+    at generation + 1), each copied by T from source.
+  - **Verdict: PASS.** No blocking issue, so no production change for F.
+- **Assumed:**
+  - F's four `logging_test.rs` failures came from a hub on the default socket at the time. They did not reproduce here
+    (11 passed without `HOLLER_STATE_DIR`), the file is outside the diff, and CI has no hub.
+- **Hedged:**
+  - The macOS timing and BSD `kill` group-signal evidence is CI's.
+  - `profile_scope.rs` is at 597 of 600 lines.
+  - A restoring write that fails with a payload-less `PaneError` loses its context. No store answers that today; this is
+    advisory, for F2.
+- **Evidence:**
+  - Scope 7/7 and probe 12/12 GREEN, probe serial in 1.39 s; 20 parallel and 5 serial probe runs all passed.
+  - The workspace (no skip) gave 1403 passed, 0 failed in 125 suites; the testkit gave 202 passed.
+  - clippy, lint, changelog-check, machete, rustfmt, docs_cli_test and wire_selftest all pass.
+  - The AC 9, 11, 12 and 14 checks all hold.
+  - Details are in `handoff-T-green.md`.

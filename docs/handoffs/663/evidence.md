@@ -121,3 +121,31 @@ Written by F (Phase 5). Every excerpt is copied from the tree at `3bdd129` (none
   >         run_probe(argv, expect, timeout)
   >     }
   > }
+
+## The tests' fixture (added by T, Phase 7; excerpts copied by T from source at `3bdd129`)
+
+- **Fact:** `FakeProfileStore::seeded` stores each profile at generation 1 and bypasses the faults and the call log, so
+  the fixture of AC 2-7 starts at generation 1 with an empty call log, and AC 2's `[Get, CasPut, CasPut]` and AC 7's
+  "generation 1, unchanged" are measured from there.
+  **Source:** `crates/holler-pane-testkit/src/profile_store.rs:122-124`
+  **Verbatim excerpt:**
+  >     /// A store holding `profiles`, each created by `actor` at expected generation 0
+  >     /// and so stored at 1 with one `Created` entry, in order. Seeding bypasses the
+  >     /// faults and the call log. Two seeds with one name are `generation-conflict`, as
+
+- **Fact:** `fail_next` fails only the next call of that method, once, so the fault AC 2 arms inside the act hits the
+  restoring `cas_put` and nothing after it, and AC 4's first-write fault is spent by the first `cas_put`.
+  **Source:** `crates/holler-pane-testkit/src/fault.rs:72-74`
+  **Verbatim excerpt:**
+  >     /// Fail the next call of `op` with `error`, once. The errors queued for one method
+  >     /// come out in the order they were queued, and a call of another method leaves them
+  >     /// queued. A standing fault answers first, also leaving them queued.
+
+- **Fact:** `concurrent_put` stores at the stored generation + 1 and bypasses the faults and the call log, so AC 3's act
+  moves Demo Alpha past the generation the restoring write expects, and that write is the conflict.
+  **Source:** `crates/holler-pane-testkit/src/profile_store.rs:156-159`
+  **Verbatim excerpt:**
+  >     /// Another writer stores `profile` unconditionally, at the stored generation + 1
+  >     /// (or at 1 for a new profile), without the name rule, logs its entry with `actor`
+  >     /// and publishes its event. It bypasses the faults and the call log. Returns the
+  >     /// stored record.
