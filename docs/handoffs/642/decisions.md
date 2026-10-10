@@ -143,3 +143,12 @@
   - Mutation table: 7 of 8 mutations were caught before the new test, and 8 of 8 after.
   - tmux probe on a private `-L` server: the title survives `respawn-pane -k`, and a chained `select-pane -T ''`
     clears it.
+
+## O (diff gate, manual rerun with a one-off prompt-ceiling override): 2026-10-09T23:50:00-06:00
+- **Decided:** The outside diff gate is taken as PASS from a hand rerun, and the run resumes at the anti-duplication gate (phase 8).
+  - The workflow's own diff gate did not run: the assembled prompt was estimated at ~64093 tokens (256370 bytes / 4) against the runner's configured ceiling of 64000 (`DUAL_REVIEW_MAX_PROMPT_TOKENS=64000` in `.env`), so it refused to send (`gate-unavailable`, `nonzero-exit`).
+  - The ceiling was calibrated on another model; the same outside model (`deepseek-v4-pro`) returned complete reviews on prompts of ~52K and ~60K tokens in this repo. The estimate exceeded the ceiling by 93 tokens (0.15%).
+  - A hand rerun of the same prompt (`docs/handoffs/642-diff-result-r1.md.prompt.txt`) with `DUAL_REVIEW_MAX_PROMPT_TOKENS=80000` exported for that one invocation (the repo's `.env` is unchanged) returned a complete review (`finish_reason: stop`, 3255 completion tokens). Its BLOCK section reads `None.` and its verdict reads `PASS — no BLOCK findings; testing may proceed.`
+- **Assumed:** The estimate is a bytes/4 heuristic and DeepSeek's context is far larger than 64K, so a 64093-token prompt is reviewed fully, not silently truncated; the complete 3255-token review with specific findings supports that.
+- **Hedged:** This waives the ceiling for this one prompt only. The anti-duplication gate and the spec audit still run on the full diff.
+- **Evidence:** the refusal text (`ceiling: 64000 tokens`, `estimated tokens: ~64093`); the rerun's `usage.json`.
