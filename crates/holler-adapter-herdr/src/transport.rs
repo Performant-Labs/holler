@@ -160,9 +160,7 @@ impl Exchange {
     fn write(&self, stream: &mut UnixStream, mut line: &[u8]) -> Result<(), PaneError> {
         const DOING: &str = "writing the request";
         while !line.is_empty() {
-            stream
-                .set_write_timeout(Some(self.left()?))
-                .map_err(|error| self.failed(DOING, error.kind()))?;
+            self.bound(DOING, |left| stream.set_write_timeout(left))?;
             match stream.write(line) {
                 Ok(0) => return Err(self.failed(DOING, ErrorKind::WriteZero)),
                 Ok(written) => line = line.get(written..).unwrap_or_default(),
@@ -212,13 +210,33 @@ impl Exchange {
     fn read_some(&self, stream: &mut UnixStream, into: &mut [u8]) -> Result<usize, PaneError> {
         const DOING: &str = "reading the reply";
         loop {
-            stream
-                .set_read_timeout(Some(self.left()?))
-                .map_err(|error| self.failed(DOING, error.kind()))?;
+            self.bound(DOING, |left| stream.set_read_timeout(left))?;
             match stream.read(into) {
                 Ok(read) => return Ok(read),
                 Err(error) => self.retry(DOING, error.kind())?,
             }
+        }
+    }
+
+    /// Set a socket timeout (`set`) to the time left: `timeout` when there is none.
+    ///
+    /// macOS refuses `SO_RCVTIMEO`/`SO_SNDTIMEO` with `EINVAL` (`InvalidInput`) on a
+    /// socket whose peer has already closed it (seen on CI's macOS runner, PR #702).
+    /// That is not the exchange failing: on such a socket the read or write returns at
+    /// once (the bytes still buffered, EOF, or a broken pipe), so the call goes ahead
+    /// and its own result is the answer. std's one `InvalidInput` of its own, for a zero
+    /// timeout, cannot happen here, since [`Exchange::left`] is never zero. Any other
+    /// error is `unavailable`, as before.
+    fn bound(
+        &self,
+        doing: &str,
+        set: impl FnOnce(Option<Duration>) -> std::io::Result<()>,
+    ) -> Result<(), PaneError> {
+        match set(Some(self.left()?)) {
+            Err(error) if error.kind() != ErrorKind::InvalidInput => {
+                Err(self.failed(doing, error.kind()))
+            }
+            _ => Ok(()),
         }
     }
 

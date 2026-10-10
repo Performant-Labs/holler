@@ -402,8 +402,18 @@ fn one_wire_condition_gives_one_answer_at_the_deadline() {
         kept.len()
     );
     for mut stream in kept {
-        stream.set_nonblocking(false).unwrap();
-        stream.set_read_timeout(Some(SLACK)).unwrap();
+        // macOS refuses both calls with EINVAL (`InvalidInput`) once the peer has
+        // closed the socket (seen on CI's macOS runner): that is the worker having
+        // dropped its socket, which is what this test checks, and the read below then
+        // ends at once.
+        for set in [
+            stream.set_nonblocking(false),
+            stream.set_read_timeout(Some(SLACK)),
+        ] {
+            if let Err(e) = set {
+                assert_eq!(e.kind(), ErrorKind::InvalidInput, "{e}");
+            }
+        }
         let mut received = Vec::new();
         let read = stream.read_to_end(&mut received).map_err(|e| e.kind());
         assert!(
