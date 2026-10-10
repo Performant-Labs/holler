@@ -26,7 +26,7 @@
 
 ## 2026-10-09 ~9:10 PM MDT — stage-run re-rooting (oddity, reported to operator)
 
-- **The run root had to move from `agent-c4r1` to the true primary `~/Projects/holler`.** v0.1.0's
+- **The run root had to move from `agent-c4r1` to the true primary checkout (repo root).** v0.1.0's
   repo-identity check (S7(C), `stage-snapshot.ts:505`) requires the run root's common dir to be
   `<root>/.git` — i.e. a main repository, never a linked worktree like `agent-c4r1`. Two refusals
   led here: missing role docs (provisioned verbatim from the release's `agents/` into the root), then
@@ -191,3 +191,14 @@
 - **Residual (unchanged from T-red):** `one_line()` blank-message edge and zero-item `emit_stream`
   remain deliberately unimplemented/unpinned (option (b) not taken); `output_api.rs` at 753 lines
   stays over the 600 warn, under the 900 fail.
+
+## 2026-10-09 ~11:55 PM MDT — PR-side loop: pr-agent finding scrubbed, O
+
+- **pr-agent (PR #713) flagged the committed handoffs' real home-directory paths** (SPEC-ENFORCER
+  item 5: neutral placeholders only; the repo is public). Checked house practice at `519947a`: no
+  tracked handoff has ever carried a home path (scrubbed: brief.md line 5-6, decisions.md line 29 →
+  repo-relative / "the primary checkout"); agent identifiers (`agent-c4r1`, `c3r1`) stay — they are
+  established practice (647's committed handoffs carry them, incl. 13 in its brief). Note: this
+  post-audit byte change to the handoff docs is editorial (paths only — no verdict, evidence or
+  finding altered) and is recorded here; the merge crossing's artifact verification had already
+  passed, and a re-statement at merge runs nothing.

@@ -2,8 +2,8 @@
 
 Repo: `Performant-Labs/holler`. Issue: #660 (epic #633, wave 3). Rigor: **in-session**. UI surface: no
 (D and U are N/A). Branch: `issue-0660-output` (plugin-named) from `origin/main` at `519947a`. Run
-worktree: `~/Projects/holler/.claude/worktrees/0660-output`; session root: the primary
-`~/Projects/holler` (re-rooted off `agent-c4r1` — see decisions.md).
+worktree: `.claude/worktrees/0660-output` (repo-relative); session root: the primary
+checkout (re-rooted off `agent-c4r1` — see decisions.md).
 
 ## Objective
 
