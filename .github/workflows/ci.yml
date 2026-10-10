@@ -9,6 +9,15 @@ on:
   # before re-opening). No inputs; it just runs the same matrix.
   workflow_dispatch:
 
+# Cancel a superseded pull-request run when its branch is pushed again (issue #743). Without this
+# every push, force-push and re-run kept running the whole matrix to the end, and the macos-latest
+# leg (GitHub-hosted, a handful of concurrent jobs at most) queued for minutes behind runs nobody
+# would read. Pushes to main and manual runs get a group of their own (the run id): they are never
+# cancelled.
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && github.head_ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   test:
     strategy:
