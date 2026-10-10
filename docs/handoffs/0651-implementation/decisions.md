@@ -188,3 +188,19 @@ false (D and U are N/A, recorded). Append-only; every phase adds its entry.
 - F's three findings ruled acceptable-as-contracted (bare action argv = #649 follow-up; SYNC
   3-of-4 cases = suite-widening follow-up; in-process unknown + TTL backstop = the one-shot
   binary reality) — recorded as follow-ups, none a wrong test. No test repairs.
+
+## 2026-10-10 · Phase A-dup — anti-duplication gate PASS (O journals; A = architecture-reviewer)
+
+- Dispatched via the task tool; recorded with `stage run` (STAGE OK, attempt 1). Diff dual-review
+  gate N/A (in-session), recorded by the advance.
+- **VERDICT: PASS, 3 warns, 0 blocks.** The diff extends what the Reuse map said to extend: hub
+  read through `holler_hub::control::run` (zero new framing), decode through `PaneReply::into_result`
+  into `Vec<Pane>` (no re-defined shapes), sync token a doc-cited case-for-case mirror of
+  `SessionSync::of` around the one `shown_differs`, `ttl_ms` pane-only, display-only structural
+  (allowlist scan + closed two-variant Method enum). Blast radius exactly as declared.
+- Warns recorded as follow-ups: (1) the forced minimal client's `Exchange` is a structural twin of
+  the adapter's — extract into the adapter crate when a second consumer appears (doc line added);
+  (2) token values sent verbatim without the CLI `text_value` terminal-safety escaping — verify
+  Herdr sidebar escaping, then apply the CLI rule if needed; (3) two wire-level socket fakes now
+  exist in test trees — extract to holler-pane-testkit on a third consumer.
+- No second registry, no second hub client, no path later stories would duplicate.
