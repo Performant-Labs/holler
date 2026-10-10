@@ -179,6 +179,35 @@ fills this file in at release time.
   line break on the screen. Until the hub client is wired (#649), the installed binary still answers
   `not implemented` ([#643](https://github.com/Performant-Labs/holler/issues/643)).
 
+- Pane control, the reconcile engine and `holler pane doctor [PANE] [--fix] [--profile NAME]` (epic
+  [#633](https://github.com/Performant-Labs/holler/issues/633)): a pass looks at each pane's Herdr pane, tmux session,
+  harness server and sessions, and the session its TUI shows, compares them with the pane's record and reports what
+  differs as typed findings with stable codes: a TUI on another session than the session of record, a wedged or dead
+  server, a missing tmux session or Herdr pane, a session of record that is missing or not set, a harness the record does
+  not know in the pane, a stray session, an unregistered Herdr pane, an unsupported Herdr, and a check that could not
+  run. Each finding names the holler command to run, or says why there is none. `--fix` repairs only what the record
+  decides: it switches the TUI back to the session of record when the pane's server is healthy and has it (the
+  orchestrator's pane only when named), and never changes the session of record, starts, attaches or deletes anything,
+  or types into a pane. Every pass records what it observed in `last_observed` and `harness.health`, writing a record
+  only when that changed, and exits 0 with or without findings, so a script reads `data.findings`. Positions print as
+  `r2c1`. There is no hub timer: a scheduler runs `holler pane doctor --format=json` ([ADR 0021](docs/adr/ADR-0021.md)
+  section 12). The verb runs on the ports, which are wired to the real hub, Herdr, tmux and OpenCode by #649, so until
+  then it answers `not-implemented` outside the tests ([#647](https://github.com/Performant-Labs/holler/issues/647)).
+
+- Pane control, `holler profile list` and `holler profile show` (epic [#633](https://github.com/Performant-Labs/holler/issues/633)):
+  `profile list` prints every profile, sorted by slug, with its number of specs, its number of live panes and its
+  generation. `profile show NAME` prints the profile's specs and compares them with its live panes, field by field: each
+  pane is reported as `matches`, `differs` (one `spec ..., live ...` line per field that differs, a position as `r2c1`,
+  row first), `missing` (a spec with no live pane) or `extra` (a live pane with no spec), and each live pane shows its
+  last health probe result (`ok`, or `failed (missing "...")`), read from the pane registry and never run. A
+  profile's live panes are the panes that belong to it. Both verbs take `--format=json`. In text mode a stored string
+  with a control character prints escaped, and a command or a check prints as a JSON array. The snapshot of a pane as
+  a spec (its port policy becomes `fixed:<port>`, the port its harness uses) and the comparison live in `holler-pane`,
+  for `profile create --from-current`, `profile apply` and the migration to reuse, and
+  [ADR 0021](docs/adr/ADR-0021.md) records both choices. Until the hub's stores are wired into the binary
+  ([#649](https://github.com/Performant-Labs/holler/issues/649)), the real `holler profile list` and `show` still
+  answer `not-implemented` ([#662](https://github.com/Performant-Labs/holler/issues/662)).
+
 ## [0.4.0] - 2026-09-29
 
 ### Enhancements

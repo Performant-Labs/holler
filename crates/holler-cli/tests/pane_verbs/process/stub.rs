@@ -27,14 +27,11 @@ pub const STUBS: &[(&str, &str, u32)] = &[
     ("pane", "unpark", 646),
     ("pane", "close", 646),
     // #647
-    ("pane", "doctor", 647),
     // #650
     ("pane", "import", 650),
     // #662
     ("profile", "create", 662),
     ("profile", "delete", 662),
-    ("profile", "list", 662),
-    ("profile", "show", 662),
     // #664
     ("profile", "apply", 664),
     // #665 (proposed: the operator confirms it)
