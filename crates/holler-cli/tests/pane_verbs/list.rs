@@ -109,13 +109,21 @@ pub(crate) fn member(name: &str, profile: &str) -> Pane {
     }
 }
 
-/// The sample pane `name` with reconcile's last observation `shown`/`driven`.
-pub(crate) fn observed(name: &str, shown: Option<&str>, driven: Option<&str>) -> Pane {
+/// The sample pane `name` whose session of record is `record`, with reconcile's last
+/// observation `shown`/`driven` stamped `at` (milliseconds; `0` is never observed).
+pub(crate) fn observed(
+    name: &str,
+    record: Option<&str>,
+    shown: Option<&str>,
+    driven: Option<&str>,
+    at: i64,
+) -> Pane {
     Pane {
+        session_of_record: record.map(Into::into),
         last_observed: LastObserved {
             shown: shown.map(str::to_owned),
             driven: driven.map(str::to_owned),
-            at: 0,
+            at,
         },
         ..pane(name)
     }
@@ -301,43 +309,73 @@ fn list_json_is_one_envelope_with_a_row_per_pane() {
     }
 }
 
-/// The three SHOWN/DRIVEN cases of AC 3: differ, agree, one side unobserved.
+/// The six panes of AC 3 (amendment 1), one per row of its table: SYNC is
+/// `shown_differs`'s answer (SHOWN against the session of record), and DRIVEN is printed
+/// as stored, never compared. `1000` stands for any `at > 0`.
 pub(crate) fn sync_rig() -> Rig {
+    let a = Some("ses-a");
+    let b = Some("ses-b");
     Rig::new(
         [
-            observed("demo-c1r1", Some("ses-a"), Some("ses-b")),
-            observed("demo-c2r1", Some("ses-a"), Some("ses-a")),
-            observed("demo-c3r1", None, Some("ses-a")),
+            observed("demo-c1r1", a, b, None, 1000), // shows another session
+            observed("demo-c2r1", a, a, None, 1000), // shows its session of record
+            observed("demo-c3r1", a, None, None, 1000), // an observed home screen
+            observed("demo-c4r1", a, None, None, 0), // never observed
+            observed("demo-c5r1", None, a, None, 1000), // no session of record
+            observed("demo-c6r1", a, a, b, 1000),    // DRIVEN differs, and is not compared
         ],
         [],
     )
     .unwrap()
 }
 
+/// AC 3's SYNC, per pane of [`sync_rig`] in name order: (pane, text, JSON).
+pub(crate) const SYNC_WANT: [(&str, &str, &str); 6] = [
+    ("demo-c1r1", "MISMATCH", "mismatch"),
+    ("demo-c2r1", "ok", "ok"),
+    ("demo-c3r1", "MISMATCH", "mismatch"),
+    ("demo-c4r1", "-", "unobserved"),
+    ("demo-c5r1", "-", "unobserved"),
+    ("demo-c6r1", "ok", "ok"),
+];
+
 #[test]
-fn list_flags_a_pane_whose_shown_and_driven_differ() {
+fn list_flags_a_pane_whose_shown_differs_from_its_session_of_record() {
     let rig = sync_rig();
     let run = rig.run(&["pane", "list"], Format::Text);
     let rows: Vec<Vec<&str>> = ok_text(&run).lines().skip(1).map(cells).collect();
-    let want = [
-        ["ses-a", "ses-b", "MISMATCH"],
-        ["ses-a", "ses-a", "ok"],
-        ["-", "ses-a", "-"],
+    let shown_driven = [
+        ("ses-b", "-"),
+        ("ses-a", "-"),
+        ("-", "-"),
+        ("-", "-"),
+        ("ses-a", "-"),
+        ("ses-a", "ses-b"),
     ];
-    for (row, want) in rows.iter().zip(want) {
-        assert_eq!(&row[5..8], want, "SHOWN DRIVEN SYNC: {run:?}");
+    assert_eq!(rows.len(), SYNC_WANT.len(), "one row per pane: {run:?}");
+    for ((row, (name, sync, _)), (shown, driven)) in rows.iter().zip(SYNC_WANT).zip(shown_driven) {
+        assert_eq!(
+            [row[0], row[5], row[6], row[7]],
+            [name, shown, driven, sync],
+            "PANE SHOWN DRIVEN SYNC: {run:?}"
+        );
     }
-    assert_eq!(rows.len(), 3, "{run:?}");
 
     let data = ok_envelope(&rig.run(&["pane", "list"], Format::Json)).data;
-    let want = [
-        ("demo-c1r1", json!("ses-a"), json!("ses-b"), "mismatch"),
-        ("demo-c2r1", json!("ses-a"), json!("ses-a"), "ok"),
-        ("demo-c3r1", Value::Null, json!("ses-a"), "unobserved"),
-    ];
-    for (name, shown, driven, sync) in want {
+    for ((name, _, sync), (shown, driven)) in SYNC_WANT.into_iter().zip(shown_driven) {
         let row = json_row(&data, name);
-        assert_eq!((&row["shown"], &row["driven"]), (&shown, &driven), "{row}");
+        let as_json = |cell: &str| {
+            if cell == "-" {
+                Value::Null
+            } else {
+                json!(cell)
+            }
+        };
+        assert_eq!(
+            (&row["shown"], &row["driven"]),
+            (&as_json(shown), &as_json(driven)),
+            "{row}"
+        );
         assert_eq!(row["sync"], sync, "{row}");
     }
 }
@@ -536,6 +574,10 @@ fn list_help_documents_the_columns_and_the_json_shape() {
         "--format=json",
         "\"panes\"",
         "r2c1",
+        // Amendment 1: SYNC's rule, and why DRIVEN is empty.
+        "session of record",
+        "home screen",
+        "#649",
     ] {
         assert!(
             help.contains(needle),

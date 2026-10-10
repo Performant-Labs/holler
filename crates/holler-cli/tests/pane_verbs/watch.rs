@@ -16,7 +16,9 @@ use holler_pane_testkit::pane_store::PaneStoreOp;
 use serde_json::{json, Value};
 
 use crate::get::help;
-use crate::list::{assert_fails, kv, member, ok_stream, ok_text, pane, scoped_rig, sync_rig, Rig};
+use crate::list::{
+    assert_fails, kv, member, ok_stream, ok_text, pane, scoped_rig, sync_rig, Rig, SYNC_WANT,
+};
 
 /// The store of AC 12. Seeded `demo-c1r1` (cursor 1) and `demo-c2r1` (2); then through
 /// the port `cas_put` c1 (3) and c2 (4) and `delete` c1 (5); then another writer puts a
@@ -284,13 +286,18 @@ fn watch_flags_a_mismatch() {
     let argv = ["pane", "watch", "--until-idle"];
     let run = rig.run(&argv, Format::Text);
     let sync: Vec<Option<&str>> = ok_text(&run).lines().map(|l| kv(l, "sync")).collect();
-    assert_eq!(sync, [Some("MISMATCH"), Some("ok"), Some("-")], "{run:?}");
+    let want: Vec<Option<&str>> = SYNC_WANT.iter().map(|(_, text, _)| Some(*text)).collect();
+    assert_eq!(sync, want, "{run:?}");
     let lines = ok_stream(&rig.run(&argv, Format::Json));
-    let sync: Vec<&Value> = lines.iter().map(|e| &e.data["pane"]["sync"]).collect();
-    assert_eq!(
-        sync,
-        [&json!("mismatch"), &json!("ok"), &json!("unobserved")]
-    );
+    let sync: Vec<Value> = lines
+        .iter()
+        .map(|e| json!([e.data["name"], e.data["pane"]["sync"]]))
+        .collect();
+    let want: Vec<Value> = SYNC_WANT
+        .iter()
+        .map(|(name, _, json)| json!([name, json]))
+        .collect();
+    assert_eq!(sync, want);
 }
 
 #[test]
@@ -302,6 +309,8 @@ fn watch_help_documents_the_stream() {
         "--until-idle",
         "\"cursor\"",
         "\"change\"",
+        // Amendment 1, A's W-4: "pane" is a row, not the record `pane get` prints.
+        "pane get",
     ] {
         assert!(
             help.contains(needle),

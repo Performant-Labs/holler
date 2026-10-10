@@ -1,91 +1,96 @@
-# Handoff-T-red: Phase 4 - #643 the read verbs (`holler pane list`, `get` and `watch`, with SHOWN and DRIVEN)  (round 2)
+# Handoff-T-red: Phase 4 - #643 the read verbs (`holler pane list`, `get` and `watch`, with SHOWN and DRIVEN)  (amendment 1)
 
 **Date:** 2026-10-09
-**Branch:** issue-643-implementation (on 04e6af2, A's round-2 PASS; F's code at 06320ad, T-green at 50bcc83)
-**Brief / wireframe reviewed:** docs/handoffs/643-brief.md (unchanged, sha256 62fce781...); docs/handoffs/643/handoff-A.md
-(round 2); docs/handoffs/643-diff-result-r1.md (the outside diff gate, round 1, gitignored). Wireframe: N/A (no UI surface).
+**Branch:** issue-643-implementation (on e3be3c1, A's PASS on amendment 1; production code unchanged since 06320ad)
+**Brief / wireframe reviewed:** docs/handoffs/643-brief.md (amendment 1: Decision 3, AC 3, AC 19, Decision 15, Test plan
+"RED for amendment 1"); docs/handoffs/643/handoff-A.md (amendment 1, W-12 to W-16, notes for T). Wireframe: N/A (no UI
+surface).
 
-Round 1 of this handoff (the 28-test RED, on fafd138) is in git: `git show 837718b:docs/handoffs/643/handoff-T-red.md`.
-This file replaces it.
+Round 2 of this handoff is in git: `git show 3140f35:docs/handoffs/643/handoff-T-red.md`. This file replaces it.
 
 ## A precondition
 
-Confirmed: A returned PASS on round 2 (handoff-A.md: 0 blocks, 9 open warns). The run came back here because the outside
-diff gate BLOCKed round 1 and F had reported `archChanged`. A triaged the gate's B-1 to B-3 as not defects and said they
-need no production change. It routed the gate's W-4, W-5 and NITs to T. Its note 4 says these findings add no behaviour,
-so nothing can be RED this cycle: a test that pins current behaviour passes at once, and that is expected.
+Confirmed: A returned PASS on amendment 1 (handoff-A.md: 0 blocks, warns W-12 to W-16). A's note 1 for T was applied
+as written: AC 3 extends the existing `observed()` helper in place (no second helper), and `sync_rig()` is still the one
+AC 3 fixture, shared by the `list`, `get` and `watch` tests. W-12 has no RED. W-13's optional `at: -1` case was taken,
+as its own test (below).
 
-## What this cycle changes, finding by finding
+## Tests authored
 
-| Gate finding | T's call | Change |
-|---|---|---|
-| B-3, the predicate is "heuristic" and "the test does not pin the exact predicate" | Pin one character per class the gate named | New `text_output_escapes_each_hidden_class_and_keeps_plain_unicode` |
-| NV-6 and W-1, "over-escapes `é`" | Pin the opposite: precomposed accents and CJK text print as themselves | The same test |
-| B-2 and W-3, a stored `-` is "indistinguishable from the sentinel" | Pin that the two print differently | New `a_stored_dash_prints_apart_from_the_empty_value` |
-| W-5, the no-write check covers only the pane store | Agreed. Extend it to the profile store | `read_verbs_call_no_adapter_or_probe` also asserts no `ProfileStoreOp::{CasPut, Delete, Rename}` call, and at least one profile-store read |
-| W-4, AC 14 may see `WatchNext` before the verb blocks | No change | The fake logs `WatchNext` on entry to `step()`, before `poll()` waits (feed.rs:263-269, evidence.md). The write lands just before the poll or during the wait. Either way that `next()` returns it once, and once is what the test asserts. The tester overlay requires races to be asserted as invariants, not timings, and the brief allows either order. |
-| B-1, `{:?}` in `get`'s `pane-not-in-profile` | No test | `get`'s own construction runs only when the scope answers success without the pane. The fake scope never does that, because it raises the same text itself (profile_scope.rs:122-123). A test through the fake would pin the fake's string, not the verb's. |
-| NIT-6, the `data.get(..).is_some()` check is "redundant" | No change; it is not redundant | `serde_json`'s `Index` returns `Null` for a missing key, so `data["profile"] == Null` also holds when the key is absent. The `get().is_some()` check is the one that pins "always present". |
-| NIT-1 to NIT-5, NIT-7 | No change | The gate itself calls them not bugs. |
+All are in-process over the `Rig` (`run_verb_with`, test-kit fakes). This is the cheapest tier that runs the real verb
+through clap, dispatch and `output.rs`.
 
-## Tests authored (round 2)
+| Test | File | Pins | Change |
+|---|---|---|---|
+| `observed(name, record, shown, driven, at)` (helper) | `tests/pane_verbs/list.rs:112-131` | AC 3's fixture: sets `session_of_record` and `at` as well as `shown`/`driven` | extended in place (was `observed(name, shown, driven)` with `at: 0`) |
+| `sync_rig()` + `SYNC_WANT` | `list.rs:312-341` | AC 3's six-row table (c1 to c6), and the expected SYNC per pane, in text and JSON. One table, used by all three tests | rewritten |
+| `list_flags_a_pane_whose_shown_differs_from_its_session_of_record` | `list.rs:343` | AC 3 for `list`: PANE, SHOWN, DRIVEN and SYNC cells per row, and JSON `shown`/`driven` (string or `null`) and `sync` | replaces `list_flags_a_pane_whose_shown_and_driven_differ` |
+| `get_flags_a_mismatch` | `get.rs:158` | AC 3 for `get`: the six `sync:` lines and `data.sync` | re-authored over `SYNC_WANT` |
+| `watch_flags_a_mismatch` | `watch.rs:284` | AC 3 for `watch`: `sync=` per text line, and `[data.name, data.pane.sync]` per NDJSON line | re-authored over `SYNC_WANT` |
+| `list_help_documents_the_columns_and_the_json_shape` | `list.rs:562` | AC 19: also `session of record`, `home screen`, `#649` | three needles added |
+| `watch_help_documents_the_stream` | `watch.rs:304` | AC 19 (W-4): also `pane get` | one needle added |
+| `a_negative_observed_at_is_never_observed` | `get.rs:172` | A's W-13: a record with `at: -1` prints `observed-at: never`, `sync: -` and JSON `"unobserved"`, although SHOWN (`ses-b`) differs from the record (`ses-a`) | new. It is a guard, not RED (see below) |
+| `a_stored_dash_prints_apart_from_the_empty_value` | `get.rs:375` | unchanged behaviour. Only its fixture call moves to the new `observed` signature (`record: Some("-")` replaces its separate assignment) | call-site update |
 
-All tests run in-process over the `Rig`, as in round 1. This is the cheapest tier that runs the real verb through clap,
-dispatch and `output.rs`, and `text_value` is reached only through it.
-
-| Test | File | Pins |
-|---|---|---|
-| `text_output_escapes_each_hidden_class_and_keeps_plain_unicode` | `tests/pane_verbs/get.rs:289` | AC 18 and F's deviations 1 and 2, one character per class: DEL, NEL, NBSP, the soft hyphen, ALM, ZWSP, ZWJ, LRM, LRI, PDI, U+2028, the BOM and a combining acute. Each prints as `"/srv/a\u{..}b"`. Precomposed `é` and `ï` and CJK text print unchanged and unquoted, both in a stored string and in an argv printed as JSON. |
-| `a_stored_dash_prints_apart_from_the_empty_value` | `tests/pane_verbs/get.rs:355` | Decision 11 as F built it: a stored `-` (`session_of_record`, `last_observed.shown`) prints as `"-"`, and an absent value prints as `-`, both in `get` and in `list`'s SHOWN and DRIVEN cells. |
-| `read_verbs_call_no_adapter_or_probe` (extended) | `tests/pane_verbs/list.rs:511-519` | AC 17 and Decision 9: no profile-store write either. |
-
-Expected strings are literals written by T, not values computed with `{:?}`, so the test does not just mirror the code.
-rustc 1.98.1 was used to confirm each class's `escape_debug` and `{:?}` form before the literals were written. The probe
-was a scratch program outside the repo, and its output matches A's round-2 check.
+The W-13 case is a separate `get` test, not a seventh `sync_rig` row, so AC 3 keeps the six rows the brief pins. One
+verb is enough for it: `observed-at` and `sync` sit side by side only in `get`, and `PaneRow::from` calls the same
+`SessionSync::of`.
 
 ## RED confirmation
 
-**There is no RED this cycle, by design** (A's note 4). The cycle adds no behaviour, so a valid test passes on F's code.
-Validity is shown the other way round: each new test fails when the behaviour it pins is removed. T applied each mutation
-to `crates/holler-cli/src/pane/list.rs` with `perl`, ran `cargo test -p holler-cli --test pane_verbs -- list:: get:: watch::`,
-and restored the file with `git checkout`:
+Command: `cargo test -p holler-cli --test pane_verbs -- list:: get:: watch::` on the unchanged production code (which
+still compares SHOWN with DRIVEN).
 
-| Mutation | Result |
+```
+test result: FAILED. 31 passed; 5 failed; 0 ignored; 0 measured; 91 filtered out
+```
+
+Each failure is an assertion about the behaviour amendment 1 adds. None is a compile, setup or harness failure:
+
+| Test | Failing assertion (verbatim) | Matches the brief's "RED for amendment 1" |
+|---|---|---|
+| `list_flags_a_pane_whose_shown_differs_from_its_session_of_record` | `list.rs:357`: `left: ["demo-c1r1", "ses-b", "-", "-"]` / `right: ["demo-c1r1", "ses-b", "-", "MISMATCH"]` | c1: the code gives `-`, the rule gives MISMATCH |
+| `get_flags_a_mismatch` | `get.rs:162`: `demo-c1r1: left: Some("-")` / `right: Some("MISMATCH")` | c1, same |
+| `watch_flags_a_mismatch` | `watch.rs:290`: `left: [Some("-"), Some("-"), Some("-"), Some("-"), Some("-"), Some("MISMATCH")]` / `right: [Some("MISMATCH"), Some("ok"), Some("MISMATCH"), Some("-"), Some("-"), Some("ok")]` | the whole table at once: c1, c2, c3 and c6 differ, and c4 and c5 agree, exactly the four cases the brief lists |
+| `list_help_documents_the_columns_and_the_json_shape` | `list.rs:582`: `` `pane list --help` names "session of record" `` | AC 19 |
+| `watch_help_documents_the_stream` | `watch.rs:315`: `` `pane watch --help` names "pane get" `` | AC 19 (W-4) |
+
+`a_negative_observed_at_is_never_observed` passes at RED. That is expected: the current rule answers `unobserved` for
+any record with `driven: None`. It guards against F writing the guard as `at == 0`.
+
+**The tests can pass, and they pin the rule.** T applied the brief's Decision 3 body to `SessionSync::of` (taking
+`&Pane` and calling `holler_pane::reconcile::shown_differs`, at both call sites) with a scratch script. T ran the same
+command and then restored both files with `git checkout`:
+
+| Variant | Result |
 |---|---|
-| Ma: `acts_on_terminal` becomes `c.is_control() \|\| !c.is_ascii()`, the over-escaping the gate's remediation would cause | 34 passed, 1 failed: `text_output_escapes_each_hidden_class_and_keeps_plain_unicode` panicked at get.rs:341 (the plain-text assertion) |
-| Mb: `acts_on_terminal` becomes `c.is_control()` only | 33 passed, 2 failed: the new test (get.rs:332, the hidden-class assertion) and the existing `text_output_escapes_c1_and_bidi_characters` |
-| Mc: `text_value` drops `&& value != NO_VALUE` | 34 passed, 1 failed: `a_stored_dash_prints_apart_from_the_empty_value` panicked at get.rs:362 |
+| Guard `at <= 0` (Decision 3 with W-13) | 34 passed, 2 failed: only the two help tests, which are F's doc work. All three AC 3 tests and the W-13 test pass |
+| Guard `at == 0` (Decision 3 to the letter) | 33 passed, 3 failed: the two help tests, plus `a_negative_observed_at_is_never_observed` at `get.rs:187` |
 
-The W-5 extension is a guard: no verb writes, so no mutation of the current code can turn it red. Its read half
-(`!calls.is_empty()`) proves it is not vacuous.
+After the restore, `git status --short` lists only the three test files, so no production file changed.
 
-Unmutated, on the current tree:
-
-```
-cargo test -p holler-cli --test pane_verbs -- list:: get:: watch::
-test result: ok. 35 passed; 0 failed; 0 ignored; 0 measured; 60 filtered out
-
-cargo test -p holler-cli --test pane_verbs
-test result: ok. 95 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
-```
-
-After the mutations, `git status --short` lists only the two test files, so no production file changed.
+The rest of the binary still holds (`cargo test -p holler-cli --test pane_verbs`: 122 passed, and the same 5 failed).
 
 Static checks on the touched files:
 
 | Check | Result |
 |---|---|
-| `rustfmt --check --edition 2021` on `tests/pane_verbs/{get,list,watch}.rs` | exit 0 |
+| `rustfmt --check --edition 2021` on `tests/pane_verbs/{list,get,watch}.rs` | exit 0 |
 | `cargo clippy -p holler-cli --all-targets -- -D warnings` | exit 0 |
 | `bash scripts/lint.sh` | exit 0 |
-| Test file sizes | get.rs 370, list.rs 545, watch.rs 311, all under 900 |
-| Non-ASCII bytes in the test files | none (`grep -P '[^\x00-\x7f]'` finds nothing); every non-ASCII character is a `\u{..}` escape |
-| New `#[allow]` | none |
-| Secrets | none: neutral `demo-*` and `/srv/...` only |
+| Test file sizes | list.rs 587, get.rs 389, watch.rs 320, all under 900 |
+| Non-ASCII bytes, new `#[allow]` | none |
+| Names | neutral only (`demo-*`, `ses-a`, `ses-b`, `/srv/demo`), and no secret-shaped value |
 
 ## Ready for F
 
-The round-2 tests are valid. They pass on F's code and fail when the behaviour they pin is removed. A's note 3 still
-applies to F: make no production change for B-1 to B-3. Append the triage facts and the four W-9 deviation entries to
-`evidence.md`. T added three evidence entries of its own (fault.rs:90-98, profile_store.rs:27-37 and :250-251,
-feed.rs:263-269), so the round-2 gate can check W-4 and W-5 from the excerpts.
+RED is valid. F may implement against these tests:
+- `SessionSync::of(pane: &Pane)`, with the guard `at <= 0` (W-13), returning `Unobserved` with no session of record,
+  and otherwise calling `shown_differs`;
+- the two call sites, and the docs and help of Decision 15 (AC 19's needles: `session of record`, `home screen` and
+  `#649` in `pane list --help`, and `pane get` in `pane watch --help`);
+- W-12 (`is_member` in `watch.rs`), which the existing `watch_profile_*` tests pin;
+- AC 23's CHANGELOG sentences, and the `evidence.md` entries for W-12, W-13 and W-16.
+
+The tests rely on nothing outside the diff that `evidence.md` lacks: `shown_differs` (`reconcile.rs:171-181`) and the
+test kit's `sample_pane` (`at: 0`, no session of record, already cited for AC 1 and AC 2) are both quoted in the brief.

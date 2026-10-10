@@ -370,3 +370,30 @@
   - Commands: `git fetch`. `git merge-tree --write-tree origin/main HEAD` exited 0.
     `git diff --name-only origin/main...HEAD` listed the brief's Files only. `gh issue view` on 646, 648, 649, 662 and
     663, and `gh issue list` found no follow-up filed.
+
+## T (Phase 4, author tests / RED, amendment 1) — 2026-10-09T19:47:47-06:00
+
+- **Decided:**
+  - AC 3 is re-authored over one fixture: `observed()` was extended in place to take `record` and `at` (A's note 1). The
+    expected SYNC per pane is one `SYNC_WANT` table in `list.rs`, so `list`, `get` and `watch` cannot drift apart.
+  - The list test also asserts each row's PANE cell, so a sort change cannot pair a row with the wrong expectation.
+  - W-13's `at: -1` case is a separate `get` test (`a_negative_observed_at_is_never_observed`), not a seventh
+    `sync_rig` row, so AC 3 keeps the six rows the brief pins. It is a guard against an `at == 0` guard, not a RED.
+  - AC 19 gains the four needles the brief names, and nothing more.
+  - D-5 (`verb_harness::parse::try_parse`) was not taken. It is optional, and `get.rs`'s `help` helper is not part of
+    this rework.
+- **Assumed:**
+  - `sample_pane` has no session of record and `at: 0` (`fixture.rs:63-70`, as A cited), so AC 1 and AC 2 still expect
+    `unobserved` under the new rule. Confirmed by running them against the temporary rule (they pass).
+  - The watch feed from cursor 0 yields puts in seed order, as the round-1 test already relied on.
+- **Hedged:**
+  - A temporary edit to production code, used to show the new tests can pass, was restored with `git checkout`, and
+    `git status` confirms that only the test files changed. F still writes the real change.
+- **Evidence:**
+  - RED: `cargo test -p holler-cli --test pane_verbs -- list:: get:: watch::` gave 31 passed and 5 failed (the three
+    AC 3 tests, the two AC 19 help tests), each on an assertion, matching the brief's "RED for amendment 1" (c1, c2, c3,
+    c6).
+  - Target rule applied temporarily: with `at <= 0`, only the two help tests fail. With `at == 0`, the W-13 test fails
+    too (`get.rs:187`).
+  - The full `pane_verbs` binary gave 122 passed and the same 5 failed. `rustfmt --check`, `cargo clippy -p holler-cli
+    --all-targets -D warnings` and `scripts/lint.sh` all exit 0. Test files are 587, 389 and 320 lines.

@@ -13,7 +13,7 @@ use serde_json::{json, Value};
 
 use crate::list::{
     assert_fails, cells, field, member, observed, ok_envelope, ok_text, pane, scoped_rig, sync_rig,
-    Rig,
+    Rig, SYNC_WANT,
 };
 
 /// The rendered `--help` of `holler <argv...>` (clap's `DisplayHelp` error).
@@ -157,16 +157,36 @@ fn get_profile_member_is_shown() {
 #[test]
 fn get_flags_a_mismatch() {
     let rig = sync_rig();
-    for (name, text, json) in [
-        ("demo-c1r1", "MISMATCH", "mismatch"),
-        ("demo-c2r1", "ok", "ok"),
-        ("demo-c3r1", "-", "unobserved"),
-    ] {
+    for (name, text, json) in SYNC_WANT {
         let run = rig.run(&["pane", "get", name], Format::Text);
         assert_eq!(field(ok_text(&run), "sync"), Some(text), "{name}: {run:?}");
         let data = ok_envelope(&rig.run(&["pane", "get", name], Format::Json)).data;
         assert_eq!(data["sync"], json, "{name}: {data}");
     }
+}
+
+/// A's W-13: a record whose `at` is negative was never observed, as `observed-at` already
+/// says (`never` for `at <= 0`), so its SYNC is not judged even though SHOWN differs from
+/// the session of record.
+#[test]
+fn a_negative_observed_at_is_never_observed() {
+    let rig = Rig::new(
+        [observed(
+            "demo-c1r1",
+            Some("ses-a"),
+            Some("ses-b"),
+            None,
+            -1,
+        )],
+        [],
+    )
+    .unwrap();
+    let run = rig.run(&["pane", "get", "demo-c1r1"], Format::Text);
+    let out = ok_text(&run);
+    assert_eq!(field(out, "observed-at"), Some("never"), "{out}");
+    assert_eq!(field(out, "sync"), Some("-"), "{out}");
+    let data = ok_envelope(&rig.run(&["pane", "get", "demo-c1r1"], Format::Json)).data;
+    assert_eq!(data["sync"], "unobserved", "{data}");
 }
 
 #[test]
@@ -353,8 +373,7 @@ fn text_output_escapes_each_hidden_class_and_keeps_plain_unicode() {
 /// fields and in `list`'s cells.
 #[test]
 fn a_stored_dash_prints_apart_from_the_empty_value() {
-    let mut dash = observed("demo-c1r1", Some("-"), None);
-    dash.session_of_record = Some("-".into());
+    let dash = observed("demo-c1r1", Some("-"), Some("-"), None, 0);
     let rig = Rig::new([dash], []).unwrap();
 
     let run = rig.run(&["pane", "get", "demo-c1r1"], Format::Text);
