@@ -9,8 +9,59 @@ on:
   # before re-opening). No inputs; it just runs the same matrix.
   workflow_dispatch:
 
+# Cancel a superseded pull-request run when its branch is pushed again (issue #743). Without this
+# every push, force-push and re-run kept running the whole matrix to the end, and the macos-latest
+# leg (GitHub-hosted, a handful of concurrent jobs at most) queued for minutes behind runs nobody
+# would read. Pushes to main and manual runs get a group of their own (the run id): they are never
+# cancelled.
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && github.head_ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
+  # Decides whether the macOS leg of `test` can be skipped (issue #745). For a pull_request whose
+  # changed files are ALL documentation (docs/**, any *.md), under agent-skills/** (the skill
+  # text and the setup wizard's helper scripts) or the wizard's own Rust test module
+  # (crates/holler-cli/tests/wizard/**), the macos-latest leg is not needed: it would
+  # queue on the small GitHub-hosted macOS pool for minutes to build Rust the pull request never
+  # touched. Anything else (crates/, .github/, scripts/, ...) keeps the full matrix, and so does a
+  # push to main or a manual run. To change what counts as skippable, edit the `case` patterns.
+  classify:
+    runs-on: ubuntu-latest
+    outputs:
+      skip_macos: ${{ steps.c.outputs.skip_macos }}
+    steps:
+      - uses: actions/checkout@v4
+        if: env.SKIP_THIS_LEG != 'true'
+        with:
+          fetch-depth: 2
+      - id: c
+        if: env.SKIP_THIS_LEG != 'true'
+        shell: bash
+        run: |
+          skip=false
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+            # On a pull_request run HEAD is the merge commit: its first parent is the base, so
+            # this lists exactly the files the pull request changes.
+            files=$(git diff --name-only HEAD^1 HEAD)
+            if [ -n "$files" ]; then
+              skip=true
+              while IFS= read -r f; do
+                case "$f" in
+                  docs/*|agent-skills/*|crates/holler-cli/tests/wizard/*|*.md) ;;
+                  *) skip=false ;;
+                esac
+              done <<< "$files"
+            fi
+          fi
+          echo "skip_macos=$skip" >> "$GITHUB_OUTPUT"
+          echo "skip_macos=$skip"
+
   test:
+    needs: classify
+    env:
+      # true only for the macos-latest leg of a docs / skill / wizard-scripts only pull request (#745)
+      SKIP_THIS_LEG: ${{ matrix.os == 'macos-latest' && needs.classify.outputs.skip_macos == 'true' }}
     strategy:
       fail-fast: false
       # Windows is deliberately OFF the matrix (not soft-failed): ADR 0002
@@ -32,21 +83,29 @@ jobs:
     # fallback here is a deliberate safety net for the fork-PR case, not an
     # accident to guard against — a missing/stale `CI_RUNNER` on a *trusted*
     # run just costs speed, never safety.
+    # A skipped macOS leg (see `classify`) is routed to the ubuntu runner, by the same fork rule,
+    # so it never waits for a macOS runner; all its steps are skipped and it reports success under
+    # the required name `test (macos-latest)`.
     runs-on: >-
       ${{
-        (matrix.os == 'ubuntu-latest' &&
+        ((matrix.os == 'ubuntu-latest' ||
+          (matrix.os == 'macos-latest' && needs.classify.outputs.skip_macos == 'true')) &&
          (github.event_name != 'pull_request' ||
           github.event.pull_request.head.repo.full_name == github.repository))
-        && vars.CI_RUNNER || matrix.os
+        && vars.CI_RUNNER
+        || (matrix.os == 'macos-latest' && needs.classify.outputs.skip_macos == 'true' && 'ubuntu-latest')
+        || matrix.os
       }}
     steps:
       - uses: actions/checkout@v4
+        if: env.SKIP_THIS_LEG != 'true'
 
       # GitHub-hosted images ship rustup preinstalled; the self-hosted
       # runner image does not (confirmed 2026-09-10, PR #312's
       # first CI run: `rustup: command not found`) — bootstrap it via the
       # official installer when missing instead of assuming it's there.
       - name: Install Rust
+        if: env.SKIP_THIS_LEG != 'true'
         run: |
           if (-not (Get-Command rustup -ErrorAction SilentlyContinue)) {
             Invoke-WebRequest -Uri https://sh.rustup.rs -OutFile rustup-init.sh
@@ -71,6 +130,7 @@ jobs:
       # holler-proto plus their dev-deps) from a cold multi-minute build to
       # a warm incremental one on every step below that invokes `cargo`.
       - uses: Swatinem/rust-cache@v2
+        if: env.SKIP_THIS_LEG != 'true'
 
       # Step 0 (issue #149/#155): the source-shape guards that need no
       # compiler — unjustified #[allow], process::exit outside main.rs, a
@@ -78,6 +138,7 @@ jobs:
       # workspace dependency. Cheapest check, so it runs before anything is
       # built; it is the same script a contributor runs locally.
       - name: Lint (scripts/lint.sh)
+        if: env.SKIP_THIS_LEG != 'true'
         run: bash scripts/lint.sh
         shell: bash
 
@@ -85,6 +146,7 @@ jobs:
       # heading — cheap, no-compiler-needed check, so it runs right after
       # scripts/lint.sh and before anything that touches the compiler.
       - name: Changelog (scripts/changelog-check.sh)
+        if: env.SKIP_THIS_LEG != 'true'
         run: bash scripts/changelog-check.sh
         shell: bash
 
@@ -96,6 +158,7 @@ jobs:
       # connect, and a booted tokio runtime — before any real e2e relies on
       # the runner (ADR 0002; Windows off).
       - name: Canary (fail-fast)
+        if: env.SKIP_THIS_LEG != 'true'
         run: cargo test -p holler-cli --test wire_selftest
         shell: pwsh
 
@@ -104,6 +167,7 @@ jobs:
       # regression is attributable at a glance, without waiting on the
       # rest of the workspace to build.
       - name: Codec
+        if: env.SKIP_THIS_LEG != 'true'
         run: cargo test -p holler-proto
         shell: pwsh
 
@@ -125,6 +189,7 @@ jobs:
       # re-runs only itself in ~4 minutes worst case, not the whole
       # multi-minute Workspace suite.
       - name: Workspace suite
+        if: env.SKIP_THIS_LEG != 'true'
         run: cargo test --workspace -- --skip roster_stays_accurate_under_concurrent_body_load
         shell: pwsh
 
@@ -169,6 +234,7 @@ jobs:
       # is for. This does not touch PEER_COUNT, the per-peer join budget, or
       # the load-window bound; those stay at their last-evidenced values.
       - name: "Load-roster scale test (isolated retry — issue #345)"
+        if: env.SKIP_THIS_LEG != 'true'
         run: |
           $ErrorActionPreference = 'Stop'
           $maxAttempts = 2
@@ -197,6 +263,7 @@ jobs:
       # cases — those are the upstream SDK crash-watcher defect (#188/#272),
       # confirmed not fixable in this crate, and stay skipped here too.
       - name: Interop-tagged (real cross-process)
+        if: env.SKIP_THIS_LEG != 'true'
         run: cargo test -p holler-cli --test body_run_test -- --ignored
         shell: pwsh
 
@@ -208,7 +275,7 @@ jobs:
       # class as rustup above, confirmed 2026-09-10 on PR #312) -- bootstrap via apt when missing, same no-op-on-hosted
       # shape as the Rust step.
       - name: test_selection_test (runner port)
-        if: hashFiles('scripts/test_selection_test.rb') != ''
+        if: env.SKIP_THIS_LEG != 'true' && (hashFiles('scripts/test_selection_test.rb') != '')
         run: |
           if (-not (Get-Command ruby -ErrorAction SilentlyContinue)) {
             sudo apt-get update -qq
@@ -252,7 +319,7 @@ jobs:
       #     runner script needs, and a Homebrew Ruby would add an install step
       #     #170 does not ask for; the full minitest suite already runs on both.
       - name: test-run.rb exec --list smoke (runner port)
-        if: hashFiles('scripts/test-run.rb') != '' && matrix.os == 'ubuntu-latest'
+        if: env.SKIP_THIS_LEG != 'true' && (hashFiles('scripts/test-run.rb') != '' && matrix.os == 'ubuntu-latest')
         run: |
           # No GITHUB_TOKEN / no octokit: `exec --list` is a pure preview, so
           # the script never builds the client (and thus never requires
@@ -274,6 +341,7 @@ jobs:
       # directory. Every other failure, including every real lint, fails the
       # step on the first attempt.
       - name: Clippy
+        if: env.SKIP_THIS_LEG != 'true'
         run: |
           set -o pipefail
           log="$(mktemp)"
@@ -298,13 +366,14 @@ jobs:
       # suite log. scripts/lint.sh already runs as its own named step
       # above, so it is not duplicated here.
       - name: Docs
+        if: env.SKIP_THIS_LEG != 'true'
         run: cargo test -p holler-cli --test docs_cli_test
         shell: pwsh
 
       # The tracked git hooks (.githooks/) are deterministic guards, so they are
       # tested: real `git commit`s in a throwaway repo. Runs once (ubuntu).
       - name: Hooks (scripts/test-hooks.sh)
-        if: matrix.os == 'ubuntu-latest'
+        if: env.SKIP_THIS_LEG != 'true' && (matrix.os == 'ubuntu-latest')
         run: bash scripts/test-hooks.sh
         shell: bash
 
@@ -312,13 +381,13 @@ jobs:
       # declare only what it consumes. Runs once (ubuntu) — the answer does
       # not depend on the OS.
       - name: Unused dependencies (cargo machete)
-        if: matrix.os == 'ubuntu-latest'
+        if: env.SKIP_THIS_LEG != 'true' && (matrix.os == 'ubuntu-latest')
         uses: bnjbvr/cargo-machete@main
 
       # Advisory only (issue #155 §7): a PR past 800 added lines is warned,
       # not failed — reviewers decide whether it should have been split.
       - name: PR size
-        if: github.event_name == 'pull_request' && matrix.os == 'ubuntu-latest'
+        if: env.SKIP_THIS_LEG != 'true' && (github.event_name == 'pull_request' && matrix.os == 'ubuntu-latest')
         env:
           ADDED: ${{ github.event.pull_request.additions }}
         run: |
@@ -328,3 +397,9 @@ jobs:
             echo "PR adds $ADDED lines (guideline: 800)."
           fi
         shell: bash
+
+      - name: macOS leg skipped (documentation, skill text and wizard scripts only)
+        if: env.SKIP_THIS_LEG == 'true'
+        run: |
+          echo "Every changed file is under docs/ or agent-skills/, or is a markdown file."
+          echo "The macOS leg is not needed (issue #745)."
