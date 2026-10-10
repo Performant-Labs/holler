@@ -10,9 +10,11 @@ see "Contradictions found", C1). An outside model reviews this brief and the dif
 fact the design rests on is pasted below, verbatim, with its file and lines.
 **Design (D):** N/A (no UI surface). **Forward-compat:** done, see the table after the Decisions.
 **Decision record:** ADR-0021 (`docs/adr/ADR-0021.md`) sections 1, 2, 5, 8 and 12, and "Decisions taken", items 1 and 2.
-This brief does **not** edit the ADR (it is outside the blast radius). The one point the ADR leaves open (Decision 5) and
-the two narrowings this story makes (Decisions 11 and 15) are recorded in the rustdoc of the two files, in the run's
-`docs/handoffs/663/decisions.md`, and in a follow-up issue that folds them into ADR-0021 section 8 (Follow-ups, F3).
+This brief **amends ADR-0021 in place in this change** (AC 14; the architecture review's B-1 widened the blast radius by
+`docs/adr/ADR-0021.md`, as #683's and #688's reviews did). The one point the ADR leaves open (Decision 5), the two
+narrowings this story makes (Decisions 11 and 15), the probe verdict (Decision 14) and the reconcile step (Decisions 6-8) are
+recorded in the rustdoc of the two files, in the run's `docs/handoffs/663/decisions.md`, and in ADR-0021 sections 1, 2 and 8
+(AC 14).
 **Handoffs:** `docs/handoffs/663/handoff-<phase>.md`; the decision journal is `docs/handoffs/663/decisions.md`.
 **Public repository:** no personal host, tailnet or account name goes into code, tests, docs, the CHANGELOG, commit
 messages or the PR. Tests use the test kit's neutral names only (`demo-c1r1` ... `demo-c4r1`, `Demo Alpha`, `Demo Beta`,
@@ -137,6 +139,13 @@ docs/adr/ADR-0021.md:78-80
 `run_probe(argv, expect, timeout) -> ProbeResult` is frozen; until #663 fills it, the stub answers `Error`, never `Ok`, so a
 launch cannot pass a probe on a stub. The `Prober` trait and `SystemProber` let a test swap the runner.
 ```
+Section 2's bound, which AC 14b narrows in place:
+```
+docs/adr/ADR-0021.md:86-88
+All ports are traits in `holler-pane` (`src/ports.rs`, `src/profile.rs`), **synchronous, blocking and `Send + Sync`**: async
+code calls them from `spawn_blocking` or a thread, and every method returns within I5's bound (default 10 s) or with
+`timeout`. `Ports` bundles one `&dyn` of each, and a verb holds it.
+```
 ```
 docs/adr/ADR-0021.md:90-98
 | Port | Methods (merged) | Implemented by |
@@ -158,6 +167,24 @@ docs/adr/ADR-0021.md:176-181
   only through the ports. It depends on `serde`, `serde_json` and `holler-proto`, and takes no async runtime. Its one direct
   side effect is the probe runner (`run_probe`, #663), which runs a process with the standard library.
 ```
+The test kit cannot reach anything in `holler-cli` (so the fake cannot call `reconcile_step`; F1); its manifest has two
+dependencies:
+```
+docs/adr/ADR-0021.md:184-186
+- `holler-pane-testkit` (empty today; #638 fills it) may depend on `holler-pane` and `serde_json`, and **must not depend on
+  `holler-cli`**: it is a dev-dependency of both the hub and the CLI, so a normal dependency back would make a cycle. Its
+  envelope conformance helper (#638) parses the CLI envelope with `serde_json` alone.
+```
+```
+crates/holler-pane-testkit/Cargo.toml:14-20
+[dependencies]
+# The ports the fakes implement and the suites drive (`PaneStore`, `Pane`, `PaneError`,
+# `next_generation`); for every fake and suite in this crate.
+holler-pane = { path = "../holler-pane" }
+# Parses the verbs' `--format=json` output for `envelope.rs` (`check_envelope`,
+# `check_ndjson`); the testkit cannot use the CLI's own `Envelope` type.
+serde_json = { workspace = true }
+```
 ```
 docs/adr/ADR-0021.md:190-192
 **Decided: where the I8 transaction helper lives.** The trait `ProfileScope` is in `holler-pane/src/profile.rs` (frozen by
@@ -165,8 +192,16 @@ docs/adr/ADR-0021.md:190-192
 (#638). The spec-editing verbs call `edit_spec` and do not write the profile themselves.
 ```
 
+Section 8's record-fence bullet, whose "pane doctor command line for that pane" AC 14e qualifies in place:
+```
+docs/adr/ADR-0021.md:273-275
+- A verb takes its expected generation when it plans, and writes the record with it after the act. If another writer got in
+  between, the verb's record write fails with `generation-conflict` **after** the live change: the verb fails loudly, exits 1,
+  writes nothing more, and prints the reconcile step (the pane doctor command line for that pane).
+```
+
 Section 8, the I8 write order, which `edit_spec` implements step by step (steps 1, 2, 3, 5 and 6 are the scope's; step 4
-is the verb's, inside its act):
+is the verb's, inside its act; step 2 is ADR lines 292-293, step 5 lines 296-298, step 6 lines 299-301):
 ```
 docs/adr/ADR-0021.md:281-305
 - No store transaction spans the two registries. The membership rule is enforced on `pane/cas_put`: setting `Pane.profile`
@@ -655,6 +690,21 @@ crates/holler-pane/src/error.rs:673-677
             PaneError::SessionNotFound { what } => write!(f, "session not found: {what}"),
             PaneError::StoreCorrupt { what } => write!(f, "store corrupt: {what}"),
             PaneError::Unavailable { what } => write!(f, "unavailable: {what}"),
+```
+The payload names (Decision 5 stretches `op` on purpose and says so), and `code()`, beside which F2 hoists the append
+helper:
+```
+crates/holler-pane/src/error.rs:399-401
+/// The payload names by convention: `what` is the thing the error is about (a
+/// pane, a profile, a socket, the text that was refused), `message` is free text,
+/// `op` is the operation that timed out.
+```
+```
+crates/holler-pane/src/error.rs:494-497
+impl PaneError {
+    /// The kebab-case code of this error: one of [`ALL_CODES`], or the open code of a
+    /// [`Refused`](PaneError::Refused).
+    pub fn code(&self) -> &str {
 ```
 
 ### G. The test kit: the fake the real scope must match, the suite it must pass, and the seams the tests use
@@ -1337,6 +1387,36 @@ That line is an assertion, not a macOS observation, and #641's tests that use it
 form on macOS. This story's AC 8f and 8g are not opt-in: they run on CI's macOS job and are the first macOS evidence. O
 could not read the macOS `kill(1)` page from this Linux host.
 
+### I. The consumers that code against this brief: #644's planned const and #696's scope
+
+#644's amended brief (unmerged branch `issue-644-implementation`, commit `7195993`) declares the unscoped step in its own
+`launch.rs`; Decision 8 hosts it here instead (W-1 of the architecture review), so #644's brief must be amended (F5):
+```
+docs/handoffs/644-brief.md:1557-1558 (at 7195993)
+/// The step without a profile: #663's wording with the ADR 0003 row's optional `--profile` group dropped.
+pub(crate) const RECONCILE_STEP_UNSCOPED: &str = "to reconcile, run holler pane doctor";
+```
+```
+docs/handoffs/644-brief.md:123-128 (at 7195993)
+- **C-15 One reconcile step, two owners in the plan.** ADR-0021 section 8 step 6 and section 12 make the reconcile step every
+  acting verb's concern, and #663's plan (I-3, decisions 5-8) makes `profile_scope::reconcile_step` the one copy and adds
+  that step to the scope's own `profile-conflict`, restore-failure and first-write-timeout errors. A verb that also appended
+  its own step would print it twice under the real scope; the fake scope adds none, so tests over the fake alone cannot see
+  it. Resolution (decision 15): #644 calls #663's function, appends the step only to an error that does not already carry
+  it, and pins that with the real `StoreScope` (AC 16k).
+```
+#696 (open), the story that later lifts this runner (Decision 20 keeps its mechanics apart for it):
+```
+issue #696, the title, then body:3-7
+refactor(pane): one bounded subprocess runner shared by the adapters and run_probe
+
+The adapter briefs each need a bounded subprocess runner (timeout, kill on timeout, captured stderr): #641 has `exec.rs` and `tmux.rs`, #642 plans a private equivalent for its tmux and `kill` calls, and #663 builds `run_probe` in `holler-pane` with the same job.
+
+## Scope
+
+When #663 lands, expose its bounded runner from `holler-pane` and switch the host and OpenCode adapters to it, removing the private copies. No behaviour change: the adapters' existing tests keep passing, including the fake-`kill` seam.
+```
+
 ## Contradictions found
 
 - **C1. Rigor.** The issue says `rigor: in-session` (A, line 24); this run is `second-opinion`, set by the orchestrator.
@@ -1383,7 +1463,7 @@ could not read the macOS `kill(1)` page from this Linux host.
   may be empty (`PaneProbe.expect` is a `Vec<String>`, ADR-0021 line 51; AC 8c), so `Ok` on any exit would let `["false"]`
   pass a health gate, and a check such as `curl -f` reports an HTTP error only by its exit status. Why not `Failed`:
   `Failed { missing }` names the missing expected strings, and here there are none. The rule is recorded in `probe.rs`'s
-  rustdoc and is part of F3 (ADR-0021 section 2).
+  rustdoc and in ADR-0021 section 1's `ProbeResult` paragraph, in this change (AC 14a).
 
 ## Acceptance criteria
 
@@ -1423,7 +1503,7 @@ All commands run from the worktree root.
    `reconcile_step(&ProfileName::parse("Demo Alpha")?)` equals exactly
    `to reconcile, run holler pane doctor --profile 'Demo Alpha' and then holler profile show 'Demo Alpha'`; for the name
    `It's $(id) Demo` it contains `--profile 'It'\''s $(id) Demo'` (Rust literal `"--profile 'It'\\''s $(id) Demo'"`) and no
-   `\n`.
+   `\n`. The same test asserts `RECONCILE_STEP_UNSCOPED == "to reconcile, run holler pane doctor"` exactly (#644's text, I).
 6. **A spec filed under another pane is `usage` (Decision 9).** Test `set_of_a_spec_for_another_pane_is_usage_before_any_write`:
    `edit_spec(Some(Demo Alpha), demo-c1r1, Set(sample_spec("demo-c2r1")))` is `Err` with `code()` `usage`, the act ran 0
    times, and `profiles.faults().calls()` holds no `CasPut`.
@@ -1490,28 +1570,63 @@ All commands run from the worktree root.
     prints nothing;
     `git diff --name-only origin/main...HEAD -- '*Cargo.toml' Cargo.lock` prints nothing.
 12. **Blast radius.** `git diff --name-only origin/main...HEAD` lists only `crates/holler-cli/src/pane/profile_scope.rs`,
-    `crates/holler-pane/src/probe.rs`, `CHANGELOG.md` and the pipeline's own `docs/handoffs/663*` files.
+    `crates/holler-pane/src/probe.rs`, `CHANGELOG.md`, `docs/adr/ADR-0021.md` and the pipeline's own `docs/handoffs/663*`
+    files.
 13. **CHANGELOG.** `CHANGELOG.md` `## [Unreleased]` / `### Enhancements` gains one entry for the `--profile` helper and the
     probe runner, linking `[#663](https://github.com/Performant-Labs/holler/issues/663)`; it names no host or account.
+14. **ADR-0021 is amended in place (the architecture review's B-1; prose only).** `docs/adr/ADR-0021.md` gets the five edits
+    below. Each is a sentence or two, made in place in the paragraph or step named, and cited `(#663)`. None changes the
+    closed code list, `class_of` or any table's classes. **Merge hygiene:** #644, #647 and #662 also edit ADR-0021 in their
+    own changes, so edit sentences in place (add a sentence, or extend one), never rewrite a whole section or paragraph, so
+    a rebase conflict stays one hunk. The current text of each place is quoted in C.
+    - a. **Section 1, the `ProbeResult` paragraph (ADR lines 78-80):** the verdict rule of Decisions 14, 17, 18 and 19:
+      `ok` only when the program exited 0 and every `expect` string occurs in its stdout (bytes, case-sensitive); a non-zero
+      exit or an end by a signal is `error`, whatever the output; the deadline passing, or more than 1 MiB of stdout, is
+      `error`; no reason echoes an argv element or an output byte; the argv is never run through a shell.
+    - b. **Section 2, after "every method returns within I5's bound (default 10 s) or with `timeout`" (ADR line 87):** two
+      narrowings. `ProfileScope::edit_spec` is bounded by the sum of its port calls (at most four) plus the verb's own act
+      (Decision 11). `run_probe` returns at its deadline plus at most 1 s for the kill and the reap (Decision 15). The
+      sentence cites F4, which amends the frozen `Prober` and `ProfileScope` trait docs to match.
+    - c. **Section 8, step 2 (ADR lines 292-293):** a first write that times out may have landed, so the act does not run,
+      and the answer is `timeout` with the reconcile step (Decision 6).
+    - d. **Section 8, steps 5-6 (ADR lines 296-301):** a restoring write that fails other than by a conflict keeps its own
+      code, and its message names P, the unrestored edit, the act's error and the reconcile step (Decision 5). The step-6
+      `profile-conflict` carries the reconcile step in its message (Decision 7).
+    - e. **Section 8, step 6 (ADR lines 299-301) and the record-fence bullet (ADR lines 273-275):** the reconcile step's
+      exact text is `to reconcile, run holler pane doctor --profile '<P>' and then holler profile show '<P>'`, with P
+      POSIX-single-quoted; it is profile-scoped until #647 gives `pane doctor` a pane positional (Decision 8, C9); the
+      scope's own errors carry the step, and a verb appends it only to errors that do not (the rule #644 plans against, its
+      C-15, quoted in I); without `--profile` the step is `to reconcile, run holler pane doctor`, the
+      `RECONCILE_STEP_UNSCOPED` const in `holler-cli/src/pane/profile_scope.rs`, beside `reconcile_step` (Decision 8).
+
+    Checks: `git diff origin/main...HEAD -- docs/adr/ADR-0021.md` has its hunks only at the places a-e name;
+    `git diff origin/main...HEAD -- docs/adr/ADR-0021.md | grep -E '^[-+]\|'` prints nothing (no table row changed) and
+    `... | grep -E '^[-+]#'` prints nothing (no heading changed); each of the five edits is cited `(#663)`; the added text
+    contains `to reconcile, run holler pane doctor --profile '<P>' and then holler profile show '<P>'`,
+    `RECONCILE_STEP_UNSCOPED` and `1 MiB`. **Alternative** (as #683's review allowed): if the operator lands a-e as a
+    separate `docs(adr)` PR merged before this run, this AC instead checks that the merged ADR says a-e, and AC 12 drops
+    `docs/adr/ADR-0021.md`.
 
 ## Files
 
 Production:
 - `crates/holler-cli/src/pane/profile_scope.rs` (fill; ~230 production lines, ~220 test lines in its `#[cfg(test)] mod
   tests`): module docs (the I8 order, the decisions below, the bound of Decision 11), `pub struct StoreScope`, `StoreScope::new`,
-  `impl ProfileScope for StoreScope`, `pub fn reconcile_step`, and private helpers (the edit, the membership check, the
-  message augmentation, the quoting).
+  `impl ProfileScope for StoreScope`, `pub fn reconcile_step`, `pub const RECONCILE_STEP_UNSCOPED`, and private helpers
+  (the edit, the membership check, the message augmentation, the quoting).
 - `crates/holler-pane/src/probe.rs` (replace the stub body and its docs; ~190 production lines, ~260 test lines):
   `run_probe` and private helpers (spawn, the stdout reader thread, the wait, the group kill, the match). `ProbeResult` is
   unchanged.
 - `CHANGELOG.md` (one entry, AC 13).
+- `docs/adr/ADR-0021.md` (prose only: five in-place edits in sections 1, 2 and 8, AC 14).
 
 Tests: inline `#[cfg(test)]` modules in the two files above (the blast radius has no test file; Decision 21).
 
-**Size:** ~420 production lines and ~480 test lines in two files, plus the CHANGELOG: one component family per file, three
-files in all, well under F's cap. **Fits one run**, no split.
+**Size:** ~420 production lines and ~480 test lines in two files, plus the CHANGELOG and five ADR sentences: one component
+family per file, four files in all, well under F's cap. **Fits one run**, no split.
 
-**Blast radius:** the issue's two files plus `CHANGELOG.md`. No manifest, no `Cargo.lock`, no test kit, no ADR, no other crate.
+**Blast radius:** the issue's two files plus `CHANGELOG.md` and `docs/adr/ADR-0021.md` (prose only, AC 14). No manifest, no
+`Cargo.lock`, no test kit, no other crate.
 
 **Reuse map (extend, do not duplicate):**
 
@@ -1584,6 +1699,11 @@ files in all, well under F's cap. **Fits one run**, no split.
    `ProfileSecretRefused`) cannot carry it and is returned as it is. Why not `profile-conflict`: no other writer is involved,
    and the code would send the operator looking for one. Why not the act's error: the act's failure is already handled by
    design; the store's is the new fault. AC 2 pins it.
+   **The append helper matches every `PaneError` variant exhaustively, with no `_` arm**, so a variant a later amendment
+   adds fails to compile there instead of passing through unextended (the payload-less variants are listed by name). Its
+   rustdoc says that `Timeout.op` carries this context **on purpose**, a stretch of `error.rs`'s convention that "`op` is
+   the operation that timed out" (F, `error.rs:399-401`), because `Timeout` has no other payload and its code must stay.
+   F2 hoists the helper into `holler-pane` as a `PaneError` method in `error.rs`, beside `code()` (F, `error.rs:494-497`).
 6. **The first write's failures.** `generation-conflict` is returned as it is: nothing live has moved and the verb can be run
    again (ADR step 2; case 10). `timeout` gets the same message extension as Decision 5 but worded for an unknown outcome:
    `; the write may have landed, so profile "<P>" may hold the edit of <pane>, and nothing live was changed; <reconcile
@@ -1595,7 +1715,12 @@ files in all, well under F's cap. **Fits one run**, no split.
    AC 3 pins it; case 11 pins the code and the profile name.
 8. **The reconcile step** is one function, `pub fn reconcile_step(profile: &ProfileName) -> String`, returning exactly
    `to reconcile, run holler pane doctor --profile '<P>' and then holler profile show '<P>'`. It is `pub` because the
-   spec-editing verbs (#644, #646) print the same step for a pane-record conflict (ADR step 4); one copy. The profile name is
+   spec-editing verbs (#644, #646) print the same step for a pane-record conflict (ADR step 4). **Beside it, the unscoped
+   form**, for a run without `--profile`, with #644's exact text (I, `644-brief.md:1558`):
+   `pub const RECONCILE_STEP_UNSCOPED: &str = "to reconcile, run holler pane doctor";`. The two forms are the whole set,
+   and both live in `profile_scope.rs`: #644 and #646 import this one const (`super::profile_scope::RECONCILE_STEP_UNSCOPED`)
+   rather than declaring their own, so #644's planned `pub(crate) const` in `launch.rs` is dropped (F5). This is additive:
+   `reconcile_step(&ProfileName)` keeps the signature #644 pastes. The profile name is
    POSIX-single-quoted (`'` becomes `'\''`, the whole wrapped in `'...'`), always, because a profile name may hold spaces,
    quotes, `$(...)` or backticks (D, lines 30-61) and an operator pastes this line into a shell. `ProfileName` refuses
    control characters, so the message stays one line (ADR section 9: every message is one line). The pane name is
@@ -1663,6 +1788,17 @@ files in all, well under F's cap. **Fits one run**, no split.
 20. **The runner stays private to `probe.rs`.** No new public item in `holler-pane` (the crate is frozen; ruling 3 and the
     amend-first rule). #696 (open) is where one bounded runner gets exposed and the adapters switch to it; this story does
     not pre-empt its design. Private helpers are split so that no function exceeds clippy's 100-line or complexity-15 gates.
+    **The process mechanics are kept apart from the verdict**, so #696 can lift the runner without a rewrite (I, #696's "No
+    behaviour change"):
+    - the mechanics (spawn in its own group, the bounded and capped read, the deadline, the group kill, the reap) return a
+      private outcome type: exit status and stdout bytes, timed out, overflow, spawn error by `io::ErrorKind`, or read error;
+    - a separate private function maps that outcome to `ProbeResult` (the `expect` match of Decision 18 and the fixed
+      reasons of Decision 19);
+    - the rustdoc lists the three points #696 must parameterize, open on purpose here: **stderr** (discarded here; #696's body asks for "captured
+      stderr"), **the signal and its grace** (`KILL` with no `TERM` grace here; #641's planned runner sends `TERM`,
+      H), and **the kill program** (`kill` from `PATH` here, with no fake-`kill` seam, which #696 must keep for the
+      adapters).
+    No public item is added, so the first sentence of this decision holds.
 21. **Tests are inline** `#[cfg(test)] mod tests` in the two files, since the blast radius has no test file, each module
     opening with `#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)] // #663`. The probe tests make their
     scratch directory with `std::fs::create_dir` under `std::env::temp_dir()` (named `hlr-probe-663-<pid>-<counter>`) and
@@ -1671,8 +1807,9 @@ files in all, well under F's cap. **Fits one run**, no split.
 
 **Process.**
 
-22. **No ADR or test-kit edit.** Decisions 5, 6, 7, 8, 11, 14 (C10) and 15 are recorded in the files' rustdoc and in
-    `docs/handoffs/663/decisions.md`; the run files the follow-ups below.
+22. **ADR-0021 is amended in this change (the new AC); the test kit is not (F1).** Decisions 5, 6, 7, 8, 11, 14 (C10) and
+    15 are recorded in the files' rustdoc, in `docs/handoffs/663/decisions.md` and in ADR-0021 (AC 14); the run files the
+    follow-ups below.
 23. **Commit and PR.** Conventional Commit subject (`feat(pane): ...`), the AI-assistance disclosure `CONTRIBUTING.md` asks
     for in the PR body, `Closes #663`.
 
@@ -1682,16 +1819,16 @@ Forward-compat (consumers):
 |---|---|---|
 | #643 read verbs, #646 park/unpark, #647 doctor | `resolve(P, None)` = every member, `resolve(P, Some(n))` with the membership refusal | yes (2) |
 | #645 switch/reset, #646 say/interrupt/answer | `resolve(P, Some(n))` to check membership only | yes (2) |
-| #644 launch/relaunch | `edit_spec(P?, pane, Set, act)`, `--spec-only` as a no-op act, `profile-not-found` in one line, the reconcile step text for a pane-record conflict | yes (3, 8; C3) |
-| #646 close | `edit_spec(P?, pane, Remove, act)`; a detached spec is removable; a pane store that is down fails before P is written | yes (3, 10) |
+| #644 launch/relaunch | `edit_spec(P?, pane, Set, act)`, `--spec-only` as a no-op act, `profile-not-found` in one line, the reconcile step text for a pane-record conflict, scoped and unscoped | yes (3, 8; C3); imports `RECONCILE_STEP_UNSCOPED` from here (F5) |
+| #646 close | `edit_spec(P?, pane, Remove, act)`; a detached spec is removable; a pane store that is down fails before P is written; the reconcile step, scoped and unscoped | yes (3, 8, 10) |
 | #644, #664 apply | `Prober::run_probe` through `SystemProber` with a bounded, non-shell, non-echoing runner | yes (13-19) |
 | #649 wiring | `StoreScope::new(Arc<dyn ProfileStore>, Arc<dyn PaneStore>, Actor)` with no I/O in the constructor; `SystemProber` unchanged | yes (1) |
-| #696 one runner | a runner whose behaviour is pinned by tests, so it can be moved without a behaviour change | yes (AC 8; 20) |
+| #696 one runner | a runner whose behaviour is pinned by tests, so it can be moved without a behaviour change | yes (AC 8; 20: mechanics apart from the verdict, its three open points in the rustdoc) |
 
 ## Out of scope
 
-- Any verb (#643-#647), the wiring (#649), the hub (#661 is merged), the test kit (#638), ADR-0021, `holler-pane`'s other
-  files (`lib.rs`, `ports.rs`, `error.rs`, `profile.rs`), any manifest.
+- Any verb (#643-#647), the wiring (#649), the hub (#661 is merged), the test kit (#638), ADR-0021 beyond AC 14's five
+  edits, `holler-pane`'s other files (`lib.rs`, `ports.rs`, `error.rs`, `profile.rs`), any manifest.
 - A public bounded-runner API and switching the adapters to it (#696).
 - A probe working directory or environment of its own (the frozen signature has neither).
 - Retrying a conflicting write; claiming a pane before acting (ADR section 8: generations fence records, not live acts).
@@ -1701,20 +1838,38 @@ Forward-compat (consumers):
 ## Follow-ups (not this story; the run files them as issues)
 
 - **F1.** Test kit: amend `FakeProfileScope` and the suite's docs to Decisions 5, 6 and 7 (the open point decided, the
-  first-write timeout text, the reconcile step in the conflict message), and pin them with cases.
-- **F2.** Hoist the membership rule into one public `holler-pane` function used by the hub, the test kit and `StoreScope`
-  (three private copies after this story).
-- **F3.** ADR-0021 section 8: record Decisions 5, 6, 8 and 11, and section 2's `Prober` row: Decision 15's "deadline plus a
-  bounded cleanup" and Decision 14's non-zero-exit rule (C10).
-- **F4.** `holler-pane`'s `Cargo.toml` description and `lib.rs` docs: drop "no I/O" (C8); rename `ports_test.rs`'s
-  `run_probe_stub_never_reports_success` (the stub is gone; the test still holds).
+  first-write timeout text, the reconcile step in the conflict message), and pin them with cases. The test kit must not
+  depend on `holler-cli` (C, ADR lines 184-186), so the fake cannot call `reconcile_step` where it is now. F1 takes one of
+  two routes, named when it is filed:
+  - **(a)** F2's `holler-pane` hoist takes `reconcile_step` (and `RECONCILE_STEP_UNSCOPED`) too, since it is pure formatting
+    over a `ProfileName`, and the fake calls it, so the fake's messages match `StoreScope`'s exactly;
+  - **(b)** F1 aligns only the fake's codes and its open-point behaviour, and states that verb stories pin the step text
+    against the real `StoreScope` (as #644 does, its C-15 and AC 16k, I).
+
+  A copy of the formatter and its quoting in the test kit is not the default: it would be a second duplicate in this epic,
+  after the membership rule.
+- **F2.** Hoist into `holler-pane` (amend-first; `holler-pane/**` is #637's): the membership rule, as one public function
+  used by the hub, the test kit and `StoreScope` (three private copies after this story); and Decision 5's payload-append
+  helper, as a `PaneError` method in `error.rs` beside `code()`. Under F1's route (a), `reconcile_step` and
+  `RECONCILE_STEP_UNSCOPED` too.
+- **F3.** (Withdrawn: its ADR-0021 items, Decisions 5, 6, 8, 11, 14 and 15, are now AC 14, in this change.)
+- **F4.** `holler-pane`, under the amend-first rule: the `Cargo.toml` description and `lib.rs` docs drop "no I/O" (C8);
+  rename `ports_test.rs`'s `run_probe_stub_never_reports_success` (the stub is gone; the test still holds); and amend the two
+  frozen trait docs that contradict the shipped code: `Prober`'s "It returns within the `timeout` it is given"
+  (`ports.rs:204-207`, E; Decision 15 adds up to 1 s of cleanup) and `ProfileScope`'s "Every method returns within I5's
+  bound (default 10 s) or with [`PaneError::Timeout`]" (`profile.rs:377-379`, D; Decision 11). AC 14b's sentence cites F4.
+- **F5 (cross-story, before #644 runs).** Amend #644's brief (`issue-644-implementation`, `7195993`) to import
+  `super::profile_scope::RECONCILE_STEP_UNSCOPED` (Decision 8) instead of declaring `pub(crate) const RECONCILE_STEP_UNSCOPED`
+  in `launch.rs` (its lines 1554 and 1557-1558, and its references at 1707, 1954, 2031 and 2157); #646's brief imports the
+  same const. The operator amends #644's brief before its run; this story does not edit it.
 - #696 is unchanged and stays open.
 
 ## Test plan
 
 **RED** (a compile error is not RED, `docs/agent-overlays/tester.md`). T first lands, in `profile_scope.rs`, a stub with the
 exact public items of Decisions 1 and 8: `StoreScope` with its three fields and `new`, an `impl ProfileScope` whose two
-methods return `Err(PaneError::NotImplemented)`, and `reconcile_step` returning `String::new()`. `probe.rs` already holds a
+methods return `Err(PaneError::NotImplemented)`, `reconcile_step` returning `String::new()`, and `RECONCILE_STEP_UNSCOPED`
+as `""`. `probe.rs` already holds a
 stub (always `Error`). T then writes the tests, and the RED run shows:
 - AC 1 fails on `assert_eq!(result, Ok(()))`: 15 case failures, each `not-implemented`.
 - AC 2, 3, 4, 6 fail on the asserted code or message (`not-implemented` answered); AC 5 fails on the string equality; AC 7
@@ -1727,7 +1882,7 @@ stub (always `Error`). T then writes the tests, and the RED run shows:
 - Green on the stub, by design (a regression guard): AC 8m only.
 T journals the RED run with each failure.
 
-**GREEN:** `cargo test -p holler-cli --lib pane::profile_scope`, `cargo test -p holler-pane --lib probe`, then AC 9-12.
+**GREEN:** `cargo test -p holler-cli --lib pane::profile_scope`, `cargo test -p holler-pane --lib probe`, then AC 9-12 and 14.
 The timing tests assert lower bounds exactly and upper bounds with 2 s of slack (this repo's macOS runner has timing
 flakes; the epic handoff notes them), and each probe test runs its own child, so they run in parallel safely. T-green also
 checks that no `hlr-probe-663-*` directory is left under the temp dir and that no `sleep 30` started by the tests is still
@@ -1746,7 +1901,8 @@ running (`ps -o pid=,args= -u "$(id -u)"`, read-only).
 - **The fake and the real scope differ in three messages until F1** (Decision 4's note: Decisions 5, 6 and 7). The codes
   are the same on all three paths, so a verb that matches on `code()` behaves alike over either; a verb test written
   against `FakeProfileScope` sees the fake's shorter texts, without the reconcile step, on those paths. Accepted for this
-  story because the test kit is outside its blast radius (C5); F1 closes the window.
+  story because the test kit is outside its blast radius (C5); F1 closes the window by route (a), or under route (b) verb
+  stories pin the step text against `StoreScope`.
 - **The `kill` binary missing from `PATH`.** The group kill is skipped, `Child::kill` still ends the leader, and its children
   are left. Linux (procps or util-linux) and macOS both ship `/bin/kill`. Accepted and documented.
 - **Pid reuse** is closed by Decision 15's order (signal only before the leader is reaped). A refactor that calls `try_wait`
