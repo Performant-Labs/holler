@@ -164,3 +164,58 @@ in git at `0ad2d8a:docs/handoffs/640/decisions.md`.
   - B-2's own text concludes there is no structural mismatch.
 - **Hedged:** The reviewer saw a bounded excerpt, not the repo; the anti-duplication gate and the spec audit still run on the full diff.
 - **Evidence:** the rerun's verdict line; `std::path::Path::starts_with` ("Only considers whole path components to match").
+
+## A (Phase 7, anti-duplication gate; the Workflow script's phase 8) — 2026-10-09T23:39:26-06:00
+- **Decided:**
+  - PASS, with 0 block and 2 warn findings (`docs/handoffs/640/handoff-A-dup.md`; diff `dc300ab..db95aa9`). F
+    extended every object the Reuse map names and built no parallel path:
+    - `protocol::excerpt` became `pub(crate)` and quotes all four Herdr-sent values, so the crate keeps one copy.
+    - `Tapped::Fail` is the one new variant of the one interceptor.
+    - `run_herdr_conformance` runs as written, with no case copied.
+    - The `op` strings equal `HerdrOp::as_str`, and AC 16 pins them.
+    - The transport is unchanged.
+  - F's `run_as` is not a parallel path. It replaces the eight per-method `self.deadline()?` calls, so `deadline()` has
+    one caller, and renames a `Timeout` once at the port boundary, as Decision 9 allows. `ensure` is `ensure_pane`'s
+    body, moved.
+  - Warns:
+    - (1) #663 merged a bounded runner into `holler-pane` (`d9eabbb`, after this branch's base), staged for #696 to
+      expose. #696's scope names only the host and OpenCode adapters, so nothing records that the harness's
+      `run_bounded` should go when #696 lands.
+    - (2) The harness's `run_bounded` bounds the child's exit but joins its stdout reader with no bound. The runner it
+      was modelled on (host `exec::run`) and #663's both bound that read against the same deadline.
+- **Assumed:**
+  - The Reuse map is the brief's section plus `handoff-A.md` finding 3's written justification for the harness's own
+    runner and poll helper. That justification is what makes them pass here rather than count as near-copies of
+    `wait_for` or `exec::run`.
+  - Warns 4 and 6 from Phase 3 (the `herdr.connect` wording, and the three stale docs including the test kit's
+    `ASSUMPTION (#640)` comments) were left on purpose by F (Design decision 5, Known issues). They are not drift
+    introduced during rework, so they are carried, not re-flagged.
+  - The per-file test helpers (`adapter_messages_test.rs`'s `spec`, the same 7 lines as `adapter_test.rs`'s) follow
+    the crate's convention of one integration-test crate per file, and the brief keeps `tests/common/mod.rs` untouched.
+    So they are not a finding.
+- **Hedged:**
+  - Warn 2 is a robustness gap that T's eight opt-in runs did not hit. It matters only if a `herdr` CLI call leaves a
+    descendant holding stdout, and the tests are opt-in and never run in CI. I kept it at warn, and it is T's file, not
+    F's.
+  - Warn 1 depends on what #696 ends up exposing. Today `run_probe` returns no stdout and uses the caller's environment
+    and working directory, so the harness cannot use it.
+- **Evidence:**
+  - Read in full: the brief (1401 lines), `handoff-A.md`, `handoff-F.md`, `handoff-T-red.md`, `handoff-T-green.md`,
+    this journal and part 2's `handoff-A-dup.md`. Also `src/adapter.rs` after the change, `tests/scratch_herdr/mod.rs`,
+    `tests/scratch_herdr_test.rs` and `tests/adapter_messages_test.rs`.
+  - The diffs `dc300ab..HEAD` of `src/`, `Cargo.toml`, `tests/wire_herdr/mod.rs`, `holler-pane` (doc comments only),
+    `docs/adr/ADR-0021.md`, `docs/testing.md` and `CHANGELOG.md`.
+  - Read in part: `tests/adapter_test.rs` (helpers, the `Tap` tests and the one-deadline and garbled-reply tests),
+    `tests/wire_herdr/serve.rs`, `tests/transport_test.rs` (`socket()`), `tests/common/mod.rs`,
+    `holler-pane-testkit/src/{herdr.rs,conformance/herdr.rs}` (the case table and the `ASSUMPTION (#640)` comments),
+    `holler-adapter-opencode/src/{lib.rs,server.rs}` (`Call`, `timeout`) and
+    `holler-cli/tests/support/mod.rs::wait_for`.
+  - On `origin/main` (`d9eabbb`): `crates/holler-pane/src/probe.rs` (#663's runner),
+    `crates/holler-adapter-host/src/exec.rs` (`run`, `collect`), `crates/holler-adapter-host/tests/real_tmux_test.rs`
+    (helpers) and main's ADR-0021 diff since `dc300ab`. `gh issue view 696`.
+  - Greps: `fn excerpt` in `src/` and across the workspace; `impl ... Transport for`; `Command::new`; `std::env` under
+    `tests/`; AC 19's second grep; AC 29's pattern over `src/` and `tests/`; `#[ignore`; `Timeout {` constructions;
+    public poll, wait or tempdir helpers in `holler-pane` and `holler-pane-testkit` (branch and `main`); `696` in the
+    diff and the brief; personal identifiers in added lines.
+  - `git diff --stat 8993137 HEAD` (handoffs only), `git merge-tree --write-tree HEAD origin/main` (clean) and `wc -l`
+    of every touched file.
