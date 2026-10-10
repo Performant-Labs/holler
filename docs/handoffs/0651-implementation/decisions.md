@@ -77,3 +77,57 @@ false (D and U are N/A, recorded). Append-only; every phase adds its entry.
   `cargo clippy -p herdr-holler --all-targets` clean, no new `unsafe`. Root `Cargo.toml`
   members line + generated `Cargo.lock` package entry staged with the suite; not committed
   (the orchestrator commits).
+
+## 2026-10-10 · Phase T-red — the suite, authored and RED (O journals; T = tester)
+
+- Dispatched via the task tool; recorded with `stage run` (STAGE OK, attempt 1). The plugin's own
+  t-red crossing then ran the unit command and rendered the verdict: **RED, exit 101** (the first
+  advance attempt was refused because no plugin-owned RED was on record — the fail-closed contract
+  working as designed; the second advance to implement passed).
+- Suite: 10 tests in the new crate — **5 failing for the right reasons** (refresh loop
+  not-implemented ×2, endpoints unresolved ×1, action resolver stub ×1, `shown_differs` doc-cite
+  absent ×1), **5 green on contact and recorded as standing guards** (allowlist scan — the
+  skeleton is clean by construction; manifest validity; event-hook wiring; unknown-pane `None`
+  boundary). Rest of the workspace green.
+- T landed the compile-minimal skeleton (`plugins/herdr-holler`: Cargo.toml per the house layout,
+  `src/lib.rs` stubs, `herdr-plugin.toml`) and the A-approved one-line members exception with its
+  comment; fixture pane names chosen to keep agent-pane-name shapes out of the staged diff
+  (public-repo scrub rule).
+- **First real commit landed immediately after T staged** (operator git convention 2026-10-10):
+  `test(herdr-plugin): #651 the display-only plugin suite, RED (5 failing), plus the run brief` —
+  run docs (survey, brief, handoff-A, decisions) committed with it by explicit path. Hooks passed
+  (gitleaks, Conventional subject). No opener commit from the operator proxy observed on the
+  branch at commit time.
+- API surface fixed by T's stubs for F: `Endpoints{herdr_socket, hub_control_socket}` + `from_env`,
+  `Reporter::new/refresh -> Refreshed{pane_reports, workspace_reports, unknown}`,
+  `PlugError{Env,Herdr}`, `resolve_action_pane(&[Pane], &str) -> Option<PaneName>`; hub read via
+  `holler_hub::control::run` (`pane/list` → `PaneReply` → `Vec<Pane>`), reports one JSON line
+  in/out over `HERDR_SOCKET_PATH`; token vocabulary pos/project/shown/driven/sync/hold, workspace
+  `profile`, source `holler`, `ttl_ms` pane-only; degraded path re-sends tokens as `unknown` +
+  `state_labels:["unknown"]`.
+- T flagged: merge semantics for degraded re-report unverified (dropping tokens might leave stale
+  values, so unknown is RE-SENT rather than cleared); `holler-hub` dep unconsumed until F wires
+  `control::run`.
+- **F started by `stage run --phase implement`** (claude-cli executor, claude-opus-5-5, effort
+  xhigh) in the background; duration and cost captured for the run report.
+
+## 2026-10-10 · Implement attempt 1 — STAGE FAILED (permission), operator decision (O)
+
+- F (claude-cli, claude-opus-5-5 xhigh) ran 463.8 s, 33 turns, usage in 44 / out 49033 / reasoning
+  35698, cache-read 1932124 / cache-write 139512, cost n/a — and wrote **no production code**: the
+  stage's write allowlist follows `.aftersight/pipeline.config.json` `paths.production`, which
+  covers only `crates/*`, so every write under `plugins/herdr-holler/**` was permission-denied.
+  F refused to bypass the boundary via shell writes and stopped with a complete implementation
+  plan in `handoff-F.md` (module layout, TTL decision 120 s, refusal-vs-fault semantics, and three
+  findings for T/operator — see below).
+- **Operator decision (asked and answered):** extend the globs on the run branch —
+  `paths.production` gains `plugins/*/src/**`, `plugins/*/Cargo.toml`,
+  `plugins/*/herdr-plugin.toml`; `paths.test` gains `plugins/*/tests/**`. Same class as the
+  A-approved Cargo.toml members exception; carried by this run's PR. The shared-with-#674 surface
+  (`test.unit.command`) is untouched.
+- F findings carried forward: (1) the pinned action argv `["holler","pane",<verb>]` cannot carry
+  the pane operand (CLI-side wiring is #649 territory) — follow-up issue, actions stay as pinned;
+  (2) the SYNC suite covers three of A-warn 2's four cases (no `at>0` with no session of record);
+  (3) unknown-never-stale holds in-process; across invocations the TTL (120 s) is the backstop —
+  a watch loop or persisted last-shown is a follow-up, not this contract.
+- Implement attempt 2 started after the config edit landed.
