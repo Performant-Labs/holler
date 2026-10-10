@@ -271,8 +271,12 @@ crates/holler-adapter-opencode/src/lib.rs:18-21 (#642 part 1, merged in dc300ab,
 //!   strings).
 ```
 
+This excerpt is from #641's branch, not from `dc300ab`: at `dc300ab`, `crates/holler-adapter-host/src/lib.rs` is a
+5-line stub. Read it with `git show ec55e02:crates/holler-adapter-host/src/lib.rs` (lines 134-137; `ec55e02` is on
+`origin/issue-641-implementation`).
+
 ```
-crates/holler-adapter-host/src/lib.rs:134-137 (#641, branch issue-641-implementation at ec55e02, not merged)
+ec55e02:crates/holler-adapter-host/src/lib.rs:134-137 (#641, branch issue-641-implementation at ec55e02, not merged)
 const OP_ENSURE_SESSION: &str = "host.ensure_session";
 const OP_RUN: &str = "host.run";
 const OP_STOP_OWNED: &str = "host.stop_owned";
@@ -485,6 +489,32 @@ pub struct HerdrConfig {
 }
 ```
 
+The builder AC 12 uses already exists (part 2, merged):
+
+```
+crates/holler-adapter-herdr/src/adapter.rs:56-72
+impl HerdrConfig {
+    /// A config with no workspace and [`DEFAULT_TIMEOUT`].
+    pub fn new(session: impl Into<String>, socket: impl Into<PathBuf>) -> Self {
+        Self {
+            session: session.into(),
+            socket: socket.into(),
+            workspaces: BTreeMap::new(),
+            timeout: DEFAULT_TIMEOUT,
+        }
+    }
+
+    /// This config, with the workspace `label` of `extent`.
+    pub fn with_workspace(mut self, label: impl Into<String>, extent: Extent) -> Self {
+        self.workspaces.insert(label.into(), extent);
+        self
+    }
+}
+```
+
+`connect` (`adapter.rs:84`) and `connect_with` (`adapter.rs:95`) are inherent methods of `HerdrAdapter`, not
+`HerdrPort` methods, so the test kit's `HerdrOp` has no entry for them.
+
 The operator's ruling on the version line (part 2's `decisions.md:1`): "Brief-gate BLOCKED, overridden by Andre
 Angelantoni ... Operator approved overriding the non-converging brief gate on 2026-10-09", so part 2's Decision 8 stands:
 the gate is at connect and at `version()`.
@@ -677,6 +707,21 @@ asserts `what.contains("w1:p2") && what.contains("r1c2")`.
 
 `adapter_test.rs` is 645 lines; `transport_test.rs` 431; `wire_herdr/mod.rs` 650.
 
+AC 18 can name a pane `LONG`: `PaneId` does not validate its text, and the adapter parses Herdr's ids straight into it
+(`protocol.rs:441`, `:457`, `:496`, `:502`: `PaneId::new(<..>.string("pane_id")?)`):
+
+```
+crates/holler-pane/src/pane.rs:79-83
+impl PaneId {
+    /// A pane id from Herdr's text.
+    pub fn new(id: impl Into<String>) -> Self {
+        Self(id.into())
+    }
+```
+
+`validate` (`adapter.rs:400-430`) checks a workspace label's extent only (zero rows or columns is `usage`), not its
+length, so a configured label `LONG` is accepted.
+
 ### E-12. Build, CI and the platform rule
 
 ```
@@ -723,6 +768,15 @@ Part 2's independence grep, which this part's harness would trip (it must read o
 docs/handoffs/640-brief.md:1426 (part 2's brief, on main)
 38. `grep -rnE "TcpStream|TcpListener|47001|47002|tmux|std::env|env::var|\.config/herdr|HERDR_|unsafe" crates/holler-adapter-herdr/`
 ```
+
+The baseline at `dc300ab`, over the whole crate (`src/`, `tests/` including `wire_herdr/` and `common/`, `Cargo.toml`),
+each run from the repo root:
+
+- `grep -rn 'Command::new' crates/holler-adapter-herdr/` prints nothing;
+- `grep -rn 'std::env\|env::var' crates/holler-adapter-herdr/` prints nothing;
+- part 2's AC 38 pattern above prints nothing.
+
+So every match of these greps after this part comes from a file this part adds or changes.
 
 ## The test harness this part creates (pinned names; T writes it, it is test code)
 
@@ -819,6 +873,11 @@ Each is observable: a test name with what it asserts, a command and its expected
    checked by `check_name`, it calls `env_clear()` and then sets exactly `scratch_env(root, std::env::vars_os())`, and it
    bounds the child (Decision 3). `grep -rn 'std::env\|env::var' crates/holler-adapter-herdr/tests/` matches only
    `tests/scratch_herdr/mod.rs`.
+   Both greps print nothing at `dc300ab` (E-12, baseline), so only new code can match them. That code is constrained
+   as follows. `scratch_herdr_test.rs`, `adapter_messages_test.rs` and `wire_herdr/**` spawn no process and read no
+   environment. The ignored tests call `opt_in()`, which reads `GATE_VAR` inside `scratch_herdr/mod.rs`. AC 7 builds
+   its inherited environment from literal pairs, not from `std::env`. AC 10's `env -i` is the shell's command, run by T
+   outside the code.
 
 **B. The gating, proven without a server**
 
@@ -843,8 +902,8 @@ The command is `HOLLER_HERDR_SCRATCH=1 cargo test -p holler-adapter-herdr --test
 
 12. `scratch_herdr_passes_the_conformance_suite`: `run_herdr_conformance` returns `Ok(())`, where `fresh` starts one
     `ScratchHerdr` per case, connects `HerdrAdapter::connect(HerdrConfig::new(<its session>, <its socket>)
-    .with_workspace("holler640-grid", Extent { rows: 2, cols: 1 }))`, and returns the server as the case's guard
-    (the shape of `adapter_conformance_test.rs:52-63`). All 11 cases hold.
+    .with_workspace("holler640-grid", Extent { rows: 2, cols: 1 }))` (the existing builder, `adapter.rs:67-71`, E-8),
+    and returns the server as the case's guard (the shape of `adapter_conformance_test.rs:52-63`). All 11 cases hold.
 13. `scratch_herdr_creates_runs_sends_reads_closes_and_snapshots_a_pane` (the issue's line), against one `ScratchHerdr`,
     workspace `holler640-grid` (2 by 1), in this order:
     1. `connect` succeeds; `version()` is a non-empty string on one line (the test prints it).
@@ -862,6 +921,10 @@ The command is `HOLLER_HERDR_SCRATCH=1 cargo test -p holler-adapter-herdr --test
 
     Polling (steps 3 and 4) waits 100 ms between reads and gives up at 10 s with a message quoting how many lines the
     last read returned and nothing of the screen.
+
+    Step 6's two `pane-not-found` answers, like conformance case 9, rest on wire-fake behaviour that is INFERRED, not
+    VERIFIED (E-9). This run is the first check against real Herdr. A difference is an AC 15 gap, not a reason to
+    loosen the step.
 14. **After the run.** T records in `handoff-T-red.md` and `handoff-T-green.md`: the `herdr --version` line, the
     duration of each test, `pgrep -f h640\.` printing nothing, and no `h640.*` directory left in the scratch base
     (Decision 2). If either check fails, that is a blocking issue.
@@ -885,6 +948,10 @@ The command is `HOLLER_HERDR_SCRATCH=1 cargo test -p holler-adapter-herdr --test
     | `send_text` / `send_keys` / `read` / `close` | `pane.send_text` / `pane.send_keys` / `pane.read` / `pane.close` | `herdr.send_text` / `herdr.send_keys` / `herdr.read` / `herdr.close` |
     | `snapshot`, one workspace with a tab | `session.snapshot`; `layout.export` | `herdr.snapshot` |
     | `version` | `ping` | `herdr.version` |
+
+    `herdr.connect` is the one string in this table with no test-kit counterpart. `connect` and `connect_with` are
+    inherent methods of `HerdrAdapter`, not `HerdrPort` methods (E-8), so `HerdrOp` has no `Connect`. The adapter spells
+    it in the same `herdr.<method>` form (Decision 9). The seven port-method strings equal `HerdrOp::as_str` (Reuse map).
 
 17. `every_other_error_passes_through_unchanged`: with the same hook answering `Tapped::Fail(PaneError::Unavailable {
     what: "injected-unavailable".into() })` for the same wire methods, each call returns that error exactly
@@ -940,6 +1007,10 @@ The command is `HOLLER_HERDR_SCRATCH=1 cargo test -p holler-adapter-herdr --test
     `grep -rnE "TcpStream|TcpListener|47001|47002|tmux|std::env|env::var|\.config/herdr|HERDR_|unsafe" crates/holler-adapter-herdr/src crates/holler-adapter-herdr/Cargo.toml`
     prints nothing, and the same pattern over `crates/holler-adapter-herdr/tests/` matches only
     `tests/scratch_herdr/mod.rs` and `tests/scratch_herdr_test.rs`.
+    The pattern prints nothing over the whole crate at `dc300ab` (E-12, baseline). `scratch_herdr_test.rs` matches
+    through AC 7's literal inputs (`HERDR_SOCKET_PATH`, `HERDR_SESSION`, `HERDR_SOMETHING_NEW`, the value
+    `/tmp/tmux-1/default,1,0`) and its assertions on them, not through any env read (AC 8). `adapter_messages_test.rs`,
+    `wire_herdr/**`, `common/mod.rs` and part 2's test files match nothing.
 30. Dependencies: `cargo tree -p holler-adapter-herdr -e normal --depth 1` lists only `holler-pane` and `serde_json`. No
     dependency line changes in any manifest; only the `tempfile` comment in `Cargo.toml:26-27` grows to name the
     scratch root.
@@ -948,6 +1019,11 @@ The command is `HOLLER_HERDR_SCRATCH=1 cargo test -p holler-adapter-herdr --test
 32. **No platform-sensitive pattern** in the new tests (Risks): no socket option, no assertion on an `io::ErrorKind`
     from a socket or process call, no fixed sleep used for readiness, and every path compared after
     `fs::canonicalize` (macOS's `/tmp` is a link to `/private/tmp`). The default-run tests of section A touch no file.
+    The canonicalize rule covers paths taken from the real file system, all on the opt-in path: the scratch base and
+    root (Decision 2) and the proven socket (Decision 4). `check_socket` and `prove` stay pure. They compare by
+    components only, call no `fs` function, and get paths that are either already canonical (from `ScratchHerdr::start`)
+    or literal (the section A tests). S checks this rule by reading `tests/scratch_herdr/mod.rs` and
+    `tests/scratch_herdr_test.rs`. The patterns listed here are the ones it looks for.
 
 ## Files (blast radius)
 
@@ -988,7 +1064,7 @@ part 2's existing test files (`adapter_test.rs`, `transport_test.rs`, `adapter_c
 | Isolating a real Herdr | `scripts/spikes/herdr-lib.sh` (E-9) | **Port the pattern** to Rust test code: the temp root, the `HERDR_*` removal, the explicit `--session`, the proof from `status server --json`, stop only the own PID. The script stays; the tests do not call it (it needs `jq` and `python3`, and it is bash). |
 | A scratch directory | `tempfile` (dev-dependency) | **Use** `tempfile::Builder::new().prefix(ROOT_PREFIX).tempdir_in(<base>)`. |
 | JSON parsing in `prove` | `serde_json` (normal dependency) | **Use**. |
-| The port op names | `FakeHerdr`'s `HerdrOp::as_str` (`herdr.rs:68-74`) | The adapter's strings must **equal** them (`herdr.<port method>`). The test kit's `HerdrOp` is not public API to import from `src/`, so the adapter spells them; AC 16 pins each. |
+| The port op names | `FakeHerdr`'s `HerdrOp::as_str` (`herdr.rs:68-74`) | The adapter's strings for the seven port methods must **equal** them (`herdr.<port method>`). The test kit's `HerdrOp` is not public API to import from `src/`, so the adapter spells them; AC 16 pins each. `herdr.connect` (`connect`, `connect_with`) is the documented exception. Those are not port methods and have no `HerdrOp` (E-8), so the string is the adapter's own, in the same form (Decision 9, AC 16). |
 
 Placement of the harness: it is the first Rust code that starts a real Herdr. #649 and #667 will need a scratch Herdr
 too. It stays in this crate's tests (blast radius) as one self-contained module with no dependency on the rest of the
