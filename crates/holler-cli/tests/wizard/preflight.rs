@@ -220,7 +220,11 @@ fn assert_read_only(env: &Env) {
 fn inventory_lists_ports_processes_serve_and_herdr_sessions_read_only() {
     let env = Env::new();
     install_live_fakes(&env);
-    let out = env.script("inventory.sh").output().unwrap();
+    let out = env
+        .script("inventory.sh")
+        .env("WIZARD_INVENTORY_HERDR", "1")
+        .output()
+        .unwrap();
     assert!(out.status.success(), "{}", text(&out));
     let s = String::from_utf8_lossy(&out.stdout).into_owned();
     assert!(s.contains("port\t41807\t111\tholler\n"), "{s}");
@@ -654,4 +658,201 @@ fn a_dash_state_dir_does_not_collide_with_a_distinct_plan_directory() {
     let env = Env::new();
     let out = run_default_dir_case(&env, &hub, "<home>/.holler-second");
     assert_eq!(out.status.code(), Some(0), "{}", text(&out));
+}
+
+// ------------------------------------------------------------ #758 fixes
+
+#[test]
+fn inventory_first_line_is_the_hosts_home() {
+    let env = Env::new();
+    install_live_fakes(&env);
+    let out = env
+        .script("inventory.sh")
+        .env("HOME", "/home/<remote-user>")
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", text(&out));
+    let s = String::from_utf8_lossy(&out.stdout).into_owned();
+    assert_eq!(s.lines().next(), Some("home\t/home/<remote-user>"), "{s}");
+}
+
+#[test]
+fn inventory_has_no_herdr_section_or_warning_unless_asked() {
+    let env = Env::new();
+    install_live_fakes(&env);
+    let out = env.script("inventory.sh").output().unwrap();
+    let s = String::from_utf8_lossy(&out.stdout).into_owned();
+    assert!(
+        !s.contains("herdr-session") && !s.contains("missing tool herdr"),
+        "{s}"
+    );
+    assert!(
+        !env.calls().iter().any(|c| c.starts_with("herdr")),
+        "herdr was called: {:?}",
+        env.calls()
+    );
+}
+
+#[test]
+fn a_missing_herdr_still_warns_when_the_herdr_section_is_asked_for() {
+    let env = Env::new();
+    for n in ["ss", "lsof", "tailscale", "ps"] {
+        env.fake(n, "exit 0");
+    }
+    let only = only_these_tools(&env, &["bash", "tr", "sed", "head"]);
+    let out = env
+        .script("inventory.sh")
+        .env("PATH", only)
+        .env("WIZARD_INVENTORY_HERDR", "1")
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", text(&out));
+    let s = String::from_utf8_lossy(&out.stdout).into_owned();
+    assert!(s.contains("warn\tmissing tool herdr\n"), "{s}");
+}
+
+#[test]
+fn herdr_bin_names_the_binary_for_the_herdr_section() {
+    let env = Env::new();
+    install_live_fakes(&env);
+    let elsewhere = env.dir.path().join("elsewhere");
+    fs::create_dir(&elsewhere).unwrap();
+    let bin = elsewhere.join("my-herdr");
+    fs::write(
+        &bin,
+        format!(
+            "#!/bin/bash\necho \"my-herdr $*\" >> \"{}\"\necho viaenv\n",
+            env.log().display()
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&bin, fs::Permissions::from_mode(0o755)).unwrap();
+    fs::remove_file(env.bin().join("herdr")).unwrap();
+    let out = env
+        .script("inventory.sh")
+        .env("WIZARD_INVENTORY_HERDR", "1")
+        .env("HERDR_BIN", &bin)
+        .output()
+        .unwrap();
+    let s = String::from_utf8_lossy(&out.stdout).into_owned();
+    assert!(s.contains("herdr-session\tviaenv\n"), "{s}");
+    assert!(!s.contains("missing tool herdr"), "{s}");
+    assert!(env.calls().contains(&"my-herdr session list".to_owned()));
+}
+
+#[test]
+fn a_dash_state_dir_is_compared_against_the_inventorys_home_not_the_local_one() {
+    let t = "\t";
+    let hub = format!("hub{t}111{t}<user>{t}-{t}41807{t}{FIRST_HUB_STARTED}{t}{FIRST_HUB_CMD}");
+    let env = Env::new();
+    let inv = env.file("inv.tsv", &format!("home{t}/home/<remote-user>\n{hub}\n"));
+    let local_home = env.dir.path().join("home");
+    let run = |plan_dir: &str| {
+        collide(&env, &inv, |c| {
+            distinct_plan(c);
+            c.env("HOME", &local_home)
+                .env("WIZARD_STATE_DIR", plan_dir)
+                .env("WIZARD_HUB_PORT", "41808");
+        })
+    };
+    let out = run("/home/<remote-user>/.holler");
+    let s = text(&out);
+    assert_eq!(out.status.code(), Some(1), "{s}");
+    assert!(s.contains("state_dir") && s.contains("REFUSED"), "{s}");
+    let out = run("~/.holler");
+    assert_eq!(out.status.code(), Some(1), "{}", text(&out));
+    // the local home's default directory is not that host's default directory
+    let out = run(&format!("{}/.holler", local_home.display()));
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out));
+}
+
+fn serve_only_inventory(extra: &str) -> String {
+    let t = "\t";
+    format!(
+        "serve{t}443{t}https://<hub-host>.example.ts.net (tailnet only){t}http://127.0.0.1:41807\n{extra}"
+    )
+}
+
+#[test]
+fn an_own_serve_pair_with_no_live_hub_is_reported_not_refused() {
+    let env = Env::new();
+    let inv = env.file("inv.tsv", &serve_only_inventory(""));
+    let out = collide(&env, &inv, hub_and_serve_plan);
+    let s = text(&out);
+    assert_eq!(out.status.code(), Some(0), "{s}");
+    assert!(!s.contains("REFUSED"), "{s}");
+    assert!(s.contains("this instance's port pair, no live hub"), "{s}");
+}
+
+#[test]
+fn an_own_serve_pair_is_still_refused_when_a_foreign_process_holds_the_hub_port() {
+    let t = "\t";
+    for extra in [
+        format!("port{t}41807{t}999{t}other-service\n"),
+        format!("port{t}41807{t}-{t}-\n"),
+        format!(
+            "hub{t}999{t}<user>{t}-{t}41807{t}{FIRST_HUB_STARTED}{t}/usr/bin/holler hub --listen 127.0.0.1:41807\n"
+        ),
+    ] {
+        let env = Env::new();
+        let inv = env.file("inv.tsv", &serve_only_inventory(&extra));
+        let out = collide(&env, &inv, hub_and_serve_plan);
+        let s = text(&out);
+        assert_eq!(out.status.code(), Some(1), "{extra}: {s}");
+        assert!(s.contains("serve_https_port"), "{s}");
+        assert!(!s.contains("no live hub"), "{s}");
+    }
+}
+
+fn unnamed_herdr_inventory() -> String {
+    let t = "\t";
+    format!("herdr{t}555{t}<user>{t}-{t}-{t}{FIRST_HUB_STARTED}{t}/usr/bin/herdr server\n")
+}
+
+fn herdr_plan(c: &mut Command, name: &str) {
+    if name == "default" {
+        hub_and_serve_plan(c);
+    } else {
+        distinct_plan(c);
+    }
+    c.env("WIZARD_INSTANCE_NAME", name);
+}
+
+#[test]
+fn an_unnamed_herdr_server_without_a_ledger_row_is_foreign_for_the_default_instance_only() {
+    let env = Env::new();
+    let inv = env.file("inv.tsv", &unnamed_herdr_inventory());
+    let out = collide(&env, &inv, |c| herdr_plan(c, "default"));
+    let s = text(&out);
+    assert_eq!(out.status.code(), Some(1), "{s}");
+    assert!(s.contains("REFUSED") && s.contains("unnamed herdr"), "{s}");
+    assert!(
+        s.contains("herdr_session") && s.contains("build in it"),
+        "{s}"
+    );
+    assert!(s.contains("present, not touched: herdr"), "{s}");
+
+    let out = collide(&env, &inv, |c| herdr_plan(c, "second"));
+    let s = text(&out);
+    assert_eq!(out.status.code(), Some(0), "{s}");
+    assert!(!s.contains("REFUSED"), "{s}");
+}
+
+#[test]
+fn an_unnamed_herdr_server_with_a_live_ledger_row_is_ours() {
+    let env = Env::new();
+    let inv = env.file("inv.tsv", &unnamed_herdr_inventory());
+    let ledger = env.file(
+        "ledger.toml",
+        &format!(
+            "[[process]]\npid = 555\nstarted = \"{FIRST_HUB_STARTED}\"\ncmd = \"/usr/bin/herdr server\"\nrole = \"herdr\"\nstage = 8\nsession = \"\"\n"
+        ),
+    );
+    let out = collide(&env, &inv, |c| {
+        herdr_plan(c, "default");
+        c.env("WIZARD_LEDGER", &ledger);
+    });
+    let s = text(&out);
+    assert_eq!(out.status.code(), Some(0), "{s}");
+    assert!(s.contains("created by this instance"), "{s}");
 }

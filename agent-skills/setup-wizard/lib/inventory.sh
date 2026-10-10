@@ -3,18 +3,23 @@
 #
 # It never writes, signals, starts or stops anything: it only runs `ss`/`lsof`, `ps`,
 # `tailscale serve status` and `herdr session list`, and prints tab-separated lines:
+#   home<TAB><this host's $HOME>      (always the first line)
 #   port<TAB><port><TAB><pid|-><TAB><process name|->
 #   hub<TAB><pid><TAB><user><TAB><state dir|-><TAB><port|-><TAB><started><TAB><cmd>
 #   body<TAB><pid><TAB><user><TAB><state dir|-><TAB><--config path|-><TAB><started><TAB><cmd>
 #   opencode<TAB><pid><TAB><user><TAB><state dir|-><TAB><port|-><TAB><started><TAB><cmd>
 #   herdr<TAB><pid><TAB><user><TAB><state dir|-><TAB><session|-><TAB><started><TAB><cmd>
 #   serve<TAB><https port><TAB><text of the tailscale serve line><TAB><proxy targets|->
-#   herdr-session<TAB><name>
+#   herdr-session<TAB><name>          (only with WIZARD_INVENTORY_HERDR=1)
 #   warn<TAB>missing tool <name>      (a tool this script needs and cannot find on PATH)
 # `started` is the `LC_ALL=C ps -o lstart=` text exactly as ps prints it (the day of month is
 # padded with a space on days 1 to 9) and `cmd` the command, the same values the wizard ledger
 # records, so collide.sh can tell wizard-created processes from foreign ones. A body's session
 # is not on its command line, so a body row names its `--config` path instead.
+#
+# The Herdr section (the `herdr session list` call and its `missing tool herdr` warning) runs
+# only when WIZARD_INVENTORY_HERDR=1, which the skill sets on the Herdr host only. HERDR_BIN
+# names the herdr binary when it is not on PATH.
 #
 # To run it on a remote host, pipe it over ssh: `ssh <remote-host> bash -s < inventory.sh`.
 # WIZARD_INVENTORY_FIXTURE=<file> replays a fixture instead (for tests).
@@ -27,6 +32,9 @@ fi
 
 T=$(printf '\t')
 
+# The first line: this host's home, so a `-` or `~/` state directory can be resolved against it.
+printf 'home\t%s\n' "${HOME:-}"
+
 # --- tools this script needs ---------------------------------------------------------------
 have() { command -v "$1" >/dev/null 2>&1; }
 have_ss=0; have_lsof=0; have_ps=0; have_tailscale=0; have_herdr=0
@@ -34,11 +42,14 @@ have ss && have_ss=1
 have lsof && have_lsof=1
 have ps && have_ps=1
 have tailscale && have_tailscale=1
-have herdr && have_herdr=1
+herdr_bin=${HERDR_BIN:-herdr}
+inventory_herdr=0
+[ "${WIZARD_INVENTORY_HERDR:-}" = 1 ] && inventory_herdr=1
+have "$herdr_bin" && have_herdr=1
 [ "$have_ss" = 1 ] || [ "$have_lsof" = 1 ] || printf 'warn\tmissing tool ss\n'
 [ "$have_ps" = 1 ] || printf 'warn\tmissing tool ps\n'
 [ "$have_tailscale" = 1 ] || printf 'warn\tmissing tool tailscale\n'
-[ "$have_herdr" = 1 ] || printf 'warn\tmissing tool herdr\n'
+[ "$inventory_herdr" = 0 ] || [ "$have_herdr" = 1 ] || printf 'warn\tmissing tool herdr\n'
 
 # --- listening TCP ports ------------------------------------------------------------------
 ports=""
@@ -161,8 +172,8 @@ if [ "$have_tailscale" = 1 ]; then
 fi
 
 # --- herdr sessions ------------------------------------------------------------------------
-if [ "$have_herdr" = 1 ]; then
-  herdr session list 2>/dev/null | while read -r name _rest; do
+if [ "$inventory_herdr" = 1 ] && [ "$have_herdr" = 1 ]; then
+  "$herdr_bin" session list 2>/dev/null | while read -r name _rest; do
     [ -n "$name" ] && printf 'herdr-session\t%s\n' "$name"
   done
 fi
