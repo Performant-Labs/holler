@@ -257,3 +257,55 @@ Rigor/brief gate: BLOCKED, overridden by Andre Angelantoni: The outside brief ga
     - a three-way `git merge-file` of ADR-0021 (base, branch, main) gave no conflict;
     - `git merge-tree` showed only `CHANGELOG.md` conflicting.
   - **The driver's routing:** `coding-pipeline.workflow.mjs:1179` and `:4642`, and `decideArchReReview`.
+
+## A (Phase 3, up-front plan review, fourth pass) — 2026-10-09T20:07:00-06:00
+- **Decided:** PASS on `docs/handoffs/663-brief.md` at `9762a97`, with no block and three warns, W-16 to W-18 (see
+  `handoff-A.md`, which replaces the third pass's BLOCK at `71f9ae2`).
+  - **B-2 is resolved.** Both reconcile-step forms are built on `findings::doctor_command(None, false)`. The profile form
+    composes on top in `profile_scope.rs`, and the const is gone. AC 5's greps, AC 14e and F5 agree. W-13 to W-15 are
+    resolved as asked.
+  - **W-16:** #705 (`dc300ab`, 19:43 MDT) merged a private `kill_group`/`run` in `holler-adapter-opencode/src/exec.rs`.
+    - `holler-pane` cannot use it (dependency direction; it is `pub(crate)`), so the plan's private runner stands, and
+      #696 plans the fold.
+    - #696 must settle three divergences: the pgid 0/1 guard, a signal after a `try_wait` error, and the program named in
+      errors.
+    - #705's macOS CI leg is the first macOS run of the same `kill` form, and it passed.
+  - **W-17:** a profile name that starts with `-` makes both printed commands fail to parse (clap 4.6.6, observed). The
+    root is the `ProfileName` grammar, so this is a follow-up, ideally before #662b's `create` merges.
+  - **W-18:** #662b plans a byte-identical `shell_word` in `profile/delete.rs`, which its brief accepts as a follow-up.
+    The pre-ruling: no Phase 7 block for #663 either way (fold into a shared non-verb module, F6). F5's #646 citation moved
+    to `ec2b6b3:521-526`.
+- **Assumed:**
+  - The brief's Reuse map table is the Reuse map, as in the earlier passes.
+  - The in-flight branches are current as read: #644 at `7195993` (brief only), #646 at `ec2b6b3` (brief only, 646b
+    after #663), and #662b at `76c774f` (T-red).
+  - #705's macOS leg ran the test it reports: its log shows `serve_kills_its_process_group_when_the_deadline_passes ... ok`.
+- **Hedged:**
+  - **W-16 is a warn, not a block.** Reuse is impossible across that dependency direction, and #696 is the planned fold. The
+    brief does justify a new object in writing; only its premise is out of date.
+  - **W-17 is a warn.** Nothing harmful runs (clap refuses to parse), such names are unusual, and the fix is upstream of
+    this story's blast radius. Changing the step's text now would ripple into AC 2-5, ADR step 6 and #644.
+  - **W-18 is a warn.** The copy is another story's, its brief already records it, and folding it into a verb file would
+    invert the layering.
+- **Evidence:**
+  - **The brief:** read in full at `9762a97`, with the diff from `d7e0421`, the outside brief gate's rounds r1 and r2
+    (r2 PASS), and the third pass's handoff and journal entry.
+  - **On the branch:** `profile_scope.rs` (whole) and `probe.rs:1-305`. The ADR-0021 diff against main, and its section
+    12 text. The C2 quotes: `lib.rs:42`, `findings.rs:12-18, 36, 303-316`, `reconcile.rs:219-243`, `ADR-0003.md:61-68`
+    and `647/handoff-A-dup.md:38`.
+  - **On `origin/main` (`dc300ab`):**
+    - `holler-adapter-opencode/src/exec.rs` (whole) and `server.rs` (lines 1-120 and 170-189);
+    - `tests/hermetic_test.rs` (lines 1-40 and 620-690);
+    - PR #705's checks, and the macOS job log (run `38013074383`, job `114099775442`).
+  - **Grepped `crates/*/src` on main and the branch** for:
+    - group-kill and `process_group` code;
+    - `holler profile show` and `holler pane doctor` literals, and `to reconcile`;
+    - POSIX quoting helpers (the `'\''` escape, `quote_id`);
+    - `SIGCHLD`/`waitpid`, and `catch_unwind`/`AssertUnwindSafe`.
+  - **Clap:** `holler-cli/src/pane/args.rs:21-25` and `ProfileName::parse`/`slugify`. A scratch clap 4.6.6 crate in the
+    session scratchpad parsed `doctor --profile -Demo`, `--profile --fix`, `--profile=-Demo`, `show -Demo` and
+    `show -- -Demo`.
+  - **The in-flight briefs:** #662b (lines 20-40 and 1300-1330, Decision B1), #646 at `ec2b6b3` (lines 31 and 506-528)
+    and #644 at `7195993` (its section 12 plan).
+  - **Checks:** `git merge-tree` against `dc300ab` conflicts in `CHANGELOG.md` only. AC 5, 11, 12 and 14's commands were
+    run at `9762a97`.
