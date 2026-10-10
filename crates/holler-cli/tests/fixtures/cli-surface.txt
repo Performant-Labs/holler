@@ -123,10 +123,12 @@ pane relaunch | --profile demo --spec-only --grid c1r2
 pane relaunch | --command-json [] --check-json []
 
 # #645
-pane switch |
-pane switch | --profile demo
-pane reset |
-pane reset | --profile demo --format=json
+pane switch | demo-c1r1 ses_0001
+pane switch | demo-c1r1 ses_0001 --profile demo
+pane switch | demo-c1r1 ses_0001 --as-operator --format=json
+pane reset | demo-c1r1
+pane reset | demo-c1r1 --profile demo --format=json
+pane reset | demo-c1r1 --as-operator
 
 # #646
 pane park |

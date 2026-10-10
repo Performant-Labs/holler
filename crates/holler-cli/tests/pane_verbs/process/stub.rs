@@ -23,8 +23,6 @@ pub const STUBS: &[(&str, &str, u32)] = &[
     ("pane", "launch", 644),
     ("pane", "relaunch", 644),
     // #645
-    ("pane", "switch", 645),
-    ("pane", "reset", 645),
     // #646
     ("pane", "park", 646),
     ("pane", "unpark", 646),

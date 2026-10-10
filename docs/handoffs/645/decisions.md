@@ -97,3 +97,41 @@
     - `cli-surface.txt`'s #645 and #647 blocks.
   - The sibling briefs, grepped for codes, failure types, the reconcile step and the orchestrator and unhealthy handling:
     644 (`TxFailure`, `LaunchRequest`, decision 20), 646, 643, and 663 (decision 8, follow-ups F1, F2 and F5).
+
+## T (author / RED) — 2026-10-09T20:23-06:00
+- **Decided:**
+  - RED is valid (handoff-T-red.md).
+  - 19 behavior tests cover ACs 1-19: 13 in `tests/pane_verbs/switch.rs` and 6 in `reset.rs`. Each runs in both formats
+    on fresh doctor rigs, reached as `crate::doctor::rig`.
+  - The shared runner `both` asserts on every run that the exit code is the same in both formats, that the envelope is
+    valid, that each format writes one line, and that there is no Herdr or host call (I4). The same runner serves AC 2's
+    call sequences.
+  - All 19 fail on the verb's answer: `not-implemented` with exit 1, where the test expects 0, 2 or 3, or another code.
+  - AC 23 (help) passes in RED, because the brief puts the real `Args` structs in RED. It fails on `origin/main`.
+  - ACs 20-22 are edited in RED, and their existing suites pass.
+  - The `doctor.rs:10` edit is visibility only.
+- **Assumed:**
+  - The brief's test plan overrides the role doc's "T writes no production code" for the RED skeleton. That plan was
+    reviewed by A and passed. The skeleton is the `tx_switch.rs` API with `not-implemented` bodies, and the two `Args`
+    structs.
+  - The CLI `run` bodies still emit `not_implemented(645)` instead of calling the stub engine. Calling it would mean
+    writing step 1's parsing and `emit_outcome`, which are F's behavior. `Verb` and `emit_outcome` are left out because
+    `dead_code` is denied.
+- **Hedged:**
+  - AC 1 sets `last_observed.driven` to `ses_driven` before the run (by `rig.rewrite`), so that "driven kept" is
+    observable. The brief's literal case has `driven: None`, which no implementation could fail.
+  - AC 17's session list is read through Q's server, which shares the data directory. P's killed server cannot be listed.
+  - AC 5 also pins the P3 message's `run holler pane relaunch demo-c1r1`. AC 6 pins `--as-operator` in the refusal. Both
+    strings are from the brief's Behaviour table.
+- **Evidence:**
+  - The brief (all of it) and handoff-A round 2.
+  - The test-side sources: `doctor/rig.rs`, `verb_harness/{mod,parse}.rs`, the test kit's `harness.rs`, `envelope.rs`,
+    `fault.rs` and `pane_store.rs`, and `fixture::sample_pane`.
+  - The `holler-pane` sources: `findings.rs` and the `error.rs` variants.
+  - The process suites: `process/{stub,flags,docs_rows}.rs`.
+  - The commands, with their results:
+    - `cargo test -p holler-cli --test pane_verbs`: 94 passed, 19 failed, each on the line 207, 212 or 221 assertions.
+    - `pane_cli_process`, `cli_surface_test` and `docs_cli_test`: all green.
+    - `cargo clippy --workspace --all-targets -- -D warnings`: clean.
+    - rustfmt `--check`: clean. `scripts/lint.sh`: exit 0.
+    - The real binary takes each AC 12 argv and answers `not-implemented`, not a clap error.
