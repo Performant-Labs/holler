@@ -20,9 +20,14 @@
 #
 # A process is "created by this instance" only if the ledger holds its pid with the same
 # `started` and `cmd` (a live entry, per the epic's contract); every other process is foreign.
-# A planned `tailscale serve` is the instance's own (present, not touched, never refused) when
-# its target is 127.0.0.1:<hub_port>, its port is WIZARD_SERVE_HTTPS_PORT and the ledger has a
-# live hub row.
+# A planned `tailscale serve` is the instance's own (never refused) when its target is
+# http://127.0.0.1:<hub_port>, its port is WIZARD_SERVE_HTTPS_PORT and no live foreign process
+# holds hub_port: "present, not touched" when the ledger has a live hub row, "this instance's
+# port pair, no live hub" when it has not (a crash, reboot or teardown left the entry).
+# `-` and `~/` state directories are resolved against the inventory's `home` line (the remote
+# host's home), else this machine's $HOME. For the default instance, a running unnamed Herdr
+# server that no live ledger row owns is foreign and refused (the operator may override that in
+# Stage 3 by answering yes to "build in it"); for a named instance it is not.
 # Prints the inventory beside the plan ("present, not touched" for foreign items), then one
 # `REFUSED:` line per collision naming the item and the config key to change.
 # Exit 0 = no collision, 1 = at least one collision, 2 = bad usage.
@@ -46,11 +51,13 @@ ledger=${WIZARD_LEDGER:-}
 
 # The default state directory, and a state directory in comparable form: `-` and `~/...` are
 # resolved, a trailing slash dropped.
-default_sd="${HOME:-~}/.holler"
+T_HOME=$(awk -F"$T" '$1 == "home" { print $2; exit }' "$inv")
+home=${T_HOME:-${HOME:-~}}
+default_sd="$home/.holler"
 norm_sd() {
   local v="$1"
   [ "$v" = "-" ] && v=$default_sd
-  case "$v" in "~/"*) v="${HOME:-~}/${v#"~/"}" ;; esac
+  case "$v" in "~/"*) v="$home/${v#"~/"}" ;; esac
   while [ "${#v}" -gt 1 ]; do
     case "$v" in */) v=${v%/} ;; *) break ;; esac
   done
@@ -115,21 +122,46 @@ NL='
 REFUSALS=""
 refused_ports=" "
 
-# own_serve <target words>: 0 when this is the instance's own serve of its own hub
-own_serve() {
+# own_target <target words>: 0 when a serve entry proxies to this instance's own hub port
+own_target() {
   local w
-  [ "$own_hub" = 1 ] && [ -n "$hub_port" ] || return 1
+  [ -n "$hub_port" ] || return 1
   for w in $1; do
     case "$w" in "http://127.0.0.1:$hub_port" | "http://127.0.0.1:$hub_port/"*) return 0 ;; esac
   done
   return 1
 }
 
+# foreign_hub_port: 0 when a live process that is not ours holds hub_port
+foreign_hub_port() {
+  local kind a b c d rest
+  [ -n "$hub_port" ] || return 1
+  while IFS="$T" read -r kind a b c d rest; do
+    case "$kind" in
+      port)
+        if [ "$a" = "$hub_port" ] && { [ "$b" = "-" ] || ! is_ours_pid "$b"; }; then return 0; fi ;;
+      hub)
+        if [ "$d" = "$hub_port" ] && ! is_ours_pid "$a"; then return 0; fi ;;
+    esac
+  done <"$inv"
+  return 1
+}
+
+# The planned serve port is the instance's own when a serve entry there proxies to its hub and
+# no foreign process holds hub_port.
+own_serve_port=""
+if [ -n "$serve_port" ] && ! foreign_hub_port; then
+  while IFS="$T" read -r kind a b c; do
+    [ "$kind" = serve ] || continue
+    if [ "$a" = "$serve_port" ] && own_target "$c"; then own_serve_port=$a; fi
+  done <"$inv"
+fi
+
 echo "== collision preflight on $host (instance ${WIZARD_INSTANCE_NAME:-default}) =="
 echo "-- already running here:"
 anything=0
 while IFS="$T" read -r kind a b c d e f; do
-  anything=1
+  [ "$kind" = home ] || anything=1
   case "$kind" in
     warn)
       echo "  warning: $a (the inventory is incomplete)" ;;
@@ -147,7 +179,11 @@ while IFS="$T" read -r kind a b c d e f; do
       [ "$c" != "-" ] && what="$what, state dir $c"
       echo "  $st: $what" ;;
     serve)
-      echo "  present, not touched: tailscale serve on https port $a" ;;
+      st="present, not touched"
+      if [ "$own_serve_port" = "$a" ] && [ "$own_hub" = 0 ]; then
+        st="this instance's port pair, no live hub"
+      fi
+      echo "  $st: tailscale serve on https port $a" ;;
     herdr-session)
       if in_words "$a" "$ours_sessions"; then st="created by this instance"
       else st="present, not touched"; fi
@@ -178,6 +214,13 @@ while IFS="$T" read -r kind a b c d e f; do
       ;;
     opencode | herdr)
       is_ours_pid "$a" && continue
+      if [ "$kind" = herdr ] && [ "$d" = "-" ] && [ "${WIZARD_INSTANCE_NAME:-}" = default ]; then
+        case " $f " in
+          *" server "*)
+            refuse "an unnamed herdr server is already running (pid $a, user $b)" \
+              'herdr_session (or answer yes to "build in it" in Stage 3)' ;;
+        esac
+      fi
       if [ -n "$state_dir" ] && [ "$c" = "$state_dir" ]; then
         refuse "state directory $c is already used by $kind (pid $a)" "state_dir"
       fi
@@ -189,15 +232,6 @@ while IFS="$T" read -r kind a b c d e f; do
       fi
       ;;
   esac
-done <"$inv"
-
-# The planned serve port is not a collision when the serve there is our own.
-own_serve_port=""
-while IFS="$T" read -r kind a b c; do
-  [ "$kind" = serve ] || continue
-  if [ -n "$serve_port" ] && [ "$a" = "$serve_port" ] && own_serve "$c"; then
-    own_serve_port=$a
-  fi
 done <"$inv"
 
 # Ports: a busy port that is not ours is a collision, whatever holds it.

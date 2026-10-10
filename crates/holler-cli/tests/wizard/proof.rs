@@ -306,9 +306,14 @@ fn stage1_validate(host: &Host, i: &Inst) {
     );
 }
 
-/// Stage 2: the read-only inventory of this host, into the scratch directory.
+/// Stage 2: the read-only inventory of this host, into the scratch directory. The proof host
+/// is the Herdr host, so the Herdr section is switched on, as the skill does there.
 fn stage2_inventory(host: &Host, i: &Inst) -> PathBuf {
-    let out = ok(host.script("inventory.sh").output().unwrap());
+    let out = ok(host
+        .script("inventory.sh")
+        .env("WIZARD_INVENTORY_HERDR", "1")
+        .output()
+        .unwrap());
     let p = host
         .path("scratch")
         .join(format!("inventory-{}.tsv", i.name));
