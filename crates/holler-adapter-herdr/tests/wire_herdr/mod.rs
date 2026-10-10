@@ -216,14 +216,17 @@ pub enum Tapped {
     Forward(String),
     /// Return this reply line; the fake sees nothing.
     Reply(String),
+    /// Fail the exchange with this error, as the transport would; the fake sees
+    /// nothing (#640 part 3, AC 16-17).
+    Fail(PaneError),
 }
 
 /// The hook of a [`Tap`]: the fake, the request's line and the exchange's deadline.
 type Hook = dyn Fn(&WireHerdr, String, Instant) -> Tapped + Send + Sync;
 
 /// A transport in front of a fake whose hook sees each exchange first: to rewrite a
-/// request, act on the fake, record the deadline or garble the reply (AC 16, 17, 28 and
-/// 29 share it).
+/// request, act on the fake, record the deadline, garble the reply or fail the exchange
+/// (part 2's AC 16, 17, 28 and 29 and part 3's AC 16-18 share it).
 pub struct Tap {
     fake: Arc<WireHerdr>,
     hook: Box<Hook>,
@@ -246,6 +249,7 @@ impl Transport for Tap {
         match (self.hook)(&self.fake, request.to_line(), deadline) {
             Tapped::Forward(line) => Ok(self.fake.answer(&line)),
             Tapped::Reply(reply) => Ok(reply),
+            Tapped::Fail(error) => Err(error),
         }
     }
 }

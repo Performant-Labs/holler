@@ -24,7 +24,8 @@ serde_json = { workspace = true }
 # crate's own constants (#640 part 1, AC 13). A dev-dependency only (ADR-0021 section 5).
 holler-pane-testkit = { path = "../holler-pane-testkit" }
 # The scratch directory that holds each test's Unix socket (the transport tests and the
-# wire fake's `serve`, #640 part 2). A dev-dependency only.
+# wire fake's `serve`, #640 part 2), and the scratch Herdr's root (`scratch_herdr`, #640
+# part 3). A dev-dependency only.
 tempfile = { workspace = true }
 
 # Workspace lints (issue #149).

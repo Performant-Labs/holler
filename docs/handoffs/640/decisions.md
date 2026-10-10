@@ -50,3 +50,36 @@ in git at `0ad2d8a:docs/handoffs/640/decisions.md`.
   - Greps: E-5's and E-12's baselines, AC 8, 9, 19, 21, 24 and 25 at the brief gate, `Timeout {` constructions, uses of
     `op` (`detail()`, `Display`), `#[ignore` across `crates/`, `HOLLER_*` variable names, `Command::new`, `try_wait` and
     `wait_for` sites, and matches on `Tapped`.
+
+## T (Phase 4, author / RED) — 2026-10-09T22:59:00-06:00
+- **Decided:**
+  - RED is valid (`docs/handoffs/640/handoff-T-red.md`). AC 16 fails on all 14 rows with the wire `op`; the four AC 18
+    tests fail quoting the whole `LONG`, each in the arm it names. AC 1-7 and AC 17 pass at RED by design (test code, and
+    a pass-through guard for F's rename). Part 1 and part 2 targets stay green.
+  - AC 9-11 run and pass. AC 12-13 run opt-in against the merged adapter and real `herdr 0.9.1-preview.2026-09-21-0ff0f27e2226`:
+    both pass, four runs in a row; AC 14's cleanup checks print nothing. No real-Herdr gap, so AC 15 adds no test and the
+    wire fake is unchanged except `Tapped::Fail`.
+  - The scratch base limit is 29 bytes, not the spike's 40 (Decision 2). `SOCKET_PATH_LIMIT` (100) minus the fixed tail
+    `/h640.XXXXXX/home/.config/herdr/sessions/holler640-XXXXXXXX/herdr.sock` (70) leaves 29 for the base. A 40-byte base
+    would give a 110-byte socket that `check_socket` refuses. Same rule as Decision 2's intent (fall back to `/tmp`),
+    stricter number, derived in code as `BASE_LIMIT`.
+  - Applied A's finding 3: one bounded runner and one bounded poll helper in the harness. `poll` is `pub` so the test
+    file's read polls reuse it rather than adding a second loop.
+  - AC 16 takes its expected strings from `HerdrOp::as_str`, so the adapter's ops are pinned equal to the test kit's
+    rather than to a second spelled copy.
+- **Assumed:**
+  - This T run is a restart; an earlier T attempt had written the same four files, uncommitted. I re-read them in full
+    against the brief, kept them, and re-ran every check above myself; nothing below rests on the earlier attempt's output.
+  - `herdr --version` with an empty environment plus `PATH` and a throwaway `HOME`/`XDG_*` touches no session, so it is
+    within Decision 7's limits for AC 14's version line.
+- **Hedged:**
+  - The pane pass takes about 66 ms including server start; fast, but every step asserts its outcome (the `printf`
+    output line, the typed text, the snapshot ids, the two `pane-not-found`s), so a pass cannot be vacuous.
+  - Real Herdr's behaviour is checked only on Linux; macOS stays unchecked (spike §15), as the brief's Risks say.
+- **Evidence:**
+  - `CARGO_BUILD_JOBS=4 cargo test -p holler-adapter-herdr --no-fail-fast` (RED output in the handoff).
+  - `cargo test ... --test scratch_herdr_test -- --list --ignored`; `env -i <binary> --ignored --nocapture`;
+    `env -i HOLLER_HERDR_SCRATCH=1 <binary> --ignored`; `HOLLER_HERDR_SCRATCH=1 cargo test ... -- --ignored --test-threads=1`
+    and three repeats; `pgrep -af 'h640\.'`, `pgrep -a herdr`, `find /tmp -maxdepth 1 -name 'h640.*'`.
+  - The doc-AC greps 19, 21-26; `cargo clippy -p holler-adapter-herdr --all-targets -- -D warnings`;
+    `cargo fmt --check -p holler-adapter-herdr`; `bash scripts/lint.sh` (exit 0); the AC 8 and AC 29 greps.
