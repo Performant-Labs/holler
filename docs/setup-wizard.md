@@ -274,6 +274,10 @@ a live recorded process whose command still matches, starts and records a new on
 one died, and never adopts a process it did not record. `agent-skills/setup-wizard/lib/ledger.sh`
 (`record`, `list`, `owns <pid>`) maintains the file.
 
+The logs of the processes Stages 4 to 7 start go under the instance's state directory too,
+`<state_dir>/logs/<prefix>-...` (`~/.holler/logs` with no `state_dir`), never `/tmp`, which is
+RAM-backed on the target hosts and must not be filled.
+
 ## Automated setup
 
 A Claude Code skill drives this end to end — `setup-wizard`, an 11-stage wizard (Stage 0 through

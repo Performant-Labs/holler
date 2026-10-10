@@ -771,6 +771,12 @@ backend port is its `backend_port` if it sets one, else `backend_port_base + i` 
 0-based position among the `[[session]]` entries, in config order); use that port, not a
 number you pick.
 
+**Logs.** Never write a log under `/tmp` (a RAM-backed tmpfs on these hosts; filling it has
+taken a fleet down). Every log Stages 4 to 7 create goes in `<logs_dir>` = `<state_dir>/logs`,
+or `~/.holler/logs` when the instance sets no `state_dir`, named `<prefix>-...`, on the host
+the process runs on. Create it first, on that host, before the first use in each stage:
+`mkdir -p <logs_dir>` (over `ssh <remote_host> "mkdir -p <logs_dir>"` for a remote host).
+
 **The ledger.** Every process this wizard starts in Stages 4 to 7 is recorded, once it is up,
 in `<state_dir>/wizard-ledger.toml` on the host it runs on (contract: epic #726; the file is
 the only source for "what this run created"). `$WIZARD_LIB` is `agent-skills/setup-wizard/lib`
@@ -799,7 +805,7 @@ unrecorded process, that is Stage 3's collision gate, stop and report it.
 `remote_host` — read per-entry from the config, not a single value shared by all — and its
 instance backend port `<port>`), printing the new pid:
 ```bash
-ssh <that entry's remote_host> "cd ~ && nohup opencode --port <port> --hostname 0.0.0.0 --model <provider>/<model> > /tmp/<prefix>-opencode-<name>.log 2>&1 & echo \$!"
+ssh <that entry's remote_host> "mkdir -p <logs_dir> && cd ~ && nohup opencode --port <port> --hostname 0.0.0.0 --model <provider>/<model> > <logs_dir>/<prefix>-opencode-<name>.log 2>&1 & echo \$!"
 ```
 repeated once per entry, then:
 ```bash
@@ -815,8 +821,13 @@ ssh <that entry's remote_host> "curl -s http://127.0.0.1:<port>/session >/dev/nu
 **Record** each freshly started backend, on its own host, with the pid printed above:
 `record --pid <pid> --role backend --stage 4 --session <name>` (remote form above).
 
+**How the state directory reaches the ledger.** `ledger.sh` reads `HOLLER_STATE_DIR` from its
+environment (unset or empty means `$HOME/.holler`); it has no flag for it. Over ssh it is set
+inline in the remote command, as in the examples above (`ssh <remote_host>
+"HOLLER_STATE_DIR=<state_dir> bash -s -- ..."`), so it needs no export and no remote profile.
+
 **Gate:** every entry must print `-up`. Any `-DOWN` — check that entry's own log file
-(`/tmp/<prefix>-opencode-<name>.log`) before retrying — don't just re-run blind.
+(`<logs_dir>/<prefix>-opencode-<name>.log`) before retrying — don't just re-run blind.
 
 **No session-side `AGENTS.md` briefing is needed, and don't add one that tells a session to run
 `roster`/`say`/`interrupt`/`wait`/`answer`.** Verified live 2026-09-22 via `holler --help`: those
@@ -862,7 +873,8 @@ fresh.
 one) — bringing up the hub itself is host-agnostic, done exactly once regardless of how many
 remote hosts sessions are split across (token minting is per-host and happens in Stage 7):
 ```bash
-HOLLER_STATE_DIR=<state_dir> holler hub serve --listen 127.0.0.1:<hub_port> --advertise <hub_host> > <state_dir or default state dir>/<prefix>-hub.log 2>&1 &
+mkdir -p <logs_dir>
+HOLLER_STATE_DIR=<state_dir> holler hub serve --listen 127.0.0.1:<hub_port> --advertise <hub_host> > <logs_dir>/<prefix>-hub.log 2>&1 &
 HUB_PID=$!
 tailscale serve --bg --https <serve_https_port> <hub_port>
 ```
@@ -976,7 +988,7 @@ Third, **for each distinct `remote_host`** (looping, not just doing this once):
    ```bash
    scp <this-host-derived-sessions.toml> <remote_host>:~/sessions.toml
    ssh <remote_host> "HOLLER_STATE_DIR=<state_dir> holler body join --server wss://<hub_host> --token <token_id>:<secret> --hub-key <hub_key>"
-   ssh <remote_host> "HOLLER_STATE_DIR=<state_dir> nohup holler body run --config <state_dir>/<prefix>-sessions.toml --debug quiet > /tmp/<prefix>-holler-body.log 2>&1 & echo \$!"
+   ssh <remote_host> "mkdir -p <logs_dir> && HOLLER_STATE_DIR=<state_dir> nohup holler body run --config <state_dir>/<prefix>-sessions.toml --debug quiet > <logs_dir>/<prefix>-holler-body.log 2>&1 & echo \$!"
    ```
    With a non-default instance, the derived config is written under the instance's own
    directory on that host (`<state_dir>/<prefix>-sessions.toml`, creating `<state_dir>` first
