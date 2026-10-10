@@ -30,8 +30,6 @@ pub const STUBS: &[(&str, &str, u32)] = &[
     // #650
     ("pane", "import", 650),
     // #662
-    ("profile", "create", 662),
-    ("profile", "delete", 662),
     // #664
     ("profile", "apply", 664),
     // #665 (proposed: the operator confirms it)

@@ -9,10 +9,15 @@
 //! `Unwired`, so a call to it fails the verb. Each format runs on its own freshly seeded
 //! rig ([`run_both`]).
 
+use std::sync::atomic::{AtomicUsize, Ordering};
+
 use holler_cli::output::Format;
 use holler_cli::pane::wiring::Unwired;
 use holler_pane::profile_snapshot::fixed_port_policy;
-use holler_pane::{Actor, Pane, Ports, Profile, ProfileName, ProfileSpec};
+use holler_pane::{
+    Actor, Cursor, Pane, PaneError, PaneEvent, PaneName, PaneStore, Ports, Profile, ProfileName,
+    ProfileSpec, Watch,
+};
 use holler_pane_testkit::envelope::{check_envelope, Envelope};
 use holler_pane_testkit::fixture::{sample_pane, sample_profile, sample_spec};
 use holler_pane_testkit::harness::FakeHarness;
@@ -71,6 +76,19 @@ impl Rig {
         run_verb_with(argv, format, self.ports())
     }
 
+    /// Run `holler <argv...>` over this rig with `pane_store` in place of its own (a seam
+    /// such as [`NthCasPut`] over `self.panes`).
+    pub fn run_over(&self, pane_store: &dyn PaneStore, argv: &[&str], format: Format) -> Outcome {
+        run_verb_with(
+            argv,
+            format,
+            Ports {
+                pane_store,
+                ..self.ports()
+            },
+        )
+    }
+
     /// No Herdr, host, harness or probe call was made through this rig (AC 3).
     pub fn assert_no_adapter_call(&self) {
         assert_eq!(self.herdr.faults().calls(), vec![], "no Herdr call");
@@ -92,11 +110,36 @@ pub(crate) struct Both {
 /// `seed()`. Asserts the exit codes are equal, the JSON output passes the test kit's
 /// envelope checker, and neither run called an adapter or the prober.
 pub(crate) fn run_both(seed: impl Fn() -> Rig, argv: &[&str]) -> Both {
+    run_both_with(seed, argv, Rig::run).both
+}
+
+/// One argv run in both formats, with the two rigs it ran on, so a test can read the
+/// stores afterwards (the verbs that write).
+pub(crate) struct Ran {
+    pub both: Both,
+    pub text_rig: Rig,
+    pub json_rig: Rig,
+}
+
+impl Ran {
+    /// The text run's rig, then the JSON run's: a store assertion holds after both.
+    pub fn rigs(&self) -> [&Rig; 2] {
+        [&self.text_rig, &self.json_rig]
+    }
+}
+
+/// [`run_both`], running each format through `run` (e.g. [`Rig::run`] or a
+/// [`Rig::run_over`] a seam), and keeping both rigs.
+pub(crate) fn run_both_with(
+    seed: impl Fn() -> Rig,
+    argv: &[&str],
+    run: impl Fn(&Rig, &[&str], Format) -> Outcome,
+) -> Ran {
     let text_rig = seed();
-    let text = text_rig.run(argv, Format::Text);
+    let text = run(&text_rig, argv, Format::Text);
     text_rig.assert_no_adapter_call();
     let json_rig = seed();
-    let json = json_rig.run(argv, Format::Json);
+    let json = run(&json_rig, argv, Format::Json);
     json_rig.assert_no_adapter_call();
     assert_eq!(
         text.code, json.code,
@@ -104,11 +147,26 @@ pub(crate) fn run_both(seed: impl Fn() -> Rig, argv: &[&str]) -> Both {
     );
     let envelope = check_envelope(&json.out, json.code)
         .unwrap_or_else(|fault| panic!("{argv:?}: {fault}: {json:?}"));
-    Both {
-        text,
-        json,
-        envelope,
+    Ran {
+        both: Both {
+            text,
+            json,
+            envelope,
+        },
+        text_rig,
+        json_rig,
     }
+}
+
+/// [`run_both_with`] over a fresh [`NthCasPut`] seam with `plan` for each format.
+pub(crate) fn run_both_seamed(
+    seed: impl Fn() -> Rig,
+    plan: &[(usize, NthPut)],
+    argv: &[&str],
+) -> Ran {
+    run_both_with(seed, argv, |rig, argv, format| {
+        rig.run_over(&NthCasPut::new(&rig.panes, plan.to_vec()), argv, format)
+    })
 }
 
 /// Assert `both` is a failure coded `code` at exit `exit`: text mode prints nothing on
@@ -127,6 +185,26 @@ pub(crate) fn assert_failure(both: &Both, code: &str, exit: i32) {
         .as_ref()
         .expect("a failure has an error");
     assert_eq!(error.code, code, "{:?}", both.envelope);
+}
+
+/// Assert both formats' error message contains `part`: the text run's `err` and the JSON
+/// envelope's `error.message`.
+pub(crate) fn assert_message_contains(both: &Both, part: &str) {
+    let message = &both
+        .envelope
+        .error
+        .as_ref()
+        .expect("a failure has an error")
+        .message;
+    assert!(
+        message.contains(part),
+        "json message has {part:?}: {message:?}"
+    );
+    assert!(
+        both.text.err.contains(part),
+        "text err has {part:?}: {:?}",
+        both.text.err
+    );
 }
 
 /// The sample pane `name` (a valid name is a test's own constant).
@@ -156,5 +234,73 @@ pub(crate) fn profile(name: &str, specs: Vec<ProfileSpec>) -> Profile {
     Profile {
         panes: specs,
         ..sample_profile(name, &[]).unwrap()
+    }
+}
+
+/// What [`NthCasPut`] does to one numbered `cas_put`.
+#[derive(Debug, Clone)]
+pub(crate) enum NthPut {
+    /// Answer this error and write nothing.
+    Fail(PaneError),
+    /// Apply the write, then answer this error: a write that landed but whose answer was
+    /// lost (a `timeout` after the store committed).
+    ApplyThenFail(PaneError),
+}
+
+/// The failing-N-th-write seam (#662 Decision 13, C11): a `PaneStore` that delegates
+/// every call to a [`FakePaneStore`] and acts on the `cas_put`s its plan numbers (1 is the
+/// first `cas_put` made through the seam). The fakes' `fail_next` fails only the next
+/// call of a method, so a failure at the second write needs this.
+///
+/// Its only state is the counter. A [`NthPut::Fail`] does not reach the fake, so the
+/// fake's call log does not record it; every other call does.
+pub(crate) struct NthCasPut<'a> {
+    inner: &'a FakePaneStore,
+    plan: Vec<(usize, NthPut)>,
+    count: AtomicUsize,
+}
+
+impl<'a> NthCasPut<'a> {
+    pub fn new(inner: &'a FakePaneStore, plan: Vec<(usize, NthPut)>) -> Self {
+        Self {
+            inner,
+            plan,
+            count: AtomicUsize::new(0),
+        }
+    }
+}
+
+impl PaneStore for NthCasPut<'_> {
+    fn get(&self, name: &PaneName) -> Result<Option<Pane>, PaneError> {
+        self.inner.get(name)
+    }
+
+    fn list(&self) -> Result<Vec<Pane>, PaneError> {
+        self.inner.list()
+    }
+
+    fn cas_put(&self, pane: &Pane, expected_generation: u64) -> Result<Pane, PaneError> {
+        let n = self.count.fetch_add(1, Ordering::SeqCst) + 1;
+        match self
+            .plan
+            .iter()
+            .find(|(at, _)| *at == n)
+            .map(|(_, step)| step)
+        {
+            Some(NthPut::Fail(error)) => Err(error.clone()),
+            Some(NthPut::ApplyThenFail(error)) => {
+                self.inner.cas_put(pane, expected_generation)?;
+                Err(error.clone())
+            }
+            None => self.inner.cas_put(pane, expected_generation),
+        }
+    }
+
+    fn delete(&self, name: &PaneName, expected_generation: u64) -> Result<(), PaneError> {
+        self.inner.delete(name, expected_generation)
+    }
+
+    fn watch(&self, since: Cursor) -> Result<Watch<PaneEvent>, PaneError> {
+        self.inner.watch(since)
     }
 }

@@ -160,8 +160,11 @@ pane import |
 pane import | --format=json
 
 # #662
-profile create |
-profile delete |
+profile create | Demo
+profile create | "Some Profile" --from-current
+profile create | Copy --from Demo --format=json
+profile delete | Demo
+profile delete | Demo --keep-panes --json
 profile list |
 profile list | --format=json
 profile show | Demo
