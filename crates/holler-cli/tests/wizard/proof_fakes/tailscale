@@ -1,0 +1,15 @@
+#!/bin/bash
+# Fake tailscale: `serve status` and `serve --bg --https <port> <target>`, kept in a file. Like
+# the real one, the serve config is not a process of ours.
+. "$FAKE_ROOT/common.sh"
+[ "$1" = serve ] || exit 1
+shift
+if [ "$1" = status ]; then
+  [ -f "$FAKE_ROOT/serve" ] && cat "$FAKE_ROOT/serve"
+  exit 0
+fi
+port="$(flag_value --https "$@")"
+target="${*: -1}"
+host="hub-host.example.ts.net"
+[ "$port" = 443 ] || host="$host:$port"
+printf 'https://%s (tailnet only)\n|-- / proxy http://127.0.0.1:%s\n\n' "$host" "$target" >>"$FAKE_ROOT/serve"

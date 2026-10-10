@@ -1,0 +1,34 @@
+#!/bin/bash
+# Fake herdr: `[--session S] server | session list | status`. A server registers its session
+# and becomes a harmless `sleep` with the command line `herdr --session S server 900`.
+. "$FAKE_ROOT/common.sh"
+orig="$*"
+sess=""
+if [ "$1" = "--session" ]; then
+  sess="$2"
+  shift 2
+fi
+sessions="$FAKE_ROOT/sessions"
+case "$1 ${2:-}" in
+  "server ")
+    register_pid $$
+    echo "$sess $$" >>"$sessions"
+    exec -a "herdr $orig" sleep 900
+    ;;
+  "session list")
+    [ -f "$sessions" ] || exit 0
+    while read -r name pid; do
+      [ -n "$pid" ] && alive "$pid" && echo "$name 1 pane"
+    done <"$sessions"
+    ;;
+  "status ")
+    running="server: not running"
+    if [ -f "$sessions" ]; then
+      while read -r name pid; do
+        [ "$name" = "$sess" ] && alive "$pid" && running="server: running"
+      done <"$sessions"
+    fi
+    echo "$running"
+    ;;
+  *) exit 0 ;;
+esac

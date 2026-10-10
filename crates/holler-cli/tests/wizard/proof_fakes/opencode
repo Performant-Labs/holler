@@ -1,0 +1,8 @@
+#!/bin/bash
+# Fake opencode backend: registers its port and becomes a harmless `sleep` whose command line
+# is `opencode <args> 900`, the way the real one shows in ps.
+. "$FAKE_ROOT/common.sh"
+port="$(flag_value --port "$@")"
+register_pid $$
+register_port "$port" $$ opencode
+exec -a "opencode $*" sleep 900

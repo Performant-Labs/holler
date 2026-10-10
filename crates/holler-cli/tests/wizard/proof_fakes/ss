@@ -1,0 +1,8 @@
+#!/bin/bash
+# Fake ss -ltnpH: the listeners the fake daemons registered, while their process is alive.
+. "$FAKE_ROOT/common.sh"
+[ -f "$FAKE_ROOT/ports" ] || exit 0
+while read -r port pid name; do
+  [ -n "$pid" ] && alive "$pid" || continue
+  echo "LISTEN 0 4096 127.0.0.1:$port 0.0.0.0:* users:((\"$name\",pid=$pid,fd=3))"
+done <"$FAKE_ROOT/ports"

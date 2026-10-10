@@ -1,0 +1,15 @@
+#!/bin/bash
+# Fake ps: a whole-host listing (-e) shows only the processes this scenario registered, so a
+# real process on the machine can never appear in an inventory. Every other call is the real ps.
+. "$FAKE_ROOT/common.sh"
+case " $* " in
+  *" -eo "*)
+    list=""
+    while read -r p; do
+      [ -n "$p" ] && list="$list,$p"
+    done <"$FAKE_ROOT/pids"
+    [ -n "$list" ] || exit 0
+    exec "$FAKE_REAL_PS" -o pid=,user=,lstart=,command= -p "${list#,}"
+    ;;
+esac
+exec "$FAKE_REAL_PS" "$@"
