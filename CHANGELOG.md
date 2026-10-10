@@ -233,6 +233,21 @@ fills this file in at release time.
   prompt is a later part of #646. Until the hub's stores are wired into the binary
   ([#649](https://github.com/Performant-Labs/holler/issues/649)), the real verbs still answer `not-implemented`
   ([#646](https://github.com/Performant-Labs/holler/issues/646), part 1 of 3).
+- Pane control, `holler profile create NAME [--from-current | --from PROFILE]` and `holler profile delete NAME
+  [--keep-panes]` (epic [#633](https://github.com/Performant-Labs/holler/issues/633)): `profile create NAME` makes an
+  empty profile. `--from PROFILE` copies another profile's specs as they are: a detached copy, which no pane joins, and
+  whose specs may still name panes of another profile. `--from-current` makes one spec per pane in the pane registry,
+  from the pane's own record (its position, working directory, harness, model and effort, role, environment variable
+  names, context ceilings, command, check and expected strings), and makes each pane a member. A name that is taken,
+  or that has the slug of a profile that exists, is `profile-exists`, and `--from-current` writes nothing when a pane
+  belongs to another profile (`pane-in-other-profile`, naming every such pane). If a pane cannot join, the verb undoes
+  the profile and the memberships made so far; if that undo fails too, it answers `profile-conflict` with the
+  commands that reconcile. `profile delete NAME` is refused while panes belong to the profile
+  (`profile-has-live-panes`); `--keep-panes` first detaches each of them, and they keep running, then deletes the
+  profile. A command that an error message suggests quotes the profile name for a shell. Both verbs take
+  `--format=json`, and [ADR 0021](docs/adr/ADR-0021.md) adds `profile-conflict` to their codes. Until the hub's stores
+  are wired into the binary ([#649](https://github.com/Performant-Labs/holler/issues/649)), the real
+  `holler profile create` and `delete` answer `not-implemented` ([#662](https://github.com/Performant-Labs/holler/issues/662)).
 - OpenCode adapter, part 1: the server side (epic [#633](https://github.com/Performant-Labs/holler/issues/633)):
   `holler-adapter-opencode` now implements the server half of `HarnessPort` over OpenCode's HTTP API, on `127.0.0.1`
   only. `serve` starts `opencode serve` for a pane in its project directory, in a process group of its own, and sends
