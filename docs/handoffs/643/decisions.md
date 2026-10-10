@@ -129,3 +129,40 @@
   on the 7 files all exit 0. `docs_cli_test`, `cli_surface_test`, `pane_cli_process` and `wire_selftest` pass. The
   `watch` filter passes 3 of 3 reruns. The AC 17/21/22 greps print nothing. The mutation table is in
   handoff-T-green.md.
+
+## A (Phase 3, up-front plan review, round 2) — 2026-10-09T18:14:28-06:00
+- **Decided:** PASS, with 0 blocks and 9 open warns (see handoff-A.md, which replaces round 1's; round 1 is at fafd138).
+  The pass covers the unchanged brief (sha256 62fce781...) and the architecture of F's code at 50bcc83. It ran because
+  the outside diff gate BLOCKed round 1 (4 BLOCKs) while F had reported `archChanged`.
+  - F's code keeps the plan's architecture. It touches `holler-cli` only, in the three verb files, reads through the
+    frozen ports, prints through `output.rs` and edits no frozen file. `get` and `watch` depend on `list`, one way. The
+    seven extra `pub` helpers are in the file and layer Decision 2 chose. No re-plan is needed.
+  - The gate's B-1 to B-3 are not defects, and no production change is needed for them. B-1's `what` form is
+    byte-identical to `FakeProfileScope::resolve`'s and to #663's planned scope. B-2's quoted `-` is what keeps a stored
+    `-` apart from the empty value, and no profile or pane name can be `-`. B-3's predicate catches every character the
+    gate lists, and `é` and CJK text pass unchanged (rustc 1.98.1). The gate's NV-1, NV-5, NV-6, W-1 and W-3 are
+    unreachable or false.
+  - New warns. W-9: the brief no longer describes the code on four points (Decisions 2, 6 and 11 and one Risks bullet),
+    and the gate reads the brief and `evidence.md`, so F should record the facts in `evidence.md`. W-10:
+    `profile_name` is a shared-flag guard kept in a verb file (`args.rs` is frozen). W-11: JSON mode writes C1 and bidi
+    characters raw (#660). W-1 to W-6 stay open and W-7 and W-8 are closed.
+- **Assumed:** `origin/main` is still 3bdd129 (`git ls-remote`; nothing merged since round 1, and no #644, #647 or #662
+  PR open). #647's code (9500955) and #644's brief (7195993) are unmerged, read at about 18:05 MDT as evidence of
+  plans. With `archChanged` set, the driver's rework classifier is skipped, so this handoff is the only carrier of the
+  gate's findings to T-red and F.
+- **Hedged:**
+  - W-9 is a warn, not a block. The four deviations go the way round 1's W-8 asked, handoff-F.md records them, and a
+    BLOCK would stop the run for a brief edit that `evidence.md` can carry.
+  - W-1 is still a warn. ADR-0021 supports both readings (I2 :161, :45, :344), and every verb is `Unwired` until #649,
+    which is therefore the deadline.
+- **Evidence:**
+  - Read in full: `pane/{list,get,watch}.rs` at 50bcc83, handoff-F.md, the round-1 handoff-A.md, decisions.md, the gate's
+    `643-diff-result-r1.md`, `pane/args.rs` and `prompt_target.rs`.
+  - Also read: `output.rs:296-330`, `roster_cmd.rs:55-110`, `verb_harness/mod.rs:76-100`, `tests/pane_verbs/list.rs`
+    (the `Rig` and its helpers), testkit `feed.rs:244-300` and `profile_scope.rs:122-123`, hub `panes/store.rs:296-330`,
+    `profile.rs:40-92, 150-200`, `vocab.rs:202-216`, and the ADR-0021 lines on SHOWN, DRIVEN and `session_of_record`.
+  - #647's `reconcile/observe.rs:195-391`, `findings.rs:322-354` and the `doctor/rig.rs` API; #644's brief (lines 121,
+    1577, 1631-1632, 2077-2079).
+  - The driver's phase routing and its diff-gate prompt builder (the gate passes `evidence.md` when it is not empty).
+    Issues #643 and #633: no MO ruling on any warn since round 1.
+  - A scratch program outside the repo checked the predicate on 25 characters with rustc 1.98.1.

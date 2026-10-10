@@ -1,94 +1,105 @@
-# Handoff-A: Phase 3 - #643 the read verbs (`holler pane list`, `get` and `watch`, with SHOWN and DRIVEN)  (up-front plan review)
+# Handoff-A: Phase 3 - #643 the read verbs (`holler pane list`, `get` and `watch`, with SHOWN and DRIVEN)  (up-front plan review, round 2)
 
 **Date:** 2026-10-09
-**Branch:** issue-643-implementation (at 2e7f221, the brief commit on 3bdd129)
-**Brief reviewed:** docs/handoffs/643-brief.md (sha256 62fce781...)   **Reuse map:** docs/handoffs/643-brief.md, "Reuse map (extend, do not duplicate)" (lines 986-1001)   **Wireframe:** N/A (no UI surface)
+**Branch:** issue-643-implementation (at 50bcc83, T-green's PASS; base 3bdd129, still `origin/main`)
+**Brief reviewed:** docs/handoffs/643-brief.md (sha256 62fce781..., unchanged since round 1)   **Reuse map:** the brief's "Reuse map (extend, do not duplicate)" (lines 986-1001)   **Wireframe:** N/A (no UI surface)
 **Verdict:** PASS
+
+Round 1 of this review (PASS, 8 warns, on 2e7f221) is in git: `git show fafd138:docs/handoffs/643/handoff-A.md`. This
+file replaces it. Round 1's open warns are carried forward below, with their status.
+
+## Why this pass ran
+
+The outside diff gate BLOCKed round 1 of the diff (`docs/handoffs/643-diff-result-r1.md`, gitignored, 4 BLOCKs). F had
+reported `archChanged` for the seven `pub` helpers it added to `list.rs` beyond the four the brief names. So the run came
+back to this phase instead of going to F. The brief is unchanged and the code exists, so this pass checks three things:
+the plan, the architecture F built, and the gate's findings.
 
 ## Summary
 
-PASS, with no blocks and eight warns. The plan uses the right objects and puts them in the right layers. The three verbs
-read only through the frozen ports (`PaneStore::{get,list,watch}`, `ProfileStore::get`, `ProfileScope::resolve`). They
-print only through `output::{emit, emit_stream, emit_error}`, raise only closed codes, and type their names in `run` the
-way `SpecFlags::validate` does. They reuse the record's own serde forms and `GridPos`, and edit no frozen file. The new
-shared view code (`PaneRow`, `SessionSync`, `text_value`, `observed_at`) has to live in `list.rs`, because the frozen
-`pane/mod.rs` cannot gain a module, and the brief says so in writing.
-
-The warns are almost all seams with the wave-3 briefs being planned in parallel (#644, #646, #647, #662). Those plans
-already define their own copies of three things this brief calls "one copy": the SHOWN/DRIVEN rule, the terminal-safe
-text helper, and the fakes-backed test rig. W-1 matters most. #647, and #644 as amended after its own A, read "SHOWN
-versus DRIVEN" as SHOWN versus `session_of_record` and keep `last_observed.driven` empty until #649. Under those plans,
-this brief's SYNC column would read `-` for every real pane while `pane doctor` reports mismatches. #643 cannot fix the
-other plans inside its own blast radius, and the documented contract supports both readings. The MO should settle W-1 to
-W-3 before the second of these stories merges, and W-1 before T pins AC 3 if possible (see "Notes for O").
+PASS, with no blocks and nine open warns, three of them new. F's code keeps the plan's architecture. It touches
+`holler-cli` only, in the three verb files. It reads through the frozen ports and prints through `output.rs`, and it
+edits no frozen file. The sibling dependency runs one way (`get` and `watch` use `list`). The extra helpers sit in the
+file and layer that Decision 2 chose. The gate's three real BLOCKs (B-1 to B-3) are not defects: the code, the codebase's
+own patterns and a rustc check all show it. None of them needs a production change. The real problem is W-9: the brief no
+longer describes the code on four points, and the outside gate reads the brief. The next F should put the facts below
+into `evidence.md`, which the gate also reads.
 
 ## Findings
 
 | # | Severity | Plan element | Drift dimension | Finding | Suggested fix |
 |---|---|---|---|---|---|
-| W-1 | warn (the most consequential) | Decision 3 (`SessionSync`, brief:1019-1025); Decision 2's "No copy of any of them elsewhere" (brief:1015-1018); forward-compat rows #648 and #647 (brief:1132, 1136); AC 3, `{shown: None, driven: "ses-a"}` → `-` / `"unobserved"` (brief:837-842) | dependency direction; contract shape (one rule, three layers, two readings) | Three layers need the SHOWN/DRIVEN rule, and only the CLI can import a `holler-cli` type. (1) #646's refusal "when the shown and driven sessions differ" belongs at `send_prompt` in `holler-hub` (pane.rs:160-164; issue #646, "`send_prompt` has no path to pane state"; ADR-0021:344). `holler-hub` cannot depend on `holler-cli`. (2) #647's `shown-driven-mismatch` finding lives in `holler-pane` (`findings.rs`, `reconcile.rs`, ADR-0021 §5:178-181). So "No copy elsewhere" cannot hold, and the #647 row is true only for `doctor.rs`. (3) Two sibling plans have already settled on a different reading. #647 compares SHOWN with `session_of_record` ("which the hub drives under I2"), counts a home-screen `None` as a mismatch, and keeps `last_observed.driven` as stored (647-brief.md:951-953, 975, 997). #644 was amended in its working tree after its own A BLOCK (uncommitted when read). It now writes `last_observed.driven = None` at launch, keeps it on relaunch, and adopts "SHOWN == `session_of_record` ... the reading #647's plan uses" (644-brief.md:118-122, 1721-1722; its committed e7064e9 wrote `driven: Some(sid)`). #647 also plans to write its reading into ADR-0021 §11 (647-brief.md:950-953), so whichever story merges second will contradict the ADR unless the plans are aligned. If both land as planned, no record carries a DRIVEN until #649 wires it (ADR-0021 §11:452-453). `pane list`/`get`/`watch` would then print DRIVEN `-` and SYNC `-` for every real pane, while `pane doctor` reports `shown-driven-mismatch` for the same panes, and #648's roster, if it reuses `SessionSync`, stays silent too. The home-screen case diverges even once DRIVEN is set. This is the epic's headline signal ("a SHOWN/DRIVEN mismatch is loud"). The documented contract supports both readings: #643's issue says DRIVEN comes from `last_observed`, while I2 makes `session_of_record` the session the hub drives. On `None`, the frozen port says "if it can tell" (ports.rs:198), and the merged fake says "on its home screen or with no TUI" (testkit harness.rs:135-136). There is no dominant pattern, so this is a warn, not a block. | The MO picks one reading for the epic, ideally before T pins AC 3. (a) Keep #643's: SYNC compares `last_observed.shown` with `.driven` and is `-` until #649. Then `--help` must say that DRIVEN and SYNC read `-` until the hub's DRIVEN is wired, and #647 should name its finding for what it compares. (b) Take #644 and #647's: SHOWN vs `session_of_record` under I2. Then Decision 3, AC 3 and the help text change. Either way, settle what `shown: None` means. Record the rule once, for example as one sentence in ADR-0021 §1's `last_observed` row through the amend channel. Give it one home: a pure function in `holler-pane` (for example `LastObserved::sync()`), added amend-first, since the hub, the engine and the CLI all need it. In this brief now: correct Decision 2 and the #647 row (only `doctor.rs` can reuse `SessionSync`), add #644 and #646 rows, and journal the chosen reading as an assumption. |
-| W-2 | warn | Decision 11 (`text_value`, brief:1090-1097); Risks, "`text_value` is the one choke point" (brief:1206-1211); Reuse map (brief:986-1001); `get`'s `probe-last` form (Decision 5, AC 7) | duplication; cross-cutting (terminal safety) | The Reuse map does not name the existing helpers for the same job. None of them can be reused as is: `hub_cmd::printable` (hub_cmd.rs:129-134, private, replaces non-ASCII with `?`), `holler_proto::log::escape_field_value` (log.rs:474-497, private, escapes control characters only, no quoting), `holler_hub::holds::sanitize_reason` (holds.rs:213-218, drops characters), `LockoutKey`'s `Display` (lockout.rs:273-281, `?`), and `holler_pane::error::excerpt` (error.rs:686-695, `pub(crate)`, always `{:?}`, cut to 64). So a new helper is justified, but the brief must say why. Its `{:?}` style matches `excerpt`'s. The parallel briefs then add two more helpers. #647 has its own sanitizer in `findings.rs` and a renderer that `{:?}`-quotes (647-brief.md:1016-1019), the same style as #643's in a separate copy. #662's `FieldValue` `Display` uses `char::escape_default` with no quoting (662-brief.md:1519-1521), a different style. The plans also disagree on the probe-result text: #662 prints `failed (missing "a", "b")` (662-brief.md:1638-1640), and #643 prints `failed missing=["ok"]`. Across `pane get`, `pane doctor` and `profile show`, the operator would get three helpers, two escaping styles and two probe-result forms. This is a cross-cutting concern of the shared output module ("one module decides what the verbs print", output.rs:1-2; open #660). Kept in `pane/list.rs`, it means `profile/show.rs` must import a pane verb file. | Add the five existing helpers to the Reuse map, each with one clause on why it does not fit. Add #662 and #647 forward-compat rows that name `text_value` (and the argv-as-JSON and probe-last forms) as the shared ones. O raises it on the epic or on #660: one terminal-safe text helper, ideally in `output.rs` (owner #660), or `pane::list::text_value` designated until then, settled before the second of #643/#647/#662 merges. |
-| W-3 | warn | Decision 10 (`pub(crate) struct Rig` in `tests/pane_verbs/list.rs`, brief:1081-1089) | duplication (test harness) | The parallel briefs each build their own fakes-backed ports rig. #644 has `pub(crate) mod rig` in `tests/pane_verbs/launch.rs` or `launch_rig.rs` (644-brief.md:58, 1806). #647 has `tests/pane_verbs/doctor/rig.rs` (647-brief.md:911). #662 has `pub(crate) mod rig` in `tests/profile_verbs/list.rs`, with `ports()`, `run(argv, format)` and `assert_no_adapter_call()` (662-brief.md:1756-1760), nearly the same API as this `Rig` (`ports`, `run`, `assert_nothing_observed`). Three of these would sit in the one `pane_verbs` test binary. #643's `Rig` copies nothing on `main` (the only `Ports` builder is `verb_harness::unwired_ports`, verb_harness/mod.rs:25-36), so this is not a block for #643. | Add a forward-compat row: "#644-#647 `pane_verbs` tests reuse `crate::list::Rig`". O tells the parallel stories to reuse whichever rig merges first, and their A-dup gates reject a second copy. A follow-up can move the one rig into `tests/verb_harness/`, so `profile_verbs` shares it too. |
-| W-4 | warn | Decision 7, `watch` JSON `data` = `{cursor, name, change, pane: PaneRow \| null}` (brief:1060-1063); Decision 5, `get` JSON `data.pane` = the `Pane` record (brief:1035); AC 3 (`data.pane.sync`), AC 5, AC 13 | contract shape; naming | The key `pane` has two shapes in sibling verbs. In `watch` it is a `PaneRow` (summary: `health`, `sync`, `pos` at its top). In `get` it is the full record (`harness.health`, `herdr.grid`). The port's own `PaneEvent.pane` (pane.rs:265-267) and the `pane/get` and `pane/list` data (ADR-0021:229-230) also use `pane`/`panes` for records. A script written against `get`'s `data.pane` breaks on a `watch` line. Once merged, a rename is breaking (ADR-0021:408-409). Precedent is mixed: `hub token list --json` uses `tokens` for summaries (token_cmd.rs:121-135). Hence a warn. | Decide before AC 3, 5 and 13 pin it. Either name the summary `row` in `PaneChange` (`{cursor, name, change, row}`; `list`'s `panes` can stay, as `tokens` allows), or carry the record under `pane`, as `PaneEvent` does, with `sync` beside it, as `get` does. |
-| W-5 | warn | Decision 7, "A watch that owes nothing prints nothing, in JSON mode too" (brief:1071-1073); AC 16 (brief:909-910) | contract with the shared test-kit checker | `check_ndjson` treats an empty stream as `EmptyStream` (envelope.rs:35-37, 144-145, 247-249). The issue says "every `--format=json` output ... passes #638's envelope helper", and #649's scenario checks that "every verb's `--format=json` output parses against the envelope" (epic #633, integration criteria). The carve-out is documented, and the port's idle `Ok(None)` carries no cursor to print, so it is the right local choice. Still, the shared checker and the verb now disagree, and an idle `watch --until-idle` in #649's scenario fails the checker. | Journal it as a known divergence. O opens a test-kit follow-up that names #649: for example, accept an empty stream at exit 0, or add a `check_ndjson` variant for `--until-idle`. |
-| W-6 | warn | Decision 16 and C5, I5 read per port call for `watch` (brief:1123-1126, 1158-1160) | ADRs | I5 says "A verb returns in bounded time" (ADR-0021:164). `watch` without `--until-idle` does not. §12 ("every port call is bounded by I5", ADR-0021:457-460) and §9's NDJSON stream (ADR-0021:363) support the brief's reading, and ADR-0021 defers nothing to #643, so no ADR edit is required here (unlike #642's B-1). But the stack rule is that a decision extending an ADR's reading updates the ADR. | Add one line to ADR-0021 §12 through the epic's amend channel, for example: "`pane watch` without `--until-idle` is the one stream verb; each `next()` is bounded by I5". Or record it on #634. Journal it either way. |
-| W-7 | warn | Test plan, "T first lands the **surface**": the three `Args` structs' fields in `src/pane/{list,get,watch}.rs` (brief:1182-1186) | process; pattern consistency | Here T writes production code before RED, which tester.md forbids (tester.md:8, 23, 208). The repo's established way to stage CLI surface that is not implemented yet is `cli-surface.pending.txt` (cli_surface_test.rs:1-15, 66-79; #508's T-red used it, 508/handoff-T-red.md:21). The brief's reason is sound: without the fields, the in-process cases panic in `run_verb_with`'s parse, and the overlay does not accept that as RED. The parallel #644 ("T-red (Args)", "T-red (stubs)", 644-brief.md:41-43) and #647 ("T first lands the type declarations", 647-brief.md:1146) briefs do the same, so this is not a block. | Keep the plan, but put the exception explicitly in T's task: fields and one-line docs only, `run` untouched, no behaviour. The MO adopts one rule for the epic's verb stories. |
-| W-8 | warn (low) | Decision 11's trigger set (control, whitespace, `"`, `\`, `=`); Risks, bidi characters accepted (brief:1209-1211) | cross-cutting (security) | A value whose only unsafe characters are Unicode format characters passes unquoted, for example bidi overrides U+202A-U+202E and U+2066-U+2069. Such a value can reorder how a line displays. | Optional and cheap: also quote when the value differs from its own escaped form, that is, when `format!("{s:?}")` minus its quotes differs from `s`. Rust's `{:?}` already escapes these characters (checked with rustc: U+202E, U+2066, U+200B and U+FEFF come out escaped, while `é` passes through), so this needs no new table. |
+| W-9 | warn (new; act on it this cycle) | Decision 2, four `pub` items (brief:1015-1018); Decision 6, bare `serde_json::to_string` (brief:1053-1056); Decision 11's trigger set (brief:1090-1097); Risks, bidi "passed through ... Accepted" (brief:1209-1211) | plan vs code (the spec the gates read) | The brief no longer describes the code on four points. (1) `list.rs` has eleven `pub` items, not four. The extra seven are `COLUMNS`, `NO_VALUE`, `json_text`, `profile_name`, `optional_text`, `health_word` and `hold_word`, plus the methods `PaneRow::cells` and `SessionSync::text`. (2) The JSON fragments in text mode go through `json_text` (list.rs:279-299), not bare `serde_json`. (3) `text_value` also quotes a stored `-` and any character `{:?}` writes as `\u{..}` (list.rs:251-272, 301-307). (4) So bidi characters are escaped, not passed through. All four go the way round 1's W-8 asked, in the same file and layer, and handoff-F.md lists them as Deviations 1-3. They are not drift. But the gate's prompt holds only the brief, the diff and `evidence.md`, and S audits against the brief. So round 2 will read the same contradictions; gate findings B-2 and B-3 came from them. | This cycle: F adds one `evidence.md` entry per point, with the triage facts below (file:line and the rustc check). If the operator wants the letter of the brief instead, amend Decisions 2, 6 and 11 and the Risks bullet. A brief edit needs a fresh run, so evidence is the cheaper fix for this run. |
+| W-10 | warn (new, low) | `profile_name(&ProfileOpt)` (list.rs:132-136), used by get.rs:18-21 and watch.rs:17 | layering; duplication across stories | `profile_name` is the typed guard of a shared flag group, but it lives in a verb file. The repo's home for such a guard is `args.rs`, next to `SpecFlags::validate` (args.rs:110-140). `args.rs` is frozen, though (#670, epic ruling 2). The sibling stories type `--profile` inline: #647's `doctor.rs:48-53` (code, unmerged) and #644's plan (644-brief.md:1577). It is one line, so the copies are cheap. But a later `--profile` rule would have several homes. | Keep it. Name `pane::list::profile_name` as the one guard until a `ProfileOpt::validate` lands in `args.rs` through the frozen-file amend channel, and have #644 to #647 use it. |
+| W-11 | warn (new) | `json_text` (list.rs:279-299); JSON mode, `write_envelope` (output.rs:302-314, #660) | cross-cutting (terminal safety); abstraction level | JSON mode writes DEL, the C1 controls (U+009B is a one-character CSI on some terminals) and bidi characters raw, because `write_envelope` is plain `serde_json::to_string`. F saw this on the fakes (handoff-F.md, "Known issues"). `json_text` fixes it only for the JSON fragments in text mode. That is a verb-local fix for a concern whose choke point, for every verb, is `write_envelope`. | O raises it on #660: one terminal-safe JSON encoding in `write_envelope`, built from `json_text`'s and `acts_on_terminal`'s logic. `json_text` then calls it instead of being a second encoder. It is outside this blast radius. |
+| W-1 | warn (open; still the most consequential) | Decision 3, `SessionSync::of` (list.rs:211-221); AC 3 | contract shape across layers (one rule, two readings) | One side is now code. #647's F commit (9500955, unmerged) compares SHOWN with `session_of_record` (`reconcile/observe.rs:224-262`, finding `shown-driven-mismatch`). Its `record` writes only `last_observed.shown` (observe.rs:354-372). #644's re-amended plan writes `driven: None` and says writing it "would need an amend-first change" (644-brief.md:121, 2077-2079). So nothing writes `last_observed.driven` before #649. #643's SYNC would then read `-` on every real pane while `pane doctor` reports mismatches. Every verb runs over `Unwired` until #649 (brief C7), so the deadline is #649, not this merge. ADR-0021 still supports both readings: I2 (:161), `last_observed` "written by reconcile, never inferred" (:45), and §9's "SHOWN differing from DRIVEN" (:344). With no dominant reading, this stays a warn. | The MO decides before #649. Either #649 writes `last_observed.driven`, or `SessionSync::of` switches to SHOWN vs `session_of_record` (one match, plus AC 3's tests and one help sentence). Record the rule once, in ADR-0021 §1. |
+| W-2 | warn (open) | `text_value`, `json_text`, `acts_on_terminal` (list.rs:251-307) | duplication across stories (terminal safety) | One side is now code. #647 adds `pub fn quoted` (`error::excerpt`: `{:?}`, cut to 64) and `embedded` (controls only) in `holler-pane/src/findings.rs:328-352`, unmerged. `pane doctor` and `pane get` would then quote the same session id two ways, and `quoted` does not escape bidi characters. #662's plan has a third style (round 1). | The MO names one helper before the second of #643, #647 and #662 merges. If both crates need it, it belongs in `holler-pane`, which both depend on, added amend-first. |
+| W-3 | warn (open) | the `Rig` (tests/pane_verbs/list.rs:39-98) | duplication (test harness) | #647's `tests/pane_verbs/doctor/rig.rs` (409 lines, unmerged) sits in the same test binary. It does a different job: it builds a live world through the ports, while #643's `Rig` is store-only. They overlap only in composing the six fakes into a `Ports`. | No change here. Follow-up: one `Ports`-over-fakes builder in `tests/verb_harness/`. |
+| W-4 | warn (open; last cheap moment) | `PaneChange.pane` (watch.rs:95-103) vs `PaneDetail.pane` (get.rs:64-73) | contract shape; naming | Unchanged, and AC 3, 5 and 13 now pin it. `data.pane` is a `PaneRow` in `watch` but the full record in `get` and in the port's `PaneEvent`. After merge, renaming it breaks the JSON contract (ADR-0021:408-409). | The MO decides now or accepts it: rename it `row` in `PaneChange` (three lines plus the tests), or keep it. |
+| W-5, W-6 | warn (open, unchanged) | Decision 7's empty stream and AC 16; Decision 16 and C5 | test-kit contract; ADRs | As in round 1. An empty `watch --until-idle` stream fails `check_ndjson` (`EmptyStream`), and I5 is read per port call for `watch`, with no ADR line. | As in round 1: a test-kit follow-up that names #649, and one ADR-0021 §12 line through the amend channel. |
+| W-7, W-8 | closed | | | W-7: T landed only the fields and one-line docs, and left `run` untouched (decisions.md, T entry). W-8: adopted (`acts_on_terminal`, list.rs:305-307). | |
 
-### Checked and consistent with existing patterns (no finding)
+## Diff gate, round 1, triaged
 
-- **Ports only, nothing observed.** The verbs call only `pane_store.get/list/watch`, `profile_store.get` and `scope.resolve`
-  (ruling 1; ADR-0021 §5). AC 17 checks this both by grep and by the fakes' call logs. No adapter, hub, proto or golden file
-  changes, and nothing is persisted.
-- **Output and exit codes.** Every result goes through `emit`, `emit_stream` or `emit_error`, and exit codes come from
-  `class_of` (output.rs:201-243, 336-340). Only the closed `PaneNotFound` and `PaneNotInProfile` are raised; no code is
-  declared (ruling 3). The failure modes match ADR-0021 §9's table (lines 336-337).
-- **Arguments.** Positionals and `--profile` stay strings at clap time and are typed in `run` with `PaneName::parse` and
-  `ProfileName::parse`, so a bad name is an emitted `usage`. This is the `SpecFlags::validate` pattern (args.rs:1-13,
-  110-150). `ProfileOpt` stays flattened. The verb-specific positional and flags live in the verb's own file (ruling 2), and
-  the ADR 0003 rows, fixture lines and `STUBS` rows are this story's (ADR-0003:92; stub.rs:12-16). `flags.rs` already
-  counts "only a required positional is missing" as accepted, so `get PANE` breaks no process test.
-- **Reuse of serde forms.** `get` prints the record verbatim (`Pane`, `ProfileSpec`). Positions use `GridPos` `Display` and
-  `Serialize` (grid.rs:68-73, 129-138). Argv in text is `serde_json` of `Argv` (transparent array, argv.rs:20-27). Time
-  formatting uses `format_epoch(ms / 1000)`, as attach_cmd.rs:189 does. The ` UTC` suffix is new, since other callers print
-  no zone; it is harmless.
-- **Shared view placement.** `list.rs` is the only home that edits no frozen file. A child module (`pane/list/view.rs`,
-  declared from `list.rs`, the way #647 nests its test rig) would also avoid `pane/mod.rs`, but it is not needed at about 290
-  lines. `pub` items in a `pub mod` raise no `dead_code`.
-- **JSON wrapper.** `list` puts its rows under `{"panes": [...]}`, the same shape as `hub token list --json`'s
-  `{"tokens": [...]}` and the roster's `{rows: [...]}`, and ADR-0021 §9's rule that fields may only be added.
-- **Membership.** Profiles are compared inline by slug, as the hub's `refuse_profile_move` (panes/store.rs:338-357) and the
-  fake scope (profile_scope.rs:238) do. The spec lookup `entry.pane == name` matches the fake's (profile_scope.rs:244, 282).
-- **`--since` ahead of the head is `usage`.** The verb leaves this check to the store, and the hub's real feed refuses it
-  the same way (holler-hub/src/panes/feed.rs:22, 86-95). So the fake and the hub agree, which answers the outside
-  reviewer's W-4.
-- **Size.** About 290, 210 and 210 lines of production code and at most about 360 lines per test file, far below 800 and
-  900, with a stated overflow plan. No new dependency, no `unsafe`, and only neutral placeholders (public repository).
+For F, T and the round-2 gate. "No change" means no production change is needed.
 
-## Notes for O (non-blocking)
+| Gate finding | Verdict here | Why (evidence) |
+|---|---|---|
+| B-1, `{:?}` in the `what` of `pane-not-in-profile` (get.rs:104-106) | not a defect; no change | This is the established form. It is byte-identical to the only other construction, `FakeProfileScope::resolve` (`crates/holler-pane-testkit/src/profile_scope.rs:122-123`), and to what #663's real scope plans (663-brief.md:1657). A profile name can hold spaces ("Demo Alpha", `fake_profile_scope_test.rs:470-471`), so the quotes carry meaning. Changing the form in the verb alone would make one code read two ways. |
+| B-2, a stored `-` prints as `"-"` | not a defect; no change | The quotes keep a stored `-` apart from the empty value `-`, as both help texts say (list.rs:50-52, get.rs:37-39). No profile or pane name can be `-`. `slugify("-")` is empty, which `ProfileName::parse` refuses (profile.rs:50), and a pane name must start and end with `[0-9a-z]` (vocab.rs:209). The brief's Decision 11 leaves `-` out (W-9). |
+| B-3, `acts_on_terminal` is "heuristic" (list.rs:305-307) | not a defect; no change | Every character the gate says is missed is caught. A scratch program on rustc 1.98.1 used the predicate as written. `is_control` flags NUL, TAB, DEL, NEL and U+009B. `escape_debug` flags ZWSP, ZWJ, LRM, RLO, LRI, PDI, U+061C, BOM, U+2028, NBSP, the soft hyphen, combining marks and VS16. `é`, `naïve` and CJK text pass unchanged. The predicate reads the same table `{:?}` uses, so whatever it flags, `text_value` escapes. T-green pinned C1 and bidi (`text_output_escapes_c1_and_bidi_characters`). |
+| B-4 | no defect (the gate's own words) | |
+| NV-6, and the gate's W-1, "over-escapes `é`" | false | The same check: `é`, `naïve` and CJK text are unchanged. |
+| The gate's W-3, "a pane named `-`" | false | Not a valid `PaneName` (vocab.rs:209). |
+| NV-1, and the gate's W-2, `json_text`'s `unwrap_or_default` | cannot be reached; no change | `Argv`, `Vec<String>` and `ProfileSpec` hold no map and no fallible `Serialize` (profile.rs:178-200). `emit`'s text closure cannot return an error, so `output.rs`'s encode-failure path (302-314) cannot be used from here. |
+| NV-5, `self.watch.next()?` (watch.rs:161) | cannot be reached today; no change | Both existing `Watch` iterators return `None` only after an error has ended the stream: the test kit's (`feed.rs:248-286`) and the hub's (`panes/store.rs:296-326`). `emit_stream` stops at that error. #649's client must keep this rule. |
+| NV-2, column width in `char`s | as specified; no change | Decision 4 says so. A wide cell misaligns but stays one cell. |
+| The gate's W-4, W-5 and NITs | test-level | T's call. |
 
-- W-1 to W-3 are seams between parallel plans. #643 can make its half right (correct the forward-compat rows, name the
-  existing helpers), but the decisions belong to the MO. Settle them before the second of #643/#644/#647/#662 merges:
-  1. One SHOWN/DRIVEN rule (W-1): which pair is compared before #649 wires DRIVEN, and what `shown: None` means. If #643
-     keeps its reading, its `--help` must say that DRIVEN and SYNC read `-` until then.
-  2. One terminal-safe text helper and probe-result form, with an owner (W-2).
-  3. One `pane_verbs` rig (W-3).
-- W-4 is the one choice this story controls that becomes permanent public JSON. It costs nothing to settle now and needs a
-  `schema_version` bump later.
-- I used the parallel briefs (#644, #646's issue, #647, #662) as evidence of what is being planned, not as merged code. None
-  of them has passed its own A, and #644's brief was being amended while I read it: its `driven: None` change is
-  uncommitted in `.claude/worktrees/0644-launch-relaunch`. Their details and line numbers, as read at about 17:15 MDT on
-  2026-10-09, may still change. The authorities are the issue (#643), the epic (#633), ADR-0021, ADR 0003 and the merged
-  code.
+## Checked and consistent with existing patterns (no finding)
+
+- **Layer and seams.** Unchanged from the plan. The code is in `holler-cli` only, in the three verb files. The only port
+  calls are `PaneStore::{get,list,watch}`, `ProfileStore::get` and `ProfileScope::resolve`, and AC 17's grep prints
+  nothing. Every result goes through `emit`, `emit_stream` or `emit_error`. The verbs raise only the closed `PaneNotFound`
+  and `PaneNotInProfile`. No frozen file, manifest, ADR-0021, hub, proto or golden file is touched.
+- **Dependency direction.** It runs one way: `get.rs` and `watch.rs` import from `list.rs`, which imports neither, and
+  nothing imports `get.rs` or `watch.rs` (Decision 2).
+- **One table definition.** `COLUMNS` and `PaneRow::cells()` build both the `list` table and the `watch` line, so the two
+  cannot drift, and #648's roster can call `cells()`. The roster's own `render_table` (roster_cmd.rs:65-95) is a
+  fixed-width renderer over JSON values, so this is not a copy of it.
+- **Words by exhaustive `match`.** Role, harness kind, health and hold are matched exhaustively, so a new variant is a
+  build error, not a stale word. That is the same guarantee as `args.rs`'s parse by serde names (args.rs:142-150).
+- **Scope.** `get --profile` uses the pane that `resolve` returned, with no second read. `watch --profile` compares
+  membership by slug (watch.rs:222-226), as the hub and the fake scope do.
+- **Test helpers.** `ok_envelope` and `ok_stream` build on the kit's `check_envelope` and `check_ndjson`, as the ACs
+  require. They do not copy `verb_harness::one_envelope`.
+- **Size and hygiene.** Production files are 316, 275 and 227 lines; the test files are 536, 280 and 311. All are under
+  800. There is no new dependency, no `unsafe`, nothing persisted and nothing logged, and only neutral names are used.
+
+## Notes for O
+
+1. **No re-plan is needed.** F's `archChanged` covers the seven extra `pub` helpers, all in the file and layer that
+   Decision 2 chose.
+2. **The gate's findings have only one carrier.** When F reports `archChanged`, the driver skips its rework classifier, so
+   no rework note brings the gate's findings to T-red or F. The round-1 result is gitignored and sits outside
+   `docs/handoffs/643/`. This handoff is the only thing that carries it.
+3. **For F, this cycle.** Make no production change for B-1 to B-3. Append the triage facts above to `evidence.md` (file
+   and line, plus the rustc check), and add one entry per W-9 point under "Deviations from the brief". The gate reads
+   `evidence.md`. When the prompt lacks the source to check a claim, the gate has to file it as needs-verification, not
+   as a BLOCK.
+4. **For T-red.** These findings add no behaviour, so nothing can be RED this cycle. A test that pins current behaviour
+   passes at once, and here that is expected, not an invalid RED. Examples: a stored `-` prints `"-"`, `é` is unchanged,
+   and the `pane-not-in-profile` text equals the scope's.
+5. **For the MO.** W-1 (deadline #649); W-2 and W-10 (one helper each, before the second sibling merges); W-3; W-4 (the
+   last cheap moment); W-11 (#660).
 
 ## Patterns referenced
 
-- `crates/holler-cli/src/output.rs` (the one output module) and `crates/holler-cli/src/pane/args.rs` (strings at clap time,
-  typed by guards).
-- `crates/holler-pane/src/{pane,ports,profile}.rs` (the records, `PaneEvent`, the `shown_session` contract) and
-  `docs/adr/ADR-0021.md` §§1-3, 5, 6, 9, 12.
-- `crates/holler-pane-testkit/src/{envelope,harness,profile_scope}.rs` and `crates/holler-cli/tests/verb_harness/mod.rs`.
-- `crates/holler-cli/src/{hub_cmd,roster_cmd,token_cmd,time_fmt}.rs`, `crates/holler-proto/src/log.rs:474-497` and
-  `crates/holler-pane/src/error.rs:686-695` (the existing text, table and escaping practice).
-- The parallel briefs: `.claude/worktrees/0644-launch-relaunch/docs/handoffs/644-brief.md`,
-  `.claude/worktrees/0647-reconcile-doctor/docs/handoffs/647-brief.md`, `.claude/worktrees/0662-profile-verbs/docs/handoffs/662-brief.md`.
+- `crates/holler-cli/src/output.rs`, `crates/holler-cli/src/pane/args.rs` and `crates/holler-cli/src/roster_cmd.rs`.
+- `crates/holler-pane-testkit/src/{profile_scope,feed}.rs` and `crates/holler-hub/src/panes/store.rs` (the `what` form,
+  and how each `Watch` ends).
+- `crates/holler-pane/src/{pane,profile}.rs` and `crates/holler-proto/src/vocab.rs` (the name grammars).
+- `docs/adr/ADR-0021.md` §§1, 3, 9 and 12.
+- The parallel worktrees, as read at about 18:05 MDT: `.claude/worktrees/0647-reconcile-doctor` (code at 9500955) and
+  `.claude/worktrees/0644-launch-relaunch` (brief at 7195993). Both are unmerged; they are evidence of plans, not merged
+  code.
