@@ -202,6 +202,19 @@ fills this file in at release time.
   ([#649](https://github.com/Performant-Labs/holler/issues/649)), the real `holler profile list` and `show` still
   answer `not-implemented` ([#662](https://github.com/Performant-Labs/holler/issues/662)).
 
+- OpenCode adapter, part 1: the server side (epic [#633](https://github.com/Performant-Labs/holler/issues/633)):
+  `holler-adapter-opencode` now implements the server half of `HarnessPort` over OpenCode's HTTP API, on `127.0.0.1`
+  only. `serve` starts `opencode serve` for a pane in its project directory, in a process group of its own, and sends
+  nothing but health checks until the server first answers healthy; it never takes over a server that already answers
+  on the port, and returns the new server's pid. `health` is a timed check that answers false, and never hangs, when the
+  server is down or frozen. `create_session` titles each new session with its own id, `list_sessions` leaves out child
+  (subagent) sessions, and `abort` checks that the session exists first, because raw OpenCode acknowledges an abort of
+  an id it does not know. Every call has a deadline (10 s by default) and answers `timeout` when a frozen server holds
+  it, and a reply that is not the JSON a step needs, such as the web page OpenCode serves for a route it does not know,
+  is `unavailable`. Attaching, switching and reading a pane's TUI answer `not-implemented` until part 2, which also
+  brings the opt-in tests against a real OpenCode. Nothing a user runs changes yet: #649 wires the adapter in
+  ([#642](https://github.com/Performant-Labs/holler/issues/642)).
+
 ## [0.4.0] - 2026-09-29
 
 ### Enhancements
