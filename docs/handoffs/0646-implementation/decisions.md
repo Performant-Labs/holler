@@ -242,3 +242,49 @@ Append-only. Format per pipeline-conventions §1.
   `cargo clippy -p holler-cli --all-targets` (T's files) → clean. `scripts/lint.sh` → exit 0.
   rustfmt --check --edition 2021 clean on both Rust files T touched.
 
+
+## Chain Summary (run closed as merged, PR #724, 2026-10-10)
+
+**Story:** #646 parts 2 and 3 (`pane close`; routed `say`/`interrupt`/`answer` + the
+`send_prompt` pane gate). Part 1 (park/unpark) had merged as #711. Run: `0646-implementation`,
+rigor in-session, no UI surface (D/U N/A, declared). Merged as `3c3b5cf` (12:54 MDT) after
+CI green and pr-agent 92 / no flags; issue auto-closed.
+
+**The chain that held:** survey → brief v2 (A BLOCK round 1 → all 11 bindings folded) →
+T-red (33 tests; the hub gate tests applied by O verbatim after T's write scope denied
+`src/**`) → F (Opus 5.5 xhigh) → T-green (T repaired its own four defects, accepted F's
+3-arg `pane_hold_refusal`) → A-dup PASS → S PASS → merge. The suite's authority was the
+plugin's own verdicts: RED from T's tests, GREEN [exit 0], merge verification GREEN.
+
+**What the outside caught that the room missed:** pr-agent's spec-drift Major was real — the
+pane hold is a third `hold_kind` on the wire and `docs/protocol/v2.md` §8/§10 still said
+operator/default. Fixed in `f38682d`; its follow-up (`42a70c1`) repaired the two inline
+`holler release` mentions the docs command extractor (correctly) tried to parse. Score
+80-with-flags → 92-clean. The other Major (the gate's `list()` error path returning Ok)
+was F's recorded decision 1, mirrors `holds.rs`, was accepted by A-dup and S, and stands —
+answered on the PR with the record.
+
+**Operational lessons (for future runs, all journal'd in place):**
+1. The plugin symlinks `target/` out of the worktree on purpose: build writes then stay
+   outside the F write-boundary. This run's (necessary) de-contamination put a private
+   in-worktree `target/` there instead and F's 22-minute attempt 1 was refused on 18k
+   `target/**` "violations". The fix: private target dir *outside* the worktree, symlinked
+   back. Attempt 2 then hit a one-off `git-metadata` refusal; attempt 3 recorded clean.
+2. The delegated (dir-routed) pipeline tool calls answer empty from this seat — the shell
+   CLI (`pipeline-cli.ts`) is the reliable path, as AGENTS.md says.
+3. Verdict lines must be exactly `**Verdict:** PASS`; A's round-2 parenthetical broke the
+   fail-closed parser and recorded BLOCK until a mechanical round 3.
+4. When the plugin's RED boilerplate says "dispatch F", read whose fault the red actually
+   is: four of the five red causes here were T-side (compile errors + one self-contradicting
+   assertion) and the repair belonged to T.
+
+**Follow-ups recorded (not this run's to do):** `cli.rs` help strings and
+`prompt_target.rs`'s module doc still say "until #646" (files frozen to #637/#670 — the
+follow-up story should carry them); the interrupt-cancel edge under a gated session
+(F decision 3) is unpinned and deserves a case when `interrupt.rs` reopens; routed forms
+still answer `not implemented` until #649 wires the stores into the binary.
+
+**Stage wall times:** survey+brief+A ≈ 75 min (A both rounds) · t-red ≈ 41 min (T) ·
+F ≈ 22.2 + 6.7 + 10.0 min (attempts 1-3; 1 and 2 refused mechanically, no re-work) ·
+T-green ≈ 26 min (T) · A-dup ≈ 11 min · S ≈ 14 min · suite verdicts ≈ 3.3 min each
+(t-green advance 206 s, merge verification 198 s).
