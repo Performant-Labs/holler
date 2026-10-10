@@ -19,7 +19,7 @@
 #   WIZARD_LIB              where ledger.sh lives (default: this script's own directory)
 #   WIZARD_HERDR_SESSION    the instance `herdr_session` (empty = no named session)
 #   WIZARD_INSTANCE_PREFIX  the instance `prefix` (default: the instance name)
-#   WIZARD_LEDGER           the ledger file (default: ${WIZARD_STATE_DIR}/wizard-ledger.toml)
+#   WIZARD_LEDGER           the ledger file (default: ${WIZARD_STATE_DIR}/herdr/setup/wizard-ledger.toml)
 #   WIZARD_STATE_DIR        the instance state directory (default: $HOME/.holler)
 #   WIZARD_LOG_DIR          where the server log goes (default: <state dir>/logs, created)
 #
@@ -92,15 +92,15 @@ ledger_file() {
   if [ -n "${WIZARD_LEDGER:-}" ]; then
     printf '%s\n' "$WIZARD_LEDGER"
   elif [ -n "${WIZARD_STATE_DIR:-}" ]; then
-    printf '%s\n' "$WIZARD_STATE_DIR/wizard-ledger.toml"
+    printf '%s\n' "$WIZARD_STATE_DIR/herdr/setup/wizard-ledger.toml"
   fi
 }
 
-# The directory `ledger.sh` reads: the ledger file's own directory when WIZARD_LEDGER is set,
-# else the instance state directory.
+# The state directory `ledger.sh` reads: three levels above the ledger file when WIZARD_LEDGER
+# is set (<state_dir>/herdr/setup/wizard-ledger.toml), else the instance state directory.
 ledger_state_dir() {
   if [ -n "${WIZARD_LEDGER:-}" ]; then
-    dirname "$WIZARD_LEDGER"
+    dirname "$(dirname "$(dirname "$WIZARD_LEDGER")")"
   elif [ -n "${WIZARD_STATE_DIR:-}" ]; then
     printf '%s\n' "$WIZARD_STATE_DIR"
   fi

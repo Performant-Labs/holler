@@ -44,7 +44,7 @@ merging across tiers):
 
 1. An explicit `--config <path>` passed to the wizard's invocation.
 2. `./sessions.toml` — a project-local config, when the wizard is run from a project directory.
-3. `~/.config/setup-wizard/sessions.toml` — the global fallback.
+3. `~/.holler/herdr/setup/sessions.toml` — the global fallback.
 
 Shape:
 
@@ -294,7 +294,7 @@ variable surviving to the next command. A command that lost its `HOLLER_STATE_DI
 the default instance's hub; the skill therefore sets it inline on every `holler hub`, `holler
 roster`, `holler say` and `ledger.sh` call.
 
-Every process the wizard starts is recorded in `<state_dir>/wizard-ledger.toml` on the host it
+Every process the wizard starts is recorded in `<state_dir>/herdr/setup/wizard-ledger.toml` on the host it
 runs on (mode 0600, written atomically; with no `state_dir`, in Holler's default state
 directory). One `[[process]]` table per process: `pid`, `started` (`LC_ALL=C ps -o lstart= -p
 <pid>`), `cmd` (`ps -o command= -p <pid>`), `role` (`backend`, `hub`, `serve`, `body`, `herdr`),
@@ -321,7 +321,7 @@ this design exists to prevent. (Once the wizard itself builds an instance with t
 directory, that instance does get its own ledger, because the wizard started its processes.)
 
 On a rerun the wizard fetches each remote host's ledger next to its inventory (`ssh <remote_host>
-"cat <state_dir>/wizard-ledger.toml"` into a named scratch directory under this machine's state
+"cat <state_dir>/herdr/setup/wizard-ledger.toml"` into a named scratch directory under this machine's state
 directory, `<state_dir>/wizard-scratch`) and passes it to the collision check as `WIZARD_LEDGER`;
 without it every remote process would look foreign and the instance's own processes would be
 refused.
@@ -345,9 +345,17 @@ RAM-backed on the target hosts and must not be filled.
 
 ## Stopping and tearing down
 
-The wizard keeps a per-instance ledger of every process it starts (`<state_dir>/wizard-ledger.toml`,
+The wizard keeps a per-instance ledger of every process it starts (`<state_dir>/herdr/setup/wizard-ledger.toml`,
 one `[[process]]` with pid, start time, command, role, stage and session). A process is the wizard's
 to stop only if that ledger recorded it and its current start time and command still match.
+
+Every file the wizard keeps for itself lives in `<state_dir>/herdr/setup/` (for the default instance,
+`~/.holler/herdr/setup/`): the ledger (`<state_dir>/herdr/setup/wizard-ledger.toml`) and the global master config
+`sessions.toml`. Logs stay in `<state_dir>/logs` and scratch files in `<state_dir>/wizard-scratch`.
+**After upgrading**, a rerun finds no ledger at the new path. A ledger at the old path
+(`<state_dir>/wizard-ledger.toml`) is not read, and there is no automatic fallback or migration: if its
+processes are still running they appear as foreign and are never signalled. Move the file into
+`<state_dir>/herdr/setup/` by hand to keep ownership.
 
 - **Stale** (the pid was recorded but now belongs to another command): never signalled, reported.
 - **Foreign** (in no ledger, for example something else holding a planned port): never signalled;
@@ -435,7 +443,7 @@ refusal names the colliding item and the config key to change (`hub_port`, `serv
 `backend_port_base` or a session's `backend_port`, `state_dir`, `herdr_session`, or the
 `[[session]]` name). Stage 3 passes each host's own ledger (fetched next to its inventory) so
 this instance's own processes are not refused on a rerun. A process counts as this instance's own only if the instance's ledger
-(`<state_dir>/wizard-ledger.toml`) records its pid with the same start time and command; a
+(`<state_dir>/herdr/setup/wizard-ledger.toml`) records its pid with the same start time and command; a
 reused pid is foreign.
 
 ## Herdr session

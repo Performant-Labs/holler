@@ -202,7 +202,10 @@ do_teardown() {
     echo "teardown: a process is still running; instance state kept."
     return 3
   fi
-  rm -f "$sd/wizard-ledger.toml"
+  rm -f "$sd/herdr/setup/wizard-ledger.toml"
+  # The folders the wizard made go too, but only when nothing else is in them.
+  rmdir "$sd/herdr/setup" 2>/dev/null
+  rmdir "$sd/herdr" 2>/dev/null
   if [ "$purge" = "yes" ]; then
     case "$sd" in
       /*) : ;;

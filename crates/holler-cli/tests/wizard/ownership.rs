@@ -19,6 +19,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::time::Duration;
 
+/// The ledger file, relative to the state directory.
+const LEDGER_REL: &str = "herdr/setup/wizard-ledger.toml";
+
 const FAKE_LEDGER: &str = r#"#!/bin/bash
 # Fake ledger.sh, same interface as the real one: the state directory comes from
 # HOLLER_STATE_DIR; `owns <pid>` exits 0 live, 1 stale, 2 not recorded; `list` prints one
@@ -128,7 +131,8 @@ impl Env {
             ));
         }
         fs::write(state.join("fake-ledger"), t).unwrap();
-        fs::write(state.join("wizard-ledger.toml"), "# placeholder\n").unwrap();
+        fs::create_dir_all(state.join("herdr/setup")).unwrap();
+        fs::write(state.join(LEDGER_REL), "# placeholder\n").unwrap();
     }
 
     fn run(&self, args: &[&str], lsof_pids: &str) -> Output {
@@ -416,11 +420,11 @@ fn teardown_stops_ledger_processes_in_reverse_order_and_leaves_the_second_instan
     // The second instance: processes, ledger and state all untouched.
     assert_all_alive(&[&b1, &b2]);
     assert_exists(&b.join("fake-ledger"));
-    assert_exists(&b.join("wizard-ledger.toml"));
+    assert_exists(&b.join(LEDGER_REL));
     assert_file_text(&b.join("data.txt"), "b state");
 
     // This instance's ledger is gone; its other state stays, and the output says so.
-    assert_missing(&a.join("wizard-ledger.toml"));
+    assert_missing(&a.join(LEDGER_REL));
     assert_exists(&a.join("keep.txt"));
     assert_has(&o, "LEFT");
 }
@@ -611,7 +615,7 @@ fn agrees_with_the_real_ledger_script() {
     assert_code(&run_real(&env, &lib, &["teardown", &s(&a)]), 0);
     assert_dead(&a1);
     assert_all_alive(&[&b1, &foreign]);
-    assert_exists(&b.join("wizard-ledger.toml"));
+    assert_exists(&b.join(LEDGER_REL));
 }
 
 fn assert_real_restart_then_stale(env: &Env, lib: &Path, state: &Path, c: &Child) {
@@ -622,4 +626,48 @@ fn assert_real_restart_then_stale(env: &Env, lib: &Path, state: &Path, c: &Child
     // Gone now: the real ledger calls it stale, and it is not signalled again.
     let o = run_real(env, lib, &["stop", &s(state), &c.pid.to_string()]);
     assert_code(&o, 1);
+}
+
+#[test]
+fn teardown_removes_the_ledger_and_its_empty_folders_and_leaves_other_files() {
+    let env = Env::new();
+    let a = env.state("inst-a");
+    let c = Child::start("tidy");
+    env.ledger(&a, &[(&c, "live")]);
+    fs::write(a.join("keep.txt"), "x").unwrap();
+    // Not purging: the ledger and the two folders it made go, the rest stays.
+    assert_code(&env.run(&["teardown", &s(&a)], ""), 0);
+    assert_missing(&a.join(LEDGER_REL));
+    assert_missing(&a.join("herdr"));
+    assert_exists(&a.join("keep.txt"));
+}
+
+#[test]
+fn teardown_keeps_a_wizard_folder_that_holds_another_file() {
+    let env = Env::new();
+    let a = env.state("inst-a");
+    let c = Child::start("other");
+    env.ledger(&a, &[(&c, "live")]);
+    fs::write(a.join("herdr/setup/sessions.toml"), "x").unwrap();
+    assert_code(&env.run(&["teardown", &s(&a)], ""), 0);
+    assert_missing(&a.join(LEDGER_REL));
+    assert_exists(&a.join("herdr/setup/sessions.toml"));
+}
+
+#[test]
+fn teardown_leaves_a_ledger_at_the_old_path_alone() {
+    let env = Env::new();
+    let a = env.state("inst-a");
+    let c = Child::start("oldpath");
+    env.ledger(&a, &[(&c, "live")]);
+    fs::write(a.join("wizard-ledger.toml"), "# old\n").unwrap();
+    assert_code(&env.run(&["teardown", &s(&a), "--purge-state"], ""), 0);
+    // The purge removes the whole instance directory, so check the plain teardown too.
+    let b = env.state("inst-b");
+    let d = Child::start("oldpath2");
+    env.ledger(&b, &[(&d, "live")]);
+    fs::write(b.join("wizard-ledger.toml"), "# old\n").unwrap();
+    assert_code(&env.run(&["teardown", &s(&b)], ""), 0);
+    assert_file_text(&b.join("wizard-ledger.toml"), "# old\n");
+    assert_missing(&b.join(LEDGER_REL));
 }

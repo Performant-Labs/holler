@@ -16,7 +16,7 @@
 #   WIZARD_SESSION_NAMES        space-separated session names whose bodies run on this host
 #                               (listed in the plan only: a body's session is not on its command
 #                               line, so there is no per-session body check)
-#   WIZARD_LEDGER               optional: this instance's wizard-ledger.toml on this host
+#   WIZARD_LEDGER               optional: this instance's herdr/setup/wizard-ledger.toml on this host
 #
 # A process is "created by this instance" only if the ledger holds its pid with the same
 # `started` and `cmd` (a live entry, per the epic's contract); every other process is foreign.
