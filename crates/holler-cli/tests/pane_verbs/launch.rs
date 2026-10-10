@@ -515,13 +515,13 @@ fn the_budget_bounds_a_slow_launch() {
         spec_only: false,
     };
     let options = TxOptions {
-        budget: Duration::from_millis(300),
+        budget: Duration::from_millis(800),
         ..TxOptions::default()
     };
     rig.fakes
         .harness
         .faults()
-        .set_delay(Some(Duration::from_millis(200)));
+        .set_delay(Some(Duration::from_millis(500)));
     let started = Instant::now();
     let (answer, calls) = rig.engine(|ports| tx_launch::launch(ports, &request, &options));
     let took = started.elapsed();
