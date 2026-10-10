@@ -1,182 +1,111 @@
-# Handoff-A: Phase 3 - #644 `pane launch` and `relaunch`  (up-front plan review)
+# Handoff-A: Phase 3 - #644 `pane launch` and `relaunch`  (up-front plan review, re-review)
 
 **Date:** 2026-10-09
-**Branch:** issue-644-implementation (worktree `.claude/worktrees/0644-launch-relaunch`, head `e7064e9`)
-**Brief reviewed:** `docs/handoffs/644-brief.md` (as amended in `e7064e9`)   **Reuse map:** the brief's "Reuse map (extend, do not duplicate)", lines 1878-1892 (there is no separate `survey.md`)   **Wireframe:** N/A (no UI surface)
-**Verdict:** BLOCK
+**Branch:** issue-644-implementation (worktree `.claude/worktrees/0644-launch-relaunch`, head `40f486e`, which contains `origin/main` `d9eabbb`)
+**Brief reviewed:** `docs/handoffs/644-brief.md` (as amended through `40f486e`)   **Reuse map:** the brief's "Reuse map (extend, do not duplicate)", lines 2403-2421 (there is no separate `survey.md`)   **Wireframe:** N/A (no UI surface)
+**Verdict:** PASS
+
+This replaces the first review's BLOCK (`d2636ba`, still in git history).
 
 ## Summary
 
-BLOCK, on four findings. Each one changes the binding API or an acceptance criterion, so they must be settled before T
-writes RED tests. The overall shape is right: a pure engine in `holler-pane` over `Ports` (ADR-0021 section 5), thin verbs
-that reuse `SpecFlags::validate`, `output::emit` and `class_of`, the I8 order through `edit_spec` with the record write
-inside the act (as the test kit's scope documents), open codes declared where they are raised, and no frozen file touched.
-The four blocks:
+PASS. The amended brief fixes all four blocks from the first review, and each fix holds against the code now on `main`:
 
-1. `tx_launch::spec_of_pane` duplicates the Pane-to-spec mapping. ADR-0021 section 3 puts that mapping in
-   `profile_snapshot.rs`, and #662a is writing it there right now as `spec_from_pane`.
-2. Relaunch's "same directory, move only with `--grid`" rules are checked only in the CLI. The engine, which `profile apply`
-   (#664) will also call, can then record a false directory or leave a Herdr pane behind.
-3. The record written at R fills in `last_observed.driven` without observing it. The frozen contract says that field is
-   never inferred.
-4. `launch.rs` gets a second reconcile-step function, beside the one #663 is building for #644 to call. Under the real
-   scope this would also print the step twice.
+- relaunch's base is #662a's merged `spec_from_pane`;
+- the relaunch rules are the engine's own first step (E0);
+- launch writes `driven: None`, which is what #647's merged reconcile expects;
+- the reconcile step is #663's merged `reconcile_step`, appended only when the message lacks it. That is the rule #663 wrote into ADR-0021 section 8 step 6.
+
+T's dependency greps from the Test plan all pass on this branch, so RED will not stop on a signature. There is no new block.
+
+Nine stories merged after the brief's evidence baseline (`3bdd129`), and they set patterns the brief does not name yet. That gives eight warns. Two of them change code:
+
+- route untrusted text through the pane domain's sanitizers (warn 1);
+- make O1 call `reconcile::shown_differs` (warn 2).
+
+## Resolution of the first review's findings
+
+| # | First review | Status | Checked against |
+|---|---|---|---|
+| 1 | block: `spec_of_pane` duplicates the Pane-to-spec mapping | Resolved. Removed; relaunch's base is `profile_snapshot::spec_from_pane`; no `"fixed:"` literal (brief lines 1813-1842, 2020-2021, 2416-2417). | `crates/holler-pane/src/profile_snapshot.rs:18-68` (merged #662a; signatures as pasted in I-1) |
+| 2 | block: relaunch rules held only in the CLI; `move_grid` | Resolved. E0 in `tx_launch::relaunch`, `grid_given`, `spec.pane == name` in both engines, and AC 19b on the engine (lines 2028-2044, 2303-2311). | the scope runs its guards before any write (`crates/holler-cli/src/pane/profile_scope.rs:104-118`) |
+| 3 | block: `last_observed.driven` inferred | Resolved. Launch writes `None` and relaunch keeps the stored value (C-14, decision 22, AC 1, AC 20). | `crates/holler-pane/src/reconcile.rs:33-35` ("left as stored"); ADR-0021 lines 492-493 |
+| 4 | block: a second reconcile-step function | Resolved. #663's `reconcile_step(Option<&ProfileName>)` with the exact-substring append rule, pinned by AC 16h, 16j and 16k over the real `StoreScope`. | `profile_scope.rs:49-56, 122-156, 205-216`; ADR-0021 lines 331-339 |
+| 5-10 | warns | Resolved in the brief: `now_millis` named (H-3); the rig rule (decision 25); B10 after R (decision 23); the cell follow-up (C-10); the lost-update risk (decision 24); the ADR edit rules (decision 20). Warns 4 and 7 below update two of these for code that has merged since. | |
 
 ## Findings
 
 | # | Severity | Plan element | Drift dimension | Finding | Suggested fix |
 |---|---|---|---|---|---|
-| 1 | block | `pub fn spec_of_pane(&Pane) -> ProfileSpec` in `tx_launch.rs` (API line 1483; Reuse map line 1891; relaunch base, line 1630) | pattern consistency (parallel path); ADR | A second public copy of the Pane-to-spec mapping. ADR-0021 section 3 and issue #662 put it in `profile_snapshot.rs`. #662a's in-flight plan defines `profile_snapshot::spec_from_pane` there with the same mapping, plus `FIXED_PORT_POLICY_PREFIX` and `fixed_port_policy`, and expects #644 to use them. | Drop `spec_of_pane`. Relaunch's base becomes `profile_snapshot::spec_from_pane`, and `port_of_policy` parses with `FIXED_PORT_POLICY_PREFIX`. The MO either sequences #662a first or moves #662a's exact API into this blast radius. |
-| 2 | block | relaunch CLI step 3 (lines 1632-1640); `RelaunchRequest.move_grid` (line 1506); B3 and B10 (lines 1655, 1659) | layering (choke point) | The cwd and cell rules are checked only in `relaunch.rs`, and the engine trusts a `move_grid` flag the caller computes. Any other caller (#664 `apply`, named in Forward-compat) can make the engine record a cwd tmux does not have, or create a pane at a new cell and leave the old pane open and unrecorded. | Replace `move_grid` with `grid_given`. The engine works out the move itself and, as its first plan step, refuses a cwd change or a cell change made without `--grid`. The `usage` text stays the same, so AC 19 does not change. Also check `spec.pane == name` there. |
-| 3 | block | the record written at R (line 1621); AC 1 (line 1706), AC 20 (line 1817) | cross-cutting (I6, the record contract); ADR | `last_observed.driven = Some(sid)` is set without being observed: no port can see the hub's DRIVEN before #649. The frozen `LastObserved` (`pane.rs:179-180`) and ADR-0021 section 1 (line 45) say "never inferred". #647's plan leaves `driven` as stored, so the inferred value would stay. | Launch writes `driven: None`, and relaunch keeps the stored value. `shown` stays what O1 observed. Amend AC 1 and AC 20, and add a C-14. |
-| 4 | block | `launch::reconcile_step` (line 1550); `emit_outcome` appends it whenever `acted` (decision 15, line 1948); AC 16h and 16j | duplication; layering | #663's in-flight plan makes `profile_scope::reconcile_step` the one shared copy for #644 and #646. It also adds the step to the scope's own `profile-conflict`, restore and timeout errors. #644 plans a second function with its own quoting and always appends it, so under the real scope the user sees two steps naming two doctor forms. The fake scope does not add the step, so #644's tests cannot see this. | One function, one owner and one doctor form, agreed with #663 before T pins AC 16h and 16j. The verb appends the step only to errors that do not already carry it (or the scope stops adding it). |
-| 5 | warn | `TxOptions.now_ms` default (line 1489); "`std::time` only" (line 1452) | duplication | `holler_proto::clock::now_millis` already does exactly this (0 on a clock error). #207 folded 5+ hand-written copies into it, and `holler-pane` already depends on `holler-proto`. | Name it as the default in the API and in the Reuse map. |
-| 6 | warn | `pub(crate) mod rig` in `tests/pane_verbs/launch.rs` | duplication (test helpers) | #643 (`crate::list::Rig`) and #647 (`doctor/rig.rs`) plan rigs over the same seven fakes in the same test target. Nothing on main sets a pattern yet. | If `crate::list::Rig` is on main when T starts, build on its fakes and add only the linked host and the hooks. Otherwise, say in Forward-compat which rig #645 and #646 reuse. |
-| 7 | warn | relaunch's B10 runs before R (lines 1659-1660) | transaction order | If closing the old pane fails after the move, R is skipped and P is restored. The record then keeps the old pane id and cell while the new pane holds the TUI. | Write R first, then close the old pane best-effort and fail loudly if that fails. Or state why not. |
-| 8 | warn | decision 12 (line 1935); the #647 row of Forward-compat (line 1983) | cross-story contract | Launch refuses any unrecorded occupant and expects #647 to "offer the way out". #647's plan reports `unregistered-herdr-pane` with no remedy. After a crash mid-launch (AC 7), no Holler verb frees the cell. | Correct the row and file a follow-up for O to assign. |
-| 9 | warn | CLI step 2 reads P for the base, and `edit_spec` reads P again later | concurrency | Between the two reads (the probe alone can take 5 s), another writer's change to the same pane's entry is overwritten with no conflict reported, because `SpecEdit::Set` carries no expected generation. | Add it to Risks, and file a follow-up with #663 for an expected generation on the edit. |
-| 10 | warn | decision 20 (the ADR-0021 edits) | ADR consistency; merge hygiene | (a) #647 and #662 are editing the adjacent "Deferred" lines and section 3 at the same time. (b) Section 9 writes a story's own codes as "open (#N)", and `unavailable` and `timeout` are already common to every verb. (c) The section 12 "Decided (#644)" note picks an option the operator did not list. | (a) Mark items decided in place, and cite #662's `fixed:<port>` sentence instead of restating it. (b) Follow the row convention. (c) Mark the note PROPOSED, or record the operator's confirmation. |
+| 1 | warn | Messages the engine and verbs compose (step 5, E0, O1, O2, B2, B10, rollback) and the success line (`launched ... session <sid> ...`) | cross-cutting: untrusted text | Every merged pane verb that prints an untrusted value sanitizes it: reconcile and doctor use `findings::quoted` / `embedded`, park uses `quoted`, and the read verbs use `list::text_value`. The brief's templates insert these raw: the harness's session ids, the TUI's shown session, Herdr pane ids, workspace labels, and B10's adapter message. The brief's security section covers secrets only. | Route each untrusted value in a composed message through `findings::quoted`, and an adapter's message through `findings::embedded` (it is `pub(crate)` in `holler-pane`, so `tx_launch.rs` can call it). Route the success line's sid and workspace through `quoted` (as park does) or `list::text_value`. An error passed through unchanged stays as it is (`output.rs`). No AC changes: a quoted plain id still contains the id. |
+| 2 | warn | O1 (`not Some(sid)` -> roll back) | pattern consistency: reuse | `reconcile::shown_differs` is documented as "the one form of this comparison", and both reconcile and #643's `SessionSync::of` call it. O1 would add a third, inline form. | O1 calls `holler_pane::reconcile::shown_differs(Some(&sid), shown.as_deref())`. Add it to the Reuse map. The semantics are the same and no AC changes. |
+| 3 | warn | C-10; "What a rollback leaves ... reported by doctor"; AC 7's parenthetical; the #647 row of Forward-compat | cross-story contract | The merged doctor sees little of what a failed or crashed launch leaves. `unregistered-herdr-pane` appears only in a whole-fleet pass, and servers and tmux sessions are observed only through in-scope records. With `--profile P`, the printed step (`pane doctor --profile 'P'`, then `profile show 'P'`) reports nothing: P's spec was restored, so `show` has nothing to show either. A whole-fleet doctor reports only the Herdr pane. After a crash, the next launch is refused with `grid-occupied` and then `port-in-use`, because nothing stops a server that has no record. | Correct those four claims to match what the merged doctor reports. Widen the cell follow-up to cover the port and the tmux session. Add a follow-up for #663/#647: after a failed launch, the reconcile step or `pane doctor --profile` should reach leftovers that have no record. The step's text does not change in this story (decision 15 stands). |
+| 4 | warn | Decision 25; the AC rig description (lines 2120-2136); the size check's `launch_rig.rs` fallback | test-helper duplication; file structure | Decision 25's condition has fired. `crate::list::Rig` (#643) is on `main`, and so are `crate::park::rig::Rig` (#646a) and doctor's private rig (#647). The brief's "no shared rig exists on `main` today" is stale, and a standalone launch rig would be the fourth copy. The two-verb precedent is `park.rs` declaring `pub(crate) mod rig;` in `park/rig.rs` (and `doctor/rig.rs` the same way), with no `#[path]`. | T takes decision 25's first branch and builds on `crate::list::Rig`. Its fields are `pub`, so `Rig { herdr: FakeHerdr::new("scratch").with_workspace("main", 3, 3)?, ..Rig::new(..)? }` needs no edit to `list.rs`. T adds only the linked host, the hook wrappers, and a call-log span named `mark`/`calls_since` as in doctor's rig. Anything T adds goes in `tests/pane_verbs/launch/rig.rs`, declared in `launch.rs` and reached as `crate::launch::rig`, not in `launch_rig.rs`. If T judges list's rig unfit, T follows park's precedent (#662's names) and says why in `handoff-T-red.md`. |
+| 5 | warn | Decision 4 (`--herdr-session`, required); the #649 and #664 rows of Forward-compat | forward-compat: wiring | The merged `HerdrAdapter` serves exactly one session, `HerdrConfig.session`. It refuses any other session before it sends a request, and it stamps every snapshot pane with that session. In production the flag therefore has only one valid value. A wrong value fails at A1 inside the act, after P's first write (P's generation moves by 2), rather than in the plan. Keeping the flag is right for this run: the frozen `HerdrPort` cannot tell the engine its session, and the wiring is `Unwired`. | Add to the #649 Forward-compat row: default `--herdr-session` from the wiring's `HerdrConfig.session`, so the flag becomes optional (relaxing a required flag breaks no caller). #664's apply takes the session from the same place. Say this in the section 8 "as built" note. |
+| 6 | warn | `TxOptions.now_ms: fn() -> i64` | pattern consistency: clock | The sibling engine takes the clock as a value: doctor fills `ReconcileRequest.now_ms: i64` once with `now_millis()`, and park takes `since: now_millis()` when the request is built. The brief's engine calls a function pointer at R instead. Both shapes work, and tests can pass a constant to either. | Keep the binding shape for this run, and have F's `TxOptions` doc say why: `last_observed.at` is stamped at R, after O1, which can be up to the budget after the CLI started. Aligning the engines' clock shapes joins the rig and engine follow-ups. |
+| 7 | warn | Decision 20 (the ADR-0021 edits); decision 15 and C-16; the follow-up "the reconcile step names the pane" | ADR consistency | (a) `pane doctor [PANE]` has merged (ADR-0003 line 61), and section 8 step 6 (lines 331-339) says the step "names no pane on purpose". The follow-up contradicts that recorded decision, and C-16 and decision 15 are stale. (b) Step 6 already holds decision 15's append rule. (c) Decision 20's line numbers are about 40 lines out: the launch row is now line 376, the operator's paragraph ends at 510 and is followed by #647's "no hub timer", and "Deferred" starts at 567. Its content anchors still hold. (d) Section 9's reason for `unavailable` (line 434, "cannot be reached (also a garbled reply)") does not cover the way decision 14 uses it. | (a) Drop that follow-up, and cite step 6's reason in decision 15. (b) The "as built" note cites step 6 for decision 15 rather than restating it. (c) F anchors every ADR edit by content, not line number. (d) Amend the reason cell at line 434 in the same change, e.g. "..., or the live state a verb needs is not there after its act (#644)". Optionally, name `grid-unreachable` in the launch row as the Herdr adapter's code: it is #640's open code, and A1 and B3 can return it. |
+| 8 | warn | `PaneLaunch.name`, `PaneRelaunch.name` | naming | The sibling `Args` structs call their positional field `pane` (`PaneGet.pane`, `PanePark.pane`, `PaneDoctor.pane`). | Name the field `pane`. Tests go through argv and never see the field, so F can rename it freely. |
 
 ### Finding detail (the evidence behind each row)
 
-**1. A second home for the Pane-to-spec mapping.**
+**1. Untrusted text.**
+- The merged rule: `crates/holler-pane/src/findings.rs:19-21` says "Untrusted text (session and Herdr ids, the record's host names, adapter messages) reaches a message only through `quoted` (one value) or `embedded` (an adapter's message), so no control sequence reaches a terminal". `quoted` is at line 332 (`pub`) and `embedded` at line 338 (`pub(crate)`).
+- Other places that follow it:
+  - `crates/holler-cli/src/pane/park.rs:31-34`, park's text output;
+  - `crates/holler-cli/src/pane/list.rs:270-291`, `text_value` ("Every stored string the read verbs print in text mode goes through here"), shared by `get.rs` and `watch.rs`.
+- Why it matters here:
+  - `shown_session` will read the TUI's title, which #642 maps back to a session id (`crates/holler-adapter-opencode/src/lib.rs:40-42`). An agent inside OpenCode can rename its own session, so O1's message can carry text the agent chose to the operator's terminal.
+  - `create_session`'s ids come from the server's JSON.
+- The brief's line 2641 ("may quote session ids, pane ids, ports") is about secrets, not about control sequences.
 
-- ADR-0021 section 3, lines 149-154: "The mapping lives in `holler-pane/src/profile_snapshot.rs` (#662), which the
-  migration (#650) reuses." Issue #662's scope says the same. The stub's own module doc (`profile_snapshot.rs:1-4`) reads
-  "Snapshot of a live pane as a `ProfileSpec`".
-- #662 is in wave 3 beside #644, and its run is live (branch `issue-662-implementation` at `5b47d82`, scoped to 662a).
-  Its brief (`docs/handoffs/662-brief.md:1440-1455` on that branch) makes these binding:
-  - `spec_from_pane(pane: &Pane) -> ProfileSpec`, with exactly the field mapping of `spec_of_pane`, `fixed:<port>` included;
-  - `FIXED_PORT_POLICY_PREFIX = "fixed:"`;
-  - `fixed_port_policy(port)`.
-- That brief names #644 as the reader of the prefix (lines 1936 and 1949), and it does not know `spec_of_pane` exists. So
-  the justification in this brief ("#662 should call or move this one rather than write a second") does not hold.
-- What happens if both ship:
-  - Two public copies of one mapping in one crate.
-  - The `fixed:<port>` grammar split between `tx_launch::port_of_policy` (the parser) and `profile_snapshot` (the prefix
-    and the formatter).
-  - `profile_diff::diff_spec` compares through `spec_from_pane` (662-brief lines 1558-1562), so any later difference
-    between the two copies shows up as false drift in `profile show` and `apply` for every pane #644 launches.
-  - Decision 20 leaves the ADR's sentence about where the mapping lives untrue.
+**2.** `crates/holler-pane/src/reconcile.rs:171-181`; `crates/holler-cli/src/pane/list.rs:226-239`.
 
-**2. Relaunch's invariants checked at one call site.**
+**3.**
+- The whole-fleet gate: `reconcile.rs:192` (`whole_fleet`) and `:311-317` (`unregistered_herdr_panes` runs only then).
+- Strays come only from in-scope servers (`reconcile.rs:371-402`), and every chain starts from a record (`reconcile/observe.rs:96-109`).
+- `crates/holler-adapter-host/src/lib.rs:31-39`: `stop_owned` stops only what `run` started. A crashed launch's server therefore keeps its port until #695, which stops a server by its recorded pid.
+- ADR-0021 line 499 ("A crash between steps leaves state that the next pane doctor run finds and reports (#644's acceptance)") overstates the merged doctor as well. That sentence is #644's issue acceptance, so S decides whether it is met; this row flags only the contract gap.
 
-- The two rules protect the record and the layout:
-  - "Relaunch cannot change a pane's directory": tmux keeps its cwd. `FakeHost::ensure_session` on an existing session
-    "changes nothing, neither the cwd nor the processes" (brief F-12).
-  - "Relaunch moves a pane only with `--grid`" (ADR-0021 section 10, line 431).
-- `move_grid` can be worked out from `spec` and `record`: the CLI makes it true exactly when the effective cell differs.
-  As a separate field, all it adds is a way to pass a request that contradicts itself.
-- Over the engine as specified, two things can go wrong:
-  - `move_grid: false` with a different cell: B3 creates a pane at the new cell, B10 is skipped, and the old Herdr pane is
-    left open with no record naming it.
-  - A different cwd: R records a cwd the tmux session does not have.
-- This matters because of who else calls the engine. Forward-compat (line 1981) has #664 call `tx_launch::relaunch` with a
-  complete spec. `--spec-only` lets P's cwd and cell drift from the live pane on purpose (decision 11, AC 16g), and those
-  drifted specs are what `apply` would pass.
-- The codebase's pattern is that the shared transaction enforces its own rules:
-  - the scope's own guards before any write (`holler-pane-testkit/src/profile_scope.rs:49-53`);
-  - the registry's membership check inside its compare-and-swap (ADR-0021 "Decisions taken", item 2);
-  - this brief's own engine re-check of `spec_only` (line 1499) and of `herdr_session` (launch step 2).
-- `usage` keeps the CLI's exit codes. If O wants `apply` to be able to match a code, an open refusal code is an option.
+**4.**
+- `crates/holler-cli/tests/pane_verbs/list.rs:35-95`.
+- `park.rs:8` and `park/rig.rs:1-12`: it uses #662's names "so a later consolidation of the rigs is mechanical".
+- `doctor.rs:10` (`mod rig;`, private) and `doctor/rig.rs:110-272` (`Calls`, `mark`, `calls_since`, `ports_with`).
 
-**3. An inferred DRIVEN in a stored record.**
+**5.** `crates/holler-adapter-herdr/src/adapter.rs:4-6, 44-54` (one session), `133-155` (`extent_of` refuses another session before any request), `326-344` (`snapshot`).
 
-- `pane.rs:179-180`: "What reconcile last observed about which session the pane shows and which the hub drives. Written by
-  reconcile, never inferred." ADR-0021 line 45 says the same, with I6.
-- How DRIVEN follows `session_of_record` is deferred to #649 and #654 (ADR-0021 lines 452-453).
-- `shown` is observed (O1), so writing it is fine. `driven` is copied from `sid`, so the record would claim the hub drives
-  a session nobody checked. That is the condition the epic's SHOWN-versus-DRIVEN check exists to expose (#633).
-- #647's plan (`issue-647-implementation` at `878a5b9`, 647-brief lines 888-889, 937, 1051-1053) keeps to the contract:
-  DRIVEN cannot be observed before #649, so reconcile compares SHOWN with `session_of_record` and leaves
-  `last_observed.driven` as stored. #644 would then be the field's only writer, and its unobserved value would stay.
-- Writing `driven` would need an amend-first change to the frozen `LastObserved` contract.
+**6.** `reconcile.rs:62-73`; `crates/holler-cli/src/pane/doctor.rs:55-60`; `park.rs:88-99`.
 
-**4. Two reconcile steps.**
+**7.** ADR-0021 lines 331-339, 376, 434, 499, 509-517, 567-575; `profile_scope.rs:37-48`; ADR-0003 line 61.
 
-- ADR-0021 section 8 step 6 and section 12 make the step a concern of every verb that acts: launch, relaunch and close, and
-  any verb that times out.
-- #663's plan (`issue-663-implementation` at `aaf8fb5`, 663-brief lines 1520-1548) has two parts:
-  - Decision 8: `pub fn reconcile_step(profile: &ProfileName)` in `holler-cli/src/pane/profile_scope.rs`, "pub because the
-    spec-editing verbs (#644, #646) print the same step ... one copy".
-  - Decisions 5 to 7: the scope adds that step to its own `profile-conflict`, restore-failure and first-write-timeout errors.
-- With #644's `emit_outcome` appending its own step to every acted failure, a real `profile-conflict` would read "... to
-  reconcile, run holler pane doctor --profile 'P' and then holler profile show 'P'; to reconcile, run: holler pane doctor
-  demo-c1r1, holler profile show 'P'".
-- `FakeProfileScope` adds no step, so #644's tests stay green and #649 is where this first shows.
-- #645 and #646 would also have to import from `pane::launch`, a verb module, or copy it.
-- #647 gives `pane doctor` a `[PANE]` positional (647-brief line 27), so `holler pane doctor <pane>` will parse. The choice
-  between the two doctor forms is the only open point.
-
-**5 to 10.** Evidence for the warns:
-
-- **5:** `crates/holler-proto/src/clock.rs:33-40`.
-- **6:** 643-brief lines 1081-1086 (`issue-643-implementation` at `2e7f221`) and 647-brief lines 1015-1020. #647's rig also
-  hand-writes the launch sequence that `tx_launch::launch` will provide. That is a note for O, not for this story.
-- **8:** 647-brief line 904: remedy "none (no holler verb adopts a pane; `pane import` is #650's)".
-- **9:** brief F-7: `edit_spec` reads P itself; CLI step 2 reads it earlier, at lines 1570 and 1630.
-- **10:**
-  - (a) ADR-0021 lines 523-532. #647 deletes line 524 (647-brief line 888), and #662 rewrites line 525 and section 3
-    (662-brief lines 1766-1768).
-  - (b) ADR-0021 lines 331-339: the common codes, and the "open (#645)" row form.
-  - (c) ADR-0021 lines 462-468 ("with an amendment to the contract first"), and the ADR's PROPOSED convention (line 3).
+**Checked against the merged code, no finding:**
+- `HOST_NAME = "localhost"` matches the test kit's `sample_pane` (`crates/holler-pane-testkit/src/fixture.rs:52`).
+- `OP_LAUNCH` and `OP_RELAUNCH` follow the `<group>.<name>` form of the other `op` strings (`"harness.serve"`, `"herdr.snapshot"`).
+- The three open codes are new: nothing else declares them.
+- The `data` shape: the profile verbs mix name-and-slug rows (`profile list`, `profile delete`) with the full `Profile` (`profile create`, `profile show`), so there is no dominant shape to drift from.
+- `effective_spec` has no analogue on `main`: `profile create` takes no spec flags.
+- `pub(crate)` for the shared verb helpers matches `profile/delete.rs` and `profile/list.rs`.
+- The `PartialEq, Eq` and `Debug` the API derives are implemented by `PaneError`, `Profile`, `ProfileName` and `PaneName`.
+- `holler_cli::pane::profile_scope::StoreScope` is reachable from the `pane_verbs` target (AC 16k).
+- B2 and AC 22 match the merged `TmuxHost`, which does not stop a server that `serve` started.
+- C-9 matches the OpenCode adapter's resolver precondition (`lib.rs:100-104`), and decision 7 matches its "no per-pane environment" (`lib.rs:56-58`).
+- The surface excerpts E-10 to E-12 are as quoted.
 
 ## Notes for O
 
-Amend the brief as follows, then start a **fresh** run. A `resumeFromRunId` would replay this verdict.
+A PASS needs no amendment. There is no O agent in the automated path, so these warns go straight to the phases that act on them:
 
-1. **Finding 1, the mapping.**
-   - Remove `spec_of_pane` from the API sheet, the Reuse map and Forward-compat.
-   - Relaunch's base is `holler_pane::profile_snapshot::spec_from_pane(&record)`.
-   - `port_of_policy` stays in `tx_launch.rs` as the grammar's parser, but builds on
-     `profile_snapshot::FIXED_PORT_POLICY_PREFIX`. No second `"fixed:"` literal.
-   - The MO decides the order:
-     - (a) #662a merges first (its `profile_snapshot.rs` is about 70 lines), and #644 starts from that `origin/main`; or
-     - (b) #644 goes first and fills `profile_snapshot.rs` with #662a's exact `spec_from_pane`, `fixed_port_policy` and
-       `FIXED_PORT_POLICY_PREFIX` (signatures and docs as in 662-brief lines 1440-1455). Its blast radius widens to that
-       file, and the MO amends #662a's brief to reuse them.
-   - Decision 20 must leave ADR-0021 section 3's sentence about where the mapping lives true. The `port_policy` "Deferred"
-     item is #662's to close.
-2. **Finding 2, relaunch's rules.**
-   - Change the request to `RelaunchRequest { record, spec, grid_given: bool, profile, spec_only }`.
-   - Add a first plan step to `tx_launch::relaunch`, with no port call and skipped with `spec_only`:
-     - `spec.pane == record.name`, else `usage`;
-     - an unchanged `host.cwd`, else `usage` with the same message;
-     - a cell change only when `grid_given`, else `usage` with the same message naming both positions.
-   - The move is "the cell differs". The CLI passes `grid_given = --grid was given` and keeps its parsing.
-   - Do the same `spec.pane == name` check in `launch`.
-   - AC 19 stays as written. Optionally add one engine-level case, such as
-     `relaunch_engine_refuses_a_cell_change_without_grid`.
-3. **Finding 3, DRIVEN.**
-   - The record at R gets `last_observed { shown: Some(sid), driven: None, at: now_ms() }` for launch, and the stored
-     `record.last_observed.driven` for relaunch.
-   - Amend AC 1 and AC 20 to match.
-   - Add C-14: the issue's "confirm SHOWN equals DRIVEN" is checked as SHOWN == `session_of_record` (I2) until #649 wires
-     DRIVEN. This is the reading #647 uses.
-4. **Finding 4, the reconcile step.** Settle with #663, whose brief is not yet plan-reviewed:
-   - One function. The recommendation is #663's `profile_scope::reconcile_step`, taking `(pane: &PaneName, profile:
-     Option<&ProfileName>)`.
-   - One doctor form.
-   - One rule for which layer appends it: the verb adds the step only to errors that do not already carry it, or the scope
-     stops adding it and every verb appends.
-   - Rewrite decision 15, the `launch.rs` API lines, and AC 16h and 16j to the single agreed text. #644 adds no second
-     quoting helper.
-   - If #663 cannot change, the brief says exactly which text #644 appends and why there is no duplicate.
-5. **The warns** are small edits:
-   - Name `holler_proto::clock::now_millis` (finding 5).
-   - One sentence on the rig (finding 6).
-   - Order R before B10, or justify (finding 7).
-   - Fix the #647 row of Forward-compat and add the follow-ups for findings 8 and 9.
-   - Follow the ADR edit rules of finding 10. For 10(c), ask the operator, or have F write the note as PROPOSED.
+- **T:** warn 4 (build on `crate::list::Rig`; put any rig file in `launch/rig.rs`).
+- **F:**
+  - in code: warns 1 and 2 (the sanitizers and `shown_differs`), and warn 8 (the rename);
+  - in the `TxOptions` doc: warn 6;
+  - in the ADR edits: warn 7;
+  - in the follow-ups and the "as built" note: warns 3 and 5.
+- **Phase 7 (anti-duplication):** re-checks warns 1, 2 and 4 against the diff.
 
 ## Patterns referenced
 
-- `docs/adr/ADR-0021.md`: section 1 (line 45), section 3 (lines 149-154), section 5 (lines 176-192), section 8 (lines
-  285-305), section 10 (lines 429-432), section 12 (lines 455-468).
-- `crates/holler-pane/src/pane.rs:179-190` (`LastObserved`) and `crates/holler-pane/src/profile_snapshot.rs:1-4`.
-- `crates/holler-pane-testkit/src/profile_scope.rs:31-55`: the scope's own guards before any write, and "recording the pane
-  ... is the verb's, inside its act".
-- `crates/holler-proto/src/clock.rs:1-40` (`now_millis`, #207).
-- The in-flight sibling briefs, read from their branches: `issue-662-implementation` (`5b47d82`), `issue-663-implementation`
-  (`aaf8fb5`), `issue-647-implementation` (`878a5b9`) and `issue-643-implementation` (`2e7f221`), each at
-  `docs/handoffs/<N>-brief.md`.
+- `crates/holler-pane/src/reconcile.rs` and `reconcile/observe.rs` (#647): the sibling engine over `Ports`; `shown_differs`; the clock taken as a request value; the whole-fleet rule.
+- `crates/holler-pane/src/findings.rs:19-21, 303-345`: `doctor_command`, `quoted`, `embedded`.
+- `crates/holler-cli/src/pane/profile_scope.rs:37-56, 122-216` (#663), and ADR-0021 section 8 step 6 (lines 328-339).
+- `crates/holler-cli/src/pane/{park,doctor,list,get}.rs` and `crates/holler-cli/src/profile/create.rs`: how the CLI verbs take the clock, sanitize text, share helpers and shape their `data`.
+- `crates/holler-adapter-herdr/src/adapter.rs` (#640), `crates/holler-adapter-opencode/src/lib.rs` (#642), `crates/holler-adapter-host/src/lib.rs` (#641); `crates/holler-cli/tests/pane_verbs/{list.rs, park/rig.rs, doctor/rig.rs}`.

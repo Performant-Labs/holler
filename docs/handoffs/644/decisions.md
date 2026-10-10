@@ -36,3 +36,33 @@
 - **Assumed:** The review's own count (0 blocking findings) is the substance and the BLOCK label is a model slip; the architecture review and the diff gate still run.
 - **Hedged:** The override waives the brief gate's formal pass for this one story only; it does not extend to any other story or gate.
 - **Evidence:** `docs/handoffs/644-brief-result-r4.md`; the stop result `{"stopped":"gate-unavailable","reason":"sanity-check-failed","gate":"brief"}` from run wf_323bb0af-347.
+
+## A (up-front plan review, re-review of the amended brief) — 2026-10-09T23:29:32-06:00
+- **Decided:** PASS (handoff-A.md, which replaces the BLOCK of `d2636ba`).
+  - All four earlier blocks are fixed in the brief, and each fix holds against the merged code:
+    - `spec_from_pane` and `FIXED_PORT_POLICY_PREFIX` (#662a);
+    - E0 with `grid_given`;
+    - `driven: None`, as #647's reconcile expects;
+    - #663's `reconcile_step` with the exact-substring append rule, now recorded in ADR-0021 section 8 step 6.
+  - T's preflight greps all pass.
+  - Eight warns, all from code merged after the brief's baseline (`3bdd129`):
+    1. untrusted text must go through `findings::quoted`/`embedded` or `list::text_value`;
+    2. O1 must call `reconcile::shown_differs`;
+    3. the merged doctor does not see a launch's leftovers (scoped passes never, whole-fleet only the Herdr pane), and a crash also leaves the port in use;
+    4. decision 25's condition has fired: build on `crate::list::Rig`, and put any rig file in `launch/rig.rs`;
+    5. the Herdr adapter serves one configured session, so #649 should default `--herdr-session`;
+    6. the clock is a `fn()` here and a value in reconcile and park; keep it and document why;
+    7. stale ADR anchors and statements, including the "step names the pane" follow-up, which contradicts step 6, and section 9's `unavailable` reason;
+    8. name the positional field `pane`.
+- **Assumed:** T and F work from the brief as committed at `40f486e`, on `origin/main` `d9eabbb`. The merged #643, #646a, #647 part 1, #640 part 2, #641, #642 part 1, #662 and #663 are the baseline the plan builds on.
+- **Hedged:**
+  - Warn 1 is a warn, not a block: no binding API or acceptance criterion changes, F can apply it within the brief's latitude on message wording, and Phase 7 re-checks it.
+  - Warn 6 keeps the brief's binding `TxOptions` shape for this run rather than asking T to deviate from it.
+  - Warn 3's acceptance question (ADR-0021 line 499, "the next pane doctor run finds and reports") is S's to judge; this review flags only the contract gap.
+- **Evidence:**
+  - Brief and prior reviews: the whole brief (2,688 lines), the first handoff-A, this journal, and the r4 gate result.
+  - ADRs: `git diff 3bdd129 HEAD` of ADR-0021 and ADR-0003, plus ADR-0021 sections 3, 8, 9 and 12 as they stand now.
+  - `holler-pane` and `holler-cli` source: `holler-pane` `lib.rs`, `profile_snapshot.rs`, `reconcile.rs`, `reconcile/observe.rs` and `findings.rs`; `holler-cli` `pane/{profile_scope,park,doctor,list,get}.rs` and `profile/create.rs`.
+  - The adapters: `holler-adapter-herdr/src/adapter.rs`, the crate docs of `holler-adapter-opencode` and `holler-adapter-host`.
+  - The test rigs: `tests/pane_verbs/{main,list,park,doctor}.rs`, `park/rig.rs` and `doctor/rig.rs`.
+  - Checks: greps for the three open codes, `HostInfo.name` and the sanitizer users; T's preflight greps; the derives on the binding types.
