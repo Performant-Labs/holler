@@ -88,3 +88,55 @@
     647-brief and `pane_verbs/doctor/rig.rs`; 663-brief (its Reuse map and Decision 2).
   - **Greps:** slug comparisons, escape helpers, per-variant serde renames, `port_policy`, spec-pane validation, inline
     tests, and the sibling briefs for this story's API names.
+
+## T (Phase 4, author / RED) — 2026-10-09T18:10-06:00
+- **Decided:** RED is valid (handoff-T-red.md).
+  - **28 new tests:**
+    - 5 in `crates/holler-pane/tests/profile_snapshot_test.rs`;
+    - 9 in `crates/holler-pane/tests/profile_diff_test.rs`;
+    - 3 in `profile_verbs/list.rs`;
+    - 9 in `profile_verbs/show.rs`;
+    - the shared `profile_verbs/rig.rs` (`#[path]` from `list.rs`).
+  - **Results at RED:** 25 fail on behaviour assertions. 2c passes vacuously, as the brief expects.
+  - **Signature stubs landed by T**, per the brief's Test plan ("the allowed approach"): `profile_snapshot.rs`,
+    `profile_diff.rs`, and `ProfileShow { name }` with `run` still `not_implemented`.
+  - **Surface changes:** removed the list/show STUBS entries (keeping `// #662`), and moved the `profile show` fixture lines
+    to take NAME.
+  - **`SpecField` serializes through `as_str()`** in the stub (A warn 1, single source), not through 15 renames. The tests
+    are neutral between the two: they pin the 15 paths against a hand-written list and check that serde equals `as_str`.
+  - **The rig's no-adapter check keeps the AC's name, `assert_no_adapter_call()`**, not #643's `assert_nothing_observed`
+    (A warn 2b). AC 3 names it literally and S audits against the AC. The later fold of the rigs is a one-line rename.
+  - **Added beyond the ACs:**
+    - `snapshot_ignores_the_fields_a_spec_does_not_hold` (the "Not copied" list);
+    - `fixed_port_policy_is_the_prefix_and_the_port` (#644's pin);
+    - `field_values_print_for_a_person` (the rest of the `Display` table);
+    - show's bad-name `usage`;
+    - show's profile-store failure passing through.
+  - A warn 5 is pinned in 5e: a spec pane with ESC prints escaped.
+- **Assumed:**
+  - **AC 2c's "fully populated pane of 1a"** is covered by `common::pane()`, which is fully populated, plus a sparse
+    orchestrator pane (the `None` and empty side). The 1a pane itself is not repeated, which avoids a second copy of its
+    builder in a second file.
+  - **The text forms** are exactly the brief's "What each verb prints": two-space indents, spec blocks before pane rows, and
+    no probe line under a `Missing` row.
+  - **The `logging_test` failures** (4 cases, `Unexpected success` on `holler roster`) are environmental: a hub is
+    reachable on this machine. This diff does not touch roster.
+- **Hedged:**
+  - Before restoring the stubs, I validated satisfiability with a throwaway reference implementation of the pure modules
+    and of list/show, written only from the brief. All 32 tests passed, and so did `cli_surface_test` and
+    `pane_cli_process`. The throwaway code was reverted and is not staged. F writes its own.
+  - `docs_cli_test` fails at RED on ADR-0003:68 (`holler profile show` without NAME). That is F's ADR row (AC 9), not a
+    test defect.
+- **Evidence:**
+  - **Runs:**
+    - `cargo test -p holler-pane --test profile_snapshot_test --test profile_diff_test --no-fail-fast` gives 1/9 and 0/5;
+    - `cargo test -p holler-cli --test profile_verbs` gives 6/18, where the 6 passing are the other verbs' stub cases;
+    - `cli_surface_test` 3/3, `pane_cli_process` 34/34, and `docs_cli_test` 2/3 (the ADR row).
+  - **Lints:** `cargo clippy -p holler-pane -p holler-cli --all-targets -- -D warnings` exits 0, `bash scripts/lint.sh`
+    exits 0, and `rustfmt --check --edition 2021` passes on every touched file.
+  - **Read:**
+    - the brief in full and handoff-A;
+    - holler-pane `tests/common/mod.rs`;
+    - the test kit's `lib`, `fixture`, `fault`, `envelope`, `pane_store`, `profile_store` and the adapter constructors;
+    - `verb_harness/{mod,parse}.rs`, `pane_verbs/process/{stub,docs_rows}.rs` and `docs_cli_test.rs`;
+    - #643's rig at `837718b`.

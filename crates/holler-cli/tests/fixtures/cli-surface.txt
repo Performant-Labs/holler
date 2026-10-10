@@ -162,8 +162,8 @@ profile create |
 profile delete |
 profile list |
 profile list | --format=json
-profile show |
-profile show | --json
+profile show | Demo
+profile show | "Some Profile" --json
 
 # #664
 profile apply |
