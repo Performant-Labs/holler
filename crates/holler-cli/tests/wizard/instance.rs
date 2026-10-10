@@ -253,8 +253,9 @@ fn documented_defaults_match_the_skill_text() {
     let docs = read_repo("docs/setup-wizard.md");
 
     // What the stages use today.
-    assert!(skill.contains("holler hub serve --listen 127.0.0.1:41807"));
-    assert!(skill.contains("tailscale serve --bg 41807"));
+    assert!(skill.contains("holler hub serve --listen 127.0.0.1:<hub_port>"));
+    assert!(skill.contains("tailscale serve --bg --https <serve_https_port> <hub_port>"));
+    assert!(skill.contains("(defaults 41807 and 443)"));
     assert!(skill.contains("endpoint = \"http://127.0.0.1:47001\""));
     assert!(skill.contains("endpoint = \"http://127.0.0.1:47002\""));
 
