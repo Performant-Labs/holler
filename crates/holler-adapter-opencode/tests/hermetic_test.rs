@@ -47,11 +47,16 @@ impl Scratch {
     /// `sh serve --port ...`: it leaves a `spawned` marker in its working directory and
     /// exits 42.
     fn with_serve_script() -> Self {
+        Self::with_script("touch spawned\nexit 42\n")
+    }
+
+    /// A scratch dir whose `serve` script is `body`.
+    fn with_script(body: &str) -> Self {
         static NEXT: AtomicUsize = AtomicUsize::new(0);
         let n = NEXT.fetch_add(1, Ordering::Relaxed);
         let dir = std::env::temp_dir().join(format!("hlr642-{}-{n}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("serve"), "touch spawned\nexit 42\n").unwrap();
+        std::fs::write(dir.join("serve"), body).unwrap();
         Scratch(dir)
     }
 
@@ -538,11 +543,63 @@ fn ac8_serve_of_a_program_that_exits_at_once_is_unavailable_with_its_status() {
         scratch.spawned(),
         "the server ran in the pane's project directory"
     );
-    let without_port = message.replace(&port.to_string(), "");
+    // 42 as a number of its own, so a port, a pid or the `hlr642-...` scratch path that holds
+    // the digits cannot satisfy it.
     assert!(
-        without_port.contains("42"),
+        message
+            .split(|c: char| !c.is_ascii_digit())
+            .any(|n| n == "42"),
         "holds the exit status 42: {message:?}"
     );
+}
+
+/// Whether `pid` is still a process (`kill -0`, which signals nothing).
+fn alive(pid: &str) -> bool {
+    std::process::Command::new("kill")
+        .args(["-0", pid])
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success())
+}
+
+/// Behaviour, `serve`: a server that never turns healthy is killed with its whole process
+/// group when the deadline passes, so a failed `serve` leaves no process behind.
+#[test]
+fn serve_kills_its_process_group_when_the_deadline_passes() {
+    let timeouts = Timeouts {
+        call: Duration::from_secs(1),
+        ..quick()
+    };
+    // Never binds the port; records its own pid and a background child's (same group).
+    let scratch = Scratch::with_script("echo $$ > pid\nsleep 30 &\necho $! > child\nwait\n");
+    let h = OpenCodeHarness::new(config("sh", scratch.path(), timeouts));
+    let start = Instant::now();
+    let op = timeout_op(
+        h.serve(&pane_name(), closed_port()),
+        "serve of a server that never answers",
+    );
+    assert_eq!(op, HarnessOp::Serve.as_str());
+    assert_within(
+        start,
+        timeouts.call + SLACK,
+        "serve of a server that never answers",
+    );
+    for file in ["pid", "child"] {
+        let pid = std::fs::read_to_string(scratch.path().join(file))
+            .unwrap_or_else(|e| panic!("the script recorded its {file}: {e}"));
+        let pid = pid.trim();
+        // A killed orphan is reaped by init shortly after the kill, not at once.
+        let gone_by = Instant::now() + Duration::from_secs(2);
+        while alive(pid) && Instant::now() < gone_by {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        if alive(pid) {
+            let _ = std::process::Command::new("kill")
+                .args(["-KILL", pid])
+                .status();
+            panic!("the {file} process {pid} outlived serve's timeout");
+        }
+    }
 }
 
 // ---- AC 11: the adapter's shape ----

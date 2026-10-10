@@ -109,3 +109,37 @@
     `bash scripts/lint.sh`; `cargo machete`; `cargo test --workspace` twice (once with the live hub reachable, once isolated);
     `cargo tree -i holler-adapter-opencode`; a `setsid` group kill through `/usr/bin/kill`; and the scratch self-checks quoted
     in handoff-F.md.
+
+## T (Phase 7, verify GREEN + Tier 2) — 2026-10-09
+
+- **Decided:**
+  - GREEN is valid. F changed no test, and the 27 RED tests all pass. Five hand mutations of `src/` (M1-M5 in
+    handoff-T-green.md) each failed exactly the test that targets them.
+  - F's fragility note on the AC 8 "42" check is applied. The check now asks for `42` as a whole number in the message,
+    so a scratch path (`hlr642-...`), a pid or the port can no longer satisfy it.
+  - One test is added: `serve_kills_its_process_group_when_the_deadline_passes`. It pins the brief's Behaviour rule for
+    `serve` (kill the group on the deadline, then answer `timeout`), the one specified branch with a real leak cost that
+    had no test. The success path is left to 642b's real rig, since only a child that answers HTTP reaches it.
+  - Verdict PASS. Nothing needs F's production code to change.
+- **Assumed:**
+  - CI's macOS leg has `kill`, `sh` and `sleep` on `PATH` and supports `kill -0`. These are standard on GitHub's macOS
+    images.
+  - An orphaned background `sleep` is reaped by init (or a subreaper) within 2 s of the group kill.
+- **Hedged:**
+  - The workspace run was done with `HOLLER_STATE_DIR` isolated only, as CI runs with no live hub. I did not repeat F's
+    non-isolated run.
+  - Whether BSD `kill` accepts `kill -s KILL -- -<pgid>` is unverified here. The new test will show it on the macOS leg,
+    and any fix belongs in `exec.rs`.
+- **Evidence:**
+  - Read: handoff-F.md, handoff-T-red.md, the brief's AC list (712-887) and its Behaviour section (618-712),
+    `evidence.md`, `.github/workflows/ci.yml` (the matrix and the run steps), and `src/{lib,server,exec}.rs` at the
+    mutation points.
+  - Ran:
+    - `cargo test -p holler-adapter-opencode` (27/27, then 28/28; 12 runs at once and one `--test-threads=1` run);
+    - the M1-M5 mutations, each restored with `git checkout`;
+    - `cargo clippy --workspace --all-targets -- -D warnings`, `rustfmt --check`, and `cargo doc` with `-D warnings`;
+    - `bash scripts/lint.sh`, `bash scripts/changelog-check.sh`, `cargo machete` and `bash scripts/test-hooks.sh`;
+    - `cargo test -p holler-cli --test wire_selftest` and `--test docs_cli_test`;
+    - `cargo test --workspace -- --skip roster_stays_accurate_under_concurrent_body_load` with `HOLLER_STATE_DIR`
+      isolated (126 suites, 1410/0/5);
+    - the AC 22 `git diff --name-only`, the `Cargo.lock` diff, the `unsafe` count and the AC 24 grep.
