@@ -111,3 +111,24 @@
   > //! is allowed **between** word chars, but a segment must not start or end
   > //! with one. The 32-char per-segment limit (docs §3) is enforced here.
   > ```
+
+## T (Phase 6)
+
+- **Fact:** the test kit's `HarnessOp` strings for the three TUI methods are `harness.attach_tui`,
+  `harness.select_session` and `harness.shown_session`. `attach_test.rs` builds every expected `timeout { op }` from
+  `HarnessOp::*.as_str()` (AC 29(d), 30, 30(e)), so the adapter's `OP_*` constants must equal them.
+  **Source:** `crates/holler-pane-testkit/src/harness.rs:44-54`
+  **Verbatim excerpt:**
+  > ```rust
+  > impl PortOp for HarnessOp {
+  >     fn as_str(self) -> &'static str {
+  >         match self {
+  >             HarnessOp::Serve => "harness.serve",
+  >             HarnessOp::Health => "harness.health",
+  >             HarnessOp::CreateSession => "harness.create_session",
+  >             HarnessOp::ListSessions => "harness.list_sessions",
+  >             HarnessOp::Abort => "harness.abort",
+  >             HarnessOp::AttachTui => "harness.attach_tui",
+  >             HarnessOp::SelectSession => "harness.select_session",
+  >             HarnessOp::ShownSession => "harness.shown_session",
+  > ```

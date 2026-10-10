@@ -7,8 +7,8 @@
 //! - the dead-end provider config, verbatim from the spike, so no model can be reached:
 //!   127.0.0.1:9 must refuse, and after every `serve` the server must report exactly that
 //!   provider, or the test fails without going on. No prompt is ever sent;
-//! - two ports from 48100-48199 only, each refused when picked and not yet handed out in
-//!   this process;
+//! - two ports from 48100-48199 only, each refused and bindable when picked and not yet
+//!   handed out in this process;
 //! - a private tmux server (`-S <scratch>/tmux.sock -f /dev/null`) with sessions
 //!   `demo-c1r1` and `demo-c2r1` running a placeholder (`sleep 3600`), for the panes
 //!   `w9:p1` and `w9:p2`; never the default tmux server.
@@ -104,7 +104,16 @@ pub fn refused(port: u16) -> bool {
     )
 }
 
-/// A port in 48100-48199 that refuses now and that this process has not handed out.
+/// Whether `127.0.0.1:port` can be bound now. The range lies inside Linux's ephemeral
+/// range, so a socket that does not listen (a client end) can hold a port that
+/// [`refused`] reports free, and `opencode serve` then cannot bind it. The listener is
+/// dropped at once; one that never accepted leaves no `TIME_WAIT`.
+fn bindable(port: u16) -> bool {
+    std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, port)).is_ok()
+}
+
+/// A port in 48100-48199 that refuses now, can be bound now, and that this process has
+/// not handed out.
 pub fn free_port() -> u16 {
     static TAKEN: OnceLock<Mutex<HashSet<u16>>> = OnceLock::new();
     let mut taken = TAKEN
@@ -117,7 +126,7 @@ pub fn free_port() -> u16 {
     let start = (nanos ^ std::process::id()) % u32::from(PORT_COUNT);
     for i in 0..u32::from(PORT_COUNT) {
         let port = FIRST_PORT + u16::try_from((start + i) % u32::from(PORT_COUNT)).unwrap();
-        if !taken.contains(&port) && refused(port) {
+        if !taken.contains(&port) && refused(port) && bindable(port) {
             taken.insert(port);
             return port;
         }

@@ -533,6 +533,26 @@ fn ac30_an_attach_the_title_never_confirms_times_out_within_settle() {
     assert!(took < quick().settle + SLACK, "took {took:?}");
 }
 
+/// I3 (F's design decision 1): the watch confirms an attach only for a TUI attached to the
+/// requested port. Two servers share one data directory, so a TUI of another server can show
+/// the same id; that is not this attach, and the answer is `timeout`, not `Ok`.
+#[test]
+fn ac30_a_tui_of_another_server_showing_the_session_does_not_confirm_the_attach() {
+    let rig = attachable();
+    let other = rig.stub.port.checked_add(1).unwrap_or(1);
+    rig.fake
+        .reply("display-message", &live(&attach_line(other), "OC | ses_A"));
+    let start = Instant::now();
+    assert_eq!(
+        rig.harness.attach_tui(&pane(PANE), rig.stub.port, "ses_A"),
+        Err(PaneError::Timeout {
+            op: HarnessOp::AttachTui.as_str().to_owned()
+        })
+    );
+    let took = start.elapsed();
+    assert!(took < quick().settle + SLACK, "took {took:?}");
+}
+
 #[test]
 fn ac30e_each_method_past_its_deadline_times_out_with_its_own_op() {
     let spent = Timeouts {

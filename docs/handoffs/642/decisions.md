@@ -115,3 +115,31 @@
     `scripts/lint.sh`, `cargo machete` and the changelog check.
   - Probes, each on a private `-L` tmux server killed afterwards: a TAB in a start-command argument prints as `\t`, and a
     pane keeps its title across `respawn-pane -k`.
+
+## T (Phase 6, verify GREEN + Tier 2) — 2026-10-09T23:45:08-06:00
+- **Decided:**
+  - GREEN, with no blocking issue (see handoff-T-green.md).
+  - I added one test, `ac30_a_tui_of_another_server_showing_the_session_does_not_confirm_the_attach`. Without it, a
+    mutation that removes F's port check from the watch passed the whole suite.
+  - The real rig's `free_port()` now also requires the port to be bindable. This is F's item 2, the ephemeral-range
+    flake.
+  - No production code was touched.
+- **Assumed:**
+  - The stale title after `respawn-pane` (reproduced on tmux 3.7c) is a contract change for O and S, not a defect in
+    F's code against this brief. The brief pins the respawn sequence (AC 11a, 30(a)), and nothing calls `attach_tui`
+    until #644 and #649. So it is recorded as an advisory that must land before #644, not as a BLOCK.
+  - The `body_run_test` failure on the fixed port 41918 is contention with other worktrees' suites, not this diff. It
+    passed 10/10 twice once the port was free, and the full `--no-fail-fast` run passed. holler-cli reaches this diff
+    only through `holler-pane`'s doc comments.
+- **Hedged:**
+  - The bindable check is hardening. Two clean real runs do not prove the 1-in-3 flake gone.
+  - AC 22 was checked against the merge base `dc300ab`. It needs a re-check after the rebase onto `d9eabbb` (#708
+    conflicts in `stub.rs` and `hermetic_test.rs`).
+- **Evidence:**
+  - Hermetic: 13 + 23 + 30, eight times in sequence and three times concurrently, all green.
+  - Real, against OpenCode 1.18.35 and tmux 3.7c: 9/9 twice (55.0 s, 49.9 s). Nothing leaked.
+  - Workspace: 1540 passed, 0 failed, exit 0.
+  - Clippy, rustdoc, rustfmt, `lint.sh`, `machete` and the changelog check are clean. The AC 24 grep is empty.
+  - Mutation table: 7 of 8 mutations were caught before the new test, and 8 of 8 after.
+  - tmux probe on a private `-L` server: the title survives `respawn-pane -k`, and a chained `select-pane -T ''`
+    clears it.
