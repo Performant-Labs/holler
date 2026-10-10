@@ -10,9 +10,9 @@
 //! (default 10 s) or with [`PaneError::Timeout`].
 //!
 //! **Frozen when #637 merges**, after which a change goes through the epic's
-//! amend-first rule. [`HerdrPort`] and [`HarnessPort`], and the minimal data types
-//! they take and return, stay provisional until the spikes #636 (Herdr) and #635
-//! (OpenCode) report.
+//! amend-first rule. [`HerdrPort`], and the minimal data types it takes and returns,
+//! stay provisional until the spike #636 (Herdr) reports. [`HarnessPort`] is final:
+//! the spike #635 (OpenCode) confirmed it, and #642 built it.
 
 use std::time::Duration;
 
@@ -168,7 +168,8 @@ pub trait HostPort: Send + Sync {
 }
 
 /// The harness server of a pane and its sessions (the adapter is
-/// `holler-adapter-opencode`, #642). **Provisional** until spike #635 reports.
+/// `holler-adapter-opencode`, #642). **Final:** the spike #635 confirmed it unchanged;
+/// ADR-0021 section 2, "`HarnessPort` as built (#642)", records what the adapter decided.
 ///
 /// **Blocking.** Every method is synchronous. Call from `spawn_blocking` (or a
 /// thread) in async code. Every method returns within I5's bound (default 10 s) or

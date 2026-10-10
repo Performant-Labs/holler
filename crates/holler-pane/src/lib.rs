@@ -29,8 +29,8 @@
 //!   stories edit this file; each names the story that fills it.
 //!
 //! **Frozen when #637 merges.** After that a change to a signature or a code goes
-//! through the epic's amend-first rule. `HerdrPort` and `HarnessPort` stay
-//! provisional until the spikes #636 and #635 report.
+//! through the epic's amend-first rule. `HerdrPort` stays provisional until the spike
+//! #636 reports; `HarnessPort` is final (the spike #635 confirmed it, and #642 built it).
 //!
 //! **Serde policy.** The stored records and the params structs refuse unknown fields:
 //! a record read, changed and written back by a peer that does not know a field would

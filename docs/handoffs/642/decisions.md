@@ -84,3 +84,34 @@
 - **Evidence:** the RED outputs in handoff-T-red.md. Clippy `-D warnings` on the crate's targets is clean, rustfmt
   `--check` passes, `scripts/lint.sh` exits 0, and the AC 24 grep is empty. Leak check after the real run: no scratch dir,
   no `opencode` on 48100-48199, no private tmux server.
+
+## F (Phase 5, implement against RED) — 2026-10-09T23:32:36-06:00
+- **Decided:** GREEN (see handoff-F.md).
+  - `tui.rs` holds the real builders and parsers under T's pinned names, plus `classify` (W-4).
+  - The new private `attach.rs` holds the three bodies and one shared watch. `exec.rs` gains `capture` and shares one
+    deadline loop with `kill`'s runner.
+  - `lib.rs` gains `call_until` (W-2), `session_reply`, which `known` calls (W-5), and `poll`, shared by `settled` and the
+    watch (W-6).
+  - The docs follow AC 23 and 26, with W-3's fact-2 correction and a "Deferred" item for #695.
+  - Two choices beyond the brief:
+    - The watch confirms only a live attach to the requested port whose title shows the id.
+    - `select_session` fails at once with "no TUI in pane P" when its watch finds a dead or missing pane.
+- **Assumed:**
+  - The brief at 6c3809c is canonical: `=<session>:` and `escape_arg`/`escape_dir`, because T's tests pin them. W-1 and
+    W-8(a) stay follow-ups.
+  - F does not rebase. AC 22 was read against the merge base `dc300ab`.
+- **Hedged:**
+  - The stale title after `respawn-pane` (probed on tmux 3.7c) means a re-attach of the session a pane already showed can
+    be confirmed before the new TUI runs. The pinned call sequence of AC 30(a) leaves no room for a fix in F. It is
+    reported with a proposed fix (chain `select-pane -T ''` into the respawn invocation) as Known issues 1.
+  - One real-rig `serve` failure on a fresh port, in one of three full runs (case 15, "exited before it answered (exit
+    status: 1)"), is attributed, as an unverified hypothesis, to a non-listening socket that holds a port in the ephemeral
+    range. It is not the TUI code: it fails before any TUI call, and four further conformance runs passed.
+- **Evidence:**
+  - Hermetic: `tui_test` 13/13, `attach_test` 22/22, `hermetic_test` 30/30. Three concurrent runs were all green.
+  - Real, against OpenCode 1.18.35 and tmux 3.7c: 9/9 twice, the second after the `poll` refactor, and AC 12 alone 2/2.
+    Nothing leaked.
+  - Workspace clippy `-D warnings` is clean, as are rustdoc `-D warnings` on the two crates, rustfmt on the changed files,
+    `scripts/lint.sh`, `cargo machete` and the changelog check.
+  - Probes, each on a private `-L` tmux server killed afterwards: a TAB in a start-command argument prints as `\t`, and a
+    pane keeps its title across `respawn-pane -k`.
