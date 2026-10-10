@@ -157,6 +157,9 @@ fn holler_and_herdr_commands_in_code_blocks_are_scoped_to_the_instance() {
         "herdr session",
     ];
     for (name, text) in all_texts() {
+        // The AGENTS.md briefing is deliberately unscoped: it must not carry the state directory
+        // (the orchestrator's pane environment sets it), see #761.
+        let text = text.replace(&briefing(), "");
         for line in code_lines(&text) {
             let hit = words.iter().any(|w| line.contains(w));
             let marked = line.contains("default instance only");
@@ -424,4 +427,207 @@ fn documented_argument_counts_match_the_scripts_usage() {
             );
         }
     }
+}
+
+// ---- #761: the text side of the verification findings (epic #726, Amendment 2) ----
+
+/// The AGENTS.md briefing the skill proposes (the fenced block that opens with its heading).
+fn briefing() -> String {
+    let text = skill();
+    let from = text.find("## Holler self-status").expect("the briefing");
+    let rest = &text[from..];
+    rest[..rest.find("```").expect("end of the briefing")].to_owned()
+}
+
+#[test]
+fn the_briefing_carries_no_state_directory_path() {
+    let block = briefing();
+    assert!(!block.contains("HOLLER_STATE_DIR=<"), "{block}");
+    assert!(!block.contains("<state_dir>"), "{block}");
+    let flat_block = flat(&block);
+    assert!(
+        flat_block.contains("already sets `HOLLER_STATE_DIR`"),
+        "{block}"
+    );
+    assert!(flat_block.contains("never change or unset it"), "{block}");
+    // The instance-specific form and the stop-and-ask rule are in the skill and in the docs.
+    for (name, text) in [("SKILL.md", flat(&skill())), ("docs", flat(&docs()))] {
+        assert!(
+            text.contains("## Holler self-status (instance <name>)"),
+            "{name}"
+        );
+        assert!(
+            text.contains("another instance's section already exists"),
+            "{name}"
+        );
+    }
+}
+
+#[test]
+fn stage_one_says_a_non_default_instance_runs_outside_any_herdr_pane_and_states_the_port_rule() {
+    let text = skill();
+    let stage1 = flat(&section(&text, "## Stage 1 ", "\n## Stage 2 "));
+    assert!(stage1.contains("outside any Herdr pane"), "{stage1}");
+    assert!(stage1.contains("hub_port` of 41807"), "{stage1}");
+    assert!(stage1.contains("serve_https_port` of 443"), "{stage1}");
+    assert!(stage1.contains("47001"), "{stage1}");
+    assert!(flat(&docs()).contains("hub_port` of 41807"), "docs");
+}
+
+#[test]
+fn stage_two_runs_the_herdr_checks_and_fetches_each_remote_home_state_dir_rule() {
+    let text = skill();
+    let stage2 = section(&text, "## Stage 2 ", "\n## Stage 3 ");
+    let flat2 = flat(&stage2);
+    assert!(stage2.contains("herdr.sh check-pane"), "{stage2}");
+    assert!(stage2.contains("herdr.sh check-session"), "{stage2}");
+    assert!(flat2.contains("Stage 3 refusal"), "{flat2}");
+    assert!(
+        flat2.contains("remote host's `$HOME/.holler`") && flat2.contains("equal to it"),
+        "{flat2}"
+    );
+    assert!(flat2.contains("read-only"), "{flat2}");
+}
+
+#[test]
+fn the_herdr_inventory_flag_is_on_the_local_line_only_and_the_login_form_is_given() {
+    let lines = code_lines(&skill());
+    let inventory: Vec<&String> = lines
+        .iter()
+        .filter(|l| l.contains("inventory.sh") && !l.contains("tar -C"))
+        .collect();
+    assert!(inventory.len() >= 2, "{inventory:?}");
+    for line in &inventory {
+        let remote = line.contains("ssh ");
+        assert_eq!(
+            line.contains("WIZARD_INVENTORY_HERDR=1"),
+            !remote,
+            "flag on the local line only: {line}"
+        );
+    }
+    assert!(
+        inventory.iter().any(|l| l.contains("bash -l -s")),
+        "the login-shell form for a piped script: {inventory:?}"
+    );
+    let flat_text = flat(&skill());
+    assert!(
+        flat_text.contains("a missing `herdr` on a remote host is expected"),
+        "remote herdr"
+    );
+    assert!(flat_text.contains("`home<TAB><that host's $HOME>`"));
+}
+
+#[test]
+fn stage_three_names_the_herdr_refusals_and_session_delete() {
+    let text = skill();
+    let stage3 = section(&text, "## Stage 3 ", "\n## Stage 4 ");
+    let flat3 = flat(&stage3);
+    assert!(stage3.contains("session-delete"), "{flat3}");
+    assert!(flat3.contains("with the user's yes"), "{flat3}");
+    assert!(
+        flat3.contains("this instance's port pair, no live hub"),
+        "{flat3}"
+    );
+    assert!(flat3.contains("unnamed Herdr server"), "{flat3}");
+    assert!(flat3.contains("build in it"), "{flat3}");
+    let stage8 = flat(&section(&text, "## Stage 8 ", "\n## Stage 9 "));
+    assert!(stage8.contains("unnamed Herdr server"), "{stage8}");
+    assert!(stage8.contains("build in it"), "{stage8}");
+    let teardown = flat(&section(
+        &text,
+        "- **Tearing the instance down:**",
+        "\n- **A join fails",
+    ));
+    assert!(teardown.contains("session-delete"), "{teardown}");
+    assert!(
+        teardown.contains("the instance's own serve entry"),
+        "{teardown}"
+    );
+}
+
+#[test]
+fn stages_one_and_two_change_nothing_but_the_scratch_directory_and_the_install_is_asked_first() {
+    let text = skill();
+    assert!(
+        flat(&text).contains("read-only except the scratch directory"),
+        "the hard-stop paragraph"
+    );
+    let stage1 = flat(&section(&text, "## Stage 1 ", "\n## Stage 2 "));
+    assert!(
+        stage1.contains("ask the user before installing"),
+        "the install into ~/.claude/skills needs a yes: {stage1}"
+    );
+}
+
+#[test]
+fn no_runnable_block_carries_a_literal_example_label_and_label_is_defined() {
+    for (name, text) in [("SKILL.md", skill()), ("docs", docs())] {
+        for line in code_lines(&text) {
+            assert!(!line.contains("hub1-"), "{name}: literal label: {line}");
+            if line.contains("--label") {
+                assert!(line.contains("--label <label>"), "{name}: {line}");
+            }
+        }
+    }
+    let text = skill();
+    assert!(
+        flat(&text).contains("`<label>` is the Stage 7 token label"),
+        "undefined placeholder"
+    );
+}
+
+#[test]
+fn the_body_reuse_rule_compares_the_expanded_path() {
+    let text = flat(&skill());
+    assert!(text.contains("expanded path of `<body_config>`"), "{text}");
+    assert!(!text.contains("its recorded `cmd` names `<body_config>`"));
+}
+
+#[test]
+fn the_remote_teardown_form_names_its_third_argument() {
+    let text = flat(&skill());
+    assert!(
+        text.contains("for `teardown` the third argument is empty or `--purge-state`"),
+        "{text}"
+    );
+}
+
+#[test]
+fn the_check_port_sentence_comes_before_the_stage_six_start_block() {
+    let text = skill();
+    let stage6 = section(&text, "## Stage 6 ", "\n## Stage 7 ");
+    let check = stage6.find("check-port").expect("check-port in Stage 6");
+    let start = stage6.find("holler hub serve").expect("the start block");
+    assert!(check < start, "check-port after the start block");
+}
+
+#[test]
+fn every_ledger_call_in_a_code_block_sets_the_state_directory() {
+    for (name, text) in [("SKILL.md", skill()), ("docs", docs())] {
+        for line in code_lines(&text)
+            .iter()
+            .filter(|l| l.contains("ledger.sh") && !l.contains("tar -C"))
+        {
+            assert!(line.contains("HOLLER_STATE_DIR="), "{name}: {line}");
+        }
+    }
+}
+
+#[test]
+fn the_readme_says_a_pre_ledger_setup_is_refused_as_foreign_and_where_to_read_more() {
+    let text = flat(&readme());
+    assert!(text.contains("before ledgers existed"), "{text}");
+    assert!(text.contains("foreign"), "{text}");
+    assert!(text.contains("docs/setup-wizard.md#instance-state-and-the-ledger"));
+}
+
+#[test]
+fn the_install_command_notes_that_no_release_tag_has_the_whole_directory() {
+    for (name, text) in [("README.md", flat(&readme())), ("docs", flat(&docs()))] {
+        assert!(
+            text.contains("No release tag contains the whole skill directory yet"),
+            "{name}"
+        );
+    }
+    assert!(flat(&skill()).contains("No release tag contains the whole skill directory yet"));
 }
