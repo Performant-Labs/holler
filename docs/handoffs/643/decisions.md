@@ -107,3 +107,25 @@
   - A scratch program outside the repo printed the real text and JSON over the fakes. It also checked rustc 1.98's
     `{:?}` on bidi, C1, DEL, NBSP, combining and CJK input.
   - Facts in unchanged code are in `evidence.md`.
+
+## T (Phase 7, verify tests / GREEN) — 2026-10-09T18:00:22-06:00
+- **Decided:** GREEN, no blocking issue. All 30 authored tests pass on F's commit, and F flagged no wrong test. T
+  mutated F's code eleven ways, ran the suite each time, and restored each file from git. Three of those changes
+  survived, and the behaviour each one broke is documented. So T added three tests, with no production edit:
+  `list_named_pane_lists_only_that_pane` (Decision 1), `text_output_escapes_c1_and_bidi_characters` (F's deviations
+  1 and 2, the security claim in `--help` and the CHANGELOG), and `watch_profile_prints_a_pane_leaving_the_profile_once`
+  (Decision 7, closing T's RED hedge without a thread: a `--since 1` replay shows the pane joining first). 33 pass.
+- **Assumed:** The fake seeds in order and each change takes head + 1 (`pane_store.rs:90-99`, `feed.rs:87`). So the
+  leave test's cursors are 1 (c4), 2 (c1), 3 (c2), 4 (c1 leaves), 5 (c2 deleted), 6 (c1 outside). Recorded in
+  evidence.md.
+- **Hedged:**
+  - The `list` sort mutation (M8) survives, because every fake already returns name order. It is left advisory rather
+    than tested with a store double outside the kit.
+  - The `--profile --since` replay edge (a current member's pre-join change prints once) follows the rule as written.
+    It is flagged for S.
+- **Evidence:** `cargo test -p holler-cli --test pane_verbs` gives 93 passed. The workspace suite (isolated
+  `HOLLER_STATE_DIR`, `--no-fail-fast`, CI's skip) gives 1409 passed, 0 failed, 5 ignored, exit 0. Clippy (workspace,
+  all targets, `-D warnings`), `lint.sh`, `changelog-check.sh`, `cargo machete` and `rustfmt --check --edition 2021`
+  on the 7 files all exit 0. `docs_cli_test`, `cli_surface_test`, `pane_cli_process` and `wire_selftest` pass. The
+  `watch` filter passes 3 of 3 reruns. The AC 17/21/22 greps print nothing. The mutation table is in
+  handoff-T-green.md.

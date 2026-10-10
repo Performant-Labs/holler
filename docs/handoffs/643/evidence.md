@@ -161,3 +161,81 @@ Source facts in **unchanged** code that the F diff (`crates/holler-cli/src/pane/
   >     Unknown,
   > }
   > ```
+
+## T (Phase 7, verify / GREEN) — 2026-10-09
+
+Facts in unchanged test-kit code that the tests rely on, excerpts copied from source by T.
+
+- **Fact:** a sample pane works in `/srv/demo` (the PROJECT cell of AC 1 and AC 18's clean comparison pane).
+  **Source:** `crates/holler-pane-testkit/src/fixture.rs:29`, `:51-56`
+  **Verbatim excerpt:**
+  > ```
+  > const SAMPLE_CWD: &str = "/srv/demo";
+  > ```
+  > ```
+  >         host: HostInfo {
+  >             name: "localhost".to_owned(),
+  >             tmux: name.to_string(),
+  >             cwd: SAMPLE_CWD.to_owned(),
+  >             herdr_api_version: None,
+  >         },
+  > ```
+
+- **Fact:** a sample pane's context ceilings are 100000 / 150000 (AC 8).
+  **Source:** `crates/holler-pane-testkit/src/fixture.rs:142-148`
+  **Verbatim excerpt:**
+  > ```
+  > /// The context ceilings of every sample pane and spec.
+  > fn sample_context() -> ContextCeilings {
+  >     ContextCeilings {
+  >         soft: 100_000,
+  >         hard: 150_000,
+  >     }
+  > }
+  > ```
+
+- **Fact:** seeding stores panes in the order given, and every change takes the next cursor (head + 1), so seeded
+  panes get cursors 1, 2, 3, ... in seed order (AC 12-15 and `watch_profile_prints_a_pane_leaving_the_profile_once`).
+  **Source:** `crates/holler-pane-testkit/src/pane_store.rs:90-99`, `crates/holler-pane-testkit/src/feed.rs:87`
+  **Verbatim excerpt:**
+  > ```
+  >     /// A store holding `panes`, each created at expected generation 0 and so stored
+  >     /// at 1, in order. Seeding bypasses the faults and the call log. Two seeds with one
+  >     /// name are `generation-conflict`, as a second create would be.
+  > ```
+  > ```
+  >         let cursor = Cursor(self.head.0.checked_add(1).ok_or_else(overflowed)?);
+  > ```
+
+- **Fact:** a watch from `Cursor(0)` yields one put per live record and resumes from the head, while one from any other
+  cursor yields every change after it (AC 12 vs AC 13, and why the leave test uses `--since 1`).
+  **Source:** `crates/holler-pane-testkit/src/feed.rs:22-26`
+  **Verbatim excerpt:**
+  > ```
+  > //! 2. From `Cursor(0)`: one put for each live record, carrying the cursor of that
+  > //!    record's last change, in cursor order. The stream then resumes from the head as
+  > //!    of that snapshot, as the hub's does, so a record deleted before the snapshot
+  > //!    leaves no event at all.
+  > //! 3. From any other cursor: every change after it, in order.
+  > ```
+
+- **Fact:** the fake's `list` is already sorted by name, so no fake-backed test can tell whether `list` sorts by itself
+  (Decision 4's "the verb sorts").
+  **Source:** `crates/holler-pane-testkit/src/pane_store.rs:54`
+  **Verbatim excerpt:**
+  > ```
+  > /// - `list` is sorted by name.
+  > ```
+
+- **Fact:** `check_ndjson` refuses an empty stream, so AC 16 checks the empty `watch` output directly.
+  **Source:** `crates/holler-pane-testkit/src/envelope.rs:243-249`
+  **Verbatim excerpt:**
+  > ```
+  >     let lines: Vec<&str> = match stdout.strip_suffix('\n').unwrap_or(stdout) {
+  >         "" => Vec::new(),
+  >         body => body.split('\n').collect(),
+  >     };
+  >     let Some((last, before)) = lines.split_last() else {
+  >         return Err(EnvelopeFault::EmptyStream);
+  >     };
+  > ```

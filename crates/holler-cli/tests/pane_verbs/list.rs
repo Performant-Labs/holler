@@ -253,6 +253,23 @@ fn list_prints_a_header_and_one_row_per_pane_sorted_by_name() {
     }
 }
 
+/// Decision 1: `list PANE` without `--profile` lists that pane alone, and a pane with no
+/// record is an empty table (the header alone), exit 0, not `pane-not-found`.
+#[test]
+fn list_named_pane_lists_only_that_pane() {
+    let rig = Rig::new([pane("demo-c1r1"), pane("demo-c2r1")], []).unwrap();
+    let run = rig.run(&["pane", "list", "demo-c2r1"], Format::Text);
+    let names: Vec<&str> = ok_text(&run).lines().skip(1).map(|l| cells(l)[0]).collect();
+    assert_eq!(names, ["demo-c2r1"], "{run:?}");
+
+    let run = rig.run(&["pane", "list", "demo-c9r9"], Format::Text);
+    let lines: Vec<&str> = ok_text(&run).lines().collect();
+    assert_eq!(lines.len(), 1, "the header alone: {run:?}");
+    assert_eq!(cells(lines[0]), HEADER, "{run:?}");
+    let data = ok_envelope(&rig.run(&["pane", "list", "demo-c9r9"], Format::Json)).data;
+    assert_eq!(data["panes"], json!([]), "{data}");
+}
+
 #[test]
 fn list_json_is_one_envelope_with_a_row_per_pane() {
     let rig = Rig::new([pane("demo-c2r1"), pane("demo-c1r1")], []).unwrap();

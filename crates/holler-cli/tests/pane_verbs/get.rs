@@ -250,3 +250,31 @@ fn text_output_escapes_control_characters() {
         assert_eq!(checked, Ok(()), "{argv:?}: {json:?}");
     }
 }
+
+/// Beyond C0: U+009B is a one-character CSI on some terminals, and U+202E reorders the
+/// line. Neither reaches the terminal raw, in a stored string or in an argv printed as JSON.
+#[test]
+fn text_output_escapes_c1_and_bidi_characters() {
+    let mut bad = pane("demo-c1r1");
+    bad.host.cwd = "/srv/demo\u{202e}x".into();
+    bad.command = Some(argv(&["opencode", "a\u{9b}b", "x\u{202e}y"]));
+    let rig = Rig::new([bad], []).unwrap();
+    let run = rig.run(&["pane", "get", "demo-c1r1"], Format::Text);
+    let out = ok_text(&run);
+    for c in ['\u{9b}', '\u{202e}'] {
+        assert!(
+            !out.contains(c),
+            "no raw {c:?} reaches the terminal: {out:?}"
+        );
+    }
+    assert_eq!(
+        field(out, "project"),
+        Some(r#""/srv/demo\u{202e}x""#),
+        "{out:?}"
+    );
+    assert_eq!(
+        field(out, "command"),
+        Some(r#"["opencode","a\u009bb","x\u202ey"]"#),
+        "still JSON, the same argv: {out:?}"
+    );
+}

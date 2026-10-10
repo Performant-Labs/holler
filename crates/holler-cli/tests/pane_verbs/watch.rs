@@ -11,11 +11,12 @@ use std::time::{Duration, Instant};
 use holler_cli::output::Format;
 use holler_pane::{Pane, PaneError, PaneName, PaneStore};
 use holler_pane_testkit::envelope::check_ndjson;
+use holler_pane_testkit::fixture::sample_profile;
 use holler_pane_testkit::pane_store::PaneStoreOp;
 use serde_json::{json, Value};
 
 use crate::get::help;
-use crate::list::{assert_fails, kv, ok_stream, ok_text, pane, scoped_rig, sync_rig, Rig};
+use crate::list::{assert_fails, kv, member, ok_stream, ok_text, pane, scoped_rig, sync_rig, Rig};
 
 /// The store of AC 12. Seeded `demo-c1r1` (cursor 1) and `demo-c2r1` (2); then through
 /// the port `cas_put` c1 (3) and c2 (4) and `delete` c1 (5); then another writer puts a
@@ -231,6 +232,49 @@ fn watch_profile_prints_only_member_changes() {
         names,
         [["put", "demo-c1r1"], ["put", "demo-c2r1"]],
         "{run:?}"
+    );
+}
+
+/// Decision 7: a pane that leaves the profile, or is deleted while in it, prints that one
+/// change, and its changes once outside print nothing. Seeded c4 with no profile (cursor 1),
+/// then c1 (2) and c2 (3) in `demo`; c1 leaves (4), c2 is deleted (5), c1 changes again
+/// outside the profile (6). From `--since 1` the replay shows c1 and c2 joining first.
+#[test]
+fn watch_profile_prints_a_pane_leaving_the_profile_once() {
+    let profile = sample_profile("demo", &["demo-c1r1", "demo-c2r1"]).unwrap();
+    let seeded = [
+        pane("demo-c4r1"),
+        member("demo-c1r1", "demo"),
+        member("demo-c2r1", "demo"),
+    ];
+    let rig = Rig::new(seeded, [profile]).unwrap();
+    let outside = |generation| Pane {
+        generation,
+        ..pane("demo-c1r1")
+    };
+    rig.panes.cas_put(&outside(1), 1).unwrap();
+    rig.panes
+        .delete(&PaneName::parse("demo-c2r1").unwrap(), 1)
+        .unwrap();
+    rig.panes.cas_put(&outside(2), 2).unwrap();
+
+    let argv = [
+        "pane",
+        "watch",
+        "--profile",
+        "demo",
+        "--since",
+        "1",
+        "--until-idle",
+    ];
+    assert_eq!(
+        changes(&rig, &argv),
+        [
+            put(2, "demo-c1r1"),
+            put(3, "demo-c2r1"),
+            put(4, "demo-c1r1"),
+            (5, "demo-c2r1".to_owned(), "delete".to_owned()),
+        ]
     );
 }
 
