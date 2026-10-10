@@ -167,3 +167,28 @@ as AC 15 pins; NV-7 `closed()` on `PaneNotFound` for the real adapter; NV-8 `rel
 checked before each live step but not between the last check and the record write. None is a BLOCK.
 
 **Evidence.** `docs/handoffs/644-diff-result-r2.md`, `docs/handoffs/644-diff-result-r2.md.usage.json`.
+
+## A (anti-duplication gate, Phase 7) — 2026-10-10T00:47-06:00
+- **Decided:** PASS (handoff-A-dup.md).
+  - F extended every object the Reuse map names. Nothing parallels `Ports`/`edit_spec`, `spec_from_pane`, `FIXED_PORT_POLICY_PREFIX`, `reconcile_step`, `shown_differs`, `findings::{quoted, embedded}`, `list::{text_value, optional_text, profile_name}` or `SpecFlags::validate`.
+  - Relaunch reuses launch's helpers with no copy, as `unpark` uses `park`.
+  - The rig builds on `crate::list::Rig` in `launch/rig.rs`.
+  - Plan-review warns 1, 2 and 4 are resolved.
+- **Six warns:**
+  1. ADR-0021 contradicts itself on `timeout`'s `op`. #640's section 9 row (line 462) and `error.rs:457` say a port method "in every implementation", while this change's section 12 paragraph (line 551) and `OP_LAUNCH` say `pane.launch`. Line 505 also still marks #644's recording of `herdr_api_version` PROPOSED. Fix before merge: one line each.
+  2. `tx_launch::with_note` duplicates `profile_scope::with_context` across the crate boundary.
+  3. `launch::spec_of` duplicates `get::spec_for`, and `stored_profile` is a named form of an inline pattern spelled four times.
+  4. The launch rig near-copies doctor's private `Calls`/`mark`/`calls_since` and its live seeder. `data_of` overlaps `list::ok_envelope`.
+  5. The (session, pane id) join key is now spelled three times in `holler-pane`.
+  6. `tx_launch.rs` is at 786 of 900 lines; the precedent for growing it is reconcile's `mod observe;`.
+- **Assumed:**
+  - Phase 7's block rule is the role doc's: a parallel path to an object the map named, with no written justification. Warns 2-5 copy objects the map did not name, or that sit behind the crate layering or the blast radius, each explained in writing (F's decision 6, A-plan warn 4, T-red, brief decision 25).
+  - Warn 1 is an ADR wording conflict that arrived with the #640 merge (`abdcbb6`, merged in `c844f06`) and that F reported (Known issues 2-3), so it is a warn, as the plan review treated its ADR items.
+- **Hedged:** warn 1 is the one I would not ship unfixed. Whether it holds up acceptance is S's call.
+- **Evidence:**
+  - The diff: `git diff origin/main...HEAD`, merge base `cec1f82`.
+  - The three production files in full, the rig in full, and the helper and import lines of the four other test files.
+  - Analogues read: `profile_scope.rs`, `list.rs`, `findings.rs`, `reconcile.rs`, `error.rs:490-713`, `profile_snapshot.rs`, `profile_diff.rs:255-333`, `get.rs`, `park.rs`/`unpark.rs`, `profile/{show,delete,create,list}.rs`, `doctor/rig.rs`, `tests/pane_verbs/list.rs` and the test kit's `sample_spec`.
+  - Greps for each new helper's analogue (join key, budget and deadline, `PaneNotFound` as closed, constructors, cell format, open codes, `"localhost"`, `--model` split, `ProbeFailed`, profile and spec lookups), and for the map's forbidden literals.
+  - `git diff --name-only` over the frozen files, and `git diff d9eabbb origin/main -- crates/holler-pane/src`.
+  - When the `timeout` wording entered the ADR: `git log -S`.
