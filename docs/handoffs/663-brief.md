@@ -366,6 +366,22 @@ pub trait ProfileScope: Send + Sync {
 }
 ```
 
+`Actor`, the third field of `StoreScope` (its one field is a `String`, so it is `Send + Sync`; Decision 1):
+```
+crates/holler-pane/src/profile.rs:107-113
+/// Who made a profile write: a non-empty name of at most 64 characters (a person, a
+/// verb such as `holler profile apply`, a watchdog). It becomes the "who" of a log
+/// entry, so control characters are refused (`usage`), and surrounding whitespace is
+/// trimmed.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
+#[serde(transparent)]
+pub struct Actor(String);
+```
+```
+crates/holler-pane/src/ports.rs:62
+pub trait PaneStore: Send + Sync {
+```
+
 A profile name allows spaces and any non-control character (so a printed command line must quote it); a pane name is
 `[a-z0-9-]` (the ADR 0005 grammar), so it needs no quoting:
 ```
@@ -1529,7 +1545,26 @@ All commands run from the worktree root.
    `CasPut`, and `get(Demo Alpha)` is unchanged (generation 1).
 8. **The probe runner** (`cargo test -p holler-pane --lib probe::tests`), each test a real child process of a harmless
    command; every path a test creates is under one fresh directory `std::env::temp_dir()/hlr-probe-663-<pid>-<n>`, removed
-   by a guard's `Drop` (Decision 21):
+   by a guard's `Drop` (Decision 21).
+   **`sh` as the program under test (8d, 8f, 8g, 8j, 8k).** The "no shell" rule (B, epic contract line 76; E, `argv.rs`)
+   is a rule about the runner: `run_probe` never puts a shell between itself and the argv it is given, never joins or
+   re-splits an element, and never spawns `sh` or any shell of its own accord (Decision 13; AC 9 greps the production
+   lines only, above `#[cfg(test)]`). It is not a rule about which program a caller's `argv[0]` names: an argv whose
+   `argv[0]` is `sh` is a stored command that asks for a shell by name, and the runner executes it like any other program,
+   as one `execve` of `sh` with the remaining elements as its arguments. The tests above use `sh -c` only as such a
+   program, because no stock command on both Linux and macOS both writes a chosen string to stdout and exits with a chosen
+   non-zero status (8d, 8j) or backgrounds a child that outlives it (8f, 8g); `sh` is in the brief's list of commands that
+   exist on every Linux and macOS machine (header). These tests are therefore evidence of the runner's exit-status,
+   timeout and group-kill behaviour, never of the "no shell" guarantee; that guarantee's evidence is AC 9 and the
+   spawn-failure cases of AC 8h and 8j (AC 9 says why those two distinguish a direct exec from any shell wrapper). The pid
+   file of 8f and 8g is written by the shell's own redirection (`echo $! > "$0"`, where `sh -c SCRIPT ARG` sets `$0` to
+   `ARG`), not through stdout, so the runner's stdout pipe stays empty in 8f; observed by O on this Linux host (`/bin/sh`
+   is `dash`): `sh -c 'sleep 1 & echo $! > "$0"; wait' <dir>/pid` wrote nothing to stdout and left the pid in the file.
+   **Time budget.** No single probe test may take more than 10 s of wall time, and the whole `probe::tests` module stays
+   under 30 s even when run serially (`--test-threads=1`). The per-test ceilings these follow from: 8e under 2.3 s; 8f and 8g
+   each under 4.5 s (the 500 ms timeout, plus C7's 2,000 ms of slack on the runner's return, so under 2,500 ms, plus at most
+   2,000 ms of the post-return poll below); 8i under 5 s (its own assertion); every other test a few ms. Serially that is
+   under 17 s, so 30 s leaves margin for a loaded macOS runner.
    - a. `all_expected_strings_present_is_ok`: argv `["printf", "%s\n%s\n", "alpha", "beta"]`, expect `["alpha", "beta"]`,
      5 s: `ProbeResult::Ok`.
    - b. `one_missing_string_is_failed_naming_it`: the same argv, expect `["alpha", "gamma", "beta"]`:
@@ -1544,18 +1579,27 @@ All commands run from the worktree root.
    - f. `timeout_kills_the_whole_process_group`: `["sh", "-c", "sleep 30 & echo $! > \"$0\"; wait", "<dir>/pid"]`, 500 ms:
      `Error` containing `timed out`; the file `<dir>/pid` exists (an assertion, so a stub fails here, not on a panic), and
      within 2 s of the return the pid it names is gone or a zombie (polled with `ps -o stat= -p <pid>`: empty output, a
-     non-zero exit or a state starting with `Z`). The test sends no signal itself. **Order (so a stub fails RED on the
+     non-zero exit or a state starting with `Z`). **The poll, exactly:** a bounded loop of at most 40 iterations, never a
+     loop without a count; each iteration runs `ps -o stat= -p <pid>` once and, if the pid is gone or a zombie (as just
+     defined), ends the loop with a pass; otherwise it sleeps 50 ms. The first `ps` runs immediately after `run_probe`
+     returns, so the window is at most 40 × 50 ms = 2,000 ms plus the 40 `ps` runs. If all 40 iterations see the pid alive
+     and not a zombie, the test fails, naming the pid and the last `stat` seen. The test sends no signal itself. **Order (so a stub fails RED on the
      existence assertion):** before the call the test only creates `<dir>` and builds the path `<dir>/pid`; it never
      creates or writes the pid file itself (only the probe's child can), it asserts `!pid_file.exists()` before calling
      `run_probe`, and it asserts `pid_file.exists()` only after `run_probe` has returned. A stub that returns `Error` at
      once without spawning leaves no file, so it fails there.
    - g. `background_child_holding_stdout_is_a_timeout`: `["sh", "-c", "sleep 30 & echo $! > \"$0\"; echo up", "<dir>/pid"]`,
      expect `["up"]`, 500 ms: the shell exits at once but its background `sleep` keeps stdout open, so the answer is `Error`
-     containing `timed out` (never `Ok`), and the `sleep` is gone or a zombie within 2 s, as in f. The pid file is set up
+     containing `timed out` (never `Ok`), and the `sleep` is gone or a zombie within 2 s, by f's bounded poll (at most 40
+     iterations of 50 ms, failing after the 40th). The pid file is set up
      and asserted in f's order (path built, never written by the test, existence asserted only after `run_probe` returns).
    - h. `argv_is_never_given_to_a_shell`: `["printf", "%s|", "a;", "$(touch <dir>/m1)", "x; touch <dir>/m2"]`, expect
      `["a;|$(touch ", "|x; touch "]`: `Ok`, and neither `<dir>/m1` nor `<dir>/m2` exists afterwards. And the one-element argv
      `["printf hello"]` (a space inside the element) is `Error` containing `could not be started` (no shell split it).
+     `printf` here is the `printf` program on `PATH` (`Command::new` runs no shell builtin). Observed by O on this Linux host
+     (its `/usr/bin/printf` is uutils coreutils 0.8.0), with `<dir>` a scratch directory: `printf '%s|' 'a;' '$(touch
+     <dir>/m1)' 'x; touch <dir>/m2'` wrote exactly `a;|$(touch <dir>/m1)|x; touch <dir>/m2|`, which contains both expect
+     strings, and created neither marker. The macOS evidence is CI's macOS job.
    - i. `output_over_the_cap_is_error`: `["yes"]`, `[]`, 10 s: `Error` containing `more than 1 MiB`, returned in under 5 s.
    - j. `reasons_never_echo_argv_or_output`: `["/nonexistent/hlr-663-SENTINELARG", "SECRET663ARG"]` gives `Error` whose
      reason contains `could not be started` and neither `SENTINELARG` nor `SECRET663ARG`;
@@ -1565,7 +1609,11 @@ All commands run from the worktree root.
      `["sh", "-c", "touch \"$0\"", "<dir>/z"]` with `Duration::ZERO` gives `Error` containing `zero`, and `<dir>/z` does not
      exist.
    - l. `non_utf8_output_still_matches`: `["printf", "\\377alpha\\376"]` (printf writes the bytes `0xFF`, `alpha`, `0xFE`),
-     expect `["alpha"]`: `Ok`.
+     expect `["alpha"]`: `Ok`. The Rust literal `"\\377alpha\\376"` passes printf the format text `\377alpha\376` (a
+     backslash and three octal digits, twice), which printf's format operand turns into one byte each. Observed by O on this
+     Linux host (uutils coreutils 0.8.0 `/usr/bin/printf`): `printf '\377alpha\376' | od -An -tx1` printed
+     `ff 61 6c 70 68 61 fe`. The macOS evidence is CI's macOS job; if a host's printf wrote the escapes literally, the
+     output would still contain `alpha` and the test would still pass, only without exercising non-UTF-8 bytes.
    - m. The existing `cargo test -p holler-pane --test ports_test run_probe_stub_never_reports_success` still passes.
 9. **No shell, no broad kill, two spawns.** On the code lines of `crates/holler-pane/src/probe.rs` above its `#[cfg(test)]`
    line (comments excluded, since the rustdoc explains why there is no `libc`):
@@ -1576,19 +1624,33 @@ All commands run from the worktree root.
    contains the letters (`"finished"`, `"shell"` and `"push"` do not match); no reason text has to avoid any word. The same
    pipeline also checks the shell-invocation shapes the two tokens miss:
    `sed -n '1,/#\[cfg(test)\]/p' crates/holler-pane/src/probe.rs | grep -vE '^\s*//' | grep -nE '"(/usr)?/bin/(sh|bash|zsh|dash)"|"(zsh|dash)"|"-c"'`
-   prints nothing (an absolute shell path, another shell's name, or a `-c` argument). Together with AC 8h (`;`, `$(...)` and
-   a space inside an element arrive literally) this is the "no shell" evidence; the greps guard the source, 8h the
-   behaviour. The greps are a guard against the plain form only: they cannot see a shell name built at run time
-   (`format!`, string concatenation, `include_str!`, a constant from another file). AC 8h's behavioural test is the
-   evidence that no shell runs. **AC 9 is a lint, not a security boundary:** it catches the plain, accidental form in
-   review and CI, and passing it proves nothing about a shell reached by an indirect route; the "no shell" guarantee rests
-   on Decision 13's `Command::new(argv[0]).args(&argv[1..])` and AC 8h, never on AC 9.
+   prints nothing (an absolute shell path, another shell's name, or a `-c` argument). The `sed` range ends at the first
+   `#[cfg(test)]` line, so it covers all the production code only when that line opens the test module: so
+   `grep -c '#\[cfg(test)\]' crates/holler-pane/src/probe.rs` prints `1`, and the `#[cfg(test)] mod tests` is the file's
+   last item (nothing but the module follows it). Together with AC 8h and 8j this is the "no shell" evidence; the greps
+   guard the source, 8h and 8j the behaviour. The greps are a guard against the plain form only: they cannot see a shell
+   name built at run time (`format!`, string concatenation, `include_str!`, a constant from another file).
+   **What the behavioural tests do and do not prove.** The `;` and `$(...)` part of AC 8h fails only for a runner that
+   joins the elements into one shell command line (the `$(touch ...)` would then run and create a marker); a runner that
+   wrapped the argv in a shell but quoted each element carefully would pass it. The spawn-failure cases are the ones that
+   fail under **any** shell wrapper, however it quotes: AC 8h's one-element `["printf hello"]` and AC 8j's
+   `/nonexistent/...` program must be `could not be started`, which only a direct exec can answer. Through a shell, the
+   spawn of the shell itself succeeds and the missing program becomes the shell's exit status 127, so the answer would be
+   `exited with status 127` (Decision 14), never `could not be started` (observed by O on this Linux host, `/bin/sh` is
+   `dash`: `sh -c 'nonexistent-prog-663'` exits 127). **Neither AC 9 nor AC 8h is a security boundary:** AC 9 catches the
+   plain, accidental form in review and CI, and AC 8h/8j catch the behaviour of the two wrapper shapes just named; passing
+   them proves nothing about a shell reached by a route neither sees. The "no shell" guarantee rests on the source
+   construction of Decision 13, `Command::new(argv[0]).args(&argv[1..])` with no other `Command::new` but `"kill"`, which
+   the diff gate reviews line by line; the greps and the tests are evidence for it, not the guarantee.
 10. **Quality gates** (the tester overlay's Tier 1, as CI runs them): `bash scripts/lint.sh`, `bash scripts/changelog-check.sh`,
     `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test -p holler-pane`, `cargo test -p holler-cli --lib`,
     `cargo test -p holler-pane-testkit`, `cargo test --workspace`, `cargo test -p holler-cli --test docs_cli_test` and
     `cargo machete` all pass. Formatting: `rustfmt --check --edition 2021 crates/holler-pane/src/probe.rs
     crates/holler-cli/src/pane/profile_scope.rs` exits 0 (ruling 4: `cargo fmt --check` fails on the untouched tree, H). Every
     `#[allow]` added carries a trailing `// #663`. Both files stay under 600 lines and every function under 100 lines.
+    The 600-line limit is per file (`scripts/lint.sh` counts each `.rs` file on its own, H), never a total across the two:
+    the estimates in Files are ~450 lines for each file (~230 + ~220 and ~190 + ~260), so each has ~150 lines of headroom
+    under the warning and ~450 under the failure. T-green and the diff gate check the actual `wc -l` of each file.
 11. **No new `unsafe`, no new dependency.** `git diff origin/main...HEAD -- crates | grep -E '^\+' | grep -vE '^\+\s*//' | grep -nE '\bunsafe\b'`
     prints nothing;
     `git diff --name-only origin/main...HEAD -- '*Cargo.toml' Cargo.lock` prints nothing.
@@ -1674,7 +1736,10 @@ family per file, four files in all, well under F's cap. **Fits one run**, no spl
 1. **Type.** `pub struct StoreScope { profiles: Arc<dyn ProfileStore>, panes: Arc<dyn PaneStore>, actor: Actor }` and
    `pub fn new(profiles: Arc<dyn ProfileStore>, panes: Arc<dyn PaneStore>, actor: Actor) -> Self`: the fake's shape (G), so
    the suite's `build` closure and #649's wiring construct it the same way. `Send + Sync` follows from the two traits'
-   supertraits. Every profile write is logged as `actor`; which actor a verb run uses is #649's call.
+   supertraits (`pub trait ProfileStore: Send + Sync`, D, at `crates/holler-pane/src/profile.rs:328` at `3bdd129`;
+   `pub trait PaneStore: Send + Sync`, `crates/holler-pane/src/ports.rs:62` at `3bdd129`, so `Arc<dyn ...>` of each is
+   `Send + Sync`) and from `Actor`'s one field being a `String` (quoted in D, `profile.rs:107-113`), so the struct is
+   `Send + Sync` by the auto traits, with no `unsafe impl`. Every profile write is logged as `actor`; which actor a verb run uses is #649's call.
 2. **`resolve`** is the fake's (G, lines 34-38): read P (`profile-not-found` first); with no pane, `PaneStore::list` filtered
    to the records whose `profile` has P's slug, in name order; with a pane, `PaneStore::get` of it, which must name P by slug,
    else `pane-not-in-profile` (a pane with no record included), its `what` `"<pane> is not in profile \"<P>\""`. Membership is
@@ -1761,7 +1826,10 @@ family per file, four files in all, well under F's cap. **Fits one run**, no spl
     would fail on that store anyway), so there is no needless edit-and-restore round trip in P's log. AC 7 pins it.
 11. **Bounded time (C6), a narrowing.** The scope adds no timer and no thread: it cannot cancel a blocking port call, and
     the act is the verb's. Its bound is the sum of its port calls (at most four, each within I5's bound or `timeout`) plus
-    the act's own. Recorded in the module docs.
+    the act's own. Recorded in the module docs **and in the rustdoc of `StoreScope`'s own `edit_spec`** (the method in
+    `impl ProfileScope for StoreScope`, in `profile_scope.rs`), whose first paragraph says that this implementation does
+    not meet the frozen trait doc's "returns within I5's bound (default 10 s)" (D, `profile.rs:377-379`) and states the
+    bound it does meet, so a reader of the implementation sees the narrowing before F4 amends the trait doc.
 12. **No retries, no pane-record write, no `catch_unwind`.** A panicking act unwinds through `edit_spec` and leaves the
     first write in place (the verb's process dies; the next `pane doctor` run sees the spec and the live pane disagree).
     Catching it would need `UnwindSafe` bounds the frozen `&mut dyn FnMut` does not have. Recorded as a risk.
@@ -1790,7 +1858,10 @@ family per file, four files in all, well under F's cap. **Fits one run**, no spl
     stuck in the kernel) is left as a zombie for the caller's exit, and the runner returns. Consequences, all
     documented: the answer comes at the deadline plus at most 1 s of cleanup (normally a few ms); a
     probe whose background child keeps stdout open after the leader exits is a timeout, never a verdict (AC 8g); the whole
-    group is killed (AC 8f). Signal: `KILL` directly. A probe is a read-only check with nothing to clean up, so there is no
+    group is killed (AC 8f) **when the `kill` binary is on `PATH`**. That whole-group guarantee is contingent on Decision 16's
+    `kill` running: if it cannot be spawned, only the leader is ended (`Child::kill`), its children are left, and the
+    runner still returns within the same bound (the Risks' `kill` item). `run_probe`'s rustdoc states the contingency in
+    those words. Signal: `KILL` directly. A probe is a read-only check with nothing to clean up, so there is no
     `TERM` grace. **The rustdoc of `run_probe` states the long-lived-caller constraint explicitly** (the Risks' first
     item): a probe whose child escapes the group (`setsid`, a double fork) and keeps stdout open leaves one reader thread
     and its pipe blocked per such run after the runner returns, so a long-lived caller (one that reuses `SystemProber`
@@ -1946,8 +2017,9 @@ running (`ps -o pid=,args= -u "$(id -u)"`, read-only).
 - **Pid reuse** is closed by Decision 15's order (signal only before the leader is reaped). A refactor that calls `try_wait`
   before the end of stdout, then signals, reopens it; the module docs say so at the code.
 - **A shell slipping in.** `Command::new(argv[0]).args(&argv[1..])` never invokes a shell; AC 8h proves `;`, `$(...)` and a
-  space inside an element arrive literally, and AC 9 greps the source (a lint for the plain form, not a security
-  boundary; see AC 9).
+  space inside an element arrive literally, AC 8h's and 8j's spawn-failure cases fail under any shell wrapper, and AC 9
+  greps the source (a lint for the plain form; none of these is a security boundary, see AC 9). The tests' own use of
+  `sh` as a probe program is a caller's `argv[0]`, not the runner spawning a shell (AC 8's note).
 - **Secrets in a probe.** Covered by Decision 19 and AC 8j: no argv element or output byte in any reason.
 - **Three copies of the membership rule** (Reuse map) can drift; the message shape and slug comparison are copied exactly,
   case 14 pins the code, and F2 removes the copies.
