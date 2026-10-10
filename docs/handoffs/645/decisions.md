@@ -176,3 +176,21 @@
   - The built binary: bad arguments exit 2 `usage` before any port; everything else exits 1 `not-implemented` from
     the `Unwired` ports, as the CHANGELOG entry says.
   - The commands and results are in handoff-F.md, "Tier 1 self-check"; the source facts are in evidence.md.
+
+## T (verify / GREEN) — 2026-10-09T23:01-06:00
+- **Decided:**
+  - GREEN is valid: `pane_verbs` 113/113, the workspace suite passes (exit 0, 1523 passed), and every Tier 1 check is
+    clean. F edited no test, and T repaired none.
+  - The tests pin behaviour: 8 mutations of `tx_switch.rs` (P4, P5, O1, the two record fields, the reconcile step, the
+    created-session note) were each caught by the test of their AC.
+  - Added two evidence entries for test-kit facts the tests rely on: the shared data directory (AC 4) and
+    `concurrent_put` (AC 9).
+- **Assumed:**
+  - `cargo fmt --all --check` failing on untouched files is not this story's problem: neither CI nor `lint.sh` runs it,
+    and AC 25 names only the five files, which pass.
+- **Hedged:**
+  - `origin/main` is at `d9eabbb`. The merge is textually clean and the merged ADR-0021 keeps the #645 paragraph in
+    section 8. T did not build the merged tree: no file main changed overlaps this story's code, and #663's helper is
+    used by no verb yet.
+- **Evidence:**
+  - handoff-T-green.md (commands, outputs, the mutation table); `git merge-tree --write-tree HEAD origin/main` exit 0.

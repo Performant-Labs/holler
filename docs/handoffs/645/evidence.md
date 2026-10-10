@@ -245,3 +245,34 @@ F's change).
   >             return Ok(());
   >         }
   > ```
+
+## Added by T (Phase 7, GREEN)
+
+- **Fact:** every port of the fake harness shares one data directory unless a seed gives it its own, and `Seed::new`
+  gives none; so P's server lists Q's session, and only P5 (not P4) can refuse `switch P <Q's session>` (AC 4).
+  **Source:** `crates/holler-pane-testkit/src/harness.rs:104-108`, `crates/holler-cli/tests/pane_verbs/doctor/rig.rs:61`
+  **Verbatim excerpt:**
+  > ```
+  > /// It holds the servers by port, a data directory per port, the sessions of each data
+  > /// directory in creation order, the TUI of each pane, the quirks that are on and the
+  > /// aborts the servers acknowledged. Every port shares the data directory `"default"`,
+  > /// as the live fleet's servers share one (opencode-pane-spike.md:75-77), until
+  > /// [`FakeHarness::set_data_dir`] gives a port its own.
+  > ```
+  > ```
+  >     /// An agent pane at `r<row>c<col>`, in no profile, on the shared data directory.
+  > ```
+
+- **Fact:** `concurrent_put` stores the other writer's record at the stored generation + 1, outside the call log, so the
+  engine's `cas_put` at the generation it read meets `generation-conflict`, and the stored record is the other writer's
+  at `before + 1` (AC 9).
+  **Source:** `crates/holler-pane-testkit/src/pane_store.rs:113-118`
+  **Verbatim excerpt:**
+  > ```
+  >     /// Another writer stores `pane` unconditionally, at the stored generation + 1 (or
+  >     /// at 1 for a new record), without the membership rule, and publishes its event.
+  >     /// It bypasses the faults and the call log. Returns the stored record.
+  >     pub fn concurrent_put(&self, pane: &Pane) -> Result<Pane, PaneError> {
+  >         self.put(pane, Writer::Other)
+  >     }
+  > ```
