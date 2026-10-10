@@ -1122,6 +1122,7 @@ dependencies = [
  "holler-pane",
  "holler-pane-testkit",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]
