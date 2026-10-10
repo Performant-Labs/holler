@@ -9,7 +9,10 @@ case " $* " in
       [ -n "$p" ] && list="$list,$p"
     done <"$FAKE_ROOT/pids"
     [ -n "$list" ] || exit 0
-    exec "$FAKE_REAL_PS" -ww -o pid=,user=,lstart=,command= -p "${list#,}"
+    # macOS pads the lstart column with extra blanks before the command; do the same here
+    "$FAKE_REAL_PS" -ww -o pid=,user=,lstart=,command= -p "${list#,}" |
+      sed -E 's/^( *[0-9]+ +[^ ]+ +.{24})/\1     /'
+    exit 0
     ;;
 esac
 exec "$FAKE_REAL_PS" "$@"
