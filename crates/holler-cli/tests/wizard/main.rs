@@ -10,4 +10,5 @@ mod ownership;
 mod preflight;
 mod proof;
 mod skilltext;
+mod skilltext_772a;
 mod start;

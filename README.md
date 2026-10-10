@@ -184,7 +184,8 @@ session — give it the prompt below. The wizard is a Claude Code skill that shi
 [`agent-skills/setup-wizard/`](agent-skills/setup-wizard/): `SKILL.md` plus the helper scripts in its
 `lib/` directory, which its stages run, so the **whole directory** is needed. The prompt uses the skill
 if it's installed and otherwise fetches the directory from this repo, so it works on a machine that
-has never seen it. To install it permanently for Claude Code instead (one command, no checkout needed):
+has never seen it. A local-only setup (orchestrators only, no remote sessions) is valid too: the session stages are skipped.
+To install it permanently for Claude Code instead (one command, no checkout needed):
 
 ```bash
 mkdir -p ~/.claude/skills && curl -fsSL https://github.com/Performant-Labs/holler/archive/refs/heads/main.tar.gz | tar -xz -C ~/.claude/skills --strip-components=2 holler-main/agent-skills/setup-wizard
