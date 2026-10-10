@@ -143,3 +143,41 @@
     - `cargo test --workspace -- --skip roster_stays_accurate_under_concurrent_body_load` with `HOLLER_STATE_DIR`
       isolated (126 suites, 1410/0/5);
     - the AC 22 `git diff --name-only`, the `Cargo.lock` diff, the `unsafe` count and the AC 24 grep.
+
+## A (Phase 3, up-front plan review: a re-review on the rework route after the outside diff gate's BLOCK; this run is 642a) — 2026-10-09T18:28:09-06:00
+- **Decided:** PASS on docs/handoffs/642-brief.md, unchanged since 5a4d68e, with 0 blocks and 3 new warns. The 8 warns of
+  80901fa are carried forward with their status (see handoff-A.md, which replaces the PASS at 80901fa).
+  - F's architecture change stays within the brief. The private `server.rs` is the brief's own split, the private `exec.rs`
+    holds only the kill path, `HttpError` keeps its variants and the bounds are private. The public API is the brief's.
+  - N-1: issue #642 (amended at 17:40 MDT, after the brief and my last PASS) and epic decision 8 make this adapter apply
+    `Pane.opencode_agent`. No part of the brief covers it, and it cannot land before #700. Only the serve-time
+    `default_agent` route is this crate's layer: a per-prompt agent belongs to the hub's `send_prompt` and `holler-body`'s
+    driver, not to `HarnessPort`.
+  - N-2: 642b's file plan predates 642a's sizes (`lib.rs` 483, `hermetic_test.rs` 704). 642b's additions would put the test
+    file past lint's 900-line failure.
+  - N-3: the diff gate's B-1 does not hold, as measured. Pin the cap with one test through the stub's `raw` mode, and add no
+    test-only knob.
+- **Assumed:** This pass came from the diff-gate BLOCK with F's `archChanged` (`coding-pipeline-logic.mjs:1127`), not from a
+  fresh run: there are no round-4 brief-gate files, and the only new artifact is `642-diff-result-r1.md`. #641's brief at
+  0f18b80 and #644's at 7195993 are those stories' current plans.
+- **Hedged:**
+  - N-1 is a warn, not a block. 642a uses no agent field, `AgentKey` is not on `main`, and 642a's resolver shape takes the
+    agent additively. It must be planned before 642b.
+  - The OpenCode facts in N-1(b) are strings in the installed 1.18.35 bundle, not observed behaviour. I started no OpenCode
+    server.
+  - N-2's 642b line counts are estimates at 642a's density.
+- **Evidence:**
+  - Read in full: the brief; the earlier handoff-A.md (80901fa), handoff-F.md and this file; `src/{lib,server,http,exec,tui}.rs`;
+    `642-diff-result-r1.md`.
+  - Read in part:
+    - `tests/support/stub.rs:1-150`, the `hermetic_test.rs` test list and `handoff-T-green.md:150-177`;
+    - ADR-0021 §11 (437-453) and the 641 brief (569, 718-736);
+    - the playbook driver (`coding-pipeline-logic.mjs:1030-1150`, `coding-pipeline.workflow.mjs:1268-1317, 4596-4726`).
+  - Issues read with `gh issue view`: 642, 700, 633 (decision 8), 695 and 696. Also `gh issue list --search FakeHarness`.
+  - Ran:
+    - `git diff --stat 5a4d68e HEAD -- docs/handoffs/642-brief.md` (empty), `git ls-remote origin` (main 3bdd129) and
+      `bash scripts/lint.sh`;
+    - a grep of the branch's added lines for personal names (none), and greps of the installed OpenCode bundle
+      (`default_agent`, `OPENCODE_CONFIG*`);
+    - a scratch program outside the repo (its own workspace and target dir, deleted afterwards). It called `http::request`
+      on replies of 200 MiB, 64 MiB + 1 and 64 MiB - 1000 with no framing headers.
