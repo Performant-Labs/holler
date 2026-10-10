@@ -14,7 +14,7 @@
 
 use clap::Args;
 use holler_pane::pane::PaneRole;
-use holler_pane::{Argv, EnvVarName, GridPos, PaneError};
+use holler_pane::{AgentKey, Argv, EnvVarName, GridPos, PaneError};
 
 /// `--profile NAME`: scope the verb to a profile.
 #[derive(Args, Debug, Clone, Default, PartialEq, Eq)]
@@ -57,6 +57,10 @@ pub struct SpecFlags {
     /// The pane's role: agent or orchestrator.
     #[arg(long, value_name = "ROLE")]
     pub role: Option<String>,
+    /// The OpenCode agent the pane's messages run as: letters, digits, - and _. Without it, the
+    /// server's default agent.
+    #[arg(long, value_name = "KEY")]
+    pub agent: Option<String>,
     /// An environment variable NAME the pane gets (a name only, never NAME=value). Repeatable.
     #[arg(long, value_name = "NAME")]
     pub env: Vec<String>,
@@ -98,6 +102,7 @@ pub struct SpecValues {
     pub model: Option<String>,
     pub effort: Option<String>,
     pub role: Option<PaneRole>,
+    pub agent: Option<AgentKey>,
     pub env: Vec<EnvVarName>,
     pub ctx_soft: Option<u32>,
     pub ctx_hard: Option<u32>,
@@ -115,7 +120,9 @@ impl SpecFlags {
     ///   `env-name-invalid` for an empty name or one with whitespace;
     /// - `--command-json` and `--check-json`: `command-not-argv` for JSON that is not an array of
     ///   strings, and `usage` for text that is not JSON;
-    /// - `--role`: `usage` for anything but `agent` or `orchestrator`.
+    /// - `--role`: `usage` for anything but `agent` or `orchestrator`;
+    /// - `--agent`: `agent-key-invalid` for a key that is empty or holds anything but ASCII
+    ///   letters, digits, `-` and `_` (the key is never echoed).
     pub fn validate(&self) -> Result<SpecValues, PaneError> {
         Ok(SpecValues {
             project: self.project.clone(),
@@ -124,6 +131,7 @@ impl SpecFlags {
             model: self.model.clone(),
             effort: self.effort.clone(),
             role: self.role.as_deref().map(parse_role).transpose()?,
+            agent: self.agent.as_deref().map(AgentKey::parse).transpose()?,
             env: self
                 .env
                 .iter()

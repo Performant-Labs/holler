@@ -33,7 +33,8 @@ const SAMPLE_PORT_POLICY: &str = "fixed";
 
 /// A valid, deterministic `Pane` named `name`: generation 0, grid `r1c1`, no profile,
 /// no session of record, harness port 48100 with its health unknown, an agent with no
-/// hold, no command and no probe. Its Herdr session and workspace are scratch names,
+/// hold, the server's default OpenCode agent (no `opencode_agent`), no command and no
+/// probe. Its Herdr session and workspace are scratch names,
 /// never a live session's. Its tmux session is the pane's name, as on a real pane, so
 /// pick a neutral one such as `demo-c1r1`. Two calls with one name return equal panes.
 ///
@@ -70,6 +71,7 @@ pub fn sample_pane(name: &str) -> Result<Pane, PaneError> {
         },
         profile: None,
         model: sample_model(),
+        opencode_agent: None,
         env: Vec::new(),
         context: sample_context(),
         command: None,
@@ -84,8 +86,9 @@ pub fn sample_pane(name: &str) -> Result<Pane, PaneError> {
 
 /// A valid, deterministic `ProfileSpec` for the pane named `pane`: workspace
 /// `scratch`, grid `r1c1`, directory `/srv/demo`, the OpenCode harness with the port
-/// policy `fixed`, the sample pane's model and context ceilings, an agent, and no env,
-/// no command, no check and no expect. Two calls with one name return equal specs.
+/// policy `fixed`, the sample pane's model and context ceilings, an agent, the server's
+/// default OpenCode agent (no `opencode_agent`), and no env, no command, no check and
+/// no expect. Two calls with one name return equal specs.
 ///
 /// `pane` is plain text and is not checked, because a spec may name a pane that has no
 /// record (a detached spec).
@@ -104,6 +107,7 @@ pub fn sample_spec(pane: &str) -> ProfileSpec {
             port_policy: SAMPLE_PORT_POLICY.to_owned(),
         },
         model: sample_model(),
+        opencode_agent: None,
         role: PaneRole::Agent,
         env: Vec::new(),
         context: sample_context(),

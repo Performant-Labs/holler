@@ -18,7 +18,7 @@ use std::fmt;
 use serde::de::Deserializer;
 use serde::{Deserialize, Serialize};
 
-use crate::argv::{Argv, EnvVarName};
+use crate::argv::{AgentKey, Argv, EnvVarName};
 use crate::error::{deserialize_parsed, excerpt, PaneError};
 use crate::grid::GridPos;
 use crate::pane::{ContextCeilings, HarnessKind, ModelSpec, Pane, PaneName, PaneRole};
@@ -183,6 +183,10 @@ pub struct ProfileSpec {
     pub host: SpecHost,
     pub harness: SpecHarness,
     pub model: ModelSpec,
+    /// The OpenCode agent the pane's hub-delivered messages run as; `None` means the
+    /// server's default agent (#700). A name, never a secret (I7).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opencode_agent: Option<AgentKey>,
     pub role: PaneRole,
     /// Environment variable NAMES only, never values.
     #[serde(default, deserialize_with = "crate::argv::deserialize_env_names")]

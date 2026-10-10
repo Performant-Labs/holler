@@ -109,3 +109,29 @@
 - **`verb_harness/parse.rs` `SPEC_FLAG_SETS` left without `--agent`** (outside T's pane_verbs glob;
   A's W6 already optional; no test demands it — parse coverage rides the verb tests). Recorded, not
   silent; S may inspect.
+
+## 2026-10-10 10:28–10:39 AM MDT — Phase 5 (F attempts 1-2), O recording
+
+- **F attempt 1 STAGE FAILED (refused/permission-denied), 233 s, 37 turns, no code written.** The
+  claude-cli executor ran in `dontAsk` with F's write boundary from the role doc's frontmatter
+  (untracked local provisioning) — and the allow-list was the Aftersight release's own shape
+  (`server/src/**`, `shared/src/**`, `webapp/src/**`), no Holler path at all, so every Edit/Write on
+  `crates/**` was denied. F behaved correctly: no bash bypass, only its handoff — with the complete
+  patch design. **Run-blocking oddity #1 (for the report): the pipeline install carried the
+  Aftersight workspace template into Holler's role boundaries.**
+- **Boundary repaired by O (config, not code):** Holler production paths added to the F role doc's
+  `permission.edit` (`crates/*/src/**` + `docs/adr/**` allows, both paired forms; `crates/*/tests/**`
+  denies LAST so T's suite stays F-denied). No tracked file touched; other role docs left as
+  provisioned (their stages dispatch through O, so their boundaries never bind here).
+- **F attempt 2 STAGE OK (658 s, 63 turns, out 23,771 / reasoning 4,022 / cache-read 2,243,398 /
+  cache-write 99,667, cost n/a):** the exact designed patch, 91 insertions across 10 files — the
+  `AgentKey` guard + `AGENT_KEY_INVALID` in `argv.rs`, the field after `model` on `Pane` and
+  `ProfileSpec`, DECISION 1's record line in `Plan::record`, the `--from-current` copy + doc row,
+  `--agent` in `SpecFlags`/`SpecValues`/`validate`, the `effective_spec` overlay, testkit `None`
+  lines, the one dated ADR row (self-describing per W4), and deviation 1 (`lib.rs` root re-export,
+  inside the issue's `holler-pane/**` blast radius). No Cargo.toml, no CHANGELOG, no error.rs.
+- **F flags one malformed test literal (T's to repair in T-green):** the serde fail-closed test's
+  `r#"""#` is a lone quote (a JSON syntax error), not the intended empty-string case; the repair is
+  `r#""""#`. F did not work around it in code — correct. F also notes the ADR's old deferred bullet
+  (~:677) still words the recording as #644's; the one-row constraint kept it, the new row states
+  the launch record writes the field (S may inspect).

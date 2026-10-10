@@ -172,6 +172,10 @@ pub(crate) fn effective_spec(
         .clone()
         .or(base.and_then(|b| b.command.clone()));
     let check = values.check.clone().or(base.and_then(|b| b.check.clone()));
+    let opencode_agent = values
+        .agent
+        .clone()
+        .or(base.and_then(|b| b.opencode_agent.clone()));
     let env = replaced(&values.env, base.map(|b| &b.env));
     let expect = replaced(&values.expect, base.map(|b| &b.expect));
     problems.check_values(
@@ -208,6 +212,7 @@ pub(crate) fn effective_spec(
             model_id,
             effort,
         },
+        opencode_agent,
         role: values
             .role
             .or(base.map(|b| b.role))

@@ -347,6 +347,7 @@ impl<'a> Plan<'a> {
             },
             profile,
             model: spec.model.clone(),
+            opencode_agent: spec.opencode_agent.clone(),
             env: spec.env.clone(),
             context: spec.context,
             command: spec.command.clone(),

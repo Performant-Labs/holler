@@ -1,5 +1,5 @@
-//! `Argv` and `EnvVarName`: the two guards that make a stored command and a stored
-//! environment safe by construction.
+//! `Argv`, `EnvVarName` and `AgentKey`: the guards that make a stored command, a
+//! stored environment and a stored agent key safe by construction.
 //!
 //! - [`Argv`] (epic #633, B2): every stored command is an argv array and nothing in
 //!   Holler passes it through a shell. A bare string where an array is expected is
@@ -10,12 +10,16 @@
 //!   `=` carries a value and is refused with `profile-secret-refused`; an empty
 //!   name, or one with whitespace, is `env-name-invalid`. Neither refusal echoes the
 //!   text it refused.
+//! - [`AgentKey`] (#700): the OpenCode agent a pane's messages run as, a name and
+//!   never a secret. It is a non-empty token of ASCII letters, digits, `-` and `_`;
+//!   anything else is refused with the open code `agent-key-invalid`, which does not
+//!   echo the text either.
 
 use serde::de::{self, Deserializer};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::error::{deserialize_parsed, PaneError};
+use crate::error::{deserialize_parsed, PaneError, RefusalCode};
 
 /// An argument vector: the program and its arguments, one string each.
 ///
@@ -113,6 +117,50 @@ impl EnvVarName {
 impl<'de> Deserialize<'de> for EnvVarName {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         deserialize_parsed(deserializer, EnvVarName::parse)
+    }
+}
+
+/// `agent-key-invalid`: an OpenCode agent key that is not a non-empty token of ASCII
+/// letters, digits, `-` and `_`. A refusal, exit 3 (#700, [`AgentKey`]).
+pub const AGENT_KEY_INVALID: RefusalCode = RefusalCode::from_static("agent-key-invalid");
+
+/// The OpenCode agent a pane's hub-delivered messages run as, such as `orchestrator`:
+/// a name, never a secret (I7). A record holding `None` instead runs the server's
+/// default agent.
+///
+/// Parsing is the guard (see the module docs). It serializes as a plain string and
+/// reads back through [`AgentKey::parse`], so a record holding a malformed key does
+/// not load.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
+#[serde(transparent)]
+pub struct AgentKey(String);
+
+impl AgentKey {
+    /// Check `text` and keep it as an agent key: non-empty, and only ASCII letters,
+    /// digits, `-` and `_` (so no whitespace, newline, `=` or `/`). Anything else is
+    /// [`AGENT_KEY_INVALID`], in a message that states the rule and not the text.
+    pub fn parse(text: &str) -> Result<Self, PaneError> {
+        let allowed = |c: char| c.is_ascii_alphanumeric() || c == '-' || c == '_';
+        if text.is_empty() || !text.chars().all(allowed) {
+            return Err(PaneError::Refused {
+                code: AGENT_KEY_INVALID,
+                message: "an OpenCode agent key must be non-empty and use only ASCII letters, \
+                          digits, '-' and '_'"
+                    .to_owned(),
+            });
+        }
+        Ok(Self(text.to_owned()))
+    }
+
+    /// The key.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl<'de> Deserialize<'de> for AgentKey {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        deserialize_parsed(deserializer, AgentKey::parse)
     }
 }
 

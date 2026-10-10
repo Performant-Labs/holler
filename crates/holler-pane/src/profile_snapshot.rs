@@ -32,6 +32,7 @@ pub fn fixed_port_policy(port: u16) -> String {
 /// | `harness.kind` | `harness.kind` |
 /// | `harness.port_policy` | [`fixed_port_policy`] of `harness.port` |
 /// | `model`, `role`, `context` | `model`, `role`, `context` |
+/// | `opencode_agent` | `opencode_agent` (absent stays absent) |
 /// | `env` | `env`: the names, in order |
 /// | `command` | `command` |
 /// | `check`, `expect` | `probe.check`, `probe.expect` (in order) |
@@ -58,6 +59,7 @@ pub fn spec_from_pane(pane: &Pane) -> ProfileSpec {
             port_policy: fixed_port_policy(pane.harness.port),
         },
         model: pane.model.clone(),
+        opencode_agent: pane.opencode_agent.clone(),
         role: pane.role,
         env: pane.env.clone(),
         context: pane.context,
