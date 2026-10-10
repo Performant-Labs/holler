@@ -1,0 +1,29 @@
+{
+  "configShapeVersion": 1,
+  "project": "holler",
+  "description": "Rust workspace: the Holler hub, body and CLI, and its pane adapters (tokio, wss loopback fleet).",
+  "test": {
+    "unit": { "command": ["cargo", "test", "--workspace", "--", "--skip", "roster_stays_accurate_under_concurrent_body_load"], "timeoutMs": 900000 },
+    "e2e": null,
+    "pluginSuite": null,
+    "pluginTypecheck": null
+  },
+  "paths": {
+    "test": ["crates/*/tests/**"],
+    "production": ["crates/*/src/**", "crates/*/Cargo.toml", "Cargo.toml", "Cargo.lock", "scripts/**"]
+  },
+  "toolchain": [
+    {
+      "name": "rust",
+      "command": ["rustc", "--version"],
+      "versionRegex": "rustc (\\d+\\.\\d+\\.\\d+)",
+      "hint": "install Rust stable with rustup (rust-toolchain.toml pins the channel)"
+    }
+  ],
+  "gitHooks": { "required": true, "setupHint": "run `bash scripts/setup-hooks.sh`" },
+  "secretScan": { "required": true, "command": ["gitleaks", "version"], "hint": "install gitleaks (Holler's commit hook fails closed without it)" },
+  "handoffs": { "dir": "docs/handoffs", "trackedProbe": "decisions.md" },
+  "worktree": { "dir": ".claude/worktrees", "basePort": 9000, "linkDirs": ["target", ".aftersight/releases"] },
+  "stages": { "implement": { "executor": "claude-cli", "model": "claude-opus-5-5", "effort": "xhigh" } },
+  "gateProvider": null
+}

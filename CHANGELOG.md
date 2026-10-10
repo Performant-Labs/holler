@@ -136,6 +136,15 @@ fills this file in at release time.
   protocol version (22; any other is `herdr-version-unsupported`). No I/O yet: the socket adapter follows in part 2,
   so nothing a user runs changes ([#640](https://github.com/Performant-Labs/holler/issues/640)).
 
+- Herdr adapter, part 2 (epic [#633](https://github.com/Performant-Labs/holler/issues/633)): `holler-adapter-herdr`
+  now implements `HerdrPort` over Herdr's local socket, one request per connection with one deadline per call (10 s by
+  default; `timeout` when it runs out, `unavailable` for a missing socket or a garbled or oversized reply). It refuses a
+  Herdr protocol other than 22 when it connects. It places a pane only by the splits the planner decides, reads the
+  tree back to confirm it landed in the cell asked for, and creates a configured workspace that Herdr lacks only for
+  `r1c1`. It passes the `HerdrPort` conformance suite against a simulated Herdr in the default test run. Nothing is
+  wired into a verb yet ([#649](https://github.com/Performant-Labs/holler/issues/649)), so nothing a user runs
+  changes ([#640](https://github.com/Performant-Labs/holler/issues/640)).
+
 - Pane control, the hub's profile registry (epic [#633](https://github.com/Performant-Labs/holler/issues/633)):
   `profile/get`, `profile/list`, `profile/cas_put`, `profile/delete`, `profile/watch` and `profile/log` now answer from
   a real registry instead of `not-implemented`. Profiles are kept in `<state dir>/hub/profiles.json` (mode `0600`,
@@ -163,6 +172,121 @@ fills this file in at release time.
   refuses to set a spec for a pane of another profile before anything is written, and that removing a spec is never
   refused for that reason. Test code only: nothing a user runs changes
   ([#688](https://github.com/Performant-Labs/holler/issues/688)).
+
+- Pane control, the read verbs (epic [#633](https://github.com/Performant-Labs/holler/issues/633)): `holler pane list`,
+  `holler pane get` and `holler pane watch` now read the pane registry instead of answering `not implemented (story
+  #643)`. `list` prints one row per pane, sorted by name: PANE, POS (the grid cell, row first: `r2c1`), PROFILE,
+  PROJECT, HEALTH, SHOWN (the session the pane's TUI shows), DRIVEN (the session the hub drives), SYNC and HOLD. SYNC
+  reads `MISMATCH` when the pane's TUI shows another session than its session of record, or its home screen: the rule
+  `holler pane doctor` uses. `get PANE` prints one pane in full, one `key: value` line per field: the record with its
+  model, environment variable names, context ceilings, launch command and health probe with its last result, plus its
+  profile's spec for it. `watch` follows the change feed, from the current state or from `--since CURSOR`, one line
+  per change, and `--until-idle` stops it once nothing more is owed. Each verb takes a pane name and `--profile NAME`
+  to scope itself; a named pane outside the profile is refused with `pane-not-in-profile` (exit 3). Under
+  `--format=json` each answers in the shared envelope, and `watch` prints NDJSON, one envelope per line. The verbs
+  observe nothing themselves: SHOWN and health are what reconcile last recorded, and DRIVEN is printed as the record
+  holds it, which is empty until the hub wiring (#649) records it. In text mode a stored value is quoted and escaped
+  when it could act on the terminal, so it cannot put a control sequence or a line break on the screen. Until the hub
+  client is wired (#649), the installed binary still answers `not implemented`
+  ([#643](https://github.com/Performant-Labs/holler/issues/643)).
+
+- Pane control, the reconcile engine and `holler pane doctor [PANE] [--fix] [--profile NAME]` (epic
+  [#633](https://github.com/Performant-Labs/holler/issues/633)): a pass looks at each pane's Herdr pane, tmux session,
+  harness server and sessions, and the session its TUI shows, compares them with the pane's record and reports what
+  differs as typed findings with stable codes: a TUI on another session than the session of record, a wedged or dead
+  server, a missing tmux session or Herdr pane, a session of record that is missing or not set, a harness the record does
+  not know in the pane, a stray session, an unregistered Herdr pane, an unsupported Herdr, and a check that could not
+  run. Each finding names the holler command to run, or says why there is none. `--fix` repairs only what the record
+  decides: it switches the TUI back to the session of record when the pane's server is healthy and has it (the
+  orchestrator's pane only when named), and never changes the session of record, starts, attaches or deletes anything,
+  or types into a pane. Every pass records what it observed in `last_observed` and `harness.health`, writing a record
+  only when that changed, and exits 0 with or without findings, so a script reads `data.findings`. Positions print as
+  `r2c1`. There is no hub timer: a scheduler runs `holler pane doctor --format=json` ([ADR 0021](docs/adr/ADR-0021.md)
+  section 12). The verb runs on the ports, which are wired to the real hub, Herdr, tmux and OpenCode by #649, so until
+  then it answers `not-implemented` outside the tests ([#647](https://github.com/Performant-Labs/holler/issues/647)).
+
+- Pane control, `holler profile list` and `holler profile show` (epic [#633](https://github.com/Performant-Labs/holler/issues/633)):
+  `profile list` prints every profile, sorted by slug, with its number of specs, its number of live panes and its
+  generation. `profile show NAME` prints the profile's specs and compares them with its live panes, field by field: each
+  pane is reported as `matches`, `differs` (one `spec ..., live ...` line per field that differs, a position as `r2c1`,
+  row first), `missing` (a spec with no live pane) or `extra` (a live pane with no spec), and each live pane shows its
+  last health probe result (`ok`, or `failed (missing "...")`), read from the pane registry and never run. A
+  profile's live panes are the panes that belong to it. Both verbs take `--format=json`. In text mode a stored string
+  with a control character prints escaped, and a command or a check prints as a JSON array. The snapshot of a pane as
+  a spec (its port policy becomes `fixed:<port>`, the port its harness uses) and the comparison live in `holler-pane`,
+  for `profile create --from-current`, `profile apply` and the migration to reuse, and
+  [ADR 0021](docs/adr/ADR-0021.md) records both choices. Until the hub's stores are wired into the binary
+  ([#649](https://github.com/Performant-Labs/holler/issues/649)), the real `holler profile list` and `show` still
+  answer `not-implemented` ([#662](https://github.com/Performant-Labs/holler/issues/662)).
+
+- Pane control, the `--profile` helper and the health-probe runner (epic [#633](https://github.com/Performant-Labs/holler/issues/633)):
+  the CLI now has the real helper every `--profile` verb uses to scope itself to a profile and to edit a pane's spec and
+  make the live change as one transaction, over the pane and profile registries, in the order of
+  [ADR 0021](docs/adr/ADR-0021.md): the profile is written first, and a live change that fails puts the specs back by a
+  second write. It passes the test kit's 15-case conformance suite. When the outcome after the profile write is not clean
+  (the specs could not be put back, another writer changed the profile, or the first write timed out), the error names
+  the profile and the pane and ends with the step to reconcile: `holler pane doctor --profile '<P>'` and then
+  `holler profile show '<P>'`, the name quoted for a shell. The health probe now really runs: the command runs directly,
+  never through a shell, and passes only when it exits 0 and its output holds every expected string. A non-zero exit, more
+  than 1 MiB of output or the timeout is an error, the whole process group the probe started is killed when it gives up,
+  and no error quotes the command or its output. ADR 0021 now records these rules and the time bounds of both. No verb
+  uses either yet; #649 wires them in ([#663](https://github.com/Performant-Labs/holler/issues/663)).
+- Pane control, `holler pane park [PANE] --reason TEXT --release-when WHEN [--profile NAME]` and
+  `holler pane unpark [PANE] [--profile NAME]` (epic [#633](https://github.com/Performant-Labs/holler/issues/633)):
+  `park` takes a pane out of service by setting its record's hold to `parked`, with the reason, the release condition
+  and the time it was parked, and `unpark` sets it back to `none`. Each pane is changed by one compare-and-swap on its
+  record and nothing else: no Herdr, tmux or OpenCode call and no profile write, so a pane never moves and its processes
+  are untouched. With `--profile` and no pane name they take every pane of the profile in name order; a named pane must
+  belong to the profile. A pane already in the asked state, or drained, is left as it is and reported unchanged (exit 0),
+  so a profile-wide run that stopped at a failed write, whose message names the panes it changed and those it did not
+  reach, can simply be run again. The reason and the release condition are trimmed, and one that is blank, holds a
+  control character or is longer than 200 characters is refused as `usage`. Both verbs take `--format=json`, and
+  [ADR 0021](docs/adr/ADR-0021.md) records how they behave. Nothing reads the hold yet: whether a parked pane refuses a
+  prompt is a later part of #646. Until the hub's stores are wired into the binary
+  ([#649](https://github.com/Performant-Labs/holler/issues/649)), the real verbs still answer `not-implemented`
+  ([#646](https://github.com/Performant-Labs/holler/issues/646), part 1 of 3).
+- Pane control, `holler profile create NAME [--from-current | --from PROFILE]` and `holler profile delete NAME
+  [--keep-panes]` (epic [#633](https://github.com/Performant-Labs/holler/issues/633)): `profile create NAME` makes an
+  empty profile. `--from PROFILE` copies another profile's specs as they are: a detached copy, which no pane joins, and
+  whose specs may still name panes of another profile. `--from-current` makes one spec per pane in the pane registry,
+  from the pane's own record (its position, working directory, harness, model and effort, role, environment variable
+  names, context ceilings, command, check and expected strings), and makes each pane a member. A name that is taken,
+  or that has the slug of a profile that exists, is `profile-exists`, and `--from-current` writes nothing when a pane
+  belongs to another profile (`pane-in-other-profile`, naming every such pane). If a pane cannot join, the verb undoes
+  the profile and the memberships made so far; if that undo fails too, it answers `profile-conflict` with the
+  commands that reconcile. `profile delete NAME` is refused while panes belong to the profile
+  (`profile-has-live-panes`); `--keep-panes` first detaches each of them, and they keep running, then deletes the
+  profile. A command that an error message suggests quotes the profile name for a shell. Both verbs take
+  `--format=json`, and [ADR 0021](docs/adr/ADR-0021.md) adds `profile-conflict` to their codes. Until the hub's stores
+  are wired into the binary ([#649](https://github.com/Performant-Labs/holler/issues/649)), the real
+  `holler profile create` and `delete` answer `not-implemented` ([#662](https://github.com/Performant-Labs/holler/issues/662)).
+- OpenCode adapter, part 1: the server side (epic [#633](https://github.com/Performant-Labs/holler/issues/633)):
+  `holler-adapter-opencode` now implements the server half of `HarnessPort` over OpenCode's HTTP API, on `127.0.0.1`
+  only. `serve` starts `opencode serve` for a pane in its project directory, in a process group of its own, and sends
+  nothing but health checks until the server first answers healthy; it never takes over a server that already answers
+  on the port, and returns the new server's pid. `health` is a timed check that answers false, and never hangs, when the
+  server is down or frozen. `create_session` titles each new session with its own id, `list_sessions` leaves out child
+  (subagent) sessions, and `abort` checks that the session exists first, because raw OpenCode acknowledges an abort of
+  an id it does not know. Every call has a deadline (10 s by default) and answers `timeout` when a frozen server holds
+  it, and a reply that is not the JSON a step needs, such as the web page OpenCode serves for a route it does not know,
+  is `unavailable`. Attaching, switching and reading a pane's TUI answer `not-implemented` until part 2, which also
+  brings the opt-in tests against a real OpenCode. Nothing a user runs changes yet: #649 wires the adapter in
+  ([#642](https://github.com/Performant-Labs/holler/issues/642)).
+
+- Host adapter (epic [#633](https://github.com/Performant-Labs/holler/issues/633)): `holler-adapter-host` now
+  implements `HostPort` over a local tmux server. Its `TmuxHost` creates a pane's tmux session, starts a command in
+  the session as a new detached window and returns once tmux reports the new process (nothing is typed into a shell
+  and nothing waits on a sleep), lists the session's processes, and stops only the processes it started: each
+  window it starts is tagged with its process id, and a stop sends `TERM` to the process group of every tagged
+  window, waits a grace, then sends `KILL` to any group that still has a member. Nothing is matched by name, and the
+  session's own shell is never signalled. A command is always an argument vector that never goes through a shell;
+  an argument tmux would read as a command separator, and a directory tmux would expand, are escaped. A session is
+  always named exactly, so a pane never reaches another whose name it prefixes. Every call ends within its bound
+  (10 s by default) or with `timeout`; a missing session is `pane-not-found` for `run` and `ps` and `Ok` for
+  `stop_owned`; a directory that is relative or does not exist is refused instead of letting tmux start the session,
+  or a command, somewhere else. The tests that need a real tmux are opt-in (`--ignored`) and each runs its own private
+  tmux server. Not wired into the CLI yet (#649), so nothing a user runs changes
+  ([#641](https://github.com/Performant-Labs/holler/issues/641)).
 
 ## [0.4.0] - 2026-09-29
 
