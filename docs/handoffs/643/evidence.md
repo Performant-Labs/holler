@@ -1,165 +1,132 @@
 # Evidence — #643 the read verbs
 
-Source facts in **unchanged** code that the F diff (`crates/holler-cli/src/pane/{list,get,watch}.rs`) relies on.
+Facts in code the diff does not show, quoted verbatim with `file:line` (in this repo unless marked). The gate reads
+only the first 12,000 bytes, so round 2 is first, and facts the brief already quotes are pointers.
+
+## F (Phase 5, implement, round 2) — 2026-10-09
+
+### Deviations from the brief (A's W-9)
+
+Each is deliberate, in the file and layer the brief chose, and pinned by a test in the diff.
+
+1. **Decision 2 lists four shared `pub` items; there are eleven.** Also `COLUMNS`, `NO_VALUE` (`list.rs:26-31`),
+   `profile_name` (`:134-136`), `health_word`, `hold_word` (`:234-249`), `optional_text` (`:275-277`) and `json_text`
+   (`:284-299`), for `get.rs:18-21` and `watch.rs:17`, one copy each (the frozen `pane/mod.rs` admits no module).
+2. **Decision 6's `serde_json::to_string` is `json_text`:** the same JSON value, with each character
+   `acts_on_terminal` flags as a `\u` escape, since `serde_json` escapes only `\x00`-`\x1F`, `"` and `\` (serde_json
+   1.0.151, `src/ser.rs:2142`: `const UU: u8 = b'u'; // \x00...\x1F except the ones above`).
+3. **Decision 11's trigger set is wider.** `text_value` also quotes a stored `-`, so that it never reads as the empty
+   value (`list.rs:50-52`, `get.rs:37-39`), and every character `acts_on_terminal` (`list.rs:305-307`) flags.
+4. **So the Risks bullet's "bidi ... passed through" is false in text mode.** JSON mode still writes them raw (#660).
+
+### The round-1 gate's findings, settled from source
+
+- **Fact (B-1):** a `what` that embeds a profile name in a sentence quotes it with `{:?}`, as `get.rs:105` does. The
+  fake scope's `pane-not-in-profile` is that text byte for byte, and the hub's `pane-in-other-profile` and slug clash
+  (`crates/holler-hub/src/profile/store.rs:397-398`) quote the same way. A profile name may hold spaces.
+  **Source:** `crates/holler-pane-testkit/src/profile_scope.rs:122-123`, `crates/holler-hub/src/panes/store.rs:348-350`,
+  `crates/holler-pane/src/profile.rs:30`
+  **Verbatim excerpt:**
+  > ```
+  >             _ => Err(PaneError::PaneNotInProfile {
+  >                 what: format!("{name} is not in profile {:?}", profile.as_str()),
+  > ```
+  > ```
+  >             Err(PaneError::PaneInOtherProfile {
+  >                 what: format!(
+  >                     "{} is in profile {:?}, not {:?}",
+  > ```
+  > ```
+  > /// The display name of a profile: spaces allowed, e.g. `Some Profile`.
+  > ```
+
+- **Fact (B-2, W-3):** no pane or profile name can be `-`, so a `-` in a name cell is always the empty value. A pane
+  name starts and ends with `[0-9a-z]` (the brief quotes `vocab.rs:209-223`), and a profile name needs an ASCII letter
+  or digit. Other stored strings (a session id, a cwd) can be `-`, and they print as `"-"`.
+  **Source:** `crates/holler-pane/src/profile.rs:50-51`
+  **Verbatim excerpt:**
+  > ```
+  >         } else if slugify(name).is_empty() {
+  >             Some("a profile name needs at least one ASCII letter or digit")
+  > ```
+
+- **Fact (B-3, NV-6, W-1):** beyond printable ASCII and the backslash forms of `\0`, `\t`, `\n` and `\r`,
+  `escape_debug` (`:546`, `ESCAPE_ALL`) writes `\u{..}` for exactly: control, private use, whitespace, grapheme
+  extender (combining marks, VS16), default-ignorable (ZWSP, ZWJ, soft hyphen, BOM), format control (bidi, LRM, ALM)
+  and unassigned characters. `é` and CJK print as themselves. So
+  `acts_on_terminal` is that explicit list plus `is_control`, and `{:?}` of a `str` (what `text_value` prints) escapes
+  with the same function and flag. A rustc 1.98.1 probe of 39 such and plain characters: they agree on all 39.
+  **Source:** library source, rust-lang/rust tag `1.98.1` (this repo's toolchain):
+  `library/core/src/char/methods.rs:489-503`, `library/core/src/fmt/mod.rs:2943-2944`
+  **Verbatim excerpt:**
+  > ```
+  >             // ASCII fast path
+  >             '\x20'..='\x7E' => EscapeDebug::printable(self),
+  >
+  >             _ if self.is_control()
+  >                 || self.is_private_use()
+  >                 || self.is_whitespace()
+  >                 || args.escape_grapheme_extender && self.is_grapheme_extender()
+  >                 || self.is_default_ignorable()
+  >                 || self.is_format_control()
+  >                 || !self.is_assigned() =>
+  >             {
+  >                 EscapeDebug::unicode(self)
+  >             }
+  >
+  >             _ => EscapeDebug::printable(self),
+  > ```
+  > ```
+  >                 let esc = c.escape_debug_ext(EscapeDebugExtArgs {
+  >                     escape_grapheme_extender: true,
+  > ```
+
+- **Fact (NV-1, W-2):** `json_text` gets an `Argv`, a `Vec<String>` or a `ProfileSpec` (`get.rs:188-192`, `:267`),
+  none holding a map (the brief lists `ProfileSpec`'s fields). So `serde_json::to_string` cannot fail there, and
+  `list.rs:287`'s `unwrap_or_default()` is unreachable.
+  **Source:** `crates/holler-pane/src/argv.rs:25-27`
+  **Verbatim excerpt:**
+  > ```
+  > #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
+  > #[serde(transparent)]
+  > pub struct Argv(Vec<String>);
+  > ```
+
+- **Fact (NV-5):** both `Watch` iterators return `None` only after they have yielded an error, and `emit_stream` stops
+  at an error item. So the `?` at `watch.rs:161` never ends a stream that has not failed.
+  **Source:** `crates/holler-pane-testkit/src/feed.rs:278-282`, `crates/holler-hub/src/panes/store.rs:296-297`, `:311`
+  **Verbatim excerpt:**
+  > ```
+  >         let feed = self.feed.take()?;
+  >         let item = self.step(&feed);
+  >         if item.is_ok() {
+  >             self.feed = Some(feed);
+  >         }
+  > ```
+  > ```
+  >     /// `None` once an error has ended the stream.
+  >     store: Option<Arc<Store>>,
+  > ```
+  > ```
+  >         let store = self.store.as_ref()?;
+  > ```
 
 ## F (Phase 5, implement) — 2026-10-09
 
-- **Fact:** a verb's `data` is serialized as the struct itself inside the envelope (never through a `serde_json::Value`),
-  so the JSON keys of `PaneRow`, `PaneChange` and `PaneDetail` come out in field order, and a nested `GridPos` keeps
-  its own key order (AC 2, AC 5's raw `"pos":{"row":2,"col":1,"pos":"r2c1"}`).
-  **Source:** `crates/holler-cli/src/output.rs:304-306`
-  **Verbatim excerpt:**
-  > ```
-  > fn write_envelope<T: Serialize>(sink: &mut Sink<'_>, envelope: &Envelope<T>) -> io::Result<()> {
-  >     match serde_json::to_string(envelope) {
-  >         Ok(line) => write_line(sink.out, &line),
-  > ```
-
-- **Fact:** `GridPos` serializes as `row`, `col`, `pos`, in that order, with `pos` its `rRcC` display.
-  **Source:** `crates/holler-pane/src/grid.rs:129-138`
-  **Verbatim excerpt:**
-  > ```
-  > impl Serialize for GridPos {
-  >     /// `{"row":R,"col":C,"pos":"rRcC"}`, in that key order.
-  >     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-  >         let mut out = serializer.serialize_struct("GridPos", 3)?;
-  >         out.serialize_field("row", &self.row)?;
-  >         out.serialize_field("col", &self.col)?;
-  >         out.serialize_field("pos", &self.to_string())?;
-  >         out.end()
-  >     }
-  > }
-  > ```
-
-- **Fact:** `emit_stream` prints item by item and returns at the first item whose exit code is not 0 (an error item,
-  or a failed write), so `watch` yields one `Err` and the stream ends there (AC 15).
-  **Source:** `crates/holler-cli/src/output.rs:231-237`
-  **Verbatim excerpt:**
-  > ```
-  >     for item in items {
-  >         let code = emit(sink, format, item, &text);
-  >         if code != 0 {
-  >             return code;
-  >         }
-  >     }
-  >     0
-  > ```
-
-- **Fact:** a rendered text is written with a newline added when it lacks one, and flushed, so `watch`'s per-line
-  render returns no newline and `list`/`get` may end theirs with one.
-  **Source:** `crates/holler-cli/src/output.rs:318-324`
-  **Verbatim excerpt:**
-  > ```
-  > fn write_line(to: &mut dyn Write, line: &str) -> io::Result<()> {
-  >     to.write_all(line.as_bytes())?;
-  >     if !line.ends_with('\n') {
-  >         to.write_all(b"\n")?;
-  >     }
-  >     to.flush()
-  > }
-  > ```
-
-- **Fact:** a watch's `next()` yields `Ok(None)` for idle (the stream stays usable), and any error ends the stream;
-  `next()` blocks for at most I5's bound, so `watch` without `--until-idle` waits on idle without busy-looping on a
-  real store.
-  **Source:** `crates/holler-pane/src/ports.rs:43-52`
-  **Verbatim excerpt:**
-  > ```
-  > /// - `next()` blocks for at most I5's bound and yields one of three things:
-  > ///   - `Ok(Some(change))`: the next change;
-  > ///   - `Ok(None)` (the item, not the end of the iterator): **idle**, nothing happened
-  > ///     within the bound. This is an ordinary outcome, as in the hub's `control/wait`,
-  > ///     and the stream stays usable. A hub long-poll that sees it answers
-  > ///     `{events: [], cursor}`;
-  > ///   - `Err(..)`: a failure. `Err(PaneError::Timeout)` means the store did not
-  > ///     answer within the bound (a wedged store), never "idle". Any error ends the
-  > ///     stream (call `watch` again).
-  > pub type Watch<T> = Box<dyn Iterator<Item = Result<Option<T>, PaneError>> + Send>;
-  > ```
-
-- **Fact:** a `PaneEvent` with no record is a delete, which is how `watch` tells `"put"` from `"delete"`.
-  **Source:** `crates/holler-pane/src/pane.rs:265-267`
-  **Verbatim excerpt:**
-  > ```
-  >     /// The record after the change; `None` when the record was deleted.
-  >     #[serde(default)]
-  >     pub pane: Option<Box<Pane>>,
-  > ```
-
-- **Fact:** `ProfileScope::resolve` is the membership check the three verbs delegate to: every pane of P with no name,
-  the named pane only if it belongs to P (`pane-not-in-profile`), `profile-not-found` for a missing P.
-  **Source:** `crates/holler-pane/src/profile.rs:380-389`
-  **Verbatim excerpt:**
-  > ```
-  > pub trait ProfileScope: Send + Sync {
-  >     /// The profile and the panes of it a verb acts on. With no `pane`, every pane
-  >     /// of the profile; with a named pane, just that one, which must belong to the
-  >     /// profile (`pane-not-in-profile` otherwise). A missing profile is
-  >     /// `profile-not-found`.
-  >     fn resolve(
-  >         &self,
-  >         profile: &ProfileName,
-  >         pane: Option<&PaneName>,
-  >     ) -> Result<ResolvedScope, PaneError>;
-  > ```
-
-- **Fact:** the two codes the verbs raise themselves (`pane-not-found` in `get`, `pane-not-in-profile` for a scope
-  that returns no such pane) are refusals, so they exit 3 in both formats.
-  **Source:** `crates/holler-pane/src/error.rs:285-291` and `crates/holler-pane/src/error.rs:241-242`
-  **Verbatim excerpt:**
-  > ```
-  >         | PaneCode::PaneNotInProfile
-  >         | PaneCode::PaneInOtherProfile
-  >         | PaneCode::ProbeFailed
-  >         | PaneCode::HerdrVersionUnsupported
-  >         | PaneCode::ProfileNotFound
-  >         | PaneCode::PaneNotFound
-  >         | PaneCode::SessionNotFound => ErrorClass::Refusal,
-  > ```
-  > ```
-  >             ErrorClass::Usage => 2,
-  >             ErrorClass::Refusal => 3,
-  > ```
-
-- **Fact:** `format_epoch` formats epoch seconds in UTC, so `observed_at` labels its text ` UTC`.
-  **Source:** `crates/holler-cli/src/time_fmt.rs:7-11`
-  **Verbatim excerpt:**
-  > ```
-  > /// Format a unix epoch second as a UTC `YYYY-MM-DD HH:MM:SS` string
-  > /// (the `hub token list`/`mint`/`ping` EXPIRES column). No chrono
-  > /// dependency: a manual civil calendar conversion (Howard Hinnant's
-  > /// algorithm) is enough for epoch seconds.
-  > pub fn format_epoch(secs: u64) -> String {
-  > ```
+Pointers to facts the brief quotes: `GridPos`'s key order (`crates/holler-pane/src/grid.rs:129-138`); JSON mode
+serializes the data itself, `emit` adds a missing newline, `emit_stream` stops at the first non-zero exit
+(`crates/holler-cli/src/output.rs:201-243`); idle is `Ok(None)`, any error ends a watch
+(`crates/holler-pane/src/ports.rs:36-52`); no `pane` is a delete (`crates/holler-pane/src/pane.rs:256-268`); `resolve`
+(`crates/holler-pane/src/profile.rs:380-389`); exit classes (`crates/holler-pane/src/error.rs:266-301`); UTC
+(`crates/holler-cli/src/time_fmt.rs:7-11`); `Health`'s serde form (`crates/holler-pane/src/pane.rs:131-150`).
 
 - **Fact:** profiles are the same profile when their slugs are equal, which is how `watch --profile` compares a
   record's `profile` with the scoped one.
-  **Source:** `crates/holler-pane/src/profile.rs:68-74`
+  **Source:** `crates/holler-pane/src/profile.rs:70-71`
   **Verbatim excerpt:**
   > ```
-  >     /// The unique id derived from the name: ASCII letters and digits in lower case,
-  >     /// each run of anything else becoming one `-`, with no leading or trailing `-`.
   >     /// Two display names with the same slug are the same profile as far as
   >     /// uniqueness goes.
-  >     pub fn slug(&self) -> String {
-  >         slugify(&self.0)
-  >     }
-  > ```
-
-- **Fact:** `Health` serializes snake_case: `"healthy"`, `"unknown"`, `{"unhealthy": REASON}` (the `health` of a
-  `PaneRow`, AC 4).
-  **Source:** `crates/holler-pane/src/pane.rs:131-139`
-  **Verbatim excerpt:**
-  > ```
-  > /// What the harness server last reported about its health.
-  > #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-  > #[serde(rename_all = "snake_case")]
-  > pub enum Health {
-  >     Healthy,
-  >     /// Unhealthy, with the reason.
-  >     Unhealthy(String),
-  >     Unknown,
-  > }
   > ```
 
 ## T (Phase 7, verify / GREEN) — 2026-10-09
@@ -207,38 +174,12 @@ Facts in unchanged test-kit code that the tests rely on, excerpts copied from so
   >         let cursor = Cursor(self.head.0.checked_add(1).ok_or_else(overflowed)?);
   > ```
 
-- **Fact:** a watch from `Cursor(0)` yields one put per live record and resumes from the head, while one from any other
-  cursor yields every change after it (AC 12 vs AC 13, and why the leave test uses `--since 1`).
-  **Source:** `crates/holler-pane-testkit/src/feed.rs:22-26`
-  **Verbatim excerpt:**
-  > ```
-  > //! 2. From `Cursor(0)`: one put for each live record, carrying the cursor of that
-  > //!    record's last change, in cursor order. The stream then resumes from the head as
-  > //!    of that snapshot, as the hub's does, so a record deleted before the snapshot
-  > //!    leaves no event at all.
-  > //! 3. From any other cursor: every change after it, in order.
-  > ```
-
-- **Fact:** the fake's `list` is already sorted by name, so no fake-backed test can tell whether `list` sorts by itself
-  (Decision 4's "the verb sorts").
-  **Source:** `crates/holler-pane-testkit/src/pane_store.rs:54`
-  **Verbatim excerpt:**
-  > ```
-  > /// - `list` is sorted by name.
-  > ```
-
-- **Fact:** `check_ndjson` refuses an empty stream, so AC 16 checks the empty `watch` output directly.
-  **Source:** `crates/holler-pane-testkit/src/envelope.rs:243-249`
-  **Verbatim excerpt:**
-  > ```
-  >     let lines: Vec<&str> = match stdout.strip_suffix('\n').unwrap_or(stdout) {
-  >         "" => Vec::new(),
-  >         body => body.split('\n').collect(),
-  >     };
-  >     let Some((last, before)) = lines.split_last() else {
-  >         return Err(EnvelopeFault::EmptyStream);
-  >     };
-  > ```
+- Facts whose excerpts the brief quotes (pointers since round 2, for the 12,000-byte cap): a watch from `Cursor(0)`
+  yields one put per live record and resumes from the head, while one from any other cursor yields every change after
+  it (AC 12 vs AC 13, and why the leave test uses `--since 1`; `crates/holler-pane-testkit/src/feed.rs:22-26`). The
+  fake's `list` is already sorted by name, so no fake-backed test can tell whether `list` sorts by itself
+  (`crates/holler-pane-testkit/src/pane_store.rs:54`). `check_ndjson` refuses an empty stream, so AC 16 checks the
+  empty `watch` output directly (`crates/holler-pane-testkit/src/envelope.rs:243-249`).
 
 ## T (Phase 4, author / RED, round 2) — 2026-10-09
 

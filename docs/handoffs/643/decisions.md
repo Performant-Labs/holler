@@ -192,3 +192,43 @@
   (`git status` lists only the two test files). `rustfmt --check`, `cargo clippy -p holler-cli --all-targets -- -D warnings`
   and `bash scripts/lint.sh` all exit 0. The test files are 370, 545 and 311 lines, ASCII-only. Three evidence.md entries
   were added, with excerpts copied from source.
+
+## F (Phase 5, implement, round 2) — 2026-10-09T18:44:55-06:00
+- **Decided:** done, with no production change (A's note 3). T-red's round-2 tests pass on round 1's code: 35 of 35,
+  and 95 for the whole target. `git diff 06320ad..HEAD -- crates CHANGELOG.md` lists only T's test files. The cycle's
+  work is the evidence the round-2 gate reads. `evidence.md` now opens with A's four W-9 deviations and the round-1
+  findings, each settled from source:
+  - B-1: a profile name inside a sentence-shaped `what` is `{:?}`-quoted in all five merged constructions, the fake
+    scope's identical `pane-not-in-profile` among them.
+  - B-2 and W-3: no pane or profile name can be `-`.
+  - B-3, NV-6 and W-1: rustc 1.98.1's `escape_debug_ext` names its classes explicitly, and the predicate is that list
+    plus `is_control`.
+  - NV-1, W-2 and NV-5: those paths cannot be reached.
+  - `archChanged` is false.
+- **Assumed:** The gate keeps only the first 12,000 bytes of the appendix (`dual-review.sh`'s
+  `DUAL_REVIEW_EVIDENCE_MAX_BYTES` default, not set in `.env`), and it shows the handoff as `(no handoff file)`, as in
+  round 1's prompt. I took rust-lang/rust's sources at tag `1.98.1` to be the sources of this host's `rustc 1.98.1
+  (48a229cea)`. A probe on the installed compiler matches them on 39 characters.
+- **Hedged:**
+  - The appendix had reached 12,744 bytes, so a section appended at the end would have been cut before the gate saw
+    it. To make it fit (11,696 bytes now), the round-2 section goes first. F's own entries that duplicate the brief's
+    verbatim quotes are now pointers. So are T-green's three such entries (`feed.rs:22-26`, `pane_store.rs:54`,
+    `envelope.rs:243-249`), with T's wording kept. That edits T's section. No fact is dropped, the excerpts stay
+    readable in the brief, and every other T entry is byte-identical.
+  - Only 304 bytes of headroom are left for T-green (flagged in handoff-F.md, "Known issues").
+  - Round 1's deviation 4 (`get --profile` with a wrong-name scope answer) has no evidence entry, to save bytes. It
+    is the B-1 entry's code path, and the round-1 gate did not question it.
+- **Evidence:**
+  - Commands, all exit 0: the read-verb filter (35 passed); `pane_verbs` (95), `pane_cli_process` (34),
+    `cli_surface_test` (3) and `docs_cli_test` (3); `cargo clippy --workspace --all-targets -- -D warnings`;
+    `bash scripts/lint.sh`; `bash scripts/changelog-check.sh`; `cargo machete`; `rustfmt --check --edition 2021` on
+    the 7 files. The AC 17, 21 and 22 greps print nothing.
+  - The isolated workspace suite gave 1413 passed, 1 failed, 5 ignored. The failure was
+    `body_run_test::fresh_hello_and_presence_on_every_reconnect`, in a file this branch does not touch. That target
+    then passed 10 of 10 on three reruns, so it is a flake.
+  - Read: `dual-review.sh` (the evidence cap, ref resolution, prompt assembly, the 64,000-token ceiling) and round 1's
+    gate prompt and usage. This round's estimate is about 51k tokens, under the ceiling.
+  - Source for the excerpts: `profile_scope.rs:100-135`, the hub's `panes/store.rs:293-351` and
+    `profile/store.rs:395-400`, the fake `pane_store.rs:222-240`, `profile.rs:28-100, 150-240`, `argv.rs:18-92`,
+    `feed.rs:236-286`, `vocab.rs:185-223`, and serde_json 1.0.151's `src/ser.rs:2135-2165`. Library files fetched into
+    the scratchpad: rust-lang/rust 1.98.1's `char/methods.rs:478-505, 545-546, 2428-2445` and `fmt/mod.rs:2916-2956`.
