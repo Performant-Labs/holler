@@ -60,3 +60,27 @@
     - `respawn-pane -k -t '=demo-c1r1:^'` exits 0.
     - A commandless session's `#{pane_start_command}` is empty.
     - A respawned pane gets the server's environment, not the client's.
+
+## T (Phase 4, author tests / RED) — 2026-10-09T23:04:25-06:00
+- **Decided:** RED is valid; F may start (see handoff-T-red.md).
+  - Kept and reviewed the staged suite of the interrupted first T run: `tui_test.rs` (13 tests), `attach_test.rs`,
+    `support/fake_tmux.rs`, the committed `fixtures/fake-tmux` (100755), `real_opencode_test.rs` and `real_opencode/rig.rs`
+    (9 opt-in tests), AC 31's `on_refused_port` in `stub.rs` used by all seven of `hermetic_test.rs`'s refused-port
+    tests, and the minimum public stubs in `src/tui.rs`.
+  - Added `ac30c_a_tui_that_exits_because_its_session_went_away_is_session_not_found` and the helper `Stub::json_once`.
+    The Behaviour section's death branch (re-`GET`; 404 means `session-not-found`) had no test.
+  - RED: `tui_test` 0/13 pass; `attach_test` 1/22 (only AC 33's fixture check); `hermetic_test` 30/30. Opted-in real run
+    (OpenCode 1.18.35, tmux 3.7c): 3/9. AC 12 fails on exactly the 8 TUI cases, and AC 13/14/15/18/19a fail on
+    `NotImplemented`.
+- **Assumed:**
+  - The brief at 6c3809c is canonical. A's W-1 (`=<session>:^`) and W-8(a) (`escape`/`escape_cwd`) were not applied by O,
+    so the tests pin `=<session>:` and `escape_arg`/`escape_dir`. An amendment changes only those strings and names.
+  - AC 16, 17 and 19 pass before F because they exercise 642a's merged server side. They are regression pins, not RED.
+- **Hedged:**
+  - `ac30e` (`timeouts.call = 0`) is deterministic only if each tmux spawn checks the time left first. That is noted for F
+    in the handoff, not worked around in the test.
+  - I did not run concurrent repeats of the hermetic files now. The timing tests cannot reach their bounds before F's code
+    exists, so that repeat belongs to T-green.
+- **Evidence:** the RED outputs in handoff-T-red.md. Clippy `-D warnings` on the crate's targets is clean, rustfmt
+  `--check` passes, `scripts/lint.sh` exits 0, and the AC 24 grep is empty. Leak check after the real run: no scratch dir,
+  no `opencode` on 48100-48199, no private tmux server.

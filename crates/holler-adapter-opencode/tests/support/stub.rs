@@ -1,17 +1,21 @@
-//! A hand-rolled stub of OpenCode's HTTP API for `hermetic_test.rs` (#642a).
+//! A hand-rolled stub of OpenCode's HTTP API for `hermetic_test.rs` and `attach_test.rs`
+//! (#642).
 //!
-//! Its cousin is `holler-cli/tests/attach_cli_test/fake_server.rs`: the same conventions
-//! (`std::net` and plain `std::thread`s, no new dev-dependency, `Connection: close` on every
-//! reply, bind-then-drop for a refused port). That file lives under another crate's `tests/`,
-//! so it cannot be imported from here. This one adds what the adapter's tests need and that
-//! one lacks: replies per method and path, a chunked reply, a raw non-HTTP reply, a frozen
-//! mode (accept, read, never answer), and a record of every request's raw request line and
-//! body exactly as received, before any URL decoding.
+//! Its cousins are `holler-cli/tests/attach_cli_test/fake_server.rs` (the same conventions:
+//! `std::net` and plain `std::thread`s, no new dev-dependency, `Connection: close` on every
+//! reply) and `holler-body/tests/http_attach_driver_test/fake_server.rs`. Either could be
+//! included here by `#[path]`, but neither fits: holler-body's runs on `tokio` (a new
+//! dev-dependency) and answers `{}` where the adapter requires an id, and holler-cli's serves
+//! two fixed routes. This one adds what the adapter's tests need: replies per method and
+//! path, a chunked reply, a raw non-HTTP reply, a frozen mode (accept, read, never answer),
+//! a record of every request's raw request line and body exactly as received, before any URL
+//! decoding, and [`on_refused_port`], which never trusts a just-freed port to stay refused.
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
-use std::net::{TcpListener, TcpStream};
+use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::time::Duration;
 
 /// How the stub frames a reply's body.
 #[derive(Clone, Copy)]
@@ -40,6 +44,8 @@ pub struct Seen {
 #[derive(Default)]
 struct State {
     routes: HashMap<(String, String), Canned>,
+    /// A reply for the next request of a route only; after it the route answers as `routes`.
+    once: HashMap<(String, String), Canned>,
     frozen: bool,
     raw: Option<Vec<u8>>,
     seen: Vec<Seen>,
@@ -124,6 +130,22 @@ impl Stub {
             .insert((method.to_string(), path.to_string()), canned);
     }
 
+    /// The next `method path` only answers `status` with a JSON body; later ones answer as
+    /// [`Stub::json`] set it, or OpenCode's 404 (a session that goes away between two
+    /// requests).
+    #[allow(dead_code)] // #642: used by attach_test.rs only
+    pub fn json_once(&self, method: &str, path: &str, status: u16, body: &str) {
+        let canned = Canned {
+            status,
+            content_type: "application/json",
+            body: body.to_string(),
+            framing: Framing::ContentLength,
+        };
+        lock(&self.state)
+            .once
+            .insert((method.to_string(), path.to_string()), canned);
+    }
+
     /// Every connection gets these bytes as its whole answer, then a close.
     pub fn raw(&self, bytes: &[u8]) {
         lock(&self.state).raw = Some(bytes.to_vec());
@@ -145,8 +167,10 @@ impl Stub {
     }
 }
 
-/// A loopback port nothing listens on: bind one, then drop the listener.
-pub fn closed_port() -> u16 {
+/// A candidate for a loopback port nothing listens on: bind one, then drop the listener.
+/// Anything else that binds `127.0.0.1:0` may be handed it next, so a test never asserts
+/// through it directly: it goes through [`on_refused_port`].
+fn closed_port() -> u16 {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind a throwaway port");
     let port = listener
         .local_addr()
@@ -154,6 +178,46 @@ pub fn closed_port() -> u16 {
         .port();
     drop(listener);
     port
+}
+
+/// How many candidates [`on_refused_port`] tries before it gives up.
+const REFUSED_ATTEMPTS: usize = 3;
+
+/// Whether something accepts a connection on `127.0.0.1:port` now. Only a refusal counts as
+/// "nothing listens"; no socket option is set (AC 32).
+pub fn accepts(port: u16) -> bool {
+    let addr = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
+    match TcpStream::connect_timeout(&addr, Duration::from_millis(500)) {
+        Ok(_) => true,
+        Err(error) => error.kind() != std::io::ErrorKind::ConnectionRefused,
+    }
+}
+
+/// Run `call` on a loopback port that nothing listens on, and return the port and what
+/// `call` answered (#642b, AC 31). A bind-then-drop port may be handed to any other bind of
+/// `127.0.0.1:0` in this process or on the machine, so a candidate counts only when a
+/// connect to it is refused just before `call`. When the answer is not `expected` **and**
+/// the port now accepts a connection, the attempt met a listener, not a defect: it is
+/// discarded and repeated with a new candidate, at most [`REFUSED_ATTEMPTS`] times in all.
+/// Only an attempt that saw no listener before and after is returned to fail the test.
+pub fn on_refused_port<T>(
+    mut call: impl FnMut(u16) -> T,
+    expected: impl Fn(&T) -> bool,
+) -> (u16, T) {
+    for _ in 0..REFUSED_ATTEMPTS {
+        let port = closed_port();
+        if accepts(port) {
+            continue;
+        }
+        let answer = call(port);
+        if expected(&answer) || !accepts(port) {
+            return (port, answer);
+        }
+    }
+    panic!(
+        "every one of {REFUSED_ATTEMPTS} refused-port candidates met a listener: interference \
+         from another bind, not a defect of the code under test"
+    );
 }
 
 fn serve_one(mut stream: TcpStream, state: &Mutex<State>) -> std::io::Result<()> {
@@ -174,12 +238,16 @@ fn serve_one(mut stream: TcpStream, state: &Mutex<State>) -> std::io::Result<()>
         stream.write_all(&raw)?;
         return stream.flush();
     }
-    let canned = st.routes.get(&(method, path)).cloned().unwrap_or(Canned {
-        status: 404,
-        content_type: "application/json",
-        body: NOT_FOUND.to_string(),
-        framing: Framing::ContentLength,
-    });
+    let route = (method, path);
+    let once = st.once.remove(&route);
+    let canned = once
+        .or_else(|| st.routes.get(&route).cloned())
+        .unwrap_or(Canned {
+            status: 404,
+            content_type: "application/json",
+            body: NOT_FOUND.to_string(),
+            framing: Framing::ContentLength,
+        });
     drop(st);
     stream.write_all(&encode(&canned))?;
     stream.flush()

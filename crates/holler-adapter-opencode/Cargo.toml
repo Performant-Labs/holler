@@ -25,6 +25,9 @@ httparse = { workspace = true }
 # `HarnessOp`, whose `as_str` the hermetic tests pin equal to this crate's own `op`
 # strings (#642, AC 5, 7, 8). A dev-dependency only (ADR-0021 section 5).
 holler-pane-testkit = { path = "../holler-pane-testkit" }
+# Scratch directories for the fake tmux's data files and the real rig's HOME, XDG dirs and
+# tmux socket (#642b, `attach_test.rs` and `real_opencode_test.rs`).
+tempfile = { workspace = true }
 
 # Workspace lints (issue #149).
 [lints]

@@ -1,8 +1,9 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)] // #642
 //! The OpenCode adapter's server side with no OpenCode and no tmux (#642a, AC 1-8, 11, 11d,
 //! 11e). Every call goes to the stub in `support/stub.rs` on an OS-assigned loopback port, or
-//! to a port bound and then dropped (refused). `serve` runs only `false` and `sh` on a script
-//! in a scratch directory, so the file runs in CI on Linux and macOS.
+//! to a refused port from `stub::on_refused_port`, which retries when another bind took the
+//! port (#642b, AC 31). `serve` runs only `false` and `sh` on a script in a scratch
+//! directory, so the file runs in CI on Linux and macOS.
 
 #[path = "support/stub.rs"]
 mod stub;
@@ -20,7 +21,7 @@ use holler_pane::{HarnessPort, PaneError, PaneId, PaneName};
 use holler_pane_testkit::fault::PortOp;
 use holler_pane_testkit::harness::HarnessOp;
 use serde_json::Value;
-use stub::{closed_port, Framing, Stub};
+use stub::{on_refused_port, Framing, Stub};
 
 /// A session id of OpenCode's shape: `ses_` and 26 of `[0-9A-Za-z]`.
 const ID: &str = "ses_0123456789abcdefABCDEFghij";
@@ -198,11 +199,19 @@ fn ac1_content_length_and_chunked_replies_read_to_the_same_bytes() {
 
 #[test]
 fn ac1_a_closed_port_is_refused_within_a_second() {
-    let port = closed_port();
-    let start = Instant::now();
-    let result = http::request(port, "GET", "/global/health", None, Duration::from_secs(5));
+    let (_, (result, took)) = on_refused_port(
+        |port| {
+            let start = Instant::now();
+            let result = http::request(port, "GET", "/global/health", None, Duration::from_secs(5));
+            (result, start.elapsed())
+        },
+        |(result, _)| *result == Err(HttpError::Refused),
+    );
     assert_eq!(result, Err(HttpError::Refused));
-    assert_within(start, Duration::from_secs(1), "a refused connect");
+    assert!(
+        took < Duration::from_secs(1),
+        "a refused connect took {took:?}"
+    );
 }
 
 #[test]
@@ -240,9 +249,9 @@ fn unframed(body_len: usize) -> Vec<u8> {
     bytes
 }
 
-/// The 64 MiB reply bound holds on the read-to-the-close path (outside diff gate r1, B-1): a
-/// body one byte past it is `Garbled`, and one just under it is read whole, so the bound is
-/// neither missing nor set lower.
+/// The 64 MiB reply bound holds on the read-to-the-close path too: a body one byte past it is
+/// `Garbled`, and one just under it is read whole, so the bound is neither missing nor set
+/// lower.
 #[test]
 fn ac1_an_unframed_reply_past_64_mib_is_garbled_and_one_under_it_is_read() {
     const MIB64: usize = 64 << 20;
@@ -262,7 +271,7 @@ fn ac1_an_unframed_reply_past_64_mib_is_garbled_and_one_under_it_is_read() {
 }
 
 /// A chunk extension is ignored and the trailer after the `0` chunk is discarded (RFC 9112
-/// section 7.1; outside diff gate r1, NV-2).
+/// section 7.1).
 #[test]
 fn ac1_a_chunked_reply_with_an_extension_and_a_trailer_reads_its_body() {
     let stub = Stub::start();
@@ -292,7 +301,8 @@ fn ac2_health_is_true_for_the_healthy_json() {
 #[test]
 fn ac2_health_is_false_for_unbound_frozen_html_unhealthy_and_500() {
     let h = harness(quick());
-    assert_eq!(h.health(closed_port()), Ok(false), "an unbound port");
+    let (_, unbound) = on_refused_port(|port| h.health(port), |answer| *answer == Ok(false));
+    assert_eq!(unbound, Ok(false), "an unbound port");
 
     let frozen = Stub::start();
     frozen.freeze();
@@ -473,11 +483,24 @@ fn ac5_abort_of_a_session_that_stays_busy_times_out() {
 #[test]
 fn ac6_server_calls_to_an_unbound_port_are_unavailable() {
     let h = harness(quick());
-    let port = closed_port();
+    let (port, [created, listed, aborted]) = on_refused_port(
+        |port| {
+            [
+                h.create_session(port).map(drop),
+                h.list_sessions(port).map(drop),
+                h.abort(port, ID),
+            ]
+        },
+        |answers| {
+            answers
+                .iter()
+                .all(|a| matches!(a, Err(PaneError::Unavailable { .. })))
+        },
+    );
     let messages = [
-        unavailable(h.create_session(port), "create_session"),
-        unavailable(h.list_sessions(port), "list_sessions"),
-        unavailable(h.abort(port, ID), "abort"),
+        unavailable(created, "create_session"),
+        unavailable(listed, "list_sessions"),
+        unavailable(aborted, "abort"),
     ];
     for message in messages {
         assert!(
@@ -507,7 +530,7 @@ fn ac7_the_call_bound_caps_the_request_timeout() {
 // ---- AC 8: serve ----
 
 /// `config`, with a `workdir` that counts its calls: `serve` resolves the project directory
-/// only once the port is refused (Behaviour, `serve`; outside diff gate r1, NV-4).
+/// only once its health check of the port was refused, so a held port starts nothing.
 fn counting_workdir(mut config: OpenCodeConfig) -> (OpenCodeConfig, Arc<AtomicUsize>) {
     let calls = Arc::new(AtomicUsize::new(0));
     let (inner, counted) = (config.workdir, Arc::clone(&calls));
@@ -549,11 +572,12 @@ fn ac8_serve_of_a_missing_binary_names_it() {
     let scratch = Scratch::with_serve_script();
     let missing = scratch.path().join("no-such-opencode");
     let h = OpenCodeHarness::new(config(&missing, scratch.path(), quick()));
-    let message = unavailable(
-        h.serve(&pane_name(), closed_port()),
-        "serve of a missing binary",
-    );
     let shown = missing.display().to_string();
+    let (_, answer) = on_refused_port(
+        |port| h.serve(&pane_name(), port),
+        |answer| matches!(answer, Err(PaneError::Unavailable { what }) if what.contains(&shown)),
+    );
+    let message = unavailable(answer, "serve of a missing binary");
     assert!(message.contains(&shown), "names {shown}: {message:?}");
 }
 
@@ -587,29 +611,26 @@ fn ac8_serve_of_a_program_that_exits_at_once_is_unavailable_with_its_status() {
     };
     let scratch = Scratch::with_serve_script();
 
+    let timed = |h: &OpenCodeHarness, port: u16| {
+        let start = Instant::now();
+        (h.serve(&pane_name(), port), start.elapsed())
+    };
+    let bound = Duration::from_secs(3); // well before the 10 s call bound
+    let quick_unavailable = |(answer, took): &(Result<u32, PaneError>, Duration)| {
+        matches!(answer, Err(PaneError::Unavailable { .. })) && *took < bound
+    };
+
     // `false` ignores the `serve` arguments and exits 1.
-    let start = Instant::now();
     let h = OpenCodeHarness::new(config("false", scratch.path(), timeouts));
-    unavailable(h.serve(&pane_name(), closed_port()), "serve of `false`");
-    assert_within(
-        start,
-        Duration::from_secs(3),
-        "well before the 10 s call bound",
-    );
+    let (_, (answer, took)) = on_refused_port(|port| timed(&h, port), quick_unavailable);
+    unavailable(answer, "serve of `false`");
+    assert!(took < bound, "serve of `false` took {took:?}");
 
     // `sh serve --port P ...` runs the scratch script in the project directory: exit 42.
-    let port = closed_port();
-    let start = Instant::now();
     let h = OpenCodeHarness::new(config("sh", scratch.path(), timeouts));
-    let message = unavailable(
-        h.serve(&pane_name(), port),
-        "serve of a script that exits 42",
-    );
-    assert_within(
-        start,
-        Duration::from_secs(3),
-        "well before the 10 s call bound",
-    );
+    let (_, (answer, took)) = on_refused_port(|port| timed(&h, port), quick_unavailable);
+    let message = unavailable(answer, "serve of a script that exits 42");
+    assert!(took < bound, "serve of the exit-42 script took {took:?}");
     assert!(
         scratch.spawned(),
         "the server ran in the pane's project directory"
@@ -644,16 +665,18 @@ fn serve_kills_its_process_group_when_the_deadline_passes() {
     // Never binds the port; records its own pid and a background child's (same group).
     let scratch = Scratch::with_script("echo $$ > pid\nsleep 30 &\necho $! > child\nwait\n");
     let h = OpenCodeHarness::new(config("sh", scratch.path(), timeouts));
-    let start = Instant::now();
-    let op = timeout_op(
-        h.serve(&pane_name(), closed_port()),
-        "serve of a server that never answers",
+    let (_, (answer, took)) = on_refused_port(
+        |port| {
+            let start = Instant::now();
+            (h.serve(&pane_name(), port), start.elapsed())
+        },
+        |(answer, _)| matches!(answer, Err(PaneError::Timeout { .. })),
     );
+    let op = timeout_op(answer, "serve of a server that never answers");
     assert_eq!(op, HarnessOp::Serve.as_str());
-    assert_within(
-        start,
-        timeouts.call + SLACK,
-        "serve of a server that never answers",
+    assert!(
+        took < timeouts.call + SLACK,
+        "serve of a server that never answers took {took:?}"
     );
     for file in ["pid", "child"] {
         let pid = std::fs::read_to_string(scratch.path().join(file))
