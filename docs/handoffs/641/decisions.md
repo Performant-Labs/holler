@@ -149,3 +149,13 @@
   - Probe: tmux 3.7c on a private `-S` server in a fresh `/tmp/hlr-f641-*` directory, with `-f /dev/null` and `TMUX` and `TMUX_PANE` unset. It sent no signal and was killed and removed on exit. `set-option -w -t @1 ...` on a closed window printed `no such window: @1`, and `list-panes -t @1` printed `can't find window: @1`. The transcript is in `handoff-F.md`.
   - After every real-tmux run there was no `/tmp/hlr-tmux-*` directory, no `demo-*` session on the default socket and no `hlr-tmux` process.
   - Source read: the brief in full, `handoff-A.md`, `handoff-T-red.md`, the three test files, `holler-pane` (`ports.rs`, `argv.rs`, `error.rs`, `pane.rs`, `probe.rs`), `holler-pane-testkit` (`host.rs`, `conformance/host.rs`), `holler-proto/src/vocab.rs` and `holler-adapter-herdr`'s crate docs and manifest. The handoff is `docs/handoffs/641/handoff-F.md`, with `docs/handoffs/641/evidence.md`.
+
+## T (Phase 7, verify GREEN) — 2026-10-09T19:06:00-06:00
+- **Decided:** GREEN, with no blocking issue. I closed F's flagged coverage gap in T's own test: `a_window_gone_before_its_tag_is_ok_and_signals_nothing` now also answers the tag with `no such window: @7`, the text tmux 3.7c prints, so CI pins F's Design decision 1 without real tmux. No production code was changed.
+- **Assumed:** the 4 `holler-cli/tests/logging_test.rs` failures are environmental. A live hub on this machine answers `holler roster`, they pass with an empty `HOLLER_STATE_DIR`, and no `holler-cli` file changed on this branch.
+- **Hedged:** AC 9's literal grep over all of `tests/` matches the AC 6f socket-flag test in `fake_tmux_test.rs`. I accepted the W-20 scoping journalled at RED rather than move the test, and noted it for S.
+- **Evidence:**
+  - `cargo test -p holler-adapter-host`: 28 passed. `-- --ignored` on tmux 3.7c: 9 passed, run twice. No `/tmp/hlr-tmux-*` and no `demo-*` session was left.
+  - 7 mutants of F's source were each killed and then restored with `git checkout`: `no such window`, `env --`, `#` doubling, `LC_ALL=C`, the ownership filter, the `pane_dead` filter and the W-14 group probe.
+  - Flake check: 24 parallel and 10 sequential runs, no failure.
+  - Clean: lint.sh, changelog-check, clippy `-D warnings`, rustfmt, machete, wire_selftest, docs_cli_test and test-hooks. Workspace: 1407 passed and 4 failed (environmental), matching F. The handoff is `docs/handoffs/641/handoff-T-green.md`.

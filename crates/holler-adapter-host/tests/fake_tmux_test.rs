@@ -630,9 +630,17 @@ fn tag_fails(err: &str) -> Fake {
 
 #[test]
 fn a_window_gone_before_its_tag_is_ok_and_signals_nothing() {
-    let fake = tag_fails("can't find window: @7\n");
-    assert_eq!(host(&fake).run(&name(C1), &argv(&["prog"])), Ok(()));
-    assert!(fake.kills().is_empty(), "{:?}", fake.kills());
+    // The brief's text, and the one tmux 3.7c prints for `set-option -w -t @<id>` on a closed
+    // window (F's probe, handoff-F Design decision 1).
+    for stderr in ["can't find window: @7\n", "no such window: @7\n"] {
+        let fake = tag_fails(stderr);
+        assert_eq!(
+            host(&fake).run(&name(C1), &argv(&["prog"])),
+            Ok(()),
+            "{stderr:?}"
+        );
+        assert!(fake.kills().is_empty(), "{stderr:?}: {:?}", fake.kills());
+    }
 }
 
 #[test]
