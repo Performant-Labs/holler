@@ -1,0 +1,12 @@
+{
+  "opencode": {
+    "pipeline": "opencode",
+    "requested": "opencode-pipeline-v0.1.0",
+    "tag": "opencode-pipeline-v0.1.0",
+    "version": "0.1.0",
+    "commit": "5853c1757113b383460bcf8fd965703ec27e2385",
+    "repository": "https://github.com/Performant-Labs/aftersight.git",
+    "resolvedAt": "2026-10-10T01:31:48Z",
+    "source": "online"
+  }
+}
