@@ -108,3 +108,22 @@ Rigor/brief gate: BLOCKED, overridden by Andre Angelantoni: The outside brief ga
     - their planned ADR-0021 edits, for merge hygiene;
     - #644's act table, append rule and const references (lines 1596-1627, 1705-1708, 1554-1558);
     - #641's runner, kill and seam lines.
+
+## T (Phase 4, author / RED) — 2026-10-09T18:34:54-06:00
+- **Decided:** RED is valid. 19 new tests: 7 in `crates/holler-cli/src/pane/profile_scope.rs` `mod tests` (AC 1-7) and 12 in
+  `crates/holler-pane/src/probe.rs` `mod tests` (AC 8a-8l). All 19 fail on a feature assertion against the stubs; 8m
+  (`ports_test::run_probe_stub_never_reports_success`) stays green by design. Per the brief's Test plan, T landed the
+  compile stub of Decisions 1 and 8 in `profile_scope.rs` (`StoreScope` + `new`, an `impl ProfileScope` answering
+  `not-implemented`, `reconcile_step` returning `""`, `RECONCILE_STEP_UNSCOPED = ""`); F replaces every body.
+- **Decided:** in 8f/8g the pid-file existence assertion runs before the `timed out` assertion (still after `run_probe`
+  returns), so a runner that answers without spawning fails on the existence check, as the brief's RED list says.
+- **Assumed:** AC 2's "holding `s'`" is checked as `panes[0] == s'` (the in-place replace keeps index 0, Decision 3.1).
+  AC 8f/8g assert no upper bound on `run_probe`'s return beyond the 2 s poll; the brief derives a 4.5 s budget but pins an
+  elapsed bound only in 8e.
+- **Hedged:** the 8f/8g poll and the 8e upper bound carry the brief's slack (2 s); macOS CI is their first macOS run.
+- **Evidence:** `cargo test -p holler-cli --lib pane::profile_scope` → 0 passed, 7 failed (each `not-implemented` or `""`
+  vs the expected value); `cargo test -p holler-pane --lib probe::tests` → 0 passed, 12 failed (each on the stub's
+  `Error("the probe runner is not implemented yet (story #663)")`); clippy `-D warnings` on both crates and
+  `scripts/lint.sh` exit 0; `rustfmt --check --edition 2021` on both files exits 0. Throwaway cross-check (reverted):
+  the scope tests over `FakeProfileScope` pass AC 1, 6, 7 and differ from it only on Decisions 5-7's message text.
+  Details in `handoff-T-red.md`.
