@@ -447,11 +447,41 @@ fn version_and_the_gate() {
     assert_eq!(port.send_text(&p, "x"), Ok(()));
 }
 
+/// Decision 8: a supported Herdr whose version string is empty or holds a control
+/// character is `unavailable` from `version()`, never returned.
+#[test]
+fn a_version_that_is_empty_or_holds_a_control_character_is_unavailable() {
+    for bad in ["", "0.7\n1", "0.7\u{7}"] {
+        let swap = Arc::new(AtomicBool::new(false));
+        let hook_swap = Arc::clone(&swap);
+        let tap = Tap::new(Arc::new(WireHerdr::new()), move |_, line, _| {
+            if hook_swap.load(Ordering::SeqCst) && line.contains(r#""method":"ping""#) {
+                let pong = json!({"id": "holler:ping", "result": {"type": "pong",
+                    "version": bad, "capabilities": {}, "protocol": 22}});
+                return Tapped::Reply(pong.to_string());
+            }
+            Tapped::Forward(line)
+        });
+        let port = connect_over(config(&[]), tap);
+        swap.store(true, Ordering::SeqCst);
+        let version = port.version();
+        assert!(
+            matches!(version, Err(PaneError::Unavailable { .. })),
+            "{bad:?}: {version:?}"
+        );
+    }
+}
+
 #[test]
 fn config_is_validated_before_any_request() {
     let relative = "relative-dir/h.sock";
     let zero_timeout = HerdrConfig {
         timeout: Duration::ZERO,
+        ..config(&[])
+    };
+    // Too long to add to the clock: refused, never a panic (A finding 3).
+    let endless_timeout = HerdrConfig {
+        timeout: Duration::MAX,
         ..config(&[])
     };
     // (config, what the message names, what it must not name)
@@ -463,6 +493,7 @@ fn config_is_validated_before_any_request() {
             vec![],
         ),
         (zero_timeout, vec!["timeout"], vec![]),
+        (endless_timeout, vec!["timeout"], vec![]),
         (
             config(&[("ws-rows", 0, 1)]),
             vec!["ws-rows", "rows"],

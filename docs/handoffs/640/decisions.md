@@ -28,3 +28,25 @@ Rigor/brief gate: BLOCKED, overridden by Andre Angelantoni: Brief-gate rounds 1-
   - fmt `-p`, clippy (crate and workspace, `-D warnings`), `lint.sh`, `changelog-check.sh` and `machete` are clean. AC 35-39 greps print nothing, and `cargo tree -e normal --depth 1` shows `holler-pane` and `serde_json` only.
   - `cargo test --workspace --no-fail-fast`: 1414 passed, 5 ignored, 4 failed. The failures are all in `holler-cli --test logging_test`, which expects `holler roster` to find no hub, and this machine runs a live one. That crate does not depend on the adapter.
   - Source facts are in `docs/handoffs/640/evidence.md` (9 entries).
+
+## T (Phase 6, verify / GREEN) — 2026-10-09T18:40:00-06:00
+- **Decided:** GREEN with no blocking issue (`docs/handoffs/640/handoff-T-green.md`). T changed test code only:
+  - one AC 27 case (`timeout: Duration::MAX` is `usage` naming `timeout`, with no request), which F named as an open gap;
+  - a new test `a_version_that_is_empty_or_holds_a_control_character_is_unavailable`, which pins Decision 8's form check;
+  - one appended `evidence.md` entry (`to_line`'s compact form and `Direction::as_str`, which AC 16's rewrite relies on).
+
+  AC 14: mutant (a) fails AC 13 and 16, (b) fails AC 13, 16 and 20, and (c) fails AC 13 only, each as the brief's
+  oracle derived.
+- **Assumed:** The 4 `holler-cli --test logging_test` failures are environmental: a live hub runs on this machine. All
+  11 pass with an isolated `HOLLER_STATE_DIR`, and `holler-cli` does not depend on the adapter. The `cargo fmt --all
+  --check` drift in other crates predates this diff: CI does not run fmt, and AC 40 asks only for `-p
+  holler-adapter-herdr`, which is clean.
+- **Hedged:** The new version test reaches `version()` through a `Tap` that answers `ping` itself, not through the wire
+  fake. That is how AC 29 reaches it too. A spot-check showed that `parse_pong` accepts each bad string, so only the
+  adapter's own check refuses it. The flake repeats (45 runs of the three new targets) ran on one machine while other
+  work loaded it, so they say nothing about CI's slower runners beyond the invariant-style assertions.
+- **Evidence:** `cargo test -p holler-adapter-herdr`: 97/97. Workspace clippy `-D warnings`, `lint.sh`,
+  `changelog-check.sh`, `machete`, `docs_cli_test` 3/3 and `wire_selftest` 3/3 are clean. The `cargo test --workspace
+  --no-fail-fast` targets all pass except the 4 `logging_test` cases. The mutants and spot-checks were applied with
+  `sed`, run, and restored with `git checkout -- crates/holler-adapter-herdr/src/*.rs`. The AC 35-39 greps print
+  nothing.

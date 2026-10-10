@@ -156,3 +156,34 @@ Written by F (Phase 5/6 of the run). T appends its own entries at T-green.
   >             .collect())
   >     }
   > ```
+
+- **Fact (appended by T at T-green):** a request line is `serde_json`'s compact form of `{"id","method","params"}`, and a split's params carry `"direction"` as Herdr's own word. AC 16's test transport relies on this: it rewrites the substring `"direction":"down"` to `"direction":"right"` in any line containing `"method":"pane.split"`. The test also asserts that the fake recorded `right`, so a change in spacing would fail the guard rather than pass silently.
+  **Source:** `crates/holler-adapter-herdr/src/protocol.rs:148-151`, `:175-184`; `crates/holler-adapter-herdr/src/layout.rs:38-43`
+  **Verbatim excerpt:**
+  > ```rust
+  >     /// One JSON object and exactly one trailing newline.
+  >     pub fn to_line(&self) -> String {
+  >         let request = json!({"id": self.id(), "method": self.method(), "params": self.params()});
+  >         format!("{request}\n")
+  >     }
+  > ```
+  > ```rust
+  >             Request::Split {
+  >                 target,
+  >                 direction,
+  >                 ratio,
+  >             } => json!({
+  >                 "target_pane_id": target.as_str(),
+  >                 "direction": direction.as_str(),
+  >                 "ratio": ratio,
+  >                 "focus": false
+  >             }),
+  > ```
+  > ```rust
+  >     pub fn as_str(self) -> &'static str {
+  >         match self {
+  >             Direction::Right => "right",
+  >             Direction::Down => "down",
+  >         }
+  >     }
+  > ```
