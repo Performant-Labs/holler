@@ -222,3 +222,48 @@ false (D and U are N/A, recorded). Append-only; every phase adds its entry.
   chore rides this PR.
 - CHANGELOG entry added in the house style (O; docs only) — the house pattern is one
   `## [Unreleased]` bullet per story.
+
+## 2026-10-10 · Merge — PR #725 merged, run closed (O)
+
+- Pre-PR: rebased on `origin/main` (3d95aec → eef2ad6; siblings #700/#723 merged mid-run), public-
+  repo scrub of the diff and commit messages clean (0 matches), fmt/clippy/narrow-suite green
+  post-rebase. PR #725 opened with the CONTRIBUTING AI-disclosure line.
+- Merge verification (plugin-owned): GREEN at the pushed commit. pr-agent: **90** (threshold 70).
+  CI: ubuntu pass; macOS failed once on the pre-existing
+  `concurrent_operator_paths_never_lose_the_lock_race` flake (`holler-hub` token store — a crate
+  this PR does not touch; main's own CI at eef2ad6 had failed macOS on a *different* flake the
+  same afternoon); rerun green in 8m54s. Squash-merged as `fcc77fb` at 12:56:47 PM MDT; branch
+  deleted; issue #651 auto-closed by the PR body.
+- Run closed with outcome **merged**.
+
+## Chain Summary — run 0651-implementation (#651, in-session)
+
+**Delivered:** the display-only Herdr sidebar plugin — `plugins/herdr-holler` (manifest +
+`herdr-holler refresh`): reads `pane/list` on the hub control socket through the merged one-shot
+client, reports per-pane pos/project/shown/driven/sync/hold + workspace profile tokens under
+source `holler` with a pane-only 120 s TTL, re-reports `unknown` on a failed read, and is
+display-only by construction (closed method enum) and by test (allowlist scan). Plus the declared
+one-line workspace-members exception and the operator-approved pipeline-config glob extension.
+
+**The chain's decisions that outlive the run:** (1) the plugin reads the control socket directly,
+never `holler pane list` — #649's wiring stays the CLI's; (2) the SYNC token is a doc-cited mirror
+of `SessionSync::of` around the one `shown_differs` — enforced by a standing source-scan test;
+(3) unknown-never-stale is in-process per invocation with the TTL as the cross-invocation
+backstop; (4) the minimal Herdr client is forced (the adapter's Request enum is closed) — extract
+on a second consumer.
+
+**Follow-ups surfaced (none blocking, all journaled):** wire the action argv's pane operand
+CLI-side in #649 (bare `holler pane <verb>` until then); add the 4th SYNC case (at>0, no session
+of record); a watch loop or persisted last-shown to make unknown cross-invocation; verify Herdr
+sidebar escaping and apply the CLI `text_value` rule if needed; extract the wire-level socket
+fake to holler-pane-testkit on a third consumer. **Machine-level:** macOS CI flakes twice on
+main in one afternoon (two different timing tests) — worth an operator look.
+
+**Stage record (all times wall-clock, MDT):** pre-flight 10:12; A dispatch→PASS ~10:21 (agent
+work inside the dispatch); T-red dispatch→RED evidence 10:5x; the plugin's t-red crossing suite
+run rendered RED 16:49Z; F attempt 1 463.8 s (permission-denied), attempt 2 433.2 s (same,
+root cause corrected to the role doc), attempt 3 **790.9 s GREEN** (claude-cli Opus 5.5 xhigh,
+66 turns, in 114 / out 60,953 / reasoning 27,596 / cache 6.5M read + 163K write; cost field n/a —
+the executor reports no cost); T-green + Tier 2 (crossing needed 3 tries: two environmental REDs
+from sibling-pane cargo contention on the shared warm target, then GREEN); A-dup PASS; S PASS;
+merge verification GREEN; PR #725 (pr-agent 90) merged 12:56:47 PM MDT.
