@@ -401,3 +401,51 @@ Rigor/brief gate: BLOCKED, overridden by Andre Angelantoni: The outside brief ga
     `wire_selftest` and the testkit all pass.
   - F's 7 new evidence excerpts match the source at the cited lines (branch, and `dc300ab`). Details are in
     `handoff-T-green.md`.
+
+## A (Phase 7, anti-duplication gate) — 2026-10-09T21:45:12-06:00
+- **Decided:** PASS on the diff `0ad2d8a..d9210bc`, with no block and two warns, D-1 and D-2 (see `handoff-A-dup.md`). This
+  cycle is `e46b427..d9210bc`. The gate also reviewed the whole feature diff, because no earlier run reached it.
+  - **F extended every object the map named.** There is one real `ProfileScope` and one `run_probe`. The reconcile step is
+    built on `doctor_command`, so `holler pane doctor` is spelled in production only at `findings.rs:36`. Every
+    deliberate copy is one the brief justifies in writing: the fake's rules, `check_joins` (W-5), the private runner
+    (W-16), `single_quoted` (W-18), and the probe tests' scratch directory and poll (W-11).
+  - **D-1:** `StoreScope`'s private `belongs` (`profile_scope.rs:218-222`) is a line-for-line copy of the public
+    `holler_pane::profile_diff::is_member` (#703). Every other CLI caller of the rule uses `is_member`: profile list,
+    profile show, and #709's `pane watch`. `pane watch` mixes `resolve`'s member set with `is_member`. The fold is 5 lines:
+    F takes it in any rework this run, else O adds it to F2, and the fake's copy to F1.
+  - **D-2:** #706 merged a second private bounded runner (`holler-adapter-host/src/exec.rs`). W-16's ruling stands, and
+    #696 gets six more differences to settle, (d) to (i).
+- **Assumed:**
+  - The brief's Reuse map table is the Reuse map, as at Phase 3.
+  - "The analogous object the map named" bounds a Phase 7 block, as `workflow-coding-pipeline.md` ("A's anti-duplication
+    gate") and the role's verdict rules state it. A copy of an object the map omitted is therefore a warn.
+  - The Workflow script commits this handoff and this entry, as it committed the earlier phases'.
+- **Hedged:**
+  - **D-1 is a warn, not a block.** It is a real near-copy of a documented single rule, and the fold is cheap. But F followed
+    the map, and the brief's written reason to re-implement the fake's rules covers this function. Main moved under the
+    branch: F wrote `belongs` at `2d9c7a0` (19:06 MDT), `is_member` reached main at `ce12cdb` (19:13 MDT), and the branch
+    merged it at `1d6a5ab` (19:34 MDT). The re-based brief and A's fourth Phase 3 pass both missed it, and the miss is A's.
+    The two functions are identical today, so nothing is wrong yet.
+  - **D-2 is a warn.** The dependency direction rules out reuse, and #696 is the planned fold.
+- **Evidence:**
+  - **The diffs:** `git diff e46b427 HEAD` and `git diff 0ad2d8a HEAD`, for the crates, the ADR and the CHANGELOG.
+  - **Read in full:** `profile_scope.rs` (605 lines) and `probe.rs` (577 lines); the brief's Evidence, ACs, Decisions,
+    Reuse map and Follow-ups; `handoff-A.md`, `handoff-F.md`, `handoff-T-green.md` and this journal.
+  - **On the branch:** `profile_diff.rs:1-40, 245-265` and `lib.rs:40-76`; `profile/{list,show}.rs`; the fake's
+    `profile_scope.rs:92-126, 234-239`; the hub's profile not-found sites; and ADR-0021 section 3 (line 165).
+  - **On `origin/main` (`519947a`):**
+    - `pane/{list,get,watch}.rs` (#709);
+    - `holler-adapter-host/src/exec.rs` (#706, whole) and the function lines of `holler-adapter-opencode/src/exec.rs`;
+    - the public items added since `3bdd129`.
+  - **Greps over `crates`, on both refs:**
+    - slug comparisons and `is_member` callers;
+    - `ProfileNotFound`/`PaneNotInProfile` producers;
+    - spec-edit helpers;
+    - the `'\''` escape and shell-quote function names;
+    - `holler pane doctor`, `holler profile` and `to reconcile` literals;
+    - context-append helpers;
+    - `try_wait`, `process_group`, `recv_timeout`, `checked_add` and `.windows(`;
+    - `impl ProfileScope for` and `impl Prober for`.
+  - **Checks:** AC 5's three greps (0, 1, 0); `git merge-tree --write-tree HEAD origin/main` (conflicts in `CHANGELOG.md`
+    only); and the commit times of `2d9c7a0`, `ce12cdb`, `1d6a5ab`, `efd9a00` and `e327569`.
+  - **Calibration:** the earlier A-dup handoffs for #508, #640 and #647; `workflow-coding-pipeline.md:737-783`.
