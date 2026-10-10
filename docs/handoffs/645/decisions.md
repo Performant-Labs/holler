@@ -357,3 +357,48 @@
   - With `CARGO_BUILD_JOBS=4`: `pane_verbs` 154 passed; the workspace in CI's form exits 0, with 1642 passed, 0 failed and
     14 ignored over 135 result lines; clippy `-D warnings`, `lint.sh`, `changelog-check.sh`, `cargo machete` and
     rustfmt on the five story files are clean. `origin/main` `d9eabbb` is an ancestor of HEAD.
+
+## A (anti-duplication gate, round 2) — 2026-10-10T00:00-06:00
+- **Decided:** PASS on `940e338` (handoff-A-dup.md, which replaces round 1's; round 1 stays in git at `da53aba`).
+  - Round 1's block is fixed. After the merge, the #645 paragraph says that the step names the pane with `--fix` even
+    with `--profile`, and why that differs from step 6. #663's bullet and step 6 are untouched, and the ADR diff against
+    `origin/main` has the four AC-24 hunks only.
+  - This cycle adds no parallel path:
+    - F rewrote the reused remedy call as a `match` and changed four doc comments.
+    - T's `failed_before_the_act` extends the story's own `failed`.
+    - The new reset test uses the existing helpers.
+  - Five warns, none needing a change in 645a:
+    1. Section 12's "prints the reconcile step" is broader than the #645 paragraph's no-step-before-the-act rule. It is
+       read as #646's park reads it ("after a live act"), and is for the next section-12 edit.
+    2. #643's `list::profile_name`, which arrived with the merge, is spelled inline in `pane/switch.rs:97-101`, as doctor
+       spells it.
+    3. The lead-in and `screen_text` are carried from round 1, and `reconcile_step`'s doc now lags.
+    4. The scoped-read arms are carried from round 1, now four copies with `get.rs`, which answers the
+       unreachable arm differently.
+    5. The fourth both-format runner (F-2) is carried from round 1.
+- **Assumed:**
+  - `origin/main` at `d9eabbb` (fetched 2026-10-09 23:53 MDT, unchanged) is what the PR merges into.
+  - AC 24 still limits this story's ADR edits, so section 12 is left for a later story.
+- **Hedged:**
+  - Warn 1 is not a block, unlike round 1's finding. There the merged spec gave two specific rules for the same failure,
+    and the #645 text did not acknowledge #663's. Here a general sentence meets a specific exception that gives its
+    reason, and `main` already reads it that way (`pane/park.rs:11-12`).
+  - Warn 2 is a warn because no `--profile` typing pattern dominates outside the read verbs (doctor inlines it, and park
+    has its own), and the expression is one line with the same behaviour.
+  - I did not build or test. T-green's run on this head (`CARGO_BUILD_JOBS=4`) is the runtime evidence, and A does not
+    own runtime.
+- **Evidence:**
+  - handoff-A-dup round 1, handoff-F (rounds 1-3), handoff-T-green (round 3), this journal, the brief (Reuse map, the
+    follow-ups, Decisions 13 and 17) and the outside diff gate's r3 result (PASS).
+  - Diffs: `git diff 583e9d4 940e338` over the story's code and test files, and `git diff d9eabbb HEAD` over the ADRs,
+    CHANGELOG, fixture, `stub.rs` and `doctor.rs`. Read in full: `tx_switch.rs`, `pane/switch.rs`, `pane/reset.rs` and
+    `tests/pane_verbs/{switch,reset}.rs`.
+  - On the merged tree: ADR-0021 sections 8, 11 and 12 and "Deferred"; `profile_scope.rs` (`reconcile_step`, `member`,
+    `resolve`); `findings.rs` (the remedy table, `doctor_command`); `reconcile.rs` `resolve`; `reconcile/observe.rs`
+    `select` and `screen_text`; `pane/{list,get,park,doctor}.rs`; `park/rig.rs`; `doctor/surface.rs` `HealthGate`; the
+    test kit's fault and harness API; `probe.rs`.
+  - Greps over `crates/`: `to reconcile`, `ProfileName::parse`, `PaneName::parse`, `from_static(`, the callers of
+    `select_session`, `create_session` and `shown_session`, `impl HarnessPort for`, `concurrent_put` and the
+    both-format runners. A scan of the diff for personal names.
+  - `gh issue list` searches for the follow-ups: none filed. `git merge-tree --write-tree` against the two open PRs: #714
+    conflicts in ADR-0021 only, and #713 merges cleanly.
