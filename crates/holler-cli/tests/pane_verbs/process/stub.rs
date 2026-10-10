@@ -19,8 +19,6 @@ pub const STUBS: &[(&str, &str, u32)] = &[
     // #643
     // #644
     // #645
-    ("pane", "switch", 645),
-    ("pane", "reset", 645),
     // #646
     ("pane", "close", 646),
     // #647

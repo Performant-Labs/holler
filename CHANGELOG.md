@@ -214,6 +214,22 @@ fills this file in at release time.
   section 12). The verb runs on the ports, which are wired to the real hub, Herdr, tmux and OpenCode by #649, so until
   then it answers `not-implemented` outside the tests ([#647](https://github.com/Performant-Labs/holler/issues/647)).
 
+- Pane control, `holler pane switch PANE SESSION` and `holler pane reset PANE`, part 1 (epic
+  [#633](https://github.com/Performant-Labs/holler/issues/633)): `switch` points a registered pane at a session its harness
+  server already has, and `reset` starts it on a fresh one that it creates over the harness API. Both move the TUI through
+  the harness API, never by typing into the pane, and record the session of record only once the TUI is seen showing it.
+  Before anything moves, each refuses with a stable code: a pane that does not exist or is outside `--profile`, the
+  orchestrator's own pane without `--as-operator` (`orchestrator-pane`), a harness server that does not answer
+  (`server-unhealthy`, naming the relaunch to run), and for `switch` a session the pane's server does not have
+  (`session-not-found`) or another pane's session of record (`session-of-other-pane`). A TUI that does not show the
+  session afterwards is `unavailable` (exit 1) and nothing is recorded; a failure once the TUI may have moved ends with the
+  `holler pane doctor <pane> --fix` step that puts it back, and names a session `reset` created and could not record.
+  `reset` is the remedy `pane doctor` names for a pane with no usable session of record; the session it replaces stays on
+  the server, where doctor reports it as a stray. Both take `--format=json`, whose data is the stored record and the
+  previous session of record. Refusing a pane that is busy or holds a question, and `reset --first TEXT`, come in part 2.
+  Until the ports are wired into the binary ([#649](https://github.com/Performant-Labs/holler/issues/649)), the real verbs
+  answer `not-implemented`. Part of [#645](https://github.com/Performant-Labs/holler/issues/645).
+
 - Pane control, `holler profile list` and `holler profile show` (epic [#633](https://github.com/Performant-Labs/holler/issues/633)):
   `profile list` prints every profile, sorted by slug, with its number of specs, its number of live panes and its
   generation. `profile show NAME` prints the profile's specs and compares them with its live panes, field by field: each

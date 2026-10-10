@@ -7,7 +7,7 @@
 //! remedy cases are `doctor/surface.rs`; the read-only pass is `doctor/read_only.rs`.
 
 mod read_only;
-mod rig;
+pub(crate) mod rig;
 mod surface;
 
 use holler_cli::output::Format;
