@@ -72,3 +72,38 @@
   - `pane_cli_process` 34 passed, `cli_surface_test` 3 passed, `docs_cli_test` 3 passed.
   - `cargo clippy -p holler-cli --all-targets -D warnings` clean, `rustfmt --check` clean, `scripts/lint.sh` exit 0, and
     `git diff HEAD -- '*Cargo.toml'` empty. The `origin/main` manifest diff is upstream #702/#705 drift (noted for AC 13).
+
+## F (Phase 5, implement): 2026-10-09T20:20:29-06:00
+- **Decided:** the verbs are real record changes. `park.rs` holds the one engine (`run_hold_change`, `change_holds`), the
+  scope rule (`in_scope`), the text guards (`checked_text`, `MAX_TEXT_CHARS`) and the renderer; `unpark.rs` types its
+  target and calls `run_hold_change` with `HoldChange::Unpark` (Decision 9, the `profile/list.rs` `count` precedent).
+  The 10 RED tests pass, 103 of 103 in `pane_verbs` (`docs/handoffs/646/handoff-F.md`).
+  - The typed request is `HoldRequest { target: HoldTarget, change: HoldChange }`. `HoldTarget` is `Named(PaneName)` or
+    `Profile { profile, pane }`, so "neither PANE nor `--profile`" cannot be represented after typing.
+  - The text line is derived from the report entry (`changed` and the record's `Hold`) plus the change, only for a
+    drained pane (park: `drained, left as it is`; unpark: `not parked`). JSON stays exactly `{name, changed, generation,
+    hold}`, `hold` being the record's own `Hold` value.
+  - A warns 1 and 4 taken in code: the cap is a named constant whose doc cites `holler_hub::holds::MAX_REASON_CHARS`
+    without importing it, and `in_scope` copies reconcile's `resolve` arms, the same `PaneNotFound { what: name }`.
+  - A warn 3 taken in the module doc only: no reconcile step is printed (no live act), and a timed-out write may have
+    landed, which the rerun reports as already in the asked state.
+  - ADR-0021: Decision 12's paragraph inserted verbatim after line 130, line breaks as in the brief (AC 12). CHANGELOG:
+    one entry under `[Unreleased]` / `Enhancements`, "part 1 of 3" of #646.
+- **Assumed:**
+  - The empty-profile text names the profile as typed (`--profile` after `ProfileName::parse`), not the stored display
+    name; they are equal in every test. Doctor's report also echoes the requested profile.
+  - The phase this run calls "Phase 6" is F (the script's own numbering); the role doc's numbering calls it Phase 5.
+- **Hedged:**
+  - A warns 2 and 3 are not in the ADR text: AC 12 pins the paragraph to Decision 12's words, and A's own notes say F
+    cannot take them without departing from the brief. Both are listed as a follow-up for O (646b's brief also edits
+    ADR-0021 and can carry the two sentences).
+  - `park.rs` is 401 lines, against the brief's estimate of about 200: the module doc and rustfmt's layout. It is under
+    lint's 600-line warning.
+- **Evidence:**
+  - `cargo test -p holler-cli --test pane_verbs`: 103 passed (the `park` filter 10, the `unpark` filter 9).
+  - `pane_cli_process` 34, `cli_surface_test` 3, `docs_cli_test` 3, `profile_verbs` 19 and the CLI's lib tests 9, all
+    passed.
+  - `cargo clippy -p holler-cli --all-targets -- -D warnings` and `cargo clippy --workspace --all-targets -- -D
+    warnings` clean; `rustfmt --check --edition 2021` on both files clean; `bash scripts/lint.sh` exit 0 (only the
+    pre-existing size warnings); `bash scripts/changelog-check.sh` ok; `git diff --stat ce12cdb -- '*Cargo.toml'` empty.
+  - The source facts relied on are in `docs/handoffs/646/evidence.md`.
