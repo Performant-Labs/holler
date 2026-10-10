@@ -4,7 +4,7 @@
 #
 # Usage:
 #   stop-owned.sh stop       <state_dir> <pid>      signal one ledger process
-#   stop-owned.sh restart    <state_dir> <pid>      stop it, then print its recorded command
+#   stop-owned.sh restart    <state_dir> <pid>      stop it, then print its recorded command and a note
 #   stop-owned.sh check-port <state_dir> <port>     report who holds a planned port
 #   stop-owned.sh teardown   <state_dir> [--purge-state]
 #                                                   stop every live ledger process in
@@ -130,6 +130,7 @@ do_restart() {
   do_stop "$sd" "$pid"; rc=$?
   [ "$rc" -eq 0 ] || return "$rc"
   echo "RESTART-CMD $cmd"
+  echo "RESTART-NOTE: re-run the stage's own start command (with HOLLER_STATE_DIR, nohup and the log path), then record the new pid; this recorded command alone would use the default state directory"
   return 0
 }
 
@@ -137,10 +138,11 @@ do_check_port() {
   local sd="$1" port="$2" pids p worst=0 rc
   is_num "$port" || die "not a port: $port"
   pids=""
-  if command -v lsof >/dev/null 2>&1; then
-    pids="$(lsof -nP -iTCP:"$port" -sTCP:LISTEN -t 2>/dev/null | sort -u)"
-  elif command -v ss >/dev/null 2>&1; then
+  # ss first: lsof run as a non-root user cannot see another user's listener and says FREE.
+  if command -v ss >/dev/null 2>&1; then
     pids="$(ss -H -ltnp "sport = :$port" 2>/dev/null | sed -n 's/.*pid=\([0-9][0-9]*\).*/\1/p' | sort -u)"
+  elif command -v lsof >/dev/null 2>&1; then
+    pids="$(lsof -nP -iTCP:"$port" -sTCP:LISTEN -t 2>/dev/null | sort -u)"
   else
     die "need lsof or ss to look up who holds port $port"
   fi
@@ -158,6 +160,20 @@ do_check_port() {
     fi
   done
   return "$worst"
+}
+
+strip_slash() {
+  local t="$1"
+  while [ "${#t}" -gt 1 ] && [ "${t%/}" != "$t" ]; do t="${t%/}"; done
+  printf '%s' "$t"
+}
+
+# The default state directory is ~/.holler (HOME/.holler); no instance may purge it.
+is_default_state() {
+  local t; t="$(strip_slash "$1")"
+  [ "$t" = "~/.holler" ] && return 0
+  [ -n "${HOME:-}" ] && [ "$t" = "$(strip_slash "$HOME")/.holler" ] && return 0
+  return 1
 }
 
 do_teardown() {
@@ -183,10 +199,16 @@ do_teardown() {
   rm -f "$sd/wizard-ledger.toml"
   if [ "$purge" = "yes" ]; then
     case "$sd" in
-      ''|/|"$HOME"|"$HOME"/) echo "LEFT state dir $sd (refused to purge a shared or top-level path)" ;;
-      /*) rm -rf "$sd" && echo "REMOVED state dir $sd" ;;
-      *) echo "LEFT state dir $sd (not an absolute path)" ;;
+      /*) : ;;
+      *) echo "LEFT state dir $sd (not an absolute path)"; sd="" ;;
     esac
+    if [ -n "$sd" ] && is_default_state "$sd"; then
+      echo "LEFT state dir $sd (refused to purge the default state directory, for every instance)"
+    elif [ -n "$sd" ] && [ "$(strip_slash "$sd")" = "/" -o "$sd" = "$HOME" ]; then
+      echo "LEFT state dir $sd (refused to purge a shared or top-level path)"
+    elif [ -n "$sd" ]; then
+      rm -rf "$sd" && echo "REMOVED state dir $sd"
+    fi
   else
     echo "LEFT state dir $sd (other files in it; pass --purge-state to remove it)"
   fi

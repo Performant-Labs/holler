@@ -2,7 +2,13 @@
 # Fake ss -ltnpH: the listeners the fake daemons registered, while their process is alive.
 . "$FAKE_ROOT/common.sh"
 [ -f "$FAKE_ROOT/ports" ] || exit 0
+# A filter argument ending in `:<port>` (as in `sport = :<port>`) limits the listing to that port.
+want=""
+for a in "$@"; do
+  case "$a" in sport*:[0-9]*) want="${a##*:}" ;; esac
+done
 while read -r port pid name; do
   [ -n "$pid" ] && alive "$pid" || continue
+  [ -z "$want" ] || [ "$port" = "$want" ] || continue
   echo "LISTEN 0 4096 127.0.0.1:$port 0.0.0.0:* users:((\"$name\",pid=$pid,fd=3))"
 done <"$FAKE_ROOT/ports"
