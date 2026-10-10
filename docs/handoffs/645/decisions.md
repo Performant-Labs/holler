@@ -402,3 +402,37 @@
     both-format runners. A scan of the diff for personal names.
   - `gh issue list` searches for the follow-ups: none filed. `git merge-tree --write-tree` against the two open PRs: #714
     conflicts in ADR-0021 only, and #713 merges cleanly.
+
+## S (spec audit) — 2026-10-10T00:11-06:00
+- **Decided:** REWORK, production, one item (handoff-S.md).
+  - Every brief AC except 24 and 25, and every issue criterion in 645a's scope, has a proving test or evidence. The
+    public API, the P0-R table, the messages and Decisions 1-19 are as the brief states. The documented deviations are
+    acceptable: `find` for `next()`, `reset` reusing `execute`, A's round-2 form of the "Deferred" bullet, and A-dup
+    round 1's four ADR sentences. Build guards, privacy and scope are clean.
+  - The item: after A-dup's round 2, `origin/main` moved to `abdcbb6`, with #713 (#660) and #714 (#640 part 3) merged at
+    00:05 and 00:06 MDT. The branch now conflicts in `docs/adr/ADR-0021.md`, in two adjacent-line hunks: the section 9
+    `pane launch` row, and the "Deferred" `HerdrPort`/`HarnessPort` bullet. Against the current `origin/main`, AC 24's
+    own command shows 8 hunks, and AC 25's `Cargo.toml` diff is 14 lines. F merges `origin/main` and keeps both sides.
+    T then re-runs GREEN on the merged tree. No code or test change is expected.
+- **Assumed:**
+  - The Workflow script opens the PR without merging `main` (`coding-pipeline.workflow.mjs:3336-3347` pushes and creates;
+    no merge step was found). So a PASS would give a PR that conflicts.
+  - T-green's round-3 Tier 1 results hold for the `d9eabbb`-based tree. I did not re-run them.
+- **Hedged:**
+  - REWORK rather than PASS with a note. The resolution is mechanical, but taking either side whole silently breaks AC 24,
+    and resolving it after S would edit the standing spec outside every gate. The brief's R-1 assigns this to F.
+  - The issue's "first message lands in the new session" criterion has no test, by Decision 1. I treat it as out of
+    645a's scope, not as REWORK, because the operator's request names "#645a".
+  - Commits carry `Co-Authored-By` but no session link. That is the script's practice, and the merged squash commits
+    `d9eabbb` and `13edbb4` match it. It is advisory for the squash at merge.
+- **Evidence:**
+  - Read: the brief (all of it), handoffs A, T-red, F, T-green and A-dup, `evidence.md`, this journal, and the outside
+    gates' brief r1 and diff r1-r3 results (r3 PASS at 23:52 MDT).
+  - Read in full: `tx_switch.rs`, `pane/switch.rs`, `pane/reset.rs`, and tests `pane_verbs/{switch,reset}.rs`. Also the
+    hunks of `doctor.rs`, `stub.rs`, `cli-surface.txt`, ADR 0003, ADR-0021 and the CHANGELOG. Also `doctor/rig.rs`,
+    `fixture.rs` `sample_pane`, `output.rs` `emit_error`, `pane.rs` `env`, `pane/get.rs`, and `CONTRIBUTING.md`.
+  - Commands: `git fetch`; `git ls-remote origin main` (`abdcbb6`); `gh pr view 713 714` (both merged);
+    `git merge-tree --write-tree HEAD origin/main` (exit 1, ADR-0021 only), with the merged ADR read at `:398-411` and
+    `:605-628`; `git diff d9eabbb origin/main` over `holler-pane/src` (doc comments only) and over `stub.rs`; the ADR-0021
+    heading, paragraph and count greps; `wc -l` on every touched file; greps for banned calls, `#[allow]` and sleeps; a
+    privacy scan of every added line; the commit trailers and author emails.
