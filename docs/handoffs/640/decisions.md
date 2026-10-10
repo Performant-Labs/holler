@@ -219,3 +219,38 @@ in git at `0ad2d8a:docs/handoffs/640/decisions.md`.
     diff and the brief; personal identifiers in added lines.
   - `git diff --stat 8993137 HEAD` (handoffs only), `git merge-tree --write-tree HEAD origin/main` (clean) and `wc -l`
     of every touched file.
+
+## S (Phase 10, spec audit) — 2026-10-09T23:53:36-06:00
+- **Decided:**
+  - PASS (`docs/handoffs/640/handoff-S.md`).
+  - Preconditions are met: A's plan review and A-dup both PASS, RED is valid, and GREEN has no blocking issue.
+  - Each of the 32 criteria has a named test or a re-checked grep (AC 15 is N/A). The issue's scratch-session line is
+    AC 1-14, and the operator's 2026-10-09 amendments to the issue resolve the brief's contradictions 1-3.
+  - Decisions 1-16 are implemented as stated. Five declared readings are accepted:
+    - T's 29-byte base limit. The brief's 40 conflicts with its own 100-byte socket limit, since 40 bytes plus the
+      70-byte tail is 110.
+    - D4 and A4 kept verbatim, with `herdr.connect` documented in the adapter.
+    - AC 19's exemption of `adapter.rs:383`, the label `snapshot` returns.
+    - AC 14's version line at GREEN taken from `version()`.
+    - The doc edits outside the issue's blast radius.
+- **Assumed:**
+  - The PR is not open (the remote branch was deleted after #702), so its title, `Closes #640` and the AI disclosure
+    are O's to check at PR time.
+  - The missing session link in commit trailers matches every commit on `main`, so it is not a finding here.
+- **Hedged:**
+  - AC 12-14 rest on T's eight local opt-in runs. CI never runs them, and they ran on Linux only.
+  - `run_bounded`'s unbounded reader join (A-dup warn 2) is kept as an advisory: the tests are opt-in, no run has
+    shown it, and no live session is at risk.
+- **Evidence:**
+  - Read: the brief in full, `gh issue view 640`, every handoff, `evidence.md` and this journal.
+  - Read in full: `src/adapter.rs` and the three new test files. Also every hunk of `protocol.rs`, `Cargo.toml`,
+    `wire_herdr/mod.rs`, the `holler-pane` docs, ADR-0021, `docs/testing.md` and `CHANGELOG.md`.
+  - Read on `origin/main`: its ADR-0021 diff since `dc300ab`.
+  - Re-ran the greps of AC 8, 9, 19, 20, 21-27 and 29, and part 2's AC 35-37 and 39.
+  - Listed every `PaneError::Timeout` producer on this branch and on `origin/main`: each names a port method, except the
+    documented `herdr.connect`.
+  - Ran a privacy grep of the added lines, a check of the manifest and lock diff, `wc -l` and the lint config
+    (`too_many_lines` and `cognitive_complexity` are `deny`).
+  - Checked the outside gate's round 1 (`finish_reason: length`) and the hand rerun's two BLOCK entries:
+    `Path::starts_with` matches whole components, and B-2 retracts itself.
+  - Searched for the follow-ups (#696's scope; the #638 test-kit issue, which is unfiled).

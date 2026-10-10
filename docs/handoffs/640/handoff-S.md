@@ -1,194 +1,339 @@
-# Handoff-S: Phase 10 - #640 part 2 of 3: the socket transport, `HerdrAdapter` and a simulated Herdr (spec audit)
+# Handoff-S: Phase 10 - #640 part 3 of 3: the opt-in scratch-Herdr test, the contract docs and the ADR-0021 rows (spec audit)
 
-**Date:** 2026-10-09
-**Branch:** issue-640-implementation (head `0fbe0e5`; diff `origin/main...HEAD` = `3bdd129...0fbe0e5`, excluding `docs/handoffs`)
-**Issue:** #640 (epic #633), part 2 of 3. The PR says `Part of #640`.
-**Source of truth:** `docs/handoffs/640-brief.md` (all of it), `gh issue view 640`
-**Handoffs reviewed:** `docs/handoffs/640/handoff-A.md`, `handoff-T-red.md`, `handoff-F.md`, `handoff-T-green.md`,
-`handoff-A-dup.md`, `evidence.md`, `decisions.md`; the outside diff gate `docs/handoffs/640-diff-result-r2.md`
-(DeepSeek V4 Pro, PASS, git-ignored)
-**Read in full:** `src/adapter.rs`, `src/transport.rs`, the `lib.rs`/`Cargo.toml`/`Cargo.lock`/`CHANGELOG.md` hunks,
-`tests/adapter_test.rs`, `tests/transport_test.rs`, `tests/adapter_conformance_test.rs`; `tests/wire_herdr/` by its
-public surface and the helpers the gate questioned.
+**Date:** 2026-10-09 (11:53 PM MDT)
+**Branch:** issue-640-implementation (head `663460b`; diff `origin/main...HEAD` = `dc300ab...663460b`. `origin/main` is now
+`d9eabbb`, and `git merge-tree` against it is clean, per T-green and A-dup)
+**Issue:** #640 (epic #633), part 3 of 3. The PR says `Closes #640` (Decision 1).
+**Source of truth:** `docs/handoffs/640-brief.md` (all of it); `gh issue view 640`, read 2026-10-09. The issue was last
+updated at 8:16 PM MDT and carries the operator's two "(amended 2026-10-09)" edits, which the brief asked for in "For the
+operator", item 1.
+**Handoffs reviewed:**
+- `docs/handoffs/640/handoff-A.md`, `handoff-T-red.md`, `handoff-F.md`, `handoff-T-green.md`, `handoff-A-dup.md`,
+  `evidence.md` and `decisions.md`.
+- The outside diff gate (DeepSeek V4 Pro, git-ignored): round 1 (`docs/handoffs/640-diff-result-r1.md`, cut off at the
+  8192-token cap) and its hand rerun (`640-diff-r2.md`, PASS, in the run's session scratchpad).
+
+**Read in full:**
+- `crates/holler-adapter-herdr/src/adapter.rs` (after the change), and the `src/protocol.rs` and `Cargo.toml` hunks.
+- `tests/scratch_herdr/mod.rs`, `tests/scratch_herdr_test.rs` and `tests/adapter_messages_test.rs`.
+- The `tests/wire_herdr/mod.rs` hunk and its module doc.
+- The `holler-pane` doc hunks (`ports.rs`, `error.rs`, `pane.rs`, `reconcile.rs`).
+- The `docs/adr/ADR-0021.md`, `docs/testing.md` and `CHANGELOG.md` hunks.
+- `origin/main`'s own ADR-0021 diff since `dc300ab`.
+
+This file replaces part 2's `handoff-S.md`, as the brief's Handoffs line says. Part 2's is in git at `0ad2d8a`.
 
 ## A precondition
 
-**Met.** `handoff-A.md` (Phase 3, plan) is `PASS` (0 block, 7 warn). `handoff-A-dup.md` (Phase 7, anti-duplication) is
-`PASS` (0 block, 4 warn).
+**Met.**
+
+- `handoff-A.md` (the plan review) is **PASS**, with 0 block and 6 warn findings.
+- `handoff-A-dup.md` (the anti-duplication gate) is **PASS**, with 0 block and 2 warn findings.
+- A-dup carries plan warns 4 and 6 forward unchanged. Neither of its own warns is drift that F introduced.
 
 ## T precondition
 
-**Met.** `handoff-T-red.md`: 34 new tests, all failing on `NotImplemented` assertions (not compile errors), the 62
-part-1 tests green. `handoff-T-green.md`: 97/97 in `cargo test -p holler-adapter-herdr`, "Blocking issues: None",
-the AC 14 mutant table recorded, and every Tier 1 gate clean (the 4 `holler-cli --test logging_test` failures are
-environmental, a live hub on this machine, and pass 11/11 with an isolated `HOLLER_STATE_DIR`; `holler-cli` does not
-depend on this crate). RED then GREEN is confirmed. I did not re-run Tier 1 or Tier 2; the greps below are read-only.
+**Met.**
+
+**RED** (`handoff-T-red.md`) is valid:
+- AC 16 fails on all 14 rows, each reporting the wire `op`.
+- The four AC 18 tests fail quoting the whole `LONG`, each in the arm it names.
+- AC 1-7 and AC 17 pass by design, and every part 1 and part 2 target stays green.
+
+**GREEN** (`handoff-T-green.md`) shows zero blocking issues:
+- The crate's tests all pass (2 ignored), and the workspace run shows 1519 passed.
+- Both of the Test plan's mutants die as required. Mutant (a) fails exactly the four AC 18 tests, and mutant (b) fails
+  exactly AC 16. An extra mutant (rename every error) shows AC 17 is not vacuous.
+
+**Opt-in runs** (AC 12-14) passed four times at RED and four times at GREEN, against real Herdr
+`0.9.1-preview.2026-09-21-0ff0f27e2226`. No `h640.` process or directory was left behind after any run.
 
 ## Acceptance criteria
 
-The issue's lines covered by this part (brief, Scope): the conformance suite, the grid read-back with the swapped
-conversion failing, and the version line at adapter level. The scratch-session line is part 3's.
+"Default run" is `cargo test -p holler-adapter-herdr` with no variable set. Test names are in
+`crates/holler-adapter-herdr/tests/scratch_herdr_test.rs` (AC 1-13) and `tests/adapter_messages_test.rs` (AC 16-18),
+unless a row names another file.
 
-| # | Criterion | Proving test or evidence | Status |
+| AC | Criterion | Proving test or evidence | Status |
 |---|---|---|---|
-| Issue 1 | Passes the conformance suite from #638 | `adapter_conformance_test.rs`: `the_adapter_passes_the_suite_from_an_empty_herdr`, `..._with_a_root_pane`, `..._over_a_real_socket` each assert `run_herdr_conformance(..) == Ok(())` | met |
-| Issue 2 | r2c1 / r1c2 land in their cells, read back, swapped conversion fails | `adapter_test.rs::r2c1_and_r1c2_land_in_their_cells_and_read_back` (literal trees, snapshot order, `to_string`, split params) + AC 14 mutants in `handoff-T-green.md` | met |
-| Issue 3 | Each supported version works against the fake's two versions; unknown refused with `herdr-version-unsupported` | `version_and_the_gate` (22 is `Ok`; 99 and `None` refused at `connect_with`; `version()` re-gates after `set_protocol(Some(99))`) | met (as the brief reads it, operator items 4/5) |
-| 1 | Writes the request line, returns the reply line as text | `transport_test.rs::exchange_writes_the_request_line_and_returns_the_reply_line` | met |
-| 2 | One connection per request | `each_request_opens_its_own_connection` (two accepts, one line each, then EOF) | met |
-| 3 | Missing / non-socket path is `Unavailable` naming it | `a_missing_or_non_socket_path_is_unavailable_naming_it` | met |
-| 4 | Too-long path is `Unavailable`, no panic | `a_socket_path_too_long_for_the_os_is_unavailable` (asserts a 200-byte path) | met |
-| 5 | Silent server is `Timeout{herdr.ping}` by deadline+2s | `a_silent_server_is_timeout_by_the_deadline` | met |
-| 6 | Dripping server is `Timeout` (deadline bounds the whole reply) | `a_dripping_server_is_timeout_by_the_deadline` | met |
-| 7 | Close without reply is `Unavailable` | `a_server_that_closes_without_replying_is_unavailable` | met |
-| 8 | Over-limit reply is `Unavailable` naming the limit | `a_reply_over_the_limit_is_unavailable` (connection held open, so only the cap ends it; spot-check with no cap gives `Timeout`) | met |
-| 9 | EOF without newline returns the bytes | `a_reply_ended_by_eof_without_a_newline_is_returned` | met |
-| 10 | Non-UTF-8 reply is `Unavailable` | `a_non_utf8_reply_is_unavailable` | met |
-| 11 | Passed deadline is `Timeout`, no connect | `a_passed_deadline_is_timeout_without_connecting` (non-blocking `accept` is `WouldBlock`) | met |
-| 12 | No error echoes typed text | `no_transport_error_echoes_typed_text` (silent, closing, missing; `Display` and `Debug`) | met |
-| 12a | One answer per wire condition; workers end by themselves | `one_wire_condition_gives_one_answer_at_the_deadline` (20 x exactly `Timeout`, <=20 connections, each reaches EOF within 2s, no worker panic) | met (see advisory 5) |
-| 13 | Grid acceptance (above) | `r2c1_and_r1c2_land_in_their_cells_and_read_back` | met |
-| 14 | Mutants (a), (b), (c) fail as derived | `handoff-T-green.md` table: (a) fails 13+16, (b) fails 13(+16)+20, (c) fails 13 only; observed values match the oracle | met |
-| 15 | Closed pane's space goes to its sibling | `a_closed_panes_space_goes_to_its_sibling` | met |
-| 16 | Misplaced pane is `Unavailable`, left in place, no close | `a_pane_that_lands_elsewhere_is_unavailable_and_left_in_place` (spot-check: ignoring the read-back fails it) | met |
-| 17 | Split target closed under the adapter is `Unavailable`, not `PaneNotFound` | `a_split_target_closed_under_the_adapter_is_unavailable_not_pane_not_found` (spot-check: no rewrite gives `PaneNotFound`) | met |
-| 18 | Occupied cell sends no mutating request | `an_occupied_cell_sends_no_mutating_request` (exactly `session.snapshot`, `layout.export`) | met |
-| 19 | Nesting refused before any split, (a) and (b) | `nesting_is_refused_before_any_split` | met |
-| 20 | Missing workspace created only for r1c1, with `{label, focus:false}` | `a_missing_workspace_is_created_only_for_r1c1` | met |
-| 21 | Another tab neither lists nor places | `a_pane_in_another_tab_neither_lists_nor_places` (also asserts every `layout.export` is the grid tab) | met |
-| 22 | Snapshot lists every workspace by label, duplicates included | `snapshot_lists_every_workspace_by_label` | met |
-| 23 | Session / workspace errors send nothing; duplicate label is `Unavailable` | `session_and_workspace_errors_send_nothing` | met |
-| 24 | Keys go out verbatim | `keys_go_out_verbatim` | met |
-| 25 | `read` asks for recent text, trims; `read(p,0)` sends `lines:1`, returns `""` | `read_asks_for_recent_text_and_trims` | met |
-| 26 | Version and the gate | `version_and_the_gate` | met |
-| 27 | Config validated before any request; order and message | `config_is_validated_before_any_request` (9 cases incl. `Duration::MAX`, label order, `session` before `socket`) | met |
-| 28 | One deadline covers every exchange of a call | `one_deadline_covers_every_exchange_of_a_call` (exact `Instant` equality, `before+t <= d <= after+t`) | met |
-| 29 | Garbled reply is `Unavailable` everywhere | `a_garbled_reply_is_unavailable_everywhere` (connect + all 7 methods) | met |
-| 30 | Base-36 pane numbering, returned verbatim | `the_fake_numbers_panes_in_base_36` | met |
-| 31-33 | Conformance: empty, root pane, real socket | the three conformance tests; the socket one follows the brief's construction order | met |
-| 34 | No method off the allow-list | `no_case_calls_a_method_off_the_allow_list` (also asserts each fake saw requests) | met |
-| 35-39 | Independence and shape greps | re-run by S: all five print nothing | met |
-| 40 | Gates | `handoff-T-green.md` Tier 1 table (workspace run green except the 4 environmental `logging_test` cases) | met (CI is the final word on the workspace run) |
-| 41 | Dependencies | `Cargo.toml` hunk: only `tempfile = { workspace = true }` as a dev-dep with a consumer comment; `Cargo.lock` +1 line; no `holler-hub`; T's `cargo tree` output | met |
-| 42 | Every touched file < 900 lines; clippy size/complexity | `wc -l`: `adapter.rs` 445, `transport.rs` 286, `lib.rs` 41, `adapter_test.rs` 645, `transport_test.rs` 421, `adapter_conformance_test.rs` 98, `wire_herdr/mod.rs` 650, `serve.rs` 84, `CHANGELOG.md` 638; clippy `-D warnings` clean | met |
-| 43 | CHANGELOG entry after the part-1 entry, linking #640 and #633 | `CHANGELOG.md` hunk at line 139 (also links #649) | met |
+| 1 | The gate runs only on exactly `"1"` | `the_gate_runs_only_on_exactly_1`: `Run` for `Some("1")`, and all six skip values of the AC skip | MET |
+| 2 | `default` refused by name | `the_name_guard_refuses_the_default_session_by_name`: `default` and `Default` are both `Err`, and the text contains `default` | MET |
+| 3 | Only `holler640-` and 8 lower-case hex | `the_name_guard_accepts_only_holler640_and_8_hex`: the one valid form is `Ok`, and all ten names of the AC are refused | MET |
+| 4 | Generated names are valid and distinct | `generated_names_pass_the_guard_and_differ`: 64 names, all valid, all distinct | MET |
+| 5 | The socket stays inside the root | `the_socket_guard_keeps_the_socket_inside_the_root`: the valid socket is `Ok`. Refused: the sibling sharing the prefix (`/r/h640.abc/...`), a path outside the root, a relative path, `..`, `.`, the root itself, and a 100-byte path. A 99-byte path is accepted | MET |
+| 6 | The server is proven by its own status | `the_server_is_proven_by_its_own_status`: `Ok` with an extra field present. The eight refusals of the AC each fail, and the `default` refusal names `default` | MET |
+| 7 | The scratch environment carries nothing live | `the_scratch_env_carries_nothing_of_the_live_herdr`: built from the AC's literal pairs, with every assertion of the AC | MET |
+| 8 | One way to run `herdr` | Greps re-run by S: one `Command::new` (`tests/scratch_herdr/mod.rs:247`). `std::env` and `env::var` appear under `tests/` only in `scratch_herdr/mod.rs`, and nowhere in `src/`. S read `command` (`mod.rs:245-257`); details are in Spec compliance, Decision 3 | MET; advisory 3 |
+| 9 | Ignored by default | `#[ignore` appears exactly at `scratch_herdr_test.rs:214` and `:268`, each with the pinned reason. T: `--list --ignored` lists exactly the two tests, and the default run reports `2 ignored` | MET |
+| 10 | Unset gate with `--ignored` | T-red and T-green: under `env -i` both tests pass, each printing `skipped (HOLLER_HERDR_SCRATCH is not 1): no scratch Herdr server was started`. S read the code: `opt_in()` is the first statement of both tests (`:216`, `:270`) | MET |
+| 11 | Gate set, no `herdr` | T-red and T-green: both tests FAIL with ``HOLLER_HERDR_SCRATCH=1 asks for a scratch Herdr, but no executable `herdr` is on PATH`` | MET |
+| 12 | The conformance suite against real Herdr | `scratch_herdr_passes_the_conformance_suite`. Details below the table. 8 opt-in runs, all ok | MET |
+| 13 | Create, run, send, read, close and snapshot | `scratch_herdr_creates_runs_sends_reads_closes_and_snapshots_a_pane`: steps 1-6 in order, as written. Details below the table. 8 runs, all ok | MET |
+| 14 | The after-run record | T-red: the `herdr --version` line, each test's duration, `pgrep` printing nothing, and no `h640.*` directory left. T-green: the same, with the version taken from the server's `version()` reply | MET; reading 4 |
+| 15 | A real-Herdr gap is fixed here | No gap was found at RED or at GREEN | N/A |
+| 16 | A timeout names the port method | `a_timeout_names_the_port_method`. Details below the table. RED: all 14 rows failed with the wire `op`. Mutant (b) fails this test and no other | MET |
+| 17 | Every other error passes unchanged | `every_other_error_passes_through_unchanged`: the same 14 exchanges, each failing with an injected `unavailable`, which the call returns exactly. Part 2's split `pane-not-found` → `unavailable` stays pinned by `adapter_test.rs::a_split_target_closed_under_the_adapter_is_unavailable_not_pane_not_found` (untouched, passing). This guard passes at RED by design; T's overreaching-rename mutant fails it | MET |
+| 18 | Herdr-sent text is cut to 64 characters | `a_misplaced_new_panes_id_is_cut_to_64`, `a_new_pane_with_no_cell_has_its_id_cut_to_64`, `a_vanished_split_targets_id_is_cut_to_64` and `a_tabless_workspaces_label_is_cut_to_64`. Details below the table. RED: all four quoted the whole `LONG`. Mutant (a) (64 → 65) fails all four | MET |
+| 19 | One `excerpt`, shared | The first grep prints exactly `protocol.rs:580:pub(crate) fn excerpt(text: &str) -> String {`. The second prints `adapter.rs:312`, `:318`, `:422` and `:436`, each inside `excerpt(..)`. It also prints `:383`, the label `snapshot` returns, which is an accepted exemption (reading 3). Caller values keep `{:?}` | MET |
+| 20 | The transport is unchanged | `git diff` of `src/transport.rs` is empty against both `origin/main` and `dc300ab`. T: `transport_test` passes 13 tests and still asserts `herdr.ping` | MET |
+| 21 | The `Key` doc | `grep -nE 'C-c\|Enter'` on `ports.rs` prints nothing. The text is D1, verbatim | MET |
+| 22 | The `ensure_pane` doc | Names both `grid-out-of-range` and `grid-unreachable`. The text is D2, verbatim | MET |
+| 23 | The `GridOutOfRange` and `Timeout` docs | `error.rs:416` and `:457` carry the required phrases. The text is D3 and D4, verbatim | MET |
+| 24 | No "#640 records it" | The grep over `crates/` and `docs/adr/` prints nothing. The text is D5 and D6, verbatim | MET |
+| 25 | ADR-0021, A1-A9 | `grid-unreachable` occurs 4 times. Both old sentences are gone. `<port>.<method>` occurs only at `:396`, the §9 `timeout` row. The diff (+18/-11) has nine hunks, each exactly one of A1-A9 and verbatim; A6-A9 are only re-wrapped. `**Date:**` is unchanged | MET |
+| 26 | The `docs/testing.md` section | "Opt-in: a scratch Herdr server (#640)" at `:439`, between "Beyond loopback: `interop.yml`" and "Windows is deferred". It names `HOLLER_HERDR_SCRATCH`, section C's command, the gate rule, the isolation, "CI never runs them" and protocol 22 (equal to `SUPPORTED_PROTOCOLS`). It adds the sibling tmux convention (A finding 2) | MET |
+| 27 | The CHANGELOG entry | Under `## [Unreleased]` / `### Enhancements`, right after the part-2 entry. It is Decision 14's text and links #633, #649 and #640. T: `changelog-check: ok` | MET |
+| 28 | The gates | T-green's Tier 1 table: the crate, `holler-pane` (86), the workspace (1519), clippy with `-D warnings`, fmt, `lint.sh` and machete all pass, plus `docs_cli_test`, `wire_selftest` and rustdoc. CI on the PR is the final word | MET |
+| 29 | Part 2's AC 35-37 and 39; the narrowed AC 38 | Re-run by S. Part 2's AC 35, 36, 37 and 39 each print nothing. The narrowed pattern prints nothing over `src/` and `Cargo.toml`, and under `tests/` it matches only `scratch_herdr/mod.rs` and `scratch_herdr_test.rs` | MET |
+| 30 | Dependencies | The only manifest or lock change since `dc300ab` is the `tempfile` comment (+2/-1). T: `cargo tree` lists only `holler-pane` and `serde_json`, and machete is clean | MET |
+| 31 | Size and complexity | The largest touched `.rs` file is `error.rs` at 713 lines (`adapter.rs` is 493). `too_many_lines` and `cognitive_complexity` are `deny` in `[workspace.lints.clippy]` (`Cargo.toml:24-25`), and clippy is clean | MET |
+| 32 | No platform-sensitive pattern | S read both new files and found no socket option and no `io::ErrorKind`. The only `thread::sleep` is inside the bounded `poll` (`mod.rs:238`). The base, the root and the proven socket are compared only after `fs::canonicalize`. `check_socket` and `prove` call no `fs` function, and section A's tests touch no file | MET |
 
-Every test asserts observable behaviour (wire params, returned values, error variants and message substrings, the
-fake's tree), not implementation details, and T's spot-checks show the key ones fail when the behaviour is removed.
+**AC 12 in detail.** `run_herdr_conformance` runs with one `ScratchHerdr` per case, kept as that case's guard. Each case
+connects through `HerdrAdapter::connect(HerdrConfig::new(<session>, <socket>).with_workspace("holler640-grid", 2 by 1))`.
+The test asserts `assert_eq!(result, Ok(()))`.
+
+**AC 13 in detail.** The steps, as the test runs them:
+
+1. `version()` returns a non-empty string on one line, and the test prints it.
+2. `a` is placed at r1c1, and the workspace's panes are exactly `[a]`.
+3. The test types `printf 'holler640-%s\n' ran` as a raw string, then sends `enter`. A read finds a line that, trimmed,
+   equals `holler640-ran`.
+4. The test types `holler640-typed` with no Enter, and a read finds a line containing it.
+5. `b` is placed at r2c1. The workspace's panes, sorted by row, are exactly `[a, b]`, and every pane in the snapshot carries
+   the scratch session.
+6. `close(b)` is `Ok`, and the remaining pane ids are exactly `[a]`. Closing `b` again and `read(b, 1)` each return
+   `PaneNotFound`.
+
+The read polls go through `poll` (100 ms apart, 10 s at most). A failed poll quotes only a line count, never the screen.
+
+**AC 16 in detail.** The test covers all 14 rows of the brief's table. The expected strings come from `HerdrOp::as_str`,
+plus `herdr.connect`. Each row asserts `Err(Timeout { op })` exactly, and asserts that its trap fired.
+
+**AC 18 in detail.** Each of the four tests asserts that the error is `Unavailable { what }` where `what`:
+- contains `format!("{:?}...", "x".repeat(64))`;
+- does not contain `TAIL-NOT-QUOTED`;
+- has no `\n`.
+
+Two of the tests also assert that their reply rewrite or their split actually happened. Part 1's surviving mutant
+(64 → 1000) would now fail these tests as well.
+
+**The issue's Acceptance list.**
+- Line 4 (the scratch session) is AC 1-14 above.
+- Lines 1-3 were covered by parts 1 and 2 (their S handoffs), and AC 12 now also runs line 1 against real Herdr.
+- The operator amended line 3 and the Scope's version sentence on 2026-10-09 to match the merged decisions. So the
+  brief's contradictions 1-3 with the issue text are resolved.
 
 ## Spec compliance
 
-Each "Decision already made" checked against the code:
+Decisions already made (MO), one by one:
 
-- **D2/D3/D4 (transport).** New connection per exchange, no `shutdown`, bytes after `\n` ignored, EOF-with-bytes
-  returned, empty EOF `unavailable`, 16 MiB cap with reading stopped (`transport.rs:178-208`). One deadline; worker
-  thread with per-syscall socket timeouts from `saturating_duration_since`, `Interrupted` retried, zero time left is
-  `Timeout` without the syscall (`:236-248`); caller `recv_timeout`, `Disconnected` is `unavailable`, spawn failure is
-  `unavailable` (`:97-117`). `op` is `herdr.<wire method>` as Decision 3 pins. Messages name socket, method and
-  `ErrorKind`, never request or reply bytes.
-- **D2 "with `write_all`".** F uses its own write loop so each `write` syscall gets the time left (Decision 3's
-  "before each syscall"). Declared in `handoff-F.md` Deviations 2; identical bytes on the wire. Not silent, and it
-  serves the stricter rule. Accepted.
-- **D5.** Socket is configuration only; relative is `usage`; no env read, no default path (AC 38 grep empty).
-- **D6.** Order `session`, `socket`, `timeout`, workspaces by label, `rows` before `cols` (`adapter.rs:400-430`). One
-  addition: a timeout that overflows `Instant` is `usage` (A finding 3), declared as F Deviation 1 and pinned by T's
-  ninth AC 27 case. It only refuses configs that would otherwise panic. Accepted.
-- **D7/D8.** `connect_with` validates, pings, `parse_pong`, `check_supported`, keeps nothing (`:95-100`). `version()`
-  pings and re-gates under its own deadline and refuses an empty or control-character version as `unavailable`
-  (`:346-355`), pinned by T's added test. The other methods do not re-check.
-- **D9/D10.** Session mismatch and unconfigured workspace are `unavailable` with no request (`:135-155`); a missing
-  workspace is an empty map; a duplicate label surfaces `SessionState::workspace`'s error; a tab-less workspace is
-  `unavailable` via `grid_tab` (`:367-377`).
-- **D11.** Plan, act, observe exactly as listed: snapshot then `layout.export`, one-cell `plan_splits` with errors
-  passed through, empty plan returns the occupant, one step runs `CreateRoot` or `Split`, `PaneNotFound` from the split
-  only becomes `unavailable` (`changed_under`, `:382-395`), more than one step is `unavailable` with no step run, then
-  the read-back; a misplaced pane is left in place and nothing is closed.
-- **D12.** One `session.snapshot`, then `layout.export` per workspace with a grid tab in Herdr's order, `cells()` order,
-  label as `workspace`, `config.session` on every pane; tab-less workspaces skipped.
-- **D13.** Single-request methods via `expect_ok`; `read` clamps `lines` to `max(1)` saturated at `u32::MAX` and passes
-  the unclamped `max_lines` to `parse_read` (`:309-318`).
-- **D14.** `exchange` returns the raw `String`; `decode_reply` is in the adapter's `call` (`:113-115`).
-- **D17.** No `// stub (#640 part 2)` marker remains in `src/`; T's `#[allow(dead_code)]` on `transport` is removed.
-- **D18/D19.** No new normal dependency, no `unsafe`, no lock or cell in `adapter.rs` (AC 37 grep empty).
-- **Pinned API.** Every pinned item is present with the pinned signature. Additions are private helpers,
-  `#[derive(Debug)]` on `HerdrAdapter` (allowed: "F may derive traits"), and one doc-only fix to the `Transport` doc
-  (backticks around `herdr.<method>` for rustdoc). No rename or drop.
+1. **Closing part.** The brief replaced part 2's, as stated. The PR is not open yet: there is no PR for this branch, and
+   the remote branch was deleted after #702 merged. So `Closes #640` and the AI disclosure are checked at PR time
+   (advisory 1).
+2. **The scratch root.** Implemented as stated, with one declared deviation: the base limit is 29 bytes, not 40
+   (reading 1). The rest is as stated:
+   - a fresh `tempfile` root `h640.XXXXXX`, canonicalized;
+   - `home/` with the spike's `config.toml` (no onboarding, `/bin/sh`, no version or manifest check);
+   - `home/.local/state`, `home/.local/share` and `home/.cache`;
+   - `run/` at mode `0700`, `work/`, and `server.log`;
+   - the session from `new_name()`.
+3. **One function runs `herdr`.** `command` does all of this:
+   - calls `check_name(name)?` first;
+   - puts `--session <name>` before every other argument;
+   - calls `env_clear()`, then `envs(scratch_env(root, std::env::vars_os()))`;
+   - sets the working directory to `root/work`, with stdin null.
 
-No silent deviation found. The brief is not defective: the brief-gate block (operator item 4, the version line) was
-overridden by the operator on 2026-10-09 and journaled in `decisions.md`, so Decision 8 stands.
+   `run_bounded` bounds a short command at 5 s: it polls `try_wait` every 50 ms, then kills and reaps on expiry. The
+   server is the guard's child. Advisory 3 covers the stdout reader.
+4. **Start and prove.** As stated:
+   - The guard exists before the proof, so a refusal still stops the server.
+   - It polls every 100 ms for at most 15 s.
+   - A child that has exited panics, naming its status.
+   - It returns only when the status command exits 0, `prove` is `Ok`, the socket exists, and the socket equals its
+     canonical path.
+   - On timeout it panics, saying the server did not prove itself in 15 s.
+5. **Stop only this server.** `server stop` runs through `command`, so it carries the checked `--session`; a failure is
+   one `eprintln!`. `Drop` then polls `try_wait` for 10 s, and kills and waits on its own `Child` if it is still alive.
+   The `TempDir` field is dropped last. `Drop` never panics, never starts tmux, and never runs `session stop` or
+   `session delete`.
+6. **The gate.** `opt_in` reads `std::env::var_os` and never calls `set_var`. It searches `PATH` by hand (`split_paths`,
+   a file with an exec bit). If none is found, it panics, naming `herdr` and `PATH`.
+7. **Only T ran `herdr`.** F says so in `handoff-F.md`, and S ran nothing.
+8. **Real-Herdr gaps.** None were found, so there was nothing to fix or escalate.
+9. **The `op` rule.** `run_as` wraps the whole body of all seven port methods and of `connect_with`, and renames only a
+   `Timeout`, so no `Timeout` escapes unrenamed. The transport is untouched and keeps the wire vocabulary. AC 16 pins the
+   seven strings equal to `HerdrOp::as_str`. `herdr.connect` is documented in the module doc, in `connect_with`'s doc
+   and in the constants' comment.
+10. **`excerpt`.** `pub(crate)` is the only change to `protocol.rs`. The four Herdr-sent quotes go through it, and the
+    caller's values keep `{:?}`. I read every other placeholder in `adapter.rs`: each quotes a caller or config value,
+    a `GridPos` or a count.
+11. **D1-D6.** Verbatim. They are doc comments only: no signature, derive, attribute or code line changes.
+12. **A1-A9.** Verbatim and in place, with no other ADR line changed and `**Date:**` unchanged. `origin/main`'s own
+    ADR edits since `dc300ab` (#646, #662 and #663) touch none of these lines and make none of them stale. A5's
+    "#645's and #646's, planned" still holds, because #646's merged park and unpark declare no open code.
+13. **`docs/testing.md`.** As stated, plus A finding 2's sentence on the tmux sibling.
+14. **The CHANGELOG.** As stated.
+15. **RED.** As T-red records it.
+16. **Ordering.** The two ignored tests use separate servers, and the documented command passes `--test-threads=1`.
+
+**Accepted readings and declared deviations.** None of them is silent: each is journalled or recorded in a handoff.
+
+1. **Decision 2's 40-byte base limit.** The brief's own numbers conflict:
+   - Every socket path is the base plus a fixed 70-byte tail,
+     `/h640.XXXXXX/home/.config/herdr/sessions/holler640-XXXXXXXX/herdr.sock`.
+   - A 40-byte base therefore gives a 110-byte socket, which AC 5's `check_socket` (limit 100) refuses. So any base of
+     30 to 40 bytes would always have made `start` panic.
+   - T derives `BASE_LIMIT = SOCKET_PATH_LIMIT - 1 - SOCKET_TAIL.len()`, which is 29, in code, and journalled the reason
+     (`decisions.md`, T at RED).
+   - This keeps Decision 2's intent: a long `TMPDIR` falls back to `/tmp`.
+
+   It is not a hold: the shipped code is right, and only the brief's number was wrong.
+2. **`herdr.connect` against D4 and A4** (A finding 4). D4 and A4 say "`op` names the port method", with no exception
+   for the constructor. F kept them verbatim, as Decision 11 and AC 25 require. Their subject is a port method, and
+   `connect` is not one, so the exception is documented in the adapter instead. I checked every `PaneError::Timeout`
+   producer on this branch and on `origin/main`:
+   - the OpenCode adapter (`harness.serve`, `.create_session`, `.list_sessions`, `.abort`);
+   - the host adapter (`host.*`);
+   - the test kit's `PortOp` and `HarnessOp` strings;
+   - `holler-cli`'s `profile_store.cas_put` test values.
+
+   Every one is a port method. So A4's "in every implementation and fake" holds, except for this one documented
+   constructor case (advisory 2(c)).
+3. **AC 19's second grep** also prints `adapter.rs:383`, `workspace: workspace.label.clone()`, which is the label that
+   `snapshot` returns. Quoting and cutting it would corrupt `HerdrPane.workspace`, and the suite filters by exact label.
+   F left it whole, as A finding 5 asked. It is exempt by name.
+4. **AC 14's version line.** AC 14 asks for `herdr --version`, while the Operating rules let only the harness run
+   `herdr`.
+   - At RED, T ran `herdr --version` with an empty environment except `PATH`, and a throwaway `HOME` and `XDG_*`. That
+     contacts no server or session.
+   - At GREEN, T took the version from the scratch server's own `version()` reply.
+
+   Both are journalled, and both name the same build.
+5. **The issue's blast radius against the doc edits outside it** (the brief's contradiction 5). Both earlier briefs assign
+   these edits to part 3, and the test kit's `ASSUMPTION (#640)` comments ask for them by name. No code outside the crate
+   changes. Accepted.
 
 ## Quality audit
 
-- **Correctness and failure handling.** Every socket fault maps to `timeout` or `unavailable`; a passed deadline never
-  connects; an abandoned worker drops its answer silently; nothing in the worker can panic (no indexing, no
-  `Instant + Duration`, `.get(..).unwrap_or_default()` on slices). The adapter keeps no state, so no lost write under
-  concurrency is possible inside it; the cross-call race is the verbs' (Decision 19).
-- **Build guards.** No `unwrap`/`expect`/`panic!`/`unreachable!` in `src/adapter.rs` or `src/transport.rs` (grep). No
-  `#[allow]` in `src/`; every test-file `#![allow]` carries `// #640`. All files under 900 lines. The three
-  can't-happen branches in `ensure_pane` return `unavailable` instead of a denied `unreachable!`, each backed by an
-  `evidence.md` entry; they are defensive code, not dead code.
-- **Protocol.** No Holler wire change: no golden, `holler-proto` or `docs/protocol/v2.md` touch, and none is needed
-  (the adapter speaks Herdr's protocol, not the hub's).
-- **Tests.** Cross-process behaviour is tested over real Unix sockets in `tempfile` directories (transport tests and
-  the AC 33 conformance run); no hub/body harness is needed. No fixed sleep is used for synchronization: the one
-  `thread::sleep` (AC 6's drip server) simulates a slow peer, and `serve()` binds before returning. RED-first evidence
-  is in `handoff-T-red.md`.
-- **Documentation.** `CHANGELOG.md` `[Unreleased]` entry present and linked. No new log event, CLI surface or protocol
-  field, so no README or `docs/` change is due. Module docs in `adapter.rs`, `transport.rs` and `lib.rs` describe the
-  behaviour accurately.
-- **Public-repository privacy.** The diff (excluding `docs/handoffs`) has no home path, user, host, tailnet, IP or
-  credential. The only "secret" hits are AC 12's sentinel `typed-secret-text`. Test paths are tempdirs and
-  `/unused/h.sock`.
-- **Commit and PR hygiene.** See advisory 1: no PR exists yet, and the branch's commits are the pipeline's `chore(#640)`
-  checkpoints.
+**Correctness and failure handling.**
+- `run_as` takes the call's deadline once, before the body runs. An error from `deadline()` itself is `usage`, never a
+  `Timeout`: T-green confirms this, and part 2's `config_is_validated_before_any_request` still pins it. `run_as` renames
+  a `Timeout` and nothing else.
+- For an id of 64 characters or fewer, `excerpt` returns exactly the old `{:?}` text. So existing messages are unchanged,
+  and `adapter_test.rs`'s `w1:p2` assertions still pass.
+- `ensure` is `ensure_pane`'s old body, moved without change.
+- The harness fails closed:
+  - every refusal and every failed proof panics after the guard exists, so the server is still stopped;
+  - the adapter only ever gets the proven, canonical socket;
+  - the adapter reads no environment.
+- No shared state is added: part 2's AC 37 grep prints nothing.
 
-**The outside diff gate's needs-verification findings** (`640-diff-result-r2.md`), settled by reading source:
+**Build guards.**
+- `src/` has no `unwrap`, `expect`, `panic!`, `unreachable!`, `todo!` or `#[allow`.
+- Both new test files open with `#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)] // #640`, the crate's
+  pattern, with its link.
+- Every touched `.rs` file is under 900 lines. `lint.sh`'s size gate covers `crates/**/*.rs`.
+- There is no dead code: clippy is clean with `-D warnings`.
 
-- **NV-1** (spawn failure): Decision 3 says "Failing to spawn the worker is `unavailable`", and
-  `transport.rs:101-110` maps any `spawn` error so. Nothing more to distinguish. Settled.
-- **NV-2** (a blocked `connect`): the claim the reviewer tests is not the code's. The socket timeouts are set only
-  after `connect` returns, so they do not bound it; the caller's `recv_timeout` bounds the call, and a worker stuck in
-  `connect` lingers until the server accepts or dies. The module doc (`transport.rs:12-17`) and the brief's Risks
-  ("covered by design only") say exactly this. Settled as designed.
-- **NV-3** (`base36`): `tests/wire_herdr/mod.rs:639-650` emits no leading zero: 1 is `1`, 10 is `A`, 35 is `Z`, 36 is
-  `10`. The reviewer's `01`/`09`/`0A` reading is wrong. AC 30 pins `w1:p9` then `w1:pA`. Settled.
-- **NV-4** (`Arc` forwarding): `transport.rs:62-66` is the only `Transport for Arc<T>`, and it forwards to
-  `(**self).exchange`; `WireHerdr` and `Tap` each have one impl. No conflict. Settled.
-- **NV-5** (overflowing timeout): `validate` calls `deadline_after` (`adapter.rs:417`), which uses `checked_add`
-  (`:434-440`); `adapter_test.rs:483-496` pins `Duration::MAX` as `usage`. Settled.
-- **W-3** (an `Ok(0)` read at the deadline): not a real race. A socket timeout surfaces as a `WouldBlock`/`TimedOut`
-  error, never `Ok(0)`, and zero time left is `Timeout` before the syscall (`left()`). `Ok(0)` is only a true EOF.
+**Protocol.** Nothing in Holler's protocol changes:
+- no `holler-proto` file, no golden file, and no edit to `docs/protocol/v2.md`;
+- no new error code. `grid-unreachable` was merged in part 1; this part adds only its ADR rows.
+
+**Tests.**
+- Real Herdr behaviour is tested against a real, throwaway server. The error messages are tested in process through the
+  wire fake's `Tap`, the cheapest place that reaches the adapter's call path.
+- Nothing waits on a fixed sleep. Every wait is the bounded `poll`, which checks before it sleeps.
+- T-red has the RED evidence, quoted assertion by assertion.
+- Each behaviour test fails without F's change, as RED and the two mutants show. Each guard test is shown to catch the
+  failure it guards against: AC 2-7 by their own assertions, and AC 17 by T's extra mutant.
+
+**Documentation.**
+- `CHANGELOG.md` has an `## [Unreleased]` entry that links #640.
+- `docs/testing.md` documents the opt-in test, its gate and its isolation.
+- There is no new log event, CLI surface or protocol field, so no README change is needed.
+
+**Public-repository privacy.** I grepped every added line of `origin/main...HEAD`, the brief and the handoffs included.
+- I found no hostname, tailnet, IP, account, private domain, secret or key.
+- The test literals are all generic (`/home/someone`, `/live/herdr.sock`, `/r/h640.ab`).
+- The handoffs write `<home>` and `<scratch-root>`.
+- The brief quotes the maintainer's name from part 2's journal. That text has been on `main` since `0ad2d8a`, and the
+  same name is the author of every commit, so it is not a new disclosure.
+- The gate files stay untracked (`.gitignore:22` and `:25`).
+
+**Commit and PR hygiene.**
+- The branch's commits are `docs(handoffs): ...` and the Workflow script's `chore(#640): <phase>` checkpoints. Squashing
+  the PR at merge replaces them with one commit.
+- Each commit carries a `Co-Authored-By:` trailer, and none has a session link. That matches `main`, where none of the
+  last 60 commits has one. So `CONTRIBUTING.md`'s "and a session link" describes a practice the repo does not follow, and
+  fixing that wording belongs to a docs change, not this PR.
+- The PR's title, `Closes #640` and its AI disclosure are checked when the PR opens (advisory 1).
 
 ## Scope check
 
-Exactly the brief's Files table: `Cargo.toml`, `src/lib.rs`, `src/transport.rs`, `src/adapter.rs`, the five test files,
-`CHANGELOG.md`, and one `Cargo.lock` line. `holler-pane`, `holler-pane-testkit`, part-1 sources, `tests/common/mod.rs`,
-`holler-cli` and `docs/adr/` are untouched. Part 3's items (scratch test, `holler-pane` doc edits, ADR rows) are not
-delivered, correctly. Over-delivery is limited to the overflow `usage` case and the version-form test, both closing
-gaps the reviews named. No under-delivery.
+This part delivered exactly the brief's Files table.
+
+- **T** wrote the harness, its test file, `adapter_messages_test.rs`, `Tapped::Fail` and the `Cargo.toml` comment.
+- **F** changed `adapter.rs`, one word of `protocol.rs`, D1-D6, A1-A9, `docs/testing.md` and `CHANGELOG.md`.
+- **Not touched**, as the brief requires: `transport.rs`, `holler-pane`'s code (doc comments only),
+  `holler-pane-testkit/**`, `holler-cli/**`, part 2's test files and `tests/common/mod.rs`.
+
+There are two small additions, each explained:
+- F's private `ensure`, a move of `ensure_pane`'s body without change. F made it because rustfmt re-wrapped the body
+  badly inside the closure.
+- T's public `poll`, beyond the pinned items. A's finding 3 asks for one poll helper, shared by AC 13's read polls.
+
+There is no over-delivery or under-delivery. The items the brief put out of scope are correctly absent: the test kit's
+comments, a D7 and a line in the Deferred list.
 
 ## Verdict
 
-**PASS.** All issue and brief criteria covered by part 2 are met by named tests that assert behaviour; every MO
-decision is implemented as stated, with two declared and justified refinements; quality, privacy and scope are clean.
-Ready for O.
+**PASS.**
+- All 32 criteria are met (AC 15 is N/A, since no gap was found).
+- Decisions 1-16 are implemented as stated, with the declared deviations above.
+- Code, test and documentation quality are acceptable.
+- Ready for O: open the PR, apply advisory 1, verify CI, then merge.
 
 ## Advisory notes (non-blocking)
 
-1. **PR and merge hygiene, still to do.** No PR is open yet. When the script opens it: the body must say `Part of #640`
-   (not `Closes`) and carry the `CONTRIBUTING.md` AI disclosure (add it with `gh pr edit`); the squash subject should be
-   a Conventional Commit such as `feat(adapter-herdr): ...`. The pipeline's commit trailers are
-   `Co-Authored-By: Claude <noreply@anthropic.com>` with no session link. `git log origin/main..HEAD` also lists part
-   1's pre-squash commits (the branch name was reused and merged with `origin/main`); the tree diff is clean and a
-   squash merge drops them.
-2. **`Timeout.op` vocabulary diverges from `FakeHerdr`** (wire method `herdr.layout.export` vs port method
-   `herdr.ensure_pane`). Decision 3 as written; carry it with Decision 20 into part 3's ADR-0021 §9/§10 rows and the
-   operator's list (A finding 1, A-dup warn 2).
-3. **Herdr-sent text is quoted with `{:?}`, not cut to 64 characters** (`adapter.rs:230-241`, `:372-374`, `:385-391`). One line always; length unbounded. Follow-up: make `protocol::excerpt` `pub(crate)` in part 3 or later
-   (A-dup warn 1).
-4. **Part 3 must write the ADR rows** for extent-from-config, the gate at `connect`/`version()`, and the `op` rule
-   (A-dup warn 3); #642 should reuse this bounded-exchange design via a shared home, not a copy (A-dup warn 4).
-5. **AC 12a's server leaves connections in the listen backlog** during the 20 exchanges rather than accepting them
-   (T-red assumption 4). The client cannot tell the two apart, and the later drain still proves each worker dropped
-   its socket, so the criterion holds; noted because it is not the brief's literal set-up.
-6. **Workspace test run on CI.** The 4 `logging_test` failures are environmental here; CI is the confirmation.
+1. **When the PR opens** (Decision 1, `CONTRIBUTING.md`, the repo's CLAUDE.md):
+   - Give it a title in the form of parts 1 and 2, because the title becomes the squash subject. For example:
+     `feat(adapter-herdr): the opt-in scratch-Herdr test, the contract docs and the ADR-0021 rows (#640 part 3 of 3)`.
+   - The body says `Closes #640`.
+   - Add the AI disclosure with `gh pr edit` if the script's body lacks it.
+
+   CI on the PR's merge ref is the final word for AC 28. `origin/main` has moved on to `d9eabbb`, and the merge with it
+   is clean.
+2. **Follow-ups for the operator.** Each one is outward-facing, so none is done here.
+   - **(a)** File the #638 test-kit follow-up before or right after merge (the brief's item 4; A warn 6(c)). These
+     `ASSUMPTION (#640)` comments describe the port docs as they were before D1-D3, so they become false when this
+     merges:
+     - `holler-pane-testkit/src/herdr.rs:272-274`;
+     - `src/conformance/herdr.rs:189-196` and `:337-339`.
+
+     No issue exists yet: a search of open issues finds only the epic.
+   - **(b)** Add the harness's `run_bounded` to #696's scope (A-dup warn 1). #696 names only the host and OpenCode
+     adapters.
+   - **(c)** Optionally, add one clause to D4 and A4 naming `herdr.connect` (A warn 4).
+   - **(d)** Optionally, add a D7 for the `snapshot` port doc and a Deferred-list line for A7's PROPOSED owner of
+     `host.herdr_api_version` (A warn 6(a) and 6(b)).
+3. **`run_bounded` waits for its stdout reader with no bound** (`tests/scratch_herdr/mod.rs:283`; A-dup warn 2).
+   - The risk: if a `herdr` client command exited but left a child process holding stdout, `start` or `Drop` could run
+     past the 15 s that the brief's Risks promise.
+   - Why it is minor: the tests are opt-in only, no run has shown it (8 runs), and no live session is at risk.
+   - The fix is T's: send the text over an `mpsc` channel and `recv_timeout` with the time left, or switch to #696's
+     runner once it lands.
+4. **A wire fake label is out of date.** `tests/wire_herdr/mod.rs:9-11` still calls `pane_not_found` for `send_text`,
+   `send_keys` and `read` of a closed pane INFERRED. This run confirmed it against real Herdr 0.9.1, through conformance
+   case 9 and AC 13's step 6. AC 15 requires a relabel only when a gap is found, so this is optional.
+5. **A comment nit.** `tests/scratch_herdr/mod.rs:56` says "a 31-byte base made a 104-byte socket". With the 70-byte tail,
+   a 104-byte socket means a 34-byte base, which is this machine's `TMPDIR` length. `handoff-T-red.md` and the journal
+   also say 31. The code is unaffected, because `BASE_LIMIT` is computed from the constants.
+6. **Where the diff gate's review is kept.** The second-opinion diff gate's complete review (the hand rerun, PASS) exists
+   only in the run's session scratchpad, not next to round 1 in `docs/handoffs/`. Copy it to
+   `docs/handoffs/640-diff-result-r2.md` (git-ignored) so a later reader can find it. I checked O's waiver of its two BLOCK
+   entries:
+   - B-1's premise is false. `Path::starts_with` matches whole components only, and AC 5's `/r/h640.abc/herdr.sock` case
+     pins exactly the sibling it worries about.
+   - B-2 retracts itself.
+   - Its W-1 (use `strip_prefix`) is optional hardening, not a defect.
