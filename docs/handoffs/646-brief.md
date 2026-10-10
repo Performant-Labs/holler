@@ -695,6 +695,17 @@ panes are `sample_pane` records (stored at generation 1); `R` = `"disk full"`, `
 `tests/pane_verbs/main.rs` (its `mod park;` and `mod unpark;` already exist; the `park/` directory is reached from
 `park.rs`'s own `mod rig;`).
 
+**Module layout (how `park.rs`'s `mod rig;` resolves to `park/rig.rs`).** `tests/pane_verbs/` is one test crate rooted at
+`main.rs`, which declares `mod park;` (`tests/pane_verbs/main.rs:30`), so `park.rs` is the file of module `crate::park`, not
+a crate root. Under Rust 2018 and later (the workspace is `edition = "2021"`, `Cargo.toml:10`, inherited by
+`crates/holler-cli/Cargo.toml:4`), a `mod rig;` written in a non-`mod.rs` file `park.rs` is looked up at `park/rig.rs`
+(then `park/rig/mod.rs`), not at the sibling `rig.rs`; no `#[path]` attribute and no `park/mod.rs` is needed, and none is
+added. This crate already uses exactly that layout: `tests/pane_verbs/main.rs:25` declares `mod doctor;`,
+`tests/pane_verbs/doctor.rs:9-11` declares `mod read_only;`, `mod rig;` and `mod surface;`, and those modules are the files
+`tests/pane_verbs/doctor/read_only.rs`, `doctor/rig.rs` and `doctor/surface.rs`. Park's rig follows it, with `pub(crate)`
+so that `unpark.rs` can reach it as `crate::park::rig`. No `Cargo.toml` changes either way (AC 13): test modules inside an
+existing test crate need no manifest entry.
+
 ### Reuse and analogous-feature map (extend, do not duplicate)
 
 | Need | Reuse (object extended or called) | Not |
