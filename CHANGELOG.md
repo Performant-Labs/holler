@@ -145,6 +145,15 @@ fills this file in at release time.
   wired into a verb yet ([#649](https://github.com/Performant-Labs/holler/issues/649)), so nothing a user runs
   changes ([#640](https://github.com/Performant-Labs/holler/issues/640)).
 
+- Herdr adapter, part 3 (epic [#633](https://github.com/Performant-Labs/holler/issues/633)): an opt-in test runs the
+  `HerdrPort` conformance suite and a create, run, send, read, close and snapshot pass against a real, throwaway Herdr
+  server (`HOLLER_HERDR_SCRATCH=1 cargo test -p holler-adapter-herdr --test scratch_herdr_test -- --ignored`). It keeps
+  Herdr's home and config in a temporary directory, removes every `HERDR_*` variable, and refuses any session but its
+  own `holler640-<hex>` one, the default included. A Herdr call that runs out of time now reports `timeout` naming the
+  port method (`herdr.ensure_pane`), as the other adapters do, and a message quotes at most 64 characters of what Herdr
+  sent. Nothing is wired into a verb yet ([#649](https://github.com/Performant-Labs/holler/issues/649)), so nothing a
+  user runs changes ([#640](https://github.com/Performant-Labs/holler/issues/640)).
+
 - Pane control, the hub's profile registry (epic [#633](https://github.com/Performant-Labs/holler/issues/633)):
   `profile/get`, `profile/list`, `profile/cas_put`, `profile/delete`, `profile/watch` and `profile/log` now answer from
   a real registry instead of `not-implemented`. Profiles are kept in `<state dir>/hub/profiles.json` (mode `0600`,

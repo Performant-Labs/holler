@@ -577,7 +577,7 @@ fn unavailable(what: String) -> PaneError {
 
 /// `text` that Herdr sent, quoted on one line and cut to [`EXCERPT_LIMIT`] characters,
 /// so that a garbled reply can neither lengthen a message nor break it across lines.
-fn excerpt(text: &str) -> String {
+pub(crate) fn excerpt(text: &str) -> String {
     let head: String = text.chars().take(EXCERPT_LIMIT).collect();
     if head.len() < text.len() {
         format!("{head:?}...")

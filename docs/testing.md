@@ -436,6 +436,18 @@ One rung further out than `test-tag-interop` (which still runs the catalog's `ca
 
 It never runs on `push`/`pull_request` — only a maintainer dispatching it by hand, from the repository's own Actions tab — because it spends real wall-clock time (a hub + tunnel + a 5-minute macOS body run) and reaches out to real ngrok infrastructure. The reserved domain is already provisioned; it requires one remaining one-time setup step (the `NGROK_AUTHTOKEN` secret — see the workflow file's own header comment); until that's configured, its jobs skip with a clear reason instead of failing. This is the cross-OS evidence catalog case **`hlr-1608`** (interop) points to: run the workflow, then paste the green run's URL as that case's evidence.
 
+## Opt-in: a scratch Herdr server (#640)
+
+The Herdr adapter's only tests against a real Herdr are in `crates/holler-adapter-herdr/tests/scratch_herdr_test.rs` (issue [#640](https://github.com/Performant-Labs/holler/issues/640)). There are two, both `#[ignore]`d. One runs the whole `HerdrPort` conformance suite, with a fresh server for each case. The other creates a pane, runs a command in it and types into it (reading both back), then places a second pane below it and closes that one, checking the snapshot as it goes. Run them with:
+
+```bash
+HOLLER_HERDR_SCRATCH=1 cargo test -p holler-adapter-herdr --test scratch_herdr_test -- --ignored --test-threads=1
+```
+
+- **The variable is required, and only `1` runs them.** With any other value, or none, each test prints one `skipped (HOLLER_HERDR_SCRATCH is not 1)` line and passes having started nothing. With the variable set and no executable `herdr` on `PATH`, both fail: a check that was asked for never passes without having run. The host adapter's tmux tests (`crates/holler-adapter-host/tests/real_tmux_test.rs`) are opt-in through `--ignored` alone and skip when `tmux` is missing. Herdr's need the variable as well, so that a workspace-wide `cargo test -- --ignored` never starts a Herdr server: Herdr finds its sessions through `HOME`, `XDG_*` and `HERDR_*`, which on an operator's machine lead to a live one.
+- **Each server is isolated** as the Herdr spike's was (`scripts/spikes/herdr-lib.sh`). It runs in a fresh temporary root (`h640.XXXXXX`), with `HOME` and every `XDG_*` directory inside it and every `HERDR_*` variable, `TMUX` and `TMUX_PANE` removed, so even Herdr's default session resolves inside the root. Every `herdr` call names the scratch session, `holler640-` and 8 hex digits, and the name `default` is refused. Before the adapter connects, the server must report that session and a socket inside the root (`herdr status server --json`). Afterwards only that server's own process is stopped (and killed if it does not stop), and the root is removed.
+- **CI never runs them**: no workflow passes `--ignored` for this crate. They need a `herdr` that speaks protocol 22 (0.9.1), the build the Herdr spike tested ([`research/herdr-api-spike.md`](research/herdr-api-spike.md)). The tests of the harness's own guards (the gate, the session name, the socket, the proof and the environment) are pure and run in the default `cargo test` everywhere.
+
 ## Windows is deferred (off the CI matrix)
 
 The CI matrix is **`ubuntu-latest` + `macos-latest` only** — Windows is deliberately *off*, not soft-failed ([`.github/workflows/ci.yml`](../.github/workflows/ci.yml), and [ADR 0002](adr/ADR-0002.md) records the retirement of "Windows on the CI matrix"). The reason is recorded in the ADR:

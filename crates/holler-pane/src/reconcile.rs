@@ -103,7 +103,7 @@ pub struct HerdrSummary {
 }
 
 /// One host of the panes in scope, as their records name it. Doctor shows the recorded
-/// Herdr API version and writes neither field (#640 records it).
+/// Herdr API version and writes neither field (a verb records it, ADR-0021 section 10).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct HostSummary {
     pub name: String,
