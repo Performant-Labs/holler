@@ -4,12 +4,15 @@
 #[path = "rig.rs"]
 pub(crate) mod rig;
 
+use holler_pane_testkit::fault::Fault;
 use serde_json::json;
 
-use rig::{matching_spec, member, pane, profile, run_both, Rig};
+use rig::{assert_failure, matching_spec, member, pane, profile, run_both, Rig};
 
 /// `Some Profile` with two specs and one member, and the empty `Alpha`, seeded in the
-/// reverse of slug order; plus a pane in no profile.
+/// reverse of slug order; plus a pane in no profile. (The kit's fake, like the hub's
+/// store, already lists in slug order, so this pins the output order, not the verb's
+/// own sort.)
 fn two_profiles() -> Rig {
     Rig::new(
         [member("demo-c1r1", "Some Profile"), pane("demo-c3r1")],
@@ -86,13 +89,28 @@ fn list_counts_members_by_slug() {
         live,
         vec![("other".to_owned(), 1), ("some-profile".to_owned(), 1)]
     );
-    let line = both
-        .text
-        .out
-        .lines()
-        .find(|l| l.starts_with("Some Profile (some-profile): "))
-        .unwrap_or_else(|| panic!("a line for Some Profile: {:?}", both.text));
-    assert!(line.contains(", 1 live, "), "{line:?}");
+    // One spec and one member: a count of 1 is singular.
+    assert!(
+        both.text
+            .out
+            .lines()
+            .any(|l| l == "Some Profile (some-profile): 1 pane, 1 live, generation 1"),
+        "{:?}",
+        both.text
+    );
+}
+
+#[test]
+fn list_passes_a_store_failure_through() {
+    // The pane store fails after the profile store answered: the store's own code, and
+    // no partial list on `out`.
+    let seed = || {
+        let rig = two_profiles();
+        rig.panes.faults().set(Some(Fault::Wedged));
+        rig
+    };
+    let both = run_both(seed, &["profile", "list"]);
+    assert_failure(&both, "timeout", 1);
 }
 
 #[test]

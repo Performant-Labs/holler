@@ -190,3 +190,23 @@
     - ADR-0003 and ADR-0021 sections 3 and 9, and "Deferred";
     - #643's `pane/list.rs` (for its shared-view pattern) and 644-brief's pins.
   - **Evidence file:** `evidence.md` has 15 facts, each excerpt checked by script against its source lines.
+
+## T (Phase 7, verify / GREEN) — 2026-10-09T18:36-06:00
+
+- **Decided:**
+  - GREEN is valid: F's commit touches no test, and all 14 pure tests and 18 verb tests pass as authored.
+  - Added four test cases F offered (DEL/C1 in argv and lists, the `error ("...")` probe form with an ESC, a count of 1,
+    a `list` store failure), by extending the tests that own each behaviour plus one new `list` test. Each was
+    mutation-checked against F's code.
+  - Not pinning `list`'s own sort: every existing store already lists in slug order, and a nine-method wrapper store
+    to observe it is out of proportion. Recorded as advisory, and the test comment was corrected.
+- **Assumed:** the 4 `logging_test` failures are environmental (a reachable hub); they pass 11/11 with an empty
+  `HOLLER_STATE_DIR`, they failed the same way at RED, and the diff does not touch `roster`.
+- **Hedged:** CI is the clean re-check for `logging_test`.
+- **Evidence:**
+  - `cargo test --workspace --no-fail-fast`: 1404 passed, 4 failed (logging_test only), identical to F's report;
+    clippy, lint.sh, changelog-check, machete, rustfmt, docs_cli_test, wire_selftest all clean.
+  - Mutations (each reverted): ordered env/expect, raw-name membership, unescaped Text, unread probe.last, bare
+    `fixed` policy, raw C1 in JSON arrays, always-plural count, unquoted probe error: each caught. Removing the
+    `list` sort: survives (advisory 1).
+  - Four facts appended to `evidence.md` ("Added by T"), copied from source by T.

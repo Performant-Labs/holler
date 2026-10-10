@@ -262,6 +262,29 @@ fn field_text_escapes_control_characters() {
         FieldValue::Argv(Some(argv(&["sh", "a b"]))).to_string(),
         r#"["sh","a b"]"#
     );
+
+    // DEL and a C1 control (CSI, U+009B) are escaped too, in text and in a JSON array
+    // alike (`serde_json` alone writes both raw), so none reaches a terminal.
+    let raw = "a\u{9b}2Jb\u{7f}";
+    let shown = [
+        text(raw).to_string(),
+        list(&[raw]).to_string(),
+        FieldValue::Argv(Some(argv(&["sh", raw]))).to_string(),
+    ];
+    assert_eq!(
+        shown,
+        [
+            r"a\u{9b}2Jb\u{7f}".to_owned(),
+            r#"["a\u009b2Jb\u007f"]"#.to_owned(),
+            r#"["sh","a\u009b2Jb\u007f"]"#.to_owned(),
+        ]
+    );
+    for s in &shown {
+        assert!(!s.chars().any(char::is_control), "{s:?}");
+    }
+    // The array form is still the JSON of the same strings.
+    let parsed: Vec<String> = serde_json::from_str(&shown[1]).unwrap();
+    assert_eq!(parsed, vec![raw.to_owned()]);
 }
 
 #[test]

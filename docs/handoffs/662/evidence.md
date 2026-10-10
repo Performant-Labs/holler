@@ -252,3 +252,69 @@ Facts in unchanged code that the diff, or T's tests over it, rely on. Every exce
   >         Err(PaneError::NotImplemented)
   >     }
   > ```
+
+## Added by T (Phase 7, GREEN)
+
+Copied by T from the tree (none of these files changes in this run; `git diff 3bdd129 HEAD` over them is empty).
+
+- **Fact:** the test kit's `FakeProfileStore::list` answers in slug order: the feed keeps live records in a `BTreeMap` by
+  key, and a profile's key is its slug. So `list_reports_name_slug_panes_live_generation_in_both_formats` pins the output
+  order, but not the verb's own `sort_by` (a test comment in `profile_verbs/list.rs` says so).
+  **Source:** `crates/holler-pane-testkit/src/feed.rs:64-66`, `:75-78`; `crates/holler-pane-testkit/src/profile_store.rs:310-315`
+  **Verbatim excerpt:**
+  > ```rust
+  >     /// The last change of each live record, by key. It is always a put, because a
+  >     /// delete removes the record's entry.
+  >     live: BTreeMap<E::Key, E>,
+  > ```
+  > ```rust
+  >     /// Every live record, in key order.
+  >     pub(crate) fn records(&self) -> impl Iterator<Item = &E::Record> {
+  >         self.live.values().filter_map(|change| change.record())
+  >     }
+  > ```
+  > ```rust
+  >     type Key = String;
+  >     type Record = Profile;
+  >
+  >     fn key(&self) -> String {
+  >         self.name.slug()
+  >     }
+  > ```
+
+- **Fact:** the hub's profile registry also lists in slug order, while the port pins none; the verb's sort is defensive.
+  **Source:** `crates/holler-hub/src/profile/store.rs:70-71`, `:168-169`
+  **Verbatim excerpt:**
+  > ```rust
+  >     /// The entry filed under each slug: the record or its tombstone, and the change log.
+  >     entries: BTreeMap<String, ProfileEntry>,
+  > ```
+  > ```rust
+  >     /// Every live profile, in slug order (the port pins no order).
+  >     pub(crate) fn list(&self) -> Result<Vec<Profile>, PaneError> {
+  > ```
+
+- **Fact:** a fake whose standing fault is `Fault::Wedged` answers every call with `PaneError::Timeout`, which is why
+  `show_passes_a_store_failure_through` and `list_passes_a_store_failure_through` expect `timeout` (exit 1).
+  **Source:** `crates/holler-pane-testkit/src/fault.rs:119-125`
+  **Verbatim excerpt:**
+  > ```rust
+  >     fn take_fault(&mut self, op: Op) -> Result<(), PaneError> {
+  >         match &self.standing {
+  >             Some(Fault::Wedged) => {
+  >                 return Err(PaneError::Timeout {
+  >                     op: op.as_str().to_owned(),
+  >                 })
+  >             }
+  > ```
+
+- **Fact:** `ProbeResult::Error` holds its reason as a plain `String`, so the new `error ("...")` case in
+  `show_reports_the_last_probe_result_without_running_one` serializes as `{"error":"..."}` (snake case; see F's
+  `ProbeResult` entry above for the attribute).
+  **Source:** `crates/holler-pane/src/probe.rs:23-25`
+  **Verbatim excerpt:**
+  > ```rust
+  >     /// The probe could not be run to a verdict (the program is missing, it timed
+  >     /// out, ...); the reason is plain text.
+  >     Error(String),
+  > ```

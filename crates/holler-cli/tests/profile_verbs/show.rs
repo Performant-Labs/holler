@@ -132,8 +132,12 @@ fn show_reports_the_last_probe_result_without_running_one() {
                         missing: vec!["qwen38".to_owned()],
                     },
                 ),
+                probed(
+                    "demo-c3r1",
+                    ProbeResult::Error("refused\u{1b}[2J".to_owned()),
+                ),
             ],
-            vec![spec("demo-c1r1"), spec("demo-c2r1")],
+            vec![spec("demo-c1r1"), spec("demo-c2r1"), spec("demo-c3r1")],
         )
     };
     // `run_both` asserts the prober (and every adapter) was never called.
@@ -147,11 +151,21 @@ fn show_reports_the_last_probe_result_without_running_one() {
         block(&both.text.out, "pane demo-c2r1: matches"),
         vec![r#"  probe: failed (missing "qwen38")"#]
     );
+    // A stored error reason prints in `{:?}` quoting: its ESC is escaped, never raw.
+    assert_eq!(
+        block(&both.text.out, "pane demo-c3r1: matches"),
+        vec![r#"  probe: error ("refused\u{1b}[2J")"#]
+    );
+    assert!(!both.text.out.contains('\u{1b}'), "{:?}", both.text.out);
     let data = &both.envelope.data;
     assert_eq!(row(data, "demo-c1r1")["probe"], json!("ok"));
     assert_eq!(
         row(data, "demo-c2r1")["probe"],
         json!({"failed": {"missing": ["qwen38"]}})
+    );
+    assert_eq!(
+        row(data, "demo-c3r1")["probe"],
+        json!({"error": "refused\u{1b}[2J"})
     );
 }
 
