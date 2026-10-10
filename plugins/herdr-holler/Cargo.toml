@@ -9,9 +9,13 @@ description = "The Herdr display plugin (issue #651): the hub's pane state in He
 name = "herdr_holler"
 path = "src/lib.rs"
 
+# The binary the manifest's event hooks run: `herdr-holler refresh`.
+[[bin]]
+name = "herdr-holler"
+path = "src/main.rs"
+
 # Declare only what is consumed (issue #155 §7 — `cargo machete` fails CI
-# otherwise). The skeleton carries the two path deps the plan requires; the
-# refresh loop (#651's F phase) consumes them.
+# otherwise).
 [dependencies]
 # The pane record types (`Pane`, `PaneName`, `PaneId`) and the one SHOWN/DRIVEN
 # rule (`reconcile::shown_differs`) the reports derive from.
@@ -19,10 +23,12 @@ holler-pane = { path = "../../crates/holler-pane" }
 # The merged one-shot control-socket client (`control::run`) the hub read goes
 # through, exactly as `holler-cli`'s transport module uses it.
 holler-hub = { path = "../../crates/holler-hub" }
+# The Herdr report lines the plugin writes, the replies it reads, and the
+# `pane/list` data it decodes into `Vec<Pane>`. Also the wire JSON of the
+# tests' two fakes.
+serde_json = { workspace = true }
 
 [dev-dependencies]
-# The wire JSON of the two fakes and the captured report lines.
-serde_json = { workspace = true }
 # The manifest under test is TOML.
 toml = { workspace = true }
 # Scratch state dirs and sockets; nothing touches a live fleet or session.

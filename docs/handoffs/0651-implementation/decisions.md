@@ -131,3 +131,41 @@ false (D and U are N/A, recorded). Append-only; every phase adds its entry.
   (3) unknown-never-stale holds in-process; across invocations the TTL (120 s) is the backstop —
   a watch loop or persisted last-shown is a follow-up, not this contract.
 - Implement attempt 2 started after the config edit landed.
+
+## 2026-10-10 · Implement attempt 2 — STAGE FAILED again; corrected root cause (O)
+
+- Attempt 2: 433.2 s, 48 turns, usage in 78 / out 42299 / reasoning 24668, cache-read 3731115 /
+  cache-write 146508, cost n/a. Same refusal, no code written — and F's attempt-2 handoff
+  **corrected attempt 1's diagnosis**: the write boundary is NOT `paths.production` but the
+  ordered `permission.edit` map in the installed role doc `<primary>/.aftersight/agents/
+  feature-implementor.md` (read by the runner's claude-cli executor; `boundary.ts` →
+  `toClaudeCliArgs`). Attempt 1's config commit `0d2a03d` was necessary (the shim derives
+  role maps from `paths.*`) but not sufficient: the installed doc predates it.
+- Fix (operator-approved unblock, following the machine's established pattern — run
+  0700-implementation installed Holler's `crates/*` entries the same way, with a dated comment):
+  additive edit of the shared role doc — allows `plugins/*/src/**`, `plugins/*/Cargo.toml`,
+  `plugins/*/herdr-plugin.toml` (bare + worktree forms) before the ADR/handoffs allows, and
+  `plugins/*/tests/**` denies in the trailing test-deny group, which stays LAST. Nothing
+  existing removed or reordered; siblings' boundaries only gain paths outside their blast radii.
+  The primary's `.aftersight/pipeline.config.json` also carries the same paths edit locally
+  (uncommitted; the run's PR lands the tracked change, after which the primary matches main).
+  `.aftersight/agents/*.md` is gitignored per-machine state — the shim writes opencode.json and
+  prompts/ only, so the role doc edit cannot drift a generated artifact the shim would overwrite.
+
+## 2026-10-10 · Operator order — primary pipeline-config edit lock (O journals)
+
+- While any other pane has a stage running, this run does not edit `.aftersight/pipeline.config.json`,
+  `opencode.json` or `.aftersight/agents/*` in the primary again (the attempt-2→3 role-doc widen
+  happened with sibling runs in flight and changed their stage boundaries too). Any further such
+  change stops and goes to MO first. Recorded in the session memory; binding from now on.
+
+## 2026-10-10 · Implement attempt 3 — STAGE OK (O journals; F = feature-implementor on claude-cli)
+
+- After the role-doc fix, F implemented: 790.9 s (13m11s), 66 turns, usage in 114 / out 60953 /
+  reasoning 27596, cache-read 6518282 / cache-write 163206, cost n/a; 1 artifact (handoff-F.md),
+  verdict none (the t-green crossing renders GREEN, not F).
+- Files: `plugins/herdr-holler/{Cargo.toml, src/lib.rs, src/herdr.rs, src/report.rs, src/main.rs,
+  herdr-plugin.toml}` per the attempt-2 plan (minimal Herdr client mirroring the adapter's
+  transport discipline; report params with pane-only ttl_ms; `Endpoints::from_env`; refresh +
+  degraded path; `resolve_action_pane`; `herdr-holler refresh` bin). Uncommitted at stage end —
+  O commits immediately per the git convention.
