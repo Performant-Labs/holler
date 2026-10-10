@@ -126,3 +126,40 @@
 - **Evidence:**
   - `docs/handoffs/646/handoff-T-green.md`: the Tier 1 and Tier 2 tables and the mutation table.
   - A new T entry in `docs/handoffs/646/evidence.md` (`profile.rs:380-404`).
+
+## A (Phase 7, anti-duplication gate): 2026-10-09T20:40:30-06:00
+- **Decided:** PASS, with no block and three warns (`docs/handoffs/646/handoff-A-dup.md`, diff `ce12cdb..dca7abb`).
+  - F extended what the Reuse map named:
+    - `PanePark` and `PaneUnpark` in place, with `ProfileOpt` still flattened;
+    - doctor's verb shape over `output::emit`;
+    - `ProfileScope::resolve` as the only membership rule;
+    - one `cas_put` per pane at the read generation;
+    - `findings::quoted` and `now_millis`.
+  - `unpark.rs` calls park's engine and copies none of it.
+  - The warns:
+    1. The rig copies #662's helpers. `assert_failure`, `pane`, `member` and `Rig::run` are verbatim; `run_both`/`Both`
+       are near-copies. Decision 11 accepted a per-story rig, but the consolidation is unfiled.
+    2. `in_scope` copies the arms of the private `reconcile::resolve`, and `HoldTarget` is the only typed
+       "PANE or `--profile`" target. The shared helper is unfiled.
+    3. The ADR-0021 paragraph still carries plan-review warns 2 and 3. AC 12 pins it, and `park.rs`'s module doc now
+       states the correct facts.
+- **Assumed:**
+  - The brief's Reuse map is the survey (there is no `survey.md`).
+  - A rig copy that Decision 11 justifies is a deliberate, reviewed choice, so the verdict rules make it a warn.
+  - The Workflow script commits this phase's files.
+- **Hedged:**
+  - Warn 1 is at the edge of a block, because several helpers are verbatim copies. It stays a warn: the brief justified
+    the rig in writing, the plan review asked for #662's names, and sharing the helpers means editing #662's rig in
+    another test target.
+- **Evidence:**
+  - The diff in full: `park.rs`, `unpark.rs`, the four test files, the ADR rows and paragraph, the fixture, `stub.rs` and
+    the CHANGELOG.
+  - `doctor.rs`, `profile/{list,show}.rs`, `output.rs`, `args.rs`, `prompt_target.rs` and `pane/mod.rs`.
+  - `reconcile.rs:219-243`, `reconcile/observe.rs:349-386`, `profile.rs:40-134`, `pane.rs:160-177` and the `findings.rs`
+    quoting.
+  - The test kit's `fault.rs` and `profile_scope.rs`.
+  - `profile_verbs/rig.rs`, `doctor/rig.rs`, `doctor/surface.rs` (`HealthGate`) and `verb_harness/mod.rs`.
+  - Every `impl PaneStore`/`ProfileScope` in the workspace, and a search for `is_control` and `MAX_*_CHARS`.
+  - `git log ce12cdb..origin/main` (adapter-only), and `gh issue list` (no follow-up issue for the rig or the scope helper
+    yet).
+  - The outside diff review `646-diff-result-r1.md`, which raised no duplication.
