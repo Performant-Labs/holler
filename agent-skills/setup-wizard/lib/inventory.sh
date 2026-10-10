@@ -114,7 +114,8 @@ flag_of() {
 [ "$have_ps" = 1 ] && LC_ALL=C ps -ww -eo pid=,user=,lstart=,command= 2>/dev/null |
   while read -r pid user rest; do
     started=${rest:0:24}
-    cmd=${rest:25}
+    cmd=${rest:24}
+    cmd=${cmd#"${cmd%%[![:space:]]*}"} # macOS pads the lstart column with extra blanks
     [ -n "$cmd" ] || continue
     first=${cmd%% *}
     rest=${cmd#"$first"}
