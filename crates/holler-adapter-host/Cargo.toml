@@ -3,16 +3,26 @@ name = "holler-adapter-host"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "The host adapter: implements holler_pane::HostPort over tmux and the local process table (empty in the workspace skeleton)"
+description = "The host adapter: implements holler_pane::HostPort over tmux and the local process table"
 
 [lib]
 name = "holler_adapter_host"
 path = "src/lib.rs"
 
 # Declare only what is consumed (issue #155 §7 — `cargo machete` fails CI
-# otherwise). The crate is an empty skeleton; its owning story adds the
-# dependencies it uses.
+# otherwise).
 [dependencies]
+# The port this crate implements and every type it speaks (`HostPort`, `PaneError`,
+# `PaneName`, `Argv`). The adapter depends on nothing else of Holler (ADR-0021 section 5).
+holler-pane = { path = "../holler-pane" }
+
+[dev-dependencies]
+# The `HostPort` conformance suite the real-tmux test runs, and `HostOp::as_str`, which
+# the timeout test pins equal to the adapter's `op` names. A dev-dependency only
+# (ADR-0021 section 5).
+holler-pane-testkit = { path = "../holler-pane-testkit" }
+# The private directories of the fake binaries and of every real tmux server; for the tests.
+tempfile = { workspace = true }
 
 # Workspace lints (issue #149).
 [lints]

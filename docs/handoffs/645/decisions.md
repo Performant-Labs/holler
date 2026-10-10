@@ -240,3 +240,47 @@
   - Greps: production callers of `select_session` and `create_session` (only reconcile's repair and the engine);
     session-id validators (none; the OpenCode adapter percent-encodes ids, `lib.rs:422-424`); lookups by session of
     record (none); both-format runners in `tests/`; the hub for any switch path (none).
+
+## F (rework, round 2: the anti-duplication BLOCK) — 2026-10-09T23:27-06:00
+- **Decided:**
+  - Merged `origin/main` (`d9eabbb`), following A-dup's note 1. It merged cleanly. I staged it with
+    `git merge --no-commit --no-ff`, because F makes no commits. The Workflow script's phase commit (`git add -A`, then
+    `git commit`) records it as the merge commit. gitleaks found no leaks on the staged merge.
+  - The pane-scoped `--fix` reconcile step stays, as A recommended. The code and tests are unchanged. Step 6's reason for
+    naming no pane is a pane that a failed launch leaves with no record. That does not apply here: a switch or reset reads
+    the pane's record before it acts. The step carries no `--profile`, and a doctor run by name refuses only a pane with no
+    record (`reconcile.rs:226-236`). `--fix` is doctor's own remedy for a fixable mismatch (`findings.rs:135-141`).
+  - ADR-0021 gets four sentences, in the #645 paragraph only (AC 24). They say:
+    - when the step is printed: every failure once `select_session` has been called, a record conflict or a `timeout`
+      included, and none before;
+    - that it names the pane even after a run with `--profile`;
+    - why it differs from the two forms of step 6 that #663's generations rule gives;
+    - that no `profile show` is needed, since neither verb edits P's specs.
+    #663's bullet and step 6 are untouched.
+  - The boundary is "once `select_session` has been called", not A's draft "once the act has begun". The paragraph
+    defines reset's act as `create_session` and then `select_session`, and a failed `create_session` carries no step
+    (`acted` is false). Two of my round-1 doc comments in `tx_switch.rs` had the same imprecision. I fixed them, comments
+    only.
+- **Assumed:**
+  - AC 24's limits still decide where the fix may go. So the generations bullet, which is #663's text, stays as it is,
+    and the exception is stated in the #645 paragraph.
+  - Fixing two doc comments of my own does not break A's "no code or test change". A meant the behaviour:
+    `SwitchFailure::message` and `RECONCILE_P` are unchanged.
+- **Hedged:**
+  - I wrote "a doctor run for that pane is not refused", not A's "never refused". A record deleted by another writer
+    after the plan would still be `pane-not-found`. That is an edge of its own, outside the reason step 6 gives.
+  - The "before then, no step" clause makes explicit what the brief's Decision 13 decided ("with the reconcile step when
+    `acted`"). Section 12 says that a verb that times out "prints the reconcile step". The clause gives the reason (the
+    TUI and the record have not moved), as step 2 of the I8 order does for its pre-act conflict.
+  - Observation, not changed: when reset's `create_session` times out, the server may still hold a session, and the
+    message cannot name it. Doctor reports such a session as a stray.
+- **Evidence:**
+  - handoff-A-dup.md; `origin/main`'s ADR-0021, section 8 (`:285-344`) and section 12; the merged ADR-0021 at
+    `:285-372`; `profile_scope.rs` `reconcile_step` on `origin/main`; `reconcile.rs:219-243`; `findings.rs:111-143`;
+    `tx_switch.rs` in full.
+  - `git merge-tree --write-tree HEAD origin/main` exited 0. On the merged tree: `git diff origin/main --
+    docs/adr/ADR-0021.md` has the four AC-24 hunks only. The paragraph is at line 345, between `### 8.` (285) and
+    `### 9.` (372). `#645` occurs 9 times (6 on `origin/main`). The source files quoted in evidence.md are unchanged
+    against `origin/main`.
+  - The commands and results are in handoff-F.md, "Tier 1 self-check". The four new source facts are in evidence.md,
+    under "Added by F (round 2)".

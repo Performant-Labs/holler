@@ -25,3 +25,5 @@ docs/handoffs/**/*-sidecar*.md
 docs/handoffs/**/*-result-r*.md
 docs/handoffs/**/screenshots/
 docs/handoffs/**/*-report.html
+docs/handoffs/state.json
+docs/handoffs/*/.stage/

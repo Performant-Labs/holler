@@ -2,7 +2,8 @@
 
 Facts in **unchanged** code that the diff (`tx_switch.rs`, `pane/switch.rs`, `pane/reset.rs`, the ADR-0021 edits) or T's
 tests rely on. Each excerpt is copied from the tree at `a912c4b` plus F's uncommitted change (none of these files is in
-F's change).
+F's change). Round 2 merged `origin/main` (`d9eabbb`), which changed none of the source files quoted here, so every line
+number still holds (`git diff origin/main` on them is empty).
 
 ## What the engine calls in `holler-pane`
 
@@ -275,4 +276,71 @@ F's change).
   >     pub fn concurrent_put(&self, pane: &Pane) -> Result<Pane, PaneError> {
   >         self.put(pane, Writer::Other)
   >     }
+  > ```
+
+## Added by F (round 2, after the anti-duplication BLOCK)
+
+These are the facts the four new sentences of the "Switch and reset as built (#645)" paragraph rely on. The paragraph is
+at `docs/adr/ADR-0021.md:345-370`, on the tree with `origin/main` (`d9eabbb`) merged. The ADR lines quoted below are
+#663's text on `origin/main`. This change does not edit them, so the diff does not show them.
+
+- **Fact:** on `origin/main`, ADR-0021's generations rule says a verb whose record write meets `generation-conflict` after
+  the act prints one of the two forms of step 6, which name no pane. The #645 paragraph says how switch and reset differ
+  from this, and why.
+  **Source:** `docs/adr/ADR-0021.md:294-299`
+  **Verbatim excerpt:**
+  > ```
+  > - A verb takes its expected generation when it plans, and writes the record with it after the act. If another writer got in
+  >   between, the verb's record write fails with `generation-conflict` **after** the live change: the verb fails loudly, exits 1,
+  >   writes nothing more, and prints the reconcile step (the pane doctor command line; the profile-scoped or the bare form of
+  >   step 6, which names no pane, for the reason given there). With `--profile` the record step runs inside the act, so a
+  >   record conflict also restores P's specs (step 5) before the verb prints the reconcile step (#663, confirming the
+  >   assumption of #638).
+  > ```
+
+- **Fact:** step 6 gives the two forms, and it names no pane because a pane-scoped doctor refuses a pane with no record or
+  outside P, which is what a failed launch of a new pane leaves. Its `profile show` part reports a spec with no live pane.
+  **Source:** `docs/adr/ADR-0021.md:331-337`
+  **Verbatim excerpt:**
+  > ```
+  >    The reconcile step is exactly `to reconcile, run holler pane doctor --profile '<P>' and then holler profile show '<P>'`,
+  >    with P POSIX-single-quoted, and without `--profile` it is `to reconcile, run holler pane doctor`. `reconcile_step` in
+  >    `holler-cli/src/pane/profile_scope.rs` builds both (`reconcile_step(None)` is the second) on
+  >    `holler_pane::findings::doctor_command(None, false)`, the doctor command line's one builder (#701). The step names no
+  >    pane on purpose: a pane-scoped doctor refuses a pane with no record or outside P (`pane-not-found` or
+  >    `pane-not-in-profile`, in `holler-pane/src/reconcile.rs`), which is what a failed `launch` of a new pane leaves, so the
+  >    step runs the doctor over every pane of P (or every pane) and `profile show` reports the spec that has no live pane.
+  > ```
+
+- **Fact:** the step switch and reset print, `holler pane doctor <pane> --fix`, has no `--profile`. A doctor run named that
+  way reads the pane's record by name. It refuses only a pane with no record (`pane-not-found`), never one outside a
+  profile. Switch and reset read that record in their plan, so the reason step 6 gives does not apply to them.
+  **Source:** `crates/holler-pane/src/reconcile.rs:226-236`
+  **Verbatim excerpt:**
+  > ```
+  >     let scope = match (request.profile, request.pane) {
+  >         (Some(profile), pane) => ports.scope.resolve(profile, pane)?.panes,
+  >         (None, Some(name)) => {
+  >             let pane = ports
+  >                 .pane_store
+  >                 .get(name)?
+  >                 .ok_or_else(|| PaneError::PaneNotFound {
+  >                     what: name.to_string(),
+  >                 })?;
+  >             vec![pane]
+  >         }
+  > ```
+
+- **Fact:** `holler pane doctor <pane> --fix` is the pane doctor's own remedy for a pane whose TUI does not show its session
+  of record, while a fix can repair it. That is the paragraph's "the pane doctor's own remedy".
+  **Source:** `crates/holler-pane/src/findings.rs:135-141`
+  **Verbatim excerpt:**
+  > ```
+  >             FindingKind::ShownDrivenMismatch => match fix {
+  >                 FixState::Fixable | FixState::Skipped => {
+  >                     pane.map(|pane| doctor_command(Some(pane), true))
+  >                 }
+  >                 FixState::NotFixable | FixState::Failed => pane.map(relaunch_command),
+  >                 FixState::Fixed => None,
+  >             },
   > ```

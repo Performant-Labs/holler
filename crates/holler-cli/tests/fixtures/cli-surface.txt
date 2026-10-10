@@ -103,11 +103,13 @@ body detach | --debug none
 
 # #643
 pane list |
+pane list | demo-c1r1
 pane list | --profile demo
 pane list | --format=json
-pane get |
-pane get | --profile demo --format json
+pane get | demo-c1r1
+pane get | demo-c1r1 --profile demo --format json
 pane watch |
+pane watch | demo-c1r1 --since 7 --until-idle
 pane watch | --profile demo --json
 
 # #644
@@ -131,9 +133,9 @@ pane reset | demo-c1r1 --profile demo --format=json
 pane reset | demo-c1r1 --as-operator
 
 # #646
-pane park |
-pane park | --profile demo
-pane unpark |
+pane park | demo-c1r1 --reason "disk full" --release-when "after the cleanup"
+pane park | --profile demo --reason r --release-when w --format=json
+pane unpark | demo-c1r1
 pane unpark | --profile demo
 pane close |
 pane close | --profile demo
@@ -160,8 +162,11 @@ pane import |
 pane import | --format=json
 
 # #662
-profile create |
-profile delete |
+profile create | Demo
+profile create | "Some Profile" --from-current
+profile create | Copy --from Demo --format=json
+profile delete | Demo
+profile delete | Demo --keep-panes --json
 profile list |
 profile list | --format=json
 profile show | Demo

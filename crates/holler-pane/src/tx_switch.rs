@@ -28,12 +28,14 @@
 //!    read record's, so a field this file does not know is kept.
 //!
 //! No step calls Herdr or the host, so nothing is ever typed into a TUI (I4), and no step
-//! serves, attaches, aborts or deletes anything. A failure once the act has begun is not
-//! compensated: the record still names the previous session, and [`SwitchFailure::message`]
-//! ends with the reconcile step (the pane doctor command line for the pane, with `--fix`),
-//! which selects that session again. A session a reset created and did not record stays on
-//! the server, and the message names it. After a successful reset the previous session stays
-//! on the server too: no port deletes a session, so doctor reports it as a stray.
+//! serves, attaches, aborts or deletes anything. A failure once `select_session` has been
+//! called is not compensated: the record still names the previous session, and
+//! [`SwitchFailure::message`] ends with the reconcile step (the pane doctor command line for
+//! the pane, with `--fix`), which selects that session again. A failure before that, a
+//! reset's `create_session` included, moved neither the TUI nor the record, and its message
+//! has no step. A session a reset created and did not record stays on the server, and the
+//! message names it. After a successful reset the previous session stays on the server
+//! too: no port deletes a session, so doctor reports it as a stray.
 //!
 //! A run makes at most seven port calls, each bounded by I5, so it needs no budget of its own.
 //! Refusing a pane that is busy or holds a question, and queueing a first message after a
@@ -128,8 +130,8 @@ impl From<PaneError> for SwitchFailure {
 impl SwitchFailure {
     /// The one-line message of the failure for `pane`: `error`'s text, then `; session <id>
     /// was created and is not recorded` when a reset left a session behind, then `; to
-    /// reconcile, run <the pane doctor command line for pane, with --fix>` once the act has
-    /// begun.
+    /// reconcile, run <the pane doctor command line for pane, with --fix>` once
+    /// `select_session` has been called.
     pub fn message(&self, pane: &PaneName) -> String {
         let mut message = self.error.to_string();
         if let Some(created) = &self.created {

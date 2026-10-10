@@ -2,7 +2,8 @@
 //!
 //! Its cousin is `holler-cli/tests/attach_cli_test/fake_server.rs`: the same conventions
 //! (`std::net` and plain `std::thread`s, no new dev-dependency, `Connection: close` on every
-//! reply, bind-then-drop for a refused port). That file lives under another crate's `tests/`,
+//! reply), except for the refused port: that file binds a port and drops the listener, which
+//! is racy under parallel tests (see `closed_port`). That file lives under another crate's `tests/`,
 //! so it cannot be imported from here. This one adds what the adapter's tests need and that
 //! one lacks: replies per method and path, a chunked reply, a raw non-HTTP reply, a frozen
 //! mode (accept, read, never answer), and a record of every request's raw request line and
@@ -145,14 +146,34 @@ impl Stub {
     }
 }
 
-/// A loopback port nothing listens on: bind one, then drop the listener.
+/// The connections whose client ends are the `closed_port`s, held until the process exits.
+static HELD: Mutex<Vec<(TcpStream, TcpStream)>> = Mutex::new(Vec::new());
+
+/// A loopback port nothing listens on, has ever listened on, or can be handed to a later bind.
+///
+/// Binding a port and dropping the listener is racy. A process that another test spawns at
+/// that moment holds a copy of every descriptor between its `fork` and its `exec`, the listener
+/// among them, so the listener can outlive the drop: a connect then completes against it and is
+/// reset once the child's `exec` closes the last copy. A port that is free can also be handed
+/// to a stub that a test running in parallel starts.
+///
+/// So the port is the client end of a held connection, an ephemeral port that `connect` picked
+/// and that never had a listener. A new connect to it matches no socket (the held one is tied
+/// to its own peer) and is answered with a reset, a refusal, on Linux and on macOS alike. The
+/// held socket keeps the port in use for the life of the process, so Linux never hands it to a
+/// `bind` of port 0.
 pub fn closed_port() -> u16 {
-    let listener = TcpListener::bind("127.0.0.1:0").expect("bind a throwaway port");
-    let port = listener
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind a throwaway listener");
+    let client = TcpStream::connect(listener.local_addr().expect("a bound listener's address"))
+        .expect("connect to the throwaway listener");
+    let (server, _) = listener.accept().expect("accept the held connection");
+    let port = client
         .local_addr()
-        .expect("a bound listener has an address")
+        .expect("a connected socket has an address")
         .port();
-    drop(listener);
+    HELD.lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .push((client, server));
     port
 }
 

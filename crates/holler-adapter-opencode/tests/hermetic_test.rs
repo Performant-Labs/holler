@@ -1,7 +1,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)] // #642
 //! The OpenCode adapter's server side with no OpenCode and no tmux (#642a, AC 1-8, 11, 11d,
 //! 11e). Every call goes to the stub in `support/stub.rs` on an OS-assigned loopback port, or
-//! to a port bound and then dropped (refused). `serve` runs only `false` and `sh` on a script
+//! to a held port that never had a listener (refused). `serve` runs only `false` and `sh` on a script
 //! in a scratch directory, so the file runs in CI on Linux and macOS.
 
 #[path = "support/stub.rs"]
