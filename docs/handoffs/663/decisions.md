@@ -309,3 +309,31 @@ Rigor/brief gate: BLOCKED, overridden by Andre Angelantoni: The outside brief ga
     and #644 at `7195993` (its section 12 plan).
   - **Checks:** `git merge-tree` against `dc300ab` conflicts in `CHANGELOG.md` only. AC 5, 11, 12 and 14's commands were
     run at `9762a97`.
+
+## T (Phase 4, author / RED, re-entry) — 2026-10-09T20:10:42-06:00
+- **Decided:** the re-entry RED is valid, as the brief's Test plan lays it out.
+  - T amended AC 5's test `reconcile_step_single_quotes_the_profile_name` to the `Option` signature. It adds two
+    assertions: `reconcile_step(None)` equals #644's exact text, and it equals `format!("to reconcile, run {}",
+    findings::doctor_command(None, false))`.
+  - T landed Decision 8's signature as a stub (`String::new()`), deleted `RECONCILE_STEP_UNSCOPED`, and passed `Some(..)` at
+    the scope's two call sites. That is the only production change, and it exists so the RED is not a compile error.
+  - RED: 4 of 7 scope tests fail on the reconcile step (AC 5 on the equality, AC 2-4 on the missing
+    `holler pane doctor --profile 'Demo Alpha'` substring). AC 5's `doctor_command(None, false)` grep prints `0`, and AC 14's
+    ADR grep prints `3`.
+- **Assumed:**
+  - Overwriting `handoff-T-red.md` is right: the previous run's RED handoff stays in git history at `8fe683b`.
+  - AC 5's other two greps (`holler pane doctor` and `RECONCILE_STEP_UNSCOPED` on production lines) are already `0` on the
+    stub, because the Test plan has T delete the const. That is not a defect in the RED: the `doctor_command` grep and the
+    equalities carry it.
+- **Hedged:**
+  - **The regression guards are green on purpose:** AC 1, AC 6, AC 7, the 12 probe tests (AC 8a-8l) and AC 8m. The amendment
+    states what the probe code already does (Decisions 13-15 and 19), so no probe test changes.
+  - **No new test for W-17** (a profile name with a leading `-`). The brief keeps the step's text, and the fix is a
+    follow-up upstream in `ProfileName::parse`.
+- **Evidence:**
+  - `cargo test -p holler-cli --lib pane::profile_scope`: `3 passed; 4 failed`, with the failure lines in `handoff-T-red.md`.
+  - `cargo test -p holler-pane --lib probe::tests`: `12 passed`. `ports_test run_probe_stub_never_reports_success`:
+    `1 passed`.
+  - `cargo clippy -p holler-pane -p holler-cli --all-targets -- -D warnings`, `bash scripts/lint.sh` and `rustfmt --check
+    --edition 2021` on both files all exit 0. `profile_scope.rs` is 592 lines.
+  - No `hlr-probe-663-*` directory and no `sleep 30` was left behind.

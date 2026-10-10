@@ -33,17 +33,13 @@ use holler_pane::{
     ProfileStore, ResolvedScope, SpecEdit,
 };
 
-/// The reconcile step of a run without `--profile`: the bare pane doctor command line, which (like
-/// [`reconcile_step`]) names no pane. The spec-editing verbs (#644, #646) print this one.
-pub const RECONCILE_STEP_UNSCOPED: &str = "to reconcile, run holler pane doctor";
-
-/// The reconcile step for `profile`, one line for an operator to paste into a shell, with the
-/// name POSIX-single-quoted (it may hold spaces, quotes or `$(...)`, but no control character):
-/// `to reconcile, run holler pane doctor --profile '<P>' and then holler profile show '<P>'`.
-/// The scope's errors carry it; a spec-editing verb prints it for a pane-record conflict.
-pub fn reconcile_step(profile: &ProfileName) -> String {
-    let name = single_quoted(profile.as_str());
-    format!("{RECONCILE_STEP_UNSCOPED} --profile {name} and then holler profile show {name}")
+/// The reconcile step, one line for an operator to paste into a shell.
+///
+/// RED stub (T, #663 re-entry): the signature of Decision 8 with an empty body, so AC 5's test
+/// compiles and fails on its equalities. F builds it on `holler_pane::findings::doctor_command`.
+pub fn reconcile_step(profile: Option<&ProfileName>) -> String {
+    let _ = profile.map(|profile| single_quoted(profile.as_str()));
+    String::new()
 }
 
 /// The real [`ProfileScope`] over any [`ProfileStore`] and [`PaneStore`]; building it does no I/O.
@@ -124,7 +120,7 @@ impl StoreScope {
         let Err(error) = self.profiles.cas_put(&back, back.generation, &self.actor) else {
             return failure;
         };
-        let (name, step) = (back.name.as_str(), reconcile_step(&back.name));
+        let (name, step) = (back.name.as_str(), reconcile_step(Some(&back.name)));
         if matches!(error, PaneError::Conflict) {
             return PaneError::ProfileConflict {
                 what: format!(
@@ -201,7 +197,7 @@ fn may_have_landed(error: PaneError, profile: &ProfileName, pane: &PaneName) -> 
         "the write may have landed, so profile {:?} may hold the edit of {pane}, and nothing live \
          was changed; {}",
         profile.as_str(),
-        reconcile_step(profile)
+        reconcile_step(Some(profile))
     );
     with_context(error, &context)
 }
@@ -314,7 +310,7 @@ mod tests {
     use holler_pane_testkit::pane_store::{FakePaneStore, PaneStoreOp};
     use holler_pane_testkit::profile_store::{FakeProfileStore, ProfileStoreOp};
 
-    use super::{reconcile_step, StoreScope, RECONCILE_STEP_UNSCOPED};
+    use super::{reconcile_step, StoreScope};
 
     const ALPHA: &str = "Demo Alpha";
     const C1: &str = "demo-c1r1";
@@ -535,24 +531,23 @@ mod tests {
     }
 
     // AC 5 (Decision 8): the step quotes the profile name POSIX-style; the unscoped
-    // form is #644's exact text.
+    // form is #644's exact text; both are built on #701's doctor command line.
     #[test]
     fn reconcile_step_single_quotes_the_profile_name() {
         assert_eq!(
-            reconcile_step(&alpha()),
+            reconcile_step(Some(&alpha())),
             "to reconcile, run holler pane doctor --profile 'Demo Alpha' \
              and then holler profile show 'Demo Alpha'"
         );
-        let tricky = reconcile_step(&ProfileName::parse("It's $(id) Demo").unwrap());
+        let tricky = reconcile_step(Some(&ProfileName::parse("It's $(id) Demo").unwrap()));
         assert!(
             tricky.contains("--profile 'It'\\''s $(id) Demo'"),
             "not single-quoted: {tricky:?}"
         );
         assert!(!tricky.contains('\n'), "not one line: {tricky:?}");
-        assert_eq!(
-            RECONCILE_STEP_UNSCOPED,
-            "to reconcile, run holler pane doctor"
-        );
+        assert_eq!(reconcile_step(None), "to reconcile, run holler pane doctor");
+        let doctor = holler_pane::findings::doctor_command(None, false);
+        assert_eq!(reconcile_step(None), format!("to reconcile, run {doctor}"));
     }
 
     // AC 6 (Decision 9): a Set whose spec names another pane is usage before any write.
