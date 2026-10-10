@@ -320,3 +320,53 @@
   - Commands: `cargo test -p holler-cli --test pane_verbs` gave 95 passed. `cargo clippy -p holler-cli --all-targets --
     -D warnings` and `bash scripts/lint.sh` exited 0. `git diff --stat 279a1fb..HEAD -- crates CHANGELOG.md` was empty.
     `git merge-tree --write-tree origin/main HEAD` conflicted in `CHANGELOG.md` only.
+
+## A (Phase 3, up-front plan review, amendment 1) — 2026-10-09T19:41:26-06:00
+- **Decided:** PASS on docs/handoffs/643-brief.md at d525032 (amendment 1, sha256 53058e77...), with 0 blocks and 5 new
+  warns (W-12 to W-16; see handoff-A.md, which replaces round 2's, kept at 04e6af2).
+  - Amendment 1 resolves D-1 the way `main` and ADR-0021 stand. `SessionSync` stays the CLI's three-state view, the
+    comparison is a call to `shown_differs`, and DRIVEN is printed and never compared. It touches no frozen file, no
+    `holler-pane` file and no ADR, and none needs an edit.
+  - W-12 (act on it this cycle): `watch.rs`'s `Members::names_profile` restates `holler_pane::profile_diff::is_member`.
+    #662 part 1 made that function public (ce12cdb, in this branch through 05e7337), and its doc calls it the
+    definition of membership. The Reuse map does not name it. F folds it inside `watch.rs`.
+  - W-13 (act on it this cycle): Decision 3's guard `at == 0` should be `at <= 0`, which is `shown_differs`'s "provided
+    `at > 0`". Then it agrees with `observed_at`.
+  - W-14: the record-reader form (the `at` guard, a session of record, then `shown_differs`) will have one copy per
+    reader, and #646c's gate in `holler-hub` cannot use `holler-cli`'s. Follow-up: the roster uses `SessionSync::of`,
+    and the form moves into `holler-pane` before #646c.
+  - W-15 (low): `PaneRow` cannot explain its own SYNC, because it has no `session_of_record` and `driven` is null until
+    #649. A key can be added later without breaking anything.
+  - W-16: #662 added a third rule for printing stored strings (`FieldValue`'s `Display`), and a second rendering of
+    `ProbeResult`. It is a non-fold for the same reasons as `findings::quoted`. F records it in `evidence.md`, and D-2
+    widens after merge.
+  - D-1, W-1, W-4 and W-9 are closed. D-2 to D-6, W-5, W-6 and W-11 stay as the brief lists them.
+- **Assumed:**
+  - F reads this handoff before it codes, as the driver's run context tells every phase to (`buildRolePhaseTaskPrompt`),
+    so W-12 and W-13 reach F without a brief edit. Round 1's W-8 reached F the same way.
+  - Folding W-12 is not a drive-by edit: it changes F's own file and calls a `pub` function without editing it.
+  - The worktrees of #646 (876f87e) and #663 (1d6a5ab) are plans, not merged code. #663's A BLOCKed at 71f9ae2.
+- **Hedged:**
+  - W-12 is a warn, not a block. The copy agrees with `is_member`. The Reuse map does not name it, so a Phase 7 block
+    rule would not fire on the map. And a Phase 3 BLOCK would stop this automated run, for a brief edit, over a
+    three-line fold that F can make in its own file with no AC change. If F does not fold it, A-dup should rate it a
+    warn, not a block.
+  - W-13 asks F to depart from the letter of Decision 3 for a case no writer produces. It is worth it only because the
+    change costs one character and makes the reader agree with the doc it cites.
+  - W-15 restates a trade-off the MO already made in ruling (a1). It is recorded for #648 and #649, not reopened.
+- **Evidence:**
+  - Read in full: the brief (1,689 lines); this directory's handoff-A (round 2), handoff-A-dup, handoff-F (round 3),
+    decisions.md and evidence.md; the outside brief reviews 643-brief-result-r1.md (BLOCK) and -r2.md (PASS).
+  - Read in full, at d525032: `pane/{list,get,watch}.rs`, `holler-pane/src/reconcile.rs` and `reconcile/observe.rs`.
+  - Also read: `profile_diff.rs:150-300`, `profile/show.rs:100-198`, `profile_snapshot.rs:30-60`, `fixture.rs:41-75`,
+    the helper list of `tests/pane_verbs/list.rs`, the builders of `doctor/rig.rs`, `pane.rs:183-190`, `lib.rs`, and
+    the ADR-0021 lines on SHOWN, DRIVEN and `session_of_record`.
+  - From the playbook: the feature-implementor role, the driver's `buildRolePhaseTaskPrompt` and its Phase 3 stop path,
+    and `pipeline-conventions.md` §1.
+  - The parallel plans: #646's brief (its gate is deferred, :32) and #663's `profile_scope.rs` (`belongs`).
+  - Greps, on origin/main at 0ad2d8a and in the branch: writes of `driven`, readers of `last_observed` and of
+    `shown_differs`, other SHOWN/DRIVEN rules, slug comparisons, `is_member`'s callers, spec lookups, and word forms on
+    `Health`, `Hold` and `ProbeResult`. Also the brief, for #662's helpers (none) and for personal names (none).
+  - Commands: `git fetch`. `git merge-tree --write-tree origin/main HEAD` exited 0.
+    `git diff --name-only origin/main...HEAD` listed the brief's Files only. `gh issue view` on 646, 648, 649, 662 and
+    663, and `gh issue list` found no follow-up filed.
