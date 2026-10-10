@@ -344,3 +344,26 @@ at `docs/adr/ADR-0021.md:345-370`, on the tree with `origin/main` (`d9eabbb`) me
   >                 FixState::Fixed => None,
   >             },
   > ```
+
+## Added by T (Phase 7, GREEN, round 2)
+
+- **Fact:** a fault queued with `fail_next(HarnessOp::CreateSession, ..)` fails the fake's `create_session` before any
+  session is minted, so `reset_create_failure_changes_nothing` sees a failed create that left no session behind.
+  **Source:** `crates/holler-pane-testkit/src/harness.rs:292-297`, `crates/holler-pane-testkit/src/fault.rs:72-77`
+  **Verbatim excerpt:**
+  > ```
+  >     fn create_session(&self, port: u16) -> Result<String, PaneError> {
+  >         self.faults.enter(HarnessOp::CreateSession)?;
+  >         let mut world = self.lock();
+  >         world.reach(port, HarnessOp::CreateSession)?;
+  >         Ok(world.mint_session(port))
+  >     }
+  > ```
+  > ```
+  >     /// Fail the next call of `op` with `error`, once. The errors queued for one method
+  >     /// come out in the order they were queued, and a call of another method leaves them
+  >     /// queued. A standing fault answers first, also leaving them queued.
+  >     pub fn fail_next(&self, op: Op, error: PaneError) {
+  >         self.lock().queued.push((op, error));
+  >     }
+  > ```

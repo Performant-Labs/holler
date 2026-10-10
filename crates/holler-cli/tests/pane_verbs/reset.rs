@@ -9,7 +9,7 @@ use holler_pane_testkit::harness::{HarnessOp as H, Quirk};
 use holler_pane_testkit::pane_store::PaneStoreOp;
 
 use crate::doctor::rig::{keys, kinds, of_kind, one, whole, Rig, Seed};
-use crate::switch::{argv, both, data, failed, Case, P, Q, RECONCILE_P};
+use crate::switch::{argv, both, data, failed, failed_before_the_act, Case, P, Q, RECONCILE_P};
 use crate::verb_harness::parse::try_parse;
 
 /// `pane reset <pane>`, with `extra` after it.
@@ -195,7 +195,7 @@ fn reset_refusals_create_nothing() {
             words
         };
         let cases = both(build, words);
-        failed(&cases, 3, code);
+        failed_before_the_act(&cases, 3, code);
         for case in &cases {
             let calls = &case.calls.harness;
             assert!(!calls.contains(&H::CreateSession), "{code}: {calls:?}");
@@ -221,6 +221,27 @@ fn faulted(fault: impl Fn(&Rig)) -> impl Fn() -> (Rig, Vec<String>) {
 
 fn reset_p(_: &Rig, _: &Vec<String>) -> Vec<String> {
     argv(&["pane", "reset", P])
+}
+
+/// A failed create comes before `select_session`: the TUI and the record are untouched, so
+/// the message has no reconcile step and names no created session.
+#[test]
+fn reset_create_failure_changes_nothing() {
+    let build = faulted(|rig| {
+        let error = PaneError::Unavailable {
+            what: "harness".to_owned(),
+        };
+        rig.harness.faults().fail_next(H::CreateSession, error);
+    });
+    let cases = both(build, reset_p);
+    for message in failed_before_the_act(&cases, 1, "unavailable") {
+        assert!(!message.contains("was created"), "{message:?}");
+    }
+    for case in &cases {
+        let calls = &case.calls.harness;
+        assert!(!calls.contains(&H::SelectSession), "{calls:?}");
+        case.assert_unchanged();
+    }
 }
 
 /// AC 18: a select that fails after the create names the session it left unrecorded,

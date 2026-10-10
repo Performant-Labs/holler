@@ -284,3 +284,27 @@
     against `origin/main`.
   - The commands and results are in handoff-F.md, "Tier 1 self-check". The four new source facts are in evidence.md,
     under "Added by F (round 2)".
+
+## T (Phase 7, GREEN, round 2, after F's anti-duplication rework) — 2026-10-09T23:36-06:00
+- **Decided:**
+  - GREEN on the merged tree (`37f2101`, with `origin/main` `d9eabbb`): the workspace in CI's form gives 1641 passed,
+    0 failed, 14 ignored over 135 result lines, the same counts F reported. Clippy, lint, changelog-check, rustfmt and
+    machete are clean.
+  - Repaired a test gap the round-2 ADR sentence exposed. "A failure before `select_session` has no step" was pinned by
+    nothing: forcing `SwitchFailure::message` to always append the step (`if true`) left all 20 switch and reset tests
+    green. I added `failed_before_the_act` in `tests/pane_verbs/switch.rs`, which is `failed` plus "no message contains
+    `to reconcile`", and used it at every refusal and pre-act failure site: 9 in `switch.rs` and AC 17's in `reset.rs`.
+    I also added `reset_create_failure_changes_nothing` for the brief's A1 row (`acted: false`, `created: None`), which
+    the new ADR sentence names and no test covered. The same mutation now fails 8 tests.
+- **Assumed:**
+  - This is test-only work for T. The production behaviour already matches the ADR sentence, so F has nothing to change.
+  - `switch_usage` uses the helper too, although usage errors are reported before the engine runs and the mutation does
+    not reach them. The assertion still holds there and costs nothing.
+- **Hedged:**
+  - The new reset test fails the create with `unavailable`, not `timeout`. F's observation, that a timed-out create may
+    leave a session the message cannot name, is a 645b question and is not pinned here.
+- **Evidence:**
+  - Mutations on `tx_switch.rs:143`, each restored with `git checkout`: `if false` fails 5 tests (ACs 7, 8, 9, 18, 19),
+    both before and after the repair. `if true` fails 0 tests before the repair and 8 after.
+  - `cargo test -p holler-cli --test pane_verbs` gives 154 passed (153 + 1). The fact the new test relies on is in
+    evidence.md, under "Added by T (Phase 7, GREEN, round 2)".

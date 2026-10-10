@@ -215,6 +215,20 @@ pub(crate) fn failed<T>(cases: &[Case<T>; 2], exit: i32, code: &str) -> [String;
     [message, error.message]
 }
 
+/// [`failed`] for a run that failed before `select_session` was called: it moved neither the
+/// TUI nor the record, so neither message carries the reconcile step (ADR-0021 section 8,
+/// "Switch and reset as built").
+pub(crate) fn failed_before_the_act<T>(cases: &[Case<T>; 2], exit: i32, code: &str) -> [String; 2] {
+    let messages = failed(cases, exit, code);
+    for message in &messages {
+        assert!(
+            !message.contains("to reconcile"),
+            "no reconcile step before the act: {message:?}"
+        );
+    }
+    messages
+}
+
 /// The `data` of the JSON run of `cases`, which must have exited 0 (and so has text).
 pub(crate) fn data<T>(cases: &[Case<T>; 2]) -> Value {
     let [_, json] = cases;
@@ -296,7 +310,7 @@ fn switch_to_a_deleted_session_changes_nothing() {
         (rig, s2)
     };
     let cases = both(build, switch_p(&[]));
-    failed(&cases, 3, "session-not-found");
+    failed_before_the_act(&cases, 3, "session-not-found");
     for case in &cases {
         assert!(!case.calls.harness.contains(&HarnessOp::SelectSession));
         case.assert_unchanged();
@@ -311,7 +325,7 @@ fn switch_to_another_panes_session_is_refused() {
     let build = || (Rig::new(&[Seed::new(P, 1, 1), Seed::new(Q, 1, 2)]), ());
     let words = |rig: &Rig, (): &()| argv(&["pane", "switch", P, &rig.live(Q).session]);
     let cases = both(build, words);
-    for message in failed(&cases, 3, "session-of-other-pane") {
+    for message in failed_before_the_act(&cases, 3, "session-of-other-pane") {
         assert!(message.contains(Q), "names the other pane: {message:?}");
     }
     for case in &cases {
@@ -335,7 +349,7 @@ fn switch_refuses_an_unhealthy_server() {
             (rig, s2)
         };
         let cases = both(build, switch_p(&[]));
-        for message in failed(&cases, 3, "server-unhealthy") {
+        for message in failed_before_the_act(&cases, 3, "server-unhealthy") {
             assert!(
                 message.contains("run holler pane relaunch demo-c1r1"),
                 "{message:?}"
@@ -355,7 +369,7 @@ fn switch_refuses_an_unhealthy_server() {
         (rig, s2)
     };
     let cases = both(build, switch_p(&[]));
-    failed(&cases, 1, "timeout");
+    failed_before_the_act(&cases, 1, "timeout");
     cases.iter().for_each(Case::assert_unchanged);
 }
 
@@ -364,7 +378,7 @@ fn switch_refuses_an_unhealthy_server() {
 fn switch_refuses_the_orchestrators_pane_unless_as_operator() {
     let build = || with_s2(&[Seed::new(P, 1, 1).orchestrator()]);
     let cases = both(build, switch_p(&[]));
-    for message in failed(&cases, 3, "orchestrator-pane") {
+    for message in failed_before_the_act(&cases, 3, "orchestrator-pane") {
         assert!(message.contains("--as-operator"), "{message:?}");
     }
     for case in &cases {
@@ -504,14 +518,14 @@ fn switch_in_a_profile() {
 
     let outside = |_: &Rig, s2: &String| argv(&["pane", "switch", Q, s2, "--profile", "demo"]);
     let cases = both(build, outside);
-    failed(&cases, 3, "pane-not-in-profile");
+    failed_before_the_act(&cases, 3, "pane-not-in-profile");
     for case in &cases {
         assert!(case.calls.harness.is_empty(), "{:?}", case.calls);
         case.assert_unchanged();
     }
 
     let cases = both(build, switch_p(&["--profile", "nope"]));
-    failed(&cases, 3, "profile-not-found");
+    failed_before_the_act(&cases, 3, "profile-not-found");
     cases.iter().for_each(Case::assert_unchanged);
 }
 
@@ -520,7 +534,7 @@ fn switch_in_a_profile() {
 fn switch_unknown_pane() {
     let words = |_: &Rig, s2: &String| argv(&["pane", "switch", "demo-c9r9", s2]);
     let cases = both(one_pane, words);
-    failed(&cases, 3, "pane-not-found");
+    failed_before_the_act(&cases, 3, "pane-not-found");
     for case in &cases {
         assert!(case.calls.harness.is_empty(), "{:?}", case.calls);
     }
@@ -541,7 +555,7 @@ fn switch_usage() {
     for [pane, session] in bad {
         let words = |_: &Rig, (): &()| argv(&["pane", "switch", pane, session]);
         let cases = both(|| (Rig::new(&[Seed::new(P, 1, 1)]), ()), words);
-        for message in failed(&cases, 2, "usage") {
+        for message in failed_before_the_act(&cases, 2, "usage") {
             assert!(
                 !message.contains('\u{1b}'),
                 "{pane} {session:?}: {message:?}"
