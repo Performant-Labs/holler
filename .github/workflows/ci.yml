@@ -20,8 +20,9 @@ concurrency:
 
 jobs:
   # Decides whether the macOS leg of `test` can be skipped (issue #745). For a pull_request whose
-  # changed files are ALL documentation (docs/**, any *.md) or under agent-skills/** (the skill
-  # text and the setup wizard's helper scripts), the macos-latest leg is not needed: it would
+  # changed files are ALL documentation (docs/**, any *.md), under agent-skills/** (the skill
+  # text and the setup wizard's helper scripts) or the wizard's own Rust test module
+  # (crates/holler-cli/tests/wizard/**), the macos-latest leg is not needed: it would
   # queue on the small GitHub-hosted macOS pool for minutes to build Rust the pull request never
   # touched. Anything else (crates/, .github/, scripts/, ...) keeps the full matrix, and so does a
   # push to main or a manual run. To change what counts as skippable, edit the `case` patterns.
@@ -47,7 +48,7 @@ jobs:
               skip=true
               while IFS= read -r f; do
                 case "$f" in
-                  docs/*|agent-skills/*|*.md) ;;
+                  docs/*|agent-skills/*|crates/holler-cli/tests/wizard/*|*.md) ;;
                   *) skip=false ;;
                 esac
               done <<< "$files"
