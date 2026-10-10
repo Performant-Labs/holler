@@ -154,3 +154,13 @@ in git at `0ad2d8a:docs/handoffs/640/decisions.md`.
     (exit 0, 1519 passed); `cargo test -p holler-pane` (86); `docs_cli_test` (3); `wire_selftest` (3); clippy
     workspace `-D warnings`; `cargo fmt --check`; `lint.sh`; `changelog-check.sh`; `cargo machete`; `cargo doc`
     `-D warnings`; `git merge-tree` against `origin/main` `d9eabbb` (clean); the AC 8, 19-27, 29-31 greps.
+
+## O (diff gate, manual rerun): 2026-10-09T23:30:00-06:00
+- **Decided:** The outside diff gate is taken as PASS from a hand rerun, and the run resumes at the anti-duplication gate (phase 8).
+  - The workflow's own round 1 hit the reviewer's 8192-token completion cap (`finish_reason: length`, no Verdict), and its retry stopped with `gate-unavailable` / `malformed-input`.
+  - A hand rerun of the same prompt (`docs/handoffs/640-diff-result-r1.md.prompt.txt`) returned a complete review that ended `PASS — no BLOCK findings; testing may proceed.`
+- **Assumed:** The review's two listed BLOCK entries are not defects:
+  - B-1 says `Path::starts_with` is a string-prefix check that a sibling named `h640.ab-evil` bypasses. It is not: `Path::starts_with` matches whole path components only, so that sibling does not match. The WARN W-1 recommendation (a `strip_prefix` check) is a hardening option, not a defect, and is left for a follow-up.
+  - B-2's own text concludes there is no structural mismatch.
+- **Hedged:** The reviewer saw a bounded excerpt, not the repo; the anti-duplication gate and the spec audit still run on the full diff.
+- **Evidence:** the rerun's verdict line; `std::path::Path::starts_with` ("Only considers whole path components to match").
