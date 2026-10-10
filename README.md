@@ -190,6 +190,10 @@ has never seen it. To install it permanently for Claude Code instead (one comman
 mkdir -p ~/.claude/skills && curl -fsSL https://github.com/Performant-Labs/holler/archive/refs/heads/main.tar.gz | tar -xz -C ~/.claude/skills --strip-components=2 holler-main/agent-skills/setup-wizard
 ```
 
+No release tag contains the whole skill directory yet, so the command fetches `main`. A setup built
+before ledgers existed is refused as foreign (the wizard stops only processes it recorded itself),
+see [Instance state and the ledger](docs/setup-wizard.md#instance-state-and-the-ledger).
+
 The prompt:
 
 ```

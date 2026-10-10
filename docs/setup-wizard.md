@@ -246,9 +246,15 @@ goes after the bare top-level keys (`layout`, `hub_host`) and before `[[orchestr
 | `backend_port_base` | integer | 47001 | session `i` (0-based, in config order) listens on `base + i` unless it sets its own `backend_port` |
 
 A non-default instance (any key differing from its default) must set `name`, `state_dir` and
-`herdr_session`. Stage 1 runs `agent-skills/setup-wizard/lib/instance.sh <config>`, which refuses a
-malformed value or a missing required key naming the key, and refuses two sessions on the same
-`remote_host` that resolve to one backend port, naming both. A session may set `backend_port`
+`herdr_session`. It also may not use the first instance's ports: `instance.sh` refuses a
+non-default instance with a `hub_port` of 41807, a `serve_https_port` of 443, or resolved backend
+ports in 47001 to 47001 plus the session count unless every session sets its own `backend_port`
+(exit 1, one line naming the key). Stage 1 runs `agent-skills/setup-wizard/lib/instance.sh <config>`,
+which refuses a malformed value or a missing required key naming the key, a `state_dir` that is the
+default state directory, and two sessions on the same `remote_host` that resolve to one backend
+port, naming both. Stage 2 also reads each remote host's `$HOME/.holler` and refuses a non-default
+`state_dir` equal to it. A non-default instance is driven from a terminal outside any Herdr pane
+(see "Herdr session"). A session may set `backend_port`
 to override its `base + i` port.
 
 ```toml
@@ -298,7 +304,9 @@ a process in no ledger is **foreign**. The wizard signals only live rows. On a r
 means exactly one thing, a live row in this instance's ledger whose command still matches; it
 starts and records a new process when the old one died, and never adopts one it did not record.
 `agent-skills/setup-wizard/lib/ledger.sh` (`record`, `list`, `owns <pid>`) maintains the file and
-reads the state directory from `HOLLER_STATE_DIR`. Each start command prints the pid of the
+reads the state directory from `HOLLER_STATE_DIR`, which every call must set, the default
+instance's included (an unset value is refused, exit 64, so a lost variable cannot reach another
+instance's ledger). Each start command prints the pid of the
 program itself (`{ nohup ... & echo $!; }`, because `cmd && nohup X & echo $!` can print the pid
 of a subshell on some login shells), and after recording the agent confirms with `list` that the
 recorded `cmd` starts with the program. The Herdr server's pid is the first line `herdr.sh
@@ -317,6 +325,19 @@ On a rerun the wizard fetches each remote host's ledger next to its inventory (`
 directory, `<state_dir>/wizard-scratch`) and passes it to the collision check as `WIZARD_LEDGER`;
 without it every remote process would look foreign and the instance's own processes would be
 refused.
+
+A setup built before ledgers existed (by an earlier version of the wizard, or by hand) is
+refused as foreign for the same reason: nothing records its processes, so the wizard reports them
+and never stops them. See "The first instance has no ledger" above.
+
+**The `AGENTS.md` briefing.** If the operator says yes in Stage 3, Stage 8 adds a `## Holler
+self-status` section to each orchestrator's `AGENTS.md`. It never writes the instance's absolute
+`HOLLER_STATE_DIR` into the file (the file may be shared with another instance's orchestrator, and
+an "already has this section" rule would then leave the wrong path in place). Instead it says the
+pane's environment already sets `HOLLER_STATE_DIR` and the orchestrator must never change or unset it
+(the launch command exports it). When the section has to be instance-specific, it is headed
+`## Holler self-status (instance <name>)`, and the wizard stops and asks when another instance's
+section already exists.
 
 The logs of the processes Stages 4 to 9 start go under the instance's state directory too,
 `<state_dir>/logs/<prefix>-...` (`$HOME/.holler/logs` for the default), never `/tmp`, which is
@@ -364,7 +385,8 @@ does it (no `sudo`):
 mkdir -p ~/.claude/skills && curl -fsSL https://github.com/Performant-Labs/holler/archive/refs/heads/main.tar.gz | tar -xz -C ~/.claude/skills --strip-components=2 holler-main/agent-skills/setup-wizard
 ```
 
-(the README has the same line, and its agent prompt fetches the directory the same way on a
+No release tag contains the whole skill directory yet, so the command fetches `main`; pin it to a
+tag once one does. (The README has the same line, and its agent prompt fetches the directory the same way on a
 machine that doesn't have it). Stage
 0 stands apart from the rest: it only installs the `herdr` binary itself (via
 [herdr.dev's install script](https://herdr.dev/install.sh) or `brew install herdr`), asked as
@@ -393,14 +415,21 @@ Stage 2 takes a read-only inventory of each host the run touches
 `holler body`, `opencode` and `herdr` processes (a body's row carries its `--config` path), the `tailscale serve`
 configuration and the Herdr sessions; a tool it needs and cannot find on `PATH` is reported as a
 `warn` line, never skipped silently. It only runs `ss`/`lsof`, `ps`, `tailscale serve status` and
-`herdr session list`; it never writes, signals, starts or stops anything. Stage 3 feeds each
+`herdr session list` (the Herdr section runs only with `WIZARD_INVENTORY_HERDR=1`, which the skill
+sets on the local line only; a missing `herdr` on a remote host is expected); it never writes,
+signals, starts or stops anything. The first line of an inventory is `home<TAB><that host's $HOME>`,
+the home that `-` and `~/` state directories are resolved against. A remote inventory is taken with
+`ssh <remote_host> 'bash -l -s' < .../inventory.sh` so a login shell's `PATH` applies. Stage 3 feeds each
 inventory and the instance's plan to `lib/collide.sh`, which prints the plan beside the
 inventory (other instances' items are "present, not touched", and so is this instance's own
 `tailscale serve` entry when the ledger has a live `hub` row) and **refuses** the plan, rather
 than warning, when anything collides with something this instance did not create: a port
 already in use, a hub already listening on `hub_port`, a state directory already in use (a hub
 or body row whose state directory is not visible counts as the default one), or a Herdr session
-of the same name. It does not check bodies per session, because a body's session is not on its
+of the same name. For the default instance, a running unnamed Herdr server with no live `herdr`
+ledger row is foreign and refused too; the operator may answer yes to "build in it" in Stage 3,
+and the wizard still never stops it. A serve entry that is the instance's own port pair with no
+live hub is reported as such and is not refused. It does not check bodies per session, because a body's session is not on its
 command line. Each
 refusal names the colliding item and the config key to change (`hub_port`, `serve_https_port`,
 `backend_port_base` or a session's `backend_port`, `state_dir`, `herdr_session`, or the
@@ -427,7 +456,13 @@ server stops through `stop-owned.sh`, not `herdr.sh run server stop`. Before bui
 Herdr sessions; if the named session exists and the instance's ledger did not record creating it
 (a live `role = herdr` row), it stops and names the session, and never splits panes of a session it did not
 create. If the run is inside a pane of a different session than the instance's, it stops before
-any split. The server log is named for the instance and lives in the instance's logs directory
+any split; if the driving agent is inside a Herdr pane at all and cannot establish the pane's
+session, `check-pane` stops and names the fix (run the wizard from a terminal outside any Herdr
+pane). Stage 2 runs `check-pane` and `check-session`, and a stop there is a Stage 3 refusal before
+"Proceed?". For a refused session that exists and is stopped, the skill offers, with the operator's
+yes, `herdr.sh session-delete` (the instance's own session, stopped only, refused when the ledger
+has a live `herdr` row); for a running one the answer is another `herdr_session`. The same verb
+removes the stopped session after a teardown. The server log is named for the instance and lives in the instance's logs directory
 (`<state_dir>/logs/<prefix>-herdr-server.log`), never under `/tmp`.
 
 Unverified until story #734 checks it with the real binary: how a pane's own session is learned

@@ -61,6 +61,8 @@ scratch directory under that host's home and is removed at the end):
 ```bash
 tar -C $WIZARD_LIB -cf - ledger.sh stop-owned.sh | ssh <remote_host> 'd=$(mktemp -d "$HOME/.wizard-run.XXXXXX") && tar -C "$d" -xf - && bash "$d/stop-owned.sh" <verb> <state_dir> <pid-or-port>; rc=$?; rm -rf "$d"; exit $rc'
 ```
+The last word depends on the verb: a pid for `stop` and `restart`, a port for `check-port`, and for
+`teardown` the third argument is empty or `--purge-state` (leave the word out when it is empty).
 The Herdr server the wizard started for the instance is a ledger process like any other: it
 stops through `stop-owned.sh` (a `herdr` row), never through `herdr.sh run server stop`.
 
@@ -309,8 +311,9 @@ For every stage:
 
 **Stage 3 is a hard stop, not just a gate like the others: nothing that changes real state
 (starting a process, killing one, joining, splitting a pane) may happen before the user has
-explicitly said to proceed.** Stages 1 and 2 are read-only (loading a file, checking status) so
-they're safe to run ahead of that; everything from Stage 4 onward is not.
+explicitly said to proceed.** Stages 1 and 2 are read-only except the scratch directory (loading a file,
+checking status; the one thing they write is `<scratch>`, and installing the skill needs its own
+yes, see Stage 1) so they're safe to run ahead of that; everything from Stage 4 onward is not.
 
 Keep a running status checklist as you go — one line per stage, name plus symbol, not a dense
 bracket-number line (a human reading it mid-run shouldn't have to cross-reference a legend to
@@ -410,12 +413,15 @@ just `SKILL.md`. The one definition, an absolute path (`<HOME>` is the output of
 WIZARD_LIB=<HOME>/.claude/skills/setup-wizard/lib
 ```
 Check it before going on: `ls <that path>/ledger.sh <that path>/instance.sh <that path>/herdr.sh`.
-If the files are not there, the skill was installed as a single file; install the whole
-directory (works on a machine with no checkout of this repository, and needs no `sudo`):
+If the files are not there, the skill was installed as a single file. Installing writes into
+`~/.claude/skills`, so **ask the user before installing** (Stages 1 and 2 change nothing else), then
+install the whole directory (works on a machine with no checkout of this repository, and needs no
+`sudo`):
 ```bash
 mkdir -p ~/.claude/skills && curl -fsSL https://github.com/Performant-Labs/holler/archive/refs/heads/main.tar.gz | tar -xz -C ~/.claude/skills --strip-components=2 holler-main/agent-skills/setup-wizard
 ```
-From here on the text writes `$WIZARD_LIB`; as the shell-state rule says, write the literal path
+No release tag contains the whole skill directory yet, so the command fetches `main`; pin it to a
+tag once one does. From here on the text writes `$WIZARD_LIB`; as the shell-state rule says, write the literal path
 into each command (it is never set for you). Run the scripts with `bash`, never by path alone.
 
 **Ask:** yes, if no config exists at any of the three tiers — but as a short scenario menu plus
@@ -579,6 +585,14 @@ missing `name`, `state_dir` or `herdr_session`, a non-default instance whose `st
 default state directory (`~/.holler`: it would share the first instance's state), and two
 sessions on the same `remote_host` that resolve to one backend port (naming both).
 
+**Two rules for a non-default instance, stated here because Stage 3 refuses them.** (1) It never
+uses the first instance's ports: `instance.sh` refuses a `hub_port` of 41807, a `serve_https_port`
+of 443, and resolved backend ports that fall in 47001 to 47001 plus the session count unless every
+session sets its own `backend_port` (exit 1, one line naming the key). (2) It is driven from a
+terminal outside any Herdr pane: a driving agent that runs inside a Herdr pane cannot establish
+which session it is in, and Stage 2's `check-pane` stops it (the fix is to start the wizard from a
+plain terminal, or from the desktop app, not from a pane).
+
 **Resolve the instance's literals once, and carry them.** After `instance.sh` passes, write down
 these values; every later command uses them as literals (shell-state rule, top of this file):
 - `<name>`, `<prefix>` (default: the name), `<hub_port>` (41807), `<serve_https_port>` (443),
@@ -694,7 +708,10 @@ Stage 1 describes)**, so every later command on that host uses its own resolved 
 ssh <remote_host> 'printf %s "$HOME/.holler"'
 ```
 (or the `~/` form for a `~/` value; an absolute `state_dir` needs no call). Write the answer down
-per host.
+per host. **For a non-default instance, also fetch each remote host's `$HOME/.holler`** (the call
+above with no `state_dir` gives it) **and refuse a `state_dir` equal to it**: that host's default
+state directory belongs to the first instance, and `instance.sh` can only compare against this
+machine's home. Treat it as a Stage 3 refusal naming the `state_dir` key.
 
 **Do (the collision inventory — read-only, per host the run touches: this machine and every
 distinct `remote_host`).** Run `inventory.sh` (in `$WIZARD_LIB`) once per host, and next to each
@@ -702,27 +719,44 @@ inventory fetch that host's own ledger, into the named scratch directory (`mkdir
 first). A host that has never run the wizard has no ledger: the `cat` fails and leaves an empty
 file, which is right (everything running there is foreign):
 ```bash
-bash $WIZARD_LIB/inventory.sh > <scratch>/inventory-<host>.tsv
-ssh <remote_host> bash -s < $WIZARD_LIB/inventory.sh > <scratch>/inventory-<host>.tsv
+WIZARD_INVENTORY_HERDR=1 bash $WIZARD_LIB/inventory.sh > <scratch>/inventory-<host>.tsv
+ssh <remote_host> 'bash -l -s' < $WIZARD_LIB/inventory.sh > <scratch>/inventory-<host>.tsv
 ssh <remote_host> "cat <state_dir>/wizard-ledger.toml" > <scratch>/ledger-<host>.toml
 ```
 (the first line for this machine, the others for each remote host; `<host>` names the file, the
 `<state_dir>` is that remote host's resolved one. This machine's ledger is read in place, no
 copy. In manual-relay mode, hand the user those exact commands and have them paste the output
 back.) Without the fetched ledger every process on a remote host would look foreign on a rerun
-and the instance's own processes would be refused. `inventory.sh` lists listening TCP ports,
+and the instance's own processes would be refused. **`WIZARD_INVENTORY_HERDR=1` is set on the
+local line only**: it switches on the Herdr section (the Herdr sessions that exist, and a `missing
+tool herdr` warning), and the Herdr server runs on this machine, never on a remote host, so a
+missing `herdr` on a remote host is expected and the remote lines do not set it. The remote form
+runs `bash -l -s` (a login shell reading the script from stdin) so the tools a non-login `ssh` shell
+lacks are on `PATH`. The first line of every inventory is `home<TAB><that host's $HOME>`;
+`collide.sh` resolves `-` and `~/` state directories against it. `inventory.sh` lists listening TCP ports,
 running `holler hub`, `holler body`, `opencode` and `herdr` processes (pid, owner, state
 directory where visible — Linux only —, start time, and for a body its `--config` path), the
 `tailscale serve` configuration, and the Herdr sessions that exist. It only reads: it never
 writes, signals, starts or stops anything (it calls just `ss`/`lsof`, `ps`, `tailscale serve
-status` and `herdr session list`). If a host's inventory cannot be taken, that is a hard failure
+status` and, with the flag, `herdr session list`). If a host's inventory cannot be taken, that is a hard failure
 for this stage, not something to skip — the plan cannot be checked without it. A line
 `warn<TAB>missing tool <name>` means the tool is not on that shell's `PATH` (a non-login `ssh`
-shell often lacks it): put it on `PATH` or run the command through `bash -lc`, then take the
-inventory again; never plan from an inventory with such a line unless the user says to.
+shell often lacks it): put it on `PATH` or use the `bash -l -s` form above, then take the
+inventory again (this does not apply to `herdr` on a remote host, see above); never plan from an inventory with such a line unless the user says to.
 
-The two status calls above are read-only (they tell Stage 3 what already exists so its plan is
-accurate) — neither starts, stops, nor changes anything. The model-endpoint checks
+**Do (the Herdr checks, on this machine, before Stage 3):**
+```bash
+<herdr_env> bash $WIZARD_LIB/herdr.sh check-pane      # stops if this run is inside a Herdr pane it cannot place in the instance's session
+<herdr_env> bash $WIZARD_LIB/herdr.sh check-session   # stops if the named session exists and the ledger did not create it
+```
+Both only read. A stop from either is a **Stage 3 refusal**: carry its message into Stage 3, and
+do not ask "Proceed with this plan?" (Stage 3 says what to offer). `check-pane` stops when the
+driving agent is inside a Herdr pane (the fix is to run the wizard from a terminal outside any
+Herdr pane) and when that pane belongs to a different session than the instance's. For the
+default instance, with no `herdr_session`, both pass.
+
+The status calls above are read-only (they tell Stage 3 what already exists so its plan is
+accurate) — none starts, stops, nor changes anything. The model-endpoint checks
 are driven by what each host's own OpenCode config says — never assume every host uses the same
 provider or model.
 
@@ -816,10 +850,32 @@ plan and show it before touching anything:
   `REFUSED:` line — naming the colliding item and the config key to change — when the plan
   needs a port that is in use, a hub port a hub already listens on, a state directory another
   process uses, or a Herdr session of the same name. (It does not check bodies per session: a
-  body's session is not on its command line; Stage 7's ledger rule covers bodies.) On any
+  body's session is not on its command line; Stage 7's ledger rule covers bodies.) A planned
+  Herdr session counts only when `inventory.sh` ran with `WIZARD_INVENTORY_HERDR=1` (Stage 2). On any
   refusal, show the refusals, **do not ask "Proceed with this plan?"**, and stop until the config
   is changed and Stage 1 onward is re-run. Never start, stop or kill the colliding thing to make
-  room: it was not created by this run.
+  room: it was not created by this run. A stop from Stage 2's `check-pane` or `check-session`, or
+  from the remote `$HOME/.holler` comparison, is a refusal of the same kind: show it, do not ask
+  "Proceed with this plan?". What to offer for each case:
+  - **A Herdr session of the instance's name exists and the ledger did not create it**
+    (`check-session`, or `collide.sh`'s `REFUSED: a herdr session named ... already exists`). Never
+    build in it. If `herdr session list` shows it `stopped`, offer, **with the user's yes**, to delete
+    it: `<herdr_env> bash $WIZARD_LIB/herdr.sh session-delete` (it deletes only this instance's own
+    session, only when it is stopped and the ledger has no live `herdr` row for it, and refuses
+    otherwise), then re-run Stage 2's `check-session`. If it is running, or the user says no, the
+    answer is another `herdr_session` in the config, and Stage 1 onward is re-run.
+  - **A `tailscale serve` entry on the instance's `serve_https_port` that `collide.sh` calls "this
+    instance's port pair, no live hub"** is not a refusal: the entry is the instance's own (it
+    proxies to `http://127.0.0.1:<hub_port>`, a crash, reboot or teardown left it, and no live
+    foreign process holds `hub_port`). Say so and continue; Stage 6 starts the hub and runs its
+    `tailscale serve --bg` line again, which sets the same mapping. If the same port is refused
+    (`tailscale serve already uses https port ...`), the entry is someone else's: change
+    `serve_https_port`.
+  - **The default instance and a running unnamed Herdr server with no live `herdr` row in the
+    ledger** (`REFUSED: an unnamed herdr server is already running`): that server is foreign. Ask
+    one question: build in it (the user's own yes; then Stage 8 reuses it and records nothing for
+    it), or stop (set a `herdr_session` in an `[instance]` table, which makes the instance
+    non-default). Never stop that server.
 - **What's already running vs. what will be started fresh, per host.** "Reused" means exactly one
   thing: a **live row in this instance's own ledger** (its pid, start time and command still
   match; see Stage 4, "Reuse on a rerun"). List per host which backends, the hub, the bodies and
@@ -844,7 +900,8 @@ before this briefing existed, the orchestrator had no reason to know it could ju
 roster`; after, it answered correctly, checked in real time). It's a real edit to a file the
 orchestrator's agent reads on every startup, so it's a genuine yes/no like any other file write
 this wizard proposes, not a silent default. If yes, Stage 8 writes/updates the briefing block
-right before launching that orchestrator's `cmd` — see Stage 8 for the exact text.
+right before launching that orchestrator's `cmd` — see Stage 8 for the exact text (the briefing
+never embeds the instance's state directory path; a second instance gets its own headed section).
 
 **This is orchestrator-side only — sessions get no such briefing, and no MCP either.** Verified
 live 2026-09-22 via `holler --help` and a real failed call from a session's own remote host:
@@ -1008,6 +1065,10 @@ for that host) — check the raw response body before moving on to the next entr
 **Ask:** nothing further — Stage 3's plan already said whether the hub gets reused or started
 fresh.
 
+**Never stop or replace a hub or `tailscale serve` that the ledger did not record** (ownership
+rule, top of this file): run `bash $WIZARD_LIB/stop-owned.sh check-port <state_dir> <hub_port>`
+before the start block below; a foreign or stale holder is reported and the run stops and asks.
+
 **Do**, only if the plan called for a fresh hub (skip entirely if the ledger has a live `hub` row,
 which means the hub is reused) — bringing up the hub itself is host-agnostic, done exactly once
 regardless of how many remote hosts sessions are split across (token minting is per-host and
@@ -1043,10 +1104,6 @@ taken only with the user's yes.
 **Gate:** if `hub serve` fails to start, stop and report the real error (port already bound by
 something else, a stale lock, etc.) — don't proceed to Stage 7's per-host token minting against
 a hub that isn't actually up.
-
-**Never stop or replace a hub or `tailscale serve` that the ledger did not record** (ownership
-rule, top of this file): `bash $WIZARD_LIB/stop-owned.sh check-port <state_dir> <hub_port>` first; a
-foreign or stale holder is reported and the run stops and asks.
 
 **If a recorded hub was already running and this is a resume** (its identity key didn't come from
 a fresh `hub_identity_generated` log line): this instance's already-live bodies from an earlier
@@ -1122,11 +1179,13 @@ Third, **for each distinct `remote_host`** (looping, not just doing this once):
    wizard. Then mint, with `hub_host`'s own short name and the instance's `<prefix>` folded into
    the label:
    ```bash
-   HOLLER_STATE_DIR=<state_dir> holler hub token mint --label <hub_host's short name>-<prefix>-<remote_host>
+   HOLLER_STATE_DIR=<state_dir> holler hub token mint --label <label>
    ```
-   e.g. `hub1-second-remote-a`, not `remote-a-body` — so a roster entry, a token list, or a process
-   inspected later on the remote host all carry which hub and which instance it's paired to, not
-   just which remote host it runs on.
+   `<label>` is the Stage 7 token label. It is built as `--label <hub_host's short name>-<prefix>-<remote_host>`
+   (the hub's short name, the instance's prefix and the remote host), e.g.
+   `hub1-second-remote-a` (never `remote-a-body`), and is written as a literal in the command. A roster entry, a token list, or a process
+   inspected later on the remote host then carries which hub and which instance it's paired to,
+   not just which remote host it runs on.
 
    **A label stays taken until its token's record is deleted.** `revoke` keeps the record by
    design (an audit trail of which machine was cut off), so a revoked token still holds its
@@ -1138,7 +1197,7 @@ Third, **for each distinct `remote_host`** (looping, not just doing this once):
    ```bash
    HOLLER_STATE_DIR=<state_dir> holler hub token revoke <old_token_id>   # only if it is still bound
    HOLLER_STATE_DIR=<state_dir> holler hub token delete <old_token_id>
-   HOLLER_STATE_DIR=<state_dir> holler hub token mint --label hub1-second-remote-a
+   HOLLER_STATE_DIR=<state_dir> holler hub token mint --label <label>
    ```
    The new token has a new token id, so the body joins again with the new join line. On holler
    v0.3.0 and earlier nothing frees a label (`delete` only invalidated the secret; confirmed live
@@ -1172,8 +1231,9 @@ Third, **for each distinct `remote_host`** (looping, not just doing this once):
    **record** that pid on this host:
    `record --pid <pid> --role body --stage 7 --session <the first session on this host>`
    (remote form, Stage 4), and confirm with `list` that the recorded `cmd` starts with `holler`.
-   Reuse rule: a `live` `body` row for this host (its recorded `cmd` names `<body_config>`) means
-   the body is reused, skip `body run`; a restarted wizard that finds the row `stale` runs it
+   Reuse rule: a `live` `body` row for this host whose recorded `cmd` names the expanded path of
+   `<body_config>` (the recorded command line holds the path with `~` expanded, e.g. the host's
+   `$HOME/sessions.toml`, never the literal `~/sessions.toml`) means the body is reused, skip `body run`; a restarted wizard that finds the row `stale` runs it
    again and records the new pid.
 
 **Verify:**
@@ -1215,9 +1275,14 @@ whole command.
 <herdr_env> bash $WIZARD_LIB/herdr.sh check-pane      # stops if this run is inside a pane of a DIFFERENT Herdr session
 <herdr_env> bash $WIZARD_LIB/herdr.sh check-session   # stops if the named session exists and the ledger did not create it
 ```
-If `check-session` stops, tell the operator the session's name and ask; never split panes of a
-session this wizard did not create (it counts as created only when the ledger has a **live**
-`herdr` row for it). If `check-pane` stops, do not split anything.
+These ran in Stage 2 and passed or were refused in Stage 3; run them again here, since time has
+passed. If `check-session` stops, tell the operator the session's name and ask (Stage 3 lists what
+to offer, including `session-delete` for a stopped session); never split panes of a session this
+wizard did not create (it counts as created only when the ledger has a **live** `herdr` row for
+it). If `check-pane` stops, do not split anything. **For the default instance, a running unnamed
+Herdr server with no live `herdr` row is foreign** (Stage 3's question "build in it, or stop"):
+only with the user's yes to building in it does this stage use that server, and the wizard never
+stops it; without that yes, stop here and ask.
 
 **Do (server check, first, only if the plan called for a fresh server):**
 ```bash
@@ -1331,18 +1396,29 @@ clearly-marked section if one does — never overwrite unrelated content) contai
 You are the orchestrator "<name>" in a Holler-driven multi-agent setup. Every session you're
 driving is a real, separate `holler` roster entry, but its **live roster name is namespaced**
 (e.g. `<body-label>/<session-name>`), not just the bare config name. Your hub is the one whose
-state directory is `<state_dir>`: put `HOLLER_STATE_DIR=<state_dir>` in front of every
-`holler` command, or it reaches a different hub (or none).
-Run `HOLLER_STATE_DIR=<state_dir> holler roster` with no filter first to see the real names,
+state directory is not yours to pass: this pane's environment already sets `HOLLER_STATE_DIR`,
+and you must never change or unset it, or `holler` reaches a different hub (or none).
+Run `holler roster` with no filter first to see the real names,
 then use `--prefix <that full name>` to narrow to one.
-Use that same full name with `HOLLER_STATE_DIR=<state_dir> holler say <full name> "…"` to
-dispatch and `HOLLER_STATE_DIR=<state_dir> holler interrupt <full name>` to redirect one that's
+Use that same full name with `holler say <full name> "…"` to
+dispatch and `holler interrupt <full name>` to redirect one that's
 stuck. Don't guess a session's status from memory or from what you last told it to do — check
-`HOLLER_STATE_DIR=<state_dir> holler roster`.
+`holler roster`.
 ```
-Substitute that orchestrator's real `name` and the instance's resolved `<state_dir>` (for the
-default instance, `$HOME/.holler` resolved: the same hub as before). If Stage 3's answer was no, or the orchestrator's
-`AGENTS.md` already has this section from a prior run, skip this sub-step. Two things verified
+Substitute that orchestrator's real `name`. **The briefing never carries the state directory's
+path**: `AGENTS.md` may be shared with another instance's orchestrator (the same project directory),
+and a path written into it would send that orchestrator to this hub. The pane's own environment
+carries the value (the launch command below exports it).
+
+- **Only one instance uses this `AGENTS.md`** (the default instance, or a directory no other
+  instance's orchestrator reads): if it already has a `## Holler self-status` section, skip this
+  sub-step; if Stage 3's answer was no, skip it too.
+- **The section must be instance-specific** (another instance's orchestrator reads this file too):
+  head it `## Holler self-status (instance <name>)` with the instance's own `<name>`, and add it
+  alongside the other section. If another instance's section already exists (a different
+  `(instance ...)` heading, or the plain heading written for the first instance), do not edit it:
+  stop and ask the user which sections to keep. If a section with this instance's own heading
+  already exists, skip this sub-step. Two things verified
 live 2026-09-22, both worth getting right in the briefing rather than guessing: there
 is no `holler status <name>` verb (`roster --prefix` is the real per-session filter), and
 `--prefix` matches the roster's live namespaced session id, not the config file's bare `name` —
@@ -1413,6 +1489,7 @@ wrong.
 **Ask:** nothing.
 
 **Do**, for every session in the config:
+(`<label>` is the Stage 7 token label.)
 ```bash
 HOLLER_STATE_DIR=<state_dir> holler say <label>/<name> "reply with just: <name> ready"
 ```
@@ -1501,8 +1578,13 @@ everything above ran headlessly over Herdr's socket API — nothing was visible 
   left (stale entries, foreign processes, other files, other instances). Pass `--purge-state`
   only when the user asked to remove the instance's whole state directory; it is refused for the
   default state directory. The instance's `tailscale serve` entry is not a process of the
-  wizard, so teardown leaves it and says so: with the user's yes, turn off **only that entry**
-  with `tailscale serve --https=<serve_https_port> off`. Never `tailscale serve reset`: it wipes
+  wizard: it is the instance's own serve entry, so teardown leaves it and says so, and to continue
+  (a rebuild reuses it, Stage 3 reports it as the instance's own port pair) nothing more is needed;
+  to remove it, with the user's yes, turn off **only that entry**
+  with `tailscale serve --https=<serve_https_port> off`. Once the Herdr server has stopped, the
+  named session stays listed as `stopped`: with the user's yes, delete it with
+  `<herdr_env> bash $WIZARD_LIB/herdr.sh session-delete` (own session, stopped only), never with a
+  bare `herdr session delete`. Never `tailscale serve reset`: it wipes
   every serve entry, the first instance's included.
 - **A join fails with `no such token` for one host:** that host's own token mint and its join
   must run against the same hub: the mint on the hub machine with the hub's `<state_dir>`, the
