@@ -1,73 +1,86 @@
-# Handoff-A: Phase 3 - #640 part 2 of 3: the socket transport, `HerdrAdapter` and a simulated Herdr  (up-front plan review)
+# Handoff-A: Phase 3 - #640 part 3 of 3: the opt-in scratch-Herdr test, the contract docs and the ADR-0021 rows  (up-front plan review)
 
 **Date:** 2026-10-09
-**Branch:** issue-640-implementation (head `e39458d`)
+**Branch:** issue-640-implementation (head `4c6dbb0`; `origin/main` is now `e327569`, see finding 1)
 **Brief reviewed:** `docs/handoffs/640-brief.md`   **Reuse map:** `docs/handoffs/640-brief.md`, section "Reuse map (extend, do not duplicate)" (there is no separate survey)   **Wireframe:** N/A (no UI surface)
 **Verdict:** PASS
 
+This file replaces part 2's `handoff-A.md`, as the brief's Handoffs line says. Part 2's is in git at `0ad2d8a`.
+
 ## Summary
 
-PASS, with no block findings and seven warns. The plan builds on the right objects: part 1's `protocol` (requests,
-`decode_reply`, the parsers, `check_supported`), `layout` (`grid_of`, `GridMap`) and `plan` (`plan_splits`, `Extent`,
-`Step`), the frozen `HerdrPort` and its types, and #638's conformance suite. It adds two modules where ADR-0021 §5 puts
-them (an adapter crate that depends on `holler-pane` alone), with no new normal dependency, no second encoder, decoder
-or tree walk, and no parallel error type. The two things that are new to the codebase, a worker thread per exchange to
-bound `connect`, and a public `Transport` seam so that a JSON-level Herdr can stand in for the socket, are each
-justified in writing (Decisions 3, 14 and 18). The warns are about consistency with neighbouring code (`Timeout.op`
-naming, `excerpt`, the deadline arithmetic), forward compatibility for #647, #649 and #642, and carrying this part's
-decisions into part 3's ADR rows.
+PASS, with no block findings and six warns. The plan extends the objects its Reuse map names, and only those. It makes
+`protocol::excerpt` `pub(crate)`, so the crate keeps one copy. It adds `Tapped::Fail` to the one interceptor. It runs
+`run_herdr_conformance` as written rather than copying a case. It renames `Timeout.op` once, at the port boundary, and
+leaves the transport alone. It puts the scratch harness in a self-contained `tests/<name>/mod.rs` module next to
+`wire_herdr/`. No dependency is added, production code still reads no environment, and every rule this part sets goes
+into ADR-0021 in the same change. The warns concern three things. First, the tree under the plan: `origin/main`
+merged #641 after the brief's baseline, and that brought a sibling opt-in test with a different convention. Second, the
+existing helpers the harness has to re-create, which the Reuse map does not name. Third, a few places where the planned
+doc and ADR text would not match the code or the ADR's own bookkeeping.
 
 ## Findings
 
 | # | Severity | Plan element | Drift dimension | Finding | Suggested fix |
 |---|---|---|---|---|---|
-| 1 | warn | Decision 3: "Expiry is `Timeout { op: format!("herdr.{}", request.method()) }`", which propagates up through every port method unchanged | pattern consistency (the error vocabulary at the port boundary) | The test kit names a timeout by the **port** method: `PortOp::as_str` is "`<port>.<method>` ... It is also the `op` of the `timeout` a wedged call answers" (`holler-pane-testkit/src/fault.rs:20-21`). `fake_herdr_test.rs:288-301` pins `FakeHerdr` to `herdr.ensure_pane`, `herdr.read`, `herdr.close`, `herdr.snapshot` and `herdr.version`. Under this plan the real adapter names the **wire** method instead: `ensure_pane` times out as `herdr.session.snapshot`, `herdr.layout.export`, `herdr.pane.split` or `herdr.workspace.create`, `read` as `herdr.pane.read`, and `version()` as `herdr.ping`. A verb test (#644 and later) that checks `timed out: herdr.ensure_pane` against `FakeHerdr` passes there and fails in production. That is a fake-versus-real divergence of the same kind as Decision 20, and it is not listed. No adapter-level AC pins `op` yet, so it is cheap to settle now. | Pick one rule in the brief. (a), recommended: the transport keeps `herdr.<wire method>` (AC 5, 6, 11 and 12a are unchanged), each port method rewrites a `Timeout` to `herdr.<port method>` exactly as `HerdrOp::as_str` spells it, and one adapter-level AC checks this (e.g. a test transport answers `Timeout { op: "herdr.layout.export" }`, and `ensure_pane` returns `op == "herdr.ensure_pane"`). (b): keep the wire names, and record the divergence next to Decision 20 and in "For the operator". |
-| 2 | warn | "the part-1 sources are **not** changed" (brief :1469, :1713), together with the new `unavailable` messages of Decision 8 (version string), Decision 10 (a workspace with no tab) and Decision 11.6 (the new pane id and where it landed; AC 16) | reuse / anti-duplication | These messages quote text that Herdr sent. The crate's rule for that (messages "quote what Herdr sent (cut to 64 characters)" on one line, `protocol.rs:20-22`; ADR-0021 §9, "Every message is one line") is carried out by the private `protocol::excerpt` (`protocol.rs:580`). That function is already part 1's own copy of `holler_pane::error::excerpt` (`error.rs:688`, `pub(crate)` in a frozen crate). The Reuse map does not name it, and the freeze leaves F two options: a third copy in `adapter.rs`, which is a Phase 7 near-copy, or quoting that breaks the crate's message rule. | Add a Reuse-map row for `protocol::excerpt`, and allow one visibility-only edit to `protocol.rs`: `fn excerpt` becomes `pub(crate) fn excerpt`. State it as the single exception next to "part-1 sources are not changed". Every Herdr-sent string that `adapter.rs` or `transport.rs` quotes goes through it. |
-| 3 | warn | Decision 3, "`deadline = Instant::now() + config.timeout`", and Decision 6, which refuses only "a zero `timeout`" | pattern consistency (cross-cutting: library code never panics) | `Instant + Duration` panics on overflow, so `HerdrConfig { timeout: Duration::MAX, .. }` passes validation and then panics at `connect`'s ping. The workspace's clippy denies (`panic`, `unwrap_used`, `expect_used`) cannot see an arithmetic panic. The three neighbouring deadline sites avoid it with `Instant::now().checked_add(window)`: `holler-hub/src/panes/store.rs:268`, `holler-hub/src/profile/store.rs:319` and `holler-pane-testkit/src/feed.rs:201`. | In Decision 6, also refuse with `usage` (naming the field `timeout`) a timeout for which `Instant::now().checked_add(timeout)` is `None`, or one above a stated cap. Add that case to AC 27 (e.g. `Duration::MAX`). Decision 3's deadline then cannot overflow, and the pinned `exchange(.., deadline: Instant)` stays as it is. |
-| 4 | warn | Decisions 7 and 8 (`connect` refuses an unsupported protocol, so no `HerdrAdapter` exists for one), the forward-compat table, operator item 3, and the public `Transport` / `connect_with` | forward compatibility / seam consistency | (a) ADR-0021 §9 makes `herdr-version-unsupported` a **finding** of `pane doctor` (#647), and `FakeHerdr::set_version(Unsupported)` models it as a live port whose `version()` refuses while its other calls work. In production no port object exists, and `Wiring::connect` ("Fails when something they need cannot be reached", `holler-cli/src/pane/wiring.rs:30`) would fail every verb, doctor included. The fake's path is then reachable only if #649 keeps the connect error and answers it through `version()`. Neither the forward-compat table nor item 3 says so. (b) `connect_with` accepts any `Transport`, but the issue's scope is "the adapter uses the local socket and has no remote path". | (a) Add the point to the #647 and #649 forward-compat rows and to operator item 3: wiring must not fail `pane doctor` on `herdr-version-unsupported`. (b) Add one doc line on `Transport` and `connect_with` calling them a test seam, and saying that production wiring builds the adapter only through `connect`. No code change in this part. |
-| 5 | warn | AC 16, 17, 28 and 29 each call for "a test transport ..." (rewrite `down` to `right`, close the split target first, record deadlines, garble replies) | test-helper duplication | The pinned `wire_herdr` API gives these four no shared seam, so four near-identical structs wrapping `Arc<WireHerdr>` that implement `Transport` are likely in `adapter_test.rs`. The overlay lists test-harness helpers as Phase 7 candidates. | Pin one interceptor in `tests/wire_herdr/`, e.g. `Tap::new(Arc<WireHerdr>, hook)`. Its hook sees each request line and its deadline, and may rewrite the line or replace the reply. The four ACs each configure that one wrapper. |
-| 6 | warn | Decisions 3 and 18 and `adapter::DEFAULT_TIMEOUT`: this is the first adapter crate with I/O (`holler-adapter-host` and `-opencode` are 5-line skeletons) | abstraction level / future duplication | This part sets the pattern for the other two adapters. The OpenCode spike says "Every request to OpenCode needs a client timeout": a frozen server accepts the connection and never answers, which is AC 5's silent server (`docs/research/opencode-pane-spike.md:189-200`). So #642 needs the same one-deadline-per-call exchange and the same I5 default of 10 s. Today that default is prose in seven `holler-pane` doc comments and nowhere in code. ADR-0021 §5 bars an adapter from depending on another adapter, so #642 cannot import this one. With one user today, keeping both in this crate is right. | No change in this part. Record it for #642's brief, which should look here first. If a second copy is needed, raise the shared home (an amend-first `holler-pane` constant for I5's default, and a shared bounded-exchange helper if both shapes match) rather than adding a second `DEFAULT_TIMEOUT` and worker. |
-| 7 | warn | ADR-0021 §10 ("How the adapter learns a workspace's extent is #640's") and Scope (the ADR rows are part 3's) | ADR currency | This part makes decisions that the ADR delegated to #640 or does not yet state: (1) a workspace's extent is configuration, per label (`HerdrConfig.workspaces`); (2) the version gate runs at `connect` and in `version()`, and the other methods trust it (Decision 8); (3) the `op` rule, if finding 1 changes it. The overlay wants the ADR updated in the same change. Deferring to part 3 is acceptable: #640 is one issue, its blast radius (`crates/holler-adapter-herdr/**`) does not cover `docs/adr/` in this PR, and the deferral is written down rather than silent. | Part 3's brief names these three by item when it writes the §9 and §10 rows. The conformance suite's own ASSUMPTION (`holler-pane-testkit/src/conformance/herdr.rs:189-196`) expects (1). |
+| 1 | warn | Header ("Its tree equals `origin/main` at `dc300ab`"); E-5 (#641 "not merged") | baseline currency | `origin/main` moved after the brief's baseline. `e327569` (2026-10-09 8:06 PM MDT) merged #641, `TmuxHost` (PR #706). The brief's last amendment (`4c6dbb0`, 8:13 PM MDT) still calls #641 unmerged. The merge touches `CHANGELOG.md` (its entry is now the last one in `[Unreleased]`), `Cargo.lock` and `crates/holler-adapter-host/**`, and none of the other files this part edits. E-5's #641 citation is now merged code (`crates/holler-adapter-host/src/lib.rs:134-137` on `main`), which strengthens Decision 9. The merge also added the first merged opt-in real-instance test (finding 2) and a second production bounded runner (finding 3). | No plan change. Optionally, merge `origin/main` into the branch before T's RED run, so local RED and GREEN runs and the gates (AC 28, `cargo machete`) see the tree the PR merges into. CI tests the PR's merge ref either way. AC 27's placement is unaffected. |
+| 2 | warn | Decision 6 (the variable on top of `#[ignore]`; a missing `herdr` fails), AC 9-11, Decision 13 | pattern consistency | The first merged opt-in real-instance adapter test, `crates/holler-adapter-host/tests/real_tmux_test.rs` (#641, on `main` since `e327569`), uses another convention. It has plain `#[ignore = "needs tmux; run with --ignored"]` (9 tests, from `:206`) and no variable, and it returns early and passes when the tool is missing (`tmux_available`, `:94-102`, "skipped: tmux not found"). This plan adds `HOLLER_HERDR_SCRATCH=1` and fails when the gate is set and `herdr` is missing. Everything else already matches: a `tempfile::Builder` root with a prefix (`:106-109`), a 100-byte socket limit (`SUN_PATH`, `:26`, equal to `SOCKET_PATH_LIMIT`), `TMUX`/`TMUX_PANE` removed, `/bin/sh` forced, a guard whose `Drop` stops only its own server, and the suite run with the server as the guard. One merged instance is not a dominant pattern. The brief's reasons also hold for Herdr in particular: its socket is resolved from `HOME`, `XDG_*` and `HERDR_*`, and a workspace-wide `cargo test -- --ignored` already starts private tmux servers and should not also start a Herdr server. So this is a reasoned divergence, not drift. But the brief was written before the merge and names neither convention. | Add a Reuse-map row for `real_tmux_test.rs` as the sibling pattern, with Decision 6 as the reason this part differs. In Decision 13's `docs/testing.md` section, say that the host adapter's tmux tests are opt-in through `--ignored` alone and why Herdr's tests also need the variable. Otherwise the doc describes one convention while the code has two. Add to "For the operator", item 5: #649 and #667 pick one convention for their scratch instances. |
+| 3 | warn | Decisions 3-5 (the bounded `herdr` call, start and prove, stop), AC 13's read polls; the Reuse map | reuse / anti-duplication | The harness builds a bounded runner, a readiness poll, a guard that stops and then kills, and two read polls. The workspace already has each of these, and none can be reached from this crate. (a) `crates/holler-cli/tests/support/mod.rs` has `StateDir` (`:69`), `wait_for` (`:151`), `Hub` and `stop_hub` (`:191`, `:210`), which are this repo's Phase 7 candidates. It is another crate's `tests/` and binds `env!("CARGO_BIN_EXE_holler")` (`:141-142`), which does not compile outside `holler-cli`. (b) `crates/holler-adapter-host/src/exec.rs::run` (`:61`, merged in `e327569`) drains stdout and stderr on threads, polls `try_wait`, and kills and reaps on the deadline. It and `crates/holler-adapter-opencode/src/exec.rs::run` (`:48`) are `pub(crate)`, and ADR-0021 §5 bars an adapter from depending on another adapter. (c) #696 (open) moves one runner into `holler-pane` after #663, and `run_probe` is still a stub (`crates/holler-pane/src/probe.rs:33`). So a new harness is justified, and this handoff records that in writing for Phase 7. But the Reuse map names none of these, and the Decisions describe each wait as a loop of its own. | Add one Reuse-map row that names (a)-(c), says why each is unreachable, and says that #696's runner replaces the harness's when it lands (`holler-pane` is already a normal dependency of this crate). In `scratch_herdr/mod.rs`, keep one bounded runner and one bounded poll helper. Shape the runner like the host adapter's `exec::run`: read the piped stdout without blocking the child, poll `try_wait`, and kill and reap on expiry. `status server --json` is small, but an undrained pipe is the known trap. Shape the poll helper like `wait_for`: check first, then sleep the lesser of the interval and the time left. Use the poll helper for Decisions 3-5 and AC 13's polls. Four loops of the same shape inside one new module would be the near-copy Phase 7 looks for. |
+| 4 | warn | D4 (the `Timeout` doc in `error.rs`), A4 (§9's `timeout` row), AC 16's `herdr.connect` | ADR currency / contract wording | AC 16 pins `connect` and `connect_with` to `herdr.connect`, which names no port method. The brief documents this exception (E-8, the Reuse map). Yet D4 says "`op` names the port method, as `<port>.<method>`", and A4 says "Its `op` names the port method that ran out ... in every implementation and fake". Neither leaves room for the constructor, and F may not add it (Decision 11: "not change the meaning"; AC 25: "No other line of the ADR changes"). So the contract crate and the ADR would state a rule that this part's own code departs from on its first call. Two smaller points about A4. Its example `harness.health` is an `op` the real OpenCode adapter never returns: `health` "is never an error" (`crates/holler-adapter-opencode/src/lib.rs:34`), while `harness.serve` and `harness.abort` are pinned there (`tests/hermetic_test.rs:467`, `:569`). And the row sits in `class_of`'s classification table, where the Reason column justifies an exit class. The port contract has its own sentence in §2 (`docs/adr/ADR-0021.md:86-88`: "every method returns within I5's bound (default 10 s) or with `timeout`"). | In D4 and A4, add "and `HerdrAdapter::connect`, which is not a port method, names itself: `herdr.connect`", and use `harness.serve` as A4's second example. Prefer putting the rule in §2's sentence and pointing AC 25's `<port>.<method>` grep there. If it stays in the §9 row, add the exception there. |
+| 5 | warn | AC 19's second grep | structural rule precision | `grep -nE 'made\.as_str\(\)\|target\.as_str\(\)\|workspace\.label' crates/holler-adapter-herdr/src/adapter.rs` also prints `adapter.rs:338`, which is `workspace: workspace.label.clone(),` in `snapshot`. That is the label the adapter returns in `HerdrPane.workspace`, not message text. AC 19 asks for each remaining use to be an argument of `excerpt(..)`. Read literally, it either fails S on a correct line or invites F to quote and cut a returned field, which would corrupt `HerdrPane.workspace`. `adapter_test.rs:327-352` and the suite's workspace filter would catch that, so the cost is low. | Exempt `adapter.rs:338` from AC 19 by name. Values the adapter returns stay as they are, and the rule covers message text only. |
+| 6 | warn | D1-D6 and A1-A9 as a set | doc currency | Three things stay stale after this part. (a) The `snapshot` doc (`crates/holler-pane/src/ports.rs:143`) says "Every pane Herdr has, with its position". The merged adapter leaves out a pane with no cell (`adapter.rs:19-21`), and A9 will say such a pane "has no place in `HerdrSnapshot`". So the ADR and the port doc would disagree. (b) A7 adds a new **PROPOSED** owner for `host.herdr_api_version`. The ADR's Status line sends readers to "Decisions taken" for PROPOSED items (`:3`). Its last line says open items owned by a named story are listed under "Deferred to named stories" (`:562`). A9 edits that list but adds no line for this item. (c) When this part merges, the test kit's `ASSUMPTION (#640)` comments that it answers become false: `crates/holler-pane-testkit/src/herdr.rs:272-274` ("the port's doc names keys `Enter` and `C-c`"), and `src/conformance/herdr.rs:189-196` and `:337-339`. The brief defers them, and no issue is filed (operator item 4). | (a) Add a doc-only D7 in the same form as D1-D6: "Every pane at a cell of a workspace's grid, with its position. A pane with no cell is not listed (ADR-0021, 'Deferred to named stories')." (b) Add one line to the Deferred list, "Who records `host.herdr_api_version`: PROPOSED, #644 (section 10)", and let AC 25 allow it. For operator item 2: #644's brief (`origin/issue-644-implementation` at `7195993`, `docs/handoffs/644-brief.md:1593`, `:1630`) already reads `version()` at its step 4 and records that string in `host.herdr_api_version`, so the PROPOSED owner matches what #644 plans. (c) File the #638 follow-up before this PR merges, rather than leaving it unfiled. |
 
-No finding blocks: the plan extends what the map names, and its one deliberate test-code duplication (the wire fake
-re-implements `base36`, `last_lines` and Herdr's tree rules instead of using `src/`) is justified in the brief as the
-oracle's independence, and is enforced by AC 35.
+None of these blocks. Each one either concerns a convention that has only one merged instance and a written reason
+to differ (2), or can be fixed with a sentence in the brief or the docs (1, 3-6). Finding 3's justification is written
+here, so a scratch harness built as finding 3 describes is not an unjustified near-copy at Phase 7.
 
 Checked and consistent (no finding):
 
-- **Layering and dependency direction.** Inside the crate, `adapter` uses `transport`, `protocol`, `layout` and
-  `plan`, and `transport` uses `protocol::Request`. Taking `&Request` instead of a raw line makes the part-1 method
-  allow-list (`ALLOWED_METHODS`) hold at the type level, the same way the hub's `send_over` builds its own envelope.
-  No cycle. No dependency on `holler-hub`, `holler-cli` or `holler-body` (AC 41).
-- **The port contract.** `HerdrPort` is implemented as frozen. `PaneError` is the only error type, as `protocol.rs`
-  already does (Reuse map: "No parallel error type"). `Usage` for a bad config follows `FakeHerdr::with_workspace`'s
-  `usage` for a bad declaration.
-- **Plan, act, observe** (Decision 11) follows I3's wording. "Never relocates a healthy pane" (ADR §10) holds: a
-  misplaced pane is left in place, and healing it is #647's.
-- **Recording `host.herdr_api_version`.** The epic credits #640 with it, but the adapter cannot write a `Pane` record
-  without breaking ADR §5 and I1. Deferring it to #644 through `version()` is the right reading.
-- **State and persistence.** The adapter persists and caches nothing (AC 37). There is no secret in any message: typed
-  text never reaches an error (AC 12; `Request`'s `Debug` already hides it).
-- **Size.** The largest planned file is `adapter_test.rs` at about 650 lines (lint warns at 600 and fails at 900). The
-  brief names where every new item goes and when the test file is split.
-- **Test-module pattern.** `tests/wire_herdr/mod.rs` follows part 1's `tests/common/mod.rs`, a shared module with
-  `#![allow(dead_code)] // #640`.
+- **The objects extended.** `protocol::excerpt` (`protocol.rs:580`) becomes the crate's one quoting helper. Every
+  Herdr-sent value that `adapter.rs` quotes is one of the four sites the brief names (`:232`, `:238`, `:374`, `:388`). I
+  read every other placeholder in the file, and each one quotes a caller value, a computed `GridPos` or a count, so the
+  brief's NV-8 question is settled. `Tapped::Fail` extends the one interceptor (`wire_herdr/mod.rs:213-251`), and
+  `Tap::exchange` is the only `match` on `Tapped`, so the new variant breaks no existing test. `HerdrConfig::with_workspace`
+  exists (`adapter.rs:68`).
+- **Decision 9's layering.** The adapter maps a `Timeout` once, at the port boundary, and the transport keeps its wire
+  vocabulary underneath (AC 20). The OpenCode adapter has the same shape: its `Call` maps `HttpError::TimedOut` to the
+  method's `op` (`holler-adapter-opencode/src/lib.rs:303-333`). The host adapter's `host.*` constants are now merged. No
+  code branches on an `op`'s text. `Display`, `detail()` and the wire carry it (`error.rs:559`, `:586`, `:673`), and
+  reconcile matches `Timeout { .. }` (`reconcile/observe.rs:170`), so the change touches vocabulary only. The seven
+  strings must equal `HerdrOp::as_str` (`holler-pane-testkit/src/herdr.rs:66-76`).
+- **Placement.** The harness is a directory module, which follows `wire_herdr/` and `common/`. Its pinned API has no
+  adapter type, so #649 can move it to the test kit. That move would add `tempfile` to the test kit, which ADR-0021 §5
+  limits to `holler-pane` and `serde_json`, so it needs an ADR edit in #649 (operator item 5). The new
+  `adapter_messages_test.rs` keeps `adapter_test.rs` (645 lines) below the overlay's 800-line flag.
+- **The stack rules.** No dependency changes (AC 30). The adapter's `src/` still reads no environment and spawns
+  nothing (AC 29), and every `herdr` spawn goes through one function (AC 8), a single choke point. No secret or personal
+  name appears in the planned text: AC 7's literals are generic, and the handoffs write `<scratch-root>`. No protocol
+  file, golden file or `holler-proto` file is touched. The baseline greps of E-5 and E-12 print what the brief says on
+  this tree.
+- **The contract crate.** D1-D6 change doc comments only, and they bring the docs up to merged behaviour and to ADR §10
+  as #683 amended it. The epic's amend-first rule ("If either fails, the ADR (#634) and the contract are amended first,
+  in their own PR") covers contract changes that a spike forces. A9 puts the one such change, unplaced panes, in the
+  Deferred list, where it belongs.
+- **Sizes.** The largest touched files afterwards are `wire_herdr/mod.rs` (about 660 lines), `holler-pane/src/error.rs`
+  (710, plus about 4) and `adapter.rs` (about 475). `scripts/lint.sh` warns at 600 and fails at 900.
+- **CHANGELOG.** Putting this entry right after the part-2 entry follows part 2's own precedent, since part 2's entry
+  sits right after part 1's.
 
 ## Notes for O
 
-PASS, so nothing is required. If the brief is reopened before T writes RED, findings 1, 2 and 3 each cost one decision
-line and at most one AC, and are cheaper now than at Phase 7. If it is not reopened: under finding 2, F quotes
-Herdr-sent text with `{:?}` and writes no third `excerpt`, and the anti-duplication gate will check that; under finding
-3, F should at least keep `connect` from panicking on an overflowing timeout. Findings 4, 6 and 7 are for the #647,
-#649 and #642 briefs and for part 3; finding 5 is T's to apply while writing the wire fake.
+The verdict is PASS, so nothing is required. On the automated path the warns are advisory, and two of them need no
+brief change. T can apply finding 3 while writing the harness (one runner and one poll helper are private helpers the
+brief allows). F can apply finding 5 by leaving `adapter.rs:338` as it is. If the brief is reopened before T's RED run,
+findings 4 and 6 each cost a sentence or two of D/A text and one line of AC 25. Finding 2 is one Reuse-map row and one
+sentence in Decision 13. Findings 2 and 6(b) also feed the operator's items 2 and 5.
 
 ## Patterns referenced
 
-1. `crates/holler-adapter-herdr/src/{protocol,layout,plan}.rs`: the part-1 objects this plan extends (all pub items
-   the Reuse map names exist as described).
-2. `crates/holler-pane-testkit/src/{herdr.rs,fault.rs,conformance/herdr.rs,conformance/mod.rs}`: `FakeHerdr`, the
-   `PortOp` op vocabulary, the 11 cases and the fixture/guard runner.
-3. `crates/holler-hub/src/control.rs:485-518` (the JSON-line Unix-socket client pattern) and
-   `crates/holler-hub/src/panes/store.rs:268` (the `checked_add` deadline idiom).
-4. `crates/holler-cli/src/pane/wiring.rs`: the seam #649 fills, where `HerdrAdapter::connect` will be called.
-5. `docs/adr/ADR-0021.md` §2, §5, §9, §10, §12; `docs/research/opencode-pane-spike.md:189-200`.
+1. `crates/holler-adapter-host/tests/real_tmux_test.rs` and `crates/holler-adapter-host/src/exec.rs` (on `main` at
+   `e327569`): the sibling opt-in real-instance test and the merged bounded runner.
+2. `crates/holler-cli/tests/support/mod.rs` (`StateDir`, `wait_for`, `Hub`, `stop_hub`): the harness helpers this repo
+   checks first at Phase 7.
+3. `crates/holler-adapter-opencode/src/lib.rs` (`Call`, the `harness.*` ops, `health`) and `src/exec.rs`.
+4. `crates/holler-pane-testkit/src/{herdr.rs,fault.rs,conformance/herdr.rs}`: `HerdrOp`, `PortOp`, the 11 cases, the
+   `ASSUMPTION (#640)` comments.
+5. `docs/adr/ADR-0021.md` §2, §5, §9, §10, "Deferred to named stories", "Decisions taken"; `scripts/lint.sh`; #696.
