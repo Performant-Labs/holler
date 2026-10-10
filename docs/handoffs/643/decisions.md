@@ -504,3 +504,47 @@
     since the merge base (empty).
   - Commands: `git fetch`; `git merge-tree --write-tree origin/main HEAD` (exit 0); `git diff --name-only
     origin/main...HEAD` (the brief's files plus `docs/handoffs/643*`); `wc -l` on the six files (the largest is 587).
+
+## S (Phase 8, spec audit, amendment 1) — 2026-10-09T20:26:07-06:00
+- **Decided:** PASS; see handoff-S.md. Both preconditions are met: A and A-dup PASS; T-red's RED was 31 passed and 5
+  failed, each on an amendment-1 assertion; T-green's GREEN was 36/36 and 127/127, with no blocking issue.
+  - Each of the 24 ACs has a proving test that asserts behaviour, by file and line in handoff-S.md. The issue's own
+    criteria map onto them.
+  - Decisions 1 to 16 are implemented as stated. The two departures from the letter (W-12 `is_member`, W-13
+    `at <= 0`) were asked for by A and are recorded in `evidence.md`, so neither is silent.
+  - Quality checks are clean: build guards, no protocol change, no fixed sleeps, the CHANGELOG under `[Unreleased]`,
+    and a privacy sweep with neutral hits only. The scope is exactly the brief's ten files.
+  - Six advisories, none blocking. The main ones:
+    - record ruling (a1) on #643, whose body still says "SHOWN and DRIVEN differ";
+    - three decisions that are implemented but pinned by no test: D5's profile-store error (exit 1), D12's `at > 0`
+      time form and the quoted non-zero `since`, and D4's verb-side sort;
+    - the PR disclosure and title, the `origin/main` merge, and the follow-ups to file.
+- **Assumed:**
+  - T-green's recorded Tier 1 and Tier 2 results stand. S re-ran no suite (role); it re-ran only read-only greps,
+    `wc -l` and diffs.
+  - `stub.rs`'s `rustfmt` check is covered by F's seven-file run, which T-green re-ran. T-green's table lists six.
+  - The MO's ruling (a1), as the brief records it, is the authority for AC 3 over the issue body's wording.
+- **Hedged:**
+  - The three untested decisions are advisory, not REWORK. None is an AC. The role sends a missing test to REWORK only
+    for a criterion, and for decisions it asks that they be implemented as stated, which they are (`get.rs:125`,
+    `list.rs:330-335`, `get.rs:247`, `list.rs:103`). The JSON contract that scripts read is pinned verbatim by AC 7.
+    A test-only loop through the paid gates for guard tests of correct code would cost more than it buys.
+  - Advisory 1 is not an ADVISORY-HOLD. The brief is not defective: it names the contradiction (C8) and the MO's
+    resolution. Only the issue text lags behind.
+- **Evidence:**
+  - Read in full: the brief (amendment 1); handoff-A, -T-red, -F, -T-green and -A-dup; decisions.md; evidence.md; the
+    outside gates `643-brief-result-r2.md` and `643-diff-result-r1.md` (both PASS); `gh issue view 643` (body, no
+    comments); the three verb files; the three test files; `process/{main,stub}.rs`; the diffs of `CHANGELOG.md`,
+    `cli-surface.txt`, `stub.rs` and `ADR-0003.md`; `reconcile.rs:171-181`; `profile_diff.rs:254-265`; the spec-auditor
+    overlay; CONTRIBUTING's disclosure section; `.githooks/prepare-commit-msg`; and `pipeline-conventions.md` §1.
+  - Commands (read-only):
+    - the AC 17, AC 21, `unsafe`, `STUBS`-row and `assert_stub_routes` greps (all empty);
+    - an `unwrap`/`expect`/`panic` grep of src and a `#[allow]` grep of the diff (both empty);
+    - `wc -l` on the eight touched files;
+    - the diffs of the manifests and the frozen files against `origin/main` (both empty);
+    - a `diff` of the ADR rows and the fixture block against the brief (identical);
+    - the CHANGELOG headings;
+    - a privacy grep of the branch's 5,229 added lines;
+    - callers of `shown_differs`, `SessionSync::of` and `is_member`;
+    - the commit subjects, authors and trailers, and a session-link count over `main`'s last 200 commits (0);
+    - `gh pr list --head issue-643-implementation` (none).
