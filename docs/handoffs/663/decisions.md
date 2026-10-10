@@ -378,3 +378,26 @@ Rigor/brief gate: BLOCKED, overridden by Andre Angelantoni: The outside brief ga
   - **AC 5, 9, 11, 12 and 14 checks** hold on the working tree against the merge base `0ad2d8a`.
   - **Sources:** the macOS log via `gh run view 38013074383 --job 114099775442 --log` (line 641), and #706's
     `holler-adapter-host/src/exec.rs:202` at `e327569`. Details are in `handoff-F.md` and `evidence.md`.
+
+## T (Phase 7, verify / GREEN, re-entry) — 2026-10-09T20:31:14-06:00
+- **Decided:**
+  - **GREEN is valid.** The 7 scope tests, the 12 probe tests and 8m pass. Both test modules hash the same as at the RED
+    commit `f79cd05`. F flagged no test as wrong and I found none, so no test was repaired.
+  - **The amended test pins behaviour.** Four mutations of `reconcile_step` (the bare form, the quoting, the
+    `profile show` half, `doctor_command`'s `fix` argument) each turn at least one authored test red. The reuse of
+    `doctor_command` itself is pinned by AC 5's source grep, not a test, because the output does not change.
+  - **No blocking issue.** Tier 1 and the AC 5, 9, 11, 12 and 14 checks all pass.
+- **Assumed:**
+  - `cargo doc` is not a CI gate. Its 7 warnings are all in `cli.rs`, which is not in the diff.
+  - The `CHANGELOG.md` conflict with `origin/main` (`e327569`) is resolved by the merge step, not T.
+- **Hedged:**
+  - `profile_scope.rs` is at 605 lines, which is the accepted `lint.sh` warn (AC 10), journalled here.
+  - The probe tests' macOS timing and BSD `kill` are covered by CI's macOS job; on this Linux host they passed 10 of 10
+    more runs.
+- **Evidence:**
+  - `cargo test -p holler-cli --lib pane::profile_scope`: 7 passed. `probe::tests`: 12 passed (0.53 s; 1.39 s serially).
+  - `HOLLER_STATE_DIR=<scratch> cargo test --workspace --no-fail-fast`: exit 0, 131 suites, 1495 passed, 0 failed.
+  - clippy `-D warnings`, `lint.sh`, `changelog-check.sh`, `cargo machete`, `rustfmt --check`, `docs_cli_test`,
+    `wire_selftest` and the testkit all pass.
+  - F's 7 new evidence excerpts match the source at the cited lines (branch, and `dc300ab`). Details are in
+    `handoff-T-green.md`.
