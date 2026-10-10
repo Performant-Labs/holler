@@ -443,3 +443,25 @@
   - Also read: `reconcile.rs:150-200`, `profile_diff.rs:168-275`, `profile/show.rs:176-198`, `pane.rs:180-190`,
     `fixture.rs:55-75`, every older `evidence.md` cite (all still match), and `dual-review.sh`'s evidence cap and
     reference resolution.
+
+## T (Phase 7, verify / GREEN, amendment 1) — 2026-10-09T20:12:07-06:00
+
+- **Decided:**
+  - GREEN is valid: 36 of 36 read-verb tests pass, `pane_verbs` 127 of 127, and the isolated workspace suite has
+    1472 passed and 0 failed. Verdict PASS, with no blocking issue.
+  - No test was changed. F flagged none, and T found none wrong.
+  - Nothing added to `evidence.md`. The new tests rely only on `shown_differs`, which the brief quotes, and
+    `is_member`, which F's W-12 entry quotes.
+- **Assumed:**
+  - Round 2's AC table and mutations M1 to M11 and Ma to Mc still hold for AC 1, 2 and 4 to 18. Amendment 1 did not
+    touch that code: the escaping, the errors and the feed loop.
+- **Hedged:**
+  - The "SHOWN/DRIVEN rule" wording in the `list.rs` docs is recorded as advisory, not blocking. The rendered help
+    names the session of record.
+- **Evidence:**
+  - Mutations Mc1 to Mc5 (the `at == 0` guard, no record guard, the home screen read as ok, no `at` guard,
+    membership always true) failed 1, 3, 3, 4 and 2 tests. Each file was restored, and `git status` was clean.
+  - All exit 0: clippy `-D warnings`, `lint.sh`, `changelog-check.sh`, `test-hooks.sh`, `machete`,
+    `rustfmt` on the six files, and `wire_selftest`.
+  - The AC 17, AC 21 and `unsafe` greps print nothing, and the manifest diff is empty.
+  - The blast radius is exactly the brief's ten files.
