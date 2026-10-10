@@ -377,6 +377,13 @@ jobs:
         run: bash scripts/test-hooks.sh
         shell: bash
 
+      # scripts/pane-restart (issue #746) is tested against fake tmux, curl and pfo
+      # on PATH and a temporary HOME; it never touches a live pane. Runs once (ubuntu).
+      - name: pane-restart (scripts/tests/pane-restart-test.sh)
+        if: env.SKIP_THIS_LEG != 'true' && (matrix.os == 'ubuntu-latest')
+        run: bash scripts/tests/pane-restart-test.sh
+        shell: bash
+
       # Unused dependencies fail the build (issue #155 §7): a crate must
       # declare only what it consumes. Runs once (ubuntu) — the answer does
       # not depend on the OS.

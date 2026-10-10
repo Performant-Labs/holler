@@ -8,6 +8,13 @@ fills this file in at release time.
 ## [Unreleased]
 
 ### Enhancements
+- `scripts/pane-restart` (issue [#746](https://github.com/Performant-Labs/holler/issues/746), epic
+  [#633](https://github.com/Performant-Labs/holler/issues/633)): one bounded command that restarts a fleet
+  pane's OpenCode TUI on a new model in its existing tmux session (`pane-restart c3r1 --model
+  anthropic/claude-sonnet-5-5 --effort medium --key-file …`). It refuses a busy or unknown pane, backs up and
+  rewrites the `OC_` lines of `pane.env`, types every command with its Enter in the same `tmux send-keys`
+  call, waits for the new session to register, checks the pane answers on the requested model, and ends with
+  `pane-ready`. An interim tool: the planned holler pane relaunch (#644) replaces it.
 - Herdr display plugin (epic [#633](https://github.com/Performant-Labs/holler/issues/633)):
   the new `plugins/herdr-holler` crate is the display-only Herdr sidebar plugin — a
   `herdr-plugin.toml` plus the `herdr-holler refresh` binary. It reads the hub's pane registry
