@@ -17,10 +17,11 @@
 //! while it is partial. The request sends no `Expect`, but an interim `1xx` head is skipped
 //! and the next one read (RFC 9110 section 15.2). The body is then read by
 //! `Transfer-Encoding: chunked` (each size line through `httparse::parse_chunk_size`, up to
-//! the `0` chunk, whose trailers are discarded), else by `Content-Length`, else to the end of
-//! the stream. A `204` or `304` has no body. A version other than HTTP/1.x, a malformed head
-//! or chunk, a connection closed before the declared length, or a reply longer than 64 MiB
-//! is [`HttpError::Garbled`].
+//! the `0` chunk; a trailer after it is never read, and goes with the connection), else by
+//! `Content-Length`, else to the end of the stream. A `204` or `304` has no body. A version
+//! other than HTTP/1.x, a malformed head or chunk, a connection closed before the declared
+//! length, or a reply that takes more than 64 MiB off the connection (its heads, chunk
+//! framing and body together) is [`HttpError::Garbled`].
 
 use std::io::{ErrorKind, Read, Write};
 use std::net::{Ipv4Addr, SocketAddr, TcpStream};
@@ -32,8 +33,10 @@ use serde_json::Value;
 /// The most headers a reply head may carry.
 const MAX_HEADERS: usize = 64;
 
-/// The most bytes a reply may take, head and body together (64 MiB): a session list of
-/// thousands of sessions is a few MiB.
+/// The most bytes one reply may take off the connection (64 MiB), counting every byte read:
+/// its heads (an interim `1xx` one too), any chunk framing and the body. A read that would
+/// pass it is refused before its bytes are kept, so the read buffer never holds more. A
+/// session list of thousands of sessions is a few MiB.
 const MAX_REPLY: usize = 64 << 20;
 
 /// A reply: the status and the whole body.
@@ -74,6 +77,7 @@ pub fn request(
     let mut reader = Reader {
         stream,
         buf: Vec::new(),
+        taken: 0,
         deadline,
     };
     let (status, framing) = reader.head()?;
@@ -119,8 +123,11 @@ fn connect(port: u16, deadline: Instant) -> Result<TcpStream, HttpError> {
     })
 }
 
-/// The request's bytes: the head, then the JSON body if there is one. A method that carries
-/// content (`POST`, `PUT`, `PATCH`) states its length even when it sends none.
+/// The request's bytes: the head, then the JSON body if there is one. The head carries
+/// `Host`, `Accept: application/json` and `Connection: close`; a body adds `Content-Type:
+/// application/json` and its `Content-Length`, and a method that carries content (`POST`,
+/// `PUT`, `PATCH`) sends `Content-Length: 0` when it has none. No other header is sent: no
+/// `User-Agent`, and no `Expect`.
 fn encode(port: u16, method: &str, path: &str, body: Option<&Value>) -> Vec<u8> {
     let body = body.map(Value::to_string);
     let mut head = format!(
@@ -221,20 +228,21 @@ fn too_long() -> HttpError {
     HttpError::Garbled(format!("the reply is longer than {MAX_REPLY} bytes"))
 }
 
-/// The reading half of one request: the connection, the bytes read and not yet used, and
-/// the request's deadline.
+/// The reading half of one request: the connection, the bytes read and not yet used, the
+/// count of every byte read, and the request's deadline.
 struct Reader {
     stream: TcpStream,
     buf: Vec<u8>,
+    /// Every byte read off the connection for this reply, used or not. The read that takes
+    /// it past [`MAX_REPLY`] fails, and the reply with it.
+    taken: usize,
     deadline: Instant,
 }
 
 impl Reader {
-    /// Read more of the reply onto `buf`; `Ok(0)` at the end of the stream.
+    /// Read more of the reply onto `buf`; `Ok(0)` at the end of the stream. A read that takes
+    /// the reply past [`MAX_REPLY`] bytes is `Garbled`, and its bytes are not kept.
     fn fill(&mut self) -> Result<usize, HttpError> {
-        if self.buf.len() >= MAX_REPLY {
-            return Err(too_long());
-        }
         let mut chunk = [0u8; 8192];
         loop {
             self.stream
@@ -242,6 +250,10 @@ impl Reader {
                 .map_err(|error| failed("set a read timeout", &error))?;
             match self.stream.read(&mut chunk) {
                 Ok(n) => {
+                    self.taken += n;
+                    if self.taken > MAX_REPLY {
+                        return Err(too_long());
+                    }
                     self.buf.extend_from_slice(&chunk[..n]);
                     return Ok(n);
                 }

@@ -23,7 +23,9 @@ use crate::{OpenCodeConfig, ProcessEnv, OP_SERVE};
 /// The route a health check asks.
 const HEALTH: &str = "/global/health";
 
-/// How often `serve` asks a fresh server whether it is up (the brief: every 100-200 ms).
+/// The least time from the start of one of `serve`'s boot health tries to the start of the
+/// next (the brief: every 100-200 ms). A try that takes longer, up to `boot_try` when its GET
+/// hangs in the boot race, is followed at once.
 const BOOT_INTERVAL: Duration = Duration::from_millis(150);
 
 /// How long the `kill` of a server that never came up may take.
@@ -115,9 +117,10 @@ fn start(config: &OpenCodeConfig, port: u16, dir: &Path) -> Result<Child, PaneEr
 }
 
 /// Ask the fresh server whether it is healthy, one `GET /global/health` of at most
-/// `boot_try` about every [`BOOT_INTERVAL`], until it is or `deadline` passes. Nothing else
-/// is sent before the first healthy answer: a request sent while the server boots can be
-/// accepted and never answered (opencode-pane-spike.md:198-201).
+/// `boot_try` per try, the tries starting at least [`BOOT_INTERVAL`] apart, until it is or
+/// `deadline` passes. Nothing else is sent before the first healthy answer: a request sent
+/// while the server boots can be accepted and never answered
+/// (opencode-pane-spike.md:198-201).
 fn wait_until_up(
     child: &mut Child,
     name: &PaneName,

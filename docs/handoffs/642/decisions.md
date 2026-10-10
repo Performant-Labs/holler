@@ -216,3 +216,43 @@
     - `cargo clippy -p holler-adapter-opencode --all-targets -- -D warnings`;
     - `rustfmt --check --edition 2021`;
     - `bash scripts/lint.sh` (exit 0).
+
+## F (Phase 6, implement: round 2, the rework after the outside diff gate's round 1) — 2026-10-09T18:44:50-06:00
+- **Decided:** `done`, with archChanged false. All 30 hermetic tests still pass, and no test was edited.
+  - B-1: the 64 MiB bound in `http.rs` now counts every byte read off the connection (heads, chunk framing and body). Once
+    the total passes the cap, a read is refused before its bytes are kept, so the read buffer never holds more than the cap. A's
+    N-3 showed that the old check already stopped within one 8 KiB read. The change makes the bound exact and the doc
+    literally true. It stays in `http.rs`, `MAX_REPLY` stays private, and there is no test-only knob (N-3).
+  - NV-2, W-1 and W-2 are wording fixes only:
+    - a trailer is never read;
+    - boot tries start at least 150 ms apart, and a longer try is followed at once;
+    - the request sends no other header.
+  - A's N-1(e): `tui.rs` no longer calls `OpenCodeConfig` final.
+  - NV-3 and NV-4: two evidence entries quote std's `CommandExt::process_group` and `Child::id` (Rust 1.98.1).
+  - W-3, NIT-1, NIT-2 and the B-2 the gate withdrew: no change. handoff-F.md gives the reasons.
+- **Assumed:**
+  - The gate's line numbers do not match the files (T found the same), so I matched its findings to the code by content.
+  - Counting a reply's head and framing toward the cap is acceptable, because no OpenCode reply comes near 64 MiB. The cost
+    is a largest readable body a little under 64 MiB.
+- **Hedged:**
+  - The std excerpts come from the local `rust-docs` component's rendered source (1.98.1), outside the repo, so the gate
+    cannot attach them. `process_group` and `Child::id` are stable APIs, so a newer stable on CI does not change them.
+  - The macOS form of `kill -s KILL -- -<pgid>` stays unverified until CI's macOS leg runs T's group-kill test.
+  - I left the early `timeout` in `settled` (less than one poll interval left) as it is. A final poll would have a request
+    budget of about zero and would time out anyway.
+- **Evidence:**
+  - Read:
+    - `642-diff-result-r1.md` (whole), handoff-A.md, handoff-T-red.md, handoff-T-green.md, this file, evidence.md, the brief
+      (whole), `src/*.rs` (whole), `tests/hermetic_test.rs:1-300` and `tests/support/stub.rs` (whole);
+    - the playbook's F block and commit step (`coding-pipeline.workflow.mjs:3048-3121, 4774-4800`) and `dual-review.sh`'s
+      excerpt and evidence handling (894-1110);
+    - the rendered std source of `os/unix/process.rs` and `process.rs` (rust-docs 1.98.1);
+    - issue #642 (last updated 17:40:07 MDT, A's N-1 amendment, nothing newer).
+  - Ran:
+    - `cargo test -p holler-adapter-opencode` (30/30 before and after);
+    - `cargo clippy --workspace --all-targets -- -D warnings`, `rustfmt --check`, and `cargo doc` with `-D warnings`;
+    - `bash scripts/lint.sh`, `scripts/changelog-check.sh`, `cargo machete`, the AC 24 grep and the `unsafe` count;
+    - `rustc --print cfg --target aarch64-apple-darwin`;
+    - `cargo test --workspace` with `HOLLER_STATE_DIR` isolated;
+    - a scratch probe of the bound's edges and peak memory, outside the repo and deleted afterwards (output in
+      handoff-F.md).

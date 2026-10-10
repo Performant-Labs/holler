@@ -1,7 +1,7 @@
 //! The tmux side of the adapter: which tmux server a pane's TUI runs on.
 //!
-//! In part 1 of #642 this module holds only [`TmuxSocket`] and [`TmuxConfig`], so that
-//! [`crate::OpenCodeConfig`] is final. Part 2 adds the tmux calls of `attach_tui`,
+//! In part 1 of #642 this module holds only [`TmuxSocket`] and [`TmuxConfig`], the type of
+//! [`crate::OpenCodeConfig`]'s `tmux` field. Part 2 adds the tmux calls of `attach_tui`,
 //! `select_session` and `shown_session` here, with their builders and parsers. This adapter
 //! never starts a tmux server (it only addresses sessions that exist), so a tmux config
 //! file has no effect and there is no `-f`.

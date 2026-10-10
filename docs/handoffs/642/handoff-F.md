@@ -1,8 +1,192 @@
 # Handoff-F: Phase 6 - #642a the OpenCode adapter, server side (`serve`, `health`, `create_session`, `list_sessions`, `abort`, `http::request`)
 
 **Date:** 2026-10-09
-**Branch:** issue-642-implementation (on 0ce98a4, T's RED commit)
+**Branch:** issue-642-implementation (round 2 on 4c9b710, T's round-2 commit; round 1 was on 0ce98a4)
 **Issue:** #642, part 1 of 2 (the PR says `Part of #642`). Brief: `docs/handoffs/642-brief.md`, its 642a AC list only.
+
+## Round 2: rework after the outside diff gate's round 1
+
+### What this round answers
+
+- **The outside diff gate's round 1** (`docs/handoffs/642-diff-result-r1.md`, untracked): 1 BLOCK (B-1), NV-1 to NV-5, W-1 to
+  W-3, NIT-1 and NIT-2. On this route the driver passes F no note, so these come from that file.
+- **A's re-review** (handoff-A.md at c052d02, PASS):
+  - N-1: the agent part waits on #700. Change no code for it, and reword `tui.rs:3-4` if docs are edited.
+  - N-2: belongs to 642b.
+  - N-3: B-1's premise does not hold as measured. Any F change stays in `http.rs`, with no test-only knob.
+- **T's round 2** (handoff-T-red.md at 4c9b710): 30 tests, all passing on the existing code. F had nothing to turn GREEN.
+
+### What was done
+
+- **`crates/holler-adapter-opencode/src/http.rs`** (348 to 360 lines):
+  - **B-1, the code change.** The 64 MiB bound is now exact, and it counts every byte the reply takes off the connection.
+    `Reader` gains one private field, `taken`. `fill` adds each read's length to it. If the total passes `MAX_REPLY`,
+    `fill` answers `Garbled` before it keeps that read's bytes. The old check before the read (`buf.len() >= MAX_REPLY`) is
+    gone. The load-bearing lines:
+    ```rust
+    Ok(n) => {
+        self.taken += n;
+        if self.taken > MAX_REPLY {
+            return Err(too_long());
+        }
+        self.buf.extend_from_slice(&chunk[..n]);
+        return Ok(n);
+    }
+    ```
+  - **The docs now match the code.** `MAX_REPLY`'s doc and the module doc say the bound covers the heads (an interim `1xx`
+    one too), any chunk framing and the body, all counted as read off the connection. That closes A's note that "head and
+    body together" was looser than the code, which drained the head before it counted the body.
+  - **NV-2, wording only.** The module doc says a trailer after the `0` chunk is never read and goes with the connection.
+    The old wording, "whose trailers are discarded", was read by the gate as "read and then discarded".
+  - **W-2.** `encode`'s doc lists the head's headers and says no other header is sent: no `User-Agent`, and no `Expect`.
+- **`src/server.rs`** (comments only, 186 to 189 lines). For W-1, the docs of `BOOT_INTERVAL` and `wait_until_up` now say
+  what the loop does. Tries start at least 150 ms apart, and a try that takes longer is followed at once. A try can take up
+  to `boot_try` when its GET hangs in the boot race. The gate's "~650 ms" period does not happen: `next` is measured from the
+  start of the try, so after a 500 ms try the sleep is zero.
+- **`src/tui.rs`** (docs only). For A's N-1(e), the module doc no longer calls `OpenCodeConfig` final, because it will gain
+  the agent field. It now says the module holds the type of that struct's `tmux` field.
+- **`docs/handoffs/642/evidence.md`**: two entries for NV-3 and NV-4, quoting the Rust 1.98.1 standard library's
+  `CommandExt::process_group` and `Child::id` (see the Evidence appendix below).
+
+No test was edited. `lib.rs`, `exec.rs`, `Cargo.toml`, `CHANGELOG.md` and `Cargo.lock` are unchanged in this round.
+
+### How each gate finding stands
+
+| Finding | Answer | Where |
+|---|---|---|
+| B-1 (the 64 MiB bound on a read to the close) | The premise did not hold. The old check let at most one 8 KiB read past the cap, and A measured that (N-3). Applied anyway, in the form the gate suggested: the check comes before a read's bytes are kept, so the read buffer never holds more than the cap. The count now covers heads and framing too. T's over and under cases pin it. | `http.rs` `fill`; T's `ac1_an_unframed_reply_past_64_mib_is_garbled_and_one_under_it_is_read` |
+| NV-1 (the index `parse_chunk_size` returns) | Settled by `httparse`'s own doc example. | T's evidence entry |
+| NV-2 (trailers) | Trailers are never read, and the client sends `Connection: close`. The doc now says so. T's new test reads a chunked body that has an extension and a trailer. | `http.rs` module doc; T's `ac1_a_chunked_reply_with_an_extension_and_a_trailer_reads_its_body` |
+| NV-3 (`process_group(0)` without `unsafe` on both CI targets) | It is a safe trait method, stable since 1.64.0. `rustc --print cfg --target aarch64-apple-darwin` prints `unix`, so `std::os::unix` is there on macOS. | F's evidence entry; T's `serve_kills_its_process_group_when_the_deadline_passes` |
+| NV-4 (`Child::id()` is the group id) | std: "A process group ID of 0 will use the process ID as the PGID", and `Child::id` is the child's process id. | F's evidence entries; the same T test |
+| NV-5 (`workdir` is resolved only after the health check) | T's counting resolver asserts zero calls when the port is held or frozen. | T's two extended `ac8_serve_*` tests |
+| W-1 (boot-poll period) | Comment corrected (above). No behaviour change. | `server.rs` |
+| W-2 (no extra headers) | Comment added (above). | `http.rs` `encode` |
+| W-3 (`Garbled` maps to `unavailable`) | No change. This is the brief's mapping (Behaviour: "`Garbled`, or a status the step does not expect -> `unavailable` naming the route and status"), and the gate itself says "No change required". | — |
+| NIT-1 (zero budget) | No change. With nothing left, `healthy` answers `false` and `refuse_a_held_port` answers `timeout`, both right for a call that is out of time. | — |
+| NIT-2 | No change; the gate says none is needed. | — |
+| The B-2 the gate withdrew itself | No change. When less than one `SETTLE_POLL` is left, `settled` answers `timeout` without a last poll, because that poll's request budget would be about zero and would time out anyway. | — |
+
+### Design decisions
+
+1. **Count every byte taken, not just the buffer.** Three options were weighed:
+   - **(a) Change the docs only** ("the head, then the body, each within one 8 KiB read of the cap"). This is A's minimum.
+     I rejected it because the buffer could still pass the stated cap by up to 8,191 bytes, which is exactly what the gate
+     flagged. It also left the edges inconsistent: a read-to-the-close body of exactly `MAX_REPLY` bytes was `Garbled`, while
+     a `Content-Length` body of the same size was read.
+   - **(b) Check `buf.len() + n > MAX_REPLY`** (the gate's second suggestion). This bounds the buffer. But the head is drained
+     before the body is counted, so "head and body together" stays untrue, and a chunked reply's framing is never counted.
+   - **(c) Count every byte read** (chosen). One counter and one comparison make the doc's sentence literally true for every
+     framing, and the read buffer never holds more than `MAX_REPLY`.
+
+   **The cost:** a reply's head and chunk framing now count toward the 64 MiB, so the largest body that can be read is a
+   little under 64 MiB. It is smaller by the head's length, and for a chunked reply by its framing (about 0.1% with 8,000-byte
+   chunks). No OpenCode reply comes near that size: a list of thousands of sessions is a few MiB.
+2. **The early refusals stay.** `sized` refuses a declared `Content-Length` over the cap before any read. `chunked` does the
+   same for a declared chunk size that cannot fit. Each is a necessary condition, so it saves the read without changing the
+   bound, and the counter does the rest.
+
+### Reuse / extend-vs-new
+
+No new object. The change extends `http.rs`'s private `Reader` with one field.
+
+### Architecture notes for A
+
+None. No module, public type, signature or dependency changed. `MAX_REPLY`, `Reader` and `taken` are private, and the public
+surface is still exactly the brief's API. archChanged: false.
+
+### Deviations from spec
+
+None. The brief's reading rules (brief:558-563) set no size bound. The bound is F's round-1 decision 9, and this round only
+makes it exact. A's N-3 asks O to record the bound in the brief's `http.rs` section at its next amendment.
+
+### Tier 1 self-check (incl. tests GREEN)
+
+```
+$ cargo test -p holler-adapter-opencode
+running 30 tests ... test result: ok. 30 passed; 0 failed; 0 ignored; finished in 1.05s   (30/30 before the change too)
+$ cargo clippy --workspace --all-targets -- -D warnings      -> Finished, no warnings
+$ rustfmt --check --edition 2021 crates/holler-adapter-opencode/{src,tests,tests/support}/*.rs   -> exit 0
+$ RUSTDOCFLAGS="-D warnings" cargo doc -p holler-adapter-opencode --no-deps   -> Finished, no warnings
+$ bash scripts/lint.sh          -> exit 0 (the crate's only note: T's hermetic_test.rs at 775 lines)
+$ bash scripts/changelog-check.sh   -> changelog-check: ok
+$ cargo machete                 -> didn't find any unused dependencies
+$ grep -rn "4700[0-9]\|--continue" crates/holler-adapter-opencode   -> nothing (exit 1)
+$ git diff origin/main -- crates/ | grep '^+' | grep -c unsafe     -> 0
+$ rustc --print cfg --target aarch64-apple-darwin | grep -E 'unix|target_family'   -> target_family="unix", unix
+```
+The whole-diff `git diff origin/main | grep -c unsafe` is 19, and every one is prose under `docs/handoffs/`: the brief, the
+handoffs, decisions.md and this round's evidence entry. The pipeline removes those files before merge. Outside them the
+count is 0 (`git diff origin/main -- . ':(exclude)docs/handoffs' | grep -c unsafe`), so no code line contains `unsafe`.
+
+AC 20, `cargo test --workspace` (CI's form, `-- --skip roster_stays_accurate_under_concurrent_body_load`, with
+`HOLLER_STATE_DIR` set to a scratch dir as in round 1): exit 0, 126 suites, **1413 passed, 0 failed, 5 ignored**. That is
+round 1's 1410 plus the crate's three new tests (27 to 30). The run started before the last two doc-comment edits to
+`http.rs`. The crate's tests, clippy, rustfmt, rustdoc, `lint.sh` and `cargo machete` were run again after those edits, and
+all are clean (30/30).
+
+**The bound, measured.** A throwaway program (in the session scratchpad, outside the repo, now deleted) called the public
+`http::request` against one-shot loopback servers. Each server streams its reply in 8 KiB writes, so it holds no large buffer
+of its own. M is 64 MiB (67,108,864 bytes), and the unframed head is 38 bytes.
+```
+unframed, head + body = M - 1: Ok((200, 67108825))
+unframed, head + body = M:     Ok((200, 67108826))
+unframed, head + body = M + 1: Err(Garbled("the reply is longer than 67108864 bytes"))
+unframed, body = M - 1024 (T's under case): Ok((200, 67107840))
+unframed, body = M + 1   (T's over case):   Err(Garbled(...))
+Content-Length, body = M - 1 KiB: Ok((200, 67107840))
+Content-Length, body = M:         Err(Garbled(...))                 (head + body > M)
+Content-Length, body = M + 1:     Err(Garbled(...)) in 84 us        (refused before reading)
+chunked, body = M - 64 KiB:       Err(Garbled(...))                 (framing of 8,000-byte chunks counts)
+chunked, body = 2 KiB:            Ok((200, 2048))
+peak:  VmHWM 2,448 kB before; a 200 MiB unframed reply -> Garbled in 29 ms; VmHWM 67,540 kB after
+```
+
+### Evidence appendix
+
+`docs/handoffs/642/evidence.md` gains two entries this round: std's `process_group` (`library/std/src/os/unix/process.rs:
+174-204`) and `Child::id` (`library/std/src/process.rs:2351-2370`), from Rust 1.98.1. They are quoted from the rendered source
+that rustup's `rust-docs` component installs, outside the repo, so the gate cannot attach them; they stand as verbatim quotes.
+
+**For T-green:** the file is now 9,528 bytes, and the gate's appendix cap is 12,000 bytes
+(`DUAL_REVIEW_EVIDENCE_MAX_BYTES`, `dual-review.sh:948`). Any text past the cap is cut from the end, so T-green has about
+2.4 KB left for new entries.
+
+### Tests that look wrong (for T)
+
+None. T's two cap cases keep their margins under the new counting. The unframed head is 38 bytes, so the under case takes
+64 MiB - 986 bytes in all, and the over case takes 64 MiB + 39.
+
+**For T-green's mutation check:** round 2's M1 (delete `fill`'s check before the read) no longer applies, because that line is
+gone. The equivalent mutation now is deleting the `self.taken > MAX_REPLY` check.
+
+### Known issues
+
+None new. Carried from round 1, with their status:
+- **`serve`'s success path** still has no hermetic test. It needs a child that answers HTTP, so it belongs to 642b's
+  real-OpenCode rig. The deadline-kill path is now pinned by T-green's test.
+- **`kill -s KILL -- -<pgid>` on macOS** is unverified. It is checked on Linux only (procps-ng 4.0.4), and CI's macOS leg
+  will show it when it runs `serve_kills_its_process_group_when_the_deadline_passes`. Any fix belongs in `exec.rs`.
+- **The port race in `serve`** is inherent to choosing a port. The registry gives each pane its own port (#644).
+- **The issue's 2026-10-09 amendment** (the pane's OpenCode agent, which depends on #700) is A's N-1. It is out of 642a, and
+  no code was changed for it. The 642a PR body should name it as #642's open remainder, waiting on #700.
+- **Before the PR (for O and the run's agent):**
+  - A's W-4(c): file the `FakeHarness` parity follow-up.
+  - A's W-3(2): the PR body lists divergence 15(a), cites #695, and says the ADR-0021 note lands with 642b.
+  - The AI disclosure required by `CONTRIBUTING.md`.
+
+### Files changed (round 2)
+
+- `crates/holler-adapter-opencode/src/http.rs`
+- `crates/holler-adapter-opencode/src/server.rs` (comments only)
+- `crates/holler-adapter-opencode/src/tui.rs` (docs only)
+
+Handoff files: `docs/handoffs/642/handoff-F.md` (this section), `docs/handoffs/642/evidence.md` (two entries), and the F
+round-2 entry in `docs/handoffs/642/decisions.md`.
+
+---
+
+## Round 1 record (999d7e3), unchanged below
 
 ## What was done
 
@@ -62,7 +246,7 @@
 9. **Bounds on what is read.** A head may carry at most 64 headers, and a reply may be at most 64 MiB (head and body);
    `TooManyHeaders` or a longer reply is `Garbled`. A declared `Content-Length` over the cap fails before any read. A
    `Content-Length` must be all digits (`+5` is refused), and two different values are `Garbled`. A `204` or `304` has no
-   body.
+   body. (Round 2 makes the 64 MiB exact: every byte read off the connection counts.)
 10. **The excerpt:** at most 60 bytes of the body, decoded lossily, control characters as spaces, cut at a character boundary,
     then `...` when the body was longer. `one_line` also cleans every other external text a message quotes (an `io::Error`,
     a path, a `Garbled` reason).

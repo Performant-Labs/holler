@@ -107,3 +107,27 @@
   > ///            Ok(httparse::Status::Complete((3, 4))));
   > /// ```
   > pub fn parse_chunk_size(buf: &[u8])
+
+## F (Phase 6, implement: round 2, after the outside diff gate's round 1)
+
+- **Fact:** `std::os::unix::process::CommandExt::process_group` is a safe method (a plain `fn`, not an `unsafe fn`), stable since Rust 1.64.0, and a process group id of 0 makes the child's own pid its process group id. So `start` (`server.rs`) needs no `unsafe` for `process_group(0)`, and the group `stop` kills is the child's own (diff gate r1, NV-3 and NV-4). This is the Rust 1.98.1 standard library, outside the repository, read from the rendered source that rustup's `rust-docs` component installs (`~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/share/doc/rust/html/src/std/os/unix/process.rs.html`); the line numbers are the source's own.
+  **Source:** `library/std/src/os/unix/process.rs:174-204` (Rust 1.98.1)
+  **Verbatim excerpt:**
+  > /// Sets the process group ID (PGID) of the child process. Equivalent to a
+  > /// `setpgid` call in the child process, but may be more efficient.
+  > ...
+  > /// A process group ID of 0 will use the process ID as the PGID.
+  > ...
+  > #[stable(feature = "process_set_process_group", since = "1.64.0")]
+  > fn process_group(&mut self, pgroup: i32) -> &mut process::Command;
+
+- **Fact:** `Child::id` is the child's OS process id, so with `process_group(0)` it is also the child's process group id. `serve` returns it, and `stop` passes it to `kill_group` (diff gate r1, NV-4). The same Rust 1.98.1 standard library and rendered copy as above (`.../html/src/std/process.rs.html`).
+  **Source:** `library/std/src/process.rs:2351-2370` (Rust 1.98.1)
+  **Verbatim excerpt:**
+  > /// Returns the OS-assigned process identifier associated with this child.
+  > ...
+  > #[stable(feature = "process_id", since = "1.3.0")]
+  > ...
+  > pub fn id(&self) -> u32 {
+  >     self.handle.id()
+  > }
