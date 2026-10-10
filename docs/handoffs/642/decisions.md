@@ -318,3 +318,55 @@
     - the 640, 641 and 663 branches' crate diffs and new helpers;
     - `gh issue view` 695, 696 and 700, and `gh issue list --search FakeHarness`;
     - a grep of the added lines outside `docs/handoffs/` for personal infrastructure names (none).
+
+## S (Phase 10, spec audit; this run is 642a) — 2026-10-09T19:17:33-06:00
+- **Decided:** PASS (see handoff-S.md). Two items are required of O or the run's agent before the merge: the PR body must
+  say `Part of #642`, and the CHANGELOG conflict must be resolved.
+  - The A precondition (re-review PASS at c052d02, A-dup PASS) and the T precondition (T-green: no blocking issues; RED was
+    1 passed and 26 failed, all on assertions; GREEN is 30 of 30) are met.
+  - Each 642a AC (1-8, 11, 11d without `attach_tui`, 11e, 20's 642a clause, 21-24) has a named test or evidence that
+    asserts the behaviour. Two Behaviour rules with no AC number are pinned too: the deadline group kill, and resolving
+    `workdir` only after the health GET.
+  - The API, the Behaviour rules and decisions 2, 10-15(a) are built as the brief says. The changes from it are
+    documented: the `Garbled` doc is wider, there is no `tempfile`, the brief's own splits are used, any answer to the
+    first health GET means the port is in use, F added private reply bounds, the CHANGELOG has a part-1 entry, and
+    T-green's group-kill test runs `kill` against Risk 6's wording.
+  - The quality checks are clean: guards, sizes, no `unsafe`, privacy (grep and gitleaks) and the docs. I found no defect
+    in the failure paths.
+  - Eleven advisories go to O. Required before the merge: (1) the script opens the PR with `Closes #642.`
+    (`coding-pipeline.workflow.mjs:4822`), so edit it to `Part of #642`, with the disclosure, 15(a), #695 and the agent
+    remainder, under a Conventional title; (2) a `CHANGELOG.md` conflict with `main` at ce12cdb (#701, #703), which is
+    resolved by keeping every entry; (3) file the `FakeHarness` parity issue. Before 642b: place the agent amendment (N-1),
+    N-2, and keep the brief, which the PR step's cleanup removes.
+- **Assumed:**
+  - T's recorded Tier 1 and Tier 2 output stands for the code. I did not re-run it, per my role, and only docs changed
+    after T-green (`git diff --stat 884d772..HEAD`).
+  - The run's agent will act on advisory 1 before it merges. The PASS depends on the PR leaving #642 open.
+  - #701 and #703 change nothing this crate compiles against. Their diff stats show no edit to `holler-pane`'s
+    `ports.rs`, `error.rs` or `lib.rs`, the test kit, or `Cargo.lock`. I did not build the merged tree.
+- **Hedged:**
+  - I chose PASS over ADVISORY-HOLD for the issue's "agent" amendment, unlike #647's S (`docs/handoffs/647/handoff-S.md`).
+    The 642a brief makes this run a part whose PR leaves #642 open. Nothing in the diff contradicts the amendment. The
+    amendment depends on #700, which is open. Its defect sits in the brief's 642b row, which is advisory 4.
+  - BSD `kill`'s handling of `--` (advisory 9) and zombie reaping on the self-hosted ubuntu runner (advisory 10) are
+    unverified. CI's two legs will show both.
+- **Evidence:**
+  - Read in full:
+    - the brief and every handoff in `docs/handoffs/642/`;
+    - `642-diff-result-r{1,2}.md` and the verdict of the brief gate's r3;
+    - `src/{lib,server,http,exec,tui}.rs`, `Cargo.toml`, `tests/hermetic_test.rs` and `tests/support/stub.rs`;
+    - the `CHANGELOG.md` and `Cargo.lock` diffs;
+    - `docs/handoffs/647/handoff-S.md` on `main`, and `CONTRIBUTING.md`'s AI section.
+  - Read in part: `holler-body/src/query.rs:230-275`; ADR-0021 line 37 and §13; `scripts/spikes/opencode-{api,lib}.sh`
+    (the abort calls and `oc_http`); `.github/workflows/ci.yml` (the matrix and the workspace step); the playbook's
+    `coding-pipeline.workflow.mjs` (the PR create step, 3866-3906 and 4815-4826, and the cleanup prompt, 3123-3135) and
+    `pipeline-conventions.md` §1.
+  - Issues read with `gh`: `issue view` 642 (updated 17:40 MDT), 633 (the hot spots), 695, 696, 700, 649 and 641; `pr list
+    --head issue-642-implementation` (none); `issue list --search "FakeHarness parity"` (none).
+  - Ran:
+    - `git merge-tree --write-tree origin/main HEAD` (a conflict only in `CHANGELOG.md`), and `git log` and `diff --stat` of
+      3bdd129..origin/main;
+    - `wc -l` on the touched files, and the greps for panics, `#[allow]`, `unsafe`, AC 24, fixed ports, HOME and tmux;
+    - the privacy greps (names, hosts, IPs, domains, URLs), and `gitleaks git --log-opts=origin/main..HEAD` (15 commits,
+      no leaks);
+    - the commit trailers, and the outside gate's usage files (`deepseek-v4-pro`, git-ignored).
