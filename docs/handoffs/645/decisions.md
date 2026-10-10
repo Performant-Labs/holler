@@ -308,3 +308,35 @@
     both before and after the repair. `if true` fails 0 tests before the repair and 8 after.
   - `cargo test -p holler-cli --test pane_verbs` gives 154 passed (153 + 1). The fact the new test relies on is in
     evidence.md, under "Added by T (Phase 7, GREEN, round 2)".
+
+## F (rework, round 3: the outside diff gate's BLOCK) — 2026-10-09T23:44-06:00
+- **Decided:**
+  - The outside diff gate (`deepseek-v4-pro`) has run twice. Its result files are gitignored, so both rounds are
+    journalled here. Round 1, on `583e9d4` at 23:03 MDT, was PASS with no block. Round 2, on `4443dd4` at 23:37 MDT, was
+    BLOCK on B-1: `check_health`'s remedy fallback used `Option::unwrap_or_else`, and the brief's P3 says "with no
+    `unwrap`/`expect`".
+  - B-1 is fixed in code, not argued. `check_health` now picks the remedy by an explicit `match` (`Some(remedy) =>
+    remedy, None => doctor_command(pane, false)`). The behaviour is the same, and the `None` arm is still never taken for
+    a named pane (`findings.rs:127-131`).
+  - NIT-1 is taken: the `SESSION_ID_MAX` doc now says that `quoted` counts characters and `parse_session_id` counts bytes,
+    which agree on an ASCII id. NIT-2 is about a test file's module doc, so it is noted for T, with no change.
+  - NV-1 is answered with evidence: two `evidence.md` entries quote the real `StoreScope::resolve` and `member` (#663),
+    `PaneStore::get`'s contract, and the fake's `resolve` and `member`. Each answers `resolve(P, Some(n))` with exactly
+    the pane `n`, or `pane-not-in-profile`, so P1's `find` by name and `next()` agree. `find` stays.
+- **Assumed:**
+  - The classifier routed B-1 to F as production work, which is right: the line is in `tx_switch.rs`.
+  - A `match` meets the brief's "no `unwrap`/`expect`" in every reading, the gate's literal one included, so this finding
+    will not come back.
+- **Hedged:**
+  - B-1's stated failure mode is wrong. `unwrap_or_else` cannot panic: it runs the closure on `None`, clippy's
+    `unwrap_used` does not cover it, and round 1 passed the same line (its NV-3). I changed the code anyway, because the
+    change is free and removes the ambiguity. Round 2 blocked a line that round 1 passed and that did not change between
+    them, so the gate's next round may raise something new that neither round raised.
+- **Evidence:**
+  - `docs/handoffs/645-diff-result-r1.md` and `-r2.md` and their `.usage.json` files (gitignored); `tx_switch.rs` in full;
+    `findings.rs:127-131, 319-334`; `error.rs:686-695`; `holler-cli/src/pane/profile_scope.rs:1-5, 92-100, 159-173`;
+    `holler-pane-testkit/src/profile_scope.rs:117-126, 190-204`; `ports.rs:63-64`; the brief's P3 row (line 914).
+  - The new evidence excerpts were checked against the source with `diff`. With `CARGO_BUILD_JOBS=4`: workspace clippy
+    with `-D warnings` is clean, `pane_verbs` gives 154 passed, and the other three CLI targets and `holler-pane` pass.
+    rustfmt, `lint.sh` and `changelog-check.sh` pass. The workspace in CI's form exits 0, with 1642 passed, 0 failed and
+    14 ignored over 135 result lines (handoff-F.md, "Tier 1 self-check").

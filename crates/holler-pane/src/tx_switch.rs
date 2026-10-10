@@ -56,7 +56,8 @@ pub const SERVER_UNHEALTHY: RefusalCode = RefusalCode::from_static("server-unhea
 /// Refusal, exit 3.
 pub const SESSION_OF_OTHER_PANE: RefusalCode = RefusalCode::from_static("session-of-other-pane");
 /// The longest session id [`parse_session_id`] accepts. It is the length `findings::quoted`
-/// cuts at, so a typed id is never cut short in a message.
+/// cuts at. `quoted` counts characters and [`parse_session_id`] counts bytes, which agree
+/// because an accepted id is ASCII, so a typed id is never cut short in a message.
 pub const SESSION_ID_MAX: usize = 64;
 
 /// A harness session id typed by a person: 1 to [`SESSION_ID_MAX`] ASCII letters, digits,
@@ -226,17 +227,19 @@ fn refuse_orchestrator(record: &Pane, as_operator: bool) -> Result<(), PaneError
 }
 
 /// The pane's harness server answers its health check now (I6). One that does not is
-/// refused with the remedy doctor gives a down server, taken from the one remedy table; a
-/// check that fails is passed on as it is.
+/// refused with the remedy doctor gives a down server, taken from the one remedy table,
+/// which has one for every named pane; were it ever `None`, the pane doctor command line
+/// stands in. A check that fails is passed on as it is.
 fn check_health(ports: Ports<'_>, record: &Pane) -> Result<(), PaneError> {
     let port = record.harness.port;
     if ports.harness.health(port)? {
         return Ok(());
     }
     let pane = Some(&record.name);
-    let remedy = FindingKind::ServerDown
-        .remedy(pane, FixState::NotFixable)
-        .unwrap_or_else(|| doctor_command(pane, false));
+    let remedy = match FindingKind::ServerDown.remedy(pane, FixState::NotFixable) {
+        Some(remedy) => remedy,
+        None => doctor_command(pane, false),
+    };
     Err(PaneError::Refused {
         code: SERVER_UNHEALTHY,
         message: format!(

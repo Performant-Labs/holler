@@ -367,3 +367,82 @@ at `docs/adr/ADR-0021.md:345-370`, on the tree with `origin/main` (`d9eabbb`) me
   >         self.lock().queued.push((op, error));
   >     }
   > ```
+
+## Added by F (round 3, after the outside diff gate's BLOCK)
+
+The diff gate's round 2 asked for these under NV-1: whether `resolve(P, Some(n))` can answer more than one pane, and
+whether a named pane outside P is always `pane-not-in-profile`. They are copied from the tree at `4443dd4`. None of the
+three files is in this change (`git diff origin/main` on each is empty).
+
+- **Fact:** the real `ProfileScope`, `StoreScope` (#663; #649 wires it in), answers `resolve(P, Some(n))` with exactly one
+  pane: the record `PaneStore::get(n)` returns, and only when that record names P. Anything else, a pane with no record
+  included, is `pane-not-in-profile`. So P1's `find` by name and `into_iter().next()` take the same pane, and no answer
+  of `resolve(P, Some(n))` lacks the pane `n`.
+  **Source:** `crates/holler-cli/src/pane/profile_scope.rs:159-173`, `:92-100`; `crates/holler-pane/src/ports.rs:63-64`
+  **Verbatim excerpt:**
+  > ```
+  > impl ProfileScope for StoreScope {
+  >     fn resolve(
+  >         &self,
+  >         profile: &ProfileName,
+  >         pane: Option<&PaneName>,
+  >     ) -> Result<ResolvedScope, PaneError> {
+  >         let stored = self.stored(profile)?;
+  >         let panes = match pane {
+  >             None => self.members(&stored.name)?,
+  >             Some(name) => vec![self.member(&stored.name, name)?],
+  >         };
+  >         Ok(ResolvedScope {
+  >             profile: stored,
+  >             panes,
+  >         })
+  > ```
+  > ```
+  >     /// The pane `name`, whose record must name `profile`: else `pane-not-in-profile`.
+  >     fn member(&self, profile: &ProfileName, name: &PaneName) -> Result<Pane, PaneError> {
+  >         match self.panes.get(name)? {
+  >             Some(pane) if belongs(&pane, profile) => Ok(pane),
+  >             _ => Err(PaneError::PaneNotInProfile {
+  >                 what: format!("{name} is not in profile {:?}", profile.as_str()),
+  >             }),
+  >         }
+  >     }
+  > ```
+  > ```
+  >     /// The pane named `name`, or `None`.
+  >     fn get(&self, name: &PaneName) -> Result<Option<Pane>, PaneError>;
+  > ```
+
+- **Fact:** the test kit's `FakeProfileScope`, which every `--profile` test of this story runs on, answers the same way:
+  one pane for a named pane, else `pane-not-in-profile`, a pane with no record included.
+  **Source:** `crates/holler-pane-testkit/src/profile_scope.rs:190-204`, `:117-126`
+  **Verbatim excerpt:**
+  > ```
+  > impl ProfileScope for FakeProfileScope {
+  >     fn resolve(
+  >         &self,
+  >         profile: &ProfileName,
+  >         pane: Option<&PaneName>,
+  >     ) -> Result<ResolvedScope, PaneError> {
+  >         let stored = self.stored(profile)?;
+  >         let panes = match pane {
+  >             None => self.members(&stored.name)?,
+  >             Some(name) => vec![self.member(&stored.name, name)?],
+  >         };
+  >         Ok(ResolvedScope {
+  >             profile: stored,
+  >             panes,
+  >         })
+  > ```
+  > ```
+  >     /// The pane `name`, whose record must name `profile`: `pane-not-in-profile`
+  >     /// otherwise, a pane with no record included.
+  >     fn member(&self, profile: &ProfileName, name: &PaneName) -> Result<Pane, PaneError> {
+  >         match self.panes.get(name)? {
+  >             Some(pane) if belongs(&pane, profile) => Ok(pane),
+  >             _ => Err(PaneError::PaneNotInProfile {
+  >                 what: format!("{name} is not in profile {:?}", profile.as_str()),
+  >             }),
+  >         }
+  >     }
+  > ```

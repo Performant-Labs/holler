@@ -1,98 +1,97 @@
-# Handoff-F: Phase 5, rework round 2 - #645a `pane switch` and `pane reset` (the anti-duplication BLOCK)
+# Handoff-F: Phase 5 (Workflow script Phase 6), rework round 3 - #645a `pane switch` and `pane reset` (the outside diff gate's BLOCK)
 
 **Date:** 2026-10-09
-**Branch:** issue-645-implementation (worktree `.claude/worktrees/0645-switch-reset`). This round starts at `da53aba`,
-the A-dup BLOCK. Its work is uncommitted, and the Workflow script commits it after this phase. The work is a merge of
-`origin/main` (`d9eabbb`), staged with `git merge --no-commit --no-ff`, and the edits below. Round 1's handoff stays in
-git at `fa59fe7`, and its content that still holds is kept below.
+**Branch:** issue-645-implementation (worktree `.claude/worktrees/0645-switch-reset`). This round starts at `4443dd4`,
+T's round-2 GREEN. The outside diff gate then ran its round 2 (`deepseek-v4-pro`, `docs/handoffs/645-diff-result-r2.md`,
+gitignored, written 23:37 MDT) and returned BLOCK on one finding, B-1. This round's work is uncommitted, and the
+Workflow script commits it after this phase. Round 2's handoff is in git at `37f2101`, and round 1's is at `fa59fe7`. Their
+content that still holds is kept below.
 **Issue:** #645 (part 1 of 2, 645a)
-**Rework of:** `docs/handoffs/645/handoff-A-dup.md`, finding 1 (block). Findings 2-4 are warns that O files as
-follow-ups. They need no change in 645a.
+**Rework of:** `docs/handoffs/645-diff-result-r2.md`, B-1 (block). It also takes NIT-1 (doc only) and adds the evidence
+NV-1 asked for. The gate's other entries say "No finding" or are not blocks (see Design decisions, round 3).
 
-## What was done (round 2)
+## What was done (round 3)
 
-- **Merged `origin/main` (`d9eabbb`: #641, #643, #646 part 1, #662 part 2, #663, #704)**, as A-dup's note 1 asks.
-  - The merge is clean. The files both sides touch are ADR-0021, ADR 0003, the CHANGELOG, `cli-surface.txt` and
-    `process/stub.rs`, and git merged each of them without a conflict.
-  - The merge is left **staged, not committed**, because F does not commit. The script's phase commit (`git add -A`,
-    then `git commit -m ...`) runs while `MERGE_HEAD` is set, so it records the merge commit with both parents.
-  - `gitleaks protect --staged` on the staged merge found no leaks, so the pre-commit hook will pass.
-- `docs/adr/ADR-0021.md`: **four sentences** added to the "Switch and reset as built (#645)" paragraph (section 8,
-  now lines 345-370). Nothing else in the ADR changed this round. The new text, after "...which selects that session
-  again.":
-  > That step follows every failure once `select_session` has been called, a record conflict or a `timeout` included; a
-  > failure before then has moved neither the TUI nor the record, and its message has no step. Whether or not the verb
-  > ran with `--profile`, the step names the pane, unlike the two forms of step 6 that the generations rule above gives.
-  > Those name no pane because a failed launch can leave a pane with no record, which a pane-scoped doctor refuses. A
-  > switch or reset reads the pane's record before it acts, so a doctor run for that pane is not refused, and `--fix` is
-  > the pane doctor's own remedy for a TUI that does not show the session of record, while a fix can repair it. Neither
-  > verb edits P's specs, so no `profile show` is needed.
+- `crates/holler-pane/src/tx_switch.rs`, `check_health` (`:229-250`): **B-1.** The remedy fallback is now an explicit
+  `match`, not `Option::unwrap_or_else`:
+  ```rust
+  let remedy = match FindingKind::ServerDown.remedy(pane, FixState::NotFixable) {
+      Some(remedy) => remedy,
+      None => doctor_command(pane, false),
+  };
+  ```
+  The behaviour is the same. For a named pane the remedy table answers `Some("holler pane relaunch <pane>")`
+  (`findings.rs:127-131`, already in `evidence.md`), so the `None` arm is never taken, and neither form could panic. The
+  doc comment now says that the table has a remedy for every named pane, and what stands in if it ever had none.
+- `crates/holler-pane/src/tx_switch.rs`, the `SESSION_ID_MAX` doc (`:58-60`): **NIT-1.** It now says why the two limits
+  agree: `quoted` counts characters (`error.rs:690`, `text.chars().count()`), `parse_session_id` counts bytes, and an
+  accepted id is ASCII.
+- `docs/handoffs/645/evidence.md`: two entries under "Added by F (round 3, after the outside diff gate's BLOCK)". They are
+  the real `StoreScope::resolve` and `member` (#663), `PaneStore::get`'s contract, and the fake's `resolve` and `member`.
+  With them NV-1 can be settled: `resolve(P, Some(n))` answers exactly the pane `n`, or `pane-not-in-profile`.
+- `docs/handoffs/645/decisions.md`: the F round-3 entry. It also journals both outside diff-gate rounds, whose result files
+  are gitignored: r1 PASS (23:03 MDT) and r2 BLOCK (23:37 MDT).
 
-  The rest of the paragraph is round 1's text. Its last five lines are re-wrapped and their words are unchanged.
-- `crates/holler-pane/src/tx_switch.rs`: **two doc comments only**, in the module doc and in `SwitchFailure::message`.
-  "once the act has begun" becomes "once `select_session` has been called", and the module doc gains the clause on a
-  failure before it. No code changed.
-- `docs/handoffs/645/evidence.md`: four new entries under "Added by F (round 2)". They cover #663's generations rule and
-  step 6 on `origin/main`, doctor's read of a named pane, and doctor's `--fix` remedy. A header note says the merge
-  changed none of the quoted source files.
-- `docs/handoffs/645/decisions.md`: the F round-2 entry.
+## Design decisions (round 3)
 
-## Design decisions (round 2)
+1. **Change the code, don't argue the finding.** B-1's reasoning is partly wrong. `unwrap_or_else` cannot panic: it runs
+   the closure on `None`. Clippy's `unwrap_used` does not cover it, and r1 reviewed the same line without a block (its
+   NV-3). But the brief's P3 says "with no `unwrap`/`expect`", and a literal reading of that covers the call's name. A
+   `match` satisfies both readings, changes no behaviour, and settles the finding for good. Leaving the code alone would
+   only send the same line back to the gate.
+2. **`match`, not another combinator.** The gate's remedy names "an explicit `match`/`if let`". Another combinator, such
+   as `map_or_else(|| .., |remedy| remedy)`, would leave the same question open. Clippy's `manual_unwrap_or` did not fire
+   on the `match` (its `None` arm is a function call), and the workspace clippy run with `-D warnings` is clean.
+3. **NIT-1 taken, NIT-2 left for T.** NIT-1 is one doc sentence in this story's own file, and the gate asked for it. NIT-2 is
+   about the module doc of `tests/pane_verbs/reset.rs`, a test file, so it is T's (see "Tests that look wrong").
+4. **NV-1 answered with evidence, not code.** P1's `find` by name (round 1's deviation 1) stays. The gate could not see the
+   real resolver. It is on `main` since #663, and both it and the fake answer one pane for a named pane, so `find` and
+   `next()` agree. `find` stays because it adds a check and costs nothing: a scope that broke its contract would give
+   `pane-not-found`, not a record of another pane.
+5. **No other change.** NV-2, NV-3 and W-1 each end "No finding" or "Not a BLOCK", and their facts are in the diff or in
+   `evidence.md`. There is no test change, ADR change or CHANGELOG change.
 
-1. **The pane-scoped `--fix` step stays; the ADR states the exception.** This follows A-dup's recommendation. Step 6
-   gives the reason its two forms name no pane: a pane-scoped doctor refuses a pane with no record, which is what a
-   failed launch leaves. That does not apply to switch and reset:
-   - Their plan read the pane's record.
-   - The printed step carries no `--profile`, so the doctor reads the pane by name and refuses only a pane with no
-     record (`reconcile.rs:226-236`).
-   - `--fix` is doctor's own remedy for that mismatch (`findings.rs:135-141`). The bare form would repair nothing.
+## What was done (round 2, unchanged)
 
-   Taking step 6's form instead would change behaviour in ACs 7, 8, 9, 18 and 19. The step would also have to move into
-   `holler-cli`, because `holler-pane` cannot call `reconcile_step`. A did not recommend that, and the brief's contract
-   is the pane form.
-2. **Where the fix goes.** It goes in the #645 paragraph only, inside AC 24's "end of section 8". The generations bullet
-   and step 6 are #663's text, and editing them is outside AC 24.
-3. **The boundary is `select_session`, not "the act".** A's draft said "once the act has begun". The paragraph defines
-   reset's act as `create_session` and then `select_session`. A failed `create_session` carries no step: the error goes
-   through `From<PaneError>`, so `acted` is false. That matches `SwitchFailure::acted`'s doc and the brief (A1: "`acted:
-   false`"). So the sentence names `select_session`, and says that a failure before it moved neither the TUI nor the
-   record. This is the brief's Decision 13 ("with the reconcile step when `acted`"), stated for section 12's "prints the
-   reconcile step". It is the same reasoning as step 2 of the I8 order, where a conflict before anything live changed
-   prints no step. My round-1 doc comments in `tx_switch.rs` had the same imprecision, so they now say the same thing.
-4. **"Whether or not the verb ran with `--profile`".** The generations rule gives a `--profile` verb the profile-scoped
-   form (doctor `--profile` and `profile show`). Switch and reset print the same pane line with `--profile` too. The
-   paragraph now says so and gives the reasons. Neither verb edits P's specs, so `profile show` has nothing to report,
-   and a doctor run by name is never refused for a pane outside P.
-5. **Wording limits.**
-   - The new text has no inline `holler ...` code span (E-7, `docs_cli_test`).
-   - It does not say "the remedy table", which the ADR never defines. It says "the pane doctor's own remedy".
-   - It says "is not refused" rather than A's "is never refused" or "always has one". A record that another writer
-     deletes after the plan would still be refused (`pane-not-found`), and that edge is not the reason step 6 gives.
-6. **Merge with `--no-commit`.** A-dup asked F to merge, and F's role makes no commits. A staged merge does both: the
-   script's own phase commit completes it. The other way, F making a merge commit of its own, would break the role
-   rule for no gain.
+- **Merged `origin/main` (`d9eabbb`: #641, #643, #646 part 1, #662 part 2, #663, #704)**, as A-dup's note 1 asked. The merge
+  was clean, and the Workflow script's phase commit recorded it with both parents (`37f2101`).
+- `docs/adr/ADR-0021.md`: four sentences added to the "Switch and reset as built (#645)" paragraph (section 8, lines
+  345-370). They say when the reconcile step is printed (every failure once `select_session` has been called, none
+  before), that it names the pane even with `--profile`, and why it differs from the two forms of #663's step 6.
+- `crates/holler-pane/src/tx_switch.rs`: two doc comments only. "once the act has begun" became "once `select_session` has
+  been called".
+- `docs/handoffs/645/evidence.md`: four entries under "Added by F (round 2)".
 
-## Design decisions (round 1, unchanged)
+## Design decisions (rounds 1 and 2, unchanged)
 
-1. **One after-clap path for both verbs** (`switch::execute`): typing `PANE` and `--profile`, the clock, the engine call
-   and the output are the same for both, so `reset.rs` is its `Args` struct and a one-call `run`.
-2. **The order of usage errors.** `switch::run` types `SESSION` first (pure) and `execute` reports it after `PANE` and
+Round 2:
+1. **The pane-scoped `--fix` step stays, and the ADR states the exception** (A-dup's recommendation). Step 6's reason, that
+   a pane-scoped doctor refuses a pane with no record, does not apply. The plan read the record, the step carries no
+   `--profile` (`reconcile.rs:226-236`), and `--fix` is doctor's own remedy for the mismatch (`findings.rs:135-141`).
+2. **The fix is in the #645 paragraph only**, inside AC 24's "end of section 8". The generations bullet and step 6 are
+   #663's text.
+3. **The boundary is `select_session`, not "the act".** A failed `create_session` goes through `From<PaneError>`, so
+   `acted` is false and the message has no step.
+
+Round 1:
+1. **One after-clap path for both verbs** (`switch::execute`), so `reset.rs` is its `Args` struct and a one-call `run`.
+2. **The order of usage errors.** `switch::run` types `SESSION` first (pure), and `execute` reports it after `PANE` and
    `--profile`, so the brief's step-1 order holds.
-3. **P1 takes the resolved pane by name** (`find`), not blindly the first (see Deviations, round 1).
-4. **The error's text goes into the message unchanged** (no `findings::embedded` pass). Every value the engine itself
-   writes into a message (the target, SHOWN, the created id) goes through `quoted`.
-5. **The `data` struct** is `{verb, pane, previous}`, `previous` `null` when there was none; `Verb` serializes lowercase.
+3. **P1 takes the resolved pane by name** (`find`), not blindly the first (Deviations, round 1).
+4. **The error's text goes into the message unchanged.** Every value the engine itself writes into a message (the target,
+   SHOWN, the created id) goes through `quoted`.
+5. **The `data` struct** is `{verb, pane, previous}`, with `previous` `null` when there was none. `Verb` serializes lowercase.
 6. **Comments cite ADR-0021 sections and issues, never the brief's labels** (`docs/handoffs/` is deleted before the push).
-7. **The CHANGELOG entry sits after #647's doctor entry.** It still merged cleanly with `origin/main`.
+7. **The CHANGELOG entry sits after #647's doctor entry.**
 
 ## Reuse / extend-vs-new
 
-Unchanged from round 1. A-dup's table confirms that every Reuse map row is extended or reused, and round 2 adds no code.
-The objects extended are the `tx_switch.rs` stub and the two verb stubs, on doctor's `--fix` repair: select, observe,
-record. These are reused:
+Unchanged. A-dup's table confirms that every Reuse map row is extended or reused, and round 3 changes how one reused call
+is written, not what is reused. The objects extended are the `tx_switch.rs` stub and the two verb stubs, on doctor's
+`--fix` repair (select, observe, record). These are reused:
 
 - `findings::doctor_command(Some(pane), true)`, `findings::quoted` and `reconcile::shown_differs`;
-- `FindingKind::ServerDown.remedy(..)`, with a `doctor_command` fallback;
+- `FindingKind::ServerDown.remedy(..)`, with a `doctor_command` fallback, now by `match` (the Reuse map's "Remedy" row);
 - `ports.scope.resolve`;
 - `output::{emit, emit_error, ErrorBody, ErrorCode, VerbCtx}` and `ProfileOpt`;
 - `holler_proto::clock::now_millis`.
@@ -101,126 +100,104 @@ The one justified copy is `screen_text` (O1).
 
 ## Architecture notes for A
 
-- **Round 2:** none. No module, public interface, dependency or behaviour changed: only ADR prose and two doc comments.
-  The merge brings `origin/main`'s own reviewed changes. Among this story's files they touch only the shared
-  docs and fixtures listed above. `git diff origin/main -- '*Cargo.toml'` is empty.
+- **Round 3:** none. One private function's body is rewritten with the same behaviour, and two doc comments change. No
+  module, public interface, dependency or behaviour changed. `git diff origin/main -- '*Cargo.toml'` is empty.
+- **Round 2:** ADR prose, two doc comments and the merge of `origin/main`.
 - **Round 1, as built:** the engine is in `holler-pane`, pure over `Ports`, with no I/O, no async and no new dependency.
   `tx_switch` uses `findings` and `reconcile::shown_differs`. `pane/switch.rs` uses `holler_pane::tx_switch`, and
   `pane/reset.rs` uses `pane/switch.rs` (`execute`, `Verb`). No frozen file and no #647 file is touched.
 
 ## Deviations from spec / wireframe
 
-Round 2:
+Round 3: none. The P3 row now holds in its literal reading too ("with no `unwrap`/`expect`").
 
-1. **A-dup's note 4 says "no code or test change".** The behaviour is unchanged: `SwitchFailure::message` and
-   `RECONCILE_P` are as they were, and no test changed. Two doc comments in `tx_switch.rs` were corrected to match the
-   new ADR sentence (design decision 3).
-2. **The ADR text differs from A's draft in three places** (design decisions 3-5): "once `select_session` has been
-   called", the `--profile` sentence, and "is not refused".
-
-Round 1, still standing: P1 uses `find` by name; the "Deferred" bullet takes A's round-2 form, "#645 for switch and
-reset; #644 to follow". That is still right, because #644's paragraph is not on `origin/main`. `reset.rs` reuses
-`switch::{execute, Verb}`, and the CHANGELOG entry keeps its position.
+Rounds 1 and 2, still standing: P1 uses `find` by name, where the brief says `into_iter().next()`; for every scope the
+two agree (round-3 evidence). The "Deferred" bullet takes A's round-2 form, "#645 for switch and reset; #644 to follow",
+which is still right because #644's paragraph is not on `origin/main`. `reset.rs` reuses `switch::{execute, Verb}`. Two
+of round 1's doc comments were corrected in round 2.
 
 No wireframe applies (no UI surface).
 
-## Tier 1 self-check (incl. tests now GREEN), on the merged tree
+## Tier 1 self-check (incl. tests now GREEN), round 3
 
-Every build ran with `CARGO_BUILD_JOBS=4`.
+Every build ran with `CARGO_BUILD_JOBS=4`. `origin/main` is still `d9eabbb` (fetched at 23:45 MDT), an ancestor of HEAD.
 
 ```
-$ git merge --no-commit --no-ff origin/main
-Automatic merge went well; stopped before committing as requested
-$ gitleaks protect --staged --redact --no-banner          -> no leaks found (exit 0)
-
-$ cargo build -p holler-pane -p holler-cli                 -> Finished (exit 0)
+$ cargo clippy --workspace --all-targets -- -D warnings      -> exit 0, 0 warnings (holler-pane re-checked)
+$ cargo build -p holler-pane -p holler-cli                    -> Finished (exit 0)
+$ cargo test -p holler-cli --test pane_verbs
+test result: ok. 154 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 $ cargo test -p holler-cli --test pane_verbs -- switch:: reset::
-test result: ok. 20 passed; 0 failed; 0 ignored; 0 measured; 133 filtered out
-   (all 13 switch cases, all 6 reset cases, and help_names_the_arguments)
-$ cargo test -p holler-cli --test pane_verbs --test pane_cli_process --test cli_surface_test --test docs_cli_test
-     Running tests/cli_surface_test.rs                          test result: ok. 3 passed; 0 failed
-     Running tests/docs_cli_test.rs                             test result: ok. 3 passed; 0 failed
-     Running tests/pane_verbs/process/main.rs (pane_cli_process) test result: ok. 34 passed; 0 failed
-     Running tests/pane_verbs/main.rs (pane_verbs)              test result: ok. 153 passed; 0 failed
-   (153 = round 1's 113 + the list, get, watch and park cases that origin/main brought)
-$ cargo clippy --workspace --all-targets -- -D warnings     -> exit 0, no warnings
-$ rustfmt --check --edition 2021 crates/holler-pane/src/tx_switch.rs crates/holler-cli/src/pane/switch.rs \
-    crates/holler-cli/src/pane/reset.rs crates/holler-cli/tests/pane_verbs/switch.rs \
-    crates/holler-cli/tests/pane_verbs/reset.rs              -> exit 0
-$ bash scripts/lint.sh                                       -> exit 0 (only the pre-existing size warning for error.rs)
-$ bash scripts/changelog-check.sh                            -> changelog-check: ok
-$ git diff origin/main -- '*Cargo.toml' | wc -l              -> 0
-$ wc -l tx_switch.rs pane/switch.rs pane/reset.rs ADR-0021.md -> 321, 160, 43, 633
-
-AC 24 on the merged tree:
-$ git diff origin/main -- docs/adr/ADR-0021.md   -> four hunks: section 8's end (the #645 paragraph), the switch and
-                                                    reset row of section 9, section 11's end, and "Deferred"
-$ grep -n 'Switch and reset as built (#645)' docs/adr/ADR-0021.md
-345:**Switch and reset as built (#645).** ...       (### 8. is line 285, ### 9. is line 372)
-$ grep -c '#645' docs/adr/ADR-0021.md    -> 9 (origin/main: 6)
+test result: ok. 21 passed; 0 failed; 0 ignored; 0 measured; 133 filtered out
+   (13 switch cases, 7 reset cases, help_names_the_arguments; switch_refuses_an_unhealthy_server
+    asserts "run holler pane relaunch demo-c1r1", the match's Some arm)
+$ cargo test -p holler-cli --test pane_cli_process --test cli_surface_test --test docs_cli_test
+   cli_surface_test 3 passed; docs_cli_test 3 passed; pane_cli_process 34 passed; 0 failed
+$ cargo test -p holler-pane                                   -> every target ok, 0 failed
+$ rustfmt --check --edition 2021 tx_switch.rs pane/switch.rs pane/reset.rs \
+    tests/pane_verbs/switch.rs tests/pane_verbs/reset.rs       -> exit 0
+$ bash scripts/lint.sh                                        -> exit 0 (pre-existing size warnings only, none for a story file)
+$ bash scripts/changelog-check.sh                             -> changelog-check: ok
+$ git diff origin/main -- '*Cargo.toml' | wc -l               -> 0
+$ wc -l crates/holler-pane/src/tx_switch.rs                   -> 324
+$ git add crates/holler-pane/src/tx_switch.rs                 (staged by path; the docs are left to the script's commit)
+$ gitleaks protect --redact --no-banner                       -> no leaks found (exit 0), over every uncommitted change
 ```
 
-**`cargo test --workspace`**, in CI's form (`-- --skip roster_stays_accurate_under_concurrent_body_load`) with
-`--no-fail-fast`, on the merged tree: **exit 0**. That is 135 result lines, 1641 passed, 0 failed and 14 ignored, and
-includes `pane_verbs` (153), `pane_cli_process`, `cli_surface_test`, `docs_cli_test` and `wire_selftest`.
-
-Two edits came after that run started. One re-wrapped three lines of the `tx_switch.rs` module doc and changed no
-words. The other was the last wording pass on the ADR paragraph. So clippy (workspace, all targets), the four test
-targets above, rustfmt, `lint.sh` and `changelog-check.sh` were run again on the final tree, and all passed. The test
-counts were the same.
+**`cargo test --workspace`** in CI's form (`-- --skip roster_stays_accurate_under_concurrent_body_load`), with
+`--no-fail-fast`, on the final tree: **exit 0**. There are 135 result lines: 1642 passed, 0 failed and 14 ignored. That is
+round 2's 1641 plus T's new `reset_create_failure_changes_nothing`. It includes `pane_verbs` (154) and `wire_selftest` (3).
 
 ## Evidence appendix
 
-`docs/handoffs/645/evidence.md` has 21 facts in unchanged code or text: 15 from F round 1, 2 from T and 4 from F round 2.
-The round-2 entries are:
+`docs/handoffs/645/evidence.md` has 24 facts in unchanged code or text: 15 from F round 1, 2 from T, 4 from F round 2, 1
+from T round 2 and 2 from F round 3. The round-3 entries are:
 
-- `docs/adr/ADR-0021.md:294-299`: #663's generations rule (the step after a post-act conflict names no pane);
-- `docs/adr/ADR-0021.md:331-337`: step 6's two forms and its reason;
-- `crates/holler-pane/src/reconcile.rs:226-236`: a doctor run named by pane, without `--profile`, refuses only a pane
-  with no record;
-- `crates/holler-pane/src/findings.rs:135-141`: `doctor <pane> --fix` is doctor's remedy for a fixable mismatch.
+- `crates/holler-cli/src/pane/profile_scope.rs:159-173`, `:92-100` and `crates/holler-pane/src/ports.rs:63-64`: the real
+  `StoreScope::resolve(P, Some(n))` answers exactly the record stored under `n`, when it names P, else
+  `pane-not-in-profile`;
+- `crates/holler-pane-testkit/src/profile_scope.rs:190-204`, `:117-126`: the fake answers the same way.
 
-No source file quoted there differs from `origin/main`, so every round-1 line number still holds.
+Their excerpts were checked against the source with `diff`, and they match. None of the three files differs from
+`origin/main`. The fact B-1's fix relies on, that `ServerDown` has a remedy for every named pane, was already there
+(`findings.rs:127-131`, `:319-320`).
 
 ## Tests that look wrong (for T)
 
-None. No test changed in either round. The A-dup finding was about the standing spec, not the tests. AC 9's assertion
-(the message ends with `; to reconcile, run holler pane doctor demo-c1r1 --fix`) is now what the ADR states.
+None is wrong, and no test changed in any round. One cosmetic note: the gate's NIT-2 says the module doc of
+`crates/holler-cli/tests/pane_verbs/reset.rs:4-6` reads "both formats, one envelope", which is imprecise, because each
+format is a separate run. That is T's call, and nothing needs to change.
 
 ## Known issues
 
-- **A-dup's warns 2-4 are for O to file.** Each needs a filed issue, and none needs a change in 645a:
-  - the lead-in `to reconcile, run ` and `screen_text`, each spelled twice. Follow-up F-4 is out of date: `reconcile_step`
-    is now on `main`, in `holler-cli/src/pane/profile_scope.rs:37-56`.
+- **The gate's needs-verification and warn entries need no change.** NV-1 (`find` against `next()`) now has its evidence.
+  NV-2, NV-3 and W-1 each end "No finding" or "Not a BLOCK".
+- **A-dup's warns 2-4 are for O to file**, and none needs a change in 645a:
+  - the lead-in `to reconcile, run ` and `screen_text`, each spelled twice. `reconcile_step` is on `main`, in
+    `holler-cli/src/pane/profile_scope.rs:37-56`;
   - the third private copy of the scoped-read arms;
   - the fourth both-format test runner (F-2 has triggered).
 
-  Follow-ups F-1 and F-3 still need filing too. Once O files the `screen_text` fold, the comment in `tx_switch.rs`
-  should name that issue. It says "a follow-up of #645" today.
-- **Observation, behaviour unchanged.** When reset's `create_session` times out, the server may still hold a new
-  session. The message cannot name it (`timed out: harness.create_session`) and has no step. That is the brief's A1
-  row (`acted: false`, `created: None`). Doctor reports such a session as a `stray-session` on its next run. If O wants
-  the message to say that a session may exist, it is a small 645b change.
+  Follow-ups F-1 and F-3 still need filing too. Once O files the `screen_text` fold, the comment in `tx_switch.rs` should
+  name that issue. Today it says "a follow-up of #645".
+- **An observation, with the behaviour unchanged.** When reset's `create_session` times out, the server may still hold a
+  new session that the message cannot name, and the message has no step. Doctor reports it as a `stray-session`. That is a
+  645b question.
 - **The accepted risks are unchanged:** the `session-of-other-pane` race (R-5, F-3), the window before 645b (R-3), and
   the `stray-session` that every successful reset leaves (F-1).
-- **Unrelated and pre-existing:** the real binary prints a `logging_started` line on stderr before every pane verb's
-  output. Round 1 saw the `join_held_test` flake once under load.
 
 ## Files changed
 
-Production (this story, both rounds):
-- `crates/holler-pane/src/tx_switch.rs` (round 2: two doc comments only)
+Production (this story, all rounds):
+- `crates/holler-pane/src/tx_switch.rs` (round 3: `check_health`'s fallback as a `match`, and two doc comments)
 - `crates/holler-cli/src/pane/switch.rs`
 - `crates/holler-cli/src/pane/reset.rs`
 
 Docs (this story):
-- `docs/adr/ADR-0021.md` (round 2: the #645 paragraph only)
-- `CHANGELOG.md` (round 1; unchanged in round 2)
-
-Merged from `origin/main` (`d9eabbb`, not this story's work; staged as the merge): the 42 files of
-`git diff dc300ab d9eabbb --stat`.
+- `docs/adr/ADR-0021.md` (round 2: the #645 paragraph; unchanged in round 3)
+- `CHANGELOG.md` (round 1; unchanged since)
 
 Pipeline records:
 - `docs/handoffs/645/handoff-F.md` (this file)
-- `docs/handoffs/645/evidence.md` (round-2 entries appended)
-- `docs/handoffs/645/decisions.md` (the F round-2 entry appended)
+- `docs/handoffs/645/evidence.md` (round-3 entries appended)
+- `docs/handoffs/645/decisions.md` (the F round-3 entry appended)
