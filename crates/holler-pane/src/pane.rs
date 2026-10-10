@@ -109,7 +109,8 @@ pub struct HostInfo {
     pub tmux: String,
     /// The project directory or worktree the pane works in.
     pub cwd: String,
-    /// The Herdr API version, recorded by the Herdr adapter (#640) on connect.
+    /// The Herdr API version, as `HerdrPort::version()` reports it, recorded by a verb
+    /// (the Herdr adapter writes no record; ADR-0021 section 10).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub herdr_api_version: Option<String>,
 }

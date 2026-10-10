@@ -98,7 +98,7 @@ pub struct HerdrSnapshot {
 }
 
 /// One key to press with `HerdrPort::send_keys`, by the name Herdr uses (for example
-/// `Enter` or `C-c`).
+/// `enter` or `ctrl+c`). It goes to Herdr as written: nothing case-folds or translates it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct Key(String);
@@ -125,7 +125,10 @@ impl Key {
 /// Only the adapter converts a [`GridPos`] to Herdr's own order and base.
 pub trait HerdrPort: Send + Sync {
     /// Make a pane exist at `spec.grid` by issuing right/down splits, or fail
-    /// loudly; never relocates a healthy pane.
+    /// loudly; never relocates a healthy pane. An occupied cell answers its pane and
+    /// makes none. A cell outside the workspace's rows and columns (Herdr has none, so
+    /// they are the implementation's configuration) is `grid-out-of-range`; a cell that
+    /// no single right or down split reaches is the open code `grid-unreachable`.
     fn ensure_pane(&self, spec: &HerdrSpec) -> Result<HerdrPane, PaneError>;
 
     /// Type `text` into the pane.

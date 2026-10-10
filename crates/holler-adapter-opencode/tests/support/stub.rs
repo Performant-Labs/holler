@@ -9,7 +9,9 @@
 //! two fixed routes. This one adds what the adapter's tests need: replies per method and
 //! path, a chunked reply, a raw non-HTTP reply, a frozen mode (accept, read, never answer),
 //! a record of every request's raw request line and body exactly as received, before any URL
-//! decoding, and [`on_refused_port`], which never trusts a just-freed port to stay refused.
+//! decoding, and [`on_refused_port`], the one way to get a port nothing listens on: its candidate
+//! (`closed_port`) is the client end of a held connection, which never had a listener, and the
+//! wrapper checks it and repeats as a backstop.
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
@@ -167,16 +169,35 @@ impl Stub {
     }
 }
 
-/// A candidate for a loopback port nothing listens on: bind one, then drop the listener.
-/// Anything else that binds `127.0.0.1:0` may be handed it next, so a test never asserts
-/// through it directly: it goes through [`on_refused_port`].
+/// The connections whose client ends are the `closed_port`s, held until the process exits.
+static HELD: Mutex<Vec<(TcpStream, TcpStream)>> = Mutex::new(Vec::new());
+
+/// A candidate for a loopback port nothing listens on, has ever listened on, or can be handed to
+/// a later bind. A test never asserts through it directly: it goes through [`on_refused_port`].
+///
+/// Binding a port and dropping the listener is racy. A process that another test spawns at
+/// that moment holds a copy of every descriptor between its `fork` and its `exec`, the listener
+/// among them, so the listener can outlive the drop: a connect then completes against it and is
+/// reset once the child's `exec` closes the last copy. A port that is free can also be handed
+/// to a stub that a test running in parallel starts.
+///
+/// So the port is the client end of a held connection, an ephemeral port that `connect` picked
+/// and that never had a listener. A new connect to it matches no socket (the held one is tied
+/// to its own peer) and is answered with a reset, a refusal, on Linux and on macOS alike. The
+/// held socket keeps the port in use for the life of the process, so Linux never hands it to a
+/// `bind` of port 0. [`on_refused_port`] then checks the candidate and repeats as a backstop.
 fn closed_port() -> u16 {
-    let listener = TcpListener::bind("127.0.0.1:0").expect("bind a throwaway port");
-    let port = listener
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind a throwaway listener");
+    let client = TcpStream::connect(listener.local_addr().expect("a bound listener's address"))
+        .expect("connect to the throwaway listener");
+    let (server, _) = listener.accept().expect("accept the held connection");
+    let port = client
         .local_addr()
-        .expect("a bound listener has an address")
+        .expect("a connected socket has an address")
         .port();
-    drop(listener);
+    HELD.lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .push((client, server));
     port
 }
 
@@ -194,9 +215,8 @@ pub fn accepts(port: u16) -> bool {
 }
 
 /// Run `call` on a loopback port that nothing listens on, and return the port and what
-/// `call` answered (#642b, AC 31). A bind-then-drop port may be handed to any other bind of
-/// `127.0.0.1:0` in this process or on the machine, so a candidate counts only when a
-/// connect to it is refused just before `call`. When the answer is not `expected` **and**
+/// `call` answered (#642b, AC 31). A candidate counts only when a connect to it is refused
+/// just before `call`. When the answer is not `expected` **and**
 /// the port now accepts a connection, the attempt met a listener, not a defect: it is
 /// discarded and repeated with a new candidate, at most [`REFUSED_ATTEMPTS`] times in all.
 /// Only an attempt that saw no listener before and after is returned to fail the test.

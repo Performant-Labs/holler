@@ -7,10 +7,19 @@
 //! formats: 0 ok, 1 runtime failure, 2 usage, 3 refusal (an error coded `usage` exits 2,
 //! so a run-time `PaneError::Usage` from a guard does not exit 1; the class of every
 //! other code is `holler_pane::error::class_of`, #676).
+//!
+//! The #660 conformance layer (the tail of this file): the JSON-side goldens and the
+//! exit-parity table asserted through `holler_pane_testkit::envelope::check_envelope`
+//! and `check_ndjson` — the #638 checker every verb story's tests use, so this module
+//! is held to the same 13 rules, not a local shape of its own.
 
-use holler_cli::output::{emit, emit_stream, emit_usage_error, ErrorBody, ErrorCode, Format, Sink};
+use holler_cli::output::{
+    emit, emit_stream, emit_usage_error, Envelope, ErrorBody, ErrorCode, Format, Sink,
+    SCHEMA_VERSION,
+};
 use holler_pane::error::{class_of, is_valid_code, ALL_CODES};
-use holler_pane::PaneError;
+use holler_pane::{GridPos, PaneError};
+use holler_pane_testkit::envelope::{check_envelope, check_ndjson};
 use serde_json::{json, Value};
 
 use crate::verb_harness::one_envelope;
@@ -215,8 +224,12 @@ fn emit_exits_2_for_a_usage_coded_error_in_both_formats_and_3_for_a_refusal() {
 
 // --- Exit code by class (#676) -----------------------------------------------
 
-/// Every closed code exits by its class, the same in text and JSON mode, and a JSON
-/// error envelope has `ok == false` and `data == null` for exit 1, 2 and 3 alike.
+/// Every closed code exits by its class, the same in text and JSON mode. The JSON leg
+/// goes through the #638 checker (`check_envelope` at the format's own exit code), so
+/// the whole line is held to the 13 rules: the framing (one value, one final `\n`), the
+/// exact key set, `schema_version` the integer 1, `ok == false` and `data == null` for
+/// exit 1, 2 and 3 alike, the message on one line, and rule 13, which re-derives the
+/// exit from the code's class the way `emit` must.
 #[test]
 fn every_closed_code_exits_by_its_class_with_the_same_code_in_both_formats() {
     for code in ALL_CODES {
@@ -244,10 +257,13 @@ fn every_closed_code_exits_by_its_class_with_the_same_code_in_both_formats() {
             err.is_empty(),
             "`{code}`: JSON mode writes nothing to err: {err:?}"
         );
-        let envelope = one_envelope(&out);
-        assert_eq!(envelope["ok"], json!(false), "`{code}`");
-        assert_eq!(envelope["data"], Value::Null, "`{code}`");
-        assert_eq!(envelope["error"]["code"], json!(code), "`{code}`");
+        let envelope = check_envelope(&out, json)
+            .unwrap_or_else(|f| panic!("`{code}`: a valid envelope at exit {json}: {f}: {out:?}"));
+        assert_eq!(
+            envelope.error.map(|e| e.code),
+            Some(code.to_string()),
+            "`{code}`: the envelope carries the code"
+        );
     }
 }
 
@@ -467,4 +483,271 @@ fn an_unencodable_result_is_reported_on_err_and_leaves_out_empty() {
     assert_eq!(code, 1);
     assert_eq!(out, "");
     assert!(err.starts_with("error: "), "{err:?}");
+}
+
+// --- The #638 conformance checker over the module's own outputs (#660) ------------------
+//
+// The goldens and the stream below are asserted through `check_envelope` /
+// `check_ndjson` — the same helper every verb story's tests use — so `output.rs` is
+// held to the 13 rules, not to this file's local idea of the shape. The raw-text
+// assertions beside each checker call pin what the checker deliberately does not
+// (key order, compactness), the way the compact golden above does.
+
+/// AC 1 (golden, success): text renders `text(&data)` to `out`; JSON is exactly one
+/// envelope, `data` the payload, and nothing on `err`.
+#[test]
+fn golden_success_in_both_formats_through_the_checker() {
+    let (code, out, err) = with_sink(|sink| {
+        emit(sink, Format::Text, Ok::<_, ErrorBody>(vec![1, 2, 3]), |v| {
+            format!("{} items", v.len())
+        })
+    });
+    assert_eq!(code, 0);
+    assert_eq!(out, "3 items\n");
+    assert!(err.is_empty(), "{err:?}");
+
+    let (code, out, err) = with_sink(|sink| {
+        emit(
+            sink,
+            Format::Json,
+            Ok::<_, ErrorBody>(json!({"n": 3})),
+            |_| panic!("JSON mode never renders text"),
+        )
+    });
+    assert_eq!(code, 0);
+    assert!(err.is_empty(), "{err:?}");
+    let envelope =
+        check_envelope(&out, 0).unwrap_or_else(|f| panic!("one valid envelope: {f}: {out:?}"));
+    assert_eq!(envelope.data, json!({"n": 3}));
+    assert_eq!(envelope.error, None);
+    assert_eq!(
+        out.trim_end(),
+        r#"{"schema_version":1,"ok":true,"data":{"n":3},"error":null}"#
+    );
+}
+
+/// AC 1 (golden, refusal): text writes one `error:` line to `err` and nothing to `out`;
+/// JSON is exactly one envelope at exit 3 carrying the code and the message.
+#[test]
+fn golden_refusal_in_both_formats_through_the_checker() {
+    let (code, out, err) = with_sink(|sink| {
+        emit(
+            sink,
+            Format::Text,
+            Err::<Value, _>(error_body("pane-not-found", "no pane named demo-c1r1")),
+            |_| panic!("an error has no data to render"),
+        )
+    });
+    assert_eq!(code, 3, "a refusal exits 3");
+    assert!(out.is_empty(), "{out:?}");
+    assert_eq!(err, "error: no pane named demo-c1r1\n");
+
+    let (code, out, err) = with_sink(|sink| {
+        emit(
+            sink,
+            Format::Json,
+            Err::<Value, _>(error_body("pane-not-found", "no pane named demo-c1r1")),
+            |_| panic!("an error has no data to render"),
+        )
+    });
+    assert_eq!(code, 3, "a refusal exits 3");
+    assert!(err.is_empty(), "{err:?}");
+    let envelope =
+        check_envelope(&out, 3).unwrap_or_else(|f| panic!("one valid envelope: {f}: {out:?}"));
+    let error = envelope.error.expect("a failure carries its error");
+    assert_eq!(error.code, "pane-not-found");
+    assert_eq!(error.message, "no pane named demo-c1r1");
+    assert_eq!(envelope.data, Value::Null);
+    assert_eq!(
+        out.trim_end(),
+        r#"{"schema_version":1,"ok":false,"data":null,"error":{"code":"pane-not-found","message":"no pane named demo-c1r1"}}"#
+    );
+}
+
+/// AC 1 (golden, usage error): `emit_usage_error` is the usage path — text writes the
+/// message to `err` at exit 2; JSON is one envelope coded `usage` at exit 2.
+#[test]
+fn golden_usage_error_in_both_formats_through_the_checker() {
+    let message = "the following required arguments were not provided: --profile <PROFILE>";
+
+    let (code, out, err) = with_sink(|sink| emit_usage_error(sink, Format::Text, message));
+    assert_eq!(code, 2);
+    assert!(out.is_empty(), "{out:?}");
+    assert_eq!(err, format!("error: {message}\n"));
+
+    let (code, out, err) = with_sink(|sink| emit_usage_error(sink, Format::Json, message));
+    assert_eq!(code, 2);
+    assert!(err.is_empty(), "{err:?}");
+    let envelope =
+        check_envelope(&out, 2).unwrap_or_else(|f| panic!("one valid envelope: {f}: {out:?}"));
+    let error = envelope.error.expect("a usage error carries its error");
+    assert_eq!(error.code, "usage");
+    assert_eq!(error.message, message);
+    assert_eq!(
+        out.trim_end(),
+        concat!(
+            r#"{"schema_version":1,"ok":false,"data":null,"error":"#,
+            r#"{"code":"usage","message":"the following required arguments were not provided: --profile <PROFILE>"}}"#
+        )
+    );
+}
+
+/// AC 2: `emit_stream` in JSON mode is NDJSON — `check_ndjson` re-checks every line on
+/// its own (framing, key set, class), so each line must be a complete envelope.
+#[test]
+fn emit_stream_in_json_mode_is_valid_ndjson_through_the_checker() {
+    let items = vec![
+        Ok::<_, ErrorBody>(json!({"seq": 1})),
+        Ok(json!({"seq": 2})),
+        Ok(json!({"seq": 3})),
+    ];
+    let (code, out, err) =
+        with_sink(|sink| emit_stream(sink, Format::Json, items.into_iter(), |_| String::new()));
+    assert_eq!(code, 0);
+    assert!(err.is_empty(), "{err:?}");
+    let envelopes =
+        check_ndjson(&out, 0).unwrap_or_else(|f| panic!("a valid NDJSON stream: {f}: {out:?}"));
+    assert!(envelopes.iter().all(|e| e.ok), "{out:?}");
+    let data: Vec<Value> = envelopes.into_iter().map(|e| e.data).collect();
+    assert_eq!(
+        data,
+        [json!({"seq": 1}), json!({"seq": 2}), json!({"seq": 3}),]
+    );
+}
+
+/// AC 2 (the failure leg): a stream that ends at a refusal keeps its earlier successes
+/// and makes the last line the failure, checked at the stream's exit code — the
+/// `NotLastFailure` semantics `check_ndjson` enforces.
+#[test]
+fn emit_stream_ending_in_a_refusal_is_valid_ndjson_at_exit_3() {
+    let items = vec![
+        Ok::<_, ErrorBody>(json!({"seq": 1})),
+        Err(error_body("pane-not-found", "no pane named demo-c1r1")),
+    ];
+    let (code, out, err) =
+        with_sink(|sink| emit_stream(sink, Format::Json, items.into_iter(), |_| String::new()));
+    assert_eq!(code, 3);
+    assert!(err.is_empty(), "{err:?}");
+    let envelopes =
+        check_ndjson(&out, 3).unwrap_or_else(|f| panic!("a valid NDJSON stream: {f}: {out:?}"));
+    assert_eq!(envelopes.len(), 2, "one envelope per line: {out:?}");
+    assert!(envelopes[0].ok, "the line before the failure is a success");
+    let error = envelopes[1]
+        .error
+        .as_ref()
+        .expect("the last line is the failure");
+    assert_eq!(error.code, "pane-not-found");
+    assert_eq!(error.message, "no pane named demo-c1r1");
+}
+
+/// AC 5: an envelope carrying a `GridPos` serializes `data` as
+/// `{"row":R,"col":C,"pos":"rRcC"}`, row first (epic decision 7, #637). The checker
+/// accepts any `data` (rule 7), so the key order is pinned by the raw text beside it,
+/// the way the compact golden above pins the envelope's own key order.
+#[test]
+fn an_envelope_carrying_a_grid_pos_serializes_row_col_pos_row_first() {
+    let (code, out, err) = with_sink(|sink| {
+        emit(
+            sink,
+            Format::Json,
+            Ok::<_, ErrorBody>(GridPos { row: 2, col: 3 }),
+            |_| panic!("JSON mode never renders text"),
+        )
+    });
+    assert_eq!(code, 0);
+    assert!(err.is_empty(), "{err:?}");
+    let envelope =
+        check_envelope(&out, 0).unwrap_or_else(|f| panic!("one valid envelope: {f}: {out:?}"));
+    assert_eq!(envelope.data, json!({"row": 2, "col": 3, "pos": "r2c3"}));
+    assert_eq!(
+        out.trim_end(),
+        r#"{"schema_version":1,"ok":true,"data":{"row":2,"col":3,"pos":"r2c3"},"error":null}"#
+    );
+    // Row first, then col, then pos — asserted on positions, not just as a substring,
+    // so a reordering cannot pass by coincidence.
+    let data = out.split("\"data\":").nth(1).unwrap_or_default();
+    let (row, col, pos) = (
+        data.find("\"row\"").expect("the row key"),
+        data.find("\"col\"").expect("the col key"),
+        data.find("\"pos\"").expect("the pos key"),
+    );
+    assert!(row < col && col < pos, "row, then col, then pos: {out:?}");
+}
+
+// --- AC 6: the #637-fixed signatures -------------------------------------------
+
+/// The #637-fixed signature of `emit`, with `T` and the `impl FnOnce` parameter
+/// instantiated at concrete fn-pointer types (`u8` is `Serialize`).
+type EmitU8 = fn(&mut Sink<'_>, Format, Result<u8, ErrorBody>, fn(&u8) -> String) -> i32;
+
+/// The #637-fixed signature of `emit_stream`, the same way: the items iterator at
+/// `vec::IntoIter`, the text renderer at a fn pointer.
+type EmitStreamU8 =
+    fn(&mut Sink<'_>, Format, std::vec::IntoIter<Result<u8, ErrorBody>>, fn(&u8) -> String) -> i32;
+
+/// The #637-fixed signature of `emit_usage_error` (not generic).
+type EmitUsageError = fn(&mut Sink<'_>, Format, &str) -> i32;
+
+/// The module compiles against the #637-fixed API unchanged: the three signatures and
+/// the fixed types, used exactly as declared. A change to any parameter, the return
+/// type or the bounds breaks this target's build — the compile is the test. The
+/// bindings are then called once each, which also proves they are the module's own
+/// functions and not something of the same shape.
+#[test]
+fn the_fixed_signatures_and_types_compile_unchanged() {
+    let emit_u8: EmitU8 = emit;
+    let emit_stream_u8: EmitStreamU8 = emit_stream;
+    let usage_error: EmitUsageError = emit_usage_error;
+
+    let (mut out_buf, mut err_buf) = (Vec::new(), Vec::new());
+    let mut sink = Sink {
+        out: &mut out_buf,
+        err: &mut err_buf,
+    };
+    assert_eq!(
+        emit_u8(&mut sink, Format::Text, Ok(7u8), |n| n.to_string()),
+        0
+    );
+    assert_eq!(usage_error(&mut sink, Format::Json, "m"), 2);
+    let items = vec![Ok::<u8, ErrorBody>(1)];
+    assert_eq!(
+        emit_stream_u8(&mut sink, Format::Text, items.into_iter(), |n| n
+            .to_string()),
+        0
+    );
+
+    // `Format`: the two variants, and `Copy` — pinned by a real move-and-use.
+    // `resolved` is moved into `again` and then read again, which compiles only
+    // while `Format` is `Copy`; a bare `assert_eq!(copy, Format::Text)` merely
+    // borrows and so could never catch `Copy` being removed.
+    let resolved = Format::Text;
+    let again = resolved;
+    assert_eq!(resolved, again);
+    assert_eq!(Format::Json, Format::Json);
+
+    // `Envelope<T>`: the four public members and the two constructors.
+    let success = Envelope::success(7u8);
+    assert_eq!(success.schema_version, SCHEMA_VERSION);
+    assert!(success.ok);
+    assert_eq!(success.data, Some(7));
+    assert_eq!(success.error, None);
+    let failure = Envelope::<u8>::failure(error_body("timeout", "took too long"));
+    assert!(!failure.ok);
+    assert_eq!(failure.data, None);
+    assert_eq!(
+        failure.error.map(|e| (e.code, e.message)),
+        Some((
+            ErrorCode::new("timeout").expect("a valid code"),
+            "took too long".to_string()
+        ))
+    );
+
+    // `ErrorBody` is its two public members; `GridPos` is the pane crate's cell with its
+    // public fields and `rRcC` display.
+    let body = ErrorBody {
+        code: ErrorCode::new("pane-not-found").expect("a valid code"),
+        message: "m".to_string(),
+    };
+    assert_eq!(body.code.as_str(), "pane-not-found");
+    assert_eq!(GridPos { row: 2, col: 3 }.to_string(), "r2c3");
 }
