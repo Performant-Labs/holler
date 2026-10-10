@@ -192,3 +192,46 @@ checked before each live step but not between the last check and the record writ
   - Greps for each new helper's analogue (join key, budget and deadline, `PaneNotFound` as closed, constructors, cell format, open codes, `"localhost"`, `--model` split, `ProbeFailed`, profile and spec lookups), and for the map's forbidden literals.
   - `git diff --name-only` over the frozen files, and `git diff d9eabbb origin/main -- crates/holler-pane/src`.
   - When the `timeout` wording entered the ADR: `git log -S`.
+
+## S (Phase 10, spec audit) — 2026-10-10T01:05:00-06:00
+- **Decided:** ADVISORY-HOLD (handoff-S.md).
+  - The A and T preconditions are met: A and A-dup both PASS; T-red's RED was valid; T-green is GREEN with no blocking
+    issue.
+  - Every one of the brief's ACs 1-31 has a proving test or a check. Every issue Acceptance item is met; "the next doctor
+    finds and reports it" is met in part, through AC 7 plus doctor's own `unregistered_herdr_pane_is_reported`.
+  - Brief decisions 1-26 are built as stated. F's and T's changes from them are documented and within the brief's
+    latitude.
+  - The quality checks are clean: guards, sizes, no frozen file, no manifest change, privacy, and gitleaks.
+  - The hold: the operator-confirmed "agent" amendment to #644 is not in the brief, the ACs or the code. It was added at
+    17:38-17:40 MDT on 2026-10-09, five hours before the brief's last three amendments, and it adds a dependency on #700,
+    which is still OPEN. F cannot build it: the field, the guard and the flag are #700's, no port reads a project's agents,
+    and the brief names no code. The fix is for O or the MO: (a) split in place, as #647 part 1 did ("Part of #644", #644
+    kept open, a Deferred bullet in ADR-0021), or (b) hold until #700 and amend the brief.
+  - Required before merge on either path: (1) ADR-0021 line 462's `timeout` cell, which since the #640 merge says `op` is
+    always `<port>.<method>`, needs this change's `pane.launch`/`pane.relaunch` exception; (2) merge `origin/main`
+    (`bd5e825`; one ADR-0021 "Deferred" conflict) and let CI pass on the merged tree; (3) the PR body gets the AI
+    disclosure, and not `Closes #644` under (a).
+- **Assumed:**
+  - The live issue text and its GraphQL edit history are authoritative for when the amendment landed.
+  - I relied on T's recorded Tier 1 and Tier 2 results and did not re-run them, per S's role. Since T-green, only the main
+    merge `c844f06` (doc-only conflict resolutions) and A-dup changed the branch.
+- **Hedged:**
+  - The hold could have been a PASS with an advisory. I did not choose that, because the script writes `Closes #644.` and
+    the run's agent merges its own PR, so a PASS would close #644 with an operator-confirmed requirement dropped. This is
+    the same reasoning as #647's S.
+  - The ADR `timeout` contradiction is REWORK-class, not a brief defect: it came from #640 merging during the run. I
+    listed it as a required change inside the hold rather than issuing a separate REWORK loop.
+  - The AC 7 doctor half is advisory, not REWORK: the brief scoped it explicitly (C-10), and the plan review left the
+    judgment to S.
+- **Evidence:**
+  - Issues: `gh issue view 644` and its `userContentEdits` (the agent edits at 23:38:09Z and 23:40:08Z, which are 17:38 and
+    17:40 MDT); #700 (OPEN, created 17:39 MDT); epic #633's decision 8, its "#700 only" rule and its wave-3 table; #647's
+    S handoff and its "part 1" merge `e612878`.
+  - Code read in full: `tx_launch.rs`, `launch.rs`, `relaunch.rs`, and every test file in the diff.
+  - Diffs read: the ADR-0003, ADR-0021, CHANGELOG, fixture and `stub.rs` diffs.
+  - Supporting code: `error.rs` (`detail`, `from_closed`, `from_wire`), `findings.rs`, `reconcile.rs` (the whole-fleet
+    gate), `pane/wiring.rs`, and main's `holler-adapter-opencode/src/attach.rs`.
+  - Read-only checks: the AC 25-29 greps; `wc -l`; greps for `unwrap`, `expect`, `panic!`, `#[allow]` and `unsafe`; the
+    three-dot frozen-file and manifest diff; a privacy grep of the added lines and the handoffs; `gitleaks git
+    --log-opts=origin/main..HEAD`; `git merge-tree --write-tree HEAD origin/main` (one ADR-0021 conflict); and the
+    workflow's PR body template (`coding-pipeline.workflow.mjs:4097`).
