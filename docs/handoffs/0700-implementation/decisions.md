@@ -204,3 +204,32 @@ unchanged.)*
   flakes (interrupt_test under load; body_run_test TIME_WAIT) deserve a follow-up issue.
 - **Decision gate: S PASS and A-dup PASS → proceed to the PR and the in-session self-merge rule**
   (CI green first, squash, branch deleted).
+
+## 2026-10-10 11:14 AM MDT — merged; Chain Summary, O closing the cycle
+
+- **Merged:** PR #721 squash-merged to `main` (`c6485b0`), branch deleted, issue #700 auto-closed;
+  main's CI green on both legs (ubuntu, macos). Fresh pr-agent score after the re-run: `score-90+`
+  (the earlier `score-below-70` came from one stale finding quoting the pre-repair RED literal —
+  rebutted with the cumulative diff and CI evidence in
+  [the PR comment](https://github.com/Performant-Labs/holler/pull/721#issuecomment-6100076873)).
+- **Delivered:** `AgentKey` + `agent-key-invalid` beside `EnvVarName`; `opencode_agent` on `Pane`
+  and `ProfileSpec` (after `model`, absent when `None`, old records read as `None`, guard on
+  decode); `--agent KEY` on `launch`/`relaunch` typed at `SpecFlags::validate`; the
+  `effective_spec` overlay; the launch record write (A's DECISION 1); the `--from-current` copy;
+  testkit builders; one dated ADR-0021 §1 row.
+- **The chain of decisions that mattered:** (1) `agent-key-invalid` as an open code (the closed 22
+  frozen, ruling 3) — `class_of` already classes it exit 3; (2) A's DECISION 1 — the record write
+  plumbs the field now, because the epic's hot-spot exception makes a `None` write a dead end no
+  later story could fix, and a flag-less relaunch would silently reset a stored key; (3) the
+  boundary repair — F's role doc carried the Aftersight workspace template (`server/src/**` etc.),
+  so F attempt 1 was structurally denied on every Holler path; Holler's production allows +
+  Rust test denies were added to the untracked role doc and F attempt 2 landed the exact patch.
+- **Left for the named stories (per the ADR's deferrals, all journalled):** #642 applies the key in
+  the OpenCode adapter (and #635's spike decides `default_agent` at serve vs per prompt); #644's
+  last part is the project-defined-key refusal; #647 owns `SpecField`/`agent-cannot-dispatch`.
+- **Follow-ups the operator may want:** a CHANGELOG `Unreleased` entry (outside this issue's blast
+  radius, so not added here); `--agent` in `SPEC_FLAG_SETS`/`docs_rows.rs` static lists; a
+  pr-agent stale-hunk quirk (a finding quoting an amended commit's text, anchored to the final
+  head); the pre-existing `interrupt_test`-under-load and `body_run_test` TIME_WAIT flakes.
+- **Unblocked:** per the epic's order, #642, #644 and #647 may start now that #700 has merged
+  (the sibling panes pick them up; not this pane's queue).
