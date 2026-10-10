@@ -19,7 +19,7 @@ use holler_pane_testkit::host::FakeHost;
 use holler_pane_testkit::pane_store::{FakePaneStore, PaneStoreOp};
 use holler_pane_testkit::prober::FakeProber;
 use holler_pane_testkit::profile_scope::FakeProfileScope;
-use holler_pane_testkit::profile_store::FakeProfileStore;
+use holler_pane_testkit::profile_store::{FakeProfileStore, ProfileStoreOp};
 use serde_json::{json, Value};
 
 use crate::verb_harness::{run_verb_with, Outcome};
@@ -508,6 +508,15 @@ fn read_verbs_call_no_adapter_or_probe() {
         .iter()
         .filter(|op| matches!(op, PaneStoreOp::CasPut | PaneStoreOp::Delete));
     assert_eq!(writes.count(), 0, "the verbs write nothing: {calls:?}");
+    let calls = rig.profiles.faults().calls();
+    assert!(!calls.is_empty(), "`get` reads the pane's profile");
+    let writes = calls.iter().filter(|op| {
+        matches!(
+            op,
+            ProfileStoreOp::CasPut | ProfileStoreOp::Delete | ProfileStoreOp::Rename
+        )
+    });
+    assert_eq!(writes.count(), 0, "no profile write either: {calls:?}");
     rig.assert_nothing_observed();
 }
 

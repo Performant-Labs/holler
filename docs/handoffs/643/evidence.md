@@ -239,3 +239,59 @@ Facts in unchanged test-kit code that the tests rely on, excerpts copied from so
   >         return Err(EnvelopeFault::EmptyStream);
   >     };
   > ```
+
+## T (Phase 4, author / RED, round 2) — 2026-10-09
+
+Facts in unchanged test-kit code that the round-2 tests and the W-4 triage rely on, excerpts copied from source by T.
+
+- **Fact:** every port method of a fake records its op in the call log first, before any delay or fault. So an empty
+  set of write ops in `faults().calls()` means no write was attempted (`read_verbs_call_no_adapter_or_probe`, the
+  profile-store half added for the gate's W-5).
+  **Source:** `crates/holler-pane-testkit/src/fault.rs:90-98`
+  **Verbatim excerpt:**
+  > ```
+  >     /// What a fake calls first in every port method. It records the call, sleeps for
+  >     /// the delay (without holding the lock, so other calls proceed), and then answers
+  >     /// the standing fault if there is one, or else the oldest error queued for `op`.
+  >     pub(crate) fn enter(&self, op: Op) -> Result<(), PaneError> {
+  >         let delay = {
+  >             let mut state = self.lock();
+  >             state.calls.push(op);
+  > ```
+
+- **Fact:** the profile store's write ops are `CasPut`, `Delete` and `Rename`, and its `get` records `Get` (why the
+  profile-store half is not vacuous: `get demo-c1r1` without `--profile` reads the pane's profile).
+  **Source:** `crates/holler-pane-testkit/src/profile_store.rs:27-37`, `:250-251`
+  **Verbatim excerpt:**
+  > ```
+  > pub enum ProfileStoreOp {
+  >     Get,
+  >     List,
+  >     CasPut,
+  >     Delete,
+  >     Watch,
+  >     /// One `next()` of an open watch.
+  >     WatchNext,
+  >     Log,
+  >     Rename,
+  > }
+  > ```
+  > ```
+  >     fn get(&self, name: &ProfileName) -> Result<Option<Profile>, PaneError> {
+  >         self.faults.enter(ProfileStoreOp::Get)?;
+  > ```
+
+- **Fact:** one `next()` of the fake's watch records `WatchNext` before it polls the feed, and the poll then waits
+  for a write. So AC 14's thread can see `WatchNext` and write either just before the poll takes the lock or during
+  the wait. Either way that `next()` returns the write, once, which is the invariant the test asserts (the gate's W-4).
+  **Source:** `crates/holler-pane-testkit/src/feed.rs:263-269`
+  **Verbatim excerpt:**
+  > ```
+  >     fn step(&mut self, feed: &Feed<E>) -> Result<Option<E>, PaneError> {
+  >         self.faults.enter(self.next_op)?;
+  >         if self.owed.is_empty() {
+  >             let (owed, resume) = feed.poll(self.since);
+  >             self.owed = owed.into();
+  >             self.since = resume;
+  >         }
+  > ```

@@ -166,3 +166,29 @@
   - The driver's phase routing and its diff-gate prompt builder (the gate passes `evidence.md` when it is not empty).
     Issues #643 and #633: no MO ruling on any warn since round 1.
   - A scratch program outside the repo checked the predicate on 25 characters with rustc 1.98.1.
+
+## T (Phase 4, author tests / RED, round 2) — 2026-10-09T18:22:00-06:00
+- **Decided:** PASS: the round-2 tests are valid. With no new behaviour this cycle (A's note 4) there is no RED. Each new
+  test passes on F's code and fails when the behaviour it pins is removed (mutations Ma, Mb and Mc in handoff-T-red.md).
+  - Two new tests in `tests/pane_verbs/get.rs`. `text_output_escapes_each_hidden_class_and_keeps_plain_unicode` covers
+    the gate's B-3, NV-6 and W-1: one character per class is escaped, and `é`, `ï` and CJK text are unchanged.
+    `a_stored_dash_prints_apart_from_the_empty_value` covers B-2 and W-3: a stored `-` prints as `"-"`, an absent value
+    as `-`.
+  - `read_verbs_call_no_adapter_or_probe` now also asserts no profile-store write (the gate's W-5).
+  - No change for W-4: the exactly-once invariant holds on both interleavings (feed.rs:263-269). No test for B-1: only a
+    scope that answers success without the pane reaches `get`'s own construction, and the fake never does. NIT-6 is
+    wrong: `Value`'s `Index` gives `Null` for a missing key, so the `get().is_some()` check is the one that pins
+    "always present".
+- **Assumed:** rustc 1.98.1's `escape_debug` and `{:?}` table, probed in a scratch program outside the repo, is the one
+  CI builds with. If a later toolchain changes which characters `{:?}` escapes, the class test fails loudly. It does
+  not drift silently.
+- **Hedged:**
+  - The W-5 extension can only be a guard: no current code path writes, so no mutation turns it red. Its read half keeps it
+    from being vacuous.
+  - The plain-Unicode pin fixes the current reading ("`é` is plain"). If the MO later picks the gate's
+    ASCII-only predicate, this test is the one to change, on purpose.
+- **Evidence:** `cargo test -p holler-cli --test pane_verbs -- list:: get:: watch::` gives 35 passed (95 for the whole
+  target). Mutations Ma, Mb and Mc each turn the new test red, and production was restored with `git checkout`
+  (`git status` lists only the two test files). `rustfmt --check`, `cargo clippy -p holler-cli --all-targets -- -D warnings`
+  and `bash scripts/lint.sh` all exit 0. The test files are 370, 545 and 311 lines, ASCII-only. Three evidence.md entries
+  were added, with excerpts copied from source.

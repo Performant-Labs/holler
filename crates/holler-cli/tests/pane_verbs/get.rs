@@ -12,7 +12,8 @@ use holler_pane_testkit::fixture::sample_profile;
 use serde_json::{json, Value};
 
 use crate::list::{
-    assert_fails, field, member, ok_envelope, ok_text, pane, scoped_rig, sync_rig, Rig,
+    assert_fails, cells, field, member, observed, ok_envelope, ok_text, pane, scoped_rig, sync_rig,
+    Rig,
 };
 
 /// The rendered `--help` of `holler <argv...>` (clap's `DisplayHelp` error).
@@ -277,4 +278,93 @@ fn text_output_escapes_c1_and_bidi_characters() {
         Some(r#"["opencode","a\u009bb","x\u202ey"]"#),
         "still JSON, the same argv: {out:?}"
     );
+}
+
+/// One character of each class that could act on a terminal or hide inside a line, beyond
+/// C0 and the two above: DEL, NEL, NBSP, the soft hyphen, ALM, ZWSP, ZWJ, LRM, LRI, PDI, the
+/// line separator, the BOM and a combining acute. Each prints as its `\u{..}` escape, the
+/// value quoted. Precomposed accents and CJK text are plain: they print as themselves,
+/// unquoted, in a stored string and in an argv printed as JSON.
+#[test]
+fn text_output_escapes_each_hidden_class_and_keeps_plain_unicode() {
+    let hidden = [
+        ('\u{7f}', "7f"),
+        ('\u{85}', "85"),
+        ('\u{a0}', "a0"),
+        ('\u{ad}', "ad"),
+        ('\u{61c}', "61c"),
+        ('\u{200b}', "200b"),
+        ('\u{200d}', "200d"),
+        ('\u{200e}', "200e"),
+        ('\u{2066}', "2066"),
+        ('\u{2069}', "2069"),
+        ('\u{2028}', "2028"),
+        ('\u{feff}', "feff"),
+        ('\u{301}', "301"),
+    ];
+    let plain = ["/srv/d\u{e9}mo", "/srv/na\u{ef}ve", "/srv/\u{4e2d}\u{6587}"];
+    let at = |row: usize, cwd: &str| {
+        let mut p = pane(&format!("demo-c1r{row}"));
+        p.host.cwd = cwd.into();
+        p
+    };
+    let mut panes: Vec<Pane> = hidden
+        .iter()
+        .enumerate()
+        .map(|(i, (c, _))| at(i + 1, &format!("/srv/a{c}b")))
+        .collect();
+    panes.extend(
+        plain
+            .iter()
+            .enumerate()
+            .map(|(i, cwd)| at(hidden.len() + i + 1, cwd)),
+    );
+    panes[hidden.len()].command = Some(argv(&["opencode", "d\u{e9}mo", "\u{4e2d}\u{6587}"]));
+    let rig = Rig::new(panes, []).unwrap();
+    let project = |row: usize| {
+        let name = format!("demo-c1r{row}");
+        let run = rig.run(&["pane", "get", &name], Format::Text);
+        field(ok_text(&run), "project").map(str::to_owned)
+    };
+
+    for (i, (c, hex)) in hidden.iter().enumerate() {
+        let want = format!(r#""/srv/a\u{{{hex}}}b""#);
+        assert_eq!(
+            project(i + 1),
+            Some(want),
+            "U+{:04X} escaped",
+            u32::from(*c)
+        );
+    }
+    for (i, cwd) in plain.iter().enumerate() {
+        let got = project(hidden.len() + i + 1);
+        assert_eq!(got.as_deref(), Some(*cwd), "plain text unchanged, unquoted");
+    }
+    let name = format!("demo-c1r{}", hidden.len() + 1);
+    let run = rig.run(&["pane", "get", &name], Format::Text);
+    assert_eq!(
+        field(ok_text(&run), "command"),
+        Some("[\"opencode\",\"d\u{e9}mo\",\"\u{4e2d}\u{6587}\"]"),
+        "plain text in an argv stays as itself: {run:?}"
+    );
+}
+
+/// A stored value `-` is quoted, so it never reads as the empty value `-`: in `get`'s
+/// fields and in `list`'s cells.
+#[test]
+fn a_stored_dash_prints_apart_from_the_empty_value() {
+    let mut dash = observed("demo-c1r1", Some("-"), None);
+    dash.session_of_record = Some("-".into());
+    let rig = Rig::new([dash], []).unwrap();
+
+    let run = rig.run(&["pane", "get", "demo-c1r1"], Format::Text);
+    let out = ok_text(&run);
+    assert_eq!(field(out, "session-of-record"), Some(r#""-""#), "{out}");
+    assert_eq!(field(out, "shown"), Some(r#""-""#), "{out}");
+    assert_eq!(field(out, "driven"), Some("-"), "none stored: {out}");
+
+    let run = rig.run(&["pane", "list"], Format::Text);
+    let row = ok_text(&run).lines().nth(1).map(cells);
+    let shown_driven = row.as_ref().map(|r| (r[5], r[6]));
+    assert_eq!(shown_driven, Some((r#""-""#, "-")), "{run:?}");
 }
