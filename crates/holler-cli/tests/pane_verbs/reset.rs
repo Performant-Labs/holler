@@ -1,6 +1,6 @@
 //! `holler pane reset` (#645, brief ACs 2 and 14-19): a switch to a session the run
-//! creates. The runner and its per-run checks (both formats, one envelope, no Herdr or host
-//! call) are `switch.rs`'s.
+//! creates. The runner and its per-run checks (a text run and a JSON run on separate rigs, the
+//! same exit code, a valid envelope, no Herdr or host call) are `switch.rs`'s.
 
 use holler_pane::findings::FindingKind as K;
 use holler_pane::reconcile::Report;

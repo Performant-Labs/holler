@@ -340,3 +340,20 @@
     with `-D warnings` is clean, `pane_verbs` gives 154 passed, and the other three CLI targets and `holler-pane` pass.
     rustfmt, `lint.sh` and `changelog-check.sh` pass. The workspace in CI's form exits 0, with 1642 passed, 0 failed and
     14 ignored over 135 result lines (handoff-F.md, "Tier 1 self-check").
+
+## T, Phase 7 (GREEN), round 3, 2026-10-09 23:53 MDT
+
+- **Decided:**
+  - GREEN on `62aae72`. F's `match` in `check_health` keeps the behaviour. Dropping its `Some` arm fails
+    `switch_refuses_an_unhealthy_server`, and the `None` arm cannot be reached for a named pane, so it needs no test.
+  - NIT-2 is taken as a test-file doc fix. The module doc of `tests/pane_verbs/reset.rs` now describes `both_with` as it
+    is: a text run and a JSON run on separate rigs. No test logic changed.
+- **Assumed:**
+  - The gate's other r2 entries need nothing from T. NV-1 is settled by F's evidence, and I checked the
+    `StoreScope::resolve` excerpt against the source.
+- **Hedged:**
+  - None.
+- **Evidence:**
+  - With `CARGO_BUILD_JOBS=4`: `pane_verbs` 154 passed; the workspace in CI's form exits 0, with 1642 passed, 0 failed and
+    14 ignored over 135 result lines; clippy `-D warnings`, `lint.sh`, `changelog-check.sh`, `cargo machete` and
+    rustfmt on the five story files are clean. `origin/main` `d9eabbb` is an ancestor of HEAD.
