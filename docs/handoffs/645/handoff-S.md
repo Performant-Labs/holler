@@ -1,240 +1,265 @@
-# Handoff-S: Phase 8 - #645a `pane switch` and `pane reset` (spec audit)
+# Handoff-S: Phase 8 - #645a `pane switch` and `pane reset` (spec audit, round 2)
 
-**Date:** 2026-10-10 00:11 MDT
-**Branch:** issue-645-implementation (worktree `.claude/worktrees/0645-switch-reset`), head `08d96df` (A-dup round 2)
+**Date:** 2026-10-10 01:50 MDT
+**Branch:** issue-645-implementation (worktree `.claude/worktrees/0645-switch-reset`), head `67fbe33` (A-dup round 3). The
+code is F round 6's (`6dd44f3`): `git diff 6dd44f3 HEAD -- crates/ CHANGELOG.md docs/adr/` is empty.
 **Issue:** #645, part 1 of 2 (645a), epic #633. **Brief:** `docs/handoffs/645-brief.md`, as amended in `8cf4f00`
-**Handoffs reviewed:** `handoff-A.md` (round 2), `handoff-T-red.md`, `handoff-F.md` (round 3), `handoff-T-green.md`
-(round 3), `handoff-A-dup.md` (round 2), `decisions.md` and `evidence.md`. Also the outside gates' result files, which are
-gitignored: brief r1 PASS (20:03 MDT, on the amended brief), diff r1 PASS (23:03), r2 BLOCK B-1 (23:37), r3 PASS (23:52).
-**Diff audited:** `git diff origin/main...HEAD`, merge base `d9eabbb`. Since A-dup's round 2, `origin/main` has moved to
-`abdcbb6`: #713 (#660) and #714 (#640 part 3) merged at 00:05 and 00:06 MDT on 2026-10-10.
+**Handoffs reviewed:**
+- `handoff-A.md` (round 2, PASS), `handoff-T-red.md`, `handoff-F.md` (round 6), `handoff-T-green.md` (round 6) and
+  `handoff-A-dup.md` (round 3, PASS).
+- `decisions.md` (from `:406` closely) and `evidence.md`.
+- The outside diff gate's results: r5, which failed (`gate-unavailable`), and r6, O's manual rerun of r5's prompt, which
+  is a PASS. r5's prompt was built at 01:15 MDT, after F's round-6 merge, so r6 reviewed this code.
+**Diff audited:** `git diff origin/main...HEAD`. The merge base is `bd5e825`, and `origin/main` is still `bd5e825`
+(`git ls-remote` at 01:46 MDT), so the three-dot diff is the tree that will land. `git merge-tree --write-tree HEAD
+origin/main` exits 0.
+**Supersedes:** round 1 (REWORK, `ddb6fc3`). Its one item, the merge of `origin/main`, is done. F did it in rounds 4 and 6,
+and T re-verified both times.
 
 ## A precondition
 
-Met. `handoff-A.md` round 2 is **PASS** (the plan), and `handoff-A-dup.md` round 2 is **PASS** (the diff, on `940e338`).
+Met. `handoff-A.md` round 2 is **PASS** (the plan). `handoff-A-dup.md` round 3 is **PASS** (the diff, on `cce6f00`, which
+carries `6dd44f3`'s code).
 
 ## T precondition
 
-Met. `handoff-T-green.md` round 3 lists no blocking issues. RED was confirmed in `handoff-T-red.md`: 94 passed and 19
-failed, each failing on its assertion, with no compile error, setup panic or timeout. GREEN gave `pane_verbs` 154/154, and
-the workspace in CI's form 1642 passed, 0 failed, 14 ignored.
+Met.
+- **RED.** `handoff-T-red.md`: 94 passed and 19 failed, each on its assertion, with no compile error, setup panic or
+  timeout.
+- **GREEN.** `handoff-T-green.md` round 6 lists no blocking issues:
+  - `pane_verbs` 162/162, with `switch::` and `reset::` at 22. `pane_cli_process` 35, `cli_surface_test` 3,
+    `docs_cli_test` 3, `wire_selftest` 3 and `holler-pane` 98.
+  - Clippy `-D warnings`, `lint.sh`, `changelog-check.sh`, rustfmt on the five story files and `cargo machete` are clean.
+- **The one workspace failure is not this story's.** T's run in CI's form had one failure,
+  `body_run_test::fresh_hello_and_presence_on_every_reconnect` ("hub did not report listening within 10s").
+  - The story touches none of that code (the diff's file list confirms it).
+  - The target passed 5 of 5 re-runs.
+  - F's run of the same command on the same tree (01:02-01:06 MDT) exited 0 with 1700 passed.
 
 ## Acceptance criteria
 
-**The brief's ACs.** All test paths are under `crates/holler-cli/tests/pane_verbs/`. Every case runs through `both_with`
-(`switch.rs:121-150`). It checks, on every run of every test, that text and JSON exit with the same code, that the JSON is
-one valid envelope with nothing on `err`, that text writes one line to the right stream, and that there is no Herdr or
-host call. The rig's records start at `Health::Unknown` and `last_observed {shown: None, driven: None, at: 0}`
-(`holler-pane-testkit/src/fixture.rs:41-80`), so each field AC 1 asserts is a real write.
+All test paths are under `crates/holler-cli/tests/pane_verbs/`. Every case runs through `both_with` (`switch.rs:121-150`).
+On every run of every test, it checks that:
+- text and JSON exit with the same code;
+- the JSON is one valid envelope, with nothing on `err`;
+- text writes one line, to the right stream;
+- no Herdr or host call was made (`:141-148`).
+
+The rig's records start at `Health::Unknown` with an empty `last_observed`, so every field AC 1 asserts is a real write.
+T's mutations, rounds 1-6, were each caught by the right test: P4, P5, O1, the record fields, the reconcile step, the
+created note, the remedy's `Some` arm, and `acted` on the select and on the observation. So these tests fail without the
+change.
 
 | AC | Criterion | Proving test or evidence | Status |
 |---|---|---|---|
-| 1 | TUI and record move together, exactly four fields, generation +1 | `switch.rs` `switch_moves_the_tui_and_the_record_together` (`assert_recorded` compares the whole record; `driven` pre-set to `ses_driven` and kept; exact text line; JSON `verb`, `previous`, `session_of_record`, and `data.pane` equal to the stored record) | MET |
-| 2 | No keystroke; exact call sequences | The I4 check in `both_with` (`switch.rs:141-148`) on every run; AC 1's `[Health, ListSessions, SelectSession, ShownSession]` and `[Get, List, CasPut]` (`switch.rs:277-286`); AC 14's `[Health, CreateSession, SelectSession, ShownSession]` and `[Get, CasPut]` (`reset.rs:71-79`). There is no test named `switch_and_reset_type_nothing`, but these assertions cover more than it would | MET |
-| 3 | Deleted session: `session-not-found`, nothing changes | `switch_to_a_deleted_session_changes_nothing` (T's mutation: skipping P4 fails it) | MET |
-| 4 | Another pane's session: `session-of-other-pane` | `switch_to_another_panes_session_is_refused` (shared data directory; names `demo-c2r1`; both panes unchanged; skipping P5 fails it) | MET |
-| 5 | Unhealthy server: 3 `server-unhealthy`; health timeout: 1 `timeout` | `switch_refuses_an_unhealthy_server` (kill and freeze stop at `[Health]`; message has `run holler pane relaunch demo-c1r1`) | MET |
-| 6 | Orchestrator's pane needs `--as-operator` | `switch_refuses_the_orchestrators_pane_unless_as_operator` | MET |
-| 7 | Mismatch after select records nothing (I3) | `switch_mismatch_after_select_records_nothing` (`its home screen`, ends with the reconcile step; ignoring O1 fails it) | MET |
-| 8 | Select failure names the reconcile step | `switch_select_failure_names_the_reconcile_step` | MET |
-| 9 | Record conflict after the act | `switch_record_conflict_after_the_act` (`WriterInSelect`: the other writer's record stands and the TUI shows S2, so the verb neither retries nor compensates) | MET |
-| 10 | `--profile` scoping | `switch_in_a_profile` | MET |
-| 11 | Unknown pane | `switch_unknown_pane` | MET |
-| 12 | Usage before any port; no raw ESC | `switch_usage` (every `calls.*` empty, `probes == 0`) | MET |
-| 13 | Switch to the current session | `switch_to_the_current_session_is_idempotent` | MET |
-| 14 | Reset creates, shows and records a fresh session | `reset.rs` `reset_creates_a_fresh_session_and_switches_to_it` | MET |
-| 15 | Reset is doctor's remedy, (a) and (b) | `reset_is_doctors_remedy_for_no_session_of_record`; `reset_is_doctors_remedy_for_a_deleted_session_of_record` (doctor's own remedy string, `holler pane reset demo-c1r1`, parses and is the argv that runs) | MET |
-| 16 | Old session stays as the one stray | `reset_leaves_the_old_session_as_a_stray` | MET |
-| 17 | Reset refusals create nothing | `reset_refusals_create_nothing` (four refusals; sessions listed through Q's server) | MET |
-| 18 | Failure after create names the unrecorded session | `reset_failure_after_create_names_the_unrecorded_session` | MET |
-| 19 | Reset mismatch records nothing | `reset_mismatch_records_nothing` | MET |
-| (A1) | A failed create: no step, no created note | `reset_create_failure_changes_nothing` (T, round 2) | MET |
-| 20 | `stub.rs` entries removed, `// #645` kept | the diff; `pane_cli_process` 34/34 (T-green) | MET |
-| 21 | `cli-surface.txt` `# #645` block exactly | the diff matches the brief line for line; `cli_surface_test` 3/3, `docs_cli_test` 3/3 | MET |
-| 22 | ADR 0003 rows 51-52 | the diff: exact text, with `#645` at column 67 like rows 44-45, 48-49, 55-56 and 61 | MET |
-| 23 | Help names the arguments, no `--first` | `switch.rs` `help_names_the_arguments` (it fails on `origin/main`, per T-red) | MET |
-| 24 | ADR-0021 holds exactly Decision 17's edits | On the merge base `d9eabbb`: four hunks; the paragraph is at `:345`, between `### 8.` (`:285`) and `### 9.` (`:372`); one `unavailable` decision in section 8 (`:352`); `#645` 9 times against 6. **Against `origin/main` now (`abdcbb6`), the AC's own command `git diff origin/main -- docs/adr/ADR-0021.md` shows 8 hunks, and the branch does not merge.** | **NOT MET on the tree that will land** (REWORK 1) |
-| 25 | clippy, rustfmt, lint, workspace tests, no new dependency | T-green round 3, on the `d9eabbb` base: all clean. The three-dot `Cargo.toml` diff is empty. **Against `abdcbb6`, `git diff origin/main -- '*Cargo.toml'` is 14 lines** (#714's `holler-adapter-herdr/Cargo.toml`, shown reversed), and no workspace run has covered #713's and #714's tests | **NOT MET on the tree that will land** (REWORK 1) |
-| 26 | CHANGELOG entry | under `## [Unreleased]` / `### Enhancements`, `Part of [#645]`; `changelog-check: ok` (T). It merges cleanly with #714's entry (checked in a merge-tree) | MET |
+| 1 | TUI and record move together; exactly four fields; generation +1 | `switch.rs:261` `switch_moves_the_tui_and_the_record_together`. `assert_recorded` compares the whole record. `driven` is pre-set to `ses_driven` and kept. The exact text line. JSON `verb`, `previous` and `data.pane` equal the stored record | MET |
+| 2 | No keystroke; exact call sequences | the I4 check in `both_with` on every run. Switch: `[Health, ListSessions, SelectSession, ShownSession]` and `[Get, List, CasPut]` (`switch.rs:277-286`). Reset: `[Health, CreateSession, SelectSession, ShownSession]` and `[Get, CasPut]` (`reset.rs:71-79`) | MET (under the AC 1 and AC 14 test names, not a test of its own) |
+| 3 | Deleted session: `session-not-found`, nothing changes | `switch.rs:306` | MET |
+| 4 | Another pane's session: `session-of-other-pane` | `switch.rs:324`: shared data directory; names `demo-c2r1`; both panes unchanged | MET |
+| 5 | Unhealthy: 3 `server-unhealthy`; health timeout: 1 `timeout` | `switch.rs:343`: kill and freeze stop at `[Health]`; the message has `run holler pane relaunch demo-c1r1` | MET |
+| 6 | Orchestrator's pane needs `--as-operator` | `switch.rs:378` | MET |
+| 7 | Mismatch after select records nothing (I3) | `switch.rs:397`: `its home screen`, ends with the reconcile step | MET |
+| 8 | Select failure names the reconcile step | `switch.rs:416`. Also `switch.rs:436` (T round 5): the observation errs after a good select, `acted` is set, no `CasPut`, and the TUI moved | MET |
+| 9 | Record conflict after the act | `switch.rs:509`: `WriterInSelect`; the other writer's record stands, the TUI shows S2, no retry | MET |
+| 10 | `--profile` scoping | `switch.rs:546` | MET |
+| 11 | Unknown pane | `switch.rs:570` | MET |
+| 12 | Usage before any port; no raw ESC | `switch.rs:582`: every `calls.*` empty, `probes == 0` | MET |
+| 13 | Switch to the current session | `switch.rs:613` | MET |
+| 14 | Reset creates, shows and records a fresh session | `reset.rs:59` | MET |
+| 15 | Reset is doctor's remedy, (a) and (b) | `reset.rs:110` and `reset.rs:127`. Doctor's own remedy string, `holler pane reset demo-c1r1`, parses and is the argv that runs | MET |
+| 16 | The old session stays as the one stray | `reset.rs:153` | MET |
+| 17 | Reset refusals create nothing | `reset.rs:166`: four refusals, with the sessions listed through Q's server | MET |
+| 18 | A failure after create names the unrecorded session | `reset.rs:250` | MET |
+| 19 | Reset mismatch records nothing | `reset.rs:272` | MET |
+| (A1) | A failed create: no step and no created note | `reset.rs:229` | MET |
+| 20 | `stub.rs` entries removed, `// #645` kept | `process/stub.rs:23` keeps `// #645`, with no entries; `pane_cli_process` 35/35 | MET |
+| 21 | The `cli-surface.txt` `# #645` block, exactly | the diff matches the brief line for line; `cli_surface_test` 3/3, `docs_cli_test` 3/3 | MET |
+| 22 | ADR 0003 rows 51-52 | the exact text, with `#645` at column 67, like rows 44-45, 48-49, 55-56 and 61 | MET |
+| 23 | Help names the arguments, and no `--first` | `switch.rs:632` (it fails on `origin/main`, per T-red) | MET |
+| 24 | ADR-0021 holds exactly Decision 17's edits | against `origin/main` (`bd5e825`): 4 hunks (row `:424`, the end of section 8, the end of section 11, "Deferred"). `grep -n 'Switch and reset as built (#645)'` gives one line, `:365`, between `### 8.` (`:305`) and `### 9.` (`:392`). The `unavailable` decision is stated once in section 8. `#645` appears 9 times, against 6 on `origin/main`. #644's paragraph is not on `main`, so the #645 paragraph states the decision itself, as Decision 17(b) says | MET |
+| 25 | clippy, rustfmt, lint, workspace tests, no new dependency | T-green round 6 (see the T precondition). `git diff origin/main -- '*Cargo.toml' Cargo.lock` is 0 lines | MET |
+| 26 | CHANGELOG entry | `CHANGELOG.md:217-231`, under `## [Unreleased]` (`:8`) / `### Enhancements` (`:10`), ending "Part of [#645]"; `changelog-check: ok` | MET |
 
 **The issue's criteria** (the source of truth):
 
 | Issue criterion | Evidence | Status |
 |---|---|---|
-| No call types into a TUI, and the test fails if one does | `both_with`'s I4 check on every run. The verbs run on the rig's logged `FakeHerdr` and `FakeHost` (`doctor/rig.rs:160-169, 250-259`) | MET |
+| No call types into a TUI, and the test fails if one does | the I4 check in `both_with` on every run, over the rig's logged `FakeHerdr` and `FakeHost` | MET |
 | Refusals are named, with stable codes | every refusal test asserts its code, in JSON and by exit code | MET for 645a's refusals |
 | A switch to a deleted session fails and changes nothing | AC 3 | MET |
-| The first message lands in the new session and nowhere else | no port sends a prompt (brief C-2, B-2, F-1) | **Deferred to 645b** by Decision 1, which the operator's request ("#645a") acknowledges. The switch form of the wrong-session incident is AC 4 |
+| The first message lands in the new session and nowhere else | no port sends a prompt (brief C-2, B-2, F-1) | **Deferred to 645b** (Decision 1). The switch form of the wrong-session incident is AC 4 |
 | A pane outside P is refused and nothing changes | AC 10, AC 17 | MET |
-| Every refusal and success passes the envelope helper; exit codes equal across formats | `both_with`, `switch.rs:128-135` | MET |
+| Every refusal and success passes the envelope helper; exit codes equal across formats | `both_with` (`switch.rs:126-140`) | MET |
 | Scope: unhealthy server and orchestrator's pane refused; not idle or a held question | AC 5, 6, 17 | MET; not idle and held question are 645b |
-| `--format=text\|json` through `output::emit()` | `emit_outcome` calls `emit` (`pane/switch.rs:143`). `execute`'s usage path calls `emit_error`, which is `emit` (`output.rs:241-242`) | MET |
-| Only #638's fakes and envelope helper; no new dependency | the doctor rig over the test kit; `check_envelope`; the three-dot `Cargo.toml` diff is empty | MET |
+| `--format=text\|json` through `output::emit()` | `emit_outcome` calls `emit` (`pane/switch.rs:143`). The usage path calls `emit_error`, which is `emit` | MET |
+| Only #638's fakes and the envelope helper; no new dependency; no new `unsafe` | the doctor rig over the test kit; `check_envelope`; the Cargo diff is empty; no `unsafe` in the added lines | MET |
 
 ## Spec compliance
 
-- **The public API** is the brief's, item for item: the three `RefusalCode`s and `SESSION_ID_MAX`, `parse_session_id`,
-  `Target`, `SwitchRequest`, `Switched`, `SwitchFailure` with `From<PaneError>` and `message`, and `switch`
-  (`tx_switch.rs:50-178`); `PaneSwitch`, `run`, `Verb` and `emit_outcome` (`pane/switch.rs:31-66, 123-128`); and
-  `PaneReset` and `run` (`pane/reset.rs:20-43`). The names, fields, derives and doc strings all match.
-- **The Behaviour table, P0 to R**, runs in the brief's order: `plan` (`:182-195`), then `read`, `refuse_orchestrator`,
-  `check_health`, `check_listed` and `check_unclaimed` (`:200-283`). Then `switch`'s act (`:154-178`),
-  `select_and_observe` (`:287-302`) and `recorded` (`:317-324`). The messages of P2, P3, P5 and O1 and of
-  `SwitchFailure::message` are word for word the brief's. `screen_text` is the brief's private copy, word for word
-  (`:307-312`).
-- **Decisions 1-19 are implemented as stated:**
-  - one engine;
-  - refusals before any write;
-  - `--as-operator` as an intent gate;
-  - health observed live, with `Err` passed through;
-  - P4, and P5 with a stray allowed;
-  - no park gate;
-  - `unavailable` for a mismatch;
-  - no compensation;
-  - a clone-and-set of four fields in one compare-and-swap, never retried, with `driven` kept;
-  - no Herdr or host call;
-  - at most seven port calls;
-  - the session-id grammar;
-  - the output shape;
-  - the rig declared once (`doctor.rs:10` is the only `doctor.rs` change);
-  - the ADR-0021 edits;
-  - the previous session left as a stray.
-- **Deviations.** Each is documented in `handoff-F.md` or `handoff-A.md`, and each is acceptable:
-  - P1 takes the resolved pane with `find` on its name, not `into_iter().next()` (`tx_switch.rs:206-207`). Under
-    `ProfileScope`'s contract it is the same pane: the real `StoreScope` and the fake both answer exactly the pane `n`
-    (`evidence.md`, F round 3). It does no indexing, which was the point of A's round-1 warn 7.
-  - `reset.rs` reuses `switch::{execute, Verb}`, not `{emit_outcome, Verb}`. `execute` calls `emit_outcome`, so nothing is
-    copied.
-  - The "Deferred" bullet takes A's round-2 form, "#645 for switch and reset; #644 to follow for launch and relaunch".
-    #644's paragraph is still not on `main` (checked at `abdcbb6`), so this form is more accurate than Decision 17(c)'s
-    literal text.
-  - The #645 paragraph has four sentences that Decision 17(b) does not list: when the reconcile step is printed, and why
-    it names the pane with `--fix`, unlike #663's step 6. They are A-dup round 1's fix, and they sit inside AC 24's "end
-    of section 8".
-- **No ADVISORY-HOLD.** The brief is not defective. The split (C-2, Decision 1) is reasoned and recorded, and the
-  operator's request for this run names the story "#645a".
+- **The public API** is the brief's, item for item.
+  - In `tx_switch.rs` (`:52-155`): the three `RefusalCode`s, `SESSION_ID_MAX`, `parse_session_id`, `Target`,
+    `SwitchRequest`, `Switched`, and `SwitchFailure` with `From<PaneError>` and `message`, then `switch`.
+  - In `pane/switch.rs`: `PaneSwitch`, `run`, `Verb` and `emit_outcome` (`:33`, `:48`, `:63`, `:123`).
+  - In `pane/reset.rs`: `PaneReset` and `run` (`:22`, `:36`).
+- **P0 to R run in the brief's order.**
+  - The plan is `plan` (`:191`): `parse_session_id` (the P0 re-check), `read`, `refuse_orchestrator`, `check_health`, and
+    then, for `Existing` only, `check_listed` and `check_unclaimed`.
+  - Then `switch` (`:155-187`):
+    - A1 `create_session` converts with `acted: false`.
+    - A2 `select_session` (`:173-176`), O1 `observe` (`:177`) and R `cas_put` (`:179-182`) each map their error with
+      `acted` and `created`.
+  - `recorded` (`:327`) clones the record and sets exactly four fields.
+  - The messages of P2, P3, P5 and O1, and `SwitchFailure::message`, are word for word the brief's. `screen_text` (`:317`) is
+    word for word reconcile's.
+- **Decisions 1-19 are implemented as stated.** Unchanged since round 1, which listed them one by one. F round 5's split
+  of the private `select_and_observe` changed no call, order, error or message, and T's mutations pin the `acted`
+  boundary on both sides.
+- **The outside gate's items that O routed to S** (`decisions.md:668-669`) all hold:
+  - NV-1: `read` searches by name (`tx_switch.rs:212-225`), as below.
+  - NV-2: `ServerDown` maps to `pane.map(relaunch_command)` (`findings.rs:127-131`), so `check_health`'s `None` arm cannot
+    be reached with a named pane, and AC 5 pins the relaunch text.
+  - NV-3: AC 17 compares the sessions through Q's server (`reset.rs:202-206`).
+  - NV-4: the code is `ErrorCode::from(&failure.error)` (`pane/switch.rs:138-141`), and `both_with` asserts equal exit
+    codes.
+  - NV-5: the paragraph is at `:365`, inside section 8.
+  - W-3: see the "Deferred" deviation below.
+- **Deviations.** Each is documented, and each is still acceptable:
+  - P1 uses `find` by name, not `into_iter().next()`. Under `resolve`'s contract it is the same pane, and it does no
+    indexing, which was the point of the brief's rule.
+  - `reset.rs` reuses `switch::{execute, Verb}`, and `execute` prints through `emit_outcome`, so nothing is copied.
+  - The "Deferred" bullet reads "#645 for switch and reset; #644 to follow". Decision 17(c)'s single form applies only if
+    #644's edit of that bullet is on `main`, and it is not (`bd5e825`), so this form is accurate. Whichever of #644 and
+    #645 lands second writes the single form.
+  - The #645 paragraph has four sentences that Decision 17(b) does not list (A-dup round 1's fix). They are inside AC 24's
+    "end of section 8".
+- **No ADVISORY-HOLD.** The brief's one gap, ADR-0021 `:485`, is minor (advisory 8). The split is reasoned and recorded
+  (C-2, Decision 1).
 
 ## Quality audit
 
 - **Correctness and failure handling.**
-  - Every refusal comes before any write or live change, by construction.
+  - Every refusal comes before any write or live change.
   - The record write is one compare-and-swap at the plan's generation, never retried.
-  - Nothing is compensated after the act: AC 9 shows the TUI stays on S2 and the other writer's record stands.
-  - A mismatch fails closed as `unavailable` and records nothing.
-  - A session that a reset created and did not record is named in the message.
+  - Nothing is compensated after the act.
+  - A mismatch fails closed as `unavailable`, records nothing and ends with the reconcile step.
+  - A failure before `select_session` prints no step, which AC 5, the usage cases and the create failure pin.
+  - A session that reset created and did not record is named in the message.
   - A port's `Err` is passed on unchanged.
   - Accepted risk: two concurrent switches to one session can both pass P5 (R-5). The ADR states this, and F-3 is its
     follow-up.
 - **Build guards.**
-  - No `unwrap`, `expect`, `panic!`, `todo!` or indexing in the three production files (grep).
+  - No `unwrap`, `expect`, `panic!`, `todo!`, `unreachable!`, indexing, `unsafe` or logging in the three production
+    files.
   - No `#[allow]` in any touched file.
-  - Every touched file is under 900 lines: `tx_switch.rs` 324, `pane/switch.rs` 160, `pane/reset.rs` 43, test `switch.rs`
-    613, test `reset.rs` 288, `ADR-0021.md` 633, `CHANGELOG.md` 769.
-  - No dead code: clippy with `-D warnings` is clean (T), and `execute` and `emit_outcome` both have callers.
-- **Protocol.** No wire, golden or `docs/protocol/v2.md` change, and none is needed: there is no hub method and no field.
-  The three codes are open `RefusalCode`s declared with `from_static` in the verb's own file, as ADR-0021 section 9 asks,
-  and the section 9 row now lists them. The closed-code table is untouched.
+  - Every touched file is under 900 lines: `tx_switch.rs` 334, `pane/switch.rs` 160, `pane/reset.rs` 45, test `switch.rs`
+    649, test `reset.rs` 288, `doctor.rs` 501, `ADR-0021.md` 661, `CHANGELOG.md` 790.
+  - No dead code: clippy `-D warnings` is clean (T).
+- **Protocol.** No wire, golden or `docs/protocol/v2.md` change, and none is needed. The three codes are open
+  `RefusalCode`s, declared with `from_static` in the verb's own file. The section 9 row lists them, and the closed-code
+  table is untouched.
 - **Tests.**
-  - In-process over the test kit's fakes, the tier the issue names.
-  - No sleeps (grep). The clock is asserted as a window.
-  - AC 9's concurrent writer is injected deterministically inside `select_session`.
-  - RED-first evidence is in T-red. T-green's mutations across rounds 1-3 (P4, P5, O1, the record fields, the reconcile
-    step, the created note, `acted`, and the remedy's `Some` arm) were each caught by the right test.
+  - The tests run in-process over the test kit's fakes, the tier the issue names.
+  - No sleeps. The clock is asserted as a window.
+  - AC 9's concurrent writer is injected deterministically.
+  - The RED-first evidence is in T-red.
 - **Security.**
-  - `SESSION` is typed to `[A-Za-z0-9_-]{1,64}` before any port is called (AC 12).
-  - Harness ids are quoted in every message and every text line.
+  - `SESSION` is typed to `[A-Za-z0-9_-]{1,64}` before any port is called.
+  - Harness ids are quoted in every message and text line.
   - The reconcile step is built from a validated `PaneName`.
-  - JSON `data.pane` is the stored record. Its `env` holds variable names only (`holler-pane/src/pane.rs:246-248`), and
-    `pane get` prints the same record (`pane/get.rs:66-69`).
+  - JSON `data.pane` is the stored record, which `pane get` already prints.
 - **Documentation.**
   - The CHANGELOG entry, the ADR 0003 rows and the ADR-0021 edits.
-  - The merged verb stories #643 (`efd9a00`) and #646 (`13edbb4`) changed the same set of docs, and no README page.
-  - Code comments cite ADR-0021 sections and issues. The test-module docs cite "brief ACs", as the merged
-    `doctor/rig.rs` and `park.rs` do.
-- **Public-repository privacy.**
-  - Scanned: every added line of the diff, the handoffs included.
-  - Looked for: host, tailnet and machine names, private IPs, absolute home paths, email addresses and key-like strings.
-  - Found: one hit, the brief's own rule statement (`645-brief.md:21`).
-  - The tests use only the neutral names `demo-c1r1`, `demo-c2r1`, `demo` and `scratch`, and ports from 48100.
+  - No README or `docs/` page describes the pane verbs. The merged verb stories #643 and #646a changed only the ADRs.
+- **Public-repository privacy.** Clean.
+  - Scanned: the 5,080 added lines of the diff, and the patch and message of every branch commit against its first
+    parent.
+  - The pattern set was the one the operator's handoff rule names (on `docs/660-placeholder-scrub`, `8f81cf6`): home and
+    machine paths, user and host names, pane and agent identifiers. Also tailnet names, IPs, emails and key-like
+    strings.
+  - This story's own lines hit nothing. The only hit is the brief's own rule statement.
+  - The history hits (two fleet pane identifiers, an operator name, and a placeholder home path in test data) are all in
+    `origin/main`'s files that the merges brought in: `docs/handoffs/640/`, `docs/handoffs/0660-output/`, the adapters'
+    test data. The scrub branch handles the handoff ones.
+  - Repo-relative `.claude/worktrees/...` paths match `CLAUDE.md` and the scrub branch's own handoffs.
 - **Commit hygiene.**
-  - 12 non-merge commits, all with Conventional subjects (`chore(#645): ...`, `docs(handoffs): ...`).
-  - Every commit has a `Co-Authored-By` trailer, and the author and committer are the GitHub no-reply address.
-  - None carries a session link. The merged squash commits `d9eabbb` and `13edbb4` have the same form, so this is the
-    script's practice, not this story's defect.
-  - No PR exists yet, so the AI disclosure cannot be checked (advisory 3).
+  - 23 commits, all with Conventional subjects, a `Co-Authored-By` trailer, and the GitHub no-reply address as author
+    and committer.
+  - None carries a session link. `main`'s squash commits (`bd5e825`, `abdcbb6`, `d9eabbb`, `13edbb4`) carry none either,
+    so this is repo practice, not this story's defect.
+  - No PR exists yet (advisories 1-3).
+- **Pipeline records.** One hygiene defect, not in F's work. O's commit `cce6f00` force-added
+  `docs/handoffs/645-diff-result-r6.md` and its `.usage.json`.
+  - `.gitignore:23` and `:25` exclude both kinds of file ("Handoffs are tracked, but their debug artifacts are not").
+  - The playbook's `new-repo-setup.md:121-124` says the same.
+  - `origin/main` tracks no such file.
+  - F's round-4 entry calls r4's files gitignored.
+  - Their content is clean: a review of public code, and token counts. Advisory 4 removes them at the PR step.
 
 ## Scope check
 
-The scope matches the brief's Files list exactly: no frozen file, no #647 file but `doctor.rs:10`, no test-kit file and no
-`Cargo.toml`. `execute` and `request` are small private structure. T's `failed_before_the_act` and
-`reset_create_failure_changes_nothing` pin the ADR's no-step-before-the-act sentence and the brief's A1 row, so they are
-inside the story. Nothing is under-delivered against the brief. Against the issue, the not-idle and held-question
-refusals, `--first` and "the first message lands in the new session" are 645b by Decision 1. This PR is "Part of #645"
-and must not close it.
+F's files are exactly the brief's Files list:
+- Three production files.
+- Two test files, the two `stub.rs` deletions and `doctor.rs:10`.
+- `cli-surface.txt`, ADR 0003, ADR-0021 and the CHANGELOG.
+
+No frozen file, test-kit file, #647 file beyond `doctor.rs:10`, or `Cargo.toml` is touched; I checked with
+`git diff --stat` over each. `execute`, `request`, `Outcome`, `render` and `session_text` are small private structure. T's
+two extra tests pin the brief's A1 row and the `acted` boundary, so they are inside the story. The two r6 gate files are
+the one item outside the scope, and they are O's records, not F's code (advisory 4). The issue's not-idle and
+held-question refusals, `--first`, and "the first message lands in the new session" are 645b's, by Decision 1. This PR is
+"Part of #645" and must not close it.
 
 ## Verdict
 
-**REWORK** (production: F acts, then T re-verifies GREEN). There is one required change.
+**PASS.** Every brief AC and every issue criterion in 645a's scope is met on the tree that will land. The work is
+spec-compliant, and its quality is acceptable. Ready for O.
 
-1. **Merge `origin/main` (`abdcbb6`) and resolve the conflict in `docs/adr/ADR-0021.md` by keeping both sides.**
-   `git merge-tree --write-tree HEAD origin/main` exits 1, and that file is the only conflict. `CHANGELOG.md` and
-   `tests/pane_verbs/process/stub.rs` merge cleanly: the #645 entry stays under `[Unreleased]` / `### Enhancements`, and
-   `stub.rs` keeps `// #645` with no entries. Both hunks are adjacent-line edits from #714 (#640 part 3), the conflict
-   that R-1 and A-dup's note anticipated:
-   - **Section 9 table** (`ADR-0021.md:403-404` on the branch). Take `origin/main`'s `pane launch`, `pane relaunch` row,
-     which now ends `; open (#640) for a cell that no single split reaches, `grid-unreachable``, and this branch's
-     `pane switch`, `pane reset` row.
-   - **"Deferred to named stories"** (`ADR-0021.md:603-608` on the branch). Keep this branch's mismatch-code bullet and
-     its **PROPOSED (#645, pending the operator)** bullet. Follow them with `origin/main`'s rewritten bullet,
-     "`HarnessPort` in its final form: #635, then #642. `HerdrPort`: #640 implements it as merged; ...", in place of the
-     old "`HerdrPort` and `HarnessPort` in their final form" bullet.
-   - Taking either side whole is wrong. "Ours" reverts #714's row and bullet, and "theirs" drops this story's row and two
-     bullets. Either way AC 24 fails.
+**Why not REWORK for the r6 files.** S's REWORK sends F through the whole loop: F, T, A-dup, the outside gate and S. Two
+force-added debug files are O's own commit. Untracking them changes no product file, spec, test or verdict, and O is the
+next to act on this branch anyway, at the PR step (advisories 1-4). They do not break CI, the merge or privacy, which is
+what made round 1's merge a REWORK. Another loop would also risk `origin/main` moving again, since open PR #718 conflicts
+in ADR-0021. So it is a required pre-merge action for O, not a rework item for F.
 
-   After the merge, check:
-   - AC 24's `git diff origin/main -- docs/adr/ADR-0021.md` again shows exactly this story's four hunks, with the #645
-     paragraph between `### 8.` and `### 9.`.
-   - AC 25's `git diff origin/main -- '*Cargo.toml'` is empty again.
-   - T re-runs GREEN with `CARGO_BUILD_JOBS=4`: `pane_verbs`, `pane_cli_process`, `cli_surface_test`, `docs_cli_test`, the
-     workspace in CI's form, clippy, `lint.sh` and `changelog-check.sh`. The merged tree adds #713's `output_api.rs` and
-     `stub.rs` tests and #714's adapter tests.
+## Advisory notes
 
-   No code or test change is expected:
-   - #714's edits to `holler-pane` (`error.rs`, `pane.rs`, `ports.rs`, `reconcile.rs`) are doc comments only.
-   - #660's new stub test picks the first remaining pane stub (`launch`, #644).
-   - Sections 8 and 11 merge cleanly, and their #645 text stays in place.
+**Before merge (O, at the PR step).**
+1. **The PR body must not close #645.** The script opens the PR with `Closes #645.` (`coding-pipeline.workflow.mjs:4097`
+   and `:4822`; no argument overrides it). Merging that closes the issue while 645b's scope is undelivered. Replace it with
+   "Part of #645 (645a); #645 stays open for 645b", as PR #711 did for #646a (and #646 is still open).
+2. **Title and squash subject.** The script's `Implements #645` is not Conventional. Use, for example, `feat(cli): holler
+   pane switch and reset (#645 part 1 of 2)`, as #711 and `bd5e825` did.
+3. **The AI disclosure** in the PR body (`CONTRIBUTING.md:25-29`), added with `gh pr edit` (`CLAUDE.md`).
+4. **Untrack the two r6 gate files:** `git rm --cached docs/handoffs/645-diff-result-r6.md
+   docs/handoffs/645-diff-result-r6.md.usage.json`, then commit. The files stay on disk, ignored. The verdict is already in
+   `decisions.md:652-671`, whose evidence line can say the files are gitignored, as F's r4 entry does.
+5. **Re-check `git merge-tree --write-tree HEAD origin/main` just before merging.** Open PR #718 (#644 part 1) conflicts
+   with this branch in ADR-0021 (A-dup's notes). If #718 lands first, re-resolving it by anchor text (R-1, Decision 17(b)
+   and (c)) and re-checking AC 24 is an F round, not an O edit.
 
-**Why REWORK and not PASS with a note.** The Workflow script pushes and opens the PR without merging `main`
-(`coding-pipeline.workflow.mjs:3336-3347`), so a PASS now would open a conflicting PR that CI cannot test. Resolving the
-conflict after S would edit the standing spec outside every gate. The brief assigns this resolution to F: R-1 says
-whichever story merges second resolves it, editing by anchor text. F's round-2 merge, after A-dup's round-1 block, is the
-precedent in this run. Everything else in this audit passes, so after the merge only AC 24 and AC 25 need re-checking.
-
-## Advisory notes (non-blocking)
-
-1. **The issue and the PR.** The PR must say "Part of #645", not "Closes #645". The brief's P3 is still not done: #645's
-   body does not mention the split, and the issue has no comments. P1 and P2 (645b's design, and landing it before #649's
-   first-message step and before #654) are still PROPOSED.
-2. **Follow-ups to file.** None is filed yet; A-dup searched at 23:55 MDT. Once the `screen_text` fold is filed, the
-   comment at `tx_switch.rs:304-306` should name its issue instead of "a follow-up of #645".
-   - F-1: the stray session that every reset leaves.
-   - F-2: the fourth both-format runner, with `WriterInSelect`.
-   - F-3: one session per pane, enforced in the registry's compare-and-swap. A's optional ordering is "before #654", since
-     R-5's race goes live once #649 wires the ports.
-   - F-4, widened: the `to reconcile, run ` lead-in and `screen_text`, moved into `findings`, with `reconcile_step`'s doc
-     corrected.
-   - A-dup warn 4: the four copies of the scoped read.
-3. **Hygiene at merge.**
-   - A Conventional squash subject, e.g. `feat(cli): holler pane switch and reset (#645 part 1 of 2)`.
-   - The `Co-Authored-By` trailer with a session link (`CONTRIBUTING.md:19-21`).
-   - The AI disclosure in the PR body, added with `gh pr edit` after the script opens the PR (`CLAUDE.md`).
-4. **The journal.**
-   - The outside diff gate's r3 (PASS, 23:52 MDT, on F's round-3 tree) is cited only in A-dup round 2's evidence. It has
-     no round entry of its own, which `pipeline-conventions.md` section 1 asks for.
-   - The r3 result file calls itself "Implementation Review (Round 1)", and its usage file says `"round": "1"`.
-5. **ADR-0021 section 12.** Its "prints the reconcile step" is broader than the #645 paragraph's no-step-before-the-act
-   rule (A-dup warn 1). This is for the next section-12 edit (#644).
-6. **A failed create.** A `timeout` from reset's `create_session` may leave a session that the message cannot name. Doctor
-   reports it as a stray. This is a 645b question, from F's observation.
-7. **`--profile` typing.** `pane/switch.rs:97-101` can call #643's `list::profile_name` when 645b edits this file (A-dup
-   warn 2).
+**After merge.**
+6. **P3.** #645's body still does not mention the split (last updated 2026-10-08 18:45 MDT, no comments). Epic #633's
+   wave table should list 645b. P1 and P2 are still PROPOSED for the operator.
+7. **Follow-ups to file.** None was filed as of A-dup's search at 01:34 MDT.
+   - F-1: the stray that every reset leaves.
+   - F-2: the rig consolidation, which fires when #718 merges.
+   - F-3: one session per pane in the registry's compare-and-swap, before #654.
+   - F-4, widened: the lead-in, the append rule and the screen wording move into `findings`, including the `None` that
+     means "cannot tell" from #642's adapter.
+   - The scoped-read fold (A-dup warn 6).
+   Once F-4 is filed, the comment at `tx_switch.rs:314-316` names its issue.
+8. **ADR-0021 `:485`** says "#645's ... planned", which goes stale once 645a lands. Decision 17 ("No other ADR-0021 line
+   changes") missed this line, and AC 24 allows no fifth hunk, so F was right to leave it. It is too small for an
+   ADVISORY-HOLD: the sentence's claim ("are all refusals") stays true, and row `:424` lists the codes. Fix it in the next
+   ADR-0021 edit, by whichever of #644 and #645 lands second.
+9. **ADR-0021 section 12's** "prints the reconcile step" is broader than the #645 paragraph (A-dup warn 4). #718 edits
+   section 12.
+10. **The flake.** `body_run_test::fresh_hello_and_presence_on_every_reconnect` failed once under load (T). It is outside
+    this story. File it if it recurs in CI.
+11. **The journal.**
+    - The O entry at `decisions.md:652` is stamped 01:40 MDT, but `cce6f00` committed it at 01:26:38 MDT, 14 minutes
+      earlier.
+    - The r6 file calls itself "Round 1", which is the script's numbering.
+12. **For 645b.**
+    - `--profile` typing through `list::profile_name` (A-dup warn 7).
+    - The switch test builds as a `faulted`-style helper (A-dup warn 2).
+    - Whether a timed-out `create_session` can leave a session that the message cannot name.

@@ -719,3 +719,48 @@ NV-2 `ServerDown` remedy is never `None`; NV-5 the #645 paragraph sits inside se
     origin/issue-644-implementation` exits 1, with ADR-0021 the only conflict. Read #718's `tx_launch.rs` `observe_live`,
     `pane/launch.rs:428-436`, `launch/rig.rs:1-18, 252` and its ADR-0021 diff.
   - `gh issue list` searches for F-1 to F-4, the scoped-read fold and 645b (01:34 MDT): none filed.
+
+## S (spec audit, round 2) — 2026-10-10T01:50-06:00
+- **Decided:** PASS (handoff-S.md, round 2, which replaces round 1's REWORK at `ddb6fc3`).
+  - Round 1's one item is done. `origin/main` is `bd5e825` (`git ls-remote`, 01:46 MDT), the merge base, so the
+    three-dot diff is the tree that will land. `git merge-tree` exits 0. Against it, AC 24 has 4 hunks, the paragraph is
+    at `:365` between `:305` and `:392`, the decision is stated once, `#645` appears 9 times against 6, and AC 25's Cargo
+    diff is 0 lines.
+  - Every brief AC (1-26 and A1), and every issue criterion in 645a's scope, has a proving test or evidence. The code
+    has not changed since T-green round 6 (`6dd44f3`). F round 5's split of `select_and_observe` kept the brief's P0-R
+    table, and T's mutations pin both sides of the `acted` boundary.
+  - The outside gate's items that O routed to S (r6's NV-1 to NV-5 and W-3) all hold. The deviations that round 1
+    accepted are still acceptable.
+  - Build guards, protocol, tests, security and docs are clean. The privacy scan of every added line and of every branch
+    commit's patch against its first parent is clean. Its hits are all `origin/main`'s files, which the merges brought in.
+- **Assumed:**
+  - T-green round 6's Tier 1 results hold. I did not re-run them, and nothing in `crates/` changed after them.
+  - The `body_run_test` failure in T's workspace run is a flake outside the story. The story touches none of its code,
+    it passed 5 of 5 re-runs, and F's run of the same command on the same tree passed.
+- **Hedged:**
+  - O's `cce6f00` force-added `645-diff-result-r6.md` and its `.usage.json`. `.gitignore:23` and `:25`, the playbook's
+    `new-repo-setup.md:121-124`, `origin/main` (which tracks none) and F's r4 entry all treat them as untracked debug
+    artifacts. I made this a required pre-merge action for O (advisory 4), not a REWORK. Untracking them changes no
+    product file, spec, test or verdict. O acts next on this branch at the PR step. And a full F-T-A-dup-gate-S loop
+    risks `origin/main` moving again (open PR #718 conflicts in ADR-0021).
+  - The script opens the PR with `Closes #645.` (`coding-pipeline.workflow.mjs:4097`, `:4822`), which would close #645
+    while 645b is undelivered. That is advisory 1 for O, with PR #711 (#646a, "Part 1 of 3 of #646") as the precedent.
+  - ADR-0021 `:485` ("#645's ... planned") is a small gap in Decision 17. I did not make it an ADVISORY-HOLD: the
+    sentence stays true, row `:424` lists the codes, and the next ADR-0021 edit fixes it (advisory 8).
+  - This entry's stamp is when the handoff was written. The O entry above is stamped 01:40 MDT, but `cce6f00` committed
+    it at 01:26:38 MDT (advisory 11).
+- **Evidence:**
+  - Read: the brief (all of it), handoffs A (round 2), T-red, F (round 6), T-green (round 6) and A-dup (round 3), this
+    journal from `:406`, the r6 result and its usage file, the issue body (`gh issue view 645`), `CONTRIBUTING.md`, and
+    PR #711's title and body.
+  - Read in full: `tx_switch.rs`, `pane/switch.rs`, `pane/reset.rs`, and tests `pane_verbs/{switch,reset}.rs`. Also the
+    hunks of `doctor.rs`, `stub.rs`, `cli-surface.txt`, ADR 0003, ADR-0021 and the CHANGELOG, and `findings.rs:121-131`.
+  - Commands: `git fetch`; `git ls-remote origin refs/heads/main`; `git merge-base --is-ancestor`; `git merge-tree`; the
+    AC 24 greps and hunk count; the AC 25 Cargo diff; `git diff --stat` over the frozen files and the test kit (empty);
+    `wc -l` on every touched file; greps for banned calls, `#[allow]`, indexing, `unsafe`, logging and sleeps; the column
+    of the ADR 0003 rows.
+  - The privacy scan: the 5,080 added lines, and `git log --first-parent -m -p origin/main..HEAD`, with each hit traced
+    to its commit and file.
+  - `git check-ignore --no-index` on the r6 files; `git ls-tree` of `origin/main` for tracked gate artifacts (none);
+    the commit trailers and author emails; `gh pr view 711 718`; the script's PR-create lines (`:4096-4097`,
+    `:4821-4822`).
