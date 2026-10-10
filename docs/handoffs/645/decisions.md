@@ -648,3 +648,24 @@
   - Mutation `observe(..).map_err(acted)?` to `observe(..)?`: 19 passed, 3 failed (AC 7, AC 19, the observation-failure
     test), as in round 5; file restored, `cmp` clean.
   - Evidence citations moved in round 6 read against source: all match verbatim.
+
+## O (diff gate, manual rerun after round 5 failed): 2026-10-10T01:40:00-06:00
+
+**Decided.** Round 5 of the outside diff gate failed twice over. The reviewer's reply hit the 8,192-token cap with `finish_reason: length`
+and no Verdict (a rambling list of "B-" items that were confirmations), and the script's outside-content agent was then blocked by a
+safety filter on that text (`gate-unavailable`, `malformed-input`). O re-ran the same prompt bytes
+(`645-diff-result-r5.md.prompt.txt`, about 48,800 estimated tokens, under the ceiling) by hand. Result: complete, `finish_reason: stop`,
+2,838 completion tokens, **Verdict: PASS, no BLOCK findings**. The review and its `usage.json` are `docs/handoffs/645-diff-result-r6.md`
+and `.usage.json`.
+
+**Assumed.** The reply lists six entries under "BLOCK findings" (B-1 to B-6) and still ends "no BLOCK findings". Each entry's own text
+concludes "not a block", "no defect" or "matches": B-1 `SESSION_ID_MAX` byte versus character count agree for an ASCII grammar;
+B-2 the engine's P0 re-check is defensive for non-CLI callers, as the brief says; B-4, B-5 and B-6 match the brief. B-3 is the one
+wording point: the ADR-0021 "Deferred" bullet names #645 first and "#644 to follow", while Decision 17(c) prints #644 first. At this
+point #644 is not on `main`, so the conditional in AC 24 (cite #644's paragraph only if it is on `main`) applies, and the bullet is
+reconciled by whichever lands second. O treats the section heading as a formatting slip and the verdict line as the result.
+
+**Hedged.** Needs-verification items NV-1 to NV-5 and warns W-1 to W-3 go to A-dup and S to check (NV-1 `read` finds the pane by name;
+NV-2 `ServerDown` remedy is never `None`; NV-5 the #645 paragraph sits inside section 8).
+
+**Evidence.** `docs/handoffs/645-diff-result-r6.md`, `docs/handoffs/645-diff-result-r6.md.usage.json`.
