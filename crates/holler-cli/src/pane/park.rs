@@ -13,6 +13,15 @@ const STORY: u32 = 646;
 /// Take a pane out of service until it is unparked.
 #[derive(Args, Debug)]
 pub struct PanePark {
+    /// Park only this pane (default with `--profile`: every pane of the profile).
+    #[arg(value_name = "PANE")]
+    pub pane: Option<String>,
+    /// Why the pane is parked (one line, at most 200 characters).
+    #[arg(long, value_name = "TEXT")]
+    pub reason: String,
+    /// When the park ends, a time or a condition (one line, at most 200 characters).
+    #[arg(long, value_name = "WHEN")]
+    pub release_when: String,
     #[command(flatten)]
     pub profile: ProfileOpt,
 }

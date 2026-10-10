@@ -42,3 +42,33 @@
     (the scan and normalisation), and `scripts/lint.sh:43-52`.
   - #644's plan review, #663's second plan review, the #643 brief, the #663 `StoreScope` (`resolve`, `member`), and
     `git log ce12cdb..origin/main` (two adapter-only commits).
+
+## T (Phase 4, author tests / RED): 2026-10-09T20:06:40-06:00
+- **Decided:** RED is valid. 10 new in-process tests over a new rig (`tests/pane_verbs/park/rig.rs`): 8 in `park.rs`
+  and `park/failures.rs`, 2 in `unpark.rs`. All 10 fail on the stub's `not-implemented` (exit 1, or the envelope's code
+  against `generation-conflict`); the other 93 `pane_verbs` cases pass (`docs/handoffs/646/handoff-T-red.md`).
+  - The brief's test plan has T land the argument structs (`PANE`, required `--reason`/`--release-when`) with `run`
+    still a stub. The surface edits had to land in the same step: ADR 0003 rows 54-55, the four `cli-surface.txt` lines,
+    and removing park/unpark from `process/stub.rs`. Without them `holler pane park` exits 2 from clap and breaks
+    `stub_verb_not_implemented`, `cli_surface_test` and `docs_cli_test`.
+  - AC 8 lives in `park/failures.rs` as a check that takes the verb, which `unpark.rs` calls for AC 8d (A warn 6). The
+    rig mirrors #662's names (A warn 5).
+- **Assumed:**
+  - For an unchanged pane, AC 3's JSON `data` carries `generation` 1 and the stored hold (Decision 8).
+  - AC 7b and 7c's messages are `PaneName::parse` and `ProfileName::parse`'s own, compared against those functions'
+    output rather than a hard-coded string.
+  - ADR-0021's paragraph (AC 12) and the CHANGELOG entry (AC 13) are F's, checked by grep and script at S, so no
+    test pins them.
+- **Hedged:**
+  - The brief puts "unpark's cases of AC 3-10" in `unpark.rs`. They live in `park.rs` under the brief's own
+    `park_and_unpark_*` test names, which cover both verbs; `unpark.rs` keeps AC 8d and the AC 5 named-member case.
+  - A throwaway prototype of the verb was used only to prove the tests can pass and catch mutations. It was restored to
+    the stub, never staged, and is not F's design.
+- **Evidence:**
+  - RED: `cargo test -p holler-cli --test pane_verbs` gives `93 passed; 10 failed`, each failure the stub's answer at the
+    first behavior assertion.
+  - Against the prototype: `10 passed`, and 4 of 4 mutations caught (untrimmed store, overwrite any hold, continue after
+    a failure, suffix on one pane).
+  - `pane_cli_process` 34 passed, `cli_surface_test` 3 passed, `docs_cli_test` 3 passed.
+  - `cargo clippy -p holler-cli --all-targets -D warnings` clean, `rustfmt --check` clean, `scripts/lint.sh` exit 0, and
+    `git diff HEAD -- '*Cargo.toml'` empty. The `origin/main` manifest diff is upstream #702/#705 drift (noted for AC 13).

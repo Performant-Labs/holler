@@ -13,6 +13,9 @@ const STORY: u32 = 646;
 /// Return a parked pane to service.
 #[derive(Args, Debug)]
 pub struct PaneUnpark {
+    /// Unpark only this pane (default with `--profile`: every pane of the profile).
+    #[arg(value_name = "PANE")]
+    pub pane: Option<String>,
     #[command(flatten)]
     pub profile: ProfileOpt,
 }
