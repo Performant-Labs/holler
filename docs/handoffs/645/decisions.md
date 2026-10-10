@@ -474,3 +474,19 @@
     workspace in CI's form exits 0, with 1663 passed, 0 failed and 16 ignored over 137 result lines. That is round 3's
     1642 plus #713's 8 and #714's 13, and the 2 new ignored are #714's opt-in real-Herdr runs.
   - A scratchpad script compared all 24 `evidence.md` excerpts with their cited lines: 0 mismatches.
+
+## T, Phase 7 (GREEN), round 4, after S's REWORK merge — 2026-10-10T00:34-06:00
+
+- **Decided:**
+  - GREEN holds on F's merged tree (`29fa0ff`, parents `ddb6fc3` and `abdcbb6`). No test needed repair, and F flagged
+    none, so T changed no test.
+  - S's NOT-MET rows are now met. AC 24: `git diff origin/main -- docs/adr/ADR-0021.md` has 4 hunks, with #714's row
+    and bullet kept. AC 25: the Cargo diff is empty, and the workspace in CI's form passes with #713's and #714's tests.
+  - PASS.
+- **Assumed:** `origin/main` at `abdcbb6` (fetched 00:26 MDT) is the PR's base.
+- **Hedged:** #644 or #642 part b may land an ADR-0021 edit first, and AC 24 would then need the same merge again (R-1).
+- **Evidence:** run with `CARGO_BUILD_JOBS=4`. The workspace in CI's form exits 0, 1663 passed, 0 failed and 16 ignored
+  over 137 lines. `pane_verbs` 161, `switch::`/`reset::` 21, `pane_cli_process` 35, `cli_surface_test` 3,
+  `docs_cli_test` 3 and `wire_selftest` 3. Clippy `-D warnings`, `lint.sh`, `changelog-check.sh`, `cargo machete` and
+  rustfmt on the five story files are clean. P4 mutation: `switch_to_a_deleted_session_changes_nothing` fails, then is
+  restored. I compared the moved `error.rs` evidence citations against source myself.
