@@ -140,3 +140,53 @@
     - the test kit's `lib`, `fixture`, `fault`, `envelope`, `pane_store`, `profile_store` and the adapter constructors;
     - `verb_harness/{mod,parse}.rs`, `pane_verbs/process/{stub,docs_rows}.rs` and `docs_cli_test.rs`;
     - #643's rig at `837718b`.
+
+## F (Phase 5, implement; the Workflow script's phase 6) — 2026-10-09T18:27-06:00
+- **Decided:** implementation done; T's tests are GREEN (handoff-F.md).
+  - **Code.** The bodies of `profile_snapshot.rs` and `profile_diff.rs` (the brief's API, no extra pub item) and the two
+    verbs `profile/list.rs` and `profile/show.rs`. No test file is edited.
+  - **Docs.** The ADR-0003 `show` row (`holler profile show NAME`, `#662` in column 67), ADR-0021 Decision 14 (i) and (iii),
+    and one CHANGELOG entry.
+  - **Comparison.** `diff_spec` goes through `spec_from_pane(live)`. `env` and `expect` compare as sets, tied to those two
+    fields; everything else by `FieldValue` equality. Values keep stored order.
+  - **Escaping.** `Text` escapes control characters through `char::escape_default`, as `holler_proto::log` does. Argv and
+    lists print as `serde_json`'s compact array, with DEL and C1 controls also escaped as JSON `\u` (stricter than the
+    brief's literal form, same JSON value).
+  - **Text-mode refinements the brief leaves open.** A count of 1 is singular (`count` in `list.rs`, `pub(crate)`, shared
+    with `show`), and a `failed` probe with an empty `missing` list prints `failed`.
+  - **`show`'s JSON row** flattens `PaneDiff` and adds `probe` (`Pane.probe.last`, read, never run). The header's live count
+    rides in the view with `#[serde(skip)]`.
+  - **`archChanged`:** true. Two empty modules gained a public API, and `profile_diff` now depends on `profile_snapshot`.
+- **Assumed:**
+  - The Workflow script commits this phase's work. F stages by explicit path and does not commit.
+  - #644's pre-flight grep is exactly the three patterns in 644-brief lines 2146-2147; the three lines match them
+    byte for byte.
+  - `serde_json` keeps the C0-only escaping it has now. If a later version escaped DEL and C1 itself, the extra pass would
+    find nothing to do, so the output does not depend on it.
+- **Hedged:**
+  - **`list`'s `data` is a bare array** (brief, AC 4a and 4c). #643's `pane list` uses an object, so that a top-level field
+    can be added later. Left as the brief fixes it, and flagged to A for the read-verb forms settlement (brief Follow-up).
+  - **The four extra cases offered to T** (DEL/C1 escaping, a count of 1, the `error (...)` probe form, `list` store
+    failures) are optional and not defects.
+- **Evidence:**
+  - **Runs (all in the worktree):**
+    - `cargo test -p holler-pane --test profile_snapshot_test --test profile_diff_test` gives 5/5 and 9/9, and
+      `cargo test -p holler-pane` passes every target;
+    - `cargo test -p holler-cli --test profile_verbs` gives 18/18; `cli_surface_test` 3/3, `docs_cli_test` 3/3,
+      `pane_cli_process` 34/34;
+    - `cargo clippy --workspace --all-targets -- -D warnings` is clean, `bash scripts/lint.sh` exits 0,
+      `bash scripts/changelog-check.sh` is ok, `rustfmt --check --edition 2021` passes on all 10 touched `.rs` files, and
+      `cargo machete` finds nothing;
+    - the AC 2e, 3, 10 and 13 greps print nothing, or the expected lines;
+    - `cargo test --workspace --no-fail-fast` gives 1404 passed and 4 failed. The 4 are all in `logging_test`, and pass
+      11/11 with `HOLLER_STATE_DIR` pointed at an empty directory: environmental.
+  - **Read:**
+    - the brief in full, handoff-A, handoff-T-red, and T's tests and rig;
+    - holler-pane `src/{lib,profile,pane,argv,grid,probe,error}.rs` and `tests/common/mod.rs`;
+    - holler-cli `src/{output,profile/mod,pane/args,pane/wiring}.rs`, `tests/verb_harness/mod.rs`,
+      `tests/docs_cli_test.rs` and `tests/pane_verbs/process/docs_rows.rs`;
+    - the test kit's `fixture.rs`, `fault.rs` and `pane_store.rs`, and `holler-proto/src/log.rs`
+      (`escape_field_value`);
+    - ADR-0003 and ADR-0021 sections 3 and 9, and "Deferred";
+    - #643's `pane/list.rs` (for its shared-view pattern) and 644-brief's pins.
+  - **Evidence file:** `evidence.md` has 15 facts, each excerpt checked by script against its source lines.
