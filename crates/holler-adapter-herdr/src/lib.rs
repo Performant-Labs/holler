@@ -21,19 +21,21 @@
 //! reaches is `grid-unreachable`. A workspace's size (its [`plan::Extent`]) is
 //! configuration, since Herdr has none.
 //!
-//! Part 1 of story #640 is this pure core, with no I/O:
+//! The modules:
 //!
 //! - [`layout`] — Herdr's split tree and the one conversion from it to a `GridPos`.
 //! - [`plan`] — the right/down splits that reach a cell, or `grid-unreachable`.
 //! - [`protocol`] — Herdr's wire: requests, reply decoding, the version gate.
-//!
-//! The socket transport and the `HerdrPort` implementation follow in part 2.
+//! - [`transport`] — the socket: one request per connection, one deadline per call.
+//! - [`adapter`] — `HerdrAdapter`, the `HerdrPort`.
 //!
 //! Nothing is re-exported flat: `layout::Direction` and `protocol::SessionState` would
 //! share a root name with `holler_proto`'s root re-exports, so a crate that uses both
 //! would see two of each. Every item is reached by its module path, as in
 //! `holler_pane_testkit`.
 
+pub mod adapter;
 pub mod layout;
 pub mod plan;
 pub mod protocol;
+pub mod transport;
