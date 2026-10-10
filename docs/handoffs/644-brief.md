@@ -6,6 +6,7 @@ Rigor: second-opinion. UI surface: no. Kind: feature.
 **Depends on #662a and #663, merged to `main` first** (see "Dependencies"): the run starts from a `main` that contains both.
 **Branch:** `issue-644-implementation` (worktree `.claude/worktrees/0644-launch-relaunch`; the brief was written on `3bdd129`,
 and the branch is rebased onto the `main` that holds #662a and #663 before T starts).
+**Amended 2026-10-09 (restart after #662a, #663 and #646a merged):** #662a and #663 are on `main`. #663 merged `reconcile_step` as `pub fn reconcile_step(profile: Option<&ProfileName>) -> String` in `crates/holler-cli/src/pane/profile_scope.rs`, with `reconcile_step(None)` returning `to reconcile, run holler pane doctor`. The `RECONCILE_STEP_UNSCOPED` constant this brief once planned does not exist and is not added: wherever the brief says `reconcile_step(&P)` it now means `reconcile_step(Some(&P))`, and the unscoped step is `reconcile_step(None)`. Section I's signatures are checked against that merged code at RED.
 **Review-rigor:** second-opinion (operator instruction for this run; the outside model is deepseek-v4-pro and sees only this
 brief). The issue's own Pipeline line says `rigor: in-session`; see Contradiction C-1.
 **Design (D):** N/A (no UI surface). **Forward-compat:** done, see the table under "Forward-compat".
@@ -1434,8 +1435,9 @@ docs/handoffs/663-brief.md:1527-1533, 1540-1555 (branch issue-663-implementation
    the live change to <pane>, so its specs were not restored after that change failed (<failure>); the other writer's
    version stays; <reconcile step>`. This is the fake's text (G, lines 172-179) plus the reconcile step ADR step 6 asks for.
    AC 3 pins it; case 11 pins the code and the profile name.
-8. **The reconcile step** is one function, `pub fn reconcile_step(profile: &ProfileName) -> String`, returning exactly
-   `to reconcile, run holler pane doctor --profile '<P>' and then holler profile show '<P>'`. It is `pub` because the
+8. **The reconcile step** is one function, `pub fn reconcile_step(profile: Option<&ProfileName>) -> String` (as merged on main by #663), returning for
+   `Some(P)` exactly `to reconcile, run holler pane doctor --profile '<P>' and then holler profile show '<P>'`, and for `None`
+   exactly `to reconcile, run holler pane doctor`. It is `pub` because the
    spec-editing verbs (#644, #646) print the same step for a pane-record conflict (ADR step 4); one copy. The profile name is
    POSIX-single-quoted (`'` becomes `'\''`, the whole wrapped in `'...'`), always, because a profile name may hold spaces,
    quotes, `$(...)` or backticks (D, lines 30-61) and an operator pastes this line into a shell. `ProfileName` refuses
@@ -1551,11 +1553,9 @@ pub fn run(args: &PaneLaunch, ctx: &mut VerbCtx<'_>) -> i32;
 pub(crate) fn effective_spec(base: Option<&ProfileSpec>, name: &PaneName, values: &SpecValues) -> Result<ProfileSpec, PaneError>;
 /// Print a run's result through output::emit. When `acted`, it appends "; " and the run's reconcile step to the message,
 /// unless the message already contains that exact step (decision 15): with `profile: Some(P)` the step is #663's
-/// `super::profile_scope::reconcile_step(&P)` (I-3), else RECONCILE_STEP_UNSCOPED. No quoting code of its own.
+/// `super::profile_scope::reconcile_step(Some(&P))` (I-3), else `reconcile_step(None)`. No quoting code and no constant of its own.
 pub(crate) fn emit_outcome(ctx: &mut VerbCtx<'_>, verb: Verb, name: &PaneName, profile: Option<&ProfileName>,
                            result: Result<Launched, TxFailure>) -> i32;
-/// The step without a profile: #663's wording with the ADR 0003 row's optional `--profile` group dropped.
-pub(crate) const RECONCILE_STEP_UNSCOPED: &str = "to reconcile, run holler pane doctor";
 pub(crate) enum Verb { Launch, Relaunch }
 ```
 
@@ -1703,8 +1703,8 @@ unchanged, although its processes were stopped: that is what the issue asks ("le
     `; profile "demo" is at generation 2` when P was named;
   - `--spec-only`: `updated the spec of demo-c1r1 in profile "demo" (generation 2); nothing live changed`.
 - **Errors**: `ErrorBody { code: error.code(), message }` (E-3), `message` = the error's own text, plus, when `acted` and
-  the text does not already contain the step, `"; " + step`, where step is `profile_scope::reconcile_step(&P)` (I-3) when the
-  run named P, else `RECONCILE_STEP_UNSCOPED`. So a `profile-conflict`, restore failure or first-write `timeout` from the
+  the text does not already contain the step, `"; " + step`, where step is `profile_scope::reconcile_step(Some(&P))` (I-3) when the
+  run named P, else `profile_scope::reconcile_step(None)`. So a `profile-conflict`, restore failure or first-write `timeout` from the
   real scope (I-3, decisions 5-7) prints the scope's step once, and an act error the scope returned unchanged (I-3, "case 9")
   gets it from the verb. Text mode writes `error: <message>` to stderr; JSON mode one envelope; the exit code is `class_of`'s
   in both (D-5).
@@ -1833,7 +1833,7 @@ placing a Herdr pane through a fake's port method, is logged too and is not part
        demo --spec-only --model demo-provider/m2` on a launched pane: P gains the spec, the record and every fake are unchanged.
     h. `a_profile_conflict_after_the_act_fails_loudly`: `scope.before_next_restore(..)` makes another writer
        `concurrent_put` P (F-6, F-21), and `fail_next(AttachTui, ..)`; exit 1, code `profile-conflict`; the message contains
-       `profile_scope::reconcile_step(&demo)` (I-3: `to reconcile, run holler pane doctor --profile 'demo' and then holler
+       `profile_scope::reconcile_step(Some(&demo))` (I-3: `to reconcile, run holler pane doctor --profile 'demo' and then holler
        profile show 'demo'`), and `to reconcile, run` occurs in it **exactly once** (no second step of either form); no record.
     i. `relaunch_refuses_a_pane_of_another_profile`: the record of `demo-c1r1` names profile `other` (seeded too);
        `pane relaunch demo-c1r1 --profile demo`; exit 3, `pane-in-other-profile`; the host and harness logs are empty (only the
@@ -1844,7 +1844,7 @@ placing a Herdr pane through a fake's port method, is logged too and is not part
     k. `a_step_the_real_scope_printed_is_not_repeated` (C-15): the rig with `holler_cli::pane::profile_scope::StoreScope::new`
        (I-4) over the rig's two `Arc` stores (actor `holler pane`) in place of `FakeProfileScope`; a hook after `serve` makes
        another writer `concurrent_put` P, and `fail_next(AttachTui, ..)`; exit 1, `profile-conflict`; the message contains
-       `reconcile_step(&demo)`, and `to reconcile, run` occurs exactly once (the scope's own step, I-3 decision 7; the verb
+       `reconcile_step(Some(&demo))`, and `to reconcile, run` occurs exactly once (the scope's own step, I-3 decision 7; the verb
        appended none). With the same rig and no conflict (only the `fail_next`), the restore succeeds, the error is the act's
        (`session-not-found`, exit 3) and `to reconcile, run` again occurs exactly once (the verb's).
 17. **JSON and exit codes** (`exit_codes_equal_across_formats`): for the cases of AC 1, 8, 9a, 10a, 11a, 13b, 15, 16e and 6a,
@@ -1951,7 +1951,7 @@ every `Cargo.toml` and `Cargo.lock`.
 | `holler_pane::error::{class_of, RefusalCode}` (D-5, D-6) | the three open codes; the exit class | reuse |
 | `ProbeResult`, `Prober` (D-1, B-6) | the probe | reuse; the engine calls `ports.prober`, never the free `run_probe` |
 | `next_generation` | not called: the stores apply it | n/a |
-| `launch::{effective_spec, emit_outcome, RECONCILE_STEP_UNSCOPED}` | shared by relaunch.rs | new in launch.rs, used by both (no copy in relaunch.rs) |
+| `launch::{effective_spec, emit_outcome}` | shared by relaunch.rs | new in launch.rs, used by both (no copy in relaunch.rs) |
 | `profile_snapshot::spec_from_pane` (#662a, I-1) | relaunch's base | reuse; no second Pane-to-spec mapping anywhere (ADR-0021 section 3) |
 | `profile_snapshot::{FIXED_PORT_POLICY_PREFIX, fixed_port_policy}` (#662a, I-1) | `port_of_policy`'s prefix; its round-trip test | reuse; `port_of_policy` is the grammar's one parser, with no `"fixed:"` literal of its own |
 | `profile_scope::reconcile_step` (#663, I-3) | the step with a profile | reuse; no quoting helper here |
@@ -2025,10 +2025,10 @@ every `Cargo.toml` and `Cargo.lock`.
     (`profile-drift` is a reconcile finding about profiles). The message names what was expected and what was seen. #645
     should use the same; ADR-0021 records it.
 15. **The reconcile step: one function, one owner, one doctor form, one appending rule** (C-15, C-16).
-    - *Function and owner:* #663's `profile_scope::reconcile_step(&P)` (I-3), called as is. #644 adds no function and no
+    - *Function and owner:* #663's `profile_scope::reconcile_step(Some(&P))` (I-3), called as is. #644 adds no function and no
       quoting of its own (the profile name's POSIX quoting is #663's, AC 16j).
     - *Doctor form:* #663's, exactly: `to reconcile, run holler pane doctor --profile '<P>' and then holler profile show
-      '<P>'` when the run named P; else `RECONCILE_STEP_UNSCOPED` = `to reconcile, run holler pane doctor` (the same ADR 0003
+      '<P>'` when the run named P; else `profile_scope::reconcile_step(None)` = `to reconcile, run holler pane doctor` (the same ADR 0003
       row, `holler pane doctor [--profile NAME]`, with the optional group dropped; it parses today). Neither names the pane:
       `pane doctor` has no pane positional until #647; naming it then is a change to #663's function (follow-up), not here.
     - *Who appends:* the scope adds the step to its own `profile-conflict`, restore-failure and first-write-`timeout` errors
@@ -2145,7 +2145,7 @@ every `Cargo.toml` and `Cargo.lock`.
 **RED first (T).** A compile error is not RED (`docs/agent-overlays/tester.md`). T first checks the dependencies on the
 `main` the branch was rebased onto (Dependencies): `grep -n 'pub fn spec_from_pane(pane: &Pane) -> ProfileSpec\|pub const
 FIXED_PORT_POLICY_PREFIX: &str = "fixed:"\|pub fn fixed_port_policy(port: u16) -> String'
-crates/holler-pane/src/profile_snapshot.rs` prints three lines, and `grep -n 'pub fn reconcile_step(profile: &ProfileName)
+crates/holler-pane/src/profile_snapshot.rs` prints three lines, and `grep -n 'pub fn reconcile_step(profile: Option<&ProfileName>)
 -> String\|pub struct StoreScope\|pub fn new(' crates/holler-cli/src/pane/profile_scope.rs` prints each; anything else is a
 stop (`preflight-failed`). Then T lands, before the tests:
 - `tx_launch.rs` with every public item of the API above: the constants with their values, `TxOptions` and its `Default`, the
@@ -2154,7 +2154,7 @@ stop (`preflight-failed`). Then T lands, before the tests:
   `Err(PaneError::NotImplemented)`. Each stub carries `// stub (#644 RED): F fills`.
 - `launch.rs` and `relaunch.rs` with the new `Args` (positional `PANE`; `--herdr-session` on launch) and `run` still answering
   `not_implemented(644)`; the fixture lines, ADR 0003 rows and the `stub.rs` deletion (Files), so the surface tests stay green.
-  The `pub(crate)` items (`effective_spec`, `emit_outcome`, `RECONCILE_STEP_UNSCOPED`, `Verb`) are F's: a stub of one with no
+  The `pub(crate)` items (`effective_spec`, `emit_outcome`, `Verb`) are F's: a stub of one with no
   caller would trip `dead_code = "deny"`; the tests that need the unscoped text write the literal.
 
 Then every behaviour test fails on its assertion (exit 1 `not-implemented` where 0, 2 or 3 is expected; AC 24 on the stub's
