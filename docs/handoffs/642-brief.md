@@ -817,6 +817,11 @@ The three methods (`642-brief.md:678-710` at `d6393b2`):
   /tui/select-session` `{"sessionID": "<id>"}` (200 `true`; 404 -> `session-not-found`), then poll `shown_session(pane)`
   until `Some(id)` within `settle`; otherwise `timeout { op: "harness.select_session" }`. Because `select-session` reaches every
   TUI of the server, a switch is never trusted until the title confirms it (spike 122-126).
+  **What "checked before the session id" (case 14, E4) means here:** the method has no port until the tmux query yields one,
+  so the order is: resolver, then the one tmux query, then (only if that query found a live pane whose start command gives a
+  port) the HTTP steps. No HTTP request of any kind (neither `GET /session/<id>` nor `POST /tui/select-session`) is sent
+  when the query finds no TUI. Observable through the fixture and the stub (AC 29(c)): the stub received nothing, and
+  `<path>.calls` holds exactly one call, the query.
 - **`shown_session(pane)`**: resolve `tui_session(pane)` (an `Err` is returned as is) and run the same tmux query. No tmux pane,
   no tmux server on the socket, a dead pane, or a pane not running an `opencode attach` -> `Ok(None)` (case 9). Otherwise
   `parse_title(#{pane_title})`: `Session(id)` -> `Ok(Some(id))`; `Home` and `Unrecognised` -> `Ok(None)`. It never contacts
@@ -833,6 +838,14 @@ The three methods (`642-brief.md:678-710` at `d6393b2`):
 - `attach_tui` takes `directory` from the `GET /session/:id` reply's string field `directory`; a reply without one is
   `unavailable` (the pane is not touched). The `--dir` element of the TUI argv is that directory, passed through
   `escape_arg`; the `-c` value is the same directory through `escape_dir`.
+  **How this relates to `known` (E1):** `known` returns `Ok(())` and drops the reply, so it cannot supply `directory`, and it
+  accepts a matching `id` whatever else the reply holds. `attach_tui` therefore sends **one** `GET /session/<id>` and applies
+  `known`'s rules to it (refused -> `unavailable`; `400` or `404` -> `session-not-found`; a reply whose `id` is not the
+  requested id -> `unavailable`), and then, on the same reply, requires a string `directory`: a reply whose `id` matches but
+  that has no string `directory` is `unavailable` (never `session-not-found`), before the resolver is called and before any
+  tmux call. How this is factored (a sibling of `known` that returns the parsed reply and that `known` itself calls, or the
+  same rules inline) is F's choice, provided `known`'s signature and its answers to `abort` and `select_session` are
+  unchanged; A-dup checks that the rules are not written twice.
 - A message never echoes an argv element, a directory, an env value or the raw title (Risk 3); it may name the pane id,
   the port, the route, the status, and tmux's first stderr line.
 
@@ -908,6 +921,12 @@ The rig (one per test, and one per conformance case):
 - the guard: a wrapper `HarnessPort` that delegates to the adapter and records every pid `serve` returns; on drop the guard
   sends SIGKILL to each recorded process group (`kill -KILL -- -<pid>`), kills the private tmux server, then removes the
   scratch dir. It never signals a process it did not start and never touches the default tmux server.
+  **How the private tmux server is killed (B-7):** by name of its socket, never by a signal: the guard runs
+  `<tmux_bin> -S <scratch>/tmux.sock kill-server` (built with `TMUX` and `TMUX_PANE` removed, as `tmux_command` does), and
+  treats `no server running` or a missing socket as already done. The guard never looks up tmux's pid, never signals tmux,
+  and never selects processes by matching command lines or socket paths (no `pkill`, `ps` or `/proc` scan). The guard is
+  built before the rig starts the private tmux server, so a rig whose setup fails part-way still kills that server and
+  removes the scratch dir.
 
 12. `run_harness_conformance(|| rig.fresh())` is `Ok(())`: all 15 cases hold against real OpenCode.
 13. Create, list, switch and report: serve; create A and B; both listed; attach pane 0 to A -> `shown_session` = `Some(A)`;
@@ -929,7 +948,13 @@ The rig (one per test, and one per conformance case):
     `GET /doc` lists the operation ids `global.health`, `session.create`, `session.list`, `session.get`,
     `session.update`, `session.delete`, `session.status`, `session.abort`, `tui.selectSession`, `tui.showToast`; raw
     `POST /tui/select-session` on a server with no TUI answers 200 `true`; raw `POST /session/<unknown>/abort` answers 200
-    `true`. Each assertion message says it is a pin.
+    `true`. Each assertion message says it is a pin. **The no-TUI pin's state (B-3):** it runs in its own test with its own
+    rig (one rig per test, above), so its server is served fresh by that test and no `attach_tui` is called in that test
+    before the pin. In this order, the test (1) serves port 0 and creates a session S on it; (2) asserts that no TUI is
+    attached: `shown_session` of both rig panes is `Ok(None)` and each pane still runs the `sleep 3600` placeholder (its
+    `#{pane_start_command}`, read by raw tmux on the private socket, gives `attach_port` = `None`); (3) only then sends the
+    raw `POST /tui/select-session` `{"sessionID": "<S>"}` (a known id: an unknown one answers 404, spike 117) and asserts 200
+    `true`. The `GET /doc` and abort pins may share that test after step (3) or have their own.
 19. `serve` refuses a port that already serves: serve port 0 for `demo-c1r1`; `serve` port 0 again for `demo-c2r1` and for
     `demo-c1r1` are both `unavailable` (see decision 2).
 19a. **A prefix never reaches another pane (B-2).** The rig as above; in this test only, a second `OpenCodeHarness` is built
@@ -946,6 +971,14 @@ call to `<path>.calls` (the remaining arguments, each followed by U+001F); and f
 prints `<path>.<subcommand>.out` to stdout and `<path>.<subcommand>.err` to stderr when they exist, and exits with the
 number in `<path>.<subcommand>.code` (default 0). The tests write only those data files, never a script (Decision 18).
 
+**The calls record, byte for byte (B-6).** A call's line is each argument after the `-S <path>` pair, each followed by one
+U+001F (so there is a U+001F after the last argument too), then one `\n`. The call `display-message -p` is the bytes
+`display-message` U+001F `-p` U+001F `\n`. An argument holding a space or a TAB (such as `QUERY_FORMAT`) stays one token.
+Every assertion on `<path>.calls` reads it this way: split the file into lines on `\n`, split each line on U+001F, drop the
+one empty segment after the final U+001F, and compare the resulting **token lists** (`Vec<String>`) with the expected
+argument vectors. Wherever AC 28-30 below write a call as a sequence of words or a builder's result, they mean that token
+list, never a space-joined string.
+
 27. **`parse_query`** (in the strings below `\t` is one TAB character). For `demo-c1r1`: `"demo-c1r1\t0\t\tenv -u OPENCODE_DISABLE_TERMINAL_TITLE /bin/oc attach
     http://127.0.0.1:48123 --dir /p --session ses_1\tOC | ses_1\n"` is `Live` with that start command and title `OC | ses_1`;
     `"demo-c1r1\t1\t7\tsh -c \"exit 7\"\t<anything>"` is `Dead(Some(7))`; `"\t\t\t\t\n"` (E7's missing target) is `NoPane`;
@@ -953,8 +986,8 @@ number in `<path>.<subcommand>.code` (default 0). The tests write only those dat
     `["display-message", "-p", "-t", "=demo-c1r1:", QUERY_FORMAT]`.
 28. **`shown_session` through the fixture.** `tui_session` maps `w9:p1` to `demo-c1r1` and anything else to
     `pane-not-found`. (a) With a `Live` reply titled `OC | <id>` and a start command from `tui_argv(..)`, the answer is
-    `Ok(Some(id))` and `<path>.calls` holds exactly one line, `display-message`, `-p`, `-t`, `=demo-c1r1:`, `QUERY_FORMAT`
-    (the `-S <path>` pair is consumed by the fixture). (b) Titles `OpenCode`, `somehost`, `OC | ses_ab…`; a `Dead` reply; a
+    `Ok(Some(id))` and `<path>.calls` holds exactly one line, whose token list (read as the calls record above) is exactly
+    `["display-message", "-p", "-t", "=demo-c1r1:", QUERY_FORMAT]` (the `-S <path>` pair is consumed by the fixture). (b) Titles `OpenCode`, `somehost`, `OC | ses_ab…`; a `Dead` reply; a
     start command `sleep 3600`; the four-TAB reply; and the fixture exiting 1 with stderr `no server running on /x/sock`,
     `can't find session: demo-c1r1` or `error connecting to /x/sock (No such file or directory)` each give `Ok(None)`. (c) The
     fixture exiting 1 with stderr `protocol version mismatch (client 8, server 7)` gives `unavailable` whose message holds
@@ -965,18 +998,26 @@ number in `<path>.<subcommand>.code` (default 0). The tests write only those dat
     `ses_B` with `POST /tui/select-session` answering `true`: `Ok(())`, and the stub's request lines are, in order,
     `GET /session/ses_B HTTP/1.1` and `POST /tui/select-session HTTP/1.1`, the second with body `{"sessionID":"ses_B"}`.
     (b) `GET /session/ses_B` answering 404: `session-not-found`, and no `POST /tui/select-session` was received. (c) A start
-    command `sleep 3600` (no TUI): `unavailable`, its message names the pane, and the stub received nothing (case 14's order).
+    command `sleep 3600` (no TUI): `unavailable`, its message names the pane, the stub received nothing (no request line at
+    all), and `<path>.calls` holds exactly one line, the token list of `query_args(demo-c1r1)`: case 14's order, the tmux
+    query before any HTTP request (see `select_session` above). The same holds for the four-TAB reply and a `Dead` reply.
     (d) The title staying `OC | ses_A`: `timeout` with `op == "harness.select_session"` within `settle` plus 500 ms. (e) A
     `POST /tui/select-session` answering 200 HTML: `unavailable` (a 200 is not enough).
 30. **`attach_tui` through the fixture and the stub.** The stub answers `GET /session/ses_A` with
     `{"id":"ses_A","directory":"/p#S;"}`. (a) With the display-message reply `Live` and titled `OC | ses_A`: `Ok(())`, and
-    `<path>.calls` starts with exactly `set-option -p -t =demo-c1r1: remain-on-exit on`, then
+    `<path>.calls`, read as token lists, has as its first line exactly
+    `["set-option", "-p", "-t", "=demo-c1r1:", "remain-on-exit", "on"]`, as its second exactly
     `respawn_args(demo-c1r1, "/p#S;", &tui_argv(<bin>, &env, <stub port>, "/p#S;", "ses_A"))`, whose `-c` value is
-    `/p##S\;` and whose `--dir` element is `/p#S\;`, then one or more `display-message` calls. (b) The `set-option` step
-    exiting 1 with `no such pane: =demo-c1r1:`: `unavailable` naming the pane, and no `respawn-pane` line was recorded. (c) A
-    `Dead(Some(3))` reply: `unavailable` whose message holds `3`. (d) A `GET /session/ses_A` reply with no `directory`:
-    `unavailable`, and `<path>.calls` does not exist. (e) The three `op` strings of 642b equal
-    `HarnessOp::{AttachTui, SelectSession, ShownSession}.as_str()`.
+    `/p##S\;` and whose `--dir` element is `/p#S\;`, then one or more lines equal to `query_args(demo-c1r1)`. (b) The
+    `set-option` step exiting 1 with `no such pane: =demo-c1r1:`: `unavailable` naming the pane, and no line's first token is
+    `respawn-pane`. (c) A `Dead(Some(3))` reply: `unavailable` whose message holds `3`. (d) A `GET /session/ses_A` reply
+    `{"id":"ses_A"}` (the id matches, no `directory`): `unavailable`, not `session-not-found` (the `known`-rules paragraph
+    above), the `tui_session` resolver is never called, and `<path>.calls` does not exist. (e) The three `op` strings of 642b
+    equal `HarnessOp::{AttachTui, SelectSession, ShownSession}.as_str()`. (f) **Decision 22 is pinned (B-2):** every scenario
+    of AC 28-30 and of AC 6's and 11d's 642b clauses asserts its exact answer (an `Ok` value, or one named `PaneError`
+    variant with `matches!`), never only `is_err()`; and the tests include one table-driven test that runs each of those
+    scenarios for `attach_tui`, `select_session` and `shown_session` and asserts that no answer is
+    `Err(PaneError::NotImplemented)`, so a method left on the skeleton's answer for any input fails it.
 31. **No test relies on a just-freed port being refused (E10).** One helper (in `tests/support/stub.rs`) gives every test
     that needs a refused port its port, replacing the direct uses of `closed_port()` in `hermetic_test.rs` and serving AC 6's
     642b clause. It (1) picks a candidate by bind-then-drop, (2) checks that a connect to it is refused immediately before the
@@ -992,8 +1033,12 @@ number in `<path>.<subcommand>.code` (default 0). The tests write only those dat
     No test writes a file and then executes it (a concurrent `fork` can make that `exec` fail with "Text file busy"). No
     test synchronises with a fixed sleep (bounded polls only), and every timing bound is an upper bound with at least 300 ms
     of slack.
-33. **The fixture runs anywhere the tests do.** `tests/fixtures/fake-tmux` starts with `#!/bin/sh`, uses only `printf`,
-    `cat`, `test` and shell built-ins, and its git mode is `100755` (`git ls-files -s` shows it). A test checks, before
+33. **The fixture runs anywhere the tests do.** `tests/fixtures/fake-tmux` starts with `#!/bin/sh` and uses only POSIX
+    `sh` language (assignments, `if`/`case`, `"$@"`, redirections `>`, `>>`, `<`, `2>`), the commands `printf`,
+    `test`/`[`, `read`, `shift`, `exit`, `:` and `set`, and the one external utility `cat`. It runs no other program: no
+    `awk`, `sed`, `tr`, `cut`, `jq`, `sleep`, `mktemp` or `echo` with options, no `bash`-only syntax (`[[`, arrays, `$'..'`),
+    and no command substitution of anything but `cat`. A and S check the script against this list, and both CI legs run it
+    through `/bin/sh`. Its git mode is `100755` (`git ls-files -s` shows it). A test checks, before
     using it, that the file is executable, and fails with a message that names `git update-index --chmod=+x` if not.
 
 **Gates (restated for 642b):**
@@ -1078,7 +1123,8 @@ shows no dependent), so no other test can break.
 - **Reuse as merged, no edit:** `HarnessPort`, `PaneError` and its codes, `run_harness_conformance`, `HarnessRig`, `HarnessOp`
   (dev-dependency, `op` pins only); `OpenCodeConfig`, `Timeouts`, `ProcessEnv`, `Resolver`, `TmuxSocket`, `TmuxConfig`.
 - **Reuse from the crate root, unchanged (E1):** `OpenCodeHarness::call` and `Call::{send, send_by, unexpected, timeout}` for
-  every HTTP step; `known` for the existence check of `attach_tui` and `select_session`; `session_path`, `json_of`,
+  every HTTP step; `known` for the existence check of `select_session` as is, and its rules for `attach_tui`'s, which also
+  needs the reply's `directory` (see "How this relates to `known`" under Behaviour); `session_path`, `json_of`,
   `string_at`, `one_line`, `excerpt`, `deadline_after`, `budget`. A new `Route` constant for `POST /tui/select-session`
   beside the others.
 - **Extend:** `exec.rs`'s `run` gains a capturing sibling (stdout and stderr on threads), sharing its deadline loop, and
