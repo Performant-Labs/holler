@@ -3,7 +3,7 @@
 ## 2026-10-09 ~8:50 PM MDT — Phase 1 (survey-brief), O
 
 - **Run opened.** Issue #660, rigor `in-session` (issue text + operator), no UI surface → D and U are
-  N/A for this run. Pre-flight PASS (0 failing of 15) at the `agent-c4r1` run root; F's executor
+  N/A for this run. Pre-flight PASS (0 failing of 15) at the implementer pane's run root; F's executor
   `claude-cli` (claude 2.1.296, auth login, effort xhigh) confirmed reachable.
 - **Survey decision 1 — the story's premise is dated, the deliverable is the conformance layer.**
   #670 (`55dba00`) and #676 (`3f9fbf2`) already built `output.rs` and most of its suite; #637's
@@ -22,13 +22,13 @@
   operator (with the evidence) rather than run a sham F or waive the RED gate silently.
 - **Boundaries recorded (operator).** F: `output.rs` only; T: `crates/holler-cli/tests/**` only;
   no `Cargo.toml`/`holler-pane/**`/`holler-pane-testkit/**`/`cli.rs`/`main.rs`/verb files (parallel
-  c3r1 session owns the sibling #633 stories); no mutation testing; one cargo at a time.
+  a sibling pane owns the sibling #633 stories); no mutation testing; one cargo at a time.
 
 ## 2026-10-09 ~9:10 PM MDT — stage-run re-rooting (oddity, reported to operator)
 
-- **The run root had to move from `agent-c4r1` to the true primary checkout (repo root).** v0.1.0's
+- **The run root had to move from the implementer pane's worktree to the true primary checkout (repo root).** v0.1.0's
   repo-identity check (S7(C), `stage-snapshot.ts:505`) requires the run root's common dir to be
-  `<root>/.git` — i.e. a main repository, never a linked worktree like `agent-c4r1`. Two refusals
+  `<root>/.git` — i.e. a main repository, never a linked worktree like the implementer pane's. Two refusals
   led here: missing role docs (provisioned verbatim from the release's `agents/` into the root), then
   the structural `repo-identity` refusal. The mis-rooted worktree was removed and the pre-flight
   re-run from the primary, which provisioned `.claude/worktrees/0660-output` (branch
@@ -50,12 +50,12 @@
   no test files in the worktree** — the old session's `stage run` had run the suite before any T
   authoring, so that GREEN is main's baseline, not a verdict on the conformance suite. It is
   superseded by the re-dispatch below; green-on-contact (decision 4) was never triggered by it.
-- **Mis-routed files cleaned.** `agent-c4r1/docs/handoffs/660/` (byte-identical to the run
+- **Mis-routed files cleaned.** the implementer pane's `docs/handoffs/660/` (byte-identical to the run
   worktree's copies — nothing needed moving) and the mis-rooted shim's `.opencode/` (tooling + stale
-  telemetry, last write 22:14 MDT) were deleted; `agent-c4r1` verified clean, worktree itself left in
+  telemetry, last write 22:14 MDT) were deleted; the implementer pane's worktree verified clean, worktree itself left in
   place.
 - **Brief de-staled (the mis-routing trap).** The brief still named the pre-re-root run root
-  (`agent-c4r1`), the pre-re-root branch (`issue-660-implementation`) and handoff path
+  (the implementer pane's worktree), the pre-re-root branch (`issue-660-implementation`) and handoff path
   (`docs/handoffs/660/`) — the exact paths that misrouted the old session's writes. Corrected to
   `issue-0660-output`, the `0660-output` run worktree, and `docs/handoffs/0660-output/`.
 - **T re-dispatched from the primary root** (operator order): advance `architecture-review → t-red`,
@@ -115,7 +115,7 @@
 - **Pre-existing fmt drift confirmed by O:** `cargo fmt --check -p holler-cli` shows 2,916 hunks on
   the committed tree under this machine's rustfmt 1.9.0-stable (2026-09-01) — repo-wide, predates
   the run, outside this run's boundary (T's collateral reformat was fully reverted; the run's two
-  files are fmt-clean). Surfaced to the operator: whoever owns repo hygiene (c3r1 parallel?) must
+  files are fmt-clean). Surfaced to the operator: whoever owns repo hygiene (the sibling pane?) must
   reconcile before any fmt-gated CI on this branch.
 
 ## 2026-10-09 ~11:05 PM MDT — the accidental RED: remote_admin_test flake, reconciled, O
@@ -197,7 +197,7 @@
 - **pr-agent (PR #713) flagged the committed handoffs' real home-directory paths** (SPEC-ENFORCER
   item 5: neutral placeholders only; the repo is public). Checked house practice at `519947a`: no
   tracked handoff has ever carried a home path (scrubbed: brief.md line 5-6, decisions.md line 29 →
-  repo-relative / "the primary checkout"); agent identifiers (`agent-c4r1`, `c3r1`) stay — they are
+  repo-relative / "the primary checkout"); agent identifiers (the implementer pane's, a sibling pane's) stay — they are
   established practice (647's committed handoffs carry them, incl. 13 in its brief). Note: this
   post-audit byte change to the handoff docs is editorial (paths only — no verdict, evidence or
   finding altered) and is recorded here; the merge crossing's artifact verification had already
@@ -229,3 +229,19 @@
   brief, not this one.
 - **Wayfinder:** epic #633 wave 3 — #660 was the output-envelope story; unblock the next wave-3
   story per the map.
+
+## 2026-10-10 ~12:40 AM MDT — operator order: placeholders again — the standing rule (O)
+
+- **RULE (operator, binding on every future run in this PUBLIC repository): committed handoffs
+  carry neutral placeholders only.** No home or machine paths (write `<primary>` for the primary
+  checkout, `<run-worktree>` for the run worktree, `<cache>` for the release cache), no pane/agent
+  identifiers (write "the implementer pane", "a sibling pane"), no host or user names. The next run
+  starts from this rule — it supersedes the 11:55 PM decision to keep agent identifiers per 647's
+  precedent.
+- **Applied now to this run's nine files** (16 token swaps across six files that still carried
+  identifiers; the home paths had been scrubbed in the earlier fix on the run branch): meaning and
+  journal order preserved, test files untouched, the full pattern set grepped clean
+  (`/home/`, `~/Projects`, usernames, host names, pane/agent ids, fleet ids).
+- **PR mechanics note:** the run's PR had already merged when this order arrived, so the scrub rides
+  a successor docs PR off main; the PR is left UNMERGED for the operator with the fresh automated
+  score reported.

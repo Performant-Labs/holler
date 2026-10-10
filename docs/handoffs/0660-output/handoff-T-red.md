@@ -138,7 +138,7 @@ Advisory (non-blocking, outside the acceptance bullets — recorded so they are 
   1.9.0 / edition 2021 — including files this run never touched. An early `cargo fmt -p holler-cli`
   of mine reformatted that drift as collateral; **every file except the two above was reverted
   immediately** (verified: `git status` shows only the two touched files). The drift itself predates
-  this run and belongs to whoever owns it (parallel c3r1 / operator) — but be aware a repo-wide
+  this run and belongs to whoever owns it (a sibling pane / the operator) — but be aware a repo-wide
   `cargo fmt --check` gate is red today independent of this story.
 
 ## Boundary compliance
