@@ -3,10 +3,16 @@
 Repo: Performant-Labs/holler. Issue: #645 (epic #633, wave 3), **part 1 of 2 (645a)**. Rigor: second-opinion. UI surface: no.
 Kind: feature.
 
-**Branch:** `issue-645-implementation` (worktree `.claude/worktrees/0645-switch-reset`, from `origin/main` at `ce12cdb`).
+**Branch:** `issue-645-implementation` (worktree `.claude/worktrees/0645-switch-reset`, from `origin/main` at `ce12cdb`,
+with `origin/main` at `dc300ab` merged in).
 **Review rigor:** second-opinion (the orchestrator's instruction for this run; the issue's Pipeline line says `in-session`, see
-C-1). The outside reviewer sees only this brief, so every fact below is pasted from the code with its file and line, as of
-`ce12cdb`.
+C-1). The outside reviewer sees only this brief, so every fact below is pasted from the code with its file and line,
+re-verified at `dc300ab` (the merge changed none of the files quoted here).
+**Amended 2026-10-09** after the up-front A review (`docs/handoffs/645/handoff-A.md`: one BLOCK, six warns), by the
+orchestrator's rulings: the rig is reached as `crate::doctor::rig` through a one-word edit of `doctor.rs` (Decision 16,
+F-8); P1 takes the first resolved pane without indexing; P3 builds its remedy from the one remedy table; O1's screen wording
+matches reconcile's; the ADR-0021 "as built" paragraph moves to section 8 (Decision 17); R-5, Forward-compat rows and
+follow-ups F-3 and F-4 are new.
 **Design (D):** N/A (no UI surface). **Forward-compat:** done, see "Forward-compat".
 **Decision record:** ADR-0021 (`docs/adr/ADR-0021.md`) sections 3, 8, 9, 11, 12 and "Deferred to named stories". This story
 decides one item ADR-0021 defers to it by name (the failure code of a mismatch observed after the act, shared with #644) and
@@ -39,7 +45,7 @@ Shipping 645a without the activity refusals is safe before 645b: until #649 the 
 method answers `not-implemented` (Evidence E-6), so no one can run either verb against a live pane. The ordering rule that
 closes the window is P2 below (645b before #649's scenario step "reset one with a first message").
 
-## Dependencies (all merged on `origin/main` at `ce12cdb`)
+## Dependencies (all merged on `origin/main` at `ce12cdb`, and so at `dc300ab`)
 
 | Story | What 645a uses | Evidence |
 |---|---|---|
@@ -58,8 +64,9 @@ OpenCode adapter), #700 (`opencode_agent`; see Forward-compat). The epic's wave 
 | `crates/holler-pane/src/tx_switch.rs` (engine, codes, session-id guard, failure message) | ~260 |
 | `crates/holler-cli/src/pane/switch.rs` (Args, run, the shared `emit_outcome`) | ~130 |
 | `crates/holler-cli/src/pane/reset.rs` (Args, run) | ~50 |
-| `crates/holler-cli/tests/pane_verbs/switch.rs` (rig include, wrappers, switch cases) | ~480 |
+| `crates/holler-cli/tests/pane_verbs/switch.rs` (wrappers, switch cases; the rig by `crate::doctor::rig`) | ~480 |
 | `crates/holler-cli/tests/pane_verbs/reset.rs` (reset cases) | ~300 |
+| `crates/holler-cli/tests/pane_verbs/doctor.rs:10` (`mod rig;` -> `pub(crate) mod rig;`, Decision 16) | 1 |
 | `process/stub.rs` (-2), `cli-surface.txt` (~6), `ADR-0003.md` (2), `ADR-0021.md` (~20), `CHANGELOG.md` (~8) | ~36 |
 | **Total** | **~1,250** |
 
@@ -87,9 +94,10 @@ session of record and for one whose session of record was deleted, so that remed
 - **C-5** ADR-0021 section 4's I2 test idea compares the driven session too (G-2), but no port observes DRIVEN before #649
   (G-6, D-7). 645a checks SHOWN against `session_of_record` and leaves `last_observed.driven` as stored, as reconcile does.
 - **C-6** The issue's blast radius names three files; ruling 2 also gives the verb story its own tests, its ADR 0003 row, its
-  `cli-surface.txt` lines and its `stub.rs` entries (E-4, E-5, E-7), and the ADR rule adds ADR-0021 and the CHANGELOG.
+  `cli-surface.txt` lines and its `stub.rs` entries (E-4, E-5, E-7), and the ADR rule adds ADR-0021 and the CHANGELOG. The
+  orchestrator's ruling on A's BLOCK adds one line of a #647 test file, `tests/pane_verbs/doctor.rs:10` (Decision 16).
 
-## Evidence (verbatim, as of `ce12cdb`)
+## Evidence (verbatim, re-verified at `dc300ab`)
 
 ### A. The stubs this story fills
 
@@ -318,7 +326,7 @@ fn is_word(b: u8) -> bool {
 
 ### D. Codes, output and the helpers reused
 
-**D-1** Open codes (`crates/holler-pane/src/error.rs:314-337`):
+**D-1** Open codes (`crates/holler-pane/src/error.rs:316-331`):
 ```
     /// A code declared as a constant, checked when the constant is evaluated:
     /// a literal that is not kebab-case, or is a closed code, fails the build.
@@ -402,7 +410,7 @@ pub struct ProfileOpt {
     pub profile: Option<String>,
 }
 ```
-**D-5** The merged analogue of argument typing (`crates/holler-cli/src/pane/doctor.rs:46-62`):
+**D-5** The merged analogue of argument typing (`crates/holler-cli/src/pane/doctor.rs:47-62`):
 ```
 fn pass(args: &PaneDoctor, ports: Ports<'_>) -> Result<Report, PaneError> {
     let pane = args.pane.as_deref().map(PaneName::parse).transpose()?;
@@ -421,8 +429,8 @@ fn pass(args: &PaneDoctor, ports: Ports<'_>) -> Result<Report, PaneError> {
     reconcile(ports, &request)
 }
 ```
-**D-6** The reconcile step and quoting, already in `holler-pane` for other verbs (`crates/holler-pane/src/findings.rs:302-315,
-328-334`):
+**D-6** The reconcile step and quoting, already in `holler-pane` for other verbs (`crates/holler-pane/src/findings.rs:303-306,
+328-332`):
 ```
 /// The `holler pane doctor` command line for `pane` (every pane when `None`), with `--fix`
 /// when `fix`. It is the reconcile step another verb prints after a failure (ADR-0021
@@ -475,6 +483,60 @@ Its repair is select then observe (`crates/holler-pane/src/reconcile/observe.rs:
         missing.remedy.as_deref(),
         Some("holler pane reset demo-c1r1")
     );
+```
+**D-9** The one remedy table (public) and the command words (private), `crates/holler-pane/src/findings.rs:35-38, 111-143,
+155-158, 318-321`:
+```
+crates/holler-pane/src/findings.rs:35-38, 121-133, 155-158, 318-321
+const DOCTOR: &str = "holler pane doctor";
+const RELAUNCH: &str = "holler pane relaunch";
+const RESET: &str = "holler pane reset";
+    pub fn remedy(self, pane: Option<&PaneName>, fix: FixState) -> Option<String> {
+        match self {
+            ...
+            FindingKind::HerdrPaneMissing
+            | FindingKind::TmuxSessionMissing
+            | FindingKind::ServerWedged
+            | FindingKind::ServerDown
+            | FindingKind::TuiForeignSession => pane.map(relaunch_command),
+pub enum FixState {
+    ...
+    NotFixable,
+/// `holler pane relaunch <pane>`.
+fn relaunch_command(pane: &PaneName) -> String {
+    format!("{RELAUNCH} {pane}")
+}
+```
+`FindingKind` (`findings.rs:42`) and `FixState` (`findings.rs:155`) are `pub`, and `findings` is a `pub mod` (`lib.rs:42`), so
+`holler_pane::findings::FindingKind::ServerDown.remedy(Some(&pane), FixState::NotFixable)` is
+`Some("holler pane relaunch <pane>")`. How reconcile names a screen in a message, private to it
+(`crates/holler-pane/src/reconcile/observe.rs:342-348`, a #647 file):
+```
+crates/holler-pane/src/reconcile/observe.rs:342-348
+/// How a message names what the TUI shows.
+fn screen_text(shown: Option<&str>) -> String {
+    shown.map_or_else(
+        || "its home screen".to_owned(),
+        |session| format!("session {}", quoted(session)),
+    )
+}
+```
+**D-10** What the hub's pane registry enforces inside its compare-and-swap: the generation and the membership rule, and no
+rule about `session_of_record` (`crates/holler-hub/src/panes/store.rs:167-175, 338-344`):
+```
+crates/holler-hub/src/panes/store.rs:167-175, 338-344
+    /// [`refuse_profile_move`]), so it holds on every path into the registry, the port and
+    /// `pane/cas_put` alike, and no writer can slip in between the check and the write.
+    pub(crate) fn cas_put(&self, pane: &Pane, expected: u64) -> Result<Pane, PaneError> {
+        let mut guard = self.lock();
+        let table = guard.as_mut().map_err(|err| err.clone())?;
+        let current = table.record(&pane.name);
+        let generation = next_generation(current.map_or(0, |stored| stored.generation), expected)?;
+        refuse_profile_move(current, pane)?;
+/// The membership rule of a write (#661; ADR-0021 §8 and "Decisions taken", item 2): a
+/// pane stored in one profile cannot be written into another, `pane-in-other-profile`.
+...
+fn refuse_profile_move(stored: Option<&Pane>, next: &Pane) -> Result<(), PaneError> {
 ```
 
 ### E. The CLI surface pieces this story edits (ruling 2)
@@ -597,13 +659,31 @@ Its API, used as is: `Seed::new(name, row, col)`, `.orchestrator()`, `.in_profil
 `Rig::new(&[Seed])`, `ports()`, `ports_with(&dyn HarnessPort)`, `live(name) -> &Live { name, herdr, port, session }`,
 `pane_id(name)`, `record(name)`, `rewrite(name, change)`, `run(&ReconcileRequest)`, `verb(argv, Format) -> Outcome`,
 `mark() -> Calls`, `calls_since(&Calls) -> Calls` with `Calls { panes, profiles, herdr, host, harness, probes }`
-(`rig.rs:99-273`); `whole(fix)`, `kinds(report)`, `one(report, kind, pane)` (`rig.rs:282, 307, 317`). The module is private to
-`doctor.rs` (`doctor.rs:10`: `mod rig;`). Rig panes share the fake's default data directory unless `.data_dir` is given.
+(`rig.rs:99-273`); `whole(fix)`, `kinds(report)`, `one(report, kind, pane)` (`rig.rs:282, 307, 317`). Every one of these
+items is `pub`. The module itself is private to `doctor.rs` today (`doctor.rs:10`: `mod rig;`); this story makes it
+`pub(crate) mod rig;` (Decision 16, F-8). Rig panes share the fake's default data directory unless `.data_dir` is given.
+**F-8** How a shared test module is shared in this crate: declared once, reached by crate path. On `main` (#662), in the
+`profile_verbs` test binary (whose `main.rs` declares `mod list;` and `mod show;`, both private):
+```
+crates/holler-cli/tests/profile_verbs/list.rs:4-5
+#[path = "rig.rs"]
+pub(crate) mod rig;
+crates/holler-cli/tests/profile_verbs/show.rs:11
+use crate::list::rig::{assert_failure, matching_spec, member, profile, run_both, Rig};
+```
+The `pane_verbs` binary has the same shape: `tests/pane_verbs/main.rs` declares `mod doctor;`, `mod reset;` and `mod
+switch;` (private siblings of the crate root), and `doctor.rs:9-11` declares `mod read_only; mod rig; mod surface;`. A
+private module of the crate root is visible to its siblings, so with `pub(crate) mod rig;` in `doctor.rs` the path
+`crate::doctor::rig::{...}` resolves from `switch.rs` and `reset.rs`. **Checked on this tree** (`dc300ab` merged; scratch
+edit, reverted): with `doctor.rs:10` changed to `pub(crate) mod rig;`, a test in `switch.rs` using
+`crate::doctor::rig::{whole, Rig, Seed}` and one in `reset.rs` using `crate::doctor::rig::{Rig, Seed}`, `cargo clippy -p
+holler-cli --test pane_verbs -- -D warnings` was clean and both tests passed. Loading `doctor/rig.rs` a second time with
+`#[path]` instead fails that clippy run with `clippy::duplicate_mod` (A's reproduction, handoff-A finding 1).
 **F-7** The in-process runner (`crates/holler-cli/tests/verb_harness/mod.rs:53-54`): `pub fn run_verb_with(argv: &[&str],
 format: Format, ports: Ports<'_>) -> Outcome`; `Outcome { code, out, err }` (`mod.rs:40-44`); `try_parse` is
 `crate::verb_harness::parse::try_parse` (`parse.rs:24`).
 
-### G. ADR-0021 (the standing spec; line numbers as of `ce12cdb`)
+### G. ADR-0021 (the standing spec; line numbers as of `dc300ab`, unchanged since `ce12cdb`)
 
 **G-1** Scoping (`ADR-0021.md:126-129`):
 ```
@@ -687,7 +767,7 @@ crates/holler-hub/src/holds.rs:16-19
 //!   place that can deliver a prompt, `circuit::dispatch::send_prompt`; the
 //!   test `tests/hold_single_path_test.rs` (holler-cli) fails if a second
 //!   `session/prompt` sender appears in the hub.
-crates/holler-hub/src/talk.rs:212-215
+crates/holler-hub/src/talk.rs:211-214
     // Issue #442: a held session refuses new work before anything else is
     // done for it (no turn id moved, no TalkLog line). This is a fast path
     // only: the enforcement that cannot be raced is the check in
@@ -829,14 +909,14 @@ profile: ProfileOpt }`, doc "Start a pane on a fresh session: create it, show it
 | # | Step | Port call | On failure |
 |---|---|---|---|
 | P0 | Re-check an `Existing` id | none | `parse_session_id` fails -> `usage` (2) |
-| P1 | Read the record (generation `g`) | with `profile: Some(P)`: `scope.resolve(&P, Some(&pane))`, record = `panes[0]`; else `pane_store.get(&pane)` | the error as is (`profile-not-found`, `pane-not-in-profile`: 3); `get` -> `None` is `PaneNotFound { what: pane }` (3). Nothing else is called. |
+| P1 | Read the record (generation `g`) | with `profile: Some(P)`: `scope.resolve(&P, Some(&pane))`, record = the first resolved pane, `resolved.panes.into_iter().next()` (never `panes[0]`: indexing can panic and no enabled lint catches it); else `pane_store.get(&pane)` | the error as is (`profile-not-found`, `pane-not-in-profile`: 3); `get` -> `None`, and `into_iter().next()` -> `None`, are both `PaneNotFound { what: pane }` (3). Nothing else is called. |
 | P2 | Role | none | `role == Orchestrator && !as_operator` -> `Refused { ORCHESTRATOR_PANE, "demo-c1r1 is the orchestrator's pane; pass --as-operator to change it" }` (3). Nothing else is called. |
-| P3 | Server healthy | `harness.health(record.harness.port)` | `Ok(false)` -> `Refused { SERVER_UNHEALTHY, "the harness server of <pane> on port <port> does not answer; run holler pane relaunch <pane>" }` (3); `Err(e)` -> `e` (`timeout`/`unavailable`: 1) |
+| P3 | Server healthy | `harness.health(record.harness.port)` | `Ok(false)` -> `Refused { SERVER_UNHEALTHY, "the harness server of <pane> on port <port> does not answer; run <remedy>" }` (3), where `<remedy>` is `findings::FindingKind::ServerDown.remedy(Some(&pane), FixState::NotFixable)` (D-9: `holler pane relaunch <pane>`), so the relaunch command is spelled only in the one remedy table; its `None` (unreachable with `Some(&pane)`) falls back to `findings::doctor_command(Some(&pane), false)`, with no `unwrap`/`expect`; `Err(e)` -> `e` (`timeout`/`unavailable`: 1) |
 | P4 | `Existing` only: the server has it | `harness.list_sessions(port)` | target not listed -> `SessionNotFound { what: <quoted target> }` (3); `Err(e)` -> `e` |
-| P5 | `Existing` only: nobody else's | `pane_store.list()` | a record `r` with `r.name != pane` and `r.session_of_record == Some(target)` -> `Refused { SESSION_OF_OTHER_PANE, "<quoted target> is the session of record of <r.name>" }` (3), naming the first such record in list order; `Err(e)` -> `e` |
+| P5 | `Existing` only: nobody else's | `pane_store.list()` | a record `r` with `r.name != pane` and `r.session_of_record == Some(target)` -> `Refused { SESSION_OF_OTHER_PANE, "<quoted target> is the session of record of <r.name>" }` (3), naming the first such record in list order; `Err(e)` -> `e`. A read-time pre-check, not the authority (R-5) |
 | A1 | `Fresh` only: create | `harness.create_session(port)` -> `target` | `e`, `acted: false`, `created: None` |
 | A2 | Switch the TUI | `harness.select_session(&record.herdr.pane_id, &target)` | `e`, `acted: true`, `created` = A1's id for reset |
-| O1 | Observe SHOWN | `harness.shown_session(&record.herdr.pane_id)` | `Err(e)` -> `e`; `shown_differs(Some(&target), shown)` -> `Unavailable { what: "the TUI of <pane> shows <quoted shown, or 'its home screen'>, not <quoted target>" }` (1); both with `acted: true`, `created` as A2 |
+| O1 | Observe SHOWN | `harness.shown_session(&record.herdr.pane_id)` | `Err(e)` -> `e`; `shown_differs(Some(&target), shown)` -> `Unavailable { what: "the TUI of <pane> shows <screen>, not session <quoted target>" }` (1), where `<screen>` is `its home screen` for `None` and `session <quoted shown>` otherwise, word for word as reconcile's private `screen_text` (D-9); `tx_switch.rs` keeps a private copy of that two-arm helper (it cannot call a private #647 function and edits no #647 file), so doctor and switch describe a screen the same way; both with `acted: true`, `created` as A2 |
 | R | Record | `pane_store.cas_put(&next, g)` | `e` (`generation-conflict`: 1), `acted: true`, `created` as A2; no retry, no second write |
 
 `next` is the record read at P1, **cloned**, with exactly these fields set: `session_of_record = Some(target)`,
@@ -862,8 +942,9 @@ doctor <pane> --fix`, D-6) selects it again, which is doctor's own repair (D-7).
 ## Acceptance criteria
 
 Tests live in `crates/holler-cli/tests/pane_verbs/switch.rs` and `reset.rs` (target `pane_verbs`) and run with
-`cargo test -p holler-cli --test pane_verbs switch` / `... reset`. They use only the test-kit fakes through the doctor rig
-(Decision 16), the in-process runner and test-local `HarnessPort` wrappers that delegate to the rig's `FakeHarness`. "Calls"
+`cargo test -p holler-cli --test pane_verbs switch` / `... reset`. They use only the test-kit fakes through the doctor rig,
+reached as `crate::doctor::rig::{...}` from both files (Decision 16), the in-process runner and test-local `HarnessPort`
+wrappers that delegate to the rig's `FakeHarness`. "Calls"
 means `rig.calls_since(&mark)` with `mark` taken just before the verb. `P` is `demo-c1r1`, `Q` is `demo-c2r1`; `S1` is P's
 rig session. Every case that runs the verb runs it in **both** formats on fresh rigs and asserts: the same exit code; JSON
 `check_envelope(out, code)` is `Ok`, `err` is empty, and `envelope.error.code` is the code named; text `out` is empty on failure
@@ -937,13 +1018,19 @@ and `err` is one `error: ...` line containing the named code's message.
     pane reset | demo-c1r1 --as-operator
     ```
     and `cargo test -p holler-cli --test cli_surface_test --test docs_cli_test` passes.
-22. ADR 0003 rows 51-52 read `holler pane switch PANE SESSION [--profile NAME] [--as-operator]` and `holler pane reset PANE
-    [--profile NAME] [--as-operator]`, each ending in `#645` in the column the other rows use.
+22. ADR 0003 rows 51-52 read `holler pane switch PANE SESSION [--as-operator] [--profile NAME]` and `holler pane reset PANE
+    [--as-operator] [--profile NAME]` (a verb's own flag before `[--profile NAME]`, as doctor's merged row
+    `holler pane doctor [PANE] [--fix] [--profile NAME]` at `ADR-0003.md:61` has it), each ending in `#645` in the column the
+    other rows use.
 23. `help_names_the_arguments`: `pane switch --help` contains `PANE`, `SESSION` and `--as-operator`; `pane reset --help`
     contains `PANE` and `--as-operator` and not `--first`.
 24. ADR-0021 holds exactly the edits of Decision 17: `git diff origin/main -- docs/adr/ADR-0021.md` touches only row 340, the
-    end of section 11 (after line 456) and the "Deferred to named stories" list; `grep -c "#645" docs/adr/ADR-0021.md` is
-    higher than on `origin/main`; `docs_cli_test` passes.
+    end of section 8 (after line 306, after #644's "Launch and relaunch as built (#644)" paragraph if that is on `main`), the
+    end of section 11 (one sentence after line 456) and the "Deferred to named stories" list; `grep -n 'Switch and reset as
+    built (#645)' docs/adr/ADR-0021.md` prints one line, inside section 8 (between the `### 8.` and `### 9.` headings); the
+    `unavailable` decision for a mismatch observed after the act is stated in section 8 once (if #644's paragraph is on
+    `main`, the #645 paragraph cites it rather than restating it); `grep -c "#645" docs/adr/ADR-0021.md` is higher than on
+    `origin/main`; `docs_cli_test` passes.
 25. `cargo clippy --workspace --all-targets -- -D warnings` is clean; `rustfmt --check --edition 2021` passes on
     `tx_switch.rs`, `switch.rs`, `reset.rs` and both test files; `bash scripts/lint.sh` passes (every file < 900 lines);
     `cargo test --workspace` passes; no new dependency in any `Cargo.toml` (`git diff origin/main -- '*Cargo.toml'` empty).
@@ -954,10 +1041,13 @@ and `err` is one `error: ...` line containing the named code's message.
 
 **Production:** `crates/holler-pane/src/tx_switch.rs` (fill), `crates/holler-cli/src/pane/switch.rs`, `reset.rs` (replace).
 **Tests:** `crates/holler-cli/tests/pane_verbs/switch.rs`, `reset.rs` (replace their stub cases); `process/stub.rs` (delete two
-entries). **Docs/fixtures:** `crates/holler-cli/tests/fixtures/cli-surface.txt` (the `# #645` block), `docs/adr/ADR-0003.md`
-(rows 51-52), `docs/adr/ADR-0021.md` (Decision 17), `CHANGELOG.md`. Nothing else: no frozen file (`lib.rs`, `ports.rs`,
-`pane.rs`, `error.rs`, `mod.rs`, `args.rs`, `output.rs`, `wiring.rs`, `tests/pane_verbs/main.rs`, any `Cargo.toml`), no #647
-file (`findings.rs`, `reconcile*.rs`, `doctor.rs`, `doctor/*`).
+entries); **`crates/holler-cli/tests/pane_verbs/doctor.rs:10`, a one-word visibility edit, `mod rig;` -> `pub(crate) mod
+rig;`, and nothing else in that file** (Decision 16; T makes it in RED). **Docs/fixtures:**
+`crates/holler-cli/tests/fixtures/cli-surface.txt` (the `# #645` block), `docs/adr/ADR-0003.md` (rows 51-52),
+`docs/adr/ADR-0021.md` (Decision 17), `CHANGELOG.md`. Nothing else: no frozen file (`lib.rs`, `ports.rs`, `pane.rs`,
+`error.rs`, `mod.rs`, `args.rs`, `output.rs`, `wiring.rs`, `tests/pane_verbs/main.rs`, any `Cargo.toml`), and no other #647
+file or line (`findings.rs`, `reconcile*.rs`, the rest of `doctor.rs`, `doctor/*` including `doctor/rig.rs`); the one line
+of `doctor.rs` above is the only exception.
 
 ### Reuse map (extend, do not duplicate)
 
@@ -969,7 +1059,8 @@ file (`findings.rs`, `reconcile*.rs`, `doctor.rs`, `doctor/*`).
 | The SHOWN comparison | `holler_pane::reconcile::shown_differs` (D-6) | an inline comparison |
 | Scope and membership | `ports.scope.resolve` (B-5) | a membership check of its own |
 | Output | `output::{emit, ErrorBody, ErrorCode, VerbCtx}` (D-3), `ProfileOpt` (D-4) | a renderer of its own |
-| Test world | the doctor rig, included with `#[path = "doctor/rig.rs"] pub(crate) mod rig;` in `switch.rs`; `reset.rs` uses `crate::switch::rig` (Decision 16) | a new rig; editing `doctor.rs` to export it |
+| Test world | the doctor rig, declared once in `doctor.rs` (made `pub(crate) mod rig;`) and reached as `crate::doctor::rig::{...}` from both `switch.rs` and `reset.rs` (Decision 16, F-8: `profile_verbs`' `crate::list::rig` pattern) | a new or copied rig; a second load of `doctor/rig.rs` (`clippy::duplicate_mod`) |
+| Remedy and screen wording | `findings::FindingKind::ServerDown.remedy(Some(&pane), FixState::NotFixable)` for P3 (D-9); O1's screen text word for word as reconcile's `screen_text` (D-9) | spelling `holler pane relaunch` outside the remedy table; a different description of a screen |
 | Envelopes, parsing | `check_envelope` (F-5), `run_verb_with` and `try_parse` (F-7) | own JSON checks |
 | Clock | `holler_proto::clock::now_millis` (already a `holler-pane` and `holler-cli` dependency) | a new clock |
 
@@ -990,12 +1081,14 @@ file (`findings.rs`, `reconcile*.rs`, `doctor.rs`, `doctor/*`).
    `session-not-found` before anything moves (AC 3), rather than relying on `select_session` alone.
 7. **The target must not be another pane's session of record** (P5): servers that share a data directory list every pane's
    sessions (H, lines 75-78), so P4 alone would let `switch` point P at Q's conversation, which is the wrong-session incident.
-   A session no record names (a stray) is allowed: choosing it is the operator's decision, as doctor's design says.
+   A session no record names (a stray) is allowed: choosing it is the operator's decision, as doctor's design says. P5 is a
+   read in the verb, so it narrows the wrong-session window but does not close it under concurrency (R-5, F-3).
 8. **No park gate.** `Hold` is park state, and a prompt refusal derived from pane state belongs at `send_prompt` (C,
    `pane.rs:160-164`); switch and reset send no work. 645b's `--first` will meet park through the hub's prompt path.
 9. **A mismatch observed after the act is `unavailable`** (C-4; exit 1). I3 needs a failure and an open code is a refusal
    (D-2); of the closed failure codes, only `unavailable` means "the live state the verb needs is not there". #644's brief
-   (on its own branch, not `main`) decides the same for launch and relaunch.
+   (on its own branch, not `main`; its decision 14) decides the same for launch and relaunch. The ADR states the decision once,
+   in section 8: whichever of #644 and #645 lands second cites the first's sentence (Decision 17(b)).
 10. **No compensation after the act.** The record still names the previous session, and doctor `--fix` selects it again; a
     second `select_session` from the verb could fail the same way and would hide the first error. ADR-0021 G-4 asks for
     "writes nothing more, and prints the reconcile step".
@@ -1011,27 +1104,41 @@ file (`findings.rs`, `reconcile*.rs`, `doctor.rs`, `doctor/*`).
     metacharacters never reach a message or a port. Ids from the harness (reset's new id, SHOWN) are quoted, never trusted.
 15. **Output** as under "Output": `previous` lets a script undo a switch with a second switch; the stored `Pane` is the
     proof of what was recorded.
-16. **The rig is the doctor rig, included by path**, not copied and not exported by editing `doctor.rs` (a #647 file). Two
-    compilations of one file in one test crate are harmless (`tests/pane_verbs/main.rs` allows `dead_code`). If #643 or #644
-    has put a shared rig on `main` when T starts, T uses the doctor rig anyway (it is the one that builds a live world with
-    TUIs) and notes the consolidation as a follow-up.
+16. **The rig is the doctor rig, declared once and reached by crate path** (the orchestrator's ruling on A's BLOCK, option
+    (a)). One named cross-story edit: `crates/holler-cli/tests/pane_verbs/doctor.rs:10`, `mod rig;` becomes `pub(crate) mod
+    rig;`, visibility only; `doctor/rig.rs` and the rest of `doctor.rs` are untouched. `switch.rs` and `reset.rs` both `use
+    crate::doctor::rig::{...}`; neither declares a `rig` module. This is the crate's existing pattern (F-8: `profile_verbs`
+    declares `rig` once in `list.rs` and `show.rs` reaches it as `crate::list::rig`), and it was checked on this tree (F-8).
+    A second load of `doctor/rig.rs` (a `#[path]` include) is rejected: clippy's `duplicate_mod` fails AC 25. A copied rig
+    is rejected too. #647 part 2 owns `doctor.rs`; it is told of this line (Forward-compat), a one-line merge at most. If
+    #643 or #644 has put a shared rig on `main` when T starts, T uses the doctor rig anyway (it is the one that builds a live
+    world with TUIs) and notes the consolidation as a follow-up (F-2).
 17. **ADR-0021, edited in this change** (the stack rule; F writes it):
     - (a) **Row 340** (G-5), which today reads "open (#645) for a pane that is not idle, holds a question or has an unhealthy
       server, and for the orchestrator's own pane", becomes: `| `pane switch`, `pane reset` | `pane-not-found`,
       `session-not-found`, `generation-conflict`, `profile-not-found`, `pane-not-in-profile`; open (#645): `orchestrator-pane`,
       `server-unhealthy`, and for `switch` `session-of-other-pane`; **PROPOSED** (645b): a pane that is not idle or holds a
       question |`.
-    - (b) **Section 11**, after the sentence ending "and leaves `last_observed.driven` as stored." (line 456), a new paragraph
-      headed "**Switch and reset as built (#645).**" stating Decisions 2-13 and 18 in prose: one engine; the plan's refusals;
-      act `select_session`; observe `shown_session`; a mismatch is `unavailable` and records nothing; the four fields written
-      in one compare-and-swap; no Herdr or host call; no compensation, the reconcile step is the pane doctor command line for
-      the pane with `--fix`; a session `reset` created but did not record is named in the message; after a successful `reset`
-      the previous session stays on the server and doctor reports it as a stray session. It names commands in prose only, no
-      inline `holler ...` span (E-7).
+    - (b) **Section 8**, at its end (after line 306, the paragraph ending "see "Decisions taken", item 1."; and after #644's
+      "**Launch and relaunch as built (#644).**" paragraph if that is on `main` by then, which 644-brief decision 20(c) places
+      in section 8 after its line 305), a new paragraph headed "**Switch and reset as built (#645).**" stating Decisions 2-13
+      and 18 in prose: one engine; the plan's refusals; act `select_session`; observe `shown_session`; a mismatch records
+      nothing; the four fields written in one compare-and-swap; no Herdr or host call; no compensation, the reconcile step is
+      the pane doctor command line for the pane with `--fix`; a session `reset` created but did not record is named in the
+      message; after a successful `reset` the previous session stays on the server and doctor reports it as a stray session;
+      the session-of-other-pane check is a read in the verb, not enforced by the registry (R-5). **The `unavailable` decision
+      is stated once in section 8:** if #644's paragraph is on `main`, this paragraph cites it ("a mismatch observed after the
+      act is `unavailable`, as for launch and relaunch above") and does not restate the reasoning; if it is not, this
+      paragraph states the decision ("a mismatch observed after the act is the closed failure `unavailable`, exit 1: I3 needs
+      a failure and an open code is a refusal") and #644, landing second, cites it. It names commands in prose only, no inline
+      `holler ...` span (E-7).
+    - (b') **Section 11**, after the sentence ending "and leaves `last_observed.driven` as stored." (line 456), one sentence
+      only: "A switch or reset (#645) likewise leaves `last_observed.driven` as stored; the hub's DRIVEN session follows the
+      new `session_of_record` once #649 wires it."
     - (c) **"Deferred to named stories"**, the bullet at lines 535-536 (G-7), becomes "Which closed failure code a mismatch
-      observed after `act` carries: decided, `unavailable` (exit 1): #645 for switch and reset (section 11); #644 for launch
-      and relaunch." If #644's in-place edit of this bullet is on `main` by then, F merges the two into one bullet naming both
-      stories and both sections.
+      observed after `act` carries: decided, `unavailable` (exit 1), section 8: #644 for launch and relaunch; #645 for switch
+      and reset." If #644's in-place edit of this bullet ("decided by #644: `unavailable`, section 8; #645 to follow",
+      644-brief decision 20(d)) is on `main` by then, F edits that bullet into this one form naming both stories.
     - (d) **"Deferred to named stories"**, one new bullet: "**PROPOSED (#645, pending the operator):** the refusal of a pane that
       is not idle or holds a question, and `reset --first`: 645b, after a contract amendment gives the verbs a way to read the
       activity of a pane's driven session and to queue a prompt through the hub's one prompt path, and after #649 points
@@ -1070,7 +1177,9 @@ file (`findings.rs`, `reconcile*.rs`, `doctor.rs`, `doctor/*`).
 | #700 `opencode_agent` | a record write that keeps fields it does not know | yes: clone-and-set (Behaviour) |
 | #646 `say --pane`, #648 roster | `last_observed.shown` and `at` written after a switch or reset | yes |
 | #653 pfleet `o reset` | a scriptable verb: stable codes, JSON envelope, `previous` | yes |
-| #644 launch | nothing; two engines with their own failure types (`TxFailure` there carries no `created`) | n/a |
+| #644 launch | nothing; two engines with their own failure types (`TxFailure` there carries no `created`). The ADR's `unavailable` sentence lives in section 8 once; the second of #644/#645 to land cites the first's (Decision 17(b)) | n/a |
+| #647 part 2 (`unattached`, `agent-cannot-dispatch`; owns `tests/pane_verbs/doctor.rs`) | **to be told:** 645a changes `doctor.rs:10` from `mod rig;` to `pub(crate) mod rig;` (visibility only), and `switch.rs` and `reset.rs` reach the rig as `crate::doctor::rig`, so part 2 keeps the line `pub(crate)` and keeps the rig's items `pub` | the orchestrator passes this one-line note to #647 part 2's brief |
+| #646c (`say`, `interrupt`, `answer` with `--pane`; ADR-0021 row 345: "open (#646) for an unhealthy pane") and any later verb refusing the same conditions | the same stable code and grammar for the same condition: `holler_pane::tx_switch::SERVER_UNHEALTHY` (`server-unhealthy`), `holler_pane::tx_switch::ORCHESTRATOR_PANE` (`orchestrator-pane`) and `holler_pane::tx_switch::parse_session_id` (the typed session-id grammar). Codes are permanent once merged (G-5), so a second spelling of one condition would be permanent too | yes, by reuse; the orchestrator passes this to 646c's brief |
 
 ## Out of scope
 
@@ -1078,7 +1187,8 @@ file (`findings.rs`, `reconcile*.rs`, `doctor.rs`, `doctor/*`).
 - Deleting or retiring the previous session after `reset` (F-1); aborting a turn (`abort`).
 - Attaching or relaunching a TUI that is gone (`select_session` on a pane with no TUI is `unavailable`; relaunch is #644's).
 - DRIVEN (`last_observed.driven`) and the hub's driven session (#649); the real adapters and wiring (#640-#642, #649).
-- Any change to a frozen file, to the test kit, or to #647's files.
+- Any change to a frozen file, to the test kit, or to #647's files, except the one-word visibility edit of
+  `tests/pane_verbs/doctor.rs:10` (Decision 16).
 
 ## Follow-ups (the orchestrator files them; none blocks 645a)
 
@@ -1086,10 +1196,23 @@ file (`findings.rs`, `reconcile*.rs`, `doctor.rs`, `doctor/*`).
   a superseded session (a recorded list of retired ids, or a harness delete) needs a contract change; doctor stays noisy
   until then.
 - **F-2** If a shared verb-test rig lands from #643 or #644, consolidate it with the doctor rig (Decision 16).
+- **F-3** Enforce "a session is the session of record of at most one pane" inside the hub registry's `pane/cas_put`, under the
+  pane lock, as `pane-in-other-profile` is (ADR-0021 "Decisions taken", item 2; D-10), so P5 stops being the only guard (R-5).
+  #650's import also writes existing session ids into records (ADR-0021 section 13, step 2), so a store-level rule serves both
+  writers. The alternative is a doctor finding for two records naming one session. Recorded here; nothing is filed by this
+  story.
+- **F-4** One owner for the sentence "to reconcile, run ...": today `tx_switch::SwitchFailure::message` (this story, in
+  `holler-pane`) writes `; to reconcile, run ` and `findings::doctor_command(Some(&pane), true)`, and #663's planned
+  `profile_scope::reconcile_step(Option<&ProfileName>)` (in `holler-cli`, on `issue-663-implementation`) writes the same
+  lead-in in a profile-shaped form. `holler-pane` cannot call `holler-cli`, so the owner is a `findings` function beside
+  `doctor_command` that both call. F spells the lead-in exactly `to reconcile, run ` so the later fold is mechanical.
+  Recorded here; nothing is filed by this story.
 
 ## Test plan
 
-**RED first** (T): replace the two stub test files with ACs 1-19 and 23 against the API above; add the `tx_switch.rs` items
+**RED first** (T): change `tests/pane_verbs/doctor.rs:10` to `pub(crate) mod rig;` (Decision 16, the only `doctor.rs`
+edit); replace the two stub test files with ACs 1-19 and 23 against the API above, both reaching the rig as
+`crate::doctor::rig`; add the `tx_switch.rs` items
 as `todo!()`-free stubs that return `Err(PaneError::NotImplemented.into())` so the crate compiles; replace the two CLI files
 with the real `Args` structs whose `run` calls the stub engine. Each AC then fails on its assertion: the verbs exit 1
 `not-implemented` where 0 or 3 is expected. ACs 20-22 are edited in RED (the stub entries, the fixture block, the ADR 0003
@@ -1108,8 +1231,9 @@ cli_surface_test --test docs_cli_test`, `cargo test --workspace`, clippy, rustfm
 
 ## Risks
 
-- **R-1 ADR-0021 adjacency.** #644's planned edit of row 339 is the line above row 340, and both stories edit the "Deferred"
-  bullet at 535-536; whichever merges second resolves a small text conflict (Decision 17(c) says how). #642 part b also
+- **R-1 ADR-0021 adjacency.** #644's planned edit of row 339 is the line above row 340, both stories add an "as built"
+  paragraph at the end of section 8, and both edit the "Deferred" bullet at 535-536; whichever merges second resolves a small
+  text conflict (Decision 17(b) and (c) say how). #642 part b also
   plans an ADR-0021 edit; F re-reads the merged ADR at GREEN and edits by anchor text, not by line number.
 - **R-2 A real adapter differs from the fake.** The real `select_session` waits (bounded) for the title to confirm (H, lines
   237-239), so O1 is a second confirmation; if the real `shown_session` can answer "unknown", it is a mismatch here
@@ -1117,3 +1241,13 @@ cli_surface_test --test docs_cli_test`, `cargo test --workspace`, clippy, rustfm
 - **R-3 The window before 645b.** Once #649 wires real ports, 645a's verbs could switch a busy pane. P2 is the mitigation.
 - **R-4 `stub.rs` and the fixture are shared files** edited by every verb story; the `// #NNN` line rule (E-4) keeps the
   conflicts away, and the fixture block is this story's own.
+- **R-5 P5 is a pre-check, not the authority.** "Not another pane's session of record" is a read in the verb
+  (`pane_store.list()` at P5). Two concurrent switches of different panes P and Q to the same session can both pass P5: the
+  real `select_session` waits up to about 2 s (H, lines 237-239) between P5 and R, and each `cas_put` fences only its own
+  record's generation, so both records then name one session (the wrong-session incident). Nothing else catches it: the hub
+  store enforces only the generation and membership inside its compare-and-swap (D-10, `store.rs:338-344`, called at
+  `store.rs:175`), and doctor has no finding for two records naming one session (its strays exclude every recorded session),
+  so section 8's "the reconcile pass (#647) is the safety net" does not cover this race. Accepted for 645a (no real ports
+  until #649); the fix is follow-up F-3.
+- **R-6 `doctor.rs` is #647 part 2's file.** The one-line visibility edit (Decision 16) can meet a part 2 change to the same
+  module list in a merge; the Forward-compat note tells part 2 to keep `pub(crate) mod rig;`.
