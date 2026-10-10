@@ -52,3 +52,48 @@
   - Greps for open codes, `--as-operator`, session-id validators and `HarnessPort` wrappers.
   - A scratch-crate reproduction of `duplicate_mod` on clippy 0.1.98 / rustc 1.98.1, in the session scratchpad, outside
     the repo.
+
+## A (up-front plan review, round 2) — 2026-10-09T20:14-06:00
+- **Decided:** PASS on the brief as amended in `8cf4f00` (handoff-A.md, which replaces round 1's; round 1 stays in git at
+  `2bbb237`).
+  - Round 1's block is fixed by option (a). `doctor.rs:10` becomes `pub(crate) mod rig;`, and `switch.rs` and `reset.rs`
+    reach the rig as `crate::doctor::rig`, the `profile_verbs` pattern on `main`. I verified it on a built copy of the tree.
+  - All six round-1 warns are written into the brief: P1, P3 and O1 wording, R-5, F-3, F-4, Decision 17 in section 8,
+    AC 22 and AC 24, and the Forward-compat rows. The amendments add no drift.
+  - Two new warns, neither blocking:
+    1. O1's private copy of `screen_text` has no follow-up to fold it. Widen F-4 to cover the screen wording.
+    2. Decision 17(c)'s "Deferred" bullet credits #644 if #645 lands first. Write "#644 to follow" in that case.
+- **Assumed:**
+  - The sibling plans are the ones on their branches now: `issue-644-implementation` at `7195993`,
+    `issue-646-implementation` at `b996a8f`, and `issue-663-implementation` at `e46b427` (its A gate passed). #647 part 2
+    is not briefed in the repo, and still owns `tests/pane_verbs/doctor.rs` and `reconcile*.rs`.
+  - `origin/main` moved from `dc300ab` to `e327569` during the review. That commit (#641) touches only
+    `holler-adapter-host`, `Cargo.lock` and `CHANGELOG.md`, so the brief's evidence holds.
+- **Hedged:**
+  - Both new findings are warns. The `screen_text` copy is justified in writing, which is a PASS at Phase 7, and round 1
+    accepted it. The bullet wording is a matter of accuracy in the standing spec, not a contradiction, because the rule
+    stated in section 8 is general.
+  - Giving F-3 a "before #654" ordering, as P2 does for 645b, is offered to O as optional, not raised as a finding.
+  - That P0 to R in one function would exceed `cognitive_complexity` 15 is an estimate. It is passed to F as a note.
+- **Evidence:**
+  - The whole amended brief (1,253 lines), the deleted lines of the amendment diff, round 1's handoff, and the outside
+    brief review r1.
+  - A scratch copy of `HEAD` built outside the repo, in its own seeded `target/`, with the one-word edit and probe tests in
+    both verb files:
+    - `cargo clippy -p holler-cli --test pane_verbs -- -D warnings` was clean.
+    - 36 tests passed (the probes and all of doctor's).
+    - The probes confirmed that the rig's items can be reached from a sibling file, AC 2's call-log sequences, that P's
+      server lists Q's session (AC 4), and the single `stray-session` after a reset (AC 16).
+  - Source read for this round:
+    - `tests/pane_verbs/{main,doctor}.rs`, `doctor/rig.rs`, and `tests/profile_verbs/{main,list,show}.rs`.
+    - `findings.rs` (the remedy table, `doctor_command`, `quoted`), `reconcile.rs` (`shown_differs`, `resolve`) and
+      `reconcile/observe.rs:286-391`.
+    - `error.rs` (`class_of`, `excerpt`, the variants), `lib.rs`, `pane.rs` (`PaneName`, `PaneId`), and the empty
+      `tx_apply.rs` and `tx_launch.rs` stubs.
+    - `holler-cli/src/pane/doctor.rs`, `output.rs` (its public items), and `cli.rs` and `profile/apply.rs` (the existing
+      bool flags).
+    - `holler-hub/src/panes/store.rs:160-182, 330-352`, `Cargo.toml` lints and `clippy.toml`.
+    - ADR-0021: section 8, rows 336-346, section 11, "Deferred" and "Decisions taken". ADR 0003, lines 48-62.
+    - `cli-surface.txt`'s #645 and #647 blocks.
+  - The sibling briefs, grepped for codes, failure types, the reconcile step and the orchestrator and unhealthy handling:
+    644 (`TxFailure`, `LaunchRequest`, decision 20), 646, 643, and 663 (decision 8, follow-ups F1, F2 and F5).
