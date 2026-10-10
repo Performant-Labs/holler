@@ -3,17 +3,21 @@
 //!
 //! The shared items are `pub` and live here because the frozen `pane/mod.rs` admits no new
 //! module. [`PaneRow`] is one pane in summary: a `list` row, and the `pane` of a `watch`
-//! put. [`SessionSync`] is the one SHOWN/DRIVEN rule. [`text_value`] and [`json_text`] make
-//! a stored string safe to print on a terminal, and [`observed_at`] prints a record
+//! put. [`SessionSync`] is SYNC, read from a record through [`shown_differs`], the one
+//! SHOWN/DRIVEN rule (`pane doctor` uses it too). [`text_value`] and [`json_text`] make a
+//! stored string safe to print on a terminal, and [`observed_at`] prints a record
 //! timestamp. `get.rs` and `watch.rs` use them through `super::list`, and a later consumer
 //! (the roster, #648) can use them through `crate::pane::list`.
 //!
 //! The read verbs read the record and nothing else. They call `PaneStore::{get, list,
 //! watch}`, `ProfileStore::get` and `ProfileScope::resolve`, never an adapter or a probe,
-//! and they write nothing. SHOWN, DRIVEN and health are what reconcile last recorded.
+//! and they write nothing. SHOWN and health are what reconcile last recorded. DRIVEN is
+//! printed as the record holds it and never compared: nothing records it before the hub
+//! wiring (#649).
 
 use clap::Args;
-use holler_pane::pane::{Health, Hold, LastObserved};
+use holler_pane::pane::{Health, Hold};
+use holler_pane::reconcile::shown_differs;
 use holler_pane::{GridPos, Pane, PaneError, PaneName, Ports, ProfileName};
 use serde::Serialize;
 
@@ -36,16 +40,20 @@ const GAP: &str = "  ";
 /// List panes, one row per pane, sorted by name.
 ///
 /// Text is a table for people; `--format=json` is for scripts. Every value is the pane
-/// registry's: SHOWN, DRIVEN and HEALTH are what reconcile last recorded, and the verb
-/// observes nothing itself.
+/// registry's: SHOWN and HEALTH are what reconcile last recorded, and the verb observes
+/// nothing itself.
 ///
 /// The columns: PANE is the pane's name. POS is its grid cell, row first (`r2c1` is row 2,
 /// column 1). PROFILE is the profile it belongs to. PROJECT is the directory it works in.
 /// HEALTH is `healthy`, `unhealthy` or `unknown`, as the harness server last reported it
-/// (`pane get` shows the reason). SHOWN is the session the pane's TUI shows, and DRIVEN is
-/// the session the hub drives. SYNC is `ok` when they are the same session, MISMATCH when
-/// they differ, and `-` while either one is unobserved (nothing has recorded it yet, or
-/// reconcile could not tell). HOLD is `none`, `parked` or `drained`.
+/// (`pane get` shows the reason). SHOWN is the session the pane's TUI showed when
+/// reconcile last observed it. DRIVEN is the session the hub drives, printed as the record
+/// holds it: nothing records it until the hub wiring (#649), so it is `-` until then. SYNC
+/// compares SHOWN with the pane's session of record (`pane get` shows it), which is the
+/// session the hub drives: `ok` when the TUI showed that session, MISMATCH when it showed
+/// another session or its home screen, and `-` when reconcile has not observed the pane or
+/// the pane has no session of record. It is the rule `pane doctor` uses. HOLD is `none`,
+/// `parked` or `drained`.
 ///
 /// A `-` is an empty value. A stored value that is empty or `-`, or that holds a space, a
 /// quote, a backslash, an `=` or a character a terminal could act on, is printed quoted and
@@ -148,10 +156,12 @@ pub struct PaneRow {
     pub project: String,
     /// What the harness server last reported, in `Health`'s serde form.
     pub health: Health,
-    /// The session the pane's TUI shows, as reconcile last recorded it.
+    /// The session the pane's TUI showed when reconcile last observed it.
     pub shown: Option<String>,
-    /// The session the hub drives, as reconcile last recorded it.
+    /// The session the hub drives, as the record holds it (`last_observed.driven`):
+    /// printed, never compared. Nothing records it until the hub wiring (#649).
     pub driven: Option<String>,
+    /// SHOWN against the pane's session of record ([`SessionSync::of`]).
     pub sync: SessionSync,
     /// In `Hold`'s serde form.
     pub hold: Hold,
@@ -167,7 +177,7 @@ impl From<&Pane> for PaneRow {
             health: pane.harness.health.clone(),
             shown: pane.last_observed.shown.clone(),
             driven: pane.last_observed.driven.clone(),
-            sync: SessionSync::of(&pane.last_observed),
+            sync: SessionSync::of(pane),
             hold: pane.hold.clone(),
         }
     }
@@ -192,31 +202,40 @@ impl PaneRow {
     }
 }
 
-/// Whether the session a pane's TUI shows is the session the hub drives, as reconcile last
-/// recorded both (`last_observed`). This is the one copy of the rule the read verbs print.
+/// SYNC: whether a pane's TUI shows the session the hub drives, read from its record. The
+/// comparison is [`shown_differs`], the one SHOWN/DRIVEN rule (`pane doctor` uses it too):
+/// SHOWN (`last_observed.shown`) against the pane's session of record, which ADR-0021's I2
+/// makes the session the hub drives. `last_observed.driven` is printed, never compared.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionSync {
-    /// Both were observed, and they are the same session.
+    /// The TUI showed the pane's session of record.
     Ok,
-    /// Both were observed, and they differ: the pane shows one session while the hub
-    /// drives another.
+    /// The TUI showed another session, or its home screen: the pane is not on the session
+    /// the hub drives.
     Mismatch,
-    /// One of them was not observed, so there is nothing to compare. This is not flagged:
-    /// reconcile records `None` when it cannot tell, and flagging every such pane would
-    /// make the flag noise.
+    /// There is nothing to compare: reconcile has never observed the pane, or the pane has
+    /// no session of record (`pane doctor` reports that as `no-session-of-record`). Not
+    /// flagged, since nothing was checked.
     Unobserved,
 }
 
 impl SessionSync {
-    /// The rule: [`Ok`](Self::Ok) when `shown` and `driven` are both set and equal,
-    /// [`Mismatch`](Self::Mismatch) when both are set and differ, and
-    /// [`Unobserved`](Self::Unobserved) when either is unset.
-    pub fn of(observed: &LastObserved) -> Self {
-        match (&observed.shown, &observed.driven) {
-            (Some(shown), Some(driven)) if shown == driven => Self::Ok,
-            (Some(_), Some(_)) => Self::Mismatch,
-            _ => Self::Unobserved,
+    /// SYNC of the record `pane`, in the form [`shown_differs`]'s doc asks of a reader:
+    /// [`Unobserved`](Self::Unobserved) unless reconcile has observed the pane
+    /// (`last_observed.at > 0`; [`observed_at`] prints `never` otherwise) and it has a
+    /// session of record. Then [`Mismatch`](Self::Mismatch) when `shown_differs` answers
+    /// yes for `last_observed.shown` (`None` is the home screen), and [`Ok`](Self::Ok) when
+    /// it answers no.
+    pub fn of(pane: &Pane) -> Self {
+        let observed = &pane.last_observed;
+        let record = pane.session_of_record.as_deref();
+        if observed.at <= 0 || record.is_none() {
+            Self::Unobserved
+        } else if shown_differs(record, observed.shown.as_deref()) {
+            Self::Mismatch
+        } else {
+            Self::Ok
         }
     }
 

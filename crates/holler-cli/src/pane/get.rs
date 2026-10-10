@@ -1,6 +1,6 @@
 //! `holler pane get` (story #643, epic #633): one pane in full. The record as the registry
-//! holds it, its profile's spec for it, and SYNC, the SHOWN/DRIVEN rule of
-//! [`SessionSync`].
+//! holds it, its profile's spec for it, and SYNC ([`SessionSync`]: SHOWN against the pane's
+//! session of record, the rule `pane doctor` uses).
 //!
 //! It reads only `PaneStore::get`, `ProfileStore::get` and `ProfileScope::resolve` (at most
 //! two calls), observes nothing and writes nothing. The text view is built from the shared
@@ -23,16 +23,18 @@ use crate::output::{emit, ErrorBody, VerbCtx};
 
 /// Show one pane in full: its record, its profile's spec for it, and SYNC.
 ///
-/// Every value is the pane registry's: SHOWN, DRIVEN and health are what reconcile last
-/// recorded, and the verb observes nothing itself. With `--profile`, the pane must belong
-/// to that profile.
+/// Every value is the pane registry's: SHOWN and health are what reconcile last recorded,
+/// DRIVEN is printed as the record holds it (nothing records it until the hub wiring,
+/// #649), and the verb observes nothing itself. With `--profile`, the pane must belong to
+/// that profile.
 ///
 /// Text prints one `key: value` line per field, in this order: pane, generation, pos (the
 /// grid cell, row first: `r2c1`), profile, project, herdr, host, tmux, herdr-api-version,
 /// harness, health (with the reason when it is unhealthy), session-of-record, shown,
-/// driven, observed-at, sync (`ok`, MISMATCH or `-`, as in `pane list`), role, hold, model,
-/// effort, env (the environment variable names), context (the soft and hard context
-/// ceilings), command, probe-check, probe-expect, probe-last and spec.
+/// driven, observed-at, sync (SHOWN against session-of-record: `ok`, MISMATCH or `-`, as in
+/// `pane list`), role, hold, model, effort, env (the environment variable names), context
+/// (the soft and hard context ceilings), command, probe-check, probe-expect, probe-last and
+/// spec.
 ///
 /// A `-` is an empty value. A stored value that is empty or `-`, or that holds a space, a
 /// quote, a backslash, an `=` or a character a terminal could act on, is printed quoted and
@@ -83,7 +85,7 @@ fn detail(args: &PaneGet, ports: Ports<'_>) -> Result<PaneDetail, PaneError> {
     Ok(PaneDetail {
         profile: pane.profile.clone(),
         spec,
-        sync: SessionSync::of(&pane.last_observed),
+        sync: SessionSync::of(&pane),
         pane,
     })
 }

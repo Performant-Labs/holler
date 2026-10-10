@@ -10,7 +10,8 @@
 use std::collections::BTreeSet;
 
 use clap::Args;
-use holler_pane::{Cursor, Pane, PaneError, PaneEvent, PaneName, Ports, Watch};
+use holler_pane::profile_diff::is_member;
+use holler_pane::{Cursor, PaneError, PaneEvent, PaneName, Ports, ProfileName, Watch};
 use serde::Serialize;
 
 use super::args::ProfileOpt;
@@ -30,8 +31,9 @@ use crate::output::{emit_error, emit_stream, ErrorBody, VerbCtx};
 /// shown=- driven=- sync=- hold=none`, or `cursor=N delete NAME`.
 ///
 /// `--format=json` prints NDJSON, one envelope per line, whose data is `{"cursor": N,
-/// "name": NAME, "change": "put" or "delete", "pane": ROW or null}`, ROW being a `pane list`
-/// row. A watch with nothing to print prints nothing, in JSON mode too.
+/// "name": NAME, "change": "put" or "delete", "pane": ROW or null}`. ROW is a `pane list`
+/// row, not the full record that `pane get` prints: a script that needs the record runs
+/// `pane get NAME`. A watch with nothing to print prints nothing, in JSON mode too.
 ///
 /// With PANE, only that pane's changes are printed. With `--profile`, only the changes of
 /// that profile's panes, and a named pane must belong to it: a change is printed when the
@@ -74,7 +76,7 @@ fn open(args: &PaneWatch, ports: Ports<'_>) -> Result<Changes, PaneError> {
         Some(profile) => {
             let scope = ports.scope.resolve(&profile, pane.as_ref())?;
             Some(Members {
-                slug: profile.slug(),
+                profile,
                 names: scope.panes.into_iter().map(|member| member.name).collect(),
             })
         }
@@ -194,34 +196,28 @@ impl Changes {
 /// The panes of the `--profile` a watch follows. It starts as the panes `resolve` returned
 /// and is updated by every event, so a pane that joins the profile is followed from then on.
 struct Members {
-    /// The profile's slug: membership is compared by slug, as everywhere.
-    slug: String,
+    /// The profile the watch follows. A record is a member when `is_member` says so
+    /// (`holler_pane::profile_diff`, compared by slug), the rule the profile verbs use.
+    profile: ProfileName,
     /// The panes in the profile as of the last record the watch saw.
     names: BTreeSet<PaneName>,
 }
 
 impl Members {
-    /// Whether `event` concerns the profile: its record names it, or the pane was in it as
-    /// of the last record seen (a pane leaving the profile, or deleted while in it). The
+    /// Whether `event` concerns the profile: its record is a member, or the pane was in it
+    /// as of the last record seen (a pane leaving the profile, or deleted while in it). The
     /// set then follows the event.
     fn admits(&mut self, event: &PaneEvent) -> bool {
         let was = self.names.contains(&event.name);
         let is = event
             .pane
             .as_deref()
-            .is_some_and(|pane| self.names_profile(pane));
+            .is_some_and(|pane| is_member(pane, &self.profile));
         if is {
             self.names.insert(event.name.clone());
         } else {
             self.names.remove(&event.name);
         }
         was || is
-    }
-
-    /// Whether the record `pane` names the profile.
-    fn names_profile(&self, pane: &Pane) -> bool {
-        pane.profile
-            .as_ref()
-            .is_some_and(|profile| profile.slug() == self.slug)
     }
 }

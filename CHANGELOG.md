@@ -168,16 +168,18 @@ fills this file in at release time.
   `holler pane get` and `holler pane watch` now read the pane registry instead of answering `not implemented (story
   #643)`. `list` prints one row per pane, sorted by name: PANE, POS (the grid cell, row first: `r2c1`), PROFILE,
   PROJECT, HEALTH, SHOWN (the session the pane's TUI shows), DRIVEN (the session the hub drives), SYNC and HOLD. SYNC
-  reads `MISMATCH` when SHOWN and DRIVEN differ. `get PANE` prints one pane in full, one `key: value` line per field:
-  the record with its model, environment variable names, context ceilings, launch command and health probe with its
-  last result, plus its profile's spec for it. `watch` follows the change feed, from the current state or from
-  `--since CURSOR`, one line per change, and `--until-idle` stops it once nothing more is owed. Each verb takes a pane
-  name and `--profile NAME` to scope itself; a named pane outside the profile is refused with `pane-not-in-profile`
-  (exit 3). Under `--format=json` each answers in the shared envelope, and `watch` prints NDJSON, one envelope per
-  line. The verbs observe nothing themselves: SHOWN, DRIVEN and health are what reconcile last recorded. In text mode
-  a stored value is quoted and escaped when it could act on the terminal, so it cannot put a control sequence or a
-  line break on the screen. Until the hub client is wired (#649), the installed binary still answers
-  `not implemented` ([#643](https://github.com/Performant-Labs/holler/issues/643)).
+  reads `MISMATCH` when the pane's TUI shows another session than its session of record, or its home screen: the rule
+  `holler pane doctor` uses. `get PANE` prints one pane in full, one `key: value` line per field: the record with its
+  model, environment variable names, context ceilings, launch command and health probe with its last result, plus its
+  profile's spec for it. `watch` follows the change feed, from the current state or from `--since CURSOR`, one line
+  per change, and `--until-idle` stops it once nothing more is owed. Each verb takes a pane name and `--profile NAME`
+  to scope itself; a named pane outside the profile is refused with `pane-not-in-profile` (exit 3). Under
+  `--format=json` each answers in the shared envelope, and `watch` prints NDJSON, one envelope per line. The verbs
+  observe nothing themselves: SHOWN and health are what reconcile last recorded, and DRIVEN is printed as the record
+  holds it, which is empty until the hub wiring (#649) records it. In text mode a stored value is quoted and escaped
+  when it could act on the terminal, so it cannot put a control sequence or a line break on the screen. Until the hub
+  client is wired (#649), the installed binary still answers `not implemented`
+  ([#643](https://github.com/Performant-Labs/holler/issues/643)).
 
 - Pane control, the reconcile engine and `holler pane doctor [PANE] [--fix] [--profile NAME]` (epic
   [#633](https://github.com/Performant-Labs/holler/issues/633)): a pass looks at each pane's Herdr pane, tmux session,

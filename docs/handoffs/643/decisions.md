@@ -397,3 +397,49 @@
     too (`get.rs:187`).
   - The full `pane_verbs` binary gave 122 passed and the same 5 failed. `rustfmt --check`, `cargo clippy -p holler-cli
     --all-targets -D warnings` and `scripts/lint.sh` all exit 0. Test files are 587, 389 and 320 lines.
+
+## F (Phase 5, implement, amendment 1) — 2026-10-09T20:04:19-06:00
+- **Decided:** `done: true`, `archChanged: false`. T-red's 5 failing tests pass, 36 of 36.
+  - `SessionSync::of(&Pane)`: `Unobserved` when `last_observed.at <= 0` or there is no session of record; otherwise
+    `Mismatch` or `Ok`, as `holler_pane::reconcile::shown_differs(session_of_record, last_observed.shown)` answers.
+    There are two call sites, and the three values and serde names are unchanged. DRIVEN is printed, never compared.
+  - W-13: the guard is `at <= 0`, not Decision 3's `at == 0`.
+  - W-12: `watch --profile` membership is `profile_diff::is_member`. `Members` holds the `ProfileName`, and
+    `names_profile` is gone.
+  - The docs of Decision 15: `pane list --help` (SYNC's rule, the home screen, DRIVEN `-` until #649), `pane get
+    --help`, the module docs, `PaneRow`'s and `SessionSync`'s docs, and W-4's `pane watch --help` sentence.
+  - AC 23's two CHANGELOG sentences.
+  - `evidence.md` (11,901 bytes, under the 12,000 cap):
+    - a new section first, with W-13, W-12 and W-16 and how this round moved the brief's dated verb-file cites;
+    - round 2's W-9 section is now a pointer, because the brief carries those points;
+    - the moved cites are corrected.
+  - No merge of `origin/main`: it is a commit, and the working tree merges cleanly.
+- **Assumed:**
+  - T-green adds at most a few entries to `evidence.md`. There are 99 bytes of headroom. T-red this round added none,
+    and neither did T-green last round.
+  - A's Phase 3 review of amendment 1 covers the public signature change `SessionSync::of(&LastObserved)` to
+    `of(&Pane)`, so `archChanged` is false (A's Notes for F, 2). `grep -rn SessionSync crates` finds no other caller.
+- **Hedged:**
+  - In `evidence.md`, T's excerpts for `fixture.rs:54` and `fault.rs:90-92` are trimmed, and T-green's pointer
+    paragraph is shortened, to fit the cap. No fact or cite is dropped. A mechanical check found every in-repo
+    excerpt verbatim in its cited file.
+  - The brief's verb-file line cites are dated (05e7337), and this round moves them down by 2 to 19 lines. The brief
+    expected this, and `evidence.md` notes it for the gate. A gate that ignores the date could still report a
+    mismatched cite.
+  - The CHANGELOG entry is rewrapped. It is new on this branch, so the diff against `main` is unchanged in scope.
+- **Evidence:**
+  - Before the change: `cargo test -p holler-cli --test pane_verbs -- list:: get:: watch::` gave 31 passed and 5
+    failed, matching handoff-T-red.md. After: 36 passed.
+  - The four `holler-cli` targets: 3, 3, 34 and 127 passed.
+  - The isolated workspace suite (empty `HOLLER_STATE_DIR`, `--no-fail-fast`, CI's skip): 1472 passed, 0 failed,
+    5 ignored, exit 0.
+  - All exit 0: `cargo clippy --workspace --all-targets -- -D warnings`, `lint.sh`, `changelog-check.sh`,
+    `cargo machete`, and `rustfmt --check --edition 2021` on the seven files.
+  - The AC 17, AC 21 and `unsafe` greps print nothing, and the manifest diff against the merge base is empty.
+  - `git merge-tree --write-tree --merge-base=<base>` of the working tree against `origin/main` exits 0.
+  - The rendered help of all three verbs was read.
+  - Read in full: the brief (amendment 1), handoff-A.md, handoff-T-red.md, handoff-A-dup.md, handoff-F.md (round 3),
+    decisions.md, evidence.md, the three verb files and the three test files.
+  - Also read: `reconcile.rs:150-200`, `profile_diff.rs:168-275`, `profile/show.rs:176-198`, `pane.rs:180-190`,
+    `fixture.rs:55-75`, every older `evidence.md` cite (all still match), and `dual-review.sh`'s evidence cap and
+    reference resolution.

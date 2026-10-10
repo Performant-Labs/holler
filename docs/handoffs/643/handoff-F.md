@@ -1,171 +1,173 @@
-# Handoff-F: Phase 5 - #643 the read verbs (`holler pane list`, `get` and `watch`, with SHOWN and DRIVEN)  (round 3: stopped for a ruling)
+# Handoff-F: Phase 5 - #643 the read verbs (`holler pane list`, `get` and `watch`, with SHOWN and DRIVEN)  (amendment 1)
 
 **Date:** 2026-10-09
-**Branch:** issue-643-implementation (on d6d22d7, A-dup's BLOCK; no production file has changed since 06320ad)
-**Issue:** #643 (epic #633). Brief: `docs/handoffs/643-brief.md` (unchanged). Input: `handoff-A-dup.md` (BLOCK on D-1,
-warns D-2 to D-6).
+**Branch:** issue-643-implementation (on 350858d, T-red's PASS on amendment 1)
+**Issue:** #643 (epic #633). Brief: `docs/handoffs/643-brief.md` (amendment 1). Inputs: `handoff-A.md` (PASS, W-12 to
+W-16, notes for F) and `handoff-T-red.md` (RED: 31 passed, 5 failed).
 
-Round 2 of this handoff is in git: `git show f922dd8:docs/handoffs/643/handoff-F.md`. This file replaces it. This
-cycle is the Workflow script's phase 6 (F), which the driver ran after A-dup's BLOCK.
+Round 3 of this handoff (the stop for the MO's ruling) is in git: `git show e499e28:docs/handoffs/643/handoff-F.md`.
+This file replaces it. This cycle is the Workflow script's phase 6 (F).
 
 ## Outcome
 
-`done: false`, `archChanged: false`, and no production change. F cannot clear D-1 without breaking the brief, so this
-cycle stops the run so the MO can rule and amend the brief. That is what A-dup's Notes for F 1 and 2 ask for.
-
-**The stop will read `gate-unavailable:6`.** That is the driver's name for F returning `done: false`. The driver turns
-`done: false` into the verdict `unavailable` (`coding-pipeline.workflow.mjs:4798`), and `nextPhase` stops every
-`unavailable` as `gate-unavailable:<phase>` (`:1107-1108`). It is not a gate failure or an infrastructure failure. The
-driver commits this handoff first, as `f -- implementation incomplete` (`:4790-4796`). A-dup's note 2 calls this stop
-`unrecognized-verdict:unavailable`, but the driver's code says `gate-unavailable:6`.
+`done: true`, `archChanged: false`. T-red's five failing tests pass, and so does everything else (Tier 1, below).
+SYNC is now `shown_differs`'s answer, DRIVEN is printed as stored and never compared, and A's W-12 and W-13 are in.
 
 ## What was done
 
-- **Checked D-1 against the source,** on `origin/main` (`e612878`) and on this branch. All of A-dup's facts hold:
-  - `holler_pane::reconcile::shown_differs` is `pub`. Its doc calls it "the one form of this comparison" and names
-    `pane get` and the roster as readers (`reconcile.rs:171-181`).
-  - ADR-0021 §11 on `main` (:454-455) says reconcile compares SHOWN with `session_of_record` and leaves
-    `last_observed.driven` as stored.
-  - Reconcile's `record` writes only `harness.health`, `last_observed.shown` and `at` (`observe.rs:350-386`).
-  - Outside test code, `git grep` on `origin/main` finds no write of `driven`. The only hit is the test kit's fixture,
-    which sets `driven: None`.
-  - `SessionSync::of` compares `shown` with `driven` (`list.rs:211-221`). It is used in `PaneRow::from`
-    (`list.rs:170`) and in `get`'s `detail` (`get.rs:86`). `watch` gets its SYNC through `PaneRow`.
-  - `git merge-tree --write-tree origin/main HEAD` conflicts in `CHANGELOG.md` only.
-  - `gh issue view 643` has no comments, and #633's latest comments have no ruling on SHOWN/DRIVEN.
-- **Ran Tier 1 on the unchanged tree** (results below).
-- Wrote this handoff and the `decisions.md` entry. `evidence.md` is unchanged: there is no diff for it to support,
-  and no gate runs after a `done: false`.
-
-### Why F stops instead of folding D-1
-
-1. **Every fold changes SYNC, and AC 3 pins SYNC.** Three tests pin AC 3's three cases:
-   `list_flags_a_pane_whose_shown_and_driven_differ`, `get_flags_a_mismatch` and `watch_flags_a_mismatch`. Their
-   fixtures (`tests/pane_verbs/list.rs:113-122`, `observed`) set `driven` with `at: 0` and no session of record.
-   Under (a) all three cases read `unobserved`, so the three tests fail. F does not edit tests, and T-green and S both
-   check against AC 3 as written. A fold made now would loop through F, a T-green BLOCK and F again until the cap.
-2. **(a) needs `shown_differs` on this branch.** That means merging `origin/main`, which is a commit, and F makes
-   none. A half-done merge would also be swept into the driver's `git add -A` phase commit.
-3. **(b) edits `holler-pane` and ADR-0021,** which are outside this story's blast radius (brief, "Out of scope").
-4. **`done: true` with no change** would re-run T-green, the paid outside diff gate and A-dup on an unchanged tree.
-   Each round would end in the same BLOCK, until the cap.
-
-## For the MO: F's input to the ruling
-
-**F recommends (a): adopt `shown_differs`.** A-dup's reasons hold: it matches `main` and ADR-0021, it keeps one rule,
-and it stays inside this story's files. Two more findings from the source bear on the ruling.
-
-- **Decision 3's reason for not flagging `None` no longer matches the writer.** Decision 3 reads `shown: None` as
-  "reconcile could not tell". The writer on `main` means something else by it. `shown: None` with `at > 0` is "an
-  observed home screen, or a pane with no TUI" (`reconcile.rs:31-32`, `observe.rs:79-83`). When reconcile cannot tell,
-  it leaves `shown` as stored (`observe.rs:369-371`). So under #643's rule, a pane whose TUI has fallen back to its home
-  screen is never flagged, even when it has a session of record. That is the mismatch the epic wants to be loud. (b)
-  would have to fix this reading as well.
-- **A caveat that comes with (a).** It is #647's to fix, not this story's. `at > 0` does not prove the screen was seen:
-  - On a pane's first observation, `harness.shown_session` can fail while the health check answers. `record` then
-    writes the health, stamps `at`, and leaves `shown` as stored, which is `None` on a record nothing has observed yet
-    (`observe.rs:361-375`, `reconcile.rs:153-161`).
-  - A reader that follows `shown_differs`'s doc ("provided `last_observed.at > 0`") then treats that unseen screen as
-    the home screen and prints a false MISMATCH. Doctor's own pass skips the rule when the screen is unseen
-    (`observe.rs:232`).
-  - The case is rare, and it fails loud, not silent.
-  - Suggested follow-up for #647: stamp `at` only when the screen was seen, or record that it was not.
-- **The amendment must also say what DRIVEN prints until #649.**
-  - **(a1)** DRIVEN keeps printing `last_observed.driven` as stored. That is `-` on every real pane until #649, and it
-    keeps the issue's wording, "SHOWN and DRIVEN come from the record's `last_observed`". A flagged row shows SHOWN
-    beside a `-`. Only `pane get` shows the session of record.
-  - **(a2)** DRIVEN prints `session_of_record`, which is the session the hub drives by I2 and ADR-0021 §11. A flagged
-    row shows both sessions. The cost: a public JSON field takes a value that #649 may later fill from somewhere else,
-    and the issue text needs an amendment.
-  - **F leans to (a1).** Every verb answers `not implemented` over `Unwired` until #649 (brief C7), so no user sees
-    either choice before #649 takes over DRIVEN. (a1) commits #649 to nothing.
-- **Under (a), the fresh run's F change is small:**
-  - Merge `origin/main` into the branch first. Only `CHANGELOG.md` conflicts: both stories add an entry at the same
-    place.
-  - `SessionSync::of` takes the pane. It is `Unobserved` when `last_observed.at == 0` or there is no session of
-    record. Otherwise it is `Mismatch` when `shown_differs(session_of_record, last_observed.shown)` and `Ok` when not.
-    There are two call sites (`list.rs:170`, `get.rs:86`), and its three values and serde names do not change.
-  - Docs to change:
-    - `list.rs`: the module doc (:6, :13), `PaneList`'s help (:36-48), `PaneRow`'s field docs (:151-154) and
-      `SessionSync`'s docs (:195-221);
-    - `get.rs`: :1-3 and :24-33;
-    - the CHANGELOG sentences "SYNC reads `MISMATCH` when SHOWN and DRIVEN differ" and "SHOWN, DRIVEN and health
-      are what reconcile last recorded".
-  - T re-authors AC 3 first, test first. The fixtures need `session_of_record` and `at > 0`, and the `shown: None`
-    case becomes MISMATCH.
-- **D-2 (`text_value` and `findings::quoted`), in the same ruling:** F agrees with A-dup that `quoted` cannot be dropped
-  in. It always quotes and cuts at 64 characters, while AC 1 pins bare plain cells and AC 7 pins an uncut cwd. Any single
-  rule would be a `holler-pane` change, made amend-first, and it would change no output of #643's. It can be a
-  follow-up and does not need to block this story.
-- **Whatever the ruling, the branch must take in `origin/main` before the PR merges.** W-4 (`PaneChange.pane`'s name)
-  and W-9 (the brief no longer describes the code on four points; `evidence.md` carries them) can go into the same
-  amendment.
+- `crates/holler-cli/src/pane/list.rs`:
+  - `SessionSync::of` takes `&Pane`. It returns `Unobserved` when `last_observed.at <= 0` or the pane has no session of
+    record. Otherwise it returns `Mismatch` or `Ok`, as `holler_pane::reconcile::shown_differs(session_of_record,
+    last_observed.shown)` answers. Its three values and serde names are unchanged.
+  - The call site in `PaneRow::from` passes the pane.
+  - Rewritten docs, so that DRIVEN is no longer "what reconcile last recorded":
+    - the module doc;
+    - `PaneList`'s help, which now states SYNC's rule with AC 19's `session of record`, `home screen` and `#649`;
+    - `PaneRow`'s `shown`, `driven` and `sync` docs;
+    - `SessionSync`'s docs.
+  - The `LastObserved` import is gone, and `shown_differs` is imported.
+- `crates/holler-cli/src/pane/get.rs`:
+  - The call site in `detail` is `SessionSync::of(&pane)`.
+  - The module doc and the help say what SYNC compares and that DRIVEN is printed as stored until #649.
+- `crates/holler-cli/src/pane/watch.rs`:
+  - W-4's help sentence: ROW is a `pane list` row, not the full record `pane get` prints.
+  - W-12: `Members` keeps the scoped `ProfileName`, and membership is `holler_pane::profile_diff::is_member`.
+    `names_profile` and the `Pane` import are gone.
+- `CHANGELOG.md`: AC 23's two sentences are replaced, and the entry is rewrapped.
+- `docs/handoffs/643/evidence.md`, now 11,901 bytes:
+  - A new amendment-1 section comes first. It has W-13, W-12 and W-16, plus a note on how this round moved the
+    brief's dated verb-file cites.
+  - Round 2's W-9 section is now a pointer, because the brief carries those points now.
+  - Cites into the verb files are corrected.
+  - Two of T's excerpts are trimmed to the lines that carry the fact.
+  - Every in-repo excerpt was checked mechanically against its source (0 misses).
 
 ## Design decisions
 
-- **No production change.** The reasons are under "Why F stops instead of folding D-1".
-- **`done: false`, not `done: true`.** The role defines `done: false` as stopping short this cycle to ask a blocking
-  question. The question here is D-1's ruling. `done: true` would only repeat the gates (reason 4).
-- **`archChanged: false`.** No module boundary, public interface or dependency changed this cycle. The driver stops on
-  `done: false` either way.
-- **No merge of `origin/main` this cycle.** It is needed whatever the ruling, but it is a commit, and the MO's fresh
-  run is where it belongs (reason 2).
+- **The shape of `SessionSync::of`:**
+
+  ```rust
+  if observed.at <= 0 || record.is_none() { Unobserved }
+  else if shown_differs(record, observed.shown.as_deref()) { Mismatch }
+  else { Ok }
+  ```
+
+  I considered mirroring doctor's `let Some(record) = .. else` followed by `shown_differs(Some(record), ..)`
+  (`observe.rs:242-247`), and a `match`. The `if` chain reads as the doc's three outcomes, and it passes the
+  `Option` to `shown_differs` without wrapping it again. The `is_none()` test is not a second comparison. It is the
+  "cannot compare" case that Decision 3 adds (A's W-14 calls it the reader's form). The comparison itself is the call.
+- **W-13: `at <= 0`, not `at == 0`.** That is `shown_differs`'s "provided `at > 0`", and it is where `observed_at`
+  already prints `never`. So `pane get` cannot print `observed-at: never` beside `sync: MISMATCH`.
+  `a_negative_observed_at_is_never_observed` pins it.
+- **W-12: call `is_member` directly.** I did not keep a `names_profile` wrapper. `Members` holds the `ProfileName`,
+  which moves out of `open` after `resolve` borrows it, instead of a cached slug. The comparison is the same, so the
+  output is the same.
+- **Help wording.**
+  - SHOWN is "the session the pane's TUI showed when reconcile last observed it": past tense, because it is a record.
+  - DRIVEN is "printed as the record holds it", and `-` until #649.
+  - SYNC names its three cases and says it is the rule `pane doctor` uses.
+  - The watch help's example line (`... shown=- driven=- sync=- ...`) is still right: a sample pane has no session
+    of record.
+- **No merge of `origin/main`.** It is two commits ahead (0ad2d8a, #640 part 2; dc300ab, #642 part 1). They touch
+  only the adapter crates, `Cargo.lock` and `CHANGELOG.md`. A merge is a commit, which is not F's work. The working
+  tree merges cleanly (`git merge-tree` over a throwaway index, exit 0).
 
 ## Reuse / extend-vs-new
 
-No code was written this cycle. A-dup checked round 1's reuse map row by row and found no copy of any named object.
-D-1 is a rule that `main` gained during this run (`e612878`, merged at 18:56:22 MDT), after the brief, so it is not
-drift from the Reuse map. Folding it is the ruling's job (above).
+- **Reused:** `holler_pane::reconcile::shown_differs` (Reuse map, amendment 1).
+  - It is called once, from `SessionSync::of`, and the verbs compare no session themselves.
+  - `last_observed.driven` is only printed (`PaneRow::from`, and `get`'s `driven:` line), never compared.
+- **Extended in place:** `SessionSync` (Reuse map: it "keeps its three values and serde names and extends
+  `shown_differs` with the `unobserved` case").
+- **Reused:** `holler_pane::profile_diff::is_member` (A's W-12, not in the Reuse map). It replaces the inline slug
+  comparison in `watch.rs`, so `watch --profile` and the profile verbs share one membership rule.
+- **Decided non-folds, recorded in `evidence.md`:** `findings::quoted` and `profile_diff::FieldValue`'s `Display`
+  (W-16).
+- **No new object.**
 
 ## Architecture notes for A
 
-None this cycle. Under (a), the fresh run would change one public signature: `SessionSync::of` would take the pane
-instead of `&LastObserved`. It would also add a dependency from `holler-cli` on `holler_pane::reconcile`, a `pub`
-module that `pane doctor` already imports.
+- **One public signature changed:** `holler_cli::pane::list::SessionSync::of(&LastObserved)` became `of(&Pane)`.
+  - Amendment 1 specifies this change, and A reviewed it at Phase 3.
+  - Its only callers are `PaneRow::from` and `get`'s `detail`. `grep -rn SessionSync crates` finds no other use.
+- **New imports:**
+  - `holler_pane::reconcile` in `list.rs`, which `pane doctor` already imports;
+  - `holler_pane::profile_diff` in `watch.rs`, which `profile list` and `profile show` already import.
+- **Unchanged:** the crate dependencies and their direction. No frozen file, manifest, wire format, golden file or ADR
+  is touched.
+- **Why `archChanged: false`:** no module boundary moved, and nothing beyond the plan A reviewed changed (A's Notes for
+  F, 2).
 
 ## Deviations from spec / wireframe
 
-None. The code still matches Decision 3 and AC 3 exactly. The question is whether those two still hold now that
-`main` has moved. There is no UI surface, so there is no wireframe.
+- **W-13:** the guard is `at <= 0`, where the letter of Decision 3 says `at == 0`.
+- **W-12:** membership is `is_member`, where Decision 7's wording says "slug compared, as `ProfileName::slug`". It is
+  the same comparison.
+- Both follow A's notes, and `evidence.md` records both with source.
+- The CHANGELOG entry is rewrapped (cosmetic). The entry is new on this branch, so the diff against `main` is the
+  whole entry either way.
+- There is no wireframe (no UI surface).
 
 ## Tier 1 self-check (incl. tests now GREEN)
 
 ```
-$ git diff --stat 279a1fb..HEAD -- crates CHANGELOG.md                 -> empty (no change since T-green's PASS)
-$ git diff --stat 06320ad..HEAD -- crates/holler-cli/src CHANGELOG.md  -> empty (production unchanged since round 1)
-$ cargo test -p holler-cli --test pane_verbs
-test result: ok. 95 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 10.04s
-$ cargo clippy -p holler-cli --all-targets -- -D warnings              -> exit 0
-$ bash scripts/lint.sh                                                 -> exit 0
-$ git merge-tree --write-tree --name-only origin/main HEAD             -> CONFLICT (content) in CHANGELOG.md only
+$ cargo test -p holler-cli --test pane_verbs -- list:: get:: watch::        # before the change: T-red's RED
+test result: FAILED. 31 passed; 5 failed; 0 ignored; 0 measured; 91 filtered out
+$ cargo test -p holler-cli --test pane_verbs -- list:: get:: watch::        # after
+test result: ok. 36 passed; 0 failed; 0 ignored; 0 measured; 91 filtered out; finished in 10.03s
+$ cargo test -p holler-cli --test pane_verbs --test pane_cli_process --test cli_surface_test --test docs_cli_test
+cli_surface_test 3 passed; docs_cli_test 3 passed; pane_cli_process 34 passed; pane_verbs 127 passed; 0 failed
+$ HOLLER_STATE_DIR=<empty scratch dir> cargo test --workspace --no-fail-fast -- --skip roster_stays_accurate_under_concurrent_body_load
+128 result lines: 1472 passed, 0 failed, 5 ignored; exit 0
+$ cargo clippy --workspace --all-targets -- -D warnings                     -> exit 0
+$ bash scripts/lint.sh                                                       -> exit 0
+$ bash scripts/changelog-check.sh                                            -> changelog-check: ok
+$ cargo machete                                                              -> no unused dependencies
+$ rustfmt --check --edition 2021 <the seven .rs files of AC 22>              -> exit 0
+$ AC 17 grep (ports.herdr|host|harness|prober), AC 21 grep, `grep -n unsafe`  -> nothing
+$ git diff --stat $(git merge-base HEAD origin/main) -- Cargo.toml Cargo.lock 'crates/*/Cargo.toml'   -> empty
+$ wc -l src/pane/{list,get,watch}.rs                                         -> 335, 277, 223 (all ASCII)
 ```
 
-T-green's round-2 workspace run (1414 passed, 0 failed) ran on this same production code, so it was not repeated.
+I read the rendered `holler pane {list,get,watch} --help`: the SYNC, DRIVEN and W-4 sentences print as intended. The
+CLI surface is unchanged.
 
 ## Evidence appendix
 
-None this cycle. No new diff relies on unchanged code, and no gate runs after `done: false`. `evidence.md` is
-unchanged at 11,696 bytes. The `file:line` facts the MO needs for the ruling are cited above, from `origin/main` at
-`e612878`.
+`docs/handoffs/643/evidence.md`, section "F (Phase 5, implement, amendment 1)": W-13 (`pane.rs:188-189`), W-12
+(`profile_diff.rs:258-265`) and W-16 (`profile_diff.rs:197-199`, `profile/show.rs:181-198`).
 
 ## Tests that look wrong (for T)
 
-None as the brief stands: AC 3's three tests match AC 3 exactly. If the MO rules (a), they encode the replaced rule,
-and T re-authors them first in the fresh run (see "For the MO").
+None. AC 3's six rows, the W-13 guard test and AC 19's needles all match the brief and A's notes.
 
 ## Known issues
 
-- **D-1 is open** until the MO rules and the brief is amended (above).
-- **The stop's name hides the reason.** The driver has no stop of its own for "F needs a ruling", so a deliberate stop
-  reads as `gate-unavailable:6`. This is a pipeline issue for the MO, and F has filed nothing.
-- **A possible false MISMATCH under (a)** (the caveat above) is in `holler-pane` code from #647, already on `main`.
-- These are unchanged from round 2: A-dup's warns D-2 to D-6 and the Phase 3 carries (W-4, W-5, W-6, W-9 and W-11, JSON
-  mode writing DEL, C1 and bidi characters raw, #660). Until #649, the installed binary answers `error: not
-  implemented` over `Unwired` (C7).
+- **`evidence.md` has 99 bytes of headroom under the gate's 12,000-byte cap.** T-green should put any new entry first
+  and turn older ones into pointers, as this round did.
+- **The brief's line cites into the verb files are at 05e7337.**
+  - This round moves `list.rs` lines down by 4 to 19, and lines in `get.rs` and `watch.rs` down by 2.
+  - The brief said F's edit would move them. `evidence.md` records the shift for the gate.
+- **The branch is two commits behind `origin/main`.** It merges cleanly. The run's agent should bring `main` in before
+  the PR merges.
+- **Unchanged, as the brief lists them:**
+  - D-2, widened by W-16, plus D-3 to D-6;
+  - #647's unseen first observation, which can show a false MISMATCH;
+  - W-14, W-15, W-5, W-6 and W-11.
+  - None of these is filed yet (A's Notes for O, 2).
+- **Until #649,** the installed binary answers `not implemented` (C7).
+- **Not this story's:** `cargo doc -p holler-cli` with broken intra-doc links denied fails on existing diagnostics at
+  `cli.rs:193`, `:553` and `:563`. The three verb files have none. rustdoc is not a gate.
 
 ## Files changed
 
-Production: none this cycle. Round 1's four files (`crates/holler-cli/src/pane/{list,get,watch}.rs`, `CHANGELOG.md`)
-are unchanged since 06320ad.
+Production:
+- `crates/holler-cli/src/pane/list.rs`
+- `crates/holler-cli/src/pane/get.rs`
+- `crates/holler-cli/src/pane/watch.rs`
+- `CHANGELOG.md`
 
-Handoff documents (this cycle): `docs/handoffs/643/handoff-F.md`, `docs/handoffs/643/decisions.md`.
+Handoff documents:
+- `docs/handoffs/643/evidence.md`
+- `docs/handoffs/643/handoff-F.md`
+- `docs/handoffs/643/decisions.md`
