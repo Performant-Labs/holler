@@ -83,3 +83,49 @@ in git at `0ad2d8a:docs/handoffs/640/decisions.md`.
     and three repeats; `pgrep -af 'h640\.'`, `pgrep -a herdr`, `find /tmp -maxdepth 1 -name 'h640.*'`.
   - The doc-AC greps 19, 21-26; `cargo clippy -p holler-adapter-herdr --all-targets -- -D warnings`;
     `cargo fmt --check -p holler-adapter-herdr`; `bash scripts/lint.sh` (exit 0); the AC 8 and AC 29 greps.
+
+## F (Phase 5, implementation; the Workflow script's phase 6) — 2026-10-09T23:16:47-06:00
+- **Decided:**
+  - The `op` rule (Decision 9) is applied at the call boundary. A new private `HerdrAdapter::run_as(op, |deadline| ..)`
+    takes the call's one deadline and renames any `Timeout` from its body to the call's `op`. All seven port methods
+    and `connect_with` (`herdr.connect`) run through it, so no `Timeout` can escape unrenamed and the transport stays
+    untouched (AC 20). This is the brief's own example, and it changes no helper signature. I rejected the siblings'
+    `Call { op, deadline }` struct: in this adapter the transport, not the adapter, makes the timeout.
+  - `ensure_pane`'s body moved unchanged into a private `ensure`, because rustfmt re-wrapped it badly inside the
+    closure.
+  - The four Herdr-sent quotes go through `protocol::excerpt`, now `pub(crate)` (Decision 10). The caller's values keep
+    `{:?}`, and `snapshot`'s returned label (`adapter.rs:383`) stays whole (A finding 5).
+  - D1-D6 and A1-A9 are written as the brief words them, reflowed only. D4 and A4 keep no constructor exception, and
+    A4 keeps `harness.health` (A finding 4). The rule's subject is a port method, `connect` is not one, and Decision 11
+    and AC 25 bar changing meaning or other lines. The `herdr.connect` case is stated in the adapter's own docs.
+  - `docs/testing.md` gets Decision 13's section plus one sentence on the host adapter's tmux convention (A finding 2).
+    `CHANGELOG.md` gets Decision 14's entry right after part 2's.
+  - Part 2's `evidence.md` is replaced with part 3's twelve facts. Its AC numbers would have meant other criteria here.
+- **Assumed:**
+  - "Perform Phase 6's work" is F's phase: the script numbers F as phase 6 (`coding-pipeline.workflow.mjs`, "Phase 6
+    (F) has no gate of its own").
+  - The brief's Handoffs rule (part 3's files replace part 2's) covers `evidence.md` too, though it names only
+    `handoff-<phase>.md` and `decisions.md`.
+  - Citing `crates/holler-adapter-host/tests/real_tmux_test.rs` in `docs/testing.md` is fine although this branch's
+    base (`dc300ab`) lacks it, because the PR merges into `main`, which has it (`e327569`).
+- **Hedged:**
+  - A finding 4: keeping D4 and A4 verbatim leaves a reader to infer that a constructor is outside the "port method"
+    rule. If the operator or S wants it explicit, it is one clause in each.
+  - Not done, and left to the operator: D7 for the `snapshot` port doc (A 6a, which would pre-empt A9's contract
+    amendment), a Deferred-list line for A7's PROPOSED owner (A 6b; AC 25 allows none), and filing the #638 follow-up
+    (A 6c; outward-facing).
+  - F did not merge `origin/main` (`d9eabbb`), since that would be a commit. A scratch three-way merge of every file F
+    edited is clean, but CI on the PR's merge ref is the real check.
+- **Evidence:**
+  - Read: the brief (all of it), `handoff-A.md`, `handoff-T-red.md`, this journal, T's `adapter_messages_test.rs`,
+    `scratch_herdr/mod.rs` and `scratch_herdr_test.rs` (the ignored tests), and every file edited. Also
+    `holler-adapter-opencode/src/lib.rs` (`Call`, `OP_*`), `origin/main:crates/holler-adapter-host/src/lib.rs`
+    (`OP_*`, `Call`) and `origin/main:.../real_tmux_test.rs`, `holler-pane-testkit/src/{herdr,harness}.rs`
+    (`HerdrOp`, `HarnessOp::Health`), `ci.yml`, `scripts/lint.sh` and `scripts/changelog-check.sh`.
+  - Ran, all with `CARGO_BUILD_JOBS=4`, none with the gate variable: `cargo test -p holler-adapter-herdr --no-fail-fast`
+    (all green; `adapter_messages_test` 6/6); `cargo test -p holler-pane` (86 passed);
+    `cargo test -p holler-cli --test docs_cli_test` (3 passed); `cargo clippy -p holler-adapter-herdr --all-targets` and
+    `cargo clippy --workspace --all-targets -- -D warnings` (both clean); `cargo fmt --check -p holler-adapter-herdr
+    -p holler-pane`; `cargo doc` with `-D warnings`; `bash scripts/lint.sh`; `bash scripts/changelog-check.sh`;
+    `cargo machete`; `cargo tree -p holler-adapter-herdr -e normal --depth 1`; the AC 8, 9, 19-27, 29 and 30 greps;
+    and `git merge-file` against `origin/main` for the nine edited files.

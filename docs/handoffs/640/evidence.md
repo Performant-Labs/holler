@@ -1,149 +1,123 @@
-# Evidence: #640 part 2 (facts in unchanged code that the diff relies on)
+# Evidence: #640 part 3 (facts in unchanged code that the diff relies on)
 
-Written by F (Phase 5/6 of the run). T appends its own entries at T-green.
+Written by F (the run's implementation phase). T appends its own entries at T-green. This file replaces part 2's
+`evidence.md`, as the brief's Handoffs line says for part 2's files; part 2's is in git at `0ad2d8a`.
 
-- **Fact:** `decode_reply` turns Herdr's `pane_not_found` about the request's own pane into `PaneError::PaneNotFound`, and every other Herdr error into `unavailable`. `adapter::changed_under` therefore rewrites only that one variant on the `pane.split` result (AC 17), and a `pane-not-found` from `send_text`, `send_keys`, `read` or `close` reaches the caller unchanged (conformance cases 7 to 9).
-  **Source:** `crates/holler-adapter-herdr/src/protocol.rs:279-296`
+- **Fact:** the socket transport is this crate's only producer of `PaneError::Timeout`, and its `op` names the wire
+  method. So every `timeout` that reaches the adapter's `run_as` carries `herdr.<wire method>`, which `run_as` replaces
+  with the call's own `op` (AC 16). The transport itself is unchanged (AC 20).
+  **Source:** `crates/holler-adapter-herdr/src/transport.rs:111-113` and `:268-273`
   **Verbatim excerpt:**
   > ```rust
-  > /// What Herdr's error reply to `request` maps to: `pane_not_found` about the request's
-  > /// pane is `pane-not-found`, and anything else is `unavailable`, naming the method and
-  > /// Herdr's code but never Herdr's message.
-  > fn herdr_error(request: &Request, error: &Value) -> PaneError {
-  >     let method = request.method();
-  >     match (error.get("code").and_then(Value::as_str), request.pane()) {
-  >         (Some(PANE_NOT_FOUND), Some(pane)) => PaneError::PaneNotFound {
-  >             what: pane.as_str().to_owned(),
-  >         },
-  > ```
-
-- **Fact:** `plan_splits` answers an occupied cell with no step (`Ok(Vec::new())`) after the range check, so `ensure_pane`'s `[]` arm finds the cell's pane in the map (AC 18). A cell outside the extent is refused first (`grid-out-of-range`, conformance case 2).
-  **Source:** `crates/holler-adapter-herdr/src/plan.rs:75-86`
-  **Verbatim excerpt:**
-  > ```rust
-  > pub fn plan_splits(existing: &GridMap, target: &Target) -> Result<Vec<Step>, PaneError> {
-  >     let extent = target.extent;
-  >     let mut cells = target.cells.clone();
-  >     cells.sort_unstable_by_key(|cell| (cell.row, cell.col));
-  >     cells.dedup();
-  >     if let Some(&outside) = cells.iter().find(|cell| !contains(extent, **cell)) {
-  >         return Err(out_of_range(outside, extent));
-  >     }
-  >     cells.retain(|cell| existing.at(*cell).is_none());
-  >     let Some(&first) = cells.first() else {
-  >         return Ok(Vec::new());
-  >     };
-  > ```
-
-- **Fact:** `Step::CreateRoot` is planned only when the grid the plan builds on is empty, and only for `r1c1`. The planner's grid is built from the map's rows, so a workspace Herdr already has (a tree with at least one leaf, hence at least one row) never gets `CreateRoot`. `ensure_pane` sends `workspace.create` only on that step, so it never creates a second workspace of a label Herdr has (AC 20).
-  **Source:** `crates/holler-adapter-herdr/src/plan.rs:113-117` and `:132-143`
-  **Verbatim excerpt:**
-  > ```rust
-  > impl Widths {
-  >     /// The grid of `map`.
-  >     fn of(map: &GridMap) -> Self {
-  >         Self((1..=map.rows()).map(|row| map.cols_in(row)).collect())
-  >     }
+  >         match answered.recv_timeout(exchange.remaining()) {
+  >             Ok(result) => result,
+  >             Err(RecvTimeoutError::Timeout) => Err(exchange.timeout()),
   > ```
   > ```rust
-  >     /// The one split that makes `cell`, a cell that is not in the grid yet.
-  >     fn step_to(&self, cell: GridPos, extent: Extent) -> Result<Step, PaneError> {
-  >         if self.0.is_empty() {
-  >             if cell == ROOT {
-  >                 return Ok(Step::CreateRoot);
-  >             }
-  > ```
-
-- **Fact:** `grid_of` makes one row per link of the root's `down` chain, and a node that is not a `down` split is one link, so any tree (a lone leaf included) gives at least one row. This is the premise of the entry above, and it is the read-back that `adapter::confirm` uses (AC 13, 16).
-  **Source:** `crates/holler-adapter-herdr/src/layout.rs:145-149` and `:171-185`
-  **Verbatim excerpt:**
-  > ```rust
-  > pub fn grid_of(root: &LayoutNode) -> GridMap {
-  >     let mut map = GridMap::default();
-  >     for (row, row_node) in chain(root, Direction::Down).into_iter().enumerate() {
-  >         let slots = chain(row_node, Direction::Right)
-  >             .into_iter()
-  > ```
-  > ```rust
-  > fn chain(node: &LayoutNode, direction: Direction) -> Vec<&LayoutNode> {
-  >     match node {
-  >         LayoutNode::Split {
-  >             direction: split,
-  >             first,
-  >             second,
-  >             ..
-  >         } if *split == direction => {
-  >             let mut links = chain(first, direction);
-  >             links.extend(chain(second, direction));
-  >             links
+  >     /// `timeout`, its `op` naming the method.
+  >     fn timeout(&self) -> PaneError {
+  >         PaneError::Timeout {
+  >             op: format!("herdr.{}", self.method),
   >         }
-  >         _ => vec![node],
+  >     }
+  > ```
+
+- **Fact:** production's `connect` goes through `connect_with`, so a `ping` that runs out of time while connecting over
+  the real socket is `timeout` with `op` `herdr.connect` too, not only over the test seam.
+  **Source:** `crates/holler-adapter-herdr/src/adapter.rs:102-109`
+  **Verbatim excerpt:**
+  > ```rust
+  > impl HerdrAdapter<UnixSocketTransport> {
+  >     /// Connect to the socket of `config`, as [`HerdrAdapter::connect_with`] does. This
+  >     /// is the way production builds an adapter.
+  >     pub fn connect(config: HerdrConfig) -> Result<Self, PaneError> {
+  >         let transport = UnixSocketTransport::new(config.socket.clone());
+  >         Self::connect_with(config, transport)
   >     }
   > }
   > ```
 
-- **Fact:** `parse_workspace_created` always sets the created workspace's `grid_tab` to the created tab, so after `CreateRoot` the read-back exports that tab, and `adapter::grid_tab` finds no missing tab there.
-  **Source:** `crates/holler-adapter-herdr/src/protocol.rs:486-497`
+- **Fact:** nothing reads the text of a `timeout`'s `op`. `PaneError` hands it out as the error's detail and prints
+  it, so renaming it changes what a message says, not what any code does (Decision 9).
+  **Source:** `crates/holler-pane/src/error.rs:562` and `:676`
   **Verbatim excerpt:**
   > ```rust
-  > pub fn parse_workspace_created(result: &Value) -> Result<(WorkspaceRef, PaneId), PaneError> {
-  >     let created = result_of(result, "workspace_created")?;
-  >     let workspace = created.object("workspace", "created workspace")?;
-  >     let tab = created.object("tab", "created tab")?;
-  >     let root = created.object("root_pane", "created root pane")?;
-  >     let workspace = WorkspaceRef {
-  >         workspace_id: workspace.string("workspace_id")?.to_owned(),
+  >             PaneError::Timeout { op } => Some(op),
+  > ```
+  > ```rust
+  >             PaneError::Timeout { op } => write!(f, "timed out: {op}"),
+  > ```
+
+- **Fact:** the seven port-method `op`s the adapter now spells (`OP_ENSURE_PANE` to `OP_VERSION`) are the test kit's
+  `HerdrOp` strings, which `adapter_messages_test.rs` takes its expected values from.
+  **Source:** `crates/holler-pane-testkit/src/herdr.rs:66-76`
+  **Verbatim excerpt:**
+  > ```rust
+  >     fn as_str(self) -> &'static str {
+  >         match self {
+  >             HerdrOp::EnsurePane => "herdr.ensure_pane",
+  >             HerdrOp::SendText => "herdr.send_text",
+  >             HerdrOp::SendKeys => "herdr.send_keys",
+  >             HerdrOp::Read => "herdr.read",
+  >             HerdrOp::Close => "herdr.close",
+  >             HerdrOp::Snapshot => "herdr.snapshot",
+  >             HerdrOp::Version => "herdr.version",
+  >         }
+  >     }
+  > ```
+
+- **Fact:** `excerpt` cuts at 64 characters and appends `...` only when it cut, so for a value of at most 64 characters
+  it returns exactly the `{:?}` form the four sites used before. Short ids are quoted as before (part 2's
+  `adapter_test.rs` assertions such as `what.contains("w1:p2")` keep holding), and only a longer value changes (AC 18).
+  **Source:** `crates/holler-adapter-herdr/src/protocol.rs:62-63` and `:578-587`
+  **Verbatim excerpt:**
+  > ```rust
+  > /// How many characters of a string Herdr sent a message quotes.
+  > const EXCERPT_LIMIT: usize = 64;
+  > ```
+  > ```rust
+  > /// `text` that Herdr sent, quoted on one line and cut to [`EXCERPT_LIMIT`] characters,
+  > /// so that a garbled reply can neither lengthen a message nor break it across lines.
+  > pub(crate) fn excerpt(text: &str) -> String {
+  >     let head: String = text.chars().take(EXCERPT_LIMIT).collect();
+  >     if head.len() < text.len() {
+  >         format!("{head:?}...")
+  >     } else {
+  >         format!("{head:?}")
+  >     }
+  > }
+  > ```
+
+- **Fact:** the four values now quoted through `excerpt` are Herdr's own text, read straight from its replies: a new
+  pane's id from `pane.split`'s `pane_info` (`made` in `confirm`), a pane id from a `layout.export` tree node (`target`
+  in `changed_under`), and a workspace label from `session.snapshot` (`grid_tab`). The caller's values (`spec.session`,
+  `spec.workspace`, the config's) keep `{:?}` (Decision 10).
+  **Source:** `crates/holler-adapter-herdr/src/protocol.rs:499-502`, `:453-458` and `:431-434`
+  **Verbatim excerpt:**
+  > ```rust
+  > /// Read a `pane_info` result (what `pane.split` returns).
+  > pub fn parse_pane_info(result: &Value) -> Result<PaneId, PaneError> {
+  >     let pane = result_of(result, "pane_info")?.object("pane", "pane")?;
+  >     Ok(PaneId::new(pane.string("pane_id")?))
+  > ```
+  > ```rust
+  > /// Read one node of a layout tree, and the nodes under it.
+  > fn layout_node(node: Object<'_>) -> Result<LayoutNode, PaneError> {
+  >     match node.string("type")? {
+  >         "pane" => Ok(LayoutNode::Pane {
+  >             pane_id: PaneId::new(node.string("pane_id")?),
+  >         }),
+  > ```
+  > ```rust
+  >     Ok(WorkspaceRef {
+  >         workspace_id: workspace_id.to_owned(),
   >         label: workspace.string("label")?.to_owned(),
-  >         grid_tab: Some(tab.string("tab_id")?.to_owned()),
-  >     };
+  >         grid_tab,
   > ```
 
-- **Fact:** `SessionState::workspace` refuses a label that two Herdr workspaces share, so `ensure_pane` is `unavailable` for duplicate labels (AC 23) while `snapshot`, which walks `state.workspaces` directly, lists both (AC 22).
-  **Source:** `crates/holler-adapter-herdr/src/protocol.rs:358-368`
-  **Verbatim excerpt:**
-  > ```rust
-  > impl SessionState {
-  >     /// The workspace labelled `label`; two with one label are `unavailable`.
-  >     pub fn workspace(&self, label: &str) -> Result<Option<&WorkspaceRef>, PaneError> {
-  >         let labelled: Vec<&WorkspaceRef> = self
-  >             .workspaces
-  >             .iter()
-  >             .filter(|workspace| workspace.label == label)
-  >             .collect();
-  >         match labelled.as_slice() {
-  >             [] => Ok(None),
-  >             [one] => Ok(Some(*one)),
-  > ```
-
-- **Fact:** `parse_read` cuts the reply to the caller's `max_lines`, and 0 lines gives `""`. So `read(p, 0)` can ask Herdr for one line (the clamp) and still return `""` (AC 25).
-  **Source:** `crates/holler-adapter-herdr/src/protocol.rs:506-509` and `:592-595`
-  **Verbatim excerpt:**
-  > ```rust
-  > pub fn parse_read(result: &Value, max_lines: usize) -> Result<String, PaneError> {
-  >     let read = result_of(result, "pane_read")?.object("read", "pane read")?;
-  >     Ok(last_lines(read.string("text")?, max_lines))
-  > }
-  > ```
-  > ```rust
-  > fn last_lines(screen: &str, max_lines: usize) -> String {
-  >     let skip = screen.lines().count().saturating_sub(max_lines);
-  >     screen.lines().skip(skip).collect::<Vec<_>>().join("\n")
-  > }
-  > ```
-
-- **Fact:** the port bounds every method by I5 (default 10 s) and returns `Timeout` otherwise. That is why each port method takes one deadline on entry, and why the transport bounds a whole exchange rather than one read.
-  **Source:** `crates/holler-pane/src/ports.rs:118-123`
-  **Verbatim excerpt:**
-  > ```rust
-  > /// Herdr, reached over its local socket (the adapter is `holler-adapter-herdr`,
-  > /// #640). **Provisional** until spike #636 reports.
-  > ///
-  > /// **Blocking.** Every method is synchronous. Call from `spawn_blocking` (or a
-  > /// thread) in async code. Every method returns within I5's bound (default 10 s) or
-  > /// with [`PaneError::Timeout`]. An implementation is `Send + Sync`.
-  > ```
-
-- **Fact:** the conformance suite finds a fixture's panes by `HerdrPane.workspace == <label>`, so `snapshot` must report a workspace by its label, never its `w<N>` id.
+- **Fact:** the label `snapshot` returns in `HerdrPane.workspace` (`adapter.rs:383`, `workspace: workspace.label.clone()`)
+  must stay whole, because the conformance suite finds a fixture's panes by exact label. That line is a returned value,
+  not message text, so it is not an `excerpt` (AC 19's exemption, A's finding 5).
   **Source:** `crates/holler-pane-testkit/src/conformance/herdr.rs:394-401`
   **Verbatim excerpt:**
   > ```rust
@@ -157,33 +131,82 @@ Written by F (Phase 5/6 of the run). T appends its own entries at T-green.
   >     }
   > ```
 
-- **Fact (appended by T at T-green):** a request line is `serde_json`'s compact form of `{"id","method","params"}`, and a split's params carry `"direction"` as Herdr's own word. AC 16's test transport relies on this: it rewrites the substring `"direction":"down"` to `"direction":"right"` in any line containing `"method":"pane.split"`. The test also asserts that the fake recorded `right`, so a change in spacing would fail the guard rather than pass silently.
-  **Source:** `crates/holler-adapter-herdr/src/protocol.rs:148-151`, `:175-184`; `crates/holler-adapter-herdr/src/layout.rs:38-43`
+- **Fact:** D2's and D3's new doc text matches what the adapter answers for a cell outside the configured extent:
+  `plan_splits` refuses it before anything else, with `grid-out-of-range` naming the cell and the extent.
+  **Source:** `crates/holler-adapter-herdr/src/plan.rs:75-81` and `:230-239`
   **Verbatim excerpt:**
   > ```rust
-  >     /// One JSON object and exactly one trailing newline.
-  >     pub fn to_line(&self) -> String {
-  >         let request = json!({"id": self.id(), "method": self.method(), "params": self.params()});
-  >         format!("{request}\n")
-  >     }
+  > pub fn plan_splits(existing: &GridMap, target: &Target) -> Result<Vec<Step>, PaneError> {
+  >     let extent = target.extent;
+  >     let mut cells = target.cells.clone();
+  >     cells.sort_unstable_by_key(|cell| (cell.row, cell.col));
+  >     cells.dedup();
+  >     if let Some(&outside) = cells.iter().find(|cell| !contains(extent, **cell)) {
+  >         return Err(out_of_range(outside, extent));
   > ```
   > ```rust
-  >             Request::Split {
-  >                 target,
-  >                 direction,
-  >                 ratio,
-  >             } => json!({
-  >                 "target_pane_id": target.as_str(),
-  >                 "direction": direction.as_str(),
-  >                 "ratio": ratio,
-  >                 "focus": false
+  > /// `grid-out-of-range` for `cell`, naming the extent.
+  > fn out_of_range(cell: GridPos, extent: Extent) -> PaneError {
+  >     PaneError::GridOutOfRange {
+  >         what: format!(
+  >             "{cell} is outside the workspace, which is {} by {}",
+  >             count(usize::from(extent.rows), "row"),
+  >             count(usize::from(extent.cols), "column")
+  >         ),
+  >     }
+  > }
+  > ```
+
+- **Fact:** D1's "It goes to Herdr as written": `send_keys` puts each key's own text on the wire, with no mapping.
+  **Source:** `crates/holler-adapter-herdr/src/protocol.rs:186-189`
+  **Verbatim excerpt:**
+  > ```rust
+  >             Request::SendKeys { pane, keys } => json!({
+  >                 "pane_id": pane.as_str(),
+  >                 "keys": keys.iter().map(Key::as_str).collect::<Vec<_>>()
   >             }),
   > ```
+
+- **Fact:** D5's and A1's "the Herdr adapter writes no record": the adapter holds its config and its transport and
+  nothing else, so no pane store is within its reach.
+  **Source:** `crates/holler-adapter-herdr/src/adapter.rs:95-100`
+  **Verbatim excerpt:**
   > ```rust
-  >     pub fn as_str(self) -> &'static str {
-  >         match self {
-  >             Direction::Right => "right",
-  >             Direction::Down => "down",
-  >         }
+  > /// The `HerdrPort` over `T`.
+  > #[derive(Debug)]
+  > pub struct HerdrAdapter<T = UnixSocketTransport> {
+  >     config: HerdrConfig,
+  >     transport: T,
+  > }
+  > ```
+
+- **Fact:** `docs/testing.md`'s "no workflow passes `--ignored` for this crate": CI's default run passes no
+  `--ignored`, and its only `--ignored` run is `holler-cli`'s `body_run_test`.
+  **Source:** `.github/workflows/ci.yml:128` and `:200`
+  **Verbatim excerpt:**
+  > ```yaml
+  >         run: cargo test --workspace -- --skip roster_stays_accurate_under_concurrent_body_load
+  > ```
+  > ```yaml
+  >         run: cargo test -p holler-cli --test body_run_test -- --ignored
+  > ```
+
+- **Fact:** `docs/testing.md`'s sibling convention: the host adapter's real-tmux tests are opt-in through `#[ignore]`
+  alone (no variable) and pass, skipping, when `tmux` is missing. This file is on `main` (merged in `e327569`, #641),
+  not on this branch's base `dc300ab`, so the source below is read with `git show origin/main:<path>`.
+  **Source:** `origin/main:crates/holler-adapter-host/tests/real_tmux_test.rs:94-102` and `:206`
+  **Verbatim excerpt:**
+  > ```rust
+  > fn tmux_available() -> bool {
+  >     let found = Command::new("tmux")
+  >         .arg("-V")
+  >         .output()
+  >         .is_ok_and(|o| o.status.success());
+  >     if !found {
+  >         eprintln!("skipped: tmux not found");
   >     }
+  >     found
+  > ```
+  > ```rust
+  > #[ignore = "needs tmux; run with --ignored"]
   > ```
