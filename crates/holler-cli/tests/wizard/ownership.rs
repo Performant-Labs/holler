@@ -37,6 +37,8 @@ case "$1" in
 esac
 "#;
 
+const FAKE_SS: &str = "#!/bin/bash\nfor p in $FAKE_SS_PIDS; do echo \"LISTEN 0 4096 127.0.0.1:1 0.0.0.0:* users:((\\\"x\\\",pid=$p,fd=3))\"; done\n";
+
 const FAKE_LSOF: &str = "#!/bin/bash\nfor p in $FAKE_LSOF_PIDS; do echo \"$p\"; done\n";
 
 /// A harmless `sleep` the test owns. Reaped by a thread when it exits; killed on drop by pid.
@@ -95,6 +97,7 @@ impl Env {
         fs::create_dir_all(&bin).unwrap();
         write_exec(&lib.join("ledger.sh"), FAKE_LEDGER);
         write_exec(&bin.join("lsof"), FAKE_LSOF);
+        write_exec(&bin.join("ss"), FAKE_SS);
         Env { root }
     }
 
@@ -143,7 +146,8 @@ impl Env {
             .args(args)
             .env("WIZARD_LIB", lib)
             .env("PATH", path)
-            .env("FAKE_LSOF_PIDS", lsof_pids)
+            .env("FAKE_SS_PIDS", lsof_pids)
+            .env("FAKE_LSOF_PIDS", "")
             .env("STOP_OWNED_GRACE", "5")
             .output()
             .unwrap()
@@ -290,6 +294,19 @@ fn check_port_reports_a_reused_pid_holder_as_stale_and_a_ledger_holder_as_owned(
 }
 
 #[test]
+fn check_port_prefers_ss_when_lsof_lists_no_listener() {
+    let env = Env::new();
+    let st = env.state("inst-a");
+    let squatter = Child::start("squatter");
+    // The fake ss lists a listener; the fake lsof (a non-root view) lists none.
+    let o = env.run(&["check-port", &s(&st), "47001"], &squatter.pid.to_string());
+    assert_code(&o, 2);
+    assert_has(&o, &squatter.pid.to_string());
+    assert_lacks(&o, "FREE");
+    assert_alive(&squatter);
+}
+
+#[test]
 fn check_port_free_exits_zero() {
     let env = Env::new();
     let st = env.state("inst-a");
@@ -308,6 +325,22 @@ fn restart_stops_the_recorded_process_and_prints_its_recorded_command() {
     assert_code(&o, 0);
     assert_has(&o, &format!("RESTART-CMD {}", c.cmd));
     assert_dead(&c);
+}
+
+#[test]
+fn restart_prints_a_note_that_the_recorded_command_alone_uses_the_default_state_directory() {
+    let env = Env::new();
+    let st = env.state("inst-a");
+    let c = Child::start("note");
+    env.ledger(&st, &[(&c, "live")]);
+    let o = env.run(&["restart", &s(&st), &c.pid.to_string()], "");
+    assert_code(&o, 0);
+    assert_line(
+        &o,
+        "RESTART-NOTE: re-run the stage's own start command (with HOLLER_STATE_DIR, nohup and the \
+         log path), then record the new pid; this recorded command alone would use the default \
+         state directory",
+    );
 }
 
 #[test]
@@ -407,6 +440,54 @@ fn teardown_with_purge_state_removes_only_the_named_state_directory() {
     assert_code(&o, 0);
     assert_missing(&a);
     assert_exists(&b.join("data.txt"));
+}
+
+/// A fake home whose default state directory holds a ledger and a file, both of which must
+/// survive a refused purge.
+fn default_state_home(env: &Env) -> (PathBuf, PathBuf) {
+    let home = env.state("home");
+    let dflt = home.join(".holler");
+    fs::create_dir_all(&dflt).unwrap();
+    fs::write(dflt.join("data.txt"), "first instance").unwrap();
+    (home, dflt)
+}
+
+fn purge_with_home(env: &Env, home: &Path, state: &str) -> Output {
+    let path = format!(
+        "{}:{}",
+        env.root.path().join("bin").display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    Command::new("bash")
+        .arg(script())
+        .args(["teardown", state, "--purge-state"])
+        .env("WIZARD_LIB", env.lib())
+        .env("PATH", path)
+        .env("HOME", home)
+        .env("FAKE_SS_PIDS", "")
+        .env("FAKE_LSOF_PIDS", "")
+        .output()
+        .unwrap()
+}
+
+#[test]
+fn purge_state_refuses_the_default_state_directory_and_removes_nothing() {
+    let env = Env::new();
+    let (home, dflt) = default_state_home(&env);
+    let o = purge_with_home(&env, &home, &s(&dflt));
+    assert_has(&o, "LEFT");
+    assert_lacks(&o, "REMOVED");
+    assert_exists(&dflt.join("data.txt"));
+    assert_exists(&dflt);
+}
+
+#[test]
+fn purge_state_refuses_the_default_state_directory_spelled_with_a_trailing_slash() {
+    let env = Env::new();
+    let (home, dflt) = default_state_home(&env);
+    let o = purge_with_home(&env, &home, &format!("{}/", s(&dflt)));
+    assert_lacks(&o, "REMOVED");
+    assert_exists(&dflt.join("data.txt"));
 }
 
 #[test]

@@ -4,7 +4,7 @@
 # Usage: instance.sh <sessions.toml>
 #
 # Stage 1 of the setup wizard runs this. On success it prints the resolved instance (every key,
-# defaults filled in) and each session's resolved backend port, exit 0. On any problem it prints
+# defaults filled in) and each session's resolved backend port and endpoint, exit 0. On any problem it prints
 # one message per problem to stderr, each naming the key, and exits 1. Exit 2 is a usage error.
 # A config without an `[instance]` table resolves to all defaults (today's behaviour).
 #
@@ -21,7 +21,7 @@ if [ ! -r "$1" ]; then
     exit 2
 fi
 
-awk '
+awk -v home="${HOME:-}" '
 function err(msg) { print "instance.sh: " msg > "/dev/stderr"; bad = 1 }
 function trim(s) { sub(/^[ \t\r]+/, "", s); sub(/[ \t\r]+$/, "", s); return s }
 function is_name(s) { return (s ~ /^[a-z][a-z0-9-]*$/ && length(s) <= 24) }
@@ -36,6 +36,13 @@ function value_of(raw,   q, rest) {
     }
     sub(/[ \t]*#.*$/, "", raw)
     return "n:" trim(raw)
+}
+# Drops trailing slashes (keeps a lone "/").
+function strip_slash(s) { while (length(s) > 1 && substr(s, length(s), 1) == "/") s = substr(s, 1, length(s) - 1); return s }
+function is_default_state(s,   t) {
+    t = strip_slash(s)
+    if (t == "~/.holler") return 1
+    return (home != "" && t == strip_slash(home) "/.holler")
 }
 function need_str(key, v) {
     if (substr(v, 1, 2) != "s:") { err("[instance] " key " must be a quoted string"); return 0 }
@@ -120,6 +127,8 @@ END {
         state_dir = substr(v["state_dir"], 3)
         if (state_dir != "") {
             if (state_dir !~ /^\// && state_dir !~ /^~\//) err("[instance] state_dir must be an absolute path or start with ~/")
+            if (is_default_state(state_dir))
+                err("[instance] state_dir must not be the default state directory (" state_dir "): a non-default instance would share the default instance token store, identity key, control socket and ledger")
             nondefault = 1
         }
     }
@@ -163,8 +172,13 @@ END {
             err("sessions " sname[i] " and " sname[j] " both resolve to backend port " rport[i] " on host " (shost[i] == "" ? "(unset)" : shost[i]))
 
     if (bad) exit 1
+    if (has_instance) for (i = 1; i <= nsess; i++)
+        if (match(send[i], /:[0-9]+$/) && substr(send[i], RSTART + 1) + 0 != rport[i])
+            print "instance.sh: warning: session " sname[i] ": its endpoint port " (substr(send[i], RSTART + 1) + 0) \
+                " differs from the resolved backend port " rport[i] "; the body is given http://127.0.0.1:" rport[i] \
+                " (on a shared host the endpoint port may belong to another instance)" > "/dev/stderr"
     print "instance: name=" name " prefix=" prefix " hub_port=" hub_port " serve_https_port=" serve \
         " state_dir=" state_dir " herdr_session=" herdr " backend_port_base=" base
-    for (i = 1; i <= nsess; i++) print "session " sname[i] ": backend_port=" rport[i]
+    for (i = 1; i <= nsess; i++) print "session " sname[i] ": backend_port=" rport[i] " endpoint=http://127.0.0.1:" rport[i]
 }
 ' "$1"

@@ -28,6 +28,19 @@ fn validate(toml: &str) -> Output {
         .unwrap()
 }
 
+/// Like `validate`, with `HOME` set so the default state directory is known to the script.
+fn validate_home(toml: &str, home: &str) -> Output {
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = dir.path().join("sessions.toml");
+    std::fs::write(&cfg, toml).unwrap();
+    Command::new("bash")
+        .arg(repo_root().join("agent-skills/setup-wizard/lib/instance.sh"))
+        .arg(&cfg)
+        .env("HOME", home)
+        .output()
+        .unwrap()
+}
+
 fn stdout(o: &Output) -> String {
     String::from_utf8_lossy(&o.stdout).into_owned()
 }
@@ -65,8 +78,8 @@ remote_tailnet_host = "remote-a.example.ts.net"
 /// The recorded plan text for the config above with no `[instance]` table.
 const RECORDED_PLAN: &str = "instance: name=default prefix=default hub_port=41807 \
 serve_https_port=443 state_dir= herdr_session= backend_port_base=47001\n\
-session alpha: backend_port=47001\n\
-session beta: backend_port=47002\n";
+session alpha: backend_port=47001 endpoint=http://127.0.0.1:47001\n\
+session beta: backend_port=47002 endpoint=http://127.0.0.1:47002\n";
 
 fn config(instance: &str, tail: &str) -> String {
     format!("{HEAD}\n{instance}\n{tail}")
@@ -109,8 +122,14 @@ fn a_full_non_default_instance_is_accepted_and_resolved() {
         ),
         "{text}"
     );
-    assert!(text.contains("session alpha: backend_port=47101"), "{text}");
-    assert!(text.contains("session beta: backend_port=47102"), "{text}");
+    assert!(
+        text.contains("session alpha: backend_port=47101 endpoint=http://127.0.0.1:47101"),
+        "{text}"
+    );
+    assert!(
+        text.contains("session beta: backend_port=47102 endpoint=http://127.0.0.1:47102"),
+        "{text}"
+    );
 }
 
 #[test]
@@ -123,7 +142,7 @@ fn a_session_backend_port_overrides_the_base() {
     let out = validate(&config(FULL_INSTANCE, &tail));
     assert!(out.status.success(), "{}", stderr(&out));
     assert!(
-        stdout(&out).contains("session beta: backend_port=47500"),
+        stdout(&out).contains("session beta: backend_port=47500 endpoint=http://127.0.0.1:47500"),
         "{}",
         stdout(&out)
     );
@@ -144,7 +163,11 @@ fn a_non_default_instance_missing_a_key_is_refused_naming_it() {
             err.contains(&format!("must set {missing}")),
             "missing {missing}: {err}"
         );
-        assert!(stdout(&out).is_empty(), "no plan on refusal: {}", stdout(&out));
+        assert!(
+            stdout(&out).is_empty(),
+            "no plan on refusal: {}",
+            stdout(&out)
+        );
     }
 }
 
@@ -225,7 +248,11 @@ fn an_instance_table_after_a_session_table_is_refused() {
     let text = format!("{HEAD}{TAIL}\n{FULL_INSTANCE}");
     let out = validate(&text);
     assert_eq!(out.status.code(), Some(1));
-    assert!(stderr(&out).contains("must come before"), "{}", stderr(&out));
+    assert!(
+        stderr(&out).contains("must come before"),
+        "{}",
+        stderr(&out)
+    );
 }
 
 #[test]
@@ -293,5 +320,90 @@ fn stage_one_runs_the_validator() {
         .nth(1)
         .and_then(|s| s.split("## Stage 2").next())
         .unwrap();
-    assert!(stage1.contains("/instance.sh"), "Stage 1 must run instance.sh");
+    assert!(
+        stage1.contains("/instance.sh"),
+        "Stage 1 must run instance.sh"
+    );
+}
+
+#[test]
+fn every_session_line_carries_its_endpoint() {
+    let out = validate(&config("", TAIL));
+    assert!(out.status.success(), "{}", stderr(&out));
+    let sessions: Vec<String> = stdout(&out)
+        .lines()
+        .filter(|l| l.starts_with("session "))
+        .map(String::from)
+        .collect();
+    assert_eq!(sessions.len(), 2);
+    assert!(sessions
+        .iter()
+        .all(|l| l.contains(" endpoint=http://127.0.0.1:")));
+}
+
+#[test]
+fn a_session_endpoint_on_another_port_warns_naming_both_ports_and_exits_0() {
+    let out = validate(&config(FULL_INSTANCE, TAIL));
+    assert!(out.status.success(), "{}", stderr(&out));
+    let warnings: Vec<String> = stderr(&out)
+        .lines()
+        .filter(|l| l.contains("alpha"))
+        .map(String::from)
+        .collect();
+    assert_eq!(warnings.len(), 1, "{}", stderr(&out));
+    assert!(
+        warnings[0].contains("47001") && warnings[0].contains("47101"),
+        "{warnings:?}"
+    );
+    assert!(stderr(&out).contains("beta"), "{}", stderr(&out));
+}
+
+#[test]
+fn a_session_endpoint_matching_the_resolved_port_does_not_warn() {
+    let tail = TAIL.replace("47001", "47101").replace("47002", "47102");
+    let out = validate(&config(FULL_INSTANCE, &tail));
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert!(stderr(&out).is_empty(), "{}", stderr(&out));
+}
+
+#[test]
+fn no_instance_table_never_warns_about_endpoints() {
+    let out = validate(&config("", TAIL));
+    assert!(stderr(&out).is_empty(), "{}", stderr(&out));
+}
+
+fn with_state_dir(dir: &str) -> String {
+    FULL_INSTANCE.replace("/home/<user>/.holler-second", dir)
+}
+
+fn assert_refused_naming_state_dir(out: &Output) {
+    assert_eq!(out.status.code(), Some(1), "{}", stderr(out));
+    assert!(stderr(out).contains("state_dir"), "{}", stderr(out));
+    assert!(stdout(out).is_empty(), "{}", stdout(out));
+}
+
+#[test]
+fn a_tilde_default_state_dir_is_refused_for_a_non_default_instance() {
+    for dir in ["~/.holler", "~/.holler/"] {
+        let out = validate_home(&config(&with_state_dir(dir), TAIL), "/home/<user>");
+        assert_refused_naming_state_dir(&out);
+    }
+}
+
+#[test]
+fn an_absolute_default_state_dir_is_refused_for_a_non_default_instance() {
+    for dir in ["/home/<user>/.holler", "/home/<user>/.holler/"] {
+        let out = validate_home(&config(&with_state_dir(dir), TAIL), "/home/<user>");
+        assert_refused_naming_state_dir(&out);
+    }
+}
+
+#[test]
+fn a_different_state_dir_is_accepted_for_a_non_default_instance() {
+    let table = with_state_dir("/home/<user>/.holler-second");
+    let out = validate_home(&config(&table, TAIL), "/home/<user>");
+    assert!(out.status.success(), "{}", stderr(&out));
+    let other = with_state_dir("~/.holler-other");
+    let out = validate_home(&config(&other, TAIL), "/home/<user>");
+    assert!(out.status.success(), "{}", stderr(&out));
 }
