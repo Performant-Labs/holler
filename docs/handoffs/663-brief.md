@@ -1493,6 +1493,45 @@ That line is an assertion, not a macOS observation, and #641's tests that use it
 form on macOS. This story's AC 8f and 8g are not opt-in: they run on CI's macOS job and are the first macOS evidence. O
 could not read the macOS `kill(1)` page from this Linux host.
 
+The source of macOS's `/bin/kill` is readable, though, and it parses exactly this form (the brief amender, round 1 of the
+brief gate: Apple's `shell_cmds`, `kill/kill.c` fetched from `apple-oss-distributions/shell_cmds` at `main` =
+`2987870`, whose last change to that file is `fba2dd2`, "shell_cmds-234"; the file's header says it "is used both as a
+standalone program /bin/kill and as a builtin for /bin/sh"). `-s KILL` names the signal (looked up case-insensitively,
+`signame_to_signum`, lines 182-194), a leading `--` is skipped, and `-<pid>` is parsed by `strtol` as a negative pid and
+passed to `kill(2)` as it is, which signals the process group:
+```
+shell_cmds kill/kill.c:108-119 (at 2987870)
+	if (!strcmp(*argv, "-s")) {
+		argc--, argv++;
+		if (argc < 1) {
+			warnx("option requires an argument -- s");
+			usage();
+		}
+		if (strcmp(*argv, "0")) {
+			if ((numsig = signame_to_signum(*argv)) < 0)
+				nosig(*argv);
+		} else
+			numsig = 0;
+		argc--, argv++;
+```
+```
+shell_cmds kill/kill.c:136-137 (at 2987870)
+	if (argc > 0 && strncmp(*argv, "--", 2) == 0)
+		argc--, argv++;
+```
+```
+shell_cmds kill/kill.c:149-154 (at 2987870)
+			pidl = strtol(*argv, &ep, 10);
+			/* Check for overflow of pid_t. */
+			pid = (pid_t)pidl;
+			if (!**argv || *ep || pid != pidl)
+				errx(2, "illegal process id: %s", *argv);
+			ret = kill(pid, numsig);
+```
+This is source evidence that the argument form is accepted, not an observation of a macOS run; whether the group dies on
+macOS is still first observed by AC 8f and 8g on CI's macOS job, and a macOS failure there fails CI (the group kill's
+outcome is ignored by the runner, Decision 16, but those two tests assert the background `sleep` is gone).
+
 ### H2. The standard library under the wait and the cleanup (std 1.98.1, the workspace's toolchain)
 
 Quoted from the installed toolchain's `rust-docs` source pages (`rustc --print sysroot`, then
@@ -1564,6 +1603,97 @@ fn wait_for_exit(child: &mut Child, stdout: Vec<u8>, deadline: Instant) -> Outco
     }
 }
 ```
+The cleanup F built on this branch, in the order Decision 15 fixes (group kill, then `Child::kill`, then the reap, all on
+one budget), and the only `try_wait` the group kill makes, which is on the `kill` program's own `Child`, never the
+leader's:
+```
+crates/holler-pane/src/probe.rs:252-289 (at 1d6a5ab)
+/// Kill the probe's whole process group, then its leader, and reap the leader, all within the
+/// one cleanup budget. Called only while the leader is unreaped (the pid-reuse rule); a leader
+/// still unreaped when the budget runs out is left, a zombie, for the caller's exit.
+fn kill_and_reap(child: &mut Child) {
+    let budget = Instant::now()
+        .checked_add(CLEANUP)
+        .unwrap_or_else(Instant::now);
+    kill_group(child.id(), budget);
+    // The leader too, in case the group kill could not run; an error means it is gone already.
+    let _ = child.kill();
+    let _ = wait_until(child, budget);
+}
+
+/// Signal the process group `group` with `KILL` through `kill -s KILL -- -<group>`, waiting for
+/// the `kill` program within `budget` and ignoring its outcome (the group may be gone already).
+/// A `kill` still running past the budget is killed itself, and reaped if it has ended by then.
+fn kill_group(group: u32, budget: Instant) {
+    #[cfg(unix)]
+    {
+        let target = format!("-{group}");
+        let killer = Command::new("kill")
+            .args(["-s", "KILL", "--", target.as_str()])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn();
+        if let Ok(mut killer) = killer {
+            if let Ok(None) = wait_until(&mut killer, budget) {
+                let _ = killer.kill();
+                let _ = killer.try_wait();
+            }
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (group, budget);
+    }
+}
+```
+`Child::kill` on Unix, which never signals a `Child` whose status it already holds (the same toolchain's source pages):
+```
+std/process.rs:2323-2324
+    /// Forces the child process to exit. If the child has already exited, `Ok(())`
+    /// is returned.
+```
+```
+std/sys/process/unix/unix.rs:993-1010
+    pub fn kill(&self) -> io::Result<()> {
+        self.send_signal(libc::SIGKILL)
+    }
+
+    pub(crate) fn send_signal(&self, signal: i32) -> io::Result<()> {
+        // If we've already waited on this process then the pid can be recycled and
+        // used for another process, and we probably shouldn't be sending signals to
+        // random processes, so return Ok because the process has exited already.
+        if self.status.is_some() {
+            return Ok(());
+        }
+        #[cfg(target_os = "linux")]
+        if let Some(pid_fd) = self.pidfd.as_ref() {
+            // pidfd_send_signal predates pidfd_open. so if we were able to get an fd then sending signals will work too
+            return pid_fd.send_signal(signal);
+        }
+        cvt(unsafe { libc::kill(self.pid, signal) }).map(drop)
+    }
+```
+The spawn-failure path F built, which hands the verdict the `io::ErrorKind` alone (the `io::Error`, whose text could name
+the program, goes no further than `e.kind()`):
+```
+crates/holler-pane/src/probe.rs:178-182 (at 1d6a5ab)
+fn run_bounded(program: &str, args: &[String], deadline: Instant) -> Outcome {
+    let mut child = match spawn(program, args) {
+        Ok(child) => child,
+        Err(e) => return Outcome::SpawnFailed(e.kind()),
+    };
+```
+```
+crates/holler-pane/src/probe.rs:154-156 (at 1d6a5ab)
+        Outcome::SpawnFailed(kind) => {
+            error(format!("the probe program could not be started: {kind}"))
+        }
+```
+AC 9's greps on the branch's `probe.rs` at `1d6a5ab` (observed by the brief amender, round 1): the forbidden-token pipeline
+prints nothing (exit 1), the `grep -c 'Command::new'` pipeline prints `2` (`spawn`'s `Command::new(program)`, line 200, and
+`kill_group`'s `Command::new("kill")`, line 272; the test module's `Command::new("ps")` is below `#[cfg(test)]`), and
+`grep -c '#\[cfg(test)\]'` prints `1`. `git diff 1d6a5ab HEAD -- crates` is empty, so these hold at the branch head.
 
 ### I. The consumers that code against this brief: #644's planned const and #696's scope
 
@@ -1697,6 +1827,11 @@ All commands run from the worktree root.
    `sed -n '1,/#\[cfg(test)\]/p' crates/holler-cli/src/pane/profile_scope.rs | grep -vE '^\s*//' | grep -c 'holler pane doctor'`
    prints `0`, the same pipeline with `grep -c 'doctor_command(None, false)'` prints at least `1`, and
    `grep -c 'RECONCILE_STEP_UNSCOPED' crates/holler-cli/src/pane/profile_scope.rs` prints `0` (the const is gone).
+   On the branch before this run's F (observed by the brief amender at `1d6a5ab`, round 1), the first pipeline's
+   production lines still spell the step: `pub const RECONCILE_STEP_UNSCOPED: &str = "to reconcile, run holler pane
+   doctor";` and `format!("{RECONCILE_STEP_UNSCOPED} --profile {name} and then holler profile show {name}")`, and
+   `doctor_command` appears nowhere, so these greps are RED until F lands Decision 8 (the Test plan's re-entry RED); the
+   evidence that they pass is the diff of this run, which T-green and the diff gate check.
 6. **A spec filed under another pane is `usage` (Decision 9).** Test `set_of_a_spec_for_another_pane_is_usage_before_any_write`:
    `edit_spec(Some(Demo Alpha), demo-c1r1, Set(sample_spec("demo-c2r1")))` is `Err` with `code()` `usage`, the act ran 0
    times, and `profiles.faults().calls()` holds no `CasPut`.
@@ -1822,13 +1957,13 @@ All commands run from the worktree root.
     files.
 13. **CHANGELOG.** `CHANGELOG.md` `## [Unreleased]` / `### Enhancements` gains one entry for the `--profile` helper and the
     probe runner, linking `[#663](https://github.com/Performant-Labs/holler/issues/663)`; it names no host or account.
-14. **ADR-0021 is amended in place (the architecture review's B-1; prose only).** `docs/adr/ADR-0021.md` gets the five edits
-    below. Each is a sentence or two, made in place in the paragraph or step named, and cited `(#663)`. None changes the
+14. **ADR-0021 is amended in place (the architecture review's B-1; prose only).** `docs/adr/ADR-0021.md` gets the six edits
+    below (f added at the brief gate, round 1, so that section 12's own sentence points at a's exceptions). Each is a sentence or two, made in place in the paragraph or step named, and cited `(#663)`. None changes the
     closed code list, `class_of` or any table's classes. **Merge hygiene:** #644, #647 and #662 also edit ADR-0021 in their
     own changes, so edit sentences in place (add a sentence, or extend one), never rewrite a whole section or paragraph, so
     a rebase conflict stays one hunk. The current text of each place on main is quoted in C. **The branch already carries
     the previous run's a-e text** (F's, at `1d6a5ab`); this run amends those added sentences in place to the wording below
-    (what changes: a's exceptions sentence, e's builder, reason and unscoped form).
+    (what changes: a's exceptions sentence, e's builder, reason and unscoped form); f is new in this run.
     - a. **Section 1, the `ProbeResult` paragraph (ADR lines 78-80):** the verdict rule of Decisions 14, 17, 18 and 19:
       `ok` only when the program exited 0 and every `expect` string occurs in its stdout (bytes, case-sensitive); a non-zero
       exit or an end by a signal is `error`, whatever the output; the deadline passing, or more than 1 MiB of stdout, is
@@ -1839,8 +1974,8 @@ All commands run from the worktree root.
     - b. **Section 2, after "every method returns within I5's bound (default 10 s) or with `timeout`" (ADR line 87):** two
       narrowings. `ProfileScope::edit_spec` is bounded by the sum of its port calls (at most four) plus the verb's own act
       (Decision 11). `run_probe` returns at its deadline plus at most 1 s for the kill and the reap (Decision 15). The
-      sentence says it also qualifies section 12's per-call bound (ADR line 461; section 12 itself is not edited, #644 and
-      #647 edit it), and that "a follow-up amends the frozen trait docs" (F4, by no number: follow-ups are filed in Phase 11).
+      sentence says it also qualifies section 12's per-call bound (ADR line 461; section 12's per-call bound sentence is not
+      edited, #644 and #647 edit section 12; f below touches only section 12's last sentence, ADR line 463), and that "a follow-up amends the frozen trait docs" (F4, by no number: follow-ups are filed in Phase 11).
     - c. **Section 8, step 2 (ADR lines 293-294):** the rule by outcome (Decision 6): a first write whose outcome is unknown
       (a `timeout`) may have landed, so the act does not run, and the answer is `timeout`, saying that P may hold the edit,
       with the reconcile step; the store client (#649) answers `timeout`, not `unavailable`, when it loses the reply to a
@@ -1863,14 +1998,27 @@ All commands run from the worktree root.
         step 6, which names no pane, for the reason given there" (replacing "for now ..."), and it keeps the previous
         run's clause: with `--profile` the record step runs inside the act, so a record conflict also restores P's specs
         (step 5) before the verb prints the reconcile step (#663, confirming #638's assumption).
+    - f. **Section 12, its last sentence (ADR line 463, quoted in C), extended in place, not rewritten:** "No verb leaves
+      work running after it exits" keeps its words and gains a clause naming a's exceptions and pointing at section 1, in
+      substance: except the probe runner's three documented cases, a `try_wait` error, a child that escapes the probe's
+      process group and a missing `kill` binary, which section 1 records (#663). No other sentence of section 12 changes
+      (its per-call bound sentence, line 461, is #644's and #647's; b qualifies it from section 2). So the ADR states the
+      exceptions where the rule is, and a reader of section 12 alone sees them; a's sentence in section 1 stays as worded
+      above. If #644 or #647 has rewritten that sentence on main before this run merges, f extends the sentence as it then
+      reads, with the same clause (one hunk, by the merge hygiene above).
 
-    Checks: `git diff origin/main...HEAD -- docs/adr/ADR-0021.md` has its hunks only at the places a-e name;
+    Checks: `git diff origin/main...HEAD -- docs/adr/ADR-0021.md` has its hunks only at the places a-f name;
     `git diff origin/main...HEAD -- docs/adr/ADR-0021.md | grep -E '^[-+]\|'` prints nothing (no table row changed) and
-    `... | grep -E '^[-+]#'` prints nothing (no heading changed); each of the five edits is cited `(#663)`; the added text
+    `... | grep -E '^[-+]#'` prints nothing (no heading changed); each of the six edits is cited `(#663)`; the added text
     contains `to reconcile, run holler pane doctor --profile '<P>' and then holler profile show '<P>'`, `doctor_command`,
     `try_wait` and `1 MiB`, and `grep -cE 'RECONCILE_STEP_UNSCOPED|takes one \(#647\)|for now the' docs/adr/ADR-0021.md`
-    prints `0`. **Alternative** (as #683's review allowed): if the operator lands a-e as a separate `docs(adr)` PR merged
-    before this run, this AC instead checks that the merged ADR says a-e, and AC 12 drops
+    prints `0`; and f is in section 12's first paragraph: `awk '/^### 12\./,/^\*\*Decided \(operator/' docs/adr/ADR-0021.md`
+    (section 12's heading up to its next `**Decided (operator, ...` paragraph, on main the ADR lines 458-465) prints text
+    that contains `No verb leaves work running after it exits`, `section 1` and `(#663)` (the clause may wrap onto the
+    next line, so the check reads the paragraph, not one line; a's sentence in section 1 quotes the same words, so a plain
+    `grep` of the whole file would find two places). **Alternative** (as #683's review allowed): if the operator lands
+    a-f as a separate `docs(adr)` PR merged before this run, this AC instead checks that the merged ADR says a-f, and AC 12
+    drops
     `docs/adr/ADR-0021.md`.
 
 ## Files
@@ -1884,11 +2032,11 @@ Production:
   `run_probe` and private helpers (spawn, the stdout reader thread, the wait, the group kill, the match). `ProbeResult` is
   unchanged.
 - `CHANGELOG.md` (one entry, AC 13).
-- `docs/adr/ADR-0021.md` (prose only: five in-place edits in sections 1, 2 and 8, AC 14).
+- `docs/adr/ADR-0021.md` (prose only: six in-place edits in sections 1, 2, 8 and 12, AC 14).
 
 Tests: inline `#[cfg(test)]` modules in the two files above (the blast radius has no test file; Decision 21).
 
-**Size:** about 600 production and 560 test lines in two files, plus the CHANGELOG and five ADR sentences: one component
+**Size:** about 600 production and 560 test lines in two files, plus the CHANGELOG and six ADR sentences: one component
 family per file, four files in all, well under F's cap. **Fits one run**, no split.
 
 **Blast radius:** the issue's two files plus `CHANGELOG.md` and `docs/adr/ADR-0021.md` (prose only, AC 14). No manifest, no
@@ -2053,8 +2201,17 @@ family per file, four files in all, well under F's cap. **Fits one run**, no spl
     and only then polls `Child::try_wait` every 10 ms until the exit or the deadline. When the deadline passes (or the cap
     is hit) it kills the group **before reaping the leader**: until `try_wait` has returned `Some`, the leader is alive or a
     zombie, so its pid, which is the group id, cannot have been reused by another process. Once `try_wait` has returned
-    `Some`, the runner never signals. Then `Child::kill` (the leader, in case the group kill could not run) and the leader is
-    reaped by polling `try_wait`. The `kill` call and the reap share **one cleanup budget of 1 s**, taken as
+    `Some`, the runner never signals. **The cleanup, in this exact order** (`kill_and_reap`, H2), with no `try_wait` of the
+    leader before step (3): (1) the group kill, Decision 16's `kill -s KILL -- -<pid>`; (2) `Child::kill` on the leader
+    alone, in case the group kill could not run (the `kill` program missing, or off Unix), its answer ignored; (3) the
+    leader is reaped by polling `try_wait`. **What keeps the pid the leader's between (1) and (2):** nothing reaps the
+    leader in that window. The only `waitpid` the runner makes there is `kill_group`'s `try_wait` on the `kill` program's
+    own `Child`, which is `waitpid` of that child's pid, not the leader's (H2: `try_wait` is `waitpid(self.pid, ..)`), and
+    no Holler code installs a `SIGCHLD` handler or calls `waitpid` (H2). So at (2) the leader is still alive or a zombie,
+    a zombie keeps its pid until it is reaped, and the pid `Child::kill` signals cannot belong to another process.
+    `Child::kill` also sends nothing once its `Child` holds a status (std's `send_signal` returns `Ok(())` when
+    `self.status.is_some()`, H2), and its answer is ignored, so a `kill(2)` on the zombie leader is harmless whatever it
+    answers. After (3)'s `try_wait` returns `Some`, the runner sends no further signal. The `kill` call and the reap share **one cleanup budget of 1 s**, taken as
     `Instant::now().checked_add(CLEANUP)` with a fallback of `Instant::now()` (a zero budget) that cannot be reached in
     practice (`now + 1 s` always fits; its effect would be the degraded path below). **The diff gate's round-1 B-2** (use
     `saturating_add`) names a method `Instant` does not have (H2): no change is needed; F may instead measure the budget as
@@ -2102,7 +2259,8 @@ family per file, four files in all, well under F's cap. **Fits one run**, no spl
     a check argv is a stored command and may carry a token (a `curl -H` header); a probe's output may carry anything; and
     the result is persisted in `Pane.probe.last` on the hub and shown by verbs. `Failed.missing` holds only `expect`
     strings, which are spec values and non-secret by I7. The spawn error is reported by its `ErrorKind` only, never by
-    `io::Error`'s text. The spawn reason is exactly the fixed text `the probe program could not be started: ` followed by
+    `io::Error`'s text (the branch's code does this: `Outcome::SpawnFailed(e.kind())` and the one `format!` of `{kind}`,
+    H2, `probe.rs:178-182` and `154-156` at `1d6a5ab`). The spawn reason is exactly the fixed text `the probe program could not be started: ` followed by
     the `ErrorKind` alone: it never names the program (`argv[0]`) or any argument, even where an OS error string would
     (AC 8j's `SENTINELARG` check pins that the program name is absent). AC 8j pins it.
 20. **The runner stays private to `probe.rs`.** No new public item in `holler-pane` (the crate is frozen; ruling 3 and the
@@ -2147,7 +2305,7 @@ Forward-compat (consumers):
 
 ## Out of scope
 
-- Any verb (#643-#647), the wiring (#649), the hub (#661 is merged), the test kit (#638), ADR-0021 beyond AC 14's five
+- Any verb (#643-#647), the wiring (#649), the hub (#661 is merged), the test kit (#638), ADR-0021 beyond AC 14's six
   edits, `holler-pane`'s other files (`lib.rs`, `ports.rs`, `error.rs`, `profile.rs`), any manifest.
 - A public bounded-runner API and switching the adapters to it (#696).
 - A probe working directory or environment of its own (the frozen signature has neither).
@@ -2257,7 +2415,8 @@ running (`ps -o pid=,args= -u "$(id -u)"`, read-only).
 - **The `kill` binary missing from `PATH`.** The group kill is skipped, `Child::kill` still ends the leader, and its children
   are left (an exception named in AC 14a). Linux (procps or util-linux) and macOS both ship `/bin/kill`. Accepted and
   documented.
-- **Pid reuse** is closed by Decision 15's order (signal only before the leader is reaped). A refactor that calls `try_wait`
+- **Pid reuse** is closed by Decision 15's order (signal only before the leader is reaped; between the group kill and
+  `Child::kill` nothing reaps the leader, Decision 15's steps (1)-(3)). A refactor that calls `try_wait`
   before the end of stdout, then signals, reopens it; the module docs say so at the code.
 - **A `try_wait` error** (the leader reaped elsewhere in the process, H2) sends no signal, so any member of the probe's
   group still running is left, like the escaped child and the missing `kill`: the third documented exception to section
