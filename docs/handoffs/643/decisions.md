@@ -246,3 +246,47 @@
   `changelog-check.sh`, `cargo machete` and `rustfmt --check` exit 0. The AC 17, 21 and 22 greps and the manifest diff
   are empty. `watch` ran 3 times, 11 passed each. Mutation Mc fails `a_stored_dash_prints_apart_from_the_empty_value` at
   get.rs:362, and `git status --short` was empty after the restore.
+
+## A (Phase 7, anti-duplication) — 2026-10-09T19:08:52-06:00
+- **Decided:** BLOCK, with 1 block (D-1) and 5 warns (D-2 to D-6); see handoff-A-dup.md. F extended every object the
+  Reuse map named and copied none of them. The block comes from `main`. `origin/main` moved to `e612878` (#647 part 1,
+  merged at 18:56:22 MDT) during this run. That commit put `holler_pane::reconcile::shown_differs` on `main`: it is
+  `pub`, calls itself "the one form of this comparison" and names `pane get` and the roster as its readers. ADR-0021
+  §11 (:454-455) records it.
+  - `SessionSync::of` (`list.rs:195-221`) is a second public rule over other fields (`last_observed.shown` against
+    `.driven`). Nothing on `main` writes `.driven`, so after merge the read verbs would print SYNC `-` for every
+    observed pane while `pane doctor` reports `shown-driven-mismatch`.
+  - #647's A-dup (on `main`, :111-115) tells each later story's A-dup gate to reject its own copy.
+  - The fold needs an MO ruling and a brief amendment, because AC 3, Decision 3 and the issue text pin the current
+    reading. Notes for F tell F to make no production change and return `done: false`, so the run stops instead of
+    looping to the three-BLOCK limit.
+  - D-2 to D-6: `text_value` against `findings::quoted` (#647's D-2 deadline is now; no drop-in); the second fakes rig
+    against the private doctor rig (#647's D-1 makes #643 the folder, but the doctor rig cannot be reached); `profile_name`
+    against doctor's inline guard; `help()` against `verb_harness::parse::try_parse`; and AC 14's inline poll against
+    `support::wait_for`, which cannot be reached here and is not copied.
+- **Assumed:** The A-dup gate judges the diff against `main` as the PR will merge into it, not only against the merge
+  base. The run's own agent merges the PR after CI and the gates, and CI cannot see this conflict, because AC 3's
+  fixtures set `driven` directly. The shared ref `origin/main` was updated by another session's fetch, and this
+  worktree's HEAD (`279a1fb`) is unchanged.
+- **Hedged:**
+  - D-1 is a block, not a warn. The role's "no dominant pattern" rule held it at warn in both Phase 3 rounds (W-1), but
+    the ambiguity it relied on is gone: `main` now has exactly one rule, recorded in an ADR, which names this story's
+    verb. The brief's exemption ("justified in writing") was written before that rule existed, and its Forward-compat
+    row expected #647 to reuse `SessionSync`.
+  - The issue text supports #643's reading, so D-1 offers both (a) adopt `shown_differs` and (b) keep #643's reading
+    with an ADR and doc edit. This review does not pick between them; it only says that (a) matches `main` as it stands.
+  - D-2 stays a warn. The two policies differ for a reason (bare plain cells, no cut in `get`), and the fix crosses
+    crates.
+- **Evidence:**
+  - Read in full: the brief, `handoff-A.md`, `handoff-F.md`, `decisions.md`, the three verb files and the three test
+    files at `279a1fb`, `verb_harness/{mod,parse}.rs` and `pane_verbs/main.rs`.
+  - Read on `e612878`: `reconcile.rs` (module doc and :112-181), `reconcile/observe.rs` (fn list and :348-391),
+    `findings.rs:320-351`, `pane/doctor.rs`, `doctor.rs:1-40`, the `doctor/rig.rs` API (:121-200, :326-398),
+    `doctor/surface.rs`'s helper list, the ADR-0021 and ADR 0003 diffs, and #647's `handoff-A-dup.md`, plus the parts
+    of `handoff-S.md` that mention the hold and #643.
+  - Greps on `origin/main` for escaping helpers, table renderers, time formatters, enum words, spec lookups, slug
+    comparisons, change kinds, `Ports {` builders, polling loops, `DisplayHelp` and writes of `driven`.
+  - `git merge-tree --write-tree origin/main HEAD` reports a conflict in `CHANGELOG.md` only.
+  - `gh issue view 643` (body, no comments) and `gh issue view 633` (latest comments): no MO ruling on W-1 or W-2.
+  - The driver's A-dup routing (BLOCK goes to F, phase 6, with no extra note) and the stop on F's `done: false`
+    (`coding-pipeline.workflow.mjs:1186-1194`, :4775-4800, logic `nextPhase` case 6).
