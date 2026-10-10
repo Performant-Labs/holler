@@ -7,7 +7,7 @@
 //!
 //! Unix-only: the scripts are bash.
 #![cfg(unix)]
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)] // #729
 
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
