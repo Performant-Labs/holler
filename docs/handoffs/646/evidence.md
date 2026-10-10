@@ -372,3 +372,32 @@ lines).
   **Verbatim excerpt:**
   > every step, and every port call is bounded by I5 (default 10 s) or ends in `timeout`. A verb that times out stops,
   > compensates as section 8 says, exits 1 with `timeout`, and prints the reconcile step. A crash between steps leaves state that
+
+## T (Phase 7, verify GREEN)
+
+- **Fact:** `ProfileScope::resolve` promises no order for the panes it answers (its doc names membership and the two
+  refusals, nothing about order), so a scope wrapper that reverses them is a legal implementation. This is why the AC 4
+  test's `ReversedScope` (`crates/holler-cli/tests/pane_verbs/park.rs`) pins the verb's own name-order sort, which the fake
+  scope's own sort (entry above, `profile_scope.rs:105-115`) would otherwise hide. `edit_spec` is the trait's only other
+  method, delegated unchanged.
+  **Source:** `crates/holler-pane/src/profile.rs:380-404`
+  **Verbatim excerpt:**
+  > pub trait ProfileScope: Send + Sync {
+  >     /// The profile and the panes of it a verb acts on. With no `pane`, every pane
+  >     /// of the profile; with a named pane, just that one, which must belong to the
+  >     /// profile (`pane-not-in-profile` otherwise). A missing profile is
+  >     /// `profile-not-found`.
+  >     fn resolve(
+  >         &self,
+  >         profile: &ProfileName,
+  >         pane: Option<&PaneName>,
+  >     ) -> Result<ResolvedScope, PaneError>;
+  ...
+  >     fn edit_spec(
+  >         &self,
+  >         profile: Option<&ProfileName>,
+  >         pane: &PaneName,
+  >         edit: &SpecEdit,
+  >         act: &mut dyn FnMut() -> Result<(), PaneError>,
+  >     ) -> Result<Option<Profile>, PaneError>;
+  > }

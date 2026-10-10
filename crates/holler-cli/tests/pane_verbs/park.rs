@@ -14,11 +14,15 @@ use clap::Parser;
 use holler_cli::output::Format;
 use holler_cli::Cli;
 use holler_pane::pane::Hold;
-use holler_pane::{PaneName, ProfileName};
+use holler_pane::{
+    PaneError, PaneName, Ports, Profile, ProfileName, ProfileScope, ResolvedScope, SpecEdit,
+};
 use holler_pane_testkit::envelope::check_envelope;
+use holler_pane_testkit::profile_scope::FakeProfileScope;
 use holler_proto::clock::now_millis;
 use serde_json::{json, Value};
 
+use crate::verb_harness::run_verb_with;
 use rig::{
     assert_failure, assert_failure_message, held, old_park, pane, profile_world, run_both, Rig,
     Verb, R, W,
@@ -172,6 +176,13 @@ fn park_and_unpark_with_a_profile_take_every_member_in_name_order() {
     // On the same rig, after the park run.
     assert_takes_the_members(&rig, Verb::Unpark, 3);
 
+    // The name order is the verb's own: `ProfileScope::resolve` promises none, and the
+    // fake scope happens to sort, so a scope that answers out of order is used here.
+    let rig = profile_world();
+    for verb in [Verb::Park, Verb::Unpark] {
+        assert_name_order_is_the_verbs(&rig, verb);
+    }
+
     let rig = profile_world();
     for verb in [Verb::Park, Verb::Unpark] {
         assert_json_lists_the_members(&rig, verb);
@@ -232,6 +243,71 @@ fn assert_json_lists_the_members(rig: &Rig, verb: Verb) {
         panes.iter().all(|entry| entry["changed"] == true),
         "{verb:?}: {}",
         envelope.data
+    );
+    rig.assert_no_live_call_and_no_profile_write();
+}
+
+/// The rig's fake scope with `resolve`'s panes reversed: a scope whose order is not name
+/// order, which the trait allows.
+struct ReversedScope<'a>(&'a FakeProfileScope);
+
+impl ProfileScope for ReversedScope<'_> {
+    fn resolve(
+        &self,
+        profile: &ProfileName,
+        pane: Option<&PaneName>,
+    ) -> Result<ResolvedScope, PaneError> {
+        let mut scope = self.0.resolve(profile, pane)?;
+        scope.panes.reverse();
+        Ok(scope)
+    }
+
+    fn edit_spec(
+        &self,
+        profile: Option<&ProfileName>,
+        pane: &PaneName,
+        edit: &SpecEdit,
+        act: &mut dyn FnMut() -> Result<(), PaneError>,
+    ) -> Result<Option<Profile>, PaneError> {
+        self.0.edit_spec(profile, pane, edit, act)
+    }
+}
+
+/// `verb --profile "Demo Alpha"` over `rig` with a [`ReversedScope`]: the text lines are
+/// still in name order (AC 4).
+fn assert_name_order_is_the_verbs(rig: &Rig, verb: Verb) {
+    let reversed = ReversedScope(&rig.scope);
+    let alpha = ProfileName::parse("Demo Alpha").unwrap();
+    let answered: Vec<String> = reversed
+        .resolve(&alpha, None)
+        .unwrap()
+        .panes
+        .iter()
+        .map(|p| p.name.to_string())
+        .collect();
+    assert_eq!(
+        answered,
+        ["demo-c2r1", "demo-c1r1"],
+        "the scope answers out of name order"
+    );
+    let ports = Ports {
+        scope: &reversed,
+        ..rig.ports()
+    };
+    let run = run_verb_with(
+        &verb.argv(&["--profile", "Demo Alpha"]),
+        Format::Text,
+        ports,
+    );
+    assert_eq!(run.code, 0, "{run:?}");
+    assert_eq!(
+        run.out,
+        format!(
+            "{}\n{}\n",
+            verb.done_line("demo-c1r1"),
+            verb.done_line("demo-c2r1")
+        ),
+        "{verb:?}"
     );
     rig.assert_no_live_call_and_no_profile_write();
 }

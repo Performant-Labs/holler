@@ -107,3 +107,22 @@
     warnings` clean; `rustfmt --check --edition 2021` on both files clean; `bash scripts/lint.sh` exit 0 (only the
     pre-existing size warnings); `bash scripts/changelog-check.sh` ok; `git diff --stat ce12cdb -- '*Cargo.toml'` empty.
   - The source facts relied on are in `docs/handoffs/646/evidence.md`.
+
+## T (Phase 7, verify GREEN): 2026-10-09T20:31:10-06:00
+- **Decided:**
+  - GREEN is valid. `pane_verbs` passes 103 of 103, F changed no test, and 12 mutations of F's real `park.rs` were each
+    caught, one of them only after a test repair.
+  - The repair is T's: `ProfileScope::resolve` promises no order and the fake scope sorts, so the AC 4 test could not see
+    the verb's own sort. `park.rs`'s test now runs park and unpark over a test-local `ReversedScope` and asserts the
+    lines are still in name order. No production change was needed, so PASS.
+- **Assumed:**
+  - The 4 `logging_test` failures in the first workspace run are the session's `HOLLER_STATE_DIR`, which points at a live
+    hub. With an empty state dir, as on CI, the workspace passes 1448 of 1448.
+  - The repo-wide `cargo fmt --check` drift in untouched crates is pre-existing and out of scope (CI does not run it;
+    epic ruling 4).
+- **Hedged:**
+  - AC 13's literal `git diff --stat origin/main -- '*Cargo.toml'` is non-empty from upstream drift. It is empty against
+    the merge base `ce12cdb`. Noted for S and for the rebase before the PR.
+- **Evidence:**
+  - `docs/handoffs/646/handoff-T-green.md`: the Tier 1 and Tier 2 tables and the mutation table.
+  - A new T entry in `docs/handoffs/646/evidence.md` (`profile.rs:380-404`).
