@@ -20,19 +20,19 @@ use std::process::{Command, Output, Stdio};
 use std::time::Duration;
 
 const FAKE_LEDGER: &str = r#"#!/bin/bash
-# Fake ledger.sh. Table: <state_dir>/fake-ledger, one "<pid> <live|stale> <cmd>" per line,
-# in start order.
-verb="$1"; sd="$2"; tbl="$sd/fake-ledger"
-case "$verb" in
+# Fake ledger.sh, same interface as the real one: the state directory comes from
+# HOLLER_STATE_DIR; `owns <pid>` exits 0 live, 1 stale, 2 not recorded; `list` prints one
+# TAB-separated line per entry: pid, live|stale, role, stage, session (may be empty), cmd.
+# Table: $HOLLER_STATE_DIR/fake-ledger, already in the `list` shape, in start order.
+tbl="$HOLLER_STATE_DIR/fake-ledger"
+case "$1" in
   owns)
     [ -f "$tbl" ] || exit 2
-    st="$(awk -v p="$3" '$1 == p { print $2; exit }' "$tbl")"
+    st="$(awk -F'\t' -v p="$2" '$1 == p { print $2; exit }' "$tbl")"
     case "$st" in live) exit 0 ;; stale) exit 1 ;; *) exit 2 ;; esac ;;
   list)
-    [ -f "$tbl" ] || exit 0
-    while read -r pid st cmd; do
-      printf '[[process]]\npid = %s\nstarted = "x"\ncmd = "%s"\nrole = "backend"\nstage = 4\nsession = ""\n\n' "$pid" "$cmd"
-    done < "$tbl" ;;
+    [ -f "$tbl" ] && cat "$tbl"
+    exit 0 ;;
   *) exit 64 ;;
 esac
 "#;
@@ -110,15 +110,29 @@ impl Env {
 
     /// Replace the fake ledger table of an instance. Entries: (child, "live" | "stale").
     fn ledger(&self, state: &Path, entries: &[(&Child, &str)]) {
+        let full: Vec<(&Child, &str, u32, &str)> =
+            entries.iter().map(|(c, st)| (*c, *st, 4, "s1")).collect();
+        self.ledger_full(state, &full);
+    }
+
+    /// Like `ledger`, with each entry's stage and session (which may be empty) too.
+    fn ledger_full(&self, state: &Path, entries: &[(&Child, &str, u32, &str)]) {
         let mut t = String::new();
-        for (c, st) in entries {
-            t.push_str(&format!("{} {} {}\n", c.pid, st, c.cmd));
+        for (c, st, stage, session) in entries {
+            t.push_str(&format!(
+                "{}\t{}\tbackend\t{}\t{}\t{}\n",
+                c.pid, st, stage, session, c.cmd
+            ));
         }
         fs::write(state.join("fake-ledger"), t).unwrap();
         fs::write(state.join("wizard-ledger.toml"), "# placeholder\n").unwrap();
     }
 
     fn run(&self, args: &[&str], lsof_pids: &str) -> Output {
+        self.run_with_lib(&self.lib(), args, lsof_pids)
+    }
+
+    fn run_with_lib(&self, lib: &Path, args: &[&str], lsof_pids: &str) -> Output {
         let path = format!(
             "{}:{}",
             self.root.path().join("bin").display(),
@@ -127,7 +141,7 @@ impl Env {
         Command::new("bash")
             .arg(script())
             .args(args)
-            .env("WIZARD_LIB", self.lib())
+            .env("WIZARD_LIB", lib)
             .env("PATH", path)
             .env("FAKE_LSOF_PIDS", lsof_pids)
             .env("STOP_OWNED_GRACE", "5")
@@ -281,13 +295,14 @@ fn teardown_stops_ledger_processes_in_reverse_order_and_leaves_the_second_instan
     let squatter = Child::start("squatter");
     let b1 = Child::start("b1");
     let b2 = Child::start("b2-longer");
-    env.ledger(
+    // File order is not start order: stage decides, then pid.
+    env.ledger_full(
         &a,
         &[
-            (&a1, "live"),
-            (&a2, "live"),
-            (&reused, "stale"),
-            (&a3, "live"),
+            (&a1, "live", 6, "s1"),
+            (&a2, "live", 4, ""),
+            (&reused, "stale", 5, "s2"),
+            (&a3, "live", 6, "s3"),
         ],
     );
     env.ledger(&b, &[(&b1, "live"), (&b2, "live")]);
@@ -303,7 +318,8 @@ fn teardown_stops_ledger_processes_in_reverse_order_and_leaves_the_second_instan
         t.find(&format!("STOPPED pid {} ", c.pid))
             .unwrap_or_else(|| panic!("no STOPPED line for {}: {t}", c.pid))
     };
-    assert!(pos(&a3) < pos(&a2) && pos(&a2) < pos(&a1), "{t}");
+    let (hi, lo) = if a1.pid > a3.pid { (&a1, &a3) } else { (&a3, &a1) };
+    assert!(pos(hi) < pos(lo) && pos(lo) < pos(&a2), "{t}");
 
     assert!(!a1.alive() && !a2.alive() && !a3.alive());
     assert!(reused.alive(), "stale entries are never signalled");
@@ -374,4 +390,81 @@ fn unusable_pids_are_refused() {
         let o = env.run(&["stop", &s(&st), bad], "");
         assert_eq!(o.status.code(), Some(4), "pid {bad:?}: {}", text(&o));
     }
+}
+
+#[test]
+fn restart_prints_the_recorded_command_when_the_session_field_is_empty() {
+    let env = Env::new();
+    let st = env.state("inst-a");
+    let c = Child::start("nosession");
+    env.ledger_full(&st, &[(&c, "live", 7, "")]);
+    let o = env.run(&["restart", &s(&st), &c.pid.to_string()], "");
+    assert_eq!(o.status.code(), Some(0), "{}", text(&o));
+    let line = format!("RESTART-CMD {}", c.cmd);
+    assert!(text(&o).lines().any(|l| l == line), "{}", text(&o));
+    assert!(!c.alive());
+}
+
+/// The real ledger.sh from story #729, if its worktree is present next to this one.
+fn real_ledger_lib(env: &Env) -> Option<PathBuf> {
+    let src = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../729-start-ledger/agent-skills/setup-wizard/lib/ledger.sh");
+    if !src.exists() {
+        eprintln!("note: real ledger.sh not found at {}; skipping", src.display());
+        return None;
+    }
+    let lib = env.root.path().join("real-lib");
+    fs::create_dir_all(&lib).unwrap();
+    fs::copy(&src, lib.join("ledger.sh")).unwrap();
+    Some(lib)
+}
+
+fn record(lib: &Path, state: &Path, c: &Child, stage: &str, session: &[&str]) {
+    let o = Command::new("bash")
+        .arg(lib.join("ledger.sh"))
+        .args(["record", "--pid", &c.pid.to_string(), "--role", "backend"])
+        .args(["--stage", stage])
+        .args(session)
+        .env("HOLLER_STATE_DIR", state)
+        .output()
+        .unwrap();
+    assert!(o.status.success(), "{}", text(&o));
+}
+
+#[test]
+fn agrees_with_the_real_ledger_script() {
+    let env = Env::new();
+    let Some(lib) = real_ledger_lib(&env) else {
+        return;
+    };
+    let a = env.state("inst-a");
+    let b = env.state("inst-b");
+    let a1 = Child::start("r1");
+    let a2 = Child::start("r2-longer");
+    let b1 = Child::start("rb1");
+    let foreign = Child::start("rforeign");
+    record(&lib, &a, &a1, "4", &["--session", "alpha"]);
+    record(&lib, &a, &a2, "5", &[]);
+    record(&lib, &b, &b1, "4", &[]);
+
+    let sa = s(&a);
+    let o = env.run_with_lib(&lib, &["stop", &sa, &foreign.pid.to_string()], "");
+    assert_eq!(o.status.code(), Some(2), "{}", text(&o));
+    let o = env.run_with_lib(&lib, &["stop", &sa, &b1.pid.to_string()], "");
+    assert_eq!(o.status.code(), Some(2), "{}", text(&o));
+    assert!(foreign.alive() && b1.alive());
+
+    let o = env.run_with_lib(&lib, &["restart", &sa, &a2.pid.to_string()], "");
+    assert_eq!(o.status.code(), Some(0), "{}", text(&o));
+    assert!(text(&o).contains(&format!("RESTART-CMD {}", a2.cmd)), "{}", text(&o));
+    assert!(!a2.alive());
+    // a2 is gone now: the real ledger calls it stale, and it is not signalled again.
+    let o = env.run_with_lib(&lib, &["stop", &sa, &a2.pid.to_string()], "");
+    assert_eq!(o.status.code(), Some(1), "{}", text(&o));
+
+    let o = env.run_with_lib(&lib, &["teardown", &sa], "");
+    assert_eq!(o.status.code(), Some(0), "{}", text(&o));
+    assert!(!a1.alive());
+    assert!(b1.alive() && foreign.alive());
+    assert!(b.join("wizard-ledger.toml").exists());
 }

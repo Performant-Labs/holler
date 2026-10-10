@@ -18,8 +18,10 @@
 #   4 usage or environment error
 #
 # Ledger access goes only through "$WIZARD_LIB/ledger.sh" (default: this script's own
-# directory): `owns <state_dir> <pid>` (0 live, 1 stale, 2 not recorded) and
-# `list <state_dir>`. Nothing is ever signalled by name or pattern, only by a recorded pid
+# directory), with the instance's state directory passed as HOLLER_STATE_DIR (the way
+# ledger.sh takes it): `owns <pid>` (0 live, 1 stale or gone, 2 not recorded) and `list`
+# (one TAB-separated line per entry: pid, live|stale, role, stage, session, cmd; session may
+# be empty, so it is parsed with awk -F'\t', never with read). Nothing is ever signalled by name or pattern, only by a recorded pid
 # that `owns` just confirmed live. Bash 3.2 compatible.
 
 set -u
@@ -37,7 +39,7 @@ is_num() { case "$1" in ''|*[!0-9]*) return 1 ;; *) return 0 ;; esac; }
 
 # The ledger decides; anything it does not clearly answer is treated as foreign.
 owns() {
-  bash "$LEDGER" owns "$1" "$2" >/dev/null 2>&1
+  HOLLER_STATE_DIR="$1" bash "$LEDGER" owns "$2" >/dev/null 2>&1
   case $? in 0) return 0 ;; 1) return 1 ;; *) return 2 ;; esac
 }
 
@@ -61,18 +63,17 @@ valid_pid() {
   return 0
 }
 
-# Recorded command, from the ledger's own `list` output (TOML [[process]] tables).
+ledger_list() { HOLLER_STATE_DIR="$1" bash "$LEDGER" list 2>/dev/null; }
+
+# Recorded command (sixth TAB-separated field) of one pid.
 recorded_cmd() {
-  bash "$LEDGER" list "$1" 2>/dev/null | awk -v want="$2" '
-    /^[[:space:]]*\[\[process\]\]/ { cur = ""; next }
-    /^[[:space:]]*pid[[:space:]]*=/ { v=$0; sub(/^[^=]*=[[:space:]]*/, "", v); cur = v; next }
-    /^[[:space:]]*cmd[[:space:]]*=/ && cur == want {
-      v=$0; sub(/^[^=]*=[[:space:]]*/, "", v); gsub(/^"|"[[:space:]]*$/, "", v); print v; exit }'
+  ledger_list "$1" | awk -F'\t' -v want="$2" '$1 == want { print $6; exit }'
 }
 
+# Recorded pids in start order: by stage, then pid (both numeric).
 ledger_pids() {
-  bash "$LEDGER" list "$1" 2>/dev/null | awk '
-    /^[[:space:]]*pid[[:space:]]*=/ { v=$0; sub(/^[^=]*=[[:space:]]*/, "", v); gsub(/[^0-9]/, "", v); if (v != "") print v }'
+  ledger_list "$1" | awk -F'\t' '$1 ~ /^[0-9]+$/ && $4 ~ /^[0-9]+$/ { print $4 " " $1 }' |
+    sort -n -k1,1 -k2,2 | awk '{ print $2 }'
 }
 
 reverse_lines() {
