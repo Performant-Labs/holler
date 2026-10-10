@@ -449,3 +449,38 @@ Rigor/brief gate: BLOCKED, overridden by Andre Angelantoni: The outside brief ga
   - **Checks:** AC 5's three greps (0, 1, 0); `git merge-tree --write-tree HEAD origin/main` (conflicts in `CHANGELOG.md`
     only); and the commit times of `2d9c7a0`, `ce12cdb`, `1d6a5ab`, `efd9a00` and `e327569`.
   - **Calibration:** the earlier A-dup handoffs for #508, #640 and #647; `workflow-coding-pipeline.md:737-783`.
+
+## S (Phase 10, spec audit) — 2026-10-09T21:55:52-06:00
+- **Decided:** PASS (see `handoff-S.md`).
+  - The A precondition is met (Phase 3 fourth pass PASS; A-dup PASS), and so is the T precondition (RED from scratch at
+    `8fe683b` and again at the re-entry `f79cd05`; GREEN at `d9210bc`, with no blocking issue and no test edited).
+  - Each point of the issue's acceptance maps to a test: the suite's 15 cases, run against `StoreScope` by AC 1, and the
+    probe tests 8a, 8b, 8e and 8h. Each brief AC (1-14) has a test or a check, and S re-ran the source and document checks:
+    AC 5 (0 / 1 / 0), AC 9, 11, 12 and 14.
+  - Decisions 1-23 are built as stated. F's two deviations (a `probe.rs` rustdoc bullet, and AC 14e cited without line
+    numbers) are documented and doc-only. D16's non-blocking reap of an overrunning `kill` is a refinement that keeps the
+    bound, and it is documented at the function.
+  - The quality checks are clean: build guards, sizes, no wire change, the tests, the docs, privacy and commit subjects.
+  - Eight advisories go to O. Among them:
+    - D-1's `is_member` fold goes to F2;
+    - two untested wordings or reasons (D5's "may still hold", and five of D19's reasons);
+    - the PR step's title, `Closes #663` and the AI-disclosure section.
+- **Assumed:**
+  - The live issue and its GraphQL edit history are authoritative. Its last edit (08:40 MDT) predates the brief (16:38 MDT),
+    and it has no comments. The epic's last edit (17:39 MDT) changed nothing the brief quotes, and adds no ruling for #663.
+  - I relied on T's recorded Tier 1 and Tier 2 results and did not re-run the suites, per S's role. Only `.md` files
+    changed after T-green (`d9210bc..d9e6c3d`).
+- **Hedged:**
+  - **The operator's name on `decisions.md:1` is not a privacy hit.** A personal name is none of the rule's categories, it is
+    public as every commit's author, and main's `640/decisions.md:1` has the same driver line.
+  - **D5's split wording having no test is advisory, not REWORK.** It is built, and no AC asks for it.
+  - **The session link missing from the commit trailers is advisory.** The phase commits are the script's, the merge is a
+    squash, and main's recent squash commits carry no trailer either, so the gap is pipeline-wide.
+- **Evidence:**
+  - Read: the brief in full; every handoff in `docs/handoffs/663/`; `evidence.md`; `663-diff-result-r1.md`; the two
+    production files in full; the suite's case table and cases 1-5; and CONTRIBUTING.md's AI section.
+  - The issue (#663) and the epic (#633), via `gh` and GraphQL `userContentEdits`.
+  - Re-ran AC 5, 9, 11, 12 and 14's commands, `wc -l`, the `#[allow]` and production-line `unwrap`/`expect`/`panic` greps,
+    and a privacy grep over all 4,995 added lines.
+  - `git merge-tree --write-tree HEAD origin/main` (`519947a`) conflicts in `CHANGELOG.md` only, and none of the contract
+    files has moved on main since `0ad2d8a`.
