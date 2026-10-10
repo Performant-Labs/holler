@@ -20,7 +20,6 @@ pub const STUBS: &[(&str, &str, u32)] = &[
     // #644
     // #645
     // #646
-    ("pane", "close", 646),
     // #647
     // #650
     ("pane", "import", 650),
@@ -33,13 +32,8 @@ pub const STUBS: &[(&str, &str, u32)] = &[
     ("profile", "import", 665),
 ];
 
-/// The refusal of `say`/`interrupt`/`answer` with `--pane` or `--profile`, until story #646.
-/// That story deletes the constant and keeps its `// #646` line and the blank line below,
-/// so the two stories' deletions do not touch adjacent lines.
-// #646
-pub const PANE_FORM_REFUSAL: &str = "error: not implemented (story #646)";
-
 /// The refusal of `roster --profile`, until story #648.
+// #646
 // #648
 pub const ROSTER_PROFILE_REFUSAL: &str = "error: not implemented (story #648)";
 

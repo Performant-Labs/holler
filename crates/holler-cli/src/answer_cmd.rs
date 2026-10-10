@@ -4,7 +4,8 @@
 //! returns a plain [`AnswerResult`]; only the bin (`main.rs`, the one file
 //! allowed to exit the process) turns that into an actual exit.
 
-use crate::prompt_target::{route, Routed};
+use crate::prompt_target::Routed;
+use crate::say_cmd::route_target;
 use crate::Answer;
 
 /// What `answer_command` (in `main.rs`) should print and exit with.
@@ -33,10 +34,12 @@ fn err(message: String, exit_code: i32) -> AnswerResult {
 /// `2` an ambiguous session (lists candidates, matching `say`'s own
 /// convention) or a malformed positional tail.
 ///
-/// `--pane` and `--profile` (epic #633) are refused with exit 1 and `not
-/// implemented (story #646)` before any hub is contacted: see `prompt_target.rs`.
+/// `--pane NAME [--profile P]` (story #646) answers on the pane's session of record,
+/// routed by `say`'s engine (`say_cmd::route_target`), with its refusals and exit
+/// codes. `session/answer` is not a prompt, so the hub's pane-state gate does not
+/// apply to it.
 pub fn run(answer: &Answer, json: bool) -> AnswerResult {
-    let Routed { session, arg } = match route(answer.resolve(), &answer.profile) {
+    let Routed { session, arg } = match route_target(answer.resolve(), &answer.profile) {
         Ok(routed) => routed,
         Err(stop) => return err(stop.message, stop.exit_code),
     };

@@ -427,6 +427,10 @@ pub struct Registry {
     /// `Registry::new()` gets an in-memory registry, the running hub swaps in
     /// the persisted one via [`Registry::with_holds`].
     holds: crate::holds::Holds,
+    /// The pane registry (story #646), whose records `send_prompt`'s pane-state
+    /// gate reads; the running hub attaches the one it serves `pane/*` from via
+    /// [`Registry::with_panes`]. `None` (`Registry::new()`) gates nothing.
+    panes: Option<Arc<crate::panes::PaneState>>,
 }
 
 /// The result of resolving a `hub query TARGET …` target against the live
@@ -458,6 +462,19 @@ impl Registry {
     /// The session hold registry (issue #442).
     pub fn holds(&self) -> &crate::holds::Holds {
         &self.holds
+    }
+
+    /// This registry with `panes` as the pane registry `send_prompt`'s pane-state
+    /// gate reads (story #646): the same `Arc` the control socket's `pane/*`
+    /// methods answer from, so a park is in force for the next prompt.
+    pub fn with_panes(mut self, panes: Arc<crate::panes::PaneState>) -> Self {
+        self.panes = Some(panes);
+        self
+    }
+
+    /// The pane registry the pane-state gate reads, if one is attached (story #646).
+    pub fn panes(&self) -> Option<&Arc<crate::panes::PaneState>> {
+        self.panes.as_ref()
     }
 
     /// Register a newly-authenticated circuit, returning the receiver its
