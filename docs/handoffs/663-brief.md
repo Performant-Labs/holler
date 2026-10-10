@@ -4,7 +4,10 @@ Rigor: second-opinion. UI surface: no. Kind: feature.
 
 Repo: Performant-Labs/holler. Issue: #663 (epic #633, wave 3).
 
-**Branch:** `issue-663-implementation` (worktree `.claude/worktrees/0663-profile-scope-probe`, from `origin/main` at `3bdd129`).
+**Branch:** `issue-663-implementation` (worktree `.claude/worktrees/0663-profile-scope-probe`), cut from `3bdd129` and merged
+with `origin/main` at `0ad2d8a` (merge commit `1d6a5ab`; only `CHANGELOG.md` conflicted, both entries kept). The branch
+already holds F's implementation from the previous run; this amendment re-bases the plan on `0ad2d8a`, which carries
+#701's `findings::doctor_command` (Decision 8).
 **Review rigor:** second-opinion, set by the orchestrator for this run (the issue's own `Pipeline` line says `in-session`;
 see "Contradictions found", C1). An outside model reviews this brief and the diff, and it sees only this brief, so every
 fact the design rests on is pasted below, verbatim, with its file and lines.
@@ -31,7 +34,7 @@ which passes the test kit's 15-case conformance suite; and `run_probe`, which ru
 timeout, with a capped output, killing the whole process group it started when it gives up. Every verb story codes against
 the trait and the fakes, so nothing waits for this one; #649 wires `StoreScope` and `SystemProber` in.
 
-## Evidence (verbatim, as of `3bdd129`)
+## Evidence (verbatim, as of `origin/main` at `0ad2d8a` unless a quote names another commit)
 
 ### A. The issue (#663), the parts this brief relies on
 
@@ -64,7 +67,7 @@ Wave 3, beside the verb stories.
 ### B. The epic (#633): the contract lines, the invariants and the rulings this story is bound by
 
 ```
-epic #633 body, the contract:76-80
+epic #633 body, the contract:78-82
 Argv            Vec<String>             // every stored command is an argv array; nothing in Holler passes it through a shell;
                                         // a bare shell string where an array is expected is refused: command-not-argv
 ProbeResult     Ok | Failed { missing: Vec<String> } | Error(reason)
@@ -72,7 +75,7 @@ ProbeResult     Ok | Failed { missing: Vec<String> } | Error(reason)
                 a failing probe refuses launch/relaunch and apply's create/relaunch with probe-failed
 ```
 ```
-epic #633 body, the contract:86-100
+epic #633 body, the contract:88-102
 Port            ProfileStore get / list / cas_put(profile, expected_generation) / delete(name, expected_generation) / watch / log(name)
 Helper trait    ProfileScope resolve(profile, pane) / edit_spec(profile, pane, edit, act)   // implemented in holler-cli/src/pane/profile_scope.rs
 Profile verbs   holler profile  create NAME [--from-current | --from PROFILE] | delete NAME [--keep-panes] | list | show NAME
@@ -90,7 +93,7 @@ Profile verbs   holler profile  create NAME [--from-current | --from PROFILE] | 
                               pane of P; say/interrupt/answer/switch/reset still need a pane name and only check membership
 ```
 ```
-epic #633 body, the invariants:122-129
+epic #633 body, the invariants:124-131
 Invariants      I1 only `holler pane` verbs change a pane or its registration
                 I2 session_of_record is the only session a pane's TUI shows and the hub drives
                 I3 every verb is plan -> act -> observe -> record; a mismatch fails loudly and records nothing
@@ -101,7 +104,7 @@ Invariants      I1 only `holler pane` verbs change a pane or its registration
                 I8 an edit through --profile and the live change are one transaction           (amended 2026-10-08, profiles)
 ```
 ```
-epic #633 body, "Skeleton split" rulings:175-185
+epic #633 body, "Skeleton split" rulings:177-187
 Rulings that came out of the reviews and apply to every later story (also in #637, #669 and #670):
 1. **Verbs run CLI-side against the ports; the hub is the store only** (`pane/*`/`profile/*` methods are get/list/cas_put/watch and the profile equivalents). Adapters are constructed in `holler-cli/src/pane/wiring.rs`.
 2. **One verb, one file, one owning story, including its clap `Args` struct** (positionals and verb-specific flags), its ADR 0003 row, its `cli-surface.txt` line and its own `tests/pane_verbs/<verb>.rs` or `tests/profile_verbs/<verb>.rs`. The frozen shared files declare only the shared flag groups (`SpecFlags`, `ProfileOpt`, `SpecOnly`) and `--take-over`.
@@ -115,13 +118,13 @@ Rulings that came out of the reviews and apply to every later story (also in #63
 
 ```
 ```
-epic #633 body, "Rules for the agent":196-198
+epic #633 body, "Rules for the agent":199-201
 ## Rules for the agent
 
 Holler's pipeline, hooks and branch rules apply (see `CLAUDE.md`). Each story edits only its Blast radius. **No story touches a live fleet, a real Herdr session, a running pane or a real OpenCode session**; verification is the test kit and scratch instances, and tests refuse real session names. Spikes #635 and #636 run only in scratch sessions. The operator does the live check and the cutover (#654), and the final recreation from profiles (#666) (amended 2026-10-08, profiles).
 ```
 ```
-epic #633 body, "Decisions 2026-10-09":218-222
+epic #633 body, "Decisions 2026-10-09":221-225
 ## Decisions 2026-10-09 (ADR-0021, #634)
 
 Taken by the operator while ADR-0021 was written; the ADR records them in its "Decisions taken" section.
@@ -159,7 +162,7 @@ docs/adr/ADR-0021.md:90-98
 | `Prober` | `run_probe(argv, expect, timeout)` | `SystemProber` (the free `run_probe`, #663) |
 ```
 ```
-docs/adr/ADR-0021.md:176-181
+docs/adr/ADR-0021.md:177-182
 **Decided: the crate dependency rules.**
 
 - `holler-pane` holds types, traits and the pure transaction engines (`tx_launch.rs` #644, `tx_switch.rs` #645, `tx_apply.rs`
@@ -170,7 +173,7 @@ docs/adr/ADR-0021.md:176-181
 The test kit cannot reach anything in `holler-cli` (so the fake cannot call `reconcile_step`; F1); its manifest has two
 dependencies:
 ```
-docs/adr/ADR-0021.md:184-186
+docs/adr/ADR-0021.md:185-187
 - `holler-pane-testkit` (empty today; #638 fills it) may depend on `holler-pane` and `serde_json`, and **must not depend on
   `holler-cli`**: it is a dev-dependency of both the hub and the CLI, so a normal dependency back would make a cycle. Its
   envelope conformance helper (#638) parses the CLI envelope with `serde_json` alone.
@@ -186,7 +189,7 @@ holler-pane = { path = "../holler-pane" }
 serde_json = { workspace = true }
 ```
 ```
-docs/adr/ADR-0021.md:190-192
+docs/adr/ADR-0021.md:191-193
 **Decided: where the I8 transaction helper lives.** The trait `ProfileScope` is in `holler-pane/src/profile.rs` (frozen by
 #637). The real implementation is in `holler-cli/src/pane/profile_scope.rs` (#663) and the fake is in `holler-pane-testkit`
 (#638). The spec-editing verbs call `edit_spec` and do not write the profile themselves.
@@ -194,16 +197,16 @@ docs/adr/ADR-0021.md:190-192
 
 Section 8's record-fence bullet, whose "pane doctor command line for that pane" AC 14e qualifies in place:
 ```
-docs/adr/ADR-0021.md:273-275
+docs/adr/ADR-0021.md:274-276
 - A verb takes its expected generation when it plans, and writes the record with it after the act. If another writer got in
   between, the verb's record write fails with `generation-conflict` **after** the live change: the verb fails loudly, exits 1,
   writes nothing more, and prints the reconcile step (the pane doctor command line for that pane).
 ```
 
 Section 8, the I8 write order, which `edit_spec` implements step by step (steps 1, 2, 3, 5 and 6 are the scope's; step 4
-is the verb's, inside its act; step 2 is ADR lines 292-293, step 5 lines 296-298, step 6 lines 299-301):
+is the verb's, inside its act; step 2 is ADR lines 293-294, step 5 lines 297-299, step 6 lines 300-302):
 ```
-docs/adr/ADR-0021.md:281-305
+docs/adr/ADR-0021.md:282-306
 - No store transaction spans the two registries. The membership rule is enforced on `pane/cas_put`: setting `Pane.profile`
   to P when the stored pane already belongs to another profile is `pane-in-other-profile`, and P must exist. A spec that
   names a pane of another profile (a detached spec) is not refused.
@@ -233,14 +236,14 @@ profile write on a failed act; see "Decisions taken", item 1.
 
 Section 12 (a timeout compensates and prints the reconcile step) and "Decisions taken", items 1 and 2:
 ```
-docs/adr/ADR-0021.md:457-460
+docs/adr/ADR-0021.md:460-463
 **Decided:** the hub runs no adapters (ruling 1), so it executes no long work. The CLI process that runs a verb executes
 every step, and every port call is bounded by I5 (default 10 s) or ends in `timeout`. A verb that times out stops,
 compensates as section 8 says, exits 1 with `timeout`, and prints the reconcile step. A crash between steps leaves state that
 the next pane doctor run finds and reports (#644's acceptance). No verb leaves work running after it exits.
 ```
 ```
-docs/adr/ADR-0021.md:539-546
+docs/adr/ADR-0021.md:543-550
 1. **The I8 compensation (section 8): the epic's order stays.** The profile is written first. A failed act restores the
    profile's specs by a second write, so the specs equal what they were but the generation has moved by two and the log
    shows the edit and its reversal. The acceptance of #663 and the conformance case in #638 are amended from "generation
@@ -251,18 +254,91 @@ docs/adr/ADR-0021.md:539-546
    registry code #639 creates, and #661's blast radius is widened to allow it.
 ```
 
-The CLI rows the reconcile step names (ADR 0003; `pane doctor` declares only `--profile NAME` today, and #647 owns its
-positionals; `profile show` gets its `NAME` positional from #662):
+The CLI rows the reconcile step names (ADR 0003; #701 gave `pane doctor` its `[PANE]` and `--fix`, #703 gave
+`profile show` its `NAME`; both are on main):
 ```
 docs/adr/ADR-0003.md:61-68
-holler pane doctor [--profile NAME]                               #647
+holler pane doctor [PANE] [--fix] [--profile NAME]                #647
 
 holler pane import                                                #650
 
 holler profile create                                             #662
 holler profile delete                                             #662
 holler profile list                                               #662
-holler profile show                                               #662
+holler profile show NAME                                          #662
+```
+
+### C2. The doctor command line's one builder (#701), and why the step names no pane
+
+`findings.rs` owns the spelling of `holler pane doctor` (its one production `const`), and its remedies never carry a
+profile:
+```
+crates/holler-pane/src/findings.rs:12-18
+//! - **Remedies** ([`FindingKind::remedy`]) name only the verb that owns each repair
+//!   (`pane relaunch`, `pane reset`, `pane doctor`), built from constant words and a
+//!   [`PaneName`], whose grammar has no space, shell metacharacter or leading `-`. No remedy
+//!   carries a session id, a Herdr id, a port, a profile or any adapter text, and none is a
+//!   raw OpenCode, Herdr or tmux command: only Holler reaches those (epic #633). A finding no
+//!   Holler verb repairs (a stray session, an unregistered Herdr pane, an unsupported Herdr)
+//!   has no remedy, and its message says why.
+```
+```
+crates/holler-pane/src/findings.rs:36
+const DOCTOR: &str = "holler pane doctor";
+```
+```
+crates/holler-pane/src/findings.rs:303-316
+/// The `holler pane doctor` command line for `pane` (every pane when `None`), with `--fix`
+/// when `fix`. It is the reconcile step another verb prints after a failure (ADR-0021
+/// sections 8 and 12), so a verb builds it here rather than spelling it again.
+pub fn doctor_command(pane: Option<&PaneName>, fix: bool) -> String {
+    let mut line = DOCTOR.to_owned();
+    if let Some(pane) = pane {
+        line.push(' ');
+        line.push_str(pane.as_str());
+    }
+    if fix {
+        line.push_str(" --fix");
+    }
+    line
+}
+```
+`findings` is a public module (`crates/holler-pane/src/lib.rs:42` is `pub mod findings;`). #647's duplication review
+marked this brief's own spelling for rejection and left the choice of the profile form to #663's O:
+```
+docs/handoffs/647/handoff-A-dup.md:38
+| D-3 | warn | `crates/holler-pane/src/findings.rs:306` (`doctor_command`) | The pane form of the reconcile step is `pub` here (Phase 3 W-4, done). The amended #663 and #644 briefs (unmerged) still spell the same command themselves, in `holler-cli/src/pane/profile_scope.rs`: `RECONCILE_STEP_UNSCOPED = "to reconcile, run holler pane doctor"`, and `reconcile_step(&ProfileName)` giving `... holler pane doctor --profile '<P>' and then holler profile show '<P>'` (663-brief.md:1804-1811; 644-brief.md:1437-1438, 1558). After both merge, `holler pane doctor` is spelled in two crates. `doctor_command` has no `--profile` form for them to call, because no doctor remedy carries one (Decision 8(a)). | O tells #663 and #644 to build the unscoped step from `findings::doctor_command(None, false)`. O also decides who owns the profile form: a `profile` parameter on `doctor_command` (#647 owns the verb's grammar), or #663 composing on top of it. The later story's A-dup gate checks this. |
+```
+How `pane doctor` resolves `[PANE]` and `--profile` on main. With `--profile P` and a pane it runs
+`ProfileScope::resolve(P, Some(pane))`, which is `pane-not-in-profile` for a pane with no record or outside P (Decision
+2); without `--profile`, a named pane with no record is `pane-not-found`:
+```
+crates/holler-pane/src/reconcile.rs:219-243
+/// The panes in scope, and every record (the stray rule judges against all of them). The
+/// membership refusals are `ProfileScope::resolve`'s, and a named pane with no record is
+/// `pane-not-found`.
+fn resolve(
+    ports: Ports<'_>,
+    request: &ReconcileRequest<'_>,
+) -> Result<(Vec<Pane>, Vec<Pane>), PaneError> {
+    let scope = match (request.profile, request.pane) {
+        (Some(profile), pane) => ports.scope.resolve(profile, pane)?.panes,
+        (None, Some(name)) => {
+            let pane = ports
+                .pane_store
+                .get(name)?
+                .ok_or_else(|| PaneError::PaneNotFound {
+                    what: name.to_string(),
+                })?;
+            vec![pane]
+        }
+        (None, None) => {
+            let records = ports.pane_store.list()?;
+            return Ok((records.clone(), records));
+        }
+    };
+    Ok((scope, ports.pane_store.list()?))
+}
 ```
 
 ### D. The frozen trait and types (`holler-pane`, #637; not edited here)
@@ -1299,7 +1375,7 @@ holler-pane-testkit = { path = "../holler-pane-testkit" }
 ```
 A dev-dependency is in scope for a library crate's own `#[cfg(test)]` modules when they are built by `cargo test --lib`, so
 the test module imports the suite as `holler_pane_testkit::conformance::profile_scope::run_profile_scope_conformance`
-(verified at `3bdd129`: `crates/holler-pane-testkit/src/lib.rs:31` is `pub mod conformance;`,
+(verified at `0ad2d8a`: `crates/holler-pane-testkit/src/lib.rs:31` is `pub mod conformance;`,
 `crates/holler-pane-testkit/src/conformance/mod.rs:21` is `pub mod profile_scope;`, and the function is `pub fn` at
 `crates/holler-pane-testkit/src/conformance/profile_scope.rs:193`), and the fixture as
 `holler_pane_testkit::fixture::{sample_profile, sample_pane, sample_spec}` (`fixture.rs:121`, `:41`, `:92`), with the
@@ -1395,7 +1471,8 @@ pub fn make_own_process_group(cmd: &mut Command) {
 
 Formatting: the tree is not rustfmt-clean, so `cargo fmt --check` cannot be this story's gate (ruling 4 above). Observed by
 O at `3bdd129`: `cargo fmt --all --check` exits 1 with 4,049 `Diff in` hunks across the tree, while
-`rustfmt --check --edition 2021 crates/holler-pane/src/probe.rs crates/holler-cli/src/pane/profile_scope.rs` exits 0.
+`rustfmt --check --edition 2021 crates/holler-pane/src/probe.rs crates/holler-cli/src/pane/profile_scope.rs` exits 0; at
+`0ad2d8a` the same commands print 4,049 hunks and exit 0, respectively.
 
 The process-group kill this design uses, observed by O on Linux (procps-ng 4.0.4 `/bin/kill`), on a scratch `sleep` it
 started itself:
@@ -1416,12 +1493,89 @@ That line is an assertion, not a macOS observation, and #641's tests that use it
 form on macOS. This story's AC 8f and 8g are not opt-in: they run on CI's macOS job and are the first macOS evidence. O
 could not read the macOS `kill(1)` page from this Linux host.
 
+### H2. The standard library under the wait and the cleanup (std 1.98.1, the workspace's toolchain)
+
+Quoted from the installed toolchain's `rust-docs` source pages (`rustc --print sysroot`, then
+`share/doc/rust/html/src/std/...`; `rustc 1.98.1 (48a229cea 2026-09-01)`; `rust-toolchain.toml` pins `stable`). Unix
+`Child::try_wait` is `waitpid(pid, WNOHANG)`; the `pidfd` branch runs only when the `Command` asked for a pidfd
+(below), which `probe.rs` does not:
+```
+std/sys/process/unix/unix.rs:1042-1062
+    pub fn try_wait(&mut self) -> io::Result<Option<ExitStatus>> {
+        if let Some(status) = self.status {
+            return Ok(Some(status));
+        }
+        #[cfg(target_os = "linux")]
+        if let Some(pid_fd) = self.pidfd.as_ref() {
+            let status = pid_fd.try_wait()?;
+            if let Some(status) = status {
+                self.status = Some(status)
+            }
+            return Ok(status);
+        }
+        let mut status = 0 as c_int;
+        let pid = cvt(unsafe { libc::waitpid(self.pid, &mut status, libc::WNOHANG) })?;
+        if pid == 0 {
+            Ok(None)
+        } else {
+            self.status = Some(ExitStatus::new(status));
+            Ok(Some(ExitStatus::new(status)))
+        }
+    }
+```
+So an `Err` from `try_wait` is `waitpid` failing, which with `WNOHANG` in practice means `ECHILD`: the kernel holds no
+unwaited child with that pid for this process (it was reaped elsewhere in the process, by another waiter or with `SIGCHLD`
+ignored), and the pid may already belong to another process. No crate's `src` installs a `SIGCHLD` handler or calls
+`waitpid` (observed by O at `1d6a5ab`: `grep -rn 'SIGCHLD\|waitpid' crates/*/src` prints nothing, exit 1), so Holler's own
+processes do not reach that path. (`create_pidfd` is `std::os::linux::process::CommandExt`'s, behind the unstable
+`linux_pidfd` feature in 1.98.1, and `probe.rs` never names a pidfd.)
+
+`ExitStatus::code`, which Decision 14's "ended by a signal" reason rests on:
+```
+std/process.rs:1997
+    /// On Unix, this will return `None` if the process was terminated by a signal.
+```
+`Instant` has `checked_add`, `checked_sub` and `saturating_duration_since`, and no `saturating_add` (the method anchors of
+`std/time/struct.Instant.html`); its `+` panics on overflow:
+```
+std/time.rs:422-428
+    /// # Panics
+    ///
+    /// This function may panic if the resulting point in time cannot be represented by the
+    /// underlying data structure. See [`Instant::checked_add`] for a version without panic.
+    #[track_caller]
+    fn add(self, other: Duration) -> Instant {
+        self.checked_add(other).expect("overflow when adding duration to instant")
+```
+What F built on this branch for a `try_wait` error after stdout ended (Decision 15 keeps it):
+```
+crates/holler-pane/src/probe.rs:238-250 (at 1d6a5ab)
+/// Stdout has ended: wait for the leader's exit until `deadline`. Past it the leader is still
+/// unreaped, so the group can be killed; a status that cannot be read is never followed by a
+/// signal, since the child may have been reaped elsewhere and its pid reused.
+fn wait_for_exit(child: &mut Child, stdout: Vec<u8>, deadline: Instant) -> Outcome {
+    match wait_until(child, deadline) {
+        Ok(Some(status)) => Outcome::Exited { status, stdout },
+        Ok(None) => {
+            kill_and_reap(child);
+            Outcome::TimedOut
+        }
+        Err(_) => Outcome::WaitFailed,
+    }
+}
+```
+
 ### I. The consumers that code against this brief: #644's planned const and #696's scope
 
 #644's amended brief (unmerged branch `issue-644-implementation`, commit `7195993`) declares the unscoped step in its own
-`launch.rs`; Decision 8 hosts it here instead (W-1 of the architecture review), so #644's brief must be amended (F5):
+`launch.rs`; Decision 8 replaces both forms with one call built on `doctor_command`, so #644's brief must be amended (F5):
 ```
-docs/handoffs/644-brief.md:1557-1558 (at 7195993)
+docs/handoffs/644-brief.md:1552-1558 (at 7195993)
+/// Print a run's result through output::emit. When `acted`, it appends "; " and the run's reconcile step to the message,
+/// unless the message already contains that exact step (decision 15): with `profile: Some(P)` the step is #663's
+/// `super::profile_scope::reconcile_step(&P)` (I-3), else RECONCILE_STEP_UNSCOPED. No quoting code of its own.
+pub(crate) fn emit_outcome(ctx: &mut VerbCtx<'_>, verb: Verb, name: &PaneName, profile: Option<&ProfileName>,
+                           result: Result<Launched, TxFailure>) -> i32;
 /// The step without a profile: #663's wording with the ADR 0003 row's optional `--profile` group dropped.
 pub(crate) const RECONCILE_STEP_UNSCOPED: &str = "to reconcile, run holler pane doctor";
 ```
@@ -1471,16 +1625,19 @@ When #663 lands, expose its bounded runner from `holler-pane` and switch the hos
 - **C7. "Returns within the timeout it is given" (the `Prober` docs, E) and "a hung command gives `Error` within the
   timeout" (issue).** Giving up at the deadline still takes the kill and the reap. Resolution: Decision 15 (returns at the
   deadline plus a cleanup bounded to 1 s; the tests allow 2 s of slack, which is that 1 s cleanup budget plus 1 s of
-  scheduling margin for the macOS runner, so AC 8e's 2,300 ms is the 300 ms timeout + 1,000 ms cleanup + 1,000 ms margin).
-  The "2 s of slack" is measured past the timeout, not the whole bound: the bound is the timeout plus 2,000 ms, and it is
-  exclusive, so AC 8e asserts `elapsed < 2,300 ms` (strictly less; 2,300 ms itself fails).
+  scheduling margin for the macOS runner, so AC 8e's exclusive 2,300 ms is the 300 ms timeout + 1,000 ms cleanup +
+  1,000 ms margin).
 - **C8. `holler-pane` describes itself as having "no I/O"** (its `Cargo.toml` line 6, quoted in H only in part:
   `description = "... (types and traits only; no async runtime, no I/O)"`, and `src/lib.rs` lines 6-7, "It holds **types and
-  traits only**: no async runtime, no I/O, no behaviour behind a stub"), while ADR-0021 section 5 (C, lines 180-181) makes
+  traits only**: no async runtime, no I/O, no behaviour behind a stub"), while ADR-0021 section 5 (C, lines 181-182) makes
   `run_probe` its one direct side effect. Both files are outside the blast radius; the wording is a follow-up (F4).
-- **C9. "The exact pane doctor command line" (ADR section 8 step 6).** `pane doctor` declares only `--profile NAME` today and
-  #647 owns its positionals (C, ADR 0003 line 61). Resolution: Decision 8 names `holler pane doctor --profile '<P>'`, which
-  is exact today, and `holler profile show '<P>'` (the epic's `show NAME`; its positional lands with #662).
+- **C9. "The pane doctor command line for that pane" (ADR section 8's record-fence bullet) versus a step that names no
+  pane.** `pane doctor` takes `[PANE]` on main (C, ADR 0003 line 61), but a pane-scoped doctor refuses exactly where the
+  step must work: after a failed `launch --profile P` of a new pane there is no record, so `holler pane doctor <pane>
+  --profile P` is `pane-not-in-profile` and `holler pane doctor <pane>` is `pane-not-found` (C2, `reconcile.rs:219-243`).
+  Resolution: Decision 8's step names no pane on purpose, not pending any story: `holler pane doctor --profile '<P>'` (every
+  pane of P) and then `holler profile show '<P>'` (ADR 0003 line 68; the epic's `show` "reports spec-vs-live differences", B), or the bare
+  `holler pane doctor` without `--profile`. AC 14e writes this reason into the fence bullet.
 - **C10. A probe that exits non-zero with every expected string in its output (Decision 14).** The frozen docs define the
   outcomes by output and leave the exit status unstated: `ProbeResult::Ok` is "The probe ran and every expected string was
   in its output" (E, `probe.rs:19`), and the issue's acceptance (A) names `Ok`, `Failed` and `Error` by output and timeout
@@ -1489,7 +1646,7 @@ When #663 lands, expose its bounded runner from `holler-pane` and switch the hos
   non-zero exit (or an end by a signal) is one more way of not reaching a verdict, so it is `Error` with the reason `the
   probe exited with status <n>` (Decision 14; AC 8d). What this choice does and does not change for a caller: the epic
   refuses alike on every non-`Ok` result, "a failing probe refuses launch/relaunch and apply's create/relaunch with
-  probe-failed" (B, epic contract line 80), so `Error` versus `Failed` changes only the persisted `Pane.probe.last` and
+  probe-failed" (B, epic contract line 82), so `Error` versus `Failed` changes only the persisted `Pane.probe.last` and
   its reason text, never whether a launch proceeds; `Error` versus `Ok` is the substantive part. Why not `Ok`: `expect`
   may be empty (`PaneProbe.expect` is a `Vec<String>`, ADR-0021 line 51; AC 8c), so `Ok` on any exit would let `["false"]`
   pass a health gate, and a check such as `curl -f` reports an HTTP error only by its exit status. Why not `Failed`:
@@ -1530,11 +1687,16 @@ All commands run from the worktree root.
    and `holler pane doctor --profile 'Demo Alpha'`. With `fail_next(CasPut, Unavailable { what: "profile store" })` instead,
    the answer equals `Err(PaneError::Unavailable { what: "profile store".into() })` exactly (passed through) and the act ran 0
    times.
-5. **The reconcile step quotes the profile name (Decision 8).** Test `reconcile_step_single_quotes_the_profile_name`:
-   `reconcile_step(&ProfileName::parse("Demo Alpha")?)` equals exactly
-   `to reconcile, run holler pane doctor --profile 'Demo Alpha' and then holler profile show 'Demo Alpha'`; for the name
-   `It's $(id) Demo` it contains `--profile 'It'\''s $(id) Demo'` (Rust literal `"--profile 'It'\\''s $(id) Demo'"`) and no
-   `\n`. The same test asserts `RECONCILE_STEP_UNSCOPED == "to reconcile, run holler pane doctor"` exactly (#644's text, I).
+5. **The reconcile step quotes the profile name and is built on `doctor_command` (Decision 8).** Test
+   `reconcile_step_single_quotes_the_profile_name`: `reconcile_step(Some(&ProfileName::parse("Demo Alpha")?))` equals
+   exactly `to reconcile, run holler pane doctor --profile 'Demo Alpha' and then holler profile show 'Demo Alpha'`; for the
+   name `It's $(id) Demo` it contains `--profile 'It'\''s $(id) Demo'` (Rust literal `"--profile 'It'\\''s $(id) Demo'"`)
+   and no `\n`. The same test asserts `reconcile_step(None) == "to reconcile, run holler pane doctor"` exactly (#644's text,
+   I), and that it equals `format!("to reconcile, run {}", holler_pane::findings::doctor_command(None, false))`. And no
+   production line spells the doctor command:
+   `sed -n '1,/#\[cfg(test)\]/p' crates/holler-cli/src/pane/profile_scope.rs | grep -vE '^\s*//' | grep -c 'holler pane doctor'`
+   prints `0`, the same pipeline with `grep -c 'doctor_command(None, false)'` prints at least `1`, and
+   `grep -c 'RECONCILE_STEP_UNSCOPED' crates/holler-cli/src/pane/profile_scope.rs` prints `0` (the const is gone).
 6. **A spec filed under another pane is `usage` (Decision 9).** Test `set_of_a_spec_for_another_pane_is_usage_before_any_write`:
    `edit_spec(Some(Demo Alpha), demo-c1r1, Set(sample_spec("demo-c2r1")))` is `Err` with `code()` `usage`, the act ran 0
    times, and `profiles.faults().calls()` holds no `CasPut`.
@@ -1546,7 +1708,7 @@ All commands run from the worktree root.
 8. **The probe runner** (`cargo test -p holler-pane --lib probe::tests`), each test a real child process of a harmless
    command; every path a test creates is under one fresh directory `std::env::temp_dir()/hlr-probe-663-<pid>-<n>`, removed
    by a guard's `Drop` (Decision 21).
-   **`sh` as the program under test (8d, 8f, 8g, 8j, 8k).** The "no shell" rule (B, epic contract line 76; E, `argv.rs`)
+   **`sh` as the program under test (8d, 8f, 8g, 8j, 8k).** The "no shell" rule (B, epic contract line 78; E, `argv.rs`)
    is a rule about the runner: `run_probe` never puts a shell between itself and the argv it is given, never joins or
    re-splits an element, and never spawns `sh` or any shell of its own accord (Decision 13; AC 9 greps the production
    lines only, above `#[cfg(test)]`). It is not a rule about which program a caller's `argv[0]` names: an argv whose
@@ -1647,10 +1809,11 @@ All commands run from the worktree root.
     `cargo test -p holler-pane-testkit`, `cargo test --workspace`, `cargo test -p holler-cli --test docs_cli_test` and
     `cargo machete` all pass. Formatting: `rustfmt --check --edition 2021 crates/holler-pane/src/probe.rs
     crates/holler-cli/src/pane/profile_scope.rs` exits 0 (ruling 4: `cargo fmt --check` fails on the untouched tree, H). Every
-    `#[allow]` added carries a trailing `// #663`. Both files stay under 600 lines and every function under 100 lines.
-    The 600-line limit is per file (`scripts/lint.sh` counts each `.rs` file on its own, H), never a total across the two:
-    the estimates in Files are ~450 lines for each file (~230 + ~220 and ~190 + ~260), so each has ~150 lines of headroom
-    under the warning and ~450 under the failure. T-green and the diff gate check the actual `wc -l` of each file.
+    `#[allow]` added carries a trailing `// #663`. Every function stays under 100 lines. **File size: `scripts/lint.sh`'s
+    own gate** (H, `lint.sh:43-52`): each file stays under 900 lines, per file, never a total across the two. Its warning
+    at 600 is accepted for `profile_scope.rs` (597 lines after the previous run's F, 296 of them T's tests; Decision 8's
+    change and AC 5's added asserts may take it past 600), and T-green journals the `warn:` line if `lint.sh` prints one;
+    `probe.rs` (573) is expected to stay under 600. T-green and the diff gate check the actual `wc -l` of each file.
 11. **No new `unsafe`, no new dependency.** `git diff origin/main...HEAD -- crates | grep -E '^\+' | grep -vE '^\+\s*//' | grep -nE '\bunsafe\b'`
     prints nothing;
     `git diff --name-only origin/main...HEAD -- '*Cargo.toml' Cargo.lock` prints nothing.
@@ -1663,43 +1826,61 @@ All commands run from the worktree root.
     below. Each is a sentence or two, made in place in the paragraph or step named, and cited `(#663)`. None changes the
     closed code list, `class_of` or any table's classes. **Merge hygiene:** #644, #647 and #662 also edit ADR-0021 in their
     own changes, so edit sentences in place (add a sentence, or extend one), never rewrite a whole section or paragraph, so
-    a rebase conflict stays one hunk. The current text of each place is quoted in C.
+    a rebase conflict stays one hunk. The current text of each place on main is quoted in C. **The branch already carries
+    the previous run's a-e text** (F's, at `1d6a5ab`); this run amends those added sentences in place to the wording below
+    (what changes: a's exceptions sentence, e's builder, reason and unscoped form).
     - a. **Section 1, the `ProbeResult` paragraph (ADR lines 78-80):** the verdict rule of Decisions 14, 17, 18 and 19:
       `ok` only when the program exited 0 and every `expect` string occurs in its stdout (bytes, case-sensitive); a non-zero
       exit or an end by a signal is `error`, whatever the output; the deadline passing, or more than 1 MiB of stdout, is
-      `error`; no reason echoes an argv element or an output byte; the argv is never run through a shell.
+      `error`; no reason echoes an argv element or an output byte; the argv is never run through a shell. Plus one
+      sentence: the runner signals the probe's group only while the leader is unreaped, so a `try_wait` error sends no
+      signal and is `error` (Decision 15); that path, a child that escapes the group, and a missing `kill` binary are the
+      documented exceptions to section 12's "No verb leaves work running after it exits" (ADR line 463).
     - b. **Section 2, after "every method returns within I5's bound (default 10 s) or with `timeout`" (ADR line 87):** two
       narrowings. `ProfileScope::edit_spec` is bounded by the sum of its port calls (at most four) plus the verb's own act
       (Decision 11). `run_probe` returns at its deadline plus at most 1 s for the kill and the reap (Decision 15). The
-      sentence cites F4, which amends the frozen `Prober` and `ProfileScope` trait docs to match.
-    - c. **Section 8, step 2 (ADR lines 292-293):** a first write that times out may have landed, so the act does not run,
-      and the answer is `timeout` with the reconcile step (Decision 6).
-    - d. **Section 8, steps 5-6 (ADR lines 296-301):** a restoring write that fails other than by a conflict keeps its own
-      code, and its message names P, the unrestored edit, the act's error and the reconcile step (Decision 5). The step-6
-      `profile-conflict` carries the reconcile step in its message (Decision 7).
-    - e. **Section 8, step 6 (ADR lines 299-301) and the record-fence bullet (ADR lines 273-275):** the reconcile step's
-      exact text is `to reconcile, run holler pane doctor --profile '<P>' and then holler profile show '<P>'`, with P
-      POSIX-single-quoted; it is profile-scoped until #647 gives `pane doctor` a pane positional (Decision 8, C9); the
-      scope's own errors carry the step, and a verb appends it only to errors that do not (the rule #644 plans against, its
-      C-15, quoted in I); without `--profile` the step is `to reconcile, run holler pane doctor`, the
-      `RECONCILE_STEP_UNSCOPED` const in `holler-cli/src/pane/profile_scope.rs`, beside `reconcile_step` (Decision 8).
+      sentence says it also qualifies section 12's per-call bound (ADR line 461; section 12 itself is not edited, #644 and
+      #647 edit it), and that "a follow-up amends the frozen trait docs" (F4, by no number: follow-ups are filed in Phase 11).
+    - c. **Section 8, step 2 (ADR lines 293-294):** the rule by outcome (Decision 6): a first write whose outcome is unknown
+      (a `timeout`) may have landed, so the act does not run, and the answer is `timeout`, saying that P may hold the edit,
+      with the reconcile step; the store client (#649) answers `timeout`, not `unavailable`, when it loses the reply to a
+      write it sent; any other error of this write is answered as it is.
+    - d. **Section 8, step 5 (ADR lines 297-299):** a restoring write that fails other than by a conflict keeps its own
+      code, and its message names P, the unrestored edit (after a `timeout`, the edit, which may not have been restored),
+      the act's error and the reconcile step (Decision 5).
+    - e. **Section 8, step 6 (ADR lines 300-302) and the record-fence bullet (ADR lines 274-276):**
+      - step 6: the reconcile step is exactly `to reconcile, run holler pane doctor --profile '<P>' and then holler profile
+        show '<P>'`, with P POSIX-single-quoted, built by `reconcile_step` in `holler-cli/src/pane/profile_scope.rs` on
+        `holler_pane::findings::doctor_command(None, false)`, the doctor command line's one builder (#701); three errors of
+        the scope carry it (this `profile-conflict`, step 5's restore failure, step 2's first-write `timeout`; Decisions 5-7),
+        and a verb appends it only to an error that does not (#644's C-15, I); without `--profile` the step is `to
+        reconcile, run holler pane doctor`, `reconcile_step(None)`, from the same builder;
+      - the step names no pane **on purpose**: a pane-scoped doctor refuses a pane with no record or outside P
+        (`pane-not-found`, `pane-not-in-profile`; `reconcile.rs:222-243`), which is the failed `launch` of a new pane, so
+        the doctor run covers every pane of P (or every pane) and `profile show` reports the spec with no live pane (C9);
+        this sentence **replaces** the previous run's "naming the pane once `pane doctor` takes one (#647) is a follow-up";
+      - the fence bullet: its parenthesis becomes "the pane doctor command line; the profile-scoped or the bare form of
+        step 6, which names no pane, for the reason given there" (replacing "for now ..."), and it keeps the previous
+        run's clause: with `--profile` the record step runs inside the act, so a record conflict also restores P's specs
+        (step 5) before the verb prints the reconcile step (#663, confirming #638's assumption).
 
     Checks: `git diff origin/main...HEAD -- docs/adr/ADR-0021.md` has its hunks only at the places a-e name;
     `git diff origin/main...HEAD -- docs/adr/ADR-0021.md | grep -E '^[-+]\|'` prints nothing (no table row changed) and
     `... | grep -E '^[-+]#'` prints nothing (no heading changed); each of the five edits is cited `(#663)`; the added text
-    contains `to reconcile, run holler pane doctor --profile '<P>' and then holler profile show '<P>'`,
-    `RECONCILE_STEP_UNSCOPED` and `1 MiB`. **Alternative** (as #683's review allowed): if the operator lands a-e as a
-    separate `docs(adr)` PR merged before this run, this AC instead checks that the merged ADR says a-e, and AC 12 drops
+    contains `to reconcile, run holler pane doctor --profile '<P>' and then holler profile show '<P>'`, `doctor_command`,
+    `try_wait` and `1 MiB`, and `grep -cE 'RECONCILE_STEP_UNSCOPED|takes one \(#647\)|for now the' docs/adr/ADR-0021.md`
+    prints `0`. **Alternative** (as #683's review allowed): if the operator lands a-e as a separate `docs(adr)` PR merged
+    before this run, this AC instead checks that the merged ADR says a-e, and AC 12 drops
     `docs/adr/ADR-0021.md`.
 
 ## Files
 
 Production:
-- `crates/holler-cli/src/pane/profile_scope.rs` (fill; ~230 production lines, ~220 test lines in its `#[cfg(test)] mod
+- `crates/holler-cli/src/pane/profile_scope.rs` (filled on the branch: 597 lines, 301 production and 296 in its `#[cfg(test)] mod
   tests`): module docs (the I8 order, the decisions below, the bound of Decision 11), `pub struct StoreScope`, `StoreScope::new`,
-  `impl ProfileScope for StoreScope`, `pub fn reconcile_step`, `pub const RECONCILE_STEP_UNSCOPED`, and private helpers
+  `impl ProfileScope for StoreScope`, `pub fn reconcile_step` (on `findings::doctor_command`), and private helpers
   (the edit, the membership check, the message augmentation, the quoting).
-- `crates/holler-pane/src/probe.rs` (replace the stub body and its docs; ~190 production lines, ~260 test lines):
+- `crates/holler-pane/src/probe.rs` (filled on the branch: 573 lines, 305 production and 268 test):
   `run_probe` and private helpers (spawn, the stdout reader thread, the wait, the group kill, the match). `ProbeResult` is
   unchanged.
 - `CHANGELOG.md` (one entry, AC 13).
@@ -1707,7 +1888,7 @@ Production:
 
 Tests: inline `#[cfg(test)]` modules in the two files above (the blast radius has no test file; Decision 21).
 
-**Size:** ~420 production lines and ~480 test lines in two files, plus the CHANGELOG and five ADR sentences: one component
+**Size:** about 600 production and 560 test lines in two files, plus the CHANGELOG and five ADR sentences: one component
 family per file, four files in all, well under F's cap. **Fits one run**, no split.
 
 **Blast radius:** the issue's two files plus `CHANGELOG.md` and `docs/adr/ADR-0021.md` (prose only, AC 14). No manifest, no
@@ -1728,6 +1909,8 @@ family per file, four files in all, well under F's cap. **Fits one run**, no spl
 | a bounded subprocess runner | none exists on `main` (#641's `exec.rs` is on an unmerged branch) | **new, private to `probe.rs`**. #696 (open) later exposes one runner from `holler-pane` and switches the adapters to it; this story does not solve #696 and adds no public runner API (Decision 20) |
 | `holler-cli/tests/support/mod.rs::make_own_process_group` | precedent only (a test helper; a library cannot call it) | n/a, the same `process_group(0)` call |
 | `holler-cli/src/pane/wiring.rs` | **not touched** (#649 owns it) | n/a |
+| `holler_pane::findings::doctor_command` (#701; `findings.rs:303-316`, C2) | the doctor command line in both reconcile-step forms: `reconcile_step` starts from `doctor_command(None, false)` | **reuse**: the one builder of the `holler pane doctor` line; `profile_scope.rs` spells `holler pane doctor` nowhere else (AC 5's grep). The profile form composes on top of it in `profile_scope.rs` (Decision 8), so `findings.rs` and its remedies stay profile-free (`findings.rs:12-18`) |
+| `holler_pane::findings::quoted` | not used | not a shell quote: "`{:?}`-quoted, so every control character and quote in it is escaped, and cut to 64 characters" (`findings.rs:328-330`), a terminal-safe value, not a shell word. `single_quoted` stays, with one caller; no crate's `src` on main has a POSIX shell-quoting helper (observed by O at `0ad2d8a`: a `git grep` of `crates/*/src` for the `'\''` escape, or "shell" beside "quot", finds nothing) |
 
 ## Decisions already made (O)
 
@@ -1736,8 +1919,8 @@ family per file, four files in all, well under F's cap. **Fits one run**, no spl
 1. **Type.** `pub struct StoreScope { profiles: Arc<dyn ProfileStore>, panes: Arc<dyn PaneStore>, actor: Actor }` and
    `pub fn new(profiles: Arc<dyn ProfileStore>, panes: Arc<dyn PaneStore>, actor: Actor) -> Self`: the fake's shape (G), so
    the suite's `build` closure and #649's wiring construct it the same way. `Send + Sync` follows from the two traits'
-   supertraits (`pub trait ProfileStore: Send + Sync`, D, at `crates/holler-pane/src/profile.rs:328` at `3bdd129`;
-   `pub trait PaneStore: Send + Sync`, `crates/holler-pane/src/ports.rs:62` at `3bdd129`, so `Arc<dyn ...>` of each is
+   supertraits (`pub trait ProfileStore: Send + Sync`, D, at `crates/holler-pane/src/profile.rs:328`;
+   `pub trait PaneStore: Send + Sync`, `crates/holler-pane/src/ports.rs:62`, so `Arc<dyn ...>` of each is
    `Send + Sync`) and from `Actor`'s one field being a `String` (quoted in D, `profile.rs:107-113`), so the struct is
    `Send + Sync` by the auto traits, with no `unsafe impl`. Every profile write is logged as `actor`; which actor a verb run uses is #649's call.
 2. **`resolve`** is the fake's (G, lines 34-38): read P (`profile-not-found` first); with no pane, `PaneStore::list` filtered
@@ -1778,8 +1961,10 @@ family per file, four files in all, well under F's cap. **Fits one run**, no spl
    ...). ADR section 8 decides only the conflict. **Decided: keep the restoring write's own code, and extend its message.**
    The code stays because it is the most recent failure and the one that says what is wrong now (a wedged or unreachable or
    corrupt store), and because each of these codes is already a failure (exit 1) in `class_of` (F). The message gains, after
-   the store's own text: `; profile "<P>" still holds the edit of <pane>, but the live change failed (<failure>); <reconcile
-   step>` (the name in prose is written with `{:?}`, as the fake writes it; only the reconcile step's command line is
+   the store's own text: `; profile "<P>" still holds the edit of <pane>, but the live change or its record failed
+   (<failure>); <reconcile step>`, with `may still hold` in place of `still holds` when the restoring write timed out (it
+   may have landed, by Decision 6's reasoning); "or its record" because with `--profile` the record step runs inside the act
+   (Decision 4), so the failure may be a pane-record conflict after a live change that worked (the name in prose is written with `{:?}`, as the fake writes it; only the reconcile step's command line is
    shell-quoted, Decision 8). So the error names the profile, the unrestored edit, the act's error (which would otherwise be lost) and the
    reconcile step. The payload extended is the variant's one string (`op` of `Timeout`, `what` of `Unavailable` and
    `StoreCorrupt` and the other `what` variants, `message` of `Usage`, `ProbeFailed`, `HerdrVersionUnsupported`, `ProfileDrift`
@@ -1796,28 +1981,41 @@ family per file, four files in all, well under F's cap. **Fits one run**, no spl
    again (ADR step 2; case 10). `timeout` gets the same message extension as Decision 5 but worded for an unknown outcome:
    `; the write may have landed, so profile "<P>" may hold the edit of <pane>, and nothing live was changed; <reconcile
    step>` (a timed-out write may still have been applied; ADR section 12 asks a timeout to print the reconcile step). Every
-   other first-write error is returned unchanged (`unavailable` and the rest: the store said no). AC 4 pins both.
+   other first-write error is returned unchanged (`unavailable` and the rest). The rule is by outcome, not by code: a write
+   whose outcome is unknown is a `timeout`, so #649's store client must answer `timeout`, not `unavailable`, when it loses
+   the reply to a write it sent (AC 14c states this requirement). AC 4 pins both.
 7. **The restore conflict** is `PaneError::ProfileConflict { what }` with `what` = `"<P>" was changed by another writer during
-   the live change to <pane>, so its specs were not restored after that change failed (<failure>); the other writer's
-   version stays; <reconcile step>`. This is the fake's text (G, lines 172-179) plus the reconcile step ADR step 6 asks for.
+   the live change to <pane>, so its specs were not restored after that change or its record failed (<failure>); the
+   other writer's version stays; <reconcile step>`. This is the fake's text (G, lines 172-179), with "or its record" (as in
+   Decision 5), plus the reconcile step ADR step 6 asks for.
    AC 3 pins it; case 11 pins the code and the profile name.
-8. **The reconcile step** is one function, `pub fn reconcile_step(profile: &ProfileName) -> String`, returning exactly
-   `to reconcile, run holler pane doctor --profile '<P>' and then holler profile show '<P>'`. It is `pub` because the
-   spec-editing verbs (#644, #646) print the same step for a pane-record conflict (ADR step 4). **Beside it, the unscoped
-   form**, for a run without `--profile`, with #644's exact text (I, `644-brief.md:1558`):
-   `pub const RECONCILE_STEP_UNSCOPED: &str = "to reconcile, run holler pane doctor";`. The two forms are the whole set,
-   and both live in `profile_scope.rs`: #644 and #646 import this one const (`super::profile_scope::RECONCILE_STEP_UNSCOPED`)
-   rather than declaring their own, so #644's planned `pub(crate) const` in `launch.rs` is dropped (F5). This is additive:
-   `reconcile_step(&ProfileName)` keeps the signature #644 pastes. The profile name is
-   POSIX-single-quoted (`'` becomes `'\''`, the whole wrapped in `'...'`), always, because a profile name may hold spaces,
-   quotes, `$(...)` or backticks (D, lines 30-61) and an operator pastes this line into a shell. `ProfileName` refuses
-   control characters, so the message stays one line (ADR section 9: every message is one line). The quoting adds no line
-   break of its own: it is a character-by-character copy of the name that writes each `'` as the four characters
-   `'\''` and every other character as itself, between an opening and a closing `'`, so the only characters it adds are
-   `'` and `\`; the rest of the step is the fixed text above. A newline in the output could come only from the name,
-   which `ProfileName::parse` refuses (`\n` and `\r` are control characters). AC 5 asserts no `\n` on a name with a quote,
-   `$(...)` and spaces. The pane name is
-   `[a-z0-9-]` and is not quoted. It names the doctor form that exists today (C9).
+8. **The reconcile step** is one function, `pub fn reconcile_step(profile: Option<&ProfileName>) -> String`, built on
+   #701's `holler_pane::findings::doctor_command(None, false)` (C2), the one builder of the doctor command line:
+   - `Some(P)`: exactly `to reconcile, run <doctor_command(None, false)> --profile '<P>' and then holler profile show
+     '<P>'`, that is `to reconcile, run holler pane doctor --profile '<P>' and then holler profile show '<P>'` (byte-identical
+     to the previous run's text, so AC 2-5's scoped substrings do not change);
+   - `None`: exactly `to reconcile, run <doctor_command(None, false)>`, that is `to reconcile, run holler pane doctor`
+     (#644's text, I, `644-brief.md:1558`).
+
+   It replaces the previous plan's `pub const RECONCILE_STEP_UNSCOPED`, which no longer exists: a `const` cannot call
+   `doctor_command`, and a literal would spell `holler pane doctor` a second time, the copy #647's review rejects (C2,
+   D-3). The `Option` takes the verbs' own `profile: Option<&ProfileName>` (the shape `edit_spec` and #644's
+   `emit_outcome` already have, I) as it is, so a verb has no branch of its own; the scope's own callers pass `Some(..)`.
+   It is `pub` because the spec-editing verbs (#644, #646) print the same step for a pane-record conflict (ADR step 4) and
+   for an act error the scope returned unchanged; they **call** it (F5) and declare no step of their own.
+   **Who owns the profile form: #663, composing on top** (D-3's second choice). `profile_scope.rs` keeps it, because
+   `findings.rs`'s remedies never carry a profile (`findings.rs:12-18`, C2, #647's Decision 8(a)), the POSIX quoting has
+   this one caller, and the blast radius stays as it is; a `profile` parameter on `doctor_command` would widen it into
+   #647's file. `profile_scope.rs`'s production code spells `holler pane doctor` nowhere (AC 5's grep).
+   **The step names no pane, on purpose** (C9): a pane-scoped doctor refuses a pane with no record or outside P
+   (`reconcile.rs:219-243`, C2), which is the failed `launch` of a new pane, so `doctor_command`'s `pane` is always `None`
+   here; `holler profile show '<P>'` then reports the spec that has no live pane.
+   **Quoting.** The profile name is POSIX-single-quoted, always (`'` becomes `'\''`, the whole wrapped in `'...'`), because
+   a profile name may hold spaces, quotes, `$(...)` or backticks (D, lines 30-61) and an operator pastes this line into a
+   shell. The quoting adds only `'` and `\` (a character-by-character copy that writes each `'` as the four characters
+   `'\''`), so a newline could come only from the name, which `ProfileName::parse` refuses (`\n` and `\r` are control
+   characters); the message stays one line (ADR section 9). AC 5 asserts no `\n` on a name with a quote, `$(...)` and
+   spaces.
 9. **A `Set` whose spec names another pane** is `usage` before any write ("a spec for the pane \"<spec.pane>\" cannot be set
    as the spec of <pane>"), as the fake does (G, lines 241-254). No case pins it; AC 6 does.
 10. **The pane record is read for every edit, before the first write**, as ADR section 8 step 1 says ("Read P at
@@ -1841,20 +2039,26 @@ family per file, four files in all, well under F's cap. **Fits one run**, no spl
     piped, stderr is null (discarded). The child is put in a process group of its own with
     `std::os::unix::process::CommandExt::process_group(0)` (safe API, Rust 1.64; the toolchain is 1.98), so its group id is
     its pid. Environment and working directory are inherited from the calling process (a probe like `curl` needs `PATH`;
-    `run_probe` has no cwd parameter). Unix only, as the rest of the workspace (`holler-hub` uses `std::os::unix`
-    unconditionally).
-14. **Verdict, in order.** Empty argv: `Error`, no process. Zero timeout: `Error`, no process. Spawn fails: `Error`. Output
-    over the cap: `Error` (group killed). Deadline passes: `Error` (group killed). Exit not success (a non-zero code, or ended
+    `run_probe` has no cwd parameter). The `process_group(0)` call and the `kill` spawn sit in `#[cfg(unix)]` blocks, as
+    `make_own_process_group` guards its call (H); elsewhere only `Child::kill` runs, Decision 16's missing-`kill` path.
+14. **Verdict, in order.** Empty argv: `Error`, no process. Zero or unrepresentable timeout: `Error`, no process. Spawn
+    fails: `Error`. Output over the cap: `Error` (group killed). Deadline passes: `Error` (group killed). Exit status
+    unreadable (`try_wait` error): `Error`, no signal (Decision 15). Exit not success (a non-zero code, or ended
     by a signal): `Error`, whatever the output, because a probe whose program failed has no verdict and a probe with no
     `expect` must not pass on `false` (the reading of the frozen docs this rests on, and why it changes no launch outcome
     against `Failed`, is C10). Exit 0: `Ok` when every `expect` string is in the output, else `Failed { missing }`.
-15. **Timeout semantics (C7).** One deadline, `start + timeout`, taken before the spawn. The runner first waits, up to the
-    deadline, for the reader thread to report end of stdout (`mpsc::Receiver::recv_timeout`), and only then polls
-    `Child::try_wait` every 10 ms until the exit or the deadline. When the deadline passes (or the cap is hit) it kills the
-    group **before reaping the leader**: until `try_wait` has returned `Some`, the leader is alive or a zombie, so its pid,
-    which is the group id, cannot have been reused by another process. Once `try_wait` has returned `Some`, the runner never
-    signals. Then `Child::kill` (the leader, in case the group kill could not run) and the leader is reaped by polling
-    `try_wait`. The `kill` call and the reap share **one cleanup budget of 1 s**; a leader still unreaped after it (a process
+15. **Timeout semantics (C7).** One deadline, `Instant::now().checked_add(timeout)`, taken before the spawn; a timeout it
+    cannot represent is `Error` with no process, like a zero one (std's `Instant + Duration` panics on overflow, H2). The
+    runner first waits, up to the deadline, for the reader thread to report end of stdout (`mpsc::Receiver::recv_timeout`),
+    and only then polls `Child::try_wait` every 10 ms until the exit or the deadline. When the deadline passes (or the cap
+    is hit) it kills the group **before reaping the leader**: until `try_wait` has returned `Some`, the leader is alive or a
+    zombie, so its pid, which is the group id, cannot have been reused by another process. Once `try_wait` has returned
+    `Some`, the runner never signals. Then `Child::kill` (the leader, in case the group kill could not run) and the leader is
+    reaped by polling `try_wait`. The `kill` call and the reap share **one cleanup budget of 1 s**, taken as
+    `Instant::now().checked_add(CLEANUP)` with a fallback of `Instant::now()` (a zero budget) that cannot be reached in
+    practice (`now + 1 s` always fits; its effect would be the degraded path below). **The diff gate's round-1 B-2** (use
+    `saturating_add`) names a method `Instant` does not have (H2): no change is needed; F may instead measure the budget as
+    an `elapsed()` from a start `Instant`, which needs no addition. A leader still unreaped after the budget (a process
     stuck in the kernel) is left as a zombie for the caller's exit, and the runner returns. Consequences, all
     documented: the answer comes at the deadline plus at most 1 s of cleanup (normally a few ms); a
     probe whose background child keeps stdout open after the leader exits is a timeout, never a verdict (AC 8g); the whole
@@ -1867,6 +2071,14 @@ family per file, four files in all, well under F's cap. **Fits one run**, no spl
     and its pipe blocked per such run after the runner returns, so a long-lived caller (one that reuses `SystemProber`
     from `spawn_blocking` or a thread, as the `Prober` docs allow) can leak them without bound; today's callers are
     short-lived CLI verbs. #696, which exposes the runner, inherits this paragraph with it.
+    **A `try_wait` error sends no signal.** On Unix `try_wait` is `waitpid(pid, WNOHANG)` (H2), so its `Err` means the
+    leader was reaped elsewhere in the process and its pid may already be reused; signalling the group would reopen the race
+    this rule closes. The answer is `Error` with Decision 19's fixed reason `the probe's exit status could not be read`, and
+    any group member left stays, as with Decision 16's missing `kill` (a documented exception: the Risks, AC 14a). F keeps
+    the branch's behaviour (`wait_for_exit`, H2). **The diff gate's round-1 B-1** (call `kill_and_reap` on that path,
+    because the child "remains unreaped") **was considered and rejected**: its premise is false (the `Err` means the kernel
+    no longer holds that child), and its remedy signals a pid that may belong to another process. No Holler code installs a
+    `SIGCHLD` handler or calls `waitpid` (H2), so Holler's own processes never take this path.
 16. **The group kill** runs the `kill` binary from `PATH`: `kill -s KILL -- -<pid>` (stdin, stdout and stderr null), waited
     for with `try_wait` within Decision 15's one shared 1 s cleanup budget (the same budget the leader's reap draws on, not
     a second 1 s), and killed and reaped itself if that budget runs out. Its outcome is ignored (the group may already be
@@ -1884,7 +2096,9 @@ family per file, four files in all, well under F's cap. **Fits one run**, no spl
 19. **Reasons never echo an argv element or an output byte.** The `Error` reasons are fixed texts: `the probe argv is empty:
     there is no program to run`; `the probe timeout is zero`; `the probe program could not be started: <io::ErrorKind>`;
     `the probe wrote more than 1 MiB to stdout`; `the probe timed out after <n> ms`; `the probe exited with status <n>`; `the
-    probe was ended by a signal`; `the probe's output could not be read`; `the probe could not start its output reader`. Why:
+    probe was ended by a signal` (`ExitStatus::code` is `None`, H2); `the probe's output could not be read`; `the probe could
+    not start its output reader`; `the probe timeout is too large` (Decision 15's unrepresentable deadline); `the probe's exit
+    status could not be read` (Decision 15's `try_wait` error, no signal sent). Why:
     a check argv is a stored command and may carry a token (a `curl -H` header); a probe's output may carry anything; and
     the result is persisted in `Pane.probe.last` on the hub and shown by verbs. `Failed.missing` holds only `expect`
     strings, which are spec values and non-secret by I7. The spawn error is reported by its `ErrorKind` only, never by
@@ -1925,8 +2139,8 @@ Forward-compat (consumers):
 |---|---|---|
 | #643 read verbs, #646 park/unpark, #647 doctor | `resolve(P, None)` = every member, `resolve(P, Some(n))` with the membership refusal | yes (2) |
 | #645 switch/reset, #646 say/interrupt/answer | `resolve(P, Some(n))` to check membership only | yes (2) |
-| #644 launch/relaunch | `edit_spec(P?, pane, Set, act)`, `--spec-only` as a no-op act, `profile-not-found` in one line, the reconcile step text for a pane-record conflict, scoped and unscoped | yes (3, 8; C3); imports `RECONCILE_STEP_UNSCOPED` from here (F5) |
-| #646 close | `edit_spec(P?, pane, Remove, act)`; a detached spec is removable; a pane store that is down fails before P is written; the reconcile step, scoped and unscoped | yes (3, 8, 10) |
+| #644 launch/relaunch | `edit_spec(P?, pane, Set, act)`, `--spec-only` as a no-op act, `profile-not-found` in one line, the reconcile step text for a pane-record conflict, scoped and unscoped | yes (3, 8; C3); calls `reconcile_step(profile)`, both forms (F5) |
+| #646 close | `edit_spec(P?, pane, Remove, act)`; a detached spec is removable; a pane store that is down fails before P is written; the reconcile step, scoped and unscoped | yes (3, 8, 10); calls `reconcile_step(profile)` (F5) |
 | #644, #664 apply | `Prober::run_probe` through `SystemProber` with a bounded, non-shell, non-echoing runner | yes (13-19) |
 | #649 wiring | `StoreScope::new(Arc<dyn ProfileStore>, Arc<dyn PaneStore>, Actor)` with no I/O in the constructor; `SystemProber` unchanged | yes (1) |
 | #696 one runner | a runner whose behaviour is pinned by tests, so it can be moved without a behaviour change | yes (AC 8; 20: mechanics apart from the verdict, its three open points in the rustdoc) |
@@ -1945,10 +2159,10 @@ Forward-compat (consumers):
 
 - **F1.** Test kit: amend `FakeProfileScope` and the suite's docs to Decisions 5, 6 and 7 (the open point decided, the
   first-write timeout text, the reconcile step in the conflict message), and pin them with cases. The test kit must not
-  depend on `holler-cli` (C, ADR lines 184-186), so the fake cannot call `reconcile_step` where it is now. F1 takes one of
+  depend on `holler-cli` (C, ADR lines 185-187), so the fake cannot call `reconcile_step` where it is now. F1 takes one of
   two routes, named when it is filed:
-  - **(a)** F2's `holler-pane` hoist takes `reconcile_step` (and `RECONCILE_STEP_UNSCOPED`) too, since it is pure formatting
-    over a `ProfileName`, and the fake calls it, so the fake's messages match `StoreScope`'s exactly;
+  - **(a)** F2's `holler-pane` hoist takes `reconcile_step` too (beside `findings::doctor_command`), since it is pure
+    formatting over a `ProfileName`, and the fake calls it, so the fake's messages match `StoreScope`'s exactly;
   - **(b)** F1 aligns only the fake's codes and its open-point behaviour, and states that verb stories pin the step text
     against the real `StoreScope` (as #644 does, its C-15 and AC 16k, I).
 
@@ -1956,8 +2170,7 @@ Forward-compat (consumers):
   after the membership rule.
 - **F2.** Hoist into `holler-pane` (amend-first; `holler-pane/**` is #637's): the membership rule, as one public function
   used by the hub, the test kit and `StoreScope` (three private copies after this story); and Decision 5's payload-append
-  helper, as a `PaneError` method in `error.rs` beside `code()`. Under F1's route (a), `reconcile_step` and
-  `RECONCILE_STEP_UNSCOPED` too. The same F2 change amends `error.rs`'s payload-name convention (F, `error.rs:399-401`,
+  helper, as a `PaneError` method in `error.rs` beside `code()`. Under F1's route (a), `reconcile_step` too. The same F2 change amends `error.rs`'s payload-name convention (F, `error.rs:399-401`,
   "`op` is the operation that timed out") to say that `Timeout.op` may also carry the appended context of Decisions 5
   and 6, so the convention text and the hoisted helper do not disagree once it lands.
 - **F3.** (Withdrawn: its ADR-0021 items, Decisions 5, 6, 8, 11, 14 and 15, are now AC 14, in this change.)
@@ -1965,20 +2178,49 @@ Forward-compat (consumers):
   rename `ports_test.rs`'s `run_probe_stub_never_reports_success` (the stub is gone; the test still holds); and amend the two
   frozen trait docs that contradict the shipped code: `Prober`'s "It returns within the `timeout` it is given"
   (`ports.rs:204-207`, E; Decision 15 adds up to 1 s of cleanup) and `ProfileScope`'s "Every method returns within I5's
-  bound (default 10 s) or with [`PaneError::Timeout`]" (`profile.rs:377-379`, D; Decision 11). AC 14b's sentence cites F4.
-- **F5 (cross-story, before #644 runs).** Amend #644's brief (`issue-644-implementation`, `7195993`) to import
-  `super::profile_scope::RECONCILE_STEP_UNSCOPED` (Decision 8) instead of declaring `pub(crate) const RECONCILE_STEP_UNSCOPED`
-  in `launch.rs` (its lines 1554 and 1557-1558, and its references at 1707, 1954, 2031 and 2157); #646's brief imports the
-  same const. The operator amends #644's brief before its run; this story does not edit it.
+  bound (default 10 s) or with [`PaneError::Timeout`]" (`profile.rs:377-379`, D; Decision 11). AC 14b's sentence names it
+  as "a follow-up", by no number.
+- **F5 (cross-story, before #644 and 646b run).** This story does not edit other briefs; the operator (or that story's O)
+  amends them so they **call** `profile_scope::reconcile_step(profile)` (Decision 8) and declare no step, no const and no
+  doctor spelling of their own. Exactly, in `docs/handoffs/644-brief.md` at `7195993` (`issue-644-implementation`):
+  - 1437-1438 (its I-3 quote of Decision 8): the signature becomes `pub fn reconcile_step(profile: Option<&ProfileName>)
+    -> String`, built on `findings::doctor_command(None, false)`; re-quote Decision 8 from this brief;
+  - 1552-1554 (`emit_outcome`'s doc): the step is `super::profile_scope::reconcile_step(profile)`, with no `else` branch;
+  - 1557-1558: delete `RECONCILE_STEP_UNSCOPED` and its doc line;
+  - 1706-1707: "step is `profile_scope::reconcile_step(profile)`" (drop "when the run named P, else
+    `RECONCILE_STEP_UNSCOPED`");
+  - 1836 and 1847: `reconcile_step(&demo)` becomes `reconcile_step(Some(&demo))`;
+  - 1954 (its reuse row): `launch::{effective_spec, emit_outcome}`, without the const;
+  - 2028-2033 (its decision 15): `reconcile_step(profile)`; the unscoped form is `reconcile_step(None)`; replace "Neither
+    names the pane: `pane doctor` has no pane positional until #647; naming it then is a change to #663's function
+    (follow-up), not here." with this brief's reason (C9: a pane-scoped doctor refuses a pane with no record or outside P,
+    `reconcile.rs:222-243`, so the step names no pane on purpose);
+  - 129-131 (C-16) and 2140 (its risk "The reconcile step names the pane once #647's `pane doctor [PANE]` lands"): the same
+    reason replaces "until #647 lands"; drop the risk;
+  - 2148 (T's pre-flight grep): `pub fn reconcile_step(profile: Option<&ProfileName>) -> String`;
+  - 2157: drop `RECONCILE_STEP_UNSCOPED` from the `pub(crate)` items.
+
+  In `docs/handoffs/646-brief.md` at `d06e6ff` (`issue-646-implementation`): re-quote Decision 8 from this brief in E-9
+  (lines 517-527, which quote the const and "#644 and #646 import this one const"), and have the 646b brief call
+  `reconcile_step(profile)`.
 - #696 is unchanged and stays open.
 
 ## Test plan
 
-**RED** (a compile error is not RED, `docs/agent-overlays/tester.md`). T first lands, in `profile_scope.rs`, a stub with the
-exact public items of Decisions 1 and 8: `StoreScope` with its three fields and `new`, an `impl ProfileScope` whose two
-methods return `Err(PaneError::NotImplemented)`, `reconcile_step` returning `String::new()`, and `RECONCILE_STEP_UNSCOPED`
-as `""`. `probe.rs` already holds a
-stub (always `Error`). T then writes the tests, and the RED run shows:
+**Re-entry RED (this run).** The branch already holds F's implementation, green on every AC of the previous plan
+(T-green at `93fb653`). This amendment changes only AC 5 (the `Option` signature, the `doctor_command` equality, the
+greps), AC 10's size rule and AC 14's ADR wording; Decisions 5-7, 13-15 and 19 now state what the code already does. A
+compile error is not RED (`docs/agent-overlays/tester.md`), so T amends AC 5's test and lands, in `profile_scope.rs`, the
+new signature `pub fn reconcile_step(profile: Option<&ProfileName>) -> String` with the body `String::new()`, deletes
+`RECONCILE_STEP_UNSCOPED`, and passes `Some(..)` at the scope's two call sites. RED then shows AC 5 failing on its
+equalities and AC 2, 3 and 4 failing on their `holler pane doctor --profile 'Demo Alpha'` substrings; every other test
+stays green (regression guards, journaled as such). AC 14's `grep -cE` prints `3` on the branch's ADR (RED). F then builds
+`reconcile_step` on `doctor_command` and amends the ADR sentences.
+
+**RED from scratch** (the previous run's, for the record). T first lands, in `profile_scope.rs`, a stub with the exact
+public items of Decisions 1 and 8: `StoreScope` with its three fields and `new`, an `impl ProfileScope` whose two methods
+return `Err(PaneError::NotImplemented)`, and `reconcile_step` returning `String::new()`. `probe.rs` already holds a stub
+(always `Error`). T then writes the tests, and the RED run shows:
 - AC 1 fails on `assert_eq!(result, Ok(()))`: 15 case failures, each `not-implemented`.
 - AC 2, 3, 4, 6 fail on the asserted code or message (`not-implemented` answered); AC 5 fails on the string equality; AC 7
   fails on the asserted code (`not-implemented`, not `unavailable`).
@@ -2013,9 +2255,14 @@ running (`ps -o pid=,args= -u "$(id -u)"`, read-only).
   story because the test kit is outside its blast radius (C5); F1 closes the window by route (a), or under route (b) verb
   stories pin the step text against `StoreScope`.
 - **The `kill` binary missing from `PATH`.** The group kill is skipped, `Child::kill` still ends the leader, and its children
-  are left. Linux (procps or util-linux) and macOS both ship `/bin/kill`. Accepted and documented.
+  are left (an exception named in AC 14a). Linux (procps or util-linux) and macOS both ship `/bin/kill`. Accepted and
+  documented.
 - **Pid reuse** is closed by Decision 15's order (signal only before the leader is reaped). A refactor that calls `try_wait`
   before the end of stdout, then signals, reopens it; the module docs say so at the code.
+- **A `try_wait` error** (the leader reaped elsewhere in the process, H2) sends no signal, so any member of the probe's
+  group still running is left, like the escaped child and the missing `kill`: the third documented exception to section
+  12's "No verb leaves work running after it exits" (AC 14a). Accepted: it needs a process that reaps children it did not
+  spawn, and no Holler code does (H2). Signalling there (the diff gate's round-1 B-1) is rejected (Decision 15).
 - **A shell slipping in.** `Command::new(argv[0]).args(&argv[1..])` never invokes a shell; AC 8h proves `;`, `$(...)` and a
   space inside an element arrive literally, AC 8h's and 8j's spawn-failure cases fail under any shell wrapper, and AC 9
   greps the source (a lint for the plain form; none of these is a security boundary, see AC 9). The tests' own use of
