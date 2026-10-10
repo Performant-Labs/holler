@@ -278,6 +278,25 @@ The logs of the processes Stages 4 to 7 start go under the instance's state dire
 `<state_dir>/logs/<prefix>-...` (`~/.holler/logs` with no `state_dir`), never `/tmp`, which is
 RAM-backed on the target hosts and must not be filled.
 
+## Stopping and tearing down
+
+The wizard keeps a per-instance ledger of every process it starts (`<state_dir>/wizard-ledger.toml`,
+one `[[process]]` with pid, start time, command, role, stage and session). A process is the wizard's
+to stop only if that ledger recorded it and its current start time and command still match.
+
+- **Stale** (the pid was recorded but now belongs to another command): never signalled, reported.
+- **Foreign** (in no ledger, for example something else holding a planned port): never signalled;
+  the wizard reports the pid, owner and command, then stops and asks.
+- **Live**: stopped with SIGTERM, nothing stronger. If it is still running after the grace
+  period the wizard says so and asks.
+
+`agent-skills/setup-wizard/lib/stop-owned.sh` does this (`stop`, `restart`, `check-port`,
+`teardown`; exit 0 done, 1 stale, 2 foreign, 3 still running, 4 usage). `restart` stops the
+recorded process and prints its recorded command; it does not run it. `teardown` stops the
+instance's live ledger processes in reverse start order, removes only that instance's ledger,
+and prints what it left: stale entries, foreign processes, the rest of the state directory
+(removed only with `--purge-state`) and every other instance's processes, ports and state.
+
 ## Automated setup
 
 A Claude Code skill drives this end to end — `setup-wizard`, an 11-stage wizard (Stage 0 through
