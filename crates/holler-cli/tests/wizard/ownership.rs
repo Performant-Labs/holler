@@ -172,6 +172,50 @@ fn s(p: &Path) -> String {
     p.display().to_string()
 }
 
+fn assert_code(o: &Output, want: i32) {
+    assert_eq!(o.status.code(), Some(want), "{}", text(o));
+}
+
+fn assert_has(o: &Output, needle: &str) {
+    assert!(text(o).contains(needle), "{}", text(o));
+}
+
+fn assert_lacks(o: &Output, needle: &str) {
+    assert!(!text(o).contains(needle), "{}", text(o));
+}
+
+fn assert_alive(c: &Child) {
+    assert!(c.alive(), "pid {} must not have been signalled", c.pid);
+}
+
+fn assert_dead(c: &Child) {
+    assert!(!c.alive(), "pid {} must have been stopped", c.pid);
+}
+
+fn assert_exists(p: &Path) {
+    assert!(p.exists(), "{} must exist", p.display());
+}
+
+fn assert_missing(p: &Path) {
+    assert!(!p.exists(), "{} must be gone", p.display());
+}
+
+fn assert_line(o: &Output, line: &str) {
+    assert!(text(o).lines().any(|l| l == line), "{}", text(o));
+}
+
+fn assert_file_text(p: &Path, want: &str) {
+    assert_eq!(fs::read_to_string(p).unwrap(), want);
+}
+
+fn assert_all_alive(cs: &[&Child]) {
+    cs.iter().for_each(|c| assert_alive(c));
+}
+
+fn assert_all_dead(cs: &[&Child]) {
+    cs.iter().for_each(|c| assert_dead(c));
+}
+
 #[test]
 fn stop_signals_a_live_ledger_process() {
     let env = Env::new();
@@ -179,9 +223,9 @@ fn stop_signals_a_live_ledger_process() {
     let c = Child::start("a");
     env.ledger(&st, &[(&c, "live")]);
     let o = env.run(&["stop", &s(&st), &c.pid.to_string()], "");
-    assert_eq!(o.status.code(), Some(0), "{}", text(&o));
-    assert!(!c.alive(), "a live ledger process must be stopped");
-    assert!(text(&o).contains("STOPPED"), "{}", text(&o));
+    assert_code(&o, 0);
+    assert_dead(&c);
+    assert_has(&o, "STOPPED");
 }
 
 #[test]
@@ -192,9 +236,9 @@ fn stop_refuses_a_reused_pid_and_reports_it_stale() {
     // The ledger recorded this pid, but the process now there is not the recorded one.
     env.ledger(&st, &[(&c, "stale")]);
     let o = env.run(&["stop", &s(&st), &c.pid.to_string()], "");
-    assert_eq!(o.status.code(), Some(1), "{}", text(&o));
-    assert!(text(&o).contains("STALE"), "{}", text(&o));
-    assert!(c.alive(), "a stale entry must never be signalled");
+    assert_code(&o, 1);
+    assert_has(&o, "STALE");
+    assert_alive(&c);
 }
 
 #[test]
@@ -205,10 +249,10 @@ fn stop_refuses_a_pid_in_no_ledger() {
     let c = Child::start("recorded");
     env.ledger(&st, &[(&c, "live")]);
     let o = env.run(&["stop", &s(&st), &other.pid.to_string()], "");
-    assert_eq!(o.status.code(), Some(2), "{}", text(&o));
-    assert!(text(&o).contains("FOREIGN"), "{}", text(&o));
-    assert!(other.alive(), "a foreign pid must never be signalled");
-    assert!(c.alive());
+    assert_code(&o, 2);
+    assert_has(&o, "FOREIGN");
+    assert_alive(&other);
+    assert_alive(&c);
 }
 
 #[test]
@@ -219,14 +263,13 @@ fn rerun_reports_an_unrecorded_process_holding_a_planned_port_and_signals_nothin
     let squatter = Child::start("squatter");
     env.ledger(&st, &[(&mine, "live")]);
     let o = env.run(&["check-port", &s(&st), "47001"], &squatter.pid.to_string());
-    assert_eq!(o.status.code(), Some(2), "{}", text(&o));
-    let t = text(&o);
-    assert!(t.contains(&squatter.pid.to_string()), "{t}");
-    assert!(t.contains(&squatter.cmd), "the command must be reported: {t}");
-    assert!(t.contains("FOREIGN"), "{t}");
-    assert!(t.contains("asks"), "the wizard must stop and ask: {t}");
-    assert!(squatter.alive(), "the holder must not be signalled");
-    assert!(mine.alive(), "no ledger process may be signalled by a port check");
+    assert_code(&o, 2);
+    assert_has(&o, &squatter.pid.to_string());
+    assert_has(&o, &squatter.cmd);
+    assert_has(&o, "FOREIGN");
+    assert_has(&o, "asks");
+    assert_alive(&squatter);
+    assert_alive(&mine);
 }
 
 #[test]
@@ -237,13 +280,13 @@ fn check_port_reports_a_reused_pid_holder_as_stale_and_a_ledger_holder_as_owned(
     let mine = Child::start("mine");
     env.ledger(&st, &[(&reused, "stale"), (&mine, "live")]);
     let o = env.run(&["check-port", &s(&st), "47001"], &reused.pid.to_string());
-    assert_eq!(o.status.code(), Some(1), "{}", text(&o));
-    assert!(text(&o).contains("STALE"), "{}", text(&o));
-    assert!(reused.alive());
+    assert_code(&o, 1);
+    assert_has(&o, "STALE");
+    assert_alive(&reused);
     let o = env.run(&["check-port", &s(&st), "47002"], &mine.pid.to_string());
-    assert_eq!(o.status.code(), Some(0), "{}", text(&o));
-    assert!(text(&o).contains("OWNED"), "{}", text(&o));
-    assert!(mine.alive(), "check-port never signals");
+    assert_code(&o, 0);
+    assert_has(&o, "OWNED");
+    assert_alive(&mine);
 }
 
 #[test]
@@ -251,8 +294,8 @@ fn check_port_free_exits_zero() {
     let env = Env::new();
     let st = env.state("inst-a");
     let o = env.run(&["check-port", &s(&st), "47001"], "");
-    assert_eq!(o.status.code(), Some(0), "{}", text(&o));
-    assert!(text(&o).contains("FREE"), "{}", text(&o));
+    assert_code(&o, 0);
+    assert_has(&o, "FREE");
 }
 
 #[test]
@@ -262,13 +305,9 @@ fn restart_stops_the_recorded_process_and_prints_its_recorded_command() {
     let c = Child::start("restart");
     env.ledger(&st, &[(&c, "live")]);
     let o = env.run(&["restart", &s(&st), &c.pid.to_string()], "");
-    assert_eq!(o.status.code(), Some(0), "{}", text(&o));
-    assert!(
-        text(&o).contains(&format!("RESTART-CMD {}", c.cmd)),
-        "{}",
-        text(&o)
-    );
-    assert!(!c.alive());
+    assert_code(&o, 0);
+    assert_has(&o, &format!("RESTART-CMD {}", c.cmd));
+    assert_dead(&c);
 }
 
 #[test]
@@ -278,9 +317,9 @@ fn restart_of_a_stale_entry_signals_nothing_and_prints_no_command() {
     let c = Child::start("restale");
     env.ledger(&st, &[(&c, "stale")]);
     let o = env.run(&["restart", &s(&st), &c.pid.to_string()], "");
-    assert_eq!(o.status.code(), Some(1), "{}", text(&o));
-    assert!(!text(&o).contains("RESTART-CMD"), "{}", text(&o));
-    assert!(c.alive());
+    assert_code(&o, 1);
+    assert_lacks(&o, "RESTART-CMD");
+    assert_alive(&c);
 }
 
 #[test]
@@ -310,32 +349,32 @@ fn teardown_stops_ledger_processes_in_reverse_order_and_leaves_the_second_instan
     fs::write(b.join("data.txt"), "b state").unwrap();
 
     let o = env.run(&["teardown", &s(&a)], &squatter.pid.to_string());
-    assert_eq!(o.status.code(), Some(0), "{}", text(&o));
-    let t = text(&o);
-
-    // Reverse start order.
-    let pos = |c: &Child| {
-        t.find(&format!("STOPPED pid {} ", c.pid))
-            .unwrap_or_else(|| panic!("no STOPPED line for {}: {t}", c.pid))
-    };
-    let (hi, lo) = if a1.pid > a3.pid { (&a1, &a3) } else { (&a3, &a1) };
-    assert!(pos(hi) < pos(lo) && pos(lo) < pos(&a2), "{t}");
-
-    assert!(!a1.alive() && !a2.alive() && !a3.alive());
-    assert!(reused.alive(), "stale entries are never signalled");
-    assert!(t.contains(&format!("STALE pid {}", reused.pid)), "{t}");
-    assert!(squatter.alive(), "an unrecorded process is untouched");
+    assert_code(&o, 0);
+    assert_reverse_order(&text(&o), &a1, &a3, &a2);
+    assert_all_dead(&[&a1, &a2, &a3]);
+    assert_alive(&reused);
+    assert_has(&o, &format!("STALE pid {}", reused.pid));
+    assert_alive(&squatter);
 
     // The second instance: processes, ledger and state all untouched.
-    assert!(b1.alive() && b2.alive());
-    assert!(b.join("fake-ledger").exists());
-    assert!(b.join("wizard-ledger.toml").exists());
-    assert_eq!(fs::read_to_string(b.join("data.txt")).unwrap(), "b state");
+    assert_all_alive(&[&b1, &b2]);
+    assert_exists(&b.join("fake-ledger"));
+    assert_exists(&b.join("wizard-ledger.toml"));
+    assert_file_text(&b.join("data.txt"), "b state");
 
     // This instance's ledger is gone; its other state stays, and the output says so.
-    assert!(!a.join("wizard-ledger.toml").exists());
-    assert!(a.join("keep.txt").exists());
-    assert!(t.contains("LEFT"), "teardown must say what it left: {t}");
+    assert_missing(&a.join("wizard-ledger.toml"));
+    assert_exists(&a.join("keep.txt"));
+    assert_has(&o, "LEFT");
+}
+
+/// Same-stage entries stop highest pid first, then the lower stage (`low`) last.
+fn assert_reverse_order(t: &str, x: &Child, y: &Child, low: &Child) {
+    let (hi, lo) = if x.pid > y.pid { (x, y) } else { (y, x) };
+    let pos = |c: &Child| t.find(&format!("STOPPED pid {} ", c.pid));
+    assert!(pos(hi) < pos(lo), "{t}");
+    assert!(pos(lo) < pos(low), "{t}");
+    assert!(pos(low).is_some(), "{t}");
 }
 
 #[test]
@@ -349,11 +388,11 @@ fn teardown_never_signals_a_pid_that_is_live_only_in_another_instances_ledger() 
     env.ledger(&a, &[(&mine, "live")]);
     env.ledger(&b, &[(&theirs, "live")]);
     let o = env.run(&["teardown", &s(&a)], "");
-    assert_eq!(o.status.code(), Some(0), "{}", text(&o));
-    assert!(theirs.alive());
+    assert_code(&o, 0);
+    assert_alive(&theirs);
     let o = env.run(&["stop", &s(&a), &theirs.pid.to_string()], "");
-    assert_eq!(o.status.code(), Some(2), "{}", text(&o));
-    assert!(theirs.alive());
+    assert_code(&o, 2);
+    assert_alive(&theirs);
 }
 
 #[test]
@@ -365,9 +404,9 @@ fn teardown_with_purge_state_removes_only_the_named_state_directory() {
     env.ledger(&a, &[(&c, "live")]);
     fs::write(b.join("data.txt"), "b state").unwrap();
     let o = env.run(&["teardown", &s(&a), "--purge-state"], "");
-    assert_eq!(o.status.code(), Some(0), "{}", text(&o));
-    assert!(!a.exists());
-    assert!(b.join("data.txt").exists());
+    assert_code(&o, 0);
+    assert_missing(&a);
+    assert_exists(&b.join("data.txt"));
 }
 
 #[test]
@@ -378,8 +417,8 @@ fn nothing_is_signalled_when_the_ledger_script_is_missing() {
     env.ledger(&st, &[(&c, "live")]);
     fs::remove_file(env.lib().join("ledger.sh")).unwrap();
     let o = env.run(&["stop", &s(&st), &c.pid.to_string()], "");
-    assert_eq!(o.status.code(), Some(4), "{}", text(&o));
-    assert!(c.alive());
+    assert_code(&o, 4);
+    assert_alive(&c);
 }
 
 #[test]
@@ -387,8 +426,7 @@ fn unusable_pids_are_refused() {
     let env = Env::new();
     let st = env.state("inst-a");
     for bad in ["1", "0", "abc", ""] {
-        let o = env.run(&["stop", &s(&st), bad], "");
-        assert_eq!(o.status.code(), Some(4), "pid {bad:?}: {}", text(&o));
+        assert_code(&env.run(&["stop", &s(&st), bad], ""), 4);
     }
 }
 
@@ -399,18 +437,19 @@ fn restart_prints_the_recorded_command_when_the_session_field_is_empty() {
     let c = Child::start("nosession");
     env.ledger_full(&st, &[(&c, "live", 7, "")]);
     let o = env.run(&["restart", &s(&st), &c.pid.to_string()], "");
-    assert_eq!(o.status.code(), Some(0), "{}", text(&o));
+    assert_code(&o, 0);
     let line = format!("RESTART-CMD {}", c.cmd);
-    assert!(text(&o).lines().any(|l| l == line), "{}", text(&o));
-    assert!(!c.alive());
+    assert_line(&o, &line);
+    assert_dead(&c);
 }
 
-/// The real ledger.sh from story #729, if its worktree is present next to this one.
+/// The repository's own ledger.sh (story #729), copied into a temp lib dir. `None` (with a
+/// printed note) until that story's file is in this tree.
 fn real_ledger_lib(env: &Env) -> Option<PathBuf> {
     let src = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../729-start-ledger/agent-skills/setup-wizard/lib/ledger.sh");
+        .join("../../agent-skills/setup-wizard/lib/ledger.sh");
     if !src.exists() {
-        eprintln!("note: real ledger.sh not found at {}; skipping", src.display());
+        eprintln!("note: ledger.sh not in this tree yet ({}); skipping", src.display());
         return None;
     }
     let lib = env.root.path().join("real-lib");
@@ -431,6 +470,16 @@ fn record(lib: &Path, state: &Path, c: &Child, stage: &str, session: &[&str]) {
     assert!(o.status.success(), "{}", text(&o));
 }
 
+fn run_real(env: &Env, lib: &Path, args: &[&str]) -> Output {
+    env.run_with_lib(lib, args, "")
+}
+
+fn assert_real_refuses(env: &Env, lib: &Path, state: &Path, c: &Child) {
+    let o = run_real(env, lib, &["stop", &s(state), &c.pid.to_string()]);
+    assert_code(&o, 2);
+    assert_alive(c);
+}
+
 #[test]
 fn agrees_with_the_real_ledger_script() {
     let env = Env::new();
@@ -447,24 +496,22 @@ fn agrees_with_the_real_ledger_script() {
     record(&lib, &a, &a2, "5", &[]);
     record(&lib, &b, &b1, "4", &[]);
 
-    let sa = s(&a);
-    let o = env.run_with_lib(&lib, &["stop", &sa, &foreign.pid.to_string()], "");
-    assert_eq!(o.status.code(), Some(2), "{}", text(&o));
-    let o = env.run_with_lib(&lib, &["stop", &sa, &b1.pid.to_string()], "");
-    assert_eq!(o.status.code(), Some(2), "{}", text(&o));
-    assert!(foreign.alive() && b1.alive());
+    assert_real_refuses(&env, &lib, &a, &foreign);
+    assert_real_refuses(&env, &lib, &a, &b1);
+    assert_real_restart_then_stale(&env, &lib, &a, &a2);
 
-    let o = env.run_with_lib(&lib, &["restart", &sa, &a2.pid.to_string()], "");
-    assert_eq!(o.status.code(), Some(0), "{}", text(&o));
-    assert!(text(&o).contains(&format!("RESTART-CMD {}", a2.cmd)), "{}", text(&o));
-    assert!(!a2.alive());
-    // a2 is gone now: the real ledger calls it stale, and it is not signalled again.
-    let o = env.run_with_lib(&lib, &["stop", &sa, &a2.pid.to_string()], "");
-    assert_eq!(o.status.code(), Some(1), "{}", text(&o));
+    assert_code(&run_real(&env, &lib, &["teardown", &s(&a)]), 0);
+    assert_dead(&a1);
+    assert_all_alive(&[&b1, &foreign]);
+    assert_exists(&b.join("wizard-ledger.toml"));
+}
 
-    let o = env.run_with_lib(&lib, &["teardown", &sa], "");
-    assert_eq!(o.status.code(), Some(0), "{}", text(&o));
-    assert!(!a1.alive());
-    assert!(b1.alive() && foreign.alive());
-    assert!(b.join("wizard-ledger.toml").exists());
+fn assert_real_restart_then_stale(env: &Env, lib: &Path, state: &Path, c: &Child) {
+    let o = run_real(env, lib, &["restart", &s(state), &c.pid.to_string()]);
+    assert_code(&o, 0);
+    assert_has(&o, &format!("RESTART-CMD {}", c.cmd));
+    assert_dead(c);
+    // Gone now: the real ledger calls it stale, and it is not signalled again.
+    let o = run_real(env, lib, &["stop", &s(state), &c.pid.to_string()]);
+    assert_code(&o, 1);
 }
