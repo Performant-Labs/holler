@@ -1600,6 +1600,211 @@ fn command_arg_and_command_json_are_mutually_exclusive() {
         assert_plain_usage_error(&text, a);
 ```
 
+### K. Excerpts added at the brief review, round 2 (pasted from this branch at `2c35ae5`)
+
+**K-1** A profile's **change log** (what AC 16a and 16c read), the port method and its fake. `log` is a port method: it passes
+the fault switch, so a call of it is itself recorded (`ProfileStoreOp::Log`) in the profile store's **call log** (F-1). The
+seed (`FakeProfileStore::seeded`, which bypasses the faults and the call log) stores each profile at 1 "with one `Created`
+entry":
+```
+crates/holler-pane/src/profile.rs:291-302, 358-359
+/// One entry of a profile's append-only change log: who, when, the new generation and
+/// what changed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProfileLogEntry {
+    /// When the write happened (milliseconds since the Unix epoch).
+    pub at: i64,
+    /// The generation the profile had after the write.
+    pub generation: u64,
+    pub actor: Actor,
+    pub change: ProfileChange,
+}
+    /// The change log of the profile `name`, oldest first.
+    fn log(&self, name: &ProfileName) -> Result<Vec<ProfileLogEntry>, PaneError>;
+
+crates/holler-pane-testkit/src/profile_store.rs:285-293
+    fn log(&self, name: &ProfileName) -> Result<Vec<ProfileLogEntry>, PaneError> {
+        self.faults.enter(ProfileStoreOp::Log)?;
+        lock(&self.change_logs)
+            .get(&name.slug())
+            .cloned()
+            .ok_or_else(|| PaneError::ProfileNotFound {
+                what: name.to_string(),
+            })
+    }
+
+crates/holler-pane-testkit/src/profile_store.rs:122-124
+    /// A store holding `profiles`, each created by `actor` at expected generation 0
+    /// and so stored at 1 with one `Created` entry, in order. Seeding bypasses the
+    /// faults and the call log. Two seeds with one name are `generation-conflict`, as
+```
+**K-2** The pane-store calls an `edit_spec` with a profile makes (what AC 16g counts): the fake scope's `stored` reads only the
+profile store, and its `plan` reads the pane record once, through `PaneStore::get`, which records `PaneStoreOp::Get`. The real
+`StoreScope::plan` (`crates/holler-cli/src/pane/profile_scope.rs:104-118`) has the same body, the same one
+`self.panes.get(pane)?` included. Neither calls `list`, `cas_put` or `delete` of the pane store in `edit_spec` (F-5: "It never
+writes a pane record"; `members`, which calls `list`, is `resolve`'s, not `edit_spec`'s):
+```
+crates/holler-pane-testkit/src/profile_scope.rs:96-103, 128-143
+    /// The profile `profile` as stored: `profile-not-found` when there is none.
+    fn stored(&self, profile: &ProfileName) -> Result<Profile, PaneError> {
+        self.profiles
+            .get(profile)?
+            .ok_or_else(|| PaneError::ProfileNotFound {
+                what: profile.to_string(),
+            })
+    }
+    /// Section 8, step 1: `stored` with the edit, once the scope's guards pass. The pane
+    /// record is read for every edit; only a `Set` is checked for membership.
+    fn plan(
+        &self,
+        stored: &Profile,
+        pane: &PaneName,
+        edit: &SpecEdit,
+    ) -> Result<Profile, PaneError> {
+        if let SpecEdit::Set(spec) = edit {
+            check_filed_under(spec, pane)?;
+        }
+        let record = self.panes.get(pane)?;
+        if let (SpecEdit::Set(_), Some(record)) = (edit, record.as_ref()) {
+            check_joins(record, &stored.name)?;
+        }
+        Ok(with_edit(stored, pane, edit))
+
+crates/holler-pane-testkit/src/pane_store.rs:176-180
+impl PaneStore for FakePaneStore {
+    fn get(&self, name: &PaneName) -> Result<Option<Pane>, PaneError> {
+        self.faults.enter(PaneStoreOp::Get)?;
+        Ok(self.feed.read(|log| log.get(name).cloned()))
+    }
+```
+**K-3** Where an error's message goes in each format (what AC 17 relies on): text mode writes `error: <message>` to `sink.err`
+and nothing to `sink.out`; JSON mode writes one envelope line to `sink.out`, with the message (flattened by `one_line`) in
+`error.message`, and writes to `sink.err` only when the envelope cannot be encoded:
+```
+crates/holler-cli/src/output.rs:281-284, 288-300, 304-315
+        Err(error) => {
+            let written = write_line(sink.err, &format!("error: {}", error.message));
+            settle(written, exit_code(&error))
+        }
+
+fn emit_json<T: Serialize>(sink: &mut Sink<'_>, result: Result<T, ErrorBody>) -> i32 {
+    match result {
+        Ok(data) => settle(write_envelope(sink, &Envelope::success(data)), 0),
+        Err(error) => {
+            let code = exit_code(&error);
+            let error = ErrorBody {
+                message: one_line(&error.message),
+                ..error
+            };
+            settle(write_envelope(sink, &Envelope::<()>::failure(error)), code)
+        }
+    }
+}
+
+fn write_envelope<T: Serialize>(sink: &mut Sink<'_>, envelope: &Envelope<T>) -> io::Result<()> {
+    match serde_json::to_string(envelope) {
+        Ok(line) => write_line(sink.out, &line),
+        Err(cause) => {
+            write_line(
+                sink.err,
+                &format!("error: cannot encode the result: {cause}"),
+            )?;
+            Err(io::Error::other(cause))
+        }
+    }
+}
+```
+**K-4** #663's merged `reconcile_step` and `StoreScope::restore` (what decision 15's exact-substring rule and AC 16k compare):
+both the conflict text and the restore-failure text end with `{step}` = `reconcile_step(Some(&back.name))`, where `back.name`
+is the profile's name **as the scope read it from the store** (`back` is `written` with the old specs, and `written` is the
+first write of `edited`, which `plan` built from `stored`). The merged conflict wording differs from the #663 brief's
+decision 7 as quoted in I-3 ("after that change or its record failed"); the merged code is the authority, and no test of this
+story asserts that wording, only the step and the code:
+```
+crates/holler-cli/src/pane/profile_scope.rs:49-56
+pub fn reconcile_step(profile: Option<&ProfileName>) -> String {
+    let doctor = doctor_command(None, false);
+    let Some(profile) = profile else {
+        return format!("to reconcile, run {doctor}");
+    };
+    let name = single_quoted(profile.as_str());
+    format!("to reconcile, run {doctor} --profile {name} and then holler profile show {name}")
+}
+
+crates/holler-cli/src/pane/profile_scope.rs:122-155
+    fn restore(
+        &self,
+        stored: Profile,
+        written: Profile,
+        pane: &PaneName,
+        failure: PaneError,
+    ) -> PaneError {
+        let back = Profile {
+            panes: stored.panes,
+            ..written
+        };
+        let Err(error) = self.profiles.cas_put(&back, back.generation, &self.actor) else {
+            return failure;
+        };
+        let (name, step) = (back.name.as_str(), reconcile_step(Some(&back.name)));
+        if matches!(error, PaneError::Conflict) {
+            return PaneError::ProfileConflict {
+                what: format!(
+                    "{name:?} was changed by another writer during the live change to {pane}, so \
+                     its specs were not restored after that change or its record failed \
+                     ({failure}); the other writer's version stays; {step}"
+                ),
+            };
+        }
+        // A timed-out restore is an unknown outcome: it may have landed.
+        let holds = match error {
+            PaneError::Timeout { .. } => "may still hold",
+            _ => "still holds",
+        };
+        let context = format!(
+            "profile {name:?} {holds} the edit of {pane}, but the live change or its record \
+             failed ({failure}); {step}"
+        );
+        with_context(error, &context)
+    }
+```
+A stale `cas_put` answers `PaneError::Conflict` (`crates/holler-pane/src/generation.rs:25-28`: `if current != expected {
+return Err(PaneError::Conflict); }`), so another writer's `concurrent_put` of P between the first write and the restore makes
+the real scope answer `profile-conflict`, with no hook of the scope's own (AC 16k).
+**K-5** `FakeHarness::list_sessions`, `attach_tui` and `shown_session` (AC 1's and O1's reading): all three pass the fault
+switch first, so each is in the harness call log, a test's own `list_sessions` after the run included; `attach_tui` sets the
+TUI's `shown` to the session in the same call, so a `shown_session` right after it answers `Some(session)`:
+```
+crates/holler-pane-testkit/src/harness.rs:299-304, 319-330, 351-354
+    fn list_sessions(&self, port: u16) -> Result<Vec<String>, PaneError> {
+        self.faults.enter(HarnessOp::ListSessions)?;
+        let world = self.lock();
+        world.reach(port, HarnessOp::ListSessions)?;
+        Ok(world.sessions_of(port).to_vec())
+    }
+    fn attach_tui(&self, pane: &PaneId, port: u16, session: &str) -> Result<(), PaneError> {
+        self.faults.enter(HarnessOp::AttachTui)?;
+        let mut world = self.lock();
+        world.reach(port, HarnessOp::AttachTui)?;
+        world.known(port, session)?;
+        let tui = TuiView {
+            port,
+            shown: Some(session.to_owned()),
+        };
+        world.tuis.insert(pane.clone(), tui);
+        Ok(())
+    }
+    fn shown_session(&self, pane: &PaneId) -> Result<Option<String>, PaneError> {
+        self.faults.enter(HarnessOp::ShownSession)?;
+        Ok(self.lock().tuis.get(pane).and_then(|tui| tui.shown.clone()))
+    }
+```
+**K-6** No spec flag is clap-`required` (AC 15's one line is `effective_spec`'s `usage`, not clap's): `grep -n 'required'
+crates/holler-cli/src/pane/args.rs` prints nothing (exit 1); every `SpecFlags` field is an `Option` or a `Vec` under a plain
+`#[arg(long, ...)]`, e.g. `crates/holler-cli/src/pane/args.rs:43-44`: `#[arg(long, value_name = "DIR")]` / `pub project:
+Option<String>,`. AC 15's argv gives `PANE`, so clap accepts it and `run` reaches `effective_spec`.
+
 ## The public API (fixed here, so T can write RED tests against it)
 
 `crates/holler-pane/src/tx_launch.rs` (reached as `holler_pane::tx_launch::...`; `lib.rs` already declares `pub mod tx_launch`
@@ -1718,7 +1923,9 @@ which reuses `launch::{effective_spec, emit_outcome}` (no copy). Neither file de
 Every port call goes through `Ports`; nothing types into a pane (no `send_text`, no `send_keys`: I4), nothing runs a shell, and
 no argv is joined or split. Before every step marked *live* below, the engine checks the budget (`options.budget` since the
 engine was entered); when it has run out it stops, rolls back as for a failed step, and answers
-`Timeout { op: OP_LAUNCH | OP_RELAUNCH }` (exit 1).
+`Timeout { op: OP_LAUNCH | OP_RELAUNCH }` (exit 1). The check is a comparison of elapsed time and nothing else: it calls no
+port (so it adds no entry to any call log, which AC 24's exact logs rely on) and does not use `options.now_ms` (a constant in
+tests); the elapsed time comes from a monotonic clock read such as `std::time::Instant` (F's choice; not I/O).
 
 ### `launch NAME`, the CLI (`launch.rs`), before the engine
 
@@ -1804,7 +2011,8 @@ then the `edit_spec` call above, and the engine returns. **Steps 1-6, the act (A
 in particular step 1's `pane_store.get` is not made by the engine, so `--spec-only` on a name that already has a record is
 not `pane-exists` (it edits P's spec and changes nothing live). The only pane-store call in a `spec_only` run is the scope's
 own read of the pane's record inside `edit_spec` (F-5: it "reads P ... and n's record"; `pane-in-other-profile` comes from
-there), never a `List`, a `CasPut` or a `Delete`.
+there), never a `List`, a `CasPut` or a `Delete`. That read is the one `self.panes.get(pane)?` in the scope's `plan` (K-2,
+the same in the fake and in `StoreScope`), so a launch `--spec-only` run's pane-store call log is exactly `[Get]`.
 
 ### `relaunch NAME`, the CLI (`relaunch.rs`), before the engine
 
@@ -1830,7 +2038,10 @@ nothing live changes, so P may drift on purpose, AC 16g):
 
 A "cell" is the pair (workspace, grid) in the record's Herdr session. **The move** is derived, never passed: the run moves
 the pane exactly when the effective cell differs from the record's (which E0 allows only with `grid_given`); `--grid` naming
-the record's own cell is no move.
+the record's own cell is no move. The engine looks only at `grid_given` and the two cells, never at which spec field a caller
+changed: with `grid_given: true` a changed workspace (with or without a changed grid) is a move like a changed grid; with
+`grid_given: false` any changed cell field is E0's `usage`. What value a caller other than the CLI passes (#664's `apply`) is
+that caller's, under the field's documented meaning ("the caller was asked to place the pane").
 
 Steps 3 (probe), 4 (version) as launch; step 5 (target cell) as launch with `herdr_session = record.herdr.session` and the
 target = the effective cell (effective workspace and grid), where the record's own pane is not "occupied": a `p` with
@@ -1858,6 +2069,15 @@ what: "relaunched NAME at <cell>, but its old Herdr pane <id> was not closed (<c
 true })`, with the record and P already stored: exit 1 whatever the close's own code (decision 14: the live state is not
 what the verb needs), and the reconcile step is appended.
 
+**Relaunch's rollback** (a step from B3 to O2 failed, or the budget ran out before one) is launch's, with B3 in A1's place:
+`host.stop_owned(&name)` (B4 ran), then `herdr.close(&hp.pane_id)` **only when B3's `hp` was created by this run**, that is,
+when step 5's snapshot did not list `hp.pane_id` (decision 12: "Rollback closes only a pane the pre-act snapshot did not
+hold"). So a rollback never closes the record's own pane: without a move, B3 answers the record's pane (an occupied cell
+answers its pane, F-15), which step 5's snapshot listed, and it is kept; after a vanish (AC 5b) B3 makes a new pane at the
+record's cell, which the snapshot did not list, and a rollback closes that new pane. With a move, the target cell had no
+occupant (step 5), so B3's pane is new and a rollback closes it, and the record's old pane at its old cell is not touched
+(B10 runs only after R). AC 18b pins the no-move case.
+
 The record written keeps `name`, `hold`, `last_observed.driven` (decision 22) and (without `--profile`) `profile` from
 `record`, and takes everything else as launch does (`last_observed.shown` is O1's `sid`). With `--profile P` it names P.
 **`spec_only`** is as launch's (after E0's `spec.pane` check), in the same order: E0's `spec.pane` check, then `spec_only`
@@ -1883,6 +2103,17 @@ unchanged, although its processes were stopped: that is what the issue asks ("le
   real scope (I-3, decisions 5-7) prints the scope's step once, and an act error the scope returned unchanged (I-3, "case 9")
   gets it from the verb. Text mode writes `error: <message>` to stderr; JSON mode one envelope; the exit code is `class_of`'s
   in both (D-5).
+- **Where the reconcile step lands, in each format** (K-3): `emit_outcome` appends the step to `ErrorBody.message` **before**
+  it calls `output::emit`, so the step is part of the one message in both formats, and `emit_outcome` writes nothing to the
+  sink itself. Text mode: `error: <message>` (step included) on stderr, stdout empty. JSON mode: one envelope on stdout whose
+  `error.message` carries the step, stderr empty. So every "stderr carries / ends with the step" below (AC 6a, 6b, 8, 16h-16k,
+  19c) describes the text run; in the JSON run of the same case the step is in `error.message` on stdout, and AC 17's empty
+  stderr holds.
+- **Which `P` names the step**: the CLI passes, as `request.profile` and as `emit_outcome`'s `profile`, the name of the
+  profile its own step-2 read returned (`Profile.name` as stored), not the `--profile` text as typed. A `ProfileName` is
+  looked up by slug (K-1: `.get(&name.slug())`), so `--profile Demo` finds a profile stored as `demo`, and #663's scope builds
+  its step from the stored name (K-4: `reconcile_step(Some(&back.name))`). Passing the stored name keeps decision 15's
+  exact-substring test exact for such a spelling too, so the step is still printed once.
 
 ## Acceptance criteria (each observable: a named test, a command, or a grep with its expected output)
 
@@ -1906,9 +2137,15 @@ otherwise this rig stays private to `launch.rs`/`relaunch.rs` and the consolidat
 
 `LAUNCH` below is `pane launch demo-c1r1 --herdr-session scratch --project /srv/demo --workspace main --grid r2c1 --model
 demo-provider/demo-model --effort medium --ctx-soft 100000 --ctx-hard 150000 --port-policy fixed:48100`. Every test ends with
-`assert_no_keystroke()`, and every test except AC 6 and AC 7 ends with `assert_matches`. **A call-log assertion counts only
-the calls the verb run made**: the rig records each log's length before the run (a test's own setup, such as serving a port or
-placing a Herdr pane through a fake's port method, is logged too and is not part of the assertion). The fakes' scenario,
+`assert_no_keystroke()`, and every test except AC 6, AC 7 and AC 18b ends with `assert_matches`. **A call-log assertion counts only
+the calls the verb run made**: the rig records each log's length before the run and again when the run returns, and an
+assertion covers only the calls between the two (a test's own setup, such as serving a port or placing a Herdr pane through a
+fake's port method, is logged too and is not part of the assertion; nor is a test's own port call after the run, such as AC
+1's `harness.list_sessions(48100)` or a `ProfileStore::log` read, each of which the fakes log too, K-1, K-5).
+**Two kinds of log.** A fake's **call log** is `faults().calls()` (F-1): the port calls made, oldest first; "the X log" or "X's
+call log" below means it, over the run's span. A profile's **change log** is `ProfileStore::log(&P)` (K-1): one
+`ProfileLogEntry` per applied write, oldest first, each with the `generation` the write left; "P's log", "P's last log entry"
+and "P's log shows" below mean it. The rig seeds P at generation 1, so P's change log starts as one entry at generation 1. The fakes' scenario,
 configuration and inspection methods (`FakeHarness::{kill, freeze, thaw, delete_session, server, tui}`, `FakeHerdr::vanish`,
 the stores' `concurrent_put`) bypass the faults and the call log (J-2, F-4, F-16, F-21), so a call log never shows them: the
 linked host's `kill` on `stop_owned` adds no harness entry, and no test asserts a log entry for a scenario method.
@@ -1945,12 +2182,16 @@ linked host's `kill` on `stop_owned` adds no harness entry, and no test asserts 
       stored record is the other writer's.
    b. `launch_record_conflict_fails_loudly`: a hook makes another writer create `demo-c1r1`'s record during the act; exit 1,
       `generation-conflict`, stderr ends with `; to reconcile, run holler pane doctor`; the live pane, tmux session and server are left
-      (ADR-0021 section 8: "writes nothing more"). AC 6 and AC 7 are the only cases where the registry may differ from the
+      (ADR-0021 section 8: "writes nothing more"). AC 6, AC 7 and AC 18b are the only cases where the registry may differ from the
       fakes, and each hands the difference to doctor (#647) through the printed reconcile step or the leftovers.
 7. **A crash between steps** (`a_crash_mid_launch_leaves_no_record`): a hook panics inside `serve`; the run, inside
    `std::panic::catch_unwind(AssertUnwindSafe(..))`, is `Err`; `pane_store.get(demo-c1r1)` is `None` and the pane store's log
    holds no `CasPut`; the snapshot lists the new Herdr pane at `r2c1` and `FakeHost::sessions()` holds `demo-c1r1`: exactly the
-   "Herdr pane and tmux session with no record" a doctor run (#647) reports (C-10).
+   "Herdr pane and tmux session with no record" a doctor run (#647) reports (C-10). No test installs, replaces or takes the
+   panic hook (`std::panic::set_hook` / `take_hook`): the default hook prints to the test process's own stderr, not to the
+   `Sink` buffers `run_verb_with` returns as `Outcome { out, err }` (E-7), so it cannot reach another test's assertions.
+   `catch_unwind` is a safe function (no `unsafe`, AC 29), and the `panic!` in the hook is already allowed for the whole
+   `pane_verbs` target by `#![allow(clippy::panic)] // #670` in `main.rs` (E-9); the rig adds no `allow` of its own.
 8. **A failed step rolls back, with a named error** (`a_failed_attach_rolls_back`): `fail_next(AttachTui, SessionNotFound)`;
    exit 3, code `session-not-found`; stderr carries `to reconcile, run holler pane doctor` once; the Herdr log holds `Close` of the created pane and the
    snapshot is empty; `FakeHost::ps(demo-c1r1)` is `[]` while `FakeHost::sessions()` still holds `demo-c1r1` (the tmux
@@ -1992,7 +2233,8 @@ linked host's `kill` on `stop_owned` adds no harness entry, and no test asserts 
     `herdr-version-unsupported`, the message contains `SUPPORTED_VERSIONS`; the Herdr log is `[Version]`.
 15. **Required flags**: `launch_names_every_missing_flag`: `pane launch demo-c1r1 --herdr-session scratch`; exit 2, `usage`,
     one line naming `--project`, `--workspace`, `--grid`, `--model`, `--effort`, `--ctx-soft`, `--ctx-hard`, `--port-policy`;
-    `assert_untouched()`. `--port-policy fixed` (no port), `--port-policy fixed:048100` and `--ctx-soft 2 --ctx-hard 1` are
+    `assert_untouched()`. That line is `effective_spec`'s `usage` (launch CLI step 3), not a clap error: no spec flag is
+    clap-`required` (K-6). `--port-policy fixed` (no port), `--port-policy fixed:048100` and `--ctx-soft 2 --ctx-hard 1` are
     each `usage`, exit 2. `a_live_launch_needs_a_herdr_session`: `LAUNCH` without `--herdr-session`; exit 2.
     `port_policy_round_trips_with_the_snapshot` (engine, decision 5): for p in {1, 80, 48100, 65535},
     `port_of_policy(&profile_snapshot::fixed_port_policy(p)) == Ok(p)`; `port_of_policy("fixed:0")` and `("fixed:65536")` are
@@ -2001,19 +2243,23 @@ linked host's `kill` on `stop_owned` adds no harness entry, and no test asserts 
     a. `launch_with_profile_adds_the_spec_and_bumps_once`: `LAUNCH --profile demo`; exit 0; P at generation 2 holds exactly
        one spec, equal to the effective spec (`pane: "demo-c1r1"`, workspace `main`, grid `r2c1`, cwd `/srv/demo`, harness
        `{opencode, "fixed:48100"}`, the model, role `agent`, ceilings); `record.profile == Some("demo")`; P's last log entry
-       is at generation 2.
+       is at generation 2: `profiles.log(&demo)` (K-1) returns two entries, the seed's at 1 and this run's at 2, so
+       `log.last().map(|e| e.generation) == Some(2)` and `log.len() == 2` (one write: "bumps once").
     b. `relaunch_with_profile_and_model_updates_the_spec`: after (a), `pane relaunch demo-c1r1 --profile demo --model
        demo-provider/other-model`; exit 0; P at generation 3, its spec's `model_id == "other-model"`, the record's too.
     c. `a_failed_act_restores_the_profile_specs`: `LAUNCH --profile demo` with `fail_next(AttachTui, ..)`; P's specs equal the
-       seeded (empty) list, at generation 3 (G-8), and its log shows the edit and its reversal; no record.
-    d. `a_refusal_leaves_the_profile_at_its_generation`: AC 10a's case: P at generation 1, the profile store's log holds no
-       `CasPut`.
+       seeded (empty) list, at generation 3 (G-8), and its log shows the edit and its reversal (P's change log, K-1, holds
+       three entries, at generations 1, 2 and 3); no record.
+    d. `a_refusal_leaves_the_profile_at_its_generation`: AC 10a's case: P at generation 1, the profile store's call log holds no
+       `CasPut`, and P's change log is still the seed's one entry at generation 1.
     e. `a_missing_profile_is_refused`: `LAUNCH --profile nope`; exit 3, `profile-not-found`; `assert_untouched()`.
     f. `without_profile_no_profile_is_touched`: `LAUNCH`; the profile store's call log is empty.
     g. `spec_only_changes_the_profile_and_nothing_live`: `pane launch demo-c1r1 --profile demo --spec-only` with the spec flags
        and no `--herdr-session`; exit 0; P at generation 2 holds the spec; the Herdr, host, harness and prober logs are empty;
        the pane store holds no record, and its log holds only the scope's own `Get` of `demo-c1r1` (F-5): no `List`, no
-       `CasPut` (the engine skips steps 1-6, "Where the `spec_only` branch sits"); stdout says `nothing live changed`. The same for `pane relaunch demo-c1r1 --profile
+       `CasPut` (the engine skips steps 1-6, "Where the `spec_only` branch sits"). Concretely, the pane store's call log over
+       the run (`FakePaneStore::faults().calls()`, F-1) is exactly `[PaneStoreOp::Get]`: the one `self.panes.get(pane)?` in
+       the fake scope's `plan` (K-2); the launch CLI reads no pane record (its step 2 reads only the profile store); stdout says `nothing live changed`. The same for `pane relaunch demo-c1r1 --profile
        demo --spec-only --model demo-provider/m2` on a launched pane: P gains the spec, the record and every fake are unchanged.
     h. `a_profile_conflict_after_the_act_fails_loudly`: `scope.before_next_restore(..)` makes another writer
        `concurrent_put` P (F-6, F-21), and `fail_next(AttachTui, ..)`; exit 1, code `profile-conflict`; the message contains
@@ -2027,15 +2273,27 @@ linked host's `kill` on `stop_owned` adds no harness entry, and no test asserts 
        function's; this pins that the verb uses it and adds no quoting of its own).
     k. `a_step_the_real_scope_printed_is_not_repeated` (C-15): the rig with `holler_cli::pane::profile_scope::StoreScope::new`
        (I-4) over the rig's two `Arc` stores (actor `holler pane`) in place of `FakeProfileScope`; a hook after `serve` makes
-       another writer `concurrent_put` P, and `fail_next(AttachTui, ..)`; exit 1, `profile-conflict`; the message contains
+       another writer `concurrent_put` P, and `fail_next(AttachTui, ..)`. The hook is the rig's **harness** hook wrapper
+       (the rig's second bullet: a closure run after a named `HarnessPort` method returns), not `FakeProfileScope`'s
+       `before_next_restore` (F-6), which `StoreScope` does not have: it runs after A4, so after the scope's first write of P
+       and before the act fails at A7, and it moves P's generation, so the scope's restoring `cas_put` at the first write's
+       generation is stale and answers `PaneError::Conflict`, which `StoreScope::restore` turns into `profile-conflict` (K-4); exit 1, `profile-conflict`; the message contains
        `reconcile_step(Some(&demo))`, and `to reconcile, run` occurs exactly once (the scope's own step, I-3 decision 7; the verb
        appended none). With the same rig and no conflict (only the `fail_next`), the restore succeeds, the error is the act's
        (`session-not-found`, exit 3) and `to reconcile, run` again occurs exactly once (the verb's).
 17. **JSON and exit codes** (`exit_codes_equal_across_formats`): for the cases of AC 1, 8, 9a, 10a, 11a, 13b, 15, 16e and 6a,
     the JSON run's stdout passes `check_envelope(stdout, code)` (F-20), its stderr is empty, and its exit code equals the text
-    run's.
+    run's. For each failure case, the text run's stdout is empty and its stderr is exactly `error: ` + the JSON run's
+    `error.message` + one newline (K-3; "Where the reconcile step lands"), so in AC 8's and 6a's cases the JSON
+    `error.message` contains `to reconcile, run holler pane doctor` once, on stdout, and not on stderr.
 18. **Relaunch keeps the position without `--grid`** (`relaunch_without_grid_keeps_the_position`): after `LAUNCH`,
     `pane relaunch demo-c1r1` exits 0; `record.herdr` (id and grid) is unchanged; the relaunch's Herdr log holds no `Close`.
+    b. `a_failed_relaunch_never_closes_the_records_pane` ("Relaunch's rollback"): after `LAUNCH`, the rig arms
+       `fail_next(AttachTui, SessionNotFound)` and runs `pane relaunch demo-c1r1`; exit 3, `session-not-found`; the relaunch's
+       Herdr log holds no `Close`; the snapshot still lists the record's `herdr.pane_id` at `r2c1`; the stored record is
+       unchanged (generation 1). This case ends without `assert_matches`, as AC 6 and 7 do: a relaunch that fails after B1
+       leaves the record naming a stopped server ("A relaunch that fails after B1 and before R", under `tx_launch::relaunch`), which
+       doctor (#647) reports.
 19. **Relaunch with `--grid` moves** (`relaunch_with_grid_moves_the_pane`): `pane relaunch demo-c1r1 --grid c1r3`; exit 0; the
     record's grid is `r3c1` with the new id the snapshot lists there; the old id is closed and gone from the snapshot; stdout
     contains `r3c1`. `pane relaunch demo-c1r1 --workspace other` (no `--grid`) and `--project /srv/other` are `usage`, exit 2,
@@ -2090,6 +2348,8 @@ linked host's `kill` on `stop_owned` adds no harness entry, and no test asserts 
 25. **No keystroke, no shell, in the source**:
     `grep -nE 'send_text|send_keys' crates/holler-pane/src/tx_launch.rs crates/holler-cli/src/pane/launch.rs crates/holler-cli/src/pane/relaunch.rs`
     prints nothing; `grep -nE '"(sh|bash|zsh)"|"-c"|Command::new|std::process' <the same three files>` prints nothing.
+    The grep's scope is these three files only, on purpose: the free probe runner `run_probe` (D-1; merged by #663 in
+    `crates/holler-pane/src/probe.rs`, which uses `std::process::Command`) runs a process by design and is reached only through `Prober::run_probe`, so it is outside this grep and outside this story.
 26. **The surface.** `cargo test -p holler-cli --test cli_surface_test --test docs_cli_test --test pane_cli_process` passes
     (the fixture, ADR 0003 rows and stub table are updated as under Files). `grep -nE '"(re)?launch", 644' crates/holler-cli/tests/pane_verbs/process/stub.rs`
     prints nothing, and `grep -c '^    // #644$' crates/holler-cli/tests/pane_verbs/process/stub.rs` prints `1`.
@@ -2417,5 +2677,11 @@ to surface a flake, and confirms the process tests (`pane_cli_process`) still pa
    `record.harness.port`, the old server is stopped (B1, B2) but its sessions stay in its data directory (F-10), and the new
    server lists none, so B8 creates a new session of record. No port call deletes the old one; it is a leftover doctor (#647)
    reports, as the rollback's created session is (Follow-ups: "A session delete for rollback" covers this case too).
-10. **Size**: the two test files are the largest; the rig's wrappers keep each case short. The 800-line fallback is in the size
+10. **O1 right after the attach on the real adapter** (decision 14, AC 1, AC 20): on the fake, `attach_tui` sets the TUI's
+   `shown` in the same call, so O1's `shown_session` right after A7 or B9 answers `Some(sid)` (K-5). The spike measured 1.6-1.7
+   s before a real TUI shows its session (H-1, decision 1). Whether the real `HarnessPort::shown_session` (#642's) answers
+   `Some(sid)` immediately after `attach_tui` returns is not shown by any evidence here. #644 relies on the port's contract
+   as written; a divergence surfaces at #642's conformance suite or #649's wiring, and it is loud (O1 rolls back with
+   `unavailable`, never a false record).
+11. **Size**: the two test files are the largest; the rig's wrappers keep each case short. The 800-line fallback is in the size
    check.
