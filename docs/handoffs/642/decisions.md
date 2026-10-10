@@ -278,3 +278,43 @@
       machete and test-hooks;
     - the isolated `cargo test --workspace` (1413/0/5), `wire_selftest` and `docs_cli_test`;
     - the AC 24 grep and the `unsafe` count.
+
+## A (Phase 7, anti-duplication gate; this run is 642a) — 2026-10-09T19:00:00-06:00
+- **Decided:** PASS on 3bdd129..884d772, with 0 blocks and 2 warns (see handoff-A-dup.md).
+  - Every object the Reuse map says to reuse is used unchanged. No file of `holler-pane` or the test kit is touched.
+    Every new object is the map's "new, justified", and `server.rs` is the brief's own split.
+  - D-1: two written justifications are inaccurate, though the conclusions hold.
+    - `holler-body/src/query.rs:239` is a blocking OpenCode probe, so "the only OpenCode clients are async" is not quite
+      true. The probe is private, reads 128 bytes, returns a bool, and sits in a layer the adapter must not depend on.
+    - holler-body's fake server is included across crates by `#[path]` in three targets, so "cannot be imported" is not
+      true either. Neither cousin fits, though.
+  - D-2: `exec.rs` hardcodes `kill` and discards its stderr. #641's `TmuxHost` takes the binary as configuration and
+    reads stderr under `LC_ALL=C`, so #696 is not quite "a move". Both differences should be recorded on #696.
+  - Round 2's rework added no new object and no drift: one private counter in `Reader`, plus doc comments.
+- **Assumed:**
+  - #641's branch at a5ea942 (T-red stubs) and #640's at e0254e3 (A-dup and S PASS, unmerged) are those stories' current
+    shapes. Neither is on `main`, so neither could have been extended here.
+  - Including holler-cli's `tests/support/mod.rs` by `#[path]` outside holler-cli fails to compile, because it calls
+    `env!("CARGO_BIN_EXE_holler")` (line 142). I read this from the code and did not compile it.
+- **Hedged:**
+  - D-1 is a warn, not a block. The brief justified both new objects in writing, and the missed analogs could not have
+    been reused.
+  - D-2 is a warn. #641's runner is not written yet (T-red stubs only), so its final shape may change.
+  - The third private `excerpt` is not a finding. Per-crate copies are the pattern (`holler-pane`'s is `pub(crate)`, and
+    the herdr adapter has its own), and this one's byte cut is what keeps AC 11d's 200-byte bound.
+- **Evidence:**
+  - Read in full: the brief; handoff-A.md, handoff-F.md and this file; `src/{lib,server,http,exec,tui}.rs`, `Cargo.toml`,
+    `tests/hermetic_test.rs` and `tests/support/stub.rs`; `642-diff-result-r2.md`; both cousin fake servers; holler-pane's
+    `lib.rs` and `probe.rs`; and the herdr adapter's `lib.rs` and `Cargo.toml`.
+  - Read in part: `holler-body/src/query.rs:190-290`; `holler-cli/tests/support/mod.rs:36-165`;
+    `holler-pane/src/error.rs:660-710`; `holler-adapter-herdr/src/protocol.rs:1-80` and `560-595`; and the #641 branch's
+    `lib.rs:1-95` and brief (a grep for `kill`, lines 375-379 and 433-436).
+  - Ran:
+    - `git diff --stat` / `--name-only` from 3bdd129, and `git diff 1c3ae10 HEAD -- crates`;
+    - the diffs of `Cargo.lock`, `Cargo.toml` and `CHANGELOG.md`;
+    - repo-wide greps for `one_line`/`excerpt`/sanitizers, deadline helpers, percent-encoding, process-group kills,
+      `#[path]`, blocking `TcpStream` in `src`, `Arc<dyn Fn`, `env_clear`, and `tempfile` against `env::temp_dir()`;
+    - the workspace dependency table;
+    - the 640, 641 and 663 branches' crate diffs and new helpers;
+    - `gh issue view` 695, 696 and 700, and `gh issue list --search FakeHarness`;
+    - a grep of the added lines outside `docs/handoffs/` for personal infrastructure names (none).
