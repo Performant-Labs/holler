@@ -159,3 +159,36 @@
   - 7 mutants of F's source were each killed and then restored with `git checkout`: `no such window`, `env --`, `#` doubling, `LC_ALL=C`, the ownership filter, the `pane_dead` filter and the W-14 group probe.
   - Flake check: 24 parallel and 10 sequential runs, no failure.
   - Clean: lint.sh, changelog-check, clippy `-D warnings`, rustfmt, machete, wire_selftest, docs_cli_test and test-hooks. Workspace: 1407 passed and 4 failed (environmental), matching F. The handoff is `docs/handoffs/641/handoff-T-green.md`.
+
+## A (Phase 7, anti-duplication gate) — 2026-10-09T19:14:09-06:00
+- **Decided:** PASS on the diff 3bdd129..23e358a, with 0 blocks and 1 warn (see handoff-A-dup.md).
+  - F extended every object the reuse map named:
+    - `HostPort` is implemented as is.
+    - The conformance suite runs unchanged, through `run_host_conformance(private)`.
+    - `PaneError`, `PaneName` and `Argv` are reused, and no variant is added.
+    - The `HostOp::as_str` names are pinned by a test.
+    - The skeleton is filled behind T's surface.
+  - The one new object the brief justified, `exec.rs`, now has its consolidation follow-up filed (#696).
+  - No other new object duplicates anything. No production crate, on this branch or on current `main`, has a bounded runner, a `kill` seam, a deadline helper, a pid type, tmux vocabulary or a `PaneError` constructor.
+  - F's two deviations stay inside `classify` and the crate docs.
+  - **W-21.** `tests/real_tmux_test.rs` redefines `name`, `argv` and `alive` from `tests/common/mod.rs`; the two `alive` bodies are byte-identical. This goes against `holler-adapter-herdr`'s pattern, where every test file imports its `tests/common`.
+- **Assumed:** #647's reconcile engine, which landed on `main` after this branch's base, is the only new consumer of `HostPort` since the base. Its `ps` reading fits the adapter's Decision 8 mapping. I did not build or run the merged tree.
+- **Hedged:**
+  - W-21 is a warn, not a block. The Phase 7 block rule covers F building a parallel path to an object the map named. These are three small test helpers in T's file. None is in the map or among the overlay's named harness helpers, and the workspace has no shared crate for them.
+  - The `CHANGELOG.md` conflict with `main` is in the handoff's Notes, not graded as a finding. It is a merge chore, not drift: #647 put its entry at the same insertion point, and the fix is to keep both.
+- **Evidence:**
+  - Read the brief in full, handoff-A (round 4), handoff-F, handoff-T-green, this journal, and every changed file in full: `src/{lib,exec,tmux}.rs`, `tests/{fake_tmux_test,real_tmux_test}.rs`, `tests/common/mod.rs`, and the `Cargo.toml`, `Cargo.lock` and `CHANGELOG.md` diffs.
+  - `git grep` checks on `origin/main` (e612878):
+    - production `Command::new`, `try_wait` and `spawn`: only `holler-load-test`;
+    - `kill`: only test-only `libc::kill`;
+    - `holler-pane`: no bound, deadline, pid type or `PaneError` constructor; `Argv`'s methods;
+    - no tmux vocabulary outside the adapter;
+    - `wait_for`: only in `holler-cli/tests/support`;
+    - no fake-binary writer elsewhere;
+    - the test kit's public API;
+    - how herdr's and holler-pane's test files share `tests/common`;
+    - #647's `check_tmux` and its `HOST_PS`.
+  - `gh issue view 663` and `696`: #696 (filed 2026-10-09 15:21 MDT) names `exec.rs` and the fake-`kill` seam.
+  - `git diff --name-only` shows nothing outside the blast radius.
+  - The issue title's host name has 0 hits in the diff and the commit messages, and every commit uses the no-reply identity.
+  - `git merge-tree HEAD origin/main` reports a content conflict in `CHANGELOG.md` only.
