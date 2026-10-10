@@ -12,6 +12,8 @@
 # Every text typed into a pane is followed by Enter: in the same `tmux send-keys` call for the shell line, as a
 # separate call after a short pause for `/exit` (the TUI's autocomplete popup swallows an Enter sent with it). Only the key file's PATH is written to
 # pane.env; the file is never read or printed. Exit: 0 ok, 1 refused (nothing changed), 2 failed after a change.
+# --mo restarts c4r2, the MO pane: it edits opencode-mo/opencode.json and agents/mo.md instead of pane.env, launches
+# with OC_SESSION_NAME=mo and no --agent, needs --key-file, accepts a busy pane, and skips pane-ready.
 # A pane that is already fully down is started without the stop step; that needs --project.
 # Timeouts (seconds) can be tuned with PANE_RESTART_T_STOP / _T_UP / _T_REG / _T_MODEL and PANE_RESTART_POLL.
 set -uo pipefail
@@ -26,7 +28,7 @@ type_delay=${PANE_RESTART_TYPE_DELAY:-2}
 
 pane=${1:-}
 [ "$#" -gt 0 ] && shift
-model="" effort="" key_file="" project="" agent="" dry=0
+model="" effort="" key_file="" project="" agent="" dry=0 mo=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --model) model=${2:-}; shift 2 || break ;;
@@ -35,14 +37,15 @@ while [ "$#" -gt 0 ]; do
     --project) project=${2:-}; shift 2 || break ;;
     --agent) agent=${2:-}; shift 2 || break ;;
     --dry-run) dry=1; shift ;;
-    *) echo "${pane:-?}: REFUSED: unknown argument '$1' (usage: pane-restart PANE --model PROVIDER/ID [--effort E] [--key-file PATH] [--project DIR] [--agent KEY] [--dry-run])"; exit 1 ;;
+    --mo) mo=1; shift ;;
+    *) echo "${pane:-?}: REFUSED: unknown argument '$1' (usage: pane-restart PANE --model PROVIDER/ID [--effort E] [--key-file PATH] [--project DIR] [--agent KEY] [--mo] [--dry-run])"; exit 1 ;;
   esac
 done
 
 refuse() { echo "${pane:-?}: REFUSED: $*"; exit 1; }
-bak=""
+bak="" changed="pane.env"
 fail_step() { # fail_step N name message: after a change, say what changed
-  echo "$pane: FAIL step $1 ($2): $3${bak:+; pane.env was changed, backup: $bak}"
+  echo "$pane: FAIL step $1 ($2): $3${bak:+; $changed was changed, backup: $bak}"
   exit 2
 }
 wait_for() { # wait_for SECONDS cmd...: poll until cmd succeeds or the bound passes
@@ -56,7 +59,12 @@ wait_for() { # wait_for SECONDS cmd...: poll until cmd succeeds or the bound pas
 
 # 1. Refuse -------------------------------------------------------------------------------------------------
 [[ "$pane" =~ ^c[0-9]r[0-9]$ ]] || refuse "'$pane' is not a pane name (cCrR)"
-[ "$pane" = c4r2 ] && refuse "c4r2 is the MO pane, which has its own config and role"
+if [ "$mo" = 1 ]; then
+  [ "$pane" = c4r2 ] || refuse "--mo is only for c4r2, the MO pane"
+  [ -n "$key_file" ] || refuse "--mo needs --key-file (the provider key file for MO's config)"
+else
+  [ "$pane" != c4r2 ] || refuse "c4r2 is the MO pane: pass --mo (its config is opencode-mo/, not pane.env)"
+fi
 [ -n "$model" ] || refuse "--model PROVIDER/ID is required"
 [[ "$model" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._:-]+$ ]] || refuse "'$model' is not PROVIDER/ID"
 [ -z "$effort" ] || [[ "$effort" =~ ^[A-Za-z0-9_-]+$ ]] || refuse "'$effort' is not an effort name"
@@ -78,11 +86,19 @@ if [ -n "${TMUX_PANE:-}" ]; then
   own=$(tmux display-message -p -t "$TMUX_PANE" '#{session_name}' 2>/dev/null || true)
   [ "$own" = "$session" ] && refuse "this script is running inside $session"
 fi
-[ -f "$penv" ] || refuse "$penv does not exist"
+mo_dir="$HOME/fleet-agents/opencode-mo"
+mo_json="$mo_dir/opencode.json"
+mo_md="$mo_dir/agents/mo.md"
+if [ "$mo" = 1 ]; then
+  [ -f "$mo_json" ] && [ -f "$mo_md" ] || refuse "MO's config files are missing ($mo_json, $mo_md)"
+else
+  [ -f "$penv" ] || refuse "$penv does not exist"
+fi
 oc_holler_running() { pgrep -f "^bash [^ ]*/oc-holler $session( |\$)" >/dev/null 2>&1; }
 down=0
 if status=$(curl -fsS -m 5 "$base/session/status" 2>/dev/null); then
-  [ "$(printf '%s' "$status" | jq -c . 2>/dev/null)" = '{}' ] || refuse "$pane is busy (/session/status is not {})"
+  # MO is almost always mid-turn (the watchdog feeds it); restarting it only aborts that turn, so --mo allows it.
+  [ "$mo" = 1 ] || [ "$(printf '%s' "$status" | jq -c . 2>/dev/null)" = '{}' ] || refuse "$pane is busy (/session/status is not {})"
 else
   # A pane that is fully down (no server, no oc-holler: crashed, or its TUI was exited) is started, not stopped.
   oc_holler_running && refuse "no OpenCode server answering at $base, but oc-holler is still running in $session"
@@ -95,15 +111,16 @@ else
   project=$(curl -fsS -m 5 "$base/path" 2>/dev/null | jq -r '.directory // empty' 2>/dev/null)
   [ -n "$project" ] || refuse "cannot read the project directory from $base/path; pass --project"
 fi
-if [ -z "$agent" ]; then
+if [ "$mo" = 0 ] && [ -z "$agent" ]; then
   agent=$(sed -n 's/^\(export[[:space:]]\{1,\}\)\{0,1\}OC_DEFAULT_AGENT=\([A-Za-z0-9_-]*\).*/\2/p' "$penv" | head -1)
 fi
 old_session=$(cat "$state/last-session" 2>/dev/null || true)
 
 # The new pane.env, built beside the old one: a replaced line keeps its place, an absent one is appended, a
 # duplicate is dropped, OC_ROLE_MODEL follows the model only when the file already has it.
-new_env=$(mktemp)
-trap 'rm -f "$new_env"' EXIT
+new_env=$(mktemp); new_json=$(mktemp); new_md=$(mktemp)
+trap 'rm -f "$new_env" "$new_json" "$new_md"' EXIT
+if [ "$mo" = 0 ]; then
 PR_OC_MODEL="$model" PR_OC_EFFORT="$effort" PR_OC_KEY_FILE="$key_file" PR_OC_ROLE_MODEL="$model" \
 awk '
 BEGIN { n = split("OC_MODEL OC_EFFORT OC_KEY_FILE OC_ROLE_MODEL", V, " "); for (i = 1; i <= n; i++) val[V[i]] = ENVIRON["PR_" V[i]] }
@@ -117,23 +134,51 @@ BEGIN { n = split("OC_MODEL OC_EFFORT OC_KEY_FILE OC_ROLE_MODEL", V, " "); for (
 END { for (i = 1; i <= n; i++) if (V[i] != "OC_ROLE_MODEL" && val[V[i]] != "" && !seen[V[i]]) print "export " V[i] "=" val[V[i]] }
 ' "$penv" > "$new_env"
 
+else
+  # MO: the provider key file and the compaction pin go in opencode-mo/opencode.json, the model and variant in agents/mo.md.
+  jq --arg p "${model%%/*}" --arg kf "$kf" --arg m "$model" --arg e "$effort" \
+    '.provider[$p].options.apiKey = "{file:" + $kf + "}" | .agent.compaction.model = $m | if $e != "" then .agent.compaction.variant = $e else . end' \
+    "$mo_json" > "$new_json" || refuse "cannot build the new $mo_json"
+  awk -v m="$model" -v e="$effort" '
+    /^---[ \t]*$/ { fm++; print; next }
+    fm == 1 && /^model:/ { print "model: " m; if (e != "") print "variant: " e; next }
+    fm == 1 && /^variant:/ { next }
+    { print }' "$mo_md" > "$new_md"
+  grep -qx "model: $model" "$new_md" || refuse "$mo_md has no model: line in its front matter"
+fi
+
 # shellcheck disable=SC2088  # the tilde is typed into the pane's own shell, which expands it
 oc_holler='~/.local/bin/oc-holler'
 q_project=$(printf '%q' "$project")
-launch="cd $q_project && OC_FRESH=1 OC_SESSION_NAME=oc $oc_holler $session $q_project -- -m $model${agent:+ --agent $agent}"
+if [ "$mo" = 1 ]; then
+  launch="cd $q_project && OC_FRESH=1 OC_SESSION_NAME=mo $oc_holler $session $q_project -- -m $model"
+else
+  launch="cd $q_project && OC_FRESH=1 OC_SESSION_NAME=oc $oc_holler $session $q_project -- -m $model${agent:+ --agent $agent}"
+fi
 
 if [ "$dry" = 1 ]; then
-  echo "$pane: dry run, nothing changed. pane.env diff:"
-  diff -u "$penv" "$new_env" | sed '1,2d'
+  echo "$pane: dry run, nothing changed. config diff:"
+  if [ "$mo" = 1 ]; then
+    diff -u "$mo_json" "$new_json" | sed '1,2d'; diff -u "$mo_md" "$new_md" | sed '1,2d'
+  else
+    diff -u "$penv" "$new_env" | sed '1,2d'
+  fi
   echo "send-keys -t $session /exit   (then, ${type_delay}s later)   send-keys -t $session Enter"
   echo "send-keys -t $session $launch Enter"
   exit 0
 fi
 
 # 2. Back up, 3. set the OC_ lines -----------------------------------------------------------------------------
-bak="$penv.bak-pre-restart-$(date +%Y%m%d-%H%M%S)-$$"
-cp "$penv" "$bak" || refuse "cannot back up $penv"
-cat "$new_env" > "$penv" || fail_step 3 pane.env "cannot write $penv"
+stamp="$(date +%Y%m%d-%H%M%S)-$$"
+if [ "$mo" = 1 ]; then
+  cp "$mo_json" "$mo_json.bak-pre-restart-$stamp" && cp "$mo_md" "$mo_md.bak-pre-restart-$stamp" || refuse "cannot back up MO's config"
+  bak="$mo_json.bak-pre-restart-$stamp and $mo_md.bak-pre-restart-$stamp"; changed="MO's config"
+  cat "$new_json" > "$mo_json" && cat "$new_md" > "$mo_md" || fail_step 3 config "cannot write MO's config"
+else
+  bak="$penv.bak-pre-restart-$stamp"
+  cp "$penv" "$bak" || refuse "cannot back up $penv"
+  cat "$new_env" > "$penv" || fail_step 3 pane.env "cannot write $penv"
+fi
 
 # 4. Stop the TUI ----------------------------------------------------------------------------------------------
 tui_down() {
@@ -158,7 +203,8 @@ followed() { # oc-holler's watcher wrote the new session to last-session and ses
   local last; last=$(cat "$state/last-session" 2>/dev/null || true)
   [ -n "$last" ] && [ "$last" != "$old_session" ] && grep -q "session_id = \"$last\"" "$state/sessions.toml" 2>/dev/null
 }
-doctor_ok() { pfo doctor "$pane" 2>&1 | tail -1 | grep -q ': ok$'; }
+doctor_name=$pane; [ "$mo" = 1 ] && doctor_name=jupiter-hj-c4r2/mo
+doctor_ok() { pfo doctor "$doctor_name" 2>&1 | tail -1 | grep -q ': ok$'; }
 if ! wait_for "$t_reg" followed; then
   last=$(cat "$state/last-session" 2>/dev/null || true)
   fail_step 7 registration "last-session is '${last:-none}' (was '${old_session:-none}') and no new session was registered after ${t_reg}s"
@@ -167,8 +213,8 @@ last=$(cat "$state/last-session")
 # oc-holler does not update pfleet's own registration record, so pfo doctor reports drift (registered old, hub drives new).
 # The fix is the one pane-ready names: write the registration for the new session.
 if ! doctor_ok; then
-  pfo doctor "$pane" --set-registration "$last" >/dev/null 2>&1
-  wait_for 10 doctor_ok || fail_step 7 registration "pfo doctor is still not ok after: pfo doctor $pane --set-registration $last"
+  pfo doctor "$doctor_name" --set-registration "$last" >/dev/null 2>&1
+  wait_for 10 doctor_ok || fail_step 7 registration "pfo doctor is still not ok after: pfo doctor $doctor_name --set-registration $last"
 fi
 sid=$(cat "$state/last-session")
 
@@ -182,8 +228,11 @@ answers_on_model() {
 wait_for "$t_model" answers_on_model || fail_step 8 model "the pane's last answer in $sid is on '${seen_model:-no answer yet}', not $model"
 
 # 9. pane-ready ---------------------------------------------------------------------------------------------
-if ! ready=$(pane-ready "$pane" 2>&1); then
-  fail_step 9 pane-ready "$(printf '%s\n' "$ready" | grep -E 'NOT READY|FAIL' | head -3 | tr '\n' ';' | cut -c1-300)"
+if [ "$mo" = 0 ]; then
+  if ! ready=$(pane-ready "$pane" 2>&1); then
+    fail_step 9 pane-ready "$(printf '%s\n' "$ready" | grep -E 'NOT READY|FAIL' | head -3 | tr '\n' ';' | cut -c1-300)"
+  fi
+  echo "$pane: OK model=$model session=$sid"
+else
+  echo "$pane: OK model=$model session=$sid (MO; pane-ready does not apply)"
 fi
-
-echo "$pane: OK model=$model session=$sid"
