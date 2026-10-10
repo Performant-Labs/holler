@@ -169,3 +169,22 @@ false (D and U are N/A, recorded). Append-only; every phase adds its entry.
   transport discipline; report params with pane-only ttl_ms; `Endpoints::from_env`; refresh +
   degraded path; `resolve_action_pane`; `herdr-holler refresh` bin). Uncommitted at stage end —
   O commits immediately per the git convention.
+
+## 2026-10-10 · Phase T-green — GREEN-CONFIRMED + Tier 2 (O journals; T = tester)
+
+- Dispatched via the task tool; recorded with `stage run` (STAGE OK, attempt 1).
+- The plugin's t-green crossing rendered **GREEN (exit 0)** on attempt 3 of 5. Attempts 1–2 were
+  RED from **environmental contention**, not code: the captured tail showed `holler-cli`'s
+  `body_confirm_test` dying with no panic line (abnormal kill signature) while sibling panes were
+  mid-suite in the shared warm `target/`; the same command passed in this session twice, the test
+  passes 4/4 in isolation, and by attempt 3 the sibling runs had closed and the crossing went
+  green. herdr-holler itself was green in every run. Journaled as the run's second odd thing.
+- T's evidence: narrow 10/10; full **147 targets, 1762 passed, 0 failed, 25 ignored, 1 filtered**
+  (the configured skip). Tier 2: honest-not-vacuous GREEN (unknown-never-stale really removes the
+  hub socket after a success; the allowlist scan really walks src + manifest; stubs→implementation
+  is a natural A/B), F's diff confined to plugins/herdr-holler/** (+Cargo.lock, +the pre-F
+  operator-approved chore), tests byte-identical to T-red, fmt/clippy -D warnings/no-unsafe/
+  no-#[allow]/machete/binary smoke all clean, all four A-warns verified in code as written.
+- F's three findings ruled acceptable-as-contracted (bare action argv = #649 follow-up; SYNC
+  3-of-4 cases = suite-widening follow-up; in-process unknown + TTL backstop = the one-shot
+  binary reality) — recorded as follow-ups, none a wrong test. No test repairs.
