@@ -28,18 +28,31 @@
 
 use std::sync::Arc;
 
+use holler_pane::findings::doctor_command;
 use holler_pane::{
     Actor, Pane, PaneError, PaneName, PaneStore, Profile, ProfileName, ProfileScope, ProfileSpec,
     ProfileStore, ResolvedScope, SpecEdit,
 };
 
-/// The reconcile step, one line for an operator to paste into a shell.
+/// The reconcile step a verb prints after a failure that may leave its records and the live
+/// panes apart (ADR-0021 sections 8 and 12), one line to paste into a shell. It is built on
+/// [`doctor_command`], the doctor command line's one builder (#701), and verbs call it rather
+/// than spell a step of their own. `Some(P)` gives
+/// `to reconcile, run holler pane doctor --profile '<P>' and then holler profile show '<P>'`,
+/// and `None` gives `to reconcile, run holler pane doctor`.
 ///
-/// RED stub (T, #663 re-entry): the signature of Decision 8 with an empty body, so AC 5's test
-/// compiles and fails on its equalities. F builds it on `holler_pane::findings::doctor_command`.
+/// It names no pane on purpose: a pane-scoped doctor refuses a pane with no record or outside P,
+/// which is what a failed `launch` of a new pane leaves; the doctor run covers every pane of P,
+/// and `profile show` reports a spec with no live pane. P is POSIX-single-quoted and has no
+/// control character, so the step is one line. A P with a leading `-` is quoted too, but clap
+/// still reads it as an option, so for that name the step does not parse.
 pub fn reconcile_step(profile: Option<&ProfileName>) -> String {
-    let _ = profile.map(|profile| single_quoted(profile.as_str()));
-    String::new()
+    let doctor = doctor_command(None, false);
+    let Some(profile) = profile else {
+        return format!("to reconcile, run {doctor}");
+    };
+    let name = single_quoted(profile.as_str());
+    format!("to reconcile, run {doctor} --profile {name} and then holler profile show {name}")
 }
 
 /// The real [`ProfileScope`] over any [`ProfileStore`] and [`PaneStore`]; building it does no I/O.

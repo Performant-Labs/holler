@@ -337,3 +337,44 @@ Rigor/brief gate: BLOCKED, overridden by Andre Angelantoni: The outside brief ga
   - `cargo clippy -p holler-pane -p holler-cli --all-targets -- -D warnings`, `bash scripts/lint.sh` and `rustfmt --check
     --edition 2021` on both files all exit 0. `profile_scope.rs` is 592 lines.
   - No `hlr-probe-663-*` directory and no `sleep 30` was left behind.
+
+## F (Phase 6, implementation, re-entry) — 2026-10-09T20:23:39-06:00
+- **Decided:**
+  - **Decision 8, built.** `reconcile_step(profile: Option<&ProfileName>)` starts from
+    `holler_pane::findings::doctor_command(None, false)` for both forms. `None` gives `to reconcile, run holler pane
+    doctor`. `Some(P)` adds `--profile '<P>' and then holler profile show '<P>'`, which is byte-identical to the
+    previous run's text.
+    - T's stub, its rustdoc and its `let _` line are replaced.
+    - The rustdoc gives C9's reason that the step names no pane, says verbs call the function (F5), and takes W-17's
+      sentence.
+  - **AC 14's ADR text.**
+    - a gains the exceptions sentence.
+    - e's step 6 is re-worded in place: the builder (#701), the no-pane reason and `reconcile_step(None)`.
+    - The fence bullet's parenthesis now points at step 6's reason.
+    - f extends section 12's last sentence with the probe runner's three cases.
+    - b, c and d already matched and are unchanged.
+  - **One rustdoc bullet on `run_probe`** for the `try_wait`-error rule (no signal, `Error`, a child still in the group
+    is left). The public doc now names all three exceptions the ADR calls "documented". No code changed.
+  - **W-16's evidence recorded.** `evidence.md` now has #705's `kill` form, its group setup and its test (from
+    `dc300ab`), and the macOS job's log line. Three facts about the reconcile step's builder are added too.
+  - **The tests are not edited.** Both test modules hash the same as at `f79cd05`. `archChanged: true`: this cycle
+    changed `reconcile_step`'s signature and removed its const (T's stub, F's body), and it amends the ADR.
+- **Assumed:**
+  - `cargo doc` is not a CI gate, and it prints no warning for the changed files anyway.
+  - The merge step resolves the `CHANGELOG.md` conflict with `origin/main` (`e327569`). F does not merge.
+- **Hedged:**
+  - **`profile_scope.rs` is at 605 lines,** past the 600-line warning. AC 10 accepts this, and the full rustdoc is worth
+    more than the warning for a function other stories call.
+  - **The `probe.rs` bullet goes beyond the brief,** which expected that file untouched in this run. It is rustdoc only.
+  - **The `dc300ab` evidence is not on the branch,** so the diff gate may not attach it. The CI log is not a repo file.
+- **Evidence:**
+  - **Scope tests:** `cargo test -p holler-cli --lib pane::profile_scope` gives 7 passed (RED: 3 passed, 4 failed).
+  - **Probe tests:** `probe::tests` gives 12 passed (1.39 s serially), and `ports_test run_probe_stub_never_reports_success`
+    gives 1 passed.
+  - **Workspace:** `HOLLER_STATE_DIR=<scratch> cargo test --workspace --no-fail-fast` with CI's skip gives 1494 passed and
+    0 failed in 131 suites.
+  - **Gates:** clippy `-D warnings`, `lint.sh` (one accepted warn), `changelog-check.sh`, `cargo machete`,
+    `rustfmt --check --edition 2021` on both files and `docs_cli_test` all pass.
+  - **AC 5, 9, 11, 12 and 14 checks** hold on the working tree against the merge base `0ad2d8a`.
+  - **Sources:** the macOS log via `gh run view 38013074383 --job 114099775442 --log` (line 641), and #706's
+    `holler-adapter-host/src/exec.rs:202` at `e327569`. Details are in `handoff-F.md` and `evidence.md`.

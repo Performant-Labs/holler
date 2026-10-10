@@ -81,6 +81,10 @@ pub enum ProbeResult {
 ///   if it cannot be spawned, only the leader is ended (`Child::kill`), its children are
 ///   left, and the runner still returns within the same bound. Off Unix only the leader is
 ///   ended.
+/// - **No signal once the leader may have been reaped.** The runner signals only while the
+///   leader is unreaped, so its pid cannot belong to another process. An exit status that
+///   cannot be read (a `try_wait` error: something else in this process reaped the leader)
+///   is `Error`, no signal is sent, and any child still in the group is left.
 /// - **Long-lived callers.** A probe whose child escapes the group (`setsid`, a double fork)
 ///   and keeps stdout open leaves one reader thread and its pipe blocked after the runner
 ///   returns, until that child closes the pipe. A long-lived caller that reuses

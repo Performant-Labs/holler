@@ -149,3 +149,97 @@ Written by F (Phase 5). Every excerpt is copied from the tree at `3bdd129` (none
   >     /// (or at 1 for a new profile), without the name rule, logs its entry with `actor`
   >     /// and publishes its event. It bypasses the faults and the call log. Returns the
   >     /// stored record.
+
+## The reconcile step's builder (added by F, re-entry run; copied from the branch, which holds `0ad2d8a`'s #701)
+
+- **Fact:** `doctor_command(None, false)` is exactly `holler pane doctor`: the one `const` spelling, with no pane and no
+  `--fix`. So `reconcile_step(None)` is `to reconcile, run holler pane doctor`, and the profile form appends
+  `--profile '<P>' and then holler profile show '<P>'` to the same line.
+  **Source:** `crates/holler-pane/src/findings.rs:36, 306-316`
+  **Verbatim excerpt:**
+  > const DOCTOR: &str = "holler pane doctor";
+  > pub fn doctor_command(pane: Option<&PaneName>, fix: bool) -> String {
+  >     let mut line = DOCTOR.to_owned();
+  >     if let Some(pane) = pane {
+  >         line.push(' ');
+  >         line.push_str(pane.as_str());
+  >     }
+  >     if fix {
+  >         line.push_str(" --fix");
+  >     }
+  >     line
+  > }
+
+- **Fact:** `findings` is a public module of `holler-pane`, so `holler-cli` can call `doctor_command`.
+  **Source:** `crates/holler-pane/src/lib.rs:42`
+  **Verbatim excerpt:**
+  > pub mod findings;
+
+- **Fact:** a pane-scoped doctor refuses a pane with no record. With `--profile P` the scope comes from
+  `ProfileScope::resolve(P, Some(pane))`, which is `pane-not-in-profile` for such a pane (`StoreScope::member`, in the
+  diff). Without `--profile` it is `pane-not-found`. This is why the step names no pane: after a failed `launch` of a new
+  pane there is no record.
+  **Source:** `crates/holler-pane/src/reconcile.rs:226-235`
+  **Verbatim excerpt:**
+  >     let scope = match (request.profile, request.pane) {
+  >         (Some(profile), pane) => ports.scope.resolve(profile, pane)?.panes,
+  >         (None, Some(name)) => {
+  >             let pane = ports
+  >                 .pane_store
+  >                 .get(name)?
+  >                 .ok_or_else(|| PaneError::PaneNotFound {
+  >                     what: name.to_string(),
+  >                 })?;
+  >             vec![pane]
+
+## The group kill on macOS (added by F, re-entry run; the architecture review's W-16)
+
+These excerpts are copied from `origin/main` at `dc300ab` (#705, merged at 19:43 MDT on 2026-10-09). The files are not on
+this branch, which is merged with `0ad2d8a`, so the gate may not be able to attach them from the branch. They are
+evidence for `probe.rs`'s group kill on macOS, which the brief's Evidence H said nothing had yet run. That statement is
+now stale. #705's `exec.rs` and `hermetic_test.rs` are byte-identical at its CI head `4155e06` and at `dc300ab` (blobs
+`359ba09` and `ddd22ae` at both).
+
+- **Fact:** the OpenCode adapter kills a process group with the same `kill -s KILL -- -<pgid>` form that `probe.rs`'s
+  `kill_group` uses, through the `kill` program on `PATH`.
+  **Source:** `crates/holler-adapter-opencode/src/exec.rs:32-34` (at `dc300ab`; `const KILL: &str = "kill";` is line 17)
+  **Verbatim excerpt:**
+  >     let group = format!("-{pgid}");
+  >     let mut kill = Command::new(KILL);
+  >     kill.args(["-s", "KILL", "--", group.as_str()]);
+
+- **Fact:** the adapter starts its server in a process group of its own and, when it gives up, kills that group with
+  `kill_group` before it kills and reaps the server itself, the order of `probe.rs`'s `kill_and_reap`.
+  **Source:** `crates/holler-adapter-opencode/src/server.rs:106, 169-172` (at `dc300ab`)
+  **Verbatim excerpt:**
+  >         .process_group(0);
+  > fn stop(child: &mut Child) {
+  >     let _ = exec::kill_group(child.id(), OP_SERVE, KILL_BOUND);
+  >     let _ = child.kill();
+  >     let _ = child.wait();
+
+- **Fact:** the test that exercises that form is not opt-in. Its server is a shell that records its own pid and starts a
+  background `sleep 30`. After `serve` gives up, the test asserts that the shell's pid and the `sleep`'s pid are each
+  gone within 2 s.
+  **Source:** `crates/holler-adapter-opencode/tests/hermetic_test.rs:638-639, 645-646, 663-671` (at `dc300ab`)
+  **Verbatim excerpt:**
+  > #[test]
+  > fn serve_kills_its_process_group_when_the_deadline_passes() {
+  >     let scratch = Scratch::with_script("echo $$ > pid\nsleep 30 &\necho $! > child\nwait\n");
+  >     let h = OpenCodeHarness::new(config("sh", scratch.path(), timeouts));
+  >         let gone_by = Instant::now() + Duration::from_secs(2);
+  >         while alive(pid) && Instant::now() < gone_by {
+  >             std::thread::sleep(Duration::from_millis(20));
+  >         }
+  >         if alive(pid) {
+  >             let _ = std::process::Command::new("kill")
+  >                 .args(["-KILL", pid])
+  >                 .status();
+  >             panic!("the {file} process {pid} outlived serve's timeout");
+
+- **Fact:** that test passed on CI's macOS runner: GitHub Actions run `38013074383`, job `114099775442`
+  (`test (macos-latest)`, conclusion `success`, PR #705's head `4155e06`). The log line is from 19:27:00 MDT on 2026-10-09.
+  **Source:** the job's log (`gh run view 38013074383 --repo Performant-Labs/holler --job 114099775442 --log`), line 641.
+  This is not a repo file. The excerpt is the test output, without the log's own timestamp prefix.
+  **Verbatim excerpt:**
+  > test serve_kills_its_process_group_when_the_deadline_passes ... ok
