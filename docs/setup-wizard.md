@@ -299,6 +299,23 @@ refusal names the colliding item and the config key to change (`hub_port`, `serv
 (`<state_dir>/wizard-ledger.toml`) records its pid with the same start time and command; a
 reused pid is foreign.
 
+## Herdr session
+
+Stage 8 and Stage 9 run every Herdr command through `agent-skills/setup-wizard/lib/herdr.sh`,
+which adds `--session <herdr_session>` (from the `[instance]` table) to each one, `server stop`
+and `session attach` included. A bare `herdr server stop` is never issued: which server it stops
+is not established, and it could stop another instance's session. The wrapper refuses to run when
+a non-default instance sets no `herdr_session`. Before building, the stage lists the machine's
+Herdr sessions; if the named session exists and the instance's ledger did not record creating it
+(`role = herdr`), it stops and names the session, and never splits panes of a session it did not
+create. If the run is inside a pane of a different session than the instance's, it stops before
+any split. The server log is named for the instance (`<prefix>-herdr-server.log`).
+
+Unverified until story #734 checks it with the real binary: how a pane's own session is learned
+(`HERDR_PANE_ID` and `HERDR_SESSION` in the environment, in one function, `pane_session`, in
+`herdr.sh`), and that `herdr session list` prints the session name first on each line. The tests
+use a fake `herdr`.
+
 ## Related
 
 - [ADR 0005](adr/ADR-0005.md) — attach mode's normative design.

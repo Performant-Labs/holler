@@ -950,33 +950,58 @@ re-minting blindly, and don't let one host's token problem block diagnosing/fixi
 **Ask:** nothing further — Stage 3's plan already said whether the Herdr server/workspace gets
 reused, extended, or built fresh.
 
+**Every Herdr command in this stage and in Stage 9 goes through `"$WIZARD_LIB/herdr.sh"`**
+(default `WIZARD_LIB`: `agent-skills/setup-wizard/lib/`), written `H` below. `H run <args>` runs
+`herdr --session <instance.herdr_session> <args>`: the session flag is on **every** command,
+`server stop` and `session attach` included. **A bare `herdr server stop` is never issued, by this
+skill or by the wrapper**: which server it stops is not established, and it could stop another
+instance's. The wrapper refuses to run when the instance is not the default one and sets no
+`herdr_session`. Export first, from the `[instance]` table (Stage 1):
+```bash
+H="$WIZARD_LIB/herdr.sh"
+export WIZARD_INSTANCE_NAME=<instance.name> WIZARD_HERDR_SESSION=<instance.herdr_session>
+export WIZARD_INSTANCE_PREFIX=<instance.prefix> WIZARD_LEDGER=<state_dir>/wizard-ledger.toml
+```
+
+**Do (session check, before anything is built):**
+```bash
+"$H" check-pane      # stops if this run is inside a pane of a DIFFERENT Herdr session
+"$H" check-session   # stops if the named session exists and the ledger did not create it
+```
+If `check-session` stops, tell the operator the session's name and ask; never split panes of a
+session this wizard did not create. If `check-pane` stops, do not split anything.
+
 **Do (server check, first, only if the plan called for a fresh server):**
 ```bash
-herdr status
+"$H" run status
 ```
 If `server: not running`, start one headlessly (`herdr` alone needs a real TTY and will fail
 with "cannot attach without a usable terminal" when run non-interactively — use the headless
-form):
+form; its log is named for the instance, see `"$H" log-path`):
 ```bash
-nohup herdr server > /tmp/herdr-server.log 2>&1 &
+"$H" server-start
 sleep 3
-herdr status   # should now show server: running
-herdr pane list
+"$H" run status   # should now show server: running
+"$H" run pane list
 ```
+Record the server in the ledger (`role = herdr`, `stage = 8`, `session = <instance.herdr_session>`)
+with `ledger.sh record` so a later run knows this wizard created the session.
+
 A genuinely first-ever Herdr has exactly one pane and no way to know what it should become. This
 wizard assumes the agent driving it is **not** itself running inside a Herdr pane (true for the
 Claude Code desktop app and for a plain terminal), so there is nothing to "find" — you are building
-the workspace from scratch. If you *are* inside a Herdr pane, don't build over your own pane: stop
-and ask which workspace to use. Note whichever pane `herdr pane list` shows — that pane becomes the
-**first slot** in the build below.
+the workspace from scratch. If you *are* inside a Herdr pane, `"$H" check-pane` compares that
+pane's session with the instance's and stops when they differ; even in the instance's own
+session, don't build over your own pane: stop and ask which workspace to use. Note whichever
+pane `"$H" run pane list` shows — that pane becomes the **first slot** in the build below.
 
 **But a Herdr that has been run before does not start blank — it restores its saved session,
 and that restore is more than pane structure.** Confirmed live 2026-09-23: after killing the
-server and starting a fresh one, `herdr pane list` came back with all 3 panes from the previous
+server and starting a fresh one, `"$H" run pane list` came back with all 3 panes from the previous
 run already present, the orchestrator pane's Claude conversation **auto-resumed** (Herdr
 re-launched it via `claude --resume <id>` on its own), and the two session-viewer panes back as
 **dead shells** showing `opencode --session <old id>` → `Session not found` (their old
-`session_id`s no longer exist on the freshly started backends). So check `herdr pane list`
+`session_id`s no longer exist on the freshly started backends). So check `"$H" run pane list`
 before splitting anything: if the pane count already equals M+N, reuse the restored structure —
 don't split again (that produces M+N+… panes and a wrong layout) — skip re-launching an
 orchestrator pane that resumed idle and healthy, and re-attach only the dead viewer panes in
@@ -984,7 +1009,7 @@ Stage 9 using this run's *new* session ids. If the count doesn't match, that's t
 changed" case in "If a stage fails" below.
 
 If reusing an existing server (per Stage 3's plan), check whether a workspace matching this
-run's target shape already exists (`herdr workspace list` / `herdr pane list`) before splitting
+run's target shape already exists (`"$H" run workspace list` / `"$H" run pane list`) before splitting
 more — a persisted session can survive a server restart with its pane *structure* intact even
 though the processes inside are gone (confirmed live 2026-09-22); reusing that structure is
 fine, but verify pane **count matches (M+N)** for *this* config, not an old run's count. If it
@@ -1006,25 +1031,25 @@ split, it already exists; every other slot needs exactly one split to create its
 ```bash
 # layout = [["o1"], ["alpha", "beta"]]  (this skill's example: o1 alone in column 1 — the
 # pre-existing base pane, no split — alpha/beta stacked in column 2)
-herdr pane split --pane <base-pane> --direction right   # -> alpha's pane (column 2, row 1), e.g. <p3>
-herdr pane split --pane <p3> --direction down              # -> beta's pane (column 2, row 2), e.g. <p4>
+"$H" run pane split --pane <base-pane> --direction right   # -> alpha's pane (column 2, row 1), e.g. <p3>
+"$H" run pane split --pane <p3> --direction down              # -> beta's pane (column 2, row 2), e.g. <p4>
 
 # layout = [["o1"], ["alpha", "beta"], ["o2"], ["gamma", "delta"]]  (2 orchestrators, 4 sessions)
-herdr pane split --pane <base-pane> --direction right   # -> alpha's pane (col 2), e.g. <p3>
-herdr pane split --pane <p3> --direction down              # -> beta's pane (col 2), e.g. <p4>
-herdr pane split --pane <p3> --direction right          # -> o2's pane (col 3), e.g. <p5>
-herdr pane split --pane <p5> --direction right          # -> gamma's pane (col 4), e.g. <p6>
-herdr pane split --pane <p6> --direction down              # -> delta's pane (col 4), e.g. <p7>
+"$H" run pane split --pane <base-pane> --direction right   # -> alpha's pane (col 2), e.g. <p3>
+"$H" run pane split --pane <p3> --direction down              # -> beta's pane (col 2), e.g. <p4>
+"$H" run pane split --pane <p3> --direction right          # -> o2's pane (col 3), e.g. <p5>
+"$H" run pane split --pane <p5> --direction right          # -> gamma's pane (col 4), e.g. <p6>
+"$H" run pane split --pane <p6> --direction down              # -> delta's pane (col 4), e.g. <p7>
 ```
 Keep a running map of pane id → slot name as you go (`<base-pane>` -> whatever slot 1 actually
 is, `<p3>` -> slot 2, and so on) — this is what both the orchestrator-launch step below and
 Stage 9's attach step key off, instead of assuming which pane is which.
 
-**Verify:** `herdr pane list` shows exactly (M+N−1) new panes beyond the pre-existing base pane
+**Verify:** `"$H" run pane list` shows exactly (M+N−1) new panes beyond the pre-existing base pane
 (M+N total in the workspace, M of which map to `[[orchestrator]]` entries and N of which map to
 real sessions), in the expected layout.
 
-**Gate:** if `herdr pane split` errors, or the pane count doesn't match M+N, stop and confirm
+**Gate:** if `"$H" run pane split` errors, or the pane count doesn't match M+N, stop and confirm
 the target workspace/pane with the user before retrying — don't chain more splits on a layout
 you haven't confirmed, and don't silently build fewer/more panes than the config calls for.
 
@@ -1035,7 +1060,7 @@ bare `claude`, got a disconnected session with none of this setup's context, not
 that was set up"). For each orchestrator's mapped pane (call it `<orch-pane>` for that
 orchestrator), first check it isn't already doing something real:
 ```bash
-herdr pane read <orch-pane>
+"$H" run pane read <orch-pane>
 ```
 If it's already running something (a real shell session mid-task, an existing orchestrator
 process, anything beyond an idle prompt), don't launch over it — flag this to the user instead
@@ -1068,8 +1093,8 @@ using that orchestrator's own `cmd` from its own `dir` (both read from the confi
 Stage 1 — that's where this is decided per orchestrator, never guessed here, and never assumed
 to be `claude` even though that's today's common case):
 ```bash
-herdr pane run <orch-pane> "cd <that orchestrator's dir> && <that orchestrator's cmd>"
-herdr pane send-keys <orch-pane> enter    # `pane run` types the command; it does NOT press Enter
+"$H" run pane run <orch-pane> "cd <that orchestrator's dir> && <that orchestrator's cmd>"
+"$H" run pane send-keys <orch-pane> enter    # `pane run` types the command; it does NOT press Enter
 ```
 This is a **fresh session with equivalent working context** (the right directory, so any
 project `CLAUDE.md`/MCP config in scope) — **not** a resume of whichever session is driving
@@ -1079,7 +1104,7 @@ per `[[orchestrator]]` entry, each in its own mapped pane, each with its own `di
 
 **Verify**, for every orchestrator's pane:
 ```bash
-herdr pane read <orch-pane>
+"$H" run pane read <orch-pane>
 ```
 Shows a real startup banner/prompt for that orchestrator's `cmd`, not a bare shell prompt.
 
@@ -1089,6 +1114,10 @@ failed to start. A partial launch (2 of 2 panes built but only 1 of 2 orchestrat
 started) is a real gap for the un-launched one, not a partial success.
 
 ## Stage 9 — Attach each pane to its real remote session
+
+Stage 9's Herdr commands use `"$H" run ...` exactly as Stage 8 does (same exports, same
+session flag; `"$H" run session attach` for viewing, `"$H" run server stop` for stopping, never a
+bare `herdr server stop`).
 
 **Ask:** nothing — you have the N session panes from Stage 8 (mapped to session names via
 `layout`, not raw file order) and the N session ids from Stage 5.
@@ -1104,11 +1133,11 @@ unfamiliar harness.
 value — a session on a different host uses a different URL here; `opencode attach --help`
 confirms the positional URL argument is an example, not a hostname restriction):
 ```bash
-herdr pane run <pane> "opencode attach http://<that session's remote_tailnet_host>:<port> -s <session_id>"
-herdr pane send-keys <pane> enter    # `pane run` types the command; it does NOT press Enter
+"$H" run pane run <pane> "opencode attach http://<that session's remote_tailnet_host>:<port> -s <session_id>"
+"$H" run pane send-keys <pane> enter    # `pane run` types the command; it does NOT press Enter
 ```
 
-**Verify**, for every pane — use `herdr pane read <pane>` (not `herdr pane get`, which only
+**Verify**, for every pane — use `"$H" run pane read <pane>` (not `"$H" run pane get`, which only
 returns metadata/title, not actual scrollback content) and confirm the title is a distinctive,
 real conversation identifier, not a generic shell prompt.
 
