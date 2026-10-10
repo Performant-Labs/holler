@@ -533,6 +533,117 @@ fn a_pane_whose_session_cannot_be_established_is_refused() {
 }
 
 #[test]
+fn inside_a_herdr_pane_with_no_session_variable_check_pane_names_the_fix_and_runs_no_herdr() {
+    let env = Env::new(&["second"]);
+    let mut c = env.base(Some("second"), "second", &["check-pane"]);
+    c.env("HERDR_PANE_ID", "p1");
+    let out = c.output().unwrap();
+    assert!(!out.status.success(), "{}", text(&out));
+    let t = text(&out);
+    assert!(t.contains("inside a Herdr pane"), "{t}");
+    assert!(t.contains("outside any Herdr pane"), "{t}");
+    assert!(env.recorded().is_empty(), "{:?}", env.recorded());
+}
+
+/// `session-delete` for `session`, with the fake listing `rows` (one `name status` per line).
+fn session_delete(env: &Env, session: &str, rows: &[(&str, &str)], extra: &[&str]) -> Output {
+    let mut list = String::new();
+    for (n, st) in rows {
+        list.push_str(&format!("{n}  {st}  /dir  /dir/sock\n"));
+    }
+    fs::write(env.path().join("sessions.txt"), list).unwrap();
+    let mut args = vec!["session-delete"];
+    args.extend_from_slice(extra);
+    env.run("second", session, &args)
+}
+
+fn deleted(env: &Env) -> bool {
+    env.recorded().iter().any(|c| c.contains("session delete"))
+}
+
+#[test]
+fn session_delete_removes_a_stopped_own_session() {
+    let env = Env::new(&[]);
+    let out = session_delete(&env, "second", &[("second", "stopped")], &[]);
+    assert!(out.status.success(), "{}", text(&out));
+    assert!(env
+        .recorded()
+        .contains(&"--session second session delete second".to_owned()));
+}
+
+#[test]
+fn session_delete_refuses_a_running_session() {
+    let env = Env::new(&[]);
+    let out = session_delete(&env, "second", &[("second", "running")], &[]);
+    assert!(!out.status.success(), "{}", text(&out));
+    assert!(text(&out).contains("second"), "{}", text(&out));
+    assert!(!deleted(&env), "{:?}", env.recorded());
+}
+
+#[test]
+fn session_delete_refuses_a_session_that_the_ledger_shows_live() {
+    let env = Env::new(&[]);
+    let mut live = LiveProcess::start();
+    env.write_ledger(&live.ledger_row("second"));
+    let out = session_delete(&env, "second", &[("second", "stopped")], &[]);
+    live.stop();
+    assert!(!out.status.success(), "{}", text(&out));
+    assert!(!deleted(&env), "{:?}", env.recorded());
+}
+
+#[test]
+fn session_delete_refuses_another_instances_session_name() {
+    let env = Env::new(&[]);
+    let out = session_delete(
+        &env,
+        "second",
+        &[("second", "stopped"), ("other", "stopped")],
+        &["other"],
+    );
+    assert!(!out.status.success(), "{}", text(&out));
+    assert!(!deleted(&env), "{:?}", env.recorded());
+}
+
+#[test]
+fn session_delete_refuses_the_default_session() {
+    let env = Env::new(&[]);
+    // The default instance has no named session of its own.
+    fs::write(
+        env.path().join("sessions.txt"),
+        "default  stopped  /d  /s\n",
+    )
+    .unwrap();
+    let out = env.run("default", "", &["session-delete"]);
+    assert!(!out.status.success(), "{}", text(&out));
+    let named = env.run("default", "", &["session-delete", "default"]);
+    assert!(!named.status.success(), "{}", text(&named));
+    assert!(!deleted(&env), "{:?}", env.recorded());
+}
+
+#[test]
+fn session_delete_refuses_a_session_that_is_not_listed() {
+    let env = Env::new(&[]);
+    let out = session_delete(&env, "second", &[("other", "stopped")], &[]);
+    assert!(!out.status.success(), "{}", text(&out));
+    assert!(!deleted(&env), "{:?}", env.recorded());
+}
+
+#[test]
+fn the_header_says_the_session_semantics_are_unverified_until_734() {
+    let src = fs::read_to_string(script()).unwrap();
+    let header: String = src
+        .to_lowercase()
+        .lines()
+        .take(20)
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        header.contains("#734") && header.contains("unverified"),
+        "{header}"
+    );
+}
+
+#[test]
 fn a_pane_of_the_instances_own_session_is_accepted_and_none_is_accepted() {
     let env = Env::new(&[]);
     let same = env.run_in_pane("second", "second", &["check-pane"]);
