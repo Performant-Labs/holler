@@ -215,6 +215,21 @@ fills this file in at release time.
   brings the opt-in tests against a real OpenCode. Nothing a user runs changes yet: #649 wires the adapter in
   ([#642](https://github.com/Performant-Labs/holler/issues/642)).
 
+- Host adapter (epic [#633](https://github.com/Performant-Labs/holler/issues/633)): `holler-adapter-host` now
+  implements `HostPort` over a local tmux server. Its `TmuxHost` creates a pane's tmux session, starts a command in
+  the session as a new detached window and returns once tmux reports the new process (nothing is typed into a shell
+  and nothing waits on a sleep), lists the session's processes, and stops only the processes it started: each
+  window it starts is tagged with its process id, and a stop sends `TERM` to the process group of every tagged
+  window, waits a grace, then sends `KILL` to any group that still has a member. Nothing is matched by name, and the
+  session's own shell is never signalled. A command is always an argument vector that never goes through a shell;
+  an argument tmux would read as a command separator, and a directory tmux would expand, are escaped. A session is
+  always named exactly, so a pane never reaches another whose name it prefixes. Every call ends within its bound
+  (10 s by default) or with `timeout`; a missing session is `pane-not-found` for `run` and `ps` and `Ok` for
+  `stop_owned`; a directory that is relative or does not exist is refused instead of letting tmux start the session,
+  or a command, somewhere else. The tests that need a real tmux are opt-in (`--ignored`) and each runs its own private
+  tmux server. Not wired into the CLI yet (#649), so nothing a user runs changes
+  ([#641](https://github.com/Performant-Labs/holler/issues/641)).
+
 ## [0.4.0] - 2026-09-29
 
 ### Enhancements
