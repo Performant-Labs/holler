@@ -37,7 +37,7 @@ case "$1" in
 esac
 "#;
 
-const FAKE_SS: &str = "#!/bin/bash\nfor p in $FAKE_SS_PIDS; do echo \"LISTEN 0 4096 127.0.0.1:1 0.0.0.0:* users:((\\\"x\\\",pid=$p,fd=3))\"; done\n";
+const FAKE_SS: &str = "#!/bin/bash\n[ -n \"${FAKE_SS_NOPID:-}\" ] && echo \"LISTEN 0 4096 127.0.0.1:1 0.0.0.0:*\"\nfor p in $FAKE_SS_PIDS; do echo \"LISTEN 0 4096 127.0.0.1:1 0.0.0.0:* users:((\\\"x\\\",pid=$p,fd=3))\"; done\n";
 
 const FAKE_LSOF: &str = "#!/bin/bash\nfor p in $FAKE_LSOF_PIDS; do echo \"$p\"; done\n";
 
@@ -304,6 +304,30 @@ fn check_port_prefers_ss_when_lsof_lists_no_listener() {
     assert_has(&o, &squatter.pid.to_string());
     assert_lacks(&o, "FREE");
     assert_alive(&squatter);
+}
+
+#[test]
+fn check_port_names_a_listener_with_no_visible_pid_and_exits_2() {
+    let env = Env::new();
+    let st = env.state("inst-a");
+    let path = format!(
+        "{}:{}",
+        env.root.path().join("bin").display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    let o = Command::new("bash")
+        .arg(script())
+        .args(["check-port", &s(&st), "47001"])
+        .env("WIZARD_LIB", env.lib())
+        .env("PATH", path)
+        .env("FAKE_SS_NOPID", "1")
+        .env("FAKE_SS_PIDS", "")
+        .env("FAKE_LSOF_PIDS", "")
+        .output()
+        .unwrap();
+    assert_code(&o, 2);
+    assert_has(&o, "HELD port 47001 by an unidentified process");
+    assert_lacks(&o, "FREE");
 }
 
 #[test]

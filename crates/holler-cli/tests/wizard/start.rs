@@ -258,20 +258,35 @@ fn record_writes_the_contract_fields_atomically_with_mode_0600() {
 }
 
 #[test]
-fn default_state_dir_is_dot_holler_under_home() {
+fn every_verb_exits_64_without_a_state_dir_and_leaves_home_alone() {
     let w = World::new();
     let home = w.root.path().join("home");
     fs::create_dir_all(&home).unwrap();
-    let pid = w.sleeper("602");
-    let o = Command::new("bash")
-        .arg(ledger_sh())
-        .args(["record", "--pid", &pid.to_string(), "--role", "hub", "--stage", "6"])
-        .env_remove("HOLLER_STATE_DIR")
-        .env("HOME", &home)
-        .output()
-        .unwrap();
-    assert_eq!(code(&o), 0, "{}", String::from_utf8_lossy(&o.stderr));
-    assert!(home.join(".holler/wizard-ledger.toml").is_file());
+    let pid = w.sleeper("602").to_string();
+    let verbs: Vec<Vec<&str>> = vec![
+        vec!["record", "--pid", &pid, "--role", "hub", "--stage", "6"],
+        vec!["list"],
+        vec!["owns", &pid],
+        vec!["bogus"],
+    ];
+    for unset in [true, false] {
+        for args in &verbs {
+            let mut c = Command::new("bash");
+            c.arg(ledger_sh()).args(args).env("HOME", &home);
+            if unset {
+                c.env_remove("HOLLER_STATE_DIR");
+            } else {
+                c.env("HOLLER_STATE_DIR", "");
+            }
+            let o = c.output().unwrap();
+            assert_eq!(code(&o), 64, "{args:?}: {}", text(&o));
+            assert!(
+                String::from_utf8_lossy(&o.stderr).contains("HOLLER_STATE_DIR"),
+                "{args:?}"
+            );
+        }
+    }
+    assert!(!home.join(".holler").exists());
 }
 
 fn assert_first_row_is_the_backend(row: &[String], pid: u32) {

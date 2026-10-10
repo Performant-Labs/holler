@@ -407,3 +407,104 @@ fn a_different_state_dir_is_accepted_for_a_non_default_instance() {
     let out = validate_home(&config(&other, TAIL), "/home/<user>");
     assert!(out.status.success(), "{}", stderr(&out));
 }
+
+fn with_keys(replacements: &[(&str, &str)]) -> String {
+    let mut t = FULL_INSTANCE.to_string();
+    for (from, to) in replacements {
+        assert!(t.contains(from), "{from}");
+        t = t.replace(from, to);
+    }
+    t
+}
+
+#[test]
+fn a_non_default_instance_on_the_default_hub_port_is_refused_naming_the_key() {
+    let table = with_keys(&[("hub_port = 41808", "hub_port = 41807")]);
+    let out = validate(&config(&table, TAIL));
+    assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
+    assert!(stderr(&out).contains("hub_port"), "{}", stderr(&out));
+    assert!(stdout(&out).is_empty());
+}
+
+#[test]
+fn a_non_default_instance_on_the_default_serve_port_is_refused_naming_the_key() {
+    let table = with_keys(&[("serve_https_port = 8443", "serve_https_port = 443")]);
+    let out = validate(&config(&table, TAIL));
+    assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
+    assert!(
+        stderr(&out).contains("serve_https_port"),
+        "{}",
+        stderr(&out)
+    );
+}
+
+#[test]
+fn a_non_default_instance_without_hub_or_serve_keys_is_refused_for_both() {
+    let table = "[instance]\nname = \"second\"\nstate_dir = \"/home/<user>/.holler-second\"\n\
+                 herdr_session = \"second\"\nbackend_port_base = 47101\n";
+    let out = validate(&config(table, TAIL));
+    assert_eq!(out.status.code(), Some(1));
+    let err = stderr(&out);
+    assert!(
+        err.contains("hub_port") && err.contains("serve_https_port"),
+        "{err}"
+    );
+}
+
+#[test]
+fn a_non_default_instance_on_the_default_backend_range_is_refused_naming_the_key() {
+    let table = with_keys(&[("backend_port_base = 47101", "backend_port_base = 47001")]);
+    let out = validate(&config(&table, TAIL));
+    assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
+    assert!(
+        stderr(&out).contains("backend_port_base"),
+        "{}",
+        stderr(&out)
+    );
+    // An unset base is the default base, so it is refused the same way.
+    let unset = with_keys(&[("backend_port_base = 47101\n", "")]);
+    let out = validate(&config(&unset, TAIL));
+    assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
+    assert!(
+        stderr(&out).contains("backend_port_base"),
+        "{}",
+        stderr(&out)
+    );
+}
+
+#[test]
+fn one_session_left_in_the_default_range_by_a_partial_override_is_refused() {
+    let tail = TAIL.replacen(
+        "name = \"beta\"\n",
+        "name = \"beta\"\nbackend_port = 47001\n",
+        1,
+    );
+    let out = validate(&config(FULL_INSTANCE, &tail));
+    assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
+    assert!(stderr(&out).contains("backend_port"), "{}", stderr(&out));
+}
+
+#[test]
+fn every_session_with_its_own_backend_port_passes_on_the_default_base() {
+    let table = with_keys(&[("backend_port_base = 47101", "backend_port_base = 47001")]);
+    let tail = TAIL
+        .replacen(
+            "name = \"alpha\"\n",
+            "name = \"alpha\"\nbackend_port = 47201\n",
+            1,
+        )
+        .replacen(
+            "name = \"beta\"\n",
+            "name = \"beta\"\nbackend_port = 47202\n",
+            1,
+        );
+    let out = validate(&config(&table, &tail));
+    assert!(out.status.success(), "{}", stderr(&out));
+}
+
+#[test]
+fn the_default_instance_keeps_every_default_port() {
+    let out = validate(&config("[instance]\nname = \"default\"\n", TAIL));
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert_eq!(stdout(&out), RECORDED_PLAN);
+}
