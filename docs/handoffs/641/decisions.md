@@ -125,3 +125,27 @@
   - `cargo test -p holler-adapter-host --test real_tmux_test -- --ignored` on tmux 3.7c: 0 passed, 9 failed, all on `NotImplemented`. No `/tmp/hlr-tmux-*` dir was left.
   - Clean on the four new files: `cargo clippy -p holler-adapter-host --all-targets -- -D warnings`, `rustfmt --check --edition 2021`, `bash scripts/lint.sh` (exit 0) and `cargo machete`.
   - A throwaway test, deleted and never staged, drove both fake scripts by hand and confirmed the record, queue, `SAY_DIR`, kill-record keying and `LC_ALL` capture. The handoff is `docs/handoffs/641/handoff-T-red.md`.
+
+## F (Phase 6, implement) — 2026-10-09T18:58:21-06:00
+- **Decided:** I implemented `TmuxHost` against T's RED in three production files, as the brief's §Files plans them, with T's public surface unchanged. `src/lib.rs` has the crate docs, the types and `impl HostPort`. `src/exec.rs` is the bounded runner and `kill_group`. `src/tmux.rs` has the vectors, the escape, the strict parsers and `classify`. I also added the CHANGELOG entry. Every default-run test (28) and every real-tmux test (9) passes.
+  - **A deviation found on real tmux.** tmux 3.7c answers the tag of a closed window (`set-option -w -t @<id>`) with `no such window: @<id>`. Only target lookups print the brief's `can't find window`. `classify` reads both as a closed window, so the tag is `Ok` (Decision 3's intent) and `run`, `ps` and `stop_owned` read it as "missing" (Decision 8). Without this, AC 11 and AC 13 failed, and every short-lived `run` would be `unavailable` and send a cleanup KILL to an exited pid's group.
+  - **The crate docs state Decision 15 with W-18's qualification**: the session survives a stop "while the session's shell window exists", and a relaunch is `stop_owned`, then `ensure_session`, then `run`.
+  - **A failed tag.** The cleanup `kill -s KILL -- -<pid>` is sent first. It gets `max(time left, 250 ms)` and is best effort. The error is then mapped as for any `run` call: missing-class is `pane-not-found`, any other stderr is `unavailable`, and a timeout stays `timeout`.
+  - **Readers of tmux's output.** The stop listing is read leniently: a malformed line is never owned and never counted live. `ps` refuses a malformed listing. A window id is parsed to a `u32` and printed again.
+  - **The `what` of an `unavailable`** is `tmux <subcommand>: <first stderr line>`, `kill -s <SIG>: <first stderr line>`, or `<binary>: <io error>`. It never holds an argv element or a directory.
+- **Assumed:**
+  - `no such window` is what `set-option` prints for a closed window in the other supported tmux versions too. Only 3.7c was probed.
+  - The default-run fakes answer as T checked them. I relied on T's handoff for that, and the 28 tests pass against them.
+  - util-linux and BSD `kill` print `No such process` for an empty group, as procps-ng 4.0.4 does. Only procps-ng was run here.
+- **Hedged:**
+  - The cleanup `kill`'s own failure is dropped and the tag's error is returned, because the brief says only "then returns the error". If that `kill` fails, an untagged process may remain. `tag`'s rustdoc says so.
+  - `archChanged: true`. Two private modules are new, though exactly as A's PASSed plan names them, and the crate's public surface is T's stub, unchanged. A false positive costs one A pass.
+  - On this machine 4 workspace tests in `holler-cli/tests/logging_test.rs` fail because a live hub answers `holler roster`. They pass with `HOLLER_STATE_DIR` pointed at an empty directory, and nothing in this diff reaches `holler-cli`. I report this as environmental, not as GREEN.
+- **Evidence:**
+  - `cargo test -p holler-adapter-host`: 28 passed. `-- --ignored` on tmux 3.7c: 9 passed on three runs, and once more after the last doc edit. The first run failed 2 tests on `tmux set-option: no such window: @1`, which led to the fix.
+  - Flake check: 15 sequential runs and 24 runs as 8 parallel copies of `fake_tmux_test`, every one 28/28.
+  - Gates: `cargo build --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, `rustfmt --check`, `bash scripts/lint.sh` (exit 0), `bash scripts/changelog-check.sh` and `cargo machete` are all clean. The AC 7, `unsafe` and AC 9 greps print nothing.
+  - `cargo test --workspace --no-fail-fast` (skipping the CI-skipped load test): 1407 passed and 4 failed, the environmental `logging_test` cases above.
+  - Probe: tmux 3.7c on a private `-S` server in a fresh `/tmp/hlr-f641-*` directory, with `-f /dev/null` and `TMUX` and `TMUX_PANE` unset. It sent no signal and was killed and removed on exit. `set-option -w -t @1 ...` on a closed window printed `no such window: @1`, and `list-panes -t @1` printed `can't find window: @1`. The transcript is in `handoff-F.md`.
+  - After every real-tmux run there was no `/tmp/hlr-tmux-*` directory, no `demo-*` session on the default socket and no `hlr-tmux` process.
+  - Source read: the brief in full, `handoff-A.md`, `handoff-T-red.md`, the three test files, `holler-pane` (`ports.rs`, `argv.rs`, `error.rs`, `pane.rs`, `probe.rs`), `holler-pane-testkit` (`host.rs`, `conformance/host.rs`), `holler-proto/src/vocab.rs` and `holler-adapter-herdr`'s crate docs and manifest. The handoff is `docs/handoffs/641/handoff-F.md`, with `docs/handoffs/641/evidence.md`.
