@@ -253,7 +253,7 @@ check "a down pane without --project is refused and says so" bash -c "[ '$(rc)' 
 mo_case() { # a fresh c4r2 case with MO's config files, busy as MO always is
   new_case c4r2
   mkdir -p "$HOME/fleet-agents/opencode-mo/agents"
-  printf '{"provider":{"saluki-io":{"models":{"saluki":{}}}},"agent":{"compaction":{"model":"saluki-io/saluki"},"mo":{}}}\n' > "$HOME/fleet-agents/opencode-mo/opencode.json"
+  printf '{"provider":{"saluki-io":{"models":{"saluki":{}}}},"agent":{"compaction":{"model":"saluki-io/saluki"},"mo":{"variant":"max"}}}\n' > "$HOME/fleet-agents/opencode-mo/opencode.json"
   printf -- '---\nname: mo\nmode: primary\nmodel: saluki-io/saluki\ncolor: info\n---\nbody line, kept\n' > "$HOME/fleet-agents/opencode-mo/agents/mo.md"
   cp "$HOME/fleet-agents/opencode-mo/opencode.json" "$FAKE/mo.json.orig"; cp "$HOME/fleet-agents/opencode-mo/agents/mo.md" "$FAKE/mo.md.orig"
   echo '{"ses_x":{"type":"busy"}}' > "$FAKE/status"
@@ -271,9 +271,10 @@ check "opencode.json gets the provider key as a file reference to the expanded p
   test "$(jq -r '.provider.anthropic.options.apiKey' "$mj")" = "{file:$HOME/.holler-oc/keys/anthropic.key}"
 check "the compaction model and variant are pinned to the new model" \
   test "$(jq -r '.agent.compaction.model + " " + .agent.compaction.variant' "$mj")" = "$mo_model high"
+check "MO's own variant is set in opencode.json, replacing the old one" test "$(jq -r '.agent.mo.variant' "$mj")" = high
 check "opencode.json keeps its other providers and agents" test "$(jq -r '.provider["saluki-io"] != null and .agent.mo != null' "$mj")" = true
-check "mo.md has the new model and variant, and its other lines unchanged" \
-  bash -c "grep -qx 'model: $mo_model' '$mm' && grep -qx 'variant: high' '$mm' && grep -qx 'name: mo' '$mm' && grep -qx 'color: info' '$mm' && grep -qx 'body line, kept' '$mm' && ! grep -q saluki '$mm'"
+check "mo.md has the new model, and its other lines unchanged" \
+  bash -c "grep -qx 'model: $mo_model' '$mm' && grep -qx 'name: mo' '$mm' && grep -qx 'color: info' '$mm' && grep -qx 'body line, kept' '$mm' && ! grep -q saluki '$mm'"
 check "both config files were backed up byte-for-byte" bash -c "cmp -s '$FAKE/mo.json.orig' \$(ls '$mj'.bak-pre-restart-* | head -1) && cmp -s '$FAKE/mo.md.orig' \$(ls '$mm'.bak-pre-restart-* | head -1)"
 check "the launch line names the mo session, the model and no --agent" \
   bash -c "grep -q 'OC_FRESH=1 OC_SESSION_NAME=mo .*oc-holler hj-c4r2 /proj/holler -- -m $mo_model Enter\$' '$FAKE/tmux.log' && ! grep -q -- '--agent' '$FAKE/tmux.log'"
@@ -284,7 +285,7 @@ check "every text typed into MO's pane is followed by Enter" bash -c "! grep '^s
 mo_case
 run c4r2 --model "$mo_model" --effort high --key-file '$HOME/.holler-oc/keys/anthropic.key'
 check "c4r2 without --mo is refused and says to pass --mo" bash -c "[ '$(rc)' = 1 ] && grep -q 'pass --mo' '$FAKE/out'"
-mo_untouched && pass "c4r2 without --mo: nothing changed" || bad "c4r2 without --mo: nothing changed"
+if mo_untouched; then pass "c4r2 without --mo: nothing changed"; else bad "c4r2 without --mo: nothing changed"; fi
 
 new_case c3r1
 run c3r1 --mo "${good[@]}"
@@ -294,7 +295,7 @@ expect_untouched "--mo on c3r1: untouched" c3r1
 mo_case
 run c4r2 --mo --model "$mo_model" --effort high
 check "--mo without --key-file is refused" test "$(rc)" = 1
-mo_untouched && pass "--mo without a key file: nothing changed" || bad "--mo without a key file: nothing changed"
+if mo_untouched; then pass "--mo without a key file: nothing changed"; else bad "--mo without a key file: nothing changed"; fi
 
 mo_case; rm -f "$HOME/fleet-agents/opencode-mo/agents/mo.md"
 run c4r2 "${mo_args[@]}"
@@ -302,8 +303,8 @@ check "missing MO config files are refused" test "$(rc)" = 1
 
 mo_case
 run c4r2 "${mo_args[@]}" --dry-run
-check "MO --dry-run exits 0 and shows both diffs" bash -c "[ '$(rc)' = 0 ] && grep -q '^+.*claude-haiku-5-5' '$FAKE/out' && grep -q '^+variant: high' '$FAKE/out'"
-mo_untouched && pass "MO --dry-run changes and types nothing" || bad "MO --dry-run changes and types nothing"
+check "MO --dry-run exits 0 and shows both diffs" bash -c "[ '$(rc)' = 0 ] && grep -q '^+model: anthropic/claude-haiku-5-5' '$FAKE/out' && grep -q '^+.*\"variant\": \"high\"' '$FAKE/out'"
+if mo_untouched; then pass "MO --dry-run changes and types nothing"; else bad "MO --dry-run changes and types nothing"; fi
 
 mo_case; : > "$FAKE/wrong_model"
 run c4r2 "${mo_args[@]}"

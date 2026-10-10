@@ -135,14 +135,14 @@ END { for (i = 1; i <= n; i++) if (V[i] != "OC_ROLE_MODEL" && val[V[i]] != "" &&
 ' "$penv" > "$new_env"
 
 else
-  # MO: the provider key file and the compaction pin go in opencode-mo/opencode.json, the model and variant in agents/mo.md.
+  # MO: the provider key file, the compaction pin and MO's variant go in opencode-mo/opencode.json (its agent.mo.variant
+  # would win over a variant: line in mo.md), the model in agents/mo.md.
   jq --arg p "${model%%/*}" --arg kf "$kf" --arg m "$model" --arg e "$effort" \
-    '.provider[$p].options.apiKey = "{file:" + $kf + "}" | .agent.compaction.model = $m | if $e != "" then .agent.compaction.variant = $e else . end' \
+    '.provider[$p].options.apiKey = "{file:" + $kf + "}" | .agent.compaction.model = $m | if $e != "" then (.agent.compaction.variant = $e | .agent.mo.variant = $e) else . end' \
     "$mo_json" > "$new_json" || refuse "cannot build the new $mo_json"
   awk -v m="$model" -v e="$effort" '
     /^---[ \t]*$/ { fm++; print; next }
-    fm == 1 && /^model:/ { print "model: " m; if (e != "") print "variant: " e; next }
-    fm == 1 && /^variant:/ { next }
+    fm == 1 && /^model:/ { print "model: " m; next }
     { print }' "$mo_md" > "$new_md"
   grep -qx "model: $model" "$new_md" || refuse "$mo_md has no model: line in its front matter"
 fi
@@ -171,9 +171,9 @@ fi
 # 2. Back up, 3. set the OC_ lines -----------------------------------------------------------------------------
 stamp="$(date +%Y%m%d-%H%M%S)-$$"
 if [ "$mo" = 1 ]; then
-  cp "$mo_json" "$mo_json.bak-pre-restart-$stamp" && cp "$mo_md" "$mo_md.bak-pre-restart-$stamp" || refuse "cannot back up MO's config"
+  if ! { cp "$mo_json" "$mo_json.bak-pre-restart-$stamp" && cp "$mo_md" "$mo_md.bak-pre-restart-$stamp"; }; then refuse "cannot back up MO's config"; fi
   bak="$mo_json.bak-pre-restart-$stamp and $mo_md.bak-pre-restart-$stamp"; changed="MO's config"
-  cat "$new_json" > "$mo_json" && cat "$new_md" > "$mo_md" || fail_step 3 config "cannot write MO's config"
+  if ! { cat "$new_json" > "$mo_json" && cat "$new_md" > "$mo_md"; }; then fail_step 3 config "cannot write MO's config"; fi
 else
   bak="$penv.bak-pre-restart-$stamp"
   cp "$penv" "$bak" || refuse "cannot back up $penv"
