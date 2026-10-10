@@ -79,3 +79,29 @@
   - Source read: `holler-pane/src/{ports,argv,probe}.rs`, `error.rs:395-480`, `pane.rs:105-111`; `holler-pane-testkit/src/host.rs`; `holler-cli/src/pane/args.rs`; `holler-adapter-herdr/{Cargo.toml,src/lib.rs,tests/common/mod.rs}`; the workspace `Cargo.toml` lints and edition; `clippy.toml`; `scripts/lint.sh`; the tester overlay.
   - `grep` checks: no bounded subprocess runner in any production crate; the existing `kill` calls are test-only `libc::kill`; remote `main` is unchanged at 3bdd129; no tracked file holds the issue title's host name; the outside-model prompt and result files are git-ignored.
   - Probes: three scripts (PR1 to PR7) on private relative-socket servers in the session scratchpad, with `TMUX` and `TMUX_PANE` unset. The only real signal was one TERM to the probe's own pane group; every other `kill` call used signal 0. Each script killed its server and removed its directory, and a process check afterwards found none left.
+
+## A (Phase 3, up-front plan review, round 4) — 2026-10-09T18:12:00-06:00
+- **Decided:** PASS on docs/handoffs/641-brief.md at 0f18b80, with 0 blocks and 3 warns (see handoff-A.md, round 4). Every round-3 finding is applied as asked (B-6 and W-14 to W-17). The amendment adds no drift and no parallel path.
+  - **W-18.** The brief assumes the shell window always outlives a stop. Once the harness window is the session's last, the TERM ends the session, and the next poll answers "missing". Decision 8's `Ok` for `stop_owned` would then skip Decision 4's `kill -s 0` check, so a TERM-ignoring member survives. Decision 15 and the #644 row rest on the same assumption: relaunch should ensure the session again before `run`.
+  - **W-19.** AC 6h's fakes need answers keyed to the arguments and to the kill record, not only "one for every call" or a numbered queue. The number of polls that fit in a grace depends on timing. AC 6a's pid check must not use `/proc`, because the default run is also CI's macOS leg.
+  - **W-20.** AC 9's grep (no `TmuxSocket::Default` or `TmuxSocket::Name` under `tests/`) contradicts AC 6f, which must build those hosts in `tests/fake_tmux_test.rs`. The fix is to scope the grep to `tests/real_tmux_test.rs` and to build every fake host through one helper that always sets both fake binaries.
+- **Assumed:**
+  - Only tmux 3.7c and procps-ng 4.0.4 were probed.
+  - That an interactive shell in a detached pane exits on an idle `TMOUT` comes from the bash and zsh documentation; it was not probed. The probe closed the shell window with `kill-window` instead, which yields the same session state.
+- **Hedged:**
+  - W-18 is a warn, not a block. It is W-14's class: the conservative failure, a process left running, with no stranger signalled. It also needs two uncommon conditions together: the shell window gone, and a member that ignores TERM and HUP.
+  - W-20 is a warn for the same reason round 3 graded W-16 a warn: an AC that, read literally, forbids the test or vector another part of the brief requires. It is certain to be hit, though. So the handoff gives T a reading that keeps the grep's intent, to apply and journal.
+  - I did not block a fourth time on spec precision. The plan's architecture has been stable since round 1, and none of the three warns reverses a decision.
+- **Evidence:**
+  - Read the brief in full (O's diff 2af088d..0f18b80), the round-3 handoff, this journal, and the outside-model results r1 (deepseek-v4-pro on the current brief: PASS, NV-3 and NV-8 matching W-19) and r2.
+  - Read issues #641 and #644, the epic's rigor lines, and ADR-0021 §2, §5 and §9.
+  - Source read: `holler-pane/src/{ports,argv,probe}.rs`, `error.rs:370-520`; `holler-pane-testkit/src/{host.rs,conformance/host.rs}`, `conformance/mod.rs`, `tests/host_conformance_test.rs`; `holler-adapter-host/{Cargo.toml,src/lib.rs}`; `holler-adapter-herdr/{Cargo.toml,src/lib.rs,tests/common/mod.rs}`; `holler-proto/src/vocab.rs`; the workspace `Cargo.toml`, `clippy.toml`, `scripts/lint.sh`, `scripts/changelog-check.sh`, `.github/workflows/ci.yml` and the tester overlay.
+  - `grep` checks:
+    - no bounded subprocess runner in any production crate, and `kill` only as test-only `libc::kill`;
+    - the `with_*` builder precedent;
+    - the `current_exe` re-exec precedent;
+    - when AC 9's grep and AC 6f entered the brief: both in every version since 69e71b5;
+    - no tracked file holds the issue title's host name, and the outside-model files are git-ignored.
+  - Probes: two scripts (Q1 to Q6) on private relative-socket servers in the session scratchpad, with `TMUX` and `TMUX_PANE` unset, run through `/bin/sh`.
+    - Signals: one TERM and one KILL, both to the probe's own pane group; every other `kill` call used signal 0.
+    - Each script killed its server and removed its directory, and a process check afterwards found none left.

@@ -1,124 +1,118 @@
-# Handoff-A: Phase 3 - #641 host adapter (tmux sessions, process control, the launcher primitive)  (up-front plan review, round 3)
+# Handoff-A: Phase 3 - #641 host adapter (tmux sessions, process control, the launcher primitive)  (up-front plan review, round 4)
 
 **Date:** 2026-10-09
-**Branch:** issue-641-implementation (at 95e2260)
-**Brief reviewed:** docs/handoffs/641-brief.md, as amended after round 2   **Reuse map:** docs/handoffs/641-brief.md §Files "Reuse map"   **Wireframe:** N/A (no UI surface)
+**Branch:** issue-641-implementation (at 0f18b80)
+**Brief reviewed:** docs/handoffs/641-brief.md, as amended after round 3   **Reuse map:** docs/handoffs/641-brief.md §Files "Reuse map"   **Wireframe:** N/A (no UI surface)
 **Earlier rounds:**
 - Round 1: BLOCK at 69e71b5, with 3 blocks and 9 warns. That handoff is this file as of commit 475d6fe.
 - Round 2: BLOCK at 81b0ddd, with 2 blocks and 4 warns. That handoff is this file as of commit 770c948.
+- Round 3: BLOCK at 95e2260, with 1 block and 4 warns. That handoff is this file as of commit 2af088d.
 
-Every finding of both rounds is applied in the brief as amended.
-**Verdict:** BLOCK
+Every finding of the three rounds is applied in the brief as amended.
+**Verdict:** PASS
 
 ## Summary
 
-BLOCK, on one new finding. B-5's fix is right but incomplete. `run` starts its program with `-c '#{session_path}'`, and that sends the program to the session's directory only while the directory is an absolute path that still exists.
+PASS. Round 3's block (B-6) and its four warns (W-14 to W-17) are applied as asked, and the amendment adds no drift.
 
-- **Relative path.** tmux keeps a relative `-c` verbatim. Each later `run` then resolves it against the cwd of the CLI that calls it.
-- **Missing directory.** If the directory is missing, tmux starts the program in `$HOME`.
+The plan stays consistent with the codebase:
+- one crate behind the frozen `HostPort`, depending on `holler-pane` only;
+- the conformance suite reused, not copied;
+- no new error variant;
+- the ownership record kept in tmux (I6);
+- every new file well under the size gate.
 
-In both cases `new-window` exits 0 and `run` returns `Ok`. So a coding agent can be launched, with no error, into another project or into the operator's home directory. That happens after a `--project .` or a removed worktree. No AC or suite case would catch it. The fix is two additive checks, one in `ensure_session` and one in `run`, each a closed `usage` or `unavailable` refusal, and no decision is reversed.
+Three new warns follow. All are about how precisely the brief is specified. None is a parallel path or a layer violation.
+- **W-18.** The brief assumes the shell window always outlives a stop. When the harness window is the session's last, the TERM ends the session. The next poll then answers `can't find session`, and Decision 8's "`Ok` for `stop_owned`" would return `Ok` with a TERM-ignoring member still running. That is W-14's failure again, and I probed it (Q6). Decision 15 and the #644 row rest on the same assumption.
+- **W-19.** AC 6 gives the fakes two answer modes: one answer for every call, or a numbered queue. AC 6h's poll bullets need answers keyed to the arguments and to the kill record. A queue sized by expectation flakes, because the number of polls that fit in a grace depends on timing. AC 6a's "no longer exists" check also runs on the macOS CI leg, which has no `/proc`.
+- **W-20.** AC 9's grep forbids `TmuxSocket::Default` and `TmuxSocket::Name` anywhere under `tests/`. AC 6f, a default-run test in `tests/fake_tmux_test.rs`, must build exactly those hosts. Both lines are in every version of the brief.
 
-Four warns follow:
-- **W-14.** A process-group member that ignores TERM outlives `stop_owned` once its leader exits.
-- **W-15.** A pid read from tmux should be range-checked before it reaches a `kill` argument.
-- **W-16.** AC 6e's wording forbids the correct `new-session -s` vector.
-- **W-17.** The fallback test-helper path departs from the neighbor's convention.
-
-The rest of the plan is consistent with existing patterns, and the round-2 fixes are applied as asked.
-
-This is the third Phase 3 BLOCK. The role doc says that after more than two blocks, O escalates to the operator.
+Each warn has a one-line fix that changes no decision. Because this run continues, T can apply each fix within the brief's intent and journal it (see Notes for O). A fresh run would take them as brief amendments.
 
 ## Findings
 
 | # | Severity | Plan element | Drift dimension | Finding | Suggested fix |
 |---|---|---|---|---|---|
-| B-6 | block | Decision 6 (`new-session -c <cwd>` for any existing directory, a relative one included); Decision 3 (`-c '#{session_path}'`, unchecked); Decision 15 ("a later `run` still works in A"); AC 11 and AC 13 (absolute, existing paths only) | contract fidelity (the port: the session works "in `cwd`"; ADR-0021: `--project DIR` maps to `host.cwd`, the "project directory or worktree"); validation at the boundary, failing closed | B-5's fix holds only while the session's directory is absolute and exists. (a) **Relative path.** tmux keeps a relative `-c` verbatim. `new-session -c rel` gave `session_path=rel`. A later `run` from another client cwd started its program in that cwd's `rel`, or in `$HOME` when that cwd had no `rel` (PR1; `-c .` behaves the same). Decision 6's directory check resolves the path against the CLI's cwd at that moment, so it passes. `--project` is a plain `Option<String>` (`holler-cli/src/pane/args.rs:44`) and `host.cwd` a `String` (`holler-pane/src/pane.rs:111`), and nothing canonicalizes either. (b) **Removed directory.** When the session's directory is removed after the session was made, as happens to a removed worktree, tmux falls back to `$HOME` and `new-window` exits 0 (PR5). In both cases `run` returns `Ok`, and the harness, a coding agent, works in another project or in `$HOME`. Decision 15's "a relaunch after `host.cwd` changes runs in the old directory" becomes `$HOME` once that directory is gone. No port call can read or end the session, so a consumer cannot guard against it. No AC or suite case uses a relative or a removed directory. | (a) Decision 6: the `new-session` path needs an **absolute** path to an existing directory. Anything else takes the existing `has-session` path: an existing session is `Ok` and unchanged, a missing one `usage`. (b) `run` first reads the directory with `list-panes -t =NAME: -F '#{session_path}'`, Decision 10's form, which fails closed (PR7). It refuses with `unavailable` unless the first line is an absolute path to an existing directory. The message names the rule and never the path. This read replaces `run`'s `has-session`. Do not use `display-message` for it: with a missing target it exits 0 and prints nothing (PR6). See Notes for O, items 1 to 7. |
-| W-14 | warn | Decision 4 ("the pane child is a session and group leader ... so its children go too"; KILL "to every survivor", meaning a pane still listed) | completeness of the stop (the issue: stop "the processes that pane owns") | TERM reaches the whole group, but the escalation follows the pane. Once the leader exits, its pane is gone, and no KILL is ever sent. So a group member that ignores TERM outlives `stop_owned`, which returns `Ok`. Probed (PR2): the leader died on TERM and its pane left the listing, yet `kill -s 0 -- -L` still succeeded. The member, still in group L and reparented, ran until its own `sleep` ended. Such a survivor can hold the harness port, so the next `run` fails to serve. A process that left the group (through `setsid`, or by daemonizing) is never reached at all. | Preferred: after the shared grace, also send `kill -s KILL -- -<pgid>` to each TERMed group whose pane is gone but which `kill -s 0 -- -<pgid>` still finds, then poll until each such group is empty or the deadline passes. "No such process" still counts as gone. In AC 6h, add a listing that lacks `101` after TERM while the fake `kill` answers `-s 0 -- -101` with exit 0: the record gains `-s KILL -- -101`. W-8's bullet then reads "gone once the pane is dead or gone and `kill -s 0` reports No such process". At minimum, record both limits in Decision 15. |
-| W-15 | warn | Decision 13 ("the pid as `u32`"); Decision 3's cleanup `kill`; Decision 4's listing parse | identity: never signal a stranger (the issue: "never by a broad pattern") | A `u32` admits values that the `kill` binary turns into a broad target or a wrong one. Probed with signal 0 on procps-ng 4.0.4 (PR3): `kill -s 0 -- -4294967295` (`u32::MAX`) reached pid 1 ("Operation not permitted"), because the argument wraps through `pid_t`. Every `u32` above `i32::MAX` wraps the same way to a positive pid, so a group kill becomes a kill of one unrelated process. In `kill(2)`, `-0` means the caller's own group and `-1` means every process the caller may signal. procps-ng happened to refuse `-0` and `-1` with a usage error, but util-linux `kill(1)` documents `kill -9 -1` as killing every process you can. A real tmux never prints such a pid, so this is defense in depth. It is also the one rule that keeps a `kill -- -1` out of the adapter by construction. | Accept a pid read from tmux only in `2..=i32::MAX`, both from `new-window -P` and from every listing. A pane whose `pane_pid` is out of range is never owned. Extend AC 6i's malformed answers with `0 @7`, `1 @7` and `4294967295 @7`: each is `unavailable`, with no `set-option` and no signal. AC 6h gains a live, tagged pane `4294967295 0 4294967295` that is never signalled. |
-| W-16 | warn | AC 6e ("No recorded call has the bare name") | test-spec precision | `ensure_session` is in AC 6e's scope, and its correct vector is `new-session -d -s demo-c1r1`, whose `-s` value is a name, not a target. Read literally, AC 6e forbids that vector. The literal fix, `-s =demo-c1r1`, makes tmux create a session named `=demo-c1r1` (PR4). Every fake-tmux test would accept that, and only the ignored real-tmux tests would fail. | Reword: "No `-t` argument is the bare name. `new-session` records `-s demo-c1r1`, a name and not a target (`-s =NAME` would create a session literally named `=NAME`)." |
-| W-17 | warn | Size estimate's fallback file `tests/support/fake.rs` | naming and file structure | The library-crate neighbors keep shared test helpers in `tests/common/mod.rs` (holler-adapter-herdr, holler-pane, holler-proto). `tests/support/` is holler-cli's process harness. A `tests/support/fake.rs` with no `mod.rs` also needs a `#[path]` attribute to be found. | If the split is needed, use `tests/common/mod.rs` with `#![allow(dead_code)] // #641`, as `holler-adapter-herdr/tests/common/mod.rs` does. |
+| W-18 | warn | Decision 4 (the polls and the "done" rule) against Decision 8 ("missing ... `Ok` for `stop_owned`"); Decision 15 ("The session and its shell window survive `stop_owned`", "`ps` is never empty while the session exists"); the #644 row ("relaunch = `stop_owned` then `run`") | completeness of the stop (the issue: stop "the processes that pane owns"); forward-compat with #644 | The shell window that `ensure_session` creates is not permanent. An interactive shell exits after an idle `TMOUT`, which hardened hosts often set, or when a person types `exit`. The harness window is then the session's last. The TERM closes that window, the session ends, and the next poll answers `can't find session: NAME`, or `no server running on ...` if it was the server's last session. Both are Decision 8's "missing", which is `Ok` for `stop_owned`. Read literally, that returns `Ok` and skips Decision 4's `kill -s 0` check. A member that ignores TERM and HUP then outlives the stop (probed: Q5, Q6). No AC 6h bullet answers a poll with "missing", and AC 3 and AC 4 keep the shell window, so neither suite would catch it. The same assumption makes two statements false once the shell is gone. A stop can end the session, so #644's relaunch `run` gets `pane-not-found`. And `ps` can be empty while the session exists, because a dead shell pane under a global `remain-on-exit on` is not listed. The suite already says a real session "may end with its last process", and its case 6 ensures the session again (`conformance/host.rs:17-19, 158-172`). Graded warn, like W-14: a process is left running, and no stranger is signalled. | **Decision 4:** "A poll whose listing is missing (Decision 8's strings) lists no pane: every TERMed pane is gone, and a group is done only once `kill -s 0` reports `No such process`. Decision 8's `Ok` applies to the first listing." **AC 6h:** add a bullet. After the TERM, a poll answers `can't find session: demo-c1r1` (exit 1) while `-s 0 -- -101` answers exit 0. After the grace the kill record gains exactly one `-s KILL -- -101`, and `stop_owned` is `Ok` once `-s 0` reports `No such process`. **Decision 15:** qualify both statements with "while the shell window exists". **The #644 row:** relaunch is `stop_owned`, then `ensure_session`, then `run`, as the suite's case 6 does. **Follow-ups:** carry the #644 items to #644 itself as an issue comment the orchestrator files: this one, and B-6's "make `--project` absolute". #644 builds against `FakeHost`, which shows neither. |
+| W-19 | warn | AC 6, the fakes ("one for every call or from a numbered queue"); AC 6h ("call by call", "unless a bullet says otherwise the fake `kill` answers `-s 0` with that text", the W-14 bullet's "exit 0 while the kill record holds no `-s KILL -- -101`, and with the text after"); AC 6a ("its pid ... no longer exists") | test-spec precision (the tester overlay: "This repo has a history of fixed-sleep flakes") | AC 6h's answers are keyed to two things AC 6 does not name. **The arguments:** `TERM` and `KILL` succeed while `-s 0` says `No such process`. **The record:** the W-14 bullet answers exit 0 until a `KILL` is recorded. Neither is "one answer for every call", and a numbered queue cannot express them reliably. How many polls fall inside a grace depends on timing, at most grace / 50 ms + 1, so up to 5 for AC 6h's 200 ms. If T sizes a queue to an expected count and a fifth poll lands inside the grace, that poll reads the "gone" answer early, no `KILL` is sent, and the test fails at random. AC 6h's first bullet and its W-10 bullet have the same problem for the fake tmux's listings. Separately, AC 6a is a default-run test, and CI's `cargo test --workspace` also runs on `macos-latest`, which has no `/proc` (`ci.yml:16-21, 128`). The outside review (r1, NV-3 and NV-8) asked the same question about the queue. | **AC 6:** add a third answer mode. The fake `kill` answers by its arguments and may read its own record, so "exit 0 until the record holds `-s KILL -- -101`, then `No such process`" is one script line. The fake tmux's `list-panes` may read the kill record the same way: it lists `101` live until the record holds its `KILL`. If T keeps a numbered queue instead, size it by the poll bound and say so in the test. **AC 6a:** check that the pid is gone with `kill -s 0` through the kill binary or with `ps -p`, never with `/proc`. |
+| W-20 | warn | AC 9 ("`grep -rn 'TmuxSocket::Default\|TmuxSocket::Name' crates/holler-adapter-host/tests` prints nothing") against AC 6f ("`TmuxSocket::Name(n)` puts `-L n` ... `TmuxSocket::Default` puts neither"), which §Files places in `tests/fake_tmux_test.rs` | test-spec consistency; test isolation (the issue: no story touches a live fleet) | The two ACs contradict each other, and every version of the brief since 69e71b5 has both. AC 6f cannot show the `-L` flag or the no-flag case without building a `Name` host and a `Default` host in `tests/`. T could satisfy both only by dodging the grep, for example with a braced import, which hides what the check is for. The check does matter. Suppose a fake-tmux test names `Default` and forgets `with_tmux_binary`. It then runs the real `tmux` against the default socket, and that socket may be a live fleet's server: on the pipeline host (Decision 14), or on the self-hosted runner that the ubuntu leg uses for same-repo runs (`ci.yml:35-40`). | Scope AC 9's grep to `tests/real_tmux_test.rs`, which matches its title, "Isolation of real-tmux tests". Keep the check's purpose for the fake tests by adding to AC 6: every host in `fake_tmux_test.rs` is built by one helper that always sets `with_tmux_binary` and `with_kill_binary` to the fakes, and AC 6f's `Name` and `Default` hosts go through that helper. A grep can pin that `TmuxHost::new` appears only once in that file. |
 
 Verified and consistent:
 
-- **Round 2 is applied in full.**
-  - B-4 is in Decisions 4, 5 and 10, AC 6e, AC 12, Risks and Evidence.
-  - B-5 is in Decision 3, AC 6d, AC 11, AC 13, Decision 15 and the #644 row.
-  - W-10 to W-13 land where the brief's header says.
-  - O's re-run transcript in Evidence agrees with my round-2 probes.
-- **No new duplication.** Remote `main` is still 3bdd129, so nothing has merged since round 2. No production crate runs a subprocess under a deadline. `holler-load-test` is a binary harness that calls `Command::output()` with no bound. So `exec.rs` is still the justified new object, with W-7's follow-up for #663.
-- **Dependency direction.** It matches ADR-0021 §5 and `holler-adapter-herdr`: a normal dependency on `holler-pane` only, with the test kit as a dev-dependency. Only the CLI constructs an adapter (ruling 1, #649).
-- **Crate root API.** `TmuxHost` and `TmuxSocket` sit at the crate root, while `holler-adapter-herdr` reaches every item by module path. Herdr's stated reason is root names that clash with `holler_proto`'s re-exports, and that does not arise here. Not drift.
-- **B-6's read needs no new error case.** It answers through Decision 8's table unchanged: `can't find session` for a prefix or a window-name shadow, and `error connecting to ... (No such file or directory)` with no server (PR7). It also inherits Decision 10's colon form, which the brief already extends to "any command added later".
-- **Hygiene.** AC 8's `rustfmt --edition 2021` matches the workspace edition. No tracked file holds the host name from the issue title. The outside-model prompt and result files are git-ignored.
+- **Round 3 is applied in full.**
+  - B-6(a): Decision 6, the `.` bullet of AC 6g, the second bullet of AC 14, and Decision 12's relative-cwd narrowing.
+  - B-6(b):
+    - Decision 3's read and its refusal order;
+    - Decision 7: the read replaces `has-session`, so a successful `run` makes three spawns;
+    - Decision 10: never `display-message` for an existence check;
+    - AC 6d (three entries), AC 6e, AC 6g, AC 6i and AC 14;
+    - Decisions 12 and 15, the #644 row, Risks and Evidence.
+  - W-14 is applied as a fix, not only documented: Decision 4's two-phase stop with the group probe, AC 4's member, the W-14 bullet of AC 6h, and AC 7's signal list.
+  - W-15: Decisions 3, 4, 5 and 13. AC 6h gains the `4294967295` pane, and AC 6i gains `0 @7`, `1 @7`, `4294967295 @7` and the `ps` case.
+  - W-16: AC 6e is reworded. W-17: the fallback is `tests/common/mod.rs`.
+  - O's round-3 transcript agrees with my round-3 probes. O rightly did not re-run the `-1` and pid-1 cases, which address processes the probe does not own.
+- **No new duplication.**
+  - Remote `main` is still 3bdd129, the branch's merge base.
+  - No production crate runs a subprocess under a deadline. `holler-load-test`'s `Command::output()` calls are unbounded harness code, and `probe.rs` is still #663's stub.
+  - The only `kill` code in the tree is test-only `libc::kill` in `holler-cli/tests`. So the kill-binary seam is not a parallel path, and `exec.rs` stays the justified new object, with W-7's follow-up.
+- **Dependency direction and naming are unchanged and consistent.**
+  - Dependencies: `holler-pane` only, with the test kit and `tempfile` as dev-dependencies (ADR-0021 §5; `holler-adapter-herdr/Cargo.toml`).
+  - `with_*(mut self) -> Self` matches `holler-hub/src/live.rs:453` and `holler-proto/src/error.rs:264`.
+  - Test files open with `#![allow(...)] // #641`, as `holler-adapter-herdr/tests/*.rs` do.
+  - AC 6f's re-executed child test has a precedent in `holler-hub/tests/token_store_test.rs:616-624`.
+- **The codes fit ADR-0021 §9.** `usage` (exit 2) covers the cwd and `argv[0]` refusals. `unavailable` (exit 1, a runtime failure) covers a missing session directory. No open code is used, which would exit 3.
+- **`exec.rs`'s drain-and-wait design holds on real tmux.** No round had probed this before. A `new-session` that starts the server returns with its pipes at EOF (Q1). The daemonized server's fds 0 to 2 are `/dev/null` (Q2), and a started pane's are its pty (Q4). So no drain thread waits on the server.
+- **Names cannot become flags.** Pane names start and end with `[0-9a-z]` (`holler-proto/src/vocab.rs` `check_segment`), so no name begins with `-`.
+- **Platform.** CI runs `ubuntu-latest` and `macos-latest` only; Windows is off per ADR 0002. So `/bin/sh` fakes are fine, and the default run is also the macOS leg (W-19).
+- **Hygiene.** No tracked file holds the host name from the issue title, and the outside-model prompt and result files are git-ignored. The outside review of the current brief (deepseek-v4-pro, r1 at 17:53, after O's 17:48 amendment) is a PASS. Its NV-3 and NV-8 are W-19.
 
-## Probe evidence (round 3)
+## Probe evidence (round 4)
 
-All probes ran on tmux 3.7c and procps-ng 4.0.4 (Linux). Each script ran its own private server: `tmux -S ../s -f /dev/null`, a relative socket path inside a fresh directory in the reviewer's session scratchpad, with `TMUX` and `TMUX_PANE` unset on every call. This session runs inside the operator's tmux, so the unset matters. An exit trap killed each server and removed its directory. A process check afterwards found no probe server and no probe directory left.
+**Setup.**
+- Versions: tmux 3.7c and procps-ng 4.0.4 (Linux).
+- Each script ran its own private server, `tmux -S ./s -f /dev/null`, on a relative socket inside a fresh `mktemp -d` directory in the reviewer's session scratchpad.
+- Every call ran with `TMUX` and `TMUX_PANE` unset, through `/bin/sh`, so that targets such as `=demo-c1r1:` reach tmux literally.
+- An exit trap killed each server and removed its directory. Afterwards no probe directory, tmux server or probe process was left.
+- The scripts (`a641r4-probe1.sh`, `a641r4-probe2.sh`) are in the scratchpad, not in the repo.
+- The only real signals were one TERM and one KILL, both to the probe's own pane group L (Q6). Every other `kill` call used signal 0.
 
-The only real signal sent was one TERM to the process group of a pane the probe itself started on its private server (PR2). Every other `kill` call used signal 0, which delivers nothing. The scripts (`a641r3-probe.sh`, `-probe2.sh`, `-probe3.sh`) are in the scratchpad, not in the repo. Below, `<dir>` is the probe directory, `<home>` the user's home directory, and L and M are the leader and member pids.
+**Results.** Below, `<dir>` is the probe directory.
 
-- **PR1, relative cwd.** From client cwd `<dir>/C`, `new-session -d -s demo-c1r1 -c rel` exited 0.
-  - `display-message -p '#{session_path}'` printed `rel`, and the session's shell pane worked in `<dir>/C/rel`.
-  - `new-window -d -P -F '#{pane_pid}' -c '#{session_path}' -t =demo-c1r1: -- env -- sleep 30`, from client cwd `<dir>/B` (where `B/rel` exists), started `sleep` in `<dir>/B/rel`.
-  - The same command from `<dir>/E`, which has no `rel`, started it in `<home>`.
-  - With `-c .`, `session_path` was `.`, and a run from `<dir>/B` worked in `<dir>/B`.
-- **PR5, removed directory.** `new-session -c <dir>/W`, then `rmdir <dir>/W`. `session_path` was still `<dir>/W`, `new-window ... -c '#{session_path}' ...` exited 0, and the program worked in `<home>`.
-- **PR6, `display-message` is not an existence check.** `display-message -p -t =NAME: '#{session_path}'` exited 0 with empty output in three cases: for `=nope:`, for `=demo-c1r1:` when only `demo-c1r10` existed, and for `=demo-c3r1:` when that was only a window name in another session. With no server it exited 1 (`no server running on ../s`).
-- **PR7, `list-panes` as the read.** `list-panes -t =NAME: -F '#{session_path}'`, without `-s`:
-  - `=demo-c1r10:` gave `<dir>/A` and `=demo-c2r1:` gave `rel` (a session made with `-c rel`), both exit 0.
-  - `=demo-c1r1:` (a prefix of `demo-c1r10`) and `=demo-c3r1:` (only a window name) each gave `can't find session: ...`, exit 1.
-  - With no server ever started it gave `error connecting to ../s (No such file or directory)`, exit 1.
-- **PR2, a group member outlives its leader.** `run`'s vector started `env -- sh leader.sh` (leader L), which ran `sh member.sh &` and then waited. `member.sh` ran `trap '' TERM HUP` and then `exec sleep 6`. The window was tagged per Decision 3 (`tag exit 0`).
-  - Member M showed pgid L and sid L.
-  - The listing before TERM showed `[L 0 L]` and the shell pane.
-  - `LC_ALL=C kill -s TERM -- -L` exited 0. 0.5 s later the listing held only the shell pane, while `kill -s 0 -- -L` still exited 0.
-  - M was alive in group L, reparented, and exited on its own about 5 s later, with no further signal sent.
-- **PR3, how `kill` reads a group argument (signal 0).**
-  - `-0` and `-1`: a usage error, exit 1.
-  - `-4294967295`: `Operation not permitted`, exit 1, meaning it reached pid 1.
-  - `-4294967296`: exit 0, meaning it wrapped to the caller's own group.
-  - `-4000000`: `No such process`, exit 1.
-- **PR4, `new-session -s` takes a name.** `new-session -d -s =demo-c3r1` exited 0, and `list-sessions` listed a session named `=demo-c3r1`.
+- **Q1, a server-starting call through a pipe.** `new-session -d -s demo-c1r1 -c <dir>/A`, with stdout and stderr captured through a pipe, started the server. It exited 0 with empty output, and the pipe reached EOF after 104 ms.
+- **Q2, the server's fds.** The server's fds 0, 1 and 2 were `/dev/null`: tmux daemonizes, so the server does not hold the client's pipes.
+- **Q3, `run`'s read through a pipe.** It printed `<dir>/A`, exit 0.
+- **Q4, `run`'s `new-window` vector through a pipe.** It printed `<pid> @1`, exit 0. The started pane's fds 0 to 2 were its pty, not the client's pipe.
+- **Q5, the session gone, no server left.** After `kill-session` of the server's only session, the server exited (exit-empty). Both the `stop_owned` listing form (`list-panes -s -t =demo-c1r1: -F '#{pane_pid} #{pane_dead} #{@holler-pid}'`) and `has-session -t =demo-c1r1` answered `no server running on ./s`, exit 1.
+- **Q6, W-18: a stop that closes the session's last window.**
+  - A second session, `demo-c9r9`, kept the server up.
+  - In `demo-c1r1`, `run`'s vector started `env -- sh leader.sh member.sh member.pid`. The leader was L. The member M ran `trap '' TERM HUP; exec sleep 6` and was in group L. The window was tagged per Decision 3 (`tag exit 0`).
+  - Then the shell window was closed with `kill-window`, which left the harness window as the session's only window. The listing before TERM was `[<L> 0 <L>]`.
+  - `LC_ALL=C kill -s TERM -- -<L>` exited 0.
+  - 0.5 s later, the poll listing (`list-panes -s -t =demo-c1r1: ...`) answered `can't find session: demo-c1r1`, exit 1. At the same time `kill -s 0 -- -<L>` and `kill -s 0 -- <M>` both exited 0, so M was alive.
+  - `kill -s KILL -- -<L>` exited 0. 0.2 s later, `kill -s 0 -- -<L>` printed `/usr/bin/kill: (-<L>): No such process`.
 
 ## Notes for O
 
-These amendments are all additions, and no decision is reversed. A BLOCK stops this automated run. Recovery is to amend the brief and start a fresh run, not `resumeFromRunId`. This is the third Phase 3 BLOCK, so the role doc's escalation to the operator applies.
+This is a PASS, so nothing stops the run. These notes are here so that each warn gets a decision.
 
-1. **Decision 6 (B-6a).** Replace "With a `cwd` that is an existing directory (checked on the unescaped value)" with "With a `cwd` that is an absolute path to an existing directory (both checked on the unescaped value)". Replace "With a `cwd` that is not an existing directory" with "With any other `cwd` (relative, or not an existing directory)". Add the reason: tmux keeps a relative `-c` verbatim and resolves it again against every later client's cwd (PR1).
-2. **Decisions 3 and 7 (B-6b).** `run` first reads `list-panes -t =NAME: -F '#{session_path}'`. Then, in order:
-   - a missing session (Decision 8's strings) is `pane-not-found`;
-   - an empty argv is `usage`;
-   - an `argv[0]` containing `=` is `usage`;
-   - a first line that is not an absolute path to an existing directory is `unavailable`, with a fixed `what` such as "the session's directory is missing or not absolute", never the path (W-2);
-   - otherwise `new-window ... -c '#{session_path}' ...` and the tag run, unchanged.
+1. **Fixes for this run.** If the run continues on this brief, T can apply W-18 to W-20 within the brief's intent and journal each one in `decisions.md`:
+   - W-18: the poll rule and its AC 6h test.
+   - W-19: fakes that answer by argument and by record, and a portable pid check.
+   - W-20: AC 9's grep read as scoped to `tests/real_tmux_test.rs`, plus the single fake-host helper.
 
-   This read replaces `run`'s `has-session` (Decision 7), so a successful `run` spawns **three** tmux subprocesses: the read, `new-window` and the tag. Add to Decision 10: "never `display-message` for an existence check: its target may fail silently (PR6)". Add PR1 and PR5 to PR7 to Evidence.
-3. **Decision 12.** Add two narrowings: a relative `cwd` is `usage` when the session would be created, where the fake would create it; and `run` is `unavailable` when the session's directory is missing or not absolute, where the fake would run it. Put both in the crate docs' error table.
-4. **Decision 15 and the #644 row.** Replace "so a later `run` still works in A" with "so a later `run` works in A while A exists. Once A is removed, `run` is `unavailable` until the session is ended, and no port call ends one (#644, #646)." In the #644 row add: a relative `host.cwd` is `usage` when the session would be created, so #644, or #670's flag layer, makes `--project` absolute before it is recorded.
-5. **ACs.**
-   - **AC 6d:** the calls file holds **three** entries for a successful `run`: the read (`list-panes -t =demo-c1r1: -F #{session_path}`, which the fake answers with an existing absolute tempdir), the `new-window` entry, then the tag. The rest of 6d stands.
-   - **AC 6e:** the read records `-t =demo-c1r1:`, and W-16's rewording applies.
-   - **AC 6i:** the fake's answer queue starts with the read's answer.
-   - **AC 6g:** in its `argv[0]` bullet, "holds `has-session`" becomes "holds the read". Add two bullets:
-     - `ensure_session` with the relative cwd `.` asks `has-session -t =demo-c1r1` and nothing else (`usage` / `Ok`, as for a non-directory), and never `new-session`.
-     - `run` whose read answers `rel`, or an absolute path that does not exist, is `unavailable`. The calls file holds no `new-window`, and `what` holds neither path.
-6. **Add AC 14, real tmux (`#[ignore]`), `run_refuses_a_missing_or_relative_directory` (B-6), built through the AC 9 helper:**
-   - `ensure_session(demo-c1r1, <dir>/W)`; remove `<dir>/W`; then `run(demo-c1r1, ["sleep", "30"])` is `unavailable`, and `list-panes -s -t =demo-c1r1:` still lists only the shell pane.
-   - `ensure_session(demo-c2r1, ".")` is `usage`, and `list-sessions` does not list `demo-c2r1`.
-7. **Risks.** Extend the "Working directory" line: a relative or removed directory would also start the harness elsewhere (PR1, PR5). AC 6g and AC 14 pin both refusals.
-8. **Warns.**
-   - W-14: one Decision 4 sentence plus one AC 6h line, or the two limits in Decision 15 at minimum.
-   - W-15: Decision 13's "the pid as `u32`" becomes "the pid as a number in `2..=i32::MAX`", applied to the listings too; AC 6i and AC 6h gain the cases above.
-   - W-16: AC 6e's rewording.
-   - W-17: the fallback path becomes `tests/common/mod.rs`.
+   None changes a decision. F follows the poll rule, which Decision 4's "done" definition already supports.
+2. **Fixes for a fresh run.** Apply the Suggested fix column as written. For W-18 that means Decision 4, AC 6h, Decision 15 and the #644 row.
+3. **Follow-up to file (W-18).** Leave a comment on #644, and on #670 if its flag layer is the right home, saying two things:
+   - `--project` must be absolute before it is recorded, because the real adapter answers `usage` for a relative one when it creates the session;
+   - relaunch is `stop_owned`, then `ensure_session`, then `run`.
 
-**Size:** B-6 adds about 15 lines of production code (the absolute check, the read, the refusal, the docs) and about 60 lines of tests (AC 6d, 6e, 6g and 6i adjustments and AC 14). W-14 and W-15 add about 10 more lines of each. `fake_tmux_test.rs` reaches about 560 lines and `real_tmux_test.rs` about 415, both under the 800 flag. The work is still one run.
+   `FakeHost` shows neither, so #644's own tests cannot find them.
+4. **Process, not architecture.** `decisions.md` has an O entry for the round-1 amendment only. The round-2 and round-3 amendments (95e2260, 0f18b80) are not journaled. Also, the brief's header names deepseek-v4-pro as the outside model and says "the issue and the epic fix it". Neither the issue nor the epic names a model, and the repo's `CLAUDE.md` names glm-5.3-flash. I did not review rigor; reconcile the header before S audits the run's gates.
 
 ## Patterns referenced
 
-- `crates/holler-pane/src/ports.rs:156-168` (the port: the session works "in `cwd`"); `crates/holler-cli/src/pane/args.rs:42-44` and `crates/holler-pane/src/pane.rs:105-111` (`--project` and `host.cwd` are plain strings, never canonicalized)
-- `docs/adr/ADR-0021.md:136, 171-183` (`--project DIR` maps to `host.cwd`; verbs and adapters run CLI-side, and each adapter depends on `holler-pane` only)
-- `crates/holler-pane/src/argv.rs:1-12` and `crates/holler-pane/src/error.rs:404-470` (guards that refuse bad input at the boundary and never echo it; the closed `usage` and `unavailable` variants the fixes use)
-- `crates/holler-pane-testkit/src/host.rs:28-61, 208-214` (the `HostOp` names; the fake's rules and its missing-session-first order)
-- `crates/holler-adapter-herdr/Cargo.toml`, `src/lib.rs`, `tests/common/mod.rs` (the neighbor adapter: dependencies, crate docs, shared test helpers)
+- `crates/holler-pane/src/ports.rs:156-168` and `crates/holler-pane-testkit/src/conformance/host.rs:17-20, 158-172`: the port, and the suite's reading that a real session "may end with its last process", which is why case 6 ensures the session again.
+- `crates/holler-pane-testkit/src/host.rs:52-61, 208-214`: the fake's rules and its missing-session-first order.
+- `docs/adr/ADR-0021.md` §2, §5 (lines 171-188) and §9 (lines 321-401): the ports, the crate dependency rules, the closed codes and their exit classes.
+- `crates/holler-adapter-herdr/{Cargo.toml, src/lib.rs, tests/common/mod.rs}`: the neighbor adapter's dependencies, crate docs and shared test helpers.
+- `.github/workflows/ci.yml:16-21, 35-40`: the OS matrix, and the self-hosted runner for same-repo ubuntu runs.
