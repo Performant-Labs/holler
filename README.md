@@ -180,13 +180,14 @@ See [docs/README.md](docs/README.md) — the index. For testing: [the harness de
 
 To have an agent (Claude Code or similar) drive the [Herdr workspace setup](docs/setup-wizard.md)
 for you — one or more local orchestrator panes plus one live view pane per remote Holler
-session — give it the prompt below. The wizard is a Claude Code skill that ships in this repo at
-[`agent-skills/setup-wizard/SKILL.md`](agent-skills/setup-wizard/SKILL.md); the prompt uses it if it's
-installed and otherwise fetches it from this repo, so it works on a machine that has never seen it.
-To install it permanently for Claude Code instead:
+session — give it the prompt below. The wizard is a Claude Code skill that ships in this repo in
+[`agent-skills/setup-wizard/`](agent-skills/setup-wizard/): `SKILL.md` plus the helper scripts in its
+`lib/` directory, which its stages run, so the **whole directory** is needed. The prompt uses the skill
+if it's installed and otherwise fetches the directory from this repo, so it works on a machine that
+has never seen it. To install it permanently for Claude Code instead (one command, no checkout needed):
 
 ```bash
-mkdir -p ~/.claude/skills/setup-wizard && curl -fsSL https://raw.githubusercontent.com/Performant-Labs/holler/main/agent-skills/setup-wizard/SKILL.md -o ~/.claude/skills/setup-wizard/SKILL.md
+mkdir -p ~/.claude/skills && curl -fsSL https://github.com/Performant-Labs/holler/archive/refs/heads/main.tar.gz | tar -xz -C ~/.claude/skills --strip-components=2 holler-main/agent-skills/setup-wizard
 ```
 
 The prompt:
@@ -200,10 +201,11 @@ separate yes/no before configuring anything or launching a workspace.
 
 1. If you have the `setup-wizard` Claude Code skill installed, invoke it directly
    (/setup-wizard, optionally with --config <path>).
-2. Otherwise get the same procedure from the repo: read agent-skills/setup-wizard/SKILL.md in a
-   local checkout, or fetch
-   https://raw.githubusercontent.com/Performant-Labs/holler/main/agent-skills/setup-wizard/SKILL.md
-   — and execute it stage by stage, as if it were that skill (treat "/setup-wizard" in it as this
+2. Otherwise get the same procedure from the repo: use agent-skills/setup-wizard/ in a local
+   checkout, or install the whole directory (not SKILL.md alone: its stages run the scripts in
+   its lib/ directory) into ~/.claude/skills with the README's install command in the section
+   "Set up a Herdr workspace with an agent" of Performant-Labs/holler's README.md — and execute
+   SKILL.md stage by stage, as if it were that skill (treat "/setup-wizard" in it as this
    very task, and its optional --config <path> as the config path I give you).
 3. Only if you cannot get that file, read docs/setup-wizard.md in full and replicate its flow
    yourself. First, check
@@ -239,9 +241,9 @@ Once a real config exists, preflight every distinct remote host (SSH
 reachability, the `holler` binary, each session's model endpoint), present the concrete plan
 you're about to execute and get my explicit yes before changing anything, start the remote
 OpenCode backends, capture real session IDs, bring up the Holler hub locally, migrate a
-Holler-only derived config and join/run one body per distinct remote host, build the Herdr
+Holler-only derived body config and join/run one body per distinct remote host, build the Herdr
 panes per the config's `layout`, attach each session pane, and verify every session end to end
-with a real round-trip `holler say` reply. If any stage fails, don't just stop and report it and
+with a real round-trip reply from it. If any stage fails, don't just stop and report it and
 leave things unfinished — tell me plainly what broke, ask me the one concrete question that
 unblocks it, and once I answer, keep going through the rest of the stages until the workspace is
 actually up and verified. Don't guess a fix silently; do push through to a finished result.
