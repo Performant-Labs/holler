@@ -290,3 +290,33 @@
   - `gh issue view 643` (body, no comments) and `gh issue view 633` (latest comments): no MO ruling on W-1 or W-2.
   - The driver's A-dup routing (BLOCK goes to F, phase 6, with no extra note) and the stop on F's `done: false`
     (`coding-pipeline.workflow.mjs:1186-1194`, :4775-4800, logic `nextPhase` case 6).
+
+## F (Phase 5, implement, round 3: after A-dup's BLOCK) — 2026-10-09T19:17:11-06:00
+- **Decided:** `done: false` and `archChanged: false`, with no production change. This stops the run so the MO can
+  rule on D-1 and amend the brief, as A-dup's Notes for F 1 and 2 ask. F cannot fold D-1 inside the brief:
+  - every fold changes SYNC, which AC 3 and its three tests pin;
+  - (a) needs `origin/main` merged into the branch, which is a commit, and F makes none;
+  - (b) edits `holler-pane` and ADR-0021, outside the blast radius;
+  - `done: true` would only re-run T-green, the paid diff gate and A-dup to the same BLOCK.
+  The stop reads `gate-unavailable:6` (`coding-pipeline.workflow.mjs:4798`, `:1107-1108`), not
+  `unrecognized-verdict:unavailable` as A-dup's note 2 says. F recommends (a), with DRIVEN still printing
+  `last_observed.driven` until #649 ("a1"). The details are in handoff-F.md, "For the MO".
+- **Assumed:** The MO's fresh run starts after the brief is amended, and it takes in `origin/main` first, whatever the
+  ruling. Only `CHANGELOG.md` conflicts. No MO ruling exists yet: #643 has no comments, and #633's latest comments say
+  nothing on SHOWN/DRIVEN.
+- **Hedged:**
+  - The lean to (a1) over (a2) is a judgment, not a finding. Both are honest. (a1) keeps the issue's wording and commits
+    #649 to nothing. (a2) makes a flagged row show both sessions.
+  - The false-MISMATCH caveat under (a) was traced in the source, not run. When `shown_session` fails on a first
+    observation, `at` is stamped while `shown` stays `None`. It belongs to #647's rule.
+- **Evidence:**
+  - Read on `origin/main` (`e612878`): `reconcile.rs:29-36, 153-161, 171-181`, `reconcile/observe.rs:78-84, 96-108,
+    186-195, 230-234, 350-386`, the ADR-0021 diff from `3bdd129`, #647's `handoff-A-dup.md:95-130`, and
+    `findings.rs:318-352`.
+  - `git grep` for writes of `driven` on `origin/main`: only the test kit's fixture sets it, to `None`.
+  - Read on this branch: `list.rs` (whole), `get.rs:1-95`, the `observed` fixture and AC 3's test in `pane_verbs/list.rs`,
+    `CHANGELOG.md`'s entry, the brief (whole), and handoffs A-dup, F (round 2) and T-green (round 2).
+  - The driver: `runImplementPhase`, the F branch of the phase loop, `commitPhaseWork` (`git add -A`) and `nextPhase`.
+  - Commands: `cargo test -p holler-cli --test pane_verbs` gave 95 passed. `cargo clippy -p holler-cli --all-targets --
+    -D warnings` and `bash scripts/lint.sh` exited 0. `git diff --stat 279a1fb..HEAD -- crates CHANGELOG.md` was empty.
+    `git merge-tree --write-tree origin/main HEAD` conflicted in `CHANGELOG.md` only.
