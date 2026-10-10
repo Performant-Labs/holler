@@ -9,7 +9,7 @@ case " $* " in
       [ -n "$p" ] && list="$list,$p"
     done <"$FAKE_ROOT/pids"
     [ -n "$list" ] || exit 0
-    exec "$FAKE_REAL_PS" -o pid=,user=,lstart=,command= -p "${list#,}"
+    exec "$FAKE_REAL_PS" -ww -o pid=,user=,lstart=,command= -p "${list#,}"
     ;;
 esac
 exec "$FAKE_REAL_PS" "$@"

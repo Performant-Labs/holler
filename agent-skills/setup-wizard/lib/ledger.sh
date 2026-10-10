@@ -39,7 +39,7 @@ LEDGER="$(state_dir)/wizard-ledger.toml"
 trim() { sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'; }
 
 ps_started() { LC_ALL=C ps -o lstart= -p "$1" 2>/dev/null | trim; }
-ps_cmd() { ps -o command= -p "$1" 2>/dev/null | trim; }
+ps_cmd() { ps -ww -o command= -p "$1" 2>/dev/null | trim; }
 
 toml_escape() { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'; }
 

@@ -43,7 +43,7 @@ owns() {
   case $? in 0) return 0 ;; 1) return 1 ;; *) return 2 ;; esac
 }
 
-cur_cmd() { ps -o command= -p "$1" 2>/dev/null | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'; }
+cur_cmd() { ps -ww -o command= -p "$1" 2>/dev/null | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'; }
 cur_user() { ps -o user= -p "$1" 2>/dev/null | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'; }
 
 # A zombie has exited; it only waits for its parent to reap it.
