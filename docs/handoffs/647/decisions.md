@@ -172,3 +172,57 @@
   - After the test edit: `pane_verbs` 95/95, doctor 32/32, clippy clean, lint 0, rustfmt clean, gitleaks clean.
   - `observation_runs_concurrently`: 20/20.
   - Mutations M1-M5 and M7 are caught. M6 was not caught, and is caught after the new test.
+
+## A (Phase 7, anti-duplication gate) — 2026-10-09T18:18:44-06:00
+- **Decided:** PASS on `3bdd129..baf176f`, with 0 blocks and 5 warns (see handoff-A-dup.md).
+  - F extended every object the brief's Reuse map names and copied none:
+    - `Ports`, and `ProfileScope::resolve`;
+    - `PaneStore` `list`, `get` and `cas_put`;
+    - the closed codes, through `ErrorBody::from` and `emit`;
+    - `GridPos`, `ProfileOpt`, and the name parsers;
+    - `error::excerpt`, wrapped and not copied;
+    - `now_millis` (W-3);
+    - the test kit's fakes, `run_verb_with`, `check_envelope` and `try_parse` (W-6(c)).
+  - Every new object is the brief's own (the engine, the findings, the named fallback submodules) or one Phase 3 asked
+    for (`shown_differs`, `doctor_command`, the one remedy table, `quoted`, `findings_test.rs`).
+  - The warns:
+    - D-1: the doctor rig is private to `doctor`, and #643's branch has a second rig in the same `pane_verbs` binary;
+    - D-2: three quoting rules (`quoted`; #643's `text_value`; the Herdr adapter's private `excerpt` copy on `main`);
+    - D-3: #663 and #644 plan their own `holler pane doctor` spelling in `profile_scope.rs`;
+    - D-4: `fix_error.code` holds a finding-kind code for a post-act mismatch, pending #644/#645's code (ADR-0021:536);
+    - D-5: a fourth crate-local control-character sanitizer, with no shared one to extend.
+- **Assumed:**
+  - `origin/main` at `3bdd129` is current: `git ls-remote` agrees, so no sibling rig or helper has merged. I did not run
+    `git fetch`, so that the remote-tracking refs other worktrees diff against stay unchanged.
+  - The #643, #644, #662 and #663 branches and briefs are plans, not patterns. I used them only as evidence of forward
+    duplication.
+- **Hedged:**
+  - D-1 to D-3 are warns, not blocks. No rig, quoting helper or reconcile-step builder is on `main`, so #647 cannot be
+    folding onto one. The role rule is to block a parallel path to an existing object only. Whichever sibling merges
+    second faces the fold at its own gate.
+  - D-4 is a warn because ADR-0021 defers the post-act code by name, and the choice is documented and tested.
+  - D-5 is a warn because the codebase has no dominant sanitizer pattern (role rule: cite the ambiguity, do not block).
+  - Not re-rated, still with O: W-1's ADR-0021 §1 half, W-7, and AC 33's Files list.
+- **Evidence:**
+  - Read in full:
+    - every changed code file: `findings.rs`, `reconcile.rs`, `reconcile/observe.rs`, `pane/doctor.rs`;
+    - the tests: `pane_verbs/doctor.rs`, `doctor/{rig,read_only,surface}.rs`, `findings_test.rs`;
+    - the diffs of `cli-surface.txt`, `process/stub.rs`, ADR 0003, ADR-0021 and the CHANGELOG;
+    - the brief, and handoff-A, -T-red, -F and -T-green.
+  - Neighbours read on `main`:
+    - `holler-pane/src/{reply,lib,probe}.rs` and the stubs;
+    - `output.rs` (lines 90-360), `pane/args.rs`, `pane/profile_scope.rs`;
+    - `verb_harness/{mod,parse}.rs` and `pane_verbs/main.rs`;
+    - the sanitizers in `log.rs`, `acp_driver/auth.rs`, `holds.rs` and `adapter-herdr/src/protocol.rs`.
+  - Greps over `crates/`:
+    - `Ports {` construction sites;
+    - `impl *Port for`;
+    - `check_envelope`;
+    - call-log snapshot helpers;
+    - `PaneNotFound`, `PaneRole::Orchestrator` and `pane doctor` literals;
+    - control-character escaping;
+    - personal infrastructure names in the diff.
+  - Sibling branches inspected with `git show`:
+    - `issue-643-implementation`: `pane_verbs/list.rs` and `src/pane/list.rs`;
+    - `issue-662-implementation`: `profile_verbs/rig.rs`;
+    - the #663 and #644 briefs (reconcile step).
