@@ -71,7 +71,8 @@ impl Env {
     }
 
     fn write_ledger(&self, body: &str) -> PathBuf {
-        let p = self.path().join("wizard-ledger.toml");
+        let p = self.path().join("herdr/setup/wizard-ledger.toml");
+        fs::create_dir_all(p.parent().unwrap()).unwrap();
         fs::write(&p, body).unwrap();
         p
     }
@@ -90,7 +91,7 @@ impl Env {
             .env("FAKE_HERDR_LOG", self.log_file())
             .env("FAKE_HERDR_SESSIONS", self.path().join("sessions.txt"))
             .env("WIZARD_HERDR_SESSION", session)
-            .env("WIZARD_LEDGER", self.path().join("wizard-ledger.toml"))
+            .env("WIZARD_LEDGER", self.path().join("herdr/setup/wizard-ledger.toml"))
             .env("HOME", self.path())
             .env("TMPDIR", self.path().join("tmp"))
             .env_remove("WIZARD_LOG_DIR")

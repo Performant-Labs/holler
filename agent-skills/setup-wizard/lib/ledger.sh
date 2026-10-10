@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ledger.sh - the setup wizard's per-(host, instance) process ledger (epic #726, story #729).
 #
-# The ledger is <state_dir>/wizard-ledger.toml, where state_dir is $HOLLER_STATE_DIR. When
+# The ledger is <state_dir>/herdr/setup/wizard-ledger.toml, where state_dir is $HOLLER_STATE_DIR. When
 # that is unset or empty every verb exits 64: a lost variable must never fall back to the
 # default instance's ledger. Mode 0600, written
 # atomically (temp file in the same directory, then rename). One [[process]] table per process
@@ -33,7 +33,7 @@ state_dir() {
 
 # A die inside $(...) would only end the subshell, so check before building the path.
 [ -n "${HOLLER_STATE_DIR:-}" ] || die "HOLLER_STATE_DIR is unset or empty; refusing to guess a state directory (pass the instance's own, the default one included)"
-LEDGER="$(state_dir)/wizard-ledger.toml"
+LEDGER="$(state_dir)/herdr/setup/wizard-ledger.toml"
 
 trim() { sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'; }
 
@@ -133,7 +133,10 @@ cmd_record() {
 
   local dir lock tmp tries
   dir="$(dirname "$LEDGER")"
-  mkdir -p "$dir" || die "cannot create $dir"
+  # The state directory as it is; herdr and setup are made 0700 (the ledger itself is 0600).
+  mkdir -p "$HOLLER_STATE_DIR" || die "cannot create $HOLLER_STATE_DIR"
+  [ -d "$HOLLER_STATE_DIR/herdr" ] || mkdir -m 700 "$HOLLER_STATE_DIR/herdr" || die "cannot create $HOLLER_STATE_DIR/herdr"
+  [ -d "$dir" ] || mkdir -m 700 "$dir" || die "cannot create $dir"
   lock="$LEDGER.lock"
   tries=0
   until mkdir "$lock" 2>/dev/null; do

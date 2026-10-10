@@ -219,7 +219,7 @@ anything else — and treat that as its own decision, not a green light to also 
 launch a workspace in the same breath. Only once `herdr` is confirmed present, ask me separately
 whether to configure Holler and launch a workspace now. If yes, replicate the doc's "Automated
 setup" flow: load my session config (an explicit path I give you, else ./sessions.toml, else
-~/.config/setup-wizard/sessions.toml).
+~/.holler/herdr/setup/sessions.toml).
 
 If none of those exist, don't invent or auto-fill anything — the doc's own example config is
 illustrative, not a template to write verbatim; using it as-is would set up whatever

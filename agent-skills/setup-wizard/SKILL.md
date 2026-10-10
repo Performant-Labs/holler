@@ -45,7 +45,7 @@ it from Stage 1.
 
 **The ownership rule (the one rule every stop, restart, rejoin and teardown step points at).**
 The wizard signals a process only if this instance's own ledger
-(`<state_dir>/wizard-ledger.toml`) recorded it **and** the process's current start time and
+(`<state_dir>/herdr/setup/wizard-ledger.toml`) recorded it **and** the process's current start time and
 command still equal the recorded ones. A recorded pid whose start time or command differ is
 **stale** (a reused pid): never signal it, report it. A process in no ledger is **foreign**:
 never signal it, report its pid, owner and command, then stop and ask the user. This holds
@@ -65,6 +65,9 @@ The last word depends on the verb: a pid for `stop` and `restart`, a port for `c
 `teardown` the third argument is empty or `--purge-state` (leave the word out when it is empty).
 The Herdr server the wizard started for the instance is a ledger process like any other: it
 stops through `stop-owned.sh` (a `herdr` row), never through `herdr.sh run server stop`.
+
+A ledger left at the old path (`<state_dir>/wizard-ledger.toml`, before the wizard moved its files to
+`<state_dir>/herdr/setup/`) is not read: its processes look foreign. The operator may move the file by hand.
 
 **What's genuinely generalized here vs. what's still OpenCode-specific:** every orchestrator
 (command, working directory, and there can be more than one) is fully config-driven and can be
@@ -124,7 +127,7 @@ socket, on whichever single machine each one lives on.
    priority over both of the searches below, and neither of them runs at all in this case.
 2. `./sessions.toml` (the current working directory the wizard is invoked from) — lets a
    project keep its own config, taking priority over the fallback when present.
-3. `~/.config/setup-wizard/sessions.toml` — the global default/fallback.
+3. `~/.holler/herdr/setup/sessions.toml` — the global default/fallback.
 
 Use whichever is found **first**, don't merge across tiers. An explicit `--config` path (tier 1)
 that doesn't exist or fails to parse is a hard failure right there — it does **not** fall
@@ -454,10 +457,10 @@ skill-invocation text parsing):
 ```bash
 if [ -f ./sessions.toml ]; then
   CONFIG=./sessions.toml
-elif [ -f ~/.config/setup-wizard/sessions.toml ]; then
-  CONFIG=~/.config/setup-wizard/sessions.toml
+elif [ -f ~/.holler/herdr/setup/sessions.toml ]; then
+  CONFIG=~/.holler/herdr/setup/sessions.toml
 else
-  CONFIG=~/.config/setup-wizard/sessions.toml   # does not exist yet — see the hard stop below
+  CONFIG=~/.holler/herdr/setup/sessions.toml   # does not exist yet — see the hard stop below
 fi
 echo "config: $CONFIG"; cat "$CONFIG" 2>&1
 ```
@@ -721,7 +724,7 @@ file, which is right (everything running there is foreign):
 ```bash
 WIZARD_INVENTORY_HERDR=1 bash $WIZARD_LIB/inventory.sh > <scratch>/inventory-<host>.tsv
 ssh <remote_host> 'bash -l -s' < $WIZARD_LIB/inventory.sh > <scratch>/inventory-<host>.tsv
-ssh <remote_host> "cat <state_dir>/wizard-ledger.toml" > <scratch>/ledger-<host>.toml
+ssh <remote_host> "cat <state_dir>/herdr/setup/wizard-ledger.toml" > <scratch>/ledger-<host>.toml
 ```
 (the first line for this machine, the others for each remote host; `<host>` names the file, the
 `<state_dir>` is that remote host's resolved one. This machine's ledger is read in place, no
@@ -839,7 +842,7 @@ plan and show it before touching anything:
   `WIZARD_STATE_DIR` (that host's resolved one), `WIZARD_BACKEND_PORTS` (the ports `instance.sh`
   printed for the sessions that run on that host) and `WIZARD_LEDGER` (that host's ledger: the
   fetched `<scratch>/ledger-<host>.toml` for a remote host, as in the command below;
-  `<state_dir>/wizard-ledger.toml` for this machine); on the hub host also `WIZARD_HUB_PORT`, `WIZARD_SERVE_HTTPS_PORT` and
+  `<state_dir>/herdr/setup/wizard-ledger.toml` for this machine); on the hub host also `WIZARD_HUB_PORT`, `WIZARD_SERVE_HTTPS_PORT` and
   `WIZARD_HERDR_SESSION`:
   ```bash
   WIZARD_INSTANCE_NAME=<name> WIZARD_HUB_PORT=<hub_port> WIZARD_SERVE_HTTPS_PORT=<serve_https_port> WIZARD_HERDR_SESSION=<herdr_session> WIZARD_STATE_DIR=<state_dir> WIZARD_BACKEND_PORTS="<ports on this host>" WIZARD_LEDGER=<scratch>/ledger-<host>.toml bash $WIZARD_LIB/collide.sh <host-label> <scratch>/inventory-<host>.tsv
@@ -954,7 +957,7 @@ the host the process runs on, named `<prefix>-...` (Stage 8 passes it to `herdr.
 `mkdir -p <logs_dir>` (over `ssh <remote_host> "mkdir -p <logs_dir>"` for a remote host).
 
 **The ledger.** Every process this wizard starts in Stages 4 to 8 is recorded, once it is up,
-in `<state_dir>/wizard-ledger.toml` on the host it runs on (contract: epic #726; the file is
+in `<state_dir>/herdr/setup/wizard-ledger.toml` on the host it runs on (contract: epic #726; the file is
 the only source for "what this run created"). `ledger.sh` has three verbs and reads the state
 directory from `HOLLER_STATE_DIR` in its environment (unset means `$HOME/.holler`, and then it
 would silently use the default instance's ledger), so **every** call sets it inline:

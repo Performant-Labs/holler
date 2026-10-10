@@ -18,6 +18,9 @@ fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
+/// The ledger file, relative to the state directory.
+const LEDGER_REL: &str = "herdr/setup/wizard-ledger.toml";
+
 fn ledger_sh() -> PathBuf {
     repo_root().join("agent-skills/setup-wizard/lib/ledger.sh")
 }
@@ -250,11 +253,18 @@ fn record_writes_the_contract_fields_atomically_with_mode_0600() {
     let o = record(&w, &st, pid, "backend", "4", Some("alpha"));
     assert_eq!(code(&o), 0, "{}", String::from_utf8_lossy(&o.stderr));
 
-    let file = st.join("wizard-ledger.toml");
+    let file = st.join(LEDGER_REL);
     assert_eq!(fs::metadata(&file).unwrap().permissions().mode() & 0o777, 0o600);
     assert_contract_fields(&fs::read_to_string(&file).unwrap(), pid);
     // No temp file is left behind by the atomic write, and no lock.
-    assert_eq!(dir_entries(&st), vec!["wizard-ledger.toml".to_string()]);
+    assert_eq!(dir_entries(&st), vec!["herdr".to_string()]);
+    assert_eq!(dir_entries(&st.join("herdr")), vec!["setup".to_string()]);
+    assert_eq!(dir_entries(&st.join("herdr/setup")), vec!["wizard-ledger.toml".to_string()]);
+    for d in ["herdr", "herdr/setup"] {
+        assert_eq!(fs::metadata(st.join(d)).unwrap().permissions().mode() & 0o777, 0o700, "{d}");
+    }
+    // Nothing is written at the old path.
+    assert!(!st.join("wizard-ledger.toml").exists());
 }
 
 #[test]
@@ -338,7 +348,7 @@ fn recording_a_pid_that_does_not_exist_fails_and_writes_nothing() {
         &["record", "--pid", "999999999", "--role", "backend", "--stage", "4"],
     );
     assert_eq!(code(&o), 1);
-    assert!(!st.join("wizard-ledger.toml").exists());
+    assert!(!st.join(LEDGER_REL).exists());
 }
 
 fn assert_usage_error(w: &World, st: &Path, args: &[&str]) {
@@ -357,7 +367,7 @@ fn record_rejects_bad_arguments() {
     assert_usage_error(&w, &st, &["record", "--pid", &pid, "--role", "hub", "--stage", "3"]);
     assert_usage_error(&w, &st, &["record", "--pid", &pid, "--role", "hub"]);
     assert_usage_error(&w, &st, &["frobnicate"]);
-    assert!(!st.join("wizard-ledger.toml").exists());
+    assert!(!st.join(LEDGER_REL).exists());
 }
 
 #[test]
@@ -398,7 +408,8 @@ fn a_reused_pid_with_another_start_time_or_command_is_stale() {
              role = \"backend\"\nstage = 4\nsession = \"alpha\"\n"
         )
     };
-    let file = st.join("wizard-ledger.toml");
+    let file = st.join(LEDGER_REL);
+    fs::create_dir_all(file.parent().unwrap()).unwrap();
 
     fs::write(&file, entry(&started, "opencode --port 47001")).unwrap();
     assert_eq!(code(&w.ledger(&st, &["owns", &live.to_string()])), 1, "different command");
@@ -602,6 +613,33 @@ fn the_instance_state_dir_holds_only_its_own_ledger() {
     let one = w.state("instance-one");
     let two = w.state("instance-two");
     start_instance(&w, &one, "one", "41807", "443", "47001");
-    assert!(one.join("wizard-ledger.toml").is_file());
-    assert!(!two.join("wizard-ledger.toml").exists());
+    assert!(one.join(LEDGER_REL).is_file());
+    assert!(!two.join(LEDGER_REL).exists());
+}
+
+#[test]
+fn a_ledger_at_the_old_path_is_not_read_and_the_new_one_is_the_only_one_written() {
+    let w = World::new();
+    let st = w.state("a");
+    let pid = w.sleeper("611");
+    // An old-path ledger that lists the pid: it must not make the pid owned.
+    let old = st.join("wizard-ledger.toml");
+    let started = ps_lstart(pid);
+    fs::write(
+        &old,
+        format!(
+            "[[process]]\npid = {pid}\nstarted = \"{started}\"\ncmd = \"sleep 611\"\n\
+             role = \"backend\"\nstage = 4\nsession = \"\"\n"
+        ),
+    )
+    .unwrap();
+    assert_eq!(code(&w.ledger(&st, &["owns", &pid.to_string()])), 2);
+    assert!(list(&w, &st).is_empty());
+    assert!(!st.join("herdr").exists(), "reading must not create folders");
+
+    let before = fs::read_to_string(&old).unwrap();
+    assert_eq!(code(&record(&w, &st, pid, "backend", "4", None)), 0);
+    assert_eq!(fs::read_to_string(&old).unwrap(), before, "old ledger untouched");
+    assert!(st.join(LEDGER_REL).is_file());
+    assert_eq!(code(&w.ledger(&st, &["owns", &pid.to_string()])), 0);
 }
