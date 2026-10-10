@@ -158,3 +158,47 @@
   - The 9-mutation table in `handoff-T-green.md`. Each mutation was reverted with `git checkout`, and `git status`
     shows only T's staged test file plus the handoff files.
   - The AC 1, 4, 6, 9 and 12 greps and diffs, reproduced as F reported them.
+
+## A (Phase 7, anti-duplication gate) — 2026-10-09T20:31:59-06:00
+- **Decided:** PASS on `ce12cdb..5396f54`, with 0 blocks and 5 warns (see `handoff-A-dup.md`).
+  - F reused every object the Reuse map named. That covers `emit` and the output types, the closed codes,
+    `profile_from_panes` for every record, `is_member` in all three places, `count` and the rig.
+  - The new objects are `insert_profile`, `single_quoted` and the `NthCasPut` seam, all justified in the brief. `detach`
+    and `pane_list` are each defined once and used by both verbs.
+  - Nothing on `main` has a counterpart to any of these, and nothing on `main` is copied.
+  - Phase 3's W-1, W-3 and W-4 are applied.
+  - The warns:
+    - W-1: the profile lookup is written three times, and the members filter twice, in `profile/`. #664 is the next
+      consumer.
+    - W-2: the suggested command lines are written in more than one place, against `doctor_command`'s
+      one-builder pattern.
+    - W-3: #663's private `single_quoted` is still there, so a second copy reaches `main` with whichever story merges
+      second. `profile/` also has two shared-helper homes.
+    - W-4: Phase 3's W-2 (the ADR-0021 `profile-conflict` meaning and the I1 exception for `--keep-panes`) is still open,
+      and no issue is filed.
+    - W-5: the `stored` test helper is defined twice, and the two test files count writes in two ways.
+- **Assumed:**
+  - `main` means `origin/main` at `e327569`. Its three commits past the base touch only the adapter crates.
+  - #663's state is the local branch `issue-663-implementation` at `4bbe607` (F done, not merged). The remote branch is
+    still at its brief.
+- **Hedged:**
+  - W-1 to W-3 are warns, not blocks, for three reasons. `main` has no object to extend: the lookup is inline in the
+    private `view` of `show.rs`, a file this run may not touch. `findings.rs` builds only pane-verb commands. #663's copy
+    has not merged.
+  - W-4 stays a warn as at Phase 3. The brief records the wider meaning (C2, Decision 7), and AC 6 forbids the edit. The
+    MO should settle it before merge.
+- **Evidence:**
+  - Read in full:
+    - the diff;
+    - `src/profile/{create,delete,show,list}.rs`;
+    - `tests/profile_verbs/{create,delete,rig,show}.rs`;
+    - `holler-pane/src/findings.rs`;
+    - the handoffs from A, F and T-green, and the brief's Reuse map and Forward-compat.
+  - Read in part: the hub's `profile/rename.rs` and the test kit's conformance mutants.
+  - Grepped `crates/*/src` and `origin/main` for:
+    - POSIX quoting helpers, `", "` joins, `"none"` and `ProfileNotFound {`;
+    - `PaneInOtherProfile {`, writes of `Pane.profile`, `cas_put(.., 0, ..)` and `impl PaneStore for`;
+    - the `FaultSwitch` API, `fn argv(` and hand-built `ErrorBody`.
+  - Grepped #663 at `4bbe607` for `single_quoted`, `reconcile_step`, `with_context`, `belongs` and `stored`.
+  - Checked file sizes, `#[allow]` additions, frozen files and personal names, and searched GitHub for filed
+    follow-ups (none).
