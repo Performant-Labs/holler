@@ -1,0 +1,43 @@
+[package]
+name = "herdr-holler"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "The Herdr display plugin (issue #651): the hub's pane state in Herdr's sidebar — display only, never a pane-changing call"
+
+[lib]
+name = "herdr_holler"
+path = "src/lib.rs"
+
+# The binary the manifest's event hooks run: `herdr-holler refresh`.
+[[bin]]
+name = "herdr-holler"
+path = "src/main.rs"
+
+# Declare only what is consumed (issue #155 §7 — `cargo machete` fails CI
+# otherwise).
+[dependencies]
+# The pane record types (`Pane`, `PaneName`, `PaneId`) and the one SHOWN/DRIVEN
+# rule (`reconcile::shown_differs`) the reports derive from.
+holler-pane = { path = "../../crates/holler-pane" }
+# The merged one-shot control-socket client (`control::run`) the hub read goes
+# through, exactly as `holler-cli`'s transport module uses it.
+holler-hub = { path = "../../crates/holler-hub" }
+# The Herdr report lines the plugin writes, the replies it reads, and the
+# `pane/list` data it decodes into `Vec<Pane>`. Also the wire JSON of the
+# tests' two fakes.
+serde_json = { workspace = true }
+
+[dev-dependencies]
+# The manifest under test is TOML.
+toml = { workspace = true }
+# Scratch state dirs and sockets; nothing touches a live fleet or session.
+tempfile = { workspace = true }
+# The fixture panes (`fixture::sample_pane`) the fake registry replies with.
+holler-pane-testkit = { path = "../../crates/holler-pane-testkit" }
+
+# Workspace lints (issue #149): inherit [workspace.lints] from the root
+# Cargo.toml — deny dead_code, clippy unwrap/expect/panic/unreachable, and the
+# complexity gates (thresholds in clippy.toml).
+[lints]
+workspace = true

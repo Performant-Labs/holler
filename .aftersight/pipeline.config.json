@@ -9,8 +9,8 @@
     "pluginTypecheck": null
   },
   "paths": {
-    "test": ["crates/*/tests/**"],
-    "production": ["crates/*/src/**", "crates/*/Cargo.toml", "Cargo.toml", "Cargo.lock", "scripts/**"]
+    "test": ["crates/*/tests/**", "plugins/*/tests/**"],
+    "production": ["crates/*/src/**", "crates/*/Cargo.toml", "plugins/*/src/**", "plugins/*/Cargo.toml", "plugins/*/herdr-plugin.toml", "Cargo.toml", "Cargo.lock", "scripts/**"]
   },
   "toolchain": [
     {

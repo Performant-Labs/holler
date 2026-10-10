@@ -1,5 +1,8 @@
 [workspace]
-members = ["crates/*"]
+# "plugins/*" is issue #651's one declared blast-radius exception (brief.md,
+# A-approved): without it the Herdr display plugin's acceptance tests never
+# run under `cargo test --workspace`.
+members = ["crates/*", "plugins/*"]
 resolver = "2"
 
 # ADR 0003: one version for the whole workspace, from 0.1.0. Member crates
