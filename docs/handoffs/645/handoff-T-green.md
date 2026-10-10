@@ -1,109 +1,100 @@
-# Handoff-T-green: Phase 7 - #645a `pane switch` and `pane reset` (GREEN + Tier 2, round 5)
+# Handoff-T-green: Phase 7 - #645a `pane switch` and `pane reset` (GREEN + Tier 2, round 6)
 
-**Date:** 2026-10-10 (00:58 MDT)
-**Branch:** issue-645-implementation (worktree `.claude/worktrees/0645-switch-reset`, head `a1f01aa`, F's round-5 commit)
+**Date:** 2026-10-10 (01:20 MDT)
+**Branch:** issue-645-implementation (worktree `.claude/worktrees/0645-switch-reset`, head `6dd44f3`, F's round-6 commit,
+a merge with parents `7435610` and `bd5e825`)
 **Issue:** #645 (part 1 of 2, 645a)
-**Handoff-F reviewed:** `docs/handoffs/645/handoff-F.md` (round 5, the outside diff gate's r4 BLOCK, B-1)
+**Handoff-F reviewed:** `docs/handoffs/645/handoff-F.md` (round 6, T-green round 5's BLOCK: merge `origin/main`)
 **Handoff-T-red:** `docs/handoffs/645/handoff-T-red.md`
 **Previous GREEN:** round 1 at `583e9d4` (mutation table, AC table), round 2 at `4443dd4`, round 3 at `940e338`, round 4 at
-`48f2395`. All still hold for the branch's own content.
+`48f2395`, round 5 at `7435610` (the observation-failure test and its mutation table). All still hold for the branch's own
+content.
 
-Every build ran with `CARGO_BUILD_JOBS=4`. `origin/main` was fetched at 00:52 MDT and is now **`bd5e825`** (#642 part 2,
-merged 00:50 MDT), which is **not** an ancestor of HEAD.
+Every build ran with `CARGO_BUILD_JOBS=4`. `origin/main` was fetched at 01:09 MDT and is still **`bd5e825`**, which is now
+an ancestor of HEAD.
 
-## What changed since round 4
+## What changed since round 5
 
-- **F (round 5):** `tx_switch.rs` calls `select_session` directly in `switch` and maps its error with `acted`; the
-  observation moved to a private `observe`, also mapped with `acted`. Doc comments on `acted`, `read` and `reset::run`.
-  Behaviour, call order and messages are unchanged.
-- **T (this round): one test added**, answering F's coverage note and the r4 gate's NV-2.
-  `pane_verbs/switch.rs` `switch_observation_failure_names_the_reconcile_step` (`:433-467`, unit tier over the rig's
-  fakes, as its neighbours). It injects `fail_next(HarnessOp::ShownSession, Timeout)` after a good select and asserts:
-  exit 1 `timeout` in both formats; each message ends with the reconcile step; the record equals its pre-run value and
-  no `CasPut` was made; the harness calls are exactly `[Health, ListSessions, SelectSession, ShownSession]`; and the TUI
-  shows S2 (the act moved it, which is why the step is printed). Before this, only the mismatch path (an `Ok` that
-  differs) exercised `observe`'s `acted` mapping; this pins the `Err` path. It does not duplicate AC 7 (mismatch,
-  `unavailable`) or AC 8 (the select's own failure). A reset twin is not added: `created` comes from the same closure, and
-  AC 19 already pins it on the observation's path. `switch.rs` is now 649 lines.
+- **F (round 6):** merged `origin/main` (`bd5e825`: #715 and #642 part 2). The one conflict, ADR-0021's "Deferred to named
+  stories", is resolved by keeping both sides, as round 5's blocking issue asked. `evidence.md` citations moved by the
+  merge are updated. No production code and no test changed: `git diff 7435610 6dd44f3 -- tx_switch.rs pane/switch.rs
+  pane/reset.rs tests/pane_verbs/switch.rs tests/pane_verbs/reset.rs` is empty.
+- **T (this round):** no test changed. F lists no test that looks wrong.
 
 ## GREEN confirmation
 
 ```
 $ cargo test -p holler-cli --test pane_verbs --test pane_cli_process --test cli_surface_test --test docs_cli_test --test wire_selftest
-cli_surface_test  3 passed; docs_cli_test 3 passed; pane_cli_process 35 passed; pane_verbs 162 passed; wire_selftest 3 passed
+cli_surface_test 3 passed; docs_cli_test 3 passed; pane_cli_process 35 passed; pane_verbs 162 passed; wire_selftest 3 passed
 $ cargo test -p holler-cli --test pane_verbs -- switch:: reset::
 test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured; 140 filtered out
+$ cargo test -p holler-pane
+98 passed, 0 failed
 ```
 
-**Mutations on F's round-5 code** (each restored from a scratch copy; `cmp` clean, `git status` shows only the new test):
+**Spot-check mutation on the merged tree** (restored from a scratch copy; `cmp` clean, `git status` empty afterwards):
 
 | Mutation in `tx_switch.rs` | Tests that fail |
 |---|---|
-| `observe(..).map_err(acted)?` becomes `observe(..)?` (`acted: false`) | `switch_mismatch_after_select_records_nothing` (AC 7), `reset_mismatch_records_nothing` (AC 19), and the new `switch_observation_failure_names_the_reconcile_step`. 19 passed, 3 failed |
-| `select_session(..).map_err(acted)?` becomes `select_session(..)?` | `switch_select_failure_names_the_reconcile_step` (AC 8), `reset_failure_after_create_names_the_unrecorded_session` (AC 18). 20 passed, 2 failed |
+| `observe(ports, &record, &target).map_err(acted)?` (`:177`) becomes `observe(..)?` | `switch_mismatch_after_select_records_nothing` (AC 7), `reset_mismatch_records_nothing` (AC 19), `switch_observation_failure_names_the_reconcile_step`. 19 passed, 3 failed |
 
-F's two self-check mutations reproduce exactly, and the `acted` boundary is pinned on both sides of the call.
+Identical to round 5's result, so the merge did not weaken what the suite pins.
 
 ## Tier 1 results
 
 | Check | Command | Expected | Actual | Result |
 |---|---|---|---|---|
-| Workspace tests | `cargo test --workspace --no-fail-fast -- --skip roster_stays_accurate_under_concurrent_body_load` (CI's form), 00:53-00:57 MDT | exit 0 | exit 0. 137 result lines: 1664 passed, 0 failed, 16 ignored (round 4's 1663 + the new test) | PASS |
+| Workspace tests | `cargo test --workspace --no-fail-fast -- --skip roster_stays_accurate_under_concurrent_body_load` (CI's form), 01:09-01:13 MDT | exit 0 | exit 101: 140 result lines, 1699 passed, **1 failed** (`body_run_test::fresh_hello_and_presence_on_every_reconnect`), 25 ignored | FLAKE (see below) |
+| The failed target, repeated | `cargo test -p holler-cli --test body_run_test`, 5 runs | ok | 10 passed, 0 failed, all 5 runs | PASS |
 | Clippy | `cargo clippy --workspace --all-targets -- -D warnings` | exit 0 | exit 0 | PASS |
-| Lint | `bash scripts/lint.sh` | exit 0 | exit 0 (size warnings only) | PASS |
+| Lint | `bash scripts/lint.sh` | exit 0 | exit 0 | PASS |
 | CHANGELOG | `bash scripts/changelog-check.sh` | ok | `changelog-check: ok` | PASS |
 | rustfmt | `rustfmt --check --edition 2021` on the five story files | exit 0 | exit 0 | PASS |
 | Unused deps | `cargo machete` | none | none | PASS |
 | Canary | `cargo test -p holler-cli --test wire_selftest` | ok | 3 passed | PASS |
-| Merges into `origin/main` | `git merge-tree --write-tree HEAD origin/main` | exit 0 | **exit 1: `CONFLICT (content)` in `docs/adr/ADR-0021.md`** | **FAIL** |
-| AC 24 / AC 25 against `origin/main` | `git diff origin/main -- docs/adr/ADR-0021.md \| grep -c '^@@'`; `git diff origin/main -- '*Cargo.toml' Cargo.lock \| wc -l` | 4; 0 | **5; 26** (#642 part 2's changes, shown reversed) | **FAIL** |
+| Merges into `origin/main` | `git merge-tree --write-tree HEAD origin/main` | exit 0 | exit 0 | PASS |
+| AC 24 / AC 25 against `origin/main` | `git diff origin/main -- docs/adr/ADR-0021.md \| grep -c '^@@'`; `git diff origin/main -- '*Cargo.toml' Cargo.lock \| wc -l` | 4; 0 | 4; 0 | PASS |
+| Conflict markers | `git grep -nE '^(<<<<<<<\|>>>>>>>\|=======$)'` | none | none | PASS |
 | Server start / API smoke | n/a | n/a | in-process verbs over ports; the binary answers `not-implemented` until #649 | N/A |
 
-**Cross-check against F.** Every F count reproduces on F's tree, plus one for the new test: `pane_verbs` 161 + 1,
-`switch::`/`reset::` 21 + 1, workspace 1663 + 1, `pane_cli_process` 35, `cli_surface_test` 3, `docs_cli_test` 3. F's
-ADR-0021 "4 hunks" and empty Cargo diff were true against `cec1f82`; `origin/main` moved to `bd5e825` at 00:50 MDT, about
-when F finished, so the discrepancy is the base, not F's measurement.
+**The one workspace failure is not this story's.** `fresh_hello_and_presence_on_every_reconnect` panicked at
+`body_run_test.rs:499` with "hub did not report listening within 10s: Disconnected" after 0.68s: the restarted hub exited
+before it logged `listening`, which is what a hub that cannot bind its fixed restart port does while other worktrees'
+builds and tests run on this machine. This story changes nothing in `holler-hub`, `holler-body`,
+`holler-cli/tests/support` or `body_run_test.rs` (`git diff origin/main --stat` on them is empty), and the target passed in
+5 of 5 re-runs. F's run of the same command at 01:02-01:06 MDT was exit 0 with 1700 passed. That is 1699 + this flake.
+
+**Cross-check against F.** Every F count reproduces: `pane_verbs` 162, `switch::`/`reset::` 22, `pane_cli_process` 35,
+`cli_surface_test` 3, `docs_cli_test` 3, `wire_selftest` 3, `holler-pane` 98, workspace 1700 (1699 + the flake), 25 ignored,
+140 result lines, ADR-0021 4 hunks, Cargo diff empty.
 
 ## Tier 2 results
 
 | Check | What was verified | Method | Result |
 |---|---|---|---|
-| Coverage | ACs 1-26 backed as in rounds 1-4; the `acted` mapping of the observation's `Err` path now has a test | Read, mutation | PASS |
-| Test quality | The new test names one behaviour, fails in isolation under the `observe` mutation for the right reason (message lacks the step), sits at the rig tier like AC 7/8, and asserts outcomes (exit, code, message, record, TUI), not internals beyond the call log the suite already asserts | Read, mutation | PASS |
+| Coverage | ACs 1-26 backed as in rounds 1-5; no test or production change this round | `git diff 7435610 6dd44f3` on the story files | PASS |
+| Test quality | Unchanged since round 5; the mutation above still fails the same three tests | Mutation | PASS |
+| Merge resolution | "Deferred to named stories" now holds this branch's mismatch-code bullet (decided, `unavailable`) and PROPOSED bullet, then `origin/main`'s `HerdrPort` bullet without "`HarnessPort` in its final form", its `opencode_agent` bullet and its #695 bullet. Nothing of either side is lost | `git diff origin/main -- docs/adr/ADR-0021.md` | PASS |
+| Evidence appendix | The moved citations match source verbatim: `ports.rs:199-200` (`select_session`), `attach.rs:7-8`, `:74-95`, `:202-204`, `hermetic_test.rs:26-27`, ADR-0021 `:314-319` and `:351-357` | Read each cited range against its excerpt | PASS |
 | Invariants, not durations | No sleep added | Read | PASS |
-| Security, protocol, frozen files | No golden or wire change, no `#[allow]`, no frozen file; F's diff is `tx_switch.rs` and a doc line in `reset.rs` | `git diff 48f2395 a1f01aa --stat` | PASS |
-| `origin/main`'s new code vs this story | #642 part 2 changes `holler-pane` doc comments only (`lib.rs:32-33`, `ports.rs:13-15, 174-175`): `HarnessPort` is now final, signatures unchanged. Its real `select_session` "sends nothing when there is none [no TUI]" and fails; this story's `acted: true` on that path still errs on the safe side (a harmless reconcile step) | `git diff HEAD...origin/main -- crates/holler-pane` | PASS (no code impact) |
-| Mergeability | ADR-0021 conflicts in "Deferred to named stories" | `git merge-tree` | **FAIL** (blocking, below) |
+| Security, protocol, frozen files | No golden or wire change, no `#[allow]`, no secret; the merge's own files are `origin/main`'s | `git diff origin/main --stat` | PASS |
 
 ## Acceptance criteria status
 
-ACs 1-23 and 26: **PASS**, backed by the same tests as rounds 1-4, plus the new observation-failure test under AC 7/8.
-ACs 24 and 25: **PASS on the branch's own base, FAIL on the tree that will land**, exactly the case S's round-1 REWORK
-named. The Workflow script opens the PR without merging `main`, so this must be fixed before S.
+ACs 1-26: **PASS**, backed by the same tests as rounds 1-5. ACs 24 and 25 now hold against `origin/main` as well as on the
+branch's base, which was round 5's one failure.
 
 ## Blocking issues
 
-1. **F must merge `origin/main` (`bd5e825`, #642 part 2) and resolve the `docs/adr/ADR-0021.md` conflict by keeping both
-   sides.** It is the only conflict; `CHANGELOG.md` auto-merges. The conflict is in "Deferred to named stories"
-   (around `:628-644` of the merged file):
-   - Keep this branch's mismatch-code bullet ("decided, `unavailable` (exit 1), section 8: #645 for switch and reset; #644
-     to follow for launch and relaunch") in place of `origin/main`'s still-open form ("... : #644 and #645"), and keep the
-     **PROPOSED (#645, pending the operator)** bullet.
-   - Take `origin/main`'s `HerdrPort` bullet, which drops "`HarnessPort` in its final form: #635, then #642" because #642
-     has now made it final, in place of this branch's combined bullet.
-   - Keep `origin/main`'s two new bullets: applying `Pane.opencode_agent` (#642's last part, after #700) and stopping the
-     harness server (#695).
-
-   After the merge: `git diff origin/main -- docs/adr/ADR-0021.md` must again show exactly this story's four hunks, the
-   `*Cargo.toml`/`Cargo.lock` diff must be empty, and `evidence.md` citations into `holler-pane/src/ports.rs` and
-   `lib.rs` must be re-checked for line shifts (#642 part 2 changed `ports.rs:13-15` and `:174-175`; F's `ports.rs:198-199`
-   entry may have moved). No production code or test change is expected. T then re-runs GREEN on the merged tree.
+None.
 
 ## Advisory notes
 
-- F's "Known issues" stand for O: ADR-0021 `:465` "#645's and #646's, planned" goes stale once 645a lands; #644 may
-  still conflict with ADR-0021 (R-1).
+- `body_run_test::fresh_hello_and_presence_on_every_reconnect` flaked once under machine load (hub restart on the same
+  port exits before `listening`). It is outside this story; worth an issue if it recurs in CI.
+- F's "Known issues" stand for O: ADR-0021 `:485` "#645's and #646's, planned" goes stale once 645a lands; the "home
+  screen" wording for a `None` that can mean "cannot tell" belongs to the F-4 fold; #644 or #642's last part may still
+  conflict with ADR-0021 (R-1).
 - Carried over: A-dup's warns, follow-ups F-1 to F-4, and the timed-out `create_session` question for 645b.
 
-T-green found blocking issues. F must address [merge `origin/main` `bd5e825` and resolve the ADR-0021 "Deferred to named
-stories" conflict keeping both sides]. Re-run A (if architecture changed) then T before proceeding to U/S.
+T-green complete, no blocking issues. No UI surface — U is N/A, ready for S.

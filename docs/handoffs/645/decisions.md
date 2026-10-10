@@ -624,3 +624,27 @@
     unstaged. `git ls-files -u` is empty. ADR-0021: the #645 paragraph at `:365` between `### 8.` (`:305`) and `### 9.`
     (`:392`), the `unavailable` decision once in section 8 (`:372`), `#645` 9 times (6 on `origin/main`).
   - `check_evidence.py`: 27 entries, 0 mismatches; none of the cited files differs from `origin/main`.
+
+## T (verify GREEN, round 6: F's merge of `origin/main`) — 2026-10-10T01:20-06:00
+- **Decided:**
+  - PASS. The merge `6dd44f3` (parents `7435610`, `bd5e825`) changes no story code or test; the story suites, clippy, lint,
+    changelog-check, machete, rustfmt and the canary are green on the merged tree, and ACs 24 and 25 hold against
+    `origin/main`.
+  - The one workspace failure, `body_run_test::fresh_hello_and_presence_on_every_reconnect` ("hub did not report listening
+    within 10s: Disconnected"), is a flake outside this story, not a BLOCK: the story touches none of its code, and the
+    target passed 5 of 5 re-runs.
+  - No test changed: F lists none that looks wrong, and the round-5 mutation still fails the same three tests.
+- **Assumed:**
+  - `origin/main` at `bd5e825` (fetched 01:09 MDT) is what the PR merges into.
+  - The flake is the restarted hub failing to bind its fixed port under load from the other worktrees' runs; it was not
+    reproduced to confirm the cause.
+- **Hedged:**
+  - If the body_run_test flake shows up in CI, it needs its own issue; it does not gate this story.
+- **Evidence:**
+  - With `CARGO_BUILD_JOBS=4`: workspace in CI's form 01:09-01:13 MDT, 1699 passed, 1 failed (the flake), 25 ignored, 140
+    result lines; `body_run_test` x5 all 10 passed; `pane_verbs` 162 (`switch::`/`reset::` 22), `pane_cli_process` 35,
+    `cli_surface_test` 3, `docs_cli_test` 3, `wire_selftest` 3, `holler-pane` 98; clippy `-D warnings` exit 0.
+  - `git merge-tree --write-tree HEAD origin/main` exit 0; ADR-0021 diff 4 hunks; Cargo diff 0 lines; no conflict markers.
+  - Mutation `observe(..).map_err(acted)?` to `observe(..)?`: 19 passed, 3 failed (AC 7, AC 19, the observation-failure
+    test), as in round 5; file restored, `cmp` clean.
+  - Evidence citations moved in round 6 read against source: all match verbatim.
