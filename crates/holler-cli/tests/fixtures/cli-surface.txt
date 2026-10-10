@@ -113,16 +113,16 @@ pane watch | demo-c1r1 --since 7 --until-idle
 pane watch | --profile demo --json
 
 # #644
-pane launch |
-pane launch | --profile demo
-pane launch | --profile demo --spec-only
-pane launch | --project /srv/demo --workspace main --grid r2c1 --model provider/model-id --effort high --role agent
-pane launch | --env ALPHA_TOKEN --env BETA_URL --ctx-soft 100000 --ctx-hard 150000 --port-policy fixed
-pane launch | --command-arg opencode --command-arg serve --check-arg curl --check-arg http://127.0.0.1:1/health --expect ok --expect ready
-pane launch | --command-json [] --check-json [] --format=json
-pane relaunch |
-pane relaunch | --profile demo --spec-only --grid c1r2
-pane relaunch | --command-json [] --check-json []
+pane launch | demo-c1r1
+pane launch | demo-c1r1 --profile demo
+pane launch | demo-c1r1 --profile demo --spec-only
+pane launch | demo-c1r1 --herdr-session scratch --project /srv/demo --workspace main --grid r2c1 --model provider/model-id --effort high --role agent
+pane launch | demo-c1r1 --env ALPHA_TOKEN --env BETA_URL --ctx-soft 100000 --ctx-hard 150000 --port-policy fixed:48100
+pane launch | demo-c1r1 --command-arg opencode --command-arg serve --check-arg curl --check-arg http://127.0.0.1:1/health --expect ok --expect ready
+pane launch | demo-c1r1 --command-json [] --check-json [] --format=json
+pane relaunch | demo-c1r1
+pane relaunch | demo-c1r1 --profile demo --spec-only --grid c1r2
+pane relaunch | demo-c1r1 --command-json [] --check-json []
 
 # #645
 pane switch | demo-c1r1 ses_0001

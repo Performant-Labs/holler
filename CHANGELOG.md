@@ -325,6 +325,24 @@ fills this file in at release time.
   tmux server. Not wired into the CLI yet (#649), so nothing a user runs changes
   ([#641](https://github.com/Performant-Labs/holler/issues/641)).
 
+- Pane control, `holler pane launch PANE --herdr-session NAME` and `holler pane relaunch PANE` (epic
+  [#633](https://github.com/Performant-Labs/holler/issues/633)): `launch` creates a pane. It first refuses, changing
+  nothing, a name that already has a record (`pane-exists`), a failing health check (`probe-failed`), a Herdr cell that
+  already holds a pane (`grid-occupied`: a pane is never adopted) and a port a server already answers on
+  (`port-in-use`). It then makes the Herdr pane and the tmux session, runs the pane's command as an argument vector
+  (never through a shell), starts the harness server and checks it, creates the session of record through the harness
+  API (no "ping" session), attaches the TUI to exactly that session, checks that the TUI shows it and that Herdr still
+  lists the pane, and only then writes the pane record, with the model, effort, environment variable names and context
+  ceilings it was launched with. A step that fails undoes what the run made and names the error, and a run that got as
+  far as the live change ends its message with the command that reconciles. `relaunch` does the same after stopping only
+  what the pane owns: it keeps the pane's directory, keeps its cell unless `--grid` moves it, and keeps its session of
+  record when the restarted server still has it. With `--profile` each verb sets the profile's spec for the pane in one
+  transaction with the live change, and `--spec-only` sets the spec and changes nothing live. A whole run is bounded
+  (10 s, then `timeout`), and the one port policy is `fixed:<port>`. Both take `--format=json`, and
+  [ADR 0021](docs/adr/ADR-0021.md) records how they behave. Until the hub's stores and the adapters are wired into the
+  binary ([#649](https://github.com/Performant-Labs/holler/issues/649)), the real verbs answer `not-implemented`
+  ([#644](https://github.com/Performant-Labs/holler/issues/644)).
+
 ## [0.4.0] - 2026-09-29
 
 ### Enhancements
