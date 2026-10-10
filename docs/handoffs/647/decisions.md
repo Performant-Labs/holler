@@ -107,3 +107,47 @@
     - `cli_surface_test`, `docs_cli_test` and `pane_cli_process`: 3, 3 and 34 passed;
     - the other 63 `pane_verbs` tests.
   - Clean at RED: clippy (`-D warnings`), `lint.sh` (exit 0), `rustfmt --check` on the touched files, and gitleaks.
+
+## F (Phase 6, implement) — 2026-10-09T17:58:06-06:00
+- **Decided:**
+  - **The engine.** `reconcile.rs` holds the API, the fan-out and the fleet-level rules; `reconcile/observe.rs` (the
+    brief's named fallback) holds one pane's chain: observe, compare, repair, record. The split was made up front: the
+    two together are about 830 lines.
+  - **Threads.** `thread::Builder::spawn_scoped`: a thread that cannot start or panics is an `observe-failed`, never a
+    panic of the pass (Decision 9). One thread runs the two Herdr calls, one runs each pane's chain.
+  - **The fix.** It acts, then observes again even after a failed select; the re-observation is what is recorded.
+    `fixed` needs a successful select and the session of record shown afterwards. A select that was acknowledged while
+    the TUI still shows another session is `failed`, with `fix_error.code` `shown-driven-mismatch`, because ADR-0021
+    leaves the closed code of a post-act mismatch to #644 and #645.
+  - **Dedupe.** It is on the whole finding (`sort` + `dedup`), with the message as the last sort key. Decision 2's
+    4-tuple would merge the two pane-less Herdr `observe-failed` findings that AC 21 requires.
+  - **First observation.** A record at `last_observed.at == 0` gets its first observation written even when the values
+    equal the defaults (A's W-1 edge case). After that, a record is written only on a change.
+  - **A's warns, taken as written:**
+    - W-2: a `pub` `shown_differs`;
+    - W-3: `holler_proto::clock::now_millis()`;
+    - W-4: `pub` `doctor_command` and `FindingKind::remedy` as the one remedy table;
+    - W-5(a): `FindingKind` serializes from `code()`;
+    - W-5(b): `ObservedHealth` is `healthy | server-wedged | server-down | unknown`;
+    - W-5(c): `observe-failed`'s doc covers the record write;
+    - W-6(d): `findings::quoted` is the one quoting helper, used by the CLI renderer too;
+    - W-1: the meanings are in `reconcile.rs`'s module doc, and edit (c) uses A's wording.
+- **Assumed:**
+  - Decision 3's remedies and the fixture's documented semantics (C-2) are the contract, as T assumed.
+  - `ports` and `herdr_pane` are filled only where the server or Herdr pane is the subject, since no AC pins them beyond
+    the strays.
+- **Hedged:**
+  - ADR-0021 section 1's rows (W-1) are not edited, because AC 28 forbids it. O decides the amend channel.
+  - AC 31's grep only works with paths made relative (the worktree path contains `reconcile`); recorded for T and S.
+  - The 4 `logging_test` failures in the first `cargo test --workspace` are environmental: a live hub on this machine
+    answers `holler roster`. They pass with an isolated `HOLLER_STATE_DIR`.
+- **Evidence:**
+  - `cargo test -p holler-cli --test pane_verbs doctor`: 31 passed, 0 failed.
+  - `pane_verbs` 94, `cli_surface_test` 3, `docs_cli_test` 3, `pane_cli_process` 34 and every `holler-pane` target
+    passed.
+  - `observation_runs_concurrently`: 20/20.
+  - `HOLLER_STATE_DIR=<fresh dir> cargo test --workspace --no-fail-fast`: 126 targets, 1415 passed, 0 failed, 5
+    ignored, exit 0.
+  - Clean: clippy `--workspace --all-targets -D warnings`; `lint.sh` (exit 0); `changelog-check`; `rustfmt --check` on
+    the touched files; `cargo machete`; no `unsafe`; no manifest diff; gitleaks.
+  - The text output was checked by eye once, with a temporary print that has since been removed.
