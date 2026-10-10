@@ -112,7 +112,8 @@ pub struct Switched {
 pub struct SwitchFailure {
     pub error: PaneError,
     /// `select_session` was called (the TUI may have moved): the message carries the
-    /// reconcile step.
+    /// reconcile step. It is set on that call's own failure, whose effect on the screen is
+    /// unknown, and on every failure after the call; never on one before it.
     pub acted: bool,
     /// The session `reset` created and did not record (it stays on the server).
     pub created: Option<String>,
@@ -160,12 +161,20 @@ pub fn switch(ports: Ports<'_>, request: &SwitchRequest) -> Result<Switched, Swi
             (id.clone(), Some(id))
         }
     };
+    // Nothing above has moved the TUI or the record (a reset's new session is neither shown
+    // nor recorded yet), so each failure so far converts with `acted: false`. From the
+    // `select_session` call below on, every failure is `acted`, the call's own included:
+    // the engine cannot tell how far a failed call got, so the TUI may have moved.
     let acted = |error| SwitchFailure {
         error,
         acted: true,
         created: created.clone(),
     };
-    select_and_observe(ports, &record, &target).map_err(acted)?;
+    ports
+        .harness
+        .select_session(&record.herdr.pane_id, &target)
+        .map_err(acted)?;
+    observe(ports, &record, &target).map_err(acted)?;
     let next = recorded(&record, &target, request.now_ms);
     let pane = ports
         .pane_store
@@ -196,7 +205,10 @@ fn plan(ports: Ports<'_>, request: &SwitchRequest) -> Result<Pane, PaneError> {
 
 /// The record of the request's pane: through the profile's scope when the request names a
 /// profile (`profile-not-found`, `pane-not-in-profile`), else from the pane store. No
-/// record is `pane-not-found`, and so is a scope that answers with another pane.
+/// record is `pane-not-found`, and so is a scope that answers with another pane. The
+/// scope's answer is searched by the pane's name, as `pane get` does, not taken as its
+/// first pane. While `resolve` keeps its contract (a named pane is answered alone) the two
+/// are the same, and a scope that breaks it cannot make the run act on another pane.
 fn read(ports: Ports<'_>, request: &SwitchRequest) -> Result<Pane, PaneError> {
     let record = match &request.profile {
         Some(profile) => ports
@@ -282,12 +294,10 @@ fn check_unclaimed(ports: Ports<'_>, pane: &PaneName, target: &str) -> Result<()
     }
 }
 
-/// The act and the observation: select `target` in the pane's TUI, then read what it shows.
-/// Anything but `target`, its home screen included, is `unavailable` (I3).
-fn select_and_observe(ports: Ports<'_>, record: &Pane, target: &str) -> Result<(), PaneError> {
-    let pane_id = &record.herdr.pane_id;
-    ports.harness.select_session(pane_id, target)?;
-    let shown = ports.harness.shown_session(pane_id)?;
+/// The observation, once `target` has been selected: what the pane's TUI shows. Anything
+/// but `target`, its home screen included, is `unavailable` (I3).
+fn observe(ports: Ports<'_>, record: &Pane, target: &str) -> Result<(), PaneError> {
+    let shown = ports.harness.shown_session(&record.herdr.pane_id)?;
     if !shown_differs(Some(target), shown.as_deref()) {
         return Ok(());
     }

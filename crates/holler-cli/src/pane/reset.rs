@@ -31,6 +31,8 @@ pub struct PaneReset {
 }
 
 /// Run `holler pane reset`: move the pane to a session the run creates, then print the result.
+/// It takes `pane switch`'s own path, [`execute`], which prints through `emit_outcome`, with a
+/// fresh target, so none of switch's code is copied here.
 pub fn run(args: &PaneReset, ctx: &mut VerbCtx<'_>) -> i32 {
     execute(
         ctx,

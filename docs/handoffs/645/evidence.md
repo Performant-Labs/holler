@@ -6,7 +6,8 @@ F's change). Round 2 merged `origin/main` (`d9eabbb`), which changed none of the
 number still held (`git diff origin/main` on them was empty). Round 4 merged `origin/main` (`abdcbb6`), whose #640 part 3
 added three doc-comment lines to `crates/holler-pane/src/error.rs` (now lines 415-417 and 457-458) and changed no excerpt's text. The
 `error.rs` citations from line 651 on moved down by three and are updated. Every excerpt below was checked against its cited
-lines on the merged tree.
+lines on the merged tree. Round 5 merges nothing: since `abdcbb6`, `origin/main` has moved only by #715 (`cec1f82`), which
+changes `docs/handoffs/0660-output/decisions.md` alone, and so none of the files quoted here. Every excerpt was checked again.
 
 ## What the engine calls in `holler-pane`
 
@@ -450,4 +451,117 @@ three files is in this change (`git diff origin/main` on each is empty).
   >             }),
   >         }
   >     }
+  > ```
+
+## Added by F (round 5, after the outside diff gate's r4 BLOCK)
+
+The r4 gate asked for these under B-1 and W-1 (whether a failed `select_session` counts as "called"), NV-1 (the shape of
+an OpenCode session id) and NV-3 (what the rig's call log covers). They are copied from the tree at `48f2395`. None of
+these files is in this change, and `git diff origin/main` on each is empty.
+
+- **Fact:** a failed `select_session` may still have moved the TUI. The port's answer is only `Ok(())` or an error, and the
+  real adapter's planned `select_session` sends the request that moves the screen, then waits for the TUI to confirm. So
+  a timeout, or a failed confirmation, can come after the screen has moved. This is why `acted` is set on the call's own
+  failure as well as on every failure after it.
+  **Source:** `crates/holler-pane/src/ports.rs:198-199`, `docs/research/opencode-pane-spike.md:237-239`
+  **Verbatim excerpt:**
+  > ```
+  >     /// Switch the TUI of `pane` to `session`.
+  >     fn select_session(&self, pane: &PaneId, session: &str) -> Result<(), PaneError>;
+  > ```
+  > ```
+  > 4. **`select_session`:** check `GET /session/:id` (404 means `session-not-found`), call `POST /tui/select-session`,
+  >    then wait (bounded, about 2 s) until `shown_session` equals the id, or fail loudly and record nothing (I3).
+  >    Exactly one TUI per server, so the broadcast reaches only that pane.
+  > ```
+
+- **Fact:** an OpenCode session id is `ses_` and 26 characters, 30 in all (the spike measured this). The OpenCode adapter's
+  tests (#642) take the 26 to be `[0-9A-Za-z]`, and the fake mints `ses_` and 26 hex digits. So every id from either
+  passes `parse_session_id`'s `[A-Za-z0-9_-]{1,64}`, which is the claim in that function's doc comment.
+  **Source:** `docs/research/opencode-pane-spike.md:149-151`, `crates/holler-adapter-opencode/tests/hermetic_test.rs:25-26`, `crates/holler-pane-testkit/src/harness.rs:122-124`
+  **Verbatim excerpt:**
+  > ```
+  > **So the caveat is a naming rule Holler must own:** give every session of record a unique, non-default title of
+  > 40 characters or fewer that maps back to its id. The simplest such title is the id itself: `ses_` plus 26 characters
+  > is 30 characters. Never set `OPENCODE_DISABLE_TERMINAL_TITLE` in a pane. Whether **Herdr** exposes a pane's
+  > ```
+  > ```
+  > /// A session id of OpenCode's shape: `ses_` and 26 of `[0-9A-Za-z]`.
+  > const ID: &str = "ses_0123456789abcdefABCDEFghij";
+  > ```
+  > ```
+  > /// - `create_session(port)` and `list_sessions(port)` reach the port, then mint an id
+  > ///   (`ses_` and 26 hex digits, 30 characters; treat it as opaque) in the port's data
+  > ///   directory, or list that directory's sessions in creation order.
+  > ```
+
+- **Fact:** the rig's `mark` and `calls_since` read the call log of every fake the verb's ports hold: the pane store,
+  the profile store, Herdr, the host, the harness and the prober. A run through `ports_with(&wrapper)` keeps the rig's
+  own Herdr and host. Each fake records a call before it answers, failed calls included, and `send_text` and `send_keys`
+  are recorded the same way. So empty `calls.herdr` and `calls.host` mean that no Herdr or host method was called, and
+  so no keystroke was sent (AC 2's I4 check in `both_with`).
+  **Source:** `crates/holler-cli/tests/pane_verbs/doctor/rig.rs:249-272`, `:159-170`; `crates/holler-pane-testkit/src/fault.rs:85-97`; `crates/holler-pane-testkit/src/herdr.rs:259-260`, `:270-271`
+  **Verbatim excerpt:**
+  > ```
+  >     /// Every call made through every port so far.
+  >     pub fn mark(&self) -> Calls {
+  >         Calls {
+  >             panes: self.panes.faults().calls(),
+  >             profiles: self.profiles.faults().calls(),
+  >             herdr: self.herdr.faults().calls(),
+  >             host: self.host.faults().calls(),
+  >             harness: self.harness.faults().calls(),
+  >             probes: self.prober.calls().len(),
+  >         }
+  >     }
+  >
+  >     /// The calls made after `mark`.
+  >     pub fn calls_since(&self, mark: &Calls) -> Calls {
+  >         let now = self.mark();
+  >         Calls {
+  >             panes: now.panes[mark.panes.len()..].to_vec(),
+  >             profiles: now.profiles[mark.profiles.len()..].to_vec(),
+  >             herdr: now.herdr[mark.herdr.len()..].to_vec(),
+  >             host: now.host[mark.host.len()..].to_vec(),
+  >             harness: now.harness[mark.harness.len()..].to_vec(),
+  >             probes: now.probes - mark.probes,
+  >         }
+  >     }
+  > ```
+  > ```
+  >     /// The ports over the rig's fakes, with `harness` in place of the rig's own.
+  >     pub fn ports_with<'a>(&'a self, harness: &'a dyn HarnessPort) -> Ports<'a> {
+  >         Ports {
+  >             pane_store: &*self.panes,
+  >             profile_store: &*self.profiles,
+  >             herdr: &self.herdr,
+  >             host: &self.host,
+  >             harness,
+  >             scope: &self.scope,
+  >             prober: &self.prober,
+  >         }
+  >     }
+  > ```
+  > ```
+  >     /// Every call made through the port, oldest first, the failed ones included.
+  >     pub fn calls(&self) -> Vec<Op> {
+  >         self.lock().calls.clone()
+  >     }
+  >
+  >     /// What a fake calls first in every port method. It records the call, sleeps for
+  >     /// the delay (without holding the lock, so other calls proceed), and then answers
+  >     /// the standing fault if there is one, or else the oldest error queued for `op`.
+  >     pub(crate) fn enter(&self, op: Op) -> Result<(), PaneError> {
+  >         let delay = {
+  >             let mut state = self.lock();
+  >             state.calls.push(op);
+  >             state.delay
+  > ```
+  > ```
+  >     fn send_text(&self, pane: &PaneId, text: &str) -> Result<(), PaneError> {
+  >         self.faults.enter(HerdrOp::SendText)?;
+  > ```
+  > ```
+  >     fn send_keys(&self, pane: &PaneId, keys: &[Key]) -> Result<(), PaneError> {
+  >         self.faults.enter(HerdrOp::SendKeys)?;
   > ```

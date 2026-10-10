@@ -490,3 +490,72 @@
   `docs_cli_test` 3 and `wire_selftest` 3. Clippy `-D warnings`, `lint.sh`, `changelog-check.sh`, `cargo machete` and
   rustfmt on the five story files are clean. P4 mutation: `switch_to_a_deleted_session_changes_nothing` fails, then is
   restored. I compared the moved `error.rs` evidence citations against source myself.
+
+## Outside diff gate, r4 (deepseek-v4-pro), recorded by F — 2026-10-10T00:32-06:00
+- **Decided (the gate's verdict):** BLOCK, "2 blocking finding(s)", on T-green round 4's tree (`48f2395`). B-1 stands. The
+  reviewer wrote B-2 to B-4 under its BLOCK heading, then withdrew B-2, said B-3 was not a block, and found no
+  contradiction in B-4. So which second finding the count includes is not clear. NV-1 and NV-3 ask for evidence. W-1
+  repeats B-1 as a warn, and NIT-1 repeats B-3.
+  - B-1: `select_and_observe` merged `select_session` with the observation, so `acted: true` was set for any failure of a
+    function. Nothing in the code tied the flag to the `select_session` call that its doc names.
+- **Assumed:** the script classified the BLOCK as production. F was spawned with no `fNote`, so it was not `mixed`.
+- **Hedged:** this entry is F's record of the gate round. The script's gate writes none, as S's advisory 4 noted for r3
+  (PASS, 23:52 MDT).
+- **Evidence:** `docs/handoffs/645-diff-result-r4.md` and its `.usage.json` (round "1" by the script's #653 numbering; 56
+  s; finish `stop`). Both are gitignored.
+
+## F (rework, round 5: the outside diff gate's r4 BLOCK) — 2026-10-10T00:45-06:00
+- **Decided:**
+  - B-1 is fixed in code, not argued. `switch` now calls `ports.harness.select_session(..)` itself, right where the
+    `acted` mapping starts, and maps that call's error with `acted`. The observation is its own function, `observe`
+    (`shown_session` and the comparison), and runs only after `select_session` returned `Ok`. `select_and_observe` is
+    gone, so no one function mixes the act with anything else. A step added before the call converts through
+    `From<PaneError>` (`acted: false`). Behaviour is unchanged: the same calls in the same order, the same errors and the
+    same messages. No spec text names the old helper: the brief leaves private helpers to F, and
+    `grep -rn select_and_observe` over the brief, the ADRs and `crates/` now finds nothing. Only earlier handoffs name it.
+  - W-1 is answered in the comment at that call and in the `acted` field doc. The field is set on `select_session`'s own
+    failure too, because the engine cannot tell how far a failed call got. The planned real adapter fails after it has
+    sent the request that moves the screen (spike `:237-239`, now in `evidence.md`). Printing the step when the TUI did
+    not move is harmless, since doctor `--fix` finds nothing to repair. Leaving it out when the TUI did move would leave
+    the operator without the repair.
+  - B-3 and NIT-1: P1 keeps `find` by name, which S accepted. `read`'s doc now says why. It matches `pane get`
+    (`get.rs:101-105`). It is the same pane as `next()` while `resolve` keeps its contract. A scope that broke the
+    contract cannot make the run act on another pane.
+  - B-2 (withdrawn by the reviewer): no code change. `reset::run`'s doc now says that it takes switch's path,
+    `execute`, which prints through `emit_outcome`, so nothing is copied.
+  - B-4: no change. `execute`'s doc already states the order of the usage checks, and no AC sets an order.
+  - NV-1 and NV-3: three `evidence.md` entries.
+    - A failed `select_session` may have moved the screen: `ports.rs:198-199` and spike `:237-239`.
+    - OpenCode's id shape: spike `:149-151`, `hermetic_test.rs:25-26` and the fake's `harness.rs:122-124`.
+    - The rig's call log covers every port: `rig.rs:249-272`, `:159-170`, `fault.rs:85-97`, and `herdr.rs:259-260`
+      and `:270-271`.
+  - No merge. Since `abdcbb6`, `origin/main` has moved only by #715 (`cec1f82`, `docs/handoffs/0660-output/decisions.md`),
+    which conflicts with nothing here and changes no AC-24 or AC-25 input.
+  - `archChanged: false`. One private function was split in two. The public API, the module boundaries and the
+    dependency direction are unchanged.
+- **Assumed:**
+  - `origin/main` at `cec1f82` (fetched at 00:34 MDT) is what the PR merges into.
+  - The next diff-gate round reviews `git diff origin/main...HEAD`, as r1-r4 did, so it sees the new docs beside the code.
+- **Hedged:**
+  - The next diff-gate round could raise B-2 or B-3 again, since the same reviewer prompt saw them twice. They are now
+    answered in the code's own docs, where the reviewer sees them.
+  - T may want a `fail_next(ShownSession, ..)` case, which would pin `acted` for an observation that errs after a good
+    select. The gate's NV-2 noted that no test covers it. That is T's call. F writes no tests.
+- **Evidence:**
+  - Read: `645-diff-result-r4.md` and r1-r3, the brief (all of it), handoffs F (round 4), T-green (round 4), S and A-dup
+    (round 2), and `evidence.md`. Also `tx_switch.rs`, `pane/{switch,reset,get}.rs`, `reconcile/observe.rs:316-348`, the
+    tests `pane_verbs/{switch,reset}.rs`, `doctor/rig.rs`, the test kit's `fault.rs`, `harness.rs` and `herdr.rs`,
+    `ports.rs`, the spike, and `holler-adapter-opencode` (`lib.rs:422-436`, `hermetic_test.rs:25-26`).
+  - With `CARGO_BUILD_JOBS=4`:
+    - rustfmt `--check` on the five story files: exit 0. Workspace clippy with `-D warnings`: exit 0, run before and
+      after the last doc edit.
+    - `pane_verbs` 161 passed (`switch::`/`reset::` 21), `pane_cli_process` 35, `cli_surface_test` 3, `docs_cli_test` 3
+      and `holler-pane` 98.
+    - The workspace in CI's form on the finished tree, 00:47-00:51 MDT: exit 0, 137 result lines, 1663 passed, 0
+      failed, 16 ignored. That is round 4's count. An earlier run at 00:39-00:43, before a doc-only reword of the `acted`
+      field, gave the same.
+    - `lint.sh` exit 0, with size warnings only. `changelog-check: ok`. gitleaks found nothing. The `Cargo.toml` and
+      `Cargo.lock` diff against `origin/main` is 0 lines, and the ADR-0021 diff has 4 hunks.
+  - Self-check mutations, each restored: mapping the select's error with `?` instead of `acted` fails AC 8 and AC 18,
+    and doing the same for `observe` fails AC 7 and AC 19.
+  - `check_evidence.py`: 27 entries, 46 blocks, 0 mismatches.
