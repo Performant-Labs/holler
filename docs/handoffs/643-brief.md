@@ -8,6 +8,19 @@ Repo: Performant-Labs/holler. Issue: #643 (epic #633, wave 3). Rigor: second-opi
 (SHOWN against `session_of_record`), DRIVEN is printed as stored and not compared. It changes Decision 3, AC 3, AC 19,
 Decision 15 and the CHANGELOG lines, adds rows to the Reuse map, folds A's W-4 and W-9 into Decisions 2, 6, 7 and 11
 and Risks, and lists A-dup's D-2 to D-6 as follow-ups. The ruling's facts are in Evidence, "Added for amendment 1".
+**What amendment 1 is, and what the excerpts show (added after the outside review's B-1 to B-3).** Amendment 1 is a
+change to **this brief only**: its commit, `d39ea9d`, touches `docs/handoffs/643-brief.md` and no other file
+(`git show --stat d39ea9d`). It is the instruction for the next T and F round, **not** a diff that is already in the
+tree. The production code on the branch is F's round-1 code: `git diff 06320ad HEAD -- crates/holler-cli/src/pane/list.rs
+crates/holler-cli/src/pane/get.rs crates/holler-cli/src/pane/watch.rs` prints nothing. So every source excerpt in this
+brief is the tree as it stands at `d39ea9d`, and the excerpts of `list.rs`, `get.rs` and the test helper under
+"Added for amendment 1" show, on purpose, the round-1 SYNC rule (`SessionSync::of(&pane.last_observed)` at `list.rs:170`
+and `get.rs:86`), the round-1 help (`list.rs:45-48`, `get.rs:26-27`) and the round-1 fixture helper that amendment 1
+tells T and F to replace. Decision 3, Decision 15 and AC 3, 19 and 23 describe the tree **after** that round; against the
+current tree they fail by design (Test plan, "RED for amendment 1"), and that failure is the RED T confirms before F
+edits. Every line number cited for code that amendment 1 changes (Files, "Amendment 1's change"; the excerpts under
+"The branch's current SYNC rule") is its position in the current, pre-amendment tree; F's edit moves those lines, and no
+AC pins them (AC 24 checks file names only).
 **Review rigor:** second-opinion, set by the orchestrator for this run. The issue's own `## Pipeline` line says
 `rigor: in-session`, and an epic comment of 2026-10-08 put every story at in-session; the orchestrator raised this one
 (see "Contradictions found", C1). The outside reviewer sees only this brief, so every fact it relies on is pasted below.
@@ -43,6 +56,35 @@ same lines, except:
   `:70-82` (rows above it were deleted by this story and by #647);
 - `docs/adr/ADR-0021.md` gained a line near :153 and two at :455-456 (§11, quoted under "Added for amendment 1"), so
   every span below from :154 on is one line later than at `3bdd129` and is cited at its current line.
+
+The surface rows as the branch holds them now (verbatim, at `d39ea9d`; round 1 already made them AC 20's and
+Decision 13's, and amendment 1 does not touch them):
+```
+docs/adr/ADR-0003.md:44-46
+holler pane list [PANE] [--profile NAME]                          #643
+holler pane get PANE [--profile NAME]                             #643
+holler pane watch [PANE] [--profile NAME] [--since CURSOR] [--until-idle]   #643
+crates/holler-cli/tests/fixtures/cli-surface.txt:104-113
+# #643
+pane list |
+pane list | demo-c1r1
+pane list | --profile demo
+pane list | --format=json
+pane get | demo-c1r1
+pane get | demo-c1r1 --profile demo --format json
+pane watch |
+pane watch | demo-c1r1 --since 7 --until-idle
+pane watch | --profile demo --json
+crates/holler-cli/tests/pane_verbs/process/stub.rs:17-21
+pub const STUBS: &[(&str, &str, u32)] = &[
+    // #643
+    // #644
+    ("pane", "launch", 644),
+    ("pane", "relaunch", 644),
+```
+So the `# #643` block is the nine lines of Decision 13 under its header (no `pane get |` line), and `STUBS` keeps the
+`// #643` line with no `#643` row under it: AC 20's greps and `stub_verb_not_implemented` (now `stub.rs:70-82`) hold on
+the current tree, and AC 22's `cargo test --workspace` does not depend on a row still to be removed.
 
 ### The stubs this story replaces (all three files, whole)
 
@@ -912,7 +954,27 @@ So nothing on `main` writes `last_observed.driven` (reconcile's `record` writes 
 `last_observed.shown` and `at`), and a `shown: None` that reconcile wrote with `at > 0` is a home screen, not "could not
 tell" (an unseen screen leaves `shown` as stored).
 
-**The branch's current SYNC rule, which amendment 1 replaces** (F's round-1 code, unchanged since `06320ad`):
+The spans above (`reconcile.rs:171-181`, `observe.rs:361-375`) were re-read in the working tree at `d39ea9d` for this
+brief and are unchanged there. The grep behind "nothing writes `driven`", over every crate's `src/`, at `d39ea9d`:
+```
+$ grep -rnE 'last_observed\.driven|\.driven\s*=|driven:\s' crates/*/src
+crates/holler-cli/src/pane/list.rs:154:    pub driven: Option<String>,
+crates/holler-cli/src/pane/list.rs:169:            driven: pane.last_observed.driven.clone(),
+crates/holler-load-test/src/hold_report.rs:95:    pub sessions_driven: usize,
+crates/holler-pane-testkit/src/fixture.rs:68:            driven: None,
+crates/holler-pane/src/pane.rs:187:    pub driven: Option<String>,
+crates/holler-load-test/src/hold_load.rs:110:fn phase(cfg: &Config, hub: &Hub, label: &str, driven: &[String], held: &HashSet<String>, secs: u64) -> Phase {
+crates/holler-load-test/src/hold_load.rs:338:    let driven: Vec<String> = all.iter().take(cfg.hold_sessions).cloned().collect();
+crates/holler-load-test/src/hold_load.rs:341:        sessions_driven: driven.len(),
+crates/holler-pane/src/reconcile.rs:33://! - `last_observed.driven` is left as stored. No port observes DRIVEN before #649, so the
+```
+The hits are the two field declarations (`pane.rs:187`, `list.rs:154`), this story's own read of it (`list.rs:169`),
+the test kit's sample pane, which sets it to `None` (`fixture.rs:68`), reconcile's doc line, and unrelated `holler-load-test`
+names. No production code assigns it.
+
+**The branch's current SYNC rule, which amendment 1 replaces** (F's round-1 code, unchanged since `06320ad`; this is the
+code **before** amendment 1's T and F round, the code that round changes, not the code after it. The new body of
+`SessionSync::of(pane: &Pane)` does not exist yet: Decision 3 specifies it, and F writes it):
 ```
 crates/holler-cli/src/pane/list.rs:195-221
 /// Whether the session a pane's TUI shows is the session the hub drives, as reconcile last
@@ -978,6 +1040,13 @@ pub(crate) fn observed(name: &str, shown: Option<&str>, driven: Option<&str>) ->
 ```
 AC 3's tests are `list_flags_a_pane_whose_shown_and_driven_differ` (`tests/pane_verbs/list.rs:318`),
 `get_flags_a_mismatch` (`get.rs:158`) and `watch_flags_a_mismatch` (`watch.rs:282`).
+Every span in the block above is pre-amendment text, quoted as it stands so the reader can see what changes: the help
+at `list.rs:45-48` still states the round-1 rule ("SYNC is `ok` when they are the same session ... while either one is
+unobserved") and lacks `session of record`, `home screen` and `#649`, and `get.rs:26-27` and `list.rs:13` still say
+DRIVEN is "what reconcile last recorded". Decision 15 replaces those words and AC 19 pins the new ones, so AC 19 fails on
+this tree until F's round (that is its RED). Likewise the fixture helper above sets no `session_of_record` and `at: 0`;
+the helper AC 3 needs (one that also sets `session_of_record` and `at`) is T's to write in that round, so it has no
+excerpt yet.
 
 **The other untrusted-text rule on `main` (A-dup's D-2), not adopted here:**
 ```
@@ -1250,7 +1319,8 @@ Tests (T):
 - `crates/holler-cli/tests/pane_verbs/watch.rs` (rewrite, ~300 lines).
 
 **Amendment 1's change, in the same files** (no new file; the code exists, at 316, 275 and 227 lines, and the tests at
-545, 370 and 311):
+545, 370 and 311; every line number below is the line's place in the current, pre-amendment tree, the code to be
+changed):
 - `crates/holler-cli/src/pane/list.rs`: `SessionSync::of` takes `&Pane` and calls `shown_differs` (Decision 3); its
   call site in `PaneRow::from` (:170); `SessionSync`'s docs (:195-221), `PaneRow`'s `shown`/`driven` docs (:151-154),
   `PaneList`'s help (:45-48) and the module doc (:6, :13); the `LastObserved` import (:16) goes if unused.
@@ -1349,7 +1419,9 @@ ADR-0021, or the test kit. Amendment 1 keeps this: it calls `holler_pane::reconc
    <ProfileSpec or null>, "sync": <SessionSync>}`. `pane` is the record verbatim, so every field ADR-0021 §1 lists is
    there (model, effort, env names, context ceilings, command, probe and its last result), with the record's own rule
    that an unset optional field is left out (ADR-0021 §1, "Optional fields are left out when absent"). The three
-   top-level fields are always present. `spec`: with `--profile P`, the entry of `resolve(P, Some(n)).profile.panes`
+   top-level fields are always present. `profile` is the record's own `profile` field on both paths (as built,
+   `get.rs:83-84`: `profile: pane.profile.clone()`, where `pane` is `resolve`'s with `--profile P` and the store's
+   `get` without it, the same record either way); AC 7's `"demo"` is that field. `spec`: with `--profile P`, the entry of `resolve(P, Some(n)).profile.panes`
    whose `pane` equals the name; without `--profile`, if the record names a profile Q, `profile_store.get(Q)` and that
    entry; `null` when there is no profile, the profile record is gone (`Ok(None)`) or it holds no entry for the pane. A
    `profile_store.get` **error** fails the verb (exit 1), it is not turned into `spec: null`. Text: one `key: value` line
