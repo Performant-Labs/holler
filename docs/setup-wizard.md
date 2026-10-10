@@ -244,6 +244,24 @@ asks the operator one concrete, answerable question about exactly what's blockin
 on the answer and keeps going through the rest of the stages. Reporting a broken stage and
 leaving the run there isn't the goal; a complete, verified workspace is.
 
+## Collision preflight
+
+Stage 2 takes a read-only inventory of each host the run touches
+(`agent-skills/setup-wizard/lib/inventory.sh`): listening ports, running `holler hub`,
+`holler body`, `opencode` and `herdr` processes, the `tailscale serve` configuration and the
+Herdr sessions. It only runs `ss`/`lsof`, `ps`, `tailscale serve status` and
+`herdr session list`; it never writes, signals, starts or stops anything. Stage 3 feeds each
+inventory and the instance's plan to `lib/collide.sh`, which prints the plan beside the
+inventory (other instances' items are "present, not touched") and **refuses** the plan, rather
+than warning, when anything collides with something this instance did not create: a port
+already in use, a hub already listening on `hub_port`, a body already running for a planned
+session name, a state directory already in use, or a Herdr session of the same name. Each
+refusal names the colliding item and the config key to change (`hub_port`, `serve_https_port`,
+`backend_port_base` or a session's `backend_port`, `state_dir`, `herdr_session`, or the
+`[[session]]` name). A process counts as this instance's own only if the instance's ledger
+(`<state_dir>/wizard-ledger.toml`) records its pid with the same start time and command; a
+reused pid is foreign.
+
 ## Related
 
 - [ADR 0005](adr/ADR-0005.md) — attach mode's normative design.
