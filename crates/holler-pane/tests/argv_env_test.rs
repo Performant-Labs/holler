@@ -161,7 +161,7 @@ fn agent_key_serde_is_a_plain_string_failing_closed() {
         r#""feature-implementor""#
     );
 
-    for bad in [r#""a=b""#, r#""a b""#, r#"""#] {
+    for bad in [r#""a=b""#, r#""a b""#, r#""""#] {
         let msg = err_text(serde_json::from_str::<AgentKey>(bad));
         assert!(msg.contains("agent-key-invalid"), "{bad}: {msg}");
     }

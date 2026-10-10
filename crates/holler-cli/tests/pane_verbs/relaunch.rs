@@ -564,7 +564,10 @@ fn relaunch_with_agent_replaces_the_stored_key() {
     let mut theirs = rig.live(false);
     theirs.opencode_agent = Some(agent("orchestrator"));
     rig.fakes.panes.concurrent_put(&theirs).unwrap();
-    let run = rig.run(&relaunch_with(&["--agent", "feature-implementor"]), Format::Json);
+    let run = rig.run(
+        &relaunch_with(&["--agent", "feature-implementor"]),
+        Format::Json,
+    );
     data_of(&run);
     assert_eq!(
         rig.record(PANE)

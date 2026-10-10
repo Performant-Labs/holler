@@ -133,5 +133,44 @@
 - **F flags one malformed test literal (T's to repair in T-green):** the serde fail-closed test's
   `r#"""#` is a lone quote (a JSON syntax error), not the intended empty-string case; the repair is
   `r#""""#`. F did not work around it in code — correct. F also notes the ADR's old deferred bullet
-  (~:677) still words the recording as #644's; the one-row constraint kept it, the new row states
+  (  ~:677) still words the recording as #644's; the one-row constraint kept it, the new row states
   the launch record writes the field (S may inspect).
+
+## 2026-10-10 10:45–11:05 AM MDT — Phase 6 (T-green), T recording
+
+- **Decided:** F's malformed-literal flag upheld and repaired by T. Delimiter-verified
+  `r#"""#` = one quote → a serde_json lex error that can never reach `AgentKey::deserialize`
+  (the RED was compile-RED, so the runtime defect was invisible at Phase 4); repaired to
+  `r#""""#` (JSON `""`). One literal, `argv_env_test.rs:164`, no behavior change.
+- **Decided:** two more T-owned repairs — my RED lines in `pane_verbs/launch.rs:124` and
+  `relaunch.rs:567` exceeded rustfmt's width (the only fmt delta of the whole run vs base
+  `3d95aec`, proven by diffing `cargo fmt --all --check` file-sets base vs HEAD in a throwaway
+  worktree, since removed); hand-rewrapped to rustfmt's exact form rather than a workspace-wide
+  `cargo fmt` (would have touched ~180 pre-existing out-of-boundary hunks).
+- **Hedged:** two suite flakes during verification — `interrupt_test` (6 fails under full-workspace
+  load, 11/11 in isolation) and `body_run_test::fresh_hello_and_presence_on_every_reconnect`
+  (fixed port 41918 in TIME_WAIT; the #242/#259 race class named in the test's own docs; passes
+  after the wait and in the final full run). Ruled environmental, not 34ca660 — it touches no
+  hub/body/interrupt path, and the final configured run was exit 0. Follow-up issue-worthy.
+- **Assumed:** the RED→GREEN transition stands in for remove-the-behavior spot-checks (mutation
+  testing barred for this run by the operator).
+- **Evidence:** configured suite exit 0 (all binaries ok); clippy `--workspace --all-targets`
+  exit 0 silent; no `unsafe` in the two crates at HEAD or base; `--agent` ×1 in the surface
+  fixture; ADR-0021 exactly `1 insertion(+)`. `GREEN: CONFIRMED` (`handoff-T-green.md`).
+
+## 2026-10-10 ~11:05 AM MDT — Phase 6 (T-green), O recording
+
+- **GREEN CONFIRMED** (`handoff-T-green.md`): configured suite exit 0 (pane_verbs 219/219,
+  argv_env_test 8/8, records_test 14/14, cli_surface_test 3/3). Tier 2 clean: clippy
+  `--workspace --all-targets` silent, fmt file-set byte-identical to base, no `unsafe` at HEAD or
+  base, `--agent` exactly once in the surface fixture, ADR-0021 exactly one dated insertion. F
+  touched zero test paths (`--stat` verified).
+- **T's repairs (its own suite, both legitimate):** the `r#"""#` lone-quote literal → `r#""""#`
+  (F's flag upheld — a JSON lex error never reached the guard), and two RED-authored lines
+  re-wrapped to rustfmt's exact form (the run's only fmt delta). T declined F's two optional
+  test-side items (A's W6-optional; coverage rides the verb tests).
+- **Two environmental flakes noted (pre-existing, out of this story's paths, follow-up
+  issue-worthy):** `interrupt_test` under full-workspace parallel load, and `body_run_test`'s fixed
+  port 41918 TIME_WAIT race (#242/#259 class). Both pass isolated and in the final full run.
+- Mutation testing barred by the operator for this run; the RED→GREEN transition stands in for
+  remove-the-behaviour spot-checks (T hedged this in its handoff).

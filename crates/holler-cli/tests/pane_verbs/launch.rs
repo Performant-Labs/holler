@@ -121,7 +121,10 @@ fn launch_records_what_the_fakes_show() {
 #[test]
 fn launch_with_agent_stores_the_key_in_the_record() {
     let rig = Rig::new();
-    let run = rig.run(&launch_with(&["--agent", "feature-implementor"]), Format::Json);
+    let run = rig.run(
+        &launch_with(&["--agent", "feature-implementor"]),
+        Format::Json,
+    );
     data_of(&run);
     assert_eq!(
         rig.record(PANE)
