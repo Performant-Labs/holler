@@ -1,0 +1,18 @@
+{
+  "model": "deepseek-v4-pro",
+  "mode": "diff",
+  "round": "1",
+  "transport": "chat",
+  "elapsed_seconds": 41,
+  "finish_reason": "stop",
+  "usage": {
+    "prompt_tokens": 103326,
+    "completion_tokens": 2423,
+    "total_tokens": 105749,
+    "prompt_tokens_details": {
+      "cached_tokens": 640
+    },
+    "prompt_cache_hit_tokens": 640,
+    "prompt_cache_miss_tokens": 102686
+  }
+}

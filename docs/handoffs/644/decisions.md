@@ -147,3 +147,23 @@
   - Tier 1: clippy, `lint.sh`, `changelog-check.sh`, `cargo machete`, rustfmt, `test-hooks.sh`, and `docs_cli_test`, `wire_selftest`, `cli_surface_test` and `pane_cli_process` all pass.
   - The greps for AC 25-29 were run here.
   - One T entry was appended to `evidence.md` (#643's `list::Rig::new` seeds).
+
+## O (diff gate, manual rerun with a one-off prompt-ceiling override): 2026-10-10T01:05:00-06:00
+
+**Decided.** The script's diff gate for #644 was refused at the runner (`gate-unavailable`, `nonzero-exit`): the assembled prompt is
+about 87,500 estimated tokens against the configured 64,000-token ceiling, and no API call was made. O re-ran the same prompt bytes
+(`644-diff-result-r1.md.prompt.txt`) by hand with `DUAL_REVIEW_MAX_PROMPT_TOKENS=100000`, exported from a directory with no `.env`
+(the script re-sources `./.env` and would override the export). Result: **PASS, no BLOCK findings**, `finish_reason: stop`, 103,326
+prompt tokens and 2,423 completion tokens, so the review was complete and not truncated. The review and its `usage.json` are
+`docs/handoffs/644-diff-result-r2.md` and `.usage.json`.
+
+**Assumed.** The ceiling is a guard against a silent non-review on a different model (the runner's own note names qwen38). This
+model returned a full structured review, with eight needs-verification items, five warnings and four nits that quote specific
+lines. The run is therefore recorded as RAN.
+
+**For A-dup and S to check, from the review.** NV-1 `launch.rs:214` splits `--model` at the first `/` (brief: both halves non-empty);
+NV-2 AC 6, AC 7 and AC 18b call `assert_matches`; NV-3 `close_old` when `--grid` names the same cell; NV-5 `fixed:048100` is refused
+as AC 15 pins; NV-7 `closed()` on `PaneNotFound` for the real adapter; NV-8 `relaunch_with_grid_moves_the_pane`; W-4 the budget is
+checked before each live step but not between the last check and the record write. None is a BLOCK.
+
+**Evidence.** `docs/handoffs/644-diff-result-r2.md`, `docs/handoffs/644-diff-result-r2.md.usage.json`.
