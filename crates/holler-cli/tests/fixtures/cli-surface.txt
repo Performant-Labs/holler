@@ -131,9 +131,9 @@ pane reset |
 pane reset | --profile demo --format=json
 
 # #646
-pane park |
-pane park | --profile demo
-pane unpark |
+pane park | demo-c1r1 --reason "disk full" --release-when "after the cleanup"
+pane park | --profile demo --reason r --release-when w --format=json
+pane unpark | demo-c1r1
 pane unpark | --profile demo
 pane close |
 pane close | --profile demo

@@ -219,6 +219,20 @@ fills this file in at release time.
   ([#649](https://github.com/Performant-Labs/holler/issues/649)), the real `holler profile list` and `show` still
   answer `not-implemented` ([#662](https://github.com/Performant-Labs/holler/issues/662)).
 
+- Pane control, `holler pane park [PANE] --reason TEXT --release-when WHEN [--profile NAME]` and
+  `holler pane unpark [PANE] [--profile NAME]` (epic [#633](https://github.com/Performant-Labs/holler/issues/633)):
+  `park` takes a pane out of service by setting its record's hold to `parked`, with the reason, the release condition
+  and the time it was parked, and `unpark` sets it back to `none`. Each pane is changed by one compare-and-swap on its
+  record and nothing else: no Herdr, tmux or OpenCode call and no profile write, so a pane never moves and its processes
+  are untouched. With `--profile` and no pane name they take every pane of the profile in name order; a named pane must
+  belong to the profile. A pane already in the asked state, or drained, is left as it is and reported unchanged (exit 0),
+  so a profile-wide run that stopped at a failed write, whose message names the panes it changed and those it did not
+  reach, can simply be run again. The reason and the release condition are trimmed, and one that is blank, holds a
+  control character or is longer than 200 characters is refused as `usage`. Both verbs take `--format=json`, and
+  [ADR 0021](docs/adr/ADR-0021.md) records how they behave. Nothing reads the hold yet: whether a parked pane refuses a
+  prompt is a later part of #646. Until the hub's stores are wired into the binary
+  ([#649](https://github.com/Performant-Labs/holler/issues/649)), the real verbs still answer `not-implemented`
+  ([#646](https://github.com/Performant-Labs/holler/issues/646), part 1 of 3).
 - Pane control, `holler profile create NAME [--from-current | --from PROFILE]` and `holler profile delete NAME
   [--keep-panes]` (epic [#633](https://github.com/Performant-Labs/holler/issues/633)): `profile create NAME` makes an
   empty profile. `--from PROFILE` copies another profile's specs as they are: a detached copy, which no pane joins, and
