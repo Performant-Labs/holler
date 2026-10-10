@@ -1,119 +1,124 @@
-# Handoff-A: Phase 3 - #663 the `--profile` helper (`StoreScope`) and the probe runner (`run_probe`)  (up-front plan review, second pass)
+# Handoff-A: Phase 3 - #663 the `--profile` helper (`StoreScope`) and the probe runner (`run_probe`)  (up-front plan review, third pass)
 
 **Date:** 2026-10-09
-**Branch:** issue-663-implementation (head `d7e0421`; base `3bdd129` = origin/main, unchanged since the first pass)
-**Brief reviewed:** `docs/handoffs/663-brief.md` (as of `d7e0421`)   **Reuse map:** the brief's "Reuse map (extend, do not duplicate)" table under "Files" (this run has no separate survey.md)   **Wireframe:** N/A (no UI surface)
-**Verdict:** PASS
+**Branch:** issue-663-implementation (head `93fb653`, base `3bdd129`; `origin/main` has moved to `ce12cdb`)
+**Brief reviewed:** `docs/handoffs/663-brief.md` (unchanged since `d7e0421`, sha256 `02ca563a...`)   **Reuse map:** the brief's "Reuse map (extend, do not duplicate)" table (this run has no survey.md)   **Wireframe:** N/A (no UI surface)
+**Verdict:** BLOCK
 
 ## Summary
 
-PASS, with no block and six warns. This pass replaces the first one, a BLOCK at `5284f91`.
+BLOCK, with one block and three warns. This pass replaces the second pass's PASS (`2dad8bf`).
 
-The first pass's block (B-1) is resolved. AC 14 amends ADR-0021 in place at the five places it named, and each quoted place and
-line range matches the ADR at `3bdd129`. Four of the first pass's six warns were taken as asked (W-1 to W-4), W-6 was taken,
-and W-5 stays accepted. The code plan still extends the right objects:
+The run came back to Phase 3 because the outside diff gate blocked (round 1) and F reported `archChanged: true`. The brief
+has not changed, but `origin/main` moved under it:
 
-- `StoreScope` implements the frozen trait in the file ADR-0021 section 5 names.
-- `run_probe` fills the stub with std only.
-- The suite and the fixtures are reused unchanged.
-
-The new warns are mostly about what the ADR text will say: the "may have landed" rule (W-7), the bound section 12 restates
-(W-8), and the record step inside the act (W-9). The other three are a platform guard (W-10), test placement and two near-copies
-that this review pre-rules for Phase 7 (W-11), and gaps in the follow-ups (W-12). F can take most of them inside the existing
-ACs.
+- **The block (B-2) comes from that move.** #701 (#647 part 1) merged at 18:56 MDT, after this brief's last amendment
+  (18:14) and after the second pass (18:30). It put a public builder of the doctor command line on main,
+  `holler_pane::findings::doctor_command`. Its rustdoc calls it the reconcile step that other verbs print, built there
+  "rather than spelling it again". The plan still builds its own spelling, writes that spelling into ADR-0021 as the
+  unscoped step, and promises it to #644.
+- **The fix is O's, not F's.** #647's reviews already marked #663's copy for rejection and left the fix to O. F cannot fix
+  it in this run, because the branch's base has no `doctor_command`.
+- **The diff gate's two blocks are not plan drift.** Its B-1 asks for a signal that the brief's own pid-reuse rule
+  forbids. The brief should state the rule for that path (W-13), and F should not take that remediation. Its B-2 fix names
+  an API that std does not have (W-14).
 
 ## Findings
 
-Numbering continues from the first pass, whose findings B-1 and W-1 to W-6 are dispositioned in the next section.
+Numbering continues from the earlier passes (B-1, and W-1 to W-12).
 
 | # | Severity | Plan element | Drift dimension | Finding | Suggested fix |
 |---|---|---|---|---|---|
-| W-7 | warn | Decision 5 ("still holds the edit"), Decision 6 ("`unavailable` and the rest: the store said no"), AC 14c, AC 14d | cross-cutting (the transaction's failure semantics) | **The plan decides "may have landed" by error code, but the condition is the outcome.**<br>(1) Decision 6 says a timed-out first write "may still have been applied". Yet Decision 5's message for a timed-out *restore* (the first case of AC 2) says P "still holds the edit", as a fact. By Decision 6's own reasoning, that restore may have landed.<br>(2) Both decisions treat `unavailable` as a definite "no". That is true of the hub's own answer (ADR section 7: a failed save "changes nothing ... and the call answers `unavailable`"). It is not true of the client side:<br>- ADR section 6 (lines 214-215) and `error.rs:599-611` turn a garbled reply into `unavailable`.<br>- ADR section 9's row (line 396) says "also a garbled reply".<br>- The CLI's control path folds "a dropped socket" into `RemoteUnavailable` (`transport.rs:69-78`).<br>#649 builds the real store client, and it will follow that precedent unless told otherwise. A first write that landed and then lost its reply would return a bare `unavailable`. Decision 6 passes it through, and #644 adds the step only when `acted` (its brief, line 1705), so no step is printed. P then holds an edit that nothing live matches, silently.<br>**Why a warn:** a rerun heals it, and nothing live moved. But AC 14c would write the by-code rule into the standing spec. | (a) **Decision 5:** for `timeout`, word the clause "may still hold the edit". AC 2's substrings are unaffected.<br>(b) **AC 14c:** state the rule by outcome: "a first write whose outcome is unknown (a `timeout`) may have landed ...". Add that the store client (#649) answers `timeout`, not `unavailable`, when it loses the reply to a write it sent. That makes it a stated requirement on #649.<br>(c) **AC 14d:** for a `timeout`, "the unrestored edit" becomes "the edit, which may not have been restored". |
-| W-8 | warn | AC 14b, AC 14e | ADRs (completeness) | **Two gaps in the five edits.**<br>(1) Section 12 restates the bound AC 14b narrows: "every port call is bounded by I5 (default 10 s) or ends in `timeout`" (ADR line 458). `ProfileScope` and `Prober` are ports in section 2's table (lines 94, 98). After this change, section 2 would bound `edit_spec` by a sum and `run_probe` by the deadline plus 1 s, while section 12 still says 10 s.<br>(2) AC 14e's "the scope's own errors carry the step" does not say which errors. Under Decisions 5-7, three carry it: the restore failure, the restore conflict and the first-write `timeout`. The plan-stage refusals and a first-write `generation-conflict` do not. #644's append rule depends on that list being exact: append only when `acted` and the text lacks the step (its brief, lines 1705-1708, which already names the same three). | (1) Have AC 14b's sentence say that it also qualifies section 12's per-call bound, as a cross-reference inside the section 2 sentence. Do not edit section 12: #644 (a PROPOSED note) and #647 ("Decided (#647)") both edit it, and a section 12 hunk is not one of a-e.<br>(2) Have AC 14e name the three errors and Decisions 5-7. |
-| W-9 | warn | Decision 4 ("the scope writes no pane record (recording is the verb's, inside its act)"); AC 14e (the record-fence bullet, ADR lines 273-275) | ADRs; cross-cutting | **Confirming this ASSUMPTION has a consequence ADR section 8 never states.**<br>- The record step (step 4) runs inside the act. So a pane-record conflict is an act failure, and the scope restores P's specs (step 5) after a live change that worked.<br>- #644 composes its act exactly so. Its act table puts `pane_store.cas_put` inside the act, as row R, with "no rollback" (brief at `7195993`, line 1622). Line 1627 adds: "Then `edit_spec` restores P's specs".<br>- The fence bullet AC 14e edits says the verb "writes nothing more" (line 274), and #644 cites those words. With `--profile`, the restore is one more write.<br>- Decisions 5 and 7 then say "the live change failed (<failure>)" when only the record failed. The scope cannot see the difference, and the codes are right.<br>**Why a warn:** the gap predates this story. #697 made the ASSUMPTION, and #663 confirms it. | In AC 14e's edit of the fence bullet (the same hunk), add one clause: with `--profile` the record step runs inside the act, so a record conflict also restores P's specs (step 5), and the verb prints the reconcile step. Cite it `(#663)`, confirming #638's ASSUMPTION.<br>Optionally, word Decisions 5 and 7 as "after the act failed (<failure>)". AC 2 and AC 3 assert neither phrase. |
-| W-10 | warn | Decision 13 ("Unix only, as the rest of the workspace (`holler-hub` uses `std::os::unix` unconditionally)") | pattern consistency (platform) | **The case Decision 13 cites is the exception.**<br>- In production `src`, `std::os::unix` is guarded with `#[cfg(unix)]` at seven sites: `holler-body` `instance_lock.rs:84` and `x25519_identity.rs:206`; `holler-hub` `identity.rs:196` and `serve.rs:247, 448`; `holler-proto` `atomic_file.rs:135, 156`.<br>- It is unguarded at one site: `holler-hub/src/control.rs:8`.<br>- Both existing `process_group(0)` calls guard it: `holler-cli/tests/support/mod.rs:782` and `holler-load-test/src/hub.rs:327`.<br>- ADR 0002 keeps Windows off the CI matrix but "tracked as a deferred story" (line 26). It is not retired.<br>`holler-pane` is the crate every other pane crate depends on, and it has no platform code today. An unguarded call would make it, the test kit and the adapters Unix-only at compile time.<br>**Why a warn:** the shipping binary is already Unix-only through `control.rs:8`. | Guard the `process_group(0)` call and the `kill` spawn with `#[cfg(unix)]`, as `own_process_group` does. On other platforms only `Child::kill` runs, the same path as Decision 16's missing-`kill` fallback.<br>Correct Decision 13's rationale.<br>Keep the test module's own `#[cfg(test)]` line as it is, since AC 9's `sed` range anchors on it. AC 9's count of two `Command::new` is unchanged. |
-| W-11 | warn | Decision 21 (inline probe tests; the scratch-dir guard); AC 8f and 8g (the bounded `ps` poll) | file structure; duplication (Phase 7 candidates) | **(1) Test placement.** `holler-pane` has no inline test module. Its tests are ten files under `crates/holler-pane/tests/` plus `tests/common/`, and the stub's own test is `tests/ports_test.rs:512`. `probe::tests` would be the crate's first inline module. This is not a block: the workspace mixes the two (`holler-body` and `holler-cli` use inline modules, e.g. `backoff.rs:43`), and the blast radius justifies the choice.<br>**(2) Two near-copies.** The probe tests' guard and AC 8f's poll copy `StateDir` (`holler-cli/tests/support/mod.rs:69`: a temp dir named from the pid and a counter, removed on `Drop`) and `wait_for` (`:151`: a deadline-bounded poll). Both are on this stack's Phase 7 rejection list. Neither can be reused: `holler-pane` has no dev-dependency and this story adds none, and `tests/support` is another crate's test module. The Reuse map does not name either. | Add one Reuse-map row: "`StateDir`, `wait_for` (`holler-cli/tests/support`): not reachable from `holler-pane`'s lib tests; a minimal private guard and a counted poll in `probe::tests`". Have Decision 21 say that inline is a deliberate departure from the crate's `tests/` pattern.<br>**Pre-ruled for Phase 7:** both copies pass if they stay private to `probe::tests` and minimal: create, path and `Drop` for the guard, and a counted loop for the poll, with no `hub()` or `body()` and no use outside the module. |
-| W-12 | warn | F2, F4, AC 14b ("cites F4") | follow-ups (completeness) | **Three gaps in the follow-ups.**<br>(1) F4 misses the crate docs that call the runner a stub: `holler-pane/src/lib.rs:26` ("[`probe`] — [`ProbeResult`] and the [`run_probe`] stub") and line 7 ("no behaviour behind a stub"). F4 already covers the "no I/O" wording on line 7.<br>(2) Follow-ups are filed by O in Phase 11 (the pipeline doc's decision-journal section), after F writes the ADR. So AC 14b's sentence cannot cite F4 by number.<br>(3) F2 hoists the append helper "beside `code()`". Its natural neighbour is `detail()` (`error.rs:535`), the crate-private exhaustive read of the same one-string payload, with `from_closed` (`error.rs:565`) as the rebuild. Placed there, the hoisted helper is a short method built on them, not a fourth walk of all 23 variants. | (1) Add `lib.rs:7` and `lib.rs:26` to F4.<br>(2) In AC 14b, write "a follow-up amends the frozen trait docs" with no number, and link the issue from the PR body or the Phase 11 summary. Alternatively, O files F4 before the run.<br>(3) Reword F2 to "beside `detail()`, built on it and `from_closed`". |
+| B-2 | block | Decision 8 ("The two forms are the whole set, and both live in `profile_scope.rs`", brief:1808); AC 5 (brief:1537); AC 14e (brief:1682); F5; the Reuse map; the Evidence "as of `3bdd129`" | duplication; ADRs; pattern consistency | **The doctor command line now has one owner on main, and the plan builds a second one.**<br>**On main:**<br>- #701 added `pub fn doctor_command(pane: Option<&PaneName>, fix: bool) -> String` (`crates/holler-pane/src/findings.rs:303-316` at `ce12cdb`).<br>- Its rustdoc says: "It is the reconcile step another verb prints after a failure (ADR-0021 sections 8 and 12), so a verb builds it here rather than spelling it again."<br>- Its `const DOCTOR` (`findings.rs:36`) is main's only production spelling of `holler pane doctor`.<br>**The review record on main:**<br>- #647's A, W-4 (`docs/handoffs/647/handoff-A.md:31`), had the builder made `pub` for #663 and #644.<br>- Its A-dup, D-3 (`handoff-A-dup.md:38`), names this brief's `RECONCILE_STEP_UNSCOPED` and `reconcile_step` as the copy. Its direction: "O tells #663 and #644 to build the unscoped step from `findings::doctor_command(None, false)`. O also decides who owns the profile form."<br>- The same review adds: "Each later story's A-dup gate should then reject its own copy" (`:115`).<br>**The plan builds the copy:**<br>- Decision 8 makes `profile_scope.rs` the home of "the whole set", and AC 5 pins the const as a literal.<br>- AC 14e writes the const into ADR-0021 as the unscoped step (branch ADR line 322).<br>- F5 has #644 import the const.<br>- The Reuse map has no `doctor_command` row, because the brief predates it.<br>That is a parallel path with no written justification, which is a Phase 7 BLOCK under this run's own rule.<br>**Stale ADR text:** AC 14e's "profile-scoped until #647 gives `pane doctor` a pane positional" is already false: ADR 0003 now reads `holler pane doctor [PANE] [--fix] [--profile NAME]` (line 61). F's "naming the pane once `pane doctor` takes one (#647) is a follow-up" (branch ADR line 319) is false in the same way.<br>**Why F cannot take it:**<br>- On the branch's base `3bdd129`, `findings.rs` is a 3-line stub with no `doctor_command`, and F does not rebase.<br>- AC 5 and F5 pin the forms.<br>- D-3 makes the choice O's. | Amend the brief per "Notes for O", items 1 to 6, on a branch rebased onto `ce12cdb`. Then start a fresh run. |
+| W-13 | warn | Decision 15 (the pid-reuse rule); Decision 19 (the reason list); AC 14a; the Risks | cross-cutting (process safety); ADRs | **The brief does not decide the `try_wait` error, and the outside gate read the gap as a defect.**<br>**The gap:** Decision 15 lets the runner signal only while the leader is unreaped, and it assumes that "until `try_wait` has returned `Some`, the leader is alive or a zombie". An `Err` breaks that premise, and neither Decision 15 nor Decision 19's reason list covers it.<br>**What F built:** F sends no signal on that path and answers a new fixed reason, "the probe's exit status could not be read" (handoff-F, deviation 3; `probe.rs:241-250`). That follows Decision 15.<br>**The gate's B-1:** it calls this a leak and asks for `kill_and_reap` on that path. Its premise, that the child "remains unreaped", is wrong:<br>- In std 1.98.1, Unix `Child::try_wait` is `waitpid(pid, WNOHANG)` (`library/std/src/sys/process/unix/unix.rs:1042-1062`; the pidfd branch runs only when a pidfd was requested).<br>- Its error means the kernel holds no unwaited child with that pid. The child was reaped elsewhere in the process (SIGCHLD set to ignore, or another waiter), so its pid may already be reused.<br>- Signalling the group then reopens the race Decision 15 closes.<br>- No crate's `src` on main installs a SIGCHLD handler or calls `waitpid`, so Holler's own processes never reach this path.<br>**Why a warn:** the code is right. The gap is in the spec the outside gate reads. | **Ruling for F:** keep the current behaviour. Do not adopt the gate's B-1 remediation unless O amends Decision 15's rule.<br>**In the brief:**<br>- **Decision 15:** add "a `try_wait` error (the leader was reaped elsewhere; its pid may be reused) sends no signal; the answer is `Error`, and any group member left stays, as with Decision 16's missing `kill`".<br>- **Decision 19:** add F's two reasons, `the probe's exit status could not be read` and `the probe timeout is too large`.<br>- **The Risks and AC 14a:** name this path as one more documented exception to section 12's "no verb leaves work running", beside the escaped child and the missing `kill`.<br>- **The Evidence:** quote std's `try_wait` source. For the gate's NV-1, also quote `ExitStatus::code`'s doc: "On Unix, this will return None if the process was terminated by a signal." |
+| W-14 | warn | Decision 15's cleanup budget (no plan change) | n/a (implementation) | **The diff gate's B-2 is not plan drift, and its fix is not available.**<br>- `kill_and_reap` uses `checked_add(CLEANUP).unwrap_or_else(Instant::now)` (`probe.rs:256-258`). It falls back to a zero budget only if `Instant::now() + 1 s` cannot be represented, which cannot happen in practice.<br>- Even then, the effect is Decision 15's documented degraded path: a leader left unreaped for the caller's exit.<br>- The gate's suggested `saturating_add` does not exist. std 1.98.1's `Instant` has `checked_add`, `checked_sub` and `saturating_duration_since`, and its `+` panics on overflow. | No plan change.<br>Optionally, F measures the budget as a `Duration` from a start `Instant` (`elapsed()`), which needs no addition, or keeps `checked_add` with a comment that says why the fallback cannot be reached.<br>Either way, put the std fact in `evidence.md`, so the next diff round sees it. |
+| W-15 | warn | AC 10 ("Both files stay under 600 lines", brief:1650) | file structure | **AC 10's 600-line limit leaves no room for the B-2 fix.**<br>- `profile_scope.rs` is at 597 lines (handoff-F), 296 of them T's test module.<br>- B-2's fix adds at least an import, and option (ii) adds a test.<br>- `scripts/lint.sh` only warns at 600 and fails at 900 (brief H, `lint.sh:43-52`). The 600 rule is the brief's own, sized on an estimate of about 450 lines. | In the B-2 amendment, either set AC 10 for this file to lint.sh's real gate (under 900, with the 600 warning accepted and journaled), or name the trim. |
 
-### The first pass's findings
+### The earlier passes' findings
 
-- **B-1, resolved.** AC 14 (a) to (e), Files, Blast radius, AC 12 and Decision 22 now carry the ADR edit, and F3 is withdrawn.
-  The places a-e name match the ADR at `3bdd129`: lines 78-80, 86-88, 273-275, 292-293, 296-298 and 299-301. AC 14's
-  merge-hygiene rule and its checks are sound.
-- **W-1, resolved.** Decision 8 adds `pub const RECONCILE_STEP_UNSCOPED` beside `reconcile_step`, AC 5 pins it, and F5 hands the
-  change to #644. The #644 lines F5 lists (1554, 1557-1558, 1707, 1954, 2031 and 2157 at `7195993`) are accurate. The path
-  `super::profile_scope::...` resolves from `pane/launch.rs`, `relaunch.rs` and `close.rs`, all in `pane/` (`pane/mod.rs:22`).
-- **W-2, resolved.** F1 names routes (a) and (b).
-- **W-3, resolved.** Decision 5 requires an exhaustive match with no `_` arm, a rustdoc note on `Timeout.op`, and the F2 hoist.
-  W-12 (3) refines where the hoist goes. Decision 5's variant lists are complete: 23 variants, five of them payload-less
-  (`error.rs:403-491`).
-- **W-4, resolved.** Decision 20 keeps the mechanics apart from the verdict and lists three open points for #696. #641's brief has
-  moved to `0f18b80`, but it still matches all three: `exec.rs` drains stdout and stderr on threads, it sends TERM and then KILL
-  after a grace, and its kill binary is a seam (`with_kill_binary`).
-- **W-5, stands.** It is accepted for Phase 7, and the brief needs no change.
-- **W-6, resolved.** F4 takes `ports.rs:204-207` and `profile.rs:377-379`.
+- **B-1: resolved, and still resolved.** ADR-0021 merges cleanly with `ce12cdb`: a three-way `git merge-file` of the base,
+  branch and main copies reports no conflict. Only `CHANGELOG.md` conflicts, and the fix is to keep both entries.
+- **W-1: superseded by B-2.** The second pass resolved W-1 by hosting the const in `profile_scope.rs`, when
+  `doctor_command` did not exist yet.
+- **W-5: stands.** It is accepted for Phase 7.
+- **W-7 to W-10 and W-12 (2): taken by F at F time**, as the second pass allowed. The brief still has the earlier wording.
+  Folding them in is optional (Notes for O, item 8).
+- **W-11: still pre-ruled for Phase 7.** F's `Scratch` and `assert_gone_within_2s` are private and minimal, as asked.
+- **W-12 (1) and (3): O's, at Phase 11.**
 
 ### Also checked (no finding)
 
-- **No missed reuse candidate.**
-  - No production shell-quoting helper exists. The only one is the test-local `sh_quote` in `multiword_command_test.rs:63`.
-  - No bounded runner exists in a library crate.
-  - `holler-load-test`'s `kill_tree` (`main.rs:556`) is a group kill, but it is a binary-only harness that uses `libc` and
-    `unsafe`, so it is precedent only. `holler-pane` cannot depend on it, and AC 11 rules out its route.
-- **The CLI's inline test module is forced.** `holler-cli` has `autotests = false`. `tests/pane_verbs/main.rs` is #670's frozen
-  file, with one `mod` per verb and no slot for the scope. `[lib]` has no `test = false`, so `cargo test -p holler-cli --lib`
-  runs the module.
-- **AC 1's closure type-checks.** The suite's `build` is `FnMut(Arc<FakeProfileStore>, Arc<FakePaneStore>) -> S`
-  (`conformance/profile_scope.rs:193-196`), and those `Arc`s coerce into `StoreScope::new`'s `Arc<dyn ...>` parameters.
-- **Decision 2's texts match the fake.** The fake writes `profile.to_string()` and `"{name} is not in profile {:?}"`
-  (`testkit/src/profile_scope.rs:97-126`).
-- **AC 14 can merge cleanly.** #644 adds a paragraph after ADR line 305, #647 edits only section 12 and "Deferred", and #662 edits
-  only sections 3 and 9. All three branches are still brief-only, so no ADR edit has been committed. AC 14's hunks are separated
-  from theirs by unchanged lines.
-- **ADR record.** Issue #22 still holds the placeholder body, so the markdown is the working record. In-place `(#NNN)` edits are
-  the practice (#639 `2a6f349`, #692 `316b8e3`, #697 `c76bbed`).
-- **Wire and persistence.** `ProbeResult`'s shape is unchanged, so no golden file or `docs/protocol/v2.md` change follows.
-  Decision 14 changes only what `Pane.probe.last` holds. Nothing new is persisted.
+- **The profile-scoped step is right on main, for a reason the brief should state.** On main (`reconcile.rs:222-242`):
+  - with `--profile P` and a pane, doctor runs `ProfileScope::resolve(P, Some(pane))`, which answers
+    `pane-not-in-profile` for a pane with no record;
+  - without `--profile`, a named pane with no record is `pane-not-found`.
+
+  A failed `launch --profile P` of a new pane leaves no record, so both pane forms refuse (exit 3) exactly where the step
+  must work. `holler pane doctor --profile P` runs, and `holler profile show P` (ADR 0003 line 68, #703) reports the spec
+  that has no live pane.
+- **No other reuse candidate on main.**
+  - No crate's `src` has a POSIX shell-quoting helper, so `single_quoted` duplicates nothing.
+  - `findings::quoted` quotes with `{:?}` for a terminal. That is not shell-safe, and it has another job.
+- **#701 and #703 change nothing else the plan rests on.**
+  - `error.rs` is untouched, so `with_context`'s exhaustive match still compiles after a rebase.
+  - `reconcile.rs:219-221` expects exactly the plan's `resolve` refusals.
+  - ADR-0021's new text in sections 3, 11 and 12 does not overlap AC 14's hunks.
+- **No wire change.** `ProbeResult`'s wire shape is unchanged, so no golden file or protocol doc moves.
 
 ## Notes for O
 
-PASS, so no amendment is required before T runs.
+Amend the brief, then start a **fresh** run. Do not use `resumeFromRunId`, which replays this verdict.
 
-**Can be taken at F time, with no brief change**, because each stays within the existing ACs and the hunks AC 14 names:
+1. **Re-base the plan on `ce12cdb`.**
+   - Rebase the branch first. Only `CHANGELOG.md` conflicts: keep both entries.
+   - Move the Evidence to the new base, and add `findings.rs:303-316` (`doctor_command`), `findings.rs:12-18` (no remedy
+     carries a profile), ADR 0003 lines 61 and 68, and `reconcile.rs:222-242`.
+2. **The Reuse map.** Add a row for `holler_pane::findings::doctor_command` (#701), the doctor command line's one builder,
+   marked **reuse**. Both reconcile-step forms are built from `doctor_command(None, false)`, and `profile_scope.rs` spells
+   `holler pane doctor` nowhere else.
+3. **Decision 8, the profile form (D-3's first choice). Recommended: compose on top.** Keep the profile form in
+   `profile_scope.rs`, built on the builder:
+   `to reconcile, run <doctor_command(None, false)> --profile '<P>' and then holler profile show '<P>'`.
+   The output is byte-identical, so AC 5's scoped text does not change. This is D-3's "#663 composing on top of it":
+   - `findings.rs`'s remedies never carry a profile (#647's Decision 8(a));
+   - the POSIX quoting has one caller;
+   - the blast radius stays as it is.
 
-- W-7: (a) and (c), and the outcome wording in (b).
-- W-8: (1), as a cross-reference inside the section 2 sentence, and (2).
-- W-9: the clause in the fence-bullet edit.
-- W-10: the `#[cfg(unix)]` guards.
+   The alternative, a `profile` parameter on `doctor_command`, widens the blast radius into #647's file.
+4. **Decision 8, the unscoped form (D-3's second choice). Pick one:**
+   - **(i), recommended: a function built on `doctor_command(None, false)`.** For example, `reconcile_step(profile:
+     Option<&ProfileName>)` covers both forms and removes #644's branch; a second function also works. AC 5 changes from a
+     const equality to a call. F5 tells #644 (and #646) to call the function, and #644 declares no const.
+   - **(ii): keep `pub const RECONCILE_STEP_UNSCOPED` as a literal.** A `const` cannot call `doctor_command`.
+     - Justify the literal in writing in the Reuse map.
+     - Pin it with a test that it equals `format!("to reconcile, run {}", doctor_command(None, false))`.
+     - That test passes on the current code, so the brief must call it a regression guard (as AC 8m is), not RED.
+5. **AC 14e's ADR text.**
+   - Name `findings::doctor_command` as the builder the step is made from.
+   - Replace "until #647 gives `pane doctor` a pane positional", and F's follow-up sentence at branch ADR line 319, with the
+     reason in "Also checked": on main a pane-scoped doctor refuses a pane with no record or outside P, which is the
+     failed-`launch` case, so the step stays profile-scoped (or bare) on purpose.
+   - Name the unscoped form as item 4 decides.
+   - F5 and the cross-story note to #644 say the same thing.
+6. **AC 10.** Set the size rule for `profile_scope.rs` (W-15), or name the trim.
+7. **W-13 and W-14.**
+   - Write the `try_wait` rule into Decisions 15 and 19, the Risks and AC 14a, with the std evidence.
+   - Tell F to keep the no-signal behaviour.
+   - Without that rule in the brief, the next outside diff round is likely to raise B-1 again.
+8. **Optional.** Fold W-7 (a)-(c), W-8 and W-9's wording, as F built them (handoff-F, design decision 1 and deviation 5),
+   into Decisions 5 to 7 and AC 14. The brief then matches the code the gate compares it with.
 
-F should record each choice in `handoff-F.md`.
-
-**For O:**
-
-- W-7 (b)'s requirement on #649's store client goes to #649's brief. It belongs beside F5, as one more cross-story note.
-- W-11's Reuse-map row can wait for the Phase 11 summary. This handoff already pre-rules it for Phase 7.
-- W-12's follow-up edits are O's at Phase 11.
-
-**What Phase 7 will check:**
-
-- `PaneInOtherProfile` is produced in `crates/holler-cli/src` only by the scope's `Set`-only helper, and it uses the hub's text
-  shape (W-5).
-- `profile_scope.rs` holds exactly one formatter (`reconcile_step`), one const (`RECONCILE_STEP_UNSCOPED`), one quoting function
-  and one payload-append helper. That helper is an exhaustive match with no `_` arm. There is no copy of the fake's helpers
-  beyond the deliberate re-implementation the Reuse map names.
-- `probe.rs` adds no public item, and its process mechanics are apart from the verdict mapping. It spawns only `argv[0]` and
-  `kill`, and uses no `libc` and no `unsafe` (AC 9, AC 11).
-- `probe::tests` has its own guard and poll, private and minimal (W-11), and no other test-support copy.
-- The ADR diff touches only the places a-e name, with no table row and no heading changed.
+**A pipeline observation for the operator (not a finding on the plan).** This re-entry came through `nextPhase` case 7
+with `archChanged: true` (`coding-pipeline.workflow.mjs:1179`). On that route the driver skips the diff rework classifier
+(`:4642`), so T-red and F get no rework note, and F's role doc reads no `*-diff-result-*.md` file. Had this pass been a
+PASS, the diff gate's findings would have reached F only through this handoff. If that is a defect, it belongs in
+Aftersight.
 
 ## Patterns referenced
 
-- `docs/adr/ADR-0021.md`: lines 78-80, 86-98, 176-192, 214-215, 273-305, 396 and 457-460, plus "Decisions taken". Also
-  `docs/adr/README.md` and ADR 0002, line 26.
-- `crates/holler-pane/src/error.rs`: lines 399-401 and 494-611 (`code`, `classify`, `detail`, `from_closed`, `from_wire`).
-  `crates/holler-pane-testkit/src/profile_scope.rs`, the reference behaviour.
-- The platform and test-support precedents: `crates/holler-cli/tests/support/mod.rs:69, 151, 782` (`StateDir`, `wait_for`,
-  `make_own_process_group`), `crates/holler-load-test/src/hub.rs:327` and `crates/holler-hub/src/control.rs:8`.
-- `crates/holler-cli/src/transport.rs:69-78`, the control path's dropped-socket mapping.
-- The consumers: `origin/issue-644-implementation:docs/handoffs/644-brief.md` at `7195993` (lines 1596-1627 and 1705-1708) and
-  `origin/issue-641-implementation:docs/handoffs/641-brief.md` at `0f18b80` (lines 524-526, 564 and 611-624).
+- `crates/holler-pane/src/findings.rs:12-18, 36, 303-316` at `ce12cdb`: `doctor_command` and the remedy rule.
+- `crates/holler-pane/src/reconcile.rs:219-242` at `ce12cdb`: how `[PANE]` and `--profile` resolve.
+- `docs/handoffs/647/handoff-A.md:31` (W-4) and `docs/handoffs/647/handoff-A-dup.md:38, 111-115` (D-3), at `ce12cdb`.
+- `docs/adr/ADR-0003.md:61, 68`, and ADR-0021 sections 8 and 12, at `ce12cdb` and on the branch.
+- std 1.98.1 (rust-docs): `sys/process/unix/unix.rs:1042-1062` (`Child::try_wait`), `ExitStatus::code`, and `Instant`'s
+  method list.

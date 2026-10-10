@@ -206,3 +206,54 @@ Rigor/brief gate: BLOCKED, overridden by Andre Angelantoni: The outside brief ga
   - clippy, lint, changelog-check, machete, rustfmt, docs_cli_test and wire_selftest all pass.
   - The AC 9, 11, 12 and 14 checks all hold.
   - Details are in `handoff-T-green.md`.
+
+## A (Phase 3, up-front plan review, third pass) — 2026-10-09T19:28:00-06:00
+- **Decided:** BLOCK on `docs/handoffs/663-brief.md` at `93fb653` (the brief is unchanged since `d7e0421`), with one block
+  and three warns, B-2 and W-13 to W-15 (see `handoff-A.md`, which replaces the second pass's PASS at `2dad8bf`).
+  - **The re-entry.** The outside diff gate blocked (round 1) and F reported `archChanged: true`, so the driver routed the
+    run back to Phase 3.
+  - **The block (B-2).**
+    - **On main:** #701 merged at 18:56 MDT, after the brief's last amendment. It put
+      `holler_pane::findings::doctor_command` on main, documented as the reconcile step's builder ("rather than spelling it
+      again").
+    - **The review record:** #647's A-dup, D-3, names #663's `RECONCILE_STEP_UNSCOPED` and `reconcile_step` as the copy.
+      It says each later story's A-dup gate should reject its own copy.
+    - **The plan:** it still builds a second spelling (Decision 8, AC 5), writes it into ADR-0021 (AC 14e), and promises it
+      to #644 (F5). AC 14e's "until #647 gives `pane doctor` a pane positional" is false on main.
+    - **Why F cannot fix it in this run:** the base `3bdd129` has no `doctor_command`, and D-3 makes the choice O's.
+  - **The diff gate's blocks.** B-1's remediation contradicts Decision 15's pid-reuse rule, so F's no-signal path stands,
+    and the brief should state the rule (W-13). B-2's suggested `saturating_add` does not exist for `Instant` (W-14).
+  - **W-15:** AC 10's 600-line rule leaves no room in `profile_scope.rs`, which is at 597 lines.
+- **Assumed:**
+  - The brief's Reuse map table is the Reuse map, as in the earlier passes.
+  - #644's brief at `7195993` is current. Its branch has not moved, and its issue was last updated at 17:40 MDT, before
+    #701 merged.
+  - #647's D-3 has not been acted on: neither the #663 nor the #644 brief mentions `doctor_command`, and neither issue
+    does.
+- **Hedged:**
+  - **B-2 is a block, not a warn.** The copied code is one literal. But:
+    - the plan writes the copy into the standing spec and into a cross-story contract;
+    - the review record on main already marks it for rejection at Phase 7;
+    - every fix needs a rebase and an O decision, which F cannot make.
+
+    A PASS would have sent F into a rework it cannot finish, and then into a predictable A-dup BLOCK.
+  - **W-13 is a warn.** The code follows the brief's rule; only the brief's text is silent.
+  - **B-2 does not ask to name the pane.** The profile-scoped step is right on main, because the pane forms refuse a pane
+    with no record. B-2 asks only to restate the reason.
+- **Evidence:**
+  - **On `origin/main` (`ce12cdb`):**
+    - `findings.rs:12-18, 36, 303-316` and `reconcile.rs:219-242`;
+    - `doctor.rs` (the `[PANE]` positional and `ReconcileRequest`) and `lib.rs:42` (`pub mod findings`);
+    - ADR 0003 lines 61 and 68, and the ADR-0021 diff `3bdd129..ce12cdb`;
+    - `docs/handoffs/647/handoff-A.md:31, 76-86, 200-206`, `handoff-A-dup.md:38, 105-118` and `handoff-S.md:258-268`.
+  - **On the branch:**
+    - the code: `findings.rs` (a 3-line stub), `profile_scope.rs:1-300` and `probe.rs` in full;
+    - the ADR-0021 diff;
+    - `handoff-F.md`, `handoff-T-green.md`, `evidence.md` and `663-diff-result-r1.md`.
+  - **std 1.98.1 (rust-docs):** the `Child::try_wait` source, `ExitStatus::code`'s doc and `Instant`'s method list.
+  - **Grepped `crates/*/src` on main** for POSIX quoting helpers, `holler pane doctor` literals, and `SIGCHLD` and
+    `waitpid`.
+  - **Merge checks against `ce12cdb`:**
+    - a three-way `git merge-file` of ADR-0021 (base, branch, main) gave no conflict;
+    - `git merge-tree` showed only `CHANGELOG.md` conflicting.
+  - **The driver's routing:** `coding-pipeline.workflow.mjs:1179` and `:4642`, and `decideArchReReview`.
