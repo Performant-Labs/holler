@@ -25,8 +25,11 @@
 #
 # Verbs:
 #   run <herdr args...>   run `herdr --session <name> <args...>`
-#   server-start          start the headless server in the background, logging to log-path;
-#                         prints the server's pid alone on the first stdout line
+#   server-start          start the headless server in the background, logging to log-path,
+#                         in a scrubbed environment (PATH HOME USER LOGNAME SHELL TERM LANG LC_*
+#                         TMPDIR XDG_* HERDR_* only); prints the server's pid alone on the first
+#                         stdout line
+#   label <pane> <label>  rename a pane (`herdr pane rename`); label ^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$
 #   check-session         refuse when the named session exists and the ledger did not create it
 #   check-pane            refuse when this process runs in a pane of a different session
 #   session-delete [name] delete this instance's own STOPPED session (`herdr session delete`);
@@ -226,16 +229,44 @@ case "$verb" in
     # always carries its session (an empty session on a non-default instance is refused above).
     log="$(log_path)"
     mkdir -p "$(dirname "$log")" || die "cannot create the log directory for $log"
-    # nohup execs herdr, so $! is the server's own pid, not a wrapper's.
+    # Only a named set of variables reaches the server (and so every pane it opens): the driving
+    # agent's own variables must not leak into the operator's orchestrators.
+    keep=()
+    for name in $(compgen -e); do
+      case "$name" in
+        PATH | HOME | USER | LOGNAME | SHELL | TERM | LANG | LC_* | TMPDIR | XDG_* | HERDR_*)
+          keep+=("$name=${!name}")
+          ;;
+      esac
+    done
+    # HERDR_BIN's directory stays reachable.
+    case "$herdr_bin" in
+      */*) keep+=("PATH=${PATH:-}:$(dirname "$herdr_bin")") ;;
+    esac
+    # env and nohup exec, so $! is the server's own pid, not a wrapper's.
     if [ -n "$session" ]; then
-      { nohup "$herdr_bin" --session "$session" server >"$log" 2>&1 & echo $!; }
+      { env -i "${keep[@]}" nohup "$herdr_bin" --session "$session" server >"$log" 2>&1 & echo $!; }
     else
-      { nohup "$herdr_bin" server >"$log" 2>&1 & echo $!; }
+      { env -i "${keep[@]}" nohup "$herdr_bin" server >"$log" 2>&1 & echo $!; }
     fi
+    ;;
+  label)
+    [ $# -eq 2 ] || die "usage: herdr.sh label <pane-id> <label>"
+    [ -n "$1" ] || die "label needs a pane id"
+    [ -n "$2" ] || die "label must not be empty"
+    case "$2" in
+      [A-Za-z0-9]*) ;;
+      *) die "label '$2' is not valid (^[A-Za-z0-9][A-Za-z0-9._-]{0,31}\$)" ;;
+    esac
+    case "$2" in
+      *[!A-Za-z0-9._-]*) die "label '$2' is not valid (^[A-Za-z0-9][A-Za-z0-9._-]{0,31}\$)" ;;
+    esac
+    [ "${#2}" -le 32 ] || die "label '$2' is longer than 32 characters"
+    herdr_cmd pane rename "$1" "$2"
     ;;
   check-session) check_session ;;
   check-pane) check_pane ;;
   session-delete) session_delete "$@" ;;
   log-path) log_path ;;
-  *) die "usage: herdr.sh run|server-start|check-session|check-pane|session-delete|log-path" ;;
+  *) die "usage: herdr.sh run|server-start|label|check-session|check-pane|session-delete|log-path" ;;
 esac
