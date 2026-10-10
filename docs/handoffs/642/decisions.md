@@ -257,3 +257,46 @@ handoff text and the `stub.rs` merge. Hermetic 30/30, attach 23/23, tui 13/13 an
 
 **Evidence.** `cargo test -p holler-adapter-opencode`; `cargo clippy --workspace --all-targets -- -D warnings`; `scripts/lint.sh` exit 0;
 `git diff origin/main -- crates/holler-pane` shows only `//!` and `///` lines.
+
+## S (Phase 10, spec audit, round 2) — 2026-10-10T00:39:10-06:00
+- **Decided:** PASS (see handoff-S.md).
+  - Round 1's item is fixed. T-green's lines 9 and 162 are neutral now. No commit in `origin/main..HEAD` holds the
+    machine name, in any file of its tree or in its message. `5d20f61` is no ancestor of HEAD, and no ref contains it.
+  - The merge of `origin/main` (`abdcbb6`) is resolved as round 1's Advisory 3 and A-dup's W-1 asked:
+    - `stub.rs` has one public refused-port helper, with #708's held-connection candidate;
+    - ADR "Deferred" keeps `main`'s #640 sentence, beside the #700 and #695 items;
+    - the CHANGELOG keeps both entries.
+  - Every canonical 642b AC is met, except AC 25 (the PR body), which the PR step owns. I re-checked AC 22 against the
+    new base.
+- **Assumed:**
+  - O's post-merge results as recorded: `tui_test` 13/13, `attach_test` 23/23, `hermetic_test` 30/30, workspace clippy
+    clean, and `lint.sh` 0. I re-ran no Tier 1 or Tier 2 check, apart from one read-only `rustfmt --check` on the two test
+    files that include the merged `stub.rs`.
+  - T-green's real-tier runs still describe the code: `src/` is unchanged since F (`48fcd05`), and the real tier does not
+    include `stub.rs`.
+- **Hedged:**
+  - Two latent issues could each have justified ADVISORY-HOLD: the stale title after `respawn-pane` (I3 on a
+    re-attach), and A's W-1. I kept round 1's call, because nothing calls `attach_tui` before #644 and #649, the brief
+    pins the sequence, and A and T rated both non-blocking.
+  - The stale title is recorded only in handoffs, which the PR step may remove. So its follow-up must be filed before the
+    merge (Advisory 1).
+  - The held-connection candidate changes AC 31's step (1). I accepted it as a disclosed, stricter candidate.
+  - The diff gate was not re-run after the merge. I accepted that, because only test-helper and doc text changed since
+    r3.
+- **Evidence:**
+  - Read in full: the brief, every phase handoff (round 1's S at `cab09eb`), `evidence.md`, the four production files,
+    every new or changed test file and the fixture. Read as diffs: CHANGELOG, ADR-0021, `holler-pane`, the manifests and
+    `Cargo.lock`.
+  - Git checks:
+    - `git show --remerge-diff f46cd3d` (only the four conflicted files);
+    - `git diff 48fcd05 HEAD -- crates/holler-adapter-opencode/src` (empty);
+    - a per-commit `git grep -i` for the machine name;
+    - `git for-each-ref --contains 5d20f61` (empty).
+  - Greps: privacy over the 5,748 added lines; the AC 22, 24, 32 and 33 checks; Risk 6 (one tmux `Command::new`, every
+    `-t` through `exact_target`); closing keywords in commit messages.
+  - r3's `usage.json`: `finish_reason: stop`, 77,559 prompt tokens, and a prompt byte-identical to r1's.
+  - `gh`:
+    - `gh api repos/Performant-Labs/holler`: the squash message is built from `COMMIT_MESSAGES`, and
+      `delete_branch_on_merge` is false;
+    - `gh issue view` for 636, 640, 644, 649, 695, 696 and 700;
+    - `gh pr list --head`: no 642b PR yet.
