@@ -232,3 +232,12 @@
     with `finish_reason: stop` and verdict PASS. The prompt was 77,559 tokens by the model's count, not the ~64,093 that
     the O entry above states. All nine of its needs-verification items resolve in the code's favour.
   - `gh issue list` finds no filed follow-up for P-2, P-3, the stale title or W-1. #644 and #649 are open with no PR.
+
+## T (Phase 6 re-entry, test-only rework after S) — 2026-10-10T00:17:38-06:00
+- **Decided:** replace the operator's machine name at handoff-T-green.md:9 and :162 with neutral phrases; touch no test
+  and no production code.
+- **Assumed:** a doc-only edit to T's own handoff needs no suite re-run; the earlier GREEN results stand.
+- **Hedged:** the name stays in commit 5d20f61 until O or the run's agent folds this edit in with
+  `git commit --fixup=5d20f61` and an `--autosquash` rebase onto origin/main, before any push.
+- **Evidence:** `git grep -i` over the branch tree finds no remaining occurrence; `git log --all -S` names only 5d20f61;
+  `git ls-remote` shows no `issue-642-implementation` branch on origin.
