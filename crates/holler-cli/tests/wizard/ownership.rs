@@ -449,7 +449,10 @@ fn real_ledger_lib(env: &Env) -> Option<PathBuf> {
     let src = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../agent-skills/setup-wizard/lib/ledger.sh");
     if !src.exists() {
-        eprintln!("note: ledger.sh not in this tree yet ({}); skipping", src.display());
+        eprintln!(
+            "note: ledger.sh not in this tree yet ({}); skipping",
+            src.display()
+        );
         return None;
     }
     let lib = env.root.path().join("real-lib");
