@@ -845,8 +845,10 @@ plan and show it before touching anything:
   `<state_dir>/herdr/setup/wizard-ledger.toml` for this machine); on the hub host also `WIZARD_HUB_PORT`, `WIZARD_SERVE_HTTPS_PORT` and
   `WIZARD_HERDR_SESSION`:
   ```bash
-  WIZARD_INSTANCE_NAME=<name> WIZARD_HUB_PORT=<hub_port> WIZARD_SERVE_HTTPS_PORT=<serve_https_port> WIZARD_HERDR_SESSION=<herdr_session> WIZARD_STATE_DIR=<state_dir> WIZARD_BACKEND_PORTS="<ports on this host>" WIZARD_LEDGER=<scratch>/ledger-<host>.toml bash $WIZARD_LIB/collide.sh <host-label> <scratch>/inventory-<host>.tsv
+  WIZARD_HERDR_HOST=1 WIZARD_INSTANCE_NAME=<name> WIZARD_HUB_PORT=<hub_port> WIZARD_SERVE_HTTPS_PORT=<serve_https_port> WIZARD_HERDR_SESSION=<herdr_session> WIZARD_STATE_DIR=<state_dir> WIZARD_BACKEND_PORTS="<ports on this host>" WIZARD_LEDGER=<scratch>/ledger-<host>.toml bash $WIZARD_LIB/collide.sh <host-label> <scratch>/inventory-<host>.tsv
   ```
+  `WIZARD_HERDR_HOST=1` marks the host that runs the Herdr server (the unnamed-server refusal below
+  applies only there): set it on the local call only, never on a remote host's call.
   Its output is the inventory printed beside what the run will create: everything that runs and
   was not created by this instance is listed as "present, not touched" (so is this instance's own
   `tailscale serve` entry, when the ledger has a live `hub` row). It exits 1 and prints a
@@ -882,7 +884,11 @@ plan and show it before touching anything:
 - **What's already running vs. what will be started fresh, per host.** "Reused" means exactly one
   thing: a **live row in this instance's own ledger** (its pid, start time and command still
   match; see Stage 4, "Reuse on a rerun"). List per host which backends, the hub, the bodies and
-  the Herdr server are reused that way and which will be started new. A listener on a planned
+  the Herdr server are reused that way and which will be started new. When `herdr session list`
+  shows a stopped session of the instance's name, say so here: starting the Herdr server restores
+  that saved session (its workspaces and panes, and an agent in a pane may resume), so Stage 8
+  checks `pane list` after `server-start` and builds a **new workspace** beside any panes the
+  wizard did not create (`workspace create`, with the user's yes). A listener on a planned
   port that has no live row is not reused: it is a collision (above), however much it looks like
   ours. If a fresh hub will replace a recorded one whose identity key is gone, only **this
   instance's own recorded bodies** are orphaned and need a rejoin (Stage 6's note), per host.
@@ -1291,7 +1297,8 @@ stops it; without that yes, stop here and ask.
 ```bash
 <herdr_env> bash $WIZARD_LIB/herdr.sh run status
 ```
-If `server: not running`, start one headlessly (`herdr` alone needs a real TTY and will fail
+Herdr 0.8.x prints the line `status: not running` or `status: running` under `server:`; the
+older `server: not running` text stays accepted. If it is not running, start one headlessly (`herdr` alone needs a real TTY and will fail
 with "cannot attach without a usable terminal" when run non-interactively — use the headless
 form; its log is `<logs_dir>/<prefix>-herdr-server.log`, see `herdr.sh log-path`). The default
 instance starts an unnamed server; a named session starts a server for that session. The **first
@@ -1299,9 +1306,14 @@ line** of `server-start`'s output is the server's pid:
 ```bash
 <herdr_env> bash $WIZARD_LIB/herdr.sh server-start
 sleep 3
-<herdr_env> bash $WIZARD_LIB/herdr.sh run status   # should now show server: running
+<herdr_env> bash $WIZARD_LIB/herdr.sh run status   # should now show `status: running` under `server:`
 <herdr_env> bash $WIZARD_LIB/herdr.sh run pane list
 ```
+**Restored saved session:** starting the server restores the previous saved session of that name
+(its workspaces and panes, and an agent in a pane may resume). When `pane list` shows panes the
+wizard did not create, never split or close them: report them to the user and, with the user's
+yes, build a **new workspace** beside them with `herdr.sh run workspace create` (then split and
+label only that workspace's panes), or reuse them only if the user asks.
 Then record the server in the ledger, with that pid, so a later run knows this wizard created the
 session (for the default instance, leave out `--session`):
 ```bash
@@ -1340,16 +1352,21 @@ doesn't match (the config has grown/shrunk since the layout was built), this sho
 have been flagged in Stage 3's plan — don't silently under- or over-provision panes relative to
 the current config.
 
-**Do (build the layout)**, using Stage 1's resolved `layout` (the nested array, every
+**Do (build the layout, row first)**, using Stage 1's resolved `layout` (the nested array, every
 orchestrator name included as a real slot alongside every session name — **not** an assumed
 single fixed orchestrator pane, and **not** raw `[[session]]`/`[[orchestrator]]` file order,
 which says nothing about columns). Flatten `layout` column by column, top to bottom within each
 column, into an ordered list of slots — each slot is either an orchestrator name or a session
 name. **The first slot in that flattened list is the pre-existing base pane** — it needs no
-split, it already exists; every other slot needs exactly one split to create its pane:
-- The first slot of a *new* column: split **right** from the previous column's first-row pane.
-- Any later slot within the *same* column: split **down** from the most-recently-created pane
-  in that column.
+split, it already exists; every other slot needs exactly one split to create its pane. Build
+the grid row first:
+- Create the first row by splitting right from the last pane of the row, one pane per column.
+- Then split each first-row pane down, once per further slot in its column, from the
+  most-recently-created pane in that column.
+
+The column-by-column order nests unevenly: Herdr nests every split inside the target pane's own
+cell, so a column split down before the next column is split right leaves the later columns
+spanning only part of the height.
 
 ```bash
 # layout = [["o1"], ["alpha", "beta"]]  (this skill's example: o1 alone in column 1 — the
@@ -1359,18 +1376,23 @@ split, it already exists; every other slot needs exactly one split to create its
 
 # layout = [["o1"], ["alpha", "beta"], ["o2"], ["gamma", "delta"]]  (2 orchestrators, 4 sessions)
 <herdr_env> bash $WIZARD_LIB/herdr.sh run pane split --pane <base-pane> --direction right   # -> alpha's pane (col 2), e.g. <p3>
-<herdr_env> bash $WIZARD_LIB/herdr.sh run pane split --pane <p3> --direction down              # -> beta's pane (col 2), e.g. <p4>
 <herdr_env> bash $WIZARD_LIB/herdr.sh run pane split --pane <p3> --direction right          # -> o2's pane (col 3), e.g. <p5>
 <herdr_env> bash $WIZARD_LIB/herdr.sh run pane split --pane <p5> --direction right          # -> gamma's pane (col 4), e.g. <p6>
-<herdr_env> bash $WIZARD_LIB/herdr.sh run pane split --pane <p6> --direction down              # -> delta's pane (col 4), e.g. <p7>
+<herdr_env> bash $WIZARD_LIB/herdr.sh run pane split --pane <p3> --direction down              # -> beta's pane (col 2, row 2), e.g. <p4>
+<herdr_env> bash $WIZARD_LIB/herdr.sh run pane split --pane <p6> --direction down              # -> delta's pane (col 4, row 2), e.g. <p7>
 ```
 Keep a running map of pane id → slot name as you go (`<base-pane>` -> whatever slot 1 actually
 is, `<p3>` -> slot 2, and so on) — this is what both the orchestrator-launch step below and
 Stage 9's attach step key off, instead of assuming which pane is which.
 
+**Do (label every pane, right after the splits):** give each pane, orchestrator or session, its
+slot name as its label, through `herdr.sh label <pane-id> <label>` (not under `run`; the label
+matches `^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$`), once per pane and with the usual `<herdr_env>` in
+front, e.g. `<base-pane>` gets `o1` and `<p3>` gets `alpha`.
+
 **Verify:** `herdr.sh run pane list` shows exactly (M+N−1) new panes beyond the pre-existing base pane
 (M+N total in the workspace, M of which map to `[[orchestrator]]` entries and N of which map to
-real sessions), in the expected layout.
+real sessions), in the expected layout, and every pane's label equals its slot name.
 
 **Gate:** if `herdr.sh run pane split` errors, or the pane count doesn't match M+N, stop and confirm
 the target workspace/pane with the user before retrying — don't chain more splits on a layout
