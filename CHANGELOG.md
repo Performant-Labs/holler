@@ -136,6 +136,15 @@ fills this file in at release time.
   protocol version (22; any other is `herdr-version-unsupported`). No I/O yet: the socket adapter follows in part 2,
   so nothing a user runs changes ([#640](https://github.com/Performant-Labs/holler/issues/640)).
 
+- Herdr adapter, part 2 (epic [#633](https://github.com/Performant-Labs/holler/issues/633)): `holler-adapter-herdr`
+  now implements `HerdrPort` over Herdr's local socket, one request per connection with one deadline per call (10 s by
+  default; `timeout` when it runs out, `unavailable` for a missing socket or a garbled or oversized reply). It refuses a
+  Herdr protocol other than 22 when it connects. It places a pane only by the splits the planner decides, reads the
+  tree back to confirm it landed in the cell asked for, and creates a configured workspace that Herdr lacks only for
+  `r1c1`. It passes the `HerdrPort` conformance suite against a simulated Herdr in the default test run. Nothing is
+  wired into a verb yet ([#649](https://github.com/Performant-Labs/holler/issues/649)), so nothing a user runs
+  changes ([#640](https://github.com/Performant-Labs/holler/issues/640)).
+
 - Pane control, the hub's profile registry (epic [#633](https://github.com/Performant-Labs/holler/issues/633)):
   `profile/get`, `profile/list`, `profile/cas_put`, `profile/delete`, `profile/watch` and `profile/log` now answer from
   a real registry instead of `not-implemented`. Profiles are kept in `<state dir>/hub/profiles.json` (mode `0600`,
@@ -192,6 +201,19 @@ fills this file in at release time.
   [ADR 0021](docs/adr/ADR-0021.md) records both choices. Until the hub's stores are wired into the binary
   ([#649](https://github.com/Performant-Labs/holler/issues/649)), the real `holler profile list` and `show` still
   answer `not-implemented` ([#662](https://github.com/Performant-Labs/holler/issues/662)).
+
+- OpenCode adapter, part 1: the server side (epic [#633](https://github.com/Performant-Labs/holler/issues/633)):
+  `holler-adapter-opencode` now implements the server half of `HarnessPort` over OpenCode's HTTP API, on `127.0.0.1`
+  only. `serve` starts `opencode serve` for a pane in its project directory, in a process group of its own, and sends
+  nothing but health checks until the server first answers healthy; it never takes over a server that already answers
+  on the port, and returns the new server's pid. `health` is a timed check that answers false, and never hangs, when the
+  server is down or frozen. `create_session` titles each new session with its own id, `list_sessions` leaves out child
+  (subagent) sessions, and `abort` checks that the session exists first, because raw OpenCode acknowledges an abort of
+  an id it does not know. Every call has a deadline (10 s by default) and answers `timeout` when a frozen server holds
+  it, and a reply that is not the JSON a step needs, such as the web page OpenCode serves for a route it does not know,
+  is `unavailable`. Attaching, switching and reading a pane's TUI answer `not-implemented` until part 2, which also
+  brings the opt-in tests against a real OpenCode. Nothing a user runs changes yet: #649 wires the adapter in
+  ([#642](https://github.com/Performant-Labs/holler/issues/642)).
 
 ## [0.4.0] - 2026-09-29
 
