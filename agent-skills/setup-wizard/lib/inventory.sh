@@ -100,7 +100,7 @@ flag_of() {
 
 # `read` keeps the inner spacing of the last field, and lstart is 24 characters in the C locale
 # ("Tue Oct  6 22:12:17 2026"), so started and cmd are cut by position, not split on blanks.
-[ "$have_ps" = 1 ] && LC_ALL=C ps -eo pid=,user=,lstart=,command= 2>/dev/null |
+[ "$have_ps" = 1 ] && LC_ALL=C ps -ww -eo pid=,user=,lstart=,command= 2>/dev/null |
   while read -r pid user rest; do
     started=${rest:0:24}
     cmd=${rest:25}
