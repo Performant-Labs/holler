@@ -181,3 +181,38 @@
       (`default_agent`, `OPENCODE_CONFIG*`);
     - a scratch program outside the repo (its own workspace and target dir, deleted afterwards). It called `http::request`
       on replies of 200 MiB, 64 MiB + 1 and 64 MiB - 1000 with no framing headers.
+
+## T (Phase 4, author RED: round 2, the rework after the outside diff gate's round 1) — 2026-10-09T18:32:14-06:00
+- **Decided:**
+  - PASS: the test contract is valid. Two tests are added and two are extended in `hermetic_test.rs` (704 to 775 lines).
+    - The 64 MiB cap on the unframed read-to-the-close path is pinned with over and under cases through the stub's `raw`
+      mode. This is B-1 and A's N-3. There is no test-only knob and no second stub.
+    - A chunked vector with an extension and a trailer (NV-2).
+    - A counting `workdir` resolver in the two `serve` tests where the port is in use or frozen (NV-4: the resolve comes
+      after the health check).
+  - Every new assertion passes on the current code, by design: the behaviour exists, and A measured the cap. Validity rests on
+    mutations M1-M4 (handoff-T-red.md), each failing exactly the targeted test. The new tests are reported as answers to
+    the gate, not as RED for F.
+  - NV-1 is answered with evidence, not a new test. The `httparse` 1.10.1 doc example is in `evidence.md`.
+  - NV-3 and the pgid NV-4 are answered by the existing group-kill test.
+  - The new tests stay in `hermetic_test.rs`, not in a new `http_test.rs`. A second target would compile `support/stub.rs`
+    again with parts unused, which would need a `dead_code` allow. 775 lines is still under the brief's 800 split point.
+    N-2's 642b test home is a new target.
+- **Assumed:**
+  - About 200 MB of transient memory for the 64 MiB case is acceptable on the GitHub Linux and macOS runners.
+  - The diff gate's `server.rs` and `http.rs` line numbers are off by the file's real size (`server.rs` is 186 lines). I
+    matched its findings to the code by content.
+- **Hedged:**
+  - The cap test's peak RSS is estimated from the buffer sizes, not measured. A measured 68 MB for the client alone.
+  - The trailer test pins the brief's "trailers discarded" only for a reply on a closed connection. That is the only kind
+    this client makes (`Connection: close`).
+- **Evidence:**
+  - Read: `642-diff-result-r1.md` (whole), handoff-A.md (re-review), the brief's API and Behaviour sections (498-669),
+    `src/http.rs` (whole), `src/server.rs:30-70`, and `tests/{hermetic_test.rs,support/stub.rs}`.
+  - Read in the `httparse` 1.10.1 registry source: `lib.rs:1251-1340`.
+  - Ran:
+    - `cargo test -p holler-adapter-opencode`: 28/28 before, 30/30 after, and six concurrent runs at 30/30;
+    - mutations M1-M4, each restored with `git checkout`;
+    - `cargo clippy -p holler-adapter-opencode --all-targets -- -D warnings`;
+    - `rustfmt --check --edition 2021`;
+    - `bash scripts/lint.sh` (exit 0).

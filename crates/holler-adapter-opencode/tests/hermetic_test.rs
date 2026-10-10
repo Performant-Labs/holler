@@ -233,6 +233,53 @@ fn ac1_a_reply_that_is_not_http_is_garbled() {
     );
 }
 
+/// A `200` with no `Content-Length` and no `Transfer-Encoding`, whose body runs to the close.
+fn unframed(body_len: usize) -> Vec<u8> {
+    let mut bytes = b"HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n".to_vec();
+    bytes.resize(bytes.len() + body_len, b'x');
+    bytes
+}
+
+/// The 64 MiB reply bound holds on the read-to-the-close path (outside diff gate r1, B-1): a
+/// body one byte past it is `Garbled`, and one just under it is read whole, so the bound is
+/// neither missing nor set lower.
+#[test]
+fn ac1_an_unframed_reply_past_64_mib_is_garbled_and_one_under_it_is_read() {
+    const MIB64: usize = 64 << 20;
+    let t = Duration::from_secs(10);
+    let over = Stub::start();
+    over.raw(&unframed(MIB64 + 1));
+    let result = http::request(over.port, "GET", "/session", None, t);
+    assert!(
+        matches!(result, Err(HttpError::Garbled(_))),
+        "a body of 64 MiB + 1 to the close: expected Garbled, got {:?}",
+        result.map(|reply| (reply.status, reply.body.len()))
+    );
+    let under = Stub::start();
+    under.raw(&unframed(MIB64 - 1024));
+    let reply = http::request(under.port, "GET", "/session", None, t).unwrap();
+    assert_eq!((reply.status, reply.body.len()), (200, MIB64 - 1024));
+}
+
+/// A chunk extension is ignored and the trailer after the `0` chunk is discarded (RFC 9112
+/// section 7.1; outside diff gate r1, NV-2).
+#[test]
+fn ac1_a_chunked_reply_with_an_extension_and_a_trailer_reads_its_body() {
+    let stub = Stub::start();
+    stub.raw(
+        b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n\
+          12;name=value\r\n{\"healthy\":true,\"v\r\n12\r\nersion\":\"1.18.35\"}\r\n\
+          0\r\nX-Trailer: discarded\r\n\r\n",
+    );
+    let reply = http::request(stub.port, "GET", "/x", None, Duration::from_secs(2)).unwrap();
+    assert_eq!(reply.status, 200);
+    assert_eq!(
+        String::from_utf8_lossy(&reply.body),
+        HEALTHY,
+        "the chunk data only"
+    );
+}
+
 // ---- AC 2: health ----
 
 #[test]
@@ -459,18 +506,36 @@ fn ac7_the_call_bound_caps_the_request_timeout() {
 
 // ---- AC 8: serve ----
 
+/// `config`, with a `workdir` that counts its calls: `serve` resolves the project directory
+/// only once the port is refused (Behaviour, `serve`; outside diff gate r1, NV-4).
+fn counting_workdir(mut config: OpenCodeConfig) -> (OpenCodeConfig, Arc<AtomicUsize>) {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let (inner, counted) = (config.workdir, Arc::clone(&calls));
+    config.workdir = Arc::new(move |name: &PaneName| {
+        counted.fetch_add(1, Ordering::SeqCst);
+        inner(name)
+    });
+    (config, calls)
+}
+
 #[test]
 fn ac8_serve_refuses_a_port_that_already_answers_healthy() {
     let stub = Stub::start();
     stub.json("GET", "/global/health", 200, HEALTHY);
     let scratch = Scratch::with_serve_script();
-    let h = OpenCodeHarness::new(config("sh", scratch.path(), quick()));
+    let (config, resolved) = counting_workdir(config("sh", scratch.path(), quick()));
+    let h = OpenCodeHarness::new(config);
     let message = unavailable(h.serve(&pane_name(), stub.port), "serve on a healthy port");
     assert!(
         message.contains(&stub.port.to_string()),
         "names the port: {message:?}"
     );
     assert!(!scratch.spawned(), "nothing is spawned for a port in use");
+    assert_eq!(
+        resolved.load(Ordering::SeqCst),
+        0,
+        "workdir is not resolved"
+    );
     let health = "GET /global/health HTTP/1.1";
     assert!(
         stub.lines().iter().all(|l| l == health),
@@ -497,7 +562,8 @@ fn ac8_serve_on_a_frozen_port_times_out_and_spawns_nothing() {
     let stub = Stub::start();
     stub.freeze();
     let scratch = Scratch::with_serve_script();
-    let h = OpenCodeHarness::new(config("sh", scratch.path(), quick()));
+    let (config, resolved) = counting_workdir(config("sh", scratch.path(), quick()));
+    let h = OpenCodeHarness::new(config);
     let start = Instant::now();
     let op = timeout_op(h.serve(&pane_name(), stub.port), "serve on a frozen port");
     assert_eq!(op, HarnessOp::Serve.as_str());
@@ -505,6 +571,11 @@ fn ac8_serve_on_a_frozen_port_times_out_and_spawns_nothing() {
     assert!(
         !scratch.spawned(),
         "nothing is spawned while a frozen server holds the port"
+    );
+    assert_eq!(
+        resolved.load(Ordering::SeqCst),
+        0,
+        "workdir is not resolved"
     );
 }
 

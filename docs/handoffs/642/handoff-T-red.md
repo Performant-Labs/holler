@@ -1,8 +1,87 @@
 # Handoff-T-red: Phase 4 - #642a the OpenCode adapter, server side (`serve`, `health`, `create_session`, `list_sessions`, `abort`, `http::request`)
 
 **Date:** 2026-10-09
-**Branch:** issue-642-implementation (on 80901fa, A's PASS commit)
-**Brief / wireframe reviewed:** docs/handoffs/642-brief.md (this run is 642a only); docs/handoffs/642/handoff-A.md. Wireframe: N/A (no UI surface).
+**Branch:** issue-642-implementation (round 2 on c052d02, A's re-review PASS; round 1 was on 80901fa)
+**Brief / wireframe reviewed:** docs/handoffs/642-brief.md (unchanged since 5a4d68e; this run is 642a only); docs/handoffs/642/handoff-A.md (the re-review); docs/handoffs/642-diff-result-r1.md (untracked). Wireframe: N/A (no UI surface).
+
+## Round 2: rework after the outside diff gate's round 1
+
+### A precondition
+
+Confirmed. A returned PASS on its re-review at c052d02, with 0 blocks and 3 new warns. N-3 is addressed to T: pin the
+64 MiB reply cap with one hermetic test through the stub's existing `raw` mode, with no second stub and no test-only knob.
+N-1 and N-2 belong to 642b, and this run changes nothing for them. On this route the driver passes no note, so the
+findings come from `642-diff-result-r1.md` and handoff-A.md.
+
+### Why this round's tests pass on the current code
+
+The production code already exists, and A measured that the cap already holds. So each new test pins behaviour F already
+implemented, and passes on the current code. These tests are not a RED that F must turn GREEN. They answer the gate's
+findings, and diff round 2 can verify them. A test that passes against existing code is valid only if it fails when the
+behaviour it pins is removed. Each one was checked that way (M1-M4 below).
+
+### Tests authored or changed (`crates/holler-adapter-opencode/tests/hermetic_test.rs`, 704 to 775 lines)
+
+All of them are integration tests over the loopback stub, the same tier as the AC 1 and AC 8 tests they sit beside. No
+cheaper tier reaches the socket read path or `serve`'s order of calls.
+
+| Test | Gate finding | Pins |
+|---|---|---|
+| `ac1_an_unframed_reply_past_64_mib_is_garbled_and_one_under_it_is_read` (new) | B-1; A's N-3 | A `200` with no `Content-Length` and no `Transfer-Encoding`. A body of 64 MiB + 1 bytes to the close is `Garbled`. A body of 64 MiB - 1 KiB is read whole (status 200, that length). The "under" case pins that the bound is not set lower. The margins hold whether the head counts toward the bound or not. `MAX_REPLY` stays private. |
+| `ac1_a_chunked_reply_with_an_extension_and_a_trailer_reads_its_body` (new) | NV-2 (and NV-1) | A raw chunked reply: a `;name=value` extension on the first size line, two `0x12` chunks, and an `X-Trailer` after the `0` chunk. The body is exactly the chunk data. |
+| `ac8_serve_refuses_a_port_that_already_answers_healthy` (extended) | NV-4 (`workdir` order) | It now also asserts that the `workdir` resolver is never called (a counting wrapper, `counting_workdir`). |
+| `ac8_serve_on_a_frozen_port_times_out_and_spawns_nothing` (extended) | the same | The same assertion for the `TimedOut` branch, which the brief's Behaviour rule also puts before the resolve. |
+
+**Gate findings answered without a new test:**
+
+- **NV-1** (the `parse_chunk_size` index). The `httparse` 1.10.1 source and doc example are now in `evidence.md`. They show
+  the index points past the size line's CRLF, so `line + size` is right. The existing two-chunk AC 1 test and the new
+  trailer test would fail if it were off by 2.
+- **NV-3 and the first NV-4** (`process_group(0)` without `unsafe`, and `Child::id()` being the group id). These are pinned
+  on both CI legs by the existing `serve_kills_its_process_group_when_the_deadline_passes`. A background grandchild in the
+  child's group must be gone after the timeout, and that is only possible if the group id the adapter kills is the child's
+  group.
+- **W-1 to W-3 and NIT-1, NIT-2.** These are comments or design choices with no behaviour to pin. They are F's to weigh.
+
+### Validity (each new assertion fails when its behaviour is removed)
+
+The command was `cargo test -p holler-adapter-opencode --test hermetic_test -- <filter>`. Each mutation was made to
+`src/` and restored with `git checkout`. `git status` afterwards shows only the test file.
+
+```
+M1  http.rs: delete fill()'s `if self.buf.len() >= MAX_REPLY` check
+    ac1_an_unframed_reply_past_64_mib_... FAILED
+    a body of 64 MiB + 1 to the close: expected Garbled, got Ok((200, 67108865))
+M2  http.rs: MAX_REPLY = 32 << 20
+    ac1_an_unframed_reply_past_64_mib_... FAILED   (panicked at hermetic_test.rs:260, the "under" case's unwrap: Garbled)
+M3  server.rs: resolve `workdir(name)` before `refuse_a_held_port`
+    ac8_serve_refuses_a_port_that_already_answers_healthy FAILED   left: 1  right: 0
+    ac8_serve_on_a_frozen_port_times_out_and_spawns_nothing FAILED left: 1  right: 0
+M4  http.rs: after the `0` chunk, demand a bare CRLF (reject a trailer)
+    ac1_a_chunked_reply_with_an_extension_and_a_trailer_reads_its_body FAILED
+    ac1_content_length_and_chunked_replies_read_to_the_same_bytes ok   (so only the new test covers trailers)
+```
+
+On the unmutated code: `cargo test -p holler-adapter-opencode` gives 30 passed, 0 failed (28 before this round). Six
+concurrent runs of `hermetic_test` all gave 30/30, each in about 1.05 s. The 64 MiB test peaks at roughly 200 MB of
+transient memory (the stub's copy and the client's buffer), which is acceptable on the CI runners.
+`cargo clippy -p holler-adapter-opencode --all-targets -- -D warnings` is clean. `rustfmt --check` is clean.
+`bash scripts/lint.sh` exits 0, warning that `hermetic_test.rs` is 775 lines (fail at 900; the brief's split point is 800).
+For 642b, see A's N-2: new TUI tests go in a new target, not this file.
+
+### Ready for F
+
+The test contract is valid. F has nothing to turn GREEN in this round, because all 30 tests pass on the current code. Any F
+change for B-1 must stay in `http.rs`, per A's N-3: for example, rewording the `MAX_REPLY` doc's "head and body together".
+It must keep the two cap cases passing. The gate's B-1 is answered by the new cap test passing, with M1 showing that the
+test catches an uncapped read.
+
+Staged by explicit path: `crates/holler-adapter-opencode/tests/hermetic_test.rs`,
+`docs/handoffs/642/{handoff-T-red.md,evidence.md,decisions.md}`.
+
+---
+
+## Round 1 record (0ce98a4), unchanged below
 
 ## A precondition
 

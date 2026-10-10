@@ -88,3 +88,22 @@
   >         // NOTE: should be const once MSRV >= 1.44
   >         let h10: u64 = u64::from_ne_bytes(*b"HTTP/1.0");
   >         let h11: u64 = u64::from_ne_bytes(*b"HTTP/1.1");
+
+## T (Phase 4, author RED: rework after the outside diff gate's round 1)
+
+- **Fact:** `httparse::parse_chunk_size` returns the index just past the size line's CRLF (the start of the chunk data) and the chunk size. So `http.rs`'s `let end = line + size;` is the end of the chunk data, and the two bytes after it are the chunk's CRLF (diff gate r1, NV-1). A chunk extension after `;` is skipped. `ac1_content_length_and_chunked_replies_read_to_the_same_bytes` (two chunks of `0x12`) and `ac1_a_chunked_reply_with_an_extension_and_a_trailer_reads_its_body` exercise it. This is a dependency's source, outside the repository (the cargo registry checkout).
+  **Source:** `~/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/httparse-1.10.1/src/lib.rs:1251-1263`
+  **Verbatim excerpt:**
+  > /// Parse a buffer of bytes as a chunk size.
+  > ///
+  > /// The return value, if complete and successful, includes the index of the
+  > /// buffer that parsing stopped at, and the size of the following chunk.
+  > ///
+  > /// # Example
+  > ///
+  > /// ```
+  > /// let buf = b"4\r\nRust\r\n0\r\n\r\n";
+  > /// assert_eq!(httparse::parse_chunk_size(buf),
+  > ///            Ok(httparse::Status::Complete((3, 4))));
+  > /// ```
+  > pub fn parse_chunk_size(buf: &[u8])
