@@ -255,3 +255,43 @@ under the standing order to hand-rerun a gate that cannot run, not an operator d
 change records it, and decision 1 (no operation id) is still PROPOSED. Both need the operator's OK to flip.
 
 **Evidence.** `docs/handoffs/644/handoff-S.md`, `docs/handoffs/644/handoff-A-dup.md`.
+
+## S (Phase 10, spec audit, re-run after the split) — 2026-10-10T01:26:03-06:00
+- **Decided:** PASS (handoff-S.md, which replaces the ADVISORY-HOLD of `90ba971`).
+  - The A and T preconditions are met: A and A-dup both PASS, T-red's RED was valid, and T-green is GREEN with no
+    blocking issue.
+  - Every item in the issue's Acceptance list is met, and every one of the brief's ACs 1-31 has a proving test or check.
+    For the crash criterion, this story's half is met, and the merged doctor's whole-fleet pass reports the leftover
+    Herdr pane.
+  - The hold's defect is resolved by the in-place split. The brief's dated note, ADR-0021's agent bullet and this
+    journal record it; #644 stays open; #700 is still OPEN, and the issue has not changed since 17:40 MDT on 2026-10-09.
+  - The hold's doc fixes are done: the ADR-0021 `timeout` cell states the `pane.launch`/`pane.relaunch` exception, and
+    `origin/main` (`bd5e825`) is merged.
+  - Two conditions for the merging agent, not for F:
+    1. replace the script's `Closes #644.` with `Part of #644.` and add the AI disclosure;
+    2. green CI (`test (ubuntu-latest)`, `test (macos-latest)`) on the merged tree.
+- **Assumed:**
+  - I relied on T's recorded Tier 1 and Tier 2 results and did not re-run them, per S's role. The production files are
+    byte-identical to T-green's `5cf6d94`.
+  - What the two merges since then changed under this branch's crates is comment-only in `holler-pane`. Main's changed
+    `holler-cli` tests do not run `launch` or `relaunch`, and `docs_cli_test` skips `docs/handoffs/`. So I judged the
+    merged tree unlikely to break, and left the proof to CI.
+- **Hedged:**
+  - PASS with merge conditions rather than a hold. The PR does not exist yet, and both conditions are the merging
+    agent's standard post-script steps (CLAUDE.md), not a defect F could fix.
+  - The branch's commit messages carry no closing keyword, and the squash default is `COMMIT_MESSAGES`, so the PR body
+    is the only way #644 could close by mistake.
+  - Advisory 1 (#700 must touch this story's full `ProfileSpec`/`Pane` literals) is a coordination note for the MO, not
+    REWORK. The compiler will flag every place, so nothing breaks silently.
+- **Evidence:**
+  - Issues: `gh issue view 644` (body and `updatedAt`) and `gh issue view 700` (OPEN, no PR); `CONTRIBUTING.md`; the
+    repo's squash settings (`gh api repos/Performant-Labs/holler`); `coding-pipeline.workflow.mjs:4822`.
+  - Code read in full: `tx_launch.rs`, `launch.rs`, `relaunch.rs` and every test file in the diff. Supporting code read:
+    `reconcile::shown_differs`, `HerdrPane`, `HarnessKind`, and `PaneError::{detail, from_closed, from_wire}` and their
+    `Display`.
+  - Diffs read: `git diff origin/main...HEAD` (ADR-0021 hunks, ADR-0003, fixture, `stub.rs`, CHANGELOG), and
+    `git show c76aeaf --cc`.
+  - Read-only checks: the AC 25-29 greps; `wc -l`; greps for `unwrap`, `expect`, `panic!`, `#[allow]` and `unsafe`;
+    the frozen-file and manifest diff; a privacy scan of all added lines; `gitleaks git --log-opts=origin/main..HEAD`
+    (15 commits, no leaks); `git diff 5cf6d94 HEAD` over `holler-pane` and `holler-cli` (comment-only, and no
+    launch/relaunch tests); and greps for full `ProfileSpec`/`Pane` literals on `origin/main`.
