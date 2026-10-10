@@ -102,7 +102,7 @@ fn first_instance_inventory() -> String {
             "hub{t}111{t}<user>{t}/home/<user>/.holler{t}41807{t}{FIRST_HUB_STARTED}{t}{FIRST_HUB_CMD}",
         ),
         format!(
-            "body{t}333{t}<user>{t}/home/<user>/.holler{t}alpha{t}{FIRST_HUB_STARTED}{t}/usr/bin/holler body run --session alpha",
+            "body{t}333{t}<user>{t}/home/<user>/.holler{t}/x/alpha.toml{t}{FIRST_HUB_STARTED}{t}/usr/bin/holler body run --config /x/alpha.toml",
         ),
         format!(
             "opencode{t}222{t}<user>{t}-{t}47001{t}{FIRST_HUB_STARTED}{t}opencode serve --port 47001",
@@ -176,7 +176,7 @@ fn install_live_fakes(env: &Env) {
         "ps",
         "echo '  111 <user> Sat Oct 10 09:00:00 2026 /usr/bin/holler hub --listen 127.0.0.1:41807'\n\
          echo '  222 <user> Sat Oct 10 09:00:01 2026 opencode serve --port 47001'\n\
-         echo '  333 <user> Sat Oct 10 09:00:02 2026 /usr/bin/holler body run --session alpha'\n\
+         echo '  333 <user> Sat Oct 10 09:00:02 2026 /usr/bin/holler body run --config /x/alpha.toml'\n\
          echo '  444 <user> Sat Oct 10 09:00:03 2026 /usr/sbin/sshd -D'",
     );
     env.fake(
@@ -188,7 +188,15 @@ fn install_live_fakes(env: &Env) {
     );
     env.fake("herdr", "echo first");
     // Anything that could change state is also faked, so a call would be recorded.
-    for n in ["kill", "pkill", "killall", "holler", "ssh", "curl", "systemctl"] {
+    for n in [
+        "kill",
+        "pkill",
+        "killall",
+        "holler",
+        "ssh",
+        "curl",
+        "systemctl",
+    ] {
         env.fake(n, "exit 0");
     }
 }
@@ -218,10 +226,12 @@ fn inventory_lists_ports_processes_serve_and_herdr_sessions_read_only() {
     assert!(s.contains("port\t41807\t111\tholler\n"), "{s}");
     assert!(s.contains("port\t47001\t222\topencode\n"), "{s}");
     assert!(
-        s.contains(&format!("hub\t111\t<user>\t-\t41807\t{FIRST_HUB_STARTED}\t{FIRST_HUB_CMD}\n")),
+        s.contains(&format!(
+            "hub\t111\t<user>\t-\t41807\t{FIRST_HUB_STARTED}\t{FIRST_HUB_CMD}\n"
+        )),
         "{s}"
     );
-    assert!(s.contains("\nbody\t333\t<user>\t-\talpha\t"), "{s}");
+    assert!(s.contains("\nbody\t333\t<user>\t-\t/x/alpha.toml\t"), "{s}");
     assert!(s.contains("\nopencode\t222\t<user>\t-\t47001\t"), "{s}");
     assert!(!s.contains("sshd"), "unrelated process listed: {s}");
     assert!(s.contains("\nserve\t443\t"), "{s}");
@@ -256,7 +266,10 @@ fn inventory_tolerates_missing_tailscale_and_herdr() {
     let out = env.script("inventory.sh").output().unwrap();
     assert!(out.status.success(), "{}", text(&out));
     let s = String::from_utf8_lossy(&out.stdout).into_owned();
-    assert!(!s.contains("\nserve\t") && !s.contains("herdr-session"), "{s}");
+    assert!(
+        !s.contains("\nserve\t") && !s.contains("herdr-session"),
+        "{s}"
+    );
     assert_read_only(&env);
 }
 
@@ -276,10 +289,10 @@ fn each_colliding_item_is_refused_in_turn_and_named() {
         ),
         (
             format!(
-                "body{t}333{t}<user>{t}-{t}beta{t}{FIRST_HUB_STARTED}{t}/usr/bin/holler body run",
+                "body{t}333{t}<user>{t}/home/<user>/.holler-x{t}/x/b.toml{t}{FIRST_HUB_STARTED}{t}/usr/bin/holler body run --config /x/b.toml",
             ),
-            "beta",
-            "[[session]] name",
+            "used by a body",
+            "state_dir",
         ),
         (
             format!(
@@ -333,10 +346,15 @@ fn a_default_second_instance_is_refused_for_every_colliding_item() {
     });
     let s = text(&out);
     assert_eq!(out.status.code(), Some(1), "{s}");
-    for key in ["hub_port", "backend_port_base", "serve_https_port", "herdr_session"] {
+    for key in [
+        "hub_port",
+        "backend_port_base",
+        "serve_https_port",
+        "herdr_session",
+    ] {
         assert!(s.contains(key), "missing {key}: {s}");
     }
-    assert!(s.contains("41807") && s.contains("47001") && s.contains("alpha"), "{s}");
+    assert!(s.contains("41807") && s.contains("47001"), "{s}");
 }
 
 #[test]
@@ -401,11 +419,239 @@ fn a_ledger_live_process_is_ours_and_a_stale_entry_is_not() {
 #[test]
 fn collide_itself_makes_no_external_calls() {
     let env = Env::new();
-    for n in ["ss", "lsof", "ps", "tailscale", "herdr", "kill", "pkill", "holler"] {
+    for n in [
+        "ss",
+        "lsof",
+        "ps",
+        "tailscale",
+        "herdr",
+        "kill",
+        "pkill",
+        "holler",
+    ] {
         env.fake(n, "exit 0");
     }
     let inv = env.file("inv.tsv", &first_instance_inventory());
     let _ = collide(&env, &inv, default_plan);
     assert!(env.calls().is_empty(), "{:?}", env.calls());
     assert!(fs::read_dir(env.work()).unwrap().next().is_none());
+}
+
+// ------------------------------------------------------------ #750 fixes
+
+const DAY_ONE_STARTED: &str = "Tue Oct  6 22:12:17 2026";
+
+fn quiet_fakes(env: &Env) {
+    for n in ["ss", "lsof", "tailscale", "herdr"] {
+        env.fake(n, "exit 0");
+    }
+}
+
+fn hub_ledger(started: &str, cmd: &str) -> String {
+    format!(
+        "[[process]]\npid = 111\nstarted = \"{started}\"\ncmd = \"{cmd}\"\nrole = \"hub\"\nstage = 6\nsession = \"\"\n"
+    )
+}
+
+/// A plan of only the hub and the serve of a default instance.
+fn hub_and_serve_plan(c: &mut Command) {
+    default_plan(c);
+    c.env("WIZARD_BACKEND_PORTS", "")
+        .env("WIZARD_SESSION_NAMES", "");
+}
+
+#[test]
+fn a_day_one_lstart_with_a_double_space_is_kept_and_recognised_as_ours() {
+    let env = Env::new();
+    quiet_fakes(&env);
+    env.fake(
+        "ps",
+        &format!("echo '  111 <user> {DAY_ONE_STARTED} {FIRST_HUB_CMD}'"),
+    );
+    let out = env.script("inventory.sh").output().unwrap();
+    assert!(out.status.success(), "{}", text(&out));
+    let inv = String::from_utf8_lossy(&out.stdout).into_owned();
+    let want = format!("hub\t111\t<user>\t-\t41807\t{DAY_ONE_STARTED}\t{FIRST_HUB_CMD}\n");
+    assert!(inv.contains(&want), "lstart not exact: {inv:?}");
+
+    let inv_file = env.file("inv.tsv", &inv);
+    let ledger = env.file("ledger.toml", &hub_ledger(DAY_ONE_STARTED, FIRST_HUB_CMD));
+    let out = collide(&env, &inv_file, |c| {
+        hub_and_serve_plan(c);
+        c.env("WIZARD_LEDGER", &ledger);
+    });
+    let s = text(&out);
+    assert_eq!(out.status.code(), Some(0), "own process refused: {s}");
+    assert!(s.contains("created by this instance"), "{s}");
+}
+
+fn own_serve_inventory(target: &str) -> String {
+    let t = "\t";
+    format!(
+        "hub{t}111{t}<user>{t}-{t}41807{t}{FIRST_HUB_STARTED}{t}{FIRST_HUB_CMD}\n\
+         serve{t}443{t}https://<hub-host>.example.ts.net (tailnet only){t}{target}\n"
+    )
+}
+
+fn run_serve_case(target: &str, ledger_cmd: &str) -> (Option<i32>, String) {
+    let env = Env::new();
+    let inv = env.file("inv.tsv", &own_serve_inventory(target));
+    let ledger = env.file("ledger.toml", &hub_ledger(FIRST_HUB_STARTED, ledger_cmd));
+    let out = collide(&env, &inv, |c| {
+        hub_and_serve_plan(c);
+        c.env("WIZARD_LEDGER", &ledger);
+    });
+    (out.status.code(), text(&out))
+}
+
+#[test]
+fn a_serve_to_our_own_hub_with_a_live_hub_row_is_present_not_touched() {
+    let (code, s) = run_serve_case("http://127.0.0.1:41807", FIRST_HUB_CMD);
+    assert_eq!(code, Some(0), "own serve refused: {s}");
+    assert!(!s.contains("REFUSED"), "{s}");
+    let line = s.lines().find(|l| l.contains("tailscale serve")).unwrap();
+    assert!(line.contains("present, not touched"), "{s}");
+}
+
+#[test]
+fn a_serve_without_a_live_hub_row_is_refused_as_before() {
+    let (code, s) = run_serve_case("http://127.0.0.1:41807", "/usr/bin/some-other-program");
+    assert_eq!(code, Some(1), "{s}");
+    assert!(s.contains("serve_https_port"), "{s}");
+}
+
+#[test]
+fn a_serve_to_another_target_is_refused_even_with_a_live_hub_row() {
+    let (code, s) = run_serve_case("http://127.0.0.1:41999", FIRST_HUB_CMD);
+    assert_eq!(code, Some(1), "{s}");
+    assert!(s.contains("serve_https_port"), "{s}");
+}
+
+#[test]
+fn inventory_carries_the_serve_target_of_each_serve_entry() {
+    let env = Env::new();
+    install_live_fakes(&env);
+    let out = env.script("inventory.sh").output().unwrap();
+    let s = String::from_utf8_lossy(&out.stdout).into_owned();
+    let line = s.lines().find(|l| l.starts_with("serve\t443\t")).unwrap();
+    assert!(line.ends_with("\thttp://127.0.0.1:41807"), "{line}");
+    let other = s.lines().find(|l| l.starts_with("serve\t8444\t")).unwrap();
+    assert!(other.ends_with("\t-"), "{other}");
+}
+
+#[test]
+fn a_body_row_carries_its_config_path_as_field_five() {
+    let env = Env::new();
+    quiet_fakes(&env);
+    env.fake(
+        "ps",
+        "echo '  333 <user> Sat Oct 10 09:00:02 2026 /usr/bin/holler body run --config /x/y.toml'",
+    );
+    let out = env.script("inventory.sh").output().unwrap();
+    let s = String::from_utf8_lossy(&out.stdout).into_owned();
+    let line = s.lines().find(|l| l.starts_with("body\t")).unwrap();
+    let fields: Vec<&str> = line.split('\t').collect();
+    assert_eq!(fields[4], "/x/y.toml", "{line}");
+}
+
+/// Links the named real tools into the fake bin directory and makes it the whole `PATH`.
+fn only_these_tools(env: &Env, names: &[&str]) -> String {
+    let real = std::env::var("PATH").unwrap_or_default();
+    for n in names {
+        let found = std::env::split_paths(&real)
+            .map(|d| d.join(n))
+            .find(|p| p.is_file())
+            .unwrap_or_else(|| panic!("no {n} on PATH"));
+        std::os::unix::fs::symlink(found, env.bin().join(n)).unwrap();
+    }
+    env.bin().display().to_string()
+}
+
+#[test]
+fn a_missing_tailscale_gives_a_warn_line_not_silence() {
+    let env = Env::new();
+    for n in ["ss", "lsof", "herdr", "ps"] {
+        env.fake(n, "exit 0");
+    }
+    let only = only_these_tools(&env, &["bash", "tr", "sed", "head"]);
+    let out = env
+        .script("inventory.sh")
+        .env("PATH", only)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", text(&out));
+    let s = String::from_utf8_lossy(&out.stdout).into_owned();
+    assert!(s.contains("warn\tmissing tool tailscale\n"), "{s}");
+    assert!(
+        !s.contains("missing tool herdr") && !s.contains("missing tool ps"),
+        "{s}"
+    );
+}
+
+#[test]
+fn collide_passes_an_inventory_warning_on() {
+    let env = Env::new();
+    let inv = env.file("inv.tsv", "warn\tmissing tool tailscale\n");
+    let out = collide(&env, &inv, distinct_plan);
+    let s = text(&out);
+    assert_eq!(out.status.code(), Some(0), "{s}");
+    assert!(s.contains("missing tool tailscale"), "{s}");
+}
+
+#[test]
+fn both_scripts_are_executable_in_git() {
+    let root = lib_dir();
+    let out = Command::new("git")
+        .current_dir(&root)
+        .args(["ls-files", "-s", "inventory.sh", "collide.sh"])
+        .output()
+        .unwrap();
+    let s = String::from_utf8_lossy(&out.stdout).into_owned();
+    assert_eq!(s.lines().count(), 2, "{s}");
+    assert!(s.lines().all(|l| l.starts_with("100755 ")), "{s}");
+    for n in ["inventory.sh", "collide.sh"] {
+        let mode = fs::metadata(root.join(n)).unwrap().permissions().mode();
+        assert_ne!(mode & 0o111, 0, "{n} is not executable");
+    }
+}
+
+fn run_default_dir_case(env: &Env, row: &str, plan_dir: &str) -> Output {
+    let inv = env.file("inv.tsv", &format!("{row}\n"));
+    let home = env.dir.path().join("home");
+    collide(env, &inv, |c| {
+        distinct_plan(c);
+        c.env("HOME", &home).env(
+            "WIZARD_STATE_DIR",
+            plan_dir.replace("<home>", home.to_str().unwrap()),
+        );
+    })
+}
+
+#[test]
+fn a_dash_state_dir_on_a_hub_or_body_row_is_the_default_state_directory() {
+    let t = "\t";
+    let hub = format!("hub{t}111{t}<user>{t}-{t}41807{t}{FIRST_HUB_STARTED}{t}{FIRST_HUB_CMD}");
+    let body = format!(
+        "body{t}333{t}<user>{t}-{t}/x/y.toml{t}{FIRST_HUB_STARTED}{t}/usr/bin/holler body run --config /x/y.toml"
+    );
+    for (row, dir) in [
+        (&hub, "<home>/.holler"),
+        (&body, "<home>/.holler"),
+        (&hub, "~/.holler"),
+    ] {
+        let env = Env::new();
+        let out = run_default_dir_case(&env, row, dir);
+        let s = text(&out);
+        assert_eq!(out.status.code(), Some(1), "{dir}: {s}");
+        assert!(s.contains("state_dir") && s.contains("REFUSED"), "{s}");
+    }
+}
+
+#[test]
+fn a_dash_state_dir_does_not_collide_with_a_distinct_plan_directory() {
+    let t = "\t";
+    let hub = format!("hub{t}111{t}<user>{t}-{t}41807{t}{FIRST_HUB_STARTED}{t}{FIRST_HUB_CMD}");
+    let env = Env::new();
+    let out = run_default_dir_case(&env, &hub, "<home>/.holler-second");
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out));
 }

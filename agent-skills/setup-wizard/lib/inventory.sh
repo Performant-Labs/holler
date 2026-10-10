@@ -5,13 +5,16 @@
 # `tailscale serve status` and `herdr session list`, and prints tab-separated lines:
 #   port<TAB><port><TAB><pid|-><TAB><process name|->
 #   hub<TAB><pid><TAB><user><TAB><state dir|-><TAB><port|-><TAB><started><TAB><cmd>
-#   body<TAB><pid><TAB><user><TAB><state dir|-><TAB><session|-><TAB><started><TAB><cmd>
+#   body<TAB><pid><TAB><user><TAB><state dir|-><TAB><--config path|-><TAB><started><TAB><cmd>
 #   opencode<TAB><pid><TAB><user><TAB><state dir|-><TAB><port|-><TAB><started><TAB><cmd>
 #   herdr<TAB><pid><TAB><user><TAB><state dir|-><TAB><session|-><TAB><started><TAB><cmd>
-#   serve<TAB><https port><TAB><text of the tailscale serve line>
+#   serve<TAB><https port><TAB><text of the tailscale serve line><TAB><proxy targets|->
 #   herdr-session<TAB><name>
-# `started` is the `ps` lstart text and `cmd` the command, the same values the wizard ledger
-# records, so collide.sh can tell wizard-created processes from foreign ones.
+#   warn<TAB>missing tool <name>      (a tool this script needs and cannot find on PATH)
+# `started` is the `LC_ALL=C ps -o lstart=` text exactly as ps prints it (the day of month is
+# padded with a space on days 1 to 9) and `cmd` the command, the same values the wizard ledger
+# records, so collide.sh can tell wizard-created processes from foreign ones. A body's session
+# is not on its command line, so a body row names its `--config` path instead.
 #
 # To run it on a remote host, pipe it over ssh: `ssh <remote-host> bash -s < inventory.sh`.
 # WIZARD_INVENTORY_FIXTURE=<file> replays a fixture instead (for tests).
@@ -24,11 +27,26 @@ fi
 
 T=$(printf '\t')
 
+# --- tools this script needs ---------------------------------------------------------------
+have() { command -v "$1" >/dev/null 2>&1; }
+have_ss=0; have_lsof=0; have_ps=0; have_tailscale=0; have_herdr=0
+have ss && have_ss=1
+have lsof && have_lsof=1
+have ps && have_ps=1
+have tailscale && have_tailscale=1
+have herdr && have_herdr=1
+[ "$have_ss" = 1 ] || [ "$have_lsof" = 1 ] || printf 'warn\tmissing tool ss\n'
+[ "$have_ps" = 1 ] || printf 'warn\tmissing tool ps\n'
+[ "$have_tailscale" = 1 ] || printf 'warn\tmissing tool tailscale\n'
+[ "$have_herdr" = 1 ] || printf 'warn\tmissing tool herdr\n'
+
 # --- listening TCP ports ------------------------------------------------------------------
-ports=$(ss -ltnpH 2>/dev/null)
+ports=""
+[ "$have_ss" = 1 ] && ports=$(ss -ltnpH 2>/dev/null)
 if [ -z "$ports" ]; then
   ports=""
-  lsof_out=$(lsof -nP -iTCP -sTCP:LISTEN 2>/dev/null)
+  lsof_out=""
+  [ "$have_lsof" = 1 ] && lsof_out=$(lsof -nP -iTCP -sTCP:LISTEN 2>/dev/null)
   if [ -n "$lsof_out" ]; then
     echo "$lsof_out" | while read -r name pid _user _fd _type _dev _size _node addr _rest; do
       [ "$name" = "COMMAND" ] && continue
@@ -80,10 +98,13 @@ flag_of() {
   printf -- '-'
 }
 
-LC_ALL=C ps -eo pid=,user=,lstart=,command= 2>/dev/null |
-  while read -r pid user d1 d2 d3 d4 d5 cmd; do
+# `read` keeps the inner spacing of the last field, and lstart is 24 characters in the C locale
+# ("Tue Oct  6 22:12:17 2026"), so started and cmd are cut by position, not split on blanks.
+[ "$have_ps" = 1 ] && LC_ALL=C ps -eo pid=,user=,lstart=,command= 2>/dev/null |
+  while read -r pid user rest; do
+    started=${rest:0:24}
+    cmd=${rest:25}
     [ -n "$cmd" ] || continue
-    started="$d1 $d2 $d3 $d4 $d5"
     first=${cmd%% *}
     rest=${cmd#"$first"}
     rest=${rest# }
@@ -103,7 +124,8 @@ LC_ALL=C ps -eo pid=,user=,lstart=,command= 2>/dev/null |
         listen=$(flag_of "$cmd" --listen)
         key=${listen##*:}
         ;;
-      body | herdr) key=$(flag_of "$cmd" --session) ;;
+      body) key=$(flag_of "$cmd" --config) ;;
+      herdr) key=$(flag_of "$cmd" --session) ;;
       opencode) key=$(flag_of "$cmd" --port) ;;
     esac
     case "$key" in '' | "$listen") key=- ;; esac
@@ -111,19 +133,37 @@ LC_ALL=C ps -eo pid=,user=,lstart=,command= 2>/dev/null |
   done
 
 # --- tailscale serve -----------------------------------------------------------------------
-tailscale serve status 2>/dev/null | while IFS= read -r line; do
-  case "$line" in
-    https://*)
-      host=${line%% *}
-      port=443
-      case "${host#https://}" in *:[0-9]*) port=${host##*:} ;; esac
-      printf 'serve\t%s\t%s\n' "$port" "$line"
-      ;;
-  esac
-done
+# One row per https entry; its proxy targets (the `|-- / proxy <url>` lines under it) are the
+# last field, space-separated, or "-".
+if [ "$have_tailscale" = 1 ]; then
+  tailscale serve status 2>/dev/null | {
+    sp="" sl="" st=""
+    flush_serve() {
+      [ -n "$sp" ] && printf 'serve\t%s\t%s\t%s\n' "$sp" "$sl" "${st:--}"
+      sp="" sl="" st=""
+    }
+    while IFS= read -r line; do
+      case "$line" in
+        https://*)
+          flush_serve
+          host=${line%% *}
+          sp=443
+          case "${host#https://}" in *:[0-9]*) sp=${host##*:} ;; esac
+          sl=$line
+          ;;
+        *proxy\ *)
+          [ -n "$sp" ] && st="${st:+$st }${line##*proxy }"
+          ;;
+      esac
+    done
+    flush_serve
+  }
+fi
 
 # --- herdr sessions ------------------------------------------------------------------------
-herdr session list 2>/dev/null | while read -r name _rest; do
-  [ -n "$name" ] && printf 'herdr-session\t%s\n' "$name"
-done
+if [ "$have_herdr" = 1 ]; then
+  herdr session list 2>/dev/null | while read -r name _rest; do
+    [ -n "$name" ] && printf 'herdr-session\t%s\n' "$name"
+  done
+fi
 exit 0
