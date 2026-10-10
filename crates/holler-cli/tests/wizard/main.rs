@@ -9,4 +9,5 @@ mod instance;
 mod ownership;
 mod preflight;
 mod proof;
+mod skilltext;
 mod start;
