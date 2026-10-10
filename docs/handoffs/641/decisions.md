@@ -105,3 +105,23 @@
   - Probes: two scripts (Q1 to Q6) on private relative-socket servers in the session scratchpad, with `TMUX` and `TMUX_PANE` unset, run through `/bin/sh`.
     - Signals: one TERM and one KILL, both to the probe's own pane group; every other `kill` call used signal 0.
     - Each script killed its server and removed its directory, and a process check afterwards found none left.
+
+## T (Phase 4, author / RED) — 2026-10-09T18:30:07-06:00
+- **Decided:** RED is valid. I authored 37 tests: 28 default-run tests in `tests/fake_tmux_test.rs`, with the fakes in `tests/common/mod.rs`, and 9 `#[ignore]` real-tmux tests in `tests/real_tmux_test.rs`. All 25 default-run behaviour tests and all 9 real-tmux tests fail on `NotImplemented`. Three tests pass at RED by design: two absence guards (AC 7, AC 9) and the AC 6f re-exec helper. Following the brief's Test plan, I landed a `src/lib.rs` stub with Decision 1's signatures and no logic, plus the `Cargo.toml` deps, so that no failure is a compile error.
+  - **W-18 applied** (A round 4, Notes for O item 1). I added an AC 6h test, `a_session_that_ends_on_term_still_has_its_group_checked`, in which a poll answers `can't find session` after the TERM. The pinned rule: Decision 8's `Ok` applies to `stop_owned`'s first listing only. A poll that answers "missing" lists no pane, and each group is done only once `kill -s 0` reports `No such process`. Decision 15 and the #644 row are prose for the brief, not tests, so they are left to O and S.
+  - **W-19 applied.** The fakes answer in a third mode, keyed on `"$*"` and on the kill record (`killed '<line>'`), so no poll count is ever assumed. AC 6a's reaped-pid check uses `kill -s 0` through the `kill` binary, never `/proc`.
+  - **W-20 applied.** AC 9's grep is scoped to `tests/real_tmux_test.rs`. Every fake-side host is built by `common::host_on`, which always sets both fake binaries. A default-run guard pins that `TmuxHost::new` appears once on the fake side and once in the real file, and that the real file names neither `TmuxSocket::Default` nor `TmuxSocket::Name`.
+  - Shared fake helpers went to `tests/common/mod.rs`, opening with `#![allow(dead_code)] // #641`. This is the brief's W-17 fallback, taken up front: one file would have been ~1,050 lines, over the 900-line gate.
+- **Assumed:**
+  - AC 6c's missing-session list includes `Connection refused` because Decision 8 names it, although AC 6c's own list omits it.
+  - `ps` lists only live panes (`pane_dead` 0), per Decision 5's "every live pane". A default-run test pins it.
+  - `Unavailable.what` holds the first stderr line verbatim. The tests check `contains`, not equality.
+- **Hedged:**
+  - AC 6e lets any subcommand other than `has-session`, `new-session` and `set-option` carry only `-t =demo-c1r1:`. It does not fail on extra calls, so F is not over-constrained beyond Decision 10.
+  - AC 6h's first bullet pins that a KILL is present, not that there is exactly one. The W-14 and W-18 bullets do pin exactly one, as the brief words them.
+  - The fake scripts are warmed up once, unrecorded, with a bounded retry on `ETXTBSY`. A script written while a parallel test forks can be briefly unexecutable, and the adapter would report that as `Unavailable`. This repo has a history of flaky tests, so I closed that window.
+- **Evidence:**
+  - `cargo test -p holler-adapter-host`: 3 passed, 25 failed, every failure `NotImplemented`.
+  - `cargo test -p holler-adapter-host --test real_tmux_test -- --ignored` on tmux 3.7c: 0 passed, 9 failed, all on `NotImplemented`. No `/tmp/hlr-tmux-*` dir was left.
+  - Clean on the four new files: `cargo clippy -p holler-adapter-host --all-targets -- -D warnings`, `rustfmt --check --edition 2021`, `bash scripts/lint.sh` (exit 0) and `cargo machete`.
+  - A throwaway test, deleted and never staged, drove both fake scripts by hand and confirmed the record, queue, `SAY_DIR`, kill-record keying and `LC_ALL` capture. The handoff is `docs/handoffs/641/handoff-T-red.md`.
