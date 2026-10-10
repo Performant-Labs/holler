@@ -245,3 +245,51 @@
     - a scratch Rust program over all 65 control characters: `escape_default` and `escape_debug` differ on NUL only;
     - `cargo clippy -p holler-pane -p holler-cli --all-targets -- -D warnings` is clean; `bash scripts/lint.sh` exits 0;
     - #644's pre-flight grep matches 3 lines.
+
+## S (spec audit) — 2026-10-09T18:53-06:00
+
+- **Decided:** PASS (handoff-S.md).
+  - The preconditions hold: A round 2 is PASS, A-dup is PASS, and T shows a valid RED and GREEN with no blocking issue.
+  - Every 662a criterion has a proving test or a re-run check: AC 1a-c, 2a-h, 3, 4a-c, 5a-g, 8, 9, 10 and 11-15.
+    AC 6 and 7, and the (b) halves, are 662b.
+  - The spec decisions are implemented as stated. The one difference in form is journaled: `SpecField` serializes
+    through `as_str`, not 15 renames (A warn 1), and the JSON is identical.
+  - The scope is exact: F changed the seven files of the 662a row, and T the seven of its Files (T) list. No frozen
+    file changed.
+  - **Must be done before merge, by the run's agent:** the Workflow script opens the PR with the title
+    `Implements #662` and the body `Closes #662.` (`coding-pipeline.workflow.mjs:4822`). The brief requires
+    `Part of #662`. After the PR opens, edit its body, add the AI disclosure (CONTRIBUTING.md), and give it a
+    Conventional Commit title.
+  - Advisory only:
+    - CI confirms the 4 environmental `logging_test` failures;
+    - the rebase onto #647 resolves ADR-0021 by keeping both deletions and CHANGELOG by keeping both entries;
+    - `list`'s own sort is not pinned by a test;
+    - `SpecField::ALL` has no completeness guard;
+    - AC 2c uses a sparse pane in place of the 1a pane;
+    - one test asserts `tests/common`'s `/work/holler`;
+    - no commit has a session link.
+- **Assumed:**
+  - T's recorded Tier 1 and Tier 2 output is accurate. S did not re-run cargo, per the role doc. It re-ran only
+    read-only greps, `wc` and git checks, and every one agreed with T's records.
+  - The 4 `logging_test` failures are environmental, not this diff's. `logging_test.rs` never names a profile verb, its
+    4 failing cases all run `holler roster`, and they failed the same way at RED.
+- **Hedged:**
+  - The PR item is not a REWORK. F cannot change the script's PR body, and the PR is not open yet. The repo CLAUDE.md
+    already has the run's agent edit the PR body after the script opens it.
+  - The unpinned sort is advisory: AC 4a's observable output (sorted by slug) is pinned, and pinning the verb's own
+    sort needs a nine-method wrapper store.
+- **Evidence:**
+  - **Read:** the brief in full; every handoff in `docs/handoffs/662/`, plus `evidence.md` and this journal; both
+    outside-model results and their `usage.json` files; the issue body (`gh issue view 662`; last updated 2026-10-08
+    18:56 MDT).
+  - **Read, the diff:** the four production files, the five test files and the rig in full, and the docs, fixture and
+    `stub.rs` diffs.
+  - **Read, for context:** `output.rs` (`emit_json`, `write_envelope`), `tests/common/mod.rs`, `CONTRIBUTING.md`,
+    pipeline conventions §1, and the script's PR call.
+  - **Greps and checks:**
+    - AC 2e, 3, 8, 10 and 13, plus #644's signature pins;
+    - production `unwrap`, `expect` and `panic`; `#[allow]`s; `wc -l` on the touched files;
+    - privacy patterns over the added lines; `git check-ignore` on the review-model sidecars;
+    - the ADR-0003 column; the CHANGELOG headings; sleeps in the new tests;
+    - the files per phase commit; the commit-msg hook on two subjects;
+    - no PR open yet for the branch (`gh pr list --head`); PR #701 still open.
