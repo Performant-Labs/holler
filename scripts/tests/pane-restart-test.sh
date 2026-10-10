@@ -65,7 +65,7 @@ cat > "$bin/pfo" <<'EOF'
 #!/usr/bin/env bash
 echo "$*" >> "$FAKE/pfo.log"
 pane=$2
-if [ "${3:-}" = "--set-registration" ]; then [ -e "$FAKE/no_fix" ] || echo "$4" > "$FAKE/registered"; echo "registered jupiter-hj-$pane/oc at $4"; exit 0; fi
+if [ "${3:-}" = "--set-registration" ]; then [ -e "$FAKE/no_fix" ] || [ -e "$FAKE/needs_body_restart" ] || echo "$4" > "$FAKE/registered"; echo "registered jupiter-hj-$pane/oc at $4"; exit 0; fi
 if [ "$(cat "$FAKE/registered" 2>/dev/null)" = ses_new ]; then echo "jupiter-hj-$pane/oc: ok"; else echo "jupiter-hj-$pane/oc: 1 finding(s)"; echo "  drift  registered ses_old, the hub drives ses_new"; exit 1; fi
 EOF
 cat > "$bin/pane-ready" <<'EOF'
@@ -310,6 +310,17 @@ mo_case; : > "$FAKE/wrong_model"
 run c4r2 "${mo_args[@]}"
 check "MO still answering on the old model fails at step 8 and names both backups" \
   bash -c "[ '$(rc)' = 2 ] && grep -q '^c4r2: FAIL step 8 (model)' '$FAKE/out' && grep -q \"MO's config was changed, backup: .*opencode.json.bak-pre-restart-.* and .*mo.md.bak-pre-restart-\" '$FAKE/out'"
+
+mo_case; : > "$FAKE/needs_body_restart"
+printf 'import os,sys\nopen(os.environ["FAKE"]+"/registered","w").write(sys.argv[2])\nopen(os.environ["FAKE"]+"/helper.log","w").write(" ".join(sys.argv[1:]))\n' > "$FAKE/helper.py"
+PANE_RESTART_BODY_HELPER="$FAKE/helper.py" run c4r2 "${mo_args[@]}"
+check "MO whose body still drives the old session is fixed by the body restart helper" \
+  bash -c "[ '$(rc)' = 0 ] && grep -qx 'jupiter-hj-c4r2/mo ses_new' '$FAKE/helper.log'"
+
+mo_case; : > "$FAKE/needs_body_restart"
+run c4r2 "${mo_args[@]}"
+check "MO with no working helper fails at step 7 and names the helper" \
+  bash -c "[ '$(rc)' = 2 ] && grep -q '^c4r2: FAIL step 7 (registration).*body restart helper' '$FAKE/out'"
 
 # --dry-run ---------------------------------------------------------------------------------------
 new_case c3r1

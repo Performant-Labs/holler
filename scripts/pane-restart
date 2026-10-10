@@ -214,7 +214,17 @@ last=$(cat "$state/last-session")
 # The fix is the one pane-ready names: write the registration for the new session.
 if ! doctor_ok; then
   pfo doctor "$doctor_name" --set-registration "$last" >/dev/null 2>&1
-  wait_for 10 doctor_ok || fail_step 7 registration "pfo doctor is still not ok after: pfo doctor $doctor_name --set-registration $last"
+  if [ "$mo" = 1 ] && ! wait_for 10 doctor_ok; then
+    # MO's hub body is a detached process still attached to the old session, and pfo refuses to restart the orchestrator's own
+    # body. The reset ladder's helper does it: record the session, rebind the body, wait for the hub to show it.
+    helper=${PANE_RESTART_BODY_HELPER:-$HOME/fleet-agents/cutover/o-restart-body.py}
+    o_env=${PANE_RESTART_O_ENV:-$HOME/fleet-agents/cutover/o-env.sh}
+    if [ -f "$helper" ]; then
+      # shellcheck disable=SC1090  # the instance env file is on Jupiter only
+      ( set -a; [ -f "$o_env" ] && . "$o_env"; set +a; python3 "$helper" "$doctor_name" "$last" >/dev/null 2>&1 )
+    fi
+  fi
+  wait_for 10 doctor_ok || fail_step 7 registration "pfo doctor is still not ok after: pfo doctor $doctor_name --set-registration $last${mo:+ (MO: and the body restart helper)}"
 fi
 sid=$(cat "$state/last-session")
 
