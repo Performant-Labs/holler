@@ -10,8 +10,8 @@ jobs:
           /bin/bash -c 'exec -a "herdr --session x server 900" sleep 5' &
           sleep 1
           echo "--- ps -ww -eo (grep herdr)"
-          ps -ww -eo pid=,user=,lstart=,command= | grep -v grep | grep "herdr" | cat -A | head
+          ps -ww -eo pid=,user=,lstart=,command= | grep -v grep | grep "herdr"
           echo "--- ps -p"
-          ps -ww -o pid=,user=,lstart=,command= -p $! | cat -A
+          ps -ww -o pid=,user=,lstart=,command= -p $!
           echo "--- ps -p comma"
-          ps -ww -o pid=,user=,lstart=,command= -p $!,$$ | cat -A
+          ps -ww -o pid=,user=,lstart=,command= -p $!,$$
