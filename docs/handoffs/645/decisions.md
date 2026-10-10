@@ -559,3 +559,30 @@
   - Self-check mutations, each restored: mapping the select's error with `?` instead of `acted` fails AC 8 and AC 18,
     and doing the same for `observe` fails AC 7 and AC 19.
   - `check_evidence.py`: 27 entries, 46 blocks, 0 mismatches.
+
+## T, Phase 7 (GREEN), round 5, after F's r4-gate rework — 2026-10-10T00:58-06:00
+
+- **Decided:**
+  - Added one test, `switch_observation_failure_names_the_reconcile_step` (`pane_verbs/switch.rs:433-467`), for F's
+    coverage note and the r4 gate's NV-2: `shown_session` errs (`Timeout`) after a good select, so the run fails `timeout`
+    with the reconcile step, records nothing, and the TUI shows the target. No reset twin: `created` comes from the same
+    `acted` closure, and AC 19 already pins it on the observation's path.
+  - Verdict **BLOCK**: the suite is GREEN, but `origin/main` moved to `bd5e825` (#642 part 2, 00:50 MDT) and the branch no
+    longer merges (`docs/adr/ADR-0021.md`, "Deferred to named stories"). S's round-1 REWORK set the precedent that AC 24
+    and AC 25 are judged on the tree that will land, and that F resolves the merge. Blocking here saves an S round.
+- **Assumed:**
+  - The PR merges into `origin/main` as fetched at 00:52 MDT (`bd5e825`).
+  - #642 part 2's `holler-pane` edits are doc comments only (read in `git diff HEAD...origin/main -- crates/holler-pane`),
+    so the merge needs no code or test change here.
+- **Hedged:**
+  - `evidence.md`'s `ports.rs` citations may shift after the merge (#642 part 2 edited `ports.rs:13-15` and `:174-175`);
+    F re-checks them.
+- **Evidence:**
+  - With `CARGO_BUILD_JOBS=4`: `pane_verbs` 162 (`switch::`/`reset::` 22), `pane_cli_process` 35, `cli_surface_test` 3,
+    `docs_cli_test` 3, `wire_selftest` 3. Workspace in CI's form 00:53-00:57 MDT: exit 0, 137 lines, 1664 passed, 0
+    failed, 16 ignored. Clippy `-D warnings`, `lint.sh`, `changelog-check.sh`, rustfmt on the story files, `cargo machete`:
+    all clean.
+  - Mutations, each restored: `observe(..)?` fails AC 7, AC 19 and the new test; `select_session(..)?` fails AC 8 and
+    AC 18.
+  - `git merge-tree --write-tree HEAD origin/main`: exit 1, `CONFLICT (content): Merge conflict in docs/adr/ADR-0021.md`.
+    Against `origin/main`, the ADR-0021 diff has 5 hunks and the Cargo diff is 26 lines.

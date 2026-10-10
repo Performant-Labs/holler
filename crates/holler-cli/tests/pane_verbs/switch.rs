@@ -430,6 +430,42 @@ fn switch_select_failure_names_the_reconcile_step() {
     cases.iter().for_each(Case::assert_unchanged);
 }
 
+/// ACs 7 and 8: the select moved the TUI, then reading what it shows failed (an error, not a
+/// mismatch). The record is untouched, and the message names the reconcile step.
+#[test]
+fn switch_observation_failure_names_the_reconcile_step() {
+    let build = || {
+        let (rig, s2) = one_pane();
+        let op = "harness.shown_session".to_owned();
+        let timeout = PaneError::Timeout { op };
+        rig.harness
+            .faults()
+            .fail_next(HarnessOp::ShownSession, timeout);
+        (rig, s2)
+    };
+    let cases = both(build, switch_p(&[]));
+    for message in failed(&cases, 1, "timeout") {
+        assert!(message.ends_with(RECONCILE_P), "{message:?}");
+    }
+    for case in &cases {
+        let label = format!("{:?}", case.format);
+        assert_eq!(case.record(P), *case.before(P), "{label}: no record write");
+        assert!(!case.calls.panes.contains(&PaneStoreOp::CasPut), "{label}");
+        let ops = [
+            H::Health,
+            H::ListSessions,
+            H::SelectSession,
+            H::ShownSession,
+        ];
+        assert_eq!(case.calls.harness, ops, "{label}");
+        assert_eq!(
+            case.shown(P).as_deref(),
+            Some(case.setup.as_str()),
+            "{label}: the act moved the TUI"
+        );
+    }
+}
+
 /// A harness whose `select_session` first lets another writer store `other` (P's record,
 /// changed), then delegates to the rig's fake: the record write after the act meets a
 /// newer generation.
