@@ -164,6 +164,21 @@ fills this file in at release time.
   refused for that reason. Test code only: nothing a user runs changes
   ([#688](https://github.com/Performant-Labs/holler/issues/688)).
 
+- Pane control, the reconcile engine and `holler pane doctor [PANE] [--fix] [--profile NAME]` (epic
+  [#633](https://github.com/Performant-Labs/holler/issues/633)): a pass looks at each pane's Herdr pane, tmux session,
+  harness server and sessions, and the session its TUI shows, compares them with the pane's record and reports what
+  differs as typed findings with stable codes: a TUI on another session than the session of record, a wedged or dead
+  server, a missing tmux session or Herdr pane, a session of record that is missing or not set, a harness the record does
+  not know in the pane, a stray session, an unregistered Herdr pane, an unsupported Herdr, and a check that could not
+  run. Each finding names the holler command to run, or says why there is none. `--fix` repairs only what the record
+  decides: it switches the TUI back to the session of record when the pane's server is healthy and has it (the
+  orchestrator's pane only when named), and never changes the session of record, starts, attaches or deletes anything,
+  or types into a pane. Every pass records what it observed in `last_observed` and `harness.health`, writing a record
+  only when that changed, and exits 0 with or without findings, so a script reads `data.findings`. Positions print as
+  `r2c1`. There is no hub timer: a scheduler runs `holler pane doctor --format=json` ([ADR 0021](docs/adr/ADR-0021.md)
+  section 12). The verb runs on the ports, which are wired to the real hub, Herdr, tmux and OpenCode by #649, so until
+  then it answers `not-implemented` outside the tests ([#647](https://github.com/Performant-Labs/holler/issues/647)).
+
 ## [0.4.0] - 2026-09-29
 
 ### Enhancements
