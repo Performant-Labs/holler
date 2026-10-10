@@ -136,6 +136,15 @@ fills this file in at release time.
   protocol version (22; any other is `herdr-version-unsupported`). No I/O yet: the socket adapter follows in part 2,
   so nothing a user runs changes ([#640](https://github.com/Performant-Labs/holler/issues/640)).
 
+- Herdr adapter, part 2 (epic [#633](https://github.com/Performant-Labs/holler/issues/633)): `holler-adapter-herdr`
+  now implements `HerdrPort` over Herdr's local socket, one request per connection with one deadline per call (10 s by
+  default; `timeout` when it runs out, `unavailable` for a missing socket or a garbled or oversized reply). It refuses a
+  Herdr protocol other than 22 when it connects. It places a pane only by the splits the planner decides, reads the
+  tree back to confirm it landed in the cell asked for, and creates a configured workspace that Herdr lacks only for
+  `r1c1`. It passes the `HerdrPort` conformance suite against a simulated Herdr in the default test run. Nothing is
+  wired into a verb yet ([#649](https://github.com/Performant-Labs/holler/issues/649)), so nothing a user runs
+  changes ([#640](https://github.com/Performant-Labs/holler/issues/640)).
+
 - Pane control, the hub's profile registry (epic [#633](https://github.com/Performant-Labs/holler/issues/633)):
   `profile/get`, `profile/list`, `profile/cas_put`, `profile/delete`, `profile/watch` and `profile/log` now answer from
   a real registry instead of `not-implemented`. Profiles are kept in `<state dir>/hub/profiles.json` (mode `0600`,
@@ -163,6 +172,23 @@ fills this file in at release time.
   refuses to set a spec for a pane of another profile before anything is written, and that removing a spec is never
   refused for that reason. Test code only: nothing a user runs changes
   ([#688](https://github.com/Performant-Labs/holler/issues/688)).
+
+- Pane control, the read verbs (epic [#633](https://github.com/Performant-Labs/holler/issues/633)): `holler pane list`,
+  `holler pane get` and `holler pane watch` now read the pane registry instead of answering `not implemented (story
+  #643)`. `list` prints one row per pane, sorted by name: PANE, POS (the grid cell, row first: `r2c1`), PROFILE,
+  PROJECT, HEALTH, SHOWN (the session the pane's TUI shows), DRIVEN (the session the hub drives), SYNC and HOLD. SYNC
+  reads `MISMATCH` when the pane's TUI shows another session than its session of record, or its home screen: the rule
+  `holler pane doctor` uses. `get PANE` prints one pane in full, one `key: value` line per field: the record with its
+  model, environment variable names, context ceilings, launch command and health probe with its last result, plus its
+  profile's spec for it. `watch` follows the change feed, from the current state or from `--since CURSOR`, one line
+  per change, and `--until-idle` stops it once nothing more is owed. Each verb takes a pane name and `--profile NAME`
+  to scope itself; a named pane outside the profile is refused with `pane-not-in-profile` (exit 3). Under
+  `--format=json` each answers in the shared envelope, and `watch` prints NDJSON, one envelope per line. The verbs
+  observe nothing themselves: SHOWN and health are what reconcile last recorded, and DRIVEN is printed as the record
+  holds it, which is empty until the hub wiring (#649) records it. In text mode a stored value is quoted and escaped
+  when it could act on the terminal, so it cannot put a control sequence or a line break on the screen. Until the hub
+  client is wired (#649), the installed binary still answers `not implemented`
+  ([#643](https://github.com/Performant-Labs/holler/issues/643)).
 
 - Pane control, the reconcile engine and `holler pane doctor [PANE] [--fix] [--profile NAME]` (epic
   [#633](https://github.com/Performant-Labs/holler/issues/633)): a pass looks at each pane's Herdr pane, tmux session,
@@ -208,6 +234,33 @@ fills this file in at release time.
   `--format=json`, and [ADR 0021](docs/adr/ADR-0021.md) adds `profile-conflict` to their codes. Until the hub's stores
   are wired into the binary ([#649](https://github.com/Performant-Labs/holler/issues/649)), the real
   `holler profile create` and `delete` answer `not-implemented` ([#662](https://github.com/Performant-Labs/holler/issues/662)).
+- OpenCode adapter, part 1: the server side (epic [#633](https://github.com/Performant-Labs/holler/issues/633)):
+  `holler-adapter-opencode` now implements the server half of `HarnessPort` over OpenCode's HTTP API, on `127.0.0.1`
+  only. `serve` starts `opencode serve` for a pane in its project directory, in a process group of its own, and sends
+  nothing but health checks until the server first answers healthy; it never takes over a server that already answers
+  on the port, and returns the new server's pid. `health` is a timed check that answers false, and never hangs, when the
+  server is down or frozen. `create_session` titles each new session with its own id, `list_sessions` leaves out child
+  (subagent) sessions, and `abort` checks that the session exists first, because raw OpenCode acknowledges an abort of
+  an id it does not know. Every call has a deadline (10 s by default) and answers `timeout` when a frozen server holds
+  it, and a reply that is not the JSON a step needs, such as the web page OpenCode serves for a route it does not know,
+  is `unavailable`. Attaching, switching and reading a pane's TUI answer `not-implemented` until part 2, which also
+  brings the opt-in tests against a real OpenCode. Nothing a user runs changes yet: #649 wires the adapter in
+  ([#642](https://github.com/Performant-Labs/holler/issues/642)).
+
+- Host adapter (epic [#633](https://github.com/Performant-Labs/holler/issues/633)): `holler-adapter-host` now
+  implements `HostPort` over a local tmux server. Its `TmuxHost` creates a pane's tmux session, starts a command in
+  the session as a new detached window and returns once tmux reports the new process (nothing is typed into a shell
+  and nothing waits on a sleep), lists the session's processes, and stops only the processes it started: each
+  window it starts is tagged with its process id, and a stop sends `TERM` to the process group of every tagged
+  window, waits a grace, then sends `KILL` to any group that still has a member. Nothing is matched by name, and the
+  session's own shell is never signalled. A command is always an argument vector that never goes through a shell;
+  an argument tmux would read as a command separator, and a directory tmux would expand, are escaped. A session is
+  always named exactly, so a pane never reaches another whose name it prefixes. Every call ends within its bound
+  (10 s by default) or with `timeout`; a missing session is `pane-not-found` for `run` and `ps` and `Ok` for
+  `stop_owned`; a directory that is relative or does not exist is refused instead of letting tmux start the session,
+  or a command, somewhere else. The tests that need a real tmux are opt-in (`--ignored`) and each runs its own private
+  tmux server. Not wired into the CLI yet (#649), so nothing a user runs changes
+  ([#641](https://github.com/Performant-Labs/holler/issues/641)).
 
 ## [0.4.0] - 2026-09-29
 

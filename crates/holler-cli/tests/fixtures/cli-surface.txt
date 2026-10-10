@@ -103,11 +103,13 @@ body detach | --debug none
 
 # #643
 pane list |
+pane list | demo-c1r1
 pane list | --profile demo
 pane list | --format=json
-pane get |
-pane get | --profile demo --format json
+pane get | demo-c1r1
+pane get | demo-c1r1 --profile demo --format json
 pane watch |
+pane watch | demo-c1r1 --since 7 --until-idle
 pane watch | --profile demo --json
 
 # #644
