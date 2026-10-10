@@ -163,3 +163,49 @@
   - `git log ce12cdb..origin/main` (adapter-only), and `gh issue list` (no follow-up issue for the rig or the scope helper
     yet).
   - The outside diff review `646-diff-result-r1.md`, which raised no duplication.
+
+## S (Phase 10, spec audit): 2026-10-09T21:45:00-06:00
+- **Decided:** PASS (`docs/handoffs/646/handoff-S.md`).
+  - The A and T preconditions are met. A and A-dup passed with no block. T-red shows 10 RED failures on assertions.
+    T-green shows 103 of 103, and 12 of 12 mutations caught.
+  - Every one of AC 1-13 has a proving test or check that tells the stub from the verb.
+  - Decisions 1-13 are built as stated. The one structural variance is Decision 9: the shared `pub(super)` entry is
+    `run_hold_change`, which wraps the private engine and the renderer, with the same behaviour.
+  - The quality audit is clean:
+    - no `unwrap`, `expect`, `panic` or `#[allow]`;
+    - every file under 600 lines;
+    - no manifest change against the merge base;
+    - no protocol change;
+    - privacy: the grep and gitleaks are clean.
+  - Six advisories go to O. The main ones:
+    - (1) `CHANGELOG.md` conflicts with `origin/main` (additive; keep both). Rebase before the PR merges.
+    - (2) #643 merged at 20:38 MDT, so `pane list`, `get` and `watch` now display the hold. That makes
+      "Nothing reads the hold yet" in `park.rs:40` and in the CHANGELOG stale; reword both when resolving the
+      conflict.
+    - (3) The PR must say "Part of #646", with no closing keyword.
+- **Assumed:**
+  - The live issue text and its GraphQL edit history are authoritative. The last edit was 03:30 MDT, before the brief
+    (19:26 MDT), with no comments, so no amendment is missing from the brief.
+  - I relied on T's recorded Tier 1 and Tier 2 results and did not re-run them, per S's role. Only handoff files
+    changed after T-green (`git show --stat 2098f7e`).
+- **Hedged:**
+  - The ADR-0021 wording gaps (A warns 2 and 3) could have been an ADVISORY-HOLD. I did not choose that:
+    - the pinned paragraph is accurate as written;
+    - section 8's reconcile-step rule is about a conflict after a live change;
+    - both A reviews graded the gaps a warn;
+    - a follow-up (646b's brief edits ADR-0021) is the fix.
+  - The stale "nothing reads the hold" wording is advisory, not REWORK. It is true at the brief's base and matches
+    Decision 10. It became stale only through upstream drift, which the rebase resolves.
+- **Evidence:**
+  - Read in full: the brief; the six handoffs; `park.rs`, `unpark.rs`, `park.rs` (tests), `park/rig.rs`,
+    `park/failures.rs`, `unpark.rs` (tests); the ADR 0003, ADR-0021, CHANGELOG, fixture and `stub.rs` diffs; ADR-0021
+    sections 3, 4, 8 and 12; `CONTRIBUTING.md`.
+  - Read-only checks:
+    - the ADR 0003 column check (77, 67, 67);
+    - the AC 12 grep (`1`) and a `cmp` of the paragraph with Decision 12 (identical);
+    - `git diff --stat ce12cdb..HEAD -- '*Cargo.toml' '*Cargo.lock'` (empty);
+    - the guard and size greps and `wc -l`;
+    - the privacy grep, and `gitleaks git --log-opts=ce12cdb..HEAD` (no leaks);
+    - `git merge-tree --write-tree origin/main HEAD` (CHANGELOG conflict only);
+    - `gh pr list --head issue-646-implementation` (none);
+    - #643's `list.rs` and `get.rs` hold rendering on `origin/main`.
