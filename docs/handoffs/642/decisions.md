@@ -152,3 +152,39 @@
 - **Assumed:** The estimate is a bytes/4 heuristic and DeepSeek's context is far larger than 64K, so a 64093-token prompt is reviewed fully, not silently truncated; the complete 3255-token review with specific findings supports that.
 - **Hedged:** This waives the ceiling for this one prompt only. The anti-duplication gate and the spec audit still run on the full diff.
 - **Evidence:** the refusal text (`ceiling: 64000 tokens`, `estimated tokens: ~64093`); the rerun's `usage.json`.
+
+## A (Phase 7, anti-duplication gate) — 2026-10-09T23:58:27-06:00
+- **Decided:** PASS on the diff `dc300ab..ff48da5`, with 0 blocks and 3 warns (see handoff-A-dup.md).
+  - F extended every object the Reuse map named:
+    - `known` through `session_reply`, so its rules are written once;
+    - `call` through `call_until`, with no `call` after the tmux query;
+    - `settled`'s loop, now the one `poll` shared with the TUI watch, with the one `SETTLE_POLL`;
+    - `exec::run`, which shares `wait` with the new `capture`.
+  - `classify` is in `tui.rs`. The only tmux `Command::new` is in `tui::tmux_command`, and every `-t` comes from
+    `exact_target`.
+  - W-1: #708 on `main` fixed the refused-port flake with a held-connection `closed_port`, and AC 31's `on_refused_port`
+    fixes the same flake. The rebase must leave one public helper.
+  - W-2: #696 has no comments. Record the three runners (the host's, this crate's `capture`, and #663's `run_bounded`),
+    the two tmux mirrors and the two fake record formats there.
+  - W-3: the real rig's raw `tmux()` is rightly independent of `tui::tmux_command`, but say so in a comment.
+- **Assumed:**
+  - The brief's written justifications ("Mirrored, not shared"; "New, justified") make the mirrors of #641 and the new
+    objects deliberate, reviewed decisions. Per the role, that is a PASS, not drift.
+  - #663's `run_bounded` is no extension point for this crate. It is private and probe-specific, and AC 22 bars
+    `holler-pane` code changes.
+- **Hedged:**
+  - W-1 is a warn, not a block. Against the merge base there is one helper, in the file the map named. The second one
+    exists only once `main` is merged in, and T-green's Advisory 3 already gives the resolution.
+  - I did not verify that #708's held-connection port is refused on macOS. I took #708's own doc and its CI for that.
+  - The diff-gate rerun's evidence (its review and its `usage.json`) is not in the worktree. I noted it for S and O and
+    did not judge it.
+- **Evidence:**
+  - Read in full: `src/{attach,lib,exec,tui,server}.rs`; `tests/{attach_test,tui_test,real_opencode_test}.rs`,
+    `tests/real_opencode/rig.rs`, `tests/support/{stub,fake_tmux}.rs` and `tests/fixtures/fake-tmux`; the diffs of
+    `hermetic_test.rs`, ADR-0021, the `holler-pane` docs, `CHANGELOG.md` and the manifests.
+  - Read at `origin/main`: #641's `exec.rs`, `tmux.rs` and `lib.rs` (structure); #663's `probe.rs` (visibility); #708's
+    diff.
+  - Greps over `src/`: `Command::new`, `"-t"`, the loops and sleeps, the `Duration` constants, `400 | 404`,
+    `call(`/`call_until(`, `Value::Bool(true)`.
+  - `hermetic_test.rs` has 30 tests at the base and at the head. `http.rs`, `server.rs`, the test kit and the workspace
+    `Cargo.toml` are unchanged. `gh issue view 696` shows 0 comments.
