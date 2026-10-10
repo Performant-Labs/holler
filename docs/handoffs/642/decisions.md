@@ -188,3 +188,47 @@
     `call(`/`call_until(`, `Value::Bool(true)`.
   - `hermetic_test.rs` has 30 tests at the base and at the head. `http.rs`, `server.rs`, the test kit and the workspace
     `Cargo.toml` are unchanged. `gh issue view 696` shows 0 comments.
+
+## S (Phase 10, spec audit) — 2026-10-10T00:16:11-06:00
+- **Decided:** REWORK with one TEST-ONLY item (see handoff-S.md).
+  - The A and T preconditions are met.
+  - Every canonical 642b AC has a proving test or other evidence that asserts behaviour, except AC 25 (the PR body),
+    which cannot be audited before the PR exists.
+  - Decisions 1, 3-6, 9, 10 and 15-23 are built as stated. A's W-2 to W-6, W-8(b) and W-9 are applied. F's five choices
+    beyond the brief are disclosed and contradict no AC: the watch's port check, `select_session` failing at once on a
+    dead or missing pane, the UTF-8 check before the resolver, `classify` with `Ran::reason`, and `poll`.
+  - The quality checks are clean apart from one item: the guards, sizes, Risk 6 (one tmux `Command::new`, every `-t`
+    through `exact_target`), the docs and the fixture.
+  - The REWORK item: T-green's handoff names the operator's machine twice (`handoff-T-green.md:9` and `:162`), and no
+    file on `main` holds that name. The fix is a neutral phrase there. Because the branch is unpushed and only `5d20f61`
+    carries the name, O or the run's agent folds the fix into that commit at the rebase, so no pushed commit holds it.
+- **Assumed:**
+  - Handoffs are public. Handoff directories reach `main` (508 and 647 are there now), and a PR's commits stay visible
+    on GitHub even when a cleanup later removes the directory.
+  - I relied on T's recorded Tier 1 and Tier 2 results and did not re-run them, per S's role. My own checks were greps,
+    `wc -l`, `git ls-files -s`, `git diff` and a `git merge-tree` preview.
+- **Hedged:**
+  - Two latent contract issues would let `attach_tui` confirm a TUI that never started, or replace the wrong pane:
+    the respawn keeps the pane's old title, and A's W-1 (`=<name>:` is the current window's active pane). They could
+    have been an ADVISORY-HOLD. I did not choose that, for four reasons:
+    - nothing calls `attach_tui` yet: #644 and #649 are open with no PR;
+    - the issue's acceptance holds;
+    - A and T rated both non-blocking;
+    - #640's audit handled latent consumer-facing items as follow-ups. #647's hold was for a missing,
+      operator-confirmed issue amendment, which is not the case here.
+  - Both must be filed before #644's relaunch uses `attach_tui`, and neither is filed yet (Advisories 1 and 2).
+  - `test-only` routes the item to T because the file is T's own handoff. It is not a test file, so the item says so
+    plainly.
+- **Evidence:**
+  - Read in full: the brief, the five phase handoffs, `evidence.md`, the production files, every new or changed test
+    file and the fixture. Read as diffs: the CHANGELOG, ADR-0021, `holler-pane`, the manifests and `Cargo.lock`.
+  - Greps over the diff's added lines: names, hosts, paths, IPs, secrets and closing keywords. The machine name has
+    exactly two hits, and it appears in no file on `origin/main`.
+  - `git ls-remote --heads origin issue-642-implementation` is empty, so the branch is not pushed.
+  - `origin/main` moved to `abdcbb6` (#640, merged 00:06 MDT). `git merge-tree --write-tree origin/main HEAD` shows
+    conflicts in `CHANGELOG.md`, `hermetic_test.rs`, `stub.rs` and ADR-0021's "Deferred" list. The resolution rules
+    are in Advisory 3.
+  - The diff gate's hand rerun is in the session scratchpad (`642-diff-r3.md` and its `usage.json`): a complete review
+    with `finish_reason: stop` and verdict PASS. The prompt was 77,559 tokens by the model's count, not the ~64,093 that
+    the O entry above states. All nine of its needs-verification items resolve in the code's favour.
+  - `gh issue list` finds no filed follow-up for P-2, P-3, the stale title or W-1. #644 and #649 are open with no PR.
