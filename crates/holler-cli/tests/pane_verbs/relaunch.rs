@@ -13,8 +13,8 @@ use holler_pane_testkit::harness::{HarnessOp, ServerState};
 use holler_pane_testkit::herdr::HerdrOp;
 
 use crate::launch::rig::{
-    argv, assert_untouched, data_of, error_of, launch_spec, name, occurrences, profile_name, Calls,
-    Rig, Seed, PANE, PORT, STEP,
+    agent, argv, assert_untouched, data_of, error_of, launch_spec, name, occurrences, profile_name,
+    Calls, Rig, Seed, PANE, PORT, STEP,
 };
 use crate::verb_harness::parse::assert_spec_flags_accepted;
 
@@ -516,4 +516,64 @@ fn relaunch_of_a_missing_pane_is_refused() {
 #[test]
 fn pane_relaunch_accepts_every_spec_flag() {
     assert_spec_flags_accepted("relaunch");
+}
+
+/// #700 AC 4: an invalid `--agent` key is refused before anything else runs — no port
+/// call, no record write — with `agent-key-invalid`, which does not echo the key.
+#[test]
+fn relaunch_refuses_an_invalid_agent_key_before_anything() {
+    let rig = Rig::new();
+    rig.live(false);
+    let run = rig.run(&relaunch_with(&["--agent", "a=b"]), Format::Json);
+    assert_eq!(run.code, 3, "{run:?}");
+    let (code, message) = error_of(&run);
+    assert_eq!(code, "agent-key-invalid", "{message}");
+    assert!(!message.contains("a=b"), "never echoes the key: {message}");
+    assert_untouched(&run.calls);
+    rig.assert_matches(&run, PANE);
+    rig.assert_no_keystroke();
+}
+
+/// #700 AC 5 (A's DECISION 1, the relaunch landmine): without the flag a relaunch keeps
+/// the stored key — its base spec is `spec_from_pane` of the record, which copies the
+/// key, and the record literal writes the spec's key back rather than resetting it.
+#[test]
+fn relaunch_without_agent_keeps_the_stored_key() {
+    let rig = Rig::new();
+    let mut theirs = rig.live(false);
+    theirs.opencode_agent = Some(agent("orchestrator"));
+    rig.fakes.panes.concurrent_put(&theirs).unwrap();
+    let run = rig.run(RELAUNCH, Format::Json);
+    data_of(&run);
+    assert_eq!(
+        rig.record(PANE)
+            .unwrap()
+            .opencode_agent
+            .as_ref()
+            .map(|key| key.as_str()),
+        Some("orchestrator")
+    );
+    rig.assert_matches(&run, PANE);
+    rig.assert_no_keystroke();
+}
+
+/// #700 AC 5: given, the flag replaces the stored key, like its siblings.
+#[test]
+fn relaunch_with_agent_replaces_the_stored_key() {
+    let rig = Rig::new();
+    let mut theirs = rig.live(false);
+    theirs.opencode_agent = Some(agent("orchestrator"));
+    rig.fakes.panes.concurrent_put(&theirs).unwrap();
+    let run = rig.run(&relaunch_with(&["--agent", "feature-implementor"]), Format::Json);
+    data_of(&run);
+    assert_eq!(
+        rig.record(PANE)
+            .unwrap()
+            .opencode_agent
+            .as_ref()
+            .map(|key| key.as_str()),
+        Some("feature-implementor")
+    );
+    rig.assert_matches(&run, PANE);
+    rig.assert_no_keystroke();
 }

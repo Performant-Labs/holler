@@ -116,7 +116,7 @@ pane watch | --profile demo --json
 pane launch | demo-c1r1
 pane launch | demo-c1r1 --profile demo
 pane launch | demo-c1r1 --profile demo --spec-only
-pane launch | demo-c1r1 --herdr-session scratch --project /srv/demo --workspace main --grid r2c1 --model provider/model-id --effort high --role agent
+pane launch | demo-c1r1 --herdr-session scratch --project /srv/demo --workspace main --grid r2c1 --model provider/model-id --effort high --role agent --agent orchestrator
 pane launch | demo-c1r1 --env ALPHA_TOKEN --env BETA_URL --ctx-soft 100000 --ctx-hard 150000 --port-policy fixed:48100
 pane launch | demo-c1r1 --command-arg opencode --command-arg serve --check-arg curl --check-arg http://127.0.0.1:1/health --expect ok --expect ready
 pane launch | demo-c1r1 --command-json [] --check-json [] --format=json

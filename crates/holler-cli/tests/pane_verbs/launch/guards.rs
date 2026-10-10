@@ -221,6 +221,27 @@ fn an_env_value_is_refused_and_not_echoed() {
     }
 }
 
+/// #700 AC 4: an invalid `--agent` key is refused before anything else runs — validate
+/// is step 1, so no port call and no record write — with `agent-key-invalid`, in a
+/// message that does not echo the key.
+#[test]
+fn an_invalid_agent_key_is_refused_before_anything() {
+    for bad in ["bad key", "a=b", ""] {
+        let rig = Rig::new();
+        let run = rig.run(&launch_with(&["--agent", bad]), Format::Json);
+        assert_eq!(run.code, 3, "{bad:?}: {run:?}");
+        let (code, message) = error_of(&run);
+        assert_eq!(code, "agent-key-invalid", "{bad:?}: {message}");
+        if !bad.is_empty() {
+            assert!(!message.contains(bad), "{bad:?}: {message}");
+        }
+        assert_untouched(&run.calls);
+        assert_eq!(rig.record(PANE), None, "{bad:?}: no record written");
+        rig.assert_matches(&run, PANE);
+        rig.assert_no_keystroke();
+    }
+}
+
 /// AC 13b: an ambiguous grid is refused before any step.
 #[test]
 fn an_ambiguous_grid_is_refused_before_any_step() {

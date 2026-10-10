@@ -4,7 +4,7 @@
 
 mod common;
 
-use holler_pane::{Argv, EnvVarName, Pane, ProfileSpec};
+use holler_pane::{AgentKey, Argv, EnvVarName, Pane, ProfileSpec};
 use serde_json::{json, Value};
 
 fn err_text<T: std::fmt::Debug>(r: Result<T, serde_json::Error>) -> String {
@@ -126,5 +126,43 @@ fn no_profile_spec_or_pane_field_can_hold_an_environment_value() {
             panic!("env entry is not a string: {entry}")
         };
         assert!(!s.contains('='), "{s}");
+    }
+}
+
+/// #700 AC 1: `AgentKey` accepts the agent names OpenCode knows and refuses a key that
+/// is empty or carries a space, a newline, `=` or `/` — each with the one open code
+/// `agent-key-invalid` (a `PaneError::Refused`), in a message that states the grammar
+/// and does not echo the key.
+#[test]
+fn agent_key_accepts_names_and_refuses_malformed_keys() {
+    for ok in ["orchestrator", "feature-implementor", "mo"] {
+        let key = AgentKey::parse(ok).unwrap_or_else(|e| panic!("{ok}: {e}"));
+        assert_eq!(key.as_str(), ok);
+    }
+
+    for bad in ["", "a b", "a\nb", "a=b", "a/b"] {
+        let error = AgentKey::parse(bad).expect_err("must be refused");
+        assert_eq!(error.code(), "agent-key-invalid", "{bad:?}: {error}");
+        let message = error.to_string();
+        assert!(message.contains("agent"), "states the grammar: {message}");
+        if !bad.is_empty() {
+            assert!(!message.contains(bad), "never echoes the key: {message}");
+        }
+    }
+}
+
+/// #700 AC 2: `AgentKey` serde is a plain string, and a key the guard refuses does not
+/// decode — fail closed, the `EnvVarName` precedent.
+#[test]
+fn agent_key_serde_is_a_plain_string_failing_closed() {
+    let key: AgentKey = serde_json::from_str(r#""feature-implementor""#).unwrap();
+    assert_eq!(
+        serde_json::to_string(&key).unwrap(),
+        r#""feature-implementor""#
+    );
+
+    for bad in [r#""a=b""#, r#""a b""#, r#"""#] {
+        let msg = err_text(serde_json::from_str::<AgentKey>(bad));
+        assert!(msg.contains("agent-key-invalid"), "{bad}: {msg}");
     }
 }

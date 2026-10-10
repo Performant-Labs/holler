@@ -168,6 +168,80 @@ fn profile_spec_variants_round_trip() {
     }
 }
 
+/// #700 AC 3: a `Pane` round-trips with `opencode_agent` set — the JSON field is
+/// exactly `opencode_agent`, serialized after `model` (the contract order) — and with
+/// it absent: omitted when `None`, and an old record with no field loads back with no
+/// field (the field is not required on read).
+///
+/// JSON-driven on purpose: these forms are the wire contract, and staying JSON-only
+/// keeps this file compiling before the field exists (its RED is the unknown-field
+/// refusal below, not a compile error).
+#[test]
+fn pane_opencode_agent_round_trips_set_and_absent() {
+    let mut want = pane_json();
+    want["opencode_agent"] = json!("orchestrator");
+    let pane: Pane = serde_json::from_value(want.clone()).unwrap();
+    assert_eq!(serde_json::to_value(&pane).unwrap(), want);
+
+    // Contract order: the field serializes after `model`.
+    let text = serde_json::to_string(&pane).unwrap();
+    let model = text.find("\"model\"").expect("a model field");
+    let agent = text.find("\"opencode_agent\"").expect("an agent field");
+    assert!(model < agent, "after model: {text}");
+
+    // Absent: today's record (no field) loads and stores back with no field.
+    let old: Pane = serde_json::from_value(pane_json()).unwrap();
+    let stored = serde_json::to_value(&old).unwrap();
+    assert!(
+        stored.get("opencode_agent").is_none(),
+        "omitted when None: {stored}"
+    );
+}
+
+/// #700 AC 3: a `ProfileSpec` round-trips with `opencode_agent` set and absent, like
+/// a `Pane` (the twin above).
+#[test]
+fn profile_spec_opencode_agent_round_trips_set_and_absent() {
+    let mut want = spec_json();
+    want["opencode_agent"] = json!("feature-implementor");
+    let spec: ProfileSpec = serde_json::from_value(want.clone()).unwrap();
+    assert_eq!(serde_json::to_value(&spec).unwrap(), want);
+
+    let text = serde_json::to_string(&spec).unwrap();
+    let model = text.find("\"model\"").expect("a model field");
+    let agent = text.find("\"opencode_agent\"").expect("an agent field");
+    assert!(model < agent, "after model: {text}");
+
+    let old: ProfileSpec = serde_json::from_value(spec_json()).unwrap();
+    let stored = serde_json::to_value(&old).unwrap();
+    assert!(
+        stored.get("opencode_agent").is_none(),
+        "omitted when None: {stored}"
+    );
+}
+
+/// #700 AC 2: a record whose `opencode_agent` the guard refuses does not decode —
+/// fail closed, the `EnvVarName` precedent — in a refusal that echoes no key text.
+#[test]
+fn a_record_with_an_invalid_agent_key_fails_to_decode() {
+    for bad in ["bad key", "a=b", "a/b"] {
+        let mut pane = pane_json();
+        pane["opencode_agent"] = json!(bad);
+        let error =
+            serde_json::from_value::<Pane>(pane).expect_err("an invalid agent key is refused");
+        let msg = error.to_string();
+        assert!(msg.contains("agent-key-invalid"), "{bad:?}: {msg}");
+        assert!(!msg.contains(bad), "never echoes the key: {msg}");
+
+        let mut spec = spec_json();
+        spec["opencode_agent"] = json!(bad);
+        let msg = serde_json::from_value::<ProfileSpec>(spec)
+            .expect_err("an invalid agent key is refused")
+            .to_string();
+        assert!(msg.contains("agent-key-invalid"), "{bad:?}: {msg}");
+    }
+}
+
 #[test]
 fn a_profile_spec_may_name_a_pane_that_does_not_exist() {
     // A detached spec (`profile create --from`): the pane name is plain data, so a

@@ -76,6 +76,8 @@ fn launch_records_what_the_fakes_show() {
             driven: None,
             ..record.last_observed
         },
+        // #700: no --agent flag and no base spec, so the record holds no key.
+        opencode_agent: None,
         ..sample
     };
     assert_eq!(record, expected, "no profile, no command, no probe result");
@@ -110,6 +112,25 @@ fn launch_records_what_the_fakes_show() {
         "AC 11b: no command, nothing run"
     );
     assert!(run.calls.probes.is_empty(), "no check, no probe");
+    rig.assert_matches(&run, PANE);
+    rig.assert_no_keystroke();
+}
+
+/// #700 (A's DECISION 1, positive path): a launch with `--agent` stores the key in the
+/// pane record — the record literal writes the spec's key, not `None`.
+#[test]
+fn launch_with_agent_stores_the_key_in_the_record() {
+    let rig = Rig::new();
+    let run = rig.run(&launch_with(&["--agent", "feature-implementor"]), Format::Json);
+    data_of(&run);
+    assert_eq!(
+        rig.record(PANE)
+            .unwrap()
+            .opencode_agent
+            .as_ref()
+            .map(|key| key.as_str()),
+        Some("feature-implementor")
+    );
     rig.assert_matches(&run, PANE);
     rig.assert_no_keystroke();
 }
