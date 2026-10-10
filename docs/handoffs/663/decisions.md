@@ -59,3 +59,52 @@ Rigor/brief gate: BLOCKED, overridden by Andre Angelantoni: The outside brief ga
     #697 and #698. Checked the earlier Phase 3 reviews (`a3e47a4` #683, `db4cba8` #688, `d2636ba` #644) and #644's brief
     at `7195993` (I-3, C-15, C-16, the `launch.rs` API).
   - Read the CI matrix in `.github/workflows/ci.yml`.
+
+## A (Phase 3, up-front plan review, second pass) — 2026-10-09T18:29:59-06:00
+- **Decided:** PASS on `docs/handoffs/663-brief.md` at `d7e0421`, with no block and six warns, W-7 to W-12 (see `handoff-A.md`,
+  which replaces the first pass's BLOCK at `5284f91`).
+  - **The first pass, dispositioned.** B-1 is resolved: AC 14 amends ADR-0021 in place at the five places, and each matches the
+    ADR text at `3bdd129`. W-1, W-2, W-3, W-4 and W-6 are resolved as asked, and W-5 stays accepted for Phase 7.
+  - **The new warns:**
+    - W-7: the "may have landed" rule is decided by code (only `timeout`), not by outcome. Decision 5 also states a timed-out
+      restore's result as a fact.
+    - W-8: section 12 restates the bound AC 14b narrows, and AC 14e does not list which errors carry the step.
+    - W-9: Decision 4's record-inside-the-act versus the fence bullet's "writes nothing more".
+    - W-10: Decision 13's unguarded `process_group(0)` cites the one exception to a guarded pattern.
+    - W-11: the inline probe tests break `holler-pane`'s local `tests/` pattern, and they carry near-copies of `StateDir` and
+      `wait_for`. Both copies are pre-ruled to pass at Phase 7 if they stay private and minimal.
+    - W-12: gaps in the follow-ups (F4 misses `lib.rs:7` and `lib.rs:26`; AC 14b's cite of F4 has no number at F time; F2's
+      hoist belongs beside `detail()`).
+  - **F can take** W-7 (a)-(c), W-8, W-9 and W-10 within the existing ACs and AC 14's hunks. W-7 (b)'s requirement on #649 is a
+    cross-story note for O, beside F5.
+- **Assumed:**
+  - The brief's Reuse map table is the Reuse map, as in the first pass (no survey.md).
+  - #644's brief at `7195993` and #641's at `0f18b80` are current. Both are in flight, and neither has code yet.
+  - #649's store client does not exist yet, so W-7's precedent is the control path (`transport.rs:69-78`) and the `PaneReply`
+    parse-back (`error.rs:599-611`), not a real client.
+- **Hedged:**
+  - **W-7 is a warn, not a block.** No code changes, nothing live moves on a first-write failure, and a rerun heals it. The cost
+    is the standing spec carrying a by-code rule.
+  - **W-9 predates this story.** #697 made the ASSUMPTION and #644 composes its act that way. #663 only confirms it, so the fix
+    is one clause in a hunk AC 14e already makes.
+  - **W-10 is a warn.** The shipping binary is already Unix-only through `holler-hub/src/control.rs:8`, and Windows is off the
+    CI matrix (ADR 0002).
+  - **W-11 is a warn.** The workspace mixes inline and `tests/` placement. Only the crate-local pattern is `tests/`, and the
+    blast radius justifies the departure.
+- **Evidence:**
+  - **The brief:** read in full, with the diff from `89b611f`, and the first pass's handoff and journal entry.
+  - **The ADR record:** ADR-0021 in full (lines 1-558), `docs/adr/README.md`, ADR 0002's Windows row, and issue #22 (still the
+    placeholder body).
+  - **The code:**
+    - `holler-pane`: `error.rs:388-710`, `ports.rs:200-235`, `profile.rs:328` and `373-380`, `lib.rs:1-76`, `probe.rs` and
+      `Cargo.toml`;
+    - `holler-pane-testkit`: `profile_scope.rs:1-130` and `conformance/profile_scope.rs:186-200`;
+    - `holler-cli`: `src/pane/{mod.rs,profile_scope.rs,launch.rs,close.rs,wiring.rs}`, `src/transport.rs`, `Cargo.toml`, and
+      `tests/pane_verbs/main.rs`;
+    - `holler-cli/tests/support/mod.rs:64-163`, and `holler-load-test` `hub.rs:320-345` and `main.rs:545-590`.
+  - **Grepped `crates/`** for `std::os::unix` (guarded or not), process-group and kill code, `Command::new`, shell-quoting
+    helpers, `StateDir`/`TempDir`/`Scratch` types, `wait_for`, and the `cfg(test)` modules in `holler-pane/src`.
+  - **The in-flight branches** of #641, #644, #647 and #662, all brief-only:
+    - their planned ADR-0021 edits, for merge hygiene;
+    - #644's act table, append rule and const references (lines 1596-1627, 1705-1708, 1554-1558);
+    - #641's runner, kill and seam lines.
