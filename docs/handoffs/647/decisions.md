@@ -151,3 +151,24 @@
   - Clean: clippy `--workspace --all-targets -D warnings`; `lint.sh` (exit 0); `changelog-check`; `rustfmt --check` on
     the touched files; `cargo machete`; no `unsafe`; no manifest diff; gitleaks.
   - The text output was checked by eye once, with a temporary print that has since been removed.
+
+## T (Phase 7, verify / GREEN + Tier 2) — 2026-10-09T18:08:43-06:00
+- **Decided:**
+  - GREEN is valid: 31/31 RED tests pass on `9500955`, and F changed no test file.
+  - I added one test, `acknowledged_select_that_switches_nothing_is_not_fixed`. A mutation spot-check showed that
+    Decision 5's "equal to S is `fixed`, anything else `failed`" was unpinned: M6 survived all 31 tests. The new test uses
+    the test kit's `Quirk::SelectAckedWithoutTui` and fails under M6. It is a suite gap, not an F defect.
+  - I appended 3 test-kit facts to `evidence.md`: `select_session`, the fake Herdr's unsupported `version()`, and
+    `FakeProfileScope::resolve`'s refusals.
+- **Assumed:**
+  - CI's `--skip roster_stays_accurate_under_concurrent_body_load` form of `cargo test --workspace` is the AC 30 gate.
+  - An isolated `HOLLER_STATE_DIR` is a valid environment, as F found.
+- **Hedged:**
+  - `findings_test.rs` is still outside the brief's Files list (AC 33). It is left to O or S as bookkeeping, not
+    routed to F.
+- **Evidence:**
+  - Tier 1 on `9500955`: lint 0, changelog 0, clippy 0, workspace 126 targets / 1414 passed / 0 failed, docs_cli 0,
+    wire_selftest 0, machete 0, test-hooks 0.
+  - After the test edit: `pane_verbs` 95/95, doctor 32/32, clippy clean, lint 0, rustfmt clean, gitleaks clean.
+  - `observation_runs_concurrently`: 20/20.
+  - Mutations M1-M5 and M7 are caught. M6 was not caught, and is caught after the new test.

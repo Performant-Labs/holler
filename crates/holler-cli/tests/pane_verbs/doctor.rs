@@ -15,7 +15,7 @@ use holler_pane::findings::{FindingKind as K, FixState};
 use holler_pane::pane::Health;
 use holler_pane::reconcile::ReconcileRequest;
 use holler_pane::{PaneError, PaneName};
-use holler_pane_testkit::harness::HarnessOp;
+use holler_pane_testkit::harness::{HarnessOp, Quirk};
 use holler_pane_testkit::herdr::HerdrOp;
 use holler_pane_testkit::host::HostOp;
 use holler_pane_testkit::pane_store::PaneStoreOp;
@@ -463,5 +463,39 @@ fn fix_failure_is_reported() {
     assert_eq!(
         mismatches[0]["remedy"], "holler pane relaunch demo-c1r1",
         "{data}"
+    );
+}
+
+/// Decision 5 (I3): a fix is `fixed` only when the TUI is then seen showing the session of
+/// record. A select the harness acknowledges without switching anything (the spike's quirk
+/// for a pane with no TUI) is `failed`, and what was observed afterwards is recorded.
+#[test]
+fn acknowledged_select_that_switches_nothing_is_not_fixed() {
+    let rig = one_pane();
+    let pane_id = rig.pane_id(PANE);
+    rig.harness.close_tui(&pane_id).expect("close the TUI");
+    rig.harness.set_quirk(Quirk::SelectAckedWithoutTui, true);
+    let mark = rig.mark();
+
+    let report = rig.run(&whole(true));
+
+    let selects = rig.calls_since(&mark).harness;
+    assert!(
+        selects.contains(&HarnessOp::SelectSession),
+        "the fix acted: {selects:?}"
+    );
+    let mismatch = one(&report, K::ShownDrivenMismatch, PANE);
+    assert_eq!(mismatch.fix, FixState::Failed, "{mismatch:?}");
+    let error = mismatch.fix_error.as_ref().expect("a fix_error");
+    assert_eq!(error.code, "shown-driven-mismatch", "{mismatch:?}");
+    assert_eq!(
+        mismatch.remedy.as_deref(),
+        Some("holler pane relaunch demo-c1r1")
+    );
+    assert!(rig.harness.tui(&pane_id).is_none(), "nothing was switched");
+    assert_eq!(
+        rig.record(PANE).last_observed.shown,
+        None,
+        "nothing guessed"
     );
 }

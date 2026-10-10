@@ -134,3 +134,60 @@ Source facts the diff relies on that live in unchanged code. F's entries (Phase 
   >         .map(|d| d.as_millis() as i64)
   >         .unwrap_or(0)
   > }
+
+T's entries (Phase 7): facts of unchanged test-kit code the authored tests rely on, excerpts copied from source.
+
+- **Fact:** on the fake harness, `select_session` switches the TUI only when the pane's server is reachable and has the session; otherwise it answers the error and the TUI is unchanged. `fix_selects_the_session_of_record_and_never_changes_it` (AC 7) and `fix_failure_is_reported` (AC 11, a killed server answers `unavailable`) rely on this.
+  **Source:** `crates/holler-pane-testkit/src/harness.rs:336-346`
+  **Verbatim excerpt:**
+  > fn select_session(&self, pane: &PaneId, session: &str) -> Result<(), PaneError> {
+  >     self.faults.enter(HarnessOp::SelectSession)?;
+  >     let mut world = self.lock();
+  >     if !world.tuis.contains_key(pane) && world.quirks.contains(&Quirk::SelectAckedWithoutTui) {
+  >         return Ok(());
+  >     }
+  >     let port = world.tui_port(pane)?;
+  >     world.reach(port, HarnessOp::SelectSession)?;
+  >     world.known(port, session)?;
+  >     world.show(pane, Some(session))
+  > }
+
+- **Fact:** the fake Herdr's unsupported build answers `herdr-version-unsupported` from `version()` only, with a message naming the supported version; `herdr_version_shown_and_unsupported_reported` (AC 20) relies on this.
+  **Source:** `crates/holler-pane-testkit/src/herdr.rs:312-327`
+  **Verbatim excerpt:**
+  > fn version(&self) -> Result<String, PaneError> {
+  >     self.faults.enter(HerdrOp::Version)?;
+  >     let version = self.lock().version;
+  >     match version {
+  >         HerdrVersion::Protocol22 => Ok(PROTOCOL_22_VERSION.to_owned()),
+  >         // ASSUMPTION (#640): only `version()` refuses an unsupported build. Whether
+  >         // the adapter also refuses every other call after a failed version check is
+  >         // #640's.
+  >         HerdrVersion::Unsupported => Err(PaneError::HerdrVersionUnsupported {
+
+- **Fact:** `FakeProfileScope::resolve` refuses an unknown profile with `profile-not-found` and a named pane outside the profile (or with no record) with `pane-not-in-profile`; `doctor_named_pane_scopes` (AC 15) asserts these codes and exit 3 through doctor.
+  **Source:** `crates/holler-pane-testkit/src/profile_scope.rs:97-103`, `119-126`, `191-205`
+  **Verbatim excerpt:**
+  > fn stored(&self, profile: &ProfileName) -> Result<Profile, PaneError> {
+  >     self.profiles
+  >         .get(profile)?
+  >         .ok_or_else(|| PaneError::ProfileNotFound {
+  >             what: profile.to_string(),
+  >         })
+  > }
+  >
+  > fn member(&self, profile: &ProfileName, name: &PaneName) -> Result<Pane, PaneError> {
+  >     match self.panes.get(name)? {
+  >         Some(pane) if belongs(&pane, profile) => Ok(pane),
+  >         _ => Err(PaneError::PaneNotInProfile {
+  >             what: format!("{name} is not in profile {:?}", profile.as_str()),
+  >         }),
+  >     }
+  > }
+  >
+  >     ) -> Result<ResolvedScope, PaneError> {
+  >         let stored = self.stored(profile)?;
+  >         let panes = match pane {
+  >             None => self.members(&stored.name)?,
+  >             Some(name) => vec![self.member(&stored.name, name)?],
+  >         };
