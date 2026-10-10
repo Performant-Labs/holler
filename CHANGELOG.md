@@ -278,10 +278,22 @@ fills this file in at release time.
   (subagent) sessions, and `abort` checks that the session exists first, because raw OpenCode acknowledges an abort of
   an id it does not know. Every call has a deadline (10 s by default) and answers `timeout` when a frozen server holds
   it, and a reply that is not the JSON a step needs, such as the web page OpenCode serves for a route it does not know,
-  is `unavailable`. Attaching, switching and reading a pane's TUI answer `not-implemented` until part 2, which also
-  brings the opt-in tests against a real OpenCode. Nothing a user runs changes yet: #649 wires the adapter in
+  is `unavailable`. Nothing a user runs changes yet: #649 wires the adapter in
   ([#642](https://github.com/Performant-Labs/holler/issues/642)).
 
+- OpenCode adapter, part 2: the TUI side (epic [#633](https://github.com/Performant-Labs/holler/issues/633)):
+  `holler-adapter-opencode` now implements the rest of `HarnessPort`. A pane's TUI is an `opencode attach` in the
+  pane's tmux session, which the adapter addresses by its exact name, never by a prefix; the adapter never sends the TUI
+  a keystroke. `attach_tui` checks that the session exists, replaces whatever ran in the pane with a TUI attached to that
+  session, and returns only once the TUI's terminal title shows it. `select_session` finds the pane's TUI first and
+  sends nothing when there is none, then switches it through OpenCode's API and returns only once the title shows the
+  new session, because OpenCode sends a switch to every TUI of a server and acknowledges one that no TUI saw.
+  `shown_session` reads the session from the title, without asking the server, and answers none whenever it cannot
+  tell: the home screen, a deleted session, a title that is not a session id, or no TUI. A session the server does not
+  know is `session-not-found`. Opt-in tests run the adapter and the `HarnessPort` conformance suite against a real
+  `opencode serve` and a private tmux server (`HOLLER_TEST_OPENCODE=1`). Applying a pane's OpenCode agent is still to
+  come, after [#700](https://github.com/Performant-Labs/holler/issues/700). Nothing a user runs changes yet: #649 wires
+  the adapter in ([#642](https://github.com/Performant-Labs/holler/issues/642)).
 - Host adapter (epic [#633](https://github.com/Performant-Labs/holler/issues/633)): `holler-adapter-host` now
   implements `HostPort` over a local tmux server. Its `TmuxHost` creates a pane's tmux session, starts a command in
   the session as a new detached window and returns once tmux reports the new process (nothing is typed into a shell
