@@ -6,6 +6,10 @@
 # or panes. A bare `herdr server stop` is never issued: which server it would stop is not
 # established, and it could stop another instance's.
 #
+# UNVERIFIED until operator story #734 checks it with the real binary: what `--session` does
+# (which server and socket it selects), what a pane sees in HERDR_PANE_ID / HERDR_SESSION, and
+# the `session list` status words used by session-delete. Do not trust any of it blind.
+#
 # bash 3.2 compatible (no associative arrays, no GNU-only flags): runs on Linux and macOS.
 #
 # Configuration (environment, set from the instance table by the skill):
@@ -25,6 +29,9 @@
 #                         prints the server's pid alone on the first stdout line
 #   check-session         refuse when the named session exists and the ledger did not create it
 #   check-pane            refuse when this process runs in a pane of a different session
+#   session-delete [name] delete this instance's own STOPPED session (`herdr session delete`);
+#                         refuses a running or listed-live-in-the-ledger session, any other
+#                         name, the default session and a session that is not listed
 #   log-path              print the server log path for this instance
 set -u
 
@@ -139,12 +146,39 @@ check_pane() {
     return 0
   fi
   if [ -z "$ps_" ]; then
+    if [ -n "${HERDR_PANE_ID:-}" ]; then
+      die "the driving agent is running inside a Herdr pane, so this instance's session '$session' cannot be established; run the wizard from a terminal outside any Herdr pane"
+    fi
     die "running inside a Herdr pane whose session cannot be established; refusing to build (instance session: '$session')"
   fi
   if [ "$ps_" != "$session" ]; then
     die "running inside a pane of Herdr session '$ps_', not this instance's session '$session'; refusing to split any pane"
   fi
   return 0
+}
+
+# Deletes this instance's own stopped session, and nothing else.
+session_delete() {
+  target="${1:-$session}"
+  [ -n "$session" ] || die "session-delete needs this instance's herdr_session; the default session is never deleted"
+  [ "$session" != "default" ] || die "the default session is never deleted"
+  [ "$target" = "$session" ] || die "session-delete only deletes this instance's own session '$session', not '$target'"
+  listing="$(herdr_cmd session list 2>/dev/null)" || listing=""
+  status=""
+  while IFS= read -r line; do
+    set -- $line
+    if [ "${1:-}" = "$session" ]; then
+      status="${2:-}"
+    fi
+  done <<EOF4
+$listing
+EOF4
+  [ -n "$status" ] || die "no Herdr session named '$session' is listed; nothing to delete"
+  [ "$status" = "stopped" ] || die "Herdr session '$session' is '$status', not stopped; refusing to delete it"
+  if ledger_created "$session"; then
+    die "the ledger shows a live Herdr server for session '$session'; refusing to delete it"
+  fi
+  herdr_cmd session delete "$session"
 }
 
 log_path() {
@@ -201,6 +235,7 @@ case "$verb" in
     ;;
   check-session) check_session ;;
   check-pane) check_pane ;;
+  session-delete) session_delete "$@" ;;
   log-path) log_path ;;
-  *) die "usage: herdr.sh run|server-start|check-session|check-pane|log-path" ;;
+  *) die "usage: herdr.sh run|server-start|check-session|check-pane|session-delete|log-path" ;;
 esac
