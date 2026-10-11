@@ -109,7 +109,7 @@ something real happens.
 
 Until holler pane relaunch with --model (#644) and the pfleet adoption (#653) land, `scripts/pane-restart`
 restarts one fleet pane's OpenCode TUI on a new model. Run it on the host that owns the pane's tmux session
-(Jupiter), from any shell except the pane being restarted:
+(the fleet host), from any shell except the pane being restarted:
 
 ```bash
 scripts/pane-restart c3r1 --model anthropic/claude-sonnet-5-5 --effort medium \

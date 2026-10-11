@@ -74,8 +74,8 @@ cat > "$bin/pfo" <<'EOF'
 #!/usr/bin/env bash
 echo "$*" >> "$FAKE/pfo.log"
 pane=$2
-if [ "${3:-}" = "--set-registration" ]; then [ -e "$FAKE/no_fix" ] || [ -e "$FAKE/needs_body_restart" ] || echo "$4" > "$FAKE/registered"; echo "registered jupiter-hj-$pane/oc at $4"; exit 0; fi
-if [ "$(cat "$FAKE/registered" 2>/dev/null)" = ses_new ]; then echo "jupiter-hj-$pane/oc: ok"; else echo "jupiter-hj-$pane/oc: 1 finding(s)"; echo "  drift  registered ses_old, the hub drives ses_new"; exit 1; fi
+if [ "${3:-}" = "--set-registration" ]; then [ -e "$FAKE/no_fix" ] || [ -e "$FAKE/needs_body_restart" ] || echo "$4" > "$FAKE/registered"; echo "registered host-hj-$pane/oc at $4"; exit 0; fi
+if [ "$(cat "$FAKE/registered" 2>/dev/null)" = ses_new ]; then echo "host-hj-$pane/oc: ok"; else echo "host-hj-$pane/oc: 1 finding(s)"; echo "  drift  registered ses_old, the hub drives ses_new"; exit 1; fi
 EOF
 cat > "$bin/pane-ready" <<'EOF'
 #!/usr/bin/env bash
@@ -118,7 +118,7 @@ ENV
   unset TMUX_PANE FAKE_OWN_SESSION
 }
 run() { # run <args...>: the script under the fakes, fast timeouts; output in $FAKE/out, status in $FAKE/rc
-  PATH="$bin:$PATH" PANE_RESTART_POLL=0 PANE_RESTART_TYPE_DELAY=0 PANE_RESTART_T_STOP=2 PANE_RESTART_T_UP=2 PANE_RESTART_T_REG=2 PANE_RESTART_T_MODEL=2 \
+  PATH="$bin:$PATH" PANE_RESTART_POLL=0 PANE_RESTART_TYPE_DELAY=0 PANE_RESTART_MO_ROSTER_NAME=host-hj-c4r2/mo PANE_RESTART_T_STOP=2 PANE_RESTART_T_UP=2 PANE_RESTART_T_REG=2 PANE_RESTART_T_MODEL=2 \
     bash "$script" "$@" > "$FAKE/out" 2>&1
   echo $? > "$FAKE/rc"
 }
@@ -300,7 +300,7 @@ check "mo.md has the new model, and its other lines unchanged" \
 check "both config files were backed up byte-for-byte" bash -c "cmp -s '$FAKE/mo.json.orig' \$(ls '$mj'.bak-pre-restart-* | head -1) && cmp -s '$FAKE/mo.md.orig' \$(ls '$mm'.bak-pre-restart-* | head -1)"
 check "the launch line names the mo session, the model and no --agent" \
   bash -c "grep -q 'OC_FRESH=1 OC_SESSION_NAME=mo .*oc-holler hj-c4r2 /proj/holler -- -m $mo_model Enter\$' '$FAKE/tmux.log' && ! grep -q -- '--agent' '$FAKE/tmux.log'"
-check "MO's doctor uses the roster name jupiter-hj-c4r2/mo" grep -q 'doctor jupiter-hj-c4r2/mo --set-registration ses_new' "$FAKE/pfo.log"
+check "MO's doctor uses the roster name host-hj-c4r2/mo" grep -q 'doctor host-hj-c4r2/mo --set-registration ses_new' "$FAKE/pfo.log"
 check "pane-ready is not run for MO" test ! -e "$FAKE/pane-ready.log"
 check "every text typed into MO's pane is followed by Enter" bash -c "! grep '^send-keys' '$FAKE/tmux.log' | grep -v 'Enter\$' | grep -v -e ' /exit\$' -e ' C-c\$'"
 
@@ -337,7 +337,7 @@ mo_case; : > "$FAKE/needs_body_restart"
 printf 'import os,sys\nopen(os.environ["FAKE"]+"/registered","w").write(sys.argv[2])\nopen(os.environ["FAKE"]+"/helper.log","w").write(" ".join(sys.argv[1:]))\n' > "$FAKE/helper.py"
 PANE_RESTART_BODY_HELPER="$FAKE/helper.py" run c4r2 "${mo_args[@]}"
 check "MO whose body still drives the old session is fixed by the body restart helper" \
-  bash -c "[ '$(rc)' = 0 ] && grep -qx 'jupiter-hj-c4r2/mo ses_new' '$FAKE/helper.log'"
+  bash -c "[ '$(rc)' = 0 ] && grep -qx 'host-hj-c4r2/mo ses_new' '$FAKE/helper.log'"
 
 mo_case; : > "$FAKE/needs_body_restart"
 run c4r2 "${mo_args[@]}"
