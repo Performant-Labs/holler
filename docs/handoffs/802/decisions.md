@@ -355,3 +355,42 @@
   - Run at head:
     - `cargo clippy --workspace --all-targets -- -D warnings`: clean.
     - `cargo test`: `pane_verbs` 262, every `holler-pane-testkit` target, `hermetic_test` 31 and `fake_tmux_test` 29, all passing.
+
+## S (Phase 10, spec audit) — 2026-10-11T08:51:40-06:00
+- **Decided:** PASS on `92fbc6e..a33a01f`. `handoff-S.md` holds the detail.
+  - All twelve acceptance criteria are met, and each has a named test that asserts the behaviour. Decisions 1-7 are
+    implemented as stated, and the Scope 1-7 items are in place.
+  - Five deviations, each documented and none silent:
+    - `with_agent` is a builder on `self` (A's W-12a);
+    - `run` refuses a missing directory too (A's W-1);
+    - AC 5 is read as "nothing from the adapter's own environment" (A's W-2). I agree: an allowlist would contradict
+      Scope 1's one shared env prefix and `ProcessEnv::Isolated`'s contract;
+    - `switch.rs` is +6 lines, where the brief asked for line-neutral;
+    - `stop_old` moved, and `OpenCodeConfig::bin()` was extracted.
+  - The brief gate's round-2 BLOCK points (B-1 to B-4, W-4) are each met by what was built.
+- **Assumed:**
+  - The opt-in real runs (`real_opencode_test` 9/9 against opencode 1.19.0, `real_tmux_test` 9/9) stand as F reported
+    them. Round 3 changed doc comments only, and the runs need private servers.
+  - T's recorded Tier 1 and Tier 2 output stands. I re-ran no build or test, per the role.
+- **Hedged:**
+  - The `pane.relaunch` op of AC 6's `timeout` is proven by code, not by a test. It comes from the shared `Budget` and
+    `OP_RELAUNCH`, both older than #802 and never tested for relaunch. This is an advisory follow-up, not rework.
+  - `origin/main` moved three commits (#816/#808, #815, #814). A trial merge conflicts in `launch.rs`, `launch/rig.rs`
+    and ADR-0021: "Decisions taken" needs renumbering, and the "Deferred" bullets need merging. This must be resolved and
+    re-verified before merge. It is not a defect of this diff.
+  - The PR body's AI disclosure goes in after the script opens the PR.
+- **Evidence:**
+  - Live state:
+    - `gh issue view 802`: body, last edit at 05:03 MDT, no comments; compared line by line with the brief.
+    - `git merge-tree --write-tree HEAD origin/main`.
+  - Diffs:
+    - `git diff 92fbc6e...HEAD`, every production file and every test file read;
+    - `git diff --stat` per phase, for the phase boundaries.
+  - Greps:
+    - the Scope 3 leftovers;
+    - the `prompt-unsupported` and `agent-unsupported` listings;
+    - `unwrap`, `expect`, `panic` and `allow` in the added `src/` lines;
+    - personal and private identifiers in every added line;
+    - the old placement in README and `docs/`.
+  - `wc -l` on the touched files; the largest is 833.
+  - A spot check of five `evidence.md` excerpts against source.
