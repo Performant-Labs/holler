@@ -223,3 +223,29 @@ Run handoff directory `docs/handoffs/642` · branch `issue-642-implementation` �
   - `cargo test --workspace -- --skip roster_stays_accurate_under_concurrent_body_load`: exit 0, with 2,142 passed,
     0 failed and 28 ignored.
   - Handoff: `docs/handoffs/642/handoff-F.md`. Evidence appendix: `docs/handoffs/642/evidence.md`.
+
+## T, verify / GREEN (Phase 7): 2026-10-11T11:23-06:00 (MDT)
+
+- **Decided:**
+  - GREEN is valid and there is no blocking Tier 2 issue, so the verdict is PASS.
+  - F changed no test, and no test was repaired: F flagged none, and I found none wrong.
+  - Eleven mutations of F's `src/` (M1 to M11 in `handoff-T-green.md`) each turned at least one authored test red, so
+    the suite pins the behaviour, not the implementation. `src/` was restored after each.
+  - Nothing was appended to `evidence.md`: F's nine facts cover every unchanged-code fact the tests rely on, and four of
+    its excerpts match source.
+- **Assumed:**
+  - The one first-run failure of the opt-in real suite (`send_prompt_queues_…`, panicking in the rig's `launch_on` at
+    `rig.rs:442`) is a flake from machine load (load average about 9 to 20, from the parallel #644 and #649 runs), not
+    an adapter defect. `launch_on` and its 30 s `BOOT` bound are unchanged by this story.
+- **Hedged:**
+  - The flake's panic text was not captured. If it recurs, make the rig's launch panic name its cause before tuning
+    `BOOT`. I logged it as advisory, not blocking: the suite is opt-in and `#[ignore]`, so CI does not run it.
+- **Evidence:**
+  - Hermetic: `agent_test` 11/11, `prompt_test` 12/12, `hermetic_test` 33/33, `attach_test` 23, `tui_test` 13.
+  - Real (opt-in): 12/12 on the second full run (135.2 s). On the first, 11/12 with a launch panic; that test then
+    passed 3/3 alone.
+  - `cargo test --workspace -- --skip roster_stays_accurate_under_concurrent_body_load`: exit 0, 2,142 passed,
+    0 failed, 28 ignored.
+  - Clippy `-D warnings`, `lint.sh`, `changelog-check.sh`, `docs_cli_test` (3), `wire_selftest` (3), `cargo machete`
+    and the fmt check on the changed crates all passed.
+  - Handoff: `docs/handoffs/642/handoff-T-green.md`.
