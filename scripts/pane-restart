@@ -203,7 +203,9 @@ followed() { # oc-holler's watcher wrote the new session to last-session and ses
   local last; last=$(cat "$state/last-session" 2>/dev/null || true)
   [ -n "$last" ] && [ "$last" != "$old_session" ] && grep -q "session_id = \"$last\"" "$state/sessions.toml" 2>/dev/null
 }
-doctor_name=$pane; [ "$mo" = 1 ] && doctor_name=jupiter-hj-c4r2/mo
+doctor_name=$pane
+# MO's roster name carries the host label in front (the lower-cased short host name); PANE_RESTART_MO_ROSTER_NAME overrides it.
+[ "$mo" = 1 ] && doctor_name=${PANE_RESTART_MO_ROSTER_NAME:-$(hostname -s | tr '[:upper:]' '[:lower:]')-hj-c4r2/mo}
 doctor_ok() { pfo doctor "$doctor_name" 2>&1 | tail -1 | grep -q ': ok$'; }
 if ! wait_for "$t_reg" followed; then
   last=$(cat "$state/last-session" 2>/dev/null || true)
@@ -220,7 +222,7 @@ if ! doctor_ok; then
     helper=${PANE_RESTART_BODY_HELPER:-$HOME/fleet-agents/cutover/o-restart-body.py}
     o_env=${PANE_RESTART_O_ENV:-$HOME/fleet-agents/cutover/o-env.sh}
     if [ -f "$helper" ]; then
-      # shellcheck disable=SC1090  # the instance env file is on Jupiter only
+      # shellcheck disable=SC1090  # the instance env file exists on the fleet host only
       ( set -a; [ -f "$o_env" ] && . "$o_env"; set +a; python3 "$helper" "$doctor_name" "$last" >/dev/null 2>&1 )
     fi
   fi
