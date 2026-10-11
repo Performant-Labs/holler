@@ -253,3 +253,20 @@
   - **The excerpts.** A script found every line of all 15 evidence excerpts verbatim at its cited lines.
   - **The paths.** `git diff --name-only origin/main` still lists exactly A's 27 paths.
   - **Files read.** The brief's C1 to C25 and the decisions, `handoff-A.md` round 4, `handoff-T-red.md`, the RED test, `pane/launch.rs` (`failure_body`), `pane/profile_scope.rs` (`reconcile_step`), `tx_launch.rs` (`TxFailure`, `run`, `act_live`, `bring_up`, `observe`), `tx_launch/server.rs` (`start`), `reconcile.rs` (`observe_all`), `holler-proto`'s `SessionName` grammar, the OpenCode adapter's `verify_serving`, and `gh issue view 818`.
+
+## T (Phase 7, verify / GREEN, fresh run after A round 4): 2026-10-11 11:28 MDT
+- **Decided:**
+  - **GREEN, with no test repair.** F listed no test as wrong, and I found none. No test file changed, and no production code was touched.
+  - **The spot-check targets F's real C25 code.** I used five mutants of `reconciled` and `stopped`, not the RED prototype, and each was killed.
+  - **One evidence entry.** It covers the fault switch's log-before-delay fact, the one F left for T, which the C21 test relies on. F's other 15 entries stand. I checked three C25 excerpts against source myself.
+- **Assumed:**
+  - The first run's five engine mutants still speak for the engine, because this run changed only docs there (`git show 0b26110` touches `tx_apply.rs`, `observe.rs` and `run.rs` in comments only).
+  - `origin/main`'s move to #820 during this phase is the PR step's to merge, not T's. It overlaps only in `CHANGELOG.md`, and `git merge-tree` is clean.
+- **Hedged:**
+  - The "already contains" guard in `reconciled` has no test. It is unreachable from the engine today, and it mirrors `failure_body` as A-dup expectation 6 asks. I recorded it as advisory, not blocking.
+  - The doc-only items (C21, C22, C23, C25's ADR sentence, `Step.acted`'s doc) are present in F's diff. Their wording is S's to audit.
+- **Evidence:**
+  - `profile_verbs`: 84 of 84 passed, 10 of 10 runs, under load.
+  - Workspace verify command: exit 0. 148 binaries, 2157 passed, 0 failed and 25 ignored, identical to F's counts.
+  - Clippy `-D warnings`, `lint.sh`, `changelog-check.sh`, `cargo machete`, `docs_cli_test`, `cli_surface_test`, `wire_selftest`, `pane_cli_process`, `test-hooks.sh`, rustdoc `-D warnings`, and `rustfmt --check` on the story's files: all clean.
+  - Mutants M1 to M5 were all killed, and the restored tree is GREEN.

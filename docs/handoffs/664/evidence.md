@@ -255,3 +255,33 @@ moved from 288-291 to 340-346 and its excerpt now shows that read. The facts and
   >     /// below one (a `down` split). Any other free cell is refused with
   >     /// [`GRID_UNREACHABLE`].
   > ```
+
+## Added by T (Phase 7, fresh run, 2026-10-11)
+
+- **Fact:** a test-kit fake records each call in the fault switch's log *before* it sleeps the configured delay, and
+  the sleep holds no lock, so other calls proceed meanwhile. So in `a_panes_health_and_shown_session_are_observed_at_once`
+  (400 ms per harness call), a call made on another thread is already in `calls()` when the first call returns, but a
+  call chained after it is not: the test's "the other call was made" check separates one-thread-per-call from a chain.
+  **Source:** `crates/holler-pane-testkit/src/fault.rs:85-103` (unchanged on this branch)
+  **Verbatim excerpt:**
+  > ```rust
+  >     /// Every call made through the port, oldest first, the failed ones included.
+  >     pub fn calls(&self) -> Vec<Op> {
+  >         self.lock().calls.clone()
+  >     }
+  >
+  >     /// What a fake calls first in every port method. It records the call, sleeps for
+  >     /// the delay (without holding the lock, so other calls proceed), and then answers
+  >     /// the standing fault if there is one, or else the oldest error queued for `op`.
+  >     pub(crate) fn enter(&self, op: Op) -> Result<(), PaneError> {
+  >         let delay = {
+  >             let mut state = self.lock();
+  >             state.calls.push(op);
+  >             state.delay
+  >         };
+  >         if let Some(delay) = delay {
+  >             thread::sleep(delay);
+  >         }
+  >         self.lock().take_fault(op)
+  >     }
+  > ```
