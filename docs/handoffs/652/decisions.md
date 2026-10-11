@@ -209,3 +209,16 @@ This file is append-only: every phase adds its entry.
 - **Hedged:** the unmanaged table's columns are not pinned (`UNMANAGED_COLUMNS` is private). This is an advisory note,
   not a production change.
 - **Evidence:** `handoff-T-green.md` (rework section); `evidence.md`, "T (Phase 6 rework)".
+
+## A, anti-duplication (Phase 7), cycle 2: 2026-10-11 (MDT)
+
+- **Decided:** PASS, 0 block, 4 warn (`handoff-A-dup.md`, rewritten for this cycle). The rework (`edbb863..b35ab04`)
+  edits the same five files in place and adds no page, section or helper; the #649, #832, #829, #839 and #835 facts are
+  each stated once in the guide and referenced by section elsewhere; the test reuses its own helpers and reads
+  `pane-unmanaged` from `PANE_UNMANAGED`. Cycle 1's warn 3 (#649 from an open branch) is resolved.
+- **Warns:** section 3's `profile apply` subsection still repeats section 6 (carried); `SCANNED_TAGS` still mirrors
+  `docs_cli_test` (carried); the guide is 794 lines, at the overlay's ~800 flag line; `pane-unlabelled` is a literal
+  where `ImportFinding::PaneUnlabelled.code()` exists, and the unmanaged columns are unpinned.
+- **Assumed:** the scope beyond the brief's text (#829, #832, `reset --first`) is S's call; F journalled the reason.
+- **Evidence:** `git diff edbb863 b35ab04 -- ':!docs/handoffs'`; `holler-pane/src/unmanaged.rs:36`;
+  `import/findings.rs:122-130`; `pane/list.rs:175`; `wc -l docs/pane-control.md` (794); `scripts/lint.sh` exit 0.
