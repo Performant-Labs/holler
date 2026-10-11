@@ -11,7 +11,7 @@ use holler_pane::profile_diff::{
     diff_profile, diff_spec, is_member, FieldDiff, FieldValue, PaneStatus, SpecField,
 };
 use holler_pane::profile_snapshot::spec_from_pane;
-use holler_pane::{Argv, EnvVarName, GridPos, Pane, ProfileSpec};
+use holler_pane::{AgentKey, Argv, EnvVarName, GridPos, Pane, ProfileSpec};
 use serde_json::{json, Value};
 
 fn argv(parts: &[&str]) -> Argv {
@@ -54,6 +54,19 @@ fn sparse_pane() -> Pane {
 
 fn fields(diffs: &[FieldDiff]) -> Vec<SpecField> {
     diffs.iter().map(|d| d.field).collect()
+}
+
+fn key(text: &str) -> AgentKey {
+    AgentKey::parse(text).unwrap()
+}
+
+/// The field whose path is `path`, found in `ALL` (#644 part 2 names `opencode_agent` only
+/// through the table, as `profile show` reads it).
+fn field_at(path: &str) -> SpecField {
+    *SpecField::ALL
+        .iter()
+        .find(|f| f.as_str() == path)
+        .unwrap_or_else(|| panic!("SpecField::ALL has a field at {path}"))
 }
 
 #[test]
@@ -198,7 +211,7 @@ fn diff_profile_classifies_matches_differs_missing_extra() {
 }
 
 /// The dotted paths, in `ALL` order: the field table is public API (#664, #665).
-const PATHS: [&str; 15] = [
+const PATHS: [&str; 16] = [
     "herdr.workspace",
     "herdr.grid",
     "host.cwd",
@@ -207,6 +220,7 @@ const PATHS: [&str; 15] = [
     "model.provider",
     "model.model_id",
     "model.effort",
+    "opencode_agent",
     "role",
     "env",
     "context.soft",
@@ -225,7 +239,11 @@ fn spec_field_values_serialize_like_the_spec() {
     bare.command = None;
     bare.check = None;
     bare.role = PaneRole::Orchestrator;
-    for one in [spec(), bare] {
+    // #644 part 2: a spec with an agent, beside the sample's, which has none (absent in the
+    // spec's JSON, so `null` at its pointer).
+    let mut agented = spec();
+    agented.opencode_agent = Some(key("feature-implementor"));
+    for one in [spec(), bare, agented] {
         let whole = serde_json::to_value(&one).unwrap();
         for field in SpecField::ALL {
             assert_eq!(
@@ -333,4 +351,50 @@ fn is_member_compares_slugs() {
     assert!(!is_member(&p, &some));
     p.profile = None;
     assert!(!is_member(&p, &some));
+}
+
+/// #644 part 2: `opencode_agent` is compared like any field by equality: a key in the spec and
+/// none live differ, two keys differ, and equal keys do not.
+#[test]
+fn diff_reports_an_agent_change() {
+    let agent = field_at("opencode_agent");
+    let mut live = pane();
+    live.opencode_agent = None;
+    let mut spec = spec_from_pane(&live);
+    spec.opencode_agent = Some(key("feature-implementor"));
+
+    let diffs = diff_spec(&spec, &live);
+    assert_eq!(fields(&diffs), vec![agent], "{diffs:?}");
+    assert_eq!(
+        serde_json::to_value(&diffs[0]).unwrap(),
+        json!({"field": "opencode_agent", "spec": "feature-implementor", "live": null})
+    );
+
+    live.opencode_agent = Some(key("orchestrator"));
+    let diffs = diff_spec(&spec, &live);
+    assert_eq!(fields(&diffs), vec![agent], "{diffs:?}");
+    assert_eq!(diffs[0].live.to_string(), "orchestrator");
+
+    live.opencode_agent = Some(key("feature-implementor"));
+    assert_eq!(diff_spec(&spec, &live), vec![]);
+}
+
+/// #644 part 2 (decision 6): an absent agent prints `(default)`, which no key can be, and a key
+/// named `none` prints `none`, so the text tells the two apart.
+#[test]
+fn an_absent_agent_prints_default_and_a_key_named_none_prints_none() {
+    let agent = field_at("opencode_agent");
+    let mut one = spec();
+    one.opencode_agent = None;
+    let absent = agent.value(&one).to_string();
+    one.opencode_agent = Some(key("none"));
+    let named_none = agent.value(&one).to_string();
+    assert_eq!(
+        (absent.as_str(), named_none.as_str()),
+        ("(default)", "none")
+    );
+    assert!(
+        AgentKey::parse("(default)").is_err(),
+        "no key prints as (default)"
+    );
 }

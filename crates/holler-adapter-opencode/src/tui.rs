@@ -161,8 +161,10 @@ pub fn escape_dir(dir: &str) -> String {
 /// ```
 ///
 /// and under [`ProcessEnv::Inherit`] it starts `env -u OPENCODE_DISABLE_TERMINAL_TITLE`
-/// instead of `env -i K=V ...`, so the title the adapter reads stays on. The prefix is the
-/// one the server's argv starts with too (`ProcessEnv`'s, #802).
+/// instead of `env -i K=V ...`, so the title the adapter reads stays on. The prefix is
+/// `ProcessEnv`'s (#802): the server's argv starts with it too for a spec without an agent,
+/// and with it plus one pair, `OPENCODE_CONFIG_CONTENT`, for a spec with one (#642 part 3).
+/// The TUI's argv never carries that pair.
 pub fn tui_argv(
     opencode_bin: &str,
     env: &ProcessEnv,

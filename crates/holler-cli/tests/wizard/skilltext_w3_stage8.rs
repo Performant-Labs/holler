@@ -1,7 +1,7 @@
 //! #788: Stage 8 text. Restored panes are reused only on the user's request, and "build in it"
 //! for an unnamed Herdr server the wizard did not start means a new workspace (epic #769).
 //!
-//! Plain text assertions over `agent-skills/setup-wizard/SKILL.md` and `docs/setup-wizard.md`.
+//! Plain text assertions over `agent-skills/herdr-setup/SKILL.md` and `docs/setup-wizard.md`.
 //! Nothing here runs a script or touches a host.
 #![cfg(unix)]
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)] // #788
@@ -26,11 +26,11 @@ fn section(text: &str, heading_start: &str) -> String {
 }
 
 fn stage8() -> String {
-    flat(&section(&read("agent-skills/setup-wizard/SKILL.md"), "## Stage 8 "))
+    flat(&section(&read("agent-skills/herdr-setup/SKILL.md"), "## Stage 8 "))
 }
 
 fn stage3() -> String {
-    flat(&section(&read("agent-skills/setup-wizard/SKILL.md"), "## Stage 3 "))
+    flat(&section(&read("agent-skills/herdr-setup/SKILL.md"), "## Stage 3 "))
 }
 
 #[test]

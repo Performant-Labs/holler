@@ -1,0 +1,330 @@
+# Decision journal: #642 part 3, the OpenCode adapter applies and verifies the pane's agent, and sends prompts
+
+Run handoff directory `docs/handoffs/642` · branch `issue-642-implementation` · rigor second-opinion · uiSurface false
+(D and U are N/A). Append-only; every phase adds its entry. The brief gate's rounds are in
+`docs/handoffs/642-brief-result-r{1,2}.md` (round 1 BLOCK, round 2 PASS).
+
+## A, up-front plan review: 2026-10-11T07:23-06:00 (MDT)
+
+- **Decided:** BLOCK, with 2 `block` and 9 `warn` findings (`docs/handoffs/642/handoff-A.md`).
+  - Block 1, the base: the plan extends objects that exist only in #802's unmerged tree (`3fe111d`).
+    - `origin/main` is `263a2d7`, `HarnessPort` still has `serve(name, port) -> u32` (`ports.rs:186`), and no `.rs`
+      file under `crates/` names `ServeSpec`, `serve_command` or `verify_serving`.
+    - #802 is OPEN and in flight in `.claude/worktrees/0802-serve-command`; its tip `0dc4e8b` amended #802's brief after
+      its T-green.
+    - Building here means tests that do not compile, then an unplanned rebuild of #802 (40 files under `crates/`,
+      +2,604/-1,029) outside the blast radius.
+  - Block 2, D4(b): `mode == "primary"` is stricter than OpenCode 1.19.0's own `default_agent` rule.
+    - That rule refuses only a missing agent, `mode === "subagent"`, or `hidden === true`.
+    - A config agent defaults to `mode: "all"`, so the plan would refuse a valid agent as "a subagent (mode all)".
+  - The warns:
+    3. The rig's `Recording` must forward `send_prompt` and `session_activity`; otherwise acceptance 11's activity
+       check cannot fail.
+    4. One status predicate for `settled` and `session_activity`.
+    5. Decide whether a child session's question counts (`holler-body`'s `session_in_scope` does).
+    6. `OP_*` names for the two new methods, which have no `HarnessOp` variant; where the new `Route`s go.
+    7. Re-export `AGENT_UNUSABLE` from the private `server` module.
+    8. A body-free failure for `prompt_async`, so the prompt cannot leak through the 60-byte excerpt.
+    9. The five "one `env` prefix" doc sites, `prefix_with`'s no-secret rule, and ADR-0021's launch paragraph.
+    10. One `tests/support/` home for the hermetic fixtures.
+    11. The section 8 carve-out (`pane reset --first` bypasses #646's gate) becomes executable here; the ADR says so,
+        and the adapter stays pure transport.
+- **Assumed:**
+  - The automated script stops this run with `needs-amendment`, and recovery is a fresh run after #802 merges, not a
+    resume.
+  - The merged #802 will keep the shapes `3fe111d` shows (the brief says the merged code wins). If it does not, the
+    `3fe111d` line numbers in my findings need re-reading.
+  - The handoff and this entry are committed by the script's phase commit, so I did not commit them.
+- **Hedged:**
+  - Block 2 overrides the letter of an operator decision ("Each is final"). I rated it `block`, not `warn`, because the
+    predicate contradicts the server the check mirrors (cut from the installed binary, as E32 is), and T would pin it
+    in tests before any code exists. The operator may keep "primary only", but must say so and fix the message for
+    `"all"`.
+  - Finding 5 is a `warn`: `pane reset` refuses either way, and only the operator's message is wrong.
+  - Not verified, and not a finding: which agent a prompt typed into the attached TUI runs as. D1 covers hub-delivered
+    prompts (`prompt_async`, no `agent`), and E21 probed only that path. The OpenCode bundle shows `opencode run --attach
+    --agent` checking the agent against the server's list, which suggests the client reads agents from the server, but
+    I did not trace the TUI's initial choice.
+  - The `env` ordering was checked on this machine's uutils `env` 0.8.0, not on CI's GNU or BSD `env`; POSIX applies
+    the operands in order.
+- **Evidence:**
+  - Read: the brief (all 1,401 lines, E1-E32 and the thread), the gate results r1 and r2, and the role's references
+    (`workflow-coding-pipeline.md` Phase 4 and the `arch` stop, `pipeline-conventions.md` section 1,
+    `parallel-agent-coexistence.md`).
+  - Code at `3fe111d`, exported with `git show`: the adapter's `lib.rs`, `server.rs`, `tui.rs` and `http.rs`;
+    `hermetic_test.rs`, `attach_test.rs`, `real_opencode/rig.rs` and `support/stub.rs`; the test kit's `harness.rs`
+    and `conformance/harness.rs`; `holler-pane`'s `ports.rs` and `tx_launch/server.rs`; ADR-0021.
+  - Code at `263a2d7`: `ports.rs:184-187`, `tx_switch.rs:204-222` and `:310-335`, `holler-body`'s `connection.rs:375-432`,
+    `holler-adapter-herdr`'s `plan.rs:30-42` and `lib.rs`, `say_cmd.rs:215-223`, and `holler-pane`'s `error.rs:1-30`.
+  - Commands:
+    - `git fetch`, `git merge-base`, `git worktree list`, `gh issue view 802`, and `git diff --stat` /
+      `--shortstat 263a2d7...3fe111d`;
+    - greps for `ServeSpec`, `serve_command`, `verify_serving`, `RefusalCode::from_static`, `HarnessOp`, `send_prompt`
+      and `session_activity`;
+    - `wc -l` over every touched file;
+    - the `env` ordering check;
+    - a scan of the installed `opencode-ai` 1.19.0 binary for the agent `mode` literals, the config agent's default
+      (`mode:"all"`, then `t.mode=s.mode??t.mode`) and the `default_agent` checks;
+    - the repo's own `opencode.json` agent modes (`orchestrator` is `primary`).
+
+## A, up-front plan review, fresh run on the re-cut brief: 2026-10-11T10:39-06:00 (MDT)
+
+- **Decided:** PASS, with 0 `block` and 5 `warn` findings (`docs/handoffs/642/handoff-A.md`, which replaces round 1's
+  BLOCK; that one stays in the history at `a4c9ca4`).
+  - Round 1's block 1 is closed: the base is `7284001` (#802 merged), and all 32 file excerpts of the brief match the tree.
+  - Round 1's block 2 is closed: D4(b) is OpenCode's rule, and E33's seven cuts each occur once in the 1.19.0 binary.
+  - Round 1's nine warns are folded into D2, D5 to D8, D12, D13 and the acceptance list, and each was checked against
+    the merged code.
+  - The new warns, all closable by T and F without a brief amendment:
+    1. Acceptance 10's "existing conformance use for the stub run" does not exist; the only conformance run is the
+       opt-in `real_opencode_test.rs:56-60`. T builds none; acceptance 1 pins case 16's property.
+    2. D7(a) has no rule for a `/question` or `/permission` answer that is not a 200 JSON array. Recommended: read it as
+       nothing held, as for `GET /session` and as in `holler-body`. Refused and timed-out stay errors. The children
+       reader goes beside `top_level_ids`.
+    3. D5's tests name `AGENT_UNUSABLE`, which F creates. That is compile RED, against the RED note. Follow #808's
+       precedent, with a throwaway stub proving behaviour RED.
+    4. D12 omits `ID`, `known_session`, `harness()` and `agent()`, which the new test files need. Move them too.
+    5. The docs of `settled` and `SETTLE_POLL` go stale under D7(b). The ADR section 8 edit should say a pending
+       permission request reads as `HoldingQuestion`.
+- **Assumed:**
+  - A PASS lets the script go on to T, with no amendment step, so the warns are written for T and F to act on.
+  - The script commits this handoff and entry at the phase commit, so I did not commit them.
+  - A question or permission request keeps the session's status `busy` while it waits, and for a subagent's question
+    the parent's too. This rests on how OpenCode runs a tool inside a turn and on round 1's reading; I did not probe it
+    live in this review.
+- **Hedged:**
+  - Finding 2's recommended rule (best-effort) is my reading of D7's own exceptions and `holler-body`. The operator may
+    prefer fail-closed. The handoff says what changes then.
+  - Finding 3 is about the test-first process, not architecture drift. I kept it because it comes from D5's decision
+    and T meets it at once.
+  - Settled since round 1 (it was hedged there): the server sorts `/agent` with the configured `default_agent` first,
+    and the TUI's local state falls back to the first agent that is neither a subagent nor hidden, so an attached TUI
+    starts on the pane's agent. Not traced: a selection the TUI remembers for a session it has shown before.
+- **Evidence:**
+  - Read: the whole brief (1,560 lines), round 1's `handoff-A.md` and this journal, gate result r2, and the role's
+    references (Phase 5's RED rule in `workflow-coding-pipeline.md`, section 1 of `pipeline-conventions.md`).
+  - Code at `7284001`:
+    - the adapter: `lib.rs`, `attach.rs:1-80`, the `Garbled` texts of `http.rs`, `hermetic_test.rs:1-170` and
+      `:440-813`, `real_opencode_test.rs:1-60`, and `rig.rs:190-335` and `:363`;
+    - the test kit: `harness.rs:40-73`, `conformance/harness.rs:440-505`, and `herdr.rs:44-56`;
+    - `holler-pane`: `ports.rs:280-331`, `tx_launch/server.rs`, and `tx_launch.rs:715-745`;
+    - the host adapter: `lib.rs:40-56`, and `tmux.rs:60-160`;
+    - `holler-body`: `connection.rs:385-450`;
+    - `docs/adr/ADR-0021.md:140-165`, `:205-215`, `:494-502`, `:609`, `:620` and `:671`;
+    - `docs/handoffs/808/handoff-T-red.md:92-118`.
+  - Commands:
+    - `git fetch`, `git merge-base`, `git log` and `git diff --stat`;
+    - a script that compared every E-section with `sed -n A,Bp` of its file (32 of 32 match);
+    - `wc -l` over the touched files;
+    - greps for `run_harness_conformance`, `verify_serving`, `send_prompt`, `session_activity`, `OpenCodeHarness` and the
+      D12 fixture names;
+    - a scan of the installed 1.19.0 binary for:
+      - E32's and E33's texts (each once);
+      - the `question.list`, `permission.list`, `session.list`, `app.agents`, `config.get`, `session.prompt_async` and
+        `session.messages` routes;
+      - where `OPENCODE_CONFIG_CONTENT` is merged;
+      - the default-first `/agent` sort and the TUI's choice of agent.
+
+## T, author tests / RED: 2026-10-11T10:50-06:00 (MDT)
+
+- **Decided:** RED is valid. F may start.
+  - **Runtime RED:**
+    - `prompt_test`: 12 of 12 fail on an assertion.
+    - `hermetic_test`: 3 fail, the rewritten agent test and the two `retry` abort cases. The other 30 pass.
+  - **Compile RED** only at `AGENT_UNUSABLE`, in `agent_test` and `real_opencode_test` (A's W-3, after #808's
+    precedent).
+  - **Behaviour RED** proven with a throwaway constant, never staged:
+    - `agent_test`: 10 fail and 1 passes, the regression pin of acceptance 2 and 3.
+    - The four new or changed real-OpenCode tests all fail on `agent-unsupported` or `prompt-unsupported`.
+  - **A's warns acted on:**
+    - W-1: no hermetic conformance run.
+    - W-2: a list that cannot be read holds nothing, and a test pins it.
+    - W-4: the fixtures moved to `tests/support/fixtures.rs`, with D12's list plus `ID`, `known_session`, `harness`
+      and `agent`.
+  - **Acceptance 11's third test** ends the turn with a raw abort. A live probe showed OpenCode 1.19.0 retrying the
+    dead-end provider indefinitely (`retry`), so the turn never ends on its own. The test also checks live that `retry`
+    reads `Busy`.
+- **Assumed:**
+  - The prompt-leak test needs no change to the stub. A canned reply that is byte-identical to the posted body stands
+    in for an echo. If F's body differed, the first `send_prompt` test would fail anyway.
+  - `send_prompt` treats a JSON 200 on the post as "not 204", so it is `unavailable` (D6: "any other status").
+  - A raw abort that ends the turn in a real test does not conflict with "the turn's end read from the raw server". The
+    end is still read from the raw message list.
+- **Hedged:**
+  - The `retry` behaviour is OpenCode 1.19.0's. A later version that fails the turn instead would still pass, because
+    the abort is harmless on a finished turn and `time.completed` is set either way.
+  - The real-test default agent for a server with no agent is computed from the raw `/agent`, not hardcoded as `build`.
+    The probe saw `build`.
+- **Evidence:**
+  - Commands, all on the base `src/`:
+    - `cargo test -p holler-adapter-opencode --test {prompt_test,hermetic_test,agent_test,attach_test,tui_test}`;
+    - `HOLLER_TEST_OPENCODE=1 cargo test --test real_opencode_test -- --ignored --test-threads=1` for the four new
+      tests, plus `ac13` and `ac17`;
+    - `cargo clippy -p holler-adapter-opencode --all-targets -- -D warnings`;
+    - `cargo fmt --check`;
+    - `bash scripts/lint.sh` (exit 0).
+  - Two live probes of `opencode serve` 1.19.0, with the rig's dead-end config, a scratch `HOME` and ports
+    48177-48179:
+    - with `default_agent` `plan`, the assistant message carries `agent` and `mode` `plan`, and the status reads
+      `retry`, attempts 1 to 5 over 40 s;
+    - with none, `/config` has no `default_agent`, the turn runs as `build`, and a raw abort answers `true`, after
+      which the status is `{}` and the message has `time.completed`.
+  - Handoff: `docs/handoffs/642/handoff-T-red.md`.
+
+## F, implement (Phase 6): 2026-10-11T11:11-06:00 (MDT)
+
+- **Decided:** the brief is implemented as written, extending the existing objects with no parallel path:
+  - `server.rs`:
+    - `AGENT_UNUSABLE`, re-exported at the crate root;
+    - `serve_command` adds `OPENCODE_CONFIG_CONTENT={"default_agent":KEY}` through the new
+      `ProcessEnv::prefix_with`, and `prefix()` delegates to it with no pair;
+    - `verify_serving` asks `GET /config` then `GET /agent`, refusing with D4's reasons as the whole message.
+  - The new `prompt.rs`:
+    - `send_prompt`: `known`, then a bare `prompt_async`, `Ok` only on `204`, with the body-free
+      `Call::unexpected_status` for any other reply;
+    - `session_activity`: held items of the session or of a direct child first, then the status object, then the
+      message-list fallback.
+  - `lib.rs`:
+    - one status reading (`status_object` and `running`), which `settled` uses too, so `retry` is not settled;
+    - one `parentID` reading (`ids_where`), behind both `top_level_ids` and the new `child_ids`;
+    - the three `OP_*` strings and six `Route`s.
+  - A's warns acted on:
+    - W-2: a list answer that is not a 200 array holds nothing, and the children reader sits beside `top_level_ids`;
+    - W-5: the docs of `settled` and `SETTLE_POLL`, and ADR section 8's note that a permission request reads as
+      `HoldingQuestion`.
+  - The docs of acceptance 12 are corrected: the crate doc, `ProcessEnv`, `prefix`, `prefix_with`, `serve_command`,
+    `tui_argv`, `AGENT_UNSUPPORTED` (comment only, D9), ADR-0021 and `CHANGELOG.md`.
+  - `GET /session` is asked only when a held item belongs to another session, so a quiet server costs three requests.
+- **Assumed:**
+  - The script's phase commit stages and commits this phase's files: the code, `handoff-F.md`, `evidence.md` and this
+    entry. I committed nothing.
+  - A message-list entry's `time.completed` counts as present whenever it is non-null, not only when it is a number.
+    OpenCode 1.19.0 writes a number (E21).
+  - An `/agent` element is unique by `name`, so the first match decides. OpenCode builds the list from a record keyed
+    by name (E33's `r[n]`).
+- **Hedged:**
+  - The JSON pair surviving the host adapter's real `tmux new-window` is checked only by reading the code: tmux's
+    escape changes only a trailing `;`, and an `AgentKey` cannot contain one. The real rig launches without tmux (ADR-0021
+    section 5), and #649's wiring is the first real run.
+  - `lib.rs` grew to 741 lines, against D8's "+60". About 45 of those lines are the corrected crate doc that acceptance
+    12 asks for. The file is under the 900 gate and the 800 flag.
+  - I stopped an orphan: T's RED live probe (`probe.sh`, `opencode serve --pure --port 48179`, started 10:49 MDT, its
+    scratch dir already deleted), still running inside the rig's port range. I signalled only that server's own
+    `setsid` group and its orphaned script.
+- **Evidence:**
+  - Hermetic GREEN:
+    - `agent_test` 11/11, `prompt_test` 12/12, `hermetic_test` 33/33;
+    - `attach_test` 23 and `tui_test` 13, unchanged.
+  - Real: `HOLLER_TEST_OPENCODE=1 cargo test -p holler-adapter-opencode --test real_opencode_test -- --ignored
+    --test-threads=1` gave 12/12 against OpenCode 1.19.0 and tmux 3.7c, including conformance `ac12`, with no leftover
+    process.
+  - `cargo clippy --workspace --all-targets -- -D warnings`: exit 0. `cargo fmt -p holler-adapter-opencode -p
+    holler-pane -- --check`: clean. `bash scripts/lint.sh`: exit 0.
+  - `cargo test --workspace -- --skip roster_stays_accurate_under_concurrent_body_load`: exit 0, with 2,142 passed,
+    0 failed and 28 ignored.
+  - Handoff: `docs/handoffs/642/handoff-F.md`. Evidence appendix: `docs/handoffs/642/evidence.md`.
+
+## T, verify / GREEN (Phase 7): 2026-10-11T11:23-06:00 (MDT)
+
+- **Decided:**
+  - GREEN is valid and there is no blocking Tier 2 issue, so the verdict is PASS.
+  - F changed no test, and no test was repaired: F flagged none, and I found none wrong.
+  - Eleven mutations of F's `src/` (M1 to M11 in `handoff-T-green.md`) each turned at least one authored test red, so
+    the suite pins the behaviour, not the implementation. `src/` was restored after each.
+  - Nothing was appended to `evidence.md`: F's nine facts cover every unchanged-code fact the tests rely on, and four of
+    its excerpts match source.
+- **Assumed:**
+  - The one first-run failure of the opt-in real suite (`send_prompt_queues_…`, panicking in the rig's `launch_on` at
+    `rig.rs:442`) is a flake from machine load (load average about 9 to 20, from the parallel #644 and #649 runs), not
+    an adapter defect. `launch_on` and its 30 s `BOOT` bound are unchanged by this story.
+- **Hedged:**
+  - The flake's panic text was not captured. If it recurs, make the rig's launch panic name its cause before tuning
+    `BOOT`. I logged it as advisory, not blocking: the suite is opt-in and `#[ignore]`, so CI does not run it.
+- **Evidence:**
+  - Hermetic: `agent_test` 11/11, `prompt_test` 12/12, `hermetic_test` 33/33, `attach_test` 23, `tui_test` 13.
+  - Real (opt-in): 12/12 on the second full run (135.2 s). On the first, 11/12 with a launch panic; that test then
+    passed 3/3 alone.
+  - `cargo test --workspace -- --skip roster_stays_accurate_under_concurrent_body_load`: exit 0, 2,142 passed,
+    0 failed, 28 ignored.
+  - Clippy `-D warnings`, `lint.sh`, `changelog-check.sh`, `docs_cli_test` (3), `wire_selftest` (3), `cargo machete`
+    and the fmt check on the changed crates all passed.
+  - Handoff: `docs/handoffs/642/handoff-T-green.md`.
+
+## A, anti-duplication gate (Phase 7): 2026-10-11T11:29-06:00 (MDT)
+
+- **Decided:** PASS, with 0 `block` and 2 `warn` findings (`docs/handoffs/642/handoff-A-dup.md`; diff `7284001..3f898ca`).
+  - Every reuse-map object was extended and none was paralleled:
+    - `ProcessEnv::prefix` delegates to `prefix_with`;
+    - `Call::unexpected` and `unexpected_status` share `answered`;
+    - `settled` and `session_activity` read `/session/status` only through `status_object` and `running`;
+    - `top_level_ids` and `child_ids` share `ids_where`;
+    - the rig's `serve` delegates to `serve_with`, and `Recording` forwards the two new methods;
+    - D12's fixtures, plus the plan review's four, moved into `support/fixtures.rs` with no copy left behind.
+  - `prompt.rs`'s plain-JSON re-read of `holler-body`'s child scope and prompt body is justified in writing by D6,
+    D7(a) and ADR-0021 section 5, so it passes.
+  - Warn 1: the `retry` status-entry literal is in both `hermetic_test.rs` (`retrying()`) and `prompt_test.rs`
+    (inline), and `status_of(kind)` builds a shape `hermetic_test.rs` writes inline. Fold both into `fixtures.rs`;
+    optional.
+  - Warn 2: `lib.rs` (741) and `hermetic_test.rs` (746) are within 60 lines of the 800-line flag. The next brief that
+    adds to either names where the code goes. The candidate split for `lib.rs` is the route table and `Call`.
+- **Assumed:**
+  - The script commits this handoff and entry at the phase commit, so I did not commit them.
+  - The T-green verdict holds for `3f898ca`. I did not re-run the tests: runtime is F's and T's, not this gate's.
+- **Hedged:**
+  - Two near-copies across test crates are not findings: `refused()`/`refusal()` and `spec()`, in `agent_test.rs` and
+    `real_opencode_test.rs`. The real suite does not include `fixtures.rs`, which needs the stub, and at the base it
+    already kept its own `unavailable` and `json_of`. Revisit if a third copy appears.
+  - The three open-coded "a 200 whose JSON is an array" reads (`server.rs`, twice in `prompt.rs`) differ in their
+    failure rule. I judged them an idiom below this gate's bar, not a missed helper.
+- **Evidence:**
+  - Read:
+    - the brief's decisions and acceptance (lines 1-82);
+    - `handoff-A.md` (round 2), `handoff-F.md` and this journal;
+    - `git diff 7284001..3f898ca` for every changed source, test, ADR and CHANGELOG file;
+    - `src/lib.rs:125-742`, `src/prompt.rs` and `tests/support/fixtures.rs`, `tests/agent_test.rs` and
+      `tests/prompt_test.rs` in full;
+    - `src/attach.rs:1-40` and `holler-adapter-herdr/src/plan.rs:235-275`.
+  - Commands:
+    - `git merge-base`, `git diff --stat` and `wc -l` over the crate;
+    - greps for the D12 fixture names, `PaneError::Refused { code, message }`, poll helpers (`wait_for`, `eventually`,
+      `wait_until`), `filter(Value::is_object)` and `as_array`, the stub's API, and `session_in_scope` and
+      `refresh_child_sessions`;
+    - a repo-wide grep for stale "every agent" or "until #642" wording outside the blast radius;
+    - `git diff --stat` on the adapter's `Cargo.toml` and on `Cargo.lock` (both unchanged).
+
+## S, spec audit (Phase 10): 2026-10-11T11:45-06:00 (MDT)
+
+- **Decided:** PASS on `7284001..fa998d7` (`docs/handoffs/642/handoff-S.md` has the detail).
+  - All twelve acceptance criteria are met. Each has a named test that asserts the behaviour, and T-green's M1-M11 show
+    the tests fail without it.
+  - D1-D13 are implemented as stated. The one gap the brief left, A's W-2 (a `/question` or `/permission` answer that
+    is not a 200 array), is read as "holds nothing", with refused and timed-out still errors. That is the reading D7(c)'s
+    fallback needs, and it is pinned by a test and stated in the crate doc and in ADR section 8.
+  - Acceptance 10 is met on A's W-1 basis: the opt-in real conformance run, with acceptance 1's whole-argv pin as the
+    hermetic stand-in for case 16.
+  - Acceptance 11's raw abort is T's documented change, because OpenCode 1.19.0 retries a refused provider instead of
+    ending the turn (D11's premise).
+- **Assumed:**
+  - T's and F's recorded runs stand, the opt-in real suite included (12/12 in F's run and in T-green's second run). I
+    re-ran no build or test, per the role.
+  - The script commits this handoff and entry at the phase commit, so I did not commit them.
+- **Hedged:**
+  - The brief's copy of the issue thread names the commenter by GitHub handle. I did not count it as a privacy hit: the
+    handle is public on the issue and is already in every branch commit's no-reply author address. It is advisory 1,
+    for the run's agent, if the operator prefers no handles in committed files.
+  - The pair through the host's real `tmux new-window` is sound by reading (`-- env --`, and `escape` changes only a
+    trailing `;`) but is not exercised until #649 (advisory 2).
+  - The outside brief gate's two rounds reviewed the brief before the re-cut. The re-cut's changes had only the
+    in-session plan review and the outside diff gate, both PASS (advisory 3).
+- **Evidence:**
+  - Live state: `gh issue view 642` (its body equals the brief's lines 3-80; three comments), and
+    `git merge-tree --write-tree origin/main HEAD` (clean; `origin/main` is at `dc1398c`, which overlaps only in
+    `CHANGELOG.md`).
+  - Read: the brief in full; `handoff-A.md`, `handoff-T-red.md`, `handoff-F.md`, `handoff-T-green.md`,
+    `handoff-A-dup.md`, this journal and `evidence.md`; the outside diff gate's result and the brief gates' prompts.
+  - Diffs: `git diff origin/main...HEAD` for every source, test, ADR and CHANGELOG file, and `git diff --stat` per phase
+    commit for the phase boundaries.
+  - Greps: stale wording ("until #642", `refuse_an_agent`, "No prompt is ever sent", "one `env` prefix"), the
+    `agent-unsupported` and `agent-unusable` listings, `unwrap`, `expect`, `panic` and `allow` in the added lines, and
+    personal or private identifiers in all 4,415 added lines.
+  - `wc -l` on the touched files (the largest is 746), and a spot check of four `evidence.md` excerpts against source.

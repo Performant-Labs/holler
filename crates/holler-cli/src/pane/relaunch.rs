@@ -32,7 +32,8 @@ use crate::output::{emit_error, ErrorBody, VerbCtx};
 /// Herdr pane is closed once the record names the new one). Flags not given keep the record's
 /// values, or with `--profile P` the values of P's spec for the pane.
 ///
-/// `--format=json` prints one envelope whose data is `{"verb", "pane", "profile", "spec_only"}`.
+/// `--format=json` prints one envelope whose data is
+/// `{"verb", "pane", "profile", "spec_only", "agent"}`.
 #[derive(Args, Debug)]
 pub struct PaneRelaunch {
     /// The pane's name, e.g. demo-c1r1.
