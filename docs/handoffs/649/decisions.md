@@ -75,3 +75,59 @@
     - `HOLLER_TEST_*` hooks in the hub;
     - the run-conformance call sites.
   - **Parallel branches:** the Blast radii of #642 and #644 (`git show issue-642-implementation:docs/handoffs/642-brief.md`, and the same for #644).
+
+## A (Phase 3, up-front plan review, re-review after the audit amendment) — 2026-10-11T11:51:08-06:00
+- **Decided:** BLOCK on `docs/handoffs/649-brief.md` at `0066ac5` (sha256 `edc4d31dc8b0525d...`), together with the work it blesses at `046026f`. One block and ten warns. The full detail is in `handoff-A.md`, which replaces the first pass's.
+  - **B-1 (block): D3's new read clause.** It maps every failure of a store read to `unavailable`, including a read the hub accepted and did not answer in time.
+    - **What it contradicts.** ADR-0021 says that case is `timeout`: lines 95-96, 217, 285 (I5), 666 and 743. So do the frozen trait docs (`ports.rs`, `profile.rs`). The test kit's wedged fault answers it with `timeout`, and three merged verb tests rely on that. The brief's own blessed WIP test pins `timeout` too (`fake_hub.rs:237`).
+    - **What is missing.** D17 amends no ADR sentence for the change.
+    - **The fix.** One clause: a read whose `Io` is `WouldBlock` or `TimedOut` is `timeout` naming the store method.
+  - **The rest holds.** The first pass's W-1, W-2, W-3, W-8, W-11 and W-13 are now decisions in the brief. W-4, W-5, W-6, W-9 and W-12 stay binding; the brief does not restate them, and the WIP honours them.
+  - **New warns:**
+    - W-A: ADR line 489-492 is missing from D17;
+    - W-B: the paragraph records that `reset --first` now delivers a real prompt outside the hub's gate, and that the `--pane` prompt verbs run over the wiring;
+    - W-C: the resolver's nested port calls exceed a TUI method's bound;
+    - W-D: D10 (5)'s binary environment needs a test-chosen `PATH` and the scratch `HOME` and `XDG_*`;
+    - W-E: the trial falls back to the default tmux socket for the harness; D6 forbids it;
+    - W-G: raw HTTP only where no port can;
+    - W-H: D28's observable does not tell tmux or OpenCode from the hub by code;
+    - W-I: `tests/support/mod.rs` is past 800 lines;
+    - W-J: the scope's single actor (a follow-up).
+- **Assumed:**
+  - **The read timeout surfaces as `WouldBlock` or `TimedOut`.** `send_over` sets a read timeout and maps the `read_line` error to `ControlError::Io`. On Linux an expired `SO_RCVTIMEO` is `EAGAIN`, so the kind is `WouldBlock`. The WIP's hang test exercises it; I did not run it.
+  - **The audit's reasoning.** It is not in the tree or on the issue (no comments). I read D3's read clause as written: "every variant".
+  - **Linux defaults.** A child process with no `HOME` falls back to `getpwuid`. A `Command` run with no `PATH` searches libc's default path. Both are standard Linux behaviour; I did not probe either.
+- **Hedged:**
+  - **Why B-1 is a block, not a binding warn.** D3's "every variant" is unambiguous, and A cannot override an operator decision by a reading. The two ways out differ in reach: conforming D3 is one clause, while amending the ADR touches files outside the Blast radius. So the operator decides.
+  - **Readings, not overrides.** W-D reads D10 (5)'s "exactly" as allowing what the test sets. W-F keeps the first pass's binding warns.
+  - **W-C's worst case** is estimated from the bounds, not measured.
+- **Evidence:**
+  - **Read in full:**
+    - the amended brief, and its diff from `cfcb974`;
+    - the trial `src/pane/wiring.rs` and `src/pane/wiring/{store,env,bind}.rs`;
+    - `tests/pane_integration/{main,clients,fake_hub,bind,env,guards,no_hub,store_only,watch,scenario}.rs` and `scratch/mod.rs`;
+    - `holler-adapter-host/tests/real_tmux/mod.rs`;
+    - `holler-hub/src/control.rs`, `holler-cli/src/transport.rs` and `holler-hub/src/profile/rename.rs`.
+  - **Read in part:**
+    - `ports.rs` (1-120) and `profile.rs` (322-332);
+    - `holler-pane-testkit/src/fault.rs`;
+    - the diffs of the three rig generalisations, and of `process/{main,stub}.rs` and `support/mod.rs`;
+    - ADR-0021 (88-120, 205-222, 280-330, 484-513, 655-680, 738-770, 780-834);
+    - `holler-adapter-opencode/src/{lib.rs (86-104, 211-232), attach.rs (155-200)}`;
+    - `pane/watch.rs` (60-95) and `panes/store.rs` (225-266);
+    - `profile_scope.rs` (135-215), `reconcile/observe.rs` (160-180) and `say_cmd.rs` (150-260);
+    - the wedged-store verb tests (`pane_verbs/list.rs:500-525`, `profile_verbs/{list.rs:95-125, show.rs:290-302}`);
+    - `pane_verbs/launch/rig.rs` (`LinkedHost`);
+    - `scripts/lint.sh`.
+  - **Greps:**
+    - `UnixListener` in tests and sources;
+    - `ControlCall {` and `ControlCall::` in the CLI;
+    - `PaneError::Timeout` consumers;
+    - `Fault::Wedged` in the CLI tests;
+    - every `#649` in ADR-0021;
+    - `const ACTOR`;
+    - `pub struct Out`;
+    - `LinkedHost`.
+  - **Line counts:** every file the work touches.
+  - **#642 part 3 (PR #823):** its changes to `rig.rs`, `ports.rs` and `OpenCodeConfig` (unchanged).
+  - **The issue:** its body equals the brief's, except that the issue carries an index in place of the Evidence section.
