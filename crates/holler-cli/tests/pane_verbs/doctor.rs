@@ -14,7 +14,7 @@ use holler_cli::output::Format;
 use holler_pane::findings::{FindingKind as K, FixState};
 use holler_pane::pane::Health;
 use holler_pane::reconcile::ReconcileRequest;
-use holler_pane::{PaneError, PaneName};
+use holler_pane::{HerdrPort, PaneError, PaneName};
 use holler_pane_testkit::harness::{HarnessOp, Quirk};
 use holler_pane_testkit::herdr::HerdrOp;
 use holler_pane_testkit::host::HostOp;
@@ -498,4 +498,63 @@ fn acknowledged_select_that_switches_nothing_is_not_fixed() {
         None,
         "nothing guessed"
     );
+}
+
+// --- #808: labels ---------------------------------------------------------------------
+
+/// #808 constraint (b): a Herdr snapshot entry's label changes nothing reconcile or doctor
+/// reports or writes. One world with the findings Herdr's snapshot feeds (an unregistered
+/// Herdr pane, a record whose Herdr pane is gone) and a moved TUI, built twice; in the second,
+/// every Herdr pane is labelled after its record was written, as the setup wizard does. The
+/// reports of a read-only and a `--fix` pass, the records they leave, and doctor's JSON and
+/// text output are the same in both.
+#[test]
+fn labels_change_nothing_doctor_reports() {
+    let world = || {
+        let rig = Rig::new(&[
+            Seed::new(PANE, 1, 1),
+            Seed::new("demo-c2r1", 1, 2),
+            Seed::new("demo-c3r1", 2, 1),
+        ]);
+        rig.unregistered_herdr_pane(3, 3);
+        rig.herdr.vanish(&rig.pane_id("demo-c3r1")).expect("vanish");
+        rig.move_tui_to_new_session(PANE);
+        rig
+    };
+    let plain = world();
+    let labelled = world();
+    for pane in labelled.herdr.snapshot().expect("snapshot").panes {
+        labelled
+            .herdr
+            .rename(&pane.pane_id, pane.pane_id.as_str())
+            .expect("label the pane");
+    }
+    let snapshot = labelled.herdr.snapshot().expect("snapshot").panes;
+    assert!(
+        snapshot.iter().all(|p| p.label.is_some()),
+        "every Herdr pane is labelled: {snapshot:?}"
+    );
+
+    for fix in [false, true] {
+        let report = plain.run(&whole(fix));
+        assert_eq!(labelled.run(&whole(fix)), report, "fix {fix}");
+        let found = kinds(&report);
+        for kind in ["unregistered-herdr-pane", "herdr-pane-missing"] {
+            assert!(found.contains(&kind), "fix {fix}: {found:?}");
+        }
+    }
+    for name in [PANE, "demo-c2r1", "demo-c3r1"] {
+        assert_eq!(labelled.record(name), plain.record(name), "{name}");
+    }
+    for format in [Format::Json, Format::Text] {
+        let (a, b) = (
+            plain.verb(&["pane", "doctor"], format),
+            labelled.verb(&["pane", "doctor"], format),
+        );
+        assert_eq!(
+            (b.code, &b.out, &b.err),
+            (a.code, &a.out, &a.err),
+            "{format:?}"
+        );
+    }
 }

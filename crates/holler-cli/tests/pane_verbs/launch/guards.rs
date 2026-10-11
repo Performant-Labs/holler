@@ -79,6 +79,7 @@ fn launch_ignores_a_stale_record_at_a_free_cell() {
         workspace: WORKSPACE.to_owned(),
         pane_id: PaneId::new("w1:p9"),
         grid: R2C1,
+        label: None,
     };
     rig.fakes.panes.concurrent_put(&other_record(gone)).unwrap();
     let run = rig.run(LAUNCH, Format::Json);

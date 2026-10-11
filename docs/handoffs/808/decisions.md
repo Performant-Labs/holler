@@ -45,3 +45,36 @@ Run handoff directory `docs/handoffs/808` Â· branch `issue-808-implementation` Â
     writes in `crates/*/src`; `herdr` in `holler-hub/src` (none); `HerdrPane` in `holler-proto/src` (none); golden
     files and `v2.md` (none).
   - `wc -l` over every touched file; `scripts/lint.sh` limits (600 warn, 900 fail).
+
+## T, RED (Phase 4): 2026-10-11T05:40-06:00 (MDT)
+
+- **Decided:** RED is valid (`docs/handoffs/808/handoff-T-red.md`).
+  - 23 rows of tests over 13 test files plus two new test modules (`launch/record_bytes.rs`, `launch/displaced.rs`), all
+    under `crates/*/tests/**`.
+  - One target is runtime-RED: `records_test`, failing with unknown field `label`. Six targets are compile-RED at the
+    new API.
+  - API names the brief left open, pinned for F:
+    - `FakeHerdr::rename(&PaneId, &str) -> Result<(), PaneError>` (and `WireHerdr::rename`, T's);
+    - the case id `labelled-pane-reports-its-label`, last in `CASES`;
+    - `parse_pane_info -> (PaneId, Option<String>)` and `parse_workspace_created -> (WorkspaceRef, PaneId, Option<String>)`,
+      each with the raw label as sent.
+  - E11's double is a pass-through `DisplacingHerdr` in a sibling module (`launch/displaced.rs`), so the rig stays at 739
+    lines (A warn 6).
+- **Assumed:**
+  - T may not edit `crates/*/src/**` (`pipeline.config.json` `paths.production`). So the conformance case, `FakeHerdr`'s
+    hook and the runner parameter are F's code, pinned by the testkit's mutants and `DOCUMENTED_CASES`.
+  - `WireHerdr` is under `tests/`, so it is T's.
+  - A made pane's `ensure_pane` answer carries the label of its creating reply (E10 item 3). I added test 17 for it,
+    though E10 does not list one.
+- **Hedged:**
+  - Tests 2, 20 and 23 are guards: they hold on the base's logic once compiled, because constraints (a) and (b) and E11
+    test 3's place check pin behaviour that must not change. Each was shown to fail against its mutant (`"label":null`; a
+    join-key-only O2; a whole-value reconcile compare).
+  - The labelled record's key order is not byte-pinned. Only the unlabelled form is (clarification 4).
+- **Evidence:**
+  - The literal: produced on `92fbc6e` (the branch's `crates/` equals it) by a throwaway probe test through
+    `tx_launch::launch` with `now_ms = 1_760_000_000_000`, then `serde_json::to_string` of the stored record.
+  - The stub: three stages in `src/`, reverted with `git checkout`. Stage 1 (API only) makes every behaviour test fail
+    on its assertion. Stage 2 (fake reports labels) fails O2 `unavailable ... is gone from r2c1` and the relaunch record
+    `Some("demo-c1r1")`. Stage 3 (four-field O2 plus `label: None`) gives `pane_verbs` 252/0.
+  - `scripts/lint.sh` exits 0, and `cargo fmt --check` lists none of the touched test files.

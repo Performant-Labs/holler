@@ -218,15 +218,20 @@ fn scratch_herdr_passes_the_conformance_suite() {
     };
     let begun = Instant::now();
 
-    let result = run_herdr_conformance(|| {
-        let server = ScratchHerdr::start(&herdr);
-        let fixture = HerdrFixture {
-            port: connect(&server),
-            session: server.session().to_owned(),
-            workspace: GRID.to_owned(),
-        };
-        (fixture, server)
-    });
+    // No label hook (#808): the suite does not label a real Herdr's panes, so its label case
+    // is not run here; the fake and the wire fake run it.
+    let result = run_herdr_conformance(
+        || {
+            let server = ScratchHerdr::start(&herdr);
+            let fixture = HerdrFixture {
+                port: connect(&server),
+                session: server.session().to_owned(),
+                workspace: GRID.to_owned(),
+            };
+            (fixture, server)
+        },
+        None,
+    );
 
     eprintln!("the conformance suite took {:?}", begun.elapsed());
     assert_eq!(result, Ok(()));

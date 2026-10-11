@@ -6,8 +6,12 @@
 //! Each mutant is a wrapper around the fake that breaks exactly one rule. The suite
 //! is the unit under test here: a suite that cannot tell a transposing adapter from a
 //! good one proves nothing about the real adapter later.
+//!
+//! #808 adds the label case: the suite's first optional hook, which labels a pane in the
+//! case's Herdr (the outside world's `pane.rename`, which the port cannot do). Every run
+//! here passes one; with none, the case is not run.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -20,8 +24,12 @@ use holler_pane_testkit::herdr::{FakeHerdr, HerdrVersion, Placement};
 const SESSION: &str = "scratch";
 const WORKSPACE: &str = "scratch";
 
-/// The 11 case ids of the brief's table, in order.
-const DOCUMENTED_CASES: [&str; 11] = [
+/// #808's case: a pane labelled through the hook is reported with its label, by `snapshot`
+/// and by `ensure_pane` of its cell; an unlabelled one, and one labelled `""`, with `None`.
+const LABEL_CASE: &str = "labelled-pane-reports-its-label";
+
+/// The 11 case ids of the brief's table, in order, then #808's label case.
+const DOCUMENTED_CASES: [&str; 12] = [
     "ensure-r2c1-reads-back-as-r2c1",
     "ensure-r1c2-is-grid-out-of-range",
     "ensure-is-idempotent",
@@ -33,6 +41,7 @@ const DOCUMENTED_CASES: [&str; 11] = [
     "calls-on-a-closed-pane-are-pane-not-found",
     "read-returns-at-most-max-lines",
     "version-is-reported",
+    LABEL_CASE,
 ];
 
 /// The fake serving a scratch session whose workspace is 2 rows by 1 column.
@@ -50,19 +59,42 @@ fn fixture<H>(port: H) -> HerdrFixture<H> {
     }
 }
 
+/// The label hook over the fake: the outside world labels `pane` (#808).
+fn rename_fake(
+    f: &HerdrFixture<FakeHerdr>,
+    _: &(),
+    pane: &PaneId,
+    label: &str,
+) -> Result<(), PaneError> {
+    f.port.rename(pane, label)
+}
+
+/// The label hook over a mutant: it labels the pane in the fake it wraps.
+fn rename_mutant(
+    f: &HerdrFixture<Mutant>,
+    _: &(),
+    pane: &PaneId,
+    label: &str,
+) -> Result<(), PaneError> {
+    f.port.rename(pane, label)
+}
+
 #[test]
 fn the_fake_passes_the_herdr_conformance_suite() {
-    let result = run_herdr_conformance(|| (fixture(scratch_fake()), ()));
+    let result = run_herdr_conformance(|| (fixture(scratch_fake()), ()), Some(&rename_fake));
     assert_eq!(result, Ok(()));
 }
 
 #[test]
 fn the_fake_in_split_only_mode_passes_the_suite() {
-    let result = run_herdr_conformance(|| {
-        let port = scratch_fake();
-        port.set_placement(Placement::SplitOnly);
-        (fixture(port), ())
-    });
+    let result = run_herdr_conformance(
+        || {
+            let port = scratch_fake();
+            port.set_placement(Placement::SplitOnly);
+            (fixture(port), ())
+        },
+        Some(&rename_fake),
+    );
     assert_eq!(result, Ok(()));
 }
 
@@ -141,21 +173,27 @@ fn the_suite_builds_a_fresh_fixture_per_case() {
     let dropped = Arc::new(AtomicUsize::new(0));
     let built = Arc::new(AtomicUsize::new(0));
 
-    let result = run_herdr_conformance(|| {
-        built.fetch_add(1, Ordering::SeqCst);
-        let over = Arc::new(AtomicBool::new(false));
-        let port = GuardWatcher {
-            inner: scratch_fake(),
-            over: Arc::clone(&over),
-            calls: Arc::clone(&calls),
-            after_drop: Arc::clone(&after_drop),
-        };
-        let guard = CaseGuard {
-            over,
-            dropped: Arc::clone(&dropped),
-        };
-        (fixture(port), guard)
-    });
+    let rename = |f: &HerdrFixture<GuardWatcher>, _: &CaseGuard, pane: &PaneId, label: &str| {
+        f.port.inner.rename(pane, label)
+    };
+    let result = run_herdr_conformance(
+        || {
+            built.fetch_add(1, Ordering::SeqCst);
+            let over = Arc::new(AtomicBool::new(false));
+            let port = GuardWatcher {
+                inner: scratch_fake(),
+                over: Arc::clone(&over),
+                calls: Arc::clone(&calls),
+                after_drop: Arc::clone(&after_drop),
+            };
+            let guard = CaseGuard {
+                over,
+                dropped: Arc::clone(&dropped),
+            };
+            (fixture(port), guard)
+        },
+        Some(&rename),
+    );
 
     assert_eq!(result, Ok(()));
     assert_eq!(built.load(Ordering::SeqCst), DOCUMENTED_CASES.len());
@@ -196,12 +234,22 @@ enum Break {
     ClosedPaneStillAnswers,
     /// `read` always asks for every line.
     ReadIgnoresMaxLines,
+    /// Every pane reports no label, from `snapshot` and from `ensure_pane` (#808).
+    ForgetsLabels,
+    /// `snapshot` reports each pane's label, and `ensure_pane` none (#808; A's finding 1).
+    EnsureForgetsLabel,
+    /// A pane labelled `""` reports `Some("")` (#808, clarification 2).
+    KeepsEmptyLabel,
+    /// A pane never labelled reports its id as its label (#808).
+    InventsLabels,
 }
 
 struct Mutant {
     inner: FakeHerdr,
     broken: Break,
     closed: Mutex<HashSet<PaneId>>,
+    /// The label each pane was given through the hook, as given (`""` included).
+    labels: Mutex<HashMap<PaneId, String>>,
 }
 
 fn swapped(grid: GridPos) -> GridPos {
@@ -217,7 +265,32 @@ impl Mutant {
             inner: scratch_fake(),
             broken,
             closed: Mutex::new(HashSet::new()),
+            labels: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// The outside world labels `pane`, an id this Herdr handed out.
+    fn rename(&self, pane: &PaneId, label: &str) -> Result<(), PaneError> {
+        self.inner.rename(&self.inward(pane)?, label)?;
+        let mut labels = self.labels.lock().unwrap_or_else(PoisonError::into_inner);
+        labels.insert(pane.clone(), label.to_owned());
+        Ok(())
+    }
+
+    /// `pane` with the label this Herdr reports for it, from `ensure_pane` when `ensured`.
+    fn labelled(&self, pane: HerdrPane, ensured: bool) -> HerdrPane {
+        let given = {
+            let labels = self.labels.lock().unwrap_or_else(PoisonError::into_inner);
+            labels.get(&pane.pane_id).cloned()
+        };
+        let label = match (self.broken, given) {
+            (Break::ForgetsLabels, _) => None,
+            (Break::EnsureForgetsLabel, _) if ensured => None,
+            (Break::KeepsEmptyLabel, Some(given)) if given.is_empty() => Some(given),
+            (Break::InventsLabels, None) => Some(pane.pane_id.as_str().to_owned()),
+            _ => pane.label.clone(),
+        };
+        HerdrPane { label, ..pane }
     }
 
     fn was_closed(&self, pane: &PaneId) -> bool {
@@ -319,7 +392,7 @@ impl HerdrPort for Mutant {
             }
             _ => self.inner.ensure_pane(spec)?,
         };
-        self.outward(made)
+        Ok(self.labelled(self.outward(made)?, true))
     }
 
     fn send_text(&self, pane: &PaneId, text: &str) -> Result<(), PaneError> {
@@ -371,7 +444,7 @@ impl HerdrPort for Mutant {
                 },
                 _ => pane,
             };
-            panes.push(self.outward(pane)?);
+            panes.push(self.labelled(self.outward(pane)?, false));
         }
         Ok(HerdrSnapshot { panes })
     }
@@ -383,7 +456,7 @@ impl HerdrPort for Mutant {
 
 /// The suite must reject `broken` and name every one of `cases` among its failures.
 fn assert_suite_fails_on(broken: Break, cases: &[&str]) {
-    let result = run_herdr_conformance(|| (fixture(Mutant::new(broken)), ()));
+    let result = run_herdr_conformance(|| (fixture(Mutant::new(broken)), ()), Some(&rename_mutant));
     let failures = result.expect_err("a broken Herdr must not pass the suite");
     for case in cases {
         assert!(
@@ -399,7 +472,10 @@ fn assert_suite_fails_on(broken: Break, cases: &[&str]) {
 
 #[test]
 fn the_unbroken_wrapper_passes_so_a_mutant_fails_for_its_break_alone() {
-    let result = run_herdr_conformance(|| (fixture(Mutant::new(Break::Nothing)), ()));
+    let result = run_herdr_conformance(
+        || (fixture(Mutant::new(Break::Nothing)), ()),
+        Some(&rename_mutant),
+    );
     assert_eq!(result, Ok(()));
 }
 
@@ -477,11 +553,14 @@ fn a_herdr_that_ignores_max_lines_fails() {
 
 #[test]
 fn an_unsupported_herdr_fails_the_version_case() {
-    let result = run_herdr_conformance(|| {
-        let port = scratch_fake();
-        port.set_version(HerdrVersion::Unsupported);
-        (fixture(port), ())
-    });
+    let result = run_herdr_conformance(
+        || {
+            let port = scratch_fake();
+            port.set_version(HerdrVersion::Unsupported);
+            (fixture(port), ())
+        },
+        Some(&rename_fake),
+    );
     let failures = result.expect_err("an unsupported build must not pass the suite");
     assert!(
         failures.iter().any(|f| f.case == "version-is-reported"),
@@ -491,4 +570,56 @@ fn an_unsupported_herdr_fails_the_version_case() {
         failures.iter().all(|f| f.case == "version-is-reported"),
         "the version alone breaks only its own case, got: {failures:?}"
     );
+}
+
+// --- #808: the label case ---
+
+#[test]
+fn a_herdr_that_forgets_labels_fails_the_label_case() {
+    assert_suite_fails_on(Break::ForgetsLabels, &[LABEL_CASE]);
+}
+
+/// A's finding 1: `ensure_pane` of a labelled cell must answer the snapshot's entry, label
+/// included, so a Herdr whose `ensure_pane` drops the label fails.
+#[test]
+fn a_herdr_whose_ensure_pane_forgets_the_label_fails_the_label_case() {
+    assert_suite_fails_on(Break::EnsureForgetsLabel, &[LABEL_CASE]);
+}
+
+#[test]
+fn a_herdr_that_keeps_an_empty_label_fails_the_label_case() {
+    assert_suite_fails_on(Break::KeepsEmptyLabel, &[LABEL_CASE]);
+}
+
+#[test]
+fn a_herdr_that_invents_labels_fails_the_label_case() {
+    assert_suite_fails_on(Break::InventsLabels, &[LABEL_CASE]);
+}
+
+/// The label breaks touch only labels, so they fail the label case alone.
+#[test]
+fn a_label_break_fails_no_other_case() {
+    for broken in [
+        Break::ForgetsLabels,
+        Break::EnsureForgetsLabel,
+        Break::KeepsEmptyLabel,
+        Break::InventsLabels,
+    ] {
+        let result =
+            run_herdr_conformance(|| (fixture(Mutant::new(broken)), ()), Some(&rename_mutant));
+        let failures = result.expect_err("a broken Herdr must not pass the suite");
+        assert!(
+            failures.iter().all(|f| f.case == LABEL_CASE),
+            "{broken:?} breaks only the label case, got: {failures:?}"
+        );
+    }
+}
+
+/// With no label hook (the opt-in run against a real Herdr), the label case is not run: a
+/// Herdr that loses every label still passes. The case is still listed.
+#[test]
+fn without_a_label_hook_the_label_case_is_not_run() {
+    let result = run_herdr_conformance(|| (fixture(Mutant::new(Break::ForgetsLabels)), ()), None);
+    assert_eq!(result, Ok(()));
+    assert!(herdr_cases().contains(&LABEL_CASE));
 }

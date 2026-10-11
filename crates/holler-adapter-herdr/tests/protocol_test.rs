@@ -8,9 +8,9 @@ mod common;
 use common::{id, pane, spike_2x4, split};
 use holler_adapter_herdr::layout::{Direction, LayoutNode};
 use holler_adapter_herdr::protocol::{
-    check_supported, decode_reply, expect_ok, parse_layout_export, parse_pane_info, parse_pong,
-    parse_read, parse_snapshot, parse_workspace_created, PaneRef, Request, ServerVersion,
-    WorkspaceRef, ALLOWED_METHODS, SUPPORTED_PROTOCOLS, SUPPORTED_VERSIONS,
+    check_supported, decode_reply, expect_ok, label_of, parse_layout_export, parse_pane_info,
+    parse_pong, parse_read, parse_snapshot, parse_workspace_created, PaneRef, Request,
+    ServerVersion, WorkspaceRef, ALLOWED_METHODS, SUPPORTED_PROTOCOLS, SUPPORTED_VERSIONS,
 };
 use holler_pane::{Key, PaneError};
 use serde_json::{json, Value};
@@ -489,6 +489,7 @@ fn ac18_a_snapshot_lists_each_pane_with_its_workspace_and_tab() {
         pane_id: id(pane),
         workspace_id: workspace.into(),
         tab_id: tab.into(),
+        label: None,
     };
 
     assert_eq!(
@@ -499,6 +500,27 @@ fn ac18_a_snapshot_lists_each_pane_with_its_workspace_and_tab() {
             pane_ref("w2:p1", "w2", "w2:t1"),
         ]
     );
+}
+
+/// #808 E10 item 1: each snapshot pane keeps its `label` as Herdr sent it (`"x"` and `""`
+/// as they are). An absent label, and one that is not a string, is `None`, never a garbled
+/// reply: no snapshot that parses without labels fails because of one.
+#[test]
+fn a_snapshot_pane_carries_its_label_as_sent() {
+    let mut result = snapshot_result("other");
+    let panes = &mut result["snapshot"]["panes"];
+    panes[0]["label"] = json!("x");
+    panes[1]["label"] = json!("");
+    panes[2]["label"] = json!(7);
+
+    let labels: Vec<Option<String>> = parse_snapshot(&result)
+        .unwrap()
+        .panes
+        .into_iter()
+        .map(|pane| pane.label)
+        .collect();
+
+    assert_eq!(labels, [Some("x".to_owned()), Some(String::new()), None]);
 }
 
 #[test]
@@ -626,7 +648,7 @@ fn workspace_created() -> Value {
 
 #[test]
 fn ac20_a_created_workspace_gives_its_ref_and_its_root_pane() {
-    let (workspace, root) = parse_workspace_created(&workspace_created()).unwrap();
+    let (workspace, root, label) = parse_workspace_created(&workspace_created()).unwrap();
 
     assert_eq!(
         workspace,
@@ -637,13 +659,62 @@ fn ac20_a_created_workspace_gives_its_ref_and_its_root_pane() {
         }
     );
     assert_eq!(root, id("w3:p1"));
+    assert_eq!(label, None, "a root pane with no label");
+}
+
+/// #808 E10 item 1: `workspace_created`'s root pane keeps its label as sent.
+#[test]
+fn a_created_workspaces_root_pane_carries_its_label() {
+    for (sent, read) in [
+        (json!("r"), Some("r")),
+        (json!(""), Some("")),
+        (json!(7), None),
+    ] {
+        let mut result = workspace_created();
+        result["root_pane"]["label"] = sent.clone();
+
+        let (_, root, label) = parse_workspace_created(&result).unwrap();
+
+        assert_eq!(root, id("w3:p1"));
+        assert_eq!(label.as_deref(), read, "{sent}");
+    }
 }
 
 #[test]
 fn ac20_pane_info_gives_the_pane_id() {
     let result = json!({"type": "pane_info", "pane": {"pane_id": "w1:pA", "workspace_id": "w1", "tab_id": "w1:t1"}});
 
-    assert_eq!(parse_pane_info(&result), Ok(id("w1:pA")));
+    assert_eq!(parse_pane_info(&result), Ok((id("w1:pA"), None)));
+}
+
+/// #808 E10 item 1: `pane_info`'s pane keeps its label as sent.
+#[test]
+fn pane_info_carries_the_panes_label() {
+    for (sent, read) in [
+        (json!("x"), Some("x")),
+        (json!(""), Some("")),
+        (json!(null), None),
+    ] {
+        let result = json!({"type": "pane_info", "pane": {"pane_id": "w1:pA",
+            "workspace_id": "w1", "tab_id": "w1:t1", "label": sent.clone()}});
+
+        assert_eq!(
+            parse_pane_info(&result),
+            Ok((id("w1:pA"), read.map(str::to_owned))),
+            "{sent}"
+        );
+    }
+}
+
+/// #808 clarification 2: the one coercion of a label Herdr sent. No label and the empty
+/// string are `None`; any other text is that text, not trimmed.
+#[test]
+fn label_of_folds_no_label_and_the_empty_string_to_none() {
+    assert_eq!(label_of(None), None);
+    assert_eq!(label_of(Some("")), None);
+    assert_eq!(label_of(Some("x")), Some("x".to_owned()));
+    assert_eq!(label_of(Some(" ")), Some(" ".to_owned()));
+    assert_eq!(label_of(Some(" hj-c1r2 ")), Some(" hj-c1r2 ".to_owned()));
 }
 
 fn read_result(text: &str) -> Value {
