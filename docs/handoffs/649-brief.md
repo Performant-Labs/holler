@@ -2,32 +2,32 @@
 
 Part of epic #633.
 
-(consolidated 2026-10-11, rewritten from merged `main` at 7284001 (#802): the operator's decisions D1 to D20 below are final and override every earlier wording of this issue, the amendment marks of the earlier text are kept in the Scope paragraph where they still bind. The Evidence section is verbatim from `main`; the pipeline copies this body into the brief, so cite an entry as E<n>.)
+(consolidated 2026-10-11, rewritten from merged `main` at 7284001 (#802): the operator's decisions D1 to D20 below are final and override every earlier wording of this issue, the amendment marks of the earlier text are kept in the Scope paragraph where they still bind. (amended 2026-10-11, audit) The brief audit of that day (B1 to B5, W6 to W19) is folded in: the edits are marked (audit), the new decisions are D21 to D30, and the Blast radius blesses the work already in the tree (`046026f`). The Evidence section is verbatim from `main`; the pipeline copies this body into the brief, so cite an entry as E<n>.)
 
 ## Scope
 Two things, in this order.
 
 **1. The wiring.** Replace the stub body of `Wiring::connect` and the fields of `Wiring` in `crates/holler-cli/src/pane/wiring.rs` (E1, E2) with the real stores and adapters, so that `holler pane ...` and `holler profile ...` run against the hub's registries and the real Herdr, tmux and OpenCode. `Unwired` stays: it is the one not-implemented port set, and the in-process verb harness builds on it. The hub constructs no adapter (E5, E56); the verbs run CLI-side. The adapter crates `holler-adapter-herdr`, `holler-adapter-host` and `holler-adapter-opencode` become `holler-cli` dependencies (E52).
 
-**2. The scripted scenario** (opt-in, scratch only) under `crates/holler-cli/tests/pane_integration/` (E50, E51): launch two panes, relaunch one, reset one with a first message, switch one, park one, kill a server and watch `doctor` find it, delete a session under a TUI and watch it be reported, restart the hub and find the registry intact. (amended 2026-10-08, profiles) Add a **profile scenario** on the same scratch instances: `holler profile create <scratch> --from-current`; edit it through `holler pane launch --profile`; `holler pane close --profile`; `holler profile show` and `list`; `holler profile delete` refused while its panes are live, then `delete --keep-panes` (the panes keep running with no profile). The apply step is not here: the real-adapter run of `holler profile apply` is #667. (amended 2026-10-08, grid) Launch one scratch pane with `--grid c1r2` and one with `--grid 2,1`, each into an otherwise empty scratch workspace, and assert from Herdr's own snapshot that each sits at row 2, col 1 as Herdr counts it (through #640). Every verb the scenario runs with `--format=json` (each `watch` line too) parses against the envelope with #638's helper (E55).
+**2. The scripted scenario** (opt-in, scratch only) under `crates/holler-cli/tests/pane_integration/` (E50, E51): launch two panes, relaunch one, reset one with a first message, switch one, park one, kill a server and watch `doctor` find it, delete a session under a TUI and watch it be reported, restart the hub and find the registry intact. (amended 2026-10-08, profiles) Add a **profile scenario** on the same scratch instances: `holler profile create <scratch> --from-current`; edit it through `holler pane launch --profile`; `holler pane close --profile`; `holler profile show` and `list`; `holler profile delete` refused while its panes are live, then `delete --keep-panes` (the panes keep running with no profile). The apply step is not here: the real-adapter run of `holler profile apply` is #667. (amended 2026-10-08, grid) Launch one scratch pane with `--grid c1r2` and one with `--grid 2,1`, each into a scratch workspace of its own whose r1c1 already holds a Holler pane launched first (the adapter refuses a first pane anywhere but r1c1 as `grid-unreachable`, E61; D23), and assert from Herdr's own snapshot that each sits at row 2, col 1 as Herdr counts it (through #640). (audit) Every verb the scenario runs with `--format=json` (each `watch` line too) parses against the envelope with #638's helper (E55).
 
 ## Decisions (final)
 
 **Wiring**
 
-D1. **What `connect` builds.** A store client for the pane registry and one for the profile registry, both over the hub's control socket; a lazily connected Herdr adapter; a `TmuxHost`; an `OpenCodeHarness`; `SystemProber` (E21); and `StoreScope::new(profiles, panes, actor)` as the `ProfileScope` (E19). The actor is `holler pane` (a constant, as each profile verb names its own, E20). `Wiring::ports()` lends them as the seven ports of `Ports` (E4). `connect` may change signature freely (nothing outside `main.rs` and the verb harness calls it).
+D1. **What `connect` builds.** A store client for the pane registry and one for the profile registry, both over the hub's control socket; a lazily connected Herdr adapter; a `TmuxHost`; an `OpenCodeHarness`; `SystemProber` (E21); and `StoreScope::new(profiles, panes, actor)` as the `ProfileScope` (E19). The actor is `holler pane` (a constant, as each profile verb names its own, E20). `Wiring::ports()` lends them as the seven ports of `Ports` (E4). (audit) `connect` keeps its signature `connect() -> Result<Wiring, PaneError>`: it is called from `main.rs` (E3) and from `say_cmd.rs::route_target`, which `say`, `interrupt` and `answer` with `--pane` use (E58); neither call changes. With no hub, `say --pane` now fails `unavailable` at `connect` (exit 1, the one-line error the legacy `say` tests expect); T runs the `say`/legacy tests to confirm. The in-process verb harness and `pane_verbs` build `Unwired` and never call `connect`.
 
-D2. **`connect` needs the hub and nothing else.** It makes one `control/status` exchange (`ControlCall::status()`, E6); with no hub running (`ControlError::NoLiveHub`, E8) it fails `unavailable` and the run exits 1 with that code, whose message names the missing hub (E3 reports it). `Io`, `BadReply` and `Refused` of that exchange are `unavailable` too. Herdr, tmux and OpenCode are not touched at `connect`: `TmuxHost::new` and `OpenCodeHarness::new` do no I/O (E27, E33), and the Herdr adapter pings Herdr when it is built (E23), so it is built on its first use and the result kept (`OnceLock`). A verb that never touches Herdr (`pane list`, `pane get`, `pane watch`, `profile list`, `profile show`) therefore works with no Herdr running.
+D2. **`connect` needs the hub and nothing else.** It makes one `control/status` exchange (`ControlCall::status()`, E6); with no hub running (`ControlError::NoLiveHub`, E8) it fails `unavailable` and the run exits 1 with that code, whose message names the missing hub (E3 reports it). `Io`, `BadReply` and `Refused` of that exchange are `unavailable` too. Herdr, tmux and OpenCode are not touched at `connect`: `TmuxHost::new` and `OpenCodeHarness::new` do no I/O (E27, E33), and the Herdr adapter pings Herdr when it is built (E23), so it is built on its first use and the result kept (`OnceLock`). A verb that never touches Herdr (`pane list`, `pane get`, `pane watch`, `profile list`, `profile show`) therefore works with no Herdr running. (audit) Every verb that reaches the wiring answers `unavailable` without a hub, the stubs too (`pane import`, `profile apply`, `profile rename`, `profile export`, `profile import`): D22 says how their process tests change. A malformed or missing configuration variable never fails `connect` (D26).
 
-D3. **The store clients** implement `PaneStore` and `ProfileStore` by `holler_hub::control::run` (E7) with the `ControlCall` of the method names (E9, each `&'static str`) and the params structs of E12 and E13; they parse the result with `PaneReply::into_result` (E10, E11) and decode `data` as E14 and E15 give it. Every call is bounded by 10 s (I5). A request that never reached the hub (`NoLiveHub`) is `unavailable`. **A write (`cas_put`, `delete`, `rename`) whose reply is lost after it was sent is `timeout`, not `unavailable`** (E40): the write may have landed, and the verb says so. `profile/rename` is PROPOSED (#665): the client sends it and passes the hub's `not-implemented` through.
+D3. **The store clients** implement `PaneStore` and `ProfileStore` by `holler_hub::control::run` (E7) with the `ControlCall` of the method names (E9, each `&'static str`) and the params structs of E12 and E13; they parse the result with `PaneReply::into_result` (E10, E11) and decode `data` as E14 and E15 give it. Every call the clients build carries a 10 s `ControlCall.timeout` (I5); the `connect` status exchange keeps `ControlCall::status()`'s own 5 s (E60). The methods are the seven of `PaneStore` and the six of `ProfileStore` including `profile/log` (`ProfileStore::log`, params `ProfileLogParams`, E62). (audit) The mapping of `ControlError` (E59), per variant: for a read (`get`, `list`, `watch`, `log`), every variant is `unavailable` naming the hub; for a write (`cas_put`, `delete`, `rename`), `NoLiveHub` is `unavailable` (the request never left), and `Io` and `BadReply` are `timeout`, because `send_over` cannot tell a failed `write_all` from a lost reply and the write may have landed; `Refused` (a JSON-RPC error before dispatch, so nothing was written) and the two remote variants (unreachable on the local socket) are `unavailable`. **A write whose reply is lost after it was sent is `timeout`, not `unavailable`** (E40): the write may have landed, and the verb says so. `profile/rename` is PROPOSED (#665): the client sends it and passes the hub's `not-implemented` through.
 
-D4. **Watch.** `PaneStore::watch` and `ProfileStore::watch` return a `Watch` (E17) that sends one `pane/watch` or `profile/watch` per `next()`, with `ControlCall.timeout` = `holler_hub::panes::WATCH_WAIT` plus 5 s (E57). A batch with events yields them in order; an empty batch yields `Ok(None)` (the port's idle item); the next request resumes from the reply's cursor (E16). A store or transport error yields one `Err` and ends the stream. A `since` ahead of the head is the hub's `usage`, passed through.
+D4. **Watch.** `PaneStore::watch` and `ProfileStore::watch` return a `Watch` (E17) that sends one `pane/watch` or `profile/watch` per `next()`, with `ControlCall.timeout` = `holler_hub::panes::WATCH_WAIT` plus 5 s (E57). A batch with events yields them in order; an empty batch yields `Ok(None)` (the port's idle item); the next request resumes from the reply's cursor (E16). A store or transport error yields one `Err` and ends the stream. A `since` ahead of the head is the hub's `usage`, passed through. (audit) `watch(since)` itself makes the first request, eagerly, and keeps its batch for the first `next()`: so a cursor ahead of the head is refused by `watch()` before any line, as `pane watch`'s `open()` promises ("every refusal comes before the first line"); later `next()`s send one request each.
 
-D5. **Herdr** is `HerdrAdapter::connect(HerdrConfig)` (E22, E23) from the environment of the process: the session is `HOLLER_HERDR_SESSION`, else `HERDR_SESSION` (Herdr sets it inside its panes, E25); the socket is `HOLLER_HERDR_SOCKET`, else `HERDR_SOCKET_PATH`, else `$XDG_CONFIG_HOME/herdr/sessions/<session>/herdr.sock` (`~/.config` when `XDG_CONFIG_HOME` is unset, E25); the workspaces are `HOLLER_HERDR_WORKSPACES=label=RxC[,label=RxC]...` (rows by columns, E24, E37, E38). No session configured: the Herdr port answers `usage` naming the two variables when it is first used (store-only verbs are unaffected, D2). `--herdr-session` stays required by `launch` as ADR-0021 records it (E37); the adapter refuses a name other than its configured session as `unavailable` (E24). Defaulting the flag from the wiring (ADR-0021 line 522) is **not** done here: it edits `launch.rs`, outside the Blast radius, and stays recorded as deferred.
+D5. **Herdr** is `HerdrAdapter::connect(HerdrConfig)` (E22, E23) from the environment of the process: the session is `HOLLER_HERDR_SESSION` only (audit: no `HERDR_SESSION` fallback; no source verifies that Herdr sets it in its panes, and the setup wizard marks it UNVERIFIED until #734, E64); the socket is `HOLLER_HERDR_SOCKET`, else `HERDR_SOCKET_PATH`, else `$XDG_CONFIG_HOME/herdr/sessions/<session>/herdr.sock` (`~/.config` when `XDG_CONFIG_HOME` is unset, E25); the workspaces are `HOLLER_HERDR_WORKSPACES=label=RxC[,label=RxC]...` (rows by columns, E24, E37, E38). (audit) A malformed value (an item without `=` or `x`, an empty label, a label containing `=` or `,`, a zero or non-numeric extent, a repeated label) is `usage` naming the variable, raised when the Herdr port is first used, never at `connect`. No session configured: the Herdr port answers `usage` naming `HOLLER_HERDR_SESSION` when it is first used (store-only verbs are unaffected, D2). `--herdr-session` stays required by `launch` as ADR-0021 records it (E37); the adapter refuses a name other than its configured session as `unavailable` (E24). Defaulting the flag from the wiring (ADR-0021 line 522) is **not** done here: it edits `launch.rs`, outside the Blast radius, and stays recorded as deferred.
 
-D6. **tmux** is one `HOLLER_TMUX_SOCKET` (an absolute path becomes `TmuxSocket::Path`; unset is `TmuxSocket::Default`), used for **both** `TmuxHost` (E27) and `OpenCodeConfig.tmux` (E30), whose two `TmuxSocket` types the wiring maps from the one value. The binary is `tmux` from `PATH`.
+D6. **tmux** is one `HOLLER_TMUX_SOCKET` (an absolute path becomes `TmuxSocket::Path`; unset is `TmuxSocket::Default`), used for **both** `TmuxHost` (E27) and `OpenCodeConfig.tmux` (E30), whose two `TmuxSocket` types the wiring maps from the one value. The binary is `tmux` from `PATH`. (audit) A relative or empty `HOLLER_TMUX_SOCKET` is `usage` naming the variable (a bare name would be a `TmuxSocket::Name`, which this story does not use), raised when the host or the harness is first used, never at `connect`.
 
-D7. **OpenCode** is `OpenCodeConfig` (E30) with: `opencode_bin` = `HOLLER_OPENCODE_BIN`, else `opencode` resolved on `PATH` to an absolute path (E30 says wiring passes one); `serve_args` = `HOLLER_OPENCODE_SERVE_ARGS`, a JSON array of strings, default none; `env` = `ProcessEnv::Inherit` always (E29); the default `Timeouts`. No binary found: the harness answers `unavailable` naming `HOLLER_OPENCODE_BIN` when first used. **No `HostPort` amendment and no credential handling here**: a provider credential reaches the server through the operator's tmux server environment (E29, E39); how production sets it is the cutover's (#654), and nothing in this story puts a credential on an argv, in a file or in a log.
+D7. **OpenCode** is `OpenCodeConfig` (E30) with: `opencode_bin` = `HOLLER_OPENCODE_BIN`, else `opencode` resolved on `PATH` to an absolute path (E30 says wiring passes one); `serve_args` = `HOLLER_OPENCODE_SERVE_ARGS`, a JSON array of strings, default none (audit: a value that is not a JSON array of strings is `usage` naming the variable, raised when the harness is first used, never at `connect`); `env` = `ProcessEnv::Inherit` always (E29); the default `Timeouts`. No binary found: the harness answers `unavailable` naming `HOLLER_OPENCODE_BIN` when first used. **No `HostPort` amendment and no credential handling here**: a provider credential reaches the server through the operator's tmux server environment (E29, E39); how production sets it is the cutover's (#654), and nothing in this story puts a credential on an argv, in a file or in a log.
 
 D8. **The `tui_session` resolver** (`Resolver<PaneId, PaneName>`, E31, E32) answers from, in this order: (a) the **bindings** of a launch in progress; (b) the pane registry (a record whose `herdr.pane_id` is the id); (c) the pane's label in Herdr's snapshot (E26: only a pane someone labelled, e.g. an imported one; `launch` never writes one); otherwise `pane-not-found` (E32). The bindings exist because the engine calls `attach_tui` with the Herdr pane id before the record exists (E34): a `HerdrPort` decorator remembers the `pane_id` that `ensure_pane` returned, and a `HostPort` decorator binds it to the name when `ensure_session(name, ..)` follows (the engine's order, E34). The bindings are per run and in memory. This couples the wiring to the engine's call order; a test pins it, and carrying the name in `attach_tui` is a later change to the port, not this story's.
 
@@ -35,53 +35,77 @@ D9. **Budgets.** The verbs keep `TxOptions::default()` (budget `DEFAULT_BUDGET`,
 
 **Scenario and tests**
 
-D10. **Scratch-only, four guards.** (1) *Opt-in:* every scratch test is `#[ignore]` and runs only with `HOLLER_TEST_PANE_INTEGRATION=1` exactly (E43, E49); opted in, a missing `herdr`, `tmux` or `opencode` is a failure, not a skip (E48). (2) *Unique prefix:* the Herdr session is `holler649-<8 lower-case hex>`, every pane name is `hlr649-...`, and `default` is refused by name (E44). (3) *Temp state dir:* the hub, its registries, the tmux socket and Herdr's whole `HOME`/`XDG_*` live in one fresh `/tmp` directory, removed by a guard that kills only the processes it started (E42, E45, E49). (4) *Refusal of real names:* the test checks every name and path before it runs a verb and fails closed on a Herdr session that is not the scratch one, a tmux socket outside the scratch directory, a state dir outside it, or a pane name without the prefix; the binary is run with `HERDR_*`, `TMUX` and `TMUX_PANE` removed and `HOLLER_STATE_DIR` set (E53). Each guard is a pure function the default run tests.
+D10. **Scratch-only, four guards.** (1) *Opt-in:* every scratch test is `#[ignore]` and runs only with `HOLLER_TEST_PANE_INTEGRATION=1` exactly (E43, E49); opted in, a missing `herdr`, `tmux` or `opencode` is a failure, not a skip (E48). (2) *Unique prefix:* the Herdr session is `holler649-<8 lower-case hex>`, every pane name is `hlr649-...`, and `default` is refused by name (E44). (3) *Temp state dir:* the hub, its registries, the tmux socket and Herdr's whole `HOME`/`XDG_*` live in one fresh `/tmp` directory, removed by a guard that kills only the processes it started (E42, E45, E49). (4) *Refusal of real names:* the test checks every name and path before it runs a verb and fails closed on a Herdr session that is not the scratch one, a tmux socket outside the scratch directory, a state dir outside it, or a pane name without the prefix; the binary is run with `HERDR_*`, `TMUX` and `TMUX_PANE` removed and `HOLLER_STATE_DIR` set (E53). Each guard is a pure function the default run tests. (audit) (5) *OpenCode's and tmux's environment:* the test starts the private tmux server itself, before any verb runs, with exactly the isolated pairs of the adapter rig (`HOME` and the `XDG_*` directories inside the scratch directory, `PATH`, `TERM`, the five `OPENCODE_DISABLE_*` flags) (tmux reads no user config: it is started by the test under the scratch `HOME`), and has written the dead-end `opencode.json` under the scratch `XDG_CONFIG_HOME/opencode/` first; under D7's `ProcessEnv::Inherit` every OpenCode the verbs start then inherits that server's environment and cannot read the operator's config, auth or session store. The binary under test gets exactly `HOLLER_STATE_DIR`, `HOLLER_HERDR_SESSION`, `HOLLER_HERDR_SOCKET`, `HOLLER_HERDR_WORKSPACES`, `HOLLER_TMUX_SOCKET`, `HOLLER_OPENCODE_BIN`, `HOLLER_OPENCODE_SERVE_ARGS=["--pure"]` and the logging variables, nothing inherited. A guard check (a pure function) fails closed when any of `HOME`, `XDG_*`, a socket or the state dir lies outside the scratch directory. (6) *Killing what it started (W16):* the servers and TUIs are started by the private tmux server and Herdr, not by the test, so the guard finds them by `tmux list-panes -a -F '#{pane_pid}'` on the scratch socket and by `HostPort::ps` per scratch session, sends `TERM` then `KILL` to their process groups, runs `tmux kill-server` on the scratch socket, runs `herdr server stop` for the scratch session, and only then removes the directory; "no server process of the test is left" (D15) means none of those pids answers `kill -0` afterwards.
 
-D11. **Reuse, do not copy.** The scratch Herdr guard (`tests/scratch_herdr/mod.rs` of `holler-adapter-herdr`, E42 to E44), the OpenCode rig's dead-end provider and port picker (E45, E47) and the private tmux pattern (E49) are included from their crates with `#[path = "..."] mod ...;`, not copied. Anything that cannot be included as it is gets one small generalisation in place; a second copy of a guard is a defect.
+D11. **Reuse, do not copy.** (audit, rewritten) The scratch Herdr guard (`holler-adapter-herdr/tests/scratch_herdr/mod.rs`, E42 to E44), the OpenCode rig's dead-end config, isolated environment, binary lookup, port picker and model guard (`holler-adapter-opencode/tests/real_opencode/rig.rs`, E45, E47) and the private tmux pattern (`holler-adapter-host/tests/real_tmux_test.rs`, E49) are included from their crates with `#[path = "..."] mod ...;`, not copied. They cannot be included as they are, so each gets one small generalisation in place, and the three adapter test directories are in the Blast radius for exactly these edits and no others, with every default-run test of those directories passing unchanged: (a) *scratch_herdr:* a `Flavor { gate_var, name_prefix, root_prefix }` with #640's own flavor (`HOLLER_HERDR_SCRATCH`, `holler640-`, `h640.`) as the default of the unsuffixed functions, and `_as`/`_in` variants (`check_name_as`, `new_name_as`, `prove_as`, `opt_in_as`, `ScratchHerdr::start_in(herdr, flavor, base)`) taking the flavor and the scratch base; this story's flavor is `HOLLER_TEST_PANE_INTEGRATION`, `holler649-`, `h649.`. (b) *real_opencode/rig.rs:* `CONFIG`, `on_path`, `binaries`, `no_model_can_be_reached`, and the new `lay_out(root)` and `isolated_vars(opencode, root)` (the pieces the rig's own constructor now calls) become `pub`. (c) *real_tmux:* the private tmux server moves out of the test target `real_tmux_test.rs` into the includable `tests/real_tmux/mod.rs`, which the test target and this story include. An included module whose items this target does not all use carries `#![allow(dead_code)] // #649` (the workspace denies `dead_code`; `pane_integration/main.rs` has it). A second copy of a guard is a defect.
 
-D12. **No model call.** The only provider is the dead-end one of E47 (a closed local port): no model can be reached and no prompt reaches one. After every server is healthy the test checks it reports exactly that provider, or fails without going on. `reset --first TEXT` sends its message through `HarnessPort::send_prompt` (ADR-0021, #642 part 3); with the dead-end provider the server accepts it and no model is called. No step types into a TUI (I4).
+D12. **No model call.** The only provider is the dead-end one of E47 (a closed local port): no model can be reached and no prompt reaches one. After every server is healthy the test checks it reports exactly that provider, or fails without going on. `reset --first TEXT` sends its message through `HarnessPort::send_prompt` (ADR-0021, #642 part 3); with the dead-end provider the server accepts it and no model is called. No step types into a TUI (I4). (audit) The first message goes to pane C2 (the one reset), and the test asserts `session_activity` after it; if the dead-end provider leaves the session busy or retrying (unverified for the real binary), that is a finding to report as D9 says, and the later steps on C2 (park, kill, unpark, relaunch) do not need an idle session.
 
-D13. **Two kinds of test, one target.** Tests that need only a hub subprocess and a state dir (the `Hub` and `StateDir` harness, E53, E54) run in the default run (CI): the store clients' round trips, the no-hub failure (`unavailable`, exit 1, D2), a lost write reply (D3), a hub restart with the registry intact, and the watch test of D14. Tests that need Herdr, tmux and OpenCode are the scenario and are `#[ignore]` (D10). Both live in `tests/pane_integration/main.rs`'s modules, the one `[[test]]` that exists (E50); no manifest edit beyond the dependencies (D16).
+D13. **Two kinds of test, one target.** Tests that need only a hub subprocess and a state dir (the `Hub` and `StateDir` harness, E53, E54) run in the default run (CI): the store clients' round trips, the no-hub failure (`unavailable`, exit 1, D2), a lost write reply (D3), a hub restart with the registry intact, and the watch test of D14. Tests that need Herdr, tmux and OpenCode are the scenario and are `#[ignore]` (D10). (audit) The lost reply of D3 is tested with an in-test fake hub: a `UnixListener` at `<state>/hub/control.sock` (`pane_integration/fake_hub.rs`) that answers `control/status` and, for a write, reads the request and closes the connection without replying; `send_over` then answers `BadReply` at once, so the test does not wait out the 10 s bound (D9 admits no knob). Both live in `tests/pane_integration/main.rs`'s modules, the one `[[test]]` that exists (E50); no manifest edit beyond the dependencies (D16).
 
 D14. **`*/watch` is wired with one minimal test**: against a real hub, `holler pane watch --until-idle --format=json` from cursor 0 prints the put of a record written through the client, each line a valid envelope, and `ProfileStore::watch` of the client yields the put of a profile from cursor 0; nothing more.
 
-D15. **The #802 follow-up belongs here.** One scratch test runs the server argv `OpenCodeHarness::serve_command` builds, through `TmuxHost::run` (E28) on the private tmux server (a real pty), waits for the health with the engine's `wait_healthy`, checks `verify_serving`, stops it with `stop_owned`, and asserts the port then refuses a connection and no server process of the test is left. The adapter's own rig cannot do it (it may not depend on the host adapter, E45).
+D15. **The #802 follow-up belongs here.** One scratch test runs the server argv `OpenCodeHarness::serve_command` builds, through `TmuxHost::run` (E28) on the private tmux server (a real pty), waits for the health with the engine's `wait_healthy`, checks `verify_serving`, stops it with `stop_owned`, and asserts the port then refuses a connection and no server process of the test is left. The adapter's own rig cannot do it (it may not depend on the host adapter, E45). (audit) The test first calls `ensure_session(name, cwd)` with an absolute existing `cwd`, because `TmuxHost::run` first reads that the session exists and checks `cwd` before it makes the window (E28).
 
-D16. **Manifest.** Only `crates/holler-cli/Cargo.toml` changes: the three adapter crates as `[dependencies]` with a comment naming this story (E52). `holler-hub/src/pane_wiring.rs` is left empty and unedited (E56); `lib.rs` is #637's.
+D16. **Manifest.** (audit) Only `crates/holler-cli/Cargo.toml` changes (and `Cargo.lock` follows it): the three adapter crates as `[dependencies]` with a comment naming this story (E52). `holler-hub/src/pane_wiring.rs` is left empty and unedited (E56); `lib.rs` is #637's.
 
-D17. **Docs.** ADR-0021 gains a "Wiring as built (#649)" paragraph in the section that names the adapters' construction (E5), recording D1 to D9 in prose; the CHANGELOG gets an `## [Unreleased]` entry linking this issue; the module doc of `wiring.rs` replaces the stub text (E1) and lists every environment variable of D5 to D7. `docs/pane-control.md` is #652's.
+D17. **Docs.** ADR-0021 gains a "Wiring as built (#649)" paragraph in the section that names the adapters' construction (E5), recording D1 to D9 in prose; the CHANGELOG gets an `## [Unreleased]` entry linking this issue; the module doc of `wiring.rs` replaces the stub text (E1) and lists every environment variable of D5 to D7. `docs/pane-control.md` is #652's. (audit) The ADR also keeps saying what this story does not do, so these sentences are edited, not only a paragraph added (line numbers of `main` at 7284001): line 180-181 ("#649 may need a `HostPort` amendment of its own": none is made here; #654 decides how production sets a credential), line 511 ("no port carries [model, effort, env] yet (#642, #649)": #642 only), line 522 (the wiring defaults `--herdr-session`: recorded as deferred, D5), lines 733-738, 785 and 824 (DRIVEN is #654's, D18a: they say #649 wires it), and lines 832-833 (the first message's path is #646's alone, D18c).
 
 D18. **Not done here, and not decided here.** (a) *DRIVEN:* how the hub's DRIVEN session follows `session_of_record` stays deferred to #654 (E41); this story wires nothing for it, `last_observed.driven` stays as stored, and the scenario asserts SHOWN against `session_of_record` only. (b) The whole-fleet defaults of ADR-0021 line 522. (c) Moving the first message to the hub's prompt path (#646). (d) Importing the live fleet (#650) and the cutover (#654).
 
-D19. **Order with #642 part 3.** The scenario's `reset --first` step and the real `send_prompt` and `session_activity` come from #642 part 3. This story is built on `main` at launch; if #642 part 3 has merged by the time F runs, the step runs as written, and if it has not, the PR waits for it (merge `main` in before the PR; do not stub the step out).
+D19. **Order with #642 part 3.** (audit, rewritten) The scenario's `reset --first` step needs the real `send_prompt` and `session_activity` of #642 part 3, which `main` at 7284001 lacks (`OpenCodeHarness` answers `prompt-unsupported`). The step belongs to the opt-in scenario (D10); no default-run test depends on it. The run is built on `main` at launch. When the run reaches T (verify) and `main` still lacks #642 part 3, the step stays in the scenario as written and the run does not stub it: the run merges `main` as soon as #642 part 3 is on it, before T-green, and no PR is opened with that step failing or removed.
 
 D20. **Rigor** is `second-opinion` (the operator's choice for the epic's remaining stories).
 
+**Audit amendments (2026-10-11)**
+
+D21. **The end state, and what is broken on purpose** (B4). The scenario breaks two things and repairs them before it asserts the end state. After the park (scenario step 5), C2's server is killed: `SIGKILL` to the process groups of the pids `tmux list-panes` (and `HostPort::ps`) give for C2's session, so `doctor` reports its server as down (`server-down`). Then C1's *session of record after the switch* is deleted under its TUI through `DELETE /session/:id` on C1's server (raw HTTP in the test), so `doctor` reports a finding for C1. `doctor` is asserted to find both. The hub is then restarted and `pane list` is asserted equal to what it was before the restart. Only then are both panes repaired: `pane reset C1`, `pane unpark C2` and `pane relaunch C2`, and the strays that the reset and the switch left on each server are deleted through the server's HTTP API (no port deletes a session). The end-state criteria then hold: `doctor` reports no finding and `pane list` equals Herdr's snapshot for the scratch panes of the scenario's workspace.
+
+D22. **The process-level stub tests** (B1). `connect` fails `unavailable` without a hub for every verb (D2), so the stub tests of `tests/pane_verbs/process/stub.rs` (`stub_verb_not_implemented`, `stub_verb_not_implemented_json_is_one_envelope`, and the forced-diagnostic test that uses a stub), which today run the stubs against an empty state dir and require `not implemented (story #N)` and the code `not-implemented` (E63), run against a started hub instead: `tests/pane_verbs/process/main.rs` gains a `LiveHub` (a `Hub::start` on its own `StateDir`) and `stub.rs` calls `LiveHub::holler`. Their assertions do not change. `tests/support/mod.rs` gains `StateDir::at(path)` for the scenario's one scratch directory. `tests/pane_verbs/process/**` and `tests/support/**` are in the Blast radius for these edits only.
+
+D23. **The grid workspaces** (B5). The adapter's planner refuses a first pane anywhere but r1c1 in an empty workspace (`grid-unreachable`, E61). Each of the two grid workspaces (`hlr649g`, `hlr649h`) is therefore given its r1c1 first by a Holler launch (panes `hlr649-g0`, `hlr649-h0`, each with its record and a server), and then the grid pane is launched: `hlr649-g1` with `--grid c1r2` into `hlr649g`, `hlr649-h1` with `--grid 2,1` into `hlr649h`. `HOLLER_HERDR_WORKSPACES` is `hlr649=2x1,hlr649b=2x1,hlr649g=2x1,hlr649h=2x1`. The grid test starts its own scratch set, so its panes never meet the end-state criteria of D21; it asserts only the two positions in Herdr's snapshot and that each launch exits 0.
+
+D24. **API sketch** (W9). T authors against these names; F may not rename them. Under `crates/holler-cli/src/pane/wiring/`, declared as submodules inside `wiring.rs` (`pane/mod.rs` admits no new module): `store.rs` (`HubPaneStore`, `HubProfileStore`, `stores()`, and `call(method, params, timeout, write, op)`, the one `ControlError` mapping of D3), `env.rs` (`herdr_config`, `tmux_socket`, `opencode_bin`, `serve_args`, each taking `&dyn Fn(&str) -> Option<String>` so the default run needs no process environment), `bind.rs` (`Bindings`, `BindingHerdr`, `BindingHost`, `LazyHerdr`, `WiredHarness` and `tui_session(...)`, the resolver of D8). `Wiring` keeps `connect()` and `ports()`. The decorators wrap `Arc<dyn HerdrPort>`/`Arc<dyn HostPort>`, so the test of D8 (the `attach_tui` of a launch resolved before the record exists) runs in the default run with fakes behind the decorators. The work in the tree at `046026f` is a satisfiability trial: `wiring/{bind,env,store}.rs` carry a `TRIAL` header and are compressed; F rewrites them to the house style and the names above, and T deletes the throwaway probe `zz_probe_attach_after_run`.
+
+D25. **Source split** (B3). `wiring.rs` stays the file of `Wiring` and `Unwired`; the new code is the three submodules of D24 under `src/pane/wiring/`, so no file reaches the 900-line lint (`scripts/lint.sh` fails at 900; `wiring.rs` is 236 lines before this story).
+
+D26. **Configuration errors** are lazy (W14): see D5, D6 and D7; `connect` needs only the hub.
+
+D27. **`say_cmd.rs`** (W7): see D1; it is in the Blast radius only if F changes `connect`'s signature, which D1 forbids.
+
+D28. **Testable observables** (W19). The criterion "touches no adapter" is observed by running the no-hub tests with no `HOLLER_HERDR_*`, `HOLLER_TMUX_SOCKET` or `HOLLER_OPENCODE_*` set and a `PATH` without `herdr`, `tmux` and `opencode`, so any adapter use would fail differently from `unavailable`. The criterion "no credential is printed, written to a file or put on an argv" is observed by planting a sentinel in the test's environment and grepping the verbs' stdout and stderr, the scratch directory's files and the argv of every process the scenario starts (`ps`) for it. `pane close --profile` closes the one named pane and removes its spec (the pane's own name is always given); `profile delete` is refused while *other* panes of the profile are live.
+
+D29. **Depends on and the bounds** (W15): #638 (the testkit `check_envelope`) and #640 (`grid-unreachable`) are used and merged. The `connect` status call keeps its 5 s (E60); no new budget covers a verb beyond the ports' own bounds (I5).
+
+D30. **Edges left to the implementer, named so a test can pin them.** A launch now makes 8 harness calls, not 6, so a timing assertion in the scenario uses no margin below the 10 s budget (D9); the scratch tools' absence when opted in is a failure (D10).
+
 ## Acceptance
-- With no hub running, every `holler pane ...` and `holler profile ...` verb exits 1 with `unavailable`, naming the missing hub, and touches no adapter (a default-run test).
+- With no hub running, every `holler pane ...` and `holler profile ...` verb exits 1 with `unavailable`, naming the missing hub, and touches no adapter (a default-run test; D28 says how "no adapter" is observed). The stub tests of `tests/pane_verbs/process` run against a started hub (D22).
 - `pane list`, `pane get`, `pane watch` and `profile list` work against a hub with no Herdr, no tmux and no OpenCode present (D2).
-- A write whose reply is lost answers `timeout` (a default-run test with a hub that drops the reply, D3).
+- A write whose reply is lost answers `timeout` (a default-run test with the in-test fake hub of D13 that closes the connection without replying, D3).
 - The scenario passes on a developer machine with only scratch Herdr, tmux and OpenCode instances; nothing outside the scratch set is touched; the test refuses the real session names (D10) and the guards are tested in the default run.
-- The scenario runs, in order: two launches; a relaunch of one; a reset of one with a first message; a switch of one; a park of one; a killed server found by `doctor`; a session deleted under a TUI reported; a hub restart after which `pane list` equals what it was.
-- No step types into a TUI; at the end the registry equals the observed state (`doctor` reports no finding and `pane list` equals Herdr's snapshot for the scratch panes).
+- The scenario runs, in order: two launches; a relaunch of one; a reset of one with a first message; a switch of one; a park of one; a killed server found by `doctor`; a session deleted under a TUI reported; a hub restart after which `pane list` equals what it was; then the repairs of D21.
+- No step types into a TUI; at the end, after the repairs of D21, the registry equals the observed state (`doctor` reports no finding and `pane list` equals Herdr's snapshot for the scratch panes of the scenario's workspace).
 - The profile scenario passes (create from current, launch with `--profile`, close with `--profile`, show, list, delete refused then `--keep-panes`, the panes still running with no profile).
-- The two grid launches sit at row 2, column 1 in Herdr's own snapshot (`c1r2` and `2,1`).
+- The two grid launches sit at row 2, column 1 in Herdr's own snapshot (`c1r2` and `2,1`), each in a workspace whose r1c1 a Holler launch made first (D23).
 - Every `--format=json` output of the scenario parses against the envelope, each `watch` line too (D14).
 - The `launch` of the scenario resolves `attach_tui` before the pane's record exists (D8), pinned by a test.
 - The server argv runs under a real tmux pty (D15).
-- No credential is printed, written to a file or put on an argv.
+- The `attach_tui` of a launch resolves before the pane's record exists, with the decorators over fakes in the default run (D8, D24).
+- No credential is printed, written to a file or put on an argv (D28 says how it is observed).
 
 ## Blast radius
-- crates/holler-cli/src/pane/wiring.rs (the stub is replaced; `Unwired` stays)
-- crates/holler-cli/src/main.rs (only if `connect`'s signature changes; the call at E3)
-- crates/holler-cli/Cargo.toml (the adapter crates as dependencies)
+- crates/holler-cli/src/pane/wiring.rs (the stub is replaced; `Unwired` stays) and crates/holler-cli/src/pane/wiring/** (the new submodules of D24 and D25)
+- crates/holler-cli/src/main.rs and crates/holler-cli/src/say_cmd.rs (only if `connect`'s signature changes, which D1 forbids; the calls at E3 and E58)
+- crates/holler-cli/Cargo.toml (the adapter crates as dependencies) and Cargo.lock
 - crates/holler-cli/tests/pane_integration/** (new files under the existing target)
-- crates/holler-cli/tests/verb_harness/** and crates/holler-cli/tests/pane_verbs/** only for the one call of `Wiring::connect`, if its signature changes
+- crates/holler-cli/tests/pane_verbs/process/** (D22: a `LiveHub` for the stub tests) and crates/holler-cli/tests/support/** (`StateDir::at`)
+- crates/holler-adapter-herdr/tests/scratch_herdr/**, crates/holler-adapter-opencode/tests/real_opencode/** and crates/holler-adapter-host/tests/real_tmux_test.rs with the new crates/holler-adapter-host/tests/real_tmux/** (D11: the generalisations only; their default-run tests pass unchanged)
 - docs/adr/ADR-0021.md (D17), CHANGELOG.md
 - crates/holler-hub/src/pane_wiring.rs: not edited (D16)
 
 ## Depends on
-All merged except #642 part 3 (D19): #639 to #647, #660 to #663, #643, #637, #669, #670, #802, #808.
+All merged except #642 part 3 (D19): #638 to #647, #660 to #663, #643, #637, #669, #670, #802, #808.
 
 ## Pipeline
 `rigor: second-opinion` (D20).
@@ -581,26 +605,29 @@ See the epic (#633): the contract section there is fixed, so this story builds a
   >         }
   >     }
 
-- **E28.** `TmuxHost::run` starts the server's argv in the pane's tmux session, in `cwd`, and tags the window.
-  **Source:** `crates/holler-adapter-host/src/lib.rs:321-337`
+- **E28.** `TmuxHost::run` starts the server's argv in the pane's tmux session, in `cwd`, and tags the window; it first reads that the session exists and checks `cwd`, so `ensure_session` comes first (D15).
+  **Source:** `crates/holler-adapter-host/src/lib.rs:338-357`
   **Verbatim excerpt:**
-  >             return match self.run_tmux(&tmux::new_session(name, cwd), call)? {
-  >                 Reply::Done(_) | Reply::Refused(Refusal::Duplicate, _) => Ok(()),
-  >                 Reply::Refused(_, what) => Err(PaneError::Unavailable { what }),
-  >             };
+  >     /// Three tmux calls on success: the read that the session exists, `new-window` in
+  >     /// `cwd`, and the tag (Decision 3). The session is checked first, then the argv, then
+  >     /// `cwd` (narrowing 5), all before any window is made.
+  >     fn run(&self, name: &PaneName, cwd: &str, argv: &Argv) -> Result<(), PaneError> {
+  >         let call = Call::start(OP_RUN, self.timeout);
+  >         if let Reply::Refused(refusal, what) = self.run_tmux(&tmux::panes(name), call)? {
+  >             return Err(refused(name, refusal, what));
   >         }
-  >         match self.run_tmux(&tmux::has_session(name), call)? {
-  >             Reply::Done(_) => Ok(()),
-  >             Reply::Refused(refusal, _) if refusal.is_missing() => Err(PaneError::Usage {
-  >                 message: format!(
-  >                     "cannot create the tmux session {name}: its directory must be an \
-  >                      absolute path to an existing directory"
-  >                 ),
-  >             }),
-  >             Reply::Refused(_, what) => Err(PaneError::Unavailable { what }),
-  >         }
+  >         check_argv(argv)?;
+  >         check_cwd(name, cwd)?;
+  >         let (pid, window) = match self.run_tmux(&tmux::new_window(name, cwd, argv), call)? {
+  >             Reply::Done(stdout) => {
+  >                 tmux::parse_new_window(&stdout).ok_or_else(|| unavailable(BAD_NEW_WINDOW))?
+  >             }
+  >             Reply::Refused(refusal, what) => return Err(refused(name, refusal, what)),
+  >         };
+  >         self.tag(name, window, pid, call)
   >     }
   >
+  >     /// `TERM` to every owned group, one shared grace, `KILL` to every group not done, and
 
 - **E29.** `ProcessEnv::Inherit`: under tmux the server inherits the tmux server's environment, so a provider credential reaches it only through the pane's tmux session, never an argv.
   **Source:** `crates/holler-adapter-opencode/src/lib.rs:151-164`
@@ -1027,3 +1054,184 @@ See the epic (#633): the contract section there is fixed, so this story builds a
   > //! registers no adapters (epic #633, ruling 0). The adapters are wired in
   > //! `holler-cli`'s `pane/wiring.rs` (#649), so this module has no job. It stays
   > //! declared in `lib.rs` as an empty placeholder.
+
+- **E58.** `say`, `interrupt` and `answer` with `--pane` call `Wiring::connect()` through `route_target` (D1).
+  **Source:** `crates/holler-cli/src/say_cmd.rs:245-255`
+  **Verbatim excerpt:**
+  >         (PromptTarget::Session(session), None) => session,
+  >         (PromptTarget::Session(_), Some(_)) => {
+  >             return Err(Stop {
+  >                 message: PROFILE_NEEDS_PANE.to_owned(),
+  >                 exit_code: ErrorClass::Usage.exit_code(),
+  >             })
+  >         }
+  >         (PromptTarget::Pane(pane), profile) => Wiring::connect()
+  >             .and_then(|wiring| resolve_pane_target(wiring.ports(), &pane, profile))
+  >             .map_err(|error| routing_stop(&error))?,
+  >     };
+
+- **E59.** `ControlError` has six variants; the client maps each (D3).
+  **Source:** `crates/holler-hub/src/control.rs:18-43`
+  **Verbatim excerpt:**
+  > /// Why a control exchange could not reach the live hub.
+  > #[derive(Debug)]
+  > pub enum ControlError {
+  >     /// No socket at the expected path (the hub is not running, or the state
+  >     /// dir is wrong) — the spec's `no live holler hub reachable at <dir>`.
+  >     NoLiveHub,
+  >     /// The socket was present but the exchange failed (I/O or a bad reply).
+  >     Io(std::io::Error),
+  >     /// The reply did not parse as a v2 envelope.
+  >     BadReply(String),
+  >     /// The hub answered with a JSON-RPC error (issue #182: `control/
+  >     /// token_ping`'s `-32004 not_connected` is reported this way).
+  >     Refused(holler_proto::WireError),
+  >     /// Issue #508: a `--server` address failed the loopback policy check
+  >     /// (ADR 0002, the same fail-closed rule `body join` applies) — refused
+  >     /// before any dial. `holler-cli`'s `*_cmd.rs` maps this to exit 3.
+  >     RemotePolicyRefused(String),
+  >     /// Issue #508 (MO 9): the remote hub could not be reached, or this
+  >     /// body's credential could not authenticate to it. Not a hub-side
+  >     /// JSON-RPC refusal (that is `Refused`, above, so every existing
+  >     /// `*_cmd.rs` rendering — exit codes, the `session_busy`/`session_held`
+  >     /// hints, ambiguity exit 2 — stays shared and unchanged between the
+  >     /// local and the remote path); this carries only a plain message and
+  >     /// maps to exit 1, same as every other runtime refusal.
+  >     RemoteUnavailable(String),
+  > }
+
+- **E60.** The control client's own timeout is 5 s, and `ControlCall` carries a public `timeout` the store clients set to 10 s (D3).
+  **Source:** `crates/holler-hub/src/control.rs:14-16`
+  **Verbatim excerpt:**
+  >
+  > /// The timeout for a one-shot control exchange (the spec: 5 s).
+  > const CLIENT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+- **E70.** `ControlCall`'s fields are public, so the store clients set their own `timeout`, and `status()` uses the 5 s (D3).
+  **Source:** `crates/holler-hub/src/control.rs:65-75`
+  **Verbatim excerpt:**
+  > /// of these constructors.
+  > pub struct ControlCall {
+  >     pub method: &'static str,
+  >     pub params: Option<serde_json::Value>,
+  >     pub timeout: std::time::Duration,
+  > }
+  >
+  > impl ControlCall {
+  >     pub fn status() -> Self {
+  >         Self { method: "control/status", params: None, timeout: CLIENT_TIMEOUT }
+  >     }
+
+- **E61.** An empty Herdr workspace starts at r1c1; the planner refuses any other first cell as `grid-unreachable` (D23).
+  **Source:** `crates/holler-adapter-herdr/src/plan.rs:136-143`
+  **Verbatim excerpt:**
+  >                 return Ok(Step::CreateRoot);
+  >             }
+  >             return Err(refuse(
+  >                 cell,
+  >                 "an empty workspace starts at r1c1, and Herdr makes every other pane by \
+  >                  splitting one",
+  >             ));
+  >         }
+
+- **E62.** `profile/delete`, `profile/log` and `profile/rename` have params structs (D3).
+  **Source:** `crates/holler-pane/src/reply.rs:175-202`
+  **Verbatim excerpt:**
+  >
+  > /// Params of `profile/delete`.
+  > #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+  > #[serde(deny_unknown_fields)]
+  > pub struct ProfileDeleteParams {
+  >     pub name: ProfileName,
+  >     pub expected_generation: u64,
+  >     pub actor: Actor,
+  > }
+  >
+  > /// Params of `profile/log`.
+  > #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+  > #[serde(deny_unknown_fields)]
+  > pub struct ProfileLogParams {
+  >     pub name: ProfileName,
+  > }
+  >
+  > /// Params of `profile/rename` (PROPOSED, #665).
+  > #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+  > #[serde(deny_unknown_fields)]
+  > pub struct ProfileRenameParams {
+  >     pub from: ProfileName,
+  >     pub to: ProfileName,
+  >     pub expected_generation: u64,
+  >     pub actor: Actor,
+  > }
+  >
+
+- **E63.** The stub process tests run with no hub and require `not-implemented` (D22).
+  **Source:** `crates/holler-cli/tests/pane_verbs/process/stub.rs:55-70`
+  **Verbatim excerpt:**
+  > }
+  >
+  > /// Text mode: `error: not implemented (story #NNN)` on stderr, nothing on stdout, exit 1.
+  > #[test]
+  > fn stub_verb_not_implemented() {
+  >     let mut failures = Vec::new();
+  >     for &(namespace, verb, story) in STUBS {
+  >         let out = holler(&[namespace, verb]);
+  >         let line = format!("error: not implemented (story #{story})");
+  >         if out.code != 1 || !out.stdout.is_empty() || !out.stderr_has_line(&line) {
+  >             failures.push(format!("holler {namespace} {verb}: want exit 1, empty stdout, stderr line {line:?}; got {out:?}"));
+  >         }
+  >     }
+  >     assert_no_failures(failures);
+  > }
+  >
+
+- **E64.** The setup wizard marks what a pane sees in `HERDR_SESSION` as UNVERIFIED until #734 (D5).
+  **Source:** `agent-skills/setup-wizard/lib/herdr.sh:8-11`
+  **Verbatim excerpt:**
+  > #
+  > # UNVERIFIED until operator story #734 checks it with the real binary: what `--session` does
+  > # (which server and socket it selects), what a pane sees in HERDR_PANE_ID / HERDR_SESSION, and
+  > # the `session list` status words used by session-delete. Do not trust any of it blind.
+
+- **E65.** ADR-0021 still says #649 wires DRIVEN (D17).
+  **Source:** `docs/adr/ADR-0021.md:733-738`
+  **Verbatim excerpt:**
+  > **Deferred to #649 (wiring) and #654 (cutover):** how the hub's DRIVEN session is pointed at `session_of_record` for each
+  > registered pane, and when it moves after a switch or reset.
+  > Until #649 wires DRIVEN, reconcile (#647) compares SHOWN with `session_of_record`, which I2 makes the session the hub
+  > drives, and leaves `last_observed.driven` as stored.
+  > A switch or reset (#645) likewise leaves `last_observed.driven` as stored; the hub's DRIVEN session follows the new
+  > `session_of_record` once #649 wires it.
+
+- **E66.** ADR-0021 still says the wiring defaults `--herdr-session` (D17).
+  **Source:** `docs/adr/ADR-0021.md:520-523`
+  **Verbatim excerpt:**
+  > Every failure once the act has started ends with the reconcile step of step 6, appended only when the message lacks it. A
+  > run is bounded as section 12 records. `--herdr-session` is required because the frozen `HerdrPort` cannot tell the
+  > engine its session; the wiring (#649) defaults it from the Herdr adapter's one configured session. What a failure or a
+  > crash leaves is not all reported by the merged doctor: only a whole-fleet pass reports a Herdr pane no record names
+
+- **E67.** ADR-0021 still says #649 may amend `HostPort` (D17).
+  **Source:** `docs/adr/ADR-0021.md:178-182`
+  **Verbatim excerpt:**
+  > sessions of their own (`scripts/spikes/opencode-lib.sh`), which the deleted `kill_group` did not stop either. A provider
+  > credential never goes on an argv (`ps` and tmux show it): under tmux the server inherits the tmux server's environment, not
+  > the adapter's, so a credential reaches it only through the pane's tmux session. That is #649's to set, and `HostPort`
+  > has no environment parameter, so #649 may need a `HostPort` amendment of its own. tmux also limits a command's size
+  > (tmux 3.7c refused a 20,000-byte `new-window` argument and took 15,000), so #642 part 3's `OPENCODE_CONFIG_CONTENT`
+
+- **E68.** ADR-0021 still names #649 for the first message and for the model and effort ports (D17).
+  **Source:** `docs/adr/ADR-0021.md:830-833`
+  **Verbatim excerpt:**
+  >   default-armed `HarnessPort` methods (section 8, "The prompt and activity seam"). Their real implementation is #642
+  >   part 3's, and the fake's recording #684's; whether the first message later moves to the hub's one prompt path is #646's
+  >   and #649's to decide.
+  > - `HerdrPort`: #640 implements it as merged; the label is added by #808; a pane with no cell stays out of the snapshot (the
+
+- **E69.** ADR-0021 line 509-512: no port carries model, effort or env yet (D17).
+  **Source:** `docs/adr/ADR-0021.md:509-512`
+  **Verbatim excerpt:**
+  > compare-and-swap, with no `harness.pid` (#802): `last_observed.shown` is that observation, and `driven` is never inferred
+  > (launch writes none, relaunch keeps the stored one). The model, effort, environment names and ceilings are recorded, not
+  > applied: no port carries them yet (#642, #649; they will join the `ServeSpec`). A failed step rolls back what the run made
+  > (it stops the tmux session's processes, the server among them since #802, and closes a Herdr pane the plan's snapshot did
