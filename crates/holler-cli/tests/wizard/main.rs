@@ -18,5 +18,7 @@ mod skilltext_w3_stage8;
 mod skilltext_w4_stage2;
 mod skilltext_w3_stage3;
 mod skilltext_w4_stage8;
+mod skilltext_w5_basics;
+mod skilltext_w5_workspace;
 mod skilltext_w5_stage0;
 mod start;

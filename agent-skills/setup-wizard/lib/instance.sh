@@ -7,6 +7,9 @@
 # defaults filled in) and each session's resolved backend port and endpoint, exit 0. On any problem it prints
 # one message per problem to stderr, each naming the key, and exits 1. Exit 2 is a usage error.
 # A config without an `[instance]` table resolves to all defaults (today's behaviour).
+# An optional bare top-level `workspace = "<name>"` (before every table header) names the Herdr
+# workspace: 1 to 40 characters, a letter or digit first, then letters, digits, space, . _ or -.
+# When present and valid it is printed on its own line, `workspace: <name>`, after the instance line.
 #
 # The keys, defaults and rules are the contract of holler#726. bash 3.2 and POSIX awk only (no
 # associative arrays, no GNU-only flags), so it runs on macOS and Linux.
@@ -81,6 +84,10 @@ BEGIN {
     eq = index(line, "=")
     if (eq == 0) next
     key = trim(substr(line, 1, eq - 1))
+    if (section == "" && key == "workspace") {
+        wraw = trim(substr(line, eq + 1)); has_ws = 1
+        next
+    }
     val = value_of(substr(line, eq + 1))
     if (section == "instance") {
         if (key != "name" && key != "prefix" && key != "hub_port" && key != "serve_https_port" &&
@@ -181,6 +188,15 @@ END {
         if (rport[i] != "" && rport[i] == rport[j] && shost[i] == shost[j])
             err("sessions " sname[i] " and " sname[j] " both resolve to backend port " rport[i] " on host " (shost[i] == "" ? "(unset)" : shost[i]))
 
+    if (has_ws) {
+        if (wraw !~ /^"[^"]*"[ \t]*(#.*)?$/) err("workspace must be a quoted string without a quote inside it")
+        else {
+            ws = value_of(wraw); ws = substr(ws, 3)
+            if (length(ws) < 1 || length(ws) > 40 || ws !~ /^[A-Za-z0-9][A-Za-z0-9 ._-]*$/)
+                err("workspace must be 1 to 40 characters: a letter or digit first, then letters, digits, spaces, . _ or -")
+        }
+    }
+
     if (bad) exit 1
     if (has_instance) for (i = 1; i <= nsess; i++)
         if (match(send[i], /:[0-9]+$/) && substr(send[i], RSTART + 1) + 0 != rport[i])
@@ -189,6 +205,7 @@ END {
                 " (on a shared host the endpoint port may belong to another instance)" > "/dev/stderr"
     print "instance: name=" name " prefix=" prefix " hub_port=" hub_port " serve_https_port=" serve \
         " state_dir=" state_dir " herdr_session=" herdr " backend_port_base=" base
+    if (has_ws) print "workspace: " ws
     for (i = 1; i <= nsess; i++) print "session " sname[i] ": backend_port=" rport[i] " endpoint=http://127.0.0.1:" rport[i]
 }
 ' "$1"

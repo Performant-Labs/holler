@@ -4,6 +4,9 @@
 //! methods, the version gate, config validation and the one deadline per call. Every
 //! request goes through `Request::to_line` and every reply through the adapter's own
 //! decoder; the fake keeps the trees.
+//!
+//! #808: every pane the adapter reports carries its label, read from the `PaneInfo` of
+//! replies the adapter already receives, through `label_of` (no new request).
 
 mod wire_herdr;
 
@@ -64,13 +67,23 @@ fn spec(workspace: &str, row: u16, col: u16) -> HerdrSpec {
     }
 }
 
-/// The pane the adapter reports for `pane_id` at `r<row>c<col>` of `workspace`.
+/// The pane the adapter reports for `pane_id` at `r<row>c<col>` of `workspace`, with no
+/// label.
 fn pane(workspace: &str, pane_id: &str, row: u16, col: u16) -> HerdrPane {
     HerdrPane {
         session: SESSION.to_owned(),
         workspace: workspace.to_owned(),
         pane_id: PaneId::new(pane_id),
         grid: cell(row, col),
+        label: None,
+    }
+}
+
+/// `pane` labelled `label` (#808).
+fn labelled(pane: HerdrPane, label: &str) -> HerdrPane {
+    HerdrPane {
+        label: Some(label.to_owned()),
+        ..pane
     }
 }
 
@@ -641,5 +654,157 @@ fn the_fake_numbers_panes_in_base_36() {
     assert_eq!(
         port.ensure_pane(&spec("w", 1, 10)),
         Ok(pane("w", "w1:pA", 1, 10))
+    );
+}
+
+// --- #808: each pane's label ---
+
+/// #808 E10, the join: `snapshot` reports each placed pane with its own label, joined to
+/// the `session.snapshot` panes by pane id, never by position. Herdr lists the panes of the
+/// other workspace first, so a join by index gives a cell another pane's label and fails on
+/// `x` and `y`. A pane labelled `""` reports `None` (clarification 2's test of `snapshot`),
+/// and a labelled pane in another tab is still not listed (it has no cell).
+#[test]
+fn snapshot_reports_each_placed_panes_own_label() {
+    let fake = Arc::new(WireHerdr::new());
+    let elsewhere = fake.create_workspace("other");
+    fake.rename(&elsewhere, "o").unwrap();
+    let port = connect(&fake, &[("w", 2, 2)]);
+    let ids: Vec<PaneId> = [(1, 1), (2, 1), (1, 2), (2, 2)]
+        .into_iter()
+        .map(|(row, col)| {
+            port.ensure_pane(&spec("w", row, col))
+                .expect("ensure")
+                .pane_id
+        })
+        .collect();
+    let other_tab = fake.add_tab("w");
+    fake.rename(&ids[0], "x").unwrap();
+    fake.rename(&ids[2], "y").unwrap();
+    fake.rename(&ids[1], "").unwrap();
+    fake.rename(&other_tab, "z").unwrap();
+    let from = fake.methods().len();
+
+    let listed = port.snapshot().expect("snapshot").panes;
+
+    assert_eq!(
+        listed,
+        vec![
+            labelled(pane("other", "w1:p1", 1, 1), "o"),
+            labelled(pane("w", "w2:p1", 1, 1), "x"),
+            labelled(pane("w", "w2:p3", 1, 2), "y"),
+            pane("w", "w2:p2", 2, 1),
+            pane("w", "w2:p4", 2, 2),
+        ]
+    );
+    let exports = vec!["layout.export".to_owned(); 2];
+    let mut want = vec!["session.snapshot".to_owned()];
+    want.extend(exports);
+    assert_eq!(sent_since(&fake, from), want, "no request added for labels");
+}
+
+/// #808 E10, the occupied cell: `ensure_pane` of a cell whose pane is labelled `x` answers
+/// `Some("x")`, and of one labelled `""` answers `None` (clarification 2's test of
+/// `ensure_pane`). Each answer is the snapshot's entry for that pane, whole, and the call
+/// sends only its two reads.
+#[test]
+fn ensure_pane_of_an_occupied_cell_answers_its_panes_label() {
+    let fake = Arc::new(WireHerdr::new());
+    let elsewhere = fake.create_workspace("other");
+    fake.rename(&elsewhere, "o").unwrap();
+    let port = connect(&fake, &[("w", 2, 1)]);
+    let a = port.ensure_pane(&spec("w", 1, 1)).expect("ensure r1c1");
+    let b = port.ensure_pane(&spec("w", 2, 1)).expect("ensure r2c1");
+    fake.rename(&a.pane_id, "x").unwrap();
+    fake.rename(&b.pane_id, "").unwrap();
+    let from = fake.methods().len();
+
+    let first = port
+        .ensure_pane(&spec("w", 1, 1))
+        .expect("ensure r1c1 again");
+    let second = port
+        .ensure_pane(&spec("w", 2, 1))
+        .expect("ensure r2c1 again");
+
+    assert_eq!(first, labelled(pane("w", "w2:p1", 1, 1), "x"));
+    assert_eq!(second, pane("w", "w2:p2", 2, 1));
+    assert_eq!(
+        sent_since(&fake, from),
+        [
+            "session.snapshot",
+            "layout.export",
+            "session.snapshot",
+            "layout.export"
+        ]
+    );
+    let listed = port.snapshot().expect("snapshot").panes;
+    assert!(listed.contains(&first), "{listed:?}");
+    assert!(listed.contains(&second), "{listed:?}");
+}
+
+/// #808 E10 item 3: `ensure_pane`'s answer for a pane it makes carries the label of the
+/// `PaneInfo` that made it: `workspace.create`'s `root_pane` for `r1c1` of a new workspace,
+/// `pane.split`'s `pane` for a split. The tap adds a label to each of those replies.
+#[test]
+fn ensure_pane_of_a_new_pane_answers_the_label_its_reply_carries() {
+    let fake = Arc::new(WireHerdr::new());
+    let tap = Tap::new(Arc::clone(&fake), |fake, line, _| {
+        let (pointer, label) = if line.contains(r#""method":"workspace.create""#) {
+            ("/result/root_pane", "root")
+        } else if line.contains(r#""method":"pane.split""#) {
+            ("/result/pane", "made")
+        } else {
+            return Tapped::Forward(line);
+        };
+        let mut reply: Value = serde_json::from_str(&fake.answer(&line)).unwrap();
+        reply.pointer_mut(pointer).expect("a PaneInfo")["label"] = json!(label);
+        Tapped::Reply(reply.to_string())
+    });
+    let port = connect_over(config(&[("w", 2, 1)]), tap);
+
+    assert_eq!(
+        port.ensure_pane(&spec("w", 1, 1)),
+        Ok(labelled(pane("w", "w1:p1", 1, 1), "root"))
+    );
+    assert_eq!(
+        port.ensure_pane(&spec("w", 2, 1)),
+        Ok(labelled(pane("w", "w1:p2", 2, 1), "made"))
+    );
+}
+
+/// #808 E10 item 4: a pane made between `snapshot`'s `session.snapshot` and its
+/// `layout.export` has a cell and no `PaneRef`. It is listed at its cell with no label, the
+/// call still succeeds, and nothing is read again (though the fake has labelled it by then).
+#[test]
+fn a_pane_made_between_the_two_reads_is_listed_with_no_label() {
+    let fake = Arc::new(WireHerdr::new());
+    let root = fake.create_workspace("w");
+    fake.rename(&root, "x").unwrap();
+    let split = Arc::new(AtomicBool::new(false));
+    let hook_split = Arc::clone(&split);
+    let tap = Tap::new(Arc::clone(&fake), move |fake, line, _| {
+        if line.contains(r#""method":"layout.export""#) && !hook_split.swap(true, Ordering::SeqCst)
+        {
+            let late = fake.split(&PaneId::new("w1:p1"), Direction::Down);
+            fake.rename(&late, "late").unwrap();
+        }
+        Tapped::Forward(line)
+    });
+    let port = connect_over(config(&[("w", 2, 1)]), tap);
+    let from = fake.methods().len();
+
+    let listed = port.snapshot().expect("snapshot").panes;
+
+    assert!(split.load(Ordering::SeqCst), "the hook split a pane");
+    assert_eq!(
+        listed,
+        vec![
+            labelled(pane("w", "w1:p1", 1, 1), "x"),
+            pane("w", "w1:p2", 2, 1)
+        ]
+    );
+    assert_eq!(
+        sent_since(&fake, from),
+        ["session.snapshot", "layout.export"]
     );
 }

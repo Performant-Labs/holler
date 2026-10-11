@@ -508,3 +508,60 @@ fn the_default_instance_keeps_every_default_port() {
     assert!(out.status.success(), "{}", stderr(&out));
     assert_eq!(stdout(&out), RECORDED_PLAN);
 }
+
+// #810: the optional top-level `workspace` key.
+
+/// `HEAD` with a `workspace` line (raw TOML after the `=`) before the tables.
+fn with_workspace(raw: &str) -> String {
+    format!("workspace = {raw}\n{HEAD}\n{TAIL}")
+}
+
+#[test]
+fn a_valid_workspace_is_accepted_and_printed() {
+    for ok in ["herald-relay", "Quiet Tower 2", "a", "x.y_z-1"] {
+        let out = validate(&with_workspace(&format!("\"{ok}\"")));
+        assert!(out.status.success(), "{ok}: {}", stderr(&out));
+        assert!(stdout(&out).contains(&format!("workspace: {ok}\n")), "{ok}");
+    }
+}
+
+#[test]
+fn a_workspace_of_forty_characters_is_accepted() {
+    let name = "a".repeat(40);
+    let out = validate(&with_workspace(&format!("\"{name}\"")));
+    assert!(out.status.success(), "{}", stderr(&out));
+}
+
+#[test]
+fn no_workspace_is_fine_and_prints_no_workspace_line() {
+    let out = validate(&config("", TAIL));
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert!(!stdout(&out).contains("workspace"));
+}
+
+#[test]
+fn a_bad_workspace_is_refused_naming_the_key() {
+    let long = format!("\"{}\"", "a".repeat(41));
+    let bad = [
+        "\"\"",
+        long.as_str(),
+        "\" lead\"",
+        "\"-dash\"",
+        "\"say \\\"hi\\\"\"",
+        "\"it's\"",
+        "\"a/b\"",
+        "herald-relay",
+    ];
+    for raw in bad {
+        let out = validate(&with_workspace(raw));
+        assert_eq!(out.status.code(), Some(1), "{raw}");
+        assert!(stderr(&out).contains("workspace"), "{raw}: {}", stderr(&out));
+    }
+}
+
+#[test]
+fn a_workspace_with_a_trailing_comment_is_accepted() {
+    let out = validate(&with_workspace("\"herald-relay\" # my name"));
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert!(stdout(&out).contains("workspace: herald-relay\n"));
+}

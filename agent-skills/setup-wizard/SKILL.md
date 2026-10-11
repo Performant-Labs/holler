@@ -160,6 +160,10 @@ layout = [["o1"], ["alpha", "beta"]]
 # (Bare top-level key for the same "must come before any table header" reason as layout.)
 hub_host = "hub.example.ts.net"
 
+# OPTIONAL — the name of the Herdr workspace: 1 to 40 characters, a letter or digit first, then
+# letters, digits, spaces, `.`, `_` or `-`. Bare top-level key, before every table header.
+workspace = "herald-relay"
+
 # OPTIONAL — an `[instance]` table, to build a second Holler instance beside a running one.
 # Leave it out and everything below behaves exactly as before. It is a table header, so it goes
 # AFTER the bare top-level keys above and BEFORE `[[orchestrator]]`/`[[session]]`. Every value
@@ -265,7 +269,8 @@ holds only that host's `[[session]]` tables; it **drops** the `[instance]` table
 session's `backend_port`, and **sets** each session's `endpoint` to
 `http://127.0.0.1:<resolved backend port>`, taking the port from what `instance.sh` printed for
 that session in Stage 1 (with an `[instance]` table the master file's own `endpoint` may name
-the first instance's port; the body would dial that backend). The wizard-only keys
+the first instance's port; the body would dial that backend). It also **drops** the top-level `workspace` key (the body denies unknown top-level keys).
+The wizard-only keys
 (`remote_host`, `remote_tailnet_host`, `hub_host`, `layout`, `[[orchestrator]]`) may stay or be
 dropped; other tools may add their own data under a top-level `[ext.<namespace>]` or per-session
 `[session.ext.<namespace>]` table, which the body also ignores. The master file — whichever of the
@@ -338,6 +343,7 @@ know what's happening):
 ⬜ 8. Build the Herdr workspace (M+N panes)
 ⬜ 9. Attach panes to sessions
 ⬜ 10. Verify end-to-end
+⬜ 11. Basic Herdr commands
 ```
 
 ✅ done · 🔄 in progress (the stage you just started) · ⬜ not started yet · ⏭️ skipped (nothing to
@@ -550,6 +556,15 @@ invented or guessed; everything else here can be.
    Present this as an actual choice (e.g. via whatever this session's own means of asking a
    multiple-choice question is), not as open-ended prose — a menu is faster to answer than a
    paragraph asking the same thing.
+
+   **Then, once the orchestrators are settled, ask one more question: the workspace name.**
+   Suggest **two dictionary words related to the task**, lower case, joined with a hyphen
+   (Discord-style), for example `herald-relay`, `lantern-hub`, `quiet-tower`. Offer one
+   suggestion (three alternatives on request); the user accepts, edits or types their own, and
+   the answer is written into the config as the top-level `workspace = "<name>"`, before every
+   table header. Pick nouns or adjectives that fit what is being built (a message hub, relays,
+   agents), never a project's real name, never a person's name. The key is optional: with no
+   `workspace` Herdr labels the workspace itself.
 
 4. **Write the file from the answers** (on a first run create the directory first:
    `mkdir -p ~/.holler/herdr/setup`), **show it, and let the user confirm or edit before Stage 1
@@ -917,6 +932,8 @@ plan and show it before touching anything:
     workspace in that server, `herdr.sh run workspace create`, never splitting the panes it already
     has; Stage 8 builds there and records nothing for it), or stop (set a `herdr_session` in an `[instance]` table, which makes the instance
     non-default). Never stop that server.
+- **The workspace's name.** When the config has a `workspace`, the plan names it ("workspace
+  `<workspace>`"); with none, say Herdr labels the workspace itself.
 - **A new workspace, when the wizard creates one** (a restored saved session, or "build in it" on a
   foreign server): name the new workspace in this plan and list the restored panes beside it (they
   stay untouched). The plan's one yes ("Proceed with this plan?") is the user's yes to that, and
@@ -1392,6 +1409,13 @@ a new workspace (a restored saved session, or "build in it" on a foreign server)
 is that workspace's first pane (`pane list` filtered by its id), and Verify and Gate below count
 panes in that workspace only.
 
+**Naming the workspace.** When the config has a `workspace`, the new workspace is created with
+`<herdr_env> bash $WIZARD_LIB/herdr.sh run workspace create --cwd <dir> --label <workspace>`.
+When the server is fresh and has exactly one pane (the base pane case), no workspace is created:
+rename that pane's workspace once with
+`<herdr_env> bash $WIZARD_LIB/herdr.sh run workspace rename <workspace_id> <workspace>`. With no
+`workspace` key nothing changes: Herdr's own label stays.
+
 **But a Herdr that has been run before does not start blank — it restores its saved session,
 and that restore is more than pane structure.** Confirmed live 2026-09-23: after killing the
 server and starting a fresh one, `herdr.sh run pane list` came back with all 3 panes from the previous
@@ -1636,17 +1660,40 @@ everything above ran headlessly over Herdr's socket API — nothing was visible 
    ```bash
    <herdr_env> bash $WIZARD_LIB/herdr.sh run workspace focus <workspace_id>   # the workspace_id from pane list / workspace list above
    ```
-2. Tell the user exactly what to run and where: **"Open a terminal (Terminal.app, iTerm,
-   whichever) and run `herdr`"** (bare, no flags: **default instance only** — it attaches to the
-   same running server and default session this wizard just used; it does not start a second
-   server). For an instance with a `herdr_session`, tell them to run `herdr --session
-   <herdr_session>` instead, matching what was actually used; a bare `herdr` would open the
-   other (default) instance.
-3. Tell them what they should see immediately upon attaching: the workspace focused in step 1
-   (M+N panes arranged in `layout`'s columns/rows — every orchestrator and every session where
-   `layout` put it), not an empty default workspace. If they land somewhere else, the
-   visible-in-TUI workspace switcher (not a socket command at that point, since they're now
-   interacting directly) is how they navigate to it.
+2. Tell the user to open a terminal and attach (Stage 11's first row has the exact command, with
+   the instance's `herdr_session` when it has one), then say what they should see immediately:
+   the workspace focused in step 1 (M+N panes arranged in `layout`'s columns/rows), not an empty
+   default workspace.
+3. Then continue to Stage 11, which holds every command for looking around and cleaning up.
+
+## Stage 11 (final): Basic Herdr commands
+
+**Ask:** nothing. This step changes nothing: it is output only, shown after the verification
+report. Print this table (the bindings are Herdr's defaults, checked against `herdr --default-config`
+and Herdr's keyboard docs; if a binding differs on the user's install, `prefix+?` shows every active
+binding):
+
+| Task | Command |
+|---|---|
+| Attach | `herdr` (or `herdr --session <name>`, the instance's `herdr_session`) |
+| The prefix key | `ctrl+b`, release, then the key |
+| Show or hide the sidebar | `prefix+b` (or click the `»` at the bottom-left) |
+| Switch workspace | `prefix+w`, or click the sidebar |
+| New / rename / close workspace | `prefix+shift+n` / `prefix+shift+w` / `prefix+shift+d` (also `herdr workspace close <id>`) |
+| Split right / down | `prefix+v` / `prefix+minus` |
+| Move between panes | `prefix+h/j/k/l` |
+| Zoom / close pane | `prefix+z` / `prefix+x` |
+| Detach, leave everything running | `prefix+q` |
+| Every binding | `prefix+?` |
+
+Then add two notes:
+
+- **A restored workspace:** if `herdr.sh run workspace list` shows any workspace the wizard did
+  **not** create beside the new one (a restored saved session), name it with its id and pane count
+  and say how to close it if the user wants (`prefix+shift+d` on it, or `herdr workspace close
+  <id>`). Never close it for them.
+- **Teardown:** the wizard's own teardown is `stop-owned.sh teardown`; warn again that it closes
+  the restored workspace too (the server it stops holds it).
 
 ## If a stage fails
 

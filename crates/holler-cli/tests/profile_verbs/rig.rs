@@ -237,6 +237,13 @@ pub(crate) fn profile(name: &str, specs: Vec<ProfileSpec>) -> Profile {
     }
 }
 
+/// Start the fake harness server of `pane` on `port`; its pid. The one place a profile verb
+/// test seeds a running server (#664, decision O3): if #802 replaces `HarnessPort::serve`,
+/// only this helper changes.
+pub(crate) fn serve_server(harness: &FakeHarness, pane: &PaneName, port: u16) -> u32 {
+    holler_pane::HarnessPort::serve(harness, pane, port).unwrap()
+}
+
 /// What [`NthCasPut`] does to one numbered `cas_put`.
 #[derive(Debug, Clone)]
 pub(crate) enum NthPut {

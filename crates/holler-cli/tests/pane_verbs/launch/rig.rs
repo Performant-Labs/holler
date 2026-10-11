@@ -12,13 +12,15 @@
 //!   returns (to freeze a server after `serve`, vanish a Herdr pane at `attach_tui`, make another
 //!   writer move a record or a profile, or panic);
 //! - #663's real `StoreScope` in place of the fake scope (AC 16k);
+//! - a **displacing Herdr** (#808 E11, `launch/displaced.rs`): the verb's `HerdrPort` is the
+//!   fake behind a wrapper whose `snapshot` reports one pane elsewhere once a test arms it;
 //! - a **call-log span** (`Calls`, as in doctor's rig): `run` returns the calls the verb run made
 //!   and nothing else, so a test's own setup and post-run reads are never asserted;
 //! - the checks every case ends with: `assert_matches` (AC 2), `assert_no_keystroke` (I4) and
 //!   `assert_untouched` (nothing live, no store write).
 
 use std::ops::Deref;
-use std::sync::{Mutex, PoisonError};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use holler_cli::output::Format;
 use holler_cli::pane::profile_scope::StoreScope;
@@ -41,6 +43,7 @@ use holler_pane_testkit::pane_store::PaneStoreOp;
 use holler_pane_testkit::prober::ProbeCall;
 use holler_pane_testkit::profile_store::ProfileStoreOp;
 
+use super::displaced::{Armed, Displace, DisplacingHerdr};
 use crate::list::Rig as Fakes;
 use crate::verb_harness::{run_verb_with, Outcome};
 
@@ -214,6 +217,8 @@ pub(crate) struct Rig {
     /// #663's `StoreScope` over the rig's two stores, in place of the fake scope (AC 16k).
     pub real_scope: Option<StoreScope>,
     hooks: Mutex<Vec<(HarnessOp, Hook)>>,
+    /// The pane the verb's snapshots report displaced, once armed (#808 E11).
+    displaced: Arc<Armed>,
 }
 
 impl Rig {
@@ -235,6 +240,7 @@ impl Rig {
             linked: true,
             real_scope: None,
             hooks: Mutex::new(Vec::new()),
+            displaced: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -261,9 +267,24 @@ impl Rig {
             .push((op, Box::new(hook)));
     }
 
-    /// Call `f` with the ports a verb sees: the linked host, the hooked harness and the
-    /// chosen scope over the rig's fakes.
+    /// #808 E11: right after the next `attach_tui` returns, the verb's snapshots report the
+    /// pane it attached displaced (`how`), from then on. The fake itself never moves it, so
+    /// the rig's own reads (`herdr_panes`, `assert_matches`) still see it in place.
+    pub fn displace_after_attach(&self, how: Displace) {
+        let displaced = Arc::clone(&self.displaced);
+        self.after(HarnessOp::AttachTui, move |_, called| {
+            let pane = called.pane.clone().expect("attach_tui names its pane");
+            *displaced.lock().unwrap_or_else(PoisonError::into_inner) = Some((pane, how));
+        });
+    }
+
+    /// Call `f` with the ports a verb sees: the displacing Herdr, the linked host, the hooked
+    /// harness and the chosen scope over the rig's fakes.
     pub fn with_ports<R>(&self, f: impl FnOnce(Ports<'_>) -> R) -> R {
+        let herdr = DisplacingHerdr {
+            herdr: &self.fakes.herdr,
+            armed: &self.displaced,
+        };
         let host = LinkedHost {
             fakes: &self.fakes,
             linked: self.linked,
@@ -279,7 +300,7 @@ impl Rig {
         f(Ports {
             pane_store: self.fakes.panes.as_ref(),
             profile_store: self.fakes.profiles.as_ref(),
-            herdr: &self.fakes.herdr,
+            herdr: &herdr,
             host: &host,
             harness: &harness,
             scope,

@@ -56,6 +56,12 @@ spreadsheet cell: `r1c1`, `r1c2`, `r1c3`, `r1c4` for the first row, `r2c1` for t
 second row, and so on. With a pane count and no grid, the wizard proposes a grid by one rule: two
 rows for more than four panes, up to 8 panes, and above 8 panes the squarest grid. It asks one confirm. Your own names always win.
 
+An optional top-level `workspace = "<name>"` (before every table header) names the Herdr workspace:
+1 to 40 characters, a letter or digit first, then letters, digits, spaces, `.`, `_` or `-`
+(`instance.sh` refuses anything else, naming the key). Stage 1 suggests two lower-case words joined
+with a hyphen, such as `herald-relay`; Stage 8 creates the workspace with `--label <name>` (or
+renames the one workspace of a fresh server). Without it Herdr labels the workspace itself.
+
 `hub_host` is optional when the config has no `[[session]]` (N=0) and required when it has one or more (N>=1). Without it the hub is started with no `--advertise`: it advertises nothing remote, which is right when no body will dial it.
 
 Shape:
@@ -111,7 +117,7 @@ session's `remote_host`/`remote_tailnet_host`) and ignores them, checking only t
 not know the `[instance]` table or a session's `backend_port`, so a master file that has either
 makes `holler body run` fail. The wizard therefore writes a **derived body config** per remote host
 (only that host's `[[session]]` tables) and sends that one: it drops the `[instance]` table and every
-session's `backend_port`, and sets each session's `endpoint` to
+session's `backend_port` and the top-level `workspace` key, and sets each session's `endpoint` to
 `http://127.0.0.1:<resolved backend port>`, the port `instance.sh` printed for that session (the master
 file's own `endpoint` may name the first instance's backend). Other tools can keep their own data in
 the file under an explicit namespace: a top-level `[ext.<namespace>]` table and a per-session
@@ -484,6 +490,10 @@ reused pid is foreign.
 
 ## Herdr session
 
+When the config sets `workspace`, Stage 8 names the workspace it creates:
+`herdr.sh run workspace create --cwd <dir> --label <workspace>`, or, on a fresh server with exactly
+one pane, `herdr.sh run workspace rename <workspace_id> <workspace>` once.
+
 Stage 8 and Stage 9 run every Herdr command through `agent-skills/setup-wizard/lib/herdr.sh`,
 which adds `--session <herdr_session>` (from the `[instance]` table) to each one, `server stop`
 and `session attach` included. A bare `herdr server stop` is never issued: which server it stops
@@ -521,6 +531,21 @@ Unverified until story #734 checks it with the real binary: how a pane's own ses
 (`HERDR_PANE_ID` and `HERDR_SESSION` in the environment, in one function, `pane_session`, in
 `herdr.sh`), and that `herdr session list` prints the session name first on each line. The tests
 use a fake `herdr`.
+
+## Basic Herdr commands
+
+The wizard ends with a final step (Stage 11) that prints the handful of Herdr commands a new user
+needs. It changes nothing; it is output only. The bindings are Herdr's defaults (confirm with
+`prefix+?` if yours differ): attach with `herdr` (or `herdr --session <name>`); the prefix is
+`ctrl+b`, released, then the key; `prefix+b` shows or hides the sidebar; `prefix+w` switches
+workspace; `prefix+shift+n` / `prefix+shift+w` / `prefix+shift+d` create, rename and close a
+workspace (also `herdr workspace close <id>`); `prefix+v` / `prefix+minus` split right / down;
+`prefix+h/j/k/l` move between panes; `prefix+z` / `prefix+x` zoom and close a pane; `prefix+q`
+detaches and leaves everything running.
+
+It also names any workspace the wizard did not create that sits beside the new one (a restored
+saved session), with its id and pane count, and says how to close it; the wizard never closes it.
+The wizard's own teardown is `stop-owned.sh teardown`, which closes the restored workspace too.
 
 ## Related
 
