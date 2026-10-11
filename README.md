@@ -218,7 +218,7 @@ whether `herdr` is already installed (`command -v herdr`); if not, ask me whethe
 (via `curl -fsSL https://herdr.dev/install.sh | sh` or `brew install herdr`) before doing
 anything else — and treat that as its own decision, not a green light to also configure and
 launch a workspace in the same breath. Only once `herdr` is confirmed present, ask me separately
-whether to configure Holler and launch a workspace now. If yes, replicate the doc's "Automated
+"All systems go. Proceed?" (yes/no). If yes, replicate the doc's "Automated
 setup" flow: load my session config (an explicit path I give you, else ./sessions.toml, else
 ~/.holler/herdr/setup/sessions.toml).
 
