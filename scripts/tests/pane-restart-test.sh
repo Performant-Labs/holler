@@ -7,7 +7,7 @@ set -uo pipefail
 root=$(cd "$(dirname "$0")/../.." && pwd)
 script="$root/scripts/pane-restart"
 work=$(mktemp -d)
-trap 'rm -rf "$work"' EXIT
+trap 'pkill -f "$work/bin/claude" 2>/dev/null; rm -rf "$work"' EXIT
 
 fail=0
 pass() { echo "ok   - $1"; }
@@ -24,17 +24,25 @@ bin="$work/bin"; mkdir -p "$bin"
 cat > "$bin/tmux" <<'EOF'
 #!/usr/bin/env bash
 echo "$*" >> "$FAKE/tmux.log"
+kill_claude() { # the running fake Claude Code process ends and its session record goes with it
+  [ -f "$FAKE/claude.pid" ] || return 0
+  local pid; pid=$(cat "$FAKE/claude.pid"); kill "$pid" 2>/dev/null; rm -f "$HOME/.claude/sessions/$pid.json" "$FAKE/claude.pid"
+}
 case "$1" in
   has-session) [ -e "$FAKE/session-$3" ] ;;
   display-message) echo "${FAKE_OWN_SESSION:-hj-hub}" ;;
+  capture-pane) cat "$FAKE/screen" 2>/dev/null ;;
   send-keys)
     target=$3; shift 3
     keys="$*"
     case "$keys" in
       "/exit Enter") echo "race: /exit and Enter in one call" >> "$FAKE/race.log" ;;
       /exit) : > "$FAKE/typed_exit" ;;
-      Enter) if [ -e "$FAKE/typed_exit" ]; then rm -f "$FAKE/typed_exit"; [ -e "$FAKE/stuck" ] || rm -f "$FAKE/up"; fi ;;
-      C-c) [ "$(cat "$FAKE/stuck" 2>/dev/null)" = hard ] || rm -f "$FAKE/up" ;;
+      Enter) if [ -e "$FAKE/typed_exit" ]; then rm -f "$FAKE/typed_exit"; [ -e "$FAKE/stuck" ] || { rm -f "$FAKE/up"; kill_claude; }; fi ;;
+      C-c) [ "$(cat "$FAKE/stuck" 2>/dev/null)" = hard ] || { rm -f "$FAKE/up"; kill_claude; } ;;
+      *'&& claude '*Enter)
+        # a Claude Code launch line: run it for real under the fake `claude` on PATH, in the background
+        [ -e "$FAKE/no_new_claude" ] || ( cd / && nohup bash -c "${keys% Enter}" >/dev/null 2>&1 & ) ;;
       *oc-holler*Enter)
         : > "$FAKE/up"
         model=$(printf '%s' "$keys" | sed -n 's/.* -m \([^ ]*\).*/\1/p')
@@ -73,6 +81,19 @@ cat > "$bin/pane-ready" <<'EOF'
 echo "$*" >> "$FAKE/pane-ready.log"
 if [ -e "$FAKE/not_ready" ]; then echo "== $1: NOT READY (1)"; exit 1; fi
 echo "== $1: READY"
+EOF
+cat > "$bin/claude" <<'EOF'
+#!/usr/bin/env bash
+# A fake Claude Code: writes the per-process session record the real one writes (~/.claude/sessions/<pid>.json)
+# and stays alive until killed. Its own arguments are its command line, which the script reads back.
+args=("$@"); sid=""
+for ((i = 0; i < $#; i++)); do [ "${args[$i]}" = --resume ] && sid=${args[$((i + 1))]}; done
+[ -n "$sid" ] || sid="sess-new-$$"
+mkdir -p "$HOME/.claude/sessions"
+echo $$ > "$FAKE/claude.pid"
+printf '{"pid":%s,"sessionId":"%s","cwd":"%s","tmux":"%s","status":"%s"}\n' "$$" "$sid" "$PWD" "${FAKE_CLAUDE_TMUX:-hj-c3r1:@1.%1}" \
+  "$(cat "$FAKE/claude.status" 2>/dev/null || echo idle)" > "$HOME/.claude/sessions/$$.json"
+while :; do sleep 0.2; done
 EOF
 chmod +x "$bin"/*
 
@@ -329,5 +350,132 @@ check "--dry-run exits 0" test "$(rc)" = 0
 expect_untouched "--dry-run changes nothing and types nothing" c3r1
 check "--dry-run prints the pane.env diff and both send-keys lines" \
   bash -c "grep -q '^[-+]export OC_MODEL=' '$FAKE/out' && grep -q 'send-keys -t hj-c3r1 /exit' '$FAKE/out' && grep -q 'oc-holler hj-c3r1' '$FAKE/out'"
+
+# Claude Code panes (issue #784) ---------------------------------------------------------------------
+# A pane whose tmux session holds a live Claude Code process (its record in ~/.claude/sessions/<pid>.json names the
+# session as the tmux target) is restarted through its own command line, not through oc-holler and pane.env.
+claude_case() { # claude_case <pane> [status]: an idle Claude Code pane on sonnet/medium, resumed from sess-old
+  new_case "$1"
+  rm -rf "$HOME/.holler-oc"; mkdir -p "$work/proj"; printf '> \n' > "$FAKE/screen"
+  [ -z "${2:-}" ] || echo "$2" > "$FAKE/claude.status"
+  ( cd "$work/proj" && FAKE_CLAUDE_TMUX="hj-$1:@1.%1" PATH="$bin:$PATH" nohup bash "$bin/claude" --dangerously-skip-permissions \
+      --model sonnet --effort medium --name test-ff --resume sess-old >/dev/null 2>&1 & )
+  local n=0; while [ ! -f "$FAKE/claude.pid" ] && [ $n -lt 100 ]; do sleep 0.05; n=$((n + 1)); done
+  old_pid=$(cat "$FAKE/claude.pid"); export FAKE_CLAUDE_TMUX="hj-$1:@1.%1"
+}
+new_pid() { cat "$FAKE/claude.pid" 2>/dev/null; }
+argv() { tr '\0' ' ' < "/proc/$1/cmdline" 2>/dev/null; }
+alive() { kill -0 "$1" 2>/dev/null; }
+claude_untouched() { alive "$old_pid" && [ "$(new_pid)" = "$old_pid" ] && ! send_lines | grep -q . && argv "$old_pid" | grep -q -- '--model sonnet --effort medium'; }
+
+claude_case c3r1
+run c3r1 --model opus --effort high
+check "claude: restart exits 0" test "$(rc)" = 0
+check "claude: prints one OK line naming pane, model, effort and the session" \
+  bash -c "[ \"\$(wc -l < '$FAKE/out')\" = 1 ] && grep -q '^c3r1: OK model=opus effort=high session=sess-old' '$FAKE/out'"
+check "claude: the old process is gone" bash -c "! kill -0 $old_pid 2>/dev/null"
+np=$(new_pid)
+check "claude: a new process is running" bash -c "[ -n '$np' ] && [ '$np' != '$old_pid' ] && kill -0 '$np'"
+check "claude: the new command line has the new model and effort and resumes the same session" \
+  bash -c "tr '\\0' ' ' < /proc/$np/cmdline | grep -q -- '--model opus --effort high' && tr '\\0' ' ' < /proc/$np/cmdline | grep -q -- '--resume sess-old'"
+check "claude: the old model and effort are gone, and the other flags are kept" \
+  bash -c "! tr '\\0' ' ' < /proc/$np/cmdline | grep -q -e 'sonnet' -e 'medium' && tr '\\0' ' ' < /proc/$np/cmdline | grep -q -e '--dangerously-skip-permissions' && tr '\\0' ' ' < /proc/$np/cmdline | grep -q -e '--name test-ff'"
+check "claude: it starts in the session's own working directory" bash -c "jq -r .cwd '$HOME/.claude/sessions/$np.json' | grep -qx '$work/proj'"
+check "claude: every text typed into the pane is followed by Enter, /exit and Enter in separate calls" \
+  bash -c "! grep '^send-keys' '$FAKE/tmux.log' | grep -v 'Enter\$' | grep -v -e ' /exit\$' -e ' C-c\$' && [ ! -e '$FAKE/race.log' ]"
+check "claude: the launch line goes in one call with its Enter" bash -c "grep -c 'claude .*Enter\$' '$FAKE/tmux.log' | grep -qx 1"
+check "claude: no OpenCode file is read or made" test ! -e "$HOME/.holler-oc"
+check "claude: only the pane's own session is typed into" bash -c "! grep '^send-keys' '$FAKE/tmux.log' | grep -v 'hj-c3r1'"
+
+claude_case c3r1
+run c3r1 --effort xhigh
+check "claude: --effort alone keeps the model" bash -c "[ '$(rc)' = 0 ] && tr '\\0' ' ' < /proc/$(new_pid)/cmdline | grep -q -- '--model sonnet --effort xhigh'"
+claude_case c3r1
+run c3r1 --model opus
+check "claude: --model alone keeps the effort" bash -c "[ '$(rc)' = 0 ] && tr '\\0' ' ' < /proc/$(new_pid)/cmdline | grep -q -- '--model opus --effort medium'"
+claude_case c3r1
+run c3r1 --model 'claude-opus-5-5[1m]' --fresh
+check "claude: a full model name with a context suffix, and --fresh, start a new session (no --resume)" \
+  bash -c "[ '$(rc)' = 0 ] && tr '\\0' ' ' < /proc/$(new_pid)/cmdline | grep -q -- '--model claude-opus-5-5\[1m\]' && ! tr '\\0' ' ' < /proc/$(new_pid)/cmdline | grep -q -e '--resume'"
+
+claude_case c3r1
+run c3r1 --model opus --effort high --dry-run
+check "claude: --dry-run exits 0 and prints the stop and launch lines" \
+  bash -c "[ '$(rc)' = 0 ] && grep -q 'send-keys -t hj-c3r1 /exit' '$FAKE/out' && grep -q 'claude .*--model opus --effort high' '$FAKE/out'"
+if claude_untouched; then pass "claude: --dry-run changes and types nothing"; else bad "claude: --dry-run changes and types nothing"; fi
+
+claude_case c3r1 busy
+run c3r1 --model opus
+check "claude: a busy session is refused (exit 1) and the reason is its record" bash -c "[ '$(rc)' = 1 ] && grep -q '^c3r1: REFUSED: the Claude Code session is busy' '$FAKE/out'"
+if claude_untouched; then pass "claude: busy: nothing typed, process untouched"; else bad "claude: busy: nothing typed, process untouched"; fi
+claude_case c3r1
+printf 'working\n  esc to interrupt\n' > "$FAKE/screen"
+run c3r1 --model opus
+check "claude: a screen saying 'esc to interrupt' is refused even if the record says idle" bash -c "[ '$(rc)' = 1 ] && grep -q 'REFUSED: the Claude Code session is working' '$FAKE/out'"
+if claude_untouched; then pass "claude: interrupt screen: untouched"; else bad "claude: interrupt screen: untouched"; fi
+claude_case c3r1
+printf 'Push the tag now?\n  Enter to select\n' > "$FAKE/screen"
+run c3r1 --model opus
+check "claude: a session waiting on a question is refused" bash -c "[ '$(rc)' = 1 ] && grep -q 'REFUSED: the Claude Code session is waiting on a question' '$FAKE/out'"
+if claude_untouched; then pass "claude: question screen: untouched"; else bad "claude: question screen: untouched"; fi
+
+while IFS='|' read -r bad_args why; do
+  claude_case c3r1
+  eval "run c3r1 $bad_args"
+  check "claude: '$bad_args' is refused (exit 1) with: $why" bash -c "[ '$(rc)' = 1 ] && grep -q '^c3r1: REFUSED: .*$why' '$FAKE/out'"
+  if claude_untouched; then pass "claude: '$bad_args': untouched"; else bad "claude: '$bad_args': untouched"; fi
+done <<'ARGS'
+--model a/b|is not a Claude model
+--model 'x y'|is not a Claude model
+--model opus --effort extreme|is not an effort level
+--effort|is not an effort level
+|needs --model or --effort
+--model opus --key-file /x|are OpenCode options
+--model opus --agent build|are OpenCode options
+--model opus --mo|are OpenCode options
+ARGS
+
+claude_case c3r1
+export FAKE_OWN_SESSION=hj-c3r1 TMUX_PANE=%9
+run c3r1 --model opus
+check "claude: the pane the script itself runs in is refused" bash -c "[ '$(rc)' = 1 ] && grep -q 'this script is running inside hj-c3r1' '$FAKE/out'"
+if claude_untouched; then pass "claude: own pane: untouched"; else bad "claude: own pane: untouched"; fi
+
+claude_case c3r1; : > "$FAKE/stuck"
+run c3r1 --model opus
+check "claude: a TUI that never exits fails at the stop step (exit 2)" bash -c "[ '$(rc)' = 2 ] && grep -q '^c3r1: FAIL step 4 (stop)' '$FAKE/out'"
+check "claude: no launch line is typed after a failed stop" bash -c "! grep -q 'claude .*Enter\$' '$FAKE/tmux.log'"
+claude_case c3r1; echo hard > "$FAKE/stuck"
+run c3r1 --model opus
+check "claude: a TUI that ignores Ctrl-C too fails at the stop step" bash -c "[ '$(rc)' = 2 ] && grep -q 'FAIL step 4' '$FAKE/out'"
+claude_case c3r1; echo soft > "$FAKE/stuck"
+run c3r1 --model opus
+check "claude: a TUI that needs one Ctrl-C still restarts" test "$(rc)" = 0
+
+claude_case c3r1; : > "$FAKE/no_new_claude"
+run c3r1 --model opus
+check "claude: a launch that never produces a session fails at step 6 and says the old one is gone" \
+  bash -c "[ '$(rc)' = 2 ] && grep -q '^c3r1: FAIL step 6' '$FAKE/out'"
+claude_case c3r1; echo busy > "$FAKE/claude.status"
+rm -f "$FAKE/claude.status"; echo busy > "$FAKE/new_status"
+run c3r1 --model opus
+check "claude: a session that comes up idle ends with exit 0" test "$(rc)" = 0
+
+claude_case c3r1
+cp "$HOME/.claude/sessions/$old_pid.json" "$HOME/.claude/sessions/9999991.json"; sed -i 's/"pid":[0-9]*/"pid":'"$old_pid"'/' "$HOME/.claude/sessions/9999991.json"
+run c3r1 --model opus
+check "claude: two live records for one pane are refused as ambiguous" bash -c "[ '$(rc)' = 1 ] && grep -q 'REFUSED: more than one live Claude Code session' '$FAKE/out'"
+rm -f "$HOME/.claude/sessions/9999991.json"
+if claude_untouched; then pass "claude: ambiguous: untouched"; else bad "claude: ambiguous: untouched"; fi
+
+claude_case c3r1
+sed -i 's/"pid":[0-9]*/"pid":2999999/' "$HOME/.claude/sessions/$old_pid.json"
+run c3r1 --model opus
+check "claude: a record whose process is dead is ignored: the pane goes down the OpenCode path" \
+  bash -c "[ '$(rc)' = 1 ] && grep -q 'is not PROVIDER/ID' '$FAKE/out' && ! grep -q 'Claude' '$FAKE/out'"
+claude_case c3r2
+run c3r1 --model opus
+check "claude: a record for another pane's session is not used for this pane" bash -c "[ '$(rc)' = 1 ] && ! grep -q 'Claude' '$FAKE/out'"
+if alive "$old_pid"; then pass "claude: another pane's process untouched"; else bad "claude: another pane's process untouched"; fi
 
 exit $fail
