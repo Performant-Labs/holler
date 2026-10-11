@@ -171,3 +171,48 @@ Run handoff directory `docs/handoffs/808` Â· branch `issue-808-implementation` Â
   - `gh issue view 650` and `gh issue view 802` (OPEN).
   - `git diff --name-only 92fbc6e origin/main`: wizard files only, with no overlap.
   - A grep of the added lines for personal names: none.
+
+## S, spec audit (Phase 10): 2026-10-11T06:30-06:00 (MDT)
+
+- **Decided:** PASS (`docs/handoffs/808/handoff-S.md`).
+  - Each acceptance criterion (the issue's AC 1-5, E9's and E15's) has a test that asserts the behaviour (17 rows), and
+    the guards fail against their mutants.
+  - Every brief decision is implemented. Three documented deviations are accepted:
+    - one `HerdrPane` constructor in place of E10 item 3's two `label_of` calls;
+    - section 1's `herdr` row, which is within scope item 4;
+    - the `LabelHook` alias, the identical type.
+  - The quality gates, privacy and scope are clean.
+  - Seven advisories:
+    1. the doctor guard labels each pane with its own id (a test-only, one-line change);
+    2. `docs/testing.md:441` still says "the whole suite";
+    3. the "one exception" wording in `protocol.rs`;
+    4. the PR body needs the AI disclosure and the section-1 note;
+    5. the note for #650 is not yet posted;
+    6. the #802 merge order;
+    7. the unrelated flake.
+- **Assumed:**
+  - The commits' `Co-Authored-By` trailer without a session link follows repo practice (`main`'s recent squash commits
+    match), so it is not a finding.
+  - The PR body cannot be checked before the script opens the PR.
+- **Hedged:**
+  - I rated advisory 1 non-blocking rather than a test-only REWORK:
+    - the criterion is met as written;
+    - the class of regression it guards (a comparison that sees the label) is shown caught by a mutant;
+    - the gap is a regression that substitutes the label for the id, which no code in this diff makes.
+  - I read section 1's row as within scope item 4 ("sections 1 and 2 (the `HerdrPane`/`HerdrSnapshot` types ...)"), not
+    as a breach of clarification 5's "exactly these places".
+- **Evidence:**
+  - Issue #808, read live: its body equals the brief's lines 3-60. Its last edit was at 04:20 MDT, before `04e53da` at
+    04:26 MDT. It has no comments.
+  - The whole `git diff origin/main...HEAD`.
+  - Greps:
+    - whole-value `HerdrPane` comparisons in `crates/*/src`;
+    - `unwrap`, `expect`, `panic`, `#[allow]` and `sleep` in the added lines;
+    - privacy, over 3,933 added lines;
+    - the `run_herdr_conformance` callers;
+    - Debug formatting of `HerdrPane`.
+  - `wc -l` on every touched file.
+  - NV-1: `scripts/spikes/herdr-grid.sh:28` and `docs/research/herdr-api-spike.md:183-191`.
+  - The CHANGELOG claim: the `Unwired` stub in `holler-cli/src/pane/wiring.rs`, and `gh issue view 649`.
+  - `gh issue view 650` and `gh issue view 802`.
+  - The outside reviews' `.usage.json`: all four on `deepseek-v4-pro`.
