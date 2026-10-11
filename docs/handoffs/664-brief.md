@@ -6,12 +6,14 @@ Part of epic #633. (added 2026-10-08, profiles) **REQUIRED (promoted from PROPOS
 - `holler profile apply NAME [--dry-run]`: declarative, idempotent convergence of the live panes to the profile. Create a missing pane (through the launch transaction of #644); **adopt** a healthy live pane that matches its spec (record it, set `Pane.profile`); **never kill a healthy pane**; report anything it will not change. `--dry-run` prints the plan as JSON (the envelope's `data` is the list of planned steps) and changes nothing. This is the cure for a reboot that returns the layout as empty shells. (amended 2026-10-08, review) Apply **refuses a pane that belongs to another profile unless `--take-over`** is given (confirmed by the operator, 2026-10-08), and lists such panes in the `--dry-run` plan. (amended 2026-10-08, features) Before each pane it creates or relaunches, apply runs the pane's probe (`run_probe`) and refuses that pane with `probe-failed`; it places panes through `HerdrPort::ensure_pane`, which reaches the `GridPos` by splits (#640), and **never relocates a healthy pane**.
 - The plan is built from the spec-versus-live comparison in `crates/holler-pane/src/profile_diff.rs` (#662, which `holler profile show` uses). There is no separate `holler profile diff` verb (dropped by the operator, 2026-10-08): `show` reports the differences and `apply --dry-run --format=json` prints the exact plan.
 - `apply` takes `--format=text|json`; positions are `GridPos`, printed `rRcC` / `{"row", "col", "pos"}`. (amended 2026-10-08, grid)
+- (added at the brief gate, 2026-10-11, for review findings R3 B-3, R3 W-1 and R3 NIT-1; it restates §4, §7 and §8 of the operator's section below, which decide it, and changes no bullet above) `apply` also takes `--herdr-session NAME` (as `pane launch` has it) and `--take-over`. **When the plan holds a `create` (a spec pane with no record: row b of §3) and `--herdr-session` is absent, the whole verb exits 2 (`usage`) before any step runs, in a dry run too.** So a dry run over a profile with a pane that has no record prints that usage error and no plan, not even for the recorded panes, until the flag is given (C1). With `--format=json`, the envelope's `data` is §7's object `{"profile", "dry_run", "steps"}`, and the first bullet's "list of planned steps" is its `steps` (C6).
 
 ## Acceptance (test kit only (amended 2026-10-08, review); the real run is story #667 (amended 2026-10-08, review))
 - Apply twice changes nothing the second time; a healthy matching pane is adopted, not relaunched; a healthy pane that differs is reported, not killed; `--dry-run` writes nothing and its plan parses against the envelope.
 - (amended 2026-10-08, review) A pane of another profile is refused without `--take-over` and adopted with it; the dry-run plan lists it.
 - (amended 2026-10-08, features) A failing probe refuses that pane with `probe-failed` and the others proceed; against #638's split-only fake, a missing pane is created by splits; a healthy pane in the wrong cell is reported, never moved.
 - `apply --dry-run` and `holler profile show` agree on the same fixture (the plan lists exactly the differences `show` reports, positions in rowcol).
+- (added at the brief gate, 2026-10-11, for review finding R3 B-2; it removes and narrows nothing above) **The acceptance is one list:** the bullets above, the tests of §9 and §11 of the operator's section below, and every test C7 adds to §11. The story is accepted only when every one of them passes on the test kit's fakes and S's audit finds the run's bound in the module doc of `tx_apply.rs` in C4's form. C14 indexes that whole list, one entry per test, with the source of each.
 
 Depends on: #637, #638, #644, #662. (amended 2026-10-08, review) (Was #640, #641, #642, #644, #647, #661, #662: the adapters and the registry are faked here.)
 
@@ -76,21 +78,25 @@ Row order matters: row a is checked first and fires only for another profile **w
 
 **13. Known limitation, not this story:** `SpecField::ALL` omits `opencode_agent` (#700 recorded it as a non-goal), so apply cannot see a pane running the wrong agent. File a follow-up issue; do not widen this story.
 
-## Brief-gate clarifications (rounds 1 and 2, 2026-10-11)
+## Brief-gate clarifications (rounds 1 to 3, 2026-10-11)
 
-Added at the brief gate for the outside review's findings (the B-, W-, NV- and NIT- numbers are the reviewer's). Round 2's
-reviewer numbered its findings from 1 again, so they carry an R2 prefix here (R2 NV-2 and so on); a number without it is
-round 1's. §N is paragraph N of the operator's section above, C*n* and O*n* are items of this section, and E*n* is an
-excerpt in the Evidence section below. Each item spells out what §1 to §13 already imply, or adds a test to §11's list.
-None of them changes, narrows or overrides §1 to §13; wherever an item and §1 to §13 could be read differently, §1 to §13
-win. What only the operator can decide is listed under "Open for the operator" and is not decided here.
+Added at the brief gate for the outside review's findings (the B-, W-, NV- and NIT- numbers are the reviewer's). The
+reviewers of rounds 2 and 3 numbered their findings from 1 again, so they carry an R2 or R3 prefix here (R2 NV-2, R3 B-1
+and so on); a number without a prefix is round 1's. §N is paragraph N of the operator's section above, C*n* and O*n* are
+items of this section, and E*n* is an excerpt in the Evidence section below. Each item spells out what §1 to §13 and the
+decisions on O1 to O5 already imply, adds a test to §11's list, or indexes the tests (C14). None of them changes, narrows
+or overrides §1 to §13; wherever an item and §1 to §13 could be read differently, §1 to §13 win. What only the operator
+can decide is listed under "Open for the operator" and is not decided here.
 
 **C1. The order of a run (W-2, W-3, R2 W-3; from §4, §6 and §9).**
 
 1. Read the registry and P.
 2. Apply §4's `--herdr-session` gate: when the flag is absent and a spec pane has no record, the verb exits 2 and no step
    runs, in a dry run too. A spec pane with no record is row b, a `create`, since row a needs a record (§3), so whether
-   the plan holds a `create` is known from 1 alone, and the gate answers here as it would after 4.
+   the plan holds a `create` is known from 1 alone, and the gate answers here as it would after 4. The gate's condition
+   is exactly row b's (R3 W-3): a spec pane for which the registry holds no entry of its name (§1). A spec pane whose name
+   has a record never trips it, whatever profile that record names (P, another profile or none) and with or without
+   `--take-over`, since such a pane is row a or one of rows c to f, never row b.
 3. Make every observation §2 needs, up front (§9): the Herdr snapshot and, for each spec pane that has a record, its
    `health` and its shown session, one thread per pane (I5). All of them finish before 4.
 4. Choose every pane's row (§3). This is the whole plan.
@@ -135,7 +141,8 @@ one port call's own bound plus its rollback calls, E10, E11). Under §9's struct
 
 This brief sets no budget over the whole apply run, so the bound grows with the number of steps, and the doc states it per
 step. Whether the run should also have a budget over the whole run is open for the operator (O5, R2 W-2). Acceptance:
-S's audit checks that the module doc of `tx_apply.rs` states the bound in this form.
+S's audit checks that the module doc of `tx_apply.rs` states the bound in this form. C13 adds tests that the engine
+keeps this structure, with no budget over the whole run as O5 decides (R3 B-4).
 
 **C5. Store conflicts (NV-9; from §5 and §9).** The stores fence writers by compare-and-swap on a generation: nothing
 claims a pane before acting, and a conflict is not retried (E5, E8, E28, E37). A write at a stale generation answers
@@ -148,16 +155,19 @@ and the step's own write makes that write conflict, which is how a stale spec is
 (`ProfileSpec.pane`), the same string `PaneDiff.pane` holds (E1, E3). `steps` has one entry per spec pane, in §3's
 `(workspace, row, col)` order. `diff_profile` lists its rows in the profile's own order (E3), so apply orders its steps
 itself. §7's step object names no position field; a cell that differs from the spec shows inside `diff` as one of its
-field differences (E1, E2). In §6, "the same table" is §3's step table: a dry run's output is the plan, one step per spec
+field differences (E1, E2). A cell that differs is a `FieldDiff` on `herdr.grid` whose `spec` and `live` are
+`FieldValue::Grid`s, which serialize through `GridPos`'s own `Serialize` as `{"row":R,"col":C,"pos":"rRcC"}` and print as
+`rRcC` (E56): the two forms the Scope's third bullet names (R3 NIT-2). A workspace that differs is a `FieldDiff` on
+`herdr.workspace` with text values (E56). In §6, "the same table" is §3's step table: a dry run's output is the plan, one step per spec
 pane chosen by that table. With `--format=json` it is §7's `data` with `"dry_run": true`, the "exact plan" of the Scope's
 second bullet. The Scope's two wordings of that output, "the envelope's `data` is the list of planned steps" (first
 bullet) and "`apply --dry-run --format=json` prints the exact plan" (second bullet), are issue #664's own text, which this
 brief carries unchanged (R2 NIT-1, R2 NIT-2). The operator's section supersedes the Scope where they differ (its opening
 paragraph), so both mean §7's object: `data` is `{"profile", "dry_run", "steps"}`, and the list of planned steps is its
-`steps`.
+`steps`. The Scope's last bullet, added at the brief gate (R3 NIT-1), says so where the Scope is read first.
 
-**C7. Tests added to §11 (B-2, B-3, NV-9, W-1; R2 NV-3, R2 NV-5, R2 NV-6, R2 W-1, R2 W-3),** on the test kit's fakes,
-as §11's are:
+**C7. Tests added to §11 (B-2, B-3, NV-9, W-1; R2 NV-3, R2 NV-5, R2 NV-6, R2 W-1, R2 W-3; R3 B-4, R3 B-5, R3 NV-1 to
+R3 NV-4),** on the test kit's fakes, as §11's are:
 
 - (B-2) A dry run in which the `health` call of a recorded pane that row a does not refuse fails: the plan lists that
   pane's step as `failed` and every later step as `skipped`; no probe runs and nothing is written; the verb exits 1.
@@ -177,13 +187,43 @@ as §11's are:
 - (R2 NV-3, R2 W-1) Row c's writes, as the fake pane store's call log counts them (C10): none for a pane already in P,
   one `cas_put` (the join) for a pane in no profile, and two under `--take-over` for a pane of another profile, the leave
   and then the join. An adopt whose join the rig's `NthCasPut` (E34) answers with `generation-conflict` is a `failed`
-  step: nothing live was touched, the steps after it are `skipped`, and the verb exits 1.
+  step: nothing live was touched, the steps after it are `skipped`, and the verb exits 1. (R3 NV-2) A call log names
+  each call's method only (E57), so it counts the writes but cannot tell the leave from the join: the test reads their
+  order from the fake pane store's `watch`, opened at a cursor taken before the run, which yields every later write in
+  order with the record as written (E57). The leave's event has `profile` none, and the join's, after it, has `profile` P.
 - (R2 W-3) The up-front `usage` case of §11 makes no Herdr or harness call: the fake Herdr's and the fake harness's call
   logs are empty (C1).
+- (R3 B-4) A step runs under its own budget (C13). The engine is called with a short `TxOptions` budget and the fake
+  harness slowed by `set_delay` (E59), over spec panes that have no record, so apply's own observations make no harness
+  call (C1) and every step is a `create`: the first `create` outlasts its budget, so its step is `failed` with `timeout`
+  whose `op` is `pane.launch` (E42, E59), the steps after it are `skipped`, and the engine returns well inside a generous
+  bound, as #644's test does (E59).
+- (R3 B-4) No budget over the whole run (O5, C13). Over the same kind of fixture, with a budget and a delay under which
+  one `create` fits in the budget and two in a row do not, both steps are `created`.
+- (R3 B-5) The shown session (C12), for a recorded agent pane that matches its spec, whose `health` answers `Ok(true)`
+  and whose Herdr session and pane id the snapshot lists: when its TUI is on the home screen (`navigate` to `None`, E60,
+  so `shown_session` answers `Ok(None)`, E25) and when `shown_session` answers an error
+  (`fail_next(HarnessOp::ShownSession, ..)`, E26), the step is `adopted` and nothing live is touched; when its TUI shows
+  another session of its server (`seed_session`, then `navigate` to it, E60), the pane is not healthy, so the step is
+  `relaunched` (row f).
+- (R3 NV-1) Row f under `--take-over` (C11): an agent pane of another profile Q whose server is killed (E25) is
+  `relaunched` and its record names P, and the fake pane store's `watch` (E57) shows the leave (`profile` none), then the
+  join (`profile` P), then the relaunch's record write. When the relaunch fails instead, with a failure-class error such
+  as `PaneError::Unavailable { .. }` (E46) injected by `fail_next` (E26) at a port method that only the relaunch calls
+  (apply's own observations call only `snapshot`, `health` and `shown_session`, C1), the step is `failed`, the record
+  still names P, the watch shows no write after the join, the steps after it are `skipped`, and the verb exits 1 (O1).
+- (R3 NV-3) A per-pane `usage` (§4): an agent pane that is not healthy and whose spec's `host.cwd` differs from its
+  record's is answered `usage` by the relaunch rules (E17), so its step is `refused`, carrying a named code; the run goes
+  on to the next step, and the verb exits 0 when no step is `failed` (§5).
+- (R3 NV-4) What a dry run calls (§6, C1, C2): over a fixture with a step of each of rows a to f, run with
+  `--herdr-session`, the fake Herdr's call log holds no method but `Snapshot`, the fake harness's none but `Health` and
+  `ShownSession`, the fake host's log and the prober's are empty, and neither store's log holds a `CasPut` or a `Delete`
+  (E57). So no launch or relaunch run started, since a run's first live reads are the probe and Herdr's `version` (E15).
 
 With one thread per pane (§9), `fail_next(HarnessOp::Health, ..)` fails whichever pane's call reaches the fake first
 (E26). So a test that fails one named pane's `health` (§11's test and the B-2 test above) uses a fixture in which that pane
-is the only one whose health is observed.
+is the only one whose health is observed, and the R3 B-5 test's `fail_next(HarnessOp::ShownSession, ..)` likewise uses a
+fixture with one recorded pane.
 
 **C8. An error before any plan exists (NV-7; from §5).** §5 calls its exit codes "the doctor form". `pane doctor` fails
 only when it cannot run its pass (a pane or profile that does not exist, a store that cannot be read), and everything its
@@ -239,6 +279,85 @@ contract (E41, E42): `profile-not-found` exits 3, and a failure such as `unavail
   Each reaches apply as the `error` of a `TxFailure`, whose `acted` says whether the act was entered (E55), and each is
   failure class, so the step is `failed` in the same way. A conflict after the live change is the case E37 has a verb
   answer with the reconcile step. Rows a and e write nothing.
+
+**C11. The write that sets `Pane.profile` to P in row f (R3 B-1, R3 NV-1; from §3 and O1).** A relaunch makes one record
+write (E19), which stores the profile its request names, or else the record's own (E16), so a relaunch with
+`profile: Some(P)` records P. Row f's two cases:
+
+- *No take-over* (the record names P, or no profile): apply moves no profile, and the relaunch's own record write is the
+  one that sets `Pane.profile` to P (row f's last sentence). A record in no profile may join P: the membership check of
+  the scope's plan step refuses a `Set` only for a pane of another profile (E28, E29), and the registry allows joining
+  from none (E27, E38).
+- *Under `--take-over`* (the record names another profile Q): apply's leave and join (C10) come first, and they are the
+  writes that set `Pane.profile` to P. The relaunch then runs on a record that names P, so the scope does not refuse it
+  `pane-in-other-profile` (E28, E29), and its own record write keeps P (E16). The `record` of its `RelaunchRequest` is
+  the record the join returned (E5: `cas_put` returns the stored record with its bumped generation), because the
+  request's record carries the generation the relaunch's record write expects (E13, E19). A request built from the
+  record as read before the move would make that write a `generation-conflict` after the live change (C5).
+
+In both cases apply writes nothing after the relaunch, also when it fails (O1). C7's R3 NV-1 test checks the take-over
+case.
+
+**C12. The shown-session comparison (R3 B-5; from §2 and O2).** `shown_differs` answers `true` for a `None` shown (E22),
+while O2 rules that an `Ok(None)` reading does not make a pane unhealthy, so apply never passes `shown_differs` a `None`
+shown. For each recorded pane it reads `shown_session(&record.herdr.pane_id)` (E7, E9) and takes §2's third condition,
+the shown session, from the answer alone:
+
+| `shown_session` answers | §2's third condition | Source |
+|---|---|---|
+| `Ok(Some(s))` | fails exactly when `reconcile::shown_differs(record.session_of_record.as_deref(), Some(s.as_str()))` is `true` | §2; O2 (the only mismatch) |
+| `Ok(None)` | holds: cannot tell (reported in the step's detail, not acted on) | O2 |
+| `Err(_)` | holds: cannot tell (reported in the step's detail, not acted on) | §2; O2 |
+
+A pane whose `session_of_record` is `None` never fails it (E22). §2's other two conditions, `health` and the snapshot
+(C9), are unchanged. C7's R3 B-5 test checks the three answers.
+
+**C13. Testing the bound, not only its doc (R3 B-4; from §9, C4 and O5).** §9's `grep`-style test keeps the doc
+sentence from being dropped; two of C7's tests check that the engine keeps the structure that sentence states. A step
+that outlasts its own budget ends `failed` with `timeout` and stops the run (§5, §9), and two steps that each fit one
+budget both complete, since there is no budget over the whole run (O5). Both follow #644's bound test (E59): the engine
+is called with a `TxOptions` whose `budget` is short, and `set_delay` slows every call of the fake harness. So
+`tx_apply`'s entry point takes the `TxOptions` its steps run under from its caller, as `tx_launch::launch` and `relaunch`
+do (E14, E58), and hands it to each step's `tx_launch` run, whose budget starts when that run starts (E14); the verb
+passes `TxOptions::default()`, as `pane launch` and `pane relaunch` do (E58).
+
+**C14. The acceptance list (R3 B-2).** The Acceptance section's last bullet makes this list the story's whole acceptance:
+every entry passes on the test kit's fakes. "Acceptance *n*" is the *n*-th bullet of the Acceptance section. A test may
+cover several entries; each entry's source states its test, and this index adds none.
+
+| # | The test | Source |
+|---|---|---|
+| 1 | Apply twice: the second run changes nothing. | Acceptance 1 |
+| 2 | Row c: a healthy pane that matches its spec is `adopted`, not relaunched, with no live call. | Acceptance 1; §11 c |
+| 3 | Row d: a healthy pane that differs is `reported`, not killed, and nothing live is touched. | Acceptance 1; §11 d |
+| 4 | A dry run runs no probe and writes nothing, and its plan parses against the envelope. | Acceptance 1; §11 |
+| 5 | Row a: a pane of another profile is `refused` (`pane-in-other-profile`) without `--take-over`. | Acceptance 2; §11 a |
+| 6 | With `--take-over`, that pane is `adopted` (the leave, then the join). | Acceptance 2; C7 (R2 NV-3) |
+| 7 | A dry run's plan lists the pane of another profile. | Acceptance 2 |
+| 8 | A failing probe: that pane's step is `refused` (`probe-failed`), and the others proceed. | Acceptance 3; §11 |
+| 9 | Row b against #638's split-only fake: a missing pane is `created`, by splits. | Acceptance 3; §11 b |
+| 10 | A healthy pane in the wrong cell is `reported`, never moved. | Acceptance 3; §11 d |
+| 11 | `apply --dry-run` and `holler profile show` agree on the same fixture. | Acceptance 4 |
+| 12 | Row b: an occupied cell is refused through launch. | §11 b |
+| 13 | Row b: a `create` that launch answers with `pane-exists` is `refused` with that code, and the run goes on. | §11 b; C7 (B-3) |
+| 14 | Row d with `--take-over`: the profile moved, and nothing live is touched. | §11 d |
+| 15 | Row e: an orchestrator that is not healthy is `refused` (`orchestrator-not-relaunched`) with no registry write, also with `--take-over`. | §11 e |
+| 16 | Row f: a pane whose server was killed is `relaunched`. | §11 f |
+| 17 | A failed `health` call: a `failed` step that stops the run, the rest `skipped`. | §11 |
+| 18 | The up-front `usage` case: exit 2, no step run, and no Herdr or harness call. | §11; C7 (R2 W-3) |
+| 19 | A stale spec is not written back. | §11 |
+| 20 | The module doc of `tx_apply.rs` states the run's bound: the `grep`-style test, and S's audit of C4's form. | §9; C4 |
+| 21 | A dry run with a failed `health` call: `failed`, the rest `skipped`, no probe, no write, exit 1. | C7 (B-2) |
+| 22 | A store conflict at a step's write: `failed`, the rest `skipped`, exit 1. | C7 (NV-9) |
+| 23 | An unreadable Herdr snapshot: the first step that needs it `failed`, the rest `skipped`, exit 1. | C7 (W-1) |
+| 24 | An orchestrator that Herdr does not list (after `vanish`; under another Herdr session): `refused` (`orchestrator-not-relaunched`), nothing written or touched. | C7 (R2 NV-5, R2 NV-6) |
+| 25 | Row c's writes, counted and in order; a join that conflicts: `failed`, the rest `skipped`, exit 1. | C7 (R2 NV-3, R2 W-1, R3 NV-2) |
+| 26 | A step that outlasts its budget: `failed` with `timeout`, the rest `skipped`, inside a generous bound. | C7 (R3 B-4) |
+| 27 | No budget over the whole run: two `create` steps that each fit one budget, though not both together, are both `created`. | C7 (R3 B-4) |
+| 28 | The shown session: the home screen and an error leave the pane `adopted`; another session makes it `relaunched`. | C7 (R3 B-5) |
+| 29 | Row f under `--take-over`: the leave, the join, then the relaunch; a relaunch that then fails leaves the pane in P, with no write after the join. | C7 (R3 NV-1) |
+| 30 | A per-pane `usage` from the relaunch rules: `refused` with a named code; the run goes on and the exit code is unchanged. | C7 (R3 NV-3) |
+| 31 | A dry run calls only the reads C1 names. | C7 (R3 NV-4) |
 
 ### Open points O1 to O5: ALL DECIDED, see "Decisions on O1 to O5 (final)" below (the text of each point is kept as the question that was asked)
 
@@ -731,7 +850,8 @@ fn same_pane(a: &HerdrPane, b: &HerdrPane) -> bool {
 ```
 
 **E22. `shown_differs`** (`crates/holler-pane/src/reconcile.rs:171-181`). It takes values already read, not a `Result`, so
-an `Err(_)` from `shown_session` never reaches it; a `None` shown is a mismatch (NV-4, O2).
+an `Err(_)` from `shown_session` never reaches it; a `None` shown is a mismatch (NV-4, O2). Apply calls it only on an
+`Ok(Some(s))` reading, never with a `None` shown, so its `None` case never decides a pane's health (O2, C12).
 
 ```rust
 /// Whether a pane whose session of record is `session_of_record` shows something else: the
@@ -1301,5 +1421,242 @@ pub struct TxFailure {
     /// step.
     pub acted: bool,
 }
+```
+
+**E56. `GridPos`'s serde form, `SpecField`'s path and `FieldValue`** (`crates/holler-pane/src/grid.rs:13` and `129-138`;
+`crates/holler-pane/src/profile_diff.rs:74-80`, `155-172` and `174-180`). How a cell that differs shows inside a step's
+`diff` (C6, R3 NIT-2).
+
+```rust
+//! - **Output**: text `r2c1`; JSON `{"row":2,"col":1,"pos":"r2c1"}`, row first.
+```
+
+```rust
+impl Serialize for GridPos {
+    /// `{"row":R,"col":C,"pos":"rRcC"}`, in that key order.
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut out = serializer.serialize_struct("GridPos", 3)?;
+        out.serialize_field("row", &self.row)?;
+        out.serialize_field("col", &self.col)?;
+        out.serialize_field("pos", &self.to_string())?;
+        out.end()
+    }
+}
+```
+
+```rust
+    /// The dotted path of the field in a `ProfileSpec`'s JSON (`"herdr.grid"`), which is
+    /// also its serde form.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            SpecField::Workspace => "herdr.workspace",
+            SpecField::Grid => "herdr.grid",
+            SpecField::Cwd => "host.cwd",
+```
+
+```rust
+/// One field's value, typed so that it serializes exactly as the field does inside a
+/// `ProfileSpec` (a grid through `GridPos`'s own `Serialize`, row first) and prints for a
+/// person.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(untagged)]
+pub enum FieldValue {
+    /// `herdr.workspace`, `host.cwd`, `harness.kind`, `harness.port_policy`, the three
+    /// `model` fields and `role`.
+    Text(String),
+    /// `herdr.grid`.
+    Grid(GridPos),
+    /// `context.soft`, `context.hard`.
+    Number(u32),
+    /// `env` (the names) and `expect`, in stored order.
+    List(Vec<String>),
+    /// `command`, `check`; `None` serializes as `null`.
+    Argv(Option<Argv>),
+}
+```
+
+```rust
+impl fmt::Display for FieldValue {
+    /// The text form:
+    ///
+    /// - `Text` with every control character escaped by `char::escape_default`, so ESC
+    ///   prints as `\u{1b}` and a newline as `\n` (the rule Holler's text log lines
+    ///   escape a field value with, in `holler_proto::log`); every other character as is.
+    /// - `Grid` as `r2c1`, and `Number` in decimal.
+```
+
+**E57. The fakes' call log, and the pane store's `watch`** (`crates/holler-pane-testkit/src/pane_store.rs:20-31`;
+`crates/holler-pane-testkit/src/fault.rs:85-88`; `crates/holler-pane/src/ports.rs:39-45`;
+`crates/holler-pane/src/pane.rs:261-273`; `crates/holler-pane-testkit/src/feed.rs:14-16` and `26`). A call log records
+each call's method alone (an `Op` such as `PaneStoreOp::CasPut`, which carries no argument), so it counts writes; the
+watch yields every change after a cursor, in order, with the record after it, and the fake keeps its whole history (C7:
+R3 NV-1, R3 NV-2, R3 NV-4).
+
+```rust
+/// A method of the `PaneStore` port, as a fault targets it and the call log records
+/// it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PaneStoreOp {
+    Get,
+    List,
+    CasPut,
+    Delete,
+    Watch,
+    /// One `next()` of an open watch.
+    WatchNext,
+}
+```
+
+```rust
+    /// Every call made through the port, oldest first, the failed ones included.
+    pub fn calls(&self) -> Vec<Op> {
+        self.lock().calls.clone()
+    }
+```
+
+```rust
+/// The stream `watch` returns: changes in order, each carrying its [`Cursor`].
+///
+/// - `watch(since)` yields every change after `since`. `Cursor(0)` starts from the
+///   beginning: the store first yields a put for every record it holds now (the
+///   current state), then every later change.
+/// - Passing the cursor of the last event seen back as `since` resumes without a
+///   gap or a repeat.
+```
+
+```rust
+/// One change to the pane store, as `PaneStore::watch` yields it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PaneEvent {
+    /// The store-wide sequence number of this change; hand it back as the `since`
+    /// of the next watch to resume without a gap or a repeat.
+    pub cursor: Cursor,
+    /// The pane the change concerns.
+    pub name: PaneName,
+    /// The record after the change; `None` when the record was deleted.
+    #[serde(default)]
+    pub pane: Option<Box<Pane>>,
+}
+```
+
+```rust
+//! Every change takes the next cursor, `head + 1`. An overflow is `store-corrupt` and
+//! changes nothing. Unlike the hub's registry, the feed keeps its whole history, so it
+//! never collapses writes.
+```
+
+```rust
+//! 3. From any other cursor: every change after it, in order.
+```
+
+**E58. `TxOptions`, and the options the `pane` verbs pass** (`crates/holler-pane/src/tx_launch.rs:93-111`;
+`crates/holler-cli/src/pane/launch.rs:78`; `crates/holler-cli/src/pane/relaunch.rs:55`). A run's budget is its caller's
+to set, and the verbs pass the default (C13).
+
+```rust
+#[derive(Debug, Clone, Copy)]
+pub struct TxOptions {
+    /// The budget of the whole run ([`DEFAULT_BUDGET`]).
+    pub budget: Duration,
+    /// The timeout of the health probe ([`PROBE_TIMEOUT`]).
+    pub probe_timeout: Duration,
+    /// The wall clock stamped into `last_observed.at` (`holler_proto::clock::now_millis`).
+    pub now_ms: fn() -> i64,
+}
+
+impl Default for TxOptions {
+    fn default() -> Self {
+        Self {
+            budget: DEFAULT_BUDGET,
+            probe_timeout: PROBE_TIMEOUT,
+            now_ms: holler_proto::clock::now_millis,
+        }
+    }
+}
+```
+
+```rust
+            let result = launch(ctx.ports, &request, &TxOptions::default());
+```
+
+```rust
+            let result = relaunch(ctx.ports, &request, &TxOptions::default());
+```
+
+**E59. `set_delay`, and #644's bound test** (`crates/holler-pane-testkit/src/fault.rs:79-83`;
+`crates/holler-cli/tests/pane_verbs/launch.rs:529-563`). The pattern C7's R3 B-4 tests follow: a short budget, a slowed
+fake, a `timeout` that names `pane.launch`, inside a generous bound (C13).
+
+```rust
+    /// Make every call sleep for `delay` before it answers, as a slow port does
+    /// (`None`: no delay).
+    pub fn set_delay(&self, delay: Option<Duration>) {
+        self.lock().delay = delay;
+    }
+```
+
+```rust
+/// AC 24 (I5): a run whose budget runs out stops before the next step, rolls back and answers
+/// `timeout`, well inside a generous bound.
+#[test]
+fn the_budget_bounds_a_slow_launch() {
+    let rig = Rig::new();
+    let request = LaunchRequest {
+        name: name(PANE),
+        herdr_session: Some("scratch".to_owned()),
+        spec: launch_spec(),
+        profile: None,
+        spec_only: false,
+    };
+    let options = TxOptions {
+        budget: Duration::from_millis(800),
+        ..TxOptions::default()
+    };
+    rig.fakes
+        .harness
+        .faults()
+        .set_delay(Some(Duration::from_millis(500)));
+    let started = Instant::now();
+    let (answer, calls) = rig.engine(|ports| tx_launch::launch(ports, &request, &options));
+    let took = started.elapsed();
+    rig.fakes.harness.faults().set_delay(None);
+    let timeout = PaneError::Timeout {
+        op: "pane.launch".to_owned(),
+    };
+    assert_eq!(
+        answer,
+        Err(TxFailure {
+            error: timeout,
+            acted: true
+        })
+    );
+    assert!(took < Duration::from_secs(3), "bounded: {took:?}");
+```
+
+**E60. The fake harness's `seed_session` and `navigate`** (`crates/holler-pane-testkit/src/harness.rs:218-223` and
+`233-243`). How C7's R3 B-5 test puts a TUI on its home screen or on another session.
+
+```rust
+    /// Another client created a session in the data directory of `port`: a stray
+    /// "ping" session, or one a person started by hand on a TUI's home screen. It needs
+    /// no running server. Returns its id.
+    pub fn seed_session(&self, port: u16) -> String {
+        self.lock().mint_session(port)
+    }
+```
+
+```rust
+    /// A person moved the TUI in `pane` by hand: `Some(id)` shows that session, `None`
+    /// goes to the home screen. `unavailable` when there is no TUI in `pane`;
+    /// `session-not-found` when the data directory of the TUI's port lacks the id.
+    pub fn navigate(&self, pane: &PaneId, session: Option<&str>) -> Result<(), PaneError> {
+        let mut world = self.lock();
+        let port = world.tui_port(pane)?;
+        if let Some(session) = session {
+            world.known(port, session)?;
+        }
+        world.show(pane, session)
+    }
 ```
 
