@@ -142,8 +142,8 @@ pub(crate) fn both_with<T>(
     );
     for case in &cases {
         assert!(
-            case.calls.herdr.is_empty() && case.calls.host.is_empty(),
-            "{:?}: no Herdr or host call, so no keystroke (I4): {:?}",
+            crate::list::only_herdr_reads(&case.calls.herdr) && case.calls.host.is_empty(),
+            "{:?}: no Herdr call that acts and no host call, so no keystroke (I4): {:?}",
             case.format,
             case.calls
         );

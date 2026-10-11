@@ -157,6 +157,7 @@ pane doctor |
 pane doctor | --profile demo --format=json
 pane doctor | demo-c1r1
 pane doctor | demo-c1r1 --fix
+pane doctor | --unmanaged-stalled-after 1800
 pane doctor | --fix --profile demo
 
 # #648

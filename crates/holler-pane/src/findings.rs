@@ -70,6 +70,9 @@ pub enum FindingKind {
     ShownDrivenMismatch,
     /// A session on a pane's server that is the session of record of no pane.
     StraySession,
+    /// A Herdr pane no record names has shown the same screen for longer than the
+    /// operator's threshold (#832). Only a whole-fleet pass with a threshold looks.
+    UnmanagedStalled,
 }
 
 impl FindingKind {
@@ -87,6 +90,7 @@ impl FindingKind {
         FindingKind::TuiForeignSession,
         FindingKind::ShownDrivenMismatch,
         FindingKind::StraySession,
+        FindingKind::UnmanagedStalled,
     ];
 
     /// The kind's stable kebab-case code, which is also its JSON form. A code is stable
@@ -105,6 +109,7 @@ impl FindingKind {
             FindingKind::TuiForeignSession => "tui-foreign-session",
             FindingKind::ShownDrivenMismatch => "shown-driven-mismatch",
             FindingKind::StraySession => "stray-session",
+            FindingKind::UnmanagedStalled => "unmanaged-stalled",
         }
     }
 
@@ -122,6 +127,7 @@ impl FindingKind {
         match self {
             FindingKind::HerdrVersionUnsupported
             | FindingKind::UnregisteredHerdrPane
+            | FindingKind::UnmanagedStalled
             | FindingKind::StraySession => None,
             FindingKind::ObserveFailed => Some(doctor_command(pane, false)),
             FindingKind::HerdrPaneMissing

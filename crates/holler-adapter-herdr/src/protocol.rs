@@ -353,6 +353,8 @@ pub struct PaneRef {
     pub tab_id: String,
     /// Its `label` as Herdr sent it, `""` included; `None` when absent or not a string.
     pub label: Option<String>,
+    /// Its `cwd` as Herdr sent it; `None` when absent or not a string (#832).
+    pub cwd: Option<String>,
 }
 
 /// What `session.snapshot` reports, reduced to what the adapter reads.
@@ -387,6 +389,11 @@ impl SessionState {
                 )))
             }
         }
+    }
+
+    /// The pane `pane` of this snapshot, in any tab, whether or not it has a grid cell.
+    pub fn pane_ref(&self, pane: &PaneId) -> Option<&PaneRef> {
+        self.panes.iter().find(|listed| listed.pane_id == *pane)
     }
 
     /// The label Herdr sent for the pane `pane`, as sent: `None` when it sent none, or
@@ -458,6 +465,7 @@ fn pane_ref(pane: Object<'_>) -> Result<PaneRef, PaneError> {
         workspace_id: pane.string("workspace_id")?.to_owned(),
         tab_id: pane.string("tab_id")?.to_owned(),
         label: sent_label(pane),
+        cwd: sent_text(pane, "cwd"),
     })
 }
 
@@ -466,8 +474,14 @@ fn pane_ref(pane: Object<'_>) -> Result<PaneRef, PaneError> {
 /// a field they read that is missing or of the wrong type: a pane's label is optional, and
 /// no reply that parses without one may fail because of one (#808).
 fn sent_label(pane: Object<'_>) -> Option<String> {
+    sent_text(pane, "label")
+}
+
+/// The text field `key` of a `PaneInfo` Herdr sent, as sent: `None` when it is absent or not
+/// a string. Like the label, an optional field must not fail a reply that parses without it.
+fn sent_text(pane: Object<'_>, key: &str) -> Option<String> {
     pane.fields
-        .get("label")
+        .get(key)
         .and_then(Value::as_str)
         .map(str::to_owned)
 }
