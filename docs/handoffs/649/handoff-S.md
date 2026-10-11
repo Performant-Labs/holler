@@ -1,323 +1,325 @@
-# Handoff-S: Phase 10 - #649 hub wiring and the scratch integration scenario  (spec audit)
+# Handoff-S: Phase 10 - #649 hub wiring and the scratch integration scenario  (spec audit, second pass)
 
-**Date:** 2026-10-11 (15:55 MDT)
-**Branch:** `issue-649-implementation` (worktree `.claude/worktrees/0649-live-harness`, head `9cafe0d`, merge base `5d366b9`, #650).
-`origin/main` is `4366fb8` (#830's research spike, `docs/research/` and `scripts/spikes/` only). A trial merge
-(`git merge-tree --write-tree origin/main HEAD`) is clean.
-**Issue:** #649 (epic #633), read live with `gh issue view 649` (last edited 12:16 MDT). Its body is the brief's top half
-with an evidence index. One difference: the issue's D10 (5) lacks the `LANG=C.UTF-8` clause that `c13400a` added to the
-brief (Notes for O, item 3).
-**Brief:** `docs/handoffs/649-brief.md` at `c13400a`.
+**Date:** 2026-10-11 (16:21 MDT)
+**Branch:** `issue-649-implementation` (worktree `.claude/worktrees/0649-live-harness`, head `c001eeb`, merge base `5d366b9`,
+#650).
+`origin/main` is `652841b` (#832, merged 15:35 MDT); `git ls-remote` agrees. A trial merge
+(`git merge-tree --write-tree origin/main HEAD`, tree `2e527e2`) conflicts in `CHANGELOG.md` only.
+**Issue:** #649 (epic #633), read live with `gh issue view 649` (last edited 12:16 MDT).
+- It still differs from the brief only by D10 (5)'s `LANG=C.UTF-8` clause (`c13400a`).
+- It names neither #832 nor `observe_pane`.
+**Brief:** `docs/handoffs/649-brief.md` at `c13400a`, unchanged since the first pass.
 **Handoffs reviewed (under `docs/handoffs/649/`):**
-- `handoff-A.md` (fifth pass, `2280399`) and `handoff-A-dup.md` (`9cafe0d`);
-- `handoff-T-red.md` (second cycle, `ce5da11`; the first cycle's is `e4f1d36`);
+- `handoff-A.md` (fifth pass, `2280399`) and `handoff-A-dup.md` (second pass, `c001eeb`);
+- `handoff-T-red.md` (second cycle, `ce5da11`);
 - `handoff-F.md` (all three cycles);
-- `handoff-T-green.md` (fourth pass, `6ce945d`);
+- `handoff-T-green.md` (fifth pass, `98280ad`: S's test-only rework);
+- the first S pass (`d387625`), which this handoff replaces. Git history keeps it;
 - `decisions.md` and `evidence.md`.
 
-**Outside gates** (`deepseek-v4-pro`, per each `.usage.json`):
-- brief gate r1: PASS (10:32 MDT);
-- diff gate r1: BLOCK (13:47). A's fifth pass refuted both blocks against the code and a real hub;
-- diff gate r2: BLOCK (14:39). The compiler refutes both (`13010f4`, `4d7f58a`);
-- diff gate r3 (15:13): "BLOCK — 0 blocking finding(s)". Its one WARN (D10 did not list `LANG`) was settled by amending
-  D10 (`c13400a`).
+**What changed since the first pass.**
+- In `crates/`, one file: `crates/holler-cli/tests/pane_integration/fake_hub.rs` (T's fifth pass).
+- No production line, ADR, CHANGELOG or manifest changed.
+- `origin/main` moved: #832 merged at 15:35 MDT.
 
-**Verdict:** REWORK, test-only. Two rows are missing in `crates/holler-cli/tests/pane_integration/fake_hub.rs`, and no
-`src/` change is needed. One more item blocks the merge but is not F's or T's code: the rename scan in Notes for O,
-item 1.
+**Verdict:** ADVISORY-HOLD.
+- F's code and T's tests meet the brief on the branch's base, and the first pass's REWORK is closed.
+- The branch cannot land as the brief leaves it, and each fix is the operator's, not F's or T's:
+  - the merge of `main` that the PR needs breaks D31 W-4 in two wrappers (A-dup's W-5);
+  - the brief file itself fails CI's rename scan.
+- The details are under Verdict.
 
 ## A precondition
 
 Met.
-- `handoff-A.md` (fifth pass, the re-entry after diff gate r1): **PASS**. Its binding warns were W-S (evidence, no code
-  for B-1 and B-2) and W-T (a non-UTF-8 value reads as malformed). F did both in the second cycle, and T pinned W-T.
-- `handoff-A-dup.md` (`5d366b9..c13400a`): **PASS**, no block. Warns W-1 to W-4 and W-O are follow-up material
-  (advisory 5).
+- `handoff-A.md` (fifth pass): **PASS**.
+- `handoff-A-dup.md` (second pass, diff `c13400a..98280ad`): **PASS**, no block.
+  - W-5 binds at the merge with `origin/main`. W-6 is a nit.
+  - W-1 to W-4 and W-O carry over as follow-up material.
 
 ## T precondition
 
-Met. `handoff-T-green.md` (fourth pass) says "Blocking issues: None".
-- **RED.** First cycle: 8 of 58 default-run tests failed against the trial of `046026f`. Each failure is on a row D32
-  names: D4's eager request (3), D5's dropped fallback (3), D5's extents (1) and W-E's fail-closed socket (1).
-  Second cycle: the new W-T row failed on its assertion (`host.ensure_session … got Ok(())`, `tmux-1000` in the trap).
-- **GREEN.** `pane_integration` passes 61, fails 0 and ignores 4. The workspace run (CI's command, `--no-fail-fast`)
-  gives 2312 passed, 1 failed, 32 ignored. The failure is the rename scan, Notes for O item 1.
-  Mutation checks M1 to M8, plus the 5 s pin check and the `move` check, each failed when the behavior was removed.
-- **Opt-in.** `scenario::*` passed 4 of 4 at `22aa539` (F's second cycle, 82.48 s; T-green's second cycle), with no
-  `/tmp/hlr649-*` directory and no `hlr649` or `holler649` process left. Since then, `git diff 22aa539 HEAD -- crates/`
-  shows comments in three files and one table value in a default-run test. No scenario code changed, so that run still
-  stands.
-  I did not re-run it.
+Met.
+- **Verdict.** `handoff-T-green.md` (fifth pass) says "Blocking issues: None in F's code."
+- **RED, then GREEN, for the rework.**
+  - Each of two mutants fails the new assertions when its behavior is removed:
+    - M9: `NoLiveHub` added to `timed_out`'s write arm;
+    - M10: `hub_unavailable`'s second arm with the hub dropped.
+  - Then `cargo test -p holler-cli --test pane_integration fake_hub`: 15 passed.
+  - Clippy `-D warnings` (workspace, all targets), `lint.sh`, `changelog-check` and `machete` are clean.
+- **The workspace run was still running when T returned** (57 of 151 binaries, 0 failures).
+  - The rework is one file of one test binary, and that binary compiled and passed its changed module.
+  - So the fourth pass's result stands: 2312 passed, 1 failed. The failure is the rename scan (Quality audit, CI
+    readiness 3).
+- **Opt-in scenario:** 4 of 4 at `22aa539` (82.48 s).
+  - No scenario or production code has changed since, on this branch.
+  - It has never run on a tree that includes #832.
 
 ## Acceptance criteria
 
-Paths are under `crates/holler-cli/tests/pane_integration/` unless given in full.
+- Paths are under `crates/holler-cli/tests/pane_integration/` unless given in full.
+- Each status is for the branch on its base, `5d366b9`. The Verdict covers the tree that would land.
 
 | # | Criterion | Proving test or evidence | Status |
 |---|---|---|---|
-| 1 | No hub: every `pane` and `profile` verb exits 1 `unavailable`, naming the missing hub, and touches no adapter (D28). The process stub tests run against a started hub (D22) | `no_hub::every_verb_with_no_hub_is_unavailable_naming_the_hub_in_json` and `…_in_text` cover all 20 verbs: 12 `pane`, 8 `profile`, checked against `src/pane/` and `src/profile/`. Each run checks one envelope (`check_envelope`), exit 1 and `unavailable`. The message must name "no live holler hub reachable" and the state dir. The traps must stay untouched: a held Herdr listener, a tmux socket path, an `opencode` that leaves a mark, and an empty `PATH`. D22: `pane_verbs/process/stub.rs`'s three stub tests now run through `LiveHub`, with their assertions unchanged | Met |
-| 2 | `pane list`, `get` and `watch` and `profile list` work with no Herdr, tmux or OpenCode (D2) | `store_only::the_store_only_verbs_work_with_no_herdr_tmux_or_opencode` runs with an empty `PATH` and no adapter setting, and covers `profile show` too. `env::malformed_adapter_settings_do_not_stop_the_store_only_verbs` and `store_only::a_herdr_verb_with_no_session_configured_is_usage_naming_holler_herdr_session` also cover D5 and D26 | Met |
-| 3 | A read the hub took and never answered is `timeout` naming the store method, within 10 s. Every other failure of a read is `unavailable` *naming the hub*. A JSON-RPC error is `unavailable` for reads and writes | **Timeout:** `fake_hub::a_read_the_hub_never_answers_is_timeout_within_the_bound` (`pane_store.get`, under 13 s); `a_read_and_a_write_answered_after_6_s_succeed` (6 s, from below); `a_watch_request_the_hub_never_answers_is_timeout_naming_watch_next`. **Unavailable:** `a_read_whose_reply_is_lost_is_unavailable` (5 reads), `a_json_rpc_error_is_unavailable_for_reads_and_writes` (10 methods) and `a_client_call_with_no_hub_is_unavailable_naming_the_hub` | **Partly met.** Every row pins the code. "Naming the hub" is asserted only on the no-hub row (REWORK 2) |
-| 4 | A malformed `HOLLER_TMUX_SOCKET` is `usage` naming it from the host and the harness, never the default socket (D6) | `wired::a_relative_tmux_socket_is_usage_from_the_host_and_the_harness_never_the_default_server` and `wired::a_tmux_socket_that_is_not_utf8_is_usage_never_the_default_server` run through `Wiring::connect` and `ports()` against a real hub. `TMUX_TMPDIR` is a trap that tmux's default socket would land in. The reader's own row is `env::a_relative_tmux_socket_is_usage_never_the_default_server` | Met |
-| 5 | A write whose reply is lost is `timeout` (D3) | `fake_hub::a_write_whose_reply_is_lost_is_timeout`: all five writes, each naming its `op`. Also `a_write_the_hub_never_answers_is_timeout_within_the_bound` | Met |
-| 6 | The scenario passes on scratch instances only; nothing outside them is touched; real names are refused; the guards are tested in the default run | The opt-in 4 of 4 above. `guards::*` has 7 tests: the gate on exactly `1`; the session (`default` refused); pane names; paths inside the base; the binary's exact environment, `LANG` included; its refusals; and the tmux server's exact environment | Met (recorded runs; not re-run by S) |
-| 7 | The scenario's order, then the repairs of D21 | `scenario::the_scenario_runs_in_order_on_scratch_instances`. Steps: 1, two launches; 2, relaunch C1; 3, reset C2 `--first`; 4, switch C1; 5, park C2; 6 and 7, kill C2's server and delete C1's session, with one `doctor` finding both; 8, a hub restart with `pane list` unchanged. Then `reset C1`, `unpark C2`, `relaunch C2` and the stray deletes | Met (advisory 3) |
-| 8 | No step types into a TUI. At the end, `doctor` reports no finding and the registry equals Herdr's snapshot for the scenario's workspace | No `send_text`, `send_keys` or `send-keys` in `scenario.rs` or `scratch/mod.rs`. `assert_end_state` checks `findings == []` and compares the records' `(pane_id, grid)` with Herdr's snapshot for workspace `hlr649` | Met (advisory 4) |
-| 9 | The profile scenario | `scenario::the_profile_scenario_runs_on_scratch_instances`: create from current; launch `--profile` adds the spec; close `--profile` removes it and the port then refuses; show and list; `delete` refused with `profile-has-live-panes` (exit 3); `--keep-panes`; then both rows have a null profile and their servers still answer | Met |
-| 10 | The grid launches sit at row 2, column 1 in Herdr's own snapshot, each in a workspace whose r1c1 a Holler launch made first (D23) | `scenario::the_two_grid_spellings_land_at_row_2_column_1_in_herdrs_snapshot`: `g0` and `h0` at r1c1, then `c1r2` and `2,1`, both exiting 0 | Met |
-| 11 | Every `--format=json` output parses against the envelope, each `watch` line too | `Scratch::json` runs #638's `check_envelope` on every JSON run. `switch_once_the_tui_takes_it` checks each try. The scenario's final `pane watch --until-idle` checks each line. In the default run: `watch::pane_watch_prints_the_put_of_a_client_write_each_line_an_envelope` | Met |
-| 12 | The scenario's launch resolves `attach_tui` before the record exists, pinned by a test | Indirect in the scenario. Launch writes no record before `attach_tui` and no label (E26), so a launch that exits 0 resolved from the bindings. The direct pin is row 14 | Met |
-| 13 | The server argv runs under a real tmux pty (D15) | `scenario::the_server_argv_runs_under_a_real_tmux_pty_and_stops` runs the default spec and an agent spec. It makes `ensure_session` with an absolute, existing `cwd` first, then `run`, `wait_healthy`, the model guard, `verify_serving` and `stop_owned`. It checks that the port refuses and the owned pids are gone | Met |
-| 14 | `attach_tui` resolves before the record exists, with the decorators over fakes in the default run (D8, D24) | `bind::launch_resolves_attach_tuis_pane_from_the_bindings_before_the_record_exists` runs the real `pane launch` over `BindingHerdr` and `BindingHost` wrapping the kit's fakes. No record and no label exist, so only (a) can answer. It sees `[(Ok(demo-c1r1), false)]`, then one record. Supporting tests: the binding order rows, and the Herdr and host conformance suites over the decorators (W-12) | Met |
-| 15 | No credential is printed, written to a file or put on an argv (D28) | **By construction, read in the code.** The wiring reads only the six `HOLLER_*` variables of the module table, plus `HERDR_SOCKET_PATH`, `XDG_CONFIG_HOME`, `HOME` and `PATH`. Its OpenCode environment is `ProcessEnv::Inherit`, and `serve_args`' error quotes none of the value. **Pinned:** guards 4 and 5 pin that the binary's and the tmux server's environments hold nothing else. D28's sentinel check, `Scratch::assert_no_credential_leaked`, runs twice in the main scenario and once in the profile scenario | Met (advisory 1) |
+| 1 | No hub: every `pane` and `profile` verb exits 1 `unavailable`, naming the missing hub, and touches no adapter (D28). The process stub tests run against a started hub (D22) | **No hub.** `no_hub::every_verb_with_no_hub_is_unavailable_naming_the_hub_in_json` and `…_in_text` run all 20 verbs of `EVERY_VERB`. Each run checks:<br>- one envelope, exit 1, `unavailable`;<br>- "no live holler hub reachable" and the state dir in the message;<br>- untouched traps: a held Herdr listener, a tmux socket path, an `opencode` that leaves a mark, and an empty `PATH`.<br>**D22.** `pane_verbs/process/stub.rs`'s three stub tests run through `LiveHub`, their assertions unchanged | Met |
+| 2 | `pane list`, `get` and `watch` and `profile list` work with no Herdr, tmux or OpenCode (D2) | `store_only::the_store_only_verbs_work_with_no_herdr_tmux_or_opencode`: an empty `PATH`, no adapter setting, `profile show` too. Also `env::malformed_adapter_settings_do_not_stop_the_store_only_verbs` | Met |
+| 3 | A read the hub took and never answered is `timeout` naming the store method, within 10 s. Every other read failure is `unavailable` naming the hub. A JSON-RPC error is `unavailable` for reads and writes | **Timeout:**<br>- `fake_hub::a_read_the_hub_never_answers_is_timeout_within_the_bound` (`pane_store.get`, under 13 s);<br>- `a_watch_request_the_hub_never_answers_is_timeout_naming_watch_next`;<br>- from below, `a_read_and_a_write_answered_after_6_s_succeed`.<br>**Unavailable, naming the hub by its state dir:**<br>- `a_read_whose_reply_is_lost_is_unavailable_naming_the_hub` (`BadReply`, five reads);<br>- `a_json_rpc_error_is_unavailable_naming_the_hub_for_reads_and_writes` (`Refused`, ten methods);<br>- `every_read_and_write_with_no_hub_is_unavailable_naming_the_hub` (`NoLiveHub`, ten methods) | **Met.** It was partly met at the first pass. Its REWORK items 1 and 2 are closed |
+| 4 | A malformed `HOLLER_TMUX_SOCKET` is `usage` naming it, from the host and the harness, never the default socket (D6) | `wired::a_relative_tmux_socket_is_usage_from_the_host_and_the_harness_never_the_default_server` and `wired::a_tmux_socket_that_is_not_utf8_is_usage_never_the_default_server`. Both run through `Wiring::connect` against a real hub, with a `TMUX_TMPDIR` trap. The reader's own row is `env::a_relative_tmux_socket_is_usage_never_the_default_server` | Met |
+| 5 | A write whose reply is lost is `timeout` (D3) | `fake_hub::a_write_whose_reply_is_lost_is_timeout`: all five writes, each naming its `op`. Also `a_write_the_hub_never_answers_is_timeout_within_the_bound`. The converse, a write with no hub is `unavailable`, is now pinned too (row 3) | Met |
+| 6 | The scenario passes on scratch instances only. Nothing outside them is touched, real names are refused, and the guards are tested in the default run | The recorded opt-in 4 of 4. `guards::*` has 7 tests:<br>- the gate on exactly `1`;<br>- the session, with `default` refused;<br>- pane names;<br>- paths inside the base;<br>- the binary's exact environment, `LANG` included;<br>- its refusals;<br>- the tmux server's exact environment | Met (recorded run; not on #832) |
+| 7 | The scenario's order, then the repairs of D21 | `scenario::the_scenario_runs_in_order_on_scratch_instances`: two launches, relaunch, reset `--first`, switch, park, killed server and deleted session with one `doctor` finding both, hub restart with `pane list` unchanged, then `reset C1`, `unpark C2`, `relaunch C2` and the stray deletes | Met (advisory 3) |
+| 8 | No step types into a TUI. At the end, `doctor` reports no finding and the registry equals Herdr's snapshot | No `send_text`, `send_keys` or `send-keys` in `scenario.rs` or `scratch/mod.rs`. `assert_end_state` checks that `doctor` reports no finding, and compares each record's `(pane_id, grid)` with Herdr's snapshot | Met (advisory 4) |
+| 9 | The profile scenario | `scenario::the_profile_scenario_runs_on_scratch_instances` | Met |
+| 10 | Each grid launch sits at row 2, column 1 in Herdr's own snapshot, in a workspace whose r1c1 a Holler launch made first (D23) | `scenario::the_two_grid_spellings_land_at_row_2_column_1_in_herdrs_snapshot` | Met |
+| 11 | Every `--format=json` output parses against the envelope, each `watch` line too | `Scratch::json` runs #638's `check_envelope` (`scratch/mod.rs:358-362`). The scenario checks each line of its final `pane watch`. In the default run: `watch::pane_watch_prints_the_put_of_a_client_write_each_line_an_envelope` | Met |
+| 12 | The scenario's launch resolves `attach_tui` before the record exists, pinned by a test | Indirect in the scenario: launch writes no record before `attach_tui` and no label (E26). The direct pin is row 14 | Met |
+| 13 | The server argv runs under a real tmux pty (D15) | `scenario::the_server_argv_runs_under_a_real_tmux_pty_and_stops`, with the default spec and an agent spec | Met |
+| 14 | `attach_tui` resolves before the record exists, with the decorators over fakes, in the default run (D8, D24) | `bind::launch_resolves_attach_tuis_pane_from_the_bindings_before_the_record_exists`. Supporting:<br>- the binding-order rows;<br>- `bind::the_binding_herdr_passes_the_herdr_conformance_suite`;<br>- `bind::the_binding_host_passes_the_host_conformance_suite` | Met. **On the merged tree, the Herdr suite fails at #832's case 13** (Spec compliance) |
+| 15 | No credential is printed, written to a file or put on an argv (D28) | By construction: the wiring reads only its `HOLLER_*` table, `HERDR_SOCKET_PATH`, `XDG_CONFIG_HOME`, `HOME` and `PATH`, and the harness runs with `ProcessEnv::Inherit`. Guards 4 and 5 pin both environments. `Scratch::assert_no_credential_leaked` runs at `scenario.rs:138`, `:187` and `:304` | Met (advisory 1) |
 
-Each test asserts outcomes, not the implementation: codes, messages, call logs, files, sockets, processes and Herdr's own
-snapshot. The mutation runs (M1 to M8, the 5 s pin, `move`) show the critical branches fail when the behavior is removed.
-The two gaps are REWORK 1 and 2.
+The tests assert outcomes, not the implementation: codes, messages, call logs, files, sockets, processes and Herdr's own
+snapshot. Mutants M1 to M10, the 5 s pin and the `move` check each fail when their behavior is removed.
 
 ## Spec compliance
 
-The decisions D1 to D32, as built:
+**On the branch's base, D1 to D32 are implemented as stated.**
+- No production line has changed since the first pass, which checked each decision.
+- I re-read `wiring.rs`, `wiring/bind.rs` and `wiring/store.rs`, and re-ran the guard greps.
+- The deviations A reviewed stand:
+  - the `Effect` enum;
+  - `stores()` returning trait objects;
+  - `Wired<P>`;
+  - `env::Lookup`.
 
-- **D1, D2, D26, D27.**
-  - `connect()` keeps its signature, so `main.rs` and `say_cmd.rs` are untouched. It makes one `control/status`
-    exchange (`reach_hub`, `ControlCall::status()`'s 5 s). Every failure of that exchange is `unavailable` naming the
-    hub.
-  - `from_env` builds every port with no I/O. The one exception is the `PATH` search for `opencode`, which is a `stat`
-    and never runs it.
-  - Configuration errors are stored and answered at the port's first use. `Wiring` holds no `Unwired`, and `Unwired`
-    stays.
-  - The actor is `holler pane`, through `Actor::parse`.
-- **D3.** `call` and `timed_out` (`store.rs:342-378`) are the one mapping. I read them against `send_over`'s error
-  sources:
-  - a failed connect is `NoLiveHub`;
-  - a failed write, flush or read is `Io`;
-  - EOF, a reply that does not decode, or a reply with no result is `BadReply`;
-  - a JSON-RPC error is `Refused`.
-  So a read's `Io` with `WouldBlock` or `TimedOut` is `timeout`, a write's `Io` or `BadReply` is `timeout`, and the
-  rest are `unavailable`. That is D3's table exactly.
-  - Every request carries 10 s, and `*/watch` requests carry `WATCH_WAIT` + 5 s.
-  - The `op` names match the test kit's (`pane_store.*`, `profile_store.*`, checked by grep).
-  - Undecodable `data` is `unavailable` naming the method (W-9).
-  - The only `control::run` caller in `holler-cli/src` is `transport.rs:35`. There is no `UnixStream` in `src`.
-- **D4.** `watch()` makes the first request eagerly, so a refused cursor and a missing hub are `watch()`'s own answer.
-  An empty batch yields `Ok(None)` once, the next request resumes from the reply's cursor, and an error yields one `Err`
-  and ends the stream.
-- **D5.**
-  - The session comes from `HOLLER_HERDR_SESSION` only.
-  - The socket chain is `HOLLER_HERDR_SOCKET`, then `HERDR_SOCKET_PATH`, then
-    `$XDG_CONFIG_HOME|$HOME/.config/herdr/sessions/<s>/herdr.sock`.
-  - The workspace grammar matches, and each listed malformation is `usage` naming the variable, at the Herdr port's
-    first use.
-  - `--herdr-session` is not defaulted.
-- **D6.** One `HOLLER_TMUX_SOCKET` feeds both `TmuxSocket` types. A relative, empty or non-UTF-8 value is `usage` from
-  the host and the harness (`Wired<P>`), never the default socket and never `Unwired`.
-- **D7.** `opencode_bin` is absolute: the variable, or the first executable on an absolute `PATH` entry. A missing
-  binary is `unavailable` naming `HOLLER_OPENCODE_BIN`. `serve_args` is a JSON array of strings. The harness uses
-  `ProcessEnv::Inherit`, `Timeouts::default()`, and `tmux` from `PATH`.
-- **D8.**
-  - The resolver tries (a) the bindings, (b) the one record on the configured session and pane id (two or more are
-    `unavailable`), then (c) a label in the session's snapshot. Otherwise it answers `pane-not-found`.
-  - The single pending slot is overwritten by every `ensure_pane`, and a failed one offers `None`. So a launch that
-    fails between `ensure_pane` and `ensure_session` cannot hand its pane id to the next launch of a `profile apply`
-    run.
-  - The engine's only call sites are `tx_launch.rs:650` and `:656`.
-  - The W-C bound is recorded in ADR section 2 and in "Wiring as built".
-- **D9, D29, D30.** There is no flag, option or variable for a bound. The scenario asserts no timing margin; it only
-  prints the first launch's time.
-- **D10 to D15, D21 to D23, D28.** The tests implement them as written, rows 1 to 15 above. That includes the six
-  guards, the exact environments (`LANG` per `c13400a`), the r1c1-first grid launches, the agent spec of D15 (W-L), the
-  `Busy` read after `reset --first` (D12), and teardown by TERM then KILL, then `kill-server`, then `herdr server stop`,
-  then removal.
-- **D11.** The three rigs are included by `#[path]` and generalised in place:
-  - `Flavor` and the `_as`/`_in` variants in `scratch_herdr`;
-  - `pub` and the extracted `lay_out` and `isolated_vars` in the rig;
-  - `real_tmux/mod.rs` moved out of `real_tmux_test.rs`.
-  The adapter crates' default-run tests pass unchanged (T-green's workspace run).
-- **D16.** Only `crates/holler-cli/Cargo.toml` changed, with a #649 comment on the three adapter dependencies, plus
-  `Cargo.lock`. `holler-hub` is untouched, `pane_wiring.rs` included.
-- **D17, D18, D19.** The ADR's "Wiring as built (#649)" paragraph records D1 to D9, W-B (#828 and the operator's
-  stopgap), W-C, B-1 and the #825 actor. Each sentence D17 lists is edited:
-  - the `HostPort` amendment;
-  - `--herdr-session` (deferred to #654, no story planned);
-  - DRIVEN (#654) at all four places;
-  - the first message (#828) at both places.
-  The CHANGELOG `## [Unreleased]` entry links #649, and the module doc has the variable table.
-  - One wording follows a later decision. ADR line 511 now names #829, where D17's parenthetical says "#642 only".
-    D18 (f) and A's W-N (a) name #829, so the ADR is right and D17's parenthetical is stale (Notes for O, item 4).
-- **D24, D25.** D24's names are kept, and every file is under 600 lines. Deviations A reviewed:
-  - `call`'s fourth parameter is an `Effect` enum, not a bool. `call` is private, so no test is affected;
-  - `stores()` returns trait objects;
-  - `Wired<P>` is added, with `WiredHarness` as an alias whose `new` is unchanged, and `WiredHost`;
-  - `env::Lookup` is an alias of D24's type.
-- **D31.**
-  - W-4: every decorator forwards every method, `send_prompt` and `session_activity` included, and a recording test
-    pins it.
-  - W-6: the conformance suites run over the clients against a real hub, one hub per case.
-  - W-12: the D8 pin and the decorator suites.
-  - W-9: "T pins each row of D3's mapping" is **not fully met**. The write half of the no-hub row is unpinned
-    (REWORK 1).
-- **D32.** No `TRIAL`, `eprintln!`, `Unwired` field, `HERDR_SESSION` read or default-socket fallback. The manifest
-  comment is present. There is no `UnixStream` in `src`. The rigs are not copied (A-dup).
+**The first pass's one gap is closed.** D31 W-9 says "T pins each row of D3's mapping". The table in `fake_hub.rs`'s module
+doc (lines 10 to 18) is now true as written:
 
-No silent deviation in production code. The one silent test deviation is W-9, REWORK 1.
+| What the exchange did | A read | A write |
+|---|---|---|
+| no socket (`NoLiveHub`) | `every_read_and_write_with_no_hub_is_unavailable_naming_the_hub` | the same test |
+| a JSON-RPC error (`Refused`) | `a_json_rpc_error_is_unavailable_naming_the_hub_for_reads_and_writes` | the same test |
+| closed before the reply (`BadReply`) | `a_read_whose_reply_is_lost_is_unavailable_naming_the_hub` | `a_write_whose_reply_is_lost_is_timeout` |
+| no reply within the bound (`Io`) | `a_read_the_hub_never_answers_…` (`pane_store.get`) and `a_watch_request_…` (`pane_store.watch_next`) | `a_write_the_hub_never_answers_…` (`pane_store.cas_put`) |
+| a `data` that does not decode | `data_that_does_not_decode_is_unavailable_naming_the_method` | none: the row is for reads only |
+
+**Against `main`, D31 W-4 does not survive the merge.** This is A-dup's W-5, which I checked against the code.
+- `HerdrPort` on `main` has two new methods with default bodies, `observe_pane` and `observe_panes`
+  (`crates/holler-pane/src/ports.rs:196-220`, #832).
+  - ADR-0021 section 14 on `main` says: "A wrapper port must delegate it."
+  - #832 changed no other port.
+- **The trial merge.** In tree `2e527e2`:
+  - `BindingHerdr` (`bind.rs:97-128`) and `LazyHerdr` (`bind.rs:201-229`) implement the seven methods of the brief's
+    base, and neither new one;
+  - their own docs say they forward every method (`bind.rs:11`, `:84`);
+  - `main`'s `Unwired`, by contrast, overrides `observe_pane`.
+- **The production path.** The chain is `BindingHerdr` over `LazyHerdr` over `HerdrAdapter` (`wiring.rs:141-152`).
+  - On `main`, `unmanaged::observe` calls `ports.herdr.observe_panes` (`crates/holler-pane/src/unmanaged.rs:108`).
+  - Through the wrappers it gets the trait default, an empty observation per pane.
+  - It never reaches the adapter's own two methods (`crates/holler-adapter-herdr/src/adapter.rs:415`, `:431` on `main`).
+- **Effect.** Under the real wiring, `pane list` and `pane get` would show no working directory for any unmanaged pane.
+  - That contradicts #832's CHANGELOG entry.
+  - #832's view only goes live in production when #649 lands, because `main`'s wiring is still the `Unwired` stub.
+- **Not F's deviation.** On the brief's base, both wrappers forward every method of the port. The brief was cut from a
+  base that `main` has since moved past (Verdict, defect 1).
 
 ## Quality audit
 
-- **Correctness and failure handling.**
-  - Each port fails closed on a bad configuration.
-  - A lost write reply is `timeout`, and the client never retries a write, so nothing is applied twice.
-  - `LazyHerdr` builds once (`OnceLock`) and keeps a failed build.
-  - The bindings' lock tolerates poison; each change is one assignment or one insert.
-  - The resolver's reads are thread-safe for `profile apply`'s concurrent observations.
-  - I found no lost-write or race defect.
+- **Correctness and failure handling.** Unchanged since the first pass, which found no lost-write or race defect:
+  - each port fails closed on a bad configuration;
+  - a lost write reply is `timeout` and is never retried;
+  - `LazyHerdr` keeps a failed build;
+  - the bindings tolerate a poisoned lock.
+- **The rework's tests.**
+  - **One runner.** `against` runs over two tables, `reads()` and `writes()`. Each call gets a fresh fake hub on its
+    own temporary state dir, and the runner still checks that the client sent its method.
+  - **`Outcome::assert_names_the_hub`.** It requires the text `holler hub` and the fake hub's own dir. The dir is a fresh
+    path, so neither the transport's text nor the fake's refusal text can supply it.
+  - **The no-hub row.** It uses a fresh `StateDir` per call and requires `no live holler hub reachable at <dir>`.
+  - **Parallel safety.** Every in-process call runs under `with_state_dir`'s lock (`main.rs:50-66`), so parallel
+    tests cannot race on `HOLLER_STATE_DIR`.
+  - **No captured state.** `type Call` holds `fn` pointers, so a row captures nothing.
+  - **Nit.** The no-hub text is spelled three ways in the target (A-dup W-6).
 - **Build guards.**
-  - No `unwrap`, `expect`, `panic!`, `unreachable!` or print in `src/pane/wiring.rs` or `src/pane/wiring/*`.
-  - The six `#[allow]`s added are all in tests, and each carries `// #649`.
-  - The largest touched `.rs` file is 579 lines (`pane_integration/bind.rs`). `support/mod.rs` is 857 lines (+8, only
-    `StateDir::at`, as D22 and W-I allow). Every touched `.rs` file is under 900.
-  - Clippy `-D warnings`, `lint.sh` and `cargo machete` were clean at T-green.
-  - No `unsafe`.
-- **Protocol.** No change: no new method, field or error code, no golden file, and no `docs/protocol/v2.md` edit is
-  needed. The client speaks the hub's existing `pane/*` and `profile/*` methods with `holler_pane::reply`'s structs.
+  - The added `src` lines have no `unwrap`, `expect`, `panic!`, `unreachable!`, print or `unsafe`.
+  - The six added `#[allow]`s are all in tests, and each carries `// #649`.
+  - Every touched `.rs` file is under 900 lines:
+    - `tests/support/mod.rs` is 857 (+8, only `StateDir::at`, as D22 and W-I allow);
+    - `pane_integration/bind.rs` is 579;
+    - `fake_hub.rs` is 454.
+- **Protocol.** No change: no new method, field, error code or golden file. No `docs/protocol/v2.md` edit is due.
 - **Tests.**
-  - Cross-process behavior runs against real hub subprocesses (`support::Hub`). The fake hub is used only for the
-    failure rows (D13).
-  - No fixed sleep is used for synchronization. The fake hub's sleeps simulate a slow hub, and the scenario polls with
-    `wait_for`.
-  - RED-first evidence is in T's handoffs.
-  - The suite is proportionate: 61 default-run and 4 opt-in tests. I found no tautological or duplicate test: the
-    reader rows in `env.rs` and the ports rows in `wired.rs` sit at different tiers for different clauses of D6.
-  - Gaps: REWORK 1 and 2, and advisories 1 to 4.
+  - Cross-process behavior runs against real hub subprocesses, and the fake hub is used only for the failure rows
+    (D13).
+  - No fixed sleep is used to synchronize. The fake's sleeps play a slow hub, and the scenario polls.
+  - The RED-first evidence is in T's handoffs.
+  - The target has 61 default-run tests and 4 opt-in ones.
 - **Documentation.**
-  - The CHANGELOG `## [Unreleased]` entry links #649, #633, #825 and #828 (`changelog-check` ok).
-  - ADR-0021 has the "Wiring as built" paragraph and D17's edits.
-  - `wiring.rs`'s module doc tables every variable.
-  - There is no operator page: D17 leaves `docs/pane-control.md` to #652 (advisory 7).
-  - One wording slip in the CHANGELOG (advisory 6).
-- **Public-repository privacy.** I grepped the added lines, handoffs included, for hostnames, tailnet names, IPs,
-  account names, private domains, home paths and key shapes. The only hits are the generic `/home/u` in `env` and guard
-  rows and the three sentinel variable names. The sentinel value is made at run time, so it gives gitleaks nothing to
-  match, unlike #650's.
-- **Commit and PR hygiene.**
-  - All 24 branch commits have `chore(#649): …` Conventional subjects and a `Co-Authored-By` trailer, the form of
-    #650's and #664's pipeline commits.
-  - The squash title and the PR body's AI disclosure belong to the PR phase (Notes for O, item 5).
-- **CI readiness.** The branch as it stands fails one CI test, the rename scan. It is not F's or T's code (Notes for O,
-  item 1).
+  - The CHANGELOG `## [Unreleased]` entry links #649, #633, #825 and #828.
+  - ADR-0021 has "Wiring as built (#649)".
+  - `wiring.rs`'s module doc tables the variables.
+  - See advisories 6 and 7.
+- **Public-repository privacy.**
+  - I grepped the whole branch diff, and separately the lines added since the first pass. I looked for IPs, hostnames,
+    tailnet names, home paths, account names, e-mail addresses and key shapes.
+  - The only hits are the generic `/home/u` in the `env` and guard rows, `127.0.0.1`, and the first pass's own
+    description of the check. Clean.
+- **Commit hygiene.**
+  - The three commits since the first pass have `chore(#649): …` subjects and the `Co-Authored-By` trailer, as the
+    rest of the run does.
+  - The squash title and the PR body's AI disclosure belong to the PR phase (Notes for O).
+- **CI readiness: the branch cannot merge as it stands.**
+  1. **The PR would conflict with `main` in `CHANGELOG.md`.** Both sides add the top entry of `### Enhancements`.
+     - The PR phase pushes the branch as it is; it does not merge `main` (`coding-pipeline.workflow.mjs:4700-4800`).
+     - GitHub runs no `pull_request` workflow on a PR with a merge conflict, so CI (`ci.yml`) would first run after
+       `main` is merged in.
+  2. **On the merged tree, CI fails `bind::the_binding_herdr_passes_the_herdr_conformance_suite`.**
+     - #832's case 13 (`crates/holler-pane-testkit/src/conformance/herdr.rs:424-447` on `main`) wants `pane-not-found`
+       from `observe_pane` of an unknown id. `BindingHerdr` answers `Ok` from the default.
+     - No test runs over `LazyHerdr`'s or `observe_panes`' forwards. Its every-method test
+       (`bind::a_lazy_herdr_that_cannot_be_built_answers_that_error_from_every_method`, `bind.rs:134-159`) lists the
+       seven methods by hand.
+     - So a fix to `BindingHerdr` alone would pass CI and still mask the adapter.
+  3. **CI's `wizard_scripts` rename scan fails on two tracked lines.** Both cite the setup wizard's skill directory as it
+     was before #820:
+     - `docs/handoffs/649-brief.md:1197` (E64's Source);
+     - `docs/handoffs/649/decisions.md:66` (A's first entry).
+
+     Details:
+     - The script is now `agent-skills/herdr-setup/lib/herdr.sh`, and E64's excerpt is at the same lines, 8 to 11.
+     - T rewrote its own hit.
+     - The release keeps the handoffs unless the run passes `removeHandoffsBeforePr: true`
+       (`coding-pipeline.workflow.mjs:4753`).
+     - `main` keeps every story's handoffs (`docs/handoffs/650`, `664`, `802`, `808`).
 
 ## Scope check
 
-F delivered the brief's scope: the wiring of D1 to D9 in the three D24 submodules, the manifest, the ADR and the
-CHANGELOG. T delivered D10 to D15, D21 to D23 and D28, with D11's in-place generalisations. Every changed file is inside
-the Blast radius.
-
-The extras are small, and A reviewed each one (fifth pass and A-dup):
-- `Wired<P>`, which generalises the harness wrapper so the host fails closed as W-E requires;
-- the environment edges in F's Design decision 6 (every path absolute, the XDG rule, an empty session is no session);
-- the ADR's section-2 pointer and three consistency edits.
-
-Nothing is under-delivered. W-R (`docs/testing.md`) was optional and is outside the Blast radius, and D5 and D18 (b)
-defer defaulting the flag.
+- **Delivered.**
+  - F delivered the brief's scope, and T delivered its tests.
+  - Every changed file is inside the Blast radius (27 files outside `docs/handoffs/`).
+- **The extras are the ones A reviewed:**
+  - `Wired<P>`;
+  - F's environment edges;
+  - the ADR's section-2 pointer.
+- **Nothing is under-delivered** on the brief's base.
+- **W-5's work is outside the brief.** It is two forwards in each wrapper, plus their pins. The brief predates #832, so
+  it does not name them.
 
 ## Verdict
 
-**REWORK**, test-only. **No `src/` change is required.** Both changes are in `crates/holler-cli/tests/pane_integration/fake_hub.rs`.
+**ADVISORY-HOLD.**
+- This is not a REWORK of F's or T's work. On the brief's base, the implementation is complete and spec-compliant.
+- The hold is for two defects in the source of truth, which only the operator can fix.
 
-1. **D3's no-hub row for writes is not pinned** (D31 W-9: "T pins each row of D3's mapping").
-   - The module doc says "The rows (A's W-9), each pinned below" (`fake_hub.rs:10`). Its table lists "no socket
-     (`NoLiveHub`) | … | `unavailable`, naming the hub" for writes (`:14`).
-   - But the only no-hub client row, `a_client_call_with_no_hub_is_unavailable_naming_the_hub` (`:318-323`), calls
-     `HubPaneStore::list`. No test sends a write with no hub.
-   - So a mutant that adds `ControlError::NoLiveHub` to `timed_out`'s write arm (`store.rs:375`) survives every test.
-     That mutant would wrongly tell the verbs a write "may have landed" when the request never left.
-   - **Change:** add a row that runs each of the five writes (`pane/cas_put`, `pane/delete`, `profile/cas_put`,
-     `profile/delete`, `profile/rename`) against a state dir with no hub. It asserts `unavailable`, never `timeout`, and
-     a message naming the missing hub: "no live holler hub reachable" and the state dir.
-2. **AC 3's "every other failure of a read is `unavailable` naming the hub" is asserted only for the code.**
-   - `a_read_whose_reply_is_lost_is_unavailable` (`fake_hub.rs:216-220`, `BadReply`) and the read half of
-     `a_json_rpc_error_is_unavailable_for_reads_and_writes` (`:296-303`, `Refused`) check only `code == "unavailable"`.
-   - **Change:** also assert that each read's message names the hub and its state dir. That is `hub_unavailable`'s
-     second arm, `store.rs:387`: "the holler hub at <state dir> did not answer <method>: …". For example, `each_read`
-     can return the fake hub's state path.
-   - A bare `contains("hub")` would not discriminate. `BadReply`'s display ("bad reply from the hub") and the fake's
-     refusal text ("the fake hub refuses") both contain the word. Today a mutant of that arm that drops the hub and its
-     state dir survives.
+**Defect 1. The brief is cut from a base that `main` has moved past, and the merge the PR needs breaks its D31 W-4.**
+- **The defect.**
+  - The brief's base is `5d366b9`. Its Depends-on stops at #644, and its evidence quotes `HerdrPort` before #832.
+  - #832 (merged 15:35 MDT) gave `HerdrPort` two default-armed methods.
+  - It also made delegating them a rule for wrapper ports (ADR-0021 section 14).
+- **The convention violated:** D31 W-4 ("Every delegating impl overrides every method of its port") and ADR-0021 section
+  14 on `main`. A story is built against the base it lands on.
+- **Why F cannot fix it inside the pipeline:**
+  - the fix does not compile before the merge, because the methods do not exist on the branch;
+  - F's role has no merge step, and F stages only production files it wrote;
+  - this run's three merges of `main` were the operator's (`3dff970`, `f59ba21`, `d0c1531`);
+  - on an S REWORK, the driver gives F only "Perform Phase 6's work." (`coding-pipeline.workflow.mjs:5650`), with no
+    finding.
 
-## Notes for T
+**Defect 2. The brief file fails CI.**
+- **The defect.**
+  - E64's Source (`docs/handoffs/649-brief.md:1197`) cites the setup wizard's skill directory as it was before #820.
+  - The brief is a tracked file, so it fails `wizard_scripts`'
+    `skilltext_w5_rename::no_old_command_or_directory_outside_the_rename_note`, which CI's workspace run includes.
+  - A's first journal entry carries the same citation (`decisions.md:66`).
+- **The convention violated:**
+  - #820's CI-enforced rule that the old skill path appears in no tracked file outside the rename note;
+  - the brief's own rule that each Evidence entry cites its current source.
+- **Neither F nor T may edit the brief or A's journal.**
 
-- Both items fit in `fake_hub.rs`. After them, the module table at lines 10 to 18 is true as written.
-- When you rewrite `handoff-T-green.md`, do not quote the setup wizard's old skill directory path. Line 48 of the
-  current one is one of the three rename-scan hits (Notes for O, item 1).
+**Why not PASS.**
+- Phase 11 would push a branch that conflicts with `main`, so CI would not run.
+- The merge after the PR would then add production code (W-5) outside the gates: T-red, F, T-green, the diff gate,
+  A-dup and S.
+- CI catches only half of that code's defect.
+
+**Proposed fix (operator), in order:**
+1. **Merge `origin/main` into the branch.**
+   - In `CHANGELOG.md`, keep both entries at the top of `## [Unreleased]` / `### Enhancements`.
+   - `ADR-0021.md` and `wiring.rs` auto-merge.
+   - Do not run a workspace `cargo fmt` in the merge (this run's own lesson).
+2. **Amend the brief, and the issue with it.**
+   - (a) **A decision for #832**, as A-dup's W-5 gives it:
+     - `BindingHerdr` and `LazyHerdr` override `observe_pane` and `observe_panes`;
+     - `observe_pane` forwards. In `LazyHerdr` it is `self.port()?.observe_pane(pane)`;
+     - `observe_panes` forwards to the inner port's own `observe_panes`, which keeps section 14's one call;
+     - when `LazyHerdr`'s build has failed, `observe_panes` answers one empty observation per pane. That is the
+       trait's contract for a failed call.
+
+     The pins, for T:
+     - the Herdr conformance suite runs over `LazyHerdr` too, so case 13 covers it;
+     - `observe_pane` joins the method list of
+       `bind::a_lazy_herdr_that_cannot_be_built_answers_that_error_from_every_method`;
+     - one recording check per wrapper: `observe_panes` reaches the inner `observe_panes` once, not `observe_pane` once
+       per pane.
+   - (b) #832 joins Depends on, with evidence re-cut from `main` for `ports.rs:196-220` and ADR-0021 section 14.
+   - (c) E64's Source names the `herdr-setup` directory, at lines 8 to 11. The excerpt is unchanged.
+   - (d) The issue body gets D10 (5)'s `LANG=C.UTF-8` clause, as the first pass asked.
+   - (e) A nit: D17's "(#642 only)" for ADR line 511 becomes #829, as D18 (f) and the ADR already say.
+3. **Correct the citation in `decisions.md:66` the same way.**
+   - Record the correction in a new journal entry, since the journal is otherwise append-only.
+   - Running the PR phase with `removeHandoffsBeforePr: true` would also clear the scan. But this repo keeps its
+     handoffs on `main`, so I do not recommend it.
+4. **Relaunch at phase 4**, as this run did after each earlier merge of `main`:
+   - A reviews the amendment;
+   - T-red pins W-5 (RED on the merged tree);
+   - F adds the forwards;
+   - T-green verifies and **re-runs the opt-in scenario on the merged tree**. #832 changes what `pane list`,
+     `pane get` and `pane doctor` read;
+   - the diff gate, A-dup and S then review the tree that lands.
 
 ## Notes for O
 
-1. **This blocks the merge. It is not F's or T's code.**
-   - CI's workspace run includes `wizard_scripts`. Its test `skilltext_w5_rename::no_old_command_or_directory_outside_the_rename_note`
-     scans every git-tracked file for the setup wizard's pre-#820 directory path: `agent-skills/` followed by the old
-     skill name.
-   - Three tracked lines on this branch carry that path:
-     - `docs/handoffs/649-brief.md:1197`, E64's Source line. The path has been stale since #820 renamed the skill: the
-       file is now `agent-skills/herdr-setup/lib/herdr.sh`, with the same comment at lines 9 to 11;
-     - `docs/handoffs/649/decisions.md:66`, the same citation in A's first entry;
-     - `docs/handoffs/649/handoff-T-green.md:48`.
-   - T-green and F record the failure (2312 passed, 1 failed). They expect Phase 11 to remove `docs/handoffs/` before
-     the push. Since Aftersight #558, the release does that only when the run passes `removeHandoffsBeforePr: true`
-     (`coding-pipeline.workflow.mjs:4734-4754`). This repo keeps its handoffs: `main` carries `docs/handoffs/650/`,
-     `664/` and others.
-   - **Fix before the PR**, in one of two ways:
-     - correct E64's path in the brief and reword the two handoff lines (T rewrites its own);
-     - run the PR phase with `removeHandoffsBeforePr: true`.
-   - Otherwise `test (ubuntu-latest)` and `test (macos-latest)` fail, and the branch-protected PR cannot merge.
-   - **Follow-ups:**
-     - (a) the wizard scan could skip `docs/handoffs/`, as `docs_cli_test` does (#462). That is outside this Blast
-       radius;
-     - (b) for Aftersight: `pipeline-conventions.md` §1 still says Phase 11 always removes the handoffs. That
-       contradicts the script since #558, and it misled F and T here.
-2. **Still unfiled.** `gh issue list --search` finds none of these:
-   - T's two product findings:
-     - the OpenCode adapter's TUI query fails without a UTF-8 locale. The scenario sets `LANG=C.UTF-8` for it;
-     - a `pane switch` right after `pane relaunch` times out until the TUI accepts `/tui/select-session`. The scenario
-       retries it for up to 20 s and prints each retry.
-   - the `LinkedHost` consolidation (W-O, with A-dup's W-1 to W-3);
-   - for Aftersight: W-U, and F's two diff-gate input gaps (the 12,000-byte evidence cap, and no `--handoff`);
-   - carried from A: the #825 comment, #653 and #828 (`pfleet o reset`), and #803 not listing #649.
-3. **Sync the issue.** The issue body's D10 (5) lacks the `LANG=C.UTF-8` clause that `c13400a` added to the brief.
-   The issue is the source of truth, so it should carry the clause.
-4. **A brief nit.** D17's "(#642 only)" for ADR line 511 is stale against D18 (f) and A's W-N (a). The ADR's "#829" is
-   right.
-5. **For the PR.** The PR body needs CONTRIBUTING's AI disclosure (`gh pr edit`), and the squash title must be a
-   Conventional Commit subject. The issue's title already is one.
+1. **For the PR.**
+   - The PR body needs CONTRIBUTING's AI disclosure (`gh pr edit`).
+   - The squash title must be a Conventional Commit subject. The issue's title already is one.
+   - It should also say what the merge makes visible:
+     - with no Herdr configured, an unscoped `pane list` still exits 0 with the registry;
+     - in JSON it adds `"unmanaged_unavailable": "usage"`;
+     - in text it prints a warning naming `HOLLER_HERDR_SESSION`.
+   - `store_only.rs`'s assertions hold on the merged tree, by my reading (A-dup's Notes for O 1).
+2. **Still unfiled.** Checked with `gh issue list --search` at 16:15 MDT:
+   - **The test-glue consolidation (W-O).** There are three `LinkedHost`s. It can absorb A-dup's W-1 to W-3 and W-6.
+   - **T's two product findings:**
+     - the OpenCode adapter's TUI query fails without a UTF-8 locale;
+     - a `pane switch` right after `pane relaunch` times out until the TUI accepts its select-session call.
+   - **The wizard's rename scan could skip `docs/handoffs/`,** as `docs_cli_test` does (#462). Then defect 2 cannot
+     recur.
+   - **For Aftersight:**
+     - W-U, which A noted for diff-gate BLOCKs. The same gap applies to a production S REWORK: F gets no finding;
+     - F's two diff-gate input gaps: the 12,000-byte evidence cap, and no `--handoff`;
+     - `pipeline-conventions.md` section 1 still says the handoffs are always removed, which is false since #558.
+   - **Carried from A:**
+     - the #825 comment;
+     - #653 and #828 (`pfleet o reset`);
+     - #803 does not list #649.
 
 ## Advisory notes
 
-1. **D28's sentinel cannot reach the code under test.**
-   - `Scratch::start` plants it in the test process's environment after the hub, Herdr and the tmux server have
-     started (`scratch/mod.rs:235-243`).
-   - The binary runs with `env_clear()` and `binary_env`, per D10 (4). The tmux server, and so every OpenCode server
-     and TUI, has exactly the rig's pairs, per D10 (5).
-   - Only the hub restarted at step 8 and the test's own children ever hold the sentinel. So the check could not catch
-     the wiring forwarding a credential onto an argv.
-   - Today AC 15 holds by construction (row 15), and T implemented D28 as written. But D10's exact environments make
-     D28's observation nearly vacuous.
-   - #829 will carry a pane's environment to its server. **Recommendation for #829:** plant the sentinel in the private
-     tmux server's global environment, the path a production credential takes (E29). Amend D10 (5)'s exact set and
-     guard 5 to admit it, then grep `ps` argv, the outputs and the files.
-2. **Read timeouts under a real hang name only `pane_store.get` and `pane_store.watch_next`.** The other read `op`s
-   are unpinned constants. Each pin would cost a 10 s wait, and D9 admits no knob. I checked each name against the test
-   kit's by grep. No change asked.
-3. **Scenario step 7 asserts only that `doctor` reports some finding for C1** (`scenario.rs:228-231`). That is not
-   vacuous: a stray session is reported with no pane (`reconcile.rs:397`), so C1 should have none before the delete.
-   Asserting the kind (`session-of-record-missing` or `tui-foreign-session`) would pin what the delete caused.
-4. **The end state reads the registry with `pane get` of C1 and C2** (`scenario.rs:245-251`), not with `pane list` as
-   AC 8 words it. The two are equivalent while the scenario registers exactly those two panes, but `pane list` would
-   also catch a stray record.
-5. **A-dup's W-1 to W-4 stand as follow-up material:** the third `alive`, `tmux_on_path`, the two small copies inside
-   the target, and the third `Feed` shape.
-6. **`CHANGELOG.md:17` says the variables are "each read when its adapter is first used".** In fact `connect` reads
-   them all once, and a bad value is answered at the port's first use. The effect the entry describes is right; the
-   verb is not.
-7. **The operator needs a page for the six variables.** Today they are in the CHANGELOG, ADR-0021 and `wiring.rs`'s
-   module doc only. D17 leaves `docs/pane-control.md` to #652, which should carry the table.
-8. **A non-UTF-8 `HOLLER_HERDR_WORKSPACES` reads as no workspace** (F's Design decision 9). It fails closed: every
-   launch is refused `unavailable`, naming the workspace, not the variable. Carried from T-green.
+1. **D28's sentinel cannot reach the code under test**, given D10's exact environments. AC 15 holds by construction.
+   The first pass recommended, for #829, planting the sentinel in the private tmux server's global environment.
+2. **Read timeouts under a real hang name only `pane_store.get` and `pane_store.watch_next`.** The other read `op`s are
+   constants, checked by grep against the test kit's names. Each extra pin would cost a 10 s wait.
+3. **Scenario step 7 asserts that `doctor` finds something for C1** (`scenario.rs:228-231`), not which finding.
+   Asserting the kind would pin what the delete caused.
+4. **The end state reads the registry with `pane get` of C1 and C2**, not with `pane list` as AC 8 words it.
+   - After the merge, an unscoped `pane list` also carries #832's unmanaged table.
+   - So the re-run on the merged tree should check that the scenario's own panes never appear in it.
+5. **A-dup's W-1 to W-4 and W-6** are follow-up material.
+6. **`CHANGELOG.md` says the variables are "each read when its adapter is first used".**
+   - In fact `connect` reads them all at once, and a bad value is answered at the port's first use.
+   - The effect described is right; the verb is not.
+7. **The operator needs a page for the six variables.** D17 leaves `docs/pane-control.md` to #652, which should carry
+   the table.
+8. **A non-UTF-8 `HOLLER_HERDR_WORKSPACES` reads as no workspace** (F's Design decision 9).
+   - It fails closed: every launch is refused `unavailable`.
+   - The refusal names the workspace, not the variable.

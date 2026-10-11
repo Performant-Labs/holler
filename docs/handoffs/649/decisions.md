@@ -795,3 +795,76 @@
     - `gh issue list --search LinkedHost --state all`: #649 and the closed #802 only;
     - `--search observe_pane`: no issue ties it to #649;
     - #832: closed at 15:35 MDT.
+
+## S (Phase 10, spec audit, second pass) — 2026-10-11T16:21:00-06:00
+- **Decided:**
+  - **ADVISORY-HOLD.** The full detail is in `handoff-S.md`, which replaces the first pass's.
+  - **On its base (`5d366b9`), the branch meets the brief.** All 15 acceptance criteria are met.
+    - The first pass's test-only REWORK is closed. T's `every_read_and_write_with_no_hub_is_unavailable_naming_the_hub`
+      and the two `…_naming_the_hub` assertions pin every row of D3's table.
+    - No production line has changed since the first pass.
+  - **The hold is for two defects in the source of truth.** Neither is F's or T's to fix.
+    - (1) **The brief predates #832.** It merged at 15:35 MDT, and the PR cannot merge without `main` (a
+      `CHANGELOG.md` conflict). After that merge, `BindingHerdr` and `LazyHerdr` answer `observe_pane` and
+      `observe_panes` from the trait defaults:
+      - this breaks D31 W-4 and ADR-0021 section 14 on `main`;
+      - unmanaged panes show no working directory under the real wiring;
+      - CI fails case 13 over `BindingHerdr` only (A-dup's W-5, confirmed against the code).
+    - (2) **The brief file fails CI's `wizard_scripts` rename scan.** E64's Source (`649-brief.md:1197`) cites the
+      setup wizard's skill directory as it was before #820, and so does `decisions.md:66`.
+  - **The proposed fix, for the operator:**
+    - merge `origin/main`, keeping both CHANGELOG entries;
+    - amend the brief and the issue: W-5 as a decision with T's three pins, #832 in Depends on, E64's path, D10's
+      `LANG` clause in the issue, and D17's #829;
+    - correct `decisions.md:66` and journal the correction;
+    - relaunch at phase 4, and re-run the opt-in scenario on the merged tree.
+- **Assumed:**
+  - This run does not pass `removeHandoffsBeforePr`. No file in the worktree sets it, and `main` keeps every story's
+    handoffs.
+  - The workspace run that T left running would show only the rename-scan failure. The rework is one file of one test
+    binary, and that binary compiled and passed its changed module.
+  - GitHub runs no `pull_request` workflow while a PR has a merge conflict, so CI would first run after the merge.
+- **Hedged:**
+  - **ADVISORY-HOLD rather than REWORK.**
+    - Defect 1 is base drift, not a brief written wrong. But no pipeline role can act on it: the forwards cannot
+      compile before the merge, F's role has no merge step, every merge of `main` in this run was the operator's,
+      and on a production S REWORK the driver gives F no finding (`coding-pipeline.workflow.mjs:5650`).
+    - Defect 2 is the brief's own line, which only O may edit.
+    - A REWORK would spend a cycle with no route to the fix.
+  - **ADVISORY-HOLD rather than PASS.** A PASS would push a conflicting branch, and the merge after the PR would add
+    the W-5 code outside the gates, where CI catches only half of it.
+- **Evidence:**
+  - **Read in full:**
+    - the brief's decisions and acceptance criteria (lines 1-122) and E64;
+    - `handoff-A.md`, `handoff-A-dup.md`, `handoff-T-red.md`, `handoff-T-green.md`, `handoff-F.md` and the first
+      `handoff-S.md`;
+    - `pane_integration/{fake_hub,main,store_only}.rs`;
+    - `src/pane/wiring.rs`, `wiring/bind.rs` and `wiring/store.rs`.
+  - **Diffs read:**
+    - `9cafe0d..HEAD` (`fake_hub.rs`, `decisions.md`, `evidence.md`);
+    - `5d366b9..origin/main`: the file list, `ports.rs`, `wiring.rs` and `pane/mod.rs`.
+  - **Read in part:**
+    - on `main`: `conformance/herdr.rs` (case 13), `unmanaged.rs` (`observe_panes` call), `pane/list.rs` (the
+      unmanaged gap), `adapter.rs` (the two methods), ADR-0021 (section 14) and the CHANGELOG head;
+    - `pane_integration/bind.rs` (the test list and the `LazyHerdr` every-method test);
+    - `skilltext_w5_rename.rs` (the scan and its filters);
+    - `ci.yml` (the triggers and the test command);
+    - the release driver: phase 10's routing, the phase-6 task text, and the PR phase (`:4700-4800`);
+    - `workflow-coding-pipeline.md` (the ADVISORY-HOLD flow) and `pipeline-conventions.md` section 1;
+    - `feature-implementor.md` (F's rules).
+  - **Git:**
+    - `git ls-remote origin refs/heads/main`: `652841b`;
+    - `git merge-tree --write-tree origin/main HEAD`: tree `2e527e2`, with a conflict in `CHANGELOG.md` only. Its
+      `bind.rs` has neither new method;
+    - the authors of `3dff970`, `f59ba21` and `d0c1531`.
+  - **Greps (read-only):**
+    - the rename-scan needles with the test's filters: two hits;
+    - the diff for panics, prints, `unsafe` and `#[allow]`;
+    - the whole diff, and the lines added since the first pass, for IPs, hosts, home paths, accounts and key shapes;
+    - `wc -l` on every touched `.rs` file: maximum 857;
+    - the test names of the target: 61 default-run tests and 4 opt-in.
+  - **GitHub (16:15 MDT):**
+    - `gh issue view 649`: last edited 12:16 MDT. Its top half differs from the brief only by D10's `LANG` clause;
+    - `gh issue view 832`: closed at 15:35 MDT;
+    - `gh issue list --search` for `LinkedHost`, `observe_pane`, the UTF-8 locale, `select-session` and
+      `wizard_scripts`: none of the carried follow-ups is filed.
