@@ -6,7 +6,7 @@ Part of epic #633. (added 2026-10-08, profiles) **REQUIRED (promoted from PROPOS
 - `holler profile apply NAME [--dry-run]`: declarative, idempotent convergence of the live panes to the profile. Create a missing pane (through the launch transaction of #644); **adopt** a healthy live pane that matches its spec (record it, set `Pane.profile`); **never kill a healthy pane**; report anything it will not change. `--dry-run` prints the plan as JSON (the envelope's `data` is the list of planned steps) and changes nothing. This is the cure for a reboot that returns the layout as empty shells. (amended 2026-10-08, review) Apply **refuses a pane that belongs to another profile unless `--take-over`** is given (confirmed by the operator, 2026-10-08), and lists such panes in the `--dry-run` plan. (amended 2026-10-08, features) Before each pane it creates or relaunches, apply runs the pane's probe (`run_probe`) and refuses that pane with `probe-failed`; it places panes through `HerdrPort::ensure_pane`, which reaches the `GridPos` by splits (#640), and **never relocates a healthy pane**.
 - The plan is built from the spec-versus-live comparison in `crates/holler-pane/src/profile_diff.rs` (#662, which `holler profile show` uses). There is no separate `holler profile diff` verb (dropped by the operator, 2026-10-08): `show` reports the differences and `apply --dry-run --format=json` prints the exact plan.
 - `apply` takes `--format=text|json`; positions are `GridPos`, printed `rRcC` / `{"row", "col", "pos"}`. (amended 2026-10-08, grid)
-- (added at the brief gate, 2026-10-11, for review findings R3 B-3, R3 W-1 and R3 NIT-1; it restates §4, §7 and §8 of the operator's section below, which decide it, and changes no bullet above) `apply` also takes `--herdr-session NAME` (as `pane launch` has it) and `--take-over`. **When the plan holds a `create` (a spec pane with no record: row b of §3) and `--herdr-session` is absent, the whole verb exits 2 (`usage`) before any step runs, in a dry run too.** So a dry run over a profile with a pane that has no record prints that usage error and no plan, not even for the recorded panes, until the flag is given (C1). With `--format=json`, the envelope's `data` is §7's object `{"profile", "dry_run", "steps"}`, and the first bullet's "list of planned steps" is its `steps` (C6).
+- (added at the brief gate, 2026-10-11, for review findings R3 B-3, R3 W-1 and R3 NIT-1, and tightened for R4 B-1 and R4 NIT-2; it restates §4, §7 and §8 of the operator's section below, which decide it, and changes no bullet above) `apply` also takes `--herdr-session NAME` (as `pane launch` has it) and `--take-over`. **When the plan holds a `create` (a spec pane with no record: row b of §3) and `--herdr-session` is absent, the whole verb exits 2 (`usage`) before any step runs, in a dry run too.** In that case `--dry-run` prints **no plan at all**, not even the steps of the recorded panes: its whole output is the usage error, and it exits 2 (C1). There the first bullet's "`--dry-run` prints the plan" gives way to §4, since the operator's section supersedes this Scope where they differ (its opening paragraph); the first bullet's text stays as the issue wrote it. A dry run prints a plan only past that gate, that is, with `--herdr-session` given or with every spec pane recorded (C1). With `--format=json`, the envelope's `data` is §7's object `{"profile", "dry_run", "steps"}` itself, not nested inside another field, and the first bullet's "list of planned steps" is its `steps` (C6, E61).
 
 ## Acceptance (test kit only (amended 2026-10-08, review); the real run is story #667 (amended 2026-10-08, review))
 - Apply twice changes nothing the second time; a healthy matching pane is adopted, not relaunched; a healthy pane that differs is reported, not killed; `--dry-run` writes nothing and its plan parses against the envelope.
@@ -78,15 +78,15 @@ Row order matters: row a is checked first and fires only for another profile **w
 
 **13. Known limitation, not this story:** `SpecField::ALL` omits `opencode_agent` (#700 recorded it as a non-goal), so apply cannot see a pane running the wrong agent. File a follow-up issue; do not widen this story.
 
-## Brief-gate clarifications (rounds 1 to 3, 2026-10-11)
+## Brief-gate clarifications (rounds 1 to 4, 2026-10-11)
 
 Added at the brief gate for the outside review's findings (the B-, W-, NV- and NIT- numbers are the reviewer's). The
-reviewers of rounds 2 and 3 numbered their findings from 1 again, so they carry an R2 or R3 prefix here (R2 NV-2, R3 B-1
-and so on); a number without a prefix is round 1's. §N is paragraph N of the operator's section above, C*n* and O*n* are
-items of this section, and E*n* is an excerpt in the Evidence section below. Each item spells out what §1 to §13 and the
-decisions on O1 to O5 already imply, adds a test to §11's list, or indexes the tests (C14). None of them changes, narrows
-or overrides §1 to §13; wherever an item and §1 to §13 could be read differently, §1 to §13 win. What only the operator
-can decide is listed under "Open for the operator" and is not decided here.
+reviewers of rounds 2 to 4 numbered their findings from 1 again, so they carry an R2, R3 or R4 prefix here (R2 NV-2,
+R3 B-1, R4 B-2 and so on); a number without a prefix is round 1's. §N is paragraph N of the operator's section above,
+C*n* and O*n* are items of this section, and E*n* is an excerpt in the Evidence section below. Each item spells out what
+§1 to §13 and the decisions on O1 to O5 already imply, adds a test to §11's list, or indexes the tests (C14). None of
+them changes, narrows or overrides §1 to §13; wherever an item and §1 to §13 could be read differently, §1 to §13 win.
+What only the operator can decide is listed under "Open for the operator" and is not decided here.
 
 **C1. The order of a run (W-2, W-3, R2 W-3; from §4, §6 and §9).**
 
@@ -108,6 +108,12 @@ no Herdr or harness call, so a wedged port cannot hold a usage error back for up
 `tx_launch::launch` keeps, which answers a missing `--herdr-session` before its plan's reads (E14, E15). §4's "before any
 step runs" holds either way.
 
+A dry run meets the gate exactly as a live run does (R4 B-1). When the gate fires, the verb prints the usage error and no
+plan, not even the steps of the recorded panes, and exits 2: in JSON the envelope is a failure coded `usage`, whose `data`
+is `null` (E61, E62), and in text the error goes to stderr and nothing to stdout (E61). The first Scope bullet's
+"`--dry-run` prints the plan" applies only past the gate (the Scope's last bullet): §4 decides it, and the operator's
+section supersedes the Scope where they differ.
+
 So no step runs while an observation is outstanding, and a failed observation is known before the first step runs. The
 step it fails is still that pane's own, for a pane that row a does not refuse (row a is checked first, §3): the steps
 before it run, and the steps after it are `skipped` (§5).
@@ -119,7 +125,8 @@ after it as `skipped`, and the verb exits 1 (§5). The dry run still runs no pro
 (§6). `health`'s error is a plain `PaneError` (E7), so "read-only" in §6 describes the calls, not a kind of error: they
 are the reads §2 needs to choose each row (`health`, the Herdr `snapshot`, `shown_session`). A dry run calls neither
 `tx_launch::launch` nor `tx_launch::relaunch`, since their runs probe, split and write (E10, E15), all of which §6
-forbids.
+forbids. Where a verb that exits 1 prints that plan is open (O6, R4 B-3): at exit 1 the envelope's `data` is `null`
+(E61, E62).
 
 **C3. A Herdr snapshot that cannot be read (W-1; from §2, §3 and §5).** §2's "healthy" needs the snapshot for every
 recorded pane. A `snapshot` call that answers a failure-class error (`unavailable`, `timeout`: E42) is one of §5's
@@ -142,7 +149,9 @@ one port call's own bound plus its rollback calls, E10, E11). Under §9's struct
 This brief sets no budget over the whole apply run, so the bound grows with the number of steps, and the doc states it per
 step. Whether the run should also have a budget over the whole run is open for the operator (O5, R2 W-2). Acceptance:
 S's audit checks that the module doc of `tx_apply.rs` states the bound in this form. C13 adds tests that the engine
-keeps this structure, with no budget over the whole run as O5 decides (R3 B-4).
+keeps this structure, with no budget over the whole run as O5 decides (R3 B-4). That doc does not exist yet: E33 is the
+whole file today, the three-line stub #637 declared, and phase F writes the doc after T's tests. So the brief cannot quote
+it, and E10 is quoted as the form it follows, not as `tx_apply`'s own text (R4 NV-1).
 
 **C5. Store conflicts (NV-9; from §5 and §9).** The stores fence writers by compare-and-swap on a generation: nothing
 claims a pane before acting, and a conflict is not retried (E5, E8, E28, E37). A write at a stale generation answers
@@ -164,10 +173,15 @@ second bullet. The Scope's two wordings of that output, "the envelope's `data` i
 bullet) and "`apply --dry-run --format=json` prints the exact plan" (second bullet), are issue #664's own text, which this
 brief carries unchanged (R2 NIT-1, R2 NIT-2). The operator's section supersedes the Scope where they differ (its opening
 paragraph), so both mean §7's object: `data` is `{"profile", "dry_run", "steps"}`, and the list of planned steps is its
-`steps`. The Scope's last bullet, added at the brief gate (R3 NIT-1), says so where the Scope is read first.
+`steps`. The Scope's last bullet, added at the brief gate (R3 NIT-1), says so where the Scope is read first. The envelope
+wraps that object directly (R4 NIT-2): a run that exits 0 prints one envelope
+`{"schema_version": 1, "ok": true, "data": ..., "error": null}` whose `data` is §7's object itself, since each verb
+supplies only its `data` (E61), and the test kit's envelope checker, which every `--format=json` test of a pane or
+profile verb reuses, takes any value there (E62). A run that exits 2 or 3 prints a failure envelope, whose `data` is
+`null` (E61, E62); what a run that exits 1 prints is open (O6).
 
 **C7. Tests added to §11 (B-2, B-3, NV-9, W-1; R2 NV-3, R2 NV-5, R2 NV-6, R2 W-1, R2 W-3; R3 B-4, R3 B-5, R3 NV-1 to
-R3 NV-4),** on the test kit's fakes, as §11's are:
+R3 NV-4; their fixtures and checks also for R4 B-4, R4 NV-4 and R4 W-2),** on the test kit's fakes, as §11's are:
 
 - (B-2) A dry run in which the `health` call of a recorded pane that row a does not refuse fails: the plan lists that
   pane's step as `failed` and every later step as `skipped`; no probe runs and nothing is written; the verb exits 1.
@@ -205,7 +219,10 @@ R3 NV-4),** on the test kit's fakes, as §11's are:
   so `shown_session` answers `Ok(None)`, E25) and when `shown_session` answers an error
   (`fail_next(HarnessOp::ShownSession, ..)`, E26), the step is `adopted` and nothing live is touched; when its TUI shows
   another session of its server (`seed_session`, then `navigate` to it, E60), the pane is not healthy, so the step is
-  `relaunched` (row f).
+  `relaunched` (row f). (R4 NV-4) The pane has a TUI only once `attach_tui` has put one there, showing the session it was
+  attached to: the pane's launch does that (E64), or the fixture calls it. `navigate` answers `unavailable` for a pane
+  with no TUI, and `navigate` to `None` sets the TUI's `shown` to `None`, which `shown_session` returns as `Ok(None)`
+  (E25, E60, E64).
 - (R3 NV-1) Row f under `--take-over` (C11): an agent pane of another profile Q whose server is killed (E25) is
   `relaunched` and its record names P, and the fake pane store's `watch` (E57) shows the leave (`profile` none), then the
   join (`profile` P), then the relaunch's record write. When the relaunch fails instead, with a failure-class error such
@@ -221,9 +238,21 @@ R3 NV-4),** on the test kit's fakes, as §11's are:
   (E57). So no launch or relaunch run started, since a run's first live reads are the probe and Herdr's `version` (E15).
 
 With one thread per pane (§9), `fail_next(HarnessOp::Health, ..)` fails whichever pane's call reaches the fake first
-(E26). So a test that fails one named pane's `health` (§11's test and the B-2 test above) uses a fixture in which that pane
-is the only one whose health is observed, and the R3 B-5 test's `fail_next(HarnessOp::ShownSession, ..)` likewise uses a
-fixture with one recorded pane.
+(E26). §9's "all panes" are the panes whose health there is to observe (R4 B-4): C1's step 3 calls `health` once for each
+spec pane that has a record and for no other pane, since §2 defines "healthy" for a recorded pane only and a spec pane
+with no record is row b whatever its health (§3). So a test that fails one named pane's `health` (§11's test and the B-2
+test above) uses a fixture in which that pane is the only one whose health is observed, because it is the only spec pane
+with a record. The fixture still has several spec panes: at least one spec pane with no record comes after the failing
+pane in §3's order, and the test asserts that its step is `skipped` (§5). Since the plan then holds a `create`, the test
+passes `--herdr-session` (§4, C1). Where a verb that exits 1 shows its `failed` and `skipped` steps is open (O6). The R3
+B-5 test's `fail_next(HarnessOp::ShownSession, ..)` likewise uses a fixture with one recorded pane.
+
+(R4 W-2) Every test of §11 and of this list that states what a run writes to the registry ("no registry write", "nothing
+is written", "the profile moved", or a number of writes) asserts it from the fake pane store's `watch`, opened at a cursor
+taken before the run (E57): no event after that cursor when it states no write, and otherwise exactly the events it
+names, in order, each with the record as written. A write that the rig's `NthCasPut` fails never reaches the fake (E34),
+so it has no event. A test that also states that P is not written asserts that the fake profile store's call log holds no
+`CasPut` or `Delete` (E57), as the R3 NV-4 test does. The call logs remain the check of which methods a run called.
 
 **C8. An error before any plan exists (NV-7; from §5).** §5 calls its exit codes "the doctor form". `pane doctor` fails
 only when it cannot run its pass (a pane or profile that does not exist, a store that cannot be read), and everything its
@@ -268,7 +297,10 @@ contract (E41, E42): `profile-not-found` exits 3, and a failure such as `unavail
   P, and P already holds the pane's spec, since the step comes from it.
 - *The twins (§9) are those writes.* `join`'s failure path, `undo`, ends by deleting the profile that `profile create`
   made (E31, E53). §3's registry effects hold no profile delete, and apply did not make P, so the twin of `join` never
-  deletes P.
+  deletes P. (R4 W-1) The follow-up issue that §9 files to merge the twins says in its body that, until the merge, the
+  twins must stay semantically identical to `detach` and to `join`'s write for one pane: the record as read, with
+  `profile` none or with `profile` P, written by one `cas_put` at the generation it was read at, answering what that
+  `cas_put` answers (E30, E31).
 - *A conflict at each kind of step.* Rows c and d: apply's own write at a stale generation answers `generation-conflict`
   (`PaneError::Conflict`; E5, E30, E46), failure class (E47), so the step is `failed`, the run stops there, the steps
   after it are `skipped` and the verb exits 1 (§5, C5); nothing live was touched, since rows c and d never touch a live
@@ -323,14 +355,15 @@ passes `TxOptions::default()`, as `pane launch` and `pane relaunch` do (E58).
 
 **C14. The acceptance list (R3 B-2).** The Acceptance section's last bullet makes this list the story's whole acceptance:
 every entry passes on the test kit's fakes. "Acceptance *n*" is the *n*-th bullet of the Acceptance section. A test may
-cover several entries; each entry's source states its test, and this index adds none.
+cover several entries; each entry's source states its test, and this index adds none. Entries 17, 21, 22, 23, 25 and 29
+assert the `failed` and `skipped` steps of a verb that exits 1; where their tests read those steps is open (O6, R4 B-3).
 
 | # | The test | Source |
 |---|---|---|
 | 1 | Apply twice: the second run changes nothing. | Acceptance 1 |
 | 2 | Row c: a healthy pane that matches its spec is `adopted`, not relaunched, with no live call. | Acceptance 1; §11 c |
 | 3 | Row d: a healthy pane that differs is `reported`, not killed, and nothing live is touched. | Acceptance 1; §11 d |
-| 4 | A dry run runs no probe and writes nothing, and its plan parses against the envelope. | Acceptance 1; §11 |
+| 4 | A dry run past C1's gate (with `--herdr-session`, or with every spec pane recorded) runs no probe and writes nothing, and its plan parses against the envelope: `data` is §7's object itself, with `"dry_run": true` (C6, E61, E62). | Acceptance 1; §11 |
 | 5 | Row a: a pane of another profile is `refused` (`pane-in-other-profile`) without `--take-over`. | Acceptance 2; §11 a |
 | 6 | With `--take-over`, that pane is `adopted` (the leave, then the join). | Acceptance 2; C7 (R2 NV-3) |
 | 7 | A dry run's plan lists the pane of another profile. | Acceptance 2 |
@@ -341,10 +374,10 @@ cover several entries; each entry's source states its test, and this index adds 
 | 12 | Row b: an occupied cell is refused through launch. | §11 b |
 | 13 | Row b: a `create` that launch answers with `pane-exists` is `refused` with that code, and the run goes on. | §11 b; C7 (B-3) |
 | 14 | Row d with `--take-over`: the profile moved, and nothing live is touched. | §11 d |
-| 15 | Row e: an orchestrator that is not healthy is `refused` (`orchestrator-not-relaunched`) with no registry write, also with `--take-over`. | §11 e |
+| 15 | Row e: an orchestrator that is not healthy is `refused` (`orchestrator-not-relaunched`) with no registry write, also with `--take-over`: no leave and no join (C15). | §11 e; C15 |
 | 16 | Row f: a pane whose server was killed is `relaunched`. | §11 f |
 | 17 | A failed `health` call: a `failed` step that stops the run, the rest `skipped`. | §11 |
-| 18 | The up-front `usage` case: exit 2, no step run, and no Herdr or harness call. | §11; C7 (R2 W-3) |
+| 18 | The up-front `usage` case: exit 2, no step run, and no Herdr or harness call, in a live run and in a dry run, which prints the usage error and no plan (C1). | §4; §11; C7 (R2 W-3) |
 | 19 | A stale spec is not written back. | §11 |
 | 20 | The module doc of `tx_apply.rs` states the run's bound: the `grep`-style test, and S's audit of C4's form. | §9; C4 |
 | 21 | A dry run with a failed `health` call: `failed`, the rest `skipped`, no probe, no write, exit 1. | C7 (B-2) |
@@ -358,6 +391,16 @@ cover several entries; each entry's source states its test, and this index adds 
 | 29 | Row f under `--take-over`: the leave, the join, then the relaunch; a relaunch that then fails leaves the pane in P, with no write after the join. | C7 (R3 NV-1) |
 | 30 | A per-pane `usage` from the relaunch rules: `refused` with a named code; the run goes on and the exit code is unchanged. | C7 (R3 NV-3) |
 | 31 | A dry run calls only the reads C1 names. | C7 (R3 NV-4) |
+
+**C15. Row e under `--take-over` (R4 B-2; from §3).** No leave or join occurs for row e, even under `--take-over`. §3's
+preamble gives the take-over's profile move to rows c, d and f only ("rows c, d and f add the profile move described in
+the table") and says "row e never writes", and row e's own registry effect is "none, **even under `--take-over`**". So an
+orchestrator pane of another profile Q that is not healthy keeps its record exactly as it was, still naming Q, and nothing
+live is touched: its step is `refused` (`orchestrator-not-relaunched`), and apply calls neither the leave twin nor the
+join twin (§9) for it. R4 B-2 asked for this sentence in row e's own text; §3 is the operator's and stays as written, so
+the sentence stands here. Entry 15 of C14 runs the pane with and without `--take-over` and asserts, both times, that the
+fake pane store's `watch`, opened at a cursor taken before the run, yields no event for that pane (an event names its
+pane, E57), so its record is unchanged, generation included.
 
 ### Open points O1 to O5: ALL DECIDED, see "Decisions on O1 to O5 (final)" below (the text of each point is kept as the question that was asked)
 
@@ -394,6 +437,25 @@ cover several entries; each entry's source states its test, and this index adds 
   2026-10-11 gives `pane launch` and `pane relaunch` a budget over their whole run (E43). A launch takes about 3 s (E43),
   so a run of four `create` steps takes about 12 s. Not decided: whether apply's run also gets a budget over the whole
   run, and its size, or meets I5 per step as C4 states.
+
+### Open for the operator: O6 (round 4), NOT DECIDED
+
+- **O6. What the verb prints when its run ends with a `failed` step (R4 B-3).** §5 makes such a run exit 1 and lists the
+  steps after the `failed` one as `skipped`; C2 reads that, for a dry run too, as a plan that lists the `failed` step and
+  the `skipped` ones, and C7's B-2 test and C14's entry 21 check it. The output contract leaves no place for that plan at
+  exit 1. In JSON mode `ok` is false for exit 1, 2 and 3 alike, and `data` is `null` whenever `ok` is false (ADR-0021's
+  decision 6 and `output.rs`, E61); the test kit's envelope checker fails an envelope whose `ok` is false and whose
+  `data` is not `null` (`DataOnFailure`, E62); and in text mode an error writes `error: <message>` to stderr and nothing
+  to stdout (E61). `pane doctor`, whose form §5 names, states the same limit: "an envelope cannot carry data with a
+  failure" (E63). The same holds for a live run, so the tests behind C14's entries 17, 21, 22, 23, 25 and 29 have nowhere
+  in the verb's output to read their `skipped` steps. Each way to settle it changes or narrows something the operator
+  decided: (a) at exit 1 the verb prints only the failure envelope, the `failed` step's error, and those tests read the
+  `failed` and `skipped` steps from `tx_apply`'s own result, not from the verb's output; a dry run with a `failed` step
+  then prints no plan, which narrows §6's "prints the same table as the plan" and changes C2; (b) apply's failure
+  envelope may carry `data`, which amends ADR-0021's decision 6, `output.rs` and the test kit's checker, none of them in
+  the Blast radius; (c) a `failed` step no longer sets the exit code, so the run exits 0 with that step in `data`, as
+  `pane doctor` reports a failed call as a finding (E45), which changes §5. R4 B-3 asks only about the dry run, but the
+  answer applies to a live run too. Not decided.
 
 ## Decisions on O1 to O5 (final, 2026-10-11, taken under the operator's standing rules; they replace "Not decided" above)
 
@@ -457,8 +519,9 @@ compared field equal; the names are not compared.
 pub fn diff_spec(spec: &ProfileSpec, live: &Pane) -> Vec<FieldDiff> {
 ```
 
-**E3. `diff_profile`** (`crates/holler-pane/src/profile_diff.rs:287-298`). The comparison `profile show` uses: rows in the
-profile's order, paired with live panes by name (C6).
+**E3. `diff_profile` and `compared`** (`crates/holler-pane/src/profile_diff.rs:287-298` and `311-324`). The comparison
+`profile show` uses: rows in the profile's order, paired with live panes by name (C6). `compared` builds each paired row
+from `diff_spec` (E2), so a row is `Matches` exactly when `diff_spec` is empty, which is row c's test (R4 NIT-1).
 
 ```rust
 /// The comparison of `profile` with the panes in `live` (the caller decides which panes
@@ -473,6 +536,23 @@ pub fn diff_profile(profile: &Profile, live: &[Pane]) -> Vec<PaneDiff> {
             None => row(&spec.pane, PaneStatus::Missing),
         }
     });
+```
+
+```rust
+/// The row of `spec` compared with `pane`, the live pane of its name.
+fn compared(spec: &ProfileSpec, pane: &Pane) -> PaneDiff {
+    let differences = diff_spec(spec, pane);
+    let status = if differences.is_empty() {
+        PaneStatus::Matches
+    } else {
+        PaneStatus::Differs
+    };
+    PaneDiff {
+        pane: spec.pane.clone(),
+        status,
+        differences,
+    }
+}
 ```
 
 **E4. I5's per-call bound** (`crates/holler-pane/src/ports.rs:8-10`). C4.
@@ -1052,8 +1132,9 @@ fn join(
 holler-pane = { path = "../holler-pane" }
 ```
 
-**E33. `tx_apply.rs` today** (`crates/holler-pane/src/tx_apply.rs:1-3`). The engine's file, whose module doc holds the
-bound (C4).
+**E33. `tx_apply.rs` today, the whole file** (`crates/holler-pane/src/tx_apply.rs:1-3`; the file has these three lines
+and no others). The engine's file, whose module doc holds the bound (C4). The story is not implemented yet: this brief
+comes before its code, so neither the engine nor the doc that states its bound exists to quote (R4 NV-1).
 
 ```rust
 //! The `holler profile apply` transaction: create missing panes, adopt a healthy live
@@ -1486,11 +1567,12 @@ impl fmt::Display for FieldValue {
 ```
 
 **E57. The fakes' call log, and the pane store's `watch`** (`crates/holler-pane-testkit/src/pane_store.rs:20-31`;
-`crates/holler-pane-testkit/src/fault.rs:85-88`; `crates/holler-pane/src/ports.rs:39-45`;
-`crates/holler-pane/src/pane.rs:261-273`; `crates/holler-pane-testkit/src/feed.rs:14-16` and `26`). A call log records
-each call's method alone (an `Op` such as `PaneStoreOp::CasPut`, which carries no argument), so it counts writes; the
-watch yields every change after a cursor, in order, with the record after it, and the fake keeps its whole history (C7:
-R3 NV-1, R3 NV-2, R3 NV-4).
+`crates/holler-pane-testkit/src/profile_store.rs:24-37`; `crates/holler-pane-testkit/src/fault.rs:85-88`;
+`crates/holler-pane/src/ports.rs:39-45`; `crates/holler-pane/src/pane.rs:261-273`;
+`crates/holler-pane-testkit/src/feed.rs:14-16` and `26`). A call log records each call's method alone (an `Op` such as
+`PaneStoreOp::CasPut`, which carries no argument), so it counts writes; the fake profile store's log names its methods
+the same way, as `ProfileStoreOp`s (R4 W-2); the watch yields every change after a cursor, in order, with the record
+after it, and the fake keeps its whole history (C7: R3 NV-1, R3 NV-2, R3 NV-4).
 
 ```rust
 /// A method of the `PaneStore` port, as a fault targets it and the call log records
@@ -1504,6 +1586,23 @@ pub enum PaneStoreOp {
     Watch,
     /// One `next()` of an open watch.
     WatchNext,
+}
+```
+
+```rust
+/// A method of the `ProfileStore` port, as a fault targets it and the call log
+/// records it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ProfileStoreOp {
+    Get,
+    List,
+    CasPut,
+    Delete,
+    Watch,
+    /// One `next()` of an open watch.
+    WatchNext,
+    Log,
+    Rename,
 }
 ```
 
@@ -1658,5 +1757,155 @@ fn the_budget_bounds_a_slow_launch() {
         }
         world.show(pane, session)
     }
+```
+
+**E61. The `--format=json` envelope, and a failure in text mode** (`docs/adr/ADR-0021.md:533-534`, `537-538`, `541-543`
+and `550`; `crates/holler-cli/src/output.rs:150-160` and `281-284`). A verb's `data` is the envelope's `data` itself; it
+is `null` whenever `ok` is false, which it is at exit 1, 2 and 3; in text mode an error goes to stderr alone (C1, C6, O6;
+R4 B-1, R4 NIT-2).
+
+```text
+**Decided (decision 6): the `--format=json` envelope.** Every pane and profile verb and the roster take
+`--format=text|json` (default text). In JSON mode stdout carries exactly one envelope, and every diagnostic goes to stderr:
+```
+
+```json
+{"schema_version": 1, "ok": true, "data": {}, "error": null}
+{"schema_version": 1, "ok": false, "data": null, "error": {"code": "pane-not-found", "message": "pane not found: hj-c1r1"}}
+```
+
+```text
+- `error` is `null` exactly when `ok` is true. `error.code` is the `PaneError` code verbatim and `error.message` its one-line
+  text; the envelope has no `detail`. Each verb supplies only its `data`. The types and `emit()`, `emit_stream()` and
+  `emit_usage_error()` are in `holler-cli/src/output.rs` (#670 creates it, #660 completes it).
+```
+
+```text
+  mode is an envelope with code `usage` and exit 2. In JSON mode `ok` is false for exit 1, 2 and 3 alike. Which `PaneError`
+```
+
+```rust
+/// The one envelope of every `holler pane` and `holler profile` result in JSON mode.
+///
+/// Keys are written in this order: `schema_version`, `ok`, `data`, `error`. `data` is `null` when
+/// `ok` is false and `error` is `null` when it is true.
+#[derive(Debug, Serialize)]
+pub struct Envelope<T> {
+    pub schema_version: u32,
+    pub ok: bool,
+    pub data: Option<T>,
+    pub error: Option<ErrorBody>,
+}
+```
+
+```rust
+        Err(error) => {
+            let written = write_line(sink.err, &format!("error: {}", error.message));
+            settle(written, exit_code(&error))
+        }
+```
+
+**E62. The test kit's envelope checker** (`crates/holler-pane-testkit/src/envelope.rs:1-2`, `25-28` and `135-136`). What
+"parses against the envelope" checks: any `data` on success, and `null` on failure (C6, O6; R4 NIT-2).
+
+```rust
+//! The JSON-envelope checker that the `--format=json` tests of every `holler pane` and
+//! `holler profile` verb reuse (ADR-0021 section 9).
+```
+
+```rust
+//! 6. `ok` is the boolean `true` when the exit code is 0, and `false` otherwise.
+//! 7. On success, `error` is `null`. `data` may be any value, `null` included.
+//! 8. On failure, `error` is an object.
+//! 9. On failure, `data` is `null`.
+```
+
+```rust
+    /// `ok` is false, but `data` is not `null`.
+    DataOnFailure,
+```
+
+**E63. `pane doctor`'s exit codes** (`crates/holler-cli/src/pane/doctor.rs:4-9`). The doctor form §5 names: a pass that
+completes exits 0, because an envelope cannot carry data with a failure (O6; R4 B-3).
+
+```rust
+//! - **Exit codes.** A pass that completes exits 0, with or without findings: findings are
+//!   kinds in the report, not errors (ADR-0021 section 9), and an envelope cannot carry data
+//!   with a failure, so a script reads `data.findings`. The verb fails only when it cannot
+//!   run the pass: a bad `PANE` or `--profile` value is `usage` (2); a pane or profile that
+//!   does not exist, or a pane outside the profile, is a refusal (3); a pane store or profile
+//!   scope that cannot be read is a failure (1).
+```
+
+**E64. The fake harness's TUIs** (`crates/holler-pane-testkit/src/harness.rs:93-100`, `150-157`, `319-330` and
+`459-472`; `crates/holler-pane/src/ports.rs:199-200`; `crates/holler-pane/src/tx_launch.rs:638-640`). How C7's R3 B-5
+test reaches a home screen (R4 NV-4). The fake's `World` starts with no TUI (`#[derive(Default)]`), and `attach_tui`, a
+`HarnessPort` method that the launch transaction's act calls, is the one place the fake adds a TUI, showing the session it
+was attached to. For a pane with no TUI, `navigate` (E60) answers `unavailable` through `tui_port`; otherwise `show` sets
+the TUI's `shown`, to `None` for the home screen, and `shown_session` returns it as it is (E25), so `Ok(None)`.
+
+```rust
+/// What [`FakeHarness::tui`] reports about the TUI in a pane.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TuiView {
+    /// The port of the server it is attached to.
+    pub port: u16,
+    /// The session it shows; `None` on its home screen.
+    pub shown: Option<String>,
+}
+```
+
+```rust
+#[derive(Default)]
+struct World {
+    servers: HashMap<u16, ServerView>,
+    /// The ports given a data directory of their own.
+    dirs: HashMap<u16, String>,
+    /// The session ids of each data directory, in creation order.
+    sessions: HashMap<String, Vec<String>>,
+    tuis: HashMap<PaneId, TuiView>,
+```
+
+```rust
+    fn attach_tui(&self, pane: &PaneId, port: u16, session: &str) -> Result<(), PaneError> {
+        self.faults.enter(HarnessOp::AttachTui)?;
+        let mut world = self.lock();
+        world.reach(port, HarnessOp::AttachTui)?;
+        world.known(port, session)?;
+        let tui = TuiView {
+            port,
+            shown: Some(session.to_owned()),
+        };
+        world.tuis.insert(pane.clone(), tui);
+        Ok(())
+    }
+```
+
+```rust
+    /// The port of the TUI in `pane`; the no-TUI `unavailable` when there is none.
+    fn tui_port(&self, pane: &PaneId) -> Result<u16, PaneError> {
+        self.tuis
+            .get(pane)
+            .map(|tui| tui.port)
+            .ok_or_else(|| no_tui(pane))
+    }
+
+    /// The TUI in `pane` shows `session` (`None`: its home screen).
+    fn show(&mut self, pane: &PaneId, session: Option<&str>) -> Result<(), PaneError> {
+        let tui = self.tuis.get_mut(pane).ok_or_else(|| no_tui(pane))?;
+        tui.shown = session.map(str::to_owned);
+        Ok(())
+    }
+```
+
+```rust
+    /// Attach the TUI of `pane` to `session` on the server at `port`.
+    fn attach_tui(&self, pane: &PaneId, port: u16, session: &str) -> Result<(), PaneError>;
+```
+
+```rust
+    ports
+        .harness
+        .attach_tui(&herdr.pane_id, plan.port, &session)?;
 ```
 
