@@ -77,6 +77,10 @@ pane=$2
 if [ "${3:-}" = "--set-registration" ]; then [ -e "$FAKE/no_fix" ] || [ -e "$FAKE/needs_body_restart" ] || echo "$4" > "$FAKE/registered"; echo "registered host-hj-$pane/oc at $4"; exit 0; fi
 if [ "$(cat "$FAKE/registered" 2>/dev/null)" = ses_new ]; then echo "host-hj-$pane/oc: ok"; else echo "host-hj-$pane/oc: 1 finding(s)"; echo "  drift  registered ses_old, the hub drives ses_new"; exit 1; fi
 EOF
+cat > "$bin/hostname" <<'EOF'
+#!/usr/bin/env bash
+if [ "${1:-}" = -s ]; then echo "FakeHost"; else echo "FakeHost.example"; fi
+EOF
 cat > "$bin/pane-ready" <<'EOF'
 #!/usr/bin/env bash
 echo "$*" >> "$FAKE/pane-ready.log"
@@ -349,6 +353,14 @@ new_case c3r1
 run c3r1 "${good[@]}" --fresh
 check "--fresh on an OpenCode pane is refused, as an unknown option was before" bash -c "[ '$(rc)' = 1 ] && grep -q 'REFUSED: --fresh is for Claude Code panes' '$FAKE/out'"
 expect_untouched "--fresh on an OpenCode pane: untouched" c3r1
+
+# The default MO roster name: the lower-cased short host name plus -hj-c4r2/mo, with no override set ------------
+mo_case
+PATH="$bin:$PATH" PANE_RESTART_POLL=0 PANE_RESTART_TYPE_DELAY=0 PANE_RESTART_T_STOP=2 PANE_RESTART_T_UP=2 PANE_RESTART_T_REG=2 PANE_RESTART_T_MODEL=2 \
+  bash "$script" c4r2 "${mo_args[@]}" > "$FAKE/out" 2>&1; echo $? > "$FAKE/rc"
+check "without the override MO's roster name is the lower-cased short host name plus -hj-c4r2/mo" \
+  grep -q 'doctor fakehost-hj-c4r2/mo --set-registration ses_new' "$FAKE/pfo.log"
+check "that run still succeeds" test "$(rc)" = 0
 
 # --dry-run ---------------------------------------------------------------------------------------
 new_case c3r1
