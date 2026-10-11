@@ -8,6 +8,18 @@ fills this file in at release time.
 ## [Unreleased]
 
 ### Enhancements
+- Pane control, the migration import (epic [#633](https://github.com/Performant-Labs/holler/issues/633)): `holler pane
+  import --from STATE_ROOT --herdr-session NAME [--launcher FILE] [--orchestrator PANE]... [--dry-run]` adopts the fleet
+  the old launcher runs ([#650](https://github.com/Performant-Labs/holler/issues/650)). It reads each pane directory's
+  `pane.env` (five values, and every other variable by name only, never its value), `last-session`, `sessions.toml`
+  (through `holler-body`'s own reader) and `owned-sessions`, and a launcher table whose shape this story defines (one TOML
+  table per pane with `port`, `cwd` and `command`, ADR-0021 section 13). It finds each pane's Herdr pane by its label in
+  the named Herdr session, takes its position from there and never from the name, and takes the session of record only
+  where every file names the same session and the pane's healthy server has it. A dry run writes nothing and reports
+  every disagreement as a finding. A real run writes the profile `fleet` and one record per pane, or nothing at all: it is
+  refused (`import-blocked`, a new open code, exit 3) while a pane has a problem, a failed write is undone, and running it
+  again writes nothing. It only reads Herdr, tmux and the harness, and changes no file. A file that cannot be read is
+  named with a line number or position only, never its text. Nothing a user runs changes yet: #649 wires the adapters in.
 - Pane control, `holler profile apply NAME [--dry-run] [--take-over] [--herdr-session NAME]` (epic
   [#633](https://github.com/Performant-Labs/holler/issues/633)): converge the live panes on a profile, declaratively and
   idempotently, without ever killing a healthy pane. For each spec of the profile, in workspace, row and column order,

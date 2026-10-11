@@ -135,8 +135,9 @@ fn render(view: &ProfileView) -> String {
     lines.join("\n")
 }
 
-/// `spec PANE`, then one `FIELD: VALUE` line per field.
-fn push_spec(lines: &mut Vec<String>, spec: &ProfileSpec) {
+/// `spec PANE`, then one `FIELD: VALUE` line per field. `pane import` (#650) prints the
+/// profile a dry run would create through it.
+pub(crate) fn push_spec(lines: &mut Vec<String>, spec: &ProfileSpec) {
     lines.push(format!("spec {}", text(&spec.pane)));
     lines.extend(
         SpecField::ALL

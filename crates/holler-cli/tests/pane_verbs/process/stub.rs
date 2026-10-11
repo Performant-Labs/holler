@@ -22,7 +22,6 @@ pub const STUBS: &[(&str, &str, u32)] = &[
     // #646
     // #647
     // #650
-    ("pane", "import", 650),
     // #662
     // #664
     // #665 (proposed: the operator confirms it)
@@ -206,12 +205,12 @@ fn a_bad_debug_value_is_still_a_policy_refusal_before_dispatch() {
 /// asserted through the checker.
 #[test]
 fn a_forced_diagnostic_in_json_mode_leaves_stdout_one_envelope() {
-    // Any stub verb answers the same not-implemented envelope; one pane stub stands in
-    // for the table (the whole-table runs are the two tests above).
+    // Any stub verb answers the same not-implemented envelope; one stub stands in for the
+    // table (the whole-table runs are the two tests above). The last pane stub, `pane
+    // import`, became a verb in #650, so the first stub of either namespace stands in.
     let &(namespace, verb, _) = STUBS
-        .iter()
-        .find(|(ns, _, _)| *ns == "pane")
-        .expect("a pane stub exists while this test lives (#660)");
+        .first()
+        .expect("a stub exists while this test lives (#660)");
     let out = holler(&[namespace, verb, "--debug", "noisy", "--format=json"]);
     assert_eq!(out.code, 1, "the stub still exits 1: {out:?}");
     assert!(
