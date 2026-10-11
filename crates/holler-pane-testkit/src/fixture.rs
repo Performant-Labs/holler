@@ -48,6 +48,7 @@ pub fn sample_pane(name: &str) -> Result<Pane, PaneError> {
             workspace: SCRATCH.to_owned(),
             pane_id: PaneId::new(format!("{SCRATCH}:{name}")),
             grid: SAMPLE_GRID,
+            label: None,
         },
         host: HostInfo {
             name: "localhost".to_owned(),

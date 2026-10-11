@@ -15,8 +15,13 @@
 //!   is neither a result object nor an error, is `unavailable` (ADR-0021 section 9: "also
 //!   a garbled reply").
 //! - **Parsers.** Each accepts one result `type`, and refuses any other, or a field it
-//!   reads that is missing or of the wrong type, as `unavailable`. They ignore every
-//!   field they do not read, so a field Herdr adds changes nothing.
+//!   reads that is missing or of the wrong type, as `unavailable`. The one exception is a
+//!   pane's optional `label` (`sent_label`): absent or not a string, it is no label, so no
+//!   reply fails because of one. They ignore every field they do not read, so a field
+//!   Herdr adds changes nothing.
+//! - **A pane's label** ([`label_of`], #808). The parsers keep the `label` of each
+//!   `PaneInfo` as Herdr sent it, and `label_of` is the one rule that makes it the label a
+//!   pane reports.
 //! - **Messages** are one line. They name the method and Herdr's code, quote what Herdr
 //!   sent (cut to 64 characters), and never echo the text typed into a pane, Herdr's own
 //!   error message (which can quote it) or a pane's screen.
@@ -346,6 +351,8 @@ pub struct PaneRef {
     pub pane_id: PaneId,
     pub workspace_id: String,
     pub tab_id: String,
+    /// Its `label` as Herdr sent it, `""` included; `None` when absent or not a string.
+    pub label: Option<String>,
 }
 
 /// What `session.snapshot` reports, reduced to what the adapter reads.
@@ -380,6 +387,15 @@ impl SessionState {
                 )))
             }
         }
+    }
+
+    /// The label Herdr sent for the pane `pane`, as sent: `None` when it sent none, or
+    /// when this snapshot does not list the pane (one made after it was read).
+    pub fn pane_label(&self, pane: &PaneId) -> Option<&str> {
+        self.panes
+            .iter()
+            .find(|listed| listed.pane_id == *pane)
+            .and_then(|listed| listed.label.as_deref())
     }
 }
 
@@ -441,7 +457,28 @@ fn pane_ref(pane: Object<'_>) -> Result<PaneRef, PaneError> {
         pane_id: PaneId::new(pane.string("pane_id")?),
         workspace_id: pane.string("workspace_id")?.to_owned(),
         tab_id: pane.string("tab_id")?.to_owned(),
+        label: sent_label(pane),
     })
+}
+
+/// The `label` of a `PaneInfo` Herdr sent, as sent: `None` when it is absent (Herdr leaves
+/// out an absent one) or is not a string. This is the parsers' one exception to refusing
+/// a field they read that is missing or of the wrong type: a pane's label is optional, and
+/// no reply that parses without one may fail because of one (#808).
+fn sent_label(pane: Object<'_>) -> Option<String> {
+    pane.fields
+        .get("label")
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+}
+
+/// The label a pane reports, made from the `label` Herdr sent for it (`raw`): `None` when
+/// Herdr sent none or sent `""`, and any other text as it is, not trimmed (#808). Every
+/// pane the adapter reports, from `snapshot` and from `ensure_pane`, gets its label here,
+/// so the two never disagree. The test kit's `FakeHerdr` reports a label the same way; its
+/// copy is private and dev-only, so it is not shared.
+pub fn label_of(raw: Option<&str>) -> Option<String> {
+    raw.filter(|label| !label.is_empty()).map(str::to_owned)
 }
 
 /// Read a `layout_export` result into its split tree.
@@ -482,8 +519,11 @@ fn direction(name: &str) -> Result<Direction, PaneError> {
         })
 }
 
-/// Read a `workspace_created` result: the workspace and its root pane.
-pub fn parse_workspace_created(result: &Value) -> Result<(WorkspaceRef, PaneId), PaneError> {
+/// Read a `workspace_created` result: the workspace, its root pane, and the root pane's
+/// label as sent.
+pub fn parse_workspace_created(
+    result: &Value,
+) -> Result<(WorkspaceRef, PaneId, Option<String>), PaneError> {
     let created = result_of(result, "workspace_created")?;
     let workspace = created.object("workspace", "created workspace")?;
     let tab = created.object("tab", "created tab")?;
@@ -493,13 +533,14 @@ pub fn parse_workspace_created(result: &Value) -> Result<(WorkspaceRef, PaneId),
         label: workspace.string("label")?.to_owned(),
         grid_tab: Some(tab.string("tab_id")?.to_owned()),
     };
-    Ok((workspace, PaneId::new(root.string("pane_id")?)))
+    let root_id = PaneId::new(root.string("pane_id")?);
+    Ok((workspace, root_id, sent_label(root)))
 }
 
-/// Read a `pane_info` result (what `pane.split` returns).
-pub fn parse_pane_info(result: &Value) -> Result<PaneId, PaneError> {
+/// Read a `pane_info` result (what `pane.split` returns): the pane, and its label as sent.
+pub fn parse_pane_info(result: &Value) -> Result<(PaneId, Option<String>), PaneError> {
     let pane = result_of(result, "pane_info")?.object("pane", "pane")?;
-    Ok(PaneId::new(pane.string("pane_id")?))
+    Ok((PaneId::new(pane.string("pane_id")?), sent_label(pane)))
 }
 
 /// Read a `pane_read` result: its last `max_lines` lines.

@@ -8,7 +8,7 @@
 mod common;
 
 use common::{pane, pane_json, profile, profile_json, spec_json, MemPaneStore};
-use holler_pane::{Pane, PaneStore, Profile, ProfileSpec};
+use holler_pane::{HerdrSnapshot, Pane, PaneStore, Profile, ProfileSpec};
 use serde_json::{json, Value};
 
 /// The value at a JSON pointer, `null` when absent (an absent optional equals null).
@@ -217,6 +217,37 @@ fn profile_spec_opencode_agent_round_trips_set_and_absent() {
     assert!(
         stored.get("opencode_agent").is_none(),
         "omitted when None: {stored}"
+    );
+}
+
+/// #808 constraint (a): `herdr.label` is optional. A record (and a snapshot entry) whose
+/// `herdr` carries `"label": "x"` reads and writes back with it; a record with no `label`
+/// key, as every record before #808, reads and writes back with none (left out when
+/// absent, never `null`).
+///
+/// JSON-driven, like #700's forms above: this file compiles before the field exists, and
+/// its RED is the unknown-field refusal of the set half.
+#[test]
+fn herdr_label_round_trips_set_and_absent() {
+    let mut want = pane_json();
+    want["herdr"]["label"] = json!("x");
+    let pane: Pane = serde_json::from_value(want.clone()).unwrap();
+    assert_eq!(serde_json::to_value(&pane).unwrap(), want);
+
+    let snapshot = json!({"panes": [want["herdr"].clone()]});
+    let read: HerdrSnapshot = serde_json::from_value(snapshot.clone()).unwrap();
+    assert_eq!(serde_json::to_value(&read).unwrap(), snapshot);
+
+    let old: Pane = serde_json::from_value(pane_json()).unwrap();
+    let stored = serde_json::to_value(&old).unwrap();
+    assert_eq!(
+        stored,
+        pane_json(),
+        "a record with no label writes back as read"
+    );
+    assert!(
+        stored["herdr"].get("label").is_none(),
+        "omitted when absent: {stored}"
     );
 }
 

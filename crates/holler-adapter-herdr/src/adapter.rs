@@ -20,10 +20,16 @@
 //!   cell needs none, and a refusal is returned as it is), runs that step, and reads
 //!   the tree back: the new pane must sit in the cell asked for. A pane that landed
 //!   elsewhere is `unavailable` and is left where Herdr put it. The adapter never
-//!   closes or moves a pane.
+//!   closes or moves a pane. Its answer carries the pane's label: an occupied cell's
+//!   from the snapshot it read, a new pane's from the reply that made it.
 //! - **`snapshot` lists every workspace**, configured or not, by its label: the placed
 //!   panes of each workspace's grid tab, by row and then column. A pane nested inside
-//!   one cell, or in another tab, has no cell and is left out.
+//!   one cell, or in another tab, has no cell and is left out. Each pane carries its
+//!   label, joined by pane id to the panes of the call's one `session.snapshot` read; a
+//!   pane made between that read and its tab's `layout.export` is listed with none.
+//! - **A label costs no request** (#808): it is read from the `PaneInfo` of replies the
+//!   adapter already receives, and both methods make it a pane's label through the
+//!   protocol's one rule, `label_of`.
 //! - **Messages quote what Herdr sent cut to 64 characters.** A pane id or a workspace
 //!   label read from Herdr's reply goes through the protocol's `excerpt`, so a long or
 //!   garbled one can neither lengthen a message nor break it across lines. What the
@@ -35,15 +41,17 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use holler_pane::{HerdrPane, HerdrPort, HerdrSnapshot, HerdrSpec, Key, PaneError, PaneId};
+use holler_pane::{
+    GridPos, HerdrPane, HerdrPort, HerdrSnapshot, HerdrSpec, Key, PaneError, PaneId,
+};
 use serde_json::Value;
 
 use crate::layout::{grid_of, GridMap};
 use crate::plan::{plan_splits, Extent, Step, Target};
 use crate::protocol::{
-    check_supported, decode_reply, excerpt, expect_ok, parse_layout_export, parse_pane_info,
-    parse_pong, parse_read, parse_snapshot, parse_workspace_created, Request, ServerVersion,
-    WorkspaceRef,
+    check_supported, decode_reply, excerpt, expect_ok, label_of, parse_layout_export,
+    parse_pane_info, parse_pong, parse_read, parse_snapshot, parse_workspace_created, Request,
+    ServerVersion, SessionState, WorkspaceRef,
 };
 use crate::transport::{Transport, UnixSocketTransport};
 
@@ -190,14 +198,15 @@ impl<T: Transport> HerdrAdapter<T> {
             })
     }
 
-    /// The workspace labelled `label` as Herdr has it now. Two of that label are
-    /// `unavailable`.
+    /// The workspace labelled `label` as Herdr has it now, and the snapshot it was read
+    /// from. Two of that label are `unavailable`.
     fn workspace_grid(&self, label: &str, deadline: Instant) -> Result<WorkspaceGrid, PaneError> {
         let state = parse_snapshot(&self.call(&Request::SessionSnapshot, deadline)?)?;
         let Some(workspace) = state.workspace(label)? else {
             return Ok(WorkspaceGrid {
                 tab: None,
                 map: GridMap::default(),
+                state,
             });
         };
         let tab = grid_tab(workspace)?;
@@ -205,6 +214,7 @@ impl<T: Transport> HerdrAdapter<T> {
         Ok(WorkspaceGrid {
             tab: Some(tab),
             map,
+            state,
         })
     }
 
@@ -217,22 +227,13 @@ impl<T: Transport> HerdrAdapter<T> {
             extent,
             cells: vec![spec.grid],
         };
-        let pane_id = match plan_splits(&workspace.map, &target)?.as_slice() {
+        let (pane_id, label) = match plan_splits(&workspace.map, &target)?.as_slice() {
             // An occupied cell: its pane, and no request that changes anything.
-            [] => workspace
-                .map
-                .at(spec.grid)
-                .cloned()
-                .ok_or_else(|| PaneError::Unavailable {
-                    what: format!(
-                        "the plan for {} is empty, and workspace {:?} has no pane there",
-                        spec.grid, spec.workspace
-                    ),
-                })?,
+            [] => workspace.occupant(spec)?,
             [step] => {
-                let (tab, made) = self.place(step, &workspace, spec, deadline)?;
+                let (tab, made, label) = self.place(step, &workspace, spec, deadline)?;
                 self.confirm(&tab, &made, spec, deadline)?;
-                made
+                (made, label)
             }
             steps => {
                 return Err(PaneError::Unavailable {
@@ -244,30 +245,45 @@ impl<T: Transport> HerdrAdapter<T> {
                 })
             }
         };
-        Ok(HerdrPane {
+        Ok(self.pane(&spec.workspace, pane_id, spec.grid, label.as_deref()))
+    }
+
+    /// The pane `pane_id` at `grid` of `workspace`, in the session served, with the label
+    /// [`label_of`] makes of the one Herdr sent for it (`raw`). Every pane `ensure_pane`
+    /// answers and `snapshot` lists is built here, so the two never disagree (#808).
+    fn pane(
+        &self,
+        workspace: &str,
+        pane_id: PaneId,
+        grid: GridPos,
+        raw: Option<&str>,
+    ) -> HerdrPane {
+        HerdrPane {
             session: self.config.session.clone(),
-            workspace: spec.workspace.clone(),
+            workspace: workspace.to_owned(),
             pane_id,
-            grid: spec.grid,
-        })
+            grid,
+            label: label_of(raw),
+        }
     }
 
     /// Run `step`, the one step of the plan for `spec.grid`: the grid tab that holds the
-    /// new pane, and the new pane.
+    /// new pane, the new pane, and the label Herdr sent with it.
     fn place(
         &self,
         step: &Step,
         workspace: &WorkspaceGrid,
         spec: &HerdrSpec,
         deadline: Instant,
-    ) -> Result<(String, PaneId), PaneError> {
+    ) -> Result<(String, PaneId, Option<String>), PaneError> {
         match step {
             Step::CreateRoot => {
                 let request = Request::WorkspaceCreate {
                     label: spec.workspace.clone(),
                 };
-                let (created, root) = parse_workspace_created(&self.call(&request, deadline)?)?;
-                Ok((grid_tab(&created)?, root))
+                let reply = self.call(&request, deadline)?;
+                let (created, root, label) = parse_workspace_created(&reply)?;
+                Ok((grid_tab(&created)?, root, label))
             }
             Step::Split {
                 from,
@@ -291,7 +307,8 @@ impl<T: Transport> HerdrAdapter<T> {
                 let reply = self
                     .call(&request, deadline)
                     .map_err(|error| changed_under(error, target, spec))?;
-                Ok((tab.clone(), parse_pane_info(&reply)?))
+                let (made, label) = parse_pane_info(&reply)?;
+                Ok((tab.clone(), made, label))
             }
         }
     }
@@ -378,11 +395,10 @@ impl<T: Transport> HerdrPort for HerdrAdapter<T> {
                     continue;
                 };
                 let cells = self.grid(tab, deadline)?.cells();
-                panes.extend(cells.into_iter().map(|(grid, pane_id)| HerdrPane {
-                    session: self.config.session.clone(),
-                    workspace: workspace.label.clone(),
-                    pane_id,
-                    grid,
+                // Each pane's own label, joined by pane id, never by position.
+                panes.extend(cells.into_iter().map(|(grid, pane_id)| {
+                    let label = state.pane_label(&pane_id);
+                    self.pane(&workspace.label, pane_id, grid, label)
                 }));
             }
             Ok(HerdrSnapshot { panes })
@@ -404,11 +420,31 @@ impl<T: Transport> HerdrPort for HerdrAdapter<T> {
 }
 
 /// A configured workspace as Herdr has it: its grid tab, `None` when Herdr has no
-/// workspace of the label, and the grid read off that tab's tree, empty when there is
-/// none.
+/// workspace of the label, the grid read off that tab's tree, empty when there is
+/// none, and the snapshot it was found in, which holds each pane's label.
 struct WorkspaceGrid {
     tab: Option<String>,
     map: GridMap,
+    state: SessionState,
+}
+
+impl WorkspaceGrid {
+    /// The pane at `spec.grid`, a cell the plan found occupied, and the label Herdr sent
+    /// for it in the snapshot read. No pane there is `unavailable`.
+    fn occupant(&self, spec: &HerdrSpec) -> Result<(PaneId, Option<String>), PaneError> {
+        let pane = self
+            .map
+            .at(spec.grid)
+            .cloned()
+            .ok_or_else(|| PaneError::Unavailable {
+                what: format!(
+                    "the plan for {} is empty, and workspace {:?} has no pane there",
+                    spec.grid, spec.workspace
+                ),
+            })?;
+        let label = self.state.pane_label(&pane).map(str::to_owned);
+        Ok((pane, label))
+    }
 }
 
 /// The grid tab of `workspace`. A workspace with no tab has no grid: `unavailable`.

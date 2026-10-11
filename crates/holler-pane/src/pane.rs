@@ -89,7 +89,8 @@ impl PaneId {
 }
 
 /// Where a pane sits in Herdr: its session, workspace, Herdr's id for it and its
-/// grid cell. Also what `HerdrPort::ensure_pane` returns for a pane that exists.
+/// grid cell. Also what `HerdrPort::ensure_pane` returns for a pane that exists, and
+/// what `HerdrPort::snapshot` lists; a pane Herdr reports also carries its label.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct HerdrPane {
@@ -97,6 +98,13 @@ pub struct HerdrPane {
     pub workspace: String,
     pub pane_id: PaneId,
     pub grid: GridPos,
+    /// The pane's label as Herdr reports it, read by the Herdr adapter through its
+    /// `label_of`: an observation (I6), and the join key from a pane name to a live Herdr
+    /// pane (#808). `launch` and `relaunch` never write one, so a record's `herdr.label`
+    /// is `None` and its JSON has no `label` key. `None` stands both for a pane Herdr
+    /// sent no label for and for one it sent an empty label for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
 }
 
 /// The machine side of a pane.
