@@ -3,14 +3,14 @@
 
 use holler_cli::output::Format;
 use holler_cli::pane::profile_scope::reconcile_step;
-use holler_pane::{Actor, PaneError};
+use holler_pane::{Actor, PaneError, ProfileSpec};
 use holler_pane_testkit::fixture::sample_profile;
 use holler_pane_testkit::harness::HarnessOp;
 use holler_pane_testkit::pane_store::PaneStoreOp;
 
 use super::rig::{
-    assert_untouched, data_of, error_of, launch_spec, launch_with, launch_without, occurrences,
-    profile_name, Rig, PANE,
+    agent, assert_untouched, data_of, error_of, launch_spec, launch_with, launch_without,
+    occurrences, profile_name, Rig, PANE,
 };
 
 /// The phrase every reconcile step starts with: it must occur once in a message.
@@ -37,15 +37,22 @@ fn conflict_the_restore(rig: &Rig, profile: &'static str) {
     });
 }
 
-/// AC 16a: P gains exactly the effective spec, in one write, and the record names P.
+/// AC 16a: P gains exactly the effective spec, in one write, and the record names P. #644
+/// part 2: `--agent` is written into P's spec for the pane by that same write.
 #[test]
 fn launch_with_profile_adds_the_spec_and_bumps_once() {
     let rig = Rig::new();
-    let run = rig.run(&launch_with(&["--profile", "demo"]), Format::Json);
-    data_of(&run);
+    let argv = launch_with(&["--profile", "demo", "--agent", "feature-implementor"]);
+    let run = rig.run(&argv, Format::Json);
+    let data = data_of(&run);
+    assert_eq!(data["agent"], "feature-implementor", "{data}");
     let profile = rig.profile("demo");
     assert_eq!(profile.generation, 2);
-    assert_eq!(profile.panes, [launch_spec()]);
+    let spec = ProfileSpec {
+        opencode_agent: Some(agent("feature-implementor")),
+        ..launch_spec()
+    };
+    assert_eq!(profile.panes, [spec]);
     let record = rig.record(PANE).unwrap();
     assert_eq!(record.profile, Some(profile_name("demo")));
     let log: Vec<u64> = rig
