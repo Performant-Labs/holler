@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# pane-restart: restart one fleet pane's OpenCode TUI on a new model, in its existing tmux session.
+# pane-restart: restart one fleet pane's OpenCode or Claude Code TUI on a new model, in its existing tmux session.
 # A stop-gap (issue #746) until `holler pane relaunch --model` (#644) and the pfleet adoption (#653) land.
 #
 #   pane-restart PANE --model PROVIDER/ID [--effort E] [--key-file PATH] [--project DIR] [--agent KEY] [--dry-run]
+#   pane-restart PANE [--model ALIAS|NAME] [--effort E] [--fresh] [--dry-run]            (a Claude Code pane, see below)
 #
 # PANE is cCrR (the tmux session is hj-PANE, derived, never typed). Steps, in order; the first failure stops the
 # script and names the step:
@@ -15,6 +16,16 @@
 # --mo restarts c4r2, the MO pane: it edits opencode-mo/opencode.json and agents/mo.md instead of pane.env, launches
 # with OC_SESSION_NAME=mo and no --agent, needs --key-file, accepts a busy pane, and skips pane-ready.
 # A pane that is already fully down is started without the stop step; that needs --project.
+# A Claude Code pane (issue #784) is found, not named: a live Claude Code process whose per-process record in
+# ~/.claude/sessions/<pid>.json names the pane's tmux session. It is restarted through its own command line, with no
+# pane.env and no oc-holler: refuse unless the record says idle and the screen shows neither 'esc to interrupt', a
+# question ('Enter to select') nor a running agent row ('◯ name'); stop it (/exit, then one Ctrl-C); start `claude` again in the same
+# directory with the flags it had, the new --model and/or --effort (an omitted one keeps its old value), and
+# `--resume <its session id>` (--fresh starts a new session instead; a session with no saved conversation can only be
+# restarted with --fresh, and is refused before anything changes without it); wait for the new process and for it to report
+# idle. The model is confirmed from the new process's own arguments, because no prompt is sent. A process whose command
+# line has arguments this script does not know how to carry over is refused. --model takes an alias (opus, sonnet,
+# fable) or a full name, with an optional [1m]; --effort is low, medium, high, xhigh or max.
 # Timeouts (seconds) can be tuned with PANE_RESTART_T_STOP / _T_UP / _T_REG / _T_MODEL and PANE_RESTART_POLL.
 set -uo pipefail
 
@@ -28,17 +39,18 @@ type_delay=${PANE_RESTART_TYPE_DELAY:-2}
 
 pane=${1:-}
 [ "$#" -gt 0 ] && shift
-model="" effort="" key_file="" project="" agent="" dry=0 mo=0
+model="" effort="" key_file="" project="" agent="" dry=0 mo=0 fresh=0 model_given=0 effort_given=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    --model) model=${2:-}; shift 2 || break ;;
-    --effort) effort=${2:-}; shift 2 || break ;;
+    --model) model_given=1; model=${2:-}; shift 2 || break ;;
+    --effort) effort_given=1; effort=${2:-}; shift 2 || break ;;
     --key-file) key_file=${2:-}; shift 2 || break ;;
     --project) project=${2:-}; shift 2 || break ;;
     --agent) agent=${2:-}; shift 2 || break ;;
     --dry-run) dry=1; shift ;;
     --mo) mo=1; shift ;;
-    *) echo "${pane:-?}: REFUSED: unknown argument '$1' (usage: pane-restart PANE --model PROVIDER/ID [--effort E] [--key-file PATH] [--project DIR] [--agent KEY] [--mo] [--dry-run])"; exit 1 ;;
+    --fresh) fresh=1; shift ;;
+    *) echo "${pane:-?}: REFUSED: unknown argument '$1' (usage: pane-restart PANE --model PROVIDER/ID [--effort E] [--key-file PATH] [--project DIR] [--agent KEY] [--mo] [--fresh] [--dry-run])"; exit 1 ;;
   esac
 done
 
@@ -56,6 +68,133 @@ wait_for() { # wait_for SECONDS cmd...: poll until cmd succeeds or the bound pas
     sleep "$poll"
   done
 }
+
+
+# Claude Code panes (issue #784) -------------------------------------------------------------------------------
+# Claude Code keeps one record per process in ~/.claude/sessions/<pid>.json: pid, sessionId, cwd, status and the tmux
+# target it runs in. That, not a name or a guess, says which process is the pane's session.
+claude_records() { # claude_records PANE: the record of each live Claude Code process in tmux session hj-PANE
+  local f t p
+  for f in "$HOME"/.claude/sessions/*.json; do
+    [ -f "$f" ] || continue
+    t=$(jq -r '.tmux // empty' "$f" 2>/dev/null)
+    case "$t" in "hj-$1:"*) ;; *) continue ;; esac
+    p=$(jq -r '.pid // empty' "$f" 2>/dev/null)
+    [[ "$p" =~ ^[0-9]+$ ]] && kill -0 "$p" 2>/dev/null || continue
+    tr '\0' '\n' < "/proc/$p/cmdline" 2>/dev/null | grep -qE '(^|/)claude$' || continue
+    echo "$f"
+  done
+}
+
+restart_claude() { # restart_claude RECORD: the whole restart of one Claude Code pane
+  local rec=$1 session="hj-$pane" pid sid cwd status screen
+  { [ "$mo" = 0 ] && [ -z "$key_file" ] && [ -z "$agent" ] && [ -z "$project" ]; } \
+    || refuse "--mo, --key-file, --agent and --project are OpenCode options; $session is a Claude Code pane"
+  if [ "$model_given" = 1 ]; then
+    [[ "$model" =~ ^[A-Za-z0-9._-]+(\[[0-9a-z]+\])?$ ]] || refuse "'$model' is not a Claude model alias or name (opus, sonnet, claude-opus-5-5, claude-opus-5-5[1m])"
+  fi
+  if [ "$effort_given" = 1 ]; then
+    case "$effort" in low|medium|high|xhigh|max) ;; *) refuse "'$effort' is not an effort level (low, medium, high, xhigh, max)" ;; esac
+  fi
+  [ "$model_given" = 1 ] || [ "$effort_given" = 1 ] || refuse "a Claude Code pane needs --model or --effort"
+  tmux has-session -t "$session" 2>/dev/null || refuse "no tmux session $session"
+  if [ -n "${TMUX_PANE:-}" ]; then
+    local own; own=$(tmux display-message -p -t "$TMUX_PANE" '#{session_name}' 2>/dev/null || true)
+    [ "$own" = "$session" ] && refuse "this script is running inside $session"
+  fi
+  pid=$(jq -r '.pid' "$rec"); sid=$(jq -r '.sessionId // empty' "$rec"); cwd=$(jq -r '.cwd // empty' "$rec"); status=$(jq -r '.status // empty' "$rec")
+  [ -n "$sid" ] && [ -d "$cwd" ] || refuse "the record $rec has no session id or no working directory"
+  [ "$status" = idle ] || refuse "the Claude Code session is ${status:-of unknown status} (its record says so, not idle)"
+  screen=$(tmux capture-pane -p -t "$session" 2>/dev/null || true)
+  printf '%s' "$screen" | grep -q 'esc to interrupt' && refuse "the Claude Code session is working (the screen shows 'esc to interrupt')"
+  printf '%s' "$screen" | grep -q 'Enter to select' && refuse "the Claude Code session is waiting on a question (the screen shows 'Enter to select')"
+  printf '%s' "$screen" | grep -qE '^[[:space:]]*◯ ' && refuse "the Claude Code session has a running agent (the screen lists one with '◯')"
+
+  # The new command line: the flags the old process had that this script knows how to carry over, the new model and
+  # effort (an omitted one keeps its old value), and the session to resume. Anything else (a prompt, an unknown flag)
+  # is refused, so a restart never replays an old one-shot prompt or drops a flag it does not understand.
+  local -a old=() kept=() nargs=(); local i start=-1 j cur_model="" cur_effort="" a
+  mapfile -d '' -t old < "/proc/$pid/cmdline" || true
+  for i in "${!old[@]}"; do case "${old[$i]##*/}" in claude) start=$i; break ;; esac; done
+  [ "$start" -ge 0 ] || refuse "cannot read the Claude Code command line of pid $pid"
+  j=$((start + 1))
+  while [ "$j" -lt "${#old[@]}" ]; do
+    a=${old[$j]}
+    case "$a" in
+      --dangerously-skip-permissions|--allow-dangerously-skip-permissions) # a shell alias can make the process carry it twice
+        [[ " ${kept[*]:-} " == *" $a "* ]] || kept+=("$a"); j=$((j + 1)) ;;
+      --name|-n|--permission-mode) kept+=("$a" "${old[$((j + 1))]:-}"); j=$((j + 2)) ;;
+      --model) cur_model=${old[$((j + 1))]:-}; j=$((j + 2)) ;;
+      --model=*) cur_model=${a#--model=}; j=$((j + 1)) ;;
+      --effort) cur_effort=${old[$((j + 1))]:-}; j=$((j + 2)) ;;
+      --effort=*) cur_effort=${a#--effort=}; j=$((j + 1)) ;;
+      --resume|-r) j=$((j + 2)) ;;
+      --continue|-c) j=$((j + 1)) ;;
+      *) refuse "the running Claude Code has an argument this script cannot carry over: '$a'" ;;
+    esac
+  done
+  [ "$model_given" = 1 ] && cur_model=$model
+  [ "$effort_given" = 1 ] && cur_effort=$effort
+  nargs=("${kept[@]}")
+  [ -z "$cur_model" ] || nargs+=(--model "$cur_model")
+  [ -z "$cur_effort" ] || nargs+=(--effort "$cur_effort")
+  [ "$fresh" = 1 ] || nargs+=(--resume "$sid")
+  # A session that never had a conversation has nothing to resume: `claude --resume` would fail after the old one is stopped.
+  if [ "$fresh" = 0 ]; then
+    find "$HOME/.claude/projects" -maxdepth 2 -name "$sid.jsonl" -size +0 2>/dev/null | grep -q . \
+      || refuse "session $sid has no saved conversation, so there is nothing to resume; pass --fresh to start a new session instead"
+  fi
+  local launch; launch="cd $(printf '%q' "$cwd") && claude $(printf '%q ' "${nargs[@]}")"; launch=${launch% }
+
+  if [ "$dry" = 1 ]; then
+    echo "$pane: dry run, nothing changed. Claude Code pid $pid, session $sid, in $cwd"
+    echo "was: ${old[*]:$start}"
+    echo "now: claude ${nargs[*]}"
+    echo "send-keys -t $session /exit   (then, ${type_delay}s later)   send-keys -t $session Enter"
+    echo "send-keys -t $session $launch Enter"
+    return 0
+  fi
+
+  # Stop it: /exit, then Enter after a pause (the autocomplete popup swallows an Enter sent with it), then one Ctrl-C.
+  claude_gone() { ! kill -0 "$pid" 2>/dev/null; }
+  tmux send-keys -t "$session" /exit
+  sleep "$type_delay"
+  tmux send-keys -t "$session" Enter
+  if ! wait_for "$t_stop" claude_gone; then
+    tmux send-keys -t "$session" C-c
+    wait_for "$t_stop" claude_gone || fail_step 4 stop "the Claude Code process $pid is still running ${t_stop}s after /exit and one Ctrl-C"
+  fi
+
+  # Start it again, text and Enter in one call.
+  tmux send-keys -t "$session" "$launch" Enter
+  local new_rec="" npid="" nsid=""
+  find_new() { # a live record in this session that is not the old process
+    local r
+    while read -r r; do
+      [ -n "$r" ] || continue
+      [ "$(jq -r '.pid' "$r")" = "$pid" ] && continue
+      new_rec=$r; return 0
+    done < <(claude_records "$pane")
+    return 1
+  }
+  wait_for "$t_up" find_new || fail_step 6 start "no new Claude Code session appeared in $session ${t_up}s after the launch; the old one (pid $pid, session $sid) is stopped; the pane ends: $(tmux capture-pane -p -t "$session" 2>/dev/null | grep -v '^[[:space:]]*$' | tail -n 2 | tr '\n' ' ' | cut -c1-240)"
+  npid=$(jq -r '.pid' "$new_rec")
+  local argv; argv=$(tr '\0' ' ' < "/proc/$npid/cmdline" 2>/dev/null || true)
+  [ -z "$cur_model" ] || [[ "$argv" == *"--model $cur_model "* ]] || fail_step 7 arguments "the new Claude Code (pid $npid) is not running with --model $cur_model: $argv"
+  [ -z "$cur_effort" ] || [[ "$argv" == *"--effort $cur_effort "* ]] || fail_step 7 arguments "the new Claude Code (pid $npid) is not running with --effort $cur_effort: $argv"
+  new_idle() { [ "$(jq -r '.status // empty' "$new_rec" 2>/dev/null)" = idle ]; }
+  wait_for "$t_model" new_idle || fail_step 8 idle "the new Claude Code session (pid $npid) is '$(jq -r '.status // "unknown"' "$new_rec" 2>/dev/null)', not idle, ${t_model}s after it started"
+  nsid=$(jq -r '.sessionId // empty' "$new_rec")
+  echo "$pane: OK model=${cur_model:-default} effort=${cur_effort:-default} session=$nsid (Claude Code; confirmed from the process's own arguments, no prompt sent)"
+}
+
+{ [[ "$pane" =~ ^c[0-9]r[0-9]$ ]] && mapfile -t crecs < <(claude_records "$pane"); } || crecs=()
+if [ "${#crecs[@]}" -gt 1 ]; then
+  refuse "more than one live Claude Code session is recorded for hj-$pane (${crecs[*]##*/})"
+elif [ "${#crecs[@]}" = 1 ]; then
+  restart_claude "${crecs[0]}"
+  exit 0
+fi
 
 # 1. Refuse -------------------------------------------------------------------------------------------------
 [[ "$pane" =~ ^c[0-9]r[0-9]$ ]] || refuse "'$pane' is not a pane name (cCrR)"

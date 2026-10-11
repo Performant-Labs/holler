@@ -8,6 +8,11 @@ fills this file in at release time.
 ## [Unreleased]
 
 ### Enhancements
+- `scripts/pane-restart` now also restarts Claude Code panes (issue [#784](https://github.com/Performant-Labs/holler/issues/784),
+  epic [#633](https://github.com/Performant-Labs/holler/issues/633)). A pane is Claude Code when a live process's record in
+  `~/.claude/sessions/<pid>.json` names its tmux session; it takes `--model ALIAS|NAME` and `--effort`, keeps the process's own flags,
+  resumes the same session (`--fresh` for a new one), and is refused unless the session is idle and the screen shows no work, question
+  or agent row. The new model is confirmed from the process's own arguments; no prompt is sent. OpenCode panes are unchanged.
 - `scripts/pane-restart` (issue [#746](https://github.com/Performant-Labs/holler/issues/746), epic
   [#633](https://github.com/Performant-Labs/holler/issues/633)): one bounded command that restarts a fleet
   pane's OpenCode TUI on a new model in its existing tmux session (`pane-restart c3r1 --model

@@ -360,6 +360,7 @@ claude_case() { # claude_case <pane> [status]: an idle Claude Code pane on sonne
   [ -z "${2:-}" ] || echo "$2" > "$FAKE/claude.status"
   ( cd "$work/proj" && FAKE_CLAUDE_TMUX="hj-$1:@1.%1" PATH="$bin:$PATH" nohup bash "$bin/claude" --dangerously-skip-permissions \
       --model sonnet --effort medium --name test-ff --resume sess-old >/dev/null 2>&1 & )
+  mkdir -p "$HOME/.claude/projects/-proj"; echo '{"type":"user"}' > "$HOME/.claude/projects/-proj/sess-old.jsonl"   # a saved conversation
   local n=0; while [ ! -f "$FAKE/claude.pid" ] && [ $n -lt 100 ]; do sleep 0.05; n=$((n + 1)); done
   old_pid=$(cat "$FAKE/claude.pid"); export FAKE_CLAUDE_TMUX="hj-$1:@1.%1"
 }
@@ -435,19 +436,25 @@ done <<'ARGS'
 --model opus --mo|are OpenCode options
 ARGS
 
+claude_case c3r1; rm -f "$HOME/.claude/projects/-proj/sess-old.jsonl"
+run c3r1 --model opus
+check "claude: a session with no saved conversation cannot be resumed: refused before anything changes" \
+  bash -c "[ '$(rc)' = 1 ] && grep -q 'REFUSED: session sess-old has no saved conversation' '$FAKE/out' && grep -q -e '--fresh' '$FAKE/out'"
+if claude_untouched; then pass "claude: no saved conversation: untouched"; else bad "claude: no saved conversation: untouched"; fi
+claude_case c3r1; rm -f "$HOME/.claude/projects/-proj/sess-old.jsonl"
+run c3r1 --model opus --fresh
+check "claude: --fresh restarts a session that has no saved conversation" test "$(rc)" = 0
+
 claude_case c3r1
 export FAKE_OWN_SESSION=hj-c3r1 TMUX_PANE=%9
 run c3r1 --model opus
 check "claude: the pane the script itself runs in is refused" bash -c "[ '$(rc)' = 1 ] && grep -q 'this script is running inside hj-c3r1' '$FAKE/out'"
 if claude_untouched; then pass "claude: own pane: untouched"; else bad "claude: own pane: untouched"; fi
 
-claude_case c3r1; : > "$FAKE/stuck"
-run c3r1 --model opus
-check "claude: a TUI that never exits fails at the stop step (exit 2)" bash -c "[ '$(rc)' = 2 ] && grep -q '^c3r1: FAIL step 4 (stop)' '$FAKE/out'"
-check "claude: no launch line is typed after a failed stop" bash -c "! grep -q 'claude .*Enter\$' '$FAKE/tmux.log'"
 claude_case c3r1; echo hard > "$FAKE/stuck"
 run c3r1 --model opus
-check "claude: a TUI that ignores Ctrl-C too fails at the stop step" bash -c "[ '$(rc)' = 2 ] && grep -q 'FAIL step 4' '$FAKE/out'"
+check "claude: a TUI that ignores /exit and Ctrl-C fails at the stop step (exit 2)" bash -c "[ '$(rc)' = 2 ] && grep -q '^c3r1: FAIL step 4 (stop)' '$FAKE/out'"
+check "claude: no launch line is typed after a failed stop" bash -c "! grep -q 'claude .*Enter\$' '$FAKE/tmux.log'"
 claude_case c3r1; echo soft > "$FAKE/stuck"
 run c3r1 --model opus
 check "claude: a TUI that needs one Ctrl-C still restarts" test "$(rc)" = 0
@@ -456,10 +463,34 @@ claude_case c3r1; : > "$FAKE/no_new_claude"
 run c3r1 --model opus
 check "claude: a launch that never produces a session fails at step 6 and says the old one is gone" \
   bash -c "[ '$(rc)' = 2 ] && grep -q '^c3r1: FAIL step 6' '$FAKE/out'"
-claude_case c3r1; echo busy > "$FAKE/claude.status"
-rm -f "$FAKE/claude.status"; echo busy > "$FAKE/new_status"
+claude_case c3r1; echo busy > "$FAKE/claude.status"   # the old process already wrote idle; the new one will write busy
 run c3r1 --model opus
-check "claude: a session that comes up idle ends with exit 0" test "$(rc)" = 0
+check "claude: a new session that never goes idle fails at step 8 (exit 2)" bash -c "[ '$(rc)' = 2 ] && grep -q '^c3r1: FAIL step 8 (idle)' '$FAKE/out'"
+
+claude_case c3r1; printf '  ● main\n  ◯ orchestrator  Checking … 3m 1s · 1 queued\n' > "$FAKE/screen"
+run c3r1 --model opus
+check "claude: a running agent row on the screen is refused" bash -c "[ '$(rc)' = 1 ] && grep -q 'REFUSED: the Claude Code session has a running agent' '$FAKE/out'"
+if claude_untouched; then pass "claude: running agent row: untouched"; else bad "claude: running agent row: untouched"; fi
+claude_case c3r1; printf '> \n  bypass permissions on (shift+tab to cycle) · ← 1 agent\n  ● main\n' > "$FAKE/screen"
+run c3r1 --model opus
+check "claude: the idle footer hint '← 1 agent' (shown by every idle session) does NOT refuse" test "$(rc)" = 0
+
+# A shell alias that adds --dangerously-skip-permissions makes the running process carry the flag twice; a restart must not stack a third.
+claude_case c3r1; kill "$(cat "$FAKE/claude.pid")" 2>/dev/null; rm -f "$HOME/.claude/sessions/"*.json "$FAKE/claude.pid"
+( cd "$work/proj" && FAKE_CLAUDE_TMUX="hj-c3r1:@1.%1" PATH="$bin:$PATH" nohup bash "$bin/claude" --dangerously-skip-permissions --dangerously-skip-permissions \
+    --model sonnet --resume sess-old >/dev/null 2>&1 & )
+n=0; while [ ! -f "$FAKE/claude.pid" ] && [ $n -lt 100 ]; do sleep 0.05; n=$((n + 1)); done; old_pid=$(cat "$FAKE/claude.pid")
+run c3r1 --effort high
+check "claude: a flag the running process carries twice is carried once" \
+  bash -c "[ '$(rc)' = 0 ] && [ \"\$(tr '\\0' '\\n' < /proc/$(new_pid)/cmdline | grep -c -x -e '--dangerously-skip-permissions')\" = 1 ]"
+
+claude_case c3r1; kill "$(cat "$FAKE/claude.pid")" 2>/dev/null; rm -f "$HOME/.claude/sessions/"*.json "$FAKE/claude.pid"
+( cd "$work/proj" && FAKE_CLAUDE_TMUX="hj-c3r1:@1.%1" PATH="$bin:$PATH" nohup bash "$bin/claude" --dangerously-skip-permissions --mcp-config x.json --model sonnet >/dev/null 2>&1 & )
+n=0; while [ ! -f "$FAKE/claude.pid" ] && [ $n -lt 100 ]; do sleep 0.05; n=$((n + 1)); done; old_pid=$(cat "$FAKE/claude.pid")
+run c3r1 --model opus
+check "claude: a process with an argument the script cannot carry over is refused and named" \
+  bash -c "[ '$(rc)' = 1 ] && grep -q \"REFUSED: the running Claude Code has an argument this script cannot carry over: '--mcp-config'\" '$FAKE/out'"
+if alive "$old_pid" && ! send_lines | grep -q 'claude .*Enter$'; then pass "claude: unknown argument: process untouched, nothing launched"; else bad "claude: unknown argument: process untouched, nothing launched"; fi
 
 claude_case c3r1
 cp "$HOME/.claude/sessions/$old_pid.json" "$HOME/.claude/sessions/9999991.json"; sed -i 's/"pid":[0-9]*/"pid":'"$old_pid"'/' "$HOME/.claude/sessions/9999991.json"
