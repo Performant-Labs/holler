@@ -170,3 +170,56 @@ Run handoff directory `docs/handoffs/642` Â· branch `issue-642-implementation` Â
     - with none, `/config` has no `default_agent`, the turn runs as `build`, and a raw abort answers `true`, after
       which the status is `{}` and the message has `time.completed`.
   - Handoff: `docs/handoffs/642/handoff-T-red.md`.
+
+## F, implement (Phase 6): 2026-10-11T11:11-06:00 (MDT)
+
+- **Decided:** the brief is implemented as written, extending the existing objects with no parallel path:
+  - `server.rs`:
+    - `AGENT_UNUSABLE`, re-exported at the crate root;
+    - `serve_command` adds `OPENCODE_CONFIG_CONTENT={"default_agent":KEY}` through the new
+      `ProcessEnv::prefix_with`, and `prefix()` delegates to it with no pair;
+    - `verify_serving` asks `GET /config` then `GET /agent`, refusing with D4's reasons as the whole message.
+  - The new `prompt.rs`:
+    - `send_prompt`: `known`, then a bare `prompt_async`, `Ok` only on `204`, with the body-free
+      `Call::unexpected_status` for any other reply;
+    - `session_activity`: held items of the session or of a direct child first, then the status object, then the
+      message-list fallback.
+  - `lib.rs`:
+    - one status reading (`status_object` and `running`), which `settled` uses too, so `retry` is not settled;
+    - one `parentID` reading (`ids_where`), behind both `top_level_ids` and the new `child_ids`;
+    - the three `OP_*` strings and six `Route`s.
+  - A's warns acted on:
+    - W-2: a list answer that is not a 200 array holds nothing, and the children reader sits beside `top_level_ids`;
+    - W-5: the docs of `settled` and `SETTLE_POLL`, and ADR section 8's note that a permission request reads as
+      `HoldingQuestion`.
+  - The docs of acceptance 12 are corrected: the crate doc, `ProcessEnv`, `prefix`, `prefix_with`, `serve_command`,
+    `tui_argv`, `AGENT_UNSUPPORTED` (comment only, D9), ADR-0021 and `CHANGELOG.md`.
+  - `GET /session` is asked only when a held item belongs to another session, so a quiet server costs three requests.
+- **Assumed:**
+  - The script's phase commit stages and commits this phase's files: the code, `handoff-F.md`, `evidence.md` and this
+    entry. I committed nothing.
+  - A message-list entry's `time.completed` counts as present whenever it is non-null, not only when it is a number.
+    OpenCode 1.19.0 writes a number (E21).
+  - An `/agent` element is unique by `name`, so the first match decides. OpenCode builds the list from a record keyed
+    by name (E33's `r[n]`).
+- **Hedged:**
+  - The JSON pair surviving the host adapter's real `tmux new-window` is checked only by reading the code: tmux's
+    escape changes only a trailing `;`, and an `AgentKey` cannot contain one. The real rig launches without tmux (ADR-0021
+    section 5), and #649's wiring is the first real run.
+  - `lib.rs` grew to 741 lines, against D8's "+60". About 45 of those lines are the corrected crate doc that acceptance
+    12 asks for. The file is under the 900 gate and the 800 flag.
+  - I stopped an orphan: T's RED live probe (`probe.sh`, `opencode serve --pure --port 48179`, started 10:49 MDT, its
+    scratch dir already deleted), still running inside the rig's port range. I signalled only that server's own
+    `setsid` group and its orphaned script.
+- **Evidence:**
+  - Hermetic GREEN:
+    - `agent_test` 11/11, `prompt_test` 12/12, `hermetic_test` 33/33;
+    - `attach_test` 23 and `tui_test` 13, unchanged.
+  - Real: `HOLLER_TEST_OPENCODE=1 cargo test -p holler-adapter-opencode --test real_opencode_test -- --ignored
+    --test-threads=1` gave 12/12 against OpenCode 1.19.0 and tmux 3.7c, including conformance `ac12`, with no leftover
+    process.
+  - `cargo clippy --workspace --all-targets -- -D warnings`: exit 0. `cargo fmt -p holler-adapter-opencode -p
+    holler-pane -- --check`: clean. `bash scripts/lint.sh`: exit 0.
+  - `cargo test --workspace -- --skip roster_stays_accurate_under_concurrent_body_load`: exit 0, with 2,142 passed,
+    0 failed and 28 ignored.
+  - Handoff: `docs/handoffs/642/handoff-F.md`. Evidence appendix: `docs/handoffs/642/evidence.md`.
