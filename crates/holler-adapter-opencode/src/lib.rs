@@ -2,16 +2,18 @@
 //! [`holler_pane::HarnessPort`] for the OpenCode harness (epic #633) over OpenCode's HTTP
 //! API, on `127.0.0.1` only, and over tmux for a pane's TUI. The facts about real OpenCode it
 //! relies on come from the spike #635 (`docs/research/opencode-pane-spike.md`, OpenCode
-//! 1.18.35) and, for the web app's catch-all page, from `holler-body`'s OpenCode driver
-//! (`http_attach_driver.rs`).
+//! 1.18.35), for the web app's catch-all page and the prompt route from `holler-body`'s
+//! OpenCode driver (`http_attach_driver.rs`), and for the agent and a session's status from
+//! probes of OpenCode 1.19.0 (#642 part 3).
 //!
 //! **Every method of the port is built** (#642): the server side (`health`,
 //! `create_session`, `list_sessions` and `abort`, part 1; `serve_command` and
-//! `verify_serving`, #802) and the TUI side (`attach_tui`, `select_session` and
-//! `shown_session`, part 2), whose TUI runs in the pane's tmux session, as the server does.
-//! The last part of #642 applies the pane's OpenCode agent (`Pane.opencode_agent`, after
-//! #700); until then `serve_command` and `verify_serving` refuse a spec that asks for one
-//! (`agent-unsupported`). Nothing wires the adapter in yet (#649).
+//! `verify_serving`, #802), the TUI side (`attach_tui`, `select_session` and
+//! `shown_session`, part 2), whose TUI runs in the pane's tmux session, as the server does,
+//! and part 3: the pane's OpenCode agent (`Pane.opencode_agent`, #700), which
+//! `serve_command` applies and `verify_serving` checks on the running server, and the prompt
+//! seam of #645, `send_prompt` and `session_activity`. Nothing wires the adapter in yet
+//! (#649).
 //!
 //! **Blocking**, as the port is: every method is synchronous (call it from `spawn_blocking`
 //! or a thread in async code) and returns within [`Timeouts::call`] (I5, 10 s by default).
@@ -28,12 +30,13 @@
 //! - **A 200 is not enough.** OpenCode answers a route it does not serve with its web app's
 //!   HTML page and a 200, so each step requires the JSON it relies on. Anything else is
 //!   `unavailable`, in one line that names the route, the port and the status and quotes at
-//!   most 60 bytes of the body. The message names an id route as `/session/:id`, so it never
-//!   echoes the id.
-//! - `abort`, `attach_tui` and `select_session` of an id the server does not know are
-//!   `session-not-found`. Raw OpenCode acknowledges an abort of an unknown id, so each asks
-//!   `GET /session/:id` first; a 404 (or a 400, for a malformed id) means no such session,
-//!   and nothing is sent or changed after it. A session id enters a URL path
+//!   most 60 bytes of the body; the reply to a prompt is quoted not at all, since it could
+//!   echo the prompt. The message names an id route as `/session/:id`, so it never echoes
+//!   the id.
+//! - `abort`, `attach_tui`, `select_session` and `send_prompt` of an id the server does not
+//!   know are `session-not-found`. Raw OpenCode acknowledges an abort of an unknown id, so
+//!   each asks `GET /session/:id` first; a 404 (or a 400, for a malformed id) means no such
+//!   session, and nothing is sent or changed after it. A session id enters a URL path
 //!   percent-encoded, so no id can change the request line.
 //! - `health` is never an error: it is `false` when the server is down, frozen, or answers
 //!   anything but `{"healthy": true}`.
@@ -47,14 +50,34 @@
 //!
 //! - **The adapter starts no server** (fact 2, #802). `serve_command` only builds the
 //!   server's argv, `<env prefix> <opencode_bin> serve --port P --hostname 127.0.0.1
-//!   <serve_args>`, behind the TUI's own `env` prefix: it starts nothing, binds nothing and
-//!   sends nothing. The host adapter's `run` starts that argv in the pane's tmux session, in
-//!   the pane spec's directory, and its `stop_owned` stops it (TERM, a grace, then KILL), so
-//!   the adapter owns no process and keeps no pid. Never adopting a running server is the
+//!   <serve_args>`, behind the TUI's own `env` prefix, plus one pair for a spec with an agent
+//!   (below): it starts nothing, binds nothing and sends nothing. The host adapter's `run`
+//!   starts that argv in the pane's tmux session, in the pane spec's directory, and its
+//!   `stop_owned` stops it (TERM, a grace, then KILL), so the adapter owns no process and
+//!   keeps no pid. Never adopting a running server is the
 //!   launch engine's: its plan refuses a port that already answers, and it asks again just
 //!   before the run. The engine also waits for the server's first healthy answer, sending
 //!   nothing but health checks until then: a request sent while the server boots can hang
 //!   for good (the spike's boot race).
+//! - **The pane's agent is its server's `default_agent`** (fact 7, #642 part 3), set once,
+//!   when the server starts, never per prompt. `opencode serve` has no agent option, so for a
+//!   spec with an agent `serve_command` adds one pair to the server's `env` prefix:
+//!   `OPENCODE_CONFIG_CONTENT={"default_agent":KEY}`. OpenCode starts healthy whatever the
+//!   key, so once the server answers, `verify_serving` asks it: `GET /config` must name the key
+//!   as its `default_agent` (the variable reached the server), and `GET /agent` must list it as
+//!   an agent OpenCode takes as a default (a `mode` other than `subagent`, not hidden). Anything
+//!   else is the adapter's own refusal [`AGENT_UNUSABLE`], and the launch engine's rollback
+//!   then stops the server. A spec without an agent adds nothing to the argv, and
+//!   `verify_serving` answers it `Ok` with nothing sent.
+//! - **A prompt is queued through the API, never typed** (I4, ADR-0021 section 8).
+//!   `send_prompt` checks the session as `abort` does, then posts the text part alone to the
+//!   bare `POST /session/:id/prompt_async`, `Ok` exactly on its `204`. It is pure transport:
+//!   a hold, a limit or a park is the hub's. `session_activity` is `HoldingQuestion` while a
+//!   question or a permission request of the session, or of a direct child (subagent) session
+//!   of it, is pending (`GET /question` and `GET /permission`, read best-effort: a list that
+//!   cannot be read holds nothing), else `Busy` while `GET /session/status` has an entry for
+//!   it that is not `idle`, else `Idle`. Only a server whose status route answers no JSON
+//!   object is read from the session's last assistant message instead.
 //! - **The session of record is titled with its own id** (fact 1). `create_session` renames
 //!   each new session to its id, so the TUI's title maps back to it. When the rename fails,
 //!   the session is deleted again, so none is left untitled.
@@ -89,9 +112,13 @@
 //!   (`ps` and tmux show it): no per-pane environment names, model or effort are applied.
 //!   tmux starts both the server and the TUI, so under [`ProcessEnv::Inherit`] both see the
 //!   tmux server's environment: a provider credential reaches the server only through the
-//!   pane's tmux session (#649's to set, ADR-0021 section 2), never through an argv. tmux
-//!   limits a command's size (3.7c refused a 20,000-byte argument), so #642 part 3's
-//!   `OPENCODE_CONFIG_CONTENT` carries only `{"default_agent": KEY}`, never an agent.
+//!   pane's tmux session (#649's to set, ADR-0021 section 2), never through an argv. The one
+//!   variable the adapter adds is `OPENCODE_CONFIG_CONTENT`, on the server's argv only (never
+//!   the TUI's) and only for a spec with an agent, carrying only `{"default_agent":KEY}`,
+//!   never an agent's definition (tmux limits a command's size: 3.7c refused a 20,000-byte
+//!   argument). It comes after the prefix's own words, and `env` applies its assignments in
+//!   order, so it replaces a same-named [`ProcessEnv::Isolated`] pair and a value inherited
+//!   from the tmux server.
 //!
 //! [`http`] is the adapter's own transport, and [`tui`] holds the tmux configuration and the
 //! pure builders and parsers of the tmux calls. Both are public for this crate's tests and
@@ -102,6 +129,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use holler_pane::ports::Activity;
 use holler_pane::{Argv, HarnessPort, PaneError, PaneId, PaneName, ServeSpec};
 use serde_json::{json, Value};
 
@@ -110,23 +138,31 @@ use crate::http::{HttpError, Reply};
 mod attach;
 mod exec;
 pub mod http;
+mod prompt;
 mod server;
 pub mod tui;
 
+pub use server::AGENT_UNUSABLE;
 pub use tui::{TmuxConfig, TmuxSocket};
 
 /// The `op` of each method's `timeout`: the strings of the test kit's `HarnessOp`, which the
-/// tests pin equal to these.
+/// tests pin equal to these. `OP_SEND_PROMPT` and `OP_SESSION_ACTIVITY` have no `HarnessOp`
+/// counterpart yet (the fake's recording of the two is #684's), so the tests pin them as
+/// literals.
+const OP_VERIFY_SERVING: &str = "harness.verify_serving";
 const OP_CREATE_SESSION: &str = "harness.create_session";
 const OP_LIST_SESSIONS: &str = "harness.list_sessions";
 const OP_ABORT: &str = "harness.abort";
 const OP_ATTACH_TUI: &str = "harness.attach_tui";
 const OP_SELECT_SESSION: &str = "harness.select_session";
 const OP_SHOWN_SESSION: &str = "harness.shown_session";
+const OP_SEND_PROMPT: &str = "harness.send_prompt";
+const OP_SESSION_ACTIVITY: &str = "harness.session_activity";
 
 /// How often a switch, an attach or an abort is checked, within [`Timeouts::settle`], for
-/// having been seen: `abort` asks `GET /session/status` whether the session is still busy,
-/// and `select_session` and `attach_tui` ask tmux what the pane's TUI shows.
+/// having been seen: `abort` asks `GET /session/status` whether the session is still running
+/// there (its entry is there and not `idle`), and `select_session` and `attach_tui` ask tmux
+/// what the pane's TUI shows.
 const SETTLE_POLL: Duration = Duration::from_millis(100);
 
 /// How much of a reply's body a message quotes.
@@ -150,7 +186,9 @@ pub type Resolver<K, V> = Arc<dyn Fn(&K) -> Result<V, PaneError> + Send + Sync>;
 
 /// The environment the adapter's OpenCode processes, the server and the TUI, start with.
 /// Both are started by tmux (the server by the host adapter's `run`, #802), and both argvs
-/// begin with the one `env` prefix it gives (`ProcessEnv::prefix`).
+/// begin with the `env` prefix it gives (`ProcessEnv::prefix`). For a spec with an agent the
+/// server's prefix is the TUI's plus one pair, `OPENCODE_CONFIG_CONTENT`
+/// (`ProcessEnv::prefix_with`, #642 part 3).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProcessEnv {
     /// Each inherits the tmux server's environment (tmux starts it, so not the adapter's),
@@ -169,21 +207,39 @@ pub enum ProcessEnv {
 }
 
 impl ProcessEnv {
-    /// The `env` prefix of every OpenCode argv the adapter builds, the server's and the
-    /// TUI's: `env -u OPENCODE_DISABLE_TERMINAL_TITLE` under [`ProcessEnv::Inherit`], and
-    /// `env -i K=V ...` with exactly the configured pairs under [`ProcessEnv::Isolated`].
-    /// Nothing of the adapter's own environment goes into it.
+    /// The `env` prefix of the TUI's argv, and of the server's for a spec without an agent:
+    /// [`ProcessEnv::prefix_with`] with no extra pair.
     pub(crate) fn prefix(&self) -> Vec<String> {
+        self.prefix_with(&[])
+    }
+
+    /// The `env` prefix of an OpenCode argv: `env -u OPENCODE_DISABLE_TERMINAL_TITLE` under
+    /// [`ProcessEnv::Inherit`], and `env -i K=V ...` with exactly the configured pairs under
+    /// [`ProcessEnv::Isolated`], then each of `extra` as `K=V`. The extra pairs come after the
+    /// prefix's own words, and `env` applies its assignments in order, so one of them replaces
+    /// a same-named configured pair and a value inherited from the tmux server. Nothing of the
+    /// adapter's own environment goes into it. The server's argv for a spec with an agent is
+    /// the one caller with a pair (`OPENCODE_CONFIG_CONTENT`, #642 part 3).
+    ///
+    /// **Never put a secret here**, the rule of [`ProcessEnv::Isolated`]: every pair goes on
+    /// an argv, which `ps` shows and tmux reports as `#{pane_start_command}`.
+    pub(crate) fn prefix_with(&self, extra: &[(String, String)]) -> Vec<String> {
         let mut prefix = vec!["env".to_owned()];
         match self {
             ProcessEnv::Inherit => prefix.extend(["-u".to_owned(), TITLE_OFF.to_owned()]),
             ProcessEnv::Isolated(vars) => {
                 prefix.push("-i".to_owned());
-                prefix.extend(vars.iter().map(|(key, value)| format!("{key}={value}")));
+                prefix.extend(vars.iter().map(assignment));
             }
         }
+        prefix.extend(extra.iter().map(assignment));
         prefix
     }
+}
+
+/// A pair as `env` takes it: `K=V`.
+fn assignment((key, value): &(String, String)) -> String {
+    format!("{key}={value}")
 }
 
 /// The adapter's bounds.
@@ -281,12 +337,12 @@ impl HarnessPort for OpenCodeHarness {
         server::serve_command(&self.config, port, spec)
     }
 
-    /// Sends nothing (#802 decision 5). A spec without an agent is settled by the argv
-    /// `serve_command` built, which applies none, so the server keeps its own default, and
-    /// the engine's health wait has just seen the server answer. A spec with an agent is
-    /// `agent-unsupported`, failing closed, until #642 part 3 applies and checks the agent.
-    fn verify_serving(&self, _port: u16, spec: &ServeSpec) -> Result<(), PaneError> {
-        server::refuse_an_agent(spec)
+    /// A spec without an agent sends nothing (#802 decision 5): the argv `serve_command` built
+    /// applies none, so the server keeps its own default, and the engine's health wait has
+    /// just seen the server answer. A spec with an agent is checked on the running server,
+    /// `agent-unusable` when it does not run that agent (#642 part 3, `server::verify_serving`).
+    fn verify_serving(&self, port: u16, spec: &ServeSpec) -> Result<(), PaneError> {
+        server::verify_serving(self, port, spec)
     }
 
     fn health(&self, port: u16) -> Result<bool, PaneError> {
@@ -337,6 +393,14 @@ impl HarnessPort for OpenCodeHarness {
     fn shown_session(&self, pane: &PaneId) -> Result<Option<String>, PaneError> {
         attach::shown_session(self, pane)
     }
+
+    fn send_prompt(&self, port: u16, session: &str, text: &str) -> Result<(), PaneError> {
+        prompt::send_prompt(self, port, session, text)
+    }
+
+    fn session_activity(&self, port: u16, session: &str) -> Result<Activity, PaneError> {
+        prompt::session_activity(self, port, session)
+    }
 }
 
 /// A route of OpenCode's API as a message names it: an id stands as `:id`.
@@ -377,6 +441,30 @@ const STATUS: Route = Route {
 const SELECT: Route = Route {
     method: "POST",
     label: "/tui/select-session",
+};
+const GET_CONFIG: Route = Route {
+    method: "GET",
+    label: "/config",
+};
+const GET_AGENT: Route = Route {
+    method: "GET",
+    label: "/agent",
+};
+const PROMPT_ASYNC: Route = Route {
+    method: "POST",
+    label: "/session/:id/prompt_async",
+};
+const GET_QUESTION: Route = Route {
+    method: "GET",
+    label: "/question",
+};
+const GET_PERMISSION: Route = Route {
+    method: "GET",
+    label: "/permission",
+};
+const GET_MESSAGES: Route = Route {
+    method: "GET",
+    label: "/session/:id/message",
 };
 
 /// One port call in flight: the server's port, the method's `op` and its deadline.
@@ -436,14 +524,29 @@ impl Call {
     fn unexpected(&self, route: Route, reply: &Reply, wanted: &str) -> PaneError {
         PaneError::Unavailable {
             what: format!(
-                "{} {} on port {} answered {}, not {wanted}: \"{}\"",
-                route.method,
-                route.label,
-                self.port,
-                reply.status,
+                "{}: \"{}\"",
+                self.answered(route, reply, wanted),
                 excerpt(&reply.body)
             ),
         }
+    }
+
+    /// [`Call::unexpected`] quoting no part of the body: one line naming the route, the port
+    /// and the status only. For the reply to a request that carries what no message may hold
+    /// (a prompt's text, #642 part 3): a server that echoes the request in its error body, a
+    /// validation error quoting its input say, cannot put it in a message.
+    fn unexpected_status(&self, route: Route, reply: &Reply, wanted: &str) -> PaneError {
+        PaneError::Unavailable {
+            what: self.answered(route, reply, wanted),
+        }
+    }
+
+    /// `<method> <route> on port <port> answered <status>, not <wanted>`.
+    fn answered(&self, route: Route, reply: &Reply, wanted: &str) -> String {
+        format!(
+            "{} {} on port {} answered {}, not {wanted}",
+            route.method, route.label, self.port, reply.status
+        )
     }
 }
 
@@ -490,16 +593,35 @@ fn session_reply(call: &Call, path: &str, id: &str) -> Result<(Reply, Value), Pa
     }
 }
 
-/// Poll `GET /session/status` until `id` is absent from it or not `busy`, within `settle`:
-/// an abort is trusted only once it is seen. Still busy at the end is `timeout`.
+/// Poll `GET /session/status` until `id` no longer runs there ([`running`]: its entry is gone
+/// or `idle`, so a session OpenCode is retrying is not settled yet), within `settle`: an abort
+/// is trusted only once it is seen. Still running at the end is `timeout`; a reply that is not
+/// a JSON object is `unavailable`.
 fn settled(call: &Call, id: &str, settle: Duration) -> Result<(), PaneError> {
     poll(settle, call.deadline, call.op, |until| {
         let reply = call.send_by(STATUS, STATUS.label, None, until)?;
-        let status = json_of(&reply)
-            .filter(Value::is_object)
-            .ok_or_else(|| call.unexpected(STATUS, &reply, "an object"))?;
-        Ok((string_at(status.get(id), "type") != Some("busy")).then_some(()))
+        let status =
+            status_object(&reply).ok_or_else(|| call.unexpected(STATUS, &reply, "an object"))?;
+        Ok((!running(&status, id)).then_some(()))
     })
+}
+
+/// A reply of `GET /session/status` as the server's account of its sessions: the JSON object
+/// of a `200` ([`json_of`]), and `None` for anything else, an error status whose body is an
+/// object included. `settled` and `session_activity` read the route only through this and
+/// [`running`], so the crate answers "is this session running?" one way.
+fn status_object(reply: &Reply) -> Option<Value> {
+    json_of(reply).filter(Value::is_object)
+}
+
+/// Whether `status` (a [`status_object`]) says `id` is running a turn: it has an entry for
+/// `id` whose `type` is not `idle`. OpenCode's statuses are `idle`, `retry` and `busy`, and
+/// setting a session `idle` deletes its entry, so no entry is idle (spike line 73), while
+/// `retry` (a turn waiting to ask its provider again) and an entry with no `type` run.
+fn running(status: &Value, id: &str) -> bool {
+    status
+        .get(id)
+        .is_some_and(|entry| string_at(Some(entry), "type") != Some("idle"))
 }
 
 /// The adapter's one poll, for whatever must be seen within [`Timeouts::settle`] (an
@@ -529,10 +651,26 @@ fn poll<T>(
 /// `parentID` is a string is a child session and is left out (ADR-0021's `HarnessPort` note,
 /// fact 5). `None` unless the list is an array of objects that each have a string `id`.
 fn top_level_ids(list: &Value) -> Option<Vec<String>> {
+    ids_where(list, |parent| parent.is_none())
+}
+
+/// The ids of a session list's direct children of `parent`, in the order given: the elements
+/// whose `parentID` is `parent`, the scope `holler-body` gives a session's held questions. A
+/// grandchild is not one. `None`, as for [`top_level_ids`], unless the list is an array of
+/// objects that each have a string `id`.
+fn child_ids(list: &Value, parent: &str) -> Option<Vec<String>> {
+    ids_where(list, |of| of == Some(parent))
+}
+
+/// The ids, in the order given, of a session list's elements whose parent passes `keep`: the
+/// parent is the element's `parentID` when that is a string, else none. The crate's one reading
+/// of a session's `parentID`. `None` unless the list is an array of objects that each have a
+/// string `id`.
+fn ids_where(list: &Value, keep: impl Fn(Option<&str>) -> bool) -> Option<Vec<String>> {
     let mut ids = Vec::new();
     for session in list.as_array()? {
         let id = string_at(Some(session), "id")?;
-        if !session.get("parentID").is_some_and(Value::is_string) {
+        if keep(string_at(Some(session), "parentID")) {
             ids.push(id.to_owned());
         }
     }

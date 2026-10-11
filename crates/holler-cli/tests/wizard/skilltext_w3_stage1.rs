@@ -1,7 +1,7 @@
 //! #786: Stage 1 text: `hub_host` for local-only runs, the `r1c1` default, one grid rule, and the
 //! first-run notes, epic #769.
 //!
-//! Plain text assertions over `agent-skills/setup-wizard/SKILL.md`, `docs/setup-wizard.md` and
+//! Plain text assertions over `agent-skills/herdr-setup/SKILL.md`, `docs/setup-wizard.md` and
 //! `README.md`. Nothing here runs a script or touches a host.
 #![cfg(unix)]
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)] // #786
@@ -29,7 +29,7 @@ fn between(text: &str, start: &str, end: &str) -> String {
 }
 
 fn skill() -> String {
-    flat("agent-skills/setup-wizard/SKILL.md")
+    flat("agent-skills/herdr-setup/SKILL.md")
 }
 
 fn stage(n: u32) -> String {

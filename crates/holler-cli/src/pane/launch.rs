@@ -24,7 +24,7 @@ use holler_pane::profile::{SpecHarness, SpecHerdr, SpecHost};
 use holler_pane::tx_launch::{
     launch, port_of_policy, LaunchRequest, Launched, TxFailure, TxOptions,
 };
-use holler_pane::{Pane, PaneError, PaneName, Ports, Profile, ProfileName, ProfileSpec};
+use holler_pane::{AgentKey, Pane, PaneError, PaneName, Ports, Profile, ProfileName, ProfileSpec};
 use serde::Serialize;
 
 use super::args::{ProfileOpt, SpecFlags, SpecOnly, SpecValues};
@@ -51,8 +51,9 @@ use crate::output::{emit, emit_error, ErrorBody, VerbCtx};
 /// run sets P's spec for the pane in the same transaction (a failed run puts P's specs back).
 /// `--spec-only` sets P's spec and changes nothing live. The one port policy is fixed:PORT.
 ///
-/// `--format=json` prints one envelope whose data is `{"verb", "pane", "profile", "spec_only"}`:
-/// the stored record, the profile's name, slug and generation, or null.
+/// `--format=json` prints one envelope whose data is
+/// `{"verb", "pane", "profile", "spec_only", "agent"}`: the stored record, the profile's name,
+/// slug and generation, or null, and the OpenCode agent the record names, or null.
 #[derive(Args, Debug)]
 pub struct PaneLaunch {
     /// The pane's name (also its tmux session name), e.g. demo-c1r1.
@@ -350,6 +351,10 @@ struct Report {
     /// The profile as the run stored it; `null` without `--profile`.
     profile: Option<ProfileRef>,
     spec_only: bool,
+    /// The OpenCode agent the stored record names, read from that record and never from the
+    /// request's spec, so it cannot disagree with `pane.opencode_agent`; `null` for a pane
+    /// with none, and with `--spec-only`.
+    agent: Option<AgentKey>,
 }
 
 /// A profile in the data: its name, slug and generation after the run.
@@ -365,6 +370,10 @@ impl Report {
         Self {
             verb: verb.as_str(),
             spec_only: launched.pane.is_none(),
+            agent: launched
+                .pane
+                .as_ref()
+                .and_then(|pane| pane.opencode_agent.clone()),
             pane: launched.pane,
             profile: launched.profile.map(|profile| ProfileRef {
                 name: profile.name,
@@ -376,6 +385,9 @@ impl Report {
 
     /// The text form, one line. A stored string goes through `list::text_value`, so no control
     /// sequence reaches the terminal; a profile name has no control character and is quoted.
+    /// The agent the record names follows the harness port as `, agent KEY`, and a pane with
+    /// none prints no clause; through `text_value` too, a key `-` (a valid key, and the line's
+    /// empty value) prints quoted, never as "no agent".
     fn text(&self, verb: Verb, name: &PaneName) -> String {
         match (&self.pane, &self.profile) {
             (Some(pane), profile) => {
@@ -392,6 +404,9 @@ impl Report {
                     optional_text(pane.session_of_record.as_deref()),
                     pane.harness.port
                 );
+                if let Some(agent) = &self.agent {
+                    line.push_str(&format!(", agent {}", text_value(agent.as_str())));
+                }
                 if let Some(profile) = profile {
                     line.push_str(&format!(
                         "; profile {} is at generation {}",

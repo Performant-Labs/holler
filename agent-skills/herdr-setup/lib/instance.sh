@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# instance.sh - validate and resolve the `[instance]` table of a setup-wizard sessions.toml.
+# instance.sh - validate and resolve the `[instance]` table of a herdr-setup sessions.toml.
 #
 # Usage: instance.sh <sessions.toml>
 #
