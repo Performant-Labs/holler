@@ -1,9 +1,4 @@
-#![allow(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::panic,
-    clippy::unreachable
-)] // #188
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable)] // #188
 //! `crash_mid_turn_is_error_not_hang` (issue #188's RED list), split into its
 //! own test binary/OS process, on a multi-thread tokio runtime.
 //!

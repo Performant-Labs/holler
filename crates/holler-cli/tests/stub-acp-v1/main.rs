@@ -1,10 +1,4 @@
-#![allow(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::panic,
-    clippy::unreachable,
-    dead_code
-)] // #362
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable, dead_code)] // #362
 //! `stub-acp-v1` — a minimal, deterministic ACP **v1** agent stub (issue
 //! #362's v1-compatibility fallback).
 //!
@@ -111,12 +105,8 @@ fn parse_args() -> Config {
             "--fail-session-new" => cfg.fail_session_new = value().and_then(|v| v.parse().ok()),
             "--error-after-auth" => cfg.error_after_auth = value().and_then(|v| v.parse().ok()),
             "--flood" => cfg.flood = true,
-            "--auth-delay-ms" => {
-                cfg.auth_delay_ms = value().and_then(|v| v.parse().ok()).unwrap_or(0)
-            }
-            "--new-delay-ms" => {
-                cfg.new_delay_ms = value().and_then(|v| v.parse().ok()).unwrap_or(0)
-            }
+            "--auth-delay-ms" => cfg.auth_delay_ms = value().and_then(|v| v.parse().ok()).unwrap_or(0),
+            "--new-delay-ms" => cfg.new_delay_ms = value().and_then(|v| v.parse().ok()).unwrap_or(0),
             // Unknown / positional args are ignored.
             _ => {}
         }
@@ -208,17 +198,8 @@ impl AuthLog {
 }
 
 /// `authenticate` (#439): log the method id, then accept or reject per flags.
-fn authenticate(
-    cfg: &Config,
-    log: &mut AuthLog,
-    msg: &Value,
-    id: Option<&Value>,
-    authenticated: &mut bool,
-) {
-    let method_id = msg
-        .pointer("/params/methodId")
-        .and_then(Value::as_str)
-        .unwrap_or_default();
+fn authenticate(cfg: &Config, log: &mut AuthLog, msg: &Value, id: Option<&Value>, authenticated: &mut bool) {
+    let method_id = msg.pointer("/params/methodId").and_then(Value::as_str).unwrap_or_default();
     log.line(&format!("authenticate {method_id}"));
     if cfg.auth_delay_ms > 0 {
         std::thread::sleep(std::time::Duration::from_millis(cfg.auth_delay_ms));
@@ -231,19 +212,9 @@ fn authenticate(
     if cfg.flood {
         respond_error(id, -32603, &"Q".repeat(5000), Some(hostile_data()));
     } else if cfg.reject_auth {
-        respond_error(
-            id,
-            -32603,
-            "stub rejected authenticate",
-            Some(hostile_data()),
-        );
+        respond_error(id, -32603, "stub rejected authenticate", Some(hostile_data()));
     } else if !env_ok {
-        respond_error(
-            id,
-            -32602,
-            "stub credential missing from environment",
-            Some(hostile_data()),
-        );
+        respond_error(id, -32602, "stub credential missing from environment", Some(hostile_data()));
     } else if method_id != "stub-key" {
         respond_error(id, -32602, "stub unknown auth method", Some(hostile_data()));
     } else {
@@ -277,10 +248,7 @@ fn session_new(cfg: &Config, log: &mut AuthLog, id: Option<&Value>, authenticate
 
 fn main() {
     let cfg = parse_args();
-    let mut log = AuthLog {
-        path: cfg.auth_log.clone(),
-        file: None,
-    };
+    let mut log = AuthLog { path: cfg.auth_log.clone(), file: None };
     let mut authenticated = false;
     let stdin = std::io::stdin();
     let reader = BufReader::new(stdin.lock());
@@ -289,20 +257,13 @@ fn main() {
         if line.trim().is_empty() {
             continue;
         }
-        let Ok(msg) = serde_json::from_str::<Value>(&line) else {
-            continue;
-        };
-        let method = msg
-            .get("method")
-            .and_then(Value::as_str)
-            .unwrap_or_default();
+        let Ok(msg) = serde_json::from_str::<Value>(&line) else { continue };
+        let method = msg.get("method").and_then(Value::as_str).unwrap_or_default();
         let id = msg.get("id").cloned();
 
         match method {
             "initialize" => {
-                let version = msg
-                    .pointer("/params/protocolVersion")
-                    .and_then(Value::as_i64);
+                let version = msg.pointer("/params/protocolVersion").and_then(Value::as_i64);
                 log.on_initialize(version);
                 if let Some(id) = &id {
                     // Every real ACP peer's own `initialize` result (see

@@ -1,10 +1,4 @@
-#![allow(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::panic,
-    clippy::unreachable,
-    dead_code
-)] // #182
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable, dead_code)] // #182
 //! `holler body run` — the connection loop (issue #182): authenticate,
 //! hello, presence heartbeat, liveness/reconnect, detach, and the hub-side
 //! `hub token ping` companion. Real subprocesses, real loopback sockets — no
@@ -81,16 +75,7 @@ fn join_fresh(state: &StateDir, ws_url: &str, label: &str) -> String {
     let hub_key = support::hub_pubkey(state);
     let (code, _, stderr) = run(
         state,
-        &[
-            "body",
-            "join",
-            "--server",
-            ws_url,
-            "--token",
-            &format!("{token_id}:{secret}"),
-            "--hub-key",
-            &hub_key,
-        ],
+        &["body", "join", "--server", ws_url, "--token", &format!("{token_id}:{secret}"), "--hub-key", &hub_key],
     );
     assert_eq!(code, 0, "body join must exit 0; stderr: {stderr}");
     token_id
@@ -115,22 +100,14 @@ fn run_authenticates_and_hub_status_shows_one_client() {
     join_fresh(&state, &hub.ws_url(), "kiwi");
 
     let body = spawn_run(&state);
-    let connected = wait_for(READY, || {
-        (conn_state(&state).as_deref() == Some("connected")).then_some(())
-    });
-    assert!(
-        connected.is_some(),
-        "body run must reach `connected` within {READY:?}"
-    );
+    let connected = wait_for(READY, || (conn_state(&state).as_deref() == Some("connected")).then_some(()));
+    assert!(connected.is_some(), "body run must reach `connected` within {READY:?}");
 
     let clients = wait_for(READY, || {
         let doc = support::hub_status_json(&state);
         (doc.get("clients").and_then(|v| v.as_u64()) == Some(1)).then_some(())
     });
-    assert!(
-        clients.is_some(),
-        "hub status must show 1 client once the body is live"
-    );
+    assert!(clients.is_some(), "hub status must show 1 client once the body is live");
 
     body.stop(&state, Duration::from_secs(5));
     hub.stop(Duration::from_secs(5));
@@ -153,20 +130,11 @@ fn token_ping_returns_rtt() {
     assert!(ready.is_some(), "the body must be live before pinging it");
 
     let (code, stdout, stderr) = run(&state, &["--json", "hub", "token", "ping", &token_id]);
-    assert_eq!(
-        code, 0,
-        "ping of a live token must exit 0; stderr: {stderr}"
-    );
+    assert_eq!(code, 0, "ping of a live token must exit 0; stderr: {stderr}");
     let doc: Value = serde_json::from_str(&stdout).expect("ping --json is JSON");
     assert_eq!(doc["state"].as_str(), Some("valid"));
-    assert!(
-        doc["hostname"].as_str().is_some(),
-        "ping reports the body's hostname: {doc}"
-    );
-    assert!(
-        doc["rtt_ms"].as_u64().is_some(),
-        "ping reports an rtt_ms: {doc}"
-    );
+    assert!(doc["hostname"].as_str().is_some(), "ping reports the body's hostname: {doc}");
+    assert!(doc["rtt_ms"].as_u64().is_some(), "ping reports an rtt_ms: {doc}");
 
     body.stop(&state, Duration::from_secs(5));
     hub.stop(Duration::from_secs(5));
@@ -181,13 +149,8 @@ fn second_run_refused_exit_3() {
     join_fresh(&state, &hub.ws_url(), "kiwi");
     let body = spawn_run(&state);
 
-    let connected = wait_for(READY, || {
-        (conn_state(&state).as_deref() == Some("connected")).then_some(())
-    });
-    assert!(
-        connected.is_some(),
-        "the first run must connect before the second is attempted"
-    );
+    let connected = wait_for(READY, || (conn_state(&state).as_deref() == Some("connected")).then_some(()));
+    assert!(connected.is_some(), "the first run must connect before the second is attempted");
 
     let config = support::write_sessions_toml(&state, &[]);
     let out = holler_cmd(&state)
@@ -230,39 +193,21 @@ fn crashed_run_lock_reclaimed() {
     // than proving `second` ever connected. `hub status`'s `clients` count is
     // hub-side truth: it can only read 1 while a socket is actually live.
     let clients_1 = wait_for(READY, || {
-        (support::hub_status_json(&state)
-            .get("clients")
-            .and_then(|v| v.as_u64())
-            == Some(1))
-        .then_some(())
+        (support::hub_status_json(&state).get("clients").and_then(|v| v.as_u64()) == Some(1)).then_some(())
     });
-    assert!(
-        clients_1.is_some(),
-        "the first run must connect before it is crashed"
-    );
+    assert!(clients_1.is_some(), "the first run must connect before it is crashed");
 
     // SIGKILL, not SIGTERM: a crash gets no graceful-shutdown path at all —
     // the flock's release is entirely the OS's doing on process death.
     kill_tree(&mut first);
     let clients_0 = wait_for(READY, || {
-        (support::hub_status_json(&state)
-            .get("clients")
-            .and_then(|v| v.as_u64())
-            == Some(0))
-        .then_some(())
+        (support::hub_status_json(&state).get("clients").and_then(|v| v.as_u64()) == Some(0)).then_some(())
     });
-    assert!(
-        clients_0.is_some(),
-        "the hub must notice the crashed socket"
-    );
+    assert!(clients_0.is_some(), "the hub must notice the crashed socket");
 
     let mut second = spawn_run_raw(&state);
     let clients_1_again = wait_for(READY, || {
-        (support::hub_status_json(&state)
-            .get("clients")
-            .and_then(|v| v.as_u64())
-            == Some(1))
-        .then_some(())
+        (support::hub_status_json(&state).get("clients").and_then(|v| v.as_u64()) == Some(1)).then_some(())
     });
     assert!(
         clients_1_again.is_some(),
@@ -303,10 +248,7 @@ fn detach_closes_live_run_and_hub_client_count_drops_to_0() {
         let doc = support::hub_status_json(&state);
         (doc.get("clients").and_then(|v| v.as_u64()) == Some(1)).then_some(())
     });
-    assert!(
-        ready.is_some(),
-        "the body must be live before it is detached"
-    );
+    assert!(ready.is_some(), "the body must be live before it is detached");
 
     // `Body::stop` runs `holler body detach` then waits for the child to
     // exit — exactly the live-detach path issue #182 adds to `body detach`.
@@ -316,10 +258,7 @@ fn detach_closes_live_run_and_hub_client_count_drops_to_0() {
         let doc = support::hub_status_json(&state);
         (doc.get("clients").and_then(|v| v.as_u64()) == Some(0)).then_some(())
     });
-    assert!(
-        dropped.is_some(),
-        "hub status must show 0 clients once the body detaches"
-    );
+    assert!(dropped.is_some(), "hub status must show 0 clients once the body detaches");
 
     hub.stop(Duration::from_secs(5));
 }
@@ -351,11 +290,7 @@ fn revoked_token_still_fails_closed_with_32002() {
         .expect("spawn body run against a revoked credential")
         .wait_with_output()
         .expect("wait on body run");
-    assert_eq!(
-        out.status.code(),
-        Some(1),
-        "a revoked credential is exit 1, not a retry loop"
-    );
+    assert_eq!(out.status.code(), Some(1), "a revoked credential is exit 1, not a retry loop");
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
         stderr.contains("authentication failed"),
@@ -381,28 +316,12 @@ fn body_refuses_connect_on_hub_key_mismatch() {
     // the hub's real one) — this never touches the wire, so the join itself
     // still succeeds (issue #322: the pin is enforced on connect, not here).
     let wrong_key = "ab".repeat(32);
-    assert_ne!(
-        wrong_key,
-        support::hub_pubkey(&state),
-        "the wrong key must not coincidentally be the real one"
-    );
+    assert_ne!(wrong_key, support::hub_pubkey(&state), "the wrong key must not coincidentally be the real one");
     let (code, _, stderr) = run(
         &state,
-        &[
-            "body",
-            "join",
-            "--server",
-            &ws_url,
-            "--token",
-            &format!("{token_id}:{secret}"),
-            "--hub-key",
-            &wrong_key,
-        ],
+        &["body", "join", "--server", &ws_url, "--token", &format!("{token_id}:{secret}"), "--hub-key", &wrong_key],
     );
-    assert_eq!(
-        code, 0,
-        "body join with a mistaken (but well-formed) --hub-key still succeeds; stderr: {stderr}"
-    );
+    assert_eq!(code, 0, "body join with a mistaken (but well-formed) --hub-key still succeeds; stderr: {stderr}");
 
     let config = support::write_sessions_toml(&state, &[]);
     let out = holler_cmd(&state)
@@ -416,16 +335,10 @@ fn body_refuses_connect_on_hub_key_mismatch() {
         .expect("spawn body run against a pinned-but-wrong hub key")
         .wait_with_output()
         .expect("wait on body run");
-    assert_eq!(
-        out.status.code(),
-        Some(1),
-        "a hub key mismatch is exit 1, not a retry loop"
-    );
+    assert_eq!(out.status.code(), Some(1), "a hub key mismatch is exit 1, not a retry loop");
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        stderr.contains("hub public key mismatch")
-            || stderr.contains("hub_pubkey")
-            || stderr.contains("mismatch"),
+        stderr.contains("hub public key mismatch") || stderr.contains("hub_pubkey") || stderr.contains("mismatch"),
         "stderr names the hub-key mismatch: {stderr}"
     );
 
@@ -444,15 +357,9 @@ fn body_refuses_connect_on_hub_key_mismatch() {
 /// `wait_with_output` calls (this file's established style — no
 /// `#[tokio::test]` elsewhere in it).
 fn spawn_fake_hub_that_refuses_the_protocol_version() -> (u16, std::thread::JoinHandle<()>) {
-    let listener =
-        std::net::TcpListener::bind("127.0.0.1:0").expect("bind the fake hub's listener");
-    let port = listener
-        .local_addr()
-        .expect("the fake hub's bound local addr")
-        .port();
-    listener
-        .set_nonblocking(true)
-        .expect("the fake hub's listener must be nonblocking for Tokio");
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind the fake hub's listener");
+    let port = listener.local_addr().expect("the fake hub's bound local addr").port();
+    listener.set_nonblocking(true).expect("the fake hub's listener must be nonblocking for Tokio");
 
     let handle = std::thread::spawn(move || {
         let rt = tokio::runtime::Runtime::new().expect("build a Tokio runtime for the fake hub");
@@ -519,21 +426,9 @@ fn body_refuses_connect_on_hub_protocol_mismatch() {
 
     let (code, _, stderr) = run(
         &state,
-        &[
-            "body",
-            "join",
-            "--server",
-            &ws_url,
-            "--token",
-            "tok_fake0:deadbeefcafe",
-            "--hub-key",
-            &fake_hub_key,
-        ],
+        &["body", "join", "--server", &ws_url, "--token", "tok_fake0:deadbeefcafe", "--hub-key", &fake_hub_key],
     );
-    assert_eq!(
-        code, 0,
-        "body join against the fake hub must still succeed; stderr: {stderr}"
-    );
+    assert_eq!(code, 0, "body join against the fake hub must still succeed; stderr: {stderr}");
 
     let config = support::write_sessions_toml(&state, &[]);
     let out = holler_cmd(&state)
@@ -547,21 +442,12 @@ fn body_refuses_connect_on_hub_protocol_mismatch() {
         .expect("spawn body run against a hub that refuses this body's protocol version")
         .wait_with_output()
         .expect("wait on body run");
-    assert_eq!(
-        out.status.code(),
-        Some(1),
-        "a protocol-version refusal is exit 1, not a retry loop"
-    );
+    assert_eq!(out.status.code(), Some(1), "a protocol-version refusal is exit 1, not a retry loop");
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(
-        stderr.contains("authentication failed"),
-        "stderr names the auth failure: {stderr}"
-    );
+    assert!(stderr.contains("authentication failed"), "stderr names the auth failure: {stderr}");
     assert!(
         stderr.to_lowercase().contains("protocol")
-            && (stderr.contains("body join")
-                || stderr.to_lowercase().contains("re-pair")
-                || stderr.to_lowercase().contains("upgrade")),
+            && (stderr.contains("body join") || stderr.to_lowercase().contains("re-pair") || stderr.to_lowercase().contains("upgrade")),
         "stderr must give a clear re-pair path, not a generic error: {stderr}"
     );
 
@@ -637,23 +523,12 @@ fn hub_restart_is_recovered_by_reconnect() {
     let mut cmd = holler_cmd(&state);
     cmd.env("HOLLER_HEARTBEAT_INTERVAL_MS", "300");
     let config = support::write_sessions_toml(&state, &[]);
-    cmd.arg("body")
-        .arg("run")
-        .arg("--config")
-        .arg(&config)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
+    cmd.arg("body").arg("run").arg("--config").arg(&config).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
     make_own_process_group(&mut cmd);
     let mut body = cmd.spawn().expect("spawn body run");
 
-    let connected = wait_for(READY, || {
-        (conn_state(&state).as_deref() == Some("connected")).then_some(())
-    });
-    assert!(
-        connected.is_some(),
-        "must connect to the first hub instance"
-    );
+    let connected = wait_for(READY, || (conn_state(&state).as_deref() == Some("connected")).then_some(()));
+    assert!(connected.is_some(), "must connect to the first hub instance");
 
     kill_tree(&mut hub);
     let mut hub2 = start_hub_at(&state, addr);
@@ -661,10 +536,7 @@ fn hub_restart_is_recovered_by_reconnect() {
     let reconnected = wait_for(Duration::from_secs(35), || {
         (conn_state(&state).as_deref() == Some("connected")).then_some(())
     });
-    assert!(
-        reconnected.is_some(),
-        "must reconnect to the restarted hub within 35s"
-    );
+    assert!(reconnected.is_some(), "must reconnect to the restarted hub within 35s");
 
     kill_tree(&mut body);
     kill_tree(&mut hub2);
@@ -734,10 +606,7 @@ fn fresh_hello_and_presence_on_every_reconnect() {
         let reconnected = wait_for(Duration::from_secs(35), || {
             (connected_count.load(std::sync::atomic::Ordering::SeqCst) > n_before).then_some(())
         });
-        assert!(
-            reconnected.is_some(),
-            "must reconnect (and re-hello) after each restart"
-        );
+        assert!(reconnected.is_some(), "must reconnect (and re-hello) after each restart");
     }
 
     assert_eq!(

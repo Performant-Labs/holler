@@ -40,12 +40,7 @@ pub fn now_millis() -> i64 {
 }
 
 #[cfg(test)]
-#[allow(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::panic,
-    clippy::unreachable
-)] // #207
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable)] // #207
 mod tests {
     use super::*;
 

@@ -71,10 +71,7 @@ impl World {
         write_exec(&bin.join("holler"), FAKE_HOLLER);
         write_exec(&bin.join("opencode"), FAKE_OPENCODE);
         write_exec(&bin.join("tailscale"), FAKE_TAILSCALE);
-        World {
-            root,
-            pids: Default::default(),
-        }
+        World { root, pids: Default::default() }
     }
 
     fn state(&self, name: &str) -> PathBuf {
@@ -139,10 +136,7 @@ impl Drop for World {
     fn drop(&mut self) {
         for pid in self.pids.borrow().iter() {
             // Only pids this test started and recorded.
-            let _ = Command::new("kill")
-                .arg(pid.to_string())
-                .stderr(Stdio::null())
-                .status();
+            let _ = Command::new("kill").arg(pid.to_string()).stderr(Stdio::null()).status();
         }
     }
 }
@@ -158,12 +152,7 @@ fn code(o: &Output) -> i32 {
 /// The ledger's `list` output, one `Vec<String>` of tab-separated fields per entry.
 fn list(w: &World, state: &Path) -> Vec<Vec<String>> {
     let o = w.ledger(state, &["list"]);
-    assert_eq!(
-        code(&o),
-        0,
-        "list failed: {}",
-        String::from_utf8_lossy(&o.stderr)
-    );
+    assert_eq!(code(&o), 0, "list failed: {}", String::from_utf8_lossy(&o.stderr));
     text(&o)
         .lines()
         .map(|l| l.split('\t').map(str::to_string).collect())
@@ -198,10 +187,7 @@ fn kill_and_wait(pid: u32) {
     let pid = pid.to_string();
     assert!(Command::new("kill").arg(&pid).status().unwrap().success());
     for _ in 0..100 {
-        let ps = Command::new("ps")
-            .args(["-o", "stat=", "-p", &pid])
-            .output()
-            .unwrap();
+        let ps = Command::new("ps").args(["-o", "stat=", "-p", &pid]).output().unwrap();
         let stat = text(&ps);
         if stat.trim().is_empty() || stat.trim().starts_with('Z') {
             return;
@@ -224,18 +210,13 @@ fn all_live(rows: &[Vec<String>]) -> bool {
 }
 
 fn has_row(rows: &[Vec<String>], pid: u32, state: &str) -> bool {
-    rows.iter()
-        .any(|r| r[0] == pid.to_string() && r[1] == state)
+    rows.iter().any(|r| r[0] == pid.to_string() && r[1] == state)
 }
 
 #[test]
 fn ledger_script_exists_and_parses() {
     assert!(ledger_sh().is_file(), "ledger.sh is missing");
-    let o = Command::new("bash")
-        .arg("-n")
-        .arg(ledger_sh())
-        .output()
-        .unwrap();
+    let o = Command::new("bash").arg("-n").arg(ledger_sh()).output().unwrap();
     assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
 }
 
@@ -261,10 +242,7 @@ fn assert_contract_fields(body: &str, pid: u32) {
     assert!(body.contains("session = \"alpha\""));
     assert!(body.contains("cmd = \"sleep 601\""));
     // The recorded start time is exactly `LC_ALL=C ps -o lstart= -p <pid>`, trimmed.
-    assert!(
-        body.contains(&format!("started = \"{}\"", ps_lstart(pid))),
-        "{body}"
-    );
+    assert!(body.contains(&format!("started = \"{}\"", ps_lstart(pid))), "{body}");
 }
 
 #[test]
@@ -276,24 +254,14 @@ fn record_writes_the_contract_fields_atomically_with_mode_0600() {
     assert_eq!(code(&o), 0, "{}", String::from_utf8_lossy(&o.stderr));
 
     let file = st.join(LEDGER_REL);
-    assert_eq!(
-        fs::metadata(&file).unwrap().permissions().mode() & 0o777,
-        0o600
-    );
+    assert_eq!(fs::metadata(&file).unwrap().permissions().mode() & 0o777, 0o600);
     assert_contract_fields(&fs::read_to_string(&file).unwrap(), pid);
     // No temp file is left behind by the atomic write, and no lock.
     assert_eq!(dir_entries(&st), vec!["herdr".to_string()]);
     assert_eq!(dir_entries(&st.join("herdr")), vec!["setup".to_string()]);
-    assert_eq!(
-        dir_entries(&st.join("herdr/setup")),
-        vec!["wizard-ledger.toml".to_string()]
-    );
+    assert_eq!(dir_entries(&st.join("herdr/setup")), vec!["wizard-ledger.toml".to_string()]);
     for d in ["herdr", "herdr/setup"] {
-        assert_eq!(
-            fs::metadata(st.join(d)).unwrap().permissions().mode() & 0o777,
-            0o700,
-            "{d}"
-        );
+        assert_eq!(fs::metadata(st.join(d)).unwrap().permissions().mode() & 0o777, 0o700, "{d}");
     }
     // Nothing is written at the old path.
     assert!(!st.join("wizard-ledger.toml").exists());
@@ -347,10 +315,7 @@ fn ledger_lists_exactly_what_was_recorded_and_never_a_foreign_process() {
     let mine1 = w.sleeper("603");
     let mine2 = w.sleeper("604");
     let foreign = w.sleeper("605");
-    assert_eq!(
-        code(&record(&w, &st, mine1, "backend", "4", Some("alpha"))),
-        0
-    );
+    assert_eq!(code(&record(&w, &st, mine1, "backend", "4", Some("alpha"))), 0);
     assert_eq!(code(&record(&w, &st, mine2, "hub", "6", None)), 0);
 
     let rows = list(&w, &st);
@@ -380,15 +345,7 @@ fn recording_a_pid_that_does_not_exist_fails_and_writes_nothing() {
     // A pid that cannot exist: above any kernel's pid_max.
     let o = w.ledger(
         &st,
-        &[
-            "record",
-            "--pid",
-            "999999999",
-            "--role",
-            "backend",
-            "--stage",
-            "4",
-        ],
+        &["record", "--pid", "999999999", "--role", "backend", "--stage", "4"],
     );
     assert_eq!(code(&o), 1);
     assert!(!st.join(LEDGER_REL).exists());
@@ -397,10 +354,7 @@ fn recording_a_pid_that_does_not_exist_fails_and_writes_nothing() {
 fn assert_usage_error(w: &World, st: &Path, args: &[&str]) {
     let c = code(&w.ledger(st, args));
     assert_ne!(c, 0, "{args:?}");
-    assert!(
-        c != 1 && c != 2,
-        "usage errors must not look like stale/foreign: {args:?}"
-    );
+    assert!(c != 1 && c != 2, "usage errors must not look like stale/foreign: {args:?}");
 }
 
 #[test]
@@ -408,23 +362,9 @@ fn record_rejects_bad_arguments() {
     let w = World::new();
     let st = w.state("a");
     let pid = w.sleeper("606").to_string();
-    assert_usage_error(
-        &w,
-        &st,
-        &["record", "--pid", "x", "--role", "hub", "--stage", "6"],
-    );
-    assert_usage_error(
-        &w,
-        &st,
-        &[
-            "record", "--pid", &pid, "--role", "nonsense", "--stage", "6",
-        ],
-    );
-    assert_usage_error(
-        &w,
-        &st,
-        &["record", "--pid", &pid, "--role", "hub", "--stage", "3"],
-    );
+    assert_usage_error(&w, &st, &["record", "--pid", "x", "--role", "hub", "--stage", "6"]);
+    assert_usage_error(&w, &st, &["record", "--pid", &pid, "--role", "nonsense", "--stage", "6"]);
+    assert_usage_error(&w, &st, &["record", "--pid", &pid, "--role", "hub", "--stage", "3"]);
     assert_usage_error(&w, &st, &["record", "--pid", &pid, "--role", "hub"]);
     assert_usage_error(&w, &st, &["frobnicate"]);
     assert!(!st.join(LEDGER_REL).exists());
@@ -435,10 +375,7 @@ fn a_dead_recorded_process_is_stale_and_never_live() {
     let w = World::new();
     let st = w.state("a");
     let pid = w.sleeper("607");
-    assert_eq!(
-        code(&record(&w, &st, pid, "backend", "4", Some("alpha"))),
-        0
-    );
+    assert_eq!(code(&record(&w, &st, pid, "backend", "4", Some("alpha"))), 0);
     assert_eq!(owns(&w, &st, pid), 0);
 
     kill_and_wait(pid);
@@ -475,26 +412,14 @@ fn a_reused_pid_with_another_start_time_or_command_is_stale() {
     fs::create_dir_all(file.parent().unwrap()).unwrap();
 
     fs::write(&file, entry(&started, "opencode --port 47001")).unwrap();
-    assert_eq!(
-        code(&w.ledger(&st, &["owns", &live.to_string()])),
-        1,
-        "different command"
-    );
+    assert_eq!(code(&w.ledger(&st, &["owns", &live.to_string()])), 1, "different command");
     assert_eq!(list(&w, &st)[0][1], "stale");
 
     fs::write(&file, entry("Thu Jan  1 00:00:00 1970", "sleep 608")).unwrap();
-    assert_eq!(
-        code(&w.ledger(&st, &["owns", &live.to_string()])),
-        1,
-        "different start time"
-    );
+    assert_eq!(code(&w.ledger(&st, &["owns", &live.to_string()])), 1, "different start time");
 
     fs::write(&file, entry(&started, "sleep 608")).unwrap();
-    assert_eq!(
-        code(&w.ledger(&st, &["owns", &live.to_string()])),
-        0,
-        "matching entry is live"
-    );
+    assert_eq!(code(&w.ledger(&st, &["owns", &live.to_string()])), 0, "matching entry is live");
 }
 
 #[test]
@@ -502,14 +427,8 @@ fn recording_the_same_pid_twice_keeps_one_entry() {
     let w = World::new();
     let st = w.state("a");
     let pid = w.sleeper("609");
-    assert_eq!(
-        code(&record(&w, &st, pid, "backend", "4", Some("alpha"))),
-        0
-    );
-    assert_eq!(
-        code(&record(&w, &st, pid, "backend", "4", Some("alpha"))),
-        0
-    );
+    assert_eq!(code(&record(&w, &st, pid, "backend", "4", Some("alpha"))), 0);
+    assert_eq!(code(&record(&w, &st, pid, "backend", "4", Some("alpha"))), 0);
     assert_eq!(list(&w, &st).len(), 1);
 }
 
@@ -626,17 +545,13 @@ fn start_instance(w: &World, st: &Path, name: &str, hub: &str, serve: &str, back
         .output()
         .unwrap();
     assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
-    list(w, st)
-        .iter()
-        .for_each(|row| w.track(row[0].parse().unwrap()));
+    list(w, st).iter().for_each(|row| w.track(row[0].parse().unwrap()));
 }
 
 const JOIN_ARGS: &str = "--server wss://loopback.example.ts.net --hub-key k";
 
 fn roster(w: &World, st: &Path) -> String {
-    text(&w.bash(st, "holler roster").output().unwrap())
-        .trim()
-        .to_string()
+    text(&w.bash(st, "holler roster").output().unwrap()).trim().to_string()
 }
 
 fn recorded_arg(st: &Path, file: &str) -> String {
@@ -720,18 +635,11 @@ fn a_ledger_at_the_old_path_is_not_read_and_the_new_one_is_the_only_one_written(
     .unwrap();
     assert_eq!(code(&w.ledger(&st, &["owns", &pid.to_string()])), 2);
     assert!(list(&w, &st).is_empty());
-    assert!(
-        !st.join("herdr").exists(),
-        "reading must not create folders"
-    );
+    assert!(!st.join("herdr").exists(), "reading must not create folders");
 
     let before = fs::read_to_string(&old).unwrap();
     assert_eq!(code(&record(&w, &st, pid, "backend", "4", None)), 0);
-    assert_eq!(
-        fs::read_to_string(&old).unwrap(),
-        before,
-        "old ledger untouched"
-    );
+    assert_eq!(fs::read_to_string(&old).unwrap(), before, "old ledger untouched");
     assert!(st.join(LEDGER_REL).is_file());
     assert_eq!(code(&w.ledger(&st, &["owns", &pid.to_string()])), 0);
 }

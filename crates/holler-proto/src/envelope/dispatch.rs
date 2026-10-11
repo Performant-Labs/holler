@@ -27,7 +27,8 @@ where
     let params = env.params().cloned();
     match params {
         Some(p) => serde_json::from_value(p).map_err(|_| reason()),
-        None => serde_json::from_value(serde_json::Value::Object(serde_json::Map::new()))
-            .map_err(|_| reason()),
+        None => {
+            serde_json::from_value(serde_json::Value::Object(serde_json::Map::new())).map_err(|_| reason())
+        }
     }
 }

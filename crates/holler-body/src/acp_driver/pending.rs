@@ -194,13 +194,7 @@ pub(super) fn permission_fields(
     let options: Vec<(String, String, Option<PermissionKind>)> = request
         .options
         .iter()
-        .map(|o| {
-            (
-                o.option_id.0.to_string(),
-                o.name.clone(),
-                permission_kind(&o.kind),
-            )
-        })
+        .map(|o| (o.option_id.0.to_string(), o.name.clone(), permission_kind(&o.kind)))
         .collect();
     if options.is_empty() {
         return (
@@ -229,13 +223,7 @@ pub(super) fn permission_fields_v1(
     let options: Vec<(String, String, Option<PermissionKind>)> = request
         .options
         .iter()
-        .map(|o| {
-            (
-                o.option_id.0.to_string(),
-                o.name.clone(),
-                permission_kind_v1(&o.kind),
-            )
-        })
+        .map(|o| (o.option_id.0.to_string(), o.name.clone(), permission_kind_v1(&o.kind)))
         .collect();
     if options.is_empty() {
         return (
@@ -333,11 +321,7 @@ pub(super) fn pending_items(block: &PendingBlock) -> Vec<PendingItem> {
         .iter()
         .enumerate()
         .map(|(index, field)| PendingItem {
-            id: if field.name.is_empty() {
-                index.to_string()
-            } else {
-                field.name.clone()
-            },
+            id: if field.name.is_empty() { index.to_string() } else { field.name.clone() },
             kind: block.kind,
             prompt: block.prompt.clone(),
             options: field.options.labels(),
@@ -486,18 +470,9 @@ mod tests {
             resolve_v2(options.clone(), "always").unwrap_err(),
             resolve_v1(options.clone(), "always").unwrap_err(),
         ] {
-            assert!(
-                err.contains("always"),
-                "error must name the shorthand: {err:?}"
-            );
-            assert!(
-                err.contains("Proceed this time"),
-                "error must list the labels: {err:?}"
-            );
-            assert!(
-                err.contains("Stop this time"),
-                "error must list the labels: {err:?}"
-            );
+            assert!(err.contains("always"), "error must name the shorthand: {err:?}");
+            assert!(err.contains("Proceed this time"), "error must list the labels: {err:?}");
+            assert!(err.contains("Stop this time"), "error must list the labels: {err:?}");
         }
     }
 
@@ -586,14 +561,8 @@ mod tests {
             match resolve_v2(options.clone(), choice) {
                 Ok(keys) => assert_eq!(keys, vec![want.to_string()], "choice {choice:?}"),
                 Err(e) => {
-                    assert!(
-                        !e.contains("does not resolve to any of this field's options"),
-                        "{choice:?}: {e}"
-                    );
-                    assert!(
-                        !e.contains("comma-separated choice segment(s)"),
-                        "{choice:?}: {e}"
-                    );
+                    assert!(!e.contains("does not resolve to any of this field's options"), "{choice:?}: {e}");
+                    assert!(!e.contains("comma-separated choice segment(s)"), "{choice:?}: {e}");
                     panic!("{choice:?} must resolve to {want:?}, got: {e}");
                 }
             }
@@ -618,10 +587,7 @@ mod tests {
         let (fields, unsupported) = elicitation_fields(&request);
         assert_eq!(unsupported, None);
         for word in ["once", "always", "reject"] {
-            assert!(
-                resolve_choice(&sets(&fields), word).is_err(),
-                "{word:?} must not resolve"
-            );
+            assert!(resolve_choice(&sets(&fields), word).is_err(), "{word:?} must not resolve");
         }
         assert_eq!(resolve_choice(&sets(&fields), "no"), one("no"));
     }

@@ -13,13 +13,7 @@
 //! [`StateDir`]; readiness is *observed* via [`wait_for`], never guessed with a
 //! blind sleep; long-lived children are spawned in their own process group so
 //! [`kill_tree`] reaps them (and any spawned agents) on drop/panic.
-#![allow(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::panic,
-    clippy::unreachable,
-    dead_code
-)] // #143
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable, dead_code)] // #143
 
 use std::io::{BufRead, Write};
 use std::os::unix::net::UnixStream;
@@ -159,10 +153,7 @@ async fn batch_or_binary_first_frame_is_32600_then_close() {
         .await
         .expect("hub must reject the batch");
     // #145: wire `error.code` is the JSON-RPC number (-32600 for a batch).
-    assert_eq!(
-        err.code, -32600,
-        "a batch is JSON-RPC -32600 invalid_request"
-    );
+    assert_eq!(err.code, -32600, "a batch is JSON-RPC -32600 invalid_request");
     assert_eq!(
         holler_proto::Code::from_jsonrpc(err.code),
         Some(holler_proto::Code::InvalidRequest),
@@ -193,7 +184,8 @@ async fn binary_first_frame_is_32600_then_close() {
         .expect("hub must reject the binary frame");
     // #145: wire `error.code` is the JSON-RPC number (-32600 for a binary frame).
     assert_eq!(
-        err.code, -32600,
+        err.code,
+        -32600,
         "a binary first frame is JSON-RPC -32600 invalid_request"
     );
     assert_eq!(
@@ -226,7 +218,8 @@ async fn garbage_first_frame_is_32700_then_close() {
         .expect("hub must reject the garbage");
     // #145: wire `error.code` is the JSON-RPC number (-32700 for non-JSON).
     assert_eq!(
-        err.code, -32700,
+        err.code,
+        -32700,
         "non-JSON input is JSON-RPC -32700 parse_error"
     );
     assert_eq!(
@@ -313,10 +306,7 @@ fn second_serve_refuses_exit_3() {
         "refusal must name the running hub's pid {holder}; got: {stderr}"
     );
     let on_disk = std::fs::read_to_string(serve_lock(&state)).expect("read serve.lock");
-    assert_eq!(
-        on_disk, holder,
-        "a losing hub must leave the holder's pid in serve.lock"
-    );
+    assert_eq!(on_disk, holder, "a losing hub must leave the holder's pid in serve.lock");
     hub.stop(Duration::from_secs(5));
 }
 
@@ -339,11 +329,7 @@ fn crashed_lock_is_reclaimed() {
     // A fresh hub in the same state dir must start (reclaiming the stale lock).
     let again = Hub::start(&state);
     let on_disk = std::fs::read_to_string(serve_lock(&state)).expect("read serve.lock");
-    assert_eq!(
-        on_disk,
-        again.pid().to_string(),
-        "the reclaiming hub must write exactly its own pid"
-    );
+    assert_eq!(on_disk, again.pid().to_string(), "the reclaiming hub must write exactly its own pid");
     again.stop(Duration::from_secs(5));
 }
 
@@ -549,12 +535,7 @@ async fn serve_without_listen_serves_the_default_loopback_address() {
         }
         Err(log) => panic!("`hub serve` with no --listen must report listening on {DEFAULT_LISTEN}; hub stderr:\n{log}"),
     };
-    assert_eq!(
-        hub.port,
-        41807,
-        "no --listen binds the default port; hub stderr:\n{}",
-        hub.log_text()
-    );
+    assert_eq!(hub.port, 41807, "no --listen binds the default port; hub stderr:\n{}", hub.log_text());
     assert_eq!(hub.ws_url(), format!("ws://{DEFAULT_LISTEN}"));
 
     // The default listener really serves the wire: a non-join first frame is
@@ -565,23 +546,12 @@ async fn serve_without_listen_serves_the_default_loopback_address() {
     ))
     .await
     .expect("send the first frame");
-    let err = next_frame_err(&mut ws)
-        .await
-        .expect("hub must reply with an error frame");
-    assert_eq!(
-        err.code, -32002,
-        "the default listener runs the fail-closed accept path"
-    );
-    assert!(
-        closed_next(&mut ws).await,
-        "hub closes the socket after refusing"
-    );
+    let err = next_frame_err(&mut ws).await.expect("hub must reply with an error frame");
+    assert_eq!(err.code, -32002, "the default listener runs the fail-closed accept path");
+    assert!(closed_next(&mut ws).await, "hub closes the socket after refusing");
 
     assert!(
-        hub.child_mut()
-            .try_wait()
-            .expect("poll the hub child")
-            .is_none(),
+        hub.child_mut().try_wait().expect("poll the hub child").is_none(),
         "the hub must still be running after serving a connection; stderr:\n{}",
         hub.log_text()
     );

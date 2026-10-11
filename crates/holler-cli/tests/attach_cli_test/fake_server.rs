@@ -1,9 +1,4 @@
-#![allow(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::panic,
-    clippy::unreachable
-)] // #196: test assertions
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable)] // #196: test assertions
 
 //! A minimal, hand-rolled fake OpenCode HTTP server for `attach_cli_test.rs`
 //! (issue #196) — just enough of `GET /session` (and `/api/session`) to
@@ -48,20 +43,11 @@ impl FakeServer {
     /// the one that resolves, matching `http_attach_driver`'s own existence
     /// check trying bare first).
     pub fn start() -> Self {
-        let listener =
-            TcpListener::bind("127.0.0.1:0").expect("fake server must bind a loopback port");
-        let addr = listener
-            .local_addr()
-            .expect("bound listener has a local addr");
+        let listener = TcpListener::bind("127.0.0.1:0").expect("fake server must bind a loopback port");
+        let addr = listener.local_addr().expect("bound listener has a local addr");
         let state = Arc::new(Mutex::new(State {
-            bare: RouteReply {
-                status: 200,
-                body: "[]".to_string(),
-            },
-            api: RouteReply {
-                status: 404,
-                body: "{}".to_string(),
-            },
+            bare: RouteReply { status: 200, body: "[]".to_string() },
+            api: RouteReply { status: 404, body: "{}".to_string() },
             requests: Vec::new(),
         }));
         let accept_state = state.clone();
@@ -83,26 +69,14 @@ impl FakeServer {
 
     /// Set the bare `GET /session` route's status + JSON body.
     pub fn set_bare(&self, status: u16, body: impl Into<String>) {
-        let mut s = self
-            .state
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        s.bare = RouteReply {
-            status,
-            body: body.into(),
-        };
+        let mut s = self.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        s.bare = RouteReply { status, body: body.into() };
     }
 
     /// Set the `GET /api/session` fallback route's status + JSON body.
     pub fn set_api(&self, status: u16, body: impl Into<String>) {
-        let mut s = self
-            .state
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        s.api = RouteReply {
-            status,
-            body: body.into(),
-        };
+        let mut s = self.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        s.api = RouteReply { status, body: body.into() };
     }
 
     /// Every request path this server has served, in order (for assertions
@@ -122,9 +96,7 @@ impl FakeServer {
 /// collide with something else on a CI runner).
 pub fn unreachable_endpoint() -> String {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind a throwaway port");
-    let addr = listener
-        .local_addr()
-        .expect("bound listener has a local addr");
+    let addr = listener.local_addr().expect("bound listener has a local addr");
     drop(listener);
     format!("http://{addr}")
 }
@@ -161,17 +133,12 @@ fn handle_connection(mut stream: TcpStream, state: Arc<Mutex<State>>) -> std::io
         reader.read_exact(&mut body)?;
     }
 
-    let mut state = state
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut state = state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     state.requests.push(path.clone());
     let reply = match path.as_str() {
         "/session" => state.bare.clone(),
         "/api/session" => state.api.clone(),
-        _ => RouteReply {
-            status: 404,
-            body: "{}".to_string(),
-        },
+        _ => RouteReply { status: 404, body: "{}".to_string() },
     };
     drop(state);
 

@@ -14,7 +14,7 @@
 //! see that function's doc for why the fetch itself (a control-socket round
 //! trip here, a local lookup there) stays separate.
 
-use crate::query_cmd::{is_ambiguous, print_and_exit_code, query_cmd_params, FetchOutcome};
+use crate::query_cmd::{query_cmd_params, is_ambiguous, print_and_exit_code, FetchOutcome};
 use crate::Query;
 
 /// `holler hub status [--json]` — read the live hub's status document over
@@ -45,10 +45,7 @@ pub fn status(server: Option<&str>, json: bool) -> i32 {
                 let clients = doc.get("clients").and_then(|v| v.as_u64()).unwrap_or(0);
                 let sessions = doc.get("sessions").and_then(|v| v.as_u64()).unwrap_or(0);
                 let version = doc.get("version").and_then(|v| v.as_str()).unwrap_or("?");
-                let protocol = doc
-                    .get("protocol")
-                    .and_then(|v| v.as_u64())
-                    .map_or_else(|| "?".to_string(), |p| p.to_string());
+                let protocol = doc.get("protocol").and_then(|v| v.as_u64()).map_or_else(|| "?".to_string(), |p| p.to_string());
                 println!("hub {version} (protocol {protocol})");
                 println!("  listening: {listening}");
                 println!("  clients:   {clients}");
@@ -83,18 +80,11 @@ pub fn status(server: Option<&str>, json: bool) -> i32 {
 /// failures building up. Empty when there are none, so a quiet hub's summary
 /// stays the four lines it always was.
 fn lockout_lines(doc: &serde_json::Value) -> Vec<String> {
-    let Some(peers) = doc
-        .pointer("/lockout/peers")
-        .and_then(|p| p.as_array())
-        .filter(|p| !p.is_empty())
-    else {
+    let Some(peers) = doc.pointer("/lockout/peers").and_then(|p| p.as_array()).filter(|p| !p.is_empty()) else {
         return Vec::new();
     };
     let locked = peers.iter().filter(|p| p["locked_out"] == true).count();
-    let mut lines = vec![format!(
-        "  lockout:   {locked} locked out, {} with failures building",
-        peers.len() - locked
-    )];
+    let mut lines = vec![format!("  lockout:   {locked} locked out, {} with failures building", peers.len() - locked)];
     lines.extend(peers.iter().map(lockout_peer_line));
     lines
 }
@@ -106,35 +96,20 @@ fn lockout_lines(doc: &serde_json::Value) -> Vec<String> {
 fn lockout_peer_line(p: &serde_json::Value) -> String {
     let failures = p["failures"].as_u64().unwrap_or(0);
     let state = if p["locked_out"] == true {
-        format!(
-            "locked out, retry in {}s",
-            p["retry_after_secs"].as_u64().unwrap_or(0)
-        )
+        format!("locked out, retry in {}s", p["retry_after_secs"].as_u64().unwrap_or(0))
     } else {
         "not locked out".to_string()
     };
-    let state = if p["scope"] == "peer" {
-        format!("all tokens {state}")
-    } else {
-        state
-    };
+    let state = if p["scope"] == "peer" { format!("all tokens {state}") } else { state };
     let reasons = p["reasons"].as_object().map_or_else(String::new, |m| {
-        m.iter()
-            .map(|(code, n)| format!("{} x{n}", printable(code)))
-            .collect::<Vec<_>>()
-            .join(", ")
+        m.iter().map(|(code, n)| format!("{} x{n}", printable(code))).collect::<Vec<_>>().join(", ")
     });
     let mut parts = vec![
         printable(p["peer"].as_str().unwrap_or("?")),
         state,
-        format!(
-            "{failures} failure{} ({reasons})",
-            if failures == 1 { "" } else { "s" }
-        ),
+        format!("{failures} failure{} ({reasons})", if failures == 1 { "" } else { "s" }),
     ];
-    let tokens: Vec<String> = p["token_ids"]
-        .as_array()
-        .map_or_else(Vec::new, |ids| ids.iter().map(lockout_token).collect());
+    let tokens: Vec<String> = p["token_ids"].as_array().map_or_else(Vec::new, |ids| ids.iter().map(lockout_token).collect());
     if !tokens.is_empty() {
         parts.push(format!("tokens {}", tokens.join(", ")));
     }
@@ -155,9 +130,7 @@ fn lockout_token(t: &serde_json::Value) -> String {
 /// lockout section was typed by an unauthenticated peer, so it must not be
 /// able to put control sequences on the operator's terminal.
 fn printable(s: &str) -> String {
-    s.chars()
-        .map(|c| if c.is_ascii_graphic() { c } else { '?' })
-        .collect()
+    s.chars().map(|c| if c.is_ascii_graphic() { c } else { '?' }).collect()
 }
 
 // --- `holler hub caps|support|query` (issue #185) ---------------------------
@@ -173,15 +146,8 @@ fn printable(s: &str) -> String {
 pub fn caps(json: bool) -> i32 {
     let outcome = match holler_hub::control::caps() {
         Ok(doc) => {
-            let n = doc
-                .get("caps")
-                .and_then(|c| c.as_object())
-                .map(|o| o.len())
-                .unwrap_or(0);
-            FetchOutcome::Doc {
-                json_text: doc.to_string(),
-                human: format!("hub: {n} caps known"),
-            }
+            let n = doc.get("caps").and_then(|c| c.as_object()).map(|o| o.len()).unwrap_or(0);
+            FetchOutcome::Doc { json_text: doc.to_string(), human: format!("hub: {n} caps known") }
         }
         Err(e) => control_error(e),
     };
@@ -222,15 +188,10 @@ pub fn query(q: &Query, json: bool) -> i32 {
 
     let call = match resolved.target() {
         None => holler_hub::control::ControlCall::query_local(method, params),
-        Some(target) => {
-            holler_hub::control::ControlCall::query_remote(target.as_str(), method, params)
-        }
+        Some(target) => holler_hub::control::ControlCall::query_remote(target.as_str(), method, params),
     };
     let outcome = match crate::transport::call(q.server.as_deref(), &call) {
-        Ok(doc) => FetchOutcome::Doc {
-            json_text: doc.to_string(),
-            human: format!("{method}: ok"),
-        },
+        Ok(doc) => FetchOutcome::Doc { json_text: doc.to_string(), human: format!("{method}: ok") },
         Err(holler_hub::control::ControlError::Refused(e)) if is_ambiguous(&e) => {
             eprintln!("error: {}", e.message);
             return 2;
@@ -257,8 +218,5 @@ fn control_error(e: holler_hub::control::ControlError) -> FetchOutcome {
         }
         other => other.to_string(),
     };
-    FetchOutcome::Err {
-        message,
-        exit_code: 1,
-    }
+    FetchOutcome::Err { message, exit_code: 1 }
 }

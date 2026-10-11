@@ -1,10 +1,4 @@
-#![allow(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::panic,
-    clippy::unreachable,
-    dead_code
-)] // #351
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable, dead_code)] // #351
 //! `holler body confirm` (issue #351): the one-time, interactive operator
 //! confirmation gate for a pairing's Short Authentication String — and the
 //! two behaviors the issue's acceptance criteria pin:
@@ -30,9 +24,7 @@ use std::time::Duration;
 
 use serde_json::Value;
 
-use support::{
-    body_status_json, holler_cmd, kill_tree, make_own_process_group, wait_for, Hub, StateDir,
-};
+use support::{body_status_json, holler_cmd, kill_tree, make_own_process_group, wait_for, Hub, StateDir};
 
 const READY: Duration = Duration::from_secs(10);
 
@@ -52,27 +44,14 @@ fn join_fresh(state: &StateDir, ws_url: &str, label: &str) -> String {
     let (token_id, secret) = support::mint_token(state, label);
     let hub_key = support::hub_pubkey(state);
     let out = holler_cmd(state)
-        .args([
-            "body",
-            "join",
-            "--server",
-            ws_url,
-            "--token",
-            &format!("{token_id}:{secret}"),
-            "--hub-key",
-            &hub_key,
-        ])
+        .args(["body", "join", "--server", ws_url, "--token", &format!("{token_id}:{secret}"), "--hub-key", &hub_key])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .expect("spawn body join")
         .wait_with_output()
         .expect("wait body join");
-    assert!(
-        out.status.success(),
-        "body join must exit 0: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
+    assert!(out.status.success(), "body join must exit 0: {}", String::from_utf8_lossy(&out.stderr));
     token_id
 }
 
@@ -98,10 +77,7 @@ fn spawn_run_with_piped_stderr(state: &StateDir) -> std::process::Child {
 /// Drain `stderr` on a background thread, incrementing `counter` once per
 /// line containing `needle`. Mirrors `body_run_test.rs`'s
 /// `fresh_hello_and_presence_on_every_reconnect` drainer.
-fn watch_for(
-    stderr: std::process::ChildStderr,
-    needle: &'static str,
-) -> std::sync::Arc<std::sync::atomic::AtomicUsize> {
+fn watch_for(stderr: std::process::ChildStderr, needle: &'static str) -> std::sync::Arc<std::sync::atomic::AtomicUsize> {
     let counter = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let c = counter.clone();
     std::thread::spawn(move || {
@@ -139,9 +115,7 @@ fn run_confirm(state: &StateDir, answer: &str) -> (i32, String, String) {
         .expect("confirm stdin piped")
         .write_all(answer.as_bytes())
         .expect("write the operator's answer");
-    let out = child
-        .wait_with_output()
-        .expect("wait on `holler body confirm`");
+    let out = child.wait_with_output().expect("wait on `holler body confirm`");
     (
         out.status.code().unwrap_or(-1),
         String::from_utf8_lossy(&out.stdout).into_owned(),
@@ -165,30 +139,16 @@ fn unconfirmed_first_pairing_connects_without_blocking_and_warns() {
     let stderr = body.stderr.take().expect("body stderr is piped");
     let warnings = watch_for(stderr, "sas_unconfirmed");
 
-    let connected = wait_for(READY, || {
-        (conn_state(&state).as_deref() == Some("connected")).then_some(())
-    });
-    assert!(
-        connected.is_some(),
-        "an unconfirmed pairing must still reach `connected` (non-blocking)"
-    );
+    let connected = wait_for(READY, || (conn_state(&state).as_deref() == Some("connected")).then_some(()));
+    assert!(connected.is_some(), "an unconfirmed pairing must still reach `connected` (non-blocking)");
 
-    let warned = wait_for(READY, || {
-        (warnings.load(std::sync::atomic::Ordering::SeqCst) >= 1).then_some(())
-    });
-    assert!(
-        warned.is_some(),
-        "an unconfirmed connect must log the sas_unconfirmed warning"
-    );
+    let warned = wait_for(READY, || (warnings.load(std::sync::atomic::Ordering::SeqCst) >= 1).then_some(()));
+    assert!(warned.is_some(), "an unconfirmed connect must log the sas_unconfirmed warning");
 
     // And `body status` agrees: joined, but not yet confirmed.
     let doc = body_status_json(&state);
     assert_eq!(doc["joined"].as_bool(), Some(true));
-    assert_eq!(
-        doc["sas_confirmed"].as_bool(),
-        Some(false),
-        "a never-confirmed pairing reports sas_confirmed:false: {doc}"
-    );
+    assert_eq!(doc["sas_confirmed"].as_bool(), Some(false), "a never-confirmed pairing reports sas_confirmed:false: {doc}");
 
     kill_tree(&mut body);
     hub.stop(Duration::from_secs(5));
@@ -206,21 +166,11 @@ fn confirm_with_yes_persists_sas_confirmed() {
     join_fresh(&state, &hub.ws_url(), "kiwi");
 
     let (code, stdout, stderr) = run_confirm(&state, "y\n");
-    assert_eq!(
-        code, 0,
-        "confirm with y must exit 0; stdout={stdout} stderr={stderr}"
-    );
-    assert!(
-        stdout.contains("confirmed"),
-        "confirm must tell the operator it succeeded: {stdout}"
-    );
+    assert_eq!(code, 0, "confirm with y must exit 0; stdout={stdout} stderr={stderr}");
+    assert!(stdout.contains("confirmed"), "confirm must tell the operator it succeeded: {stdout}");
 
     let doc = body_status_json(&state);
-    assert_eq!(
-        doc["sas_confirmed"].as_bool(),
-        Some(true),
-        "confirm must persist sas_confirmed:true: {doc}"
-    );
+    assert_eq!(doc["sas_confirmed"].as_bool(), Some(true), "confirm must persist sas_confirmed:true: {doc}");
 
     // Idempotent: confirming again short-circuits (no connection attempted —
     // stopping the hub first proves it) and still exits 0.
@@ -251,17 +201,10 @@ fn confirm_with_no_does_not_persist() {
     join_fresh(&state, &hub.ws_url(), "kiwi");
 
     let (code, stdout, stderr) = run_confirm(&state, "n\n");
-    assert_eq!(
-        code, 1,
-        "declining confirmation must exit 1; stdout={stdout} stderr={stderr}"
-    );
+    assert_eq!(code, 1, "declining confirmation must exit 1; stdout={stdout} stderr={stderr}");
 
     let doc = body_status_json(&state);
-    assert_eq!(
-        doc["sas_confirmed"].as_bool(),
-        Some(false),
-        "a declined confirmation must not persist: {doc}"
-    );
+    assert_eq!(doc["sas_confirmed"].as_bool(), Some(false), "a declined confirmation must not persist: {doc}");
 
     hub.stop(Duration::from_secs(5));
 }
@@ -280,18 +223,13 @@ fn confirmed_pairing_reconnects_freely_after_hub_restart() {
     join_fresh(&state, &format!("ws://{addr}"), "kiwi");
 
     let (code, _stdout, stderr) = run_confirm(&state, "y\n");
-    assert_eq!(
-        code, 0,
-        "confirm must succeed before the reconnect exercise: {stderr}"
-    );
+    assert_eq!(code, 0, "confirm must succeed before the reconnect exercise: {stderr}");
 
     let mut body = spawn_run_with_piped_stderr(&state);
     let stderr_pipe = body.stderr.take().expect("body stderr is piped");
     let unconfirmed_warnings = watch_for(stderr_pipe, "sas_unconfirmed");
 
-    let first = wait_for(READY, || {
-        (conn_state(&state).as_deref() == Some("connected")).then_some(())
-    });
+    let first = wait_for(READY, || (conn_state(&state).as_deref() == Some("connected")).then_some(()));
     assert!(first.is_some(), "must connect once before the restart");
 
     kill_tree(&mut hub);
@@ -299,10 +237,7 @@ fn confirmed_pairing_reconnects_freely_after_hub_restart() {
     let reconnected = wait_for(Duration::from_secs(35), || {
         (conn_state(&state).as_deref() == Some("connected")).then_some(())
     });
-    assert!(
-        reconnected.is_some(),
-        "an already-confirmed pairing must reconnect after a hub restart without blocking"
-    );
+    assert!(reconnected.is_some(), "an already-confirmed pairing must reconnect after a hub restart without blocking");
 
     assert_eq!(
         unconfirmed_warnings.load(std::sync::atomic::Ordering::SeqCst),

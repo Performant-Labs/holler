@@ -13,10 +13,7 @@ use std::time::Duration;
 use holler_hub::control::{self, ControlError};
 use serde_json::Value;
 
-use super::{
-    holler_cmd, join, kill_tree, make_own_process_group, mint_token, wait_for, write_sessions_toml,
-    Body, StateDir,
-};
+use super::{holler_cmd, join, kill_tree, make_own_process_group, mint_token, wait_for, write_sessions_toml, Body, StateDir};
 
 pub const READY: Duration = Duration::from_secs(30);
 pub const SESSION: &str = "b/alpha";
@@ -50,11 +47,7 @@ pub fn free_addr() -> String {
     static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
     loop {
         let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let port = 20_000
-            + (std::process::id()
-                .wrapping_mul(7919)
-                .wrapping_add(n.wrapping_mul(131)))
-                % 10_000;
+        let port = 20_000 + (std::process::id().wrapping_mul(7919).wrapping_add(n.wrapping_mul(131))) % 10_000;
         let addr = format!("127.0.0.1:{port}");
         if std::net::TcpListener::bind(&addr).is_ok() {
             return addr;
@@ -65,11 +58,7 @@ pub fn free_addr() -> String {
 /// A hub on a free loopback port, retrying with another port when the bind
 /// loses a race (another process on the machine took the port between the
 /// probe in [`free_addr`] and the hub's own bind). Returns the hub and its address.
-pub fn start_hub_on_free_port(
-    state: &StateDir,
-    env: &[(String, String)],
-    args: &[String],
-) -> (Child, String) {
+pub fn start_hub_on_free_port(state: &StateDir, env: &[(String, String)], args: &[String]) -> (Child, String) {
     let mut last = String::new();
     for _ in 0..8 {
         let addr = free_addr();
@@ -81,38 +70,19 @@ pub fn start_hub_on_free_port(
     panic!("no hub could be started on a free port after 8 attempts; last failure:\n{last}");
 }
 
-pub fn start_hub_at(
-    state: &StateDir,
-    addr: &str,
-    env: &[(String, String)],
-    args: &[String],
-) -> Child {
+pub fn start_hub_at(state: &StateDir, addr: &str, env: &[(String, String)], args: &[String]) -> Child {
     start_hub_at_logged(state, addr, env, args).0
 }
 
 /// [`start_hub_at`], also returning the hub's stderr history.
-fn start_hub_at_logged(
-    state: &StateDir,
-    addr: &str,
-    env: &[(String, String)],
-    args: &[String],
-) -> (Child, HubLog) {
+fn start_hub_at_logged(state: &StateDir, addr: &str, env: &[(String, String)], args: &[String]) -> (Child, HubLog) {
     try_start_hub_at(state, addr, env, args).unwrap_or_else(|why| panic!("{why}"))
 }
 
-fn try_start_hub_at(
-    state: &StateDir,
-    addr: &str,
-    env: &[(String, String)],
-    args: &[String],
-) -> Result<(Child, HubLog), String> {
+fn try_start_hub_at(state: &StateDir, addr: &str, env: &[(String, String)], args: &[String]) -> Result<(Child, HubLog), String> {
     let mut cmd = holler_cmd(state);
     cmd.envs(env.iter().map(|(k, v)| (k.as_str(), v.as_str())));
-    cmd.args(["hub", "serve", "--listen", addr])
-        .args(args)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped());
+    cmd.args(["hub", "serve", "--listen", addr]).args(args).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped());
     make_own_process_group(&mut cmd);
     let mut child = cmd.spawn().expect("spawn `holler hub serve`");
     let stderr = child.stderr.take().expect("hub stderr is piped");
@@ -132,9 +102,7 @@ fn try_start_hub_at(
                     v.push(line.trim_end().to_string());
                 }
             }
-            if !sent
-                && serde_json::from_str::<Value>(&line).is_ok_and(|v| v["event"] == "listening")
-            {
+            if !sent && serde_json::from_str::<Value>(&line).is_ok_and(|v| v["event"] == "listening") {
                 sent = true;
                 let _ = tx.send(());
             }
@@ -162,40 +130,17 @@ impl Rig {
 
     /// [`Rig::start_with`], also passing `hub_args` to `holler hub serve`
     /// (e.g. `--join-held`).
-    pub fn start_with_args(
-        sessions: &[(&str, &[&str])],
-        hub_env: &[(&str, &str)],
-        hub_args: &[&str],
-    ) -> Rig {
+    pub fn start_with_args(sessions: &[(&str, &[&str])], hub_env: &[(&str, &str)], hub_args: &[&str]) -> Rig {
         let hub_state = StateDir::new();
         let body_state = StateDir::new();
-        let hub_env: Vec<(String, String)> = hub_env
-            .iter()
-            .map(|(k, v)| (k.to_string(), v.to_string()))
-            .collect();
+        let hub_env: Vec<(String, String)> = hub_env.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
         let hub_args: Vec<String> = hub_args.iter().map(|s| s.to_string()).collect();
         let (hub, addr) = start_hub_on_free_port(&hub_state, &hub_env, &hub_args);
         let hub_log = HubLog::default();
         let (token_id, secret) = mint_token(&hub_state, "b");
-        join(
-            &body_state,
-            &hub_state,
-            &format!("ws://{addr}"),
-            &token_id,
-            &secret,
-        );
+        join(&body_state, &hub_state, &format!("ws://{addr}"), &token_id, &secret);
         let config = write_sessions_toml(&body_state, sessions);
-        let mut rig = Rig {
-            hub_state,
-            body_state,
-            addr,
-            hub: Some(hub),
-            body: None,
-            config,
-            hub_env,
-            hub_args,
-            hub_log,
-        };
+        let mut rig = Rig { hub_state, body_state, addr, hub: Some(hub), body: None, config, hub_env, hub_args, hub_log };
         rig.start_body();
         for (name, _) in sessions {
             rig.wait_row(&format!("b/{name}"), |r| r["state"] == "idle");
@@ -204,11 +149,7 @@ impl Rig {
     }
 
     pub fn start_body(&mut self) {
-        self.body = Some(Body::start_with_env(
-            &self.body_state,
-            &self.config,
-            &[("HOLLER_HEARTBEAT_INTERVAL_MS", "300")],
-        ));
+        self.body = Some(Body::start_with_env(&self.body_state, &self.config, &[("HOLLER_HEARTBEAT_INTERVAL_MS", "300")]));
     }
 
     pub fn stop_body(&mut self) {
@@ -229,8 +170,7 @@ impl Rig {
         if let Some(mut h) = self.hub.take() {
             kill_tree(&mut h);
         }
-        let (hub, log) =
-            start_hub_at_logged(&self.hub_state, &self.addr, &self.hub_env, &self.hub_args);
+        let (hub, log) = start_hub_at_logged(&self.hub_state, &self.addr, &self.hub_env, &self.hub_args);
         self.hub = Some(hub);
         self.hub_log = log;
     }
@@ -238,19 +178,9 @@ impl Rig {
     /// What to print when a wait fails (issue #483): the hub's stderr since its
     /// last (re)start, the body's log, and the roster as the hub reports it.
     pub fn diagnostics(&self) -> String {
-        let hub = self
-            .hub_log
-            .lock()
-            .map(|v| v.join("\n"))
-            .unwrap_or_default();
-        let body = self
-            .body
-            .as_ref()
-            .map(Body::log_text)
-            .unwrap_or_else(|| "<no body running>".to_string());
-        let tokens = std::fs::metadata(self.hub_state.hub().join("tokens.json"))
-            .map(|m| format!("{} bytes", m.len()))
-            .unwrap_or_else(|e| format!("unreadable: {e}"));
+        let hub = self.hub_log.lock().map(|v| v.join("\n")).unwrap_or_default();
+        let body = self.body.as_ref().map(Body::log_text).unwrap_or_else(|| "<no body running>".to_string());
+        let tokens = std::fs::metadata(self.hub_state.hub().join("tokens.json")).map(|m| format!("{} bytes", m.len())).unwrap_or_else(|e| format!("unreadable: {e}"));
         format!("--- hub stderr ({}) ---\n{hub}\n--- body log ---\n{body}\n--- tokens.json: {tokens} ---\n--- roster ---\n{:?}", self.addr, self.rows())
     }
 
@@ -268,9 +198,7 @@ impl Rig {
         say_at_retrying(self.root(), s, "hi", queue)
     }
     pub fn rows(&self) -> Vec<Value> {
-        control::roster_at(self.root(), true, None)
-            .map(|v| v["rows"].as_array().cloned().unwrap_or_default())
-            .unwrap_or_default()
+        control::roster_at(self.root(), true, None).map(|v| v["rows"].as_array().cloned().unwrap_or_default()).unwrap_or_default()
     }
     pub fn row(&self, name: &str) -> Option<Value> {
         self.rows().into_iter().find(|r| r["name"] == name)
@@ -286,13 +214,10 @@ impl Rig {
         self.wait_row(name, |r| turn_accepted(r, prev.as_ref()));
     }
     pub fn turn_id(&self, name: &str) -> Option<Value> {
-        self.row(name)
-            .map(|r| r["turn_id"].clone())
-            .filter(|v| !v.is_null())
+        self.row(name).map(|r| r["turn_id"].clone()).filter(|v| !v.is_null())
     }
     pub fn hold_file(&self) -> Value {
-        let text =
-            std::fs::read_to_string(self.hub_state.hub().join("holds.json")).unwrap_or_default();
+        let text = std::fs::read_to_string(self.hub_state.hub().join("holds.json")).unwrap_or_default();
         serde_json::from_str(&text).unwrap_or(Value::Null)
     }
 }
@@ -311,12 +236,7 @@ impl Drop for Rig {
 /// because the hub's own presence cache can trail the roster row by a moment
 /// after a turn ends, so a session the roster shows `idle` may still be
 /// refused as `working` for that moment.
-pub fn say_at_retrying(
-    root: &Path,
-    session: &str,
-    text: &str,
-    queue: bool,
-) -> Result<Value, ControlError> {
+pub fn say_at_retrying(root: &Path, session: &str, text: &str, queue: bool) -> Result<Value, ControlError> {
     let deadline = std::time::Instant::now() + READY;
     loop {
         let res = control::say_at(root, session, text, queue, Duration::from_secs(60));
@@ -347,11 +267,7 @@ pub fn assert_held(res: Result<Value, ControlError>, reason: Option<&str>) {
             assert_eq!(data.reason.as_deref(), reason);
             assert!(data.since.is_some(), "since is set");
             if let Some(r) = reason {
-                assert!(
-                    e.message.contains(r),
-                    "the message names the reason: {}",
-                    e.message
-                );
+                assert!(e.message.contains(r), "the message names the reason: {}", e.message);
             }
         }
         Ok(v) => panic!("expected session_held, but the prompt was delivered: {v}"),
@@ -364,6 +280,5 @@ pub fn is_held(res: &Result<Value, ControlError>) -> bool {
 }
 
 pub fn is_delivered(res: &Result<Value, ControlError>) -> bool {
-    res.as_ref()
-        .is_ok_and(|v| v["text"].as_str().is_some_and(|t| t.contains("stub chunk")))
+    res.as_ref().is_ok_and(|v| v["text"].as_str().is_some_and(|t| t.contains("stub chunk")))
 }

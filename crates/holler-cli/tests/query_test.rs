@@ -1,10 +1,4 @@
-#![allow(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::panic,
-    clippy::unreachable,
-    dead_code
-)] // #185
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable, dead_code)] // #185
 //! `status`/`caps`/`support`/`protocol` — local and remote, both peers
 //! (issue #185). Real subprocesses, a real loopback hub, a real `stub-acp`
 //! agent for the harness-resolution probes — the same discipline as
@@ -45,16 +39,7 @@ fn join_fresh(state: &StateDir, ws_url: &str, label: &str) -> String {
     let hub_key = support::hub_pubkey(state);
     let (code, _, stderr) = run(
         state,
-        &[
-            "body",
-            "join",
-            "--server",
-            ws_url,
-            "--token",
-            &format!("{token_id}:{secret}"),
-            "--hub-key",
-            &hub_key,
-        ],
+        &["body", "join", "--server", ws_url, "--token", &format!("{token_id}:{secret}"), "--hub-key", &hub_key],
     );
     assert_eq!(code, 0, "body join must exit 0; stderr: {stderr}");
     token_id
@@ -64,16 +49,12 @@ fn join_fresh(state: &StateDir, ws_url: &str, label: &str) -> String {
 /// `command[0]` is `command` verbatim (not necessarily resolvable) — used by
 /// the harness-resolution cases, which need to control resolvability
 /// directly rather than always pointing at the real `stub-acp` binary.
-fn write_raw_sessions_toml(
-    state: &StateDir,
-    name: &str,
-    harness: &str,
-    command: &str,
-) -> std::path::PathBuf {
+fn write_raw_sessions_toml(state: &StateDir, name: &str, harness: &str, command: &str) -> std::path::PathBuf {
     std::fs::create_dir_all(state.body()).expect("create body dir");
     let path = state.body().join("sessions.toml");
-    let toml =
-        format!("[[session]]\nname = {name:?}\nharness = {harness:?}\ncommand = [{command:?}]\n");
+    let toml = format!(
+        "[[session]]\nname = {name:?}\nharness = {harness:?}\ncommand = [{command:?}]\n"
+    );
     std::fs::write(&path, toml).expect("write sessions.toml");
     path
 }
@@ -88,17 +69,10 @@ fn write_raw_sessions_toml(
 fn body_status_local_without_run() {
     let state = StateDir::new();
     let (code, stdout, stderr) = run(&state, &["--json", "body", "query", "status"]);
-    assert_eq!(
-        code, 0,
-        "local `body query status` must exit 0 with no run active; stderr: {stderr}"
-    );
+    assert_eq!(code, 0, "local `body query status` must exit 0 with no run active; stderr: {stderr}");
     let doc: Value = serde_json::from_str(&stdout).expect("body query status --json is valid JSON");
     assert_eq!(doc["role"].as_str(), Some("body"));
-    assert_eq!(
-        doc["connected"].as_bool(),
-        Some(false),
-        "no run/join means not connected: {doc}"
-    );
+    assert_eq!(doc["connected"].as_bool(), Some(false), "no run/join means not connected: {doc}");
     assert_eq!(doc["protocol"].as_u64(), Some(3));
 }
 
@@ -150,10 +124,7 @@ fn caps_contains_every_known_id() {
     assert_eq!(code, 0);
     let doc: Value = serde_json::from_str(&stdout).expect("valid JSON");
     let caps = doc["caps"].as_object().expect("caps is an object");
-    for id in holler_proto::FEATURES
-        .iter()
-        .chain(holler_proto::HARNESS_IDS.iter())
-    {
+    for id in holler_proto::FEATURES.iter().chain(holler_proto::HARNESS_IDS.iter()) {
         assert!(caps.contains_key(*id), "caps is missing {id}: {caps:?}");
     }
 }
@@ -170,26 +141,13 @@ fn body_support_stub_harness_true_when_on_path_false_when_not() {
     let (code, stdout, stderr) = run(&state, &["--json", "body", "support", "opencode"]);
     assert_eq!(code, 0, "stderr: {stderr}");
     let doc: Value = serde_json::from_str(&stdout).expect("valid JSON");
-    assert_eq!(
-        doc["ok"].as_bool(),
-        Some(true),
-        "a real, existing command must be ok:true: {doc}"
-    );
+    assert_eq!(doc["ok"].as_bool(), Some(true), "a real, existing command must be ok:true: {doc}");
 
-    write_raw_sessions_toml(
-        &state,
-        "alpha",
-        "opencode",
-        "/definitely/not/a/real/binary-xyz",
-    );
+    write_raw_sessions_toml(&state, "alpha", "opencode", "/definitely/not/a/real/binary-xyz");
     let (code, stdout, stderr) = run(&state, &["--json", "body", "support", "opencode"]);
     assert_eq!(code, 0, "stderr: {stderr}");
     let doc: Value = serde_json::from_str(&stdout).expect("valid JSON");
-    assert_eq!(
-        doc["ok"].as_bool(),
-        Some(false),
-        "a missing command must be ok:false: {doc}"
-    );
+    assert_eq!(doc["ok"].as_bool(), Some(false), "a missing command must be ok:false: {doc}");
 }
 
 /// `query/support` with an id outside the v2 vocabulary is `-32006
@@ -199,10 +157,7 @@ fn unknown_feature_is_32006() {
     let state = StateDir::new();
     let (code, _, stderr) = run(&state, &["body", "support", "not-a-real-feature"]);
     assert_eq!(code, 1, "an unknown id is exit 1, not a crash");
-    assert!(
-        stderr.contains("unknown"),
-        "stderr names the failure: {stderr}"
-    );
+    assert!(stderr.contains("unknown"), "stderr names the failure: {stderr}");
 }
 
 /// `query/protocol {version:1}` is `ok:false` (v2 only speaks version 3,
@@ -238,10 +193,7 @@ fn query_protocol_with_no_version_is_not_rejected() {
     let (code, stdout, stderr) = run(&state, &["--json", "body", "query", "protocol"]);
     assert_eq!(code, 0, "stderr: {stderr}");
     let doc: Value = serde_json::from_str(&stdout).expect("valid JSON");
-    assert!(
-        doc.get("asked").is_none(),
-        "no version asked must not appear in the answer: {doc}"
-    );
+    assert!(doc.get("asked").is_none(), "no version asked must not appear in the answer: {doc}");
 }
 
 /// `query/protocol {version:0}` is the documented `-32006 unknown_feature`
@@ -251,14 +203,8 @@ fn query_protocol_with_no_version_is_not_rejected() {
 fn body_query_protocol_version_zero_is_unknown_feature() {
     let state = StateDir::new();
     let (code, _, stderr) = run(&state, &["body", "query", "protocol", "0"]);
-    assert_eq!(
-        code, 1,
-        "version:0 must be a refusal, not a crash or a normal answer"
-    );
-    assert!(
-        stderr.contains("positive integer"),
-        "stderr names the failure: {stderr}"
-    );
+    assert_eq!(code, 1, "version:0 must be a refusal, not a crash or a normal answer");
+    assert!(stderr.contains("positive integer"), "stderr names the failure: {stderr}");
 }
 
 /// A negative `version` is rejected the same way as `0` — the old bug
@@ -268,14 +214,8 @@ fn body_query_protocol_version_zero_is_unknown_feature() {
 fn body_query_protocol_negative_version_is_unknown_feature() {
     let state = StateDir::new();
     let (code, _, stderr) = run(&state, &["body", "query", "protocol", "-1"]);
-    assert_eq!(
-        code, 1,
-        "a negative version must be a refusal, not silently 'no version asked'"
-    );
-    assert!(
-        stderr.contains("positive integer"),
-        "stderr names the failure: {stderr}"
-    );
+    assert_eq!(code, 1, "a negative version must be a refusal, not silently 'no version asked'");
+    assert!(stderr.contains("positive integer"), "stderr names the failure: {stderr}");
 }
 
 /// A malformed (non-numeric) `version` is rejected the same way.
@@ -283,14 +223,8 @@ fn body_query_protocol_negative_version_is_unknown_feature() {
 fn body_query_protocol_malformed_version_is_unknown_feature() {
     let state = StateDir::new();
     let (code, _, stderr) = run(&state, &["body", "query", "protocol", "not-a-number"]);
-    assert_eq!(
-        code, 1,
-        "a malformed version must be a refusal, not silently 'no version asked'"
-    );
-    assert!(
-        stderr.contains("positive integer"),
-        "stderr names the failure: {stderr}"
-    );
+    assert_eq!(code, 1, "a malformed version must be a refusal, not silently 'no version asked'");
+    assert!(stderr.contains("positive integer"), "stderr names the failure: {stderr}");
 }
 
 /// The **hub**'s local `query/protocol` leaf (`hub query protocol …`, served
@@ -301,14 +235,8 @@ fn hub_query_protocol_version_zero_is_unknown_feature() {
     let state = StateDir::new();
     let hub = Hub::start(&state);
     let (code, _, stderr) = run(&state, &["hub", "query", "protocol", "0"]);
-    assert_eq!(
-        code, 1,
-        "version:0 must be a refusal, not a crash or a normal answer"
-    );
-    assert!(
-        stderr.contains("positive integer"),
-        "stderr names the failure: {stderr}"
-    );
+    assert_eq!(code, 1, "version:0 must be a refusal, not a crash or a normal answer");
+    assert!(stderr.contains("positive integer"), "stderr names the failure: {stderr}");
     hub.stop(Duration::from_secs(5));
 }
 
@@ -322,17 +250,11 @@ fn hub_query_protocol_negative_and_malformed_version_are_unknown_feature() {
 
     let (code, _, stderr) = run(&state, &["hub", "query", "protocol", "-1"]);
     assert_eq!(code, 1, "a negative version must be a refusal: {stderr}");
-    assert!(
-        stderr.contains("positive integer"),
-        "stderr names the failure: {stderr}"
-    );
+    assert!(stderr.contains("positive integer"), "stderr names the failure: {stderr}");
 
     let (code, _, stderr) = run(&state, &["hub", "query", "protocol", "not-a-number"]);
     assert_eq!(code, 1, "a malformed version must be a refusal: {stderr}");
-    assert!(
-        stderr.contains("positive integer"),
-        "stderr names the failure: {stderr}"
-    );
+    assert!(stderr.contains("positive integer"), "stderr names the failure: {stderr}");
 
     hub.stop(Duration::from_secs(5));
 }
@@ -352,10 +274,7 @@ fn hub_query_protocol_valid_and_absent_version_are_not_rejected() {
     let (code, stdout, stderr) = run(&state, &["--json", "hub", "query", "protocol"]);
     assert_eq!(code, 0, "stderr: {stderr}");
     let doc: Value = serde_json::from_str(&stdout).expect("valid JSON");
-    assert!(
-        doc.get("asked").is_none(),
-        "no version asked must not appear in the answer: {doc}"
-    );
+    assert!(doc.get("asked").is_none(), "no version asked must not appear in the answer: {doc}");
 
     hub.stop(Duration::from_secs(5));
 }
@@ -388,10 +307,7 @@ fn hub_status_reports_real_client_and_session_counts() {
             && doc.get("sessions").and_then(|v| v.as_u64()) == Some(1))
         .then_some(())
     });
-    assert!(
-        ready.is_some(),
-        "hub status must report 1 client and 1 session once the body is live"
-    );
+    assert!(ready.is_some(), "hub status must report 1 client and 1 session once the body is live");
 
     body.stop(&state, Duration::from_secs(5));
     hub.stop(Duration::from_secs(5));
@@ -411,13 +327,9 @@ fn hub_confirmed_harness_reflects_real_probe() {
 
     let confirmed = wait_for(READY, || {
         let (code, stdout, _) = run(&state, &["--json", "hub", "support", "opencode"]);
-        (code == 0 && serde_json::from_str::<Value>(&stdout).ok()?["ok"].as_bool() == Some(true))
-            .then_some(())
+        (code == 0 && serde_json::from_str::<Value>(&stdout).ok()?["ok"].as_bool() == Some(true)).then_some(())
     });
-    assert!(
-        confirmed.is_some(),
-        "the hub must confirm `opencode` once the live body's command resolves"
-    );
+    assert!(confirmed.is_some(), "the hub must confirm `opencode` once the live body's command resolves");
 
     body.stop(&state, Duration::from_secs(5));
     hub.stop(Duration::from_secs(5));
@@ -435,16 +347,9 @@ fn remote_query_status_by_label_and_by_token_id() {
     let body = Body::start(&state, &config);
 
     let ready = wait_for(READY, || {
-        (support::hub_status_json(&state)
-            .get("clients")
-            .and_then(|v| v.as_u64())
-            == Some(1))
-        .then_some(())
+        (support::hub_status_json(&state).get("clients").and_then(|v| v.as_u64()) == Some(1)).then_some(())
     });
-    assert!(
-        ready.is_some(),
-        "the body must be live before it can be queried"
-    );
+    assert!(ready.is_some(), "the body must be live before it can be queried");
 
     // Target-resolution routes by the token's own `--label` (`"kiwi"`
     // here), not by the hostname a body claims in its hello — every body
@@ -458,11 +363,7 @@ fn remote_query_status_by_label_and_by_token_id() {
     let (code, stdout, stderr) = run(&state, &["--json", "hub", "query", "kiwi", "status"]);
     assert_eq!(code, 0, "query by label must exit 0; stderr: {stderr}");
     let doc: Value = serde_json::from_str(&stdout).expect("valid JSON");
-    assert_eq!(
-        doc["role"].as_str(),
-        Some("body"),
-        "the answer is the BODY's status doc: {doc}"
-    );
+    assert_eq!(doc["role"].as_str(), Some("body"), "the answer is the BODY's status doc: {doc}");
     assert_eq!(doc["hostname"].as_str(), Some("default"));
 
     let (code, stdout, stderr) = run(&state, &["--json", "hub", "query", &token_id, "status"]);
@@ -487,32 +388,16 @@ fn remote_query_protocol_version_zero_is_unknown_feature() {
     let body = Body::start(&state, &config);
 
     let ready = wait_for(READY, || {
-        (support::hub_status_json(&state)
-            .get("clients")
-            .and_then(|v| v.as_u64())
-            == Some(1))
-        .then_some(())
+        (support::hub_status_json(&state).get("clients").and_then(|v| v.as_u64()) == Some(1)).then_some(())
     });
-    assert!(
-        ready.is_some(),
-        "the body must be live before it can be queried"
-    );
+    assert!(ready.is_some(), "the body must be live before it can be queried");
 
     let (code, _, stderr) = run(&state, &["hub", "query", "kiwi", "protocol", "0"]);
-    assert_eq!(
-        code, 1,
-        "version:0 forwarded to a live body must be a refusal: {stderr}"
-    );
-    assert!(
-        stderr.contains("positive integer"),
-        "stderr names the failure: {stderr}"
-    );
+    assert_eq!(code, 1, "version:0 forwarded to a live body must be a refusal: {stderr}");
+    assert!(stderr.contains("positive integer"), "stderr names the failure: {stderr}");
 
     let (code, stdout, stderr) = run(&state, &["--json", "hub", "query", "kiwi", "protocol", "3"]);
-    assert_eq!(
-        code, 0,
-        "a valid version must still work normally; stderr: {stderr}"
-    );
+    assert_eq!(code, 0, "a valid version must still work normally; stderr: {stderr}");
     let doc: Value = serde_json::from_str(&stdout).expect("valid JSON");
     assert_eq!(doc["ok"].as_bool(), Some(true));
 
@@ -531,10 +416,7 @@ fn remote_query_to_disconnected_body_not_connected_exit_1() {
 
     let (code, _, stderr) = run(&state, &["hub", "query", &token_id, "status"]);
     assert_eq!(code, 1, "a not-connected target is exit 1, not a crash");
-    assert!(
-        stderr.contains("not connected"),
-        "stderr names the failure: {stderr}"
-    );
+    assert!(stderr.contains("not connected"), "stderr names the failure: {stderr}");
 
     hub.stop(Duration::from_secs(5));
 }
@@ -559,10 +441,7 @@ fn remote_query_ambiguous_target_exit_2() {
     // *other* branch (exit 1) stays exit 1, so `is_ambiguous`'s string match
     // in `holler-cli/src/main.rs` cannot be accidentally over-broad.
     let (code, _, stderr) = run(&state, &["hub", "query", "nobody-here", "status"]);
-    assert_eq!(
-        code, 1,
-        "a plain not-connected target must stay exit 1, not misclassify as ambiguous: {stderr}"
-    );
+    assert_eq!(code, 1, "a plain not-connected target must stay exit 1, not misclassify as ambiguous: {stderr}");
     hub.stop(Duration::from_secs(5));
 }
 
@@ -585,10 +464,7 @@ fn hub_caps_without_live_hub_exit_1() {
     let state = StateDir::new();
     let (code, _, stderr) = run(&state, &["hub", "caps"]);
     assert_eq!(code, 1);
-    assert!(
-        stderr.contains("no live holler hub reachable"),
-        "stderr: {stderr}"
-    );
+    assert!(stderr.contains("no live holler hub reachable"), "stderr: {stderr}");
 }
 
 // --- issue #368: `hub status`/`caps`/`support`'s own success-path formatting
@@ -610,28 +486,12 @@ fn hub_status_live_human_readable_format() {
     let (code, stdout, stderr) = run(&state, &["hub", "status"]);
     assert_eq!(code, 0, "stderr: {stderr}");
     let lines: Vec<&str> = stdout.lines().collect();
-    assert_eq!(
-        lines.len(),
-        4,
-        "hub {{version}} (protocol {{N}}) / listening / clients / sessions: {stdout:?}"
-    );
+    assert_eq!(lines.len(), 4, "hub {{version}} (protocol {{N}}) / listening / clients / sessions: {stdout:?}");
     let want_protocol = format!("(protocol {})", holler_proto::PROTOCOL_VERSION);
-    assert!(
-        lines[0].starts_with("hub ") && lines[0].contains(&want_protocol),
-        "line 1: {lines:?}"
-    );
-    assert!(
-        lines[1].trim_start().starts_with("listening:"),
-        "line 2: {lines:?}"
-    );
-    assert!(
-        lines[2].trim_start().starts_with("clients:") && lines[2].contains('0'),
-        "line 3: {lines:?}"
-    );
-    assert!(
-        lines[3].trim_start().starts_with("sessions:") && lines[3].contains('0'),
-        "line 4: {lines:?}"
-    );
+    assert!(lines[0].starts_with("hub ") && lines[0].contains(&want_protocol), "line 1: {lines:?}");
+    assert!(lines[1].trim_start().starts_with("listening:"), "line 2: {lines:?}");
+    assert!(lines[2].trim_start().starts_with("clients:") && lines[2].contains('0'), "line 3: {lines:?}");
+    assert!(lines[3].trim_start().starts_with("sessions:") && lines[3].contains('0'), "line 4: {lines:?}");
     hub.stop(Duration::from_secs(5));
 }
 
@@ -660,15 +520,8 @@ fn hub_caps_live_human_readable_format() {
     let (code, stdout, stderr) = run(&state, &["hub", "caps"]);
     assert_eq!(code, 0, "stderr: {stderr}");
     let line = stdout.trim_end();
-    assert!(
-        line.starts_with("hub: ") && line.ends_with(" caps known"),
-        "got: {line:?}"
-    );
-    let n: u32 = line
-        .trim_start_matches("hub: ")
-        .trim_end_matches(" caps known")
-        .parse()
-        .expect("a number of caps");
+    assert!(line.starts_with("hub: ") && line.ends_with(" caps known"), "got: {line:?}");
+    let n: u32 = line.trim_start_matches("hub: ").trim_end_matches(" caps known").parse().expect("a number of caps");
     assert!(n > 0, "a live hub must know at least one cap: {line:?}");
     hub.stop(Duration::from_secs(5));
 }
@@ -683,10 +536,7 @@ fn hub_caps_live_json() {
     assert_eq!(code, 0, "stderr: {stderr}");
     let doc: Value = serde_json::from_str(&stdout).expect("hub caps --json is valid JSON");
     let caps = doc["caps"].as_object().expect("caps is an object");
-    assert!(
-        !caps.is_empty(),
-        "a live hub must report at least one cap: {doc}"
-    );
+    assert!(!caps.is_empty(), "a live hub must report at least one cap: {doc}");
     hub.stop(Duration::from_secs(5));
 }
 
@@ -709,13 +559,7 @@ fn hub_support_live_human_readable_format() {
     // normal ok=false answer — confirmed by running this for real rather
     // than assumed from reading the source.
     let (code, _, stderr) = run(&state, &["hub", "support", "definitely-not-a-real-feature"]);
-    assert_eq!(
-        code, 1,
-        "an unknown feature id is a refusal, not a false answer; stderr: {stderr}"
-    );
-    assert!(
-        stderr.contains("unknown feature/harness id"),
-        "stderr: {stderr}"
-    );
+    assert_eq!(code, 1, "an unknown feature id is a refusal, not a false answer; stderr: {stderr}");
+    assert!(stderr.contains("unknown feature/harness id"), "stderr: {stderr}");
     hub.stop(Duration::from_secs(5));
 }

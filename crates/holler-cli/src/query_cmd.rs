@@ -25,9 +25,7 @@ use crate::cli::Cmd;
 pub fn query_cmd_params(cmd: &Cmd, args: &[String]) -> Option<serde_json::Value> {
     match cmd {
         Cmd::Support => args.first().map(|f| serde_json::json!({ "feature": f })),
-        Cmd::Protocol => args
-            .first()
-            .map(|s| serde_json::json!({ "version": protocol_version_arg_value(s) })),
+        Cmd::Protocol => args.first().map(|s| serde_json::json!({ "version": protocol_version_arg_value(s) })),
         Cmd::Status | Cmd::Caps => None,
     }
 }
@@ -54,9 +52,7 @@ fn protocol_version_arg_value(s: &str) -> serde_json::Value {
 /// the wire and validates it the same way, so the local and the
 /// wire-forwarded leaves agree on what a valid `version` is.
 pub fn protocol_version_from_args(args: &[String]) -> Result<Option<u32>, holler_proto::WireError> {
-    let params = args
-        .first()
-        .map(|s| serde_json::json!({ "version": protocol_version_arg_value(s) }));
+    let params = args.first().map(|s| serde_json::json!({ "version": protocol_version_arg_value(s) }));
     holler_proto::ProtocolParams::parse_version(params.as_ref())
 }
 

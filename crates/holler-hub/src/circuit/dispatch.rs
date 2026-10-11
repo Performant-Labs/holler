@@ -14,7 +14,9 @@
 //! `pub(super)` rather than fully private.
 
 use futures_util::{Sink, SinkExt};
-use holler_proto::{log::Severity, Envelope, PingAck, Presence, PromptResult, Update, WireError};
+use holler_proto::{
+    log::Severity, Envelope, PingAck, Presence, PromptResult, Update, WireError,
+};
 use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 
 use crate::live::{CancelReply, Registry, SayReply, SeenUpdate};
@@ -172,64 +174,30 @@ where
 {
     // `admit` decides and, for a valid grant, consumes it in one critical
     // section: the prompt is accepted here, so the grant is spent here.
-    gate.holds
-        .admit(gate.key, gate.grant)
-        .map_err(SendPromptError::Refused)?;
+    gate.holds.admit(gate.key, gate.grant).map_err(SendPromptError::Refused)?;
     if let Some(panes) = gate.panes.as_deref() {
         pane_gate(panes, session).map_err(SendPromptError::Refused)?;
     }
     let cid = holler_proto::CorrelationId::parse(request_id).map_err(|_| SendPromptError::Io)?;
-    let params = holler_proto::Prompt {
-        session: session.to_string(),
-        message: *message,
-        meta: None,
-        queue,
-        replace,
-    };
-    let req = Envelope::request(
-        &cid,
-        "session/prompt",
-        Some(serde_json::to_value(params).map_err(|_| SendPromptError::Io)?),
-    );
+    let params = holler_proto::Prompt { session: session.to_string(), message: *message, meta: None, queue, replace };
+    let req = Envelope::request(&cid, "session/prompt", Some(serde_json::to_value(params).map_err(|_| SendPromptError::Io)?));
     let text = holler_proto::encode(&req).map_err(|_| SendPromptError::Io)?;
-    super::log_frame(
-        super::LogDirection::Out,
-        "session/prompt",
-        Some(request_id),
-        &text,
-    );
-    sink.send(Message::text(text))
-        .await
-        .map_err(|_| SendPromptError::Io)?;
+    super::log_frame(super::LogDirection::Out, "session/prompt", Some(request_id), &text);
+    sink.send(Message::text(text)).await.map_err(|_| SendPromptError::Io)?;
     sink.flush().await.map_err(|_| SendPromptError::Io)
 }
 
 /// Send a `session/cancel {session}` request to the body under `request_id`
 /// (issue #191) — the priority-path counterpart of [`send_prompt`].
-pub(super) async fn send_cancel<Snk>(
-    sink: &mut Snk,
-    request_id: &str,
-    session: &str,
-) -> Result<(), ()>
+pub(super) async fn send_cancel<Snk>(sink: &mut Snk, request_id: &str, session: &str) -> Result<(), ()>
 where
     Snk: Sink<Message, Error = WsError> + Unpin,
 {
     let cid = holler_proto::CorrelationId::parse(request_id).map_err(|_| ())?;
-    let params = holler_proto::Cancel {
-        session: session.to_string(),
-    };
-    let req = Envelope::request(
-        &cid,
-        "session/cancel",
-        Some(serde_json::to_value(params).map_err(|_| ())?),
-    );
+    let params = holler_proto::Cancel { session: session.to_string() };
+    let req = Envelope::request(&cid, "session/cancel", Some(serde_json::to_value(params).map_err(|_| ())?));
     let text = holler_proto::encode(&req).map_err(|_| ())?;
-    super::log_frame(
-        super::LogDirection::Out,
-        "session/cancel",
-        Some(request_id),
-        &text,
-    );
+    super::log_frame(super::LogDirection::Out, "session/cancel", Some(request_id), &text);
     sink.send(Message::text(text)).await.map_err(|_| ())?;
     sink.flush().await.map_err(|_| ())
 }
@@ -250,11 +218,7 @@ where
 
 /// Send a `hub query TARGET …` forward (issue #185) to the body over this
 /// connection, returning its correlation id.
-pub(super) async fn send_query_forward<Snk>(
-    sink: &mut Snk,
-    method: &str,
-    params: Option<serde_json::Value>,
-) -> Result<String, ()>
+pub(super) async fn send_query_forward<Snk>(sink: &mut Snk, method: &str, params: Option<serde_json::Value>) -> Result<String, ()>
 where
     Snk: Sink<Message, Error = WsError> + Unpin,
 {
@@ -280,28 +244,15 @@ pub(super) async fn handle_presence_notification(
     roster: &std::sync::Arc<crate::roster::Roster>,
     last_seen: &mut LastSeenFlusher,
 ) {
-    let Some(p) = params.and_then(|v| serde_json::from_value::<Presence>(v).ok()) else {
-        return;
-    };
+    let Some(p) = params.and_then(|v| serde_json::from_value::<Presence>(v).ok()) else { return };
     // Issue #460: a session seen for the first time joins held when the hub
     // was started with `--join-held`. Done before the session becomes
     // resolvable (`update_presence` below), so there is no moment at which it
     // can be sent to but is not yet held.
-    registry.holds().note_joined(
-        p.sessions
-            .iter()
-            .map(|s| crate::holds::session_key(label, &s.name)),
-    );
+    registry.holds().note_joined(p.sessions.iter().map(|s| crate::holds::session_key(label, &s.name)));
     // Clone `p.hostname` into the log line (issue #186): `roster.advertise`
     // below borrows the whole `Presence`, so the log must not move a field out.
-    super::log(
-        Severity::Debug,
-        "presence",
-        vec![
-            ("client_id", client_id.to_string()),
-            ("hostname", p.hostname.clone()),
-        ],
-    );
+    super::log(Severity::Debug, "presence", vec![("client_id", client_id.to_string()), ("hostname", p.hostname.clone())]);
     // Advertise the roster row *before* `registry.update_presence` moves
     // `p.sessions` out (issue #186). The roster row is keyed by token, so
     // resolve the client id to its token first. A body that lost its registry
@@ -312,9 +263,7 @@ pub(super) async fn handle_presence_notification(
         roster.advertise(&token_id, &p);
         last_seen.beat(&token_id);
     }
-    registry
-        .set_session_count(client_id, p.sessions.len() as u32)
-        .await;
+    registry.set_session_count(client_id, p.sessions.len() as u32).await;
     registry.update_presence(client_id, p.sessions).await;
 }
 
@@ -337,23 +286,13 @@ pub(super) fn handle_update_notification(
     params: Option<serde_json::Value>,
     pending_says: &mut std::collections::HashMap<String, PendingSay>,
 ) {
-    let Some(p) = params.and_then(|v| serde_json::from_value::<Update>(v).ok()) else {
-        return;
-    };
+    let Some(p) = params.and_then(|v| serde_json::from_value::<Update>(v).ok()) else { return };
     match pending_says.get_mut(&p.prompt_id) {
         Some(pending) => {
-            pending.updates.push(SeenUpdate {
-                ts: holler_proto::log::timestamp(),
-                seq: p.seq,
-                parts: p.parts,
-            });
+            pending.updates.push(SeenUpdate { ts: holler_proto::log::timestamp(), seq: p.seq, parts: p.parts });
         }
         None => {
-            super::log(
-                Severity::Debug,
-                "orphan_update",
-                vec![("prompt_id", p.prompt_id)],
-            );
+            super::log(Severity::Debug, "orphan_update", vec![("prompt_id", p.prompt_id)]);
         }
     }
 }
@@ -372,9 +311,7 @@ pub(super) async fn handle_confirm_response(
     let Some(harness) = pending_confirms.remove(id) else {
         return;
     };
-    let ok = result
-        .and_then(|v| v.get("ok").and_then(|o| o.as_bool()))
-        .unwrap_or(false);
+    let ok = result.and_then(|v| v.get("ok").and_then(|o| o.as_bool())).unwrap_or(false);
     if ok {
         registry.confirm_harness(client_id, &harness).await;
     }
@@ -391,15 +328,10 @@ pub(super) fn handle_response(
     pending_ping: &mut PendingPing,
     pending_query: &mut PendingQuery,
     pending_says: &mut std::collections::HashMap<String, PendingSay>,
-    pending_cancels: &mut std::collections::HashMap<
-        String,
-        tokio::sync::oneshot::Sender<CancelReply>,
-    >,
+    pending_cancels: &mut std::collections::HashMap<String, tokio::sync::oneshot::Sender<CancelReply>>,
 ) {
     if let Some(reply) = pending_cancels.remove(id) {
-        let outcome = match result
-            .and_then(|v| serde_json::from_value::<holler_proto::CancelResult>(v).ok())
-        {
+        let outcome = match result.and_then(|v| serde_json::from_value::<holler_proto::CancelResult>(v).ok()) {
             Some(r) if r.applied => CancelReply::Applied,
             _ => CancelReply::ConnectionLost,
         };
@@ -442,10 +374,7 @@ pub(super) fn handle_error_response(
     error: &WireError,
     pending_query: &mut PendingQuery,
     pending_says: &mut std::collections::HashMap<String, PendingSay>,
-    pending_cancels: &mut std::collections::HashMap<
-        String,
-        tokio::sync::oneshot::Sender<CancelReply>,
-    >,
+    pending_cancels: &mut std::collections::HashMap<String, tokio::sync::oneshot::Sender<CancelReply>>,
 ) {
     let Some(want_id) = id else { return };
     if let Some(reply) = pending_cancels.remove(want_id) {
@@ -456,10 +385,7 @@ pub(super) fn handle_error_response(
         let _ = pending.reply.send(SayReply::Refused(error.clone()));
         return;
     }
-    if pending_query
-        .as_ref()
-        .is_some_and(|(want, _)| want_id == want)
-    {
+    if pending_query.as_ref().is_some_and(|(want, _)| want_id == want) {
         if let Some((_, tx)) = pending_query.take() {
             let _ = tx.send(Err(error.clone()));
         }
@@ -470,10 +396,7 @@ pub(super) fn handle_error_response(
 /// A send failure (the socket is already gone) just stops early — whatever
 /// was sent still gets a chance to be answered before the socket is
 /// discovered dead in the loop proper.
-pub(super) async fn send_confirm_probes<Snk>(
-    sink: &mut Snk,
-    harnesses: &[String],
-) -> std::collections::HashMap<String, String>
+pub(super) async fn send_confirm_probes<Snk>(sink: &mut Snk, harnesses: &[String]) -> std::collections::HashMap<String, String>
 where
     Snk: Sink<Message, Error = WsError> + Unpin,
 {
@@ -508,10 +431,7 @@ pub(super) struct LastSeenFlusher {
 
 impl LastSeenFlusher {
     pub(super) fn new(state: &HubState) -> Self {
-        Self {
-            state: state.clone(),
-            flushed_at: None,
-        }
+        Self { state: state.clone(), flushed_at: None }
     }
 
     /// Persist `token_id`'s `last_seen` unless this connection already did so
@@ -520,33 +440,21 @@ impl LastSeenFlusher {
     /// (the roster, not the token store, is the liveness source).
     fn beat(&mut self, token_id: &str) {
         let now = tokio::time::Instant::now();
-        if self
-            .flushed_at
-            .is_some_and(|t| now.duration_since(t) < LAST_SEEN_FLUSH_INTERVAL)
-        {
+        if self.flushed_at.is_some_and(|t| now.duration_since(t) < LAST_SEEN_FLUSH_INTERVAL) {
             return;
         }
         self.flushed_at = Some(now);
         let (token_id, state) = (token_id.to_string(), self.state.clone());
         tokio::spawn(async move {
             if let Err(e) = crate::token::touch_last_seen_async(&token_id, &state).await {
-                super::log(
-                    Severity::Warn,
-                    "last_seen_touch_failed",
-                    vec![("error", e.to_string())],
-                );
+                super::log(Severity::Warn, "last_seen_touch_failed", vec![("error", e.to_string())]);
             }
         });
     }
 }
 
 #[cfg(test)]
-#[allow(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::panic,
-    clippy::unreachable
-)] // #442, #646
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable)] // #442, #646
 mod hold_tests {
     use super::*;
 
@@ -556,35 +464,23 @@ mod hold_tests {
 
     impl Sink<Message> for Recording {
         type Error = WsError;
-        fn poll_ready(
-            self: std::pin::Pin<&mut Self>,
-            _: &mut std::task::Context<'_>,
-        ) -> std::task::Poll<Result<(), WsError>> {
+        fn poll_ready(self: std::pin::Pin<&mut Self>, _: &mut std::task::Context<'_>) -> std::task::Poll<Result<(), WsError>> {
             std::task::Poll::Ready(Ok(()))
         }
         fn start_send(mut self: std::pin::Pin<&mut Self>, item: Message) -> Result<(), WsError> {
             self.0.push(item);
             Ok(())
         }
-        fn poll_flush(
-            self: std::pin::Pin<&mut Self>,
-            _: &mut std::task::Context<'_>,
-        ) -> std::task::Poll<Result<(), WsError>> {
+        fn poll_flush(self: std::pin::Pin<&mut Self>, _: &mut std::task::Context<'_>) -> std::task::Poll<Result<(), WsError>> {
             std::task::Poll::Ready(Ok(()))
         }
-        fn poll_close(
-            self: std::pin::Pin<&mut Self>,
-            _: &mut std::task::Context<'_>,
-        ) -> std::task::Poll<Result<(), WsError>> {
+        fn poll_close(self: std::pin::Pin<&mut Self>, _: &mut std::task::Context<'_>) -> std::task::Poll<Result<(), WsError>> {
             std::task::Poll::Ready(Ok(()))
         }
     }
 
     fn message() -> Box<holler_proto::Message> {
-        Box::new(crate::talk::test_user_message(
-            "h-01HTESTHOLD00000000000000",
-            "hi",
-        ))
+        Box::new(crate::talk::test_user_message("h-01HTESTHOLD00000000000000", "hi"))
     }
 
     #[tokio::test]
@@ -593,30 +489,10 @@ mod hold_tests {
         holds.hold("io/alpha", Some("freeze"));
         for (queue, replace) in [(false, false), (true, false), (false, true), (true, true)] {
             let mut sink = Recording::default();
-            let gate = HoldGate {
-                holds: &holds,
-                key: "io/alpha",
-                grant: None,
-                panes: None,
-            };
-            let res = send_prompt(
-                &mut sink,
-                gate,
-                "h-01HTESTHOLD00000000000000",
-                "alpha",
-                message(),
-                queue,
-                replace,
-            )
-            .await;
-            assert!(
-                matches!(res, Err(SendPromptError::Refused(ref e)) if e.code == -32011 && e.message.contains("freeze")),
-                "queue={queue} replace={replace}"
-            );
-            assert!(
-                sink.0.is_empty(),
-                "a refused prompt must put nothing on the socket"
-            );
+            let gate = HoldGate { holds: &holds, key: "io/alpha", grant: None, panes: None };
+            let res = send_prompt(&mut sink, gate, "h-01HTESTHOLD00000000000000", "alpha", message(), queue, replace).await;
+            assert!(matches!(res, Err(SendPromptError::Refused(ref e)) if e.code == -32011 && e.message.contains("freeze")), "queue={queue} replace={replace}");
+            assert!(sink.0.is_empty(), "a refused prompt must put nothing on the socket");
         }
     }
 
@@ -626,41 +502,11 @@ mod hold_tests {
         holds.hold("io/alpha", None);
         let mut sink = Recording::default();
         // A different session is never affected.
-        let other = HoldGate {
-            holds: &holds,
-            key: "io/beta",
-            grant: None,
-            panes: None,
-        };
-        assert!(send_prompt(
-            &mut sink,
-            other,
-            "h-01HTESTHOLD00000000000000",
-            "beta",
-            message(),
-            false,
-            false
-        )
-        .await
-        .is_ok());
+        let other = HoldGate { holds: &holds, key: "io/beta", grant: None, panes: None };
+        assert!(send_prompt(&mut sink, other, "h-01HTESTHOLD00000000000000", "beta", message(), false, false).await.is_ok());
         holds.release("io/alpha");
-        let gate = HoldGate {
-            holds: &holds,
-            key: "io/alpha",
-            grant: None,
-            panes: None,
-        };
-        assert!(send_prompt(
-            &mut sink,
-            gate,
-            "h-01HTESTHOLD00000000000001",
-            "alpha",
-            message(),
-            true,
-            false
-        )
-        .await
-        .is_ok());
+        let gate = HoldGate { holds: &holds, key: "io/alpha", grant: None, panes: None };
+        assert!(send_prompt(&mut sink, gate, "h-01HTESTHOLD00000000000001", "alpha", message(), true, false).await.is_ok());
         assert_eq!(sink.0.len(), 2);
     }
 
@@ -743,10 +589,7 @@ mod hold_tests {
         let id = "h-01HTESTPANE00000000000000";
         match send_prompt(&mut sink, gate, id, session, message(), false, false).await {
             Err(SendPromptError::Refused(e)) => {
-                assert!(
-                    sink.0.is_empty(),
-                    "a refused prompt puts nothing on the socket"
-                );
+                assert!(sink.0.is_empty(), "a refused prompt puts nothing on the socket");
                 e
             }
             other => panic!("{session} was sent: {other:?}, {:?}", sink.0),
@@ -796,27 +639,15 @@ mod hold_tests {
                 grant: None,
                 panes: Some(PaneArc::clone(&panes)),
             };
-            let res = send_prompt(
-                &mut sink,
-                gate,
-                "h-01HTESTPANE00000000000000",
-                "ses-demo-a",
-                message(),
-                queue,
-                replace,
-            )
-            .await;
+            let res =
+                send_prompt(&mut sink, gate, "h-01HTESTPANE00000000000000", "ses-demo-a", message(), queue, replace)
+                    .await;
             assert!(
                 matches!(res, Err(SendPromptError::Refused(ref e)) if e.code == -32011),
                 "queue={queue} replace={replace}"
             );
-            assert!(
-                sink.0.is_empty(),
-                "a refused prompt puts nothing on the socket"
-            );
-            let Err(SendPromptError::Refused(error)) = res else {
-                unreachable!()
-            };
+            assert!(sink.0.is_empty(), "a refused prompt puts nothing on the socket");
+            let Err(SendPromptError::Refused(error)) = res else { unreachable!() };
             assert_pane_refusal(&error, "demo-c1r1", "pane-parked");
         }
     }
@@ -866,14 +697,16 @@ mod hold_tests {
     #[tokio::test]
     async fn a_healthy_matching_pane_and_an_unmatched_session_go_through() {
         let holds = crate::holds::Holds::in_memory();
-        let (panes, _dir) = pane_registry(&[gate_pane(
-            "demo-c1r1",
-            Some("ses-demo-a"),
-            PaneHold::None,
-            PaneHealth::Healthy,
-            Some("ses-demo-a"),
-            None, // driven absent: not a mismatch
-        )]);
+        let (panes, _dir) = pane_registry(&[
+            gate_pane(
+                "demo-c1r1",
+                Some("ses-demo-a"),
+                PaneHold::None,
+                PaneHealth::Healthy,
+                Some("ses-demo-a"),
+                None, // driven absent: not a mismatch
+            ),
+        ]);
         let mut sink = Recording::default();
         for session in ["ses-other", "ses-demo-a"] {
             let key = format!("io/{session}");
@@ -884,17 +717,9 @@ mod hold_tests {
                 panes: Some(PaneArc::clone(&panes)),
             };
             assert!(
-                send_prompt(
-                    &mut sink,
-                    gate,
-                    "h-01HTESTPANE00000000000000",
-                    session,
-                    message(),
-                    false,
-                    false
-                )
-                .await
-                .is_ok(),
+                send_prompt(&mut sink, gate, "h-01HTESTPANE00000000000000", session, message(), false, false)
+                    .await
+                    .is_ok(),
                 "{session} is sent"
             );
         }
@@ -918,12 +743,7 @@ mod hold_tests {
             )
         };
         let bad = [
-            (
-                "demo-c2r1",
-                parked_hold(),
-                PaneHealth::Healthy,
-                "pane-parked",
-            ),
+            ("demo-c2r1", parked_hold(), PaneHealth::Healthy, "pane-parked"),
             (
                 "demo-c2r1",
                 PaneHold::None,
@@ -941,23 +761,9 @@ mod hold_tests {
         for (name, hold, health, code) in bad {
             let mismatched = code == "pane-shown-driven-mismatch";
             let record = if mismatched {
-                gate_pane(
-                    name,
-                    Some("ses-demo-a"),
-                    hold,
-                    health,
-                    Some("ses-shown"),
-                    Some("ses-driven"),
-                )
+                gate_pane(name, Some("ses-demo-a"), hold, health, Some("ses-shown"), Some("ses-driven"))
             } else {
-                gate_pane(
-                    name,
-                    Some("ses-demo-a"),
-                    hold,
-                    health,
-                    Some("ses-demo-a"),
-                    Some("ses-demo-a"),
-                )
+                gate_pane(name, Some("ses-demo-a"), hold, health, Some("ses-demo-a"), Some("ses-demo-a"))
             };
             let (panes, _dir) = pane_registry(&[healthy("demo-c1r1"), record]);
             let error = prompt(&holds, Some(panes), "ses-demo-a").await;
@@ -996,11 +802,7 @@ mod hold_tests {
         let error = prompt(&holds, Some(panes), "ses-demo-a").await;
         assert_eq!(error.code, -32011);
         let data = error.data.as_deref().expect("data");
-        assert_eq!(
-            data.hold_kind.as_deref(),
-            Some("operator"),
-            "the hold's own kind"
-        );
+        assert_eq!(data.hold_kind.as_deref(), Some("operator"), "the hold's own kind");
         assert_ne!(data.reason.as_deref(), Some("pane-parked"));
         assert!(error.message.contains("freeze"), "{}", error.message);
     }
@@ -1014,4 +816,5 @@ mod hold_tests {
         let registry = crate::live::Registry::new().with_panes(PaneArc::clone(&panes));
         assert!(registry.panes().is_some(), "the handle is carried");
     }
+
 }

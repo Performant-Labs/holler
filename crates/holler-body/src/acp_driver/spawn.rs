@@ -52,10 +52,7 @@ pub(super) fn is_v1_negotiation_failure(reason: &str) -> bool {
 /// apply at their common failure point (#439, #459): the startup reason plus
 /// the [`auth::stage_suffix`] for how far the auth flow got when
 /// `auth_method` is set, the reason unchanged when it is not.
-fn auth_annotation(
-    auth_method: Option<String>,
-    progress: Arc<AuthProgress>,
-) -> impl Fn(String) -> String {
+fn auth_annotation(auth_method: Option<String>, progress: Arc<AuthProgress>) -> impl Fn(String) -> String {
     move |reason| match &auth_method {
         Some(id) => format!("{reason}{}", auth::stage_suffix(id, progress.get())),
         None => reason,
@@ -112,10 +109,7 @@ impl AcpDriver {
                 log_debug(
                     LogDirection::In,
                     "spawn",
-                    vec![
-                        ("event", "spawned".to_string()),
-                        ("protocol", "v2".to_string()),
-                    ],
+                    vec![("event", "spawned".to_string()), ("protocol", "v2".to_string())],
                     None,
                 );
                 Ok(Self {
@@ -143,21 +137,12 @@ impl AcpDriver {
                     HandshakeError::Reason(reason) => reason,
                 };
                 let reason = annotate(reason);
-                log_warn(
-                    "spawn",
-                    vec![("event", format!("startup_failed: {reason}"))],
-                );
+                log_warn("spawn", vec![("event", format!("startup_failed: {reason}"))]);
                 Err(SpawnAttempt::Fatal(DriverError::Startup(reason)))
             }
             Ok(Err(_dropped)) => {
                 join_handle.abort();
-                log_warn(
-                    "spawn",
-                    vec![(
-                        "event",
-                        "connection task ended before readiness".to_string(),
-                    )],
-                );
+                log_warn("spawn", vec![("event", "connection task ended before readiness".to_string())]);
                 Err(SpawnAttempt::Fatal(DriverError::Startup(annotate(
                     "connection task ended before signalling readiness".to_string(),
                 ))))
@@ -168,13 +153,10 @@ impl AcpDriver {
                 // the spawned process group when the connection future is
                 // dropped (which `abort` forces).
                 join_handle.abort();
-                log_warn(
-                    "spawn",
-                    vec![("event", format!("startup_timeout: {timeout_ms}ms"))],
-                );
-                Err(SpawnAttempt::Fatal(DriverError::Startup(annotate(
-                    format!("no response within {timeout_ms}ms (HOLLER_ACP_TIMEOUT_MS)"),
-                ))))
+                log_warn("spawn", vec![("event", format!("startup_timeout: {timeout_ms}ms"))]);
+                Err(SpawnAttempt::Fatal(DriverError::Startup(annotate(format!(
+                    "no response within {timeout_ms}ms (HOLLER_ACP_TIMEOUT_MS)"
+                )))))
             }
         }
     }
@@ -228,10 +210,7 @@ impl AcpDriver {
                 log_debug(
                     LogDirection::In,
                     "spawn",
-                    vec![
-                        ("event", "spawned".to_string()),
-                        ("protocol", "v1".to_string()),
-                    ],
+                    vec![("event", "spawned".to_string()), ("protocol", "v1".to_string())],
                     None,
                 );
                 Ok(Self {
@@ -247,51 +226,29 @@ impl AcpDriver {
             Ok(Ok(Err(reason))) => {
                 join_handle.abort();
                 let reason = annotate(reason);
-                log_warn(
-                    "spawn",
-                    vec![("event", format!("startup_failed (v1 fallback): {reason}"))],
-                );
+                log_warn("spawn", vec![("event", format!("startup_failed (v1 fallback): {reason}"))]);
                 Err(SpawnAttempt::Fatal(DriverError::Startup(reason)))
             }
             Ok(Err(_dropped)) => {
                 join_handle.abort();
-                log_warn(
-                    "spawn",
-                    vec![(
-                        "event",
-                        "v1 fallback connection task ended before readiness".to_string(),
-                    )],
-                );
+                log_warn("spawn", vec![("event", "v1 fallback connection task ended before readiness".to_string())]);
                 Err(SpawnAttempt::Fatal(DriverError::Startup(annotate(
                     "connection task ended before signalling readiness (v1 fallback)".to_string(),
                 ))))
             }
             Err(_timed_out) => {
                 join_handle.abort();
-                log_warn(
-                    "spawn",
-                    vec![(
-                        "event",
-                        format!("startup_timeout (v1 fallback): {timeout_ms}ms"),
-                    )],
-                );
-                Err(SpawnAttempt::Fatal(DriverError::Startup(annotate(
-                    format!(
-                        "no response within {timeout_ms}ms (HOLLER_ACP_TIMEOUT_MS, v1 fallback)"
-                    ),
-                ))))
+                log_warn("spawn", vec![("event", format!("startup_timeout (v1 fallback): {timeout_ms}ms"))]);
+                Err(SpawnAttempt::Fatal(DriverError::Startup(annotate(format!(
+                    "no response within {timeout_ms}ms (HOLLER_ACP_TIMEOUT_MS, v1 fallback)"
+                )))))
             }
         }
     }
 }
 
 #[cfg(test)]
-#[allow(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::panic,
-    clippy::unreachable
-)] // #439
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable)] // #439
 mod tests {
     use super::is_v1_negotiation_failure;
 
@@ -306,18 +263,13 @@ mod tests {
         // Only `data` carrying BOTH phrases the classifier needs would defeat
         // it; that is adapter-controlled text and out of scope here (the
         // classifier predates #439), so the test asserts the realistic shapes.
-        let with_both = agent_client_protocol::Error::auth_required().data(
-            serde_json::json!({ "hint": "required ACP protocol version; peer negotiated 1" }),
-        );
+        let with_both = agent_client_protocol::Error::auth_required()
+            .data(serde_json::json!({ "hint": "required ACP protocol version; peer negotiated 1" }));
         assert!(
             is_v1_negotiation_failure(&with_both.to_string()),
             "documents the known limit: adapter `data` with both phrases matches the classifier"
         );
-        for reason in [
-            "Authentication required".to_string(),
-            canonical.to_string(),
-            with_data.to_string(),
-        ] {
+        for reason in ["Authentication required".to_string(), canonical.to_string(), with_data.to_string()] {
             assert!(!is_v1_negotiation_failure(&reason), "{reason}");
         }
         assert!(is_v1_negotiation_failure(

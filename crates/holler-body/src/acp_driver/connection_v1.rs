@@ -73,9 +73,7 @@ fn handle_notification(shared: &Arc<Mutex<Shared>>, note: v1::SessionNotificatio
                 LogDirection::In,
                 "session/update",
                 vec![("chunk_len", text.len().to_string())],
-                holler_proto::log::frame_at_noisy(
-                    &serde_json::json!({ "chunk": text }).to_string(),
-                ),
+                holler_proto::log::frame_at_noisy(&serde_json::json!({ "chunk": text }).to_string()),
             );
             let guard = lock(shared);
             if let Some(tx) = &guard.current_events {
@@ -97,12 +95,7 @@ fn handle_permission_request(
     // v1 has no direct `title` field on the request itself (see the module
     // doc); the closest human-readable prompt is the tool-call update's own
     // optional title.
-    let prompt = request
-        .tool_call
-        .fields
-        .title
-        .clone()
-        .unwrap_or_else(|| "permission request".to_string());
+    let prompt = request.tool_call.fields.title.clone().unwrap_or_else(|| "permission request".to_string());
     store_pending(
         shared,
         PendingBlock {
@@ -149,16 +142,8 @@ async fn new_session(
 /// The one `authenticate` request (issue #439), [`auth::open_session`]'s
 /// login step on v1. Only the method id is sent or logged; the caller builds
 /// the failure reason from the error's code and message.
-async fn authenticate(
-    connection: &ConnectionTo<Agent>,
-    method_id: String,
-) -> Result<(), agent_client_protocol::Error> {
-    log_debug(
-        LogDirection::Out,
-        "authenticate",
-        vec![("method_id", auth::quote_id(&method_id))],
-        None,
-    );
+async fn authenticate(connection: &ConnectionTo<Agent>, method_id: String) -> Result<(), agent_client_protocol::Error> {
+    log_debug(LogDirection::Out, "authenticate", vec![("method_id", auth::quote_id(&method_id))], None);
     connection
         .send_request(v1::AuthenticateRequest::new(method_id))
         .block_task()
@@ -176,12 +161,7 @@ async fn do_handshake(
     auth_method: Option<&str>,
     progress: &AuthProgress,
 ) -> Result<v1::SessionId, String> {
-    log_debug(
-        LogDirection::Out,
-        "initialize",
-        vec![("protocol", "v1".to_string())],
-        None,
-    );
+    log_debug(LogDirection::Out, "initialize", vec![("protocol", "v1".to_string())], None);
     let initialize = connection
         .send_request(v1::InitializeRequest::new(
             agent_client_protocol::schema::ProtocolVersion::V1,
@@ -205,25 +185,21 @@ async fn do_handshake(
     // than hanging when the transport closes unexpectedly.
     let watch_shared = shared.clone();
     let watch_conn = connection.clone();
-    connection
-        .spawn(async move {
-            watch_conn.incoming_closed().await;
-            log_warn(
-                "spawn",
-                vec![("event", "child_exit: connection closed (v1)".to_string())],
-            );
-            let mut guard = lock(&watch_shared);
-            guard.last_stop_reason = Some(StopReason::Error);
-            if let Some(tx) = guard.current_events.take() {
-                let _ = tx.send(DriverEvent::Done(StopReason::Error));
-            }
-            if let Some(done_tx) = guard.awaiting_done.take() {
-                let _ = done_tx.send(StopReason::Error);
-            }
-            guard.status = Status::Idle;
-            Ok(())
-        })
-        .map_err(|e| auth::startup_error_text(&e, auth_method))?;
+    connection.spawn(async move {
+        watch_conn.incoming_closed().await;
+        log_warn("spawn", vec![("event", "child_exit: connection closed (v1)".to_string())]);
+        let mut guard = lock(&watch_shared);
+        guard.last_stop_reason = Some(StopReason::Error);
+        if let Some(tx) = guard.current_events.take() {
+            let _ = tx.send(DriverEvent::Done(StopReason::Error));
+        }
+        if let Some(done_tx) = guard.awaiting_done.take() {
+            let _ = done_tx.send(StopReason::Error);
+        }
+        guard.status = Status::Idle;
+        Ok(())
+    })
+    .map_err(|e| auth::startup_error_text(&e, auth_method))?;
 
     Ok(session_id)
 }
@@ -272,15 +248,7 @@ pub(super) async fn run(
             agent_client_protocol::on_receive_request!(),
         )
         .connect_with(agent, move |connection: ConnectionTo<Agent>| async move {
-            match do_handshake(
-                &connection,
-                &cwd,
-                &handshake_shared,
-                auth_method.as_deref(),
-                &progress,
-            )
-            .await
-            {
+            match do_handshake(&connection, &cwd, &handshake_shared, auth_method.as_deref(), &progress).await {
                 Ok(session_id) => {
                     let _ = ready_tx.send(Ok(ReadyV1 {
                         session_id,

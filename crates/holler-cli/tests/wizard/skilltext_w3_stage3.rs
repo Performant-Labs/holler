@@ -40,11 +40,7 @@ fn collide_lines() -> Vec<String> {
 #[test]
 fn there_are_two_collide_lines_one_local_and_one_remote() {
     let lines = collide_lines();
-    assert_eq!(
-        lines.len(),
-        2,
-        "one local and one per-remote-host line: {lines:?}"
-    );
+    assert_eq!(lines.len(), 2, "one local and one per-remote-host line: {lines:?}");
     let (local, remote): (Vec<_>, Vec<_>) = lines
         .iter()
         .partition(|l| l.contains("WIZARD_HERDR_HOST=1"));
@@ -63,10 +59,7 @@ fn there_are_two_collide_lines_one_local_and_one_remote() {
         local.contains("WIZARD_LEDGER=<state_dir>/herdr/setup/wizard-ledger.toml"),
         "the local ledger is in place: {local}"
     );
-    assert!(
-        !local.contains("ledger-<host>"),
-        "no fetched ledger locally"
-    );
+    assert!(!local.contains("ledger-<host>"), "no fetched ledger locally");
 
     let remote = remote[0];
     for var in [
@@ -98,10 +91,7 @@ fn stage10_checks_the_hub_with_the_scoped_command() {
     assert!(s.contains("`HOLLER_STATE_DIR=<state_dir> holler hub status`"));
     assert!(s.contains("`listening: 127.0.0.1:<hub_port>`"));
     assert!(s.contains("herdr.sh run pane read <orch-pane>"));
-    assert!(
-        !s.contains("(`holler hub status`)"),
-        "the bare command is gone"
-    );
+    assert!(!s.contains("(`holler hub status`)"), "the bare command is gone");
 }
 
 #[test]
@@ -123,8 +113,5 @@ fn done_means_every_stage_green_or_skipped() {
 #[test]
 fn the_docs_say_the_remote_call_has_no_hub_only_variables() {
     let d = flat(&read("docs/setup-wizard.md"));
-    assert!(
-        d.contains("local `collide.sh` call only, never on a remote call"),
-        "docs name both calls"
-    );
+    assert!(d.contains("local `collide.sh` call only, never on a remote call"), "docs name both calls");
 }

@@ -57,10 +57,7 @@ impl Envelope {
     /// `true` for request and notification frames (both carry a method).
     #[inline]
     pub fn is_call(&self) -> bool {
-        matches!(
-            self,
-            Envelope::Request { .. } | Envelope::Notification { .. }
-        )
+        matches!(self, Envelope::Request { .. } | Envelope::Notification { .. })
     }
     /// The method name, for a call frame; `None` for response/error.
     pub fn method(&self) -> Option<&str> {
@@ -107,34 +104,21 @@ impl Envelope {
     // build a structurally-invalid frame.
     /// Build a **request** frame (the `id` is carried; a response is expected).
     pub fn request(id: &CorrelationId, method: impl Into<String>, params: Option<Value>) -> Self {
-        Envelope::Request {
-            id: id.to_string(),
-            method: method.into(),
-            params,
-        }
+        Envelope::Request { id: id.to_string(), method: method.into(), params }
     }
     /// Build a **notification** frame (no `id`, no response expected).
     pub fn notification(method: impl Into<String>, params: Option<Value>) -> Self {
-        Envelope::Notification {
-            method: method.into(),
-            params,
-        }
+        Envelope::Notification { method: method.into(), params }
     }
     /// Build a **response** frame echoing the request's `id`.
     pub fn response(id: &CorrelationId, result: Option<Value>) -> Self {
-        Envelope::Response {
-            id: id.to_string(),
-            result,
-        }
+        Envelope::Response { id: id.to_string(), result }
     }
     /// Build an **error** frame echoing the request's `id` with a
     /// [`WireError`]. Named `error_frame` (not `error`) because the `Envelope`
     /// accessors already own the bare `error` name.
     pub fn error_frame(id: &CorrelationId, error: &WireError) -> Self {
-        Envelope::Error {
-            id: Some(id.to_string()),
-            error: error.clone(),
-        }
+        Envelope::Error { id: Some(id.to_string()), error: error.clone() }
     }
     /// The four shapes, as names (for tests and the golden-file test, #149).
     pub fn shape_name(&self) -> &'static str {

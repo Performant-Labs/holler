@@ -1,10 +1,4 @@
-#![allow(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::panic,
-    clippy::unreachable,
-    dead_code
-)] // #149
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable, dead_code)] // #149
 //! `stub-acp` — a deterministic ACP **v2** agent stub (story #130).
 //!
 //! The test suite spawns this binary instead of a real agent. It is a real

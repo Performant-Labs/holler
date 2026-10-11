@@ -5,12 +5,7 @@
 //! story link (the build guard `scripts/lint.sh` only allows a `#[allow]`
 //! that carries a `// #NNN` link on the same line).
 
-#![allow(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::panic,
-    clippy::unreachable
-)] // #143
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable)] // #143
 
 use serde_json::json;
 

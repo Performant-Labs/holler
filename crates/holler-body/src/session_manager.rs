@@ -109,9 +109,7 @@ pub enum SessionCommand {
         updates: Option<mpsc::UnboundedSender<String>>,
     },
     /// Cancel the in-flight turn only; queued prompts are untouched.
-    Cancel {
-        reply_tx: oneshot::Sender<Result<(), String>>,
-    },
+    Cancel { reply_tx: oneshot::Sender<Result<(), String>> },
     /// Resolve a held permission/elicitation. Replies `Ok(())` only once the
     /// driver reports `Working` again (or the turn ends outright).
     Answer {
@@ -220,18 +218,10 @@ impl SessionManager {
             let join = tokio::spawn(task::run(rx, inner));
             sessions.insert(
                 name.clone(),
-                ManagedSession {
-                    config: entry.config.clone(),
-                    tx,
-                    presence,
-                    join,
-                },
+                ManagedSession { config: entry.config.clone(), tx, presence, join },
             );
         }
-        Self {
-            sessions,
-            presence_tx,
-        }
+        Self { sessions, presence_tx }
     }
 
     /// Subscribe to "some session's presence changed" notices — the signal a
@@ -274,23 +264,14 @@ impl SessionManager {
         let (reply_tx, reply_rx) = oneshot::channel();
         self.send(
             name,
-            SessionCommand::Prompt {
-                id: id.into(),
-                text: text.into(),
-                queue,
-                reply_tx,
-                updates,
-            },
+            SessionCommand::Prompt { id: id.into(), text: text.into(), queue, reply_tx, updates },
         )
         .await?;
         reply_rx.await.map_err(|_| SessionManagerError::Gone)
     }
 
     /// Cancel the in-flight turn only (queued prompts are untouched).
-    pub async fn cancel(
-        &self,
-        name: &SessionName,
-    ) -> Result<Result<(), String>, SessionManagerError> {
+    pub async fn cancel(&self, name: &SessionName) -> Result<Result<(), String>, SessionManagerError> {
         let (reply_tx, reply_rx) = oneshot::channel();
         self.send(name, SessionCommand::Cancel { reply_tx }).await?;
         reply_rx.await.map_err(|_| SessionManagerError::Gone)
@@ -303,14 +284,7 @@ impl SessionManager {
         choice: impl Into<String>,
     ) -> Result<Result<(), String>, SessionManagerError> {
         let (reply_tx, reply_rx) = oneshot::channel();
-        self.send(
-            name,
-            SessionCommand::Answer {
-                choice: choice.into(),
-                reply_tx,
-            },
-        )
-        .await?;
+        self.send(name, SessionCommand::Answer { choice: choice.into(), reply_tx }).await?;
         reply_rx.await.map_err(|_| SessionManagerError::Gone)
     }
 
@@ -335,27 +309,12 @@ impl SessionManager {
         updates: Option<mpsc::UnboundedSender<String>>,
     ) -> Result<PromptOutcome, SessionManagerError> {
         let (reply_tx, reply_rx) = oneshot::channel();
-        self.send(
-            name,
-            SessionCommand::Replace {
-                text: text.into(),
-                reply_tx,
-                updates,
-            },
-        )
-        .await?;
+        self.send(name, SessionCommand::Replace { text: text.into(), reply_tx, updates }).await?;
         reply_rx.await.map_err(|_| SessionManagerError::Gone)
     }
 
-    async fn send(
-        &self,
-        name: &SessionName,
-        cmd: SessionCommand,
-    ) -> Result<(), SessionManagerError> {
-        let session = self
-            .sessions
-            .get(name)
-            .ok_or(SessionManagerError::UnknownSession)?;
+    async fn send(&self, name: &SessionName, cmd: SessionCommand) -> Result<(), SessionManagerError> {
+        let session = self.sessions.get(name).ok_or(SessionManagerError::UnknownSession)?;
         let kind = match &cmd {
             SessionCommand::Prompt { .. } => "prompt",
             SessionCommand::Cancel { .. } => "cancel",
@@ -370,17 +329,10 @@ impl SessionManager {
             method: "mailbox_enqueue",
             id: None,
             peer: None,
-            fields: vec![
-                ("name", name.as_str().to_string()),
-                ("command", kind.to_string()),
-            ],
+            fields: vec![("name", name.as_str().to_string()), ("command", kind.to_string())],
             frame: None,
         });
-        session
-            .tx
-            .send(cmd)
-            .await
-            .map_err(|_| SessionManagerError::Gone)
+        session.tx.send(cmd).await.map_err(|_| SessionManagerError::Gone)
     }
 
     /// Build this body's `session/presence` params from every session's live
@@ -400,10 +352,7 @@ impl SessionManager {
             .sessions
             .iter()
             .filter_map(|(name, managed)| {
-                let p = managed
-                    .presence
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner);
+                let p = managed.presence.lock().unwrap_or_else(PoisonError::into_inner);
                 if p.omitted_pending_attach {
                     return None;
                 }

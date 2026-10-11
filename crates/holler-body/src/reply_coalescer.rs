@@ -86,10 +86,7 @@ impl Default for Coalescer {
 
 impl Coalescer {
     pub fn new() -> Self {
-        Self {
-            buf: String::new(),
-            window_start: None,
-        }
+        Self { buf: String::new(), window_start: None }
     }
 
     /// Buffer one streamed text chunk, arriving at `now`. Consecutive chunks
@@ -147,12 +144,7 @@ impl Coalescer {
 }
 
 #[cfg(test)]
-#[allow(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::panic,
-    clippy::unreachable
-)] // #190
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable)] // #190
 mod tests {
     //! In-crate unit tests for the pure state machine, kept alongside the
     //! logic they cover. The issue's own named RED list

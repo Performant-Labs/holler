@@ -57,22 +57,14 @@ pub enum SayError {
     Ambiguous(Vec<String>),
     /// The target session is `working`/`stalled` and `--queue` was not
     /// given (or was refused outright on `input-required`).
-    Busy {
-        state: String,
-        turn_age_ms: u64,
-        last_update_age_ms: u64,
-    },
+    Busy { state: String, turn_age_ms: u64, last_update_age_ms: u64 },
     /// The target session is `input-required`, holding a question (issue
     /// #151: `--queue` never overrides this — a held permission/elicitation
     /// is answered, not queued behind). `question` is the pending item's own
     /// prompt text when the cached presence carries one (empty roster
     /// caches — e.g. a body that predates issue #151 — still refuse, just
     /// without that detail).
-    InputRequired {
-        question: Option<String>,
-        turn_age_ms: u64,
-        last_update_age_ms: u64,
-    },
+    InputRequired { question: Option<String>, turn_age_ms: u64, last_update_age_ms: u64 },
     /// The body answered with some other JSON-RPC refusal.
     Refused(holler_proto::WireError),
     /// The socket dropped mid-turn.
@@ -94,14 +86,11 @@ impl SayError {
         match self {
             Self::UnknownSession => "unknown session".to_string(),
             Self::NotConnected(detail) => detail.clone(),
-            Self::Ambiguous(candidates) => format!(
-                "ambiguous session: candidates are {}",
-                candidates.join(", ")
-            ),
+            Self::Ambiguous(candidates) => format!("ambiguous session: candidates are {}", candidates.join(", ")),
             Self::Busy { state, .. } => format!("session_busy: {state}"),
-            Self::InputRequired { question, .. } => question
-                .clone()
-                .unwrap_or_else(|| "waiting for an answer".to_string()),
+            Self::InputRequired { question, .. } => {
+                question.clone().unwrap_or_else(|| "waiting for an answer".to_string())
+            }
             Self::Refused(err) => err.message.clone(),
             Self::ConnectionLost => "io disconnected mid-turn; ask again".to_string(),
             Self::Timeout => "no reply within the timeout".to_string(),
@@ -154,8 +143,7 @@ pub async fn answer(
     choice: &str,
     timeout: Duration,
 ) -> Result<AnswerOutcome, AnswerError> {
-    let name =
-        holler_proto::RoutableName::parse(session).map_err(|_| AnswerError::UnknownSession)?;
+    let name = holler_proto::RoutableName::parse(session).map_err(|_| AnswerError::UnknownSession)?;
     let (handle, ad) = match registry.resolve_session(&name).await {
         ResolveOutcome::Found(h, ad) => (h, ad),
         ResolveOutcome::Unknown => return Err(AnswerError::UnknownSession),
@@ -167,14 +155,8 @@ pub async fn answer(
         None => Err(AnswerError::ConnectionLost),
         Some(Err(e)) => Err(AnswerError::Refused(e)),
         Some(Ok(value)) => {
-            let applied = value
-                .get("applied")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false);
-            Ok(AnswerOutcome {
-                session: format!("{}/{}", handle.hostname, ad.name),
-                applied,
-            })
+            let applied = value.get("applied").and_then(|v| v.as_bool()).unwrap_or(false);
+            Ok(AnswerOutcome { session: format!("{}/{}", handle.hostname, ad.name), applied })
         }
     }
 }
@@ -217,22 +199,12 @@ pub async fn say(
     state: &HubState,
     args: SayArgs<'_>,
 ) -> Result<SayOutcome, SayError> {
-    let SayArgs {
-        session,
-        text,
-        queue,
-        grant,
-        timeout,
-    } = args;
+    let SayArgs { session, text, queue, grant, timeout } = args;
     let name = holler_proto::RoutableName::parse(session).map_err(|_| SayError::UnknownSession)?;
     let (handle, ad) = match registry.resolve_session(&name).await {
         ResolveOutcome::Found(h, ad) => (h, ad),
         ResolveOutcome::Unknown => return Err(SayError::UnknownSession),
-        ResolveOutcome::NotConnected => {
-            return Err(SayError::NotConnected(not_connected_detail(
-                roster, session,
-            )))
-        }
+        ResolveOutcome::NotConnected => return Err(SayError::NotConnected(not_connected_detail(roster, session))),
         ResolveOutcome::Ambiguous(candidates) => return Err(SayError::Ambiguous(candidates)),
     };
 
@@ -240,10 +212,7 @@ pub async fn say(
     // done for it (no turn id moved, no TalkLog line). This is a fast path
     // only: the enforcement that cannot be raced is the check in
     // `circuit::dispatch::send_prompt`, which every prompt passes through.
-    if let Some(refusal) = registry.holds().would_refuse(
-        &crate::holds::session_key(&handle.hostname, ad.name.as_str()),
-        grant,
-    ) {
+    if let Some(refusal) = registry.holds().would_refuse(&crate::holds::session_key(&handle.hostname, ad.name.as_str()), grant) {
         return Err(SayError::Refused(refusal));
     }
 
@@ -252,18 +221,10 @@ pub async fn say(
     // independently, so a race still fails closed).
     match ad.state {
         SessionState::InputRequired => {
-            let question = ad
-                .pending
-                .as_ref()
-                .and_then(|items| items.first())
-                .map(|item| item.prompt.clone());
+            let question = ad.pending.as_ref().and_then(|items| items.first()).map(|item| item.prompt.clone());
             let turn_age_ms = age_ms(ad.turn_started_at.as_deref());
             let last_update_age_ms = age_ms(ad.last_update_at.as_deref());
-            return Err(SayError::InputRequired {
-                question,
-                turn_age_ms,
-                last_update_age_ms,
-            });
+            return Err(SayError::InputRequired { question, turn_age_ms, last_update_age_ms });
         }
         SessionState::Working if !queue => {
             let turn_age_ms = age_ms(ad.turn_started_at.as_deref());
@@ -274,39 +235,14 @@ pub async fn say(
             // state") — #186 (roster) owns the real derivation; this is the
             // minimal stand-in `say`'s own busy hint needs (see the module
             // doc's "Decisions I made").
-            let state = if last_update_age_ms >= stall_threshold_ms() {
-                "stalled"
-            } else {
-                "working"
-            };
-            return Err(SayError::Busy {
-                state: state.to_string(),
-                turn_age_ms,
-                last_update_age_ms,
-            });
+            let state = if last_update_age_ms >= stall_threshold_ms() { "stalled" } else { "working" };
+            return Err(SayError::Busy { state: state.to_string(), turn_age_ms, last_update_age_ms });
         }
         _ => {}
     }
 
-    let kind = if queue {
-        TurnKind::Queue
-    } else {
-        TurnKind::Plain
-    };
-    send_turn(
-        &TurnCtx {
-            registry,
-            roster,
-            state,
-            grant,
-        },
-        &handle,
-        &ad,
-        text,
-        kind,
-        timeout,
-    )
-    .await
+    let kind = if queue { TurnKind::Queue } else { TurnKind::Plain };
+    send_turn(&TurnCtx { registry, roster, state, grant }, &handle, &ad, text, kind, timeout).await
 }
 
 /// `interrupt SESSION TEXT`'s own redirect turn (issue #191): unlike [`say`],
@@ -325,20 +261,7 @@ pub async fn send_replace_turn(
     text: &str,
     timeout: Duration,
 ) -> Result<SayOutcome, SayError> {
-    send_turn(
-        &TurnCtx {
-            registry,
-            roster,
-            state,
-            grant: None,
-        },
-        handle,
-        ad,
-        text,
-        TurnKind::Replace,
-        timeout,
-    )
-    .await
+    send_turn(&TurnCtx { registry, roster, state, grant: None }, handle, ad, text, TurnKind::Replace, timeout).await
 }
 
 /// `queue`/`replace` collapsed into one enum purely to keep [`send_turn`]
@@ -390,12 +313,7 @@ async fn send_turn(
     kind: TurnKind,
     timeout: Duration,
 ) -> Result<SayOutcome, SayError> {
-    let TurnCtx {
-        registry,
-        roster,
-        state,
-        grant,
-    } = *ctx;
+    let TurnCtx { registry, roster, state, grant } = *ctx;
     let request_id = holler_proto::CorrelationId::mint_hub().as_str().to_string();
     let message = user_message(&request_id, text);
     let started = Instant::now();
@@ -404,30 +322,19 @@ async fn send_turn(
     // dispatched, ahead of the body's next presence heartbeat — so a `wait
     // --after <prev turn_id>` started right after this call already sees a
     // fresh in-flight turn rather than the stale one it was watermarked on.
-    let prev_turn_id = roster
-        .replace_turn_id(&handle.token_id, ad.name.as_str(), &request_id)
-        .flatten();
+    let prev_turn_id = roster.replace_turn_id(&handle.token_id, ad.name.as_str(), &request_id).flatten();
 
-    append_talklog(
-        state,
-        &handle.hostname,
-        ad.name.as_str(),
-        &TalkLine::Prompt {
-            prompt_id: request_id.clone(),
-            text: text.to_string(),
-        },
-    );
+    append_talklog(state, &handle.hostname, ad.name.as_str(), &TalkLine::Prompt {
+        prompt_id: request_id.clone(),
+        text: text.to_string(),
+    });
 
     let reply = handle
         .say(
             request_id.clone(),
             ad.name.clone(),
             Box::new(message),
-            SayOpts {
-                queue: kind.queue(),
-                replace: kind.replace(),
-                grant: grant.map(str::to_owned),
-            },
+            SayOpts { queue: kind.queue(), replace: kind.replace(), grant: grant.map(str::to_owned) },
             timeout,
         )
         .await;
@@ -450,64 +357,37 @@ async fn send_turn(
                         )
                     })
                     .unwrap_or_default();
-                Err(SayError::Busy {
-                    state: state_str,
-                    turn_age_ms,
-                    last_update_age_ms,
-                })
+                Err(SayError::Busy { state: state_str, turn_age_ms, last_update_age_ms })
             } else {
-                if err.code == holler_proto::Code::SessionHeld.jsonrpc()
-                    || err.code == holler_proto::Code::InvalidGrant.jsonrpc()
-                {
+                if err.code == holler_proto::Code::SessionHeld.jsonrpc() || err.code == holler_proto::Code::InvalidGrant.jsonrpc() {
                     // The hold was set after `say`'s own pre-check but before
                     // the prompt reached `send_prompt` (issue #442): nothing
                     // was delivered, so undo the turn id moved above (only if it
                     // is still ours: a newer turn's id is left alone).
-                    roster.undo_turn_id(
-                        &handle.token_id,
-                        ad.name.as_str(),
-                        &request_id,
-                        prev_turn_id,
-                    );
+                    roster.undo_turn_id(&handle.token_id, ad.name.as_str(), &request_id, prev_turn_id);
                 }
                 Err(SayError::Refused(err))
             }
         }
-        Some(SayReply::Result {
-            message,
-            stop_reason,
-            state: turn_state,
-            updates,
-        }) => {
+        Some(SayReply::Result { message, stop_reason, state: turn_state, updates }) => {
             for u in &updates {
-                append_talklog(
-                    state,
-                    &handle.hostname,
-                    ad.name.as_str(),
-                    &TalkLine::Update {
-                        prompt_id: request_id.clone(),
-                        seq: u.seq,
-                        parts: u.parts.clone(),
-                        ts: u.ts.clone(),
-                    },
-                );
-            }
-            append_talklog(
-                state,
-                &handle.hostname,
-                ad.name.as_str(),
-                &TalkLine::Done {
+                append_talklog(state, &handle.hostname, ad.name.as_str(), &TalkLine::Update {
                     prompt_id: request_id.clone(),
-                    stop_reason: stop_reason.clone(),
-                },
-            );
+                    seq: u.seq,
+                    parts: u.parts.clone(),
+                    ts: u.ts.clone(),
+                });
+            }
+            append_talklog(state, &handle.hostname, ad.name.as_str(), &TalkLine::Done {
+                prompt_id: request_id.clone(),
+                stop_reason: stop_reason.clone(),
+            });
             if stop_reason == "cancelled" {
                 return Err(SayError::Cancelled);
             }
             let last_turn = holler_proto::docs::LastTurn {
                 turn_id: request_id.clone(),
-                state: holler_proto::state_for_stop_reason(&stop_reason)
-                    .unwrap_or(SessionState::Failed),
+                state: holler_proto::state_for_stop_reason(&stop_reason).unwrap_or(SessionState::Failed),
                 stop_reason: stop_reason.clone(),
                 ended_at: holler_proto::log::timestamp(),
             };
@@ -556,16 +436,12 @@ fn not_connected_detail(roster: &Roster, session: &str) -> String {
 /// `say`'s busy hint calls it `stalled` instead of `working`.
 /// `HOLLER_STALL_MS` overrides the 30s default.
 fn stall_threshold_ms() -> u64 {
-    std::env::var("HOLLER_STALL_MS")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(30_000)
+    std::env::var("HOLLER_STALL_MS").ok().and_then(|s| s.parse().ok()).unwrap_or(30_000)
 }
 
 fn age_ms(rfc3339: Option<&str>) -> u64 {
     let Some(s) = rfc3339 else { return 0 };
-    let Ok(then) = time::OffsetDateTime::parse(s, &time::format_description::well_known::Rfc3339)
-    else {
+    let Ok(then) = time::OffsetDateTime::parse(s, &time::format_description::well_known::Rfc3339) else {
         return 0;
     };
     let now = time::OffsetDateTime::now_utc();
@@ -591,20 +467,9 @@ fn user_message(request_id: &str, text: &str) -> Message {
 }
 
 enum TalkLine {
-    Prompt {
-        prompt_id: String,
-        text: String,
-    },
-    Update {
-        prompt_id: String,
-        seq: u64,
-        parts: Vec<Part>,
-        ts: String,
-    },
-    Done {
-        prompt_id: String,
-        stop_reason: String,
-    },
+    Prompt { prompt_id: String, text: String },
+    Update { prompt_id: String, seq: u64, parts: Vec<Part>, ts: String },
+    Done { prompt_id: String, stop_reason: String },
 }
 
 /// Append one line to `<state>/hub/talklog/<label>__<session>.jsonl`
@@ -638,31 +503,19 @@ fn append_talklog(state: &HubState, label: &str, session: &str, line: &TalkLine)
             "prompt_id": prompt_id,
             "text": text,
         }),
-        TalkLine::Update {
-            prompt_id,
-            seq,
-            parts,
-            ts,
-        } => serde_json::json!({
+        TalkLine::Update { prompt_id, seq, parts, ts } => serde_json::json!({
             "ts": ts,
             "prompt_id": prompt_id,
             "seq": seq,
             "parts": parts_to_json(parts),
         }),
-        TalkLine::Done {
-            prompt_id,
-            stop_reason,
-        } => serde_json::json!({
+        TalkLine::Done { prompt_id, stop_reason } => serde_json::json!({
             "ts": holler_proto::log::timestamp(),
             "prompt_id": prompt_id,
             "stopReason": stop_reason,
         }),
     };
-    if let Ok(mut f) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)
-    {
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
         use std::io::Write;
         let _ = writeln!(f, "{json}");
     }

@@ -636,24 +636,15 @@ fn the_install_command_notes_that_no_release_tag_has_the_whole_directory() {
 fn every_wizard_file_is_under_herdr_setup_and_the_old_paths_are_gone() {
     // The one place the old locations may be named is the migration note.
     for (name, text) in all_texts() {
-        assert!(
-            !text.contains(".config/setup-wizard"),
-            "{name} names the old config path"
-        );
+        assert!(!text.contains(".config/setup-wizard"), "{name} names the old config path");
         let new = text.matches("herdr/setup/wizard-ledger.toml").count();
         let all = text.matches("wizard-ledger.toml").count();
         let old = all - new;
-        assert!(
-            old <= usize::from(name != "README.md"),
-            "{name}: {old} old ledger mentions"
-        );
+        assert!(old <= usize::from(name != "README.md"), "{name}: {old} old ledger mentions");
     }
     for (name, text) in all_texts() {
         if name != "README.md" {
-            assert!(
-                text.contains("<state_dir>/herdr/setup/wizard-ledger.toml"),
-                "{name}"
-            );
+            assert!(text.contains("<state_dir>/herdr/setup/wizard-ledger.toml"), "{name}");
         }
     }
     assert!(skill().contains("~/.holler/herdr/setup/sessions.toml"));

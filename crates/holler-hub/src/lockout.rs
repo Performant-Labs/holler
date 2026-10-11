@@ -132,12 +132,7 @@ fn clip_token_id(id: &str) -> &str {
 impl PeerState {
     /// An entry first counted at `now`, with nothing counted yet.
     fn new(now: u64) -> Self {
-        Self {
-            window_start: now,
-            count: 0,
-            tripped_since: None,
-            failures: Vec::new(),
-        }
+        Self { window_start: now, count: 0, tripped_since: None, failures: Vec::new() }
     }
 
     /// Whether this entry still counts at `now`: a tripped entry until its
@@ -154,15 +149,12 @@ impl PeerState {
     /// Whether this entry refuses at `now`: tripped, and its cooldown not yet
     /// elapsed. Accumulating failures never refuse (the PR #289 rule).
     fn refuses(&self, now: u64, limits: LockoutLimits) -> bool {
-        self.tripped_since
-            .is_some_and(|since| now.saturating_sub(since) < limits.duration_ms)
+        self.tripped_since.is_some_and(|since| now.saturating_sub(since) < limits.duration_ms)
     }
 
     /// The time left on the cooldown at `now`, in milliseconds; 0 unless tripped.
     fn retry_after_ms(&self, now: u64, limits: LockoutLimits) -> u64 {
-        self.tripped_since.map_or(0, |since| {
-            limits.duration_ms.saturating_sub(now.saturating_sub(since))
-        })
+        self.tripped_since.map_or(0, |since| limits.duration_ms.saturating_sub(now.saturating_sub(since)))
     }
 
     /// Count `failure` against this entry at `now`; `true` if it tripped the
@@ -214,12 +206,9 @@ impl PeerEntry {
                 FailureOutcome::of(wide, newly_tripped, true, now, limits)
             }
             Self::Tokens(buckets)
-                if buckets.contains_key(&failure.token_id)
-                    || buckets.len() + 1 < MAX_TOKEN_IDS_PER_PEER =>
+                if buckets.contains_key(&failure.token_id) || buckets.len() + 1 < MAX_TOKEN_IDS_PER_PEER =>
             {
-                let bucket = buckets
-                    .entry(failure.token_id.clone())
-                    .or_insert_with(|| PeerState::new(now));
+                let bucket = buckets.entry(failure.token_id.clone()).or_insert_with(|| PeerState::new(now));
                 let newly_tripped = bucket.count_failure(failure, now, limits);
                 FailureOutcome::of(bucket, newly_tripped, false, now, limits)
             }
@@ -242,18 +231,11 @@ impl PeerEntry {
 fn fold_buckets(buckets: HashMap<String, PeerState>, failure: Failure, now: u64) -> PeerState {
     let mut buckets: Vec<(String, PeerState)> = buckets.into_iter().collect();
     buckets.sort_by(|(a_id, a), (b_id, b)| (a.window_start, a_id).cmp(&(b.window_start, b_id)));
-    let count = buckets
-        .iter()
-        .fold(1u64, |sum, (_, s)| sum.saturating_add(s.count));
+    let count = buckets.iter().fold(1u64, |sum, (_, s)| sum.saturating_add(s.count));
     let mut failures: Vec<Failure> = buckets.into_iter().flat_map(|(_, s)| s.failures).collect();
     failures.push(failure);
     let excess = failures.len().saturating_sub(MAX_RECORDED_REASONS);
-    PeerState {
-        window_start: now,
-        count,
-        tripped_since: Some(now),
-        failures: failures.split_off(excess),
-    }
+    PeerState { window_start: now, count, tripped_since: Some(now), failures: failures.split_off(excess) }
 }
 
 /// What a lockout entry covers (issue #455): one token id from one address,
@@ -267,11 +249,7 @@ pub(crate) enum Scope {
 impl Scope {
     /// `Peer` for the whole address, else `Token`.
     pub(crate) fn of(peer_wide: bool) -> Self {
-        if peer_wide {
-            Self::Peer
-        } else {
-            Self::Token
-        }
+        if peer_wide { Self::Peer } else { Self::Token }
     }
 
     /// The scope's name: `token` or `peer`.
@@ -297,13 +275,8 @@ pub struct LockoutKey {
 /// is shown as `?`: a key can be put in a log line as it is.
 impl fmt::Display for LockoutKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let Some(id) = &self.token_id else {
-            return write!(f, "{}", self.peer);
-        };
-        let shown: String = id
-            .chars()
-            .map(|c| if c.is_ascii_graphic() { c } else { '?' })
-            .collect();
+        let Some(id) = &self.token_id else { return write!(f, "{}", self.peer) };
+        let shown: String = id.chars().map(|c| if c.is_ascii_graphic() { c } else { '?' }).collect();
         write!(f, "{} token_id={shown}", self.peer)
     }
 }
@@ -334,13 +307,7 @@ pub struct FailureOutcome {
 
 impl FailureOutcome {
     /// The outcome of a failure that left `state` as it is (`cleared` is the caller's).
-    fn of(
-        state: &PeerState,
-        newly_tripped: bool,
-        peer_wide: bool,
-        now: u64,
-        limits: LockoutLimits,
-    ) -> Self {
+    fn of(state: &PeerState, newly_tripped: bool, peer_wide: bool, now: u64, limits: LockoutLimits) -> Self {
         Self {
             count: state.count,
             max: limits.max_failures,
@@ -414,9 +381,7 @@ impl Lockout {
         let map = self.peers.lock().unwrap_or_else(|e| e.into_inner());
         match map.get(peer) {
             Some(PeerEntry::Wide(wide)) => wide.refuses(now, self.limits),
-            Some(PeerEntry::Tokens(buckets)) => buckets
-                .get(clip_token_id(token_id))
-                .is_some_and(|b| b.refuses(now, self.limits)),
+            Some(PeerEntry::Tokens(buckets)) => buckets.get(clip_token_id(token_id)).is_some_and(|b| b.refuses(now, self.limits)),
             None => false,
         }
     }
@@ -428,9 +393,7 @@ impl Lockout {
     /// `true` if a lockout (a trip, not mere accumulating strikes) was lifted.
     pub fn reset(&self, peer: &IpAddr, token_id: &str) -> bool {
         let mut map = self.peers.lock().unwrap_or_else(|e| e.into_inner());
-        let Some(PeerEntry::Tokens(buckets)) = map.get_mut(peer) else {
-            return false;
-        };
+        let Some(PeerEntry::Tokens(buckets)) = map.get_mut(peer) else { return false };
         let removed = buckets.remove(clip_token_id(token_id));
         if buckets.is_empty() {
             map.remove(peer);
@@ -445,26 +408,13 @@ impl Lockout {
     /// the address's peer-wide entry ([`PeerEntry::record`], issue #455).
     /// `token_id` is the id the peer named (issue #451), remembered for `hub
     /// status` and clipped to [`MAX_TOKEN_ID_BYTES`]; empty when there was none.
-    pub fn record_failure_detailed(
-        &self,
-        peer: &IpAddr,
-        reason: &'static str,
-        token_id: &str,
-    ) -> FailureOutcome {
+    pub fn record_failure_detailed(&self, peer: &IpAddr, reason: &'static str, token_id: &str) -> FailureOutcome {
         let now = self.clock.now_ms();
         let mut map = self.peers.lock().unwrap_or_else(|e| e.into_inner());
         let cleared = Self::drop_stale(&mut map, now, self.limits);
-        let failure = Failure {
-            reason,
-            token_id: clip_token_id(token_id).to_owned(),
-        };
-        let entry = map
-            .entry(*peer)
-            .or_insert_with(|| PeerEntry::Tokens(HashMap::new()));
-        FailureOutcome {
-            cleared,
-            ..entry.record(failure, now, self.limits)
-        }
+        let failure = Failure { reason, token_id: clip_token_id(token_id).to_owned() };
+        let entry = map.entry(*peer).or_insert_with(|| PeerEntry::Tokens(HashMap::new()));
+        FailureOutcome { cleared, ..entry.record(failure, now, self.limits) }
     }
 
     /// Drop lapsed entries now and report the keys whose *cooldown* lapsed
@@ -493,39 +443,24 @@ impl Lockout {
             .iter()
             .flat_map(|(ip, entry)| match entry {
                 PeerEntry::Wide(wide) => vec![(ip, Scope::Peer, wide)],
-                PeerEntry::Tokens(buckets) => {
-                    buckets.values().map(|s| (ip, Scope::Token, s)).collect()
-                }
+                PeerEntry::Tokens(buckets) => buckets.values().map(|s| (ip, Scope::Token, s)).collect(),
             })
             .filter(|(_, _, s)| s.is_live(now, self.limits))
             .map(|(ip, scope, s)| PeerRow::of(ip, scope, s, now, self.limits))
             .collect();
-        peers.sort_by(|a, b| {
-            (&a.peer, a.scope.as_str(), &a.token_ids).cmp(&(
-                &b.peer,
-                b.scope.as_str(),
-                &b.token_ids,
-            ))
-        });
+        peers.sort_by(|a, b| (&a.peer, a.scope.as_str(), &a.token_ids).cmp(&(&b.peer, b.scope.as_str(), &b.token_ids)));
         LockoutSnapshot { peers }
     }
 
     /// Remove tripped entries whose cooldown has lapsed and accumulating ones
     /// whose window has lapsed with no trip, and any address left with no
     /// entry; return the keys of the former.
-    fn drop_stale(
-        map: &mut HashMap<IpAddr, PeerEntry>,
-        now: u64,
-        limits: LockoutLimits,
-    ) -> Vec<LockoutKey> {
+    fn drop_stale(map: &mut HashMap<IpAddr, PeerEntry>, now: u64, limits: LockoutLimits) -> Vec<LockoutKey> {
         let mut cleared = Vec::new();
         let mut keep = |s: &PeerState, peer: IpAddr, token_id: Option<&String>| {
             let live = s.is_live(now, limits);
             if !live && s.tripped_since.is_some() {
-                cleared.push(LockoutKey {
-                    peer,
-                    token_id: token_id.cloned(),
-                });
+                cleared.push(LockoutKey { peer, token_id: token_id.cloned() });
             }
             live
         };
@@ -579,12 +514,8 @@ impl PeerRow {
     /// The row for an entry that [`PeerState::is_live`] at `now`.
     fn of(ip: &IpAddr, scope: Scope, s: &PeerState, now: u64, limits: LockoutLimits) -> Self {
         let reasons: Vec<&'static str> = s.failures.iter().map(|f| f.reason).collect();
-        let token_ids: BTreeSet<&str> = s
-            .failures
-            .iter()
-            .map(|f| f.token_id.as_str())
-            .filter(|id| !id.is_empty())
-            .collect();
+        let token_ids: BTreeSet<&str> =
+            s.failures.iter().map(|f| f.token_id.as_str()).filter(|id| !id.is_empty()).collect();
         Self {
             peer: ip.to_string(),
             scope,
@@ -598,16 +529,10 @@ impl PeerRow {
     }
 
     fn to_json(&self, labels: &HashMap<String, String>) -> serde_json::Value {
-        let reasons: serde_json::Map<String, serde_json::Value> = self
-            .reasons
-            .iter()
-            .map(|(code, n)| ((*code).to_owned(), serde_json::Value::from(*n)))
-            .collect();
-        let token_ids: Vec<serde_json::Value> = self
-            .token_ids
-            .iter()
-            .map(|id| serde_json::json!({ "id": id, "label": labels.get(id) }))
-            .collect();
+        let reasons: serde_json::Map<String, serde_json::Value> =
+            self.reasons.iter().map(|(code, n)| ((*code).to_owned(), serde_json::Value::from(*n))).collect();
+        let token_ids: Vec<serde_json::Value> =
+            self.token_ids.iter().map(|id| serde_json::json!({ "id": id, "label": labels.get(id) })).collect();
         serde_json::json!({
             "peer": self.peer,
             "scope": self.scope.as_str(),

@@ -76,17 +76,11 @@ fn thread_count(pid: u32) -> Option<usize> {
 
 #[cfg(not(target_os = "linux"))]
 fn thread_count(pid: u32) -> Option<usize> {
-    let out = Command::new("ps")
-        .args(["-M", "-p", &pid.to_string()])
-        .output()
-        .ok()?;
+    let out = Command::new("ps").args(["-M", "-p", &pid.to_string()]).output().ok()?;
     if !out.status.success() {
         return None;
     }
-    let lines = String::from_utf8_lossy(&out.stdout)
-        .lines()
-        .filter(|l| !l.trim().is_empty())
-        .count();
+    let lines = String::from_utf8_lossy(&out.stdout).lines().filter(|l| !l.trim().is_empty()).count();
     Some(lines.saturating_sub(2).max(1))
 }
 
@@ -96,9 +90,7 @@ fn thread_count(pid: u32) -> Option<usize> {
 /// measured there rather than measured badly.
 #[cfg(target_os = "linux")]
 fn open_fds(pid: u32) -> Option<usize> {
-    std::fs::read_dir(format!("/proc/{pid}/fd"))
-        .ok()
-        .map(Iterator::count)
+    std::fs::read_dir(format!("/proc/{pid}/fd")).ok().map(Iterator::count)
 }
 
 #[cfg(not(target_os = "linux"))]

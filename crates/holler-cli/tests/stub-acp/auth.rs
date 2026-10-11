@@ -96,9 +96,7 @@ static AUTHENTICATED: AtomicBool = AtomicBool::new(false);
 static LOG: Mutex<Option<File>> = Mutex::new(None);
 
 fn config() -> std::sync::MutexGuard<'static, AuthConfig> {
-    CONFIG
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
+    CONFIG.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 /// Consume one auth flag from `main`'s argv scan. Returns how many extra
@@ -137,9 +135,7 @@ pub(crate) fn parse_flag(flag: &str, next: Option<&String>) -> usize {
 fn log_line(text: &str) {
     let path = config().auth_log.clone();
     let Some(path) = path else { return };
-    let mut log = LOG
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut log = LOG.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     if log.is_none() {
         *log = OpenOptions::new().create(true).append(true).open(path).ok();
     }
@@ -178,10 +174,7 @@ fn auth_methods(cfg: &AuthConfig) -> Vec<Value> {
     let mut methods = Vec::new();
     if cfg.flood {
         for n in 0..100 {
-            methods.push(method(
-                "agent",
-                &format!("filler-{n:03}-\u{1b}[31m{}", "f".repeat(500 - 16)),
-            ));
+            methods.push(method("agent", &format!("filler-{n:03}-\u{1b}[31m{}", "f".repeat(500 - 16))));
         }
     }
     if cfg.require_auth || cfg.advertise_methods || cfg.flood {
@@ -213,11 +206,7 @@ pub(crate) fn session_new(lock: &mut impl Write, id: &Value) -> bool {
     log_line("session/new");
     let cfg = config();
     let authenticated = AUTHENTICATED.load(Ordering::SeqCst);
-    let delay = if authenticated && cfg.retry_delay_ms > 0 {
-        cfg.retry_delay_ms
-    } else {
-        cfg.new_delay_ms
-    };
+    let delay = if authenticated && cfg.retry_delay_ms > 0 { cfg.retry_delay_ms } else { cfg.new_delay_ms };
     if delay > 0 {
         std::thread::sleep(Duration::from_millis(delay));
     }
@@ -229,13 +218,7 @@ pub(crate) fn session_new(lock: &mut impl Write, id: &Value) -> bool {
             write_error(lock, id, code, "stub session/new failure", None);
         }
     } else if cfg.require_auth && (!authenticated || cfg.always_auth_required) {
-        write_error(
-            lock,
-            id,
-            AUTH_REQUIRED,
-            "Authentication required",
-            Some(hostile_data()),
-        );
+        write_error(lock, id, AUTH_REQUIRED, "Authentication required", Some(hostile_data()));
     } else if let (true, Some(code)) = (authenticated, cfg.error_after_auth) {
         write_error(lock, id, code, "stub failure after auth/login", None);
     } else {
@@ -246,10 +229,7 @@ pub(crate) fn session_new(lock: &mut impl Write, id: &Value) -> bool {
 
 /// `auth/login`: log the method id, then accept or reject per the flags.
 pub(crate) fn login(lock: &mut impl Write, msg: &Value) {
-    let method_id = msg
-        .pointer("/params/methodId")
-        .and_then(Value::as_str)
-        .unwrap_or_default();
+    let method_id = msg.pointer("/params/methodId").and_then(Value::as_str).unwrap_or_default();
     log_line(&format!("auth/login {method_id}"));
     let cfg = config();
     if cfg.auth_delay_ms > 0 {
@@ -263,29 +243,11 @@ pub(crate) fn login(lock: &mut impl Write, msg: &Value) {
     if cfg.flood {
         write_error(lock, id, -32603, &"Q".repeat(5000), Some(hostile_data()));
     } else if cfg.reject_auth {
-        write_error(
-            lock,
-            id,
-            -32603,
-            "stub rejected auth/login",
-            Some(hostile_data()),
-        );
+        write_error(lock, id, -32603, "stub rejected auth/login", Some(hostile_data()));
     } else if !env_ok {
-        write_error(
-            lock,
-            id,
-            -32602,
-            "stub credential missing from environment",
-            Some(hostile_data()),
-        );
+        write_error(lock, id, -32602, "stub credential missing from environment", Some(hostile_data()));
     } else if method_id != "stub-key" {
-        write_error(
-            lock,
-            id,
-            -32602,
-            "stub unknown auth method",
-            Some(hostile_data()),
-        );
+        write_error(lock, id, -32602, "stub unknown auth method", Some(hostile_data()));
     } else {
         AUTHENTICATED.store(true, Ordering::SeqCst);
         let ok = json!({ "jsonrpc": "2.0", "id": id, "result": {} });

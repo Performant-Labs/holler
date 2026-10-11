@@ -2,8 +2,8 @@
 
 use std::collections::BTreeMap;
 
-use base64::engine::general_purpose::STANDARD as B64;
 use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as B64;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -65,15 +65,8 @@ impl TryFrom<PartWire> for Part {
 
     fn try_from(mut w: PartWire) -> Result<Self, Self::Error> {
         // A Part carries at most one OneOf member; two or more is a wire error.
-        let n = [
-            w.text.is_some(),
-            w.raw.is_some(),
-            w.url.is_some(),
-            w.data.is_some(),
-        ]
-        .iter()
-        .filter(|b| **b)
-        .count();
+        let n = [w.text.is_some(), w.raw.is_some(), w.url.is_some(), w.data.is_some()]
+            .iter().filter(|b| **b).count();
         let content = match n {
             0 => None,
             1 => Some(match w.text {

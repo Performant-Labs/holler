@@ -141,12 +141,7 @@ impl Hub {
         }
         self.stop();
         let started = std::time::Instant::now();
-        let (child, _) = spawn_hub(
-            &self.holler_bin,
-            self.state.path(),
-            &self.env,
-            &format!("127.0.0.1:{}", self.port),
-        )?;
+        let (child, _) = spawn_hub(&self.holler_bin, self.state.path(), &self.env, &format!("127.0.0.1:{}", self.port))?;
         let took = started.elapsed();
         self.pid = Some(child.id());
         self.child = Some(child);
@@ -216,11 +211,7 @@ impl Hub {
             .stderr(Stdio::piped())
             .output()?;
         if !out.status.success() {
-            return Err(format!(
-                "`hub status --json` failed: {}",
-                String::from_utf8_lossy(&out.stderr)
-            )
-            .into());
+            return Err(format!("`hub status --json` failed: {}", String::from_utf8_lossy(&out.stderr)).into());
         }
         Ok(serde_json::from_slice(&out.stdout)?)
     }
@@ -265,75 +256,68 @@ impl Drop for Hub {
 /// uses. The stderr pipe keeps being drained on a background thread for the
 /// hub's whole life: stopping at the `listening` line would let the pipe fill
 /// and block the hub's runtime.
-fn spawn_hub(
-    holler_bin: &Path,
-    state_path: &Path,
-    env: &[(String, String)],
-    listen: &str,
-) -> Res<(Child, u16)> {
-    let mut cmd = Command::new(holler_bin);
-    cmd.env("HOLLER_STATE_DIR", state_path)
-        .env("HOLLER_DEBUG", "quiet")
-        .env("HOLLER_LOG_FORMAT", "json");
-    for (k, v) in env {
-        cmd.env(k, v);
-    }
-    cmd.args(["hub", "serve", "--listen", listen])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped());
-    own_process_group(&mut cmd);
-    let mut child = cmd.spawn()?;
-
-    let stderr = child.stderr.take().ok_or("hub stderr was not piped")?;
-    let (tx, rx) = std::sync::mpsc::channel::<u16>();
-    // The hub's own log stream is invisible by default (it would drown the
-    // report), but a hub that fails to come up leaves nothing to diagnose
-    // from — `HOLLER_LOAD_TEST_ECHO_HUB=1` relays it to this process's
-    // stderr.
-    let echo = std::env::var("HOLLER_LOAD_TEST_ECHO_HUB").is_ok();
-    std::thread::spawn(move || {
-        let mut reader = std::io::BufReader::new(stderr);
-        let mut line = String::new();
-        let mut sent = false;
-        loop {
-            line.clear();
-            match reader.read_line(&mut line) {
-                Ok(0) | Err(_) => break,
-                Ok(_) => {}
-            }
-            if echo {
-                eprint!("[hub] {line}");
-            }
-            if sent {
-                continue;
-            }
-            let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) else {
-                continue;
-            };
-            if v.get("event").and_then(serde_json::Value::as_str) != Some("listening") {
-                continue;
-            }
-            if let Some(port) = v
-                .get("addr")
-                .or_else(|| v.get("address"))
-                .and_then(serde_json::Value::as_str)
-                .and_then(|a| a.rsplit(':').next())
-                .and_then(|p| p.parse::<u16>().ok())
-            {
-                sent = true;
-                let _ = tx.send(port);
-            }
+fn spawn_hub(holler_bin: &Path, state_path: &Path, env: &[(String, String)], listen: &str) -> Res<(Child, u16)> {
+        let mut cmd = Command::new(holler_bin);
+        cmd.env("HOLLER_STATE_DIR", state_path)
+            .env("HOLLER_DEBUG", "quiet")
+            .env("HOLLER_LOG_FORMAT", "json");
+        for (k, v) in env {
+            cmd.env(k, v);
         }
-    });
+        cmd.args(["hub", "serve", "--listen", listen])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped());
+        own_process_group(&mut cmd);
+        let mut child = cmd.spawn()?;
 
-    let port = match rx.recv_timeout(Duration::from_secs(20)) {
-        Ok(p) => p,
-        Err(e) => {
-            kill_tree(&mut child);
-            return Err(format!("hub never reported a listening port: {e}").into());
-        }
-    };
+        let stderr = child.stderr.take().ok_or("hub stderr was not piped")?;
+        let (tx, rx) = std::sync::mpsc::channel::<u16>();
+        // The hub's own log stream is invisible by default (it would drown the
+        // report), but a hub that fails to come up leaves nothing to diagnose
+        // from — `HOLLER_LOAD_TEST_ECHO_HUB=1` relays it to this process's
+        // stderr.
+        let echo = std::env::var("HOLLER_LOAD_TEST_ECHO_HUB").is_ok();
+        std::thread::spawn(move || {
+            let mut reader = std::io::BufReader::new(stderr);
+            let mut line = String::new();
+            let mut sent = false;
+            loop {
+                line.clear();
+                match reader.read_line(&mut line) {
+                    Ok(0) | Err(_) => break,
+                    Ok(_) => {}
+                }
+                if echo {
+                    eprint!("[hub] {line}");
+                }
+                if sent {
+                    continue;
+                }
+                let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) else { continue };
+                if v.get("event").and_then(serde_json::Value::as_str) != Some("listening") {
+                    continue;
+                }
+                if let Some(port) = v
+                    .get("addr")
+                    .or_else(|| v.get("address"))
+                    .and_then(serde_json::Value::as_str)
+                    .and_then(|a| a.rsplit(':').next())
+                    .and_then(|p| p.parse::<u16>().ok())
+                {
+                    sent = true;
+                    let _ = tx.send(port);
+                }
+            }
+        });
+
+        let port = match rx.recv_timeout(Duration::from_secs(20)) {
+            Ok(p) => p,
+            Err(e) => {
+                kill_tree(&mut child);
+                return Err(format!("hub never reported a listening port: {e}").into());
+            }
+        };
 
     Ok((child, port))
 }

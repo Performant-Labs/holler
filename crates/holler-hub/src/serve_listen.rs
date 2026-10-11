@@ -83,12 +83,7 @@ impl<L: AsRef<[TcpListener]> + Unpin> Future for AcceptAny<L> {
 }
 
 #[cfg(test)]
-#[allow(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::panic,
-    clippy::unreachable
-)] // #469
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable)] // #469
 mod tests {
     use super::{effective_listen, AcceptAny, DEFAULT_LISTEN};
     use tokio::net::TcpListener;
@@ -98,10 +93,7 @@ mod tests {
     /// (the drift check `token_cmd`'s default join URL also relies on).
     #[test]
     fn effective_listen_with_nothing_given_is_the_one_default() {
-        assert_eq!(
-            DEFAULT_LISTEN, "127.0.0.1:41807",
-            "the documented default listen address"
-        );
+        assert_eq!(DEFAULT_LISTEN, "127.0.0.1:41807", "the documented default listen address");
         assert_eq!(
             effective_listen(&[]),
             vec!["127.0.0.1:41807".to_string()],
@@ -119,11 +111,7 @@ mod tests {
             "an explicit --listen replaces the default"
         );
         let two = vec!["127.0.0.1:5001".to_string(), "[::1]:5002".to_string()];
-        assert_eq!(
-            effective_listen(&two),
-            two,
-            "two given addresses are both kept, in order"
-        );
+        assert_eq!(effective_listen(&two), two, "two given addresses are both kept, in order");
     }
 
     /// Criterion 2: an `AcceptAny` over zero listeners is refused at
@@ -142,18 +130,12 @@ mod tests {
     /// the *second* of two listeners resolves the future with that peer.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn accept_any_resolves_a_connection_on_any_listener() {
-        let first = TcpListener::bind("127.0.0.1:0")
-            .await
-            .expect("bind the first listener");
-        let second = TcpListener::bind("127.0.0.1:0")
-            .await
-            .expect("bind the second listener");
+        let first = TcpListener::bind("127.0.0.1:0").await.expect("bind the first listener");
+        let second = TcpListener::bind("127.0.0.1:0").await.expect("bind the second listener");
         let target = second.local_addr().expect("second listener addr");
         let listeners = vec![first, second];
 
-        let client = tokio::net::TcpStream::connect(target)
-            .await
-            .expect("dial the second listener");
+        let client = tokio::net::TcpStream::connect(target).await.expect("dial the second listener");
         let client_addr = client.local_addr().expect("client local addr");
 
         let accept = AcceptAny::new(&listeners).expect("two listeners build an AcceptAny");
@@ -161,9 +143,6 @@ mod tests {
             .await
             .expect("AcceptAny resolves once a connection is pending")
             .expect("the accept succeeds");
-        assert_eq!(
-            peer, client_addr,
-            "the accepted peer is the client that dialed the second listener"
-        );
+        assert_eq!(peer, client_addr, "the accepted peer is the client that dialed the second listener");
     }
 }

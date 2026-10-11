@@ -29,8 +29,7 @@ impl Samples {
 
     /// Record one observation.
     pub fn push(&mut self, d: Duration) {
-        self.micros
-            .push(d.as_micros().min(u128::from(u64::MAX)) as u64);
+        self.micros.push(d.as_micros().min(u128::from(u64::MAX)) as u64);
     }
 
     /// Fold another collector's observations into this one.
@@ -437,17 +436,7 @@ pub fn human_table(report: &Report) -> String {
 
     out.push_str(&format!(
         "{:>7} {:>7} {:>8} {:>9} {:>9} {:>9} {:>9} {:>8} {:>8} {:>7} {:>8}\n",
-        "target",
-        "live",
-        "status",
-        "hs p50",
-        "hs p90",
-        "hs p99",
-        "hs max",
-        "rss",
-        "thr",
-        "cpu%",
-        "step s",
+        "target", "live", "status", "hs p50", "hs p90", "hs p99", "hs max", "rss", "thr", "cpu%", "step s",
     ));
     out.push_str(&format!("{}\n", "-".repeat(101)));
     for step in &report.steps {
@@ -456,10 +445,8 @@ pub fn human_table(report: &Report) -> String {
             "{:>7} {:>7} {:>8} {:>9} {:>9} {:>9} {:>9} {:>8} {:>8} {:>7} {:>8}\n",
             step.clients_target,
             step.clients_live,
-            step.hub_status_clients.map_or_else(
-                || "?".to_string(),
-                |c| format!("{c}{}", if step.hub_status_matches { "" } else { "!" })
-            ),
+            step.hub_status_clients
+                .map_or_else(|| "?".to_string(), |c| format!("{c}{}", if step.hub_status_matches { "" } else { "!" })),
             hs.map_or_else(|| "-".to_string(), |s| format!("{:.1}", s.p50_ms)),
             hs.map_or_else(|| "-".to_string(), |s| format!("{:.1}", s.p90_ms)),
             hs.map_or_else(|| "-".to_string(), |s| format!("{:.1}", s.p99_ms)),
@@ -471,9 +458,7 @@ pub fn human_table(report: &Report) -> String {
         ));
     }
     out.push_str("\n(hs = full circuit handshake, ms: authenticate -> prove -> hello.\n");
-    out.push_str(
-        " status: hub status --json's `clients`; a trailing `!` means it did NOT match `live`.)\n",
-    );
+    out.push_str(" status: hub status --json's `clients`; a trailing `!` means it did NOT match `live`.)\n");
 
     for step in &report.steps {
         out.push_str(&step_extra_lines(step));
@@ -495,10 +480,7 @@ pub fn human_table(report: &Report) -> String {
 fn step_extra_lines(step: &StepReport) -> String {
     let mut out = String::new();
     if let Some(per) = step.rss_delta_per_client_kib {
-        out.push_str(&format!(
-            "  N={:<4} rss over baseline: {:.0} KiB/client",
-            step.clients_target, per
-        ));
+        out.push_str(&format!("  N={:<4} rss over baseline: {:.0} KiB/client", step.clients_target, per));
         if let Some(td) = step.threads_delta {
             out.push_str(&format!("; threads over baseline: {td:+}"));
         }
@@ -522,15 +504,9 @@ fn step_extra_lines(step: &StepReport) -> String {
         out.push_str(&format!(
             "  M={:<4} sessions: expected={} actual={}{} \n",
             spb,
-            step.sessions_expected
-                .map_or_else(|| "?".to_string(), |v| v.to_string()),
-            step.sessions_actual
-                .map_or_else(|| "?".to_string(), |v| v.to_string()),
-            if step.sessions_match == Some(true) {
-                " (match)"
-            } else {
-                " (MISMATCH)"
-            },
+            step.sessions_expected.map_or_else(|| "?".to_string(), |v| v.to_string()),
+            step.sessions_actual.map_or_else(|| "?".to_string(), |v| v.to_string()),
+            if step.sessions_match == Some(true) { " (match)" } else { " (MISMATCH)" },
         ));
     }
     if let Some(fanout) = step.presence_fanout {
@@ -565,31 +541,16 @@ fn churn_lines(c: &ChurnReport) -> String {
     let lat = |s: Option<LatencyStats>| {
         s.map_or_else(
             || "n=0".to_string(),
-            |s| {
-                format!(
-                    "n={} p50={:.1}ms p90={:.1}ms p99={:.1}ms max={:.1}ms",
-                    s.count, s.p50_ms, s.p90_ms, s.p99_ms, s.max_ms
-                )
-            },
+            |s| format!("n={} p50={:.1}ms p90={:.1}ms p99={:.1}ms max={:.1}ms", s.count, s.p50_ms, s.p90_ms, s.p99_ms, s.max_ms),
         )
     };
     let mut out = format!(
         "  churn: {}/{} cycles returned the hub to baseline ({} bodies x {} sessions each)\n",
         c.cycles_completed, c.cycles_target, c.bodies_per_cycle, c.sessions_per_body,
     );
-    out.push_str(&format!(
-        "  join -> registered: {}\n",
-        lat(c.join_to_registered)
-    ));
-    out.push_str(&format!(
-        "  say:                {} (failures={})\n",
-        lat(c.say),
-        c.say_failures
-    ));
-    out.push_str(&format!(
-        "  tear down wave:     {} (graceful/crash cycles)\n",
-        lat(c.detach)
-    ));
+    out.push_str(&format!("  join -> registered: {}\n", lat(c.join_to_registered)));
+    out.push_str(&format!("  say:                {} (failures={})\n", lat(c.say), c.say_failures));
+    out.push_str(&format!("  tear down wave:     {} (graceful/crash cycles)\n", lat(c.detach)));
     out.push_str(&format!("  killed -> baseline: {}\n", lat(c.cleanup)));
     out.push_str(&format!(
         "  hub rss: before={} after={}\n",
@@ -601,10 +562,7 @@ fn churn_lines(c: &ChurnReport) -> String {
             Some(ms) if d.detected => format!("detected after {ms:.0}ms"),
             _ => format!("NOT detected within {}s", d.window_secs),
         };
-        out.push_str(&format!(
-            "  dead attach backend: {verdict}; roster then showed: {}\n",
-            d.roster_after
-        ));
+        out.push_str(&format!("  dead attach backend: {verdict}; roster then showed: {}\n", d.roster_after));
     }
     out.push_str(&churn_run2_lines(c));
     out
@@ -613,37 +571,19 @@ fn churn_lines(c: &ChurnReport) -> String {
 /// The Run #2 additions to [`churn_lines`]; empty for a Run #1-style run.
 fn churn_run2_lines(c: &ChurnReport) -> String {
     let lat = |s: Option<LatencyStats>| {
-        s.map_or_else(
-            || "n=0".to_string(),
-            |s| {
-                format!(
-                    "n={} p50={:.1}ms p99={:.1}ms max={:.1}ms",
-                    s.count, s.p50_ms, s.p99_ms, s.max_ms
-                )
-            },
-        )
+        s.map_or_else(|| "n=0".to_string(), |s| format!("n={} p50={:.1}ms p99={:.1}ms max={:.1}ms", s.count, s.p50_ms, s.p99_ms, s.max_ms))
     };
     let mut out = String::new();
     if c.teardown_modes.len() > 1 || c.parallel_teardown {
-        out.push_str(&format!(
-            "  teardown modes: {} (parallel={})\n",
-            c.teardown_modes.join(","),
-            c.parallel_teardown
-        ));
+        out.push_str(&format!("  teardown modes: {} (parallel={})\n", c.teardown_modes.join(","), c.parallel_teardown));
     }
     for (mode, stats) in &c.cleanup_by_mode {
-        out.push_str(&format!(
-            "    {mode:<9} killed -> baseline: {}\n",
-            lat(Some(*stats))
-        ));
+        out.push_str(&format!("    {mode:<9} killed -> baseline: {}\n", lat(Some(*stats))));
     }
     if let Some(h) = &c.hang {
         out.push_str(&format!(
             "  hang: {}/{} cycles cleaned up on their own within {}s; SIGSTOP -> baseline {}\n",
-            h.cleaned_within_budget,
-            h.cycles,
-            h.budget_secs,
-            lat(h.latency),
+            h.cleaned_within_budget, h.cycles, h.budget_secs, lat(h.latency),
         ));
         if let Some(r) = &h.roster_when_not_cleaned {
             out.push_str(&format!("    not cleaned: roster showed {r}\n"));
@@ -658,18 +598,11 @@ fn churn_run2_lines(c: &ChurnReport) -> String {
     if let Some(r) = &c.resident {
         out.push_str(&format!(
             "  resident ({} sessions): say {} (failures={}); disturbances={}/{} checks\n",
-            r.sessions,
-            lat(r.say),
-            r.say_failures,
-            r.disturbances,
-            r.checks,
+            r.sessions, lat(r.say), r.say_failures, r.disturbances, r.checks,
         ));
     }
     if c.mint_lock_retries > 0 {
-        out.push_str(&format!(
-            "  token-store lock: {} mint retries under contention\n",
-            c.mint_lock_retries
-        ));
+        out.push_str(&format!("  token-store lock: {} mint retries under contention\n", c.mint_lock_retries));
     }
     if let Some(l) = &c.label_reuse {
         out.push_str(&format!("  label reuse: {l}\n"));
@@ -683,32 +616,16 @@ fn series_lines(series: &[CycleSample]) -> String {
     if series.is_empty() {
         return String::new();
     }
-    let max_rss = series
-        .iter()
-        .filter_map(|p| p.rss_mib)
-        .fold(f64::MIN, f64::max);
-    let max_rows = series
-        .iter()
-        .filter_map(|p| p.roster_rows)
-        .max()
-        .unwrap_or(0);
-    let mut out = format!(
-        "  per-cycle series ({} samples; max rss={max_rss:.1}MiB, max roster rows={max_rows}):\n",
-        series.len()
-    );
+    let max_rss = series.iter().filter_map(|p| p.rss_mib).fold(f64::MIN, f64::max);
+    let max_rows = series.iter().filter_map(|p| p.roster_rows).max().unwrap_or(0);
+    let mut out = format!("  per-cycle series ({} samples; max rss={max_rss:.1}MiB, max roster rows={max_rows}):\n", series.len());
     let step = (series.len() / 10).max(1);
     let last_on_step = (series.len() - 1).is_multiple_of(step);
     let tail = if last_on_step { None } else { series.last() };
     for p in series.iter().step_by(step).chain(tail) {
         out.push_str(&format!(
             "    cycle={:>4} t={:>7.1}s mode={:<9} rss={} threads={} roster_rows={} minted={}\n",
-            p.cycle,
-            p.elapsed_s,
-            p.mode,
-            opt_f(p.rss_mib, "MiB"),
-            opt_u(p.threads),
-            opt_u(p.roster_rows),
-            opt_u(p.minted_records),
+            p.cycle, p.elapsed_s, p.mode, opt_f(p.rss_mib, "MiB"), opt_u(p.threads), opt_u(p.roster_rows), opt_u(p.minted_records),
         ));
     }
     out
@@ -737,21 +654,14 @@ fn sustained_throughput_lines(step: &StepReport) -> String {
     if step.queue_depth_max.is_some() || step.queue_depth_final.is_some() {
         out.push_str(&format!(
             "  queue depth: max={} final={} events={} queue_full_refusals={}\n",
-            step.queue_depth_max
-                .map_or_else(|| "?".to_string(), |v| v.to_string()),
-            step.queue_depth_final
-                .map_or_else(|| "?".to_string(), |v| v.to_string()),
-            step.queue_events_observed
-                .map_or_else(|| "?".to_string(), |v| v.to_string()),
-            step.queue_full_refusals
-                .map_or_else(|| "?".to_string(), |v| v.to_string()),
+            step.queue_depth_max.map_or_else(|| "?".to_string(), |v| v.to_string()),
+            step.queue_depth_final.map_or_else(|| "?".to_string(), |v| v.to_string()),
+            step.queue_events_observed.map_or_else(|| "?".to_string(), |v| v.to_string()),
+            step.queue_full_refusals.map_or_else(|| "?".to_string(), |v| v.to_string()),
         ));
     }
     if !step.rss_series.is_empty() {
-        out.push_str(&format!(
-            "  hub RSS over time ({} samples):\n",
-            step.rss_series.len()
-        ));
+        out.push_str(&format!("  hub RSS over time ({} samples):\n", step.rss_series.len()));
         for point in &step.rss_series {
             out.push_str(&format!(
                 "    t={:>6.1}s rss={} threads={}\n",

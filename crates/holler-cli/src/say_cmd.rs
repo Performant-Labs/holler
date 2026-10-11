@@ -45,18 +45,10 @@ pub struct SayResult {
 }
 
 fn ok(message: String) -> SayResult {
-    SayResult {
-        message,
-        to_stderr: false,
-        exit_code: 0,
-    }
+    SayResult { message, to_stderr: false, exit_code: 0 }
 }
 fn err(message: String, exit_code: i32) -> SayResult {
-    SayResult {
-        message,
-        to_stderr: true,
-        exit_code,
-    }
+    SayResult { message, to_stderr: true, exit_code }
 }
 
 /// Parse a `<number><s|m|h>` duration (the `say --timeout` grammar). `None`
@@ -86,16 +78,10 @@ pub(crate) fn parse_duration(s: &str) -> Option<Duration> {
 /// present by the time this runs; `text` is its `TEXT`.
 fn resolve_say_text(say: &Say, text: Option<&str>) -> Result<String, String> {
     if let Some(path) = &say.parts_file {
-        let content = std::fs::read_to_string(path)
-            .map_err(|e| format!("cannot read --parts-file {path}: {e}"))?;
+        let content = std::fs::read_to_string(path).map_err(|e| format!("cannot read --parts-file {path}: {e}"))?;
         let message: holler_proto::Message = serde_json::from_str(&content)
             .map_err(|e| format!("--parts-file {path} is not a valid A2A Message: {e}"))?;
-        Ok(message
-            .parts
-            .iter()
-            .filter_map(|p| p.text())
-            .collect::<Vec<_>>()
-            .join(""))
+        Ok(message.parts.iter().filter_map(|p| p.text()).collect::<Vec<_>>().join(""))
     } else {
         Ok(text.unwrap_or_default().to_string())
     }
@@ -112,9 +98,7 @@ fn resolve_say_text(say: &Say, text: Option<&str>) -> Result<String, String> {
 /// `input-required`, never silently accepted — see `talk::say`'s own gate).
 fn busy_hint(session: &str, e: &holler_proto::WireError) -> String {
     let data = e.data.as_ref();
-    let state = data
-        .and_then(|d| d.state.clone())
-        .unwrap_or_else(|| "working".to_string());
+    let state = data.and_then(|d| d.state.clone()).unwrap_or_else(|| "working".to_string());
     let turn_age = fmt_age(data.and_then(|d| d.turn_age_ms).unwrap_or(0));
     let last_update_age = fmt_age(data.and_then(|d| d.last_update_age_ms).unwrap_or(0));
     if state == "input-required" {
@@ -163,12 +147,7 @@ pub fn run(say: &Say, json: bool) -> SayResult {
     };
     let timeout = match parse_duration(&say.timeout) {
         Some(d) => d,
-        None => {
-            return err(
-                format!("invalid --timeout {:?} (use e.g. 30s, 5m, 1h)", say.timeout),
-                3,
-            )
-        }
+        None => return err(format!("invalid --timeout {:?} (use e.g. 30s, 5m, 1h)", say.timeout), 3),
     };
     let text = match resolve_say_text(say, arg.as_deref()) {
         Ok(t) => t,
@@ -189,10 +168,9 @@ pub fn run(say: &Say, json: bool) -> SayResult {
     let reply = crate::transport::call(say.server.as_deref(), &call);
     match wait_ended(reply, early) {
         Ok(wait) => queue_outcome(&session, wait, json),
-        Err(holler_hub::control::ControlError::NoLiveHub) => err(
-            format!("no live holler hub reachable at {}", state_root.display()),
-            1,
-        ),
+        Err(holler_hub::control::ControlError::NoLiveHub) => {
+            err(format!("no live holler hub reachable at {}", state_root.display()), 1)
+        }
         Err(e) => control_refusal(&session, e, json),
     }
 }
@@ -211,24 +189,15 @@ fn control_refusal(session: &str, e: ControlError, json: bool) -> SayResult {
             // `say` refusal that exits 2, not 1 — every other refusal
             // (unknown session, session_busy, not_connected, connection_lost,
             // cancelled) is a runtime failure (exit 1).
-            let is_ambiguous =
-                e.data.as_ref().and_then(|d| d.reason.as_deref()) == Some("ambiguous");
+            let is_ambiguous = e.data.as_ref().and_then(|d| d.reason.as_deref()) == Some("ambiguous");
             if crate::hold_cmd::is_held(&e) {
                 let (message, to_stderr) = crate::hold_cmd::held_refusal(session, &e, json);
-                return SayResult {
-                    message,
-                    to_stderr,
-                    exit_code: crate::hold_cmd::HELD_EXIT_CODE,
-                };
+                return SayResult { message, to_stderr, exit_code: crate::hold_cmd::HELD_EXIT_CODE };
             }
             if crate::hold_cmd::is_invalid_grant(&e) {
                 let (message, to_stderr) =
                     crate::hold_cmd::invalid_grant_refusal(session, &e, json);
-                return SayResult {
-                    message,
-                    to_stderr,
-                    exit_code: crate::hold_cmd::INVALID_GRANT_EXIT_CODE,
-                };
+                return SayResult { message, to_stderr, exit_code: crate::hold_cmd::INVALID_GRANT_EXIT_CODE };
             }
             let message = if e.code == holler_proto::Code::SessionBusy.jsonrpc() {
                 busy_hint(session, &e)

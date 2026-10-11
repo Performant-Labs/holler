@@ -20,9 +20,7 @@
 //! their print+exit tail with `hub_cmd.rs`'s own versions via
 //! [`crate::query_cmd::print_and_exit_code`] (issue #229).
 
-use crate::query_cmd::{
-    body_local_configs, print_and_exit_code, protocol_version_from_args, FetchOutcome,
-};
+use crate::query_cmd::{body_local_configs, print_and_exit_code, protocol_version_from_args, FetchOutcome};
 use crate::{Cmd, Query, QueryResolution};
 
 /// Resolve the state dir, or fail closed (exit 1) if there is nowhere for
@@ -236,20 +234,10 @@ pub fn support(feature: &str, json: bool) -> i32 {
     let configs = body_local_configs(&state.root);
     let outcome = match holler_body::query::local_support(feature, &configs) {
         Ok(doc) => doc_outcome(&doc, |doc| {
-            let reason = doc
-                .reason
-                .as_deref()
-                .map(|r| format!(" ({r})"))
-                .unwrap_or_default();
-            format!(
-                "{feature}: {}{reason}",
-                if doc.ok { "ok" } else { "not ok" }
-            )
+            let reason = doc.reason.as_deref().map(|r| format!(" ({r})")).unwrap_or_default();
+            format!("{feature}: {}{reason}", if doc.ok { "ok" } else { "not ok" })
         }),
-        Err(e) => FetchOutcome::Err {
-            message: e.message,
-            exit_code: 1,
-        },
+        Err(e) => FetchOutcome::Err { message: e.message, exit_code: 1 },
     };
     print_and_exit_code(json, outcome)
 }
@@ -292,26 +280,17 @@ pub fn query(q: &Query, json: bool) -> i32 {
             };
             match holler_body::query::local_support(feature, &configs) {
                 Ok(doc) => doc_outcome(&doc, |doc| format!("{feature}: {}", doc.ok)),
-                Err(e) => FetchOutcome::Err {
-                    message: e.message,
-                    exit_code: 1,
-                },
+                Err(e) => FetchOutcome::Err { message: e.message, exit_code: 1 },
             }
         }
         Cmd::Protocol => match protocol_version_from_args(args) {
             Ok(version) => {
                 let doc = holler_body::query::local_protocol(version);
                 doc_outcome(&doc, |doc| {
-                    format!(
-                        "protocol: session={} min={} max={}",
-                        doc.session, doc.min, doc.max
-                    )
+                    format!("protocol: session={} min={} max={}", doc.session, doc.min, doc.max)
                 })
             }
-            Err(e) => FetchOutcome::Err {
-                message: e.message,
-                exit_code: 1,
-            },
+            Err(e) => FetchOutcome::Err { message: e.message, exit_code: 1 },
         },
     };
     print_and_exit_code(json, outcome)
@@ -326,13 +305,7 @@ pub fn query(q: &Query, json: bool) -> i32 {
 /// always-encodable fields) but still reports exit 1 rather than panicking.
 fn doc_outcome<T: serde::Serialize>(doc: &T, human: impl FnOnce(&T) -> String) -> FetchOutcome {
     match serde_json::to_string(doc) {
-        Ok(json_text) => FetchOutcome::Doc {
-            json_text,
-            human: human(doc),
-        },
-        Err(e) => FetchOutcome::Err {
-            message: e.to_string(),
-            exit_code: 1,
-        },
+        Ok(json_text) => FetchOutcome::Doc { json_text, human: human(doc) },
+        Err(e) => FetchOutcome::Err { message: e.to_string(), exit_code: 1 },
     }
 }

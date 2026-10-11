@@ -18,21 +18,14 @@ pub struct SurfaceLine {
 
 /// Read a fixture file from `tests/fixtures/`.
 pub fn load_surface(name: &str) -> Vec<SurfaceLine> {
-    let path: PathBuf = [env!("CARGO_MANIFEST_DIR"), "tests", "fixtures", name]
-        .iter()
-        .collect();
+    let path: PathBuf = [env!("CARGO_MANIFEST_DIR"), "tests", "fixtures", name].iter().collect();
     let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
     text.lines()
         .map(strip_comment)
         .filter(|l| !l.trim().is_empty())
         .map(|l| {
-            let (leaf, args) = l
-                .split_once('|')
-                .unwrap_or_else(|| panic!("fixture line has no `|`: {l:?}"));
-            SurfaceLine {
-                leaf: leaf.trim().to_string(),
-                args: args.trim().to_string(),
-            }
+            let (leaf, args) = l.split_once('|').unwrap_or_else(|| panic!("fixture line has no `|`: {l:?}"));
+            SurfaceLine { leaf: leaf.trim().to_string(), args: args.trim().to_string() }
         })
         .collect()
 }
@@ -40,10 +33,7 @@ pub fn load_surface(name: &str) -> Vec<SurfaceLine> {
 /// The leaf paths listed in `cli-surface.pending.txt` — verbs ADR 0003
 /// specifies that no story has implemented yet.
 pub fn pending_leaves() -> Vec<String> {
-    load_surface("cli-surface.pending.txt")
-        .into_iter()
-        .map(|l| l.leaf)
-        .collect()
+    load_surface("cli-surface.pending.txt").into_iter().map(|l| l.leaf).collect()
 }
 
 fn strip_comment(line: &str) -> &str {

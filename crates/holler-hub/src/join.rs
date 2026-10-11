@@ -26,8 +26,12 @@ use crate::state::HubState;
 /// **before** touching the store. A refusal (unknown / already-redeemed /
 /// revoked / expired) is a `join_failed` error carrying the store's own
 /// message (the body prints it verbatim), then the socket closes.
-pub(crate) async fn redeem_join<S>(sink: &mut S, id: Option<&str>, params: Join, state: &HubState)
-where
+pub(crate) async fn redeem_join<S>(
+    sink: &mut S,
+    id: Option<&str>,
+    params: Join,
+    state: &HubState,
+) where
     S: Sink<Message, Error = WsError> + Unpin,
 {
     // The join secret crosses the wire; if it is noisy-logged it must be
@@ -48,35 +52,16 @@ where
         frame: None,
     });
     if !is_valid_ed25519_pubkey_hex(&params.body_pubkey) {
-        crate::serve::send_error(
-            sink,
-            id,
-            Code::InvalidParams,
-            "body_pubkey must be 64 lowercase hex chars (a 32-byte Ed25519 public key)",
-        )
-        .await;
+        crate::serve::send_error(sink, id, Code::InvalidParams, "body_pubkey must be 64 lowercase hex chars (a 32-byte Ed25519 public key)").await;
         crate::serve::close(sink).await;
         return;
     }
     if !is_valid_x25519_pubkey_hex(&params.body_x25519_pubkey) {
-        crate::serve::send_error(
-            sink,
-            id,
-            Code::InvalidParams,
-            "body_x25519_pubkey must be 64 lowercase hex chars (a 32-byte X25519 public key)",
-        )
-        .await;
+        crate::serve::send_error(sink, id, Code::InvalidParams, "body_x25519_pubkey must be 64 lowercase hex chars (a 32-byte X25519 public key)").await;
         crate::serve::close(sink).await;
         return;
     }
-    let outcome = crate::token::redeem_async(
-        &params.secret,
-        &params.hostname,
-        &params.body_pubkey,
-        &params.body_x25519_pubkey,
-        state,
-    )
-    .await;
+    let outcome = crate::token::redeem_async(&params.secret, &params.hostname, &params.body_pubkey, &params.body_x25519_pubkey, state).await;
     match outcome {
         // Success: echo the join request's id and the `{client_id}` result,
         // then close (docs §3).
@@ -110,12 +95,8 @@ where
 /// hub ever stores it, so a malformed key fails the join itself (`-32602`)
 /// rather than surfacing later as an inexplicable `circuit/prove` failure.
 fn is_valid_ed25519_pubkey_hex(s: &str) -> bool {
-    let Ok(bytes) = hex::decode(s) else {
-        return false;
-    };
-    let Ok(arr) = <[u8; 32]>::try_from(bytes.as_slice()) else {
-        return false;
-    };
+    let Ok(bytes) = hex::decode(s) else { return false };
+    let Ok(arr) = <[u8; 32]>::try_from(bytes.as_slice()) else { return false };
     ed25519_dalek::VerifyingKey::from_bytes(&arr).is_ok()
 }
 
@@ -125,18 +106,11 @@ fn is_valid_ed25519_pubkey_hex(s: &str) -> bool {
 /// the shape check (the same convention `holler_body::join`'s own
 /// `is_valid_hex_pubkey` uses for the hub's pinned `--hub-key`, issue #322).
 fn is_valid_x25519_pubkey_hex(s: &str) -> bool {
-    s.len() == 64
-        && s.chars()
-            .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
+    s.len() == 64 && s.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
 }
 
 #[cfg(test)]
-#[allow(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::panic,
-    clippy::unreachable
-)] // #240
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable)] // #240
 mod tests {
     use std::sync::{Arc, Mutex};
 
@@ -155,10 +129,7 @@ mod tests {
             let unique = format!(
                 "holler-join-{tag}-{}-{:x}",
                 std::process::id(),
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_nanos())
-                    .unwrap_or(0),
+                std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0),
             );
             let root = std::env::temp_dir().join(unique);
             std::fs::create_dir_all(&root).expect("create scratch state dir");
@@ -228,11 +199,7 @@ mod tests {
         redeem_join(&mut sink, Some("b-req-1"), params, &state).await;
 
         let frames = sent.lock().unwrap_or_else(|p| p.into_inner());
-        assert_eq!(
-            frames.len(),
-            2,
-            "a response frame, then a close frame: {frames:?}"
-        );
+        assert_eq!(frames.len(), 2, "a response frame, then a close frame: {frames:?}");
         let text = frames[0].to_text().expect("first frame is text");
         let env: Envelope = holler_proto::decode(text).expect("first frame decodes as an envelope");
         let Envelope::Response { id, result } = env else {
@@ -240,35 +207,18 @@ mod tests {
         };
         assert_eq!(id, "b-req-1", "the response echoes the request id");
         let raw_result = result.expect("a success carries a result");
-        assert!(
-            raw_result.get("credential").is_none(),
-            "the wire result must carry no credential field: {raw_result}"
-        );
-        let result: JoinResult =
-            serde_json::from_value(raw_result).expect("result decodes as JoinResult");
-        assert!(
-            result.client_id.starts_with("cli_"),
-            "client_id: {}",
-            result.client_id
-        );
-        assert!(
-            frames[1].is_close(),
-            "second frame is the close frame: {frames:?}"
-        );
+        assert!(raw_result.get("credential").is_none(), "the wire result must carry no credential field: {raw_result}");
+        let result: JoinResult = serde_json::from_value(raw_result).expect("result decodes as JoinResult");
+        assert!(result.client_id.starts_with("cli_"), "client_id: {}", result.client_id);
+        assert!(frames[1].is_close(), "second frame is the close frame: {frames:?}");
 
         // …and the store now shows the token bound with the registered public
         // key (the redeem really ran, through the async wrapper, not a no-op).
         let records = crate::token::list(&state).expect("list");
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].state, crate::token::TokenState::Bound);
-        assert_eq!(
-            records[0].body_pubkey.as_deref(),
-            Some(body_pubkey.as_str())
-        );
-        assert_eq!(
-            records[0].body_x25519_pubkey.as_deref(),
-            Some(body_x25519_pubkey.as_str())
-        );
+        assert_eq!(records[0].body_pubkey.as_deref(), Some(body_pubkey.as_str()));
+        assert_eq!(records[0].body_x25519_pubkey.as_deref(), Some(body_x25519_pubkey.as_str()));
     }
 
     /// A malformed `body_pubkey` is `-32602 invalid_params`, before the store
@@ -289,11 +239,7 @@ mod tests {
         redeem_join(&mut sink, Some("b-req-3"), params, &state).await;
 
         let frames = sent.lock().unwrap_or_else(|p| p.into_inner());
-        assert_eq!(
-            frames.len(),
-            2,
-            "an error frame, then a close frame: {frames:?}"
-        );
+        assert_eq!(frames.len(), 2, "an error frame, then a close frame: {frames:?}");
         let text = frames[0].to_text().expect("first frame is text");
         let env: Envelope = holler_proto::decode(text).expect("first frame decodes as an envelope");
         let Envelope::Error { error, .. } = env else {
@@ -302,11 +248,7 @@ mod tests {
         assert_eq!(error.code, Code::InvalidParams.jsonrpc());
 
         let records = crate::token::list(&state).expect("list");
-        assert_eq!(
-            records[0].state,
-            crate::token::TokenState::Unused,
-            "a malformed pubkey must not consume the join secret"
-        );
+        assert_eq!(records[0].state, crate::token::TokenState::Unused, "a malformed pubkey must not consume the join secret");
     }
 
     /// A secret that matches no minted token is a `join_failed` error naming
@@ -322,8 +264,7 @@ mod tests {
 
         let (mut sink, sent) = recording_sink();
         let params = Join {
-            secret: "hlr_join_0000000000000000000000000000000000000000000000000000000000000000"
-                .to_string(),
+            secret: "hlr_join_0000000000000000000000000000000000000000000000000000000000000000".to_string(),
             hostname: "myhost".to_string(),
             body_pubkey: test_body_pubkey_hex(9),
             body_x25519_pubkey: test_body_x25519_pubkey_hex(9),
@@ -331,11 +272,7 @@ mod tests {
         redeem_join(&mut sink, Some("b-req-2"), params, &state).await;
 
         let frames = sent.lock().unwrap_or_else(|p| p.into_inner());
-        assert_eq!(
-            frames.len(),
-            2,
-            "an error frame, then a close frame: {frames:?}"
-        );
+        assert_eq!(frames.len(), 2, "an error frame, then a close frame: {frames:?}");
         let text = frames[0].to_text().expect("first frame is text");
         let env: Envelope = holler_proto::decode(text).expect("first frame decodes as an envelope");
         let Envelope::Error { id, error } = env else {
@@ -365,11 +302,7 @@ mod tests {
         redeem_join(&mut sink, Some("b-req-4"), params, &state).await;
 
         let frames = sent.lock().unwrap_or_else(|p| p.into_inner());
-        assert_eq!(
-            frames.len(),
-            2,
-            "an error frame, then a close frame: {frames:?}"
-        );
+        assert_eq!(frames.len(), 2, "an error frame, then a close frame: {frames:?}");
         let text = frames[0].to_text().expect("first frame is text");
         let env: Envelope = holler_proto::decode(text).expect("first frame decodes as an envelope");
         let Envelope::Error { error, .. } = env else {
@@ -378,15 +311,8 @@ mod tests {
         assert_eq!(error.code, Code::InvalidParams.jsonrpc());
 
         let records = crate::token::list(&state).expect("list");
-        assert_eq!(
-            records[0].state,
-            crate::token::TokenState::Unused,
-            "a malformed X25519 pubkey must not consume the join secret"
-        );
-        assert!(
-            records[0].body_x25519_pubkey.is_none(),
-            "a rejected join must not register anything"
-        );
+        assert_eq!(records[0].state, crate::token::TokenState::Unused, "a malformed X25519 pubkey must not consume the join secret");
+        assert!(records[0].body_x25519_pubkey.is_none(), "a rejected join must not register anything");
     }
 
     /// Issue #337's acceptance: "a test confirms the private key is never
@@ -428,24 +354,15 @@ mod tests {
         let frames = sent.lock().unwrap_or_else(|p| p.into_inner());
         for frame in frames.iter() {
             if let Ok(text) = frame.to_text() {
-                assert!(
-                    !text.contains(&secret_hex),
-                    "the X25519 private key must never appear in a wire frame: {text}"
-                );
+                assert!(!text.contains(&secret_hex), "the X25519 private key must never appear in a wire frame: {text}");
             }
         }
 
         // 2. The store holds only the public key.
         let records = crate::token::list(&state).expect("list");
-        assert_eq!(
-            records[0].body_x25519_pubkey.as_deref(),
-            Some(public_hex.as_str())
-        );
+        assert_eq!(records[0].body_x25519_pubkey.as_deref(), Some(public_hex.as_str()));
         let stored = serde_json::to_string(&records[0].body_x25519_pubkey).unwrap_or_default();
-        assert!(
-            !stored.contains(&secret_hex),
-            "the store must never hold the private key"
-        );
+        assert!(!stored.contains(&secret_hex), "the store must never hold the private key");
 
         // 3. The exact `circuit/join` debug-wire event this module emits
         //    (this file's own `holler_proto::emit(...)` call, replicated
@@ -465,15 +382,8 @@ mod tests {
             ],
             frame: None,
         };
-        for debug in [
-            holler_proto::log::DebugLevel::None,
-            holler_proto::log::DebugLevel::Quiet,
-            holler_proto::log::DebugLevel::Noisy,
-        ] {
-            for format in [
-                holler_proto::log::LogFormat::Text,
-                holler_proto::log::LogFormat::Json,
-            ] {
+        for debug in [holler_proto::log::DebugLevel::None, holler_proto::log::DebugLevel::Quiet, holler_proto::log::DebugLevel::Noisy] {
+            for format in [holler_proto::log::LogFormat::Text, holler_proto::log::LogFormat::Json] {
                 let config = holler_proto::log::Config { debug, format };
                 let rendered = event.render(&config);
                 assert!(

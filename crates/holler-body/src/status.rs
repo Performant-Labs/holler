@@ -97,7 +97,10 @@ impl StatusDoc {
 /// keeps its invariant (only the JSON document on stdout).
 pub fn status(state_root: &Path) -> (Option<StatusDoc>, StatusExit) {
     match identity::load(state_root) {
-        None => (Some(StatusDoc::build(None)), StatusExit::Ok),
+        None => (
+            Some(StatusDoc::build(None)),
+            StatusExit::Ok,
+        ),
         Some(Ok(i)) => (Some(StatusDoc::build(Some(&i))), StatusExit::Ok),
         Some(Err(e)) => {
             eprintln!("error: state dir: {e}");
@@ -136,12 +139,7 @@ pub fn render_human(doc: &StatusDoc) -> String {
 }
 
 #[cfg(test)]
-#[allow(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::panic,
-    clippy::unreachable
-)] // #176
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable)] // #176
 mod tests {
     use super::*;
 

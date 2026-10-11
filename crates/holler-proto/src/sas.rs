@@ -65,9 +65,7 @@ pub struct SasError {
 
 impl SasError {
     fn new(message: impl Into<String>) -> Self {
-        Self {
-            message: message.into(),
-        }
+        Self { message: message.into() }
     }
 }
 
@@ -106,20 +104,14 @@ fn hkdf_expand_labeled(ikm: &[u8], label: &[u8], out_len: usize) -> Result<Vec<u
 /// `handshake_hash_hex` is always `hex::encode` of a real hash, but a caller
 /// could in principle hand this fn any string.
 pub fn derive_sas(handshake_hash_hex: &str) -> Result<String, SasError> {
-    let ikm = hex::decode(handshake_hash_hex)
-        .map_err(|e| SasError::new(format!("malformed handshake hash hex: {e}")))?;
+    let ikm = hex::decode(handshake_hash_hex).map_err(|e| SasError::new(format!("malformed handshake hash hex: {e}")))?;
     let okm = hkdf_expand_labeled(&ikm, SAS_LABEL, SAS_OKM_LEN)?;
     let n = u32::from_be_bytes([okm[0], okm[1], okm[2], okm[3]]) % 1_000_000;
     Ok(format!("{:03}-{:03}", n / 1000, n % 1000))
 }
 
 #[cfg(test)]
-#[allow(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::panic,
-    clippy::unreachable
-)] // #339
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable)] // #339
 mod tests {
     use super::*;
     use crate::noise::{build_prologue, HandshakeXk};
@@ -139,13 +131,8 @@ mod tests {
     /// Run a full 3-message Noise XK handshake between fresh `hub`/`body`
     /// keypairs, returning both sides' finished handshake state — mirrors
     /// `noise`'s own private `run_handshake` test helper.
-    fn run_handshake(
-        hub: ([u8; 32], [u8; 32]),
-        body: ([u8; 32], [u8; 32]),
-        prologue: &[u8],
-    ) -> (HandshakeXk, HandshakeXk) {
-        let mut initiator =
-            HandshakeXk::initiator(&body.0, &hub.1, prologue).expect("build initiator");
+    fn run_handshake(hub: ([u8; 32], [u8; 32]), body: ([u8; 32], [u8; 32]), prologue: &[u8]) -> (HandshakeXk, HandshakeXk) {
+        let mut initiator = HandshakeXk::initiator(&body.0, &hub.1, prologue).expect("build initiator");
         let mut responder = HandshakeXk::responder(&hub.0, prologue).expect("build responder");
 
         let msg1 = initiator.write_message().expect("write message 1");
@@ -172,20 +159,11 @@ mod tests {
 
         assert!(initiator.is_finished(), "sanity: handshake must complete");
         assert!(responder.is_finished(), "sanity: handshake must complete");
-        assert_eq!(
-            initiator.handshake_hash_hex(),
-            responder.handshake_hash_hex(),
-            "sanity: hashes match on both sides"
-        );
+        assert_eq!(initiator.handshake_hash_hex(), responder.handshake_hash_hex(), "sanity: hashes match on both sides");
 
-        let sas_body_side = derive_sas(&initiator.handshake_hash_hex())
-            .expect("derive on the body's own handshake state");
-        let sas_hub_side = derive_sas(&responder.handshake_hash_hex())
-            .expect("derive on the hub's own handshake state");
-        assert_eq!(
-            sas_body_side, sas_hub_side,
-            "both sides must derive the identical SAS from a completed handshake"
-        );
+        let sas_body_side = derive_sas(&initiator.handshake_hash_hex()).expect("derive on the body's own handshake state");
+        let sas_hub_side = derive_sas(&responder.handshake_hash_hex()).expect("derive on the hub's own handshake state");
+        assert_eq!(sas_body_side, sas_hub_side, "both sides must derive the identical SAS from a completed handshake");
     }
 
     /// Acceptance: "SAS uses a versioned, distinct HKDF label
@@ -207,10 +185,7 @@ mod tests {
 
         let sas_a = derive_sas(&responder_a.handshake_hash_hex()).expect("derive a");
         let sas_b = derive_sas(&responder_b.handshake_hash_hex()).expect("derive b");
-        assert_ne!(
-            sas_a, sas_b,
-            "different static keys must produce different SAS values"
-        );
+        assert_ne!(sas_a, sas_b, "different static keys must produce different SAS values");
     }
 
     /// Acceptance: "Two handshakes with different ... nonces produce
@@ -254,31 +229,17 @@ mod tests {
         let (_, responder) = run_handshake(hub, body, &prologue);
         let ikm = hex::decode(responder.handshake_hash_hex()).expect("valid hex handshake hash");
 
-        let under_sas_label =
-            hkdf_expand_labeled(&ikm, SAS_LABEL, SAS_OKM_LEN).expect("expand under holler-sas-v1");
-        let under_other_label =
-            hkdf_expand_labeled(&ikm, b"holler-some-future-derivation-v1", SAS_OKM_LEN)
-                .expect("expand under a different label");
-        assert_ne!(
-            under_sas_label, under_other_label,
-            "a different HKDF label must change the derived output"
-        );
+        let under_sas_label = hkdf_expand_labeled(&ikm, SAS_LABEL, SAS_OKM_LEN).expect("expand under holler-sas-v1");
+        let under_other_label = hkdf_expand_labeled(&ikm, b"holler-some-future-derivation-v1", SAS_OKM_LEN).expect("expand under a different label");
+        assert_ne!(under_sas_label, under_other_label, "a different HKDF label must change the derived output");
 
         // And derive_sas itself is exactly this call under SAS_LABEL —
         // proven by formatting under_sas_label the same way derive_sas does
         // and comparing to derive_sas's own result, so this test would fail
         // if derive_sas ever drifted from hkdf_expand_labeled(_, SAS_LABEL, _).
-        let n = u32::from_be_bytes([
-            under_sas_label[0],
-            under_sas_label[1],
-            under_sas_label[2],
-            under_sas_label[3],
-        ]) % 1_000_000;
+        let n = u32::from_be_bytes([under_sas_label[0], under_sas_label[1], under_sas_label[2], under_sas_label[3]]) % 1_000_000;
         let expected = format!("{:03}-{:03}", n / 1000, n % 1000);
-        assert_eq!(
-            derive_sas(&responder.handshake_hash_hex()).expect("derive"),
-            expected
-        );
+        assert_eq!(derive_sas(&responder.handshake_hash_hex()).expect("derive"), expected);
     }
 
     /// A malformed (non-hex) handshake hash is a fail-closed `Err`, never a

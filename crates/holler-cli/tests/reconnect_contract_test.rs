@@ -1,10 +1,4 @@
-#![allow(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::panic,
-    clippy::unreachable,
-    dead_code
-)] // #192
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable, dead_code)] // #192
 //! RED tests for issue #192's reconnect contract, against a real hub + body +
 //! `stub-acp` (#130) — no mocks of the circuit.
 //!
@@ -50,9 +44,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
-use support::{
-    join, kill_tree, mint_token, wait_for, write_sessions_toml, Body, Hub, StateDir, STARTUP_WAIT,
-};
+use support::{join, kill_tree, mint_token, wait_for, write_sessions_toml, Body, Hub, StateDir, STARTUP_WAIT};
 
 fn stdout_of(out: &Output) -> String {
     String::from_utf8_lossy(&out.stdout).into_owned()
@@ -125,19 +117,12 @@ fn roster_all_json(state: &StateDir) -> Value {
         .spawn()
         .and_then(|c| c.wait_with_output())
         .expect("run `holler roster --all --json`");
-    assert!(
-        out.status.success(),
-        "`holler roster --all --json` failed: {}",
-        stderr_of(&out)
-    );
+    assert!(out.status.success(), "`holler roster --all --json` failed: {}", stderr_of(&out));
     serde_json::from_slice(&out.stdout).expect("roster --all --json is valid JSON")
 }
 
 fn row_of<'a>(v: &'a Value, name: &str) -> Option<&'a Value> {
-    v.get("rows")?
-        .as_array()?
-        .iter()
-        .find(|r| r.get("name").and_then(Value::as_str) == Some(name))
+    v.get("rows")?.as_array()?.iter().find(|r| r.get("name").and_then(Value::as_str) == Some(name))
 }
 
 fn conn_state_of<'a>(v: &'a Value, name: &str) -> Option<&'a str> {
@@ -177,25 +162,15 @@ fn say_fails_connection_lost_when_body_drops_mid_turn() {
     let hub_state = StateDir::new();
     let body_state = StateDir::new();
     let hub = Hub::start_with_env(&hub_state, &[("HOLLER_TEST_HOOKS", "1")]);
-    let (token_id, mut body) = start_body_with_token(
-        &hub_state,
-        &body_state,
-        &hub,
-        "b",
-        &[("alpha", &["--slow", "--chunks", "20"])],
-    );
+    let (token_id, mut body) =
+        start_body_with_token(&hub_state, &body_state, &hub, "b", &[("alpha", &["--slow", "--chunks", "20"])]);
 
     let warm = say_ready(&hub_state, "alpha", "warm up", STARTUP_WAIT);
     assert!(warm.status.success(), "stderr: {}", stderr_of(&warm));
 
     let handle = say_full_in_background(
         &hub_state,
-        owned(&[
-            "--timeout",
-            "30s",
-            "alpha",
-            "a long turn, about to be dropped",
-        ]),
+        owned(&["--timeout", "30s", "alpha", "a long turn, about to be dropped"]),
         Duration::from_millis(300),
     );
 
@@ -207,20 +182,11 @@ fn say_fails_connection_lost_when_body_drops_mid_turn() {
 
     assert_eq!(out.status.code(), Some(1), "stderr: {}", stderr_of(&out));
     let err = stderr_of(&out);
-    assert!(
-        err.contains("connection_lost") || err.contains("disconnected"),
-        "got: {err:?}"
-    );
-    assert!(
-        !err.contains("no live holler hub reachable"),
-        "must never report the hub itself as unreachable: {err:?}"
-    );
+    assert!(err.contains("connection_lost") || err.contains("disconnected"), "got: {err:?}");
+    assert!(!err.contains("no live holler hub reachable"), "must never report the hub itself as unreachable: {err:?}");
     // The whole point of #192 rule 3: the hub fails the pending `say`
     // *immediately* on the drop, never after the CLI's own 30s `--timeout`.
-    assert!(
-        elapsed < Duration::from_secs(10),
-        "must fail immediately on the drop, not wait out a timeout: {elapsed:?}"
-    );
+    assert!(elapsed < Duration::from_secs(10), "must fail immediately on the drop, not wait out a timeout: {elapsed:?}");
 
     kill_tree(body.child_mut());
 }
@@ -230,13 +196,8 @@ fn orphan_updates_after_reconnect_are_ignored_not_delivered_twice() {
     let hub_state = StateDir::new();
     let body_state = StateDir::new();
     let hub = Hub::start_with_env(&hub_state, &[("HOLLER_TEST_HOOKS", "1")]);
-    let (token_id, mut body) = start_body_with_token(
-        &hub_state,
-        &body_state,
-        &hub,
-        "b",
-        &[("alpha", &["--slow", "--chunks", "10"])],
-    );
+    let (token_id, mut body) =
+        start_body_with_token(&hub_state, &body_state, &hub, "b", &[("alpha", &["--slow", "--chunks", "10"])]);
 
     let warm = say_ready(&hub_state, "alpha", "warm up", STARTUP_WAIT);
     assert!(warm.status.success(), "stderr: {}", stderr_of(&warm));
@@ -249,15 +210,8 @@ fn orphan_updates_after_reconnect_are_ignored_not_delivered_twice() {
     test_drop(&hub_state, &token_id);
 
     let first = handle.join().expect("say thread");
-    assert_eq!(
-        first.status.code(),
-        Some(1),
-        "stderr: {}",
-        stderr_of(&first)
-    );
-    assert!(
-        stderr_of(&first).contains("connection_lost") || stderr_of(&first).contains("disconnected")
-    );
+    assert_eq!(first.status.code(), Some(1), "stderr: {}", stderr_of(&first));
+    assert!(stderr_of(&first).contains("connection_lost") || stderr_of(&first).contains("disconnected"));
 
     // The body reconnects on its own backoff (never a blind sleep, ADR
     // 0002): once the roster shows the session `connected` again, a fresh
@@ -276,11 +230,7 @@ fn orphan_updates_after_reconnect_are_ignored_not_delivered_twice() {
         out.status.success().then_some(out)
     })
     .unwrap_or_else(|| panic!("a fresh `say` must succeed once the body reconnects"));
-    assert!(
-        stdout_of(&fresh).contains("stub chunk"),
-        "got: {:?}",
-        stdout_of(&fresh)
-    );
+    assert!(stdout_of(&fresh).contains("stub chunk"), "got: {:?}", stdout_of(&fresh));
 
     kill_tree(body.child_mut());
 }
@@ -290,13 +240,8 @@ fn say_during_reconnecting_is_not_connected_with_age() {
     let hub_state = StateDir::new();
     let body_state = StateDir::new();
     let hub = Hub::start_with_env(&hub_state, &[("HOLLER_TEST_HOOKS", "1")]);
-    let (token_id, mut body) = start_body_with_token(
-        &hub_state,
-        &body_state,
-        &hub,
-        "b",
-        &[("alpha", &["--chunks", "1"])],
-    );
+    let (token_id, mut body) =
+        start_body_with_token(&hub_state, &body_state, &hub, "b", &[("alpha", &["--chunks", "1"])]);
 
     let warm = say_ready(&hub_state, "alpha", "warm up", STARTUP_WAIT);
     assert!(warm.status.success(), "stderr: {}", stderr_of(&warm));
@@ -323,10 +268,7 @@ fn say_during_reconnecting_is_not_connected_with_age() {
     std::thread::sleep(Duration::from_millis(1_200));
 
     let started = Instant::now();
-    let out = say_full(
-        hub_state.path(),
-        &["--timeout", "30s", "alpha", "are you there"],
-    );
+    let out = say_full(hub_state.path(), &["--timeout", "30s", "alpha", "are you there"]);
     let elapsed = started.elapsed();
 
     // Resume then reap the frozen body before any assertion below can panic
@@ -336,9 +278,7 @@ fn say_during_reconnecting_is_not_connected_with_age() {
     }
     kill_tree(body.child_mut());
 
-    reconnecting.expect(
-        "the roster must show `alpha` reconnecting after the drop, while the body stays frozen",
-    );
+    reconnecting.expect("the roster must show `alpha` reconnecting after the drop, while the body stays frozen");
 
     assert_eq!(out.status.code(), Some(1), "stderr: {}", stderr_of(&out));
     let err = stderr_of(&out);
@@ -346,24 +286,12 @@ fn say_during_reconnecting_is_not_connected_with_age() {
     // 32s ago)"` — the wire code is `-32004 not_connected` (the CLI's own
     // exit-1 mapping, asserted above); the message itself names the row's
     // own `conn_state` and age rather than a bare "not connected".
-    assert!(
-        err.contains("reconnecting"),
-        "must name the row's own conn_state: {err:?}"
-    );
-    assert!(
-        err.contains("last seen") && err.contains("s ago"),
-        "must carry the age hint: {err:?}"
-    );
-    assert!(
-        !err.contains("0s ago"),
-        "the age hint must reflect real elapsed time, not always read zero: {err:?}"
-    );
+    assert!(err.contains("reconnecting"), "must name the row's own conn_state: {err:?}");
+    assert!(err.contains("last seen") && err.contains("s ago"), "must carry the age hint: {err:?}");
+    assert!(!err.contains("0s ago"), "the age hint must reflect real elapsed time, not always read zero: {err:?}");
     // No queuing at the hub in v1 (rule 4): the refusal is immediate, never a
     // wait for the (frozen, unreachable) body to come back.
-    assert!(
-        elapsed < Duration::from_secs(10),
-        "must refuse immediately, never queue: {elapsed:?}"
-    );
+    assert!(elapsed < Duration::from_secs(10), "must refuse immediately, never queue: {elapsed:?}");
 }
 
 #[test]
@@ -371,13 +299,8 @@ fn queued_prompt_runs_after_drop_and_reply_is_discarded() {
     let hub_state = StateDir::new();
     let body_state = StateDir::new();
     let hub = Hub::start_with_env(&hub_state, &[("HOLLER_TEST_HOOKS", "1")]);
-    let (token_id, mut body) = start_body_with_token(
-        &hub_state,
-        &body_state,
-        &hub,
-        "b",
-        &[("alpha", &["--slow", "--chunks", "6"])],
-    );
+    let (token_id, mut body) =
+        start_body_with_token(&hub_state, &body_state, &hub, "b", &[("alpha", &["--slow", "--chunks", "6"])]);
 
     let warm = say_ready(&hub_state, "alpha", "warm up", STARTUP_WAIT);
     assert!(warm.status.success(), "stderr: {}", stderr_of(&warm));
@@ -389,13 +312,7 @@ fn queued_prompt_runs_after_drop_and_reply_is_discarded() {
     );
     let queued = say_full_in_background(
         &hub_state,
-        owned(&[
-            "--timeout",
-            "30s",
-            "--queue",
-            "alpha",
-            "queued turn, about to be dropped too",
-        ]),
+        owned(&["--timeout", "30s", "--queue", "alpha", "queued turn, about to be dropped too"]),
         Duration::from_millis(200),
     );
 
@@ -404,12 +321,7 @@ fn queued_prompt_runs_after_drop_and_reply_is_discarded() {
     let running_out = running.join().expect("running say thread");
     let queued_out = queued.join().expect("queued say thread");
     for (label, out) in [("running", &running_out), ("queued", &queued_out)] {
-        assert_eq!(
-            out.status.code(),
-            Some(1),
-            "{label} say must fail; stderr: {}",
-            stderr_of(out)
-        );
+        assert_eq!(out.status.code(), Some(1), "{label} say must fail; stderr: {}", stderr_of(out));
         let err = stderr_of(out);
         assert!(
             err.contains("connection_lost") || err.contains("disconnected"),
@@ -423,9 +335,7 @@ fn queued_prompt_runs_after_drop_and_reply_is_discarded() {
     // neither turn's reply ever reached an operator.
     wait_for(Duration::from_secs(20), || {
         let v = roster_all_json(&hub_state);
-        (conn_state_of(&v, "b/alpha") == Some("connected")
-            && state_of(&v, "b/alpha") == Some("idle"))
-        .then_some(())
+        (conn_state_of(&v, "b/alpha") == Some("connected") && state_of(&v, "b/alpha") == Some("idle")).then_some(())
     })
     .expect("the session must return to idle once both dropped turns finish locally");
 
@@ -443,13 +353,8 @@ fn presence_after_reconnect_is_authoritative() {
     let hub_state = StateDir::new();
     let body_state = StateDir::new();
     let hub = Hub::start(&hub_state);
-    let (_token_id, mut body) = start_body_with_token(
-        &hub_state,
-        &body_state,
-        &hub,
-        "b",
-        &[("alpha", &["--chunks", "1"]), ("beta", &["--chunks", "1"])],
-    );
+    let (_token_id, mut body) =
+        start_body_with_token(&hub_state, &body_state, &hub, "b", &[("alpha", &["--chunks", "1"]), ("beta", &["--chunks", "1"])]);
 
     let warm_a = say_ready(&hub_state, "alpha", "warm up", STARTUP_WAIT);
     assert!(warm_a.status.success(), "stderr: {}", stderr_of(&warm_a));
@@ -473,9 +378,7 @@ fn presence_after_reconnect_is_authoritative() {
     // `beta`'s row goes `gone` immediately, not lingering as `connected`.
     wait_for(Duration::from_secs(25), || {
         let v = roster_all_json(&hub_state);
-        (conn_state_of(&v, "b/alpha") == Some("connected")
-            && conn_state_of(&v, "b/beta") == Some("gone"))
-        .then_some(())
+        (conn_state_of(&v, "b/alpha") == Some("connected") && conn_state_of(&v, "b/beta") == Some("gone")).then_some(())
     })
     .unwrap_or_else(|| {
         let v = roster_all_json(&hub_state);
@@ -490,13 +393,8 @@ fn roster_returns_to_connected_after_successful_traffic() {
     let hub_state = StateDir::new();
     let body_state = StateDir::new();
     let hub = Hub::start_with_env(&hub_state, &[("HOLLER_TEST_HOOKS", "1")]);
-    let (token_id, mut body) = start_body_with_token(
-        &hub_state,
-        &body_state,
-        &hub,
-        "b",
-        &[("alpha", &["--chunks", "1"])],
-    );
+    let (token_id, mut body) =
+        start_body_with_token(&hub_state, &body_state, &hub, "b", &[("alpha", &["--chunks", "1"])]);
 
     let warm = say_ready(&hub_state, "alpha", "warm up", STARTUP_WAIT);
     assert!(warm.status.success(), "stderr: {}", stderr_of(&warm));
@@ -529,8 +427,7 @@ fn roster_returns_to_connected_after_successful_traffic() {
 
     kill_tree(body.child_mut());
 
-    reconnected
-        .expect("the roster must return `alpha` to connected once the body's own traffic resumes");
+    reconnected.expect("the roster must return `alpha` to connected once the body's own traffic resumes");
 }
 
 /// Issue #299: connection churn at volume — dozens of consecutive
@@ -551,13 +448,8 @@ fn connection_churn_survives_dozens_of_reconnect_cycles() {
     let hub_state = StateDir::new();
     let body_state = StateDir::new();
     let hub = Hub::start_with_env(&hub_state, &[("HOLLER_TEST_HOOKS", "1")]);
-    let (token_id, mut body) = start_body_with_token(
-        &hub_state,
-        &body_state,
-        &hub,
-        "b",
-        &[("alpha", &["--chunks", "1"])],
-    );
+    let (token_id, mut body) =
+        start_body_with_token(&hub_state, &body_state, &hub, "b", &[("alpha", &["--chunks", "1"])]);
 
     let warm = say_ready(&hub_state, "alpha", "warm up", STARTUP_WAIT);
     assert!(warm.status.success(), "stderr: {}", stderr_of(&warm));
@@ -566,10 +458,7 @@ fn connection_churn_survives_dozens_of_reconnect_cycles() {
         // The body must still be alive going into this cycle — a crash mid-churn
         // is a real bug, not something later cycles should paper over.
         assert!(
-            body.child_mut()
-                .try_wait()
-                .expect("try_wait the body")
-                .is_none(),
+            body.child_mut().try_wait().expect("try_wait the body").is_none(),
             "the body process must survive churn cycle {cycle} (it died)"
         );
 
@@ -601,17 +490,8 @@ fn connection_churn_survives_dozens_of_reconnect_cycles() {
         // A fresh `say` must work cleanly on the reconnected session — proves
         // the reconnect is not just a roster-label flip but a genuinely live
         // connection each cycle.
-        let out = say_ready(
-            &hub_state,
-            "alpha",
-            &format!("cycle {cycle}"),
-            Duration::from_secs(8),
-        );
-        assert!(
-            out.status.success(),
-            "cycle {cycle}: `say` after reconnect failed: {}",
-            stderr_of(&out)
-        );
+        let out = say_ready(&hub_state, "alpha", &format!("cycle {cycle}"), Duration::from_secs(8));
+        assert!(out.status.success(), "cycle {cycle}: `say` after reconnect failed: {}", stderr_of(&out));
         assert!(
             stdout_of(&out).contains("stub chunk"),
             "cycle {cycle}: unexpected reply: {:?}",
@@ -621,10 +501,7 @@ fn connection_churn_survives_dozens_of_reconnect_cycles() {
 
     // No crash across the whole churn run.
     assert!(
-        body.child_mut()
-            .try_wait()
-            .expect("try_wait the body")
-            .is_none(),
+        body.child_mut().try_wait().expect("try_wait the body").is_none(),
         "the body process must still be alive after {CHURN_CYCLES} churn cycles"
     );
 
@@ -653,10 +530,7 @@ fn connection_churn_survives_dozens_of_reconnect_cycles() {
             .args(["-P", &body_pid.to_string()])
             .output()
             .expect("run pgrep to count the body's live children");
-        let child_count = stdout_of(&children)
-            .lines()
-            .filter(|l| !l.trim().is_empty())
-            .count();
+        let child_count = stdout_of(&children).lines().filter(|l| !l.trim().is_empty()).count();
         assert!(
             child_count <= 1,
             "expected the body to hold at most one live agent child after {CHURN_CYCLES} churn cycles, found {child_count} (a leak): {:?}",

@@ -66,10 +66,7 @@ impl PermissionKind {
 const SHORTHANDS: [(&str, &[PermissionKind]); 3] = [
     ("once", &[PermissionKind::AllowOnce]),
     ("always", &[PermissionKind::AllowAlways]),
-    (
-        "reject",
-        &[PermissionKind::RejectOnce, PermissionKind::RejectAlways],
-    ),
+    ("reject", &[PermissionKind::RejectOnce, PermissionKind::RejectAlways]),
 ];
 
 /// One option of a field. `key` is what gets echoed back to the agent on the
@@ -99,16 +96,9 @@ impl OptionSet {
     pub fn new(options: Vec<(String, String)>) -> Self {
         let options = options
             .into_iter()
-            .map(|(key, label)| OptionEntry {
-                key,
-                label,
-                kind: None,
-            })
+            .map(|(key, label)| OptionEntry { key, label, kind: None })
             .collect();
-        Self {
-            options,
-            permission: false,
-        }
+        Self { options, permission: false }
     }
 
     /// Build a permission field's option set from `(key, label, kind)`
@@ -120,20 +110,14 @@ impl OptionSet {
             .into_iter()
             .map(|(key, label, kind)| OptionEntry { key, label, kind })
             .collect();
-        Self {
-            options,
-            permission: true,
-        }
+        Self { options, permission: true }
     }
 
     /// The human-readable label of every option, in declaration order (issue
     /// #151: the roster's `PENDING` column and `session/presence`'s
     /// `PendingItem.options` render from these).
     pub fn labels(&self) -> Vec<String> {
-        self.options
-            .iter()
-            .map(|option| option.label.clone())
-            .collect()
+        self.options.iter().map(|option| option.label.clone()).collect()
     }
 
     /// Resolve one segment against this field's options, trimmed, in the
@@ -174,9 +158,7 @@ impl OptionSet {
     /// order, as a duplicate key or label resolves to its first option).
     fn by_shorthand(&self, word: &str) -> Option<&OptionEntry> {
         self.shorthand_kinds(word)?.iter().find_map(|kind| {
-            self.options
-                .iter()
-                .find(|option| option.kind == Some(*kind))
+            self.options.iter().find(|option| option.kind == Some(*kind))
         })
     }
 
@@ -191,11 +173,8 @@ impl OptionSet {
             );
         };
         let wanted: Vec<&str> = kinds.iter().map(|kind| kind.wire_name()).collect();
-        let labels: Vec<String> = self
-            .options
-            .iter()
-            .map(|option| format!("{:?}", option.label))
-            .collect();
+        let labels: Vec<String> =
+            self.options.iter().map(|option| format!("{:?}", option.label)).collect();
         format!(
             "segment {index} ({segment:?}) does not resolve: this permission offers no option \
              of kind {}; its options are {}",
@@ -241,12 +220,7 @@ pub fn resolve_choice(fields: &[OptionSet], choice: &str) -> Result<Vec<String>,
 }
 
 #[cfg(test)]
-#[allow(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::panic,
-    clippy::unreachable
-)] // #188
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable)] // #188
 mod tests {
     use super::*;
 
@@ -341,11 +315,7 @@ mod tests {
         // comma split, so a comma inside a label is selectable by that label.
         let fields = vec![opts(&[("approved", "Proceed"), ("abort", CODEX_REJECT)])];
         let resolved = resolve_choice(&fields, CODEX_REJECT);
-        assert_eq!(
-            resolved,
-            Ok(vec!["abort".to_string()]),
-            "whole comma label must resolve"
-        );
+        assert_eq!(resolved, Ok(vec!["abort".to_string()]), "whole comma label must resolve");
         let lower = CODEX_REJECT.to_lowercase();
         assert_eq!(
             resolve_choice(&fields, &lower),
@@ -369,10 +339,7 @@ mod tests {
         // unchanged, so a bad single choice reports exactly what it does today.
         let fields = vec![opts(&[("allow", "Allow"), ("deny", "Deny")])];
         let err = resolve_choice(&fields, "nope, nothing").unwrap_err();
-        assert_eq!(
-            err,
-            "expected 1 comma-separated choice segment(s) for 1 field(s), got 2"
-        );
+        assert_eq!(err, "expected 1 comma-separated choice segment(s) for 1 field(s), got 2");
     }
 
     #[test]
@@ -383,10 +350,7 @@ mod tests {
             opts(&[("go", "Yes, go"), ("no", "No")]),
             opts(&[("s", "Small"), ("m", "Medium")]),
         ];
-        assert!(
-            resolve_choice(&fields, "Yes, go").is_err(),
-            "must split, not match the label whole"
-        );
+        assert!(resolve_choice(&fields, "Yes, go").is_err(), "must split, not match the label whole");
         assert_eq!(
             resolve_choice(&fields, "no,m").unwrap(),
             vec!["no".to_string(), "m".to_string()]
@@ -399,10 +363,7 @@ mod tests {
         // `OptionSet::new`, no kinds) fails closed on each of them.
         let fields = vec![opts(&[("red", "Red"), ("blue", "Blue")])];
         for word in ["once", "always", "reject", "ONCE"] {
-            assert!(
-                resolve_choice(&fields, word).is_err(),
-                "{word:?} must not resolve on an elicitation field"
-            );
+            assert!(resolve_choice(&fields, word).is_err(), "{word:?} must not resolve on an elicitation field");
         }
     }
 
@@ -413,9 +374,7 @@ mod tests {
         // shorthand-specific error (never the generic one, never a match).
         let perm = |opts: &[(&str, &str, Option<PermissionKind>)]| {
             vec![OptionSet::permission(
-                opts.iter()
-                    .map(|(k, l, kind)| (k.to_string(), l.to_string(), *kind))
-                    .collect(),
+                opts.iter().map(|(k, l, kind)| (k.to_string(), l.to_string(), *kind)).collect(),
             )]
         };
         let allow_only = perm(&[
@@ -423,21 +382,12 @@ mod tests {
             ("a2", "Proceed always", Some(PermissionKind::AllowAlways)),
         ]);
         let err = resolve_choice(&allow_only, "reject").unwrap_err();
-        assert!(
-            err.contains("reject_once or reject_always"),
-            "names both kinds: {err:?}"
-        );
-        assert!(
-            err.contains("\"Proceed\", \"Proceed always\""),
-            "lists the labels: {err:?}"
-        );
+        assert!(err.contains("reject_once or reject_always"), "names both kinds: {err:?}");
+        assert!(err.contains("\"Proceed\", \"Proceed always\""), "lists the labels: {err:?}");
         let unknown = perm(&[("x", "Custom", None), ("y", "Other", None)]);
         for word in ["once", "always", "reject"] {
             let err = resolve_choice(&unknown, word).unwrap_err();
-            assert!(
-                err.contains("offers no option of kind"),
-                "{word:?}: {err:?}"
-            );
+            assert!(err.contains("offers no option of kind"), "{word:?}: {err:?}");
         }
         // Several options of one kind: the first declared wins, as a duplicate
         // key or label does.

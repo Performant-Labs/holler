@@ -59,9 +59,9 @@ use crate::scenario::wait_for_client_count;
 use crate::{Config, Res};
 
 pub async fn run(cfg: &Config, hub: &Hub, report: &mut Report) -> Res<()> {
-    let hub_pid = hub.pid.ok_or(
-        "scenario `session-scale` samples the hub process, which needs a hub this harness started",
-    )?;
+    let hub_pid = hub
+        .pid
+        .ok_or("scenario `session-scale` samples the hub process, which needs a hub this harness started")?;
     let mut meter = CpuMeter::new(hub_pid);
     let _ = meter.sample();
     tokio::time::sleep(cfg.settle).await;
@@ -85,13 +85,7 @@ pub async fn run(cfg: &Config, hub: &Hub, report: &mut Report) -> Res<()> {
         for _ in 0..cfg.bodies {
             let label = format!("ss{next_body_index}");
             next_body_index += 1;
-            match FleetMember::start(
-                hub,
-                &cfg.holler_bin,
-                &cfg.stub_acp_bin,
-                &label,
-                sessions_per_body,
-            ) {
+            match FleetMember::start(hub, &cfg.holler_bin, &cfg.stub_acp_bin, &label, sessions_per_body) {
                 Ok(m) => members.push(m),
                 Err(e) => failures.push(e.to_string()),
             }
@@ -105,8 +99,7 @@ pub async fn run(cfg: &Config, hub: &Hub, report: &mut Report) -> Res<()> {
         // poll absorbs the last body's own presence beat still being in
         // flight; a mismatch that survives the budget is a real defect, not
         // a flaky read, and aborts the run rather than being smoothed over.
-        let sessions_actual =
-            wait_for_session_count(hub, expected_sessions, Duration::from_secs(60)).await;
+        let sessions_actual = wait_for_session_count(hub, expected_sessions, Duration::from_secs(60)).await;
         if sessions_actual != Some(expected_sessions) {
             let live = members.len();
             for member in members {
@@ -127,10 +120,7 @@ pub async fn run(cfg: &Config, hub: &Hub, report: &mut Report) -> Res<()> {
             .into());
         }
 
-        let session_names: Vec<String> = members
-            .iter()
-            .flat_map(|m| m.session_names.clone())
-            .collect();
+        let session_names: Vec<String> = members.iter().flat_map(|m| m.session_names.clone()).collect();
 
         let (roster_read, fanout) = {
             let holler_bin = cfg.holler_bin.clone();
@@ -189,9 +179,7 @@ fn build_step_report(
 ) -> StepReport {
     let hub_status_clients = hub.client_count().ok();
     let rss_delta_per_client_kib = match (baseline.rss_mib, steady.rss_mib) {
-        (Some(b), Some(s)) if !members.is_empty() => {
-            Some(((s - b) * 1024.0) / members.len() as f64)
-        }
+        (Some(b), Some(s)) if !members.is_empty() => Some(((s - b) * 1024.0) / members.len() as f64),
         _ => None,
     };
     let threads_delta = match (baseline.threads, steady.threads) {
@@ -340,9 +328,6 @@ fn session_is_not_idle(doc: &serde_json::Value, session: &str) -> bool {
         .flatten()
         .any(|row| {
             row.get("name").and_then(|n| n.as_str()) == Some(session)
-                && row
-                    .get("state")
-                    .and_then(|s| s.as_str())
-                    .is_some_and(|s| s != "idle")
+                && row.get("state").and_then(|s| s.as_str()).is_some_and(|s| s != "idle")
         })
 }

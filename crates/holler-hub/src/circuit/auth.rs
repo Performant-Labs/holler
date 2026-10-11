@@ -22,13 +22,11 @@
 use std::net::IpAddr;
 
 use futures_util::{Sink, Stream};
-use holler_proto::log::Severity;
 use holler_proto::noise::{
-    HandshakeXk, AUTH_FAILED_REASON, HANDSHAKE_FAILED_REASON, HUB_UNAVAILABLE_REASON,
-    KEY_MISMATCH_REASON, NOISE_MESSAGE_ONE_REJECTED_REASON, NO_PUBLIC_KEY_REASON,
-    PROTOCOL_ERROR_REASON, PROVE_TIMEOUT_REASON, TOKEN_EXPIRED_REASON, TOKEN_NOT_BOUND_REASON,
-    TOKEN_UNKNOWN_REASON,
+    HandshakeXk, AUTH_FAILED_REASON, HANDSHAKE_FAILED_REASON, HUB_UNAVAILABLE_REASON, KEY_MISMATCH_REASON, NOISE_MESSAGE_ONE_REJECTED_REASON,
+    NO_PUBLIC_KEY_REASON, PROTOCOL_ERROR_REASON, PROVE_TIMEOUT_REASON, TOKEN_EXPIRED_REASON, TOKEN_NOT_BOUND_REASON, TOKEN_UNKNOWN_REASON,
 };
+use holler_proto::log::Severity;
 use holler_proto::{Authenticate, Code};
 use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 
@@ -64,10 +62,7 @@ pub struct AuthDeps<'a> {
 /// accepts (a loopback `SocketAddr`, ADR 0006); if it ever did, that attempt
 /// would skip the lockout (fail-open), as an unparsable peer always has.
 fn key_ip(peer_ip: &str) -> Option<IpAddr> {
-    let bare = peer_ip
-        .strip_prefix('[')
-        .and_then(|s| s.strip_suffix(']'))
-        .unwrap_or(peer_ip);
+    let bare = peer_ip.strip_prefix('[').and_then(|s| s.strip_suffix(']')).unwrap_or(peer_ip);
     bare.parse().ok()
 }
 
@@ -96,31 +91,16 @@ pub(super) async fn refuse_unauthenticated<Snk>(
     Snk: Sink<Message, Error = WsError> + Unpin,
 {
     let code = rejection_reason(message);
-    let outcome =
-        key_ip(peer_ip).map(|ip| deps.lockout.record_failure_detailed(&ip, code, token_id));
+    let outcome = key_ip(peer_ip).map(|ip| deps.lockout.record_failure_detailed(&ip, code, token_id));
     log_rejection(peer_ip, token_id, code, outcome.as_ref());
-    refuse_and_close(
-        sink,
-        id,
-        message,
-        Some(reason.unwrap_or(code)),
-        token_id,
-        deps,
-    )
-    .await;
+    refuse_and_close(sink, id, message, Some(reason.unwrap_or(code)), token_id, deps).await;
 }
 
 /// The tail every `-32002` refusal shares, counted or not: send it, close
 /// the socket, and drop the roster row (issue #186: an unauthenticated body
 /// is gone, and the TTL would only keep a stale row around).
-async fn refuse_and_close<Snk>(
-    sink: &mut Snk,
-    id: Option<&str>,
-    message: &str,
-    reason: Option<&'static str>,
-    token_id: &str,
-    deps: &AuthDeps<'_>,
-) where
+async fn refuse_and_close<Snk>(sink: &mut Snk, id: Option<&str>, message: &str, reason: Option<&'static str>, token_id: &str, deps: &AuthDeps<'_>)
+where
     Snk: Sink<Message, Error = WsError> + Unpin,
 {
     send_error_with_reason(sink, id, Code::Unauthenticated, message, reason).await;
@@ -147,21 +127,9 @@ async fn refuse_failed_step<Snk>(
 {
     let message = format!("authentication failed: {cause}");
     if hub_fault {
-        let fields = vec![
-            ("peer", peer_ip.to_string()),
-            ("token_id", token_id.to_string()),
-            ("cause", cause.to_string()),
-        ];
+        let fields = vec![("peer", peer_ip.to_string()), ("token_id", token_id.to_string()), ("cause", cause.to_string())];
         log(Severity::Error, "auth_unavailable", fields);
-        refuse_and_close(
-            sink,
-            id,
-            &message,
-            Some(HUB_UNAVAILABLE_REASON),
-            token_id,
-            deps,
-        )
-        .await;
+        refuse_and_close(sink, id, &message, Some(HUB_UNAVAILABLE_REASON), token_id, deps).await;
     } else {
         refuse_unauthenticated(sink, id, &message, None, token_id, peer_ip, deps).await;
     }
@@ -192,10 +160,7 @@ pub(super) fn rejection_reason(message: &str) -> &'static str {
         ("handshake", HANDSHAKE_FAILED_REASON),
         ("pairing SAS", HANDSHAKE_FAILED_REASON),
     ];
-    RULES
-        .iter()
-        .find(|(needle, _)| message.contains(needle))
-        .map_or(AUTH_FAILED_REASON, |(_, code)| code)
+    RULES.iter().find(|(needle, _)| message.contains(needle)).map_or(AUTH_FAILED_REASON, |(_, code)| code)
 }
 
 /// Log one rejected authentication at `Warn` (visible at the default log
@@ -203,30 +168,16 @@ pub(super) fn rejection_reason(message: &str) -> &'static str {
 /// trip itself (issue #450), with its `scope` (issue #455; `token_id` is the
 /// id the tripping failure named). Only the public token id is logged, never
 /// a secret.
-fn log_rejection(
-    peer_ip: &str,
-    token_id: &str,
-    reason: &'static str,
-    outcome: Option<&crate::lockout::FailureOutcome>,
-) {
+fn log_rejection(peer_ip: &str, token_id: &str, reason: &'static str, outcome: Option<&crate::lockout::FailureOutcome>) {
     let failures = outcome.map_or_else(|| "?".to_string(), |o| format!("{}/{}", o.count, o.max));
     log(
         Severity::Warn,
         "auth_rejected",
-        vec![
-            ("peer", peer_ip.to_string()),
-            ("token_id", token_id.to_string()),
-            ("reason", reason.to_string()),
-            ("failures", failures),
-        ],
+        vec![("peer", peer_ip.to_string()), ("token_id", token_id.to_string()), ("reason", reason.to_string()), ("failures", failures)],
     );
     let Some(o) = outcome else { return };
     if o.newly_tripped {
-        let reasons = crate::lockout::group_reasons(&o.reasons)
-            .iter()
-            .map(|(r, n)| format!("{r}x{n}"))
-            .collect::<Vec<_>>()
-            .join(",");
+        let reasons = crate::lockout::group_reasons(&o.reasons).iter().map(|(r, n)| format!("{r}x{n}")).collect::<Vec<_>>().join(",");
         log(
             Severity::Warn,
             "lockout_tripped",
@@ -251,10 +202,7 @@ fn log_rejection(
 fn log_cleared(key: &LockoutKey, why: &str) {
     let mut fields = vec![("peer", key.peer.to_string())];
     fields.extend(key.token_id.clone().map(|id| ("token_id", id)));
-    fields.push((
-        "scope",
-        Scope::of(key.token_id.is_none()).as_str().to_string(),
-    ));
+    fields.push(("scope", Scope::of(key.token_id.is_none()).as_str().to_string()));
     fields.push(("why", why.to_string()));
     log(Severity::Warn, "lockout_cleared", fields);
 }
@@ -273,11 +221,7 @@ fn log_cleared(key: &LockoutKey, why: &str) {
 /// nothing about this peer's trustworthiness (it is not an auth attempt),
 /// so it must not count against this peer's lockout budget the way a
 /// genuine failed proof does.
-pub(super) async fn check_protocol_version<Snk>(
-    sink: &mut Snk,
-    id: Option<&str>,
-    params: &Authenticate,
-) -> Option<()>
+pub(super) async fn check_protocol_version<Snk>(sink: &mut Snk, id: Option<&str>, params: &Authenticate) -> Option<()>
 where
     Snk: Sink<Message, Error = WsError> + Unpin,
 {
@@ -327,17 +271,9 @@ pub(super) async fn begin_authenticate<Snk>(
 where
     Snk: Sink<Message, Error = WsError> + Unpin,
 {
-    if let Some(ip) =
-        key_ip(peer_ip).filter(|ip| deps.lockout.is_token_locked_out(ip, &params.token_id))
-    {
-        let scope = Scope::of(deps.lockout.is_locked_out(&ip))
-            .as_str()
-            .to_string();
-        let fields = vec![
-            ("peer", peer_ip.to_string()),
-            ("token_id", params.token_id.clone()),
-            ("scope", scope),
-        ];
+    if let Some(ip) = key_ip(peer_ip).filter(|ip| deps.lockout.is_token_locked_out(ip, &params.token_id)) {
+        let scope = Scope::of(deps.lockout.is_locked_out(&ip)).as_str().to_string();
+        let fields = vec![("peer", peer_ip.to_string()), ("token_id", params.token_id.clone()), ("scope", scope)];
         log(Severity::Warn, "lockout_refused", fields);
         close_with_code(sink, 1008, "auth refused: too many failures").await;
         return None;
@@ -345,16 +281,7 @@ where
     match crate::token::bound_record_async(&params.token_id, state).await {
         Ok(record) => Some(record),
         Err(e) => {
-            refuse_failed_step(
-                sink,
-                id,
-                &e.to_string(),
-                e.is_hub_fault(),
-                &params.token_id,
-                peer_ip,
-                deps,
-            )
-            .await;
+            refuse_failed_step(sink, id, &e.to_string(), e.is_hub_fault(), &params.token_id, peer_ip, deps).await;
             None
         }
     }
@@ -389,50 +316,19 @@ where
         Ok(identity) => identity.secret_bytes(),
         Err(e) => {
             // The hub's own identity key, never the peer's credential: a hub fault.
-            refuse_failed_step(
-                sink,
-                id,
-                &format!("could not resolve hub identity: {e}"),
-                true,
-                &params.token_id,
-                peer_ip,
-                deps,
-            )
-            .await;
+            refuse_failed_step(sink, id, &format!("could not resolve hub identity: {e}"), true, &params.token_id, peer_ip, deps).await;
             return None;
         }
     };
     let Ok(msg1) = hex::decode(&params.message) else {
-        refuse_unauthenticated(
-            sink,
-            id,
-            "authentication failed: malformed handshake message",
-            None,
-            &params.token_id,
-            peer_ip,
-            deps,
-        )
-        .await;
+        refuse_unauthenticated(sink, id, "authentication failed: malformed handshake message", None, &params.token_id, peer_ip, deps).await;
         return None;
     };
-    let prologue = holler_proto::noise::build_prologue(
-        holler_proto::PROTOCOL_VERSION,
-        &params.token_id,
-        &params.advertised_url,
-    );
+    let prologue = holler_proto::noise::build_prologue(holler_proto::PROTOCOL_VERSION, &params.token_id, &params.advertised_url);
     let mut handshake = match HandshakeXk::responder(&hub_secret, &prologue) {
         Ok(h) => h,
         Err(_) => {
-            refuse_unauthenticated(
-                sink,
-                id,
-                "authentication failed: could not start the handshake",
-                None,
-                &params.token_id,
-                peer_ip,
-                deps,
-            )
-            .await;
+            refuse_unauthenticated(sink, id, "authentication failed: could not start the handshake", None, &params.token_id, peer_ip, deps).await;
             return None;
         }
     };
@@ -472,77 +368,24 @@ where
     let env = match tokio::time::timeout(PROVE_TIMEOUT, next_envelope(stream)).await {
         Ok(Some(env)) => env,
         _ => {
-            refuse_unauthenticated(
-                sink,
-                None,
-                "authentication failed: no circuit/prove within the timeout",
-                None,
-                token_id,
-                peer_ip,
-                deps,
-            )
-            .await;
+            refuse_unauthenticated(sink, None, "authentication failed: no circuit/prove within the timeout", None, token_id, peer_ip, deps).await;
             return None;
         }
     };
-    let holler_proto::Envelope::Request {
-        id: prove_id,
-        method,
-        params,
-    } = &env
-    else {
-        refuse_unauthenticated(
-            sink,
-            env.id(),
-            "authentication failed: expected circuit/prove",
-            None,
-            token_id,
-            peer_ip,
-            deps,
-        )
-        .await;
+    let holler_proto::Envelope::Request { id: prove_id, method, params } = &env else {
+        refuse_unauthenticated(sink, env.id(), "authentication failed: expected circuit/prove", None, token_id, peer_ip, deps).await;
         return None;
     };
     if method != "circuit/prove" {
-        refuse_unauthenticated(
-            sink,
-            Some(prove_id),
-            "authentication failed: expected circuit/prove",
-            None,
-            token_id,
-            peer_ip,
-            deps,
-        )
-        .await;
+        refuse_unauthenticated(sink, Some(prove_id), "authentication failed: expected circuit/prove", None, token_id, peer_ip, deps).await;
         return None;
     }
-    let Some(prove) = params
-        .clone()
-        .and_then(|v| serde_json::from_value::<holler_proto::Prove>(v).ok())
-    else {
-        refuse_unauthenticated(
-            sink,
-            Some(prove_id),
-            "authentication failed: malformed circuit/prove params",
-            None,
-            token_id,
-            peer_ip,
-            deps,
-        )
-        .await;
+    let Some(prove) = params.clone().and_then(|v| serde_json::from_value::<holler_proto::Prove>(v).ok()) else {
+        refuse_unauthenticated(sink, Some(prove_id), "authentication failed: malformed circuit/prove params", None, token_id, peer_ip, deps).await;
         return None;
     };
     if prove.token_id != token_id {
-        refuse_unauthenticated(
-            sink,
-            Some(prove_id),
-            "authentication failed: circuit/prove token_id mismatch",
-            None,
-            token_id,
-            peer_ip,
-            deps,
-        )
-        .await;
+        refuse_unauthenticated(sink, Some(prove_id), "authentication failed: circuit/prove token_id mismatch", None, token_id, peer_ip, deps).await;
         return None;
     }
     Some((prove_id.clone(), prove))
@@ -575,119 +418,50 @@ pub(super) async fn finish_prove<Snk>(
 where
     Snk: Sink<Message, Error = WsError> + Unpin,
 {
-    let peer_ip = deps
-        .peer
-        .rsplit_once(':')
-        .map(|(ip, _)| ip)
-        .unwrap_or(deps.peer);
+    let peer_ip = deps.peer.rsplit_once(':').map(|(ip, _)| ip).unwrap_or(deps.peer);
     let record = match crate::token::bound_record_async(&params.token_id, state).await {
         Ok(r) => r,
         Err(e) => {
-            refuse_failed_step(
-                sink,
-                Some(prove_id),
-                &e.to_string(),
-                e.is_hub_fault(),
-                &params.token_id,
-                peer_ip,
-                deps,
-            )
-            .await;
+            refuse_failed_step(sink, Some(prove_id), &e.to_string(), e.is_hub_fault(), &params.token_id, peer_ip, deps).await;
             return None;
         }
     };
     // `bound_record` only ever returns a record with `Some(body_x25519_pubkey)`
     // — `is_none` is unreachable defensively (see that function's own check).
     let Some(expected_pubkey_hex) = record.body_x25519_pubkey.clone() else {
-        refuse_unauthenticated(
-            sink,
-            Some(prove_id),
-            "authentication failed: no X25519 public key on record",
-            None,
-            &params.token_id,
-            peer_ip,
-            deps,
-        )
-        .await;
+        refuse_unauthenticated(sink, Some(prove_id), "authentication failed: no X25519 public key on record", None, &params.token_id, peer_ip, deps).await;
         return None;
     };
     let Ok(msg3) = hex::decode(&prove.message) else {
-        refuse_unauthenticated(
-            sink,
-            Some(prove_id),
-            "authentication failed: malformed handshake message",
-            None,
-            &params.token_id,
-            peer_ip,
-            deps,
-        )
-        .await;
+        refuse_unauthenticated(sink, Some(prove_id), "authentication failed: malformed handshake message", None, &params.token_id, peer_ip, deps).await;
         return None;
     };
     if handshake.read_message(&msg3).is_err() {
-        refuse_unauthenticated(
-            sink,
-            Some(prove_id),
-            "authentication failed: bad handshake message",
-            None,
-            &params.token_id,
-            peer_ip,
-            deps,
-        )
-        .await;
+        refuse_unauthenticated(sink, Some(prove_id), "authentication failed: bad handshake message", None, &params.token_id, peer_ip, deps).await;
         return None;
     }
     if !handshake.is_finished() {
-        refuse_unauthenticated(
-            sink,
-            Some(prove_id),
-            "authentication failed: incomplete handshake",
-            None,
-            &params.token_id,
-            peer_ip,
-            deps,
-        )
-        .await;
+        refuse_unauthenticated(sink, Some(prove_id), "authentication failed: incomplete handshake", None, &params.token_id, peer_ip, deps).await;
         return None;
     }
     if handshake.remote_static_hex().as_deref() != Some(expected_pubkey_hex.as_str()) {
-        refuse_unauthenticated(
-            sink,
-            Some(prove_id),
-            "authentication failed: static key mismatch",
-            None,
-            &params.token_id,
-            peer_ip,
-            deps,
-        )
-        .await;
+        refuse_unauthenticated(sink, Some(prove_id), "authentication failed: static key mismatch", None, &params.token_id, peer_ip, deps).await;
         return None;
     }
     if let Some(ip) = key_ip(peer_ip) {
         if deps.lockout.reset(&ip, &params.token_id) {
-            log_cleared(
-                &LockoutKey {
-                    peer: ip,
-                    token_id: Some(params.token_id.clone()),
-                },
-                "authenticated",
-            );
+            log_cleared(&LockoutKey { peer: ip, token_id: Some(params.token_id.clone()) }, "authenticated");
         }
     }
     Some(record)
 }
 
 #[cfg(test)]
-#[allow(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::panic,
-    clippy::unreachable
-)] // #338
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable)] // #338
 mod tests {
     use super::rejection_reason;
     use holler_proto::noise::{build_prologue, HandshakeXk};
-    use holler_proto::{AuthChallenge, Authenticate, Prove};
+    use holler_proto::{Authenticate, AuthChallenge, Prove};
     use x25519_dalek::{PublicKey, StaticSecret};
 
     fn keypair(seed: u8) -> ([u8; 32], [u8; 32]) {
@@ -716,10 +490,8 @@ mod tests {
         let token_id = "tok_1";
         let prologue = build_prologue(holler_proto::PROTOCOL_VERSION, token_id, advertised_url);
 
-        let mut initiator =
-            HandshakeXk::initiator(&body_secret, &hub_public, &prologue).expect("build initiator");
-        let mut responder =
-            HandshakeXk::responder(&hub_secret, &prologue).expect("build responder");
+        let mut initiator = HandshakeXk::initiator(&body_secret, &hub_public, &prologue).expect("build initiator");
+        let mut responder = HandshakeXk::responder(&hub_secret, &prologue).expect("build responder");
 
         let msg1 = initiator.write_message().expect("write message 1");
         let authenticate = Authenticate {
@@ -732,37 +504,19 @@ mod tests {
         responder.read_message(&msg1).expect("process message 1");
 
         let msg2 = responder.write_message().expect("write message 2");
-        let challenge = AuthChallenge {
-            message: hex::encode(&msg2),
-        };
+        let challenge = AuthChallenge { message: hex::encode(&msg2) };
         initiator.read_message(&msg2).expect("process message 2");
 
         let msg3 = initiator.write_message().expect("write message 3");
-        let prove = Prove {
-            token_id: token_id.into(),
-            message: hex::encode(&msg3),
-        };
+        let prove = Prove { token_id: token_id.into(), message: hex::encode(&msg3) };
         responder.read_message(&msg3).expect("process message 3");
 
-        assert!(
-            responder.is_finished(),
-            "sanity: the handshake must complete"
-        );
-        assert_eq!(
-            responder.remote_static_hex(),
-            Some(hex::encode(body_public)),
-            "sanity: the responder must learn the real body key"
-        );
+        assert!(responder.is_finished(), "sanity: the handshake must complete");
+        assert_eq!(responder.remote_static_hex(), Some(hex::encode(body_public)), "sanity: the responder must learn the real body key");
 
         let raw_frames = [
-            (
-                "circuit/authenticate params",
-                serde_json::to_value(&authenticate),
-            ),
-            (
-                "circuit/authenticate result",
-                serde_json::to_value(&challenge),
-            ),
+            ("circuit/authenticate params", serde_json::to_value(&authenticate)),
+            ("circuit/authenticate result", serde_json::to_value(&challenge)),
             ("circuit/prove params", serde_json::to_value(&prove)),
         ];
         let secrets = [hex::encode(hub_secret), hex::encode(body_secret)];
@@ -770,29 +524,17 @@ mod tests {
             assert!(result.is_ok(), "{name} failed to serialize: {result:?}");
             let wire = result.unwrap_or_default();
             let obj = wire.as_object();
-            assert!(
-                obj.is_some(),
-                "{name} did not serialize as a JSON object: {wire}"
-            );
+            assert!(obj.is_some(), "{name} did not serialize as a JSON object: {wire}");
             let obj = obj.cloned().unwrap_or_default();
             assert!(!obj.is_empty(), "{name} serialized to an empty object");
             let wire_str = wire.to_string();
             for secret_hex in &secrets {
-                assert!(
-                    !wire_str.contains(secret_hex),
-                    "{name} must never contain private key hex: {wire_str}"
-                );
+                assert!(!wire_str.contains(secret_hex), "{name} must never contain private key hex: {wire_str}");
             }
             for (key, value) in &obj {
-                assert!(
-                    !holler_proto::key_is_secret(key),
-                    "{name} carries a secret-shaped field {key:?}"
-                );
+                assert!(!holler_proto::key_is_secret(key), "{name} carries a secret-shaped field {key:?}");
                 if let Some(s) = value.as_str() {
-                    assert!(
-                        !holler_proto::value_is_secret(s),
-                        "{name}.{key} looks like a bearer token: {s:?}"
-                    );
+                    assert!(!holler_proto::value_is_secret(s), "{name}.{key} looks like a bearer token: {s:?}");
                 }
             }
         }
@@ -820,41 +562,26 @@ mod tests {
         let prologue = build_prologue(holler_proto::PROTOCOL_VERSION, token_id, advertised_url);
 
         // Attempt 1: a genuine, successful handshake. Capture messages 1 and 3.
-        let mut initiator_1 =
-            HandshakeXk::initiator(&body_secret, &hub_public, &prologue).expect("build initiator");
-        let mut responder_1 =
-            HandshakeXk::responder(&hub_secret, &prologue).expect("build responder");
+        let mut initiator_1 = HandshakeXk::initiator(&body_secret, &hub_public, &prologue).expect("build initiator");
+        let mut responder_1 = HandshakeXk::responder(&hub_secret, &prologue).expect("build responder");
         let captured_msg1 = initiator_1.write_message().expect("write message 1");
-        responder_1
-            .read_message(&captured_msg1)
-            .expect("attempt 1 message 1 accepted");
+        responder_1.read_message(&captured_msg1).expect("attempt 1 message 1 accepted");
         let msg2_1 = responder_1.write_message().expect("write message 2");
-        initiator_1
-            .read_message(&msg2_1)
-            .expect("attempt 1 message 2 accepted");
+        initiator_1.read_message(&msg2_1).expect("attempt 1 message 2 accepted");
         let captured_msg3 = initiator_1.write_message().expect("write message 3");
-        responder_1
-            .read_message(&captured_msg3)
-            .expect("attempt 1 completes cleanly");
+        responder_1.read_message(&captured_msg3).expect("attempt 1 completes cleanly");
 
         // Attempt 2: a brand-new connection (the shape of `begin_noise_
         // handshake` building a fresh responder per socket) — the attacker
         // replays attempt 1's captured message 1 and message 3 into it.
-        let mut responder_2 =
-            HandshakeXk::responder(&hub_secret, &prologue).expect("build responder");
-        assert!(
-            responder_2.read_message(&captured_msg1).is_ok(),
-            "message 1 alone replays harmlessly"
-        );
+        let mut responder_2 = HandshakeXk::responder(&hub_secret, &prologue).expect("build responder");
+        assert!(responder_2.read_message(&captured_msg1).is_ok(), "message 1 alone replays harmlessly");
         let _fresh_msg2 = responder_2.write_message().expect("write message 2");
         assert!(
             responder_2.read_message(&captured_msg3).is_err(),
             "a captured message 3 from an earlier attempt must not verify against a fresh attempt's different message 2"
         );
-        assert!(
-            !responder_2.is_finished(),
-            "the replayed attempt must never report finished"
-        );
+        assert!(!responder_2.is_finished(), "the replayed attempt must never report finished");
     }
 
     /// A handshake that completes cryptographically with a *self-consistent*
@@ -872,29 +599,18 @@ mod tests {
         let token_id = "tok_1";
         let prologue = build_prologue(holler_proto::PROTOCOL_VERSION, token_id, advertised_url);
 
-        let mut initiator = HandshakeXk::initiator(&attacker_secret, &hub_public, &prologue)
-            .expect("build initiator");
-        let mut responder =
-            HandshakeXk::responder(&hub_secret, &prologue).expect("build responder");
+        let mut initiator = HandshakeXk::initiator(&attacker_secret, &hub_public, &prologue).expect("build initiator");
+        let mut responder = HandshakeXk::responder(&hub_secret, &prologue).expect("build responder");
         let msg1 = initiator.write_message().expect("write message 1");
         responder.read_message(&msg1).expect("message 1 accepted");
         let msg2 = responder.write_message().expect("write message 2");
         initiator.read_message(&msg2).expect("message 2 accepted");
         let msg3 = initiator.write_message().expect("write message 3");
-        responder
-            .read_message(&msg3)
-            .expect("message 3 accepted — the crypto handshake itself completes");
+        responder.read_message(&msg3).expect("message 3 accepted — the crypto handshake itself completes");
 
-        assert!(
-            responder.is_finished(),
-            "the handshake itself completes with any self-consistent keypair"
-        );
+        assert!(responder.is_finished(), "the handshake itself completes with any self-consistent keypair");
         let learned = responder.remote_static_hex();
-        assert_eq!(
-            learned,
-            Some(hex::encode(attacker_public)),
-            "the responder learns the attacker's real key, not a claim"
-        );
+        assert_eq!(learned, Some(hex::encode(attacker_public)), "the responder learns the attacker's real key, not a claim");
         assert_ne!(
             learned,
             Some(hex::encode(registered_body_public)),
@@ -909,82 +625,26 @@ mod tests {
     #[test]
     fn rejection_reasons_are_stable_codes() {
         use holler_proto::noise::{
-            AUTH_FAILED_REASON, HANDSHAKE_FAILED_REASON, KEY_MISMATCH_REASON, NO_PUBLIC_KEY_REASON,
-            PROTOCOL_ERROR_REASON, PROVE_TIMEOUT_REASON, TOKEN_EXPIRED_REASON,
-            TOKEN_NOT_BOUND_REASON, TOKEN_UNKNOWN_REASON,
+            AUTH_FAILED_REASON, HANDSHAKE_FAILED_REASON, KEY_MISMATCH_REASON, NO_PUBLIC_KEY_REASON, PROTOCOL_ERROR_REASON,
+            PROVE_TIMEOUT_REASON, TOKEN_EXPIRED_REASON, TOKEN_NOT_BOUND_REASON, TOKEN_UNKNOWN_REASON,
         };
         let cases = [
-            (
-                "authentication failed: token tok_x is expired",
-                TOKEN_EXPIRED_REASON,
-                "token_expired",
-            ),
-            (
-                "authentication failed: no such token tok_x",
-                TOKEN_UNKNOWN_REASON,
-                "token_unknown",
-            ),
-            (
-                "authentication failed: token tok_x is not bound",
-                TOKEN_NOT_BOUND_REASON,
-                "token_not_bound",
-            ),
-            (
-                "authentication failed: token tok_x has no public key on record",
-                NO_PUBLIC_KEY_REASON,
-                "no_public_key",
-            ),
-            (
-                "authentication failed: no X25519 public key on record",
-                NO_PUBLIC_KEY_REASON,
-                "no_public_key",
-            ),
-            (
-                "authentication failed: static key mismatch",
-                KEY_MISMATCH_REASON,
-                "key_mismatch",
-            ),
-            (
-                "authentication failed: no circuit/prove within the timeout",
-                PROVE_TIMEOUT_REASON,
-                "prove_timeout",
-            ),
-            (
-                "authentication failed: expected circuit/prove",
-                PROTOCOL_ERROR_REASON,
-                "protocol_error",
-            ),
-            (
-                "authentication failed: circuit/prove token_id mismatch",
-                PROTOCOL_ERROR_REASON,
-                "protocol_error",
-            ),
-            (
-                "authentication failed: bad handshake message",
-                HANDSHAKE_FAILED_REASON,
-                "handshake_failed",
-            ),
-            (
-                "authentication failed: incomplete handshake",
-                HANDSHAKE_FAILED_REASON,
-                "handshake_failed",
-            ),
-            (
-                "authentication failed: could not derive the pairing SAS",
-                HANDSHAKE_FAILED_REASON,
-                "handshake_failed",
-            ),
-            (
-                "something the hub has never said",
-                AUTH_FAILED_REASON,
-                "auth_failed",
-            ),
+            ("authentication failed: token tok_x is expired", TOKEN_EXPIRED_REASON, "token_expired"),
+            ("authentication failed: no such token tok_x", TOKEN_UNKNOWN_REASON, "token_unknown"),
+            ("authentication failed: token tok_x is not bound", TOKEN_NOT_BOUND_REASON, "token_not_bound"),
+            ("authentication failed: token tok_x has no public key on record", NO_PUBLIC_KEY_REASON, "no_public_key"),
+            ("authentication failed: no X25519 public key on record", NO_PUBLIC_KEY_REASON, "no_public_key"),
+            ("authentication failed: static key mismatch", KEY_MISMATCH_REASON, "key_mismatch"),
+            ("authentication failed: no circuit/prove within the timeout", PROVE_TIMEOUT_REASON, "prove_timeout"),
+            ("authentication failed: expected circuit/prove", PROTOCOL_ERROR_REASON, "protocol_error"),
+            ("authentication failed: circuit/prove token_id mismatch", PROTOCOL_ERROR_REASON, "protocol_error"),
+            ("authentication failed: bad handshake message", HANDSHAKE_FAILED_REASON, "handshake_failed"),
+            ("authentication failed: incomplete handshake", HANDSHAKE_FAILED_REASON, "handshake_failed"),
+            ("authentication failed: could not derive the pairing SAS", HANDSHAKE_FAILED_REASON, "handshake_failed"),
+            ("something the hub has never said", AUTH_FAILED_REASON, "auth_failed"),
         ];
         for (message, constant, spelled) in cases {
-            assert_eq!(
-                constant, spelled,
-                "the shared constant for {message:?} changed its wire spelling"
-            );
+            assert_eq!(constant, spelled, "the shared constant for {message:?} changed its wire spelling");
             assert_eq!(rejection_reason(message), constant, "{message}");
         }
     }
@@ -1008,38 +668,16 @@ mod tests {
             "authentication failed: could not derive the pairing SAS",
             "something the hub has never said",
         ];
-        let returned: std::collections::BTreeSet<&str> =
-            messages.iter().map(|m| rejection_reason(m)).collect();
+        let returned: std::collections::BTreeSet<&str> = messages.iter().map(|m| rejection_reason(m)).collect();
         for code in &returned {
-            assert!(
-                AUTH_REJECTION_REASONS.contains(code),
-                "{code} is sent on the wire but missing from AUTH_REJECTION_REASONS"
-            );
+            assert!(AUTH_REJECTION_REASONS.contains(code), "{code} is sent on the wire but missing from AUTH_REJECTION_REASONS");
         }
-        let listed: std::collections::BTreeSet<&str> =
-            AUTH_REJECTION_REASONS.iter().copied().collect();
-        assert_eq!(
-            AUTH_REJECTION_REASONS.len(),
-            9,
-            "{AUTH_REJECTION_REASONS:?}"
-        );
-        assert_eq!(
-            listed.len(),
-            AUTH_REJECTION_REASONS.len(),
-            "duplicates in {AUTH_REJECTION_REASONS:?}"
-        );
-        assert_eq!(
-            listed, returned,
-            "the vocabulary and the classifier disagree"
-        );
-        for fixed in [
-            holler_proto::noise::HUB_UNAVAILABLE_REASON,
-            holler_proto::noise::NOISE_MESSAGE_ONE_REJECTED_REASON,
-        ] {
-            assert!(
-                !listed.contains(fixed),
-                "{fixed} is not a counted rejection code"
-            );
+        let listed: std::collections::BTreeSet<&str> = AUTH_REJECTION_REASONS.iter().copied().collect();
+        assert_eq!(AUTH_REJECTION_REASONS.len(), 9, "{AUTH_REJECTION_REASONS:?}");
+        assert_eq!(listed.len(), AUTH_REJECTION_REASONS.len(), "duplicates in {AUTH_REJECTION_REASONS:?}");
+        assert_eq!(listed, returned, "the vocabulary and the classifier disagree");
+        for fixed in [holler_proto::noise::HUB_UNAVAILABLE_REASON, holler_proto::noise::NOISE_MESSAGE_ONE_REJECTED_REASON] {
+            assert!(!listed.contains(fixed), "{fixed} is not a counted rejection code");
         }
     }
 

@@ -1,10 +1,4 @@
-#![allow(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::panic,
-    clippy::unreachable,
-    dead_code
-)] // #294
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable, dead_code)] // #294
 //! Mechanism proof for a **multi-word** `command` array (issue #294 / the
 //! Claude Code harness docs, README's "Harness recipes"): every existing
 //! real-subprocess test in this crate spawns `command[0]` as an *absolute
@@ -77,11 +71,7 @@ fn sh_quote(s: &str) -> String {
 /// this file's own module doc. `harness` is `"claude"` (not `"opencode"`,
 /// which every other test in this crate uses) so this also exercises the
 /// harness id the docs recipe actually names.
-fn write_multiword_claude_sessions_toml(
-    state: &StateDir,
-    name: &str,
-    extra: &[&str],
-) -> std::path::PathBuf {
+fn write_multiword_claude_sessions_toml(state: &StateDir, name: &str, extra: &[&str]) -> std::path::PathBuf {
     let stub = env!("CARGO_BIN_EXE_stub-acp");
     let script = std::iter::once(sh_quote(stub))
         .chain(extra.iter().map(|a| sh_quote(a)))
@@ -117,11 +107,7 @@ fn body_support_claude_true_for_bare_name_multiword_command() {
         Some(true),
         "a bare-name, multi-word command[0] resolvable on PATH must be ok:true: {doc}"
     );
-    assert_eq!(
-        doc["how"].as_str(),
-        Some("spawn: sh"),
-        "how must name the resolved command[0]: {doc}"
-    );
+    assert_eq!(doc["how"].as_str(), Some("spawn: sh"), "how must name the resolved command[0]: {doc}");
 }
 
 /// The same shape with an unresolvable `command[0]` (a bare name that is not
@@ -178,8 +164,7 @@ fn say_round_trip_over_multiword_bare_name_command() {
     // uses) rather than a blind sleep.
     let out = wait_for(READY, || {
         let out = support::say(&hub_state, "alpha", "hi");
-        if out.status.success() || !String::from_utf8_lossy(&out.stderr).contains("unknown session")
-        {
+        if out.status.success() || !String::from_utf8_lossy(&out.stderr).contains("unknown session") {
             Some(out)
         } else {
             None

@@ -313,11 +313,7 @@ impl Query {
         // `let-else` (not `expect`) keeps the borrow checker happy.
         let first = match self.rest.first() {
             Some(first) => first,
-            None => {
-                return Err(Usage::new(
-                    "a query needs a CMD [ARGS...] or TARGET CMD".to_string(),
-                ))
-            }
+            None => return Err(Usage::new("a query needs a CMD [ARGS...] or TARGET CMD".to_string())),
         };
         if is_cmd(first) {
             // Local form: `query CMD [ARGS...]` — no target.
@@ -709,20 +705,12 @@ mod tests {
     // Unit tests legitimately use unwrap/expect/panic (the integration test
     // files do the same at their crate top). An in-crate `mod` can't use a
     // file-level `#![allow]`, so the module opts out here instead.
-    #![allow(
-        clippy::unwrap_used,
-        clippy::expect_used,
-        clippy::panic,
-        clippy::unreachable
-    )] // #149
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable)] // #149
 
     use super::*;
 
     fn query(rest: &[&str]) -> Query {
-        Query {
-            server: None,
-            rest: rest.iter().map(|s| s.to_string()).collect(),
-        }
+        Query { server: None, rest: rest.iter().map(|s| s.to_string()).collect() }
     }
 
     /// The four shapes the old accessors got wrong (issue #148): `status`,
@@ -730,17 +718,13 @@ mod tests {
     #[test]
     fn resolves_the_four_query_shapes() {
         // (a) Local, no target: `query status` — cmd is the first token.
-        let r = query(&["status"])
-            .resolve()
-            .expect("local `query status` must resolve");
+        let r = query(&["status"]).resolve().expect("local `query status` must resolve");
         assert!(r.target().is_none(), "`query status` has no target");
         assert_eq!(r.cmd(), &Cmd::Status);
         assert!(r.args().is_empty());
 
         // (b) Remote, same verb: `query TARGET status`.
-        let r = query(&["io", "status"])
-            .resolve()
-            .expect("remote `query io status` must resolve");
+        let r = query(&["io", "status"]).resolve().expect("remote `query io status` must resolve");
         assert_eq!(r.target(), Some(&Target::new("io".into())));
         assert_eq!(r.cmd(), &Cmd::Status);
         assert!(r.args().is_empty());
@@ -749,10 +733,7 @@ mod tests {
         let r = query(&["support", "opencode"])
             .resolve()
             .expect("local `query support opencode` must resolve");
-        assert!(
-            r.target().is_none(),
-            "`query support opencode` has no target"
-        );
+        assert!(r.target().is_none(), "`query support opencode` has no target");
         assert_eq!(r.cmd(), &Cmd::Support);
         assert_eq!(r.args(), &["opencode".to_string()]);
 
@@ -769,9 +750,7 @@ mod tests {
     #[test]
     fn target_without_command_is_a_usage_error() {
         // A bare, non-CMD token is a remote target with no command after it.
-        let err = query(&["io"])
-            .resolve()
-            .expect_err("`query io` (no cmd) must be a usage error");
+        let err = query(&["io"]).resolve().expect_err("`query io` (no cmd) must be a usage error");
         let Usage { .. } = err; // just assert it is the usage error type
         assert!(err.to_string().contains("io"));
     }

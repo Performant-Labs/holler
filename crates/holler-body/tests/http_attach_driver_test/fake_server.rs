@@ -72,27 +72,19 @@ impl FakeServer {
         let listener = TcpListener::bind("127.0.0.1:0")
             .await
             .expect("fake server must bind a loopback port");
-        let addr = listener
-            .local_addr()
-            .expect("bound listener has a local addr");
+        let addr = listener.local_addr().expect("bound listener has a local addr");
         let state = Arc::new(Mutex::new(FakeState::new()));
         let accept_state = state.clone();
         let task = tokio::spawn(async move {
             loop {
-                let Ok((socket, _peer)) = listener.accept().await else {
-                    return;
-                };
+                let Ok((socket, _peer)) = listener.accept().await else { return };
                 let conn_state = accept_state.clone();
                 tokio::spawn(async move {
                     let _ = handle_connection(socket, conn_state).await;
                 });
             }
         });
-        FakeServer {
-            addr,
-            state,
-            _task: task,
-        }
+        FakeServer { addr, state, _task: task }
     }
 
     pub fn endpoint(&self) -> String {
@@ -102,19 +94,13 @@ impl FakeServer {
     /// Broadcasts one already-JSON-encoded OpenCode event to every currently
     /// connected `/event` listener.
     pub fn push_event(&self, event: Value) {
-        let state = self
-            .state
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let state = self.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let _ = state.event_tx.send(event.to_string());
     }
 
     /// Closes every currently-open `/event` connection right now.
     pub fn force_disconnect(&self) {
-        let state = self
-            .state
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let state = self.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         state.generation.fetch_add(1, Ordering::SeqCst);
     }
 
@@ -127,10 +113,7 @@ impl FakeServer {
     }
 
     pub fn set_questions(&self, questions: Vec<Value>) {
-        self.state
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .questions = questions;
+        self.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner).questions = questions;
     }
 
     pub fn set_permissions(&self, permissions: Vec<Value>) {
@@ -259,9 +242,7 @@ async fn serve_sse(
     write_half.flush().await?;
 
     let (mut rx, my_generation, generation) = {
-        let state = state
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let state = state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         (
             state.event_tx.subscribe(),
             state.generation.load(Ordering::SeqCst),
@@ -292,9 +273,7 @@ async fn serve_sse(
 }
 
 fn route(method: &str, path: &str, body: &str, state: &Arc<Mutex<FakeState>>) -> String {
-    let mut state = state
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut state = state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     state.requests.push(RecordedRequest {
         method: method.to_string(),
         path: path.to_string(),
@@ -318,7 +297,9 @@ fn route(method: &str, path: &str, body: &str, state: &Arc<Mutex<FakeState>>) ->
                 not_found()
             }
         }
-        ("GET", ["session"]) => ok_json(&Value::Array(state.child_sessions.clone()).to_string()),
+        ("GET", ["session"]) => {
+            ok_json(&Value::Array(state.child_sessions.clone()).to_string())
+        }
         ("POST", ["session"]) => {
             state.session_new_called = true;
             ok_json("{}")

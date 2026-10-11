@@ -383,15 +383,8 @@ pub const REDACTED: &str = "[redacted]";
 /// hands either to `emit` in the first place (mirroring how the pepper
 /// itself is never logged), but a field named this way is redacted the
 /// instant anything ever does.
-const SECRET_KEY_SUBSTRINGS: &[&str] = &[
-    "secret",
-    "credential",
-    "ticket",
-    "authorization",
-    "pepper",
-    "private_key",
-    "signing_key",
-];
+const SECRET_KEY_SUBSTRINGS: &[&str] =
+    &["secret", "credential", "ticket", "authorization", "pepper", "private_key", "signing_key"];
 
 /// String-value prefixes that mark a value as a token, regardless of key.
 const SECRET_VALUE_PREFIXES: &[&str] = &["hlr_join_", "hlr_live_"];
@@ -418,14 +411,11 @@ pub fn redact(value: &Value) -> Value {
             let mut out = Map::new();
             for (k, v) in map {
                 let red = key_is_secret(k) || matches!(v, Value::String(s) if value_is_secret(s));
-                out.insert(
-                    k.clone(),
-                    if red {
-                        Value::String(REDACTED.to_owned())
-                    } else {
-                        redact(v)
-                    },
-                );
+                out.insert(k.clone(), if red {
+                    Value::String(REDACTED.to_owned())
+                } else {
+                    redact(v)
+                });
             }
             Value::Object(out)
         }
@@ -530,18 +520,9 @@ fn render_text(ev: &Event) -> String {
 fn render_json(ev: &Event) -> String {
     let mut m = Map::new();
     m.insert("ts".into(), Value::String(timestamp()));
-    m.insert(
-        "level".into(),
-        Value::String(ev.severity.as_str().to_owned()),
-    );
-    m.insert(
-        "component".into(),
-        Value::String(ev.component.as_str().to_owned()),
-    );
-    m.insert(
-        "dir".into(),
-        Value::String(ev.direction.as_str().to_owned()),
-    );
+    m.insert("level".into(), Value::String(ev.severity.as_str().to_owned()));
+    m.insert("component".into(), Value::String(ev.component.as_str().to_owned()));
+    m.insert("dir".into(), Value::String(ev.direction.as_str().to_owned()));
     m.insert("type".into(), Value::String(ev.method.to_owned()));
     if let Some(id) = ev.id {
         m.insert("id".into(), Value::String(short_id(id)));

@@ -40,8 +40,7 @@ use std::time::{Duration, Instant};
 use crate::fleet::FleetMember;
 use crate::hub::Hub;
 use crate::metrics::{
-    ChurnReport, CycleSample, HangOutcome, Report, ResidentOutcome, ResourceSample, RestartOutcome,
-    Samples, StepReport,
+    ChurnReport, CycleSample, HangOutcome, Report, ResidentOutcome, ResourceSample, RestartOutcome, Samples, StepReport,
 };
 use crate::proc::CpuMeter;
 use crate::{Config, Res};
@@ -95,10 +94,7 @@ pub struct Accum {
 impl Accum {
     fn record_cleanup(&mut self, mode: TeardownMode, d: Duration) {
         self.cleanup.push(d);
-        self.cleanup_by_mode
-            .entry(mode.name().to_string())
-            .or_default()
-            .push(d);
+        self.cleanup_by_mode.entry(mode.name().to_string()).or_default().push(d);
     }
 }
 
@@ -109,11 +105,7 @@ fn run_blocking(cfg: &Config, hub: &Hub, report: &mut Report) -> Res<()> {
     let rss_before = report.hub_baseline.rss_mib;
     let initial_clients = counts(hub).map(|c| c.0);
 
-    let resident = if cfg.resident {
-        Some(start_resident(cfg, hub)?)
-    } else {
-        None
-    };
+    let resident = if cfg.resident { Some(start_resident(cfg, hub)?) } else { None };
     let outcome = churn_loop(cfg, hub, started, &mut meter, resident.as_ref());
     let resident_sessions = resident.as_ref().map_or(0, |r| r.session_names.len());
     if let Some(r) = resident {
@@ -129,25 +121,9 @@ fn run_blocking(cfg: &Config, hub: &Hub, report: &mut Report) -> Res<()> {
     let steady = sample(&mut meter);
     let dead_backend = probes::dead_backend(cfg, hub)?;
     let final_clients = counts(hub).map(|c| c.0);
-    let churn = build_churn_report(
-        cfg,
-        acc,
-        cycles,
-        resident_sessions,
-        rss_before,
-        steady.rss_mib,
-        label_reuse,
-        dead_backend,
-    );
+    let churn = build_churn_report(cfg, acc, cycles, resident_sessions, rss_before, steady.rss_mib, label_reuse, dead_backend);
     let back_to_initial = final_clients.is_some() && final_clients == initial_clients;
-    report.steps.push(step_report(
-        cfg,
-        started,
-        steady,
-        final_clients,
-        back_to_initial,
-        churn,
-    ));
+    report.steps.push(step_report(cfg, started, steady, final_clients, back_to_initial, churn));
     Ok(())
 }
 
@@ -158,18 +134,11 @@ fn churn_loop(
     meter: &mut Option<CpuMeter>,
     resident: Option<&FleetMember>,
 ) -> Res<(Accum, usize)> {
-    let baseline =
-        counts(hub).ok_or("could not read `hub status --json` before the first cycle")?;
-    let wave = (
-        cfg.bodies as u64,
-        (cfg.bodies * cfg.sessions_per_body) as u64,
-    );
+    let baseline = counts(hub).ok_or("could not read `hub status --json` before the first cycle")?;
+    let wave = (cfg.bodies as u64, (cfg.bodies * cfg.sessions_per_body) as u64);
     let mut acc = Accum::default();
     let mut cycle = 0;
-    while cfg
-        .churn_secs
-        .map_or(cycle < cfg.churn_cycles, |secs| started.elapsed() < secs)
-    {
+    while cfg.churn_secs.map_or(cycle < cfg.churn_cycles, |secs| started.elapsed() < secs) {
         let mode = cfg.teardown_modes[cycle % cfg.teardown_modes.len()];
         let c = Cycle {
             cfg,
@@ -203,19 +172,11 @@ fn run_cycle(c: &Cycle, mode: TeardownMode, acc: &mut Accum) -> Res<()> {
     let mut members = Vec::with_capacity(c.cfg.bodies);
     for i in 0..c.cfg.bodies {
         let label = format!("ch{}-{i}", c.cycle);
-        match FleetMember::start(
-            c.hub,
-            &c.cfg.holler_bin,
-            &c.cfg.stub_acp_bin,
-            &label,
-            c.cfg.sessions_per_body,
-        ) {
+        match FleetMember::start(c.hub, &c.cfg.holler_bin, &c.cfg.stub_acp_bin, &label, c.cfg.sessions_per_body) {
             Ok(m) => members.push(m),
             Err(e) => {
                 teardown_all(members, false, FleetMember::stop);
-                return Err(
-                    format!("churn cycle {}: body {i} failed to start: {e}", c.cycle).into(),
-                );
+                return Err(format!("churn cycle {}: body {i} failed to start: {e}", c.cycle).into());
             }
         }
     }
@@ -235,10 +196,7 @@ fn run_cycle(c: &Cycle, mode: TeardownMode, acc: &mut Accum) -> Res<()> {
         acc.first_graceful_label = Some(format!("ch{}-0", c.cycle));
     }
 
-    let names: Vec<String> = members
-        .iter()
-        .flat_map(|m| m.session_names.clone())
-        .collect();
+    let names: Vec<String> = members.iter().flat_map(|m| m.session_names.clone()).collect();
     let (say, failures) = say_all(&c.cfg.holler_bin, c.hub, &names);
     for d in say {
         acc.say.push(d);
@@ -249,25 +207,13 @@ fn run_cycle(c: &Cycle, mode: TeardownMode, acc: &mut Accum) -> Res<()> {
 }
 
 fn start_resident(cfg: &Config, hub: &Hub) -> Res<FleetMember> {
-    let before = counts(hub)
-        .ok_or("could not read `hub status --json` before starting the resident body")?;
-    let resident = FleetMember::start(
-        hub,
-        &cfg.holler_bin,
-        &cfg.stub_acp_bin,
-        "resident",
-        cfg.sessions_per_body,
-    )?;
+    let before = counts(hub).ok_or("could not read `hub status --json` before starting the resident body")?;
+    let resident = FleetMember::start(hub, &cfg.holler_bin, &cfg.stub_acp_bin, "resident", cfg.sessions_per_body)?;
     let want = (before.0 + 1, before.1 + cfg.sessions_per_body as u64);
     let seen = wait_for_counts(hub, want, REGISTER_BUDGET);
     if seen != Some(want) {
         resident.stop();
-        return Err(format!(
-            "resident body never registered; wanted {}, saw {}",
-            fmt(Some(want)),
-            fmt(seen)
-        )
-        .into());
+        return Err(format!("resident body never registered; wanted {}, saw {}", fmt(Some(want)), fmt(seen)).into());
     }
     Ok(resident)
 }
@@ -275,9 +221,7 @@ fn start_resident(cfg: &Config, hub: &Hub) -> Res<FleetMember> {
 /// After a cycle's cleanup, every resident session must still be connected
 /// and idle/working; anything else counts as a disturbance.
 fn check_resident(c: &Cycle, acc: &mut Accum) {
-    let Some(names) = c.resident_sessions else {
-        return;
-    };
+    let Some(names) = c.resident_sessions else { return };
     let rows = probes::roster_rows(c.hub);
     for name in names {
         acc.resident_checks += 1;
@@ -290,9 +234,7 @@ fn check_resident(c: &Cycle, acc: &mut Accum) {
 /// Run `f` (a teardown) while the resident body, if any, takes one `say` per
 /// session: churn happening next to live traffic.
 fn with_resident_traffic<R>(c: &Cycle, acc: &mut Accum, f: impl FnOnce() -> R) -> R {
-    let Some(names) = c.resident_sessions else {
-        return f();
-    };
+    let Some(names) = c.resident_sessions else { return f() };
     let (result, (samples, failures)) = std::thread::scope(|scope| {
         let traffic = scope.spawn(|| say_all(&c.cfg.holler_bin, c.hub, names));
         let result = f();
@@ -354,10 +296,7 @@ fn say_all(holler_bin: &Path, hub: &Hub, sessions: &[String]) -> (Vec<Duration>,
                 })
             })
             .collect();
-        handles
-            .into_iter()
-            .map(|h| h.join().ok().flatten())
-            .collect()
+        handles.into_iter().map(|h| h.join().ok().flatten()).collect()
     });
     let failures = outcomes.iter().filter(|o| o.is_none()).count();
     (outcomes.into_iter().flatten().collect(), failures)
@@ -366,10 +305,7 @@ fn say_all(holler_bin: &Path, hub: &Hub, sessions: &[String]) -> (Vec<Duration>,
 /// `(clients, sessions)` from one `hub status --json` read.
 fn counts(hub: &Hub) -> Option<(u64, u64)> {
     let doc = hub.status_json().ok()?;
-    Some((
-        doc.get("clients")?.as_u64()?,
-        doc.get("sessions")?.as_u64()?,
-    ))
+    Some((doc.get("clients")?.as_u64()?, doc.get("sessions")?.as_u64()?))
 }
 
 /// Poll until the hub reports exactly `want`, or the budget runs out;
@@ -387,10 +323,7 @@ fn wait_for_counts(hub: &Hub, want: (u64, u64), budget: Duration) -> Option<(u64
 }
 
 fn fmt(c: Option<(u64, u64)>) -> String {
-    c.map_or_else(
-        || "unreadable".to_string(),
-        |(cl, s)| format!("clients={cl} sessions={s}"),
-    )
+    c.map_or_else(|| "unreadable".to_string(), |(cl, s)| format!("clients={cl} sessions={s}"))
 }
 
 fn sample(meter: &mut Option<CpuMeter>) -> ResourceSample {
@@ -421,17 +354,9 @@ fn build_churn_report(
         hub_rss_before_mib: rss_before,
         hub_rss_after_mib: rss_after,
         dead_backend: Some(dead_backend),
-        teardown_modes: cfg
-            .teardown_modes
-            .iter()
-            .map(|m| m.name().to_string())
-            .collect(),
+        teardown_modes: cfg.teardown_modes.iter().map(|m| m.name().to_string()).collect(),
         parallel_teardown: cfg.parallel_teardown,
-        cleanup_by_mode: acc
-            .cleanup_by_mode
-            .iter()
-            .filter_map(|(k, v)| v.stats().map(|s| (k.clone(), s)))
-            .collect(),
+        cleanup_by_mode: acc.cleanup_by_mode.iter().filter_map(|(k, v)| v.stats().map(|s| (k.clone(), s))).collect(),
         hang: (acc.hang_cycles > 0).then(|| HangOutcome {
             cycles: acc.hang_cycles,
             budget_secs: cfg.hang_budget.as_secs(),

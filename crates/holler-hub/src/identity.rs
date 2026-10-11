@@ -76,9 +76,7 @@ pub struct IdentityError {
 
 impl IdentityError {
     fn new(message: impl Into<String>) -> Self {
-        Self {
-            message: message.into(),
-        }
+        Self { message: message.into() }
     }
 }
 
@@ -112,19 +110,10 @@ pub fn ensure(state: &HubState) -> Result<HubIdentity, IdentityError> {
         Ok(()) => {}
         // A concurrent caller created the key first: its key is the hub's.
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-            return read_key(&path)?.ok_or_else(|| {
-                IdentityError::new(format!(
-                    "hub identity {} exists but could not be read back",
-                    path.display()
-                ))
-            });
+            return read_key(&path)?
+                .ok_or_else(|| IdentityError::new(format!("hub identity {} exists but could not be read back", path.display())));
         }
-        Err(e) => {
-            return Err(IdentityError::new(format!(
-                "cannot create hub identity {}: {e}",
-                path.display()
-            )))
-        }
+        Err(e) => return Err(IdentityError::new(format!("cannot create hub identity {}: {e}", path.display()))),
     }
     let identity = from_bytes(buf);
     emit_identity_generated(&path, &identity.public_hex());
@@ -136,19 +125,11 @@ fn read_key(path: &Path) -> Result<Option<HubIdentity>, IdentityError> {
     let bytes = match std::fs::read(path) {
         Ok(bytes) => bytes,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(e) => {
-            return Err(IdentityError::new(format!(
-                "cannot read hub identity {}: {e}",
-                path.display()
-            )))
-        }
+        Err(e) => return Err(IdentityError::new(format!("cannot read hub identity {}: {e}", path.display()))),
     };
-    let arr: [u8; KEY_BYTES] = bytes.try_into().map_err(|_| {
-        IdentityError::new(format!(
-            "hub identity {} is corrupt (wrong length)",
-            path.display()
-        ))
-    })?;
+    let arr: [u8; KEY_BYTES] = bytes
+        .try_into()
+        .map_err(|_| IdentityError::new(format!("hub identity {} is corrupt (wrong length)", path.display())))?;
     Ok(Some(from_bytes(arr)))
 }
 
@@ -178,12 +159,7 @@ fn emit_identity_generated(path: &Path, public_hex: &str) {
 }
 
 #[cfg(test)]
-#[allow(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::panic,
-    clippy::unreachable
-)] // #322
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable)] // #322
 mod tests {
     use super::*;
 
@@ -195,10 +171,7 @@ mod tests {
             let unique = format!(
                 "holler-hub-identity-{tag}-{}-{:x}",
                 std::process::id(),
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_nanos())
-                    .unwrap_or(0),
+                std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0),
             );
             let root = std::env::temp_dir().join(unique);
             std::fs::create_dir_all(&root).expect("create scratch state dir");
@@ -224,27 +197,15 @@ mod tests {
         {
             use std::os::unix::fs::MetadataExt;
             let mode = std::fs::metadata(&path).expect("stat identity.key").mode();
-            assert_eq!(
-                mode & 0o777,
-                0o600,
-                "identity.key must be mode 0600; got {mode:o}"
-            );
+            assert_eq!(mode & 0o777, 0o600, "identity.key must be mode 0600; got {mode:o}");
         }
 
         // A fresh `HubState` over the *same* root simulates a hub restart:
         // `ensure` must load the same keypair back, never regenerate.
         let restarted_state = HubState::from_root(dir.root.clone());
         let second = ensure(&restarted_state).expect("second ensure loads the persisted keypair");
-        assert_eq!(
-            first.public_hex(),
-            second.public_hex(),
-            "the public key must survive a restart"
-        );
-        assert_eq!(
-            first.secret_bytes(),
-            second.secret_bytes(),
-            "the private key must survive a restart"
-        );
+        assert_eq!(first.public_hex(), second.public_hex(), "the public key must survive a restart");
+        assert_eq!(first.secret_bytes(), second.secret_bytes(), "the private key must survive a restart");
     }
 
     #[test]
@@ -253,16 +214,8 @@ mod tests {
         let state = HubState::from_root(dir.root.clone());
         let identity = ensure(&state).expect("ensure");
         let hex = identity.public_hex();
-        assert_eq!(
-            hex.len(),
-            64,
-            "a 32-byte X25519 public key is 64 hex chars: {hex}"
-        );
-        assert!(
-            hex.chars()
-                .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()),
-            "must be lowercase hex: {hex}"
-        );
+        assert_eq!(hex.len(), 64, "a 32-byte X25519 public key is 64 hex chars: {hex}");
+        assert!(hex.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()), "must be lowercase hex: {hex}");
     }
 
     /// #322's `hub_private_key_never_appears_in_noisy_debug_output`: the one
@@ -291,21 +244,11 @@ mod tests {
             method: "hub_identity_generated",
             id: None,
             peer: None,
-            fields: vec![
-                ("path", path.display().to_string()),
-                ("hub_pubkey", identity.public_hex()),
-            ],
+            fields: vec![("path", path.display().to_string()), ("hub_pubkey", identity.public_hex())],
             frame: None,
         };
-        for debug in [
-            holler_proto::log::DebugLevel::None,
-            holler_proto::log::DebugLevel::Quiet,
-            holler_proto::log::DebugLevel::Noisy,
-        ] {
-            for format in [
-                holler_proto::log::LogFormat::Text,
-                holler_proto::log::LogFormat::Json,
-            ] {
+        for debug in [holler_proto::log::DebugLevel::None, holler_proto::log::DebugLevel::Quiet, holler_proto::log::DebugLevel::Noisy] {
+            for format in [holler_proto::log::LogFormat::Text, holler_proto::log::LogFormat::Json] {
                 let config = holler_proto::log::Config { debug, format };
                 let rendered = event.render(&config);
                 assert!(

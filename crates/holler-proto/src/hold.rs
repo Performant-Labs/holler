@@ -59,12 +59,6 @@ impl SessionHold {
     /// A held session: `reason` is the operator's text (if any), `since` the
     /// RFC 3339 time the hold was set.
     pub fn held(reason: Option<String>, since: String) -> Self {
-        Self {
-            hold: true,
-            hold_reason: reason,
-            held_since: Some(since),
-            hold_kind: None,
-            hold_default: false,
-        }
+        Self { hold: true, hold_reason: reason, held_since: Some(since), hold_kind: None, hold_default: false }
     }
 }

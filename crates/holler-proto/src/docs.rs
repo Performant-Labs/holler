@@ -311,27 +311,14 @@ impl<'de> Deserialize<'de> for Status {
         }
 
         let mut value = Value::deserialize(deserializer)?;
-        let obj = value
-            .as_object_mut()
-            .ok_or_else(|| D::Error::custom("Status: expected a JSON object"))?;
+        let obj = value.as_object_mut().ok_or_else(|| D::Error::custom("Status: expected a JSON object"))?;
 
-        let (sessions, session_list): (Option<u32>, Option<Vec<StatusSession>>) =
-            match obj.remove("sessions") {
-                None => (None, None),
-                Some(arr @ Value::Array(_)) => (
-                    None,
-                    Some(serde_json::from_value(arr).map_err(D::Error::custom)?),
-                ),
-                Some(num @ Value::Number(_)) => (
-                    Some(serde_json::from_value(num).map_err(D::Error::custom)?),
-                    None,
-                ),
-                Some(other) => {
-                    return Err(D::Error::custom(format!(
-                        "Status: `sessions` must be a number or an array, got {other}"
-                    )))
-                }
-            };
+        let (sessions, session_list): (Option<u32>, Option<Vec<StatusSession>>) = match obj.remove("sessions") {
+            None => (None, None),
+            Some(arr @ Value::Array(_)) => (None, Some(serde_json::from_value(arr).map_err(D::Error::custom)?)),
+            Some(num @ Value::Number(_)) => (Some(serde_json::from_value(num).map_err(D::Error::custom)?), None),
+            Some(other) => return Err(D::Error::custom(format!("Status: `sessions` must be a number or an array, got {other}"))),
+        };
 
         Ok(Status {
             role: require(obj, "role")?,
@@ -909,3 +896,4 @@ pub fn parse_session_state(s: &str) -> Result<SessionState, WireError> {
         )),
     }
 }
+

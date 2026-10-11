@@ -21,12 +21,8 @@ pub fn roster_rows(hub: &Hub) -> Vec<serde_json::Value> {
 }
 
 /// Every roster row whose `name` is `name`.
-pub fn rows_named<'a>(
-    rows: &'a [serde_json::Value],
-    name: &'a str,
-) -> impl Iterator<Item = &'a serde_json::Value> {
-    rows.iter()
-        .filter(move |r| r.get("name").and_then(|n| n.as_str()) == Some(name))
+pub fn rows_named<'a>(rows: &'a [serde_json::Value], name: &'a str) -> impl Iterator<Item = &'a serde_json::Value> {
+    rows.iter().filter(move |r| r.get("name").and_then(|n| n.as_str()) == Some(name))
 }
 
 pub fn str_field<'a>(row: &'a serde_json::Value, key: &str) -> Option<&'a str> {
@@ -37,21 +33,14 @@ pub fn str_field<'a>(row: &'a serde_json::Value, key: &str) -> Option<&'a str> {
 /// roster kept (wrongly) showing for a dead backend.
 pub fn is_healthy(row: Option<&serde_json::Value>) -> bool {
     row.is_some_and(|r| {
-        str_field(r, "conn_state") == Some("connected")
-            && matches!(str_field(r, "state"), Some("idle" | "working"))
+        str_field(r, "conn_state") == Some("connected") && matches!(str_field(r, "state"), Some("idle" | "working"))
     })
 }
 
 pub fn describe(row: Option<&serde_json::Value>) -> String {
     row.map_or_else(
         || "row absent".to_string(),
-        |r| {
-            format!(
-                "state={} conn_state={}",
-                str_field(r, "state").unwrap_or("?"),
-                str_field(r, "conn_state").unwrap_or("?")
-            )
-        },
+        |r| format!("state={} conn_state={}", str_field(r, "state").unwrap_or("?"), str_field(r, "conn_state").unwrap_or("?")),
     )
 }
 
@@ -64,9 +53,7 @@ fn row_for(hub: &Hub, name: &str) -> Option<serde_json::Value> {
 /// Token records in the hub's store, or `None` if it can't be read.
 pub fn token_count(hub: &Hub) -> Option<usize> {
     let hub_state = holler_hub::state::HubState::from_root(hub.state().path().to_path_buf());
-    holler_hub::token::list(&hub_state)
-        .ok()
-        .map(|records| records.len())
+    holler_hub::token::list(&hub_state).ok().map(|records| records.len())
 }
 
 /// Try to mint a new token under a label whose body was gracefully detached.
@@ -74,9 +61,7 @@ pub fn label_reuse(hub: &Hub, label: &str) -> String {
     let hub_state = holler_hub::state::HubState::from_root(hub.state().path().to_path_buf());
     match holler_hub::token::mint(label, 3600, &hub_state) {
         Ok(_) => format!("label {label:?} was freed: re-minting it after `body detach` succeeded"),
-        Err(e) => {
-            format!("label {label:?} stays claimed after `body detach`: re-mint refused ({e})")
-        }
+        Err(e) => format!("label {label:?} stays claimed after `body detach`: re-mint refused ({e})"),
     }
 }
 
@@ -84,14 +69,7 @@ pub fn label_reuse(hub: &Hub, label: &str) -> String {
 /// and time how long the roster takes to stop showing the session healthy.
 pub fn dead_backend(cfg: &Config, hub: &Hub) -> Res<DeadBackendProbe> {
     let (mut backend, endpoint) = spawn_fake_opencode()?;
-    let member = match FleetMember::start_attach(
-        hub,
-        &cfg.holler_bin,
-        "churn-dead",
-        "attached",
-        &endpoint,
-        "ses_churn",
-    ) {
+    let member = match FleetMember::start_attach(hub, &cfg.holler_bin, "churn-dead", "attached", &endpoint, "ses_churn") {
         Ok(m) => m,
         Err(e) => {
             kill_tree(&mut backend);
@@ -139,17 +117,11 @@ pub fn dead_backend(cfg: &Config, hub: &Hub) -> Res<DeadBackendProbe> {
 /// it prints.
 fn spawn_fake_opencode() -> Res<(Child, String)> {
     let mut cmd = Command::new(std::env::current_exe()?);
-    cmd.arg("--fake-opencode")
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null());
+    cmd.arg("--fake-opencode").stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
     own_process_group(&mut cmd);
     let mut child = cmd.spawn()?;
     let mut line = String::new();
-    let read = child
-        .stdout
-        .take()
-        .map(|s| BufReader::new(s).read_line(&mut line));
+    let read = child.stdout.take().map(|s| BufReader::new(s).read_line(&mut line));
     if !matches!(read, Some(Ok(n)) if n > 0) {
         kill_tree(&mut child);
         return Err("fake OpenCode process exited before printing its endpoint".into());

@@ -49,17 +49,9 @@ fn remote(server: &str, call: &ControlCall) -> Result<serde_json::Value, Control
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
-        .map_err(|e| {
-            ControlError::RemoteUnavailable(format!("could not start the local runtime: {e}"))
-        })?;
-    rt.block_on(holler_body::admin_client::call(
-        &state_root,
-        server,
-        &method,
-        call.params.clone(),
-        call.timeout,
-    ))
-    .map_err(map_admin_error)
+        .map_err(|e| ControlError::RemoteUnavailable(format!("could not start the local runtime: {e}")))?;
+    rt.block_on(holler_body::admin_client::call(&state_root, server, &method, call.params.clone(), call.timeout))
+        .map_err(map_admin_error)
 }
 
 /// `control/x` → `admin/x` (MO 8's whole transport switch). The two local

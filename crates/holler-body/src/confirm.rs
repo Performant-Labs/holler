@@ -71,10 +71,7 @@ pub enum ConfirmExit {
 /// discipline `body join`/`body run`'s own tests use: real subprocesses, no
 /// mocks of the circuit) while unit tests can supply a canned answer without
 /// a terminal.
-pub fn confirm(
-    state_root: &Path,
-    read_answer: impl FnOnce() -> std::io::Result<String>,
-) -> ConfirmExit {
+pub fn confirm(state_root: &Path, read_answer: impl FnOnce() -> std::io::Result<String>) -> ConfirmExit {
     let identity = match identity::load(state_root) {
         None => return ConfirmExit::NotJoined,
         Some(Err(e)) => return ConfirmExit::Refused(format!("state dir: {e}")),
@@ -84,10 +81,7 @@ pub fn confirm(
         return ConfirmExit::AlreadyConfirmed;
     }
 
-    let rt = match tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-    {
+    let rt = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
         Ok(rt) => rt,
         Err(e) => return ConfirmExit::Refused(format!("runtime: {e}")),
     };
@@ -105,9 +99,7 @@ pub fn confirm(
     }
     let answer = match read_answer() {
         Ok(a) => a,
-        Err(e) => {
-            return ConfirmExit::Refused(format!("could not read the operator's answer: {e}"))
-        }
+        Err(e) => return ConfirmExit::Refused(format!("could not read the operator's answer: {e}")),
     };
     if !is_yes(&answer) {
         println!("not confirmed — this pairing's SAS remains unconfirmed.");
@@ -116,10 +108,7 @@ pub fn confirm(
 
     match identity::mark_sas_confirmed(state_root) {
         Some(Ok(_)) => {
-            println!(
-                "confirmed — {} is now a trusted pairing.",
-                identity.server_url
-            );
+            println!("confirmed — {} is now a trusted pairing.", identity.server_url);
             ConfirmExit::Confirmed
         }
         Some(Err(e)) => ConfirmExit::Refused(format!("state dir: {e}")),

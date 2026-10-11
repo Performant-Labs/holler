@@ -116,29 +116,14 @@ impl HoldReport {
 
 /// The plain-ASCII section `human_table` appends for this scenario.
 pub fn lines(r: &HoldReport) -> String {
-    let stat = |s: Option<LatencyStats>| {
-        s.map_or_else(
-            || "-".to_string(),
-            |s| {
-                format!(
-                    "p50={:.1} p90={:.1} p99={:.1} max={:.1} n={}",
-                    s.p50_ms, s.p90_ms, s.p99_ms, s.max_ms, s.count
-                )
-            },
-        )
-    };
+    let stat = |s: Option<LatencyStats>| s.map_or_else(|| "-".to_string(), |s| format!("p50={:.1} p90={:.1} p99={:.1} max={:.1} n={}", s.p50_ms, s.p90_ms, s.p99_ms, s.max_ms, s.count));
     let rss = |a: Option<f64>| a.map_or_else(|| "?".to_string(), |v| format!("{v:.1}"));
     let mut out = format!(
         "\nsession-hold (#444): {} sessions on the hub, {} driven, {}s per phase\nother load on the machine: {}\n\n",
         r.sessions_total, r.sessions_driven, r.phase_seconds, r.other_load
     );
     out.push_str("say path (ms): unheld sessions' say latency, held sessions' refusal latency\n");
-    for p in r
-        .baseline_runs
-        .iter()
-        .chain(&r.held_fractions)
-        .chain(&r.refusal_only)
-    {
+    for p in r.baseline_runs.iter().chain(&r.held_fractions).chain(&r.refusal_only) {
         out.push_str(&format!(
             "  {:<26} held {:>3}%  unheld: {} ({:.1}/s, {} busy retries)\n{:<38}refusals: {} ({:.0}/s); rss {} -> {} MiB; delivered-to-held={} other-errors={}\n",
             p.label,
@@ -157,12 +142,7 @@ pub fn lines(r: &HoldReport) -> String {
     }
     out.push_str("\nroster read (ms):\n");
     for rr in &r.roster_reads {
-        out.push_str(&format!(
-            "  {} sessions, {} held: {}\n",
-            rr.sessions,
-            rr.holds,
-            stat(rr.latency)
-        ));
+        out.push_str(&format!("  {} sessions, {} held: {}\n", rr.sessions, rr.holds, stat(rr.latency)));
     }
     if let Some(c) = &r.churn {
         out.push_str(&format!(
@@ -187,8 +167,7 @@ pub fn lines(r: &HoldReport) -> String {
             t.name,
             t.limit,
             t.unit,
-            t.actual
-                .map_or_else(|| "n/a".to_string(), |v| format!("{v:.1}")),
+            t.actual.map_or_else(|| "n/a".to_string(), |v| format!("{v:.1}")),
         ));
     }
     out

@@ -65,14 +65,8 @@ fn allowlisted_verb(method: &str) -> Option<&'static str> {
 /// [`super::SessionConnection`], this never touches the roster or the
 /// registry's body-slot bookkeeping — `record`/`peer`/`sas` are used only
 /// for the `admin_connected`/`admin_dropped` log lines (MO 5).
-pub(super) async fn run<Snk, St>(
-    sink: &mut Snk,
-    stream: &mut St,
-    record: &crate::token::Record,
-    peer: &str,
-    sas: &str,
-    deps: AdminDeps,
-) where
+pub(super) async fn run<Snk, St>(sink: &mut Snk, stream: &mut St, record: &crate::token::Record, peer: &str, sas: &str, deps: AdminDeps)
+where
     Snk: Sink<Message, Error = WsError> + Unpin,
     St: Stream<Item = Result<Message, WsError>> + Unpin,
 {
@@ -181,11 +175,7 @@ enum FrameOutcome {
     Ended,
 }
 
-fn frame_outcome(
-    frame: Option<Result<Message, WsError>>,
-    deps: &AdminDeps,
-    reply_tx: &tokio::sync::mpsc::UnboundedSender<Reply>,
-) -> FrameOutcome {
+fn frame_outcome(frame: Option<Result<Message, WsError>>, deps: &AdminDeps, reply_tx: &tokio::sync::mpsc::UnboundedSender<Reply>) -> FrameOutcome {
     let now = tokio::time::Instant::now();
     match frame {
         Some(Ok(Message::Text(t))) => match handle_request(&t, deps, reply_tx) {
@@ -193,9 +183,7 @@ fn frame_outcome(
             RequestOutcome::Inline => FrameOutcome::Continue { fresh_frame: now },
             RequestOutcome::Rejected => FrameOutcome::Rejected,
         },
-        Some(Ok(Message::Ping(_) | Message::Pong(_) | Message::Frame(_))) => {
-            FrameOutcome::Continue { fresh_frame: now }
-        }
+        Some(Ok(Message::Ping(_) | Message::Pong(_) | Message::Frame(_))) => FrameOutcome::Continue { fresh_frame: now },
         _ => FrameOutcome::Ended,
     }
 }
@@ -206,9 +194,7 @@ async fn send_ping<Snk>(sink: &mut Snk) -> Result<(), ()>
 where
     Snk: Sink<Message, Error = WsError> + Unpin,
 {
-    sink.send(Message::Ping(Vec::new().into()))
-        .await
-        .map_err(|_| ())?;
+    sink.send(Message::Ping(Vec::new().into())).await.map_err(|_| ())?;
     sink.flush().await.map_err(|_| ())
 }
 
@@ -245,11 +231,7 @@ enum RequestOutcome {
 /// `session/presence`/`session/update` included — has no `id` and is
 /// dropped without being serviced or touching the roster (MO 4: an admin
 /// socket can never publish presence).
-fn handle_request(
-    text: &str,
-    deps: &AdminDeps,
-    reply_tx: &tokio::sync::mpsc::UnboundedSender<Reply>,
-) -> RequestOutcome {
+fn handle_request(text: &str, deps: &AdminDeps, reply_tx: &tokio::sync::mpsc::UnboundedSender<Reply>) -> RequestOutcome {
     let env = match holler_proto::decode(text) {
         Ok(env) => env,
         Err(e) => {
@@ -257,48 +239,28 @@ fn handle_request(
             return RequestOutcome::Rejected;
         }
     };
-    let Some(id) = env.id() else {
-        return RequestOutcome::Inline;
-    };
-    let Some(method) = env.method() else {
-        return RequestOutcome::Inline;
-    };
-    let Ok(cid) = CorrelationId::parse(id) else {
-        return RequestOutcome::Inline;
-    };
+    let Some(id) = env.id() else { return RequestOutcome::Inline };
+    let Some(method) = env.method() else { return RequestOutcome::Inline };
+    let Ok(cid) = CorrelationId::parse(id) else { return RequestOutcome::Inline };
 
     // MO 4: anything other than `admin/*` and `circuit/ping` is `-32601` on
     // an admin connection — a body-shaped request (`session/prompt`, a bare
     // `control/*` name, …) never reaches a handler here.
     if method == "circuit/ping" {
-        let ack = PingAck {
-            hostname: "hub-admin".to_string(),
-            ts: holler_proto::now_millis(),
-        };
-        let body = holler_proto::encode(&Envelope::response(&cid, serde_json::to_value(ack).ok()))
-            .unwrap_or_default();
+        let ack = PingAck { hostname: "hub-admin".to_string(), ts: holler_proto::now_millis() };
+        let body = holler_proto::encode(&Envelope::response(&cid, serde_json::to_value(ack).ok())).unwrap_or_default();
         let _ = reply_tx.send(Reply::Inline(body));
         return RequestOutcome::Inline;
     }
 
-    let Ok(obj) = serde_json::from_str::<serde_json::Value>(text) else {
-        return RequestOutcome::Inline;
-    };
+    let Ok(obj) = serde_json::from_str::<serde_json::Value>(text) else { return RequestOutcome::Inline };
     let verb = if method == "admin/query" {
         // MO 2: maps to `control/query_remote` when `params.target` is
         // present, `control/query_local` when it is absent — the same
         // shape `hub_query_remote`/`hub_query_local` already read `obj`
         // for, unchanged.
-        let has_target = obj
-            .get("params")
-            .and_then(|p| p.get("target"))
-            .and_then(|v| v.as_str())
-            .is_some();
-        Some(if has_target {
-            "query_remote"
-        } else {
-            "query_local"
-        })
+        let has_target = obj.get("params").and_then(|p| p.get("target")).and_then(|v| v.as_str()).is_some();
+        Some(if has_target { "query_remote" } else { "query_local" })
     } else {
         allowlisted_verb(method)
     };
@@ -311,16 +273,9 @@ fn handle_request(
 
     let (deps, reply_tx, verb) = (deps.clone(), reply_tx.clone(), verb.to_string());
     tokio::spawn(async move {
-        let body = crate::control_server::dispatch_allowlisted(
-            &verb,
-            &cid,
-            &obj,
-            &deps.registry,
-            &deps.roster,
-            &deps.lockout,
-        )
-        .await
-        .unwrap_or_default();
+        let body = crate::control_server::dispatch_allowlisted(&verb, &cid, &obj, &deps.registry, &deps.roster, &deps.lockout)
+            .await
+            .unwrap_or_default();
         // Discarded (never observed) once the loop above has already ended
         // and dropped its receiver — MO 5's "if the client disconnects
         // mid-`say`, the hub finishes the turn and discards the reply".
@@ -345,11 +300,7 @@ fn handle_request(
 /// reply does at `circuit.rs:812-817` (that path always sends an unkeyed
 /// error; this one recovers the id when it can, since an admin client has no
 /// other way to correlate the reply with its request).
-fn reply_decode_error(
-    text: &str,
-    err: &EnvelopeError,
-    reply_tx: &tokio::sync::mpsc::UnboundedSender<Reply>,
-) {
+fn reply_decode_error(text: &str, err: &EnvelopeError, reply_tx: &tokio::sync::mpsc::UnboundedSender<Reply>) {
     let id = serde_json::from_str::<serde_json::Value>(text)
         .ok()
         .and_then(|v| v.get("id").and_then(|i| i.as_str()).map(str::to_owned));
@@ -387,11 +338,7 @@ mod tests {
         ]
         .to_vec();
         for (method, verb) in &mapped {
-            assert_eq!(
-                allowlisted_verb(method),
-                Some(*verb),
-                "{method} must map to allowlisted verb {verb}"
-            );
+            assert_eq!(allowlisted_verb(method), Some(*verb), "{method} must map to allowlisted verb {verb}");
         }
 
         // Nothing else — not `admin/query` (handled separately in
@@ -408,11 +355,7 @@ mod tests {
             "circuit/ping",
             "",
         ] {
-            assert_eq!(
-                allowlisted_verb(other),
-                None,
-                "{other} must not be in the allowlisted-verb map"
-            );
+            assert_eq!(allowlisted_verb(other), None, "{other} must not be in the allowlisted-verb map");
         }
     }
 }

@@ -157,11 +157,7 @@ impl Inner {
 /// `Answer` command arriving in the meantime.
 pub(super) async fn run(mut mailbox: mpsc::Receiver<SessionCommand>, mut inner: Inner) {
     if inner.config.mode == SessionMode::Attach {
-        inner
-            .presence
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .omitted_pending_attach = true;
+        inner.presence.lock().unwrap_or_else(PoisonError::into_inner).omitted_pending_attach = true;
         attempt_initial_attach(&mut inner).await;
     }
 
@@ -205,11 +201,7 @@ async fn dispatch_command(inner: &mut Inner, cmd: Option<SessionCommand>) -> boo
         Some(SessionCommand::Answer { .. }) => "answer",
         Some(SessionCommand::Replace { .. }) => "replace",
     };
-    log_session(
-        "mailbox_dequeue",
-        &inner.name,
-        vec![("command", kind.to_string())],
-    );
+    log_session("mailbox_dequeue", &inner.name, vec![("command", kind.to_string())]);
     match cmd {
         None | Some(SessionCommand::Shutdown) => {
             if let Some(driver) = inner.driver.take() {
@@ -217,13 +209,7 @@ async fn dispatch_command(inner: &mut Inner, cmd: Option<SessionCommand>) -> boo
             }
             false
         }
-        Some(SessionCommand::Prompt {
-            id,
-            text,
-            queue,
-            reply_tx,
-            updates,
-        }) => {
+        Some(SessionCommand::Prompt { id, text, queue, reply_tx, updates }) => {
             handle_prompt(inner, id, text, queue, reply_tx, updates).await;
             true
         }
@@ -235,11 +221,7 @@ async fn dispatch_command(inner: &mut Inner, cmd: Option<SessionCommand>) -> boo
             handle_answer(inner, choice, reply_tx).await;
             true
         }
-        Some(SessionCommand::Replace {
-            text,
-            reply_tx,
-            updates,
-        }) => {
+        Some(SessionCommand::Replace { text, reply_tx, updates }) => {
             handle_replace(inner, text, reply_tx, updates).await;
             true
         }
@@ -277,10 +259,7 @@ async fn attempt_initial_attach(inner: &mut Inner) {
     match Driver::spawn_or_attach(&inner.config).await {
         Ok(driver) => {
             inner.driver = Some(driver);
-            let mut p = inner
-                .presence
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner);
+            let mut p = inner.presence.lock().unwrap_or_else(PoisonError::into_inner);
             p.omitted_pending_attach = false;
             p.state = SessionState::Idle;
             drop(p);
@@ -322,11 +301,7 @@ async fn handle_prompt(
     reply_tx: oneshot::Sender<PromptOutcome>,
     updates: Option<mpsc::UnboundedSender<String>>,
 ) {
-    let current_state = inner
-        .presence
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .state;
+    let current_state = inner.presence.lock().unwrap_or_else(PoisonError::into_inner).state;
     if current_state == SessionState::Idle {
         start_turn(inner, id, text, reply_tx, updates).await;
         return;
@@ -344,39 +319,19 @@ async fn handle_prompt(
         log_session(
             "busy_refused",
             &inner.name,
-            vec![
-                ("state", format!("{current_state:?}")),
-                ("queue", queue.to_string()),
-            ],
+            vec![("state", format!("{current_state:?}")), ("queue", queue.to_string())],
         );
         let (state, turn_age_ms, last_update_age_ms) = busy_ages(inner, current_state);
-        let _ = reply_tx.send(PromptOutcome::Busy {
-            state,
-            turn_age_ms,
-            last_update_age_ms,
-        });
+        let _ = reply_tx.send(PromptOutcome::Busy { state, turn_age_ms, last_update_age_ms });
         return;
     }
     if inner.queue.len() >= QUEUE_CAP {
-        log_session(
-            "queue_full",
-            &inner.name,
-            vec![("depth", inner.queue.len().to_string())],
-        );
+        log_session("queue_full", &inner.name, vec![("depth", inner.queue.len().to_string())]);
         let _ = reply_tx.send(PromptOutcome::QueueFull);
         return;
     }
-    inner.queue.push_back(QueuedPrompt {
-        id,
-        text,
-        reply_tx,
-        updates,
-    });
-    log_session(
-        "queue_enqueue",
-        &inner.name,
-        vec![("depth", inner.queue.len().to_string())],
-    );
+    inner.queue.push_back(QueuedPrompt { id, text, reply_tx, updates });
+    log_session("queue_enqueue", &inner.name, vec![("depth", inner.queue.len().to_string())]);
 }
 
 /// The `-32009 session_busy` refusal's `data` trio: the session's current A2A
@@ -384,9 +339,7 @@ async fn handle_prompt(
 fn busy_ages(inner: &Inner, state: SessionState) -> (String, u64, u64) {
     let now = Instant::now();
     let age_ms = |since: Option<Instant>| {
-        since
-            .map(|t| u64::try_from(now.duration_since(t).as_millis()).unwrap_or(u64::MAX))
-            .unwrap_or(0)
+        since.map(|t| u64::try_from(now.duration_since(t).as_millis()).unwrap_or(u64::MAX)).unwrap_or(0)
     };
     let state_str = match state {
         SessionState::InputRequired => "input-required",
@@ -396,11 +349,7 @@ fn busy_ages(inner: &Inner, state: SessionState) -> (String, u64, u64) {
         _ => "working",
     }
     .to_string();
-    (
-        state_str,
-        age_ms(inner.turn_started_at_ms),
-        age_ms(inner.last_update_at_ms),
-    )
+    (state_str, age_ms(inner.turn_started_at_ms), age_ms(inner.last_update_at_ms))
 }
 
 async fn handle_cancel(inner: &mut Inner, reply_tx: oneshot::Sender<Result<(), String>>) {
@@ -429,16 +378,8 @@ async fn handle_cancel(inner: &mut Inner, reply_tx: oneshot::Sender<Result<(), S
     }
 }
 
-async fn handle_answer(
-    inner: &mut Inner,
-    choice: String,
-    reply_tx: oneshot::Sender<Result<(), String>>,
-) {
-    let current_state = inner
-        .presence
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .state;
+async fn handle_answer(inner: &mut Inner, choice: String, reply_tx: oneshot::Sender<Result<(), String>>) {
+    let current_state = inner.presence.lock().unwrap_or_else(PoisonError::into_inner).state;
     if current_state != SessionState::InputRequired {
         let _ = reply_tx.send(Err("nothing pending to answer".to_string()));
         return;
@@ -574,21 +515,14 @@ async fn start_turn(
     let ts = log::timestamp();
     let id_for_log = turn_id.clone();
     {
-        let mut p = inner
-            .presence
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
+        let mut p = inner.presence.lock().unwrap_or_else(PoisonError::into_inner);
         p.state = SessionState::Working;
         p.turn_started_at = Some(ts.clone());
         p.last_update_at = Some(ts);
         p.pending = None;
         p.turn_id = Some(turn_id);
     }
-    log_session(
-        "state_transition",
-        &inner.name,
-        vec![("state", "Working".to_string()), ("turn_id", id_for_log)],
-    );
+    log_session("state_transition", &inner.name, vec![("state", "Working".to_string()), ("turn_id", id_for_log)]);
     notify_presence(inner);
     true
 }
@@ -624,30 +558,19 @@ async fn handle_stream_event(inner: &mut Inner, event: Option<DriverEvent>) {
 }
 
 fn set_state(inner: &mut Inner, state: SessionState) {
-    log_session(
-        "state_transition",
-        &inner.name,
-        vec![("state", format!("{state:?}"))],
-    );
+    log_session("state_transition", &inner.name, vec![("state", format!("{state:?}"))]);
     // Issue #151: `pending` mirrors `state` — populated from the driver's
     // own held block only while entering/staying `InputRequired`, and
     // cleared the instant this leaves that state (a resumed `Working`, or a
     // turn that ended outright). Read before the lock below so this never
     // holds the presence mutex while also locking the driver's own.
     let pending: Option<Vec<PendingItem>> = if state == SessionState::InputRequired {
-        inner
-            .driver
-            .as_ref()
-            .map(|d| d.pending())
-            .filter(|items| !items.is_empty())
+        inner.driver.as_ref().map(|d| d.pending()).filter(|items| !items.is_empty())
     } else {
         None
     };
     {
-        let mut p = inner
-            .presence
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
+        let mut p = inner.presence.lock().unwrap_or_else(PoisonError::into_inner);
         p.state = state;
         p.pending = pending;
     }
@@ -666,10 +589,7 @@ fn touch_last_update(inner: &mut Inner) {
     inner.last_update_at_ms = Some(Instant::now());
     let ts = log::timestamp();
     {
-        let mut p = inner
-            .presence
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
+        let mut p = inner.presence.lock().unwrap_or_else(PoisonError::into_inner);
         p.last_update_at = Some(ts);
     }
     notify_presence(inner);
@@ -703,8 +623,8 @@ fn touch_last_update(inner: &mut Inner) {
 /// again (and republishes presence) before anything outside this task's own
 /// mailbox loop gets a chance to observe the gap.
 async fn finish_turn_no_dispatch(inner: &mut Inner, reason: StopReason, publish_idle: bool) {
-    let a2a_state =
-        holler_proto::state_for_stop_reason(reason.as_wire_str()).unwrap_or(SessionState::Failed);
+    let a2a_state = holler_proto::state_for_stop_reason(reason.as_wire_str())
+        .unwrap_or(SessionState::Failed);
     let turn_id = inner.current_turn_id.take().unwrap_or_default();
     let ended_at = log::timestamp();
     let last_turn = LastTurn {
@@ -714,10 +634,7 @@ async fn finish_turn_no_dispatch(inner: &mut Inner, reason: StopReason, publish_
         ended_at,
     };
     {
-        let mut p = inner
-            .presence
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
+        let mut p = inner.presence.lock().unwrap_or_else(PoisonError::into_inner);
         if publish_idle {
             p.state = SessionState::Idle;
             p.turn_started_at = None;
@@ -731,14 +648,7 @@ async fn finish_turn_no_dispatch(inner: &mut Inner, reason: StopReason, publish_
         "state_transition",
         &inner.name,
         vec![
-            (
-                "state",
-                if publish_idle {
-                    "Idle".to_string()
-                } else {
-                    "Working (queued next)".to_string()
-                },
-            ),
+            ("state", if publish_idle { "Idle".to_string() } else { "Working (queued next)".to_string() }),
             ("turn_id", turn_id.clone()),
             ("stop_reason", reason.as_wire_str().to_string()),
         ],
@@ -783,11 +693,7 @@ async fn dispatch_next_queued(inner: &mut Inner) {
     // A spawn failure for one queued item must not strand the rest of the
     // FIFO behind it — try the next one instead of leaving the queue stuck.
     while let Some(item) = inner.queue.pop_front() {
-        log_session(
-            "queue_dequeue",
-            &inner.name,
-            vec![("depth", inner.queue.len().to_string())],
-        );
+        log_session("queue_dequeue", &inner.name, vec![("depth", inner.queue.len().to_string())]);
         if start_turn(inner, item.id, item.text, item.reply_tx, item.updates).await {
             return;
         }

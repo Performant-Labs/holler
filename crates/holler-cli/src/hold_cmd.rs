@@ -30,20 +30,10 @@ pub struct HoldResult {
 }
 
 fn ok(message: String, warning: Option<String>) -> HoldResult {
-    HoldResult {
-        message,
-        to_stderr: false,
-        exit_code: 0,
-        warning,
-    }
+    HoldResult { message, to_stderr: false, exit_code: 0, warning }
 }
 fn err(message: String, exit_code: i32) -> HoldResult {
-    HoldResult {
-        message,
-        to_stderr: true,
-        exit_code,
-        warning: None,
-    }
+    HoldResult { message, to_stderr: true, exit_code, warning: None }
 }
 
 const NOT_SAVED: &str = "the hub could not save this change to disk; it is in force now but will not survive a hub restart";
@@ -62,13 +52,11 @@ fn run(
             }
             ok(if json { doc.to_string() } else { out }, warning)
         }
-        Err(holler_hub::control::ControlError::NoLiveHub) => err(
-            format!("no live holler hub reachable at {}", state_root.display()),
-            1,
-        ),
+        Err(holler_hub::control::ControlError::NoLiveHub) => {
+            err(format!("no live holler hub reachable at {}", state_root.display()), 1)
+        }
         Err(holler_hub::control::ControlError::Refused(e)) => {
-            let is_ambiguous =
-                e.data.as_ref().and_then(|d| d.reason.as_deref()) == Some("ambiguous");
+            let is_ambiguous = e.data.as_ref().and_then(|d| d.reason.as_deref()) == Some("ambiguous");
             err(e.message.clone(), if is_ambiguous { 2 } else { 1 })
         }
         Err(e) => err(e.to_string(), 1),
@@ -81,21 +69,10 @@ pub fn hold(hold: &Hold, json: bool) -> HoldResult {
         json,
         || holler_hub::control::hold(&hold.session, hold.reason.as_deref()),
         |doc| {
-            let session = doc
-                .get("session")
-                .and_then(|v| v.as_str())
-                .unwrap_or(&hold.session);
+            let session = doc.get("session").and_then(|v| v.as_str()).unwrap_or(&hold.session);
             let since = doc.get("since").and_then(|v| v.as_str()).unwrap_or("-");
-            let reason = doc
-                .get("reason")
-                .and_then(|v| v.as_str())
-                .map(|r| format!(": {r}"))
-                .unwrap_or_default();
-            let verb = if doc.get("newly_held").and_then(|v| v.as_bool()) == Some(false) {
-                "already held"
-            } else {
-                "held"
-            };
+            let reason = doc.get("reason").and_then(|v| v.as_str()).map(|r| format!(": {r}")).unwrap_or_default();
+            let verb = if doc.get("newly_held").and_then(|v| v.as_bool()) == Some(false) { "already held" } else { "held" };
             (format!("{verb} {session} since {since}{reason}"), None)
         },
     )
@@ -110,10 +87,7 @@ pub fn release(release: &Release, json: bool) -> HoldResult {
         json,
         || holler_hub::control::release(&release.session),
         |doc| {
-            let session = doc
-                .get("session")
-                .and_then(|v| v.as_str())
-                .unwrap_or(&release.session);
+            let session = doc.get("session").and_then(|v| v.as_str()).unwrap_or(&release.session);
             let text = match doc.get("lifted").and_then(|v| v.as_str()) {
                 None => format!("{session} was not held"),
                 Some(kind) if doc.get("still_held").and_then(|v| v.as_bool()) == Some(true) => {
@@ -133,25 +107,13 @@ fn release_once(release: &Release, json: bool) -> HoldResult {
     let ttl = match release.ttl.as_deref().map(crate::say_cmd::parse_duration) {
         None => None,
         Some(Some(d)) => Some(d),
-        Some(None) => {
-            return err(
-                format!(
-                    "invalid --ttl {:?} (use e.g. 30s, 5m, 1h)",
-                    release.ttl.as_deref().unwrap_or("")
-                ),
-                3,
-            )
-        }
+        Some(None) => return err(format!("invalid --ttl {:?} (use e.g. 30s, 5m, 1h)", release.ttl.as_deref().unwrap_or("")), 3),
     };
     run(
         json,
         || holler_hub::control::release_once(&release.session, ttl),
         |doc| {
-            let grant = doc
-                .get("grant")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
+            let grant = doc.get("grant").and_then(|v| v.as_str()).unwrap_or("").to_string();
             let warning = if doc.get("operator_held").and_then(|v| v.as_bool()) == Some(true) {
                 Some("the session also has an operator hold, which a grant does not lift; release that first".to_string())
             } else if doc.get("default_held").and_then(|v| v.as_bool()) == Some(false) {
@@ -186,9 +148,7 @@ pub fn held_refusal(session: &str, e: &holler_proto::WireError, json: bool) -> (
     let data = e.data.as_ref();
     let reason = data.and_then(|d| d.reason.as_deref());
     let since = data.and_then(|d| d.since.as_deref());
-    let kind = data
-        .and_then(|d| d.hold_kind.as_deref())
-        .unwrap_or("operator");
+    let kind = data.and_then(|d| d.hold_kind.as_deref()).unwrap_or("operator");
     if json {
         let doc = serde_json::json!({ "error": "session_held", "session": session, "reason": reason, "since": since, "hold_kind": kind });
         return (doc.to_string(), false);
@@ -209,19 +169,10 @@ pub fn held_refusal(session: &str, e: &holler_proto::WireError, json: bool) -> (
 }
 
 /// What `say --grant` prints for a grant the hub did not honour.
-pub fn invalid_grant_refusal(
-    session: &str,
-    e: &holler_proto::WireError,
-    json: bool,
-) -> (String, bool) {
-    let reason = e
-        .data
-        .as_ref()
-        .and_then(|d| d.reason.as_deref())
-        .unwrap_or("unknown");
+pub fn invalid_grant_refusal(session: &str, e: &holler_proto::WireError, json: bool) -> (String, bool) {
+    let reason = e.data.as_ref().and_then(|d| d.reason.as_deref()).unwrap_or("unknown");
     if json {
-        let doc =
-            serde_json::json!({ "error": "invalid_grant", "session": session, "reason": reason });
+        let doc = serde_json::json!({ "error": "invalid_grant", "session": session, "reason": reason });
         return (doc.to_string(), false);
     }
     (format!("invalid_grant: {}", e.message), true)

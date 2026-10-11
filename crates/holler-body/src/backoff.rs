@@ -40,12 +40,7 @@ pub fn delay_random(attempt: u32) -> Duration {
 }
 
 #[cfg(test)]
-#[allow(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::panic,
-    clippy::unreachable
-)] // #182
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable)] // #182
 mod tests {
     use super::*;
 
@@ -69,10 +64,7 @@ mod tests {
     fn backoff_grows_before_the_cap() {
         let early = delay(0, |bound| bound);
         let later = delay(3, |bound| bound);
-        assert!(
-            later >= early,
-            "the schedule must not shrink before the cap"
-        );
+        assert!(later >= early, "the schedule must not shrink before the cap");
     }
 
     #[test]

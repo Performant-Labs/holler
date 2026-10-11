@@ -1,10 +1,4 @@
-#![allow(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::panic,
-    clippy::unreachable,
-    dead_code
-)] // #149
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable, dead_code)] // #149
 //! Codec test suite for `holler-proto` (issue #136 / holler-server#331).
 //!
 //! Every case below is a named test; the A2A fixtures under
@@ -181,11 +175,7 @@ fn error_table_codes_are_unique_and_in_range() {
     // The one source of truth is the Code enum (#145): there is no separate
     // table to cross-check, so uniqueness/range are asserted over the enum.
     let codes: BTreeSet<i64> = Code::ALL.iter().map(|c| c.jsonrpc()).collect();
-    assert_eq!(
-        codes.len(),
-        Code::ALL.len(),
-        "JSON-RPC codes are not unique"
-    );
+    assert_eq!(codes.len(), Code::ALL.len(), "JSON-RPC codes are not unique");
     for &c in &Code::ALL {
         let data_code = c.data_code();
         // NOTE: order matters. `invalid_params` also starts with `invalid`, so
@@ -237,10 +227,7 @@ fn error_frame_encodes_numeric_code_and_string_data_code() {
     // `code` is the JSON-RPC number …
     assert_eq!(err.get("code"), Some(&serde_json::json!(-32002)));
     // … and the Holler identity is the string in `data.code`.
-    assert_eq!(
-        err.get("data").and_then(|d| d.get("code")),
-        Some(&serde_json::json!("unauthenticated"))
-    );
+    assert_eq!(err.get("data").and_then(|d| d.get("code")), Some(&serde_json::json!("unauthenticated")));
 }
 
 /// The busy-turn policy's refusal (issue #150): `say` to a `working`/
@@ -261,10 +248,7 @@ fn session_busy_error_carries_state_and_turn_ages() {
     assert_eq!(data.get("code"), Some(&serde_json::json!("session_busy")));
     assert_eq!(data.get("state"), Some(&serde_json::json!("working")));
     assert_eq!(data.get("turn_age_ms"), Some(&serde_json::json!(45_000)));
-    assert_eq!(
-        data.get("last_update_age_ms"),
-        Some(&serde_json::json!(3_000))
-    );
+    assert_eq!(data.get("last_update_age_ms"), Some(&serde_json::json!(3_000)));
 }
 
 /// The answer command's refusal (issue #151): `answer SESSION CHOICE` to a
@@ -283,19 +267,13 @@ fn nothing_pending_error_encodes_code_and_data_code() {
     let err = v.get("error").expect("error object present");
     assert_eq!(err.get("code"), Some(&serde_json::json!(-32010)));
     let data = err.get("data").expect("nothing_pending carries data");
-    assert_eq!(
-        data.get("code"),
-        Some(&serde_json::json!("nothing_pending"))
-    );
+    assert_eq!(data.get("code"), Some(&serde_json::json!("nothing_pending")));
     // The session_busy-only enrichment fields stay off the wire here.
     assert!(data.get("state").is_none());
     assert!(data.get("turn_age_ms").is_none());
     // Round-trips back to the named code by its number.
     let back = decode(&wire).unwrap();
-    assert_eq!(
-        Code::from_jsonrpc(back.error().unwrap().code),
-        Some(Code::NothingPending)
-    );
+    assert_eq!(Code::from_jsonrpc(back.error().unwrap().code), Some(Code::NothingPending));
 }
 
 /// The session hold's refusal (issue #441): `say` to a held session encodes
@@ -312,20 +290,11 @@ fn session_held_error_carries_reason_and_since() {
     let v: serde_json::Value = serde_json::from_str(&wire).unwrap();
     let err = v.get("error").expect("error object present");
     assert_eq!(err.get("code"), Some(&serde_json::json!(-32011)));
-    assert_eq!(
-        err.get("message"),
-        Some(&serde_json::json!("session is held: deploy freeze"))
-    );
+    assert_eq!(err.get("message"), Some(&serde_json::json!("session is held: deploy freeze")));
     let data = err.get("data").expect("session_held carries data");
     assert_eq!(data.get("code"), Some(&serde_json::json!("session_held")));
-    assert_eq!(
-        data.get("reason"),
-        Some(&serde_json::json!("deploy freeze"))
-    );
-    assert_eq!(
-        data.get("since"),
-        Some(&serde_json::json!("2026-09-08T12:00:00Z"))
-    );
+    assert_eq!(data.get("reason"), Some(&serde_json::json!("deploy freeze")));
+    assert_eq!(data.get("since"), Some(&serde_json::json!("2026-09-08T12:00:00Z")));
     // The session_busy-only fields stay off the wire here.
     assert!(data.get("state").is_none());
     assert!(data.get("turn_age_ms").is_none());
@@ -333,23 +302,18 @@ fn session_held_error_carries_reason_and_since() {
     let back = decode(&wire).unwrap();
     let e = back.error().unwrap();
     assert_eq!(Code::from_jsonrpc(e.code), Some(Code::SessionHeld));
-    assert_eq!(
-        e,
-        &WireError::session_held(Some("deploy freeze"), "2026-09-08T12:00:00Z")
-    );
+    assert_eq!(e, &WireError::session_held(Some("deploy freeze"), "2026-09-08T12:00:00Z"));
 }
 
 /// Issue #460: a refusal names which hold is refusing, and `-32012
 /// invalid_grant` carries why the grant was not honoured.
 #[test]
 fn session_held_names_its_kind_and_invalid_grant_names_its_reason() {
-    let held = WireError::session_held(Some("held on join"), "2026-09-08T12:00:00Z")
-        .with_hold_kind("default");
+    let held = WireError::session_held(Some("held on join"), "2026-09-08T12:00:00Z").with_hold_kind("default");
     let v = serde_json::to_value(&held).unwrap();
     assert_eq!(v["data"]["hold_kind"], serde_json::json!("default"));
     // Absent when not set: an error from a hub that predates default holds is unchanged.
-    let plain =
-        serde_json::to_value(WireError::session_held(None, "2026-09-08T12:00:00Z")).unwrap();
+    let plain = serde_json::to_value(WireError::session_held(None, "2026-09-08T12:00:00Z")).unwrap();
     assert!(plain["data"].get("hold_kind").is_none());
 
     for reason in ["unknown", "expired", "used", "other_session"] {
@@ -357,21 +321,12 @@ fn session_held_names_its_kind_and_invalid_grant_names_its_reason() {
         assert_eq!(e.code, -32012);
         assert_eq!(e.data.as_ref().unwrap().code, "invalid_grant");
         assert_eq!(e.data.as_ref().unwrap().reason.as_deref(), Some(reason));
-        let back = decode(
-            &encode(&Envelope::Error {
-                id: Some("h-01HTEST00000000000000000004".into()),
-                error: e.clone(),
-            })
-            .unwrap(),
-        )
-        .unwrap();
+        let back = decode(&encode(&Envelope::Error { id: Some("h-01HTEST00000000000000000004".into()), error: e.clone() }).unwrap()).unwrap();
         assert_eq!(back.error().unwrap(), &e);
     }
     // Each reason has its own message.
-    let msgs: std::collections::BTreeSet<_> = ["unknown", "expired", "used", "other_session"]
-        .iter()
-        .map(|r| WireError::invalid_grant(r).message)
-        .collect();
+    let msgs: std::collections::BTreeSet<_> =
+        ["unknown", "expired", "used", "other_session"].iter().map(|r| WireError::invalid_grant(r).message).collect();
     assert_eq!(msgs.len(), 4);
 }
 
@@ -384,10 +339,7 @@ fn session_held_error_without_reason_omits_it() {
     let v = serde_json::to_value(&err).unwrap();
     let data = v.get("data").unwrap();
     assert!(data.get("reason").is_none());
-    assert_eq!(
-        data.get("since"),
-        Some(&serde_json::json!("2026-09-08T12:00:00Z"))
-    );
+    assert_eq!(data.get("since"), Some(&serde_json::json!("2026-09-08T12:00:00Z")));
 }
 
 /// A conformant error from a foreign peer — numeric `-32601`, no `data` —
@@ -433,10 +385,7 @@ fn every_code_round_trips_through_wire(#[case] code: Code) {
     let e = back.error().expect("error frame");
     assert_eq!(e.code, code.jsonrpc());
     assert_eq!(Code::from_jsonrpc(e.code), Some(code));
-    assert_eq!(
-        e.data.as_ref().map(|d| d.code.as_str()),
-        Some(code.data_code())
-    );
+    assert_eq!(e.data.as_ref().map(|d| d.code.as_str()), Some(code.data_code()));
     // #150's three session_busy-only fields are absent for every other code —
     // `WireError::new` never sets them, so this holds for the whole table.
     assert_eq!(e.data.as_ref().and_then(|d| d.state.as_deref()), None);
@@ -586,14 +535,8 @@ fn presence_session_ad_carries_turn_timing_only_while_working() {
         last_turn: None,
     };
     let wire = serde_json::to_value(&working).unwrap();
-    assert_eq!(
-        wire["turn_started_at"],
-        serde_json::json!("2026-09-08T12:00:00Z")
-    );
-    assert_eq!(
-        wire["last_update_at"],
-        serde_json::json!("2026-09-08T12:00:03Z")
-    );
+    assert_eq!(wire["turn_started_at"], serde_json::json!("2026-09-08T12:00:00Z"));
+    assert_eq!(wire["last_update_at"], serde_json::json!("2026-09-08T12:00:03Z"));
     let back: docs::SessionAd = serde_json::from_value(wire).unwrap();
     assert_eq!(back, working);
 
@@ -610,14 +553,8 @@ fn presence_session_ad_carries_turn_timing_only_while_working() {
         last_turn: None,
     };
     let wire = serde_json::to_value(&idle).unwrap();
-    assert!(
-        wire.get("turn_started_at").is_none(),
-        "absent, not null, when idle"
-    );
-    assert!(
-        wire.get("last_update_at").is_none(),
-        "absent, not null, when idle"
-    );
+    assert!(wire.get("turn_started_at").is_none(), "absent, not null, when idle");
+    assert!(wire.get("last_update_at").is_none(), "absent, not null, when idle");
 }
 
 /// A presence row's `pending` list (issue #151) round-trips and is absent
@@ -655,9 +592,7 @@ fn presence_session_ad_carries_pending_only_while_input_required() {
         last_turn: None,
     };
     let wire = serde_json::to_value(&input_required).unwrap();
-    let pend = wire["pending"]
-        .as_array()
-        .expect("pending is an array on the wire");
+    let pend = wire["pending"].as_array().expect("pending is an array on the wire");
     // kind uses the kebab-case wire strings that match the ACP method names.
     assert_eq!(pend[0]["kind"], serde_json::json!("permission"));
     assert_eq!(pend[1]["kind"], serde_json::json!("elicitation"));
@@ -677,10 +612,7 @@ fn presence_session_ad_carries_pending_only_while_input_required() {
         last_turn: None,
     };
     let wire = serde_json::to_value(&working).unwrap();
-    assert!(
-        wire.get("pending").is_none(),
-        "absent, not null, when working"
-    );
+    assert!(wire.get("pending").is_none(), "absent, not null, when working");
 }
 
 /// A presence row's `turn_id`/`last_turn` (issue #142) round-trip; `turn_id`
@@ -705,14 +637,8 @@ fn presence_session_ad_carries_turn_id_and_last_turn() {
         last_turn: None,
     };
     let wire = serde_json::to_value(&fresh).unwrap();
-    assert!(
-        wire.get("turn_id").is_none(),
-        "absent, not null, before the first prompt"
-    );
-    assert!(
-        wire.get("last_turn").is_none(),
-        "absent, not null, before any turn has ended"
-    );
+    assert!(wire.get("turn_id").is_none(), "absent, not null, before the first prompt");
+    assert!(wire.get("last_turn").is_none(), "absent, not null, before any turn has ended");
     let back: SessionAd = serde_json::from_value(wire).unwrap();
     assert_eq!(back, fresh);
 
@@ -735,19 +661,10 @@ fn presence_session_ad_carries_turn_id_and_last_turn() {
         }),
     };
     let wire = serde_json::to_value(&settled).unwrap();
-    assert_eq!(
-        wire["turn_id"],
-        serde_json::json!("h-01HTESTTURN0000000000000A")
-    );
+    assert_eq!(wire["turn_id"], serde_json::json!("h-01HTESTTURN0000000000000A"));
     assert_eq!(wire["last_turn"]["state"], serde_json::json!("completed"));
-    assert_eq!(
-        wire["last_turn"]["stop_reason"],
-        serde_json::json!("end_turn")
-    );
-    assert_eq!(
-        wire["last_turn"]["ended_at"],
-        serde_json::json!("2026-09-08T12:00:05Z")
-    );
+    assert_eq!(wire["last_turn"]["stop_reason"], serde_json::json!("end_turn"));
+    assert_eq!(wire["last_turn"]["ended_at"], serde_json::json!("2026-09-08T12:00:05Z"));
     let back: SessionAd = serde_json::from_value(wire).unwrap();
     assert_eq!(back, settled);
 
@@ -787,45 +704,31 @@ fn stop_reason_to_task_state_mapping_is_total() {
     // The mapping is exactly the spec table (wire strings via `as_str`).
     use docs::SessionState;
     assert_eq!(
-        docs::state_for_stop_reason("end_turn")
-            .as_ref()
-            .map(|s| s.as_str()),
+        docs::state_for_stop_reason("end_turn").as_ref().map(|s| s.as_str()),
         Some("completed")
     );
     assert_eq!(
-        docs::state_for_stop_reason("cancelled")
-            .as_ref()
-            .map(|s| s.as_str()),
+        docs::state_for_stop_reason("cancelled").as_ref().map(|s| s.as_str()),
         Some("canceled")
     );
     assert_eq!(
-        docs::state_for_stop_reason("error")
-            .as_ref()
-            .map(|s| s.as_str()),
+        docs::state_for_stop_reason("error").as_ref().map(|s| s.as_str()),
         Some("failed")
     );
     assert_eq!(
-        docs::state_for_stop_reason("refusal")
-            .as_ref()
-            .map(|s| s.as_str()),
+        docs::state_for_stop_reason("refusal").as_ref().map(|s| s.as_str()),
         Some("rejected")
     );
     assert_eq!(
-        docs::state_for_stop_reason("max_tokens")
-            .as_ref()
-            .map(|s| s.as_str()),
+        docs::state_for_stop_reason("max_tokens").as_ref().map(|s| s.as_str()),
         Some("failed")
     );
     assert_eq!(
-        docs::state_for_stop_reason("max_turn_requests")
-            .as_ref()
-            .map(|s| s.as_str()),
+        docs::state_for_stop_reason("max_turn_requests").as_ref().map(|s| s.as_str()),
         Some("failed")
     );
     assert_eq!(
-        docs::state_for_stop_reason("limit")
-            .as_ref()
-            .map(|s| s.as_str()),
+        docs::state_for_stop_reason("limit").as_ref().map(|s| s.as_str()),
         Some("failed")
     );
     // The codomain is exactly the A2A terminal states.
@@ -907,10 +810,12 @@ fn a2a_part_is_member_name_discriminated() {
 
     // An unknown member alone is still an "empty" part (A2A does not define
     // deny-unknown on Part); the two-discriminator case above is what errors.
-    assert!(serde_json::from_str::<Part>(r#"{"foo":"bar"}"#)
-        .unwrap()
-        .content
-        .is_none());
+    assert!(
+        serde_json::from_str::<Part>(r#"{"foo":"bar"}"#)
+            .unwrap()
+            .content
+            .is_none()
+    );
 }
 
 // A Part round-trips through JSON to the exact flat object A2A shows — this

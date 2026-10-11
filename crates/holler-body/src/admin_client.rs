@@ -52,9 +52,7 @@ pub enum AdminClientError {
 impl std::fmt::Display for AdminClientError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            AdminClientError::NotJoined(p) => {
-                write!(f, "{} not found; run `holler body join` first", p.display())
-            }
+            AdminClientError::NotJoined(p) => write!(f, "{} not found; run `holler body join` first", p.display()),
             AdminClientError::Identity(m)
             | AdminClientError::Connect(m)
             | AdminClientError::Refused(m)
@@ -83,9 +81,7 @@ pub async fn call(
 
     let (ws, _) = tokio_tungstenite::connect_async(server_url)
         .await
-        .map_err(|e| {
-            AdminClientError::Connect(format!("could not reach the hub at {server_url}: {e}"))
-        })?;
+        .map_err(|e| AdminClientError::Connect(format!("could not reach the hub at {server_url}: {e}")))?;
     let (mut sink, mut stream) = ws.split();
 
     handshake::authenticate(&mut sink, &mut stream, &identity, state_root)
@@ -99,23 +95,13 @@ pub async fn call(
 
     let cid = CorrelationId::mint_body();
     let req = Envelope::request(&cid, method, params);
-    let text = holler_proto::encode(&req)
-        .map_err(|e| AdminClientError::Dropped(format!("encode request: {e}")))?;
-    sink.send(Message::text(text))
-        .await
-        .map_err(|e| AdminClientError::Dropped(format!("send request: {e}")))?;
-    sink.flush()
-        .await
-        .map_err(|e| AdminClientError::Dropped(format!("send request: {e}")))?;
+    let text = holler_proto::encode(&req).map_err(|e| AdminClientError::Dropped(format!("encode request: {e}")))?;
+    sink.send(Message::text(text)).await.map_err(|e| AdminClientError::Dropped(format!("send request: {e}")))?;
+    sink.flush().await.map_err(|e| AdminClientError::Dropped(format!("send request: {e}")))?;
 
     let result = tokio::time::timeout(timeout, read_reply(&mut stream, &cid))
         .await
-        .map_err(|_| {
-            AdminClientError::Dropped(format!(
-                "no reply from the hub within {}s",
-                timeout.as_secs()
-            ))
-        })??;
+        .map_err(|_| AdminClientError::Dropped(format!("no reply from the hub within {}s", timeout.as_secs())))??;
 
     let _ = sink.send(Message::Close(None)).await;
     let _ = sink.flush().await;
@@ -163,35 +149,25 @@ fn attempt_words(a: crate::connection::Attempt) -> String {
 /// skipping ping/pong/raw/binary frames — mirrors `connection::
 /// next_envelope`, but this module is a short-lived one-shot client with no
 /// live loop of its own to fold it into.
-async fn read_reply<St>(
-    stream: &mut St,
-    cid: &CorrelationId,
-) -> Result<serde_json::Value, AdminClientError>
+async fn read_reply<St>(stream: &mut St, cid: &CorrelationId) -> Result<serde_json::Value, AdminClientError>
 where
     St: Stream<Item = Result<Message, WsError>> + Unpin,
 {
     loop {
         match stream.next().await {
             Some(Ok(Message::Text(t))) => {
-                let env = holler_proto::decode(&t)
-                    .map_err(|e| AdminClientError::Dropped(e.to_string()))?;
+                let env = holler_proto::decode(&t).map_err(|e| AdminClientError::Dropped(e.to_string()))?;
                 match env {
-                    Envelope::Response { id, result } if id == cid.as_str() => {
-                        return Ok(result.unwrap_or_default())
-                    }
+                    Envelope::Response { id, result } if id == cid.as_str() => return Ok(result.unwrap_or_default()),
                     Envelope::Error { id, error } if id.as_deref() == Some(cid.as_str()) => {
                         return Err(AdminClientError::Wire(error));
                     }
                     _ => continue,
                 }
             }
-            Some(Ok(
-                Message::Ping(_) | Message::Pong(_) | Message::Frame(_) | Message::Binary(_),
-            )) => continue,
+            Some(Ok(Message::Ping(_) | Message::Pong(_) | Message::Frame(_) | Message::Binary(_))) => continue,
             Some(Ok(Message::Close(_))) | None => {
-                return Err(AdminClientError::Dropped(
-                    "the hub closed the socket before replying".to_string(),
-                ));
+                return Err(AdminClientError::Dropped("the hub closed the socket before replying".to_string()));
             }
             Some(Err(e)) => return Err(AdminClientError::Dropped(e.to_string())),
         }

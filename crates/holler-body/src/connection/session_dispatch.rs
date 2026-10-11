@@ -43,11 +43,7 @@ pub(super) async fn dispatch_session_request<Snk>(
 where
     Snk: Sink<Message, Error = WsError> + Unpin,
 {
-    let env = Envelope::Request {
-        id: id.clone(),
-        method: method.clone(),
-        params,
-    };
+    let env = Envelope::Request { id: id.clone(), method: method.clone(), params };
     match method.as_str() {
         "session/prompt" => match holler_proto::typed_params::<Prompt>(&env) {
             Ok(p) => spawn_prompt_dispatch(session_manager, outbound_tx, id, p),

@@ -71,9 +71,7 @@ fn relay_queue_events(stderr: std::process::ChildStderr, label: &str, events: &S
             Ok(0) | Err(_) => return,
             Ok(_) => {}
         }
-        let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) else {
-            continue;
-        };
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) else { continue };
         if v.get("component").and_then(serde_json::Value::as_str) != Some("session") {
             continue;
         }
@@ -83,9 +81,7 @@ fn relay_queue_events(stderr: std::process::ChildStderr, label: &str, events: &S
             Some("queue_full") => QueueEventKind::Full,
             _ => continue,
         };
-        let Some(session) = v.get("name").and_then(serde_json::Value::as_str) else {
-            continue;
-        };
+        let Some(session) = v.get("name").and_then(serde_json::Value::as_str) else { continue };
         let Some(depth) = v
             .get("depth")
             .and_then(serde_json::Value::as_str)
@@ -96,12 +92,7 @@ fn relay_queue_events(stderr: std::process::ChildStderr, label: &str, events: &S
         // A send error means the receiver (the scenario's aggregator) has
         // already hung up — nothing left to do but stop relaying.
         if events
-            .send(QueueEvent {
-                label: label.to_string(),
-                session: session.to_string(),
-                kind,
-                depth,
-            })
+            .send(QueueEvent { label: label.to_string(), session: session.to_string(), kind, depth })
             .is_err()
         {
             return;
@@ -123,13 +114,7 @@ impl FleetMember {
     /// Provision, join and start one body: its own state dir (so its own
     /// on-disk identity), its own token, its own `sessions.toml` pointing every
     /// session at the real `stub-acp` binary.
-    pub fn start(
-        hub: &Hub,
-        holler_bin: &Path,
-        stub_acp: &Path,
-        label: &str,
-        sessions: usize,
-    ) -> Res<Self> {
+    pub fn start(hub: &Hub, holler_bin: &Path, stub_acp: &Path, label: &str, sessions: usize) -> Res<Self> {
         let state = join_body(hub, holler_bin, label)?;
         let config = write_sessions_toml(&state, stub_acp, sessions)?;
         let child = spawn_body_run(holler_bin, &state, &config, Stdio::null())?;
@@ -199,11 +184,7 @@ fn join_body(hub: &Hub, holler_bin: &Path, label: &str) -> Res<StateDir> {
         .stderr(Stdio::piped())
         .output()?;
     if !join.status.success() {
-        return Err(format!(
-            "`body join` for {label} failed: {}",
-            String::from_utf8_lossy(&join.stderr)
-        )
-        .into());
+        return Err(format!("`body join` for {label} failed: {}", String::from_utf8_lossy(&join.stderr)).into());
     }
     Ok(state)
 }
@@ -225,10 +206,7 @@ pub fn mint_lock_retries() -> usize {
 /// exactly this. (The hub's internal redeem path already retries, via
 /// `acquire_lock_retrying`; `mint`, the operator-facing path, does not.)
 /// Retries are counted so a run can report how often it happened.
-fn mint_retrying(
-    label: &str,
-    hub_state: &holler_hub::state::HubState,
-) -> Res<holler_hub::token::Minted> {
+fn mint_retrying(label: &str, hub_state: &holler_hub::state::HubState) -> Res<holler_hub::token::Minted> {
     let deadline = Instant::now() + Duration::from_secs(5);
     let mut delay = Duration::from_millis(5);
     loop {
@@ -288,10 +266,7 @@ impl FleetMember {
         let config = write_sessions_toml(&state, stub_acp, sessions)?;
         let mut child = spawn_body_run(holler_bin, &state, &config, Stdio::piped())?;
 
-        let stderr = child
-            .stderr
-            .take()
-            .ok_or("watched body's stderr was not piped")?;
+        let stderr = child.stderr.take().ok_or("watched body's stderr was not piped")?;
         let label_owned = label.to_string();
         std::thread::spawn(move || relay_queue_events(stderr, &label_owned, &events));
 
@@ -361,9 +336,7 @@ impl FleetMember {
 /// Write `<state>/body/sessions.toml` with `sessions` spawn-mode rows, each
 /// running the real `stub-acp` binary in place of a model.
 fn write_sessions_toml(state: &StateDir, stub_acp: &Path, sessions: usize) -> Res<PathBuf> {
-    let stub = stub_acp
-        .to_str()
-        .ok_or("stub-acp path is not valid UTF-8")?;
+    let stub = stub_acp.to_str().ok_or("stub-acp path is not valid UTF-8")?;
     let mut toml = String::new();
     for i in 0..sessions {
         // `--chunks 2` keeps each stub turn short: the harness is measuring

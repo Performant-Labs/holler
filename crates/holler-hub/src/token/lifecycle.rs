@@ -82,9 +82,7 @@ pub(super) fn ensure_label_free(store: &Store, label: &str) -> Result<(), TokenE
     };
     let id = &holder.token_id;
     let fix = match holder.state {
-        TokenState::Bound => {
-            format!("holler hub token revoke {id}, then holler hub token delete {id}")
-        }
+        TokenState::Bound => format!("holler hub token revoke {id}, then holler hub token delete {id}"),
         TokenState::Unused | TokenState::Revoked => format!("holler hub token delete {id}"),
     };
     Err(TokenError::new(format!(

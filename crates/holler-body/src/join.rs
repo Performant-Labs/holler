@@ -70,13 +70,7 @@ pub enum JoinExit {
 /// [`JoinExit::Ok`] has already persisted `<state>/body/credential.json`
 /// (0600). A `Refused` carries the one-line reason for stderr. A `Policy`
 /// refusal made no connection and wrote nothing.
-pub fn join(
-    state_root: &std::path::Path,
-    server: &str,
-    token: &str,
-    hostname: &str,
-    hub_key: &str,
-) -> JoinExit {
+pub fn join(state_root: &std::path::Path, server: &str, token: &str, hostname: &str, hub_key: &str) -> JoinExit {
     // 1. Parse + policy-check the address *before* any I/O: a plaintext
     //    non-loopback `ws://` is exit 3, with no connection attempted.
     let addr = match parse(server) {
@@ -127,9 +121,9 @@ pub fn join(
             eprintln!("error: {}", e.message());
             JoinExit::Refused(e)
         }
-        Ok(rt) => rt.block_on(connect_and_join(
-            state_root, &url, token_id, secret, hostname, &url, hub_key,
-        )),
+        Ok(rt) => {
+            rt.block_on(connect_and_join(state_root, &url, token_id, secret, hostname, &url, hub_key))
+        }
     }
 }
 
@@ -150,9 +144,7 @@ fn split_token(token: &str) -> Option<(&str, &str)> {
 /// but well-formed key is caught later, on first connect, by the hard
 /// mismatch failure in `holler_body::connection`).
 fn is_valid_hex_pubkey(s: &str) -> bool {
-    s.len() == 64
-        && s.chars()
-            .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
+    s.len() == 64 && s.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
 }
 
 /// Issue #337: this body's own long-lived X25519 static keypair — its Noise
@@ -305,15 +297,7 @@ async fn connect_and_join(
         // Decode the frame and act on its shape.
         match holler_proto::decode(next) {
             Ok(Envelope::Response { id, result }) if id == cid.as_str() => {
-                return on_response(
-                    state_root,
-                    token_id,
-                    hostname,
-                    server_url,
-                    &signing_key_hex,
-                    hub_key,
-                    result,
-                )
+                return on_response(state_root, token_id, hostname, server_url, &signing_key_hex, hub_key, result)
             }
             Ok(Envelope::Error { error, .. }) => {
                 // A `join_failed` (or any other) error: report the hub's
@@ -383,10 +367,7 @@ fn on_response(
     }
     // Success — and the operator is told the *identity* (the server it joined
     // and the client id it minted), never the one-time join secret.
-    println!(
-        "joined {} as client_id={}",
-        server_url, join_result.client_id
-    );
+    println!("joined {} as client_id={}", server_url, join_result.client_id);
     JoinExit::Ok
 }
 
@@ -399,3 +380,4 @@ where
     ws.flush().await?;
     Ok(ws)
 }
+

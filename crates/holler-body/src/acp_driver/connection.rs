@@ -102,9 +102,7 @@ fn handle_notification(shared: &Arc<Mutex<Shared>>, note: v2::UpdateSessionNotif
                     LogDirection::In,
                     "session/update",
                     vec![("chunk_len", text.len().to_string())],
-                    holler_proto::log::frame_at_noisy(
-                        &serde_json::json!({ "chunk": text }).to_string(),
-                    ),
+                    holler_proto::log::frame_at_noisy(&serde_json::json!({ "chunk": text }).to_string()),
                 );
                 let guard = lock(shared);
                 if let Some(tx) = &guard.current_events {
@@ -120,12 +118,7 @@ fn handle_notification(shared: &Arc<Mutex<Shared>>, note: v2::UpdateSessionNotif
 fn handle_state_update(shared: &Arc<Mutex<Shared>>, state: v2::StateUpdate) {
     match state {
         v2::StateUpdate::Running(_) => {
-            log_debug(
-                LogDirection::In,
-                "state_update",
-                vec![("state", "working".to_string())],
-                None,
-            );
+            log_debug(LogDirection::In, "state_update", vec![("state", "working".to_string())], None);
             let mut guard = lock(shared);
             guard.status = Status::Working;
             if let Some(tx) = &guard.current_events {
@@ -133,12 +126,7 @@ fn handle_state_update(shared: &Arc<Mutex<Shared>>, state: v2::StateUpdate) {
             }
         }
         v2::StateUpdate::RequiresAction(_) => {
-            log_debug(
-                LogDirection::In,
-                "state_update",
-                vec![("state", "input_required".to_string())],
-                None,
-            );
+            log_debug(LogDirection::In, "state_update", vec![("state", "input_required".to_string())], None);
             let mut guard = lock(shared);
             // The permission/elicitation *request* handler (`store_pending`)
             // already flipped status to `InputRequired` and emitted this same
@@ -161,10 +149,7 @@ fn handle_state_update(shared: &Arc<Mutex<Shared>>, state: v2::StateUpdate) {
             log_debug(
                 LogDirection::In,
                 "state_update",
-                vec![
-                    ("state", "idle".to_string()),
-                    ("stop_reason", stop_reason.as_wire_str().to_string()),
-                ],
+                vec![("state", "idle".to_string()), ("stop_reason", stop_reason.as_wire_str().to_string())],
                 None,
             );
             let mut guard = lock(shared);
@@ -255,10 +240,7 @@ fn advertised_methods(methods: &[v2::AuthMethod]) -> Vec<AdvertisedMethod> {
                 // a newer SDK adds to the `#[non_exhaustive]` enum.
                 _ => return None,
             };
-            Some(AdvertisedMethod {
-                id: method.method_id().0.to_string(),
-                kind,
-            })
+            Some(AdvertisedMethod { id: method.method_id().0.to_string(), kind })
         })
         .collect()
 }
@@ -280,16 +262,8 @@ async fn new_session(
 /// The one `auth/login` request (#459), [`auth::open_session`]'s login step
 /// on v2. Only the method id is sent or logged; the caller builds the failure
 /// reason from the error's code and message.
-async fn login(
-    connection: &V2ConnectionTo<Agent>,
-    method_id: String,
-) -> Result<(), agent_client_protocol::Error> {
-    log_debug(
-        LogDirection::Out,
-        "auth/login",
-        vec![("method_id", auth::quote_id(&method_id))],
-        None,
-    );
+async fn login(connection: &V2ConnectionTo<Agent>, method_id: String) -> Result<(), agent_client_protocol::Error> {
+    log_debug(LogDirection::Out, "auth/login", vec![("method_id", auth::quote_id(&method_id))], None);
     connection
         .send_request(v2::LoginAuthRequest::new(method_id))
         .block_task()
@@ -321,13 +295,7 @@ async fn do_handshake(
         .await
         .map_err(HandshakeError::Initialize)?;
     if initialize.capabilities.session.is_none() {
-        log_warn(
-            "initialize",
-            vec![(
-                "event",
-                "agent did not advertise the v2 session capability".to_string(),
-            )],
-        );
+        log_warn("initialize", vec![("event", "agent did not advertise the v2 session capability".to_string())]);
         // The driver's own text, no adapter content: kept as it was.
         return Err(HandshakeError::Reason(
             agent_client_protocol::Error::invalid_params()
@@ -339,9 +307,7 @@ async fn do_handshake(
     let session_id = match auth_method {
         // No `auth_method`: the handshake and its startup text are what they
         // were before #459, byte for byte.
-        None => new_session(connection, cwd)
-            .await
-            .map_err(|e| HandshakeError::Reason(e.to_string()))?,
+        None => new_session(connection, cwd).await.map_err(|e| HandshakeError::Reason(e.to_string()))?,
         Some(_) => auth::open_session(
             &advertised_methods(&initialize.auth_methods),
             auth_method,
@@ -360,27 +326,23 @@ async fn do_handshake(
     // the connection ends normally too.
     let watch_shared = shared.clone();
     let watch_conn = connection.clone();
-    connection
-        .spawn(async move {
-            watch_conn.incoming_closed().await;
-            // No pid/exit status is available here — see `AcpDriver::spawn`'s own
-            // doc comment on why the pinned SDK never surfaces it to this crate.
-            log_warn(
-                "spawn",
-                vec![("event", "child_exit: connection closed".to_string())],
-            );
-            let mut guard = lock(&watch_shared);
-            guard.last_stop_reason = Some(StopReason::Error);
-            if let Some(tx) = guard.current_events.take() {
-                let _ = tx.send(DriverEvent::Done(StopReason::Error));
-            }
-            if let Some(done_tx) = guard.awaiting_done.take() {
-                let _ = done_tx.send(StopReason::Error);
-            }
-            guard.status = Status::Idle;
-            Ok(())
-        })
-        .map_err(|e| HandshakeError::Reason(auth::startup_error_text(&e, auth_method)))?;
+    connection.spawn(async move {
+        watch_conn.incoming_closed().await;
+        // No pid/exit status is available here — see `AcpDriver::spawn`'s own
+        // doc comment on why the pinned SDK never surfaces it to this crate.
+        log_warn("spawn", vec![("event", "child_exit: connection closed".to_string())]);
+        let mut guard = lock(&watch_shared);
+        guard.last_stop_reason = Some(StopReason::Error);
+        if let Some(tx) = guard.current_events.take() {
+            let _ = tx.send(DriverEvent::Done(StopReason::Error));
+        }
+        if let Some(done_tx) = guard.awaiting_done.take() {
+            let _ = done_tx.send(StopReason::Error);
+        }
+        guard.status = Status::Idle;
+        Ok(())
+    })
+    .map_err(|e| HandshakeError::Reason(auth::startup_error_text(&e, auth_method)))?;
 
     Ok(session_id)
 }
@@ -446,15 +408,7 @@ pub(super) async fn run(
             agent_client_protocol::on_receive_request!(),
         )
         .connect_with(agent, move |connection: V2ConnectionTo<Agent>| async move {
-            match do_handshake(
-                &connection,
-                &cwd,
-                &handshake_shared,
-                auth_method.as_deref(),
-                &progress,
-            )
-            .await
-            {
+            match do_handshake(&connection, &cwd, &handshake_shared, auth_method.as_deref(), &progress).await {
                 Ok(session_id) => {
                     let _ = ready_tx.send(Ok(Ready {
                         session_id,

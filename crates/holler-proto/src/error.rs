@@ -206,11 +206,7 @@ impl Error {
     /// Build a `-32009 session_busy` refusal (issue #150): `say` refuses a
     /// `working`/`stalled` session unless `--queue` opts in. The ages are
     /// the caller's next-command hint — "how long has this been stuck".
-    pub fn session_busy(
-        state: impl Into<String>,
-        turn_age_ms: u64,
-        last_update_age_ms: u64,
-    ) -> Self {
+    pub fn session_busy(state: impl Into<String>, turn_age_ms: u64, last_update_age_ms: u64) -> Self {
         Self {
             code: Code::SessionBusy.jsonrpc(),
             message: "session is busy".to_owned(),
@@ -232,11 +228,7 @@ impl Error {
     /// resolve. The wire vocabulary is present now; the `answer` dispatch
     /// that returns it lives in the session-manager story (#342).
     pub fn nothing_pending() -> Self {
-        Self::new(
-            Code::NothingPending,
-            "no held permission or elicitation to answer",
-            None,
-        )
+        Self::new(Code::NothingPending, "no held permission or elicitation to answer", None)
     }
 
     /// Build a `-32011 session_held` refusal (issue #441, umbrella #437): the

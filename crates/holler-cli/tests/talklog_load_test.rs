@@ -1,10 +1,4 @@
-#![allow(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::panic,
-    clippy::unreachable,
-    dead_code
-)] // #300
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable, dead_code)] // #300
 //! Load test (issue #300): TalkLog behavior at a large accumulated log size.
 //!
 //! **Bounded/automated**, per the issue's own scope: drive one session
@@ -87,11 +81,7 @@ fn talklog_survives_large_accumulated_log_without_corruption() {
         (out.status.success() || !stderr_of(&out).contains("unknown session")).then_some(out)
     })
     .unwrap_or_else(|| panic!("warm-up say never got past unknown_session within 10s"));
-    assert!(
-        warm.status.success(),
-        "warm-up say must succeed: {}",
-        stderr_of(&warm)
-    );
+    assert!(warm.status.success(), "warm-up say must succeed: {}", stderr_of(&warm));
 
     let path = hub_state.hub().join("talklog").join("b__alpha.jsonl");
     wait_for(Duration::from_secs(5), || std::fs::metadata(&path).ok())
@@ -104,15 +94,9 @@ fn talklog_survives_large_accumulated_log_without_corruption() {
         let started = Instant::now();
         let out = say(hub_state.path(), "alpha", &format!("exchange number {i}"));
         let elapsed_ms = started.elapsed().as_secs_f64() * 1000.0;
-        assert!(
-            out.status.success(),
-            "say #{i} must succeed; stderr: {}",
-            stderr_of(&out)
-        );
+        assert!(out.status.success(), "say #{i} must succeed; stderr: {}", stderr_of(&out));
         latencies_ms.push(elapsed_ms);
-        let size = std::fs::metadata(&path)
-            .expect("talklog file exists after every append")
-            .len();
+        let size = std::fs::metadata(&path).expect("talklog file exists after every append").len();
         sizes_bytes.push(size);
     }
 
@@ -127,8 +111,7 @@ fn talklog_survives_large_accumulated_log_without_corruption() {
     let mut prompts = 0usize;
     let mut dones = 0usize;
     for (n, line) in lines.iter().enumerate() {
-        let v: Value = serde_json::from_str(line)
-            .unwrap_or_else(|e| panic!("corrupt talklog line {n}: {e}: {line:?}"));
+        let v: Value = serde_json::from_str(line).unwrap_or_else(|e| panic!("corrupt talklog line {n}: {e}: {line:?}"));
         if let Some(pid) = v.get("prompt_id").and_then(|p| p.as_str()) {
             prompt_ids.insert(pid.to_string());
         }
@@ -140,23 +123,9 @@ fn talklog_survives_large_accumulated_log_without_corruption() {
         }
     }
     let total_turns = ENTRIES + 1; // + the warm-up turn
-    assert_eq!(
-        prompts,
-        total_turns,
-        "every turn's prompt line must be present, no loss: {} lines total",
-        lines.len()
-    );
-    assert_eq!(
-        dones,
-        total_turns,
-        "every turn's done line must be present, no loss: {} lines total",
-        lines.len()
-    );
-    assert_eq!(
-        prompt_ids.len(),
-        total_turns,
-        "every turn has a unique prompt_id, no collision/corruption"
-    );
+    assert_eq!(prompts, total_turns, "every turn's prompt line must be present, no loss: {} lines total", lines.len());
+    assert_eq!(dones, total_turns, "every turn's done line must be present, no loss: {} lines total", lines.len());
+    assert_eq!(prompt_ids.len(), total_turns, "every turn has a unique prompt_id, no collision/corruption");
 
     // Latency-growth characterization (the issue's own actionable output,
     // logged as evidence even if inconclusive): compare the mean per-append

@@ -23,18 +23,10 @@ pub struct RosterResult {
 }
 
 fn ok(message: String) -> RosterResult {
-    RosterResult {
-        message,
-        to_stderr: false,
-        exit_code: 0,
-    }
+    RosterResult { message, to_stderr: false, exit_code: 0 }
 }
 fn err(message: String, exit_code: i32) -> RosterResult {
-    RosterResult {
-        message,
-        to_stderr: true,
-        exit_code,
-    }
+    RosterResult { message, to_stderr: true, exit_code }
 }
 
 /// `holler roster [--all] [--prefix PREFIX] [--json]` (issue #186; `--prefix`
@@ -55,10 +47,9 @@ pub fn run(roster: &Roster, json: bool) -> RosterResult {
                 ok(render_table(&doc))
             }
         }
-        Err(holler_hub::control::ControlError::NoLiveHub) => err(
-            format!("no live holler hub reachable at {}", state_root.display()),
-            1,
-        ),
+        Err(holler_hub::control::ControlError::NoLiveHub) => {
+            err(format!("no live holler hub reachable at {}", state_root.display()), 1)
+        }
         // Issue #508 AC 13: `--server ws://…` to a non-loopback host, exit 3
         // (the same fail-closed policy `body join` applies) — checked before
         // any dial, never reachable when `roster.server` is `None`.
@@ -72,11 +63,7 @@ pub fn run(roster: &Roster, json: bool) -> RosterResult {
 /// human view shows just its count — `--json` carries the full array). An
 /// empty roster prints a friendly one-liner instead of a bare header.
 fn render_table(doc: &serde_json::Value) -> String {
-    let rows = doc
-        .get("rows")
-        .and_then(|r| r.as_array())
-        .cloned()
-        .unwrap_or_default();
+    let rows = doc.get("rows").and_then(|r| r.as_array()).cloned().unwrap_or_default();
     if rows.is_empty() {
         return "(no sessions on the hub)\n".to_string();
     }
@@ -97,9 +84,7 @@ fn render_table(doc: &serde_json::Value) -> String {
             row.get("harness").and_then(|v| v.as_str()).unwrap_or("-"),
             row.get("mode").and_then(|v| v.as_str()).unwrap_or("-"),
             row.get("state").and_then(|v| v.as_str()).unwrap_or("-"),
-            row.get("conn_state")
-                .and_then(|v| v.as_str())
-                .unwrap_or("-"),
+            row.get("conn_state").and_then(|v| v.as_str()).unwrap_or("-"),
             row.get("hostname").and_then(|v| v.as_str()).unwrap_or("-"),
             pending,
             last_turn_display(row.get("last_turn")),
@@ -120,20 +105,11 @@ fn last_turn_display(last_turn: Option<&serde_json::Value>) -> String {
         return "-".to_string();
     };
     let state = lt.get("state").and_then(|v| v.as_str()).unwrap_or("-");
-    let stop_reason = lt
-        .get("stop_reason")
-        .and_then(|v| v.as_str())
-        .unwrap_or("-");
+    let stop_reason = lt.get("stop_reason").and_then(|v| v.as_str()).unwrap_or("-");
     let ended_at = lt.get("ended_at").and_then(|v| v.as_str());
     let age = ended_at
         .and_then(holler_hub::roster::parse_rfc3339_secs_since)
-        .map(|secs| {
-            if secs < 60 {
-                format!("{secs}s ago")
-            } else {
-                format!("{}m ago", secs / 60)
-            }
-        })
+        .map(|secs| if secs < 60 { format!("{secs}s ago") } else { format!("{}m ago", secs / 60) })
         .unwrap_or_else(|| "-".to_string());
     format!("{state} {stop_reason} {age}")
 }
@@ -151,24 +127,10 @@ fn hold_display(row: &serde_json::Value) -> String {
         .get("held_since")
         .and_then(|v| v.as_str())
         .and_then(holler_hub::roster::parse_rfc3339_secs_since)
-        .map(|secs| {
-            if secs < 60 {
-                format!("{secs}s ago")
-            } else {
-                format!("{}m ago", secs / 60)
-            }
-        })
+        .map(|secs| if secs < 60 { format!("{secs}s ago") } else { format!("{}m ago", secs / 60) })
         .unwrap_or_else(|| "-".to_string());
-    let kind = if row.get("hold_kind").and_then(|v| v.as_str()) == Some("default") {
-        " (default)"
-    } else {
-        ""
-    };
-    let under = if row.get("hold_default").and_then(|v| v.as_bool()) == Some(true) {
-        " [+default]"
-    } else {
-        ""
-    };
+    let kind = if row.get("hold_kind").and_then(|v| v.as_str()) == Some("default") { " (default)" } else { "" };
+    let under = if row.get("hold_default").and_then(|v| v.as_bool()) == Some(true) { " [+default]" } else { "" };
     match row.get("hold_reason").and_then(|v| v.as_str()) {
         Some(reason) => format!("held{kind} {age}{under}: {reason}"),
         None => format!("held{kind} {age}{under}"),

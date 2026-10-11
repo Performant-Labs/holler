@@ -19,8 +19,8 @@ use std::path::Path;
 
 use futures_util::{Sink, Stream};
 use holler_proto::noise::{
-    HUB_UNAVAILABLE_REASON, KEY_MISMATCH_REASON, NOISE_MESSAGE_ONE_REJECTED_REASON,
-    NO_PUBLIC_KEY_REASON, TOKEN_NOT_BOUND_REASON, TOKEN_UNKNOWN_REASON,
+    HUB_UNAVAILABLE_REASON, KEY_MISMATCH_REASON, NOISE_MESSAGE_ONE_REJECTED_REASON, NO_PUBLIC_KEY_REASON, TOKEN_NOT_BOUND_REASON,
+    TOKEN_UNKNOWN_REASON,
 };
 use holler_proto::{Authenticate, Code, CorrelationId, Envelope, Hello, HelloRole, WireError};
 use tokio_tungstenite::tungstenite::{Error as WsError, Message};
@@ -52,12 +52,7 @@ use super::{send, timeout_next_envelope, Attempt};
 /// mapped to [`Attempt::Dropped`] (retry) rather than unwrapped, the same
 /// fail-closed discipline every other near-impossible step in this fn
 /// follows.
-pub(crate) async fn authenticate<Snk, St>(
-    sink: &mut Snk,
-    stream: &mut St,
-    identity: &BodyIdentity,
-    state_root: &Path,
-) -> Result<String, Attempt>
+pub(crate) async fn authenticate<Snk, St>(sink: &mut Snk, stream: &mut St, identity: &BodyIdentity, state_root: &Path) -> Result<String, Attempt>
 where
     Snk: Sink<Message, Error = WsError> + Unpin,
     St: Stream<Item = Result<Message, WsError>> + Unpin,
@@ -70,28 +65,17 @@ where
     let hub_pubkey: [u8; 32] = hex::decode(&identity.hub_pubkey)
         .ok()
         .and_then(|bytes| bytes.try_into().ok())
-        .ok_or_else(|| {
-            Attempt::AuthFailed(
-                "this body's pinned hub public key is corrupt — re-run `body join`".to_string(),
-            )
-        })?;
+        .ok_or_else(|| Attempt::AuthFailed("this body's pinned hub public key is corrupt — re-run `body join`".to_string()))?;
 
-    let prologue = holler_proto::noise::build_prologue(
-        holler_proto::PROTOCOL_VERSION,
-        &identity.token_id,
-        &identity.server_url,
-    );
-    let mut handshake =
-        holler_proto::noise::HandshakeXk::initiator(&body_secret, &hub_pubkey, &prologue)
-            .map_err(|e| Attempt::Dropped(format!("could not start the handshake: {e}")))?;
+    let prologue = holler_proto::noise::build_prologue(holler_proto::PROTOCOL_VERSION, &identity.token_id, &identity.server_url);
+    let mut handshake = holler_proto::noise::HandshakeXk::initiator(&body_secret, &hub_pubkey, &prologue)
+        .map_err(|e| Attempt::Dropped(format!("could not start the handshake: {e}")))?;
 
     // Step 1: `circuit/authenticate` names the token, this body's own belief
     // of the address it is dialing, and Noise message 1 (`e, es`); the hub's
     // result is message 2 (`e, ee`), not an ack.
     let cid = CorrelationId::mint_body();
-    let msg1 = handshake
-        .write_message()
-        .map_err(|e| Attempt::Dropped(format!("write handshake message 1: {e}")))?;
+    let msg1 = handshake.write_message().map_err(|e| Attempt::Dropped(format!("write handshake message 1: {e}")))?;
     let params = Authenticate {
         protocol: holler_proto::PROTOCOL_VERSION,
         token_id: identity.token_id.clone(),
@@ -99,12 +83,9 @@ where
         advertised_url: identity.server_url.clone(),
         message: hex::encode(msg1),
     };
-    let params =
-        serde_json::to_value(params).map_err(|e| Attempt::Dropped(format!("encode auth: {e}")))?;
+    let params = serde_json::to_value(params).map_err(|e| Attempt::Dropped(format!("encode auth: {e}")))?;
     let req = Envelope::request(&cid, "circuit/authenticate", Some(params));
-    send(sink, &req)
-        .await
-        .map_err(|_| Attempt::Dropped("send auth: socket closed".to_string()))?;
+    send(sink, &req).await.map_err(|_| Attempt::Dropped("send auth: socket closed".to_string()))?;
 
     let env = timeout_next_envelope(stream)
         .await
@@ -113,11 +94,8 @@ where
         Envelope::Response { id, result } if id == cid.as_str() => {
             let challenge: holler_proto::AuthChallenge = result
                 .and_then(|v| serde_json::from_value(v).ok())
-                .ok_or_else(|| {
-                    Attempt::Dropped("malformed circuit/authenticate challenge".to_string())
-                })?;
-            hex::decode(&challenge.message)
-                .map_err(|e| Attempt::Dropped(format!("malformed handshake message 2: {e}")))?
+                .ok_or_else(|| Attempt::Dropped("malformed circuit/authenticate challenge".to_string()))?;
+            hex::decode(&challenge.message).map_err(|e| Attempt::Dropped(format!("malformed handshake message 2: {e}")))?
         }
         // Issue #486: one classifier for a `-32002` at either step, on the
         // structured `error.data.reason`, never on `message` text.
@@ -134,57 +112,34 @@ where
             return Err(Attempt::AuthFailed(error.message));
         }
         Envelope::Error { error, .. } => {
-            return Err(Attempt::Dropped(format!(
-                "authenticate refused: {}",
-                error.message
-            )));
+            return Err(Attempt::Dropped(format!("authenticate refused: {}", error.message)));
         }
-        _ => {
-            return Err(Attempt::Dropped(
-                "unexpected reply to circuit/authenticate".to_string(),
-            ))
-        }
+        _ => return Err(Attempt::Dropped("unexpected reply to circuit/authenticate".to_string())),
     };
 
     // Step 2: process message 2, write message 3 (`s, se`, carrying this
     // body's own static key encrypted), and answer `circuit/prove`. The
     // private key never leaves this function.
-    handshake
-        .read_message(&msg2)
-        .map_err(|e| Attempt::Dropped(format!("handshake message 2 rejected: {e}")))?;
-    let msg3 = handshake
-        .write_message()
-        .map_err(|e| Attempt::Dropped(format!("write handshake message 3: {e}")))?;
+    handshake.read_message(&msg2).map_err(|e| Attempt::Dropped(format!("handshake message 2 rejected: {e}")))?;
+    let msg3 = handshake.write_message().map_err(|e| Attempt::Dropped(format!("write handshake message 3: {e}")))?;
     let prove_cid = CorrelationId::mint_body();
     let prove_params = holler_proto::Prove {
         token_id: identity.token_id.clone(),
         message: hex::encode(msg3),
     };
-    let prove_params = serde_json::to_value(prove_params)
-        .map_err(|e| Attempt::Dropped(format!("encode prove: {e}")))?;
+    let prove_params = serde_json::to_value(prove_params).map_err(|e| Attempt::Dropped(format!("encode prove: {e}")))?;
     let prove_req = Envelope::request(&prove_cid, "circuit/prove", Some(prove_params));
-    send(sink, &prove_req)
-        .await
-        .map_err(|_| Attempt::Dropped("send prove: socket closed".to_string()))?;
+    send(sink, &prove_req).await.map_err(|_| Attempt::Dropped("send prove: socket closed".to_string()))?;
 
     let env = timeout_next_envelope(stream)
         .await
         .ok_or_else(|| Attempt::Dropped("no answer to circuit/prove".to_string()))?;
     match env {
-        Envelope::Response { id, .. } if id == prove_cid.as_str() => {
-            holler_proto::sas::derive_sas(&handshake.handshake_hash_hex())
-                .map_err(|e| Attempt::Dropped(format!("could not derive the pairing SAS: {e}")))
-        }
-        Envelope::Error { error, .. } if error.code == Code::Unauthenticated.jsonrpc() => {
-            Err(refusal_attempt(error, &identity.hub_pubkey))
-        }
-        Envelope::Error { error, .. } => Err(Attempt::Dropped(format!(
-            "prove refused: {}",
-            error.message
-        ))),
-        _ => Err(Attempt::Dropped(
-            "unexpected reply to circuit/prove".to_string(),
-        )),
+        Envelope::Response { id, .. } if id == prove_cid.as_str() => holler_proto::sas::derive_sas(&handshake.handshake_hash_hex())
+            .map_err(|e| Attempt::Dropped(format!("could not derive the pairing SAS: {e}"))),
+        Envelope::Error { error, .. } if error.code == Code::Unauthenticated.jsonrpc() => Err(refusal_attempt(error, &identity.hub_pubkey)),
+        Envelope::Error { error, .. } => Err(Attempt::Dropped(format!("prove refused: {}", error.message))),
+        _ => Err(Attempt::Dropped("unexpected reply to circuit/prove".to_string())),
     }
 }
 
@@ -298,12 +253,9 @@ where
         sessions,
         hub_pubkey: None,
     };
-    let params =
-        serde_json::to_value(hello).map_err(|e| Attempt::Dropped(format!("encode hello: {e}")))?;
+    let params = serde_json::to_value(hello).map_err(|e| Attempt::Dropped(format!("encode hello: {e}")))?;
     let req = Envelope::request(&cid, "circuit/hello", Some(params));
-    send(sink, &req)
-        .await
-        .map_err(|_| Attempt::Dropped("send hello: socket closed".to_string()))?;
+    send(sink, &req).await.map_err(|_| Attempt::Dropped("send hello: socket closed".to_string()))?;
 
     let hub_hello = match timeout_next_envelope(stream).await {
         Some(Envelope::Response { id, result }) if id == cid.as_str() => result
@@ -344,26 +296,16 @@ where
     // The hub's own hello: a request we must answer with `{}`.
     match timeout_next_envelope(stream).await {
         Some(Envelope::Request { id, method, .. }) if method == "circuit/hello" => {
-            let cid = CorrelationId::parse(&id)
-                .map_err(|e| Attempt::Dropped(format!("bad hub hello id: {e}")))?;
+            let cid = CorrelationId::parse(&id).map_err(|e| Attempt::Dropped(format!("bad hub hello id: {e}")))?;
             let ack = Envelope::response(&cid, Some(serde_json::json!({})));
-            send(sink, &ack)
-                .await
-                .map_err(|_| Attempt::Dropped("send hello ack: socket closed".to_string()))
+            send(sink, &ack).await.map_err(|_| Attempt::Dropped("send hello ack: socket closed".to_string()))
         }
-        _ => Err(Attempt::Dropped(
-            "no hub-initiated circuit/hello".to_string(),
-        )),
+        _ => Err(Attempt::Dropped("no hub-initiated circuit/hello".to_string())),
     }
 }
 
 #[cfg(test)]
-#[allow(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::panic,
-    clippy::unreachable
-)] // #486
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable)] // #486
 mod tests {
     use super::*;
     use holler_proto::WireError;
@@ -388,19 +330,10 @@ mod tests {
     #[test]
     fn hub_unavailable_is_dropped_and_retried() {
         let msg = "authentication failed: the token store could not be read";
-        match refusal_attempt(
-            refusal(msg, Some(holler_proto::noise::HUB_UNAVAILABLE_REASON)),
-            PINNED,
-        ) {
+        match refusal_attempt(refusal(msg, Some(holler_proto::noise::HUB_UNAVAILABLE_REASON)), PINNED) {
             Attempt::Dropped(text) => {
-                assert!(
-                    text.starts_with("hub unavailable (reason hub_unavailable): "),
-                    "{text}"
-                );
-                assert!(
-                    text.ends_with(msg),
-                    "the hub's message follows verbatim: {text}"
-                );
+                assert!(text.starts_with("hub unavailable (reason hub_unavailable): "), "{text}");
+                assert!(text.ends_with(msg), "the hub's message follows verbatim: {text}");
             }
             Attempt::AuthFailed(m) => panic!("hub_unavailable must be retried, not a stop: {m}"),
             Attempt::Ended(_) => panic!("hub_unavailable must be retried, got Ended"),
@@ -412,23 +345,11 @@ mod tests {
     #[test]
     fn token_not_bound_stops_with_plain_words_and_the_code() {
         let msg = "authentication failed: token tok_x is not bound";
-        let text = auth_failed(refusal_attempt(
-            refusal(msg, Some("token_not_bound")),
-            PINNED,
-        ));
-        assert!(
-            text.contains("this hub no longer accepts this body's token"),
-            "{text}"
-        );
+        let text = auth_failed(refusal_attempt(refusal(msg, Some("token_not_bound")), PINNED));
+        assert!(text.contains("this hub no longer accepts this body's token"), "{text}");
         assert!(text.contains("was revoked, or never joined"), "{text}");
-        assert!(
-            text.contains("mint a new token and re-run `body join`"),
-            "{text}"
-        );
-        assert!(
-            text.contains(&format!("(reason token_not_bound); the hub said: {msg}")),
-            "{text}"
-        );
+        assert!(text.contains("mint a new token and re-run `body join`"), "{text}");
+        assert!(text.contains(&format!("(reason token_not_bound); the hub said: {msg}")), "{text}");
     }
 
     #[test]
@@ -436,14 +357,8 @@ mod tests {
         let msg = "authentication failed: no such token tok_x";
         let text = auth_failed(refusal_attempt(refusal(msg, Some("token_unknown")), PINNED));
         assert!(text.contains("this hub has no such token"), "{text}");
-        assert!(
-            text.contains("this body is joined to a different hub"),
-            "{text}"
-        );
-        assert!(
-            text.contains(&format!("(reason token_unknown); the hub said: {msg}")),
-            "{text}"
-        );
+        assert!(text.contains("this body is joined to a different hub"), "{text}");
+        assert!(text.contains(&format!("(reason token_unknown); the hub said: {msg}")), "{text}");
     }
 
     #[test]
@@ -451,14 +366,8 @@ mod tests {
         for code in ["no_public_key", "key_mismatch"] {
             let msg = "authentication failed: static key mismatch";
             let text = auth_failed(refusal_attempt(refusal(msg, Some(code)), PINNED));
-            assert!(
-                text.contains("this body's key does not match the key the hub registered at join"),
-                "{code}: {text}"
-            );
-            assert!(
-                text.contains(&format!("(reason {code}); the hub said: {msg}")),
-                "{code}: {text}"
-            );
+            assert!(text.contains("this body's key does not match the key the hub registered at join"), "{code}: {text}");
+            assert!(text.contains(&format!("(reason {code}); the hub said: {msg}")), "{code}: {text}");
         }
     }
 
@@ -467,24 +376,11 @@ mod tests {
     /// newer hub might add.
     #[test]
     fn every_other_reason_stops_with_the_generic_words() {
-        for code in [
-            "prove_timeout",
-            "protocol_error",
-            "handshake_failed",
-            "auth_failed",
-            "token_expired",
-            "a_future_code",
-        ] {
+        for code in ["prove_timeout", "protocol_error", "handshake_failed", "auth_failed", "token_expired", "a_future_code"] {
             let msg = "authentication failed: something";
             let text = auth_failed(refusal_attempt(refusal(msg, Some(code)), PINNED));
-            assert!(
-                text.contains("the hub refused this body's authentication"),
-                "{code}: {text}"
-            );
-            assert!(
-                text.contains(&format!("(reason {code}); the hub said: {msg}")),
-                "{code}: {text}"
-            );
+            assert!(text.contains("the hub refused this body's authentication"), "{code}: {text}");
+            assert!(text.contains(&format!("(reason {code}); the hub said: {msg}")), "{code}: {text}");
         }
     }
 
@@ -492,23 +388,14 @@ mod tests {
     #[test]
     fn no_reason_stops_with_the_hubs_message_verbatim() {
         let msg = "authentication failed: token tok_x is not bound";
-        assert_eq!(
-            auth_failed(refusal_attempt(refusal(msg, None), PINNED)),
-            msg
-        );
+        assert_eq!(auth_failed(refusal_attempt(refusal(msg, None), PINNED)), msg);
     }
 
     #[test]
     fn noise_message_one_rejected_is_the_hub_key_mismatch() {
         let reason = Some(holler_proto::noise::NOISE_MESSAGE_ONE_REJECTED_REASON);
-        let text = auth_failed(refusal_attempt(
-            refusal("authentication failed: bad handshake message", reason),
-            PINNED,
-        ));
+        let text = auth_failed(refusal_attempt(refusal("authentication failed: bad handshake message", reason), PINNED));
         assert!(text.starts_with("hub public key mismatch"), "{text}");
-        assert!(
-            text.contains(PINNED),
-            "the text names the pinned key: {text}"
-        );
+        assert!(text.contains(PINNED), "the text names the pinned key: {text}");
     }
 }

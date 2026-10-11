@@ -91,10 +91,7 @@ pub async fn run(cfg: &Config, hub: &Hub, report: &mut Report) -> Res<()> {
     wait_for_client_count(hub, members.len() as u64, Duration::from_secs(60)).await;
     tokio::time::sleep(cfg.settle).await;
 
-    let sessions: Vec<String> = members
-        .iter()
-        .flat_map(|m| m.session_names.clone())
-        .collect();
+    let sessions: Vec<String> = members.iter().flat_map(|m| m.session_names.clone()).collect();
     if sessions.is_empty() {
         for member in members {
             member.stop();
@@ -117,9 +114,7 @@ pub async fn run(cfg: &Config, hub: &Hub, report: &mut Report) -> Res<()> {
         let rate = cfg.rate;
         let duration = cfg.sustained;
         let concurrency = cfg.connect_concurrency;
-        tokio::task::block_in_place(|| {
-            drive_sustained_say(&holler_bin, hub, &sessions, rate, duration, concurrency)
-        })
+        tokio::task::block_in_place(|| drive_sustained_say(&holler_bin, hub, &sessions, rate, duration, concurrency))
     };
     let drive_elapsed = drive_started.elapsed();
 
@@ -157,11 +152,7 @@ pub async fn run(cfg: &Config, hub: &Hub, report: &mut Report) -> Res<()> {
 /// each cloning `events` so its own reader thread can relay queue-depth
 /// events. Split out of [`run`] to keep that function under this
 /// workspace's line-count lint.
-fn start_watched_fleet(
-    cfg: &Config,
-    hub: &Hub,
-    events: std_mpsc::Sender<QueueEvent>,
-) -> (Vec<FleetMember>, Vec<String>) {
+fn start_watched_fleet(cfg: &Config, hub: &Hub, events: std_mpsc::Sender<QueueEvent>) -> (Vec<FleetMember>, Vec<String>) {
     let mut members = Vec::with_capacity(cfg.bodies);
     let mut failures = Vec::new();
     for i in 0..cfg.bodies {
@@ -230,12 +221,7 @@ impl QueueAggregator {
 /// that function under this workspace's line-count lint.
 fn spawn_queue_aggregator(rx: std_mpsc::Receiver<QueueEvent>) -> QueueAggregator {
     let stop = Arc::new(AtomicBool::new(false));
-    let outcome = Arc::new(Mutex::new(QueueOutcome {
-        max_depth: None,
-        final_depth: None,
-        events_observed: 0,
-        full_refusals: 0,
-    }));
+    let outcome = Arc::new(Mutex::new(QueueOutcome { max_depth: None, final_depth: None, events_observed: 0, full_refusals: 0 }));
     let handle = {
         let stop = Arc::clone(&stop);
         let outcome = Arc::clone(&outcome);
@@ -269,11 +255,7 @@ fn spawn_queue_aggregator(rx: std_mpsc::Receiver<QueueEvent>) -> QueueAggregator
             }
         })
     };
-    QueueAggregator {
-        stop,
-        outcome,
-        handle,
-    }
+    QueueAggregator { stop, outcome, handle }
 }
 
 /// A running hub-RSS-over-time sampler: samples `proc::CpuMeter` on a
@@ -307,23 +289,16 @@ fn spawn_rss_sampler(hub_pid: u32, interval: Duration) -> RssSampler {
             let started = Instant::now();
             while !stop.load(Ordering::Relaxed) {
                 let sample = meter.sample();
-                series
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .push(RssPoint {
-                        elapsed_s: started.elapsed().as_secs_f64(),
-                        rss_mib: sample.rss_mib,
-                        threads: sample.threads,
-                    });
+                series.lock().unwrap_or_else(|e| e.into_inner()).push(RssPoint {
+                    elapsed_s: started.elapsed().as_secs_f64(),
+                    rss_mib: sample.rss_mib,
+                    threads: sample.threads,
+                });
                 std::thread::sleep(interval);
             }
         })
     };
-    RssSampler {
-        stop,
-        series,
-        handle,
-    }
+    RssSampler { stop, series, handle }
 }
 
 /// Build the run's single [`StepReport`]. Split out of [`run`] for the same
@@ -345,9 +320,7 @@ fn build_step_report(
 ) -> StepReport {
     let hub_status_clients = hub.client_count().ok();
     let rss_delta_per_client_kib = match (baseline.rss_mib, steady.rss_mib) {
-        (Some(b), Some(s)) if !members.is_empty() => {
-            Some(((s - b) * 1024.0) / members.len() as f64)
-        }
+        (Some(b), Some(s)) if !members.is_empty() => Some(((s - b) * 1024.0) / members.len() as f64),
         _ => None,
     };
     let threads_delta = match (baseline.threads, steady.threads) {
@@ -439,10 +412,7 @@ fn drive_sustained_say(
         }
     });
 
-    (
-        samples.into_inner().unwrap_or_else(|e| e.into_inner()),
-        failures.load(Ordering::Relaxed),
-    )
+    (samples.into_inner().unwrap_or_else(|e| e.into_inner()), failures.load(Ordering::Relaxed))
 }
 
 /// One real `holler say <session> "..." --queue` invocation, timed end to

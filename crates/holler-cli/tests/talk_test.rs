@@ -1,10 +1,4 @@
-#![allow(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::panic,
-    clippy::unreachable,
-    dead_code
-)] // #190
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable, dead_code)] // #190
 //! RED tests for `say` → `session/prompt` (issue #190), the issue's own test
 //! list, verbatim in name where practical, against real hub + body +
 //! `stub-acp` (#130) subprocesses — no mocks of the circuit.
@@ -35,10 +29,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
-use support::{
-    join, kill_tree, mint_token, roster_json, wait_for, write_sessions_toml, Body, Hub, StateDir,
-    STARTUP_WAIT,
-};
+use support::{join, kill_tree, mint_token, roster_json, wait_for, write_sessions_toml, Body, Hub, StateDir, STARTUP_WAIT};
 
 fn stdout_of(out: &Output) -> String {
     String::from_utf8_lossy(&out.stdout).into_owned()
@@ -126,12 +117,7 @@ fn owned(args: &[&str]) -> Vec<String> {
 /// directly, so it must run against the *hub's own* state dir, not the
 /// body's — a distinct `body_state` is only for the identity/session-config
 /// files the body process itself owns).
-fn start_body(
-    hub_state: &StateDir,
-    body_state: &StateDir,
-    hub: &Hub,
-    sessions: &[(&str, &[&str])],
-) -> Body {
+fn start_body(hub_state: &StateDir, body_state: &StateDir, hub: &Hub, sessions: &[(&str, &[&str])]) -> Body {
     start_body_labeled(hub_state, body_state, hub, "b", sessions)
 }
 
@@ -187,24 +173,12 @@ fn say_routes_and_returns_reply() {
     let hub_state = StateDir::new();
     let body_state = StateDir::new();
     let hub = Hub::start(&hub_state);
-    let _body = start_body(
-        &hub_state,
-        &body_state,
-        &hub,
-        &[("alpha", &["--chunks", "2"])],
-    );
+    let _body = start_body(&hub_state, &body_state, &hub, &[("alpha", &["--chunks", "2"])]);
 
     let out = say_ready(&hub_state, "alpha", "hi", Duration::from_secs(10));
-    assert!(
-        out.status.success(),
-        "say must exit 0; stderr: {}",
-        stderr_of(&out)
-    );
+    assert!(out.status.success(), "say must exit 0; stderr: {}", stderr_of(&out));
     let text = stdout_of(&out);
-    assert!(
-        text.contains("stub chunk"),
-        "reply must carry the stub's streamed text: {text:?}"
-    );
+    assert!(text.contains("stub chunk"), "reply must carry the stub's streamed text: {text:?}");
 }
 
 #[test]
@@ -220,17 +194,9 @@ fn say_two_sessions_independently() {
     );
 
     let a = say_ready(&hub_state, "alpha", "hi alpha", Duration::from_secs(10));
-    assert!(
-        a.status.success(),
-        "say alpha must exit 0; stderr: {}",
-        stderr_of(&a)
-    );
+    assert!(a.status.success(), "say alpha must exit 0; stderr: {}", stderr_of(&a));
     let b = say_full(hub_state.path(), &["beta", "hi beta"]);
-    assert!(
-        b.status.success(),
-        "say beta must exit 0; stderr: {}",
-        stderr_of(&b)
-    );
+    assert!(b.status.success(), "say beta must exit 0; stderr: {}", stderr_of(&b));
     assert!(stdout_of(&a).contains("stub chunk"));
     assert!(stdout_of(&b).contains("stub chunk"));
 }
@@ -240,21 +206,12 @@ fn say_bare_name_when_unambiguous() {
     let hub_state = StateDir::new();
     let body_state = StateDir::new();
     let hub = Hub::start(&hub_state);
-    let _body = start_body(
-        &hub_state,
-        &body_state,
-        &hub,
-        &[("alpha", &["--chunks", "1"])],
-    );
+    let _body = start_body(&hub_state, &body_state, &hub, &[("alpha", &["--chunks", "1"])]);
 
     // A bare name (no `<label>/` prefix) resolves cleanly when exactly one
     // live session carries it.
     let out = say_ready(&hub_state, "alpha", "hi", Duration::from_secs(10));
-    assert!(
-        out.status.success(),
-        "bare unambiguous name must resolve; stderr: {}",
-        stderr_of(&out)
-    );
+    assert!(out.status.success(), "bare unambiguous name must resolve; stderr: {}", stderr_of(&out));
 }
 
 #[test]
@@ -265,20 +222,8 @@ fn say_ambiguous_exit_2_lists_candidates() {
     // `say alpha` cannot pick one.
     let body_a = StateDir::new();
     let body_b = StateDir::new();
-    let _a = start_body_labeled(
-        &hub_state,
-        &body_a,
-        &hub,
-        "b1",
-        &[("alpha", &["--chunks", "1"])],
-    );
-    let _b = start_body_labeled(
-        &hub_state,
-        &body_b,
-        &hub,
-        "b2",
-        &[("alpha", &["--chunks", "1"])],
-    );
+    let _a = start_body_labeled(&hub_state, &body_a, &hub, "b1", &[("alpha", &["--chunks", "1"])]);
+    let _b = start_body_labeled(&hub_state, &body_b, &hub, "b2", &[("alpha", &["--chunks", "1"])]);
 
     // Issue #220 root cause (CI-run audit, 2026-09-11 — see
     // `gh run list --repo Performant-Labs/holler` cross-referenced against
@@ -340,17 +285,9 @@ fn say_ambiguous_exit_2_lists_candidates() {
     })
     .unwrap_or_else(|| panic!("never observed an ambiguous refusal within 5s of both `alpha` rows appearing on the roster"));
 
-    assert_eq!(
-        out.status.code(),
-        Some(2),
-        "ambiguous session must exit 2; stderr: {}",
-        stderr_of(&out)
-    );
+    assert_eq!(out.status.code(), Some(2), "ambiguous session must exit 2; stderr: {}", stderr_of(&out));
     let err = stderr_of(&out);
-    assert!(
-        err.contains("alpha"),
-        "the refusal must name the ambiguous session: {err:?}"
-    );
+    assert!(err.contains("alpha"), "the refusal must name the ambiguous session: {err:?}");
 }
 
 #[test]
@@ -358,28 +295,15 @@ fn say_unknown_session_exit_1() {
     let hub_state = StateDir::new();
     let hub = Hub::start(&hub_state);
     let body_state = StateDir::new();
-    let _body = start_body(
-        &hub_state,
-        &body_state,
-        &hub,
-        &[("alpha", &["--chunks", "1"])],
-    );
+    let _body = start_body(&hub_state, &body_state, &hub, &[("alpha", &["--chunks", "1"])]);
     // Give the one real session a moment to register so the refusal below is
     // provably "no such session", not "the hub hasn't heard from anyone yet".
     let _ = say_ready(&hub_state, "alpha", "warm up", Duration::from_secs(10));
 
     let out = support::say(&hub_state, "no-such-session", "hi");
-    assert_eq!(
-        out.status.code(),
-        Some(1),
-        "unknown session must exit 1; stderr: {}",
-        stderr_of(&out)
-    );
+    assert_eq!(out.status.code(), Some(1), "unknown session must exit 1; stderr: {}", stderr_of(&out));
     let err = stderr_of(&out);
-    assert!(
-        err.contains("unknown session") || err.contains("no-such-session"),
-        "got: {err:?}"
-    );
+    assert!(err.contains("unknown session") || err.contains("no-such-session"), "got: {err:?}");
 }
 
 #[test]
@@ -387,12 +311,7 @@ fn say_json_shape() {
     let hub_state = StateDir::new();
     let body_state = StateDir::new();
     let hub = Hub::start(&hub_state);
-    let _body = start_body(
-        &hub_state,
-        &body_state,
-        &hub,
-        &[("alpha", &["--chunks", "2"])],
-    );
+    let _body = start_body(&hub_state, &body_state, &hub, &[("alpha", &["--chunks", "2"])]);
 
     let out = wait_for(Duration::from_secs(10), || {
         let out = say_full(hub_state.path(), &["--json", "alpha", "hi"]);
@@ -400,21 +319,9 @@ fn say_json_shape() {
     })
     .expect("say --json eventually succeeds");
     assert!(out.status.success(), "stderr: {}", stderr_of(&out));
-    let doc: Value =
-        serde_json::from_slice(&out.stdout).expect("say --json prints one JSON document");
-    for key in [
-        "session",
-        "stop_reason",
-        "state",
-        "updates",
-        "elapsed_ms",
-        "text",
-        "message",
-    ] {
-        assert!(
-            doc.get(key).is_some(),
-            "say --json result missing `{key}`: {doc}"
-        );
+    let doc: Value = serde_json::from_slice(&out.stdout).expect("say --json prints one JSON document");
+    for key in ["session", "stop_reason", "state", "updates", "elapsed_ms", "text", "message"] {
+        assert!(doc.get(key).is_some(), "say --json result missing `{key}`: {doc}");
     }
     assert_eq!(doc["stop_reason"], "end_turn");
     assert_eq!(doc["state"], "completed");
@@ -426,12 +333,7 @@ fn talklog_has_prompt_updates_done() {
     let hub_state = StateDir::new();
     let body_state = StateDir::new();
     let hub = Hub::start(&hub_state);
-    let _body = start_body(
-        &hub_state,
-        &body_state,
-        &hub,
-        &[("alpha", &["--chunks", "3"])],
-    );
+    let _body = start_body(&hub_state, &body_state, &hub, &[("alpha", &["--chunks", "3"])]);
 
     let out = say_ready(&hub_state, "alpha", "hi", Duration::from_secs(10));
     assert!(out.status.success(), "stderr: {}", stderr_of(&out));
@@ -443,38 +345,19 @@ fn talklog_has_prompt_updates_done() {
     // exists yet on `body join` — that value is a separate thing, see
     // `query_test.rs`'s own note on the same distinction).
     let path = hub_state.hub().join("talklog").join("b__alpha.jsonl");
-    let content = wait_for(Duration::from_secs(5), || {
-        std::fs::read_to_string(&path).ok()
-    })
-    .unwrap_or_else(|| panic!("talklog never appeared at {}", path.display()));
-    let lines: Vec<Value> = content
-        .lines()
-        .map(|l| serde_json::from_str(l).expect("valid jsonl line"))
-        .collect();
+    let content = wait_for(Duration::from_secs(5), || std::fs::read_to_string(&path).ok())
+        .unwrap_or_else(|| panic!("talklog never appeared at {}", path.display()));
+    let lines: Vec<Value> = content.lines().map(|l| serde_json::from_str(l).expect("valid jsonl line")).collect();
+    assert!(lines.iter().any(|l| l.get("text").is_some()), "must have a prompt line: {lines:?}");
     assert!(
-        lines.iter().any(|l| l.get("text").is_some()),
-        "must have a prompt line: {lines:?}"
-    );
-    assert!(
-        lines
-            .iter()
-            .any(|l| l.get("seq").is_some() && l.get("parts").is_some()),
+        lines.iter().any(|l| l.get("seq").is_some() && l.get("parts").is_some()),
         "must have an update line: {lines:?}"
     );
-    assert!(
-        lines.iter().any(|l| l.get("stopReason").is_some()),
-        "must have a done line: {lines:?}"
-    );
+    assert!(lines.iter().any(|l| l.get("stopReason").is_some()), "must have a done line: {lines:?}");
     // Every line names the same prompt_id (one turn, one correlation id).
-    let ids: std::collections::HashSet<_> = lines
-        .iter()
-        .filter_map(|l| l.get("prompt_id").and_then(|v| v.as_str()))
-        .collect();
-    assert_eq!(
-        ids.len(),
-        1,
-        "every talklog line for one turn shares one prompt_id: {lines:?}"
-    );
+    let ids: std::collections::HashSet<_> =
+        lines.iter().filter_map(|l| l.get("prompt_id").and_then(|v| v.as_str())).collect();
+    assert_eq!(ids.len(), 1, "every talklog line for one turn shares one prompt_id: {lines:?}");
 }
 
 #[test]
@@ -482,12 +365,7 @@ fn say_to_working_session_is_session_busy_exit_1_with_hint() {
     let hub_state = StateDir::new();
     let body_state = StateDir::new();
     let hub = Hub::start(&hub_state);
-    let _body = start_body(
-        &hub_state,
-        &body_state,
-        &hub,
-        &[("alpha", &["--slow", "--chunks", "5"])],
-    );
+    let _body = start_body(&hub_state, &body_state, &hub, &[("alpha", &["--slow", "--chunks", "5"])]);
 
     let warm = say_ready(&hub_state, "alpha", "warm up", Duration::from_secs(10));
     assert!(warm.status.success(), "stderr: {}", stderr_of(&warm));
@@ -501,21 +379,10 @@ fn say_to_working_session_is_session_busy_exit_1_with_hint() {
     let racer = support::say(&hub_state, "alpha", "interrupting");
     let _ = handle.join();
 
-    assert_eq!(
-        racer.status.code(),
-        Some(1),
-        "busy session must exit 1; stderr: {}",
-        stderr_of(&racer)
-    );
+    assert_eq!(racer.status.code(), Some(1), "busy session must exit 1; stderr: {}", stderr_of(&racer));
     let err = stderr_of(&racer);
-    assert!(
-        err.contains("session_busy"),
-        "must carry the session_busy hint: {err:?}"
-    );
-    assert!(
-        err.contains("is working") || err.contains("is stalled"),
-        "must name the state: {err:?}"
-    );
+    assert!(err.contains("session_busy"), "must carry the session_busy hint: {err:?}");
+    assert!(err.contains("is working") || err.contains("is stalled"), "must name the state: {err:?}");
     assert!(err.contains("--queue"), "must hint --queue: {err:?}");
 }
 
@@ -524,12 +391,7 @@ fn say_queue_appends_and_runs_after_turn() {
     let hub_state = StateDir::new();
     let body_state = StateDir::new();
     let hub = Hub::start(&hub_state);
-    let _body = start_body(
-        &hub_state,
-        &body_state,
-        &hub,
-        &[("alpha", &["--slow", "--chunks", "3"])],
-    );
+    let _body = start_body(&hub_state, &body_state, &hub, &[("alpha", &["--slow", "--chunks", "3"])]);
 
     let warm = say_ready(&hub_state, "alpha", "warm up", Duration::from_secs(10));
     assert!(warm.status.success(), "stderr: {}", stderr_of(&warm));
@@ -543,16 +405,8 @@ fn say_queue_appends_and_runs_after_turn() {
     let queued = say_full(hub_state.path(), &["--queue", "alpha", "queued turn"]);
     let first = handle.join().expect("first say thread");
 
-    assert!(
-        first.status.success(),
-        "the first turn must still succeed; stderr: {}",
-        stderr_of(&first)
-    );
-    assert!(
-        queued.status.success(),
-        "the queued turn must run after the first ends; stderr: {}",
-        stderr_of(&queued)
-    );
+    assert!(first.status.success(), "the first turn must still succeed; stderr: {}", stderr_of(&first));
+    assert!(queued.status.success(), "the queued turn must run after the first ends; stderr: {}", stderr_of(&queued));
 }
 
 #[test]
@@ -567,12 +421,7 @@ fn say_to_stalled_session_names_stalled() {
     // (issue #190's own wiring of #189's `subscribe_presence_changes`), so
     // the hub's cache reflects `Working` within the connection's normal
     // traffic — no heartbeat tuning needed here.
-    let _body = start_body(
-        &hub_state,
-        &body_state,
-        &hub,
-        &[("alpha", &["--slow", "--chunks", "10"])],
-    );
+    let _body = start_body(&hub_state, &body_state, &hub, &[("alpha", &["--slow", "--chunks", "10"])]);
 
     let warm = say_ready(&hub_state, "alpha", "warm up", Duration::from_secs(10));
     assert!(warm.status.success(), "stderr: {}", stderr_of(&warm));
@@ -597,17 +446,9 @@ fn say_to_stalled_session_names_stalled() {
     .unwrap_or_else(|| panic!("never observed a stalled refusal within 5s"));
     let _ = handle.join();
 
-    assert_eq!(
-        racer.status.code(),
-        Some(1),
-        "stderr: {}",
-        stderr_of(&racer)
-    );
+    assert_eq!(racer.status.code(), Some(1), "stderr: {}", stderr_of(&racer));
     let err = stderr_of(&racer);
-    assert!(
-        err.contains("is stalled"),
-        "a 1ms stall threshold must name the session stalled: {err:?}"
-    );
+    assert!(err.contains("is stalled"), "a 1ms stall threshold must name the session stalled: {err:?}");
 }
 
 #[test]
@@ -615,12 +456,7 @@ fn say_to_disconnected_body_is_not_connected() {
     let hub_state = StateDir::new();
     let body_state = StateDir::new();
     let hub = Hub::start(&hub_state);
-    let body = start_body(
-        &hub_state,
-        &body_state,
-        &hub,
-        &[("alpha", &["--chunks", "1"])],
-    );
+    let body = start_body(&hub_state, &body_state, &hub, &[("alpha", &["--chunks", "1"])]);
 
     let warm = say_ready(&hub_state, "alpha", "warm up", Duration::from_secs(10));
     assert!(warm.status.success(), "stderr: {}", stderr_of(&warm));
@@ -638,10 +474,7 @@ fn say_to_disconnected_body_is_not_connected() {
     let out = support::say(&hub_state, "alpha", "hi");
     assert_eq!(out.status.code(), Some(1), "stderr: {}", stderr_of(&out));
     let err = stderr_of(&out);
-    assert!(
-        err.contains("not connected") || err.contains("not_connected"),
-        "got: {err:?}"
-    );
+    assert!(err.contains("not connected") || err.contains("not_connected"), "got: {err:?}");
 }
 
 /// Issue #347 investigation (2026-09-15): this test failed once on
@@ -722,38 +555,18 @@ fn body_drop_mid_turn_is_connection_lost_not_unreachable() {
     let hub_state = StateDir::new();
     let body_state = StateDir::new();
     let hub = Hub::start(&hub_state);
-    let mut body = start_body(
-        &hub_state,
-        &body_state,
-        &hub,
-        &[("alpha", &["--ask-permission", "--chunks", "2"])],
-    );
+    let mut body = start_body(&hub_state, &body_state, &hub, &[("alpha", &["--ask-permission", "--chunks", "2"])]);
 
     let suffix = "/alpha";
     wait_for(Duration::from_secs(10), || {
         let rows = roster_json(&hub_state)["rows"].as_array()?.clone();
-        rows.iter()
-            .any(|r| r["name"].as_str().is_some_and(|n| n.ends_with(suffix)))
-            .then_some(())
+        rows.iter().any(|r| r["name"].as_str().is_some_and(|n| n.ends_with(suffix))).then_some(())
     })
-    .unwrap_or_else(|| {
-        panic!(
-            "`alpha` never appeared on the roster within 10s: {:?}",
-            roster_json(&hub_state)
-        )
-    });
+    .unwrap_or_else(|| panic!("`alpha` never appeared on the roster within 10s: {:?}", roster_json(&hub_state)));
 
     let state_path = hub_state.path().to_path_buf();
     let handle = std::thread::spawn(move || {
-        say_full(
-            &state_path,
-            &[
-                "--timeout",
-                "20s",
-                "alpha",
-                "a long turn, about to be cut off",
-            ],
-        )
+        say_full(&state_path, &["--timeout", "20s", "alpha", "a long turn, about to be cut off"])
     });
 
     // `input-required` (the gate `--ask-permission` parks the turn in after
@@ -766,18 +579,12 @@ fn body_drop_mid_turn_is_connection_lost_not_unreachable() {
         rows.iter()
             .any(|r| {
                 r["name"].as_str().is_some_and(|n| n.ends_with(suffix))
-                    && matches!(
-                        r["state"].as_str(),
-                        Some("working") | Some("stalled") | Some("input-required")
-                    )
+                    && matches!(r["state"].as_str(), Some("working") | Some("stalled") | Some("input-required"))
             })
             .then_some(())
     })
     .unwrap_or_else(|| {
-        panic!(
-            "background `say alpha` never reached a pending state on the roster within 10s: {:?}",
-            roster_json(&hub_state)
-        )
+        panic!("background `say alpha` never reached a pending state on the roster within 10s: {:?}", roster_json(&hub_state))
     });
 
     support::kill_tree(body.child_mut());
@@ -785,14 +592,8 @@ fn body_drop_mid_turn_is_connection_lost_not_unreachable() {
     let out = handle.join().expect("say thread");
     assert_eq!(out.status.code(), Some(1), "stderr: {}", stderr_of(&out));
     let err = stderr_of(&out);
-    assert!(
-        err.contains("connection_lost") || err.contains("disconnected"),
-        "got: {err:?}"
-    );
-    assert!(
-        !err.contains("no live holler hub reachable"),
-        "must never report the hub itself as unreachable: {err:?}"
-    );
+    assert!(err.contains("connection_lost") || err.contains("disconnected"), "got: {err:?}");
+    assert!(!err.contains("no live holler hub reachable"), "must never report the hub itself as unreachable: {err:?}");
 }
 
 /// `--timeout`'s grammar is `<number><s|m|h>` (`say_cmd.rs::parse_duration`,
@@ -804,23 +605,9 @@ fn body_drop_mid_turn_is_connection_lost_not_unreachable() {
 fn say_malformed_timeout_exit_3() {
     // No hub started at all: the malformed-timeout check must fail before
     // ever touching the control socket.
-    let out = say_full(
-        std::env::temp_dir()
-            .join(format!("holler-say-bad-timeout-{}", std::process::id()))
-            .as_path(),
-        &["--timeout", "notaduration", "alpha", "hi"],
-    );
-    assert_eq!(
-        out.status.code(),
-        Some(3),
-        "a malformed --timeout is exit 3; stderr: {}",
-        stderr_of(&out)
-    );
-    assert!(
-        stderr_of(&out).contains("invalid --timeout"),
-        "stderr: {}",
-        stderr_of(&out)
-    );
+    let out = say_full(std::env::temp_dir().join(format!("holler-say-bad-timeout-{}", std::process::id())).as_path(), &["--timeout", "notaduration", "alpha", "hi"]);
+    assert_eq!(out.status.code(), Some(3), "a malformed --timeout is exit 3; stderr: {}", stderr_of(&out));
+    assert!(stderr_of(&out).contains("invalid --timeout"), "stderr: {}", stderr_of(&out));
 }
 
 /// `--parts-file`'s two failure modes (`say_cmd.rs::resolve_say_text`) — a
@@ -829,55 +616,21 @@ fn say_malformed_timeout_exit_3() {
 /// any test at all until now (issue #368).
 #[test]
 fn say_parts_file_missing_exit_3() {
-    let state_path =
-        std::env::temp_dir().join(format!("holler-say-parts-missing-{}", std::process::id()));
-    let out = say_full(
-        &state_path,
-        &[
-            "--parts-file",
-            "/nonexistent/path/does-not-exist.json",
-            "alpha",
-        ],
-    );
-    assert_eq!(
-        out.status.code(),
-        Some(3),
-        "a missing --parts-file is exit 3; stderr: {}",
-        stderr_of(&out)
-    );
-    assert!(
-        stderr_of(&out).contains("cannot read --parts-file"),
-        "stderr: {}",
-        stderr_of(&out)
-    );
+    let state_path = std::env::temp_dir().join(format!("holler-say-parts-missing-{}", std::process::id()));
+    let out = say_full(&state_path, &["--parts-file", "/nonexistent/path/does-not-exist.json", "alpha"]);
+    assert_eq!(out.status.code(), Some(3), "a missing --parts-file is exit 3; stderr: {}", stderr_of(&out));
+    assert!(stderr_of(&out).contains("cannot read --parts-file"), "stderr: {}", stderr_of(&out));
 }
 
 #[test]
 fn say_parts_file_malformed_json_exit_3() {
-    let state_path =
-        std::env::temp_dir().join(format!("holler-say-parts-bad-json-{}", std::process::id()));
+    let state_path = std::env::temp_dir().join(format!("holler-say-parts-bad-json-{}", std::process::id()));
     std::fs::create_dir_all(&state_path).expect("create state dir");
     let bad_path = state_path.join("bad.json");
     std::fs::write(&bad_path, "not json at all").expect("write bad parts-file");
-    let out = say_full(
-        &state_path,
-        &[
-            "--parts-file",
-            bad_path.to_str().expect("utf8 path"),
-            "alpha",
-        ],
-    );
-    assert_eq!(
-        out.status.code(),
-        Some(3),
-        "a malformed --parts-file is exit 3; stderr: {}",
-        stderr_of(&out)
-    );
-    assert!(
-        stderr_of(&out).contains("is not a valid A2A Message"),
-        "stderr: {}",
-        stderr_of(&out)
-    );
+    let out = say_full(&state_path, &["--parts-file", bad_path.to_str().expect("utf8 path"), "alpha"]);
+    assert_eq!(out.status.code(), Some(3), "a malformed --parts-file is exit 3; stderr: {}", stderr_of(&out));
+    assert!(stderr_of(&out).contains("is not a valid A2A Message"), "stderr: {}", stderr_of(&out));
     let _ = std::fs::remove_dir_all(&state_path);
 }
 
@@ -890,12 +643,7 @@ fn say_parts_file_success() {
     let hub_state = StateDir::new();
     let body_state = StateDir::new();
     let hub = Hub::start(&hub_state);
-    let _body = start_body(
-        &hub_state,
-        &body_state,
-        &hub,
-        &[("alpha", &["--chunks", "1"])],
-    );
+    let _body = start_body(&hub_state, &body_state, &hub, &[("alpha", &["--chunks", "1"])]);
     say_ready(&hub_state, "alpha", "warm up", Duration::from_secs(10));
 
     let message = holler_proto::Message {
@@ -904,43 +652,18 @@ fn say_parts_file_success() {
         task_id: None,
         role: holler_proto::Role::RoleUser,
         parts: vec![
-            holler_proto::Part {
-                content: Some(holler_proto::Content::Text("hello ".to_string())),
-                filename: None,
-                media_type: None,
-                metadata: None,
-            },
-            holler_proto::Part {
-                content: Some(holler_proto::Content::Text("from a parts file".to_string())),
-                filename: None,
-                media_type: None,
-                metadata: None,
-            },
+            holler_proto::Part { content: Some(holler_proto::Content::Text("hello ".to_string())), filename: None, media_type: None, metadata: None },
+            holler_proto::Part { content: Some(holler_proto::Content::Text("from a parts file".to_string())), filename: None, media_type: None, metadata: None },
         ],
         metadata: None,
         extensions: None,
         reference_task_ids: None,
     };
     let parts_path = hub_state.path().join("parts.json");
-    std::fs::write(
-        &parts_path,
-        serde_json::to_string(&message).expect("serialize Message"),
-    )
-    .expect("write parts-file");
+    std::fs::write(&parts_path, serde_json::to_string(&message).expect("serialize Message")).expect("write parts-file");
 
-    let out = say_full(
-        hub_state.path(),
-        &[
-            "--parts-file",
-            parts_path.to_str().expect("utf8 path"),
-            "alpha",
-        ],
-    );
-    assert!(
-        out.status.success(),
-        "a well-formed --parts-file must run the turn; stderr: {}",
-        stderr_of(&out)
-    );
+    let out = say_full(hub_state.path(), &["--parts-file", parts_path.to_str().expect("utf8 path"), "alpha"]);
+    assert!(out.status.success(), "a well-formed --parts-file must run the turn; stderr: {}", stderr_of(&out));
 }
 
 #[test]
@@ -950,26 +673,15 @@ fn say_timeout_message() {
     let hub = Hub::start(&hub_state);
     // 10 chunks * 200ms/chunk (--slow) ≈ 2s turn — comfortably longer than a
     // 1s `--timeout`, so the CLI's own wait (not the turn) is what expires.
-    let _body = start_body(
-        &hub_state,
-        &body_state,
-        &hub,
-        &[("alpha", &["--slow", "--chunks", "10"])],
-    );
+    let _body = start_body(&hub_state, &body_state, &hub, &[("alpha", &["--slow", "--chunks", "10"])]);
 
     let warm = say_ready(&hub_state, "alpha", "warm up", Duration::from_secs(10));
     assert!(warm.status.success(), "stderr: {}", stderr_of(&warm));
 
-    let out = say_full(
-        hub_state.path(),
-        &["--timeout", "1s", "alpha", "another long turn"],
-    );
+    let out = say_full(hub_state.path(), &["--timeout", "1s", "alpha", "another long turn"]);
     assert_eq!(out.status.code(), Some(1), "stderr: {}", stderr_of(&out));
     let err = stderr_of(&out);
-    assert!(
-        err.contains("no reply from") && err.contains("1s"),
-        "got: {err:?}"
-    );
+    assert!(err.contains("no reply from") && err.contains("1s"), "got: {err:?}");
 }
 
 /// Issue #243: a body that goes silent **without closing the TCP socket**
@@ -993,12 +705,7 @@ fn body_frozen_without_close_is_connection_lost_within_bounded_time() {
     let hub_state = StateDir::new();
     let body_state = StateDir::new();
     let hub = Hub::start_with_env(&hub_state, &[("HOLLER_HUB_LIVENESS_TIMEOUT_MS", "800")]);
-    let mut body = start_body(
-        &hub_state,
-        &body_state,
-        &hub,
-        &[("alpha", &["--chunks", "1"])],
-    );
+    let mut body = start_body(&hub_state, &body_state, &hub, &[("alpha", &["--chunks", "1"])]);
 
     let warm = say_ready(&hub_state, "alpha", "warm up", Duration::from_secs(10));
     assert!(warm.status.success(), "stderr: {}", stderr_of(&warm));
@@ -1013,10 +720,7 @@ fn body_frozen_without_close_is_connection_lost_within_bounded_time() {
     }
 
     let started = Instant::now();
-    let out = say_full(
-        hub_state.path(),
-        &["--timeout", "20s", "alpha", "are you there"],
-    );
+    let out = say_full(hub_state.path(), &["--timeout", "20s", "alpha", "are you there"]);
     let elapsed = started.elapsed();
 
     // Resume then reap the frozen body before any assertion below can panic
@@ -1028,10 +732,7 @@ fn body_frozen_without_close_is_connection_lost_within_bounded_time() {
 
     assert_eq!(out.status.code(), Some(1), "stderr: {}", stderr_of(&out));
     let err = stderr_of(&out);
-    assert!(
-        err.contains("connection_lost") || err.contains("disconnected"),
-        "got: {err:?}"
-    );
+    assert!(err.contains("connection_lost") || err.contains("disconnected"), "got: {err:?}");
     assert!(
         !err.contains("no reply from"),
         "must be the hub's own liveness check, not the CLI's --timeout firing: {err:?}"

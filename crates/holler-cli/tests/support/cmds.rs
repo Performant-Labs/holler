@@ -57,11 +57,7 @@ fn try_status_json_of(state: &StateDir, sub: &[&str]) -> Result<Value, String> {
         .map_err(|e| format!("run status command `holler {cmd}`: {e}"))?;
     if !out.status.success() {
         let stderr = String::from_utf8_lossy(&out.stderr);
-        return Err(format!(
-            "`holler {cmd}` failed: {} ({})",
-            stderr.trim_end(),
-            out.status
-        ));
+        return Err(format!("`holler {cmd}` failed: {} ({})", stderr.trim_end(), out.status));
     }
     serde_json::from_slice(&out.stdout).map_err(|e| {
         let stdout = String::from_utf8_lossy(&out.stdout);

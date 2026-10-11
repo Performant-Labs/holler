@@ -83,9 +83,7 @@ pub struct InterruptOutcome {
 /// or its `HOLLER_HEARTBEAT_INTERVAL_MS` override at all — see the module
 /// doc's "Decisions I made".
 pub fn ack_timeout(last_measured_rtt: Option<Duration>) -> Duration {
-    let scaled = last_measured_rtt
-        .and_then(|d| d.checked_mul(10))
-        .unwrap_or(Duration::ZERO);
+    let scaled = last_measured_rtt.and_then(|d| d.checked_mul(10)).unwrap_or(Duration::ZERO);
     std::cmp::max(Duration::from_secs(2), scaled)
 }
 
@@ -101,8 +99,7 @@ pub async fn interrupt(
     session: &str,
     text: Option<&str>,
 ) -> Result<InterruptOutcome, InterruptError> {
-    let name =
-        holler_proto::RoutableName::parse(session).map_err(|_| InterruptError::UnknownSession)?;
+    let name = holler_proto::RoutableName::parse(session).map_err(|_| InterruptError::UnknownSession)?;
     let (handle, ad) = match registry.resolve_session(&name).await {
         ResolveOutcome::Found(h, ad) => (h, ad),
         ResolveOutcome::Unknown => return Err(InterruptError::UnknownSession),
@@ -117,10 +114,7 @@ pub async fn interrupt(
     // is still `send_prompt`'s; a hold set between this check and the redirect
     // surfaces as `PromptFailed`.)
     if text.is_some() {
-        if let Some(refusal) = registry.holds().would_refuse(
-            &crate::holds::session_key(&handle.hostname, ad.name.as_str()),
-            None,
-        ) {
+        if let Some(refusal) = registry.holds().would_refuse(&crate::holds::session_key(&handle.hostname, ad.name.as_str()), None) {
             return Err(InterruptError::Refused(refusal));
         }
     }
@@ -129,19 +123,11 @@ pub async fn interrupt(
 
     let session_full = format!("{}/{}", handle.hostname, ad.name);
     let Some(text) = text else {
-        return Ok(InterruptOutcome {
-            session: session_full,
-            reply: None,
-        });
+        return Ok(InterruptOutcome { session: session_full, reply: None });
     };
 
-    match talk::send_replace_turn(registry, roster, state, &handle, &ad, text, REPLACE_TIMEOUT)
-        .await
-    {
-        Ok(outcome) => Ok(InterruptOutcome {
-            session: session_full,
-            reply: Some(outcome),
-        }),
+    match talk::send_replace_turn(registry, roster, state, &handle, &ad, text, REPLACE_TIMEOUT).await {
+        Ok(outcome) => Ok(InterruptOutcome { session: session_full, reply: Some(outcome) }),
         Err(e) => Err(InterruptError::PromptFailed(e)),
     }
 }
@@ -157,13 +143,8 @@ async fn apply_cancel(handle: &LiveHandle, session_name: &str) -> Result<(), Int
     let request_id = holler_proto::CorrelationId::mint_hub().as_str().to_string();
     let started = Instant::now();
 
-    match handle
-        .cancel(request_id, session_name.to_string(), timeout)
-        .await
-    {
-        None => Err(InterruptError::AckTimeout {
-            secs: timeout.as_secs(),
-        }),
+    match handle.cancel(request_id, session_name.to_string(), timeout).await {
+        None => Err(InterruptError::AckTimeout { secs: timeout.as_secs() }),
         Some(CancelReply::Refused(e)) => Err(InterruptError::Refused(e)),
         Some(CancelReply::ConnectionLost) => Err(InterruptError::ConnectionLost),
         Some(CancelReply::Applied) => {

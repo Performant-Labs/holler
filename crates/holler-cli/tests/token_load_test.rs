@@ -1,10 +1,4 @@
-#![allow(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::panic,
-    clippy::unreachable,
-    dead_code
-)] // #301
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable, dead_code)] // #301
 //! Load test (issue #301): token mint/redeem at realistic onboarding volume.
 //!
 //! **Bounded/automated**, per the issue's own scope. `token_store_test.rs`'s
@@ -77,16 +71,9 @@ fn concurrent_distinct_token_redemptions_are_isolated_and_uncorrupted() {
             })
             .collect();
 
-        handles
-            .into_iter()
-            .map(|h| h.join().expect("body join thread"))
-            .collect()
+        handles.into_iter().map(|h| h.join().expect("body join thread")).collect()
     });
-    assert_eq!(
-        results.len(),
-        TOKENS,
-        "every one of the {TOKENS} concurrent joins completed"
-    );
+    assert_eq!(results.len(), TOKENS, "every one of the {TOKENS} concurrent joins completed");
 
     let client_ids = assert_every_body_joined_its_own_token(&results);
     assert_store_is_uncorrupted(&hub_state, &results, &client_ids);
@@ -98,17 +85,11 @@ fn concurrent_distinct_token_redemptions_are_isolated_and_uncorrupted() {
 /// possible form of cross-token corruption). Returns the set of client_ids
 /// observed, for [`assert_store_is_uncorrupted`] to cross-check against the
 /// store's own view.
-fn assert_every_body_joined_its_own_token(
-    results: &[(String, String, StateDir)],
-) -> HashSet<String> {
+fn assert_every_body_joined_its_own_token(results: &[(String, String, StateDir)]) -> HashSet<String> {
     let mut client_ids = HashSet::new();
     for (label, token_id, body_state) in results {
         let doc = body_status_json(body_state);
-        assert_eq!(
-            doc["joined"],
-            Value::Bool(true),
-            "{label} must be joined: {doc}"
-        );
+        assert_eq!(doc["joined"], Value::Bool(true), "{label} must be joined: {doc}");
         assert_eq!(
             doc["token_id"].as_str(),
             Some(token_id.as_str()),
@@ -118,20 +99,13 @@ fn assert_every_body_joined_its_own_token(
             .as_str()
             .unwrap_or_else(|| panic!("{label}'s body status is missing client_id: {doc}"))
             .to_string();
-        assert!(
-            client_id.starts_with("cli_"),
-            "{label}'s client_id looks like a real minted id: {client_id}"
-        );
+        assert!(client_id.starts_with("cli_"), "{label}'s client_id looks like a real minted id: {client_id}");
         assert!(
             client_ids.insert(client_id.clone()),
             "{label}'s client_id {client_id} collides with another concurrently-joined body — cross-token corruption"
         );
     }
-    assert_eq!(
-        client_ids.len(),
-        TOKENS,
-        "every one of the {TOKENS} bodies got its own distinct client_id"
-    );
+    assert_eq!(client_ids.len(), TOKENS, "every one of the {TOKENS} bodies got its own distinct client_id");
     client_ids
 }
 
@@ -145,43 +119,20 @@ fn assert_every_body_joined_its_own_token(
 /// (`token_cmd.rs::list` — `token_id, label, state, machine, last_seen,
 /// expires`) that never carries `client_id`/`body_pubkey`, so it can't
 /// answer the cross-token-corruption question this test asks.
-fn assert_store_is_uncorrupted(
-    hub_state: &StateDir,
-    results: &[(String, String, StateDir)],
-    client_ids: &HashSet<String>,
-) {
-    let raw =
-        std::fs::read_to_string(hub_state.hub().join("tokens.json")).expect("read tokens.json");
+fn assert_store_is_uncorrupted(hub_state: &StateDir, results: &[(String, String, StateDir)], client_ids: &HashSet<String>) {
+    let raw = std::fs::read_to_string(hub_state.hub().join("tokens.json")).expect("read tokens.json");
     let doc: Value = serde_json::from_str(&raw).expect("tokens.json is valid JSON");
-    let rows = doc
-        .as_array()
-        .expect("tokens.json is a JSON array of records");
-    assert_eq!(
-        rows.len(),
-        TOKENS,
-        "the store has exactly the {TOKENS} minted rows, none lost/duplicated"
-    );
+    let rows = doc.as_array().expect("tokens.json is a JSON array of records");
+    assert_eq!(rows.len(), TOKENS, "the store has exactly the {TOKENS} minted rows, none lost/duplicated");
 
     let mut store_client_ids = HashSet::new();
     for (label, token_id, _body_state) in results {
         let row = rows
             .iter()
             .find(|r| r["token_id"].as_str() == Some(token_id.as_str()))
-            .unwrap_or_else(|| {
-                panic!(
-                    "token {token_id} ({label}) is missing from the store after redeem: {rows:?}"
-                )
-            });
-        assert_eq!(
-            row["state"].as_str(),
-            Some("bound"),
-            "{label}'s token row must read bound: {row}"
-        );
-        assert_eq!(
-            row["label"].as_str(),
-            Some(label.as_str()),
-            "{label}'s row keeps its own label, not another's: {row}"
-        );
+            .unwrap_or_else(|| panic!("token {token_id} ({label}) is missing from the store after redeem: {rows:?}"));
+        assert_eq!(row["state"].as_str(), Some("bound"), "{label}'s token row must read bound: {row}");
+        assert_eq!(row["label"].as_str(), Some(label.as_str()), "{label}'s row keeps its own label, not another's: {row}");
         let row_client_id = row["client_id"]
             .as_str()
             .unwrap_or_else(|| panic!("{label}'s bound row is missing client_id: {row}"))
@@ -191,11 +142,7 @@ fn assert_store_is_uncorrupted(
             "{label}'s stored client_id {row_client_id} is duplicated across rows in the store — cross-token corruption"
         );
     }
-    assert_eq!(
-        store_client_ids.len(),
-        TOKENS,
-        "every stored row is bound to a distinct client_id — no cross-token corruption"
-    );
+    assert_eq!(store_client_ids.len(), TOKENS, "every stored row is bound to a distinct client_id — no cross-token corruption");
     assert_eq!(
         &store_client_ids, client_ids,
         "the store's client_ids exactly match what each body itself observed — hub and body agree, nothing crossed"

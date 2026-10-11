@@ -1,10 +1,4 @@
-#![allow(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::panic,
-    clippy::unreachable,
-    dead_code
-)] // #149
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable, dead_code)] // #149
 //! Golden wire files (issue #155 §4).
 //!
 //! Every wire shape has a checked-in JSON file under `tests/golden/`:
@@ -44,30 +38,16 @@ fn golden_dir() -> PathBuf {
 /// (re)write the file instead.
 fn assert_golden(rel: &str, actual_json: &str) {
     let path = golden_dir().join(rel);
-    let actual = canonical_str(actual_json)
-        .unwrap_or_else(|e| panic!("{rel}: encoder output is not JSON: {e}"));
+    let actual = canonical_str(actual_json).unwrap_or_else(|e| panic!("{rel}: encoder output is not JSON: {e}"));
     if std::env::var("BLESS").is_ok() {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         let pretty: Value = serde_json::from_str(actual_json).unwrap();
-        std::fs::write(
-            &path,
-            format!("{}\n", serde_json::to_string_pretty(&pretty).unwrap()),
-        )
-        .unwrap();
+        std::fs::write(&path, format!("{}\n", serde_json::to_string_pretty(&pretty).unwrap())).unwrap();
         return;
     }
-    let expected = std::fs::read_to_string(&path).unwrap_or_else(|_| {
-        panic!(
-            "missing golden file {} (run with BLESS=1 to create it, then review the diff)",
-            path.display()
-        )
-    });
-    let expected =
-        canonical_str(&expected).unwrap_or_else(|e| panic!("{rel}: golden file is not JSON: {e}"));
-    assert_eq!(
-        actual, expected,
-        "wire bytes changed for {rel} — if intended, BLESS=1 and review the golden diff"
-    );
+    let expected = std::fs::read_to_string(&path).unwrap_or_else(|_| panic!("missing golden file {} (run with BLESS=1 to create it, then review the diff)", path.display()));
+    let expected = canonical_str(&expected).unwrap_or_else(|e| panic!("{rel}: golden file is not JSON: {e}"));
+    assert_eq!(actual, expected, "wire bytes changed for {rel} — if intended, BLESS=1 and review the golden diff");
 }
 
 // --- one canonical instance of every envelope shape --------------------------
@@ -132,10 +112,7 @@ fn envelope_request_notification_response_match_golden() {
 /// is the spec of record, not a snapshot of the (former) bug.
 #[test]
 fn envelope_error_matches_golden() {
-    let env = envelopes()
-        .into_iter()
-        .find(|e| e.shape_name() == "error")
-        .unwrap();
+    let env = envelopes().into_iter().find(|e| e.shape_name() == "error").unwrap();
     let wire = encode(&env).unwrap();
     assert_golden("envelope/error.json", &wire);
 }
@@ -144,36 +121,16 @@ fn envelope_error_matches_golden() {
 /// the whole error frame.
 #[test]
 fn session_held_error_frames_match_golden() {
-    for (file, reason) in [
-        ("error.session_held.json", Some("deploy freeze")),
-        ("error.session_held_no_reason.json", None),
-    ] {
-        let env = Envelope::Error {
-            id: Some(id()),
-            error: WireError::session_held(reason, "2026-09-08T12:00:00Z"),
-        };
+    for (file, reason) in [("error.session_held.json", Some("deploy freeze")), ("error.session_held_no_reason.json", None)] {
+        let env = Envelope::Error { id: Some(id()), error: WireError::session_held(reason, "2026-09-08T12:00:00Z") };
         assert_golden(&format!("envelope/{file}"), &encode(&env).unwrap());
     }
     // Issue #460: the refusal names its kind, and a grant refusal names why.
-    let kinded = WireError::session_held(Some("held on join"), "2026-09-08T12:00:00Z")
-        .with_hold_kind("default");
-    assert_golden(
-        "envelope/error.session_held_default.json",
-        &encode(&Envelope::Error {
-            id: Some(id()),
-            error: kinded,
-        })
-        .unwrap(),
-    );
+    let kinded = WireError::session_held(Some("held on join"), "2026-09-08T12:00:00Z").with_hold_kind("default");
+    assert_golden("envelope/error.session_held_default.json", &encode(&Envelope::Error { id: Some(id()), error: kinded }).unwrap());
     for reason in ["unknown", "expired", "used", "other_session"] {
-        let env = Envelope::Error {
-            id: Some(id()),
-            error: WireError::invalid_grant(reason),
-        };
-        assert_golden(
-            &format!("envelope/error.invalid_grant_{reason}.json"),
-            &encode(&env).unwrap(),
-        );
+        let env = Envelope::Error { id: Some(id()), error: WireError::invalid_grant(reason) };
+        assert_golden(&format!("envelope/error.invalid_grant_{reason}.json"), &encode(&env).unwrap());
     }
 }
 
@@ -182,34 +139,14 @@ fn session_held_error_frames_match_golden() {
 /// words before it stops.
 #[test]
 fn unauthenticated_error_frames_match_golden() {
-    use holler_proto::noise::{
-        HUB_UNAVAILABLE_REASON, TOKEN_NOT_BOUND_REASON, TOKEN_UNKNOWN_REASON,
-    };
+    use holler_proto::noise::{HUB_UNAVAILABLE_REASON, TOKEN_NOT_BOUND_REASON, TOKEN_UNKNOWN_REASON};
     for (file, message, reason) in [
-        (
-            "hub_unavailable",
-            "authentication failed: the token store could not be read",
-            HUB_UNAVAILABLE_REASON,
-        ),
-        (
-            "token_not_bound",
-            "authentication failed: token tok_x is not bound",
-            TOKEN_NOT_BOUND_REASON,
-        ),
-        (
-            "token_unknown",
-            "authentication failed: no such token tok_x",
-            TOKEN_UNKNOWN_REASON,
-        ),
+        ("hub_unavailable", "authentication failed: the token store could not be read", HUB_UNAVAILABLE_REASON),
+        ("token_not_bound", "authentication failed: token tok_x is not bound", TOKEN_NOT_BOUND_REASON),
+        ("token_unknown", "authentication failed: no such token tok_x", TOKEN_UNKNOWN_REASON),
     ] {
-        let env = Envelope::Error {
-            id: Some(id()),
-            error: WireError::new(Code::Unauthenticated, message, Some(reason)),
-        };
-        assert_golden(
-            &format!("envelope/error.unauthenticated_{file}.json"),
-            &encode(&env).unwrap(),
-        );
+        let env = Envelope::Error { id: Some(id()), error: WireError::new(Code::Unauthenticated, message, Some(reason)) };
+        assert_golden(&format!("envelope/error.unauthenticated_{file}.json"), &encode(&env).unwrap());
     }
 }
 
@@ -225,28 +162,11 @@ fn roster_row_with_hold_fields_matches_golden() {
         #[serde(flatten)]
         hold: SessionHold,
     }
-    let held = Row {
-        name: "io/alpha",
-        state: "idle",
-        hold: SessionHold::held(Some("deploy freeze".into()), "2026-09-08T12:00:00Z".into()),
-    };
-    assert_golden(
-        "docs/RosterRow.held.json",
-        &serde_json::to_string(&held).unwrap(),
-    );
-    let open = Row {
-        name: "io/alpha",
-        state: "idle",
-        hold: SessionHold::default(),
-    };
-    assert_golden(
-        "docs/RosterRow.not_held.json",
-        &serde_json::to_string(&open).unwrap(),
-    );
-    assert_eq!(
-        serde_json::to_value(&open).unwrap(),
-        json!({"name":"io/alpha","state":"idle"})
-    );
+    let held = Row { name: "io/alpha", state: "idle", hold: SessionHold::held(Some("deploy freeze".into()), "2026-09-08T12:00:00Z".into()) };
+    assert_golden("docs/RosterRow.held.json", &serde_json::to_string(&held).unwrap());
+    let open = Row { name: "io/alpha", state: "idle", hold: SessionHold::default() };
+    assert_golden("docs/RosterRow.not_held.json", &serde_json::to_string(&open).unwrap());
+    assert_eq!(serde_json::to_value(&open).unwrap(), json!({"name":"io/alpha","state":"idle"}));
 }
 
 // --- one instance of every docs.rs wire type ----------------------------------
@@ -285,343 +205,87 @@ fn agent_message() -> Message {
 
 fn docs_instances() -> Vec<(&'static str, Value)> {
     vec![
-        (
-            "Hello.body",
-            serde_json::to_value(Hello {
-                protocol: 2,
-                protocol_min: 2,
-                protocol_max: 2,
-                role: HelloRole::Body,
-                hostname: "kiwi".into(),
-                token_id: Some("tok_7f3a".into()),
-                client_id: Some("cli_19".into()),
-                features: vec![
-                    "interrupt".into(),
-                    "presence".into(),
-                    "ping".into(),
-                    "query".into(),
-                ],
-                harnesses: Some(vec!["opencode".into()]),
-                harnesses_known: None,
-                harnesses_confirmed: None,
-                sessions: Some(vec![HelloSession {
-                    name: "alpha".into(),
-                    harness: "opencode".into(),
-                    mode: Mode::Spawn,
-                    harness_session_id: None,
-                }]),
-                hub_pubkey: None,
-            })
-            .unwrap(),
-        ),
-        (
-            "Hello.hub",
-            serde_json::to_value(Hello {
-                protocol: 2,
-                protocol_min: 2,
-                protocol_max: 2,
-                role: HelloRole::Hub,
-                hostname: "hub-host".into(),
-                token_id: None,
-                client_id: None,
-                features: vec![
-                    "interrupt".into(),
-                    "presence".into(),
-                    "ping".into(),
-                    "query".into(),
-                    "roster".into(),
-                    "token".into(),
-                ],
-                harnesses: None,
-                harnesses_known: Some(vec!["opencode".into()]),
-                harnesses_confirmed: Some(vec!["opencode".into()]),
-                sessions: None,
-                hub_pubkey: Some("a".repeat(64)),
-            })
-            .unwrap(),
-        ),
-        (
-            "Status.body",
-            serde_json::to_value(Status {
-                role: HelloRole::Body,
-                protocol: 2,
-                protocol_min: 2,
-                protocol_max: 2,
-                version: "0.1.0".into(),
-                hostname: "kiwi".into(),
-                connected: Some(true),
-                token_id: Some("tok_7f3a".into()),
-                listening: None,
-                features: vec!["ping".into()],
-                harnesses: Some(vec!["opencode".into()]),
-                harnesses_known: None,
-                harnesses_confirmed: None,
-                bodies: None,
-                sessions: None,
-                session_list: Some(vec![StatusSession {
-                    name: "alpha".into(),
-                    harness: "opencode".into(),
-                    state: SessionState::Idle,
-                    endpoint: None,
-                }]),
-            })
-            .unwrap(),
-        ),
-        (
-            "Status.hub",
-            serde_json::to_value(Status {
-                role: HelloRole::Hub,
-                protocol: 2,
-                protocol_min: 2,
-                protocol_max: 2,
-                version: "0.1.0".into(),
-                hostname: "hub-host".into(),
-                connected: None,
-                token_id: None,
-                listening: Some("ws://127.0.0.1:41807".into()),
-                features: vec!["roster".into()],
-                harnesses: None,
-                harnesses_known: Some(vec!["opencode".into()]),
-                harnesses_confirmed: Some(vec![ConfirmedHarness {
-                    id: "opencode".into(),
-                    bodies: vec!["kiwi".into()],
-                }]),
-                bodies: Some(1),
-                sessions: Some(2),
-                session_list: None,
-            })
-            .unwrap(),
-        ),
-        (
-            "Caps",
-            serde_json::to_value(Caps {
-                status: Status {
-                    role: HelloRole::Body,
-                    protocol: 2,
-                    protocol_min: 2,
-                    protocol_max: 2,
-                    version: "0.1.0".into(),
-                    hostname: "kiwi".into(),
-                    connected: Some(false),
-                    token_id: None,
-                    listening: None,
-                    features: vec![],
-                    harnesses: None,
-                    harnesses_known: None,
-                    harnesses_confirmed: None,
-                    bodies: None,
-                    sessions: None,
-                    session_list: None,
-                },
-                caps: BTreeMap::from([(
-                    "opencode".to_string(),
-                    Support {
-                        feature: "opencode".into(),
-                        kind: SupportKind::Harness,
-                        ok: true,
-                        how: Some("opencode acp".into()),
-                        reason: None,
-                    },
-                )]),
-            })
-            .unwrap(),
-        ),
-        (
-            "SupportParams",
-            serde_json::to_value(SupportParams {
-                feature: "opencode".into(),
-            })
-            .unwrap(),
-        ),
-        (
-            "Support.ok",
-            serde_json::to_value(Support {
-                feature: "opencode".into(),
-                kind: SupportKind::Harness,
-                ok: true,
-                how: Some("opencode acp".into()),
-                reason: None,
-            })
-            .unwrap(),
-        ),
-        (
-            "Support.no",
-            serde_json::to_value(Support {
-                feature: "claude".into(),
-                kind: SupportKind::Harness,
-                ok: false,
-                how: None,
-                reason: Some("no adapter".into()),
-            })
-            .unwrap(),
-        ),
-        (
-            "ProtocolParams",
-            serde_json::to_value(ProtocolParams { version: Some(2) }).unwrap(),
-        ),
-        (
-            "ProtocolAnswer",
-            serde_json::to_value(ProtocolAnswer {
-                session: 2,
-                min: 2,
-                max: 2,
-                asked: Some(2),
-                ok: Some(true),
-            })
-            .unwrap(),
-        ),
-        (
-            "Presence",
-            serde_json::to_value(Presence {
-                hostname: "kiwi".into(),
-                sessions: vec![SessionAd {
-                    name: "alpha".into(),
-                    harness: "opencode".into(),
-                    state: SessionState::Working,
-                    mode: Mode::Attach,
-                    harness_session_id: Some("ses_1".into()),
-                    turn_started_at: Some("2026-09-08T12:00:00Z".into()),
-                    last_update_at: Some("2026-09-08T12:00:03Z".into()),
-                    pending: None,
-                    turn_id: Some("h-01HTESTGOLDEN000000000000".into()),
-                    last_turn: Some(LastTurn {
-                        turn_id: "h-01HTESTGOLDENPREV00000000".into(),
-                        state: SessionState::Completed,
-                        stop_reason: "end_turn".into(),
-                        ended_at: "2026-09-08T11:59:50Z".into(),
-                    }),
-                }],
-            })
-            .unwrap(),
-        ),
-        (
-            "Prompt",
-            serde_json::to_value(Prompt {
-                session: "io/alpha".into(),
-                message: user_message(),
-                meta: meta(),
-                queue: false,
-                replace: false,
-            })
-            .unwrap(),
-        ),
-        (
-            "PromptResult",
-            serde_json::to_value(PromptResult {
-                stop_reason: "end_turn".into(),
-                state: "completed".into(),
-                message: agent_message(),
-            })
-            .unwrap(),
-        ),
-        (
-            "Update",
-            serde_json::to_value(Update {
-                session: "io/alpha".into(),
-                prompt_id: id(),
-                seq: 1,
-                parts: vec![Part::text_part("AL")],
-            })
-            .unwrap(),
-        ),
-        (
-            "Cancel",
-            serde_json::to_value(Cancel {
-                session: "io/alpha".into(),
-            })
-            .unwrap(),
-        ),
-        (
-            "CancelResult",
-            serde_json::to_value(CancelResult { applied: true }).unwrap(),
-        ),
-        (
-            "Join",
-            serde_json::to_value(Join {
-                secret: "hlr_join_x".into(),
-                hostname: "kiwi".into(),
-                body_pubkey: "b".repeat(64),
-                body_x25519_pubkey: "e".repeat(64),
-            })
-            .unwrap(),
-        ),
-        (
-            "JoinResult",
-            serde_json::to_value(JoinResult {
-                client_id: "cli_19".into(),
-            })
-            .unwrap(),
-        ),
-        (
-            "Authenticate",
-            serde_json::to_value(Authenticate {
-                protocol: 3,
-                token_id: "tok_7f3a".into(),
-                hostname: "kiwi".into(),
-                advertised_url: "wss://hub.example.ts.net".into(),
-                message: "1".repeat(96),
-            })
-            .unwrap(),
-        ),
-        (
-            "AuthChallenge",
-            serde_json::to_value(AuthChallenge {
-                message: "2".repeat(96),
-            })
-            .unwrap(),
-        ),
-        (
-            "Prove",
-            serde_json::to_value(Prove {
-                token_id: "tok_7f3a".into(),
-                message: "3".repeat(128),
-            })
-            .unwrap(),
-        ),
+        ("Hello.body", serde_json::to_value(Hello {
+            protocol: 2, protocol_min: 2, protocol_max: 2, role: HelloRole::Body, hostname: "kiwi".into(),
+            token_id: Some("tok_7f3a".into()), client_id: Some("cli_19".into()),
+            features: vec!["interrupt".into(), "presence".into(), "ping".into(), "query".into()],
+            harnesses: Some(vec!["opencode".into()]), harnesses_known: None, harnesses_confirmed: None,
+            sessions: Some(vec![HelloSession { name: "alpha".into(), harness: "opencode".into(), mode: Mode::Spawn, harness_session_id: None }]),
+            hub_pubkey: None,
+        }).unwrap()),
+        ("Hello.hub", serde_json::to_value(Hello {
+            protocol: 2, protocol_min: 2, protocol_max: 2, role: HelloRole::Hub, hostname: "hub-host".into(),
+            token_id: None, client_id: None,
+            features: vec!["interrupt".into(), "presence".into(), "ping".into(), "query".into(), "roster".into(), "token".into()],
+            harnesses: None, harnesses_known: Some(vec!["opencode".into()]), harnesses_confirmed: Some(vec!["opencode".into()]), sessions: None,
+            hub_pubkey: Some("a".repeat(64)),
+        }).unwrap()),
+        ("Status.body", serde_json::to_value(Status {
+            role: HelloRole::Body, protocol: 2, protocol_min: 2, protocol_max: 2, version: "0.1.0".into(), hostname: "kiwi".into(),
+            connected: Some(true), token_id: Some("tok_7f3a".into()), listening: None,
+            features: vec!["ping".into()], harnesses: Some(vec!["opencode".into()]), harnesses_known: None, harnesses_confirmed: None,
+            bodies: None, sessions: None,
+            session_list: Some(vec![StatusSession {
+                name: "alpha".into(),
+                harness: "opencode".into(),
+                state: SessionState::Idle,
+                endpoint: None,
+            }]),
+        }).unwrap()),
+        ("Status.hub", serde_json::to_value(Status {
+            role: HelloRole::Hub, protocol: 2, protocol_min: 2, protocol_max: 2, version: "0.1.0".into(), hostname: "hub-host".into(),
+            connected: None, token_id: None, listening: Some("ws://127.0.0.1:41807".into()),
+            features: vec!["roster".into()], harnesses: None, harnesses_known: Some(vec!["opencode".into()]),
+            harnesses_confirmed: Some(vec![ConfirmedHarness { id: "opencode".into(), bodies: vec!["kiwi".into()] }]),
+            bodies: Some(1), sessions: Some(2), session_list: None,
+        }).unwrap()),
+        ("Caps", serde_json::to_value(Caps {
+            status: Status {
+                role: HelloRole::Body, protocol: 2, protocol_min: 2, protocol_max: 2, version: "0.1.0".into(), hostname: "kiwi".into(),
+                connected: Some(false), token_id: None, listening: None, features: vec![], harnesses: None,
+                harnesses_known: None, harnesses_confirmed: None, bodies: None, sessions: None, session_list: None,
+            },
+            caps: BTreeMap::from([("opencode".to_string(), Support { feature: "opencode".into(), kind: SupportKind::Harness, ok: true, how: Some("opencode acp".into()), reason: None })]),
+        }).unwrap()),
+        ("SupportParams", serde_json::to_value(SupportParams { feature: "opencode".into() }).unwrap()),
+        ("Support.ok", serde_json::to_value(Support { feature: "opencode".into(), kind: SupportKind::Harness, ok: true, how: Some("opencode acp".into()), reason: None }).unwrap()),
+        ("Support.no", serde_json::to_value(Support { feature: "claude".into(), kind: SupportKind::Harness, ok: false, how: None, reason: Some("no adapter".into()) }).unwrap()),
+        ("ProtocolParams", serde_json::to_value(ProtocolParams { version: Some(2) }).unwrap()),
+        ("ProtocolAnswer", serde_json::to_value(ProtocolAnswer { session: 2, min: 2, max: 2, asked: Some(2), ok: Some(true) }).unwrap()),
+        ("Presence", serde_json::to_value(Presence {
+            hostname: "kiwi".into(),
+            sessions: vec![SessionAd {
+                name: "alpha".into(), harness: "opencode".into(), state: SessionState::Working, mode: Mode::Attach,
+                harness_session_id: Some("ses_1".into()),
+                turn_started_at: Some("2026-09-08T12:00:00Z".into()),
+                last_update_at: Some("2026-09-08T12:00:03Z".into()),
+                pending: None,
+                turn_id: Some("h-01HTESTGOLDEN000000000000".into()),
+                last_turn: Some(LastTurn {
+                    turn_id: "h-01HTESTGOLDENPREV00000000".into(),
+                    state: SessionState::Completed,
+                    stop_reason: "end_turn".into(),
+                    ended_at: "2026-09-08T11:59:50Z".into(),
+                }),
+            }],
+        }).unwrap()),
+        ("Prompt", serde_json::to_value(Prompt { session: "io/alpha".into(), message: user_message(), meta: meta(), queue: false, replace: false }).unwrap()),
+        ("PromptResult", serde_json::to_value(PromptResult { stop_reason: "end_turn".into(), state: "completed".into(), message: agent_message() }).unwrap()),
+        ("Update", serde_json::to_value(Update { session: "io/alpha".into(), prompt_id: id(), seq: 1, parts: vec![Part::text_part("AL")] }).unwrap()),
+        ("Cancel", serde_json::to_value(Cancel { session: "io/alpha".into() }).unwrap()),
+        ("CancelResult", serde_json::to_value(CancelResult { applied: true }).unwrap()),
+        ("Join", serde_json::to_value(Join { secret: "hlr_join_x".into(), hostname: "kiwi".into(), body_pubkey: "b".repeat(64), body_x25519_pubkey: "e".repeat(64) }).unwrap()),
+        ("JoinResult", serde_json::to_value(JoinResult { client_id: "cli_19".into() }).unwrap()),
+        ("Authenticate", serde_json::to_value(Authenticate { protocol: 3, token_id: "tok_7f3a".into(), hostname: "kiwi".into(), advertised_url: "wss://hub.example.ts.net".into(), message: "1".repeat(96) }).unwrap()),
+        ("AuthChallenge", serde_json::to_value(AuthChallenge { message: "2".repeat(96) }).unwrap()),
+        ("Prove", serde_json::to_value(Prove { token_id: "tok_7f3a".into(), message: "3".repeat(128) }).unwrap()),
         ("AuthOk", serde_json::to_value(AuthOk { ok: true }).unwrap()),
-        (
-            "SessionHold.held",
-            serde_json::to_value(SessionHold::held(
-                Some("deploy freeze".into()),
-                "2026-09-08T12:00:00Z".into(),
-            ))
-            .unwrap(),
-        ),
-        (
-            "SessionHold.held_no_reason",
-            serde_json::to_value(SessionHold::held(None, "2026-09-08T12:00:00Z".into())).unwrap(),
-        ),
-        (
-            "SessionHold.held_default",
-            serde_json::to_value(
-                SessionHold::held(Some("held on join".into()), "2026-09-08T12:00:00Z".into())
-                    .of_kind("default"),
-            )
-            .unwrap(),
-        ),
-        (
-            "SessionHold.held_operator_over_default",
-            serde_json::to_value({
-                let mut h =
-                    SessionHold::held(Some("deploy freeze".into()), "2026-09-08T12:00:00Z".into())
-                        .of_kind("operator");
-                h.hold_default = true;
-                h
-            })
-            .unwrap(),
-        ),
-        (
-            "SessionHold.not_held",
-            serde_json::to_value(SessionHold::default()).unwrap(),
-        ),
-        (
-            "PingAck",
-            serde_json::to_value(PingAck {
-                hostname: "kiwi".into(),
-                ts: 1_757_000_000_000,
-            })
-            .unwrap(),
-        ),
+        ("SessionHold.held", serde_json::to_value(SessionHold::held(Some("deploy freeze".into()), "2026-09-08T12:00:00Z".into())).unwrap()),
+        ("SessionHold.held_no_reason", serde_json::to_value(SessionHold::held(None, "2026-09-08T12:00:00Z".into())).unwrap()),
+        ("SessionHold.held_default", serde_json::to_value(SessionHold::held(Some("held on join".into()), "2026-09-08T12:00:00Z".into()).of_kind("default")).unwrap()),
+        ("SessionHold.held_operator_over_default", serde_json::to_value({ let mut h = SessionHold::held(Some("deploy freeze".into()), "2026-09-08T12:00:00Z".into()).of_kind("operator"); h.hold_default = true; h }).unwrap()),
+        ("SessionHold.not_held", serde_json::to_value(SessionHold::default()).unwrap()),
+        ("PingAck", serde_json::to_value(PingAck { hostname: "kiwi".into(), ts: 1_757_000_000_000 }).unwrap()),
     ]
 }
 

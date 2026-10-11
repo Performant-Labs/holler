@@ -120,17 +120,11 @@ pub fn run(state_root: &Path, registry: SessionRegistry) -> RunExit {
             };
         }
     };
-    let rt = match tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()
-    {
+    let rt = match tokio::runtime::Builder::new_multi_thread().enable_all().build() {
         Ok(rt) => rt,
         Err(e) => return RunExit::Io(format!("runtime: {e}")),
     };
-    let configs: Vec<SessionConfig> = registry
-        .iter()
-        .map(|(_, entry)| entry.config.clone())
-        .collect();
+    let configs: Vec<SessionConfig> = registry.iter().map(|(_, entry)| entry.config.clone()).collect();
     let exit = rt.block_on(async {
         // Started once, for this process's whole live lifetime: every
         // reconnect attempt below (`connect_and_serve`) shares the same
@@ -194,16 +188,9 @@ async fn run_loop(
     let mut attempt: u32 = 0;
     loop {
         // `attempt` is `&mut`: reset to 0 on a live connect (issue #299 — grows only across consecutive failures).
-        let outcome = connect_and_serve(
-            state_root,
-            identity,
-            session_manager,
-            configs,
-            &mut attempt,
-            &mut sigint,
-            &mut sigterm,
-        )
-        .await;
+        let outcome =
+            connect_and_serve(state_root, identity, session_manager, configs, &mut attempt, &mut sigint, &mut sigterm)
+                .await;
         match outcome {
             Attempt::Ended(exit) => return exit,
             Attempt::AuthFailed(msg) => {
@@ -235,10 +222,7 @@ async fn run_loop(
 /// Resolve as soon as either signal fires. Folding both into one future keeps
 /// callers' `tokio::select!` blocks to one arm instead of two, which is what
 /// keeps their cognitive complexity under the workspace threshold.
-async fn any_signal(
-    sigint: &mut tokio::signal::unix::Signal,
-    sigterm: &mut tokio::signal::unix::Signal,
-) {
+async fn any_signal(sigint: &mut tokio::signal::unix::Signal, sigterm: &mut tokio::signal::unix::Signal) {
     tokio::select! {
         _ = sigint.recv() => {}
         _ = sigterm.recv() => {}
@@ -371,15 +355,7 @@ async fn connect_and_serve(
         Ok(sas) => sas,
         Err(reason) => return reason,
     };
-    if let Err(reason) = handshake::hello_exchange(
-        &mut sink,
-        &mut stream,
-        identity,
-        configs,
-        holler_proto::HelloRole::Body,
-    )
-    .await
-    {
+    if let Err(reason) = handshake::hello_exchange(&mut sink, &mut stream, identity, configs, holler_proto::HelloRole::Body).await {
         return reason;
     }
 
@@ -390,13 +366,7 @@ async fn connect_and_serve(
     // the handshake just completed — logged (never sent) alongside
     // `conn_connected` so the operator can compare it by eye against what
     // the hub's own console shows for this same connection.
-    info(
-        "conn_connected",
-        vec![
-            ("server", identity.server_url.clone()),
-            ("sas", sas.clone()),
-        ],
-    );
+    info("conn_connected", vec![("server", identity.server_url.clone()), ("sas", sas.clone())]);
 
     // Issue #351 design decision: an unconfirmed pairing is a **soft
     // warning**, never a hard refusal, here. This loop is the same
@@ -419,8 +389,7 @@ async fn connect_and_serve(
                 ("sas", sas),
                 (
                     "hint",
-                    "run `holler body confirm` to verify this SAS and mark the pairing trusted"
-                        .to_string(),
+                    "run `holler body confirm` to verify this SAS and mark the pairing trusted".to_string(),
                 ),
             ],
         );
@@ -435,14 +404,7 @@ async fn connect_and_serve(
         },
     );
 
-    let mut conn = LiveConnection::new(
-        state_root,
-        &mut sink,
-        &mut stream,
-        identity,
-        session_manager,
-        configs,
-    );
+    let mut conn = LiveConnection::new(state_root, &mut sink, &mut stream, identity, session_manager, configs);
     conn.run(sigint, sigterm).await
 }
 
@@ -452,9 +414,7 @@ async fn timeout_next_envelope<St>(stream: &mut St) -> Option<Envelope>
 where
     St: Stream<Item = Result<Message, WsError>> + Unpin,
 {
-    tokio::time::timeout(Duration::from_secs(10), next_envelope(stream))
-        .await
-        .ok()?
+    tokio::time::timeout(Duration::from_secs(10), next_envelope(stream)).await.ok()?
 }
 
 /// Issue #207: this is duplicated verbatim in `holler-hub`'s
@@ -476,9 +436,7 @@ where
     loop {
         match stream.next().await {
             Some(Ok(Message::Text(t))) => return holler_proto::decode(&t).ok(),
-            Some(Ok(Message::Ping(_)))
-            | Some(Ok(Message::Pong(_)))
-            | Some(Ok(Message::Frame(_))) => continue,
+            Some(Ok(Message::Ping(_))) | Some(Ok(Message::Pong(_))) | Some(Ok(Message::Frame(_))) => continue,
             _ => return None,
         }
     }
@@ -619,10 +577,7 @@ where
     ) -> Attempt {
         self.heartbeat.tick().await; // the first tick fires immediately; consume it.
 
-        if send_presence(self.sink, self.identity, self.session_manager)
-            .await
-            .is_err()
-        {
+        if send_presence(self.sink, self.identity, self.session_manager).await.is_err() {
             return Attempt::Dropped("send initial presence: socket closed".to_string());
         }
 
@@ -684,9 +639,9 @@ where
                 let _ = mark_disconnected(self.state_root);
                 Some(Attempt::Ended(RunExit::Ok))
             }
-            Beat::LivenessExpired => Some(Attempt::Dropped(
-                "no frame from the hub within the liveness window".to_string(),
-            )),
+            Beat::LivenessExpired => {
+                Some(Attempt::Dropped("no frame from the hub within the liveness window".to_string()))
+            }
             Beat::Frame(FrameOutcome::Continue) => {
                 self.last_frame_at = tokio::time::Instant::now();
                 None
@@ -700,13 +655,11 @@ where
     async fn handle_frame(&mut self, frame: Option<Result<Message, WsError>>) -> FrameOutcome {
         match frame {
             Some(Ok(Message::Text(t))) => self.handle_text(&t).await,
-            Some(Ok(Message::Ping(_)))
-            | Some(Ok(Message::Pong(_)))
-            | Some(Ok(Message::Frame(_))) => FrameOutcome::Continue,
-            Some(Ok(Message::Binary(_))) => FrameOutcome::Continue,
-            Some(Ok(Message::Close(_))) => {
-                FrameOutcome::Dropped("hub closed the socket".to_string())
+            Some(Ok(Message::Ping(_))) | Some(Ok(Message::Pong(_))) | Some(Ok(Message::Frame(_))) => {
+                FrameOutcome::Continue
             }
+            Some(Ok(Message::Binary(_))) => FrameOutcome::Continue,
+            Some(Ok(Message::Close(_))) => FrameOutcome::Dropped("hub closed the socket".to_string()),
             Some(Err(e)) => FrameOutcome::Dropped(format!("socket error: {e}")),
             None => FrameOutcome::Dropped("socket EOF".to_string()),
         }
@@ -739,41 +692,23 @@ where
         );
         match env {
             Envelope::Request { id, method, .. } if method == "circuit/ping" => {
-                let ack = PingAck {
-                    hostname: self.identity.hostname.clone(),
-                    ts: holler_proto::now_millis(),
-                };
-                let Ok(cid) = CorrelationId::parse(&id) else {
-                    return FrameOutcome::Continue;
-                };
-                let resp =
-                    Envelope::response(&cid, Some(serde_json::to_value(ack).unwrap_or_default()));
+                let ack = PingAck { hostname: self.identity.hostname.clone(), ts: holler_proto::now_millis() };
+                let Ok(cid) = CorrelationId::parse(&id) else { return FrameOutcome::Continue };
+                let resp = Envelope::response(&cid, Some(serde_json::to_value(ack).unwrap_or_default()));
                 match send(self.sink, &resp).await {
                     Ok(()) => FrameOutcome::Continue,
                     Err(()) => FrameOutcome::Dropped("send ping ack: socket closed".to_string()),
                 }
             }
             Envelope::Request { id, method, params } if method.starts_with("query/") => {
-                crate::dispatch::handle_query(
-                    self.sink,
-                    &id,
-                    &method,
-                    params,
-                    self.identity,
-                    self.state_root,
-                    self.configs,
-                )
-                .await
+                crate::dispatch::handle_query(self.sink, &id, &method, params, self.identity, self.state_root, self.configs).await
             }
             Envelope::Notification { method, .. } if method == "circuit/superseded" => {
                 warn("conn_superseded", vec![]);
                 FrameOutcome::Superseded
             }
             Envelope::Request { id, method, params }
-                if matches!(
-                    method.as_str(),
-                    "session/prompt" | "session/cancel" | "session/answer"
-                ) =>
+                if matches!(method.as_str(), "session/prompt" | "session/cancel" | "session/answer") =>
             {
                 // Issue #191's priority path: `session/cancel`'s own
                 // response frame goes out via `priority_tx`, not the normal
@@ -792,20 +727,12 @@ where
                 .await
             }
             Envelope::Request { id, .. } => {
-                let Ok(cid) = CorrelationId::parse(&id) else {
-                    return FrameOutcome::Continue;
-                };
-                let err = holler_proto::WireError::new(
-                    Code::MethodNotFound,
-                    "not implemented on this body yet",
-                    None,
-                );
+                let Ok(cid) = CorrelationId::parse(&id) else { return FrameOutcome::Continue };
+                let err = holler_proto::WireError::new(Code::MethodNotFound, "not implemented on this body yet", None);
                 let _ = send(self.sink, &Envelope::error_frame(&cid, &err)).await;
                 FrameOutcome::Continue
             }
-            Envelope::Notification { .. } | Envelope::Response { .. } | Envelope::Error { .. } => {
-                FrameOutcome::Continue
-            }
+            Envelope::Notification { .. } | Envelope::Response { .. } | Envelope::Error { .. } => FrameOutcome::Continue,
         }
     }
 }
@@ -823,10 +750,7 @@ async fn send_presence_or_drop<Snk>(
 where
     Snk: Sink<Message, Error = WsError> + Unpin,
 {
-    if send_presence(sink, identity, session_manager)
-        .await
-        .is_err()
-    {
+    if send_presence(sink, identity, session_manager).await.is_err() {
         return Some(Attempt::Dropped("send presence: socket closed".to_string()));
     }
     // A real WS-level Ping alongside the presence Text frame (see
@@ -846,14 +770,8 @@ where
 /// state regardless of how many discrete changes a slow subscriber missed.
 /// `Closed` cannot happen while `session_manager` (held by this same call
 /// chain, in `connection::run`) outlives [`LiveConnection`].
-fn presence_worth_resending<T>(
-    changed: &Result<T, tokio::sync::broadcast::error::RecvError>,
-) -> bool {
-    changed.is_ok()
-        || matches!(
-            changed,
-            Err(tokio::sync::broadcast::error::RecvError::Lagged(_))
-        )
+fn presence_worth_resending<T>(changed: &Result<T, tokio::sync::broadcast::error::RecvError>) -> bool {
+    changed.is_ok() || matches!(changed, Err(tokio::sync::broadcast::error::RecvError::Lagged(_)))
 }
 
 /// The `presence_changed` arm's own [`Beat`] — split out of the `select!` in
@@ -923,9 +841,7 @@ where
     // `.expect()`-ing a channel invariant.
     let msg = outbound?;
     if sink.send(msg).await.is_err() || sink.flush().await.is_err() {
-        Some(Attempt::Dropped(
-            "send outbound frame: socket closed".to_string(),
-        ))
+        Some(Attempt::Dropped("send outbound frame: socket closed".to_string()))
     } else {
         None
     }
@@ -943,11 +859,7 @@ where
     let _ = sink.flush().await;
 }
 
-async fn send_presence<Snk>(
-    sink: &mut Snk,
-    identity: &BodyIdentity,
-    session_manager: &SessionManager,
-) -> Result<(), ()>
+async fn send_presence<Snk>(sink: &mut Snk, identity: &BodyIdentity, session_manager: &SessionManager) -> Result<(), ()>
 where
     Snk: Sink<Message, Error = WsError> + Unpin,
 {
@@ -956,9 +868,6 @@ where
     // #182 shipped before any session ever ran a turn.
     let presence: Presence = session_manager.presence_doc(identity.hostname.clone());
     let params = serde_json::to_value(presence).map_err(|_| ())?;
-    send(
-        sink,
-        &Envelope::notification("session/presence", Some(params)),
-    )
-    .await
+    send(sink, &Envelope::notification("session/presence", Some(params))).await
 }
+

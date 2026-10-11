@@ -555,11 +555,7 @@ fn a_bad_workspace_is_refused_naming_the_key() {
     for raw in bad {
         let out = validate(&with_workspace(raw));
         assert_eq!(out.status.code(), Some(1), "{raw}");
-        assert!(
-            stderr(&out).contains("workspace"),
-            "{raw}: {}",
-            stderr(&out)
-        );
+        assert!(stderr(&out).contains("workspace"), "{raw}: {}", stderr(&out));
     }
 }
 

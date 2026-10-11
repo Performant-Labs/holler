@@ -29,9 +29,7 @@ impl Driver {
     pub(super) async fn spawn_or_attach(config: &SessionConfig) -> Result<Self, DriverError> {
         match config.mode {
             SessionMode::Spawn => AcpDriver::spawn(config).await.map(Driver::Acp),
-            SessionMode::Attach => HttpAttachDriver::attach(config)
-                .await
-                .map(Driver::HttpAttach),
+            SessionMode::Attach => HttpAttachDriver::attach(config).await.map(Driver::HttpAttach),
         }
     }
 
