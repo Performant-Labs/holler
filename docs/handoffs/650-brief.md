@@ -10,17 +10,17 @@ Read the current fleet's per-pane files and produce registry records, a profile 
 
 ### The input (this story fixes these shapes; the repository holds no sample of the real fleet's files)
 
-- **`<state-root>`** is the directory that holds one directory per pane: today `$HOME/.holler-oc/`, whose per-pane directory is `hj-<cCrR>` (E10: `state="$HOME/.holler-oc/$session"`). **The pane's name is the directory's name** (`hj-c1r2`), parsed with `PaneName::parse`. A subdirectory that holds none of the four pane files below (for example `opencode-mo/`) is not a pane directory: it is an information finding `ignored-entry` and nothing else. A subdirectory that holds a pane file but whose name does not parse is a problem finding `source-unreadable`.
+- **`<state-root>`** is the directory that holds one directory per pane: today `$HOME/.holler-oc/`, whose per-pane directory is `hj-<cCrR>` (E10: `state="$HOME/.holler-oc/$session"`). **The pane's name is the directory's name** (`hj-c1r2`), parsed with `PaneName::parse`. That name is the record's key (`Pane.name`, E2) and nothing more: it is neither the pane's identity in Herdr nor its position, which come from the label join (item 1 of "The join, per pane" below; ADR-0021 section 10, E9). A subdirectory that holds none of the four pane files below (for example `opencode-mo/`) is not a pane directory: it is an information finding `ignored-entry` and nothing else. A subdirectory that holds a pane file but whose name does not parse is a problem finding `source-unreadable`.
 - **Per-pane files**, each under the pane's directory:
   - `pane.env`: lines of the form `[export ]NAME=value` (E10, the pattern `^(export[ \t]+)?OC_[A-Z_]+=`). The reader takes the **value** of exactly five names: `OC_MODEL` (`PROVIDER/MODEL_ID`, split at the first `/`, into `ModelSpec.provider` and `model_id`), `OC_EFFORT` (`ModelSpec.effort`), `OC_CONTEXT_SOFT` and `OC_CONTEXT_HARD` (unsigned integers, `ContextCeilings.soft` and `hard`), and `OC_DEFAULT_AGENT` (optional, `Pane.opencode_agent` through `AgentKey::parse`). **Every other variable is kept by NAME only** through `EnvVarName::parse`, in file order and de-duplicated; its value is never read into any value, log line or finding. A line that is blank or starts with `#` is skipped. `OC_MODEL`, `OC_EFFORT`, `OC_CONTEXT_SOFT` and `OC_CONTEXT_HARD` are required (E2: `ModelSpec` and `ContextCeilings` have no empty form).
   - `last-session`: the whole content, trimmed, is one session id (E10). Absent or empty means "no session recorded".
-  - `sessions.toml`: the **`holler-body` attach-config grammar** (confirmed in code, E11: `[[session]]` rows with `harness`, `mode = "attach"`, `endpoint`, `session_id`; the pane-restart script greps `session_id = "<id>"` in it, E10). It is read through `holler_body::config::load`, never through a new parser. Every row's `session_id` is a recorded session; a row whose `harness` is not `opencode` marks a pane that is not an OpenCode pane.
+  - `sessions.toml`: the **`holler-body` attach-config grammar** (confirmed in code, E11: `[[session]]` rows with `harness`, `mode = "attach"`, `endpoint`, `session_id`; the pane-restart script greps `session_id = "<id>"` in it, E10). It is read through `holler_body::config::load`, never through a new parser. Every row's `session_id` is a recorded session; a row whose `harness` is not `opencode` marks a pane that is not an OpenCode pane. `load` refuses an `attach` row that has no `session_id` (or no `endpoint`), so a file holding one is unparsable: `source-unreadable` (E24, acceptance 7). `session_id` is optional only on a `spawn` row (E24); a row without one adds nothing to `S` (item 4 of the join).
   - `owned-sessions`: one session id per line; blank lines and lines starting with `#` are skipped.
 - **The launcher's table** is the file `--launcher FILE`, default `<state-root>/launcher.toml`. Shape (the story's contract; ADR-0021 section 13 names only what it maps to, E9): one table per pane, keyed by the pane's name, with `port` (integer 1 to 65535), `cwd` (an absolute path string) and `command` (an array of strings, an argv). The port is **never derived from the name** (the pane-restart script derives it as `47000 + col * 10 + row`; that is name-as-data and the import does not copy it). The real fleet's own table is read for its shape in the cutover (#654) dry run before anything is written; if its shape differs, the dry run reports `source-unreadable` and the fix is a one-file export, not a code change here.
 
 ### What the engine observes (reads only)
 
-Only through `Ports` (E3, E12, E17): `herdr.snapshot()` once, `herdr.version()` once, then per pane `host.ps(name)`, `harness.health(port)` and, only when the health call answered healthy, `harness.list_sessions(port)`. **Nothing else is called**: not `ensure_pane`, `ensure_session`, `run`, `stop_owned`, `serve`, `create_session`, `attach_tui`, `select_session`, `abort`, `send_text`, `send_keys`, `close`, `shown_session`. A `herdr.snapshot()` or `herdr.version()` error ends the verb with that error (its class, its exit code), because nothing can be joined without them; `herdr-version-unsupported` is such an error.
+Only through `Ports` (E3, E12, E17, E23): `herdr.snapshot()` once, `herdr.version()` once, then per pane `host.ps(name)`, `harness.health(port)` and, only when the health call answered healthy (`Ok(true)`: `health` returns `Result<bool, PaneError>`, E23), `harness.list_sessions(port)`. Every method named here exists on the frozen ports as they are (E3, E23). **Nothing else is called**: not `ensure_pane`, `ensure_session`, `run`, `stop_owned`, `serve`, `create_session`, `attach_tui`, `select_session`, `abort`, `send_text`, `send_keys`, `close`, `shown_session`. A `herdr.snapshot()` or `herdr.version()` error ends the verb with that error (its class, its exit code), because nothing can be joined without them; `herdr-version-unsupported` is such an error.
 
 ### The join, per pane
 
@@ -41,14 +41,15 @@ Only through `Ports` (E3, E12, E17): `herdr.snapshot()` once, `herdr.version()` 
 
 ### The record the import builds (once, in the plan; the real run writes exactly these)
 
-`name`; `generation` 0; `herdr` (item 1); `host { name: tx_launch::HOST_NAME, tmux: name, cwd: launcher cwd, herdr_api_version: Some(herdr.version()) }`; `harness { kind: opencode, port: launcher port, pid: None, health: healthy only when this run's `health` answered healthy, otherwise unknown }`; `session_of_record` (item 4); `role` (item 5); `hold: none`; `last_observed { shown: None, driven: None, at: 0 }` (0 means never observed; the first doctor pass fills it; nothing in it is read from a file); `profile: fleet`; `model`; `opencode_agent`; `env` (names); `context`; `command`; `probe` empty (E2, E12). The profile is `profile_from_panes(fleet, &records)` (E4), so `holler profile show fleet` reports every pane `matches` by construction.
+`name`; `generation` 0; `herdr` (item 1); `host { name: tx_launch::HOST_NAME, tmux: name, cwd: launcher cwd, herdr_api_version: Some(herdr.version()) }`; `harness { kind: opencode, port: launcher port, pid: None, health: healthy only when this run's `health` answered healthy, otherwise unknown }`; `session_of_record` (item 4); `role` (item 5); `hold: none`; `last_observed { shown: None, driven: None, at: 0 }` (0 means never observed; the first doctor pass fills it; nothing in it is read from a file); `profile: fleet`; `model`; `opencode_agent`; `env` (names); `context`; `command`; `probe` empty (E2, E12). The profile is `profile_from_panes(fleet, &records)` (E4), so `holler profile show fleet` reports every pane `matches` by construction: `profile show` compares each spec with its member's record (a member is a record whose `profile` is `fleet`, `is_member`) through `diff_spec`, which compares the spec with `spec_from_pane(record)`, so a spec built from a record never differs from it (`diff_spec(&spec_from_pane(p), p)` is always empty, E25).
 
 ### The real run's writes (the contract of `profile create --from-current`, E5)
 
 1. **Checks first**, before any write: nothing is blocked (below), and `fleet` does not exist unless every candidate pane is already imported.
 2. **Write the profile first** through `crate::profile::create::insert_profile` (the one place the create race becomes `profile-exists`, E5), with the actor constant `holler pane import`.
-3. **Then each record** with `profile: fleet`, through `cas_put(record, 0)`, in name order.
+3. **Then each record** with `profile: fleet`, through `cas_put(record, 0)` (E22), in name order (ascending `PaneName`, whose derived `Ord` is the order of the name's string, E30).
 4. **A failure records nothing** (I3). The undo runs newest first: delete the records this run created (plus the one whose write answered `timeout`, if it landed), then delete the profile at its stored generation, stopping at the first failed step and answering `profile-conflict` with the commands that reconcile (never `holler pane close`, which would act on the live fleet). This undo is deliberate and separate from `create`'s (E5: create detaches existing records; the import deletes the records it created).
+   The import's undo is **new code in this story** (in `crates/holler-cli/src/pane/import.rs` or one of its submodules), not a call to `create`'s `undo`, which is private to `create.rs` and detaches (E5). E5 is cited only for what the two share: the profile written first through `insert_profile`, then the members; an undo that runs newest first, stops at its first failed step and deletes the profile last at the generation it was stored at; and `profile-conflict` when an undo step fails. The one step that differs is the one operator decision 5 states: a record is **deleted**, not detached, since every record this run writes is new (`cas_put(record, 0)`; a pane that already has a record is `already-imported` and skipped, item 8 of the join). Each step uses calls the ports already have: the read `PaneStore::get` and the compare-and-swap deletes `PaneStore::delete` and `ProfileStore::delete` (E22). When a record's `cas_put` fails, the undo calls, in this order: (a) for the pane whose write failed (a `timeout` may have landed), `pane_store.get(name)`; when it answers a record whose `profile` is `fleet` (`is_member`, the check E5's undo makes, E25), that write landed, and `pane_store.delete(name, <the generation get answered>)` removes it; (b) for each record this run stored, newest first, `pane_store.delete(name, <the generation its cas_put returned>)`; (c) `profile_store.delete(fleet, <the generation insert_profile returned>, <the actor of item 2>)`.
 
 ### Exit codes and what blocks
 
@@ -60,11 +61,11 @@ Only through `Ports` (E3, E12, E17): `herdr.snapshot()` once, `herdr.version()` 
 ### The output
 
 `--format=text|json` is the global flag (`VerbCtx.format`), one `output::emit` call (E14). The verb flattens no `ProfileOpt` (`import` is in neither `--profile` class, E9); the existing test that `holler pane import --profile demo` is a usage error stays true. The JSON `data` (documented in `PaneImport`'s doc, versioned with the envelope: adding a key later is not breaking) is:
-`{"dry_run": bool, "state_root": string, "recorded": integer, "profile": Profile or null, "panes": [{"name", "action": "record"|"already-imported"|"skipped"|"blocked", "role": "agent"|"orchestrator"|null, "pos": GridPos or null, "session_of_record": string or null}], "findings": [{"pane": name or null, "level", "code", "message"}]}`. Positions go through `GridPos` serde (row first). `recorded` is the number of records written (0 in a dry run). The text form prints one line per pane (`NAME  ACTION  ROLE  POS  SESSION`, `-` for absent), then each finding as `  <level> <code>: <message>`, then (dry run) the profile as `profile show` prints a spec (each spec field through `SpecField::ALL` and `FieldValue`). Finding messages carry untrusted text (paths, ids, adapter messages) only through `findings::quoted` / `findings::embedded` (E6); a message about `pane.env` names the file, the line number and the variable, never the line.
+`{"dry_run": bool, "state_root": string, "recorded": integer, "profile": Profile or null, "panes": [{"name", "action": "record"|"already-imported"|"skipped"|"blocked", "role": "agent"|"orchestrator"|null, "pos": GridPos or null, "session_of_record": string or null}], "findings": [{"pane": name or null, "level", "code", "message"}]}`. Positions go through `GridPos` serde (row first): a pane's `pos` is the object `{"row": 2, "col": 1, "pos": "r2c1"}`, in that key order, not a string (ADR-0021 section 10, E9; E30); the text form prints `r2c1`. `recorded` is the number of records written (0 in a dry run). In a dry run `data.profile` is the `Profile` that `profile_from_panes(fleet, &records)` builds (E4, E27), the value a real run hands to `insert_profile`; its `generation`, `created` and `updated` are 0 because the store stamps them (E4). The text form prints one line per pane (`NAME  ACTION  ROLE  POS  SESSION`, `-` for absent), then each finding as `  <level> <code>: <message>`, then (dry run) the profile as `profile show` prints a spec (each spec field through `SpecField::ALL` and `FieldValue`, E26: `spec PANE`, then one `  FIELD: VALUE` line per field). `profile show`'s own `push_spec` is private to `show.rs`, which this story does not edit, so the import builds the same lines from the public `SpecField::ALL`, `SpecField::as_str`, `SpecField::value` and `FieldValue`'s `Display` (E26). Finding messages carry untrusted text (paths, ids, adapter messages) only through `findings::quoted` / `findings::embedded` (E6); a message about `pane.env` names the file, the line number and the variable, never the line.
 
 ### The finding vocabulary
 
-A new single-source enum `ImportFinding` in `crates/holler-pane/src/import/findings.rs`, copying `FindingKind`'s pattern (E6): `code()` is the one source of each code, `Serialize` is built from it, there is an `ALL` list, and a code-table test (unique, kebab-case, `is_valid_code`) lives in `crates/holler-pane/tests/import_test.rs`. A condition that reconcile already names keeps reconcile's spelling through `FindingKind::ObserveFailed.code()` and `FindingKind::HerdrVersionUnsupported.code()`; `command-not-argv` is the closed `PaneError` code. The new codes are exactly: `pane-unlabelled`, `pane-label-ambiguous`, `sources-disagree`, `source-unreadable`, `source-missing`, `no-tmux-session`, `session-not-found`, `no-session-recorded`, `harness-not-opencode`, `name-cell-differs`, `already-imported`, `ignored-entry`. `findings.rs` and `reconcile.rs` are #647's files and are not edited.
+A new single-source enum `ImportFinding` in `crates/holler-pane/src/import/findings.rs`, copying `FindingKind`'s pattern (E6, E29): `code()` is the one source of each code, `Serialize` is built from it, there is an `ALL` list, and a code-table test (unique, kebab-case, `is_valid_code`) lives in `crates/holler-pane/tests/import_test.rs`. A condition that reconcile already names keeps reconcile's spelling through `FindingKind::ObserveFailed.code()` and `FindingKind::HerdrVersionUnsupported.code()`; `command-not-argv` is the closed `PaneError` code (`PaneError::CommandNotArgv`, E28). The new codes are exactly: `pane-unlabelled`, `pane-label-ambiguous`, `sources-disagree`, `source-unreadable`, `source-missing`, `no-tmux-session`, `session-not-found`, `no-session-recorded`, `harness-not-opencode`, `name-cell-differs`, `already-imported`, `ignored-entry`. `findings.rs` and `reconcile.rs` are #647's files and are not edited.
 
 ## Operator decisions (2026-10-11)
 
@@ -100,6 +101,8 @@ Tests go in `crates/holler-cli/tests/pane_verbs/import.rs` (replacing the stub's
 ## Blast radius
 
 Edit: `crates/holler-cli/src/pane/import.rs` (args, run, render, the real run's writes) and its submodules `crates/holler-cli/src/pane/import/*.rs` (for example `sources.rs` for reading and parsing; the CLI side passes `scripts/lint.sh`'s 600-line warning, and the lint fails at 900, so the split is named now); `crates/holler-pane/src/import.rs` and `crates/holler-pane/src/import/*.rs` (the pure engine, the plan, the finding enum, `IMPORT_BLOCKED`); `crates/holler-cli/tests/pane_verbs/import.rs` and `import/**`; `crates/holler-cli/tests/pane_verbs/doctor/rig.rs` (an unrecorded seed only); `crates/holler-cli/tests/pane_verbs/process/stub.rs` (delete its `STUBS` entry and the `// #650` line); `crates/holler-cli/tests/fixtures/cli-surface.txt` (its two lines); `docs/adr/ADR-0003.md` (its row); `docs/adr/ADR-0021.md` (sections 9's import row, 10 and 13 text); `crates/holler-pane/tests/import_test.rs`; `CHANGELOG.md`. `holler-pane` takes no `toml` and no `holler-body` dependency (ADR-0021 section 5): all file-format knowledge stays in `holler-cli`.
+
+**New code, not yet in the repository** (so no excerpt can show it; the acceptance tests named pin it), among it: the `PaneImport` arguments with the repeatable `--orchestrator` and its usage check (acceptance 11); the plan and its name order, the real run's writes and the import's undo (acceptance 3, 9 and 10); and `ImportFinding` with its code-table test, which copy `FindingKind`'s pattern (E29; acceptance 12). What they use already exists and is quoted: the ports (E3, E22, E23), `insert_profile` (E5), `profile_from_panes` (E4), `profile show`'s comparison and spec fields (E25, E26) and `holler_body::config::load` (E11, E24).
 
 **Must not edit** (frozen or other stories'): `crates/holler-cli/src/pane/mod.rs`, `crates/holler-pane/src/ports.rs`, `crates/holler-pane/src/pane.rs`, `crates/holler-pane/src/profile_snapshot.rs`, `crates/holler-pane/src/findings.rs`, `crates/holler-pane/src/reconcile.rs` and `reconcile/**`, `crates/holler-pane/src/tx_launch.rs`, the Herdr adapter, the test kit's `src/`, and any hub or protocol file. No protocol row, golden file or hub state file changes.
 
@@ -1220,4 +1223,559 @@ pub fn check_envelope(stdout: &str, exit_code: i32) -> Result<Envelope, Envelope
     if schema_version.as_u64() != Some(SCHEMA_VERSION) {
         return Err(EnvelopeFault::SchemaVersion);
     }
+```
+
+### E22: PaneStore and ProfileStore: the compare-and-swap writes and deletes the real run and its undo call
+`crates/holler-pane/src/ports.rs:57-85`
+```
+/// The registry of panes, kept by the hub (#639) and faked by the test kit (#638).
+///
+/// **Blocking.** Every method is synchronous. Call from `spawn_blocking` (or a
+/// thread) in async code. Every method returns within I5's bound (default 10 s) or
+/// with [`PaneError::Timeout`]. An implementation is `Send + Sync`.
+///
+/// Every write is a compare-and-swap on the pane's `generation` (see
+/// [`crate::generation`]); a stale one is `generation-conflict`.
+pub trait PaneStore: Send + Sync {
+    /// The pane named `name`, or `None`.
+    fn get(&self, name: &PaneName) -> Result<Option<Pane>, PaneError>;
+
+    /// Every pane.
+    fn list(&self) -> Result<Vec<Pane>, PaneError>;
+
+    /// Store `pane` if the stored one is still at `expected_generation` (0 for a
+    /// new pane); returns the stored record with its bumped generation.
+    fn cas_put(&self, pane: &Pane, expected_generation: u64) -> Result<Pane, PaneError>;
+
+    /// Remove a pane's record if it is still at `expected_generation`. `close`
+    /// uses it, so a closed pane's record does not outlive the pane. A stale
+    /// generation is `generation-conflict`; a record that does not exist is
+    /// `pane-not-found`, whatever `expected_generation` is (a missing record is
+    /// checked first, so no store has to guess which of the two to answer).
+    fn delete(&self, name: &PaneName, expected_generation: u64) -> Result<(), PaneError>;
+
+    /// The changes after `since`, in order (see [`Watch`] for the cursor rules).
+    fn watch(&self, since: Cursor) -> Result<Watch<PaneEvent>, PaneError>;
+}
+```
+`crates/holler-pane/src/profile.rs:323-357`
+```
+/// The registry of profiles, kept by the hub (#661) and faked by the test kit (#638).
+///
+/// **Blocking.** Every method is synchronous. Call from `spawn_blocking` (or a
+/// thread) in async code. Every method returns within I5's bound (default 10 s) or
+/// with [`PaneError::Timeout`]. An implementation is `Send + Sync`.
+///
+/// **Writes** are compare-and-swap on the profile's `generation` (see
+/// [`crate::generation`]) and carry the [`Actor`] that made them; each appends one
+/// [`ProfileLogEntry`]. A stale generation is `generation-conflict`.
+pub trait ProfileStore: Send + Sync {
+    /// The profile named `name`, or `None`.
+    fn get(&self, name: &ProfileName) -> Result<Option<Profile>, PaneError>;
+
+    /// Every profile.
+    fn list(&self) -> Result<Vec<Profile>, PaneError>;
+
+    /// Store `profile` if the stored one is still at `expected_generation` (0 for a
+    /// new profile); returns the stored record with its bumped generation.
+    fn cas_put(
+        &self,
+        profile: &Profile,
+        expected_generation: u64,
+        actor: &Actor,
+    ) -> Result<Profile, PaneError>;
+
+    /// Delete the profile `name` if it is still at `expected_generation`. A stale
+    /// generation is `generation-conflict`; a profile that does not exist is
+    /// `profile-not-found`, whatever `expected_generation` is (a missing profile is
+    /// checked first, so no store has to guess which of the two to answer).
+    fn delete(
+        &self,
+        name: &ProfileName,
+        expected_generation: u64,
+        actor: &Actor,
+    ) -> Result<(), PaneError>;
+```
+
+### E23: HostPort::ps, HarnessPort::health and list_sessions, and Ports: the reads the import makes
+`crates/holler-pane/src/ports.rs:157-175`
+```
+/// The machine a pane lives on: tmux sessions and the processes in them (the adapter
+/// is `holler-adapter-host`, #641).
+///
+/// **Blocking.** Every method is synchronous. Call from `spawn_blocking` (or a
+/// thread) in async code. Every method returns within I5's bound (default 10 s) or
+/// with [`PaneError::Timeout`]. An implementation is `Send + Sync`.
+pub trait HostPort: Send + Sync {
+    /// Make the tmux session `name` exist, working in `cwd`.
+    fn ensure_session(&self, name: &PaneName, cwd: &str) -> Result<(), PaneError>;
+
+    /// Run `argv` (never through a shell) in the session `name`.
+    fn run(&self, name: &PaneName, argv: &Argv) -> Result<(), PaneError>;
+
+    /// Stop the processes the session `name` owns.
+    fn stop_owned(&self, name: &PaneName) -> Result<(), PaneError>;
+
+    /// The process ids running in the session `name`.
+    fn ps(&self, name: &PaneName) -> Result<Vec<u32>, PaneError>;
+}
+```
+`crates/holler-pane/src/ports.rs:177-195`
+```
+/// The harness server of a pane and its sessions (the adapter is
+/// `holler-adapter-opencode`, #642). **Final:** the spike #635 confirmed it unchanged;
+/// ADR-0021 section 2, "`HarnessPort` as built (#642)", records what the adapter decided.
+///
+/// **Blocking.** Every method is synchronous. Call from `spawn_blocking` (or a
+/// thread) in async code. Every method returns within I5's bound (default 10 s) or
+/// with [`PaneError::Timeout`]. An implementation is `Send + Sync`.
+pub trait HarnessPort: Send + Sync {
+    /// Start the harness server for `name` on `port`; returns its process id.
+    fn serve(&self, name: &PaneName, port: u16) -> Result<u32, PaneError>;
+
+    /// Whether the server on `port` answers.
+    fn health(&self, port: u16) -> Result<bool, PaneError>;
+
+    /// Create a session on the server at `port`; returns its id.
+    fn create_session(&self, port: u16) -> Result<String, PaneError>;
+
+    /// The session ids on the server at `port`.
+    fn list_sessions(&self, port: u16) -> Result<Vec<String>, PaneError>;
+```
+`crates/holler-pane/src/ports.rs:270-281`
+```
+/// One `&dyn` of each port: what a verb holds. `Ports` is `Copy`, so it is passed
+/// by value or by reference freely, and `Ports<'static>` is `Send + Sync`.
+#[derive(Clone, Copy)]
+pub struct Ports<'a> {
+    pub pane_store: &'a dyn PaneStore,
+    pub profile_store: &'a dyn ProfileStore,
+    pub herdr: &'a dyn HerdrPort,
+    pub host: &'a dyn HostPort,
+    pub harness: &'a dyn HarnessPort,
+    pub scope: &'a dyn ProfileScope,
+    pub prober: &'a dyn Prober,
+}
+```
+
+### E24: holler-body's SessionConfig (the rest of the struct) and the attach rule (an attach row needs session_id)
+`crates/holler-body/src/config.rs:112-125`
+```
+    /// How to interrupt an in-flight turn.
+    pub interrupt: Interrupt,
+    /// The attach endpoint (required for `attach`; an optional HTTP-interrupt
+    /// fallback for `spawn`).
+    pub endpoint: Option<String>,
+    /// The existing harness session id being attached to (attach only).
+    pub session_id: Option<String>,
+    /// The ACP auth method id the driver sends in `authenticate` when the
+    /// adapter answers `session/new` with auth-required (spawn only, ACP v1
+    /// only; issue #439). Only an id: the credential itself stays in the
+    /// spawned process's environment. Kept exactly as written (compared
+    /// case-sensitively, untrimmed); `None` for `attach`.
+    pub auth_method: Option<String>,
+}
+```
+`crates/holler-body/src/config.rs:304-340`
+```
+        let mut command = r.command.clone();
+        match mode {
+            SessionMode::Spawn => {
+                if command.is_none() {
+                    return Err(ConfigError::Invalid {
+                        row,
+                        name: r.name.clone(),
+                        field: "command",
+                        reason: "spawn mode requires `command`".to_string(),
+                    });
+                }
+            }
+            SessionMode::Attach => {
+                if r.endpoint.is_none() {
+                    return Err(ConfigError::Invalid {
+                        row,
+                        name: r.name.clone(),
+                        field: "endpoint",
+                        reason: "attach mode requires `endpoint`".to_string(),
+                    });
+                }
+                if r.session_id.is_none() {
+                    return Err(ConfigError::Invalid {
+                        row,
+                        name: r.name.clone(),
+                        field: "session_id",
+                        reason: "attach mode requires `session_id`".to_string(),
+                    });
+                }
+                if command.take().is_some() {
+                    warnings.push(format!(
+                        "session {:?} (row {row}): attach mode ignores `command` — never spawned",
+                        r.name
+                    ));
+                }
+            }
+        }
+```
+
+### E25: profile show: the members it compares, and why a spec built from a pane's own record matches it
+`crates/holler-cli/src/profile/show.rs:74-103`
+```
+/// The profile named in `args` and its comparison with its members. A bad name is
+/// `usage`, a profile that does not exist is `profile-not-found`, and a store error passes
+/// through with its own code.
+fn view(args: &ProfileShow, ports: Ports<'_>) -> Result<ProfileView, PaneError> {
+    let name = ProfileName::parse(&args.name)?;
+    let profile = ports
+        .profile_store
+        .get(&name)?
+        .ok_or_else(|| PaneError::ProfileNotFound {
+            what: format!("{:?}", name.as_str()),
+        })?;
+    let members: Vec<Pane> = ports
+        .pane_store
+        .list()?
+        .into_iter()
+        .filter(|pane| is_member(pane, &profile.name))
+        .collect();
+    let comparison = diff_profile(&profile, &members)
+        .into_iter()
+        .map(|diff| ComparisonRow {
+            probe: last_probe(&diff, &members),
+            diff,
+        })
+        .collect();
+    Ok(ProfileView {
+        live: members.len(),
+        profile,
+        comparison,
+    })
+}
+```
+`crates/holler-pane/src/profile_diff.rs:254-285`
+```
+/// Whether `pane` is a member of `profile`: its `profile` has `profile.slug()`. Slugs are
+/// compared on both sides, since the slug is a profile's identity (a pane whose profile
+/// is `SOME-PROFILE` is a member of `Some Profile`), like the test kit's fakes do.
+///
+/// This is what "a live pane of a profile" means (ADR-0021 section 3): `profile list`'s
+/// live count, `profile show`'s comparison and `profile delete`'s refusal
+/// `profile-has-live-panes` all use it.
+pub fn is_member(pane: &Pane, profile: &ProfileName) -> bool {
+    pane.profile
+        .as_ref()
+        .is_some_and(|own| own.slug() == profile.slug())
+}
+
+/// Every field where `live` differs from `spec`, in `SpecField::ALL` order; empty when
+/// they match. The names are not compared (the caller pairs them). `env` and `expect`
+/// are compared as sets (sorted, duplicates dropped); every other field by equality.
+/// Pure: it compares `spec` with `spec_from_pane(live)`, so
+/// `diff_spec(&spec_from_pane(p), p)` is always empty.
+pub fn diff_spec(spec: &ProfileSpec, live: &Pane) -> Vec<FieldDiff> {
+    let observed = spec_from_pane(live);
+    SpecField::ALL
+        .into_iter()
+        .filter_map(|field| {
+            let (want, got) = (field.value(spec), field.value(&observed));
+            field.differs(&want, &got).then_some(FieldDiff {
+                field,
+                spec: want,
+                live: got,
+            })
+        })
+        .collect()
+}
+```
+`crates/holler-pane/src/profile_diff.rs:311-324`
+```
+/// The row of `spec` compared with `pane`, the live pane of its name.
+fn compared(spec: &ProfileSpec, pane: &Pane) -> PaneDiff {
+    let differences = diff_spec(spec, pane);
+    let status = if differences.is_empty() {
+        PaneStatus::Matches
+    } else {
+        PaneStatus::Differs
+    };
+    PaneDiff {
+        pane: spec.pane.clone(),
+        status,
+        differences,
+    }
+}
+```
+
+### E26: how profile show prints a spec: SpecField::ALL, SpecField::as_str, SpecField::value and FieldValue
+`crates/holler-cli/src/profile/show.rs:134-142`
+```
+/// `spec PANE`, then one `FIELD: VALUE` line per field.
+fn push_spec(lines: &mut Vec<String>, spec: &ProfileSpec) {
+    lines.push(format!("spec {}", text(&spec.pane)));
+    lines.extend(
+        SpecField::ALL
+            .into_iter()
+            .map(|field| format!("  {}: {}", field.as_str(), field.value(spec))),
+    );
+}
+```
+`crates/holler-pane/src/profile_diff.rs:52-94`
+```
+impl SpecField {
+    /// Every field, in the order `profile show` lists a spec and [`diff_spec`] compares
+    /// it. `harness.port_policy` is compared like every other field: the live side is
+    /// the policy of the port the pane's harness uses (ADR-0021 section 3).
+    pub const ALL: [SpecField; 15] = [
+        SpecField::Workspace,
+        SpecField::Grid,
+        SpecField::Cwd,
+        SpecField::HarnessKind,
+        SpecField::PortPolicy,
+        SpecField::Provider,
+        SpecField::ModelId,
+        SpecField::Effort,
+        SpecField::Role,
+        SpecField::Env,
+        SpecField::ContextSoft,
+        SpecField::ContextHard,
+        SpecField::Command,
+        SpecField::Check,
+        SpecField::Expect,
+    ];
+
+    /// The dotted path of the field in a `ProfileSpec`'s JSON (`"herdr.grid"`), which is
+    /// also its serde form.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            SpecField::Workspace => "herdr.workspace",
+            SpecField::Grid => "herdr.grid",
+            SpecField::Cwd => "host.cwd",
+            SpecField::HarnessKind => "harness.kind",
+            SpecField::PortPolicy => "harness.port_policy",
+            SpecField::Provider => "model.provider",
+            SpecField::ModelId => "model.model_id",
+            SpecField::Effort => "model.effort",
+            SpecField::Role => "role",
+            SpecField::Env => "env",
+            SpecField::ContextSoft => "context.soft",
+            SpecField::ContextHard => "context.hard",
+            SpecField::Command => "command",
+            SpecField::Check => "check",
+            SpecField::Expect => "expect",
+        }
+    }
+```
+`crates/holler-pane/src/profile_diff.rs:96-118`
+```
+    /// The value of this field in `spec`. `harness.kind` and `role` take their text from
+    /// their serde form, so no variant name is written a second time.
+    pub fn value(self, spec: &ProfileSpec) -> FieldValue {
+        match self {
+            SpecField::Workspace => FieldValue::Text(spec.herdr.workspace.clone()),
+            SpecField::Grid => FieldValue::Grid(spec.herdr.grid),
+            SpecField::Cwd => FieldValue::Text(spec.host.cwd.clone()),
+            SpecField::HarnessKind => FieldValue::Text(serde_text(&spec.harness.kind)),
+            SpecField::PortPolicy => FieldValue::Text(spec.harness.port_policy.clone()),
+            SpecField::Provider => FieldValue::Text(spec.model.provider.clone()),
+            SpecField::ModelId => FieldValue::Text(spec.model.model_id.clone()),
+            SpecField::Effort => FieldValue::Text(spec.model.effort.clone()),
+            SpecField::Role => FieldValue::Text(serde_text(&spec.role)),
+            SpecField::Env => {
+                FieldValue::List(spec.env.iter().map(|n| n.as_str().to_owned()).collect())
+            }
+            SpecField::ContextSoft => FieldValue::Number(spec.context.soft),
+            SpecField::ContextHard => FieldValue::Number(spec.context.hard),
+            SpecField::Command => FieldValue::Argv(spec.command.clone()),
+            SpecField::Check => FieldValue::Argv(spec.check.clone()),
+            SpecField::Expect => FieldValue::List(spec.expect.clone()),
+        }
+    }
+```
+`crates/holler-pane/src/profile_diff.rs:155-193`
+```
+/// One field's value, typed so that it serializes exactly as the field does inside a
+/// `ProfileSpec` (a grid through `GridPos`'s own `Serialize`, row first) and prints for a
+/// person.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(untagged)]
+pub enum FieldValue {
+    /// `herdr.workspace`, `host.cwd`, `harness.kind`, `harness.port_policy`, the three
+    /// `model` fields and `role`.
+    Text(String),
+    /// `herdr.grid`.
+    Grid(GridPos),
+    /// `context.soft`, `context.hard`.
+    Number(u32),
+    /// `env` (the names) and `expect`, in stored order.
+    List(Vec<String>),
+    /// `command`, `check`; `None` serializes as `null`.
+    Argv(Option<Argv>),
+}
+
+impl fmt::Display for FieldValue {
+    /// The text form:
+    ///
+    /// - `Text` with every control character escaped by `char::escape_default`, so ESC
+    ///   prints as `\u{1b}` and a newline as `\n` (the rule Holler's text log lines
+    ///   escape a field value with, in `holler_proto::log`); every other character as is.
+    /// - `Grid` as `r2c1`, and `Number` in decimal.
+    /// - `List` and `Argv(Some)` as a compact JSON array of strings, `["opencode","serve"]`,
+    ///   never a line joined for a shell; `Argv(None)` as `none`.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            FieldValue::Text(text) => write_escaped(f, text),
+            FieldValue::Grid(grid) => write!(f, "{grid}"),
+            FieldValue::Number(number) => write!(f, "{number}"),
+            FieldValue::List(items) => write_json_strings(f, items),
+            FieldValue::Argv(Some(argv)) => write_json_strings(f, argv.as_slice()),
+            FieldValue::Argv(None) => f.write_str("none"),
+        }
+    }
+}
+```
+
+### E27: Profile, the type of data.profile
+`crates/holler-pane/src/profile.rs:206-224`
+```
+/// A named, stored set of panes. Every write is a compare-and-swap on
+/// [`Profile::generation`] (see [`crate::generation`]).
+///
+/// On read, the stored `slug` must equal the slug derived from the name: a record
+/// where they disagree is corrupt or forged and does not load.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "RawProfile")]
+pub struct Profile {
+    pub name: ProfileName,
+    /// The unique id derived from the name ([`ProfileName::slug`]).
+    pub slug: String,
+    /// Bumped on every change.
+    pub generation: u64,
+    pub panes: Vec<ProfileSpec>,
+    /// When the profile was created (milliseconds since the Unix epoch).
+    pub created: i64,
+    /// When it last changed (milliseconds since the Unix epoch).
+    pub updated: i64,
+}
+```
+
+### E28: command-not-argv is a closed PaneError code
+`crates/holler-pane/src/error.rs:70-77`
+```
+impl PaneCode {
+    /// Every closed code, in the epic's order.
+    pub(crate) const ALL: [PaneCode; CODE_COUNT] = [
+        PaneCode::NotImplemented,
+        PaneCode::Usage,
+        PaneCode::GridAmbiguous,
+        PaneCode::GridOutOfRange,
+        PaneCode::CommandNotArgv,
+```
+`crates/holler-pane/src/error.rs:97-104`
+```
+    /// The kebab-case wire string of this code.
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            PaneCode::NotImplemented => "not-implemented",
+            PaneCode::Usage => "usage",
+            PaneCode::GridAmbiguous => "grid-ambiguous",
+            PaneCode::GridOutOfRange => "grid-out-of-range",
+            PaneCode::CommandNotArgv => "command-not-argv",
+```
+`crates/holler-pane/src/error.rs:140-146`
+```
+/// Every closed code, as its kebab-case wire string, in the epic's order.
+///
+/// The set is closed: the invariants of this crate (one variant per code, unique,
+/// valid under [`is_valid_code`]) are tested against it, and no story edits it.
+/// `profile-drift` is listed for convenience: it is a reconcile finding kind
+/// (#647/#665 put it in `findings.rs`), not an error a port returns.
+pub const ALL_CODES: &[&str] = &CLOSED_CODES;
+```
+`crates/holler-pane/src/error.rs:419-421`
+```
+    /// `command-not-argv`: a command given where an argv array is required, such as
+    /// a shell string. (#637, `Argv`.)
+    CommandNotArgv,
+```
+
+### E29: FindingKind's code(), its Serialize and its code-table test: the pattern ImportFinding copies
+`crates/holler-pane/src/findings.rs:92-109`
+```
+    /// The kind's stable kebab-case code, which is also its JSON form. A code is stable
+    /// once merged (ADR-0021 section 9).
+    pub const fn code(self) -> &'static str {
+        match self {
+            FindingKind::HerdrVersionUnsupported => "herdr-version-unsupported",
+            FindingKind::ObserveFailed => "observe-failed",
+            FindingKind::UnregisteredHerdrPane => "unregistered-herdr-pane",
+            FindingKind::HerdrPaneMissing => "herdr-pane-missing",
+            FindingKind::TmuxSessionMissing => "tmux-session-missing",
+            FindingKind::ServerWedged => "server-wedged",
+            FindingKind::ServerDown => "server-down",
+            FindingKind::NoSessionOfRecord => "no-session-of-record",
+            FindingKind::SessionOfRecordMissing => "session-of-record-missing",
+            FindingKind::TuiForeignSession => "tui-foreign-session",
+            FindingKind::ShownDrivenMismatch => "shown-driven-mismatch",
+            FindingKind::StraySession => "stray-session",
+        }
+    }
+```
+`crates/holler-pane/src/findings.rs:146-151`
+```
+impl Serialize for FindingKind {
+    /// The kind's [`code`](FindingKind::code), so the JSON form cannot drift from it.
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.code())
+    }
+}
+```
+`crates/holler-pane/tests/findings_test.rs:27-44`
+```
+#[test]
+fn finding_kind_codes_are_stable() {
+    let codes: Vec<&str> = FindingKind::ALL.iter().map(|k| k.code()).collect();
+    assert_eq!(codes, CODES, "the kinds, in declaration order");
+
+    let unique: BTreeSet<&str> = codes.iter().copied().collect();
+    assert_eq!(unique.len(), codes.len(), "a duplicate code: {codes:?}");
+
+    for kind in FindingKind::ALL {
+        assert!(
+            is_valid_code(kind.code()),
+            "{:?} is not kebab-case",
+            kind.code()
+        );
+        let json = serde_json::to_value(kind).unwrap();
+        assert_eq!(json, kind.code(), "{kind:?} serializes as its code");
+    }
+}
+```
+
+### E30: GridPos's JSON form, and the order of PaneName (a SessionName, a String)
+`crates/holler-pane/src/grid.rs:129-138`
+```
+impl Serialize for GridPos {
+    /// `{"row":R,"col":C,"pos":"rRcC"}`, in that key order.
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut out = serializer.serialize_struct("GridPos", 3)?;
+        out.serialize_field("row", &self.row)?;
+        out.serialize_field("col", &self.col)?;
+        out.serialize_field("pos", &self.to_string())?;
+        out.end()
+    }
+}
+```
+`crates/holler-pane/src/pane.rs:25-32`
+```
+/// The name of a pane, e.g. `hj-c1r1` (the tmux session name). It is a
+/// `holler_proto::vocab::SessionName`: the ADR 0005 name grammar is reused, not
+/// copied, so a pane name is exactly a valid session name. Serde goes through
+/// [`PaneName::parse`]; an invalid name is `usage`.
+///
+/// Pane names such as `hj-c1r2` are names, not positions, and are not renamed.
+#[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct PaneName(SessionName);
+```
+`crates/holler-proto/src/vocab.rs:73-74`
+```
+#[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct SessionName(String);
 ```
