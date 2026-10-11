@@ -895,8 +895,9 @@ plan and show it before touching anything:
     `serve_https_port`.
   - **The default instance and a running unnamed Herdr server with no live `herdr` row in the
     ledger** (`REFUSED: an unnamed herdr server is already running`): that server is foreign. Ask
-    one question: build in it (the user's own yes; then Stage 8 reuses it and records nothing for
-    it), or stop (set a `herdr_session` in an `[instance]` table, which makes the instance
+    one question: build in it (the user's own yes to using the server; "build in it" means a new
+    workspace in that server, `herdr.sh run workspace create`, never splitting the panes it already
+    has; Stage 8 builds there and records nothing for it), or stop (set a `herdr_session` in an `[instance]` table, which makes the instance
     non-default). Never stop that server.
 - **What's already running vs. what will be started fresh, per host.** "Reused" means exactly one
   thing: a **live row in this instance's own ledger** (its pid, start time and command still
@@ -1316,7 +1317,10 @@ wizard did not create (it counts as created only when the ledger has a **live** 
 it). If `check-pane` stops, do not split anything. **For the default instance, a running unnamed
 Herdr server with no live `herdr` row is foreign** (Stage 3's question "build in it, or stop"):
 only with the user's yes to building in it does this stage use that server, and the wizard never
-stops it; without that yes, stop here and ask.
+stops it; without that yes, stop here and ask. "Build in it" means a new workspace in that server
+(`herdr.sh run workspace create`): never split a pane the wizard did not create. Read the new
+workspace's first pane id from `herdr.sh run pane list`, filtered by the new workspace id; that
+pane is `<base-pane>` below.
 
 **Do (server check, first, only if the plan called for a fresh server):**
 ```bash
@@ -1338,7 +1342,8 @@ sleep 3
 (its workspaces and panes, and an agent in a pane may resume). When `pane list` shows panes the
 wizard did not create, never split or close them: report them to the user and, with the user's
 yes, build a **new workspace** beside them with `herdr.sh run workspace create` (then split and
-label only that workspace's panes), or reuse them only if the user asks.
+label only that workspace's panes), or reuse them only if the user asks (see the reuse branch
+below).
 Then record the server in the ledger, with that pid, so a later run knows this wizard created the
 session (for the default instance, leave out `--session`):
 ```bash
@@ -1362,17 +1367,20 @@ run already present, the orchestrator pane's Claude conversation **auto-resumed*
 re-launched it via `claude --resume <id>` on its own), and the two session-viewer panes back as
 **dead shells** showing `opencode --session <old id>` → `Session not found` (their old
 `session_id`s no longer exist on the freshly started backends). So check `herdr.sh run pane list`
-before splitting anything: if the pane count already equals M+N, reuse the restored structure —
-don't split again (that produces M+N+… panes and a wrong layout) — skip re-launching an
-orchestrator pane that resumed idle and healthy, and re-attach only the dead viewer panes in
-Stage 9 using this run's *new* session ids. If the count doesn't match, that's the "config
-changed" case in "If a stage fails" below.
+before splitting anything. Those panes are the user's, not the wizard's, so they are reused only
+on request. **Reuse branch:** if the user asked to reuse them and the count equals M+N, reuse the
+restored structure — don't split again (that produces M+N+… panes and a wrong layout) — skip
+re-launching an orchestrator pane that resumed idle and healthy, and re-attach only the dead
+viewer panes in Stage 9 using this run's *new* session ids. If the user asked to reuse them and
+the count doesn't match, that's the "config changed" case in "If a stage fails" below. If the user
+did not ask, build a new workspace as above.
 
-If reusing an existing server (per Stage 3's plan), check whether a workspace matching this
+If reusing an existing server (per Stage 3's plan; that means a workspace in it, never a split
+of its existing panes), check whether a workspace matching this
 run's target shape already exists (`herdr.sh run workspace list` / `herdr.sh run pane list`) before splitting
 more — a persisted session can survive a server restart with its pane *structure* intact even
 though the processes inside are gone (confirmed live 2026-09-22); reusing that structure is
-fine, but verify pane **count matches (M+N)** for *this* config, not an old run's count. If it
+allowed only if the user asked for it, and then verify pane **count matches (M+N)** for *this* config, not an old run's count. If it
 doesn't match (the config has grown/shrunk since the layout was built), this should already
 have been flagged in Stage 3's plan — don't silently under- or over-provision panes relative to
 the current config.
@@ -1421,7 +1429,10 @@ front, e.g. `<base-pane>` gets `o1` and `<p3>` gets `alpha`:
 
 **Verify:** `herdr.sh run pane list` shows exactly (M+N−1) new panes beyond the pre-existing base pane
 (M+N total in the workspace, M of which map to `[[orchestrator]]` entries and N of which map to
-real sessions), in the expected layout, and every pane's label equals its slot name.
+real sessions), in the expected layout, and every pane's label equals its slot name. Then read
+`herdr.sh run pane list` again and tell the user if the widths look uneven: chained right-splits
+may leave columns at about 1/2, 1/4, 1/8, 1/8 of the width unless Herdr rebalances. This is
+unverified until the operator story #734 and the new-user run #778 check it with the real Herdr.
 
 **Gate:** if `herdr.sh run pane split` errors, or the pane count doesn't match M+N, stop and confirm
 the target workspace/pane with the user before retrying — don't chain more splits on a layout
