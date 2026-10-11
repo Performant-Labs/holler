@@ -190,3 +190,10 @@
 - **Evidence:**
   - Six production mutations were each caught by the targeted tests, then reverted with `git checkout`. M1, the act's port re-check; M2, `verify_serving` skipped; M3, the health wait with no retry; M4, the host's `check_cwd`; M5, OpenCode's agent refusal; M6, the plan passing a default `ServeSpec`.
   - Details are in `handoff-T-green.md`.
+
+## T (Phase 7, verify GREEN + Tier 2, re-run after the brief's round-1 amendment) — 2026-10-11T07:28:09-06:00
+- **Decided:** BLOCK, for F. The amended Scope 2 says each `health` call of the wait is a live step with the run's budget checked before it, and that ADR-0021 section 12's bound (the budget plus one port call's own bound) holds for the wait too. `server::start` calls `wait_healthy` straight after `host.run` with no budget check, and `wait_healthy` asks once more at the deadline. Before #802 the engine checked the budget between `serve` and `health`.
+- **Decided:** Added `launch::serve::no_health_poll_starts_once_the_budget_has_run_out` (engine tier, `set_delay`, no sleep). It is RED on F's code: harness calls are `[ServeCommand, Health, Health, Health]` where the expected list is `[ServeCommand, Health, Health]`. It is GREEN with a deadline check before each ask in `wait_healthy`, which I tried and reverted.
+- **Assumed:** The amended brief's sentence is binding even though some pre-existing plan and act steps (the plan's reads, `list_sessions` then `create_session`) also run two port calls without a check between them. Those are outside #802's diff. The wait is #802's own code and the brief names it.
+- **Hedged:** The CHANGELOG clause about the adapter's own-process check is advisory (AC 12 / Scope 7), so it is not part of the BLOCK.
+- **Evidence:** `handoff-T-green.md` (RED output, the trial fix's results, and the Tier 1 run on this tree).

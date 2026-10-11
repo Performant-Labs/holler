@@ -13,7 +13,7 @@ use std::time::Duration;
 
 use holler_cli::output::Format;
 use holler_pane::ports::AGENT_UNSUPPORTED;
-use holler_pane::tx_launch::TxOptions;
+use holler_pane::tx_launch::{self, TxFailure, TxOptions};
 use holler_pane::{HarnessPort, HostPort, PaneError, PaneId, ProbeResult, ServeSpec};
 use holler_pane_testkit::harness::{HarnessOp, ServerState};
 use holler_pane_testkit::herdr::HerdrOp;
@@ -25,7 +25,7 @@ use super::rig::{
     agent, argv, data_of, error_of, launch_with, name, occurrences, Called, Rig, PANE, PORT, PROBE,
     PROBE_FLAGS, STEP,
 };
-use super::steps;
+use super::{launch_request, steps};
 use crate::list::Rig as Fakes;
 
 /// The phrase every reconcile step starts with.
@@ -324,6 +324,52 @@ fn the_health_wait_retries_until_the_server_answers() {
         run.calls.harness
     );
     rig.assert_matches(&run, PANE);
+    rig.assert_no_keystroke();
+}
+
+/// AC 6 and Scope 2 (I5, the brief as amended in round 1): the health wait has no budget of
+/// its own, and each of its `health` calls is a live step with the run's budget checked before
+/// it. A server run that returns after the budget has run out (every host call 400 ms slow
+/// from the plan's port check on, against a 600 ms budget: `ensure_session` ends inside it,
+/// `run` past it) is never asked: the run is the budget's `timeout`, and the only `health`
+/// calls are the plan's port check and the act's re-check before the run.
+#[test]
+fn no_health_poll_starts_once_the_budget_has_run_out() {
+    let rig = Rig::new();
+    rig.after(HarnessOp::Health, |f, _| {
+        f.host.faults().set_delay(Some(Duration::from_millis(400)));
+    });
+    let options = TxOptions {
+        budget: Duration::from_millis(600),
+        ..TxOptions::default()
+    };
+    let (answer, calls) = rig.engine(|ports| tx_launch::launch(ports, &launch_request(), &options));
+    rig.fakes.host.faults().set_delay(None);
+    let timeout = PaneError::Timeout {
+        op: "pane.launch".to_owned(),
+    };
+    assert_eq!(
+        answer,
+        Err(TxFailure {
+            error: timeout,
+            acted: true
+        })
+    );
+    assert_eq!(
+        calls.host,
+        [HostOp::EnsureSession, HostOp::Run, HostOp::StopOwned],
+        "the server ran, then the rollback"
+    );
+    assert_eq!(
+        calls.harness,
+        [
+            HarnessOp::ServeCommand,
+            HarnessOp::Health,
+            HarnessOp::Health
+        ],
+        "no health call after the run: the budget had run out"
+    );
+    assert_eq!(rig.record(PANE), None);
     rig.assert_no_keystroke();
 }
 

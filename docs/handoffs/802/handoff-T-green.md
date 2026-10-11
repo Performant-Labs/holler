@@ -1,123 +1,143 @@
-# Handoff-T-green: Phase 7 (Workflow script; the role doc's Phase 6) - #802 `HarnessPort::serve_command` takes a `ServeSpec`; the harness server runs in the pane's tmux session
+# Handoff-T-green: Phase 7 (Workflow script; the role doc's Phase 6), re-run after the brief's round-1 amendment - #802 `HarnessPort::serve_command` takes a `ServeSpec`; the harness server runs in the pane's tmux session
 
 **Date:** 2026-10-11
-**Branch:** issue-802-implementation (worktree `.claude/worktrees/0802-serve-command`, head `7ede9c7`)
+**Branch:** issue-802-implementation (worktree `.claude/worktrees/0802-serve-command`, head `0dc4e8b`)
 **Issue:** #802 (closes #695)
 **Handoff-F reviewed:** `docs/handoffs/802/handoff-F.md`
 **Handoff-T-red:** `docs/handoffs/802/handoff-T-red.md`
+**Brief:** `docs/handoffs/802-brief.md` as amended in `0dc4e8b` (13 findings applied)
 
-**VERDICT: GREEN, no blocking issue.** No UI surface, so U is N/A and the run is ready for S.
+**VERDICT: BLOCK.** F must change one function. The production code is unchanged since the first
+T-green (`7ede9c7`, PASS). The brief was amended afterwards, and its new Scope 2 text rules out
+what `tx_launch::server::wait_healthy` does. I wrote a test that pins the amended rule. It fails on
+F's code for the right reason, and it passes with a three-line fix that I tried and then reverted.
 
-## GREEN confirmation
+## What the amended brief adds, and how the code measures up
 
-F changed no test file (`git diff --name-only 26148ba 7ede9c7 | grep /tests/` is empty).
+| Amended text | Check | Result |
+|---|---|---|
+| Scope 2: "each `health` call is a live step with the budget checked before it ... and the ADR's last sentence must keep holding for the wait too" | `server.rs` read; new test | **FAIL** (below) |
+| AC 1: two `compile_fail,E0639` doctests, one per form | `ports.rs` ~113-118: two doctests; `cargo test -p holler-pane --doc` | PASS |
+| AC 2: complete call logs via `assert_eq!`, `acted == false` | `an_agent_refusal_in_the_plan_is_exit_3_and_writes_nothing` asserts `calls.harness == [ServeCommand]` and empty `herdr`, `host` and `probes` lists, exit 3, no step phrase. The step phrase is printed only when `acted` is true, so its absence covers `acted == false`. | PASS |
+| AC 4: escape `p#S`->`p##S`, `q;`->`q\;`; the real-tmux test uses another directory | `fake_tmux_test::run_escapes_the_cwd_for_tmux` (both cases plus `#(...)`); `real_tmux_test::run_works_in_the_given_cwd_not_the_sessions` (opt-in, 9/9 on F's run) | PASS |
+| AC 6: the run's budget, a short `TxOptions.budget`, a frozen fake, a bounded run time | `launch.rs::assert_waits_out_the_budget` (700 ms budget, `took < 3 s`) used by both 4a and 4b | PASS |
+| AC 8: "loudly" = exit 1, `unavailable`, "still answers", generation unchanged | `relaunch_fails_when_the_old_server_survives` asserts all four | PASS |
+| AC 12: CHANGELOG names the behaviour changes | names `timeout` not `unavailable`, and the port re-check | **Partial** (advisory below) |
 
-```text
-$ cargo test --workspace -- --skip roster_stays_accurate_under_concurrent_body_load
-148 test binaries: passed=2070 failed=0 ignored=25, exit 0      # matches F's count exactly
+## Blocking issue (F must address)
+
+**B-1. The health wait asks `health` without the run's budget being checked first.**
+`crates/holler-pane/src/tx_launch/server.rs`, `start` (lines ~93-97) and `wait_healthy` (~37-53):
+
+- `start` checks the budget, calls `host.run`, then enters `wait_healthy`. The wait's first act is
+  `harness.health(port)`, with no budget check after `run`. A `run` that returns after the budget
+  has run out is followed by a `health` call anyway. The run then takes the budget plus `run`'s
+  bound plus `health`'s bound (OpenCode's 2 s). That breaks ADR-0021 section 12's sentence, "A run
+  takes at most the budget plus one port call's own bound plus its rollback calls", which the
+  amended Scope 2 says "must keep holding for the wait too". Before #802 the engine had a
+  `budget.check()` between `serve` and `health` (`92fbc6e` `tx_launch.rs` ~628-630), so this
+  removed a check.
+- `wait_healthy` also asks "once more when the deadline comes during a sleep". That is a `health`
+  call started once the budget has run out. Scope 2 rules it out: "each `health` call is a live step
+  with the budget checked before it".
+
+**Fix that turns the new test GREEN** (tried, then reverted with a file copy; F owns the final form):
+check the deadline before each ask in `wait_healthy`:
+
+```rust
+loop {
+    if Instant::now() >= deadline {
+        return Ok(false);
+    }
+    if harness.health(port)? {
 ```
 
-Every target named in handoff-T-red passes on the final code, including `pane_verbs` (258),
-`fake_harness_test`, `harness_conformance_test` (the new case 16 and both new mutants caught),
-`fake_host_test`, `host_conformance_test`, `hermetic_test` (31), `attach_test`, `fake_tmux_test`
-(29), `ports_test`, `pane_registry_test`, and the `holler-pane` doctests: 5, including the two new
-`compile_fail` doctests on `ServeSpec`, at `ports.rs` lines 113 and 116.
+With that change applied: `pane_verbs` 259/259 passed (the new test included), and every
+`holler-pane-testkit` target passed (conformance 15/15, `fake_harness_test` 23/23). F should
+also update `wait_healthy`'s doc ("It asks at least once, and once more when the deadline
+comes..."), `Budget::deadline`'s doc ("ends the wait after its first poll"; with the check, an
+unrepresentable deadline asks nothing), and the ADR's health-wait paragraph if its wording
+changes.
 
-### The tests pin behaviour: mutation spot checks
+## Test added in this phase
 
-Each mutation below removed one behaviour from F's production code. I ran the targeted test
-binary against it, then restored the file with `git checkout`. The tree is clean apart from the one
-test edit described below.
+`crates/holler-cli/tests/pane_verbs/launch/serve.rs`,
+`no_health_poll_starts_once_the_budget_has_run_out` (integration, the engine through the rig's
+fakes, the same tier as `the_budget_bounds_a_slow_launch`).
 
-| # | Mutation (production) | Caught by |
+- **Setup:** the budget is 600 ms. A hook on the plan's port check sets every host call 400 ms
+  slow, so `ensure_session` ends inside the budget and `run` ends past it. There is no sleep in test
+  code; the slowdown is the fault switch's `set_delay`.
+- **Assertions:** `Err(TxFailure { Timeout("pane.launch"), acted: true })`. Host calls are
+  `[EnsureSession, Run, StopOwned]`. Harness calls are exactly `[ServeCommand, Health, Health]`
+  (the plan's port check and the act's re-check). No record is written.
+- **Margins:** about 200 ms on each side of the budget, and the outcome is an ordering, not a
+  duration.
+- **RED on F's code** (the assertion about the missing behaviour, not a setup error):
+
+```text
+---- launch::serve::no_health_poll_starts_once_the_budget_has_run_out stdout ----
+assertion `left == right` failed: no health call after the run: the budget had run out
+  left: [ServeCommand, Health, Health, Health]
+ right: [ServeCommand, Health, Health]
+test result: FAILED. 12 passed; 1 failed (launch::serve)
+```
+
+The prior phase's test repair (`hermetic_test`, `stub.lines().is_empty()`) is committed in `3fe111d`.
+
+## GREEN confirmation (everything except the new test)
+
+```text
+$ cargo test --workspace --no-fail-fast -- --skip roster_stays_accurate_under_concurrent_body_load
+148 binaries: passed=2070 failed=1 ignored=25
+  the one failure: launch::serve::no_health_poll_starts_once_the_budget_has_run_out (B-1)
+  2070 is F's count, so every pre-existing and Phase-5 test is still GREEN
+```
+
+| Check | Command | Result |
 |---|---|---|
-| M1 | `server::start` drops the act's `port-in-use` re-check | `launch::serve::the_port_is_checked_again_just_before_the_server_runs` |
-| M2 | `server::start` skips `verify_serving` | `a_verify_refusal_rolls_back_and_stops_the_server`, `the_act_runs_the_planned_argv_after_the_command_then_waits_and_verifies`, `launch_records_what_the_fakes_show` |
-| M3 | `wait_healthy` asks once, no retry | `launch::serve::the_health_wait_retries_until_the_server_answers` |
-| M4 | `TmuxHost::run` skips `check_cwd` | `fake_tmux_test::run_refuses_a_cwd_that_is_empty_relative_or_missing` |
-| M5 | `OpenCodeHarness::serve_command` stops refusing an agent | `hermetic_test::ac8_a_spec_with_an_agent_is_refused_and_one_without_verifies` |
-| M6 | the plan calls `serve_command` with `ServeSpec::default()` instead of the in-flight spec | 5 tests, including `relaunch_passes_the_in_flight_agent_to_serve_command` and `relaunch_with_agent_replaces_the_stored_key` |
+| Clippy | `cargo clippy --workspace --all-targets -- -D warnings` | exit 0, PASS |
+| Lint | `bash scripts/lint.sh` | exit 0 (size notices only), PASS |
+| Changelog | `bash scripts/changelog-check.sh` | `ok`, PASS |
+| Docs CLI | `cargo test -p holler-cli --test docs_cli_test` | 3 passed, PASS |
+| Wire canary | `cargo test -p holler-cli --test wire_selftest` | 3 passed, PASS |
+| Unused deps | `cargo machete` | none, PASS |
+| Doctests | `cargo test -p holler-pane --doc` | 5 passed (the 2 `compile_fail,E0639`), PASS |
+| Hook tests | `bash scripts/test-hooks.sh` | exit 0, PASS |
+| rustfmt | `rustfmt --edition 2021 --check` on the new test file | clean (after formatting), PASS |
+| Workspace tests | as above | **1 FAIL (B-1, the new test)** |
 
-## Test repaired in this phase
-
-The change is in `crates/holler-adapter-opencode/tests/hermetic_test.rs`,
-`ac8_a_spec_with_an_agent_is_refused_and_one_without_verifies`. I added
-`assert!(stub.lines().is_empty(), ...)` after the no-agent `verify_serving`. The test's doc says
-that call "sends nothing", but before this edit nothing asserted it. F flagged the gap in the
-handoff as a note, not a defect. The test passes, rustfmt is clean, and clippy on the crate is
-clean. The file is now 813 lines, under the 900-line lint limit. This edit was not committed.
-
-## Tier 1 results
-
-| Check | Command | Expected | Actual | Result |
-|---|---|---|---|---|
-| Lint | `bash scripts/lint.sh` | exit 0 | exit 0; warnings are size notices only (`fake_tmux_test.rs` 803 among them), none fail | PASS |
-| Changelog | `bash scripts/changelog-check.sh` | ok | `changelog-check: ok` | PASS |
-| Clippy | `cargo clippy --workspace --all-targets -- -D warnings` | exit 0 | exit 0 | PASS |
-| Workspace tests | `cargo test --workspace -- --skip roster_stays_accurate_under_concurrent_body_load` | 0 failed | 2070 / 0 / 25 ignored | PASS |
-| Docs CLI | `cargo test -p holler-cli --test docs_cli_test` | pass | 3 passed | PASS |
-| Wire canary | `cargo test -p holler-cli --test wire_selftest` | pass | 3 passed | PASS |
-| Unused deps | `cargo machete` | none | none found | PASS |
-| Hook tests | `bash scripts/test-hooks.sh` | exit 0 | exit 0 | PASS |
-| Doctests | `cargo test -p holler-pane --doc` | pass | 5 passed (2 new `compile_fail`) | PASS |
-
-There is no server to start and no HTTP API to smoke-test: this story is a library and port
-change, and #649 wires it into the CLI.
-
-**Cross-check against F's report.** My results match F's: the workspace count, clippy, lint,
-changelog, machete and docs_cli. I did not re-run F's opt-in real runs (`real_tmux_test --ignored`
-9/9, and `HOLLER_TEST_OPENCODE=1 real_opencode_test` 9/9). They need private tmux and opencode
-servers and are not CI steps. F's results for them stand as reported.
+F's opt-in real runs (`real_tmux_test`, `real_opencode_test`, 9/9 each) were not re-run. They
+need private servers and are not CI steps. F's results stand as reported.
 
 ## Tier 2 results
 
 | Check | Method | Result |
 |---|---|---|
-| Coverage per AC | AC 1 to 12 mapped below, each to a passing test | PASS |
-| Test quality | Each test names a behaviour and fails alone for the right reason (shown in RED and by M1 to M6). Each sits at the cheapest sufficient tier: engine order runs through the rig's fakes, and the argv pin and the tmux `-c` checks are unit tests. Nothing is duplicated: the TERM/grace/KILL proof is not copied, per Scope 6, and the adapter's deleted spawn tests were removed with the behaviour. | PASS |
-| Type safety | Clippy with `-D warnings`. `ServeSpec` is `#[non_exhaustive]`, and the engine builds it as an exhaustive literal (W-5). | PASS |
-| Error paths | `agent-unsupported` in the plan (exit 3, nothing written), `port-in-use` in the plan and in the act, the health-wait `timeout` with the verb's op, the `verify_serving` refusal with rollback, and `usage` for a bad `cwd` are each tested. | PASS |
-| Data integrity | A stored record with `pid: 4242` still loads, and a launched record has no `pid` key (`pane_registry_test`, `a_launched_record_has_no_pid_key`). The record is still written by one compare-and-swap. | PASS |
-| API contract | The port signatures match brief Scope 1 and the pinned T-red contract. `AGENT_UNSUPPORTED` is `agent-unsupported`, class Refusal, exit 3. | PASS |
-| Security | No secret from the adapter's environment reaches an argv (the re-executed child test, W-2). The `cwd` refusal does not echo the path. `#` and `;` in `cwd` are escaped for tmux. | PASS |
-| Timing | The health wait polls until a deadline; there is no fixed sleep in the engine. The tests assert order and outcome, not durations. | PASS |
-| Protocol and goldens | No protocol, hub or `holler-body` change, so no golden or `v2.md` drift. | N/A |
-| Migration | No schema change: `HarnessInfo.pid` keeps its serde. | PASS |
-| Scope 3 deletions | The removed items no longer appear in `holler-adapter-opencode`. `kill_group` in `holler-pane/src/probe.rs` is the prober's own, pre-existing function. | PASS |
-| Playwright / visual | No such surface in this repo. | N/A |
-| Evidence appendix | F's `evidence.md` covers the unchanged-code facts the tests rely on: rollback `stop_owned`, `acted` and the reconcile step, open-code class, `pid` serde, the host's TERM/grace/KILL, the `argv[0]` rule, and fault logging. I added nothing. | PASS |
+| Coverage per AC | AC 1-12, each mapped to a test (first T-green table, still valid), plus the new I5 test for amended Scope 2 | PASS once B-1 is fixed |
+| Test quality | The new test names one behaviour, fails alone for the right reason, sits at the engine tier and duplicates neither `the_budget_bounds_a_slow_launch` (slow harness, stops before the server step) nor 4a/4b (frozen server, polls until the budget ends) | PASS |
+| Timing | The new test asserts the call order and the outcome, not a duration. It uses `set_delay`, with no `thread::sleep` | PASS |
+| I5 budget | `server::start` / `wait_healthy` as above | **FAIL (B-1)** |
+| Type safety, error paths, data integrity, API contract, security, migration | Unchanged since the first T-green, whose mutation checks M1 to M6 still apply (the production code is the same) | PASS |
+| Protocol, goldens, Playwright | No such change or surface | N/A |
+| Evidence appendix | The new test relies on `roll_back` calling only `stop_owned` and `herdr.close` (already in `evidence.md`), on the fault switch logging every call (already there) and on `set_delay` (`holler-pane-testkit/src/fault.rs` ~79-83, a test-kit fact shown in the diff's context). Nothing added. | PASS |
 
 ## Acceptance criteria status
 
-| AC | Status | Backed by |
-|---|---|---|
-| 1 `ServeSpec` default, `with_agent`, E0639 | PASS | `serve_spec_default_has_no_agent_and_with_agent_holds_the_key`, the 2 `compile_fail` doctests |
-| 2 Plan order; `agent-unsupported` writes nothing | PASS | `an_agent_refusal_in_the_plan_is_exit_3_and_writes_nothing`, `..._leaves_a_relaunched_pane_running`, `serve_command_runs_in_the_plan_before_any_other_call` |
-| 3 Agent reaches `serve_command`; act order | PASS | `the_act_runs_the_planned_argv_after_the_command_then_waits_and_verifies`, `relaunch_passes_the_in_flight_agent_to_serve_command` |
-| 4 Directory: `run` gets the spec's `cwd`; tmux `-c`, refusal, escaping | PASS | `a_relaunch_runs_the_server_in_the_spec_directory_not_the_sessions`, `run_passes_the_argv_exactly_in_three_tmux_calls`, `run_refuses_a_cwd_that_is_empty_relative_or_missing`, `run_escapes_the_cwd_for_tmux` |
-| 5 OpenCode argv pin, starts nothing, agent refused, no credential | PASS | `ac8_serve_command_is_the_server_argv_behind_the_env_prefix`, `ac8_the_server_and_the_tui_share_one_env_prefix`, `ac8_serve_command_starts_nothing`, `ac8_a_spec_with_an_agent_...`, `ac8_no_credential_of_the_adapters_environment_reaches_an_argv` |
-| 6 Health wait: `timeout`, rollback; `boot_poll` 150 ms | PASS | `launch_times_out_when_the_server_never_gets_healthy`, `launch_onto_a_frozen_server_times_out_before_any_session`, `boot_poll_defaults_to_150_ms`, `the_health_wait_retries_until_the_server_answers` |
-| 7 Verify refusal rolls back and stops the server; no-agent verify `Ok` | PASS | `a_verify_refusal_rolls_back_and_stops_the_server`, the conformance cases, `ac8_a_spec_with_an_agent_...` |
-| 8 Relaunch stops the old server; a survivor fails loudly | PASS | `relaunch_stops_the_old_server_and_starts_one_on_the_same_port`, `relaunch_fails_when_the_old_server_survives` |
-| 9 Old `panes.json` reads; no `pid` key | PASS | `a_record_with_a_harness_pid_still_loads_and_one_without_stores_no_key`, `a_launched_record_has_no_pid_key` |
-| 10 Conformance passes; new case; new mutant caught | PASS | `harness_conformance_test` (the fake). The real OpenCode run is opt-in and passed 9/9 on F's run. |
-| 11 `AGENT_UNSUPPORTED` code, exit 3, listed | PASS | `agent_unsupported_is_a_refusal_with_exit_3`; ADR rows are S's to audit against Scope 7 |
-| 12 ADR/doc edits, CHANGELOG entry, deletions | PASS (mechanical part) | Changelog check ok; the `[Unreleased]` entry links #802 and #695; clippy confirms the deletions are complete. The ADR wording is S's Tier 3. |
-
-## Blocking issues
-
-None.
+AC 1-5 and 7-11: PASS (as in the first T-green; the amended wording is checked in the table at the
+top). AC 6: **FAIL** until B-1 is fixed. The wait's `timeout` and rollback pass, but the amended
+Scope 2 rule about the budget, which AC 6 now cites, does not hold. AC 12: PASS for the mechanical
+part, with one advisory below.
 
 ## Advisory notes
 
-- **W-11(a), carried from F, for O and S.** No test starts the server under a tmux pty through
-  `new-window ... -- env -- <argv>`. That end-to-end check belongs with #649.
-- Under `ProcessEnv::Isolated`, the configured pairs now appear on the server's command line,
-  visible in `ps`. Before this change they were set through `envs()`. This is by design (A's
-  W-2), and the crate doc states it. The operator should keep credentials out of `Isolated`, which
-  #649's credential path must respect.
-- `fake_tmux_test.rs` (803), `hermetic_test.rs` (813), `switch.rs` (833) and `launch/rig.rs` (793)
-  are close to the 900-line limit. The next story to touch them should split them first.
-- The mutation runs left mutant builds in this worktree's `target/`. The next `cargo` invocation
-  rebuilds from the restored sources. No source file other than the test edit above differs from
-  `7ede9c7`.
+- **AC 12 / Scope 7 (for F with B-1, or for S).** The CHANGELOG entry says the engine "checks the
+  port again just before the server starts". It does not say what the amended Scope 7 asks it to
+  name: that never-adopt now rests on those two checks *without the adapter's check that a healthy
+  answer came from the server it started*. The ADR states this (ADR-0021 ~163-165); the CHANGELOG
+  does not. One clause would fix it.
+- W-11(a), carried over: no test starts the server under a tmux pty. That check belongs with #649.
+- `Isolated` pairs now appear on the server's command line (by design, A's W-2). Credentials must
+  stay out of `Isolated`.
+- `serve.rs` is about 500 lines after the new test. `fake_tmux_test.rs` (803), `hermetic_test.rs`
+  (813), `switch.rs` (833) and `launch/rig.rs` (793) are close to the 900-line limit.
