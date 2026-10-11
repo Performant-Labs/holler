@@ -194,6 +194,7 @@ mkdir -p ~/.claude/skills && curl -fsSL https://github.com/Performant-Labs/holle
 No release tag contains the whole skill directory yet, so the command fetches `main`. A setup built
 before ledgers existed is refused as foreign (the wizard stops only processes it recorded itself),
 see [Instance state and the ledger](docs/setup-wizard.md#instance-state-and-the-ledger).
+An optional `workspace = "<name>"` in the config names the Herdr workspace; the wizard suggests two words, such as `herald-relay`.
 
 The prompt:
 
