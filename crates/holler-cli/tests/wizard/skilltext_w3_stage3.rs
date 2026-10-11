@@ -1,7 +1,7 @@
 //! #787: Stage 3 and Stage 10 text (one collide line per host, no serve port for a local-only
 //! run, the scoped hub check, the `default` session entry, the done wording), epic #769.
 //!
-//! Plain text assertions over `agent-skills/setup-wizard/SKILL.md` and `docs/setup-wizard.md`.
+//! Plain text assertions over `agent-skills/herdr-setup/SKILL.md` and `docs/setup-wizard.md`.
 //! Nothing here runs a script or touches a host.
 #![cfg(unix)]
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)] // #787
@@ -14,7 +14,7 @@ fn read(rel: &str) -> String {
 }
 
 fn skill() -> String {
-    read("agent-skills/setup-wizard/SKILL.md")
+    read("agent-skills/herdr-setup/SKILL.md")
 }
 
 /// Whitespace folded to one space, for phrases that wrap.
