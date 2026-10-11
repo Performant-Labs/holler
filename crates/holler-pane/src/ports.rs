@@ -206,6 +206,18 @@ pub trait HerdrPort: Send + Sync {
         let _ = pane;
         Ok(PaneObservation::default())
     }
+
+    /// [`HerdrPort::observe_pane`] for several panes at once: one observation for each of
+    /// `panes`, in the same order, where a pane that cannot be observed (Herdr does not have
+    /// it, or the call failed) reports an empty one. A list of many unmanaged panes costs one
+    /// call to Herdr when the implementation can read them together; the default asks about
+    /// each pane in turn.
+    fn observe_panes(&self, panes: &[PaneId]) -> Vec<PaneObservation> {
+        panes
+            .iter()
+            .map(|pane| self.observe_pane(pane).unwrap_or_default())
+            .collect()
+    }
 }
 
 /// What [`HerdrPort::observe_pane`] reports about one pane. Both fields are optional

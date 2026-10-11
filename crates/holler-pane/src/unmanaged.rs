@@ -83,9 +83,9 @@ pub(crate) fn unregistered<'a>(
 /// cell, each with what Herdr reports about it. `now_ms` is the clock: idle time is counted
 /// to it.
 ///
-/// A failed `snapshot` or `pane_store.list` is the call's own error. A failed
-/// `observe_pane` of one pane leaves that pane's `cwd` and `last_screen_change` empty: the
-/// pane is still listed.
+/// A failed `snapshot` or `pane_store.list` is the call's own error. A pane Herdr cannot
+/// observe leaves its `cwd` and `last_screen_change` empty: the pane is still listed. The
+/// panes are observed together (`HerdrPort::observe_panes`), so many of them cost one call.
 pub fn observe(ports: Ports<'_>, now_ms: i64) -> Result<Vec<UnmanagedPane>, PaneError> {
     let snapshot = ports.herdr.snapshot()?;
     let records = ports.pane_store.list()?;
@@ -99,11 +99,21 @@ pub(crate) fn from_snapshot(
     records: &[Pane],
     now_ms: i64,
 ) -> Vec<UnmanagedPane> {
-    let mut panes: Vec<UnmanagedPane> = unregistered(snapshot, records)
-        .map(|herdr| {
-            let seen = ports.herdr.observe_pane(&herdr.pane_id).unwrap_or_default();
-            UnmanagedPane::new(herdr, &seen, now_ms)
-        })
+    let listed: Vec<&HerdrPane> = unregistered(snapshot, records).collect();
+    let ids: Vec<PaneId> = listed.iter().map(|herdr| herdr.pane_id.clone()).collect();
+    // One call for all of them: a list of many unmanaged panes is one read of Herdr.
+    let seen = if ids.is_empty() {
+        Vec::new()
+    } else {
+        ports.herdr.observe_panes(&ids)
+    };
+    let mut panes: Vec<UnmanagedPane> = listed
+        .into_iter()
+        .zip(
+            seen.iter()
+                .chain(std::iter::repeat(&PaneObservation::default())),
+        )
+        .map(|(herdr, seen)| UnmanagedPane::new(herdr, seen, now_ms))
         .collect();
     panes.sort_by(|a, b| {
         let key = |pane: &UnmanagedPane| {

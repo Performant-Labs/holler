@@ -878,3 +878,22 @@ fn observe_pane_of_a_pane_with_no_cwd_reports_none() {
 
     assert_eq!((seen.cwd, seen.last_screen_change), (None, None));
 }
+
+/// #832 (review): observing several panes costs **one** `session.snapshot`, not one per
+/// pane, and a pane the snapshot does not list reports an empty observation in its place.
+#[test]
+fn observe_panes_reads_the_snapshot_once_for_all_the_panes() {
+    let fake = Arc::new(WireHerdr::new());
+    let port = connect(&fake, &[("w", 2, 1)]);
+    let a = port.ensure_pane(&spec("w", 1, 1)).expect("ensure").pane_id;
+    let b = port.ensure_pane(&spec("w", 2, 1)).expect("ensure").pane_id;
+    let from = fake.methods().len();
+
+    let seen = port.observe_panes(&[a, PaneId::new("w9:p9"), b]);
+
+    assert_eq!(seen.len(), 3, "one observation per pane asked, in order");
+    assert_eq!(seen[0].cwd.as_deref(), Some("/scratch"));
+    assert_eq!(seen[1].cwd, None, "an unlisted pane reports nothing");
+    assert_eq!(seen[2].cwd.as_deref(), Some("/scratch"));
+    assert_eq!(sent_since(&fake, from), ["session.snapshot"]);
+}

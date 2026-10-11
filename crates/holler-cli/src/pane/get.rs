@@ -95,6 +95,11 @@ fn shown(args: &PaneGet, ports: Ports<'_>) -> Result<Shown, PaneError> {
         {
             match unmanaged::find(ports, &args.pane, now_millis()) {
                 Ok(Some(pane)) => Ok(Shown::Unmanaged(Box::new(pane))),
+                // A Herdr pane id is not a valid pane name, but it is not a usage mistake
+                // either: nothing answers to it.
+                _ if super::is_herdr_pane_id_shaped(&args.pane) => Err(PaneError::PaneNotFound {
+                    what: args.pane.clone(),
+                }),
                 _ => Err(error),
             }
         }

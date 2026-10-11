@@ -374,3 +374,11 @@ fn run_ok_or_findings(run: &crate::verb_harness::Outcome) -> Value {
         .unwrap_or_else(|f| panic!("an envelope: {f}: {run:?}"))
         .data
 }
+
+#[test]
+fn get_of_an_unknown_herdr_pane_id_is_pane_not_found_not_usage() {
+    let (rig, _) = rig_with_unmanaged(&[], Some(4));
+    assert_fails(&rig, &["pane", "get", "w9:p9"], 3, "pane-not-found", false);
+    // A bad name that does not look like a Herdr pane id is still a usage error.
+    assert_fails(&rig, &["pane", "get", "a/b"], 2, "usage", false);
+}

@@ -426,6 +426,27 @@ impl<T: Transport> HerdrPort for HerdrAdapter<T> {
         })
     }
 
+    /// The panes together, from **one** `session.snapshot`: a pane it does not list, and a
+    /// failed read, report an empty observation (see [`HerdrPort::observe_panes`]).
+    fn observe_panes(&self, panes: &[PaneId]) -> Vec<PaneObservation> {
+        let state = self.run_as(OP_OBSERVE_PANE, |deadline| {
+            parse_snapshot(&self.call(&Request::SessionSnapshot, deadline)?)
+        });
+        panes
+            .iter()
+            .map(|pane| {
+                let cwd = state
+                    .as_ref()
+                    .ok()
+                    .and_then(|state| state.pane_ref(pane))
+                    .and_then(|listed| listed.cwd.clone());
+                cwd.map_or_else(PaneObservation::default, |cwd| {
+                    PaneObservation::default().with_cwd(cwd)
+                })
+            })
+            .collect()
+    }
+
     fn version(&self) -> Result<String, PaneError> {
         self.run_as(OP_VERSION, |deadline| {
             let version = self.supported_server(deadline)?.version;

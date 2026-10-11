@@ -51,7 +51,7 @@ pub enum PaneCmd {
 
 /// Whether `arg` could be a Herdr pane id rather than a pane name: it has a `:` and is not a
 /// valid pane name (Herdr ids look like `w1:p3`).
-fn is_herdr_pane_id_shaped(arg: &str) -> bool {
+pub(crate) fn is_herdr_pane_id_shaped(arg: &str) -> bool {
     arg.contains(':') && holler_pane::PaneName::parse(arg).is_err()
 }
 
