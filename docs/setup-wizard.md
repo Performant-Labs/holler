@@ -53,8 +53,10 @@ never deletes it. When no config is found, the wizard's message names the path i
 
 When you do not name the panes, the default names are the grid cells, row then column, like a
 spreadsheet cell: `r1c1`, `r1c2`, `r1c3`, `r1c4` for the first row, `r2c1` for the first cell of the
-second row, and so on. With a pane count and no grid, the wizard proposes the squarest grid (two
-rows for more than four panes) and asks one confirm. Your own names always win.
+second row, and so on. With a pane count and no grid, the wizard proposes a grid by one rule: two
+rows for more than four panes, up to 8 panes, and above 8 panes the squarest grid. It asks one confirm. Your own names always win.
+
+`hub_host` is optional when the config has no `[[session]]` (N=0) and required when it has one or more (N>=1). Without it the hub is started with no `--advertise`: it advertises nothing remote, which is right when no body will dial it.
 
 Shape:
 
@@ -370,8 +372,8 @@ one `[[process]]` with pid, start time, command, role, stage and session). A pro
 to stop only if that ledger recorded it and its current start time and command still match.
 
 Every file the wizard keeps for itself lives in `<state_dir>/herdr/setup/` (for the default instance,
-`~/.holler/herdr/setup/`): the ledger (`<state_dir>/herdr/setup/wizard-ledger.toml`) and the global master config
-`sessions.toml`. Logs stay in `<state_dir>/logs` and scratch files in `<state_dir>/wizard-scratch`.
+`~/.holler/herdr/setup/`): the ledger (`<state_dir>/herdr/setup/wizard-ledger.toml`). The global master config
+`sessions.toml` is always `~/.holler/herdr/setup/sessions.toml`, even for a non-default instance. Logs stay in `<state_dir>/logs` and scratch files in `<state_dir>/wizard-scratch`.
 **After upgrading**, a rerun finds no ledger at the new path. A ledger at the old path
 (`<state_dir>/wizard-ledger.toml`) is not read, and there is no automatic fallback or migration: if its
 processes are still running they appear as foreign and are never signalled. Move the file into

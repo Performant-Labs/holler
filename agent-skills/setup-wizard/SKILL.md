@@ -318,8 +318,8 @@ For every stage:
 
 **Stage 3 is a hard stop, not just a gate like the others: nothing that changes real state
 (starting a process, killing one, joining, splitting a pane) may happen before the user has
-explicitly said to proceed.** Stages 1 and 2 are read-only except the scratch directory (loading a file,
-checking status; the one thing they write is `<scratch>`, and installing the skill needs its own
+explicitly said to proceed.** Stages 1 and 2 are read-only except the scratch directory and the config file you write from the user's answers (loading a file,
+checking status; the only things they write are `<scratch>` and that config file, and installing the skill needs its own
 yes, see Stage 1) so they're safe to run ahead of that; everything from Stage 4 onward is not.
 
 Keep a running status checklist as you go — one line per stage, name plus symbol, not a dense
@@ -495,37 +495,37 @@ invented or guessed; everything else here can be.
    ```
    If that's non-zero, this machine has no `tailscale` client (a real, unremarkable case —
    nothing about this wizard *requires* Tailscale specifically, it's just what this pattern's
-   been verified against). Skip straight to asking for `hub_host` and any `remote_host`/
-   `remote_tailnet_host` values directly — don't block on it, don't pretend it's there. It's
+   been verified against). Skip straight to asking for any `remote_host`/
+   `remote_tailnet_host` values directly (and for `hub_host` only when the config will have a session, N>=1) — don't block on it, don't pretend it's there. It's
    fine to mention, once, in passing while asking (e.g. "if these machines are on a Tailscale
    tailnet, I can look values up live instead of you typing them — let me know if `tailscale`
    is installed somewhere I should check") — a suggestion offered while doing the real work,
    never a requirement gating it.
 
 2. **If it is there, discover `hub_host` before asking anything** — it's a live fact about
-   *this* machine, not a decision:
+   *this* machine, not a decision. `hub_host` is optional when N=0 and required when N>=1:
    ```bash
    tailscale status --self --json 2>&1
    ```
    Use `.Self.DNSName` (strip the trailing dot) if that succeeds. If the command itself fails
-   (installed but not logged in / not running), fall back to asking — same as the "not
-   installed" case above, just reached a different way.
+   (installed but not logged in / not running), fall back to asking when N>=1 (same as the "not
+   installed" case above, just reached a different way); for N=0 leave it out of the file.
 
 3. **Offer a scenario menu instead of a blank-slate interview:**
    - **(A) Just a local orchestrator, nothing remote yet.** Needs only an orchestrator. Propose
-     a default — `name = "o1"`, `dir` = the cwd this wizard is running from, `cmd = "claude"` —
+     a default — `name = "r1c1"`, `dir` = the cwd this wizard is running from, `cmd = "claude"` —
      and ask one confirm-or-override question, not three separate ones. `layout` is then just
-     `[["o1"]]`, computed, not asked. When the user wants several panes and does not name them,
+     `[["r1c1"]]`, computed, not asked. When the user wants several panes and does not name them,
      the default names are the grid cells, row then column: `r1c1`, `r1c2`, `r1c3`, `r1c4` for
      the first row, `r2c1` for the first cell of the second row, and so on, with `layout` built
-     as columns of those names. If they give a pane count and no grid, propose the squarest grid
-     (two rows for more than four panes, for example 8 panes as 2 rows of 4) and ask one confirm.
+     as columns of those names. If they give a pane count and no grid, propose a grid by one rule
+     (two rows for more than four panes, up to 8 panes, for example 8 panes as 2 rows of 4; above 8 panes the squarest grid) and ask one confirm.
      The user's own names always win. This is a fully valid, complete config: a real Herdr pane
      running a real orchestrator, with no SSH/tailnet knowledge required at all — and doesn't
-     even touch the `tailscale` question above, since there's nothing remote to look up. Most
+     even touch the `tailscale` question above, since there's nothing remote to look up; fill `hub_host` from `tailscale` only when step 2 succeeds, otherwise leave it out. Most
      useful as the on-ramp for someone who hasn't set up a remote body yet.
    - **(B) A local orchestrator plus one or more remote attach-mode sessions.** Same
-     orchestrator default as (A), then — and only then — the genuinely unknowable part: for
+     orchestrator default as (A) (`name = "r1c1"`, `layout = [["r1c1"]]`), then — and only then — the genuinely unknowable part: for
      each remote session the user actually wants (ask how many, don't assume a count), get its
      `remote_host`. If `tailscale` is available (step 1), offer real, live candidates before
      asking them to type one blind:
@@ -552,7 +552,8 @@ invented or guessed; everything else here can be.
    multiple-choice question is), not as open-ended prose — a menu is faster to answer than a
    paragraph asking the same thing.
 
-4. **Write the file from the answers, show it, and let the user confirm or edit before Stage 1
+4. **Write the file from the answers** (on a first run create the directory first:
+   `mkdir -p ~/.holler/herdr/setup`), **show it, and let the user confirm or edit before Stage 1
    re-validates it** — don't silently trust your own assembly of their answers into TOML;
    showing the real file is cheap and catches a transcription mistake before Stage 3 builds a
    plan from it.
@@ -567,14 +568,14 @@ question to Stage 8, where it's too late to have asked cheaply.
 **Verify:** state plainly **which of the three paths/sources** you actually loaded (an explicit
 `--config` flag, cwd, or the global fallback), as an absolute path — this is real, user-visible state that changes
 what a later edit to either file would affect. The file parses as valid TOML with a top-level
-`hub_host` (non-empty), at least one `[[orchestrator]]` table (every entry has a real `name`,
+`hub_host` (non-empty; optional when N=0, required when N>=1), at least one `[[orchestrator]]` table (every entry has a real `name`,
 `dir`, and `cmd`), zero or more `[[session]]` tables (a local-only config has none, N=0; every
 entry that exists has a real `name`, `harness`, `endpoint` — a `http://127.0.0.1:<port>` URL — **and its own non-empty `remote_host` and
 `remote_tailnet_host`**), and a top-level `layout` (a nested array of names). Cross-check
 `layout` in every direction: every `[[orchestrator]]` name must appear in `layout` exactly
 once, every `[[session]]` name must appear in `layout` exactly once, no orchestrator name and
 session name may collide with each other, and `layout` must contain no name that isn't a real
-orchestrator or session. Extract and state `hub_host`, the real M (orchestrator count) and N
+orchestrator or session. Extract and state `hub_host` (or "none", when N=0 and it is absent), the real M (orchestrator count) and N
 (session count), every orchestrator's name/dir/cmd, every session's name/port/harness/
 `remote_host`, **the set of distinct `remote_host` values across all sessions** (this is what
 Stage 7 groups bodies by — state it explicitly, e.g. "2 distinct hosts: remote-a (alpha, beta),
@@ -634,7 +635,7 @@ these values; every later command uses them as literals (shell-state rule, top o
 
 **Gate:** zero sessions is not a failure: a config with at least one `[[orchestrator]]` and no `[[session]]` passes. Stop on: the files under `$WIZARD_LIB` are missing and the install command did not fix it (stop and say so); `instance.sh` exits non-zero (stop and show the user its messages, never guess a fix);
 no config found at any of the three tiers (per the Do step above, this is a hard stop
-with the user, never an auto-created file), a missing/empty `hub_host`, a missing `name`/`dir`/`cmd` on any orchestrator entry, a
+with the user, never an auto-created file), a missing/empty `hub_host` when N>=1 (with N=0 it may be absent), a missing `name`/`dir`/`cmd` on any orchestrator entry, a
 missing `name`/`harness`/`mode`/`endpoint`/`remote_host`/`remote_tailnet_host` on any session
 entry, a `mode` value other than `attach` (the only mode this wizard's Stage 4/9 implement —
 flag it explicitly here rather than letting it fail silently three stages later, same as an
@@ -1109,7 +1110,7 @@ happens in Stage 7). `mkdir -p <logs_dir>` first, then start it, printing the pr
 { HOLLER_STATE_DIR=<state_dir> nohup holler hub serve --listen 127.0.0.1:<hub_port> --advertise <hub_host>:<serve_https_port> > <logs_dir>/<prefix>-hub.log 2>&1 & echo $!; }
 tailscale serve --bg --https <serve_https_port> <hub_port>
 ```
-Note the printed pid as a literal (it is not kept anywhere else). `--advertise` carries the
+Note the printed pid as a literal (it is not kept anywhere else). With no `hub_host` (N=0 and none in the config), leave `--advertise` out: `holler hub serve` then persists no advertise address and the hub advertises nothing remote, which is right when no body will dial it. `--advertise` carries the
 **serve port**: bodies dial `wss://<hub_host>:<serve_https_port>`, and a hub advertised without
 it would send them to port 443, which for a second instance is the first instance's serve
 endpoint. `<hub_port>` and `<serve_https_port>` are the instance's (defaults 41807 and 443); the
