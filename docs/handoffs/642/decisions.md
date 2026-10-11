@@ -124,3 +124,49 @@ Run handoff directory `docs/handoffs/642` Â· branch `issue-642-implementation` Â
         `session.messages` routes;
       - where `OPENCODE_CONFIG_CONTENT` is merged;
       - the default-first `/agent` sort and the TUI's choice of agent.
+
+## T, author tests / RED: 2026-10-11T10:50-06:00 (MDT)
+
+- **Decided:** RED is valid. F may start.
+  - **Runtime RED:**
+    - `prompt_test`: 12 of 12 fail on an assertion.
+    - `hermetic_test`: 3 fail, the rewritten agent test and the two `retry` abort cases. The other 30 pass.
+  - **Compile RED** only at `AGENT_UNUSABLE`, in `agent_test` and `real_opencode_test` (A's W-3, after #808's
+    precedent).
+  - **Behaviour RED** proven with a throwaway constant, never staged:
+    - `agent_test`: 10 fail and 1 passes, the regression pin of acceptance 2 and 3.
+    - The four new or changed real-OpenCode tests all fail on `agent-unsupported` or `prompt-unsupported`.
+  - **A's warns acted on:**
+    - W-1: no hermetic conformance run.
+    - W-2: a list that cannot be read holds nothing, and a test pins it.
+    - W-4: the fixtures moved to `tests/support/fixtures.rs`, with D12's list plus `ID`, `known_session`, `harness`
+      and `agent`.
+  - **Acceptance 11's third test** ends the turn with a raw abort. A live probe showed OpenCode 1.19.0 retrying the
+    dead-end provider indefinitely (`retry`), so the turn never ends on its own. The test also checks live that `retry`
+    reads `Busy`.
+- **Assumed:**
+  - The prompt-leak test needs no change to the stub. A canned reply that is byte-identical to the posted body stands
+    in for an echo. If F's body differed, the first `send_prompt` test would fail anyway.
+  - `send_prompt` treats a JSON 200 on the post as "not 204", so it is `unavailable` (D6: "any other status").
+  - A raw abort that ends the turn in a real test does not conflict with "the turn's end read from the raw server". The
+    end is still read from the raw message list.
+- **Hedged:**
+  - The `retry` behaviour is OpenCode 1.19.0's. A later version that fails the turn instead would still pass, because
+    the abort is harmless on a finished turn and `time.completed` is set either way.
+  - The real-test default agent for a server with no agent is computed from the raw `/agent`, not hardcoded as `build`.
+    The probe saw `build`.
+- **Evidence:**
+  - Commands, all on the base `src/`:
+    - `cargo test -p holler-adapter-opencode --test {prompt_test,hermetic_test,agent_test,attach_test,tui_test}`;
+    - `HOLLER_TEST_OPENCODE=1 cargo test --test real_opencode_test -- --ignored --test-threads=1` for the four new
+      tests, plus `ac13` and `ac17`;
+    - `cargo clippy -p holler-adapter-opencode --all-targets -- -D warnings`;
+    - `cargo fmt --check`;
+    - `bash scripts/lint.sh` (exit 0).
+  - Two live probes of `opencode serve` 1.19.0, with the rig's dead-end config, a scratch `HOME` and ports
+    48177-48179:
+    - with `default_agent` `plan`, the assistant message carries `agent` and `mode` `plan`, and the status reads
+      `retry`, attempts 1 to 5 over 40 s;
+    - with none, `/config` has no `default_agent`, the turn runs as `build`, and a raw abort answers `true`, after
+      which the status is `{}` and the message has `time.completed`.
+  - Handoff: `docs/handoffs/642/handoff-T-red.md`.

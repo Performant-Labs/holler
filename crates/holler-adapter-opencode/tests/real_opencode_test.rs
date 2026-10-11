@@ -9,8 +9,9 @@
 //! ```
 //!
 //! Every test builds its own rig (`real_opencode/rig.rs`): a scratch `HOME`, the dead-end
-//! provider (no model can be reached and no prompt is sent), ports from 48100-48199 only and
-//! a private tmux server. No test prints a raw `#{pane_title}`: assertions use the parsed
+//! provider (no model can be reached; a prompt is sent only by the agent and prompt tests of
+//! #642 part 3, to that provider, and their turns are aborted), ports from 48100-48199 only
+//! and a private tmux server. No test prints a raw `#{pane_title}`: assertions use the parsed
 //! value.
 
 #[path = "real_opencode/rig.rs"]
@@ -19,7 +20,8 @@ mod rig;
 use std::time::{Duration, Instant};
 
 use holler_adapter_opencode::tui::attach_port;
-use holler_adapter_opencode::OpenCodeHarness;
+use holler_adapter_opencode::{OpenCodeHarness, AGENT_UNUSABLE};
+use holler_pane::ports::Activity;
 use holler_pane::{AgentKey, HarnessPort, PaneError, PaneId, PaneName, ServeSpec};
 use holler_pane_testkit::conformance::harness::run_harness_conformance;
 use holler_pane_testkit::fault::PortOp;
@@ -312,7 +314,7 @@ fn ac18_raw_opencode_pins_what_the_adapter_hides() {
 
 #[test]
 #[ignore = "needs opencode and tmux: HOLLER_TEST_OPENCODE=1 cargo test -p holler-adapter-opencode --test real_opencode_test -- --ignored"]
-fn ac19_serve_command_starts_nothing_and_refuses_an_agent() {
+fn ac19_serve_command_starts_nothing_and_applies_an_agent() {
     if !opted_in("ac19") {
         return;
     }
@@ -328,11 +330,16 @@ fn ac19_serve_command_starts_nothing_and_refuses_an_agent() {
     assert!(refused(p0), "#802: serve_command started nothing on {p0}");
     let key = AgentKey::parse("feature-implementor").unwrap();
     let with = ServeSpec::default().with_agent(key);
-    let refusal = rig.harness.serve_command(&name, p0, &with);
+    let applied = rig.harness.serve_command(&name, p0, &with).unwrap();
     assert!(
-        matches!(&refusal, Err(e) if e.code() == "agent-unsupported"),
-        "{refusal:?}"
+        applied
+            .as_slice()
+            .iter()
+            .any(|e| e.contains("feature-implementor")),
+        "#642 part 3: the argv carries the key: {applied:?}"
     );
+    std::thread::sleep(Duration::from_millis(500));
+    assert!(refused(p0), "serve_command started nothing on {p0}");
 }
 
 #[test]
@@ -370,4 +377,176 @@ fn ac19a_a_prefix_of_a_session_name_never_reaches_its_pane() {
         pid,
         "pane 0 was not respawned"
     );
+}
+
+// ---- #642 part 3, acceptance 11: the agent, the prompt and the activity ----
+
+/// How long a raw read of the server's own state may take to show what a test waits for.
+const OBSERVE: Duration = Duration::from_secs(15);
+
+fn spec(key: &str) -> ServeSpec {
+    ServeSpec::default().with_agent(AgentKey::parse(key).unwrap())
+}
+
+/// Poll `seen` on a raw read until it answers, within [`OBSERVE`].
+fn observed<T>(what: &str, mut seen: impl FnMut() -> Option<T>) -> T {
+    let until = Instant::now() + OBSERVE;
+    loop {
+        if let Some(answer) = seen() {
+            return answer;
+        }
+        assert!(
+            Instant::now() < until,
+            "{what}: not seen within {OBSERVE:?}"
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
+/// The raw message list of `session`, read with no adapter in between.
+fn messages(port: u16, session: &str) -> Vec<Value> {
+    let reply = raw(port, "GET", &format!("/session/{session}/message"), None);
+    json_of(&reply).as_array().cloned().unwrap_or_default()
+}
+
+/// The `info` of the first assistant message of `session`, once there is one.
+fn first_assistant(port: u16, session: &str) -> Value {
+    observed("an assistant message", || {
+        messages(port, session)
+            .into_iter()
+            .map(|m| m["info"].clone())
+            .find(|info| info["role"] == "assistant")
+    })
+}
+
+/// The raw prompt holler-body sends (E16), on the bare route.
+fn raw_prompt(port: u16, session: &str) {
+    let body = json!({ "parts": [{ "type": "text", "text": "hello" }] });
+    let reply = raw(
+        port,
+        "POST",
+        &format!("/session/{session}/prompt_async"),
+        Some(&body),
+    );
+    assert_eq!(reply.status, 204, "raw prompt_async");
+}
+
+/// End `session`'s turn with a raw abort: the dead-end provider is retried until then.
+fn raw_abort(port: u16, session: &str) {
+    let reply = raw(port, "POST", &format!("/session/{session}/abort"), None);
+    assert_eq!(json_of(&reply), Value::Bool(true), "raw abort");
+}
+
+fn refusal(result: Result<(), PaneError>, what: &str) -> (String, String) {
+    match result {
+        Err(PaneError::Refused { code, message }) => (code.as_str().to_owned(), message),
+        other => panic!("{what}: expected a refusal, got {other:?}"),
+    }
+}
+
+/// Acceptance 11 (D1-D4): a server started with `plan` runs its turns as `plan`, and
+/// `verify_serving` says so; a server started with no agent runs as its own default, and
+/// `verify_serving` asked for `plan` refuses it: a real server the variable did not reach.
+#[test]
+#[ignore = "needs opencode and tmux: HOLLER_TEST_OPENCODE=1 cargo test -p holler-adapter-opencode --test real_opencode_test -- --ignored"]
+fn agent_default_reaches_the_first_message() {
+    if !opted_in("agent_default_reaches_the_first_message") {
+        return;
+    }
+    let mut rig = Rig::start();
+    rig.serve_with(0, &spec("plan"));
+    rig.serve(1);
+    let [p0, p1] = rig.ports;
+    assert_eq!(rig.harness.verify_serving(p0, &spec("plan")), Ok(()));
+    let (code, message) = refusal(
+        rig.harness.verify_serving(p1, &spec("plan")),
+        "a server with no agent",
+    );
+    assert_eq!(code, AGENT_UNUSABLE.as_str());
+    assert!(
+        message.contains("the server's default agent is not plan"),
+        "{message:?}"
+    );
+    // The server's own default: the first agent a default may be (E33).
+    let agents = json_of(&raw(p1, "GET", "/agent", None));
+    let default = agents
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|a| a["mode"] != "subagent" && a["hidden"] != true)
+        .and_then(|a| a["name"].as_str())
+        .unwrap()
+        .to_owned();
+    assert_ne!(
+        default, "plan",
+        "the second server must not run plan anyway"
+    );
+    for (i, want) in [(0, "plan"), (1, default.as_str())] {
+        let port = rig.ports[i];
+        let session = rig.create(i);
+        raw_prompt(port, &session);
+        let info = first_assistant(port, &session);
+        assert_eq!(
+            (info["agent"].as_str(), info["mode"].as_str()),
+            (Some(want), Some(want)),
+            "server {i}: {info}"
+        );
+        raw_abort(port, &session);
+    }
+}
+
+/// Acceptance 11 (D4(b)): a server started with a subagent, a hidden agent or an unknown key
+/// comes up healthy (E21), and `verify_serving` refuses each `agent-unusable`.
+#[test]
+#[ignore = "needs opencode and tmux: HOLLER_TEST_OPENCODE=1 cargo test -p holler-adapter-opencode --test real_opencode_test -- --ignored"]
+fn verify_serving_refuses_a_subagent_a_hidden_agent_and_an_unknown_key() {
+    if !opted_in("verify_serving_refuses_a_subagent_a_hidden_agent_and_an_unknown_key") {
+        return;
+    }
+    for (key, reason) in [
+        ("explore", "agent explore is a subagent"),
+        ("title", "agent title is hidden"),
+        ("zq642-no-such-agent", "no agent named zq642-no-such-agent"),
+    ] {
+        let mut rig = Rig::start();
+        rig.serve_with(0, &spec(key));
+        let (code, message) = refusal(rig.harness.verify_serving(rig.ports[0], &spec(key)), key);
+        assert_eq!(code, AGENT_UNUSABLE.as_str(), "{key}");
+        assert!(message.contains(reason), "{key}: {message:?}");
+    }
+}
+
+/// Acceptance 11 (D6, D7): `send_prompt` queues a turn, which reads `Busy` while OpenCode
+/// retries the dead-end provider (`retry`, D7(b)); once a raw abort has ended it, as the raw
+/// message list shows, `session_activity` reads `Idle` within `Timeouts.settle`.
+#[test]
+#[ignore = "needs opencode and tmux: HOLLER_TEST_OPENCODE=1 cargo test -p holler-adapter-opencode --test real_opencode_test -- --ignored"]
+fn send_prompt_queues_a_turn_and_session_activity_follows_it() {
+    if !opted_in("send_prompt_queues_a_turn_and_session_activity_follows_it") {
+        return;
+    }
+    let mut rig = Rig::start();
+    rig.serve(0);
+    let p0 = rig.ports[0];
+    let s = rig.create(0);
+    assert_eq!(rig.harness.send_prompt(p0, &s, "hello"), Ok(()));
+    observed("the turn in /session/status", || {
+        let status = json_of(&raw(p0, "GET", "/session/status", None));
+        status.get(&s).is_some().then_some(())
+    });
+    assert_eq!(rig.harness.session_activity(p0, &s), Ok(Activity::Busy));
+    raw_abort(p0, &s);
+    observed("the turn's assistant message completed", || {
+        messages(p0, &s)
+            .iter()
+            .any(|m| m["info"]["role"] == "assistant" && m["info"]["time"]["completed"].is_number())
+            .then_some(())
+    });
+    let until = Instant::now() + rig.config.timeouts.settle;
+    let mut activity = rig.harness.session_activity(p0, &s);
+    while activity != Ok(Activity::Idle) && Instant::now() < until {
+        std::thread::sleep(Duration::from_millis(100));
+        activity = rig.harness.session_activity(p0, &s);
+    }
+    assert_eq!(activity, Ok(Activity::Idle), "once the turn has ended");
 }

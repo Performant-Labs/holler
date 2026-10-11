@@ -6,8 +6,10 @@
 //!   `XDG_*` dirs inside it, so no real OpenCode config, auth or session store is read;
 //! - the dead-end provider config, verbatim from the spike, so no model can be reached:
 //!   127.0.0.1:9 must refuse, and after every server the rig launches is healthy it must
-//!   report exactly that provider, or the test fails without going on. No prompt is ever
-//!   sent;
+//!   report exactly that provider, or the test fails without going on. A prompt is sent only
+//!   by the agent and prompt tests of #642 part 3 (D11), and only to that provider: OpenCode
+//!   1.19.0 retries the refused connection (the session's status reads `retry`) until the
+//!   turn is aborted, so no model is reached;
 //! - a launcher (#802): `serve_command` only builds the server's argv, so the rig runs that
 //!   argv itself, in a process group of its own, in the scratch project dir, waits for its
 //!   health with the engine's own wait (`holler_pane::tx_launch::wait_healthy`), then runs
@@ -36,6 +38,7 @@ use holler_adapter_opencode::http::{self, Reply};
 use holler_adapter_opencode::{
     OpenCodeConfig, OpenCodeHarness, ProcessEnv, Timeouts, TmuxConfig, TmuxSocket,
 };
+use holler_pane::ports::Activity;
 use holler_pane::tx_launch::{wait_healthy, BOOT_POLL};
 use holler_pane::{Argv, HarnessPort, PaneError, PaneId, PaneName, ServeSpec};
 use holler_pane_testkit::conformance::harness::HarnessRig;
@@ -292,6 +295,14 @@ impl HarnessPort for Recording {
     fn shown_session(&self, pane: &PaneId) -> Result<Option<String>, PaneError> {
         self.inner.shown_session(pane)
     }
+    // #642 part 3: forwarded, or the trait's defaults (`prompt-unsupported`, `Idle`) would
+    // answer for the adapter through `rig.harness`.
+    fn send_prompt(&self, port: u16, session: &str, text: &str) -> Result<(), PaneError> {
+        self.inner.send_prompt(port, session, text)
+    }
+    fn session_activity(&self, port: u16, session: &str) -> Result<Activity, PaneError> {
+        self.inner.session_activity(port, session)
+    }
 }
 
 /// The model guard: the server on `port` lists exactly the dead-end provider, and
@@ -403,11 +414,17 @@ impl Rig {
         (self.harness, rig, self.guard)
     }
 
-    /// Start the server of `SESSIONS[i]` on `ports[i]`: the argv `serve_command` builds with
-    /// no agent, run by the rig's launcher. A port another process took since it was picked
+    /// Start the server of `SESSIONS[i]` on `ports[i]` with no agent: [`Rig::serve_with`] of
+    /// the default spec. Its pid, which is also its process group id.
+    pub fn serve(&mut self, i: usize) -> u32 {
+        self.serve_with(i, &ServeSpec::default())
+    }
+
+    /// Start the server of `SESSIONS[i]` on `ports[i]`: the argv `serve_command` builds for
+    /// `spec`, run by the rig's launcher. A port another process took since it was picked
     /// (it no longer refuses) is replaced by a new one from the range, not a failure (AC 31).
     /// Its pid, which is also its process group id.
-    pub fn serve(&mut self, i: usize) -> u32 {
+    pub fn serve_with(&mut self, i: usize, spec: &ServeSpec) -> u32 {
         let name = PaneName::parse(SESSIONS[i]).unwrap();
         for _ in 0..3 {
             let port = self.ports[i];
@@ -417,7 +434,7 @@ impl Rig {
             }
             let argv = self
                 .harness
-                .serve_command(&name, port, &ServeSpec::default())
+                .serve_command(&name, port, spec)
                 .unwrap_or_else(|e| panic!("serve_command({name}, {port}): {e:?}"));
             return self
                 .harness
