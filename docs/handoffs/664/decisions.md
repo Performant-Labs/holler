@@ -48,3 +48,40 @@
     exits 0 (`apply/rig.rs` warns at 742 lines).
   - **Source.** `src/` is identical to `origin/main` after every throwaway edit (`git diff origin/main --stat --
     'crates/*/src'` is empty).
+
+## F (Phase 6, implement): 2026-10-11 07:55 MDT
+- **Decided:**
+  - **The engine.** `tx_apply.rs` holds the module doc and the bound, the API T pinned, the gate, the plan and the
+    stop loop. `tx_apply/observe.rs` holds the fan-out and §2's judgment. `tx_apply/run.rs` holds one live step, the
+    take-over move and the twins. `tx_launch.rs` is unchanged.
+  - **The observation** runs one scoped thread per call (the snapshot, and each recorded pane's `health` and
+    `shown_session`), so it takes one per-call bound, which is §9's 10 s, rather than two.
+  - **Rows are chosen once, at planning.** A step acts on its re-read record and on P's current spec. Rows a and e
+    re-read nothing.
+  - **Classification goes through `class_of`.** `usage` for a step's spec becomes the open code `spec-not-launchable`.
+    An observation error that is not failure class becomes `unavailable`, so a failed step always exits 1.
+  - **The vocabulary.** Actions are `create`, `adopt`, `report`, `relaunch`, `refuse` and `observe`, and a dry run's
+    acting step is `planned`. The step JSON adds `detail` (C12/O2's "the step's detail"), and absent keys print
+    `null`.
+  - **Reuse.** The verb reuses `show`'s `difference_line` and `text`, made `pub(crate)`, and `reconcile_step`.
+  - **Docs.** ADR-0021 section 9's apply row and "Apply as built (#664)", which defines "adopt"; ADR 0003's row;
+    `cli-surface.txt`; the CHANGELOG; and one inline span in `docs/research/herdr-api-spike.md`, without which
+    `docs_cli_test` fails once `NAME` is required.
+- **Assumed:**
+  - **C3, literally.** A snapshot error fails every recorded pane that row a does not refuse.
+  - **The row e test uses the record's role**, as §3 says ("record, not healthy, role orchestrator").
+  - **A spec whose pane is not a pane name** is a planning refusal (action `refuse`). It never trips §4's gate.
+- **Hedged:**
+  - **The follow-up issues of §9 and §13 are not filed.** CONTRIBUTING.md makes filing an issue an assertion of
+    human review. Both issues are drafted in `handoff-F.md` for the operator or the run's agent.
+  - **`stub.rs`'s `STUBS` still lists `profile apply`.** That is a test file, so T must delete it. Until then the two
+    `pane_cli_process` stub tests fail.
+  - **Two warns stay open, as the brief leaves them** (Known issues): a row-f pane that recovers before its step is
+    still relaunched (A warn 5(b)), and the stale-P window after a re-read remains (A warn 5(a)).
+- **Evidence:**
+  - **`profile_verbs`.** 81 of 81 pass (T's 38 apply tests and the 43 existing), over 5 runs.
+  - **Lint and format.** Workspace clippy with `-D warnings` is clean, `scripts/lint.sh` exits 0, `changelog-check`
+    is ok, and rustfmt is clean on every changed file.
+  - **`cli_surface_test` and `docs_cli_test`** pass.
+  - **`pane_cli_process`.** 34 of 36 pass; the 2 failures are the `STUBS` entry.
+  - **The whole workspace.** See `handoff-F.md`'s Tier 1 output.
