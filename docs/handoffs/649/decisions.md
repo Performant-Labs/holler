@@ -554,3 +554,23 @@
     - `dual-review.sh` (`build_evidence_section`, `EVIDENCE_MAX_BYTES`, `DEFAULT_EXCLUDES`, `--handoff`);
     - the driver's diff-gate loop, `shouldEscalate` and `PER_GATE_BLOCK_THRESHOLD`;
     - `handoff-T-green.md` and `handoff-T-red.md`.
+
+## T (Phase 7, verify GREEN, fourth pass: F's third cycle) — 2026-10-11T15:12:01-06:00
+- **Decided:**
+  - **PASS.** F's only production change is a two-line comment in `wiring.rs`. No code line differs, and the suite is
+    GREEN at `4d7f58a`.
+  - **No test change.** F flagged none. A comment has no behaviour to pin, and the compiler pins the `move`.
+- **Assumed:**
+  - The opt-in `scenario::*` run need not repeat, since no code line changed after `22aa539`, where it passed 4/4.
+- **Hedged:**
+  - Round 3 of the diff gate may still ask for first-cycle facts that are now past the 12,000-byte evidence cap. That
+    is a gate-input gap for O to file, not a defect in the code.
+- **Evidence:**
+  - `git show 4d7f58a -- crates/`: two added comment lines.
+  - Repeated F's mutation: without `move`, `cargo check -p holler-cli` fails `E0373`. Restored with `git checkout`,
+    and the tree was clean.
+  - The B-2 excerpts match `adapter.rs:73-74` and `error.rs:402-403`. A `LC_ALL=C` sorted-line diff of `evidence.md`
+    (`13010f4` against HEAD) loses only the old title and intro.
+  - Workspace: 151 binaries; 2312 passed, 1 failed (the rename scan, `docs/handoffs/` hits only), 32 ignored.
+    `pane_integration` 61/0/4, `docs_cli_test` 3/3, `wire_selftest` 3/3. Build, clippy `-D warnings`, `lint.sh`,
+    `changelog-check` and `machete` are clean.
