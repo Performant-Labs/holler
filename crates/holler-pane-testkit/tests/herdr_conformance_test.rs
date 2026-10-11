@@ -16,7 +16,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use holler_pane::{
-    GridPos, HerdrPane, HerdrPort, HerdrSnapshot, HerdrSpec, Key, PaneError, PaneId,
+    GridPos, HerdrPane, HerdrPort, HerdrSnapshot, HerdrSpec, Key, PaneError, PaneId, PaneObservation,
 };
 use holler_pane_testkit::conformance::herdr::{herdr_cases, run_herdr_conformance, HerdrFixture};
 use holler_pane_testkit::herdr::{FakeHerdr, HerdrVersion, Placement};
@@ -28,8 +28,9 @@ const WORKSPACE: &str = "scratch";
 /// and by `ensure_pane` of its cell; an unlabelled one, and one labelled `""`, with `None`.
 const LABEL_CASE: &str = "labelled-pane-reports-its-label";
 
-/// The 11 case ids of the brief's table, in order, then #808's label case.
-const DOCUMENTED_CASES: [&str; 12] = [
+/// The 11 case ids of the brief's table, in order, then #808's label case and #832's
+/// `observe_pane` case.
+const DOCUMENTED_CASES: [&str; 13] = [
     "ensure-r2c1-reads-back-as-r2c1",
     "ensure-r1c2-is-grid-out-of-range",
     "ensure-is-idempotent",
@@ -42,6 +43,7 @@ const DOCUMENTED_CASES: [&str; 12] = [
     "read-returns-at-most-max-lines",
     "version-is-reported",
     LABEL_CASE,
+    "observe-pane-answers-a-listed-pane-and-refuses-an-unknown-one",
 ];
 
 /// The fake serving a scratch session whose workspace is 2 rows by 1 column.
@@ -164,6 +166,10 @@ impl HerdrPort for GuardWatcher {
         self.note();
         self.inner.version()
     }
+    fn observe_pane(&self, pane: &PaneId) -> Result<PaneObservation, PaneError> {
+        self.note();
+        self.inner.observe_pane(pane)
+    }
 }
 
 #[test]
@@ -242,6 +248,8 @@ enum Break {
     KeepsEmptyLabel,
     /// A pane never labelled reports its id as its label (#808).
     InventsLabels,
+    /// `observe_pane` answers every pane, a closed or unknown one too (#832).
+    ObserveAnswersAnyPane,
 }
 
 struct Mutant {
@@ -434,6 +442,13 @@ impl HerdrPort for Mutant {
         }
     }
 
+    fn observe_pane(&self, pane: &PaneId) -> Result<PaneObservation, PaneError> {
+        if self.broken == Break::ObserveAnswersAnyPane {
+            return Ok(PaneObservation::default());
+        }
+        self.inner.observe_pane(&self.inward(pane)?)
+    }
+
     fn snapshot(&self) -> Result<HerdrSnapshot, PaneError> {
         let mut panes = Vec::new();
         for pane in self.inner.snapshot()?.panes {
@@ -540,6 +555,14 @@ fn a_herdr_whose_closed_panes_still_answer_fails() {
     assert_suite_fails_on(
         Break::ClosedPaneStillAnswers,
         &["calls-on-a-closed-pane-are-pane-not-found"],
+    );
+}
+
+#[test]
+fn a_herdr_whose_observe_pane_answers_any_pane_fails() {
+    assert_suite_fails_on(
+        Break::ObserveAnswersAnyPane,
+        &["observe-pane-answers-a-listed-pane-and-refuses-an-unknown-one"],
     );
 }
 

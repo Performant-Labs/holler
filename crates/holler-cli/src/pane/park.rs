@@ -43,6 +43,7 @@
 use clap::Args;
 use holler_pane::findings::quoted;
 use holler_pane::pane::Hold;
+use holler_pane::unmanaged;
 use holler_pane::{Pane, PaneError, PaneName, Ports, ProfileName};
 use holler_proto::clock::now_millis;
 use serde::Serialize;
@@ -307,9 +308,7 @@ fn in_scope(target: &HoldTarget, ports: Ports<'_>) -> Result<Vec<Pane>, PaneErro
             let record = ports
                 .pane_store
                 .get(name)?
-                .ok_or_else(|| PaneError::PaneNotFound {
-                    what: name.to_string(),
-                })?;
+                .ok_or_else(|| unmanaged::missing(ports, name.as_str()))?;
             vec![record]
         }
         HoldTarget::Profile { profile, pane } => ports.scope.resolve(profile, pane.as_ref())?.panes,

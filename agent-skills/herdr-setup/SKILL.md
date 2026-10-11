@@ -417,7 +417,7 @@ the wizard can establish without a config:
 | `ssh` present | ok / absent | absent means manual-relay mode in Stage 2 and after |
 | The skill's `lib/` scripts present (`WIZARD_LIB`) | ok / missing | the absolute `lib` path |
 | Driving agent not inside a Herdr pane (`check-pane`) | ok / stop | a stop is a Stage 3 refusal, carried forward |
-| Herdr server state and saved sessions | info | running or stopped, and `herdr session list` |
+| Herdr server state and saved sessions | info | the server running or stopped, and every session from `herdr session list` with its status (running or stopped) |
 | A Holler hub running here | info | `holler hub status`, default state directory |
 | An existing wizard ledger | info | its live rows |
 | An existing config at the three tiers | info | which tier, as an absolute path |
@@ -602,7 +602,40 @@ invented or guessed; everything else here can be.
    multiple-choice question is), not as open-ended prose — a menu is faster to answer than a
    paragraph asking the same thing.
 
-   **Then, once the orchestrators are settled, ask one more question: the workspace name.**
+   **Next, once the orchestrators are settled, ask the Herdr session question** (skip it for (C);
+   an existing config is not re-asked: its `[instance]` table, or the lack of one, stands, and
+   Stage 1's report states which session it targets). Herdr has no session rename, so this is
+   decided now, before the workspace is first built. Offer two answers, again as an actual choice:
+   - **The default, unnamed session**, recommended when the user has no reason to separate this
+     workspace from their other Herdr work. It writes no `[instance]` table, and the behaviour is
+     unchanged: the wizard builds in Herdr's unnamed `default` server, and Stage 1's report and
+     Stage 3's plan say "default (unnamed)".
+   - **A new named session**: a full second instance with its own state directory and ports.
+     Suggest a name (for example `work`); it must match `^[a-z][a-z0-9-]{0,23}$` and must not be
+     `default`. Check it against every session Stage 0 listed from `herdr session list`, running
+     or stopped: building in an existing session is not offered, so refuse a name already listed,
+     name the session it matches and its status, and offer the choice of another name or the
+     default. For a free name, propose this `[instance]` table:
+     ```toml
+     [instance]
+     name = "<name>"
+     herdr_session = "<name>"
+     state_dir = "~/.holler-<name>"
+     hub_port = 41808
+     serve_https_port = 8443
+     backend_port_base = 47101
+     ```
+     The ports are defaults only (nothing is probed here): Stage 3's `collide.sh` stays the
+     authority and refuses a taken port, and the user may change any value. Step 4 writes the
+     table after the bare top-level keys and before `[[orchestrator]]`, shows the file, and the
+     user confirms or edits it before `instance.sh` validates it (Verify, below). Say this once:
+     a named session is driven from a terminal outside any Herdr pane (rule (2) of "Two rules for
+     a non-default instance", below), and `holler` calls in the user's own shells need
+     `HOLLER_STATE_DIR=<state_dir>` (for example `HOLLER_STATE_DIR=$HOME/.holler-work holler hub
+     status`), or they reach the default instance instead.
+
+   **Then, once the orchestrators and the session are settled, ask the last question: the
+   workspace name.**
    Suggest **two dictionary words related to the task**, lower case, joined with a hyphen
    (Discord-style), for example `herald-relay`, `lantern-hub`, `quiet-tower`. Offer one
    suggestion (three alternatives on request); the user accepts, edits or types their own, and
@@ -615,7 +648,8 @@ invented or guessed; everything else here can be.
    `mkdir -p ~/.holler/herdr/setup`), **show it, and let the user confirm or edit before Stage 1
    re-validates it** — don't silently trust your own assembly of their answers into TOML;
    showing the real file is cheap and catches a transcription mistake before Stage 3 builds a
-   plan from it.
+   plan from it. A new named session's `[instance]` table goes after the bare top-level keys
+   (`workspace`, `hub_host`, `layout`) and before the first `[[orchestrator]]`.
 
 Only once a config exists this way — assembled from the user's own real answers, plus live
 `tailscale status` discovery when it's actually available, never from the doc's example values
@@ -626,7 +660,9 @@ question to Stage 8, where it's too late to have asked cheaply.
 
 **Verify:** state plainly **which of the three paths/sources** you actually loaded (an explicit
 `--config` flag, cwd, or the global fallback), as an absolute path — this is real, user-visible state that changes
-what a later edit to either file would affect. The file parses as valid TOML with a top-level
+what a later edit to either file would affect. State the Herdr session the config targets: the
+`[instance]` table's `herdr_session` ("Herdr session: `<name>`"), or, with no `herdr_session`,
+"Herdr session: default (unnamed)". The file parses as valid TOML with a top-level
 `hub_host` (non-empty; optional when N=0, required when N>=1), at least one `[[orchestrator]]` table (every entry has a real `name`,
 `dir`, and `cmd`), zero or more `[[session]]` tables (a local-only config has none, N=0; every
 entry that exists has a real `name`, `harness`, `endpoint` — a `http://127.0.0.1:<port>` URL — **and its own non-empty `remote_host` and
@@ -972,6 +1008,9 @@ plan and show it before touching anything:
     workspace in that server, `herdr.sh run workspace create`, never splitting the panes it already
     has; Stage 8 builds there and records nothing for it), or stop (set a `herdr_session` in an `[instance]` table, which makes the instance
     non-default). Never stop that server.
+- **The Herdr session.** The plan names it in both cases: "Herdr session: default (unnamed)" for
+  the default instance (no `herdr_session`), or "Herdr session: `<name>` (new, own state directory
+  and ports)" for a named one, followed by its `state_dir` and ports.
 - **The workspace's name.** When the config has a `workspace`, the plan names it ("workspace
   `<workspace>`"); with none, say Herdr labels the workspace itself.
 - **A new workspace, when the wizard creates one** (a restored saved session, or "build in it" on a

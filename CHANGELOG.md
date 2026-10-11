@@ -15,6 +15,23 @@ fills this file in at release time.
   section "Restarting a pane on another model" of `docs/orchestrating.md` now leads with `holler pane relaunch` and keeps
   `scripts/pane-restart` as the fallback until the 7-day sign-off of the cutover (#654), and as the only restart path
   of a Claude Code pane. A docs test pins the guide to the code's own tables. No behaviour changes.
+- Setup wizard (epic [#726](https://github.com/Performant-Labs/holler/issues/726)): Stage 1 asks which Herdr session to
+  build in, between the orchestrators and the workspace name ([#838](https://github.com/Performant-Labs/holler/issues/838)).
+  "The default, unnamed session" (recommended) writes no `[instance]` table, so nothing changes; "A new named session"
+  proposes a full second instance (`state_dir = "~/.holler-<name>"`, ports 41808, 8443 and 47101) and refuses a name
+  already in `herdr session list`, running or stopped. An existing config is not re-asked. Stage 0 lists every session
+  with its status, and Stage 1's report and Stage 3's plan name the targeted session.
+- Pane control, unmanaged panes (epic [#633](https://github.com/Performant-Labs/holler/issues/633), decision 9):
+  `holler pane list` (over the whole registry) and `holler pane get` now show a Herdr pane that no record names, with the
+  state `unmanaged`, its Herdr pane id, label, working directory and idle time
+  ([#832](https://github.com/Performant-Labs/holler/issues/832)). `unmanaged` is observed, never stored, and not a hold: no
+  verb that acts on a pane (`relaunch`, `switch`, `reset`, `park`, `unpark`, `close`) accepts one, and each refuses it with the
+  new code `pane-unmanaged` (exit 3) instead of `pane-not-found`. `holler pane doctor --unmanaged-stalled-after SECONDS`
+  reports an unmanaged pane whose screen has not changed that long as the finding `unmanaged-stalled`. **Herdr 0.8.2 reports no
+  time at which a screen last changed**, so the port carries `last_screen_change` (new `HerdrPort::observe_pane`) and the real
+  adapter leaves it, and the idle time, empty rather than guess one: the idle time and `unmanaged-stalled` need a Herdr that
+  reports it, tracked as a follow-up. If Herdr cannot be read, `list` still prints the registry's panes and says so. The test
+  kit gains `seed_unmanaged_pane`, and the roster (#648) is not changed here.
 - Pane control, the migration import (epic [#633](https://github.com/Performant-Labs/holler/issues/633)): `holler pane
   import --from STATE_ROOT --herdr-session NAME [--launcher FILE] [--orchestrator PANE]... [--dry-run]` adopts the fleet
   the old launcher runs ([#650](https://github.com/Performant-Labs/holler/issues/650)). It reads each pane directory's

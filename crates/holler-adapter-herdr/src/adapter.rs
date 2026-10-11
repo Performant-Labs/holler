@@ -42,7 +42,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use holler_pane::{
-    GridPos, HerdrPane, HerdrPort, HerdrSnapshot, HerdrSpec, Key, PaneError, PaneId,
+    GridPos, HerdrPane, HerdrPort, HerdrSnapshot, HerdrSpec, Key, PaneError, PaneId, PaneObservation,
 };
 use serde_json::Value;
 
@@ -68,6 +68,7 @@ const OP_READ: &str = "herdr.read";
 const OP_CLOSE: &str = "herdr.close";
 const OP_SNAPSHOT: &str = "herdr.snapshot";
 const OP_VERSION: &str = "herdr.version";
+const OP_OBSERVE_PANE: &str = "herdr.observe_pane";
 
 /// What the adapter is told (Herdr has no grid and no discoverable socket of Holler's).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -403,6 +404,47 @@ impl<T: Transport> HerdrPort for HerdrAdapter<T> {
             }
             Ok(HerdrSnapshot { panes })
         })
+    }
+
+    /// The pane's working directory, from the `PaneInfo` of one `session.snapshot` (no new
+    /// request kind, and nothing that acts on the pane). **Herdr 0.8.2 (protocol 20)
+    /// reports no time at which a screen last changed**: `PaneInfo` carries a `revision`
+    /// that stayed 0 while a pane printed (scratch run, #832), so `last_screen_change` is
+    /// `None` and the adapter does not make one up. A pane in any tab is observed, grid
+    /// cell or not.
+    fn observe_pane(&self, pane: &PaneId) -> Result<PaneObservation, PaneError> {
+        self.run_as(OP_OBSERVE_PANE, |deadline| {
+            let state = parse_snapshot(&self.call(&Request::SessionSnapshot, deadline)?)?;
+            let listed = state.pane_ref(pane).ok_or_else(|| PaneError::PaneNotFound {
+                what: pane.as_str().to_owned(),
+            })?;
+            let mut seen = PaneObservation::default();
+            if let Some(cwd) = &listed.cwd {
+                seen = seen.with_cwd(cwd.clone());
+            }
+            Ok(seen)
+        })
+    }
+
+    /// The panes together, from **one** `session.snapshot`: a pane it does not list, and a
+    /// failed read, report an empty observation (see [`HerdrPort::observe_panes`]).
+    fn observe_panes(&self, panes: &[PaneId]) -> Vec<PaneObservation> {
+        let state = self.run_as(OP_OBSERVE_PANE, |deadline| {
+            parse_snapshot(&self.call(&Request::SessionSnapshot, deadline)?)
+        });
+        panes
+            .iter()
+            .map(|pane| {
+                let cwd = state
+                    .as_ref()
+                    .ok()
+                    .and_then(|state| state.pane_ref(pane))
+                    .and_then(|listed| listed.cwd.clone());
+                cwd.map_or_else(PaneObservation::default, |cwd| {
+                    PaneObservation::default().with_cwd(cwd)
+                })
+            })
+            .collect()
     }
 
     fn version(&self) -> Result<String, PaneError> {

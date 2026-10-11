@@ -96,6 +96,15 @@ impl Rig {
 
 // --- shared helpers ----------------------------------------------------------------
 
+/// Herdr calls that only read: all a verb may make when it has no record to act on or lists
+/// what the registry does not hold (story #832). Nothing that acts on a pane is among them.
+pub(crate) fn only_herdr_reads(calls: &[holler_pane_testkit::herdr::HerdrOp]) -> bool {
+    use holler_pane_testkit::herdr::HerdrOp;
+    calls
+        .iter()
+        .all(|op| matches!(op, HerdrOp::Snapshot | HerdrOp::ObservePane))
+}
+
 /// The sample pane `name` (a valid name is a test's own constant).
 pub(crate) fn pane(name: &str) -> Pane {
     sample_pane(name).unwrap()
@@ -555,7 +564,19 @@ fn read_verbs_call_no_adapter_or_probe() {
         )
     });
     assert_eq!(writes.count(), 0, "no profile write either: {calls:?}");
-    rig.assert_nothing_observed();
+    // The unscoped `list` also looks at Herdr for the panes no record names (#832); that is
+    // a read, and the only Herdr call any of these verbs makes.
+    let herdr = rig.herdr.faults().calls();
+    assert!(only_herdr_reads(&herdr), "Herdr is only read: {herdr:?}");
+    assert_eq!(
+        herdr.len(),
+        2,
+        "one snapshot for each of the two unscoped lists (text and JSON), none for a pane, a \
+         profile or `watch`, and no `observe_pane` since no pane is unmanaged: {herdr:?}"
+    );
+    assert_eq!(rig.host.faults().calls(), vec![], "no host call");
+    assert_eq!(rig.harness.faults().calls(), vec![], "no harness call");
+    assert_eq!(rig.prober.calls(), vec![], "no probe run");
 }
 
 #[test]
