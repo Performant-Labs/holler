@@ -7,8 +7,8 @@
 //! code that knows Herdr's own order and base (ADR-0021 section 10). It passes the
 //! `HerdrPort` conformance suite ([`crate::conformance::herdr`]) in both placements.
 //! What only the fake has is a size per workspace, the split-only placement, the
-//! selectable version, fault injection, a pane whose shell exits or whose program
-//! prints, and the record of what was typed into a pane.
+//! selectable version, fault injection, a pane whose shell exits, whose program prints
+//! or that the outside world labels, and the record of what was typed into a pane.
 //!
 //! Where the fake departs from real Herdr, or decides what the spike left open, an
 //! `ASSUMPTION (#640)` comment says so at the code concerned.
@@ -124,12 +124,14 @@ pub enum Sent {
 /// A pane's screen shows what is typed into it (`enter` breaks a line) and what
 /// [`FakeHerdr::print`] adds, and `read` returns its last lines. An unknown, closed or
 /// vanished id is `pane-not-found` everywhere. Every `send_text` and `send_keys` that
-/// reaches a pane is in [`FakeHerdr::sent`].
+/// reaches a pane is in [`FakeHerdr::sent`]. A pane has no label until
+/// [`FakeHerdr::rename`] gives it one, and `snapshot` and `ensure_pane` report it the
+/// same way (#808).
 ///
 /// Every port method first passes [`FakeHerdr::faults`], and when that fails, it
 /// returns the error and changes nothing. The call log there holds every attempt, and
-/// it is where a test checks I4's "no keystroke". `vanish` and `print` are the outside
-/// world acting on a pane: they bypass the faults and the call log.
+/// it is where a test checks I4's "no keystroke". `vanish`, `print` and `rename` are the
+/// outside world acting on a pane: they bypass the faults and the call log.
 ///
 /// It is not `Clone`: share it behind an `Arc`, because a copy would split the session.
 pub struct FakeHerdr {
@@ -162,10 +164,12 @@ struct Workspace {
     panes: BTreeMap<(u16, u16), LivePane>,
 }
 
-/// One pane that exists: its id and the text its screen shows.
+/// One pane that exists: its id, the text its screen shows, and the label the outside
+/// world gave it, as given (`""` included; `None` before any).
 struct LivePane {
     id: PaneId,
     screen: String,
+    label: Option<String>,
 }
 
 impl FakeHerdr {
@@ -235,6 +239,15 @@ impl FakeHerdr {
         Ok(())
     }
 
+    /// The outside world labels the pane `label`, replacing any label it had, as Herdr's
+    /// `pane.rename` does (the setup wizard's `herdr.sh label` sets one). `snapshot` and
+    /// `ensure_pane` then report it, except that `""` is reported as no label (#808). It
+    /// bypasses the faults and the call log. `pane-not-found` when no such pane exists.
+    pub fn rename(&self, pane: &PaneId, label: &str) -> Result<(), PaneError> {
+        self.lock().pane_mut(pane)?.label = Some(label.to_owned());
+        Ok(())
+    }
+
     /// The state, locked. A poisoned lock is taken over: a test that panicked while
     /// holding it must not wedge every later call.
     fn lock(&self) -> MutexGuard<'_, State> {
@@ -248,12 +261,9 @@ impl HerdrPort for FakeHerdr {
         let mut state = self.lock();
         let placement = state.placement;
         let pane_id = state.workspace_mut(spec)?.place(spec.grid, placement)?;
-        Ok(HerdrPane {
-            session: spec.session.clone(),
-            workspace: spec.workspace.clone(),
-            pane_id,
-            grid: spec.grid,
-        })
+        // The pane's snapshot entry, label included, so the two never disagree (#808).
+        let entry = state.listed().find(|pane| pane.pane_id == pane_id);
+        entry.ok_or_else(|| not_found(&pane_id))
     }
 
     fn send_text(&self, pane: &PaneId, text: &str) -> Result<(), PaneError> {
@@ -301,12 +311,7 @@ impl HerdrPort for FakeHerdr {
 
     fn snapshot(&self) -> Result<HerdrSnapshot, PaneError> {
         self.faults.enter(HerdrOp::Snapshot)?;
-        let state = self.lock();
-        let panes = state
-            .workspaces
-            .iter()
-            .flat_map(|workspace| workspace.listed(&state.session))
-            .collect();
+        let panes = self.lock().listed().collect();
         Ok(HerdrSnapshot { panes })
     }
 
@@ -350,6 +355,14 @@ impl State {
             panes: BTreeMap::new(),
         });
         Ok(())
+    }
+
+    /// Every pane, as `snapshot` lists it and `ensure_pane` answers it: by workspace,
+    /// then by row, then by column.
+    fn listed(&self) -> impl Iterator<Item = HerdrPane> + '_ {
+        self.workspaces
+            .iter()
+            .flat_map(|workspace| workspace.listed(&self.session))
     }
 
     /// Step 1 of `ensure_pane`: the workspace `spec` names, in the session the fake
@@ -471,18 +484,21 @@ impl Workspace {
             LivePane {
                 id: id.clone(),
                 screen: String::new(),
+                label: None,
             },
         );
         Ok(id)
     }
 
-    /// Every pane of the workspace, by row and then by column, as `snapshot` lists it.
+    /// Every pane of the workspace, by row and then by column, as `snapshot` lists it:
+    /// the one place the fake builds a `HerdrPane`.
     fn listed<'a>(&'a self, session: &'a str) -> impl Iterator<Item = HerdrPane> + 'a {
         self.panes.iter().map(move |(&(row, col), pane)| HerdrPane {
             session: session.to_owned(),
             workspace: self.name.clone(),
             pane_id: pane.id.clone(),
             grid: GridPos { row, col },
+            label: label_of(pane.label.as_deref()),
         })
     }
 }
@@ -522,4 +538,11 @@ fn base36(n: u64) -> String {
 fn last_lines(screen: &str, max_lines: usize) -> String {
     let skip = screen.lines().count().saturating_sub(max_lines);
     screen.lines().skip(skip).collect::<Vec<_>>().join("\n")
+}
+
+/// The label a pane reports, made from the one it was given (`given`): `None` for none
+/// and for `""`, and any other text as it is, not trimmed (#808). The Herdr adapter's
+/// `protocol::label_of` makes a pane's label from the one Herdr sent the same way.
+fn label_of(given: Option<&str>) -> Option<String> {
+    given.filter(|label| !label.is_empty()).map(str::to_owned)
 }

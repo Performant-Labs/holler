@@ -131,7 +131,8 @@ pub trait HerdrPort: Send + Sync {
     /// loudly; never relocates a healthy pane. An occupied cell answers its pane and
     /// makes none. A cell outside the workspace's rows and columns (Herdr has none, so
     /// they are the implementation's configuration) is `grid-out-of-range`; a cell that
-    /// no single right or down split reaches is the open code `grid-unreachable`.
+    /// no single right or down split reaches is the open code `grid-unreachable`. The
+    /// answer carries the pane's label as `snapshot` reports it (#808).
     fn ensure_pane(&self, spec: &HerdrSpec) -> Result<HerdrPane, PaneError>;
 
     /// Type `text` into the pane.
@@ -146,7 +147,7 @@ pub trait HerdrPort: Send + Sync {
     /// Close the pane.
     fn close(&self, pane: &PaneId) -> Result<(), PaneError>;
 
-    /// Every pane Herdr has, with its position.
+    /// Every pane Herdr has, with its position and its label (`HerdrPane.label`, #808).
     fn snapshot(&self) -> Result<HerdrSnapshot, PaneError>;
 
     /// Herdr's API version. An unknown version is `herdr-version-unsupported`.

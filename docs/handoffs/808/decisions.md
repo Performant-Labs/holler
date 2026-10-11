@@ -78,3 +78,42 @@ Run handoff directory `docs/handoffs/808` Â· branch `issue-808-implementation` Â
     on its assertion. Stage 2 (fake reports labels) fails O2 `unavailable ... is gone from r2c1` and the relaunch record
     `Some("demo-c1r1")`. Stage 3 (four-field O2 plus `label: None`) gives `pane_verbs` 252/0.
   - `scripts/lint.sh` exits 0, and `cargo fmt --check` lists none of the touched test files.
+
+## F, implement (Phase 6): 2026-10-11T05:57-06:00 (MDT)
+
+- **Decided:** done, GREEN on every test T authored (`docs/handoffs/808/handoff-F.md`).
+  - The label is the last field of `HerdrPane`, in the record format's optional-field form.
+  - Each implementation builds its `HerdrPane` in one place:
+    - the adapter in `HerdrAdapter::pane`, the only `label_of` call;
+    - the fake in `Workspace::listed`, with `ensure_pane` answering the pane's own snapshot entry.
+
+    So `snapshot` and `ensure_pane` cannot disagree (clarification 2, A warn 1).
+  - `sent_label` is the parsers' one optional read (A warn 3), and `SessionState::pane_label` is the join by pane id.
+  - O2 compares through `same_place` (`same_pane` plus workspace and cell), and `Plan::record` clears the label.
+  - The label case is the last of the one `CASES` table. Without a hook, the runner filters it out, so no fixture is
+    built, and the case fails closed if ever run without one (A warn 5).
+  - E12's parameter is written through the `LabelHook` alias, the identical type, because clippy's
+    `type_complexity` rejects the spelled-out type under CI's `-D warnings`.
+  - ADR-0021: clarification 5's four places as written, plus section 1's `herdr` row (A warn 2).
+  - `CHANGELOG.md` entry at the top of Enhancements.
+  - `archChanged: true`: the public interfaces of the contract type, the protocol parsers and the conformance runner
+    changed, as planned and as A reviewed.
+- **Assumed:**
+  - E10 item 3's "the two `HerdrPane` literals call `label_of`" is satisfied, and strengthened, by one shared
+    constructor.
+  - A bold title on "Decisions taken" item 10 is formatting, not a change to clarification 5's text.
+  - `crates/*/src/**` of the test kit is production code, so F's (`pipeline.config.json` `paths.production`).
+- **Hedged:**
+  - `protocol.rs` crosses lint's 600-line warning (636; the fail is 900). `label_of` must live there because T's
+    tests import it from `protocol`.
+  - The section-1 ADR row goes beyond the letter of clarification 5; the PR body must name it.
+  - If #802 merges first, "Decisions taken" item 10 is renumbered when `main` is merged in.
+- **Evidence:**
+  - Tests: `cargo test -p holler-pane-testkit` (fake 24/24, conformance 21/21), `-p holler-adapter-herdr` (adapter
+    22, protocol 37, conformance 4), `-p holler-pane`, `-p holler-cli --test pane_verbs` 252/0 and
+    `--test profile_verbs` 44/0.
+  - The full `test.unit.command`: 148 targets, 2068 passed, 0 failed, 25 ignored, exit 0. A doc-only edit to the
+    `HerdrPort` docs (`ports.rs`) followed; I re-ran clippy and the three contract crates (432 passed, 0 failed).
+  - Gates: `cargo clippy --workspace --all-targets -- -D warnings` is clean; `scripts/lint.sh` and
+    `scripts/changelog-check.sh` exit 0; `rustfmt --check` is clean on the 8 touched `.rs` files.
+  - Five unchanged-code facts are in `docs/handoffs/808/evidence.md`.
