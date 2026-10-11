@@ -187,3 +187,33 @@ contract text after the diff gate's B-1, no line moved in `tx_launch.rs`).
   >             }),
   >             Err(HttpError::TimedOut) => Err(self.timeout()),
   > ```
+
+- **Fact (T, Phase 7 round 3):** the fake harness's `create_session` first reaches the server on
+  the port, so after `kill(port)` it fails rather than minting a session. This is what
+  `a_server_gone_after_verify_fails_the_session_of_record_and_rolls_back` relies on to stand in
+  for a real server that died after the health wait.
+  **Source:** `crates/holler-pane-testkit/src/harness.rs:351-356`
+  **Verbatim excerpt:**
+  > ```rust
+  >     fn create_session(&self, port: u16) -> Result<String, PaneError> {
+  >         self.faults.enter(HarnessOp::CreateSession)?;
+  >         let mut world = self.lock();
+  >         world.reach(port, HarnessOp::CreateSession)?;
+  >         Ok(world.mint_session(port))
+  >     }
+  > ```
+
+- **Fact (T, Phase 7 round 3):** reaching a killed server is `unavailable`, the same answer
+  OpenCode's `Call::send_by` gives a refused connection (`lib.rs:409-415`, above), so the test's
+  expected code `unavailable` (exit 1) matches the real adapter's.
+  **Source:** `crates/holler-pane-testkit/src/harness.rs:424-430`
+  **Verbatim excerpt:**
+  > ```rust
+  >     fn reach(&self, port: u16, op: HarnessOp) -> Result<(), PaneError> {
+  >         match self.state(port) {
+  >             Some(ServerState::Running) => Ok(()),
+  >             Some(ServerState::Frozen) => Err(frozen(op)),
+  >             Some(ServerState::Killed) | None => Err(unreachable_server(port)),
+  >         }
+  >     }
+  > ```

@@ -454,6 +454,52 @@ fn a_verify_refusal_rolls_back_and_stops_the_server() {
     rig.assert_no_keystroke();
 }
 
+/// `verify_serving` answers for the spec, not for the server being up (`HarnessPort`'s doc,
+/// diff gate B-1): a server that dies once it has answered is caught by the next call to it,
+/// the session of record's, and that failure rolls back as a refusal does. Nothing is recorded,
+/// the pane the run made is closed and the reconcile step is printed once.
+#[test]
+fn a_server_gone_after_verify_fails_the_session_of_record_and_rolls_back() {
+    let rig = Rig::new();
+    rig.after(HarnessOp::VerifyServing, |f, _| {
+        f.harness.kill(PORT).unwrap()
+    });
+    let run = rig.run(&launch_with(&[]), Format::Json);
+    assert_eq!(run.code, 1, "{run:?}");
+    let (code, message) = error_of(&run);
+    assert_eq!(code, "unavailable");
+    assert_eq!(occurrences(&message, STEP_PHRASE), 1, "{message}");
+    let harness = [
+        HarnessOp::ServeCommand,
+        HarnessOp::Health,
+        HarnessOp::VerifyServing,
+        HarnessOp::CreateSession,
+    ];
+    assert_eq!(
+        steps(&run.calls.harness),
+        harness,
+        "no call after the failed one"
+    );
+    assert!(
+        run.calls.host.contains(&HostOp::StopOwned),
+        "{:?}",
+        run.calls.host
+    );
+    assert!(
+        run.calls.herdr.contains(&HerdrOp::Close),
+        "{:?}",
+        run.calls.herdr
+    );
+    assert_eq!(
+        rig.herdr_ids(),
+        Vec::<PaneId>::new(),
+        "the pane made is closed"
+    );
+    assert_eq!(rig.record(PANE), None);
+    rig.assert_matches(&run, PANE);
+    rig.assert_no_keystroke();
+}
+
 /// Plan review W-5: a server that answers on the port after the plan checked it (another
 /// process took the port) is refused just before the server's run, after the spec's command:
 /// `port-in-use`, from the act, so the run rolls back and prints the reconcile step. That

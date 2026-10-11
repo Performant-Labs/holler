@@ -298,3 +298,17 @@
   - `hermetic_test`: 31 passed, and the ac8 test still sees nothing sent. `pane_verbs`: 261 passed. The test kit's targets all passed.
   - The full verify command: 148 binaries, 2073 passed, 0 failed, 25 ignored, exit 0 (the same as round 2).
   - All 13 `evidence.md` excerpts were checked against their cited lines by script.
+
+## T (Phase 7, verify GREEN, round 3 after F's doc-only B-1 reply) — 2026-10-11T08:28:00-06:00
+- **Decided:** PASS. Round 3 changes doc comments only (`git diff 2a32fc8 7ee7d8e -- crates/`). The workspace verify command gives 2073 passed, 0 failed, 25 ignored, which equals F's run. Clippy, lint, changelog-check, machete, rustdoc, rustfmt, docs_cli_test, wire_selftest and the hook tests are clean.
+- **Decided:** F's reply to B-1 is right on the brief: lines 11, 33 and 41 require `Ok(())` with nothing checked for a no-agent spec, and `hermetic_test`'s ac8 "nothing sent" stays.
+- **Decided:** Took three test-side items:
+  - Diff gate W-3: a fixture-prefix guard in `run_escapes_the_cwd_for_tmux`.
+  - Diff gate NV-2: `run_checks_the_session_before_the_argv` became `run_checks_the_session_then_the_argv_then_the_cwd`, which pins the full order that `TmuxHost::run`'s doc promises.
+  - New `a_server_gone_after_verify_fails_the_session_of_record_and_rolls_back`, which pins the round-3 contract claim that F's B-1 rebuttal rests on.
+- **Assumed:** The fake's `kill` after `VerifyServing`, followed by `create_session` answering `unavailable`, is a faithful stand-in for a real server that dies after the health wait. The real adapter answers a refused connection as `unavailable` too (`lib.rs:409-415`).
+- **Hedged:** `real_opencode_test` was not re-run (doc-only change; it needs a private server). The full workspace run was on `7ee7d8e` before my test edits. After the edits, the two edited targets (`pane_verbs` 262/262, `fake_tmux_test` 29/29), clippy, lint and rustfmt were re-run.
+- **Evidence:**
+  - Three mutants, each caught. M7 (cwd checked before argv) is caught only by the new T2. M8 (checks before the session read) and M9 (a swallowed session-of-record error) are caught by T2 and T3. Source was restored from copies each time.
+  - The new test passed 5 of 5 runs.
+  - Two evidence entries appended: `harness.rs:351-356` and `harness.rs:424-430`, copied verbatim from source.

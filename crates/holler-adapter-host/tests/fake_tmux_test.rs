@@ -515,6 +515,13 @@ fn run_escapes_the_cwd_for_tmux() {
         ("#(touch x)", "##(touch x)"),
     ] {
         let fake = Fake::new(&run_ok());
+        // The expected `-c` below joins the fixture's own prefix unescaped, so the prefix
+        // must hold nothing the escape would change (diff gate W-3).
+        assert!(
+            !fake.dir_str().contains(['#', ';']),
+            "fixture prefix {:?}",
+            fake.dir_str()
+        );
         let cwd = fake.path(dir);
         fs::create_dir(&cwd).unwrap();
         let given = cwd.to_string_lossy().into_owned();
@@ -533,17 +540,25 @@ fn run_escapes_the_cwd_for_tmux() {
     }
 }
 
+/// `run`'s documented order (#802 narrowing 5, diff gate NV-2): the session, then the argv,
+/// then `cwd`. Every call below breaks all three, so each answer names the first check.
 #[test]
-fn run_checks_the_session_before_the_argv() {
+fn run_checks_the_session_then_the_argv_then_the_cwd() {
     let fake = Fake::new(&answer("", "can't find session: demo-c1r1\n", 1));
-    let result = host(&fake).run(&name(C1), &fake.dir_str(), &argv(&[]));
+    let result = host(&fake).run(&name(C1), "", &argv(&[]));
     assert!(
         matches!(result, Err(PaneError::PaneNotFound { .. })),
-        "{result:?}"
+        "a missing session comes before a bad argv and cwd: {result:?}"
     );
     let fake = Fake::new(SAY_DIR);
-    let result = host(&fake).run(&name(C1), &fake.dir_str(), &argv(&[]));
-    assert!(matches!(result, Err(PaneError::Usage { .. })), "{result:?}");
+    let result = host(&fake).run(&name(C1), "", &argv(&[]));
+    let Err(PaneError::Usage { message }) = &result else {
+        panic!("expected usage, got {result:?}");
+    };
+    assert!(
+        message.contains("argv") && !message.contains("directory"),
+        "a bad argv comes before a bad cwd: {message}"
+    );
     assert_eq!(fake.calls().len(), 1, "{:?}", fake.calls());
 }
 
