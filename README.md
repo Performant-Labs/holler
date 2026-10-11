@@ -112,7 +112,7 @@ The hold is kept by the hub per session name and survives a body reconnect and a
 `interrupt` still works on a held session. See `docs/protocol/v2.md` §7 and §10.
 
 A policy layer that wants every prompt to a worker to go through it can start the hub with
-`holler hub serve --join-held` (all sessions) or `--join-held 'io/*'` (matching `<label>/<session>`):
+`holler hub serve --join-held` (all sessions) or `--join-held 'remote-a/*'` (matching `<label>/<session>`):
 sessions then join held, and `holler release <session> --once` prints a one-time grant that lets exactly
 one `holler say <session-name> "text" --grant <id>` through before the session is held again (an operator `hold` still wins).
 Off unless given.
@@ -234,7 +234,7 @@ whole schema on me and ask me to fill it in cold. Instead:
    `hub_host`/`remote_host`/`remote_tailnet_host` directly — that's a completely normal path,
    and Tailscale isn't a requirement, only something to use for discovery when it's there.
 2. Offer me a short choice instead of an open-ended question: (A) just a local orchestrator,
-   nothing remote yet — propose `name = "o1"`, `dir` = my current directory, `cmd = "claude"`
+   nothing remote yet — propose `name = "r1c1"`, `dir` = my current directory, `cmd = "claude"`
    as one confirm-or-override, and compute `layout` for me; (B) that plus one or more remote
    attach-mode sessions — same orchestrator default, then ask only for what's genuinely
    unknowable per session (how many, each one's name, its host, its OpenCode port); (C) let me
@@ -244,7 +244,7 @@ whole schema on me and ask me to fill it in cold. Instead:
 
 If I don't name the panes, name each one for its grid cell, row then column, like a spreadsheet
 cell: `r1c1`, `r1c2`, `r1c3`, `r1c4` for the first row, `r2c1` for the second row's first cell, and
-so on (for a bare pane count, propose the squarest grid and ask one confirm). An existing global
+so on (for a bare pane count, two rows for more than four panes, up to 8 panes, and above 8 panes the squarest grid, then ask one confirm). An existing global
 `sessions.toml` skips this interview; to start clean I move it aside, and you never delete it.
 
 Once a real config exists, preflight every distinct remote host (SSH
