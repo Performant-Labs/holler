@@ -66,3 +66,61 @@ Run handoff directory `docs/handoffs/642` Â· branch `issue-642-implementation` Â
     - a scan of the installed `opencode-ai` 1.19.0 binary for the agent `mode` literals, the config agent's default
       (`mode:"all"`, then `t.mode=s.mode??t.mode`) and the `default_agent` checks;
     - the repo's own `opencode.json` agent modes (`orchestrator` is `primary`).
+
+## A, up-front plan review, fresh run on the re-cut brief: 2026-10-11T10:39-06:00 (MDT)
+
+- **Decided:** PASS, with 0 `block` and 5 `warn` findings (`docs/handoffs/642/handoff-A.md`, which replaces round 1's
+  BLOCK; that one stays in the history at `a4c9ca4`).
+  - Round 1's block 1 is closed: the base is `7284001` (#802 merged), and all 32 file excerpts of the brief match the tree.
+  - Round 1's block 2 is closed: D4(b) is OpenCode's rule, and E33's seven cuts each occur once in the 1.19.0 binary.
+  - Round 1's nine warns are folded into D2, D5 to D8, D12, D13 and the acceptance list, and each was checked against
+    the merged code.
+  - The new warns, all closable by T and F without a brief amendment:
+    1. Acceptance 10's "existing conformance use for the stub run" does not exist; the only conformance run is the
+       opt-in `real_opencode_test.rs:56-60`. T builds none; acceptance 1 pins case 16's property.
+    2. D7(a) has no rule for a `/question` or `/permission` answer that is not a 200 JSON array. Recommended: read it as
+       nothing held, as for `GET /session` and as in `holler-body`. Refused and timed-out stay errors. The children
+       reader goes beside `top_level_ids`.
+    3. D5's tests name `AGENT_UNUSABLE`, which F creates. That is compile RED, against the RED note. Follow #808's
+       precedent, with a throwaway stub proving behaviour RED.
+    4. D12 omits `ID`, `known_session`, `harness()` and `agent()`, which the new test files need. Move them too.
+    5. The docs of `settled` and `SETTLE_POLL` go stale under D7(b). The ADR section 8 edit should say a pending
+       permission request reads as `HoldingQuestion`.
+- **Assumed:**
+  - A PASS lets the script go on to T, with no amendment step, so the warns are written for T and F to act on.
+  - The script commits this handoff and entry at the phase commit, so I did not commit them.
+  - A question or permission request keeps the session's status `busy` while it waits, and for a subagent's question
+    the parent's too. This rests on how OpenCode runs a tool inside a turn and on round 1's reading; I did not probe it
+    live in this review.
+- **Hedged:**
+  - Finding 2's recommended rule (best-effort) is my reading of D7's own exceptions and `holler-body`. The operator may
+    prefer fail-closed. The handoff says what changes then.
+  - Finding 3 is about the test-first process, not architecture drift. I kept it because it comes from D5's decision
+    and T meets it at once.
+  - Settled since round 1 (it was hedged there): the server sorts `/agent` with the configured `default_agent` first,
+    and the TUI's local state falls back to the first agent that is neither a subagent nor hidden, so an attached TUI
+    starts on the pane's agent. Not traced: a selection the TUI remembers for a session it has shown before.
+- **Evidence:**
+  - Read: the whole brief (1,560 lines), round 1's `handoff-A.md` and this journal, gate result r2, and the role's
+    references (Phase 5's RED rule in `workflow-coding-pipeline.md`, section 1 of `pipeline-conventions.md`).
+  - Code at `7284001`:
+    - the adapter: `lib.rs`, `attach.rs:1-80`, the `Garbled` texts of `http.rs`, `hermetic_test.rs:1-170` and
+      `:440-813`, `real_opencode_test.rs:1-60`, and `rig.rs:190-335` and `:363`;
+    - the test kit: `harness.rs:40-73`, `conformance/harness.rs:440-505`, and `herdr.rs:44-56`;
+    - `holler-pane`: `ports.rs:280-331`, `tx_launch/server.rs`, and `tx_launch.rs:715-745`;
+    - the host adapter: `lib.rs:40-56`, and `tmux.rs:60-160`;
+    - `holler-body`: `connection.rs:385-450`;
+    - `docs/adr/ADR-0021.md:140-165`, `:205-215`, `:494-502`, `:609`, `:620` and `:671`;
+    - `docs/handoffs/808/handoff-T-red.md:92-118`.
+  - Commands:
+    - `git fetch`, `git merge-base`, `git log` and `git diff --stat`;
+    - a script that compared every E-section with `sed -n A,Bp` of its file (32 of 32 match);
+    - `wc -l` over the touched files;
+    - greps for `run_harness_conformance`, `verify_serving`, `send_prompt`, `session_activity`, `OpenCodeHarness` and the
+      D12 fixture names;
+    - a scan of the installed 1.19.0 binary for:
+      - E32's and E33's texts (each once);
+      - the `question.list`, `permission.list`, `session.list`, `app.agents`, `config.get`, `session.prompt_async` and
+        `session.messages` routes;
+      - where `OPENCODE_CONFIG_CONTENT` is merged;
+      - the default-first `/agent` sort and the TUI's choice of agent.
