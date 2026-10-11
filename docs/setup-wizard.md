@@ -283,7 +283,7 @@ A non-default instance (any key differing from its default) must set `name`, `st
 `herdr_session`. It also may not use the first instance's ports: `instance.sh` refuses a
 non-default instance with a `hub_port` of 41807, a `serve_https_port` of 443, or resolved backend
 ports in 47001 to 47001 plus the session count unless every session sets its own `backend_port`
-(exit 1, one line naming the key). Stage 1 runs `agent-skills/setup-wizard/lib/instance.sh <config>`,
+(exit 1, one line naming the key). Stage 1 runs `agent-skills/herdr-setup/lib/instance.sh <config>`,
 which refuses a malformed value or a missing required key naming the key, a `state_dir` that is the
 default state directory, and two sessions on the same `remote_host` that resolve to one backend
 port, naming both. Stage 2 also reads each remote host's `$HOME/.holler` and refuses a non-default
@@ -337,7 +337,7 @@ start time and command still match; a pid that was reused by another program is 
 a process in no ledger is **foreign**. The wizard signals only live rows. On a rerun "reused"
 means exactly one thing, a live row in this instance's ledger whose command still matches; it
 starts and records a new process when the old one died, and never adopts one it did not record.
-`agent-skills/setup-wizard/lib/ledger.sh` (`record`, `list`, `owns <pid>`) maintains the file and
+`agent-skills/herdr-setup/lib/ledger.sh` (`record`, `list`, `owns <pid>`) maintains the file and
 reads the state directory from `HOLLER_STATE_DIR`, which every call must set, the default
 instance's included (an unset value is refused, exit 64, so a lost variable cannot reach another
 instance's ledger). Each start command prints the pid of the
@@ -399,7 +399,7 @@ processes are still running they appear as foreign and are never signalled. Move
 - **Live**: stopped with SIGTERM, nothing stronger. If it is still running after the grace
   period the wizard says so and asks.
 
-`agent-skills/setup-wizard/lib/stop-owned.sh` does this (`stop`, `restart`, `check-port`,
+`agent-skills/herdr-setup/lib/stop-owned.sh` does this (`stop`, `restart`, `check-port`,
 `teardown`; exit 0 done, 1 stale, 2 foreign, 3 still running, 4 usage). `restart` stops the
 recorded process and prints `RESTART-CMD <recorded command>`; it does not run it, and that
 recorded command has no environment, no `nohup` and no log redirect (run alone it would use the
@@ -423,19 +423,19 @@ instance the wizard offers to leave the server running and stop only the hub.
 
 ## Automated setup
 
-A Claude Code skill drives this end to end — `setup-wizard`, an 11-stage wizard (Stage 0 through
-Stage 10). The skill ships in this repo at
-[`agent-skills/setup-wizard/SKILL.md`](../agent-skills/setup-wizard/SKILL.md), which is its source
-of truth, and its stages call the helper scripts in `agent-skills/setup-wizard/lib/`, so the
+A Claude Code skill drives this end to end — `herdr-setup`, a 12-stage wizard (Stage 0 through
+Stage 11), run as `/herdr-setup`. The skill ships in this repo at
+[`agent-skills/herdr-setup/SKILL.md`](../agent-skills/herdr-setup/SKILL.md), which is its source
+of truth, and its stages call the helper scripts in `agent-skills/herdr-setup/lib/`, so the
 **whole directory** is installed, not just `SKILL.md`. On a machine with no checkout, one command
 does it (no `sudo`):
 
 ```bash
-mkdir -p ~/.claude/skills && curl -fsSL https://github.com/Performant-Labs/holler/archive/refs/heads/main.tar.gz | tar -xz -C ~/.claude/skills --strip-components=2 holler-main/agent-skills/setup-wizard
+mkdir -p ~/.claude/skills && curl -fsSL https://github.com/Performant-Labs/holler/archive/refs/heads/main.tar.gz | tar -xz -C ~/.claude/skills --strip-components=2 holler-main/agent-skills/herdr-setup
 ```
 
 No release tag contains the whole skill directory yet, so the command fetches `main`; pin it to a
-tag once one does. (The README has the same line, and its agent prompt fetches the directory the same way on a
+tag once one does. A skill installed as `~/.claude/skills/setup-wizard` before the rename is a different skill name now: remove or move it by hand (the wizard never deletes it). (The README has the same line, and its agent prompt fetches the directory the same way on a
 machine that doesn't have it). Stage
 0 stands apart from the rest: it only installs the `herdr` binary itself (via
 [herdr.dev's install script](https://herdr.dev/install.sh) or `brew install herdr`), asked as
@@ -460,7 +460,7 @@ leaving the run there isn't the goal; a complete, verified workspace is.
 ## Collision preflight
 
 Stage 2 takes a read-only inventory of each host the run touches
-(`agent-skills/setup-wizard/lib/inventory.sh`): listening ports, running `holler hub`,
+(`agent-skills/herdr-setup/lib/inventory.sh`): listening ports, running `holler hub`,
 `holler body`, `opencode` and `herdr` processes (a body's row carries its `--config` path), the `tailscale serve`
 configuration and the Herdr sessions; a tool it needs and cannot find on `PATH` is reported as a
 `warn` line, never skipped silently. It only runs `ss`/`lsof`, `ps`, `tailscale serve status` and
@@ -494,7 +494,7 @@ When the config sets `workspace`, Stage 8 names the workspace it creates:
 `herdr.sh run workspace create --cwd <dir> --label <workspace>`, or, on a fresh server with exactly
 one pane, `herdr.sh run workspace rename <workspace_id> <workspace>` once.
 
-Stage 8 and Stage 9 run every Herdr command through `agent-skills/setup-wizard/lib/herdr.sh`,
+Stage 8 and Stage 9 run every Herdr command through `agent-skills/herdr-setup/lib/herdr.sh`,
 which adds `--session <herdr_session>` (from the `[instance]` table) to each one, `server stop`
 and `session attach` included. A bare `herdr server stop` is never issued: which server it stops
 is not established, and it could stop another instance's session. The wrapper refuses to run when

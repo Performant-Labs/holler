@@ -173,7 +173,7 @@ impl Drop for Host {
 }
 
 fn lib_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../agent-skills/setup-wizard/lib")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../agent-skills/herdr-setup/lib")
 }
 
 fn find_on_path(prog: &str) -> PathBuf {

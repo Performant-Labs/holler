@@ -17,7 +17,7 @@ const FIRST_HUB_CMD: &str = "/usr/bin/holler hub --listen 127.0.0.1:41807";
 const FIRST_HUB_STARTED: &str = "Sat Oct 10 09:00:00 2026";
 
 fn lib_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../agent-skills/setup-wizard/lib")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../agent-skills/herdr-setup/lib")
 }
 
 struct Env {
