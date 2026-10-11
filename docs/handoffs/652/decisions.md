@@ -66,3 +66,22 @@ This file is append-only: every phase adds its entry.
     `docs/agent-overlays/tester.md` and `docs/releasing.md` (the CHANGELOG structure).
   - **Greps:** the docs tests and doc readers across `crates/`, the clap-tree walks, `pane-restart` across `*.md`,
     `holler pane` and `holler profile` across `docs/`, and the typed flag values in the pane and profile `Args`.
+
+## A, up-front plan review, round 2: 2026-10-11T14:34-06:00 (MDT)
+
+- **Decided:** PASS, with 0 `block` and 5 `warn` findings (`docs/handoffs/652/handoff-A.md`, overwriting round 1's
+  BLOCK, which stays in git at `060d328`).
+  - Round 1's block is resolved by operator decision (a); warns 2 to 9 of round 1 are folded into the brief.
+  - Warns: (1) section 3's `switch` and `park` heading forms disagree with the clap tree and with acceptance 17's
+    computed forms (`switch` needs `SESSION`; `park`'s `PANE` is optional); (2) section 10's closing sentence is
+    unqualified against known fact (1), and a follow-up issue for an import exclusion should gate #654; (3) #649 is
+    still open, so sections 2 and 4 wait for its merge; (4) acceptance 15 is a second hand-kept list, against decision
+    3's wording; (5) the new test file may need a directory target to stay under the lint limit.
+- **Assumed:** this is the build run on base `5d366b9`; #649 is the only open dependency (`gh issue view 649`: OPEN).
+- **Hedged:** finding 2's hazard (Claude Code panes recorded as OpenCode panes) is a product gap for #654, not drift in
+  this docs story, so it is a `warn` here; the brief states it as a fact and invents no procedure, as decided.
+- **Evidence:** the brief at `05d7804`; round 1's handoff; `pane/{switch,park,import,launch,list,watch}.rs`,
+  `profile/apply.rs`, `pane/import/writes.rs`, `holler-pane/src/{pane,error,grid,import,argv,tx_apply}.rs`,
+  `import/findings.rs`, `holler-adapter-opencode/src/server.rs:31`, `holler-pane-testkit/src/envelope.rs:202`,
+  `holler-cli/Cargo.toml`, `pane/wiring.rs:1-40`, `scripts/pane-restart:1-12`, `docs/README.md` and
+  `docs/orchestrating.md` headings, ADR-0021 line 302; greps for the interim anchor, the stop-gap sentence and `hj-c`.
