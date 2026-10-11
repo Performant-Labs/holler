@@ -207,3 +207,47 @@ Run handoff directory `docs/handoffs/644` Â· branch `issue-644-implementation` Â
 - **Assumed:** F's ADR-0003 one-token edit (Deviation 1) is O's call to keep; it does not affect any test.
 - **Hedged:** none.
 - **Evidence:** the Tier 1 log in this session's scratchpad; `handoff-T-green.md` tables.
+
+## A, anti-duplication gate: 2026-10-11T11:15-06:00 (MDT)
+
+- **Decided:** PASS, with 0 `block` and 2 `warn` findings (`docs/handoffs/644/handoff-A-dup.md`; diff `7284001..3026df7`).
+  - **No parallel path.** F extended the one `Report` (its `agent` comes from the stored record, through `text_value`)
+    and the one `SpecField`/`FieldValue` table (`Key(Some)` shares `Text`'s `write_escaped` arm, and `differs` gains
+    no arm). The refusal is still `verify_serving`'s, with the engine's rollback. The request builders, the rig, the
+    test kit and `tx_launch` are unchanged.
+  - **Tests.** Four existing tests were extended. The new module holds only new behavior: one refusal table per verb,
+    with the rollback assertions in one helper, and `serve.rs`'s private `with_agent` is not copied.
+  - **Warn 1.** Small test constants and builders are copies: `STEP_PHRASE` x3 and `AGENT` x2 in the launch test
+    modules, beside the rig's `STEP`, and a one-line `AgentKey` builder x3 with three names in the `holler-pane` tests,
+    beside `tests/common/mod.rs`. Each follows its module's own pattern, and the Blast radius barred the shared files.
+    An XS follow-up can hoist them.
+  - **Warn 2.** The brief never received Phase 3's warns 1 to 5: its Blast radius leaves out ADR-0003, and Scope 3 and
+    Acceptance 4 still say "message unchanged". O should fold them in before S. The ADR-0003:93 edit is not a drive-by:
+    Phase 3 warn 1 asked for it, `docs_rows.rs:18` assigns the two verbs to #644, and #664's hunk is at line 70.
+- **Assumed:** the driver's phase commit commits this handoff and journal entry. A writes no commit of its own.
+- **Hedged:**
+  - `data.agent` repeats `data.pane.opencode_agent`, and `(default)` is a third spelling of an absent value beside
+    `none` and `-`. Both were cleared as operator decisions 5 and 6: one source, and both reasons are documented. I
+    did not count them as duplication.
+  - The outside diff gate's NIT-2 (`MISMATCH_MESSAGE` hard-codes port 48100) is a test oracle that copies the fake's
+    text. That is T's domain, and I did not raise it here.
+- **Evidence:**
+  - `git merge-base HEAD origin/main` (`7284001`); `git diff --stat` and full diffs of every changed file.
+  - Greps over the tree:
+    - `STEP_PHRASE`, `split_whitespace`, `harness port`, `Format::Text`, `get::help`;
+    - `SpecField::`/`FieldValue::` outside `profile_diff.rs`;
+    - `opencode_agent` in `holler-cli/src`, `; 15]`, `"model.effort"`;
+    - `AgentKey::parse` and `fn key|agent` across `holler-pane/tests` and the test kit;
+    - the `common/mod.rs` builders.
+  - Sibling branches:
+    - `git diff 7284001 issue-{664,642,649}-implementation` over this diff's source files (none touched);
+    - ADR-0003 hunks (#664: line 70 only);
+    - new `opencode_agent`/`SpecField` lines (#664 composes through `profile show`'s `PaneDiff`);
+    - #664's `profile_verbs/rig.rs` change (additive only).
+  - A scan of the added lines for personal infrastructure names: none.
+  - `wc -l` on every touched file.
+  - Files read in full:
+    - `launch/agent.rs`, `launch/serve.rs`, `launch/rig.rs`;
+    - `profile_diff.rs` and `launch.rs`'s `Report` region;
+    - `handoff-A.md`, `handoff-F.md`, `handoff-T-red.md`, `handoff-T-green.md`, `644-diff-result-r1.md`;
+    - the brief.
