@@ -1,6 +1,6 @@
 //! #752: the skill text, the docs and the README read as one procedure (epic #726).
 //!
-//! Plain text assertions over `agent-skills/setup-wizard/SKILL.md`, `docs/setup-wizard.md` and
+//! Plain text assertions over `agent-skills/herdr-setup/SKILL.md`, `docs/setup-wizard.md` and
 //! `README.md`, plus a check that every script command line the skill documents uses a verb and
 //! flags the script itself knows. Nothing here runs a script or touches a host.
 #![cfg(unix)]
@@ -17,7 +17,7 @@ fn read(rel: &str) -> String {
 }
 
 fn skill() -> String {
-    read("agent-skills/setup-wizard/SKILL.md")
+    read("agent-skills/herdr-setup/SKILL.md")
 }
 
 /// The skill with every run of whitespace folded to one space, for phrases that wrap.
@@ -205,7 +205,7 @@ fn the_install_command_fetches_the_whole_skill_directory() {
             .expect(name);
         assert!(install.contains("tar"), "{name}: {install}");
         assert!(
-            install.contains("agent-skills/setup-wizard"),
+            install.contains("agent-skills/herdr-setup"),
             "{name}: {install}"
         );
         assert!(
@@ -370,7 +370,7 @@ fn script_words(line: &str, script: &str) -> Option<Vec<String>> {
 }
 
 fn script_source(script: &str) -> String {
-    read(&format!("agent-skills/setup-wizard/lib/{script}.sh"))
+    read(&format!("agent-skills/herdr-setup/lib/{script}.sh"))
 }
 
 #[test]
@@ -552,10 +552,10 @@ fn stages_one_and_two_change_nothing_but_the_scratch_directory_and_the_install_i
         flat(&text).contains("read-only except the scratch directory"),
         "the hard-stop paragraph"
     );
-    let stage1 = flat(&section(&text, "## Stage 1 ", "\n## Stage 2 "));
+    let stage0 = flat(&section(&text, "## Stage 0 ", "\n## Stage 1 "));
     assert!(
-        stage1.contains("ask the user before installing"),
-        "the install into ~/.claude/skills needs a yes: {stage1}"
+        stage0.contains("ask the user before installing"),
+        "the install into ~/.claude/skills needs a yes: {stage0}"
     );
 }
 
