@@ -55,6 +55,9 @@ pub struct Seed {
     pub profile: Option<&'static str>,
     /// A data directory of the pane's server's own (default: the shared `"default"`).
     pub data_dir: Option<&'static str>,
+    /// Whether the rig stores a record for the pane (default). An unrecorded seed is a live
+    /// pane with no record: what `pane import` (#650) finds before the cutover.
+    pub recorded: bool,
 }
 
 impl Seed {
@@ -66,7 +69,14 @@ impl Seed {
             role: PaneRole::Agent,
             profile: None,
             data_dir: None,
+            recorded: true,
         }
+    }
+
+    /// A live pane the rig stores no record for (#650).
+    pub fn unrecorded(mut self) -> Self {
+        self.recorded = false;
+        self
     }
 
     pub fn orchestrator(mut self) -> Self {
@@ -130,7 +140,9 @@ impl Rig {
         for (index, seed) in seeds.iter().enumerate() {
             let port = FIRST_PORT + u16::try_from(index).expect("a small fleet");
             let made = make_live(&herdr, &host, &harness, seed, port);
-            records.push(record_of(seed, &made));
+            if seed.recorded {
+                records.push(record_of(seed, &made));
+            }
             live.insert(seed.name, made);
         }
         let actor = Actor::parse("doctor-test").expect("an actor");

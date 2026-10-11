@@ -163,8 +163,8 @@ pane doctor | --fix --profile demo
 roster | --profile demo
 
 # #650
-pane import |
-pane import | --format=json
+pane import | --from /srv/state --herdr-session main
+pane import | --from /srv/state --herdr-session main --launcher /srv/state/launcher.toml --orchestrator demo-c1r1 --orchestrator demo-c2r1 --dry-run --format=json
 
 # #662
 profile create | Demo
