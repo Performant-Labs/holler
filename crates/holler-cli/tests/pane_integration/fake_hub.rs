@@ -19,6 +19,7 @@
 
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -151,71 +152,96 @@ fn failure<T: std::fmt::Debug>(result: Result<T, PaneError>) -> (String, String)
     (error.code().to_owned(), error.to_string())
 }
 
-/// Every write of both clients, each against a fresh fake hub with one connection answered
-/// `answer`, with the method each must send.
-fn each_write(answer: &Answer) -> Vec<(&'static str, (String, String))> {
-    let run = |method: &'static str, call: &dyn Fn() -> (String, String)| {
-        let hub = FakeHub::start(vec![answer.clone()]);
-        let outcome = hub.with(call);
-        assert_eq!(
-            hub.requests().first().map(|(m, _)| m.as_str()),
-            Some(method),
-            "the client sent {method}"
-        );
-        (method, outcome)
-    };
-    vec![
-        run("pane/cas_put", &|| failure(HubPaneStore::new().cas_put(&pane(), 0))),
-        run("pane/delete", &|| failure(HubPaneStore::new().delete(&pname(), 1))),
-        run("profile/cas_put", &|| {
+/// One client call: the method it must send, and the call, yielding its error's code and text.
+type Call = (&'static str, fn() -> (String, String));
+
+/// Every write of both clients.
+fn writes() -> [Call; 5] {
+    [
+        ("pane/cas_put", || failure(HubPaneStore::new().cas_put(&pane(), 0))),
+        ("pane/delete", || failure(HubPaneStore::new().delete(&pname(), 1))),
+        ("profile/cas_put", || {
             failure(HubProfileStore::new().cas_put(&profile(), 0, &actor()))
         }),
-        run("profile/delete", &|| {
+        ("profile/delete", || {
             failure(HubProfileStore::new().delete(&prname("hlr649"), 1, &actor()))
         }),
-        run("profile/rename", &|| {
+        ("profile/rename", || {
             failure(HubProfileStore::new().rename(&prname("hlr649"), &prname("hlr649b"), 1, &actor()))
         }),
     ]
 }
 
-/// Every read of both clients, the same way.
-fn each_read(answer: &Answer) -> Vec<(&'static str, (String, String))> {
-    let run = |method: &'static str, call: &dyn Fn() -> (String, String)| {
-        let hub = FakeHub::start(vec![answer.clone()]);
-        let outcome = hub.with(call);
-        assert_eq!(
-            hub.requests().first().map(|(m, _)| m.as_str()),
-            Some(method),
-            "the client sent {method}"
-        );
-        (method, outcome)
-    };
-    vec![
-        run("pane/get", &|| failure(HubPaneStore::new().get(&pname()))),
-        run("pane/list", &|| failure(HubPaneStore::new().list())),
-        run("profile/get", &|| failure(HubProfileStore::new().get(&prname("hlr649")))),
-        run("profile/list", &|| failure(HubProfileStore::new().list())),
-        run("profile/log", &|| failure(HubProfileStore::new().log(&prname("hlr649")))),
+/// Every read of both clients.
+fn reads() -> [Call; 5] {
+    [
+        ("pane/get", || failure(HubPaneStore::new().get(&pname()))),
+        ("pane/list", || failure(HubPaneStore::new().list())),
+        ("profile/get", || failure(HubProfileStore::new().get(&prname("hlr649")))),
+        ("profile/list", || failure(HubProfileStore::new().list())),
+        ("profile/log", || failure(HubProfileStore::new().log(&prname("hlr649")))),
     ]
+}
+
+/// One call's failure against a fake hub, and that hub's state dir.
+struct Outcome {
+    method: &'static str,
+    code: String,
+    text: String,
+    state: PathBuf,
+}
+
+impl Outcome {
+    /// AC 3's "naming the hub": the message says which holler hub, by its state dir. The dir
+    /// is a fresh temporary path, so neither a transport error's text nor the fake hub's own
+    /// refusal text can supply it.
+    fn assert_names_the_hub(&self) {
+        let dir = self.state.display().to_string();
+        assert!(
+            self.text.contains("holler hub") && self.text.contains(&dir),
+            "{}: the message names the hub at {dir}: {}",
+            self.method,
+            self.text
+        );
+    }
+}
+
+/// Each of `calls` against a fresh fake hub with one connection answered `answer`. Each call
+/// must send its own method.
+fn against(answer: &Answer, calls: [Call; 5]) -> Vec<Outcome> {
+    calls
+        .into_iter()
+        .map(|(method, call)| {
+            let hub = FakeHub::start(vec![answer.clone()]);
+            let (code, text) = hub.with(call);
+            assert_eq!(
+                hub.requests().first().map(|(m, _)| m.as_str()),
+                Some(method),
+                "the client sent {method}"
+            );
+            Outcome { method, code, text, state: hub.state.path().to_path_buf() }
+        })
+        .collect()
 }
 
 /// AC 3 and D3: a write whose reply is lost after it was sent is `timeout`, naming the
 /// write, because it may have landed.
 #[test]
 fn a_write_whose_reply_is_lost_is_timeout() {
-    for (method, (code, text)) in each_write(&Answer::Close) {
+    for Outcome { method, code, text, .. } in against(&Answer::Close, writes()) {
         assert_eq!(code, "timeout", "{method}: {text}");
         let op = method.replace('/', "_store.");
         assert!(text.contains(&op), "{method}: the timeout names {op}: {text}");
     }
 }
 
-/// W-9: a read whose reply is lost is `unavailable` (nothing was written).
+/// W-9 and AC 3: a read whose reply is lost is `unavailable` (nothing was written), naming
+/// the hub.
 #[test]
-fn a_read_whose_reply_is_lost_is_unavailable() {
-    for (method, (code, text)) in each_read(&Answer::Close) {
-        assert_eq!(code, "unavailable", "{method}: {text}");
+fn a_read_whose_reply_is_lost_is_unavailable_naming_the_hub() {
+    for outcome in against(&Answer::Close, reads()) {
+        assert_eq!(outcome.code, "unavailable", "{}: {}", outcome.method, outcome.text);
+        outcome.assert_names_the_hub();
     }
 }
 
@@ -290,15 +316,13 @@ fn a_watch_request_the_hub_never_answers_is_timeout_naming_watch_next() {
     assert!(took < Duration::from_secs(13), "bounded by WATCH_WAIT + 5 s: took {took:?}");
 }
 
-/// W-9: a JSON-RPC error never reached a handler, so nothing was written: `unavailable`,
-/// for a read and for a write.
+/// W-9 and AC 3: a JSON-RPC error never reached a handler, so nothing was written:
+/// `unavailable`, naming the hub, for a read and for a write.
 #[test]
-fn a_json_rpc_error_is_unavailable_for_reads_and_writes() {
-    for (method, (code, text)) in each_read(&Answer::Error)
-        .into_iter()
-        .chain(each_write(&Answer::Error))
-    {
-        assert_eq!(code, "unavailable", "{method}: {text}");
+fn a_json_rpc_error_is_unavailable_naming_the_hub_for_reads_and_writes() {
+    for outcome in against(&Answer::Error, reads()).into_iter().chain(against(&Answer::Error, writes())) {
+        assert_eq!(outcome.code, "unavailable", "{}: {}", outcome.method, outcome.text);
+        outcome.assert_names_the_hub();
     }
 }
 
@@ -307,19 +331,24 @@ fn a_json_rpc_error_is_unavailable_for_reads_and_writes() {
 #[test]
 fn data_that_does_not_decode_is_unavailable_naming_the_method() {
     let bad = Answer::Result(json!({ "ok": true, "data": 42 }));
-    for (method, (code, text)) in each_read(&bad) {
+    for Outcome { method, code, text, .. } in against(&bad, reads()) {
         assert_eq!(code, "unavailable", "{method}: {text}");
         assert!(text.contains(method), "{method}: the message names it: {text}");
     }
 }
 
-/// W-9: with no hub at all, a client call is `unavailable` naming the missing hub.
+/// W-9 and D3: with no hub at all, every read and every write is `unavailable` naming the
+/// missing hub and its state dir. A write is never `timeout` here: the request never left,
+/// so it cannot have landed.
 #[test]
-fn a_client_call_with_no_hub_is_unavailable_naming_the_hub() {
-    let state = StateDir::new();
-    let (code, text) = with_state_dir(state.path(), || failure(HubPaneStore::new().list()));
-    assert_eq!(code, "unavailable", "{text}");
-    assert!(text.contains("no live holler hub reachable"), "{text}");
+fn every_read_and_write_with_no_hub_is_unavailable_naming_the_hub() {
+    for (method, call) in reads().into_iter().chain(writes()) {
+        let state = StateDir::new();
+        let (code, text) = with_state_dir(state.path(), call);
+        assert_eq!(code, "unavailable", "{method}: {text}");
+        let want = format!("no live holler hub reachable at {}", state.path().display());
+        assert!(text.contains(&want), "{method}: the message says {want:?}: {text}");
+    }
 }
 
 /// D4: a store or transport error yields one `Err` and ends the stream.

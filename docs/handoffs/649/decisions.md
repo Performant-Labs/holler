@@ -685,3 +685,31 @@
     - `git grep` for the rename-scan needles at HEAD and on `main`;
     - `gh issue view 649`, diffed with the brief: only D10's `LANG` clause differs;
     - `gh issue list` for the unfiled follow-ups.
+
+## T (Phase 7, verify GREEN, fifth pass: S's test-only rework) — 2026-10-11T15:51:45-06:00
+- **Decided:**
+  - **PASS.** Only `crates/holler-cli/tests/pane_integration/fake_hub.rs` changed. No production code changed.
+  - (1) The one-read no-hub test is replaced by `every_read_and_write_with_no_hub_is_unavailable_naming_the_hub`. It
+    covers all five reads and five writes, each `unavailable` with `no live holler hub reachable at <state dir>`.
+    Replacing the test, not adding one beside it, keeps the suite the same size.
+  - (2) The lost-read and JSON-RPC-error tests now also assert that the message names the hub by the fake hub's own
+    state dir, a fresh temporary path that no transport or refusal text can supply.
+  - The helpers became `writes()`/`reads()` tables and one `against()` runner returning an `Outcome` that carries the
+    state dir.
+  - T rewrote its own rename-scan line in `handoff-T-green.md`. The brief's E64 line (O's) and `decisions.md:66` (in
+    A's entry) are not T's to edit, so they are left for O.
+- **Assumed:**
+  - Asserting the literal `no live holler hub reachable at` pins behaviour, not wording: it is the CLI's existing text,
+    already pinned by six other test files.
+  - The opt-in scenario need not re-run, since no production line changed after `22aa539`.
+- **Hedged:**
+  - The `Refused` and `BadReply` assertions check `holler hub` plus the state dir, not the full phrase, so they
+    allow rewording.
+- **Evidence:**
+  - `cargo test -p holler-cli --test pane_integration fake_hub`: 15 passed.
+  - M9 (`NoLiveHub` in `timed_out`'s write arm) fails the new no-hub test on `pane/cas_put: timed out`. M10
+    (`hub_unavailable`'s second arm without the hub) fails both strengthened tests. `store.rs` was restored with
+    `git checkout` after each, and `git status` was clean.
+  - New `evidence.md` section, verbatim: `state.rs:38-40` and `control.rs:492`.
+  - Clippy `-D warnings`, `lint.sh`, `changelog-check` and `machete` are clean. Workspace counts are in
+    `handoff-T-green.md`.

@@ -5,6 +5,25 @@ and `wiring/{store,env,bind}.rs`) and its tests rely on. One entry per fact; eac
 verbatim. The diff gate shows only the first 12,000 bytes of this file, so the sections run newest
 first: add a later round's entries above them.
 
+## The source S's test-only rework relies on (T, fifth pass)
+
+`fake_hub::every_read_and_write_with_no_hub_is_unavailable_naming_the_hub` and the two `..._naming_the_hub`
+assertions compare the message's state dir with the test's own `HOLLER_STATE_DIR`. Neither file is in the diff.
+
+- **Fact:** the state dir is `HOLLER_STATE_DIR` exactly as set, not canonicalized, so `hub_unavailable` prints the
+  test's own path.
+  **Source:** `crates/holler-hub/src/state.rs:38-40`
+  **Verbatim excerpt:**
+  > pub fn resolve_state_dir() -> Option<PathBuf> {
+  >     if let Some(dir) = std::env::var_os("HOLLER_STATE_DIR") {
+  >         return Some(PathBuf::from(dir));
+
+- **Fact:** with no socket in the state dir, the connect fails before any request is written, as `NoLiveHub`.
+  So a write against no hub never left, and `unavailable` (not `timeout`) is the D3 answer.
+  **Source:** `crates/holler-hub/src/control.rs:492`
+  **Verbatim excerpt:**
+  > let stream = UnixStream::connect(path).map_err(|_| ControlError::NoLiveHub)?;
+
 ## The source that round 2 of the diff gate asked for (T, third cycle)
 
 Round 2 could not check that `bind::launch_resolves_attach_tuis_pane_from_the_bindings_before_the_record_exists`
