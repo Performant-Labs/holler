@@ -270,3 +270,32 @@
   - Workspace verify command: exit 0. 148 binaries, 2157 passed, 0 failed and 25 ignored, identical to F's counts.
   - Clippy `-D warnings`, `lint.sh`, `changelog-check.sh`, `cargo machete`, `docs_cli_test`, `cli_surface_test`, `wire_selftest`, `pane_cli_process`, `test-hooks.sh`, rustdoc `-D warnings`, and `rustfmt --check` on the story's files: all clean.
   - Mutants M1 to M5 were all killed, and the restored tree is GREEN.
+
+## A (Phase 7, anti-duplication gate, fresh run after A round 4): 2026-10-11 11:36 MDT
+- **Decided:** PASS, with 0 block and 2 warn findings (`docs/handoffs/664/handoff-A-dup.md`).
+  - F extended the objects the plan named and built no parallel path. `tx_launch` is called unchanged. The plan is `diff_profile`'s rows, outcomes go through `class_of`, and the verb reuses `reconcile_step`, `list::count` and `show`'s helpers.
+  - The twins match `detach` and one pane's `join` write line for line, and #818 is open and tracks them.
+  - All nine of A round 4's reuse expectations are met.
+  - The two warns:
+    1. `joined`, three call-name constants and a third spelling of the `(session, pane_id)` join key are copied from `reconcile`/`tx_launch` and not tracked.
+    2. `apply/rig.rs` re-creates about 176 verbatim lines of `launch/rig.rs`, and that copy has begun to drift (`pid`). No issue tracks the consolidation.
+  - Both warns are follow-up work, not changes in this story.
+- **Assumed:**
+  - The rig copy counts as a reviewed decision, not drift. A round 1 warn 6 directed it, it is the house pattern (the `park` and `close` rig docs), and the two rigs are in different test binaries.
+  - Copying `joined` is incidental to the separate fan-out that C21 justifies. Sharing it would mean editing `reconcile.rs`, which is outside the Blast radius.
+- **Hedged:**
+  - I did not run the test suite. T-green ran it on the same head (`8ed5f8c`), and nothing has changed since.
+  - The 176-line overlap is a mechanical count: normalized, non-trivial lines of `apply/rig.rs` that occur verbatim in `launch/rig.rs`. It undercounts the lines that differ only in `self.x` against `self.fakes.x`.
+- **Evidence:**
+  - **The diff.** `git diff --name-only 7284001..8ed5f8c` lists exactly the 27 paths. `bash scripts/lint.sh` exits 0, and the story's only warning is `apply/rig.rs` at 759 lines.
+  - **Shared code.** The diff of `tx_launch*`, `reconcile*`, `lib.rs`, `profile/mod.rs` and every Cargo file is empty.
+  - **Searches.** grep finds no I/O, `unsafe` or `#[allow]` in the engine or the verb, no hub harness names, and no personal infrastructure names in the diff.
+  - **Issue #818.** `gh issue view 818`: open, and its body carries C10's clause.
+  - **Files read.** `tx_apply.rs`, `tx_apply/{observe,run}.rs` and `profile/apply.rs` in full, and the diffs of `show.rs`, `profile_verbs/rig.rs`, `process/stub.rs`, `cli-surface.txt`, ADR-0003, ADR-0021, the CHANGELOG and the spike doc. Against them:
+    - `reconcile.rs` (`observe_all`, `joined`, `missing_herdr_panes`);
+    - `tx_launch.rs` (`same_pane`, `TxFailure`, `Launched`);
+    - `profile/delete.rs` (`detach`) and `profile/create.rs` (`join`);
+    - `pane/launch.rs` and `pane/close.rs` (`failure_body`), and `pane/profile_scope.rs` (`reconcile_step`, `StoreScope::stored`);
+    - `profile_diff.rs` (`diff_profile`, `is_member`) and `tx_switch.rs` (its open codes);
+    - `apply/rig.rs` and `launch/rig.rs` in full, and the headers of the `park`, `close` and `doctor` rigs;
+    - the brief's §1 to §13 and C1 to C25, and handoff-A rounds 1, 2 and 4, handoff-F and handoff-T-green.
