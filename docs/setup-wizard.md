@@ -232,6 +232,16 @@ more than one.
   if the pane count already equals orchestrators + sessions, reuse the structure, leave a
   healthy resumed orchestrator alone, and re-attach only the dead viewer panes using the new run's
   session ids.
+  The wizard never splits or closes panes it did not create: when `pane list` shows such panes
+  after the server starts, it reports them and, with the user's yes, builds a new workspace beside
+  them (`workspace create`), or reuses them only if the user asks. Stage 3 says this in the plan
+  when `herdr session list` shows a stopped session of the instance's name.
+- **Stage 8 labels and builds the grid.** Every pane gets its slot name as a label
+  (`herdr.sh label <pane-id> <label>`, right after the splits) and Verify checks that each label
+  equals its slot. The grid is built row first (split right along the first row, then each
+  first-row pane down), because the column-by-column order nests unevenly. Its status check reads
+  Herdr 0.8.x's `status: not running` / `status: running` line under `server:` and still accepts
+  the older `server: not running`.
 - **A resumed orchestrator can't prove the `AGENTS.md` briefing works.** It may already know about
   Holler from its own past turns. To test the briefing, exit that session, launch a fresh
   `claude` (no `--resume`), and ask it something with no Holler context, like "Send a hello to
@@ -434,7 +444,7 @@ Stage 2 takes a read-only inventory of each host the run touches
 configuration and the Herdr sessions; a tool it needs and cannot find on `PATH` is reported as a
 `warn` line, never skipped silently. It only runs `ss`/`lsof`, `ps`, `tailscale serve status` and
 `herdr session list` (the Herdr section runs only with `WIZARD_INVENTORY_HERDR=1`, which the skill
-sets on the local line only; a missing `herdr` on a remote host is expected); it never writes,
+sets on the local line only, and `WIZARD_HERDR_HOST=1` on the local `collide.sh` call only; a missing `herdr` on a remote host is expected); it never writes,
 signals, starts or stops anything. The first line of an inventory is `home<TAB><that host's $HOME>`,
 the home that `-` and `~/` state directories are resolved against. A remote inventory is taken with
 `ssh <remote_host> 'bash -l -s' < .../inventory.sh` so a login shell's `PATH` applies. Stage 3 feeds each
