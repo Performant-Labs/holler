@@ -79,3 +79,56 @@ No story owns the post-#831 adoption, and #835 cannot build it (`HarnessKind` ha
 ### Fixture additions
 
 On top of the issue's fixture: a pane whose command read errors (not `pane-not-found`) gives `command-unreadable`, no record, and a real run refused as `import-blocked`; a session with no process (the #650 default world) is imported as OpenCode; a pane whose command is `bash` is imported as OpenCode; every pane left alone writes nothing in a real run and in a dry run.
+
+---
+
+## Contract amendment, round 2 (resolves the second BLOCK in `docs/handoffs/835/handoff-A.md`)
+
+This section supersedes the earlier sections wherever they differ. The issue text at the top still wins where it is explicit.
+
+### R2-1. The port method is REQUIRED, not default-armed (supersedes section 1's "Default-armed" bullet and its open code)
+
+Reason: #649's production wiring (`BindingHost` over `WiredHost` over `TmuxHost`, in #649's `crates/holler-cli/src/pane/wiring.rs` and `wiring/bind.rs`) forwards only the four `HostPort` methods that exist. A default-armed method is not forwarded by those decorators, so over the real wiring the import would get the default's refusal for every pane, every pane would be `harness-unreadable`, and every real run would be refused `import-blocked`; no compile error would say so and no test over `FakeHost` would catch it. A required method makes the compiler find every implementation (ADR-0021 decision 12, the #802 precedent) and keeps #649's own rule that every decorator forwards every port method.
+
+- **No default, no new open code.** Delete the default and the `command-names-unsupported` code from section 1. The signature stays `foreground_commands(&self, name: &PaneName) -> Result<Vec<String>, PaneError>`.
+- **Implementations to update (the compiler lists them):** `TmuxHost`, `FakeHost`, the conformance `Mutant`, `TestHost`, `Unwired`, the launch and apply rigs' linked hosts, and, after #649 has merged, `BindingHost` and `Wired<dyn HostPort>`.
+- **Lift the "do not touch `wiring.rs`" rule** (section 6) for exactly these forwards, and no other change to #649's files.
+- **Pin each decorator:** a test per decorator that the new method reaches the inner host (follow the pattern of #649's forwarding tests in `tests/pane_integration/bind.rs`), and the host conformance suite run over the production decorator if #649 already does that for the existing methods.
+- **Sequencing: this story is built after #649 has merged**, in a worktree based on that `main`. (It also needs the current `main`, which includes #832.) Until then it is parked.
+
+### R2-2. The records (supersedes the ADR 0021 section 13 "finding table" wording)
+
+ADR-0021 section 13 has no finding table. Add a **"Decided (#835)" paragraph** to section 13 recording the port method, the rule and its limits, and the two new codes. Edit sections 2 and 9 and the closing lists as before. Add `crates/holler-pane/tests/import_test.rs` to the blast radius (its code table `NEW_CODES` and levels, and the prose counts, change). The missing-session code in section 2 is spelled **`tmux-session-missing`** (the real code, pinned in `import_test.rs`), not `no-tmux-session`.
+
+### R2-3. Files and coexistence (supersedes the `fake_tmux_test.rs` sentence in section 6)
+
+`crates/holler-adapter-host/tests/fake_tmux_test.rs` must change by about three lines: its `METHODS` array and exhaustive `call` match will not compile with a new `HostOp` variant, and its `OP_*` pin needs the new constant. It goes from 818 to about 821 lines; new adapter tests still go in a new file. #832 (merged as PR #836) edited `ports.rs`, `wiring.rs` and ADR-0021 sections 2, 9 and 13, the same places this story edits: work from the current `main`, and note the coexistence in the PR.
+
+### R2-4. The two codes, renamed (supersedes `left-alone-not-driven` and `command-unreadable`)
+
+- **`harness-claude-code`** (level `info`, row action `skipped`, built through `Outcome::left_alone`): names the condition, and stays true after #831, when the same panes are adopted with the switch.
+- **`harness-unreadable`** (level `problem`): names what could not be read, and does not clash with this verb's existing "command" (the launcher argv).
+
+### R2-5. The rule's limits, recorded (supersedes section 2's "matches the old launcher's own test ... `claude` on argv[0]")
+
+tmux reports `#{pane_current_command}`, the argv[0] basename of the pane's foreground process, whereas the old launcher matches any argv element. Record the limits in the "Decided (#835)" paragraph and in the verb's help text:
+
+- A Claude Code pane whose `claude` process has exited shows its shell (`bash`) and is imported as OpenCode.
+- A Claude Code pane started in a way that makes argv[0] something else (a wrapper) is not recognised.
+- The rule is a default for the first real import, not a proof of what a pane runs.
+
+### R2-6. Every path that would record a pane on a guess is the unreadable problem (extends section 2)
+
+Besides an error from the new read, these are also `harness-unreadable` (problem, no record, `import-blocked` on a real run): a lost chain (`Observed::Lost`, which today is only an `observe-failed` warning in `assess.rs`), and a failed `ps` that is not `pane-not-found`. A pane is never recorded as OpenCode unless the signal was read and was not `claude`.
+
+### R2-7. Home of the rule
+
+The one constant (`"claude"`) and its predicate are public in `crates/holler-pane/src/pane.rs`, beside `HarnessKind`, so #831 and #832 can reuse them. Nothing compares a command name with `"claude"` anywhere else.
+
+### R2-8. Rules for the conformance case (for T)
+
+The new host conformance case must hold on a real tmux as well as on `FakeHost`: never assert an empty list (the session's shell is itself listed), and poll within a bound for the expected name, because right after `run` the foreground name can still be `env`. The case asserts the name the process settles to, and the `Mutant` break makes that assertion fail.
+
+### Out of scope, for the operator
+
+#832's `HerdrPort::observe_pane` is default-armed too, and #649's `BindingHerdr` and `LazyHerdr` do not forward it, so over the real wiring `pane list` would silently show no working directory and no last screen change. That is #832's to settle, and the reason this story takes the required form.
