@@ -1,143 +1,99 @@
-# Handoff-T-green: Phase 7 (Workflow script; the role doc's Phase 6), re-run after the brief's round-1 amendment - #802 `HarnessPort::serve_command` takes a `ServeSpec`; the harness server runs in the pane's tmux session
+# Handoff-T-green: Phase 7 (Workflow script; the role doc's Phase 6), round 2 - #802 the health wait checks the run's deadline before every ask
 
 **Date:** 2026-10-11
-**Branch:** issue-802-implementation (worktree `.claude/worktrees/0802-serve-command`, head `0dc4e8b`)
+**Branch:** issue-802-implementation (worktree `.claude/worktrees/0802-serve-command`, head `f27d5d0`)
 **Issue:** #802 (closes #695)
-**Handoff-F reviewed:** `docs/handoffs/802/handoff-F.md`
-**Handoff-T-red:** `docs/handoffs/802/handoff-T-red.md`
-**Brief:** `docs/handoffs/802-brief.md` as amended in `0dc4e8b` (13 findings applied)
+**Handoff-F reviewed:** `docs/handoffs/802/handoff-F.md` (round 2)
+**Handoff-T-red:** `docs/handoffs/802/handoff-T-red.md` (round 2)
+**Brief:** `docs/handoffs/802-brief.md` as amended in `0dc4e8b`
 
-**VERDICT: BLOCK.** F must change one function. The production code is unchanged since the first
-T-green (`7ede9c7`, PASS). The brief was amended afterwards, and its new Scope 2 text rules out
-what `tx_launch::server::wait_healthy` does. I wrote a test that pins the amended rule. It fails on
-F's code for the right reason, and it passes with a three-line fix that I tried and then reverted.
+The previous T-green (BLOCK on B-1) is at `git show dab3cd3:docs/handoffs/802/handoff-T-green.md`,
+and the first one (PASS on round 1's code, with the per-AC table and mutation checks M1 to M6) at
+`git show 3fe111d:docs/handoffs/802/handoff-T-green.md`. This round re-checks the whole suite and
+what F changed for B-1, W-4, W-14, W-16 and the AC 12 advisory.
 
-## What the amended brief adds, and how the code measures up
+**VERDICT: PASS.** The suite is GREEN, B-1 is fixed where W-4 puts it, and Tier 1 and Tier 2 are
+clean. No test was repaired: F listed none as wrong, and I found none.
 
-| Amended text | Check | Result |
-|---|---|---|
-| Scope 2: "each `health` call is a live step with the budget checked before it ... and the ADR's last sentence must keep holding for the wait too" | `server.rs` read; new test | **FAIL** (below) |
-| AC 1: two `compile_fail,E0639` doctests, one per form | `ports.rs` ~113-118: two doctests; `cargo test -p holler-pane --doc` | PASS |
-| AC 2: complete call logs via `assert_eq!`, `acted == false` | `an_agent_refusal_in_the_plan_is_exit_3_and_writes_nothing` asserts `calls.harness == [ServeCommand]` and empty `herdr`, `host` and `probes` lists, exit 3, no step phrase. The step phrase is printed only when `acted` is true, so its absence covers `acted == false`. | PASS |
-| AC 4: escape `p#S`->`p##S`, `q;`->`q\;`; the real-tmux test uses another directory | `fake_tmux_test::run_escapes_the_cwd_for_tmux` (both cases plus `#(...)`); `real_tmux_test::run_works_in_the_given_cwd_not_the_sessions` (opt-in, 9/9 on F's run) | PASS |
-| AC 6: the run's budget, a short `TxOptions.budget`, a frozen fake, a bounded run time | `launch.rs::assert_waits_out_the_budget` (700 ms budget, `took < 3 s`) used by both 4a and 4b | PASS |
-| AC 8: "loudly" = exit 1, `unavailable`, "still answers", generation unchanged | `relaunch_fails_when_the_old_server_survives` asserts all four | PASS |
-| AC 12: CHANGELOG names the behaviour changes | names `timeout` not `unavailable`, and the port re-check | **Partial** (advisory below) |
-
-## Blocking issue (F must address)
-
-**B-1. The health wait asks `health` without the run's budget being checked first.**
-`crates/holler-pane/src/tx_launch/server.rs`, `start` (lines ~93-97) and `wait_healthy` (~37-53):
-
-- `start` checks the budget, calls `host.run`, then enters `wait_healthy`. The wait's first act is
-  `harness.health(port)`, with no budget check after `run`. A `run` that returns after the budget
-  has run out is followed by a `health` call anyway. The run then takes the budget plus `run`'s
-  bound plus `health`'s bound (OpenCode's 2 s). That breaks ADR-0021 section 12's sentence, "A run
-  takes at most the budget plus one port call's own bound plus its rollback calls", which the
-  amended Scope 2 says "must keep holding for the wait too". Before #802 the engine had a
-  `budget.check()` between `serve` and `health` (`92fbc6e` `tx_launch.rs` ~628-630), so this
-  removed a check.
-- `wait_healthy` also asks "once more when the deadline comes during a sleep". That is a `health`
-  call started once the budget has run out. Scope 2 rules it out: "each `health` call is a live step
-  with the budget checked before it".
-
-**Fix that turns the new test GREEN** (tried, then reverted with a file copy; F owns the final form):
-check the deadline before each ask in `wait_healthy`:
-
-```rust
-loop {
-    if Instant::now() >= deadline {
-        return Ok(false);
-    }
-    if harness.health(port)? {
-```
-
-With that change applied: `pane_verbs` 259/259 passed (the new test included), and every
-`holler-pane-testkit` target passed (conformance 15/15, `fake_harness_test` 23/23). F should
-also update `wait_healthy`'s doc ("It asks at least once, and once more when the deadline
-comes..."), `Budget::deadline`'s doc ("ends the wait after its first poll"; with the check, an
-unrepresentable deadline asks nothing), and the ADR's health-wait paragraph if its wording
-changes.
-
-## Test added in this phase
-
-`crates/holler-cli/tests/pane_verbs/launch/serve.rs`,
-`no_health_poll_starts_once_the_budget_has_run_out` (integration, the engine through the rig's
-fakes, the same tier as `the_budget_bounds_a_slow_launch`).
-
-- **Setup:** the budget is 600 ms. A hook on the plan's port check sets every host call 400 ms
-  slow, so `ensure_session` ends inside the budget and `run` ends past it. There is no sleep in test
-  code; the slowdown is the fault switch's `set_delay`.
-- **Assertions:** `Err(TxFailure { Timeout("pane.launch"), acted: true })`. Host calls are
-  `[EnsureSession, Run, StopOwned]`. Harness calls are exactly `[ServeCommand, Health, Health]`
-  (the plan's port check and the act's re-check). No record is written.
-- **Margins:** about 200 ms on each side of the budget, and the outcome is an ordering, not a
-  duration.
-- **RED on F's code** (the assertion about the missing behaviour, not a setup error):
+## GREEN confirmation
 
 ```text
----- launch::serve::no_health_poll_starts_once_the_budget_has_run_out stdout ----
-assertion `left == right` failed: no health call after the run: the budget had run out
-  left: [ServeCommand, Health, Health, Health]
- right: [ServeCommand, Health, Health]
-test result: FAILED. 12 passed; 1 failed (launch::serve)
+$ cargo test -p holler-cli --test pane_verbs -- launch::serve
+test launch::serve::the_health_wait_asks_nothing_once_its_deadline_has_passed ... ok
+test launch::serve::a_deadline_during_the_health_waits_sleep_ends_it_without_another_ask ... ok
+test launch::serve::no_health_poll_starts_once_the_budget_has_run_out ... ok
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 246 filtered out; finished in 1.20s
 ```
 
-The prior phase's test repair (`hermetic_test`, `stub.lines().is_empty()`) is committed in `3fe111d`.
-
-## GREEN confirmation (everything except the new test)
+**Spot-check (the tests pin the behaviour, not F's code).** I put `wait_healthy`'s loop back to
+its round-1 form (ask first, check the time left after), ran the same command, then restored the
+file from a copy (`git status` clean afterwards):
 
 ```text
-$ cargo test --workspace --no-fail-fast -- --skip roster_stays_accurate_under_concurrent_body_load
-148 binaries: passed=2070 failed=1 ignored=25
-  the one failure: launch::serve::no_health_poll_starts_once_the_budget_has_run_out (B-1)
-  2070 is F's count, so every pre-existing and Phase-5 test is still GREEN
+test result: FAILED. 12 passed; 3 failed
+  the_health_wait_asks_nothing_once_its_deadline_has_passed          left: [Health]                               right: []
+  a_deadline_during_the_health_waits_sleep_ends_it_without_another_ask left: [Health, Health]                       right: [Health]
+  no_health_poll_starts_once_the_budget_has_run_out                   left: [ServeCommand, Health, Health, Health] right: [ServeCommand, Health, Health]
 ```
+
+These are the same three assertions as the RED in `handoff-T-red.md`.
+
+## Tier 1 results
 
 | Check | Command | Result |
 |---|---|---|
-| Clippy | `cargo clippy --workspace --all-targets -- -D warnings` | exit 0, PASS |
-| Lint | `bash scripts/lint.sh` | exit 0 (size notices only), PASS |
-| Changelog | `bash scripts/changelog-check.sh` | `ok`, PASS |
-| Docs CLI | `cargo test -p holler-cli --test docs_cli_test` | 3 passed, PASS |
-| Wire canary | `cargo test -p holler-cli --test wire_selftest` | 3 passed, PASS |
-| Unused deps | `cargo machete` | none, PASS |
-| Doctests | `cargo test -p holler-pane --doc` | 5 passed (the 2 `compile_fail,E0639`), PASS |
-| Hook tests | `bash scripts/test-hooks.sh` | exit 0, PASS |
-| rustfmt | `rustfmt --edition 2021 --check` on the new test file | clean (after formatting), PASS |
-| Workspace tests | as above | **1 FAIL (B-1, the new test)** |
+| Verify command (whole workspace) | `cargo test --workspace --no-fail-fast -- --skip roster_stays_accurate_under_concurrent_body_load` | 148 binaries, passed=2073 failed=0 ignored=25, exit 0. PASS (F's count; includes `docs_cli_test`, `wire_selftest` and the test kit's conformance targets) |
+| Clippy | `cargo clippy --workspace --all-targets -- -D warnings` (after touching `holler-pane` and `holler-adapter-opencode` crate roots so they are re-checked) | exit 0. PASS |
+| Lint | `bash scripts/lint.sh` | exit 0, size warnings only (`tx_launch.rs` 820). PASS |
+| Changelog | `bash scripts/changelog-check.sh` | `changelog-check: ok`. PASS |
+| Unused deps | `cargo machete` | none. PASS |
+| Rustdoc | `RUSTDOCFLAGS="-D warnings" cargo doc --no-deps -p holler-pane -p holler-pane-testkit -p holler-adapter-opencode` | clean. PASS |
+| rustfmt | `rustfmt --edition 2021 --check` on all 40 `.rs` files the PR changes (`git diff --name-only 92fbc6e HEAD`) | clean. PASS |
+| Hook tests | `bash scripts/test-hooks.sh` | exit 0. PASS |
 
-F's opt-in real runs (`real_tmux_test`, `real_opencode_test`, 9/9 each) were not re-run. They
-need private servers and are not CI steps. F's results stand as reported.
+F's opt-in `real_opencode_test` run (9/9 against opencode 1.19.0) was not repeated. It needs a
+private opencode server and is not a CI step. The rig change it exercised (W-16) compiles under
+`clippy --all-targets` and the workspace build.
+
+**Cross-check of F's numbers.** Every command F lists in "Tier 1 self-check" gave the same result
+here. F's one flake (`remote_admin_test::remote_admin_traffic_never_moves_the_bodys_last_seen`)
+did not recur in my run.
 
 ## Tier 2 results
 
 | Check | Method | Result |
 |---|---|---|
-| Coverage per AC | AC 1-12, each mapped to a test (first T-green table, still valid), plus the new I5 test for amended Scope 2 | PASS once B-1 is fixed |
-| Test quality | The new test names one behaviour, fails alone for the right reason, sits at the engine tier and duplicates neither `the_budget_bounds_a_slow_launch` (slow harness, stops before the server step) nor 4a/4b (frozen server, polls until the budget ends) | PASS |
-| Timing | The new test asserts the call order and the outcome, not a duration. It uses `set_delay`, with no `thread::sleep` | PASS |
-| I5 budget | `server::start` / `wait_healthy` as above | **FAIL (B-1)** |
-| Type safety, error paths, data integrity, API contract, security, migration | Unchanged since the first T-green, whose mutation checks M1 to M6 still apply (the production code is the same) | PASS |
+| B-1 / W-4: no `health` call once the deadline has passed | Read `server.rs` `wait_healthy`: the deadline is checked at the top of the loop, so before every ask, the first after `run` included. The sleep is `min(poll, deadline - now)`, read after the ask. `start` has no second `budget.check()` (Phase 8's rule). | PASS |
+| W-14: `check` and the wait agree | `Budget` holds one `end`, computed in `start`. `check` is `Instant::now() < end` and the wait stops at `Instant::now() >= deadline`, with `deadline() == end`: the same predicate. The halving loop ends because `checked_add(Duration::ZERO)` always succeeds. No caller passes such a budget, so no test, as T-red said. | PASS |
+| W-16: rig imports `BOOT_POLL` | `rig.rs` now imports `tx_launch::BOOT_POLL`; its own `BOOT` (30 s) stays. An import in my test file, no logic or value changed. I accept it as it is. | PASS |
+| AC 12 advisory (CHANGELOG) | The #802 entry now names both checks never-adopt rests on, and that the adapter's own-process check is gone. | PASS |
+| Docs match behaviour | `wait_healthy`'s doc, `Budget`/`start`/`check`/`deadline` docs, step 3 of the server module doc, the I5 bullet of `tx_launch.rs`, and ADR-0021 section 2's health-wait paragraph all say "checked before every ask, none once the budget has run out". | PASS |
+| Coverage per AC | AC 1-12 each have a test (the table in `3fe111d`'s T-green); amended Scope 2 / AC 6 now has the engine test and the two direct `wait_healthy` tests | PASS |
+| Test quality | Each of the three tests names one behaviour and fails alone for the right reason (spot-check above). The engine test pins the bound of the run; the direct tests pin the rule in the shared function, which the engine test alone would not (a second `budget.check()` in `start` would pass it). No duplicates. The suite is proportionate: three tests for one rule at two tiers. | PASS |
+| Timing | The assertions are call logs and outcomes, not durations. The sleep test's window (200 ms) is far shorter than its poll (60 s), so its result is fixed by ordering. `thread::sleep` never sleeps less than asked (std docs), so the wait's capped sleep always wakes at or past the deadline. | PASS |
+| Type safety, error paths, data integrity, API contract, security, migration | Round 2 changes only `wait_healthy`'s loop and `Budget`'s fields. A `health` error is still returned as it is. Mutation checks M1 to M6 from `3fe111d` cover the unchanged rest. | PASS |
+| Evidence appendix | Checked the two new entries myself against source: `harness.rs:346-349` (`FakeHarness::health` goes through `faults.enter`, which logs every call, `fault.rs:93-103`) and `fault.rs:79-83` (`set_delay`). Both excerpts are verbatim. Nothing to add. | PASS |
 | Protocol, goldens, Playwright | No such change or surface | N/A |
-| Evidence appendix | The new test relies on `roll_back` calling only `stop_owned` and `herdr.close` (already in `evidence.md`), on the fault switch logging every call (already there) and on `set_delay` (`holler-pane-testkit/src/fault.rs` ~79-83, a test-kit fact shown in the diff's context). Nothing added. | PASS |
 
 ## Acceptance criteria status
 
-AC 1-5 and 7-11: PASS (as in the first T-green; the amended wording is checked in the table at the
-top). AC 6: **FAIL** until B-1 is fixed. The wait's `timeout` and rollback pass, but the amended
-Scope 2 rule about the budget, which AC 6 now cites, does not hold. AC 12: PASS for the mechanical
-part, with one advisory below.
+- AC 1-5 and AC 7-11: PASS, backed by the tests listed in `3fe111d`'s T-green, all GREEN in the
+  workspace run above.
+- AC 6 (with amended Scope 2): PASS. `the_budget_bounds_a_slow_launch` and the 4a/4b frozen-server
+  tests in `launch.rs`, plus `no_health_poll_starts_once_the_budget_has_run_out`,
+  `the_health_wait_asks_nothing_once_its_deadline_has_passed` and
+  `a_deadline_during_the_health_waits_sleep_ends_it_without_another_ask`.
+- AC 12: PASS. `changelog-check` passes, and the entry now says what never-adopt rests on.
+
+## Blocking issues
+
+None.
 
 ## Advisory notes
 
-- **AC 12 / Scope 7 (for F with B-1, or for S).** The CHANGELOG entry says the engine "checks the
-  port again just before the server starts". It does not say what the amended Scope 7 asks it to
-  name: that never-adopt now rests on those two checks *without the adapter's check that a healthy
-  answer came from the server it started*. The ADR states this (ADR-0021 ~163-165); the CHANGELOG
-  does not. One clause would fix it.
-- W-11(a), carried over: no test starts the server under a tmux pty. That check belongs with #649.
-- `Isolated` pairs now appear on the server's command line (by design, A's W-2). Credentials must
-  stay out of `Isolated`.
-- `serve.rs` is about 500 lines after the new test. `fake_tmux_test.rs` (803), `hermetic_test.rs`
-  (813), `switch.rs` (833) and `launch/rig.rs` (793) are close to the 900-line limit.
+- `cargo fmt --all -- --check` reports drift in 191 files across the workspace. None of them is a
+  file this PR changes, and CI does not run `cargo fmt`. Pre-existing, not #802's.
+- `tx_launch.rs` is at 820 lines (lint warns, fails at 900). #644 part 2 and #664 also edit it.
+- Carried over: W-11(a) (no test starts the server under a tmux pty, goes with #649), W-13 (merge
+  order with #664), W-15 (no budget check between the plan's reads and `session_of_record`'s two
+  calls; predates #802).

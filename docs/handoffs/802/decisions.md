@@ -269,3 +269,10 @@
   - `scripts/lint.sh`, `scripts/changelog-check.sh`, `cargo machete`, rustfmt `--check`, `RUSTDOCFLAGS=-D warnings cargo doc` and `docs_cli_test`.
   - The full verify command: 2073 passed, 0 failed, 25 ignored on the second run. The first run had 1 failure, the flake above.
   - Opt-in real `real_opencode_test` against opencode 1.19.0: 9/9, with no stray server left.
+
+## T (Phase 7, verify GREEN, round 2 after F's B-1 / W-4 fix) — 2026-10-11T08:06:46-06:00
+- **Decided:** PASS. `launch::serve` is 15/15, and the whole verify command is 2073 passed, 0 failed, 25 ignored. Clippy, lint, changelog-check, machete, rustdoc, hook tests and rustfmt on the PR's files are clean.
+- **Decided:** Accepted F's W-16 edit to my `real_opencode/rig.rs` as it is (an import of `BOOT_POLL` in place of a copied constant). No test repaired: none was wrong.
+- **Assumed:** The repo-wide `cargo fmt --check` drift (191 files, none in this PR) is pre-existing and out of scope; CI does not run `cargo fmt`.
+- **Hedged:** F's opt-in `real_opencode_test` run was not repeated (needs a private opencode server; not a CI step).
+- **Evidence:** Spot-check: with `wait_healthy` put back to ask-then-check, the three round-2 tests failed with the RED assertions, then the file was restored and the tree was clean. The two new `evidence.md` entries (`harness.rs:346-349`, `fault.rs:79-83`) match source verbatim.
