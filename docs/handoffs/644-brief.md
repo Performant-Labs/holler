@@ -1,61 +1,73 @@
 # [feat(cli): `holler pane launch` and `relaunch`, a transaction that creates the session of record](https://github.com/Performant-Labs/holler/issues/644)
 
-Part of epic #633. This is the complete statement of the story (consolidated 2026-10-11; where an older comment or amendment disagrees, this text is the decision).
+Part of epic #633. This is the complete statement of the story (consolidated 2026-10-11; revised the same day after the plan check, with the evidence re-cut from merged `origin/main` `7284001`; where an older comment or amendment disagrees, this text is the decision).
 
 ## Status
 
 - **Part 1 is merged** (#718): `holler pane launch` and `relaunch` as a transaction (plan, Herdr pane, tmux session, server, health, session of record through the API, TUI, one CAS write, observe), profile spec-editing, probe, argv rule, grid forms.
-- **Part 2 is this run: the OpenCode agent through `launch` and `relaunch`.** #700 (merged) declared the field `Pane.opencode_agent`, its `AgentKey` guard and the `--agent` flag, and the verbs already overlay the flag on the spec and record it (E1 to E8 below). #802 (PR open when this was written) makes the engine pass the in-flight spec's agent to `serve_command` and `verify_serving` (E11 to E14). What is left is small and is listed in Scope.
+- **Part 2 is this run: the OpenCode agent through `launch` and `relaunch`.** #700 (merged) declared the field `Pane.opencode_agent`, its `AgentKey` guard and the `--agent` flag, and the verbs already overlay the flag on the spec and record it (E1 to E8 below). **#802 is merged** (PR #817, `7284001`): the engine passes the in-flight spec's agent to `serve_command` in the plan and to `verify_serving` in the act (E11 to E15), and #802's own tests pin both for a launch and a relaunch (E24, E25). What is left is small and is listed in Scope.
 
 ## Dependency note
 
-Built after **#802** and **#642 part 3** have merged. Every `#802` line quoted below is the pre-merge reading, taken from #802's branch at `3fe111d` (`origin/main` is `263a2d7`); the contract names used here (`serve_command`, `verify_serving`, `ServeSpec`, `AGENT_UNSUPPORTED`) are fixed by #802's issue body. #642 part 3 supplies the OpenCode adapter's real `verify_serving` and its refusal code `agent-unusable`; the fakes in this story stand in for it.
+Built on `origin/main` at `7284001` (#802 merged); every quote in the Evidence is cut from that tree. **#642 part 3 is built in parallel and is not a prerequisite.** It supplies the OpenCode adapter's real `verify_serving`, its refusal code `agent-unusable` and the `default_agent` that applies the agent; until it lands the adapter refuses every agent `agent-unsupported` (fail closed, ADR-0021 section 2, items 5 and 7). This story's tests run on the test kit's fakes, which stand in for the adapter: `FakeHarness::verify_serving` refuses `agent-mismatch` when the running server's agent is not the spec's (E17, E18), and a test can make it answer any other open code with `fail_next`. This story changes no adapter file and #642 part 3 changes no CLI, `profile_diff` or CLI-test file, so the two compose without a shared edit except in ADR-0021 (section 9's launch row, "Deferred to named stories", "Decisions taken") and `CHANGELOG.md`: whichever merges second merges `main` and keeps both texts. For that reason this story's ADR text states the refusal in general terms (an open code the harness owns: `agent-unsupported` from the OpenCode adapter today) and leaves #642 part 3 to name its own `agent-unusable` in section 9.
 
 ## Scope (final)
 
 1. **Output.** A successful `launch` and `relaunch` report the agent the pane was recorded with:
-   - **text:** the one-line result gains `, agent KEY` after `harness port N` and the optional `(pid P)`, before any `; profile ...` clause (E7). A pane with no agent prints exactly the line it prints today (a golden test).
-   - **JSON:** `data` gains the key `agent` after `spec_only` (additive; every existing key and its order are unchanged): the stored record's `opencode_agent` as a string, or `null` when the pane has none and with `--spec-only`.
-2. **The spec field table.** `opencode_agent` joins `SpecField` (E19): a new variant `OpencodeAgent`, path `opencode_agent`, placed in `ALL` after `Effort` and before `Role` (`ALL` has 16 entries), `value()` reads `spec.opencode_agent`, and `FieldValue` gains `Key(Option<String>)` (serializes as the string or `null`; `Display` prints `none` for `None`, else the key with control characters escaped like `Text`); `differs` is plain equality. `profile show` and `profile apply` therefore see an agent change; `spec_from_pane` already maps the field (E21), so a pane compared with its own snapshot never differs.
-3. **The undefined-key refusal is `verify_serving`'s, and the verbs add no check of their own.** The engine asks the running server (E14), after the health wait and before any session is created, whether it honours the spec's agent; a refusal (the adapter's code `agent-unusable` once #642 part 3 lands, `agent-unsupported` for an adapter that cannot apply an agent, the fake's `agent-mismatch`) is exit 3 with the code and message unchanged, goes through the engine's rollback, and records nothing. Only a running server can say which agents it has, so this cannot be moved earlier; the plan's `serve_command` refusal (E11) already covers a harness that cannot apply any agent. The CLI reads no project file.
-4. **What needs no change** (stated so the brief does not re-plan it, each shown in the evidence): the flag and its `agent-key-invalid` refusal (E1, E2, E3); the overlay and the rule that a relaunch without `--agent` keeps the recorded agent, and with `--agent` replaces it (E5, E8, E26); the same CAS write that records the pane records the agent, because the record is built from the spec (E12); the engine's plumbing of the spec's agent into `ServeSpec` on launch and relaunch (E11, E24).
+   - **text:** the one-line result gains `, agent KEY` after `harness port N` and the optional `(pid P)`, before any `; profile ...` clause (E7). A pane with no agent prints exactly the line it prints today (a golden test). (Since #802 no launch records a pid, so `(pid P)` appears only for a record written before it; the clause stays as it is.)
+   - **JSON:** `data` gains the key `agent` after `spec_only` (additive; every existing key and its order are unchanged): the stored record's `opencode_agent` as a string, or `null` when the pane has none and with `--spec-only`. `Report::new` derives it from `launched.pane`, as it derives `spec_only`, and never from the request's spec, so `data.agent` cannot disagree with `data.pane.opencode_agent`.
+2. **The spec field table.** `opencode_agent` joins `SpecField` (E19): a new variant `OpencodeAgent`, path `opencode_agent`, placed in `ALL` after `Effort` and before `Role` (the order of `ProfileSpec`'s fields; `ALL` has 16 entries), `value()` reads `spec.opencode_agent`, and `FieldValue` gains `Key(Option<String>)` (serializes as the string or `null`, like the other variants, which are `#[serde(untagged)]`, E20; `differs` is plain equality). **Text form:** `Key(Some(k))` prints the key through `write_escaped`, the one escaper of that file (no second one); `Key(None)` prints **`(default)`**, never `none`, because `none` is a valid `AgentKey` and the text of `profile show` and of its difference lines could not tell an agent named `none` from no agent (the JSON can; `Argv(None)` prints `none` only because a set argv prints as a JSON array). `(default)` cannot be a key (`AgentKey::parse` allows only ASCII letters, digits, `-` and `_`, E3) and says what an absent agent means. `profile show` therefore lists the field (it prints every field of `SpecField::ALL`, E22) and `diff_profile` reports a change of it; `spec_from_pane` already maps the field (E21), so a pane compared with its own snapshot never differs. Neither type derives `Deserialize` and no hub, protocol or persisted form reads either, so the field touches no wire or file format.
+3. **The undefined-key refusal is `verify_serving`'s, and the verbs add no check of their own.** The engine asks the running server (E14), after the health wait and before any session is created, whether it honours the spec's agent; a refusal (an open code the harness owns: `agent-unsupported` from the OpenCode adapter today, the code #642 part 3 will name, the fake's `agent-mismatch`) is exit 3 with the code and message unchanged, goes through the engine's rollback (which stops the server, E14), and records nothing. Only a running server can say which agents it has, so this cannot be moved earlier; the plan's `serve_command` refusal (E11) already covers a harness that cannot apply any agent, and that one is exit 3 with nothing written and no rollback. The CLI reads no project file.
+4. **Help text.** The `--agent` help line (`args.rs:60-61`, E1) says "Without it, the server's default agent", which is false for a relaunch and for a launch whose profile spec names an agent (they keep the spec's, E5, decision 2): it becomes "Without it, a new spec has none (the server's default agent) and an existing spec keeps its own." The `--help` of the two verbs is the doc comment of their `Args` structs (no `PaneCmd` variant has a doc comment), and both list the data keys (`launch.rs:54-55`, `relaunch.rs:35`, E31): each gains `agent`.
+5. **What needs no change** (stated so the brief does not re-plan it, each shown in the evidence): the flag and its `agent-key-invalid` refusal (E1, E2, E3); the overlay and the rule that a relaunch without `--agent` keeps the recorded agent, and with `--agent` replaces it (E5, E8, E26); the same CAS write that records the pane records the agent, because the record is built from the spec (E12); the engine's plumbing of the spec's agent into `ServeSpec` on launch and relaunch (E11, E24); `profile show`'s listing (E22); `Report::text`'s escaping (an `AgentKey` is escape-free by its guard, which also runs on decode).
 
 ## Operator decisions (2026-10-11)
 
 1. **Refuse an undefined key from `verify_serving`'s answer, with the adapter's code and a rollback; no file is read in the CLI.** One source of truth (the server). The refusal happens in the act, not the plan, because only a running server can answer (Scope 3).
 2. **`relaunch` without `--agent` keeps the recorded agent.** A relaunch never changes behaviour silently; the existing test pins it (E26).
 3. **No clear flag in this story; `--agent` only sets.** Removing an agent is a separate decision and is not planned.
-4. **`opencode_agent` joins `SpecField::ALL`** (a small amend of #662's `profile_diff.rs`, in the Blast radius), so `profile show` and `apply` see an agent change.
+4. **`opencode_agent` joins `SpecField::ALL`** (a small amend of #662's `profile_diff.rs`, in the Blast radius), so `profile show` and `apply` see an agent change. Ownership: this story owns the field; no other story adds it. #664's brief (item 13: "`SpecField::ALL` omits `opencode_agent` ... file a follow-up issue") is superseded by this decision, and its row c/d split changes with it: a healthy pane whose agent differs from its spec is `reported` (row d), not `adopted`. #700's journal assigns `SpecField` to #647; #647's brief does not touch `profile_diff.rs`, so there is no overlap.
 5. **`agent` appears in the result line and as an additive JSON key** (Scope 1).
+
+Decided in the plan-check follow-up under the standing rules (not an operator ruling; the operator may overturn it): **6. An absent agent prints `(default)` in text** (Scope 2), not `none`.
 
 ## Acceptance (each is a test on the test kit's fakes; paths are real or named sibling modules)
 
-1. **Output, text and JSON.** `crates/holler-cli/tests/pane_verbs/launch/agent.rs` (new sibling module, declared next to `mod serve;` in `launch.rs`): `launch --agent KEY` prints `..., harness port N, agent KEY` and `data.agent == "KEY"`; a launch without `--agent` prints the golden line it prints today with `data.agent == null`; `--spec-only` prints `data.agent == null`; a `--format=json` run passes the envelope checker with every pre-existing key in its pre-existing order.
-2. **Launch records the agent.** The same module: after `launch --agent KEY` the stored record has `opencode_agent == Some(KEY)`, written in the same CAS write as the model and effort (one generation bump, one `cas_put`), and the fake harness recorded a `ServeSpec` with that agent for both `serve_command` and `verify_serving`.
-3. **Relaunch with a different `--agent`, without `--agent`.** `crates/holler-cli/tests/pane_verbs/relaunch.rs` (existing tests at E26 stay as they are) plus, in the new module, a relaunch result that reports `agent` for a replaced key and for a kept key.
-4. **An undefined key is refused, nothing is recorded and nothing runs.** In the new module, on a launch and on a relaunch: the fake `verify_serving` answers a refusal with an open code (`agent-unusable` as the adapter will answer it) and a second case with the fake's own `agent-mismatch`; the verb exits 3 with that code and message unchanged; the registry equals what it was (same generation, no record for a launch); the call log shows the session's processes were stopped by the rollback and no session of record was created; the reconcile step is printed once. (The launch case with `agent-unsupported` is #802's `a_verify_refusal_rolls_back_and_stops_the_server`, E25; this criterion adds the other codes and the relaunch.)
-5. **`--agent` with `--profile P`.** `crates/holler-cli/tests/pane_verbs/launch/profiles.rs`: `launch --profile P --agent KEY` writes the key into P's spec for the pane and bumps P's generation once; a launch that fails at `verify_serving` leaves P unchanged.
-6. **The field table.** `crates/holler-pane/tests/profile_diff_test.rs`: `PATHS` has 16 entries in `ALL` order with `opencode_agent` after `model.effort`; `spec_field_values_serialize_like_the_spec` holds for a spec with an agent and one without (absent in the spec JSON, `null` in the value); `diff_spec` reports `opencode_agent` as a difference when the spec has `KEY` and the live pane has none, and when they differ, and never when equal; `FieldValue::Key(None).to_string() == "none"`.
-7. **`profile show` and `apply` see it.** `crates/holler-cli/tests/profile_verbs/show.rs` (and `apply.rs` where it lists spec fields or differences): a spec with an agent prints `opencode_agent: KEY` and one without prints `opencode_agent: none`; a live pane whose agent differs from its profile's spec is reported as a difference of that field. Every golden or literal list of spec fields in `crates/holler-cli/tests/profile_verbs/**` and `crates/holler-pane-testkit/tests/fake_profile_store_test.rs` is updated for the 16th field (found by grepping for `harness.port_policy` and `SpecField`), and only those lines change.
-8. **Docs.** ADR-0021's launch/relaunch row records the agent output and the `verify_serving` refusal; the README or `docs/` text that shows a launch result line (grep for `harness port`) shows the agent form; `CHANGELOG.md` has an `## [Unreleased]` entry linking this issue.
+A new test goes in the new module only for what is new; where an existing test already pins the record half, that test gains the new assertions (the rig is shared and a near-copy is an anti-duplication rejection).
+
+1. **Output, text and JSON.** `crates/holler-cli/tests/pane_verbs/launch/agent.rs` (new sibling module, declared as `mod agent;` next to `mod serve;` in `launch.rs`, E33): `launch --agent KEY` prints `..., harness port N, agent KEY` and `data.agent == "KEY"`; a launch without `--agent` prints the golden line it prints today with `data.agent == null`; `--spec-only` prints `data.agent == null`; a `--format=json` run passes the envelope checker with every pre-existing key in its pre-existing order.
+2. **Launch records the agent.** The existing `launch_with_agent_stores_the_key_in_the_record` (`launch.rs:159-177`, E32) gains: `data.agent == "KEY"` and the record written by one `cas_put` with one generation bump. In the new module: the fake harness's `serve_specs()` holds a spec whose agent is KEY (the fake records `serve_command`'s spec only; `verify_serving` records nothing, E18), the running server runs KEY (`server(PORT).agent`), `verify_serving` is in the call log and the run succeeded (the fake answers `agent-mismatch` otherwise, E17). #802's E24 already pins the `ServeSpec` handed to the engine; this story does not repeat it.
+3. **Relaunch with a different `--agent`, without `--agent`.** The two existing tests of E26 (`relaunch_without_agent_keeps_the_stored_key`, `relaunch_with_agent_replaces_the_stored_key`, in `relaunch.rs`) gain `data.agent` assertions (the kept key; the replaced key). They are extended, not copied, and nothing about them is weakened.
+4. **An undefined key is refused, nothing is recorded and nothing runs.** In the new module, on a launch and on a relaunch: the fake `verify_serving` answers a refusal with an open code (a stand-in for the code #642 part 3 will name) and a second case with the fake's own `agent-mismatch` (a server started with another agent); the verb exits 3 with that code and message unchanged; the registry equals what it was (same generation, no record for a launch); the call log shows the session's processes were stopped by the rollback and no session of record was created; the reconcile step is printed once. (The launch case with `agent-unsupported` is #802's `a_verify_refusal_rolls_back_and_stops_the_server`, E25; this criterion adds the other codes and the relaunch.)
+5. **`--agent` with `--profile P`.** `crates/holler-cli/tests/pane_verbs/launch/profiles.rs`: `launch --profile P --agent KEY` writes the key into P's spec for the pane and bumps P's generation once (the log `[1, 2]`, as the existing success test pins); a launch that fails at `verify_serving` leaves **P's specs equal to what they were; P's generation moved by two and the log shows the edit and its reversal** (`[1, 2, 3]`, the compensation ADR-0021 "Decisions taken" 1 ratified and `a_failed_act_restores_the_profile_specs` pins, E34), not an unchanged generation.
+6. **The field table.** `crates/holler-pane/tests/profile_diff_test.rs`: `PATHS` has 16 entries in `ALL` order with `opencode_agent` after `model.effort` (E23); `spec_field_values_serialize_like_the_spec` holds for a spec with an agent and one without (absent in the spec JSON, `null` in the value); `diff_spec` reports `opencode_agent` as a difference when the spec has `KEY` and the live pane has none, and when they differ, and never when equal; `FieldValue::Key(None).to_string() == "(default)"`, and a key named `none` prints `none`, so the two differ.
+7. **`profile show` sees it.** `crates/holler-cli/tests/profile_verbs/show.rs`: a spec with an agent prints `opencode_agent: KEY` and one without prints `opencode_agent: (default)`; a live pane whose agent differs from its profile's spec is reported as a difference of that field in the `show` output. **No other list of spec fields exists to update** (grepped on the merged tree, E35): `PATHS` is the only literal 15-field list; `profile_verbs/show.rs` asserts single lines with `contains` and `fake_profile_store_test.rs` holds no field list. **`profile apply` is not covered here**: it is still a stub (E36) and #664 owns it; #664's acceptance covers an agent difference in its report.
+8. **Docs.** ADR-0021 is updated in five places, each in the text as #802 left it (E27 to E30, E37; line numbers are the merged tree's):
+   - (a) section 8, "Launch and relaunch as built (#644)" (E27): the result carries the agent, and a `verify_serving` refusal rolls back and records nothing (the paragraph already names `verify_serving`; add the refusal and the output);
+   - (b) section 9's `pane launch`, `pane relaunch` row (E28): add `agent-key-invalid` (#700's, an open code, exit 3, never echoing the key) and state that the `verify_serving` refusal is an open code the harness owns; `agent-mismatch` belongs to the fake and is not listed; the code #642 part 3 names is left to #642 part 3;
+   - (c) "Deferred to named stories" (E29): the bullet "Applying a project's agent in `pane launch` and `pane relaunch` (`--agent KEY`, refusing a key the project does not define ...): #644's last part" is replaced by what was decided: the server's `verify_serving` answers and the CLI reads no project file;
+   - (d) "Decisions taken": operator decisions 1 to 5 above and the `(default)` rule, as dated items after item 14 (E37);
+   - (e) section 3 (E30): `profile_diff` compares `opencode_agent` too (add it to what is compared).
+   There is **no README or `docs/` text that shows the launch result line** (`grep "harness port"` over `README.md` and `docs/` outside `docs/handoffs/` finds nothing, E35), so none is edited. `CHANGELOG.md` has an `## [Unreleased]` entry linking this issue.
 
 ## Blast radius
 
-- `crates/holler-cli/src/pane/launch.rs` (the `Report` struct and its text only; the overlay code stays)
-- `crates/holler-cli/src/pane/relaunch.rs` only if its docs need the agent sentence
+- `crates/holler-cli/src/pane/launch.rs` (the `Report` struct and its text, and the doc comment of `PaneLaunch` at lines 54-55 only; the overlay code stays)
+- `crates/holler-cli/src/pane/relaunch.rs` (the doc comment of `PaneRelaunch` at line 35 only)
+- `crates/holler-cli/src/pane/args.rs` (the help line of `--agent`, lines 60-61, only)
 - `crates/holler-pane/src/profile_diff.rs` (the `SpecField` row and `FieldValue::Key`; amends #662's file)
-- the tests named in Acceptance, including the new `crates/holler-cli/tests/pane_verbs/launch/agent.rs`; no test file may pass 900 lines (`launch.rs` is 687, `relaunch.rs` 596)
-- `docs/adr/ADR-0021.md` (the launch/relaunch row), `README.md` / `docs/` result-line text, `CHANGELOG.md`
+- the tests named in Acceptance, including the new `crates/holler-cli/tests/pane_verbs/launch/agent.rs`. **Every new test helper goes in `launch/agent.rs`; the only edit to `launch.rs` beyond the extended test of Acceptance 2 is the `mod agent;` line, and `launch/rig.rs` is not edited** (E33: `launch.rs` is 740 lines, `launch/rig.rs` 814, `relaunch.rs` 629, and a file may not pass 900)
+- `docs/adr/ADR-0021.md` (the five places of Acceptance 8), `CHANGELOG.md`
 
-Not in this story: `HarnessPort` and `HostPort` (#802), the adapter and its refusal code (#642 part 3), `Pane.opencode_agent`, `AgentKey` and the flag declaration (#700), `tx_launch.rs`, any hub, protocol or `holler-body` change.
+Not in this story: `HarnessPort` and `HostPort` (#802, merged), the adapter and its refusal code (#642 part 3, in parallel), `Pane.opencode_agent`, `AgentKey` and the flag declaration (#700), `tx_launch.rs` and `tx_launch/server.rs`, `holler-pane-testkit` and the launch rig, `profile apply` (#664), the text rows of `pane get` (which does not print the agent today; a separate observation), any hub, protocol or `holler-body` change.
 
 ## Depends on
 
-#802 and #642 part 3 merged. (Part 2 also needs #700, merged.)
+Nothing unmerged: #802 is merged, and #700 is merged. #642 part 3 runs beside this story and is not needed (the fakes stand in).
 
 ## Pipeline
 
-`rigor: second-opinion`. Fresh worktree, branch `issue-644-implementation` off `origin/main`.
+`rigor: second-opinion`. Fresh worktree, branch `issue-644-implementation` off `origin/main` (`7284001` or later).
 
 ## Rules for this story
 
@@ -67,7 +79,7 @@ This issue was drafted by Claude (Sonnet 5.5) from the operator's decisions in s
 
 ## Evidence (verbatim)
 
-Cut by command from the files named, never retyped. Source: #802's branch at `3fe111d` (which is `origin/main` `263a2d7` plus #802's unmerged commits), so every `tx_launch*`, `ports.rs` and test-kit quote is the pre-merge reading of #802.
+Cut by command from the files named, never retyped, from the **merged tree** (`origin/main` `7284001`, plus this worktree's brief commits). E1 to E10 and E17 to E22 are unchanged readings; E11 to E16, E23, E24 and E26 moved or changed with #802 and were re-cut; E25 and E27 to E37 are new.
 
 - **E1** `crates/holler-cli/src/pane/args.rs:56-66` — the `--agent` flag as declared (#700)
 ```rust
@@ -125,7 +137,7 @@ impl SpecFlags {
                 .env
 ```
 
-- **E3** `crates/holler-pane/src/argv.rs:130-160` — `AgentKey` and its guard
+- **E3** `crates/holler-pane/src/argv.rs:130-159` — `AgentKey` and its guard
 ```rust
 ///
 /// Parsing is the guard (see the module docs). It serializes as a plain string and
@@ -323,7 +335,7 @@ fn relaunch_request(args: &PaneRelaunch, ports: Ports<'_>) -> Result<RelaunchReq
 }
 ```
 
-- **E9** `crates/holler-pane/src/pane.rs:244-252` — the record's field (#700)
+- **E9** `crates/holler-pane/src/pane.rs:252-260` — the record's field (#700)
 ```rust
     /// Recorded by launch/relaunch (#644) and import (#650), so
     /// `profile create --from-current` copies them from the store.
@@ -345,7 +357,7 @@ fn relaunch_request(args: &PaneRelaunch, ports: Ports<'_>) -> Result<RelaunchReq
     pub role: PaneRole,
 ```
 
-- **E11** `crates/holler-pane/src/tx_launch.rs:265-340` — #802: the plan builds the `ServeSpec` from the in-flight spec and calls `serve_command`
+- **E11** `crates/holler-pane/src/tx_launch.rs:278-359` — the plan builds the `ServeSpec` from the in-flight spec and calls `serve_command` (#802, merged)
 ```rust
     spec: &'a ProfileSpec,
     /// Where the pane goes: the Herdr session, and the spec's workspace and grid.
@@ -405,10 +417,10 @@ impl<'a> Plan<'a> {
         })
     }
 
-    /// Steps 3 to 6, none of which writes or changes anything live: the server's argv (pure, so
-    /// its refusal stays in the plan), the probe, Herdr's version, the target cell (where a
-    /// relaunch's own pane is no occupant) and the port, which for a relaunch is checked only
-    /// when it changes (its own server answers there until B1).
+    /// The plan's reads, none of which writes or changes anything live: first the server's argv
+    /// (pure, so its refusal stays in the plan; #802), then steps 3 to 6: the probe, Herdr's
+    /// version, the target cell (where a relaunch's own pane is no occupant) and the port, which
+    /// for a relaunch is checked only when it changes (its own server answers there until B1).
     fn observe(&self, ports: Ports<'_>, probe_timeout: Duration) -> Result<Seen, PaneError> {
         let server = ports
             .harness
@@ -423,9 +435,15 @@ impl<'a> Plan<'a> {
             return Err(port_in_use(self.port));
         }
         Ok(Seen {
+            server,
+            probe,
+            herdr_api_version,
+            listed,
+        })
+    }
 ```
 
-- **E12** `crates/holler-pane/src/tx_launch.rs:376-392` — the record is built from the spec, `opencode_agent` included
+- **E12** `crates/holler-pane/src/tx_launch.rs:393-409` — the record is built from the spec, `opencode_agent` included
 ```rust
             },
             session_of_record: Some(live.session),
@@ -446,7 +464,7 @@ impl<'a> Plan<'a> {
                 check: spec.check.clone(),
 ```
 
-- **E13** `crates/holler-pane/src/tx_launch.rs:620-660` — the act: `server::start`
+- **E13** `crates/holler-pane/src/tx_launch.rs:637-676` — the act: `server::start`
 ```rust
 
 /// A1 to O2 (a relaunch's B3 to O2), each after a budget check, and the budget check before R.
@@ -490,7 +508,7 @@ fn bring_up(
 }
 ```
 
-- **E14** `crates/holler-pane/src/tx_launch/server.rs:1-101` — #802: the health wait and `verify_serving`, whose refusal goes through the rollback
+- **E14** `crates/holler-pane/src/tx_launch/server.rs:1-108` — the health wait and `verify_serving` (#802, merged); a refusal goes through the rollback, which stops the server
 ```rust
 //! The harness server's steps of a launch and a relaunch, and the one health wait (#802).
 //!
@@ -507,12 +525,17 @@ fn bring_up(
 //!      this is what keeps a launch from taking over a server it did not start.
 //!   2. **The run**, in the spec's directory.
 //!   3. **The health wait** ([`wait_healthy`]): the server is asked every `boot_poll` until it
-//!      answers or the run's budget ends, and a server that never answers ends the run as the
-//!      budget's `timeout` (`pane.launch` or `pane.relaunch`). A server that exits at once is
-//!      seen the same way: the wait has no process to watch.
-//!   4. **The spec**: `verify_serving` asks the running server whether it honours the plan's
-//!      `ServeSpec`, before any session is created on it. A refusal is the run's failure, and
-//!      the rollback stops the server.
+//!      answers or the run's budget ends. The budget's end is the wait's deadline, checked
+//!      before every ask, the first one after the run included, so each ask is a live step
+//!      with the budget checked before it and none starts once the budget has run out. A
+//!      server that never answers ends the run as the budget's `timeout` (`pane.launch` or
+//!      `pane.relaunch`). A server that exits at once is seen the same way: the wait has no
+//!      process to watch.
+//!   4. **The spec**: the harness says whether the running server honours the plan's
+//!      `ServeSpec` (`verify_serving`), before any session is created on it. A refusal is the
+//!      run's failure, and the rollback stops the server. It answers for the spec, not for the
+//!      server being up: a server gone since the wait fails the next step's call to it (the
+//!      session of record's), and that failure rolls back the same way.
 
 use std::thread;
 use std::time::{Duration, Instant};
@@ -523,8 +546,10 @@ use super::{port_in_use, unavailable, Budget, Plan, Seen};
 
 /// Wait for the harness server on `port` to answer: ask `harness.health` every `poll` until it
 /// answers `true` (`Ok(true)`) or `deadline` passes (`Ok(false)`). A `health` error is returned
-/// as it is. It asks at least once, and once more when the deadline comes during a sleep, so a
-/// call takes at most until `deadline` plus one `health` call's own bound.
+/// as it is. The deadline is checked before every ask, the first one included, and no ask
+/// starts once it has passed: a deadline already past asks nothing, and one that comes during
+/// a sleep ends the sleep and the wait. So a call takes at most until `deadline` plus one
+/// `health` call's own bound.
 ///
 /// The launch engine's wait, and the one the test kit's `HarnessPort` conformance suite and the
 /// OpenCode adapter's opt-in real tests wait with.
@@ -535,14 +560,13 @@ pub fn wait_healthy(
     deadline: Instant,
 ) -> Result<bool, PaneError> {
     loop {
+        if Instant::now() >= deadline {
+            return Ok(false);
+        }
         if harness.health(port)? {
             return Ok(true);
         }
-        let left = deadline.saturating_duration_since(Instant::now());
-        if left.is_zero() {
-            return Ok(false);
-        }
-        thread::sleep(left.min(poll));
+        thread::sleep(deadline.saturating_duration_since(Instant::now()).min(poll));
     }
 }
 
@@ -570,7 +594,7 @@ pub(super) fn stop_old(
 
 /// The new server's step of the act (see the module docs): the port is checked again, the
 /// planned argv runs in the spec's directory, the server's health is waited for within what is
-/// left of the budget, and the running server is asked whether it honours the plan's
+/// left of the budget, and the harness says whether the running server honours the plan's
 /// `ServeSpec`.
 pub(super) fn start(
     ports: Ports<'_>,
@@ -587,6 +611,7 @@ pub(super) fn start(
     ports
         .host
         .run(plan.name, &plan.spec.host.cwd, &seen.server)?;
+    // No budget check here: the wait checks the budget's end before every ask, its first included.
     if !wait_healthy(ports.harness, plan.port, poll, budget.deadline())? {
         return Err(budget.expired());
     }
@@ -595,23 +620,31 @@ pub(super) fn start(
 }
 ```
 
-- **E15** `crates/holler-pane/src/ports.rs:245-256` — #802: `verify_serving`'s contract
+- **E15** `crates/holler-pane/src/ports.rs:246-265` — `verify_serving`'s contract (it answers for the spec, not for whether the server is up)
 ```rust
     /// Whether the server running on `port` honours `spec`. The launch engine asks once
     /// the server is healthy, before any session is created on it (#802). `Ok` only when
     /// the server honours every field of `spec`; a server that does not is a refusal with
-    /// an open code the implementation owns, and one that cannot be reached answers as any
-    /// call to it does (`unavailable`, `timeout`). The engine answers every error by
-    /// rolling back (the host then stops the server). An implementation that cannot check
-    /// a field it cannot apply refuses it, as [`HarnessPort::serve_command`] does
+    /// an open code the implementation owns. The engine answers every error by rolling
+    /// back (the host then stops the server). An implementation that cannot check a field
+    /// it cannot apply refuses it, as [`HarnessPort::serve_command`] does
     /// ([`AGENT_UNSUPPORTED`] for an agent).
+    ///
+    /// It answers for the spec, not for whether the server is up: the engine's health wait
+    /// has just seen the server answer, and a server gone since then fails the engine's
+    /// next call to it (the session of record's), which rolls back the same way. So an
+    /// implementation sends a request only for what it must check on the server, and that
+    /// request answers an unreachable server as any call does (`unavailable`, `timeout`).
+    /// A spec that the implementation's own argv already settles is answered `Ok(())` with
+    /// nothing sent. That is the OpenCode adapter's answer to a spec without an agent: its
+    /// argv applies none, so the server keeps its own default.
     ///
     /// Required, with no default: a harness that starts servers must say whether the
     /// running one honours the spec.
     fn verify_serving(&self, port: u16, spec: &ServeSpec) -> Result<(), PaneError>;
 ```
 
-- **E16** `crates/holler-pane/src/ports.rs:305-312` — `AGENT_UNSUPPORTED`
+- **E16** `crates/holler-pane/src/ports.rs:314-320` — `AGENT_UNSUPPORTED`
 ```rust
 pub const PROMPT_UNSUPPORTED: RefusalCode = RefusalCode::from_static("prompt-unsupported");
 
@@ -904,7 +937,7 @@ fn push_spec(lines: &mut Vec<String>, spec: &ProfileSpec) {
 }
 ```
 
-- **E23** `crates/holler-pane/tests/profile_diff_test.rs:199-246` — the field table is public API: `PATHS` and the serialize-like-the-spec test
+- **E23** `crates/holler-pane/tests/profile_diff_test.rs:199-245` — the field table is public API: `PATHS` and the serialize-like-the-spec test
 ```rust
 
 /// The dotted paths, in `ALL` order: the field table is public API (#664, #665).
@@ -1060,13 +1093,8 @@ fn relaunch_passes_the_in_flight_agent_to_serve_command() {
     rig.assert_no_keystroke();
 ```
 
-- **E25** `crates/holler-cli/tests/pane_verbs/launch/serve.rs:325-360` — #802's verb test: a `verify_serving` refusal rolls back and stops the server
+- **E25** `crates/holler-cli/tests/pane_verbs/launch/serve.rs:414-455` — #802's verb test: a `verify_serving` refusal rolls back and stops the server
 ```rust
-    );
-    rig.assert_matches(&run, PANE);
-    rig.assert_no_keystroke();
-}
-
 /// AC 7: a `verify_serving` refusal after a healthy start goes through the rollback: the
 /// session's processes are stopped (the server among them), the Herdr pane the run made is
 /// closed, no session of record is created and nothing is recorded; the act had begun, so the
@@ -1098,9 +1126,20 @@ fn a_verify_refusal_rolls_back_and_stops_the_server() {
         run.calls.herdr.contains(&HerdrOp::Close),
         "{:?}",
         run.calls.herdr
+    );
+    let server = rig
+        .fakes
+        .harness
+        .server(PORT)
+        .expect("the server had started");
+    assert_eq!(server.state, ServerState::Killed, "the server is stopped");
+    assert_eq!(rig.record(PANE), None);
+    rig.assert_matches(&run, PANE);
+    rig.assert_no_keystroke();
+}
 ```
 
-- **E26** `crates/holler-cli/tests/pane_verbs/relaunch.rs:530-596` — #700's tests: an invalid key is refused first; relaunch without `--agent` keeps the stored key; with `--agent` replaces it
+- **E26** `crates/holler-cli/tests/pane_verbs/relaunch.rs:563-629` — #700's tests: an invalid key is refused first; relaunch without `--agent` keeps the stored key; with `--agent` replaces it
 ```rust
 #[test]
 fn pane_relaunch_accepts_every_spec_flag() {
@@ -1171,3 +1210,188 @@ fn relaunch_with_agent_replaces_the_stored_key() {
 }
 ```
 
+- **E27** `docs/adr/ADR-0021.md:494-529` — ADR-0021 section 8: the paragraph this story extends (the agent in the result; the `verify_serving` refusal)
+```md
+**Launch and relaunch as built (#644).** `pane launch PANE --herdr-session NAME` and `pane relaunch PANE`, each with the
+spec flags, `--profile` and `--spec-only`, run one engine over the ports, `holler_pane::tx_launch`, which `profile apply`
+(#664) calls unchanged. Its plan writes nothing and moves nothing: the spec names the pane, a launched name has no record
+(`pane-exists`), the port policy is the `fixed:<port>` form of section 3 (launch accepts no other), the harness builds the
+server's argv from the in-flight spec's `ServeSpec` (`serve_command`, pure, the plan's first call since #802, so its
+`agent-unsupported` is exit 3 with nothing written), a check passes when the spec has one (a failing result is not stored),
+Herdr's version is supported, the target cell holds no Herdr pane (`grid-occupied`, judged by Herdr's snapshot alone,
+recorded or not: a pane is never adopted) and no server answers on the port (`port-in-use`, never adopted). The act ensures
+the Herdr pane and the tmux session, runs the spec's `command` in that session as an argv, checks the port again (a server
+that took it since the plan is `port-in-use`, from the act), runs the planned server argv there (both runs through
+`HostPort::run`, in the spec's directory), waits for the server's health within the run's budget, has the harness say
+whether the server honours the spec (`verify_serving`), creates the session of record through the harness API (never a ping
+session), attaches the TUI to it, and observes that the TUI shows it (SHOWN equal to `session_of_record`, which I2 makes the
+session the hub drives) and that Herdr still lists the pane. A mismatch observed after the act is `unavailable`: a closed
+failure code, since I3 asks for exit 1 and an open code is a refusal. Only then is the record written, by one
+compare-and-swap, with no `harness.pid` (#802): `last_observed.shown` is that observation, and `driven` is never inferred
+(launch writes none, relaunch keeps the stored one). The model, effort, environment names and ceilings are recorded, not
+applied: no port carries them yet (#642, #649; they will join the `ServeSpec`). A failed step rolls back what the run made
+(it stops the tmux session's processes, the server among them since #802, and closes a Herdr pane the plan's snapshot did
+not list); the tmux session and a created harness session stay, as no port call ends them, and a record write that conflicts
+is not rolled back. Relaunch first stops only what the pane owns, its server among them (`stop_owned`: TERM, the grace, then
+KILL), and fails loudly when the old server still answers after that, never adopting it; it keeps the pane's directory,
+moves its cell only with `--grid` (both rules are the engine's own, so every
+caller is held to them) and keeps the session of record the restarted server still lists (a new conversation is
+`pane reset`'s). After a move it records the new pane before it closes the old one, so a close that fails leaves an extra
+pane with no record, never a record naming the wrong pane; the run then exits 1 with `unavailable` and P keeps its edit.
+Every failure once the act has started ends with the reconcile step of step 6, appended only when the message lacks it. A
+run is bounded as section 12 records. `--herdr-session` is required because the frozen `HerdrPort` cannot tell the
+engine its session; the wiring (#649) defaults it from the Herdr adapter's one configured session. What a failure or a
+crash leaves is not all reported by the merged doctor: only a whole-fleet pass reports a Herdr pane no record names
+(`unregistered-herdr-pane`, which no verb removes, so the next launch at that cell is `grid-occupied` until the operator
+closes it in Herdr), and no pass sees a server or a tmux session that no record names. A rollback and a crash leave
+different things (#802): a rollback stops the server it started, since the server is a process of the pane's session; a
+crash runs no rollback, so its server stays, tagged, in the pane's tmux session, and the next launch of that name is
+refused with `port-in-use`. With no record, neither `close` nor `relaunch` can stop that server, and no doctor pass sees
+it.
+```
+
+- **E28** `docs/adr/ADR-0021.md:609-609` — ADR-0021 section 9: the codes of `pane launch` and `pane relaunch`
+```md
+| `pane launch`, `pane relaunch` | `grid-ambiguous`, `grid-out-of-range`, `command-not-argv`, `env-name-invalid`, `profile-secret-refused`, `probe-failed`, `herdr-version-unsupported`, `session-not-found`, `generation-conflict`, `profile-not-found`, `profile-conflict`, `pane-in-other-profile`; `relaunch` also `pane-not-found`; open (#644) for a name that already has a record, an occupied target cell and a port a server already answers on (`pane-exists`, `grid-occupied`, `port-in-use`); open (#640) for a cell that no single split reaches, `grid-unreachable`; open (#802) for a harness that cannot apply the spec's agent, `agent-unsupported` (the OpenCode adapter's answer to every agent until #642 part 3) |
+```
+
+- **E29** `docs/adr/ADR-0021.md:840-841` — ADR-0021 "Deferred to named stories": the bullet this story completes (and changes: no project file is read)
+```md
+- Applying a project's agent in `pane launch` and `pane relaunch` (`--agent KEY`, refusing a key the project does not define,
+  and recording `Pane.opencode_agent` in the record write): #644's last part, after #700.
+```
+
+- **E30** `docs/adr/ADR-0021.md:269-275` — ADR-0021 section 3: what `--from-current` copies and what `profile_diff` compares
+```md
+Giving both forms of `command` or of `check` is a usage error (exit 2). **`profile create --from-current`** copies, from the
+`Pane` records in `PaneStore` (so it needs no Herdr call), each member's `herdr.workspace` and `herdr.grid`, `host.cwd`,
+`harness.kind`, `model`, `role`, `env`, `context`, `command`, `probe.check` and `probe.expect`, and sets each member's
+`Pane.profile`; a pane already in another profile is `pane-in-other-profile`. The mapping lives in
+`holler-pane/src/profile_snapshot.rs` (#662), which the migration (#650) reuses. `--from-current` writes `harness.port_policy`
+as `fixed:<port>`, the port the pane's harness uses (#662, `profile_snapshot::fixed_port_policy`); `profile_diff` compares it
+with `fixed:<port>` of the live port. A profile's **live panes** are the pane records whose `profile` names it (by slug).
+```
+
+- **E31** `crates/holler-cli/src/pane/launch.rs:53-55` — the `--help` of `launch` (the `Args` doc comment) lists the data keys without `agent`
+```rust
+///
+/// `--format=json` prints one envelope whose data is `{"verb", "pane", "profile", "spec_only"}`:
+/// the stored record, the profile's name, slug and generation, or null.
+```
+- **E31b** `crates/holler-cli/src/pane/relaunch.rs:34-36` — the `--help` of `relaunch` lists the data keys without `agent`
+```rust
+///
+/// `--format=json` prints one envelope whose data is `{"verb", "pane", "profile", "spec_only"}`.
+#[derive(Args, Debug)]
+```
+
+- **E32** `crates/holler-cli/tests/pane_verbs/launch.rs:157-177` — #700's launch test that the new assertions extend
+```rust
+/// #700 (A's DECISION 1, positive path): a launch with `--agent` stores the key in the
+/// pane record — the record literal writes the spec's key, not `None`.
+#[test]
+fn launch_with_agent_stores_the_key_in_the_record() {
+    let rig = Rig::new();
+    let run = rig.run(
+        &launch_with(&["--agent", "feature-implementor"]),
+        Format::Json,
+    );
+    data_of(&run);
+    assert_eq!(
+        rig.record(PANE)
+            .unwrap()
+            .opencode_agent
+            .as_ref()
+            .map(|key| key.as_str()),
+        Some("feature-implementor")
+    );
+    rig.assert_matches(&run, PANE);
+    rig.assert_no_keystroke();
+}
+```
+
+- **E33** `crates/holler-cli/tests/pane_verbs/launch.rs:14-18` and file sizes — where `mod agent;` goes, and why no helper goes in the rig
+```rust
+mod displaced;
+mod guards;
+mod profiles;
+mod record_bytes;
+mod serve;
+```
+```text
+   740 crates/holler-cli/tests/pane_verbs/launch.rs
+   814 crates/holler-cli/tests/pane_verbs/launch/rig.rs
+   629 crates/holler-cli/tests/pane_verbs/relaunch.rs
+   587 crates/holler-cli/tests/pane_verbs/launch/serve.rs
+   205 crates/holler-cli/tests/pane_verbs/launch/profiles.rs
+  2975 total
+```
+
+- **E34** `crates/holler-cli/tests/pane_verbs/launch/profiles.rs:61-84` — the I8 compensation as tested: specs equal, generation moved by two, the log `[1, 2, 3]`
+```rust
+/// AC 16c (G-8): a failed act puts P's specs back by a second write: the specs are equal, the
+/// generation moved by two, and the log shows the edit and its reversal.
+#[test]
+fn a_failed_act_restores_the_profile_specs() {
+    let rig = Rig::new();
+    fail_the_attach(&rig);
+    let run = rig.run(&launch_with(&["--profile", "demo"]), Format::Json);
+    assert_eq!(run.code, 3, "{run:?}");
+    assert_eq!(error_of(&run).0, "session-not-found");
+    let profile = rig.profile("demo");
+    assert!(
+        profile.panes.is_empty(),
+        "the seeded specs: {:?}",
+        profile.panes
+    );
+    assert_eq!(profile.generation, 3);
+    let log: Vec<u64> = rig
+        .profile_log("demo")
+        .iter()
+        .map(|e| e.generation)
+        .collect();
+    assert_eq!(log, [1, 2, 3]);
+    assert_eq!(rig.record(PANE), None);
+    rig.assert_matches(&run, PANE);
+```
+
+- **E35** `grep` over the merged tree — no other literal list of spec fields, no README or `docs/` text showing the launch result line
+```text
+$ grep -rn 'harness.port_policy\|model\.effort' crates/holler-cli/tests/profile_verbs crates/holler-pane-testkit/tests
+crates/holler-cli/tests/profile_verbs/rig.rs:228:    spec.harness.port_policy = fixed_port_policy(pane("demo-c1r1").harness.port);
+crates/holler-pane-testkit/tests/fake_profile_store_test.rs:569:    assert_eq!(spec.harness.port_policy, "fixed");
+$ grep -rn 'harness port' README.md docs --include='*.md' (outside docs/handoffs)
+(no output)
+```
+
+- **E36** `crates/holler-cli/src/profile/apply.rs:1-4` — `profile apply` is still a stub; #664 owns it
+```rust
+//! `holler profile apply`: a stub (story #670). Story #664 owns the real verb: it replaces this
+//! file and adds the verb's own positionals and flags to the arguments below, edits its own
+//! ADR 0003 row and `cli-surface.txt` line, and edits no frozen file.
+
+```
+- **E36b** `crates/holler-cli/src/profile/apply.rs:21-23` — the stub answers `not-implemented` naming #664
+```rust
+pub fn run(_args: &ProfileApply, ctx: &mut VerbCtx<'_>) -> i32 {
+    emit_error(&mut ctx.sink, ctx.format, not_implemented(STORY))
+}
+```
+
+- **E37** `docs/adr/ADR-0021.md:869-882` — ADR-0021 "Decisions taken": the last items (the new ones go after item 14)
+```md
+10. **A Herdr snapshot pane carries its label, the join key for import** (operator, 2026-10-11, #808).
+11. **The pane's OpenCode agent is applied as the server's `default_agent` when the server starts** (operator, 2026-10-11,
+    #802, section 2): not per prompt, which would need a protocol field, a hub change and a `holler-body` change.
+12. **The agent reaches `HarnessPort` by changing the port** (operator, 2026-10-11, #802): `serve` became
+    `serve_command(name, port, &ServeSpec)`, so an omitted agent is a compile error at every call site; no additive
+    default-armed method.
+13. **`ServeSpec`** (operator, 2026-10-11, #802): a `#[non_exhaustive]` struct holding `agent: Option<AgentKey>` today. New
+    fields of the pane's spec for its server go into it, never into new parameters.
+14. **The harness server runs inside the pane's tmux session, started through the host adapter** (operator, 2026-10-11,
+    #802): `HostPort` (`run`, `stop_owned`) is the one place that starts and stops a pane's processes, `serve_command`
+    builds the argv and starts nothing, and `harness.pid` is no longer written. This closes #695. Three consequences were
+    decided in review round 1 under the operator's rules: the required `verify_serving` after the health wait, the server's
+    directory from the pane's spec through `HostPort::run(name, cwd, argv)`, and every refusal of `serve_command` in the
+    plan (section 2, items 5 to 7).
+```
