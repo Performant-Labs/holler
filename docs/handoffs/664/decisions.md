@@ -122,3 +122,43 @@
   - **The code.** I read F's `tx_apply.rs`, `tx_apply/observe.rs`, `tx_apply/run.rs` and `profile/apply.rs`, and the diffs of `show.rs`, ADR-0021, ADR-0003, `cli-surface.txt`, the CHANGELOG and `profile_verbs/rig.rs`. I read `reconcile.rs`'s `observe_all` and `reconcile/observe.rs`'s chain, ADR-0021 sections 2 and 12 on I5, `diff_profile`, `PaneName::parse`, and the profile name's text-form notes.
   - **The tests.** I read `apply/observe.rs`, `apply/bound.rs`'s timing tests (entries 26 and 27 time only unrecorded panes) and entry 19's hook. Neither thread shape breaks a test.
   - **Untouched shared code.** `tx_launch.rs`, `lib.rs` and the Cargo files are unchanged on the branch.
+
+## A (Phase 3, up-front plan review, round 3, fresh run): 2026-10-11 10:40 MDT
+- **Decided:** BLOCK: 1 block and 5 warns (`docs/handoffs/664/handoff-A.md`).
+  - **The block.** The merge `780a578` (origin/main `7284001`, #802) also ran `cargo fmt` at the workspace root.
+    - It rewrote 183 files outside the Blast radius, in holler-body, holler-cli, holler-hub, holler-load-test and holler-proto. The rewrite is in neither merge parent.
+    - `scripts/lint.sh`, CI's first gate, now fails three checks: 15 files of 900 lines or more, 91 `#[allow]` lines without a link, and 1 `dead_code` allow without a link.
+    - The diff every gate reads grows from 415 KB over 27 files to 1.86 MB over 210 files.
+    - F and T may not undo it, so it must be undone before T. The fix is one `git checkout origin/main --` of those paths, plus a C24 clarification that scopes "`cargo fmt`".
+  - **The design passes.** C21 settles round 2's block. #802 leaves the plan's architecture intact.
+  - **The warns:**
+    1. #802 made refusals possible during the act, and apply then drops the reconcile step on that `refused` step.
+    2. #644 part 2 supersedes §13, and claims that #664 owns the test for an agent difference. Neither brief owns it.
+    3. C23 has F cite a twins issue that no one has filed yet.
+    4. C22 says ADR-0021 names the vocabulary, but it does not yet.
+    5. The Evidence was cut at `92fbc6e`, before #802. Separately, entry 27's timing margin dropped from about 300 ms to about 100 ms (eight harness calls per create, not six).
+- **Assumed:**
+  - The operator's §1 to §13 and the decisions on O1 to O6 are final, so I framed the #802 effects as clarifications, not as changes.
+  - I read the merge commit's message as the MO's own merge, not a pipeline phase.
+  - My inference: the bare "`cargo fmt`" in the brief's Rules line set off the root reformat.
+- **Hedged:**
+  - I did not run cargo test, so whether the branch passes its tests after the merge is T's to confirm.
+  - Whether the 1.86 MB diff would overflow the outside model's context is not measured. I state only the size.
+  - I counted harness calls per create statically from `tx_launch.rs` and `server.rs`.
+- **Evidence:**
+  - **The merge.** `git diff --name-only` of `d56707b..HEAD` intersected with `origin/main..HEAD` gives 188 paths, 183 of them outside the story. Each of the 183 is byte-identical to `rustfmt --edition 2021` of its `origin/main` version (183/183). `git diff --name-only 263a2d7 d56707b` touches none of them.
+  - **Lint.**
+    - On HEAD, `bash scripts/lint.sh` exits 1.
+    - On a `git archive` of `origin/main`, it exits 0.
+    - On HEAD with the 183 files restored from `origin/main`, in a scratch copy, it exits 0.
+    - A `wc -l` comparison shows 15 files go over 900 lines; `main` has none.
+  - **Files read.**
+    - The whole brief, with a focus on §1 to §13, C1 to C23 and O1 to O6. I spot-checked Evidence E1 to E20.
+    - Round 2's `handoff-A.md`, and `decisions.md`.
+    - F's `tx_apply.rs`, `tx_apply/observe.rs`, `tx_apply/run.rs`, `profile/apply.rs` and `apply/bound.rs`.
+    - #802's diffs of `ports.rs`, `lib.rs`, `tx_launch.rs`, `tx_launch/server.rs`, the testkit's `harness.rs` and `host.rs`, and ADR-0021.
+    - The merge's changes to `apply/rig.rs`, `apply/rows.rs` and `profile_verbs/rig.rs`.
+    - `pane/launch.rs` (`failure_body`) and `pane/profile_scope.rs` (`reconcile_step`).
+    - ADR-0021 :150-166, :392-432, :538-575, :648 and :655-664.
+    - `644-brief.md` (Blast radius, items 2 to 4 and 7, and the Rules line) on the `issue-644-implementation` worktree, and `642-brief.md`'s Blast radius.
+  - **GitHub.** `gh issue list` searches found no filed twins or §13 follow-up.
