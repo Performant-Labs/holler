@@ -237,6 +237,23 @@ pub(crate) fn profile(name: &str, specs: Vec<ProfileSpec>) -> Profile {
     }
 }
 
+/// Start the fake harness server of `pane` on `port`; its pid. The one place a profile verb
+/// test seeds a running server (#664, decision O3): `serve_command` through the port, then the
+/// fake's scenario method, as `launch`'s rig does (#802).
+pub(crate) fn serve_server(harness: &FakeHarness, pane: &PaneName, port: u16) -> u32 {
+    let argv = holler_pane::HarnessPort::serve_command(
+        harness,
+        pane,
+        port,
+        &holler_pane::ServeSpec::default(),
+    )
+    .unwrap();
+    harness
+        .start_server(&argv)
+        .expect("the fake harness's own argv")
+        .unwrap()
+}
+
 /// What [`NthCasPut`] does to one numbered `cas_put`.
 #[derive(Debug, Clone)]
 pub(crate) enum NthPut {
