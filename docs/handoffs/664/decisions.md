@@ -162,3 +162,43 @@
     - ADR-0021 :150-166, :392-432, :538-575, :648 and :655-664.
     - `644-brief.md` (Blast radius, items 2 to 4 and 7, and the Rules line) on the `issue-644-implementation` worktree, and `642-brief.md`'s Blast radius.
   - **GitHub.** `gh issue list` searches found no filed twins or §13 follow-up.
+
+## A (Phase 3, up-front plan review, round 4, fresh run): 2026-10-11 10:58 MDT
+- **Decided:** PASS: 0 blocks and 4 warns (`docs/handoffs/664/handoff-A.md`).
+  - **Round 3's block is fixed.** `3c57c10` restored the 183 files, `lint.sh` exits 0, the diff against `origin/main` is the story's 27 paths, and C24 scopes formatting to the story's own files.
+  - **The design holds.** C25 adds the reconcile step for an acted refusal in the verb, which is where `pane launch` adds it.
+  - **The warns:**
+    1. E40's apply-row excerpt is empty, and its cited line is stale (`530`; the row is at `620` on `7284001`).
+    2. #644's brief was not amended to match C18's order clause. If #664 merges first, no one writes the agent-difference test. The fix: extend entry 11's fixture, which passes both before and after #644.
+    3. The Blast radius still omits `tx_apply/{observe,run}.rs`, which C21 and C23 tell F to edit, and five other paths the branch changes.
+    4. C25's reconcile step is missing from C22's ADR sentence and from `Step.acted`'s doc.
+- **Assumed:**
+  - The operator's §1 to §13 and the decisions on O1 to O6 are final.
+  - The fresh run's T and F start from the first run's code, as round 3's Notes for O item 4 planned.
+  - #664 is likelier than #644 part 2 to merge first, since #664's code exists and #644 part 2 has none.
+- **Hedged:**
+  - I did not run `cargo test`. Whether the branch is green after the merge and the restore is T's to confirm.
+  - I counted the harness calls of a `create` from the code, not from a run.
+  - E40's harm is small, because the ADR diff shows the row, so I rated it a warn.
+- **Evidence:**
+  - **The branch.**
+    - `git ls-remote` shows `origin/main` is `7284001`.
+    - `git diff --name-only origin/main...HEAD` lists 27 paths. Each of the 183 paths `3c57c10` restored equals `origin/main`.
+    - `af230b6` changes only the brief.
+    - `bash scripts/lint.sh` exits 0, and `rustfmt --check --edition 2021` passes on all 15 of the story's `.rs` files.
+  - **The brief.**
+    - I read §1 to §13, C1 to C25, O1 to O6 and the decisions, and the whole diff `d56707b..af230b6`.
+    - A script checked every Evidence code line against its cited files at `7284001`. All of them matched, except E40's empty block.
+    - C11's line numbers (198, 332, 376, 402, 516) match.
+  - **The code.**
+    - F's `tx_apply.rs`, `tx_apply/run.rs`, the head of `tx_apply/observe.rs` and `profile/apply.rs`.
+    - `tx_launch.rs` (`observe`, `bring_up`, `session_of_record`, `observe_live`) and `tx_launch/server.rs` whole.
+    - `pane/launch.rs` (`failure_body`), `pane/profile_scope.rs` (`reconcile_step`) and `error.rs` (`class_of`).
+    - The test kit's `HarnessOp` and its fake `verify_serving`; the OpenCode adapter's `verify_serving`.
+    - Entry 11's test (`apply/dry_run.rs:115-175`).
+  - **The ADR.** ADR-0021 :548-576 and :640-665 on HEAD, and :620 on `origin/main`.
+  - **Other stories.**
+    - #818 via `gh issue view`.
+    - `644-brief.md` at `93b2cd7`: items 2, 4 and 7, its Blast radius, and its Rules.
+    - What each in-flight branch changes, and #652's references to `tx_apply`.
+    - `gh pr list` shows no PR yet for #644 part 2.

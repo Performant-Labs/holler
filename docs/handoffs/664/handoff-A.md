@@ -1,118 +1,108 @@
-# Handoff-A: Phase 3 - `holler profile apply` (#664)  (up-front plan review, round 3)
+# Handoff-A: Phase 3 - `holler profile apply` (#664)  (up-front plan review, round 4)
 
-**Date:** 2026-10-11 (10:40 MDT)
-**Branch:** `issue-664-implementation`, head `780a578`: the merge of `origin/main` `7284001` (#802) into `d56707b` (the brief with C21 to C23)
-**Brief reviewed:** `docs/handoffs/664-brief.md` as of `d56707b`   **Reuse map:** none (no `survey.md`); "Reuse expectations for Phase 7" below stands in for one   **Wireframe:** N/A (`uiSurface: false`)
-**Why a round 3:** this is a fresh run after round 2's BLOCK (`0e64a87`). Since then, the brief has gained C21 to C23 and the branch has merged #802. F's code from the first run (`7f23e0f`) is still on the branch, so this pass reviews the plan and uses that code and the merge as evidence.
-**Verdict:** BLOCK
+**Date:** 2026-10-11 (10:58 MDT)
+**Branch:** `issue-664-implementation`, head `af230b6` (the brief amended for round 3), based on `origin/main` `7284001` (which matches the remote)
+**Brief reviewed:** `docs/handoffs/664-brief.md` as of `af230b6`   **Reuse map:** none (no `survey.md`); "Reuse expectations for Phase 7" below stands in for one   **Wireframe:** N/A (`uiSurface: false`)
+**Why a round 4:** this is a fresh run after round 3's BLOCK (`630c98c`). Since then the MO has made two commits. `3c57c10` restored the 183 reformatted files. `af230b6` amended the brief: it adds C24 and C25, settles C18 and C23, and re-cuts the Evidence from `7284001`. F's code from the first run is still on the branch, so this pass reviews the plan and uses that code as evidence.
+**Verdict:** PASS
 
 ## Summary
 
-BLOCK. The block is about the branch the run would build on, not the brief's design.
+PASS, with no block.
 
-- **The design holds.** C21 settles round 2's block: one thread per call, under §9's single per-call bound. C22 names the step vocabulary. Merging #802 leaves the plan's architecture intact. `tx_launch` is still called unchanged, and #802 did not change the three calls apply makes itself (`snapshot`, `health`, `shown_session`).
-- **The merge broke CI.** The merge commit `780a578` also ran `cargo fmt` over the whole workspace. That rewrote 183 files in five crates. All of them are outside the Blast radius, and the rewrite is in neither merge parent.
-  - `scripts/lint.sh`, CI's first gate, now exits 1. It exits 0 on `main`, and 0 on this branch once those files are restored.
-  - The rewrite also adds 1.4 MB of formatting to the diff that every later gate reads.
-- **No pipeline agent can undo it.** F and T are held to the Blast radius, so the fix has to come before T. It is one `git checkout` and one clarification in the brief (Notes for O).
+- **Round 3's block is fixed, and I verified it.** `bash scripts/lint.sh` exits 0. The branch's diff against `origin/main` is exactly the story's 27 paths. C24 limits formatting to the story's own files, and all 15 of those `.rs` files are already rustfmt-clean, so following the rule cannot cause a drive-by.
+- **The design is unchanged and holds.** C25 puts the reconcile step for an acted refusal in the verb, which is where `pane launch` puts it.
 
-Five warns follow:
+Four warns remain. None changes the design:
 
-- Two come from #802. A refusal can now arrive after the act, and that step loses the reconcile step. The Evidence describes code that no longer exists.
-- Three are about the follow-ups and the ADR text that C22 and C23 promise.
+1. One Evidence excerpt (E40) is broken.
+2. The test for an agent difference still has no owner if #664 merges first.
+3. The Blast radius does not name files the brief tells F to edit.
+4. C25's behavior is missing from the ADR sentence C22 asks for.
 
 ## Findings
 
 | # | Severity | Plan element | Drift dimension | Finding | Suggested fix |
 |---|---|---|---|---|---|
-| 1 | block | The branch the run builds on (merge `780a578`). The bare "`cargo fmt`" in the Rules line (brief:34). | Size and structure. A drive-by edit of shared code that other stories own (parallel-agent coexistence). | **What the merge did.** 183 `.rs` files differ from both merge parents: holler-body 37, holler-cli 81, holler-hub 29, holler-load-test 14 and holler-proto 22, for +15,254/−3,750 lines.<ul><li>Each file is byte-identical to `rustfmt --edition 2021` of its `origin/main` version (183 of 183).</li><li>No branch commit before the merge touched any of them (`git diff --name-only 263a2d7 d56707b`).</li><li>`main` is not rustfmt-clean, so `cargo fmt` at the root rewrites every crate.</li></ul>**What it breaks.** `bash scripts/lint.sh` (ci.yml:140) exits 1 on `780a578` and 0 on `7284001`. Three of its checks fail:<ul><li>15 files now have 900 lines or more; `main` has none. Examples: `holler-hub/src/control_server.rs` 837→1172, `circuit.rs` 898→1057, and `circuit/dispatch.rs`, the `send_prompt` choke point, 820→1017.</li><li>91 `#[allow(` lines lost their trailing `// #NNN` link, which rustfmt moved to the next line: 50 in holler-cli, 18 in holler-body, 11 in holler-hub, 11 in holler-proto and 1 in holler-load-test.</li><li>That last one, the `allow(dead_code)` at `holler-load-test/src/main.rs:56`, also fails the dead-code check.</li></ul>**What it costs the run.**<ul><li>The diff the gates read (`origin/main...HEAD`) is 1.86 MB over 210 files. Without the rewrite it is 415 KB over 27 files. For scale, the r1 outside diff prompt was 358 KB.</li><li>Every in-flight branch that touches one of these files will conflict with #664.</li></ul>**Why it cannot wait.**<ul><li>F and T are held to the Blast radius. F's Tier 1 would hit 17 lint failures in files it may not edit.</li><li>A-dup and S would each have to clear 183 drive-by files.</li><li>T-green had declined exactly this: "the repo-wide `cargo fmt --check` drift is not this branch's concern" (decisions.md, T Phase 7).</li></ul> | **Before the fresh run (MO):** restore the 183 paths from `origin/main` and commit (Notes for O 1). I checked the result on a copy of the tree: `lint.sh` exits 0, and the diff holds only the story's 27 paths.<br><br>Then add the clarification in Notes for O 2 to the brief: run rustfmt only on the files the story changes, and never run `cargo fmt` at the root, also not while merging `main`. |
-| 2 | warn | §4 ("a refusal ... is a `refused` step"). C10's conflicts "from inside the launch transaction". The verb's output (O6). | Error handling: consistency with `pane launch` | **#802 made act-time refusals reachable.** Two refusals can now come from inside the launch act, after its rollback:<ul><li>`server::start` re-checks the port and refuses `port-in-use` (`tx_launch/server.rs:95-96`). By then `ensure_pane`, `ensure_session` and the spec's command have run.</li><li>`verify_serving` refuses a server that does not honour the spec (`server.rs:107`), after the server has started. The code belongs to the harness: the fake's is `agent-mismatch`, and #642 part 3 names one for an undefined agent key (644-brief.md:20).</li></ul>ADR-0021's decision 7 for #802 ("every refusal stays in the plan", :158) covers only `serve_command`. For both refusals above, `TxFailure.acted` is true.<br><br>**What apply prints.**<ul><li>F's `halted` keeps `acted` on a `refused` step (`tx_apply.rs:509-530`).</li><li>But `acted` is `#[serde(skip)]` (:121-122), and the verb adds the reconcile step only to the `failed` step at exit 1 (`profile/apply.rs:98-101`).</li><li>So an acted `refused` step prints at exit 0 with no sign that anything ran.</li><li>`pane launch`, by contrast, adds the reconcile step to every acted failure, refusals included (`pane/launch.rs:435-442`).</li></ul>**Why it matters for row f.** By the time of the refusal, the relaunch has already stopped the pane's processes (`stop_old`). Take a pane chosen only because its TUI showed another session: it ends with no server, and apply reports it only as "refused". | Name this case in the brief, for example in a C25. The verb should add `reconcile_step(Some(P))` to the `detail` of an acted `refused` step, as it already does for the failed step.<br><br>T pins one case: `fail_next(HarnessOp::VerifyServing, PaneError::Refused { .. })` on a `create`. The test asserts that the step is `refused`, that the run goes on, and that the reconcile step is in the detail. |
-| 3 | warn | §13 and C18 (brief:81, 579-584). The second issue of C23. | Cross-story ownership | **#644 part 2 is closing §13's gap now.**<ul><li>Its brief, in flight on `issue-644-implementation`, adds `opencode_agent` to `SpecField::ALL` (644-brief.md:19, :58).</li><li>It says this "supersedes" #664's item 13, and that "#664's acceptance covers an agent difference in its report" (:29, :44).</li><li>#664's §13 says the agent is not this story's concern, and no C14 entry covers it. So neither brief owns the test.</li><li>Once the field is added, apply needs no code change, since it reads `diff_profile`. But a healthy pane whose agent differs from its spec moves from row c (`adopted`) to row d (`reported`).</li></ul> | **Settle who owns the test now, while both briefs are open.** Recommended:<ul><li>Do not file §13's follow-up, because #644 part 2 supersedes it.</li><li>The apply test belongs to #664, as #644 part 2's brief already says.</li><li>If #644 part 2 merges before #664's PR, #664 merges `main` and T adds the test: a healthy pane whose agent differs from its spec is `reported`, with a `FieldDiff` on `opencode_agent`.</li><li>Otherwise, the test goes in a one-line follow-up that #644 part 2's merge picks up.</li></ul>Record the choice as a clarification in each brief. |
-| 4 | warn | C23 (brief:641-643) | Sequencing: the paper trail for the deliberate duplication | **F cannot cite an issue that does not exist yet.**<ul><li>C23 has F cite the twins issue in `tx_apply/run.rs`'s module doc. Today that doc says only "a follow-up of #664 merges them" (`run.rs:8`).</li><li>C23 has the run's agent file the issue only "before the PR opens", which is after F has run.</li><li>Neither issue is filed. A search of open and closed issues for the twins, `detach`, `SpecField` and `opencode_agent` found none.</li></ul> | The operator or MO files the twins issue before the relaunch; the draft is in handoff-F.md under "Known issues". The brief's C23 names the issue number, so that F cites a real one. For §13's issue, see finding 3. |
-| 5 | warn | C22 ("ADR-0021 names every one of these", brief:638) | ADR, and the contract that #666 and #803 consume | **C22 states as done what is still a requirement on F.**<ul><li>ADR-0021's "Apply as built (#664)" (:548-574) and its apply row (:648) name `planned`, `spec-not-launchable` and `orchestrator-not-relaunched`.</li><li>They do not name the six `action` strings, the step object's keys `{"pane", "action", "outcome", "code", "diff", "detail"}`, or the rule that an absent `code`, `diff` or `detail` prints `null`.</li><li>The ADR also says "the envelope has no `detail`" (:660). The step's `detail` is a key of `data.steps[]`, not of the envelope, but a reader can take the two statements as contradicting each other.</li></ul> | F adds one sentence to "Apply as built" covering the step object; its six actions; its outcomes (§5's six, plus `skipped`, plus `planned` for a dry run); the `null` keys; and the fact that `detail` belongs to the step, not to the envelope's `error`. S checks the sentence against C22. |
-| 6 | warn | The Evidence (header brief:717-721; E7, E10, E15, E20, E58, E67, E73, E75). C11's line numbers (:418-419). C20, O3 and E44. | Plan accuracy after #802; review integrity at `second-opinion` | **The Evidence describes code that no longer exists.** It is cut "at `origin/main` `92fbc6e` (this branch changes only this brief)", and neither half of that holds now. Since #802:<ul><li>`HarnessPort::serve` is now `serve_command` plus `verify_serving` (E7, E20).</li><li>A launch's plan starts with `serve_command` (E10, E15).</li><li>`TxOptions` gained `boot_poll` (E58), and `act_live` takes `&TxOptions` (E67).</li><li>`Budget` is now `{end, op}` (E73).</li><li>`stop_old` lives in `tx_launch/server.rs`, and the server steps are `server::start` (E75).</li><li>C20, O3 and E44 still call #802 open.</li></ul>The outside model cannot see the repo, so it will judge the diff against these excerpts.<br><br>**One effect lands on a test, not on the design.**<ul><li>A `create` now makes eight harness calls, not six: the port re-check, the health wait and `verify_serving` are new.</li><li>Entry 27 (`bound.rs:98-110`) still says "six harness calls".</li><li>Its margin is now about 100 ms of a 900 ms budget (8 × 100 ms), not 300 ms, which risks flakes on slow runners.</li></ul> | Re-cut the Evidence from `7284001`, as the operator asked for #642 and #644. Add a short clarification on what #802 changes for apply, covering findings 2 and 6.<br><br>T re-derives entry 27's numbers so that one create fits the budget with room to spare and two do not. For example, a 100 ms delay with a 1200 ms budget gives 800 ms per create. |
+| 1 | warn | E40 (brief :1575-1584), the Evidence behind C8 and NV-7 | Plan accuracy; review integrity at `second-opinion` | **The re-cut left E40's second excerpt empty.** It should quote the apply row "as it stands, which §10 rewords".<ul><li>Its heading still cites `ADR-0021.md:530`. At `7284001` that line is blank; the row is at line 620.</li><li>I checked every other excerpt mechanically. Every code line of E1 to E76 (except E44 and E72, which are GitHub text) occurs verbatim in its cited files at `7284001`. C11's line numbers (198, 332, 376, 402, 516) and E33 match too.</li><li>The outside model last read the brief at 06:41 MDT. It next reads it at the diff gate, where it will find an empty block. The harm is small, because the ADR diff shows the row.</li></ul> | Re-cut E40's second block from `docs/adr/ADR-0021.md:620` at `7284001`: the row that starts `` | `profile apply` | `profile-not-found`, `pane-in-other-profile` (without `--take-over`) ``. Change the heading's `530` to `620`. Any later edit of the brief can carry this. |
+| 2 | warn | C18's order clause: "if it merges after, the test is a one-line follow-up that #644 part 2's own PR picks up" | Cross-story ownership | **#644's brief was not amended to match.** On `issue-644-implementation` at `93b2cd7` (A PASS at 10:43 MDT):<ul><li>Item 7 (:44) still says "`profile apply` is not covered here ... #664 owns it".</li><li>"Not in this story" (:62) lists `profile apply (#664)`.</li><li>Its run is past A, so its T will not write an apply test.</li></ul>So if #664 merges first, no one writes the test. That is the likelier order, since #664's code exists and #644 part 2 has none. Round 3 asked for the choice to be recorded in each brief; only #664's records it.<br><br>**No code is at risk.** Apply reads `diff_profile`, and no file of this story's code or tests names `FieldValue` or `SpecField`. #644's new `FieldValue::Key` variant cannot break it. | **Simplest, inside this story:** T extends entry 11's fixture (`apply/dry_run.rs:115-175`: the dry-run plan agrees with `profile show`). The new pane is a healthy recorded pane whose spec's `opencode_agent` differs from its record's.<ul><li>Today both verbs say "matches", so the plan has an adopt.</li><li>After #644 both report the difference (row d).</li><li>The test loops over `show`'s rows, so it passes in both cases and never flips. With #644's `show` test, it covers the agent case by composition.</li></ul>**Otherwise:** the MO adds C18's order clause to #644's brief before #644's T runs. |
+| 3 | warn | The Blast radius (brief :22-24 and §10), against C21, C23, C24 and the branch | Size and structure; parallel-agent coexistence | **Carried from round 1's warn 7.** The Blast radius names `tx_apply.rs`, but not `tx_apply/observe.rs` or `tx_apply/run.rs`, and C21 and C23 tell F to edit both. The branch also changes five other unlisted paths, each justified in `handoff-F.md`:<ul><li>`profile/show.rs`: `difference_line` and `text` made `pub(crate)`, for reuse.</li><li>`profile_verbs/apply.rs`: #637's test stub.</li><li>`pane_verbs/process/stub.rs`: the story's `STUBS` entry.</li><li>`CHANGELOG.md`.</li><li>`docs/research/herdr-api-spike.md`, which `docs_cli_test` needs.</li></ul>The Rules say "Edit only the files in the Blast radius". C24 says the PR "holds only this story's paths" but does not list them. So S or the outside gate could read a justified edit as a drive-by. | Add one sentence to C24, or to the Blast radius, naming the 27 paths of Phase 7 expectation 9. Until then, expectation 9 pins the set for A-dup.<br><br>The `tx_apply/` child modules follow the house pattern for overflow: `tx_launch/server.rs` (#802). |
+| 4 | warn | C25 (the reconcile step on an acted `refused` step), against C22 (the ADR sentence F adds) | Consistent error handling; the contract that #666 and #803 consume | **C25 adds output that a consumer can see, but nothing documents it.** An acted step's `detail` now carries `reconcile_step(Some(P))`.<ul><li>C22's list, the "Apply as built" sentence F adds, and S's check of that sentence cover only the vocabulary.</li><li>ADR-0021's "Apply as built (#664)" (:548-574) does not mention the reconcile step even for a `failed` step.</li><li>The doc on `Step.acted` (`tx_apply.rs:119-122`) says "A `failed` step's launch or relaunch had started its act". After C25 that is wrong, because `refused` steps carry it too.</li></ul> | F's C22 sentence also states this: when a step's launch or relaunch had started its act, the step carries the reconcile step. A `refused` step carries it in its `detail`. A `failed` step carries it in the failure's message at exit 1, as `pane launch` does (ADR-0021 section 8, step 6).<br><br>F also updates `Step.acted`'s doc to cover `refused`. S checks both. |
 
-### Round 2's findings, now
+### Round 3's findings, now
 
 | # | Status |
 |---|---|
-| 1 (block: the observation had two shapes) | **Settled by C21.** It takes option 1, one thread per call under §9's single bound, which A recommended. The code already has that shape (`observe.rs:48-77`). |
-| 2 (warn: `observe.rs`'s doc) | **Planned, not done.** C21 requires the doc to drop "the shape of `observe_all`", and `observe.rs:4` still says it. F changes one sentence. |
-| 3 (warn: the vocabulary) | **Named in the brief (C22).** The ADR does not name it yet (finding 5). |
-| 4 (warn: the follow-ups) | **Planned (C23).** The filing order is finding 4. The overlap of §13 with #644 part 2 is finding 3. |
-| 5 (warn: the stale-P window, and a row chosen only once) | **Unchanged and still open for the operator**, as in rounds 1 and 2 (handoff-F.md, "Known issues"). |
-| Rigor | **Done.** The Pipeline section says `second-opinion`. |
+| 1 (block: the merge's workspace reformat) | **Fixed and verified.**<ul><li>`3c57c10` restores the 183 paths, and each now equals `origin/main`.</li><li>`lint.sh` exits 0.</li><li>`git diff --name-only origin/main...HEAD` lists exactly the 27 paths.</li><li>`af230b6` changes only the brief.</li><li>C24 is in the brief, and the Rules line points to it.</li></ul> |
+| 2 (warn: an acted refusal loses the reconcile step) | **Taken, as C25.** The verb adds the step, as `pane launch` does.<ul><li>`class_of` sorts every well-formed open code as a refusal (`error.rs:266-273`). So `fail_next(HarnessOp::VerifyServing, Refused { .. })` gives a `refused` step.</li><li>`HarnessOp::VerifyServing` exists in the test kit (`harness.rs:49`).</li><li>No existing apply test pins the reconcile step, so no test contradicts C25.</li><li>The ADR side is finding 4.</li></ul> |
+| 3 (warn: who owns the agent-difference test) | **Half settled.** C18 settles #664's side, but #644's brief does not match it (finding 2). |
+| 4 (warn: the twins issue is not filed) | **Fixed.** #818 is open (filed 10:38 MDT), its body carries C10's clause that the twins stay semantically identical to `detach` and `join`, and C23 names it. |
+| 5 (warn: the ADR does not name the vocabulary) | **Planned, as C22.** F adds the sentence, and finding 4 adds C25 to it. |
+| 6 (warn: the Evidence predates #802; entry 27's margin) | **Fixed, except E40 (finding 1).** C25's count of eight harness calls per `create` is right:<ol><li>`serve_command`</li><li>the plan's port `health`</li><li>`start`'s port re-check `health`</li><li>the wait's first `health`</li><li>`verify_serving`</li><li>`create_session`</li><li>`attach_tui`</li><li>`shown_session`</li></ol>Sources: `tx_launch.rs:340-351` and `641-702`, and `server.rs:94-107`. T re-derives the numbers of entries 26 and 27. |
+| Round 1's warn 5 (the stale-P window; a row is chosen only once) | **Unchanged, and still open for the operator** (`handoff-F.md`, "Known issues"). |
 
-### Drift re-check after #802 (verified, no action)
+### Drift re-check (verified, no action)
 
-- **Untouched shared code.** Against `origin/main`, the branch does not change `tx_launch.rs`, `tx_launch/`, `ports.rs`, `lib.rs`, `holler-pane-testkit`, any `Cargo.toml`, `Cargo.lock` or the golden files. There is no new dependency and no wire or protocol change.
-- **Layering.** The engine still works only through `Ports`. Apply reaches the port methods #802 changed only through `tx_launch`. Its own observation calls `snapshot`, `health` and `shown_session`, which #802 did not change.
-- **The merge's changes to the story's own files are scoped:**
-  - `LinkedHost::run` in `apply/rig.rs` starts the fake server through `start_server`, as #802's test kit asks.
-  - `HookedHarness` implements `serve_command` and `verify_serving`.
-  - Row f in `rows.rs` asserts that no pid is recorded.
-  - `profile_verbs/rig.rs` changes only `serve_server`, the one helper O3 named, so O3 held.
-- **`TxOptions` in the tests.** The tests build it with `..TxOptions::default()` (`apply/rig.rs:100-105`), so they pick up `boot_poll`.
-- **File sizes after the restore:** `tx_apply.rs` 546 lines, `observe.rs` 184, `run.rs` 240, `profile/apply.rs` 149 and `apply/rig.rs` 759. Lint warns at 600 lines, and no file reaches 900.
-- **Public repository.** The story's own diff names no personal infrastructure.
+- **Layering and placement are unchanged.**
+  - The engine is in `holler-pane` and works only through `Ports`.
+  - `tx_launch.rs` and `tx_launch/` are untouched.
+  - The verb is in `holler-cli`.
+  - C25's change belongs in the verb, because `reconcile_step` is `holler-cli`'s (`pane/profile_scope.rs:49`). That is the same place `failure_body` calls it from (`pane/launch.rs:434-442`).
+- **Formatting.**
+  - The workspace edition is 2021 (`Cargo.toml:13`), so C24's `rustfmt --edition 2021` matches it.
+  - All 15 of the story's `.rs` files pass `rustfmt --check` at HEAD.
+  - `rustfmt` on `tx_apply.rs` or `profile_verbs/apply.rs` follows `mod` lines only into the story's own child modules.
+- **Coexistence.**
+  - The in-flight branches (#642, #644, #647, #648, #649, #650, #652) have so far changed only their own handoff files.
+  - Of the paths this story changes or depends on, #644 part 2 plans to edit two. One is `ADR-0021.md`, in other sections. The other is `profile_diff.rs`, which this story does not edit.
+  - #652 is docs-only and is built after #664 merges.
+- **File sizes.**
+  - `tx_apply.rs` is 546 lines, `observe.rs` 184, `run.rs` 240, `profile/apply.rs` 149 and `apply/rig.rs` 759. None reaches 800.
+  - New tests belong outside `apply/rig.rs`, for example in `apply/failures.rs` (250 lines).
+- **Public repository.** The story's diff names no personal infrastructure.
 
 ## Notes for O
 
-1. **Undo the merge's reformat (finding 1)** in `.claude/worktrees/0664b-profile-apply`, before the fresh run:
+None are required, since the verdict is PASS.
 
-   ```bash
-   git checkout origin/main -- $(LC_ALL=C comm -12 \
-       <(git diff --name-only d56707b HEAD | LC_ALL=C sort) \
-       <(git diff --name-only origin/main HEAD | LC_ALL=C sort) \
-     | grep -vE '^(CHANGELOG\.md|docs/|crates/holler-cli/tests/profile_verbs/)')   # the 183 paths
-   git commit -m "chore(#664): undo the merge's workspace reformat (183 files outside the blast radius)"
-   ```
-
-   The filter selects exactly the 183 files I verified and none of the story's own. Then check two things:
-   - `bash scripts/lint.sh` exits 0.
-   - `git diff --name-only origin/main...HEAD` lists exactly 27 paths: `CHANGELOG.md`, `profile/{apply,show}.rs`, `cli-surface.txt`, `pane_verbs/process/stub.rs`, `profile_verbs/{apply.rs,rig.rs,apply/*}`, `tx_apply.rs` and `tx_apply/{observe,run}.rs`, ADR-0003, ADR-0021, `docs/handoffs/664*` and `docs/research/herdr-api-spike.md`.
-
-2. **Amend the brief.** This also changes the brief's hash, which the re-review needs. Add, for example:
-
-   > **C24. Formatting, and a merge of `main` (A round 3 finding 1; from the Rules for this story).** The Rules' "`cargo fmt`" means rustfmt on the `.rs` files this story changes and on no other file (`rustfmt --edition 2021 <file>`). `cargo fmt` is never run at the workspace root, including while merging `main`. `main` is not rustfmt-clean, so a root run rewrites every crate, and the result fails `scripts/lint.sh`: some files reach 900 lines, and rustfmt moves the `// #NNN` link off each `#[allow]` line. A merge of `main` changes no path outside the Blast radius beyond what `main` itself changed. The merge `780a578` broke this rule, and `<sha>` restored those 183 files from `origin/main`.
-
-   In the same amendment, these are recommended but not blocking:
-   - a short C25 on what #802 changes for apply (findings 2 and 6);
-   - the Evidence, re-cut from `7284001`;
-   - the owner of the agent-difference test (finding 3).
-
-3. **File the twins issue now**, and put its number in C23, so that F can cite it (finding 4). Do not file §13's issue, because #644 part 2 supersedes it (finding 3).
-
-4. **Then start a fresh run.** Never use `resumeFromRunId`, which replays this verdict. Little is left for F:
-   - the sentence at `observe.rs:4` (C21);
-   - ADR-0021's vocabulary sentence (C22, finding 5);
-   - the issue citation at `run.rs:8` (C23);
-   - the reconcile step on an acted refusal, if you take finding 2.
-
-   T re-derives entry 27's numbers.
-
-5. **The same hazard is in other briefs.** The epic's Rules boilerplate carries the same bare "`cargo fmt`" (for example `docs/handoffs/644-brief.md:74` on `issue-644-implementation`). No merge of `main` into the #642, #644 or #649 branches may run `cargo fmt` at the root either.
+- **If the brief is edited again for any reason,** fold in finding 1 (E40) and finding 3 (the 27 paths). Together they are two lines and change no requirement.
+- **Finding 2's choice is the MO's** and should be made before #644's T writes its tests.
+- **Out of scope, noticed.** #644's brief still has the bare "`cargo fmt`" in its Rules (`644-brief.md:74`).
+  - Its merge `fefa434` reformatted nothing: its diff against `main` is three handoff files.
+  - Its F could still run it, as round 3's Notes for O item 5 said.
 
 ## Reuse expectations for Phase 7 (A-dup)
 
-1. **Met.** "Listed" compares only the `(session, pane_id)` pair.
-2. **Mechanism met.** The grain is one thread per call (C21). `observe.rs`'s doc must say so, not "the shape of `observe_all`".
-3. **Met.** Each row's `PaneDiff` is the row from `diff_profile`.
-4. **Met.** The twins are exact private copies of `detach` and of `join` for one pane, with no undo and no profile delete. `run.rs` must cite the filed issue (C23).
-5. **Met.** Every step is classified through `class_of`.
-6. **Met for a `failed` step.** An acted `refused` step is finding 2.
-7. **Met.** The rigs are additive, and the #802 changes stay inside the story's own rig files.
-8. **Met.** `orchestrator-not-relaunched` and `spec-not-launchable` are `RefusalCode` constants and are listed in ADR-0021's apply row.
-9. **New.** The PR's diff against `origin/main` holds only the 27 paths in Notes for O 1, plus later edits to them. Any other path is a drive-by edit.
+1. "Listed" compares only the `(session, pane_id)` pair.
+2. The observation runs one thread per call (C21). `observe.rs:4` must stop saying "the shape of `reconcile`'s `observe_all`".
+3. Each row's `PaneDiff` is that pane's row from `diff_profile`.
+4. The twins are exact private copies of `detach`, and of `join` for one pane, with no undo and no profile delete. `run.rs`'s module doc cites #818 (C23).
+5. Every step is classified through `class_of`.
+6. **The reconcile step goes on every acted step (C25), `refused` steps included.**
+   - The verb (`profile/apply.rs`) adds it through `reconcile_step`, with the same "already contains" guard `failure_body` uses.
+   - It is not a second copy of `failure_body`'s text.
+   - `Step.acted`'s doc covers `refused` (finding 4).
+7. The rigs are additive, and the #802 changes stay inside the story's own rig files.
+8. `orchestrator-not-relaunched` and `spec-not-launchable` are `RefusalCode` constants and are listed in ADR-0021's apply row.
+9. **The PR's diff against `origin/main` holds only these 27 paths,** plus later edits to them and this run's own handoff files under `docs/handoffs/664/`:
+   - `CHANGELOG.md`
+   - `crates/holler-cli/src/profile/{apply,show}.rs`
+   - `crates/holler-cli/tests/fixtures/cli-surface.txt`
+   - `crates/holler-cli/tests/pane_verbs/process/stub.rs`
+   - `crates/holler-cli/tests/profile_verbs/{apply,rig}.rs`
+   - `crates/holler-cli/tests/profile_verbs/apply/{bound,dry_run,failures,observe,rig,rows,takeover}.rs`
+   - `crates/holler-pane/src/tx_apply.rs` and `crates/holler-pane/src/tx_apply/{observe,run}.rs`
+   - `docs/adr/ADR-0003.md` and `docs/adr/ADR-0021.md`
+   - `docs/handoffs/664-brief.md`
+   - `docs/handoffs/664/{decisions,evidence,handoff-A,handoff-F,handoff-T-green,handoff-T-red}.md`
+   - `docs/research/herdr-api-spike.md`
+
+   Any other path is a drive-by edit. `bash scripts/lint.sh` must still exit 0.
 
 ## Patterns referenced
 
-- `scripts/lint.sh`, CI's first gate (`.github/workflows/ci.yml:140-142`): the 900-line limit and the `#[allow]` link checks.
-- `crates/holler-pane/src/tx_launch/server.rs` and `crates/holler-pane/src/ports.rs` (#802): `serve_command`, `verify_serving`, the port re-check during the act, and the health wait.
-- `crates/holler-cli/src/pane/launch.rs:435-442` (`failure_body`): the reconcile step on every acted failure.
-- `docs/adr/ADR-0021.md`:
-  - :158, decision 7 for #802;
-  - :548-574, "Apply as built (#664)";
-  - :648, the apply row;
-  - :660, "the envelope has no `detail`".
-- `docs/handoffs/644-brief.md` on `issue-644-implementation`, :19, :29, :44 and :58: `opencode_agent` joins `SpecField::ALL`.
+- **The reconcile step on an acted failure, added in the verb:** `crates/holler-cli/src/pane/launch.rs:434-442` (`failure_body`) and `crates/holler-cli/src/pane/profile_scope.rs:49` (`reconcile_step`).
+- **The act-time refusals, and the harness calls a `create` makes:** `crates/holler-pane/src/tx_launch/server.rs:87-107` and `crates/holler-pane/src/tx_launch.rs:340-351` and `641-702`.
+- **An open code is a refusal:** `crates/holler-pane/src/error.rs:266-303` (`class_of`).
+- **`docs/adr/ADR-0021.md` on HEAD:** :548-574 ("Apply as built (#664)"), :648 (the apply row) and :660 ("the envelope has no `detail`"). On `origin/main`, :620 is the row E40 should quote.
+- **#644 part 2's brief:** `docs/handoffs/644-brief.md` on `issue-644-implementation` (`93b2cd7`), :19, :29, :44, :53-62 and :74.
