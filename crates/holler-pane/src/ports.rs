@@ -314,8 +314,9 @@ pub trait HarnessPort: Send + Sync {
 pub const PROMPT_UNSUPPORTED: RefusalCode = RefusalCode::from_static("prompt-unsupported");
 
 /// `agent-unsupported`: [`HarnessPort::serve_command`] or [`HarnessPort::verify_serving`]
-/// of a harness that cannot apply the agent a [`ServeSpec`] asks for (#802; the OpenCode
-/// adapter answers it for every agent until #642 part 3). Refusal, exit 3: the harness
+/// of a harness that cannot apply the agent a [`ServeSpec`] asks for at all (#802). A harness
+/// that applies agents refuses one its running server cannot use with a code of its own (the
+/// OpenCode adapter's `agent-unusable`, #642 part 3). Refusal, exit 3: the harness
 /// understood the request and declines it; nothing went wrong.
 pub const AGENT_UNSUPPORTED: RefusalCode = RefusalCode::from_static("agent-unsupported");
 

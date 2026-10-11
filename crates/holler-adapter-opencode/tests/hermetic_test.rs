@@ -7,40 +7,26 @@
 //! process but the re-executed copy of this binary in the credential case; the file runs in
 //! CI on Linux and macOS.
 
+#[path = "support/fixtures.rs"]
+mod fixtures;
 #[path = "support/stub.rs"]
 mod stub;
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use fixtures::*;
 use holler_adapter_opencode::http::{self, HttpError};
-use holler_adapter_opencode::{
-    OpenCodeConfig, OpenCodeHarness, ProcessEnv, Timeouts, TmuxConfig, TmuxSocket,
-};
-use holler_pane::{AgentKey, Argv, HarnessPort, PaneError, PaneId, PaneName, ServeSpec};
+use holler_adapter_opencode::{OpenCodeHarness, ProcessEnv, Timeouts};
+use holler_pane::{HarnessPort, PaneError, ServeSpec};
 use holler_pane_testkit::fault::PortOp;
 use holler_pane_testkit::harness::HarnessOp;
 use serde_json::Value;
 use stub::{on_refused_port, Framing, Stub};
 
-/// A session id of OpenCode's shape: `ses_` and 26 of `[0-9A-Za-z]`.
-const ID: &str = "ses_0123456789abcdefABCDEFghij";
-/// What a bound may overrun by on a loaded CI runner.
-const SLACK: Duration = Duration::from_millis(300);
 const HEALTHY: &str = r#"{"healthy":true,"version":"1.18.35"}"#;
-
-/// Short bounds so the frozen cases finish quickly.
-fn quick() -> Timeouts {
-    Timeouts {
-        call: Duration::from_secs(2),
-        request: Duration::from_millis(800),
-        health: Duration::from_millis(300),
-        settle: Duration::from_millis(400),
-    }
-}
 
 /// A scratch directory of its own per test, removed on drop.
 struct Scratch(PathBuf);
@@ -80,87 +66,8 @@ impl Drop for Scratch {
     }
 }
 
-/// A config whose tmux half is never reached in 642a: a binary and socket that do not exist,
-/// and a `tui_session` that knows no pane.
-fn config(opencode_bin: impl Into<PathBuf>, timeouts: Timeouts) -> OpenCodeConfig {
-    OpenCodeConfig {
-        opencode_bin: opencode_bin.into(),
-        serve_args: Vec::new(),
-        env: ProcessEnv::Inherit,
-        tmux: TmuxConfig {
-            tmux_bin: PathBuf::from("/nonexistent/hlr642-tmux"),
-            socket: TmuxSocket::Path(PathBuf::from("/nonexistent/hlr642-tmux.sock")),
-        },
-        tui_session: Arc::new(|pane: &PaneId| {
-            Err(PaneError::PaneNotFound {
-                what: pane.as_str().to_string(),
-            })
-        }),
-        timeouts,
-    }
-}
-
-/// An adapter for the calls that never spawn.
-fn harness(timeouts: Timeouts) -> OpenCodeHarness {
-    OpenCodeHarness::new(config("/nonexistent/hlr642-opencode", timeouts))
-}
-
-fn pane_name() -> PaneName {
-    PaneName::parse("demo-c1r1").unwrap()
-}
-
-fn unavailable<T: std::fmt::Debug>(result: Result<T, PaneError>, what: &str) -> String {
-    match result {
-        Err(PaneError::Unavailable { what: message }) => message,
-        other => panic!("{what}: expected unavailable, got {other:?}"),
-    }
-}
-
-fn timeout_op<T: std::fmt::Debug>(result: Result<T, PaneError>, what: &str) -> String {
-    match result {
-        Err(PaneError::Timeout { op }) => op,
-        other => panic!("{what}: expected timeout, got {other:?}"),
-    }
-}
-
-/// ADR-0021 section 9: one line, naming the route and the status, short.
-fn assert_one_line_naming(message: &str, route: &str, what: &str) {
-    assert!(
-        !message.contains(['\n', '\r']),
-        "{what}: the message is one line: {message:?}"
-    );
-    assert!(
-        message.len() <= 200,
-        "{what}: at most 200 bytes, got {}",
-        message.len()
-    );
-    assert!(
-        message.contains(route),
-        "{what}: names the route {route}: {message:?}"
-    );
-    assert!(
-        message.contains("200"),
-        "{what}: names the status 200: {message:?}"
-    );
-}
-
-fn assert_within(start: Instant, bound: Duration, what: &str) {
-    let took = start.elapsed();
-    assert!(took < bound, "{what}: took {took:?}, bound {bound:?}");
-}
-
 fn no_abort_sent(stub: &Stub) -> bool {
     !stub.lines().iter().any(|line| line.contains("/abort"))
-}
-
-/// `GET /session/<ID>` answers that session.
-fn known_session(stub: &Stub) {
-    stub.json(
-        "GET",
-        &format!("/session/{ID}"),
-        200,
-        &format!(r#"{{"id":"{ID}","title":"{ID}"}}"#),
-    );
 }
 
 // ---- AC 1: http::request ----
@@ -476,6 +383,51 @@ fn ac5_abort_of_a_session_that_stays_busy_times_out() {
     assert_within(start, quick().call + SLACK, "abort of a busy session");
 }
 
+/// The `/session/status` entry of a session OpenCode is retrying (E32).
+fn retrying() -> String {
+    format!(r#"{{"{ID}":{{"type":"retry","attempt":1,"message":"x","next":1}}}}"#)
+}
+
+/// #642 part 3, D7(b): `settled` reads the route as `session_activity` does, so a session in
+/// `retry` is still running: an abort of it that stays in `retry` is never settled.
+#[test]
+fn ac5_abort_of_a_session_that_stays_in_retry_times_out() {
+    let stub = Stub::start();
+    known_session(&stub);
+    stub.json("POST", &format!("/session/{ID}/abort"), 200, "true");
+    stub.json("GET", "/session/status", 200, &retrying());
+    let start = Instant::now();
+    let op = timeout_op(
+        harness(quick()).abort(stub.port, ID),
+        "a session that stays in retry",
+    );
+    assert_eq!(op, HarnessOp::Abort.as_str());
+    assert_within(start, quick().call + SLACK, "abort of a retrying session");
+}
+
+/// #642 part 3, D7(b): an abort is settled once the session's entry reads `idle`, and not
+/// while it reads `retry`: the status is asked again after the `retry`.
+#[test]
+fn ac5_abort_settles_once_a_retrying_session_reads_idle() {
+    let stub = Stub::start();
+    known_session(&stub);
+    stub.json("POST", &format!("/session/{ID}/abort"), 200, "true");
+    stub.json_once("GET", "/session/status", 200, &retrying());
+    stub.json(
+        "GET",
+        "/session/status",
+        200,
+        &format!(r#"{{"{ID}":{{"type":"idle"}}}}"#),
+    );
+    assert_eq!(harness(quick()).abort(stub.port, ID), Ok(()));
+    let asked = stub
+        .lines()
+        .iter()
+        .filter(|line| line.starts_with("GET /session/status "))
+        .count();
+    assert!(asked >= 2, "not settled at `retry`: {:?}", stub.lines());
+}
+
 // ---- AC 6 and 7: unreachable and frozen servers ----
 
 #[test]
@@ -527,9 +479,6 @@ fn ac7_the_call_bound_caps_the_request_timeout() {
 
 // ---- AC 8 (#802 AC 5): serve_command and verify_serving ----
 
-/// The binary every `serve_command` case names.
-const BIN: &str = "/opt/oc/bin/opencode";
-
 /// The secret-looking variable of the credential case: set only in the adapter process's own
 /// environment, never in a configured `ProcessEnv`.
 const SECRET_VAR: &str = "HLR802_PROVIDER_API_KEY";
@@ -537,26 +486,6 @@ const SECRET: &str = "s3cr3t-802-do-not-leak";
 
 /// The marker that makes [`credential_probe_child`] build the argvs and check them.
 const CREDENTIAL_PROBE: &str = "HLR802_CREDENTIAL_PROBE";
-
-fn strings(argv: &Argv) -> Vec<&str> {
-    argv.as_slice().iter().map(String::as_str).collect()
-}
-
-/// An adapter with `env` and `serve_args` `["--pure"]`, naming [`BIN`].
-fn serving(env: ProcessEnv) -> OpenCodeHarness {
-    let mut config = config(BIN, quick());
-    config.serve_args = vec!["--pure".to_owned()];
-    config.env = env;
-    OpenCodeHarness::new(config)
-}
-
-/// The isolated environment of the cases: a scratch `HOME` and one `XDG_*` dir.
-fn isolated() -> ProcessEnv {
-    ProcessEnv::Isolated(vec![
-        ("HOME".to_owned(), "/tmp/hlr802/home".to_owned()),
-        ("XDG_DATA_HOME".to_owned(), "/tmp/hlr802/data".to_owned()),
-    ])
-}
 
 /// #802 AC 5: with no agent, `serve_command` is the argv `start()` built before (`serve
 /// --port P --hostname 127.0.0.1`, then `serve_args`), behind the one `env` prefix the TUI's
@@ -639,33 +568,37 @@ fn ac8_serve_command_starts_nothing() {
     );
 }
 
-fn agent(text: &str) -> AgentKey {
-    AgentKey::parse(text).unwrap()
-}
-
 fn is_agent_unsupported<T: std::fmt::Debug>(answer: &Result<T, PaneError>) -> bool {
     matches!(answer, Err(e @ PaneError::Refused { .. }) if e.code() == "agent-unsupported")
 }
 
-/// #802 AC 5 and plan review W-3: until #642 part 3 the adapter applies no agent, so a spec
-/// with one is refused `agent-unsupported` by `serve_command` (no argv at all) and by
-/// `verify_serving` (fail closed); a spec without one verifies `Ok` and sends nothing.
+/// #642 part 3 (changed in place from #802's refusal): the adapter applies an agent now, so
+/// neither `serve_command` nor `verify_serving` answers `agent-unsupported` for a spec with
+/// one. `serve_command` builds an argv carrying the key, and `verify_serving` asks the
+/// running server (`GET /config` first, D4) instead of refusing with nothing sent.
+/// `agent_test.rs` pins the argv and every answer of the check.
 #[test]
-fn ac8_a_spec_with_an_agent_is_refused_and_one_without_verifies() {
+fn ac8_a_spec_with_an_agent_is_applied_and_checked_on_the_server() {
     let stub = Stub::start();
     let h = serving(ProcessEnv::Inherit);
     let with = ServeSpec::default().with_agent(agent("feature-implementor"));
     let built = h.serve_command(&pane_name(), stub.port, &with);
-    assert!(is_agent_unsupported(&built), "{built:?}");
+    assert!(!is_agent_unsupported(&built), "{built:?}");
+    let argv = built.expect("an argv for a spec with an agent");
+    assert!(
+        strings(&argv)
+            .iter()
+            .any(|e| e.contains("feature-implementor")),
+        "the argv carries the key: {argv:?}"
+    );
     let verified = h.verify_serving(stub.port, &with);
-    assert!(is_agent_unsupported(&verified), "{verified:?}");
-    assert_eq!(h.verify_serving(stub.port, &ServeSpec::default()), Ok(()));
-    assert!(stub.lines().is_empty(), "sent: {:?}", stub.lines());
-    let message = match built {
-        Err(PaneError::Refused { message, .. }) => message,
-        other => panic!("{other:?}"),
-    };
-    assert!(!message.contains('\n'), "one line: {message:?}");
+    assert!(!is_agent_unsupported(&verified), "{verified:?}");
+    assert_eq!(
+        stub.lines().first().map(String::as_str),
+        Some("GET /config HTTP/1.1"),
+        "verify_serving asks the server: {:?}",
+        stub.lines()
+    );
 }
 
 /// Run by [`ac8_no_credential_of_the_adapters_environment_reaches_an_argv`] as a re-executed
