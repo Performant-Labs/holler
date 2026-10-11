@@ -131,3 +131,59 @@
   - **Line counts:** every file the work touches.
   - **#642 part 3 (PR #823):** its changes to `rig.rs`, `ports.rs` and `OpenCodeConfig` (unchanged).
   - **The issue:** its body equals the brief's, except that the issue carries an index in place of the Evidence section.
+
+## A (Phase 3, up-front plan review, third pass: the A-review amendment and the merge of #642 part 3 and #644) — 2026-10-11T12:12:43-06:00
+- **Decided:** BLOCK on `docs/handoffs/649-brief.md` at `6c07882` (sha256 `2da3f9e27edee976...`). The merge `3dff970` left the brief unchanged. I read it against the merged tree. One block and three warns. The full detail is in `handoff-A.md`, which replaces the second pass's.
+  - **The amendment is right.** B-1 is fixed in the recommended wording, and a new acceptance line pins it. W-A to W-J are folded in. D31 and D32 carry the first pass's binding warns and the phase 7 checklist.
+  - **B-2 (block): the first message's path has a closed owner.**
+    - **What the plan says.** D18 (c), D17's list item and the W-B sentence of the new ADR paragraph give "whether the first message moves to the hub's prompt path" to #646.
+    - **What is true.** #646 closed on 2026-10-10 at 12:54 MDT, before the brief was written. The question was never in its scope (its issue, brief and handoffs). #642 part 3 added an ADR sentence today ("#646 and #649 decide whether it moves") that D17 does not list.
+    - **Why it matters.** #649 makes `reset --first` deliver real prompts outside the hub's park, hold and health gate (`tx_switch.rs:218` against `circuit/dispatch.rs:87,163`). As written, no open story would own closing that.
+    - **Why A cannot fix it.** F cannot follow D17 and stay truthful. Naming an owner is the operator's call.
+  - **W-K:** three more deferrals D17 points at no live owner:
+    - model, effort and env would become "#642 only", but #642 closed today and lists them as untouched;
+    - the `--herdr-session` default names no story;
+    - #654's body does not list the DRIVEN wiring as work.
+  - **W-L:** #642's S advisory 2 asks #649 to run the `OPENCODE_CONFIG_CONTENT` pair through a real `tmux new-window`. D15's test is the one place that can, if it also runs a spec with an agent.
+  - **W-M:** facts the merge settled. #642 part 3 is on the branch, so D19's contingency is met. OpenCode 1.19.0 leaves a dead-end prompt's session in `retry`, which reads as `Busy`, so D12's "unverified" is settled.
+  - **The merge changes nothing the plan builds on:**
+    - `HarnessPort` still has eleven methods;
+    - `OpenCodeConfig`, `Timeouts` and `TmuxConfig` are unchanged;
+    - the resolver's call site is unchanged;
+    - the rig's #649 generalisations survive;
+    - there are still two copies of `LinkedHost`;
+    - the tree type-checks.
+- **Assumed:**
+  - **The operator does not know #646 is closed.** Three sources assume it is open, so this is a stale pointer, not a deliberate choice:
+    - the brief's W-B text, adopted today from my second pass;
+    - #642 part 3's new ADR sentence;
+    - #642's handoff-A.
+  - **No owner exists elsewhere.** No open issue owns the first message's path or the model, effort and env. I grepped open issue titles and #654's body and comments, but did not read every open issue's body.
+  - **#649 makes the path live.** It is the first story where `reset --first` can run in production: before it, `Unwired` answers `not-implemented` at the first port call.
+- **Hedged:**
+  - **Why B-2 is a block, not a binding warn.** The brief names #646 three times, explicitly. By the second pass's rule, A cannot replace an operator-adopted pointer by a reading. Also, the fix needs an outward act (filing an issue) or an operator decision (a permanent carve-out). The overlay's first rule (one prompt choke point) is what is at stake.
+  - **The recommended owner** is a follow-up story that routes the first message through the hub's prompt path, and #654/#653 depending on it is a suggestion. The operator may instead decide now that the carve-out is permanent; the handoff lists that as the cheaper option.
+  - **W-L is about test scope, which is T's.** I raised it only because it is an upstream hand-off to this story that the brief predates.
+- **Evidence:**
+  - **Read in full:**
+    - the amended brief and its diff from `0066ac5`;
+    - the trial `src/pane/wiring.rs` and `src/pane/wiring/{store,env,bind}.rs`;
+    - `tests/pane_integration/scenario.rs`.
+  - **Diffs read:** the merge `6c07882..3dff970` for `ports.rs`, the OpenCode adapter's `lib.rs`, `tui.rs` and `server.rs` (signatures), `real_opencode/rig.rs` and ADR-0021.
+  - **Read in part:**
+    - ADR-0021 at `3dff970`: 478-526, 540-569, 595-626, 776-790, 826-836, 864-891, and every `#649` mention;
+    - `docs/handoffs/642/{handoff-S.md (255-300), decisions.md (300-322), handoff-A.md}`;
+    - `tx_switch.rs` and `circuit/dispatch.rs` (greps);
+    - `prompt.rs:51`.
+  - **GitHub:**
+    - #642, #646, #654, #684 and #825: states and closing times;
+    - #646's body and comments, and #654's body and comments, for the first message and DRIVEN;
+    - #647: its state, and PR #701 (doctor, part 1);
+    - the open issue list (titles).
+  - **Greps:**
+    - `docs/handoffs/0646-implementation/` for the first message;
+    - every `impl <Port> for` in the CLI tests (the `LinkedHost` count);
+    - `OpenCodeConfig`, `Timeouts` and `TmuxConfig` fields;
+    - `HarnessPort`'s methods (11);
+    - `tui_session` call sites.
+  - **Build:** `cargo check --tests -p holler-cli -p holler-adapter-opencode -p holler-adapter-host -p holler-adapter-herdr` on `3dff970`, clean. I ran no tests.
