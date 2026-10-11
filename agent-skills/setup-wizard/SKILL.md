@@ -844,7 +844,8 @@ plan and show it before touching anything:
   `~/Projects/other-project`)." Not assumed to be exactly one, not assumed to be Claude.
 - **With no sessions (N=0),** say so: "Stages 4, 5, 7 and 9 are skipped (no sessions)", reported as skipped, never as failed, and with
   no remote host the `tailscale serve` line of Stage 6 is skipped too (no remote host dials the
-  hub); the hub is still started and every orchestrator pane is still built.
+  hub), so leave `WIZARD_SERVE_HTTPS_PORT` empty on the local call (a port never used must not
+  refuse the plan); the hub is still started and every orchestrator pane is still built.
 - **Sessions (from the config), grouped by their own `remote_host`** — the real N, names,
   ports (the ones `instance.sh` printed in Stage 1, never recomputed), and **harnesses**,
   organized per host, not as one flat list — e.g. "2 hosts: remote-a
@@ -858,14 +859,19 @@ plan and show it before touching anything:
   instance's contract values set inline on that command: `WIZARD_INSTANCE_NAME`,
   `WIZARD_STATE_DIR` (that host's resolved one), `WIZARD_BACKEND_PORTS` (the ports `instance.sh`
   printed for the sessions that run on that host) and `WIZARD_LEDGER` (that host's ledger: the
-  fetched `<scratch>/ledger-<host>.toml` for a remote host, as in the command below;
-  `<state_dir>/herdr/setup/wizard-ledger.toml` for this machine); on the hub host also `WIZARD_HUB_PORT`, `WIZARD_SERVE_HTTPS_PORT` and
-  `WIZARD_HERDR_SESSION`:
+  fetched `<scratch>/ledger-<host>.toml` for a remote host; `<state_dir>/herdr/setup/wizard-ledger.toml`
+  for this machine). The local call also carries the four hub-only variables; a remote host's call
+  carries none of them:
   ```bash
-  WIZARD_HERDR_HOST=1 WIZARD_INSTANCE_NAME=<name> WIZARD_HUB_PORT=<hub_port> WIZARD_SERVE_HTTPS_PORT=<serve_https_port> WIZARD_HERDR_SESSION=<herdr_session> WIZARD_STATE_DIR=<state_dir> WIZARD_BACKEND_PORTS="<ports on this host>" WIZARD_LEDGER=<scratch>/ledger-<host>.toml bash $WIZARD_LIB/collide.sh <host-label> <scratch>/inventory-<host>.tsv
+  # this machine (the hub and Herdr host):
+  WIZARD_HERDR_HOST=1 WIZARD_INSTANCE_NAME=<name> WIZARD_HUB_PORT=<hub_port> WIZARD_SERVE_HTTPS_PORT=<serve_https_port> WIZARD_HERDR_SESSION=<herdr_session> WIZARD_STATE_DIR=<state_dir> WIZARD_BACKEND_PORTS="<ports on this host>" WIZARD_LEDGER=<state_dir>/herdr/setup/wizard-ledger.toml bash $WIZARD_LIB/collide.sh <host-label> <scratch>/inventory-<host>.tsv
+  # each remote host:
+  WIZARD_INSTANCE_NAME=<name> WIZARD_STATE_DIR=<state_dir> WIZARD_BACKEND_PORTS="<ports on this host>" WIZARD_LEDGER=<scratch>/ledger-<host>.toml bash $WIZARD_LIB/collide.sh <host-label> <scratch>/inventory-<host>.tsv
   ```
   `WIZARD_HERDR_HOST=1` marks the host that runs the Herdr server (the unnamed-server refusal below
-  applies only there): set it on the local call only, never on a remote host's call.
+  applies only there): set it on the local call only, never on a remote host's call. The same goes
+  for `WIZARD_HUB_PORT`, `WIZARD_SERVE_HTTPS_PORT` and `WIZARD_HERDR_SESSION`: a remote host builds
+  no hub and no Herdr, so they belong to the local call only.
   Its output is the inventory printed beside what the run will create: everything that runs and
   was not created by this instance is listed as "present, not touched" (so is this instance's own
   `tailscale serve` entry, when the ledger has a live `hub` row). It exits 1 and prints a
@@ -902,7 +908,7 @@ plan and show it before touching anything:
   thing: a **live row in this instance's own ledger** (its pid, start time and command still
   match; see Stage 4, "Reuse on a rerun"). List per host which backends, the hub, the bodies and
   the Herdr server are reused that way and which will be started new. When `herdr session list`
-  shows a stopped session of the instance's name, say so here: starting the Herdr server restores
+  shows a stopped session of the instance's name (for the default instance (no `herdr_session`) the entry named `default`), say so here: starting the Herdr server restores
   that saved session (its workspaces and panes, and an agent in a pane may resume), so Stage 8
   checks `pane list` after `server-start` and builds a **new workspace** beside any panes the
   wizard did not create (`workspace create`, with the user's yes). A listener on a planned
@@ -1544,8 +1550,9 @@ wrong.
 
 **Ask:** nothing.
 
-**With no sessions, verify what exists:** the hub answers (`holler hub status`) and every
-orchestrator pane is alive; this stage does not look for sessions, a roster or a `say`.
+**With no sessions, verify what exists:** the hub answers
+(`HOLLER_STATE_DIR=<state_dir> holler hub status` shows `listening: 127.0.0.1:<hub_port>`) and every
+orchestrator pane is alive (`<herdr_env> bash $WIZARD_LIB/herdr.sh run pane read <orch-pane>` shows its live prompt); this stage does not look for sessions, a roster or a `say`.
 
 **Do**, for every session in the config:
 (`<label>` is the Stage 7 token label.)
@@ -1581,7 +1588,7 @@ declare success on the CLI half alone for a session that was supposed to be pane
 don't rely on `pane get`'s `revision` field either (it does not reliably bump on new
 content — confirmed live 2026-09-22, a real new turn landed with `revision` unchanged).
 
-**All 10 stages green = done.** Report the final layout (which pane is which orchestrator or
+**Every stage green or skipped = done.** Report the final layout (which pane is which orchestrator or
 session) and every session id, so the user has them on hand for a later "recover a dead pane"
 run. Then give the user precise instructions to actually **see** the workspace, since
 everything above ran headlessly over Herdr's socket API — nothing was visible on screen yet:

@@ -444,7 +444,7 @@ Stage 2 takes a read-only inventory of each host the run touches
 configuration and the Herdr sessions; a tool it needs and cannot find on `PATH` is reported as a
 `warn` line, never skipped silently. It only runs `ss`/`lsof`, `ps`, `tailscale serve status` and
 `herdr session list` (the Herdr section runs only with `WIZARD_INVENTORY_HERDR=1`, which the skill
-sets on the local line only, and `WIZARD_HERDR_HOST=1` on the local `collide.sh` call only; a missing `herdr` on a remote host is expected); it never writes,
+sets on the local line only, and `WIZARD_HERDR_HOST=1`, `WIZARD_HUB_PORT`, `WIZARD_SERVE_HTTPS_PORT` and `WIZARD_HERDR_SESSION` on the local `collide.sh` call only, never on a remote call, and `WIZARD_SERVE_HTTPS_PORT` empty when there are no sessions; a missing `herdr` on a remote host is expected); it never writes,
 signals, starts or stops anything. The first line of an inventory is `home<TAB><that host's $HOME>`,
 the home that `-` and `~/` state directories are resolved against. A remote inventory is taken with
 `ssh <remote_host> 'bash -l -s' < .../inventory.sh` so a login shell's `PATH` applies. Stage 3 feeds each
