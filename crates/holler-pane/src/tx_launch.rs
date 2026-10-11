@@ -4,33 +4,41 @@
 //!
 //! - **Plan**, writing nothing and changing nothing live: the spec names the pane; a launched
 //!   name has no record (`pane-exists`) and its Herdr session is given; the port policy names a
-//!   port ([`port_of_policy`]); the probe passes when the spec has a check (a failing result is
-//!   not stored); Herdr's version is supported; the target cell holds no Herdr pane
-//!   (`grid-occupied`, decided by Herdr's snapshot alone, recorded or not: a pane is never
-//!   adopted); and no server answers on the port (`port-in-use`, never adopted).
+//!   port ([`port_of_policy`]); the harness builds the server's argv (`serve_command`, pure, so
+//!   its refusal, `agent-unsupported` say, writes nothing); the probe passes when the spec has a
+//!   check (a failing result is not stored); Herdr's version is supported; the target cell holds
+//!   no Herdr pane (`grid-occupied`, decided by Herdr's snapshot alone, recorded or not: a pane is
+//!   never adopted); and no server answers on the port (`port-in-use`, never adopted).
 //! - **Act**, inside `ProfileScope::edit_spec` (I8: with a profile, P is written first and its
 //!   specs are put back if the act fails): ensure the Herdr pane and the tmux session, run the
-//!   spec's command there, start the harness server and check it, create the session of record
+//!   spec's command there, then start the server from the planned argv and check it (both runs
+//!   in the spec's directory; the child module `server`, #802), create the session of record
 //!   through the harness API (never a "ping" session, never "the most recent"), attach the TUI to
 //!   exactly that session, and observe that the TUI shows it and Herdr still lists the pane (a
-//!   mismatch is `unavailable`). Only then is the record written, by one compare-and-swap.
-//! - **Rollback.** A failed step stops the tmux session's processes and closes the Herdr pane this
-//!   run created (one the plan's snapshot did not list), and nothing is recorded. The tmux session
-//!   and a session the server created stay: no port call ends either. A record write that
-//!   conflicts is not rolled back: another writer owns the record now.
-//! - **Relaunch** is the same act after stopping only what the pane owns. It keeps the pane's
-//!   directory, moves its cell only when the caller was asked to place it (`grid_given`), keeps
-//!   the session of record the restarted server still lists, and after a move records the new
-//!   pane before it closes the old one. Its rules are the engine's first step (E0), so every
-//!   caller is held to them.
+//!   mismatch is `unavailable`). Only then is the record written, by one compare-and-swap, with no
+//!   server pid: the server is a process of the pane's tmux session.
+//! - **Rollback.** A failed step stops the tmux session's processes, the harness server among
+//!   them, and closes the Herdr pane this run created (one the plan's snapshot did not list), and
+//!   nothing is recorded. The tmux session and a session the server created stay: no port call
+//!   ends either. A record write that conflicts is not rolled back: another writer owns the
+//!   record now. A crash runs no rollback, so a server it started stays in the tmux session.
+//! - **Relaunch** is the same act after stopping only what the pane owns, its server among them.
+//!   It keeps the pane's directory, moves its cell only when the caller was asked to place it
+//!   (`grid_given`), keeps the session of record the restarted server still lists, and after a
+//!   move records the new pane before it closes the old one. Its rules are the engine's first
+//!   step (E0), so every caller is held to them.
 //! - **Bound (I5).** A run's budget ([`DEFAULT_BUDGET`]) starts when the engine is entered and is
 //!   checked before every live step (a monotonic clock, no port call). When it has run out the run
 //!   rolls back and answers `timeout`. A run takes at most the budget plus one port call's own
-//!   bound plus its rollback calls.
+//!   bound plus its rollback calls. The health wait ([`wait_healthy`]) asks every
+//!   [`TxOptions::boot_poll`] with the budget's end as its deadline, checked before each ask, so
+//!   it holds to that bound too; its sleep is the engine's one wait.
 //!
 //! Nothing here types into a pane (I4), runs a shell, or joins or splits an argv. Untrusted text
 //! (session and Herdr ids, workspaces, directories, a spec's pane, an adapter's or the prober's
 //! message) reaches a message only through `findings::quoted` or `findings::embedded`.
+
+mod server;
 
 use std::time::{Duration, Instant};
 
@@ -40,9 +48,11 @@ use crate::pane::{HarnessInfo, Health, Hold, HostInfo, LastObserved, PaneProbe};
 use crate::profile_snapshot::FIXED_PORT_POLICY_PREFIX;
 use crate::reconcile::shown_differs;
 use crate::{
-    GridPos, HerdrPane, HerdrSpec, Pane, PaneError, PaneId, PaneName, Ports, ProbeResult, Profile,
-    ProfileName, ProfileSpec, SpecEdit,
+    Argv, GridPos, HerdrPane, HerdrSpec, Pane, PaneError, PaneId, PaneName, Ports, ProbeResult,
+    Profile, ProfileName, ProfileSpec, ServeSpec, SpecEdit,
 };
+
+pub use server::wait_healthy;
 
 /// `pane-exists`: `launch` of a name that already has a record (relaunch it instead). A
 /// refusal, exit 3.
@@ -57,6 +67,8 @@ pub const PORT_IN_USE: RefusalCode = RefusalCode::from_static("port-in-use");
 pub const DEFAULT_BUDGET: Duration = Duration::from_secs(10);
 /// The timeout handed to `Prober::run_probe`.
 pub const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
+/// How often the act asks a server it started whether it is healthy (#802).
+pub const BOOT_POLL: Duration = Duration::from_millis(150);
 /// `HostInfo.name` of every pane recorded here (epic decision 3: Herdr, tmux and the harness
 /// run on the hub's machine).
 pub const HOST_NAME: &str = "localhost";
@@ -96,6 +108,9 @@ pub struct TxOptions {
     pub budget: Duration,
     /// The timeout of the health probe ([`PROBE_TIMEOUT`]).
     pub probe_timeout: Duration,
+    /// How often the health wait asks the started server ([`BOOT_POLL`]); the wait ends with
+    /// the budget.
+    pub boot_poll: Duration,
     /// The wall clock stamped into `last_observed.at` (`holler_proto::clock::now_millis`).
     pub now_ms: fn() -> i64,
 }
@@ -105,6 +120,7 @@ impl Default for TxOptions {
         Self {
             budget: DEFAULT_BUDGET,
             probe_timeout: PROBE_TIMEOUT,
+            boot_poll: BOOT_POLL,
             now_ms: holler_proto::clock::now_millis,
         }
     }
@@ -210,26 +226,49 @@ pub fn relaunch(
     run(ports, &plan, &budget, options)
 }
 
-/// The budget of one run, started when the engine is entered.
+/// The budget of one run, started when the engine is entered. Its end is fixed once, when it
+/// starts, so [`Budget::check`] and the health wait ([`Budget::deadline`]) agree on when it runs
+/// out.
 struct Budget {
-    started: Instant,
-    limit: Duration,
+    end: Instant,
     op: &'static str,
 }
 
 impl Budget {
+    /// A budget of `limit` from now. A limit the clock cannot hold (hundreds of billions of
+    /// years) is halved until it can, so such a budget still never runs out in practice, for
+    /// `check` and the health wait alike.
     fn start(limit: Duration, op: &'static str) -> Self {
         let started = Instant::now();
-        Self { started, limit, op }
+        let mut limit = limit;
+        let end = loop {
+            if let Some(end) = started.checked_add(limit) {
+                break end;
+            }
+            limit /= 2;
+        };
+        Self { end, op }
     }
 
-    /// `timeout` once the budget has run out; a comparison of elapsed time, no port call.
+    /// `timeout` once the budget has run out: a reading of the monotonic clock against its end,
+    /// no port call.
     fn check(&self) -> Result<(), PaneError> {
-        if self.started.elapsed() < self.limit {
+        if Instant::now() < self.end {
             return Ok(());
         }
+        Err(self.expired())
+    }
+
+    /// The `timeout` of a run whose budget ran out, its `op` the verb's.
+    fn expired(&self) -> PaneError {
         let op = self.op.to_owned();
-        Err(PaneError::Timeout { op })
+        PaneError::Timeout { op }
+    }
+
+    /// When the budget runs out, the health wait's deadline: the instant from which `check`
+    /// fails, so the wait asks only while `check` would pass.
+    fn deadline(&self) -> Instant {
+        self.end
     }
 }
 
@@ -240,6 +279,9 @@ struct Plan<'a> {
     /// Where the pane goes: the Herdr session, and the spec's workspace and grid.
     target: HerdrSpec,
     port: u16,
+    /// What the harness server runs with, from the in-flight spec: the one spec both
+    /// `serve_command` (in the plan) and `verify_serving` (in the act) get.
+    serve: ServeSpec,
     /// The record a relaunch replaces; `None` for a launch.
     old: Option<&'a Pane>,
     profile: Option<&'a ProfileName>,
@@ -247,6 +289,8 @@ struct Plan<'a> {
 
 /// What the plan's reads saw, for the act and the record.
 struct Seen {
+    /// The argv `serve_command` built, which the act runs exactly as it is.
+    server: Argv,
     /// The probe's result when the spec has a check (it passed), written only at R.
     probe: Option<ProbeResult>,
     /// Herdr's version, recorded as `host.herdr_api_version`.
@@ -273,20 +317,30 @@ impl<'a> Plan<'a> {
             workspace,
             grid,
         };
+        // Every field named, never `..Default::default()`: a field `ServeSpec` gains later
+        // fails to compile here until the spec's value is passed on.
+        let serve = ServeSpec {
+            agent: spec.opencode_agent.clone(),
+        };
         Ok(Self {
             name,
             spec,
             target,
             port,
+            serve,
             old,
             profile,
         })
     }
 
-    /// Steps 3 to 6, none of which writes or changes anything live: the probe, Herdr's version,
-    /// the target cell (where a relaunch's own pane is no occupant) and the port, which for a
-    /// relaunch is checked only when it changes (its own server answers there until B1).
+    /// The plan's reads, none of which writes or changes anything live: first the server's argv
+    /// (pure, so its refusal stays in the plan; #802), then steps 3 to 6: the probe, Herdr's
+    /// version, the target cell (where a relaunch's own pane is no occupant) and the port, which
+    /// for a relaunch is checked only when it changes (its own server answers there until B1).
     fn observe(&self, ports: Ports<'_>, probe_timeout: Duration) -> Result<Seen, PaneError> {
+        let server = ports
+            .harness
+            .serve_command(self.name, self.port, &self.serve)?;
         let probe = probe(ports, self.spec, probe_timeout)?;
         let herdr_api_version = ports.herdr.version()?;
         let listed = ports.herdr.snapshot()?.panes;
@@ -294,14 +348,10 @@ impl<'a> Plan<'a> {
         refuse_occupied(ports, &listed, &self.target, own)?;
         let must_be_free = self.old.is_none_or(|old| old.harness.port != self.port);
         if must_be_free && ports.harness.health(self.port)? {
-            let message = format!(
-                "a harness server already answers on port {}; a running server is never \
-                 adopted, so stop it or choose another port",
-                self.port
-            );
-            return Err(refused(PORT_IN_USE, message));
+            return Err(port_in_use(self.port));
         }
         Ok(Seen {
+            server,
             probe,
             herdr_api_version,
             listed,
@@ -338,7 +388,7 @@ impl<'a> Plan<'a> {
             harness: HarnessInfo {
                 kind: spec.harness.kind,
                 port: self.port,
-                pid: Some(live.pid),
+                pid: None,
                 health: Health::Healthy,
             },
             session_of_record: Some(live.session),
@@ -518,7 +568,7 @@ fn run(
     let (mut entered, mut acted) = (false, None);
     let mut act = || {
         entered = true;
-        acted = Some(act_live(ports, plan, &seen, budget, options.now_ms)?);
+        acted = Some(act_live(ports, plan, &seen, budget, options)?);
         Ok(())
     };
     let edited = ports
@@ -552,16 +602,16 @@ fn act_live(
     plan: &Plan<'_>,
     seen: &Seen,
     budget: &Budget,
-    now_ms: fn() -> i64,
+    options: &TxOptions,
 ) -> Result<Acted, PaneError> {
     if let Some(old) = plan.old {
-        stop_old(ports, plan.name, old, budget)?;
+        server::stop_old(ports, plan.name, old, budget)?;
     }
     let mut made = Made::default();
-    let live = bring_up(ports, plan, seen, budget, &mut made)
+    let live = bring_up(ports, plan, seen, budget, options.boot_poll, &mut made)
         .map_err(|error| roll_back(ports, plan.name, &made, error))?;
     let expected = plan.old.map_or(0, |old| old.generation);
-    let record = plan.record(seen, live, now_ms());
+    let record = plan.record(seen, live, (options.now_ms)());
     let stored = ports.pane_store.cas_put(&record, expected)?;
     let unclosed = plan
         .old
@@ -569,32 +619,10 @@ fn act_live(
     Ok(Acted { stored, unclosed })
 }
 
-/// B1 and B2: stop what the pane owns, then check that its old server no longer answers. Until
-/// #695 stops a server by its recorded pid, one that survives fails the run, loudly, never by
-/// adopting it.
-fn stop_old(
-    ports: Ports<'_>,
-    name: &PaneName,
-    old: &Pane,
-    budget: &Budget,
-) -> Result<(), PaneError> {
-    budget.check()?;
-    ports.host.stop_owned(name)?;
-    budget.check()?;
-    let port = old.harness.port;
-    if ports.harness.health(port)? {
-        return Err(unavailable(format!(
-            "the harness server on port {port} still answers after the processes of {name} \
-             were stopped (#695)"
-        )));
-    }
-    Ok(())
-}
-
 /// What the act made, so that a rollback undoes that and nothing else.
 #[derive(Default)]
 struct Made {
-    /// The tmux session's step ran, so its processes are stopped.
+    /// The tmux session's step ran, so its processes, the server among them, are stopped.
     session: bool,
     /// The Herdr pane this run created (the plan's snapshot did not list it), so it is closed.
     pane: Option<PaneId>,
@@ -603,17 +631,19 @@ struct Made {
 /// What the act brought up and observed.
 struct Live {
     herdr: HerdrPane,
-    pid: u32,
     session: String,
     shown: Option<String>,
 }
 
 /// A1 to O2 (a relaunch's B3 to O2), each after a budget check, and the budget check before R.
+/// The spec's command and the server run in the spec's directory, whatever directory the tmux
+/// session was made in; the server's step is `server::start`.
 fn bring_up(
     ports: Ports<'_>,
     plan: &Plan<'_>,
     seen: &Seen,
     budget: &Budget,
+    boot_poll: Duration,
     made: &mut Made,
 ) -> Result<Live, PaneError> {
     budget.check()?;
@@ -622,20 +652,14 @@ fn bring_up(
         made.pane = Some(herdr.pane_id.clone());
     }
     budget.check()?;
-    ports.host.ensure_session(plan.name, &plan.spec.host.cwd)?;
+    let cwd = &plan.spec.host.cwd;
+    ports.host.ensure_session(plan.name, cwd)?;
     made.session = true;
     if let Some(command) = &plan.spec.command {
         budget.check()?;
-        ports.host.run(plan.name, command)?;
+        ports.host.run(plan.name, cwd, command)?;
     }
-    budget.check()?;
-    let pid = ports.harness.serve(plan.name, plan.port)?;
-    budget.check()?;
-    if !ports.harness.health(plan.port)? {
-        let port = plan.port;
-        let what = format!("the harness server on port {port} is not healthy after it was started");
-        return Err(unavailable(what));
-    }
+    server::start(ports, plan, seen, budget, boot_poll)?;
     budget.check()?;
     let session = session_of_record(ports, plan)?;
     budget.check()?;
@@ -646,7 +670,6 @@ fn bring_up(
     budget.check()?;
     Ok(Live {
         herdr,
-        pid,
         session,
         shown,
     })
@@ -766,6 +789,16 @@ fn same_place(a: &HerdrPane, b: &HerdrPane) -> bool {
 /// A cell in a message: its grid and its workspace, which is Herdr's text and so quoted.
 fn cell(workspace: &str, grid: GridPos) -> String {
     format!("{grid} in workspace {}", quoted(workspace))
+}
+
+/// `port-in-use`: a server answers on `port`, and a running server is never adopted. The plan
+/// asks before anything moves, and the act again just before the server's run.
+fn port_in_use(port: u16) -> PaneError {
+    let message = format!(
+        "a harness server already answers on port {port}; a running server is never adopted, \
+         so stop it or choose another port"
+    );
+    refused(PORT_IN_USE, message)
 }
 
 fn usage(message: String) -> PaneError {

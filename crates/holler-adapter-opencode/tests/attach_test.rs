@@ -49,7 +49,6 @@ fn quick() -> Timeouts {
         call: Duration::from_secs(3),
         request: Duration::from_millis(800),
         health: Duration::from_millis(300),
-        boot_try: Duration::from_millis(200),
         settle: Duration::from_millis(600),
     }
 }
@@ -80,11 +79,6 @@ fn rig_with(timeouts: Timeouts, tmux_bin: PathBuf) -> Rig {
             tmux_bin,
             socket: TmuxSocket::Path(fake.sock()),
         },
-        workdir: Arc::new(|_: &PaneName| {
-            Err(PaneError::Unavailable {
-                what: "the TUI methods never ask for a workdir".to_owned(),
-            })
-        }),
         tui_session: Arc::new(move |pane: &PaneId| {
             counted.fetch_add(1, Ordering::SeqCst);
             if pane.as_str() == PANE {

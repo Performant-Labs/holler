@@ -63,7 +63,9 @@ fn launch_refuses_a_cell_another_record_holds() {
         assert!(message.contains(occupant.pane_id.as_str()), "{message}");
         assert!(message.contains("demo-c2r1"), "{message}");
         assert_eq!(run.calls.herdr, [HerdrOp::Version, HerdrOp::Snapshot]);
-        assert_eq!((run.calls.host.len(), run.calls.harness.len()), (0, 0));
+        assert_eq!(run.calls.host.len(), 0);
+        // #802: the plan builds the server's argv (pure) before its reads; nothing else.
+        assert_eq!(run.calls.harness, [HarnessOp::ServeCommand]);
         rig.assert_matches(&run, PANE);
         rig.assert_no_keystroke();
     }
@@ -100,7 +102,8 @@ fn launch_never_adopts_an_unrecorded_pane() {
     assert!(message.contains(stranger.pane_id.as_str()), "{message}");
     assert!(message.contains("no record"), "{message}");
     assert_eq!(rig.herdr_ids(), vec![stranger.pane_id], "never closed");
-    assert_eq!((run.calls.host.len(), run.calls.harness.len()), (0, 0));
+    assert_eq!(run.calls.host.len(), 0);
+    assert_eq!(run.calls.harness, [HarnessOp::ServeCommand]);
     rig.assert_matches(&run, PANE);
     rig.assert_no_keystroke();
 }
@@ -113,7 +116,10 @@ fn launch_never_adopts_a_running_server() {
     let run = rig.run(LAUNCH, Format::Json);
     assert_eq!(run.code, 3, "{run:?}");
     assert_eq!(error_of(&run).0, "port-in-use");
-    assert_eq!(run.calls.harness, [HarnessOp::Health]);
+    assert_eq!(
+        run.calls.harness,
+        [HarnessOp::ServeCommand, HarnessOp::Health]
+    );
     assert_eq!(run.calls.host.len(), 0);
     rig.assert_matches(&run, PANE);
     rig.assert_no_keystroke();
@@ -133,12 +139,10 @@ fn a_failing_probe_refuses_before_any_step() {
     let (code, message) = error_of(&run);
     assert_eq!(code, "probe-failed");
     assert!(message.contains("qwen38"), "{message}");
-    let live = (&run.calls.herdr, &run.calls.host, &run.calls.harness);
-    assert_eq!(
-        (live.0.len(), live.1.len(), live.2.len()),
-        (0, 0, 0),
-        "{live:?}"
-    );
+    let live = (&run.calls.herdr, &run.calls.host);
+    assert_eq!((live.0.len(), live.1.len()), (0, 0), "{live:?}");
+    // #802: only the pure `serve_command` ran, in the plan before the probe.
+    assert_eq!(run.calls.harness, [HarnessOp::ServeCommand]);
     assert!(!run.calls.profiles.contains(&ProfileStoreOp::CasPut), "16d");
     assert_eq!(rig.record(PANE), None);
     assert_eq!(

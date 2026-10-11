@@ -20,11 +20,11 @@ use std::time::{Duration, Instant};
 
 use holler_adapter_opencode::tui::attach_port;
 use holler_adapter_opencode::OpenCodeHarness;
-use holler_pane::{HarnessPort, PaneError, PaneId};
+use holler_pane::{AgentKey, HarnessPort, PaneError, PaneId, PaneName, ServeSpec};
 use holler_pane_testkit::conformance::harness::run_harness_conformance;
 use holler_pane_testkit::fault::PortOp;
 use holler_pane_testkit::harness::HarnessOp;
-use rig::{opted_in, raw, refused, sessions_for, signal_group, Rig, PANES, SESSIONS};
+use rig::{opted_in, raw, refused, sessions_for, signal_group, Recording, Rig, PANES, SESSIONS};
 use serde_json::{json, Value};
 
 /// A well-formed id that no server holds.
@@ -57,7 +57,7 @@ fn ac12_the_adapter_passes_the_harness_conformance_suite() {
     if !opted_in("ac12") {
         return;
     }
-    let result = run_harness_conformance(|| Rig::start().into_case());
+    let result = run_harness_conformance(|| Rig::start().into_case(), Recording::launch);
     assert_eq!(result, Ok(()), "every case holds against real OpenCode");
 }
 
@@ -312,21 +312,27 @@ fn ac18_raw_opencode_pins_what_the_adapter_hides() {
 
 #[test]
 #[ignore = "needs opencode and tmux: HOLLER_TEST_OPENCODE=1 cargo test -p holler-adapter-opencode --test real_opencode_test -- --ignored"]
-fn ac19_serve_refuses_a_port_that_already_serves() {
+fn ac19_serve_command_starts_nothing_and_refuses_an_agent() {
     if !opted_in("ac19") {
         return;
     }
-    let mut rig = Rig::start();
-    rig.serve(0);
+    let rig = Rig::start();
     let p0 = rig.ports[0];
-    for session in [SESSIONS[1], SESSIONS[0]] {
-        let name = holler_pane::PaneName::parse(session).unwrap();
-        unavailable(
-            rig.harness.serve(&name, p0),
-            &format!("serve({session}, {p0}) again"),
-        );
-    }
-    assert!(!refused(p0), "the first server still serves");
+    let name = PaneName::parse(SESSIONS[0]).unwrap();
+    let argv = rig
+        .harness
+        .serve_command(&name, p0, &ServeSpec::default())
+        .unwrap();
+    assert!(!argv.as_slice().is_empty());
+    std::thread::sleep(Duration::from_millis(500));
+    assert!(refused(p0), "#802: serve_command started nothing on {p0}");
+    let key = AgentKey::parse("feature-implementor").unwrap();
+    let with = ServeSpec::default().with_agent(key);
+    let refusal = rig.harness.serve_command(&name, p0, &with);
+    assert!(
+        matches!(&refusal, Err(e) if e.code() == "agent-unsupported"),
+        "{refusal:?}"
+    );
 }
 
 #[test]
