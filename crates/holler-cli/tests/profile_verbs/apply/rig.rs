@@ -30,7 +30,7 @@ use holler_pane::tx_launch::TxOptions;
 use holler_pane::{
     Actor, Argv, Cursor, GridPos, HarnessPort, HerdrPane, HerdrPort, HerdrSpec, HostPort, Pane,
     PaneError, PaneEvent, PaneId, PaneName, PaneStore, Ports, Profile, ProfileName, ProfileSpec,
-    ProfileStore,
+    ProfileStore, ServeSpec,
 };
 use holler_pane_testkit::envelope::{check_envelope, Envelope};
 use holler_pane_testkit::fixture::{sample_pane, sample_profile};
@@ -642,8 +642,14 @@ impl HostPort for LinkedHost<'_> {
         self.rig.host.ensure_session(name, cwd)
     }
 
-    fn run(&self, name: &PaneName, argv: &Argv) -> Result<(), PaneError> {
-        self.rig.host.run(name, argv)
+    fn run(&self, name: &PaneName, cwd: &str, argv: &Argv) -> Result<(), PaneError> {
+        self.rig.host.run(name, cwd, argv)?;
+        // The host starts the server the argv describes (#802): the fake harness does it for
+        // the argv it built, and starts nothing for any other.
+        if let Some(started) = self.rig.harness.start_server(argv) {
+            started?;
+        }
+        Ok(())
     }
 
     fn stop_owned(&self, name: &PaneName) -> Result<(), PaneError> {
@@ -692,9 +698,20 @@ impl HookedHarness<'_> {
 }
 
 impl HarnessPort for HookedHarness<'_> {
-    fn serve(&self, name: &PaneName, port: u16) -> Result<u32, PaneError> {
-        let answer = self.rig.harness.serve(name, port);
-        self.fire(HarnessOp::Serve);
+    fn serve_command(
+        &self,
+        name: &PaneName,
+        port: u16,
+        spec: &ServeSpec,
+    ) -> Result<Argv, PaneError> {
+        let answer = self.rig.harness.serve_command(name, port, spec);
+        self.fire(HarnessOp::ServeCommand);
+        answer
+    }
+
+    fn verify_serving(&self, port: u16, spec: &ServeSpec) -> Result<(), PaneError> {
+        let answer = self.rig.harness.verify_serving(port, spec);
+        self.fire(HarnessOp::VerifyServing);
         answer
     }
 

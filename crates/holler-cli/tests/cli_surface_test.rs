@@ -1,4 +1,10 @@
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable, dead_code)] // #149
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unreachable,
+    dead_code
+)] // #149
 //! The CLI surface as a fixture (issue #155 §5).
 //!
 //! `tests/fixtures/cli-surface.txt` is the normative, machine-readable form
@@ -26,14 +32,19 @@ fn try_parse(line: &SurfaceLine) -> Result<(), String> {
     let mut argv: Vec<String> = vec!["holler".to_string()];
     argv.extend(line.leaf.split_whitespace().map(str::to_string));
     argv.extend(split_args(&line.args));
-    Cli::try_parse_from(&argv).map(|_| ()).map_err(|e| format!("{argv:?}: {e}"))
+    Cli::try_parse_from(&argv)
+        .map(|_| ())
+        .map_err(|e| format!("{argv:?}: {e}"))
 }
 
 /// Every leaf verb path clap knows (`hub token mint`, `roster`, …), built by
 /// walking the derived command tree. `help` is clap's own, not ours.
 fn clap_leaves() -> BTreeSet<String> {
     fn walk(cmd: &clap::Command, prefix: &str, out: &mut BTreeSet<String>) {
-        let mut subs = cmd.get_subcommands().filter(|c| c.get_name() != "help").peekable();
+        let mut subs = cmd
+            .get_subcommands()
+            .filter(|c| c.get_name() != "help")
+            .peekable();
         if subs.peek().is_none() {
             out.insert(prefix.trim().to_string());
             return;

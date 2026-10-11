@@ -208,7 +208,12 @@ pub struct SayOpts {
 pub enum SayReply {
     /// The turn ran and ended; `updates` is every `session/update` observed,
     /// in arrival order.
-    Result { message: Box<Message>, stop_reason: String, state: String, updates: Vec<SeenUpdate> },
+    Result {
+        message: Box<Message>,
+        stop_reason: String,
+        state: String,
+        updates: Vec<SeenUpdate>,
+    },
     /// The body answered with a JSON-RPC error (`-32009 session_busy`,
     /// `-32003 unknown_session`, …) — carried verbatim so the caller can map
     /// it to the spec's exact CLI wording.
@@ -290,7 +295,11 @@ impl LiveHandle {
         let (reply_tx, reply_rx) = oneshot::channel();
         if self
             .tx
-            .send(LiveCommand::Query { method: method.to_string(), params, reply: reply_tx })
+            .send(LiveCommand::Query {
+                method: method.to_string(),
+                params,
+                reply: reply_tx,
+            })
             .is_err()
         {
             return None;
@@ -312,8 +321,20 @@ impl LiveHandle {
         timeout: std::time::Duration,
     ) -> Option<SayReply> {
         let (reply_tx, reply_rx) = oneshot::channel();
-        let SayOpts { queue, replace, grant } = opts;
-        let cmd = LiveCommand::Say { request_id, session, message, queue, replace, grant, reply: reply_tx };
+        let SayOpts {
+            queue,
+            replace,
+            grant,
+        } = opts;
+        let cmd = LiveCommand::Say {
+            request_id,
+            session,
+            message,
+            queue,
+            replace,
+            grant,
+            reply: reply_tx,
+        };
         if self.tx.send(cmd).is_err() {
             return None;
         }
@@ -334,7 +355,11 @@ impl LiveHandle {
         timeout: std::time::Duration,
     ) -> Option<CancelReply> {
         let (reply_tx, reply_rx) = oneshot::channel();
-        let cmd = CancelCommand { request_id, session, reply: reply_tx };
+        let cmd = CancelCommand {
+            request_id,
+            session,
+            reply: reply_tx,
+        };
         if self.cancel_tx.send(cmd).is_err() {
             return None;
         }
@@ -344,14 +369,19 @@ impl LiveHandle {
     /// The last measured circuit RTT (issue #191's ack-timeout scale), if
     /// any has been recorded yet for this body.
     pub async fn last_rtt(&self) -> Option<std::time::Duration> {
-        self.state.lock().await.last_rtt_ms.map(std::time::Duration::from_millis)
+        self.state
+            .lock()
+            .await
+            .last_rtt_ms
+            .map(std::time::Duration::from_millis)
     }
 
     /// Record a freshly measured RTT for this body (`hub token ping`'s own
     /// measurement, or `interrupt`'s own cancel round trip) — the input to
     /// the *next* `interrupt`'s ack-timeout scale.
     pub async fn record_rtt(&self, rtt: std::time::Duration) {
-        self.state.lock().await.last_rtt_ms = Some(u64::try_from(rtt.as_millis()).unwrap_or(u64::MAX));
+        self.state.lock().await.last_rtt_ms =
+            Some(u64::try_from(rtt.as_millis()).unwrap_or(u64::MAX));
     }
 
     /// The last presence this body reported, if any yet.
@@ -369,7 +399,9 @@ impl LiveHandle {
         if self.tx.send(LiveCommand::Drop { reply: reply_tx }).is_err() {
             return false;
         }
-        tokio::time::timeout(std::time::Duration::from_secs(2), reply_rx).await.is_ok()
+        tokio::time::timeout(std::time::Duration::from_secs(2), reply_rx)
+            .await
+            .is_ok()
     }
 
     /// Issue #184's supersede-on-reauth: ask this (old) connection to notify
@@ -381,10 +413,16 @@ impl LiveHandle {
     /// its slot the moment the new connection registers).
     pub async fn supersede(&self) -> bool {
         let (reply_tx, reply_rx) = oneshot::channel();
-        if self.tx.send(LiveCommand::Supersede { reply: reply_tx }).is_err() {
+        if self
+            .tx
+            .send(LiveCommand::Supersede { reply: reply_tx })
+            .is_err()
+        {
             return false;
         }
-        tokio::time::timeout(std::time::Duration::from_secs(2), reply_rx).await.is_ok()
+        tokio::time::timeout(std::time::Duration::from_secs(2), reply_rx)
+            .await
+            .is_ok()
     }
 
     /// Issue #184's `hub token revoke`: ask this connection to close with WS
@@ -394,10 +432,16 @@ impl LiveHandle {
     /// either way — the token store side already took effect).
     pub async fn revoke(&self) -> bool {
         let (reply_tx, reply_rx) = oneshot::channel();
-        if self.tx.send(LiveCommand::Revoke { reply: reply_tx }).is_err() {
+        if self
+            .tx
+            .send(LiveCommand::Revoke { reply: reply_tx })
+            .is_err()
+        {
             return false;
         }
-        tokio::time::timeout(std::time::Duration::from_secs(2), reply_rx).await.is_ok()
+        tokio::time::timeout(std::time::Duration::from_secs(2), reply_rx)
+            .await
+            .is_ok()
     }
 }
 
@@ -500,7 +544,9 @@ impl Registry {
     ) {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         let (cancel_tx, cancel_rx) = tokio::sync::mpsc::unbounded_channel();
-        let seq = self.next_seq.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let seq = self
+            .next_seq
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let handle = LiveHandle {
             client_id: client_id.to_string(),
             hostname: hostname.to_string(),
@@ -513,7 +559,10 @@ impl Registry {
             state: Arc::new(Mutex::new(LiveState::default())),
             presence: Arc::new(Mutex::new(None)),
         };
-        self.inner.lock().await.insert(client_id.to_string(), handle);
+        self.inner
+            .lock()
+            .await
+            .insert(client_id.to_string(), handle);
         // A fresh connection supersedes any stale offline snapshot for this
         // exact `client_id` — see the `offline` field's own doc.
         self.offline.lock().await.remove(client_id);
@@ -548,7 +597,11 @@ impl Registry {
     pub async fn remove_if_current(&self, client_id: &str, seq: u64) {
         let mut inner = self.inner.lock().await;
         let is_current = inner.get(client_id).is_some_and(|h| h.seq == seq);
-        let removed = if is_current { inner.remove(client_id) } else { None };
+        let removed = if is_current {
+            inner.remove(client_id)
+        } else {
+            None
+        };
         drop(inner);
         self.snapshot_offline(client_id, removed).await;
     }
@@ -562,7 +615,10 @@ impl Registry {
         if let Some(handle) = removed {
             log_registry("remove", client_id, Some(&handle.hostname));
             if let Some(sessions) = handle.presence.lock().await.clone() {
-                self.offline.lock().await.insert(client_id.to_string(), (handle.hostname.clone(), sessions));
+                self.offline
+                    .lock()
+                    .await
+                    .insert(client_id.to_string(), (handle.hostname.clone(), sessions));
             }
         }
     }
@@ -661,7 +717,11 @@ impl Registry {
     /// actually proved it).
     pub async fn confirm_harness(&self, client_id: &str, harness: &str) {
         if let Some(h) = self.inner.lock().await.get(client_id) {
-            h.state.lock().await.harnesses_confirmed.insert(harness.to_string());
+            h.state
+                .lock()
+                .await
+                .harnesses_confirmed
+                .insert(harness.to_string());
         }
     }
 
@@ -691,12 +751,18 @@ impl Registry {
         for h in self.inner.lock().await.values() {
             let state = h.state.lock().await;
             for id in &state.harnesses_confirmed {
-                by_id.entry(id.clone()).or_default().insert(h.hostname.clone());
+                by_id
+                    .entry(id.clone())
+                    .or_default()
+                    .insert(h.hostname.clone());
             }
         }
         by_id
             .into_iter()
-            .map(|(id, bodies)| holler_proto::ConfirmedHarness { id, bodies: bodies.into_iter().collect() })
+            .map(|(id, bodies)| holler_proto::ConfirmedHarness {
+                id,
+                bodies: bodies.into_iter().collect(),
+            })
             .collect()
     }
 
@@ -718,7 +784,9 @@ impl Registry {
     /// `session/presence` overwrites the whole row anyway.
     pub async fn replace_session(&self, handle: &LiveHandle, updated: SessionAd) {
         let inner = self.inner.lock().await;
-        let Some(live) = inner.values().find(|h| h.token_id == handle.token_id) else { return };
+        let Some(live) = inner.values().find(|h| h.token_id == handle.token_id) else {
+            return;
+        };
         let mut presence = live.presence.lock().await;
         if let Some(sessions) = presence.as_mut() {
             if let Some(row) = sessions.iter_mut().find(|s| s.name == updated.name) {
@@ -748,7 +816,9 @@ impl Registry {
             if name.has_label() && handle.hostname != name.label() {
                 continue;
             }
-            let Some(sessions) = handle.presence.lock().await.clone() else { continue };
+            let Some(sessions) = handle.presence.lock().await.clone() else {
+                continue;
+            };
             for ad in sessions {
                 if ad.name == name.session() {
                     matches.push((handle.clone(), ad));
@@ -770,7 +840,10 @@ impl Registry {
             let (handle, ad) = matches.remove(0);
             return ResolveOutcome::Found(handle, Box::new(ad));
         }
-        let candidates = matches.into_iter().map(|(h, ad)| format!("{}/{}", h.hostname, ad.name)).collect();
+        let candidates = matches
+            .into_iter()
+            .map(|(h, ad)| format!("{}/{}", h.hostname, ad.name))
+            .collect();
         ResolveOutcome::Ambiguous(candidates)
     }
 
@@ -778,12 +851,16 @@ impl Registry {
     /// session matching `name` (the `not_connected` case — see the
     /// `offline` field's own doc).
     async fn matches_offline(&self, name: &holler_proto::RoutableName) -> bool {
-        self.offline.lock().await.values().any(|(hostname, sessions)| {
-            if name.has_label() && hostname != name.label() {
-                return false;
-            }
-            sessions.iter().any(|ad| ad.name == name.session())
-        })
+        self.offline
+            .lock()
+            .await
+            .values()
+            .any(|(hostname, sessions)| {
+                if name.has_label() && hostname != name.label() {
+                    return false;
+                }
+                sessions.iter().any(|ad| ad.name == name.session())
+            })
     }
 }
 
@@ -810,21 +887,43 @@ pub enum ResolveOutcome {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable)] // #185
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unreachable
+)] // #185
 mod tests {
     use super::*;
 
     #[tokio::test]
     async fn find_target_matches_by_token_id_client_id_or_label() {
         let registry = Registry::new();
-        let (mut rx, mut cancel_rx, _seq) = registry.insert("cli_1", "kiwi", "tok_1", "127.0.0.1:1").await;
+        let (mut rx, mut cancel_rx, _seq) = registry
+            .insert("cli_1", "kiwi", "tok_1", "127.0.0.1:1")
+            .await;
 
-        assert!(matches!(registry.find_target("tok_1").await, TargetLookup::Found(_)));
-        assert!(matches!(registry.find_target("cli_1").await, TargetLookup::Found(_)));
-        assert!(matches!(registry.find_target("kiwi").await, TargetLookup::Found(_)));
+        assert!(matches!(
+            registry.find_target("tok_1").await,
+            TargetLookup::Found(_)
+        ));
+        assert!(matches!(
+            registry.find_target("cli_1").await,
+            TargetLookup::Found(_)
+        ));
+        assert!(matches!(
+            registry.find_target("kiwi").await,
+            TargetLookup::Found(_)
+        ));
         // A `label/session` form resolves by its label segment.
-        assert!(matches!(registry.find_target("kiwi/alpha").await, TargetLookup::Found(_)));
-        assert!(matches!(registry.find_target("nobody").await, TargetLookup::NotConnected));
+        assert!(matches!(
+            registry.find_target("kiwi/alpha").await,
+            TargetLookup::Found(_)
+        ));
+        assert!(matches!(
+            registry.find_target("nobody").await,
+            TargetLookup::NotConnected
+        ));
 
         rx.close();
         cancel_rx.close();
@@ -837,12 +936,22 @@ mod tests {
     #[tokio::test]
     async fn ambiguous_target_is_reported_as_ambiguous() {
         let registry = Registry::new();
-        let (mut rx1, mut cancel_rx1, _seq) = registry.insert("cli_1", "kiwi", "tok_1", "127.0.0.1:1").await;
-        let (mut rx2, mut cancel_rx2, _seq) = registry.insert("cli_2", "kiwi", "tok_2", "127.0.0.1:1").await;
+        let (mut rx1, mut cancel_rx1, _seq) = registry
+            .insert("cli_1", "kiwi", "tok_1", "127.0.0.1:1")
+            .await;
+        let (mut rx2, mut cancel_rx2, _seq) = registry
+            .insert("cli_2", "kiwi", "tok_2", "127.0.0.1:1")
+            .await;
 
-        assert!(matches!(registry.find_target("kiwi").await, TargetLookup::Ambiguous));
+        assert!(matches!(
+            registry.find_target("kiwi").await,
+            TargetLookup::Ambiguous
+        ));
         // Each body's own token/client id still resolves unambiguously.
-        assert!(matches!(registry.find_target("tok_1").await, TargetLookup::Found(_)));
+        assert!(matches!(
+            registry.find_target("tok_1").await,
+            TargetLookup::Found(_)
+        ));
 
         rx1.close();
         rx2.close();
@@ -853,10 +962,20 @@ mod tests {
     #[tokio::test]
     async fn confirm_harness_and_advertised_are_independent() {
         let registry = Registry::new();
-        let (mut rx, mut cancel_rx, _seq) = registry.insert("cli_1", "kiwi", "tok_1", "127.0.0.1:1").await;
-        registry.set_harnesses_advertised("cli_1", vec!["opencode".to_string(), "claude".to_string()]).await;
-        assert_eq!(registry.harnesses_known().await, vec!["claude".to_string(), "opencode".to_string()]);
-        assert!(registry.harnesses_confirmed().await.is_empty(), "advertising alone confirms nothing");
+        let (mut rx, mut cancel_rx, _seq) = registry
+            .insert("cli_1", "kiwi", "tok_1", "127.0.0.1:1")
+            .await;
+        registry
+            .set_harnesses_advertised("cli_1", vec!["opencode".to_string(), "claude".to_string()])
+            .await;
+        assert_eq!(
+            registry.harnesses_known().await,
+            vec!["claude".to_string(), "opencode".to_string()]
+        );
+        assert!(
+            registry.harnesses_confirmed().await.is_empty(),
+            "advertising alone confirms nothing"
+        );
 
         registry.confirm_harness("cli_1", "opencode").await;
         let confirmed = registry.harnesses_confirmed().await;
@@ -871,8 +990,12 @@ mod tests {
     #[tokio::test]
     async fn session_count_sums_across_bodies() {
         let registry = Registry::new();
-        let (mut rx1, mut cancel_rx1, _seq) = registry.insert("cli_1", "kiwi", "tok_1", "127.0.0.1:1").await;
-        let (mut rx2, mut cancel_rx2, _seq) = registry.insert("cli_2", "mango", "tok_2", "127.0.0.1:1").await;
+        let (mut rx1, mut cancel_rx1, _seq) = registry
+            .insert("cli_1", "kiwi", "tok_1", "127.0.0.1:1")
+            .await;
+        let (mut rx2, mut cancel_rx2, _seq) = registry
+            .insert("cli_2", "mango", "tok_2", "127.0.0.1:1")
+            .await;
         registry.set_session_count("cli_1", 2).await;
         registry.set_session_count("cli_2", 3).await;
         assert_eq!(registry.total_sessions().await, 5);

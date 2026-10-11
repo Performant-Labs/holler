@@ -101,22 +101,10 @@ pub(crate) fn parse_rfc3339(s: &str) -> Option<u64> {
 /// Howard Hinnant's `days_from_civil` — whole days since 1970-01-01 for a
 /// proleptic Gregorian date. (The standard 6-line algorithm.)
 fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
-    let y = if month <= 2 {
-        year - 1
-    } else {
-        year
-    };
-    let era = if y >= 0 {
-        y
-    } else {
-        y - 399
-    } / 400;
+    let y = if month <= 2 { year - 1 } else { year };
+    let era = if y >= 0 { y } else { y - 399 } / 400;
     let yoe = y - era * 400;
-    let m = if month > 2 {
-        month - 3
-    } else {
-        month + 9
-    };
+    let m = if month > 2 { month - 3 } else { month + 9 };
     let doy = (153 * m + 2) / 5 + day - 1;
     let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
     era * 146097 + doe - 719468

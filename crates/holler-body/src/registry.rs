@@ -43,7 +43,13 @@ impl SessionRegistry {
             .into_iter()
             .map(|config| {
                 let name = config.name.clone();
-                (name, SessionEntry { config, state: SessionState::Idle })
+                (
+                    name,
+                    SessionEntry {
+                        config,
+                        state: SessionState::Idle,
+                    },
+                )
             })
             .collect();
         Self { sessions }
@@ -100,7 +106,12 @@ impl SessionRegistry {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable)] // #187
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unreachable
+)] // #187
 mod tests {
     use super::*;
     use crate::config::{Interrupt, SessionMode};

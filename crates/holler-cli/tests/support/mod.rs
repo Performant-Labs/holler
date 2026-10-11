@@ -1,4 +1,10 @@
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable, dead_code)] // #138
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unreachable,
+    dead_code
+)] // #138
 //! Shared test harness (story #138).
 //!
 //! One hand-written Rust module every integration test composes from: real
@@ -48,7 +54,10 @@ pub use onboard::{hub_pubkey, join, mint_token};
 // per-binary warning, not a dead API) — allowed rather than importing a
 // different subset per call site.
 #[allow(unused_imports)] // #142
-pub use cmds::{answer, body_status_json, hub_status_json, interrupt, roster_json, say, try_roster_json, wait_cmd};
+pub use cmds::{
+    answer, body_status_json, hub_status_json, interrupt, roster_json, say, try_roster_json,
+    wait_cmd,
+};
 // The session-hold rig (issues #442, #460), shared by two test files.
 pub mod hold_rig;
 // Raw WebSocket clients against a real hub (issue #455).
@@ -329,9 +338,7 @@ impl Hub {
                         Ok(v) => v,
                         Err(_) => continue,
                     };
-                    if v.get("event").and_then(|e| e.as_str()) == Some("listening")
-                        && !sent
-                    {
+                    if v.get("event").and_then(|e| e.as_str()) == Some("listening") && !sent {
                         let p = parse_port(&v);
                         sent = true;
                         // Signal the port; the drainer keeps running so the
@@ -363,7 +370,10 @@ impl Hub {
 
     /// Everything the hub has written to stderr so far, one line per event.
     pub fn log_text(&self) -> String {
-        self.log_lines.lock().map(|l| l.join("\n")).unwrap_or_default()
+        self.log_lines
+            .lock()
+            .map(|l| l.join("\n"))
+            .unwrap_or_default()
     }
 
     /// The WebSocket URL bodies dial to reach this hub.
@@ -672,9 +682,18 @@ impl Body {
     /// for a test to observe a state change within its own timeout budget).
     pub fn start_with_env(state: &StateDir, config: &Path, envs: &[(&str, &str)]) -> Body {
         let log_path = state.path().join("body.log");
-        let mut log = std::fs::OpenOptions::new().create(true).append(true).open(&log_path).expect("open body.log");
+        let mut log = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log_path)
+            .expect("open body.log");
         // One banner per start, so several starts in one state dir stay attributable.
-        writeln!(log, "--- body start {} ---", SystemTimeNanos::now() / 1_000_000).expect("write body.log banner");
+        writeln!(
+            log,
+            "--- body start {} ---",
+            SystemTimeNanos::now() / 1_000_000
+        )
+        .expect("write body.log banner");
         let mut cmd = holler_cmd(state);
         cmd.envs(envs.iter().copied());
         cmd.arg("body")

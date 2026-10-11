@@ -10,9 +10,9 @@
 use std::path::Path;
 
 use holler_proto::{
-    Caps, Code, HelloRole, ProtocolAnswer, SessionState as WireSessionState, Status,
-    StatusSession, Support, SupportKind, WireError, FEATURES, HARNESS_IDS,
-    PROTOCOL_MAX, PROTOCOL_MIN, PROTOCOL_VERSION,
+    Caps, Code, HelloRole, ProtocolAnswer, SessionState as WireSessionState, Status, StatusSession,
+    Support, SupportKind, WireError, FEATURES, HARNESS_IDS, PROTOCOL_MAX, PROTOCOL_MIN,
+    PROTOCOL_VERSION,
 };
 
 use crate::config::{SessionConfig, SessionMode};
@@ -40,7 +40,11 @@ fn classify(id: &str) -> Option<SupportKind> {
 }
 
 /// Build this body's `query/status` document.
-pub fn local_status(state_root: &Path, identity: Option<&BodyIdentity>, configs: &[SessionConfig]) -> Status {
+pub fn local_status(
+    state_root: &Path,
+    identity: Option<&BodyIdentity>,
+    configs: &[SessionConfig],
+) -> Status {
     let connected = crate::connection_state::read(state_root)
         .map(|c| matches!(c.state, crate::connection_state::ConnState::Connected))
         .unwrap_or(false);
@@ -83,7 +87,11 @@ pub fn local_status(state_root: &Path, identity: Option<&BodyIdentity>, configs:
 
 /// Build this body's `query/caps` document: the status doc plus a support
 /// answer for every known id in the v2 vocabulary (docs §5.2).
-pub fn local_caps(state_root: &Path, identity: Option<&BodyIdentity>, configs: &[SessionConfig]) -> Caps {
+pub fn local_caps(
+    state_root: &Path,
+    identity: Option<&BodyIdentity>,
+    configs: &[SessionConfig],
+) -> Caps {
     let status = local_status(state_root, identity, configs);
     let mut caps = std::collections::BTreeMap::new();
     for id in FEATURES.iter().chain(HARNESS_IDS.iter()) {
@@ -244,10 +252,18 @@ fn probe_one(endpoint: &str, path: &str) -> bool {
     const CONNECT_TIMEOUT: Duration = Duration::from_millis(800);
     const IO_TIMEOUT: Duration = Duration::from_millis(800);
 
-    let Some((host, port)) = parse_host_port(endpoint) else { return false };
-    let Ok(mut addrs) = (host.as_str(), port).to_socket_addrs() else { return false };
-    let Some(addr) = addrs.next() else { return false };
-    let Ok(mut stream) = TcpStream::connect_timeout(&addr, CONNECT_TIMEOUT) else { return false };
+    let Some((host, port)) = parse_host_port(endpoint) else {
+        return false;
+    };
+    let Ok(mut addrs) = (host.as_str(), port).to_socket_addrs() else {
+        return false;
+    };
+    let Some(addr) = addrs.next() else {
+        return false;
+    };
+    let Ok(mut stream) = TcpStream::connect_timeout(&addr, CONNECT_TIMEOUT) else {
+        return false;
+    };
     let _ = stream.set_read_timeout(Some(IO_TIMEOUT));
     let _ = stream.set_write_timeout(Some(IO_TIMEOUT));
 
@@ -258,7 +274,9 @@ fn probe_one(endpoint: &str, path: &str) -> bool {
     }
 
     let mut buf = [0u8; 128];
-    let Ok(n) = stream.read(&mut buf) else { return false };
+    let Ok(n) = stream.read(&mut buf) else {
+        return false;
+    };
     let text = String::from_utf8_lossy(&buf[..n]);
     // The status line's second whitespace-separated token is the numeric
     // code (`"HTTP/1.1 200 OK"` → `"200"`).
@@ -308,7 +326,12 @@ pub fn local_protocol(version: Option<u32>) -> ProtocolAnswer {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable)] // #185
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unreachable
+)] // #185
 mod tests {
     use super::*;
     use holler_proto::SessionName;
@@ -340,7 +363,11 @@ mod tests {
         let s = local_support("opencode", &configs).expect("known id");
         assert!(s.ok, "an absolute, existing command must be ok:true: {s:?}");
 
-        let configs = vec![spawn("alpha", "opencode", &["/definitely/not/a/real/binary-xyz"])];
+        let configs = vec![spawn(
+            "alpha",
+            "opencode",
+            &["/definitely/not/a/real/binary-xyz"],
+        )];
         let s = local_support("opencode", &configs).expect("known id");
         assert!(!s.ok, "a missing command must be ok:false: {s:?}");
     }

@@ -673,7 +673,9 @@ fn assert_populated(s: &Snap, a: &Inst) {
         "{}",
         s.ports
     );
-    assert!(s.state.contains_key("herdr/setup/wizard-ledger.toml") && s.state.contains_key("hub.info"));
+    assert!(
+        s.state.contains_key("herdr/setup/wizard-ledger.toml") && s.state.contains_key("hub.info")
+    );
     assert_eq!(s.roster.trim(), "alpha connected");
 }
 

@@ -1,8 +1,7 @@
 //! What the adapter says to tmux and how it reads tmux's answers (#641): one pure
 //! function per command line, the one escape for values the adapter did not write
-//! (Decision 13), the strict parsers for what tmux prints (W-15), the session-directory
-//! check of `run` (Decision 3, B-6), and the reading of a failed call's stderr
-//! (Decision 8).
+//! (Decision 13), the strict parsers for what tmux prints (W-15), and the reading of a
+//! failed call's stderr (Decision 8).
 //!
 //! **Targets** (Decision 10). `has-session` takes `-t =NAME`, a session target. Every
 //! other command that names the session takes `-t =NAME:`. A bare name is matched by
@@ -26,11 +25,7 @@ const MAX_PID: u32 = i32::MAX.unsigned_abs();
 /// What `run`'s `new-window -P` prints: the new pane's pid and its window's id.
 const NEW_WINDOW_FORMAT: &str = "#{pane_pid} #{window_id}";
 
-/// The session's directory: what `run` reads, and the `-c` its window starts in. tmux
-/// expands it once, against the target session, and not again (P6).
-const SESSION_PATH: &str = "#{session_path}";
-
-/// What `ps` lists for every pane.
+/// What `ps` lists for every pane (and what `run` reads to know that the session exists).
 const PS_FORMAT: &str = "#{pane_pid} #{pane_dead}";
 
 /// What `stop_owned` lists for every pane: also the window's tag (an untagged pane's
@@ -66,18 +61,14 @@ pub(crate) fn has_session(name: &PaneName) -> Vec<String> {
     strings(&["has-session", "-t", &format!("={name}")])
 }
 
-/// `run`'s read of the session's directory (Decision 3). With the colon a missing
-/// session fails, where `display-message` would print an empty line (PR6, PR7).
-pub(crate) fn session_dir(name: &PaneName) -> Vec<String> {
-    strings(&["list-panes", "-t", &window_target(name), "-F", SESSION_PATH])
-}
-
-/// `run`'s window: detached, printing its pid and id, in the session's directory, with
-/// the argv after `env --` and each element escaped (Decisions 3 and 13). `env --` keeps
-/// a one-element argv from reaching tmux as a single argument, which tmux would hand to
-/// a shell.
-pub(crate) fn new_window(name: &PaneName, argv: &Argv) -> Vec<String> {
+/// `run`'s window: detached, printing its pid and id, starting in `cwd` (escaped:
+/// tmux format-expands a start directory), with the argv after `env --` and each element
+/// escaped (Decisions 3 and 13; #802). The caller has checked that `cwd` is an absolute
+/// path to an existing directory. `env --` keeps a one-element argv from reaching tmux as
+/// a single argument, which tmux would hand to a shell.
+pub(crate) fn new_window(name: &PaneName, cwd: &str, argv: &Argv) -> Vec<String> {
     let target = window_target(name);
+    let cwd = escape_cwd(cwd);
     let mut args = strings(&[
         "new-window",
         "-d",
@@ -85,7 +76,7 @@ pub(crate) fn new_window(name: &PaneName, argv: &Argv) -> Vec<String> {
         "-F",
         NEW_WINDOW_FORMAT,
         "-c",
-        SESSION_PATH,
+        &cwd,
         "-t",
         &target,
         "--",
@@ -119,7 +110,8 @@ pub(crate) fn tag(window: Window, pid: Pid) -> Vec<String> {
 }
 
 /// `ps`'s listing: every pane of the session, its pid and whether it is dead
-/// (Decision 5).
+/// (Decision 5). `run` asks it first, to know that the session exists: with the colon a
+/// missing session fails, where `display-message` would print an empty line (PR6, PR7).
 pub(crate) fn panes(name: &PaneName) -> Vec<String> {
     strings(&[
         "list-panes",
@@ -164,9 +156,9 @@ pub(crate) fn escape(value: &str) -> String {
     }
 }
 
-/// A start directory for `new-session -c` (Decision 13). tmux format-expands it, and
-/// `#(...)` there runs a shell command (E3, E4), so every `#` is doubled (`##` is a
-/// literal `#`) before [`escape`].
+/// A start directory for `-c`, of `new-session` and of `run`'s `new-window` (Decision 13).
+/// tmux format-expands it, and `#(...)` there runs a shell command (E3, E4), so every `#`
+/// is doubled (`##` is a literal `#`) before [`escape`].
 pub(crate) fn escape_cwd(cwd: &str) -> String {
     escape(&cwd.replace('#', "##"))
 }
@@ -262,18 +254,6 @@ pub(crate) fn parse_listing(stdout: &str) -> Listing {
         }
     }
     listing
-}
-
-/// Whether `run`'s read printed, as its first line, an absolute path to an existing
-/// directory (Decision 3, B-6). tmux keeps a relative directory as given and resolves it
-/// again against each later client's cwd, and starts a program in `$HOME` when the
-/// directory is gone, both with exit 0 (PR1, PR5). The path is only checked, never put
-/// in a command.
-pub(crate) fn is_session_dir(stdout: &str) -> bool {
-    stdout.lines().next().is_some_and(|line| {
-        let path = Path::new(line);
-        path.is_absolute() && path.is_dir()
-    })
 }
 
 /// A failed tmux call, read from its stderr (Decision 8).

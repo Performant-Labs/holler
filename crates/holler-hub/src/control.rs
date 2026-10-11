@@ -49,7 +49,9 @@ impl std::fmt::Display for ControlError {
             ControlError::Io(e) => write!(f, "control socket I/O error: {e}"),
             ControlError::BadReply(s) => write!(f, "bad reply from the hub: {s}"),
             ControlError::Refused(e) => write!(f, "{}", e.message),
-            ControlError::RemotePolicyRefused(m) | ControlError::RemoteUnavailable(m) => write!(f, "{m}"),
+            ControlError::RemotePolicyRefused(m) | ControlError::RemoteUnavailable(m) => {
+                write!(f, "{m}")
+            }
         }
     }
 }
@@ -71,7 +73,11 @@ pub struct ControlCall {
 
 impl ControlCall {
     pub fn status() -> Self {
-        Self { method: "control/status", params: None, timeout: CLIENT_TIMEOUT }
+        Self {
+            method: "control/status",
+            params: None,
+            timeout: CLIENT_TIMEOUT,
+        }
     }
     pub fn roster(all: bool, prefix: Option<&str>) -> Self {
         Self {
@@ -80,7 +86,13 @@ impl ControlCall {
             timeout: CLIENT_TIMEOUT,
         }
     }
-    pub fn say_with(session: &str, text: &str, queue: bool, grant: Option<&str>, timeout: std::time::Duration) -> Self {
+    pub fn say_with(
+        session: &str,
+        text: &str,
+        queue: bool,
+        grant: Option<&str>,
+        timeout: std::time::Duration,
+    ) -> Self {
         Self {
             method: "control/say",
             params: Some(serde_json::json!({
@@ -112,7 +124,13 @@ impl ControlCall {
             timeout: CLIENT_TIMEOUT,
         }
     }
-    pub fn wait(sessions: Option<&str>, prefix: Option<&str>, until: Option<&str>, after: Option<&str>, timeout: std::time::Duration) -> Self {
+    pub fn wait(
+        sessions: Option<&str>,
+        prefix: Option<&str>,
+        until: Option<&str>,
+        after: Option<&str>,
+        timeout: std::time::Duration,
+    ) -> Self {
         Self {
             method: "control/wait",
             params: Some(serde_json::json!({
@@ -135,7 +153,9 @@ impl ControlCall {
     pub fn query_remote(target: &str, method: &str, params: Option<serde_json::Value>) -> Self {
         Self {
             method: "control/query_remote",
-            params: Some(serde_json::json!({ "target": target, "method": method, "params": params })),
+            params: Some(
+                serde_json::json!({ "target": target, "method": method, "params": params }),
+            ),
             timeout: CLIENT_TIMEOUT,
         }
     }
@@ -195,7 +215,10 @@ pub fn support(feature: &str) -> Result<serde_json::Value, ControlError> {
 /// (`query/status`|`caps`|`support`|`protocol`) from the live hub's own
 /// state, with `params` as that method's own params (e.g.
 /// `query/support`'s `{feature}`).
-pub fn query_local(method: &str, params: Option<serde_json::Value>) -> Result<serde_json::Value, ControlError> {
+pub fn query_local(
+    method: &str,
+    params: Option<serde_json::Value>,
+) -> Result<serde_json::Value, ControlError> {
     exchange_call("b-query-local", &ControlCall::query_local(method, params))
 }
 
@@ -209,7 +232,10 @@ pub fn query_remote(
     method: &str,
     params: Option<serde_json::Value>,
 ) -> Result<serde_json::Value, ControlError> {
-    exchange_call("b-query-remote", &ControlCall::query_remote(target, method, params))
+    exchange_call(
+        "b-query-remote",
+        &ControlCall::query_remote(target, method, params),
+    )
 }
 
 /// `say SESSION TEXT` (issue #190): ask the live hub to resolve `session`,
@@ -218,7 +244,12 @@ pub fn query_remote(
 /// `--timeout` (default 600s) — this call waits up to `timeout` **plus** a
 /// small fixed margin for the control-socket round trip itself, since the
 /// hub's own exchange already applies `timeout` to the live socket wait.
-pub fn say(session: &str, text: &str, queue: bool, timeout: std::time::Duration) -> Result<serde_json::Value, ControlError> {
+pub fn say(
+    session: &str,
+    text: &str,
+    queue: bool,
+    timeout: std::time::Duration,
+) -> Result<serde_json::Value, ControlError> {
     say_with(session, text, queue, None, timeout)
 }
 
@@ -230,7 +261,10 @@ pub fn say_with(
     grant: Option<&str>,
     timeout: std::time::Duration,
 ) -> Result<serde_json::Value, ControlError> {
-    exchange_call("b-say", &ControlCall::say_with(session, text, queue, grant, timeout))
+    exchange_call(
+        "b-say",
+        &ControlCall::say_with(session, text, queue, grant, timeout),
+    )
 }
 
 /// `interrupt SESSION [TEXT]` (issue #191): ask the live hub to cancel
@@ -270,10 +304,20 @@ pub fn roster(all: bool, prefix: Option<&str>) -> Result<serde_json::Value, Cont
 /// race a process-wide env var by mutating it, and paying one Unix-socket
 /// round trip per poll instead of one `holler roster --json` subprocess per
 /// poll is what makes a sub-100ms propagation window observable at all.
-pub fn roster_at(state_root: &std::path::Path, all: bool, prefix: Option<&str>) -> Result<serde_json::Value, ControlError> {
+pub fn roster_at(
+    state_root: &std::path::Path,
+    all: bool,
+    prefix: Option<&str>,
+) -> Result<serde_json::Value, ControlError> {
     let path = control_sock_path(&HubState::from_root(state_root.to_path_buf()));
     let params = serde_json::json!({ "all": all, "prefix": prefix });
-    send_over(&path, "b-roster", "control/roster", Some(params), CLIENT_TIMEOUT)
+    send_over(
+        &path,
+        "b-roster",
+        "control/roster",
+        Some(params),
+        CLIENT_TIMEOUT,
+    )
 }
 
 /// Issue #192's `control/test_drop` test hook: ask the hub whose state dir
@@ -285,10 +329,19 @@ pub fn roster_at(state_root: &std::path::Path, all: bool, prefix: Option<&str>) 
 /// process-wide variable. Only answered when the target hub process has
 /// `HOLLER_TEST_HOOKS=1` set; every other hub answers
 /// `-32601 method_not_found`, indistinguishable from an unknown method.
-pub fn test_drop_at(state_root: &std::path::Path, token: &str) -> Result<serde_json::Value, ControlError> {
+pub fn test_drop_at(
+    state_root: &std::path::Path,
+    token: &str,
+) -> Result<serde_json::Value, ControlError> {
     let path = control_sock_path(&HubState::from_root(state_root.to_path_buf()));
     let params = serde_json::json!({ "token": token });
-    send_over(&path, "b-test-drop", "control/test_drop", Some(params), CLIENT_TIMEOUT)
+    send_over(
+        &path,
+        "b-test-drop",
+        "control/test_drop",
+        Some(params),
+        CLIENT_TIMEOUT,
+    )
 }
 
 /// `holler wait SESSION[,SESSION…] [--prefix P] [--until STATES] [--after
@@ -307,7 +360,10 @@ pub fn wait(
     after: Option<&str>,
     timeout: std::time::Duration,
 ) -> Result<serde_json::Value, ControlError> {
-    exchange_call("b-wait", &ControlCall::wait(sessions, prefix, until, after, timeout))
+    exchange_call(
+        "b-wait",
+        &ControlCall::wait(sessions, prefix, until, after, timeout),
+    )
 }
 
 /// `holler hold SESSION [--reason TEXT]` (issue #442): ask the live hub to
@@ -322,22 +378,45 @@ pub fn hold(session: &str, reason: Option<&str>) -> Result<serde_json::Value, Co
 /// `holler release SESSION` (issue #442): lift a hold. Idempotent. Returns
 /// `{session, hold: false, was_held, persisted}`.
 pub fn release(session: &str) -> Result<serde_json::Value, ControlError> {
-    exchange("b-release", "control/release", Some(serde_json::json!({ "session": session })))
+    exchange(
+        "b-release",
+        "control/release",
+        Some(serde_json::json!({ "session": session })),
+    )
 }
 
 /// [`hold`] against an explicit state root rather than the ambient
 /// `HOLLER_STATE_DIR` (the same reason [`roster_at`] takes one: a test that
 /// drives several hubs from one process must not race a process-wide env var).
-pub fn hold_at(state_root: &std::path::Path, session: &str, reason: Option<&str>) -> Result<serde_json::Value, ControlError> {
+pub fn hold_at(
+    state_root: &std::path::Path,
+    session: &str,
+    reason: Option<&str>,
+) -> Result<serde_json::Value, ControlError> {
     let path = control_sock_path(&HubState::from_root(state_root.to_path_buf()));
     let params = serde_json::json!({ "session": session, "reason": reason });
-    send_over(&path, "b-hold", "control/hold", Some(params), CLIENT_TIMEOUT)
+    send_over(
+        &path,
+        "b-hold",
+        "control/hold",
+        Some(params),
+        CLIENT_TIMEOUT,
+    )
 }
 
 /// [`release`] against an explicit state root (see [`hold_at`]).
-pub fn release_at(state_root: &std::path::Path, session: &str) -> Result<serde_json::Value, ControlError> {
+pub fn release_at(
+    state_root: &std::path::Path,
+    session: &str,
+) -> Result<serde_json::Value, ControlError> {
     let path = control_sock_path(&HubState::from_root(state_root.to_path_buf()));
-    send_over(&path, "b-release", "control/release", Some(serde_json::json!({ "session": session })), CLIENT_TIMEOUT)
+    send_over(
+        &path,
+        "b-release",
+        "control/release",
+        Some(serde_json::json!({ "session": session })),
+        CLIENT_TIMEOUT,
+    )
 }
 
 /// [`say`] against an explicit state root (see [`hold_at`]): the concurrency
@@ -369,15 +448,28 @@ pub fn say_with_at(
         "grant": grant,
         "timeout_ms": u64::try_from(timeout.as_millis()).unwrap_or(u64::MAX),
     });
-    send_over(&path, "b-say", "control/say", Some(params), timeout + std::time::Duration::from_secs(5))
+    send_over(
+        &path,
+        "b-say",
+        "control/say",
+        Some(params),
+        timeout + std::time::Duration::from_secs(5),
+    )
 }
 
 /// `holler release SESSION --once [--ttl DURATION]` (issue #460): mint a
 /// one-time release grant for exactly one prompt to `session`. `ttl` of `None`
 /// is the hub's default (60 s). Returns `{session, grant, ttl_ms,
 /// default_held, operator_held}`.
-pub fn release_once(session: &str, ttl: Option<std::time::Duration>) -> Result<serde_json::Value, ControlError> {
-    exchange("b-release", "control/release", Some(release_once_params(session, ttl)))
+pub fn release_once(
+    session: &str,
+    ttl: Option<std::time::Duration>,
+) -> Result<serde_json::Value, ControlError> {
+    exchange(
+        "b-release",
+        "control/release",
+        Some(release_once_params(session, ttl)),
+    )
 }
 
 /// [`release_once`] against an explicit state root (see [`hold_at`]).
@@ -387,7 +479,13 @@ pub fn release_once_at(
     ttl: Option<std::time::Duration>,
 ) -> Result<serde_json::Value, ControlError> {
     let path = control_sock_path(&HubState::from_root(state_root.to_path_buf()));
-    send_over(&path, "b-release", "control/release", Some(release_once_params(session, ttl)), CLIENT_TIMEOUT)
+    send_over(
+        &path,
+        "b-release",
+        "control/release",
+        Some(release_once_params(session, ttl)),
+        CLIENT_TIMEOUT,
+    )
 }
 
 fn release_once_params(session: &str, ttl: Option<std::time::Duration>) -> serde_json::Value {
@@ -396,10 +494,20 @@ fn release_once_params(session: &str, ttl: Option<std::time::Duration>) -> serde
 }
 
 /// [`interrupt`] against an explicit state root (see [`hold_at`]).
-pub fn interrupt_at(state_root: &std::path::Path, session: &str, text: Option<&str>) -> Result<serde_json::Value, ControlError> {
+pub fn interrupt_at(
+    state_root: &std::path::Path,
+    session: &str,
+    text: Option<&str>,
+) -> Result<serde_json::Value, ControlError> {
     let path = control_sock_path(&HubState::from_root(state_root.to_path_buf()));
     let params = serde_json::json!({ "session": session, "text": text });
-    send_over(&path, "b-interrupt", "control/interrupt", Some(params), std::time::Duration::from_secs(60 + 600 + 5))
+    send_over(
+        &path,
+        "b-interrupt",
+        "control/interrupt",
+        Some(params),
+        std::time::Duration::from_secs(60 + 600 + 5),
+    )
 }
 
 /// `hub query TARGET METHOD` against an explicit state root, with `method`
@@ -413,7 +521,13 @@ pub fn query_remote_at(
 ) -> Result<serde_json::Value, ControlError> {
     let path = control_sock_path(&HubState::from_root(state_root.to_path_buf()));
     let outer = serde_json::json!({ "target": target, "method": method, "params": params });
-    send_over(&path, "b-query-remote", "control/query_remote", Some(outer), CLIENT_TIMEOUT)
+    send_over(
+        &path,
+        "b-query-remote",
+        "control/query_remote",
+        Some(outer),
+        CLIENT_TIMEOUT,
+    )
 }
 
 /// Send one `method`/`params` request over the control socket and return its
@@ -421,7 +535,11 @@ pub fn query_remote_at(
 /// `token_ping`, …). `id_literal` is a fixed, well-formed `b-` id (each
 /// caller's own; the control socket does not correlate concurrent calls, so a
 /// literal per call site is enough).
-fn exchange(id_literal: &str, method: &str, params: Option<serde_json::Value>) -> Result<serde_json::Value, ControlError> {
+fn exchange(
+    id_literal: &str,
+    method: &str,
+    params: Option<serde_json::Value>,
+) -> Result<serde_json::Value, ControlError> {
     exchange_with_timeout(id_literal, method, params, CLIENT_TIMEOUT)
 }
 
@@ -490,14 +608,21 @@ fn send_over(
     timeout: std::time::Duration,
 ) -> Result<serde_json::Value, ControlError> {
     let stream = UnixStream::connect(path).map_err(|_| ControlError::NoLiveHub)?;
-    stream.set_read_timeout(Some(timeout)).map_err(ControlError::Io)?;
+    stream
+        .set_read_timeout(Some(timeout))
+        .map_err(ControlError::Io)?;
 
     let cid = CorrelationId::parse(id_literal).expect("a well-formed literal control id");
     let req = holler_proto::Envelope::request(&cid, method, params);
-    let bytes = format!("{}\n", holler_proto::encode(&req).expect("encode the control request"));
+    let bytes = format!(
+        "{}\n",
+        holler_proto::encode(&req).expect("encode the control request")
+    );
 
     let mut stream = stream;
-    stream.write_all(bytes.as_bytes()).map_err(ControlError::Io)?;
+    stream
+        .write_all(bytes.as_bytes())
+        .map_err(ControlError::Io)?;
     stream.flush().map_err(ControlError::Io)?;
 
     let mut line = String::new();
@@ -505,7 +630,9 @@ fn send_over(
         .read_line(&mut line)
         .map_err(ControlError::Io)?;
     if n == 0 {
-        return Err(ControlError::BadReply("the hub closed the socket before replying".into()));
+        return Err(ControlError::BadReply(
+            "the hub closed the socket before replying".into(),
+        ));
     }
 
     let env = holler_proto::decode(&line).map_err(|e| ControlError::BadReply(e.to_string()))?;

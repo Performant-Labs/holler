@@ -83,7 +83,12 @@ pub fn clear(state_root: &Path) -> std::io::Result<()> {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable)] // #182
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unreachable
+)] // #182
 mod tests {
     use super::*;
 

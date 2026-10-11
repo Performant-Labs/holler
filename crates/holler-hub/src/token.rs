@@ -199,17 +199,29 @@ fn parse_state(s: &str) -> TokenState {
 /// the clear.
 fn record_to_value(r: &Record) -> serde_json::Value {
     let mut m = serde_json::Map::new();
-    m.insert("token_id".into(), serde_json::Value::String(r.token_id.clone()));
+    m.insert(
+        "token_id".into(),
+        serde_json::Value::String(r.token_id.clone()),
+    );
     m.insert("label".into(), serde_json::Value::String(r.label.clone()));
     m.insert("created".into(), serde_json::Value::from(r.created));
     m.insert("expires".into(), serde_json::Value::from(r.expires));
-    m.insert("state".into(), serde_json::Value::String(state_str(r.state).into()));
-    m.insert("secret_hmac".into(), serde_json::Value::String(r.secret_hmac.clone()));
+    m.insert(
+        "state".into(),
+        serde_json::Value::String(state_str(r.state).into()),
+    );
+    m.insert(
+        "secret_hmac".into(),
+        serde_json::Value::String(r.secret_hmac.clone()),
+    );
     if let Some(k) = &r.body_pubkey {
         m.insert("body_pubkey".into(), serde_json::Value::String(k.clone()));
     }
     if let Some(k) = &r.body_x25519_pubkey {
-        m.insert("body_x25519_pubkey".into(), serde_json::Value::String(k.clone()));
+        m.insert(
+            "body_x25519_pubkey".into(),
+            serde_json::Value::String(k.clone()),
+        );
     }
     if let Some(c) = &r.client_id {
         m.insert("client_id".into(), serde_json::Value::String(c.clone()));
@@ -234,7 +246,9 @@ fn record_from_value(v: &serde_json::Value) -> Option<Record> {
         label: get("label")?,
         created: get_u64("created")?,
         expires: get_u64("expires")?,
-        state: get("state").map(|s| parse_state(&s)).unwrap_or(TokenState::Unused),
+        state: get("state")
+            .map(|s| parse_state(&s))
+            .unwrap_or(TokenState::Unused),
         secret_hmac: get("secret_hmac")?,
         body_pubkey: get("body_pubkey"),
         body_x25519_pubkey: get("body_x25519_pubkey"),
@@ -262,12 +276,14 @@ impl Store {
         }
         let raw = std::fs::read_to_string(path)
             .map_err(|e| TokenError::new(format!("cannot read tokens store: {e}")))?;
-        let values: Vec<serde_json::Value> =
-            serde_json::from_str(&raw).map_err(|e| TokenError::new(format!("tokens store is corrupted: {e}")))?;
+        let values: Vec<serde_json::Value> = serde_json::from_str(&raw)
+            .map_err(|e| TokenError::new(format!("tokens store is corrupted: {e}")))?;
         let records: Vec<Record> = values.iter().filter_map(record_from_value).collect();
         let mut label_to_key = HashMap::new();
         for r in &records {
-            label_to_key.entry(r.label.clone()).or_insert_with(|| r.token_id.clone());
+            label_to_key
+                .entry(r.label.clone())
+                .or_insert_with(|| r.token_id.clone());
         }
         Ok(Store {
             records,
@@ -351,7 +367,10 @@ fn acquire_lock_retrying(state: &HubState) -> Result<StoreLock, TokenError> {
     loop {
         match acquire_lock(state) {
             Ok(lock) => return Ok(lock),
-            Err(e) if e.message.contains("holds the token lock") && std::time::Instant::now() < deadline => {
+            Err(e)
+                if e.message.contains("holds the token lock")
+                    && std::time::Instant::now() < deadline =>
+            {
                 std::thread::sleep(std::time::Duration::from_millis(delay_ms));
                 delay_ms = (delay_ms * 2).min(50);
             }
@@ -422,8 +441,7 @@ fn valid_label(label: &str) -> bool {
     if !(first.is_ascii_alphanumeric() && first.is_ascii_lowercase() || first.is_ascii_digit()) {
         return false;
     }
-    chars
-        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+    chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
 }
 
 /// Resolve the effective pepper: env `HOLLER_PEPPER` (hex) wins; else the
@@ -436,18 +454,14 @@ fn valid_label(label: &str) -> bool {
 fn effective_pepper(state: &HubState) -> Result<Vec<u8>, TokenError> {
     let key = state.root.to_string_lossy().to_string();
     let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
-    let cache = cache
-        .lock()
-        .unwrap_or_else(|p| p.into_inner());
+    let cache = cache.lock().unwrap_or_else(|p| p.into_inner());
     if let Some(p) = cache.get(&key) {
         return Ok(p.clone());
     }
     let pepper = resolve_pepper_uncached(state)?;
     drop(cache);
     let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
-    let mut cache = cache
-        .lock()
-        .unwrap_or_else(|p| p.into_inner());
+    let mut cache = cache.lock().unwrap_or_else(|p| p.into_inner());
     cache.insert(key, pepper.clone());
     Ok(pepper)
 }
@@ -461,12 +475,13 @@ static CACHE: OnceLock<PepperCache> = OnceLock::new();
 
 fn resolve_pepper_uncached(state: &HubState) -> Result<Vec<u8>, TokenError> {
     if let Ok(hex_str) = std::env::var("HOLLER_PEPPER") {
-        let bytes = hex::decode(hex_str)
-            .map_err(|_| TokenError::new("HOLLER_PEPPER is not valid hex"))?;
+        let bytes =
+            hex::decode(hex_str).map_err(|_| TokenError::new("HOLLER_PEPPER is not valid hex"))?;
         return Ok(bytes);
     }
     let path = pepper_path(state);
-    let read_failed = |e: std::io::Error| TokenError::new(format!("cannot read pepper {}: {e}", path.display()));
+    let read_failed =
+        |e: std::io::Error| TokenError::new(format!("cannot read pepper {}: {e}", path.display()));
     match std::fs::read(&path) {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
         read => return read.map_err(read_failed),
@@ -477,8 +492,15 @@ fn resolve_pepper_uncached(state: &HubState) -> Result<Vec<u8>, TokenError> {
     let bytes = random_bytes()?;
     match create_atomic(&path, &bytes, 0o600) {
         Ok(()) => emit_pepper_generated(),
-        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => return std::fs::read(&path).map_err(read_failed),
-        Err(e) => return Err(TokenError::new(format!("cannot create pepper {}: {e}", path.display()))),
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            return std::fs::read(&path).map_err(read_failed)
+        }
+        Err(e) => {
+            return Err(TokenError::new(format!(
+                "cannot create pepper {}: {e}",
+                path.display()
+            )))
+        }
     }
     Ok(bytes)
 }
@@ -548,7 +570,9 @@ pub fn mint(label: &str, ttl_secs: u64, state: &HubState) -> Result<Minted, Toke
         last_seen: None,
     };
     store.records.push(record.clone());
-    store.label_to_key.insert(label.to_string(), token_id.clone());
+    store
+        .label_to_key
+        .insert(label.to_string(), token_id.clone());
     store.save(&tokens_path(state))?;
 
     Ok(Minted { record, secret })
@@ -681,18 +705,26 @@ pub fn bound_record(token_id: &str, state: &HubState) -> Result<Record, LookupEr
     let _lock = acquire_lock_retrying(state).map_err(LookupError::HubFault)?;
     let store = Store::load(&tokens_path(state)).map_err(LookupError::HubFault)?;
     let Some(record) = store.records.iter().find(|r| r.token_id == token_id) else {
-        return Err(LookupError::Credential(TokenError::new(format!("no such token {token_id}"))));
+        return Err(LookupError::Credential(TokenError::new(format!(
+            "no such token {token_id}"
+        ))));
     };
     if record.state != TokenState::Bound {
-        return Err(LookupError::Credential(TokenError::new(format!("token {token_id} is not bound"))));
+        return Err(LookupError::Credential(TokenError::new(format!(
+            "token {token_id} is not bound"
+        ))));
     }
     if record.body_pubkey.is_none() {
-        return Err(LookupError::Credential(TokenError::new(format!("token {token_id} has no public key on record"))));
+        return Err(LookupError::Credential(TokenError::new(format!(
+            "token {token_id} has no public key on record"
+        ))));
     }
     // Issue #338: the Noise XK handshake needs the body's X25519 key (#337); a
     // bound record without one (corrupt or hand-edited data) fails closed here.
     if record.body_x25519_pubkey.is_none() {
-        return Err(LookupError::Credential(TokenError::new(format!("token {token_id} has no X25519 public key on record"))));
+        return Err(LookupError::Credential(TokenError::new(format!(
+            "token {token_id} has no X25519 public key on record"
+        ))));
     }
     Ok(record.clone())
 }
@@ -739,7 +771,11 @@ pub fn touch_last_seen(token_id: &str, state: &HubState) -> Result<(), TokenErro
 
 /// `mint` on the blocking pool (the spec: "all locked operations run in
 /// `tokio::task::spawn_blocking` when called from async code").
-pub async fn mint_async(label: &str, ttl_secs: u64, state: &HubState) -> Result<Minted, TokenError> {
+pub async fn mint_async(
+    label: &str,
+    ttl_secs: u64,
+    state: &HubState,
+) -> Result<Minted, TokenError> {
     let (label, state) = (label.to_string(), state.clone());
     tokio::task::spawn_blocking(move || mint(&label, ttl_secs, &state))
         .await
@@ -754,12 +790,24 @@ pub async fn redeem_async(
     body_x25519_pubkey: &str,
     state: &HubState,
 ) -> Result<String, RedeemError> {
-    let (secret, hostname, body_pubkey, body_x25519_pubkey) =
-        (secret.to_string(), hostname.to_string(), body_pubkey.to_string(), body_x25519_pubkey.to_string());
+    let (secret, hostname, body_pubkey, body_x25519_pubkey) = (
+        secret.to_string(),
+        hostname.to_string(),
+        body_pubkey.to_string(),
+        body_x25519_pubkey.to_string(),
+    );
     let state = state.clone();
-    tokio::task::spawn_blocking(move || redeem(&secret, &hostname, &body_pubkey, &body_x25519_pubkey, &state))
-        .await
-        .unwrap_or(Err(RedeemError::NotFound))
+    tokio::task::spawn_blocking(move || {
+        redeem(
+            &secret,
+            &hostname,
+            &body_pubkey,
+            &body_x25519_pubkey,
+            &state,
+        )
+    })
+    .await
+    .unwrap_or(Err(RedeemError::NotFound))
 }
 
 /// `touch_last_seen` on the blocking pool (issue #419).
@@ -788,7 +836,10 @@ pub async fn bound_record_async(token_id: &str, state: &HubState) -> Result<Reco
         // delay on the *blocking-pool* thread only, behind issue #192's
         // `HOLLER_TEST_HOOKS=1` flag (never set on a production hub).
         if std::env::var("HOLLER_TEST_HOOKS").as_deref() == Ok("1") {
-            if let Some(ms) = std::env::var("HOLLER_TEST_TOKEN_STORE_DELAY_MS").ok().and_then(|s| s.parse().ok()) {
+            if let Some(ms) = std::env::var("HOLLER_TEST_TOKEN_STORE_DELAY_MS")
+                .ok()
+                .and_then(|s| s.parse().ok())
+            {
                 std::thread::sleep(std::time::Duration::from_millis(ms));
             }
         }

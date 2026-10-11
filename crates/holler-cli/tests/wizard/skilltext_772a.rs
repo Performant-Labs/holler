@@ -115,10 +115,7 @@ fn the_checklist_shows_skipped_stages_with_a_distinct_symbol() {
         "the legend defines the skipped symbol"
     );
     for sym in ["✅", "🔄", "⬜", "❌"] {
-        assert!(
-            !"⏭️".contains(sym),
-            "the skipped symbol differs from {sym}"
-        );
+        assert!(!"⏭️".contains(sym), "the skipped symbol differs from {sym}");
     }
 }
 

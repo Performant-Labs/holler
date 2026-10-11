@@ -17,10 +17,18 @@ pub struct InterruptResult {
 }
 
 fn ok(message: String) -> InterruptResult {
-    InterruptResult { message, to_stderr: false, exit_code: 0 }
+    InterruptResult {
+        message,
+        to_stderr: false,
+        exit_code: 0,
+    }
 }
 fn err(message: String, exit_code: i32) -> InterruptResult {
-    InterruptResult { message, to_stderr: true, exit_code }
+    InterruptResult {
+        message,
+        to_stderr: true,
+        exit_code,
+    }
 }
 
 /// `holler interrupt SESSION [TEXT]` (issue #191): cancel `SESSION`'s
@@ -58,9 +66,10 @@ pub fn run(interrupt: &Interrupt, json: bool) -> InterruptResult {
                 None => ok(format!("interrupted {session}")),
             }
         }
-        Err(holler_hub::control::ControlError::NoLiveHub) => {
-            err(format!("no live holler hub reachable at {}", state_root.display()), 1)
-        }
+        Err(holler_hub::control::ControlError::NoLiveHub) => err(
+            format!("no live holler hub reachable at {}", state_root.display()),
+            1,
+        ),
         Err(holler_hub::control::ControlError::RemotePolicyRefused(msg)) => err(msg, 3),
         Err(holler_hub::control::ControlError::Refused(e)) => {
             // The pane arm comes first (story #646): the redirect passes
@@ -74,9 +83,14 @@ pub fn run(interrupt: &Interrupt, json: bool) -> InterruptResult {
             }
             if crate::hold_cmd::is_held(&e) {
                 let (message, to_stderr) = crate::hold_cmd::held_refusal(&session, &e, json);
-                return InterruptResult { message, to_stderr, exit_code: crate::hold_cmd::HELD_EXIT_CODE };
+                return InterruptResult {
+                    message,
+                    to_stderr,
+                    exit_code: crate::hold_cmd::HELD_EXIT_CODE,
+                };
             }
-            let is_ambiguous = e.data.as_ref().and_then(|d| d.reason.as_deref()) == Some("ambiguous");
+            let is_ambiguous =
+                e.data.as_ref().and_then(|d| d.reason.as_deref()) == Some("ambiguous");
             err(e.message.clone(), if is_ambiguous { 2 } else { 1 })
         }
         Err(e) => err(e.to_string(), 1),

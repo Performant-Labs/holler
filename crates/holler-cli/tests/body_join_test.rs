@@ -1,4 +1,10 @@
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable, dead_code)] // #176
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unreachable,
+    dead_code
+)] // #176
 //! `holler body join` / `body detach` / `body status` e2e (story #176).
 //!
 //! Each test drives the **real** `holler` binary against an isolated
@@ -56,10 +62,22 @@ fn join_exits_0_and_does_not_echo_the_secret() {
 
     let (code, stdout, stderr) = run(
         &state,
-        &["body", "join", "--server", &hub.ws_url(), "--token", &format!("{token_id}:{secret}"), "--hub-key", &hub_key],
+        &[
+            "body",
+            "join",
+            "--server",
+            &hub.ws_url(),
+            "--token",
+            &format!("{token_id}:{secret}"),
+            "--hub-key",
+            &hub_key,
+        ],
     );
     assert_eq!(code, 0, "body join must exit 0; stderr: {stderr}");
-    assert!(!stdout.contains(&secret), "the join success line must not print the secret; got: {stdout}");
+    assert!(
+        !stdout.contains(&secret),
+        "the join success line must not print the secret; got: {stdout}"
+    );
 
     hub.stop(Duration::from_secs(5));
 }
@@ -77,23 +95,41 @@ fn join_persists_credential_0600_and_pins_hub_key() {
 
     let (code, _stdout, stderr) = run(
         &state,
-        &["body", "join", "--server", &hub.ws_url(), "--token", &format!("{token_id}:{secret}"), "--hub-key", &hub_key],
+        &[
+            "body",
+            "join",
+            "--server",
+            &hub.ws_url(),
+            "--token",
+            &format!("{token_id}:{secret}"),
+            "--hub-key",
+            &hub_key,
+        ],
     );
     assert_eq!(code, 0, "body join must exit 0; stderr: {stderr}");
 
     let cred_path = credential_path(&state);
-    assert!(cred_path.exists(), "body join must persist body/credential.json");
+    assert!(
+        cred_path.exists(),
+        "body join must persist body/credential.json"
+    );
     let mode = file_mode(&cred_path);
-    assert_eq!(mode & 0o777, 0o600, "credential.json is mode 0600; got {mode:o}");
+    assert_eq!(
+        mode & 0o777,
+        0o600,
+        "credential.json is mode 0600; got {mode:o}"
+    );
 
-    let doc: Value =
-        serde_json::from_str(&std::fs::read_to_string(&cred_path).unwrap()).expect("credential.json is JSON");
+    let doc: Value = serde_json::from_str(&std::fs::read_to_string(&cred_path).unwrap())
+        .expect("credential.json is JSON");
     assert_eq!(
         doc["token_id"].as_str(),
         Some(token_id.as_str()),
         "credential.json names the token"
     );
-    let client_id = doc["client_id"].as_str().expect("credential.json carries a client_id");
+    let client_id = doc["client_id"]
+        .as_str()
+        .expect("credential.json carries a client_id");
     assert!(
         client_id.starts_with("cli_"),
         "client_id is a cli_ id: {client_id}"
@@ -110,8 +146,16 @@ fn join_persists_credential_0600_and_pins_hub_key() {
     );
     // Issue #323: this body's own signing private key is persisted (never
     // sent to the hub), never a `credential` field (there is none any more).
-    assert!(doc.get("signing_key").and_then(|v| v.as_str()).is_some_and(|s| s.len() == 64), "credential.json carries this body's own signing_key: {doc}");
-    assert!(doc.get("credential").is_none(), "there is no `credential` field any more (issue #323): {doc}");
+    assert!(
+        doc.get("signing_key")
+            .and_then(|v| v.as_str())
+            .is_some_and(|s| s.len() == 64),
+        "credential.json carries this body's own signing_key: {doc}"
+    );
+    assert!(
+        doc.get("credential").is_none(),
+        "there is no `credential` field any more (issue #323): {doc}"
+    );
 
     hub.stop(Duration::from_secs(5));
 }
@@ -128,18 +172,38 @@ fn status_reports_joined_with_same_identity_after_join() {
 
     let (code, _stdout, stderr) = run(
         &state,
-        &["body", "join", "--server", &hub.ws_url(), "--token", &format!("{token_id}:{secret}"), "--hub-key", &hub_key],
+        &[
+            "body",
+            "join",
+            "--server",
+            &hub.ws_url(),
+            "--token",
+            &format!("{token_id}:{secret}"),
+            "--hub-key",
+            &hub_key,
+        ],
     );
     assert_eq!(code, 0, "body join must exit 0; stderr: {stderr}");
-    let doc: Value = serde_json::from_str(&std::fs::read_to_string(credential_path(&state)).unwrap())
-        .expect("credential.json is JSON");
-    let client_id = doc["client_id"].as_str().expect("credential.json carries a client_id");
+    let doc: Value =
+        serde_json::from_str(&std::fs::read_to_string(credential_path(&state)).unwrap())
+            .expect("credential.json is JSON");
+    let client_id = doc["client_id"]
+        .as_str()
+        .expect("credential.json carries a client_id");
 
     let (sc, sstd, ssterr) = run(&state, &["--json", "body", "status"]);
     assert_eq!(sc, 0, "body status must exit 0; stderr: {ssterr}");
     let sdoc: Value = serde_json::from_str(&sstd).expect("body status --json is valid JSON");
-    assert_eq!(sdoc["role"].as_str(), Some("body"), "status document is a body's");
-    assert_eq!(sdoc["joined"].as_bool(), Some(true), "status reports joined: {sdoc}");
+    assert_eq!(
+        sdoc["role"].as_str(),
+        Some("body"),
+        "status document is a body's"
+    );
+    assert_eq!(
+        sdoc["joined"].as_bool(),
+        Some(true),
+        "status reports joined: {sdoc}"
+    );
     assert_eq!(
         sdoc["client_id"].as_str(),
         Some(client_id),
@@ -166,10 +230,28 @@ fn join_with_bad_secret_exit_1_message_from_hub() {
     let hub_key = support::hub_pubkey(&state);
     let bogus = "hlr_join_00000000000000000000000000000000000000000000000000000000000000";
 
-    let (code, _, stderr) = run(&state, &["body", "join", "--server", &hub.ws_url(), "--token", &format!("tok_nope:{bogus}"), "--hub-key", &hub_key]);
+    let (code, _, stderr) = run(
+        &state,
+        &[
+            "body",
+            "join",
+            "--server",
+            &hub.ws_url(),
+            "--token",
+            &format!("tok_nope:{bogus}"),
+            "--hub-key",
+            &hub_key,
+        ],
+    );
     assert_eq!(code, 1, "a refused redeem must exit 1; stderr: {stderr}");
-    assert!(!stderr.is_empty(), "the hub's refusal message reaches stderr");
-    assert!(!stderr.contains("not implemented"), "this is a real refusal, not the skeleton: {stderr}");
+    assert!(
+        !stderr.is_empty(),
+        "the hub's refusal message reaches stderr"
+    );
+    assert!(
+        !stderr.contains("not implemented"),
+        "this is a real refusal, not the skeleton: {stderr}"
+    );
     assert!(
         !credential_path(&state).exists(),
         "a failed join must not persist a credential"
@@ -188,10 +270,25 @@ fn join_plain_ws_to_non_loopback_refused_exit_3() {
     // connect — `--hub-key` is a placeholder here, never even inspected.
     let (code, _, stderr) = run(
         &state,
-        &["body", "join", "--server", "ws://192.0.2.5:41807", "--token", "tok_7f3a:hlr_join_deadbeef", "--hub-key", &"a".repeat(64)],
+        &[
+            "body",
+            "join",
+            "--server",
+            "ws://192.0.2.5:41807",
+            "--token",
+            "tok_7f3a:hlr_join_deadbeef",
+            "--hub-key",
+            &"a".repeat(64),
+        ],
     );
-    assert_eq!(code, 3, "a plaintext ws:// to a non-loopback host must exit 3; stderr: {stderr}");
-    assert!(!stderr.is_empty(), "the refusal is explained on stderr: {stderr}");
+    assert_eq!(
+        code, 3,
+        "a plaintext ws:// to a non-loopback host must exit 3; stderr: {stderr}"
+    );
+    assert!(
+        !stderr.is_empty(),
+        "the refusal is explained on stderr: {stderr}"
+    );
     assert!(
         !credential_path(&state).exists(),
         "a refused join must not persist a credential"
@@ -209,7 +306,16 @@ fn secret_never_written_to_disk() {
     let hub_key = support::hub_pubkey(&state);
     let (code, _, stderr) = run(
         &state,
-        &["body", "join", "--server", &ws_url, "--token", &format!("{token_id}:{secret}"), "--hub-key", &hub_key],
+        &[
+            "body",
+            "join",
+            "--server",
+            &ws_url,
+            "--token",
+            &format!("{token_id}:{secret}"),
+            "--hub-key",
+            &hub_key,
+        ],
     );
     assert_eq!(code, 0, "body join must exit 0; stderr: {stderr}");
 
@@ -241,10 +347,22 @@ fn detach_without_run_removes_credential() {
     let hub_key = support::hub_pubkey(&state);
     let (code, _, stderr) = run(
         &state,
-        &["body", "join", "--server", &hub.ws_url(), "--token", &format!("{token_id}:{secret}"), "--hub-key", &hub_key],
+        &[
+            "body",
+            "join",
+            "--server",
+            &hub.ws_url(),
+            "--token",
+            &format!("{token_id}:{secret}"),
+            "--hub-key",
+            &hub_key,
+        ],
     );
     assert_eq!(code, 0, "body join must exit 0; stderr: {stderr}");
-    assert!(credential_path(&state).exists(), "joined body has a credential");
+    assert!(
+        credential_path(&state).exists(),
+        "joined body has a credential"
+    );
 
     // First detach: removes the credential, exits 0.
     let (code, _, stderr) = run(&state, &["body", "detach"]);
@@ -256,13 +374,20 @@ fn detach_without_run_removes_credential() {
 
     // Second detach (already detached): still exit 0, no error.
     let (code2, _, stderr2) = run(&state, &["body", "detach"]);
-    assert_eq!(code2, 0, "a second detach must still exit 0; stderr: {stderr2}");
+    assert_eq!(
+        code2, 0,
+        "a second detach must still exit 0; stderr: {stderr2}"
+    );
 
     // …and status now reports the body is no longer joined.
     let (sc, sstd, ssterr) = run(&state, &["--json", "body", "status"]);
     assert_eq!(sc, 0, "body status must exit 0; stderr: {ssterr}");
     let sdoc: Value = serde_json::from_str(&sstd).expect("body status --json is valid JSON");
-    assert_eq!(sdoc["joined"].as_bool(), Some(false), "after detach, status reports unjoined: {sdoc}");
+    assert_eq!(
+        sdoc["joined"].as_bool(),
+        Some(false),
+        "after detach, status reports unjoined: {sdoc}"
+    );
 
     hub.stop(Duration::from_secs(5));
 }
@@ -275,10 +400,21 @@ fn status_unjoined_is_exit_0_joined_false() {
     let state = StateDir::new();
     // No hub, no join: the status document is the local, unjoined one.
     let (code, stdout, stderr) = run(&state, &["--json", "body", "status"]);
-    assert_eq!(code, 0, "body status must exit 0 even unjoined; stderr: {stderr}");
+    assert_eq!(
+        code, 0,
+        "body status must exit 0 even unjoined; stderr: {stderr}"
+    );
     let doc: Value = serde_json::from_str(&stdout).expect("body status --json is valid JSON");
-    assert_eq!(doc["role"].as_str(), Some("body"), "the status document is a body's: {doc}");
-    assert_eq!(doc["joined"].as_bool(), Some(false), "an unjoined body reports joined:false: {doc}");
+    assert_eq!(
+        doc["role"].as_str(),
+        Some("body"),
+        "the status document is a body's: {doc}"
+    );
+    assert_eq!(
+        doc["joined"].as_bool(),
+        Some(false),
+        "an unjoined body reports joined:false: {doc}"
+    );
 }
 
 // --- issue #322: hub identity / join-line pinning -----------------------------
@@ -292,11 +428,20 @@ fn join_line_carries_hub_pubkey() {
     let hub = Hub::start(&state);
     let real_key = support::hub_pubkey(&state);
 
-    let (code, stdout, stderr) = run(&state, &["--json", "hub", "token", "mint", "--label", "kiwi"]);
+    let (code, stdout, stderr) = run(
+        &state,
+        &["--json", "hub", "token", "mint", "--label", "kiwi"],
+    );
     assert_eq!(code, 0, "hub token mint must exit 0; stderr: {stderr}");
     let doc: Value = serde_json::from_str(&stdout).expect("mint --json is valid JSON");
-    assert_eq!(doc["hub_pubkey"].as_str(), Some(real_key.as_str()), "mint --json carries the real hub_pubkey: {doc}");
-    let join_command = doc["join_command"].as_str().expect("mint --json carries join_command");
+    assert_eq!(
+        doc["hub_pubkey"].as_str(),
+        Some(real_key.as_str()),
+        "mint --json carries the real hub_pubkey: {doc}"
+    );
+    let join_command = doc["join_command"]
+        .as_str()
+        .expect("mint --json carries join_command");
     assert!(
         join_command.contains(&format!("--hub-key {real_key}")),
         "the join line embeds --hub-key <the real key>: {join_command}"
@@ -305,9 +450,18 @@ fn join_line_carries_hub_pubkey() {
     // Human output: the same key appears both as its own line and inside the
     // ready-to-paste join line.
     let (code2, stdout2, stderr2) = run(&state, &["hub", "token", "mint", "--label", "web"]);
-    assert_eq!(code2, 0, "hub token mint (human) must exit 0; stderr: {stderr2}");
-    assert!(stdout2.contains(&format!("hub_pubkey:  {real_key}")), "human output names hub_pubkey: {stdout2}");
-    assert!(stdout2.contains(&format!("--hub-key {real_key}")), "human output's join line embeds --hub-key: {stdout2}");
+    assert_eq!(
+        code2, 0,
+        "hub token mint (human) must exit 0; stderr: {stderr2}"
+    );
+    assert!(
+        stdout2.contains(&format!("hub_pubkey:  {real_key}")),
+        "human output names hub_pubkey: {stdout2}"
+    );
+    assert!(
+        stdout2.contains(&format!("--hub-key {real_key}")),
+        "human output's join line embeds --hub-key: {stdout2}"
+    );
 
     hub.stop(Duration::from_secs(5));
 }
@@ -327,13 +481,27 @@ fn body_join_pins_hub_key_and_persists_it() {
 
     let (code, _, stderr) = run(
         &state,
-        &["body", "join", "--server", &hub.ws_url(), "--token", &format!("{token_id}:{secret}"), "--hub-key", &real_key],
+        &[
+            "body",
+            "join",
+            "--server",
+            &hub.ws_url(),
+            "--token",
+            &format!("{token_id}:{secret}"),
+            "--hub-key",
+            &real_key,
+        ],
     );
     assert_eq!(code, 0, "body join must exit 0; stderr: {stderr}");
 
-    let doc: Value = serde_json::from_str(&std::fs::read_to_string(credential_path(&state)).unwrap())
-        .expect("credential.json is JSON");
-    assert_eq!(doc["hub_pubkey"].as_str(), Some(real_key.as_str()), "the pinned hub key is persisted verbatim: {doc}");
+    let doc: Value =
+        serde_json::from_str(&std::fs::read_to_string(credential_path(&state)).unwrap())
+            .expect("credential.json is JSON");
+    assert_eq!(
+        doc["hub_pubkey"].as_str(),
+        Some(real_key.as_str()),
+        "the pinned hub key is persisted verbatim: {doc}"
+    );
 
     hub.stop(Duration::from_secs(5));
 }
@@ -349,10 +517,25 @@ fn body_join_malformed_hub_key_refused_exit_3() {
 
     let (code, _, stderr) = run(
         &state,
-        &["body", "join", "--server", &hub.ws_url(), "--token", &format!("{token_id}:{secret}"), "--hub-key", "not-hex"],
+        &[
+            "body",
+            "join",
+            "--server",
+            &hub.ws_url(),
+            "--token",
+            &format!("{token_id}:{secret}"),
+            "--hub-key",
+            "not-hex",
+        ],
     );
-    assert_eq!(code, 3, "a malformed --hub-key must exit 3; stderr: {stderr}");
-    assert!(!credential_path(&state).exists(), "a refused join must not persist an identity");
+    assert_eq!(
+        code, 3,
+        "a malformed --hub-key must exit 3; stderr: {stderr}"
+    );
+    assert!(
+        !credential_path(&state).exists(),
+        "a refused join must not persist an identity"
+    );
 
     hub.stop(Duration::from_secs(5));
 }
@@ -363,9 +546,7 @@ fn body_join_malformed_hub_key_refused_exit_3() {
 #[cfg(unix)]
 fn file_mode(path: &std::path::Path) -> u32 {
     use std::os::unix::fs::MetadataExt;
-    std::fs::metadata(path)
-        .map(|m| m.mode())
-        .unwrap_or(0)
+    std::fs::metadata(path).map(|m| m.mode()).unwrap_or(0)
 }
 #[cfg(not(unix))]
 fn file_mode(_path: &std::path::Path) -> u32 {

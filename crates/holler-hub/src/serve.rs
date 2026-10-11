@@ -97,7 +97,11 @@ pub fn run(listen: &[String], advertise: Option<&str>, join_held: &[String]) -> 
     // served yet but has already minted a token still answers with the same
     // key a body pinned earlier.
     if let Err(e) = crate::identity::ensure(&state) {
-        warn(Component::Control, "hub_identity_failed", format!("cannot resolve hub identity: {e}"));
+        warn(
+            Component::Control,
+            "hub_identity_failed",
+            format!("cannot resolve hub identity: {e}"),
+        );
         return 1;
     }
 
@@ -123,7 +127,13 @@ pub fn run(listen: &[String], advertise: Option<&str>, join_held: &[String]) -> 
         .enable_all()
         .build()
         .expect("build the tokio runtime");
-    let code = rt.block_on(serve_forever(addrs, advertise, state.clone(), lock, join_held.to_vec()));
+    let code = rt.block_on(serve_forever(
+        addrs,
+        advertise,
+        state.clone(),
+        lock,
+        join_held.to_vec(),
+    ));
 
     if code == 0 {
         // Graceful teardown: remove both artifacts. (The lock guard is dropped
@@ -289,7 +299,11 @@ async fn bind_one_ws_listener(addr: &SocketAddr) -> std::io::Result<TcpListener>
     // unwrap it at the end.
     let mut last_err = std::io::Error::other("bind_one_ws_listener: unreachable placeholder");
     for attempt in 1..=MAX_ATTEMPTS {
-        let socket = if addr.is_ipv4() { TcpSocket::new_v4()? } else { TcpSocket::new_v6()? };
+        let socket = if addr.is_ipv4() {
+            TcpSocket::new_v4()?
+        } else {
+            TcpSocket::new_v6()?
+        };
         socket.set_reuseaddr(true)?;
         match socket.bind(*addr) {
             Ok(()) => match socket.listen(1024) {
@@ -322,12 +336,20 @@ async fn bind_ws_listeners(addrs: &[SocketAddr]) -> Result<(Vec<TcpListener>, Ve
                     ws_listeners.push(l);
                 }
                 Err(e) => {
-                    warn(Component::Wire, "bind_addr_report_failed", format!("cannot report the bound address: {e}"));
+                    warn(
+                        Component::Wire,
+                        "bind_addr_report_failed",
+                        format!("cannot report the bound address: {e}"),
+                    );
                     return Err(1);
                 }
             },
             Err(e) => {
-                warn(Component::Wire, "bind_failed", format!("failed to bind {addr}: {e}"));
+                warn(
+                    Component::Wire,
+                    "bind_failed",
+                    format!("failed to bind {addr}: {e}"),
+                );
                 return Err(1);
             }
         }
@@ -373,15 +395,25 @@ fn build_shared_state(state: &HubState, join_held: Vec<String>) -> SharedState {
     // already uses), then shared by every accepted socket.
     let hygiene = crate::hygiene::HygieneLimits::resolve();
     let lockout = crate::lockout::Lockout::new();
-    let preauth_semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(hygiene.max_preauth_connections));
+    let preauth_semaphore =
+        std::sync::Arc::new(tokio::sync::Semaphore::new(hygiene.max_preauth_connections));
     // The roster (issue #186): one per hub process, shared by every accepted
     // WS connection (which advertises/touches/clears it as presence and frames
     // arrive and circuits open/close), the control socket (which reads it for
     // `holler roster`), and the periodic sweep task (issue #255). The system
     // clock drives the 45/180/360 s sweep in production (the unit tests
     // inject a manual clock).
-    let roster = std::sync::Arc::new(crate::roster::Roster::with_system_clock(&crate::roster::Config::from_env()));
-    SharedState { registry, hygiene, lockout, preauth_semaphore, roster, pane_deps }
+    let roster = std::sync::Arc::new(crate::roster::Roster::with_system_clock(
+        &crate::roster::Config::from_env(),
+    ));
+    SharedState {
+        registry,
+        hygiene,
+        lockout,
+        preauth_semaphore,
+        roster,
+        pane_deps,
+    }
 }
 
 /// Bind the listeners and serve until a signal. Runs inside the tokio runtime
@@ -414,19 +446,29 @@ async fn serve_forever(
     // have nothing to accept on), and that refusal becomes this exit code
     // before the hub ever reports `listening`.
     let Some(accept_any) = AcceptAny::new(ws_listeners) else {
-        warn(Component::Control, "no_ws_listener", "no WebSocket listener is bound; nothing to serve".into());
+        warn(
+            Component::Control,
+            "no_ws_listener",
+            "no WebSocket listener is bound; nothing to serve".into(),
+        );
         return 1;
     };
 
     // Record the bound addresses so a `control/status` (same process) can
     // report them in its `listening` array. Best effort, and atomic (#483).
     let listening = serde_json::to_string_pretty(&bound_addrs).unwrap_or_default();
-    let _ = holler_proto::atomic_file::write_atomic(&state.hub_dir.join("listening.json"), listening.as_bytes(), 0o644);
+    let _ = holler_proto::atomic_file::write_atomic(
+        &state.hub_dir.join("listening.json"),
+        listening.as_bytes(),
+        0o644,
+    );
 
     // Persist the advertise address (used by `token mint`'s join line), atomically (#483).
     if let Some(adv) = advertise {
         let doc = format!("{{\"advertise\":\"{adv}\"}}\n");
-        if let Err(e) = holler_proto::atomic_file::write_atomic(&advertise_path(&state), doc.as_bytes(), 0o644) {
+        if let Err(e) =
+            holler_proto::atomic_file::write_atomic(&advertise_path(&state), doc.as_bytes(), 0o644)
+        {
             warn(
                 Component::Control,
                 "advertise_persist_failed",
@@ -467,7 +509,14 @@ async fn serve_forever(
     let mut sig_term = signal(SignalKind::terminate()).expect("install SIGTERM handler");
 
     let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
-    let SharedState { registry, hygiene, lockout, preauth_semaphore, roster, pane_deps } = build_shared_state(&state, join_held);
+    let SharedState {
+        registry,
+        hygiene,
+        lockout,
+        preauth_semaphore,
+        roster,
+        pane_deps,
+    } = build_shared_state(&state, join_held);
 
     // The roster TTL sweep task (issue #255): `Roster::sweep()` was
     // previously only exercised by the unit tests against an injected clock
@@ -485,7 +534,19 @@ async fn serve_forever(
         })
     };
     let accept_handle = tokio::spawn(async move {
-        accept_loop(uds, accept_any, state, registry, roster, hygiene, lockout, preauth_semaphore, pane_deps, stop_rx).await;
+        accept_loop(
+            uds,
+            accept_any,
+            state,
+            registry,
+            roster,
+            hygiene,
+            lockout,
+            preauth_semaphore,
+            pane_deps,
+            stop_rx,
+        )
+        .await;
     });
 
     // 6. Only now — WS listeners bound, control socket bound + mode 0600,
@@ -634,7 +695,13 @@ where
             Some(Ok(Message::Text(t))) => return Some(t.to_string()),
             Some(Ok(Message::Binary(_))) => {
                 // A binary first frame is not a v2 message.
-                send_error(sink, None, Code::InvalidRequest, "a binary frame is not a v2 message").await;
+                send_error(
+                    sink,
+                    None,
+                    Code::InvalidRequest,
+                    "a binary frame is not a v2 message",
+                )
+                .await;
                 close(sink).await;
                 return None;
             }
@@ -684,10 +751,18 @@ async fn admit_preauth(
     // still have completed by the time this runs), but nothing past that
     // point is read from a locked-out peer.
     for ip in lockout.sweep() {
-        warn(Component::Wire, "lockout_cleared", format!("peer={ip} why=expired"));
+        warn(
+            Component::Wire,
+            "lockout_cleared",
+            format!("peer={ip} why=expired"),
+        );
     }
     if lockout.is_locked_out(&addr.ip()) {
-        warn(Component::Wire, "lockout_refused", format!("peer={peer} refused: locked out"));
+        warn(
+            Component::Wire,
+            "lockout_refused",
+            format!("peer={peer} refused: locked out"),
+        );
         close_with_code(sink, 1008, "auth refused: too many failures").await;
         return Err(());
     }
@@ -700,7 +775,12 @@ async fn admit_preauth(
     let preauth_permit = match preauth_semaphore.clone().try_acquire_owned() {
         Ok(permit) => permit,
         Err(_) => {
-            close_with_code(sink, 1013, "try again later: too many unauthenticated connections").await;
+            close_with_code(
+                sink,
+                1013,
+                "try again later: too many unauthenticated connections",
+            )
+            .await;
             return Err(());
         }
     };
@@ -708,7 +788,12 @@ async fn admit_preauth(
     // Issue #184's pre-auth timeout: a socket that has sent nothing at all
     // within this budget is closed. Read the first frame (skipping
     // ping/pong; a close or EOF ends the socket) under that bound.
-    match tokio::time::timeout(hygiene.pre_auth_timeout(), read_first_text_frame(sink, stream)).await {
+    match tokio::time::timeout(
+        hygiene.pre_auth_timeout(),
+        read_first_text_frame(sink, stream),
+    )
+    .await
+    {
         Ok(Some(t)) => Ok((t, preauth_permit)),
         Ok(None) => Err(()),
         Err(_) => {
@@ -736,11 +821,20 @@ async fn handle_ws_conn(
     };
     let (mut sink, mut stream) = ws.split();
 
-    let (first, preauth_permit) =
-        match admit_preauth(&mut sink, &mut stream, addr, &peer, hygiene, &lockout, &preauth_semaphore).await {
-            Ok(pair) => pair,
-            Err(()) => return,
-        };
+    let (first, preauth_permit) = match admit_preauth(
+        &mut sink,
+        &mut stream,
+        addr,
+        &peer,
+        hygiene,
+        &lockout,
+        &preauth_semaphore,
+    )
+    .await
+    {
+        Ok(pair) => pair,
+        Err(()) => return,
+    };
 
     // `first` is a text frame; run it through the codec.
     let env = match decode(&first) {
@@ -782,7 +876,18 @@ async fn handle_ws_conn(
         // keep this dispatch's cognitive complexity under the workspace
         // threshold.
         Some("circuit/authenticate") => {
-            dispatch_authenticate(&mut sink, &mut stream, &env, &state, &registry, &roster, &peer, &lockout, preauth_permit).await;
+            dispatch_authenticate(
+                &mut sink,
+                &mut stream,
+                &env,
+                &state,
+                &registry,
+                &roster,
+                &peer,
+                &lockout,
+                preauth_permit,
+            )
+            .await;
         }
         // Any other method on a fresh socket, or a response/error where a
         // request is expected: unauthenticated.
@@ -824,8 +929,22 @@ async fn dispatch_authenticate(
             return;
         }
     };
-    let deps = crate::circuit::AuthDeps { registry, roster, peer, lockout };
-    crate::circuit::handle_authenticated(sink, stream, env.id(), params, state, deps, Some(preauth_permit)).await;
+    let deps = crate::circuit::AuthDeps {
+        registry,
+        roster,
+        peer,
+        lockout,
+    };
+    crate::circuit::handle_authenticated(
+        sink,
+        stream,
+        env.id(),
+        params,
+        state,
+        deps,
+        Some(preauth_permit),
+    )
+    .await;
 }
 
 // The four WS wire-frame helpers (`send_error`, `send_error_with_reason`,

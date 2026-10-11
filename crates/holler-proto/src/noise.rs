@@ -151,7 +151,9 @@ pub struct NoiseError {
 
 impl NoiseError {
     fn new(message: impl Into<String>) -> Self {
-        Self { message: message.into() }
+        Self {
+            message: message.into(),
+        }
     }
 }
 
@@ -170,9 +172,9 @@ impl From<snow::Error> for NoiseError {
 }
 
 fn params() -> Result<snow::params::NoiseParams, NoiseError> {
-    NOISE_PARAMS_STR
-        .parse()
-        .map_err(|e: snow::Error| NoiseError::new(format!("bad noise params {NOISE_PARAMS_STR:?}: {e:?}")))
+    NOISE_PARAMS_STR.parse().map_err(|e: snow::Error| {
+        NoiseError::new(format!("bad noise params {NOISE_PARAMS_STR:?}: {e:?}"))
+    })
 }
 
 /// Build the Noise XK prologue: `"holler-noise-xk-v1" ‖ protocol_version ‖
@@ -201,7 +203,11 @@ impl HandshakeXk {
     /// Build the **initiator** side — the body: per XK's own `K`, it already
     /// knows the responder's (hub's) static public key, pinned at `body
     /// join` (issue #322).
-    pub fn initiator(local_private: &[u8; KEY_LEN], remote_public: &[u8; KEY_LEN], prologue: &[u8]) -> Result<Self, NoiseError> {
+    pub fn initiator(
+        local_private: &[u8; KEY_LEN],
+        remote_public: &[u8; KEY_LEN],
+        prologue: &[u8],
+    ) -> Result<Self, NoiseError> {
         let inner = snow::Builder::new(params()?)
             .local_private_key(local_private)?
             .remote_public_key(remote_public)?
@@ -267,7 +273,12 @@ impl HandshakeXk {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable)] // #338
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unreachable
+)] // #338
 mod tests {
     use super::*;
     use x25519_dalek::{PublicKey, StaticSecret};
@@ -319,7 +330,8 @@ mod tests {
         let body = keypair(2);
         let prologue = build_prologue(2, "tok_1", "wss://hub.example");
 
-        let (initiator, responder) = run_handshake(hub, body, &prologue, &prologue).expect("a matched handshake must succeed");
+        let (initiator, responder) = run_handshake(hub, body, &prologue, &prologue)
+            .expect("a matched handshake must succeed");
 
         assert!(initiator.is_finished(), "initiator must report finished");
         assert!(responder.is_finished(), "responder must report finished");
@@ -328,11 +340,23 @@ mod tests {
         // message 3 — this is the DH-authenticated proof of possession that
         // replaces the old Ed25519 signature.
         let expected_body_pub = hex::encode(body.1);
-        assert_eq!(responder.remote_static_hex(), Some(expected_body_pub), "responder must learn the body's real static key");
+        assert_eq!(
+            responder.remote_static_hex(),
+            Some(expected_body_pub),
+            "responder must learn the body's real static key"
+        );
 
         // The handshake hash matches on both sides (the SAS-derivation input, #339).
-        assert_eq!(initiator.handshake_hash_hex(), responder.handshake_hash_hex(), "handshake hash must match on both sides");
-        assert_eq!(initiator.handshake_hash_hex().len(), 64, "BLAKE2s hash is 32 bytes = 64 hex chars");
+        assert_eq!(
+            initiator.handshake_hash_hex(),
+            responder.handshake_hash_hex(),
+            "handshake hash must match on both sides"
+        );
+        assert_eq!(
+            initiator.handshake_hash_hex().len(),
+            64,
+            "BLAKE2s hash is 32 bytes = 64 hex chars"
+        );
     }
 
     /// Acceptance: "Handshake fails closed on a wrong/missing static key" —
@@ -349,12 +373,19 @@ mod tests {
         let body = keypair(4);
         let prologue = build_prologue(2, "tok_1", "wss://hub.example");
 
-        let mut initiator = HandshakeXk::initiator(&body.0, &wrong_hub.1, &prologue).expect("building the initiator itself cannot fail here");
-        let mut responder = HandshakeXk::responder(&real_hub.0, &prologue).expect("building the responder itself cannot fail here");
+        let mut initiator = HandshakeXk::initiator(&body.0, &wrong_hub.1, &prologue)
+            .expect("building the initiator itself cannot fail here");
+        let mut responder = HandshakeXk::responder(&real_hub.0, &prologue)
+            .expect("building the responder itself cannot fail here");
 
-        let msg1 = initiator.write_message().expect("writing message 1 itself cannot fail here");
+        let msg1 = initiator
+            .write_message()
+            .expect("writing message 1 itself cannot fail here");
         let result = responder.read_message(&msg1);
-        assert!(result.is_err(), "a body pinning the wrong hub key must fail at message 1, not silently proceed");
+        assert!(
+            result.is_err(),
+            "a body pinning the wrong hub key must fail at message 1, not silently proceed"
+        );
     }
 
     /// Acceptance: "Handshake fails closed on a wrong/missing static key" —
@@ -379,9 +410,14 @@ mod tests {
         let different_body = keypair(60);
         let prologue = build_prologue(2, "tok_1", "wss://hub.example");
 
-        let (_, responder) = run_handshake(hub, real_body, &prologue, &prologue).expect("a matched handshake must succeed — pinned by the happy-path test above");
+        let (_, responder) = run_handshake(hub, real_body, &prologue, &prologue)
+            .expect("a matched handshake must succeed — pinned by the happy-path test above");
         let learned = responder.remote_static_hex();
-        assert_eq!(learned, Some(hex::encode(real_body.1)), "must equal the real body's actual public key");
+        assert_eq!(
+            learned,
+            Some(hex::encode(real_body.1)),
+            "must equal the real body's actual public key"
+        );
         assert_ne!(learned, Some(hex::encode(different_body.1)), "must not equal an unrelated body's public key — a caller's registered-key comparison is meaningful");
     }
 
@@ -397,9 +433,15 @@ mod tests {
         let base = build_prologue(2, "tok_1", "wss://hub.example");
 
         let cases: [(&str, Vec<u8>); 3] = [
-            ("protocol_version", build_prologue(3, "tok_1", "wss://hub.example")),
+            (
+                "protocol_version",
+                build_prologue(3, "tok_1", "wss://hub.example"),
+            ),
             ("token_id", build_prologue(2, "tok_2", "wss://hub.example")),
-            ("advertised_url", build_prologue(2, "tok_1", "wss://other.example")),
+            (
+                "advertised_url",
+                build_prologue(2, "tok_1", "wss://other.example"),
+            ),
         ];
         for (field, other_prologue) in cases {
             // The initiator built its prologue over one context; the
@@ -411,7 +453,10 @@ mod tests {
 
         // Sanity: the identical prologue on both sides still succeeds (rules
         // out "always rejects" as a false-positive explanation above).
-        assert!(run_handshake(hub, body, &base, &base).is_ok(), "sanity: a matched prologue must still succeed");
+        assert!(
+            run_handshake(hub, body, &base, &base).is_ok(),
+            "sanity: a matched prologue must still succeed"
+        );
     }
 
     /// Acceptance: "Existing #323 acceptance tests (no secret on wire,
@@ -433,22 +478,37 @@ mod tests {
         let prologue = build_prologue(2, "tok_1", "wss://hub.example");
 
         // Attempt 1: a genuine, successful handshake. Capture messages 1 and 3.
-        let mut initiator_1 = HandshakeXk::initiator(&body.0, &hub.1, &prologue).expect("building the initiator cannot fail here");
-        let mut responder_1 = HandshakeXk::responder(&hub.0, &prologue).expect("building the responder cannot fail here");
+        let mut initiator_1 = HandshakeXk::initiator(&body.0, &hub.1, &prologue)
+            .expect("building the initiator cannot fail here");
+        let mut responder_1 = HandshakeXk::responder(&hub.0, &prologue)
+            .expect("building the responder cannot fail here");
         let captured_msg1 = initiator_1.write_message().expect("write message 1");
-        assert!(responder_1.read_message(&captured_msg1).is_ok(), "sanity: attempt 1's message 1 must be accepted");
+        assert!(
+            responder_1.read_message(&captured_msg1).is_ok(),
+            "sanity: attempt 1's message 1 must be accepted"
+        );
         let msg2_1 = responder_1.write_message().expect("write message 2");
-        assert!(initiator_1.read_message(&msg2_1).is_ok(), "sanity: attempt 1's message 2 must be accepted");
+        assert!(
+            initiator_1.read_message(&msg2_1).is_ok(),
+            "sanity: attempt 1's message 2 must be accepted"
+        );
         let captured_msg3 = initiator_1.write_message().expect("write message 3");
-        assert!(responder_1.read_message(&captured_msg3).is_ok(), "sanity: attempt 1 must complete cleanly");
+        assert!(
+            responder_1.read_message(&captured_msg3).is_ok(),
+            "sanity: attempt 1 must complete cleanly"
+        );
         assert!(responder_1.is_finished(), "sanity: attempt 1 must finish");
 
         // Attempt 2: a brand-new connection (fresh responder state), same
         // token/keys/prologue — the shape of a real reconnect. The attacker
         // replays attempt 1's captured message 1 into it.
-        let mut responder_2 = HandshakeXk::responder(&hub.0, &prologue).expect("building the responder cannot fail here");
+        let mut responder_2 = HandshakeXk::responder(&hub.0, &prologue)
+            .expect("building the responder cannot fail here");
         let msg1_replay = responder_2.read_message(&captured_msg1);
-        assert!(msg1_replay.is_ok(), "message 1 alone replays harmlessly — it proves nothing by itself yet");
+        assert!(
+            msg1_replay.is_ok(),
+            "message 1 alone replays harmlessly — it proves nothing by itself yet"
+        );
 
         // The fresh responder writes its OWN message 2 (a live hub always
         // does this — an attacker cannot make it reuse attempt 1's message
@@ -456,7 +516,10 @@ mod tests {
         let _fresh_msg2 = responder_2.write_message().expect("write message 2");
         let msg3_replay = responder_2.read_message(&captured_msg3);
         assert!(msg3_replay.is_err(), "a captured message 3 from an earlier attempt must not verify against a fresh attempt's different message 2");
-        assert!(!responder_2.is_finished(), "the replayed attempt must never report finished");
+        assert!(
+            !responder_2.is_finished(),
+            "the replayed attempt must never report finished"
+        );
     }
 
     /// Acceptance: "No key material (static or ephemeral private) ever
@@ -475,27 +538,47 @@ mod tests {
         let wrong_hub = keypair(110);
         let body = keypair(12);
         let prologue = build_prologue(2, "tok_1", "wss://hub.example");
-        let secrets = [hex::encode(hub.0), hex::encode(wrong_hub.0), hex::encode(body.0)];
+        let secrets = [
+            hex::encode(hub.0),
+            hex::encode(wrong_hub.0),
+            hex::encode(body.0),
+        ];
 
         // Failure 1: wrong hub key at message 1.
-        let mut bad_initiator = HandshakeXk::initiator(&body.0, &wrong_hub.1, &prologue).expect("building the initiator itself cannot fail here");
-        let mut responder = HandshakeXk::responder(&hub.0, &prologue).expect("building the responder itself cannot fail here");
+        let mut bad_initiator = HandshakeXk::initiator(&body.0, &wrong_hub.1, &prologue)
+            .expect("building the initiator itself cannot fail here");
+        let mut responder = HandshakeXk::responder(&hub.0, &prologue)
+            .expect("building the responder itself cannot fail here");
         let msg1 = bad_initiator.write_message().expect("write message 1");
         let failure_1 = responder.read_message(&msg1);
-        assert!(failure_1.is_err(), "this case must fail — pinned by wrong_hub_key_rejected_at_message_one above");
+        assert!(
+            failure_1.is_err(),
+            "this case must fail — pinned by wrong_hub_key_rejected_at_message_one above"
+        );
         if let Err(e) = failure_1 {
             for secret_hex in &secrets {
-                assert!(!e.message.contains(secret_hex), "a NoiseError must never contain private key hex: {}", e.message);
+                assert!(
+                    !e.message.contains(secret_hex),
+                    "a NoiseError must never contain private key hex: {}",
+                    e.message
+                );
             }
         }
 
         // Failure 2: mismatched prologue.
         let other_prologue = build_prologue(2, "tok_1", "wss://other.example");
         let failure_2 = run_handshake(hub, body, &prologue, &other_prologue);
-        assert!(failure_2.is_err(), "this case must fail — pinned by prologue_binding_rejects_a_different_context above");
+        assert!(
+            failure_2.is_err(),
+            "this case must fail — pinned by prologue_binding_rejects_a_different_context above"
+        );
         if let Err(e) = failure_2 {
             for secret_hex in &secrets {
-                assert!(!e.message.contains(secret_hex), "a NoiseError must never contain private key hex: {}", e.message);
+                assert!(
+                    !e.message.contains(secret_hex),
+                    "a NoiseError must never contain private key hex: {}",
+                    e.message
+                );
             }
         }
     }

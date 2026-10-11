@@ -29,9 +29,15 @@ pub async fn connect_ws_with_headers(url: &str, headers: &[(&str, &str)]) -> WsC
     let mut request = url.into_client_request().expect("a valid ws:// URL");
     for (name, value) in headers {
         let name = HeaderName::from_bytes(name.as_bytes()).expect("a valid header name");
-        request.headers_mut().insert(name, HeaderValue::from_str(value).expect("a valid header value"));
+        request.headers_mut().insert(
+            name,
+            HeaderValue::from_str(value).expect("a valid header value"),
+        );
     }
-    tokio_tungstenite::connect_async(request).await.expect("dial the hub's WebSocket listener").0
+    tokio_tungstenite::connect_async(request)
+        .await
+        .expect("dial the hub's WebSocket listener")
+        .0
 }
 
 /// This test binary's own resolved copy of the hub's X25519 static public
@@ -44,13 +50,19 @@ pub async fn connect_ws_with_headers(url: &str, headers: &[(&str, &str)]) -> WsC
 /// is already persisted rather than generating a second, different one.
 pub fn hub_x25519_pubkey(state: &StateDir) -> [u8; 32] {
     let hub_state = holler_hub::state::HubState::from_root(state.path().to_path_buf());
-    let identity = holler_hub::identity::ensure(&hub_state).expect("resolve the hub's X25519 identity");
+    let identity =
+        holler_hub::identity::ensure(&hub_state).expect("resolve the hub's X25519 identity");
     let bytes = hex::decode(identity.public_hex()).expect("hub pubkey is valid hex");
     bytes.try_into().expect("hub pubkey is 32 bytes")
 }
 
 /// A `circuit/authenticate` request frame carrying Noise message 1.
-pub fn authenticate_request(token_id: &str, hostname: &str, advertised_url: &str, msg1: &[u8]) -> serde_json::Value {
+pub fn authenticate_request(
+    token_id: &str,
+    hostname: &str,
+    advertised_url: &str,
+    msg1: &[u8],
+) -> serde_json::Value {
     json!({
         "jsonrpc": "2.0",
         "id": "b-auth1",
@@ -68,8 +80,12 @@ pub async fn decode_next(ws: &mut WsClient) -> Option<Envelope> {
     loop {
         match ws.next().await {
             None => return None,
-            Some(Ok(Message::Text(t))) => return Some(decode(t.as_str()).expect("a valid v2 frame")),
-            Some(Ok(Message::Ping(_))) | Some(Ok(Message::Pong(_))) | Some(Ok(Message::Frame(_))) => continue,
+            Some(Ok(Message::Text(t))) => {
+                return Some(decode(t.as_str()).expect("a valid v2 frame"))
+            }
+            Some(Ok(Message::Ping(_)))
+            | Some(Ok(Message::Pong(_)))
+            | Some(Ok(Message::Frame(_))) => continue,
             Some(Ok(Message::Close(_))) => return None,
             Some(Ok(Message::Binary(_))) => panic!("unexpected binary frame"),
             Some(Err(e)) => panic!("ws stream error: {e:?}"),
@@ -96,17 +112,35 @@ pub async fn wait_for_close(ws: &mut WsClient) -> Option<u16> {
 /// refusal is `Ok(error)`; anything else (a 1008 lockout close, a challenge)
 /// is `Err(description)`, so a caller can collect every attempt and assert on
 /// them together instead of dying on the first unexpected shape.
-pub async fn authenticate_once(ws_url: &str, token_id: &str, key: &[u8; 32], hub_pubkey: &[u8; 32]) -> Result<holler_proto::WireError, String> {
+pub async fn authenticate_once(
+    ws_url: &str,
+    token_id: &str,
+    key: &[u8; 32],
+    hub_pubkey: &[u8; 32],
+) -> Result<holler_proto::WireError, String> {
     let mut ws = connect_ws(ws_url).await;
     authenticate_on(&mut ws, ws_url, token_id, key, hub_pubkey).await
 }
 
 /// [`authenticate_once`] on a socket the caller already dialled (for example
 /// with [`connect_ws_with_headers`], issue #455).
-pub async fn authenticate_on(ws: &mut WsClient, ws_url: &str, token_id: &str, key: &[u8; 32], hub_pubkey: &[u8; 32]) -> Result<holler_proto::WireError, String> {
+pub async fn authenticate_on(
+    ws: &mut WsClient,
+    ws_url: &str,
+    token_id: &str,
+    key: &[u8; 32],
+    hub_pubkey: &[u8; 32],
+) -> Result<holler_proto::WireError, String> {
     let prologue = build_prologue(holler_proto::PROTOCOL_VERSION, token_id, ws_url);
-    let msg1 = HandshakeXk::initiator(key, hub_pubkey, &prologue).and_then(|mut h| h.write_message()).expect("write handshake message 1");
-    if let Err(e) = ws.send(Message::text(authenticate_request(token_id, "fault-body", ws_url, &msg1).to_string())).await {
+    let msg1 = HandshakeXk::initiator(key, hub_pubkey, &prologue)
+        .and_then(|mut h| h.write_message())
+        .expect("write handshake message 1");
+    if let Err(e) = ws
+        .send(Message::text(
+            authenticate_request(token_id, "fault-body", ws_url, &msg1).to_string(),
+        ))
+        .await
+    {
         return Err(format!("send failed: {e}"));
     }
     match tokio::time::timeout(Duration::from_secs(10), ws.next()).await {
@@ -138,12 +172,19 @@ pub async fn send_authenticate(
     advertised_url: &str,
 ) -> Result<(), holler_proto::WireError> {
     let prologue = build_prologue(holler_proto::PROTOCOL_VERSION, token_id, advertised_url);
-    let mut handshake = HandshakeXk::initiator(body_x25519_secret, hub_x25519_pubkey, &prologue).expect("build noise initiator");
-    let msg1 = handshake.write_message().expect("write handshake message 1");
+    let mut handshake = HandshakeXk::initiator(body_x25519_secret, hub_x25519_pubkey, &prologue)
+        .expect("build noise initiator");
+    let msg1 = handshake
+        .write_message()
+        .expect("write handshake message 1");
 
     let req = authenticate_request(token_id, hostname, advertised_url, &msg1);
-    ws.send(Message::text(req.to_string())).await.expect("send circuit/authenticate");
-    let env = decode_next(ws).await.expect("an answer to circuit/authenticate");
+    ws.send(Message::text(req.to_string()))
+        .await
+        .expect("send circuit/authenticate");
+    let env = decode_next(ws)
+        .await
+        .expect("an answer to circuit/authenticate");
     let msg2_hex = match env {
         Envelope::Response { result, .. } => result
             .and_then(|v| v.get("message").and_then(|n| n.as_str()).map(String::from))
@@ -152,8 +193,12 @@ pub async fn send_authenticate(
         other => panic!("unexpected reply to circuit/authenticate: {other:?}"),
     };
     let msg2 = hex::decode(&msg2_hex).expect("hex-decode handshake message 2");
-    handshake.read_message(&msg2).expect("process handshake message 2");
-    let msg3 = handshake.write_message().expect("write handshake message 3");
+    handshake
+        .read_message(&msg2)
+        .expect("process handshake message 2");
+    let msg3 = handshake
+        .write_message()
+        .expect("write handshake message 3");
 
     let prove = json!({
         "jsonrpc": "2.0",
@@ -161,7 +206,9 @@ pub async fn send_authenticate(
         "method": "circuit/prove",
         "params": { "token_id": token_id, "message": hex::encode(msg3) },
     });
-    ws.send(Message::text(prove.to_string())).await.expect("send circuit/prove");
+    ws.send(Message::text(prove.to_string()))
+        .await
+        .expect("send circuit/prove");
     let env = decode_next(ws).await.expect("an answer to circuit/prove");
     match env.error() {
         Some(e) => Err(e.clone()),
@@ -194,16 +241,24 @@ pub async fn run_hello_as(ws: &mut WsClient, hostname: &str, role: &str) {
             "role": role, "hostname": hostname, "harnesses": [],
         },
     });
-    ws.send(Message::text(hello.to_string())).await.expect("send circuit/hello");
-    let _ = decode_next(ws).await.expect("the hub's answer to our circuit/hello");
+    ws.send(Message::text(hello.to_string()))
+        .await
+        .expect("send circuit/hello");
+    let _ = decode_next(ws)
+        .await
+        .expect("the hub's answer to our circuit/hello");
 
     // The hub's own half: a request we must answer with `{}`.
-    let hub_hello = decode_next(ws).await.expect("the hub's own circuit/hello request");
+    let hub_hello = decode_next(ws)
+        .await
+        .expect("the hub's own circuit/hello request");
     let Envelope::Request { id, .. } = hub_hello else {
         panic!("expected the hub's circuit/hello request, got {hub_hello:?}");
     };
     let ack = json!({ "jsonrpc": "2.0", "id": id, "result": {} });
-    ws.send(Message::text(ack.to_string())).await.expect("ack the hub's hello");
+    ws.send(Message::text(ack.to_string()))
+        .await
+        .expect("ack the hub's hello");
 }
 
 /// [`run_hello_as`] with role `"body"` — today's ordinary body hello.
@@ -223,20 +278,47 @@ pub async fn go_live_as(
     advertised_url: &str,
     role: &str,
 ) {
-    send_authenticate(ws, token_id, body_x25519_secret, hub_x25519_pubkey, hostname, advertised_url)
-        .await
-        .expect("authenticate must succeed");
+    send_authenticate(
+        ws,
+        token_id,
+        body_x25519_secret,
+        hub_x25519_pubkey,
+        hostname,
+        advertised_url,
+    )
+    .await
+    .expect("authenticate must succeed");
     run_hello_as(ws, hostname, role).await;
 }
 
 /// [`go_live_as`] with role `"body"` — today's ordinary body handshake.
-pub async fn go_live(ws: &mut WsClient, token_id: &str, body_x25519_secret: &[u8; 32], hub_x25519_pubkey: &[u8; 32], hostname: &str, advertised_url: &str) {
-    go_live_as(ws, token_id, body_x25519_secret, hub_x25519_pubkey, hostname, advertised_url, "body").await;
+pub async fn go_live(
+    ws: &mut WsClient,
+    token_id: &str,
+    body_x25519_secret: &[u8; 32],
+    hub_x25519_pubkey: &[u8; 32],
+    hostname: &str,
+    advertised_url: &str,
+) {
+    go_live_as(
+        ws,
+        token_id,
+        body_x25519_secret,
+        hub_x25519_pubkey,
+        hostname,
+        advertised_url,
+        "body",
+    )
+    .await;
 }
 
 /// The hub's JSON log lines whose `type` is `ty`.
 pub fn log_events(hub: &Hub, ty: &str) -> Vec<serde_json::Value> {
-    hub.log_text().lines().filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok()).filter(|v| v["type"] == ty).collect()
+    hub.log_text()
+        .lines()
+        .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+        .filter(|v| v["type"] == ty)
+        .collect()
 }
 
 /// One full-handshake admin (or body) socket already past the
@@ -251,21 +333,37 @@ pub fn log_events(hub: &Hub, ty: &str) -> Vec<serde_json::Value> {
 /// `remote_admin_liveness_test.rs` (handoff-S round-2, A-dup W-2: previously
 /// duplicated five times in one file, and the same shape a sixth/seventh
 /// time would need in the other).
-pub async fn live_socket(state: &StateDir, hub: &Hub, token_id: &str, hostname: &str, role: &str) -> WsClient {
+pub async fn live_socket(
+    state: &StateDir,
+    hub: &Hub,
+    token_id: &str,
+    hostname: &str,
+    role: &str,
+) -> WsClient {
     let identity = holler_body::identity::load(state.path())
         .expect("this state dir has a joined body/credential.json")
         .expect("credential.json is readable");
-    let secret_bytes: [u8; 32] = std::fs::read(holler_body::x25519_identity::identity_path(state.path()))
-        .expect("read the joined credential's x25519 identity")
-        .try_into()
-        .expect("the identity key file is exactly 32 raw bytes");
+    let secret_bytes: [u8; 32] =
+        std::fs::read(holler_body::x25519_identity::identity_path(state.path()))
+            .expect("read the joined credential's x25519 identity")
+            .try_into()
+            .expect("the identity key file is exactly 32 raw bytes");
     let hub_pubkey: [u8; 32] = hex::decode(&identity.hub_pubkey)
         .ok()
         .and_then(|b| b.try_into().ok())
         .expect("the joined credential's pinned hub_pubkey is 32 bytes of hex");
     let ws_url = hub.ws_url();
     let mut ws = connect_ws(&ws_url).await;
-    go_live_as(&mut ws, token_id, &secret_bytes, &hub_pubkey, hostname, &ws_url, role).await;
+    go_live_as(
+        &mut ws,
+        token_id,
+        &secret_bytes,
+        &hub_pubkey,
+        hostname,
+        &ws_url,
+        role,
+    )
+    .await;
     ws
 }
 
@@ -275,10 +373,22 @@ pub async fn live_socket(state: &StateDir, hub: &Hub, token_id: &str, hostname: 
 /// bare close 1008, no JSON-RPC error); `Err` describes the first
 /// application frame, or an EOF with no close frame. A send error is
 /// ignored: a peer-wide refusal may already have closed the socket.
-pub async fn authenticate_expecting_bare_close(ws: &mut WsClient, ws_url: &str, token_id: &str, key: &[u8; 32], hub_pubkey: &[u8; 32]) -> Result<u16, String> {
+pub async fn authenticate_expecting_bare_close(
+    ws: &mut WsClient,
+    ws_url: &str,
+    token_id: &str,
+    key: &[u8; 32],
+    hub_pubkey: &[u8; 32],
+) -> Result<u16, String> {
     let prologue = build_prologue(holler_proto::PROTOCOL_VERSION, token_id, ws_url);
-    let msg1 = HandshakeXk::initiator(key, hub_pubkey, &prologue).and_then(|mut h| h.write_message()).expect("write handshake message 1");
-    let _ = ws.send(Message::text(authenticate_request(token_id, "lockout-body", ws_url, &msg1).to_string())).await;
+    let msg1 = HandshakeXk::initiator(key, hub_pubkey, &prologue)
+        .and_then(|mut h| h.write_message())
+        .expect("write handshake message 1");
+    let _ = ws
+        .send(Message::text(
+            authenticate_request(token_id, "lockout-body", ws_url, &msg1).to_string(),
+        ))
+        .await;
     loop {
         match tokio::time::timeout(Duration::from_secs(10), ws.next()).await {
             Ok(Some(Ok(Message::Ping(_) | Message::Pong(_) | Message::Frame(_)))) => continue,

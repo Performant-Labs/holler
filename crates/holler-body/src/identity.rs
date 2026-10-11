@@ -139,7 +139,9 @@ impl JoinError {
             JoinError::MalformedToken(m) => format!("bad --token: {m}"),
             JoinError::Connect(m) => format!("could not reach the hub: {m}"),
             JoinError::HubRefused(m) => m.clone(),
-            JoinError::Closed => "the hub closed the connection before completing the join".to_string(),
+            JoinError::Closed => {
+                "the hub closed the connection before completing the join".to_string()
+            }
             JoinError::Io(m) => format!("state dir: {m}"),
             JoinError::Wire(m) => format!("wire: {m}"),
         }

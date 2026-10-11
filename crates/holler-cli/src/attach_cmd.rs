@@ -135,7 +135,9 @@ fn fetch_sessions(endpoint: &str) -> Result<Vec<OcSession>, String> {
         if let Some(sessions) = try_get_sessions(&client, &api_url).await {
             return Ok(sort_newest_first(sessions));
         }
-        Err(format!("could not reach {bare_url} (or its /api/session fallback {api_url})"))
+        Err(format!(
+            "could not reach {bare_url} (or its /api/session fallback {api_url})"
+        ))
     })
 }
 

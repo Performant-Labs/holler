@@ -1,4 +1,10 @@
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable, dead_code)] // #151
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unreachable,
+    dead_code
+)] // #151
 //! RED tests for `answer SESSION CHOICE` (issue #151), against real hub +
 //! body + `stub-acp` (#130) subprocesses — no mocks of the circuit. Mirrors
 //! `talk_test.rs`'s own setup pattern (issue #190); a session's `--ask-
@@ -52,7 +58,12 @@ fn row_name_matches(row: &serde_json::Value, session: &str) -> bool {
 
 /// Same setup `talk_test.rs` uses: mint a token against `hub_state`, join
 /// `body_state`, and start `holler body run` over `sessions`.
-fn start_body(hub_state: &StateDir, body_state: &StateDir, hub: &Hub, sessions: &[(&str, &[&str])]) -> Body {
+fn start_body(
+    hub_state: &StateDir,
+    body_state: &StateDir,
+    hub: &Hub,
+    sessions: &[(&str, &[&str])],
+) -> Body {
     let (token_id, secret) = mint_token(hub_state, "b");
     join(body_state, hub_state, &hub.ws_url(), &token_id, &secret);
     let config = write_sessions_toml(body_state, sessions);
@@ -92,7 +103,9 @@ fn say_full_in_background(state: &StateDir, args: Vec<String>) -> std::thread::J
 static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 fn serial() -> std::sync::MutexGuard<'static, ()> {
-    SERIAL.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    SERIAL
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 /// Poll `say session TEXT` until it stops failing with `unknown session`
@@ -112,7 +125,12 @@ fn say_ready(state: &StateDir, session: &str, text: &str, timeout: Duration) -> 
 
 /// Poll the roster until `session`'s row reports `state == want`, or panic
 /// after `timeout`.
-fn wait_for_roster_state(state: &StateDir, session: &str, want: &str, timeout: Duration) -> serde_json::Value {
+fn wait_for_roster_state(
+    state: &StateDir,
+    session: &str,
+    want: &str,
+    timeout: Duration,
+) -> serde_json::Value {
     wait_for(timeout, || {
         let doc = support::roster_json(state);
         let rows = doc.get("rows")?.as_array()?;
@@ -131,7 +149,9 @@ fn wait_until_session_present(state: &StateDir, session: &str, timeout: Duration
     wait_for(timeout, || {
         let doc = support::roster_json(state);
         let rows = doc.get("rows")?.as_array()?.clone();
-        rows.iter().any(|r| row_name_matches(r, session)).then_some(())
+        rows.iter()
+            .any(|r| row_name_matches(r, session))
+            .then_some(())
     })
     .unwrap_or_else(|| panic!("`{session}` never appeared in the roster within {timeout:?}"));
 }
@@ -148,7 +168,12 @@ fn gate_a_session(
 ) -> (std::thread::JoinHandle<Output>, serde_json::Value) {
     wait_until_session_present(hub_state, session, Duration::from_secs(10));
     let handle = say_full_in_background(hub_state, vec![session.to_string(), text.to_string()]);
-    let row = wait_for_roster_state(hub_state, session, "input-required", Duration::from_secs(10));
+    let row = wait_for_roster_state(
+        hub_state,
+        session,
+        "input-required",
+        Duration::from_secs(10),
+    );
     (handle, row)
 }
 
@@ -158,12 +183,21 @@ fn answer_resolves_held_permission_and_turn_completes() {
     let hub_state = StateDir::new();
     let body_state = StateDir::new();
     let hub = Hub::start(&hub_state);
-    let _body = start_body(&hub_state, &body_state, &hub, &[("alpha", &["--ask-permission", "--chunks", "2"])]);
+    let _body = start_body(
+        &hub_state,
+        &body_state,
+        &hub,
+        &[("alpha", &["--ask-permission", "--chunks", "2"])],
+    );
 
     let (handle, _row) = gate_a_session(&hub_state, "alpha", "please run the tool");
 
     let ans = support::answer(&hub_state, "alpha", "allow");
-    assert!(ans.status.success(), "answer must exit 0; stderr: {}", stderr_of(&ans));
+    assert!(
+        ans.status.success(),
+        "answer must exit 0; stderr: {}",
+        stderr_of(&ans)
+    );
 
     let say_result = handle.join().expect("say thread");
     assert!(
@@ -171,7 +205,10 @@ fn answer_resolves_held_permission_and_turn_completes() {
         "the gated turn must resume and complete after answer; stderr: {}",
         stderr_of(&say_result)
     );
-    assert!(stdout_of(&say_result).contains("stub chunk"), "the reply must carry the stub's streamed text");
+    assert!(
+        stdout_of(&say_result).contains("stub chunk"),
+        "the reply must carry the stub's streamed text"
+    );
 }
 
 #[test]
@@ -180,20 +217,41 @@ fn answer_by_multi_field_comma_separated_choice_resolves_each_field() {
     let hub_state = StateDir::new();
     let body_state = StateDir::new();
     let hub = Hub::start(&hub_state);
-    let _body = start_body(&hub_state, &body_state, &hub, &[("alpha", &["--ask-elicitation", "--chunks", "2"])]);
+    let _body = start_body(
+        &hub_state,
+        &body_state,
+        &hub,
+        &[("alpha", &["--ask-elicitation", "--chunks", "2"])],
+    );
 
     let (handle, row) = gate_a_session(&hub_state, "alpha", "please pick");
-    let pending = row.get("pending").and_then(|p| p.as_array()).cloned().unwrap_or_default();
-    assert_eq!(pending.len(), 2, "the stub's elicitation form has two fields (color, size): {pending:?}");
+    let pending = row
+        .get("pending")
+        .and_then(|p| p.as_array())
+        .cloned()
+        .unwrap_or_default();
+    assert_eq!(
+        pending.len(),
+        2,
+        "the stub's elicitation form has two fields (color, size): {pending:?}"
+    );
 
     // One comma segment per field, in the block's own declared order (the
     // stub names its fields so BTreeMap order is `color`, then `size` — see
     // `acp_driver.rs`'s own module doc).
     let ans = support::answer(&hub_state, "alpha", "red,m");
-    assert!(ans.status.success(), "multi-field answer must exit 0; stderr: {}", stderr_of(&ans));
+    assert!(
+        ans.status.success(),
+        "multi-field answer must exit 0; stderr: {}",
+        stderr_of(&ans)
+    );
 
     let say_result = handle.join().expect("say thread");
-    assert!(say_result.status.success(), "the gated turn must complete; stderr: {}", stderr_of(&say_result));
+    assert!(
+        say_result.status.success(),
+        "the gated turn must complete; stderr: {}",
+        stderr_of(&say_result)
+    );
 }
 
 #[test]
@@ -202,14 +260,24 @@ fn answer_with_nothing_pending_is_exit_1_nothing_pending() {
     let hub_state = StateDir::new();
     let body_state = StateDir::new();
     let hub = Hub::start(&hub_state);
-    let _body = start_body(&hub_state, &body_state, &hub, &[("alpha", &["--chunks", "1"])]);
+    let _body = start_body(
+        &hub_state,
+        &body_state,
+        &hub,
+        &[("alpha", &["--chunks", "1"])],
+    );
 
     // The session is idle (never gated) — nothing to resolve.
     let warm = say_ready(&hub_state, "alpha", "hi", Duration::from_secs(10));
     assert!(warm.status.success(), "stderr: {}", stderr_of(&warm));
 
     let ans = support::answer(&hub_state, "alpha", "allow");
-    assert_eq!(ans.status.code(), Some(1), "nothing-pending answer must exit 1; stderr: {}", stderr_of(&ans));
+    assert_eq!(
+        ans.status.code(),
+        Some(1),
+        "nothing-pending answer must exit 1; stderr: {}",
+        stderr_of(&ans)
+    );
     let err = stderr_of(&ans);
     assert!(
         err.contains("no held permission or elicitation to answer"),
@@ -223,16 +291,35 @@ fn plain_say_to_input_required_is_session_busy_with_answer_hint() {
     let hub_state = StateDir::new();
     let body_state = StateDir::new();
     let hub = Hub::start(&hub_state);
-    let _body = start_body(&hub_state, &body_state, &hub, &[("alpha", &["--ask-permission", "--chunks", "2"])]);
+    let _body = start_body(
+        &hub_state,
+        &body_state,
+        &hub,
+        &[("alpha", &["--ask-permission", "--chunks", "2"])],
+    );
 
     let (handle, _row) = gate_a_session(&hub_state, "alpha", "please run the tool");
 
     let racer = support::say(&hub_state, "alpha", "interrupting");
-    assert_eq!(racer.status.code(), Some(1), "say to an input-required session must exit 1; stderr: {}", stderr_of(&racer));
+    assert_eq!(
+        racer.status.code(),
+        Some(1),
+        "say to an input-required session must exit 1; stderr: {}",
+        stderr_of(&racer)
+    );
     let err = stderr_of(&racer);
-    assert!(err.contains("session_busy"), "must carry the session_busy refusal: {err:?}");
-    assert!(err.contains("input-required"), "must name the input-required state: {err:?}");
-    assert!(err.contains("answer"), "must hint 'answer', not interrupt/--queue: {err:?}");
+    assert!(
+        err.contains("session_busy"),
+        "must carry the session_busy refusal: {err:?}"
+    );
+    assert!(
+        err.contains("input-required"),
+        "must name the input-required state: {err:?}"
+    );
+    assert!(
+        err.contains("answer"),
+        "must hint 'answer', not interrupt/--queue: {err:?}"
+    );
 
     // Clean up: resolve the still-held gate so the background thread ends.
     let _ = support::answer(&hub_state, "alpha", "allow");
@@ -245,7 +332,12 @@ fn queue_is_refused_on_input_required_distinct_from_working() {
     let hub_state = StateDir::new();
     let body_state = StateDir::new();
     let hub = Hub::start(&hub_state);
-    let _body = start_body(&hub_state, &body_state, &hub, &[("alpha", &["--ask-permission", "--chunks", "2"])]);
+    let _body = start_body(
+        &hub_state,
+        &body_state,
+        &hub,
+        &[("alpha", &["--ask-permission", "--chunks", "2"])],
+    );
 
     let (handle, _row) = gate_a_session(&hub_state, "alpha", "please run the tool");
 
@@ -269,7 +361,11 @@ fn queue_is_refused_on_input_required_distinct_from_working() {
         "--queue must not resolve an input-required refusal; stderr: {}",
         stderr_of(&queued)
     );
-    assert!(stderr_of(&queued).contains("session_busy"), "still a session_busy refusal: {}", stderr_of(&queued));
+    assert!(
+        stderr_of(&queued).contains("session_busy"),
+        "still a session_busy refusal: {}",
+        stderr_of(&queued)
+    );
 
     let _ = support::answer(&hub_state, "alpha", "allow");
     let _ = handle.join();
@@ -281,19 +377,42 @@ fn roster_shows_pending_column_with_content_then_clears_it() {
     let hub_state = StateDir::new();
     let body_state = StateDir::new();
     let hub = Hub::start(&hub_state);
-    let _body = start_body(&hub_state, &body_state, &hub, &[("alpha", &["--ask-permission", "--chunks", "2"])]);
+    let _body = start_body(
+        &hub_state,
+        &body_state,
+        &hub,
+        &[("alpha", &["--ask-permission", "--chunks", "2"])],
+    );
 
     let (handle, row) = gate_a_session(&hub_state, "alpha", "please run the tool");
 
-    let pending = row.get("pending").and_then(|p| p.as_array()).cloned().unwrap_or_default();
-    assert_eq!(pending.len(), 1, "the stub's permission gate is one field: {pending:?}");
+    let pending = row
+        .get("pending")
+        .and_then(|p| p.as_array())
+        .cloned()
+        .unwrap_or_default();
+    assert_eq!(
+        pending.len(),
+        1,
+        "the stub's permission gate is one field: {pending:?}"
+    );
     let item = &pending[0];
-    assert_eq!(item.get("kind").and_then(|v| v.as_str()), Some("permission"));
-    assert_eq!(item.get("prompt").and_then(|v| v.as_str()), Some("stub tool wants to run"));
+    assert_eq!(
+        item.get("kind").and_then(|v| v.as_str()),
+        Some("permission")
+    );
+    assert_eq!(
+        item.get("prompt").and_then(|v| v.as_str()),
+        Some("stub tool wants to run")
+    );
     let options: Vec<String> = item
         .get("options")
         .and_then(|o| o.as_array())
-        .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+        .map(|a| {
+            a.iter()
+                .filter_map(|v| v.as_str().map(str::to_string))
+                .collect()
+        })
         .unwrap_or_default();
     assert_eq!(options, vec!["Allow".to_string(), "Deny".to_string()]);
 
@@ -307,9 +426,13 @@ fn roster_shows_pending_column_with_content_then_clears_it() {
         let doc = support::roster_json(&hub_state);
         let rows = doc.get("rows")?.as_array()?.clone();
         let row = rows.into_iter().find(|r| row_name_matches(r, "alpha"))?;
-        (row.get("pending").is_none() || row.get("pending") == Some(&serde_json::Value::Null)).then_some(row)
+        (row.get("pending").is_none() || row.get("pending") == Some(&serde_json::Value::Null))
+            .then_some(row)
     });
-    assert!(after.is_some(), "pending must clear once the session leaves input-required");
+    assert!(
+        after.is_some(),
+        "pending must clear once the session leaves input-required"
+    );
 }
 
 // ---- Issue #476 / #477: shorthands and comma-containing labels (ACP) ----
@@ -333,16 +456,26 @@ fn answer_and_finish(hub_state: &StateDir, session: &str, choice: &str) -> Outpu
         stderr_of(&ans)
     );
     let say_result = handle.join().expect("say thread");
-    assert!(say_result.status.success(), "the gated turn must complete; stderr: {}", stderr_of(&say_result));
+    assert!(
+        say_result.status.success(),
+        "the gated turn must complete; stderr: {}",
+        stderr_of(&say_result)
+    );
     say_result
 }
 
 /// The adapter received `want` and no other option of the kinds gate.
 fn assert_adapter_selected(out: &Output, want: &str) {
     let text = stdout_of(out);
-    assert!(text.contains(&format!("stub selected {want} ")), "the adapter must receive {want}: {text:?}");
+    assert!(
+        text.contains(&format!("stub selected {want} ")),
+        "the adapter must receive {want}: {text:?}"
+    );
     for other in KINDS_OPTION_IDS.iter().filter(|id| **id != want) {
-        assert!(!text.contains(&format!("stub selected {other} ")), "{other} must not be selected: {text:?}");
+        assert!(
+            !text.contains(&format!("stub selected {other} ")),
+            "{other} must not be selected: {text:?}"
+        );
     }
 }
 
@@ -354,7 +487,12 @@ fn answer_by_index_on_the_kinds_gate_selects_that_option_at_the_adapter() {
     let hub_state = StateDir::new();
     let body_state = StateDir::new();
     let hub = Hub::start(&hub_state);
-    let _body = start_body(&hub_state, &body_state, &hub, &[("i-one", KINDS_GATE), ("i-three", KINDS_GATE)]);
+    let _body = start_body(
+        &hub_state,
+        &body_state,
+        &hub,
+        &[("i-one", KINDS_GATE), ("i-three", KINDS_GATE)],
+    );
 
     let out = answer_and_finish(&hub_state, "i-one", "1");
     assert_adapter_selected(&out, "opt-always");
@@ -372,7 +510,11 @@ fn answer_shorthands_select_the_option_of_the_matching_kind_at_the_adapter() {
         &hub_state,
         &body_state,
         &hub,
-        &[("k-once", KINDS_GATE), ("k-always", KINDS_GATE), ("k-reject", KINDS_GATE)],
+        &[
+            ("k-once", KINDS_GATE),
+            ("k-always", KINDS_GATE),
+            ("k-reject", KINDS_GATE),
+        ],
     );
 
     for (session, choice, want) in [
@@ -391,7 +533,12 @@ fn answer_by_comma_containing_label_selects_it_at_the_adapter() {
     let hub_state = StateDir::new();
     let body_state = StateDir::new();
     let hub = Hub::start(&hub_state);
-    let _body = start_body(&hub_state, &body_state, &hub, &[("c-exact", KINDS_GATE), ("c-lower", KINDS_GATE)]);
+    let _body = start_body(
+        &hub_state,
+        &body_state,
+        &hub,
+        &[("c-exact", KINDS_GATE), ("c-lower", KINDS_GATE)],
+    );
 
     let out = answer_and_finish(&hub_state, "c-exact", CODEX_REJECT);
     assert_adapter_selected(&out, "opt-tell");
@@ -408,11 +555,20 @@ fn answer_once_and_reject_resolve_on_the_default_permission_gate() {
     let body_state = StateDir::new();
     let hub = Hub::start(&hub_state);
     let gate: &[&str] = &["--ask-permission", "--chunks", "2"];
-    let _body = start_body(&hub_state, &body_state, &hub, &[("d-once", gate), ("d-reject", gate)]);
+    let _body = start_body(
+        &hub_state,
+        &body_state,
+        &hub,
+        &[("d-once", gate), ("d-reject", gate)],
+    );
 
     for (session, choice) in [("d-once", "once"), ("d-reject", "reject")] {
         let out = answer_and_finish(&hub_state, session, choice);
-        assert!(stdout_of(&out).contains("stub chunk"), "the resumed turn must stream: {}", stdout_of(&out));
+        assert!(
+            stdout_of(&out).contains("stub chunk"),
+            "the resumed turn must stream: {}",
+            stdout_of(&out)
+        );
     }
 }
 
@@ -425,20 +581,49 @@ fn answer_always_with_no_allow_always_option_fails_closed_and_keeps_the_gate() {
     let hub_state = StateDir::new();
     let body_state = StateDir::new();
     let hub = Hub::start(&hub_state);
-    let _body = start_body(&hub_state, &body_state, &hub, &[("alpha", &["--ask-permission", "--chunks", "2"])]);
+    let _body = start_body(
+        &hub_state,
+        &body_state,
+        &hub,
+        &[("alpha", &["--ask-permission", "--chunks", "2"])],
+    );
 
     let (handle, _row) = gate_a_session(&hub_state, "alpha", "please run the tool");
 
     let ans = support::answer(&hub_state, "alpha", "always");
-    assert_eq!(ans.status.code(), Some(1), "an unresolvable shorthand must exit 1; stderr: {}", stderr_of(&ans));
+    assert_eq!(
+        ans.status.code(),
+        Some(1),
+        "an unresolvable shorthand must exit 1; stderr: {}",
+        stderr_of(&ans)
+    );
     let err = stderr_of(&ans);
-    assert!(err.contains("always"), "the refusal must name the shorthand: {err:?}");
-    assert!(err.contains("Allow") && err.contains("Deny"), "the refusal must list the labels: {err:?}");
+    assert!(
+        err.contains("always"),
+        "the refusal must name the shorthand: {err:?}"
+    );
+    assert!(
+        err.contains("Allow") && err.contains("Deny"),
+        "the refusal must list the labels: {err:?}"
+    );
 
     // Nothing was sent: the session is still held on the same permission.
-    wait_for_roster_state(&hub_state, "alpha", "input-required", Duration::from_secs(10));
+    wait_for_roster_state(
+        &hub_state,
+        "alpha",
+        "input-required",
+        Duration::from_secs(10),
+    );
     let retry = support::answer(&hub_state, "alpha", "allow");
-    assert!(retry.status.success(), "the held permission must still be answerable; stderr: {}", stderr_of(&retry));
+    assert!(
+        retry.status.success(),
+        "the held permission must still be answerable; stderr: {}",
+        stderr_of(&retry)
+    );
     let say_result = handle.join().expect("say thread");
-    assert!(say_result.status.success(), "stderr: {}", stderr_of(&say_result));
+    assert!(
+        say_result.status.success(),
+        "stderr: {}",
+        stderr_of(&say_result)
+    );
 }

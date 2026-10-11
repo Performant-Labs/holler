@@ -1,4 +1,10 @@
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable, dead_code)] // #142
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unreachable,
+    dead_code
+)] // #142
 //! RED tests for `holler wait` (issue #142), against real hub + body +
 //! `stub-acp` (#130) subprocesses — no mocks of the circuit. Mirrors
 //! `answer_cli_test.rs`'s / `talk_test.rs`'s own setup pattern.
@@ -105,7 +111,12 @@ fn wait_row_matches(row: &serde_json::Value, session: &str) -> bool {
 
 /// Same setup `talk_test.rs`/`answer_cli_test.rs` use: mint a token against
 /// `hub_state`, join `body_state`, and start `holler body run`.
-fn start_body(hub_state: &StateDir, body_state: &StateDir, hub: &Hub, sessions: &[(&str, &[&str])]) -> Body {
+fn start_body(
+    hub_state: &StateDir,
+    body_state: &StateDir,
+    hub: &Hub,
+    sessions: &[(&str, &[&str])],
+) -> Body {
     let (token_id, secret) = mint_token(hub_state, "b");
     join(body_state, hub_state, &hub.ws_url(), &token_id, &secret);
     let config = write_sessions_toml(body_state, sessions);
@@ -134,7 +145,9 @@ fn roster_turn_id(state: &StateDir, session: &str) -> Option<String> {
     let doc = support::roster_json(state);
     let rows = doc.get("rows")?.as_array()?.clone();
     let row = rows.into_iter().find(|r| row_name_matches(r, session))?;
-    row.get("turn_id").and_then(|v| v.as_str()).map(str::to_string)
+    row.get("turn_id")
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
 }
 
 #[test]
@@ -142,7 +155,12 @@ fn wait_returns_immediately_if_already_matching() {
     let hub_state = StateDir::new();
     let body_state = StateDir::new();
     let hub = Hub::start(&hub_state);
-    let _body = start_body(&hub_state, &body_state, &hub, &[("alpha", &["--chunks", "1"])]);
+    let _body = start_body(
+        &hub_state,
+        &body_state,
+        &hub,
+        &[("alpha", &["--chunks", "1"])],
+    );
     wait_until_sessions_present(&hub_state, &["alpha"], Duration::from_secs(10));
 
     let said = support::say(&hub_state, "alpha", "hi");
@@ -154,8 +172,12 @@ fn wait_returns_immediately_if_already_matching() {
     let out = support::wait_cmd(&hub_state, &["alpha", "--timeout", "20s", "--json"]);
     let elapsed = started.elapsed();
     assert!(out.status.success(), "stderr: {}", stderr_of(&out));
-    assert!(elapsed < Duration::from_secs(5), "must return immediately (edge-triggered), took {elapsed:?}");
-    let doc: serde_json::Value = serde_json::from_slice(&out.stdout).expect("wait --json is valid JSON");
+    assert!(
+        elapsed < Duration::from_secs(5),
+        "must return immediately (edge-triggered), took {elapsed:?}"
+    );
+    let doc: serde_json::Value =
+        serde_json::from_slice(&out.stdout).expect("wait --json is valid JSON");
     assert_eq!(doc["matched"], serde_json::json!(true));
     let rows = doc["rows"].as_array().expect("rows array");
     assert_eq!(rows.len(), 1);
@@ -167,7 +189,12 @@ fn wait_with_after_does_not_rematch_same_turn() {
     let hub_state = StateDir::new();
     let body_state = StateDir::new();
     let hub = Hub::start(&hub_state);
-    let _body = start_body(&hub_state, &body_state, &hub, &[("alpha", &["--chunks", "1"])]);
+    let _body = start_body(
+        &hub_state,
+        &body_state,
+        &hub,
+        &[("alpha", &["--chunks", "1"])],
+    );
     wait_until_sessions_present(&hub_state, &["alpha"], Duration::from_secs(10));
 
     let said = support::say(&hub_state, "alpha", "first");
@@ -179,21 +206,47 @@ fn wait_with_after_does_not_rematch_same_turn() {
     // moment later.
     let path = hub_state.path().to_path_buf();
     let turn1_clone = turn1.clone();
-    let handle = std::thread::spawn(move || wait_full(&path, &["alpha", "--after", &turn1_clone, "--timeout", "30s", "--json"]));
+    let handle = std::thread::spawn(move || {
+        wait_full(
+            &path,
+            &[
+                "alpha",
+                "--after",
+                &turn1_clone,
+                "--timeout",
+                "30s",
+                "--json",
+            ],
+        )
+    });
 
     std::thread::sleep(Duration::from_millis(500));
-    assert!(!handle.is_finished(), "must not re-match the same turn_id it was watermarked on");
+    assert!(
+        !handle.is_finished(),
+        "must not re-match the same turn_id it was watermarked on"
+    );
 
     let said2 = support::say(&hub_state, "alpha", "second");
     assert!(said2.status.success(), "stderr: {}", stderr_of(&said2));
 
-    let ready = wait_for(Duration::from_secs(20), || handle.is_finished().then_some(()));
-    assert!(ready.is_some(), "wait --after must return once a NEW turn settles");
+    let ready = wait_for(Duration::from_secs(20), || {
+        handle.is_finished().then_some(())
+    });
+    assert!(
+        ready.is_some(),
+        "wait --after must return once a NEW turn settles"
+    );
     let out = handle.join().expect("wait thread");
     assert!(out.status.success(), "stderr: {}", stderr_of(&out));
-    let doc: serde_json::Value = serde_json::from_slice(&out.stdout).expect("wait --json is valid JSON");
-    let turn2 = doc["rows"][0]["turn_id"].as_str().expect("a turn_id on the match");
-    assert_ne!(turn2, turn1, "must be the NEW turn, not the watermarked one");
+    let doc: serde_json::Value =
+        serde_json::from_slice(&out.stdout).expect("wait --json is valid JSON");
+    let turn2 = doc["rows"][0]["turn_id"]
+        .as_str()
+        .expect("a turn_id on the match");
+    assert_ne!(
+        turn2, turn1,
+        "must be the NEW turn, not the watermarked one"
+    );
 }
 
 #[test]
@@ -201,12 +254,22 @@ fn wait_default_set_ignores_bare_idle_but_fires_on_input_required() {
     let hub_state = StateDir::new();
     let body_state = StateDir::new();
     let hub = Hub::start(&hub_state);
-    let _body = start_body(&hub_state, &body_state, &hub, &[("alpha", &["--ask-permission", "--chunks", "2"])]);
+    let _body = start_body(
+        &hub_state,
+        &body_state,
+        &hub,
+        &[("alpha", &["--ask-permission", "--chunks", "2"])],
+    );
     wait_until_sessions_present(&hub_state, &["alpha"], Duration::from_secs(10));
 
     // Idle at start; the default --until set must NOT fire on it.
     let out = support::wait_cmd(&hub_state, &["alpha", "--timeout", "1s"]);
-    assert_eq!(out.status.code(), Some(2), "bare idle must not match the default set; stderr: {}", stderr_of(&out));
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "bare idle must not match the default set; stderr: {}",
+        stderr_of(&out)
+    );
 
     // Now gate the session (in the background) and prove the SAME default
     // set fires once it reaches input-required.
@@ -214,8 +277,13 @@ fn wait_default_set_ignores_bare_idle_but_fires_on_input_required() {
     let gate_handle = std::thread::spawn(move || say_full(&path, "alpha", "please run the tool"));
 
     let out = support::wait_cmd(&hub_state, &["alpha", "--timeout", "10s", "--json"]);
-    assert!(out.status.success(), "must fire on input-required; stderr: {}", stderr_of(&out));
-    let doc: serde_json::Value = serde_json::from_slice(&out.stdout).expect("wait --json is valid JSON");
+    assert!(
+        out.status.success(),
+        "must fire on input-required; stderr: {}",
+        stderr_of(&out)
+    );
+    let doc: serde_json::Value =
+        serde_json::from_slice(&out.stdout).expect("wait --json is valid JSON");
     assert_eq!(doc["rows"][0]["state"].as_str(), Some("input-required"));
 
     let _ = support::answer(&hub_state, "alpha", "allow");
@@ -243,21 +311,40 @@ fn wait_on_two_sessions_returns_first_match_only() {
     });
 
     std::thread::sleep(Duration::from_millis(300));
-    assert!(!handle.is_finished(), "neither session has completed a turn yet");
+    assert!(
+        !handle.is_finished(),
+        "neither session has completed a turn yet"
+    );
 
     let said = support::say(&hub_state, "alpha", "only alpha runs");
     assert!(said.status.success(), "stderr: {}", stderr_of(&said));
 
-    let ready = wait_for(Duration::from_secs(15), || handle.is_finished().then_some(()));
-    assert!(ready.is_some(), "wait never returned after alpha's turn settled");
+    let ready = wait_for(Duration::from_secs(15), || {
+        handle.is_finished().then_some(())
+    });
+    assert!(
+        ready.is_some(),
+        "wait never returned after alpha's turn settled"
+    );
     let (out, elapsed) = handle.join().expect("wait thread");
 
     assert!(out.status.success(), "stderr: {}", stderr_of(&out));
-    assert!(elapsed < Duration::from_secs(10), "must return on the first match, not wait out the full timeout: {elapsed:?}");
-    let doc: serde_json::Value = serde_json::from_slice(&out.stdout).expect("wait --json is valid JSON");
+    assert!(
+        elapsed < Duration::from_secs(10),
+        "must return on the first match, not wait out the full timeout: {elapsed:?}"
+    );
+    let doc: serde_json::Value =
+        serde_json::from_slice(&out.stdout).expect("wait --json is valid JSON");
     let rows = doc["rows"].as_array().expect("rows array");
-    assert_eq!(rows.len(), 1, "only the session that actually matched is reported: {rows:?}");
-    assert!(wait_row_matches(&rows[0], "alpha"), "the match must be alpha, not beta: {rows:?}");
+    assert_eq!(
+        rows.len(),
+        1,
+        "only the session that actually matched is reported: {rows:?}"
+    );
+    assert!(
+        wait_row_matches(&rows[0], "alpha"),
+        "the match must be alpha, not beta: {rows:?}"
+    );
 }
 
 #[test]
@@ -265,17 +352,36 @@ fn wait_timeout_exit_2() {
     let hub_state = StateDir::new();
     let body_state = StateDir::new();
     let hub = Hub::start(&hub_state);
-    let _body = start_body(&hub_state, &body_state, &hub, &[("alpha", &["--chunks", "1"])]);
+    let _body = start_body(
+        &hub_state,
+        &body_state,
+        &hub,
+        &[("alpha", &["--chunks", "1"])],
+    );
     wait_until_sessions_present(&hub_state, &["alpha"], Duration::from_secs(10));
 
     // Idle, never prompted — nothing in the default --until set ever fires.
     let started = Instant::now();
     let out = support::wait_cmd(&hub_state, &["alpha", "--timeout", "1s"]);
     let elapsed = started.elapsed();
-    assert_eq!(out.status.code(), Some(2), "a real timeout with no match is exit 2; stderr: {}", stderr_of(&out));
-    assert!(elapsed >= Duration::from_millis(900), "must actually wait out the timeout, not return early: {elapsed:?}");
-    assert!(elapsed < Duration::from_secs(10), "must not overrun its own timeout by much: {elapsed:?}");
-    assert!(stdout_of(&out).is_empty(), "a timeout prints nothing on stdout");
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "a real timeout with no match is exit 2; stderr: {}",
+        stderr_of(&out)
+    );
+    assert!(
+        elapsed >= Duration::from_millis(900),
+        "must actually wait out the timeout, not return early: {elapsed:?}"
+    );
+    assert!(
+        elapsed < Duration::from_secs(10),
+        "must not overrun its own timeout by much: {elapsed:?}"
+    );
+    assert!(
+        stdout_of(&out).is_empty(),
+        "a timeout prints nothing on stdout"
+    );
 }
 
 /// `--timeout`'s grammar is `<number><s|m|h>` (`wait_cmd.rs::parse_duration`)
@@ -288,7 +394,12 @@ fn wait_malformed_timeout_exit_3() {
     // ever touching the control socket, so this must NOT be exit 1 (no live
     // hub) even though none is running.
     let out = support::wait_cmd(&state, &["alpha", "--timeout", "notaduration"]);
-    assert_eq!(out.status.code(), Some(3), "a malformed --timeout is exit 3; stderr: {}", stderr_of(&out));
+    assert_eq!(
+        out.status.code(),
+        Some(3),
+        "a malformed --timeout is exit 3; stderr: {}",
+        stderr_of(&out)
+    );
     assert!(
         stderr_of(&out).contains("invalid --timeout"),
         "must carry the spec's own wording: {}",
@@ -301,7 +412,12 @@ fn wait_no_hub_exit_1() {
     let state = StateDir::new();
     // No `Hub::start` at all — the control socket does not exist.
     let out = support::wait_cmd(&state, &["alpha"]);
-    assert_eq!(out.status.code(), Some(1), "no live hub must be exit 1; stderr: {}", stderr_of(&out));
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "no live hub must be exit 1; stderr: {}",
+        stderr_of(&out)
+    );
     assert!(
         stderr_of(&out).contains("no live holler hub reachable"),
         "must carry the spec's exact wording: {}",
@@ -339,25 +455,44 @@ fn wait_fires_on_gone_when_body_detaches() {
             ("HOLLER_ROSTER_GONE_MS", "3000"),
         ],
     );
-    let mut body = start_body(&hub_state, &body_state, &hub, &[("alpha", &["--chunks", "1"])]);
+    let mut body = start_body(
+        &hub_state,
+        &body_state,
+        &hub,
+        &[("alpha", &["--chunks", "1"])],
+    );
     wait_until_sessions_present(&hub_state, &["alpha"], Duration::from_secs(10));
 
     let path = hub_state.path().to_path_buf();
-    let handle = std::thread::spawn(move || wait_full(&path, &["alpha", "--until", "gone", "--timeout", "20s", "--json"]));
+    let handle = std::thread::spawn(move || {
+        wait_full(
+            &path,
+            &["alpha", "--until", "gone", "--timeout", "20s", "--json"],
+        )
+    });
 
     std::thread::sleep(Duration::from_millis(300));
-    assert!(!handle.is_finished(), "the body is still live; must not have matched yet");
+    assert!(
+        !handle.is_finished(),
+        "the body is still live; must not have matched yet"
+    );
 
     // A hard kill (not a graceful `body detach`) drops the socket out from
     // under the hub; the row ages `connected` → `reconnecting` → `gone`
     // purely via the roster's shortened TTL sweep above.
     support::kill_tree(body.child_mut());
 
-    let ready = wait_for(Duration::from_secs(15), || handle.is_finished().then_some(()));
-    assert!(ready.is_some(), "wait --until gone never returned after the body was killed");
+    let ready = wait_for(Duration::from_secs(15), || {
+        handle.is_finished().then_some(())
+    });
+    assert!(
+        ready.is_some(),
+        "wait --until gone never returned after the body was killed"
+    );
     let out = handle.join().expect("wait thread");
     assert!(out.status.success(), "stderr: {}", stderr_of(&out));
-    let doc: serde_json::Value = serde_json::from_slice(&out.stdout).expect("wait --json is valid JSON");
+    let doc: serde_json::Value =
+        serde_json::from_slice(&out.stdout).expect("wait --json is valid JSON");
     assert_eq!(doc["rows"][0]["conn_state"].as_str(), Some("gone"));
 }
 
@@ -371,7 +506,12 @@ fn wait_without_json_prints_human_readable_line() {
     let hub_state = StateDir::new();
     let body_state = StateDir::new();
     let hub = Hub::start(&hub_state);
-    let _body = start_body(&hub_state, &body_state, &hub, &[("alpha", &["--chunks", "1"])]);
+    let _body = start_body(
+        &hub_state,
+        &body_state,
+        &hub,
+        &[("alpha", &["--chunks", "1"])],
+    );
     wait_until_sessions_present(&hub_state, &["alpha"], Duration::from_secs(10));
 
     let said = support::say(&hub_state, "alpha", "hi");
@@ -385,15 +525,28 @@ fn wait_without_json_prints_human_readable_line() {
     // SESSION STATE TURN_ID STOP_REASON AGE — AGE itself is two space-separated
     // tokens (`<n>s ago` / `<n>m ago`), so the line is 6 tokens wide, not 5.
     let fields: Vec<&str> = line.trim_end().split(' ').collect();
-    assert_eq!(fields.len(), 6, "SESSION STATE TURN_ID STOP_REASON <n><unit> ago, got: {line:?}");
-    assert!(fields[0].ends_with("/alpha"), "field 1 is the session name: {line:?}");
+    assert_eq!(
+        fields.len(),
+        6,
+        "SESSION STATE TURN_ID STOP_REASON <n><unit> ago, got: {line:?}"
+    );
+    assert!(
+        fields[0].ends_with("/alpha"),
+        "field 1 is the session name: {line:?}"
+    );
     assert_eq!(fields[1], "idle", "field 2 is the matched state: {line:?}");
-    assert_eq!(fields[3], "end_turn", "field 4 is the stop reason: {line:?}");
+    assert_eq!(
+        fields[3], "end_turn",
+        "field 4 is the stop reason: {line:?}"
+    );
     assert!(
         fields[4].ends_with('s') || fields[4].ends_with('m'),
         "field 5 is the age number+unit (`<n>s`/`<n>m`): {line:?}"
     );
-    assert_eq!(fields[5], "ago", "field 6 is the literal word \"ago\": {line:?}");
+    assert_eq!(
+        fields[5], "ago",
+        "field 6 is the literal word \"ago\": {line:?}"
+    );
 }
 
 /// See this file's module doc: depends on the same upstream `agent-client-
@@ -410,11 +563,21 @@ fn wait_fires_on_failed_when_stub_crashes() {
     let hub_state = StateDir::new();
     let body_state = StateDir::new();
     let hub = Hub::start(&hub_state);
-    let _body = start_body(&hub_state, &body_state, &hub, &[("alpha", &["--crash-after-prompt", "--chunks", "3"])]);
+    let _body = start_body(
+        &hub_state,
+        &body_state,
+        &hub,
+        &[("alpha", &["--crash-after-prompt", "--chunks", "3"])],
+    );
     wait_until_sessions_present(&hub_state, &["alpha"], Duration::from_secs(10));
 
     let path = hub_state.path().to_path_buf();
-    let handle = std::thread::spawn(move || wait_full(&path, &["alpha", "--until", "failed", "--timeout", "60s", "--json"]));
+    let handle = std::thread::spawn(move || {
+        wait_full(
+            &path,
+            &["alpha", "--until", "failed", "--timeout", "60s", "--json"],
+        )
+    });
 
     // The crashing prompt: expected to fail once the driver observes the
     // crash (blocked upstream — see the `#[ignore]` reason above).
@@ -422,6 +585,10 @@ fn wait_fires_on_failed_when_stub_crashes() {
 
     let out = handle.join().expect("wait thread");
     assert!(out.status.success(), "stderr: {}", stderr_of(&out));
-    let doc: serde_json::Value = serde_json::from_slice(&out.stdout).expect("wait --json is valid JSON");
-    assert_eq!(doc["rows"][0]["last_turn"]["state"].as_str(), Some("failed"));
+    let doc: serde_json::Value =
+        serde_json::from_slice(&out.stdout).expect("wait --json is valid JSON");
+    assert_eq!(
+        doc["rows"][0]["last_turn"]["state"].as_str(),
+        Some("failed")
+    );
 }

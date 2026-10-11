@@ -1,4 +1,9 @@
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable)] // #188
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unreachable
+)] // #188
 //! RED tests for the ACP v2 spawn driver (issue #188) — the issue's own test
 //! list, verbatim in name where practical. 18 of the 19 tests live here;
 //! `crash_mid_turn_is_error_not_hang` lives in its own `[[test]]` target
@@ -645,7 +650,10 @@ async fn cancel_mid_turn_reports_real_cancelled_reason() {
     assert_eq!(driver.status(), Status::Idle);
 
     let events = drain_to_done(&mut stream, Duration::from_secs(5)).await;
-    assert_eq!(events.last(), Some(&DriverEvent::Done(StopReason::Cancelled)));
+    assert_eq!(
+        events.last(),
+        Some(&DriverEvent::Done(StopReason::Cancelled))
+    );
     driver.shutdown().await.expect("shutdown");
 }
 

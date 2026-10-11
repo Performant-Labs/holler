@@ -1,4 +1,9 @@
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable)] // #187
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unreachable
+)] // #187
 //! RED tests for the body's session config TOML + registry (issue #187) —
 //! the issue's own test list, verbatim in name.
 
@@ -35,13 +40,22 @@ fn parses_two_spawn_sessions() {
     assert_eq!(alpha.name.as_str(), "alpha");
     assert_eq!(alpha.harness, "opencode");
     assert_eq!(alpha.mode, SessionMode::Spawn);
-    assert_eq!(alpha.command, Some(vec!["opencode".to_string(), "acp".to_string()]));
+    assert_eq!(
+        alpha.command,
+        Some(vec!["opencode".to_string(), "acp".to_string()])
+    );
     assert_eq!(alpha.interrupt, Interrupt::Acp);
 
     let beta = &parsed.sessions[1];
     assert_eq!(beta.name.as_str(), "beta");
     assert_eq!(beta.cwd.as_deref(), Some("/tmp/beta"));
-    assert_eq!(beta.env.as_ref().and_then(|e| e.get("FOO")).map(String::as_str), Some("bar"));
+    assert_eq!(
+        beta.env
+            .as_ref()
+            .and_then(|e| e.get("FOO"))
+            .map(String::as_str),
+        Some("bar")
+    );
 }
 
 #[test]
@@ -137,7 +151,9 @@ fn non_table_session_ext_names_row_and_field_exit_3() {
         ext = 5
     "#;
     match config::parse(toml).expect_err("non-table ext must be refused") {
-        ConfigError::Invalid { row, name, field, .. } => {
+        ConfigError::Invalid {
+            row, name, field, ..
+        } => {
             assert_eq!((row, name.as_str(), field), (1, "beta", "ext"));
         }
         other => panic!("wrong error variant: {other:?}"),
@@ -233,7 +249,10 @@ fn attach_with_command_warns_and_ignores() {
     "#;
     let parsed = config::parse(toml).expect("attach+command is a warning, not a refusal");
     assert_eq!(parsed.sessions.len(), 1);
-    assert!(parsed.sessions[0].command.is_none(), "command must be dropped, never spawned");
+    assert!(
+        parsed.sessions[0].command.is_none(),
+        "command must be dropped, never spawned"
+    );
     assert_eq!(parsed.warnings.len(), 1);
     assert!(parsed.warnings[0].contains("command"));
 }
@@ -317,11 +336,19 @@ fn presence_doc_lists_every_session_idle() {
         assert_eq!(ad.state, SessionState::Idle);
     }
 
-    let alpha = presence.sessions.iter().find(|a| a.name == "alpha").expect("alpha present");
+    let alpha = presence
+        .sessions
+        .iter()
+        .find(|a| a.name == "alpha")
+        .expect("alpha present");
     assert_eq!(alpha.mode, Mode::Spawn);
     assert_eq!(alpha.harness, "opencode");
 
-    let beta = presence.sessions.iter().find(|a| a.name == "beta").expect("beta present");
+    let beta = presence
+        .sessions
+        .iter()
+        .find(|a| a.name == "beta")
+        .expect("beta present");
     assert_eq!(beta.mode, Mode::Attach);
     assert_eq!(beta.harness_session_id.as_deref(), Some("ses_1"));
 

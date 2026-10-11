@@ -4,10 +4,10 @@
 //! implement exactly it, no unlisted aliases. The `main.rs` binary is a
 //! thin entry point over this tree.
 
-mod cli;
 pub mod answer_cmd;
 pub mod attach_cmd;
 pub mod body_cmd;
+mod cli;
 pub mod hold_cmd;
 pub mod hub_cmd;
 pub mod interrupt_cmd;
@@ -24,9 +24,10 @@ pub mod transport;
 pub mod wait_cmd;
 
 pub use crate::cli::{
-    Answer, Attach, AttachCommand, Body, BodyCommand, Cli, Cmd, Command, Confirm, Delete, Hold, Hub,
-    HubCommand, Init, Interrupt, Join, List, Mint, Ping, Query, QueryResolution, Release, Revoke, Roster,
-    Run, Say, Serve, Sessions, Status, Support, Target, Token, TokenCommand, Usage, Wait,
+    Answer, Attach, AttachCommand, Body, BodyCommand, Cli, Cmd, Command, Confirm, Delete, Hold,
+    Hub, HubCommand, Init, Interrupt, Join, List, Mint, Ping, Query, QueryResolution, Release,
+    Revoke, Roster, Run, Say, Serve, Sessions, Status, Support, Target, Token, TokenCommand, Usage,
+    Wait,
 };
 // NOTE (story #144): the global `--debug` / `--log-format` values are
 // captured on `Cli` as `Option<String>` (not typed enums) so the logging

@@ -43,7 +43,10 @@ impl ClientIdentity {
     pub fn derive(seed: u64) -> Self {
         let mut bytes = [0u8; 32];
         for (i, slot) in bytes.iter_mut().enumerate() {
-            *slot = ((seed.wrapping_mul(0x9E37_79B9_7F4A_7C15).wrapping_add(i as u64)) >> 11) as u8;
+            *slot = ((seed
+                .wrapping_mul(0x9E37_79B9_7F4A_7C15)
+                .wrapping_add(i as u64))
+                >> 11) as u8;
         }
         // Distinct derivation per algorithm so the two keypairs are unrelated.
         let mut ed_bytes = bytes;
@@ -96,7 +99,13 @@ pub async fn connect_and_handshake(
     hello(&mut ws, hostname).await?;
     let handshake = handshake_started.elapsed();
 
-    Ok((ws, ConnectTimings { ws_connect, handshake }))
+    Ok((
+        ws,
+        ConnectTimings {
+            ws_connect,
+            handshake,
+        },
+    ))
 }
 
 /// The Noise XK half: `circuit/authenticate` (message 1), read the hub's
@@ -274,10 +283,14 @@ async fn next_frame(ws: &mut WsClient) -> Res<Value> {
     let read = async {
         loop {
             match ws.next().await {
-                None => return Err::<Value, crate::Error>("connection closed mid-handshake".into()),
+                None => {
+                    return Err::<Value, crate::Error>("connection closed mid-handshake".into())
+                }
                 Some(Err(e)) => return Err(format!("websocket error: {e}").into()),
                 Some(Ok(Message::Text(text))) => return Ok(serde_json::from_str::<Value>(&text)?),
-                Some(Ok(Message::Close(_))) => return Err("hub closed the connection mid-handshake".into()),
+                Some(Ok(Message::Close(_))) => {
+                    return Err("hub closed the connection mid-handshake".into())
+                }
                 Some(Ok(_)) => continue,
             }
         }

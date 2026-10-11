@@ -169,7 +169,7 @@ fn the_reconcile_step_quotes_the_profile() {
 fn a_step_the_real_scope_printed_is_not_repeated() {
     let step = reconcile_step(Some(&profile_name("demo")));
     let rig = Rig::new().with_store_scope();
-    rig.after(HarnessOp::Serve, |f, _| {
+    rig.after_server_start(|f, _| {
         let theirs = sample_profile("demo", &["demo-c2r1"]).unwrap();
         let actor = Actor::parse("another writer").unwrap();
         f.profiles.concurrent_put(&theirs, &actor).unwrap();

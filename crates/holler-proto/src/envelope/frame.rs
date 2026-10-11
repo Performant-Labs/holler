@@ -84,12 +84,7 @@ pub fn decode(frame: &str) -> Result<Envelope, EnvelopeError> {
     let raw: RawFrame = serde_json::from_value(Value::Object(std::mem::take(&mut frame)))
         .map_err(|e| EnvelopeError::Json(e.to_string()))?;
 
-    match (
-        raw.method.as_ref(),
-        has_id,
-        has_result,
-        has_error,
-    ) {
+    match (raw.method.as_ref(), has_id, has_result, has_error) {
         // A call (method present): a request if it carries an id, else a
         // notification. `params` is read off `raw` (serde filled it from the
         // wire `params` member).
@@ -136,14 +131,15 @@ fn decode_request(
     if CorrelationId::parse(&id).is_err() {
         return Err(EnvelopeError::BadId);
     }
-    Ok(Envelope::Request { id, method: method.to_owned(), params: params.cloned() })
+    Ok(Envelope::Request {
+        id,
+        method: method.to_owned(),
+        params: params.cloned(),
+    })
 }
 
 /// The notification arm of `decode` (a call without an id).
-fn decode_notification(
-    method: &str,
-    params: Option<&Value>,
-) -> Result<Envelope, EnvelopeError> {
+fn decode_notification(method: &str, params: Option<&Value>) -> Result<Envelope, EnvelopeError> {
     // The method must be in the catalog.
     if crate::methods::find(method).is_none() {
         return Err(EnvelopeError::UnknownMethod(method.to_owned()));
@@ -152,7 +148,10 @@ fn decode_notification(
     if is_request(method) {
         return Err(EnvelopeError::NotificationButRequest(method.to_owned()));
     }
-    Ok(Envelope::Notification { method: method.to_owned(), params: params.cloned() })
+    Ok(Envelope::Notification {
+        method: method.to_owned(),
+        params: params.cloned(),
+    })
 }
 
 /// The response arm of `decode` (`id` present, `result` present, no method).

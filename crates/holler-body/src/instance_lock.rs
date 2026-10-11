@@ -98,7 +98,12 @@ fn write_pid(file: &std::fs::File) -> std::io::Result<()> {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable)] // #182
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unreachable
+)] // #182
 mod tests {
     use super::*;
 
@@ -132,10 +137,17 @@ mod tests {
         let me = std::process::id().to_string();
 
         let second = acquire(dir.path());
-        assert_eq!(second.err(), Some(LockError::Held(me.clone())), "the refusal must name the holder's pid");
+        assert_eq!(
+            second.err(),
+            Some(LockError::Held(me.clone())),
+            "the refusal must name the holder's pid"
+        );
 
         let on_disk = std::fs::read_to_string(lock_path(dir.path())).expect("read lock file");
-        assert_eq!(on_disk, me, "a losing acquire must not blank the holder's pid");
+        assert_eq!(
+            on_disk, me,
+            "a losing acquire must not blank the holder's pid"
+        );
     }
 
     /// #489: the winner writes exactly its own PID, even over a longer PID a
@@ -151,6 +163,10 @@ mod tests {
 
         let _g = acquire(dir.path()).expect("a dead holder's lock file must be reclaimed");
         let on_disk = std::fs::read_to_string(&path).expect("read lock file");
-        assert_eq!(on_disk, std::process::id().to_string(), "the file must hold exactly the winner's pid");
+        assert_eq!(
+            on_disk,
+            std::process::id().to_string(),
+            "the file must hold exactly the winner's pid"
+        );
     }
 }

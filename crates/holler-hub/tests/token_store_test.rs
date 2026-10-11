@@ -1,4 +1,10 @@
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable, dead_code)] // #163
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unreachable,
+    dead_code
+)] // #163
 //! The hub's token store (story #163), tested against the real file-backed
 //! store (a real `HOLLER_STATE_DIR` scratch dir, a real `fs4` flock, a real
 //! HMAC-SHA-256 under a real pepper). No mocks: the store is the thing under
@@ -13,10 +19,10 @@
 
 #![cfg(unix)]
 
-use holler_proto::RedeemError;
-use holler_proto::TokenError;
 use holler_hub::state::{ensure_dirs, HubState};
 use holler_hub::token;
+use holler_proto::RedeemError;
+use holler_proto::TokenError;
 
 /// A per-test scratch state dir, created under the OS temp dir and removed on
 /// drop so a panicking test does not leak directories.
@@ -29,7 +35,10 @@ impl Tdir {
         let unique = format!(
             "holler-tok-{}-{:x}-{:x}",
             std::process::id(),
-            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0),
             COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
         );
         let root = std::env::temp_dir().join(unique);
@@ -85,9 +94,18 @@ fn mint_then_list_shows_unused_without_secret() {
     assert_eq!(row.label, "io");
     assert_eq!(row.state, holler_hub::token::TokenState::Unused);
     // The record holds the HMAC, not the secret.
-    assert!(!row.secret_hmac.contains("hlr_join_"), "secret_hmac is a digest, not the secret");
-    assert!(row.secret_hmac != minted.secret, "the stored hmac is not the plaintext secret");
-    assert!(minted.secret.starts_with("hlr_join_"), "the returned secret is a join secret");
+    assert!(
+        !row.secret_hmac.contains("hlr_join_"),
+        "secret_hmac is a digest, not the secret"
+    );
+    assert!(
+        row.secret_hmac != minted.secret,
+        "the stored hmac is not the plaintext secret"
+    );
+    assert!(
+        minted.secret.starts_with("hlr_join_"),
+        "the returned secret is a join secret"
+    );
 }
 
 #[test]
@@ -95,7 +113,8 @@ fn duplicate_label_is_refused_exit_3() {
     let dir = Tdir::new();
     let state = prep(&dir);
     let _ = token::mint("io", 3600, &state).expect("first mint of io");
-    let err = token::mint("io", 3600, &state).expect_err("a second mint of the same label is refused");
+    let err =
+        token::mint("io", 3600, &state).expect_err("a second mint of the same label is refused");
     matches!(err, TokenError { .. });
     // A distinct label still succeeds.
     assert!(token::mint("web", 3600, &state).is_ok());
@@ -108,18 +127,38 @@ fn redeem_binds_and_consumes_secret() {
     let minted = token::mint("io", 3600, &state).expect("mint");
     let body_pubkey = pubkey(1);
     let body_x25519_pubkey = x25519_pubkey(1);
-    let client_id = token::redeem(&minted.secret, "myhost", &body_pubkey, &body_x25519_pubkey, &state).expect("first redeem");
+    let client_id = token::redeem(
+        &minted.secret,
+        "myhost",
+        &body_pubkey,
+        &body_x25519_pubkey,
+        &state,
+    )
+    .expect("first redeem");
     assert!(client_id.starts_with("cli_"));
     // The secret is now consumed: a second redeem is AlreadyBound.
-    let again = token::redeem(&minted.secret, "myhost", &pubkey(2), &x25519_pubkey(2), &state);
-    assert_eq!(again, Err(RedeemError::AlreadyBound), "the second redeem is refused");
+    let again = token::redeem(
+        &minted.secret,
+        "myhost",
+        &pubkey(2),
+        &x25519_pubkey(2),
+        &state,
+    );
+    assert_eq!(
+        again,
+        Err(RedeemError::AlreadyBound),
+        "the second redeem is refused"
+    );
     // The record is now bound to the client, with both public keys registered.
     let row = token::list(&state).expect("list")[0].clone();
     assert_eq!(row.state, holler_hub::token::TokenState::Bound);
     assert_eq!(row.client_id.as_deref(), Some(client_id.as_str()));
     assert_eq!(row.hostname.as_deref(), Some("myhost"));
     assert_eq!(row.body_pubkey.as_deref(), Some(body_pubkey.as_str()));
-    assert_eq!(row.body_x25519_pubkey.as_deref(), Some(body_x25519_pubkey.as_str()));
+    assert_eq!(
+        row.body_x25519_pubkey.as_deref(),
+        Some(body_x25519_pubkey.as_str())
+    );
 }
 
 /// Model a "concurrent second client" redeeming the same secret. Two CLIs on
@@ -136,13 +175,29 @@ fn concurrent_redeem_has_exactly_one_winner() {
     let state = prep(&dir);
     let minted = token::mint("io", 3600, &state).expect("mint");
     // First client redeems and wins.
-    let client_id =
-        token::redeem(&minted.secret, "host-a", &pubkey(3), &x25519_pubkey(3), &state).expect("first client redeems and wins");
+    let client_id = token::redeem(
+        &minted.secret,
+        "host-a",
+        &pubkey(3),
+        &x25519_pubkey(3),
+        &state,
+    )
+    .expect("first client redeems and wins");
     assert!(client_id.starts_with("cli_"));
     // The second client presents the same (already-consumed) secret: refused
     // AlreadyBound, not handed a second registered key.
-    let again = token::redeem(&minted.secret, "host-b", &pubkey(4), &x25519_pubkey(4), &state);
-    assert_eq!(again, Err(RedeemError::AlreadyBound), "a second client cannot redeem a consumed secret");
+    let again = token::redeem(
+        &minted.secret,
+        "host-b",
+        &pubkey(4),
+        &x25519_pubkey(4),
+        &state,
+    );
+    assert_eq!(
+        again,
+        Err(RedeemError::AlreadyBound),
+        "a second client cannot redeem a consumed secret"
+    );
 }
 
 /// Drive 8 mints and 4 deletes through the public API (each takes the real
@@ -176,10 +231,25 @@ fn concurrent_mint_delete_do_not_lose_writes() {
     // count would be short.
     let rows = token::list(&prep(&dir)).expect("final list");
     let mints: Vec<_> = rows.iter().filter(|r| r.label.starts_with("w-")).collect();
-    assert_eq!(mints.len(), 8, "all 8 concurrent mints survived (no lost writes)");
-    let victim = rows.iter().find(|r| r.label == "victim").expect("the victim row is kept");
-    assert_eq!(victim.state, holler_hub::token::TokenState::Revoked, "the victim was revoked by the racing deletes");
-    assert_eq!(rows.len(), 9, "9 rows: 8 mints + 1 revoked victim (no row lost, none duplicated)");
+    assert_eq!(
+        mints.len(),
+        8,
+        "all 8 concurrent mints survived (no lost writes)"
+    );
+    let victim = rows
+        .iter()
+        .find(|r| r.label == "victim")
+        .expect("the victim row is kept");
+    assert_eq!(
+        victim.state,
+        holler_hub::token::TokenState::Revoked,
+        "the victim was revoked by the racing deletes"
+    );
+    assert_eq!(
+        rows.len(),
+        9,
+        "9 rows: 8 mints + 1 revoked victim (no row lost, none duplicated)"
+    );
 }
 
 /// Issue #323's RED test: a bound token's row holds no secret material — the
@@ -194,16 +264,37 @@ fn hub_store_contains_no_secret_material_for_a_bound_token() {
     let minted = token::mint("io", 3600, &state).expect("mint");
     let body_pubkey = pubkey(5);
     let body_x25519_pubkey = x25519_pubkey(5);
-    let _client_id = token::redeem(&minted.secret, "myhost", &body_pubkey, &body_x25519_pubkey, &state).expect("redeem");
+    let _client_id = token::redeem(
+        &minted.secret,
+        "myhost",
+        &body_pubkey,
+        &body_x25519_pubkey,
+        &state,
+    )
+    .expect("redeem");
     let raw = std::fs::read_to_string(dir.tokens_path()).expect("read tokens.json");
-    assert!(!raw.contains(&minted.secret), "the join secret is not in tokens.json");
+    assert!(
+        !raw.contains(&minted.secret),
+        "the join secret is not in tokens.json"
+    );
     // The at-rest forms (HMAC digest for the spent secret) are present, not
     // the secret itself; the public keys are public keys, so they are present
     // in the clear (issue #323/#337 — a stolen store yields no secret material).
-    assert!(raw.contains(&minted.record.secret_hmac), "the at-rest secret_hmac is present");
+    assert!(
+        raw.contains(&minted.record.secret_hmac),
+        "the at-rest secret_hmac is present"
+    );
     let row = token::list(&state).expect("list")[0].clone();
-    assert_eq!(row.body_pubkey.as_deref(), Some(body_pubkey.as_str()), "the registered Ed25519 public key is present once bound");
-    assert_eq!(row.body_x25519_pubkey.as_deref(), Some(body_x25519_pubkey.as_str()), "the registered X25519 public key is present once bound");
+    assert_eq!(
+        row.body_pubkey.as_deref(),
+        Some(body_pubkey.as_str()),
+        "the registered Ed25519 public key is present once bound"
+    );
+    assert_eq!(
+        row.body_x25519_pubkey.as_deref(),
+        Some(body_x25519_pubkey.as_str()),
+        "the registered X25519 public key is present once bound"
+    );
 }
 
 #[test]
@@ -220,7 +311,11 @@ fn pepper_autogenerated_0600() {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let mode = std::fs::metadata(&pepper).expect("stat pepper").permissions().mode() & 0o777;
+        let mode = std::fs::metadata(&pepper)
+            .expect("stat pepper")
+            .permissions()
+            .mode()
+            & 0o777;
         assert_eq!(mode, 0o600, "the pepper file is mode 0600 (owner-only)");
     }
 }
@@ -241,8 +336,18 @@ fn expired_secret_fails_closed() {
     let obj = row.as_object_mut().expect("row object");
     obj.insert("expires".to_string(), serde_json::json!(1)); // in the past
     std::fs::write(&path, doc.to_string()).expect("write");
-    let err = token::redeem(&minted.secret, "myhost", &pubkey(6), &x25519_pubkey(6), &state);
-    assert_eq!(err, Err(RedeemError::Expired), "an expired secret fails closed with Expired");
+    let err = token::redeem(
+        &minted.secret,
+        "myhost",
+        &pubkey(6),
+        &x25519_pubkey(6),
+        &state,
+    );
+    assert_eq!(
+        err,
+        Err(RedeemError::Expired),
+        "an expired secret fails closed with Expired"
+    );
 }
 
 #[test]
@@ -252,8 +357,18 @@ fn delete_unused_then_redeem_fails() {
     let minted = token::mint("io", 3600, &state).expect("mint");
     token::delete(&minted.record.token_id, &state).expect("invalidate the unused token");
     // A revoked token's secret is no longer redeemable.
-    let err = token::redeem(&minted.secret, "myhost", &pubkey(7), &x25519_pubkey(7), &state);
-    assert_eq!(err, Err(RedeemError::Revoked), "a revoked (deleted) token's secret is refused");
+    let err = token::redeem(
+        &minted.secret,
+        "myhost",
+        &pubkey(7),
+        &x25519_pubkey(7),
+        &state,
+    );
+    assert_eq!(
+        err,
+        Err(RedeemError::Revoked),
+        "a revoked (deleted) token's secret is refused"
+    );
 }
 
 #[test]
@@ -261,7 +376,14 @@ fn list_json_shape() {
     let dir = Tdir::new();
     let state = prep(&dir);
     let minted = token::mint("io", 3600, &state).expect("mint");
-    let _ = token::redeem(&minted.secret, "myhost", &pubkey(8), &x25519_pubkey(8), &state).expect("redeem");
+    let _ = token::redeem(
+        &minted.secret,
+        "myhost",
+        &pubkey(8),
+        &x25519_pubkey(8),
+        &state,
+    )
+    .expect("redeem");
     let raw = std::fs::read_to_string(dir.tokens_path()).expect("read tokens.json");
     let doc: serde_json::Value = serde_json::from_str(&raw).expect("parse");
     let arr = doc.as_array().expect("tokens.json is a JSON array");
@@ -269,13 +391,28 @@ fn list_json_shape() {
     let obj = row.as_object().expect("row is an object");
     // The exact keys the spec pins on the record (the bound ones are present
     // after the redeem; the optional ones that are absent are omitted).
-    for k in ["token_id", "label", "created", "expires", "state", "secret_hmac", "body_pubkey", "body_x25519_pubkey", "client_id", "hostname", "bound_at"] {
+    for k in [
+        "token_id",
+        "label",
+        "created",
+        "expires",
+        "state",
+        "secret_hmac",
+        "body_pubkey",
+        "body_x25519_pubkey",
+        "client_id",
+        "hostname",
+        "bound_at",
+    ] {
         assert!(obj.get(k).is_some(), "record has key {k:?}");
     }
     assert_eq!(obj["state"].as_str(), Some("bound"));
     // No secret ever appears as a top-level key.
     assert!(obj.get("secret").is_none(), "there is no raw `secret` key");
-    assert!(obj.get("credential").is_none(), "there is no raw `credential` key (issue #323: none is ever minted)");
+    assert!(
+        obj.get("credential").is_none(),
+        "there is no raw `credential` key (issue #323: none is ever minted)"
+    );
 }
 
 /// **Regression (issue #370's load baseline).** The hub's own live paths must
@@ -301,7 +438,14 @@ fn concurrent_live_path_reads_never_lose_the_lock_race() {
     let dir = Tdir::new();
     let state = prep(&dir);
     let minted = token::mint("conc", 3600, &state).expect("mint");
-    let _ = token::redeem(&minted.secret, "myhost", &pubkey(9), &x25519_pubkey(9), &state).expect("redeem");
+    let _ = token::redeem(
+        &minted.secret,
+        "myhost",
+        &pubkey(9),
+        &x25519_pubkey(9),
+        &state,
+    )
+    .expect("redeem");
     let token_id = minted.record.token_id;
 
     // Deliberately more threads than cores: the failure this pins is a lost
@@ -314,10 +458,16 @@ fn concurrent_live_path_reads_never_lose_the_lock_race() {
             scope.spawn(|| {
                 for _ in 0..ROUNDS {
                     if let Err(e) = token::bound_record(&token_id, &state) {
-                        errors.lock().expect("errors lock").push(format!("bound_record: {e}"));
+                        errors
+                            .lock()
+                            .expect("errors lock")
+                            .push(format!("bound_record: {e}"));
                     }
                     if let Err(e) = token::touch_last_seen(&token_id, &state) {
-                        errors.lock().expect("errors lock").push(format!("touch_last_seen: {}", e.message));
+                        errors
+                            .lock()
+                            .expect("errors lock")
+                            .push(format!("touch_last_seen: {}", e.message));
                     }
                 }
             });
@@ -351,14 +501,26 @@ fn concurrent_operator_paths_never_lose_the_lock_race() {
     let dir = Tdir::new();
     let state = prep(&dir);
     let bound = token::mint("bound-body", 3600, &state).expect("mint");
-    let _ = token::redeem(&bound.secret, "myhost", &pubkey(9), &x25519_pubkey(9), &state).expect("redeem");
+    let _ = token::redeem(
+        &bound.secret,
+        "myhost",
+        &pubkey(9),
+        &x25519_pubkey(9),
+        &state,
+    )
+    .expect("redeem");
     let bound_id = bound.record.token_id.clone();
 
     const LIVE_THREADS: usize = 8;
     const OPERATOR_THREADS: usize = 16;
     const ROUNDS: usize = 6;
     let errors = std::sync::Mutex::new(Vec::<String>::new());
-    let note = |what: &str, e: TokenError| errors.lock().expect("errors lock").push(format!("{what}: {}", e.message));
+    let note = |what: &str, e: TokenError| {
+        errors
+            .lock()
+            .expect("errors lock")
+            .push(format!("{what}: {}", e.message))
+    };
     std::thread::scope(|scope| {
         for _ in 0..LIVE_THREADS {
             scope.spawn(|| {
@@ -404,7 +566,8 @@ fn concurrent_operator_paths_never_lose_the_lock_race() {
 /// file on every call, so the next `bound_record` sees it).
 fn set_only_expires(dir: &Tdir, expires: u64) {
     let path = dir.tokens_path();
-    let mut doc: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).expect("read")).expect("parse");
+    let mut doc: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).expect("read")).expect("parse");
     let rows = doc.as_array_mut().expect("tokens.json is an array");
     assert_eq!(rows.len(), 1, "exactly one record: {rows:?}");
     rows[0]["expires"] = serde_json::json!(expires);
@@ -419,12 +582,23 @@ fn bound_record_ignores_expires() {
     let dir = Tdir::new();
     let state = prep(&dir);
     let minted = token::mint("io", 3600, &state).expect("mint");
-    token::redeem(&minted.secret, "myhost", &pubkey(20), &x25519_pubkey(20), &state).expect("redeem");
+    token::redeem(
+        &minted.secret,
+        "myhost",
+        &pubkey(20),
+        &x25519_pubkey(20),
+        &state,
+    )
+    .expect("redeem");
     set_only_expires(&dir, 1); // long past
     let record = token::bound_record(&minted.record.token_id, &state)
         .unwrap_or_else(|e| panic!("a bound token past its expires must still authenticate: {e}"));
     assert_eq!(record.token_id, minted.record.token_id);
-    assert_eq!(record.body_pubkey.as_deref(), Some(pubkey(20).as_str()), "the bound key is returned");
+    assert_eq!(
+        record.body_pubkey.as_deref(),
+        Some(pubkey(20).as_str()),
+        "the bound key is returned"
+    );
 }
 
 /// Issue #453: removing the bound-token expiry check must not let a token
@@ -436,8 +610,12 @@ fn bound_record_rejects_unused_token() {
     let minted = token::mint("io", 3600, &state).expect("mint");
     for expires in [u64::MAX / 2, 1] {
         set_only_expires(&dir, expires);
-        let err = token::bound_record(&minted.record.token_id, &state).expect_err("an unused token must not authenticate");
-        assert!(err.to_string().contains("is not bound"), "expires={expires}: {err}");
+        let err = token::bound_record(&minted.record.token_id, &state)
+            .expect_err("an unused token must not authenticate");
+        assert!(
+            err.to_string().contains("is not bound"),
+            "expires={expires}: {err}"
+        );
     }
 }
 
@@ -446,7 +624,14 @@ fn bound_record_rejects_unused_token() {
 /// A bound token for the #485 cases; returns its token id.
 fn bound_token(state: &HubState) -> String {
     let minted = token::mint("fault", 3600, state).expect("mint");
-    token::redeem(&minted.secret, "myhost", &pubkey(30), &x25519_pubkey(30), state).expect("redeem");
+    token::redeem(
+        &minted.secret,
+        "myhost",
+        &pubkey(30),
+        &x25519_pubkey(30),
+        state,
+    )
+    .expect("redeem");
     minted.record.token_id
 }
 
@@ -457,8 +642,15 @@ fn assert_lookup(token_id: &str, state: &HubState, hub_fault: bool, needle: &str
         Ok(r) => panic!("expected a refusal naming {needle:?}, got the record {r:?}"),
         Err(e) => e,
     };
-    assert!(err.to_string().contains(needle), "the refusal keeps its cause text ({needle:?}): {err}");
-    assert_eq!(err.is_hub_fault(), hub_fault, "hub-fault tag for {needle:?}: {err}");
+    assert!(
+        err.to_string().contains(needle),
+        "the refusal keeps its cause text ({needle:?}): {err}"
+    );
+    assert_eq!(
+        err.is_hub_fault(),
+        hub_fault,
+        "hub-fault tag for {needle:?}: {err}"
+    );
 }
 
 /// Issue #485: when the hub cannot read its own `tokens.json`, the refusal is
@@ -473,7 +665,10 @@ fn unreadable_or_corrupt_store_is_a_hub_fault() {
         std::fs::write(dir.tokens_path(), bytes).expect("corrupt tokens.json");
         let err = token::bound_record(&token_id, &state).expect_err(what);
         assert!(err.to_string().contains("corrupted"), "{what}: {err}");
-        assert!(err.is_hub_fault(), "a {what} tokens.json must be tagged a hub fault: {err}");
+        assert!(
+            err.is_hub_fault(),
+            "a {what} tokens.json must be tagged a hub fault: {err}"
+        );
     }
     // Unreadable: a directory where the file should be fails the read itself
     // (and does so even when the test runs as root, unlike a mode-000 file).
@@ -490,7 +685,12 @@ fn lock_held_past_the_retry_is_a_hub_fault() {
     let dir = Tdir::new();
     let state = prep(&dir);
     let token_id = bound_token(&state);
-    let held = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(token::tokens_lock_path(&state)).expect("open lock file");
+    let held = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(token::tokens_lock_path(&state))
+        .expect("open lock file");
     // std's `try_lock` is flock(2) on unix: the same lock fs4 takes in the store.
     held.try_lock().expect("the test must hold the token lock");
     assert_lookup(&token_id, &state, true, "holds the token lock");
@@ -503,20 +703,30 @@ fn lock_held_past_the_retry_is_a_hub_fault() {
 /// (inferred, so this test does not name it) via `From<JoinError>`.
 #[test]
 fn a_join_failure_is_a_hub_fault() {
-    fn from_join<E: From<tokio::task::JoinError>>(_like: &Result<token::Record, E>, e: tokio::task::JoinError) -> E {
+    fn from_join<E: From<tokio::task::JoinError>>(
+        _like: &Result<token::Record, E>,
+        e: tokio::task::JoinError,
+    ) -> E {
         e.into()
     }
     let dir = Tdir::new();
     let state = prep(&dir);
     let like = token::bound_record("tok_missing", &state);
-    let rt = tokio::runtime::Builder::new_current_thread().build().expect("runtime");
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .expect("runtime");
     let join_err = rt.block_on(async {
         let handle = tokio::spawn(std::future::pending::<()>());
         handle.abort();
-        handle.await.expect_err("an aborted task yields a JoinError")
+        handle
+            .await
+            .expect_err("an aborted task yields a JoinError")
     });
     let err = from_join(&like, join_err);
-    assert!(err.is_hub_fault(), "a join failure must be tagged a hub fault: {err}");
+    assert!(
+        err.is_hub_fault(),
+        "a join failure must be tagged a hub fault: {err}"
+    );
 }
 
 /// Issue #485, the risk the brief names: every credential outcome stays
@@ -526,15 +736,25 @@ fn credential_failures_are_not_hub_faults() {
     let dir = Tdir::new();
     let state = prep(&dir);
     assert_lookup("tok_nope", &state, false, "no such token");
-    let unused = token::mint("unused", 3600, &state).expect("mint").record.token_id;
+    let unused = token::mint("unused", 3600, &state)
+        .expect("mint")
+        .record
+        .token_id;
     assert_lookup(&unused, &state, false, "is not bound");
 
     let token_id = bound_token(&state);
-    for (field, needle) in [("body_x25519_pubkey", "no X25519 public key on record"), ("body_pubkey", "no public key on record")] {
+    for (field, needle) in [
+        ("body_x25519_pubkey", "no X25519 public key on record"),
+        ("body_pubkey", "no public key on record"),
+    ] {
         let path = dir.tokens_path();
-        let mut doc: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).expect("read")).expect("parse");
+        let mut doc: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).expect("read")).expect("parse");
         let rows = doc.as_array_mut().expect("tokens.json is an array");
-        let row = rows.iter_mut().find(|r| r["token_id"] == token_id.as_str()).expect("the bound row");
+        let row = rows
+            .iter_mut()
+            .find(|r| r["token_id"] == token_id.as_str())
+            .expect("the bound row");
         row[field] = serde_json::Value::Null;
         std::fs::write(&path, doc.to_string()).expect("write");
         assert_lookup(&token_id, &state, false, needle);
@@ -568,7 +788,10 @@ impl Drop for KillOnDrop {
 #[test]
 #[ignore = "child process of a_kill_during_save_never_leaves_the_store_empty_or_corrupt (#483)"]
 fn kill_during_save_child_loop() {
-    let (Ok(root), Ok(token_id)) = (std::env::var(SAVE_LOOP_ROOT_ENV), std::env::var(SAVE_LOOP_TOKEN_ENV)) else {
+    let (Ok(root), Ok(token_id)) = (
+        std::env::var(SAVE_LOOP_ROOT_ENV),
+        std::env::var(SAVE_LOOP_TOKEN_ENV),
+    ) else {
         return;
     };
     let root = std::path::PathBuf::from(root);
@@ -609,7 +832,11 @@ fn a_kill_during_save_never_leaves_the_store_empty_or_corrupt() {
         row["label"] = serde_json::json!(format!("pad-{i}"));
         rows.push(row);
     }
-    std::fs::write(&path, serde_json::to_string_pretty(&rows).expect("serialize")).expect("write padded store");
+    std::fs::write(
+        &path,
+        serde_json::to_string_pretty(&rows).expect("serialize"),
+    )
+    .expect("write padded store");
     let expected = token::list(&state).expect("padded store loads").len();
     assert_eq!(expected, PADDING + 1);
 
@@ -618,7 +845,13 @@ fn a_kill_during_save_never_leaves_the_store_empty_or_corrupt() {
     for i in 0..KILLS {
         let _ = std::fs::remove_file(&ready);
         let child = std::process::Command::new(&exe)
-            .args(["kill_during_save_child_loop", "--exact", "--ignored", "--nocapture", "--test-threads=1"])
+            .args([
+                "kill_during_save_child_loop",
+                "--exact",
+                "--ignored",
+                "--nocapture",
+                "--test-threads=1",
+            ])
             .env(SAVE_LOOP_ROOT_ENV, &dir.root)
             .env(SAVE_LOOP_TOKEN_ENV, &minted.record.token_id)
             .stdout(std::process::Stdio::null())
@@ -631,16 +864,22 @@ fn a_kill_during_save_never_leaves_the_store_empty_or_corrupt() {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
         while !ready.exists() {
             if let Ok(Some(status)) = child.0.try_wait() {
-                panic!("kill {i}: the save-loop child exited early ({status}); store size {:?}",
-                    std::fs::metadata(&path).map(|m| m.len()));
+                panic!(
+                    "kill {i}: the save-loop child exited early ({status}); store size {:?}",
+                    std::fs::metadata(&path).map(|m| m.len())
+                );
             }
-            assert!(std::time::Instant::now() < deadline, "kill {i}: the save-loop child never became ready");
+            assert!(
+                std::time::Instant::now() < deadline,
+                "kill {i}: the save-loop child never became ready"
+            );
             std::thread::sleep(std::time::Duration::from_millis(1));
         }
         // Watch the file for a varied stretch of the save loop, and kill the
         // child the instant the file is seen empty (the worst moment to die),
         // or at the end of the stretch. The stretch varies the kill moment.
-        let watch_until = std::time::Instant::now() + std::time::Duration::from_micros(2_000 + (i * 1_777) % 9_000);
+        let watch_until = std::time::Instant::now()
+            + std::time::Duration::from_micros(2_000 + (i * 1_777) % 9_000);
         let mut seen_empty = false;
         while std::time::Instant::now() < watch_until {
             if std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0) == 0 {
@@ -650,12 +889,25 @@ fn a_kill_during_save_never_leaves_the_store_empty_or_corrupt() {
         }
         drop(child); // SIGKILL + reap
 
-        let len = std::fs::metadata(&path).expect("tokens.json must still exist").len();
+        let len = std::fs::metadata(&path)
+            .expect("tokens.json must still exist")
+            .len();
         assert!(!seen_empty, "kill {i}: tokens.json was observed empty (0 bytes) during a save (killed there; {len} bytes after the kill)");
-        assert!(len > 0, "kill {i}: a kill during a save left tokens.json empty (0 bytes)");
-        let records = token::list(&state)
-            .unwrap_or_else(|e| panic!("kill {i}: the store no longer loads after a kill ({len} bytes): {}", e.message));
-        assert_eq!(records.len(), expected, "kill {i}: a kill during a save lost records");
+        assert!(
+            len > 0,
+            "kill {i}: a kill during a save left tokens.json empty (0 bytes)"
+        );
+        let records = token::list(&state).unwrap_or_else(|e| {
+            panic!(
+                "kill {i}: the store no longer loads after a kill ({len} bytes): {}",
+                e.message
+            )
+        });
+        assert_eq!(
+            records.len(),
+            expected,
+            "kill {i}: a kill during a save lost records"
+        );
     }
 }
 
@@ -677,9 +929,19 @@ fn purge_unused_removes_the_row_and_frees_the_label() {
     let state = prep(&dir);
     let minted = token::mint("io", 3600, &state).expect("mint");
     let gone = token::purge(&minted.record.token_id, &state).expect("purge an unused token");
-    assert_eq!((gone.token_id.as_str(), gone.label.as_str()), (minted.record.token_id.as_str(), "io"));
-    assert_eq!(gone.state, token::TokenState::Unused, "purge returns the removed record as it was");
-    assert!(token::list(&state).expect("list").is_empty(), "the row is removed from the store");
+    assert_eq!(
+        (gone.token_id.as_str(), gone.label.as_str()),
+        (minted.record.token_id.as_str(), "io")
+    );
+    assert_eq!(
+        gone.state,
+        token::TokenState::Unused,
+        "purge returns the removed record as it was"
+    );
+    assert!(
+        token::list(&state).expect("list").is_empty(),
+        "the row is removed from the store"
+    );
     token::mint("io", 3600, &state).expect("the label is free for a new mint");
 }
 
@@ -688,15 +950,28 @@ fn revoke_then_purge_frees_a_bound_label_for_a_new_token() {
     let dir = Tdir::new();
     let state = prep(&dir);
     let old = token::mint("io", 3600, &state).expect("mint");
-    token::redeem(&old.secret, "myhost", &pubkey(40), &x25519_pubkey(40), &state).expect("redeem");
+    token::redeem(
+        &old.secret,
+        "myhost",
+        &pubkey(40),
+        &x25519_pubkey(40),
+        &state,
+    )
+    .expect("redeem");
     token::delete(&old.record.token_id, &state).expect("revoke the bound token");
     let gone = token::purge(&old.record.token_id, &state).expect("purge a revoked token");
     assert_eq!(gone.state, token::TokenState::Revoked);
     let new = token::mint("io", 3600, &state).expect("the label is free for a new mint");
-    assert_ne!(new.record.token_id, old.record.token_id, "the re-minted label is a new token");
+    assert_ne!(
+        new.record.token_id, old.record.token_id,
+        "the re-minted label is a new token"
+    );
     let rows = token::list(&state).expect("list");
     assert_eq!(rows.len(), 1, "only the new row is on file: {rows:?}");
-    assert_eq!((rows[0].token_id.as_str(), rows[0].state), (new.record.token_id.as_str(), token::TokenState::Unused));
+    assert_eq!(
+        (rows[0].token_id.as_str(), rows[0].state),
+        (new.record.token_id.as_str(), token::TokenState::Unused)
+    );
 }
 
 #[test]
@@ -705,13 +980,27 @@ fn purge_of_a_bound_token_is_refused_and_keeps_the_label() {
     let state = prep(&dir);
     let minted = token::mint("io", 3600, &state).expect("mint");
     let id = minted.record.token_id.clone();
-    token::redeem(&minted.secret, "myhost", &pubkey(41), &x25519_pubkey(41), &state).expect("redeem");
+    token::redeem(
+        &minted.secret,
+        "myhost",
+        &pubkey(41),
+        &x25519_pubkey(41),
+        &state,
+    )
+    .expect("redeem");
     let err = token::purge(&id, &state).expect_err("a bound token must be revoked first");
     assert!(err.message.contains("is bound"), "{err}");
-    assert!(err.message.contains(&format!("holler hub token revoke {id}")), "the refusal names the revoke: {err}");
+    assert!(
+        err.message
+            .contains(&format!("holler hub token revoke {id}")),
+        "the refusal names the revoke: {err}"
+    );
     let rows = token::list(&state).expect("list");
     assert_eq!(rows.len(), 1, "the row is kept: {rows:?}");
-    assert_eq!((rows[0].token_id.as_str(), rows[0].state), (id.as_str(), token::TokenState::Bound));
+    assert_eq!(
+        (rows[0].token_id.as_str(), rows[0].state),
+        (id.as_str(), token::TokenState::Bound)
+    );
     let err = token::mint("io", 3600, &state).expect_err("the label is still held");
     assert_eq!(err.message, held_message("io", "bound", &id));
 }
@@ -720,14 +1009,35 @@ fn purge_of_a_bound_token_is_refused_and_keeps_the_label() {
 fn mint_over_a_held_label_names_the_holder_and_the_fix() {
     let dir = Tdir::new();
     let state = prep(&dir);
-    let unused = token::mint("u", 3600, &state).expect("mint u").record.token_id;
+    let unused = token::mint("u", 3600, &state)
+        .expect("mint u")
+        .record
+        .token_id;
     let bound = token::mint("b", 3600, &state).expect("mint b");
-    token::redeem(&bound.secret, "myhost", &pubkey(42), &x25519_pubkey(42), &state).expect("redeem b");
-    let revoked = token::mint("r", 3600, &state).expect("mint r").record.token_id;
+    token::redeem(
+        &bound.secret,
+        "myhost",
+        &pubkey(42),
+        &x25519_pubkey(42),
+        &state,
+    )
+    .expect("redeem b");
+    let revoked = token::mint("r", 3600, &state)
+        .expect("mint r")
+        .record
+        .token_id;
     token::delete(&revoked, &state).expect("revoke r");
-    for (label, word, id) in [("u", "unused", &unused), ("b", "bound", &bound.record.token_id), ("r", "revoked", &revoked)] {
+    for (label, word, id) in [
+        ("u", "unused", &unused),
+        ("b", "bound", &bound.record.token_id),
+        ("r", "revoked", &revoked),
+    ] {
         let err = token::mint(label, 3600, &state).expect_err("a held label is refused");
-        assert_eq!(err.message, held_message(label, word, id), "the {word} holder");
+        assert_eq!(
+            err.message,
+            held_message(label, word, id),
+            "the {word} holder"
+        );
     }
 }
 
@@ -744,13 +1054,20 @@ fn purge_of_an_unknown_id_is_refused() {
 fn purge_and_mint_on_a_corrupt_store_fail_without_writing() {
     let dir = Tdir::new();
     let state = prep(&dir);
-    let id = token::mint("io", 3600, &state).expect("mint").record.token_id;
+    let id = token::mint("io", 3600, &state)
+        .expect("mint")
+        .record
+        .token_id;
     std::fs::write(dir.tokens_path(), b"not json {").expect("corrupt tokens.json");
     let err = token::purge(&id, &state).expect_err("purge on a corrupt store");
     assert!(err.message.contains("corrupted"), "{err}");
     let err = token::mint("io", 3600, &state).expect_err("mint on a corrupt store");
     assert!(err.message.contains("corrupted"), "{err}");
-    assert_eq!(std::fs::read(dir.tokens_path()).expect("read"), b"not json {", "the corrupt file is left byte-identical");
+    assert_eq!(
+        std::fs::read(dir.tokens_path()).expect("read"),
+        b"not json {",
+        "the corrupt file is left byte-identical"
+    );
 }
 
 #[test]
@@ -759,8 +1076,18 @@ fn a_purged_tokens_secret_is_not_found() {
     let state = prep(&dir);
     let minted = token::mint("io", 3600, &state).expect("mint");
     token::purge(&minted.record.token_id, &state).expect("purge");
-    let err = token::redeem(&minted.secret, "myhost", &pubkey(43), &x25519_pubkey(43), &state);
-    assert_eq!(err, Err(RedeemError::NotFound), "a purged token's secret matches no record");
+    let err = token::redeem(
+        &minted.secret,
+        "myhost",
+        &pubkey(43),
+        &x25519_pubkey(43),
+        &state,
+    );
+    assert_eq!(
+        err,
+        Err(RedeemError::NotFound),
+        "a purged token's secret matches no record"
+    );
 }
 
 /// #454's churn at store level: every cycle on one label leaves nothing behind.
@@ -769,11 +1096,26 @@ fn label_churn_cycles_leave_an_empty_store() {
     let dir = Tdir::new();
     let state = prep(&dir);
     for n in 0..20u8 {
-        let minted = token::mint("churn", 3600, &state).unwrap_or_else(|e| panic!("cycle {n}: mint: {e}"));
-        token::redeem(&minted.secret, "myhost", &pubkey(n), &x25519_pubkey(n), &state).expect("redeem");
+        let minted =
+            token::mint("churn", 3600, &state).unwrap_or_else(|e| panic!("cycle {n}: mint: {e}"));
+        token::redeem(
+            &minted.secret,
+            "myhost",
+            &pubkey(n),
+            &x25519_pubkey(n),
+            &state,
+        )
+        .expect("redeem");
         token::delete(&minted.record.token_id, &state).expect("revoke");
-        token::purge(&minted.record.token_id, &state).unwrap_or_else(|e| panic!("cycle {n}: purge: {e}"));
+        token::purge(&minted.record.token_id, &state)
+            .unwrap_or_else(|e| panic!("cycle {n}: purge: {e}"));
     }
-    let doc: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(dir.tokens_path()).expect("read")).expect("parse");
-    assert_eq!(doc, serde_json::json!([]), "20 cycles leave no records on file");
+    let doc: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(dir.tokens_path()).expect("read"))
+            .expect("parse");
+    assert_eq!(
+        doc,
+        serde_json::json!([]),
+        "20 cycles leave no records on file"
+    );
 }

@@ -26,11 +26,17 @@ fn section(text: &str, heading_start: &str) -> String {
 }
 
 fn stage8() -> String {
-    flat(&section(&read("agent-skills/setup-wizard/SKILL.md"), "## Stage 8 "))
+    flat(&section(
+        &read("agent-skills/setup-wizard/SKILL.md"),
+        "## Stage 8 ",
+    ))
 }
 
 fn stage3() -> String {
-    flat(&section(&read("agent-skills/setup-wizard/SKILL.md"), "## Stage 3 "))
+    flat(&section(
+        &read("agent-skills/setup-wizard/SKILL.md"),
+        "## Stage 3 ",
+    ))
 }
 
 #[test]
@@ -55,7 +61,10 @@ fn stage8_build_in_it_is_a_new_workspace_with_a_way_to_find_its_pane() {
     let s = stage8();
     assert!(s.contains("`herdr.sh run workspace create`"));
     assert!(s.contains("a new workspace in that server"));
-    assert!(s.contains("filtered by the new workspace id"), "first pane id");
+    assert!(
+        s.contains("filtered by the new workspace id"),
+        "first pane id"
+    );
     assert!(s.contains("`<base-pane>`"));
     assert!(s.contains("never split a pane the wizard did not create"));
 }
@@ -80,7 +89,11 @@ fn stage8_says_to_check_column_widths_after_the_build() {
 #[test]
 fn docs_reuse_restored_panes_only_on_request() {
     let d = flat(&read("docs/setup-wizard.md"));
-    assert!(d.contains("if the user asked to reuse them and the count equals orchestrators + sessions"));
-    assert!(!d.contains("if the pane count already equals orchestrators + sessions, reuse the structure"));
+    assert!(
+        d.contains("if the user asked to reuse them and the count equals orchestrators + sessions")
+    );
+    assert!(!d.contains(
+        "if the pane count already equals orchestrators + sessions, reuse the structure"
+    ));
     assert!(d.contains("a new workspace in that server"));
 }

@@ -15,7 +15,13 @@
 //! `hub_serve_test.rs`: every test gets its own [`StateDir`], readiness is
 //! observed via [`wait_for`], hygiene tunables are set per-test via
 //! [`Hub::start_with_env`] (never the ambient environment).
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable, dead_code)] // #184
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unreachable,
+    dead_code
+)] // #184
 
 use std::time::Duration;
 
@@ -28,8 +34,8 @@ use tokio_tungstenite::tungstenite::Message;
 
 mod support;
 use support::raw_ws::{
-    authenticate_expecting_bare_close, authenticate_once, authenticate_request, connect_ws, decode_next, go_live, hub_x25519_pubkey, log_events,
-    send_authenticate, wait_for_close,
+    authenticate_expecting_bare_close, authenticate_once, authenticate_request, connect_ws,
+    decode_next, go_live, hub_x25519_pubkey, log_events, send_authenticate, wait_for_close,
 };
 use support::{holler_cmd, hub_status_json, wait_for, Hub, StateDir, STARTUP_WAIT};
 
@@ -50,7 +56,8 @@ fn fresh_signing_key(seed: u8) -> SigningKey {
 /// is what a raw client actually authenticates with, via the Noise XK
 /// handshake), and returns `(token_id, x25519_secret_bytes)`.
 fn mint_and_redeem(state: &StateDir, label: &str) -> (String, [u8; 32]) {
-    let (token_id, x25519_secret_bytes, _join_secret) = mint_and_redeem_keeping_secret(state, label);
+    let (token_id, x25519_secret_bytes, _join_secret) =
+        mint_and_redeem_keeping_secret(state, label);
     (token_id, x25519_secret_bytes)
 }
 
@@ -61,14 +68,23 @@ fn mint_and_redeem_keeping_secret(state: &StateDir, label: &str) -> (String, [u8
     let minted = holler_hub::token::mint(label, 24 * 3600, &hub_state).expect("mint a token");
     // Deterministic-but-distinct seed per label so concurrently-minted tokens
     // in the same test never collide on the same keypair.
-    let seed = label.bytes().fold(0u8, |a, b| a.wrapping_add(b)).wrapping_add(1);
+    let seed = label
+        .bytes()
+        .fold(0u8, |a, b| a.wrapping_add(b))
+        .wrapping_add(1);
     let signing_key = fresh_signing_key(seed);
     let body_pubkey = hex::encode(signing_key.verifying_key().to_bytes());
     let x25519_secret_bytes = [seed; 32];
     let x25519_secret = x25519_dalek::StaticSecret::from(x25519_secret_bytes);
     let body_x25519_pubkey = hex::encode(x25519_dalek::PublicKey::from(&x25519_secret).as_bytes());
-    let client_id = holler_hub::token::redeem(&minted.secret, label, &body_pubkey, &body_x25519_pubkey, &hub_state)
-        .expect("redeem the just-minted token");
+    let client_id = holler_hub::token::redeem(
+        &minted.secret,
+        label,
+        &body_pubkey,
+        &body_x25519_pubkey,
+        &hub_state,
+    )
+    .expect("redeem the just-minted token");
     let _ = client_id;
     (minted.record.token_id, x25519_secret_bytes, minted.secret)
 }
@@ -93,22 +109,52 @@ async fn reauth_supersedes_and_closes_old_socket_with_notification() {
     let ws_url = hub.ws_url();
 
     let mut old = connect_ws(&ws_url).await;
-    go_live(&mut old, &token_id, &body_x25519_secret, &hub_pubkey, "reauth-body", &ws_url).await;
+    go_live(
+        &mut old,
+        &token_id,
+        &body_x25519_secret,
+        &hub_pubkey,
+        "reauth-body",
+        &ws_url,
+    )
+    .await;
 
     let mut fresh = connect_ws(&ws_url).await;
-    go_live(&mut fresh, &token_id, &body_x25519_secret, &hub_pubkey, "reauth-body", &ws_url).await;
+    go_live(
+        &mut fresh,
+        &token_id,
+        &body_x25519_secret,
+        &hub_pubkey,
+        "reauth-body",
+        &ws_url,
+    )
+    .await;
 
     // The old socket must see the notification, then a 1000 close.
-    let note = decode_next(&mut old).await.expect("the old socket must receive circuit/superseded");
-    assert_eq!(note.method(), Some("circuit/superseded"), "unexpected frame on the old socket: {note:?}");
+    let note = decode_next(&mut old)
+        .await
+        .expect("the old socket must receive circuit/superseded");
+    assert_eq!(
+        note.method(),
+        Some("circuit/superseded"),
+        "unexpected frame on the old socket: {note:?}"
+    );
     let code = wait_for_close(&mut old).await;
     assert_eq!(code, Some(1000), "the old socket must close with code 1000");
 
     // The new socket is fully live: a `circuit/ping` still round-trips.
     let ping = json!({ "jsonrpc": "2.0", "id": "b-ping1", "method": "circuit/ping", "params": {} });
-    fresh.send(Message::text(ping.to_string())).await.expect("send circuit/ping on the new socket");
-    let ack = decode_next(&mut fresh).await.expect("the new socket must still answer circuit/ping");
-    assert!(ack.result().is_some(), "circuit/ping must succeed on the surviving socket: {ack:?}");
+    fresh
+        .send(Message::text(ping.to_string()))
+        .await
+        .expect("send circuit/ping on the new socket");
+    let ack = decode_next(&mut fresh)
+        .await
+        .expect("the new socket must still answer circuit/ping");
+    assert!(
+        ack.result().is_some(),
+        "circuit/ping must succeed on the surviving socket: {ack:?}"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -127,26 +173,52 @@ async fn revoke_force_closes_live_connection() {
     let ws_url = hub.ws_url();
 
     let mut ws = connect_ws(&ws_url).await;
-    go_live(&mut ws, &token_id, &body_x25519_secret, &hub_pubkey, "revoke-body", &ws_url).await;
+    go_live(
+        &mut ws,
+        &token_id,
+        &body_x25519_secret,
+        &hub_pubkey,
+        "revoke-body",
+        &ws_url,
+    )
+    .await;
 
     let out = holler_cmd(&state)
         .args(["hub", "token", "revoke", &token_id])
         .output()
         .expect("run `hub token revoke`");
-    assert!(out.status.success(), "hub token revoke must succeed: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "hub token revoke must succeed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
 
     let code = wait_for_close(&mut ws).await;
-    assert_eq!(code, Some(1008), "a revoked live socket must close with code 1008");
+    assert_eq!(
+        code,
+        Some(1008),
+        "a revoked live socket must close with code 1008"
+    );
 
     // Reconnecting to a revoked token fails `-32002` (issue #323's
     // `revoked_token_still_fails_closed_with_32002`: existing behaviour
     // survives the credential → public-key redesign, and now the public-key
     // → Noise XK redesign, issue #338).
     let mut retry = connect_ws(&ws_url).await;
-    let err = send_authenticate(&mut retry, &token_id, &body_x25519_secret, &hub_pubkey, "revoke-body", &ws_url)
-        .await
-        .expect_err("re-authenticating a revoked token must fail");
-    assert_eq!(err.code, -32002, "a revoked token must fail closed: {err:?}");
+    let err = send_authenticate(
+        &mut retry,
+        &token_id,
+        &body_x25519_secret,
+        &hub_pubkey,
+        "revoke-body",
+        &ws_url,
+    )
+    .await
+    .expect_err("re-authenticating a revoked token must fail");
+    assert_eq!(
+        err.code, -32002,
+        "a revoked token must fail closed: {err:?}"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -164,10 +236,16 @@ async fn oversized_frame_closes_1009() {
     // sees it — the frame is rejected at the WebSocket layer before decode.
     let huge = "x".repeat(4096);
     let req = json!({ "jsonrpc": "2.0", "id": "b-huge", "method": "query/status", "params": { "junk": huge } });
-    ws.send(Message::text(req.to_string())).await.expect("send the oversized frame");
+    ws.send(Message::text(req.to_string()))
+        .await
+        .expect("send the oversized frame");
 
     let code = wait_for_close(&mut ws).await;
-    assert_eq!(code, Some(1009), "an oversized frame must close with code 1009");
+    assert_eq!(
+        code,
+        Some(1009),
+        "an oversized frame must close with code 1009"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -188,7 +266,10 @@ async fn silent_socket_closed_after_pre_auth_timeout() {
     })
     .await
     .unwrap_or(false);
-    assert!(closed, "a silent socket must be closed once the pre-auth timeout elapses");
+    assert!(
+        closed,
+        "a silent socket must be closed once the pre-auth timeout elapses"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -204,7 +285,10 @@ async fn preauth_cap_rejects_65th_socket() {
     // reclaimed by their own timeout mid-test.
     let hub = Hub::start_with_env(
         &state,
-        &[("HOLLER_MAX_PREAUTH_CONNECTIONS", "4"), ("HOLLER_PRE_AUTH_TIMEOUT_MS", "30000")],
+        &[
+            ("HOLLER_MAX_PREAUTH_CONNECTIONS", "4"),
+            ("HOLLER_PRE_AUTH_TIMEOUT_MS", "30000"),
+        ],
     );
 
     // 4 sockets that connect and send nothing (holding their pre-auth slot).
@@ -216,12 +300,19 @@ async fn preauth_cap_rejects_65th_socket() {
     // The 5th must be refused immediately (1013), before reading a frame.
     let mut fifth = connect_ws(&hub.ws_url()).await;
     let code = wait_for_close(&mut fifth).await;
-    assert_eq!(code, Some(1013), "the connection over the pre-auth cap must be refused with code 1013");
+    assert_eq!(
+        code,
+        Some(1013),
+        "the connection over the pre-auth cap must be refused with code 1013"
+    );
 
     // The 4 held sockets are unaffected (still open — no close observed yet).
     for ws in &mut held {
         let immediate = tokio::time::timeout(Duration::from_millis(200), ws.next()).await;
-        assert!(immediate.is_err(), "a slot-holding socket under the cap must not be closed");
+        assert!(
+            immediate.is_err(),
+            "a slot-holding socket under the cap must not be closed"
+        );
     }
 }
 
@@ -239,7 +330,11 @@ async fn five_bad_auths_lock_out_peer_for_window() {
     let state = StateDir::new();
     let hub = Hub::start_with_env(
         &state,
-        &[("HOLLER_LOCKOUT_MAX_FAILURES", "5"), ("HOLLER_LOCKOUT_WINDOW_MS", "2000"), ("HOLLER_LOCKOUT_DURATION_MS", "2000")],
+        &[
+            ("HOLLER_LOCKOUT_MAX_FAILURES", "5"),
+            ("HOLLER_LOCKOUT_WINDOW_MS", "2000"),
+            ("HOLLER_LOCKOUT_DURATION_MS", "2000"),
+        ],
     );
     let (token_id, _body_x25519_secret) = mint_and_redeem(&state, "lockout-body");
     let hub_pubkey = hub_x25519_pubkey(&state);
@@ -253,10 +348,20 @@ async fn five_bad_auths_lock_out_peer_for_window() {
 
     for i in 0..5 {
         let mut ws = connect_ws(&ws_url).await;
-        let err = send_authenticate(&mut ws, &token_id, &wrong_key, &hub_pubkey, "lockout-body", &ws_url)
-            .await
-            .expect_err("a wrong key must fail authentication");
-        assert_eq!(err.code, -32002, "bad-auth attempt {i} must be -32002: {err:?}");
+        let err = send_authenticate(
+            &mut ws,
+            &token_id,
+            &wrong_key,
+            &hub_pubkey,
+            "lockout-body",
+            &ws_url,
+        )
+        .await
+        .expect_err("a wrong key must fail authentication");
+        assert_eq!(
+            err.code, -32002,
+            "bad-auth attempt {i} must be -32002: {err:?}"
+        );
     }
 
     // Issue #455: the lockout is keyed by (peer, token id), so the 6th
@@ -264,21 +369,52 @@ async fn five_bad_auths_lock_out_peer_for_window() {
     // `MAX_TOKEN_IDS_PER_PEER`) and refused only once it names the locked
     // token: a bare close 1008 with no JSON-RPC error frame first.
     let mut sixth = connect_ws(&ws_url).await;
-    let code = authenticate_expecting_bare_close(&mut sixth, &ws_url, &token_id, &wrong_key, &hub_pubkey).await;
-    assert_eq!(code, Ok(1008), "the locked token's authenticate must be refused with a bare close 1008");
+    let code =
+        authenticate_expecting_bare_close(&mut sixth, &ws_url, &token_id, &wrong_key, &hub_pubkey)
+            .await;
+    assert_eq!(
+        code,
+        Ok(1008),
+        "the locked token's authenticate must be refused with a bare close 1008"
+    );
     drop(sixth);
 
     // A different token from the same peer is not locked out: it completes
     // the whole handshake and reaches the live session.
     let (other_token, other_key) = mint_and_redeem(&state, "lockout-other");
     let mut other = connect_ws(&ws_url).await;
-    go_live(&mut other, &other_token, &other_key, &hub_pubkey, "lockout-other", &ws_url).await;
+    go_live(
+        &mut other,
+        &other_token,
+        &other_key,
+        &hub_pubkey,
+        "lockout-other",
+        &ws_url,
+    )
+    .await;
     drop(other);
     // The refusal is logged with the token it refused (fields `peer`, `token_id`).
-    let refused = wait_for(STARTUP_WAIT, || log_events(&hub, "lockout_refused").into_iter().find(|e| e["token_id"] == token_id.as_str()))
-        .unwrap_or_else(|| panic!("the token-scoped refusal was never logged:\n{}", hub.log_text()));
-    assert!(refused["peer"].as_str().is_some_and(|p| p.starts_with("127.0.0.1")), "the refusal names the peer: {refused}");
-    assert_eq!(refused["scope"], "token", "a one-token lockout is refused with scope token: {refused}");
+    let refused = wait_for(STARTUP_WAIT, || {
+        log_events(&hub, "lockout_refused")
+            .into_iter()
+            .find(|e| e["token_id"] == token_id.as_str())
+    })
+    .unwrap_or_else(|| {
+        panic!(
+            "the token-scoped refusal was never logged:\n{}",
+            hub.log_text()
+        )
+    });
+    assert!(
+        refused["peer"]
+            .as_str()
+            .is_some_and(|p| p.starts_with("127.0.0.1")),
+        "the refusal names the peer: {refused}"
+    );
+    assert_eq!(
+        refused["scope"], "token",
+        "a one-token lockout is refused with scope token: {refused}"
+    );
 
     // After the window lapses, the peer is admitted again: a bad-credential
     // attempt now gets the *normal* auth-failure roundtrip (an error frame,
@@ -286,10 +422,20 @@ async fn five_bad_auths_lock_out_peer_for_window() {
     // not just that this one attempt happened to look different.
     tokio::time::sleep(Duration::from_millis(2100)).await;
     let mut retry = connect_ws(&ws_url).await;
-    let err = send_authenticate(&mut retry, &token_id, &wrong_key, &hub_pubkey, "lockout-body", &ws_url)
-        .await
-        .expect_err("still the wrong key");
-    assert_eq!(err.code, -32002, "after the cooldown, auth failures are answered normally again: {err:?}");
+    let err = send_authenticate(
+        &mut retry,
+        &token_id,
+        &wrong_key,
+        &hub_pubkey,
+        "lockout-body",
+        &ws_url,
+    )
+    .await
+    .expect_err("still the wrong key");
+    assert_eq!(
+        err.code, -32002,
+        "after the cooldown, auth failures are answered normally again: {err:?}"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -304,7 +450,13 @@ async fn five_bad_auths_lock_out_peer_for_window() {
 #[tokio::test]
 async fn slow_token_store_does_not_stall_sibling_ping() {
     let state = StateDir::new();
-    let hub = Hub::start_with_env(&state, &[("HOLLER_TEST_HOOKS", "1"), ("HOLLER_TEST_TOKEN_STORE_DELAY_MS", "200")]);
+    let hub = Hub::start_with_env(
+        &state,
+        &[
+            ("HOLLER_TEST_HOOKS", "1"),
+            ("HOLLER_TEST_TOKEN_STORE_DELAY_MS", "200"),
+        ],
+    );
     let (sibling_token, sibling_key) = mint_and_redeem(&state, "sibling-body");
     let (slow_token, slow_key) = mint_and_redeem(&state, "slow-body");
     let hub_pubkey = hub_x25519_pubkey(&state);
@@ -314,14 +466,30 @@ async fn slow_token_store_does_not_stall_sibling_ping() {
     // store delay — twice, once per `circuit/authenticate`/`circuit/prove`
     // step — that is not what is being measured).
     let mut sibling = connect_ws(&ws_url).await;
-    go_live(&mut sibling, &sibling_token, &sibling_key, &hub_pubkey, "sibling-body", &ws_url).await;
+    go_live(
+        &mut sibling,
+        &sibling_token,
+        &sibling_key,
+        &hub_pubkey,
+        "sibling-body",
+        &ws_url,
+    )
+    .await;
 
     // Start a second connection's authenticate concurrently (it will sit on
     // the delayed store for ~200ms per step) without awaiting it yet.
     let slow_url = ws_url.clone();
     let slow_handle = tokio::spawn(async move {
         let mut ws = connect_ws(&slow_url).await;
-        go_live(&mut ws, &slow_token, &slow_key, &hub_pubkey, "slow-body", &slow_url).await;
+        go_live(
+            &mut ws,
+            &slow_token,
+            &slow_key,
+            &hub_pubkey,
+            "slow-body",
+            &slow_url,
+        )
+        .await;
         ws
     });
 
@@ -330,9 +498,15 @@ async fn slow_token_store_does_not_stall_sibling_ping() {
     // local (no store access at all) — round trip.
     tokio::time::sleep(Duration::from_millis(30)).await;
     let started = std::time::Instant::now();
-    let ping = json!({ "jsonrpc": "2.0", "id": "b-sibping", "method": "circuit/ping", "params": {} });
-    sibling.send(Message::text(ping.to_string())).await.expect("send circuit/ping");
-    let ack = decode_next(&mut sibling).await.expect("the sibling must answer circuit/ping promptly");
+    let ping =
+        json!({ "jsonrpc": "2.0", "id": "b-sibping", "method": "circuit/ping", "params": {} });
+    sibling
+        .send(Message::text(ping.to_string()))
+        .await
+        .expect("send circuit/ping");
+    let ack = decode_next(&mut sibling)
+        .await
+        .expect("the sibling must answer circuit/ping promptly");
     let elapsed = started.elapsed();
     assert!(ack.result().is_some(), "circuit/ping must succeed: {ack:?}");
     assert!(
@@ -341,7 +515,9 @@ async fn slow_token_store_does_not_stall_sibling_ping() {
          looks like the store call is blocking the connection's own executor thread"
     );
 
-    let _ = tokio::time::timeout(Duration::from_secs(5), slow_handle).await.expect("the slow authenticate must still finish");
+    let _ = tokio::time::timeout(Duration::from_secs(5), slow_handle)
+        .await
+        .expect("the slow authenticate must still finish");
 }
 
 // ---------------------------------------------------------------------------
@@ -359,17 +535,33 @@ async fn peer_addr_present_in_status_json() {
     let ws_url = hub.ws_url();
 
     let mut ws = connect_ws(&ws_url).await;
-    go_live(&mut ws, &token_id, &body_x25519_secret, &hub_pubkey, "peer-body", &ws_url).await;
+    go_live(
+        &mut ws,
+        &token_id,
+        &body_x25519_secret,
+        &hub_pubkey,
+        "peer-body",
+        &ws_url,
+    )
+    .await;
 
     let doc = wait_for(STARTUP_WAIT, || {
         let d = hub_status_json(&state);
-        let has_client = d.get("clients_detail").and_then(|c| c.as_array()).is_some_and(|a| !a.is_empty());
+        let has_client = d
+            .get("clients_detail")
+            .and_then(|c| c.as_array())
+            .is_some_and(|a| !a.is_empty());
         has_client.then_some(d)
     })
     .expect("hub status must report the live connection");
 
-    let peer = doc["clients_detail"][0]["peer"].as_str().expect("clients_detail[0].peer is a string");
-    assert!(peer.starts_with("127.0.0.1:"), "peer must be the real loopback transport address, got {peer:?}");
+    let peer = doc["clients_detail"][0]["peer"]
+        .as_str()
+        .expect("clients_detail[0].peer is a string");
+    assert!(
+        peer.starts_with("127.0.0.1:"),
+        "peer must be the real loopback transport address, got {peer:?}"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -389,13 +581,23 @@ async fn fresh_hub_single_authenticate_does_not_panic() {
     let ws_url = hub.ws_url();
 
     let mut ws = connect_ws(&ws_url).await;
-    send_authenticate(&mut ws, &token_id, &body_x25519_secret, &hub_pubkey, "solo-body", &ws_url)
-        .await
-        .expect("a legitimate authenticate must succeed with no panic");
+    send_authenticate(
+        &mut ws,
+        &token_id,
+        &body_x25519_secret,
+        &hub_pubkey,
+        "solo-body",
+        &ws_url,
+    )
+    .await
+    .expect("a legitimate authenticate must succeed with no panic");
 
     // The hub process must still be alive and answering afterward.
     let doc = hub_status_json(&state);
-    assert_eq!(doc["role"], "hub", "the hub must still be responsive: {doc}");
+    assert_eq!(
+        doc["role"], "hub",
+        "the hub must still be responsive: {doc}"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -421,8 +623,11 @@ async fn authenticate_with_old_protocol_is_refused_with_unsupported_version() {
     let ws_url = hub.ws_url();
 
     let prologue = build_prologue(holler_proto::PROTOCOL_VERSION, &token_id, &ws_url);
-    let mut handshake = HandshakeXk::initiator(&body_x25519_secret, &hub_pubkey, &prologue).expect("build noise initiator");
-    let msg1 = handshake.write_message().expect("write handshake message 1");
+    let mut handshake = HandshakeXk::initiator(&body_x25519_secret, &hub_pubkey, &prologue)
+        .expect("build noise initiator");
+    let msg1 = handshake
+        .write_message()
+        .expect("write handshake message 1");
 
     let mut ws = connect_ws(&ws_url).await;
     let old_protocol = holler_proto::PROTOCOL_VERSION - 1;
@@ -435,9 +640,13 @@ async fn authenticate_with_old_protocol_is_refused_with_unsupported_version() {
             "token_id": token_id, "hostname": "old-proto-body", "advertised_url": ws_url, "message": hex::encode(msg1),
         },
     });
-    ws.send(Message::text(req.to_string())).await.expect("send circuit/authenticate");
+    ws.send(Message::text(req.to_string()))
+        .await
+        .expect("send circuit/authenticate");
 
-    let env = decode_next(&mut ws).await.expect("the hub must answer, not hang");
+    let env = decode_next(&mut ws)
+        .await
+        .expect("the hub must answer, not hang");
     let Envelope::Error { error, .. } = env else {
         panic!("an old-protocol body must be refused, not answered with an AuthChallenge: {env:?}");
     };
@@ -447,17 +656,23 @@ async fn authenticate_with_old_protocol_is_refused_with_unsupported_version() {
         "must be -32000 unsupported_version, not a generic auth failure: {error:?}"
     );
     assert!(
-        error.message.contains(&old_protocol.to_string()) && error.message.to_lowercase().contains("protocol"),
+        error.message.contains(&old_protocol.to_string())
+            && error.message.to_lowercase().contains("protocol"),
         "the message must name the mismatch: {error:?}"
     );
     assert!(
-        error.message.contains("body join") || error.message.to_lowercase().contains("re-pair") || error.message.to_lowercase().contains("upgrade"),
+        error.message.contains("body join")
+            || error.message.to_lowercase().contains("re-pair")
+            || error.message.to_lowercase().contains("upgrade"),
         "the message must give an actionable re-pair path, not a bare refusal: {error:?}"
     );
 
     // No silent downgrade, no hang: the socket closes right after — no
     // further frame (a real `AuthChallenge`) ever follows.
-    assert!(decode_next(&mut ws).await.is_none(), "the hub must close the socket, not leave it open");
+    assert!(
+        decode_next(&mut ws).await.is_none(),
+        "the hub must close the socket, not leave it open"
+    );
 }
 
 /// The literal "pre-Noise-XK bodies are refused cleanly" acceptance
@@ -477,8 +692,11 @@ async fn authenticate_missing_protocol_field_is_refused_with_unsupported_version
     let ws_url = hub.ws_url();
 
     let prologue = build_prologue(holler_proto::PROTOCOL_VERSION, &token_id, &ws_url);
-    let mut handshake = HandshakeXk::initiator(&body_x25519_secret, &hub_pubkey, &prologue).expect("build noise initiator");
-    let msg1 = handshake.write_message().expect("write handshake message 1");
+    let mut handshake = HandshakeXk::initiator(&body_x25519_secret, &hub_pubkey, &prologue)
+        .expect("build noise initiator");
+    let msg1 = handshake
+        .write_message()
+        .expect("write handshake message 1");
 
     let mut ws = connect_ws(&ws_url).await;
     let req = json!({
@@ -489,9 +707,13 @@ async fn authenticate_missing_protocol_field_is_refused_with_unsupported_version
             "token_id": token_id, "hostname": "no-proto-field-body", "advertised_url": ws_url, "message": hex::encode(msg1),
         },
     });
-    ws.send(Message::text(req.to_string())).await.expect("send circuit/authenticate");
+    ws.send(Message::text(req.to_string()))
+        .await
+        .expect("send circuit/authenticate");
 
-    let env = decode_next(&mut ws).await.expect("the hub must answer, not hang");
+    let env = decode_next(&mut ws)
+        .await
+        .expect("the hub must answer, not hang");
     let Envelope::Error { error, .. } = env else {
         panic!("a pre-#340-shaped body (no `protocol` field) must be refused, not answered with an AuthChallenge: {env:?}");
     };
@@ -519,9 +741,16 @@ async fn hello_with_old_protocol_is_refused_with_unsupported_version() {
     let ws_url = hub.ws_url();
 
     let mut ws = connect_ws(&ws_url).await;
-    send_authenticate(&mut ws, &token_id, &body_x25519_secret, &hub_pubkey, "old-hello-body", &ws_url)
-        .await
-        .expect("a legitimate handshake must succeed");
+    send_authenticate(
+        &mut ws,
+        &token_id,
+        &body_x25519_secret,
+        &hub_pubkey,
+        "old-hello-body",
+        &ws_url,
+    )
+    .await
+    .expect("a legitimate handshake must succeed");
 
     let old_protocol = holler_proto::PROTOCOL_VERSION - 1;
     let hello = json!({
@@ -533,9 +762,13 @@ async fn hello_with_old_protocol_is_refused_with_unsupported_version() {
             "role": "body", "hostname": "old-hello-body", "harnesses": [],
         },
     });
-    ws.send(Message::text(hello.to_string())).await.expect("send circuit/hello");
+    ws.send(Message::text(hello.to_string()))
+        .await
+        .expect("send circuit/hello");
 
-    let env = decode_next(&mut ws).await.expect("the hub must answer, not hang");
+    let env = decode_next(&mut ws)
+        .await
+        .expect("the hub must answer, not hang");
     let Envelope::Error { error, .. } = env else {
         panic!("an old-protocol hello must be refused, not answered normally: {env:?}");
     };
@@ -544,7 +777,10 @@ async fn hello_with_old_protocol_is_refused_with_unsupported_version() {
         holler_proto::Code::UnsupportedVersion.jsonrpc(),
         "must be -32000 unsupported_version: {error:?}"
     );
-    assert!(decode_next(&mut ws).await.is_none(), "the hub must close the socket after refusing the hello");
+    assert!(
+        decode_next(&mut ws).await.is_none(),
+        "the hub must close the socket after refusing the hello"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -554,16 +790,29 @@ async fn hello_with_old_protocol_is_refused_with_unsupported_version() {
 /// A hub-fault refusal: still `-32002` with the `authentication failed:`
 /// prefix, marked `error.data.reason = "hub_unavailable"`.
 fn assert_hub_unavailable(outcome: &Result<holler_proto::WireError, String>, what: &str) {
-    let err = outcome.as_ref().unwrap_or_else(|e| panic!("{what}: not refused as -32002: {e}"));
+    let err = outcome
+        .as_ref()
+        .unwrap_or_else(|e| panic!("{what}: not refused as -32002: {e}"));
     assert_eq!(err.code, -32002, "{what}: {err:?}");
-    assert!(err.message.starts_with("authentication failed:"), "{what}: {err:?}");
-    assert_eq!(err.data.as_ref().and_then(|d| d.reason.as_deref()), Some("hub_unavailable"), "{what}: {err:?}");
+    assert!(
+        err.message.starts_with("authentication failed:"),
+        "{what}: {err:?}"
+    );
+    assert_eq!(
+        err.data.as_ref().and_then(|d| d.reason.as_deref()),
+        Some("hub_unavailable"),
+        "{what}: {err:?}"
+    );
 }
 
 /// `hub status` shows no lockout and no counted failure for any peer.
 fn assert_nothing_counted(state: &StateDir, what: &str) {
     let doc = hub_status_json(state);
-    assert_eq!(doc["lockout"], json!({ "peers": [] }), "{what}: a hub fault must never count toward the lockout: {doc}");
+    assert_eq!(
+        doc["lockout"],
+        json!({ "peers": [] }),
+        "{what}: a hub fault must never count toward the lockout: {doc}"
+    );
 }
 
 /// Issue #485, acceptance criteria 2 to 4: a hub whose `tokens.json` is
@@ -575,7 +824,13 @@ fn assert_nothing_counted(state: &StateDir, what: &str) {
 #[tokio::test]
 async fn a_corrupt_token_store_is_hub_unavailable_and_never_locks_the_peer_out() {
     let state = StateDir::new();
-    let hub = Hub::start_with_env(&state, &[("HOLLER_LOCKOUT_MAX_FAILURES", "3"), ("HOLLER_DEBUG", "none")]);
+    let hub = Hub::start_with_env(
+        &state,
+        &[
+            ("HOLLER_LOCKOUT_MAX_FAILURES", "3"),
+            ("HOLLER_DEBUG", "none"),
+        ],
+    );
     let (token_id, key, join_secret) = mint_and_redeem_keeping_secret(&state, "fault-body");
     let hub_pubkey = hub_x25519_pubkey(&state);
     let ws_url = hub.ws_url();
@@ -587,37 +842,90 @@ async fn a_corrupt_token_store_is_hub_unavailable_and_never_locks_the_peer_out()
     for _ in 0..6 {
         outcomes.push(authenticate_once(&ws_url, &token_id, &key, &hub_pubkey).await);
     }
-    assert_nothing_counted(&state, &format!("6 attempts on a corrupt store, outcomes {outcomes:?}"));
+    assert_nothing_counted(
+        &state,
+        &format!("6 attempts on a corrupt store, outcomes {outcomes:?}"),
+    );
     for (i, o) in outcomes.iter().enumerate() {
         assert_hub_unavailable(o, &format!("attempt {i}"));
     }
 
-    let events = wait_for(STARTUP_WAIT, || Some(log_events(&hub, "auth_unavailable")).filter(|e| e.len() >= 6))
-        .unwrap_or_else(|| panic!("six auth_unavailable events were never logged:\n{}", hub.log_text()));
+    let events = wait_for(STARTUP_WAIT, || {
+        Some(log_events(&hub, "auth_unavailable")).filter(|e| e.len() >= 6)
+    })
+    .unwrap_or_else(|| {
+        panic!(
+            "six auth_unavailable events were never logged:\n{}",
+            hub.log_text()
+        )
+    });
     for e in &events {
         assert_eq!(e["level"], "ERROR", "{e}");
         assert_eq!(e["token_id"], token_id.as_str(), "{e}");
-        assert!(e["peer"].as_str().is_some_and(|p| p.starts_with("127.0.0.1")), "the event names the peer: {e}");
-        assert!(e.to_string().contains("corrupted"), "the event carries the cause: {e}");
+        assert!(
+            e["peer"]
+                .as_str()
+                .is_some_and(|p| p.starts_with("127.0.0.1")),
+            "the event names the peer: {e}"
+        );
+        assert!(
+            e.to_string().contains("corrupted"),
+            "the event carries the cause: {e}"
+        );
     }
-    assert!(log_events(&hub, "auth_rejected").is_empty(), "a hub fault is not an auth rejection:\n{}", hub.log_text());
-    assert!(log_events(&hub, "lockout_tripped").is_empty(), "no lockout trip:\n{}", hub.log_text());
-    let identity_hex = hex::encode(std::fs::read(state.hub().join("identity.key")).expect("read the hub identity"));
+    assert!(
+        log_events(&hub, "auth_rejected").is_empty(),
+        "a hub fault is not an auth rejection:\n{}",
+        hub.log_text()
+    );
+    assert!(
+        log_events(&hub, "lockout_tripped").is_empty(),
+        "no lockout trip:\n{}",
+        hub.log_text()
+    );
+    let identity_hex = hex::encode(
+        std::fs::read(state.hub().join("identity.key")).expect("read the hub identity"),
+    );
     let log = hub.log_text();
-    for (name, secret) in [("join secret", join_secret), ("body key", hex::encode(key)), ("hub identity", identity_hex)] {
-        assert!(!log.contains(&secret), "the {name} must never appear in the hub log");
+    for (name, secret) in [
+        ("join secret", join_secret),
+        ("body key", hex::encode(key)),
+        ("hub identity", identity_hex),
+    ] {
+        assert!(
+            !log.contains(&secret),
+            "the {name} must never appear in the hub log"
+        );
     }
 
     std::fs::write(&tokens, &good).expect("repair the store");
     let mut ws = connect_ws(&ws_url).await;
-    send_authenticate(&mut ws, &token_id, &key, &hub_pubkey, "fault-body", &ws_url).await.expect("after repair the same peer authenticates");
+    send_authenticate(&mut ws, &token_id, &key, &hub_pubkey, "fault-body", &ws_url)
+        .await
+        .expect("after repair the same peer authenticates");
     drop(ws);
     let mut ws = connect_ws(&ws_url).await;
-    let err = send_authenticate(&mut ws, &token_id, &[200u8; 32], &hub_pubkey, "fault-body", &ws_url).await.expect_err("a wrong key");
-    assert_eq!(err.data.as_ref().and_then(|d| d.reason.as_deref()), Some("key_mismatch"), "a credential failure names its code: {err:?}");
+    let err = send_authenticate(
+        &mut ws,
+        &token_id,
+        &[200u8; 32],
+        &hub_pubkey,
+        "fault-body",
+        &ws_url,
+    )
+    .await
+    .expect_err("a wrong key");
+    assert_eq!(
+        err.data.as_ref().and_then(|d| d.reason.as_deref()),
+        Some("key_mismatch"),
+        "a credential failure names its code: {err:?}"
+    );
     let doc = hub_status_json(&state);
     let peers = &doc["lockout"]["peers"];
-    assert_eq!(peers[0]["failures"], 1, "a credential failure is still counted: {doc}");
+    assert_eq!(
+        peers[0]["failures"], 1,
+        "a credential failure is still counted: {doc}"
+    );
     assert_eq!(peers[0]["reasons"], json!({ "key_mismatch": 1 }), "{doc}");
 }
 
@@ -628,7 +936,13 @@ async fn a_corrupt_token_store_is_hub_unavailable_and_never_locks_the_peer_out()
 #[tokio::test]
 async fn identity_and_prove_time_store_faults_are_hub_unavailable_and_not_counted() {
     let state = StateDir::new();
-    let hub = Hub::start_with_env(&state, &[("HOLLER_LOCKOUT_MAX_FAILURES", "1"), ("HOLLER_DEBUG", "none")]);
+    let hub = Hub::start_with_env(
+        &state,
+        &[
+            ("HOLLER_LOCKOUT_MAX_FAILURES", "1"),
+            ("HOLLER_DEBUG", "none"),
+        ],
+    );
     let (token_id, key) = mint_and_redeem(&state, "fault-body");
     let hub_pubkey = hub_x25519_pubkey(&state);
     let ws_url = hub.ws_url();
@@ -637,18 +951,42 @@ async fn identity_and_prove_time_store_faults_are_hub_unavailable_and_not_counte
     let tokens = state.hub().join("tokens.json");
     let good = std::fs::read(&tokens).expect("read the valid store");
     let prologue = build_prologue(holler_proto::PROTOCOL_VERSION, &token_id, &ws_url);
-    let mut handshake = HandshakeXk::initiator(&key, &hub_pubkey, &prologue).expect("build noise initiator");
-    let msg1 = handshake.write_message().expect("write handshake message 1");
+    let mut handshake =
+        HandshakeXk::initiator(&key, &hub_pubkey, &prologue).expect("build noise initiator");
+    let msg1 = handshake
+        .write_message()
+        .expect("write handshake message 1");
     let mut ws = connect_ws(&ws_url).await;
-    ws.send(Message::text(authenticate_request(&token_id, "fault-body", &ws_url, &msg1).to_string())).await.expect("send authenticate");
-    let Some(Envelope::Response { result, .. }) = decode_next(&mut ws).await else { panic!("expected the challenge") };
-    let msg2 = hex::decode(result.as_ref().and_then(|v| v["message"].as_str()).expect("message 2")).expect("hex message 2");
-    handshake.read_message(&msg2).expect("process handshake message 2");
-    let msg3 = handshake.write_message().expect("write handshake message 3");
+    ws.send(Message::text(
+        authenticate_request(&token_id, "fault-body", &ws_url, &msg1).to_string(),
+    ))
+    .await
+    .expect("send authenticate");
+    let Some(Envelope::Response { result, .. }) = decode_next(&mut ws).await else {
+        panic!("expected the challenge")
+    };
+    let msg2 = hex::decode(
+        result
+            .as_ref()
+            .and_then(|v| v["message"].as_str())
+            .expect("message 2"),
+    )
+    .expect("hex message 2");
+    handshake
+        .read_message(&msg2)
+        .expect("process handshake message 2");
+    let msg3 = handshake
+        .write_message()
+        .expect("write handshake message 3");
     std::fs::write(&tokens, b"not json {").expect("corrupt the store mid-handshake");
     let prove = json!({ "jsonrpc": "2.0", "id": "b-prove1", "method": "circuit/prove", "params": { "token_id": token_id, "message": hex::encode(msg3) } });
-    ws.send(Message::text(prove.to_string())).await.expect("send circuit/prove");
-    let refusal = decode_next(&mut ws).await.and_then(|e| e.error().cloned()).ok_or_else(|| "no refusal".to_string());
+    ws.send(Message::text(prove.to_string()))
+        .await
+        .expect("send circuit/prove");
+    let refusal = decode_next(&mut ws)
+        .await
+        .and_then(|e| e.error().cloned())
+        .ok_or_else(|| "no refusal".to_string());
     assert_nothing_counted(&state, "store fault at circuit/prove");
     assert_hub_unavailable(&refusal, "store fault at circuit/prove");
     std::fs::write(&tokens, &good).expect("repair the store");

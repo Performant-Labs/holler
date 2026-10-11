@@ -30,7 +30,10 @@ use tokio_tungstenite::{
 /// `WebSocketStream`, configured with `ws_config` (issue #184's max frame/
 /// message size hygiene limit). A client that sends a non-WebSocket `GET`
 /// (or nothing) is dropped (returns `None`).
-pub(crate) async fn server_handshake(mut stream: TcpStream, ws_config: WebSocketConfig) -> Option<WebSocketStream<TcpStream>> {
+pub(crate) async fn server_handshake(
+    mut stream: TcpStream,
+    ws_config: WebSocketConfig,
+) -> Option<WebSocketStream<TcpStream>> {
     // 1. Drain the HTTP upgrade request: read until the end of the header
     //    section (`\r\n\r\n`). A WebSocket `GET` has no body, so the bytes
     //    after the blank line (if any) are already the first WS frame.
@@ -77,7 +80,10 @@ pub(crate) async fn server_handshake(mut stream: TcpStream, ws_config: WebSocket
 
     // 4. Wrap the (already-upgraded) socket, folding in any over-read bytes so
     //    the first frame is not lost. No handshake is repeated.
-    Some(WebSocketStream::from_partially_read(stream, rest.to_vec(), Role::Server, Some(ws_config)).await)
+    Some(
+        WebSocketStream::from_partially_read(stream, rest.to_vec(), Role::Server, Some(ws_config))
+            .await,
+    )
 }
 
 /// The offset (exclusive) just past the first `\r\n\r\n` in `buf`, or `None`.
@@ -105,7 +111,10 @@ fn parse_upgrade_request(head: &[u8]) -> Option<WsRequest> {
     let path = raw.path.unwrap_or("/");
     // A WebSocket upgrade is always HTTP/1.1 (httparse reports the numeric
     // version, `1`); the response below is emitted as HTTP/1.1.
-    let mut builder = http::Request::builder().method(method).uri(path).version(http::Version::HTTP_11);
+    let mut builder = http::Request::builder()
+        .method(method)
+        .uri(path)
+        .version(http::Version::HTTP_11);
     for h in raw.headers.iter() {
         // httparse's header name/value borrow from `head`; the `http` crate
         // wants owned (or `'static`) header parts, so copy via `from_bytes`

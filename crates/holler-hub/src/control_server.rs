@@ -77,7 +77,13 @@ fn log_control(method: &str, id: Option<&str>) {
 
 /// Parse one control frame, dispatch it, and return the reply as a single
 /// line (no trailing newline; the caller adds it).
-async fn dispatch_control(line: &str, registry: &Registry, roster: &Roster, lockout: &Lockout, pane_deps: &PaneDeps) -> String {
+async fn dispatch_control(
+    line: &str,
+    registry: &Registry,
+    roster: &Roster,
+    lockout: &Lockout,
+    pane_deps: &PaneDeps,
+) -> String {
     // The control socket is **internal, non-wire**: it is not validated
     // against the v2 wire catalog (those are the `control/…` methods, which
     // live only here). We still parse the frame as a JSON-RPC object so we can
@@ -97,7 +103,11 @@ async fn dispatch_control(line: &str, registry: &Registry, roster: &Roster, lock
     log_control(method.unwrap_or("<none>"), id.as_deref());
 
     match method {
-        Some("control/status") => dispatch_allowlisted("status", &cid, &obj, registry, roster, lockout).await.unwrap_or_default(),
+        Some("control/status") => {
+            dispatch_allowlisted("status", &cid, &obj, registry, roster, lockout)
+                .await
+                .unwrap_or_default()
+        }
         Some("control/token_ping") => token_ping(&cid, &obj, registry).await,
         Some("control/caps") => {
             let listening = read_listening_here();
@@ -106,21 +116,34 @@ async fn dispatch_control(line: &str, registry: &Registry, roster: &Roster, lock
         }
         Some("control/support") => hub_support(&cid, &obj, registry).await,
         Some("control/query_local") => {
-            dispatch_allowlisted("query_local", &cid, &obj, registry, roster, lockout).await.unwrap_or_default()
+            dispatch_allowlisted("query_local", &cid, &obj, registry, roster, lockout)
+                .await
+                .unwrap_or_default()
         }
         Some("control/query_remote") => {
-            dispatch_allowlisted("query_remote", &cid, &obj, registry, roster, lockout).await.unwrap_or_default()
+            dispatch_allowlisted("query_remote", &cid, &obj, registry, roster, lockout)
+                .await
+                .unwrap_or_default()
         }
         // `pane/*` and `profile/*` (issue #669): the two method lists, not a
         // prefix, so `pane/frobnicate` stays `method_not_found`. Ahead of the
         // `control/` arm so the order is explicit.
-        Some(m) if is_pane_method(m) || is_profile_method(m) => crate::pane_dispatch::forward(m, &cid, &obj, pane_deps).await,
+        Some(m) if is_pane_method(m) || is_profile_method(m) => {
+            crate::pane_dispatch::forward(m, &cid, &obj, pane_deps).await
+        }
         Some(other) if other.starts_with("control/") => {
             dispatch_session_control(other, &cid, &obj, registry, roster, lockout).await
         }
-        Some(other) => encode_error(&cid, Code::MethodNotFound, format!("unknown control method: {other}")),
+        Some(other) => encode_error(
+            &cid,
+            Code::MethodNotFound,
+            format!("unknown control method: {other}"),
+        ),
         // No method: not a call (a stray response/notification or empty frame).
-        None => unkeyed_error_line(Code::InvalidRequest, "a control frame must be a request with a method"),
+        None => unkeyed_error_line(
+            Code::InvalidRequest,
+            "a control frame must be a request with a method",
+        ),
     }
 }
 
@@ -138,14 +161,24 @@ async fn dispatch_session_control(
     lockout: &Lockout,
 ) -> String {
     match method {
-        "control/say" => dispatch_allowlisted("say", cid, obj, registry, roster, lockout).await.unwrap_or_default(),
+        "control/say" => dispatch_allowlisted("say", cid, obj, registry, roster, lockout)
+            .await
+            .unwrap_or_default(),
         // `control/interrupt` (issue #191): the CLI's `interrupt` verb.
-        "control/interrupt" => dispatch_allowlisted("interrupt", cid, obj, registry, roster, lockout).await.unwrap_or_default(),
-        "control/answer" => dispatch_allowlisted("answer", cid, obj, registry, roster, lockout).await.unwrap_or_default(),
+        "control/interrupt" => {
+            dispatch_allowlisted("interrupt", cid, obj, registry, roster, lockout)
+                .await
+                .unwrap_or_default()
+        }
+        "control/answer" => dispatch_allowlisted("answer", cid, obj, registry, roster, lockout)
+            .await
+            .unwrap_or_default(),
         // `control/roster` (issue #186): read the hub's own roster and return
         // `{rows: [...]}` (the live-only view; the CLI's `--all` reads the
         // same socket and asks for the full set, which the server honors here).
-        "control/roster" => dispatch_allowlisted("roster", cid, obj, registry, roster, lockout).await.unwrap_or_default(),
+        "control/roster" => dispatch_allowlisted("roster", cid, obj, registry, roster, lockout)
+            .await
+            .unwrap_or_default(),
         // `control/hold` / `control/release` (issue #442): the session hold.
         "control/hold" => crate::control_hold::hold(cid, obj, registry, roster),
         "control/release" => crate::control_hold::release(cid, obj, registry, roster),
@@ -161,14 +194,20 @@ async fn dispatch_session_control(
         // every row under `--prefix`) matches one of the target states, or
         // `params.timeout_ms` elapses. Edge-triggered on `Roster::subscribe`
         // — no polling loop anywhere in this path.
-        "control/wait" => dispatch_allowlisted("wait", cid, obj, registry, roster, lockout).await.unwrap_or_default(),
+        "control/wait" => dispatch_allowlisted("wait", cid, obj, registry, roster, lockout)
+            .await
+            .unwrap_or_default(),
         // `control/revoke` (issue #184): `hub token revoke`/`delete`'s own
         // process already flipped the token store to `revoked`; this call
         // (from that same CLI invocation) force-closes the live socket, if
         // any, so the spec's "closes the socket immediately" is not left
         // waiting on the body's own liveness timeout.
         "control/revoke" => revoke(cid, obj, registry).await,
-        other => encode_error(cid, Code::MethodNotFound, format!("unknown control method: {other}")),
+        other => encode_error(
+            cid,
+            Code::MethodNotFound,
+            format!("unknown control method: {other}"),
+        ),
     }
 }
 
@@ -189,7 +228,10 @@ pub(crate) async fn dispatch_allowlisted(
     lockout: &Lockout,
 ) -> Option<String> {
     Some(match verb {
-        "status" => encode_response(cid, crate::control_status::status_doc(registry, lockout).await),
+        "status" => encode_response(
+            cid,
+            crate::control_status::status_doc(registry, lockout).await,
+        ),
         "roster" => roster_control(cid, obj, roster, registry).await,
         "say" => say(cid, obj, registry, roster).await,
         "interrupt" => interrupt(cid, obj, registry, roster).await,
@@ -203,9 +245,21 @@ pub(crate) async fn dispatch_allowlisted(
 
 /// `control/support {feature}` (issue #185): a single `query/support` answer
 /// for the hub role (see [`crate::query::local_support`]).
-async fn hub_support(cid: &holler_proto::CorrelationId, obj: &serde_json::Value, registry: &Registry) -> String {
-    let Some(feature) = obj.get("params").and_then(|p| p.get("feature")).and_then(|v| v.as_str()) else {
-        return encode_error(cid, Code::InvalidParams, "control/support needs params.feature".to_string());
+async fn hub_support(
+    cid: &holler_proto::CorrelationId,
+    obj: &serde_json::Value,
+    registry: &Registry,
+) -> String {
+    let Some(feature) = obj
+        .get("params")
+        .and_then(|p| p.get("feature"))
+        .and_then(|v| v.as_str())
+    else {
+        return encode_error(
+            cid,
+            Code::InvalidParams,
+            "control/support needs params.feature".to_string(),
+        );
     };
     match crate::query::local_support(feature, registry).await {
         Ok(doc) => encode_response(cid, serde_json::to_value(doc).unwrap_or_default()),
@@ -216,9 +270,21 @@ async fn hub_support(cid: &holler_proto::CorrelationId, obj: &serde_json::Value,
 /// `control/query_local {method, params?}` (issue #185): `holler hub query
 /// CMD [ARGS...]` — the local form, answered from this hub's own state
 /// without touching any body.
-async fn hub_query_local(cid: &holler_proto::CorrelationId, obj: &serde_json::Value, registry: &Registry) -> String {
-    let Some(method) = obj.get("params").and_then(|p| p.get("method")).and_then(|v| v.as_str()) else {
-        return encode_error(cid, Code::InvalidParams, "control/query_local needs params.method".to_string());
+async fn hub_query_local(
+    cid: &holler_proto::CorrelationId,
+    obj: &serde_json::Value,
+    registry: &Registry,
+) -> String {
+    let Some(method) = obj
+        .get("params")
+        .and_then(|p| p.get("method"))
+        .and_then(|v| v.as_str())
+    else {
+        return encode_error(
+            cid,
+            Code::InvalidParams,
+            "control/query_local needs params.method".to_string(),
+        );
     };
     let inner_params = obj.get("params").and_then(|p| p.get("params")).cloned();
     match method {
@@ -231,20 +297,30 @@ async fn hub_query_local(cid: &holler_proto::CorrelationId, obj: &serde_json::Va
             encode_response(cid, serde_json::to_value(doc).unwrap_or_default())
         }
         "query/support" => {
-            let feature = inner_params.as_ref().and_then(|p| p.get("feature")).and_then(|v| v.as_str()).unwrap_or_default();
+            let feature = inner_params
+                .as_ref()
+                .and_then(|p| p.get("feature"))
+                .and_then(|v| v.as_str())
+                .unwrap_or_default();
             match crate::query::local_support(feature, registry).await {
                 Ok(doc) => encode_response(cid, serde_json::to_value(doc).unwrap_or_default()),
                 Err(e) => encode_error(cid, Code::UnknownFeature, e.message),
             }
         }
-        "query/protocol" => match holler_proto::ProtocolParams::parse_version(inner_params.as_ref()) {
-            Ok(version) => {
-                let doc = crate::query::local_protocol(version);
-                encode_response(cid, serde_json::to_value(doc).unwrap_or_default())
+        "query/protocol" => {
+            match holler_proto::ProtocolParams::parse_version(inner_params.as_ref()) {
+                Ok(version) => {
+                    let doc = crate::query::local_protocol(version);
+                    encode_response(cid, serde_json::to_value(doc).unwrap_or_default())
+                }
+                Err(e) => encode_error_frame(cid, &e),
             }
-            Err(e) => encode_error_frame(cid, &e),
-        },
-        other => encode_error(cid, Code::MethodNotFound, format!("unknown query method: {other}")),
+        }
+        other => encode_error(
+            cid,
+            Code::MethodNotFound,
+            format!("unknown query method: {other}"),
+        ),
     }
 }
 
@@ -254,33 +330,54 @@ async fn hub_query_local(cid: &holler_proto::CorrelationId, obj: &serde_json::Va
 /// for `target` is `-32004 not_connected` (exit 1 at the CLI); more than one
 /// match is reported as an ambiguous refusal (the CLI maps that to exit 2,
 /// ADR 0003's usage-error code for an unresolvable target).
-async fn hub_query_remote(cid: &holler_proto::CorrelationId, obj: &serde_json::Value, registry: &Registry) -> String {
+async fn hub_query_remote(
+    cid: &holler_proto::CorrelationId,
+    obj: &serde_json::Value,
+    registry: &Registry,
+) -> String {
     let params = obj.get("params");
     let (Some(target), Some(method)) = (
-        params.and_then(|p| p.get("target")).and_then(|v| v.as_str()),
-        params.and_then(|p| p.get("method")).and_then(|v| v.as_str()),
+        params
+            .and_then(|p| p.get("target"))
+            .and_then(|v| v.as_str()),
+        params
+            .and_then(|p| p.get("method"))
+            .and_then(|v| v.as_str()),
     ) else {
-        return encode_error(cid, Code::InvalidParams, "control/query_remote needs params.target and params.method".to_string());
+        return encode_error(
+            cid,
+            Code::InvalidParams,
+            "control/query_remote needs params.target and params.method".to_string(),
+        );
     };
     let inner_params = params.and_then(|p| p.get("params")).cloned();
 
     match registry.find_target(target).await {
         crate::live::TargetLookup::Found(handle) => {
-            match handle.query(method, inner_params, std::time::Duration::from_secs(10)).await {
+            match handle
+                .query(method, inner_params, std::time::Duration::from_secs(10))
+                .await
+            {
                 Some(Ok(value)) => encode_response(cid, value),
                 // The body itself raised a wire error (e.g. `query/support`'s
                 // `-32006 unknown_feature`) — forward it verbatim rather than
                 // re-wrapping it in a fresh `Code`.
-                Some(Err(e)) => holler_proto::encode(&Envelope::error_frame(cid, &e)).unwrap_or_default(),
+                Some(Err(e)) => {
+                    holler_proto::encode(&Envelope::error_frame(cid, &e)).unwrap_or_default()
+                }
                 None => encode_error(cid, Code::NotConnected, format!("{target} did not answer")),
             }
         }
-        crate::live::TargetLookup::NotConnected => {
-            encode_error(cid, Code::NotConnected, format!("{target} is not connected"))
-        }
-        crate::live::TargetLookup::Ambiguous => {
-            encode_error(cid, Code::InvalidRequest, format!("{target} is ambiguous — matches more than one live body"))
-        }
+        crate::live::TargetLookup::NotConnected => encode_error(
+            cid,
+            Code::NotConnected,
+            format!("{target} is not connected"),
+        ),
+        crate::live::TargetLookup::Ambiguous => encode_error(
+            cid,
+            Code::InvalidRequest,
+            format!("{target} is ambiguous — matches more than one live body"),
+        ),
     }
 }
 
@@ -288,43 +385,92 @@ async fn hub_query_remote(cid: &holler_proto::CorrelationId, obj: &serde_json::V
 /// `say` verb, relayed to [`crate::talk::say`]. See that module for the full
 /// resolve → busy-check → send → collect → TalkLog flow; this is only the
 /// control-socket param/result mapping.
-async fn say(cid: &holler_proto::CorrelationId, obj: &serde_json::Value, registry: &Registry, roster: &Roster) -> String {
+async fn say(
+    cid: &holler_proto::CorrelationId,
+    obj: &serde_json::Value,
+    registry: &Registry,
+    roster: &Roster,
+) -> String {
     let params = obj.get("params");
-    let Some(session) = params.and_then(|p| p.get("session")).and_then(|v| v.as_str()) else {
-        return encode_error(cid, Code::InvalidParams, "control/say needs params.session".to_string());
+    let Some(session) = params
+        .and_then(|p| p.get("session"))
+        .and_then(|v| v.as_str())
+    else {
+        return encode_error(
+            cid,
+            Code::InvalidParams,
+            "control/say needs params.session".to_string(),
+        );
     };
     let Some(text) = params.and_then(|p| p.get("text")).and_then(|v| v.as_str()) else {
-        return encode_error(cid, Code::InvalidParams, "control/say needs params.text".to_string());
+        return encode_error(
+            cid,
+            Code::InvalidParams,
+            "control/say needs params.text".to_string(),
+        );
     };
-    let queue = params.and_then(|p| p.get("queue")).and_then(|v| v.as_bool()).unwrap_or(false);
-    let timeout_ms = params.and_then(|p| p.get("timeout_ms")).and_then(|v| v.as_u64()).unwrap_or(600_000);
+    let queue = params
+        .and_then(|p| p.get("queue"))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let timeout_ms = params
+        .and_then(|p| p.get("timeout_ms"))
+        .and_then(|v| v.as_u64())
+        .unwrap_or(600_000);
     let timeout = std::time::Duration::from_millis(timeout_ms);
 
     let state = HubState::from_root(resolve_state_dir().unwrap_or_default());
     let grant = params.and_then(|p| p.get("grant")).and_then(|v| v.as_str());
-    match crate::talk::say(registry, roster, &state, crate::talk::SayArgs { session, text, queue, grant, timeout }).await {
-        Ok(outcome) => encode_response(cid, serde_json::json!({
-            "session": outcome.session,
-            "stop_reason": outcome.stop_reason,
-            "state": outcome.state,
-            "updates": outcome.updates,
-            "elapsed_ms": outcome.elapsed_ms,
-            "text": crate::talk::reply_text(&outcome.message),
-            "message": outcome.message,
-        })),
-        Err(crate::talk::SayError::UnknownSession) => {
-            encode_error(cid, Code::UnknownSession, format!("unknown session: {session}"))
-        }
+    match crate::talk::say(
+        registry,
+        roster,
+        &state,
+        crate::talk::SayArgs {
+            session,
+            text,
+            queue,
+            grant,
+            timeout,
+        },
+    )
+    .await
+    {
+        Ok(outcome) => encode_response(
+            cid,
+            serde_json::json!({
+                "session": outcome.session,
+                "stop_reason": outcome.stop_reason,
+                "state": outcome.state,
+                "updates": outcome.updates,
+                "elapsed_ms": outcome.elapsed_ms,
+                "text": crate::talk::reply_text(&outcome.message),
+                "message": outcome.message,
+            }),
+        ),
+        Err(crate::talk::SayError::UnknownSession) => encode_error(
+            cid,
+            Code::UnknownSession,
+            format!("unknown session: {session}"),
+        ),
         // Issue #192, rule 4: `detail` already carries the roster's own
         // `conn_state` (and, for `reconnecting`, the last-seen age) when the
         // roster still remembers this name — see `talk::not_connected_detail`.
-        Err(crate::talk::SayError::NotConnected(detail)) => encode_error(cid, Code::NotConnected, detail),
+        Err(crate::talk::SayError::NotConnected(detail)) => {
+            encode_error(cid, Code::NotConnected, detail)
+        }
         Err(crate::talk::SayError::Ambiguous(candidates)) => {
-            let message = format!("ambiguous session {session}: candidates are {}", candidates.join(", "));
+            let message = format!(
+                "ambiguous session {session}: candidates are {}",
+                candidates.join(", ")
+            );
             let err = WireError::new(Code::UnknownSession, message, Some("ambiguous"));
             encode_error_frame(cid, &err)
         }
-        Err(crate::talk::SayError::Busy { state, turn_age_ms, last_update_age_ms }) => {
+        Err(crate::talk::SayError::Busy {
+            state,
+            turn_age_ms,
+            last_update_age_ms,
+        }) => {
             let err = WireError::session_busy(state, turn_age_ms, last_update_age_ms);
             encode_error_frame(cid, &err)
         }
@@ -333,24 +479,37 @@ async fn say(cid: &holler_proto::CorrelationId, obj: &serde_json::Value, registr
         // CLI's own busy hint (`say_cmd::busy_hint`) can point at `answer`
         // instead of `interrupt`/`--queue` — neither of which resolves a
         // held permission/elicitation.
-        Err(crate::talk::SayError::InputRequired { question, turn_age_ms, last_update_age_ms }) => {
-            let mut err = WireError::session_busy("input-required", turn_age_ms, last_update_age_ms);
+        Err(crate::talk::SayError::InputRequired {
+            question,
+            turn_age_ms,
+            last_update_age_ms,
+        }) => {
+            let mut err =
+                WireError::session_busy("input-required", turn_age_ms, last_update_age_ms);
             if let Some(q) = question {
                 err.message = q;
             }
             encode_error_frame(cid, &err)
         }
         Err(crate::talk::SayError::Refused(err)) => encode_error_frame(cid, &err),
-        Err(crate::talk::SayError::ConnectionLost) => {
-            encode_error(cid, Code::ConnectionLost, format!("{session} io disconnected mid-turn; ask again"))
-        }
+        Err(crate::talk::SayError::ConnectionLost) => encode_error(
+            cid,
+            Code::ConnectionLost,
+            format!("{session} io disconnected mid-turn; ask again"),
+        ),
         Err(crate::talk::SayError::Timeout) => {
             let secs = timeout.as_secs();
-            encode_error(cid, Code::NotConnected, format!("no reply from {session} within {secs}s"))
+            encode_error(
+                cid,
+                Code::NotConnected,
+                format!("no reply from {session} within {secs}s"),
+            )
         }
-        Err(crate::talk::SayError::Cancelled) => {
-            encode_error(cid, Code::NotConnected, "prompt was interrupted before it completed".to_string())
-        }
+        Err(crate::talk::SayError::Cancelled) => encode_error(
+            cid,
+            Code::NotConnected,
+            "prompt was interrupted before it completed".to_string(),
+        ),
     }
 }
 
@@ -360,10 +519,22 @@ async fn say(cid: &holler_proto::CorrelationId, obj: &serde_json::Value, registr
 /// redirect turn's own reply, in exactly `control/say`'s own result shape
 /// (`stop_reason`/`state`/`updates`/`elapsed_ms`/`text`/`message`) so the CLI
 /// can share `say_cmd.rs`'s own printing logic.
-async fn interrupt(cid: &holler_proto::CorrelationId, obj: &serde_json::Value, registry: &Registry, roster: &Roster) -> String {
+async fn interrupt(
+    cid: &holler_proto::CorrelationId,
+    obj: &serde_json::Value,
+    registry: &Registry,
+    roster: &Roster,
+) -> String {
     let params = obj.get("params");
-    let Some(session) = params.and_then(|p| p.get("session")).and_then(|v| v.as_str()) else {
-        return encode_error(cid, Code::InvalidParams, "control/interrupt needs params.session".to_string());
+    let Some(session) = params
+        .and_then(|p| p.get("session"))
+        .and_then(|v| v.as_str())
+    else {
+        return encode_error(
+            cid,
+            Code::InvalidParams,
+            "control/interrupt needs params.session".to_string(),
+        );
     };
     let text = params.and_then(|p| p.get("text")).and_then(|v| v.as_str());
 
@@ -381,14 +552,21 @@ async fn interrupt(cid: &holler_proto::CorrelationId, obj: &serde_json::Value, r
             }
             encode_response(cid, result)
         }
-        Err(crate::interrupt::InterruptError::UnknownSession) => {
-            encode_error(cid, Code::UnknownSession, format!("unknown session: {session}"))
-        }
-        Err(crate::interrupt::InterruptError::NotConnected) => {
-            encode_error(cid, Code::NotConnected, format!("{session}'s body is not connected"))
-        }
+        Err(crate::interrupt::InterruptError::UnknownSession) => encode_error(
+            cid,
+            Code::UnknownSession,
+            format!("unknown session: {session}"),
+        ),
+        Err(crate::interrupt::InterruptError::NotConnected) => encode_error(
+            cid,
+            Code::NotConnected,
+            format!("{session}'s body is not connected"),
+        ),
         Err(crate::interrupt::InterruptError::Ambiguous(candidates)) => {
-            let message = format!("ambiguous session {session}: candidates are {}", candidates.join(", "));
+            let message = format!(
+                "ambiguous session {session}: candidates are {}",
+                candidates.join(", ")
+            );
             let err = WireError::new(Code::UnknownSession, message, Some("ambiguous"));
             encode_error_frame(cid, &err)
         }
@@ -401,11 +579,17 @@ async fn interrupt(cid: &holler_proto::CorrelationId, obj: &serde_json::Value, r
             ),
         ),
         Err(crate::interrupt::InterruptError::Refused(err)) => encode_error_frame(cid, &err),
-        Err(crate::interrupt::InterruptError::ConnectionLost) => {
-            encode_error(cid, Code::ConnectionLost, format!("{session} io disconnected mid-turn; ask again"))
+        Err(crate::interrupt::InterruptError::ConnectionLost) => encode_error(
+            cid,
+            Code::ConnectionLost,
+            format!("{session} io disconnected mid-turn; ask again"),
+        ),
+        Err(crate::interrupt::InterruptError::PromptFailed(crate::talk::SayError::Refused(
+            err,
+        ))) => encode_error_frame(cid, &err),
+        Err(crate::interrupt::InterruptError::PromptFailed(e)) => {
+            encode_error(cid, Code::NotConnected, e.message())
         }
-        Err(crate::interrupt::InterruptError::PromptFailed(crate::talk::SayError::Refused(err))) => encode_error_frame(cid, &err),
-        Err(crate::interrupt::InterruptError::PromptFailed(e)) => encode_error(cid, Code::NotConnected, e.message()),
     }
 }
 
@@ -414,34 +598,67 @@ async fn interrupt(cid: &holler_proto::CorrelationId, obj: &serde_json::Value, r
 /// param/result mapping; the body-side refusal (`-32010 nothing_pending`,
 /// `-32602 invalid_params`, …) is forwarded verbatim via
 /// [`crate::talk::AnswerError::Refused`], never re-coded here.
-async fn answer(cid: &holler_proto::CorrelationId, obj: &serde_json::Value, registry: &Registry) -> String {
+async fn answer(
+    cid: &holler_proto::CorrelationId,
+    obj: &serde_json::Value,
+    registry: &Registry,
+) -> String {
     let params = obj.get("params");
-    let Some(session) = params.and_then(|p| p.get("session")).and_then(|v| v.as_str()) else {
-        return encode_error(cid, Code::InvalidParams, "control/answer needs params.session".to_string());
+    let Some(session) = params
+        .and_then(|p| p.get("session"))
+        .and_then(|v| v.as_str())
+    else {
+        return encode_error(
+            cid,
+            Code::InvalidParams,
+            "control/answer needs params.session".to_string(),
+        );
     };
-    let Some(choice) = params.and_then(|p| p.get("choice")).and_then(|v| v.as_str()) else {
-        return encode_error(cid, Code::InvalidParams, "control/answer needs params.choice".to_string());
+    let Some(choice) = params
+        .and_then(|p| p.get("choice"))
+        .and_then(|v| v.as_str())
+    else {
+        return encode_error(
+            cid,
+            Code::InvalidParams,
+            "control/answer needs params.choice".to_string(),
+        );
     };
-    let timeout_ms = params.and_then(|p| p.get("timeout_ms")).and_then(|v| v.as_u64()).unwrap_or(10_000);
+    let timeout_ms = params
+        .and_then(|p| p.get("timeout_ms"))
+        .and_then(|v| v.as_u64())
+        .unwrap_or(10_000);
     let timeout = std::time::Duration::from_millis(timeout_ms);
 
     match crate::talk::answer(registry, session, choice, timeout).await {
-        Ok(outcome) => encode_response(cid, serde_json::json!({ "session": outcome.session, "applied": outcome.applied })),
-        Err(crate::talk::AnswerError::UnknownSession) => {
-            encode_error(cid, Code::UnknownSession, format!("unknown session: {session}"))
-        }
-        Err(crate::talk::AnswerError::NotConnected) => {
-            encode_error(cid, Code::NotConnected, format!("{session}'s body is not connected"))
-        }
+        Ok(outcome) => encode_response(
+            cid,
+            serde_json::json!({ "session": outcome.session, "applied": outcome.applied }),
+        ),
+        Err(crate::talk::AnswerError::UnknownSession) => encode_error(
+            cid,
+            Code::UnknownSession,
+            format!("unknown session: {session}"),
+        ),
+        Err(crate::talk::AnswerError::NotConnected) => encode_error(
+            cid,
+            Code::NotConnected,
+            format!("{session}'s body is not connected"),
+        ),
         Err(crate::talk::AnswerError::Ambiguous(candidates)) => {
-            let message = format!("ambiguous session {session}: candidates are {}", candidates.join(", "));
+            let message = format!(
+                "ambiguous session {session}: candidates are {}",
+                candidates.join(", ")
+            );
             let err = WireError::new(Code::UnknownSession, message, Some("ambiguous"));
             encode_error_frame(cid, &err)
         }
         Err(crate::talk::AnswerError::Refused(err)) => encode_error_frame(cid, &err),
-        Err(crate::talk::AnswerError::ConnectionLost) => {
-            encode_error(cid, Code::ConnectionLost, format!("{session} io disconnected; ask again"))
-        }
+        Err(crate::talk::AnswerError::ConnectionLost) => encode_error(
+            cid,
+            Code::ConnectionLost,
+            format!("{session} io disconnected; ask again"),
+        ),
     }
 }
 
@@ -458,20 +675,27 @@ async fn answer(cid: &holler_proto::CorrelationId, obj: &serde_json::Value, regi
 /// `stalled` is not a filter dimension here (it is a display-only column in
 /// the CLI), and `hostname` narrowing is still the CLI's job (it can read the
 /// roster once and filter locally).
-async fn roster_control(cid: &holler_proto::CorrelationId, obj: &serde_json::Value, roster: &Roster, registry: &Registry) -> String {
+async fn roster_control(
+    cid: &holler_proto::CorrelationId,
+    obj: &serde_json::Value,
+    roster: &Roster,
+    registry: &Registry,
+) -> String {
     let params = obj.get("params");
-    let all = params.and_then(|p| p.get("all")).and_then(|v| v.as_bool()).unwrap_or(false);
-    let prefix = params.and_then(|p| p.get("prefix")).and_then(|v| v.as_str());
+    let all = params
+        .and_then(|p| p.get("all"))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let prefix = params
+        .and_then(|p| p.get("prefix"))
+        .and_then(|v| v.as_str());
     let mut rows = roster.rows_matching(Option::from(all), prefix);
     // Issue #442: the hold is hub state keyed by session name, so it is read
     // here from the registry rather than stored on the (presence-driven) row.
     for row in &mut rows {
         row.hold = registry.holds().row_hold(&row.name);
     }
-    encode_response(
-        cid,
-        serde_json::json!({ "rows": rows }),
-    )
+    encode_response(cid, serde_json::json!({ "rows": rows }))
 }
 
 /// `control/wait {sessions?, prefix?, until?, after?, timeout_ms?}` (issue
@@ -491,19 +715,40 @@ async fn roster_control(cid: &holler_proto::CorrelationId, obj: &serde_json::Val
 /// `sessions`/`prefix`), each `{session, state, conn_state, turn_id,
 /// stop_reason, last_turn}` — the shape `wait_cmd.rs` renders and `--json`
 /// forwards.
-async fn wait(cid: &holler_proto::CorrelationId, obj: &serde_json::Value, roster: &Roster) -> String {
+async fn wait(
+    cid: &holler_proto::CorrelationId,
+    obj: &serde_json::Value,
+    roster: &Roster,
+) -> String {
     let params = obj.get("params");
     let sessions = comma_list(params, "sessions");
-    let prefix = params.and_then(|p| p.get("prefix")).and_then(|v| v.as_str()).map(str::to_string);
+    let prefix = params
+        .and_then(|p| p.get("prefix"))
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
     if sessions.is_empty() && prefix.is_none() {
-        return encode_error(cid, Code::InvalidParams, "control/wait needs params.sessions or params.prefix".to_string());
+        return encode_error(
+            cid,
+            Code::InvalidParams,
+            "control/wait needs params.sessions or params.prefix".to_string(),
+        );
     }
     let until = {
         let given = comma_list(params, "until");
-        if given.is_empty() { default_until() } else { given }
+        if given.is_empty() {
+            default_until()
+        } else {
+            given
+        }
     };
-    let after = params.and_then(|p| p.get("after")).and_then(|v| v.as_str()).map(str::to_string);
-    let timeout_ms = params.and_then(|p| p.get("timeout_ms")).and_then(|v| v.as_u64()).unwrap_or(600_000);
+    let after = params
+        .and_then(|p| p.get("after"))
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
+    let timeout_ms = params
+        .and_then(|p| p.get("timeout_ms"))
+        .and_then(|v| v.as_u64())
+        .unwrap_or(600_000);
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_millis(timeout_ms);
 
     // Subscribe *before* the first check: a change that lands between "check"
@@ -513,7 +758,13 @@ async fn wait(cid: &holler_proto::CorrelationId, obj: &serde_json::Value, roster
     // reports the latest generation, not a stale one.
     let mut rx = roster.subscribe();
     loop {
-        let rows = matching_rows(roster, &sessions, prefix.as_deref(), &until, after.as_deref());
+        let rows = matching_rows(
+            roster,
+            &sessions,
+            prefix.as_deref(),
+            &until,
+            after.as_deref(),
+        );
         if !rows.is_empty() {
             return encode_response(cid, serde_json::json!({ "matched": true, "rows": rows }));
         }
@@ -553,7 +804,13 @@ fn comma_list(params: Option<&serde_json::Value>, field: &str) -> Vec<String> {
     params
         .and_then(|p| p.get(field))
         .and_then(|v| v.as_str())
-        .map(|s| s.split(',').map(str::trim).filter(|s| !s.is_empty()).map(str::to_string).collect())
+        .map(|s| {
+            s.split(',')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+                .collect()
+        })
         .unwrap_or_default()
 }
 
@@ -573,7 +830,12 @@ fn matching_rows(
     roster
         .rows_matching(Some(true), prefix)
         .into_iter()
-        .filter(|row| prefix.is_some() || sessions.iter().any(|s| row.name == *s || row.name.ends_with(&format!("/{s}"))))
+        .filter(|row| {
+            prefix.is_some()
+                || sessions
+                    .iter()
+                    .any(|s| row.name == *s || row.name.ends_with(&format!("/{s}")))
+        })
         .filter(|row| row_matches_until(row, until, after))
         .map(row_to_json)
         .collect()
@@ -590,9 +852,10 @@ fn row_matches_until(row: &crate::roster::Row, until: &[String], after: Option<&
     until.iter().any(|state| match state.as_str() {
         "gone" => row.conn_state == "gone",
         "idle" | "working" | "input-required" | "stalled" => row.state == *state,
-        "completed" | "canceled" | "failed" | "rejected" => row.last_turn.as_ref().is_some_and(|lt| {
-            lt.state.as_str() == state && after.is_none_or(|a| lt.turn_id != a)
-        }),
+        "completed" | "canceled" | "failed" | "rejected" => row
+            .last_turn
+            .as_ref()
+            .is_some_and(|lt| lt.state.as_str() == state && after.is_none_or(|a| lt.turn_id != a)),
         _ => false,
     })
 }
@@ -603,7 +866,10 @@ fn row_matches_until(row: &crate::roster::Row, until: &[String], after: Option<&
 /// parse_rfc3339`] rather than giving the CLI a second RFC3339 parser (or a
 /// new `time`-crate dependency) just to render "how long ago".
 fn row_to_json(row: crate::roster::Row) -> serde_json::Value {
-    let age_secs = row.last_turn.as_ref().and_then(|lt| crate::roster::parse_rfc3339_secs_since(&lt.ended_at));
+    let age_secs = row
+        .last_turn
+        .as_ref()
+        .and_then(|lt| crate::roster::parse_rfc3339_secs_since(&lt.ended_at));
     serde_json::json!({
         "session": row.name,
         "state": row.state,
@@ -630,7 +896,9 @@ fn read_listening_here() -> Vec<String> {
 /// request time (not cached), so a test that spawns its own hub with this
 /// env var never affects any other concurrently-running hub process.
 fn test_hooks_enabled() -> bool {
-    std::env::var("HOLLER_TEST_HOOKS").map(|v| v == "1").unwrap_or(false)
+    std::env::var("HOLLER_TEST_HOOKS")
+        .map(|v| v == "1")
+        .unwrap_or(false)
 }
 
 /// `control/test_drop {token}` (issue #192, test-only): resolve `token`
@@ -640,21 +908,37 @@ fn test_hooks_enabled() -> bool {
 /// No live match is `-32004 not_connected`; more than one is `-32600` (the
 /// CLI's own exit-2 ambiguity shape), matching `hub_query_remote`'s own
 /// mapping.
-async fn test_drop(cid: &holler_proto::CorrelationId, obj: &serde_json::Value, registry: &Registry) -> String {
-    let Some(token) = obj.get("params").and_then(|p| p.get("token")).and_then(|v| v.as_str()) else {
-        return encode_error(cid, Code::InvalidParams, "control/test_drop needs params.token".to_string());
+async fn test_drop(
+    cid: &holler_proto::CorrelationId,
+    obj: &serde_json::Value,
+    registry: &Registry,
+) -> String {
+    let Some(token) = obj
+        .get("params")
+        .and_then(|p| p.get("token"))
+        .and_then(|v| v.as_str())
+    else {
+        return encode_error(
+            cid,
+            Code::InvalidParams,
+            "control/test_drop needs params.token".to_string(),
+        );
     };
     match registry.find_target(token).await {
         crate::live::TargetLookup::Found(handle) => {
             let dropped = handle.force_drop().await;
             encode_response(cid, serde_json::json!({ "dropped": dropped }))
         }
-        crate::live::TargetLookup::NotConnected => {
-            encode_error(cid, Code::NotConnected, format!("{token} has no live connection"))
-        }
-        crate::live::TargetLookup::Ambiguous => {
-            encode_error(cid, Code::InvalidRequest, format!("{token} is ambiguous — matches more than one live body"))
-        }
+        crate::live::TargetLookup::NotConnected => encode_error(
+            cid,
+            Code::NotConnected,
+            format!("{token} has no live connection"),
+        ),
+        crate::live::TargetLookup::Ambiguous => encode_error(
+            cid,
+            Code::InvalidRequest,
+            format!("{token} is ambiguous — matches more than one live body"),
+        ),
     }
 }
 /// `control/revoke {token_id}` (issue #184): if `token_id` currently has a
@@ -663,9 +947,21 @@ async fn test_drop(cid: &holler_proto::CorrelationId, obj: &serde_json::Value, r
 /// (`false` is not an error — the token may simply not have been connected,
 /// which is the common case; the store-side revoke already took effect in
 /// the CLI process that called this).
-async fn revoke(cid: &holler_proto::CorrelationId, obj: &serde_json::Value, registry: &Registry) -> String {
-    let Some(token_id) = obj.get("params").and_then(|p| p.get("token_id")).and_then(|v| v.as_str()) else {
-        return encode_error(cid, Code::InvalidParams, "control/revoke needs params.token_id".to_string());
+async fn revoke(
+    cid: &holler_proto::CorrelationId,
+    obj: &serde_json::Value,
+    registry: &Registry,
+) -> String {
+    let Some(token_id) = obj
+        .get("params")
+        .and_then(|p| p.get("token_id"))
+        .and_then(|v| v.as_str())
+    else {
+        return encode_error(
+            cid,
+            Code::InvalidParams,
+            "control/revoke needs params.token_id".to_string(),
+        );
     };
     match registry.find_by_token(token_id).await {
         Some(handle) => {
@@ -681,12 +977,28 @@ async fn revoke(cid: &holler_proto::CorrelationId, obj: &serde_json::Value, regi
 /// returning `{hostname, rtt_ms}`. No live socket for that token is
 /// `-32004 not_connected` — the spec's exact fail-closed shape for `hub token
 /// ping` against a body that is not currently connected.
-async fn token_ping(cid: &holler_proto::CorrelationId, obj: &serde_json::Value, registry: &Registry) -> String {
-    let Some(token_id) = obj.get("params").and_then(|p| p.get("token_id")).and_then(|v| v.as_str()) else {
-        return encode_error(cid, Code::InvalidParams, "control/token_ping needs params.token_id".to_string());
+async fn token_ping(
+    cid: &holler_proto::CorrelationId,
+    obj: &serde_json::Value,
+    registry: &Registry,
+) -> String {
+    let Some(token_id) = obj
+        .get("params")
+        .and_then(|p| p.get("token_id"))
+        .and_then(|v| v.as_str())
+    else {
+        return encode_error(
+            cid,
+            Code::InvalidParams,
+            "control/token_ping needs params.token_id".to_string(),
+        );
     };
     let Some(handle) = registry.find_by_token(token_id).await else {
-        return encode_error(cid, Code::NotConnected, format!("{token_id} has no live connection"));
+        return encode_error(
+            cid,
+            Code::NotConnected,
+            format!("{token_id} has no live connection"),
+        );
     };
     let started = std::time::Instant::now();
     match handle.ping(std::time::Duration::from_secs(5)).await {
@@ -696,18 +1008,32 @@ async fn token_ping(cid: &holler_proto::CorrelationId, obj: &serde_json::Value, 
             // `interrupt`'s ack-timeout scale (`interrupt::ack_timeout`).
             handle.record_rtt(elapsed).await;
             let rtt_ms = u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX);
-            encode_response(cid, serde_json::json!({ "hostname": ack.hostname, "rtt_ms": rtt_ms }))
+            encode_response(
+                cid,
+                serde_json::json!({ "hostname": ack.hostname, "rtt_ms": rtt_ms }),
+            )
         }
-        None => encode_error(cid, Code::NotConnected, format!("{token_id} did not answer the ping")),
+        None => encode_error(
+            cid,
+            Code::NotConnected,
+            format!("{token_id} did not answer the ping"),
+        ),
     }
 }
 
-pub(crate) fn encode_response(cid: &holler_proto::CorrelationId, result: serde_json::Value) -> String {
+pub(crate) fn encode_response(
+    cid: &holler_proto::CorrelationId,
+    result: serde_json::Value,
+) -> String {
     let env = Envelope::response(cid, Some(result));
     holler_proto::encode(&env).unwrap_or_default()
 }
 
-pub(crate) fn encode_error(cid: &holler_proto::CorrelationId, code: Code, message: String) -> String {
+pub(crate) fn encode_error(
+    cid: &holler_proto::CorrelationId,
+    code: Code,
+    message: String,
+) -> String {
     let env = Envelope::error_frame(cid, &WireError::new(code, message, None));
     holler_proto::encode(&env).unwrap_or_default()
 }
@@ -750,7 +1076,12 @@ fn resolve_cid(id: Option<&str>) -> holler_proto::CorrelationId {
 
 #[cfg(test)]
 mod wait_tests {
-    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable)] // #142
+    #![allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::unreachable
+    )] // #142
     //! Issue #142's `wait_uses_no_polling`: proving the `control/wait`
     //! handler is genuinely event-driven — it calls the private `wait` fn
     //! directly (same module, same crate) against a real [`Roster`], rather
@@ -820,7 +1151,11 @@ mod wait_tests {
             .expect("the wait task did not panic");
         let env = holler_proto::decode(&reply).expect("a valid v2 envelope");
         let result = env.result().expect("a result, not an error");
-        assert_eq!(result["matched"], serde_json::json!(true), "must match once last_turn lands: {result}");
+        assert_eq!(
+            result["matched"],
+            serde_json::json!(true),
+            "must match once last_turn lands: {result}"
+        );
 
         let after = roster.read_count();
         // A real 50ms poll loop over this ~300ms span would already have run

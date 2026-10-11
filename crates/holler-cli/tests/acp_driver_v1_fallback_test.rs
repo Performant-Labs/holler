@@ -1,4 +1,9 @@
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable)] // #362
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unreachable
+)] // #362
 //! Regression tests for `AcpDriver`'s ACP v1 fallback (issue #362): every
 //! real ACP implementation checked while investigating that issue (the
 //! newest `opencode acp`, the newest published `@agentclientprotocol/sdk`)
@@ -58,14 +63,19 @@ async fn spawn_falls_back_to_v1_and_reports_idle() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn prompt_streams_chunk_then_done_end_turn_via_v1() {
     let config = stub_v1_config("alpha");
-    let driver = AcpDriver::spawn(&config).await.expect("spawn via v1 fallback");
+    let driver = AcpDriver::spawn(&config)
+        .await
+        .expect("spawn via v1 fallback");
     let mut stream = driver.prompt("hi").await;
 
     let mut events = Vec::new();
     let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
     loop {
         let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
-        assert!(remaining > Duration::ZERO, "timed out waiting for Done: {events:?}");
+        assert!(
+            remaining > Duration::ZERO,
+            "timed out waiting for Done: {events:?}"
+        );
         match tokio::time::timeout(remaining, futures_util::StreamExt::next(&mut stream)).await {
             Ok(Some(event)) => {
                 let done = matches!(event, DriverEvent::Done(_));
@@ -80,7 +90,9 @@ async fn prompt_streams_chunk_then_done_end_turn_via_v1() {
     }
 
     assert!(
-        events.iter().any(|e| matches!(e, DriverEvent::Chunk(text) if text == "hello from v1")),
+        events
+            .iter()
+            .any(|e| matches!(e, DriverEvent::Chunk(text) if text == "hello from v1")),
         "{events:?}"
     );
     assert_eq!(events.last(), Some(&DriverEvent::Done(StopReason::EndTurn)));

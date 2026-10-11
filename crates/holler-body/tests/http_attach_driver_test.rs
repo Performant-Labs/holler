@@ -1,4 +1,9 @@
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable)] // #194: test assertions
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unreachable
+)] // #194: test assertions
 
 //! RED/GREEN tests for the HTTP attach driver (issue #194) against a fake
 //! OpenCode HTTP server (`fake_server.rs`, hand-rolled — see its own doc
@@ -141,7 +146,10 @@ async fn cancel_posts_interrupt_and_yields_cancelled() {
         if saw_interrupt {
             break;
         }
-        assert!(tokio::time::Instant::now() < deadline, "interrupt POST never arrived");
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "interrupt POST never arrived"
+        );
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
     server.push_event(session_idle("ses_2"));
@@ -184,7 +192,9 @@ async fn cancel_also_posts_classic_abort_after_interrupt() {
             .map(|r| r.path.clone())
             .collect();
         if posts.iter().any(|p| p == "/session/ses_abort/abort") {
-            let interrupt_at = posts.iter().position(|p| p == "/api/session/ses_abort/interrupt");
+            let interrupt_at = posts
+                .iter()
+                .position(|p| p == "/api/session/ses_abort/interrupt");
             let abort_at = posts.iter().position(|p| p == "/session/ses_abort/abort");
             assert!(
                 interrupt_at < abort_at,
@@ -192,7 +202,10 @@ async fn cancel_also_posts_classic_abort_after_interrupt() {
             );
             break;
         }
-        assert!(tokio::time::Instant::now() < deadline, "abort POST never arrived");
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "abort POST never arrived"
+        );
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
     server.push_event(session_idle("ses_abort"));
@@ -264,7 +277,10 @@ async fn pending_question_polled_and_surfaced_as_input_required() {
     let pending = driver.pending();
     assert_eq!(pending.len(), 1);
     assert_eq!(pending[0].prompt, "Proceed?");
-    assert_eq!(pending[0].options, vec!["Yes".to_string(), "No".to_string()]);
+    assert_eq!(
+        pending[0].options,
+        vec!["Yes".to_string(), "No".to_string()]
+    );
 }
 
 #[tokio::test]
@@ -286,7 +302,10 @@ async fn answer_posts_reply_and_turn_resumes() {
         DriverEvent::State(DriverState::InputRequired)
     );
 
-    driver.answer("Yes").await.expect("answer should be accepted");
+    driver
+        .answer("Yes")
+        .await
+        .expect("answer should be accepted");
     let reply_req = server
         .requests()
         .into_iter()
@@ -320,14 +339,20 @@ async fn multi_question_choice_splits_on_comma() {
     server.set_questions(vec![multi_question_request(
         "q2",
         "ses_6",
-        &[("First?", &["Yes", "No"][..]), ("Second?", &["A", "B", "C"][..])],
+        &[
+            ("First?", &["Yes", "No"][..]),
+            ("Second?", &["A", "B", "C"][..]),
+        ],
     )]);
     assert_eq!(
         next_event_within(&mut stream, WAIT).await,
         DriverEvent::State(DriverState::InputRequired)
     );
 
-    driver.answer("Yes,2").await.expect("comma-separated answer should be accepted");
+    driver
+        .answer("Yes,2")
+        .await
+        .expect("comma-separated answer should be accepted");
     let reply_req = server
         .requests()
         .into_iter()
@@ -340,9 +365,7 @@ async fn multi_question_choice_splits_on_comma() {
 #[tokio::test]
 async fn child_session_question_is_seen() {
     let server = FakeServer::start().await;
-    server.set_child_sessions(vec![
-        json!({"id": "ses_7_child", "parentID": "ses_7"}),
-    ]);
+    server.set_child_sessions(vec![json!({"id": "ses_7_child", "parentID": "ses_7"})]);
     let driver = HttpAttachDriver::attach(&config(&server.endpoint(), "ses_7"))
         .await
         .expect("attach must succeed");
@@ -378,7 +401,10 @@ async fn permission_reply_uses_permission_shape_not_answers() {
         DriverEvent::State(DriverState::InputRequired)
     );
 
-    driver.answer("once").await.expect("permission answer should be accepted");
+    driver
+        .answer("once")
+        .await
+        .expect("permission answer should be accepted");
     let reply_req = server
         .requests()
         .into_iter()
@@ -417,7 +443,10 @@ async fn shutdown_does_not_touch_fake_server() {
     // The fake server is still alive and answers a fresh existence check —
     // shutdown never touched the attached session.
     let still_alive = HttpAttachDriver::attach(&config(&server.endpoint(), "ses_10")).await;
-    assert!(still_alive.is_ok(), "the fake server must still answer after our shutdown");
+    assert!(
+        still_alive.is_ok(),
+        "the fake server must still answer after our shutdown"
+    );
 }
 
 /// Both existence-check forms were independently confirmed live to work

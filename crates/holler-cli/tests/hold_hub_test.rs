@@ -1,4 +1,10 @@
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable, dead_code)] // #442
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unreachable,
+    dead_code
+)] // #442
 //! Session hold, hub side (issue #442, umbrella #437), against a real hub, a
 //! real body and `stub-acp`: no mocks of the circuit, and a real hub restart.
 //! Tags: `test-grp-concurrency` (the race matrix) and lifecycle (the rest).
@@ -21,7 +27,8 @@ use std::time::Duration;
 
 use holler_hub::control::{self, ControlError};
 use support::hold_rig::{
-    assert_held, is_delivered, is_held, say_at_retrying, start_hub_on_free_port, turn_accepted, Rig, READY, SESSION,
+    assert_held, is_delivered, is_held, say_at_retrying, start_hub_on_free_port, turn_accepted,
+    Rig, READY, SESSION,
 };
 use support::{join, kill_tree, mint_token, wait_for, write_sessions_toml, Body, StateDir};
 
@@ -40,7 +47,10 @@ fn a_held_session_refuses_every_delivery_variant_and_others_are_unaffected() {
     // The bare name resolves to the same session.
     assert_held(rig.say("alpha", false), Some("deploy freeze"));
     // `--replace` is the redirect half of `interrupt SESSION TEXT`.
-    assert_held(control::interrupt_at(rig.root(), SESSION, Some("do this instead")), Some("deploy freeze"));
+    assert_held(
+        control::interrupt_at(rig.root(), SESSION, Some("do this instead")),
+        Some("deploy freeze"),
+    );
 
     // An unheld session is unaffected, in both variants.
     assert!(is_delivered(&rig.say("b/beta", false)));
@@ -62,7 +72,10 @@ fn a_prompt_cannot_be_forwarded_around_the_hold() {
     });
     let res = control::query_remote_at(rig.root(), "b", "session/prompt", Some(prompt));
     match res {
-        Err(ControlError::Refused(e)) => assert_eq!(e.code, -32601, "a prompt is not a forwardable method: {e:?}"),
+        Err(ControlError::Refused(e)) => assert_eq!(
+            e.code, -32601,
+            "a prompt is not a forwardable method: {e:?}"
+        ),
         other => panic!("the generic forward must refuse a session/prompt: {other:?}"),
     }
     // And the session saw nothing: the roster row never left idle.
@@ -91,7 +104,13 @@ fn the_running_turn_the_accepted_queue_and_interrupt_are_not_touched() {
         let n: usize = std::fs::read_dir(&talklog)
             .ok()?
             .filter_map(Result::ok)
-            .map(|e| std::fs::read_to_string(e.path()).unwrap_or_default().lines().filter(|l| l.contains("\"text\"")).count())
+            .map(|e| {
+                std::fs::read_to_string(e.path())
+                    .unwrap_or_default()
+                    .lines()
+                    .filter(|l| l.contains("\"text\""))
+                    .count()
+            })
             .sum();
         (n >= 2).then_some(())
     });
@@ -101,8 +120,14 @@ fn the_running_turn_the_accepted_queue_and_interrupt_are_not_touched() {
     // New work is refused while both accepted turns still run.
     assert_held(rig.say(SESSION, true), Some("drain"));
     // The running turn completes and the queued one still runs.
-    assert!(is_delivered(&first.join().unwrap()), "the running turn must complete");
-    assert!(is_delivered(&queued.join().unwrap()), "the prompt accepted before the hold must still run");
+    assert!(
+        is_delivered(&first.join().unwrap()),
+        "the running turn must complete"
+    );
+    assert!(
+        is_delivered(&queued.join().unwrap()),
+        "the prompt accepted before the hold must still run"
+    );
     // Interrupt (no text) still works on a held session.
     let out = control::interrupt_at(rig.root(), SESSION, None).unwrap();
     assert_eq!(out["applied"], true);
@@ -117,7 +142,10 @@ fn hold_and_release_are_idempotent_and_keep_the_first_reason() {
     let b = rig.hold(SESSION, Some("second")).unwrap();
     assert_eq!(a["newly_held"], true);
     assert_eq!(b["newly_held"], false);
-    assert_eq!(b["reason"], "first", "a repeated hold keeps the original reason");
+    assert_eq!(
+        b["reason"], "first",
+        "a repeated hold keeps the original reason"
+    );
     assert_eq!(b["since"], a["since"], "and the original since-time");
     assert_eq!(rig.release(SESSION).unwrap()["was_held"], true);
     assert_eq!(rig.release(SESSION).unwrap()["was_held"], false);
@@ -129,7 +157,11 @@ fn hold_and_release_are_idempotent_and_keep_the_first_reason() {
 #[test]
 fn holding_or_releasing_an_unknown_session_is_refused() {
     let rig = Rig::start(&[("alpha", &["--chunks", "1"])]);
-    for res in [rig.hold("b/nope", None), rig.release("b/nope"), rig.hold("nope", Some("x"))] {
+    for res in [
+        rig.hold("b/nope", None),
+        rig.release("b/nope"),
+        rig.hold("nope", Some("x")),
+    ] {
         match res {
             Err(ControlError::Refused(e)) => assert_eq!(e.code, -32003, "unknown_session: {e:?}"),
             other => panic!("expected unknown_session, got {other:?}"),
@@ -143,14 +175,22 @@ fn the_roster_shows_the_hold_and_a_held_idle_session_stays_held() {
     let rig = Rig::start(&[("alpha", &["--chunks", "1"]), ("beta", &["--chunks", "1"])]);
     rig.hold(SESSION, Some("deploy freeze")).unwrap();
     let held = rig.row(SESSION).unwrap();
-    assert_eq!(held["state"], "idle", "the hold is orthogonal to the session's own state");
+    assert_eq!(
+        held["state"], "idle",
+        "the hold is orthogonal to the session's own state"
+    );
     assert_eq!(held["hold"], true);
     assert_eq!(held["hold_reason"], "deploy freeze");
-    assert!(held["held_since"].as_str().is_some_and(|s| s.ends_with('Z')));
+    assert!(held["held_since"]
+        .as_str()
+        .is_some_and(|s| s.ends_with('Z')));
     // A session that is not held carries none of the fields (byte-identical to before).
     let open = rig.row("b/beta").unwrap();
     for f in ["hold", "hold_reason", "held_since"] {
-        assert!(open.get(f).is_none(), "{f} must be absent on an unheld row: {open}");
+        assert!(
+            open.get(f).is_none(),
+            "{f} must be absent on an unheld row: {open}"
+        );
     }
     // Still held (and still idle) after presence beats have refreshed the row.
     std::thread::sleep(Duration::from_millis(900));
@@ -165,10 +205,18 @@ fn a_hold_survives_body_disconnect_and_rejoin() {
     rig.hold(SESSION, Some("keep")).unwrap();
     rig.kill_body();
     rig.wait_row(SESSION, |r| r["conn_state"] != "connected");
-    assert_eq!(rig.row(SESSION).unwrap()["hold"], true, "held while disconnected");
+    assert_eq!(
+        rig.row(SESSION).unwrap()["hold"],
+        true,
+        "held while disconnected"
+    );
     rig.start_body();
     rig.wait_row(SESSION, |r| r["conn_state"] == "connected");
-    assert_eq!(rig.row(SESSION).unwrap()["hold"], true, "a re-joining body is still held");
+    assert_eq!(
+        rig.row(SESSION).unwrap()["hold"],
+        true,
+        "a re-joining body is still held"
+    );
     assert_held(rig.say(SESSION, false), Some("keep"));
 }
 
@@ -177,7 +225,12 @@ fn a_hold_survives_a_roster_prune() {
     // A short TTL so the row is pruned within the test.
     let mut rig = Rig::start_with(
         &[("alpha", &["--chunks", "1"])],
-        &[("HOLLER_ROSTER_RECONNECT_MS", "200"), ("HOLLER_ROSTER_GONE_MS", "400"), ("HOLLER_ROSTER_PRUNE_MS", "800"), ("HOLLER_ROSTER_SWEEP_MS", "100")],
+        &[
+            ("HOLLER_ROSTER_RECONNECT_MS", "200"),
+            ("HOLLER_ROSTER_GONE_MS", "400"),
+            ("HOLLER_ROSTER_PRUNE_MS", "800"),
+            ("HOLLER_ROSTER_SWEEP_MS", "100"),
+        ],
     );
     rig.hold(SESSION, Some("keep")).unwrap();
     rig.kill_body();
@@ -188,38 +241,63 @@ fn a_hold_survives_a_roster_prune() {
     assert!(rig.hold_file()["holds"].get(SESSION).is_some());
     rig.start_body();
     rig.wait_row(SESSION, |r| r["conn_state"] == "connected");
-    assert_eq!(rig.row(SESSION).unwrap()["hold"], true, "the re-created row is held again");
+    assert_eq!(
+        rig.row(SESSION).unwrap()["hold"],
+        true,
+        "the re-created row is held again"
+    );
     assert_held(rig.say(SESSION, false), Some("keep"));
     assert_eq!(rig.release(SESSION).unwrap()["was_held"], true);
 }
 
 #[test]
 fn holds_survive_a_real_hub_restart_and_a_rejoining_body_stays_held() {
-    let mut rig = Rig::start(&[("alpha", &["--chunks", "1"]), ("beta", &["--chunks", "1"]), ("gamma", &["--chunks", "1"])]);
+    let mut rig = Rig::start(&[
+        ("alpha", &["--chunks", "1"]),
+        ("beta", &["--chunks", "1"]),
+        ("gamma", &["--chunks", "1"]),
+    ]);
     let since = rig.hold("b/alpha", Some("one")).unwrap()["since"].clone();
     rig.hold("b/beta", None).unwrap();
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let mode = std::fs::metadata(rig.hub_state.hub().join("holds.json")).unwrap().permissions().mode();
-        assert_eq!(mode & 0o777, 0o600, "the hold state file is private like the hub's other state");
+        let mode = std::fs::metadata(rig.hub_state.hub().join("holds.json"))
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(
+            mode & 0o777,
+            0o600,
+            "the hold state file is private like the hub's other state"
+        );
     }
 
     rig.restart_hub(); // a real process kill and a fresh `holler hub serve`
     let reconnected = wait_for(Duration::from_secs(90), || {
-        rig.row("b/gamma").filter(|r| r["conn_state"] == "connected")
+        rig.row("b/gamma")
+            .filter(|r| r["conn_state"] == "connected")
     });
-    assert!(reconnected.is_some(), "the body never re-joined the restarted hub");
+    assert!(
+        reconnected.is_some(),
+        "the body never re-joined the restarted hub"
+    );
 
     let alpha = rig.row("b/alpha").unwrap();
     assert_eq!(alpha["hold"], true);
     assert_eq!(alpha["hold_reason"], "one");
-    assert_eq!(alpha["held_since"], since, "the since-time survived the restart");
+    assert_eq!(
+        alpha["held_since"], since,
+        "the since-time survived the restart"
+    );
     assert_eq!(rig.row("b/beta").unwrap()["hold"], true);
     assert!(rig.row("b/gamma").unwrap().get("hold").is_none());
     assert_held(rig.say("b/alpha", false), Some("one"));
     assert_held(rig.say("b/beta", true), None);
-    assert!(is_delivered(&rig.say("b/gamma", false)), "an unheld session is unaffected by the restart");
+    assert!(
+        is_delivered(&rig.say("b/gamma", false)),
+        "an unheld session is unaffected by the restart"
+    );
 }
 
 // --- isolation -------------------------------------------------------------------
@@ -247,24 +325,53 @@ fn a_corrupt_hold_file_does_not_stop_the_hub_and_is_kept() {
     let (mut hub, addr) = start_hub_on_free_port(&hub_state, &[], &[]); // panics if no hub comes up
     let (token_id, secret) = mint_token(&hub_state, "b");
     let body_state = StateDir::new();
-    join(&body_state, &hub_state, &format!("ws://{addr}"), &token_id, &secret);
+    join(
+        &body_state,
+        &hub_state,
+        &format!("ws://{addr}"),
+        &token_id,
+        &secret,
+    );
     let config = write_sessions_toml(&body_state, &[("alpha", &["--chunks", "1"])]);
-    let body = Body::start_with_env(&body_state, &config, &[("HOLLER_HEARTBEAT_INTERVAL_MS", "300")]);
+    let body = Body::start_with_env(
+        &body_state,
+        &config,
+        &[("HOLLER_HEARTBEAT_INTERVAL_MS", "300")],
+    );
     let ready = wait_for(READY, || {
         let r = control::roster_at(hub_state.path(), false, None).ok()?;
-        r["rows"].as_array()?.iter().any(|r| r["name"] == SESSION).then_some(())
+        r["rows"]
+            .as_array()?
+            .iter()
+            .any(|r| r["name"] == SESSION)
+            .then_some(())
     });
     assert!(ready.is_some());
     // The hub works, the corrupt file was moved aside intact, and a new hold persists.
-    assert!(is_delivered(&say_at_retrying(hub_state.path(), SESSION, "hi", false)));
+    assert!(is_delivered(&say_at_retrying(
+        hub_state.path(),
+        SESSION,
+        "hi",
+        false
+    )));
     let aside: Vec<_> = std::fs::read_dir(hub_state.hub())
         .unwrap()
         .filter_map(Result::ok)
-        .filter(|e| e.file_name().to_string_lossy().starts_with("holds.json.corrupt-"))
+        .filter(|e| {
+            e.file_name()
+                .to_string_lossy()
+                .starts_with("holds.json.corrupt-")
+        })
         .collect();
     assert_eq!(aside.len(), 1, "the corrupt file must be kept, not deleted");
-    assert_eq!(std::fs::read(aside[0].path()).unwrap(), b"{ this is not json");
-    assert_eq!(control::hold_at(hub_state.path(), SESSION, None).unwrap()["persisted"], true);
+    assert_eq!(
+        std::fs::read(aside[0].path()).unwrap(),
+        b"{ this is not json"
+    );
+    assert_eq!(
+        control::hold_at(hub_state.path(), SESSION, None).unwrap()["persisted"],
+        true
+    );
     body.stop(&body_state, Duration::from_secs(5));
     kill_tree(&mut hub);
 }
@@ -281,8 +388,14 @@ fn an_unwritable_state_directory_keeps_the_hold_in_force() {
     let repeat = rig.hold(SESSION, Some("in memory only")).unwrap();
     std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
     if !can_write_anyway {
-        assert_eq!(out["persisted"], false, "the caller is told the hold will not survive a restart");
-        assert_eq!(repeat["persisted"], false, "and a repeat does not claim otherwise");
+        assert_eq!(
+            out["persisted"], false,
+            "the caller is told the hold will not survive a restart"
+        );
+        assert_eq!(
+            repeat["persisted"], false,
+            "and a repeat does not claim otherwise"
+        );
     }
     // Once the directory is writable, the next hold or release call saves it.
     assert_eq!(rig.hold(SESSION, None).unwrap()["persisted"], true);
@@ -319,11 +432,19 @@ fn say_racing_hold_is_delivered_or_refused_never_lost() {
         } else if is_held(&res) {
             refused += 1;
         } else {
-            panic!("round {round}: a say that raced a hold was neither delivered nor refused: {res:?}");
+            panic!(
+                "round {round}: a say that raced a hold was neither delivered nor refused: {res:?}"
+            );
         }
         // Once hold() has returned, nothing new gets in.
-        assert!(is_held(&rig.say(SESSION, false)), "round {round}: a say after hold() returned was not refused");
-        assert!(is_held(&rig.say(SESSION, true)), "round {round}: a queued say after hold() returned was not refused");
+        assert!(
+            is_held(&rig.say(SESSION, false)),
+            "round {round}: a say after hold() returned was not refused"
+        );
+        assert!(
+            is_held(&rig.say(SESSION, true)),
+            "round {round}: a queued say after hold() returned was not refused"
+        );
         rig.release(SESSION).unwrap();
         rig.wait_row(SESSION, |r| r["state"] == "idle" && r.get("hold").is_none());
     }
@@ -346,10 +467,16 @@ fn say_racing_release_is_delivered_or_refused_never_lost() {
         barrier.wait();
         rig.release(SESSION).unwrap();
         let res = racer.join().unwrap();
-        assert!(is_delivered(&res) || is_held(&res), "round {round}: neither delivered nor refused: {res:?}");
+        assert!(
+            is_delivered(&res) || is_held(&res),
+            "round {round}: neither delivered nor refused: {res:?}"
+        );
         // Once release() has returned, a say goes through.
         rig.wait_row(SESSION, |r| r["state"] == "idle");
-        assert!(is_delivered(&rig.say(SESSION, false)), "round {round}: a say after release() returned was refused");
+        assert!(
+            is_delivered(&rig.say(SESSION, false)),
+            "round {round}: a say after release() returned was refused"
+        );
     }
 }
 
@@ -370,10 +497,16 @@ fn hold_while_a_queued_prompt_is_in_flight() {
             if running.is_finished() {
                 return Some(false);
             }
-            rig.row(SESSION).filter(|r| turn_accepted(r, prev.as_ref())).map(|_| true)
+            rig.row(SESSION)
+                .filter(|r| turn_accepted(r, prev.as_ref()))
+                .map(|_| true)
         });
         if dispatched != Some(true) {
-            let res = if running.is_finished() { format!("{:?}", running.join().unwrap()) } else { "still running".into() };
+            let res = if running.is_finished() {
+                format!("{:?}", running.join().unwrap())
+            } else {
+                "still running".into()
+            };
             panic!("round {round}: the running say never dispatched a new turn; its result: {res}; roster: {:?}", rig.rows());
         }
         let barrier = Arc::new(Barrier::new(2));
@@ -387,9 +520,15 @@ fn hold_while_a_queued_prompt_is_in_flight() {
         barrier.wait();
         rig.hold(SESSION, None).unwrap();
         let q = queued.join().unwrap();
-        assert!(is_delivered(&q) || is_held(&q), "round {round}: the queued say was lost: {q:?}");
+        assert!(
+            is_delivered(&q) || is_held(&q),
+            "round {round}: the queued say was lost: {q:?}"
+        );
         let r = running.join().unwrap();
-        assert!(is_delivered(&r), "round {round}: the running turn was affected by the hold: {r:?}");
+        assert!(
+            is_delivered(&r),
+            "round {round}: the running turn was affected by the hold: {r:?}"
+        );
         rig.release(SESSION).unwrap();
         rig.wait_row(SESSION, |r| r["state"] == "idle");
     }
@@ -431,7 +570,10 @@ fn two_clients_holding_and_releasing_the_same_session_stay_consistent() {
             assert!(is_held(&rig.say(SESSION, false)));
         } else {
             rig.release(SESSION).unwrap();
-            assert!(rig.hold_file()["holds"].get(SESSION).is_none(), "round {round}: the file disagrees with the hub");
+            assert!(
+                rig.hold_file()["holds"].get(SESSION).is_none(),
+                "round {round}: the file disagrees with the hub"
+            );
             assert!(rig.row(SESSION).unwrap().get("hold").is_none());
             assert!(is_delivered(&rig.say(SESSION, false)));
         }

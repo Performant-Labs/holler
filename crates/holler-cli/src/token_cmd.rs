@@ -11,8 +11,8 @@
 //! (stdout already printed), `1` on an I/O failure, `3` on a fail-closed
 //! policy refusal.
 
-use crate::Mint;
 use crate::time_fmt::format_epoch;
+use crate::Mint;
 use holler_proto::TokenError;
 
 /// Resolve this invocation's state dir, or fail closed (exit 1) if there is
@@ -55,7 +55,10 @@ pub fn mint(mint: &Mint, json: bool) -> i32 {
     let ttl_secs = match parse_ttl(&mint.ttl) {
         Some(t) => t,
         None => {
-            eprintln!("error: invalid --ttl {:?} (use e.g. 15m, 2h, 24h)", mint.ttl);
+            eprintln!(
+                "error: invalid --ttl {:?} (use e.g. 15m, 2h, 24h)",
+                mint.ttl
+            );
             return 3;
         }
     };
@@ -288,7 +291,10 @@ pub fn ping(id: &str, json: bool) -> i32 {
     };
     let Some(record) = rows.iter().find(|r| r.token_id == id) else {
         if json {
-            println!("{}", serde_json::json!({ "token_id": id, "state": "not_found" }));
+            println!(
+                "{}",
+                serde_json::json!({ "token_id": id, "state": "not_found" })
+            );
         }
         eprintln!("not_found {id} (no such token)");
         return 3;
@@ -298,11 +304,14 @@ pub fn ping(id: &str, json: bool) -> i32 {
         holler_hub::token::TokenState::Revoked => Some("revoked"),
         holler_hub::token::TokenState::Unused if record.expires < now => Some("expired"),
         holler_hub::token::TokenState::Unused => None, // never redeemed: nothing to probe, `valid`.
-        holler_hub::token::TokenState::Bound => None,  // worth probing live, whatever its `expires` (#453).
+        holler_hub::token::TokenState::Bound => None, // worth probing live, whatever its `expires` (#453).
     };
     if let Some(status) = refusal {
         if json {
-            println!("{}", serde_json::json!({ "token_id": id, "label": record.label, "state": status }));
+            println!(
+                "{}",
+                serde_json::json!({ "token_id": id, "label": record.label, "state": status })
+            );
         } else {
             println!("{status} ({})", record.label);
         }
@@ -312,7 +321,10 @@ pub fn ping(id: &str, json: bool) -> i32 {
         return ping_live(id, &record.label, json);
     }
     if json {
-        println!("{}", serde_json::json!({ "token_id": id, "label": record.label, "state": "valid" }));
+        println!(
+            "{}",
+            serde_json::json!({ "token_id": id, "label": record.label, "state": "valid" })
+        );
     } else {
         println!("valid ({})", record.label);
     }
@@ -328,7 +340,10 @@ fn ping_live(id: &str, label: &str, json: bool) -> i32 {
             let hostname = doc.get("hostname").and_then(|v| v.as_str()).unwrap_or("?");
             let rtt_ms = doc.get("rtt_ms").and_then(|v| v.as_u64()).unwrap_or(0);
             if json {
-                println!("{}", serde_json::json!({ "token_id": id, "label": label, "state": "valid", "hostname": hostname, "rtt_ms": rtt_ms }));
+                println!(
+                    "{}",
+                    serde_json::json!({ "token_id": id, "label": label, "state": "valid", "hostname": hostname, "rtt_ms": rtt_ms })
+                );
             } else {
                 println!("valid ({label}, {hostname}) rtt={rtt_ms}ms");
             }
@@ -336,7 +351,10 @@ fn ping_live(id: &str, label: &str, json: bool) -> i32 {
         }
         Err(e) => {
             if json {
-                println!("{}", serde_json::json!({ "token_id": id, "label": label, "state": "not_connected" }));
+                println!(
+                    "{}",
+                    serde_json::json!({ "token_id": id, "label": label, "state": "not_connected" })
+                );
             }
             eprintln!("not_connected {id} ({e})");
             1
@@ -404,12 +422,27 @@ fn parse_ttl(ttl: &str) -> Option<u64> {
 /// advertise host — the same loopback/off-loopback line the body's own
 /// `--server` parsing enforces — so a bare loopback host gets `ws://` and
 /// every off-loopback host keeps `wss://`, unchanged from before.
-fn join_command(state: &holler_hub::state::HubState, token_id: &str, secret: &str, hub_pubkey: &str) -> String {
+fn join_command(
+    state: &holler_hub::state::HubState,
+    token_id: &str,
+    secret: &str,
+    hub_pubkey: &str,
+) -> String {
     let server = std::fs::read_to_string(holler_hub::state::advertise_path(state))
         .ok()
         .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
-        .and_then(|v| v.get("advertise").and_then(|a| a.as_str()).map(String::from))
-        .map(|adv| if adv.contains("://") { adv } else { format!("{}://{adv}", scheme_for(&adv)) })
+        .and_then(|v| {
+            v.get("advertise")
+                .and_then(|a| a.as_str())
+                .map(String::from)
+        })
+        .map(|adv| {
+            if adv.contains("://") {
+                adv
+            } else {
+                format!("{}://{adv}", scheme_for(&adv))
+            }
+        })
         .unwrap_or_else(|| format!("ws://{}", holler_hub::serve_listen::DEFAULT_LISTEN));
     format!("holler body join --server {server} --token {token_id}:{secret} --hub-key {hub_pubkey}")
 }
@@ -431,11 +464,17 @@ fn scheme_for(bare_host: &str) -> &'static str {
 mod tests {
     use super::join_command;
 
-    fn state_with_advertise(advertise_json_body: &str) -> (tempfile::TempDir, holler_hub::state::HubState) {
+    fn state_with_advertise(
+        advertise_json_body: &str,
+    ) -> (tempfile::TempDir, holler_hub::state::HubState) {
         let dir = tempfile::tempdir().expect("tempdir");
         let state = holler_hub::state::HubState::from_root(dir.path().to_path_buf());
         holler_hub::state::ensure_dirs(&state).expect("ensure_dirs");
-        std::fs::write(holler_hub::state::advertise_path(&state), advertise_json_body).expect("write advertise.json");
+        std::fs::write(
+            holler_hub::state::advertise_path(&state),
+            advertise_json_body,
+        )
+        .expect("write advertise.json");
         (dir, state)
     }
 
@@ -474,7 +513,10 @@ mod tests {
         let state = holler_hub::state::HubState::from_root(dir.path().to_path_buf());
         holler_hub::state::ensure_dirs(&state).expect("ensure_dirs");
         let cmd = join_command(&state, "tok_1", "secret_1", "deadbeef");
-        assert!(cmd.contains("--server ws://127.0.0.1:41807"), "expected the loopback default: {cmd}");
+        assert!(
+            cmd.contains("--server ws://127.0.0.1:41807"),
+            "expected the loopback default: {cmd}"
+        );
     }
 
     /// Real-usage regression (README Quick Start, run end to end 2026-09-22):
@@ -486,10 +528,18 @@ mod tests {
     /// failing fast.
     #[test]
     fn bare_loopback_advertise_host_gets_ws_scheme() {
-        for host in ["127.0.0.1:41807", "127.0.0.1", "[::1]:41807", "localhost:41807"] {
+        for host in [
+            "127.0.0.1:41807",
+            "127.0.0.1",
+            "[::1]:41807",
+            "localhost:41807",
+        ] {
             let (_dir, state) = state_with_advertise(&format!(r#"{{"advertise":{host:?}}}"#));
             let cmd = join_command(&state, "tok_1", "secret_1", "deadbeef");
-            assert!(cmd.contains(&format!("--server ws://{host}")), "host {host:?}: expected ws://, got: {cmd}");
+            assert!(
+                cmd.contains(&format!("--server ws://{host}")),
+                "host {host:?}: expected ws://, got: {cmd}"
+            );
         }
     }
 }

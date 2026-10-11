@@ -66,7 +66,12 @@ pub(super) struct Grants {
 
 impl Grants {
     /// Mint a grant for `key` valid until `now + ttl`.
-    pub(super) fn mint(&mut self, key: &str, ttl: Duration, now: Instant) -> Result<String, MintError> {
+    pub(super) fn mint(
+        &mut self,
+        key: &str,
+        ttl: Duration,
+        now: Instant,
+    ) -> Result<String, MintError> {
         self.purge(now);
         if self.by_id.len() >= MAX_GRANTS {
             return Err(MintError::Full);
@@ -74,7 +79,14 @@ impl Grants {
         let mut raw = [0u8; 16];
         getrandom::fill(&mut raw).map_err(|_| MintError::NoRandomness)?;
         let id = format!("gnt_{}", hex::encode(raw));
-        self.by_id.insert(id.clone(), Rec { key: key.to_owned(), expires: now + ttl.min(MAX_TTL), used_at: None });
+        self.by_id.insert(
+            id.clone(),
+            Rec {
+                key: key.to_owned(),
+                expires: now + ttl.min(MAX_TTL),
+                used_at: None,
+            },
+        );
         Ok(id)
     }
 
@@ -105,11 +117,15 @@ impl Grants {
 
     /// Live (unused, unexpired) grants for `key`.
     pub(super) fn live_for(&self, key: &str, now: Instant) -> usize {
-        self.by_id.values().filter(|r| r.key == key && r.used_at.is_none() && now < r.expires).count()
+        self.by_id
+            .values()
+            .filter(|r| r.key == key && r.used_at.is_none() && now < r.expires)
+            .count()
     }
 
     fn purge(&mut self, now: Instant) {
-        self.by_id.retain(|_, r| r.used_at.unwrap_or(r.expires) + TOMBSTONE > now);
+        self.by_id
+            .retain(|_, r| r.used_at.unwrap_or(r.expires) + TOMBSTONE > now);
     }
 }
 
@@ -125,7 +141,10 @@ mod tests {
         let id = g.mint("io/alpha", Duration::from_secs(60), t0).unwrap();
         assert!(id.starts_with("gnt_") && id.len() == 4 + 32);
         assert_eq!(g.check(&id, "io/beta", t0), Err(GrantError::OtherSession));
-        assert_eq!(g.check("gnt_nope", "io/alpha", t0), Err(GrantError::Unknown));
+        assert_eq!(
+            g.check("gnt_nope", "io/alpha", t0),
+            Err(GrantError::Unknown)
+        );
         assert_eq!(g.live_for("io/alpha", t0), 1);
         assert_eq!(g.consume(&id, "io/alpha", t0), Ok(()));
         assert_eq!(g.consume(&id, "io/alpha", t0), Err(GrantError::Used));
@@ -139,9 +158,18 @@ mod tests {
         let id = g.mint("io/alpha", Duration::from_secs(5), t0).unwrap();
         // A refused attempt for another session leaves it live.
         assert_eq!(g.consume(&id, "io/beta", t0), Err(GrantError::OtherSession));
-        assert_eq!(g.check(&id, "io/alpha", t0 + Duration::from_secs(4)), Ok(()));
-        assert_eq!(g.check(&id, "io/alpha", t0 + Duration::from_secs(5)), Err(GrantError::Expired));
-        assert_eq!(g.consume(&id, "io/alpha", t0 + Duration::from_secs(6)), Err(GrantError::Expired));
+        assert_eq!(
+            g.check(&id, "io/alpha", t0 + Duration::from_secs(4)),
+            Ok(())
+        );
+        assert_eq!(
+            g.check(&id, "io/alpha", t0 + Duration::from_secs(5)),
+            Err(GrantError::Expired)
+        );
+        assert_eq!(
+            g.consume(&id, "io/alpha", t0 + Duration::from_secs(6)),
+            Err(GrantError::Expired)
+        );
     }
 
     #[test]
@@ -152,7 +180,11 @@ mod tests {
         let b = g.mint("io/alpha", Duration::from_secs(1), t0).unwrap();
         assert_ne!(a, b);
         let much_later = t0 + TOMBSTONE + Duration::from_secs(10);
-        g.mint("io/alpha", Duration::from_secs(1), much_later).unwrap();
-        assert_eq!(g.check(&a, "io/alpha", much_later), Err(GrantError::Unknown));
+        g.mint("io/alpha", Duration::from_secs(1), much_later)
+            .unwrap();
+        assert_eq!(
+            g.check(&a, "io/alpha", much_later),
+            Err(GrantError::Unknown)
+        );
     }
 }

@@ -1,4 +1,10 @@
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable, dead_code)] // #296
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unreachable,
+    dead_code
+)] // #296
 //! Bounded, CI-feasible load test for issue #296: many concurrent real
 //! WS-connected bodies on one hub.
 //!
@@ -153,14 +159,12 @@ fn roster(state: &StateDir) -> Value {
 }
 
 fn row_connected(v: &Value, row_name: &str) -> bool {
-    v.get("rows")
-        .and_then(Value::as_array)
-        .is_some_and(|rows| {
-            rows.iter().any(|r| {
-                r.get("name").and_then(Value::as_str) == Some(row_name)
-                    && r.get("conn_state").and_then(Value::as_str) == Some("connected")
-            })
+    v.get("rows").and_then(Value::as_array).is_some_and(|rows| {
+        rows.iter().any(|r| {
+            r.get("name").and_then(Value::as_str) == Some(row_name)
+                && r.get("conn_state").and_then(Value::as_str) == Some("connected")
         })
+    })
 }
 
 /// Per-peer join budget for [`warm_up_peers`]. Widened 150s -> 240s
@@ -219,12 +223,17 @@ fn say_ready(hub_state: &StateDir, session: &str, text: &str, timeout: Duration)
 /// stays a separate manual exercise."
 #[cfg(target_os = "linux")]
 fn resource_snapshot(pid: u32) -> (Option<usize>, Option<usize>) {
-    let fds = std::fs::read_dir(format!("/proc/{pid}/fd")).ok().map(|d| d.count());
+    let fds = std::fs::read_dir(format!("/proc/{pid}/fd"))
+        .ok()
+        .map(|d| d.count());
     let threads = std::fs::read_to_string(format!("/proc/{pid}/status"))
         .ok()
         .and_then(|s| {
             s.lines()
-                .find_map(|l| l.strip_prefix("Threads:").map(|n| n.trim().parse::<usize>().ok()))
+                .find_map(|l| {
+                    l.strip_prefix("Threads:")
+                        .map(|n| n.trim().parse::<usize>().ok())
+                })
                 .flatten()
         });
     (fds, threads)
@@ -297,7 +306,11 @@ fn warm_up_peers(hub_state: &StateDir, peers: &[Peer]) {
                 peer.session,
                 stderr_of(&warm)
             );
-            assert!(stdout_of(&warm).contains("stub chunk"), "unexpected warm-up reply: {:?}", stdout_of(&warm));
+            assert!(
+                stdout_of(&warm).contains("stub chunk"),
+                "unexpected warm-up reply: {:?}",
+                stdout_of(&warm)
+            );
         }
     });
 }
@@ -324,7 +337,10 @@ fn run_concurrent_load(hub_state: &StateDir, peers: &[Peer]) {
                     if !row_connected(&v, &peer.row_name) {
                         let mut slot = watch_failure.lock().expect("watch_failure lock");
                         if slot.is_none() {
-                            *slot = Some(format!("{} dropped out of `connected` mid-load: {v}", peer.row_name));
+                            *slot = Some(format!(
+                                "{} dropped out of `connected` mid-load: {v}",
+                                peer.row_name
+                            ));
                         }
                     }
                 }
@@ -348,7 +364,10 @@ fn run_concurrent_load(hub_state: &StateDir, peers: &[Peer]) {
                     })
                 })
                 .collect();
-            handles.into_iter().map(|h| h.join().expect("say-load thread")).collect()
+            handles
+                .into_iter()
+                .map(|h| h.join().expect("say-load thread"))
+                .collect()
         });
         let elapsed = started.elapsed();
 
@@ -358,7 +377,11 @@ fn run_concurrent_load(hub_state: &StateDir, peers: &[Peer]) {
         // body's traffic delayed/dropped by another's load.
         for (session, outs) in &outcomes {
             for (round, out) in outs.iter().enumerate() {
-                assert!(out.status.success(), "{session} round {round} failed: {}", stderr_of(out));
+                assert!(
+                    out.status.success(),
+                    "{session} round {round} failed: {}",
+                    stderr_of(out)
+                );
                 assert!(
                     stdout_of(out).contains("stub chunk"),
                     "{session} round {round}: unexpected reply {:?}",
@@ -394,13 +417,18 @@ fn run_concurrent_load(hub_state: &StateDir, peers: &[Peer]) {
 /// exercise.
 fn check_resource_usage(hub: &Hub) {
     let (fds, threads) = resource_snapshot(hub.pid());
-    eprintln!("hub resource usage after {PEER_COUNT} concurrent peers: fds={fds:?} threads={threads:?}");
+    eprintln!(
+        "hub resource usage after {PEER_COUNT} concurrent peers: fds={fds:?} threads={threads:?}"
+    );
     if let Some(fds) = fds {
         // PEER_COUNT bodies each hold ~1 socket fd plus the hub's own
         // listener/stdio/log fds — a generous multiple of PEER_COUNT catches
         // a real fd leak (e.g. one per `say` never closed) without being a
         // brittle exact-count assertion.
-        assert!(fds < PEER_COUNT * 10, "hub fd count ({fds}) looks runaway for {PEER_COUNT} peers");
+        assert!(
+            fds < PEER_COUNT * 10,
+            "hub fd count ({fds}) looks runaway for {PEER_COUNT} peers"
+        );
     }
     if let Some(threads) = threads {
         assert!(
@@ -436,7 +464,10 @@ fn roster_stays_accurate_under_concurrent_body_load() {
     // still be alive (a `try_wait` that reports an exit would mean it died
     // during the load window above).
     assert!(
-        hub.child_mut().try_wait().expect("try_wait the hub").is_none(),
+        hub.child_mut()
+            .try_wait()
+            .expect("try_wait the hub")
+            .is_none(),
         "the hub must still be running after the concurrent load"
     );
 

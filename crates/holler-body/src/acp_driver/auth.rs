@@ -80,7 +80,10 @@ pub(super) struct AdvertisedMethod {
 /// id and no advertised entry with that id is terminal-type; the id returned
 /// is the configured string. Otherwise `Err` with the refusal, which always
 /// names `auth_method`, and no login request is sent.
-pub(super) fn select(advertised: &[AdvertisedMethod], configured: Option<&str>) -> Result<String, String> {
+pub(super) fn select(
+    advertised: &[AdvertisedMethod],
+    configured: Option<&str>,
+) -> Result<String, String> {
     if advertised.is_empty() {
         return Err(match configured {
             Some(id) => format!(
@@ -92,7 +95,9 @@ pub(super) fn select(advertised: &[AdvertisedMethod], configured: Option<&str>) 
     }
     let listed = list_ids(advertised);
     let Some(id) = configured else {
-        return Err(format!("auth_method is not set; set it to one of the advertised methods: {listed}"));
+        return Err(format!(
+            "auth_method is not set; set it to one of the advertised methods: {listed}"
+        ));
     };
     if !advertised.iter().any(|m| m.id == id) {
         return Err(format!(
@@ -100,7 +105,10 @@ pub(super) fn select(advertised: &[AdvertisedMethod], configured: Option<&str>) 
             quote_id(id)
         ));
     }
-    if advertised.iter().any(|m| m.id == id && m.kind == MethodKind::Terminal) {
+    if advertised
+        .iter()
+        .any(|m| m.id == id && m.kind == MethodKind::Terminal)
+    {
         return Err(format!(
             "auth_method {} is a terminal-type method: it needs a manual login (#440) and is never sent \
              in authenticate; advertised methods: {listed}",
@@ -114,7 +122,11 @@ pub(super) fn select(advertised: &[AdvertisedMethod], configured: Option<&str>) 
 /// [`MAX_ECHOED_IDS`] through [`quote_id`], comma-separated, then
 /// `(+N more)` for the rest.
 pub(super) fn list_ids(advertised: &[AdvertisedMethod]) -> String {
-    let shown: Vec<String> = advertised.iter().take(MAX_ECHOED_IDS).map(|m| quote_id(&m.id)).collect();
+    let shown: Vec<String> = advertised
+        .iter()
+        .take(MAX_ECHOED_IDS)
+        .map(|m| quote_id(&m.id))
+        .collect();
     match advertised.len().saturating_sub(MAX_ECHOED_IDS) {
         0 => shown.join(", "),
         more => format!("{} (+{more} more)", shown.join(", ")),
@@ -151,7 +163,11 @@ pub(super) fn cap_adapter_message(msg: &str) -> String {
 /// characters on a char boundary, with `...` appended when anything was cut.
 fn sanitize(raw: &str, max: usize) -> String {
     let mut chars = raw.chars();
-    let mut out: String = chars.by_ref().take(max).map(|c| if c.is_control() { ' ' } else { c }).collect();
+    let mut out: String = chars
+        .by_ref()
+        .take(max)
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect();
     if chars.next().is_some() {
         out.push_str("...");
     }
@@ -172,12 +188,19 @@ pub(super) fn rpc_error(message: &str, code: i32) -> String {
 /// The reason when `session/new` answered auth-required and [`select`]
 /// refused: the adapter's own message, then the refusal.
 pub(super) fn refused_reason(adapter_message: &str, refusal: &str) -> String {
-    format!("session/new: {}; {refusal}", rpc_error(adapter_message, AUTH_REQUIRED))
+    format!(
+        "session/new: {}; {refusal}",
+        rpc_error(adapter_message, AUTH_REQUIRED)
+    )
 }
 
 /// The reason when the login request (`authenticate` or `auth/login`) itself
 /// failed. Fatal: `session/new` is not retried.
-pub(super) fn authenticate_failed_reason(configured: &str, code: i32, adapter_message: &str) -> String {
+pub(super) fn authenticate_failed_reason(
+    configured: &str,
+    code: i32,
+    adapter_message: &str,
+) -> String {
     format!(
         "authenticate with auth_method {} failed: {}",
         quote_id(configured),
@@ -233,7 +256,8 @@ pub(super) struct AuthProgress(std::sync::atomic::AtomicU8);
 
 impl AuthProgress {
     pub(super) fn set(&self, stage: AuthStage) {
-        self.0.store(stage as u8, std::sync::atomic::Ordering::SeqCst);
+        self.0
+            .store(stage as u8, std::sync::atomic::Ordering::SeqCst);
     }
 
     pub(super) fn get(&self) -> AuthStage {
@@ -273,7 +297,10 @@ pub(super) fn stage_suffix(configured: &str, stage: AuthStage) -> String {
 /// the code and the capped, sanitized message alone. `spawn_v2` applies it to
 /// a failed v2 `initialize` only after checking the raw error for the v1
 /// negotiation failure, whose phrase the SDK puts only in `data` (#459).
-pub(super) fn startup_error_text(e: &agent_client_protocol::Error, auth_method: Option<&str>) -> String {
+pub(super) fn startup_error_text(
+    e: &agent_client_protocol::Error,
+    auth_method: Option<&str>,
+) -> String {
     match auth_method {
         None => e.to_string(),
         Some(_) => rpc_error(&e.message, i32::from(e.code)),
@@ -313,7 +340,10 @@ where
     log_debug(
         LogDirection::In,
         "session/new",
-        vec![("event", "auth_required".to_string()), ("advertised", list_ids(advertised))],
+        vec![
+            ("event", "auth_required".to_string()),
+            ("advertised", list_ids(advertised)),
+        ],
         None,
     );
     let method_id = select(advertised, auth_method).map_err(|refusal| {
@@ -323,34 +353,58 @@ where
     progress.set(AuthStage::AuthenticatePending);
     if let Err(e) = login(method_id.clone()).await {
         progress.set(AuthStage::Settled);
-        return Err(authenticate_failed_reason(&method_id, i32::from(e.code), &e.message));
+        return Err(authenticate_failed_reason(
+            &method_id,
+            i32::from(e.code),
+            &e.message,
+        ));
     }
     progress.set(AuthStage::RetryPending);
     let retried = new_session().await;
     progress.set(AuthStage::Settled);
     match retried {
         Ok(session) => Ok(session),
-        Err(e) if e.code == ErrorCode::AuthRequired => Err(did_not_clear_reason(&method_id, &e.message)),
-        Err(e) => Err(retry_failed_reason(&method_id, i32::from(e.code), &e.message)),
+        Err(e) if e.code == ErrorCode::AuthRequired => {
+            Err(did_not_clear_reason(&method_id, &e.message))
+        }
+        Err(e) => Err(retry_failed_reason(
+            &method_id,
+            i32::from(e.code),
+            &e.message,
+        )),
     }
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable)] // #439
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unreachable
+)] // #439
 mod tests {
     use super::*;
 
     fn agent(id: &str) -> AdvertisedMethod {
-        AdvertisedMethod { id: id.to_string(), kind: MethodKind::Agent }
+        AdvertisedMethod {
+            id: id.to_string(),
+            kind: MethodKind::Agent,
+        }
     }
 
     fn terminal(id: &str) -> AdvertisedMethod {
-        AdvertisedMethod { id: id.to_string(), kind: MethodKind::Terminal }
+        AdvertisedMethod {
+            id: id.to_string(),
+            kind: MethodKind::Terminal,
+        }
     }
 
     fn refusal(advertised: &[AdvertisedMethod], configured: Option<&str>) -> String {
         let reason = select(advertised, configured).expect_err("must refuse");
-        assert!(reason.contains("auth_method"), "every refusal names the config key: {reason}");
+        assert!(
+            reason.contains("auth_method"),
+            "every refusal names the config key: {reason}"
+        );
         reason
     }
 
@@ -363,7 +417,10 @@ mod tests {
     #[test]
     fn missing_configuration_refuses_listing_advertised_ids() {
         let r = refusal(&[agent("stub-key"), agent("api-key")], None);
-        assert!(r.contains("\"stub-key\"") && r.contains("\"api-key\""), "{r}");
+        assert!(
+            r.contains("\"stub-key\"") && r.contains("\"api-key\""),
+            "{r}"
+        );
     }
 
     #[test]
@@ -375,7 +432,10 @@ mod tests {
     #[test]
     fn unadvertised_method_refuses_naming_both_sides() {
         let r = refusal(&[agent("stub-key")], Some("nope"));
-        assert!(r.contains("\"nope\"") && r.contains("\"stub-key\"") && r.contains("not advertised"), "{r}");
+        assert!(
+            r.contains("\"nope\"") && r.contains("\"stub-key\"") && r.contains("not advertised"),
+            "{r}"
+        );
     }
 
     #[test]
@@ -383,13 +443,19 @@ mod tests {
         let r = refusal(&[agent("Stub-Key")], Some("stub-key"));
         assert!(r.contains("not advertised"), "{r}");
         let r = refusal(&[agent("stub-key")], Some(" stub-key "));
-        assert!(r.contains("\" stub-key \"") && r.contains("not advertised"), "padded value renders distinctly: {r}");
+        assert!(
+            r.contains("\" stub-key \"") && r.contains("not advertised"),
+            "padded value renders distinctly: {r}"
+        );
     }
 
     #[test]
     fn terminal_method_refuses_as_manual_login() {
         let r = refusal(&[terminal("stub-tty"), agent("stub-key")], Some("stub-tty"));
-        assert!(r.contains("\"stub-tty\"") && r.contains("manual login"), "{r}");
+        assert!(
+            r.contains("\"stub-tty\"") && r.contains("manual login"),
+            "{r}"
+        );
         assert!(!r.contains("not advertised"), "{r}");
     }
 
@@ -397,7 +463,10 @@ mod tests {
     fn duplicate_ids_refuse_if_any_is_terminal_else_select_once() {
         let r = refusal(&[agent("dup"), terminal("dup")], Some("dup"));
         assert!(r.contains("manual login"), "{r}");
-        assert_eq!(select(&[agent("dup"), agent("dup")], Some("dup")), Ok("dup".to_string()));
+        assert_eq!(
+            select(&[agent("dup"), agent("dup")], Some("dup")),
+            Ok("dup".to_string())
+        );
     }
 
     #[test]
@@ -417,7 +486,9 @@ mod tests {
 
     #[test]
     fn a_flood_of_long_ids_lists_at_most_eight_capped_ids_then_a_count() {
-        let flood: Vec<_> = (0..100).map(|n| agent(&format!("id{n:03}{}", "z".repeat(495)))).collect();
+        let flood: Vec<_> = (0..100)
+            .map(|n| agent(&format!("id{n:03}{}", "z".repeat(495))))
+            .collect();
         let r = refusal(&flood, None);
         assert_eq!(r.matches("\"id").count(), 8, "{r}");
         assert!(r.contains("(+92 more)"), "{r}");
@@ -433,12 +504,18 @@ mod tests {
         assert_eq!(quote_id("a\nb"), "\"a b\"");
         let hostile = quote_id("x\u{1b}[31m\ny");
         assert!(!hostile.chars().any(char::is_control), "{hostile:?}");
-        assert!(hostile.starts_with('"') && hostile.ends_with('"'), "{hostile}");
+        assert!(
+            hostile.starts_with('"') && hostile.ends_with('"'),
+            "{hostile}"
+        );
         let long = quote_id(&"a".repeat(500));
         assert_eq!(long.matches('a').count(), MAX_ID_CHARS);
         assert!(long.starts_with('"') && long.ends_with('"'), "{long}");
         // Cut on a char boundary: a multi-byte id must not panic.
-        assert_eq!(quote_id(&"é".repeat(100)).matches('é').count(), MAX_ID_CHARS);
+        assert_eq!(
+            quote_id(&"é".repeat(100)).matches('é').count(),
+            MAX_ID_CHARS
+        );
     }
 
     #[test]
@@ -451,18 +528,30 @@ mod tests {
 
     #[test]
     fn adapter_message_is_capped_and_sanitized() {
-        assert_eq!(cap_adapter_message("Authentication required"), "Authentication required");
+        assert_eq!(
+            cap_adapter_message("Authentication required"),
+            "Authentication required"
+        );
         let capped = cap_adapter_message(&"Q".repeat(5000));
-        assert!(capped.matches('Q').count() <= MAX_ADAPTER_MSG_CHARS, "{} Qs", capped.matches('Q').count());
+        assert!(
+            capped.matches('Q').count() <= MAX_ADAPTER_MSG_CHARS,
+            "{} Qs",
+            capped.matches('Q').count()
+        );
         assert!(capped.chars().count() <= MAX_ADAPTER_MSG_CHARS + 3);
         let multibyte = cap_adapter_message(&"é".repeat(5000));
         assert!(multibyte.matches('é').count() <= MAX_ADAPTER_MSG_CHARS);
-        assert!(!cap_adapter_message("bad\r\n\u{1b}[0mtext").chars().any(char::is_control));
+        assert!(!cap_adapter_message("bad\r\n\u{1b}[0mtext")
+            .chars()
+            .any(char::is_control));
     }
 
     #[test]
     fn caps_are_the_briefs_values() {
-        assert_eq!((MAX_ECHOED_IDS, MAX_ID_CHARS, MAX_ADAPTER_MSG_CHARS), (8, 64, 200));
+        assert_eq!(
+            (MAX_ECHOED_IDS, MAX_ID_CHARS, MAX_ADAPTER_MSG_CHARS),
+            (8, 64, 200)
+        );
     }
 
     #[test]
@@ -471,7 +560,8 @@ mod tests {
             stage_suffix("stub-key", AuthStage::NotReached),
             "; auth_method \"stub-key\" was configured but not applied (startup ended before session/new answered auth-required -32000)"
         );
-        assert!(stage_suffix("k", AuthStage::AuthenticatePending).contains("authenticate with auth_method \"k\" was pending"));
+        assert!(stage_suffix("k", AuthStage::AuthenticatePending)
+            .contains("authenticate with auth_method \"k\" was pending"));
         assert!(stage_suffix("k", AuthStage::RetryPending).contains("retried session/new"));
         assert_eq!(stage_suffix("k", AuthStage::Settled), "");
     }
@@ -480,7 +570,12 @@ mod tests {
     fn auth_progress_round_trips_every_stage() {
         let p = AuthProgress::default();
         assert_eq!(p.get(), AuthStage::NotReached);
-        for stage in [AuthStage::AuthenticatePending, AuthStage::RetryPending, AuthStage::Settled, AuthStage::NotReached] {
+        for stage in [
+            AuthStage::AuthenticatePending,
+            AuthStage::RetryPending,
+            AuthStage::Settled,
+            AuthStage::NotReached,
+        ] {
             p.set(stage);
             assert_eq!(p.get(), stage);
         }
@@ -489,7 +584,11 @@ mod tests {
     #[test]
     fn suffixes_render_the_configured_id_through_quote_id() {
         let id = "a\nb";
-        for stage in [AuthStage::NotReached, AuthStage::AuthenticatePending, AuthStage::RetryPending] {
+        for stage in [
+            AuthStage::NotReached,
+            AuthStage::AuthenticatePending,
+            AuthStage::RetryPending,
+        ] {
             let suffix = stage_suffix(id, stage);
             assert!(suffix.contains("auth_method \"a b\""), "{suffix}");
             assert!(!suffix.chars().any(char::is_control));

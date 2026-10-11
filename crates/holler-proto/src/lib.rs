@@ -55,18 +55,18 @@ pub use docs::{
     ProtocolParams, Prove, SessionAd, SessionState, Status, StatusSession, Support, SupportKind,
     SupportParams, Update, A2A_TERMINAL_STATES, STOP_TO_STATE,
 };
-pub use envelope::{decode, encode, Envelope, EnvelopeError, typed_params};
+pub use envelope::{decode, encode, typed_params, Envelope, EnvelopeError};
 pub use error::{Code, Error as WireError, ErrorData};
 pub use hold::SessionHold;
 pub use id::{CorrelationId, CorrelationIdError};
-pub use token::RedeemError;
-pub use token::TokenError;
 pub use log::{
     emit, emit_banner, frame_at_noisy, get, init, key_is_secret, redact, redact_frame, resolve,
     value_is_secret, Component, Config, DebugLevel, Direction as LogDirection, Event, LogFormat,
-    REDACTED, Severity,
+    Severity, REDACTED,
 };
 pub use methods::{find, is_notification, is_request, Direction, Method, MethodKind, CATALOG};
+pub use token::RedeemError;
+pub use token::TokenError;
 pub use version::{is_supported_version, PROTOCOL_MAX, PROTOCOL_MIN, PROTOCOL_VERSION};
 pub use vocab::{
     Label, NameError, RoutableName, SessionName, Vocab, FEATURES, HARNESS_IDS, MAX_SEGMENT_LEN,

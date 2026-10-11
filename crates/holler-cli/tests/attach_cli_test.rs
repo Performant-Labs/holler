@@ -1,4 +1,10 @@
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable, dead_code)] // #196
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unreachable,
+    dead_code
+)] // #196
 //! `holler body attach sessions` / `holler body attach init` e2e (issue
 //! #196) — a genuine float over the HTTP attach driver (#194): list an
 //! already-running OpenCode endpoint's sessions and write a ready `mode =
@@ -9,9 +15,9 @@
 //! not a straight reuse of `holler-body`'s own fake server) rather than a
 //! real hub/body pair.
 
-mod support;
 #[path = "attach_cli_test/fake_server.rs"]
 mod fake_server;
+mod support;
 
 use std::process::Stdio;
 
@@ -63,7 +69,13 @@ fn sessions_lists_newest_first() {
     let state = StateDir::new();
     let (code, stdout, stderr) = run(
         &state,
-        &["body", "attach", "sessions", "--endpoint", &server.endpoint()],
+        &[
+            "body",
+            "attach",
+            "sessions",
+            "--endpoint",
+            &server.endpoint(),
+        ],
     );
     assert_eq!(code, 0, "sessions must exit 0; stderr: {stderr}");
     assert!(
@@ -78,7 +90,10 @@ fn sessions_lists_newest_first() {
         pos_new < pos_mid && pos_mid < pos_old,
         "rows must be newest-updated first; got:\n{stdout}"
     );
-    assert!(stdout.contains("latest chat"), "title column is populated: {stdout}");
+    assert!(
+        stdout.contains("latest chat"),
+        "title column is populated: {stdout}"
+    );
 
     // The bare form answered, so no `/api/session` fallback was needed.
     assert_eq!(server.requests(), vec!["/session".to_string()]);
@@ -101,7 +116,14 @@ fn sessions_json_shape() {
     let state = StateDir::new();
     let (code, stdout, stderr) = run(
         &state,
-        &["--json", "body", "attach", "sessions", "--endpoint", &server.endpoint()],
+        &[
+            "--json",
+            "body",
+            "attach",
+            "sessions",
+            "--endpoint",
+            &server.endpoint(),
+        ],
     );
     assert_eq!(code, 0, "sessions --json must exit 0; stderr: {stderr}");
     let doc: Value = serde_json::from_str(&stdout).expect("sessions --json stdout is valid JSON");
@@ -109,7 +131,10 @@ fn sessions_json_shape() {
     assert_eq!(sessions.len(), 2, "both sessions are present: {doc:?}");
     assert_eq!(sessions[0]["session_id"], "ses_b", "newest first: {doc:?}");
     assert_eq!(sessions[0]["title"], "beta chat");
-    assert!(sessions[0]["updated"].is_number(), "updated is a number: {doc:?}");
+    assert!(
+        sessions[0]["updated"].is_number(),
+        "updated is a number: {doc:?}"
+    );
     assert_eq!(sessions[1]["session_id"], "ses_a");
 }
 
@@ -119,8 +144,14 @@ fn sessions_json_shape() {
 fn sessions_unreachable_exit_1() {
     let endpoint = unreachable_endpoint();
     let state = StateDir::new();
-    let (code, stdout, stderr) = run(&state, &["body", "attach", "sessions", "--endpoint", &endpoint]);
-    assert_eq!(code, 1, "an unreachable endpoint must exit 1; stdout: {stdout}, stderr: {stderr}");
+    let (code, stdout, stderr) = run(
+        &state,
+        &["body", "attach", "sessions", "--endpoint", &endpoint],
+    );
+    assert_eq!(
+        code, 1,
+        "an unreachable endpoint must exit 1; stdout: {stdout}, stderr: {stderr}"
+    );
     assert!(
         stderr.contains(&endpoint),
         "stderr names the URL that was tried; got: {stderr}"
@@ -158,7 +189,10 @@ fn init_writes_valid_config_default_newest_alpha() {
     assert!(out.status.success(), "init must exit 0; stderr: {stderr}");
 
     let written = state.path().join("attach.toml");
-    assert!(written.exists(), "./attach.toml was written; stdout: {stdout}");
+    assert!(
+        written.exists(),
+        "./attach.toml was written; stdout: {stdout}"
+    );
     assert!(
         stdout.contains("attach.toml"),
         "stdout names the file written: {stdout}"
@@ -169,12 +203,18 @@ fn init_writes_valid_config_default_newest_alpha() {
     );
 
     let contents = std::fs::read_to_string(&written).expect("read attach.toml");
-    assert!(contents.contains("name = \"alpha\""), "default name is alpha: {contents}");
+    assert!(
+        contents.contains("name = \"alpha\""),
+        "default name is alpha: {contents}"
+    );
     assert!(
         contents.contains("session_id = \"ses_new\""),
         "default session is the newest one: {contents}"
     );
-    assert!(contents.contains("mode = \"attach\""), "mode is attach: {contents}");
+    assert!(
+        contents.contains("mode = \"attach\""),
+        "mode is attach: {contents}"
+    );
     assert!(
         contents.contains(&format!("endpoint = \"{}\"", server.endpoint())),
         "endpoint is recorded: {contents}"
@@ -186,7 +226,10 @@ fn init_writes_valid_config_default_newest_alpha() {
 #[test]
 fn init_refuses_overwrite_without_force() {
     let server = FakeServer::start();
-    server.set_bare(200, json!([session_json("ses_1", "chat", 1_700_000_000_000)]).to_string());
+    server.set_bare(
+        200,
+        json!([session_json("ses_1", "chat", 1_700_000_000_000)]).to_string(),
+    );
 
     let state = StateDir::new();
     let out_path = state.path().join("attach.toml");
@@ -204,9 +247,15 @@ fn init_refuses_overwrite_without_force() {
             out_path.to_str().expect("utf8 path"),
         ],
     );
-    assert_eq!(code, 3, "an existing --out without --force is exit 3; stderr: {stderr}");
+    assert_eq!(
+        code, 3,
+        "an existing --out without --force is exit 3; stderr: {stderr}"
+    );
     let contents = std::fs::read_to_string(&out_path).expect("read attach.toml");
-    assert_eq!(contents, "# pre-existing\n", "the existing file must be left untouched");
+    assert_eq!(
+        contents, "# pre-existing\n",
+        "the existing file must be left untouched"
+    );
 
     // Now with --force: it overwrites.
     let (code, _stdout, stderr) = run(
@@ -222,9 +271,15 @@ fn init_refuses_overwrite_without_force() {
             "--force",
         ],
     );
-    assert_eq!(code, 0, "--force must allow the overwrite; stderr: {stderr}");
+    assert_eq!(
+        code, 0,
+        "--force must allow the overwrite; stderr: {stderr}"
+    );
     let contents = std::fs::read_to_string(&out_path).expect("read attach.toml");
-    assert!(contents.contains("session_id = \"ses_1\""), "the file was actually overwritten: {contents}");
+    assert!(
+        contents.contains("session_id = \"ses_1\""),
+        "the file was actually overwritten: {contents}"
+    );
 }
 
 /// The file `init` writes is not just hand-checked strings — it must
@@ -234,7 +289,10 @@ fn init_refuses_overwrite_without_force() {
 #[test]
 fn init_output_parses_with_body_config_loader() {
     let server = FakeServer::start();
-    server.set_bare(200, json!([session_json("ses_xyz", "chat", 1_700_000_000_000)]).to_string());
+    server.set_bare(
+        200,
+        json!([session_json("ses_xyz", "chat", 1_700_000_000_000)]).to_string(),
+    );
 
     let state = StateDir::new();
     let out_path = state.path().join("attach.toml");
@@ -256,8 +314,13 @@ fn init_output_parses_with_body_config_loader() {
     );
     assert_eq!(code, 0, "init must exit 0; stderr: {stderr}");
 
-    let parsed = holler_body::config::load(&out_path).expect("the written file loads through the real config loader");
-    assert_eq!(parsed.sessions.len(), 1, "exactly one session row: {parsed:?}");
+    let parsed = holler_body::config::load(&out_path)
+        .expect("the written file loads through the real config loader");
+    assert_eq!(
+        parsed.sessions.len(),
+        1,
+        "exactly one session row: {parsed:?}"
+    );
     let row = &parsed.sessions[0];
     assert_eq!(row.name.as_str(), "beta");
     assert_eq!(row.mode, holler_body::config::SessionMode::Attach);

@@ -20,12 +20,27 @@ fn banner_is_emitted_exactly_once_and_names_settings() {
 
     // The first emit prints the banner (also written to stderr).
     let first = emit_banner();
-    assert!(!first.is_empty(), "the first emit_banner must print the banner");
-    assert!(first.contains("logging_started"), "banner names the event: {first:?}");
-    assert!(first.contains("level=noisy"), "banner reports the level: {first:?}");
-    assert!(first.contains("format=json"), "banner reports the format: {first:?}");
+    assert!(
+        !first.is_empty(),
+        "the first emit_banner must print the banner"
+    );
+    assert!(
+        first.contains("logging_started"),
+        "banner names the event: {first:?}"
+    );
+    assert!(
+        first.contains("level=noisy"),
+        "banner reports the level: {first:?}"
+    );
+    assert!(
+        first.contains("format=json"),
+        "banner reports the format: {first:?}"
+    );
 
     // A second emit within the same process is a no-op (the once-guard held).
     let second = emit_banner();
-    assert!(second.is_empty(), "the banner must not print twice: {second:?}");
+    assert!(
+        second.is_empty(),
+        "the banner must not print twice: {second:?}"
+    );
 }

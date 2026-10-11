@@ -1,4 +1,9 @@
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable)] // #185/#251/#250
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unreachable
+)] // #185/#251/#250
 //! Wire-shape unit tests for `holler_proto::docs` that don't fit the golden-file
 //! suite (`golden_test.rs` only exercises the `Serialize` direction). Split out
 //! of `docs.rs` itself to keep that file under the 900-line lint gate.
@@ -36,7 +41,8 @@ mod protocol_version_tests {
     #[test]
     fn negative_version_is_unknown_feature() {
         let params = serde_json::json!({"version": -1});
-        let err = ProtocolParams::parse_version(Some(&params)).expect_err("negative must be rejected");
+        let err =
+            ProtocolParams::parse_version(Some(&params)).expect_err("negative must be rejected");
         assert_eq!(err.code, Code::UnknownFeature.jsonrpc());
     }
 
@@ -44,7 +50,8 @@ mod protocol_version_tests {
     #[test]
     fn non_numeric_version_is_unknown_feature() {
         let params = serde_json::json!({"version": "two"});
-        let err = ProtocolParams::parse_version(Some(&params)).expect_err("a string must be rejected");
+        let err =
+            ProtocolParams::parse_version(Some(&params)).expect_err("a string must be rejected");
         assert_eq!(err.code, Code::UnknownFeature.jsonrpc());
     }
 
@@ -52,7 +59,8 @@ mod protocol_version_tests {
     #[test]
     fn oversized_version_is_unknown_feature() {
         let params = serde_json::json!({"version": 5_000_000_000_u64});
-        let err = ProtocolParams::parse_version(Some(&params)).expect_err("must not silently truncate");
+        let err =
+            ProtocolParams::parse_version(Some(&params)).expect_err("must not silently truncate");
         assert_eq!(err.code, Code::UnknownFeature.jsonrpc());
     }
 
@@ -99,7 +107,10 @@ mod status_sessions_wire_tests {
             }]),
         };
         let wire = serde_json::to_value(&status).unwrap();
-        assert!(wire.get("sessions").unwrap().is_array(), "body role must serialize the session list under the wire key `sessions`");
+        assert!(
+            wire.get("sessions").unwrap().is_array(),
+            "body role must serialize the session list under the wire key `sessions`"
+        );
         let back: Status = serde_json::from_value(wire).unwrap();
         assert_eq!(back, status);
     }
@@ -125,7 +136,10 @@ mod status_sessions_wire_tests {
             session_list: None,
         };
         let wire = serde_json::to_value(&status).unwrap();
-        assert!(wire.get("sessions").unwrap().is_number(), "hub role must serialize the session count under the wire key `sessions`");
+        assert!(
+            wire.get("sessions").unwrap().is_number(),
+            "hub role must serialize the session count under the wire key `sessions`"
+        );
         let back: Status = serde_json::from_value(wire).unwrap();
         assert_eq!(back, status);
     }

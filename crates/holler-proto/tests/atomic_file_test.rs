@@ -1,4 +1,9 @@
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable)] // #483
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unreachable
+)] // #483
 //! `holler_proto::atomic_file` (issue #483): the one crash-safe way the hub
 //! and the body persist a state file.
 //!
@@ -58,7 +63,12 @@ impl Drop for Tdir {
 fn entries(dir: &Path) -> Vec<String> {
     let mut names: Vec<String> = std::fs::read_dir(dir)
         .expect("read scratch dir")
-        .map(|e| e.expect("dir entry").file_name().to_string_lossy().into_owned())
+        .map(|e| {
+            e.expect("dir entry")
+                .file_name()
+                .to_string_lossy()
+                .into_owned()
+        })
         .collect();
     names.sort();
     names
@@ -76,8 +86,16 @@ fn write_atomic_writes_the_bytes_exactly_and_leaves_no_temp_file() {
     let dest = dir.root.join("tokens.json");
     let bytes: Vec<u8> = (0..=255u8).cycle().take(70_000).collect();
     write_atomic(&dest, &bytes, 0o600).expect("write_atomic");
-    assert_eq!(std::fs::read(&dest).expect("read back"), bytes, "the bytes must be written exactly");
-    assert_eq!(entries(&dir.root), vec!["tokens.json".to_string()], "no temporary file may be left behind");
+    assert_eq!(
+        std::fs::read(&dest).expect("read back"),
+        bytes,
+        "the bytes must be written exactly"
+    );
+    assert_eq!(
+        entries(&dir.root),
+        vec!["tokens.json".to_string()],
+        "no temporary file may be left behind"
+    );
 }
 
 #[test]
@@ -85,35 +103,65 @@ fn write_atomic_applies_the_requested_mode_to_the_final_file() {
     let dir = Tdir::new("mode");
     let secret = dir.root.join("tokens.json");
     write_atomic(&secret, b"[]\n", 0o600).expect("write 0600");
-    assert_eq!(mode_of(&secret), 0o600, "a 0600 state file must end up 0600");
+    assert_eq!(
+        mode_of(&secret),
+        0o600,
+        "a 0600 state file must end up 0600"
+    );
 
     let public = dir.root.join("listening.json");
     write_atomic(&public, b"{}\n", 0o644).expect("write 0644");
-    assert_eq!(mode_of(&public), 0o644, "a 0644 state file must end up 0644");
+    assert_eq!(
+        mode_of(&public),
+        0o644,
+        "a 0644 state file must end up 0644"
+    );
 
     // Replacing an existing, looser file still yields the requested mode.
     std::fs::set_permissions(&secret, std::fs::Permissions::from_mode(0o644)).expect("loosen");
     write_atomic(&secret, b"[1]\n", 0o600).expect("rewrite 0600");
-    assert_eq!(mode_of(&secret), 0o600, "a replaced file must carry the requested mode, not the old one");
+    assert_eq!(
+        mode_of(&secret),
+        0o600,
+        "a replaced file must carry the requested mode, not the old one"
+    );
 }
 
 #[test]
 fn write_atomic_replaces_an_existing_destination() {
     let dir = Tdir::new("replace");
     let dest = dir.root.join("credential.json");
-    write_atomic(&dest, b"old contents that are longer than the new ones\n", 0o600).expect("first write");
+    write_atomic(
+        &dest,
+        b"old contents that are longer than the new ones\n",
+        0o600,
+    )
+    .expect("first write");
     write_atomic(&dest, b"new\n", 0o600).expect("second write");
-    assert_eq!(std::fs::read(&dest).expect("read back"), b"new\n", "the old bytes must be fully replaced");
-    assert_eq!(entries(&dir.root), vec!["credential.json".to_string()], "no temporary file may be left behind");
+    assert_eq!(
+        std::fs::read(&dest).expect("read back"),
+        b"new\n",
+        "the old bytes must be fully replaced"
+    );
+    assert_eq!(
+        entries(&dir.root),
+        vec!["credential.json".to_string()],
+        "no temporary file may be left behind"
+    );
 }
 
 #[test]
 fn write_atomic_into_a_missing_directory_fails_and_creates_nothing() {
     let dir = Tdir::new("missing");
     let dest = dir.root.join("no-such-dir").join("tokens.json");
-    let err = write_atomic(&dest, b"[]\n", 0o600).expect_err("a missing parent directory must be an error");
+    let err = write_atomic(&dest, b"[]\n", 0o600)
+        .expect_err("a missing parent directory must be an error");
     assert_eq!(err.kind(), ErrorKind::NotFound, "unexpected error: {err}");
-    assert!(entries(&dir.root).is_empty(), "nothing may be created on failure: {:?}", entries(&dir.root));
+    assert!(
+        entries(&dir.root).is_empty(),
+        "nothing may be created on failure: {:?}",
+        entries(&dir.root)
+    );
 }
 
 #[test]
@@ -125,7 +173,11 @@ fn write_atomic_removes_its_temp_file_when_the_rename_fails() {
     std::fs::create_dir(&dest).expect("mkdir dest");
     std::fs::write(dest.join("keep"), b"x").expect("populate dest");
     write_atomic(&dest, b"{}\n", 0o644).expect_err("renaming a file over a directory must fail");
-    assert_eq!(entries(&dir.root), vec!["advertise.json".to_string()], "the temporary file must be removed on failure");
+    assert_eq!(
+        entries(&dir.root),
+        vec!["advertise.json".to_string()],
+        "the temporary file must be removed on failure"
+    );
     assert!(dest.is_dir(), "the destination must be left as it was");
 }
 
@@ -136,7 +188,8 @@ fn write_atomic_leaves_the_old_contents_intact_when_it_fails_before_the_rename()
     write_atomic(&dest, b"[\"old\"]\n", 0o600).expect("first write");
     // A read-only directory refuses the temporary file, so the operation
     // fails before it can rename anything.
-    std::fs::set_permissions(&dir.root, std::fs::Permissions::from_mode(0o500)).expect("make dir read-only");
+    std::fs::set_permissions(&dir.root, std::fs::Permissions::from_mode(0o500))
+        .expect("make dir read-only");
     let probe = dir.root.join("probe");
     if std::fs::write(&probe, b"").is_ok() {
         // Privileged user (root ignores the mode): the failure cannot be staged.
@@ -144,10 +197,19 @@ fn write_atomic_leaves_the_old_contents_intact_when_it_fails_before_the_rename()
         eprintln!("skipping: running with privileges that ignore directory modes");
         return;
     }
-    write_atomic(&dest, b"[\"new\"]\n", 0o600).expect_err("a read-only directory must refuse the write");
-    assert_eq!(std::fs::read(&dest).expect("read back"), b"[\"old\"]\n", "the old contents must survive a failed write");
+    write_atomic(&dest, b"[\"new\"]\n", 0o600)
+        .expect_err("a read-only directory must refuse the write");
+    assert_eq!(
+        std::fs::read(&dest).expect("read back"),
+        b"[\"old\"]\n",
+        "the old contents must survive a failed write"
+    );
     std::fs::set_permissions(&dir.root, std::fs::Permissions::from_mode(0o700)).expect("restore");
-    assert_eq!(entries(&dir.root), vec!["tokens.json".to_string()], "nothing else may be left behind");
+    assert_eq!(
+        entries(&dir.root),
+        vec!["tokens.json".to_string()],
+        "nothing else may be left behind"
+    );
 }
 
 /// The property #483 needs: a concurrent reader of a file being rewritten
@@ -186,7 +248,11 @@ fn a_concurrent_reader_never_sees_an_empty_or_partial_file() {
     stop.store(true, Ordering::SeqCst);
     let reads = reader.join().expect("the reader must not see a torn file");
     assert!(reads > 0, "the reader must have run");
-    assert_eq!(entries(&dir.root), vec!["tokens.json".to_string()], "no temporary file may be left behind");
+    assert_eq!(
+        entries(&dir.root),
+        vec!["tokens.json".to_string()],
+        "no temporary file may be left behind"
+    );
 }
 
 // --- create_atomic ---------------------------------------------------------
@@ -199,7 +265,11 @@ fn create_atomic_creates_an_absent_file_with_the_bytes_and_mode() {
     create_atomic(&dest, &key, 0o600).expect("create_atomic");
     assert_eq!(std::fs::read(&dest).expect("read back"), key.to_vec());
     assert_eq!(mode_of(&dest), 0o600, "a created key file must be 0600");
-    assert_eq!(entries(&dir.root), vec!["identity.key".to_string()], "no temporary file may be left behind");
+    assert_eq!(
+        entries(&dir.root),
+        vec!["identity.key".to_string()],
+        "no temporary file may be left behind"
+    );
 }
 
 #[test]
@@ -208,9 +278,21 @@ fn create_atomic_refuses_to_overwrite_an_existing_file() {
     let dest = dir.root.join(".pepper");
     create_atomic(&dest, &[1u8; 32], 0o600).expect("first create");
     let err = create_atomic(&dest, &[2u8; 32], 0o600).expect_err("a second create must be refused");
-    assert_eq!(err.kind(), ErrorKind::AlreadyExists, "unexpected error: {err}");
-    assert_eq!(std::fs::read(&dest).expect("read back"), vec![1u8; 32], "the existing bytes must be untouched");
-    assert_eq!(entries(&dir.root), vec![".pepper".to_string()], "the loser's temporary file must be removed");
+    assert_eq!(
+        err.kind(),
+        ErrorKind::AlreadyExists,
+        "unexpected error: {err}"
+    );
+    assert_eq!(
+        std::fs::read(&dest).expect("read back"),
+        vec![1u8; 32],
+        "the existing bytes must be untouched"
+    );
+    assert_eq!(
+        entries(&dir.root),
+        vec![".pepper".to_string()],
+        "the loser's temporary file must be removed"
+    );
 }
 
 /// Two (here: many) concurrent creators of one file: exactly one wins, every
@@ -234,18 +316,38 @@ fn concurrent_creators_have_exactly_one_winner_whose_bytes_survive() {
                 })
             })
             .collect();
-        let results: Vec<_> = handles.into_iter().map(|h| h.join().expect("creator thread")).collect();
-        let winners: Vec<&Vec<u8>> = results.iter().filter(|(_, r)| r.is_ok()).map(|(b, _)| b).collect();
-        assert_eq!(winners.len(), 1, "round {round}: exactly one creator must win, got {}", winners.len());
+        let results: Vec<_> = handles
+            .into_iter()
+            .map(|h| h.join().expect("creator thread"))
+            .collect();
+        let winners: Vec<&Vec<u8>> = results
+            .iter()
+            .filter(|(_, r)| r.is_ok())
+            .map(|(b, _)| b)
+            .collect();
+        assert_eq!(
+            winners.len(),
+            1,
+            "round {round}: exactly one creator must win, got {}",
+            winners.len()
+        );
         for (_, r) in results.iter().filter(|(_, r)| r.is_err()) {
             let kind = r.as_ref().expect_err("loser").kind();
-            assert_eq!(kind, ErrorKind::AlreadyExists, "round {round}: a loser must see AlreadyExists");
+            assert_eq!(
+                kind,
+                ErrorKind::AlreadyExists,
+                "round {round}: a loser must see AlreadyExists"
+            );
         }
         assert_eq!(
             &std::fs::read(&dest).expect("read back"),
             winners[0],
             "round {round}: the file must hold exactly the winner's bytes"
         );
-        assert_eq!(entries(&dir.root), vec!["identity.key".to_string()], "round {round}: no temporary file may be left");
+        assert_eq!(
+            entries(&dir.root),
+            vec!["identity.key".to_string()],
+            "round {round}: no temporary file may be left"
+        );
     }
 }

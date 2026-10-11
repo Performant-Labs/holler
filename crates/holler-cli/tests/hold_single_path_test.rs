@@ -1,4 +1,9 @@
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable)] // #442
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unreachable
+)] // #442
 //! The session hold has one enforcement point (issue #442, umbrella decision
 //! 3): every prompt reaches a body through `send_prompt` in
 //! `crates/holler-hub/src/circuit/dispatch.rs`, and the hold is checked there.
@@ -51,20 +56,40 @@ fn session_prompt_is_built_in_exactly_one_place_and_the_hold_is_checked_there() 
         // log label and never sends.)
         for (i, line) in code.lines().enumerate() {
             if line.contains("\"session/prompt\"") && line.contains("Envelope::request") {
-                builders.push(format!("{}:{}", f.strip_prefix(hub_src()).unwrap().display(), i + 1));
+                builders.push(format!(
+                    "{}:{}",
+                    f.strip_prefix(hub_src()).unwrap().display(),
+                    i + 1
+                ));
             }
         }
     }
-    assert_eq!(builders.len(), 1, "exactly one place may build a session/prompt request: {builders:?}");
-    assert!(builders[0].starts_with("circuit/dispatch.rs"), "the one builder must be send_prompt: {builders:?}");
+    assert_eq!(
+        builders.len(),
+        1,
+        "exactly one place may build a session/prompt request: {builders:?}"
+    );
+    assert!(
+        builders[0].starts_with("circuit/dispatch.rs"),
+        "the one builder must be send_prompt: {builders:?}"
+    );
 
     // And the hold is checked in that function before the request is built.
     let dispatch = code_of(&hub_src().join("circuit/dispatch.rs"));
-    let start = dispatch.find("async fn send_prompt").expect("send_prompt exists");
+    let start = dispatch
+        .find("async fn send_prompt")
+        .expect("send_prompt exists");
     let body = &dispatch[start..];
-    let check = body.find("gate.holds.admit(").expect("send_prompt checks the hold");
-    let build = body.find("Envelope::request").expect("send_prompt builds the request");
-    assert!(check < build, "the hold must be checked before the prompt is built or sent");
+    let check = body
+        .find("gate.holds.admit(")
+        .expect("send_prompt checks the hold");
+    let build = body
+        .find("Envelope::request")
+        .expect("send_prompt builds the request");
+    assert!(
+        check < build,
+        "the hold must be checked before the prompt is built or sent"
+    );
 }
 
 #[test]
@@ -72,10 +97,13 @@ fn the_generic_request_forward_allows_only_query_and_answer() {
     // `LiveHandle::query` is the hub's generic "forward this method to the
     // body" path (`hub query TARGET ...`, `answer`). It must not carry a prompt.
     let live = code_of(&hub_src().join("live.rs"));
-    let start = live.find("pub async fn query(").expect("LiveHandle::query exists");
+    let start = live
+        .find("pub async fn query(")
+        .expect("LiveHandle::query exists");
     let body = &live[start..];
     assert!(
-        body.find("method.starts_with(\"query/\")").is_some_and(|i| i < body.find("LiveCommand::Query").unwrap()),
+        body.find("method.starts_with(\"query/\")")
+            .is_some_and(|i| i < body.find("LiveCommand::Query").unwrap()),
         "LiveHandle::query must reject anything but query/* and session/answer before forwarding"
     );
 }

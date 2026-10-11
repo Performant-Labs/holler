@@ -53,7 +53,8 @@ mod churn;
 // scenario runs it as a real child process (`--fake-opencode`) so it can
 // kill it the way the 2026-09-21 incident's backend died.
 #[path = "../../holler-body/tests/http_attach_driver_test/fake_server.rs"]
-#[allow(dead_code, clippy::expect_used, clippy::unwrap_used, clippy::panic)] // #373: reused test fixture; its unused helpers and bind-failure panics are fine here
+#[allow(dead_code, clippy::expect_used, clippy::unwrap_used, clippy::panic)]
+// #373: reused test fixture; its unused helpers and bind-failure panics are fine here
 mod fake_opencode;
 mod fleet;
 mod hold_load;
@@ -378,7 +379,9 @@ fn main() -> Res<()> {
     let hub_env = parse_env(&cli.hub_env)?;
     let mut hub = match (cli.hub_url, cli.hub_state) {
         (Some(url), Some(state)) => hub::Hub::attach(holler_bin, hub::StateDir::adopt(state), url),
-        (Some(_), None) => return Err("--hub-url requires --hub-state (the hub's own HOLLER_STATE_DIR)".into()),
+        (Some(_), None) => {
+            return Err("--hub-url requires --hub-state (the hub's own HOLLER_STATE_DIR)".into())
+        }
         (None, _) => hub::Hub::start(holler_bin, hub::StateDir::fresh()?, &hub_env)?,
     };
 
@@ -400,13 +403,17 @@ fn main() -> Res<()> {
         hold: None,
     };
 
-    let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?;
     let outcome = runtime.block_on(async {
         match cli.scenario {
             Scenario::ConnectionScale => scenario::run(&cfg, &hub, &mut report).await,
             Scenario::BodyFleet => scenario::run_body_fleet(&cfg, &hub, &mut report).await,
             Scenario::SessionScale => session_scale::run(&cfg, &hub, &mut report).await,
-            Scenario::SustainedThroughput => sustained_throughput::run(&cfg, &hub, &mut report).await,
+            Scenario::SustainedThroughput => {
+                sustained_throughput::run(&cfg, &hub, &mut report).await
+            }
             Scenario::Churn => churn::run(&cfg, &hub, &mut report).await,
             Scenario::SessionHold => hold_load::run(&cfg, &mut hub, &mut report).await,
         }
@@ -432,7 +439,9 @@ fn main() -> Res<()> {
 /// `--fake-opencode`: serve the fake, print its endpoint, run until killed.
 fn serve_fake_opencode() -> Res<()> {
     use std::io::Write;
-    let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?;
     runtime.block_on(async {
         let server = fake_opencode::FakeServer::start().await;
         println!("{}", server.endpoint());
@@ -449,7 +458,10 @@ fn parse_ramp(s: &str) -> Res<Vec<usize>> {
         if part.is_empty() {
             continue;
         }
-        out.push(part.parse::<usize>().map_err(|e| format!("bad --ramp element {part:?}: {e}"))?);
+        out.push(
+            part.parse::<usize>()
+                .map_err(|e| format!("bad --ramp element {part:?}: {e}"))?,
+        );
     }
     if out.is_empty() {
         return Err("--ramp named no counts".into());

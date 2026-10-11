@@ -28,8 +28,8 @@ use holler_proto::log::{Component, Direction as LogDirection, Event as LogEvent,
 use crate::acp_driver::{DriverError, DriverEvent, DriverState, Status, StopReason};
 
 use super::wire::{
-    normalize_permission_reply, resolve_question_choices, BlockKind, OcEvent,
-    OcPermissionRequest, OcQuestionRequest, PendingBlock,
+    normalize_permission_reply, resolve_question_choices, BlockKind, OcEvent, OcPermissionRequest,
+    OcQuestionRequest, PendingBlock,
 };
 
 /// How often the background loop polls `/question` and `/permission` while a
@@ -119,7 +119,9 @@ fn log_warn(method: &'static str, fields: Vec<(&'static str, String)>) {
 /// Milliseconds elapsed since `started`, as a log field value — the `ms` half
 /// of the spec's "each HTTP call (method, path, status, ms)" (issue #197).
 fn elapsed_ms(started: Instant) -> String {
-    u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX).to_string()
+    u64::try_from(started.elapsed().as_millis())
+        .unwrap_or(u64::MAX)
+        .to_string()
 }
 
 /// Drives one attached session for its whole lifetime (from `attach()` until
@@ -235,8 +237,12 @@ fn process_sse_chunk(
         let frame = buffer[..pos].to_string();
         buffer.drain(..pos + 2);
         for line in frame.lines() {
-            let Some(json_str) = line.strip_prefix("data: ") else { continue };
-            let Ok(event) = serde_json::from_str::<OcEvent>(json_str) else { continue };
+            let Some(json_str) = line.strip_prefix("data: ") else {
+                continue;
+            };
+            let Ok(event) = serde_json::from_str::<OcEvent>(json_str) else {
+                continue;
+            };
             if event.properties.session_id.as_deref() != Some(session_id) {
                 continue;
             }
@@ -260,7 +266,10 @@ async fn connect_sse(client: &reqwest::Client, endpoint: &str) -> Option<ByteStr
     if !response.status().is_success() {
         log_warn(
             "sse_connect",
-            vec![("event", format!("non-success status: {}", response.status()))],
+            vec![(
+                "event",
+                format!("non-success status: {}", response.status()),
+            )],
         );
         return None;
     }
@@ -276,11 +285,17 @@ async fn send_prompt(
 ) {
     // Always bare — confirmed live that `/api/session/{id}/prompt_async` is
     // not a real route (see `http_attach_driver.rs`'s module doc).
-    let url = format!("{}/session/{session_id}/prompt_async", endpoint.trim_end_matches('/'));
+    let url = format!(
+        "{}/session/{session_id}/prompt_async",
+        endpoint.trim_end_matches('/')
+    );
     let body = serde_json::json!({ "parts": [{"type": "text", "text": text}] });
     log_debug(
         "prompt_async",
-        vec![("method", "POST".to_string()), ("path", format!("/session/{session_id}/prompt_async"))],
+        vec![
+            ("method", "POST".to_string()),
+            ("path", format!("/session/{session_id}/prompt_async")),
+        ],
         holler_proto::log::frame_at_noisy(&body.to_string()),
     );
     lock(shared).status = Status::Working;
@@ -297,7 +312,13 @@ async fn send_prompt(
             );
         }
         Err(err) => {
-            log_warn("prompt_async", vec![("event", format!("error: {err}")), ("ms", elapsed_ms(started))]);
+            log_warn(
+                "prompt_async",
+                vec![
+                    ("event", format!("error: {err}")),
+                    ("ms", elapsed_ms(started)),
+                ],
+            );
         }
     }
 }
@@ -314,11 +335,15 @@ async fn refresh_child_sessions(
     child_sessions: &mut Vec<String>,
 ) {
     let url = format!("{}/session", endpoint.trim_end_matches('/'));
-    let Ok(response) = client.get(&url).send().await else { return };
+    let Ok(response) = client.get(&url).send().await else {
+        return;
+    };
     if !response.status().is_success() {
         return;
     }
-    let Ok(sessions) = response.json::<Vec<OcSessionSummary>>().await else { return };
+    let Ok(sessions) = response.json::<Vec<OcSessionSummary>>().await else {
+        return;
+    };
     *child_sessions = sessions
         .into_iter()
         .filter(|s| s.parent_id.as_deref() == Some(session_id))
@@ -383,7 +408,11 @@ async fn poll_pending_question(
     child_sessions: &[String],
 ) -> Option<PendingBlock> {
     let url = format!("{}/question", endpoint.trim_end_matches('/'));
-    log_debug("question_poll", vec![("path", "/question".to_string())], None);
+    log_debug(
+        "question_poll",
+        vec![("path", "/question".to_string())],
+        None,
+    );
     let response = client.get(&url).send().await.ok()?;
     if !response.status().is_success() {
         return None;
@@ -421,7 +450,11 @@ async fn poll_pending_permission(
     child_sessions: &[String],
 ) -> Option<PendingBlock> {
     let url = format!("{}/permission", endpoint.trim_end_matches('/'));
-    log_debug("permission_poll", vec![("path", "/permission".to_string())], None);
+    log_debug(
+        "permission_poll",
+        vec![("path", "/permission".to_string())],
+        None,
+    );
     let response = client.get(&url).send().await.ok()?;
     if !response.status().is_success() {
         return None;
@@ -439,7 +472,11 @@ async fn poll_pending_permission(
     })
 }
 
-fn handle_event(event: OcEvent, message_roles: &mut HashMap<String, String>, shared: &Arc<Mutex<Shared>>) {
+fn handle_event(
+    event: OcEvent,
+    message_roles: &mut HashMap<String, String>,
+    shared: &Arc<Mutex<Shared>>,
+) {
     match event.kind.as_str() {
         "message.updated" => {
             if let Some(info) = event.properties.info {
@@ -491,7 +528,11 @@ fn handle_event(event: OcEvent, message_roles: &mut HashMap<String, String>, sha
 fn finish_turn(shared: &Arc<Mutex<Shared>>, reason: StopReason) {
     let mut guard = lock(shared);
     let was_cancelled = std::mem::take(&mut guard.interrupt_requested);
-    let resolved = if was_cancelled { StopReason::Cancelled } else { reason };
+    let resolved = if was_cancelled {
+        StopReason::Cancelled
+    } else {
+        reason
+    };
     guard.status = Status::Idle;
     guard.last_stop_reason = Some(resolved);
     if let Some(done_tx) = guard.awaiting_done.take() {
@@ -518,7 +559,11 @@ pub(super) async fn post_answer(
                     "invalid permission choice {choice:?}; expected one of once/allow, always, reject/deny"
                 )));
             };
-            let url = format!("{}/permission/{}/reply", endpoint.trim_end_matches('/'), pending.id);
+            let url = format!(
+                "{}/permission/{}/reply",
+                endpoint.trim_end_matches('/'),
+                pending.id
+            );
             let body = serde_json::json!({ "reply": reply });
             post_reply(client, &url, &body, "answer_permission").await
         }
@@ -529,7 +574,11 @@ pub(super) async fn post_answer(
                     pending.options.len()
                 )));
             };
-            let url = format!("{}/question/{}/reply", endpoint.trim_end_matches('/'), pending.id);
+            let url = format!(
+                "{}/question/{}/reply",
+                endpoint.trim_end_matches('/'),
+                pending.id
+            );
             let answers: Vec<Vec<&str>> = labels.iter().map(|l| vec![l.as_str()]).collect();
             let body = serde_json::json!({ "answers": answers });
             post_reply(client, &url, &body, "answer_question").await
@@ -557,11 +606,17 @@ async fn post_reply(
         .map_err(|err| DriverError::Rpc(err.to_string()))?;
     log_debug(
         method,
-        vec![("status", response.status().as_str().to_string()), ("ms", elapsed_ms(started))],
+        vec![
+            ("status", response.status().as_str().to_string()),
+            ("ms", elapsed_ms(started)),
+        ],
         None,
     );
     if !response.status().is_success() {
-        return Err(DriverError::Rpc(format!("{method} returned HTTP {}", response.status())));
+        return Err(DriverError::Rpc(format!(
+            "{method} returned HTTP {}",
+            response.status()
+        )));
     }
     Ok(())
 }
@@ -573,12 +628,18 @@ async fn post_reply(
 /// is deliberately not an error: the interrupt already went out, and older
 /// servers may not expose this route.
 pub(super) async fn post_abort(client: &reqwest::Client, endpoint: &str, session_id: &str) {
-    let url = format!("{}/session/{session_id}/abort", endpoint.trim_end_matches('/'));
+    let url = format!(
+        "{}/session/{session_id}/abort",
+        endpoint.trim_end_matches('/')
+    );
     let started = Instant::now();
     match client.post(&url).send().await {
         Ok(response) => log_debug(
             "abort",
-            vec![("status", response.status().as_str().to_string()), ("ms", elapsed_ms(started))],
+            vec![
+                ("status", response.status().as_str().to_string()),
+                ("ms", elapsed_ms(started)),
+            ],
             None,
         ),
         Err(err) => log_debug("abort", vec![("error", err.to_string())], None),
@@ -594,10 +655,16 @@ pub(super) async fn post_interrupt(
     // Always `/api`-prefixed — confirmed live that the bare
     // `/session/{id}/interrupt` is not a real route (see
     // `http_attach_driver.rs`'s module doc).
-    let url = format!("{}/api/session/{session_id}/interrupt", endpoint.trim_end_matches('/'));
+    let url = format!(
+        "{}/api/session/{session_id}/interrupt",
+        endpoint.trim_end_matches('/')
+    );
     log_debug(
         "interrupt",
-        vec![("method", "POST".to_string()), ("path", format!("/api/session/{session_id}/interrupt"))],
+        vec![
+            ("method", "POST".to_string()),
+            ("path", format!("/api/session/{session_id}/interrupt")),
+        ],
         None,
     );
     let started = Instant::now();
@@ -608,11 +675,17 @@ pub(super) async fn post_interrupt(
         .map_err(|err| DriverError::Rpc(err.to_string()))?;
     log_debug(
         "interrupt",
-        vec![("status", response.status().as_str().to_string()), ("ms", elapsed_ms(started))],
+        vec![
+            ("status", response.status().as_str().to_string()),
+            ("ms", elapsed_ms(started)),
+        ],
         None,
     );
     if !response.status().is_success() {
-        return Err(DriverError::Rpc(format!("interrupt returned HTTP {}", response.status())));
+        return Err(DriverError::Rpc(format!(
+            "interrupt returned HTTP {}",
+            response.status()
+        )));
     }
     Ok(())
 }

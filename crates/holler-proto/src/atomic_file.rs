@@ -107,7 +107,10 @@ fn write_temp(path: &Path, bytes: &[u8], mode: u32, durable: bool) -> io::Result
     }
     Err(io::Error::new(
         ErrorKind::AlreadyExists,
-        format!("no free temporary file name beside {} after {MAX_TEMP_TRIES} tries", path.display()),
+        format!(
+            "no free temporary file name beside {} after {MAX_TEMP_TRIES} tries",
+            path.display()
+        ),
     ))
 }
 
@@ -115,11 +118,18 @@ fn write_temp(path: &Path, bytes: &[u8], mode: u32, durable: bool) -> io::Result
 /// `hard_link` never crosses a filesystem).
 fn temp_path(path: &Path) -> io::Result<PathBuf> {
     let Some(name) = path.file_name() else {
-        return Err(io::Error::new(ErrorKind::InvalidInput, format!("{} does not name a file", path.display())));
+        return Err(io::Error::new(
+            ErrorKind::InvalidInput,
+            format!("{} does not name a file", path.display()),
+        ));
     };
     let mut tmp = OsString::from(".");
     tmp.push(name);
-    tmp.push(format!(".{}.{}.tmp", std::process::id(), TEMP_SEQ.fetch_add(1, Ordering::Relaxed)));
+    tmp.push(format!(
+        ".{}.{}.tmp",
+        std::process::id(),
+        TEMP_SEQ.fetch_add(1, Ordering::Relaxed)
+    ));
     Ok(path.with_file_name(tmp))
 }
 
@@ -177,7 +187,11 @@ mod tests {
     use super::*;
 
     fn scratch(tag: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("holler-atomic-{tag}-{}-{}", std::process::id(), TEMP_SEQ.fetch_add(1, Ordering::Relaxed)));
+        let dir = std::env::temp_dir().join(format!(
+            "holler-atomic-{tag}-{}-{}",
+            std::process::id(),
+            TEMP_SEQ.fetch_add(1, Ordering::Relaxed)
+        ));
         std::fs::create_dir_all(&dir).unwrap();
         dir
     }
@@ -194,8 +208,16 @@ mod tests {
 
         let err = open_temp(&leftover, 0o600).unwrap_err();
         assert_eq!(err.kind(), ErrorKind::AlreadyExists);
-        assert_eq!(std::fs::read(&dest).unwrap(), b"secret bytes", "the destination is intact");
-        assert_eq!(std::fs::read(&leftover).unwrap(), b"secret bytes", "the leftover is untouched");
+        assert_eq!(
+            std::fs::read(&dest).unwrap(),
+            b"secret bytes",
+            "the destination is intact"
+        );
+        assert_eq!(
+            std::fs::read(&leftover).unwrap(),
+            b"secret bytes",
+            "the leftover is untouched"
+        );
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -208,7 +230,10 @@ mod tests {
         let tmp = dir.join(".x.1.0.tmp");
         std::os::unix::fs::symlink(&victim, &tmp).unwrap();
 
-        assert_eq!(open_temp(&tmp, 0o600).unwrap_err().kind(), ErrorKind::AlreadyExists);
+        assert_eq!(
+            open_temp(&tmp, 0o600).unwrap_err().kind(),
+            ErrorKind::AlreadyExists
+        );
         assert_eq!(std::fs::read(&victim).unwrap(), b"keep");
         std::fs::remove_dir_all(&dir).unwrap();
     }
@@ -223,7 +248,11 @@ mod tests {
         std::fs::write(&dest, b"old").unwrap();
         let start = TEMP_SEQ.load(Ordering::Relaxed);
         for n in start..start + 8 {
-            std::fs::hard_link(&dest, dir.join(format!(".tokens.json.{}.{n}.tmp", std::process::id()))).unwrap();
+            std::fs::hard_link(
+                &dest,
+                dir.join(format!(".tokens.json.{}.{n}.tmp", std::process::id())),
+            )
+            .unwrap();
         }
 
         write_atomic(&dest, b"new bytes", 0o600).unwrap();

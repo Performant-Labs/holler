@@ -1,8 +1,9 @@
 //! The TUI side of `HarnessPort` (#642): `attach_tui`, `select_session` and
 //! `shown_session`, to which the crate root delegates in one line each, as it delegates
-//! `serve` to `server`. A pane's TUI is an `opencode attach` that runs in the pane's tmux
-//! session (the one `tui_session` names). The adapter reaches it only through tmux, by the
-//! calls [`crate::tui`] builds, and reads what it shows only from its terminal title.
+//! the server's argv to `server`. A pane's TUI is an `opencode attach` that runs in the
+//! pane's tmux session (the one `tui_session` names). The adapter reaches it only through
+//! tmux, by the calls [`crate::tui`] builds, and reads what it shows only from its terminal
+//! title.
 //!
 //! - **One deadline per method**, taken at its entry: every tmux call and every request of
 //!   the method runs within it, and past it the answer is `timeout` with the method's `op`.
@@ -43,13 +44,7 @@ pub(crate) fn attach_tui(
     let (reply, found) = session_reply(&call, &path, session)?;
     let directory = string_at(Some(&found), "directory")
         .ok_or_else(|| call.unexpected(GET_SESSION, &reply, "that session with its directory"))?;
-    let bin = config
-        .opencode_bin
-        .to_str()
-        .ok_or_else(|| PaneError::Unavailable {
-            what: "the path of the opencode binary is not valid UTF-8".to_owned(),
-        })?;
-    let argv = tui::tui_argv(bin, &config.env, port, directory, session);
+    let argv = tui::tui_argv(config.bin()?, &config.env, port, directory, session);
     let tui = Tui::of(harness, pane, OP_ATTACH_TUI, call.deadline)?;
     tui.change(&tui::remain_on_exit_args(&tui.session))?;
     tui.change(&tui::respawn_args(&tui.session, directory, &argv))?;

@@ -33,7 +33,11 @@ fn skill() -> String {
 }
 
 fn stage(n: u32) -> String {
-    between(&skill(), &format!("## Stage {n} "), &format!("## Stage {} ", n + 1))
+    between(
+        &skill(),
+        &format!("## Stage {n} "),
+        &format!("## Stage {} ", n + 1),
+    )
 }
 
 fn has_all(what: &str, text: &str, needles: &[&str]) {
@@ -90,7 +94,10 @@ fn scenarios_a_and_b_and_the_readme_propose_r1c1() {
     assert!(!s1.contains("[[\"o1\"]]"), "Stage 1 still computes o1");
     let readme = flat("README.md");
     has_all("README", &readme, &["`name = \"r1c1\"`"]);
-    assert!(!readme.contains("name = \"o1\""), "README still proposes o1");
+    assert!(
+        !readme.contains("name = \"o1\""),
+        "README still proposes o1"
+    );
 }
 
 #[test]
@@ -136,11 +143,7 @@ fn the_readme_uses_a_placeholder_host_in_its_join_held_example() {
 #[test]
 fn stage_one_notes_the_first_run_directory_and_what_it_writes() {
     let s1 = stage(1);
-    has_all(
-        "Stage 1",
-        &s1,
-        &["mkdir -p ~/.holler/herdr/setup"],
-    );
+    has_all("Stage 1", &s1, &["mkdir -p ~/.holler/herdr/setup"]);
     assert!(
         skill().contains(
             "read-only except the scratch directory and the config file you write from the user's answers"

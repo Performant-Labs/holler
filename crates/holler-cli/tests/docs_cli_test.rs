@@ -1,4 +1,10 @@
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable, dead_code)] // #149
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unreachable,
+    dead_code
+)] // #149
 //! Docs doc-test (issue #155 §6): every `holler …` command the documentation
 //! shows must parse against the real clap tree.
 //!
@@ -27,7 +33,10 @@ use fixture::{pending_leaves, split_args};
 use holler_cli::Cli;
 
 fn workspace_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap()
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .canonicalize()
+        .unwrap()
 }
 
 /// Whether a path relative to the workspace root (a markdown file such as
@@ -86,7 +95,11 @@ struct Doc {
 /// Extract candidate `holler …` commands from one markdown file.
 fn extract(path: &Path) -> Vec<Doc> {
     let text = std::fs::read_to_string(path).unwrap();
-    let file = path.strip_prefix(workspace_root()).unwrap().display().to_string();
+    let file = path
+        .strip_prefix(workspace_root())
+        .unwrap()
+        .display()
+        .to_string();
     let mut out = Vec::new();
     let mut in_fence = false;
     let mut fence_ok = false;
@@ -107,7 +120,11 @@ fn extract(path: &Path) -> Vec<Doc> {
                 let t = line.trim_start();
                 let t = t.strip_prefix("$ ").unwrap_or(t);
                 if t.starts_with("holler ") || t == "holler" {
-                    out.push(Doc { file: file.clone(), line_no, raw: t.to_string() });
+                    out.push(Doc {
+                        file: file.clone(),
+                        line_no,
+                        raw: t.to_string(),
+                    });
                 }
             }
             continue;
@@ -119,7 +136,11 @@ fn extract(path: &Path) -> Vec<Doc> {
             let Some(end) = after.find('`') else { break };
             let span = &after[..end];
             if span.starts_with("holler ") {
-                out.push(Doc { file: file.clone(), line_no, raw: span.to_string() });
+                out.push(Doc {
+                    file: file.clone(),
+                    line_no,
+                    raw: span.to_string(),
+                });
             }
             rest = &after[end + 1..];
         }
@@ -140,7 +161,9 @@ fn normalise(raw: &str) -> Vec<String> {
     // Drop optional groups [ ... ], innermost first so nesting such as
     // `[--advertise HOST[:PORT]]` collapses cleanly.
     while let Some(close) = s.find(']') {
-        let Some(open) = s[..close].rfind('[') else { break };
+        let Some(open) = s[..close].rfind('[') else {
+            break;
+        };
         s.replace_range(open..=close, "");
     }
     // <placeholder> -> placeholder
@@ -190,19 +213,34 @@ fn every_documented_holler_command_parses() {
                 // `holler hub` or `holler body …` used in prose to name the
                 // role: a prefix of the real tree is fine, an unknown or
                 // malformed verb is not.
-                Err(e) if matches!(
-                    e.kind(),
-                    ErrorKind::DisplayHelp
-                        | ErrorKind::DisplayVersion
-                        | ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand
-                        | ErrorKind::MissingSubcommand
-                ) => {}
-                Err(e) => failures.push(format!("{}:{}: `{}` → {:?}: {}", doc.file, doc.line_no, doc.raw, argv, e.kind())),
+                Err(e)
+                    if matches!(
+                        e.kind(),
+                        ErrorKind::DisplayHelp
+                            | ErrorKind::DisplayVersion
+                            | ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand
+                            | ErrorKind::MissingSubcommand
+                    ) => {}
+                Err(e) => failures.push(format!(
+                    "{}:{}: `{}` → {:?}: {}",
+                    doc.file,
+                    doc.line_no,
+                    doc.raw,
+                    argv,
+                    e.kind()
+                )),
             }
         }
     }
-    eprintln!("docs doc-test: {checked} commands parsed; {} tolerated as pending:\n{}", tolerated.len(), tolerated.join("\n"));
-    assert!(checked > 0, "no `holler …` commands found in README.md or docs/**/*.md");
+    eprintln!(
+        "docs doc-test: {checked} commands parsed; {} tolerated as pending:\n{}",
+        tolerated.len(),
+        tolerated.join("\n")
+    );
+    assert!(
+        checked > 0,
+        "no `holler …` commands found in README.md or docs/**/*.md"
+    );
     assert!(
         failures.is_empty(),
         "{} documented commands do not parse against the real CLI:\n{}",
@@ -217,8 +255,15 @@ fn every_documented_holler_command_parses() {
 /// name merely contains `handoffs`, stays scanned.
 #[test]
 fn doc_filter_skips_pipeline_handoffs_only() {
-    for excluded in ["docs/handoffs/462-brief.md", "docs/handoffs/462/handoff-A.md", "docs/handoffs/decisions.md"] {
-        assert!(!is_cli_doc(Path::new(excluded)), "{excluded} is pipeline scratch and must not be scanned");
+    for excluded in [
+        "docs/handoffs/462-brief.md",
+        "docs/handoffs/462/handoff-A.md",
+        "docs/handoffs/decisions.md",
+    ] {
+        assert!(
+            !is_cli_doc(Path::new(excluded)),
+            "{excluded} is pipeline scratch and must not be scanned"
+        );
     }
     for included in [
         "README.md",
@@ -228,7 +273,10 @@ fn doc_filter_skips_pipeline_handoffs_only() {
         "docs/reviews/review-battery.md",
         "docs/research/handoffs-notes.md",
     ] {
-        assert!(is_cli_doc(Path::new(included)), "{included} is documentation and must be scanned");
+        assert!(
+            is_cli_doc(Path::new(included)),
+            "{included} is documentation and must be scanned"
+        );
     }
 }
 
@@ -238,10 +286,22 @@ fn doc_filter_skips_pipeline_handoffs_only() {
 #[test]
 fn markdown_files_excludes_pipeline_handoffs() {
     let root = workspace_root();
-    let rel: Vec<PathBuf> = markdown_files().iter().map(|p| p.strip_prefix(&root).unwrap().to_path_buf()).collect();
-    let leaked: Vec<_> = rel.iter().filter(|p| p.starts_with("docs/handoffs")).collect();
-    assert!(leaked.is_empty(), "markdown_files() returned pipeline scratch: {leaked:?}");
+    let rel: Vec<PathBuf> = markdown_files()
+        .iter()
+        .map(|p| p.strip_prefix(&root).unwrap().to_path_buf())
+        .collect();
+    let leaked: Vec<_> = rel
+        .iter()
+        .filter(|p| p.starts_with("docs/handoffs"))
+        .collect();
+    assert!(
+        leaked.is_empty(),
+        "markdown_files() returned pipeline scratch: {leaked:?}"
+    );
     for must in ["README.md", "docs/testing.md", "docs/protocol/v2.md"] {
-        assert!(rel.iter().any(|p| p == Path::new(must)), "markdown_files() lost {must}");
+        assert!(
+            rel.iter().any(|p| p == Path::new(must)),
+            "markdown_files() lost {must}"
+        );
     }
 }

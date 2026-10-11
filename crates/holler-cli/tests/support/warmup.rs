@@ -37,7 +37,8 @@ pub fn roster_row_connected(roster: &Value, session: &str) -> bool {
     let qualified = format!("/{session}");
     rows.iter().any(|row| {
         let name = row["name"].as_str().unwrap_or_default();
-        (name == session || name.ends_with(&qualified)) && row["conn_state"].as_str() == Some("connected")
+        (name == session || name.ends_with(&qualified))
+            && row["conn_state"].as_str() == Some("connected")
     })
 }
 
@@ -104,7 +105,10 @@ fn read_roster(state: &StateDir, last: &mut String) -> Option<Value> {
 
 /// Run `attempt` until it succeeds or `deadline` passes (at least once),
 /// retrying only an `unknown session` failure. The `Err` says what ended it.
-fn attempt_until_ok(deadline: Instant, mut attempt: impl FnMut() -> Output) -> Result<Output, String> {
+fn attempt_until_ok(
+    deadline: Instant,
+    mut attempt: impl FnMut() -> Output,
+) -> Result<Output, String> {
     let mut last_stderr = String::new();
     let budget = deadline.saturating_duration_since(Instant::now());
     let settled = wait_for(budget, || {
@@ -126,12 +130,20 @@ fn attempt_until_ok(deadline: Instant, mut attempt: impl FnMut() -> Output) -> R
     });
     settled.unwrap_or_else(|| {
         let stderr = last_stderr.trim_end();
-        Err(format!("attempt still failed with `unknown session` at the deadline; stderr: {stderr}"))
+        Err(format!(
+            "attempt still failed with `unknown session` at the deadline; stderr: {stderr}"
+        ))
     })
 }
 
 /// Panic with `cause` and its evidence: `roster:`, `hub log:`, `body log:`.
 fn warm_panic(cause: &str, roster: &str, hub: &Hub, body: Option<&Body>) -> ! {
-    let body_log = body.map_or_else(|| " <no body handle>".to_string(), |b| format!("\n{}", b.log_text()));
-    panic!("wait_warm: {cause}\nroster: {roster}\nhub log:\n{}\nbody log:{body_log}", hub.log_text())
+    let body_log = body.map_or_else(
+        || " <no body handle>".to_string(),
+        |b| format!("\n{}", b.log_text()),
+    );
+    panic!(
+        "wait_warm: {cause}\nroster: {roster}\nhub log:\n{}\nbody log:{body_log}",
+        hub.log_text()
+    )
 }

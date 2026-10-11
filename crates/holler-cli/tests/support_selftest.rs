@@ -18,7 +18,13 @@
 //! fallible `try_roster_json`, and `wait_warm`'s retry-only-`unknown session`
 //! contract and its three-section (`roster:` / `hub log:` / `body log:`) panic.
 
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable, dead_code)] // #138
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unreachable,
+    dead_code
+)] // #138
 
 mod support;
 
@@ -505,10 +511,17 @@ fn wait_warm_never_attempts_before_the_row_is_connected() {
     let hub = Hub::start(&hub_state);
     let mut calls = 0u32;
     let msg = panic_text_of(|| {
-        wait_warm(&hub_state, "alpha", Duration::from_secs(1), &hub, None, || {
-            calls += 1;
-            fake_output(0, "")
-        })
+        wait_warm(
+            &hub_state,
+            "alpha",
+            Duration::from_secs(1),
+            &hub,
+            None,
+            || {
+                calls += 1;
+                fake_output(0, "")
+            },
+        )
     });
     assert_eq!(calls, 0, "attempted {calls} times before any connected row");
     section_offsets(&msg);

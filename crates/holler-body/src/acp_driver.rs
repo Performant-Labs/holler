@@ -124,7 +124,12 @@ use spawn::SpawnAttempt;
 /// spawn driver never had one at all before this issue (#197): every
 /// request/notification/child-lifecycle event below is new instrumentation,
 /// not a fix to something that logged incorrectly.
-fn log_debug(direction: LogDirection, method: &'static str, fields: Vec<(&'static str, String)>, frame: Option<String>) {
+fn log_debug(
+    direction: LogDirection,
+    method: &'static str,
+    fields: Vec<(&'static str, String)>,
+    frame: Option<String>,
+) {
     holler_proto::log::emit(&LogEvent {
         component: Component::Acp,
         severity: Severity::Debug,
@@ -457,7 +462,14 @@ impl AcpDriver {
         // is fatal in either mode, so it is reported as-is rather than
         // triggering a second, redundant spawn attempt. Each attempt says
         // what became of a configured `auth_method` itself (#459).
-        match Self::spawn_v2(agent_config.clone(), session_cwd.clone(), timeout_ms, config.auth_method.clone()).await {
+        match Self::spawn_v2(
+            agent_config.clone(),
+            session_cwd.clone(),
+            timeout_ms,
+            config.auth_method.clone(),
+        )
+        .await
+        {
             Ok(driver) => Ok(driver),
             Err(SpawnAttempt::Fatal(e)) => Err(e),
             Err(SpawnAttempt::FallbackToV1 { reason }) => {
@@ -469,14 +481,19 @@ impl AcpDriver {
                         ("fallback", "v1".to_string()),
                     ],
                 );
-                Self::spawn_v1(agent_config, session_cwd, timeout_ms, config.auth_method.clone())
-                    .await
-                    .map_err(|attempt| match attempt {
-                        SpawnAttempt::Fatal(e) => e,
-                        // v1 is the last protocol this driver knows; a v1
-                        // attempt has no further fallback to offer.
-                        SpawnAttempt::FallbackToV1 { reason } => DriverError::Startup(reason),
-                    })
+                Self::spawn_v1(
+                    agent_config,
+                    session_cwd,
+                    timeout_ms,
+                    config.auth_method.clone(),
+                )
+                .await
+                .map_err(|attempt| match attempt {
+                    SpawnAttempt::Fatal(e) => e,
+                    // v1 is the last protocol this driver knows; a v1
+                    // attempt has no further fallback to offer.
+                    SpawnAttempt::FallbackToV1 { reason } => DriverError::Startup(reason),
+                })
             }
         }
     }
@@ -502,14 +519,20 @@ impl AcpDriver {
             holler_proto::log::frame_at_noisy(&serde_json::json!({ "text": text }).to_string()),
         );
         match &self.conn {
-            Conn::V2 { session, connection } => {
+            Conn::V2 {
+                session,
+                connection,
+            } => {
                 // Fire-and-forget the acceptance ack: v2's `session/prompt`
                 // response only means "accepted", not "done" (see the module
                 // doc). A failure here (e.g. the child already died)
                 // surfaces as a `Done(Error)` on the stream via the crash
                 // watcher, not as a hang.
                 let result = connection
-                    .send_request_to(Agent, v2::PromptRequest::new(session.clone(), vec![text.into()]))
+                    .send_request_to(
+                        Agent,
+                        v2::PromptRequest::new(session.clone(), vec![text.into()]),
+                    )
                     .block_task()
                     .await;
                 if result.is_err() {
@@ -521,7 +544,10 @@ impl AcpDriver {
                     }
                 }
             }
-            Conn::V1 { session, connection } => {
+            Conn::V1 {
+                session,
+                connection,
+            } => {
                 // Unlike v2, a v1 `session/prompt` response IS completion —
                 // it carries `stop_reason` directly (see `connection_v1`'s
                 // module doc). Await it in a background task rather than
@@ -544,7 +570,10 @@ impl AcpDriver {
                     let stop_reason = match result {
                         Ok(response) => StopReason::from_acp_v1(response.stop_reason),
                         Err(_) => {
-                            log_warn("session/prompt", vec![("event", "send failed (v1)".to_string())]);
+                            log_warn(
+                                "session/prompt",
+                                vec![("event", "send failed (v1)".to_string())],
+                            );
                             StopReason::Error
                         }
                     };
@@ -645,7 +674,13 @@ impl AcpDriver {
                 Ok(stop_reason)
             }
             Ok(Err(_recv_dropped)) => {
-                log_warn("session/cancel", vec![("event", "connection ended while awaiting cancel".to_string())]);
+                log_warn(
+                    "session/cancel",
+                    vec![(
+                        "event",
+                        "connection ended while awaiting cancel".to_string(),
+                    )],
+                );
                 Err(DriverError::Cancel(
                     "connection ended while awaiting the cancelled state_update".to_string(),
                 ))
@@ -654,7 +689,13 @@ impl AcpDriver {
                 if let Some(handle) = lock_option(&self.join_handle).as_ref() {
                     handle.abort();
                 }
-                log_warn("session/cancel", vec![("event", format!("timeout after {CANCEL_TIMEOUT:?}; child force-killed"))]);
+                log_warn(
+                    "session/cancel",
+                    vec![(
+                        "event",
+                        format!("timeout after {CANCEL_TIMEOUT:?}; child force-killed"),
+                    )],
+                );
                 Err(DriverError::Cancel(format!(
                     "no cancelled state_update within {CANCEL_TIMEOUT:?}; child force-killed"
                 )))
@@ -715,14 +756,23 @@ impl AcpDriver {
     /// live state" contract rather than caching a snapshot that could drift
     /// from what `answer()` would actually see.
     pub fn pending(&self) -> Vec<PendingItem> {
-        lock(&self.shared).pending.as_ref().map(pending_items).unwrap_or_default()
+        lock(&self.shared)
+            .pending
+            .as_ref()
+            .map(pending_items)
+            .unwrap_or_default()
     }
 
     /// Close the session gracefully, then end the connection (which kills the
     /// child's whole process tree via the SDK's own transport guard). Bounded
     /// by `SHUTDOWN_GRACE`; a hang past that force-kills instead.
     pub async fn shutdown(&self) -> Result<(), DriverError> {
-        log_debug(LogDirection::Out, "shutdown", vec![("event", "session/close".to_string())], None);
+        log_debug(
+            LogDirection::Out,
+            "shutdown",
+            vec![("event", "session/close".to_string())],
+            None,
+        );
         let _ = self.session_close().await;
         if let Some(tx) = lock_option(&self.shutdown_tx).take() {
             let _ = tx.send(());
@@ -749,21 +799,34 @@ impl AcpDriver {
 
     fn session_cancel(&self) -> Result<(), agent_client_protocol::Error> {
         match &self.conn {
-            Conn::V2 { session, connection } => connection
+            Conn::V2 {
+                session,
+                connection,
+            } => connection
                 .send_notification_to(Agent, v2::CancelSessionNotification::new(session.clone())),
-            Conn::V1 { session, connection } => connection
-                .send_notification_to(Agent, v1::CancelNotification::new(session.clone())),
+            Conn::V1 {
+                session,
+                connection,
+            } => {
+                connection.send_notification_to(Agent, v1::CancelNotification::new(session.clone()))
+            }
         }
     }
 
     async fn session_close(&self) -> Result<(), agent_client_protocol::Error> {
         match &self.conn {
-            Conn::V2 { session, connection } => connection
+            Conn::V2 {
+                session,
+                connection,
+            } => connection
                 .send_request_to(Agent, v2::CloseSessionRequest::new(session.clone()))
                 .block_task()
                 .await
                 .map(|_response| ()),
-            Conn::V1 { session, connection } => connection
+            Conn::V1 {
+                session,
+                connection,
+            } => connection
                 .send_request_to(Agent, v1::CloseSessionRequest::new(session.clone()))
                 .block_task()
                 .await

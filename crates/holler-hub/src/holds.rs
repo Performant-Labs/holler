@@ -261,14 +261,23 @@ fn emit(severity: Severity, method: &'static str, fields: Vec<(&'static str, Str
 
 /// Which hold refuses `key`, and why it does (or the grant that was not
 /// honoured). `consume` decides whether a valid grant is used up.
-fn decide(state: &mut State, key: &str, grant: Option<&str>, consume: bool) -> Result<(), holler_proto::WireError> {
+fn decide(
+    state: &mut State,
+    key: &str,
+    grant: Option<&str>,
+    consume: bool,
+) -> Result<(), holler_proto::WireError> {
     // An operator hold beats a grant: a valid grant is neither honoured nor consumed.
     if let Some(op) = state.operator.get(key) {
         return Err(op.refusal().with_hold_kind(Kind::Operator.as_str()));
     }
     if let Some(id) = grant {
         let now = Instant::now();
-        let verdict = if consume { state.grants.consume(id, key, now) } else { state.grants.check(id, key, now) };
+        let verdict = if consume {
+            state.grants.consume(id, key, now)
+        } else {
+            state.grants.check(id, key, now)
+        };
         return verdict.map_err(|e| holler_proto::WireError::invalid_grant(e.reason()));
     }
     if let Some(def) = state.default.get(key) {
@@ -280,17 +289,31 @@ fn decide(state: &mut State, key: &str, grant: Option<&str>, consume: bool) -> R
 impl Holds {
     /// A registry that never touches disk.
     pub fn in_memory() -> Self {
-        Self::with_persist(State::default(), Persist { path: None, blocked: false, unsaved: false })
+        Self::with_persist(
+            State::default(),
+            Persist {
+                path: None,
+                blocked: false,
+                unsaved: false,
+            },
+        )
     }
 
     fn with_persist(state: State, persist: Persist) -> Self {
         Self {
-            shared: Arc::new(Shared { state: Mutex::new(state), persist: Mutex::new(persist), join_held: Mutex::new(Vec::new()) }),
+            shared: Arc::new(Shared {
+                state: Mutex::new(state),
+                persist: Mutex::new(persist),
+                join_held: Mutex::new(Vec::new()),
+            }),
         }
     }
 
     fn state(&self) -> std::sync::MutexGuard<'_, State> {
-        self.shared.state.lock().unwrap_or_else(PoisonError::into_inner)
+        self.shared
+            .state
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
     }
 
     /// Load the registry from `<state dir>/hub/holds.json`. Never fails: see
@@ -298,15 +321,30 @@ impl Holds {
     pub fn load(state: &HubState) -> Self {
         let path = state.hub_dir.join("holds.json");
         let (doc, blocked) = read_file(&path);
-        let st = State { operator: doc.holds, default: doc.default_holds, ..State::default() };
-        Self::with_persist(st, Persist { path: Some(path), blocked, unsaved: blocked })
+        let st = State {
+            operator: doc.holds,
+            default: doc.default_holds,
+            ..State::default()
+        };
+        Self::with_persist(
+            st,
+            Persist {
+                path: Some(path),
+                blocked,
+                unsaved: blocked,
+            },
+        )
     }
 
     /// Make sessions whose `<label>/<session>` name matches any of `patterns`
     /// join held (issue #460). Call once, at startup; an empty list is the
     /// default (sessions join open).
     pub fn set_join_held(&self, patterns: Vec<String>) {
-        *self.shared.join_held.lock().unwrap_or_else(PoisonError::into_inner) = patterns;
+        *self
+            .shared
+            .join_held
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = patterns;
     }
 
     /// The hold that is refusing `key` (operator first), if any.
@@ -322,7 +360,12 @@ impl Holds {
     /// Every key with any hold (sorted).
     pub fn keys(&self) -> Vec<String> {
         let st = self.state();
-        let mut keys: Vec<String> = st.operator.keys().chain(st.default.keys()).cloned().collect();
+        let mut keys: Vec<String> = st
+            .operator
+            .keys()
+            .chain(st.default.keys())
+            .cloned()
+            .collect();
         keys.sort();
         keys.dedup();
         keys
@@ -338,11 +381,15 @@ impl Holds {
         let st = self.state();
         match (st.operator.get(key), st.default.get(key)) {
             (Some(op), def) => {
-                let mut h = holler_proto::SessionHold::held(op.reason.clone(), op.since.clone()).of_kind(Kind::Operator.as_str());
+                let mut h = holler_proto::SessionHold::held(op.reason.clone(), op.since.clone())
+                    .of_kind(Kind::Operator.as_str());
                 h.hold_default = def.is_some();
                 h
             }
-            (None, Some(def)) => holler_proto::SessionHold::held(def.reason.clone(), def.since.clone()).of_kind(Kind::Default.as_str()),
+            (None, Some(def)) => {
+                holler_proto::SessionHold::held(def.reason.clone(), def.since.clone())
+                    .of_kind(Kind::Default.as_str())
+            }
             (None, None) => holler_proto::SessionHold::default(),
         }
     }
@@ -372,7 +419,10 @@ impl Holds {
             match st.operator.get(key) {
                 Some(existing) => (existing.clone(), false),
                 None => {
-                    let info = HoldInfo { reason: reason.and_then(sanitize_reason), since: log::timestamp() };
+                    let info = HoldInfo {
+                        reason: reason.and_then(sanitize_reason),
+                        since: log::timestamp(),
+                    };
                     st.operator.insert(key.to_owned(), info.clone());
                     (info, true)
                 }
@@ -380,9 +430,17 @@ impl Holds {
         };
         let persisted = self.sync(newly_held);
         if newly_held {
-            emit(Severity::Info, "session_held", vec![("session", key.to_owned()), ("kind", "operator".to_owned())]);
+            emit(
+                Severity::Info,
+                "session_held",
+                vec![("session", key.to_owned()), ("kind", "operator".to_owned())],
+            );
         }
-        HoldOutcome { info, newly_held, persisted }
+        HoldOutcome {
+            info,
+            newly_held,
+            persisted,
+        }
     }
 
     /// Release `key`: lift the operator hold if there is one, else the default
@@ -401,9 +459,21 @@ impl Holds {
         };
         let persisted = self.sync(lifted.is_some());
         if let Some(kind) = lifted {
-            emit(Severity::Info, "session_released", vec![("session", key.to_owned()), ("kind", kind.as_str().to_owned())]);
+            emit(
+                Severity::Info,
+                "session_released",
+                vec![
+                    ("session", key.to_owned()),
+                    ("kind", kind.as_str().to_owned()),
+                ],
+            );
         }
-        ReleaseOutcome { was_held: lifted.is_some(), lifted, still_held, persisted }
+        ReleaseOutcome {
+            was_held: lifted.is_some(),
+            lifted,
+            still_held,
+            persisted,
+        }
     }
 
     /// Mint a one-time grant for `key` valid for `ttl` (issue #460).
@@ -417,7 +487,14 @@ impl Holds {
             operator_held: st.operator.contains_key(key),
         };
         drop(st);
-        emit(Severity::Info, "grant_minted", vec![("session", key.to_owned()), ("ttl_ms", out.ttl.as_millis().to_string())]);
+        emit(
+            Severity::Info,
+            "grant_minted",
+            vec![
+                ("session", key.to_owned()),
+                ("ttl_ms", out.ttl.as_millis().to_string()),
+            ],
+        );
         Ok(out)
     }
 
@@ -433,7 +510,12 @@ impl Holds {
     /// match, so memory grows only with the holds themselves. Returns how many
     /// were held. Cheap when `--join-held` is off: no lock is taken.
     pub fn note_joined(&self, keys: impl IntoIterator<Item = String>) -> usize {
-        let patterns = self.shared.join_held.lock().unwrap_or_else(PoisonError::into_inner).clone();
+        let patterns = self
+            .shared
+            .join_held
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
         if patterns.is_empty() {
             return 0;
         }
@@ -445,7 +527,13 @@ impl Holds {
                     continue;
                 }
                 if patterns.iter().any(|pat| glob_match(pat, &key)) {
-                    st.default.insert(key.clone(), HoldInfo { reason: Some(JOIN_REASON.to_owned()), since: log::timestamp() });
+                    st.default.insert(
+                        key.clone(),
+                        HoldInfo {
+                            reason: Some(JOIN_REASON.to_owned()),
+                            since: log::timestamp(),
+                        },
+                    );
                     newly.push(key);
                 }
             }
@@ -453,7 +541,11 @@ impl Holds {
         if !newly.is_empty() {
             self.sync(true);
             for key in &newly {
-                emit(Severity::Info, "session_held", vec![("session", key.clone()), ("kind", "default".to_owned())]);
+                emit(
+                    Severity::Info,
+                    "session_held",
+                    vec![("session", key.clone()), ("kind", "default".to_owned())],
+                );
             }
         }
         newly.len()
@@ -462,7 +554,12 @@ impl Holds {
     /// Bring the file up to date with memory when `changed` (or when an earlier
     /// write failed and the file is still behind), and report whether it is.
     fn sync(&self, changed: bool) -> bool {
-        let behind = self.shared.persist.lock().unwrap_or_else(PoisonError::into_inner).unsaved;
+        let behind = self
+            .shared
+            .persist
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .unsaved;
         if changed || behind {
             self.persist()
         } else {
@@ -474,15 +571,25 @@ impl Holds {
     /// snapshot is taken *after* acquiring it, so whichever writer runs last
     /// writes the newest state no matter how the writers interleaved.
     fn persist(&self) -> bool {
-        let mut persist = self.shared.persist.lock().unwrap_or_else(PoisonError::into_inner);
-        let Some(path) = persist.path.clone() else { return true };
+        let mut persist = self
+            .shared
+            .persist
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let Some(path) = persist.path.clone() else {
+            return true;
+        };
         if persist.blocked {
             persist.unsaved = true;
             return false;
         }
         let doc = {
             let st = self.state();
-            FileDoc { version: FILE_VERSION, holds: st.operator.clone(), default_holds: st.default.clone() }
+            FileDoc {
+                version: FILE_VERSION,
+                holds: st.operator.clone(),
+                default_holds: st.default.clone(),
+            }
         };
         let body = serde_json::to_vec_pretty(&doc).map_err(std::io::Error::other);
         match body.and_then(|body| holler_proto::atomic_file::write_atomic(&path, &body, 0o600)) {
@@ -498,7 +605,11 @@ impl Holds {
                     vec![
                         ("path", path.display().to_string()),
                         ("error", e.to_string()),
-                        ("effect", "the hold is in force in memory but will not survive a hub restart".to_owned()),
+                        (
+                            "effect",
+                            "the hold is in force in memory but will not survive a hub restart"
+                                .to_owned(),
+                        ),
                     ],
                 );
                 false
@@ -520,7 +631,10 @@ fn read_file(path: &std::path::Path) -> (FileDoc, bool) {
                 vec![
                     ("path", path.display().to_string()),
                     ("error", e.to_string()),
-                    ("effect", "starting with no holds; the file will not be overwritten".to_owned()),
+                    (
+                        "effect",
+                        "starting with no holds; the file will not be overwritten".to_owned(),
+                    ),
                 ],
             );
             return (FileDoc::default(), true);
@@ -551,7 +665,10 @@ fn set_aside(path: &std::path::Path, why: &str) -> (FileDoc, bool) {
                     ("path", path.display().to_string()),
                     ("problem", why.to_owned()),
                     ("moved_to", target.display().to_string()),
-                    ("effect", "starting with no holds; re-hold the sessions that need it".to_owned()),
+                    (
+                        "effect",
+                        "starting with no holds; re-hold the sessions that need it".to_owned(),
+                    ),
                 ],
             );
             (FileDoc::default(), false)
@@ -564,7 +681,10 @@ fn set_aside(path: &std::path::Path, why: &str) -> (FileDoc, bool) {
                     ("path", path.display().to_string()),
                     ("problem", why.to_owned()),
                     ("error", format!("could not move it aside: {e}")),
-                    ("effect", "starting with no holds; the file will not be overwritten".to_owned()),
+                    (
+                        "effect",
+                        "starting with no holds; the file will not be overwritten".to_owned(),
+                    ),
                 ],
             );
             (FileDoc::default(), true)

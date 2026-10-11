@@ -65,11 +65,18 @@ pub async fn handle_prompt(
     params: Prompt,
     outbound: mpsc::UnboundedSender<WsMessage>,
 ) {
-    let Ok(cid) = CorrelationId::parse(&id) else { return };
+    let Ok(cid) = CorrelationId::parse(&id) else {
+        return;
+    };
     let name = match SessionName::parse(&params.session) {
         Ok(n) => n,
         Err(e) => {
-            send_error(&outbound, &cid, Code::UnknownSession, &format!("bad session name: {e}"));
+            send_error(
+                &outbound,
+                &cid,
+                Code::UnknownSession,
+                &format!("bad session name: {e}"),
+            );
             return;
         }
     };
@@ -92,9 +99,13 @@ pub async fn handle_prompt(
     // this arrives the session is expected to already be idle — `replace`
     // still cancels defensively rather than assuming that.
     let outcome = if params.replace {
-        session_manager.replace_with_updates(&name, text, Some(chunk_tx)).await
+        session_manager
+            .replace_with_updates(&name, text, Some(chunk_tx))
+            .await
     } else {
-        session_manager.prompt_with_updates(&name, id.clone(), text, params.queue, Some(chunk_tx)).await
+        session_manager
+            .prompt_with_updates(&name, id.clone(), text, params.queue, Some(chunk_tx))
+            .await
     };
     // The updates task ends on its own once the session task drops its
     // `current_updates` sender (turn-end, before the reply fires — see
@@ -103,17 +114,32 @@ pub async fn handle_prompt(
     let final_parts = updates_task.await.unwrap_or_default();
 
     match outcome {
-        Ok(PromptOutcome::Result { stop_reason, state, .. }) => {
+        Ok(PromptOutcome::Result {
+            stop_reason, state, ..
+        }) => {
             let message = agent_message(&id, final_parts);
-            let result = PromptResult { stop_reason, state: state.as_str().to_string(), message };
+            let result = PromptResult {
+                stop_reason,
+                state: state.as_str().to_string(),
+                message,
+            };
             send_response(&outbound, &cid, &result);
         }
-        Ok(PromptOutcome::Busy { state, turn_age_ms, last_update_age_ms }) => {
+        Ok(PromptOutcome::Busy {
+            state,
+            turn_age_ms,
+            last_update_age_ms,
+        }) => {
             let err = WireError::session_busy(state, turn_age_ms, last_update_age_ms);
             send_error_frame(&outbound, &cid, &err);
         }
         Ok(PromptOutcome::QueueFull) => {
-            send_error(&outbound, &cid, Code::LimitExceeded, "the queue for this session is full");
+            send_error(
+                &outbound,
+                &cid,
+                Code::LimitExceeded,
+                "the queue for this session is full",
+            );
         }
         Ok(PromptOutcome::Error(msg)) => {
             // A driver-level failure is a completed (failed) turn, not a
@@ -122,14 +148,28 @@ pub async fn handle_prompt(
             let state = holler_proto::state_for_stop_reason(&stop_reason)
                 .unwrap_or(holler_proto::SessionState::Failed);
             let message = agent_message(&id, vec![Part::text_part(msg)]);
-            let result = PromptResult { stop_reason, state: state.as_str().to_string(), message };
+            let result = PromptResult {
+                stop_reason,
+                state: state.as_str().to_string(),
+                message,
+            };
             send_response(&outbound, &cid, &result);
         }
         Err(SessionManagerError::UnknownSession) => {
-            send_error(&outbound, &cid, Code::UnknownSession, &format!("no such session: {}", params.session));
+            send_error(
+                &outbound,
+                &cid,
+                Code::UnknownSession,
+                &format!("no such session: {}", params.session),
+            );
         }
         Err(SessionManagerError::Gone) => {
-            send_error(&outbound, &cid, Code::NotConnected, "the session task is gone");
+            send_error(
+                &outbound,
+                &cid,
+                Code::NotConnected,
+                "the session task is gone",
+            );
         }
     }
 }
@@ -141,11 +181,18 @@ pub async fn handle_cancel(
     params: Cancel,
     outbound: mpsc::UnboundedSender<WsMessage>,
 ) {
-    let Ok(cid) = CorrelationId::parse(&id) else { return };
+    let Ok(cid) = CorrelationId::parse(&id) else {
+        return;
+    };
     let name = match SessionName::parse(&params.session) {
         Ok(n) => n,
         Err(e) => {
-            send_error(&outbound, &cid, Code::UnknownSession, &format!("bad session name: {e}"));
+            send_error(
+                &outbound,
+                &cid,
+                Code::UnknownSession,
+                &format!("bad session name: {e}"),
+            );
             return;
         }
     };
@@ -153,10 +200,20 @@ pub async fn handle_cancel(
         Ok(Ok(())) => send_response(&outbound, &cid, &CancelResult { applied: true }),
         Ok(Err(msg)) => send_error(&outbound, &cid, Code::NotConnected, &msg),
         Err(SessionManagerError::UnknownSession) => {
-            send_error(&outbound, &cid, Code::UnknownSession, &format!("no such session: {}", params.session));
+            send_error(
+                &outbound,
+                &cid,
+                Code::UnknownSession,
+                &format!("no such session: {}", params.session),
+            );
         }
         Err(SessionManagerError::Gone) => {
-            send_error(&outbound, &cid, Code::NotConnected, "the session task is gone");
+            send_error(
+                &outbound,
+                &cid,
+                Code::NotConnected,
+                "the session task is gone",
+            );
         }
     }
 }
@@ -177,11 +234,18 @@ pub async fn handle_answer(
     params: Answer,
     outbound: mpsc::UnboundedSender<WsMessage>,
 ) {
-    let Ok(cid) = CorrelationId::parse(&id) else { return };
+    let Ok(cid) = CorrelationId::parse(&id) else {
+        return;
+    };
     let name = match SessionName::parse(&params.session) {
         Ok(n) => n,
         Err(e) => {
-            send_error(&outbound, &cid, Code::UnknownSession, &format!("bad session name: {e}"));
+            send_error(
+                &outbound,
+                &cid,
+                Code::UnknownSession,
+                &format!("bad session name: {e}"),
+            );
             return;
         }
     };
@@ -189,10 +253,20 @@ pub async fn handle_answer(
         Ok(Ok(())) => send_response(&outbound, &cid, &AnswerResult { applied: true }),
         Ok(Err(msg)) => send_answer_refusal(&outbound, &cid, &msg),
         Err(SessionManagerError::UnknownSession) => {
-            send_error(&outbound, &cid, Code::UnknownSession, &format!("no such session: {}", params.session));
+            send_error(
+                &outbound,
+                &cid,
+                Code::UnknownSession,
+                &format!("no such session: {}", params.session),
+            );
         }
         Err(SessionManagerError::Gone) => {
-            send_error(&outbound, &cid, Code::NotConnected, "the session task is gone");
+            send_error(
+                &outbound,
+                &cid,
+                Code::NotConnected,
+                "the session task is gone",
+            );
         }
     }
 }
@@ -200,7 +274,11 @@ pub async fn handle_answer(
 /// Map [`crate::session_manager::task::handle_answer`]'s one-line failure
 /// strings to the closed v2 error table. Split out of [`handle_answer`] to
 /// keep that function's own match flat.
-fn send_answer_refusal(outbound: &mpsc::UnboundedSender<WsMessage>, cid: &CorrelationId, msg: &str) {
+fn send_answer_refusal(
+    outbound: &mpsc::UnboundedSender<WsMessage>,
+    cid: &CorrelationId,
+    msg: &str,
+) {
     if msg == "nothing pending to answer" {
         send_error_frame(outbound, cid, &WireError::nothing_pending());
     } else if msg.contains("did not resolve") || msg.contains("unsupported elicitation") {
@@ -213,7 +291,12 @@ fn send_answer_refusal(outbound: &mpsc::UnboundedSender<WsMessage>, cid: &Correl
 /// The concatenation of `message`'s text parts (see the module doc's
 /// "Decisions I made" — a non-text part is dropped, not refused).
 fn message_text(message: &Message) -> String {
-    message.parts.iter().filter_map(|p| p.text()).collect::<Vec<_>>().join("")
+    message
+        .parts
+        .iter()
+        .filter_map(|p| p.text())
+        .collect::<Vec<_>>()
+        .join("")
 }
 
 /// Build the outward A2A reply message: `role:"agent"`, one merged text part
@@ -285,7 +368,9 @@ fn flush_and_send(
     prompt_id: &str,
     seq: &mut u64,
 ) {
-    let Some(parts) = coalescer.flush() else { return };
+    let Some(parts) = coalescer.flush() else {
+        return;
+    };
     *seq += 1;
     let update = holler_proto::Update {
         session: session.to_string(),
@@ -333,23 +418,39 @@ fn send_frame(outbound: &mpsc::UnboundedSender<WsMessage>, env: &Envelope) {
             method,
             id: None,
             peer: None,
-            fields: env.id().map(|i| vec![("id", i.to_string())]).unwrap_or_default(),
+            fields: env
+                .id()
+                .map(|i| vec![("id", i.to_string())])
+                .unwrap_or_default(),
             frame: holler_proto::log::frame_at_noisy(&text),
         });
         let _ = outbound.send(WsMessage::text(text));
     }
 }
 
-fn send_response(outbound: &mpsc::UnboundedSender<WsMessage>, cid: &CorrelationId, result: &impl serde::Serialize) {
+fn send_response(
+    outbound: &mpsc::UnboundedSender<WsMessage>,
+    cid: &CorrelationId,
+    result: &impl serde::Serialize,
+) {
     let env = Envelope::response(cid, serde_json::to_value(result).ok());
     send_frame(outbound, &env);
 }
 
-fn send_error(outbound: &mpsc::UnboundedSender<WsMessage>, cid: &CorrelationId, code: Code, message: &str) {
+fn send_error(
+    outbound: &mpsc::UnboundedSender<WsMessage>,
+    cid: &CorrelationId,
+    code: Code,
+    message: &str,
+) {
     send_error_frame(outbound, cid, &WireError::new(code, message, None));
 }
 
-fn send_error_frame(outbound: &mpsc::UnboundedSender<WsMessage>, cid: &CorrelationId, error: &WireError) {
+fn send_error_frame(
+    outbound: &mpsc::UnboundedSender<WsMessage>,
+    cid: &CorrelationId,
+    error: &WireError,
+) {
     let env = Envelope::error_frame(cid, error);
     send_frame(outbound, &env);
 }

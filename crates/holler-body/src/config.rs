@@ -146,7 +146,12 @@ pub enum ConfigError {
     /// file's `[[session]]` array, `name` is that row's (possibly invalid)
     /// `name` value, `field` is the offending key, `reason` is human-
     /// readable.
-    Invalid { row: usize, name: String, field: &'static str, reason: String },
+    Invalid {
+        row: usize,
+        name: String,
+        field: &'static str,
+        reason: String,
+    },
     /// No config file was found via any discovery source.
     NoConfigFound,
     /// The file could not be read (permissions, not a file, etc).
@@ -158,7 +163,12 @@ impl ConfigError {
     pub fn message(&self) -> String {
         match self {
             ConfigError::Toml(m) => format!("config: {m}"),
-            ConfigError::Invalid { row, name, field, reason } => {
+            ConfigError::Invalid {
+                row,
+                name,
+                field,
+                reason,
+            } => {
                 format!("config: session[{row}] {name:?}: `{field}`: {reason}")
             }
             ConfigError::NoConfigFound => {
@@ -419,7 +429,11 @@ fn parse_mode(row: usize, raw_name: &str, mode: Option<&str>) -> Result<SessionM
     }
 }
 
-fn parse_interrupt(row: usize, raw_name: &str, interrupt: Option<&str>) -> Result<Interrupt, ConfigError> {
+fn parse_interrupt(
+    row: usize,
+    raw_name: &str,
+    interrupt: Option<&str>,
+) -> Result<Interrupt, ConfigError> {
     match interrupt {
         None | Some("acp") => Ok(Interrupt::Acp),
         Some("http") => Ok(Interrupt::Http),
@@ -434,8 +448,8 @@ fn parse_interrupt(row: usize, raw_name: &str, interrupt: Option<&str>) -> Resul
 
 /// Read + parse + validate the file at `path`.
 pub fn load(path: &Path) -> Result<ParsedConfig, ConfigError> {
-    let contents =
-        std::fs::read_to_string(path).map_err(|e| ConfigError::Io(format!("{}: {e}", path.display())))?;
+    let contents = std::fs::read_to_string(path)
+        .map_err(|e| ConfigError::Io(format!("{}: {e}", path.display())))?;
     parse(&contents)
 }
 
@@ -481,7 +495,12 @@ pub fn discover_and_load(flag: Option<&str>, cwd: &Path) -> Result<ParsedConfig,
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable)] // #187
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unreachable
+)] // #187
 mod tests {
     use super::*;
 
@@ -608,7 +627,8 @@ mod tests {
         parse(&format!("{ONE}{extra}"))
     }
 
-    const ATTACH: &str = "[[session]]\nname = \"alpha\"\nharness = \"opencode\"\nmode = \"attach\"\n\
+    const ATTACH: &str =
+        "[[session]]\nname = \"alpha\"\nharness = \"opencode\"\nmode = \"attach\"\n\
         endpoint = \"http://127.0.0.1:4096\"\nsession_id = \"ses_1\"\n";
 
     #[test]
@@ -633,10 +653,17 @@ mod tests {
     fn empty_or_whitespace_auth_method_is_refused_naming_row_and_field() {
         for value in ["\"\"", "\"   \"", "\" \\t \""] {
             let err = one_with(&format!("auth_method = {value}\n")).expect_err("refused");
-            let ConfigError::Invalid { row, name, field, .. } = &err else {
+            let ConfigError::Invalid {
+                row, name, field, ..
+            } = &err
+            else {
                 panic!("{value}: expected Invalid, got {err:?}");
             };
-            assert_eq!((*row, name.as_str(), *field), (0, "alpha", "auth_method"), "{value}");
+            assert_eq!(
+                (*row, name.as_str(), *field),
+                (0, "alpha", "auth_method"),
+                "{value}"
+            );
         }
     }
 
@@ -644,7 +671,11 @@ mod tests {
     fn attach_mode_auth_method_is_ignored_with_a_warning() {
         let got = parse(&format!("{ATTACH}auth_method = \"stub-key\"\n")).expect("accepted");
         assert_eq!(got.sessions[0].auth_method, None);
-        assert!(got.warnings.iter().any(|w| w.contains("auth_method")), "{:?}", got.warnings);
+        assert!(
+            got.warnings.iter().any(|w| w.contains("auth_method")),
+            "{:?}",
+            got.warnings
+        );
     }
 
     #[test]

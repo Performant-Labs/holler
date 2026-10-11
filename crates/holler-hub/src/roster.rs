@@ -54,8 +54,8 @@
 //! deadlock risk.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, Mutex as StdMutex};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex as StdMutex};
 
 use holler_proto::docs::{LastTurn, PendingItem, SessionAd};
 use holler_proto::Presence;
@@ -328,12 +328,18 @@ impl Roster {
     /// joined; the roster learns it when a live circuit authenticates).
     /// Idempotent.
     pub fn set_token(&self, token_id: &str, client_id: &str) {
-        self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner).bind_token(token_id, Some(client_id), None);
+        self.inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .bind_token(token_id, Some(client_id), None);
     }
 
     /// Record a hostname for a token (from the hello exchange).
     pub fn set_hostname(&self, token_id: &str, hostname: &str) {
-        self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner).bind_token(token_id, None, Some(hostname));
+        self.inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .bind_token(token_id, None, Some(hostname));
     }
 
     /// Record the label a token was minted with (issue #236, ADR 0005 §2):
@@ -343,7 +349,10 @@ impl Roster {
     /// <session>` (see [`qualified_name`]); idempotent, like [`Roster::
     /// set_token`]/[`Roster::set_hostname`].
     pub fn set_label(&self, token_id: &str, label: &str) {
-        self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner).bind_label(token_id, label);
+        self.inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .bind_label(token_id, label);
     }
 
     /// A `session/presence` from a body: replace (not merge) that token's set
@@ -353,10 +362,17 @@ impl Roster {
     /// collision policy (a connected different-token holder blocks them) — the
     /// rest of the frame was applied.
     pub fn advertise(&self, token_id: &str, p: &Presence) -> Vec<String> {
-        let mut inner = self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut inner = self
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         inner.bind_token(token_id, None, Some(&p.hostname));
         let info = inner.tokens.get(token_id).cloned().unwrap_or_default();
-        let incoming: HashSet<String> = p.sessions.iter().map(|s| qualified_name(&info, s)).collect();
+        let incoming: HashSet<String> = p
+            .sessions
+            .iter()
+            .map(|s| qualified_name(&info, s))
+            .collect();
         // The newest ad timestamp in this frame (the `last_update_at` base):
         // the body emits one presence per body, so its sessions share one
         // clock and this is the frame's "now" on the body's wall.
@@ -388,7 +404,10 @@ impl Roster {
     /// an unknown token is a silent no-op (never a panic); a touch never
     /// refreshes another token's rows.
     pub fn touch(&self, token_id: &str, _method: &str) {
-        let mut inner = self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut inner = self
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let now = inner.now_secs();
         let mut touched = 0usize;
         for row in inner.rows.values_mut() {
@@ -411,7 +430,10 @@ impl Roster {
     /// `gone` rows are hidden from the default listing but linger until the TTL
     /// prunes them.
     pub fn clear(&self, token_id: &str) {
-        let mut inner = self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut inner = self
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let now = inner.now_secs();
         let mut cleared = 0usize;
         for row in inner.rows.values_mut() {
@@ -443,7 +465,10 @@ impl Roster {
     /// already `gone` is left alone (a stale drop signal arriving after the
     /// row has already aged all the way out must never revive it).
     pub fn mark_reconnecting(&self, token_id: &str) {
-        let mut inner = self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut inner = self
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let now = inner.now_secs();
         let mut changed = 0usize;
         for row in inner.rows.values_mut() {
@@ -467,19 +492,29 @@ impl Roster {
     /// 0003's own resolution grammar) when that misses. `None` if nothing in
     /// the roster (live, reconnecting, or gone-but-not-yet-pruned) matches.
     pub fn find_by_name(&self, name: &str) -> Option<Row> {
-        let inner = self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let inner = self
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(row) = inner.rows.get(name) {
             return Some(row.clone());
         }
         let suffix = format!("/{name}");
-        inner.rows.values().find(|r| r.name.ends_with(&suffix)).cloned()
+        inner
+            .rows
+            .values()
+            .find(|r| r.name.ends_with(&suffix))
+            .cloned()
     }
 
     /// `row`'s age in whole seconds since `last_seen`, on the roster's own
     /// clock (so a unit test with an injected [`Clock::Manual`] gets a
     /// deterministic value too, not the wall clock).
     pub fn age_secs(&self, row: &Row) -> u64 {
-        let inner = self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let inner = self
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         inner.now_secs().saturating_sub(row.last_seen)
     }
 
@@ -490,7 +525,10 @@ impl Roster {
     /// change-channel generation when anything moved, so a `wait`-ing CLI
     /// notices.
     pub fn sweep(&self) {
-        let mut inner = self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut inner = self
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let now = inner.now_secs();
         let mut changed = 0usize;
         let mut pruned = Vec::new();
@@ -535,7 +573,10 @@ impl Roster {
     /// (or the empty string) matches every row, same as [`Roster::rows`].
     pub fn rows_matching(&self, all: Option<bool>, prefix: Option<&str>) -> Vec<Row> {
         let (rows, now) = {
-            let inner = self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            let inner = self
+                .inner
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             inner.read_count.fetch_add(1, Ordering::SeqCst);
             let rows: Vec<Row> = inner.rows.values().cloned().collect();
             (rows, inner.now_secs())
@@ -557,7 +598,10 @@ impl Roster {
     /// The change channel's receiver (issue #142's `holler wait` selects on
     /// this without polling).
     pub fn subscribe(&self) -> watch::Receiver<u64> {
-        self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner).change_rx()
+        self.inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .change_rx()
     }
 
     /// The sweep's period in milliseconds (the hub's sweep task sleeps this
@@ -576,7 +620,10 @@ impl Roster {
     /// if no such row exists yet (the row's first presence hasn't landed) —
     /// the presence that follows will carry the same `turn_id` anyway.
     pub fn set_turn_id(&self, token_id: &str, bare_name: &str, turn_id: &str) {
-        let mut inner = self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut inner = self
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut changed = false;
         for row in inner.rows.values_mut() {
             if row.token_id == token_id && row_matches_bare(&row.name, bare_name) {
@@ -592,8 +639,16 @@ impl Roster {
     /// [`Roster::set_turn_id`], returning the `turn_id` the row had before (issue
     /// #442), so a prompt the session hold then refuses can undo exactly its own
     /// change with [`Roster::undo_turn_id`]. `None` when no row matched.
-    pub fn replace_turn_id(&self, token_id: &str, bare_name: &str, turn_id: &str) -> Option<Option<String>> {
-        let mut inner = self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    pub fn replace_turn_id(
+        &self,
+        token_id: &str,
+        bare_name: &str,
+        turn_id: &str,
+    ) -> Option<Option<String>> {
+        let mut inner = self
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut prev = None;
         for row in inner.rows.values_mut() {
             if row.token_id == token_id && row_matches_bare(&row.name, bare_name) {
@@ -609,10 +664,16 @@ impl Roster {
     /// Put `prev` back as the row's `turn_id`, but only if it is still `ours`: a
     /// newer turn's id is never overwritten (issue #442).
     pub fn undo_turn_id(&self, token_id: &str, bare_name: &str, ours: &str, prev: Option<String>) {
-        let mut inner = self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut inner = self
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut changed = false;
         for row in inner.rows.values_mut() {
-            if row.token_id == token_id && row_matches_bare(&row.name, bare_name) && row.turn_id.as_deref() == Some(ours) {
+            if row.token_id == token_id
+                && row_matches_bare(&row.name, bare_name)
+                && row.turn_id.as_deref() == Some(ours)
+            {
                 row.turn_id = prev.clone();
                 changed = true;
             }
@@ -630,7 +691,10 @@ impl Roster {
     /// last_turn_before_next_presence`). Same matching rule as
     /// [`Roster::set_turn_id`]; a no-op if the row is not yet known.
     pub fn set_last_turn(&self, token_id: &str, bare_name: &str, last_turn: LastTurn) {
-        let mut inner = self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut inner = self
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut changed = false;
         for row in inner.rows.values_mut() {
             if row.token_id == token_id && row_matches_bare(&row.name, bare_name) {
@@ -704,10 +768,21 @@ impl Inner {
     /// calls — [`Inner::upsert_row`], [`Inner::bump_gen`], and the `Roster`
     /// row-builder / `name_held` warn — never re-lock, so there is no
     /// self-deadlock).
-    fn apply_ad(&mut self, token_id: &str, info: &TokenInfo, s: &SessionAd, base: Option<u64>) -> Option<String> {
+    fn apply_ad(
+        &mut self,
+        token_id: &str,
+        info: &TokenInfo,
+        s: &SessionAd,
+        base: Option<u64>,
+    ) -> Option<String> {
         let now = self.now_secs();
         let name = qualified_name(info, s);
-        let ad = AdInput { token_id, info, ad: s, name: &name };
+        let ad = AdInput {
+            token_id,
+            info,
+            ad: s,
+            name: &name,
+        };
         if let Some(existing) = self.rows.get(&name) {
             if existing.token_id == token_id {
                 // Same token: a re-claim is always accepted (a locator refresh).
@@ -724,14 +799,18 @@ impl Inner {
             return None;
         }
         // A brand-new name.
-        self.rows.insert(name.clone(), self.build_row(&ad, now, now, base));
+        self.rows
+            .insert(name.clone(), self.build_row(&ad, now, now, base));
         None
     }
 
     /// Replace an existing row with the new advertisement (upsert / re-claim /
     /// displacement). `first_seen` is preserved across a re-claim.
     fn upsert_row(&mut self, ad: &AdInput<'_>, first_seen: u64, now: u64, base: Option<u64>) {
-        self.rows.insert(ad.name.to_string(), self.build_row(ad, first_seen, now, base));
+        self.rows.insert(
+            ad.name.to_string(),
+            self.build_row(ad, first_seen, now, base),
+        );
     }
 
     /// Mark the rows this token previously held but the frame dropped as
@@ -739,7 +818,12 @@ impl Inner {
     /// re-anchored on the *dropping* frame's clock (not the stale base the row
     /// was built with) so a dropped `working` row does not instantly read as
     /// `stalled` on display.
-    fn drop_absent(&mut self, token_id: &str, incoming: &HashSet<String>, _base: Option<u64>) -> usize {
+    fn drop_absent(
+        &mut self,
+        token_id: &str,
+        incoming: &HashSet<String>,
+        _base: Option<u64>,
+    ) -> usize {
         let now = self.now_secs();
         let mut gone = 0usize;
         for (name, row) in self.rows.iter_mut() {

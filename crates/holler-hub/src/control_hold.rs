@@ -29,7 +29,11 @@ enum Resolved {
 /// `name` is `<label>/<session>` or a bare `<session>`; a bare name matches
 /// any known key ending in `/<name>`, an exact match always wins.
 fn resolve(name: &str, registry: &Registry, roster: &Roster) -> Resolved {
-    let mut known: Vec<String> = roster.rows(Some(true)).into_iter().map(|r| r.name).collect();
+    let mut known: Vec<String> = roster
+        .rows(Some(true))
+        .into_iter()
+        .map(|r| r.name)
+        .collect();
     known.extend(registry.holds().keys());
     known.sort();
     known.dedup();
@@ -48,24 +52,51 @@ fn resolve(name: &str, registry: &Registry, roster: &Roster) -> Resolved {
 fn refusal(cid: &CorrelationId, name: &str, r: Resolved) -> Result<String, String> {
     match r {
         Resolved::Key(k) => Ok(k),
-        Resolved::Unknown => Err(encode_error(cid, Code::UnknownSession, format!("unknown session: {name}"))),
+        Resolved::Unknown => Err(encode_error(
+            cid,
+            Code::UnknownSession,
+            format!("unknown session: {name}"),
+        )),
         Resolved::Ambiguous(candidates) => {
-            let message = format!("ambiguous session {name}: candidates are {}", candidates.join(", "));
-            Err(encode_error_frame(cid, &WireError::new(Code::UnknownSession, message, Some("ambiguous"))))
+            let message = format!(
+                "ambiguous session {name}: candidates are {}",
+                candidates.join(", ")
+            );
+            Err(encode_error_frame(
+                cid,
+                &WireError::new(Code::UnknownSession, message, Some("ambiguous")),
+            ))
         }
     }
 }
 
-fn session_param<'a>(cid: &CorrelationId, obj: &'a serde_json::Value, method: &str) -> Result<&'a str, String> {
-    match obj.get("params").and_then(|p| p.get("session")).and_then(|v| v.as_str()) {
+fn session_param<'a>(
+    cid: &CorrelationId,
+    obj: &'a serde_json::Value,
+    method: &str,
+) -> Result<&'a str, String> {
+    match obj
+        .get("params")
+        .and_then(|p| p.get("session"))
+        .and_then(|v| v.as_str())
+    {
         Some(s) if !s.is_empty() => Ok(s),
-        _ => Err(encode_error(cid, Code::InvalidParams, format!("{method} needs params.session"))),
+        _ => Err(encode_error(
+            cid,
+            Code::InvalidParams,
+            format!("{method} needs params.session"),
+        )),
     }
 }
 
 /// `control/hold {session, reason?}` → `{session, hold: true, reason?, since,
 /// newly_held, persisted}`.
-pub(crate) fn hold(cid: &CorrelationId, obj: &serde_json::Value, registry: &Registry, roster: &Roster) -> String {
+pub(crate) fn hold(
+    cid: &CorrelationId,
+    obj: &serde_json::Value,
+    registry: &Registry,
+    roster: &Roster,
+) -> String {
     let name = match session_param(cid, obj, "control/hold") {
         Ok(n) => n,
         Err(e) => return e,
@@ -74,7 +105,10 @@ pub(crate) fn hold(cid: &CorrelationId, obj: &serde_json::Value, registry: &Regi
         Ok(k) => k,
         Err(e) => return e,
     };
-    let reason = obj.get("params").and_then(|p| p.get("reason")).and_then(|v| v.as_str());
+    let reason = obj
+        .get("params")
+        .and_then(|p| p.get("reason"))
+        .and_then(|v| v.as_str());
     let out = registry.holds().hold(&key, reason);
     encode_response(
         cid,
@@ -99,7 +133,12 @@ pub(crate) fn hold(cid: &CorrelationId, obj: &serde_json::Value, registry: &Regi
 /// one prompt to this session, valid for `ttl_ms` (default 60 s), and answers
 /// `{session, grant, ttl_ms, default_held, operator_held}`. The grant is
 /// presented with `say --grant`; it lifts a default hold only.
-pub(crate) fn release(cid: &CorrelationId, obj: &serde_json::Value, registry: &Registry, roster: &Roster) -> String {
+pub(crate) fn release(
+    cid: &CorrelationId,
+    obj: &serde_json::Value,
+    registry: &Registry,
+    roster: &Roster,
+) -> String {
     let name = match session_param(cid, obj, "control/release") {
         Ok(n) => n,
         Err(e) => return e,
@@ -126,14 +165,32 @@ pub(crate) fn release(cid: &CorrelationId, obj: &serde_json::Value, registry: &R
     )
 }
 
-fn mint(cid: &CorrelationId, key: &str, params: Option<&serde_json::Value>, registry: &Registry) -> String {
-    let ttl = match params.and_then(|p| p.get("ttl_ms")).and_then(|v| v.as_u64()) {
+fn mint(
+    cid: &CorrelationId,
+    key: &str,
+    params: Option<&serde_json::Value>,
+    registry: &Registry,
+) -> String {
+    let ttl = match params
+        .and_then(|p| p.get("ttl_ms"))
+        .and_then(|v| v.as_u64())
+    {
         None => crate::holds::DEFAULT_TTL,
-        Some(0) => return encode_error(cid, Code::InvalidParams, "ttl must be greater than zero".to_string()),
+        Some(0) => {
+            return encode_error(
+                cid,
+                Code::InvalidParams,
+                "ttl must be greater than zero".to_string(),
+            )
+        }
         Some(ms) => std::time::Duration::from_millis(ms),
     };
     if ttl > crate::holds::MAX_TTL {
-        return encode_error(cid, Code::InvalidParams, "ttl is longer than the 24h maximum".to_string());
+        return encode_error(
+            cid,
+            Code::InvalidParams,
+            "ttl is longer than the 24h maximum".to_string(),
+        );
     }
     match registry.holds().mint_grant(key, ttl) {
         Ok(g) => encode_response(
@@ -146,9 +203,13 @@ fn mint(cid: &CorrelationId, key: &str, params: Option<&serde_json::Value>, regi
                 "operator_held": g.operator_held,
             }),
         ),
-        Err(crate::holds::MintError::Full) => encode_error(cid, Code::LimitExceeded, "too many live grants".to_string()),
-        Err(crate::holds::MintError::NoRandomness) => {
-            encode_error(cid, Code::InvalidRequest, "the hub could not generate a grant id".to_string())
+        Err(crate::holds::MintError::Full) => {
+            encode_error(cid, Code::LimitExceeded, "too many live grants".to_string())
         }
+        Err(crate::holds::MintError::NoRandomness) => encode_error(
+            cid,
+            Code::InvalidRequest,
+            "the hub could not generate a grant id".to_string(),
+        ),
     }
 }

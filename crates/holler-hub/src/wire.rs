@@ -57,9 +57,16 @@ pub(crate) async fn close(sink: &mut (impl Sink<Message, Error = WsError> + Unpi
 /// — the plain [`close`] above only ever sends a codeless close, which is
 /// right for every *other* teardown path but not these operator/registry/
 /// hygiene-initiated ones).
-pub(crate) async fn close_with_code(sink: &mut (impl Sink<Message, Error = WsError> + Unpin), code: u16, reason: &'static str) {
+pub(crate) async fn close_with_code(
+    sink: &mut (impl Sink<Message, Error = WsError> + Unpin),
+    code: u16,
+    reason: &'static str,
+) {
     use tokio_tungstenite::tungstenite::protocol::frame::{coding::CloseCode, CloseFrame};
-    let frame = Message::Close(Some(CloseFrame { code: CloseCode::from(code), reason: reason.into() }));
+    let frame = Message::Close(Some(CloseFrame {
+        code: CloseCode::from(code),
+        reason: reason.into(),
+    }));
     let _ = sink.send(frame).await;
     let _ = sink.flush().await;
 }

@@ -10,7 +10,11 @@ use std::time::{Duration, Instant};
 use holler_body::reply_coalescer::{max_bytes, window, Coalescer, PushOutcome};
 
 fn text_of(parts: &[holler_proto::a2a::Part]) -> String {
-    parts.iter().filter_map(|p| p.text()).collect::<Vec<_>>().join("")
+    parts
+        .iter()
+        .filter_map(|p| p.text())
+        .collect::<Vec<_>>()
+        .join("")
 }
 
 #[test]
@@ -153,7 +157,10 @@ fn many_updates_fewer_frames_e2e() {
     if c.due(due_at) && c.flush().is_some() {
         frames += 1;
     }
-    assert_eq!(frames, 1, "200 chunks inside one window must coalesce into exactly one frame");
+    assert_eq!(
+        frames, 1,
+        "200 chunks inside one window must coalesce into exactly one frame"
+    );
 }
 
 #[test]
@@ -213,7 +220,10 @@ fn thousand_chunks_all_flushed_exactly_once_in_order_state_stays_bounded() {
     // `sent` even if every char in `sent` also appears in `received`, and
     // `assert_eq!` on the full strings catches that — an extra copy of any
     // `chunk-N-` shifts every following comparison out of alignment.
-    assert!(flush_count > 1, "1000 chunks spanning many windows must not collapse into a single flush");
+    assert!(
+        flush_count > 1,
+        "1000 chunks spanning many windows must not collapse into a single flush"
+    );
     assert!(
         max_flush_bytes <= max_bytes(),
         "a single flush must never exceed the byte cap — the buffer is drained on every trigger \

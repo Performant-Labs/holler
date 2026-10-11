@@ -19,10 +19,18 @@ pub struct AnswerResult {
 }
 
 fn ok(message: String) -> AnswerResult {
-    AnswerResult { message, to_stderr: false, exit_code: 0 }
+    AnswerResult {
+        message,
+        to_stderr: false,
+        exit_code: 0,
+    }
 }
 fn err(message: String, exit_code: i32) -> AnswerResult {
-    AnswerResult { message, to_stderr: true, exit_code }
+    AnswerResult {
+        message,
+        to_stderr: true,
+        exit_code,
+    }
 }
 
 /// `holler answer SESSION CHOICE [--json]` (issue #151): resolve `SESSION`
@@ -51,20 +59,29 @@ pub fn run(answer: &Answer, json: bool) -> AnswerResult {
             if json {
                 ok(doc.to_string())
             } else {
-                let applied = doc.get("applied").and_then(|v| v.as_bool()).unwrap_or(false);
-                ok(if applied { "applied".to_string() } else { "not applied".to_string() })
+                let applied = doc
+                    .get("applied")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                ok(if applied {
+                    "applied".to_string()
+                } else {
+                    "not applied".to_string()
+                })
             }
         }
-        Err(holler_hub::control::ControlError::NoLiveHub) => {
-            err(format!("no live holler hub reachable at {}", state_root.display()), 1)
-        }
+        Err(holler_hub::control::ControlError::NoLiveHub) => err(
+            format!("no live holler hub reachable at {}", state_root.display()),
+            1,
+        ),
         Err(holler_hub::control::ControlError::RemotePolicyRefused(msg)) => err(msg, 3),
         Err(holler_hub::control::ControlError::Refused(e)) => {
             // `ambiguous` (matching `say`'s own convention: "lists
             // candidates") is the one refusal that exits 2, not 1 — every
             // other refusal (unknown session, nothing_pending, not_connected,
             // invalid_params, connection_lost) is a runtime failure (exit 1).
-            let is_ambiguous = e.data.as_ref().and_then(|d| d.reason.as_deref()) == Some("ambiguous");
+            let is_ambiguous =
+                e.data.as_ref().and_then(|d| d.reason.as_deref()) == Some("ambiguous");
             err(e.message.clone(), if is_ambiguous { 2 } else { 1 })
         }
         Err(e) => err(e.to_string(), 1),

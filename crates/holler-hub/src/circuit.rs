@@ -188,35 +188,64 @@ where
     Snk: Sink<Message, Error = WsError> + Unpin,
     St: Stream<Item = Result<Message, WsError>> + Unpin,
 {
-    let peer_ip = deps.peer.rsplit_once(':').map(|(ip, _)| ip).unwrap_or(deps.peer);
+    let peer_ip = deps
+        .peer
+        .rsplit_once(':')
+        .map(|(ip, _)| ip)
+        .unwrap_or(deps.peer);
 
     auth::check_protocol_version(sink, id, params).await?;
     auth::begin_authenticate(sink, id, params, state, peer_ip, deps).await?;
 
     let mut handshake = auth::begin_noise_handshake(sink, id, params, state, peer_ip, deps).await?;
     let Ok(msg2) = handshake.write_message() else {
-        auth::refuse_unauthenticated(sink, id, "authentication failed: could not continue the handshake", None, &params.token_id, peer_ip, deps).await;
+        auth::refuse_unauthenticated(
+            sink,
+            id,
+            "authentication failed: could not continue the handshake",
+            None,
+            &params.token_id,
+            peer_ip,
+            deps,
+        )
+        .await;
         return None;
     };
-    let challenge = serde_json::to_value(holler_proto::AuthChallenge { message: hex::encode(msg2) }).unwrap_or_default();
+    let challenge = serde_json::to_value(holler_proto::AuthChallenge {
+        message: hex::encode(msg2),
+    })
+    .unwrap_or_default();
     reply(sink, id, challenge).await.ok()?;
 
-    let (prove_id, prove) = auth::await_prove(sink, stream, &params.token_id, peer_ip, deps).await?;
-    let record = auth::finish_prove(sink, &prove_id, params, &prove, &mut handshake, state, deps).await?;
+    let (prove_id, prove) =
+        auth::await_prove(sink, stream, &params.token_id, peer_ip, deps).await?;
+    let record =
+        auth::finish_prove(sink, &prove_id, params, &prove, &mut handshake, state, deps).await?;
 
     // Issue #339: derived (never transmitted) before the `ok` reply, so a
     // (structurally near-impossible — `handshake_hash_hex` is always real
     // hex once `finish_prove` succeeded) derivation failure still fails
     // closed rather than telling the body `ok` first.
     let Ok(sas) = holler_proto::sas::derive_sas(&handshake.handshake_hash_hex()) else {
-        auth::refuse_unauthenticated(sink, Some(&prove_id), "authentication failed: could not derive the pairing SAS", None, &params.token_id, peer_ip, deps).await;
+        auth::refuse_unauthenticated(
+            sink,
+            Some(&prove_id),
+            "authentication failed: could not derive the pairing SAS",
+            None,
+            &params.token_id,
+            peer_ip,
+            deps,
+        )
+        .await;
         return None;
     };
 
     let ok = serde_json::to_value(holler_proto::AuthOk { ok: true }).unwrap_or_default();
     reply(sink, Some(prove_id.as_str()), ok).await.ok()?;
 
-    let (body_harnesses, role) = hello_exchange(sink, stream, &params.hostname, state).await.ok()?;
+    let (body_harnesses, role) = hello_exchange(sink, stream, &params.hostname, state)
+        .await
+        .ok()?;
 
     // `finish_prove` only ever returns a `Bound` record (from `bound_record`,
     // which requires a `client_id` to be `bound`) — safe to unwrap the
@@ -254,11 +283,20 @@ pub async fn handle_authenticated<Snk, St>(
     // indefinitely without holding it.
     preauth_permit.take();
 
-    let AuthDeps { registry, roster, peer, lockout } = deps;
+    let AuthDeps {
+        registry,
+        roster,
+        peer,
+        lockout,
+    } = deps;
 
     // AC 3-4: admin branches before supersede/insert/roster writes.
     if role == HelloRole::Admin {
-        let deps = admin::AdminDeps { registry: registry.clone(), roster: roster.clone(), lockout: lockout.clone() };
+        let deps = admin::AdminDeps {
+            registry: registry.clone(),
+            roster: roster.clone(),
+            lockout: lockout.clone(),
+        };
         admin::run(sink, stream, &record, peer, &sas, deps).await;
         return;
     }
@@ -269,7 +307,12 @@ pub async fn handle_authenticated<Snk, St>(
     log(
         Severity::Info,
         "conn_connected",
-        vec![("client_id", client_id.clone()), ("hostname", params.hostname.clone()), ("peer", peer.to_string()), ("sas", sas)],
+        vec![
+            ("client_id", client_id.clone()),
+            ("hostname", params.hostname.clone()),
+            ("peer", peer.to_string()),
+            ("sas", sas),
+        ],
     );
 
     // Issue #184's supersede-on-reauth: if this token already has a live
@@ -294,9 +337,12 @@ pub async fn handle_authenticated<Snk, St>(
     // token label instead means `say macos/macos-session` finds what the
     // roster already correctly reports as connected, instead of comparing
     // against a hostname no session was ever actually filed under.
-    let (mut cmd_rx, mut cancel_rx, seq) =
-        registry.insert(&client_id, &record.label, &params.token_id, peer).await;
-    registry.set_harnesses_advertised(&client_id, body_harnesses.clone()).await;
+    let (mut cmd_rx, mut cancel_rx, seq) = registry
+        .insert(&client_id, &record.label, &params.token_id, peer)
+        .await;
+    registry
+        .set_harnesses_advertised(&client_id, body_harnesses.clone())
+        .await;
     // Issue #236 (ADR 0005 §2): the label travels with the authenticated
     // token, never on the wire, so this is the one place the hub can read it
     // — `record` is the verified token record from just above. Binding it
@@ -320,24 +366,30 @@ pub async fn handle_authenticated<Snk, St>(
     // `harnesses_confirmed` stays the trustworthy subset of `harnesses_known`.
     let pending_confirms = dispatch::send_confirm_probes(sink, &body_harnesses).await;
 
-    let mut conn =
-        SessionConnection::new(
-            sink,
-            stream,
-            CommandChannels { cmd_rx: &mut cmd_rx, cancel_rx: &mut cancel_rx },
-            &client_id,
-            &record.label,
-            registry,
-            roster,
-            state,
-            pending_confirms,
-        )
-        .await;
+    let mut conn = SessionConnection::new(
+        sink,
+        stream,
+        CommandChannels {
+            cmd_rx: &mut cmd_rx,
+            cancel_rx: &mut cancel_rx,
+        },
+        &client_id,
+        &record.label,
+        registry,
+        roster,
+        state,
+        pending_confirms,
+    )
+    .await;
     conn.run().await;
     // Issue #184: `remove_if_current` (not the unconditional `remove`) — see
     // its own doc for the supersede race this closes.
     registry.remove_if_current(&client_id, seq).await;
-    log(Severity::Warn, "conn_dropped", vec![("client_id", client_id), ("peer", peer.to_string())]);
+    log(
+        Severity::Warn,
+        "conn_dropped",
+        vec![("client_id", client_id), ("peer", peer.to_string())],
+    );
 }
 
 /// Send a response envelope; `Err` means the socket is already gone (the
@@ -363,7 +415,12 @@ where
 /// Returns the body's advertised harness ids (issue #185's `harnesses_known`
 /// input) — empty if none, or unparsable — alongside its claimed
 /// `hello.role` (issue #508; unparsable defaults to `Body`).
-async fn hello_exchange<Snk, St>(sink: &mut Snk, stream: &mut St, hostname: &str, state: &HubState) -> Result<(Vec<String>, HelloRole), ()>
+async fn hello_exchange<Snk, St>(
+    sink: &mut Snk,
+    stream: &mut St,
+    hostname: &str,
+    state: &HubState,
+) -> Result<(Vec<String>, HelloRole), ()>
 where
     Snk: Sink<Message, Error = WsError> + Unpin,
     St: Stream<Item = Result<Message, WsError>> + Unpin,
@@ -373,16 +430,30 @@ where
         .map_err(|_| ())?
         .ok_or(())?;
     let Envelope::Request { id, method, params } = &env else {
-        send_error(sink, env.id(), Code::Unauthenticated, "expected circuit/hello").await;
+        send_error(
+            sink,
+            env.id(),
+            Code::Unauthenticated,
+            "expected circuit/hello",
+        )
+        .await;
         close(sink).await;
         return Err(());
     };
     if method != "circuit/hello" {
-        send_error(sink, Some(id), Code::MethodNotFound, "expected circuit/hello first").await;
+        send_error(
+            sink,
+            Some(id),
+            Code::MethodNotFound,
+            "expected circuit/hello first",
+        )
+        .await;
         close(sink).await;
         return Err(());
     }
-    let body_hello = params.clone().and_then(|v| serde_json::from_value::<Hello>(v).ok());
+    let body_hello = params
+        .clone()
+        .and_then(|v| serde_json::from_value::<Hello>(v).ok());
 
     // Issue #340: defense-in-depth mirror of `circuit/auth::check_protocol_
     // version` — a genuine mismatch is already refused there, before this
@@ -410,7 +481,10 @@ where
             return Err(());
         }
     }
-    let role = body_hello.as_ref().map(|h| h.role).unwrap_or(HelloRole::Body);
+    let role = body_hello
+        .as_ref()
+        .map(|h| h.role)
+        .unwrap_or(HelloRole::Body);
     let body_harnesses = body_hello.and_then(|h| h.harnesses).unwrap_or_default();
 
     // Issue #322: the hub's identity keypair is resolved (generated on first
@@ -424,13 +498,17 @@ where
 
     // The hub's own half: a request the body must answer with `{}`.
     let hub_cid = holler_proto::CorrelationId::mint_hub();
-    let hello_req = Envelope::request(&hub_cid, "circuit/hello", Some(serde_json::json!({
-        "protocol": holler_proto::PROTOCOL_VERSION,
-        "protocol_min": holler_proto::PROTOCOL_MIN,
-        "protocol_max": holler_proto::PROTOCOL_MAX,
-        "role": "hub",
-        "hostname": hub_hostname(),
-    })));
+    let hello_req = Envelope::request(
+        &hub_cid,
+        "circuit/hello",
+        Some(serde_json::json!({
+            "protocol": holler_proto::PROTOCOL_VERSION,
+            "protocol_min": holler_proto::PROTOCOL_MIN,
+            "protocol_max": holler_proto::PROTOCOL_MAX,
+            "role": "hub",
+            "hostname": hub_hostname(),
+        })),
+    );
     let text = holler_proto::encode(&hello_req).unwrap_or_default();
     sink.send(Message::text(text)).await.map_err(|_| ())?;
     sink.flush().await.map_err(|_| ())?;
@@ -478,7 +556,10 @@ fn hub_hello_doc(_body_hostname: &str, hub_pubkey: Option<String>) -> Hello {
 /// a time, same discipline as before #190 (unlike `say`, neither is ever
 /// concurrent on one connection today).
 type PendingPing = Option<(String, tokio::sync::oneshot::Sender<PingAck>)>;
-type PendingQuery = Option<(String, tokio::sync::oneshot::Sender<Result<serde_json::Value, WireError>>)>;
+type PendingQuery = Option<(
+    String,
+    tokio::sync::oneshot::Sender<Result<serde_json::Value, WireError>>,
+)>;
 
 /// Issue #230: the session loop's connection-scoped mutable state, bundled
 /// into one owned struct instead of threaded as 9 loose positional
@@ -604,7 +685,11 @@ where
     /// split out purely to keep that `select!`'s own cognitive complexity
     /// under the workspace threshold.
     async fn handle_cancel_command(&mut self, cancel_cmd: Option<CancelCommand>) -> Result<(), ()> {
-        let CancelCommand { request_id, session, reply } = cancel_cmd.ok_or(())?;
+        let CancelCommand {
+            request_id,
+            session,
+            reply,
+        } = cancel_cmd.ok_or(())?;
         match dispatch::send_cancel(self.sink, &request_id, &session).await {
             Ok(()) => {
                 self.pending_cancels.insert(request_id, reply);
@@ -623,7 +708,13 @@ where
     /// `select!` arm bodies uniformly small (matching
     /// [`Self::handle_cancel_command`]/[`Self::handle_live_command`]).
     async fn send_ws_ping(&mut self) -> Result<(), ()> {
-        if self.sink.send(Message::Ping(Vec::new().into())).await.is_err() || self.sink.flush().await.is_err() {
+        if self
+            .sink
+            .send(Message::Ping(Vec::new().into()))
+            .await
+            .is_err()
+            || self.sink.flush().await.is_err()
+        {
             self.fail_pending();
             self.mark_reconnecting();
             return Err(());
@@ -718,28 +809,61 @@ where
     /// own cognitive complexity under the workspace threshold.
     async fn handle_live_command(&mut self, cmd: Option<LiveCommand>) -> Result<(), ()> {
         match cmd.ok_or(())? {
-            LiveCommand::Ping { reply: reply_tx } => match dispatch::send_ping_probe(self.sink).await {
-                Ok(cid) => {
-                    self.pending_ping = Some((cid, reply_tx));
-                    Ok(())
-                }
-                Err(()) => Err(()),
-            },
-            LiveCommand::Query { method, params, reply: reply_tx } => {
-                match dispatch::send_query_forward(self.sink, &method, params).await {
+            LiveCommand::Ping { reply: reply_tx } => {
+                match dispatch::send_ping_probe(self.sink).await {
                     Ok(cid) => {
-                        self.pending_query = Some((cid, reply_tx));
+                        self.pending_ping = Some((cid, reply_tx));
                         Ok(())
                     }
                     Err(()) => Err(()),
                 }
             }
-            LiveCommand::Say { request_id, session, message, queue, replace, grant, reply } => {
+            LiveCommand::Query {
+                method,
+                params,
+                reply: reply_tx,
+            } => match dispatch::send_query_forward(self.sink, &method, params).await {
+                Ok(cid) => {
+                    self.pending_query = Some((cid, reply_tx));
+                    Ok(())
+                }
+                Err(()) => Err(()),
+            },
+            LiveCommand::Say {
+                request_id,
+                session,
+                message,
+                queue,
+                replace,
+                grant,
+                reply,
+            } => {
                 let key = crate::holds::session_key(self.label, &session);
-                let gate = HoldGate { holds: self.registry.holds(), key: &key, grant: grant.as_deref(), panes: self.registry.panes().cloned() };
-                match dispatch::send_prompt(self.sink, gate, &request_id, &session, message, queue, replace).await {
+                let gate = HoldGate {
+                    holds: self.registry.holds(),
+                    key: &key,
+                    grant: grant.as_deref(),
+                    panes: self.registry.panes().cloned(),
+                };
+                match dispatch::send_prompt(
+                    self.sink,
+                    gate,
+                    &request_id,
+                    &session,
+                    message,
+                    queue,
+                    replace,
+                )
+                .await
+                {
                     Ok(()) => {
-                        self.pending_says.insert(request_id, PendingSay { reply, updates: Vec::new() });
+                        self.pending_says.insert(
+                            request_id,
+                            PendingSay {
+                                reply,
+                                updates: Vec::new(),
+                            },
+                        );
                         Ok(())
                     }
                     // Issue #442: a held session refuses the prompt (nothing
@@ -821,7 +945,12 @@ where
         // `session/update` — a body's reply to a `say` — never showed up in a
         // trace at any debug level, because nothing on the hub's inbound path
         // ever logged a frame at all).
-        log_frame(LogDirection::In, static_wire_method(env.method()), env.id(), text);
+        log_frame(
+            LogDirection::In,
+            static_wire_method(env.method()),
+            env.id(),
+            text,
+        );
         // Every inbound frame on an authenticated socket is proof the body is
         // still talking to us (issue #186), so refresh the roster row's
         // `last_heard_ms` on whatever the frame is. The roster is keyed by
@@ -835,7 +964,15 @@ where
         }
         match &env {
             Envelope::Notification { method, params } if method == "session/presence" => {
-                dispatch::handle_presence_notification(self.client_id, params.clone(), self.label, self.registry, self.roster, &mut self.last_seen).await;
+                dispatch::handle_presence_notification(
+                    self.client_id,
+                    params.clone(),
+                    self.label,
+                    self.registry,
+                    self.roster,
+                    &mut self.last_seen,
+                )
+                .await;
                 Ok(())
             }
             Envelope::Notification { method, params } if method == "session/update" => {
@@ -843,12 +980,26 @@ where
                 Ok(())
             }
             Envelope::Request { id, method, .. } if method == "circuit/ping" => {
-                let ack = PingAck { hostname: self.client_id.to_string(), ts: holler_proto::now_millis() };
-                reply(self.sink, Some(id), serde_json::to_value(ack).unwrap_or_default()).await
+                let ack = PingAck {
+                    hostname: self.client_id.to_string(),
+                    ts: holler_proto::now_millis(),
+                };
+                reply(
+                    self.sink,
+                    Some(id),
+                    serde_json::to_value(ack).unwrap_or_default(),
+                )
+                .await
             }
             Envelope::Response { id, result } if self.pending_confirms.contains_key(id) => {
-                dispatch::handle_confirm_response(id, result.clone(), self.client_id, &mut self.pending_confirms, self.registry)
-                    .await;
+                dispatch::handle_confirm_response(
+                    id,
+                    result.clone(),
+                    self.client_id,
+                    &mut self.pending_confirms,
+                    self.registry,
+                )
+                .await;
                 Ok(())
             }
             Envelope::Response { id, result } => {
@@ -863,7 +1014,13 @@ where
                 Ok(())
             }
             Envelope::Error { id, error } => {
-                dispatch::handle_error_response(id.as_deref(), error, &mut self.pending_query, &mut self.pending_says, &mut self.pending_cancels);
+                dispatch::handle_error_response(
+                    id.as_deref(),
+                    error,
+                    &mut self.pending_query,
+                    &mut self.pending_says,
+                    &mut self.pending_cancels,
+                );
                 Ok(())
             }
             Envelope::Request { id, .. } => {
@@ -891,7 +1048,9 @@ where
     loop {
         match stream.next().await {
             Some(Ok(Message::Text(t))) => return holler_proto::decode(&t).ok(),
-            Some(Ok(Message::Ping(_))) | Some(Ok(Message::Pong(_))) | Some(Ok(Message::Frame(_))) => continue,
+            Some(Ok(Message::Ping(_)))
+            | Some(Ok(Message::Pong(_)))
+            | Some(Ok(Message::Frame(_))) => continue,
             _ => return None,
         }
     }

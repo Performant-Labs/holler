@@ -21,10 +21,18 @@ pub struct WaitResult {
 }
 
 fn ok(message: String) -> WaitResult {
-    WaitResult { message, to_stderr: false, exit_code: 0 }
+    WaitResult {
+        message,
+        to_stderr: false,
+        exit_code: 0,
+    }
 }
 fn err(message: String, exit_code: i32) -> WaitResult {
-    WaitResult { message, to_stderr: true, exit_code }
+    WaitResult {
+        message,
+        to_stderr: true,
+        exit_code,
+    }
 }
 
 /// Parse a `<number><s|m|h>` duration (the `wait --timeout` grammar, shared
@@ -58,7 +66,15 @@ fn parse_duration(s: &str) -> Option<Duration> {
 pub fn run(wait: &Wait, json: bool) -> WaitResult {
     let timeout = match parse_duration(&wait.timeout) {
         Some(d) => d,
-        None => return err(format!("invalid --timeout {:?} (use e.g. 30s, 5m, 1h)", wait.timeout), 3),
+        None => {
+            return err(
+                format!(
+                    "invalid --timeout {:?} (use e.g. 30s, 5m, 1h)",
+                    wait.timeout
+                ),
+                3,
+            )
+        }
     };
     let state_root = holler_hub::state::resolve_state_dir().unwrap_or_default();
     let call = holler_hub::control::ControlCall::wait(
@@ -70,19 +86,27 @@ pub fn run(wait: &Wait, json: bool) -> WaitResult {
     );
     match crate::transport::call(wait.server.as_deref(), &call) {
         Ok(doc) => {
-            let matched = doc.get("matched").and_then(serde_json::Value::as_bool).unwrap_or(false);
+            let matched = doc
+                .get("matched")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false);
             if json {
                 ok(doc.to_string())
             } else if matched {
                 ok(render_matches(&doc))
             } else {
                 // A timeout is a quiet exit 2 (ADR 0003) — nothing printed.
-                WaitResult { message: String::new(), to_stderr: false, exit_code: 2 }
+                WaitResult {
+                    message: String::new(),
+                    to_stderr: false,
+                    exit_code: 2,
+                }
             }
         }
-        Err(holler_hub::control::ControlError::NoLiveHub) => {
-            err(format!("no live holler hub reachable at {}", state_root.display()), 1)
-        }
+        Err(holler_hub::control::ControlError::NoLiveHub) => err(
+            format!("no live holler hub reachable at {}", state_root.display()),
+            1,
+        ),
         Err(holler_hub::control::ControlError::RemotePolicyRefused(msg)) => err(msg, 3),
         Err(e) => err(e.to_string(), 1),
     }
@@ -95,19 +119,28 @@ pub fn run(wait: &Wait, json: bool) -> WaitResult {
 /// live-state match (`input-required`, `gone`), which has no single
 /// "since when" instant of its own here.
 fn render_matches(doc: &serde_json::Value) -> String {
-    let rows = doc.get("rows").and_then(|r| r.as_array()).cloned().unwrap_or_default();
+    let rows = doc
+        .get("rows")
+        .and_then(|r| r.as_array())
+        .cloned()
+        .unwrap_or_default();
     let mut out = String::new();
     for row in &rows {
         let session = row.get("session").and_then(|v| v.as_str()).unwrap_or("-");
         let state = row.get("state").and_then(|v| v.as_str()).unwrap_or("-");
         let turn_id = row.get("turn_id").and_then(|v| v.as_str()).unwrap_or("-");
-        let stop_reason = row.get("stop_reason").and_then(|v| v.as_str()).unwrap_or("-");
+        let stop_reason = row
+            .get("stop_reason")
+            .and_then(|v| v.as_str())
+            .unwrap_or("-");
         let age = row
             .get("age_secs")
             .and_then(serde_json::Value::as_u64)
             .map(fmt_age_secs)
             .unwrap_or_else(|| "-".to_string());
-        out.push_str(&format!("{session} {state} {turn_id} {stop_reason} {age}\n"));
+        out.push_str(&format!(
+            "{session} {state} {turn_id} {stop_reason} {age}\n"
+        ));
     }
     out
 }

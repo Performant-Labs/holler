@@ -1,4 +1,9 @@
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable)] // #186
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unreachable
+)] // #186
 //! The hub's roster (issue #186): who can be hollered at right now, driven by
 //! periodic presence, with the tri-state TTL from the dropped-connections memo
 //! (`connected` → `reconnecting` → `gone` → pruned), the explicit-close-is-gone
@@ -81,10 +86,17 @@ fn presence_replaces_not_merges() {
     // `a/1` is gone but still in the map until pruned, so inspect it via
     // `rows(Some(true))`.
     let rows = r.rows(Some(true));
-    assert_eq!(rows.len(), 2, "both names still exist in the map (no prune yet)");
+    assert_eq!(
+        rows.len(),
+        2,
+        "both names still exist in the map (no prune yet)"
+    );
     let a = rows.iter().find(|row| row.name == "a/1").unwrap();
     let b = rows.iter().find(|row| row.name == "b/1").unwrap();
-    assert_eq!(a.conn_state, "gone", "absent-from-frame goes gone immediately");
+    assert_eq!(
+        a.conn_state, "gone",
+        "absent-from-frame goes gone immediately"
+    );
     assert_eq!(b.conn_state, "connected");
     // And the default listing shows only the survivor.
     let default = r.rows(None);
@@ -103,8 +115,16 @@ fn absent_session_goes_gone_immediately() {
     // `gone` rows are hidden from the default listing, so collect them from the
     // full map (`rows(Some(true))`): exactly `b/1` is gone, `a/1` is not.
     let rows = r.rows(Some(true));
-    let gone: Vec<_> = rows.iter().filter(|row| row.conn_state == "gone").map(|row| row.name.clone()).collect();
-    assert_eq!(gone, vec!["b/1"], "the absent session is gone now, `a/1` is not");
+    let gone: Vec<_> = rows
+        .iter()
+        .filter(|row| row.conn_state == "gone")
+        .map(|row| row.name.clone())
+        .collect();
+    assert_eq!(
+        gone,
+        vec!["b/1"],
+        "the absent session is gone now, `a/1` is not"
+    );
 }
 
 #[test]
@@ -117,11 +137,18 @@ fn different_token_cannot_steal_a_name() {
     // A different token claiming a name whose current holder is `connected`
     // is rejected for that row (the existing row keeps its `token_id`).
     let rejected = r.advertise(other, &presence("h2", &["a/1"]));
-    assert_eq!(rejected, vec!["a/1".to_string()], "the connected holder's row is rejected");
+    assert_eq!(
+        rejected,
+        vec!["a/1".to_string()],
+        "the connected holder's row is rejected"
+    );
     let rows = r.rows(None);
     let a = rows.iter().find(|row| row.name == "a/1").unwrap();
     assert_eq!(a.token_id, T, "the connected holder keeps the name");
-    assert!(a.hostname == "h1", "the connected holder's locator is not clobbered");
+    assert!(
+        a.hostname == "h1",
+        "the connected holder's locator is not clobbered"
+    );
 }
 
 #[test]
@@ -132,7 +159,10 @@ fn same_token_reclaims_its_name() {
     // The same token re-advertising its own name is always accepted (a same-
     // token re-claim is a locator refresh, never a collision).
     let rejected = r.advertise(T, &presence("h1", &["a/1"]));
-    assert!(rejected.is_empty(), "a same-token re-claim is never rejected");
+    assert!(
+        rejected.is_empty(),
+        "a same-token re-claim is never rejected"
+    );
     let rows = r.rows(None);
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].conn_state, "connected");
@@ -164,7 +194,10 @@ fn fresh_token_claims_name_from_reconnecting_holder() {
     let other = "tok_0002";
     r.set_token(other, "cli_0002");
     let rejected = r.advertise(other, &presence("h2", &["a/1"]));
-    assert!(rejected.is_empty(), "a reconnecting holder does not block a new claim");
+    assert!(
+        rejected.is_empty(),
+        "a reconnecting holder does not block a new claim"
+    );
     {
         let rows = r.rows(None);
         assert_eq!(rows.len(), 1);
@@ -173,7 +206,11 @@ fn fresh_token_claims_name_from_reconnecting_holder() {
     }
     // The displaced holder's *later* presence for that name is rejected.
     let rejected2 = r.advertise(T, &presence("h1", &["a/1"]));
-    assert_eq!(rejected2, vec!["a/1".to_string()], "the displaced holder cannot reclaim the name it lost");
+    assert_eq!(
+        rejected2,
+        vec!["a/1".to_string()],
+        "the displaced holder cannot reclaim the name it lost"
+    );
     {
         let rows = r.rows(None);
         assert_eq!(rows[0].token_id, other);
@@ -196,7 +233,11 @@ fn connected_holder_still_blocks_a_different_token() {
     let other = "tok_0002";
     r.set_token(other, "cli_0002");
     let rejected = r.advertise(other, &presence("h2", &["a/1"]));
-    assert_eq!(rejected, vec!["a/1".to_string()], "a connected holder blocks a different token");
+    assert_eq!(
+        rejected,
+        vec!["a/1".to_string()],
+        "a connected holder blocks a different token"
+    );
 }
 
 #[test]
@@ -223,7 +264,10 @@ fn rejected_claim_succeeds_on_next_presence_after_holder_gone() {
     r.advance(41);
     r.sweep();
     let rejected2 = r.advertise(other, &presence("h2", &["a/1"]));
-    assert!(rejected2.is_empty(), "once the holder is gone, the claimant's retry succeeds");
+    assert!(
+        rejected2.is_empty(),
+        "once the holder is gone, the claimant's retry succeeds"
+    );
     {
         let rows = r.rows(None);
         assert_eq!(rows.len(), 1);
@@ -249,11 +293,17 @@ fn missed_heartbeats_connected_to_reconnecting_to_gone_to_pruned() {
     // `gone` rows are hidden from the default listing; the row is gone (and
     // still in the map until pruned), so inspect it via `rows(Some(true))`.
     assert_eq!(r.rows(Some(true))[0].conn_state, "gone");
-    assert!(r.rows(None).is_empty(), "a gone row is hidden from the default listing");
+    assert!(
+        r.rows(None).is_empty(),
+        "a gone row is hidden from the default listing"
+    );
 
     r.advance(180); // 360 s since last_seen
     r.sweep();
-    assert!(r.rows(Some(true)).is_empty(), "the row is pruned at the prune threshold");
+    assert!(
+        r.rows(Some(true)).is_empty(),
+        "the row is pruned at the prune threshold"
+    );
 }
 
 #[test]
@@ -276,7 +326,11 @@ fn any_frame_touch_flips_reconnecting_back_to_connected() {
     r.touch(T, "session/prompt");
     // The touch refreshed `last_seen`, so the next sweep no longer ages it out.
     r.sweep();
-    assert_eq!(r.rows(None)[0].conn_state, "connected", "a touch flips reconnecting back to connected");
+    assert_eq!(
+        r.rows(None)[0].conn_state,
+        "connected",
+        "a touch flips reconnecting back to connected"
+    );
 }
 
 #[test]
@@ -305,8 +359,14 @@ fn touch_never_refreshes_other_token() {
     let rows = r.rows(None);
     let a = rows.iter().find(|row| row.name == "a/1").unwrap();
     let b = rows.iter().find(|row| row.name == "b/1").unwrap();
-    assert_eq!(a.conn_state, "connected", "the touched token's row refreshed");
-    assert_eq!(b.conn_state, "reconnecting", "another token's row was not refreshed by A's touch");
+    assert_eq!(
+        a.conn_state, "connected",
+        "the touched token's row refreshed"
+    );
+    assert_eq!(
+        b.conn_state, "reconnecting",
+        "another token's row was not refreshed by A's touch"
+    );
 }
 
 #[test]
@@ -318,7 +378,10 @@ fn explicit_close_is_gone_now() {
     r.advertise(T, &presence("h1", &["a/1", "b/1"]));
     r.clear(T);
     let rows = r.rows(None);
-    assert!(rows.iter().all(|row| row.conn_state == "gone"), "every row of a closed token is gone now");
+    assert!(
+        rows.iter().all(|row| row.conn_state == "gone"),
+        "every row of a closed token is gone now"
+    );
 }
 
 #[test]
@@ -335,7 +398,10 @@ fn revoke_is_gone_now() {
     let rows = r.rows(Some(true));
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].conn_state, "gone");
-    assert!(r.rows(None).is_empty(), "gone rows are excluded from the default listing");
+    assert!(
+        r.rows(None).is_empty(),
+        "gone rows are excluded from the default listing"
+    );
 }
 
 #[test]
@@ -351,17 +417,29 @@ fn working_with_no_updates_shows_stalled_after_threshold() {
     };
     let r = Roster::new(&cfg);
     r.set_token(T, C);
-    r.advertise(T, &Presence { hostname: "h1".into(), sessions: vec![working_ad("a/1")] });
+    r.advertise(
+        T,
+        &Presence {
+            hostname: "h1".into(),
+            sessions: vec![working_ad("a/1")],
+        },
+    );
     {
         let rows = r.rows(None);
-        assert_eq!(rows[0].state, "working", "a fresh working row is not stalled");
+        assert_eq!(
+            rows[0].state, "working",
+            "a fresh working row is not stalled"
+        );
     }
     // 10 minutes with no update (the default `stall_secs` would be 300 s; here
     // 60 s). The row's `last_update_at` (2026-09-09T00:00:00Z) is now far past
     // the threshold.
     r.advance(600);
     let rows = r.rows(None);
-    assert_eq!(rows[0].state, "stalled", "a working row with no update past the threshold is stalled");
+    assert_eq!(
+        rows[0].state, "stalled",
+        "a working row with no update past the threshold is stalled"
+    );
 }
 
 /// A `SessionAd` carrying `pending` and a terminal `last_turn` (the roster's
@@ -398,19 +476,31 @@ fn roster_json_shape() {
     // present, and a terminal `last_turn` round-trips its four fields.
     let r = Roster::new(&Config::default());
     r.set_token(T, C);
-    r.advertise(T, &Presence { hostname: "h1".into(), sessions: vec![input_required_ad("a/1")] });
+    r.advertise(
+        T,
+        &Presence {
+            hostname: "h1".into(),
+            sessions: vec![input_required_ad("a/1")],
+        },
+    );
     let rows = r.rows(None);
     assert_eq!(rows.len(), 1);
     let row = &rows[0];
     assert_eq!(row.state, "input-required");
     assert_eq!(row.turn_id.as_deref(), Some("h-000000000000000000000042"));
-    let last = row.last_turn.as_ref().expect("a terminal last_turn is carried");
+    let last = row
+        .last_turn
+        .as_ref()
+        .expect("a terminal last_turn is carried");
     assert_eq!(last.turn_id, "h-000000000000000000000041");
     assert_eq!(last.state.as_str(), "completed");
     assert_eq!(last.stop_reason, "end_turn");
     assert_eq!(last.ended_at, "2026-09-09T00:05:00Z");
     // `--json` carries the full `pending` array (not just the rendered column).
-    let pending = row.pending.as_ref().expect("an input-required row carries pending");
+    let pending = row
+        .pending
+        .as_ref()
+        .expect("an input-required row carries pending");
     assert_eq!(pending.len(), 1);
     assert_eq!(pending[0].kind, PendingKind::Permission);
     assert_eq!(pending[0].prompt, "may use the network?");
@@ -438,7 +528,11 @@ fn label_qualifies_row_names_and_prefix_filters_on_the_label_boundary() {
     names.sort();
     assert_eq!(
         names,
-        vec!["io-other/gamma".to_string(), "io/alpha".to_string(), "io/beta".to_string()],
+        vec![
+            "io-other/gamma".to_string(),
+            "io/alpha".to_string(),
+            "io/beta".to_string()
+        ],
         "every row is qualified `<label>/<session>` once its token's label is bound"
     );
 
@@ -446,20 +540,36 @@ fn label_qualifies_row_names_and_prefix_filters_on_the_label_boundary() {
     // proving the match is on the `/`-delimited label boundary, not a plain
     // substring/`starts_with("io")` search (which `io-other/gamma` would also
     // satisfy).
-    let mut io_names: Vec<String> = r.rows_matching(None, Some("io")).iter().map(|row| row.name.clone()).collect();
+    let mut io_names: Vec<String> = r
+        .rows_matching(None, Some("io"))
+        .iter()
+        .map(|row| row.name.clone())
+        .collect();
     io_names.sort();
-    assert_eq!(io_names, vec!["io/alpha".to_string(), "io/beta".to_string()]);
+    assert_eq!(
+        io_names,
+        vec!["io/alpha".to_string(), "io/beta".to_string()]
+    );
 
     // A trailing slash (the ADR's own example spelling, `io/`) behaves
     // identically.
-    let mut io_slash: Vec<String> =
-        r.rows_matching(None, Some("io/")).iter().map(|row| row.name.clone()).collect();
+    let mut io_slash: Vec<String> = r
+        .rows_matching(None, Some("io/"))
+        .iter()
+        .map(|row| row.name.clone())
+        .collect();
     io_slash.sort();
-    assert_eq!(io_slash, io_names, "a trailing slash on --prefix is equivalent to none");
+    assert_eq!(
+        io_slash, io_names,
+        "a trailing slash on --prefix is equivalent to none"
+    );
 
     // `--prefix io-other` matches only its own row.
-    let other_names: Vec<String> =
-        r.rows_matching(None, Some("io-other")).iter().map(|row| row.name.clone()).collect();
+    let other_names: Vec<String> = r
+        .rows_matching(None, Some("io-other"))
+        .iter()
+        .map(|row| row.name.clone())
+        .collect();
     assert_eq!(other_names, vec!["io-other/gamma".to_string()]);
 
     // No prefix (`None`) is every row, same as `rows(None)`.
@@ -471,8 +581,15 @@ fn label_qualifies_row_names_and_prefix_filters_on_the_label_boundary() {
     let unlabeled = "tok_0003";
     r.set_token(unlabeled, "cli_0003");
     r.advertise(unlabeled, &presence("h3", &["delta"]));
-    let bare = r.rows(None).into_iter().find(|row| row.token_id == unlabeled).expect("the unlabeled row exists");
-    assert_eq!(bare.name, "delta", "no bound label falls back to the bare name");
+    let bare = r
+        .rows(None)
+        .into_iter()
+        .find(|row| row.token_id == unlabeled)
+        .expect("the unlabeled row exists");
+    assert_eq!(
+        bare.name, "delta",
+        "no bound label falls back to the bare name"
+    );
 }
 
 /// Issue #142: the roster row's own `last_turn`/`turn_id` must be
@@ -498,7 +615,10 @@ fn prompt_response_updates_last_turn_before_next_presence() {
     // Dispatch: the roster's `turn_id` moves immediately (no new presence).
     r.set_turn_id(T, "alpha", "h-000000000000000000000099");
     let mid = r.rows(None);
-    assert_eq!(mid[0].turn_id.as_deref(), Some("h-000000000000000000000099"));
+    assert_eq!(
+        mid[0].turn_id.as_deref(),
+        Some("h-000000000000000000000099")
+    );
     assert_eq!(mid[0].last_turn, None, "no response yet");
 
     // The response lands: `last_turn` moves immediately too — still no
@@ -511,7 +631,11 @@ fn prompt_response_updates_last_turn_before_next_presence() {
     };
     r.set_last_turn(T, "alpha", last_turn.clone());
     let after = r.rows(None);
-    assert_eq!(after[0].last_turn.as_ref(), Some(&last_turn), "authoritative ahead of any presence beat");
+    assert_eq!(
+        after[0].last_turn.as_ref(),
+        Some(&last_turn),
+        "authoritative ahead of any presence beat"
+    );
 }
 
 /// Issue #142: `last_turn` must survive a reconnect — it rides presence (the
@@ -523,9 +647,18 @@ fn last_turn_survives_reconnect_via_presence() {
     let r = Roster::new(&Config::default());
     r.set_token(T, C);
     r.set_label(T, "io");
-    r.advertise(T, &Presence { hostname: "h1".into(), sessions: vec![input_required_ad("alpha")] });
+    r.advertise(
+        T,
+        &Presence {
+            hostname: "h1".into(),
+            sessions: vec![input_required_ad("alpha")],
+        },
+    );
     let before = r.rows(None);
-    let last = before[0].last_turn.clone().expect("a terminal last_turn was advertised");
+    let last = before[0]
+        .last_turn
+        .clone()
+        .expect("a terminal last_turn was advertised");
     assert_eq!(last.turn_id, "h-000000000000000000000041");
 
     // The connection drops (explicit close) and a *different* token
@@ -542,12 +675,25 @@ fn last_turn_survives_reconnect_via_presence() {
     // turn — is unchanged.
     ad.state = SessionState::Idle;
     ad.pending = None;
-    r.advertise(reconnected, &Presence { hostname: "h1".into(), sessions: vec![ad] });
+    r.advertise(
+        reconnected,
+        &Presence {
+            hostname: "h1".into(),
+            sessions: vec![ad],
+        },
+    );
 
     let after = r.rows(None);
-    assert_eq!(after.len(), 1, "the reconnected body's row replaces the cleared one");
+    assert_eq!(
+        after.len(),
+        1,
+        "the reconnected body's row replaces the cleared one"
+    );
     assert_eq!(after[0].conn_state, "connected");
-    let after_last = after[0].last_turn.as_ref().expect("last_turn survives the reconnect");
+    let after_last = after[0]
+        .last_turn
+        .as_ref()
+        .expect("last_turn survives the reconnect");
     assert_eq!(after_last.turn_id, "h-000000000000000000000041");
     assert_eq!(after_last.state.as_str(), "completed");
 }
@@ -563,19 +709,35 @@ fn a_refused_prompt_undoes_only_its_own_turn_id() {
     r.advertise(T, &presence("h1", &["alpha"]));
 
     // First turn dispatched: no previous id.
-    assert_eq!(r.replace_turn_id(T, "alpha", "h-000000000000000000000001"), Some(None));
+    assert_eq!(
+        r.replace_turn_id(T, "alpha", "h-000000000000000000000001"),
+        Some(None)
+    );
     // A second prompt is dispatched, then refused: its id is rolled back to the first's.
-    let prev = r.replace_turn_id(T, "alpha", "h-000000000000000000000002").unwrap();
+    let prev = r
+        .replace_turn_id(T, "alpha", "h-000000000000000000000002")
+        .unwrap();
     assert_eq!(prev.as_deref(), Some("h-000000000000000000000001"));
     r.undo_turn_id(T, "alpha", "h-000000000000000000000002", prev);
-    assert_eq!(r.rows(None)[0].turn_id.as_deref(), Some("h-000000000000000000000001"));
+    assert_eq!(
+        r.rows(None)[0].turn_id.as_deref(),
+        Some("h-000000000000000000000001")
+    );
 
     // A stale rollback never clobbers a newer turn: #3 replaced #2 before #2's undo ran.
-    let prev2 = r.replace_turn_id(T, "alpha", "h-000000000000000000000002").unwrap();
+    let prev2 = r
+        .replace_turn_id(T, "alpha", "h-000000000000000000000002")
+        .unwrap();
     r.replace_turn_id(T, "alpha", "h-000000000000000000000003");
     r.undo_turn_id(T, "alpha", "h-000000000000000000000002", prev2);
-    assert_eq!(r.rows(None)[0].turn_id.as_deref(), Some("h-000000000000000000000003"));
+    assert_eq!(
+        r.rows(None)[0].turn_id.as_deref(),
+        Some("h-000000000000000000000003")
+    );
 
     // No row: no answer.
-    assert_eq!(r.replace_turn_id(T, "nope", "h-000000000000000000000004"), None);
+    assert_eq!(
+        r.replace_turn_id(T, "nope", "h-000000000000000000000004"),
+        None
+    );
 }

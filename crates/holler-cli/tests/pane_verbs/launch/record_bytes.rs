@@ -44,7 +44,11 @@ fn launched_record(rig: &Rig) -> Pane {
 fn a_launch_writes_the_record_bytes_it_wrote_before_808() {
     let rig = Rig::new();
     let record = launched_record(&rig);
-    assert_eq!(serde_json::to_string(&record).unwrap(), PRE_808_RECORD);
+    // #802 stopped writing `harness.pid` (the server runs in the pane's tmux session); that is the one
+    // key the pre-#808 record has and a launch no longer writes. The record still reads with it.
+    let written_now = PRE_808_RECORD.replace(r#""pid":20000,"#, "");
+    assert_ne!(written_now, PRE_808_RECORD, "the literal holds the pid key");
+    assert_eq!(serde_json::to_string(&record).unwrap(), written_now);
 }
 
 /// The pre-#808 record reads, with no label, and writes back to the same bytes; the same

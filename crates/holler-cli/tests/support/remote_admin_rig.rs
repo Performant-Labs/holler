@@ -13,17 +13,24 @@
 
 use std::process::Stdio;
 
-use super::{join, mint_token, roster_json, wait_for, write_sessions_toml, Body, Hub, StateDir, STARTUP_WAIT};
+use super::{
+    join, mint_token, roster_json, wait_for, write_sessions_toml, Body, Hub, StateDir, STARTUP_WAIT,
+};
 
 /// [`rig_with_env`] with no extra hub environment — the ordinary AC 3-13 rig.
-pub fn two_dir_rig(sessions: &[(&str, &[&str])]) -> (StateDir, StateDir, Hub, Body, String, String) {
+pub fn two_dir_rig(
+    sessions: &[(&str, &[&str])],
+) -> (StateDir, StateDir, Hub, Body, String, String) {
     rig_with_env(sessions, &[])
 }
 
 /// [`two_dir_rig`], also passing `hub_env` to the hub process (AC 16: a low
 /// ping interval and liveness timeout so the admin-loop liveness cases run
 /// in seconds, not minutes).
-pub fn rig_with_env(sessions: &[(&str, &[&str])], hub_env: &[(&str, &str)]) -> (StateDir, StateDir, Hub, Body, String, String) {
+pub fn rig_with_env(
+    sessions: &[(&str, &[&str])],
+    hub_env: &[(&str, &str)],
+) -> (StateDir, StateDir, Hub, Body, String, String) {
     let hub_state = StateDir::new();
     let body_state = StateDir::new();
     let hub = Hub::start_with_env(&hub_state, hub_env);
@@ -34,7 +41,11 @@ pub fn rig_with_env(sessions: &[(&str, &[&str])], hub_env: &[(&str, &str)]) -> (
     for (name, _) in sessions {
         let want = format!("b/{name}");
         wait_for(STARTUP_WAIT, || {
-            roster_json(&hub_state)["rows"].as_array()?.iter().any(|r| r["name"] == want.as_str() && r["state"] == "idle").then_some(())
+            roster_json(&hub_state)["rows"]
+                .as_array()?
+                .iter()
+                .any(|r| r["name"] == want.as_str() && r["state"] == "idle")
+                .then_some(())
         })
         .unwrap_or_else(|| panic!("session {want} never came up idle"));
     }
@@ -72,7 +83,12 @@ pub fn spawn_cmd(state: &StateDir, args: &[&str]) -> std::process::Child {
 pub fn mutate_credential(body_state: &StateDir, f: impl FnOnce(&mut serde_json::Value)) {
     let path = holler_body::identity::BodyIdentity::path(body_state.path());
     let mut v: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(&path).expect("read credential.json")).expect("credential.json is valid JSON");
+        serde_json::from_slice(&std::fs::read(&path).expect("read credential.json"))
+            .expect("credential.json is valid JSON");
     f(&mut v);
-    std::fs::write(&path, serde_json::to_vec_pretty(&v).expect("serialize credential.json")).expect("write credential.json");
+    std::fs::write(
+        &path,
+        serde_json::to_vec_pretty(&v).expect("serialize credential.json"),
+    )
+    .expect("write credential.json");
 }

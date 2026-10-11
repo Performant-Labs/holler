@@ -6,7 +6,10 @@ use std::time::Instant;
 use clap::ValueEnum;
 
 use super::probes::{roster_rows, rows_named, str_field};
-use super::{expect_baseline, teardown_all, wait_for_counts, with_resident_traffic, Accum, Cycle, REGISTER_BUDGET};
+use super::{
+    expect_baseline, teardown_all, wait_for_counts, with_resident_traffic, Accum, Cycle,
+    REGISTER_BUDGET,
+};
 use crate::fleet::FleetMember;
 use crate::Res;
 
@@ -37,7 +40,9 @@ impl TeardownMode {
 /// run) when the hub misses a hard invariant.
 pub fn run(mode: TeardownMode, c: &Cycle, members: Vec<FleetMember>, acc: &mut Accum) -> Res<()> {
     match mode {
-        TeardownMode::Graceful => kill_and_expect_baseline(c, members, acc, mode, FleetMember::stop),
+        TeardownMode::Graceful => {
+            kill_and_expect_baseline(c, members, acc, mode, FleetMember::stop)
+        }
         TeardownMode::Crash => kill_and_expect_baseline(c, members, acc, mode, FleetMember::crash),
         TeardownMode::Hang => hang(c, members, acc),
         TeardownMode::Restart => restart(c, members, acc),
@@ -52,7 +57,9 @@ fn kill_and_expect_baseline(
     kill: fn(FleetMember),
 ) -> Res<()> {
     let started = Instant::now();
-    with_resident_traffic(c, acc, || teardown_all(members, c.cfg.parallel_teardown, kill));
+    with_resident_traffic(c, acc, || {
+        teardown_all(members, c.cfg.parallel_teardown, kill)
+    });
     acc.detach.push(started.elapsed());
     let killed_at = Instant::now();
     expect_baseline(c, mode.name())?;
@@ -64,7 +71,12 @@ fn kill_and_expect_baseline(
 /// the hang budget (recorded, not failed), then SIGKILL them and require the
 /// hub back at baseline (failed if not).
 fn hang(c: &Cycle, members: Vec<FleetMember>, acc: &mut Accum) -> Res<()> {
-    let frozen = with_resident_traffic(c, acc, || members.iter().map(FleetMember::hang).collect::<Res<Vec<()>>>());
+    let frozen = with_resident_traffic(c, acc, || {
+        members
+            .iter()
+            .map(FleetMember::hang)
+            .collect::<Res<Vec<()>>>()
+    });
     let hung_at = Instant::now();
     if let Err(e) = frozen {
         teardown_all(members, c.cfg.parallel_teardown, FleetMember::crash);
@@ -80,7 +92,11 @@ fn hang(c: &Cycle, members: Vec<FleetMember>, acc: &mut Accum) -> Res<()> {
         let rows = roster_rows(c.hub);
         let first = members.first().and_then(|m| m.session_names.first());
         let row = first.and_then(|n| rows_named(&rows, n).next());
-        acc.hang_roster = Some(format!("{}; hub status {}", super::probes::describe(row), super::fmt(seen)));
+        acc.hang_roster = Some(format!(
+            "{}; hub status {}",
+            super::probes::describe(row),
+            super::fmt(seen)
+        ));
     }
 
     let killed_at = Instant::now();
@@ -94,12 +110,20 @@ fn hang(c: &Cycle, members: Vec<FleetMember>, acc: &mut Accum) -> Res<()> {
 /// respawn each on its saved credential and check it came back as the same
 /// identity, with exactly one connected roster row per session.
 fn restart(c: &Cycle, mut members: Vec<FleetMember>, acc: &mut Accum) -> Res<()> {
-    let names: Vec<String> = members.iter().flat_map(|m| m.session_names.clone()).collect();
+    let names: Vec<String> = members
+        .iter()
+        .flat_map(|m| m.session_names.clone())
+        .collect();
     let before: HashMap<String, String> = {
         let rows = roster_rows(c.hub);
         names
             .iter()
-            .filter_map(|n| rows_named(&rows, n).next().and_then(|r| str_field(r, "client_id")).map(|id| (n.clone(), id.to_string())))
+            .filter_map(|n| {
+                rows_named(&rows, n)
+                    .next()
+                    .and_then(|r| str_field(r, "client_id"))
+                    .map(|id| (n.clone(), id.to_string()))
+            })
             .collect()
     };
 
@@ -118,7 +142,11 @@ fn restart(c: &Cycle, mut members: Vec<FleetMember>, acc: &mut Accum) -> Res<()>
     let respawned_at = Instant::now();
     if let Some(e) = members.iter_mut().find_map(|m| m.respawn().err()) {
         teardown_all(members, false, FleetMember::crash);
-        return Err(format!("churn cycle {}: respawn on the saved credential failed: {e}", c.cycle).into());
+        return Err(format!(
+            "churn cycle {}: respawn on the saved credential failed: {e}",
+            c.cycle
+        )
+        .into());
     }
     let seen = wait_for_counts(c.hub, c.want, REGISTER_BUDGET);
     if seen != Some(c.want) {
@@ -139,14 +167,22 @@ fn restart(c: &Cycle, mut members: Vec<FleetMember>, acc: &mut Accum) -> Res<()>
     expect_baseline(c, "restart, final detach")
 }
 
-fn check_rejoined_rows(c: &Cycle, names: &[String], before: &HashMap<String, String>, acc: &mut Accum) {
+fn check_rejoined_rows(
+    c: &Cycle,
+    names: &[String],
+    before: &HashMap<String, String>,
+    acc: &mut Accum,
+) {
     let rows = roster_rows(c.hub);
     for name in names {
         let named: Vec<&serde_json::Value> = rows_named(&rows, name).collect();
         if named.len() != 1 {
             acc.ghost_or_missing += 1;
         }
-        let row = named.iter().find(|r| str_field(r, "conn_state") == Some("connected")).or(named.first());
+        let row = named
+            .iter()
+            .find(|r| str_field(r, "conn_state") == Some("connected"))
+            .or(named.first());
         if row.and_then(|r| str_field(r, "conn_state")) != Some("connected") {
             acc.not_connected += 1;
         }

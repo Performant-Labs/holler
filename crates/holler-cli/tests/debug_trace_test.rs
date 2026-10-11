@@ -1,4 +1,10 @@
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable, dead_code)] // #197
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unreachable,
+    dead_code
+)] // #197
 //! RED/GREEN tests for `--debug noisy`/`--debug quiet` per-component
 //! instrumentation (issue #197) — the issue's own test list, verbatim in
 //! name — against a **real** hub + body + `stub-acp` pair (real
@@ -56,7 +62,9 @@ use support::{holler_bin, make_own_process_group, mint_token, wait_for, StateDir
 type Captured = Arc<Mutex<Vec<String>>>;
 
 fn spawn_capturing(mut cmd: Command) -> (Child, Captured) {
-    cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped());
+    cmd.stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped());
     make_own_process_group(&mut cmd);
     let mut child = cmd.spawn().expect("spawn subprocess");
     let stderr = child.stderr.take().expect("stderr is piped");
@@ -98,7 +106,10 @@ fn start_hub_capturing(state: &StateDir, debug_level: &str) -> (Child, u16, Capt
         guard.iter().find_map(|l| {
             let v: Value = serde_json::from_str(l).ok()?;
             if v.get("event").and_then(|e| e.as_str()) == Some("listening") {
-                v.get("addr").and_then(|a| a.as_str()).and_then(|a| a.rsplit(':').next()).and_then(|p| p.parse().ok())
+                v.get("addr")
+                    .and_then(|a| a.as_str())
+                    .and_then(|a| a.rsplit(':').next())
+                    .and_then(|p| p.parse().ok())
             } else {
                 None
             }
@@ -129,10 +140,23 @@ fn join_fresh(state: &StateDir, ws_url: &str, label: &str) {
         .env("HOLLER_STATE_DIR", state.path())
         .env("HOLLER_DEBUG", "quiet")
         .env("HOLLER_LOG_FORMAT", "json")
-        .args(["body", "join", "--server", ws_url, "--token", &token, "--hub-key", &hub_key])
+        .args([
+            "body",
+            "join",
+            "--server",
+            ws_url,
+            "--token",
+            &token,
+            "--hub-key",
+            &hub_key,
+        ])
         .output()
         .expect("run `body join`");
-    assert!(out.status.success(), "body join failed: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "body join failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
 }
 
 fn write_sessions_toml(state: &StateDir, sessions: &[(&str, &[&str])]) -> PathBuf {
@@ -199,7 +223,9 @@ fn components_in_order(lines: &Captured) -> Vec<String> {
         .iter()
         .filter_map(|l| {
             let v: Value = serde_json::from_str(l).ok()?;
-            v.get("component").and_then(|c| c.as_str()).map(str::to_string)
+            v.get("component")
+                .and_then(|c| c.as_str())
+                .map(str::to_string)
         })
         .collect()
 }
@@ -246,7 +272,11 @@ fn noisy_trace_of_say_contains_all_components_in_order() {
         }
     });
     let out = ready.unwrap_or_else(|| panic!("`say alpha` never became reachable"));
-    assert!(out.status.success(), "say failed: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "say failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
 
     wait_for_component(&hub_lines, "talklog", Duration::from_secs(5));
     wait_for_component(&body_lines, "acp", Duration::from_secs(5));
@@ -255,10 +285,16 @@ fn noisy_trace_of_say_contains_all_components_in_order() {
     let body_components = components_in_order(&body_lines);
 
     for want in ["control", "wire", "talklog"] {
-        assert!(hub_components.contains(&want.to_string()), "hub trace missing {want:?}: {hub_components:?}");
+        assert!(
+            hub_components.contains(&want.to_string()),
+            "hub trace missing {want:?}: {hub_components:?}"
+        );
     }
     for want in ["wire", "session", "acp"] {
-        assert!(body_components.contains(&want.to_string()), "body trace missing {want:?}: {body_components:?}");
+        assert!(
+            body_components.contains(&want.to_string()),
+            "body trace missing {want:?}: {body_components:?}"
+        );
     }
 
     // Causal order (issue #197's own RED wording: "control received first,
@@ -271,17 +307,29 @@ fn noisy_trace_of_say_contains_all_components_in_order() {
     // precedes it".
     let hub_control = first_index(&hub_components, "control").unwrap();
     assert!(
-        hub_components.iter().skip(hub_control + 1).any(|c| c == "wire"),
+        hub_components
+            .iter()
+            .skip(hub_control + 1)
+            .any(|c| c == "wire"),
         "hub: no wire frame followed the first control event: {hub_components:?}"
     );
 
     let body_wire = first_index(&body_components, "wire").unwrap();
-    let body_session = body_components.iter().skip(body_wire + 1).position(|c| c == "session");
+    let body_session = body_components
+        .iter()
+        .skip(body_wire + 1)
+        .position(|c| c == "session");
     let body_session = body_session.map(|i| i + body_wire + 1);
-    assert!(body_session.is_some(), "body: no session event followed the first wire event: {body_components:?}");
+    assert!(
+        body_session.is_some(),
+        "body: no session event followed the first wire event: {body_components:?}"
+    );
     let body_session = body_session.unwrap();
     assert!(
-        body_components.iter().skip(body_session + 1).any(|c| c == "acp"),
+        body_components
+            .iter()
+            .skip(body_session + 1)
+            .any(|c| c == "acp"),
         "body: no acp event followed the first session event: {body_components:?}"
     );
 
@@ -305,7 +353,13 @@ async fn noisy_trace_of_attach_say_contains_http_attach() {
         let doc = support::roster_json(&state);
         doc.get("rows")
             .and_then(|r| r.as_array())
-            .and_then(|rows| rows.iter().find(|r| r.get("name").and_then(|n| n.as_str()).is_some_and(|n| n.ends_with("/beta"))))
+            .and_then(|rows| {
+                rows.iter().find(|r| {
+                    r.get("name")
+                        .and_then(|n| n.as_str())
+                        .is_some_and(|n| n.ends_with("/beta"))
+                })
+            })
             .cloned()
     });
 
@@ -313,7 +367,11 @@ async fn noisy_trace_of_attach_say_contains_http_attach() {
         scope.spawn(|| {
             let deadline = std::time::Instant::now() + Duration::from_secs(10);
             while std::time::Instant::now() < deadline {
-                if server.requests().iter().any(|r| r.method == "POST" && r.path.ends_with("/prompt_async")) {
+                if server
+                    .requests()
+                    .iter()
+                    .any(|r| r.method == "POST" && r.path.ends_with("/prompt_async"))
+                {
                     break;
                 }
                 std::thread::sleep(Duration::from_millis(20));
@@ -324,7 +382,11 @@ async fn noisy_trace_of_attach_say_contains_http_attach() {
         });
         support::say(&state, "beta", "hi")
     });
-    assert!(out.status.success(), "say to attach session failed: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "say to attach session failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
 
     wait_for_component(&body_lines, "http_attach", Duration::from_secs(5));
 
@@ -353,16 +415,26 @@ fn quiet_has_no_frames_noisy_has_frames() {
         }
     });
     let out = ready.unwrap_or_else(|| panic!("`say gamma` never became reachable"));
-    assert!(out.status.success(), "say failed: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "say failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
 
     wait_for_component(&hub_lines, "wire", Duration::from_secs(5));
 
     // `quiet`: every wire-shaped debug line must carry no `frame` field at
     // all (issue #197's own contract: quiet is shape-only).
     let quiet_had_frame = hub_lines.lock().unwrap().iter().any(|l| {
-        serde_json::from_str::<Value>(l).ok().is_some_and(|v| v.get("frame").is_some())
+        serde_json::from_str::<Value>(l)
+            .ok()
+            .is_some_and(|v| v.get("frame").is_some())
     });
-    assert!(!quiet_had_frame, "quiet must never carry a `frame` field: {:?}", hub_lines.lock().unwrap());
+    assert!(
+        !quiet_had_frame,
+        "quiet must never carry a `frame` field: {:?}",
+        hub_lines.lock().unwrap()
+    );
 
     stop_capturing(body_child);
     stop_capturing(hub_child);
@@ -387,13 +459,23 @@ fn quiet_has_no_frames_noisy_has_frames() {
         }
     });
     let out2 = ready2.unwrap_or_else(|| panic!("`say delta` never became reachable"));
-    assert!(out2.status.success(), "say failed: {}", String::from_utf8_lossy(&out2.stderr));
+    assert!(
+        out2.status.success(),
+        "say failed: {}",
+        String::from_utf8_lossy(&out2.stderr)
+    );
 
     wait_for_component(&hub_lines2, "wire", Duration::from_secs(5));
     let noisy_had_frame = hub_lines2.lock().unwrap().iter().any(|l| {
-        serde_json::from_str::<Value>(l).ok().is_some_and(|v| v.get("frame").is_some())
+        serde_json::from_str::<Value>(l)
+            .ok()
+            .is_some_and(|v| v.get("frame").is_some())
     });
-    assert!(noisy_had_frame, "noisy must carry at least one `frame` field: {:?}", hub_lines2.lock().unwrap());
+    assert!(
+        noisy_had_frame,
+        "noisy must carry at least one `frame` field: {:?}",
+        hub_lines2.lock().unwrap()
+    );
 
     stop_capturing(body_child2);
     stop_capturing(hub_child2);

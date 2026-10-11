@@ -174,7 +174,9 @@ async fn connect_burst(
             let Ok(permit) = permits.acquire().await else {
                 return Attempt::Failed("harness semaphore closed".to_string());
             };
-            let connected = wire::connect_and_handshake(&ws_url, &token_id, &identity, &hub_pubkey, &label).await;
+            let connected =
+                wire::connect_and_handshake(&ws_url, &token_id, &identity, &hub_pubkey, &label)
+                    .await;
             drop(permit);
             match connected {
                 Err(e) => Attempt::Failed(e.to_string()),
@@ -206,9 +208,9 @@ async fn connect_burst(
 /// #371-#373 are expected to build on; it is implemented and verified here
 /// rather than sketched, but this issue's own baseline is scenario 1's.
 pub async fn run_body_fleet(cfg: &Config, hub: &Hub, report: &mut Report) -> Res<()> {
-    let hub_pid = hub
-        .pid
-        .ok_or("scenario `body-fleet` samples the hub process, which needs a hub this harness started")?;
+    let hub_pid = hub.pid.ok_or(
+        "scenario `body-fleet` samples the hub process, which needs a hub this harness started",
+    )?;
     let mut meter = CpuMeter::new(hub_pid);
     let _ = meter.sample();
     tokio::time::sleep(cfg.settle).await;
@@ -219,7 +221,13 @@ pub async fn run_body_fleet(cfg: &Config, hub: &Hub, report: &mut Report) -> Res
     let mut members = Vec::with_capacity(cfg.bodies);
     let mut failures = Vec::new();
     for i in 0..cfg.bodies {
-        match crate::fleet::FleetMember::start(hub, &cfg.holler_bin, &cfg.stub_acp_bin, &format!("lb{i}"), cfg.sessions_per_body) {
+        match crate::fleet::FleetMember::start(
+            hub,
+            &cfg.holler_bin,
+            &cfg.stub_acp_bin,
+            &format!("lb{i}"),
+            cfg.sessions_per_body,
+        ) {
             Ok(m) => members.push(m),
             Err(e) => failures.push(e.to_string()),
         }
@@ -233,18 +241,25 @@ pub async fn run_body_fleet(cfg: &Config, hub: &Hub, report: &mut Report) -> Res
     wait_for_client_count(hub, members.len() as u64, Duration::from_secs(60)).await;
     tokio::time::sleep(cfg.settle).await;
 
-    let sessions: Vec<String> = members.iter().flat_map(|m| m.session_names.clone()).collect();
+    let sessions: Vec<String> = members
+        .iter()
+        .flat_map(|m| m.session_names.clone())
+        .collect();
     let calls = {
         let holler_bin = cfg.holler_bin.clone();
         let rate = cfg.rate;
         let total = cfg.calls;
-        tokio::task::block_in_place(|| crate::fleet::drive_calls(&holler_bin, hub, &sessions, rate, total))
+        tokio::task::block_in_place(|| {
+            crate::fleet::drive_calls(&holler_bin, hub, &sessions, rate, total)
+        })
     };
 
     let steady = meter.sample();
     let hub_status_clients = hub.client_count().ok();
     let rss_delta_per_client_kib = match (baseline.rss_mib, steady.rss_mib) {
-        (Some(b), Some(s)) if !members.is_empty() => Some(((s - b) * 1024.0) / members.len() as f64),
+        (Some(b), Some(s)) if !members.is_empty() => {
+            Some(((s - b) * 1024.0) / members.len() as f64)
+        }
         _ => None,
     };
     let threads_delta = match (baseline.threads, steady.threads) {

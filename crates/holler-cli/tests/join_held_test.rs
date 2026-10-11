@@ -1,4 +1,10 @@
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable, dead_code)] // #460
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unreachable,
+    dead_code
+)] // #460
 //! Join held and the one-time release grant, hub side (issue #460, on the
 //! session hold #437), against a real hub started with `--join-held`, a real
 //! body and `stub-acp`, including a real hub restart. Tags:
@@ -26,7 +32,9 @@ fn refusal(res: &Result<Value, ControlError>) -> Option<&holler_proto::WireError
 }
 
 fn is_invalid_grant(res: &Result<Value, ControlError>, reason: &str) -> bool {
-    refusal(res).is_some_and(|e| e.code == -32012 && e.data.as_ref().and_then(|d| d.reason.as_deref()) == Some(reason))
+    refusal(res).is_some_and(|e| {
+        e.code == -32012 && e.data.as_ref().and_then(|d| d.reason.as_deref()) == Some(reason)
+    })
 }
 
 fn hold_kind(res: &Result<Value, ControlError>) -> Option<String> {
@@ -34,11 +42,21 @@ fn hold_kind(res: &Result<Value, ControlError>) -> Option<String> {
 }
 
 fn say_with(rig: &Rig, s: &str, queue: bool, grant: &str) -> Result<Value, ControlError> {
-    control::say_with_at(rig.root(), s, "hi", queue, Some(grant), Duration::from_secs(60))
+    control::say_with_at(
+        rig.root(),
+        s,
+        "hi",
+        queue,
+        Some(grant),
+        Duration::from_secs(60),
+    )
 }
 
 fn grant(rig: &Rig, s: &str) -> String {
-    control::release_once_at(rig.root(), s, None).unwrap()["grant"].as_str().unwrap().to_string()
+    control::release_once_at(rig.root(), s, None).unwrap()["grant"]
+        .as_str()
+        .unwrap()
+        .to_string()
 }
 
 const JOIN_HELD: &[&str] = &["--join-held"];
@@ -49,14 +67,26 @@ const JOIN_HELD: &[&str] = &["--join-held"];
 fn without_the_option_nothing_joins_held() {
     let rig = Rig::start(&[("alpha", &["--chunks", "1"])]);
     let row = rig.row(SESSION).unwrap();
-    for f in ["hold", "hold_reason", "held_since", "hold_kind", "hold_default"] {
-        assert!(row.get(f).is_none(), "{f} must be absent on a session that joined open: {row}");
+    for f in [
+        "hold",
+        "hold_reason",
+        "held_since",
+        "hold_kind",
+        "hold_default",
+    ] {
+        assert!(
+            row.get(f).is_none(),
+            "{f} must be absent on a session that joined open: {row}"
+        );
     }
     assert!(is_delivered(&rig.say(SESSION, false)));
     // The plain hold still works exactly as before, and reports no default hold.
     rig.hold(SESSION, Some("drain")).unwrap();
     let held = rig.row(SESSION).unwrap();
-    assert_eq!((held["hold_kind"].as_str(), held.get("hold_default")), (Some("operator"), None));
+    assert_eq!(
+        (held["hold_kind"].as_str(), held.get("hold_default")),
+        (Some("operator"), None)
+    );
     assert_held(rig.say(SESSION, false), Some("drain"));
 }
 
@@ -70,7 +100,10 @@ fn a_session_joins_held_and_every_delivery_variant_is_refused() {
     assert_eq!(row["hold_kind"], "default");
     assert_eq!(row["hold_reason"], "held on join");
     assert!(row["held_since"].as_str().is_some());
-    assert!(row.get("hold_default").is_none(), "a default hold alone is not `under` anything");
+    assert!(
+        row.get("hold_default").is_none(),
+        "a default hold alone is not `under` anything"
+    );
     for queue in [false, true] {
         let res = rig.say(SESSION, queue);
         assert_eq!(hold_kind(&res).as_deref(), Some("default"), "{res:?}");
@@ -80,13 +113,20 @@ fn a_session_joins_held_and_every_delivery_variant_is_refused() {
     assert_eq!(hold_kind(&redirect).as_deref(), Some("default"));
     assert_held(redirect, Some("held on join"));
     // interrupt without text still works on a session that joined held.
-    assert_eq!(control::interrupt_at(rig.root(), SESSION, None).unwrap()["applied"], true);
+    assert_eq!(
+        control::interrupt_at(rig.root(), SESSION, None).unwrap()["applied"],
+        true
+    );
 }
 
 #[test]
 fn only_sessions_matching_the_pattern_join_held() {
     let rig = Rig::start_with_args(
-        &[("alpha", &["--chunks", "1"]), ("beta", &["--chunks", "1"]), ("gamma", &["--chunks", "1"])],
+        &[
+            ("alpha", &["--chunks", "1"]),
+            ("beta", &["--chunks", "1"]),
+            ("gamma", &["--chunks", "1"]),
+        ],
         &[],
         &["--join-held", "b/al*", "--join-held", "b/gam?a"],
     );
@@ -101,11 +141,22 @@ fn only_sessions_matching_the_pattern_join_held() {
 
 #[test]
 fn a_grant_lets_exactly_one_prompt_through_and_the_session_is_held_again() {
-    let rig = Rig::start_with_args(&[("alpha", &["--chunks", "1"]), ("beta", &["--chunks", "1"])], &[], JOIN_HELD);
+    let rig = Rig::start_with_args(
+        &[("alpha", &["--chunks", "1"]), ("beta", &["--chunks", "1"])],
+        &[],
+        JOIN_HELD,
+    );
     let minted = control::release_once_at(rig.root(), SESSION, None).unwrap();
     let g = minted["grant"].as_str().unwrap().to_string();
     assert!(g.starts_with("gnt_"));
-    assert_eq!((minted["default_held"].as_bool(), minted["operator_held"].as_bool(), minted["ttl_ms"].as_u64()), (Some(true), Some(false), Some(60_000)));
+    assert_eq!(
+        (
+            minted["default_held"].as_bool(),
+            minted["operator_held"].as_bool(),
+            minted["ttl_ms"].as_u64()
+        ),
+        (Some(true), Some(false), Some(60_000))
+    );
 
     // Only the grant gets through: plain, --queue and a grant for another session do not.
     assert!(is_held(&rig.say(SESSION, false)));
@@ -116,15 +167,24 @@ fn a_grant_lets_exactly_one_prompt_through_and_the_session_is_held_again() {
     let ok = say_with(&rig, SESSION, false, &g);
     assert!(is_delivered(&ok), "{ok:?}");
     // A second use, a plain say and a new attempt are all refused now.
-    assert!(is_invalid_grant(&say_with(&rig, SESSION, false, &g), "used"));
+    assert!(is_invalid_grant(
+        &say_with(&rig, SESSION, false, &g),
+        "used"
+    ));
     assert!(is_held(&rig.say(SESSION, false)));
     assert_eq!(rig.row(SESSION).unwrap()["hold"], true, "held again");
-    assert!(is_invalid_grant(&say_with(&rig, SESSION, false, "gnt_00000000000000000000000000000000"), "unknown"));
+    assert!(is_invalid_grant(
+        &say_with(&rig, SESSION, false, "gnt_00000000000000000000000000000000"),
+        "unknown"
+    ));
 
     // A grant works with --queue too, and each grant is for one prompt.
     let g2 = grant(&rig, SESSION);
     assert!(is_delivered(&say_with(&rig, SESSION, true, &g2)));
-    assert!(is_invalid_grant(&say_with(&rig, SESSION, true, &g2), "used"));
+    assert!(is_invalid_grant(
+        &say_with(&rig, SESSION, true, &g2),
+        "used"
+    ));
     // The other session's own hold is untouched by all of this.
     assert_held(rig.say("b/beta", false), Some("held on join"));
 }
@@ -132,7 +192,11 @@ fn a_grant_lets_exactly_one_prompt_through_and_the_session_is_held_again() {
 #[test]
 fn an_unused_grant_expires_and_the_session_is_held_again() {
     let rig = Rig::start_with_args(&[("alpha", &["--chunks", "1"])], &[], JOIN_HELD);
-    let g = control::release_once_at(rig.root(), SESSION, Some(Duration::from_millis(300))).unwrap()["grant"].as_str().unwrap().to_string();
+    let g = control::release_once_at(rig.root(), SESSION, Some(Duration::from_millis(300)))
+        .unwrap()["grant"]
+        .as_str()
+        .unwrap()
+        .to_string();
     // The TTL is the thing under test, so let it pass (with a wide margin).
     std::thread::sleep(Duration::from_millis(900));
     let late = say_with(&rig, SESSION, false, &g);
@@ -144,13 +208,27 @@ fn an_unused_grant_expires_and_the_session_is_held_again() {
 #[test]
 fn a_hub_restart_voids_a_live_grant_and_keeps_the_session_held() {
     let mut rig = Rig::start_with_args(&[("alpha", &["--chunks", "1"])], &[], JOIN_HELD);
-    let g = control::release_once_at(rig.root(), SESSION, Some(Duration::from_secs(600))).unwrap()["grant"].as_str().unwrap().to_string();
+    let g = control::release_once_at(rig.root(), SESSION, Some(Duration::from_secs(600))).unwrap()
+        ["grant"]
+        .as_str()
+        .unwrap()
+        .to_string();
     rig.restart_hub();
-    support::wait_for(Duration::from_secs(90), || rig.row(SESSION).filter(|r| r["conn_state"] == "connected")).unwrap_or_else(|| panic!("the body re-joined\n{}", rig.diagnostics()));
+    support::wait_for(Duration::from_secs(90), || {
+        rig.row(SESSION).filter(|r| r["conn_state"] == "connected")
+    })
+    .unwrap_or_else(|| panic!("the body re-joined\n{}", rig.diagnostics()));
     let row = rig.row(SESSION).unwrap();
-    assert_eq!((row["hold"].as_bool(), row["hold_kind"].as_str()), (Some(true), Some("default")), "the default hold persisted");
+    assert_eq!(
+        (row["hold"].as_bool(), row["hold_kind"].as_str()),
+        (Some(true), Some("default")),
+        "the default hold persisted"
+    );
     let res = say_with(&rig, SESSION, false, &g);
-    assert!(is_invalid_grant(&res, "unknown"), "the grant is void after a restart: {res:?}");
+    assert!(
+        is_invalid_grant(&res, "unknown"),
+        "the grant is void after a restart: {res:?}"
+    );
     assert!(is_held(&rig.say(SESSION, false)));
 }
 
@@ -162,26 +240,49 @@ fn an_operator_hold_beats_a_grant_and_the_error_says_so() {
     let g = grant(&rig, SESSION);
     rig.hold(SESSION, Some("drain")).unwrap();
     let row = rig.row(SESSION).unwrap();
-    assert_eq!((row["hold_kind"].as_str(), row["hold_default"].as_bool(), row["hold_reason"].as_str()), (Some("operator"), Some(true), Some("drain")));
+    assert_eq!(
+        (
+            row["hold_kind"].as_str(),
+            row["hold_default"].as_bool(),
+            row["hold_reason"].as_str()
+        ),
+        (Some("operator"), Some(true), Some("drain"))
+    );
 
     let res = say_with(&rig, SESSION, false, &g);
-    assert_eq!(hold_kind(&res).as_deref(), Some("operator"), "the error names the operator hold: {res:?}");
+    assert_eq!(
+        hold_kind(&res).as_deref(),
+        Some("operator"),
+        "the error names the operator hold: {res:?}"
+    );
     assert_held(res, Some("drain"));
     // A grant minted while the operator hold is set says it will not help.
-    assert_eq!(control::release_once_at(rig.root(), SESSION, None).unwrap()["operator_held"], true);
+    assert_eq!(
+        control::release_once_at(rig.root(), SESSION, None).unwrap()["operator_held"],
+        true
+    );
 
     // Releasing the operator hold falls back to the default hold, not to open;
     // the grant was not spent by the refused attempt and now works.
     let out = rig.release(SESSION).unwrap();
-    assert_eq!((out["lifted"].as_str(), out["still_held"].as_bool()), (Some("operator"), Some(true)));
+    assert_eq!(
+        (out["lifted"].as_str(), out["still_held"].as_bool()),
+        (Some("operator"), Some(true))
+    );
     assert!(is_held(&rig.say(SESSION, false)));
     assert!(is_delivered(&say_with(&rig, SESSION, false, &g)));
     // A second release lifts the default hold; the session is open, and stays open.
     let out = rig.release(SESSION).unwrap();
-    assert_eq!((out["lifted"].as_str(), out["still_held"].as_bool()), (Some("default"), Some(false)));
+    assert_eq!(
+        (out["lifted"].as_str(), out["still_held"].as_bool()),
+        (Some("default"), Some(false))
+    );
     assert!(is_delivered(&rig.say(SESSION, false)));
     std::thread::sleep(Duration::from_millis(900)); // a few presence beats (300ms each)
-    assert!(rig.row(SESSION).unwrap().get("hold").is_none(), "presence does not re-hold a released session");
+    assert!(
+        rig.row(SESSION).unwrap().get("hold").is_none(),
+        "presence does not re-hold a released session"
+    );
 }
 
 #[test]
@@ -190,19 +291,33 @@ fn a_released_default_hold_is_reapplied_when_the_hub_restarts_with_the_option() 
     assert_eq!(rig.release(SESSION).unwrap()["lifted"], "default");
     assert!(is_delivered(&rig.say(SESSION, false)));
     rig.restart_hub();
-    support::wait_for(Duration::from_secs(90), || rig.row(SESSION).filter(|r| r["conn_state"] == "connected")).expect("the body re-joined");
+    support::wait_for(Duration::from_secs(90), || {
+        rig.row(SESSION).filter(|r| r["conn_state"] == "connected")
+    })
+    .expect("the body re-joined");
     // Its first presence to the restarted hub is a join.
-    let held = support::wait_for(Duration::from_secs(30), || rig.row(SESSION).filter(|r| r["hold"] == true));
-    assert!(held.is_some(), "the session joined held again after the restart");
+    let held = support::wait_for(Duration::from_secs(30), || {
+        rig.row(SESSION).filter(|r| r["hold"] == true)
+    });
+    assert!(
+        held.is_some(),
+        "the session joined held again after the restart"
+    );
 }
 
 #[test]
 fn releasing_or_minting_for_an_unknown_session_is_refused() {
     let rig = Rig::start_with_args(&[("alpha", &["--chunks", "1"])], &[], JOIN_HELD);
     let res = control::release_once_at(rig.root(), "b/nope", None);
-    assert!(matches!(&res, Err(ControlError::Refused(e)) if e.code == -32003), "{res:?}");
+    assert!(
+        matches!(&res, Err(ControlError::Refused(e)) if e.code == -32003),
+        "{res:?}"
+    );
     let zero = control::release_once_at(rig.root(), SESSION, Some(Duration::ZERO));
-    assert!(matches!(&zero, Err(ControlError::Refused(e)) if e.code == -32602), "a zero ttl is invalid: {zero:?}");
+    assert!(
+        matches!(&zero, Err(ControlError::Refused(e)) if e.code == -32602),
+        "a zero ttl is invalid: {zero:?}"
+    );
 }
 
 // --- 5. concurrency ------------------------------------------------------------------
@@ -225,8 +340,16 @@ fn racing_senders_get_exactly_one_prompt_through_a_grant() {
                     // Busy is retried (nothing delivered); every other outcome is final.
                     let deadline = std::time::Instant::now() + Duration::from_secs(30);
                     loop {
-                        let res = control::say_with_at(&root, SESSION, "race", i >= 2, grant, Duration::from_secs(60));
-                        let busy = matches!(&res, Err(ControlError::Refused(e)) if e.code == -32009);
+                        let res = control::say_with_at(
+                            &root,
+                            SESSION,
+                            "race",
+                            i >= 2,
+                            grant,
+                            Duration::from_secs(60),
+                        );
+                        let busy =
+                            matches!(&res, Err(ControlError::Refused(e)) if e.code == -32009);
                         if !busy || std::time::Instant::now() > deadline {
                             return res;
                         }
@@ -237,11 +360,20 @@ fn racing_senders_get_exactly_one_prompt_through_a_grant() {
             .collect();
         let results: Vec<_> = senders.into_iter().map(|t| t.join().unwrap()).collect();
         let delivered = results.iter().filter(|r| is_delivered(r)).count();
-        assert_eq!(delivered, 1, "round {round}: exactly one prompt must be delivered: {results:?}");
+        assert_eq!(
+            delivered, 1,
+            "round {round}: exactly one prompt must be delivered: {results:?}"
+        );
         for r in results.iter().filter(|r| !is_delivered(r)) {
-            assert!(is_held(r) || is_invalid_grant(r, "used"), "round {round}: a loser was neither held nor used-grant: {r:?}");
+            assert!(
+                is_held(r) || is_invalid_grant(r, "used"),
+                "round {round}: a loser was neither held nor used-grant: {r:?}"
+            );
         }
-        assert!(is_held(&rig.say(SESSION, false)), "round {round}: the session must be held again");
+        assert!(
+            is_held(&rig.say(SESSION, false)),
+            "round {round}: the session must be held again"
+        );
         rig.wait_row(SESSION, |r| r["state"] == "idle");
     }
 }
@@ -263,9 +395,17 @@ fn a_plain_say_never_gets_through_a_default_hold_under_churn() {
     };
     for round in 0..30 {
         let res = say_at_retrying(rig.root(), SESSION, "plain", false);
-        assert!(is_held(&res), "round {round}: a plain say got through a default hold: {res:?}");
+        assert!(
+            is_held(&res),
+            "round {round}: a plain say got through a default hold: {res:?}"
+        );
     }
     stop.store(true, std::sync::atomic::Ordering::SeqCst);
     churn.join().unwrap();
-    assert_eq!(rig.row(SESSION).unwrap()["hold_kind"].as_str().map(|_| true), Some(true));
+    assert_eq!(
+        rig.row(SESSION).unwrap()["hold_kind"]
+            .as_str()
+            .map(|_| true),
+        Some(true)
+    );
 }

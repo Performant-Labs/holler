@@ -49,10 +49,6 @@ const HOME_TITLE: &str = "OpenCode";
 /// The URL of a server on the loopback address, up to its port.
 const LOOPBACK_URL: &str = "http://127.0.0.1:";
 
-/// The variable that turns the TUI's title off, which the adapter reads: under
-/// [`ProcessEnv::Inherit`] the TUI's `env` removes it.
-const TITLE_OFF: &str = "OPENCODE_DISABLE_TERMINAL_TITLE";
-
 /// Which tmux server to address: the same variants as the host adapter's (#641)
 /// `TmuxSocket`, so wiring (#649) configures one value and hands it to both adapters. An
 /// adapter cannot depend on another adapter crate (ADR-0021 section 5), hence a mirror and
@@ -165,7 +161,8 @@ pub fn escape_dir(dir: &str) -> String {
 /// ```
 ///
 /// and under [`ProcessEnv::Inherit`] it starts `env -u OPENCODE_DISABLE_TERMINAL_TITLE`
-/// instead of `env -i K=V ...`, so the title the adapter reads stays on.
+/// instead of `env -i K=V ...`, so the title the adapter reads stays on. The prefix is the
+/// one the server's argv starts with too (`ProcessEnv`'s, #802).
 pub fn tui_argv(
     opencode_bin: &str,
     env: &ProcessEnv,
@@ -173,14 +170,7 @@ pub fn tui_argv(
     dir: &str,
     session_id: &str,
 ) -> Vec<String> {
-    let mut argv = vec!["env".to_owned()];
-    match env {
-        ProcessEnv::Inherit => argv.extend(["-u".to_owned(), TITLE_OFF.to_owned()]),
-        ProcessEnv::Isolated(vars) => {
-            argv.push("-i".to_owned());
-            argv.extend(vars.iter().map(|(key, value)| format!("{key}={value}")));
-        }
-    }
+    let mut argv = env.prefix();
     argv.extend([
         opencode_bin.to_owned(),
         "attach".to_owned(),

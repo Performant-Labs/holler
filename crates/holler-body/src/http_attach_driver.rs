@@ -154,7 +154,9 @@ fn log_warn(method: &'static str, fields: Vec<(&'static str, String)>) {
 }
 
 fn elapsed_ms(started: Instant) -> String {
-    u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX).to_string()
+    u64::try_from(started.elapsed().as_millis())
+        .unwrap_or(u64::MAX)
+        .to_string()
 }
 
 /// How long [`HttpAttachDriver::cancel`] waits for the attached session's own
@@ -204,7 +206,10 @@ impl HttpAttachDriver {
         match check_exists(&client, &endpoint, &session_id).await {
             Ok(()) => log_debug(
                 "attach",
-                vec![("event", "attached".to_string()), ("session_id", session_id.clone())],
+                vec![
+                    ("event", "attached".to_string()),
+                    ("session_id", session_id.clone()),
+                ],
             ),
             Err(e) => {
                 log_warn(
@@ -397,7 +402,13 @@ async fn check_exists(
         vec![
             ("method", "GET".to_string()),
             ("path", format!("/session/{session_id}")),
-            ("status", v1_result.as_ref().map(|r| r.status().as_str().to_string()).unwrap_or_default()),
+            (
+                "status",
+                v1_result
+                    .as_ref()
+                    .map(|r| r.status().as_str().to_string())
+                    .unwrap_or_default(),
+            ),
             ("ms", elapsed_ms(started)),
         ],
     );
@@ -414,7 +425,13 @@ async fn check_exists(
         vec![
             ("method", "GET".to_string()),
             ("path", format!("/api/session/{session_id}")),
-            ("status", v2_result.as_ref().map(|r| r.status().as_str().to_string()).unwrap_or_default()),
+            (
+                "status",
+                v2_result
+                    .as_ref()
+                    .map(|r| r.status().as_str().to_string())
+                    .unwrap_or_default(),
+            ),
             ("ms", elapsed_ms(started)),
         ],
     );

@@ -36,21 +36,37 @@ where
         return FrameOutcome::Continue;
     };
     let result: Result<serde_json::Value, holler_proto::WireError> = match method {
-        "query/status" => Ok(serde_json::to_value(crate::query::local_status(state_root, Some(identity), configs))
-            .unwrap_or_default()),
-        "query/caps" => Ok(serde_json::to_value(crate::query::local_caps(state_root, Some(identity), configs))
-            .unwrap_or_default()),
+        "query/status" => Ok(serde_json::to_value(crate::query::local_status(
+            state_root,
+            Some(identity),
+            configs,
+        ))
+        .unwrap_or_default()),
+        "query/caps" => Ok(serde_json::to_value(crate::query::local_caps(
+            state_root,
+            Some(identity),
+            configs,
+        ))
+        .unwrap_or_default()),
         "query/support" => {
             let feature = params
                 .as_ref()
                 .and_then(|p| p.get("feature"))
                 .and_then(|v| v.as_str())
                 .unwrap_or_default();
-            crate::query::local_support(feature, configs).map(|s| serde_json::to_value(s).unwrap_or_default())
+            crate::query::local_support(feature, configs)
+                .map(|s| serde_json::to_value(s).unwrap_or_default())
         }
-        "query/protocol" => holler_proto::ProtocolParams::parse_version(params.as_ref())
-            .map(|version| serde_json::to_value(crate::query::local_protocol(version)).unwrap_or_default()),
-        _ => Err(holler_proto::WireError::new(Code::MethodNotFound, "unknown query method", None)),
+        "query/protocol" => {
+            holler_proto::ProtocolParams::parse_version(params.as_ref()).map(|version| {
+                serde_json::to_value(crate::query::local_protocol(version)).unwrap_or_default()
+            })
+        }
+        _ => Err(holler_proto::WireError::new(
+            Code::MethodNotFound,
+            "unknown query method",
+            None,
+        )),
     };
     let send_result = match result {
         Ok(value) => send(sink, &Envelope::response(&cid, Some(value))).await,

@@ -8,11 +8,16 @@
 //! path (the tests build the structs directly). So this is where the
 //! `deny_unknown_fields` guard on those structs is first exercised.
 
-#![allow(clippy::unwrap_used, clippy::panic, clippy::expect_used, clippy::unreachable)] // #146
+#![allow(
+    clippy::unwrap_used,
+    clippy::panic,
+    clippy::expect_used,
+    clippy::unreachable
+)] // #146
 
 use serde_json::json;
 
-use crate::{Code, Envelope, Mode, Presence, Prompt, Role, SessionState, typed_params};
+use crate::{typed_params, Code, Envelope, Mode, Presence, Prompt, Role, SessionState};
 
 /// A valid `session/presence` params object decodes into the typed `Presence`.
 #[test]
@@ -74,7 +79,10 @@ fn typed_prompt_valid() {
     assert_eq!(p.session, "io/alpha");
     assert_eq!(p.message.role, Role::RoleUser);
     assert_eq!(p.message.parts.len(), 1);
-    assert!(matches!(p.message.parts[0].content, Some(crate::a2a::Content::Text(_))));
+    assert!(matches!(
+        p.message.parts[0].content,
+        Some(crate::a2a::Content::Text(_))
+    ));
 }
 
 /// An unknown field at the `Prompt` level is an `invalid_params` error — this

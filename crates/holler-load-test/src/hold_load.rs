@@ -76,7 +76,13 @@ fn rss_of(pid: Option<u32>) -> Option<f64> {
 }
 
 /// One driven session's loop: sequential `say`s until `deadline`.
-fn drive_one(root: &Path, session: &str, held: bool, deadline: Instant, refusal_pause: Duration) -> Driven {
+fn drive_one(
+    root: &Path,
+    session: &str,
+    held: bool,
+    deadline: Instant,
+    refusal_pause: Duration,
+) -> Driven {
     let mut d = Driven::default();
     while Instant::now() < deadline {
         let started = Instant::now();
@@ -107,7 +113,14 @@ fn drive_one(root: &Path, session: &str, held: bool, deadline: Instant, refusal_
 
 /// Run one phase: every session in `driven` loops `say` for `secs`; the ones
 /// in `held` are refused.
-fn phase(cfg: &Config, hub: &Hub, label: &str, driven: &[String], held: &HashSet<String>, secs: u64) -> Phase {
+fn phase(
+    cfg: &Config,
+    hub: &Hub,
+    label: &str,
+    driven: &[String],
+    held: &HashSet<String>,
+    secs: u64,
+) -> Phase {
     let root = hub.state().path().to_path_buf();
     let rss_start = rss_of(hub.pid);
     let started = Instant::now();
@@ -128,7 +141,11 @@ fn phase(cfg: &Config, hub: &Hub, label: &str, driven: &[String], held: &HashSet
     let d = std::mem::take(&mut *total.lock().unwrap_or_else(|e| e.into_inner()));
     Phase {
         label: label.to_string(),
-        held_percent: if driven.is_empty() { 0 } else { (held.len() * 100 / driven.len()) as u32 },
+        held_percent: if driven.is_empty() {
+            0
+        } else {
+            (held.len() * 100 / driven.len()) as u32
+        },
         driven_sessions: driven.len(),
         held_sessions: held.len(),
         seconds: elapsed,
@@ -211,7 +228,8 @@ fn churn(cfg: &Config, hub: &Hub, sessions: &[String], secs: u64) -> Churn {
         for w in 0..workers {
             let (root, results) = (&root, Arc::clone(&results));
             scope.spawn(move || {
-                let (mut holds, mut releases, mut ops, mut failed) = (Samples::new(), Samples::new(), 0, 0);
+                let (mut holds, mut releases, mut ops, mut failed) =
+                    (Samples::new(), Samples::new(), 0, 0);
                 let mut i = w;
                 while Instant::now() < deadline {
                     let s = &sessions[i % sessions.len()];
@@ -247,7 +265,8 @@ fn churn(cfg: &Config, hub: &Hub, sessions: &[String], secs: u64) -> Churn {
         ops_per_sec: g.2 as f64 / elapsed,
         hold_latency: g.0.stats(),
         release_latency: g.1.stats(),
-        hub_cpu_percent_mean: (!cpu_points.is_empty()).then(|| cpu_points.iter().sum::<f64>() / cpu_points.len() as f64),
+        hub_cpu_percent_mean: (!cpu_points.is_empty())
+            .then(|| cpu_points.iter().sum::<f64>() / cpu_points.len() as f64),
         hub_rss_start_mib: rss_start,
         hub_rss_end_mib: rss_of(hub.pid),
         holds_file_bytes_end: holds_file(&root).0,
@@ -284,7 +303,11 @@ fn restart_scenario(hub: &mut Hub, all: &[String], budget: Duration) -> Res<Rest
     while visible_from.elapsed() < budget {
         let held_rows = control::roster_at(&root, false, None)
             .ok()
-            .and_then(|d| d["rows"].as_array().map(|r| r.iter().filter(|x| x["hold"] == true).count()))
+            .and_then(|d| {
+                d["rows"]
+                    .as_array()
+                    .map(|r| r.iter().filter(|x| x["hold"] == true).count())
+            })
             .unwrap_or(0);
         if held_rows == all.len() {
             visible = Some(visible_from.elapsed().as_secs_f64());
@@ -293,7 +316,9 @@ fn restart_scenario(hub: &mut Hub, all: &[String], budget: Duration) -> Res<Rest
         std::thread::sleep(Duration::from_millis(500));
     }
     let (_, after) = holds_file(&root);
-    let sample = all.first().map(|s| control::say_at(&root, s, "x", false, Duration::from_secs(30)));
+    let sample = all
+        .first()
+        .map(|s| control::say_at(&root, s, "x", false, Duration::from_secs(30)));
     let refused = matches!(&sample, Some(Err(ControlError::Refused(e))) if e.code == HELD);
     Ok(Restart {
         holds: all.len(),
@@ -317,9 +342,18 @@ pub async fn run(cfg: &Config, hub: &mut Hub, report: &mut Report) -> Res<()> {
     let total = per_body * bodies;
     let mut members = Vec::new();
     for i in 0..bodies {
-        members.push(FleetMember::start(hub, &cfg.holler_bin, &cfg.stub_acp_bin, &format!("hd{i}"), per_body)?);
+        members.push(FleetMember::start(
+            hub,
+            &cfg.holler_bin,
+            &cfg.stub_acp_bin,
+            &format!("hd{i}"),
+            per_body,
+        )?);
     }
-    let all: Vec<String> = members.iter().flat_map(|m| m.session_names.clone()).collect();
+    let all: Vec<String> = members
+        .iter()
+        .flat_map(|m| m.session_names.clone())
+        .collect();
     crate::scenario::wait_for_client_count(hub, bodies as u64, Duration::from_secs(60)).await;
     let hub_ref: &Hub = hub;
     tokio::task::block_in_place(|| wait_sessions(hub_ref, total, Duration::from_secs(180)))?;
@@ -340,7 +374,8 @@ fn measure(cfg: &Config, hub: &mut Hub, all: &[String]) -> Res<HoldReport> {
         sessions_total: all.len(),
         sessions_driven: driven.len(),
         phase_seconds: cfg.hold_secs,
-        other_load: std::env::var("HOLLER_LOAD_TEST_OTHER_LOAD").unwrap_or_else(|_| "not recorded (set HOLLER_LOAD_TEST_OTHER_LOAD)".into()),
+        other_load: std::env::var("HOLLER_LOAD_TEST_OTHER_LOAD")
+            .unwrap_or_else(|_| "not recorded (set HOLLER_LOAD_TEST_OTHER_LOAD)".into()),
         ..HoldReport::default()
     };
     let none = HashSet::new();
@@ -351,28 +386,66 @@ fn measure(cfg: &Config, hub: &mut Hub, all: &[String]) -> Res<HoldReport> {
     }
 
     // 1. Baseline twice: the difference is the noise floor.
-    r.baseline_runs.push(phase(cfg, hub, "baseline run 1", &driven, &none, cfg.hold_secs));
-    r.baseline_runs.push(phase(cfg, hub, "baseline run 2", &driven, &none, cfg.hold_secs));
+    r.baseline_runs.push(phase(
+        cfg,
+        hub,
+        "baseline run 1",
+        &driven,
+        &none,
+        cfg.hold_secs,
+    ));
+    r.baseline_runs.push(phase(
+        cfg,
+        hub,
+        "baseline run 2",
+        &driven,
+        &none,
+        cfg.hold_secs,
+    ));
     for percent in [0usize, 10, 50] {
         let k = driven.len() * percent / 100;
         let held: HashSet<String> = driven.iter().take(k).cloned().collect();
         set_held(&root, &driven[..k], true)?;
-        r.held_fractions.push(phase(cfg, hub, &format!("{percent}% held"), &driven, &held, cfg.hold_secs));
+        r.held_fractions.push(phase(
+            cfg,
+            hub,
+            &format!("{percent}% held"),
+            &driven,
+            &held,
+            cfg.hold_secs,
+        ));
         set_held(&root, &driven[..k], false)?;
     }
 
     // 2. Refusal cost: everything held, a sustained refusal rate.
     set_held(&root, &driven, true)?;
     let held_all: HashSet<String> = driven.iter().cloned().collect();
-    r.refusal_only = Some(phase(cfg, hub, "all driven held", &driven, &held_all, cfg.hold_secs));
+    r.refusal_only = Some(phase(
+        cfg,
+        hub,
+        "all driven held",
+        &driven,
+        &held_all,
+        cfg.hold_secs,
+    ));
     set_held(&root, &driven, false)?;
 
     // 3. Roster scale, with and without every session held.
     let (base_read, rows) = roster_reads(&root, cfg.roster_reads)?;
-    r.roster_reads.push(RosterRead { sessions: rows, holds: 0, reads: cfg.roster_reads, latency: base_read.stats() });
+    r.roster_reads.push(RosterRead {
+        sessions: rows,
+        holds: 0,
+        reads: cfg.roster_reads,
+        latency: base_read.stats(),
+    });
     set_held(&root, all, true)?;
     let (held_read, rows) = roster_reads(&root, cfg.roster_reads)?;
-    r.roster_reads.push(RosterRead { sessions: rows, holds: all.len(), reads: cfg.roster_reads, latency: held_read.stats() });
+    r.roster_reads.push(RosterRead {
+        sessions: rows,
+        holds: all.len(),
+        reads: cfg.roster_reads,
+        latency: held_read.stats(),
+    });
     set_held(&root, all, false)?;
 
     // 4. Churn.
@@ -382,9 +455,18 @@ fn measure(cfg: &Config, hub: &mut Hub, all: &[String]) -> Res<HoldReport> {
     r.restart = Some(restart_scenario(hub, all, Duration::from_secs(180))?);
 
     // Correctness is not a threshold.
-    for p in r.baseline_runs.iter().chain(&r.held_fractions).chain(&r.refusal_only) {
+    for p in r
+        .baseline_runs
+        .iter()
+        .chain(&r.held_fractions)
+        .chain(&r.refusal_only)
+    {
         if p.delivered_to_held > 0 {
-            return Err(format!("{}: {} say(s) were DELIVERED to a held session", p.label, p.delivered_to_held).into());
+            return Err(format!(
+                "{}: {} say(s) were DELIVERED to a held session",
+                p.label, p.delivered_to_held
+            )
+            .into());
         }
     }
     if let Some(x) = &r.restart {
@@ -401,7 +483,13 @@ fn measure(cfg: &Config, hub: &mut Hub, all: &[String]) -> Res<HoldReport> {
 }
 
 fn t(name: &str, limit: f64, actual: Option<f64>, unit: &str) -> Threshold {
-    Threshold { name: name.to_string(), limit, actual, unit: unit.to_string(), passed: actual.is_some_and(|a| a <= limit) }
+    Threshold {
+        name: name.to_string(),
+        limit,
+        actual,
+        unit: unit.to_string(),
+        passed: actual.is_some_and(|a| a <= limit),
+    }
 }
 
 /// The thresholds (issue #444: set from the first measured baseline, not
@@ -413,33 +501,67 @@ pub fn judge(r: &HoldReport) -> Vec<Threshold> {
     let base: Vec<f64> = r.baseline_runs.iter().filter_map(p50).collect();
     let base_mean = (!base.is_empty()).then(|| base.iter().sum::<f64>() / base.len() as f64);
     let noise = (base.len() == 2).then(|| (base[0] - base[1]).abs());
-    let at50 = r.held_fractions.iter().find(|p| p.held_percent == 50).and_then(p50);
+    let at50 = r
+        .held_fractions
+        .iter()
+        .find(|p| p.held_percent == 50)
+        .and_then(p50);
     let refusal_only = r.refusal_only.as_ref();
-    let roster = |holds: bool| r.roster_reads.iter().find(|x| (x.holds > 0) == holds).and_then(|x| x.latency).map(|s| s.p50_ms);
+    let roster = |holds: bool| {
+        r.roster_reads
+            .iter()
+            .find(|x| (x.holds > 0) == holds)
+            .and_then(|x| x.latency)
+            .map(|s| s.p50_ms)
+    };
     let churn = r.churn.as_ref();
     let restart = r.restart.as_ref();
     vec![
         t(
             "unheld say p50 with 50% held vs baseline",
             LIMIT_UNHELD_RATIO,
-            at50.zip(base_mean).map(|(a, b)| (a - noise.unwrap_or(0.0)).max(0.0) / b.max(0.001)),
+            at50.zip(base_mean)
+                .map(|(a, b)| (a - noise.unwrap_or(0.0)).max(0.0) / b.max(0.001)),
             "x",
         ),
-        t("refusal p99", LIMIT_REFUSAL_P99_MS, refusal_only.and_then(|p| p.refusals).map(|s| s.p99_ms), "ms"),
+        t(
+            "refusal p99",
+            LIMIT_REFUSAL_P99_MS,
+            refusal_only.and_then(|p| p.refusals).map(|s| s.p99_ms),
+            "ms",
+        ),
         t(
             "refusal p50 as a share of a delivered say's p50",
             LIMIT_REFUSAL_VS_DELIVERY,
-            refusal_only.and_then(|p| p.refusals).map(|s| s.p50_ms).zip(base_mean).map(|(a, b)| a / b.max(0.001)),
+            refusal_only
+                .and_then(|p| p.refusals)
+                .map(|s| s.p50_ms)
+                .zip(base_mean)
+                .map(|(a, b)| a / b.max(0.001)),
             "x",
         ),
         t(
             "hub RSS growth across the refusal phase",
             LIMIT_REFUSAL_RSS_MIB,
-            refusal_only.and_then(|p| p.hub_rss_start_mib.zip(p.hub_rss_end_mib)).map(|(a, b)| (b - a).max(0.0)),
+            refusal_only
+                .and_then(|p| p.hub_rss_start_mib.zip(p.hub_rss_end_mib))
+                .map(|(a, b)| (b - a).max(0.0)),
             "MiB",
         ),
-        t("roster read p50, all held vs none held", LIMIT_ROSTER_RATIO, roster(true).zip(roster(false)).map(|(a, b)| a / b.max(0.001)), "x"),
-        t("churn hold p99", LIMIT_CHURN_P99_MS, churn.and_then(|c| c.hold_latency).map(|s| s.p99_ms), "ms"),
+        t(
+            "roster read p50, all held vs none held",
+            LIMIT_ROSTER_RATIO,
+            roster(true)
+                .zip(roster(false))
+                .map(|(a, b)| a / b.max(0.001)),
+            "x",
+        ),
+        t(
+            "churn hold p99",
+            LIMIT_CHURN_P99_MS,
+            churn.and_then(|c| c.hold_latency).map(|s| s.p99_ms),
+            "ms",
+        ),
         t(
             "churn operations that failed",
             LIMIT_CHURN_FAILED_PERCENT,
@@ -455,10 +577,17 @@ pub fn judge(r: &HoldReport) -> Vec<Threshold> {
         t(
             "hub RSS growth after churn and cooldown",
             LIMIT_CHURN_RSS_MIB,
-            churn.and_then(|c| c.hub_rss_start_mib.zip(c.hub_rss_end_mib)).map(|(a, b)| (b - a).max(0.0)),
+            churn
+                .and_then(|c| c.hub_rss_start_mib.zip(c.hub_rss_end_mib))
+                .map(|(a, b)| (b - a).max(0.0)),
             "MiB",
         ),
-        t("restart to listening with all holds persisted", LIMIT_RESTART_LISTENING_MS, restart.map(|x| x.listening_ms_with_holds), "ms"),
+        t(
+            "restart to listening with all holds persisted",
+            LIMIT_RESTART_LISTENING_MS,
+            restart.map(|x| x.listening_ms_with_holds),
+            "ms",
+        ),
         t(
             "restart until every session is back and held",
             LIMIT_RESTART_VISIBLE_SECS,
@@ -504,29 +633,79 @@ mod tests {
     use crate::metrics::LatencyStats;
 
     fn stats(p50: f64, p99: f64) -> Option<LatencyStats> {
-        Some(LatencyStats { count: 10, min_ms: p50, p50_ms: p50, p90_ms: p99, p99_ms: p99, max_ms: p99, mean_ms: p50 })
+        Some(LatencyStats {
+            count: 10,
+            min_ms: p50,
+            p50_ms: p50,
+            p90_ms: p99,
+            p99_ms: p99,
+            max_ms: p99,
+            mean_ms: p50,
+        })
     }
 
     fn healthy() -> HoldReport {
-        let base = |p50| Phase { unheld: stats(p50, p50 * 2.0), ..Phase::default() };
+        let base = |p50| Phase {
+            unheld: stats(p50, p50 * 2.0),
+            ..Phase::default()
+        };
         HoldReport {
             baseline_runs: vec![base(300.0), base(310.0)],
-            held_fractions: vec![Phase { held_percent: 50, unheld: stats(250.0, 500.0), ..Phase::default() }],
-            refusal_only: Some(Phase { refusals: stats(0.3, 2.0), hub_rss_start_mib: Some(20.0), hub_rss_end_mib: Some(20.5), ..Phase::default() }),
+            held_fractions: vec![Phase {
+                held_percent: 50,
+                unheld: stats(250.0, 500.0),
+                ..Phase::default()
+            }],
+            refusal_only: Some(Phase {
+                refusals: stats(0.3, 2.0),
+                hub_rss_start_mib: Some(20.0),
+                hub_rss_end_mib: Some(20.5),
+                ..Phase::default()
+            }),
             roster_reads: vec![
-                RosterRead { sessions: 100, holds: 0, reads: 5, latency: stats(10.0, 12.0) },
-                RosterRead { sessions: 100, holds: 100, reads: 5, latency: stats(20.0, 30.0) },
+                RosterRead {
+                    sessions: 100,
+                    holds: 0,
+                    reads: 5,
+                    latency: stats(10.0, 12.0),
+                },
+                RosterRead {
+                    sessions: 100,
+                    holds: 100,
+                    reads: 5,
+                    latency: stats(20.0, 30.0),
+                },
             ],
-            churn: Some(Churn { operations: 1000, failed_operations: 1, hold_latency: stats(30.0, 400.0), hub_rss_start_mib: Some(20.0), hub_rss_end_mib: Some(22.0), ..Churn::default() }),
-            restart: Some(Restart { holds: 1000, hold_all_secs: 9.0, listening_ms_with_holds: 10.0, all_held_visible_secs: Some(1.0), ..Restart::default() }),
+            churn: Some(Churn {
+                operations: 1000,
+                failed_operations: 1,
+                hold_latency: stats(30.0, 400.0),
+                hub_rss_start_mib: Some(20.0),
+                hub_rss_end_mib: Some(22.0),
+                ..Churn::default()
+            }),
+            restart: Some(Restart {
+                holds: 1000,
+                hold_all_secs: 9.0,
+                listening_ms_with_holds: 10.0,
+                all_held_visible_secs: Some(1.0),
+                ..Restart::default()
+            }),
             ..HoldReport::default()
         }
     }
 
     #[test]
     fn a_healthy_run_passes_every_threshold() {
-        let r = HoldReport { thresholds: judge(&healthy()), ..healthy() };
-        assert!(r.failed().is_empty(), "{:?}", r.failed().iter().map(|t| &t.name).collect::<Vec<_>>());
+        let r = HoldReport {
+            thresholds: judge(&healthy()),
+            ..healthy()
+        };
+        assert!(
+            r.failed().is_empty(),
+            "{:?}",
+            r.failed().iter().map(|t| &t.name).collect::<Vec<_>>()
+        );
         assert_eq!(r.thresholds.len(), 11);
     }
 
@@ -536,28 +715,61 @@ mod tests {
     fn each_threshold_fails_when_exceeded() {
         type Break = fn(&mut HoldReport);
         let breaks: [(&str, Break); 10] = [
-            ("unheld say p50", |r| r.held_fractions[0].unheld = stats(900.0, 900.0)),
-            ("refusal p99", |r| r.refusal_only.as_mut().unwrap().refusals = stats(0.3, 500.0)),
-            ("refusal p50 as a share", |r| r.refusal_only.as_mut().unwrap().refusals = stats(200.0, 2.0)),
-            ("across the refusal phase", |r| r.refusal_only.as_mut().unwrap().hub_rss_end_mib = Some(90.0)),
-            ("roster read p50", |r| r.roster_reads[1].latency = stats(200.0, 300.0)),
-            ("churn hold p99", |r| r.churn.as_mut().unwrap().hold_latency = stats(30.0, 9000.0)),
-            ("churn operations that failed", |r| r.churn.as_mut().unwrap().failed_operations = 500),
-            ("time per hold", |r| r.restart.as_mut().unwrap().hold_all_secs = 500.0),
-            ("after churn and cooldown", |r| r.churn.as_mut().unwrap().hub_rss_end_mib = Some(200.0)),
-            ("restart to listening", |r| r.restart.as_mut().unwrap().listening_ms_with_holds = 9000.0),
+            ("unheld say p50", |r| {
+                r.held_fractions[0].unheld = stats(900.0, 900.0)
+            }),
+            ("refusal p99", |r| {
+                r.refusal_only.as_mut().unwrap().refusals = stats(0.3, 500.0)
+            }),
+            ("refusal p50 as a share", |r| {
+                r.refusal_only.as_mut().unwrap().refusals = stats(200.0, 2.0)
+            }),
+            ("across the refusal phase", |r| {
+                r.refusal_only.as_mut().unwrap().hub_rss_end_mib = Some(90.0)
+            }),
+            ("roster read p50", |r| {
+                r.roster_reads[1].latency = stats(200.0, 300.0)
+            }),
+            ("churn hold p99", |r| {
+                r.churn.as_mut().unwrap().hold_latency = stats(30.0, 9000.0)
+            }),
+            ("churn operations that failed", |r| {
+                r.churn.as_mut().unwrap().failed_operations = 500
+            }),
+            ("time per hold", |r| {
+                r.restart.as_mut().unwrap().hold_all_secs = 500.0
+            }),
+            ("after churn and cooldown", |r| {
+                r.churn.as_mut().unwrap().hub_rss_end_mib = Some(200.0)
+            }),
+            ("restart to listening", |r| {
+                r.restart.as_mut().unwrap().listening_ms_with_holds = 9000.0
+            }),
         ];
         for (name, worsen) in breaks {
             let mut r = healthy();
             worsen(&mut r);
-            let failed: Vec<String> = judge(&r).into_iter().filter(|t| !t.passed).map(|t| t.name).collect();
-            assert_eq!(failed.len(), 1, "breaking `{name}` must fail exactly one threshold, got {failed:?}");
-            assert!(failed[0].contains(name), "breaking `{name}` failed {failed:?}");
+            let failed: Vec<String> = judge(&r)
+                .into_iter()
+                .filter(|t| !t.passed)
+                .map(|t| t.name)
+                .collect();
+            assert_eq!(
+                failed.len(),
+                1,
+                "breaking `{name}` must fail exactly one threshold, got {failed:?}"
+            );
+            assert!(
+                failed[0].contains(name),
+                "breaking `{name}` failed {failed:?}"
+            );
         }
         // A restart that never got every session back and held fails its threshold.
         let mut r = healthy();
         r.restart.as_mut().unwrap().all_held_visible_secs = None;
-        assert!(judge(&r).iter().any(|t| !t.passed && t.name.contains("every session is back")));
+        assert!(judge(&r)
+            .iter()
+            .any(|t| !t.passed && t.name.contains("every session is back")));
         // A missing measurement is a failure, not a pass.
         assert!(judge(&HoldReport::default()).iter().all(|t| !t.passed));
     }

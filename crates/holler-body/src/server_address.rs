@@ -45,7 +45,11 @@ impl ServerAddress {
     pub fn is_loopback(&self) -> bool {
         // An IPv6 literal is stored with its brackets (`[::1]`); strip them
         // before the `IpAddr` parse (brackets are not part of an `IpAddr`).
-        let host = self.host.strip_prefix('[').and_then(|h| h.strip_suffix(']')).unwrap_or(&self.host);
+        let host = self
+            .host
+            .strip_prefix('[')
+            .and_then(|h| h.strip_suffix(']'))
+            .unwrap_or(&self.host);
         match host.parse::<IpAddr>() {
             Ok(IpAddr::V4(v4)) => v4.is_loopback(),
             Ok(IpAddr::V6(v6)) => v6.is_loopback(),
@@ -69,8 +73,13 @@ pub enum AddressError {
 impl std::fmt::Display for AddressError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            AddressError::BadScheme(s) => write!(f, "a server address must be ws:// or wss:// (got scheme {s:?})"),
-            AddressError::MissingHost => write!(f, "a server address must name a host (ws://<host>[:port])"),
+            AddressError::BadScheme(s) => write!(
+                f,
+                "a server address must be ws:// or wss:// (got scheme {s:?})"
+            ),
+            AddressError::MissingHost => {
+                write!(f, "a server address must name a host (ws://<host>[:port])")
+            }
             AddressError::BadPort(p) => write!(f, "server port {p:?} is not a 16-bit number"),
         }
     }
@@ -102,7 +111,11 @@ pub fn parse(input: &str) -> Result<ServerAddress, AddressError> {
     if authority.is_empty() {
         return Err(AddressError::MissingHost);
     }
-    let default_port = if scheme == "wss" { DEFAULT_WSS_PORT } else { DEFAULT_PORT };
+    let default_port = if scheme == "wss" {
+        DEFAULT_WSS_PORT
+    } else {
+        DEFAULT_PORT
+    };
     // An IPv6 literal is bracketed (`[::1]` / `[::1]:port`). The colons *inside*
     // the brackets are part of the address, so the host/port separator is the
     // colon *after* the closing `]` — not the last colon in the string (which,
@@ -150,7 +163,8 @@ fn parse_port(s: &str) -> Result<u16, AddressError> {
     if s.is_empty() {
         return Err(AddressError::BadPort(s.to_string()));
     }
-    s.parse::<u16>().map_err(|_| AddressError::BadPort(s.to_string()))
+    s.parse::<u16>()
+        .map_err(|_| AddressError::BadPort(s.to_string()))
 }
 
 /// The one fail-closed transport rule: a plaintext `ws://` address that is not
@@ -169,7 +183,12 @@ pub fn loopback_only_check(addr: &ServerAddress) -> Option<&'static str> {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable)] // #176
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unreachable
+)] // #176
 mod tests {
     use super::*;
 
@@ -222,7 +241,10 @@ mod tests {
 
     #[test]
     fn bad_scheme_is_an_error() {
-        assert!(matches!(parse("http://hub"), Err(AddressError::BadScheme(_))));
+        assert!(matches!(
+            parse("http://hub"),
+            Err(AddressError::BadScheme(_))
+        ));
     }
 
     #[test]
@@ -232,7 +254,10 @@ mod tests {
 
     #[test]
     fn bad_port_is_an_error() {
-        assert!(matches!(parse("ws://127.0.0.1:99999"), Err(AddressError::BadPort(_))));
+        assert!(matches!(
+            parse("ws://127.0.0.1:99999"),
+            Err(AddressError::BadPort(_))
+        ));
     }
 
     #[test]

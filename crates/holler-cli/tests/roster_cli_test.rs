@@ -1,4 +1,10 @@
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable, dead_code)] // #186
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unreachable,
+    dead_code
+)] // #186
 //! `holler roster` (issue #186, CLI surface): the live roster read over the
 //! control socket, shown as a table (or `--json`). Real subprocesses, real
 //! loopback sockets — no mocks of the circuit (the same discipline as
@@ -18,7 +24,9 @@ use std::time::Duration;
 
 use serde_json::Value;
 
-use support::{holler_cmd, join, mint_token, roster_json, wait_for, Body, Hub, StateDir, STARTUP_WAIT};
+use support::{
+    holler_cmd, join, mint_token, roster_json, wait_for, Body, Hub, StateDir, STARTUP_WAIT,
+};
 
 fn run(state: &StateDir, args: &[&str]) -> (i32, String, String) {
     let out = holler_cmd(state)
@@ -70,7 +78,9 @@ fn roster_cli_shows_two_sessions_from_one_body() {
         "the roster table shows the `beta` session:\n{stdout}"
     );
     // The table has the spec's columns.
-    for col in ["SESSION", "HARNESS", "MODE", "STATE", "CONN", "HOSTNAME", "PENDING"] {
+    for col in [
+        "SESSION", "HARNESS", "MODE", "STATE", "CONN", "HOSTNAME", "PENDING",
+    ] {
         assert!(
             stdout.contains(col),
             "the roster table has a {col} column:\n{stdout}"
@@ -129,15 +139,27 @@ fn roster_all_shows_gone_row_in_human_table() {
 
     let (code, stdout, stderr) = run(&state, &["roster"]);
     assert_eq!(code, 0, "stderr: {stderr}");
-    assert_eq!(stdout, "(no sessions on the hub)\n", "gone rows are hidden without --all:\n{stdout}");
+    assert_eq!(
+        stdout, "(no sessions on the hub)\n",
+        "gone rows are hidden without --all:\n{stdout}"
+    );
 
     let (code, stdout, stderr) = run(&state, &["roster", "--all"]);
     assert_eq!(code, 0, "stderr: {stderr}");
-    assert!(stdout.contains("alpha"), "human table with --all shows the gone row:\n{stdout}");
+    assert!(
+        stdout.contains("alpha"),
+        "human table with --all shows the gone row:\n{stdout}"
+    );
     // The session name is `<label>/alpha` (e.g. `body-1/alpha`), not bare
     // `alpha` — match on that shape rather than a bare prefix.
-    let alpha_line = stdout.lines().find(|l| l.contains("/alpha")).unwrap_or_else(|| panic!("an alpha row:\n{stdout}"));
-    assert!(alpha_line.contains("gone"), "the CONN column reads gone: {alpha_line:?}");
+    let alpha_line = stdout
+        .lines()
+        .find(|l| l.contains("/alpha"))
+        .unwrap_or_else(|| panic!("an alpha row:\n{stdout}"));
+    assert!(
+        alpha_line.contains("gone"),
+        "the CONN column reads gone: {alpha_line:?}"
+    );
     drop(hub);
 }
 
@@ -156,21 +178,42 @@ fn roster_json_shape() {
     wait_for(STARTUP_WAIT, || {
         let v = roster_json(&state);
         let rows = v.get("rows").and_then(|r| r.as_array())?;
-        rows.iter().find(|r| r.get("name").and_then(Value::as_str) == Some("body-1/alpha")).map(|_| ())
+        rows.iter()
+            .find(|r| r.get("name").and_then(Value::as_str) == Some("body-1/alpha"))
+            .map(|_| ())
     })
     .expect("the roster --json carries the body's session row");
 
     let v = roster_json(&state);
-    let rows = v.get("rows").and_then(|r| r.as_array()).expect("roster --json carries a rows array");
-    let row = rows.iter().find(|r| r.get("name").and_then(Value::as_str) == Some("body-1/alpha")).expect("the alpha row");
+    let rows = v
+        .get("rows")
+        .and_then(|r| r.as_array())
+        .expect("roster --json carries a rows array");
+    let row = rows
+        .iter()
+        .find(|r| r.get("name").and_then(Value::as_str) == Some("body-1/alpha"))
+        .expect("the alpha row");
     // The JSON row carries the spec's fields.
-    for key in ["name", "harness", "mode", "state", "conn_state", "client_id", "hostname", "last_seen"] {
+    for key in [
+        "name",
+        "harness",
+        "mode",
+        "state",
+        "conn_state",
+        "client_id",
+        "hostname",
+        "last_seen",
+    ] {
         assert!(
             row.get(key).is_some(),
             "the roster --json row carries `{key}`: {row}"
         );
     }
-    assert_eq!(row["state"].as_str(), Some("idle"), "a spawned-but-quiet session is `idle` in the JSON roster");
+    assert_eq!(
+        row["state"].as_str(),
+        Some("idle"),
+        "a spawned-but-quiet session is `idle` in the JSON roster"
+    );
     assert_eq!(row["conn_state"].as_str(), Some("connected"));
 
     body.stop(&state, Duration::from_secs(10));
@@ -191,13 +234,25 @@ fn roster_cli_prefix_filters_by_label() {
 
     let io_body_state = StateDir::new();
     let (io_token, io_secret) = mint_token(&hub_state, "io");
-    join(&io_body_state, &hub_state, &hub.ws_url(), &io_token, &io_secret);
+    join(
+        &io_body_state,
+        &hub_state,
+        &hub.ws_url(),
+        &io_token,
+        &io_secret,
+    );
     let io_config = support::write_sessions_toml(&io_body_state, &[("alpha", &[])]);
     let io_body = Body::start(&io_body_state, &io_config);
 
     let media_body_state = StateDir::new();
     let (media_token, media_secret) = mint_token(&hub_state, "media");
-    join(&media_body_state, &hub_state, &hub.ws_url(), &media_token, &media_secret);
+    join(
+        &media_body_state,
+        &hub_state,
+        &hub.ws_url(),
+        &media_token,
+        &media_secret,
+    );
     let media_config = support::write_sessions_toml(&media_body_state, &[("gamma", &[])]);
     let media_body = Body::start(&media_body_state, &media_config);
 
@@ -205,7 +260,10 @@ fn roster_cli_prefix_filters_by_label() {
     wait_for(STARTUP_WAIT, || {
         let v = roster_json(&hub_state);
         let rows = v.get("rows").and_then(|r| r.as_array())?;
-        let names: Vec<&str> = rows.iter().filter_map(|r| r.get("name").and_then(Value::as_str)).collect();
+        let names: Vec<&str> = rows
+            .iter()
+            .filter_map(|r| r.get("name").and_then(Value::as_str))
+            .collect();
         if names.contains(&"io/alpha") && names.contains(&"media/gamma") {
             Some(())
         } else {
@@ -217,35 +275,75 @@ fn roster_cli_prefix_filters_by_label() {
     // `--prefix io` (no trailing slash): only `io/alpha`.
     let (code, stdout, stderr) = run(&hub_state, &["--json", "roster", "--prefix", "io"]);
     assert_eq!(code, 0, "roster --prefix io exits 0: {stderr}");
-    let v: Value = serde_json::from_str(&stdout).expect("roster --prefix io --json is a JSON object");
-    let rows = v.get("rows").and_then(|r| r.as_array()).expect("rows array");
-    let names: Vec<&str> = rows.iter().filter_map(|r| r.get("name").and_then(Value::as_str)).collect();
-    assert_eq!(names, vec!["io/alpha"], "--prefix io lists only the io/ row, never media/gamma");
+    let v: Value =
+        serde_json::from_str(&stdout).expect("roster --prefix io --json is a JSON object");
+    let rows = v
+        .get("rows")
+        .and_then(|r| r.as_array())
+        .expect("rows array");
+    let names: Vec<&str> = rows
+        .iter()
+        .filter_map(|r| r.get("name").and_then(Value::as_str))
+        .collect();
+    assert_eq!(
+        names,
+        vec!["io/alpha"],
+        "--prefix io lists only the io/ row, never media/gamma"
+    );
 
     // `--prefix io/` (trailing slash, the ADR's own example spelling):
     // identical result.
     let (code, stdout, stderr) = run(&hub_state, &["--json", "roster", "--prefix", "io/"]);
     assert_eq!(code, 0, "roster --prefix io/ exits 0: {stderr}");
-    let v: Value = serde_json::from_str(&stdout).expect("roster --prefix io/ --json is a JSON object");
-    let rows = v.get("rows").and_then(|r| r.as_array()).expect("rows array");
-    let names: Vec<&str> = rows.iter().filter_map(|r| r.get("name").and_then(Value::as_str)).collect();
-    assert_eq!(names, vec!["io/alpha"], "a trailing slash on --prefix behaves the same as none");
+    let v: Value =
+        serde_json::from_str(&stdout).expect("roster --prefix io/ --json is a JSON object");
+    let rows = v
+        .get("rows")
+        .and_then(|r| r.as_array())
+        .expect("rows array");
+    let names: Vec<&str> = rows
+        .iter()
+        .filter_map(|r| r.get("name").and_then(Value::as_str))
+        .collect();
+    assert_eq!(
+        names,
+        vec!["io/alpha"],
+        "a trailing slash on --prefix behaves the same as none"
+    );
 
     // `--prefix media`: only `media/gamma`.
     let (code, stdout, stderr) = run(&hub_state, &["--json", "roster", "--prefix", "media"]);
     assert_eq!(code, 0, "roster --prefix media exits 0: {stderr}");
-    let v: Value = serde_json::from_str(&stdout).expect("roster --prefix media --json is a JSON object");
-    let rows = v.get("rows").and_then(|r| r.as_array()).expect("rows array");
-    let names: Vec<&str> = rows.iter().filter_map(|r| r.get("name").and_then(Value::as_str)).collect();
-    assert_eq!(names, vec!["media/gamma"], "--prefix media lists only the media/ row, never io/alpha");
+    let v: Value =
+        serde_json::from_str(&stdout).expect("roster --prefix media --json is a JSON object");
+    let rows = v
+        .get("rows")
+        .and_then(|r| r.as_array())
+        .expect("rows array");
+    let names: Vec<&str> = rows
+        .iter()
+        .filter_map(|r| r.get("name").and_then(Value::as_str))
+        .collect();
+    assert_eq!(
+        names,
+        vec!["media/gamma"],
+        "--prefix media lists only the media/ row, never io/alpha"
+    );
 
     // No `--prefix` at all: both rows still come back (the flag narrows, it
     // never becomes the only way to list).
     let (code, stdout, stderr) = run(&hub_state, &["--json", "roster"]);
     assert_eq!(code, 0, "plain roster exits 0: {stderr}");
     let v: Value = serde_json::from_str(&stdout).expect("roster --json is a JSON object");
-    let rows = v.get("rows").and_then(|r| r.as_array()).expect("rows array");
-    assert_eq!(rows.len(), 2, "without --prefix both bodies' rows are listed");
+    let rows = v
+        .get("rows")
+        .and_then(|r| r.as_array())
+        .expect("rows array");
+    assert_eq!(
+        rows.len(),
+        2,
+        "without --prefix both bodies' rows are listed"
+    );
 
     io_body.stop(&io_body_state, Duration::from_secs(10));
     media_body.stop(&media_body_state, Duration::from_secs(10));

@@ -1,4 +1,10 @@
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable, dead_code)] // #149
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unreachable,
+    dead_code
+)] // #149
 //! RED unit tests for the `holler_proto::log` module (story #144).
 //!
 //! These pin the *core* (no-OS) contract of the debug-logging primitive:
@@ -19,8 +25,8 @@
 //! in "exactly once" form from a fresh process.
 
 use holler_proto::log::{
-    resolve, redact, redact_frame, Component, Config, DebugLevel, Direction, Event, LogFormat,
-    REDACTED, Severity,
+    redact, redact_frame, resolve, Component, Config, DebugLevel, Direction, Event, LogFormat,
+    Severity, REDACTED,
 };
 use serde_json::json;
 
@@ -28,10 +34,17 @@ use serde_json::json;
 
 #[test]
 fn resolve_flag_beats_env() {
-    let c = resolve(Some("noisy"), Some("json"), Some("none"), Some("text"))
-        .expect("valid values");
-    assert_eq!(c.debug, DebugLevel::Noisy, "the --debug flag beats HOLLER_DEBUG");
-    assert_eq!(c.format, LogFormat::Json, "the --log-format flag beats HOLLER_LOG_FORMAT");
+    let c = resolve(Some("noisy"), Some("json"), Some("none"), Some("text")).expect("valid values");
+    assert_eq!(
+        c.debug,
+        DebugLevel::Noisy,
+        "the --debug flag beats HOLLER_DEBUG"
+    );
+    assert_eq!(
+        c.format,
+        LogFormat::Json,
+        "the --log-format flag beats HOLLER_LOG_FORMAT"
+    );
 }
 
 #[test]
@@ -54,21 +67,38 @@ fn resolve_empty_flag_is_treated_as_absent() {
     // flag arrives as `Some("")`. The resolver must treat that as "not
     // given" (fall through to the env), not as the invalid value `""`.
     let c = resolve(Some(""), None, Some("noisy"), None).expect("empty flag is absent");
-    assert_eq!(c.debug, DebugLevel::Noisy, "empty --debug must not shadow the env");
+    assert_eq!(
+        c.debug,
+        DebugLevel::Noisy,
+        "empty --debug must not shadow the env"
+    );
     let c = resolve(None, Some(""), None, Some("json")).expect("empty flag is absent");
-    assert_eq!(c.format, LogFormat::Json, "empty --log-format must not shadow the env");
+    assert_eq!(
+        c.format,
+        LogFormat::Json,
+        "empty --log-format must not shadow the env"
+    );
 }
 
 #[test]
 fn resolve_invalid_value_is_err() {
     let err = resolve(Some("verbose"), None, None, None)
         .expect_err("an unrecognised level is a fail-closed refusal");
-    assert!(err.contains("--debug"), "the error names the offending flag: {err}");
-    assert!(err.contains("verbose"), "the error echoes the bad value: {err}");
+    assert!(
+        err.contains("--debug"),
+        "the error names the offending flag: {err}"
+    );
+    assert!(
+        err.contains("verbose"),
+        "the error echoes the bad value: {err}"
+    );
 
     let err = resolve(None, Some("yaml"), None, None)
         .expect_err("an unrecognised format is a fail-closed refusal");
-    assert!(err.contains("--log-format"), "the error names the offending flag: {err}");
+    assert!(
+        err.contains("--log-format"),
+        "the error names the offending flag: {err}"
+    );
 }
 
 #[test]
@@ -87,17 +117,34 @@ fn redact_key_substrings_are_case_insensitive() {
     // authorization|pepper|private_key|signing_key (case-insensitive) is
     // redacted.
     let inputs = [
-        "secret", "SECRET", "Secret",
-        "client_secret", "x-api-key-secret", "SECRET_KEY",
-        "credential", "Credential", "credentials",
-        "ticket", "TICKET", "auth_ticket",
-        "authorization", "Authorization", "AUTHORIZATION",
-        "pepper", "Pepper", "HOLLER_PEPPER",
+        "secret",
+        "SECRET",
+        "Secret",
+        "client_secret",
+        "x-api-key-secret",
+        "SECRET_KEY",
+        "credential",
+        "Credential",
+        "credentials",
+        "ticket",
+        "TICKET",
+        "auth_ticket",
+        "authorization",
+        "Authorization",
+        "AUTHORIZATION",
+        "pepper",
+        "Pepper",
+        "HOLLER_PEPPER",
         // issue #322: the hub's X25519 private key.
-        "private_key", "PRIVATE_KEY", "hub_private_key", "body_private_key",
+        "private_key",
+        "PRIVATE_KEY",
+        "hub_private_key",
+        "body_private_key",
         // issue #323: `BodyIdentity::signing_key` is the field's literal
         // name (not `*private_key*`), so it needs its own substring.
-        "signing_key", "SIGNING_KEY", "body_signing_key",
+        "signing_key",
+        "SIGNING_KEY",
+        "body_signing_key",
     ];
     for key in inputs {
         let v = json!({ key: "some-value" });
@@ -189,7 +236,10 @@ fn event(component: Component, severity: Severity, method: &'static str) -> Even
 #[test]
 fn render_text_component_column_is_12_wide() {
     // `wire` is 4 chars → 8 leading spaces → a 12-char column.
-    let config = Config { debug: DebugLevel::Noisy, format: LogFormat::Text };
+    let config = Config {
+        debug: DebugLevel::Noisy,
+        format: LogFormat::Text,
+    };
     let line = event(Component::Wire, Severity::Info, "hello").render(&config);
     // Layout: `<ts> INFO <12-char column> …`. We anchor on the level token
     // (robust to the timestamp's exact length, which varies with the year)
@@ -209,7 +259,10 @@ fn render_text_component_column_is_12_wide() {
 
 #[test]
 fn render_json_is_one_object_with_expected_keys() {
-    let config = Config { debug: DebugLevel::Noisy, format: LogFormat::Json };
+    let config = Config {
+        debug: DebugLevel::Noisy,
+        format: LogFormat::Json,
+    };
     let line = event(Component::Wire, Severity::Warn, "boom").render(&config);
     let v: serde_json::Value =
         serde_json::from_str(&line).expect("the json line must parse as one object");
@@ -234,13 +287,26 @@ fn debug_severity_is_gated_by_level() {
     let debug_ev = event(Component::Wire, Severity::Debug, "tick");
     // At `none`, a debug event renders to the empty string (a no-op emit).
     assert_eq!(
-        debug_ev.render(&Config { debug: DebugLevel::None, format: LogFormat::Text }),
+        debug_ev.render(&Config {
+            debug: DebugLevel::None,
+            format: LogFormat::Text
+        }),
         "",
         "a debug event must be silent at --debug none"
     );
     // …but at `quiet`/`noisy` it renders a real line.
-    assert!(!debug_ev.render(&Config { debug: DebugLevel::Quiet, format: LogFormat::Text }).is_empty());
-    assert!(!debug_ev.render(&Config { debug: DebugLevel::Noisy, format: LogFormat::Text }).is_empty());
+    assert!(!debug_ev
+        .render(&Config {
+            debug: DebugLevel::Quiet,
+            format: LogFormat::Text
+        })
+        .is_empty());
+    assert!(!debug_ev
+        .render(&Config {
+            debug: DebugLevel::Noisy,
+            format: LogFormat::Text
+        })
+        .is_empty());
 }
 
 #[test]
@@ -249,7 +315,10 @@ fn info_and_warn_are_always_emitted() {
     for severity in [Severity::Info, Severity::Warn] {
         for level in [DebugLevel::None, DebugLevel::Quiet, DebugLevel::Noisy] {
             let ev = event(Component::Cli, severity, "op");
-            let rendered = ev.render(&Config { debug: level, format: LogFormat::Text });
+            let rendered = ev.render(&Config {
+                debug: level,
+                format: LogFormat::Text,
+            });
             assert!(
                 !rendered.is_empty(),
                 "{severity:?} must always render at {level:?}, got: {rendered:?}"
@@ -269,7 +338,10 @@ fn render_text_escapes_newlines_in_field_values() {
     let forged = "evil\n2026-09-09T00:00:00.000000Z INFO         wire -- lockout client_id=forged";
     let mut ev = event(Component::Registry, Severity::Info, "conn_connected");
     ev.fields = vec![("hostname", forged.to_owned())];
-    let config = Config { debug: DebugLevel::None, format: LogFormat::Text };
+    let config = Config {
+        debug: DebugLevel::None,
+        format: LogFormat::Text,
+    };
     let line = ev.render(&config);
 
     assert_eq!(
@@ -292,11 +364,20 @@ fn render_text_escapes_carriage_returns_and_other_control_chars() {
     let ev_fields = vec![("hostname", "host\rname\t\u{0}end".to_owned())];
     let mut ev = event(Component::Registry, Severity::Debug, "presence");
     ev.fields = ev_fields;
-    let config = Config { debug: DebugLevel::Noisy, format: LogFormat::Text };
+    let config = Config {
+        debug: DebugLevel::Noisy,
+        format: LogFormat::Text,
+    };
     let line = ev.render(&config);
 
-    assert!(!line.contains('\r'), "a raw carriage return must not reach the line: {line:?}");
-    assert!(line.contains("\\r"), "carriage return must be escaped: {line:?}");
+    assert!(
+        !line.contains('\r'),
+        "a raw carriage return must not reach the line: {line:?}"
+    );
+    assert!(
+        line.contains("\\r"),
+        "carriage return must be escaped: {line:?}"
+    );
     assert!(line.contains("\\t"), "tab must be escaped: {line:?}");
     assert!(line.contains("\\u{0}"), "NUL must be escaped: {line:?}");
 }
@@ -307,7 +388,10 @@ fn render_text_leaves_printable_field_values_untouched() {
     // text) must render verbatim — the fix must not over-escape.
     let mut ev = event(Component::Registry, Severity::Info, "conn_connected");
     ev.fields = vec![("hostname", "laptop-42.local".to_owned())];
-    let config = Config { debug: DebugLevel::None, format: LogFormat::Text };
+    let config = Config {
+        debug: DebugLevel::None,
+        format: LogFormat::Text,
+    };
     let line = ev.render(&config);
     assert!(
         line.contains("hostname=laptop-42.local"),
@@ -322,11 +406,22 @@ fn render_json_already_escapes_control_characters() {
     // silently regress it.
     let mut ev = event(Component::Registry, Severity::Info, "conn_connected");
     ev.fields = vec![("hostname", "evil\nforged line".to_owned())];
-    let config = Config { debug: DebugLevel::None, format: LogFormat::Json };
+    let config = Config {
+        debug: DebugLevel::None,
+        format: LogFormat::Json,
+    };
     let line = ev.render(&config);
-    assert_eq!(line.lines().count(), 1, "the JSON line must stay a single line: {line:?}");
-    let v: serde_json::Value = serde_json::from_str(&line).expect("valid JSON despite the embedded newline");
-    assert_eq!(v["hostname"], "evil\nforged line", "serde_json round-trips the raw value safely");
+    assert_eq!(
+        line.lines().count(),
+        1,
+        "the JSON line must stay a single line: {line:?}"
+    );
+    let v: serde_json::Value =
+        serde_json::from_str(&line).expect("valid JSON despite the embedded newline");
+    assert_eq!(
+        v["hostname"], "evil\nforged line",
+        "serde_json round-trips the raw value safely"
+    );
 }
 
 // --- emission timestamp: the real microsecond fraction (issue #461) ----------
@@ -368,7 +463,10 @@ fn format_timestamp_orders_instants_within_one_second() {
     // and `.001`, sorting backwards.
     let earlier = format_timestamp(datetime!(2026-09-26 12:00:18.372988 UTC));
     let later = format_timestamp(datetime!(2026-09-26 12:00:18.408001 UTC));
-    assert!(earlier < later, "string order must follow time order: {earlier} vs {later}");
+    assert!(
+        earlier < later,
+        "string order must follow time order: {earlier} vs {later}"
+    );
 }
 
 #[test]
@@ -377,11 +475,22 @@ fn timestamp_has_the_fixed_microsecond_shape() {
     let ts = timestamp();
     let b = ts.as_bytes();
     assert_eq!(b.len(), 27, "fixed width, six fraction digits: {ts:?}");
-    for (i, sep) in [(4, b'-'), (7, b'-'), (10, b'T'), (13, b':'), (16, b':'), (19, b'.'), (26, b'Z')] {
+    for (i, sep) in [
+        (4, b'-'),
+        (7, b'-'),
+        (10, b'T'),
+        (13, b':'),
+        (16, b':'),
+        (19, b'.'),
+        (26, b'Z'),
+    ] {
         assert_eq!(b[i], sep, "separator at offset {i} in {ts:?}");
     }
     for i in (0..26).filter(|i| ![4, 7, 10, 13, 16, 19].contains(i)) {
-        assert!(b[i].is_ascii_digit(), "digit expected at offset {i} in {ts:?}");
+        assert!(
+            b[i].is_ascii_digit(),
+            "digit expected at offset {i} in {ts:?}"
+        );
     }
 }
 

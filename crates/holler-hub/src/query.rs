@@ -69,8 +69,12 @@ pub async fn local_status(registry: &Registry, listening: Vec<String>) -> Status
 /// answer for every known id in the v2 vocabulary (docs §5.2).
 pub async fn local_caps(registry: &Registry, listening: Vec<String>) -> Caps {
     let status = local_status(registry, listening).await;
-    let confirmed: std::collections::BTreeSet<String> =
-        status.harnesses_confirmed.iter().flatten().map(|c| c.id.clone()).collect();
+    let confirmed: std::collections::BTreeSet<String> = status
+        .harnesses_confirmed
+        .iter()
+        .flatten()
+        .map(|c| c.id.clone())
+        .collect();
     let mut caps = std::collections::BTreeMap::new();
     for id in FEATURES.iter().chain(HARNESS_IDS.iter()) {
         caps.insert((*id).to_string(), support_for(id, &confirmed));
@@ -92,8 +96,12 @@ pub async fn local_support(feature: &str, registry: &Registry) -> Result<Support
             None,
         ));
     }
-    let confirmed: std::collections::BTreeSet<String> =
-        registry.harnesses_confirmed().await.into_iter().map(|c| c.id).collect();
+    let confirmed: std::collections::BTreeSet<String> = registry
+        .harnesses_confirmed()
+        .await
+        .into_iter()
+        .map(|c| c.id)
+        .collect();
     Ok(support_for(feature, &confirmed))
 }
 
@@ -143,14 +151,21 @@ pub fn local_protocol(version: Option<u32>) -> ProtocolAnswer {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable)] // #185
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unreachable
+)] // #185
 mod tests {
     use super::*;
 
     #[tokio::test]
     async fn unknown_feature_is_32006() {
         let registry = Registry::new();
-        let err = local_support("not-a-real-id", &registry).await.expect_err("unknown id must error");
+        let err = local_support("not-a-real-id", &registry)
+            .await
+            .expect_err("unknown id must error");
         assert_eq!(err.code, Code::UnknownFeature.jsonrpc());
     }
 
@@ -166,21 +181,34 @@ mod tests {
     #[tokio::test]
     async fn unconfirmed_harness_is_not_ok() {
         let registry = Registry::new();
-        let s = local_support("opencode", &registry).await.expect("known id");
+        let s = local_support("opencode", &registry)
+            .await
+            .expect("known id");
         assert!(!s.ok);
     }
 
     #[tokio::test]
     async fn confirmed_harness_reflects_real_probe() {
         let registry = Registry::new();
-        let (mut rx, mut cancel_rx, _seq) = registry.insert("cli_1", "kiwi", "tok_1", "127.0.0.1:1").await;
-        registry.set_harnesses_advertised("cli_1", vec!["opencode".to_string()]).await;
+        let (mut rx, mut cancel_rx, _seq) = registry
+            .insert("cli_1", "kiwi", "tok_1", "127.0.0.1:1")
+            .await;
+        registry
+            .set_harnesses_advertised("cli_1", vec!["opencode".to_string()])
+            .await;
         // Not yet confirmed: advertising alone is not proof.
-        let s = local_support("opencode", &registry).await.expect("known id");
-        assert!(!s.ok, "advertised-but-unconfirmed must stay ok:false: {s:?}");
+        let s = local_support("opencode", &registry)
+            .await
+            .expect("known id");
+        assert!(
+            !s.ok,
+            "advertised-but-unconfirmed must stay ok:false: {s:?}"
+        );
 
         registry.confirm_harness("cli_1", "opencode").await;
-        let s = local_support("opencode", &registry).await.expect("known id");
+        let s = local_support("opencode", &registry)
+            .await
+            .expect("known id");
         assert!(s.ok, "a confirmed harness must be ok:true: {s:?}");
 
         rx.close();

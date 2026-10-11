@@ -1,4 +1,9 @@
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable)] // #189
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unreachable
+)] // #189
 //! RED tests for the session manager (issue #189) — the issue's own test
 //! list, verbatim in name where practical, against real `stub-acp` (#130)
 //! processes.
@@ -57,7 +62,10 @@ fn sn(name: &str) -> SessionName {
 }
 
 fn registry_of(sessions: &[(&str, &[&str])]) -> SessionRegistry {
-    let configs = sessions.iter().map(|(n, args)| stub_config(n, args)).collect();
+    let configs = sessions
+        .iter()
+        .map(|(n, args)| stub_config(n, args))
+        .collect();
     SessionRegistry::from_sessions(configs)
 }
 
@@ -76,7 +84,12 @@ async fn state_of(manager: &SessionManager, name: &SessionName) -> SessionState 
 /// Poll `presence_doc()` until `name` reaches `want`, or panic after
 /// `timeout`. Safe to race via `tokio::select!` against a still-running
 /// prompt future — see the module doc's "Synchronization pattern".
-async fn wait_for_state(manager: &SessionManager, name: &SessionName, want: SessionState, timeout: Duration) {
+async fn wait_for_state(
+    manager: &SessionManager,
+    name: &SessionName,
+    want: SessionState,
+    timeout: Duration,
+) {
     let deadline = tokio::time::Instant::now() + timeout;
     loop {
         if state_of(manager, name).await == want {
@@ -98,7 +111,11 @@ fn assert_result_ok(
     state: SessionState,
 ) {
     match res {
-        Ok(PromptOutcome::Result { turn_id: got_id, stop_reason: got_reason, state: got_state }) => {
+        Ok(PromptOutcome::Result {
+            turn_id: got_id,
+            stop_reason: got_reason,
+            state: got_state,
+        }) => {
             assert_eq!(got_id, turn_id, "{res:?}");
             assert_eq!(got_reason, stop_reason, "{res:?}");
             assert_eq!(*got_state, state, "{res:?}");
@@ -109,8 +126,10 @@ fn assert_result_ok(
 
 #[tokio::test]
 async fn two_sessions_prompt_independently_no_cross_contamination() {
-    let manager =
-        SessionManager::start(&registry_of(&[("alpha", &["--chunks", "2"]), ("beta", &["--chunks", "2"])]));
+    let manager = SessionManager::start(&registry_of(&[
+        ("alpha", &["--chunks", "2"]),
+        ("beta", &["--chunks", "2"]),
+    ]));
     let alpha = sn("alpha");
     let beta = sn("beta");
 
@@ -186,10 +205,17 @@ async fn plain_prompt_to_working_session_is_session_busy_with_ages() {
         }
     };
     match busy {
-        Ok(PromptOutcome::Busy { state, turn_age_ms, last_update_age_ms }) => {
+        Ok(PromptOutcome::Busy {
+            state,
+            turn_age_ms,
+            last_update_age_ms,
+        }) => {
             assert_eq!(state, "working");
             assert!(turn_age_ms >= 20, "turn_age_ms={turn_age_ms}");
-            assert!(last_update_age_ms < 5_000, "last_update_age_ms={last_update_age_ms}");
+            assert!(
+                last_update_age_ms < 5_000,
+                "last_update_age_ms={last_update_age_ms}"
+            );
         }
         other => panic!("expected Busy, got {other:?}"),
     }
@@ -286,8 +312,9 @@ async fn queue_overflow_is_limit_exceeded() {
     // (50 slow chunks, ~10s) outlasts this whole fill, so none of these
     // queued prompts get dispatched during this test — each is driven only
     // far enough (via the timed `select!`) to be accepted into the queue.
-    let mut queued: Vec<_> =
-        (0..64).map(|i| Box::pin(manager.prompt(&alpha, format!("q{i}"), "queued", true))).collect();
+    let mut queued: Vec<_> = (0..64)
+        .map(|i| Box::pin(manager.prompt(&alpha, format!("q{i}"), "queued", true)))
+        .collect();
     for fut in &mut queued {
         tokio::select! {
             res = fut.as_mut() => panic!("queued prompt resolved unexpectedly: {res:?}"),
@@ -342,7 +369,10 @@ async fn large_backlog_drains_in_strict_fifo_order_no_loss() {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(120);
 
     while completion_order.len() < N {
-        assert!(tokio::time::Instant::now() < deadline, "backlog did not drain within 30s");
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "backlog did not drain within 30s"
+        );
 
         // Top the backlog up while there is real, observed room for it —
         // `QueueFull` (not an assumption about capacity) is what stops this
@@ -350,7 +380,8 @@ async fn large_backlog_drains_in_strict_fifo_order_no_loss() {
         // fill-to-cap loop.
         while next_to_submit < N {
             let idx = next_to_submit;
-            let mut fut = Box::pin(manager.prompt(&alpha, format!("q{idx}"), format!("queued {idx}"), true));
+            let mut fut =
+                Box::pin(manager.prompt(&alpha, format!("q{idx}"), format!("queued {idx}"), true));
             tokio::select! {
                 biased;
                 res = fut.as_mut() => {
@@ -380,11 +411,23 @@ async fn large_backlog_drains_in_strict_fifo_order_no_loss() {
             }
         }
 
-        let res = pending.next().await.expect("more prompts are still outstanding");
+        let res = pending
+            .next()
+            .await
+            .expect("more prompts are still outstanding");
         match res {
-            Ok(PromptOutcome::Result { turn_id, stop_reason, state, .. }) => {
+            Ok(PromptOutcome::Result {
+                turn_id,
+                stop_reason,
+                state,
+                ..
+            }) => {
                 assert_eq!(stop_reason, "end_turn", "{turn_id} did not end cleanly");
-                assert_eq!(state, SessionState::Completed, "{turn_id} did not end cleanly");
+                assert_eq!(
+                    state,
+                    SessionState::Completed,
+                    "{turn_id} did not end cleanly"
+                );
                 completion_order.push(turn_id);
             }
             other => panic!("unexpected queued outcome: {other:?}"),
@@ -400,7 +443,10 @@ async fn large_backlog_drains_in_strict_fifo_order_no_loss() {
         "every one of the {N} queued prompts must complete exactly once — none dropped or duplicated"
     );
     let expected: Vec<String> = (0..N).map(|i| format!("q{i}")).collect();
-    assert_eq!(completion_order, expected, "the backlog must drain in strict FIFO order");
+    assert_eq!(
+        completion_order, expected,
+        "the backlog must drain in strict FIFO order"
+    );
 
     // The manager settles back to a clean idle state once the whole backlog
     // (occupying turn + all 120 queued ones) has drained — no turn left
@@ -449,7 +495,9 @@ async fn replace_cancels_then_runs_ahead_of_queue() {
 
     let (replace_res, queued_res) = tokio::join!(&mut replace, &mut queued);
     match replace_res {
-        Ok(PromptOutcome::Result { stop_reason, state, .. }) => {
+        Ok(PromptOutcome::Result {
+            stop_reason, state, ..
+        }) => {
             assert_eq!(stop_reason, "end_turn");
             assert_eq!(state, SessionState::Completed);
         }
@@ -486,7 +534,9 @@ async fn presence_carries_turn_and_update_timestamps() {
     assert_eq!(ad2.state, SessionState::Idle);
     assert!(ad2.turn_started_at.is_none());
     assert!(ad2.last_update_at.is_none());
-    let last_turn = ad2.last_turn.expect("last_turn present after a settled turn");
+    let last_turn = ad2
+        .last_turn
+        .expect("last_turn present after a settled turn");
     assert_eq!(last_turn.stop_reason, "cancelled");
     assert_eq!(last_turn.turn_id, "a1");
 }
@@ -530,12 +580,18 @@ async fn post_cancel_prompt_is_fresh() {
     with `cargo test -p holler-cli --test session_manager_test -- --ignored \
     driver_crash_isolated_and_restarts_on_next_prompt`."]
 async fn driver_crash_isolated_and_restarts_on_next_prompt() {
-    let manager = SessionManager::start(&registry_of(&[("alpha", &["--crash-after-prompt", "--chunks", "3"])]));
+    let manager = SessionManager::start(&registry_of(&[(
+        "alpha",
+        &["--crash-after-prompt", "--chunks", "3"],
+    )]));
     let alpha = sn("alpha");
 
-    let crashed = tokio::time::timeout(Duration::from_secs(45), manager.prompt(&alpha, "a1", "hi", false))
-        .await
-        .expect("first (crashing) prompt within timeout");
+    let crashed = tokio::time::timeout(
+        Duration::from_secs(45),
+        manager.prompt(&alpha, "a1", "hi", false),
+    )
+    .await
+    .expect("first (crashing) prompt within timeout");
     assert_result_ok(&crashed, "a1", "error", SessionState::Failed);
     assert_eq!(state_of(&manager, &alpha).await, SessionState::Idle);
 
@@ -546,9 +602,12 @@ async fn driver_crash_isolated_and_restarts_on_next_prompt() {
     // structural: see `two_sessions_prompt_independently_no_cross_contamination`
     // and `cancel_alpha_does_not_touch_beta_mid_turn` for the multi-session
     // proof of that same property).
-    let recovered = tokio::time::timeout(Duration::from_secs(10), manager.prompt(&alpha, "a2", "hi again", false))
-        .await
-        .expect("recovered prompt within timeout");
+    let recovered = tokio::time::timeout(
+        Duration::from_secs(10),
+        manager.prompt(&alpha, "a2", "hi again", false),
+    )
+    .await
+    .expect("recovered prompt within timeout");
     assert_result_ok(&recovered, "a2", "end_turn", SessionState::Completed);
 }
 
@@ -573,7 +632,9 @@ async fn chunk_only_activity_keeps_last_update_at_fresh() {
 
     let ad0 = find(&manager.presence_doc("h".to_string()), "alpha");
     assert_eq!(ad0.state, SessionState::Working);
-    let last_update_0 = ad0.last_update_at.expect("last_update_at present while working");
+    let last_update_0 = ad0
+        .last_update_at
+        .expect("last_update_at present while working");
 
     // Sample repeatedly across more than one 200ms inter-chunk gap: as soon
     // as `last_update_at` has moved past its initial value while `state` is
@@ -584,14 +645,21 @@ async fn chunk_only_activity_keeps_last_update_at_fresh() {
     let mut moved = false;
     while tokio::time::Instant::now() < deadline {
         let ad = find(&manager.presence_doc("h".to_string()), "alpha");
-        assert_eq!(ad.state, SessionState::Working, "no state transition should occur mid-stream here");
+        assert_eq!(
+            ad.state,
+            SessionState::Working,
+            "no state transition should occur mid-stream here"
+        );
         if ad.last_update_at.as_deref() != Some(last_update_0.as_str()) {
             moved = true;
             break;
         }
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
-    assert!(moved, "last_update_at never advanced during a Chunk-only streaming stretch (issue #210)");
+    assert!(
+        moved,
+        "last_update_at never advanced during a Chunk-only streaming stretch (issue #210)"
+    );
 
     // Clean up: cancel the still-running turn rather than waiting out all 5
     // chunks.
@@ -611,7 +679,10 @@ async fn chunk_only_activity_keeps_last_update_at_fresh() {
 /// than "cleared".
 #[tokio::test]
 async fn timing_fields_survive_working_to_input_required_transition() {
-    let manager = SessionManager::start(&registry_of(&[("alpha", &["--ask-permission", "--chunks", "2"])]));
+    let manager = SessionManager::start(&registry_of(&[(
+        "alpha",
+        &["--ask-permission", "--chunks", "2"],
+    )]));
     let alpha = sn("alpha");
 
     let first = manager.prompt(&alpha, "a1", "hi", false);
@@ -621,8 +692,10 @@ async fn timing_fields_survive_working_to_input_required_transition() {
         () = wait_for_state(&manager, &alpha, SessionState::Working, Duration::from_secs(2)) => {}
     }
     let working_ad = find(&manager.presence_doc("h".to_string()), "alpha");
-    let turn_started_while_working =
-        working_ad.turn_started_at.clone().expect("turn_started_at present while working");
+    let turn_started_while_working = working_ad
+        .turn_started_at
+        .clone()
+        .expect("turn_started_at present while working");
 
     tokio::select! {
         res = &mut first => panic!("finished early: {res:?}"),
@@ -661,7 +734,10 @@ async fn timing_fields_survive_working_to_input_required_transition() {
 /// `Working` (this test) or the turn ends outright.
 #[tokio::test]
 async fn presence_pending_appears_while_input_required_and_clears_once_answered() {
-    let manager = SessionManager::start(&registry_of(&[("alpha", &["--ask-permission", "--chunks", "2"])]));
+    let manager = SessionManager::start(&registry_of(&[(
+        "alpha",
+        &["--ask-permission", "--chunks", "2"],
+    )]));
     let alpha = sn("alpha");
 
     let first = manager.prompt(&alpha, "a1", "hi", false);
@@ -672,10 +748,19 @@ async fn presence_pending_appears_while_input_required_and_clears_once_answered(
     }
 
     let paused_ad = find(&manager.presence_doc("h".to_string()), "alpha");
-    let pending = paused_ad.pending.expect("pending must be Some while input-required");
-    assert_eq!(pending.len(), 1, "the stub's permission gate is a single field: {pending:?}");
+    let pending = paused_ad
+        .pending
+        .expect("pending must be Some while input-required");
+    assert_eq!(
+        pending.len(),
+        1,
+        "the stub's permission gate is a single field: {pending:?}"
+    );
     assert_eq!(pending[0].prompt, "stub tool wants to run");
-    assert_eq!(pending[0].options, vec!["Allow".to_string(), "Deny".to_string()]);
+    assert_eq!(
+        pending[0].options,
+        vec!["Allow".to_string(), "Deny".to_string()]
+    );
 
     let answer = manager.answer(&alpha, "allow").await;
     assert_eq!(answer, Ok(Ok(())));
@@ -683,7 +768,10 @@ async fn presence_pending_appears_while_input_required_and_clears_once_answered(
     assert_result_ok(&result, "a1", "end_turn", SessionState::Completed);
 
     let idle_ad = find(&manager.presence_doc("h".to_string()), "alpha");
-    assert!(idle_ad.pending.is_none(), "pending must clear once the session leaves input-required");
+    assert!(
+        idle_ad.pending.is_none(),
+        "pending must clear once the session leaves input-required"
+    );
 }
 
 /// Issue #151: `answer` against a session that has never been prompted (no
@@ -705,7 +793,10 @@ async fn answer_with_nothing_pending_at_manager_level_is_error() {
 /// *does* accept a queued prompt).
 #[tokio::test]
 async fn plain_prompt_to_input_required_session_is_session_busy() {
-    let manager = SessionManager::start(&registry_of(&[("alpha", &["--ask-permission", "--chunks", "2"])]));
+    let manager = SessionManager::start(&registry_of(&[(
+        "alpha",
+        &["--ask-permission", "--chunks", "2"],
+    )]));
     let alpha = sn("alpha");
 
     let first = manager.prompt(&alpha, "a1", "hi", false);
@@ -834,16 +925,22 @@ async fn driver_crash_in_one_session_does_not_affect_concurrent_sibling_session(
     // independent `Error`/`Failed` outcome for `a2` (not a hang, not a stuck
     // `Busy`, not `Gone`) — proving the session survives its own driver crash
     // indefinitely, turn after turn.
-    let recovered = tokio::time::timeout(Duration::from_secs(45), manager.prompt(&alpha, "a2", "hi again", false))
-        .await
-        .expect("recovered prompt within timeout");
+    let recovered = tokio::time::timeout(
+        Duration::from_secs(45),
+        manager.prompt(&alpha, "a2", "hi again", false),
+    )
+    .await
+    .expect("recovered prompt within timeout");
     assert_result_ok(&recovered, "a2", "error", SessionState::Failed);
     assert_eq!(state_of(&manager, &alpha).await, SessionState::Idle);
 }
 
 #[tokio::test]
 async fn state_transitions_idle_working_input_required_idle_emit_presence() {
-    let manager = SessionManager::start(&registry_of(&[("alpha", &["--ask-permission", "--chunks", "2"])]));
+    let manager = SessionManager::start(&registry_of(&[(
+        "alpha",
+        &["--ask-permission", "--chunks", "2"],
+    )]));
     let alpha = sn("alpha");
     let mut presence_rx = manager.subscribe_presence_changes();
 

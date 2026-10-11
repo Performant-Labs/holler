@@ -1,4 +1,9 @@
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable)] // #189
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unreachable
+)] // #189
 //! One regression test, split out of `session_manager_test.rs` purely to
 //! keep that file under the repo's 900-line file-size gate
 //! (`scripts/lint.sh`) — this is not a new test area, it is
@@ -81,7 +86,10 @@ fn sn(name: &str) -> SessionName {
 }
 
 fn registry_of(sessions: &[(&str, &[&str])]) -> SessionRegistry {
-    let configs = sessions.iter().map(|(n, args)| stub_config(n, args)).collect();
+    let configs = sessions
+        .iter()
+        .map(|(n, args)| stub_config(n, args))
+        .collect();
     SessionRegistry::from_sessions(configs)
 }
 
@@ -99,7 +107,12 @@ async fn state_of(manager: &SessionManager, name: &SessionName) -> SessionState 
 
 /// Poll `presence_doc()` until `name` reaches `want`, or panic after
 /// `timeout` — mirrors `session_manager_test.rs::wait_for_state` exactly.
-async fn wait_for_state(manager: &SessionManager, name: &SessionName, want: SessionState, timeout: Duration) {
+async fn wait_for_state(
+    manager: &SessionManager,
+    name: &SessionName,
+    want: SessionState,
+    timeout: Duration,
+) {
     let deadline = tokio::time::Instant::now() + timeout;
     loop {
         if state_of(manager, name).await == want {
@@ -122,7 +135,11 @@ fn assert_result_ok(
     state: SessionState,
 ) {
     match res {
-        Ok(PromptOutcome::Result { turn_id: got_id, stop_reason: got_reason, state: got_state }) => {
+        Ok(PromptOutcome::Result {
+            turn_id: got_id,
+            stop_reason: got_reason,
+            state: got_state,
+        }) => {
             assert_eq!(got_id, turn_id, "{res:?}");
             assert_eq!(got_reason, stop_reason, "{res:?}");
             assert_eq!(*got_state, state, "{res:?}");

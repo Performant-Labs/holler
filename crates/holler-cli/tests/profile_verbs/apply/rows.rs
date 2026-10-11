@@ -374,8 +374,9 @@ fn row_f_a_killed_agent_is_relaunched() {
     let after = rig.record("pane-f").unwrap();
     let server = rig.harness.server(48100).unwrap();
     assert_eq!(server.state, ServerState::Running);
-    assert_eq!(after.harness.pid, Some(server.pid));
-    assert_ne!(after.harness.pid, f.harness.pid, "a new server");
+    // #802: the host owns the server, so a relaunch records no pid; the server is a new one.
+    assert_eq!(after.harness.pid, None);
+    assert_ne!(Some(server.pid), f.harness.pid, "a new server");
     assert_eq!(after.profile.as_ref().map(|p| p.as_str()), Some(P));
     let writes = rig.writes_since(before);
     assert_eq!(writes.len(), 1, "{writes:?}");

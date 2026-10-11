@@ -1,4 +1,10 @@
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable, dead_code)] // #315
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unreachable,
+    dead_code
+)] // #315
 //! Platform & machine parity (issue #315, catalog group `platform`,
 //! `hlr-1400`–`1404`).
 //!
@@ -161,10 +167,12 @@ fn start_hub_on(state: &StateDir, listen: &str) -> (Child, String) {
             }
         }
     });
-    let addr = rx.recv_timeout(Duration::from_secs(10)).unwrap_or_else(|_| {
-        let _ = child.kill();
-        panic!("hub did not report a listening addr within 10s for --listen {listen}");
-    });
+    let addr = rx
+        .recv_timeout(Duration::from_secs(10))
+        .unwrap_or_else(|_| {
+            let _ = child.kill();
+            panic!("hub did not report a listening addr within 10s for --listen {listen}");
+        });
     (child, addr)
 }
 
@@ -260,7 +268,8 @@ fn start_self_signed_tls_listener() -> (u16, std::thread::JoinHandle<()>) {
         .expect("build a rustls ServerConfig from the self-signed cert");
     let acceptor = tokio_rustls::TlsAcceptor::from(std::sync::Arc::new(server_config));
 
-    let std_listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind a throwaway TLS listener");
+    let std_listener =
+        std::net::TcpListener::bind("127.0.0.1:0").expect("bind a throwaway TLS listener");
     std_listener
         .set_nonblocking(true)
         .expect("set the throwaway listener nonblocking for tokio");
@@ -275,8 +284,8 @@ fn start_self_signed_tls_listener() -> (u16, std::thread::JoinHandle<()>) {
             .build()
             .expect("build a tokio runtime for the throwaway TLS server");
         rt.block_on(async move {
-            let listener =
-                tokio::net::TcpListener::from_std(std_listener).expect("adopt the std listener into tokio");
+            let listener = tokio::net::TcpListener::from_std(std_listener)
+                .expect("adopt the std listener into tokio");
             if let Ok((stream, _)) = listener.accept().await {
                 if let Err(e) = acceptor.accept(stream).await {
                     eprintln!(
@@ -396,7 +405,11 @@ fn check_hub_instance_lock() {
 /// The Unix permission bits of `path` (masked to the owner/group/other rwx
 /// bits, ignoring the file-type bits `MetadataExt::mode` also carries).
 fn mode_of(path: &Path) -> u32 {
-    std::fs::metadata(path).expect("stat the file").permissions().mode() & 0o777
+    std::fs::metadata(path)
+        .expect("stat the file")
+        .permissions()
+        .mode()
+        & 0o777
 }
 
 // ---------------------------------------------------------------------------
