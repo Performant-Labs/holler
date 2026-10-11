@@ -8,6 +8,12 @@ fills this file in at release time.
 ## [Unreleased]
 
 ### Enhancements
+- Setup wizard (epic [#726](https://github.com/Performant-Labs/holler/issues/726)): Stage 1 asks which Herdr session to
+  build in, between the orchestrators and the workspace name ([#838](https://github.com/Performant-Labs/holler/issues/838)).
+  "The default, unnamed session" (recommended) writes no `[instance]` table, so nothing changes; "A new named session"
+  proposes a full second instance (`state_dir = "~/.holler-<name>"`, ports 41808, 8443 and 47101) and refuses a name
+  already in `herdr session list`, running or stopped. An existing config is not re-asked. Stage 0 lists every session
+  with its status, and Stage 1's report and Stage 3's plan name the targeted session.
 - Pane control, unmanaged panes (epic [#633](https://github.com/Performant-Labs/holler/issues/633), decision 9):
   `holler pane list` (over the whole registry) and `holler pane get` now show a Herdr pane that no record names, with the
   state `unmanaged`, its Herdr pane id, label, working directory and idle time
