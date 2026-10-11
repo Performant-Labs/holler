@@ -234,7 +234,8 @@ fn the_serve_args_are_a_json_array_of_strings_default_none() {
             .unwrap(),
         vec!["--pure".to_owned(), "--print-logs".to_owned()]
     );
-    for bad in ["--pure", "[1]", r#"{"a":"b"}"#, r#"["--pure","#] {
+    // "" is also how `connect` reads a value that is not UTF-8: refused, never the default.
+    for bad in ["", "--pure", "[1]", r#"{"a":"b"}"#, r#"["--pure","#] {
         usage_naming(
             env::serve_args(&vars(&[("HOLLER_OPENCODE_SERVE_ARGS", bad)])),
             "HOLLER_OPENCODE_SERVE_ARGS",

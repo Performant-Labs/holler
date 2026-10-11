@@ -483,3 +483,20 @@
     - `649-diff-result-r1.md`, and its prompt's evidence and excerpt sections;
     - `dual-review.sh` (the excerpt cap and `--evidence`) and the driver's `buildDiffGateCaptureTaskPrompt`;
     - T's `wired.rs`, `env.rs` and `main.rs` (`with_env`).
+
+## T (Phase 7, verify GREEN, second cycle: the re-entry after the diff gate's round-1 BLOCK) — 2026-10-11T14:38:21-06:00
+- **Decided:**
+  - **GREEN, no blocking issue.** The W-T row and the 6 s pin pass. The default run is 61/0/4 and the opt-in run 4/4.
+  - **One table value added:** `""` in `env::the_serve_args_are_a_json_array_of_strings_default_none`.
+    - F's new docs say the empty value (which is how a non-UTF-8 value reads) is `usage` for every variable but the workspaces.
+    - The serve arguments' empty value was the one such case with no test.
+  - **No second process-level non-UTF-8 row.** The one closure in `connect` is pinned by the W-T row, and `env.rs` pins each reader's empty value.
+- **Assumed:**
+  - CI runs no `rustfmt`, as `ci.yml` and `lint.sh` show. So the test tree's existing bare-rustfmt drift in `support/` is not this story's.
+- **Hedged:**
+  - A non-UTF-8 `HOLLER_HERDR_WORKSPACES` is left as F's known issue: it fails closed, but the message does not name the variable. Advisory, not blocking.
+- **Evidence:**
+  - **M8**, a lossy conversion in `connect`: the W-T row FAILED (`host.ensure_session … got Ok(())`). The file was restored, and `git status` was clean.
+  - **Workspace** (`--no-fail-fast`, CI's skip): 2312 passed, 1 failed, 32 ignored. The failure is the rename scan, whose only hits are under `docs/handoffs/`.
+  - **Clean:** clippy `-D warnings`, `lint.sh`, `changelog-check`, `cargo machete`, `docs_cli_test` 3/3, `wire_selftest` 3/3, and `rustfmt` on `wiring.rs`.
+  - **Leftovers:** none after the opt-in and mutation runs (no `/tmp/hlr649-*/`, no `hlr649` process).
