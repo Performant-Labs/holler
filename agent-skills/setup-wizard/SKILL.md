@@ -845,7 +845,8 @@ plan and show it before touching anything:
   `~/Projects/other-project`)." Not assumed to be exactly one, not assumed to be Claude.
 - **With no sessions (N=0),** say so: "Stages 4, 5, 7 and 9 are skipped (no sessions)", reported as skipped, never as failed, and with
   no remote host the `tailscale serve` line of Stage 6 is skipped too (no remote host dials the
-  hub); the hub is still started and every orchestrator pane is still built.
+  hub), so leave `WIZARD_SERVE_HTTPS_PORT` empty on the local call (a port never used must not
+  refuse the plan); the hub is still started and every orchestrator pane is still built.
 - **Sessions (from the config), grouped by their own `remote_host`** — the real N, names,
   ports (the ones `instance.sh` printed in Stage 1, never recomputed), and **harnesses**,
   organized per host, not as one flat list — e.g. "2 hosts: remote-a
@@ -859,14 +860,19 @@ plan and show it before touching anything:
   instance's contract values set inline on that command: `WIZARD_INSTANCE_NAME`,
   `WIZARD_STATE_DIR` (that host's resolved one), `WIZARD_BACKEND_PORTS` (the ports `instance.sh`
   printed for the sessions that run on that host) and `WIZARD_LEDGER` (that host's ledger: the
-  fetched `<scratch>/ledger-<host>.toml` for a remote host, as in the command below;
-  `<state_dir>/herdr/setup/wizard-ledger.toml` for this machine); on the hub host also `WIZARD_HUB_PORT`, `WIZARD_SERVE_HTTPS_PORT` and
-  `WIZARD_HERDR_SESSION`:
+  fetched `<scratch>/ledger-<host>.toml` for a remote host; `<state_dir>/herdr/setup/wizard-ledger.toml`
+  for this machine). The local call also carries the four hub-only variables; a remote host's call
+  carries none of them:
   ```bash
-  WIZARD_HERDR_HOST=1 WIZARD_INSTANCE_NAME=<name> WIZARD_HUB_PORT=<hub_port> WIZARD_SERVE_HTTPS_PORT=<serve_https_port> WIZARD_HERDR_SESSION=<herdr_session> WIZARD_STATE_DIR=<state_dir> WIZARD_BACKEND_PORTS="<ports on this host>" WIZARD_LEDGER=<scratch>/ledger-<host>.toml bash $WIZARD_LIB/collide.sh <host-label> <scratch>/inventory-<host>.tsv
+  # this machine (the hub and Herdr host):
+  WIZARD_HERDR_HOST=1 WIZARD_INSTANCE_NAME=<name> WIZARD_HUB_PORT=<hub_port> WIZARD_SERVE_HTTPS_PORT=<serve_https_port> WIZARD_HERDR_SESSION=<herdr_session> WIZARD_STATE_DIR=<state_dir> WIZARD_BACKEND_PORTS="<ports on this host>" WIZARD_LEDGER=<state_dir>/herdr/setup/wizard-ledger.toml bash $WIZARD_LIB/collide.sh <host-label> <scratch>/inventory-<host>.tsv
+  # each remote host:
+  WIZARD_INSTANCE_NAME=<name> WIZARD_STATE_DIR=<state_dir> WIZARD_BACKEND_PORTS="<ports on this host>" WIZARD_LEDGER=<scratch>/ledger-<host>.toml bash $WIZARD_LIB/collide.sh <host-label> <scratch>/inventory-<host>.tsv
   ```
   `WIZARD_HERDR_HOST=1` marks the host that runs the Herdr server (the unnamed-server refusal below
-  applies only there): set it on the local call only, never on a remote host's call.
+  applies only there): set it on the local call only, never on a remote host's call. The same goes
+  for `WIZARD_HUB_PORT`, `WIZARD_SERVE_HTTPS_PORT` and `WIZARD_HERDR_SESSION`: a remote host builds
+  no hub and no Herdr, so they belong to the local call only.
   Its output is the inventory printed beside what the run will create: everything that runs and
   was not created by this instance is listed as "present, not touched" (so is this instance's own
   `tailscale serve` entry, when the ledger has a live `hub` row). It exits 1 and prints a
@@ -896,14 +902,15 @@ plan and show it before touching anything:
     `serve_https_port`.
   - **The default instance and a running unnamed Herdr server with no live `herdr` row in the
     ledger** (`REFUSED: an unnamed herdr server is already running`): that server is foreign. Ask
-    one question: build in it (the user's own yes; then Stage 8 reuses it and records nothing for
-    it), or stop (set a `herdr_session` in an `[instance]` table, which makes the instance
+    one question: build in it (the user's own yes to using the server; "build in it" means a new
+    workspace in that server, `herdr.sh run workspace create`, never splitting the panes it already
+    has; Stage 8 builds there and records nothing for it), or stop (set a `herdr_session` in an `[instance]` table, which makes the instance
     non-default). Never stop that server.
 - **What's already running vs. what will be started fresh, per host.** "Reused" means exactly one
   thing: a **live row in this instance's own ledger** (its pid, start time and command still
   match; see Stage 4, "Reuse on a rerun"). List per host which backends, the hub, the bodies and
   the Herdr server are reused that way and which will be started new. When `herdr session list`
-  shows a stopped session of the instance's name, say so here: starting the Herdr server restores
+  shows a stopped session of the instance's name (for the default instance (no `herdr_session`) the entry named `default`), say so here: starting the Herdr server restores
   that saved session (its workspaces and panes, and an agent in a pane may resume), so Stage 8
   checks `pane list` after `server-start` and builds a **new workspace** beside any panes the
   wizard did not create (`workspace create`, with the user's yes). A listener on a planned
@@ -1317,7 +1324,10 @@ wizard did not create (it counts as created only when the ledger has a **live** 
 it). If `check-pane` stops, do not split anything. **For the default instance, a running unnamed
 Herdr server with no live `herdr` row is foreign** (Stage 3's question "build in it, or stop"):
 only with the user's yes to building in it does this stage use that server, and the wizard never
-stops it; without that yes, stop here and ask.
+stops it; without that yes, stop here and ask. "Build in it" means a new workspace in that server
+(`herdr.sh run workspace create`): never split a pane the wizard did not create. Read the new
+workspace's first pane id from `herdr.sh run pane list`, filtered by the new workspace id; that
+pane is `<base-pane>` below.
 
 **Do (server check, first, only if the plan called for a fresh server):**
 ```bash
@@ -1339,7 +1349,8 @@ sleep 3
 (its workspaces and panes, and an agent in a pane may resume). When `pane list` shows panes the
 wizard did not create, never split or close them: report them to the user and, with the user's
 yes, build a **new workspace** beside them with `herdr.sh run workspace create` (then split and
-label only that workspace's panes), or reuse them only if the user asks.
+label only that workspace's panes), or reuse them only if the user asks (see the reuse branch
+below).
 Then record the server in the ledger, with that pid, so a later run knows this wizard created the
 session (for the default instance, leave out `--session`):
 ```bash
@@ -1363,17 +1374,20 @@ run already present, the orchestrator pane's Claude conversation **auto-resumed*
 re-launched it via `claude --resume <id>` on its own), and the two session-viewer panes back as
 **dead shells** showing `opencode --session <old id>` → `Session not found` (their old
 `session_id`s no longer exist on the freshly started backends). So check `herdr.sh run pane list`
-before splitting anything: if the pane count already equals M+N, reuse the restored structure —
-don't split again (that produces M+N+… panes and a wrong layout) — skip re-launching an
-orchestrator pane that resumed idle and healthy, and re-attach only the dead viewer panes in
-Stage 9 using this run's *new* session ids. If the count doesn't match, that's the "config
-changed" case in "If a stage fails" below.
+before splitting anything. Those panes are the user's, not the wizard's, so they are reused only
+on request. **Reuse branch:** if the user asked to reuse them and the count equals M+N, reuse the
+restored structure — don't split again (that produces M+N+… panes and a wrong layout) — skip
+re-launching an orchestrator pane that resumed idle and healthy, and re-attach only the dead
+viewer panes in Stage 9 using this run's *new* session ids. If the user asked to reuse them and
+the count doesn't match, that's the "config changed" case in "If a stage fails" below. If the user
+did not ask, build a new workspace as above.
 
-If reusing an existing server (per Stage 3's plan), check whether a workspace matching this
+If reusing an existing server (per Stage 3's plan; that means a workspace in it, never a split
+of its existing panes), check whether a workspace matching this
 run's target shape already exists (`herdr.sh run workspace list` / `herdr.sh run pane list`) before splitting
 more — a persisted session can survive a server restart with its pane *structure* intact even
 though the processes inside are gone (confirmed live 2026-09-22); reusing that structure is
-fine, but verify pane **count matches (M+N)** for *this* config, not an old run's count. If it
+allowed only if the user asked for it, and then verify pane **count matches (M+N)** for *this* config, not an old run's count. If it
 doesn't match (the config has grown/shrunk since the layout was built), this should already
 have been flagged in Stage 3's plan — don't silently under- or over-provision panes relative to
 the current config.
@@ -1422,7 +1436,10 @@ front, e.g. `<base-pane>` gets `o1` and `<p3>` gets `alpha`:
 
 **Verify:** `herdr.sh run pane list` shows exactly (M+N−1) new panes beyond the pre-existing base pane
 (M+N total in the workspace, M of which map to `[[orchestrator]]` entries and N of which map to
-real sessions), in the expected layout, and every pane's label equals its slot name.
+real sessions), in the expected layout, and every pane's label equals its slot name. Then read
+`herdr.sh run pane list` again and tell the user if the widths look uneven: chained right-splits
+may leave columns at about 1/2, 1/4, 1/8, 1/8 of the width unless Herdr rebalances. This is
+unverified until the operator story #734 and the new-user run #778 check it with the real Herdr.
 
 **Gate:** if `herdr.sh run pane split` errors, or the pane count doesn't match M+N, stop and confirm
 the target workspace/pane with the user before retrying — don't chain more splits on a layout
@@ -1545,8 +1562,9 @@ wrong.
 
 **Ask:** nothing.
 
-**With no sessions, verify what exists:** the hub answers (`holler hub status`) and every
-orchestrator pane is alive; this stage does not look for sessions, a roster or a `say`.
+**With no sessions, verify what exists:** the hub answers
+(`HOLLER_STATE_DIR=<state_dir> holler hub status` shows `listening: 127.0.0.1:<hub_port>`) and every
+orchestrator pane is alive (`<herdr_env> bash $WIZARD_LIB/herdr.sh run pane read <orch-pane>` shows its live prompt); this stage does not look for sessions, a roster or a `say`.
 
 **Do**, for every session in the config:
 (`<label>` is the Stage 7 token label.)
@@ -1582,7 +1600,7 @@ declare success on the CLI half alone for a session that was supposed to be pane
 don't rely on `pane get`'s `revision` field either (it does not reliably bump on new
 content — confirmed live 2026-09-22, a real new turn landed with `revision` unchanged).
 
-**All 10 stages green = done.** Report the final layout (which pane is which orchestrator or
+**Every stage green or skipped = done.** Report the final layout (which pane is which orchestrator or
 session) and every session id, so the user has them on hand for a later "recover a dead pane"
 run. Then give the user precise instructions to actually **see** the workspace, since
 everything above ran headlessly over Herdr's socket API — nothing was visible on screen yet:

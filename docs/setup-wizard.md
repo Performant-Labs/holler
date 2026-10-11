@@ -231,9 +231,9 @@ more than one.
   panes were already there, the orchestrator pane's Claude conversation had auto-resumed
   (`claude --resume <id>`), and the two viewer panes had come back as dead shells running
   `opencode --session <old id>` → `Session not found`. Check `herdr pane list` before splitting:
-  if the pane count already equals orchestrators + sessions, reuse the structure, leave a
-  healthy resumed orchestrator alone, and re-attach only the dead viewer panes using the new run's
-  session ids.
+  if the user asked to reuse them and the count equals orchestrators + sessions, reuse the
+  structure, leave a healthy resumed orchestrator alone, and re-attach only the dead viewer panes
+  using the new run's session ids.
   The wizard never splits or closes panes it did not create: when `pane list` shows such panes
   after the server starts, it reports them and, with the user's yes, builds a new workspace beside
   them (`workspace create`), or reuses them only if the user asks. Stage 3 says this in the plan
@@ -446,7 +446,7 @@ Stage 2 takes a read-only inventory of each host the run touches
 configuration and the Herdr sessions; a tool it needs and cannot find on `PATH` is reported as a
 `warn` line, never skipped silently. It only runs `ss`/`lsof`, `ps`, `tailscale serve status` and
 `herdr session list` (the Herdr section runs only with `WIZARD_INVENTORY_HERDR=1`, which the skill
-sets on the local line only, and `WIZARD_HERDR_HOST=1` on the local `collide.sh` call only; a missing `herdr` on a remote host is expected); it never writes,
+sets on the local line only, and `WIZARD_HERDR_HOST=1`, `WIZARD_HUB_PORT`, `WIZARD_SERVE_HTTPS_PORT` and `WIZARD_HERDR_SESSION` on the local `collide.sh` call only, never on a remote call, and `WIZARD_SERVE_HTTPS_PORT` empty when there are no sessions; a missing `herdr` on a remote host is expected); it never writes,
 signals, starts or stops anything. The first line of an inventory is `home<TAB><that host's $HOME>`,
 the home that `-` and `~/` state directories are resolved against. A remote inventory is taken with
 `ssh <remote_host> 'bash -l -s' < .../inventory.sh` so a login shell's `PATH` applies. Stage 3 feeds each
@@ -457,8 +457,9 @@ than warning, when anything collides with something this instance did not create
 already in use, a hub already listening on `hub_port`, a state directory already in use (a hub
 or body row whose state directory is not visible counts as the default one), or a Herdr session
 of the same name. For the default instance, a running unnamed Herdr server with no live `herdr`
-ledger row is foreign and refused too; the operator may answer yes to "build in it" in Stage 3,
-and the wizard still never stops it. A serve entry that is the instance's own port pair with no
+ledger row is foreign and refused too; the operator may answer yes to "build in it" in Stage 3
+(which means a new workspace in that server, never a split of its panes), and the wizard still
+never stops it. A serve entry that is the instance's own port pair with no
 live hub is reported as such and is not refused. It does not check bodies per session, because a body's session is not on its
 command line. Each
 refusal names the colliding item and the config key to change (`hub_port`, `serve_https_port`,
@@ -494,6 +495,14 @@ yes, `herdr.sh session-delete` (the instance's own session, stopped only, refuse
 has a live `herdr` row); for a running one the answer is another `herdr_session`. The same verb
 removes the stopped session after a teardown. The server log is named for the instance and lives in the instance's logs directory
 (`<state_dir>/logs/<prefix>-herdr-server.log`), never under `/tmp`.
+
+`herdr.sh server-start` scrubs the environment: only an allow-list reaches the server and so every
+pane it opens. It is `PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`, `TERM`, `LANG`, `LC_*`, `TMPDIR`,
+`XDG_*` and `HERDR_*`, plus what an interactive pane needs: `SSH_AUTH_SOCK`, `DISPLAY`,
+`WAYLAND_DISPLAY`, `DBUS_SESSION_BUS_ADDRESS`, `COLORTERM`, `TZ`, `EDITOR`, `VISUAL`, `LANGUAGE`, the
+proxy variables (`HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, `ALL_PROXY`, in both cases) and
+`SSL_CERT_FILE`, `SSL_CERT_DIR`, `NODE_EXTRA_CA_CERTS`. The driving agent's own variables (`CLAUDE_*`,
+`ANTHROPIC_*`, tokens, keys) stay out. Put anything else a pane needs in your shell rc.
 
 Unverified until story #734 checks it with the real binary: how a pane's own session is learned
 (`HERDR_PANE_ID` and `HERDR_SESSION` in the environment, in one function, `pane_session`, in
