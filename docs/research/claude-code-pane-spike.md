@@ -265,7 +265,7 @@ The docs list more `waitingFor` values (`sandbox request`, `worker request`, `di
 `ClaudeCode` implements `HarnessPort`. It composes three small seams, each faked in the test kit (below): `claude
 agents --json` (list), a unix-socket write (deliver), and `claude auth status` (login).
 
-**Launch** (`holler pane launch --harness claude`): the launch engine chooses a fresh UUID *first* (this is
+**Launch** (the `launch` verb with a Claude harness, a flag that does not exist yet): the launch engine chooses a fresh UUID *first* (this is
 `create_session`; it is a Holler-side value, not a server call), records it as `session_of_record`, and runs the argv
 above through `HostPort::run` in the pane's tmux session. The `--settings` JSON carries `crossSessionInbound: accept` and a
 `SessionStart` hook that tells Holler the socket path. The observe step is `agents --json` for the pane's pid: the entry
