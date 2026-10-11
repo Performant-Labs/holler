@@ -85,3 +85,34 @@ This file is append-only: every phase adds its entry.
   `import/findings.rs`, `holler-adapter-opencode/src/server.rs:31`, `holler-pane-testkit/src/envelope.rs:202`,
   `holler-cli/Cargo.toml`, `pane/wiring.rs:1-40`, `scripts/pane-restart:1-12`, `docs/README.md` and
   `docs/orchestrating.md` headings, ADR-0021 line 302; greps for the interim anchor, the stop-gap sentence and `hj-c`.
+
+## T, author tests (RED): 2026-10-11T14:38-06:00 (MDT)
+
+- **Decided:** RED is valid. There is one new target, `docs_pane_control_test`, with 16 tests: acceptances 1 to 5 and
+  7 to 17 each have a test, and acceptance 6 is the existing `docs_cli_test`. All 16 fail on missing-content
+  assertions (`docs/handoffs/652/handoff-T-red.md`). The file has 511 lines, so it stays a single file and needs no
+  directory target (A warn 5).
+  - Section 3's heading forms are computed from the clap tree: required positionals, then required flags, plus
+    `--herdr-session NAME` for `pane import`. The result agrees with A's warn 1 (`switch PANE SESSION`;
+    `park --reason TEXT --release-when WHEN`). The handoff lists the forms for F.
+  - The class column in the error-code table is built as `<word> (<class_of(code).exit_code()>)`. The word comes from
+    matching on `ErrorClass`, and the number is never typed.
+- **Assumed:**
+  - Acceptance 15's "apply reference" is the `` ### `holler profile apply `` subsection of section 3 together with
+    section 6. The brief does not fix where the reference sits, and these are the two places it points to.
+  - Acceptance 4 is checked with a whole-word match for each column name, with no backticks required. The brief says
+    only that each name "appears".
+- **Hedged:**
+  - A missing file reads as empty instead of panicking, so each test shows its own list of missing items.
+  - Tests 12 and 13 each add a non-vacuity check (at least one scanned `holler ` command; at least one success and one
+    failure envelope), so neither passes on an empty guide. Without these checks, both would be green before the
+    guide exists, which is not a valid RED.
+  - The section 3 heading must start with the exact computed span. A suffix after the closing backtick is allowed.
+- **Evidence:**
+  - Ran `cargo test -p holler-cli --test docs_pane_control_test`: 0 passed, 16 failed.
+  - Ran a positive control with a temporary scratch guide, deleted afterwards: tests 5, 11, 12 and 13 passed, and the
+    classed rows and the `switch` heading matched.
+  - `cargo clippy ... -D warnings` was clean, and `bash scripts/lint.sh` exited 0.
+  - Read: `findings.rs` (`FindingKind::ALL`), `import/findings.rs`, `import.rs:45`, `error.rs:146,221-266`,
+    `grid.rs:44`, `pane/list.rs:30`, `holler-pane-testkit/src/envelope.rs:202`, and the verb `Args` in
+    `pane/{switch,park,import,get,launch,relaunch,reset,unpark,close,doctor,list,watch}.rs`.

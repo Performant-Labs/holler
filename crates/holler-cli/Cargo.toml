@@ -89,6 +89,12 @@ path = "tests/cli_surface_test.rs"
 name = "docs_cli_test"
 path = "tests/docs_cli_test.rs"
 
+# The operator guide of `holler pane` (issue #652): docs/pane-control.md names
+# every verb, finding kind, error code and column the code's own tables hold.
+[[test]]
+name = "docs_pane_control_test"
+path = "tests/docs_pane_control_test.rs"
+
 # `holler hub serve` + `holler hub status` e2e (story #143): the hub's
 # WebSocket listener, instance lock, Unix-domain control socket, and status.
 [[test]]
