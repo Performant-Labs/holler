@@ -193,3 +193,17 @@ Run handoff directory `docs/handoffs/644` Â· branch `issue-644-implementation` Â
   - `git grep` on the sibling branches #642, #647, #649, #650 and #664 found no exhaustive match on `SpecField` or
     `FieldValue`. `git diff` hunk positions were checked for #664's ADR and CHANGELOG edits.
   - `docs/handoffs/644/evidence.md`: 18 entries, each excerpt checked by script against its `file:line`.
+
+## T, verify (GREEN) + Tier 2: 2026-10-11T11:09-06:00 (MDT)
+
+- **Decided:** GREEN, no blocking issue (`docs/handoffs/644/handoff-T-green.md`). PASS.
+  - All 13 RED tests pass; workspace test (the configured `test.unit.command`), clippy, lint, changelog-check, machete,
+    `docs_cli_test` and `wire_selftest` all pass. F's reported numbers reproduce exactly.
+  - No test was repaired: F flagged none and T found none.
+  - Three removal mutations (no text clause; `Report.agent` always `None`; `Key(None)` printing `none`) each turned
+    tests red, then were reverted with `git checkout`.
+  - Appended two evidence entries (fake `verify_serving`'s `agent-mismatch` message, `fail_next`) for unchanged test-kit
+    facts the refusal table relies on.
+- **Assumed:** F's ADR-0003 one-token edit (Deviation 1) is O's call to keep; it does not affect any test.
+- **Hedged:** none.
+- **Evidence:** the Tier 1 log in this session's scratchpad; `handoff-T-green.md` tables.

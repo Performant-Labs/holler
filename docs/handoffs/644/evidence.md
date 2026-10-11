@@ -191,3 +191,39 @@ uncommitted change (line numbers are that tree's). Append-only; T adds its own e
   **Source:** `docs/adr/ADR-0021.md:693`
   **Verbatim excerpt:**
   > - `schema_version` is an integer and is 1 now. Adding a field to the envelope or to a verb's `data` does not change it.
+
+## T (Phase 7 verify), 2026-10-11
+
+Entries the refusal table in `crates/holler-cli/tests/pane_verbs/launch/agent.rs` relies on, in unchanged test-kit code.
+Each excerpt was copied by T from the source.
+
+- **Fact:** the fake's `verify_serving` answers `Ok` only when the running server's agent is the spec's, and otherwise refuses `agent-mismatch` with the message `MISMATCH_MESSAGE` pins (port 48100 is the rig's `PORT`).
+  **Source:** `crates/holler-pane-testkit/src/harness.rs:332-344`
+  **Verbatim excerpt:**
+  > ```rust
+  >     fn verify_serving(&self, port: u16, spec: &ServeSpec) -> Result<(), PaneError> {
+  >         self.faults.enter(HarnessOp::VerifyServing)?;
+  >         let world = self.lock();
+  >         world.reach(port, HarnessOp::VerifyServing)?;
+  >         let running = world.servers.get(&port).and_then(|s| s.agent.as_ref());
+  >         if running == spec.agent.as_ref() {
+  >             return Ok(());
+  >         }
+  >         Err(PaneError::Refused {
+  >             code: AGENT_MISMATCH,
+  >             message: format!("the server on port {port} does not run the agent the spec asks for"),
+  >         })
+  >     }
+  > ```
+
+- **Fact:** `fail_next` makes the next call of one method fail once with the given error, which is how the stand-in row gets an open code (`agent-unusable`) from `verify_serving`.
+  **Source:** `crates/holler-pane-testkit/src/fault.rs:72-77`
+  **Verbatim excerpt:**
+  > ```rust
+  >     /// Fail the next call of `op` with `error`, once. The errors queued for one method
+  >     /// come out in the order they were queued, and a call of another method leaves them
+  >     /// queued. A standing fault answers first, also leaving them queued.
+  >     pub fn fail_next(&self, op: Op, error: PaneError) {
+  >         self.lock().queued.push((op, error));
+  >     }
+  > ```
