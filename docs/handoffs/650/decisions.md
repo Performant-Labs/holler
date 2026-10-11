@@ -257,3 +257,53 @@ Run handoff directory `docs/handoffs/650` Â· branch `issue-650-implementation` Â
   - `git log 7284001..origin/main`: #644 merged as `b8242d7`, adding `SpecField::OpencodeAgent`, which `push_spec` now
     prints. `git merge-tree --write-tree HEAD origin/main` exits 0. The files both sides touch are `CHANGELOG.md`,
     ADR-0003 and ADR-0021.
+
+## S, spec audit (Phase 10): 2026-10-11T12:10-06:00 (MDT)
+
+- **Decided:** PASS on `7284001..542b5dc`. `docs/handoffs/650/handoff-S.md` has the detail.
+  - All fourteen acceptance criteria have a test that asserts the behaviour, and T-green's two mutations fail the named
+    tests.
+  - Acceptance 10's last clause, "a follow-up issue is filed", is an outward act and is not done. It is a pre-merge
+    action for the run's agent (advisory 1), not F's rework.
+  - The operator decisions and the brief's sections are implemented as stated. The code departs from the brief's
+    literal text only where a decision is recorded:
+    - `tmux-session-missing`: the brief's own spelling rule, and A's warn 1;
+    - the health after a failed list: the operator's comment;
+    - the kept `// #650` line: the operator's comment;
+    - `text` not widened;
+    - the text form's layout: A's warn 6.
+- **Assumed:**
+  - The brief governs where it differs from the issue body, as the operator's comment on #650 says (2026-10-11 11:33
+    MDT).
+  - T's and F's recorded runs stand. I re-ran no build or test, per the role. My only checks were read-only:
+    `rustfmt --check` on the touched files, `git merge-tree`, greps and `wc -l`.
+  - The script commits this handoff and this entry at the phase commit.
+- **Hedged:**
+  - The brief contradicts itself on `no-tmux-session`: its list names it, while its rule and its join item 3 point to
+    reconcile's code. I did not call this an `ADVISORY-HOLD`, because the code follows the rule and the operator's own
+    reason ("reuse `pane doctor`'s vocabulary"). A code is stable once merged, so the issue should record the choice
+    before the merge (advisory 3).
+  - Three message clauses are pinned by reading only (advisory 4, test-only, size XS).
+  - `origin/main` moved to `3286486` (#642 part 3) after A-dup's trial merge. The merge now conflicts in `CHANGELOG.md`
+    and in ADR-0021's open-codes row, both text only (advisory 2).
+- **Evidence:**
+  - Live:
+    - `gh issue view 650`: the body is the text from before the amendments, and its one comment is the operator's
+      amendment.
+    - `gh issue list --search` for the follow-up: none found.
+    - `git merge-tree --write-tree HEAD origin/main`: two doc conflicts.
+  - Read:
+    - the brief through "Evidence", with E10 and the `holler_body::config` evidence;
+    - every handoff, this journal and `evidence.md`;
+    - the outside diff gate's result (PASS; NV-1 settled by `RawSession.harness`, which has no default).
+  - Diffs: `git diff origin/main...HEAD` for every production, test, fixture, ADR and CHANGELOG file.
+  - Source checked:
+    - `holler_body::config`: `RawSession`, `ConfigError`, `load` and `parse`;
+    - `Argv`, `PaneName::parse`, `insert_profile`, `is_member`, `pane_list`, `optional_text` and `class_of`;
+    - the fake harness's `health`, `list_sessions` and `reach`;
+    - five `evidence.md` excerpts.
+  - Greps over the added lines:
+    - panics and `#[allow]`;
+    - logging calls on the import path;
+    - sleeps in the new tests;
+    - private identifiers.
