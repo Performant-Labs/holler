@@ -242,6 +242,11 @@ whole schema on me and ask me to fill it in cold. Instead:
    but still using Tailscale for discovery per step 1 wherever it applies.
 3. Write the file from my answers and show it to me before treating it as the real config.
 
+If I don't name the panes, name each one for its grid cell, row then column, like a spreadsheet
+cell: `r1c1`, `r1c2`, `r1c3`, `r1c4` for the first row, `r2c1` for the second row's first cell, and
+so on (for a bare pane count, propose the squarest grid and ask one confirm). An existing global
+`sessions.toml` skips this interview; to start clean I move it aside, and you never delete it.
+
 Once a real config exists, preflight every distinct remote host (SSH
 reachability, the `holler` binary, each session's model endpoint), present the concrete plan
 you're about to execute and get my explicit yes before changing anything, start the remote
