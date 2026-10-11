@@ -3,7 +3,7 @@
 Repo: Performant-Labs/holler. Issue: #838 (part of epic #726). Rigor: in-session. UI surface: no. Kind: feature (skill text, docs and tests only).
 
 ## Problem
-The Herdr session is reachable only through the optional `[instance]` table and the wizard never asks about it. Stage 1's scenario menu (A to D) covers orchestrators, sessions and layout, so a config built from it has no `[instance]` table and the wizard silently builds in the unnamed `default` Herdr server. A user with other Herdr sessions (seen live: a running `jupiter`, a stopped `default`) is never told they exist, and one who wants a named session must hand-write `[instance]` with the right `state_dir` and ports. Herdr has no session rename, so the choice has to be made when the workspace is first built. The GitHub issue (#838) is the source of truth; this brief restates it.
+The Herdr session is reachable only through the optional `[instance]` table and the wizard never asks about it. Stage 1's scenario menu (A to D) covers orchestrators, sessions and layout, so a config built from it has no `[instance]` table and the wizard silently builds in the unnamed `default` Herdr server. A user with other Herdr sessions (for example a running named session and a stopped `default`) is never told they exist, and one who wants a named session must hand-write `[instance]` with the right `state_dir` and ports. Herdr has no session rename, so the choice has to be made when the workspace is first built. The GitHub issue (#838) is the source of truth; this brief restates it.
 
 ## Evidence (verbatim, as of `main` 652841b)
 
