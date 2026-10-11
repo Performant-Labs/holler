@@ -96,3 +96,29 @@
   - These are clean: clippy `-D warnings`, `lint.sh`, `changelog-check`, `cargo machete`, `docs_cli_test`, `cli_surface_test`, `wire_selftest`, `test-hooks.sh`, `pipeline-adoption-test.sh`, and rustfmt on the changed files.
   - Five mutants of F's code were all killed, each reverted with `git checkout`.
   - I compared the twins `leave` and `join` in `run.rs` with `profile::delete::detach` and `profile::create::join` by reading both.
+
+## A (Phase 3 re-entry, up-front plan review, round 2): 2026-10-11 08:14 MDT
+- **Decided:** BLOCK, with 1 block and 4 warns (`docs/handoffs/664/handoff-A.md`).
+  - **The block.** The brief gives the up-front observation two shapes that cannot both hold:
+    - §9 bounds it by one I5 per-call bound ("10 s plus N step bounds").
+    - C1 step 3 and C4 put each pane's `health` and shown session on one thread, which makes a chain of two per-call bounds.
+  - **How it surfaced.** F ran one thread per call to keep §9, and the outside diff gate blocked that on "one thread per pane". No code meets every sentence, so another T/F cycle would end in a block, so the brief must change.
+  - **The amendment I recommend (option 1).** An O-level clarification that applies the brief's precedence rule (§9 wins) and keeps F's per-call shape, with ready-to-paste text in Notes for O. Option 2, the per-pane chain, needs the operator, because it changes §9's arithmetic.
+  - **The warns:**
+    1. `observe.rs`'s doc claims `observe_all`'s shape but has only its mechanism.
+    2. Name the step vocabulary in the same amendment, because §5 calls its outcomes exhaustive without `planned`.
+    3. File §9's and §13's follow-ups before the PR.
+    4. Round 1's warn 5 stays open for the operator.
+- **Assumed:**
+  - **How the run got here.** It reached A through `nextPhase(7, BLOCK)`, with F's `archChanged` true: the diff gate ran at 07:59, after T-green at 07:58. The task's "before any code exists" is the script's fixed wording, so I reviewed the plan with F's code as evidence.
+  - **What my BLOCK does.** On the unchanged brief, the script stops with `needs-amendment`, which is the route for a brief defect. A PASS would have sent T and F into a cycle the brief cannot settle.
+- **Hedged:**
+  - **The recommendation.** I judged the per-call fan-out sound and recommended keeping it, because §9 is the operator's text and a pane's two reads are independent. The per-pane chain is the house shape (`reconcile`), and choosing it is the operator's call.
+  - **What I cannot predict.** I cannot say what the outside gate will make of an amended brief.
+  - **My own miss.** My round-1 PASS missed this contradiction.
+- **Evidence:**
+  - **Reviews and run state.** I read `664-diff-result-r1.md` whole, and its usage file (model `deepseek-v4-pro`). I read the script's phase-4 entry, `nextPhase`, `decideArchReReview`, `buildArchStop` and `RESUMABLE_PHASES`.
+  - **The brief.** I read §1 to §13, C1 to C20, O1 to O6 and the decisions on them. I grepped every "thread", "chain" and "slowest" in it. It is unchanged since `7bd8242` (`git diff --stat` is empty).
+  - **The code.** I read F's `tx_apply.rs`, `tx_apply/observe.rs`, `tx_apply/run.rs` and `profile/apply.rs`, and the diffs of `show.rs`, ADR-0021, ADR-0003, `cli-surface.txt`, the CHANGELOG and `profile_verbs/rig.rs`. I read `reconcile.rs`'s `observe_all` and `reconcile/observe.rs`'s chain, ADR-0021 sections 2 and 12 on I5, `diff_profile`, `PaneName::parse`, and the profile name's text-form notes.
+  - **The tests.** I read `apply/observe.rs`, `apply/bound.rs`'s timing tests (entries 26 and 27 time only unrecorded panes) and entry 19's hook. Neither thread shape breaks a test.
+  - **Untouched shared code.** `tx_launch.rs`, `lib.rs` and the Cargo files are unchanged on the branch.
