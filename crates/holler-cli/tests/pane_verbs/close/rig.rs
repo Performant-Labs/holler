@@ -321,15 +321,39 @@ impl Both {
             assert_untouched(&run.calls);
         }
     }
+
+    /// [`Self::assert_untouched`] for a pane with no record: Herdr may be read (#832).
+    pub fn assert_untouched_after_missing_record(&self) {
+        for (_, run) in self.each() {
+            assert_untouched_after_missing_record(&run.calls);
+        }
+    }
 }
 
 /// Nothing live was called and neither store was written, over `calls`.
+///
+/// **No Herdr call at all**: a pane that has a record costs no read of Herdr (#832). The one
+/// exception is [`assert_untouched_after_missing_record`].
 pub(crate) fn assert_untouched(calls: &Calls) {
-    assert!(
-        crate::list::only_herdr_reads(&calls.herdr),
-        "no Herdr call that acts, only reads: {:?}",
-        calls.herdr
-    );
+    assert_untouched_with(calls, false);
+}
+
+/// [`assert_untouched`] for a refusal of a pane that has **no record**: the verb may read
+/// Herdr (`snapshot`) to tell an unmanaged pane from a typo (#832), and nothing that acts.
+pub(crate) fn assert_untouched_after_missing_record(calls: &Calls) {
+    assert_untouched_with(calls, true);
+}
+
+fn assert_untouched_with(calls: &Calls, herdr_reads_ok: bool) {
+    if herdr_reads_ok {
+        assert!(
+            crate::list::only_herdr_reads(&calls.herdr),
+            "no Herdr call that acts, only reads: {:?}",
+            calls.herdr
+        );
+    } else {
+        assert_eq!(calls.herdr, vec![], "no Herdr call: {:?}", calls.herdr);
+    }
     assert_eq!(calls.host, vec![], "no host call: {:?}", calls.host);
     assert_eq!(calls.harness, vec![], "no harness call");
     assert_eq!(calls.probes, vec![], "no probe run");

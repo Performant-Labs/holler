@@ -80,10 +80,12 @@ fn acting_pane(cmd: &PaneCmd) -> Option<&str> {
 /// names is visible, not drivable, so each such verb refuses it the same way
 /// (`pane-unmanaged`, exit 3) instead of reporting a missing record. A verb does that where
 /// it finds no record, through `unmanaged::missing`, so a pane that has a record costs no
-/// extra read. The one case a verb cannot see is a Herdr pane **id** (`w1:p3`), which is not
-/// a valid pane name and would be a `usage` error before any lookup: it is checked here.
+/// extra read. The case a verb cannot see is an argument that is **not a valid pane name**:
+/// a Herdr pane id (`w1:p3`), or a label, which Herdr allows to be any text (`Claude Code`, a
+/// label with upper case or over 32 characters). The verb would answer `usage` before any
+/// lookup, so it is checked here, and `usage` stands only when no unmanaged pane answers to it.
 pub fn run(cmd: &PaneCmd, ctx: &mut VerbCtx<'_>) -> i32 {
-    if let Some(arg) = acting_pane(cmd).filter(|arg| is_herdr_pane_id_shaped(arg)) {
+    if let Some(arg) = acting_pane(cmd).filter(|arg| holler_pane::PaneName::parse(arg).is_err()) {
         if let Err(error) = unmanaged::refuse_if_unmanaged(ctx.ports, arg) {
             return emit_error(&mut ctx.sink, ctx.format, ErrorBody::from(&error));
         }
