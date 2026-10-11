@@ -1,129 +1,144 @@
 # Handoff-A-dup: Phase 8 - #649 hub wiring and the scratch integration scenario  (anti-duplication gate)
 
-**Date:** 2026-10-11
+**Date:** 2026-10-11 (16:07 MDT)
 **Branch:** issue-649-implementation (worktree `.claude/worktrees/0649-live-harness`)
-**Diff base:** `5d366b9` (the merge base with `origin/main`)   **Diff head:** `c13400a`
+**Diff base:** `5d366b9` (the merge base with `origin/main`)   **Diff head:** `98280ad`
 **Reuse map:** no separate file. As in every A pass of this run, the brief's D11, D24, D31 and D32, with Evidence E1 to E70 (`docs/handoffs/649-brief.md`).
 **Verdict:** PASS
 
-`origin/main` has moved to `4366fb8` (#830's research spike). It touches only `docs/research/` and `scripts/spikes/`, and no file of this diff.
+This is the second A-dup pass. The first (`9cafe0d`, diff `5d366b9..c13400a`) passed. S then returned a test-only
+REWORK (`d387625`), and T's fifth pass made it (`98280ad`).
+- **This cycle's diff is `c13400a..98280ad`.** In `crates/` it is one file,
+  `crates/holler-cli/tests/pane_integration/fake_hub.rs` (+86 −57). The rest is pipeline files under `docs/handoffs/649/`.
+- No production line, ADR, CHANGELOG or manifest changed.
 
-The head commit `c13400a` changes one line of the brief. `git diff 4d7f58a c13400a -- crates/` is empty, so the tree under review is the one T-green verified.
+**`origin/main` moved after the first pass.** It is now `652841b`: #832 (PR #836) merged at 15:35 MDT, nine minutes
+after the first A-dup pass.
+- A trial merge (`git merge-tree --write-tree origin/main HEAD`, tree `112bb17`) conflicts in `CHANGELOG.md` only. So
+  the branch must take `main` before its PR can merge.
+- `ADR-0021.md` and `src/pane/wiring.rs` auto-merge.
+- What #832 brings in is W-5.
 
 ## Summary
 
-**PASS. F extended the objects the map named, and built no parallel path.**
+**PASS. This cycle's change builds no parallel path, and it removes a duplicate.**
 
-- **Production.** #670's `Wiring` is filled in place. Its `connect`/`ports` signatures are kept, and `Unwired` stays.
-  - Every port is built from a reused piece: `StoreScope`, `SystemProber`, `transport::call(None, ..)`, `holler_pane::reply`, and the adapters' own constructors.
-  - The new objects are D24's names, plus two. `Wired<P>` generalises D24's `WiredHarness` (reviewed at A's fifth pass), and `Lookup` is an alias.
-  - For the store clients, the environment readers, the bindings and the resolver, I searched for an analogue to extend and found none.
-- **Tests.** D11's three rigs are included by `#[path]` and generalised in place.
-  - `support`'s `Hub`, `StateDir` (extended by `StateDir::at`) and `wait_for` are used and never re-declared.
-  - There are still three `LinkedHost` copies, and no fourth.
-- **The rework cycles added no drift.**
-  - F's second cycle changed `connect`'s lookup closure and two private messages; its third added a comment.
-  - T's cycles changed tests only.
+- **T folded two copies into one.** `each_write` and `each_read` each declared the same `run` closure: start a fake
+  hub, run the call against it, check the method sent. They are now one runner, `against` (`fake_hub.rs:211-225`), over
+  two tables, `writes()` and `reads()` (`:159-184`).
+- **The new pieces have no analogue to extend.**
+  - `Outcome` (`:187-207`) is one client call's error code, text and fake hub state dir. `verb_harness::Outcome`,
+    which this target also includes, is a verb run's exit code and writers: a different job.
+  - `assert_names_the_hub` pins the second arm of `hub_unavailable` (`store.rs:387`). No other test pins that text.
+  - `reads()` and `writes()` are the only per-method call tables in the CLI's tests. They do not reuse the production
+    `Method` table (`store.rs:71-82`), and that is right: a test that took its rows from that table could not catch a
+    row missing from it.
+- **The first pass's findings stand unchanged:** W-1 to W-4, and W-O (three `LinkedHost`s, no fourth).
 
-**Four low warns, none binding on this run.** Three are small test-helper copies. One notes that the client's watch iterator has two private twins in the hub.
+**Two new warns.**
+- **W-5 is binding at the merge with `origin/main`.** #832 added `HerdrPort::observe_pane` and `observe_panes`, both
+  with default bodies, and `main`'s ADR-0021 section 14 says "A wrapper port must delegate it".
+  - #649's two Herdr wrappers, `BindingHerdr` and `LazyHerdr`, exist only on this branch, so #832 could not update
+    them. After the merge, both answer from the defaults: an empty observation for every pane, and never
+    `pane-not-found`.
+  - In production, `ports.herdr` is `BindingHerdr` over `LazyHerdr` over the adapter. So under the real wiring, #832's
+    `pane list` and `pane get` would show no working directory for any unmanaged pane.
+  - CI on the merged tree catches half of this. A fix to `BindingHerdr` alone passes CI and still masks the adapter.
+  - It is not a parallel path, so it is not a phase 7 block (why: `decisions.md`, Hedged).
+- **W-6 is a nit:** the new no-hub row spells out `no_hub.rs`'s check again.
 
 ## Findings
 
 | # | Severity | File:line | Finding | Suggested fix |
 |---|---|---|---|---|
-| W-1 | warn (low, T; not binding) | `crates/holler-cli/tests/pane_integration/scratch/mod.rs:84-91` | **`alive(pid)` is a third copy.** It runs `kill -s 0 -- <pid>`, as `holler-adapter-host/tests/real_tmux_test.rs:53-60` and `tests/common/mod.rs:221-230` do; those two also set `LC_ALL=C`.<br>`real_tmux/mod.rs`, which this story made includable, would be its shared home. But D11 limits edits to the adapter test directories to the named generalisations. So the copy follows from the brief's own boundary; it is not drift. | Move `alive` into `real_tmux/mod.rs` when the `LinkedHost` consolidation is done (Notes for O). `real_tmux_test.rs` and the scenario then share one. |
-| W-2 | warn (low, T; not binding) | `crates/holler-adapter-host/tests/real_tmux/mod.rs:129-136` | **`tmux_on_path` repeats the rig's `on_path`** (`real_opencode/rig.rs:95-101`), which D32 lists among what must not be copied.<ul><li>It serves only `isolated`, which only #649 calls (`real_tmux_test.rs:14-16`).</li><li>`Scratch::start` already holds `tmux_bin` from `rig::binaries()` (`scratch/mod.rs:207`).</li></ul>Not a block: it was in the blessed trial `046026f`, and the host adapter's tests cannot reach the OpenCode rig. So it is a crate-boundary helper, not a parallel path. | Give `isolated` a `tmux: &Path` parameter, pass `rig::binaries().1`, and delete `tmux_on_path`. |
-| W-3 | warn (nit, T; not binding) | `crates/holler-cli/tests/pane_integration/wired.rs:27-41`; `scratch/mod.rs:293-297` | **Two small copies inside the new target.**<ul><li>(a) `wired.rs`'s `trap_dir` rebuilds the OpenCode trap of `no_hub.rs:56-72` (`Traps::new`): the same `hlr649-` temp dir, and an `opencode` script that touches `opencode-ran`, mode 0755.</li><li>(b) `Scratch::harness`'s `tui_session` closure is `rig::sessions_for(&[])` (`rig.rs:548-560`, already `pub`).</li></ul> | (a) One trap helper in `main.rs`, used by both files.<br>(b) Call `rig::sessions_for(&[])`. |
-| W-4 | warn (low, O; optional follow-up) | `crates/holler-cli/src/pane/wiring/store.rs:290-336` | **The client's `Feed<E>` is the third instance of one iterator shape:** each reply's batch yielded one event at a time, an empty batch as `Ok(None)`, and the first error ending the stream. The other two are the hub's private twins, `holler-hub/src/panes/store.rs:295` and `profile/store.rs:347` (the second is commented "Twin of `panes::store::Feed`").<br>Not a block:<ul><li>the map does not name them;</li><li>they are private to `holler-hub`, which is outside the Blast radius (D16), and bound to `Arc<Store>::poll`;</li><li>the client's version adds D4's eager first request.</li></ul>It is generic over the event, so one copy serves both clients and adds no twin of its own. | If O wants it: a generic poll feed in `holler-pane` over `FnMut(Cursor) -> Result<WatchReply<E>, PaneError>`, used by the hub's two stores and by the client. No change in this run. |
-| W-O | warn (carried from Phase 3; checked) | `crates/holler-cli/tests/pane_integration/bind.rs:422` | **Still holds.** There are three `struct LinkedHost`s: `pane_integration/bind.rs:422`, `pane_verbs/launch/rig.rs:663` and `profile_verbs/apply/rig.rs:636`.<ul><li>There is no fourth under any name. The only new `HostPort` that passes `run` to `FakeHarness::start_server` is #649's own.</li><li>The consolidation is still not filed. `gh issue list --search LinkedHost` finds only #649 and the closed #802.</li></ul> | O files it (Notes for O). |
+| W-5 | **warn, binding at the merge with `origin/main`** (O; then F and T) | `crates/holler-cli/src/pane/wiring/bind.rs:97-128` (`BindingHerdr`) and `:201-229` (`LazyHerdr`) | **After the merge, both Herdr wrappers answer #832's two new methods from the trait's defaults.**<ul><li>On `main`, `HerdrPort` has `observe_pane` and `observe_panes`, each with a default body (`ports.rs:196-220`). ADR-0021 section 14 says "A wrapper port must delegate it" (line 913). #832 added an `observe_pane` forward to every delegating port on `main`: `ExtraHerdr`, `DisplacingHerdr`, and the conformance test's `GuardWatcher` and `Mutant`.</li><li>#649's two wrappers are not on `main`, and the trial-merged `bind.rs` has neither method. Both would also contradict their own docs: `bind.rs:11` and `:84` ("forward every method"), and `:175` ("every method answers its error").</li><li>The production chain is `BindingHerdr` over `LazyHerdr` over `HerdrAdapter` (`wiring.rs:140-152`). `unmanaged::observe` calls `ports.herdr.observe_panes` (`unmanaged.rs:108` on `main`), which never reaches the adapter's one-snapshot read (`adapter.rs:409-447`). So every unmanaged pane shows no working directory, and `observe_pane` never answers `pane-not-found`.</li><li>**What CI catches on the merged tree.** `bind::the_binding_herdr_passes_the_herdr_conformance_suite` (`tests/pane_integration/bind.rs:293`) fails at the new case 13: "expected `pane-not-found`, but it succeeded".</li><li>**What it does not catch.** No suite runs over `LazyHerdr`, and `LazyHerdr`'s every-method test (`:134`) lists the seven methods by hand. No case covers `observe_panes`. So a fix to `BindingHerdr` alone passes CI, while production still masks the adapter through `LazyHerdr`.</li></ul> | <ul><li>Merge `origin/main`.</li><li>Give both wrappers both methods:<ul><li>`observe_pane` forwards. In `LazyHerdr` it is `self.port()?.observe_pane(pane)`.</li><li>`observe_panes` forwards to the inner port's own `observe_panes`, which keeps the ADR's "one call". When `LazyHerdr`'s build has failed, it answers one empty observation per pane, the trait's contract for a failed call.</li></ul></li><li>Pins, for T:<ul><li>`observe_pane` joins the method list of the test at `:134`;</li><li>the Herdr conformance suite runs over `LazyHerdr` too, so case 13 pins it;</li><li>one recording check per wrapper that `observe_panes` reaches the inner port's `observe_panes` once, not `observe_pane` once per pane.</li></ul></li></ul> |
+| W-6 | warn (nit, T; not binding) | `crates/holler-cli/tests/pane_integration/fake_hub.rs:349-350` | **The new no-hub row spells out `no_hub.rs`'s check again.**<ul><li>It builds `"no live holler hub reachable at <state dir>"` inline.</li><li>`no_hub.rs` already has `NO_HUB` (`:47`) and `names_the_missing_hub` (`:116-118`), both private. `watch_with_no_hub_is_unavailable_from_watch_itself` (`fake_hub.rs:423`) has a third spelling.</li><li>All three check one text: `hub_unavailable`'s first arm (`store.rs:386`), which `connect`'s `reach_hub` also uses (`store.rs:118-122`).</li><li>Not binding. It is a two-line check in a sibling module, not one of the overlay's helpers, and the inline form is the strictest of the three: it also pins "at" before the dir.</li></ul> | Move `NO_HUB` and one predicate, in the strict form, to `main.rs` beside `with_state_dir`, and use it in all three places. It can join the test-glue consolidation (W-O). |
+| W-1 to W-4 | warn (low or nit; not binding), carried | as in the first pass (`9cafe0d`) | **Unchanged by this cycle:**<ul><li>W-1: a third `alive`;</li><li>W-2: `tmux_on_path`;</li><li>W-3: `trap_dir`, and the inline `sessions_for(&[])`;</li><li>W-4: the third `Feed` shape.</li></ul> | As in the first pass. |
+| W-O | warn (carried from phase 3) | `crates/holler-cli/tests/pane_integration/bind.rs:422` | **Still three `struct LinkedHost`s, and no fourth:** `pane_integration/bind.rs:422`, `pane_verbs/launch/rig.rs:663` and `profile_verbs/apply/rig.rs:636`.<br>The consolidation is still unfiled: `gh issue list --search LinkedHost --state all` finds only #649 and the closed #802. | O files it (Notes for O). |
 
-### Checked and clean
+### Checked and clean (this cycle)
 
-**Production (F)**
+- **The fold.**
+  - The lines removed are the two `run` closures of `each_write` and `each_read`, which were the same.
+  - `against` keeps their method check (the fake hub's first request is the call's method) for every row that uses it:
+    the lost write, the lost read, the JSON-RPC error and the data that does not decode.
+- **No copy of an overlay helper.**
+  - `FakeHub`, `failure`, `with_state_dir` and `support::StateDir` are used, and none is declared again.
+  - No polling loop and no `thread::sleep` was added.
+- **`Outcome` has nothing to extend.**
+  - `verb_harness::Outcome` (`verb_harness/mod.rs:38-44`) is a verb run's `code: i32`, `out` and `err`.
+  - `fake_hub` does not import it, so nothing is shadowed.
+  - A module's own private `Outcome` is the codebase's pattern: `src/pane/switch.rs:117`, `holler-pane/src/import/assess.rs:51`.
+- **`assert_names_the_hub` pins a different text from `no_hub.rs`'s check.**
+  - It pins the second arm of `hub_unavailable` (`store.rs:387`: "the holler hub at <state dir> did not answer
+    <method>: …"). `no_hub.rs`'s predicate pins the first arm.
+  - Its state dir is the fake hub's own fresh temporary path, so neither the transport's text nor the fake's refusal can
+    supply it.
+- **`reads()` and `writes()` are the right oracle.**
+  - The test kit has no per-method wire table: its `FaultSwitch` (`holler-pane-testkit/src/fault.rs`) works at the trait.
+  - The production table is private (the `const`s at `store.rs:71-82`, `struct Method` at `:226`). A table of the
+    test's own is the right check against it.
+- **`type Call` holds `fn` pointers,** so a row captures nothing. Every call still runs under `with_state_dir`, through
+  `FakeHub::with` or directly.
+- **Build guards.**
+  - `fake_hub.rs` is 455 lines.
+  - `cargo clippy -p holler-cli --test pane_integration -- -D warnings` is clean.
+  - The five reworked tests pass.
+- **Blast radius.**
+  - The only file changed in `crates/` is in `pane_integration/`.
+  - T rewrote its own `handoff-T-green.md` line that quoted the setup wizard's old directory path, and `evidence.md`
+    gained T's section. Neither is code.
 
-- **`Wiring` is filled in place.**
-  - `connect() -> Result<Wiring, PaneError>` and `ports()` are unchanged, so `main.rs` and `say_cmd.rs` are untouched.
-  - `Wiring` holds no `Unwired` field, and `Unwired` itself stays.
-- **Reused, not rebuilt:**
-  - `StoreScope::new` (E19), with `const ACTOR` and `Actor::parse`, the pattern of `profile/create.rs` (E20);
-  - `SystemProber` (E21);
-  - `crate::transport::call(None, ..)`. `control::run`'s only caller in `holler-cli/src` is still `transport.rs:35`;
-  - `ControlCall::status()`, used by `reach_hub`;
-  - the params structs of `holler_pane::reply` and `PaneReply::into_result` (E10 to E13, E62);
-  - `WATCH_WAIT` (E57) and `holler_hub::state::resolve_state_dir`;
-  - `HerdrAdapter::connect`, `HerdrConfig::new`, `TmuxHost::new`, `OpenCodeHarness::new` and `Timeouts::default()`.
-- **One mapping.** `store.rs`'s `call`, `timed_out` and `hub_unavailable` are the only `ControlError` to `PaneError` mapping in `holler-cli/src`. `call` holds its only `ControlCall {` literal (E70: the fields are public for this).
-- **No analogue to extend.** I searched for each:
-  - **A store client.** No other production `PaneStore` or `ProfileStore` client exists. Outside the hub and `holler-pane`, the only `PaneReply` user in `src` is `store.rs`.
-  - **The environment readers.**
-    - `holler-adapter-herdr` has no `Extent` parser and no Herdr socket resolver.
-    - No `src` has a shared XDG helper.
-    - The one other `PATH` search in `src` is `holler-body/src/query.rs:288` (`resolvable`). It is private, answers a bool and checks `is_file`, a different contract: `opencode_bin` must return an absolute executable through the injected `Lookup`.
-  - **The no-hub text.** It is inlined in seven `*_cmd.rs` files, and there is no shared helper. `hub_unavailable` follows that pattern.
-  - **The resolver's join on `(session, pane_id)`.**
-    - `tx_launch.rs:779`'s `same_pane` is private and compares two `HerdrPane`s.
-    - `tx_apply/observe.rs:171` inlines the same check, so inline is the dominant pattern.
-    - Import's `labelled` (`import/assess.rs:164`) goes the other way, from a name to its panes.
-  - **`LazyHerdr` beside `Wired<P>`.** They are two shapes by design: D2's lazy ping, and W-E's port-or-error. Both are D24's names, and A's fifth pass reviewed them.
-- **D32's production items, all clean:**
-  - no `TRIAL` header and no `eprintln!` in the wiring files;
-  - no `Unwired` field, and no read of `HERDR_SESSION`;
-  - no fallback to the default tmux socket, a value that is not UTF-8 included (W-T);
-  - D4's eager first request (`store.rs:285`);
-  - the manifest comment naming #649 (`Cargo.toml:402-404`);
-  - no `UnixStream` or `UnixListener` in `holler-cli/src`.
-- **Blast radius.** Every changed file is inside it. `holler-hub`, `pane/mod.rs`, `main.rs` and `say_cmd.rs` are untouched.
-
-**Tests (T)**
-
-- **D11.** The three rigs are included by `#[path]` (`scratch/mod.rs:38-45`), and each is generalised in place:
-  - `scratch_herdr` gains `Flavor`. `HERDR_640` is the default of the unsuffixed functions, which delegate to the new `_as` and `_in` variants.
-  - `rig.rs`'s items become `pub`. `lay_out` and `isolated_vars` are extracted from the rig's own constructor, which now calls them.
-  - The private tmux server moves to `real_tmux/mod.rs`, and `real_tmux_test.rs` uses it, with no copy left behind. Its one `TmuxHost` helper, `private`, stays in place for AC 9's source guard.
-- **The scenario copies none of the rigs.**
-  - It uses the rig's dead-end config, model guard, port picker, `refused`, `raw` and `signal_group`.
-  - Its name and path guards delegate to `scratch_herdr`'s: `check_session` to `check_name_as`, `check_inside` to `check_socket`.
-- **`support`.**
-  - `Hub`, `StateDir`, `wait_for`, `holler_bin` and `holler_cmd` are used.
-  - `StateDir::at` (D22) is the one constructor added.
-  - None of the overlay's helpers (`Hub`, `Body`, `mint_token`, `join`, `wait_for`, `StateDir`) is re-declared, and no polling loop bypasses `wait_for`.
-  - `LiveHub` wraps `Hub::start` (D22).
-- **`FakeHub` is D13's sanctioned new object.** The CLI's tests have no fake control socket to extend. It reuses `StateDir`, `control_sock_path` and `holler_proto`'s own frame encoders.
-- **Test-local types with no shared analogue:**
-  - `Recording`, a call log. The test kit's `FakeHarness` keeps none, and the rig's `Recording` is a launcher, not a log.
-  - `Resolving`, which resolves before `attach_tui`. The launch rig's `HookedHarness` fires after a method, and lives in another target.
-  - `Out` and `output_of`, the root type of this target, as `pane_verbs/process` has its own. The scenario must check envelopes with #638's `check_envelope` (E55).
+For the full review of the production code and the tests, see the first pass (`9cafe0d`). Nothing it checked has changed.
 
 ## Notes for F
 
-None. The verdict is PASS, and no warn binds F.
+None for this verdict. If O routes the merge through the pipeline, W-5's change is F's (the two wrappers) and T's (the
+pins). The steps are in W-5's row.
 
 ## Notes for O
 
-- **File the test-glue consolidation** (W-O; #664's gate asked for it). It is still unfiled.
-  - It moves `LinkedHost` (three copies) to the test kit.
-  - It can also absorb W-1 (`alive`, now in three test crates), W-2 (`isolated` takes the tmux binary) and W-3.
-- **W-4 is optional.** Open an issue only if a shared poll feed is wanted for the hub's two stores and the client.
-- **Carried, still open:**
-  - comment on #825 that `profile apply` logs as `holler pane` (W-Q (a));
-  - #653 and #828: the automated `pfleet o reset` caller;
-  - #803 does not list #649.
-- **For Aftersight** (pipeline bugs go there):
-  - W-U, the diff gate's findings lost on the `archChanged` route;
-  - F's two diff-gate input gaps: the 12,000-byte evidence cap, and no `--handoff`.
+1. **W-5, before the PR merges.** The PR cannot merge without `main` (the `CHANGELOG.md` conflict), and W-5 starts at
+   that merge.
+   - **The conflict.** Both sides add an entry at the top of `## [Unreleased]` / `### Enhancements`. Keep both.
+   - **Then W-5's fix and pins, as its row gives them,** before the merged tree is pushed. Fixing only the failing test
+     (case 13 over `BindingHerdr`) is not enough.
+   - **Better through the pipeline.** Route the merge and the fix through F and T-green, then A-dup and S, so the gates
+     review the tree that lands. A should re-check the merge itself: #832 touches 47 files, among them `wiring.rs` (an
+     `Unwired::observe_pane`) and ADR-0021 (a new section 14).
+   - **Re-run the opt-in scenario on the merged tree.** #832 changes what `pane list`, `pane get` and `pane doctor`
+     read.
+   - **A visible change, for the PR body.**
+     - After the merge, an unscoped `pane list`, and a `pane get` that finds no record, also ask Herdr. This is #832's
+       one exception to "the read verbs read the record only" (`list.rs:141` and `get.rs:96` on `main`).
+     - Under this wiring with no Herdr configured, both still exit 0 and list the registry. So D2 and AC 2 hold:
+       `store_only.rs`'s assertions stay true, by my reading.
+     - They add `"unmanaged_unavailable": "usage"` to the JSON. In text mode they print a warning line naming
+       `HOLLER_HERDR_SESSION`.
+2. **The rename scan still fails CI** (S's item 1).
+   - Two of its three hits remain: the brief's E64 Source line (`649-brief.md:1197`) and the first-pass entry in A's
+     journal (`decisions.md:66`). T rewrote its own.
+   - The journal is append-only, and S gave that rewording to O, so A has not edited its line.
+   - The other way out is `removeHandoffsBeforePr: true` for the PR phase.
+3. **Still unfiled** (`gh issue list`, 16:07 MDT): the test-glue consolidation (W-O). It can absorb W-1 to W-3 and W-6.
+   S's items 2 to 5 are carried as S wrote them.
+4. **W-4 is still optional.**
 
 ## Patterns referenced
 
-- **The analogues searched:**
-  - `crates/holler-hub/src/panes/store.rs` (`Feed`, 292-322) and `crates/holler-hub/src/profile/store.rs` (`Feed`, 344-374);
-  - `crates/holler-pane/src/tx_launch.rs:779` and `crates/holler-pane/src/import/assess.rs:163-171`;
-  - `crates/holler-body/src/query.rs:286-296`;
-  - the no-hub text in `crates/holler-cli/src/{say,hold,roster,wait,answer,interrupt,hub}_cmd.rs`.
-- **The included rigs:**
-  - `crates/holler-adapter-opencode/tests/real_opencode/rig.rs`;
-  - `crates/holler-adapter-herdr/tests/scratch_herdr/mod.rs`;
-  - `crates/holler-adapter-host/tests/real_tmux/mod.rs`.
-- **The CLI's test support:**
-  - `crates/holler-cli/tests/support/mod.rs` (`StateDir`, `Hub`, `wait_for`);
-  - `crates/holler-pane-testkit/src/harness.rs` (`FakeHarness`'s public API).
-- **The three `LinkedHost`s:** `crates/holler-cli/tests/{pane_integration/bind.rs:422, pane_verbs/launch/rig.rs:663, profile_verbs/apply/rig.rs:636}`.
+- **This cycle:**
+  - `crates/holler-cli/tests/pane_integration/no_hub.rs:47, 116-118` (`NO_HUB`, `names_the_missing_hub`);
+  - `crates/holler-cli/tests/verb_harness/mod.rs:38-44` (`Outcome`);
+  - `crates/holler-cli/src/pane/wiring/store.rs:71-82, 118-122, 226, 380-389`;
+  - `crates/holler-pane-testkit/src/fault.rs` (`FaultSwitch`).
+- **W-5, on `origin/main` (`652841b`):**
+  - `crates/holler-pane/src/ports.rs:196-220` (the two methods) and `:229` (`PaneObservation`);
+  - `docs/adr/ADR-0021.md:901-915` (section 14);
+  - `crates/holler-adapter-herdr/src/adapter.rs:409-447`;
+  - `crates/holler-pane/src/unmanaged.rs:89-110`;
+  - `crates/holler-pane-testkit/src/conformance/herdr.rs:142, 424-447` (case 13);
+  - `crates/holler-cli/tests/pane_verbs/import/seams.rs:52` and `pane_verbs/launch/displaced.rs:80` (#832's forwards);
+  - the trial merge `112bb17`: `src/pane/wiring.rs:306` (`Unwired::observe_pane`), and a `bind.rs` with neither method.
+- **On the branch:**
+  - `crates/holler-cli/src/pane/wiring/bind.rs:11, 83-128, 169-229`;
+  - `crates/holler-cli/tests/pane_integration/bind.rs:119-159, 293-315`.

@@ -713,3 +713,85 @@
   - New `evidence.md` section, verbatim: `state.rs:38-40` and `control.rs:492`.
   - Clippy `-D warnings`, `lint.sh`, `changelog-check` and `machete` are clean. Workspace counts are in
     `handoff-T-green.md`.
+
+## A (Phase 8, anti-duplication gate, second pass: S's test-only rework) — 2026-10-11T16:07:27-06:00
+- **Decided:** PASS on this cycle's diff `c13400a..98280ad`, read with the whole story `5d366b9..98280ad`. In `crates/`,
+  the cycle's diff is one file, `pane_integration/fake_hub.rs`. No blocks, and two new warns: W-5 is binding at the
+  merge with `origin/main`, and W-6 is a nit. The first pass's W-1 to W-4 and W-O carry over unchanged. The full detail
+  is in `handoff-A-dup.md`, which replaces the first pass's.
+  - **No parallel path, and one duplicate folded.**
+    - T's `against` runner, over the `reads()` and `writes()` tables, replaces the two identical `run` closures of
+      `each_read` and `each_write`.
+    - `Outcome` and `assert_names_the_hub` have no analogue: `verb_harness::Outcome` is a verb run's result, and no
+      other test pins `hub_unavailable`'s second arm.
+    - The production `Method` table is private, and a table of the test's own is the right oracle.
+  - **W-5 (binding at the merge with `origin/main`).**
+    - `main` moved to `652841b` at 15:35 MDT (#832), and the trial merge conflicts in `CHANGELOG.md`. So the PR needs
+      that merge.
+    - #832 added `HerdrPort::observe_pane` and `observe_panes`, both with default bodies. ADR-0021 section 14 says "A
+      wrapper port must delegate it", and #832 added the forward to every delegating port on `main`.
+    - #649's `BindingHerdr` and `LazyHerdr` are not on `main`, so after the merge they answer from the defaults. Under
+      the real wiring, every unmanaged pane would show no working directory.
+    - CI on the merged tree fails only case 13 over `BindingHerdr`. Nothing pins `LazyHerdr` or `observe_panes`. So a
+      fix to `BindingHerdr` alone passes CI and still masks the adapter in production.
+    - The fix is both methods in both wrappers, with three pins.
+  - **W-6 (nit, not binding):** `fake_hub.rs:349-350` builds the no-hub text inline. `no_hub.rs` already has
+    `NO_HUB` and `names_the_missing_hub`, and `fake_hub.rs:423` has a third spelling.
+- **Assumed:**
+  - **The PR merges only after `origin/main` is merged into the branch**, since `CHANGELOG.md` conflicts. W-5 is
+    written for that merge.
+  - **CI's result on the merged tree is read from the code, not run.**
+    - Case 13 meets `Ok` from the trait default, and `expect_code` turns that into "expected `pane-not-found`, but it
+      succeeded".
+    - No test runs over `LazyHerdr`'s or `observe_panes`' forwards.
+    - I did not build the trial merge `112bb17`.
+  - **`store_only.rs`'s assertions hold on the merged tree**, by reading. `pane list` with no Herdr configured
+    degrades, with `unmanaged_unavailable: "usage"`, and still exits 0 with the rows.
+- **Hedged:**
+  - **Why W-5 is a binding warn, not a block.**
+    - Phase 7 blocks a parallel path or a drive-by edit, and W-5 is neither. It is drift against a base that moved after
+      F wrote the code: on the branch's own base, both wrappers forward every method.
+    - A BLOCK routes to F, whose role has no step for merging `origin/main`. The fix cannot compile before that merge,
+      because the trait methods do not exist on the branch.
+    - Every merge of `main` in this run was made at the operator's level (`3dff970`, `f59ba21`, `d0c1531`).
+    - So W-5 goes to O, as the first item of Notes for O. I recommend routing the merge and the fix through F, T-green,
+      A-dup and S, so the gates review the tree that lands.
+  - **`observe_panes` is A's reading.** The ADR's literal rule names `observe_pane` ("it"), and #832's own test wrappers
+    forward only that one. Forwarding `observe_panes` too keeps the ADR's "one call", which only the production chain
+    can lose.
+  - **W-6 is a nit.** It is a two-line check in a sibling module, not an overlay helper, and the inline form is the
+    strictest of the three.
+  - **This journal is append-only, so A did not reword its first entry (`decisions.md:66`).** That line is one of the
+    two rename-scan hits left. S gave it to O.
+- **Evidence:**
+  - **Read in full:**
+    - `pane_integration/fake_hub.rs` and `store_only.rs`;
+    - `src/pane/wiring/bind.rs`;
+    - `handoff-S.md`, the first `handoff-A-dup.md`, and every entry of `decisions.md` from A's first A-dup pass on.
+  - **Diffs read:**
+    - `c13400a..98280ad`, all of it;
+    - on `5d366b9..origin/main`: `ports.rs`, `wiring.rs`, `conformance/herdr.rs`, `pane/list.rs`, `pane/get.rs`, and
+      the file list.
+  - **Read in part:**
+    - `pane_integration/{no_hub.rs (100-170), main.rs (1-162), bind.rs (100-160, 240-320)}`;
+    - `verb_harness/mod.rs` (1-142) and `store.rs` (65-125, 330-395);
+    - on `main`: `unmanaged.rs` (1-110, greps), `adapter.rs` (405-460), `herdr.rs` (`FakeHerdr::observe_pane`),
+      `conformance/mod.rs` (`expect_code`), ADR-0021 (901-916) and `ports_test.rs` (`TestHerdr`);
+    - the driver's phase-8 routing (`nextPhase` case 8) and its PR phase (greps for a merge of `main`);
+    - `skilltext_w5_rename.rs` (the scan's needles) and `pipeline-conventions.md` section 1.
+  - **Ran:**
+    - `cargo clippy -p holler-cli --test pane_integration -- -D warnings`: clean.
+    - The five reworked `fake_hub::` tests: 5 passed.
+  - **Git:**
+    - `git fetch origin`: `origin/main` is `652841b`.
+    - `git merge-tree --write-tree origin/main HEAD` gives tree `112bb17`, with a conflict in `CHANGELOG.md` only. In
+      it, `wiring.rs:306` has `Unwired::observe_pane`, and `bind.rs` has neither method.
+    - `git grep` at the rename-scan needles: two hits left.
+  - **Greps:**
+    - `impl … HerdrPort for` and `fn observe_pane(s)` on HEAD and on `main`;
+    - `struct Outcome`, `type Call`, `fn against`, the per-method tables, and the no-hub text in the tests;
+    - `struct LinkedHost`.
+  - **GitHub (16:07 MDT):**
+    - `gh issue list --search LinkedHost --state all`: #649 and the closed #802 only;
+    - `--search observe_pane`: no issue ties it to #649;
+    - #832: closed at 15:35 MDT.
