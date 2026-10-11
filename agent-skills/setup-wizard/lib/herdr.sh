@@ -27,7 +27,10 @@
 #   run <herdr args...>   run `herdr --session <name> <args...>`
 #   server-start          start the headless server in the background, logging to log-path,
 #                         in a scrubbed environment (PATH HOME USER LOGNAME SHELL TERM LANG LC_*
-#                         TMPDIR XDG_* HERDR_* only); prints the server's pid alone on the first
+#                         TMPDIR XDG_* HERDR_* plus the session set a pane needs: SSH_AUTH_SOCK
+#                         DISPLAY WAYLAND_DISPLAY DBUS_SESSION_BUS_ADDRESS COLORTERM TZ EDITOR
+#                         VISUAL LANGUAGE, the proxy variables in both cases and SSL_CERT_FILE
+#                         SSL_CERT_DIR NODE_EXTRA_CA_CERTS; nothing else); prints the server's pid alone on the first
 #                         stdout line
 #   label <pane> <label>  rename a pane (`herdr pane rename`); label ^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$
 #   check-session         refuse when the named session exists and the ledger did not create it
@@ -234,7 +237,12 @@ case "$verb" in
     keep=()
     for name in $(compgen -e); do
       case "$name" in
-        PATH | HOME | USER | LOGNAME | SHELL | TERM | LANG | LC_* | TMPDIR | XDG_* | HERDR_*)
+        PATH | HOME | USER | LOGNAME | SHELL | TERM | LANG | LC_* | TMPDIR | XDG_* | HERDR_* | \
+          SSH_AUTH_SOCK | DISPLAY | WAYLAND_DISPLAY | DBUS_SESSION_BUS_ADDRESS | COLORTERM | TZ | \
+          EDITOR | VISUAL | LANGUAGE | \
+          HTTP_PROXY | HTTPS_PROXY | NO_PROXY | ALL_PROXY | \
+          http_proxy | https_proxy | no_proxy | all_proxy | \
+          SSL_CERT_FILE | SSL_CERT_DIR | NODE_EXTRA_CA_CERTS)
           keep+=("$name=${!name}")
           ;;
       esac
@@ -254,12 +262,16 @@ case "$verb" in
     [ $# -eq 2 ] || die "usage: herdr.sh label <pane-id> <label>"
     [ -n "$1" ] || die "label needs a pane id"
     [ -n "$2" ] || die "label must not be empty"
+    # Like the other pane verbs: never rename a pane from a pane of another session.
+    check_pane
+    # The character classes are spelled out: a bracket range follows collation in a UTF-8 locale
+    # on bash 3.2, so a non-ASCII letter could pass a range such as A-Za-z.
     case "$2" in
-      [A-Za-z0-9]*) ;;
+      [ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789]*) ;;
       *) die "label '$2' is not valid (^[A-Za-z0-9][A-Za-z0-9._-]{0,31}\$)" ;;
     esac
     case "$2" in
-      *[!A-Za-z0-9._-]*) die "label '$2' is not valid (^[A-Za-z0-9][A-Za-z0-9._-]{0,31}\$)" ;;
+      *[!ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-]*) die "label '$2' is not valid (^[A-Za-z0-9][A-Za-z0-9._-]{0,31}\$)" ;;
     esac
     [ "${#2}" -le 32 ] || die "label '$2' is longer than 32 characters"
     herdr_cmd pane rename "$1" "$2"
