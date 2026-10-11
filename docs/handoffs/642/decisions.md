@@ -291,3 +291,40 @@ Run handoff directory `docs/handoffs/642` Â· branch `issue-642-implementation` Â
       `refresh_child_sessions`;
     - a repo-wide grep for stale "every agent" or "until #642" wording outside the blast radius;
     - `git diff --stat` on the adapter's `Cargo.toml` and on `Cargo.lock` (both unchanged).
+
+## S, spec audit (Phase 10): 2026-10-11T11:45-06:00 (MDT)
+
+- **Decided:** PASS on `7284001..fa998d7` (`docs/handoffs/642/handoff-S.md` has the detail).
+  - All twelve acceptance criteria are met. Each has a named test that asserts the behaviour, and T-green's M1-M11 show
+    the tests fail without it.
+  - D1-D13 are implemented as stated. The one gap the brief left, A's W-2 (a `/question` or `/permission` answer that
+    is not a 200 array), is read as "holds nothing", with refused and timed-out still errors. That is the reading D7(c)'s
+    fallback needs, and it is pinned by a test and stated in the crate doc and in ADR section 8.
+  - Acceptance 10 is met on A's W-1 basis: the opt-in real conformance run, with acceptance 1's whole-argv pin as the
+    hermetic stand-in for case 16.
+  - Acceptance 11's raw abort is T's documented change, because OpenCode 1.19.0 retries a refused provider instead of
+    ending the turn (D11's premise).
+- **Assumed:**
+  - T's and F's recorded runs stand, the opt-in real suite included (12/12 in F's run and in T-green's second run). I
+    re-ran no build or test, per the role.
+  - The script commits this handoff and entry at the phase commit, so I did not commit them.
+- **Hedged:**
+  - The brief's copy of the issue thread names the commenter by GitHub handle. I did not count it as a privacy hit: the
+    handle is public on the issue and is already in every branch commit's no-reply author address. It is advisory 1,
+    for the run's agent, if the operator prefers no handles in committed files.
+  - The pair through the host's real `tmux new-window` is sound by reading (`-- env --`, and `escape` changes only a
+    trailing `;`) but is not exercised until #649 (advisory 2).
+  - The outside brief gate's two rounds reviewed the brief before the re-cut. The re-cut's changes had only the
+    in-session plan review and the outside diff gate, both PASS (advisory 3).
+- **Evidence:**
+  - Live state: `gh issue view 642` (its body equals the brief's lines 3-80; three comments), and
+    `git merge-tree --write-tree origin/main HEAD` (clean; `origin/main` is at `dc1398c`, which overlaps only in
+    `CHANGELOG.md`).
+  - Read: the brief in full; `handoff-A.md`, `handoff-T-red.md`, `handoff-F.md`, `handoff-T-green.md`,
+    `handoff-A-dup.md`, this journal and `evidence.md`; the outside diff gate's result and the brief gates' prompts.
+  - Diffs: `git diff origin/main...HEAD` for every source, test, ADR and CHANGELOG file, and `git diff --stat` per phase
+    commit for the phase boundaries.
+  - Greps: stale wording ("until #642", `refuse_an_agent`, "No prompt is ever sent", "one `env` prefix"), the
+    `agent-unsupported` and `agent-unusable` listings, `unwrap`, `expect`, `panic` and `allow` in the added lines, and
+    personal or private identifiers in all 4,415 added lines.
+  - `wc -l` on the touched files (the largest is 746), and a spot check of four `evidence.md` excerpts against source.
