@@ -440,3 +440,46 @@
   - `cargo clippy -p holler-cli --all-targets -- -D warnings` clean; `bash scripts/lint.sh` exit 0.
   - Opt-in `scenario::the_two_grid_spellings…` on scratch instances: 1 passed, 15 s; no `/tmp/hlr649-*` or `hlr649` process left.
   - After the RED run: the pid `host.ps` reported (778017) is gone; no tmux process names the trap.
+
+## F (Phase 6, implement, second cycle: the re-entry after the diff gate's round-1 BLOCK) — 2026-10-11T14:25:57-06:00
+- **Decided:**
+  - **W-T, as A sized it.** `connect`'s lookup is `std::env::var_os(name).map(|value| value.into_string().unwrap_or_default())`.
+    - A value that is not UTF-8 is the empty string, never `None`.
+    - T-red's row `wired::a_tmux_socket_that_is_not_utf8_is_usage_never_the_default_server` passes, and the trap stays untouched.
+  - **The two empty-value messages now say "empty or not UTF-8":** `absolute`'s and the no-session one.
+    - So an operator whose value is not UTF-8 is not told it is `""`, or that none is set.
+    - No test pins either text (`git grep`).
+  - **Docs:**
+    - `connect`, `Lookup`, both module docs, and one ADR sentence in "Wiring as built (#649)" (D17);
+    - the first cycle's ambiguous rustdoc link `[`env`]` is now `[`mod@env`]`.
+  - **W-S: eight entries in `evidence.md`**, under "The source that round 1 of the diff gate asked for":
+    - B-1: `PaneReply` and `into_result`; serde's `Option` and `serde_json`'s `deserialize_option` (library source at the locked versions); conformance Case 1 in both suites;
+    - B-2: `NoParams`, `params_of`, `decode_params`' doc, and the nine params structs of `holler_pane::reply`;
+    - NV-4: `HarnessPort`'s eleven methods and its two defaults;
+    - NV-5: `pane/cas_put`'s membership check;
+    - and the Herdr adapter's refusal of an unlisted workspace, which backs the docs' workspace sentence.
+  - **No code change for B-1 or B-2** (A's W-S).
+  - **`archChanged: false`.** The change is a local closure, two private messages and docs: no public item, type, module or dependency.
+- **Assumed:**
+  - **`OsString::into_string` fails exactly when the value is not UTF-8.** This is std's documented behaviour, and T's row confirms it for the socket.
+  - **Round 2's diff gate attaches none of the new citations.**
+    - Its 24 KB excerpt cap is used up by the brief's own citations: round 1 omitted 27 cited files.
+    - So each entry quotes the lines it relies on.
+- **Hedged:**
+  - **A non-UTF-8 `HOLLER_HERDR_WORKSPACES` reads as no workspace, the same as unset, not as `usage`.**
+    - It fails closed: the adapter refuses every launch before any request of its own (evidence).
+    - Covering it would need either an in-band marker that every reader checks, or a new `Lookup` type that breaks D24's signature and T's tests. Neither is worth it for this edge.
+    - It is recorded in the docs and as a known issue.
+  - **`XDG_CONFIG_HOME`, `HOME` and `PATH` read as before.** A non-UTF-8 `XDG_CONFIG_HOME` reads as empty, which the XDG rule takes as unset (`$HOME/.config`). It matters only when neither socket variable is set.
+  - **The message changes go beyond A's one line.** They change no tested behaviour.
+- **Evidence:**
+  - `cargo test -p holler-cli --test pane_integration`, final code: 61 passed, 0 failed, 4 ignored. `wired::`: 2 passed. After the last doc-only edits, `wired::`, `env::` and `no_hub::`: 17 passed.
+  - Opt-in, `--ignored --test-threads=1`: 4 passed in 82 s. No scratch directory or process was left.
+  - `cargo test --workspace --no-fail-fast -- --skip roster_…`: 2312 passed, 1 failed, 32 ignored. The failure is the rename scan over `docs/handoffs/`, as in both earlier cycles.
+  - Clean: clippy `-D warnings`, `docs_cli_test` 3/3, `wire_selftest` 3/3, `lint.sh`, `changelog-check`, `cargo machete` and `rustfmt --check`. Rustdoc reports no diagnostic in a wiring file.
+  - The evidence quotes: each quoted line checked against its file by a script, and the line ranges read with `cat -n`.
+  - **Read:**
+    - `handoff-A.md` (fifth pass) and `handoff-T-red.md`;
+    - `649-diff-result-r1.md`, and its prompt's evidence and excerpt sections;
+    - `dual-review.sh` (the excerpt cap and `--evidence`) and the driver's `buildDiffGateCaptureTaskPrompt`;
+    - T's `wired.rs`, `env.rs` and `main.rs` (`with_env`).

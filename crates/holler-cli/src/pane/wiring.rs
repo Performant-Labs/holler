@@ -26,7 +26,7 @@
 //! (D26): the error is kept, and the port it configures answers it at its first use. So `pane list`,
 //! `pane get`, `pane watch`, `profile list` and `profile show` work with nothing but the hub.
 //!
-//! **The environment (D5 to D7).** Read once, by `connect`, through [`env`]:
+//! **The environment (D5 to D7).** Read once, by `connect`, through [`mod@env`]:
 //!
 //! | Variable | What it sets | When it is unset |
 //! |---|---|---|
@@ -40,11 +40,14 @@
 //! A malformed value (a relative or empty path, a workspace list that does not parse, serve
 //! arguments that are not a JSON array of strings) is `usage` naming its variable, at the first
 //! use of the port it configures; a bad `HOLLER_TMUX_SOCKET` fails the host and the harness both,
-//! and never falls back to the default tmux server. The OpenCode processes run with
-//! `ProcessEnv::Inherit`: they inherit the tmux server's environment, never the CLI's, so a
-//! provider credential reaches a harness server only through that tmux server's environment. No
-//! variable here carries a credential, and nothing of this module puts one on an argv, in a file
-//! or in a message.
+//! and never falls back to the default tmux server. A variable of the table whose value is not
+//! UTF-8 is read as the empty value, never as unset, so it takes no fallback: the empty value is
+//! `usage` naming the variable, but for `HOLLER_HERDR_WORKSPACES`, where it is no workspace, so
+//! the Herdr adapter refuses every launch as it refuses one into an unlisted workspace
+//! ([`env::Lookup`]). The OpenCode processes run with `ProcessEnv::Inherit`: they inherit the
+//! tmux server's environment, never the CLI's, so a provider credential reaches a harness server
+//! only through that tmux server's environment. No variable here carries a credential, and
+//! nothing of this module puts one on an argv, in a file or in a message.
 //!
 //! **The `tui_session` lookup (D8)** answers from the bindings of a launch in progress, then the
 //! pane registry, then Herdr's labels ([`bind::tui_session`]).
@@ -98,10 +101,17 @@ pub struct Wiring {
 impl Wiring {
     /// Build the ports of a run from this process's environment, once the hub has answered.
     /// Fails `unavailable`, naming the hub, only when the hub cannot be reached (D2).
+    ///
+    /// A variable whose value is not UTF-8 is read as the empty value, never as unset
+    /// ([`env::Lookup`]): unset, `HOLLER_TMUX_SOCKET` would be tmux's default server, the
+    /// operator's live one (D6).
     pub fn connect() -> Result<Self, PaneError> {
         store::reach_hub()?;
         let actor = Actor::parse(ACTOR)?;
-        Ok(Self::from_env(&|name| std::env::var(name).ok(), actor))
+        let lookup = |name: &str| {
+            std::env::var_os(name).map(|value| value.into_string().unwrap_or_default())
+        };
+        Ok(Self::from_env(&lookup, actor))
     }
 
     /// The ports, lent for one verb.

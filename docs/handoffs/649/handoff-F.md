@@ -1,10 +1,43 @@
 # Handoff-F: Phase 6 (F, implement) - #649 hub wiring and the scratch integration scenario
 
 **Date:** 2026-10-11
-**Branch:** issue-649-implementation (worktree `.claude/worktrees/0649-live-harness`, head `e4f1d36` plus this phase's staged changes)
+**Branch:** issue-649-implementation (worktree `.claude/worktrees/0649-live-harness`, head `ce5da11` plus this phase's
+staged changes)
 **Issue:** #649
 
+This handoff covers both F cycles.
+- **Second cycle (this one):** the re-entry after the diff gate's round-1 BLOCK, run on A's fifth pass (`2280399`) and
+  T-red's second cycle (`ce5da11`). It is described first.
+- **First cycle (`8b70771`):** its text follows. All of it still holds. Only the Tier 1 table and the file list are
+  updated, so they describe the tree as it is now.
+
 ## What was done
+
+### Second cycle
+
+A's binding notes were W-T (code) and W-S (evidence), and no change for B-1 or B-2. All three are done.
+
+- `crates/holler-cli/src/pane/wiring.rs`: `connect` now reads each variable with `std::env::var_os`. A value that is not
+  UTF-8 becomes the empty string, never `None` (W-T, A's form).
+  - The empty value is malformed for every path variable and for the serve arguments. So a non-UTF-8
+    `HOLLER_TMUX_SOCKET` is `usage` naming it from the host and the harness, and tmux's default server is never reached.
+  - The old `std::env::var(name).ok()` read such a value as unset, which fell back to the default server.
+  - The `connect` doc and the module doc state the rule.
+- `crates/holler-cli/src/pane/wiring/env.rs`: two messages and two docs change. No behaviour changes for any value
+  a test lookup can give.
+  - `absolute` answers the empty value with `<VAR> is empty or not UTF-8; it must be an absolute path`. Before, the
+    message ended `not ""`, which is false for an operator whose value is not UTF-8.
+  - The no-session message now says `HOLLER_HERDR_SESSION is unset, empty or not UTF-8`. It still names only that
+    variable, as T's `names_only_hollers_session_variable` requires.
+  - The `Lookup` doc and the module doc say how production reads, and what the empty value means for each variable.
+- `crates/holler-cli/src/pane/wiring.rs`, module doc: the first cycle's link `[`env`]` becomes `[`mod@env`]`.
+  Rustdoc found it ambiguous with the `env!` macro, and it was the only rustdoc diagnostic in the wiring files.
+- `docs/adr/ADR-0021.md`: one sentence in "Wiring as built (#649)" records the rule (D17).
+- `docs/handoffs/649/evidence.md`: eight entries for round 2's reviewer (W-S). See the Evidence appendix below.
+- B-1 and B-2: no production change, as A's W-S rules. Both are refuted by source, now in `evidence.md`, and by
+  conformance Case 1, which passes against a real hub.
+
+### First cycle
 
 The satisfiability trial of `046026f` is gone. The three `TRIAL` files are rewritten to the house style under D24's
 names, and `connect` is the real one.
@@ -39,6 +72,30 @@ names, and `connect` is the real one.
 
 ## Design decisions
 
+### Second cycle
+
+9. **A non-UTF-8 value reads as the empty value (A's form), and the empty value keeps each variable's own rule.**
+   - D24 fixes `Lookup` as `&dyn Fn(&str) -> Option<String>`, and T's tests build lookups of that type. So the lookup
+     cannot say "set, but not UTF-8". The empty string is the one value that every path variable, the session and the
+     serve arguments already refuse as `usage` naming the variable.
+   - A lossy conversion was rejected. `/tmp/x\u{FFFD}/tmux.sock` is absolute and would be taken as a socket path, as
+     T-red noted.
+   - Two other ways were rejected as not worth their cost for this edge:
+     - an in-band marker (a NUL, which no real value can hold) that every reader would check;
+     - a new `Lookup` type, which would change D24's signature and break T's tests.
+   - What is left uncovered: `HOLLER_HERDR_WORKSPACES`, whose empty value is no workspace (pinned by T-green). A
+     non-UTF-8 list therefore reads like an unset one. It fails closed: the Herdr adapter refuses every `ensure_pane`
+     into an unlisted workspace as `unavailable`, before any request of its own (evidence), so no pane is made.
+   - The rule is documented on `connect`, on `Lookup`, in both module docs and in the ADR.
+10. **The lookup stays a closure in `connect`.** A named `env::process` function was the alternative. It would add a
+    public item to `holler_cli::pane::wiring::env` for one caller, and A sized the fix as one line in `connect`. No public
+    API changes.
+11. **The two empty-value messages say "empty or not UTF-8".** These are `absolute`'s message, which quoted the value
+    as `""`, and the session's, which said none was configured. This goes beyond A's one line, but it keeps the
+    operator-facing text true. `serve_args`' message quotes no value, so it needs no change.
+
+### First cycle
+
 1. **One generic `Wired<P>` for the harness and the host.**
    - W-E needs a host that answers `usage` naming `HOLLER_TMUX_SOCKET` from every method. The trial fell back to
      `Unwired` instead.
@@ -54,7 +111,8 @@ names, and `connect` is the real one.
    - `call(method, params, timeout, effect, op)` keeps D24's five parameters and is the one `ControlError` mapping.
    - `write` is an `Effect` enum (`Read`, `Write`), not a bool, so the mapping's `match` reads as D3 does.
    - Params are the typed structs of `holler_pane::reply`, not `json!`, so they match the hub's `deny_unknown_fields`.
-     `json!` also hides an `unwrap` for non-literal values.
+     `json!` also hides an `unwrap` for non-literal values. The two list methods send the literal `{}`, the hub's
+     documented `NoParams` (evidence).
 3. **The eager watch (D4).**
    - The iterator holds `batch: Option<VecDeque<E>>`. `watch()` fills it with the first reply.
    - Each `next()` takes the batch, or makes a request when there is none.
@@ -98,6 +156,8 @@ names, and `connect` is the real one.
 
 ## Reuse / extend-vs-new
 
+- **Second cycle:** nothing new. The fix is inside the existing `connect`, and the messages are inside the existing
+  `env.rs` functions.
 - **Extended:** #670's `Wiring` (its body and fields replaced, `connect`/`ports` signatures kept) and the trial's three
   submodules (rewritten in place).
 - **Reused unchanged:**
@@ -116,6 +176,9 @@ names, and `connect` is the real one.
 
 ## Architecture notes for A
 
+- **Second cycle: no architecture change.** No new module, type, public item or dependency, and no signature change.
+  `connect`'s lookup is a local closure, and the two message texts are private. This agrees with A's reading of W-T.
+  This cycle reports `archChanged: false`.
 - **Layers:** `holler-cli` only. The CLI now depends on the three adapter crates. They were already in the tree, and
   ADR-0021 section 5 allows it. `holler-hub` gains nothing, and `pane_wiring.rs` is untouched (D16).
 - **Contracts:** no change to the ports, the protocol, golden files or `holler-pane`.
@@ -125,10 +188,13 @@ names, and `connect` is the real one.
   - `const ACTOR` and `Actor::parse(ACTOR)?` (as `profile/create.rs` does);
   - `unwrap_or_else(PoisonError::into_inner)` for a lock;
   - the module docs carry the decision tables, as `profile_scope.rs` does.
-- **File sizes:** `wiring.rs` 382, `bind.rs` 406, `store.rs` 394 and `env.rs` 234 lines, all under the 600 warn line.
+- **File sizes:** `wiring.rs` 390, `bind.rs` 410, `store.rs` 397 and `env.rs` 250 lines, all under the 600 warn line.
 
 ## Deviations from spec / wireframe
 
+- **Second cycle:** none from the brief.
+  - The two message texts go beyond A's one line (Design decision 11).
+  - The ADR sentence is D17's record of the rule.
 - **D24's `call`:** the `write` parameter is the `Effect` enum, not a bool. The name, the order and the role (the one
   mapping) are as sketched.
 - **D24's `stores()`:** returns `(Arc<dyn PaneStore>, Arc<dyn ProfileStore>)`, what the wiring shares, not the
@@ -147,50 +213,50 @@ names, and `connect` is the real one.
 
 ## Tier 1 self-check (incl. tests now GREEN)
 
+At this cycle's tree (`ce5da11` plus the staged changes):
+
 | Command | Result |
 |---|---|
-| `cargo build -p holler-cli` | clean |
-| `cargo clippy -p holler-cli --all-targets -- -D warnings` (CI's flags) | clean |
-| `cargo test -p holler-cli --test pane_integration` | `test result: ok. 58 passed; 0 failed; 4 ignored; ... finished in 107.39s` |
-| `HOLLER_TEST_PANE_INTEGRATION=1 cargo test -p holler-cli --test pane_integration -- --ignored --test-threads=1` | `test result: ok. 4 passed; 0 failed; ... finished in 57.05s` |
-| `cargo test --workspace -- --skip roster_stays_accurate_under_concurrent_body_load` | 1607 passed, 1 failed, 31 ignored, then stopped (see below) |
-| `cargo test --no-fail-fast -p holler-hub -p holler-load-test -p holler-pane -p holler-pane-testkit -p holler-proto -- --skip roster_stays_accurate_under_concurrent_body_load` (the crates the stopped run never reached) | 702 passed, 0 failed, 1 ignored, exit 0 |
-| `cargo test --doc` for the crates the stopped run had reached (`holler-cli`, `holler-body`, the three adapters, `herdr-holler`) | ok (none has a doc-test) |
-| `cargo test -p holler-cli --test docs_cli_test`, rerun after the ADR edit | 3 passed: every `holler …` span of the new ADR text parses |
-| `bash scripts/lint.sh` | exit 0, no warning for a touched file |
+| `cargo test -p holler-cli --test pane_integration wired::` | `ok. 2 passed; 0 failed`. T-red's RED row `a_tmux_socket_that_is_not_utf8_is_usage_never_the_default_server` now passes, beside its D6 sibling |
+| `cargo test -p holler-cli --test pane_integration` (default run, final code) | `ok. 61 passed; 0 failed; 4 ignored; ... finished in 123.59s`, T's 6 s pin included |
+| `HOLLER_TEST_PANE_INTEGRATION=1 cargo test -p holler-cli --test pane_integration -- --ignored --test-threads=1` (final code) | `ok. 4 passed; 0 failed; ... finished in 82.48s`: the scenario, the profile scenario, the grid, and the server argv under a real tmux pty. No `/tmp/hlr649-*` directory and no `hlr649` or `holler649` process was left |
+| After the last edits, which touched only doc comments and the ADR sentence: `cargo test -p holler-cli --test pane_integration -- wired:: env:: no_hub::` | `ok. 17 passed; 0 failed`. Clippy, rustdoc, `docs_cli_test`, `lint.sh` and `rustfmt` were re-run too (rows below, at the staged tree) |
+| `cargo test --workspace --no-fail-fast -- --skip roster_stays_accurate_under_concurrent_body_load` (CI's `test.unit.command`; `--no-fail-fast` so every crate is reached) | 151 test binaries: 2312 passed, **1 failed**, 32 ignored. The failure is the rename scan below. This run includes `pane_cli_process` (the D22 stub tests over a `LiveHub`, 36 passed) and `pane_verbs` (313 passed) |
+| `cargo clippy --workspace --all-targets -- -D warnings` (CI's flags) | clean, exit 0 |
+| `cargo test -p holler-cli --test docs_cli_test`, after the ADR sentence | `ok. 3 passed` |
+| `cargo test -p holler-cli --test wire_selftest` | `ok. 3 passed` |
+| `bash scripts/lint.sh` | exit 0. The size warnings are for files this story does not touch; none names a wiring or `pane_integration` file |
 | `bash scripts/changelog-check.sh` | ok |
 | `cargo machete` | no unused dependency |
-| `rustfmt --edition 2021 --check crates/holler-cli/src/pane/wiring.rs` (and its three submodules) | clean |
+| `rustfmt --edition 2021 --check crates/holler-cli/src/pane/wiring.rs` (it checks the three submodules too) | clean |
+| `cargo doc -p holler-cli --no-deps --document-private-items`, with the intra-doc link lints as warnings | no diagnostic in a wiring file. Other modules of the crate have existing ones; CI runs no rustdoc |
 
-**The 58 default-run tests** include T's 8 RED rows, all now passing:
-
-- `env::herdrs_own_session_variable_is_no_fallback`;
-- `env::no_herdr_session_is_usage_naming_holler_herdr_session`;
-- `env::malformed_workspaces_are_usage_naming_the_variable`;
-- `store_only::a_herdr_verb_with_no_session_configured_is_usage_naming_holler_herdr_session`;
-- `fake_hub::watch_makes_its_first_request_when_called_and_keeps_the_batch_for_the_first_next`;
-- `fake_hub::a_cursor_ahead_of_the_head_is_refused_by_watch_itself`;
-- `fake_hub::watch_with_no_hub_is_unavailable_from_watch_itself`;
-- `wired::a_relative_tmux_socket_is_usage_from_the_host_and_the_harness_never_the_default_server`.
-
-**The opt-in run** used the scratch instances the tests start themselves. Afterwards no `/tmp/hlr649-*` directory and no
-`hlr649` or `holler649` process was left. The `/tmp/hlr649-*.txt` files there are T's earlier logs; I did not create or
-remove them.
-
-**The one workspace failure is not this phase's.**
-- The failing test is `wizard_scripts`' `skilltext_w5_rename::no_old_command_or_directory_outside_the_rename_note`. It
-  scans every git-tracked file for the setup wizard's pre-#812 directory and command names.
-- It hits two lines of pipeline scratch that O and A wrote:
-  - `docs/handoffs/649-brief.md:1197`, the brief's E64 source path;
-  - `docs/handoffs/649/decisions.md:66`, A's first-pass evidence list.
-- Phase 11 deletes `docs/handoffs/` before the push, so CI will not see them. No production file or file of this phase
-  carries the old name.
-- cargo stops at the first failing binary. So the crates after `holler-cli` were run separately, with `--no-fail-fast`
-  (row above).
+**The workspace failure that is not this phase's.**
+- `wizard_scripts`' `skilltext_w5_rename::no_old_command_or_directory_outside_the_rename_note` scans every git-tracked
+  file for the setup wizard's pre-#812 names.
+- Its only hits are pipeline scratch under `docs/handoffs/`, which Phase 11 deletes before the push, so CI will not see
+  them. F and T-green both reported it in the first cycle.
 
 ## Evidence appendix
 
-`docs/handoffs/649/evidence.md`, which covers:
+`docs/handoffs/649/evidence.md`.
+
+**Second cycle**, under "The source that round 1 of the diff gate asked for". These are the facts W-S lists, for round
+2's reviewer:
+- **B-1:** `PaneReply.data` and `into_result`; serde's `Option` and `serde_json`'s `deserialize_option` at the locked
+  versions; conformance Case 1 in both suites.
+- **B-2:** the hub's `NoParams`, `params_of`, `decode_params`' doc, and the nine params structs of
+  `holler_pane::reply`.
+- **NV-4:** `HarnessPort`'s eleven methods and its two defaults.
+- **NV-5:** `pane/cas_put`'s membership check and `check_membership`.
+- **W-T:** the Herdr adapter refuses an unlisted workspace before any request of its own. This backs the
+  non-UTF-8 `HOLLER_HERDR_WORKSPACES` sentence of the docs.
+
+Every quoted line was checked mechanically against its file, and each line range against a numbered read. The excerpt cap of
+round 1 (24 KB) is used up by the brief's own citations, so each entry quotes the lines it relies on rather than counting
+on the gate to attach them.
+
+**First cycle:**
 - the `ControlError` sources in `send_over`;
 - `transport::call` → `control::run`;
 - the state dir read per call;
@@ -201,14 +267,20 @@ remove them.
 
 ## Tests that look wrong (for T)
 
-None. For Phase 6:
-- `env.rs`'s malformed-workspace rows do not include the empty value `""`, which this implementation reads as no
-  workspace. Pinning that is T's call.
-- No test pins the absolute-path rule for `HOLLER_HERDR_SOCKET`, `HERDR_SOCKET_PATH` or `HOLLER_OPENCODE_BIN`
-  (Design decision 6). They may be worth a row each.
+None. T's call, not a defect:
+- No row pins a non-UTF-8 value for a variable other than `HOLLER_TMUX_SOCKET`. The empty-value rows of `env.rs` cover
+  each reader, and the process lookup is one closure that every variable goes through. So a second process-level row
+  (such as `HOLLER_HERDR_SOCKET`, against the `HERDR_SOCKET_PATH` fallback) would pin the same line twice.
 
 ## Known issues
 
+- **A non-UTF-8 `HOLLER_HERDR_WORKSPACES` reads as no workspace, not as `usage`.** This is Design decision 9. It fails
+  closed: every launch is refused `unavailable` ("workspace ... is not configured"), and no Herdr pane is made.
+- **A non-UTF-8 `XDG_CONFIG_HOME` reads as empty.** The XDG rule takes empty as unset, so the socket default uses
+  `$HOME/.config`, as it did before this cycle.
+  - The wiring cannot tell such a value from an empty one through D24's `Lookup`.
+  - It matters only when neither `HOLLER_HERDR_SOCKET` nor `HERDR_SOCKET_PATH` is set.
+  - `PATH` and `HOME` read as before too.
 - **T's findings 1 and 2 stay O's to file**, outside the Blast radius:
   - the OpenCode adapter's TUI query without a UTF-8 locale;
   - `pane switch` right after `pane relaunch`.
@@ -216,17 +288,19 @@ None. For Phase 6:
 - **A's follow-ups for O are unchanged:**
   - comment on #825 that `profile apply` logs as `holler pane` (the ADR paragraph and the CHANGELOG now say so);
   - file the `LinkedHost` consolidation (W-O);
-  - #653 and #803.
+  - #653 and #803;
+  - W-U, to be filed in Aftersight.
 
 ## Files changed
 
-- `crates/holler-cli/src/pane/wiring.rs`
+Production files, both cycles (this cycle's marked):
+- `crates/holler-cli/src/pane/wiring.rs` (this cycle too)
 - `crates/holler-cli/src/pane/wiring/bind.rs`
-- `crates/holler-cli/src/pane/wiring/env.rs`
+- `crates/holler-cli/src/pane/wiring/env.rs` (this cycle too)
 - `crates/holler-cli/src/pane/wiring/store.rs`
 - `crates/holler-cli/Cargo.toml`
-- `docs/adr/ADR-0021.md`
+- `docs/adr/ADR-0021.md` (this cycle too)
 - `CHANGELOG.md`
 
-Pipeline scratch: `docs/handoffs/649/handoff-F.md`, `docs/handoffs/649/evidence.md`, and the F entry in
+Pipeline scratch: `docs/handoffs/649/handoff-F.md`, `docs/handoffs/649/evidence.md`, and the F entries in
 `docs/handoffs/649/decisions.md`.

@@ -2,11 +2,11 @@
 //! and its workspaces, the tmux socket, and the OpenCode binary and server arguments. The
 //! parent module's doc lists every variable.
 //!
-//! Each function reads through the [`Lookup`] it is given (`std::env::var` in production), so
-//! a test needs no process environment. A malformed or missing value is an error that names
-//! its variable. The wiring keeps it, and the port the value configures answers it at its first
-//! use, never at `connect` (D26), so the verbs that read only the registries work whatever these
-//! variables say.
+//! Each function reads through the [`Lookup`] it is given (the process environment in
+//! production), so a test needs no process environment. A malformed or missing value is an
+//! error that names its variable. The wiring keeps it, and the port the value configures answers
+//! it at its first use, never at `connect` (D26), so the verbs that read only the registries
+//! work whatever these variables say.
 //!
 //! Every path a variable gives must be absolute: a relative or empty one is `usage` naming the
 //! variable, never a path resolved against the working directory, and never a fallback (D6:
@@ -21,7 +21,14 @@ use holler_adapter_herdr::plan::Extent;
 use holler_adapter_host::TmuxSocket;
 use holler_pane::PaneError;
 
-/// How the wiring reads a variable: its value, or `None` when it is unset (or not UTF-8).
+/// How the wiring reads a variable: its value, or `None` when it is unset.
+///
+/// `Wiring::connect` reads the process environment, and gives a value that is not UTF-8 as the
+/// empty string, never as `None`, so a malformed value takes no unset variable's fallback (for
+/// `HOLLER_TMUX_SOCKET`, tmux's default server). Each variable of the parent module's table,
+/// and `HERDR_SOCKET_PATH`, refuses the empty value as `usage` naming it, but
+/// `HOLLER_HERDR_WORKSPACES`, whose empty value is no workspace. `PATH`, `HOME` and
+/// `XDG_CONFIG_HOME` take the empty value as they take an unset one.
 pub type Lookup<'a> = &'a dyn Fn(&str) -> Option<String>;
 
 /// The one Herdr session the panes live in.
@@ -57,8 +64,8 @@ pub fn herdr_config(env: Lookup<'_>) -> Result<HerdrConfig, PaneError> {
         .filter(|session| !session.is_empty())
         .ok_or_else(|| {
             usage(format!(
-                "no Herdr session is configured: set {HERDR_SESSION} to the Herdr session the \
-                 panes live in"
+                "no Herdr session is configured: {HERDR_SESSION} is unset, empty or not UTF-8; \
+                 set it to the Herdr session the panes live in"
             ))
         })?;
     let socket = herdr_socket(env, &session)?;
@@ -213,8 +220,14 @@ fn bad_workspace(item: &str, why: &str) -> PaneError {
     ))
 }
 
-/// The value of `variable` as a path: `usage` naming the variable when it is not absolute.
+/// The value of `variable` as a path: `usage` naming the variable when it is not absolute. The
+/// empty value also stands for a value that is not UTF-8 ([`Lookup`]), so its message names both.
 fn absolute(variable: &str, value: String) -> Result<PathBuf, PaneError> {
+    if value.is_empty() {
+        return Err(usage(format!(
+            "{variable} is empty or not UTF-8; it must be an absolute path"
+        )));
+    }
     let path = PathBuf::from(value);
     if path.is_absolute() {
         Ok(path)
