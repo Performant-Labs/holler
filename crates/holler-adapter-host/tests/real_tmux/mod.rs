@@ -2,19 +2,21 @@
 //! `real_tmux_test.rs` so that a second test crate includes it with `#[path]` instead of
 //! copying it (#649's pane integration scenario). It holds no `#[test]`.
 //!
-//! [`private`] builds every host of `real_tmux_test.rs`: its own tmux server on a socket in a
-//! fresh `/tmp/hlr-tmux-*` directory, with a config that forces `/bin/sh`. [`isolated`] is the
-//! same server in a directory under a caller's scratch base, started by the test itself with
-//! exactly the environment it is given (#649, A's W-1): tmux gives a new session the server's
-//! global environment, so what the server starts with is what every process under it sees.
-//! Dropping the [`Server`] kills that server (by its socket, never a signal) and removes its
-//! directory.
+//! [`private_server`] is the server of every host of `real_tmux_test.rs`: its own tmux server
+//! on a socket in a fresh `/tmp/hlr-tmux-*` directory, with a config that forces `/bin/sh`.
+//! [`isolated`] is the same server in a directory under a caller's scratch base, started by
+//! the test itself with exactly the environment it is given (#649, A's W-1): tmux gives a new
+//! session the server's global environment, so what the server starts with is what every
+//! process under it sees. Dropping the [`Server`] kills that server (by its socket, never a
+//! signal) and removes its directory.
+//!
+//! The module builds no `TmuxHost`: `real_tmux_test.rs` keeps its one host helper, `private`,
+//! which `fake_tmux_test.rs`'s source guard counts there (AC 9).
 
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
-use holler_adapter_host::{TmuxHost, TmuxSocket};
 use tempfile::TempDir;
 
 /// The `sun_path` limit the socket path must stay under.
@@ -119,15 +121,9 @@ fn server_in(base: &Path) -> Server {
     server
 }
 
-/// The host on `server`.
-fn host_on(server: &Server) -> TmuxHost {
-    TmuxHost::new(TmuxSocket::Path(server.sock())).with_config(server.config())
-}
-
-/// The one helper every real-tmux test builds its host with (AC 9).
-pub fn private() -> (TmuxHost, Server) {
-    let server = server_in(Path::new("/tmp"));
-    (host_on(&server), server)
+/// A private server in `/tmp`, its config written (AC 9).
+pub fn private_server() -> Server {
+    server_in(Path::new("/tmp"))
 }
 
 /// `tmux` on this process's `PATH`, as an absolute path.
@@ -143,7 +139,7 @@ fn tmux_on_path() -> PathBuf {
 /// inherited) and one session, `anchor`, that keeps it running. The anchor runs `/bin/sh`
 /// and is never a pane's session. `tmux` is found on this process's `PATH`, not `env`'s, and
 /// runs in `base`, so the `PWD` tmux adds to its global environment is `base` too.
-pub fn isolated(base: &Path, env: &[(String, String)], anchor: &str) -> (TmuxHost, Server) {
+pub fn isolated(base: &Path, env: &[(String, String)], anchor: &str) -> Server {
     let server = server_in(base);
     let out = Command::new(tmux_on_path())
         .arg("-S")
@@ -158,5 +154,5 @@ pub fn isolated(base: &Path, env: &[(String, String)], anchor: &str) -> (TmuxHos
         .output()
         .unwrap();
     assert!(out.status.success(), "tmux new-session {anchor}: {out:?}");
-    (host_on(&server), server)
+    server
 }

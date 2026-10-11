@@ -137,7 +137,7 @@ fn a_lazy_herdr_that_cannot_be_built_answers_that_error_from_every_method() {
     let lazy = LazyHerdr::new(move || {
         count.fetch_add(1, Ordering::SeqCst);
         Err(PaneError::Usage {
-            message: "set HOLLER_HERDR_SESSION or HERDR_SESSION".to_owned(),
+            message: "no Herdr session: set HOLLER_HERDR_SESSION".to_owned(),
         })
     });
     let pane = PaneId::new("w1:p1");

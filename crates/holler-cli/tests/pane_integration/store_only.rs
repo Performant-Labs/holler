@@ -24,7 +24,7 @@ const PROFILE: &str = "hlr649";
 pub struct Bare {
     pub state: StateDir,
     pub hub: Hub,
-    empty: tempfile::TempDir,
+    pub empty: tempfile::TempDir,
 }
 
 impl Bare {
@@ -88,44 +88,62 @@ fn the_store_only_verbs_work_with_no_herdr_tmux_or_opencode() {
     assert_eq!(show.code, 0, "profile show: {show:?}");
 }
 
-/// A verb that needs Herdr, with none configured, fails at its first Herdr call with
-/// `usage` naming the two session variables (D5); the store-only verbs above are unaffected
-/// by the same missing setting.
+/// A verb that needs Herdr, with no Herdr session configured but tmux and OpenCode
+/// configured (each a trap that is never reached), fails at its first Herdr call with `usage`
+/// naming `HOLLER_HERDR_SESSION`, and only that variable: `HERDR_SESSION` is no fallback (D5,
+/// audit). The store-only verbs above are unaffected by the same missing setting, and nothing
+/// is written. `HOME` and `XDG_CONFIG_HOME` are scratch, so a wiring that did fall back could
+/// only resolve a Herdr socket inside the trap directory.
 #[test]
-fn a_herdr_verb_with_no_session_configured_is_usage_naming_the_variables() {
+fn a_herdr_verb_with_no_session_configured_is_usage_naming_holler_herdr_session() {
     let bare = Bare::start();
-    let out = bare.holler(&[
-        "pane",
-        "launch",
-        PANE,
-        "--herdr-session",
-        "holler649-00000000",
-        "--project",
-        "/tmp",
-        "--workspace",
-        "hlr649",
-        "--grid",
-        "r1c1",
-        "--model",
-        "deadend/none",
-        "--effort",
-        "medium",
-        "--ctx-soft",
-        "100000",
-        "--ctx-hard",
-        "150000",
-        "--port-policy",
-        "fixed:48100",
-        "--format=json",
-    ]);
+    let traps = tempfile::Builder::new().prefix("hlr649-").tempdir_in("/tmp").unwrap();
+    let opencode = traps.path().join("opencode").display().to_string();
+    let tmux = traps.path().join("tmux.sock").display().to_string();
+    let empty = bare.empty.path().display().to_string();
+    let home = traps.path().display().to_string();
+    let out = holler_on(
+        &bare.state,
+        &[
+            "pane",
+            "launch",
+            PANE,
+            "--herdr-session",
+            "holler649-00000000",
+            "--project",
+            "/tmp",
+            "--workspace",
+            "hlr649",
+            "--grid",
+            "r1c1",
+            "--model",
+            "deadend/none",
+            "--effort",
+            "medium",
+            "--ctx-soft",
+            "100000",
+            "--ctx-hard",
+            "150000",
+            "--port-policy",
+            "fixed:48100",
+            "--format=json",
+        ],
+        &[
+            ("PATH", empty.as_str()),
+            ("HOME", home.as_str()),
+            ("XDG_CONFIG_HOME", home.as_str()),
+            ("HERDR_SESSION", "holler649-0000000b"),
+            ("HOLLER_TMUX_SOCKET", tmux.as_str()),
+            ("HOLLER_OPENCODE_BIN", opencode.as_str()),
+        ],
+    );
     let error = out.envelope().error.unwrap_or_else(|| panic!("a failure: {out:?}"));
     assert_eq!(error.code, "usage", "{out:?}");
-    for variable in ["HOLLER_HERDR_SESSION", "HERDR_SESSION"] {
-        assert!(
-            error.message.contains(variable),
-            "the message names {variable}: {out:?}"
-        );
-    }
+    assert!(
+        error.message.contains("HOLLER_HERDR_SESSION")
+            && !error.message.replace("HOLLER_HERDR_SESSION", "").contains("HERDR_SESSION"),
+        "the message names HOLLER_HERDR_SESSION and offers no fallback: {out:?}"
+    );
     let list = bare.holler(&["pane", "list", "--format=json"]);
     assert_eq!(list.code, 0, "nothing was written: {list:?}");
     assert_eq!(list.data()["panes"], Value::Array(Vec::new()), "{list:?}");

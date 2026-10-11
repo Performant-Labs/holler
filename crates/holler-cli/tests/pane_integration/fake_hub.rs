@@ -14,7 +14,7 @@
 //! | no socket (`NoLiveHub`) | `unavailable`, naming the hub | `unavailable`, naming the hub |
 //! | a JSON-RPC error (`Refused`) | `unavailable` | `unavailable` |
 //! | closed before the reply (`BadReply`) | `unavailable` | `timeout` (D3: it may have landed) |
-//! | no reply within the bound (`Io`, timed out) | `timeout` | `timeout` |
+//! | no reply within the bound (`Io`, timed out) | `timeout`, naming the store method | `timeout` |
 //! | a `data` that does not decode | `unavailable`, naming the method | |
 
 use std::io::{BufRead, BufReader, Write};
@@ -229,6 +229,7 @@ fn a_write_the_hub_never_answers_is_timeout_within_the_bound() {
         (code, text, started.elapsed())
     });
     assert_eq!(code, "timeout", "{text}");
+    assert!(text.contains("pane_store.cas_put"), "the timeout names the write: {text}");
     assert!(took < Duration::from_secs(13), "bounded by 10 s: took {took:?}");
 }
 
@@ -242,7 +243,30 @@ fn a_read_the_hub_never_answers_is_timeout_within_the_bound() {
         (code, text, started.elapsed())
     });
     assert_eq!(code, "timeout", "{text}");
+    assert!(text.contains("pane_store.get"), "the timeout names the store method: {text}");
     assert!(took < Duration::from_secs(13), "bounded by 10 s: took {took:?}");
+}
+
+/// D3: a watch request the hub took and never answered is `timeout` naming
+/// `pane_store.watch_next`, within the watch's own bound (`WATCH_WAIT` + 5 s). Whether the
+/// request is `watch`'s own first one or a later `next()`'s, the answer is the same.
+#[test]
+fn a_watch_request_the_hub_never_answers_is_timeout_naming_watch_next() {
+    let hub = FakeHub::start(vec![Answer::Hang(Duration::from_secs(16))]);
+    let (error, took) = hub.with(|| {
+        let started = Instant::now();
+        let error = match HubPaneStore::new().watch(Cursor(0)) {
+            Err(error) => error,
+            Ok(mut watch) => match watch.next() {
+                Some(Err(error)) => error,
+                other => panic!("want one error; got {other:?}"),
+            },
+        };
+        (error, started.elapsed())
+    });
+    assert_eq!(error.code(), "timeout", "{error}");
+    assert!(error.to_string().contains("pane_store.watch_next"), "{error}");
+    assert!(took < Duration::from_secs(13), "bounded by WATCH_WAIT + 5 s: took {took:?}");
 }
 
 /// W-9: a JSON-RPC error never reached a handler, so nothing was written: `unavailable`,
@@ -277,35 +301,76 @@ fn a_client_call_with_no_hub_is_unavailable_naming_the_hub() {
     assert!(text.contains("no live holler hub reachable"), "{text}");
 }
 
-/// D4: an empty batch is the idle item `Ok(None)`, and the next request resumes from the
-/// reply's cursor.
-#[test]
-fn an_empty_watch_batch_is_idle_and_the_next_poll_resumes_from_its_cursor() {
-    let idle = json!({ "ok": true, "data": { "events": [], "cursor": 7 } });
-    let hub = FakeHub::start(vec![Answer::Result(idle.clone()), Answer::Result(idle)]);
-    let (first, second) = hub.with(|| {
-        let mut watch = HubPaneStore::new().watch(Cursor(0)).expect("watch");
-        (watch.next(), watch.next())
-    });
-    assert!(matches!(first, Some(Ok(None))), "idle: {first:?}");
-    assert!(matches!(second, Some(Ok(None))), "idle again: {second:?}");
-    let requests = hub.requests();
-    assert_eq!(requests.len(), 2, "one request per next(): {requests:?}");
-    assert_eq!(requests[0].0, "pane/watch");
-    assert_eq!(requests[1].1["since"], 7, "resumed from the reply's cursor: {requests:?}");
-}
-
 /// D4: a store or transport error yields one `Err` and ends the stream.
 #[test]
 fn a_watch_error_yields_one_err_and_ends_the_stream() {
-    let hub = FakeHub::start(vec![Answer::Error]);
-    let (first, second) = hub.with(|| {
+    let idle = json!({ "ok": true, "data": { "events": [], "cursor": 3 } });
+    let hub = FakeHub::start(vec![Answer::Result(idle), Answer::Error]);
+    let (first, second, third) = hub.with(|| {
         let mut watch = HubProfileStore::new().watch(Cursor(0)).expect("watch");
-        (watch.next(), watch.next())
+        (watch.next(), watch.next(), watch.next())
     });
-    assert!(matches!(first, Some(Err(_))), "one error: {first:?}");
-    assert!(second.is_none(), "then the stream ends: {second:?}");
-    assert_eq!(hub.requests().len(), 1, "no request after the error");
+    assert!(matches!(first, Some(Ok(None))), "idle: {first:?}");
+    assert!(matches!(second, Some(Err(_))), "one error: {second:?}");
+    assert!(third.is_none(), "then the stream ends: {third:?}");
+    assert_eq!(hub.requests().len(), 2, "no request after the error");
+}
+
+/// D4 (audit): `watch(since)` makes the first request itself, eagerly, and keeps its batch
+/// for the first `next()`; each later `next()` sends one request, resuming from the cursor of
+/// the reply before it.
+#[test]
+fn watch_makes_its_first_request_when_called_and_keeps_the_batch_for_the_first_next() {
+    let idle = json!({ "ok": true, "data": { "events": [], "cursor": 7 } });
+    let hub = FakeHub::start(vec![Answer::Result(idle.clone()), Answer::Result(idle)]);
+    let (at_watch, first, at_first, second) = hub.with(|| {
+        let mut watch = HubPaneStore::new().watch(Cursor(0)).expect("watch");
+        let at_watch = hub.requests().len();
+        let first = watch.next();
+        let at_first = hub.requests().len();
+        (at_watch, first, at_first, watch.next())
+    });
+    assert_eq!(at_watch, 1, "watch() itself sent the first request");
+    assert!(matches!(first, Some(Ok(None))), "the kept batch, idle: {first:?}");
+    assert_eq!(at_first, 1, "the first next() sent nothing: it yields the kept batch");
+    assert!(matches!(second, Some(Ok(None))), "idle again: {second:?}");
+    let requests = hub.requests();
+    assert_eq!(requests.len(), 2, "the second next() sent one request: {requests:?}");
+    assert_eq!(requests[0].1["since"], 0, "{requests:?}");
+    assert_eq!(requests[1].1["since"], 7, "resumed from the reply's cursor: {requests:?}");
+}
+
+/// D4 (audit): a cursor ahead of the head is the hub's `usage`, passed through, and it is
+/// refused by `watch()` itself, before any item: `pane watch`'s `open()` promises that every
+/// refusal comes before the first line. The same for both clients.
+#[test]
+fn a_cursor_ahead_of_the_head_is_refused_by_watch_itself() {
+    let refusal = json!({
+        "ok": false,
+        "error": { "code": "usage", "message": "the cursor 99 is ahead of the head 0" }
+    });
+    let pane = FakeHub::start(vec![Answer::Result(refusal.clone())]);
+    let pane_answer = pane.with(|| HubPaneStore::new().watch(Cursor(99)).map(drop));
+    let profile = FakeHub::start(vec![Answer::Result(refusal)]);
+    let profile_answer = profile.with(|| HubProfileStore::new().watch(Cursor(99)).map(drop));
+    for (store, answer, hub) in [("pane", pane_answer, &pane), ("profile", profile_answer, &profile)] {
+        let error = answer.expect_err("watch() refuses the cursor itself");
+        assert_eq!(error.code(), "usage", "{store}: {error}");
+        let requests = hub.requests();
+        assert_eq!(requests.len(), 1, "{store}: {requests:?}");
+        assert_eq!(requests[0].1["since"], 99, "{store}: {requests:?}");
+    }
+}
+
+/// D4 (audit) with D3: with no hub, `watch()` itself is `unavailable` naming the missing hub,
+/// not a stream whose first item is the error.
+#[test]
+fn watch_with_no_hub_is_unavailable_from_watch_itself() {
+    let state = StateDir::new();
+    let answer = with_state_dir(state.path(), || HubPaneStore::new().watch(Cursor(0)).map(drop));
+    let error = answer.expect_err("watch() fails at once");
+    assert_eq!(error.code(), "unavailable", "{error}");
+    assert!(error.to_string().contains("no live holler hub reachable"), "{error}");
 }
 
 /// D4: a watch request's own timeout is the hub's window plus a margin (`WATCH_WAIT` + 5 s),
@@ -322,11 +387,11 @@ fn a_watch_poll_waits_past_the_default_control_timeout() {
     assert!(matches!(first, Some(Ok(None))), "idle, not a timeout: {first:?}");
 }
 
-/// D2: `connect` makes one `control/status` exchange; a hub that refuses it, or closes
-/// without a reply, is `unavailable`.
+/// D2: `connect` makes one `control/status` exchange; a hub that refuses it, closes without
+/// a reply, or does not answer within the exchange's own 5 s, is `unavailable`.
 #[test]
 fn connect_is_unavailable_when_the_status_exchange_fails() {
-    for answer in [Answer::Error, Answer::Close] {
+    for answer in [Answer::Error, Answer::Close, Answer::Hang(Duration::from_secs(8))] {
         let hub = FakeHub::start(vec![answer.clone()]);
         let outcome = hub.with(|| Wiring::connect().err().map(|e| e.code().to_owned()));
         assert_eq!(outcome.as_deref(), Some("unavailable"), "{answer:?}");

@@ -4,8 +4,9 @@
 //! `cargo test -p holler-adapter-host --test real_tmux_test -- --ignored`. Each returns
 //! early, saying why, when `tmux -V` cannot run.
 //!
-//! Every host is built by [`private`] (`real_tmux/mod.rs`) on its own tmux server, on a socket in a fresh
-//! `/tmp/hlr-tmux-*` directory, with a config that forces `/bin/sh` (AC 9). The guard
+//! Every host is built by [`private`] on its own tmux server (`real_tmux/mod.rs`, shared with
+//! #649's scenario), on a socket in a fresh `/tmp/hlr-tmux-*` directory, with a config that
+//! forces `/bin/sh` (AC 9). The guard
 //! kills that server and removes its directory. No test touches the default socket or
 //! names a session outside `demo-*`. The real `kill` is used, and only ever on a process
 //! the test started on its private server (Decision 14).
@@ -21,10 +22,18 @@ use std::process::{Child, Command};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use holler_adapter_host::TmuxHost;
+use holler_adapter_host::{TmuxHost, TmuxSocket};
 use holler_pane::{Argv, HostPort, PaneError, PaneName};
 use holler_pane_testkit::conformance::host::run_host_conformance;
-use real_tmux::{private, tmux_available, Server};
+use real_tmux::{tmux_available, Server};
+
+/// The one helper every real-tmux test builds its host with (AC 9): a private server, and
+/// the host on its socket with its config.
+fn private() -> (TmuxHost, Server) {
+    let server = real_tmux::private_server();
+    let host = TmuxHost::new(TmuxSocket::Path(server.sock())).with_config(server.config());
+    (host, server)
+}
 
 /// The longest a bounded wait polls.
 const WAIT: Duration = Duration::from_secs(1);

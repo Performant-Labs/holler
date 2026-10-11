@@ -10,7 +10,8 @@
 //! state dir: the no-hub answer of every verb (`no_hub`), the verbs that need no adapter
 //! (`store_only`), the store clients against a real hub (`clients`: the test kit's two
 //! conformance suites) and against a hub that misbehaves on purpose (`fake_hub`), the
-//! watch (`watch`), the environment the wiring reads (`env`), the bindings, decorators and
+//! watch (`watch`), the environment the wiring reads (`env`, and `wired` for the ports
+//! `connect` builds from it), the bindings, decorators and
 //! lazy ports (`bind`), and the scenario's guards as pure functions (`guards`). The
 //! scenario itself (`scenario`) is `#[ignore]` and runs only with
 //! `HOLLER_TEST_PANE_INTEGRATION=1` exactly, on scratch instances it starts itself
@@ -38,6 +39,7 @@ mod scenario;
 mod scratch;
 mod store_only;
 mod watch;
+mod wired;
 
 use std::path::Path;
 use std::process::Command;
@@ -61,6 +63,32 @@ pub fn with_state_dir<R>(dir: &Path, f: impl FnOnce() -> R) -> R {
     // against every other in-process client test of this target.
     std::env::set_var("HOLLER_STATE_DIR", dir);
     f()
+}
+
+/// [`with_state_dir`], with each variable of `vars` set (`Some`) or removed (`None`) for the
+/// length of `f` and put back as it was afterwards. Only the in-process `Wiring::connect`
+/// tests need it: `connect` reads the wiring's settings from this process's environment.
+pub fn with_env<R>(dir: &Path, vars: &[(&str, Option<&str>)], f: impl FnOnce() -> R) -> R {
+    let _held = state_dir_lock();
+    std::env::set_var("HOLLER_STATE_DIR", dir);
+    let saved: Vec<(String, Option<std::ffi::OsString>)> = vars
+        .iter()
+        .map(|(name, _)| ((*name).to_owned(), std::env::var_os(name)))
+        .collect();
+    for (name, value) in vars {
+        match value {
+            Some(value) => std::env::set_var(name, value),
+            None => std::env::remove_var(name),
+        }
+    }
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
+    for (name, value) in saved {
+        match value {
+            Some(value) => std::env::set_var(&name, value),
+            None => std::env::remove_var(&name),
+        }
+    }
+    result.unwrap_or_else(|panic| std::panic::resume_unwind(panic))
 }
 
 /// What one run of the `holler` binary produced.

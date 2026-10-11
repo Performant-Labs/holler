@@ -106,6 +106,7 @@ fn the_binary_env_is_built_from_nothing_inherited() {
         "XDG_STATE_HOME",
         "XDG_CACHE_HOME",
         "PATH",
+        "LANG",
         "HOLLER_STATE_DIR",
         "HOLLER_DEBUG",
         "HOLLER_LOG_FORMAT",
@@ -124,6 +125,7 @@ fn the_binary_env_is_built_from_nothing_inherited() {
         assert!(value(&env, name).starts_with(&format!("{BASE}/oc/")), "{name} is scratch");
     }
     assert_eq!(value(&env, "HOLLER_STATE_DIR"), format!("{BASE}/state"));
+    assert_eq!(value(&env, "LANG"), "C.UTF-8", "a UTF-8 locale for the tmux client");
     assert_eq!(value(&env, "HOLLER_HERDR_SESSION"), "holler649-0123abcd");
 }
 

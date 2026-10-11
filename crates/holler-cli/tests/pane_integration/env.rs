@@ -31,29 +31,43 @@ fn usage_naming(result: Result<impl std::fmt::Debug, PaneError>, variable: &str)
 
 // --- Herdr (D5) ------------------------------------------------------------------------
 
+/// The message of `error` names `HOLLER_HERDR_SESSION` and offers no other variable for the
+/// session: `HERDR_SESSION` is no fallback (D5, audit), so a message that suggests it is wrong.
+fn names_only_hollers_session_variable(error: &PaneError) -> bool {
+    let text = error.to_string();
+    text.contains("HOLLER_HERDR_SESSION") && !text.replace("HOLLER_HERDR_SESSION", "").contains("HERDR_SESSION")
+}
+
 #[test]
-fn the_herdr_session_is_hollers_variable_else_herdrs() {
+fn the_herdr_session_is_hollers_variable() {
     let both = vars(&[
         ("HOLLER_HERDR_SESSION", "holler649-0000000a"),
         ("HERDR_SESSION", "holler649-0000000b"),
         ("HOLLER_HERDR_SOCKET", "/tmp/h/herdr.sock"),
     ]);
     assert_eq!(env::herdr_config(&both).unwrap().session, "holler649-0000000a");
+}
+
+/// D5 (audit): no `HERDR_SESSION` fallback. No source verifies that Herdr sets it in its
+/// panes (the setup wizard marks it UNVERIFIED until #734), so a value there is ignored and
+/// the session is still unconfigured.
+#[test]
+fn herdrs_own_session_variable_is_no_fallback() {
     let herdrs = vars(&[
         ("HERDR_SESSION", "holler649-0000000b"),
         ("HOLLER_HERDR_SOCKET", "/tmp/h/herdr.sock"),
     ]);
-    assert_eq!(env::herdr_config(&herdrs).unwrap().session, "holler649-0000000b");
+    let error = env::herdr_config(&herdrs).expect_err("HERDR_SESSION alone configures nothing");
+    assert_eq!(error.code(), "usage", "{error}");
+    assert!(names_only_hollers_session_variable(&error), "{error}");
 }
 
 #[test]
-fn no_herdr_session_is_usage_naming_both_variables() {
+fn no_herdr_session_is_usage_naming_holler_herdr_session() {
     let none = vars(&[("HOLLER_HERDR_SOCKET", "/tmp/h/herdr.sock")]);
     let error = env::herdr_config(&none).expect_err("no session");
     assert_eq!(error.code(), "usage", "{error}");
-    for variable in ["HOLLER_HERDR_SESSION", "HERDR_SESSION"] {
-        assert!(error.to_string().contains(variable), "names {variable}: {error}");
-    }
+    assert!(names_only_hollers_session_variable(&error), "{error}");
 }
 
 #[test]
@@ -101,16 +115,36 @@ fn the_workspaces_are_label_rows_by_columns() {
 
 #[test]
 fn malformed_workspaces_are_usage_naming_the_variable() {
-    for bad in ["hlr649", "hlr649=2", "hlr649=2x", "hlr649=twoxone", "=2x1", "a=2x1;b=1x1"] {
-        usage_naming(
-            env::herdr_config(&vars(&[
-                ("HOLLER_HERDR_SESSION", "holler649-0000000a"),
-                ("HOLLER_HERDR_SOCKET", "/tmp/h/herdr.sock"),
-                ("HOLLER_HERDR_WORKSPACES", bad),
-            ])),
-            "HOLLER_HERDR_WORKSPACES",
-        );
+    let mut failures = Vec::new();
+    // D5 (audit): an item without `=` or `x`, an empty label, a label containing `=` (`,`
+    // separates items, so an empty item stands for it), a zero or non-numeric extent, and a
+    // repeated label.
+    for bad in [
+        "hlr649",
+        "hlr649=2",
+        "hlr649=2x",
+        "hlr649=twoxone",
+        "=2x1",
+        "a=2x1;b=1x1",
+        "a=b=2x1",
+        "a=2x1,",
+        "a=2x1,,b=1x1",
+        "hlr649=0x1",
+        "hlr649=2x0",
+        "hlr649=-1x1",
+        "hlr649=2x1,hlr649=1x1",
+    ] {
+        let answer = env::herdr_config(&vars(&[
+            ("HOLLER_HERDR_SESSION", "holler649-0000000a"),
+            ("HOLLER_HERDR_SOCKET", "/tmp/h/herdr.sock"),
+            ("HOLLER_HERDR_WORKSPACES", bad),
+        ]));
+        match answer {
+            Err(e) if e.code() == "usage" && e.to_string().contains("HOLLER_HERDR_WORKSPACES") => {}
+            other => failures.push(format!("{bad:?}: want `usage` naming the variable; got {other:?}")),
+        }
     }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
 // --- tmux (D6) ---------------------------------------------------------------------------

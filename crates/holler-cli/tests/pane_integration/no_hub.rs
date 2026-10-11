@@ -4,7 +4,10 @@
 //! "Touches no adapter" is observed, not assumed: every adapter setting points at a trap in
 //! a scratch directory. The Herdr socket is a listener the test holds (a connect to it is
 //! seen), the tmux socket is a path no tmux server may create, and the OpenCode binary is a
-//! script that leaves a mark when it runs.
+//! script that leaves a mark when it runs. `PATH` is an empty directory, so no `herdr`,
+//! `tmux` or `opencode` can be found either (D28): the error code alone cannot tell the hub
+//! from an absent adapter, which also answers `unavailable`, so the message must name the
+//! missing hub and its state dir, and the traps must stay untouched.
 
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::UnixListener;
@@ -13,8 +16,10 @@ use std::path::{Path, PathBuf};
 use crate::support::StateDir;
 use crate::{holler_on, Out};
 
-/// Every verb of both namespaces, with arguments that parse. The stubs are here too: with no
-/// hub, `connect` fails before any verb runs, stub or not.
+/// Every verb of both namespaces, with arguments that parse (A's W-P: `pane import` takes a
+/// required `--from` since #650, `profile apply` a required name since #664, so a bare row
+/// would be clap's usage error before `connect` runs). The stubs are here too: with no hub,
+/// `connect` fails before any verb runs, stub or not.
 pub const EVERY_VERB: &[&[&str]] = &[
     &["pane", "list"],
     &["pane", "get", "hlr649-c1r1"],
@@ -27,12 +32,12 @@ pub const EVERY_VERB: &[&[&str]] = &[
     &["pane", "unpark", "hlr649-c1r1"],
     &["pane", "close", "hlr649-c1r1"],
     &["pane", "doctor"],
-    &["pane", "import"],
+    &["pane", "import", "--from", "/nonexistent-hlr649", "--herdr-session", "holler649-00000000"],
     &["profile", "create", "hlr649"],
     &["profile", "delete", "hlr649"],
     &["profile", "list"],
     &["profile", "show", "hlr649"],
-    &["profile", "apply"],
+    &["profile", "apply", "hlr649"],
     &["profile", "rename"],
     &["profile", "export"],
     &["profile", "import"],
@@ -62,6 +67,7 @@ impl Traps {
         )
         .unwrap();
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::create_dir(dir.path().join("empty-path")).unwrap();
         Self { dir, herdr }
     }
 
@@ -81,6 +87,7 @@ impl Traps {
             ("HOLLER_HERDR_WORKSPACES", "hlr649=2x1".to_owned()),
             ("HOLLER_TMUX_SOCKET", self.text("tmux.sock")),
             ("HOLLER_OPENCODE_BIN", self.text("opencode")),
+            ("PATH", self.text("empty-path")),
         ]
     }
 

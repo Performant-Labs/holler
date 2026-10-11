@@ -260,3 +260,36 @@
     - `allow(dead_code)` in the test trees;
     - line counts of every file the work touches.
   - **Build:** `cargo check --tests -p holler-cli -p holler-pane -p holler-adapter-opencode -p holler-adapter-host -p holler-adapter-herdr`, clean at `f59ba21` and at `d0c1531`. I ran no tests.
+
+## T (Phase 4, author / RED) — 2026-10-11T13:05:00-06:00
+- **Decided:** RED is valid: 8 of 58 default-run tests fail against the trial of `046026f`, each on a row D32 names. The rows are D4's eager first request (3 tests), D5's dropped `HERDR_SESSION` fallback (3 tests), D5's zero-extent and repeated-label checks (1), and D6/W-E's fail-closed tmux socket (new `wired.rs`, 1). The full list and outputs are in `handoff-T-red.md`.
+  - **W-P applied:** the no-hub rows of `pane import` and `profile apply` carry arguments that parse. D28's `PATH` there is an empty directory.
+  - **Scenario rewritten to the brief:**
+    - sessions are made and listed through the test's own `HarnessPort` (W-G); only deletes are raw;
+    - D12's `Busy` is asserted after `reset --first`;
+    - D21's breakage gets one `doctor` that finds both;
+    - D23's r1c1-first launches;
+    - D15 runs a second spec, with an agent (W-L);
+    - D28's sentinel is planted and grepped in output, files and `ps`;
+    - D10 (6)'s TERM/KILL teardown.
+  - **The probe** `zz_probe_attach_after_run` is deleted.
+  - **D11 repair:** the WIP's move of the private tmux server broke `holler-adapter-host`'s default test `fake_tmux_test::hosts_are_built_by_one_helper…`. The one `TmuxHost::new` is back in `real_tmux_test.rs`; `real_tmux/mod.rs` builds only servers. `fake_tmux_test.rs` is untouched.
+  - **The binary's environment** in the scenario now carries a test-chosen `LANG=C.UTF-8`. This is A's W-D reading: chosen, not inherited.
+  - **`pane switch` in the scenario is sent again on `timeout`**, for up to 20 s, with the tries printed.
+  - **The redundant test** `an_empty_watch_batch_is_idle…` is merged into the eager-request test.
+- **Assumed:**
+  - **D21's "pids tmux list-panes (and HostPort::ps) give for C2's session"** means the server's pids: the `@holler-pid` tags of the windows `run` made, intersected with `ps`. Killing every pane of the session would also kill the TUI's pane, and could destroy the session, which is a different breakage from "its server down".
+  - **`ANTHROPIC_API_KEY`, `OPENAI_API_KEY` and `OPENROUTER_API_KEY`** are the names to plant D28's sentinel under.
+- **Hedged:**
+  - **Two findings outside the Blast radius, for O to file.**
+    - (1) The OpenCode adapter's TUI query fails without a UTF-8 locale: tmux writes its tabs as `_`, so every `attach_tui` reads "no tmux session". Reproduced with plain tmux; `-u` or `LANG` fixes it.
+    - (2) A `pane switch` right after `pane relaunch` times out until the relaunched TUI accepts `/tui/select-session`. Seen 3/3 in the scenario and 2/3 in a probe; one sent 8 s later always succeeds.
+  - **The scenario works around (2) with a bounded retry** and does not hide it. If O or the operator wants the scenario strict instead, it fails until that race is fixed elsewhere.
+  - **Not reformatted.** Local rustfmt reports diffs across the whole crate, and CI runs no fmt check.
+  - **One flake.** `real_opencode_test::send_prompt_queues…` failed once in a long `--ignored` run and passed alone.
+- **Evidence:**
+  - `cargo test -p holler-cli --test pane_integration`: 50 passed, 8 failed, 4 ignored, run twice.
+  - `HOLLER_TEST_PANE_INTEGRATION=1 … -- --ignored --test-threads=1`: 4/4 pass against the trial, run three times for the main scenario. No `/tmp/hlr649-*` directory and no `hlr649` process left.
+  - `cargo clippy -p holler-cli --test pane_integration -- -D warnings` and `-p holler-adapter-host --tests`: clean. `bash scripts/lint.sh`: exit 0.
+  - `cargo test -p holler-cli --test pane_cli_process`: 36/36. `-p holler-adapter-host`: all pass, `real_tmux_test --ignored` 9/9. Herdr scratch `--ignored`: 2/2.
+  - Probes, temporary and removed: tmux `display-message` with and without `LANG`, and the switch after relaunch with and without an 8 s wait.
