@@ -36,10 +36,13 @@ impl Env {
         fs::write(
             &fake,
             "#!/bin/sh\n\
-             echo \"$*\" >> \"$FAKE_HERDR_LOG\"\n\
-             echo \"$$\" >> \"$FAKE_HERDR_LOG.pid\"\n\
+             echo \"$*\" >> \"$HERDR_FAKE_LOG\"\n\
+             echo \"$$\" >> \"$HERDR_FAKE_LOG.pid\"\n\
              case \"$*\" in\n\
-             *\"session list\"*) cat \"$FAKE_HERDR_SESSIONS\" ;;\n\
+             *server) env > \"$HERDR_FAKE_LOG.env\" ;;\n\
+             esac\n\
+             case \"$*\" in\n\
+             *\"session list\"*) cat \"$HERDR_FAKE_SESSIONS\" ;;\n\
              esac\n\
              exit 0\n",
         )
@@ -88,10 +91,13 @@ impl Env {
                 "PATH",
                 format!("{}:{old_path}", self.path().join("bin").display()),
             )
-            .env("FAKE_HERDR_LOG", self.log_file())
-            .env("FAKE_HERDR_SESSIONS", self.path().join("sessions.txt"))
+            .env("HERDR_FAKE_LOG", self.log_file())
+            .env("HERDR_FAKE_SESSIONS", self.path().join("sessions.txt"))
             .env("WIZARD_HERDR_SESSION", session)
-            .env("WIZARD_LEDGER", self.path().join("herdr/setup/wizard-ledger.toml"))
+            .env(
+                "WIZARD_LEDGER",
+                self.path().join("herdr/setup/wizard-ledger.toml"),
+            )
             .env("HOME", self.path())
             .env("TMPDIR", self.path().join("tmp"))
             .env_remove("WIZARD_LOG_DIR")
@@ -682,4 +688,84 @@ fn the_skill_runs_stages_8_and_9_through_the_wrapper_and_forbids_a_bare_server_s
     assert!(section.contains("bare `herdr server stop`"));
     let docs = fs::read_to_string(repo_root().join("docs/setup-wizard.md")).unwrap();
     assert!(docs.contains("## Herdr session"));
+}
+
+/// The environment the fake `herdr server` saw, as NAME=value lines.
+fn server_env(env: &Env) -> String {
+    fs::read_to_string(format!("{}.env", env.log_file().display())).unwrap_or_default()
+}
+
+#[test]
+fn the_server_starts_in_a_scrubbed_environment() {
+    let env = Env::new(&[]);
+    let mut c = env.base(Some("second"), "second", &["server-start"]);
+    c.env("CLAUDE_CODE_FOO", "1")
+        .env("SECRET_X", "1")
+        .env("LC_ALL", "C")
+        .env("XDG_RUNTIME_DIR", env.path())
+        .env("HERDR_EXTRA", "kept");
+    let (out, server_pid) = start_server(&env, c);
+    assert!(out.status.success(), "{}", text(&out));
+    assert_eq!(first_line(&out), server_pid);
+    // the fake writes its environment right after it records its pid
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while server_env(&env).is_empty() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let seen = server_env(&env);
+    let names: Vec<&str> = seen.lines().filter_map(|l| l.split('=').next()).collect();
+    for gone in ["CLAUDE_CODE_FOO", "SECRET_X"] {
+        assert!(!names.contains(&gone), "{gone} leaked: {seen}");
+    }
+    for kept in ["PATH", "HOME", "LC_ALL", "XDG_RUNTIME_DIR", "HERDR_EXTRA"] {
+        assert!(names.contains(&kept), "{kept} dropped: {seen}");
+    }
+    assert_eq!(env.recorded(), vec!["--session second server".to_owned()]);
+}
+
+#[test]
+fn label_renames_the_pane_with_the_session_flag_first() {
+    let env = Env::new(&[]);
+    let out = env.run("second", "second", &["label", "w1:p3", "r1c2"]);
+    assert!(out.status.success(), "{}", text(&out));
+    assert_eq!(
+        env.recorded(),
+        vec!["--session second pane rename w1:p3 r1c2".to_owned()]
+    );
+}
+
+#[test]
+fn label_without_a_session_runs_a_bare_rename() {
+    let env = Env::new(&[]);
+    let out = env.run("default", "", &["label", "w1:p3", "a.b_c-1"]);
+    assert!(out.status.success(), "{}", text(&out));
+    assert_eq!(env.recorded(), vec!["pane rename w1:p3 a.b_c-1".to_owned()]);
+}
+
+#[test]
+fn label_refuses_empty_and_malformed_labels_without_a_call() {
+    let env = Env::new(&[]);
+    let long = "a".repeat(33);
+    for bad in [
+        "",
+        "-x",
+        ".x",
+        "_x",
+        "a b",
+        "a/b",
+        "a;b",
+        "é",
+        long.as_str(),
+    ] {
+        let out = env.run("second", "second", &["label", "w1:p3", bad]);
+        assert!(!out.status.success(), "{bad:?} accepted");
+    }
+    let out = env.run("second", "second", &["label", "w1:p3"]);
+    assert!(!out.status.success());
+    let out = env.run("second", "second", &["label"]);
+    assert!(!out.status.success());
+    assert!(env.recorded().is_empty(), "{:?}", env.recorded());
+    let ok = "a".repeat(32);
+    let out = env.run("second", "second", &["label", "w1:p3", ok.as_str()]);
+    assert!(out.status.success(), "{}", text(&out));
 }

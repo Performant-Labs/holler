@@ -818,11 +818,17 @@ fn herdr_plan(c: &mut Command, name: &str) {
     c.env("WIZARD_INSTANCE_NAME", name);
 }
 
+/// The plan as the skill passes it for the machine that builds the workspace.
+fn herdr_host_plan(c: &mut Command, name: &str) {
+    herdr_plan(c, name);
+    c.env("WIZARD_HERDR_HOST", "1");
+}
+
 #[test]
-fn an_unnamed_herdr_server_without_a_ledger_row_is_foreign_for_the_default_instance_only() {
+fn an_unnamed_herdr_server_without_a_ledger_row_is_foreign_for_the_default_herdr_host_only() {
     let env = Env::new();
     let inv = env.file("inv.tsv", &unnamed_herdr_inventory());
-    let out = collide(&env, &inv, |c| herdr_plan(c, "default"));
+    let out = collide(&env, &inv, |c| herdr_host_plan(c, "default"));
     let s = text(&out);
     assert_eq!(out.status.code(), Some(1), "{s}");
     assert!(s.contains("REFUSED") && s.contains("unnamed herdr"), "{s}");
@@ -832,7 +838,7 @@ fn an_unnamed_herdr_server_without_a_ledger_row_is_foreign_for_the_default_insta
     );
     assert!(s.contains("present, not touched: herdr"), "{s}");
 
-    let out = collide(&env, &inv, |c| herdr_plan(c, "second"));
+    let out = collide(&env, &inv, |c| herdr_host_plan(c, "second"));
     let s = text(&out);
     assert_eq!(out.status.code(), Some(0), "{s}");
     assert!(!s.contains("REFUSED"), "{s}");
@@ -855,4 +861,30 @@ fn an_unnamed_herdr_server_with_a_live_ledger_row_is_ours() {
     let s = text(&out);
     assert_eq!(out.status.code(), Some(0), "{s}");
     assert!(s.contains("created by this instance"), "{s}");
+}
+
+#[test]
+fn an_unnamed_herdr_server_is_listed_never_refused_without_the_herdr_host_flag() {
+    let env = Env::new();
+    let inv = env.file("inv.tsv", &unnamed_herdr_inventory());
+    for name in ["default", "second"] {
+        let out = collide(&env, &inv, |c| herdr_plan(c, name));
+        let s = text(&out);
+        assert_eq!(out.status.code(), Some(0), "{name}: {s}");
+        assert!(!s.contains("REFUSED"), "{name}: {s}");
+        assert!(s.contains("present, not touched: herdr"), "{name}: {s}");
+    }
+}
+
+#[test]
+fn a_herdr_host_flag_other_than_one_does_not_enable_the_unnamed_server_refusal() {
+    let env = Env::new();
+    let inv = env.file("inv.tsv", &unnamed_herdr_inventory());
+    let out = collide(&env, &inv, |c| {
+        herdr_plan(c, "default");
+        c.env("WIZARD_HERDR_HOST", "0");
+    });
+    let s = text(&out);
+    assert_eq!(out.status.code(), Some(0), "{s}");
+    assert!(!s.contains("REFUSED"), "{s}");
 }

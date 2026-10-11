@@ -11,5 +11,6 @@ mod preflight;
 mod proof;
 mod skilltext;
 mod skilltext_772b;
+mod skilltext_772a;
 mod skilltext_772c;
 mod start;

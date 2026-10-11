@@ -16,6 +16,9 @@
 #   WIZARD_SESSION_NAMES        space-separated session names whose bodies run on this host
 #                               (listed in the plan only: a body's session is not on its command
 #                               line, so there is no per-session body check)
+#   WIZARD_HERDR_HOST           1 only on the machine that builds the Herdr workspace (the local
+#                               call): an unnamed Herdr server is refused only there; elsewhere
+#                               Herdr rows are listed as present and not touched
 #   WIZARD_LEDGER               optional: this instance's herdr/setup/wizard-ledger.toml on this host
 #
 # A process is "created by this instance" only if the ledger holds its pid with the same
@@ -25,9 +28,9 @@
 # holds hub_port: "present, not touched" when the ledger has a live hub row, "this instance's
 # port pair, no live hub" when it has not (a crash, reboot or teardown left the entry).
 # `-` and `~/` state directories are resolved against the inventory's `home` line (the remote
-# host's home), else this machine's $HOME. For the default instance, a running unnamed Herdr
+# host's home), else this machine's $HOME. For the default instance on the Herdr host (WIZARD_HERDR_HOST=1), a running unnamed Herdr
 # server that no live ledger row owns is foreign and refused (the operator may override that in
-# Stage 3 by answering yes to "build in it"); for a named instance it is not.
+# Stage 3 by answering yes to "build in it"); for a named instance, or without WIZARD_HERDR_HOST, it is not.
 # Prints the inventory beside the plan ("present, not touched" for foreign items), then one
 # `REFUSED:` line per collision naming the item and the config key to change.
 # Exit 0 = no collision, 1 = at least one collision, 2 = bad usage.
@@ -214,7 +217,8 @@ while IFS="$T" read -r kind a b c d e f; do
       ;;
     opencode | herdr)
       is_ours_pid "$a" && continue
-      if [ "$kind" = herdr ] && [ "$d" = "-" ] && [ "${WIZARD_INSTANCE_NAME:-}" = default ]; then
+      if [ "$kind" = herdr ] && [ "$d" = "-" ] && [ "${WIZARD_INSTANCE_NAME:-}" = default ] \
+        && [ "${WIZARD_HERDR_HOST:-}" = 1 ]; then
         case " $f " in
           *" server "*)
             refuse "an unnamed herdr server is already running (pid $a, user $b)" \
