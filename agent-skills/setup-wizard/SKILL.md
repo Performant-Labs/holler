@@ -1,6 +1,6 @@
 ---
 name: setup-wizard
-description: Install Herdr (if not already present, asked as its own up-front yes/no) and, as a genuinely separate follow-up question, optionally set up a Herdr workspace — one or more local orchestrator panes plus one remote agent session pane per entry in a Holler session config, wired through a Holler hub (local) / body (remote) pair, using the safe `opencode attach` recipe (never herdr-mirror). Config-driven, not hardcoded — every orchestrator's name/command/directory, every session's harness, and the whole pane layout (including how many orchestrators there are and where each one sits) are all read from the config, never assumed. Use when the user asks to install Herdr, set up Herdr with a local orchestrator + remote agent sessions, recreate the alpha/beta (or N-agent, or multi-orchestrator) setup, or rebuild that workspace.
+description: Install Herdr (if not already present, asked as its own up-front yes/no) and, as a genuinely separate follow-up question ("All systems go. Proceed?"), optionally set up a Herdr workspace — one or more local orchestrator panes plus one remote agent session pane per entry in a Holler session config, wired through a Holler hub (local) / body (remote) pair, using the safe `opencode attach` recipe (never herdr-mirror). Config-driven, not hardcoded — every orchestrator's name/command/directory, every session's harness, and the whole pane layout (including how many orchestrators there are and where each one sits) are all read from the config, never assumed. Use when the user asks to install Herdr, set up Herdr with a local orchestrator + remote agent sessions, recreate the alpha/beta (or N-agent, or multi-orchestrator) setup, or rebuild that workspace.
 ---
 
 # Herdr: M local orchestrators + N remote agent sessions — wizard
@@ -405,8 +405,7 @@ don't proceed to the closing question until it's resolved or the user explicitly
 without a working `herdr`.
 
 **Then, only once `herdr` is confirmed present (already installed, or freshly installed and
-verified) — ask a second, separate, explicit question, never assumed:** **"Do you want to
-configure Herdr now and launch a workspace?"** A no (or "not right now," or any non-committal
+verified) — ask a second, separate, explicit question, never assumed:** **"All systems go. Proceed?"** (yes/no) A no (or "not right now," or any non-committal
 answer) ends the wizard cleanly right here — installing Herdr does not commit the user to also
 building a config/workspace in the same run. Only a clear yes moves on to Stage 1.
 

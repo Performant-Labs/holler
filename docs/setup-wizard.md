@@ -433,8 +433,7 @@ tag once one does. (The README has the same line, and its agent prompt fetches t
 machine that doesn't have it). Stage
 0 stands apart from the rest: it only installs the `herdr` binary itself (via
 [herdr.dev's install script](https://herdr.dev/install.sh) or `brew install herdr`), asked as
-its own up-front yes/no, and ends with a second, separate yes/no — "configure Herdr now and
-launch a workspace?" — before anything past it runs; a yes to installing Herdr is never treated
+its own up-front yes/no, and ends with a second, separate yes/no — "All systems go. Proceed?" — before anything past it runs; a yes to installing Herdr is never treated
 as a yes to also building a workspace in the same run. Only once that second question gets a
 yes does Stage 1 onward run: load the config described above, preflight (including per-host SSH
 reachability, with a manual-relay fallback when no local `ssh` client exists), present the plan
