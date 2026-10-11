@@ -19,6 +19,7 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 use holler_pane::error::RefusalCode;
 use holler_pane::{
     GridPos, HerdrPane, HerdrPort, HerdrSnapshot, HerdrSpec, Key, PaneError, PaneId,
+    PaneObservation,
 };
 
 use crate::fault::{FaultSwitch, PortOp};
@@ -60,6 +61,8 @@ pub enum HerdrOp {
     Close,
     Snapshot,
     Version,
+    /// `observe_pane` (#832).
+    ObservePane,
 }
 
 impl PortOp for HerdrOp {
@@ -72,6 +75,7 @@ impl PortOp for HerdrOp {
             HerdrOp::Close => "herdr.close",
             HerdrOp::Snapshot => "herdr.snapshot",
             HerdrOp::Version => "herdr.version",
+            HerdrOp::ObservePane => "herdr.observe_pane",
         }
     }
 }
@@ -170,6 +174,9 @@ struct LivePane {
     id: PaneId,
     screen: String,
     label: Option<String>,
+    /// What `observe_pane` reports: the working directory and the time of the last screen
+    /// change, as the outside world set them (#832). Empty before any.
+    observation: PaneObservation,
 }
 
 impl FakeHerdr {
@@ -248,6 +255,19 @@ impl FakeHerdr {
         Ok(())
     }
 
+    /// What `observe_pane` reports for the pane from now on: its working directory and the
+    /// time its screen last changed (#832), replacing any earlier observation. A field left
+    /// `None` is reported as Herdr not knowing it, as the real adapter does for a time. It
+    /// bypasses the faults and the call log. `pane-not-found` when no such pane exists.
+    pub fn set_observation(
+        &self,
+        pane: &PaneId,
+        observation: PaneObservation,
+    ) -> Result<(), PaneError> {
+        self.lock().pane_mut(pane)?.observation = observation;
+        Ok(())
+    }
+
     /// The state, locked. A poisoned lock is taken over: a test that panicked while
     /// holding it must not wedge every later call.
     fn lock(&self) -> MutexGuard<'_, State> {
@@ -313,6 +333,11 @@ impl HerdrPort for FakeHerdr {
         self.faults.enter(HerdrOp::Snapshot)?;
         let panes = self.lock().listed().collect();
         Ok(HerdrSnapshot { panes })
+    }
+
+    fn observe_pane(&self, pane: &PaneId) -> Result<PaneObservation, PaneError> {
+        self.faults.enter(HerdrOp::ObservePane)?;
+        Ok(self.lock().pane_mut(pane)?.observation.clone())
     }
 
     fn version(&self) -> Result<String, PaneError> {
@@ -485,6 +510,7 @@ impl Workspace {
                 id: id.clone(),
                 screen: String::new(),
                 label: None,
+                observation: PaneObservation::default(),
             },
         );
         Ok(id)

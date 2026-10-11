@@ -1,4 +1,5 @@
-//! `holler pane doctor [PANE] [--fix] [--profile NAME]` (story #647): run one reconcile pass
+//! `holler pane doctor [PANE] [--fix] [--profile NAME] [--unmanaged-stalled-after SECONDS]`
+//! (story #647, and #832 for the last flag): run one reconcile pass
 //! (`holler_pane::reconcile`) over the panes in scope and print its report.
 //!
 //! - **Exit codes.** A pass that completes exits 0, with or without findings: findings are
@@ -35,6 +36,11 @@ pub struct PaneDoctor {
     pub fix: bool,
     #[command(flatten)]
     pub profile: ProfileOpt,
+    /// Report each Herdr pane no record names whose screen has not changed for this many
+    /// seconds as `unmanaged-stalled` (story #832). Whole-fleet runs only: a run with PANE or
+    /// `--profile` never looks. There is no default, so without it no pane is reported.
+    #[arg(long, value_name = "SECONDS", value_parser = clap::value_parser!(u64).range(1..))]
+    pub unmanaged_stalled_after: Option<u64>,
 }
 
 /// Run `holler pane doctor`: one reconcile pass, printed in the run's format.
@@ -57,6 +63,7 @@ fn pass(args: &PaneDoctor, ports: Ports<'_>) -> Result<Report, PaneError> {
         pane: pane.as_ref(),
         fix: args.fix,
         now_ms: now_millis(),
+        unmanaged_stalled_after_secs: args.unmanaged_stalled_after,
     };
     reconcile(ports, &request)
 }

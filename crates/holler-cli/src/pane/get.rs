@@ -3,15 +3,18 @@
 //! session of record, the rule `pane doctor` uses).
 //!
 //! It reads only `PaneStore::get`, `ProfileStore::get` and `ProfileScope::resolve` (at most
-//! two calls), observes nothing and writes nothing. The text view is built from the shared
+//! two calls) and writes nothing. Only when no record answers does it also look at Herdr, for
+//! an **unmanaged** pane (story #832). The text view is built from the shared
 //! helpers of `list.rs`, so every stored string is escaped the same way in all three read
 //! verbs.
 
 use clap::Args;
 use holler_pane::pane::{HarnessInfo, HarnessKind, Health, HerdrPane, Hold, PaneRole};
+use holler_pane::unmanaged::{self, duration_text, UnmanagedPane};
 use holler_pane::{
     EnvVarName, Pane, PaneError, PaneName, Ports, ProbeResult, Profile, ProfileName, ProfileSpec,
 };
+use holler_proto::clock::now_millis;
 use serde::Serialize;
 
 use super::args::ProfileOpt;
@@ -36,6 +39,12 @@ use crate::output::{emit, ErrorBody, VerbCtx};
 /// (the soft and hard context ceilings), command, probe-check, probe-expect, probe-last and
 /// spec.
 ///
+/// A PANE with no record may name an **unmanaged** pane instead: the label or the Herdr pane
+/// id of a pane in the Herdr session that no record names (story #832). Text prints `state`,
+/// `pane-id`, `label`, `session`, `workspace`, `pos`, `project`, `last-screen-change` (UTC)
+/// and `idle`; JSON data is the same object `pane list` prints for it (`{"state":
+/// "unmanaged", "pane_id", ...}`). Anything else with no record is `pane-not-found`.
+///
 /// A `-` is an empty value. A stored value that is empty or `-`, or that holds a space, a
 /// quote, a backslash, an `=` or a character a terminal could act on, is printed quoted and
 /// escaped. Times are UTC. The command, the probe's argv and strings, and the spec are
@@ -58,8 +67,39 @@ pub struct PaneGet {
 
 /// Run `holler pane get`: read one pane, and its profile's spec for it, and print them.
 pub fn run(args: &PaneGet, ctx: &mut VerbCtx<'_>) -> i32 {
-    let result = detail(args, ctx.ports).map_err(|e| ErrorBody::from(&e));
-    emit(&mut ctx.sink, ctx.format, result, render)
+    let result = shown(args, ctx.ports).map_err(|e| ErrorBody::from(&e));
+    emit(&mut ctx.sink, ctx.format, result, |shown| match shown {
+        Shown::Record(detail) => render(detail),
+        Shown::Unmanaged(pane) => render_unmanaged(pane),
+    })
+}
+
+/// What `pane get` shows: a record, or (story #832) a Herdr pane no record names.
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+enum Shown {
+    Record(Box<PaneDetail>),
+    Unmanaged(Box<UnmanagedPane>),
+}
+
+/// The pane `args` names: its record, or, when there is none (and without `--profile`,
+/// whose scope is records), the unmanaged Herdr pane whose label or pane id it is. A pane
+/// id is not a valid pane name, so it is tried before the name is typed. When neither
+/// answers, the record path's own error stands: `usage` for a bad name, `pane-not-found`
+/// for a missing record.
+fn shown(args: &PaneGet, ports: Ports<'_>) -> Result<Shown, PaneError> {
+    match detail(args, ports) {
+        Ok(detail) => Ok(Shown::Record(Box::new(detail))),
+        Err(error @ (PaneError::PaneNotFound { .. } | PaneError::Usage { .. }))
+            if args.profile.profile.is_none() =>
+        {
+            match unmanaged::find(ports, &args.pane, now_millis()) {
+                Ok(Some(pane)) => Ok(Shown::Unmanaged(Box::new(pane))),
+                _ => Err(error),
+            }
+        }
+        Err(error) => Err(error),
+    }
 }
 
 /// The data of `pane get --format=json`. The four keys are always present.
@@ -136,6 +176,35 @@ fn spec_for(profile: &Profile, name: &PaneName) -> Option<ProfileSpec> {
         .iter()
         .find(|spec| spec.pane == name.as_str())
         .cloned()
+}
+
+/// The text view of an unmanaged pane: `state`, `pane-id`, `label`, `session`, `workspace`,
+/// `pos`, `project` (its working directory), `last-screen-change` (UTC) and `idle`. A `-` is
+/// a value Herdr did not report.
+fn render_unmanaged(pane: &UnmanagedPane) -> String {
+    let optional = |value: Option<&str>| value.map_or_else(|| NO_VALUE.to_owned(), text_value);
+    let rows = [
+        ("state", pane.state.to_owned()),
+        ("pane-id", text_value(pane.pane_id.as_str())),
+        ("label", optional(pane.label.as_deref())),
+        ("session", text_value(&pane.session)),
+        ("workspace", text_value(&pane.workspace)),
+        ("pos", pane.pos.to_string()),
+        ("project", optional(pane.cwd.as_deref())),
+        (
+            "last-screen-change",
+            pane.last_screen_change
+                .map_or_else(|| NO_VALUE.to_owned(), observed_at),
+        ),
+        (
+            "idle",
+            pane.idle_seconds
+                .map_or_else(|| NO_VALUE.to_owned(), duration_text),
+        ),
+    ];
+    rows.into_iter()
+        .map(|(key, value)| format!("{key}: {value}\n"))
+        .collect()
 }
 
 /// The text view: one `key: value` line per field, in the order `--help` lists.

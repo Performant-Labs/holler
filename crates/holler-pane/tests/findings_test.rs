@@ -9,7 +9,7 @@ use std::collections::BTreeSet;
 use holler_pane::error::is_valid_code;
 use holler_pane::findings::FindingKind;
 
-const CODES: [&str; 12] = [
+const CODES: [&str; 13] = [
     "herdr-version-unsupported",
     "observe-failed",
     "unregistered-herdr-pane",
@@ -22,6 +22,7 @@ const CODES: [&str; 12] = [
     "tui-foreign-session",
     "shown-driven-mismatch",
     "stray-session",
+    "unmanaged-stalled",
 ];
 
 #[test]

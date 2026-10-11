@@ -51,6 +51,7 @@ use serde::{Serialize, Serializer};
 
 use crate::findings::{embedded, quoted, Finding, FindingKind};
 use crate::pane::Health;
+use crate::unmanaged;
 use crate::{GridPos, HerdrSnapshot, Pane, PaneError, PaneId, PaneName, Ports, ProfileName};
 
 use observe::Checked;
@@ -70,6 +71,10 @@ pub struct ReconcileRequest<'a> {
     pub fix: bool,
     /// The clock: milliseconds since the Unix epoch, written as `last_observed.at`.
     pub now_ms: i64,
+    /// The operator's threshold for `unmanaged-stalled` (#832), in seconds: a whole-fleet
+    /// pass reports each Herdr pane no record names whose screen has not changed for this
+    /// long. `None` looks for none, and a pass scoped to a pane or a profile never does.
+    pub unmanaged_stalled_after_secs: Option<u64>,
 }
 
 /// What one reconcile pass found.
@@ -192,6 +197,14 @@ pub fn reconcile(ports: Ports<'_>, request: &ReconcileRequest<'_>) -> Result<Rep
     let whole_fleet = request.profile.is_none() && request.pane.is_none();
     let mut findings = herdr_findings(herdr.as_ref(), &scope, &records, whole_fleet);
     findings.extend(strays(&scope, &checked, &records));
+    if let (true, Some(after), Some(Ok(snapshot))) = (
+        whole_fleet,
+        request.unmanaged_stalled_after_secs,
+        herdr.as_ref().map(|seen| &seen.snapshot),
+    ) {
+        let unmanaged = unmanaged::from_snapshot(ports, snapshot, &records, request.now_ms);
+        findings.extend(unmanaged::stalled_findings(&unmanaged, after));
+    }
     let mut panes = Vec::with_capacity(checked.len());
     for pane in checked {
         findings.extend(pane.findings);
@@ -348,14 +361,7 @@ fn missing_herdr_panes(snapshot: &HerdrSnapshot, scope: &[Pane]) -> Vec<Finding>
 
 /// `unregistered-herdr-pane` for each pane of the snapshot that no record names.
 fn unregistered_herdr_panes(snapshot: &HerdrSnapshot, records: &[Pane]) -> Vec<Finding> {
-    let named: BTreeSet<(&str, &PaneId)> = records
-        .iter()
-        .map(|pane| (pane.herdr.session.as_str(), &pane.herdr.pane_id))
-        .collect();
-    snapshot
-        .panes
-        .iter()
-        .filter(|herdr| !named.contains(&(herdr.session.as_str(), &herdr.pane_id)))
+    unmanaged::unregistered(snapshot, records)
         .map(|herdr| {
             let message = format!(
                 "Herdr pane {} (session {}, workspace {}) is in no pane record; no holler verb adopts a pane",

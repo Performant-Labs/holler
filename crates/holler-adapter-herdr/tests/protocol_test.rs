@@ -490,6 +490,7 @@ fn ac18_a_snapshot_lists_each_pane_with_its_workspace_and_tab() {
         workspace_id: workspace.into(),
         tab_id: tab.into(),
         label: None,
+        cwd: Some("/tmp/x".into()),
     };
 
     assert_eq!(

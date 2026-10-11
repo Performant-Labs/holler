@@ -808,3 +808,73 @@ fn a_pane_made_between_the_two_reads_is_listed_with_no_label() {
         ["session.snapshot", "layout.export"]
     );
 }
+
+// --- #832: what Herdr says about a pane no record names ---
+
+/// #832: `observe_pane` reports the pane's working directory, read from the `PaneInfo` of
+/// the one `session.snapshot` it sends, and **no time of the last screen change**: Herdr
+/// 0.8.2 (protocol 20) reports none, and the adapter never guesses one (the epic's rule: an
+/// observation, not an inference). A pane in a tab the grid does not list is observed too:
+/// it has no cell, but it is a Herdr pane.
+#[test]
+fn observe_pane_reports_the_working_directory_and_no_screen_change_time() {
+    let fake = Arc::new(WireHerdr::new());
+    let port = connect(&fake, &[("w", 1, 1)]);
+    let placed = port.ensure_pane(&spec("w", 1, 1)).expect("ensure").pane_id;
+    let elsewhere = fake.add_tab("w");
+    let from = fake.methods().len();
+
+    let seen = port.observe_pane(&placed).expect("observe");
+    assert_eq!(seen.cwd.as_deref(), Some("/scratch"));
+    assert_eq!(seen.last_screen_change, None, "Herdr reports none");
+    let other = port.observe_pane(&elsewhere).expect("observe the other tab's pane");
+    assert_eq!(other.cwd.as_deref(), Some("/scratch"));
+
+    assert_eq!(
+        sent_since(&fake, from),
+        ["session.snapshot", "session.snapshot"],
+        "one read each, and nothing that acts on the pane"
+    );
+}
+
+/// #832: a pane the snapshot does not list is `pane-not-found`, naming it.
+#[test]
+fn observe_pane_of_an_unknown_pane_is_pane_not_found() {
+    let fake = Arc::new(WireHerdr::new());
+    let port = connect(&fake, &[("w", 1, 1)]);
+    port.ensure_pane(&spec("w", 1, 1)).expect("ensure");
+
+    let error = port.observe_pane(&PaneId::new("w9:p9")).expect_err("no such pane");
+
+    assert!(
+        matches!(&error, PaneError::PaneNotFound { what } if what.contains("w9:p9")),
+        "{error:?}"
+    );
+}
+
+/// #832: a `PaneInfo` with no `cwd` (or a `cwd` that is not text) reports none, and the call
+/// still succeeds: the working directory is optional, like the label.
+#[test]
+fn observe_pane_of_a_pane_with_no_cwd_reports_none() {
+    let fake = Arc::new(WireHerdr::new());
+    let tap = Tap::new(Arc::clone(&fake), |fake, line, _| {
+        if !line.contains(r#""method":"session.snapshot""#) {
+            return Tapped::Forward(line);
+        }
+        let mut reply: Value = serde_json::from_str(&fake.answer(&line)).unwrap();
+        for pane in reply
+            .pointer_mut("/result/snapshot/panes")
+            .and_then(Value::as_array_mut)
+            .expect("panes")
+        {
+            pane.as_object_mut().unwrap().remove("cwd");
+        }
+        Tapped::Reply(reply.to_string())
+    });
+    let port = connect_over(config(&[("w", 1, 1)]), tap);
+    let placed = port.ensure_pane(&spec("w", 1, 1)).expect("ensure").pane_id;
+
+    let seen = port.observe_pane(&placed).expect("observe");
+
+    assert_eq!((seen.cwd, seen.last_screen_change), (None, None));
+}

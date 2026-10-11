@@ -57,6 +57,7 @@ pub mod reply;
 pub mod tx_apply;
 pub mod tx_launch;
 pub mod tx_switch;
+pub mod unmanaged;
 
 // Flat re-exports so the common path is `holler_pane::{...}`, the way `holler_proto`
 // does it. Nothing here shares a name with a root re-export of `holler_proto`
@@ -68,8 +69,8 @@ pub use generation::next_generation;
 pub use grid::GridPos;
 pub use pane::{HerdrPane, Pane, PaneEvent, PaneId, PaneName};
 pub use ports::{
-    Cursor, HarnessPort, HerdrPort, HerdrSnapshot, HerdrSpec, HostPort, Key, PaneStore, Ports,
-    Prober, ServeSpec, SystemProber, Watch,
+    Cursor, HarnessPort, HerdrPort, HerdrSnapshot, HerdrSpec, HostPort, Key, PaneObservation,
+    PaneStore, Ports, Prober, ServeSpec, SystemProber, Watch,
 };
 pub use probe::{run_probe, ProbeResult};
 pub use profile::{

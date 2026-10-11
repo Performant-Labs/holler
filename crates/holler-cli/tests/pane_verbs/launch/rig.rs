@@ -578,7 +578,11 @@ impl Rig {
 
 /// Nothing live was called and neither store was written, over `calls`.
 pub(crate) fn assert_untouched(calls: &Calls) {
-    assert_eq!(calls.herdr, vec![], "no Herdr call");
+    assert!(
+        crate::list::only_herdr_reads(&calls.herdr),
+        "no Herdr call that acts, only reads: {:?}",
+        calls.herdr
+    );
     assert_eq!(calls.host, vec![], "no host call");
     assert_eq!(calls.harness, vec![], "no harness call");
     assert_eq!(calls.probes, vec![], "no probe run");

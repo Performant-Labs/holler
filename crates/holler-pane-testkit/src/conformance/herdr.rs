@@ -15,6 +15,7 @@
 //! - A closed or unknown pane is `pane-not-found` for `close`, `send_text`, `send_keys`
 //!   and `read`.
 //! - `read` returns at most the lines asked for, and `version` reports one line.
+//! - `observe_pane` answers a listed pane and refuses an unknown or closed one (#832).
 //! - A pane the outside world labels is reported with its label, by `snapshot` and by
 //!   `ensure_pane` of its cell, and a pane with no label, or labelled `""`, with none
 //!   (#808).
@@ -100,7 +101,7 @@ type Case = fn(&Scratch<'_>) -> Result<(), String>;
 
 /// The suite, in order: the one table that the runner iterates and [`herdr_cases`]
 /// lists.
-const CASES: [(&str, Case); 12] = [
+const CASES: [(&str, Case); 13] = [
     (
         "ensure-r2c1-reads-back-as-r2c1",
         ensure_r2c1_reads_back_as_r2c1,
@@ -137,6 +138,10 @@ const CASES: [(&str, Case); 12] = [
     ),
     ("version-is-reported", version_is_reported),
     (LABEL_CASE, labelled_pane_reports_its_label),
+    (
+        "observe-pane-answers-a-listed-pane-and-refuses-an-unknown-one",
+        observe_pane_answers_a_listed_pane_and_refuses_an_unknown_one,
+    ),
 ];
 
 /// The ids of the cases [`run_herdr_conformance`] runs, in the order it runs them.
@@ -414,6 +419,31 @@ fn version_is_reported(s: &Scratch<'_>) -> Result<(), String> {
     Err(format!(
         "version() returned {version:?}; expected a non-empty string on one line"
     ))
+}
+
+/// Case 13 (#832): `observe_pane` answers a pane the snapshot lists (what it reports is the
+/// implementation's: Herdr may report no working directory and no screen-change time), and
+/// an id Herdr never handed out, or a pane that has closed, is `pane-not-found`.
+fn observe_pane_answers_a_listed_pane_and_refuses_an_unknown_one(
+    s: &Scratch<'_>,
+) -> Result<(), String> {
+    let a = s.ensure(R1C1)?;
+    let b = s.ensure(R2C1)?.pane_id;
+    succeeds(
+        &format!("observe_pane({}), a listed pane", a.pane_id.as_str()),
+        s.port.observe_pane(&a.pane_id),
+    )?;
+    expect_code(
+        &format!("observe_pane({UNKNOWN_ID}), an id never handed out"),
+        s.port.observe_pane(&PaneId::new(UNKNOWN_ID)),
+        NOT_FOUND,
+    )?;
+    s.close(&b)?;
+    expect_code(
+        &format!("observe_pane({}) after it closed", b.as_str()),
+        s.port.observe_pane(&b),
+        NOT_FOUND,
+    )
 }
 
 /// Case 12 (#808): a pane labelled through the hook is reported with its label, by

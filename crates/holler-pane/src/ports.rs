@@ -192,6 +192,50 @@ pub trait HerdrPort: Send + Sync {
 
     /// Herdr's API version. An unknown version is `herdr-version-unsupported`.
     fn version(&self) -> Result<String, PaneError>;
+
+    /// What Herdr says about the pane `pane` that a record does not hold: its working
+    /// directory and when its screen last changed (#832). It is an observation (I6), read
+    /// fresh and never stored; `pane list` and `pane get` show it for a pane no record
+    /// names.
+    ///
+    /// The default answers an empty [`PaneObservation`]: an implementation that cannot
+    /// tell says so with `None` fields and never guesses, so one that does not override
+    /// this keeps compiling and reports nothing. `pane-not-found` when Herdr has no such
+    /// pane.
+    fn observe_pane(&self, pane: &PaneId) -> Result<PaneObservation, PaneError> {
+        let _ = pane;
+        Ok(PaneObservation::default())
+    }
+}
+
+/// What [`HerdrPort::observe_pane`] reports about one pane. Both fields are optional
+/// because Herdr may not report them: Herdr 0.8.2 (protocol 20) reports no time at which a
+/// screen last changed, so the real adapter leaves `last_screen_change` empty until a
+/// source exists (#832).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct PaneObservation {
+    /// The pane's working directory, as Herdr reports it.
+    pub cwd: Option<String>,
+    /// When the pane's screen last changed (milliseconds since the Unix epoch), as Herdr
+    /// reports it; never inferred from a file or from earlier reads.
+    pub last_screen_change: Option<i64>,
+}
+
+impl PaneObservation {
+    /// An observation with the pane's working directory.
+    #[must_use]
+    pub fn with_cwd(mut self, cwd: impl Into<String>) -> Self {
+        self.cwd = Some(cwd.into());
+        self
+    }
+
+    /// An observation with the time the pane's screen last changed.
+    #[must_use]
+    pub fn with_last_screen_change(mut self, at_ms: i64) -> Self {
+        self.last_screen_change = Some(at_ms);
+        self
+    }
 }
 
 /// The machine a pane lives on: tmux sessions and the processes in them (the adapter
