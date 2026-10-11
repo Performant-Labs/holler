@@ -312,3 +312,46 @@
   - Three mutants, each caught. M7 (cwd checked before argv) is caught only by the new T2. M8 (checks before the session read) and M9 (a swallowed session-of-record error) are caught by T2 and T3. Source was restored from copies each time.
   - The new test passed 5 of 5 runs.
   - Two evidence entries appended: `harness.rs:351-356` and `harness.rs:424-430`, copied verbatim from source.
+
+## A (Phase 7, anti-duplication gate) — 2026-10-11T08:37:07-06:00
+- **Decided:** PASS on the whole PR diff, `92fbc6e..9861930`, with no blocks. `handoff-A-dup.md` holds the detail.
+  - **Every object the map named is extended in place, and the old paths are deleted, not kept alongside.**
+    - The ports: `serve` became `serve_command` plus `verify_serving`, and `run` gained `cwd`.
+    - `ServeSpec` sits beside `HerdrSpec`, and `AGENT_UNSUPPORTED` beside `PROMPT_UNSUPPORTED`.
+    - The OpenCode adapter: one env prefix (`ProcessEnv::prefix`, extracted from `tui_argv`), `OpenCodeConfig::bin()` (extracted from `attach.rs`), one `refuse_an_agent`, and the spawn, boot poll, reaper and kill code deleted.
+    - The host adapter: it reuses `escape_cwd` and `tmux::panes`, and `ensure_session` and `run` share `is_usable_dir`.
+    - The engine: one `ServeSpec` per run and the argv in `Seen`; `port_in_use` shared by the plan's check and the act's re-check; `stop_old` moved into `tx_launch/server.rs`; one `wait_healthy`.
+    - The test kit: `World::start` behind `start_server`, and one argv log (`runs()` with the `cwd`); `LinkedHost`, `CASES` and the runner extended.
+  - **Round 2's Phase 8 checks hold.** There is one health-wait loop, and it checks before it asks. No `budget.check()` repeats it. The rig imports `BOOT_POLL`.
+  - **Round 1's rejection list.** None of its items is present.
+  - **Warns.**
+    - W-1 (low, test code): the `serve_command` + `start_server` setup pair, in three helpers and two inline copies. The fix is one `FakeHarness` setup method.
+    - W-2 (low, test code): `Seen` and `snapshot_into` rebuild part of `Calls`, and `STEP_PHRASE` is declared twice.
+    - W-3 (watch): file sizes. `tx_launch.rs` is at 820 lines, and `switch.rs` grew by 6 lines where the brief asked for line-neutral.
+    - W-4 (reading note for #642 part 3): in the round-3 `verify_serving` doc, "settles" never covers an agent key.
+- **Assumed:**
+  - The reuse map is the brief's Scope plus the Phase 8 lists of A's rounds 1 and 2. There is no `survey.md` in this automated run.
+  - #642 part 3's text, as `gh issue view 642` shows it today, binds the agent check that W-4 relies on: D4 is `GET /config` and `GET /agent`, and D9 allows the doc edit.
+- **Hedged:**
+  - W-1 and W-2 are warns, not blocks. The brief's Scope 4 told setup code to call the scenario method, and both concern test code only. No existing object was bypassed.
+  - The real rig's spawn in its own process group is test code that the brief requires (ADR-0021 section 5). It is not counted as a copy of the deleted adapter code.
+- **Evidence:**
+  - Diffs read in full, `92fbc6e..HEAD`:
+    - every production file of the PR;
+    - the test-kit sources and their tests;
+    - `launch/{rig,serve}.rs`, `launch.rs`, `doctor/rig.rs`, `guards.rs`, `relaunch.rs` and `switch.rs`;
+    - `fake_tmux_test.rs` and `real_tmux_test.rs`;
+    - `hermetic_test.rs` and `real_opencode/{rig,test}.rs`;
+    - `pane_registry_test.rs`, ADR-0021 and `CHANGELOG.md`.
+  - Read in full: `tx_launch/server.rs`; prior rounds' `handoff-A.md`, `handoff-F.md`, `handoff-T-red.md` and `handoff-T-green.md`; `802-diff-result-r2.md` (PASS).
+  - Greps:
+    - the callers of `start_server`, `serve_command`, `verify_serving` and `wait_healthy`, and `ServeSpec` construction in `src`;
+    - the env-prefix builders, and `TITLE_OFF`;
+    - leftovers of the deleted items (`OP_SERVE`, `boot_try`, `kill_group`, `workdir`, and others);
+    - the poll loops and sleeps added by the diff;
+    - `current_exe()` re-exec idioms;
+    - the `STEP_PHRASE` and `"to reconcile, run"` constants;
+    - personal infrastructure names in the diff (none).
+  - Run at head:
+    - `cargo clippy --workspace --all-targets -- -D warnings`: clean.
+    - `cargo test`: `pane_verbs` 262, every `holler-pane-testkit` target, `hermetic_test` 31 and `fake_tmux_test` 29, all passing.
