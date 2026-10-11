@@ -152,3 +152,44 @@ Run handoff directory `docs/handoffs/644` Â· branch `issue-644-implementation` Â
     exact `data` keys.
   - An accidental `cargo fmt --all` reformatted about 180 unrelated files. I reverted them with `git checkout`, and only
     my hunks remain.
+
+## F, implement against the RED: 2026-10-11T11:00-06:00 (MDT)
+
+- **Decided:** done, with all 13 of T's RED tests GREEN and no test file touched (`docs/handoffs/644/handoff-F.md`).
+  - **Field table.** `SpecField::OpencodeAgent` (`opencode_agent`, in `ALL` after `Effort`, 16 fields). `FieldValue`
+    gains `Key(Option<String>)`, which serializes as the key or `null`. `Key(Some)` shares `Text`'s `write_escaped`
+    arm, and `Key(None)` prints `(default)`. `differs` gains no arm.
+  - **Result.** `Report.agent: Option<AgentKey>` goes after `spec_only`, read from `launched.pane` (the CAS result).
+    The text gains `, agent KEY` after the harness port, through `text_value`, so `-` prints `"-"` (A's warn 2).
+  - **Help.** The `--agent` line now reads "a new spec has none (the server's default agent) and an existing spec keeps
+    its own", and both verbs' doc comments list `agent`.
+  - **Docs.** ADR-0021 gets the five places of Acceptance 8 (sections 3, 8 and 9, the deferred bullet, and decisions
+    15 to 20). Section 3 also gets the `--agent KEY` table row and `opencode_agent` in the `--from-current` list (A's
+    warn 1). ADR-0003's SPEC FLAGS bullet gets `--agent KEY`, and `CHANGELOG.md` an Unreleased entry.
+  - **ADR wording.** The refusal text follows A's warns 3 and 4: the harness's message gets the reconcile step once,
+    and a refused relaunch leaves the pane with no server and its record unchanged.
+  - **`archChanged: true`.** The change is additive and is what A reviewed, but it changes public `holler-pane`
+    enums (`SpecField` and `FieldValue` gain variants, and `ALL`'s type becomes `[SpecField; 16]`).
+- **Assumed:**
+  - Editing ADR-0003 line 93 is acceptable although the brief's Blast radius omits that file. A's PASS warn 1 asked
+    for it to be added. It is recorded as a deviation, and reverting it is one line.
+  - The driver's phase commit (`git add -A`) commits these handoff files. F stages only the production files, by
+    path.
+- **Hedged:**
+  - Kept the unreachable `(pid P)` clause, as the brief decided, and left its removal to O or the operator.
+  - A's warn 6 (recording decisions on #664's and #642's issues) is O or MO work and was not done here.
+  - Merge with #664 (ADR-0021, ADR-0003 and CHANGELOG): no hunks touch today. Whichever run merges second merges
+    `main`.
+- **Evidence:**
+  - Before F (RED, per T): `profile_diff_test` 8 passed, 3 failed; `pane_verbs` 266 passed, 9 failed;
+    `profile_verbs` 44 passed, 1 failed.
+  - After F: `cargo test -p holler-pane --test profile_diff_test` (11 passed). `cargo test -p holler-cli --test
+    pane_verbs --test profile_verbs` (275 and 45 passed).
+  - `cargo clippy --workspace --all-targets -- -D warnings` (0 warnings). `bash scripts/lint.sh` (exit 0).
+    `bash scripts/changelog-check.sh` (ok). `rustfmt --check` on the 4 source files (clean).
+  - The pipeline's `cargo test --workspace -- --skip roster_stays_accurate_under_concurrent_body_load`: exit 0, with
+    2127 passed, 0 failed and 25 ignored across 148 test binaries.
+  - The rendered `holler pane launch --help` and `relaunch --help`.
+  - `git grep` on the sibling branches #642, #647, #649, #650 and #664 found no exhaustive match on `SpecField` or
+    `FieldValue`. `git diff` hunk positions were checked for #664's ADR and CHANGELOG edits.
+  - `docs/handoffs/644/evidence.md`: 18 entries, each excerpt checked by script against its `file:line`.
