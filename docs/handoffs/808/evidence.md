@@ -75,3 +75,46 @@ are the post-F file's; the excerpted lines themselves are unchanged by the diff)
   >     Ok(Live {
   >         herdr,
   > ```
+
+## T (Phase 7, verify)
+
+- **Fact:** reconcile's `herdr-pane-missing` check keys a live Herdr pane by `(session, pane_id)` only, so a label on a
+  live pane cannot change whether a record's pane is found (the doctor guard `labels_change_nothing_doctor_reports`
+  relies on it).
+  **Source:** `crates/holler-pane/src/reconcile.rs:328-335`
+  **Verbatim excerpt:**
+  > ```rust
+  >     let live: BTreeSet<(&str, &PaneId)> = snapshot
+  >         .panes
+  >         .iter()
+  >         .map(|herdr| (herdr.session.as_str(), &herdr.pane_id))
+  >         .collect();
+  >     scope
+  >         .iter()
+  >         .filter(|pane| !live.contains(&(pane.herdr.session.as_str(), &pane.herdr.pane_id)))
+  > ```
+
+- **Fact:** reconcile's `unregistered-herdr-pane` check keys by `(session, pane_id)` too, and a finding carries only the
+  Herdr pane's id and cell, never the whole `HerdrPane`, so a labelled world's `Report` and `pane doctor` output are
+  identical to an unlabelled one's (same guard).
+  **Source:** `crates/holler-pane/src/reconcile.rs:351-358` and `crates/holler-pane/src/findings.rs:270-276`
+  **Verbatim excerpt:**
+  > ```rust
+  >     let named: BTreeSet<(&str, &PaneId)> = records
+  >         .iter()
+  >         .map(|pane| (pane.herdr.session.as_str(), &pane.herdr.pane_id))
+  >         .collect();
+  >     snapshot
+  >         .panes
+  >         .iter()
+  >         .filter(|herdr| !named.contains(&(herdr.session.as_str(), &herdr.pane_id)))
+  > ```
+  > ```rust
+  >     pub(crate) fn with_herdr_pane(self, herdr: &HerdrPane) -> Self {
+  >         Self {
+  >             herdr_pane: Some(herdr.pane_id.clone()),
+  >             grid: Some(herdr.grid),
+  >             ..self
+  >         }
+  >     }
+  > ```

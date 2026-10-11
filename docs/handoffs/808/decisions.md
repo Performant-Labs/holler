@@ -117,3 +117,19 @@ Run handoff directory `docs/handoffs/808` Â· branch `issue-808-implementation` Â
   - Gates: `cargo clippy --workspace --all-targets -- -D warnings` is clean; `scripts/lint.sh` and
     `scripts/changelog-check.sh` exit 0; `rustfmt --check` is clean on the 8 touched `.rs` files.
   - Five unchanged-code facts are in `docs/handoffs/808/evidence.md`.
+
+## T, verify GREEN (Phase 7): 2026-10-11T06:08-06:00 (MDT)
+
+- **Decided:** GREEN with no blocking issue; no test repaired (F changed no test and flagged none).
+  - Full `test.unit.command` with `--no-fail-fast`: 148 targets, 2068 passed, 0 failed, 25 ignored. This matches F.
+  - Four mutants on F's code (the record keeps the label; O2 requires whole-value equality; the adapter `label_of` keeps
+    `""`; the adapter snapshot drops the join) are each caught. `src/` was reverted after each.
+  - Tier 1 is clean: clippy `-D warnings`, `lint.sh`, `changelog-check.sh`, `cargo machete`, `rustfmt --check` on the
+    touched files, `docs_cli_test`, `wire_selftest`.
+  - Two evidence entries appended (reconcile keys by `(session, pane_id)`; findings carry no label), because the
+    doctor guard relies on them.
+- **Assumed:** the one failure on the first full pass, `remote_admin_traffic_never_moves_the_bodys_last_seen`
+  (`last_seen` +1 s), is a pre-existing fixed-sleep flake unrelated to #808. The diff touches no hub, CLI source, body
+  or proto code, and the test passed three isolated reruns plus the full rerun.
+- **Hedged:** the flake is not filed. It is named in `handoff-T-green.md` as a follow-up outside this story.
+- **Evidence:** `docs/handoffs/808/handoff-T-green.md`; `docs/handoffs/808/evidence.md` "T (Phase 7, verify)".
