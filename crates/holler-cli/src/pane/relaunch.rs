@@ -13,6 +13,7 @@
 use clap::Args;
 use holler_pane::profile_snapshot::spec_from_pane;
 use holler_pane::tx_launch::{relaunch, RelaunchRequest, TxOptions};
+use holler_pane::unmanaged;
 use holler_pane::{PaneError, PaneName, Ports};
 
 use super::args::{ProfileOpt, SpecFlags, SpecOnly};
@@ -69,9 +70,7 @@ fn relaunch_request(args: &PaneRelaunch, ports: Ports<'_>) -> Result<RelaunchReq
     let record = ports
         .pane_store
         .get(&name)?
-        .ok_or_else(|| PaneError::PaneNotFound {
-            what: name.to_string(),
-        })?;
+        .ok_or_else(|| unmanaged::missing(ports, name.as_str()))?;
     let profile = stored_profile(ports, profile.as_ref())?;
     let from_record = spec_from_pane(&record);
     let base = profile

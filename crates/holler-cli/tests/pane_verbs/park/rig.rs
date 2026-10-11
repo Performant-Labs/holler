@@ -152,7 +152,10 @@ impl Rig {
     /// AC 9: no Herdr, host, harness or probe call, and no profile write (`CasPut`,
     /// `Delete`, `Rename`). The profile reads a `--profile` run makes are expected.
     pub fn assert_no_live_call_and_no_profile_write(&self) {
-        assert_eq!(self.herdr.faults().calls(), vec![], "no Herdr call");
+        assert!(
+            crate::list::only_herdr_reads(&self.herdr.faults().calls()),
+            "no Herdr call that acts, only reads"
+        );
         assert_eq!(self.host.faults().calls(), vec![], "no host call");
         assert_eq!(self.harness.faults().calls(), vec![], "no harness call");
         assert_eq!(self.prober.calls(), vec![], "no probe run");

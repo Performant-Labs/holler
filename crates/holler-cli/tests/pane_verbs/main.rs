@@ -31,6 +31,7 @@ mod park;
 mod relaunch;
 mod reset;
 mod switch;
+mod unmanaged;
 mod unpark;
 mod watch;
 

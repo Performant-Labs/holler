@@ -73,7 +73,7 @@ use holler_adapter_opencode::{
 };
 use holler_pane::{
     Actor, Argv, Cursor, HarnessPort, HerdrPane, HerdrPort, HerdrSnapshot, HerdrSpec, HostPort,
-    Key, Pane, PaneError, PaneEvent, PaneId, PaneName, PaneStore, Ports, ProbeResult, Prober,
+    Key, Pane, PaneError, PaneEvent, PaneId, PaneName, PaneObservation, PaneStore, Ports, ProbeResult, Prober,
     Profile, ProfileEvent, ProfileLogEntry, ProfileName, ProfileScope, ProfileStore, ResolvedScope,
     ServeSpec, SpecEdit, SystemProber, Watch,
 };
@@ -300,6 +300,10 @@ impl HerdrPort for Unwired {
     }
 
     fn version(&self) -> Result<String, PaneError> {
+        Err(PaneError::NotImplemented)
+    }
+
+    fn observe_pane(&self, _pane: &PaneId) -> Result<PaneObservation, PaneError> {
         Err(PaneError::NotImplemented)
     }
 }

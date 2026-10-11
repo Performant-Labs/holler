@@ -297,6 +297,7 @@ pub fn whole(fix: bool) -> ReconcileRequest<'static> {
         pane: None,
         fix,
         now_ms: NOW,
+        unmanaged_stalled_after_secs: None,
     }
 }
 

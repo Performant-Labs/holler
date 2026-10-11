@@ -48,6 +48,10 @@ impl HerdrPort for ExtraHerdr<'_> {
     fn version(&self) -> Result<String, PaneError> {
         self.herdr.version()
     }
+
+    fn observe_pane(&self, pane: &PaneId) -> Result<holler_pane::PaneObservation, PaneError> {
+        self.herdr.observe_pane(pane)
+    }
 }
 
 /// What [`NthCasPut`] does to one numbered `cas_put`.
