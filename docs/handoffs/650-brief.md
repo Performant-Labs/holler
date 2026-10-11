@@ -6,21 +6,21 @@ Part of epic #633. This is the complete, final statement of the story (consolida
 
 `holler pane import --from <state-root> --herdr-session NAME [--launcher FILE] [--orchestrator PANE]... [--dry-run] [--format=text|json]`
 
-Read the current fleet's per-pane files and produce registry records, a profile `fleet`, and one report of every disagreement between those files and what Herdr, tmux and the harness show. The dry run writes nothing. A real run writes the records and the profile or writes nothing at all. The verb adopts what is running: it never starts, stops, types into or moves anything, and it deletes nothing from the source files.
+Read the current fleet's per-pane files and produce registry records, a profile `fleet`, and one report of every disagreement between those files and what Herdr, tmux and the harness show. The dry run writes nothing. A real run writes the records and the profile or writes nothing at all. (A failed write is undone; when an undo step itself fails, the undo stops at that step and the verb answers `profile-conflict` with the commands that reconcile, as `profile create --from-current` does: item 4 of "The real run's writes", acceptance 10, E5.) The verb adopts what is running: it never starts, stops, types into or moves anything, and it deletes nothing from the source files.
 
 ### The input (this story fixes these shapes; the repository holds no sample of the real fleet's files)
 
 - **`<state-root>`** is the directory that holds one directory per pane: today `$HOME/.holler-oc/`, whose per-pane directory is `hj-<cCrR>` (E10: `state="$HOME/.holler-oc/$session"`). **The pane's name is the directory's name** (`hj-c1r2`), parsed with `PaneName::parse`. That name is the record's key (`Pane.name`, E2) and nothing more: it is neither the pane's identity in Herdr nor its position, which come from the label join (item 1 of "The join, per pane" below; ADR-0021 section 10, E9). A subdirectory that holds none of the four pane files below (for example `opencode-mo/`) is not a pane directory: it is an information finding `ignored-entry` and nothing else. A subdirectory that holds a pane file but whose name does not parse is a problem finding `source-unreadable`.
 - **Per-pane files**, each under the pane's directory:
-  - `pane.env`: lines of the form `[export ]NAME=value` (E10, the pattern `^(export[ \t]+)?OC_[A-Z_]+=`). The reader takes the **value** of exactly five names: `OC_MODEL` (`PROVIDER/MODEL_ID`, split at the first `/`, into `ModelSpec.provider` and `model_id`), `OC_EFFORT` (`ModelSpec.effort`), `OC_CONTEXT_SOFT` and `OC_CONTEXT_HARD` (unsigned integers, `ContextCeilings.soft` and `hard`), and `OC_DEFAULT_AGENT` (optional, `Pane.opencode_agent` through `AgentKey::parse`). **Every other variable is kept by NAME only** through `EnvVarName::parse`, in file order and de-duplicated; its value is never read into any value, log line or finding. A line that is blank or starts with `#` is skipped. `OC_MODEL`, `OC_EFFORT`, `OC_CONTEXT_SOFT` and `OC_CONTEXT_HARD` are required (E2: `ModelSpec` and `ContextCeilings` have no empty form).
+  - `pane.env`: lines of the form `[export ]NAME=value` (E10, the pattern `^(export[ \t]+)?OC_[A-Z_]+=`). The reader takes the **value** of exactly five names: `OC_MODEL` (`PROVIDER/MODEL_ID`, split at the first `/`, into `ModelSpec.provider` and `model_id`), `OC_EFFORT` (`ModelSpec.effort`), `OC_CONTEXT_SOFT` and `OC_CONTEXT_HARD` (unsigned integers, `ContextCeilings.soft` and `hard`), and `OC_DEFAULT_AGENT` (optional, `Pane.opencode_agent` through `AgentKey::parse`). **Every other variable is kept by NAME only** through `EnvVarName::parse`, in file order and de-duplicated; its value is never read into any value, log line or finding. A line that is blank or starts with `#` is skipped. `OC_MODEL`, `OC_EFFORT`, `OC_CONTEXT_SOFT` and `OC_CONTEXT_HARD` are required (E2: `ModelSpec` and `ContextCeilings` have no empty form). A `pane.env` whose lines parse but that lacks one of these four is `source-missing`, naming the file and the missing variable (a name from this list, never text read from the file), as a launcher entry without its port or cwd is (acceptance 7).
   - `last-session`: the whole content, trimmed, is one session id (E10). Absent or empty means "no session recorded".
-  - `sessions.toml`: the **`holler-body` attach-config grammar** (confirmed in code, E11: `[[session]]` rows with `harness`, `mode = "attach"`, `endpoint`, `session_id`; the pane-restart script greps `session_id = "<id>"` in it, E10). It is read through `holler_body::config::load`, never through a new parser. Every row's `session_id` is a recorded session; a row whose `harness` is not `opencode` marks a pane that is not an OpenCode pane. `load` refuses an `attach` row that has no `session_id` (or no `endpoint`), so a file holding one is unparsable: `source-unreadable` (E24, acceptance 7). `session_id` is optional only on a `spawn` row (E24); a row without one adds nothing to `S` (item 4 of the join).
-  - `owned-sessions`: one session id per line; blank lines and lines starting with `#` are skipped.
+  - `sessions.toml`: the **`holler-body` attach-config grammar** (confirmed in code, E11: `[[session]]` rows with `harness`, `mode = "attach"`, `endpoint`, `session_id`; the pane-restart script greps `session_id = "<id>"` in it, E10). It is read through `holler_body::config::load`, never through a new parser. Every row's `session_id` is a recorded session; a row whose `harness` is not `opencode` marks a pane that is not an OpenCode pane. Every row has a `harness`: `RawSession.harness` has no default (E34), so `load` refuses a row without one as `ConfigError::Toml`, which is `source-unreadable`. `load` refuses an `attach` row that has no `session_id` (or no `endpoint`), so a file holding one is unparsable: `source-unreadable` (E24, acceptance 7). `session_id` is optional only on a `spawn` row (E24); a row without one adds nothing to `S` (item 4 of the join).
+  - `owned-sessions`: one session id per line; blank lines and lines starting with `#` are skipped. A file that exists but holds no session id (only blank and `#` lines) is present with `O` empty, not absent (only `last-session` reads empty as absent), so a present `L` is not in `O` and the result is `sources-disagree` (item 4 of the join: "`L` is in `O` when `owned-sessions` exists").
 - **The launcher's table** is the file `--launcher FILE`, default `<state-root>/launcher.toml`. Shape (the story's contract; ADR-0021 section 13 names only what it maps to, E9): one table per pane, keyed by the pane's name, with `port` (integer 1 to 65535), `cwd` (an absolute path string) and `command` (an array of strings, an argv). The port is **never derived from the name** (the pane-restart script derives it as `47000 + col * 10 + row`; that is name-as-data and the import does not copy it). The real fleet's own table is read for its shape in the cutover (#654) dry run before anything is written; if its shape differs, the dry run reports `source-unreadable` and the fix is a one-file export, not a code change here.
 
 ### What the engine observes (reads only)
 
-Only through `Ports` (E3, E12, E17, E23): `herdr.snapshot()` once, `herdr.version()` once, then per pane `host.ps(name)`, `harness.health(port)` and `harness.list_sessions(port)` (after `Ok(true)` to read the sessions; after `Ok(false)` only to tell a wedged server from a down one, its list never trusted, as reconcile does; `health` returns `Result<bool, PaneError>`, E23). The panes are observed **concurrently**, one scoped thread per pane as reconcile does (`reconcile.rs:7-8`), and the report lists them in name order, so a dry run over wedged servers costs about one bound, not N. Every method named here exists on the frozen ports as they are (E3, E23). **Nothing else is called**: not `ensure_pane`, `ensure_session`, `run`, `stop_owned`, `serve`, `create_session`, `attach_tui`, `select_session`, `abort`, `send_text`, `send_keys`, `close`, `shown_session`. A `herdr.snapshot()` or `herdr.version()` error ends the verb with that error (its class, its exit code), because nothing can be joined without them; `herdr-version-unsupported` is such an error.
+Only through `Ports` (E3, E12, E17, E23): `herdr.snapshot()` once, `herdr.version()` once, then per pane `host.ps(name)`, `harness.health(port)` and `harness.list_sessions(port)` (after `Ok(true)` to read the sessions; after `Ok(false)` only to tell a wedged server from a down one, its list never trusted, as reconcile does; `health` returns `Result<bool, PaneError>`, E23). The panes are observed **concurrently**, one scoped thread per pane as reconcile does (`reconcile.rs:7-8`, and its `observe_all`, `reconcile.rs:251-278`, E31), and the report lists them in name order, so a dry run over wedged servers costs about one bound, not N. Every method named here exists on the frozen ports as they are (E3, E23). **Nothing else is called**: not `ensure_pane`, `ensure_session`, `run`, `stop_owned`, `serve`, `create_session`, `attach_tui`, `select_session`, `abort`, `send_text`, `send_keys`, `close`, `shown_session`. A `herdr.snapshot()` or `herdr.version()` error ends the verb with that error (its class, its exit code), because nothing can be joined without them; `herdr-version-unsupported` is such an error (`PaneError::HerdrVersionUnsupported`, a refusal, exit 3, E32), never a finding of the report ("The finding vocabulary" below, acceptance 14).
 
 ### The join, per pane
 
@@ -62,11 +62,11 @@ Only through `Ports` (E3, E12, E17, E23): `herdr.snapshot()` once, `herdr.versio
 ### The output
 
 `--format=text|json` is the global flag (`VerbCtx.format`), one `output::emit` call (E14). The verb flattens no `ProfileOpt` (`import` is in neither `--profile` class, E9); the existing test that `holler pane import --profile demo` is a usage error stays true. The JSON `data` (documented in `PaneImport`'s doc, versioned with the envelope: adding a key later is not breaking) is:
-`{"dry_run": bool, "state_root": string, "recorded": integer, "profile": Profile or null, "panes": [{"name", "action": "record"|"already-imported"|"skipped"|"blocked", "role": "agent"|"orchestrator"|null, "pos": GridPos or null, "session_of_record": string or null}], "findings": [{"pane": name or null, "level", "kind", "message"}]}`. Positions go through `GridPos` serde (row first): a pane's `pos` is the object `{"row": 2, "col": 1, "pos": "r2c1"}`, in that key order, not a string (ADR-0021 section 10, E9; E30); the text form prints `r2c1`. `recorded` is the number of records written (0 in a dry run). In a dry run `data.profile` is the `Profile` that `profile_from_panes(fleet, &records)` builds (E4, E27), the value a real run hands to `insert_profile`; its `generation`, `created` and `updated` are 0 because the store stamps them (E4). The finding key is `kind`, the name doctor's report already uses for the same field (`findings.rs:214`), because renaming it after merge would be a breaking change. The text form prints one line per pane (`NAME  ACTION  ROLE  POS  SESSION`, `-` for absent), then each finding as `  <level> <code>: <message>`, then (dry run) the profile as `profile show` prints a spec (each spec field through `SpecField::ALL` and `FieldValue`, E26: `spec PANE`, then one `  FIELD: VALUE` line per field). The import reuses `profile show`'s own spec text: `push_spec` and `text` in `show.rs` widen from private to `pub(crate)` (visibility only, as `insert_profile`, `detach`, `single_quoted`, `pane_list` and `count` already are) and the import calls them; it copies nothing (E26). Finding messages carry untrusted text (paths, ids, adapter messages) only through `findings::quoted` / `findings::embedded` (E6), with one exception that is a rule: **a `source-unreadable` message never carries text read from a file or from a parser's error**, because `toml` 0.8.23 / `toml_edit` 0.22.27 error text quotes the offending source line verbatim (`toml_edit` `src/error.rs:101-110`) and `holler_body::config`'s `ConfigError::Toml` keeps only that text (`config.rs:273`); the line can be an `env` table of values or a key of the real launcher table (ADR-0021 :298-300, :513). It names the file and a position only: for the launcher table, the line and column from `toml::de::Error::span()` and no message; for `sessions.toml`, `ConfigError::Invalid`'s row and field, and for `ConfigError::Toml` only "not valid TOML"; for `pane.env`, the line number alone (a line that does not parse has no safe variable to name).
+`{"dry_run": bool, "state_root": string, "recorded": integer, "profile": Profile or null, "panes": [{"name", "action": "record"|"already-imported"|"skipped"|"blocked", "role": "agent"|"orchestrator"|null, "pos": GridPos or null, "session_of_record": string or null}], "findings": [{"pane": name or null, "level", "kind", "message"}]}`. Positions go through `GridPos` serde (row first): a pane's `pos` is the object `{"row": 2, "col": 1, "pos": "r2c1"}`, in that key order, not a string (ADR-0021 section 10, E9; E30); the text form prints `r2c1`. `recorded` is the number of records written (0 in a dry run). In a dry run `data.profile` is the `Profile` that `profile_from_panes(fleet, &records)` builds (E4, E27), the value a real run hands to `insert_profile`; its `generation`, `created` and `updated` are 0 because the store stamps them (E4). The finding key is `kind`, the name doctor's report already uses for the same field (`findings.rs:214`), because renaming it after merge would be a breaking change. The text form prints one line per pane (`NAME  ACTION  ROLE  POS  SESSION`, `-` for absent), then each finding as `  <level> <code>: <message>` (`<code>` is the finding's `kind`, the same string its JSON `kind` holds), then (dry run) the profile as `profile show` prints a spec (each spec field through `SpecField::ALL` and `FieldValue`, E26: `spec PANE`, then one `  FIELD: VALUE` line per field). The import reuses `profile show`'s own spec text: `push_spec` and `text` in `show.rs` widen from private to `pub(crate)` (visibility only, as `insert_profile`, `detach`, `single_quoted`, `pane_list` and `count` already are) and the import calls them; it copies nothing (E26). Finding messages carry untrusted text (paths, ids, adapter messages) only through `findings::quoted` / `findings::embedded` (E6), with one exception that is a rule: **a `source-unreadable` message never carries text read from a file or from a parser's error**, because `toml` 0.8.23 / `toml_edit` 0.22.27 error text quotes the offending source line verbatim (`toml_edit` `src/error.rs:101-110`) and `holler_body::config`'s `ConfigError::Toml` keeps only that text (`config.rs:273`); the line can be an `env` table of values or a key of the real launcher table (ADR-0021 :298-300, :513). It names the file and a position only: for the launcher table, the line and column from `toml::de::Error::span()` and no message; for `sessions.toml`, `ConfigError::Invalid`'s row and field, and for `ConfigError::Toml` only "not valid TOML"; for `pane.env`, the line number alone (a line that does not parse has no safe variable to name). For the launcher table, `holler-cli` parses the file itself with `toml::from_str`, which answers a `toml::de::Error` (E33), and keeps that error value, never its `to_string()` or `message()`: those are the parser's error text the rule above keeps out of the message. `span()` is the byte range of the error in the text parsed, or `None` (E33), so the reader counts the line and column of the span's start in that text, and with no span the message names the file alone. For `sessions.toml`, `ConfigError::Invalid`'s `row` is the 0-based index of the `[[session]]` table, not a line number, and its `field` is a fixed key name (`&'static str`); the message never carries the variant's `name`, which is the row's own value, or its `reason`, which can quote a value of the file (`parse_mode`'s `unknown mode {other:?}`, E34).
 
 ### The finding vocabulary
 
-A new single-source enum `ImportFinding` in `crates/holler-pane/src/import/findings.rs`, copying `FindingKind`'s pattern (E6, E29): `code()` is the one source of each code, `Serialize` is built from it, there is an `ALL` list, and a code-table test (unique, kebab-case, `is_valid_code`) lives in `crates/holler-pane/tests/import_test.rs`. A condition that reconcile already names keeps reconcile's spelling through `FindingKind::ObserveFailed.code()` and `FindingKind::HerdrVersionUnsupported.code()`; `command-not-argv` is the closed `PaneError` code (`PaneError::CommandNotArgv`, E28). The new codes are exactly: `pane-unlabelled`, `pane-label-ambiguous`, `sources-disagree`, `source-unreadable`, `source-missing`, `no-tmux-session`, `session-not-found`, `no-session-recorded`, `harness-not-opencode`, `name-cell-differs`, `already-imported`, `ignored-entry`. `findings.rs` and `reconcile.rs` are #647's files and are not edited.
+A new single-source enum `ImportFinding` in `crates/holler-pane/src/import/findings.rs`, copying `FindingKind`'s pattern (E6, E29): `code()` is the one source of each code, `Serialize` is built from it, there is an `ALL` list, and a code-table test (unique, kebab-case, `is_valid_code`) lives in `crates/holler-pane/tests/import_test.rs`. A condition that reconcile already names keeps reconcile's spelling through `FindingKind::ObserveFailed.code()` and `FindingKind::HerdrVersionUnsupported.code()`; `command-not-argv` is the closed `PaneError` code (`PaneError::CommandNotArgv`, E28). Of reconcile's codes, the import's **report** carries `observe-failed` (items 3 and 4 of the join), `server-wedged` and `server-down` (`FindingKind::ServerWedged.code()` and `FindingKind::ServerDown.code()`, item 4). **`herdr-version-unsupported` is never a finding of the import**, in a dry run or a real run: it is the error `herdr.version()` answers (`PaneError::HerdrVersionUnsupported`, a closed code of class refusal, exit 3, E32), and a `herdr.version()` error ends the verb with that error ("What the engine observes"; an adapter error keeps its own class and code, "Exit codes and what blocks"). The verb answers that error in place of a report and writes nothing, so no `ImportFinding` variant, no `data.findings` entry and no text finding line carries it, and ADR-0021 section 9's import row lists it among the verb's error codes (acceptance 12; acceptance 14 pins the behaviour). Its spelling is still reconcile's: the error's code is the same string as `FindingKind::HerdrVersionUnsupported.code()` (E29, E32). Doctor reports it as a finding because a reconcile pass goes on without the version (`reconcile.rs:300-305`, E32); the import does not go on. The new codes are exactly: `pane-unlabelled`, `pane-label-ambiguous`, `sources-disagree`, `source-unreadable`, `source-missing`, `no-tmux-session`, `session-not-found`, `no-session-recorded`, `harness-not-opencode`, `name-cell-differs`, `already-imported`, `ignored-entry`. `findings.rs` and `reconcile.rs` are #647's files and are not edited.
 
 ## Operator decisions (2026-10-11)
 
@@ -90,21 +90,22 @@ Tests go in `crates/holler-cli/tests/pane_verbs/import.rs` (replacing the stub's
 2. **Dry run writes nothing.** The fake pane store's and profile store's call logs hold none of `cas_put`, `delete`, `rename` (reads allowed); every file under `<state-root>` has the same bytes after; JSON passes `check_envelope`; `data.profile` is the profile it would create and `data.recorded` is 0; the adapters' call logs hold only the allowed reads.
 3. **Real run.** The profile `fleet` exists with one spec per imported pane (env NAMES only), each pane's `profile` is `fleet`, `holler profile show fleet` reports every row `matches`, a secret-looking value placed in `pane.env` under a non-listed variable appears in no record, no output and no finding, and no source file changed.
 4. **Join failures.** No labelled pane: `pane-unlabelled`; two panes with the label: `pane-label-ambiguous`; each leaves no record, the dry run exits 0 listing it, and the real run writes nothing and exits 3 with the pinned `import-blocked` message.
-5. **Disagreement.** `last-session` names A and `sessions.toml` names B: `sources-disagree`, no record, real run refused. A stale file naming A while the fake server lists only B: no record anywhere holds A (I6).
+5. **Disagreement.** `last-session` names A and `sessions.toml` names B: `sources-disagree`, no record, real run refused. A stale file naming A while the fake server lists only B: no record anywhere holds A (I6). An `owned-sessions` that holds only blank and `#` lines while `last-session` names A: `sources-disagree`, no record.
 6. **Agreement but the server does not hold the session**: the record is written without `session_of_record` and the finding is `session-not-found`. A `health` or `list_sessions` call that returns an error: `observe-failed` (naming the call), `harness.health` `unknown`. A server whose `health` answers `Ok(false)`: `server-down`, or `server-wedged` when `list_sessions` times out; the record is written without `session_of_record` and `harness.health` is `Unhealthy("server-down")` or `Unhealthy("server-wedged")`; `observe-failed` is not used for it.
-7. **Hand-edited and missing files.** An unparsable `sessions.toml`, a `pane.env` line that is not `[export ]NAME=value`, and a non-numeric ceiling each give `source-unreadable` naming the file and a position only (see The output): a secret placed on the offending line of `sessions.toml`, of the launcher table and of `pane.env` appears in no finding, no output and no log line (assert its absence in all three); a missing `pane.env`, a missing launcher entry (port or cwd) give `source-missing`; none has a record. A missing `<state-root>` gives exit 2.
+7. **Hand-edited and missing files.** An unparsable `sessions.toml`, a `pane.env` line that is not `[export ]NAME=value`, and a non-numeric ceiling each give `source-unreadable` naming the file and a position only (see The output): a secret placed on the offending line of `sessions.toml`, of the launcher table and of `pane.env` appears in no finding, no output and no log line (assert its absence in all three); a missing `pane.env`, a `pane.env` without one of its four required variables (the finding names the variable), a missing launcher entry (port or cwd) give `source-missing`; none has a record. A missing `<state-root>` gives exit 2.
 8. **Not OpenCode and command shapes.** A `harness = "claude"` row: `harness-not-opencode`, no record, the other panes still import. `command` as an array imports as `Pane.command`; as a string it gives `command-not-argv` and the pane imports without a command.
 9. **Idempotence and `fleet`.** A second real run exits 0, reports `already-imported`, makes no store write. With `fleet` present and a new pane to record: `profile-exists`, exit 3, nothing written.
 10. **Failure records nothing.** A fault injected on the second `cas_put` leaves the pane store empty and the profile deleted; a fault that also fails an undo step answers `profile-conflict` with the reconcile commands and never names `pane close`. The message names the remedy steps: after a failure at the profile delete, `holler profile delete fleet` and run the import again; with records kept, `holler profile delete fleet --keep-panes`, run the import again (the kept records are `already-imported` and are skipped), then `holler profile delete fleet --keep-panes` and `holler profile create fleet --from-current` (a pane's record must join `fleet` for the profile to describe it). A follow-up issue is filed for a verb that removes only a record (no verb does today).
 11. **Roles and flags.** An unknown `--orchestrator` name: exit 2. `--herdr-session` is required. `holler pane import --profile demo` is still a usage error. The name-cell information: `hj-c1r2` observed at row 1, column 1 gives `name-cell-differs` and the record uses row 1, column 1.
-13. **Herdr session.** A fake Herdr with the label `hj-c1r2` in two sessions: the import joins only the pane in `--herdr-session`; with the label only in another session the pane is `pane-unlabelled`.
 12. **Vocabulary and docs.** The code-table test passes; `cli_surface_test` and `docs_cli_test` pass with the new `cli-surface.txt` lines and the ADR 0003 row; ADR-0021 section 9's import row lists `profile-exists`, `profile-conflict`, `generation-conflict`, `herdr-version-unsupported`, `import-blocked` and `usage`, the open-codes row (`:584`) lists `import-blocked`, section 13 gives the shape of the launcher table (a new on-disk format this story defines), and section 10 says what this story decided; `CHANGELOG.md` has an `## [Unreleased]` entry linking this issue.
+13. **Herdr session.** A fake Herdr with the label `hj-c1r2` in two sessions: the import joins only the pane in `--herdr-session`; with the label only in another session the pane is `pane-unlabelled`.
+14. **Herdr's version.** A fake Herdr that reports an unsupported build (`FakeHerdr::set_version(HerdrVersion::Unsupported)`, E32): the dry run and the real run each end with the error `herdr-version-unsupported`, exit 3, with no report (in JSON the failure envelope, which passes `check_envelope`), no finding that carries the code, and no store write (the fake pane store's and profile store's call logs hold none of `cas_put`, `delete`, `rename`).
 
 ## Blast radius
 
 Edit: `crates/holler-cli/src/pane/import.rs` (args, run, render, the real run's writes) and its submodules `crates/holler-cli/src/pane/import/*.rs` (for example `sources.rs` for reading and parsing; the CLI side passes `scripts/lint.sh`'s 600-line warning, and the lint fails at 900, so the split is named now); `crates/holler-pane/src/import.rs` and `crates/holler-pane/src/import/*.rs` (the pure engine, the plan, the finding enum, `IMPORT_BLOCKED`); `crates/holler-cli/tests/pane_verbs/import.rs` and `import/**`; `crates/holler-cli/tests/pane_verbs/doctor/rig.rs` (an unrecorded seed only); `crates/holler-cli/tests/pane_verbs/process/stub.rs` (delete its `STUBS` entry and the `// #650` line); `crates/holler-cli/tests/fixtures/cli-surface.txt` (its two lines); `crates/holler-cli/src/profile/show.rs` (visibility of `push_spec` and `text` only); `docs/adr/ADR-0003.md` (its row); `docs/adr/ADR-0021.md` (sections 9's import row, 10 and 13 text); `crates/holler-pane/tests/import_test.rs`; `CHANGELOG.md`. `holler-pane` takes no `toml` and no `holler-body` dependency (ADR-0021 section 5): all file-format knowledge stays in `holler-cli`.
 
-**New code, not yet in the repository** (so no excerpt can show it; the acceptance tests named pin it), among it: the `PaneImport` arguments with the repeatable `--orchestrator` and its usage check (acceptance 11); the plan and its name order, the real run's writes and the import's undo (acceptance 3, 9 and 10); and `ImportFinding` with its code-table test, which copy `FindingKind`'s pattern (E29; acceptance 12). What they use already exists and is quoted: the ports (E3, E22, E23), `insert_profile` (E5), `profile_from_panes` (E4), `profile show`'s comparison and spec fields (E25, E26) and `holler_body::config::load` (E11, E24).
+**New code, not yet in the repository** (so no excerpt can show it; the acceptance tests named pin it), among it: the `PaneImport` arguments with the repeatable `--orchestrator` and its usage check (acceptance 11); the plan and its name order, the real run's writes and the import's undo (acceptance 3, 9 and 10); and `ImportFinding` with its code-table test, which copy `FindingKind`'s pattern (E29; acceptance 12); and the readers of `pane.env`, `last-session`, `owned-sessions` and the launcher table, with the positions their `source-unreadable` findings name (the `pane.env` line number, the launcher table's line and column from `span()`), in `crates/holler-cli/src/pane/import/` (for example `sources.rs`, as the Blast radius names it; acceptance 7). What they use already exists and is quoted: the ports (E3, E22, E23), `insert_profile` (E5), `profile_from_panes` (E4), `profile show`'s comparison and spec fields (E25, E26) and `holler_body::config::load` (E11, E24).
 
 **Must not edit** (frozen or other stories'): `crates/holler-cli/src/pane/mod.rs`, `crates/holler-pane/src/ports.rs`, `crates/holler-pane/src/pane.rs`, `crates/holler-pane/src/profile_snapshot.rs`, `crates/holler-pane/src/findings.rs`, `crates/holler-pane/src/reconcile.rs` and `reconcile/**`, `crates/holler-pane/src/tx_launch.rs`, the Herdr adapter, the test kit's `src/`, and any hub or protocol file. No protocol row, golden file or hub state file changes.
 
@@ -1780,4 +1781,205 @@ pub struct PaneName(SessionName);
 ```
 #[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct SessionName(String);
+```
+
+### E31: reconcile observes every pane at once, one scoped thread per pane
+`crates/holler-pane/src/reconcile.rs:7-8`
+```
+//! One pass, over every pane in scope at once (a thread per pane, so a pass takes about as
+//! long as its slowest pane's chain, not the pane count times it: I5):
+```
+`crates/holler-pane/src/reconcile.rs:251-278`
+```
+/// Observe Herdr and every pane of `scope` at once: one thread for the two Herdr calls and
+/// one per pane, each pane's in `scope` order. A thread that cannot start or does not finish
+/// leaves `None` for Herdr, and a lone `observe-failed` for a pane.
+fn observe_all(
+    ports: Ports<'_>,
+    request: &ReconcileRequest<'_>,
+    scope: &[Pane],
+) -> (Option<HerdrSeen>, Vec<Checked>) {
+    thread::scope(|threads| {
+        let herdr = thread::Builder::new().spawn_scoped(threads, move || HerdrSeen {
+            version: ports.herdr.version(),
+            snapshot: ports.herdr.snapshot(),
+        });
+        let chains: Vec<_> = scope
+            .iter()
+            .map(|pane| {
+                thread::Builder::new()
+                    .spawn_scoped(threads, move || observe::check_pane(ports, request, pane))
+            })
+            .collect();
+        let checked: Vec<Checked> = scope
+            .iter()
+            .zip(chains)
+            .map(|(pane, chain)| joined(chain).unwrap_or_else(|| observe::lost(pane)))
+            .collect();
+        (joined(herdr), checked)
+    })
+}
+```
+
+### E32: `herdr-version-unsupported`: a closed error of class refusal (exit 3), which doctor reports as a finding; the fake Herdr's unsupported build
+`crates/holler-pane/src/error.rs:453-455`
+```
+    /// `herdr-version-unsupported`: Herdr reports an API version the adapter does not
+    /// know; `message` names the version and the supported ones. (#640.)
+    HerdrVersionUnsupported { message: String },
+```
+`crates/holler-pane/src/error.rs:115`
+```
+            PaneCode::HerdrVersionUnsupported => "herdr-version-unsupported",
+```
+`crates/holler-pane/src/error.rs:276-291`
+```
+        // Understood and declined: a guard, a policy or a gate said no, the name is
+        // taken, or the request named something that does not exist.
+        PaneCode::GridAmbiguous
+        | PaneCode::GridOutOfRange
+        | PaneCode::CommandNotArgv
+        | PaneCode::EnvNameInvalid
+        | PaneCode::ProfileSecretRefused
+        | PaneCode::ProfileExists
+        | PaneCode::ProfileHasLivePanes
+        | PaneCode::PaneNotInProfile
+        | PaneCode::PaneInOtherProfile
+        | PaneCode::ProbeFailed
+        | PaneCode::HerdrVersionUnsupported
+        | PaneCode::ProfileNotFound
+        | PaneCode::PaneNotFound
+        | PaneCode::SessionNotFound => ErrorClass::Refusal,
+```
+`crates/holler-pane/src/error.rs:235-245`
+```
+impl ErrorClass {
+    /// The exit code of a verb that ends with an error of this class, the same in
+    /// text and JSON mode: 2 usage, 3 refusal, 1 runtime failure (ADR 0003's exit
+    /// codes; success is 0 and has no class).
+    pub const fn exit_code(self) -> i32 {
+        match self {
+            ErrorClass::Usage => 2,
+            ErrorClass::Refusal => 3,
+            ErrorClass::Failure => 1,
+        }
+    }
+```
+`crates/holler-pane/src/reconcile.rs:300-305`
+```
+    match &herdr.version {
+        Ok(_) => {}
+        Err(PaneError::HerdrVersionUnsupported { message }) => findings.push(Finding::new(
+            FindingKind::HerdrVersionUnsupported,
+            format!("{}; no holler verb upgrades Herdr", embedded(message)),
+        )),
+```
+`crates/holler-pane-testkit/src/herdr.rs:92-100`
+```
+/// Which Herdr build `version()` reports.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum HerdrVersion {
+    /// Protocol 22: `version()` is `Ok(PROTOCOL_22_VERSION)` (the default).
+    #[default]
+    Protocol22,
+    /// A build the adapter does not know: `version()` is `herdr-version-unsupported`.
+    Unsupported,
+}
+```
+`crates/holler-pane-testkit/src/herdr.rs:208-211`
+```
+    /// Which build `version()` reports from now on.
+    pub fn set_version(&self, version: HerdrVersion) {
+        self.lock().version = version;
+    }
+```
+
+### E33: `toml` 0.8.23, the version `Cargo.lock` pins: `toml::from_str` is `de::from_str` and answers a `de::Error`, which keeps its message apart from its span, a byte range (the excerpts of `lib.rs` and `de.rs` are cut by command from the crates.io source of `toml` 0.8.23, not from the repository)
+`Cargo.lock:2741-2742`
+```
+name = "toml"
+version = "0.8.23"
+```
+`toml-0.8.23/src/lib.rs:167`
+```
+pub use crate::de::{from_str, Deserializer};
+```
+`toml-0.8.23/src/de.rs:40-52`
+```
+#[cfg(feature = "parse")]
+pub fn from_str<T>(s: &'_ str) -> Result<T, Error>
+where
+    T: serde::de::DeserializeOwned,
+{
+    T::deserialize(Deserializer::new(s))
+}
+
+/// Errors that can occur when deserializing a type.
+#[derive(PartialEq, Eq, Clone)]
+pub struct Error {
+    inner: crate::edit::de::Error,
+}
+```
+`toml-0.8.23/src/de.rs:63-72`
+```
+    /// What went wrong
+    pub fn message(&self) -> &str {
+        self.inner.message()
+    }
+
+    /// The start/end index into the original document where the error occurred
+    #[cfg(feature = "parse")]
+    pub fn span(&self) -> Option<std::ops::Range<usize>> {
+        self.inner.span()
+    }
+```
+
+### E34: holler-body's ConfigError, the raw `[[session]]` row (`harness` has no default) and a `reason` that quotes a value of the file
+`crates/holler-body/src/config.rs:136-154`
+```
+/// Why a config file was refused. Every variant is a fail-closed validation
+/// refusal the CLI maps to exit 3 (ADR 0003) — there is no "warning that
+/// still exits 0" case here (that's [`ParsedConfig::warnings`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConfigError {
+    /// The file failed to parse as TOML, or violated a `deny_unknown_fields`
+    /// gate (an unknown top-level or per-session key). The message is the
+    /// `toml` crate's own (it already names the offending key/line).
+    Toml(String),
+    /// A per-session validation failure: `row` is the 0-based index into the
+    /// file's `[[session]]` array, `name` is that row's (possibly invalid)
+    /// `name` value, `field` is the offending key, `reason` is human-
+    /// readable.
+    Invalid { row: usize, name: String, field: &'static str, reason: String },
+    /// No config file was found via any discovery source.
+    NoConfigFound,
+    /// The file could not be read (permissions, not a file, etc).
+    Io(String),
+}
+```
+`crates/holler-body/src/config.rs:209-216`
+```
+/// One raw `[[session]]` table, before validation. `deny_unknown_fields`
+/// catches a typo'd key (e.g. `harnes`) as a parse error rather than a
+/// silently-ignored field.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawSession {
+    name: String,
+    harness: String,
+```
+`crates/holler-body/src/config.rs:409-420`
+```
+fn parse_mode(row: usize, raw_name: &str, mode: Option<&str>) -> Result<SessionMode, ConfigError> {
+    match mode {
+        None | Some("spawn") => Ok(SessionMode::Spawn),
+        Some("attach") => Ok(SessionMode::Attach),
+        Some(other) => Err(ConfigError::Invalid {
+            row,
+            name: raw_name.to_string(),
+            field: "mode",
+            reason: format!("unknown mode {other:?} (expected \"spawn\" or \"attach\")"),
+        }),
+    }
+}
 ```
