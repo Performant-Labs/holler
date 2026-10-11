@@ -8,5 +8,15 @@
     "repository": "https://github.com/Performant-Labs/aftersight.git",
     "resolvedAt": "2026-10-10T01:31:48Z",
     "source": "online"
+  },
+  "claude": {
+    "pipeline": "claude",
+    "requested": "claude-pipeline-v0.1.7",
+    "tag": "claude-pipeline-v0.1.7",
+    "version": "0.1.7",
+    "commit": "fee1b9745f3833b536a6775b33f44ae5517987d8",
+    "repository": "https://github.com/Performant-Labs/aftersight.git",
+    "resolvedAt": "2026-10-11T01:23:44Z",
+    "source": "online"
   }
 }
