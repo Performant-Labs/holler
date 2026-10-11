@@ -552,10 +552,10 @@ fn stages_one_and_two_change_nothing_but_the_scratch_directory_and_the_install_i
         flat(&text).contains("read-only except the scratch directory"),
         "the hard-stop paragraph"
     );
-    let stage1 = flat(&section(&text, "## Stage 1 ", "\n## Stage 2 "));
+    let stage0 = flat(&section(&text, "## Stage 0 ", "\n## Stage 1 "));
     assert!(
-        stage1.contains("ask the user before installing"),
-        "the install into ~/.claude/skills needs a yes: {stage1}"
+        stage0.contains("ask the user before installing"),
+        "the install into ~/.claude/skills needs a yes: {stage0}"
     );
 }
 
