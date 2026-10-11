@@ -98,19 +98,21 @@ fn a_step_that_outlasts_its_budget_fails_and_stops_the_run() {
 }
 
 /// Entry 27 (O5, C13, C7 R3 B-4; numbers re-derived for #802 by C25): there is no budget over
-/// the whole run. Each `create` makes eight harness calls, so at 100 ms each one takes about
-/// 800 ms: it fits a 1200 ms budget with about 400 ms to spare, and two in a row (about
-/// 1600 ms) do not. Both are `created`, and the run is seen to outlast one budget.
+/// the whole run. Each `create` makes eight harness calls, so at 150 ms each one takes at least
+/// 1200 ms and two in a row at least 2400 ms. The budget is 2200 ms: below two creates for
+/// certain (a delay is a floor, so scheduling can only add), and 1000 ms above one create's
+/// floor for the fixed costs around the calls (a macOS runner overran 400 ms at 100 ms a call).
+/// Both are `created`, and the run is seen to outlast one budget.
 #[test]
 fn there_is_no_budget_over_the_whole_run() {
     let rig = two_creates();
     let budget = TxOptions {
-        budget: Duration::from_millis(1200),
+        budget: Duration::from_millis(2200),
         ..options()
     };
     rig.harness
         .faults()
-        .set_delay(Some(Duration::from_millis(100)));
+        .set_delay(Some(Duration::from_millis(150)));
     let started = Instant::now();
     let (answer, _) = rig.engine(&request(false, false, true), &budget);
     let took = started.elapsed();
