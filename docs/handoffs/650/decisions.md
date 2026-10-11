@@ -49,3 +49,44 @@ Run handoff directory `docs/handoffs/650` Â· branch `issue-650-implementation` Â
   - ADR-0021 sections 5, 7, 8, 9, 12 and 13; `docs/testing.md`.
   - `toml` 0.8.23 and `toml_edit` 0.22.27 sources in the local cargo registry: `TomlError`'s `Display` writes the raw
     line, and `from_str` attaches the raw input.
+
+## A, up-front plan review (second run, on the merged tree): 2026-10-11T10:37-06:00 (MDT)
+
+- **Decided:** PASS, with 0 `block` and 6 `warn` findings (`docs/handoffs/650/handoff-A.md`, which replaces the first
+  run's BLOCK). The amended brief (`ac17120`) resolves all eight findings of the first review. I checked each fix against
+  the code at `7284001`, the tree with #802 merged in. #802 changes nothing the import calls, and launch now writes
+  `pid: None`, as the import does. The warns:
+  1. `no-tmux-session` is a second name for reconcile's `tmux-session-missing`, against the brief's own vocabulary rule.
+     `session-not-found` is the closed `PaneError` code, so it is not a new code.
+  2. The record's health line (`:45`) is stale. Acceptance 6 also records `unknown` for `Ok(true)` followed by a failed
+     list, where reconcile records `healthy`.
+  3. Acceptance 13 needs two Herdr sessions, and `FakeHerdr` serves one. `DisplacingHerdr` (`Displace::Session`) in the
+     launch tests is the existing wrapper for this.
+  4. The brief's list of calls the import never makes still names `serve`, which #802 removed. Several line references
+     are stale. Acceptance 2 should be an allow-list.
+  5. Acceptance 10's remedy commands leave the profile name unquoted, where `single_quoted` is the pattern (#662 B1).
+  6. The text form's finding lines name no pane, and the brief does not say where findings about no pane print.
+- **Assumed:**
+  - With a PASS, the automated run goes on to T and the brief is not amended, so the warns reach T and F only through
+    this handoff.
+  - The import stays in the CLI after the cutover, so a code it merges stays in the vocabulary.
+- **Hedged:**
+  - Finding 1 is a warn and not a block, by the first review's own calibration. A naming inconsistency on the versioned
+    surface (the `code`/`kind` key) was a warn; reusing a code for another meaning (`observe-failed`) was a block.
+  - It is the one finding that cannot be fixed after merge, and the handoff says so to O.
+- **Corrected:** the first review said `FakeHerdr` can hold panes in several sessions. It cannot (`herdr.rs:112`,
+  `:362-386`).
+- **Evidence:**
+  - The amended brief, in full through "AI assistance", and the brief-gate result `650-brief-result-r3.md`.
+  - The diff `263a2d7..7284001`: `ports.rs`, `lib.rs`, `tx_launch.rs`, the test kit's `harness.rs` and `host.rs`,
+    `doctor/rig.rs`, `wiring.rs`, ADR-0021, and the host adapter's `ps`.
+  - Source on the merged tree:
+    - `holler-pane`: `reconcile.rs`, `reconcile/observe.rs`, `findings.rs`, `error.rs` (`PaneCode`), `pane.rs`
+      (`Health`, `Pane`), `tx_launch.rs` (`HOST_NAME`, the session filter).
+    - `holler-cli`: `pane/{import,doctor,launch,mod}.rs`, `profile/{mod,create,show,delete}.rs`, `output.rs`.
+    - `holler-body/src/config.rs` (`ConfigError`, `parse`, `load`).
+    - The test kit: `herdr.rs`, `fault.rs`, `harness.rs`, `host.rs`.
+    - Tests: `pane_verbs/{main,doctor/rig,doctor/surface,launch/displaced,launch/rig,park/failures}.rs`,
+      `profile_verbs/rig.rs`, `holler-pane/tests/findings_test.rs`.
+    - Elsewhere: `holler-hub/src/circuit/dispatch.rs:92`, `cli-surface.txt`, `process/stub.rs`, ADR 0003's row,
+      `scripts/lint.sh`, and both crates' `Cargo.toml`.
