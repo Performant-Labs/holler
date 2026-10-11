@@ -671,6 +671,12 @@ still applies the same way; the only thing that changes is who's holding the key
 remote half. If `ssh` *is* present locally, none of this applies — proceed with every `ssh`
 call below exactly as written, run by you directly.
 
+**With no sessions (N=0),** skip the ssh reachability loop, the remote `which holler`, the
+model-endpoint checks, the remote state-directory and ledger fetch and the `tailscale status`
+grep of remote names: there is no remote host to reach. Still run the orchestrator `dir`/`cmd`
+checks, the local `which holler`, the scoped `holler hub status`, the local inventory and the
+`collide` inputs, and the Herdr checks. Report each skipped check as skipped, never as failed.
+
 **Do (SSH reachability, first — looped over every DISTINCT `remote_host` from Stage 1, not just
 one — everything after this depends on it, so check each host in isolation rather than letting
 a bad one fail silently inside a later, more complicated command). Skip this block entirely in
@@ -716,6 +722,10 @@ ssh <that session's remote_host> "curl -s <baseURL>/models" | head -c 200
 HOLLER_STATE_DIR=<state_dir> holler hub status 2>&1
 <herdr_env> bash $WIZARD_LIB/herdr.sh run status 2>&1
 ```
+With N=0 only the local `which holler` line and the last two lines run (see above). When
+`hub_host` is absent, skip the `tailscale status` check and say why: no `hub_host` and no remote
+host to look up, so there is nothing to grep for.
+
 The last two calls are scoped to **this instance** (its state directory, its Herdr session): a bare
 `holler hub status` or `herdr status` reports the *default* instance's hub and Herdr, which is a
 different thing when this is a second instance.
@@ -788,7 +798,8 @@ doesn't name a default or defines several candidates, **ask the user once** whic
 invent one or copy a value from this document.
 
 **Verify:** every orchestrator's `dir` exists and its `cmd`'s first token resolves on `$PATH`
-(locally — orchestrators always run on the hub machine, never remote); every host's SSH check
+(locally — orchestrators always run on the hub machine, never remote). The remote lines below
+apply only when N>=1; with N=0 only the orchestrator, local `holler` and Herdr lines apply. Every host's SSH check
 exits 0 — a non-zero exit for any one of them is the *root cause* to report for that host
 specifically, not a mysterious later failure three stages downstream (and not a reason to
 silently skip that host's sessions — surface it). Every distinct `remote_tailnet_host` shows
@@ -828,7 +839,8 @@ different, incompatible protocol.
 
 **Gate:** any hard failure here (an orchestrator's `dir` missing or `cmd` not resolving, remote
 host offline, `holler` missing/wrong version, an opencode-harness session's model endpoint
-down) — stop and tell the user; every later stage depends on this one being real. A missing
+down) — stop and tell the user (the remote host, `holler` on a remote host and model-endpoint
+failures apply only when N>=1; with N=0 none of the remote failures can occur); every later stage depends on this one being real. A missing
 `dir`/unresolved `cmd` is the user's config to fix (a typo, an uninstalled CLI, a directory that
 moved) — don't guess a substitute path or auto-install anything on their behalf.
 

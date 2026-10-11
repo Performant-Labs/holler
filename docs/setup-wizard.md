@@ -430,7 +430,8 @@ real session IDs, bring up the hub, migrate the config and join/run one body per
 host, build the Herdr workspace, attach each pane, and verify every session end to end with a
 real round-trip reply. It's config-driven throughout — however many orchestrators, sessions, and
 distinct remote hosts the config lists is however many panes and bodies get built, never a
-hardcoded pair.
+hardcoded pair. With no sessions (N=0), preflight skips every remote check (SSH, the remote
+`holler`, model endpoints, remote state and ledger, the tailnet lookup) and runs the local ones.
 
 **A failed check is a prompt to ask, not a reason to stop.** The wizard is meant to push through
 to a fully working install — when a stage's Gate fails or something is genuinely ambiguous, it
