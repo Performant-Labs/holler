@@ -208,3 +208,38 @@ Facts in unchanged code that `crates/holler-cli/tests/docs_pane_control_test.rs`
   > - **The time of the last screen change is whatever Herdr reports, and Herdr reports none.** Herdr 0.8.2 (protocol 20) has no
   >
   >   There is no default: the threshold is the operator's, and without it nothing is reported. Whole-fleet runs only, as
+
+## T (Phase 6 rework, after F's rework)
+
+- **Fact:** the import's join filters the snapshot by the run's `--herdr-session` before it matches a label, so with the adapter's snapshot stamped with another session (entry above, `adapter.rs:262-264`) no pane matches and each is `pane-unlabelled`.
+  **Source:** `crates/holler-pane/src/import/assess.rs:163-171`
+  **Verbatim excerpt:**
+  > ```
+  > /// The Herdr panes in the run's session that carry `name` as their label.
+  > fn labelled<'s>(context: &Context<'s>, name: &PaneName) -> Vec<&'s HerdrPane> {
+  >     context
+  >         .snapshot
+  >         .iter()
+  >         .filter(|pane| pane.session == context.session)
+  >         .filter(|pane| pane.label.as_deref() == Some(name.as_str()))
+  >         .collect()
+  > }
+  > ```
+
+- **Fact:** a dry run of the import exits 0 whatever it found; a real run with a problem is `import-blocked` (exit 3).
+  **Source:** `crates/holler-cli/src/pane/import.rs:18-20`
+  **Verbatim excerpt:**
+  > ```
+  > //! A dry run exits 0 with the whole report, whatever it found. A real run exits 0 when it
+  > //! wrote the plan or had nothing to write, 3 with `import-blocked` when a pane has a problem
+  > //! and with `profile-exists` when `fleet` exists, and 1 when a write failed.
+  > ```
+
+- **Fact:** `pane-unmanaged` is an open refusal code (exit 3), the constant the test reads for section 9.
+  **Source:** `crates/holler-pane/src/unmanaged.rs:34-36`
+  **Verbatim excerpt:**
+  > ```
+  > /// `pane-unmanaged`: a verb that acts on a pane was given a pane Holler does not drive
+  > /// (a Herdr pane no record names). Refusal, exit 3.
+  > pub const PANE_UNMANAGED: RefusalCode = RefusalCode::from_static("pane-unmanaged");
+  > ```

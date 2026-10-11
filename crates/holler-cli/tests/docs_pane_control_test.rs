@@ -20,6 +20,7 @@ use holler_pane::error::{class_of, ErrorClass, ALL_CODES};
 use holler_pane::findings::FindingKind;
 use holler_pane::import::findings::ImportFinding;
 use holler_pane::import::IMPORT_BLOCKED;
+use holler_pane::unmanaged::PANE_UNMANAGED;
 use holler_pane::GridPos;
 use holler_pane_testkit::envelope::check_envelope;
 
@@ -487,16 +488,25 @@ fn changelog_unreleased_names_the_guide() {
 }
 
 /// Acceptance 17: the content the audit found missing, and section 3's heading per built verb,
-/// computed from the clap tree's required arguments.
+/// computed from the clap tree's required arguments. Sections 2 and 10 also say how `pane import`
+/// answers a `--herdr-session` other than the adapter's (every pane `pane-unlabelled`, brief R2 as
+/// re-cut after #649), and section 9 names #832's open code `pane-unmanaged` among the open codes.
 #[test]
 fn audit_content_and_section_3_headings_are_present() {
     let doc = guide();
     let (s2, s3, s5, s10) = (section(&doc, 2), section(&doc, 3), section(&doc, 5), section(&doc, 10));
+    let s9 = section(&doc, 9);
     let mut missing = Vec::new();
-    let wanted: [(&str, &String, &[&str]); 3] = [
-        ("2", &s2, &["agent-key-invalid", "agent-unusable", "--herdr-session"]),
+    let unmanaged = ticked(PANE_UNMANAGED.as_str());
+    let wanted: [(&str, &String, &[&str]); 4] = [
+        ("2", &s2, &["agent-key-invalid", "agent-unusable", "--herdr-session", "`pane-unlabelled`"]),
         ("5", &s5, &["not-fixable"]),
-        ("10", &s10, &["profile-exists", "already-imported", "--herdr-session", "launcher.toml", "source-missing"]),
+        ("9", &s9, &[unmanaged.as_str()]),
+        (
+            "10",
+            &s10,
+            &["profile-exists", "already-imported", "--herdr-session", "launcher.toml", "source-missing", "`pane-unlabelled`"],
+        ),
     ];
     for (n, text, words) in wanted {
         for w in words.iter().filter(|w| !text.contains(*w)) {

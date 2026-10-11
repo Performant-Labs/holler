@@ -196,3 +196,16 @@ This file is append-only: every phase adds its entry.
 - **Evidence:** `evidence.md`, "F rework" entries; `cargo test -p holler-cli --test docs_cli_test --test
   docs_pane_control_test` (3 and 16 passed); `scripts/changelog-check.sh` ok; `scripts/lint.sh` exit 0; `gh issue view`
   829 OPEN, 835 OPEN, 839 OPEN, 828 CLOSED (not planned, folded into #839), 649 and 832 CLOSED.
+
+## T, GREEN rework after F's rework: 2026-10-11 17:55 MDT
+
+- **Decided:** PASS. The suite is GREEN: `docs_pane_control_test` 16/16 and `docs_cli_test` 3/3. Tier 1 is clean apart
+  from the known flake #847.
+- **Decided:** acceptance 17's test is extended so that sections 2 and 10 name `pane-unlabelled` (the re-cut R2) and
+  section 9 names `PANE_UNMANAGED` (read from the code). I chose this over a new test function, to keep the suite in
+  proportion. Each new assertion failed alone under a mutation.
+- **Assumed:** the `remote_admin_test` failure is #847, not this diff: no Rust source changed, and it passed 4 of 5
+  re-runs alone.
+- **Hedged:** the unmanaged table's columns are not pinned (`UNMANAGED_COLUMNS` is private). This is an advisory note,
+  not a production change.
+- **Evidence:** `handoff-T-green.md` (rework section); `evidence.md`, "T (Phase 6 rework)".
