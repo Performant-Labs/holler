@@ -90,3 +90,110 @@ Run handoff directory `docs/handoffs/650` Â· branch `issue-650-implementation` Â
       `profile_verbs/rig.rs`, `holler-pane/tests/findings_test.rs`.
     - Elsewhere: `holler-hub/src/circuit/dispatch.rs:92`, `cli-surface.txt`, `process/stub.rs`, ADR 0003's row,
       `scripts/lint.sh`, and both crates' `Cargo.toml`.
+
+## T, Phase 4 (author / RED): 2026-10-11T10:53-06:00 (MDT)
+
+- **Decided:** RED is valid. 39 new verb tests and 5 code-table tests:
+  - 38 verb tests fail because the verb has none of its flags yet. With the flags declared on the stub (a scratch edit,
+    reverted), each fails on its own assertion against `not-implemented`.
+  - The ADR row test fails on its assertion.
+  - `cli_surface_test` fails on the two new fixture lines.
+  - `import_test` fails to build on exactly `import::findings` and `IMPORT_BLOCKED`.
+
+  On A's six warns, since the brief was not amended:
+  1. Reconcile's `tmux-session-missing`, applying the brief's own spelling rule. A code is stable once merged.
+  2. `unknown` health after a failed list, keeping acceptance 6's text over A's suggestion.
+  3. The import rig has its own `ExtraHerdr`.
+  4. Acceptance 2 is an allow-list.
+  5. Remedy commands are single-quoted (`'fleet'`).
+  6. Where pane-less findings print is left to F. Every pinned `import-blocked` count involves no pane-less problem.
+
+  In `stub.rs`, the `// #650` line is kept per the file's own rule, and the forced-diagnostic test now takes any stub.
+- **Assumed:**
+  - **Field values.** A `pane.env` variable other than the five read ones goes to `env` by name; the five are not in
+    `env`. Rows use `"record"` as the action in both the dry run and the real run.
+  - **Message wording.** `source-unreadable` positions read `line N` (and `column C` for the launcher table). An
+    `ignored-entry` message names the directory. A `sources-disagree` message names `last-session`.
+  - **The fixtures.** A launcher table that does not parse blocks the one pane of its fixture. The fake harness's shared
+    data directory lists every pane's sessions on every port, which the agreement cases do not depend on.
+- **Hedged:**
+  - Decision 2 differs from A's recommendation. If O amends the brief to reconcile's `healthy`, change one assertion in
+    `join::a_failed_session_list_is_observe_failed`.
+  - Decision 1 deviates from the brief's literal code list. It follows the brief's own rule and A's finding, and the
+    handoff says so for S and the diff gate.
+  - The three property tests in `import_test.rs` are guards that pass vacuously on a one-variant stub.
+- **Evidence:**
+  - The amended brief in full, `handoff-A.md` and this journal.
+  - Test kit: `herdr.rs`, `harness.rs` (`reach`, `frozen`, `mint_session`), `host.rs`, `fault.rs`, `pane_store.rs`,
+    `profile_store.rs`, `fixture.rs`, `envelope.rs`.
+  - Tests: `doctor/rig.rs`, `launch/displaced.rs`, `launch/rig.rs` (`error_of`, `assert_untouched`),
+    `profile_verbs/rig.rs` (`NthCasPut`), `process/{stub,flags,docs_rows}.rs`, `cli_surface_test.rs`,
+    `verb_harness/mod.rs`.
+  - Source: `holler-body/src/config.rs` (`parse`, `RawFile`, `parse_mode`), `profile/{create,delete,show}.rs`,
+    `holler-pane/src/{error,argv,grid,pane}.rs`, and ADR-0021's section 9 and open-codes rows.
+  - Runs: `cargo test -p holler-cli --test pane_verbs` (267 pass, 39 new fail), `--test cli_surface_test`,
+    `--test pane_cli_process` (36 pass), `cargo test -p holler-pane --test import_test` (E0432 on the two items),
+    `cargo clippy -p holler-cli --no-deps --tests -- -D warnings` (clean), `bash scripts/lint.sh` (exit 0).
+
+## F, Phase 6 (implement): 2026-10-11T11:24-06:00 (MDT)
+
+- **Decided:** the verb is built as the brief splits it (`docs/handoffs/650/handoff-F.md` lists every file).
+  - **The plan** is in `holler_pane::import`: `plan()`, `Plan`, `PaneRow`, `Action`, `IMPORT_BLOCKED` and `FLEET`. It has
+    the submodules `files` (the plain values the CLI hands it), `findings` (`ImportFinding`, `Level`, `Finding`), `observe`
+    (a thread per pane) and `assess` (the join and the record).
+  - **The CLI** (`pane/import.rs` and its submodules `sources`, `pane_env`, `launcher`, `writes`) reads the files, writes
+    and undoes. `push_spec` is widened (visibility only).
+  - **Read order:** Herdr's version, then its snapshot (either error ends the run); `pane_store.get` per pane; the
+    not-OpenCode check; then the remaining panes are observed at once. A pane left alone keeps only its own finding.
+  - **The launcher table is strict** (`deny_unknown_fields`). A refusal names the file, line and column for every pane.
+    Port 0 and a cwd that is not absolute are `source-unreadable`. A shell-string command's text is never kept.
+  - **The text form** (A finding 6): each pane's line (`PANE  ACTION  ROLE  POS  SESSION`, two spaces apart, no header),
+    followed by its findings; findings about no pane first, under `-`; the dry run's profile through `push_spec`; a
+    summary line.
+  - **`import-blocked`'s N** counts panes with a problem once each, plus problems about no pane.
+  - **`profile-exists`** is checked with `profile_store.get` before any write.
+  - **The undo** answers the write's own code when it completes. When a step fails it answers `profile-conflict`, naming
+    the records kept and acceptance 10's two remedies, with `'fleet'` quoted.
+  - **Docs:** ADR-0003's row; ADR-0021 sections 9 (import row, open-codes row), 10 (the join) and 13 (the launcher
+    table's shape, step 2 narrowed); a CHANGELOG entry.
+  - `text` in `show.rs` is not widened, since the import never calls it.
+- **Assumed:**
+  - A `sessions.toml` or `owned-sessions` that is absent imposes no constraint on the session. A present one with no id
+    (a `sessions.toml` with no row) disagrees.
+  - A `sessions.toml` with no non-OpenCode row marks an OpenCode pane, and so does a pane with no `sessions.toml`.
+  - `pane.env`:
+    - the last assignment wins, as the shell's does;
+    - an empty `OC_DEFAULT_AGENT` is no agent;
+    - an empty `OC_EFFORT` is a bad value;
+    - only the first bad line is reported.
+  - A missing launcher file, `--launcher` included, is `source-missing` per pane, not a usage error.
+  - A state root that cannot be listed is `unavailable`, not `usage`.
+- **Hedged:**
+  - Two tests read the log window after the rig's own `List`, so they fail on the window only:
+    `writes::a_failed_write_is_undone_and_answers_its_own_code` and `a_write_that_landed_and_timed_out_is_undone_too`. Their
+    observed tails are `[Get, Delete, List]` and `[Delete, Delete, List]`, which are the intended undo order plus that
+    `List`. The fix is test-only, for T. Everything else in both passes.
+  - `gitleaks protect --staged` (the pre-commit hook) flags T's made-up value at
+    `tests/pane_verbs/import/sources.rs:170` as a `generic-api-key`. The commit of the staged set is refused until T
+    changes that line (`// gitleaks:allow`, or another name and value). F's files are clean.
+  - The follow-up issue acceptance 10 names (a verb that removes only a record) is not filed. That is an outward act for
+    O or S.
+- **Evidence:**
+  - Every file of T's RED suite, `handoff-T-red.md`, `handoff-A.md` and the brief through E46.
+  - Source read before use: `reconcile.rs` and `reconcile/observe.rs`, `findings.rs`, `error.rs`, `argv.rs`, `grid.rs`,
+    `pane.rs`, `profile.rs`, `profile_snapshot.rs`, `profile_diff.rs`, `ports.rs` and `tx_launch.rs`.
+  - CLI and body: `profile/{create,delete,show,list}.rs`, `pane/{mod,doctor,launch,list}.rs`, `output.rs`, and
+    `holler-body/src/config.rs`.
+  - The test kit's `herdr.rs`, `harness.rs`, `host.rs`, `fault.rs`, `pane_store.rs` and `profile_store.rs`, and toml
+    0.8.23's `de.rs`.
+  - Runs:
+    - `cargo test -p holler-pane --test import_test` (5 pass);
+    - `cargo test -p holler-cli --test pane_verbs` (304 pass, the 2 above fail);
+    - `cli_surface_test`, `docs_cli_test`, `pane_cli_process`, `profile_verbs` (all pass);
+    - `cargo clippy -p holler-cli -p holler-pane --no-deps --all-targets -- -D warnings` (clean);
+    - `rustfmt --check` on F's files (clean);
+    - `bash scripts/lint.sh` (exit 0);
+    - the pipeline's workspace command with `--no-fail-fast` (149 targets: 2158 pass, 25 ignored, the 2 above fail and
+      nothing else);
+    - the real binary's usage paths (exit 2, and `not-implemented` past them until #649).
+  - The facts in unchanged code are in `docs/handoffs/650/evidence.md`.
