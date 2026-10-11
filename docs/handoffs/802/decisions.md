@@ -276,3 +276,25 @@
 - **Assumed:** The repo-wide `cargo fmt --check` drift (191 files, none in this PR) is pre-existing and out of scope; CI does not run `cargo fmt`.
 - **Hedged:** F's opt-in `real_opencode_test` run was not repeated (needs a private opencode server; not a CI step).
 - **Evidence:** Spot-check: with `wait_healthy` put back to ask-then-check, the three round-2 tests failed with the RED assertions, then the file was restored and the tree was clean. The two new `evidence.md` entries (`harness.rs:346-349`, `fault.rs:79-83`) match source verbatim.
+
+## F (Workflow Phase 6, round 3: the outside diff gate's B-1) — 2026-10-11T08:18:00-06:00
+- **Decided:** B-1's remediation, a `health` call in `OpenCodeHarness::verify_serving` for a spec without an agent, was not applied. The contradiction B-1 showed was fixed in the contract text instead.
+  - The brief rules the remediation out. Decision 5 says the OpenCode implementation "checks nothing beyond `Ok(())` for a spec with no agent". Scope 3 says it "returns `Ok(())` for a spec without an agent". AC 7's second half says the same, and implementing `verify_serving` for real is Out of scope (#642 part 3).
+  - T pins it: `hermetic_test::ac8_a_spec_with_an_agent_is_refused_and_one_without_verifies` asserts that nothing is sent.
+  - The engine calls `verify_serving` right after `wait_healthy` returned `true`, so a health ask there would repeat that wait.
+  - A server that dies between the wait and `verify_serving` fails the next call to it, the session of record's `create_session` or `list_sessions`, as `unavailable`. That call is inside `bring_up`, so it rolls back as a `verify_serving` refusal does.
+  - What B-1 did demonstrate was my trait doc's sentence "one that cannot be reached answers as any call to it does". Read as a rule for every implementation, it contradicts the brief. The trait doc now says that `verify_serving` answers for the spec, not for whether the server is up. An implementation sends a request only for what it must check on the server, and answers a spec its own argv settles with `Ok(())` and nothing sent: OpenCode's case for a spec without an agent.
+  - The same wording went into four more places: ADR-0021 decision 5, the launch paragraph of ADR-0021, step 4 of `tx_launch/server.rs` and the CHANGELOG entry. `OpenCodeHarness::verify_serving` gained a doc saying why it sends nothing.
+- **Decided:** W-1 applied: `Plan::observe`'s doc reads "first the server's argv, then steps 3 to 6". NIT-1 not applied: `tui_argv` is `pub`, and its doc shows the whole argv, while `ProcessEnv::prefix` is `pub(crate)`. NIT-2 not applied: a zero poll still ends at the loop-top deadline check, and every caller passes `BOOT_POLL`. NIT-3 and W-2 need nothing, per the reviewer. W-3 (a test fixture comment) is T's.
+- **Decided:** `archChanged: false`. No signature, module boundary, dependency or behaviour changed; the documented contract now matches decision 5, which A approved (W-3). A sees the new paragraph at Phase 8.
+- **Assumed:** The diff gate's prompt carries no `handoff-F.md` ("(no handoff file)": the run keeps it under `docs/handoffs/802/`). So the fix has to read correctly from the diff, the brief and `evidence.md` alone. Three evidence entries back it: `tx_launch.rs:676-684`, `lib.rs:451-452` and `lib.rs:409-415`.
+- **Hedged:**
+  - The outside reviewer may still prefer a health call. If it blocks again on this point, the question is the operator's: it would reverse decision 5 and turn T's pinned assertion, not F's code, into the thing to change.
+  - The opt-in `real_opencode_test` was not re-run. Only doc comments changed.
+- **Evidence:**
+  - `cargo build --workspace --tests`; `cargo clippy --workspace --all-targets -- -D warnings`, plus a forced re-check of `holler-pane` and `holler-adapter-opencode`.
+  - `scripts/lint.sh`, `scripts/changelog-check.sh`, `cargo machete`, rustfmt `--check` and `RUSTDOCFLAGS=-D warnings cargo doc`.
+  - `cargo test -p holler-pane --doc`: 5 passed, both `ServeSpec` compile_fail doctests (NV-3). `docs_cli_test`: 3 passed.
+  - `hermetic_test`: 31 passed, and the ac8 test still sees nothing sent. `pane_verbs`: 261 passed. The test kit's targets all passed.
+  - The full verify command: 148 binaries, 2073 passed, 0 failed, 25 ignored, exit 0 (the same as round 2).
+  - All 13 `evidence.md` excerpts were checked against their cited lines by script.

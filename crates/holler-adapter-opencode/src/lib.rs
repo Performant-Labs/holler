@@ -281,6 +281,10 @@ impl HarnessPort for OpenCodeHarness {
         server::serve_command(&self.config, port, spec)
     }
 
+    /// Sends nothing (#802 decision 5). A spec without an agent is settled by the argv
+    /// `serve_command` built, which applies none, so the server keeps its own default, and
+    /// the engine's health wait has just seen the server answer. A spec with an agent is
+    /// `agent-unsupported`, failing closed, until #642 part 3 applies and checks the agent.
     fn verify_serving(&self, _port: u16, spec: &ServeSpec) -> Result<(), PaneError> {
         server::refuse_an_agent(spec)
     }

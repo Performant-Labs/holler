@@ -245,11 +245,19 @@ pub trait HarnessPort: Send + Sync {
     /// Whether the server running on `port` honours `spec`. The launch engine asks once
     /// the server is healthy, before any session is created on it (#802). `Ok` only when
     /// the server honours every field of `spec`; a server that does not is a refusal with
-    /// an open code the implementation owns, and one that cannot be reached answers as any
-    /// call to it does (`unavailable`, `timeout`). The engine answers every error by
-    /// rolling back (the host then stops the server). An implementation that cannot check
-    /// a field it cannot apply refuses it, as [`HarnessPort::serve_command`] does
+    /// an open code the implementation owns. The engine answers every error by rolling
+    /// back (the host then stops the server). An implementation that cannot check a field
+    /// it cannot apply refuses it, as [`HarnessPort::serve_command`] does
     /// ([`AGENT_UNSUPPORTED`] for an agent).
+    ///
+    /// It answers for the spec, not for whether the server is up: the engine's health wait
+    /// has just seen the server answer, and a server gone since then fails the engine's
+    /// next call to it (the session of record's), which rolls back the same way. So an
+    /// implementation sends a request only for what it must check on the server, and that
+    /// request answers an unreachable server as any call does (`unavailable`, `timeout`).
+    /// A spec that the implementation's own argv already settles is answered `Ok(())` with
+    /// nothing sent. That is the OpenCode adapter's answer to a spec without an agent: its
+    /// argv applies none, so the server keeps its own default.
     ///
     /// Required, with no default: a harness that starts servers must say whether the
     /// running one honours the spec.

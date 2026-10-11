@@ -333,10 +333,10 @@ impl<'a> Plan<'a> {
         })
     }
 
-    /// Steps 3 to 6, none of which writes or changes anything live: the server's argv (pure, so
-    /// its refusal stays in the plan), the probe, Herdr's version, the target cell (where a
-    /// relaunch's own pane is no occupant) and the port, which for a relaunch is checked only
-    /// when it changes (its own server answers there until B1).
+    /// The plan's reads, none of which writes or changes anything live: first the server's argv
+    /// (pure, so its refusal stays in the plan; #802), then steps 3 to 6: the probe, Herdr's
+    /// version, the target cell (where a relaunch's own pane is no occupant) and the port, which
+    /// for a relaunch is checked only when it changes (its own server answers there until B1).
     fn observe(&self, ports: Ports<'_>, probe_timeout: Duration) -> Result<Seen, PaneError> {
         let server = ports
             .harness

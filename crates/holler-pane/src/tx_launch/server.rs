@@ -19,9 +19,11 @@
 //!      server that never answers ends the run as the budget's `timeout` (`pane.launch` or
 //!      `pane.relaunch`). A server that exits at once is seen the same way: the wait has no
 //!      process to watch.
-//!   4. **The spec**: `verify_serving` asks the running server whether it honours the plan's
-//!      `ServeSpec`, before any session is created on it. A refusal is the run's failure, and
-//!      the rollback stops the server.
+//!   4. **The spec**: the harness says whether the running server honours the plan's
+//!      `ServeSpec` (`verify_serving`), before any session is created on it. A refusal is the
+//!      run's failure, and the rollback stops the server. It answers for the spec, not for the
+//!      server being up: a server gone since the wait fails the next step's call to it (the
+//!      session of record's), and that failure rolls back the same way.
 
 use std::thread;
 use std::time::{Duration, Instant};
@@ -80,7 +82,7 @@ pub(super) fn stop_old(
 
 /// The new server's step of the act (see the module docs): the port is checked again, the
 /// planned argv runs in the spec's directory, the server's health is waited for within what is
-/// left of the budget, and the running server is asked whether it honours the plan's
+/// left of the budget, and the harness says whether the running server honours the plan's
 /// `ServeSpec`.
 pub(super) fn start(
     ports: Ports<'_>,

@@ -1,12 +1,13 @@
 # Evidence: #802 (F, Phase 6 of the Workflow script)
 
 Behaviour in **unchanged** code that the diff or T's tests rely on. Line numbers are at the F
-working tree (branch `issue-802-implementation`, after F's round-2 changes: the health wait's
-deadline check, W-4, and the budget's single end, W-14).
+working tree (branch `issue-802-implementation`, after F's round-3 changes: the `verify_serving`
+contract text after the diff gate's B-1, no line moved in `tx_launch.rs`).
 
 - **Fact:** a rollback stops the tmux session's processes when the act's session step ran, so the
   server started by `host.run` (after `made.session = true`) is stopped by the rollback of a later
-  failure (a `verify_serving` refusal, the health wait's `timeout`, the act's `port-in-use`).
+  failure (a `verify_serving` refusal, the health wait's `timeout`, the act's `port-in-use`, or the
+  session of record's call to a server gone after the health wait).
   **Source:** `crates/holler-pane/src/tx_launch.rs:721-727`
   **Verbatim excerpt:**
   > ```rust
@@ -142,4 +143,47 @@ deadline check, W-4, and the budget's single end, W-14).
   >     pub fn set_delay(&self, delay: Option<Duration>) {
   >         self.lock().delay = delay;
   >     }
+  > ```
+
+- **Fact:** the engine's next call to the server after `verify_serving` is the session of record's:
+  `list_sessions` for a relaunch that kept one, else `create_session`. Both are inside `bring_up`,
+  whose every error goes through `roll_back` (the `.map_err` at `tx_launch.rs:607-608`, in the diff),
+  so a server gone after the health wait fails that call and is rolled back as a `verify_serving`
+  refusal is.
+  **Source:** `crates/holler-pane/src/tx_launch.rs:676-684`
+  **Verbatim excerpt:**
+  > ```rust
+  > fn session_of_record(ports: Ports<'_>, plan: &Plan<'_>) -> Result<String, PaneError> {
+  >     if let Some(kept) = plan.old.and_then(|old| old.session_of_record.as_deref()) {
+  >         let listed = ports.harness.list_sessions(plan.port)?;
+  >         if listed.iter().any(|session| session == kept) {
+  >             return Ok(kept.to_owned());
+  >         }
+  >     }
+  >     ports.harness.create_session(plan.port)
+  > }
+  > ```
+
+- **Fact:** OpenCode's `create_session` sends `POST /session` through `Call::send` (`create`, called
+  first by `create_session` at `lib.rs:297-299`).
+  **Source:** `crates/holler-adapter-opencode/src/lib.rs:451-452`
+  **Verbatim excerpt:**
+  > ```rust
+  > fn create(call: &Call) -> Result<String, PaneError> {
+  >     let reply = call.send(CREATE, CREATE.label, Some(&json!({})))?;
+  > ```
+
+- **Fact:** every request OpenCode's `Call` sends answers a refused connection (nothing listens: the
+  server is gone) as `unavailable`, and no reply in time (a wedged server) as `timeout`. So the call
+  that follows a `verify_serving` that sent nothing fails on a dead server.
+  **Source:** `crates/holler-adapter-opencode/src/lib.rs:409-415`
+  **Verbatim excerpt:**
+  > ```rust
+  >         let within = budget(self.request, until.min(self.deadline));
+  >         match http::request(self.port, route.method, path, body, within) {
+  >             Ok(reply) => Ok(reply),
+  >             Err(HttpError::Refused) => Err(PaneError::Unavailable {
+  >                 what: format!("the harness server on port {}", self.port),
+  >             }),
+  >             Err(HttpError::TimedOut) => Err(self.timeout()),
   > ```
