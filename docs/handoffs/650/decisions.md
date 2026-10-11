@@ -216,3 +216,44 @@ Run handoff directory `docs/handoffs/650` Â· branch `issue-650-implementation` Â
   - `lint.sh`, `changelog-check.sh`, `docs_cli_test`, `wire_selftest`, `cargo machete` and `test-hooks.sh`: all pass.
   - Two production mutations, both reverted, were each caught by the test that names the behaviour.
   - Three evidence entries were appended to `evidence.md`.
+
+## A, Phase 7 (anti-duplication gate): 2026-10-11T11:50-06:00 (MDT)
+
+- **Decided:** PASS, with 0 `block` and 2 `warn` findings (`docs/handoffs/650/handoff-A-dup.md`).
+  - **Production has no parallel path.** F reused every object the map named: `insert_profile`, `profile_from_panes`,
+    `push_spec` (widened), `holler_body::config::load`, `FindingKind::code` and `PaneCode::as_str`, `quoted` and
+    `embedded`, `is_member`, `single_quoted`, `pane_list`, `count`, `optional_text` and `HOST_NAME`.
+  - **The new objects are the brief's own:** `ImportFinding`, the four readers and the deleting undo.
+  - **The only copies are reconcile's deliberate ones:** the scaffold, the server and tmux classification,
+    `failed_message` and the call-name constants.
+  - Warn 1: `import/rig.rs`'s `findings`, `data_of` and `error_of` re-implement doctor's `json_findings` and `json_data`
+    and launch's `error_of`. All three are reachable in `pane_verbs`.
+  - Warn 2: two pass-through `HerdrPort` wrappers and three failing-N-th-write seams now exist. A follow-up should move
+    them into the test kit.
+- **Assumed:**
+  - The diff to review is `243f910..f5c75d3`, the story's code after A's plan review. The handoff and journal files are
+    not reviewed for duplication.
+  - The PR's CI builds and tests the merge with `origin/main`. I did not build it.
+- **Hedged:**
+  - Warn 1 is a warn and not a block, by the role's rule for a codebase with no dominant pattern. Close, launch and doctor
+    each keep their own envelope helper, and switch and park read the envelope inline. The copies are also test-only and
+    small.
+  - The overlay's "a near-copy is a rejection" names the hub's harness helpers (`Hub`, `Body`, ...), not these.
+- **Evidence:**
+  - Read in full:
+    - every changed source file in `holler-pane/src/import*` and `holler-cli/src/pane/import*`;
+    - the `show.rs` diff;
+    - every new test file;
+    - the `doctor/rig.rs`, `stub.rs`, `cli-surface.txt`, ADR-0003, ADR-0021 and CHANGELOG diffs.
+  - Compared against:
+    - `reconcile.rs` and `reconcile/observe.rs`, `findings.rs`, `tx_launch.rs` (`record`, `HOST_NAME`, the
+      `--herdr-session` check) and `profile_diff.rs`;
+    - `profile/{create,delete,list,show}.rs`, `pane/{list,get,doctor,args,launch}.rs` and `output.rs`;
+    - the test files `doctor/rig.rs`, `launch/rig.rs`, `launch/displaced.rs`, `close/rig.rs`, `park/failures.rs`,
+      `relaunch.rs`, `profile_verbs/rig.rs` and `holler-pane/tests/findings_test.rs`.
+  - Searched the workspace for an env-file reader, a helper that turns an offset into a line and column, an `hj-`
+    constant, a role-text helper, other `NthCasPut` copies and other users of `json_data` and `json_findings`.
+  - `scripts/lint.sh`'s size gate covers `*.rs` only, and every touched `.rs` file is under 600 lines.
+  - `git log 7284001..origin/main`: #644 merged as `b8242d7`, adding `SpecField::OpencodeAgent`, which `push_spec` now
+    prints. `git merge-tree --write-tree HEAD origin/main` exits 0. The files both sides touch are `CHANGELOG.md`,
+    ADR-0003 and ADR-0021.
