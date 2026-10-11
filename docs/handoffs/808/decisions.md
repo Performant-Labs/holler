@@ -133,3 +133,41 @@ Run handoff directory `docs/handoffs/808` Â· branch `issue-808-implementation` Â
   or proto code, and the test passed three isolated reruns plus the full rerun.
 - **Hedged:** the flake is not filed. It is named in `handoff-T-green.md` as a follow-up outside this story.
 - **Evidence:** `docs/handoffs/808/handoff-T-green.md`; `docs/handoffs/808/evidence.md` "T (Phase 7, verify)".
+
+## A, anti-duplication gate: 2026-10-11T06:17-06:00 (MDT)
+
+- **Decided:** PASS, with 0 `block` and 2 `warn` findings (`docs/handoffs/808/handoff-A-dup.md`). The diff is `92fbc6e..797b5bb`.
+  - F extended every object the map named. The label is a field on `HerdrPane`. The adapter extends `PaneRef`, the two
+    `PaneInfo` parsers, `SessionState` (`pane_label`) and `WorkspaceGrid`. The fake gains `rename` beside
+    `vanish`/`print`. The suite keeps its one `CASES` table. O2 uses `same_place`, which reuses `same_pane`.
+  - The diff removes duplication: each implementation now builds a `HerdrPane` in exactly one place
+    (`HerdrAdapter::pane`; the fake's `Workspace::listed`, through `State::listed`).
+  - Each new object has a written justification: clarification 2, E10, E11, or A's Phase 3 warns 3, 4 and 6.
+  - Warn 1: `Plan::record`'s label clearing and `same_pane`/`same_place` are private to `tx_launch.rs`. #650's body
+    mentions neither, though its importer is the second writer. O should note on #650 that the rules move to one place
+    in `holler-pane` (for example `HerdrPane` methods in `pane.rs`) in #650's own PR.
+  - Warn 2: `adapter_test.rs` is 810 lines and `tx_launch.rs` 798. The next adapter tests go in a new file with shared
+    helpers in `tests/common`, and nothing more lands in `tx_launch.rs`.
+- **Assumed:** that #650's brief has not yet been written with this follow-up in it. I read #650's issue body, not any
+  local draft brief.
+- **Hedged:**
+  - The test kit's `label_of` copy is a near-copy of the adapter's. I did not flag it, because it is deliberate and
+    documented both ways. The dependency direction forces it: the adapter dev-depends on the test kit.
+  - The `LaunchRequest` literal now appears in three test files. I did not flag it, because the rig has no request
+    helper and the existing tests inline it.
+- **Evidence:**
+  - The full diff `92fbc6e..HEAD` (production, test and docs).
+  - Greps over `crates/`:
+    - every `impl HerdrPort for`;
+    - every `HerdrPane {` literal in `src`;
+    - the `label_of` and `last_lines` definitions;
+    - whole-value comparisons (none left in `src`);
+    - place comparisons in `src`;
+    - readers of `SessionState.panes`;
+    - `HerdrPane` and `HerdrSnapshot` in the hub, CLI and proto `src`;
+    - `profile_snapshot.rs`.
+  - `crates/holler-adapter-herdr/Cargo.toml:25` (the dev-dependency on the test kit).
+  - `wc -l` and `bash scripts/lint.sh` (size warns only).
+  - `gh issue view 650` and `gh issue view 802` (OPEN).
+  - `git diff --name-only 92fbc6e origin/main`: wizard files only, with no overlap.
+  - A grep of the added lines for personal names: none.
