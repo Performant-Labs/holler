@@ -575,6 +575,12 @@ issue and does not widen its own scope; the new issue can link #647's part 2.
 - **O4 (a take-over whose join fails after its leave landed): leave the pane in no profile and say so.** The step is `failed`, its error text says the pane left Q and is in no profile, and the run stops (section 5). Apply does not write a compensating re-join of Q (a further write that can fail too); the operator re-runs apply, which then sees a pane with no profile and takes it through rows b to f.
 - **O5 (a budget over the whole run): none.** The bound is per step plus one up-front observation, recorded in the module doc of `crates/holler-pane/src/tx_apply.rs` (section 9) and asserted by a test over that file.
 
+## Decision on O6 (final, 2026-10-11; overrides every "O6 ... open / NOT DECIDED" sentence above)
+
+- **O6: option (a).** A run that ends with a `failed` step exits 1 and the verb prints **only the failure**: in `--format=json` the failure envelope (`ok` false, `data` null, `error.code` the failed step's error code, `error.message` naming the pane, the step's action and how many later steps were skipped); in text mode one `error: <same message>` line on stderr and nothing on stdout. No plan table and no `skipped` list is printed at exit 1, for a dry run too (a dry run with a `failed` step prints no plan). This narrows §6's "prints the same table as the plan" to runs that do not fail, and C2 reads accordingly. ADR-0021's decision 6, `output.rs` and the test kit's envelope checker are **not** changed.
+- **Where the `failed` / `skipped` steps are asserted:** the tests behind C14's entries 17, 21, 22, 23, 25 and 29 read the steps from `tx_apply`'s own returned result (an in-process test over the fakes), not from the verb's output. The verb-level test for the same situations asserts exit 1, the failure envelope's code and the message text, and that stdout is empty in text mode.
+- The `error.message` format is pinned: `apply stopped at <pane> (<action>): <step error message>; <N> later step(s) skipped`.
+
 ## Evidence (verbatim)
 
 The reviewers cannot see the repository (§12), so the signatures §12 names, and the code and ADR text the items of this
