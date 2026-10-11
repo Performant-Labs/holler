@@ -1,6 +1,10 @@
 #!/bin/bash
 # Fake herdr: `[--session S] server | session list | status`. A server registers its session
 # and becomes a harmless `sleep` with the command line `herdr --session S server 900`.
+# herdr.sh scrubs the environment: only HERDR_* reaches the server (#771)
+FAKE_ROOT="${FAKE_ROOT:-$HERDR_FAKE_ROOT}"
+FAKE_REAL_PS="${FAKE_REAL_PS:-$HERDR_FAKE_REAL_PS}"
+export FAKE_ROOT FAKE_REAL_PS
 . "$FAKE_ROOT/common.sh"
 orig="$*"
 sess=""
