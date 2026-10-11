@@ -27,7 +27,7 @@ Depends on: #637, #638, #644, #662. (amended 2026-10-08, review) (Was #640, #641
 Wave 5 (the last development wave), beside #652 and #665; all its dependencies are in wave 3 or earlier, so it runs in parallel with #652 and adds no serial step. The cutover #654 does not wait for it; the final operator-run story #666 (after #654) does. (amended 2026-10-08, review) **Now wave 4**, beside #648, #649, #650, #653 and #665; #652 and #667 (wave 5) wait for it. (amended 2026-10-08, review)
 
 ## Pipeline
-`rigor: in-session`.
+`rigor: second-opinion` (the outside model runs the brief and diff gates; the operator's choice, 2026-10-11).
 
 ## Rules for this story
 
@@ -616,6 +616,31 @@ and stays as written. The two readings ask nothing different of this story: §10
 `tx_launch.rs` is not in the Blast radius, so this story edits no line of it, the `serve` call or any other, and §10's
 "do not edit that line here" holds for every line #802 names. Which harness API this story's tests are written against
 is the decision on O3.
+
+**C21. The observation's threads and bound (outside diff gate r1, A round 2 finding 1; from §2, §9 and the precedence rule above).**
+§9 observes each recorded pane's `health` on a thread of its own and bounds the up-front observation by one I5 per-call
+bound, so a run is bounded by 10 s plus N step bounds. The shown session that §2 also needs (C1 step 3, C12) is read on a
+thread of its own beside that pane's `health`, and Herdr's snapshot on one more: every call of the observation runs at
+once, one thread per call, and the observation takes one per-call bound, as §9's arithmetic says. A pane's two reads are
+independent, so neither waits on the other. Where C1 step 3 says "its `health` and its shown session, one thread per
+pane" and C4 counts "the slowest pane's chain", they read "one thread per call" and "the slowest call", since §9 wins
+where they differ. The fan-out is `reconcile`'s mechanism (scoped `thread::Builder` threads, each joined, a thread that
+cannot start or panics answered `unavailable` naming its call) at one thread per call rather than per pane, because
+`reconcile`'s chain has dependent calls and apply's two reads of a pane do not. `tx_apply/observe.rs`'s doc says exactly
+that, and not that the observation has "the shape of `observe_all`" (A round 2 finding 2). The same applies to C7's note
+above ("With one thread per pane (§9)"): it reads "with one thread per call".
+
+**C22. The step vocabulary as built (A round 2 finding 3; fills what §4, §5, §6, §7 and O2 leave open, and amends none of
+them).** A step's `action` is one of `create`, `adopt`, `report`, `relaunch`, `refuse` (rows a and e, and a spec whose
+pane is not a pane name) and `observe` (a failed observation). A dry-run step that would act has the outcome `planned`;
+row d's is `reported`. §5's "exactly one of" outcomes therefore reads as the six of §5 plus `planned` for dry-run steps
+only. A `usage` answer for a step's spec is refused with the code `spec-not-launchable`. The step object of §7 adds
+`detail` (O2's "the step's detail"), and an absent `code`, `diff` or `detail` prints `null`. ADR-0021 names every one of
+these, and S and the outside gate judge #666's contract against this list.
+
+**C23. Follow-ups before the PR (A round 2 finding 4).** The run's agent files both follow-up issues drafted in
+`docs/handoffs/664/handoff-F.md` ("Known issues"), the twins `leave`/`join` of §9 and the one of §13, before the PR opens,
+and F cites the twins issue in the module doc of `tx_apply/run.rs`.
 
 ### Open points O1 to O5: ALL DECIDED, see "Decisions on O1 to O5 (final)" below (the text of each point is kept as the question that was asked)
 
