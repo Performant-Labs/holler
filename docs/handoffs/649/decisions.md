@@ -1038,3 +1038,69 @@
       HEAD`: tree `4686bca`, with a conflict in `CHANGELOG.md` only;
     - `gh issue list --search LinkedHost --state all`: #649 and #802 only;
     - `gh pr list --head issue-649-implementation`: no PR yet.
+
+## S (Phase 10, spec audit, third pass: the D33 cycle) — 2026-10-11T17:19:52-06:00
+- **Decided:**
+  - **PASS** at `fc58026`. The full detail is in `handoff-S.md`, which replaces the second pass's.
+  - **D33 is implemented clause by clause.** `BindingHerdr` and `LazyHerdr` forward `observe_pane` and `observe_panes`
+    (`src/pane/wiring/bind.rs:137-143`, `:248-257`). Its pins pass, and they fail without the forwards (T-red's RED,
+    M11 to M13):
+    - case 13 over both wrappers;
+    - the every-method row;
+    - the three recording rows, one of them over production's chain;
+    - the failed-build row;
+    - `store_only`'s `unmanaged_unavailable` rows.
+  - **All 15 acceptance criteria are met on the tree that includes #832.**
+  - **The second pass's two defects are closed.** #832 is merged and its methods reach the adapter. The rename scan has
+    no hit (I re-ran its needles and filters over `git ls-files`).
+  - **The merge of #838 is not a hold.** `origin/main` (`853c1e1`) conflicts in `CHANGELOG.md` only, and #838 touches no
+    file of this branch and no Rust source. So the merge is PR-phase work for the run's agent before CI (Notes for O 1).
+  - **#828's closure is not a hold either.** #828 was closed as not planned at 15:56 MDT and folded into #839, which also
+    takes DRIVEN from #654. #839's body records the operator's order ("Prefer #649 first; this story then supersedes its
+    DRIVEN wording"). So the CHANGELOG and ADR text that names #828 and #654 lands as the operator planned. O tells #839
+    the exact lines, including `CHANGELOG.md:26-28`, which #839 does not name (Notes for O 2).
+- **Assumed:**
+  - **T's recorded runs stand.** I did not re-run Tier 1 or the opt-in scenario: F's and T-green's 4 of 4 on the merged
+    tree, the 66/0/4 default run, and the workspace runs.
+  - **The one workspace failure is a load flake.** It is `remote_admin_traffic_never_moves_the_bodys_last_seen`, outside
+    the branch, and it passed alone three times.
+  - **A-dup's review of D33 as a plan stands in for a phase-3 pass.** D33 is A-dup's own W-5, with the second S pass's
+    pins.
+- **Hedged:**
+  - **#828 and #839 as an advisory, not an ADVISORY-HOLD.**
+    - The brief's D17 and D18 (c) are now stale against the tracker, but the operator's #839 accepts that wording landing
+      first.
+    - The guard it gives the operator (no `reset --first` on a parked or held pane) is still right.
+    - A hold would cost a full gate cycle for a pointer that #839 owns.
+  - **The story's own test files carry rustfmt drift** (`scenario.rs` 23 hunks, `fake_hub.rs` 19, and others).
+    - The brief's Rules list `cargo fmt`, but nothing in this repo enforces it, and half of the existing test files drift.
+    - So it is advisory 6, not REWORK.
+- **Evidence:**
+  - **Read:**
+    - the brief (all decisions, the Acceptance and the Blast radius; E64), and the issue body diffed against it;
+    - every handoff of this cycle, and the second S pass;
+    - `decisions.md` from O's amendment entry on;
+    - `649-diff-result-r1.md` (16:58 MDT, PASS) and its prompt's D33 and `bind.rs` hunks;
+    - `src/pane/wiring.rs` and `bind.rs` in full;
+    - `tests/pane_integration/observe.rs`, `store_only.rs`, `scenario.rs` and `main.rs` in full, and the `bind.rs` rows;
+    - `ports.rs:150-260`, `unmanaged.rs:75-130` and `adapter.rs:405-450`;
+    - ADR-0021 section 14;
+    - `ci.yml`'s triggers, and the release's PR phase (`coding-pipeline.workflow.mjs:4168-4177`, `:4700-4825`);
+    - #838's `skilltext_838.rs`.
+  - **Ran (read-only):**
+    - `git merge-tree --write-tree origin/main HEAD`: `CHANGELOG.md` only;
+    - `git show --remerge-diff 63b4afa`;
+    - `git diff --stat` per cycle;
+    - the guard greps on added `src` lines;
+    - the `#[allow]` list;
+    - `wc -l` on every touched `.rs` file (maximum 857);
+    - `rustfmt --edition 2021 --check` per touched file;
+    - the privacy grep over 9,393 added lines;
+    - the port traits' default-armed methods against each wrapper's overrides;
+    - the test count (66 default, 4 opt-in);
+    - the Blast-radius check (28 files, none outside).
+  - **GitHub (about 17:10 MDT):**
+    - `gh issue view` 649, 825, 828, 829, 839, 654, 652, 653 and 803;
+    - `gh run list --branch main`: `ci` success at `853c1e1`;
+    - `gh pr list --head issue-649-implementation`: no PR;
+    - `gh issue list --search` for each carried follow-up: none filed.
