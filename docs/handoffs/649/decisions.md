@@ -420,3 +420,23 @@
     - `diff-result` in the role docs and the driver;
     - the evidence argument of the diff gate.
   - **`git fetch origin`:** `HEAD..origin/main` is empty.
+
+## T (Phase 4, author / RED, second cycle: the re-entry after the diff gate's round-1 BLOCK) — 2026-10-11T14:05:56-06:00
+
+- **Decided:**
+  - **W-T is pinned as a second row of D6's test**, `wired::a_tmux_socket_that_is_not_utf8_is_usage_never_the_default_server`, with the absolute value `/tmp/hlr649-\xff/tmux.sock`. It fails at HEAD on its assertion: the host's `ensure_session` succeeds on tmux's default server in the `TMUX_TMPDIR` trap.
+  - **The two rows share one body** (`assert_the_socket_is_usage_never_the_default_server(&OsStr)`) rather than a copy; `with_env` takes `AsRef<OsStr>` values to carry the non-UTF-8 one.
+  - **The trap kills any tmux server a regression starts in it** (`kill_trapped_servers`), because the RED itself starts one.
+  - **All three optional rows taken.** The 6 s lower-bound pin (`fake_hub::a_read_and_a_write_answered_after_6_s_succeed`, the reviewer's W-1); NIT-2 (`herdr_snapshot`'s labels come from `WORKSPACES`); NV-6 (the sentinels are restored on drop, not removed).
+  - **No RED for B-1 or B-2**, per A's W-S.
+- **Assumed:**
+  - **F takes A's form of the fix** (a non-UTF-8 value becomes empty, which `absolute` refuses as `usage`). The row asserts the outcome (`usage` naming the variable), so any fix with that outcome passes; a lossy conversion would not.
+- **Hedged:**
+  - **The 6 s row is a regression pin, not a RED:** it passes at HEAD. A local mutation (`CALL_TIMEOUT` = 5 s, reverted with `git checkout` at once) shows it fails then, so it discriminates.
+  - **The 6 s row holds the state-dir lock for about 12 s** (two sequential replies). It adds that much to the target's wall time; the default run took 119 s.
+- **Evidence:**
+  - `cargo test -p holler-cli --test pane_integration`: 60 passed, 1 failed (the W-T row), 4 ignored, 119.18 s.
+  - Mutation run of the 6 s row: `the read waits past 5 s: Err(Timeout { op: "pane_store.get" })`.
+  - `cargo clippy -p holler-cli --all-targets -- -D warnings` clean; `bash scripts/lint.sh` exit 0.
+  - Opt-in `scenario::the_two_grid_spellings…` on scratch instances: 1 passed, 15 s; no `/tmp/hlr649-*` or `hlr649` process left.
+  - After the RED run: the pid `host.ps` reported (778017) is gone; no tmux process names the trap.

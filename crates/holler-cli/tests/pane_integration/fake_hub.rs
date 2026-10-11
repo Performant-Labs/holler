@@ -247,6 +247,27 @@ fn a_read_the_hub_never_answers_is_timeout_within_the_bound() {
     assert!(took < Duration::from_secs(13), "bounded by 10 s: took {took:?}");
 }
 
+/// D3, D9 and I5, from below: the store's bound is its own 10 s, not the control client's
+/// default 5 s, so a read and a write the hub answers after 6 s each succeed. With the two
+/// hang rows above, this pins the bound between 6 s and 13 s.
+#[test]
+fn a_read_and_a_write_answered_after_6_s_succeed() {
+    let after = Duration::from_secs(6);
+    let written = pane();
+    let hub = FakeHub::start(vec![
+        Answer::After(after, json!({ "ok": true, "data": null })),
+        Answer::After(after, json!({ "ok": true, "data": written })),
+    ]);
+    let (read, write) = hub.with(|| {
+        let store = HubPaneStore::new();
+        (store.get(&pname()), store.cas_put(&written, 0))
+    });
+    assert!(matches!(read, Ok(None)), "the read waits past 5 s: {read:?}");
+    assert_eq!(write.ok(), Some(written), "the write waits past 5 s");
+    let methods: Vec<String> = hub.requests().into_iter().map(|(method, _)| method).collect();
+    assert_eq!(methods, ["pane/get", "pane/cas_put"]);
+}
+
 /// D3: a watch request the hub took and never answered is `timeout` naming
 /// `pane_store.watch_next`, within the watch's own bound (`WATCH_WAIT` + 5 s). Whether the
 /// request is `watch`'s own first one or a later `next()`'s, the answer is the same.

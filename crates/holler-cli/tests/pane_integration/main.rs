@@ -67,8 +67,13 @@ pub fn with_state_dir<R>(dir: &Path, f: impl FnOnce() -> R) -> R {
 
 /// [`with_state_dir`], with each variable of `vars` set (`Some`) or removed (`None`) for the
 /// length of `f` and put back as it was afterwards. Only the in-process `Wiring::connect`
-/// tests need it: `connect` reads the wiring's settings from this process's environment.
-pub fn with_env<R>(dir: &Path, vars: &[(&str, Option<&str>)], f: impl FnOnce() -> R) -> R {
+/// tests need it: `connect` reads the wiring's settings from this process's environment. A
+/// value is any OS string, so a test can set one that is not UTF-8 (A's W-T).
+pub fn with_env<R, V: AsRef<std::ffi::OsStr>>(
+    dir: &Path,
+    vars: &[(&str, Option<V>)],
+    f: impl FnOnce() -> R,
+) -> R {
     let _held = state_dir_lock();
     std::env::set_var("HOLLER_STATE_DIR", dir);
     let saved: Vec<(String, Option<std::ffi::OsString>)> = vars

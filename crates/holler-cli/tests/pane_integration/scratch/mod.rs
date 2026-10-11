@@ -195,6 +195,8 @@ pub struct Scratch {
     outputs: Mutex<Vec<String>>,
     /// The planted credential (D28).
     sentinel: String,
+    /// The sentinel variables as they were before the run, put back on drop (NV-6).
+    saved_sentinels: Vec<(&'static str, Option<std::ffi::OsString>)>,
     base: TempDir,
 }
 
@@ -232,6 +234,10 @@ impl Scratch {
         binary_env(&settings).unwrap_or_else(|refusal| panic!("{refusal}"));
         let hub = Hub::start(&state);
         let sentinel = scratch_herdr::new_name_as("hlr649-sentinel-");
+        let saved_sentinels = SENTINEL_VARS
+            .iter()
+            .map(|&name| (name, std::env::var_os(name)))
+            .collect();
         for name in SENTINEL_VARS {
             std::env::set_var(name, &sentinel);
         }
@@ -245,6 +251,7 @@ impl Scratch {
             tmux_bin,
             outputs: Mutex::new(Vec::new()),
             sentinel,
+            saved_sentinels,
             base: dir,
         })
     }
@@ -403,7 +410,10 @@ impl Scratch {
     /// Herdr's own snapshot, read by the test through the adapter on the scratch socket.
     pub fn herdr_snapshot(&self) -> Vec<HerdrPane> {
         let extent = Extent { rows: 2, cols: 1 };
-        let config = ["hlr649", "hlr649b", "hlr649g", "hlr649h"].into_iter().fold(
+        let labels = WORKSPACES
+            .split(',')
+            .map(|row| row.split_once('=').map_or(row, |(label, _)| label));
+        let config = labels.fold(
             HerdrConfig::new(self.herdr.session(), self.herdr.socket()),
             |config, label| config.with_workspace(label, extent),
         );
@@ -447,8 +457,11 @@ impl Drop for Scratch {
         if !left.is_empty() {
             eprintln!("scratch: processes still answer kill -0 after KILL: {left:?}");
         }
-        for name in SENTINEL_VARS {
-            std::env::remove_var(name);
+        for (name, value) in &self.saved_sentinels {
+            match value {
+                Some(value) => std::env::set_var(name, value),
+                None => std::env::remove_var(name),
+            }
         }
     }
 }
