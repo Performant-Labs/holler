@@ -964,3 +964,77 @@
   - Clippy `-D warnings` exit 0; `lint.sh` exit 0; `changelog-check` ok; `machete` clean; `docs_cli_test` 3/3;
     `wire_selftest` 3/3.
   - Workspace (CI's command, `--no-fail-fast`): 151 binaries, 2344 passed, 1 failed (the flake), 32 ignored.
+
+## A (Phase 8, anti-duplication gate, third pass: the D33 cycle and the merge of #832) — 2026-10-11T17:04:00-06:00
+- **Decided:**
+  - **PASS** on this cycle's diff, `c68e34e..c35916b`. It includes the merge `63b4afa` of `652841b` (#832); the story's
+    own work after the merge is `63b4afa..c35916b`. There is no block. The full detail is in `handoff-A-dup.md`, which
+    replaces the second pass's.
+  - **F extended D33's two objects in place.** `BindingHerdr` and `LazyHerdr` (`wiring/bind.rs`) each gain
+    `observe_pane` and `observe_panes` (+35 lines). There is no new type, helper, module or signature, and the
+    production chain is unchanged.
+    - Both wrappers send `observe_panes` to the inner `observe_panes`, so ADR section 14's one call survives the chain.
+    - `LazyHerdr`'s failed-build branch goes through `port()`, the one build path.
+  - **W-5 is closed,** with all three of its pins plus a check over the production chain.
+  - **The merge adds nothing the wiring duplicates.** It had one conflict, `CHANGELOG.md`, and kept both entries. #832
+    changed only `HerdrPort` among the ports, so no other wrapper owes a forward.
+  - **D33 is reviewed here as a plan too,** since no Phase 3 pass ran on the amendment. It is W-5 word for word, with
+    S's pins. No drift.
+  - **New warn W-7 (nit, T; not binding).** `observe.rs` copies three pieces of `bind.rs`:
+    - the Herdr conformance run;
+    - the call log of the recording port;
+    - the unbuildable `LazyHerdr`.
+    `main.rs`'s module doc also omits `observe`. The fold is one generic suite helper, one `CallLog` and one builder.
+  - W-1 to W-4, W-6 and W-O carry over unchanged.
+- **Assumed:**
+  - **T-green's opt-in run (4/4) stands for the merged tree.** I did not re-run the scenario. I ran clippy on the target
+    and the 20 `observe::`/`bind::` tests.
+  - **#838 needs no code fix.** This is by its file list and the files I read: it touches no port, no wiring file, no
+    `holler-cli/src` file and no file of this branch.
+- **Hedged:**
+  - **W-7 is a warn, not a block.**
+    - It is test glue inside one target, not an overlay helper and not a guard (D11). It is the class of W-1 to W-4 and
+      W-6.
+    - The new module has a sound reason: `bind.rs` is 580 lines.
+  - **`Observing` is not counted as a copy of the test kit's call log.** `FakeHerdr` does not override
+    `observe_panes`, and `HerdrOp` has no `ObservePanes`. So the fake's log cannot tell one `observe_panes` from N
+    `observe_pane`s.
+  - **The new `main` (`853c1e1`, #838, 16:33 MDT) goes to O, not a finding.** It conflicts in `CHANGELOG.md` only. This
+    is a PR-phase merge, not drift.
+- **Evidence:**
+  - **Read in full:**
+    - `wiring/bind.rs`, `wiring.rs` and `pane_integration/observe.rs` and `main.rs`;
+    - `handoff-F.md` (fourth cycle, and the Reuse, Architecture and Known-issues sections);
+    - `handoff-T-red.md`, `handoff-T-green.md`, `handoff-S.md`, the second `handoff-A-dup.md`, and this journal from
+      line 717.
+  - **Diffs read:**
+    - `63b4afa..c35916b`, all of the code;
+    - `git show --remerge-diff 63b4afa`;
+    - `c68e34e..63b4afa -- wiring.rs`;
+    - `5d366b9..652841b -- ports.rs`.
+  - **Read in part:**
+    - `ports.rs:150-260`;
+    - `adapter.rs:409-447`;
+    - `holler-pane-testkit/src/herdr.rs` (1-140, `observe_pane`);
+    - `herdr_conformance_test.rs:50-82`;
+    - `conformance/herdr.rs` (`HerdrFixture`, `run_herdr_conformance`);
+    - `pane_integration/bind.rs:1-330`, `scenario.rs:1-290` and `store_only.rs:1-100`;
+    - ADR-0021 sections 5 and 14;
+    - the brief (D1 to D33, E1 to E70).
+  - **Ran:**
+    - `cargo clippy -p holler-cli --test pane_integration -- -D warnings`: clean;
+    - `cargo test -p holler-cli --test pane_integration -- observe:: bind::`: 20 passed;
+    - `rustfmt --check` on `wiring.rs`: one hunk, the import line #832 left. `main`'s copy has the same line.
+  - **Greps:**
+    - `impl … HerdrPort for`: 11 blocks;
+    - `Mutex<Vec<&'static str>>`: two, `bind.rs` and `observe.rs`;
+    - `run_herdr_conformance(` callers;
+    - D32's checks (`TRIAL`, prints, `"HERDR_SESSION"`, `UnixStream`, `control::run`, `#[path]`, the manifest comment);
+    - `herdr_session` and `HOLLER_HERDR_SESSION` in `crates/`.
+  - **Git and GitHub (17:04 MDT):**
+    - `git ls-remote origin main`: `853c1e1`;
+    - `gh api …/compare/652841b...853c1e1`: one commit (#838) and its files;
+    - `git fetch --no-write-fetch-head origin 853c1e1`, which updates no ref, then `git merge-tree --write-tree 853c1e1
+      HEAD`: tree `4686bca`, with a conflict in `CHANGELOG.md` only;
+    - `gh issue list --search LinkedHost --state all`: #649 and #802 only;
+    - `gh pr list --head issue-649-implementation`: no PR yet.
