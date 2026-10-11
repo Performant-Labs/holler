@@ -7,18 +7,21 @@ Part of epic #633. This is the complete statement of the story (consolidated 202
 Extend `holler roster` with the pane's place in the registry, so a mismatch between what a pane **shows** and what the hub **drives** is loud.
 
 1. **New columns**, appended after the existing ones, in this order: `PANE` (the pane's name, `-` for an agent with no pane: the io body, the alpha and beta agents), `POS` (the pane's grid position), `PROFILE` (the pane's profile, `-` for none), `HEALTH` (the pane's harness health: `healthy`, `unhealthy`, `unknown`, `-` when no pane), `SHOWN` (the session the pane's TUI shows, `-` when unknown or no pane) and `DRIVEN` (the session the hub drives, `-` when no pane).
+   - *Noted at the brief gate (round 4; facts only, E18 quotes them; the decision "Where every new column comes from" below is unchanged):* a pane's name is a `SessionName`, which never contains a `/` (E10, E18). The hub names every row through `qualified_name`: `<label>/<session>` once the advertising token's label is bound, and the hub binds it when the body authenticates, before its first `session/presence`; a label minted by the hub is 1 to 32 characters. A row's name is the bare session name only when no label is bound, which the hub's own doc gives as a unit test or a presence that outraces the bind. So a row's `name` equals a pane's name only for a row with no label. No code today matches a row's `name` with a pane's name. What relates a pane record to a hub session today is its `session_of_record`, which the hub's prompt gate matches with the bare session name being prompted and to which `say --pane` sends.
 2. **`POS` is rowcol**: text `r2c1`; JSON `{"row":2,"col":1,"pos":"r2c1"}` with `pos` equal to `r{row}c{col}`. A pane named `hj-c1r2` is a name, not a position: it sits at `r2c1` and is not renamed. The roster's help and legend say so.
    - *Clarified at the brief gate:* POS is read from the pane's registry record ("the pane's place in the registry" above), never from its name. The record holds where the pane sits in Herdr as `herdr.grid`, a `GridPos` (`crates/holler-pane/src/pane.rs:91-100`, `:232`), the field `pane list` (#643) prints (`crates/holler-cli/src/pane/list.rs:174`, `crates/holler-cli/src/pane/list.rs:193`). `GridPos` prints as `r{row}c{col}` and serializes as `{"row":R,"col":C,"pos":"rRcC"}`, row first (`crates/holler-pane/src/grid.rs:68-73`, `crates/holler-pane/src/grid.rs:129-138`). ADR-0021 section 10 (lines 614-615): "A pane's position comes from Herdr's snapshot, never from its name: `hj-c1r2` sits at `r2c1`." So the fixture's pane is named `hj-c1r2` and its record's `herdr.grid` is row 2, column 1. E10 quotes them.
    - *Clarified at the brief gate (round 3):* today's help does not say this, so the story adds it. The roster's help is the doc comment of `Command::Roster`, `/// List the roster. (hub-only, top-level daily verb)` (`crates/holler-cli/src/cli.rs:107`), and the doc comments of the `Roster` struct's fields (`cli.rs:464-484`, quoted in full in E4); none of them says that a pane's name is not its position. The roster prints no legend today: `render_table` writes a header line and the rows and nothing else (E1), and a search of `cli.rs` and `roster_cmd.rs` at `92fbc6e` finds no `legend`, `long_about` or `after_help` (the one `about` in `cli.rs`, at line 26, is the root command's). So the legend is new text as well.
 3. **The mismatch summary line** (text output only): when at least one pane's `SHOWN` differs from its `DRIVEN` (both known and not equal), the first line of the output is `N pane(s) show a different session than the hub drives: <names>`, names in roster order, separated by `, `. When every pane matches, or no pane has both values, no such line is printed.
    - *Clarified at the brief gate:* "both known and not equal" means that a pane whose SHOWN is `-` is never counted or named, whatever its DRIVEN, and neither is an agent with no pane. That is the rule the hub's pane-state prompt gate and `say --pane` already apply to a pane's recorded pair: "one side absent is not a mismatch" (`crates/holler-cli/src/say_cmd.rs:341-342`, `:358-364`; the hub's twin, `crates/holler-hub/src/circuit/dispatch.rs:80-81`, `:95-101`). Acceptance 2 tests it; E11 quotes the rule.
-   - *Clarified at the brief gate (round 3):* the line is the byte format of the decision "Summary line, byte format" below for every N, one included: only N and the names vary, and `pane(s)` and `show` are written as they stand, so one mismatched pane gives `1 pane(s) show a different session than the hub drives: <name>`. Acceptance 2 pins N = 1 as well as N = 2.
+   - *Clarified at the brief gate (round 3):* the line is the byte format of the decision "Summary line, byte format" below for every N, one included: only N and the names vary, and `pane(s)` and `show` are written literally, so one mismatched pane gives `1 pane(s) show a different session than the hub drives: <name>`. Acceptance 2 pins N = 1 as well as N = 2.
    - *Clarified at the brief gate (round 3):* "roster order" is the order in which the roster prints its rows, a name taking the place of the row it is printed on. The roster prints the rows of the hub's `control/roster` reply in the reply's order (`render_table`'s `for row in &rows`, `crates/holler-cli/src/roster_cmd.rs:75`, in E1), and the hub sorts them by row name (`crates/holler-hub/src/roster.rs:553`, E16). Acceptance 1 holds each of those lines byte-identical to today's up to its `HOLD` cell, so the pane store's name order (E8) is not roster order and does not reorder the rows.
 4. **`--profile P`** lists only P's panes, through the `ProfileScope` trait (#637). A profile that does not exist is a **refusal** (`profile-not-found`, exit 3, one line, nothing else printed).
    - *Clarified at the brief gate:* with no pane named, `ProfileScope::resolve(P, None)` answers P and every pane of P, and a P that does not exist is `profile-not-found` (`crates/holler-pane/src/profile.rs:384-393`). The CLI's implementation, `StoreScope`, takes every pane whose record names P, in name order (`crates/holler-cli/src/pane/profile_scope.rs:84-90`, `:159-174`); the tests use the test kit's `FakeProfileScope` (`crates/holler-pane-testkit/src/profile_scope.rs:1-4`, `:190-200`). A verb holds the scope as `Ports.scope` (`crates/holler-pane/src/ports.rs:278`), and `pane list --profile` calls it that way (`crates/holler-cli/src/pane/list.rs:98-99`). `profile-not-found` is a refusal with exit 3, the same in text and JSON (`class_of`, `crates/holler-pane/src/error.rs:289-291`; `ErrorClass::exit_code`, `:235-246`). E6 and E8 quote them.
+   - *Clarified at the brief gate (round 4), the order under `--profile`:* `--profile P` changes which rows are printed, never their order. The rows it prints come in the order of the hub's `control/roster` reply, as every roster's rows do (scope item 3, round 3), and not in the name order in which `ProfileScope::resolve` returns P's panes (`StoreScope`'s `members`, E8). The names of the summary line and of `data.mismatches` (scope item 5) follow the same order.
 5. **`--format=text|json`** (default text). `--format=json` prints the shared envelope (`output::emit()`, #670) with the same new fields in `data`; in JSON the mismatch is `data.mismatches` (an array of pane names) and there is no summary line.
    - *Clarified at the brief gate:* `--format=json` is told from a bare `--json` by `FormatChoice.json_explicit`, which only `--format=json` sets (`crates/holler-cli/src/output.rs:49-82`); `main.rs` already reserves the bit for this story (`crates/holler-cli/src/main.rs:216-219`), and today `dispatch` hands `roster` only the resolved `json` (`:221`, `:229`). `output::emit` writes one envelope (`schema_version` 1, `ok`, `data`, `error`) in JSON mode and the text otherwise, and in both returns 0 or the exit code of the error's class (`output.rs:150-171`, `:201-217`, `:336-340`; `SCHEMA_VERSION`, `:33-34`). A usage error that clap reports under `roster` is clap's own text on stderr with exit 2 in every format, since only `pane` and `profile` get usage envelopes (`output.rs:36-38`; `main.rs:115-120`), and `--json --format=text` is `error: ...` with exit 2 for `roster` (`main.rs:160-184`). `check_envelope(stdout, exit_code)` is in the test kit, which `holler-cli` already has as a dev-dependency. E5, E6 and E7 quote them.
    - *Clarified at the brief gate (round 3; E14 quotes the lines not quoted elsewhere):* with this story `roster` prints the envelope, and only for an explicit `--format=json`, the case #670 reserved for it: "`roster` prints the envelope only for this, so `roster --json` keeps its legacy shape" (`FormatChoice.json_explicit`, `output.rs:54-57`, in E5). Under `--format=json` the roster's success (`ok` true, `data` as the decision "`--format=json` `data` shape" below says) and its `profile-not-found` refusal (`ok` false, `error.code` `profile-not-found`, exit 3) are each one envelope on stdout, written by `output::emit` (`output.rs:207-217`, in E6) and `output::emit_error` (`:240-243`). Both are `pub` and take a `Sink`; `emit` takes any `Serialize` data and `emit_error` an `ErrorBody`, and neither names a verb, so the roster calls them as the `pane` and `profile` verbs do, with no change to `output.rs` (not in the blast radius). In text mode the roster prints its table, and a bare `--json` prints no envelope (scope item 6). `ENVELOPE_NAMESPACES` stays `["pane", "profile"]` (`output.rs:36-38`): its one reader is `RawArgs::envelope_namespace` (`:362-369`), which only `usage_envelope` calls, for a command line clap could not parse (`main.rs:140-158`), so it decides usage errors and nothing else. A usage error under `roster` is therefore what it is today in every format, `--format=json` included: clap's own message on stderr with exit 2 (`--format=xml` is one, since `--format` is a `value_enum`, `cli.rs:80-81` in E5), or `error: --json cannot be combined with --format=text` on stderr with exit 2 (`main.rs:160-184`, in E6), and nothing on stdout. Acceptance 4 says what its test checks for each class.
+   - *Clarified at the brief gate (round 4), the one shape of `data` (the decision "`--format=json` `data` shape" below is unchanged; this spells out what it gives):* on success, `data` is one object with exactly two keys, `rows` and `mismatches`: `{"rows": [ROW, ...], "mismatches": [NAME, ...]}`. `data.rows` is the array that `roster --json` prints as its own top-level `rows` for the same hub reply, pane registry and flags: the same rows in the same order, each with today's keys (E2) and the six new keys of scope item 6. `data.mismatches` is an array of pane names: the names the text summary line gives for the same input (scope item 3's rule), in roster order. The decision makes `mismatches` a key of the object, so it is in every success envelope, and it is `[]` when no pane is a mismatch, which is when the text output has no summary line. `data` has no other key: `rows` is not moved out of `data` or nested deeper, and `roster --json` stays `{"rows": [...]}`, with no `mismatches` (scope item 6). So with two mismatched panes `a` and `b`, in that roster order, the text output's first line is `2 pane(s) show a different session than the hub drives: a, b`, and the `data` of `--format=json` is `{"rows": [...], "mismatches": ["a", "b"]}`. This object is "the roster payload" of acceptance 4.
 6. **`roster --json` keeps its shape and gains the new fields additively** (`pane`, `pos`, `profile`, `health`, `shown`, `driven` as extra keys). ADR 0003 lines 105-106: a changed `--json` shape is breaking, but "Additive = MINOR", so there is **no ADR 0003 amendment and no deprecation notice**. Every existing key and its value is unchanged. (Operator decision, 2026-10-11.)
    - *Evidence added at the brief gate (the operator decision above is unchanged):* ADR 0003 lines 105-106 are quoted verbatim in E9. Today `roster --json` prints the hub's `control/roster` reply as it arrives, `{"rows": [ROW, ...]}` (`crates/holler-cli/src/roster_cmd.rs:44-45`; the hub builds it at `crates/holler-hub/src/control_server.rs:465-474`), each ROW being the serde form of the hub's `Row` with its `hold` flattened (`crates/holler-hub/src/roster.rs:131-180`). Those are the keys acceptance 3 keeps. E1 and E2 quote them.
 7. Tests use only #638's fakes and envelope helper; no new dependency. `SHOWN` and `DRIVEN` are the pane record's `last_observed.shown` and `last_observed.driven`, the same values `pane list` prints (see "Decisions on the review's blocking points"); the roster makes no adapter call.
@@ -33,10 +36,11 @@ Extend `holler roster` with the pane's place in the registry, so a mismatch betw
    - *Clarified at the brief gate:* today's table has nine columns, `SESSION` to `HOLD` (E1). Each but `HOLD` is left-aligned to a fixed width and followed by one space; `HOLD` is the last and is not padded, so each line ends right after its `HOLD` cell (`crates/holler-cli/src/roster_cmd.rs:71-74`, `:81-92`). The new columns therefore follow the `HOLD` cell, and "byte-identical" covers each line from its start through the end of that cell. An empty roster prints `(no sessions on the hub)` and no header (`:67-69`).
 2. **Text mismatch.** A fixture with two panes whose SHOWN differs from DRIVEN prints the summary line first with both names in roster order (golden); a fixture with none prints no such line (golden).
    - *Clarified at the brief gate:* both fixtures also hold a pane whose SHOWN is `-` and whose DRIVEN is known. It is never named, and N counts only the panes with both values known and different (scope item 3), so in the fixture with none the line stays absent although that pane's two cells differ.
-   - *Clarified at the brief gate (round 3):* a third golden fixture has exactly one pane whose SHOWN and DRIVEN are both known and differ. Its output starts with the line `1 pane(s) show a different session than the hub drives: <name>`, `<name>` being that pane's name, and then the table (scope item 3: `pane(s)` is written as it stands for every N).
+   - *Clarified at the brief gate (round 3):* a third golden fixture has exactly one pane whose SHOWN and DRIVEN are both known and differ. Its output starts with the line `1 pane(s) show a different session than the hub drives: <name>`, `<name>` being that pane's name, and then the table (scope item 3: `pane(s)` is written literally for every N).
 3. **`--json` additive.** The `--json` output of the fixture parses; every key present in today's output is present with an equal value; the new keys are present.
 4. **Envelope.** `--format=json` output parses with #681's `check_envelope`, `ok` is true, `schema_version` is 1, `data` equals the roster payload including the new fields, and exit codes are identical for `--format=text` and `--format=json` for the same input (0 on success, 2 on a usage error, 3 on a refusal).
    - *Clarified at the brief gate (round 3):* the outputs of `--format=json` that are envelopes (scope item 5) are the success and the `profile-not-found` refusal, and the test passes each to `check_envelope` with its exit code (0 and 3; E7 lists the rules it checks). A usage error under `roster` writes no envelope in any format (scope item 5), so for that class the test checks exit 2 and an empty stdout, and does not call `check_envelope`.
+   - *Clarified at the brief gate (round 4), what `data` is compared with:* "the roster payload including the new fields" is the `data` object that scope item 5 (round 4) states, `{"rows": [...], "mismatches": [...]}`, with no other key. The test runs `roster --json` and `roster --format=json` over the same fixture and, comparing parsed JSON values, checks three things. `data` has exactly the keys `rows` and `mismatches`. `data.rows` equals the `rows` of the `--json` output, whose keys acceptance 3 checks. `data.mismatches` holds the names of the text summary line for that fixture, in the same order: `[]` for acceptance 1's fixture and for acceptance 2's fixture with no mismatch, the two names for acceptance 2's fixture with two, and the one name for its third fixture.
 5. **POS.** In the text table, in the JSON `pos` and `row`/`col`, and in `--format=json`, a position is never written as `c<col>r<row>`; a golden test shows the pane named `hj-c1r2` at `r2c1`. (Pane **names** and the explanatory help text may contain `c1r2`: this criterion is about position values only.)
 6. **PROFILE and `--profile`.** PROFILE shows the profile or `-`; `--profile P` lists only P's panes; an unknown profile is refused `profile-not-found` with exit 3.
    - *Clarified at the brief gate (round 2):* the process test that pins today's refusal of `roster --profile` (exit 1 and `error: not implemented (story #648)`, E4) is deleted with the refusal (Blast radius); after this story, this criterion's tests are what pin `--profile`.
@@ -72,9 +76,9 @@ The reviewers cannot see the repo. The brief quotes, with file and line: #670's 
 - **The `--profile` refusal output** goes through the same shared helper every refusing verb uses (`output.rs`): text mode prints the one-line `error:` form on stderr, `--format=json` prints the failure envelope; nothing else is printed.
 - **`roster_cmd::run`'s new signature** is chosen by the story and stated in the brief: it receives the resolved format choice (with #670's `json_explicit` bit) and a `Ports`; `main.rs`'s `run_roster` builds the `Ports` the way `run_with_stdio` does for the pane verbs.
 
-## Evidence (brief gate, rounds 1 to 3)
+## Evidence (brief gate, rounds 1 to 4)
 
-Added at the brief gate, with every line above whose italic label says "at the brief gate", to answer the outside review; the rest of this brief is the issue's text. Round 2 added E12, E13 and the lines labelled "round 2"; round 3 added E14 to E17 and the lines labelled "round 3". Every excerpt is verbatim from this worktree at its base, `92fbc6e` (`origin/main`); once an item names a file, a bare `:N` is a line of that file. (The worktree's base is now `3c139dd`, which differs from `92fbc6e` only in files no excerpt comes from; round 3 read its excerpts there.) The "E-list in the evidence" that the first decision above cites is this list: `pane list` reads the registry through `ports.pane_store.list()` in E8 (`rows_in_scope`) and turns a record into its cells in E3 (`PaneRow::from`) and E17. The six quotes the section above asks for are E4 (#670's roster helper and its refusal), E5 (the format resolver's "explicit json" bit), E8 (`ProfileScope`), E7 (`check_envelope`), E1 (the `render_table` header) and E2 (the hub's roster row type).
+Added at the brief gate, with every line above whose italic label says "at the brief gate", to answer the outside review; the rest of this brief is the issue's text. Round 2 added E12, E13 and the lines labelled "round 2"; round 3 added E14 to E17 and the lines labelled "round 3"; round 4 added E18 and the lines labelled "round 4". Every excerpt is verbatim from this worktree at its base, `92fbc6e` (`origin/main`); once an item names a file, a bare `:N` is a line of that file. (The worktree's base is now `3c139dd`, which differs from `92fbc6e` only in files no excerpt comes from; rounds 3 and 4 read their excerpts there.) The "E-list in the evidence" that the first decision above cites is this list: `pane list` reads the registry through `ports.pane_store.list()` in E8 (`rows_in_scope`) and turns a record into its cells in E3 (`PaneRow::from`) and E17. The six quotes the section above asks for are E4 (#670's roster helper and its refusal), E5 (the format resolver's "explicit json" bit), E8 (`ProfileScope`), E7 (`check_envelope`), E1 (the `render_table` header) and E2 (the hub's roster row type).
 
 - **E1, the roster today** (`crates/holler-cli/src/roster_cmd.rs`). `run` reads the hub's roster once per call and sets the exit code (`:39-59`):
 
@@ -1375,6 +1379,118 @@ Added at the brief gate, with every line above whose italic label says "at the b
   ```rust
   /// What a text cell or field holds when the record has no value.
   pub const NO_VALUE: &str = "-";
+  ```
+- **E18, a hub row's name beside a pane's name (added at the brief gate, round 4).** A pane's name is a `SessionName` (`crates/holler-pane/src/pane.rs:25-32`, in E10). The three name kinds (`crates/holler-proto/src/vocab.rs:3-11`), and the check that keeps a `/` out of a `SessionName` (`:79-88`):
+
+  ```rust
+  //! Three **distinct** name kinds, each a newtype around a `String`, sharing
+  //! one segment grammar but differing in length and structure:
+  //!
+  //! - [`Label`] — the hub-unique hostname / label (the prefix a session is
+  //!   routed under). 1–32 chars.
+  //! - [`SessionName`] — a session **within** a single body. 1–32 chars, **no
+  //!   `/`**.
+  //! - [`RoutableName`] — the cross-hub router: `<label>/<session>`, or a bare
+  //!   name. Each `/`-separated segment is 1–32 chars.
+  ```
+
+  ```rust
+      /// Succeeds iff the string is a single 1–32-char segment matching the
+      /// grammar. A `SessionName` never contains a `/` (that is the
+      /// [`RoutableName`] shape).
+      pub fn parse(s: &str) -> Result<Self, NameError> {
+          if s.is_empty() {
+              return Err(NameError::Empty);
+          }
+          if s.contains('/') {
+              return Err(NameError::Slash);
+          }
+  ```
+
+  How the hub names a row (`crates/holler-hub/src/roster.rs:845-857`). Rows are inserted only at `:727` and `:734`, both under the `name` that `apply_ad` takes from this function (`:709-710`), and `build_row` copies it into the row's `name` field (E2's `Row.name`):
+
+  ```rust
+  /// The roster row's key: `<label>/<bare-name>` (ADR 0005 §2) once the roster
+  /// knows the advertising token's label (bound at `circuit/authenticate` time
+  /// — see [`Roster::set_label`]); the bare name alone when it doesn't (a unit
+  /// test that builds rows without binding a label, or — defensively — a
+  /// presence that somehow outraces the auth-time bind). Bodies only ever send
+  /// the bare name (ADR 0005 §2: "Bodies never send the label"), so this is
+  /// entirely the hub's own attribution, not anything read off the wire.
+  fn qualified_name(info: &TokenInfo, s: &SessionAd) -> String {
+      match info.label.as_deref() {
+          Some(label) if !label.is_empty() => format!("{label}/{}", s.name),
+          _ => s.name.clone(),
+      }
+  }
+  ```
+
+  Where the hub binds the label (`crates/holler-hub/src/circuit.rs:300-307`), and the label a token is minted with (`crates/holler-hub/src/token.rs:413-417`; `mint` refuses a label that fails it, `:524-528`):
+
+  ```rust
+      // Issue #236 (ADR 0005 §2): the label travels with the authenticated
+      // token, never on the wire, so this is the one place the hub can read it
+      // — `record` is the verified token record from just above. Binding it
+      // (and the client id) here, before any `session/presence` arrives, means
+      // every roster row this body advertises is qualified `<label>/<session>`
+      // from its very first row, not just from the second presence beat.
+      roster.set_token(&params.token_id, &client_id);
+      roster.set_label(&params.token_id, &record.label);
+  ```
+
+  ```rust
+  /// The label grammar (ADR 0005 §1): `^[a-z0-9][a-z0-9-]{0,31}$`.
+  fn valid_label(label: &str) -> bool {
+      if !(1..=32).contains(&label.len()) {
+          return false;
+      }
+  ```
+
+  The code that relates a pane record, or a bare session name, to a hub session today. None of it compares a row's `name` with a pane's name. The hub's prompt gate matches a pane's `session_of_record` with the bare session name being prompted (`crates/holler-hub/src/circuit/dispatch.rs:105-111`, `:130-133`):
+
+  ```rust
+  /// The pane-state gate: refuse a prompt to `session` (the bare session name being
+  /// sent) while any pane whose session of record it is has a refusal
+  /// ([`pane_state_refusal`]). Fail-closed across panes on different bodies that
+  /// record the same session name: any bad one refuses, and the first bad one in name
+  /// order (`list` is name-sorted) is the one named. One synchronous read with no
+  /// `await`, so it is totally ordered against a pane write, as `holds.admit` is
+  /// against `hold`/`release`.
+  ```
+
+  ```rust
+      let refused = records
+          .iter()
+          .filter(|pane| pane.session_of_record.as_deref() == Some(session))
+          .find_map(|pane| pane_state_refusal(pane).map(|refusal| (pane, refusal)));
+  ```
+
+  `say --pane` sends to the pane's `session_of_record` (`crates/holler-cli/src/say_cmd.rs:309-316`, in `resolve_pane_target`, `:301-318`):
+
+  ```rust
+      let Some(session) = record.session_of_record.clone() else {
+          return Err(PaneError::SessionNotFound {
+              what: format!("{name} has no session of record"),
+          });
+      };
+      match pane_state_refusal(&record) {
+          Some(refusal) => Err(refusal),
+          None => Ok(session),
+  ```
+
+  The roster's own match of a row with a bare session name (`crates/holler-hub/src/roster.rs:859-868`):
+
+  ```rust
+  /// True iff a (possibly qualified) row `name` is the advertisement for the
+  /// *bare* session name `bare` — either the row carries no label (`name ==
+  /// bare`) or it is qualified and `bare` is its final segment (`name ==
+  /// "<label>/<bare>"`). Used by [`Roster::set_turn_id`]/[`Roster::
+  /// set_last_turn`], whose callers (`talk::say`) know a connection's token id
+  /// and the bare session name it prompted, not the label the roster qualified
+  /// the row with.
+  fn row_matches_bare(name: &str, bare: &str) -> bool {
+      name == bare || name.ends_with(&format!("/{bare}"))
+  }
   ```
 
 ## Pipeline
