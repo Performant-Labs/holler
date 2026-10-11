@@ -63,7 +63,7 @@
     - ADR-0021 (92-520, 728-842);
     - `docs/testing.md` (439-449);
     - `docs/research/herdr-api-spike.md` (40-46, 395-402);
-    - `agent-skills/setup-wizard/lib/herdr.sh` (84-95);
+    - `agent-skills/herdr-setup/lib/herdr.sh` (84-95);
     - `holler-cli/Cargo.toml` (380-522).
   - **Greps:**
     - every `impl <Port> for`;
@@ -868,3 +868,6 @@
     - `gh issue view 832`: closed at 15:35 MDT;
     - `gh issue list --search` for `LinkedHost`, `observe_pane`, the UTF-8 locale, `select-session` and
       `wizard_scripts`: none of the carried follow-ups is filed.
+
+## O (brief amendment after the S advisory-hold) — 2026-10-11T16:30:00-06:00
+- **Decided:** the citation of the setup wizard's `lib/herdr.sh` in A's first entry (line 66) is corrected to the renamed `agent-skills/herdr-setup/` directory (#820): the CI scan `no_old_command_or_directory_outside_the_rename_note` fails on the old path in any tracked file. The excerpt is unchanged. D33 is added for #832; E64's Source and Depends on are corrected; the run resumes at phase 5.
