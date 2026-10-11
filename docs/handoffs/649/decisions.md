@@ -943,3 +943,24 @@
     - `ports.rs:161-251`, `unmanaged.rs:82-125`, `adapter.rs:409-447`, and ADR-0021 section 14;
     - `tests/pane_integration/observe.rs` and `bind.rs`;
     - `git show origin/main:crates/holler-cli/src/pane/wiring.rs`.
+
+## T (Phase 7, verify GREEN, D33 cycle) — 2026-10-11T16:58:00-06:00
+- **Decided:**
+  - GREEN: the default run of `pane_integration` is 66/0/4, the seven D33 rows included; the opt-in run on the merged
+    tree is 4/4. No production change is owed by F.
+  - Added S's advisory 4 to the scenario's `assert_end_state`: an unscoped `pane list --format=json` through the real
+    wiring has no `unmanaged_unavailable`, and no recorded pane id is in its `unmanaged` table. Test-only.
+  - One evidence entry for that check (`list.rs:83-84`), at the top of `evidence.md`.
+  - The workspace run's one failure, `remote_admin_traffic_never_moves_the_bodys_last_seen`, is a load flake outside
+    the branch, not a blocker.
+- **Assumed:** the flake is timing, not a regression: the branch touches neither `holler-hub` nor
+  `remote_admin_test.rs`, and the test passes alone three times and with its whole target.
+- **Hedged:** the new end-state check passed but was not mutated (no cheap mutant makes a recorded pane unmanaged
+  without breaking the scenario earlier); it pins a contract #832's own tests already cover in-process.
+- **Evidence:**
+  - Mutants M11 (`BindingHerdr::observe_panes` loops over `observe_pane`), M12 (`LazyHerdr::observe_pane` answers a
+    default on a failed build) and M13 (failed-build `observe_panes` answers `[]`) each fail their rows; `bind.rs`
+    restored from a copy after each.
+  - Clippy `-D warnings` exit 0; `lint.sh` exit 0; `changelog-check` ok; `machete` clean; `docs_cli_test` 3/3;
+    `wire_selftest` 3/3.
+  - Workspace (CI's command, `--no-fail-fast`): 151 binaries, 2344 passed, 1 failed (the flake), 32 ignored.

@@ -5,6 +5,15 @@ and `wiring/{store,env,bind}.rs`) and its tests rely on. One entry per fact; eac
 verbatim. The diff gate shows only the first 12,000 bytes of this file, so the sections run newest
 first: add a later round's entries above them.
 
+## The #832 source the scenario's end-state check relies on (T-green, D33 cycle)
+
+- **Fact:** an unscoped `pane list --format=json` carries an `"unmanaged"` array (left out when empty) whose rows
+  have a `"pane_id"`, and `"unmanaged_unavailable"` only when Herdr could not be read (T-red's entry below quotes that
+  line). `scenario.rs`'s `assert_end_state` reads both keys.
+  **Source:** `crates/holler-cli/src/pane/list.rs:83-84`
+  > /// `"unmanaged"`, an array left out when empty, of `{"state": "unmanaged", "pane_id",
+  > /// "session", "workspace", "pos", "label", "cwd", "last_screen_change" (milliseconds since the
+
 ## The #832 source D33's forwards rely on (F, D33 cycle)
 
 `BindingHerdr` and `LazyHerdr` (`wiring/bind.rs`) now override `observe_pane` and `observe_panes`. T's section below

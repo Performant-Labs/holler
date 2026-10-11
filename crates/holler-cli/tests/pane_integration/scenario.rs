@@ -231,8 +231,9 @@ fn break_both(scratch: &Scratch, p1: u16, p2: u16, target: &str) {
     );
 }
 
-/// The end state after the repairs: `doctor` reports no finding, and `pane list` equals
-/// Herdr's snapshot for the scratch panes of the scenario's workspace.
+/// The end state after the repairs: `doctor` reports no finding, `pane list` equals Herdr's
+/// snapshot for the scratch panes of the scenario's workspace, and none of them is in the
+/// unmanaged table.
 fn assert_end_state(scratch: &Scratch) {
     let report = scratch.json(&["pane", "doctor"], 0).data();
     assert_eq!(report["findings"], json!([]), "doctor reports no finding: {report}");
@@ -250,6 +251,26 @@ fn assert_end_state(scratch: &Scratch) {
         })
         .collect();
     assert_eq!(recorded, observed, "pane list equals Herdr's snapshot for the scratch panes");
+
+    // #832's unmanaged table, read through the real wiring (D33): Herdr is readable, and no
+    // pane a record names is listed as unmanaged.
+    let list = scratch.json(&["pane", "list"], 0).data();
+    assert!(
+        list.get("unmanaged_unavailable").is_none(),
+        "Herdr is read: {list}"
+    );
+    let unmanaged: BTreeSet<String> = list["unmanaged"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|pane| pane["pane_id"].as_str().unwrap().to_owned())
+        .collect();
+    for (pane_id, _) in &recorded {
+        assert!(
+            !unmanaged.contains(pane_id),
+            "{pane_id} has a record, so is not unmanaged: {list}"
+        );
+    }
 }
 
 /// The profile scenario. Create from current; edit through `launch --profile`; `close
