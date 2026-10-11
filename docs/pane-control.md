@@ -26,8 +26,12 @@ harness kind is a closed set with one member, `opencode`. A pane that does not r
 runs Claude Code) has no record and can have none, so it is outside the rule: no `holler pane` verb restarts it, and
 for a Claude Code pane `scripts/pane-restart` is still the way to restart it, now and after the cutover's sign-off.
 The import (`pane import`) creates no record for a pane whose files name another harness (the finding `harness-not-opencode`,
-section 10), a verb that names such a pane answers `pane-not-found`, and a whole-fleet `doctor` pass reports it as
-`unregistered-herdr-pane` (section 5). Sections 3, 5, 10 and 11 repeat the consequence where it matters.
+section 10). A Herdr pane that no record names is **unmanaged**, a state that is observed and never stored:
+`holler pane list` over the whole registry shows it in a table of its own (section 4), and `holler pane get PANE` shows it
+when PANE is its label or its Herdr pane id. A verb that acts on a pane (`relaunch`, `switch`, `reset`, `park`, `unpark`,
+`close`) refuses it with `pane-unmanaged` (exit 3), and a name that is neither a record nor an unmanaged pane is
+`pane-not-found`. A whole-fleet `doctor` pass reports it as `unregistered-herdr-pane` (section 5). Sections 3, 4, 5, 10 and
+11 repeat the consequence where it matters.
 
 ## 2. What a pane runs
 
@@ -37,6 +41,12 @@ session owns, by `TERM` to every owned process group, one shared grace (2 s by d
 still has a member. A launch is a transaction: it makes the Herdr pane and the tmux session, starts and checks the
 server, creates the session of record over the harness API, attaches the TUI to it, observes that the TUI shows it, and
 only then writes the record. A step that fails undoes what the run made and writes no record.
+
+**The model is recorded, not applied yet.** A pane's model, effort, environment variable names and context ceilings are
+written to its record (and to its profile's spec), but no port carries them to the harness server yet: the server a
+launch or relaunch starts receives the agent only (below), and the model it uses is whatever its OpenCode
+configuration selects. Applying them is issue [#829](https://github.com/Performant-Labs/holler/issues/829), not built. Until it lands, `--model` and `--effort` change
+what the record says, not what the server runs (section 11 says what that means for a restart on another model).
 
 **The agent.** `--agent KEY` on `launch` and `relaunch` sets the OpenCode agent the server starts with as its default
 agent. A key that is empty or holds anything but ASCII letters, digits, `-` and `_` is refused with `agent-key-invalid`
@@ -65,18 +75,31 @@ profile's spec for the pane, when it has one); the `spec` line of the text form 
 agent (`none` is a valid key, so it never means "no agent"); in JSON the value is the key or `null`.
 
 **What a verb needs.** Every `pane` and `profile` verb needs the hub: the registry lives there. With no hub running a verb
-answers `unavailable` (exit 1) and its message names the missing hub. A verb that never touches Herdr
-(`holler pane list`, `holler pane get PANE`, `holler pane watch`, `holler profile list`, `holler profile show NAME`) works
-with no Herdr running.
+answers `unavailable` (exit 1) and its message names the missing hub; it touches no adapter. The hub is the only thing a
+verb needs before it starts: Herdr, tmux and OpenCode are reached when a verb first uses them. So the read verbs
+(`holler pane list`, `holler pane get PANE`, `holler pane watch`, `holler profile list`, `holler profile show NAME`) work
+with no Herdr running. `pane list` over the whole registry and `pane get` of a name with no record also read Herdr, for
+the unmanaged panes (section 4); without Herdr, `list` still lists every record and says on one `warning:` line that the
+unmanaged panes are not listed.
 
 The Herdr session, the tmux socket and the OpenCode binary the adapters use come from environment variables. The one to
-know is `HOLLER_HERDR_SESSION`, the Herdr session the panes live in; the full list, with each variable's default, is the
+know is `HOLLER_HERDR_SESSION`, the Herdr session the panes live in (Herdr's own `HERDR_SESSION` is not read); with it
+unset, each Herdr call answers `usage` naming it. A variable that is missing or malformed never stops a verb from
+starting: the port it configures answers the error at its first use. The full list, with each variable's default, is the
 module doc of `crates/holler-cli/src/pane/wiring.rs`, and this guide does not copy it.
 
 **`--herdr-session NAME` stays a required flag** of every verb that reaches Herdr: `launch` (unless `--spec-only`),
 `pane import`, and `profile apply` when its plan has a create. `relaunch` has no such flag and acts in the Herdr session
-its record names. The flag is required even when `HOLLER_HERDR_SESSION` is set: the variable configures the adapter, and
-the flag names the session the verb acts on. The two must name the same session, or the verb answers `unavailable`.
+its record names, which must be the adapter's session too. The flag is required even when `HOLLER_HERDR_SESSION` is set, and is not defaulted from it: the
+variable configures the adapter, and the flag names the session the verb acts on. **The two must name the same
+session**, and a mismatch is not answered the same way by every verb:
+
+- `launch` answers a session other than the adapter's with `unavailable` (exit 1), naming both sessions, and writes
+  no record. In `profile apply` the same answer is a create step that fails, which stops the run (exit 1, section 6).
+- `pane import` looks for each pane's label only in the session the flag names, and the adapter's snapshot holds only
+  its own session, so with a mismatch it finds no Herdr pane at all: **every pane it would record is `pane-unlabelled`**
+  (a problem). A dry run exits 0 listing them, and a real run is refused with `import-blocked`. Read a dry run in which
+  every pane is `pane-unlabelled` as a session mismatch first (section 10, step 1).
 
 ## 3. The verbs
 
@@ -97,13 +120,16 @@ Two flag groups are shared:
 **Exit codes.** Every verb ends with 0 on success, or with the class of its error's code: 2 usage, 3 refusal, 1 runtime
 failure (section 9). Every verb can answer `usage`, `unavailable`, `timeout` and `store-corrupt`; the codes beyond those
 are the verb's row of [ADR-0021 section 9](adr/ADR-0021.md#9-failure-taxonomy-and-the-cli-output), and each subsection
-below names the main ones. `doctor`, `profile apply` and `pane import` have rules of their own, given in their
-subsections.
+below names the main ones. The verbs that act on an existing pane (`relaunch`, `switch`, `reset`, `park`, `unpark`,
+`close`) refuse an unmanaged pane, named by its label or its Herdr pane id, with the open code `pane-unmanaged` (3)
+where they would otherwise say `pane-not-found` (section 1). `doctor`, `profile apply` and `pane import` have rules of
+their own, given in their subsections.
 
 ### `holler pane list`
 
 The pane registry as a table, one row per pane, sorted by name; section 4 says how to read it. `PANE` (optional) lists
-one pane, `--profile NAME` the panes of one profile. It reads the record only: it observes nothing and writes nothing.
+one pane, `--profile NAME` the panes of one profile. It writes nothing. A scoped list reads the records only; a list of
+the whole registry also reads Herdr's snapshot to show the unmanaged panes in a second table (section 4).
 
 ```bash
 holler pane list
@@ -114,14 +140,17 @@ Ends with `profile-not-found` or `pane-not-in-profile` (3) for a bad scope.
 
 ### `holler pane get PANE`
 
-One pane in full, one `key: value` line per field: its record, its profile's spec for it and SYNC (section 4). It reads
-the record only.
+One pane in full, one `key: value` line per field: its record, its profile's spec for it and SYNC (section 4). For a
+pane with a record it reads the record only.
 
 ```bash
 holler pane get demo-alpha
 ```
 
-Ends with `pane-not-found` (3) when the pane has no record.
+When no record answers, PANE may be the label or the Herdr pane id (such as `w1:p3`) of an unmanaged pane, and `get`
+reads Herdr and shows it: `state` (always `unmanaged`), `pane-id`, `label`, `session`, `workspace`, `pos`, `project`,
+`last-screen-change` (UTC) and `idle`; in JSON, the same object `pane list` prints for it. Anything else with no record
+ends with `pane-not-found` (3).
 
 ### `holler pane watch`
 
@@ -164,7 +193,8 @@ pane keeps its directory, and moves to another cell only with `--grid`.
 holler pane relaunch demo-alpha --model anthropic/claude-opus-5-5 --effort high
 ```
 
-Its codes are `launch`'s, and `pane-not-found` (3).
+A new `--model` or `--effort` is recorded, not yet applied to the server (#829, section 2). Its codes are `launch`'s,
+and `pane-not-found` and `pane-unmanaged` (3).
 
 ### `holler pane switch PANE SESSION`
 
@@ -191,12 +221,18 @@ holler pane reset demo-alpha --first "Read the brief and start."
 Refused (3) with `session-busy` or `session-holds-question` while the session of record is running a turn or waits on
 an answer, and with `orchestrator-pane` and `server-unhealthy` as `switch` is.
 
+**Do not use `--first` on a parked or held pane.** The first message goes to the harness directly, outside the hub's
+prompt path, so the gate that refuses a prompt to a parked or held pane does not see it (ADR-0021 section 8, "The prompt
+and activity seam"). Sending it through that gate is issue [#839](https://github.com/Performant-Labs/holler/issues/839),
+not built.
+
 ### `holler pane park --reason TEXT --release-when WHEN`
 
 Take a pane out of service until it is unparked: the record's hold becomes parked, with the reason and the release
 condition (one line each, at most 200 characters). It takes one pane, or with `--profile` and no pane every pane of the
 profile. It changes the record only: nothing moves in Herdr and no process is touched. A prompt
-to a parked pane's session of record is refused (`pane-parked`).
+through the hub to a parked pane's session of record is refused (`pane-parked`); the first message of `reset --first` is
+not (see `reset`).
 
 ```bash
 holler pane park demo-alpha --reason "waiting for the review" --release-when "the review merges"
@@ -220,16 +256,19 @@ Close a pane: stop its processes (its harness server among them), close its Herd
 holler pane close demo-alpha
 ```
 
-Ends with `pane-not-found` (3), or with the error of the step it reached, followed by the command that reconciles.
+Ends with `pane-not-found` or `pane-unmanaged` (3), or with the error of the step it reached, followed by the command
+that reconciles.
 
 ### `holler pane doctor`
 
-Run one reconcile pass and print what it found; `--fix` repairs one kind. Section 5 is its reference. A pass that
-completes exits 0, whatever it found.
+Run one reconcile pass and print what it found; `--fix` repairs one kind, and `--unmanaged-stalled-after SECONDS`
+reports the unmanaged panes whose screen has not changed for that long (section 5). Section 5 is its reference. A pass
+that completes exits 0, whatever it found.
 
 ```bash
 holler pane doctor
 holler pane doctor demo-alpha --fix
+holler pane doctor --unmanaged-stalled-after 1800
 ```
 
 ### `holler pane import --from STATE_ROOT --herdr-session NAME`
@@ -360,15 +399,29 @@ answers `not-implemented`.
 | SYNC | SHOWN against the session of record: `ok`, `MISMATCH` (loud on purpose) or `-` when nothing was observed. |
 | HOLD | `none`, `parked` or `drained`. |
 
-Every value is the registry's. HEALTH and SHOWN are what reconcile (`pane doctor`) last recorded, and `list` observes
-nothing itself: run `holler pane doctor` to bring them up to date. An empty cell is `-`. A stored value that holds a
-space, a quote or a character a terminal could act on is printed quoted and escaped.
+Every value of this table is the registry's. HEALTH and SHOWN are what reconcile (`pane doctor`) last recorded, and
+`list` observes no registry pane itself: run `holler pane doctor` to bring them up to date. An empty cell is `-`. A
+stored value that holds a space, a quote or a character a terminal could act on is printed quoted and escaped.
+
+**Unmanaged panes.** A list of the whole registry (no PANE and no `--profile`) also shows every pane of Herdr's
+snapshot that no record names, today a Claude Code pane set up by hand (section 1). They follow the registry's table
+after a blank line, as a second table with the columns PANE-ID, LABEL, POS, PROJECT, STATE and IDLE:
+
+- STATE is always `unmanaged`. It is observed on every run and never stored, and it is not a hold.
+- IDLE is how long the pane's screen has not changed, and `-` when Herdr does not say. **Herdr 0.8.2 reports no time of
+  the last screen change, so IDLE is `-` for every pane against real Herdr** until a source exists (ADR-0021 section 14).
+- In JSON, `data` gains `unmanaged`, an array left out when there is none, of objects
+  `{"state": "unmanaged", "pane_id", "session", "workspace", "pos", "label", "cwd", "last_screen_change", "idle_seconds"}`,
+  with `null` for what Herdr did not report.
+- When Herdr (or the pane store) cannot be read, the registry's rows are still listed: text prints one `warning:` line on
+  stderr, and JSON carries `unmanaged_unavailable` with the failed call's code.
+- The snapshot lists only the panes in a workspace's grid tab, so an unmanaged pane in another tab is not shown.
 
 **SHOWN against DRIVEN.** The session of record is the session the hub drives (I2), so SYNC compares SHOWN with it. It
 is `MISMATCH` when the TUI showed another session or its home screen, and `-` when reconcile has never observed the pane
 or the pane has no session of record. DRIVEN is printed as the record holds it and is not compared: nothing records it
-yet (the hub wiring, #649, leaves it as stored, and how it follows the session of record is the cutover's, #654), so it
-prints `-`. `pane doctor` uses the same rule for `shown-driven-mismatch` (section 5).
+yet (the hub wiring, #649, leaves it as stored; making it follow each pane's session of record is
+[#839](https://github.com/Performant-Labs/holler/issues/839), not built), so it prints `-`. `pane doctor` uses the same rule for `shown-driven-mismatch` (section 5).
 
 A `holler pane watch` line prints the same cells as `key=value`, the column name in lower case, after the pane's name:
 
@@ -404,13 +457,14 @@ The finding kinds:
 | `tui-foreign-session` | The TUI shows a session its pane's own server does not have. | `holler pane relaunch PANE` |
 | `shown-driven-mismatch` | The TUI shows another session than the session of record, or its home screen. | `holler pane doctor PANE --fix` |
 | `stray-session` | A session on a pane's server that is the session of record of no pane. | none |
+| `unmanaged-stalled` | An unmanaged pane whose screen has not changed for the threshold or longer. Whole-fleet passes with `--unmanaged-stalled-after SECONDS` only. | none |
 
 **`--fix` repairs only `shown-driven-mismatch`.** It selects the session of record in the pane's TUI, so the TUI shows
 the session the record already names, and observes the TUI again. It never changes which session is the session of
 record, never writes the record's session, and never creates, starts, stops or types into anything. It leaves the
 orchestrator's pane alone unless the run names that pane (the bracket then says `skipped`).
 
-`--fix` does not repair any other kind: each of those names the command to run instead, and three name none. A
+`--fix` does not repair any other kind: each of those names the command to run instead, and four name none. A
 `shown-driven-mismatch` is also `not-fixable` when its server is not healthy or does not have the session of record; its
 line then carries no bracket, and the command it names is `holler pane relaunch PANE`. The bracket is `fixable` (a run
 without `--fix` would repair it), `skipped`, `fixed` or `fix failed: CODE`.
@@ -432,7 +486,13 @@ the import). Section 8 has the Herdr version.
 **Panes outside the registry.** Each Herdr pane that no record names (a Claude Code pane, a plain shell) is reported as
 `unregistered-herdr-pane` in every whole-fleet pass, and no Holler verb adopts it. That is expected and is not a
 failure. A pass is whole-fleet only when it names neither a pane nor a profile, so a pass that names one does not report
-it, and the finding names no command.
+it, and the finding names no command. `holler pane list` shows the same panes as `unmanaged` (section 4).
+
+**`unmanaged-stalled`** is that pane seen another way: with `--unmanaged-stalled-after SECONDS`, a whole-fleet pass
+reports each unmanaged pane whose screen has not changed for at least SECONDS, naming its pane id, label, idle time and
+the threshold. There is no default threshold: without the flag nothing is reported. A pane whose idle time is unknown
+is never stalled, and Herdr 0.8.2 reports no time of the last screen change, so **this kind cannot fire against real
+Herdr yet** (ADR-0021 section 14).
 
 `profile-drift` (a live pane that differs from its spec) is PROPOSED (#665): it is a code of the closed list and not yet a doctor kind.
 
@@ -609,7 +669,8 @@ change.
 are always a refusal, exit 3: among them `agent-unusable` and `agent-key-invalid` (section 2), `orchestrator-not-relaunched`
 and `spec-not-launchable` of `profile apply` (section 6), `import-blocked` of `pane import` (section 3), and `pane-exists`,
 `grid-occupied`, `port-in-use`, `grid-unreachable`, `orchestrator-pane`, `server-unhealthy`, `session-of-other-pane`,
-`session-busy`, `session-holds-question` and `pane-parked`. ADR-0021 section 9 lists each verb's.
+`session-busy`, `session-holds-question`, `pane-parked` and `pane-unmanaged` (section 1). ADR-0021 section 9 lists each
+verb's.
 
 ## 10. Migration and cutover
 
@@ -618,15 +679,14 @@ old launcher's files to the registry. This is its procedure; where it differs fr
 `pane list` and `doctor`, not from the roster, and the first pane is watched through a full overnight, not a day), this
 guide is the standing text.
 
-Two facts about the live fleet come first; they are facts, not steps:
+One fact about the live fleet comes first; it is a fact, not a step:
 
 - **Some Claude Code panes look like OpenCode panes to the import.** Their old files say `harness = "opencode"` and
   `mode = "attach"` in `sessions.toml`, and their `pane.env` holds an `anthropic/...` model. The import reads only those
   files and what it observes, and `harness-not-opencode` fires only for a pane whose `sessions.toml` names another
   harness, so the import would adopt such a pane as an OpenCode pane, with a record. No mechanism excludes a pane from
-  the import yet.
-- **The dry run cannot run on the live fleet until the hub wiring (#649) has merged.** Until then the binary's ports are
-  stubs, and every port call answers `not-implemented`.
+  the import yet: leaving such panes alone is issue [#835](https://github.com/Performant-Labs/holler/issues/835), not
+  built.
 
 The steps, in order:
 
@@ -652,7 +712,9 @@ The steps, in order:
 
    Name the orchestrator (MO) pane with `--orchestrator PANE`; it needs its own `pane.env`, which the operator writes
    before the cutover (the dry run reports a missing one as `source-missing`). Set `HOLLER_HERDR_SESSION` and pass the
-   same name as `--herdr-session`: the flag stays required (section 2).
+   same name as `--herdr-session`: the flag stays required (section 2). **If the two differ, the import finds no Herdr
+   pane and every pane is `pane-unlabelled`**: a dry run in which every pane is `pane-unlabelled` is a session mismatch
+   until shown otherwise, and a real run would be refused with `import-blocked`.
 2. **Fix drift with the old tools.** Files that disagree about a pane's session give the problem `sources-disagree` and
    no record for that pane, and a real run is refused (`import-blocked`) until they agree. Each other problem of the
    table in section 3 is fixed the same way, then the dry run is run again.
@@ -670,7 +732,8 @@ The steps, in order:
 4. **Bring SHOWN and the session of record together.** Run `holler pane doctor` until it reports no
    `shown-driven-mismatch`, and `holler pane list` shows SYNC `ok` for every pane (section 4).
 5. **Cut one pane over** to `holler pane launch PANE` and `holler pane reset PANE`, watch it **through a full overnight**,
-   then move the rest.
+   then move the rest. A launch records the pane's model and does not apply it yet (#829, section 2), and
+   `reset --first` is not used on a parked or held pane (section 3).
 6. **Seven days with no invisible session.** Every day `doctor` reports no `shown-driven-mismatch` and no stray session
    older than an hour. A pass keeps no memory, so read "older than an hour" by comparing the `session` of each
    `stray-session` finding between two passes an hour apart. Then the operator signs off.
@@ -684,9 +747,9 @@ the launcher's writers is pfleet's follow-up (#653, in another repository). The 
 release, with one exception: `scripts/pane-restart` still writes `pane.env` when it is used as a rollback (section 11).
 
 A pane whose files name another harness gets no record from the import (`harness-not-opencode`; a Claude Code pane whose
-files name `opencode` is the case of the first fact above). After the import, a whole-fleet `doctor` reports each pane
-with no record as `unregistered-herdr-pane` in every pass, which is expected and is not counted against the seven days
-(section 5).
+files name `opencode` is the case of the fact above). After the import, `holler pane list` shows each Herdr pane with no
+record as `unmanaged` (section 4), and a whole-fleet `doctor` reports it as `unregistered-herdr-pane` in every pass,
+which is expected and is not counted against the seven days (section 5).
 
 ## 11. Rollback
 
@@ -708,7 +771,10 @@ scripts/pane-restart PANE --model PROVIDER/ID [--effort E] [--key-file PATH]
   run `--fix` on a pane that was restarted with the script.**
 - **The way back** is `holler pane relaunch PANE --model PROVIDER/ID`: it restarts the server, keeps the session of record
   when the restarted server still lists it (and creates a new one only when it does not), and records the new model.
-  Then `doctor` is clean for that pane again.
+  Then `doctor` is clean for that pane again. **Until #829 lands, the model is recorded and not applied** (section 2):
+  the relaunched server runs the model its OpenCode configuration selects, so the way back returns the pane to the
+  registry's control, not to the model the script set. While a pane must run a model other than that one, the script
+  is the only way to put it there.
 - The same command is the way back from an `agent-unusable` refusal of `holler pane relaunch PANE --agent KEY`: that
   refusal comes after the old server was stopped, so the pane has no server and its record is unchanged until
   `holler pane relaunch PANE` runs again without `--agent` (section 2).
@@ -719,6 +785,9 @@ scripts/pane-restart PANE --model PROVIDER/ID [--effort E] [--key-file PATH]
 Deferred, so not documented here as existing; none of them is available:
 
 - the roster extension: the pane columns on `holler roster` (#648);
+- applying a pane's model, effort and environment to its harness server (#829);
+- DRIVEN following each pane's session of record, and `reset --first` through the hub's gate (#839);
+- an import that leaves the panes Holler does not drive alone (#835);
 - the shared subprocess runner of the adapters and the probe (#696);
 - the real-adapter scenario for `profile apply` (#667);
 - recreating the Herdr workspace from the stored profiles (#666);

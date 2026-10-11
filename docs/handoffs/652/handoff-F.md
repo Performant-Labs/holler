@@ -112,3 +112,96 @@ line, the doctor finding line and remedy, the PROPOSED stubs).
 - `docs/README.md`
 - `scripts/pane-restart` (comment, line 3)
 - `CHANGELOG.md`
+
+---
+
+# Handoff-F (rework): #652 - after S ADVISORY-HOLD, with #649 and #832 merged
+
+**Date:** 2026-10-11
+**Branch:** `issue-652-implementation` (head `e9eb05c` before this round; `origin/main` has nothing beyond it)
+**Issue:** #652
+
+## What was done
+
+- `docs/pane-control.md`:
+  - **Section 2, R1 to R3 re-cut from the merged `wiring.rs`** (S's verdict item 1): the hub is the only precondition and
+    no hub is `unavailable` touching no adapter; a missing or malformed variable fails at its port's first use;
+    `HERDR_SESSION` is not read and an unset `HOLLER_HERDR_SESSION` is `usage`; `--herdr-session` is not defaulted.
+  - **The mismatch sentence fixed** (S's verdict item 2, the patched brief's R2): `launch` answers `unavailable` (apply's
+    create step fails and stops the run); `pane import` reports every pane `pane-unlabelled`, a dry run exits 0, a real
+    run is `import-blocked`. Repeated at section 10, step 1, as how to read such a dry run.
+  - **Section 10's second fact dropped** (stale since #649); the first fact names #835 as the follow-up.
+  - **#832 (merged into the branch at `8dc1aca`) documented**: it had turned `section_5_names_every_finding_kind` RED
+    (`unmanaged-stalled`) and made section 1's "a verb that names such a pane answers `pane-not-found`" false. Sections 1,
+    3 (`list`, `get PANE` by label or Herdr pane id, `pane-unmanaged` for the six acting verbs, doctor's
+    `--unmanaged-stalled-after`), 4 (the second table, the JSON keys, IDLE `-` against Herdr 0.8.2, the grid-tab limit),
+    5 (the `unmanaged-stalled` row and paragraph; "four name none"), 9 (`pane-unmanaged` among the open codes) and 10.
+  - **#829 stated**: the model, effort, env names and ceilings are recorded, not applied (section 2, `relaunch`, step 5,
+    section 11's way back, section 12).
+  - **`reset --first` caveat** (ADR-0021 lines 365-367): do not use it on a parked or held pane; #839 owns the fix. Also
+    in `park` and step 5. DRIVEN's follow-up named as #839 in section 4.
+- `docs/orchestrating.md`: the relaunch paragraph no longer says the server starts "on the new model"; it says the model
+  is recorded and not applied until #829, so the fallback is what puts a pane on another model meanwhile.
+- `CHANGELOG.md`: the #652 line says `--model` is recorded and not yet applied (#829).
+- `docs/handoffs/652/evidence.md`, `decisions.md`: the rework's facts and decisions.
+
+## Design decisions
+
+- **#832 documented, not deferred.** The brief predates its merge, but the brief's rule is that the guide states what is
+  on `main`, and the merge made the docs test RED; leaving it would have shipped a failing test and a false boundary.
+- **#829 stated although the brief does not name it.** Without it the guide and `orchestrating.md` told the operator a
+  relaunch changes the model the server runs, which ADR-0021 lines 604-605 say it does not. The orchestrating.md section
+  keeps its heading and its lead command (the docs test and the brief require it) and gains the caveat.
+- The `wiring.rs` variable table is still not copied (brief); only `HOLLER_HERDR_SESSION` and its two behaviours are named.
+
+## Reuse / extend-vs-new
+
+Unchanged: the same page, sections and files are edited in place; ADR-0021 sections 8, 9, 13 and 14 and the `wiring.rs`
+module doc are pointed to, not restated.
+
+## Architecture notes for A
+
+None: docs, CHANGELOG and handoffs only.
+
+## Deviations from spec / wireframe
+
+- The brief's section 1 text ("A verb that names it as an existing pane ... answers `pane-not-found`") is superseded by
+  #832 as merged: an acting verb answers `pane-unmanaged` for an unmanaged pane, `pane-not-found` otherwise.
+- #829, #839 and the `reset --first` caveat are added beyond the brief's text, for the reason above.
+
+## Tier 1 self-check (incl. tests now GREEN)
+
+```text
+before this round (main merged in): docs_pane_control_test 15 passed, 1 FAILED
+  section_5_names_every_finding_kind: section 5 (doctor) does not name these finding kinds: `unmanaged-stalled`
+cargo test -p holler-cli --test docs_cli_test --test docs_pane_control_test
+  docs_cli_test:          test result: ok. 3 passed; 0 failed
+  docs_pane_control_test: test result: ok. 16 passed; 0 failed
+bash scripts/changelog-check.sh   changelog-check: ok
+bash scripts/lint.sh              exit 0 (guide 794 lines, orchestrating.md 163; under the 850 decompose mark)
+gitleaks detect --no-git          docs/pane-control.md, docs/orchestrating.md: no leaks found
+```
+
+The full workspace suite was not re-run: this round changes only Markdown and the CHANGELOG, which only the two docs
+tests and `changelog-check.sh` read.
+
+## Evidence appendix
+
+`docs/handoffs/652/evidence.md`, section "F rework (after S ADVISORY-HOLD; #649 and #832 merged)".
+
+## Tests that look wrong (for T)
+
+None. (T may want a test that pins the `pane-unmanaged` open code in section 9 and the import mismatch sentence; none of
+the 16 reads them today.)
+
+## Known issues
+
+- Section 4's IDLE and section 5's `unmanaged-stalled` describe a field Herdr 0.8.2 does not fill; the guide says so.
+- A-dup warns 1 and 2 (apply subsection restating section 6; `SCANNED_TAGS` hand-mirrored) are unchanged.
+- The brief's "Pipeline" rigor question (S advisory note 5) is O's.
+
+## Files changed
+
+- `docs/pane-control.md`
+- `docs/orchestrating.md`
+- `CHANGELOG.md`

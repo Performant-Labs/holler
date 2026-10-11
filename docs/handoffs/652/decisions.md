@@ -167,3 +167,32 @@ This file is append-only: every phase adds its entry.
   `docs_cli_test.rs:101` (follow-up: share it via `tests/fixture/mod.rs`); the #649 statements still rest on the open branch.
 - **Evidence:** `git diff 5d366b9..3d318df`; `docs/pane-control.md` (whole); `docs_pane_control_test.rs` (helpers and
   tests); `docs_cli_test.rs:29,87-130`; `tests/fixture/mod.rs`; ADR-0021 heading lines 662 and 863 (anchors resolve).
+
+## F, rework after S ADVISORY-HOLD (#649 and #832 merged): 2026-10-11 (MDT)
+
+- **Decided:**
+  - R1 to R3 re-cut from the merged `wiring.rs` module doc (lines 22-38). Section 2 states D2 as built (the hub is the
+    only precondition; a missing or malformed variable fails at the port's first use; `HERDR_SESSION` is not read; unset
+    `HOLLER_HERDR_SESSION` is `usage`).
+  - The session-mismatch sentence is split by verb, per the patched brief: `launch` (and apply's create step) answers
+    `unavailable`; `pane import` reports every pane `pane-unlabelled`, so its dry run exits 0 and a real run is
+    `import-blocked`. Stated in section 2 and in section 10, step 1.
+  - Section 10's second known fact (the stubbed dry run) is dropped; the first fact names #835 as the follow-up.
+  - **#832 (merged in `8dc1aca`) is documented**, because the docs test went RED on it (`section_5_names_every_finding_kind`:
+    `unmanaged-stalled` missing) and the guide said things #832 made false. Unmanaged panes in sections 1, 3 (list, get,
+    the acting verbs' `pane-unmanaged`, doctor's `--unmanaged-stalled-after`), 4 (the second table, JSON
+    `unmanaged`/`unmanaged_unavailable`, IDLE `-` against Herdr 0.8.2), 5 (the `unmanaged-stalled` row; "four name none"),
+    9 (open code `pane-unmanaged`) and 10.
+  - **#829 stated** (model, effort, env names and ceilings recorded, not applied): section 2, `relaunch`, step 5 of the
+    cutover, section 11's way back, section 12, `orchestrating.md` and the CHANGELOG line. `orchestrating.md` no longer
+    says the relaunch "starts the harness server again on the new model".
+  - **The `reset --first` caveat** (ADR-0021 lines 365-367; #828 folded into #839, open) is in `reset`, `park` and step 5.
+    DRIVEN's follow-up is named as #839.
+- **Assumed:** a relaunch whose record names a Herdr session other than `HOLLER_HERDR_SESSION` meets the same
+  `extent_of` refusal as a launch (it goes through the same launch engine and adapter); not run.
+- **Hedged:** #829 and the `reset --first` caveat go beyond the brief's text (it names neither). They are stated because
+  the brief's rule is that the guide states what is on `main`, and without them `orchestrating.md` and section 11 told
+  the operator a relaunch changes the model the server runs.
+- **Evidence:** `evidence.md`, "F rework" entries; `cargo test -p holler-cli --test docs_cli_test --test
+  docs_pane_control_test` (3 and 16 passed); `scripts/changelog-check.sh` ok; `scripts/lint.sh` exit 0; `gh issue view`
+  829 OPEN, 835 OPEN, 839 OPEN, 828 CLOSED (not planned, folded into #839), 649 and 832 CLOSED.

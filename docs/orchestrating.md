@@ -107,16 +107,19 @@ something real happens.
 
 ## Restarting a pane on another model
 
-A registry pane (an OpenCode pane with a pane record) is restarted on another model with `holler pane relaunch PANE --model PROVIDER/ID`. It
-stops only the processes the pane owns, starts the harness server again on the new model, keeps the session of record
-when the restarted server still lists it, and records the new model:
+A registry pane (an OpenCode pane with a pane record) is restarted with `holler pane relaunch PANE --model PROVIDER/ID`. It
+stops only the processes the pane owns, starts the harness server again, keeps the session of record when the restarted
+server still lists it, and records the new model:
 
 ```bash
 holler pane relaunch hj-c3r1 --model anthropic/claude-sonnet-5-5 --effort medium
 ```
 
 The synopsis is `holler pane relaunch PANE --model PROVIDER/ID [--effort E]`; [pane-control.md](pane-control.md) is the
-operator guide for every `holler pane` verb, and its section 11 is the rollback.
+operator guide for every `holler pane` verb, and its section 11 is the rollback. **The model is recorded, not applied
+yet:** until issue #829 lands, no port carries the pane's model or effort to the server, which runs the model its
+OpenCode configuration selects (pane-control.md, section 2). Until then, putting a pane on a model other than that one
+is the fallback's job.
 
 **The fallback: `scripts/pane-restart`, until the 7-day sign-off of the cutover (#654).** It restarts one fleet pane's
 OpenCode TUI on a new model without the registry. Run it on the host that owns the pane's tmux session (the fleet host),
