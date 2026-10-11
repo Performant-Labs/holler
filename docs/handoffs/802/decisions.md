@@ -181,3 +181,12 @@
     `real_opencode_test` 9/9 (`HOLLER_TEST_OPENCODE=1`), the conformance suite through the new
     launcher against a real `opencode serve`.
   - The two struct literals compiled outside `holler-pane` fail with `error[E0639]`.
+
+## T (Phase 7, verify GREEN + Tier 2) — 2026-10-11T06:36:24-06:00
+- **Decided:** PASS. The suite is GREEN on `7ede9c7`: 2070 passed, 0 failed, 25 ignored, the same as F. Tier 1 is clean (lint, changelog check, clippy `-D warnings`, `docs_cli_test`, `wire_selftest`, machete, hook tests, doctests). Tier 2 finds no blocking issue. U is N/A (no UI), and the run is ready for S.
+- **Decided:** Repaired one test. `hermetic_test::ac8_a_spec_with_an_agent_is_refused_and_one_without_verifies` now asserts that the stub received no request for the no-agent `verify_serving`, which its doc already claimed (F's note). No production code was touched.
+- **Assumed:** F's opt-in real runs (`real_tmux_test`, `real_opencode_test`, 9/9 each) stand as F reported them. They need private tmux and opencode servers and are not CI steps, so I did not re-run them.
+- **Hedged:** W-11(a) stays open: no test runs the server argv under a tmux pty. This is deferred to #649, as F proposes.
+- **Evidence:**
+  - Six production mutations were each caught by the targeted tests, then reverted with `git checkout`. M1, the act's port re-check; M2, `verify_serving` skipped; M3, the health wait with no retry; M4, the host's `check_cwd`; M5, OpenCode's agent refusal; M6, the plan passing a default `ServeSpec`.
+  - Details are in `handoff-T-green.md`.

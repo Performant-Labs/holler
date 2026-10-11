@@ -660,6 +660,7 @@ fn ac8_a_spec_with_an_agent_is_refused_and_one_without_verifies() {
     let verified = h.verify_serving(stub.port, &with);
     assert!(is_agent_unsupported(&verified), "{verified:?}");
     assert_eq!(h.verify_serving(stub.port, &ServeSpec::default()), Ok(()));
+    assert!(stub.lines().is_empty(), "sent: {:?}", stub.lines());
     let message = match built {
         Err(PaneError::Refused { message, .. }) => message,
         other => panic!("{other:?}"),
