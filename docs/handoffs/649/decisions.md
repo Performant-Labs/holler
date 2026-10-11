@@ -293,3 +293,49 @@
   - `cargo clippy -p holler-cli --test pane_integration -- -D warnings` and `-p holler-adapter-host --tests`: clean. `bash scripts/lint.sh`: exit 0.
   - `cargo test -p holler-cli --test pane_cli_process`: 36/36. `-p holler-adapter-host`: all pass, `real_tmux_test --ignored` 9/9. Herdr scratch `--ignored`: 2/2.
   - Probes, temporary and removed: tmux `display-message` with and without `LANG`, and the switch after relaunch with and without an 8 s wait.
+
+## F (Phase 6, implement) — 2026-10-11T13:30:43-06:00
+- **Decided:** the trial of `046026f` is rewritten to the house style under D24's names, and `connect` is the real one. All 58 default-run tests pass, T's 8 RED rows included, and the 4 opt-in scenarios pass on scratch instances. The full detail is in `handoff-F.md`.
+  - **`store.rs`:** a table of 12 `Method` rows (wire name, `op`, read or write, bound) over D24's `call`, the one D3 mapping. Its `write` is an `Effect` enum, not a bool. Params are the typed `holler_pane::reply` structs.
+  - **The watch is eager (D4):** `watch()` makes the first request and keeps the batch for the first `next()`.
+  - **`env.rs`:** no `HERDR_SESSION` fallback. Zero extents, repeated labels, empty items and labels holding `=` are `usage` naming `HOLLER_HERDR_WORKSPACES`. Every path a variable gives must be absolute.
+  - **`bind.rs`:** one generic `Wired<P>` serves both W-4's harness and W-E's fail-closed host. `WiredHarness` (D24's name, same `new`) and the new `WiredHost` are aliases of it.
+  - **The bindings:** each failed `ensure_pane` offers no id. An `ensure_session` claims the offer whatever its outcome, and binds only on success.
+  - **The resolver:** (b) and (c) both use the join key (session and pane id). An unconfigured session matches no record.
+  - **ADR-0021:**
+    - the "Wiring as built (#649)" paragraph in section 5;
+    - D17's sentence edits and W-N (a) to (c);
+    - a section 2 pointer for W-C's third bounded-otherwise case.
+  - **The rest:** the CHANGELOG entry, and the manifest comment (D16).
+- **Assumed:**
+  - **Every `ensure_session` follows its own `ensure_pane`.** The engine calls the two only in `tx_launch::bring_up`, back to back (grep, evidence). A future caller that calls `ensure_session` alone binds nothing, which is safe.
+  - **An unconfigured Herdr session never matches a record.** The resolver then gets `""`, and no launch or import writes a record with an empty Herdr session. The predicate also refuses `""` explicitly.
+  - **The suites' watch cases tolerate the eager form.** I read them: each case either drains, or reads the first `next()` before its write. Both suites passed against a real hub, which confirms it.
+- **Hedged:**
+  - **Environment edges D5 to D7 do not decide**, each recorded as a deviation:
+    - an empty session is none;
+    - every path must be absolute, D6's rule applied to all;
+    - XDG rules for `XDG_CONFIG_HOME`;
+    - the empty workspace list is none;
+    - relative `PATH` entries are skipped;
+    - no serve-args value is quoted.
+    Each refuses or is stricter, and none falls back.
+  - **The workspace run stopped at one failure that is not this phase's.** `wizard_scripts`' rename scan hits the brief's E64 line and A's first-pass decisions line, both pipeline scratch that Phase 11 deletes. So the crates after `holler-cli` were run separately with `--no-fail-fast`.
+  - **Two tests T may want to add:** the empty workspace list, and the absolute-path rule for the socket and binary variables (in `handoff-F.md`).
+- **Evidence:**
+  - `cargo build -p holler-cli` and `cargo clippy -p holler-cli --all-targets -- -D warnings`: clean.
+  - `cargo test -p holler-cli --test pane_integration`: 58 passed, 0 failed, 4 ignored.
+  - `HOLLER_TEST_PANE_INTEGRATION=1 … -- --ignored --test-threads=1`: 4 passed in 57 s. No scratch directory or process was left.
+  - `cargo test --workspace -- --skip roster_stays_accurate_under_concurrent_body_load`: 1607 passed, and 1 failed (the scratch scan above), then it stopped.
+  - The rest, `--no-fail-fast` on `holler-hub`, `holler-load-test`, `holler-pane`, `holler-pane-testkit` and `holler-proto`: 702 passed, 0 failed.
+  - Doc-tests: ok. `docs_cli_test`, after the ADR edit: 3/3.
+  - `scripts/lint.sh`: exit 0. `changelog-check`: ok. `cargo machete`: clean. `rustfmt --check` on the four wiring files: clean.
+  - Read:
+    - `control.rs` (the client, 1-140 and 419-519) and `transport.rs`;
+    - `ports.rs`, `reply.rs` and `error.rs`;
+    - `profile_scope.rs`;
+    - the adapters' public constructors and configs;
+    - `attach.rs` (the resolver's call site);
+    - `tx_launch.rs` (600-720);
+    - both store conformance suites' watch cases;
+    - ADR-0021 whole.

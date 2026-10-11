@@ -8,6 +8,26 @@ fills this file in at release time.
 ## [Unreleased]
 
 ### Enhancements
+- Pane control is wired (epic [#633](https://github.com/Performant-Labs/holler/issues/633)): every `holler pane` and
+  `holler profile` verb, and `say`, `interrupt` and `answer` with `--pane`, now run against the hub's pane and profile
+  registries and the real Herdr, tmux and OpenCode adapters, where they answered `not-implemented` before
+  ([#649](https://github.com/Performant-Labs/holler/issues/649)). The CLI reads the registries over the hub's control
+  socket and builds the adapters itself; the hub builds none. With no hub running, every one of these verbs exits 1 with
+  `unavailable`, naming the missing hub, and touches nothing else; `pane list`, `get` and `watch` and `profile list` and
+  `show` need nothing but the hub. The adapters are configured by environment variables, each read when its adapter is
+  first used, so a missing or malformed one fails only the verbs that need it, with an error naming it:
+  `HOLLER_HERDR_SESSION` (the Herdr session the panes live in; Herdr's own `HERDR_SESSION` is not read),
+  `HOLLER_HERDR_SOCKET` (else `HERDR_SOCKET_PATH`, else that session's default socket), `HOLLER_HERDR_WORKSPACES` (each
+  workspace's rows by columns, `label=RxC,...`), `HOLLER_TMUX_SOCKET` (an absolute path; unset, tmux's default socket),
+  `HOLLER_OPENCODE_BIN` (else `opencode` on `PATH`) and `HOLLER_OPENCODE_SERVE_ARGS` (a JSON array of strings). A registry
+  write whose reply is lost answers `timeout`, since it may have landed. No credential is read, printed or put on a
+  command line: an OpenCode server inherits its tmux server's environment. Two things go live with it: every profile
+  write a `--profile` pane verb or `profile apply` makes is logged as `holler pane`
+  ([#825](https://github.com/Performant-Labs/holler/issues/825)), and the first message of `pane reset --first` reaches
+  the pane's server outside the hub's park and hold gate, so until
+  [#828](https://github.com/Performant-Labs/holler/issues/828) lands, do not use `reset --first` on a parked or held pane.
+  An opt-in scenario (`HOLLER_TEST_PANE_INTEGRATION=1`) runs the verbs end to end against scratch Herdr, tmux and OpenCode
+  instances it starts itself, and refuses any real session. [ADR 0021](docs/adr/ADR-0021.md) records the wiring.
 - Pane control, the migration import (epic [#633](https://github.com/Performant-Labs/holler/issues/633)): `holler pane
   import --from STATE_ROOT --herdr-session NAME [--launcher FILE] [--orchestrator PANE]... [--dry-run]` adopts the fleet
   the old launcher runs ([#650](https://github.com/Performant-Labs/holler/issues/650)). It reads each pane directory's
