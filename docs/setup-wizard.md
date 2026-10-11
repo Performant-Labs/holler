@@ -493,6 +493,14 @@ has a live `herdr` row); for a running one the answer is another `herdr_session`
 removes the stopped session after a teardown. The server log is named for the instance and lives in the instance's logs directory
 (`<state_dir>/logs/<prefix>-herdr-server.log`), never under `/tmp`.
 
+`herdr.sh server-start` scrubs the environment: only an allow-list reaches the server and so every
+pane it opens. It is `PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`, `TERM`, `LANG`, `LC_*`, `TMPDIR`,
+`XDG_*` and `HERDR_*`, plus what an interactive pane needs: `SSH_AUTH_SOCK`, `DISPLAY`,
+`WAYLAND_DISPLAY`, `DBUS_SESSION_BUS_ADDRESS`, `COLORTERM`, `TZ`, `EDITOR`, `VISUAL`, `LANGUAGE`, the
+proxy variables (`HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, `ALL_PROXY`, in both cases) and
+`SSL_CERT_FILE`, `SSL_CERT_DIR`, `NODE_EXTRA_CA_CERTS`. The driving agent's own variables (`CLAUDE_*`,
+`ANTHROPIC_*`, tokens, keys) stay out. Put anything else a pane needs in your shell rc.
+
 Unverified until story #734 checks it with the real binary: how a pane's own session is learned
 (`HERDR_PANE_ID` and `HERDR_SESSION` in the environment, in one function, `pane_session`, in
 `herdr.sh`), and that `herdr session list` prints the session name first on each line. The tests

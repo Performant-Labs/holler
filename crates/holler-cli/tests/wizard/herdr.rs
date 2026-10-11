@@ -769,3 +769,106 @@ fn label_refuses_empty_and_malformed_labels_without_a_call() {
     let out = env.run("second", "second", &["label", "w1:p3", ok.as_str()]);
     assert!(out.status.success(), "{}", text(&out));
 }
+
+/// The session variables an interactive pane needs (story #785), with a value each.
+const PANE_VARS: [&str; 20] = [
+    "SSH_AUTH_SOCK",
+    "DISPLAY",
+    "WAYLAND_DISPLAY",
+    "DBUS_SESSION_BUS_ADDRESS",
+    "COLORTERM",
+    "TZ",
+    "EDITOR",
+    "VISUAL",
+    "LANGUAGE",
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "NO_PROXY",
+    "ALL_PROXY",
+    "http_proxy",
+    "https_proxy",
+    "no_proxy",
+    "all_proxy",
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+    "NODE_EXTRA_CA_CERTS",
+];
+
+#[test]
+fn the_server_keeps_the_session_variables_a_pane_needs_and_still_drops_the_rest() {
+    let env = Env::new(&[]);
+    let mut c = env.base(Some("second"), "second", &["server-start"]);
+    for name in PANE_VARS {
+        c.env(name, format!("v-{name}"));
+    }
+    c.env("CLAUDE_CODE_FOO", "1")
+        .env("ANTHROPIC_API_KEY", "1")
+        .env("SECRET_X", "1");
+    let (out, server_pid) = start_server(&env, c);
+    assert!(out.status.success(), "{}", text(&out));
+    assert_eq!(first_line(&out), server_pid);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while server_env(&env).is_empty() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let seen = server_env(&env);
+    for name in PANE_VARS {
+        let line = format!("{name}=v-{name}");
+        assert!(seen.lines().any(|l| l == line), "{name} dropped: {seen}");
+    }
+    let names: Vec<&str> = seen.lines().filter_map(|l| l.split('=').next()).collect();
+    for gone in ["CLAUDE_CODE_FOO", "ANTHROPIC_API_KEY", "SECRET_X"] {
+        assert!(!names.contains(&gone), "{gone} leaked: {seen}");
+    }
+}
+
+#[test]
+fn label_from_a_pane_of_another_session_is_refused_without_a_rename() {
+    let env = Env::new(&["other"]);
+    let out = env.run_in_pane("second", "other", &["label", "w1:p3", "r1c2"]);
+    assert!(!out.status.success(), "{}", text(&out));
+    let t = text(&out);
+    assert!(t.contains("other") && t.contains("second"), "{t}");
+    assert!(env.recorded().is_empty(), "{:?}", env.recorded());
+}
+
+#[test]
+fn label_from_a_pane_of_the_own_session_is_accepted() {
+    let env = Env::new(&[]);
+    let out = env.run_in_pane("second", "second", &["label", "w1:p3", "r1c2"]);
+    assert!(out.status.success(), "{}", text(&out));
+    assert_eq!(
+        env.recorded(),
+        vec!["--session second pane rename w1:p3 r1c2".to_owned()]
+    );
+}
+
+#[test]
+fn a_label_with_a_non_ascii_letter_is_refused_under_a_utf8_locale() {
+    let env = Env::new(&[]);
+    for bad in ["é", "aé", "éa", "ñandú"] {
+        let mut c = env.base(Some("second"), "second", &["label", "w1:p3", bad]);
+        c.env("LC_ALL", "C.UTF-8")
+            .env("LANG", "C.UTF-8")
+            .env("WIZARD_LOG_DIR", env.path());
+        let out = c.output().unwrap();
+        assert!(!out.status.success(), "{bad:?} accepted: {}", text(&out));
+    }
+    assert!(env.recorded().is_empty(), "{:?}", env.recorded());
+}
+
+#[test]
+fn the_docs_name_the_scrub_the_allow_list_and_the_shell_rc() {
+    let docs = fs::read_to_string(repo_root().join("docs/setup-wizard.md")).unwrap();
+    let herdr = docs
+        .split("## Herdr session")
+        .nth(1)
+        .unwrap()
+        .split("\n## ")
+        .next()
+        .unwrap()
+        .replace('\n', " ");
+    assert!(herdr.contains("scrub"), "no mention of the scrub");
+    assert!(herdr.contains("SSH_AUTH_SOCK"), "allow-list not named");
+    assert!(herdr.contains("shell rc"), "no pointer to the shell rc");
+}
