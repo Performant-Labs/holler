@@ -133,3 +133,51 @@
   - A naive engine on the new signatures fails 21 `pane_verbs` cases on assertions. The messages
     are in `handoff-T-red.md`.
   - The shim was deleted afterwards.
+
+## F (Workflow Phase 6, implement against RED) — 2026-10-11T06:26:17-06:00
+- **Decided:**
+  - Implemented the brief and A's warns against T's suite with no test edited; every target that
+    was RED compiles and passes (the full verify command: 2070 passed, 0 failed).
+  - The API is T's contract exactly: `ServeSpec` (`with_agent` a builder on `self`, W-12a) with
+    the two `compile_fail,E0639` doctests on its doc; `serve_command` / `verify_serving`;
+    `HostPort::run(name, cwd, argv)`; `AGENT_UNSUPPORTED`; `TxOptions.boot_poll` (`BOOT_POLL`,
+    150 ms); `tx_launch::wait_healthy`; `HarnessOp::{ServeCommand, VerifyServing}`;
+    `FakeHarness::{start_server, serve_specs}`; `ServerView.agent`; `FakeHost::runs()` with the
+    `cwd`; `run_harness_conformance(fresh, launch)` with cases `launch-then-healthy` and
+    `serve-command-carries-the-agent`.
+  - The engine's server step is the child module `tx_launch/server.rs` (W-6): the `port-in-use`
+    re-check, `host.run` of exactly the planned argv in the spec's directory, the health wait to
+    the budget's end (`timeout`, the verb's op), `verify_serving`. `stop_old` moved there too, which
+    keeps `tx_launch.rs` at 807 lines.
+  - W-1: the tmux adapter's `run` refuses an empty, relative or missing `cwd` as `usage`, after the
+    session and argv checks and before any window, without echoing it. W-9: the existence read
+    reuses `tmux::panes`; `session_dir`, `SESSION_PATH`, `is_session_dir` and `BAD_SESSION_DIR` are
+    deleted.
+  - W-2: `ProcessEnv::prefix` (beside `ProcessEnv`) is the one env prefix of the server's and the
+    TUI's argv; it holds only the adapter's literals and the configured `Isolated` pairs.
+  - W-3: OpenCode's `verify_serving` refuses `agent-unsupported` for an agent and answers `Ok(())`,
+    sending nothing, without one. The fake answers from its running server's agent, refusing a
+    mismatch with its own open code `agent-mismatch`.
+  - Scope 3's deletions are complete (`dead_code` is denied and clippy is clean).
+  - ADR-0021 (Scope 7, W-10 a-f, W-11b) and `CHANGELOG.md` updated; decisions 1-4 recorded as the
+    operator's, 5-7 as review round 1's, and "Decisions taken" items 10-13 added.
+- **Assumed:**
+  - tmux starts a `new-window -c <dir>` program in `$HOME` when the directory is missing (A's
+    reading of `tmux.rs:267-271` for `#{session_path}`). Not probed for a literal `-c`; the refusal
+    makes it moot, and the real-tmux test `run_refuses_a_missing_or_relative_directory` passes.
+  - The `opencode serve` argv behaves under a tmux pty as it does spawned directly (W-11a, open).
+- **Hedged:**
+  - `stop_old`'s move into the child module is a structural choice the brief did not ask for; it is
+    the relaunch's server step, and it buys headroom for #644 part 2 and #664 in `tx_launch.rs`.
+  - The fake's `agent-mismatch` code and its `start_server` timeout op (`harness.serve_command`)
+    are the fake's choices; T's tests assert only `Refused` and `Timeout`.
+- **Evidence:**
+  - `cargo build --workspace --tests`; `cargo clippy --workspace --all-targets -- -D warnings`;
+    `scripts/lint.sh` (exit 0); `scripts/changelog-check.sh`; `cargo machete`; rustfmt check on the
+    changed crates; `RUSTDOCFLAGS=-D warnings cargo doc` on the four changed crates.
+  - `cargo test --workspace -- --skip roster_stays_accurate_under_concurrent_body_load`: 2070
+    passed, 0 failed, 25 ignored.
+  - Opt-in real runs on private servers: `real_tmux_test` 9/9 (`--ignored`) and
+    `real_opencode_test` 9/9 (`HOLLER_TEST_OPENCODE=1`), the conformance suite through the new
+    launcher against a real `opencode serve`.
+  - The two struct literals compiled outside `holler-pane` fail with `error[E0639]`.

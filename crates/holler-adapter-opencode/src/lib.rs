@@ -5,11 +5,13 @@
 //! 1.18.35) and, for the web app's catch-all page, from `holler-body`'s OpenCode driver
 //! (`http_attach_driver.rs`).
 //!
-//! **Every method of the port is built** (#642): the server side (`serve`, `health`,
-//! `create_session`, `list_sessions` and `abort`, part 1) and the TUI side (`attach_tui`,
-//! `select_session` and `shown_session`, part 2), whose TUI runs in the pane's tmux session.
+//! **Every method of the port is built** (#642): the server side (`health`,
+//! `create_session`, `list_sessions` and `abort`, part 1; `serve_command` and
+//! `verify_serving`, #802) and the TUI side (`attach_tui`, `select_session` and
+//! `shown_session`, part 2), whose TUI runs in the pane's tmux session, as the server does.
 //! The last part of #642 applies the pane's OpenCode agent (`Pane.opencode_agent`, after
-//! #700); until then the adapter applies none. Nothing wires the adapter in yet (#649).
+//! #700); until then `serve_command` and `verify_serving` refuse a spec that asks for one
+//! (`agent-unsupported`). Nothing wires the adapter in yet (#649).
 //!
 //! **Blocking**, as the port is: every method is synchronous (call it from `spawn_blocking`
 //! or a thread in async code) and returns within [`Timeouts::call`] (I5, 10 s by default).
@@ -43,24 +45,28 @@
 //! What the adapter decides (ADR-0021 section 2, "`HarnessPort` as built (#642)", whose facts
 //! the numbers below cite):
 //!
-//! - **`serve` never adopts a server** (fact 2). It asks `GET /global/health` first: a
-//!   port that answers is `unavailable` ("port N is in use"), and a frozen server that holds
-//!   it is `timeout`. Otherwise it starts `opencode serve --port P --hostname 127.0.0.1` in
-//!   the pane's project directory, in a process group of its own, and sends nothing but
-//!   health checks until its first healthy answer: a request sent while the server boots can
-//!   hang for good (the spike's boot race). It returns the server's pid, which is also its
-//!   process group id, and the server outlives the adapter. `HarnessPort` has no stop:
-//!   stopping that server by its pid and process group is #695's, and the host adapter
-//!   (#641) stops only what its own `run` started.
+//! - **The adapter starts no server** (fact 2, #802). `serve_command` only builds the
+//!   server's argv, `<env prefix> <opencode_bin> serve --port P --hostname 127.0.0.1
+//!   <serve_args>`, behind the TUI's own `env` prefix: it starts nothing, binds nothing and
+//!   sends nothing. The host adapter's `run` starts that argv in the pane's tmux session, in
+//!   the pane spec's directory, and its `stop_owned` stops it (TERM, a grace, then KILL), so
+//!   the adapter owns no process and keeps no pid. Never adopting a running server is the
+//!   launch engine's: its plan refuses a port that already answers, and it asks again just
+//!   before the run. The engine also waits for the server's first healthy answer, sending
+//!   nothing but health checks until then: a request sent while the server boots can hang
+//!   for good (the spike's boot race).
 //! - **The session of record is titled with its own id** (fact 1). `create_session` renames
 //!   each new session to its id, so the TUI's title maps back to it. When the rename fails,
 //!   the session is deleted again, so none is left untitled.
 //! - **SHOWN is read from the TUI's terminal title, through tmux** (fact 1): the
 //!   `#{pane_title}` of the pane's tmux session, addressed by its exact name as `=<name>:`,
 //!   which tmux resolves to the active pane of the session's current window. That pane is the
-//!   TUI's. `shown_session` is `None` whenever it cannot tell (fact 3): the home screen, a
-//!   deleted session, a title that is not a whole id, a dead pane, another program, no tmux
-//!   session or server. It never guesses and never asks the server.
+//!   TUI's: the session's current window must be the TUI's. Since #802 every pane's session
+//!   also holds its server's window, which the host's `run` creates detached; a client that
+//!   switches the session to that window would move `attach_tui` and `shown_session` onto the
+//!   server's pane. `shown_session` is `None` whenever it cannot tell (fact 3): the home
+//!   screen, a deleted session, a title that is not a whole id, a dead pane, another program,
+//!   no tmux session or server. It never guesses and never asks the server.
 //! - **A TUI's port is observed, not remembered**: `select_session` reads it from the
 //!   pane's `#{pane_start_command}`, so a pane with no TUI is `unavailable` before anything
 //!   is sent. `attach_tui` keeps the pane when its program exits (`remain-on-exit on`) and
@@ -71,19 +77,21 @@
 //! - **`list_sessions` lists top-level sessions only** (fact 5). A child (subagent)
 //!   session, one whose `parentID` is a string, is left out, because reconcile (#647) treats
 //!   every listed session except the session of record as a stray.
-//! - **The lookups are wiring's job** (fact 6, see [`Resolver`]). `workdir` and
-//!   `tui_session` must answer for a pane that is being launched, before the pane's record
-//!   exists, so #649 cannot back them with a registry lookup alone.
-//! - **Two divergences from the test kit's `FakeHarness`** (facts 2 and 6), which the
-//!   conformance suite pins neither way: (a) `serve` on a port that already serves the same
-//!   pane is `unavailable` here, where the fake returns that server's pid; (b) a `PaneId` the
-//!   `tui_session` lookup does not know is the lookup's own error (`pane-not-found`) from
-//!   `select_session` and `shown_session`, where the fake answers `unavailable` and `None`.
-//! - **No per-pane environment.** The adapter applies no per-pane environment names, model
-//!   or effort. Under [`ProcessEnv::Inherit`] the server sees the operator's own environment
-//!   (ADR-0021 section 13), and the TUI the tmux server's, because tmux starts it. So a bare
-//!   `opencode_bin` is looked up on two `PATH`s, and wiring passes an absolute path, so that
-//!   a server and its TUI run one binary.
+//! - **The lookup is wiring's job** (fact 6, see [`Resolver`]). `tui_session` must answer
+//!   for a pane that is being launched, before the pane's record exists, so #649 cannot back
+//!   it with a registry lookup alone. The server's directory is no lookup (#802): it comes
+//!   from the pane spec, through the host's `run`.
+//! - **One divergence from the test kit's `FakeHarness`** (fact 6), which the conformance
+//!   suite pins neither way: a `PaneId` the `tui_session` lookup does not know is the
+//!   lookup's own error (`pane-not-found`) from `select_session` and `shown_session`, where
+//!   the fake answers `unavailable` and `None`.
+//! - **No per-pane environment, and none of the adapter's own environment on an argv**
+//!   (`ps` and tmux show it): no per-pane environment names, model or effort are applied.
+//!   tmux starts both the server and the TUI, so under [`ProcessEnv::Inherit`] both see the
+//!   tmux server's environment: a provider credential reaches the server only through the
+//!   pane's tmux session (#649's to set, ADR-0021 section 2), never through an argv. tmux
+//!   limits a command's size (3.7c refused a 20,000-byte argument), so #642 part 3's
+//!   `OPENCODE_CONFIG_CONTENT` carries only `{"default_agent": KEY}`, never an agent.
 //!
 //! [`http`] is the adapter's own transport, and [`tui`] holds the tmux configuration and the
 //! pure builders and parsers of the tmux calls. Both are public for this crate's tests and
@@ -94,7 +102,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use holler_pane::{HarnessPort, PaneError, PaneId, PaneName};
+use holler_pane::{Argv, HarnessPort, PaneError, PaneId, PaneName, ServeSpec};
 use serde_json::{json, Value};
 
 use crate::http::{HttpError, Reply};
@@ -109,7 +117,6 @@ pub use tui::{TmuxConfig, TmuxSocket};
 
 /// The `op` of each method's `timeout`: the strings of the test kit's `HarnessOp`, which the
 /// tests pin equal to these.
-const OP_SERVE: &str = "harness.serve";
 const OP_CREATE_SESSION: &str = "harness.create_session";
 const OP_LIST_SESSIONS: &str = "harness.list_sessions";
 const OP_ABORT: &str = "harness.abort";
@@ -129,6 +136,10 @@ const EXCERPT_BYTES: usize = 60;
 /// overflow an `Instant`.
 const LONGEST: Duration = Duration::from_secs(365 * 24 * 60 * 60);
 
+/// The variable that turns the TUI's title off, which the adapter reads: under
+/// [`ProcessEnv::Inherit`] every argv's `env` prefix removes it.
+const TITLE_OFF: &str = "OPENCODE_DISABLE_TERMINAL_TITLE";
+
 /// Maps a key to what the adapter needs; an `Err` is returned to the caller as it is.
 ///
 /// Precondition (ADR-0021 section 2, "`HarnessPort` as built (#642)", fact 6): a resolver
@@ -138,21 +149,41 @@ const LONGEST: Duration = Duration::from_secs(365 * 24 * 60 * 60);
 pub type Resolver<K, V> = Arc<dyn Fn(&K) -> Result<V, PaneError> + Send + Sync>;
 
 /// The environment the adapter's OpenCode processes, the server and the TUI, start with.
+/// Both are started by tmux (the server by the host adapter's `run`, #802), and both argvs
+/// begin with the one `env` prefix it gives (`ProcessEnv::prefix`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProcessEnv {
-    /// The server inherits the environment the adapter runs in. The TUI is started by tmux,
-    /// so it inherits the tmux server's environment instead, with
-    /// `OPENCODE_DISABLE_TERMINAL_TITLE` removed (its `env -u`), because the adapter reads
-    /// the TUI's title.
+    /// Each inherits the tmux server's environment (tmux starts it, so not the adapter's),
+    /// with `OPENCODE_DISABLE_TERMINAL_TITLE` removed (`env -u`), because the adapter reads
+    /// the TUI's title. A provider credential reaches the server only that way, through the
+    /// pane's tmux session (#649), never through an argv.
     Inherit,
     /// Each gets exactly these variables (`env -i` semantics). Tests use it for the scratch
     /// `HOME` and `XDG_*`. It must not set `OPENCODE_DISABLE_TERMINAL_TITLE`, which turns
     /// off the title the adapter reads.
     ///
-    /// **Never put a secret here.** Every pair goes on the TUI's command line, which `ps`
-    /// shows and tmux reports as `#{pane_start_command}`. No message of the adapter echoes
-    /// a start command or an environment value.
+    /// **Never put a secret here.** Every pair goes on the server's and the TUI's command
+    /// lines, which `ps` shows and tmux reports as `#{pane_start_command}`. No message of
+    /// the adapter echoes a start command or an environment value.
     Isolated(Vec<(String, String)>),
+}
+
+impl ProcessEnv {
+    /// The `env` prefix of every OpenCode argv the adapter builds, the server's and the
+    /// TUI's: `env -u OPENCODE_DISABLE_TERMINAL_TITLE` under [`ProcessEnv::Inherit`], and
+    /// `env -i K=V ...` with exactly the configured pairs under [`ProcessEnv::Isolated`].
+    /// Nothing of the adapter's own environment goes into it.
+    pub(crate) fn prefix(&self) -> Vec<String> {
+        let mut prefix = vec!["env".to_owned()];
+        match self {
+            ProcessEnv::Inherit => prefix.extend(["-u".to_owned(), TITLE_OFF.to_owned()]),
+            ProcessEnv::Isolated(vars) => {
+                prefix.push("-i".to_owned());
+                prefix.extend(vars.iter().map(|(key, value)| format!("{key}={value}")));
+            }
+        }
+        prefix
+    }
 }
 
 /// The adapter's bounds.
@@ -162,11 +193,8 @@ pub struct Timeouts {
     pub call: Duration,
     /// One HTTP request, cut to what is left of `call`. Default 5 s.
     pub request: Duration,
-    /// One health GET: `health`, and the check `serve` makes before it starts a server.
-    /// Default 2 s.
+    /// One health GET (`health`, which the launch engine's wait also asks). Default 2 s.
     pub health: Duration,
-    /// One health GET while `serve` waits for the server it started. Default 500 ms.
-    pub boot_try: Duration,
     /// How long a switch, an attach or an abort may take to be observed. Default 5 s.
     pub settle: Duration,
 }
@@ -177,7 +205,6 @@ impl Default for Timeouts {
             call: Duration::from_secs(10),
             request: Duration::from_secs(5),
             health: Duration::from_secs(2),
-            boot_try: Duration::from_millis(500),
             settle: Duration::from_secs(5),
         }
     }
@@ -186,10 +213,9 @@ impl Default for Timeouts {
 /// How the adapter reaches OpenCode and tmux.
 #[derive(Clone)]
 pub struct OpenCodeConfig {
-    /// The `opencode` binary, for the server and the TUI. Wiring (#649) passes an absolute
-    /// path: a bare name is looked up on the adapter's `PATH` for `serve` but on the pane's
-    /// for the TUI's `attach`, so the two could run different binaries. Its path must be
-    /// valid UTF-8, since it goes on the TUI's command line.
+    /// The `opencode` binary, for the server and the TUI. Its path must be valid UTF-8,
+    /// since it goes on their command lines. tmux starts both, so a bare name is looked up
+    /// on the `PATH` of the tmux server; wiring (#649) passes an absolute path.
     pub opencode_bin: PathBuf,
     /// Appended after `serve --port P --hostname 127.0.0.1`; the tests pass `["--pure"]`.
     pub serve_args: Vec<String>,
@@ -197,14 +223,23 @@ pub struct OpenCodeConfig {
     pub env: ProcessEnv,
     /// The tmux server the panes' TUIs run on.
     pub tmux: TmuxConfig,
-    /// The project directory a pane's server runs in (#649: from `Pane.host.cwd`).
-    pub workdir: Resolver<PaneName, PathBuf>,
     /// The tmux session name a pane's TUI runs in, never a tmux target (#649:
     /// `Pane.host.tmux`, which equals `Pane.name`, ADR-0021 line 37). The adapter alone
     /// turns it into a target.
     pub tui_session: Resolver<PaneId, PaneName>,
     /// The bounds.
     pub timeouts: Timeouts,
+}
+
+impl OpenCodeConfig {
+    /// The `opencode` binary as an argv's text; `unavailable` when it is not valid UTF-8.
+    pub(crate) fn bin(&self) -> Result<&str, PaneError> {
+        self.opencode_bin
+            .to_str()
+            .ok_or_else(|| PaneError::Unavailable {
+                what: "the path of the opencode binary is not valid UTF-8".to_owned(),
+            })
+    }
 }
 
 /// The `HarnessPort` over OpenCode.
@@ -237,8 +272,17 @@ impl OpenCodeHarness {
 }
 
 impl HarnessPort for OpenCodeHarness {
-    fn serve(&self, name: &PaneName, port: u16) -> Result<u32, PaneError> {
-        server::serve(&self.config, name, port)
+    fn serve_command(
+        &self,
+        _name: &PaneName,
+        port: u16,
+        spec: &ServeSpec,
+    ) -> Result<Argv, PaneError> {
+        server::serve_command(&self.config, port, spec)
+    }
+
+    fn verify_serving(&self, _port: u16, spec: &ServeSpec) -> Result<(), PaneError> {
+        server::refuse_an_agent(spec)
     }
 
     fn health(&self, port: u16) -> Result<bool, PaneError> {

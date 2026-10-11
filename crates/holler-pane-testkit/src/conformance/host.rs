@@ -18,9 +18,9 @@
 //! hold a shell process, so no case asserts that a fresh session's `ps` is empty; and it
 //! may end with its last process, so a case ensures the session again before it reads
 //! `ps` after `stop_owned`. Every list of pids is read as a set: the port fixes no order.
-//! The sessions have neutral names (`demo-c1r1`, `demo-c2r1`) and work in the system's
-//! temporary directory, which exists on any machine. The command is `sleep 30`: harmless
-//! if a real adapter runs it, and the case's guard stops it.
+//! The sessions have neutral names (`demo-c1r1`, `demo-c2r1`), and they and every `run`
+//! work in the system's temporary directory, which exists on any machine. The command is
+//! `sleep 30`: harmless if a real adapter runs it, and the case's guard stops it.
 
 use std::env;
 
@@ -112,7 +112,7 @@ fn ps_of_missing_session_is_pane_not_found(host: &dyn HostPort) -> Result<(), St
 fn run_in_missing_session_is_pane_not_found(host: &dyn HostPort) -> Result<(), String> {
     let missing = succeeds("PaneName::parse", PaneName::parse(C1))?;
     let call = "run in a session never ensured";
-    expect_code(call, host.run(&missing, &sleep()), NOT_FOUND)?;
+    expect_code(call, host.run(&missing, &temp_dir(), &sleep()), NOT_FOUND)?;
     expect_code(
         &format!("ps after the refused {call}"),
         host.ps(&missing),
@@ -147,7 +147,8 @@ fn run_empty_argv_is_usage(host: &dyn HostPort) -> Result<(), String> {
     let a = ensured(host, C1)?;
     let before = ps(host, &a)?;
     let call = "run of an empty argv";
-    expect_code(call, host.run(&a, &Argv::new(Vec::new())), USAGE)?;
+    let empty = Argv::new(Vec::new());
+    expect_code(call, host.run(&a, &temp_dir(), &empty), USAGE)?;
     expect_eq(
         &format!("ps after the refused {call}"),
         sorted(ps(host, &a)?),
@@ -204,8 +205,8 @@ fn ps_lists_only_its_session(host: &dyn HostPort) -> Result<(), String> {
 
 // --- helpers ---
 
-/// The working directory of every session the cases ensure: the system's temporary
-/// directory.
+/// The working directory of every session the cases ensure, and of every `run`: the
+/// system's temporary directory.
 fn temp_dir() -> String {
     env::temp_dir().to_string_lossy().into_owned()
 }
@@ -235,7 +236,7 @@ fn ps(host: &dyn HostPort, name: &PaneName) -> Result<Vec<u32>, String> {
 fn started(host: &dyn HostPort, name: &PaneName) -> Result<u32, String> {
     let before = ps(host, name)?;
     let call = format!("run({name}, sleep 30)");
-    succeeds(&call, host.run(name, &sleep()))?;
+    succeeds(&call, host.run(name, &temp_dir(), &sleep()))?;
     let after = ps(host, name)?;
     after
         .iter()

@@ -387,6 +387,23 @@ fills this file in at release time.
   [ADR 0021](docs/adr/ADR-0021.md) records how they behave. Until the hub's stores and the adapters are wired into the
   binary ([#649](https://github.com/Performant-Labs/holler/issues/649)), the real verbs answer `not-implemented`
   ([#644](https://github.com/Performant-Labs/holler/issues/644)).
+- Pane control, a pane's harness server now runs inside the pane's tmux session (epic
+  [#633](https://github.com/Performant-Labs/holler/issues/633)), so a wedged server can always be stopped
+  ([#695](https://github.com/Performant-Labs/holler/issues/695)). This replaces what the OpenCode adapter's part 1
+  entry above says of `serve`: the adapter no longer starts the server in a process group of its own or returns its
+  pid. `HarnessPort::serve` became `serve_command`, which only builds the server's command line from a `ServeSpec`
+  (today the pane's OpenCode agent; the model, effort and environment names will join it). The host adapter starts
+  that command in the pane's tmux session, in the pane's own project directory, and stops it the way it stops every
+  process it started (TERM, a grace, then KILL), so `pane relaunch`, `pane close` and a launch that fails all stop the
+  server, and no pid is recorded for it. `HostPort::run` now takes the directory a program starts in, and the tmux
+  adapter refuses one that is not an absolute path to an existing directory. The launch engine builds the command in
+  its plan, so a harness that cannot apply the pane's agent refuses before anything is changed (`agent-unsupported`,
+  exit 3; the OpenCode adapter answers it for every agent until it applies agents), checks the port again just before
+  the server starts, waits for the server's health within the run's budget (a server that never answers is now
+  `timeout`, not `unavailable`), and asks the running server whether it honours the spec (`verify_serving`) before it
+  creates the session of record. Nothing a user runs changes yet:
+  [#649](https://github.com/Performant-Labs/holler/issues/649) wires the adapters in
+  ([#802](https://github.com/Performant-Labs/holler/issues/802)).
 
 ## [0.4.0] - 2026-09-29
 

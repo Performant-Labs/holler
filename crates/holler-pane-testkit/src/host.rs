@@ -3,15 +3,18 @@
 //! port's methods as its faults and its call log name them.
 //!
 //! The fake passes the `HostPort` conformance suite ([`crate::conformance::host`]).
-//! What only the fake has is fault injection ([`FakeHost::faults`]), the argv log
-//! ([`FakeHost::runs`]), the inspection of its sessions, and two scenarios the port
-//! cannot cause: a process that exits by itself ([`FakeHost::exit_process`]) and a
-//! session killed outside Holler ([`FakeHost::end_session`]).
+//! What only the fake has is fault injection ([`FakeHost::faults`]), the log of every
+//! argv run and the directory it was run in ([`FakeHost::runs`]), the inspection of its
+//! sessions, and two scenarios the port cannot cause: a process that exits by itself
+//! ([`FakeHost::exit_process`]) and a session killed outside Holler
+//! ([`FakeHost::end_session`]).
 //!
-//! The host and harness fakes share no state. `stop_owned` does not stop a
-//! [`crate::harness::FakeHarness`] server, and a harness pid is never in `ps`. A test
-//! that needs the two to agree drives both, e.g. with a `HostPort` wrapper whose
-//! `stop_owned` also calls `FakeHarness::kill(port)`.
+//! The host and harness fakes share no state. `run` of a server's argv (#802: the argv
+//! `HarnessPort::serve_command` builds) starts no [`crate::harness::FakeHarness`] server,
+//! `stop_owned` stops none, and a harness pid is never in `ps`. A test that needs the two
+//! to agree drives both with a `HostPort` wrapper: its `run` also calls
+//! `FakeHarness::start_server(argv)`, and its `stop_owned` also calls
+//! `FakeHarness::kill(port)`.
 
 use std::collections::BTreeMap;
 use std::sync::{Mutex, MutexGuard, PoisonError};
@@ -53,8 +56,10 @@ impl PortOp for HostOp {
 ///   is `Ok` and changes nothing, neither the cwd nor the processes.
 /// - `run` in a missing session is `pane-not-found`, and an empty argv is `usage`.
 ///   Otherwise it starts one process in the session and records the argv exactly as
-///   given: an element is never joined to another or re-split, and nothing goes
-///   through a shell.
+///   given, with the `cwd` it was given: an element is never joined to another or
+///   re-split, and nothing goes through a shell. The session keeps the cwd it was made
+///   with; the fake does not check the `cwd` of a run (the tmux adapter refuses one that is
+///   not an absolute path to an existing directory).
 /// - `stop_owned` stops every process of the session and of no other session. On a
 ///   missing session it is `Ok`: nothing is owned, so nothing is stopped.
 /// - `ps` of a missing session is `pane-not-found`; otherwise the session's pids, in
@@ -79,8 +84,9 @@ pub struct FakeHost {
 struct HostState {
     /// Sorted by name.
     sessions: BTreeMap<PaneName, Session>,
-    /// Every argv a successful `run` started, oldest first, with its session.
-    runs: Vec<(PaneName, Argv)>,
+    /// Every argv a successful `run` started, oldest first, with its session and the
+    /// `cwd` it was run in.
+    runs: Vec<(PaneName, String, Argv)>,
     /// How many pids were minted: the next one is `FIRST_PID + pids_minted`.
     pids_minted: u32,
 }
@@ -121,9 +127,10 @@ impl FakeHost {
             .map(|session| session.cwd.clone())
     }
 
-    /// Every argv a successful `run` started, oldest first, with its session. The log
-    /// is never cleared, not by `stop_owned` and not by `end_session`.
-    pub fn runs(&self) -> Vec<(PaneName, Argv)> {
+    /// Every argv a successful `run` started, oldest first, as `(session, cwd, argv)`, the
+    /// `cwd` being the one `run` was given. The log is never cleared, not by `stop_owned`
+    /// and not by `end_session`.
+    pub fn runs(&self) -> Vec<(PaneName, String, Argv)> {
         self.lock().runs.clone()
     }
 
@@ -179,9 +186,9 @@ impl HostPort for FakeHost {
         Ok(())
     }
 
-    fn run(&self, name: &PaneName, argv: &Argv) -> Result<(), PaneError> {
+    fn run(&self, name: &PaneName, cwd: &str, argv: &Argv) -> Result<(), PaneError> {
         self.faults.enter(HostOp::Run)?;
-        self.lock().start(name, argv)
+        self.lock().start(name, cwd, argv)
     }
 
     fn stop_owned(&self, name: &PaneName) -> Result<(), PaneError> {
@@ -204,8 +211,8 @@ impl HostPort for FakeHost {
 
 impl HostState {
     /// `run`'s work: refuse a missing session, then an empty argv; otherwise give the
-    /// session a new pid and log the argv as given.
-    fn start(&mut self, name: &PaneName, argv: &Argv) -> Result<(), PaneError> {
+    /// session a new pid and log the argv as given, with its `cwd`.
+    fn start(&mut self, name: &PaneName, cwd: &str, argv: &Argv) -> Result<(), PaneError> {
         let session = self.sessions.get_mut(name).ok_or_else(|| not_found(name))?;
         if argv.as_slice().is_empty() {
             return Err(PaneError::Usage {
@@ -214,7 +221,7 @@ impl HostState {
         }
         session.pids.push(FIRST_PID + self.pids_minted);
         self.pids_minted += 1;
-        self.runs.push((name.clone(), argv.clone()));
+        self.runs.push((name.clone(), cwd.to_owned(), argv.clone()));
         Ok(())
     }
 }
