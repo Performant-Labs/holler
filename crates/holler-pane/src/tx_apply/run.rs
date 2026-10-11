@@ -5,7 +5,7 @@
 //! **The twins.** The leave and the join are the only writes apply makes itself, and both exist
 //! in `holler-cli` already (`profile::delete::detach`, one pane's write of
 //! `profile::create::join`). `holler-pane` cannot depend on `holler-cli`, so `leave` and `join`
-//! below are private copies, the decision of #664's brief; a follow-up of #664 merges them.
+//! below are private copies, the decision of #664's brief; #818 merges them into one home.
 //! Until then each stays what its original does for one pane: the record as read, with
 //! `profile` none or P, written by one compare-and-swap at the generation it was read at,
 //! answering what that write answers. The join has no undo and deletes no profile: apply did not

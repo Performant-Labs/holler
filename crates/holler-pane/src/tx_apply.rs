@@ -30,8 +30,10 @@
 //! - **Outcomes.** A refusal from launch or relaunch is a `refused` step with its code, and a
 //!   `usage` answer a `refused` step coded [`SPEC_NOT_LAUNCHABLE`]; the run goes on. A
 //!   failure-class answer is a `failed` step, which stops the run: the steps after it are
-//!   `skipped`. In a dry run a step that would act is `planned`, and the run calls only its
-//!   reads: no probe, no split, no write.
+//!   `skipped`. A `refused` or `failed` step whose launch or relaunch had started its act (a
+//!   refusal can come from inside the act: the port's re-check, `verify_serving`) is marked
+//!   [`Step::acted`], for the reconcile step the verb prints. In a dry run a step that would act
+//!   is `planned`, and the run calls only its reads: no probe, no split, no write.
 //! - **Each step re-reads** its record and P before it acts, so a stale spec is never written
 //!   back: the spec handed to launch or relaunch is P's at that moment, and a membership write
 //!   is a compare-and-swap at the generation re-read (a conflict is a `failed` step).
@@ -49,7 +51,8 @@
 //!   step bounds, beyond its reads.
 //!
 //! Untrusted text (a spec's pane, profile names, session and Herdr ids) reaches a message only
-//! through `findings::quoted`.
+//! through `findings::quoted`. A [`PaneName`] is checked text (1 to 32 lowercase letters, digits
+//! and inner `-`, `SessionName`'s grammar), so it is printed as it is.
 
 mod observe;
 mod run;
@@ -116,8 +119,9 @@ pub struct Step {
     /// The error of a `refused` or `failed` step, and of no other.
     #[serde(skip)]
     pub error: Option<PaneError>,
-    /// A `failed` step's launch or relaunch had started its act, so the verb prints the
-    /// reconcile step.
+    /// A `refused` or `failed` step whose launch or relaunch had started its act
+    /// (`TxFailure.acted`), so the live panes and the records may be apart: the verb ends the
+    /// step's detail with the reconcile step. False for every step that acted nothing.
     #[serde(skip)]
     pub acted: bool,
 }

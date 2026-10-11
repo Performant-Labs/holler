@@ -226,3 +226,30 @@
   - **Mutants M1 to M4:** each failed at least one new test.
   - **Tier 1 on the test files:** clippy `-D warnings` is clean, `rustfmt --check` passes, and `lint.sh` exits 0.
   - **Files read:** the brief's C18 to C25, `handoff-A.md` round 4, `tx_apply.rs`, `tx_apply/observe.rs`, `profile/apply.rs`, `tx_launch/server.rs:85-107`, the test kit's `fault.rs` and `harness.rs`, and `pane/profile_scope.rs` (`reconcile_step`).
+
+## F (Phase 6, implement, fresh run after A round 4): 2026-10-11 11:22 MDT
+- **Decided:**
+  - **C25, the RED.** The verb adds the reconcile step in one place: a `reconciled` pass that ends the detail of every `acted` step, `refused` or `failed`, with `reconcile_step(Some(P))`. It appends after `"; "`, and only when the detail lacks it, as `failure_body` does. `stopped` no longer appends it, since the failed step's detail already carries it. The engine only marks `acted`, because `reconcile_step` is `holler-cli`'s.
+  - **The docs the amended brief gives F.**
+    - `Step.acted` and the engine's "Outcomes" bullet cover `refused` steps (A round 4 warn 4).
+    - `observe.rs` names `reconcile`'s mechanism at one thread per call, and drops "the shape of `observe_all`" (C21).
+    - `run.rs` cites #818 (C23).
+    - One ADR-0021 sentence names the step object, the six actions, the outcomes, `null` for absent keys, the step's own `detail` against "the envelope has no `detail`", and the reconcile step on an acted step (C22 and warn 4).
+    - The CHANGELOG gains one clause.
+    - The engine's doc says a `PaneName` is checked text. That answers the first diff gate's W on `other_profile`.
+  - **Evidence.** `evidence.md` is re-cut to HEAD, since #802 moved `tx_launch.rs`. That includes T's two entries, with their wording kept and a note added. Four C25 facts are added.
+- **Assumed:**
+  - An acted step always has a detail, because `halted` sets it. The pass still falls back to the error's text, and then to the step alone.
+  - T's three new pins (C21, C22, the acted `failed` step) pass on the first run's code, as T-red reported. They needed no change.
+- **Hedged:**
+  - I edited T's two evidence entries, line numbers and one excerpt only, so the diff gate's file:line attachment matches. T should re-verify them at Phase 7.
+  - A round 4's warns 1 and 3 (E40, the 27-path list) are brief edits for O, and warn 2 is the MO's. I made none of them.
+  - The first run's open points (a row chosen once, the stale-P window, duplicate specs) stay open, as C23 says.
+- **Evidence:**
+  - **The RED, then GREEN.** `profile_verbs` went from 83 passed and 1 failed (the C25 test) to 84 passed, over 7 runs.
+  - **The whole workspace.** `cargo test --workspace --no-fail-fast -- --skip roster_stays_accurate_under_concurrent_body_load` exits 0: 148 binaries, 2157 passed, 0 failed.
+  - **Other targets.** `holler-pane` passed 108, `docs_cli_test` 3, `cli_surface_test` 3 and `pane_cli_process` 36.
+  - **Lint and format.** Clippy `-D warnings` over the workspace and all targets is clean. `lint.sh` exits 0, `changelog-check` is ok, `rustfmt --check` passes on the story's files (no `cargo fmt`, C24), and rustdoc `-D warnings` on `holler-pane` is clean.
+  - **The excerpts.** A script found every line of all 15 evidence excerpts verbatim at its cited lines.
+  - **The paths.** `git diff --name-only origin/main` still lists exactly A's 27 paths.
+  - **Files read.** The brief's C1 to C25 and the decisions, `handoff-A.md` round 4, `handoff-T-red.md`, the RED test, `pane/launch.rs` (`failure_body`), `pane/profile_scope.rs` (`reconcile_step`), `tx_launch.rs` (`TxFailure`, `run`, `act_live`, `bring_up`, `observe`), `tx_launch/server.rs` (`start`), `reconcile.rs` (`observe_all`), `holler-proto`'s `SessionName` grammar, the OpenCode adapter's `verify_serving`, and `gh issue view 818`.

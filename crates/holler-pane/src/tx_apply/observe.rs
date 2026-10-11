@@ -1,13 +1,19 @@
 //! The up-front observation of `profile apply` (#664), and what it says of each recorded spec
 //! pane's health. The parent module has the rules; this is how they are observed.
 //!
-//! Every call runs at once, one scoped thread each, the shape of `reconcile`'s `observe_all`:
-//! Herdr's snapshot, and each recorded spec pane's `health` and `shown_session`. So the
-//! observation takes as long as its slowest call, one port call's own bound (I5), whatever the
-//! number of panes. It is apply's own fan-out and not `observe_all`, which is private to
-//! `reconcile`, also calls `host.ps` and `list_sessions` (which a dry run must not), and turns a
-//! failed call into a finding, where a failed `health` call here is a `failed` step. A thread that
-//! cannot start or panics is a call that failed: `unavailable`, naming the call.
+//! Every call runs at once, one thread per call: Herdr's snapshot, and each recorded spec pane's
+//! `health` and `shown_session`. A pane's two reads are independent, so neither waits on the
+//! other, and the observation takes as long as its slowest call, one port call's own bound (I5),
+//! whatever the number of panes, as the parent module's bound counts it.
+//!
+//! The fan-out is `reconcile`'s mechanism: scoped `thread::Builder` threads, each joined before
+//! the observation returns, and a thread that cannot start or panics is a call that did not
+//! finish, here `unavailable` naming its call. It runs one thread per call rather than
+//! `reconcile`'s one per pane, because `reconcile`'s chain of a pane makes dependent calls and
+//! apply's two reads of a pane do not. It is apply's own code, not `reconcile`'s `observe_all`,
+//! which is private to `reconcile`, also calls `host.ps` and `list_sessions` (which a dry run must
+//! not), and turns a failed call into a finding, where a failed `health` call here is a `failed`
+//! step.
 
 use std::thread::{self, Scope, ScopedJoinHandle};
 

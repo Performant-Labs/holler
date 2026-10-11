@@ -9,11 +9,16 @@
 //!   "steps"}` itself; for a dry run those steps are the plan.
 //! - **1, a `failed` step** (the decision on O6): only the failure, coded as that step's error,
 //!   with the message `apply stopped at <pane> (<action>): <step error>; <N> later step(s)
-//!   skipped`. A launch or relaunch that had started its act adds the reconcile step to the step
-//!   error, as `pane launch` does. No plan and no `skipped` list is printed, for a dry run too;
-//!   the engine's result holds them.
+//!   skipped`. No plan and no `skipped` list is printed, for a dry run too; the engine's result
+//!   holds them.
 //! - **An error before any plan** (a bad name, P not found, a registry that cannot be read, a
 //!   `create` without `--herdr-session`): that error alone.
+//!
+//! **The reconcile step.** A step whose launch or relaunch had started its act before it was
+//! refused or failed (since #802 the act can refuse: the port's re-check, `verify_serving`) may
+//! leave the records and the live panes apart. So the verb ends that step's detail with the
+//! reconcile step of P, as `pane launch` ends an acted failure: a `refused` step prints it with
+//! its detail, and a `failed` step's message above carries it (ADR-0021 section 8, step 6).
 
 use clap::Args;
 use holler_pane::findings::quoted;
@@ -72,6 +77,7 @@ pub fn run(args: &ProfileApply, ctx: &mut VerbCtx<'_>) -> i32 {
         apply(ports, &request, &TxOptions::default())
     });
     let result = applied
+        .map(reconciled)
         .map_err(|error: PaneError| ErrorBody::from(&error))
         .and_then(|applied| match stopped(&applied) {
             Some(failure) => Err(failure),
@@ -80,9 +86,31 @@ pub fn run(args: &ProfileApply, ctx: &mut VerbCtx<'_>) -> i32 {
     emit(&mut ctx.sink, ctx.format, result, render)
 }
 
+/// `applied` with P's reconcile step at the end of the detail of every step whose launch or
+/// relaunch had started its act, `refused` or `failed` (see the module docs). As `pane launch`
+/// appends it to an acted failure, it follows `"; "`, and only when the detail lacks it (the
+/// profile scope's own errors carry it). A step that acted nothing (a dry run's, row a's, a
+/// refusal of launch's plan) is left as it is.
+fn reconciled(mut applied: Applied) -> Applied {
+    let reconcile = reconcile_step(Some(&applied.profile));
+    for step in applied.steps.iter_mut().filter(|step| step.acted) {
+        let detail = step
+            .detail
+            .take()
+            .or_else(|| step.error.as_ref().map(ToString::to_string));
+        step.detail = Some(match detail {
+            Some(detail) if detail.contains(&reconcile) => detail,
+            Some(detail) => format!("{detail}; {reconcile}"),
+            None => reconcile.clone(),
+        });
+    }
+    applied
+}
+
 /// The failure a run with a `failed` step prints, and nothing else (the decision on O6):
 /// `apply stopped at <pane> (<action>): <step error>; <N> later step(s) skipped`, coded as the
-/// step's error. `None` when no step failed.
+/// step's error, whose text is the step's detail (with the reconcile step when it had acted).
+/// `None` when no step failed.
 fn stopped(applied: &Applied) -> Option<ErrorBody> {
     let (failed, error) = applied
         .steps
@@ -94,11 +122,7 @@ fn stopped(applied: &Applied) -> Option<ErrorBody> {
         .iter()
         .filter(|step| step.outcome == Outcome::Skipped)
         .count();
-    let mut message = failed.detail.clone().unwrap_or_else(|| error.to_string());
-    let reconcile = reconcile_step(Some(&applied.profile));
-    if failed.acted && !message.contains(&reconcile) {
-        message = format!("{message}; {reconcile}");
-    }
+    let message = failed.detail.clone().unwrap_or_else(|| error.to_string());
     Some(ErrorBody {
         code: ErrorCode::from(error),
         message: format!(

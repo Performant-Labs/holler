@@ -18,10 +18,12 @@ fills this file in at release time.
   pane's harness server answers, Herdr lists its pane, and its TUI does not show a session other than its session of
   record. A pane of another profile is refused unless `--take-over`, which moves it. A refused or reported step leaves
   the exit code at 0; a failed step stops the run and exits 1, printing only that failure and how many later steps it
-  skipped. `--dry-run` prints the plan and changes nothing, `--format=json` prints `{"profile", "dry_run", "steps"}`, and
-  creating a pane needs `--herdr-session`. [ADR 0021](docs/adr/ADR-0021.md) defines what adopting a pane means. Until
-  the ports are wired into the binary ([#649](https://github.com/Performant-Labs/holler/issues/649)), the real verb
-  answers `not-implemented` ([#664](https://github.com/Performant-Labs/holler/issues/664)).
+  skipped. A step refused or failed after its launch or relaunch had begun says how to reconcile the profile, as
+  `holler pane launch` does. `--dry-run` prints the plan and changes nothing, `--format=json` prints
+  `{"profile", "dry_run", "steps"}`, and creating a pane needs `--herdr-session`. [ADR 0021](docs/adr/ADR-0021.md)
+  defines what adopting a pane means. Until the ports are wired into the binary
+  ([#649](https://github.com/Performant-Labs/holler/issues/649)), the real verb answers `not-implemented`
+  ([#664](https://github.com/Performant-Labs/holler/issues/664)).
 - Pane control, a Herdr pane's label (epic [#633](https://github.com/Performant-Labs/holler/issues/633)): every pane
   `HerdrPort::snapshot` lists and `HerdrPort::ensure_pane` answers now carries its Herdr label (`HerdrPane.label`), the key
   by which `holler pane import` ([#650](https://github.com/Performant-Labs/holler/issues/650)) will find a pane name's
