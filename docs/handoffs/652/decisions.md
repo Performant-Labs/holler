@@ -157,3 +157,13 @@ This file is append-only: every phase adds its entry.
     roster_stays_accurate_under_concurrent_body_load` all exit 0.
   - `gitleaks detect --no-git` on the guide found no leaks.
   - `gh issue view 649` shows OPEN.
+
+## A, anti-duplication (Phase 7): 2026-10-11 (MDT)
+
+- **Decided:** PASS, 0 block, 3 warn (`handoff-A-dup.md`). F extended what the brief named: one new page under the
+  existing "Guidance" index, the obsolete `orchestrating.md` section rewritten in place, a comment-only script change, one
+  CHANGELOG entry; ADR-0021 sections 9 and 13 and the `wiring.rs` module doc are linked, not restated.
+- **Warns:** section 3's `profile apply` subsection repeats section 6's reference; the test's `SCANNED_TAGS` hand-mirrors
+  `docs_cli_test.rs:101` (follow-up: share it via `tests/fixture/mod.rs`); the #649 statements still rest on the open branch.
+- **Evidence:** `git diff 5d366b9..3d318df`; `docs/pane-control.md` (whole); `docs_pane_control_test.rs` (helpers and
+  tests); `docs_cli_test.rs:29,87-130`; `tests/fixture/mod.rs`; ADR-0021 heading lines 662 and 863 (anchors resolve).
