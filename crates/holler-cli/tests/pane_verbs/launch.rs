@@ -6,11 +6,13 @@
 //! `assert_matches` (the registry equals the fakes). The refusals before the act are in
 //! `launch/guards.rs`, the `--profile` cases in `launch/profiles.rs`, the harness server's
 //! cases of #802 (`serve_command` in the plan, the server run in the pane's tmux session, the
-//! health wait, `verify_serving`) in `launch/serve.rs`, and relaunch's cases in
-//! `relaunch.rs`, which reuses this rig.
+//! health wait, `verify_serving`) in `launch/serve.rs`, the OpenCode agent's result and
+//! refusals of #644 part 2 in `launch/agent.rs`, and relaunch's cases in `relaunch.rs`, which
+//! reuses this rig.
 
 pub(crate) mod rig;
 
+mod agent;
 mod displaced;
 mod guards;
 mod profiles;
@@ -163,15 +165,21 @@ fn launch_with_agent_stores_the_key_in_the_record() {
         &launch_with(&["--agent", "feature-implementor"]),
         Format::Json,
     );
-    data_of(&run);
+    let data = data_of(&run);
+    let record = rig.record(PANE).unwrap();
     assert_eq!(
-        rig.record(PANE)
-            .unwrap()
-            .opencode_agent
-            .as_ref()
-            .map(|key| key.as_str()),
+        record.opencode_agent.as_ref().map(|key| key.as_str()),
         Some("feature-implementor")
     );
+    // #644 part 2: the result reports it, and the one write that recorded the pane did.
+    assert_eq!(data["agent"], "feature-implementor", "{data}");
+    let puts = run
+        .calls
+        .panes
+        .iter()
+        .filter(|op| **op == PaneStoreOp::CasPut)
+        .count();
+    assert_eq!((puts, record.generation), (1, 1), "{:?}", run.calls.panes);
     rig.assert_matches(&run, PANE);
     rig.assert_no_keystroke();
 }

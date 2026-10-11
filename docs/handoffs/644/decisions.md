@@ -117,3 +117,38 @@ Run handoff directory `docs/handoffs/644` Â· branch `issue-644-implementation` Â
     `crates/holler-cli/tests/fixtures/cli-surface.txt`, `docs/adr/ADR-0021.md` (sections 2, 3, 8, 9, deferred and
     decided), `docs/adr/ADR-0003.md`, `docs/handoffs/644-brief-result-r1.md` (round 1's NV items), and
     `.aftersight/releases/claude/workflow/parallel-agent-coexistence.md`.
+
+## T, author tests (RED): 2026-10-11T10:50-06:00 (MDT)
+
+- **Decided:** RED is valid (`docs/handoffs/644/handoff-T-red.md`).
+  - **New tests.** `crates/holler-cli/tests/pane_verbs/launch/agent.rs` holds six tests: the text line (and its golden form
+    with no agent), the quoting of `-`, `data.agent` and its key order, `--spec-only`, the help text of both verbs, and
+    one refusal table each for launch and relaunch. Elsewhere there are two new `profile_diff_test.rs` tests and one
+    new `profile_verbs/show.rs` test.
+  - **Extended tests.** `launch_with_agent_stores_the_key_in_the_record`, both of #700's relaunch agent tests,
+    `launch_with_profile_adds_the_spec_and_bumps_once`, and `spec_field_values_serialize_like_the_spec` (16 `PATHS`).
+  - **Result.** 13 tests fail on assertions about the missing behavior, and clippy is clean.
+  - **Applied A's notes for T.** Existing tests are extended rather than copied (warn 5). The message is the
+    harness's message plus the step, once (warn 3). The key prints through `text_value`, so `-` prints as `"-"` (warn
+    2). A refused relaunch is asserted as `StopOwned` twice with the record unchanged (warn 4). Key order is read on the
+    raw stdout.
+- **Assumed:**
+  - O folds A's warn 2 into the brief (the `-` quoting) as A recommended. If O declines, F must not meet it by a second
+    escaper: drop `a_key_that_reads_as_the_empty_value_is_quoted` instead.
+  - `agent-unusable` is a stand-in string for #642 part 3's code. The test needs no #642 code, and any open code would
+    serve.
+- **Hedged:**
+  - The two refusal-table tests pass before F. Scope 3 makes that behavior #802's, so they are regression pins, not a
+    RED for F. I kept them because Acceptance 4 and 5 ask for them, and they add the relaunch, `agent-mismatch` and
+    `--profile` cells that #802 did not test.
+  - The new field is reached by its path through `SpecField::ALL`, never by its variant name. This keeps the RED free of
+    compile errors, and it is how `profile show` reaches the field.
+- **Evidence:**
+  - `cargo test -p holler-pane --test profile_diff_test` (3 failed of 11), `cargo test -p holler-cli --test pane_verbs`
+    (9 failed of 275), `cargo test -p holler-cli --test profile_verbs` (1 failed of 45).
+  - `cargo clippy -p holler-cli -p holler-pane --all-targets -- -D warnings` (clean, after the refusal asserts moved
+    into one helper for `cognitive_complexity`).
+  - `wc -l` on every test file touched. A grep found no other test that pins the full `profile show` field block or the
+    exact `data` keys.
+  - An accidental `cargo fmt --all` reformatted about 180 unrelated files. I reverted them with `git checkout`, and only
+    my hunks remain.
