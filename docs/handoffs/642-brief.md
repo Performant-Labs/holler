@@ -34,18 +34,18 @@ Each is final; the reason follows it.
 
 Every test is named in a file below. "Stub" is the hermetic HTTP stub of `tests/support/stub.rs` (as `hermetic_test.rs` uses it). Existing tests that pin the OpenCode adapter's `agent-unsupported` refusal (`tests/hermetic_test.rs` near line 647, `tests/real_opencode_test.rs` near line 333) are changed in place to the new behaviour. **RED note for T:** these tests call methods that exist, so RED is an assertion failure (`serve_command` with an agent still answers `agent-unsupported`, `send_prompt` still answers `prompt-unsupported`), not a compile error.
 
-1. **`tests/agent_test.rs` (new, hermetic):** `serve_command` with `Some(plan)` under `ProcessEnv::Inherit` returns exactly `env -u OPENCODE_DISABLE_TERMINAL_TITLE OPENCODE_CONFIG_CONTENT={"default_agent":"plan"} <bin> serve --port P --hostname 127.0.0.1 <serve_args>` (pinned as a whole argv); under `ProcessEnv::Isolated` the pair comes after the configured pairs; with a configured `OPENCODE_CONFIG_CONTENT=x` pair in `Isolated` the adapter's assignment is the later one; `Some(key)` for several valid keys (`plan`, `orchestrator`, `a-b_c`) carries the key in exactly one element.
-2. **`tests/agent_test.rs`:** `serve_command` with `None` returns the same argv as before this part, byte for byte (the pin of the previous behaviour), and sends nothing (the stub saw no request).
+1. **`tests/agent_test.rs` (new, hermetic):** `serve_command` with `Some(plan)` under `ProcessEnv::Inherit` returns exactly `env -u OPENCODE_DISABLE_TERMINAL_TITLE OPENCODE_CONFIG_CONTENT={"default_agent":"plan"} <bin> serve --port P --hostname 127.0.0.1 <serve_args>` (pinned as a whole argv; called with the suite's `pane_name()`, `demo-c1r1` (E27), which the argv does not depend on (E6: the pane's name is not on the argv; E10 passes it as `_name`), and with the config E31's `serving` builds, so `<bin>` is `BIN` and `<serve_args>` is `--pure`); under `ProcessEnv::Isolated` the pair comes after the configured pairs; with a configured `OPENCODE_CONFIG_CONTENT=x` pair in `Isolated` the adapter's assignment is the later one; `Some(key)` for several valid keys (`plan`, `orchestrator`, `a-b_c`) carries the key in exactly one element.
+2. **`tests/agent_test.rs`:** `serve_command` with `None` returns the same argv as before this part, byte for byte (the pin of the previous behaviour: the argv #802's `ac8_serve_command_is_the_server_argv_behind_the_env_prefix` pins under both `ProcessEnv::Inherit` and `ProcessEnv::Isolated`, E31; that test keeps passing unchanged), and sends nothing (the stub saw no request).
 3. **`tests/agent_test.rs`:** `verify_serving` with `None` returns `Ok(())` and the stub saw **no** request.
-4. **`tests/agent_test.rs` (Stub):** with `Some(plan)` and the stub answering `GET /config` `{"default_agent":"plan"}` and `GET /agent` `[{"name":"plan","mode":"primary","native":true,"hidden":null}, ...]`: `Ok(())`, and exactly those two requests were made.
-5. **`tests/agent_test.rs` (Stub):** each of these is `Refused` with code `agent-unusable` and a one-line message naming the key and the reason of D4: `/config` default is another agent; the agent is absent from `/agent`; its `mode` is `subagent`; its `hidden` is `true`. No reply body appears in any message.
-6. **`tests/agent_test.rs` (Stub):** `/config` or `/agent` answering the web app's HTML with a 200 is `unavailable` (one line naming the route and port); a refused port is `unavailable`; a server that accepts and never answers is `timeout` with `op` `harness.verify_serving`, within `Timeouts.call` plus the suite's usual slack.
-7. **`tests/prompt_test.rs` (new, Stub):** `send_prompt` posts to `/session/:id/prompt_async` exactly `{"parts":[{"type":"text","text":TEXT}]}` (no `agent` key, bare route) and returns `Ok(())` on `204`; a 404 on `GET /session/:id` is `session-not-found` and nothing was posted; a `200` HTML answer to the post is `unavailable`; a `500` is `unavailable`; the prompt text appears in no error message (a distinctive text is searched for).
-8. **`tests/prompt_test.rs` (Stub):** `session_activity` is `HoldingQuestion` for a `/question` item with this session's `sessionID` and for a `/permission` item with it; an item for another session does not count; `Busy` for `/session/status` `{"<id>":{"type":"busy"}}`; `Idle` for `{}`; `Idle` for an entry of type `idle`; with `/session/status` answering HTML, the message-list fallback gives `Busy` for a last assistant message without `time.completed` and `Idle` for a completed one; with the fallback unusable too, `unavailable`.
-9. **`tests/hermetic_test.rs` (changed in place):** the test near line 647 now asserts the new `serve_command`/`verify_serving` behaviour for an agent instead of `agent-unsupported`; no test file passes 900 lines.
+4. **`tests/agent_test.rs` (Stub):** with `Some(plan)` and the stub answering `GET /config` `{"default_agent":"plan"}` and `GET /agent` `[{"name":"plan","mode":"primary","native":true,"hidden":null}, ...]`: `Ok(())`, and exactly those two requests were made. The same holds when the `plan` element has no `hidden` key at all, the shape OpenCode itself answers (E21: `hidden` is absent unless it is true): an absent `hidden` is "not `true`".
+5. **`tests/agent_test.rs` (Stub):** each of these is `Refused` with code `agent-unusable` and a one-line message naming the key and the reason of D4: `/config` default is another agent (pinned at least as `{"default_agent":"build"}`, the agent a pane runs as when the variable did not reach its server, D4(a), and as a `/config` object with no `default_agent` key; each is refused with the message `the server's default agent is not plan`); the agent is absent from `/agent`; its `mode` is `subagent`; its `hidden` is `true`. No reply body appears in any message.
+6. **`tests/agent_test.rs` (Stub):** `/config` or `/agent` answering the web app's HTML with a 200 is `unavailable` (one line naming the route and port); a refused port is `unavailable`; a server that accepts and never answers is `timeout` with `op` `harness.verify_serving`, within `Timeouts.call` plus the suite's `SLACK` (300 ms, E27).
+7. **`tests/prompt_test.rs` (new, Stub):** `send_prompt` posts to `/session/:id/prompt_async` exactly `{"parts":[{"type":"text","text":TEXT}]}` (no `agent` key, bare route) and returns `Ok(())` on `204`; a 404 on `GET /session/:id` is `session-not-found` and nothing was posted, and so is a 400 (D6; `known`, E29, reads a 400 as a malformed id); any other answer to `GET /session/:id`, a `500` or a `200` that is not that session, is `unavailable` and nothing was posted (E29); a `200` HTML answer to the post is `unavailable`; a `500` is `unavailable`; the prompt text appears in no error message (a distinctive text is searched for).
+8. **`tests/prompt_test.rs` (Stub):** `session_activity` is `HoldingQuestion` for a `/question` item with this session's `sessionID` and for a `/permission` item with it; an item for another session does not count; `Busy` for `/session/status` `{"<id>":{"type":"busy"}}`, for an entry of type `retry` (`{"<id>":{"type":"retry"}}`: OpenCode 1.19.0's session status is `idle`, `retry` or `busy`, E32) and for an entry with no `type` (D7(b): its `type` is not `idle`); `Idle` for `{}`; `Idle` for an entry of type `idle`; with `/session/status` answering HTML, the message-list fallback gives `Busy` for a last assistant message without `time.completed` and `Idle` for a completed one; the fallback decides as well when `/session/status` answers a `500` whose body is a JSON object, or a `200` whose JSON is `[]` (D7(c)'s "does not answer an object", read the way `settled` reads that route, E12, through `json_of`, E30, which reads only a `200`), so an error object is never taken for an empty status; with the fallback unusable too, `unavailable`.
+9. **`tests/hermetic_test.rs` (changed in place):** the test near line 647 now asserts the new `serve_command`/`verify_serving` behaviour for an agent instead of `agent-unsupported`; no test file reaches 900 lines (`scripts/lint.sh` fails any `.rs` file under `crates` at 900 lines or more).
 10. **Conformance:** `OpenCodeHarness` passes `run_harness_conformance` from `holler-pane-testkit` (including #802's agent case, which now takes the "argv carries the key" branch), through the launcher of `tests/real_opencode/rig.rs` for the opt-in run, and `tests/hermetic_test.rs`' existing conformance use for the stub run.
-11. **`tests/real_opencode_test.rs` (opt-in `#[ignore]`, `HOLLER_TEST_OPENCODE=1`, no model call):** `agent_default_reaches_the_first_message`: start one server through `serve_command` with `plan` and one with `None` (the rig's launcher), `verify_serving` is `Ok` for the first; send a **raw** `POST /session/:id/prompt_async` whose body is exactly `{"parts":[{"type":"text","text":"hello"}]}` (the rig's raw helper, not the adapter) and assert the first assistant message's `info.agent` and `info.mode` are `plan` for the first server and the server's default for the second (tolerate its `error`); a second test asserts `verify_serving` refuses, `agent-unusable`, `explore` (a subagent), `title` (hidden) and an unknown key on real servers started with them; a third that `send_prompt` answers `Ok` and `session_activity` reads `Idle` once the turn has ended (poll within `Timeouts.settle`). The rig keeps its dead-end provider check after every server it starts.
-12. **Docs:** the crate doc comment in `src/lib.rs` (the "agent ... until then ... refuse" sentences and the "No per-pane environment" decision) says the agent is applied through `OPENCODE_CONFIG_CONTENT`, verified by `verify_serving`, and that `send_prompt` and `session_activity` are real; the rig's header ("No prompt is ever sent", `rig.rs` lines 7-9) and `tests/real_opencode_test.rs` lines 10-12 say a prompt is sent only by the agent test; ADR-0021 section 2 (the "harness server as amended" decision 5, "HarnessPort as built" fact 7), section 8 ("The prompt and activity seam": the adapter now replaces both defaults) and the Deferred bullets ("Applying `Pane.opencode_agent`...", "The refusal of a pane that is not idle...") are updated, and `agent-unusable` is listed where the code tables list `agent-unsupported`; `CHANGELOG.md` has an `## [Unreleased]` entry linking this issue.
+11. **`tests/real_opencode_test.rs` (opt-in `#[ignore]`, `HOLLER_TEST_OPENCODE=1`, no model call):** `agent_default_reaches_the_first_message`: start one server through `serve_command` with `plan` and one with `None` (the rig's launcher), `verify_serving` is `Ok` for the first and, asked for `plan`, refuses `agent-unusable` (`the server's default agent is not plan`) for the second, a real server the variable did not reach (the incident D4(a) exists to catch); send a **raw** `POST /session/:id/prompt_async` whose body is exactly `{"parts":[{"type":"text","text":"hello"}]}` (the rig's raw helper, not the adapter) and assert the first assistant message's `info.agent` and `info.mode` are `plan` for the first server and the server's default for the second (tolerate its `error`); a second test asserts `verify_serving` refuses, `agent-unusable`, `explore` (a subagent), `title` (hidden) and an unknown key on real servers started with them; a third that `send_prompt` answers `Ok` and `session_activity` reads `Idle` once the turn has ended (poll within `Timeouts.settle`), the turn's end read from the raw server and not from the adapter: the rig's raw `GET /session/:id/message` shows the turn's assistant message with `info.time.completed` (E21's shape; its `error` tolerated) before `session_activity` is asked. The rig keeps its dead-end provider check after every server it starts.
+12. **Docs:** the crate doc comment in `src/lib.rs` (the "agent ... until then ... refuse" sentences and the "No per-pane environment" decision) says the agent is applied through `OPENCODE_CONFIG_CONTENT`, verified by `verify_serving`, and that `send_prompt` and `session_activity` are real, and its corrected "No per-pane environment" bullet (E8) says that `OPENCODE_CONFIG_CONTENT` is the one variable the adapter adds, on the server's argv only (never the TUI's) and only for a spec with an agent, carrying only `{"default_agent":KEY}`, placed after the prefix's own words so that it replaces a same-named `ProcessEnv::Isolated` pair and an inherited value (D2); the `AGENT_UNSUPPORTED` doc in `crates/holler-pane/src/ports.rs` no longer says "the OpenCode adapter answers it for every agent until #642 part 3" (lines 308-309 at `3fe111d`, E4; comment-only, D9; at `3fe111d` the module doc of `crates/holler-pane/src/lib.rs` carries no such sentence); the rig's header ("No prompt is ever sent", `rig.rs` lines 7-9) and `tests/real_opencode_test.rs` lines 10-12 say a prompt is sent only by the agent test; ADR-0021 section 2 (the "harness server as amended" decision 5, "HarnessPort as built" fact 7), section 8 ("The prompt and activity seam": the adapter now replaces both defaults) and the Deferred bullets ("Applying `Pane.opencode_agent`...", "The refusal of a pane that is not idle...") are updated, and `agent-unusable` is listed where the code tables list `agent-unsupported`; `CHANGELOG.md` has an `## [Unreleased]` entry linking this issue.
 
 ## Blast radius
 
@@ -65,6 +65,8 @@ Every test is named in a file below. "Stub" is the hermetic HTTP stub of `tests/
 
 #802 is not merged at the time of writing (PR pending, tree `3fe111d`). The signatures and file:line quotes below (E1 to E10) are the **pre-merge reading of that tree**; this story is built after #802 merges, and if the merged code differs from the quote, the merged code wins and the brief is patched before the run builds.
 
+**Checked at the brief gate (2026-10-11, review round 1).** Every excerpt cut from a file of this repository (E1 to E20, E22 to E31) matches `git show 3fe111d:<path> | sed -n A,Bp` byte for byte, so each can be checked against that commit, the tip of branch `issue-802-implementation`; D8's line counts are `3fe111d`'s (`src/lib.rs` 599, `src/server.rs` 76, `tests/hermetic_test.rs` 813). The worktree this run was given is **not** that tree: its branch `issue-642-implementation` is cut from `origin/main` at `263a2d7`, which does not contain #802 (issue #802 is open and has no PR yet). There `crates/holler-pane/src/ports.rs` still declares `fn serve(&self, name: &PaneName, port: u16) -> Result<u32, PaneError>` (line 186) and no crate names `ServeSpec`; `src/server.rs` is 189 lines and its `serve` spawns the server as a `Child`; `src/lib.rs` is 555 lines and `tests/hermetic_test.rs` 798; and only E5 and E13 to E18 read the same at their stated lines. So the precondition of "Depends on" and "Pipeline" (#802 merged, this branch cut from an `origin/main` that contains it) is not met by this worktree: the evidence describes `3fe111d`, not it.
+
 ## Pipeline
 
 `rigor: second-opinion`. Fresh worktree, branch `issue-642-implementation` off `origin/main` after #802 merged.
@@ -79,7 +81,7 @@ This issue was drafted by Claude (Sonnet 5.5) from the operator's decisions in s
 
 ## Evidence (verbatim)
 
-Every excerpt is cut by `sed -n A,Bp` from the file at the stated line numbers of the #802 tree (`3fe111d`, pre-merge) or of the repository, never retyped. E21 is the output of commands run against a scratch `opencode serve`.
+Every excerpt is cut by `sed -n A,Bp` from the file at the stated line numbers of the #802 tree (`3fe111d`, pre-merge) or of the repository, never retyped. E21 is the output of commands run against a scratch `opencode serve`. E32 is cut from the text of the installed OpenCode binary (E32 says how).
 
 ### E1. ServeSpec (the spec serve_command and verify_serving take)
 `crates/holler-pane/src/ports.rs:99-133`
@@ -1243,6 +1245,132 @@ GET  /session/<id>/message | jq -c '[.[]|{role:.info.role,agent:.info.agent,mode
   -> [{"role":"user","agent":"plan","mode":null,"error":null,"completed":null},{"role":"assistant","agent":"plan","mode":"plan","error":null,"completed":1791722748214}]
 GET  /session/status          -> {}
 ~~~~
+
+### E29. lib.rs: known and session_reply (the existence check D6 reuses, and what each answer to it means)
+`crates/holler-adapter-opencode/src/lib.rs:467-487`
+
+~~~~
+/// The existence check `GET /session/<id>`: `Ok` when the server holds that session. A 404,
+/// or a 400 (a malformed id), is `session-not-found`. Any other answer, a 200 that is not
+/// that session included, is `unavailable`.
+fn known(call: &Call, path: &str, id: &str) -> Result<(), PaneError> {
+    session_reply(call, path, id).map(drop)
+}
+
+/// [`known`]'s request and rules, also returning the reply and its JSON object, the session,
+/// for a step that reads more of it (`attach_tui` reads its `directory`).
+fn session_reply(call: &Call, path: &str, id: &str) -> Result<(Reply, Value), PaneError> {
+    let reply = call.send(GET_SESSION, path, None)?;
+    if matches!(reply.status, 400 | 404) {
+        return Err(PaneError::SessionNotFound {
+            what: id.to_owned(),
+        });
+    }
+    match json_of(&reply) {
+        Some(session) if string_at(Some(&session), "id") == Some(id) => Ok((reply, session)),
+        _ => Err(call.unexpected(GET_SESSION, &reply, "that session")),
+    }
+}
+~~~~
+
+### E30. lib.rs: json_of (only a 200 is read, so "answers an object" means a 200 whose JSON is an object)
+`crates/holler-adapter-opencode/src/lib.rs:555-562`
+
+~~~~
+/// The JSON of a `200` reply; `None` for another status or a body that is not JSON.
+fn json_of(reply: &Reply) -> Option<Value> {
+    if reply.status == 200 {
+        serde_json::from_slice(&reply.body).ok()
+    } else {
+        None
+    }
+}
+~~~~
+
+### E31. hermetic_test.rs: #802's pin of the argv with no agent (the previous behaviour of acceptance 2; `BIN`, line 531, is `/opt/oc/bin/opencode`)
+`crates/holler-adapter-opencode/tests/hermetic_test.rs:541-605`
+
+~~~~
+fn strings(argv: &Argv) -> Vec<&str> {
+    argv.as_slice().iter().map(String::as_str).collect()
+}
+
+/// An adapter with `env` and `serve_args` `["--pure"]`, naming [`BIN`].
+fn serving(env: ProcessEnv) -> OpenCodeHarness {
+    let mut config = config(BIN, quick());
+    config.serve_args = vec!["--pure".to_owned()];
+    config.env = env;
+    OpenCodeHarness::new(config)
+}
+
+/// The isolated environment of the cases: a scratch `HOME` and one `XDG_*` dir.
+fn isolated() -> ProcessEnv {
+    ProcessEnv::Isolated(vec![
+        ("HOME".to_owned(), "/tmp/hlr802/home".to_owned()),
+        ("XDG_DATA_HOME".to_owned(), "/tmp/hlr802/data".to_owned()),
+    ])
+}
+
+/// #802 AC 5: with no agent, `serve_command` is the argv `start()` built before (`serve
+/// --port P --hostname 127.0.0.1`, then `serve_args`), behind the one `env` prefix the TUI's
+/// argv also uses: `env -u OPENCODE_DISABLE_TERMINAL_TITLE` under `Inherit`, `env -i K=V ...`
+/// under `Isolated`.
+#[test]
+fn ac8_serve_command_is_the_server_argv_behind_the_env_prefix() {
+    let name = pane_name();
+    let inherit = serving(ProcessEnv::Inherit)
+        .serve_command(&name, 48123, &ServeSpec::default())
+        .unwrap();
+    assert_eq!(
+        strings(&inherit),
+        [
+            "env",
+            "-u",
+            "OPENCODE_DISABLE_TERMINAL_TITLE",
+            BIN,
+            "serve",
+            "--port",
+            "48123",
+            "--hostname",
+            "127.0.0.1",
+            "--pure"
+        ]
+    );
+    let isolated = serving(isolated())
+        .serve_command(&name, 48124, &ServeSpec::default())
+        .unwrap();
+    assert_eq!(
+        strings(&isolated),
+        [
+            "env",
+            "-i",
+            "HOME=/tmp/hlr802/home",
+            "XDG_DATA_HOME=/tmp/hlr802/data",
+            BIN,
+            "serve",
+            "--port",
+            "48124",
+            "--hostname",
+            "127.0.0.1",
+            "--pure"
+        ]
+    );
+}
+~~~~
+
+### E32. OpenCode 1.19.0: the status a `/session/status` entry carries, and the route (not a file of this repository)
+
+Cut from the text of the installed `opencode-ai` npm package, `"version": "1.19.0"` in its `package.json` (the version E21 probed), file `<npm prefix>/lib/node_modules/opencode-ai/bin/opencode.exe`, a compiled binary that carries the server's bundled, minified JavaScript (the short names are the bundler's). Each line below is the only occurrence of its text in that file, cut from its first character through its last and never retyped; the lines are not adjacent there.
+
+~~~~
+var ds=s.Union([s.Struct({type:s.Literal("idle")}),s.Struct({type:s.Literal("retry"),attempt:hn,message:s.String,action:rn(s.Struct({reason:s.String,provider:s.String,title:s.String,message:s.String,label:s.String,link:rn(s.String)})),next:hn}),s.Struct({type:s.Literal("busy")})]).annotate({identifier:"SessionStatus"})
+S(Fo,{Status:()=>ys,SessionStatusEvent:()=>Fo,Info:()=>ds,Idle:()=>cs,Definitions:()=>th})
+l=n.fn("SessionStatus.get")(function*(r){return(yield*re.get(o)).get(r)??{type:"idle"}}),i=n.fn("SessionStatus.list")(function*(){return new Map(yield*re.get(o))}),h=n.fn("SessionStatus.set")(function*(r,d){let f=yield*re.get(o);if(yield*e.publish(tn.Status,{sessionID:r,status:d}),d.type==="idle"){yield*e.publish(tn.Idle,{sessionID:r}),f.delete(r);return}f.set(r,d)})
+C.get("status",Dn.status,{query:J,success:A(T8,"Get session status"),error:N.BadRequest}).annotateMerge(M.annotations({identifier:"session.status",summary:"Get session status",description:"Retrieve the current status of all sessions, including active, idle, and completed states."}))
+T8=r.Record(r.String,Vr.Info)
+~~~~
+
+What the cuts show: a session's `SessionStatus` has one of three `type`s, `idle`, `retry` (with `attempt`, `message` and `next`) and `busy`; setting a session `idle` deletes its entry, and `get` answers `{type:"idle"}` for a session with none, which agrees with the spike's "absence means idle" (E13); the route `session.status` answers a record from a string to an `Info`, and the status module exports `ds` as its `Info`. Not traced: the import that makes the route's `Vr` that module (the bundler renamed it), so the route's value is tied to `ds` by these names, not by a followed import.
 
 ## Comments from the issue thread
 
