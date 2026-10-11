@@ -136,6 +136,8 @@ impl Wiring {
             .as_ref()
             .map(|config| config.session.clone())
             .unwrap_or_default();
+        // `move`: the closure owns `herdr_config` from here on, so it is `'static`, as
+        // `LazyHerdr::new` requires, and each build borrows the config from the closure.
         let lazy: Arc<dyn HerdrPort> =
             Arc::new(LazyHerdr::new(move || connect_herdr(&herdr_config)));
         let bindings = Bindings::new();

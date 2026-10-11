@@ -1,17 +1,52 @@
 # Handoff-F: Phase 6 (F, implement) - #649 hub wiring and the scratch integration scenario
 
 **Date:** 2026-10-11
-**Branch:** issue-649-implementation (worktree `.claude/worktrees/0649-live-harness`, head `ce5da11` plus this phase's
+**Branch:** issue-649-implementation (worktree `.claude/worktrees/0649-live-harness`, head `13010f4` plus this phase's
 staged changes)
 **Issue:** #649
 
-This handoff covers both F cycles.
-- **Second cycle (this one):** the re-entry after the diff gate's round-1 BLOCK, run on A's fifth pass (`2280399`) and
-  T-red's second cycle (`ce5da11`). It is described first.
-- **First cycle (`8b70771`):** its text follows. All of it still holds. Only the Tier 1 table and the file list are
-  updated, so they describe the tree as it is now.
+This handoff covers all three F cycles.
+- **Third cycle (this one):** the production half of the mixed rework after the diff gate's round-2 BLOCK. T took the
+  test half (B-1) in `13010f4`. It is described first.
+- **Second cycle (`22aa539`):** the re-entry after the diff gate's round-1 BLOCK, run on A's fifth pass (`2280399`) and
+  T-red's second cycle (`ce5da11`).
+- **First cycle (`8b70771`):** its text follows. All of it still holds.
+
+The Tier 1 section has one table per later cycle, each at that cycle's tree. The file list covers all three cycles.
 
 ## What was done
+
+### Third cycle
+
+Round 2 of the diff gate (`docs/handoffs/649-diff-result-r2.md`) blocked on two findings, and the driver classified
+them as mixed. B-1, the D8 test in `tests/pane_integration/bind.rs`, was T's (evidence and a comment, `13010f4`).
+B-2 is the production one. It reads `from_env`'s `LazyHerdr` closure in `wiring.rs` as borrowing the local
+`herdr_config`, and so as code that cannot compile.
+
+- **B-2 is refuted by the compiler.** The closure is `move || connect_herdr(&herdr_config)`. `move` takes the owned
+  `Result<HerdrConfig, PaneError>` into the closure, and `&herdr_config` borrows the closure's own field. So the
+  closure is `'static`, as `LazyHerdr::new` requires.
+  - At HEAD, `cargo build -p holler-cli --all-targets` and clippy `-D warnings` are clean.
+  - A mutation check confirms the reading. With `move` removed, `cargo check -p holler-cli` fails with `E0373`:
+    "closure may outlive the current function, but it borrows `herdr_config`, which is owned by the current
+    function". That is the error B-2 describes, for code without `move`. The file was restored with `git checkout`,
+    and `git status` was clean.
+- `crates/holler-cli/src/pane/wiring.rs`: a two-line comment above the closure. It says the closure owns
+  `herdr_config` (`move`), so it is `'static` as `LazyHerdr::new` requires. **No behaviour change.** It is there
+  because round 3's reviewer sees only the brief, the diff and `evidence.md`, never this handoff (Design decision 12).
+- `docs/handoffs/649/evidence.md`, two changes:
+  - **A new entry for B-2.** Neither `HerdrConfig` nor `PaneError` takes a lifetime or type parameter. Their
+    declarations are quoted and checked against source. So the value the closure owns holds no borrow of `from_env`'s
+    frame.
+  - **The sections reordered, newest first.**
+    - The gate attaches only the first 12,000 bytes of this file (`DUAL_REVIEW_EVIDENCE_MAX_BYTES`, default 12000).
+      Round 2's prompt shows the file cut there, with 9,925 bytes dropped.
+    - At 25,304 bytes, the file would have shown round 3 the same window as round 2. That window has none of T's
+      four entries for B-1, and no entry for B-2.
+    - Round 3 now sees, in full: T's B-1 entries, the B-2 entry, and round 1's four B-1 and B-2 entries. The cut
+      falls in round 1's conformance entry, as it did in round 2.
+    - Every existing entry is carried over byte for byte. A script assembled the file from line ranges of the old one
+      and asserted that no line was lost. A sorted-line diff shows that only the title and the intro changed.
 
 ### Second cycle
 
@@ -71,6 +106,34 @@ names, and `connect` is the real one.
 - `CHANGELOG.md`: an `## [Unreleased]` / Enhancements entry linking #649, #825 and #828.
 
 ## Design decisions
+
+### Third cycle
+
+12. **Answer B-2 where the next reviewer will read it: a comment in the diff, not a code change.**
+    - The closure is correct and idiomatic, so its code stays as it is.
+    - The answer cannot live in this handoff alone. Round 3's reviewer is given the brief, the diff and
+      `evidence.md`, and nothing else: the driver calls `dual-review.sh` without `--handoff`, and round 2's prompt
+      reads "Feature Handoff: (no handoff file)".
+    - The cost of a repeat is high. The run stops at the diff gate's third consecutive BLOCK
+      (`PER_GATE_BLOCK_THRESHOLD = 3` in the driver), and this would be the third.
+    - Two other ways were rejected:
+      - **Restructure the closure** (for example a `herdr_build(config) -> impl Fn() .. + Send + Sync + 'static`
+        helper) to remove the `&` that B-2 read as a borrow of a local. That is churn in reviewed, tested code, to work
+        around a misreading.
+      - **No change at all.** That would leave round 3 the same text that round 2 misread.
+    - The comment is two lines. It states the rule at the line B-2 cites, and is true for any reader.
+13. **The B-2 evidence entry quotes only the two type headers.**
+    - "A type with no lifetime or type parameter holds no borrow that is not `'static`" settles the one thing B-2
+      questions.
+    - Quoting all 23 variants of `PaneError` would also show `Send + Sync`, but it would cost about 800 of the 12,000
+      bytes, and B-2 does not question `Send + Sync`.
+14. **Reorder the evidence, don't trim it.**
+    - Rewriting entries to shrink them risks a misquote, and T's entries are T's to word. Reordering keeps every quote
+      exactly as it was checked.
+    - Within round 1's section, the two B-2 entries (`NoParams`, `params_of`) now come before the conformance entry.
+      So both of round 1's blocking answers are whole inside the cap. Conformance is supporting evidence for B-1, and
+      round 2 also saw it only in part.
+    - The intro now tells T and S to put a later round's entries above the existing ones, so they stay inside the cap.
 
 ### Second cycle
 
@@ -156,6 +219,7 @@ names, and `connect` is the real one.
 
 ## Reuse / extend-vs-new
 
+- **Third cycle:** nothing new. There is one comment inside the existing `from_env`, and one evidence entry.
 - **Second cycle:** nothing new. The fix is inside the existing `connect`, and the messages are inside the existing
   `env.rs` functions.
 - **Extended:** #670's `Wiring` (its body and fields replaced, `connect`/`ports` signatures kept) and the trial's three
@@ -176,6 +240,8 @@ names, and `connect` is the real one.
 
 ## Architecture notes for A
 
+- **Third cycle: no architecture change.** The cycle adds one comment and no code: no type, signature, module or
+  dependency changes. This cycle reports `archChanged: false`.
 - **Second cycle: no architecture change.** No new module, type, public item or dependency, and no signature change.
   `connect`'s lookup is a local closure, and the two message texts are private. This agrees with A's reading of W-T.
   This cycle reports `archChanged: false`.
@@ -192,6 +258,9 @@ names, and `connect` is the real one.
 
 ## Deviations from spec / wireframe
 
+- **Third cycle:** none from the brief.
+  - The evidence reordering moves T's round-2 section, unchanged, above F's sections. It is recorded in
+    `decisions.md`.
 - **Second cycle:** none from the brief.
   - The two message texts go beyond A's one line (Design decision 11).
   - The ADR sentence is D17's record of the rule.
@@ -213,7 +282,22 @@ names, and `connect` is the real one.
 
 ## Tier 1 self-check (incl. tests now GREEN)
 
-At this cycle's tree (`ce5da11` plus the staged changes):
+**Third cycle**, at `13010f4` plus this cycle's staged changes (one comment in `wiring.rs`):
+
+| Command | Result |
+|---|---|
+| `cargo build -p holler-cli --all-targets`, at HEAD and again after the comment | clean |
+| Mutation: `move` removed from the closure, then `cargo check -p holler-cli` | fails as expected with `E0373` at the closure (`wiring.rs:140` at HEAD): "closure may outlive the current function, but it borrows `herdr_config`, which is owned by the current function", and "function requires argument type to outlive `'static`". Restored with `git checkout`; `git status` clean |
+| `cargo clippy --workspace --all-targets -- -D warnings` (CI's flags) | clean, exit 0 |
+| `rustfmt --edition 2021 --check crates/holler-cli/src/pane/wiring.rs` | clean |
+| `bash scripts/lint.sh` | exit 0. The only warning is `holler-pane/src/error.rs is 713 lines`, a file this story does not touch. `wiring.rs` is 392 lines |
+| `bash scripts/changelog-check.sh` | ok |
+| `cargo machete` | no unused dependency |
+| `cargo test --workspace --no-fail-fast -- --skip roster_stays_accurate_under_concurrent_body_load` (CI's `test.unit.command`) | 151 test binaries: 2312 passed, **1 failed**, 32 ignored, the same figures as both earlier cycles. `pane_integration`: `ok. 61 passed; 0 failed; 4 ignored; ... finished in 119.10s`, including T's D8 test and the fake-hub timing pins. The one failure is the rename scan below. Its hits are `docs/handoffs/649-brief.md`, `decisions.md` and `handoff-T-green.md`; `git grep` finds none outside `docs/handoffs/` |
+| `evidence.md` quotes (a script) | 23 entries and 344 quoted lines, each found verbatim in a file its entry cites, library sources included. The two new quotes were checked at their line numbers |
+| Opt-in scenario | not re-run. This cycle changes one comment, and no code; the last run was 4/4 at `22aa539` |
+
+**Second cycle**, at `ce5da11` plus that cycle's staged changes:
 
 | Command | Result |
 |---|---|
@@ -241,6 +325,19 @@ At this cycle's tree (`ce5da11` plus the staged changes):
 
 `docs/handoffs/649/evidence.md`.
 
+**Third cycle**, under "The source that round 2 of the diff gate asked for (F, third cycle)":
+- **B-2:** the declarations of `HerdrConfig` (`holler-adapter-herdr/src/adapter.rs:73-74`) and `PaneError`
+  (`holler-pane/src/error.rs:402-403`). Neither has a lifetime or type parameter. Both quotes were checked line by line
+  against the files.
+- **The order is now newest first**, so the gate's 12,000-byte window holds:
+  1. T's four B-1 entries (bytes 378-3,757);
+  2. the B-2 entry (3,757-4,884);
+  3. round 1's B-1 entries (`into_result`, serde's `Option`) and its B-2 entries (`NoParams`, `params_of`), which run
+     to byte 10,781.
+- The cut falls in round 1's conformance entry. I rendered the file through the gate's own `awk` cap to check.
+- Past the cut are the rest of round 1's section (NV-4, NV-5, W-T) and the first cycle's ten entries. Six of those
+  ten repeat what the brief's own Evidence quotes (E23, E27, E33, E34, E57, E70).
+
 **Second cycle**, under "The source that round 1 of the diff gate asked for". These are the facts W-S lists, for round
 2's reviewer:
 - **B-1:** `PaneReply.data` and `into_result`; serde's `Option` and `serde_json`'s `deserialize_option` at the locked
@@ -267,13 +364,32 @@ on the gate to attach them.
 
 ## Tests that look wrong (for T)
 
-None. T's call, not a defect:
+**Third cycle:** none. Round 2's B-1 was test-only, and T answered it in `13010f4`. The D8 test passes, and F did not
+touch it. This cycle only moved T's evidence section, unchanged, to the top of `evidence.md`, so that the gate shows it.
+
+**Second cycle:** none. T's call, not a defect:
 - No row pins a non-UTF-8 value for a variable other than `HOLLER_TMUX_SOCKET`. The empty-value rows of `env.rs` cover
   each reader, and the process lookup is one closure that every variable goes through. So a second process-level row
   (such as `HOLLER_HERDR_SOCKET`, against the `HERDR_SOCKET_PATH` fallback) would pin the same line twice.
 
 ## Known issues
 
+- **Third cycle, for O: two gaps in the diff gate's inputs.** Both are the pipeline's, not this story's, and are to be
+  filed in Aftersight.
+  - **The evidence cap is below this run's evidence file.**
+    - `dual-review.sh` keeps only the first `DUAL_REVIEW_EVIDENCE_MAX_BYTES` (12,000) bytes of `evidence.md`. The role
+      docs tell F and T to append, so each round's newest answers land past the cap.
+    - Round 2's reviewer saw no `NoParams` entry, which was round 1's B-2 answer. Without this cycle's reordering,
+      round 3 would not have seen T's B-1 entries either.
+    - Raising the variable in `.env` for this run is the operator's call. I did not change configuration.
+  - **The diff gate never sees F's handoff.** The driver passes no `--handoff`, so every round's prompt has "Feature
+    Handoff: (no handoff file)". An answer written only in the handoff does not reach the reviewer.
+- **Third cycle: round 3 may still find something new.** 12,000 bytes cannot hold every unchanged-source fact the
+  change relies on.
+  - The first cycle's ten entries are now past the cap.
+  - Six of them repeat facts the brief's own Evidence quotes (E23, E27, E33, E34, E57, E70).
+  - The other four back statements that the brief makes itself, in D3, D8 and D31: `transport::call`, the state dir,
+    `send_over`'s error sources, and the adapter's deadline.
 - **A non-UTF-8 `HOLLER_HERDR_WORKSPACES` reads as no workspace, not as `usage`.** This is Design decision 9. It fails
   closed: every launch is refused `unavailable` ("workspace ... is not configured"), and no Herdr pane is made.
 - **A non-UTF-8 `XDG_CONFIG_HOME` reads as empty.** The XDG rule takes empty as unset, so the socket default uses
@@ -293,14 +409,16 @@ None. T's call, not a defect:
 
 ## Files changed
 
-Production files, both cycles (this cycle's marked):
-- `crates/holler-cli/src/pane/wiring.rs` (this cycle too)
+Production files, all three cycles (marked by cycle where a later cycle touched them):
+- `crates/holler-cli/src/pane/wiring.rs` (second cycle; third cycle, a comment only)
 - `crates/holler-cli/src/pane/wiring/bind.rs`
-- `crates/holler-cli/src/pane/wiring/env.rs` (this cycle too)
+- `crates/holler-cli/src/pane/wiring/env.rs` (second cycle)
 - `crates/holler-cli/src/pane/wiring/store.rs`
 - `crates/holler-cli/Cargo.toml`
-- `docs/adr/ADR-0021.md` (this cycle too)
+- `docs/adr/ADR-0021.md` (second cycle)
 - `CHANGELOG.md`
 
-Pipeline scratch: `docs/handoffs/649/handoff-F.md`, `docs/handoffs/649/evidence.md`, and the F entries in
-`docs/handoffs/649/decisions.md`.
+The third cycle changes only `wiring.rs` in production.
+
+Pipeline scratch: `docs/handoffs/649/handoff-F.md`, `docs/handoffs/649/evidence.md` (third cycle: one entry, and the
+sections reordered), and the F entries in `docs/handoffs/649/decisions.md`.

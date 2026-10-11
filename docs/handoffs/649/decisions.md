@@ -515,3 +515,42 @@
   - Workspace: 2312 passed, 1 failed (the rename scan, scratch only), 32 ignored.
   - `docs_cli_test` 3/3 and `wire_selftest` 3/3; `lint.sh`, `changelog-check` and `machete` clean.
   - The excerpts were checked against source by script. One range was corrected from 356-368 to 356-367.
+
+## F (Phase 6, implement, third cycle: the production half of the mixed rework after the diff gate's round-2 BLOCK) — 2026-10-11T15:00:59-06:00
+- **Decided:**
+  - **B-2 (`wiring.rs`, `from_env`'s `LazyHerdr` closure) needs no code change.** The closure is
+    `move || connect_herdr(&herdr_config)`. It owns the `Result<HerdrConfig, PaneError>` it captures, so it is
+    `'static`, as `LazyHerdr::new` requires. The build is clean.
+  - **A two-line comment at the closure states that rule.** Round 3's reviewer sees the diff and `evidence.md`, never
+    the handoff, and a third consecutive diff-gate BLOCK stops the run. No behaviour change.
+  - **One evidence entry for B-2:** the declarations of `HerdrConfig` and `PaneError`, neither with a lifetime or type
+    parameter.
+  - **`evidence.md` reordered newest first; every entry carried over verbatim.** The gate shows only the first 12,000
+    bytes. In the old order, round 3 would have seen neither T's B-1 entries nor the B-2 entry.
+  - T's section is unchanged in content, and moved to the top. Within round 1's section, the B-2 entries now come
+    before the conformance entry.
+- **Assumed:**
+  - Round 3 is assembled as round 2 was: `--evidence <handoff dir>/evidence.md`, the default 12,000-byte cap, no
+    `--handoff`, and source excerpts used up by the brief's own citations first. This is read from the driver and
+    `dual-review.sh`, and from round 2's prompt.
+- **Hedged:**
+  - A fresh round-3 reviewer may raise something new. The first cycle's ten entries are now past the cap, though six
+    of them repeat the brief's own Evidence.
+  - The tail of the 12,000-byte window is a partial conformance excerpt. Round 2 had the same, with no finding on it.
+- **Evidence:**
+  - **Mutation:** with `move` removed, `cargo check -p holler-cli` fails `E0373` ("closure may outlive the current
+    function, but it borrows `herdr_config`"). The file was restored with `git checkout`, and `git status` was clean.
+  - **Clean at the staged tree:** `cargo build -p holler-cli --all-targets`; `cargo clippy --workspace --all-targets
+    -- -D warnings`; `rustfmt --check` on `wiring.rs`; `scripts/lint.sh` (exit 0; the only warning is the existing
+    one on `holler-pane/src/error.rs`).
+  - **Workspace** (CI's command, with `--no-fail-fast`): 151 binaries; 2312 passed, 1 failed, 32 ignored.
+    `pane_integration` is 61/0/4. The failure is the rename scan, whose hits are only under `docs/handoffs/`.
+  - **Evidence quotes:** each checked by script against its file and line. The new file was rendered through the
+    gate's `awk` cap to place the cut.
+  - **Nothing lost:** a sorted-line diff between the old and the new `evidence.md` shows only the replaced title and
+    intro removed.
+  - **Read:**
+    - `649-diff-result-r2.md` and its prompt's evidence, diff and excerpt sections;
+    - `dual-review.sh` (`build_evidence_section`, `EVIDENCE_MAX_BYTES`, `DEFAULT_EXCLUDES`, `--handoff`);
+    - the driver's diff-gate loop, `shouldEscalate` and `PER_GATE_BLOCK_THRESHOLD`;
+    - `handoff-T-green.md` and `handoff-T-red.md`.
