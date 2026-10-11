@@ -58,3 +58,1174 @@ This issue was drafted by Claude (Sonnet 5.5) from the operator's decisions in s
    - "Decisions taken": append "10. A Herdr snapshot pane carries its label, the join key for import (operator, 2026-10-11, #808)."
 6. **`HerdrPane` equality.** If the field is on `HerdrPane` (which derives `PartialEq, Eq`), the brief names every place that compares a record's `HerdrPane` with a snapshot entry and shows each ignores the label; if any cannot, the label goes on a separate snapshot-entry type instead and `HerdrPane` stays unchanged. The survey decides by reading `reconcile.rs`, `observe.rs` and the doctor code.
 7. **Evidence.** The reviewers cannot see the repo; the brief quotes the excerpts it relies on: `HerdrPane`/`HerdrSnapshot` (`pane.rs:93-100`, `ports.rs:96-101`), `HerdrPort::ensure_pane`/`snapshot`, `Adapter::snapshot`, and the `PaneInfo` parsing, with file and line.
+
+## Survey and evidence (brief gate, round 1 amendment, 2026-10-11)
+
+The outside review of round 1 blocked this brief because the survey that clarifications 1, 4, 6 and 7 call for was not in it. This section is that survey; the review's findings are named below by their ids (B-, NV-, W-, NIT-). Every source it relies on is quoted verbatim, with file and line, as of this branch's base, `main` at `92fbc6e4186acc717f4aa2b6465c55a266b9043c` (the branch's commits before T touch only `docs/handoffs/`). This section adds to the brief. It changes neither the operator's decision nor any scope item, acceptance criterion or clarification above; where a line number cited above is off, the right one is given here.
+
+In short:
+
+- `HerdrSnapshot.panes` is a `Vec<HerdrPane>`, and the persisted record `Pane` holds a `HerdrPane` as its `herdr` field (E1, E2).
+- The label comes from the `PaneInfo` objects of `session.snapshot`, `pane.split` and `workspace.create`, which the adapter already requests: no new method and no new call (E4).
+- Every comparison in reconcile and doctor ignores the label. One comparison in the launch engine would see it, and it can ignore it. By clarification 6's rule the label is therefore a field on `HerdrPane` (E5).
+- Constraints (b) and (c) then need two changes in `crates/holler-pane/src/tx_launch.rs`, which the blast radius did not list. E9 adds them, and four tests, to the scope and the acceptance criteria.
+
+### E1. `HerdrSnapshot` holds `HerdrPane`s (B-1, NV-1)
+
+`HerdrSnapshot` has one field, `panes: Vec<HerdrPane>`. The struct is `crates/holler-pane/src/ports.rs:96-101` and the field is line 100 (scope item 1 cites line 99, the `struct` line). A field added to `HerdrPane` is therefore on every snapshot entry, with no other type between them.
+
+`crates/holler-pane/src/ports.rs:96-101`
+~~~~text
+96| /// What Herdr reports about every pane it has.
+97| #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+98| #[serde(deny_unknown_fields)]
+99| pub struct HerdrSnapshot {
+100|     pub panes: Vec<HerdrPane>,
+101| }
+~~~~
+
+`crates/holler-pane/src/pane.rs:91-100`
+~~~~text
+91| /// Where a pane sits in Herdr: its session, workspace, Herdr's id for it and its
+92| /// grid cell. Also what `HerdrPort::ensure_pane` returns for a pane that exists.
+93| #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+94| #[serde(deny_unknown_fields)]
+95| pub struct HerdrPane {
+96|     pub session: String,
+97|     pub workspace: String,
+98|     pub pane_id: PaneId,
+99|     pub grid: GridPos,
+100| }
+~~~~
+
+The two implementations the conformance suite runs against build every snapshot entry, and every `ensure_pane` answer, as a `HerdrPane` literal, so each sets the new field in exactly those places: the adapter at `crates/holler-adapter-herdr/src/adapter.rs:247-252` and `:381-386` (E3), and `FakeHerdr`:
+
+`crates/holler-pane-testkit/src/herdr.rs:246-257`
+~~~~text
+246|     fn ensure_pane(&self, spec: &HerdrSpec) -> Result<HerdrPane, PaneError> {
+247|         self.faults.enter(HerdrOp::EnsurePane)?;
+248|         let mut state = self.lock();
+249|         let placement = state.placement;
+250|         let pane_id = state.workspace_mut(spec)?.place(spec.grid, placement)?;
+251|         Ok(HerdrPane {
+252|             session: spec.session.clone(),
+253|             workspace: spec.workspace.clone(),
+254|             pane_id,
+255|             grid: spec.grid,
+256|         })
+257|     }
+~~~~
+
+`crates/holler-pane-testkit/src/herdr.rs:302-311`
+~~~~text
+302|     fn snapshot(&self) -> Result<HerdrSnapshot, PaneError> {
+303|         self.faults.enter(HerdrOp::Snapshot)?;
+304|         let state = self.lock();
+305|         let panes = state
+306|             .workspaces
+307|             .iter()
+308|             .flat_map(|workspace| workspace.listed(&state.session))
+309|             .collect();
+310|         Ok(HerdrSnapshot { panes })
+311|     }
+~~~~
+
+`crates/holler-pane-testkit/src/herdr.rs:479-487`
+~~~~text
+479|     /// Every pane of the workspace, by row and then by column, as `snapshot` lists it.
+480|     fn listed<'a>(&'a self, session: &'a str) -> impl Iterator<Item = HerdrPane> + 'a {
+481|         self.panes.iter().map(move |(&(row, col), pane)| HerdrPane {
+482|             session: session.to_owned(),
+483|             workspace: self.name.clone(),
+484|             pane_id: pane.id.clone(),
+485|             grid: GridPos { row, col },
+486|         })
+487|     }
+~~~~
+
+The other `HerdrPane` literals are in tests and in the test kit's fixture, all inside the blast radius above.
+
+### E2. The persisted record is `Pane`, whose `herdr` field is a `HerdrPane` (B-2, NV-2)
+
+`panes.json` is one document whose entries each carry a whole `Pane` record (`crates/holler-hub/src/panes/persist.rs:4-15`). `Pane.herdr` is a `HerdrPane` (`crates/holler-pane/src/pane.rs:224-233`), so a `label` field on `HerdrPane` is part of the persisted form. Records refuse unknown fields, and a `panes.json` holding a field the running build does not know fails to load (`pane.rs:4-9`, `persist.rs:30-37`). The established form of an optional record field is the one constraint (a) names, `#[serde(default, skip_serializing_if = "Option::is_none")]` (`pane.rs:8-9`; `HostInfo.herdr_api_version`, `pane.rs:112-115`). With it, a pre-change record (no `label` key) reads as `label: None`, and a record with `label: None` writes no `label` key, so its bytes are today's.
+
+`crates/holler-hub/src/panes/persist.rs:4-15`
+~~~~text
+4| //! The pane registry's file is `<state dir>/hub/panes.json`, beside `holds.json`:
+5| //!
+6| //! ```text
+7| //! {"version": 1, "cursor": <head>,
+8| //!  "entries": [{"cursor": <c>, "name": "<pane>", "pane": {<the Pane record>} or null}, ...]}
+9| //! ```
+10| //!
+11| //! - `cursor` is the change feed's head, so cursors keep increasing across a restart.
+12| //! - An entry is the last change filed under a name, a `PaneEvent`: a put carries the record
+13| //!   and a delete leaves a tombstone (`"pane": null`). A deletion therefore survives a
+14| //!   restart, and a watcher that resumes across one still learns of it (`feed.rs`, rule 4).
+15| //!   Entries are sorted by name.
+~~~~
+
+`crates/holler-hub/src/panes/persist.rs:30-37`
+~~~~text
+30| //! # Loading fails closed (D3)
+31| //!
+32| //! A missing file is an empty registry. Anything else that keeps the file from being read
+33| //! back exactly is a [`Problem`]:
+34| //!
+35| //! - an unreadable file;
+36| //! - a document that does not parse, including a record with a field this build does not
+37| //!   know (the records refuse unknown fields);
+~~~~
+
+`crates/holler-pane/src/pane.rs:4-9`
+~~~~text
+4| //! The JSON field names are the contract: #639 persists these forms, #649 reads them
+5| //! over the control socket. The records refuse unknown fields (`deny_unknown_fields`):
+6| //! a record that is read, changed and written back by a hub or a client that does not
+7| //! know a field would otherwise drop that field silently; refusing is loud and
+8| //! fails closed. Optional fields default to absent on read and are left out when
+9| //! they are `None`. Every timestamp is milliseconds since the Unix epoch as `i64`.
+~~~~
+
+`crates/holler-pane/src/pane.rs:112-115`
+~~~~text
+112|     /// The Herdr API version, as `HerdrPort::version()` reports it, recorded by a verb
+113|     /// (the Herdr adapter writes no record; ADR-0021 section 10).
+114|     #[serde(default, skip_serializing_if = "Option::is_none")]
+115|     pub herdr_api_version: Option<String>,
+~~~~
+
+`crates/holler-pane/src/pane.rs:224-233`
+~~~~text
+224| /// One record per pane, owned by the hub. The key is [`Pane::name`]. Every write is
+225| /// a compare-and-swap on [`Pane::generation`] (see [`crate::generation`]).
+226| #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+227| #[serde(deny_unknown_fields)]
+228| pub struct Pane {
+229|     pub name: PaneName,
+230|     /// Bumped on every change.
+231|     pub generation: u64,
+232|     pub herdr: HerdrPane,
+233|     pub host: HostInfo,
+~~~~
+
+**What constraint (c) requires of the launch engine.** The record's `herdr` is exactly the `ensure_pane` answer: `bring_up` takes it (`crates/holler-pane/src/tx_launch.rs:616`), carries it as `Live.herdr` (`:643-648`), and `Plan::record` writes `herdr: live.herdr` (`:327`). Scope item 2 makes that answer carry the pane's label. A relaunch in place gets the pane already in the cell (an occupied cell answers its pane, `crates/holler-adapter-herdr/src/adapter.rs:221-231`), and that pane may carry a label: the operator decision notes that the setup wizard's `herdr.sh label` verb already sets them. So `Plan::record` must write `label: None` for launch and relaunch to write no label (constraint (c)). Without it, that relaunch's record would carry the label: its bytes would not be today's (constraint (a)), and a build without the field would refuse to load `panes.json` (`persist.rs:30-37`).
+
+`crates/holler-pane/src/tx_launch.rs:615-619`
+~~~~text
+615|     budget.check()?;
+616|     let herdr = ports.herdr.ensure_pane(&plan.target)?;
+617|     if !seen.listed.iter().any(|p| same_pane(p, &herdr)) {
+618|         made.pane = Some(herdr.pane_id.clone());
+619|     }
+~~~~
+
+`crates/holler-pane/src/tx_launch.rs:643-648`
+~~~~text
+643|     Ok(Live {
+644|         herdr,
+645|         pid,
+646|         session,
+647|         shown,
+648|     })
+~~~~
+
+`crates/holler-pane/src/tx_launch.rs:311-327`
+~~~~text
+311|     /// The record R writes: what the act brought up and observed, and the spec's values. A
+312|     /// relaunch keeps the record's hold, its stored DRIVEN (never inferred) and, without a
+313|     /// profile, its profile.
+314|     fn record(&self, seen: &Seen, live: Live, at: i64) -> Pane {
+315|         let (hold, driven, profile) = match self.old {
+316|             Some(old) => (
+317|                 old.hold.clone(),
+318|                 old.last_observed.driven.clone(),
+319|                 self.profile.or(old.profile.as_ref()).cloned(),
+320|             ),
+321|             None => (Hold::None, None, self.profile.cloned()),
+322|         };
+323|         let spec = self.spec;
+324|         Pane {
+325|             name: self.name.clone(),
+326|             generation: self.old.map_or(0, |old| old.generation),
+327|             herdr: live.herdr,
+~~~~
+
+### E3. Where the adapter builds a `HerdrPane` (NV-3, NV-8, NV-9)
+
+`snapshot()`, in full: one `session.snapshot`, then for each workspace with a grid tab one `layout.export` of that tab, and one `HerdrPane` per placed cell. `cells()` returns `Vec<(GridPos, PaneId)>`, the placed panes only. A pane in a split nested inside a cell sits in an `Unplaced` slot, and a pane in any tab but the grid tab (the workspace's tab with the lowest `number`) is in no tree `snapshot()` reads. Neither is in the snapshot. That is clarification 1's "a pane with no cell", and this PR leaves it so.
+
+`crates/holler-adapter-herdr/src/adapter.rs:371-390`
+~~~~text
+371|     fn snapshot(&self) -> Result<HerdrSnapshot, PaneError> {
+372|         self.run_as(OP_SNAPSHOT, |deadline| {
+373|             let state = parse_snapshot(&self.call(&Request::SessionSnapshot, deadline)?)?;
+374|             let mut panes = Vec::new();
+375|             for workspace in &state.workspaces {
+376|                 // A workspace with no tab has no grid, so no pane of it has a cell.
+377|                 let Some(tab) = &workspace.grid_tab else {
+378|                     continue;
+379|                 };
+380|                 let cells = self.grid(tab, deadline)?.cells();
+381|                 panes.extend(cells.into_iter().map(|(grid, pane_id)| HerdrPane {
+382|                     session: self.config.session.clone(),
+383|                     workspace: workspace.label.clone(),
+384|                     pane_id,
+385|                     grid,
+386|                 }));
+387|             }
+388|             Ok(HerdrSnapshot { panes })
+389|         })
+390|     }
+~~~~
+
+`crates/holler-adapter-herdr/src/adapter.rs:24-26`
+~~~~text
+24| //! - **`snapshot` lists every workspace**, configured or not, by its label: the placed
+25| //!   panes of each workspace's grid tab, by row and then column. A pane nested inside
+26| //!   one cell, or in another tab, has no cell and is left out.
+~~~~
+
+`crates/holler-adapter-herdr/src/layout.rs:62-68`
+~~~~text
+62| enum Slot {
+63|     /// A pane, at the slot's row and column.
+64|     Pane(PaneId),
+65|     /// A slot whose panes have no position: a split nested inside the row's cell, or a
+66|     /// slot past the last row or column a `GridPos` can count. Its panes are in
+67|     /// [`GridMap::unplaced`].
+68|     Unplaced,
+~~~~
+
+`crates/holler-adapter-herdr/src/layout.rs:98-103`
+~~~~text
+98|     /// The placed panes, by row then column.
+99|     pub fn cells(&self) -> Vec<(GridPos, PaneId)> {
+100|         self.placed()
+101|             .map(|(cell, pane)| (cell, pane.clone()))
+102|             .collect()
+103|     }
+~~~~
+
+`crates/holler-adapter-herdr/src/protocol.rs:27-30`
+~~~~text
+27| //! - **The grid tab** ([`SessionState::workspace`]). A workspace is found by its `label`,
+28| //!   which must be unique, and its grid is the tree of its tab with the lowest `number`.
+29| //!   A tab's `number` is a display ordinal, not an id, so reordering a workspace's tabs
+30| //!   (`tab.move`) changes which tab that is.
+~~~~
+
+`ensure_pane` is `ensure` under one deadline. `ensure` reads the workspace through `session.snapshot` and `layout.export` (`workspace_grid`), then either answers an occupied cell's pane and changes nothing, or makes one pane by `workspace.create` (read by `parse_workspace_created`) or `pane.split` (read by `parse_pane_info`). It returns one `HerdrPane` literal. That literal (`adapter.rs:247-252`) and the one in `snapshot()` (`adapter.rs:381-386`) are the two places clarification 2's `label_of` feeds. `label_of` itself is new code, so there is nothing of it to quote yet.
+
+`crates/holler-adapter-herdr/src/adapter.rs:327-330`
+~~~~text
+327| impl<T: Transport> HerdrPort for HerdrAdapter<T> {
+328|     fn ensure_pane(&self, spec: &HerdrSpec) -> Result<HerdrPane, PaneError> {
+329|         self.run_as(OP_ENSURE_PANE, |deadline| self.ensure(spec, deadline))
+330|     }
+~~~~
+
+`crates/holler-adapter-herdr/src/adapter.rs:193-209`
+~~~~text
+193|     /// The workspace labelled `label` as Herdr has it now. Two of that label are
+194|     /// `unavailable`.
+195|     fn workspace_grid(&self, label: &str, deadline: Instant) -> Result<WorkspaceGrid, PaneError> {
+196|         let state = parse_snapshot(&self.call(&Request::SessionSnapshot, deadline)?)?;
+197|         let Some(workspace) = state.workspace(label)? else {
+198|             return Ok(WorkspaceGrid {
+199|                 tab: None,
+200|                 map: GridMap::default(),
+201|             });
+202|         };
+203|         let tab = grid_tab(workspace)?;
+204|         let map = self.grid(&tab, deadline)?;
+205|         Ok(WorkspaceGrid {
+206|             tab: Some(tab),
+207|             map,
+208|         })
+209|     }
+~~~~
+
+`crates/holler-adapter-herdr/src/adapter.rs:211-253`
+~~~~text
+211|     /// `ensure_pane` against `deadline`: plan the one step that makes `spec.grid` (an
+212|     /// occupied cell needs none), run it, and confirm the new pane sits there.
+213|     fn ensure(&self, spec: &HerdrSpec, deadline: Instant) -> Result<HerdrPane, PaneError> {
+214|         let extent = self.extent_of(spec)?;
+215|         let workspace = self.workspace_grid(&spec.workspace, deadline)?;
+216|         let target = Target {
+217|             extent,
+218|             cells: vec![spec.grid],
+219|         };
+220|         let pane_id = match plan_splits(&workspace.map, &target)?.as_slice() {
+221|             // An occupied cell: its pane, and no request that changes anything.
+222|             [] => workspace
+223|                 .map
+224|                 .at(spec.grid)
+225|                 .cloned()
+226|                 .ok_or_else(|| PaneError::Unavailable {
+227|                     what: format!(
+228|                         "the plan for {} is empty, and workspace {:?} has no pane there",
+229|                         spec.grid, spec.workspace
+230|                     ),
+231|                 })?,
+232|             [step] => {
+233|                 let (tab, made) = self.place(step, &workspace, spec, deadline)?;
+234|                 self.confirm(&tab, &made, spec, deadline)?;
+235|                 made
+236|             }
+237|             steps => {
+238|                 return Err(PaneError::Unavailable {
+239|                     what: format!(
+240|                         "the plan for {} has {} steps, and ensure_pane makes one pane",
+241|                         spec.grid,
+242|                         steps.len()
+243|                     ),
+244|                 })
+245|             }
+246|         };
+247|         Ok(HerdrPane {
+248|             session: self.config.session.clone(),
+249|             workspace: spec.workspace.clone(),
+250|             pane_id,
+251|             grid: spec.grid,
+252|         })
+253|     }
+~~~~
+
+`crates/holler-adapter-herdr/src/adapter.rs:265-271`
+~~~~text
+265|             Step::CreateRoot => {
+266|                 let request = Request::WorkspaceCreate {
+267|                     label: spec.workspace.clone(),
+268|                 };
+269|                 let (created, root) = parse_workspace_created(&self.call(&request, deadline)?)?;
+270|                 Ok((grid_tab(&created)?, root))
+271|             }
+~~~~
+
+`crates/holler-adapter-herdr/src/adapter.rs:286-294`
+~~~~text
+286|                 let request = Request::Split {
+287|                     target: target.clone(),
+288|                     direction: *direction,
+289|                     ratio: *ratio,
+290|                 };
+291|                 let reply = self
+292|                     .call(&request, deadline)
+293|                     .map_err(|error| changed_under(error, target, spec))?;
+294|                 Ok((tab.clone(), parse_pane_info(&reply)?))
+~~~~
+
+### E4. Where the label comes from: the `PaneInfo` Herdr already sends (clarification 1; NV-4, NV-5)
+
+**The spike** (`docs/research/herdr-api-spike.md`; its section 4 rows are VERIFIED unless marked, line 120):
+
+- `session.snapshot` returns `panes[PaneInfo]` (line 134), and `PaneInfo` carries `label?` (line 137). An absent optional field is omitted, never null (lines 137 and 432).
+- `pane.split` returns `pane_info` with a `PaneInfo` (line 126), and `workspace.create` returns `root_pane: PaneInfo` (line 124).
+- `pane.rename {pane_id, label}` sets a label, and the label persists across a restart (line 140).
+- The spike read labels back from `session.snapshot`'s panes: the grid probe sets them with `pane rename` and reads `label` off each of the snapshot's `panes` (`scripts/spikes/herdr-grid.sh:15`, `:19-28`), and its VERIFIED output lists them (lines 183-191).
+
+`docs/research/herdr-api-spike.md:120`
+~~~~text
+120| equivalent `herdr --session <s> ...` command. All rows are VERIFIED by `herdr-ops.sh` unless marked.
+~~~~
+
+`docs/research/herdr-api-spike.md:124`
+~~~~text
+124| | Create a workspace | yes | `workspace.create {cwd?, label?, env?, focus?}`; `workspace create --cwd D --label L --no-focus` | `{type: "workspace_created", workspace: WorkspaceInfo, tab: TabInfo, root_pane: PaneInfo}` | ids `w<N>`, `w<N>:t<M>`, `w<N>:p<M>`, never reused |
+~~~~
+
+`docs/research/herdr-api-spike.md:126`
+~~~~text
+126| | Split | yes | `pane.split {target_pane_id, direction: "right"\|"down", ratio?, cwd?, env?, focus?}`; `pane split ID --direction right --ratio 0.25 --no-focus` | `{type: "pane_info", pane: PaneInfo}`; new pane id in `.result.pane.pane_id` | no `command` param: the new pane runs the default shell. `left`/`up` are `invalid_request` |
+~~~~
+
+`docs/research/herdr-api-spike.md:134`
+~~~~text
+134| | Snapshot | yes | `session.snapshot {}`; `api snapshot` | `{type: "session_snapshot", snapshot: {version, protocol, workspaces[], tabs[], panes[PaneInfo], layouts[{workspace_id, tab_id, zoomed, area, focused_pane_id, panes[{pane_id, focused, rect{x,y,width,height}}], splits[{id, direction, ratio, rect}]}], agents[], focused_*}}` | split `id`s (`split_3_011`) encode a tree path and are renumbered on relayout: not stable |
+~~~~
+
+`docs/research/herdr-api-spike.md:137`
+~~~~text
+137| | Pane info | yes | `pane.get {pane_id}`, `pane.list {workspace_id?}`; `pane get ID` | `PaneInfo`: `pane_id, terminal_id, workspace_id, tab_id, focused, cwd, foreground_cwd, label?, title?, agent?, display_agent?, agent_status, agent_session?, state_labels?, tokens?, scroll, revision, restore_error?` | absent optional fields are omitted, not null |
+~~~~
+
+`docs/research/herdr-api-spike.md:140`
+~~~~text
+140| | Rename (label) | yes | `pane.rename {pane_id, label}`; `pane rename ID LABEL` | `pane_info` | label persists across restart |
+~~~~
+
+`docs/research/herdr-api-spike.md:432`
+~~~~text
+432| - Optional fields are omitted rather than null (`agent`, `label`, `title`, `tokens`, `tty`).
+~~~~
+
+`scripts/spikes/herdr-grid.sh:15`
+~~~~text
+15| label() { h pane rename "$1" "$2" >/dev/null; }
+~~~~
+
+`scripts/spikes/herdr-grid.sh:19-28`
+~~~~text
+19| derive() { # derive TAB_ID
+20|   local snap tree
+21|   snap="$(h api snapshot)"
+22|   tree="$(hsock "{\"id\":\"e\",\"method\":\"layout.export\",\"params\":{\"tab_id\":\"$1\"}}")"
+23|   python3 -I -c '
+24| import json, sys
+25| snap = json.loads(sys.argv[1])["result"]["snapshot"]
+26| tree = json.loads(sys.argv[2])["result"]["layout"]["root"]
+27| tab = sys.argv[3]
+28| labels = {p["pane_id"]: p.get("label") for p in snap["panes"]}
+~~~~
+
+`docs/research/herdr-api-spike.md:183-191`
+~~~~text
+183| pane    label        herdr rect {x,y,w,h}     rank (row,col) tree (row,col)
+184| w1:p1   r1c1         {0,0,30,20}              r1c1           r1c1
+185| w1:p3   r1c2         {30,0,30,20}             r1c2           r1c2
+186| w1:p4   r1c3         {60,0,30,20}             r1c3           r1c3
+187| w1:p5   r1c4         {90,0,30,20}             r1c4           r1c4
+188| w1:p2   r2c1         {0,20,30,20}             r2c1           r2c1
+189| w1:p6   r2c2         {30,20,30,20}            r2c2           r2c2
+190| w1:p7   marker       {60,20,30,20}            r2c3           r2c3
+191| w1:p8   r2c4         {90,20,30,20}            r2c4           r2c4
+~~~~
+
+**The adapter today** (`crates/holler-adapter-herdr/src/protocol.rs`). It has no `PaneInfo` type. It may call nine methods, and `pane.list` and `pane.get` are not among them (lines 44-45, 94-107); a test fails any conformance run that sends a method off that list (`crates/holler-adapter-herdr/tests/adapter_conformance_test.rs:80-98`). It already parses every pane of `session.snapshot` (`parse_snapshot`, `pane_ref`) and the `PaneInfo` of `pane.split` and `workspace.create`, reading ids only, and its parsers ignore every field they do not read (lines 17-19).
+
+`crates/holler-adapter-herdr/src/protocol.rs:17-19`
+~~~~text
+17| //! - **Parsers.** Each accepts one result `type`, and refuses any other, or a field it
+18| //!   reads that is missing or of the wrong type, as `unavailable`. They ignore every
+19| //!   field they do not read, so a field Herdr adds changes nothing.
+~~~~
+
+`crates/holler-adapter-herdr/src/protocol.rs:44-45`
+~~~~text
+44| /// The number of methods the adapter may call.
+45| const METHOD_COUNT: usize = 9;
+~~~~
+
+`crates/holler-adapter-herdr/src/protocol.rs:94-107`
+~~~~text
+94|     /// Herdr's name for the method.
+95|     const fn as_str(self) -> &'static str {
+96|         match self {
+97|             Method::Ping => "ping",
+98|             Method::SessionSnapshot => "session.snapshot",
+99|             Method::LayoutExport => "layout.export",
+100|             Method::WorkspaceCreate => "workspace.create",
+101|             Method::PaneSplit => "pane.split",
+102|             Method::PaneSendText => "pane.send_text",
+103|             Method::PaneSendKeys => "pane.send_keys",
+104|             Method::PaneRead => "pane.read",
+105|             Method::PaneClose => "pane.close",
+106|         }
+107|     }
+~~~~
+
+`crates/holler-adapter-herdr/src/protocol.rs:343-356`
+~~~~text
+343| /// A pane of a Herdr snapshot.
+344| #[derive(Debug, Clone, PartialEq, Eq)]
+345| pub struct PaneRef {
+346|     pub pane_id: PaneId,
+347|     pub workspace_id: String,
+348|     pub tab_id: String,
+349| }
+350|
+351| /// What `session.snapshot` reports, reduced to what the adapter reads.
+352| #[derive(Debug, Clone, PartialEq, Eq)]
+353| pub struct SessionState {
+354|     pub workspaces: Vec<WorkspaceRef>,
+355|     pub panes: Vec<PaneRef>,
+356| }
+~~~~
+
+`crates/holler-adapter-herdr/src/protocol.rs:386-405`
+~~~~text
+386| /// Read a `session_snapshot` result.
+387| pub fn parse_snapshot(result: &Value) -> Result<SessionState, PaneError> {
+388|     let snapshot = result_of(result, "session_snapshot")?.object("snapshot", "snapshot")?;
+389|     let tabs = snapshot
+390|         .list("tabs", "snapshot tab")?
+391|         .into_iter()
+392|         .map(tab_ref)
+393|         .collect::<Result<Vec<_>, _>>()?;
+394|     let workspaces = snapshot
+395|         .list("workspaces", "snapshot workspace")?
+396|         .into_iter()
+397|         .map(|workspace| workspace_ref(workspace, &tabs))
+398|         .collect::<Result<_, _>>()?;
+399|     let panes = snapshot
+400|         .list("panes", "snapshot pane")?
+401|         .into_iter()
+402|         .map(pane_ref)
+403|         .collect::<Result<_, _>>()?;
+404|     Ok(SessionState { workspaces, panes })
+405| }
+~~~~
+
+`crates/holler-adapter-herdr/src/protocol.rs:438-445`
+~~~~text
+438| /// Read one pane of a snapshot.
+439| fn pane_ref(pane: Object<'_>) -> Result<PaneRef, PaneError> {
+440|     Ok(PaneRef {
+441|         pane_id: PaneId::new(pane.string("pane_id")?),
+442|         workspace_id: pane.string("workspace_id")?.to_owned(),
+443|         tab_id: pane.string("tab_id")?.to_owned(),
+444|     })
+445| }
+~~~~
+
+`crates/holler-adapter-herdr/src/protocol.rs:485-503`
+~~~~text
+485| /// Read a `workspace_created` result: the workspace and its root pane.
+486| pub fn parse_workspace_created(result: &Value) -> Result<(WorkspaceRef, PaneId), PaneError> {
+487|     let created = result_of(result, "workspace_created")?;
+488|     let workspace = created.object("workspace", "created workspace")?;
+489|     let tab = created.object("tab", "created tab")?;
+490|     let root = created.object("root_pane", "created root pane")?;
+491|     let workspace = WorkspaceRef {
+492|         workspace_id: workspace.string("workspace_id")?.to_owned(),
+493|         label: workspace.string("label")?.to_owned(),
+494|         grid_tab: Some(tab.string("tab_id")?.to_owned()),
+495|     };
+496|     Ok((workspace, PaneId::new(root.string("pane_id")?)))
+497| }
+498|
+499| /// Read a `pane_info` result (what `pane.split` returns).
+500| pub fn parse_pane_info(result: &Value) -> Result<PaneId, PaneError> {
+501|     let pane = result_of(result, "pane_info")?.object("pane", "pane")?;
+502|     Ok(PaneId::new(pane.string("pane_id")?))
+503| }
+~~~~
+
+`crates/holler-adapter-herdr/tests/adapter_conformance_test.rs:80-98`
+~~~~text
+80| #[test]
+81| fn no_case_calls_a_method_off_the_allow_list() {
+82|     let mut fakes = Vec::new();
+83|     let _ = run_in_process(false, &mut fakes);
+84|     let _ = run_in_process(true, &mut fakes);
+85|     let _ = run_over_a_socket(&mut fakes);
+86|
+87|     assert!(!fakes.is_empty());
+88|     for fake in &fakes {
+89|         let methods = fake.methods();
+90|         assert!(!methods.is_empty(), "a case sent nothing");
+91|         for method in methods {
+92|             assert!(
+93|                 ALLOWED_METHODS.contains(&method.as_str()),
+94|                 "{method} is not on the allow-list"
+95|             );
+96|         }
+97|     }
+98| }
+~~~~
+
+**Survey result (clarification 1).** The label is read from the `PaneInfo` objects Herdr already sends in reply to calls the adapter already makes: the `panes` of `session.snapshot` (for `snapshot()`, and for `ensure_pane`'s answer about an occupied cell, since `ensure` has read `session.snapshot` in `workspace_grid`), and the `PaneInfo` of `pane.split` and of `workspace.create`'s `root_pane` (for a pane `ensure_pane` makes). No method joins the allow-list and no call is added, so clarification 1's "one extra `pane.list` call per snapshot" does not arise. Scope item 2's `pane.list` / `pane.get` are not called; clarification 1 already lets the survey choose "the session snapshot" instead. (`layout.export`'s pane nodes also carry `label?`, spike line 135; the survey keeps to `PaneInfo`, the shape scope item 2 and the operator decision name.)
+
+**I5 (NV-5).** A port call takes one deadline on entry, I5's 10 s unless configured, and every exchange of the call runs against it (`crates/holler-adapter-herdr/src/adapter.rs:7-9`, `:50-51`, `:134-146`); `snapshot()` runs inside `run_as(OP_SNAPSHOT, ..)` (`:371-372`). Reading the label adds no exchange, so neither the bound nor the number of exchanges changes.
+
+`crates/holler-adapter-herdr/src/adapter.rs:7-9`
+~~~~text
+7| //! - **One deadline per call.** Each port method takes its deadline once, on entry,
+8| //!   `timeout` from then (I5's bound, [`DEFAULT_TIMEOUT`] unless configured), and every
+9| //!   exchange of the call runs against that one deadline.
+~~~~
+
+`crates/holler-adapter-herdr/src/adapter.rs:50-51`
+~~~~text
+50| /// I5's bound for one `HerdrPort` call.
+51| pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
+~~~~
+
+`crates/holler-adapter-herdr/src/adapter.rs:134-146`
+~~~~text
+134|     /// Run `body` as the call `op`: against the one deadline of the call, taken now, and
+135|     /// with a `timeout` from any exchange of it named `op`, where the transport names the
+136|     /// wire method that ran out. Every other error passes unchanged.
+137|     fn run_as<V>(
+138|         &self,
+139|         op: &'static str,
+140|         body: impl FnOnce(Instant) -> Result<V, PaneError>,
+141|     ) -> Result<V, PaneError> {
+142|         body(self.deadline()?).map_err(|error| match error {
+143|             PaneError::Timeout { .. } => PaneError::Timeout { op: op.to_owned() },
+144|             other => other,
+145|         })
+146|     }
+~~~~
+
+### E5. Every comparison of a `HerdrPane` with a snapshot entry (clarification 6; B-3, W-1, W-2)
+
+**Method.** Every caller of `HerdrPort::snapshot` and `HerdrPort::ensure_pane` outside tests and the test kit (`grep -rn 'snapshot()\|ensure_pane(' crates/*/src`), and all of `reconcile.rs`, `reconcile/observe.rs` (clarification 6's `observe.rs`) and the doctor code. Outside tests and the test kit the snapshot is read in two places only, reconcile (`crates/holler-pane/src/reconcile.rs:262`) and the launch engine (`crates/holler-pane/src/tx_launch.rs:292`, `:685`), and `ensure_pane` is called only by the launch engine (`tx_launch.rs:616`). `crates/holler-hub/src` does not mention `herdr` at all (`grep -rni herdr` finds nothing): the hub stores records whole.
+
+| # | Site | What it compares | The label |
+|---|---|---|---|
+| 1 | `crates/holler-pane/src/reconcile.rs:326-347`, `missing_herdr_panes` | each record with the snapshot, by the key `(session, pane_id)`; the finding and its message are built from the record | ignored |
+| 2 | `crates/holler-pane/src/reconcile.rs:349-369`, `unregistered_herdr_panes` | each snapshot entry with the records, by the key `(session, pane_id)`; the finding copies only the entry's `pane_id` and `grid` (`crates/holler-pane/src/findings.rs:269-276`), and its message quotes `pane_id`, `session` and `workspace` | ignored |
+| 3 | `crates/holler-pane/src/reconcile/observe.rs:365-374`, `record` | the record with its own clone (`next == *pane`), never with a snapshot entry | equal by construction |
+| 4 | `crates/holler-cli/src/pane/doctor.rs:55-61` | nothing: doctor runs `reconcile` and prints its `Report`, whose types hold no `HerdrPane` (`crates/holler-pane/src/reconcile.rs:75-125`; `Finding`, `crates/holler-pane/src/findings.rs:211-239`, holds `herdr_pane: Option<PaneId>` and `grid`) | not present |
+| 5 | `crates/holler-pane/src/tx_launch.rs:441-458`, `refuse_occupied` | each snapshot entry's `session`, `workspace` and `grid` with the target; `same_pane` with the relaunched pane's record | ignored |
+| 6 | `crates/holler-pane/src/tx_launch.rs:486-490`, `occupant` | each record with an occupant, by `same_pane` | ignored |
+| 7 | `crates/holler-pane/src/tx_launch.rs:617`, `bring_up` | the plan's snapshot entries with the `ensure_pane` answer, by `same_pane` | ignored |
+| 8 | `crates/holler-pane/src/tx_launch.rs:685`, `observe_live` (O2) | `snapshot()?.panes.contains(herdr)`: the whole `HerdrPane`, by its derived `PartialEq`, against the `ensure_pane` answer the record is written from | **compared, as written** |
+| 9 | `crates/holler-pane/src/tx_launch.rs:726-728`, `close_old` | the record's `workspace` and `grid` with the target; `same_pane` | ignored |
+
+`same_pane` is the join key, session and pane id (`tx_launch.rs:750-753`).
+
+`crates/holler-pane/src/reconcile.rs:326-347`
+~~~~text
+326| /// `herdr-pane-missing` for each pane of `scope` whose Herdr session and pane id the
+327| /// snapshot lacks.
+328| fn missing_herdr_panes(snapshot: &HerdrSnapshot, scope: &[Pane]) -> Vec<Finding> {
+329|     let live: BTreeSet<(&str, &PaneId)> = snapshot
+330|         .panes
+331|         .iter()
+332|         .map(|herdr| (herdr.session.as_str(), &herdr.pane_id))
+333|         .collect();
+334|     scope
+335|         .iter()
+336|         .filter(|pane| !live.contains(&(pane.herdr.session.as_str(), &pane.herdr.pane_id)))
+337|         .map(|pane| {
+338|             let message = format!(
+339|                 "Herdr has no pane {} in session {}, where the record puts this pane",
+340|                 quoted(pane.herdr.pane_id.as_str()),
+341|                 quoted(&pane.herdr.session)
+342|             );
+343|             Finding::about(FindingKind::HerdrPaneMissing, pane, message)
+344|                 .with_herdr_pane(&pane.herdr)
+345|         })
+346|         .collect()
+347| }
+~~~~
+
+`crates/holler-pane/src/reconcile.rs:349-369`
+~~~~text
+349| /// `unregistered-herdr-pane` for each pane of the snapshot that no record names.
+350| fn unregistered_herdr_panes(snapshot: &HerdrSnapshot, records: &[Pane]) -> Vec<Finding> {
+351|     let named: BTreeSet<(&str, &PaneId)> = records
+352|         .iter()
+353|         .map(|pane| (pane.herdr.session.as_str(), &pane.herdr.pane_id))
+354|         .collect();
+355|     snapshot
+356|         .panes
+357|         .iter()
+358|         .filter(|herdr| !named.contains(&(herdr.session.as_str(), &herdr.pane_id)))
+359|         .map(|herdr| {
+360|             let message = format!(
+361|                 "Herdr pane {} (session {}, workspace {}) is in no pane record; no holler verb adopts a pane",
+362|                 quoted(herdr.pane_id.as_str()),
+363|                 quoted(&herdr.session),
+364|                 quoted(&herdr.workspace)
+365|             );
+366|             Finding::new(FindingKind::UnregisteredHerdrPane, message).with_herdr_pane(herdr)
+367|         })
+368|         .collect()
+369| }
+~~~~
+
+`crates/holler-pane/src/findings.rs:269-276`
+~~~~text
+269|     /// The same finding, about the Herdr pane `herdr` and at its position.
+270|     pub(crate) fn with_herdr_pane(self, herdr: &HerdrPane) -> Self {
+271|         Self {
+272|             herdr_pane: Some(herdr.pane_id.clone()),
+273|             grid: Some(herdr.grid),
+274|             ..self
+275|         }
+276|     }
+~~~~
+
+`crates/holler-pane/src/reconcile/observe.rs:365-374`
+~~~~text
+365|     let mut next = pane.clone();
+366|     if let Some(health) = health {
+367|         next.harness.health = health;
+368|     }
+369|     if let Screen::Seen(shown) = screen {
+370|         next.last_observed.shown.clone_from(shown);
+371|     }
+372|     if next == *pane && pane.last_observed.at != 0 {
+373|         return None;
+374|     }
+~~~~
+
+`crates/holler-cli/src/pane/doctor.rs:55-61`
+~~~~text
+55|     let request = ReconcileRequest {
+56|         profile: profile.as_ref(),
+57|         pane: pane.as_ref(),
+58|         fix: args.fix,
+59|         now_ms: now_millis(),
+60|     };
+61|     reconcile(ports, &request)
+~~~~
+
+`crates/holler-pane/src/reconcile.rs:75-125`
+~~~~text
+75| /// What one reconcile pass found.
+76| #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+77| pub struct Report {
+78|     pub scope: ScopeSummary,
+79|     pub fix_requested: bool,
+80|     pub herdr: HerdrSummary,
+81|     /// The hosts the records in scope name, each once, sorted by name.
+82|     pub hosts: Vec<HostSummary>,
+83|     /// The panes in scope, sorted by name.
+84|     pub panes: Vec<PaneSummary>,
+85|     /// Sorted by pane (the findings about no pane first), then by kind in
+86|     /// [`FindingKind::ALL`] order, then by session and Herdr pane.
+87|     pub findings: Vec<Finding>,
+88| }
+89|
+90| /// The scope the pass ran over: a profile's panes, one pane, both, or (neither) every pane.
+91| #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+92| pub struct ScopeSummary {
+93|     pub profile: Option<ProfileName>,
+94|     pub pane: Option<PaneName>,
+95| }
+96|
+97| /// What Herdr reported about itself.
+98| #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+99| pub struct HerdrSummary {
+100|     /// Herdr's API version; `None` when it was not observed or is unsupported (a finding
+101|     /// says which).
+102|     pub version: Option<String>,
+103| }
+104|
+105| /// One host of the panes in scope, as their records name it. Doctor shows the recorded
+106| /// Herdr API version and writes neither field (a verb records it, ADR-0021 section 10).
+107| #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+108| pub struct HostSummary {
+109|     pub name: String,
+110|     pub herdr_api_version: Option<String>,
+111| }
+112|
+113| /// One pane in scope, as the pass observed it.
+114| #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+115| pub struct PaneSummary {
+116|     pub name: PaneName,
+117|     /// Where its record places it.
+118|     pub grid: GridPos,
+119|     pub session_of_record: Option<String>,
+120|     /// The session the TUI showed at the end of the pane's chain (after a fix, the one it
+121|     /// showed then). `None` is its home screen or no TUI, or that it was not observed (an
+122|     /// `observe-failed` finding then names `harness.shown_session`).
+123|     pub shown: Option<String>,
+124|     pub health: ObservedHealth,
+125| }
+~~~~
+
+`crates/holler-pane/src/findings.rs:211-239`
+~~~~text
+211| /// One finding of a reconcile pass.
+212| #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+213| pub struct Finding {
+214|     pub kind: FindingKind,
+215|     /// The pane it is about; `None` for Herdr itself, a stray session or an unregistered
+216|     /// Herdr pane.
+217|     pub pane: Option<PaneName>,
+218|     /// Where that pane is, as its record places it, or where the unregistered Herdr pane
+219|     /// is.
+220|     pub grid: Option<GridPos>,
+221|     /// The Herdr pane it is about: the one Herdr lacks (`herdr-pane-missing`) or the one no
+222|     /// record names (`unregistered-herdr-pane`).
+223|     pub herdr_pane: Option<PaneId>,
+224|     /// The session it is about: the stray, the missing session of record, the foreign one,
+225|     /// or the one a mismatched TUI shows (`None` there is its home screen).
+226|     pub session: Option<String>,
+227|     /// The harness servers, by port and sorted, whose state or sessions it reports: every
+228|     /// in-scope server a stray session was listed on, and the pane's own server for a
+229|     /// wedged or down server, a missing session of record and a foreign session.
+230|     pub ports: Vec<u16>,
+231|     /// One line for a person; untrusted values in it are quoted.
+232|     pub message: String,
+233|     /// The command to run (see [`FindingKind::remedy`]); `None` when no Holler verb repairs
+234|     /// it, or it was fixed.
+235|     pub remedy: Option<String>,
+236|     pub fix: FixState,
+237|     /// Why the fix failed, when it did.
+238|     pub fix_error: Option<FixError>,
+239| }
+~~~~
+
+`crates/holler-pane/src/tx_launch.rs:289-294`
+~~~~text
+289|     fn observe(&self, ports: Ports<'_>, probe_timeout: Duration) -> Result<Seen, PaneError> {
+290|         let probe = probe(ports, self.spec, probe_timeout)?;
+291|         let herdr_api_version = ports.herdr.version()?;
+292|         let listed = ports.herdr.snapshot()?.panes;
+293|         let own = self.old.map(|old| &old.herdr);
+294|         refuse_occupied(ports, &listed, &self.target, own)?;
+~~~~
+
+`crates/holler-pane/src/tx_launch.rs:441-458`
+~~~~text
+441| /// Step 5: `grid-occupied` when the target cell holds a Herdr pane other than `own`. Whether the
+442| /// run is refused is the snapshot's alone. The records are read only to word the refusal, joined
+443| /// to each occupant by Herdr session and pane id whatever cell a record stores, so a stale record
+444| /// is still named.
+445| fn refuse_occupied(
+446|     ports: Ports<'_>,
+447|     listed: &[HerdrPane],
+448|     target: &HerdrSpec,
+449|     own: Option<&HerdrPane>,
+450| ) -> Result<(), PaneError> {
+451|     let at_target = |p: &&HerdrPane| {
+452|         p.session == target.session && p.workspace == target.workspace && p.grid == target.grid
+453|     };
+454|     let occupants: Vec<&HerdrPane> = listed
+455|         .iter()
+456|         .filter(at_target)
+457|         .filter(|p| own.is_none_or(|own| !same_pane(own, p)))
+458|         .collect();
+~~~~
+
+`crates/holler-pane/src/tx_launch.rs:486-490`
+~~~~text
+486|     let names: Vec<&str> = records
+487|         .iter()
+488|         .filter(|record| same_pane(&record.herdr, pane))
+489|         .map(|record| record.name.as_str())
+490|         .collect();
+~~~~
+
+`crates/holler-pane/src/tx_launch.rs:663-665`
+~~~~text
+663| /// O1 and O2: the TUI shows the session of record (`shown_differs`, the one form of that
+664| /// comparison), and Herdr still lists the pane at its cell. Either mismatch is `unavailable`
+665| /// (decision 14). Returns what the TUI showed.
+~~~~
+
+`crates/holler-pane/src/tx_launch.rs:684-691`
+~~~~text
+684|     budget.check()?;
+685|     if !ports.herdr.snapshot()?.panes.contains(herdr) {
+686|         return Err(unavailable(format!(
+687|             "the Herdr pane {} of {name} is gone from {}",
+688|             quoted(herdr.pane_id.as_str()),
+689|             cell(&herdr.workspace, herdr.grid)
+690|         )));
+691|     }
+~~~~
+
+`crates/holler-pane/src/tx_launch.rs:726-728`
+~~~~text
+726|     let moved = plan.target.workspace != old.herdr.workspace || plan.target.grid != old.herdr.grid;
+727|     let listed = seen.listed.iter().any(|p| same_pane(p, &old.herdr));
+728|     if !moved || !listed || same_pane(&old.herdr, now) {
+~~~~
+
+`crates/holler-pane/src/tx_launch.rs:750-753`
+~~~~text
+750| /// Whether two Herdr panes are one: the same Herdr session and pane id (the join key).
+751| fn same_pane(a: &HerdrPane, b: &HerdrPane) -> bool {
+752|     a.session == b.session && a.pane_id == b.pane_id
+753| }
+~~~~
+
+Tests compare whole values too: the conformance suite's cases 3 and 4 compare `ensure_pane` answers with snapshot entries (`crates/holler-pane-testkit/src/conformance/herdr.rs:217-226`, `:231-244`). They label no pane, so every label in them is `None` and they are unchanged. A case that labels a pane and compares whole values holds only when the implementation's `ensure_pane` and `snapshot` report the same label for that pane.
+
+`crates/holler-pane-testkit/src/conformance/herdr.rs:217-226`
+~~~~text
+217| fn ensure_is_idempotent(s: &Scratch<'_>) -> Result<(), String> {
+218|     let first = s.ensure(R1C1)?;
+219|     let second = s.ensure(R1C1)?;
+220|     expect_eq("the second ensure_pane(r1c1)", &second, &first)?;
+221|     expect_eq(
+222|         "the workspace's panes after ensure_pane(r1c1) twice",
+223|         s.panes()?,
+224|         vec![first],
+225|     )
+226| }
+~~~~
+
+`crates/holler-pane-testkit/src/conformance/herdr.rs:231-244`
+~~~~text
+231| fn ensure_never_moves_another_pane(s: &Scratch<'_>) -> Result<(), String> {
+232|     let a = s.ensure(R1C1)?;
+233|     let b = s.ensure(R2C1)?;
+234|     expect_eq(
+235|         "ensure_pane(r1c1) after r2c1 was made",
+236|         &s.ensure(R1C1)?,
+237|         &a,
+238|     )?;
+239|     expect_eq(
+240|         "the workspace's panes, in any order",
+241|         by_id(s.panes()?),
+242|         by_id(vec![a, b]),
+243|     )
+244| }
+~~~~
+
+**Survey result (clarification 6).** Rows 1 to 4, every comparison in `reconcile.rs`, `observe.rs` and the doctor code, ignore the label as the code stands, so reconcile and doctor cannot change because a snapshot entry has one (constraint (b)). Outside them one comparison would see it: row 8, the launch engine's O2 check. It can ignore the label by comparing the four fields `HerdrPane` has today (`session`, `workspace`, `pane_id`, `grid`) in place of the whole value, and constraint (b) says it must ("anything that compares a record's `HerdrPane` with a snapshot entry must ignore the label"). Every comparison can ignore the label, so by clarification 6's rule **the label is a field on `HerdrPane`** (`label: Option<String>`, `#[serde(default, skip_serializing_if = "Option::is_none")]`, constraint (a)), and no separate snapshot-entry type is made. That type would also leave `HerdrPane` unchanged, so `ensure_pane`, which returns a `HerdrPane`, could not report the label that scope item 2 and clarification 2 require of its answer. The acceptance criteria above are written for this design and stand as written (W-2).
+
+`crates/holler-pane/src/ports.rs:135`
+~~~~text
+135|     fn ensure_pane(&self, spec: &HerdrSpec) -> Result<HerdrPane, PaneError>;
+~~~~
+
+Row 8 matters in practice: if a pane's label changes between the `ensure_pane` answer and the O2 snapshot (the operator or the wizard renames it meanwhile), the whole-value check fails the run `unavailable` and rolls it back though the pane sits where it should; the four-field check does not.
+
+ADR-0021 (W-1): clarification 5's section-2 sentence, "no comparison of a record with a snapshot entry looks at it", is true of the code once row 8 compares the four fields, and this PR makes both changes. Its text is unchanged.
+
+### E6. The fakes and the conformance suite (NV-6, NV-7, NIT-2)
+
+**`WireHerdr`** is `crates/holler-adapter-herdr/tests/wire_herdr/mod.rs`, a simulated Herdr at the JSON level, written from the spike and never from `src/` (lines 1-7). The adapter's tests use it in process as a `Transport` (lines 204-210) and over a real Unix socket (`wire_herdr::serve`), and run the conformance suite against it both ways (`crates/holler-adapter-herdr/tests/adapter_conformance_test.rs:2-18`). It serves nine methods and refuses every other as unknown or forbidden (lines 261-279), so it has no `pane.rename`, `pane.get` or `pane.list`. Every `PaneInfo` it sends, in `session.snapshot` (lines 297-313), `workspace.create` (line 338) and `pane.split` (line 363), comes from `pane_json`, which sends no `label` (lines 603-606). Clarification 3's label "field of the pane it serves" therefore reaches the adapter only if `pane_json` sends it.
+
+`crates/holler-adapter-herdr/tests/wire_herdr/mod.rs:1-7`
+~~~~text
+1| //! A simulated Herdr at the JSON level (#640 part 2, Decision 15): it reads request
+2| //! lines with `serde_json` and answers them the way the Herdr spike
+3| //! (`docs/research/herdr-api-spike.md`) saw Herdr answer, keeping its own split trees.
+4| //! It is written from the spike, never from `src/`: it reads no tree with the adapter's
+5| //! code and decodes no reply with it, so a bug in the adapter cannot hide in its oracle
+6| //! (AC 35). Each test file that needs it declares `mod wire_herdr;`, and uses a part of
+7| //! it, so the rest would trip `dead_code`.
+~~~~
+
+`crates/holler-adapter-herdr/tests/wire_herdr/mod.rs:204-210`
+~~~~text
+204| /// In process: the line the adapter built goes to [`WireHerdr::answer`]; the deadline
+205| /// is unused.
+206| impl Transport for WireHerdr {
+207|     fn exchange(&self, request: &Request, _deadline: Instant) -> Result<String, PaneError> {
+208|         Ok(self.answer(&request.to_line()))
+209|     }
+210| }
+~~~~
+
+`crates/holler-adapter-herdr/tests/adapter_conformance_test.rs:2-18`
+~~~~text
+2| //! `HerdrAdapter` passes #638's `HerdrPort` conformance suite (#640 part 2, AC 31-34)
+3| //! against the wire fake, from the two starting states the suite allows (an empty
+4| //! Herdr, and a workspace holding only its root pane), in process and over a real Unix
+5| //! socket. The suite's cases are run, never copied.
+6|
+7| mod wire_herdr;
+8|
+9| use std::path::Path;
+10| use std::sync::Arc;
+11|
+12| use holler_adapter_herdr::adapter::{HerdrAdapter, HerdrConfig};
+13| use holler_adapter_herdr::plan::Extent;
+14| use holler_adapter_herdr::protocol::ALLOWED_METHODS;
+15| use holler_pane_testkit::conformance::herdr::{run_herdr_conformance, HerdrFixture};
+16| use holler_pane_testkit::conformance::Conformance;
+17| use wire_herdr::serve::serve;
+18| use wire_herdr::WireHerdr;
+~~~~
+
+`crates/holler-adapter-herdr/tests/wire_herdr/mod.rs:261-279`
+~~~~text
+261|     fn handle(&mut self, method: &str, params: &Map<String, Value>) -> Result<Value, Fault> {
+262|         match method {
+263|             "ping" => Ok(self.pong()),
+264|             "session.snapshot" => Ok(self.snapshot()),
+265|             "layout.export" => self.layout_export(params),
+266|             "workspace.create" => Ok(self.workspace_create(params)),
+267|             "pane.split" => self.pane_split(params),
+268|             "pane.send_text" => self.send_text(params),
+269|             "pane.send_keys" => self.send_keys(params),
+270|             "pane.read" => self.read(params),
+271|             "pane.close" => self.close(params),
+272|             other if is_forbidden(other) => Err(invalid(format!(
+273|                 "invalid request: the simulated Herdr refuses `{other}`"
+274|             ))),
+275|             other => Err(invalid(format!(
+276|                 "invalid request: unknown variant `{other}`"
+277|             ))),
+278|         }
+279|     }
+~~~~
+
+`crates/holler-adapter-herdr/tests/wire_herdr/mod.rs:297-313`
+~~~~text
+297|     fn snapshot(&self) -> Value {
+298|         let (mut workspaces, mut tabs, mut panes) = (Vec::new(), Vec::new(), Vec::new());
+299|         for (i, workspace) in self.workspaces.iter().enumerate() {
+300|             workspaces.push(workspace_json(workspace, i + 1));
+301|             for tab in &workspace.tabs {
+302|                 tabs.push(tab_json(workspace, tab));
+303|                 for pane in tab.root.panes() {
+304|                     panes.push(pane_json(workspace, tab, &pane));
+305|                 }
+306|             }
+307|         }
+308|         json!({"type": "session_snapshot", "snapshot": {
+309|             "version": self.version(), "protocol": self.protocol,
+310|             "workspaces": workspaces, "tabs": tabs, "panes": panes,
+311|             "layouts": [], "agents": []
+312|         }})
+313|     }
+~~~~
+
+`crates/holler-adapter-herdr/tests/wire_herdr/mod.rs:603-606`
+~~~~text
+603| fn pane_json(workspace: &Workspace, tab: &Tab, pane: &str) -> Value {
+604|     json!({"pane_id": pane, "workspace_id": workspace.id, "tab_id": tab.id,
+605|         "focused": false, "cwd": "/scratch", "agent_status": "idle", "revision": 0})
+606| }
+~~~~
+
+**`FakeHerdr`** is `crates/holler-pane-testkit/src/herdr.rs`. Its hooks for the outside world acting on a pane, `vanish` and `print`, bypass the faults and the call log (lines 129-133, 223-236); a label hook is one more of them. A pane is a `LivePane { id, screen }` (lines 165-169). The doctor rig of acceptance 3 runs on `FakeHerdr` (`crates/holler-cli/tests/pane_verbs/doctor/rig.rs:1-2`, `:103`, `:124-126`), so its regression test labels the rig's panes through that hook.
+
+`crates/holler-pane-testkit/src/herdr.rs:129-138`
+~~~~text
+129| /// Every port method first passes [`FakeHerdr::faults`], and when that fails, it
+130| /// returns the error and changes nothing. The call log there holds every attempt, and
+131| /// it is where a test checks I4's "no keystroke". `vanish` and `print` are the outside
+132| /// world acting on a pane: they bypass the faults and the call log.
+133| ///
+134| /// It is not `Clone`: share it behind an `Arc`, because a copy would split the session.
+135| pub struct FakeHerdr {
+136|     state: Mutex<State>,
+137|     faults: FaultSwitch<HerdrOp>,
+138| }
+~~~~
+
+`crates/holler-pane-testkit/src/herdr.rs:165-169`
+~~~~text
+165| /// One pane that exists: its id and the text its screen shows.
+166| struct LivePane {
+167|     id: PaneId,
+168|     screen: String,
+169| }
+~~~~
+
+`crates/holler-pane-testkit/src/herdr.rs:223-236`
+~~~~text
+223|     /// The pane's shell exited (Herdr's `pane_exited`): the pane is gone, its cell is
+224|     /// free, its id is never reused, and every later call naming it is
+225|     /// `pane-not-found`. It bypasses the faults and the call log. `pane-not-found` when
+226|     /// no such pane exists.
+227|     pub fn vanish(&self, pane: &PaneId) -> Result<(), PaneError> {
+228|         self.lock().remove(pane)
+229|     }
+230|
+231|     /// The pane's program prints `text`, which `read` then shows. It bypasses the faults
+232|     /// and the call log. `pane-not-found` when no such pane exists.
+233|     pub fn print(&self, pane: &PaneId, text: &str) -> Result<(), PaneError> {
+234|         self.lock().pane_mut(pane)?.screen.push_str(text);
+235|         Ok(())
+236|     }
+~~~~
+
+`crates/holler-cli/tests/pane_verbs/doctor/rig.rs:1-2`
+~~~~text
+1| //! The doctor rig (#647, brief Decision 12): a live world on the test kit's fakes, with one
+2| //! record per pane that matches it.
+~~~~
+
+`crates/holler-cli/tests/pane_verbs/doctor/rig.rs:103`
+~~~~text
+103|     pub herdr: FakeHerdr,
+~~~~
+
+`crates/holler-cli/tests/pane_verbs/doctor/rig.rs:124-126`
+~~~~text
+124|         let herdr = FakeHerdr::new(SCRATCH)
+125|             .with_workspace(SCRATCH, 3, 3)
+126|             .expect("the rig's workspace");
+~~~~
+
+**The conformance suite has no optional hook today (NV-7).** `run_herdr_conformance` takes one closure, `fresh`, which returns the fixture (`port`, `session`, `workspace`) and a guard. The other five runners take only `fresh`, or `build` for the profile scope. So the label hook is the suite's first optional closure parameter: clarification 3's "as its other optional hooks are" has no precedent to follow, and its instruction, a closure parameter, stands as written.
+
+`crates/holler-pane-testkit/src/conformance/herdr.rs:57-64`
+~~~~text
+57| pub struct HerdrFixture<H> {
+58|     /// The implementation under test.
+59|     pub port: H,
+60|     /// The scratch session: never the default session or a live one.
+61|     pub session: String,
+62|     /// The workspace of 2 rows by 1 column that the cases place their panes in.
+63|     pub workspace: String,
+64| }
+~~~~
+
+`crates/holler-pane-testkit/src/conformance/herdr.rs:140-152`
+~~~~text
+140| pub fn run_herdr_conformance<H, K, F>(fresh: F) -> Conformance
+141| where
+142|     H: HerdrPort,
+143|     F: FnMut() -> (HerdrFixture<H>, K),
+144| {
+145|     run_cases(&CASES, fresh, |case, fixture| {
+146|         case(&Scratch {
+147|             port: &fixture.port,
+148|             session: &fixture.session,
+149|             workspace: &fixture.workspace,
+150|         })
+151|     })
+152| }
+~~~~
+
+`crates/holler-pane-testkit/src/conformance/pane_store.rs:113`
+~~~~text
+113| pub fn run_pane_store_conformance<S, K, F>(fresh: F) -> Conformance
+~~~~
+
+`crates/holler-pane-testkit/src/conformance/profile_store.rs:177`
+~~~~text
+177| pub fn run_profile_store_conformance<S, K, F>(fresh: F) -> Conformance
+~~~~
+
+`crates/holler-pane-testkit/src/conformance/host.rs:90`
+~~~~text
+90| pub fn run_host_conformance<S, K, F>(fresh: F) -> Conformance
+~~~~
+
+`crates/holler-pane-testkit/src/conformance/harness.rs:142`
+~~~~text
+142| pub fn run_harness_conformance<S, K, F>(mut fresh: F) -> Conformance
+~~~~
+
+`crates/holler-pane-testkit/src/conformance/profile_scope.rs:193`
+~~~~text
+193| pub fn run_profile_scope_conformance<S, F>(mut build: F) -> Conformance
+~~~~
+
+**NIT-2.** Scope item 3's conformance case also labels one pane with the empty string and expects `None`. Acceptance 1 already requires that of the fake test and of the adapter test; the case checks it through the one case both implementations run.
+
+### E7. The byte-pinned fixture (NV-10, W-3)
+
+- **Provenance.** Clarification 4's "code on `main` before this change" is `92fbc6e4186acc717f4aa2b6465c55a266b9043c`, this branch's base. T produces the literal from that code and names the commit in a comment beside it. The literal is T's RED artifact, so it is not quoted here.
+- **Round trip (W-3).** Clarification 4's second test also writes each record it read back to JSON and reads that again: the result equals the record first read. Written with the `serde_json` function that produced the literal, the pre-change record's JSON also equals the literal byte for byte, since `label: None` writes no key. The hub does this to every record: it loads `panes.json` once at startup and saves the whole document on every write (`crates/holler-hub/src/panes/persist.rs:1-2`).
+
+### E8. Small clarifications (NIT-1; line numbers)
+
+- **NIT-1.** `HerdrPane.label` is `None` both when Herdr sends no `label` (Herdr omits an absent one, spike line 432) and when it sends `""`: `label_of` folds the two (clarification 2). The field's doc comment says so, so that a reader does not take `None` for a distinction Herdr makes.
+- **ADR-0021 line numbers.** The "Deferred to named stories" `HerdrPort` bullet is `docs/adr/ADR-0021.md:739-740` (scope item 4 says 740-741). The section-2 note is line 111. "Decisions taken" ends at item 9 (lines 770-771), so clarification 5's item 10 is the next number.
+
+`docs/adr/ADR-0021.md:111`
+~~~~text
+111| `HerdrPort`, and the data types it takes and returns, stay **provisional** until the spike #636 (Herdr) reports.
+~~~~
+
+`docs/adr/ADR-0021.md:739-740`
+~~~~text
+739| - `HerdrPort`: #640 implements it as merged; a pane with no cell (inside a nested split, or in another tab) has no place in
+740|   `HerdrSnapshot`, which waits for a contract amendment before #647 and #650 need it.
+~~~~
+
+`docs/adr/ADR-0021.md:770-771`
+~~~~text
+770| 9. **A verb records `host.herdr_api_version`** (operator, 2026-10-11, section 10): #644's `launch` and `relaunch` write it; the
+771|    Herdr adapter writes no record.
+~~~~
+
+### E9. Added to the scope, the blast radius and the acceptance criteria
+
+These follow from the survey and from the constraints above; none removes or narrows anything.
+
+- **Scope and blast radius:** `crates/holler-pane/src/tx_launch.rs`, for two changes: `Plan::record` writes `label: None` (E2, constraint (c)), and O2 compares the four fields (E5 row 8, constraint (b)); with them, the launch tests that cover the two changes (`crates/holler-cli/tests/pane_verbs/launch/`). Nothing in reconcile, doctor or the hub changes.
+- **Acceptance**, added to the list above:
+  - A relaunch in place of a pane whose `ensure_pane` answer carries a label writes a record with `herdr.label: None`, whose JSON has no `label` key (E2).
+  - A launch passes O2 when the O2 snapshot reports a label for its pane that the `ensure_pane` answer did not (E5 row 8), for example through a `HerdrPort` double around `FakeHerdr`.
+  - The round trip of E7.
+  - The conformance case's empty-label pane (E6, NIT-2).
