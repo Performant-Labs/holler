@@ -108,8 +108,13 @@ fn only_the_local_collide_line_sets_the_herdr_host_flag() {
         .filter(|l| l.contains("bash $WIZARD_LIB/collide.sh"))
         .collect();
     assert!(!lines.is_empty());
-    for l in &lines {
-        assert!(l.contains("WIZARD_HERDR_HOST=1"), "collide call: {l}");
+    let (local, remote): (Vec<&str>, Vec<&str>) = lines
+        .iter()
+        .partition(|l| l.contains("WIZARD_HERDR_HOST=1"));
+    assert_eq!(local.len(), 1, "the local line has the flag");
+    assert!(!remote.is_empty(), "a remote line without it exists");
+    for l in &remote {
+        assert!(!l.contains("WIZARD_HERDR_HOST"), "remote collide call: {l}");
     }
     assert!(flat(&text).contains("local call only"), "remote calls never set it");
     // The flag is never put on an inventory or remote line.
