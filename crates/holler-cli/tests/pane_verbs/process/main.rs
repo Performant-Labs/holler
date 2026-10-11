@@ -4,7 +4,8 @@
 #![allow(clippy::unreachable)] // #670
 #![allow(dead_code)] // #670
 //! Process-level tests of the `holler pane` / `holler profile` surface (story #670,
-//! epic #633): the real `holler` binary, no hub, no body.
+//! epic #633): the real `holler` binary, no body, and no hub except where a verb must get
+//! past the wiring's `connect` to run ([`LiveHub`], #649).
 //!
 //! What lives here is what only the binary can show: that `main.rs` dispatches `pane`
 //! and `profile`, that `--format`/`--json` choose the output, that a usage error under
@@ -58,7 +59,12 @@ pub struct Out {
 /// Run `holler <args>` against an empty state dir (no hub is running).
 pub fn holler(args: &[&str]) -> Out {
     let state = support::StateDir::new();
-    let output = support::holler_cmd(&state)
+    run_on(&state, args)
+}
+
+/// `holler <args>` on `state`.
+fn run_on(state: &support::StateDir, args: &[&str]) -> Out {
+    let output = support::holler_cmd(state)
         .args(args)
         .output()
         .expect("run the holler binary");
@@ -66,6 +72,28 @@ pub fn holler(args: &[&str]) -> Out {
         code: output.status.code().expect("holler exited, not killed"),
         stdout: String::from_utf8(output.stdout).expect("stdout is UTF-8"),
         stderr: String::from_utf8(output.stderr).expect("stderr is UTF-8"),
+    }
+}
+
+/// A hub running on its own state dir, for the verbs that need one to get as far as the
+/// verb (#649: the wiring's `connect` asks the hub's status first, so with no hub every verb,
+/// a stub included, answers `unavailable` before it runs).
+pub struct LiveHub {
+    // Dropped first: the hub stops before its state dir is removed.
+    _hub: support::Hub,
+    state: support::StateDir,
+}
+
+impl LiveHub {
+    pub fn start() -> Self {
+        let state = support::StateDir::new();
+        let hub = support::Hub::start(&state);
+        Self { _hub: hub, state }
+    }
+
+    /// Run `holler <args>` against this hub.
+    pub fn holler(&self, args: &[&str]) -> Out {
+        run_on(&self.state, args)
     }
 }
 

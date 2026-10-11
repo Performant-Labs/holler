@@ -21,6 +21,11 @@
 //!   `demo-c1r1` and `demo-c2r1` running a placeholder (`sleep 3600`), for the panes
 //!   `w9:p1` and `w9:p2`; never the default tmux server.
 //!
+//! The dead-end config ([`CONFIG`]), its layout ([`lay_out`]), the isolated environment
+//! ([`isolated_vars`]), the binaries ([`binaries`]) and the model guard
+//! ([`no_model_can_be_reached`]) are public: the pane integration scenario (#649) includes
+//! this file and reuses them, never a copy.
+//!
 //! The [`Guard`] is built before the tmux server starts. On drop it SIGKILLs the process
 //! group of every server the launcher started through [`Recording`], kills the private tmux server
 //! by its socket (`kill-server`, never a signal), and removes the scratch dir. It never
@@ -59,7 +64,7 @@ const PORT_COUNT: u16 = 100;
 const DEAD_END: u16 = 9;
 
 /// `scripts/spikes/opencode-lib.sh:68-85`, verbatim.
-const CONFIG: &str = r#"{
+pub const CONFIG: &str = r#"{
   "$schema": "https://opencode.ai/config.json",
   "enabled_providers": ["deadend"],
   "disabled_providers": ["opencode"],
@@ -88,7 +93,7 @@ pub fn opted_in(test: &str) -> bool {
 }
 
 /// `name` on `PATH`, as an absolute path.
-fn on_path(name: &str) -> Option<PathBuf> {
+pub fn on_path(name: &str) -> Option<PathBuf> {
     let path = std::env::var_os("PATH")?;
     std::env::split_paths(&path)
         .map(|dir| dir.join(name))
@@ -97,7 +102,7 @@ fn on_path(name: &str) -> Option<PathBuf> {
 
 /// The binaries: `OPENCODE_BIN` or `opencode` on `PATH`, and `tmux` on `PATH`. Opted in, a
 /// missing one is a failure, not a skip.
-fn binaries() -> (PathBuf, PathBuf) {
+pub fn binaries() -> (PathBuf, PathBuf) {
     let opencode = std::env::var_os("OPENCODE_BIN")
         .map(PathBuf::from)
         .or_else(|| on_path("opencode"))
@@ -307,7 +312,7 @@ impl HarnessPort for Recording {
 
 /// The model guard: the server on `port` lists exactly the dead-end provider, and
 /// 127.0.0.1:9 still refuses. Otherwise the test stops here.
-fn no_model_can_be_reached(port: u16) {
+pub fn no_model_can_be_reached(port: u16) {
     let reply = raw(port, "GET", "/config/providers", None);
     let providers: Option<Vec<Value>> = serde_json::from_slice::<Value>(&reply.body)
         .ok()
@@ -368,10 +373,7 @@ impl Rig {
             refused(DEAD_END),
             "127.0.0.1:9 accepts connections; the dead-end provider would not be dead. Refusing."
         );
-        for sub in ["home", "data", "config/opencode", "state", "cache", "proj"] {
-            std::fs::create_dir_all(root.join(sub)).unwrap();
-        }
-        std::fs::write(root.join("config/opencode/opencode.json"), CONFIG).unwrap();
+        lay_out(&root);
         for session in SESSIONS {
             let out = tmux(
                 &tmux_bin,
@@ -485,10 +487,19 @@ impl Rig {
     }
 }
 
-/// The adapter's config for a rig: the isolated env of `opencode-lib.sh:98-111`, `--pure`,
-/// one scratch project dir for every pane, the private tmux socket, and a `tui_session`
-/// that maps the rig's panes to their sessions and anything else to `pane-not-found`.
-fn config(opencode: &Path, tmux_bin: &Path, sock: &Path, root: &Path) -> OpenCodeConfig {
+/// Lay out a scratch root: `home`, `data`, `config`, `state`, `cache` and `proj`, with the
+/// dead-end [`CONFIG`] as `config/opencode/opencode.json`.
+pub fn lay_out(root: &Path) {
+    for sub in ["home", "data", "config/opencode", "state", "cache", "proj"] {
+        std::fs::create_dir_all(root.join(sub)).unwrap();
+    }
+    std::fs::write(root.join("config/opencode/opencode.json"), CONFIG).unwrap();
+}
+
+/// The isolated env of `opencode-lib.sh:98-111` over the scratch `root` (laid out by
+/// [`lay_out`]): `PATH` with `opencode`'s directory, `HOME` and the `XDG_*` dirs inside the
+/// root, `TERM`, and the five `OPENCODE_DISABLE_*` flags. Nothing else.
+pub fn isolated_vars(opencode: &Path, root: &Path) -> Vec<(String, String)> {
     let dir = |sub: &str| root.join(sub).display().to_string();
     let bin_dir = opencode
         .parent()
@@ -514,10 +525,17 @@ fn config(opencode: &Path, tmux_bin: &Path, sock: &Path, root: &Path) -> OpenCod
     ] {
         vars.push((format!("OPENCODE_DISABLE_{flag}"), "1".to_owned()));
     }
+    vars
+}
+
+/// The adapter's config for a rig: the isolated env of [`isolated_vars`], `--pure`, one
+/// scratch project dir for every pane, the private tmux socket, and a `tui_session` that maps
+/// the rig's panes to their sessions and anything else to `pane-not-found`.
+fn config(opencode: &Path, tmux_bin: &Path, sock: &Path, root: &Path) -> OpenCodeConfig {
     OpenCodeConfig {
         opencode_bin: opencode.to_path_buf(),
         serve_args: vec!["--pure".to_owned()],
-        env: ProcessEnv::Isolated(vars),
+        env: ProcessEnv::Isolated(isolated_vars(opencode, root)),
         tmux: TmuxConfig {
             tmux_bin: tmux_bin.to_path_buf(),
             socket: TmuxSocket::Path(sock.to_path_buf()),

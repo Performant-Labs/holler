@@ -87,6 +87,14 @@ impl StateDir {
         Self { path }
     }
 
+    /// A state directory at `path`, created now and removed on drop like
+    /// [`StateDir::new`]'s (#649: the scenario keeps its state dir inside its one scratch
+    /// directory).
+    pub fn at(path: PathBuf) -> Self {
+        std::fs::create_dir_all(&path).expect("create state dir");
+        Self { path }
+    }
+
     /// The root of this state dir (where holler roots `hub/`, `body/`, etc.).
     pub fn path(&self) -> &Path {
         &self.path

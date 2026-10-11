@@ -15,6 +15,26 @@ fills this file in at release time.
   section "Restarting a pane on another model" of `docs/orchestrating.md` now leads with `holler pane relaunch` and keeps
   `scripts/pane-restart` as the fallback until the 7-day sign-off of the cutover (#654), and as the only restart path
   of a Claude Code pane. A docs test pins the guide to the code's own tables. No behaviour changes.
+- Pane control is wired (epic [#633](https://github.com/Performant-Labs/holler/issues/633)): every `holler pane` and
+  `holler profile` verb, and `say`, `interrupt` and `answer` with `--pane`, now run against the hub's pane and profile
+  registries and the real Herdr, tmux and OpenCode adapters, where they answered `not-implemented` before
+  ([#649](https://github.com/Performant-Labs/holler/issues/649)). The CLI reads the registries over the hub's control
+  socket and builds the adapters itself; the hub builds none. With no hub running, every one of these verbs exits 1 with
+  `unavailable`, naming the missing hub, and touches nothing else; `pane list`, `get` and `watch` and `profile list` and
+  `show` need nothing but the hub. The adapters are configured by environment variables, and a missing or malformed one
+  fails only the verbs that use its adapter, when they first use it, with an error naming it:
+  `HOLLER_HERDR_SESSION` (the Herdr session the panes live in; Herdr's own `HERDR_SESSION` is not read),
+  `HOLLER_HERDR_SOCKET` (else `HERDR_SOCKET_PATH`, else that session's default socket), `HOLLER_HERDR_WORKSPACES` (each
+  workspace's rows by columns, `label=RxC,...`), `HOLLER_TMUX_SOCKET` (an absolute path; unset, tmux's default socket),
+  `HOLLER_OPENCODE_BIN` (else `opencode` on `PATH`) and `HOLLER_OPENCODE_SERVE_ARGS` (a JSON array of strings). A registry
+  write whose reply is lost answers `timeout`, since it may have landed. No credential is read, printed or put on a
+  command line: an OpenCode server inherits its tmux server's environment. Two things go live with it: every profile
+  write a `--profile` pane verb or `profile apply` makes is logged as `holler pane`
+  ([#825](https://github.com/Performant-Labs/holler/issues/825)), and the first message of `pane reset --first` reaches
+  the pane's server outside the hub's park and hold gate, so until
+  [#828](https://github.com/Performant-Labs/holler/issues/828) lands, do not use `reset --first` on a parked or held pane.
+  An opt-in scenario (`HOLLER_TEST_PANE_INTEGRATION=1`) runs the verbs end to end against scratch Herdr, tmux and OpenCode
+  instances it starts itself, and refuses any real session. [ADR 0021](docs/adr/ADR-0021.md) records the wiring.
 - Setup wizard (epic [#726](https://github.com/Performant-Labs/holler/issues/726)): Stage 1 asks which Herdr session to
   build in, between the orchestrators and the workspace name ([#838](https://github.com/Performant-Labs/holler/issues/838)).
   "The default, unnamed session" (recommended) writes no `[instance]` table, so nothing changes; "A new named session"
