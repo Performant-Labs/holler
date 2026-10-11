@@ -197,3 +197,22 @@ Run handoff directory `docs/handoffs/650` Â· branch `issue-650-implementation` Â
       nothing else);
     - the real binary's usage paths (exit 2, and `not-implemented` past them until #649).
   - The facts in unchanged code are in `docs/handoffs/650/evidence.md`.
+
+## T, Phase 7 (verify / GREEN): 2026-10-11T11:42-06:00 (MDT)
+
+- **Decided:**
+  - F's two "tests that look wrong" were wrong in the test: they read the log window after `rig.records()`, whose own
+    `List` is logged. The repair takes the tail right after the run; the expected undo orders are unchanged.
+  - No production change is needed. Verdict PASS.
+- **Assumed:** the gitleaks finding F reported was settled before `660efe8`, since the sentinel is now
+  `zq-env-secret-c3c3` and a scan of the commit is clean. T made no change for it.
+- **Hedged:** AC 10's follow-up issue (a verb that removes only a record) is still not filed. That is an outward act, for O
+  or S.
+- **Evidence:**
+  - `cargo test -p holler-cli --test pane_verbs`: 306 passed.
+  - `cargo test -p holler-pane --test import_test`: 5 passed.
+  - The workspace command with `--no-fail-fast`: 149 targets, 2160 passed, 0 failed, 25 ignored.
+  - Workspace clippy with `-D warnings`: clean.
+  - `lint.sh`, `changelog-check.sh`, `docs_cli_test`, `wire_selftest`, `cargo machete` and `test-hooks.sh`: all pass.
+  - Two production mutations, both reverted, were each caught by the test that names the behaviour.
+  - Three evidence entries were appended to `evidence.md`.

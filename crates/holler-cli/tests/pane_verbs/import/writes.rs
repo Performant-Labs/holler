@@ -247,11 +247,13 @@ fn a_failed_write_is_undone_and_answers_its_own_code() {
     let rig = two_panes();
     let mark = rig.mark();
     let (exit, code, _) = run_failing_write_2(&rig, NthPut::Fail(PaneError::Conflict));
+    // Read the log before `records()`, whose own `List` lands in it.
+    let tail = pane_ops_tail(&rig, &mark, 3);
     assert_eq!((exit, code.as_str()), (1, "generation-conflict"));
     assert!(rig.records().is_empty(), "the pane store is empty");
     assert!(rig.fleet().is_none(), "fleet is deleted");
     assert_eq!(
-        pane_ops_tail(&rig, &mark, 3)[..],
+        tail[..],
         [PaneStoreOp::CasPut, PaneStoreOp::Get, PaneStoreOp::Delete],
         "write 1, the undo's get of B, the delete of A"
     );
@@ -266,11 +268,13 @@ fn a_write_that_landed_and_timed_out_is_undone_too() {
         op: "pane_store.cas_put".to_owned(),
     };
     let (exit, code, _) = run_failing_write_2(&rig, NthPut::ApplyThenFail(timeout));
+    // Read the log before `records()`, whose own `List` lands in it.
+    let tail = pane_ops_tail(&rig, &mark, 3);
     assert_eq!((exit, code.as_str()), (1, "timeout"));
     assert!(rig.records().is_empty(), "the pane store is empty");
     assert!(rig.fleet().is_none(), "fleet is deleted");
     assert_eq!(
-        pane_ops_tail(&rig, &mark, 3)[..],
+        tail[..],
         [PaneStoreOp::Get, PaneStoreOp::Delete, PaneStoreOp::Delete],
         "the undo's get of B, the delete of B, then of A"
     );

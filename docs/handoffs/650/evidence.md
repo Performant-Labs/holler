@@ -254,3 +254,33 @@ Phase 7 (verify).
   >     assert_eq!(
   >         pane_ops_tail(&rig, &mark, 3)[..],
   > ```
+
+## T, Phase 7
+
+- **Fact:** the reused code `tmux-session-missing` is spelled by reconcile's `FindingKind::code`, the one source the import's
+  code table must match (`import_test.rs`, `join::a_missing_tmux_session_is_reconciles_problem_and_blocks`).
+  **Source:** `crates/holler-pane/src/findings.rs:100`
+  **Verbatim excerpt:**
+  > ```rust
+  >             FindingKind::TmuxSessionMissing => "tmux-session-missing",
+  > ```
+
+- **Fact:** the reused code `session-not-found` is spelled by the closed `PaneCode::as_str`
+  (`import_test.rs`, `join::agreeing_files_naming_a_session_the_server_lacks_record_no_session`).
+  **Source:** `crates/holler-pane/src/error.rs:118`
+  **Verbatim excerpt:**
+  > ```rust
+  >             PaneCode::SessionNotFound => "session-not-found",
+  > ```
+
+- **Fact:** the test kit's fake `health` answers `Ok(false)` for a killed and for a frozen server alike (only `Running` is
+  healthy), so `join::an_unhealthy_server_is_down_or_wedged_as_reconcile_says` tells `server-down` from `server-wedged`
+  through the copied classification (F's `observe_server` entry above), not through `health`.
+  **Source:** `crates/holler-pane-testkit/src/harness.rs:346-349`
+  **Verbatim excerpt:**
+  > ```rust
+  >     fn health(&self, port: u16) -> Result<bool, PaneError> {
+  >         self.faults.enter(HarnessOp::Health)?;
+  >         Ok(self.lock().state(port) == Some(ServerState::Running))
+  >     }
+  > ```
