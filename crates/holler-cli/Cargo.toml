@@ -399,6 +399,12 @@ holler-proto = { path = "../holler-proto" }
 # #670: the pane/profile verbs take every error code, guard and port type from
 # the holler-pane crate (`Ports`, `PaneError`, `GridPos`, `Argv`, `EnvVarName`).
 holler-pane = { path = "../holler-pane" }
+# #649: `pane/wiring.rs` builds the real ports from the three adapter crates
+# (ADR-0021 section 5: the verbs run CLI-side, so holler-cli depends on the
+# adapters and holler-hub does not).
+holler-adapter-herdr = { path = "../holler-adapter-herdr" }
+holler-adapter-host = { path = "../holler-adapter-host" }
+holler-adapter-opencode = { path = "../holler-adapter-opencode" }
 # Story #143: the `hub serve` / `hub status` leaves drive the hub crate (the
 # listener + control socket). This is the first story to consume holler-hub
 # from the CLI, so per the #155 §7 rule it is declared here.

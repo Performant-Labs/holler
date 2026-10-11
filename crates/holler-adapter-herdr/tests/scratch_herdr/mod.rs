@@ -16,6 +16,11 @@
 //! The guard ([`ScratchHerdr`]) stops only the child it started, then removes the root.
 //! Every `herdr` the harness runs goes through [`command`], and every wait through
 //! [`poll`]: checked first, then paused, and bounded.
+//!
+//! **Flavors (#649).** The gate variable, the session prefix and the root prefix are a
+//! [`Flavor`]. #640's own tests use [`HERDR_640`] through the unsuffixed functions; the
+//! pane integration scenario (`holler-cli/tests/pane_integration`, #649) includes this module
+//! with its own flavor and its own scratch base, through the `_as` and `_in` functions.
 
 use std::collections::hash_map::RandomState;
 use std::ffi::OsString;
@@ -68,6 +73,23 @@ const ROOTED: [(&str, &str); 6] = [
     ("XDG_RUNTIME_DIR", "run"),
 ];
 
+/// The names one family of scratch servers uses: the gate variable that opts in, the
+/// session-name prefix (followed by 8 lower-case hex digits) and the root's directory-name
+/// prefix. Both prefixes keep #640's lengths, so [`SOCKET_TAIL`] bounds every flavor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Flavor {
+    pub gate_var: &'static str,
+    pub name_prefix: &'static str,
+    pub root_prefix: &'static str,
+}
+
+/// #640's flavor: `HOLLER_HERDR_SCRATCH`, `holler640-`, `h640.`.
+pub const HERDR_640: Flavor = Flavor {
+    gate_var: GATE_VAR,
+    name_prefix: NAME_PREFIX,
+    root_prefix: ROOT_PREFIX,
+};
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum Gate {
     Run,
@@ -85,25 +107,35 @@ pub fn gate(value: Option<&str>) -> Gate {
 
 /// Pure: `Ok` only for `NAME_PREFIX` + 8 of `[0-9a-f]`; `default` is refused by name.
 pub fn check_name(name: &str) -> Result<(), String> {
+    check_name_as(NAME_PREFIX, name)
+}
+
+/// Pure: [`check_name`] for the session prefix `prefix`.
+pub fn check_name_as(prefix: &str, name: &str) -> Result<(), String> {
     if name.eq_ignore_ascii_case("default") {
         return Err(format!(
             "refusing the Herdr session {name:?}: it is Herdr's default session, never a \
              scratch one"
         ));
     }
-    let hex = name.strip_prefix(NAME_PREFIX).unwrap_or("");
+    let hex = name.strip_prefix(prefix).unwrap_or("");
     let is_hex = |c: char| c.is_ascii_digit() || ('a'..='f').contains(&c);
-    if name.starts_with(NAME_PREFIX) && hex.len() == 8 && hex.chars().all(is_hex) {
+    if name.starts_with(prefix) && hex.len() == 8 && hex.chars().all(is_hex) {
         return Ok(());
     }
     Err(format!(
-        "refusing the Herdr session {name:?}: a scratch session is {NAME_PREFIX} and 8 \
+        "refusing the Herdr session {name:?}: a scratch session is {prefix} and 8 \
          lower-case hex digits"
     ))
 }
 
 /// A fresh name that passes `check_name` (std only, for example `RandomState`).
 pub fn new_name() -> String {
+    new_name_as(NAME_PREFIX)
+}
+
+/// A fresh name that passes `check_name_as(prefix, ..)`.
+pub fn new_name_as(prefix: &str) -> String {
     static CALLS: AtomicU64 = AtomicU64::new(0);
     let mut hasher = RandomState::new().build_hasher();
     hasher.write_u64(CALLS.fetch_add(1, Ordering::Relaxed));
@@ -112,7 +144,7 @@ pub fn new_name() -> String {
         .duration_since(SystemTime::UNIX_EPOCH)
         .map_or(0, |since| since.as_nanos());
     hasher.write_u128(nanos);
-    format!("{NAME_PREFIX}{:08x}", hasher.finish() as u32)
+    format!("{prefix}{:08x}", hasher.finish() as u32)
 }
 
 /// Pure: `Ok` only when `socket` is absolute, has only normal components, lies under
@@ -150,7 +182,17 @@ pub fn check_socket(root: &Path, socket: &Path) -> Result<(), String> {
 /// Pure: read `herdr status server --json`'s output; `Ok(socket)` only when its
 /// `session` is `name` and its `socket` passes `check_socket(root, ..)`.
 pub fn prove(status_json: &str, name: &str, root: &Path) -> Result<PathBuf, String> {
-    check_name(name)?;
+    prove_as(NAME_PREFIX, status_json, name, root)
+}
+
+/// Pure: [`prove`] for the session prefix `prefix`.
+pub fn prove_as(
+    prefix: &str,
+    status_json: &str,
+    name: &str,
+    root: &Path,
+) -> Result<PathBuf, String> {
+    check_name_as(prefix, name)?;
     let status: serde_json::Value = serde_json::from_str(status_json)
         .map_err(|_| "refusing the server: its status is not JSON".to_owned())?;
     let session = status.get("session").and_then(serde_json::Value::as_str);
@@ -198,9 +240,14 @@ pub fn scratch_env(
 /// starting `skipped (HOLLER_HERDR_SCRATCH is not 1)`) unless the gate is `Run`; then
 /// the absolute path of `herdr` on `PATH`, or a panic naming `herdr` and `PATH`.
 pub fn opt_in() -> Option<PathBuf> {
-    let value = std::env::var_os(GATE_VAR);
+    opt_in_as(GATE_VAR)
+}
+
+/// [`opt_in`] gated on `gate_var`.
+pub fn opt_in_as(gate_var: &str) -> Option<PathBuf> {
+    let value = std::env::var_os(gate_var);
     if gate(value.as_deref().and_then(|v| v.to_str())) == Gate::Skip {
-        eprintln!("skipped (HOLLER_HERDR_SCRATCH is not 1): no scratch Herdr server was started");
+        eprintln!("skipped ({gate_var} is not 1): no scratch Herdr server was started");
         return None;
     }
     let path = std::env::var_os("PATH").unwrap_or_default();
@@ -208,10 +255,10 @@ pub fn opt_in() -> Option<PathBuf> {
         .map(|dir| dir.join("herdr"))
         .find(|candidate| is_executable(candidate));
     let Some(herdr) = found else {
-        panic!("{GATE_VAR}=1 asks for a scratch Herdr, but no executable `herdr` is on PATH");
+        panic!("{gate_var}=1 asks for a scratch Herdr, but no executable `herdr` is on PATH");
     };
     Some(fs::canonicalize(&herdr).unwrap_or_else(|error| {
-        panic!("{GATE_VAR}=1: the `herdr` found on PATH cannot be resolved ({error})")
+        panic!("{gate_var}=1: the `herdr` found on PATH cannot be resolved ({error})")
     }))
 }
 
@@ -240,10 +287,16 @@ pub fn poll<T>(
 }
 
 /// The one way the harness runs `herdr` (AC 8): `herdr --session <name> <args>`, the
-/// name checked, the environment exactly `scratch_env(root, ..)`, in `root/work`, with
-/// no stdin.
-fn command(herdr: &Path, root: &Path, name: &str, args: &[&str]) -> Result<Command, String> {
-    check_name(name)?;
+/// name checked against `prefix`, the environment exactly `scratch_env(root, ..)`, in
+/// `root/work`, with no stdin.
+fn command(
+    herdr: &Path,
+    prefix: &str,
+    root: &Path,
+    name: &str,
+    args: &[&str],
+) -> Result<Command, String> {
+    check_name_as(prefix, name)?;
     let mut command = Command::new(herdr);
     command
         .arg("--session")
@@ -294,11 +347,11 @@ fn scratch_base() -> PathBuf {
     }
 }
 
-/// A fresh root `h640.XXXXXX` in the scratch base, laid out as Decision 2 says.
-fn make_root() -> (TempDir, PathBuf) {
+/// A fresh root `<root_prefix>XXXXXX` in `base`, laid out as Decision 2 says.
+fn make_root(base: &Path, root_prefix: &str) -> (TempDir, PathBuf) {
     let dir = tempfile::Builder::new()
-        .prefix(ROOT_PREFIX)
-        .tempdir_in(scratch_base())
+        .prefix(root_prefix)
+        .tempdir_in(base)
         .expect("a scratch root");
     let root = fs::canonicalize(dir.path()).expect("the scratch root, canonical");
     for (_, under) in ROOTED {
@@ -314,6 +367,8 @@ fn make_root() -> (TempDir, PathBuf) {
 /// One scratch Herdr server: its root, its session, its proven socket, its child process.
 pub struct ScratchHerdr {
     herdr: PathBuf,
+    /// The session prefix every `herdr` call is checked against.
+    prefix: &'static str,
     root: PathBuf,
     name: String,
     socket: PathBuf,
@@ -326,10 +381,20 @@ impl ScratchHerdr {
     /// Start a server, prove it (Decision 4), and return once its socket is proven.
     /// Any refusal or failure panics with the reason.
     pub fn start(herdr: &Path) -> Self {
-        let (dir, root) = make_root();
-        let name = new_name();
+        Self::start_in(herdr, HERDR_640, &scratch_base())
+    }
+
+    /// [`ScratchHerdr::start`] for `flavor`, its root made in `base`. `base` must be short:
+    /// at most [`BASE_LIMIT`] bytes keeps the socket under [`SOCKET_PATH_LIMIT`].
+    pub fn start_in(herdr: &Path, flavor: Flavor, base: &Path) -> Self {
+        assert!(
+            base.as_os_str().len() <= BASE_LIMIT,
+            "the scratch base {base:?} is longer than {BASE_LIMIT} bytes"
+        );
+        let (dir, root) = make_root(base, flavor.root_prefix);
+        let name = new_name_as(flavor.name_prefix);
         let log = File::create(root.join("server.log")).expect("server.log");
-        let child = command(herdr, &root, &name, &["server"])
+        let child = command(herdr, flavor.name_prefix, &root, &name, &["server"])
             .unwrap_or_else(|why| panic!("{why}"))
             .stdout(log.try_clone().expect("server.log, twice"))
             .stderr(log)
@@ -338,6 +403,7 @@ impl ScratchHerdr {
         // The guard exists before the proof, so a refusal still stops the server.
         let mut server = Self {
             herdr: herdr.to_owned(),
+            prefix: flavor.name_prefix,
             root,
             name,
             socket: PathBuf::new(),
@@ -357,17 +423,20 @@ impl ScratchHerdr {
             }
             let status = command(
                 &self.herdr,
+                self.prefix,
                 &self.root,
                 &self.name,
                 &["status", "server", "--json"],
             )
             .and_then(run_bounded);
             match status {
-                Ok((exit, json)) if exit.success() => match prove(&json, &self.name, &self.root) {
-                    Ok(socket) if socket.exists() => Some(Ok(socket)),
-                    Ok(_) => None,
-                    Err(refusal) => Some(Err(refusal)),
-                },
+                Ok((exit, json)) if exit.success() => {
+                    match prove_as(self.prefix, &json, &self.name, &self.root) {
+                        Ok(socket) if socket.exists() => Some(Ok(socket)),
+                        Ok(_) => None,
+                        Err(refusal) => Some(Err(refusal)),
+                    }
+                }
                 _ => None,
             }
         });
@@ -396,8 +465,14 @@ impl ScratchHerdr {
 /// Stops only this server, then removes its root (Decision 5). Never panics.
 impl Drop for ScratchHerdr {
     fn drop(&mut self) {
-        let stopped =
-            command(&self.herdr, &self.root, &self.name, &["server", "stop"]).and_then(run_bounded);
+        let stopped = command(
+            &self.herdr,
+            self.prefix,
+            &self.root,
+            &self.name,
+            &["server", "stop"],
+        )
+        .and_then(run_bounded);
         if let Err(why) = stopped {
             eprintln!("scratch Herdr: `server stop` failed: {why}");
         }

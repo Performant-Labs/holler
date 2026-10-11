@@ -5,7 +5,7 @@
 use holler_pane_testkit::envelope::check_envelope;
 use serde_json::Value;
 
-use crate::{assert_no_failures, holler, PANE_VERBS, PROFILE_VERBS};
+use crate::{assert_no_failures, holler, LiveHub, PANE_VERBS, PROFILE_VERBS};
 
 /// Every verb that is still a stub, with the story that owns it. The only place in the
 /// shared process tests that names a stub's owning story.
@@ -53,11 +53,14 @@ fn every_stub_names_a_known_verb() {
 }
 
 /// Text mode: `error: not implemented (story #NNN)` on stderr, nothing on stdout, exit 1.
+/// Against a live hub: with none, the wiring answers `unavailable` before any verb runs
+/// (#649).
 #[test]
 fn stub_verb_not_implemented() {
+    let hub = LiveHub::start();
     let mut failures = Vec::new();
     for &(namespace, verb, story) in STUBS {
-        let out = holler(&[namespace, verb]);
+        let out = hub.holler(&[namespace, verb]);
         let line = format!("error: not implemented (story #{story})");
         if out.code != 1 || !out.stdout.is_empty() || !out.stderr_has_line(&line) {
             failures.push(format!("holler {namespace} {verb}: want exit 1, empty stdout, stderr line {line:?}; got {out:?}"));
@@ -68,8 +71,10 @@ fn stub_verb_not_implemented() {
 
 /// JSON mode, in each spelling (`--format=json`, `--format json`, `--json`, and the
 /// flag before the namespace): exactly one envelope on stdout and nothing else, exit 1.
+/// Against a live hub, as above.
 #[test]
 fn stub_verb_not_implemented_json_is_one_envelope() {
+    let hub = LiveHub::start();
     let mut failures = Vec::new();
     for &(namespace, verb, story) in STUBS {
         let phrase = format!("not implemented (story #{story})");
@@ -80,7 +85,7 @@ fn stub_verb_not_implemented_json_is_one_envelope() {
             vec!["--format=json", namespace, verb],
         ];
         for argv in spellings {
-            let out = holler(&argv);
+            let out = hub.holler(&argv);
             let lines: Vec<&str> = out.stdout.lines().collect();
             let compact_prefix = r#"{"schema_version":1,"ok":false,"data":null,"error":{"code":"not-implemented","message":"#;
             let parsed: Option<Value> = (lines.len() == 1)
@@ -211,7 +216,8 @@ fn a_forced_diagnostic_in_json_mode_leaves_stdout_one_envelope() {
     let &(namespace, verb, _) = STUBS
         .first()
         .expect("a stub exists while this test lives (#660)");
-    let out = holler(&[namespace, verb, "--debug", "noisy", "--format=json"]);
+    let hub = LiveHub::start();
+    let out = hub.holler(&[namespace, verb, "--debug", "noisy", "--format=json"]);
     assert_eq!(out.code, 1, "the stub still exits 1: {out:?}");
     assert!(
         out.stderr.contains("logging_started level=noisy"),
