@@ -500,3 +500,18 @@
   - **Workspace** (`--no-fail-fast`, CI's skip): 2312 passed, 1 failed, 32 ignored. The failure is the rename scan, whose only hits are under `docs/handoffs/`.
   - **Clean:** clippy `-D warnings`, `lint.sh`, `changelog-check`, `cargo machete`, `docs_cli_test` 3/3, `wire_selftest` 3/3, and `rustfmt` on `wiring.rs`.
   - **Leftovers:** none after the opt-in and mutation runs (no `/tmp/hlr649-*/`, no `hlr649` process).
+
+## T (Phase 7, verify GREEN, third cycle: test-only rework after the diff gate's round-2 findings) — 2026-10-11T14:49:25-06:00
+- **Decided:**
+  - **GREEN, no blocking issue.** Both round-2 findings say the code "will not compile", and the build refutes both. `cargo build -p holler-cli --all-targets` and clippy `-D warnings` are clean, and the D8 test passes.
+  - **Test-side fix: evidence, not a rewrite.** The D8 test was correct. The reviewer could not see `run_verb_with`, `Ports`, the `Send + Sync` supertraits or the fakes' constructors. Four verbatim entries were added to `evidence.md`, plus a two-line comment in the test saying why the profile store, the scope and the prober are there.
+  - **`wiring.rs` closure: no change, and none was made (it is production code).** `move` moves the owned `Result` into the closure, so the closure is `'static`. F should answer the finding in prose.
+- **Assumed:**
+  - The opt-in run need not be repeated, because no production or harness code changed since its 4/4 at `22aa539`.
+- **Hedged:**
+  - The round-3 reviewer may again lack source for the closure. The closure is in the diff, so this is left as an advisory for F rather than a T entry.
+- **Evidence:**
+  - Default run: 61/0/4.
+  - Workspace: 2312 passed, 1 failed (the rename scan, scratch only), 32 ignored.
+  - `docs_cli_test` 3/3 and `wire_selftest` 3/3; `lint.sh`, `changelog-check` and `machete` clean.
+  - The excerpts were checked against source by script. One range was corrected from 356-368 to 356-367.

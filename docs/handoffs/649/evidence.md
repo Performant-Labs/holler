@@ -449,3 +449,71 @@ it relies on.
   >                 ),
   >             })
   >     }
+
+## The source that round 2 of the diff gate asked for (T, third cycle)
+
+Round 2 could not check that `bind::launch_resolves_attach_tuis_pane_from_the_bindings_before_the_record_exists`
+(`crates/holler-cli/tests/pane_integration/bind.rs`) compiles, because the signatures it relies on were not
+shown. None of these files is in the diff. The test target builds and the test passes at this tree
+(`cargo test -p holler-cli --test pane_integration bind::launch_resolves_`: `ok. 1 passed`).
+
+- **Fact:** `run_verb_with` takes a `Ports<'_>` by value, with no bound of its own beyond `Ports`.
+  **Source:** `crates/holler-cli/tests/verb_harness/mod.rs:54`
+  **Verbatim excerpt:**
+  > pub fn run_verb_with(argv: &[&str], format: Format, ports: Ports<'_>) -> Outcome {
+
+- **Fact:** `Ports` is seven `&dyn` references, one per port, so the test must fill all seven, including
+  `profile_store`, `scope` and `prober`, which a launch's assertions do not read. Its only requirement on
+  a value is that it implements the port's trait.
+  **Source:** `crates/holler-pane/src/ports.rs:356-367`
+  **Verbatim excerpt:**
+  > /// One `&dyn` of each port: what a verb holds. `Ports` is `Copy`, so it is passed
+  > /// by value or by reference freely, and `Ports<'static>` is `Send + Sync`.
+  > #[derive(Clone, Copy)]
+  > pub struct Ports<'a> {
+  >     pub pane_store: &'a dyn PaneStore,
+  >     pub profile_store: &'a dyn ProfileStore,
+  >     pub herdr: &'a dyn HerdrPort,
+  >     pub host: &'a dyn HostPort,
+  >     pub harness: &'a dyn HarnessPort,
+  >     pub scope: &'a dyn ProfileScope,
+  >     pub prober: &'a dyn Prober,
+  > }
+
+- **Fact:** `Send + Sync` is a supertrait of `Prober` and of `ProfileScope`, so the test kit's
+  `impl Prober for FakeProber` and `impl ProfileScope for FakeProfileScope` compile only if both fakes are
+  `Send + Sync`. Both impls exist in the test kit, which the workspace builds.
+  **Source:** `crates/holler-pane/src/ports.rs:340`, `crates/holler-pane/src/profile.rs:384`,
+  `crates/holler-pane-testkit/src/prober.rs:81`, `crates/holler-pane-testkit/src/profile_scope.rs:190`
+  **Verbatim excerpt:**
+  > pub trait Prober: Send + Sync {
+  >
+  > (profile.rs)
+  > pub trait ProfileScope: Send + Sync {
+  >
+  > (prober.rs)
+  > impl Prober for FakeProber {
+  >
+  > (profile_scope.rs)
+  > impl ProfileScope for FakeProfileScope {
+
+- **Fact:** the constructors the test calls: `FakeProber::new()` takes nothing and scripts nothing, and
+  `FakeProfileScope::new` takes the two stores as `Arc<dyn ..>` and an `Actor`. The test passes
+  `profiles.clone()` and `panes.clone()` (an `Arc<FakeProfileStore>` and an `Arc<FakePaneStore>`, which
+  coerce), and both fakes implement their store trait.
+  **Source:** `crates/holler-pane-testkit/src/prober.rs:44-47`, `crates/holler-pane-testkit/src/profile_scope.rs:70`,
+  `crates/holler-pane-testkit/src/profile_store.rs:249`, `crates/holler-pane-testkit/src/pane_store.rs:176`
+  **Verbatim excerpt:**
+  > impl FakeProber {
+  >     /// Nothing scripted: every run answers `ProbeResult::Error` naming the argv, never
+  >     /// `Ok`.
+  >     pub fn new() -> Self {
+  >
+  > (profile_scope.rs)
+  >     pub fn new(profiles: Arc<dyn ProfileStore>, panes: Arc<dyn PaneStore>, actor: Actor) -> Self {
+  >
+  > (profile_store.rs)
+  > impl ProfileStore for FakeProfileStore {
+  >
+  > (pane_store.rs)
+  > impl PaneStore for FakePaneStore {

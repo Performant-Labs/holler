@@ -525,6 +525,8 @@ fn launch_resolves_attach_tuis_pane_from_the_bindings_before_the_record_exists()
         panes: Arc::clone(&panes),
         seen: Mutex::new(Vec::new()),
     };
+    // `Ports` takes all seven ports. The profile store, the scope and the prober only fill it:
+    // the test asserts on the resolver's answer and the pane store.
     let scope = FakeProfileScope::new(
         profiles.clone(),
         panes.clone(),

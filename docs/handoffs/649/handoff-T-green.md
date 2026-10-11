@@ -1,133 +1,103 @@
-# Handoff-T-green: Phase 7 - #649 hub wiring and the scratch integration scenario  (second cycle: re-entry after the diff gate's round-1 BLOCK)
+# Handoff-T-green: Phase 7 - #649 hub wiring and the scratch integration scenario  (third cycle: test-only rework after the diff gate's round-2 findings)
 
 **Date:** 2026-10-11
-**Branch:** issue-649-implementation (worktree `.claude/worktrees/0649-live-harness`, head `22aa539` plus this phase's one test edit)
+**Branch:** issue-649-implementation (worktree `.claude/worktrees/0649-live-harness`, head `dfb395c` plus this phase's edits)
 **Issue:** #649
-**Handoff-F reviewed:** `docs/handoffs/649/handoff-F.md` (second cycle)
+**Handoff-F reviewed:** `docs/handoffs/649/handoff-F.md` (second cycle; F has not run since)
 **Handoff-T-red:** `docs/handoffs/649/handoff-T-red.md` (second cycle)
 
-This handoff replaces the first cycle's (`1c05f75`), which git history keeps. Everything that one confirmed (the 8 first-cycle
-RED rows, mutations M1 to M7, the full acceptance table) still holds at this tree. The suite that pins it is unchanged
-and still green. This cycle adds the W-T row and the 6 s pin.
+This handoff replaces the second cycle's (`dfb395c`), which git history keeps. That cycle's spot-checks still hold at
+this tree: the W-T row against the unset read and M8, and the 6 s pin against a 5 s bound. So do the first cycle's
+M1 to M7, and the acceptance table below. **No production file has changed since `22aa539`.** This phase changes
+one test comment and `evidence.md`.
+
+## The round-2 findings
+
+Both findings say the code may not compile. The reviewer could not see enough source to tell. A build settles both,
+and both are refuted.
+
+| Finding | What it claims | What the build shows | Kind |
+|---|---|---|---|
+| `tests/pane_integration/bind.rs:466-510`, the D8 pin test | The test may not compile. The reviewer saw neither `run_verb_with`'s signature nor `FakeProber`, so it could not check the `Ports` bounds or `Prober: Send + Sync`. | `cargo build -p holler-cli --all-targets` is clean. `cargo test -p holler-cli --test pane_integration bind::launch_resolves_attach_tuis_pane_from_the_bindings_before_the_record_exists` gives `ok. 1 passed`. | Test-only: the reviewer lacked source. Fixed below. |
+| `src/pane/wiring.rs:100-107`, `from_env`'s `LazyHerdr` closure | `move \|\| connect_herdr(&herdr_config)` borrows a local, so the closure is not `'static` and will not compile. | It compiles, with clippy `-D warnings` clean. `move` moves the owned `Result<HerdrConfig, PaneError>` into the closure. `&herdr_config` then borrows the closure's own copy, so the closure is `'static`. | Production code, so it is F's to answer. **No production change is needed.** I made none. |
+
+## Test repairs this phase
+
+- **`evidence.md`, new section "The source that round 2 of the diff gate asked for (T, third cycle)".** It has four
+  entries, each copied verbatim from unchanged source and checked line by line with a script:
+  - `run_verb_with(argv, format, ports: Ports<'_>)` (`tests/verb_harness/mod.rs:54`);
+  - the `Ports` struct, seven `&dyn` port references (`holler-pane/src/ports.rs:356-367`);
+  - `Prober: Send + Sync` and `ProfileScope: Send + Sync`, and the test kit's `impl Prober for FakeProber` and
+    `impl ProfileScope for FakeProfileScope`;
+  - the constructors `FakeProber::new()` and `FakeProfileScope::new(Arc<dyn ProfileStore>, Arc<dyn PaneStore>, Actor)`,
+    and both fake stores' trait impls.
+- **`bind.rs`, the D8 test:** two comment lines before the scope. They say that `Ports` takes all seven ports, and that
+  the profile store, the scope and the prober only fill it, because the test asserts on the resolver's answer and the
+  pane store. This answers the finding's observation that the test "never asserts on the profile store". The test's
+  behaviour is unchanged. The file is 579 lines.
 
 ## GREEN confirmation
 
 | Run | Result |
 |---|---|
-| `cargo test -p holler-cli --test pane_integration` (F's tree, `22aa539`) | `ok. 61 passed; 0 failed; 4 ignored; finished in 119.06s` |
-| `cargo test -p holler-cli --test pane_integration env::` (after this phase's edit) | `ok. 13 passed; 0 failed` |
-| `HOLLER_TEST_PANE_INTEGRATION=1 cargo test -p holler-cli --test pane_integration -- --ignored --test-threads=1` | `ok. 4 passed; 0 failed; finished in 67.75s`: the scenario, the profile scenario, the grid, and the server argv under a real tmux pty |
-
-This cycle's RED row `wired::a_tmux_socket_that_is_not_utf8_is_usage_never_the_default_server` now passes, beside
-its D6 sibling `wired::a_relative_tmux_socket_…`. The pin `fake_hub::a_read_and_a_write_answered_after_6_s_succeed` passes.
-After the opt-in run there is no `/tmp/hlr649-*/` directory and no `hlr649` or `holler649` process. The loose
-`/tmp/hlr649-*.txt` and `.bak` files are earlier phases' notes.
-
-### Spot-check: the W-T row fails when the behaviour is removed
-
-- **Reverting to `std::env::var(name).ok()`:** this is HEAD before F's change, and T-red's RED output shows the row failing
-  on it.
-- **M8, a lossy conversion:** `connect`'s lookup was set to `var_os(name).map(|v| v.to_string_lossy().into_owned())`. That is
-  the form T-red and F rejected, because `/tmp/hlr649-\u{FFFD}/tmux.sock` is absolute.
-  - Result: `wired::a_tmux_socket_that_is_not_utf8_…` **FAILED**, with `host.ensure_session: want usage naming
-    HOLLER_TMUX_SOCKET; got Ok(())`, and the same for `host.ps`, `harness.health` and `harness.shown_session`.
-  - So the row pins "malformed, refused", not merely "not the default socket".
-  - The file was restored with `git checkout`, and `git status` was clean afterwards. No scratch directory or process was
-    left by the mutated run.
-
-## Test repairs and additions this phase
-
-F listed no test as wrong. One table value was added:
-
-- **`env::the_serve_args_are_a_json_array_of_strings_default_none`** now also refuses `""` as `usage` naming
-  `HOLLER_OPENCODE_SERVE_ARGS`.
-  - F's new docs (`connect`, `Lookup`, the module doc and the ADR sentence) state that a non-UTF-8 value reads as the
-    empty value, and that the empty value is `usage` for every variable but `HOLLER_HERDR_WORKSPACES`.
-  - Every path variable's empty value was already pinned (first cycle's `env::a_path_variable_that_is_not_absolute_…`,
-    plus `HOLLER_TMUX_SOCKET`'s own rows), and so was the session's (`env::no_herdr_session_…`). The serve arguments'
-    empty value was the one documented case with no test.
-  - It passes against F's code, because `serde_json::from_str("")` is an error.
-- I did not add a second process-level non-UTF-8 row. I agree with F's note: every variable goes through the one closure in
-  `connect`, which the W-T row pins, and `env.rs`'s empty-value rows pin each reader.
+| `cargo test -p holler-cli --test pane_integration bind::launch_resolves_…` | `ok. 1 passed` |
+| `cargo test -p holler-cli --test pane_integration` (after this phase's edits) | `ok. 61 passed; 0 failed; 4 ignored; finished in 119.04s` |
+| Opt-in run (`HOLLER_TEST_PANE_INTEGRATION=1 … -- --ignored --test-threads=1`) | Not re-run. No production or harness code has changed since the second cycle's 4/4 at `22aa539`, and this phase adds only a comment. |
 
 ## Tier 1 results
 
-| Check | Command | Expected | Actual | |
-|---|---|---|---|---|
-| Clippy (CI flags) | `cargo clippy --workspace --all-targets -- -D warnings` | clean | clean, exit 0 (also `-p holler-cli` after the test edit) | PASS |
-| Workspace tests (CI's `test.unit.command`) | `cargo test --workspace --no-fail-fast -- --skip roster_stays_accurate_under_concurrent_body_load` | all pass | 151 binaries: 2312 passed, **1 failed**, 32 ignored. The failure is `wizard_scripts`' `skilltext_w5_rename::no_old_command_or_directory_outside_the_rename_note` | PASS for this story (see below) |
-| Docs CLI | `cargo test -p holler-cli --test docs_cli_test` | pass | 3 passed | PASS |
-| Wire canary | `cargo test -p holler-cli --test wire_selftest` | pass | 3 passed | PASS |
-| Lint | `bash scripts/lint.sh` | exit 0 | exit 0. The only warning is `crates/holler-pane/src/error.rs is 713 lines`, a file this story does not touch | PASS |
-| Changelog | `bash scripts/changelog-check.sh` | ok | ok | PASS |
-| Unused deps | `cargo machete` | none | none | PASS |
-| Format | `rustfmt --edition 2021 --check crates/holler-cli/src/pane/wiring.rs` | clean | clean | PASS |
+| Check | Command | Actual | |
+|---|---|---|---|
+| Build | `cargo build -p holler-cli --all-targets` | clean | PASS |
+| Clippy (CI flags) | `cargo clippy --workspace --all-targets -- -D warnings` | clean | PASS |
+| Workspace tests (CI's `test.unit.command`) | `cargo test --workspace --no-fail-fast -- --skip roster_stays_accurate_under_concurrent_body_load` | 151 binaries: 2312 passed, 1 failed, 32 ignored. The figures are the same as F's and the second cycle's. The failure is `wizard_scripts`' rename scan. | PASS for this story |
+| Docs CLI | `cargo test -p holler-cli --test docs_cli_test` | 3 passed | PASS |
+| Wire canary | `cargo test -p holler-cli --test wire_selftest` | 3 passed | PASS |
+| Lint | `bash scripts/lint.sh` | exit 0. The only warning is `holler-pane/src/error.rs is 713 lines`, a file this story does not touch. | PASS |
+| Changelog | `bash scripts/changelog-check.sh` | ok | PASS |
+| Unused deps | `cargo machete` | none | PASS |
 
-**The one workspace failure is pipeline scratch, as F reported.**
-- Its hits are `docs/handoffs/649-brief.md:1197`, `docs/handoffs/649/decisions.md:66`, and this handoff's previous
-  version, which quoted the name.
-- `git grep -l agent-skills/setup-wizard -- ':!docs/handoffs'` finds nothing.
-- `docs/handoffs/` is removed before the push, so this is not a regression.
+The rename scan's hits are pipeline scratch only. `git grep -l agent-skills/setup-wizard -- ':!docs/handoffs'` finds
+nothing, and `docs/handoffs/` is removed before the push.
 
-**Cross-check of F's figures.** F's results reproduce:
-- 61/0/4 for the default run;
-- 4/4 for the opt-in run (67.75 s here, 82.48 s for F);
-- 2312 passed, 1 failed and 32 ignored for the workspace;
-- 3/3 for `docs_cli_test` and 3/3 for `wire_selftest`;
-- clean clippy, lint, changelog and machete.
-
-There is no discrepancy.
+**Cross-check against F's handoff:** 61/0/4, 2312/1/32, 3/3, 3/3, and clean clippy, lint, changelog and machete all
+reproduce. There is no discrepancy.
 
 ## Tier 2 results
 
 | Check | Method | |
 |---|---|---|
-| Coverage per criterion | The one new behaviour of this cycle (W-T) has its row. Every first-cycle criterion keeps its test (table below). | PASS |
-| Test quality | The W-T row fails on both the unset read (T-red) and the lossy read (M8), so it pins the behaviour, not the call. It is a second value through the D6 row's shared check, not a copy. The 6 s pin fails at a 5 s bound (T-red's mutation). The added `""` is one table value in an existing row. The suite is proportionate: 61 default rows across 11 files, the largest `bind.rs` at 577 lines. | PASS |
-| Type safety | Clippy `-D warnings` clean. F's change adds no cast, no `unsafe` and no new type. The lookup still satisfies D24's `Lookup` signature. | PASS |
-| Error handling | `absolute` now answers the empty value before `PathBuf::from` with `<VAR> is empty or not UTF-8; it must be an absolute path`. It is still `usage` naming the variable, which every path row asserts. The no-session message still names only `HOLLER_HERDR_SESSION`, as `env::no_herdr_session_…` asserts through its helper `names_only_hollers_session_variable`. `serve_args` refuses `""` (added row). | PASS |
-| Docs match the code | `Lookup`'s doc says `PATH`, `HOME` and `XDG_CONFIG_HOME` take the empty value as unset. That matches `env.rs`: `PATH` is `unwrap_or_default` with relative entries skipped, and the config home filters to absolute directories. `HOLLER_HERDR_WORKSPACES`' empty value is no workspace, as pinned by the first cycle's `env::the_workspaces_are_label_rows_by_columns`. | PASS |
-| Data integrity, API contract | No protocol, golden-file, port or store change this cycle. | PASS |
-| Security | No message quotes a value. The new texts name only the variable, and `serve_args` still quotes none of its input. A non-UTF-8 `HOLLER_TMUX_SOCKET` can no longer reach the operator's default tmux server (W-T row, trap untouched). | PASS |
-| Blast radius | This cycle's production diff is `wiring.rs`, `wiring/env.rs` and `docs/adr/ADR-0021.md`, all in the brief's Blast radius. | PASS |
-| Evidence appendix | The W-T row and the added `""` rely only on `connect`, `absolute`, `tmux_socket` and `serve_args`, all in the diff. `evidence.md` needs no new entry from T. F's eight W-S entries are present. | PASS |
-| Migration safety, Playwright | N/A: no schema, and no browser surface in this repo. | N/A |
+| Coverage per criterion | Unchanged from the second cycle. Every criterion keeps its test (table below). | PASS |
+| Test quality | The D8 test fails when its behaviour is removed: in the first cycle's M6, `BindingHerdr` offers no pane id and the test fails. The new comment names what the test asserts on. Nothing redundant was added. | PASS |
+| Type safety | The build and clippy `-D warnings` are clean. Both "will not compile" claims are refuted by building. | PASS |
+| Evidence appendix | Every unchanged-source fact the D8 test relies on now has a verbatim entry. Each line was checked against its file by script, and one range was corrected from 356-368 to 356-367 before saving. | PASS |
+| Error handling, data integrity, API contract, security | No change this phase. The second cycle's results stand. | PASS |
+| Migration safety, Playwright | N/A: no schema, and no browser surface. | N/A |
 
 ## Acceptance criteria status
 
-| Criterion | Status | Backed by |
-|---|---|---|
-| No hub: every verb exits 1 `unavailable` naming the hub and touches no adapter; the process stub tests use a started hub | PASS | `no_hub::every_verb_with_no_hub_…_in_json` / `_in_text`; `pane_verbs/process` (workspace run) |
-| Store-only verbs work with no Herdr, tmux or OpenCode | PASS | `store_only::the_store_only_verbs_work_…`, `env::malformed_adapter_settings_do_not_stop_…` |
-| A read never answered is `timeout` within 10 s; other read failures are `unavailable`; a JSON-RPC error is `unavailable` | PASS | `fake_hub::a_read_the_hub_never_answers_…`, `…a_read_and_a_write_answered_after_6_s_succeed` (lower bound), `…a_read_whose_reply_is_lost_is_unavailable`, `…a_json_rpc_error_is_unavailable_…` |
-| A malformed `HOLLER_TMUX_SOCKET`, **including a non-UTF-8 one**, is `usage` from the host and the harness, never the default socket | PASS | `wired::a_relative_tmux_socket_…`, `wired::a_tmux_socket_that_is_not_utf8_…` (M8), `env::a_relative_tmux_socket_…` |
-| A write whose reply is lost is `timeout` | PASS | `fake_hub::a_write_whose_reply_is_lost_is_timeout` |
-| The scenario runs on scratch instances only; real session names are refused; the guards are in the default run | PASS | `scenario::the_scenario_runs_in_order_…` (opt-in), `guards::*` (default) |
-| The scenario's steps run in order, ending with D21's repairs | PASS | `scenario::the_scenario_runs_in_order_on_scratch_instances` |
-| No typing into a TUI; the registry equals the observed state at the end | PASS | same |
-| The profile scenario | PASS | `scenario::the_profile_scenario_runs_on_scratch_instances` |
-| Both grid spellings land at row 2, column 1 in Herdr's snapshot | PASS | `scenario::the_two_grid_spellings_…` |
-| Every `--format=json` output and `watch` line is an envelope | PASS | the scenario; `watch::pane_watch_prints_…` |
-| `attach_tui` resolves before the record exists | PASS | `bind::launch_resolves_attach_tuis_pane_…`, and the scenario's launch steps |
-| The server argv runs under a real tmux pty | PASS | `scenario::the_server_argv_runs_under_a_real_tmux_pty_and_stops` |
-| No credential is printed, written or put on an argv | PASS | the scenario's D28 sentinel checks |
+The criteria all PASS, backed by the same tests as the second cycle's table (`dfb395c`):
+- `no_hub::*`, `store_only::*` and `env::malformed_adapter_settings_…`;
+- `fake_hub::*` (timeout, unavailable, the lost write, the 6 s pin);
+- `wired::*` (the relative socket and the non-UTF-8 socket), `guards::*` and `watch::*`;
+- `bind::launch_resolves_attach_tuis_pane_…` (`attach_tui` resolves before the record exists);
+- the opt-in `scenario::*` (the scenario, the profile scenario, the grid, and the server argv under tmux);
+- the D28 sentinel checks.
 
 ## Blocking issues
 
-None.
+None. F's production code does not need to change for either round-2 finding. In F's own pass, the `wiring.rs` finding
+needs only an answer, for example a line in `handoff-F.md` saying the closure is `move` and the build is clean. A code
+change is not needed.
 
 ## Advisory notes
 
-- **A non-UTF-8 `HOLLER_HERDR_WORKSPACES` reads as no workspace, not as `usage`.** This is F's known issue and Design
-  decision 9. It fails closed: the adapter refuses every launch into an unlisted workspace, per `evidence.md`. It is not
-  pinned at process level, which is consistent with the brief's scope. The operator gets the adapter's "workspace … is not
-  configured", which does not name the variable.
-- **The test tree is not bare-`rustfmt` clean.** The shared `support/` modules have long lines, and CI runs no `fmt`.
-  This predates the story, and the one line added here follows the file's existing style.
-- **The rename scan fails while `docs/handoffs/` is tracked**, as in both earlier cycles. Read that failure as the scratch
-  hit.
-- The first cycle's notes still stand:
-  - `with_env` mutates the process environment under the state-dir lock;
-  - T-red's findings 1 to 3 are O's to file.
+- The second cycle's advisories stand:
+  - a non-UTF-8 `HOLLER_HERDR_WORKSPACES` reads as no workspace;
+  - the `support/` tree is not bare-`rustfmt` clean;
+  - the rename scan fails while `docs/handoffs/` is tracked.
+- Both round-2 findings came from source the reviewer could not see. If F wants to head off a repeat on the `wiring.rs`
+  closure, an `evidence.md` entry is the cheaper route. `LazyHerdr::new`'s signature is in the diff (`bind.rs`), so
+  it needs no excerpt.
 
 `T-green complete, no blocking issues. No UI surface — U is N/A, ready for S.`
