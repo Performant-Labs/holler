@@ -229,9 +229,9 @@ more than one.
   panes were already there, the orchestrator pane's Claude conversation had auto-resumed
   (`claude --resume <id>`), and the two viewer panes had come back as dead shells running
   `opencode --session <old id>` → `Session not found`. Check `herdr pane list` before splitting:
-  if the pane count already equals orchestrators + sessions, reuse the structure, leave a
-  healthy resumed orchestrator alone, and re-attach only the dead viewer panes using the new run's
-  session ids.
+  if the user asked to reuse them and the count equals orchestrators + sessions, reuse the
+  structure, leave a healthy resumed orchestrator alone, and re-attach only the dead viewer panes
+  using the new run's session ids.
   The wizard never splits or closes panes it did not create: when `pane list` shows such panes
   after the server starts, it reports them and, with the user's yes, builds a new workspace beside
   them (`workspace create`), or reuses them only if the user asks. Stage 3 says this in the plan
@@ -455,8 +455,9 @@ than warning, when anything collides with something this instance did not create
 already in use, a hub already listening on `hub_port`, a state directory already in use (a hub
 or body row whose state directory is not visible counts as the default one), or a Herdr session
 of the same name. For the default instance, a running unnamed Herdr server with no live `herdr`
-ledger row is foreign and refused too; the operator may answer yes to "build in it" in Stage 3,
-and the wizard still never stops it. A serve entry that is the instance's own port pair with no
+ledger row is foreign and refused too; the operator may answer yes to "build in it" in Stage 3
+(which means a new workspace in that server, never a split of its panes), and the wizard still
+never stops it. A serve entry that is the instance's own port pair with no
 live hub is reported as such and is not refused. It does not check bodies per session, because a body's session is not on its
 command line. Each
 refusal names the colliding item and the config key to change (`hub_port`, `serve_https_port`,

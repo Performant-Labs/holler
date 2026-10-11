@@ -13,5 +13,6 @@ mod skilltext;
 mod skilltext_772b;
 mod skilltext_772a;
 mod skilltext_772c;
+mod skilltext_w3_stage8;
 mod skilltext_w3_stage3;
 mod start;
