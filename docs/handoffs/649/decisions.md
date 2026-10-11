@@ -353,3 +353,70 @@
   - Mutations M1 to M7 (lazy watch, a lost write mapped to `unavailable`, a zero extent, relative paths, the `HERDR_SESSION` fallback, no binding offer, the host falling back to `Unwired`): each was caught by the named test, then restored with `git checkout`.
   - `cargo test --workspace --no-fail-fast -- --skip roster_…`: 2309 passed, 1 failed (the scratch scan), 32 ignored.
   - Clippy `-D warnings`, `docs_cli_test` 3/3, `wire_selftest` 3/3, `lint.sh`, `changelog-check` and `cargo machete`: all clean.
+
+## A (Phase 3, up-front plan review, fifth pass: the re-entry after the diff gate's round-1 BLOCK) — 2026-10-11T13:59:29-06:00
+- **Decided:** PASS on `docs/handoffs/649-brief.md` at `451e2b3` (sha256 `afe88dc4916d7e09...`), read against HEAD `1c05f75`. No blocks and four warns. The full detail is in `handoff-A.md`, which replaces the fourth pass's.
+  - **Why phase 3 ran again.** The outside diff gate returned BLOCK at 13:47 MDT (round 1). F had reported `archChanged`, so the driver routed here, the drift re-check, without classifying the findings.
+  - **The plan holds.** The brief is unchanged, and `origin/main` is still `5d366b9`. #828 and #829 are open. #654's body edit at 13:34 MDT is to the cutover procedure only.
+  - **F's change has no drift.**
+    - `Wired<P>` extends D24's `WiredHarness` to W-E's host: one wrapper, not two.
+    - W-4 holds for all three decorators.
+    - D3 and W-9 are one mapping, through `transport::call(None, ..)`.
+    - The no-hub text matches the CLI's own pattern.
+    - The ADR edits match D17 and W-N.
+    - The rigs are included by `#[path]`. There is no fourth `LinkedHost`.
+  - **W-S (binding on F and T): the round-1 BLOCK.**
+    - Its B-1 (a `get` of a missing record) and B-2 (`{}` for `list`) are false. `Option<T>` decodes `null` as `None`, and the hub's `NoParams` is "only `{}`".
+    - Conformance Case 1 pins B-1, and both suites pass against a real hub.
+    - F changes no code for either. F adds the refuting facts to `evidence.md`, which round 2 receives through `--evidence`.
+    - The reviewer's own WARN (the 10 s bound pinned only from above) and its nits are T's call.
+  - **W-T (binding on F, low): a value that is not UTF-8 reads as unset.**
+    - `connect`'s `std::env::var(name).ok()` makes it `None`.
+    - So a non-UTF-8 `HOLLER_TMUX_SOCKET` falls back to tmux's default server, which D6 forbids for a malformed value.
+    - The fix is one line: read such a value as malformed.
+  - **W-O is carried (no fourth copy).**
+  - **W-U (for O to file in Aftersight):**
+    - on the `archChanged` route, and on a `production` classification, the diff gate's findings reach neither T nor F;
+    - phase 4's task text says "before any code exists";
+    - a phase-4 BLOCK on an unchanged brief stops the run.
+- **Assumed:**
+  - **F reported `archChanged: true`.** I inferred this from the route: `nextPhase(7, 'BLOCK')` reaches phase 4 only then. F's handoff has no "Architecture changed" line.
+  - **T-red and F read `handoff-A.md` on this route.** The run-context block tells every phase to read prior handoffs, and names this file.
+  - **`std::env::var` answers `Err(NotUnicode)` for a value that is not UTF-8.** This is the standard library's documented behaviour. I did not run a probe.
+- **Hedged:**
+  - **Why PASS and binding warns, not BLOCK.** With the brief unchanged, a BLOCK stops the run as `needs-amendment` at the next phase-4 entry (`decideArchReReview`), and nothing in the brief needs amending. W-S and W-T go to F through this handoff instead.
+  - **W-S binds evidence, not code.** This is the one way round 2's reviewer sees the source it asked for (NV-1, NV-2, NV-4, NV-5).
+  - **W-T is A's reading of D6 and the first pass's W-13.** D6 does not name the non-UTF-8 case. The scenario cannot reach it, because D10 (4) gives the binary ASCII paths.
+  - **The #654 edit.** I read it as a diff of the body, and did not read #652's guide.
+- **Evidence:**
+  - **Read in full:**
+    - `wiring.rs` and `wiring/{store,bind,env}.rs` at HEAD;
+    - `649-diff-result-r1.md`;
+    - `handoff-F.md`, `handoff-T-green.md` and `evidence.md`.
+  - **Diffs read:** ADR-0021 `d0c1531..HEAD`; the story's file list and line counts against `origin/main`.
+  - **Read in part:**
+    - the driver: `coding-pipeline.workflow.mjs` 1095-1215, 3690-3708 and 5376-5720;
+    - `workflow-coding-pipeline.md` 1104-1112, 1765-1800 and 1875-1890;
+    - `panes/handlers.rs` 37-116 and `panes/mod.rs` 180-215;
+    - `profile/handlers.rs` 37-39 and `reply.rs` 46-117;
+    - `ports.rs` (the trait methods);
+    - conformance `pane_store.rs` 120-131 and `profile_store.rs` 185-196;
+    - `fake_hub.rs` 41-52, 215-300 and 377-398;
+    - `wired.rs` 1-98 and `main.rs` `with_env`;
+    - the no-hub text in `say_cmd.rs` and `roster_cmd.rs`;
+    - `fake_tmux_test.rs` 785-797 and `scratch/mod.rs` (the `#[path]` lines, 94 and 406).
+  - **Ran:** `cargo test -p holler-cli --test pane_integration clients::` at `1c05f75`: 2 passed, 0 failed, 66.41 s.
+  - **GitHub:**
+    - #828, #829, #825 and #654: all open;
+    - #654's body edit of 13:34 MDT, diffed against the version before it;
+    - #825's comments: none;
+    - open issues mentioning `LinkedHost`: only #649.
+  - **Greps:**
+    - `struct LinkedHost` in `crates/`;
+    - the `support::` helpers in `pane_integration`;
+    - `#[path` includes;
+    - the `TmuxHost::new` sites;
+    - personal names in the added lines;
+    - `diff-result` in the role docs and the driver;
+    - the evidence argument of the diff gate.
+  - **`git fetch origin`:** `HEAD..origin/main` is empty.

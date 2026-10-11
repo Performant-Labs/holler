@@ -1,112 +1,119 @@
-# Handoff-A: Phase 3 - #649 hub wiring and the scratch integration scenario  (up-front plan review, fourth pass: the third-pass amendment and the merges of #664 and #650)
+# Handoff-A: Phase 3 - #649 hub wiring and the scratch integration scenario  (up-front plan review, fifth pass: the re-entry after the diff gate's round-1 BLOCK, F having reported `archChanged`)
 
 **Date:** 2026-10-11
-**Branch:** issue-649-implementation (worktree `.claude/worktrees/0649-live-harness`, head `d0c1531`)
+**Branch:** issue-649-implementation (worktree `.claude/worktrees/0649-live-harness`, head `1c05f75`)
 **Brief reviewed:** `docs/handoffs/649-brief.md` at `451e2b3` (sha256 `afe88dc4916d7e09...`).
-- The two merges after it left the brief unchanged: `f59ba21` (#664, `profile apply`) and `d0c1531` (#650, `pane import`). The second landed during this review.
-- I read the brief against the tree at `d0c1531`.
-- The issue's body matches the brief from Scope to Pipeline. The issue was updated at 12:16 MDT.
+- The brief has not changed since the fourth pass.
+- `origin/main` is still `5d366b9` (#650), the base the fourth pass read. I fetched during this pass, and nothing has merged since.
 
 **Reuse map:** no separate file. As in the earlier passes, the brief's Evidence (E1 to E70) and D11 serve as the map.   **Wireframe:** N/A (no UI surface)
 **Verdict:** PASS
 
-This pass replaces the third one (BLOCK on the brief at `6c07882`, committed in `be87a09`). It reviews the amendment `451e2b3`, then what the merges of #664 and #650 changed under the plan.
+This pass replaces the fourth one (PASS, `eb94951`). Git history keeps that pass's text.
+
+**Why phase 3 ran again.**
+- T-green passed at 13:46 MDT. The outside diff gate then returned BLOCK at 13:47 MDT (round 1, `docs/handoffs/649-diff-result-r1.md`).
+- F had reported `archChanged`. So `nextPhase(7, 'BLOCK')` routed here, the pipeline's "A (drift re-check) if architecture changed", and did not classify the findings.
+- The chain now resumes: T-red, F, T-green, then diff gate round 2.
+
+**This handoff is the only channel for the round-1 findings.**
+- On this route the driver gives them to neither T nor F. The classifier is skipped when `archChanged` is set, so there is no `tNote` or `fNote`.
+- The result file is gitignored, sits outside `docs/handoffs/649/`, and no role doc names it.
 
 ## Summary
 
-**Verdict: PASS.** The amendment closes B-2, and no finding blocks. There are five warns. Three bind F, T or phase 7 as A's readings, and none needs a new operator decision.
+**Verdict: PASS.** I reviewed three things.
 
-- **B-2 is closed.** #828 is open (filed at 12:14 MDT) and scoped to the first message's path. The brief names it in four places:
-  - D18 (c);
-  - D17, for both ADR sentences;
-  - the W-B sentence, with the stopgap "until #828 lands, the operator avoids `reset --first` on a parked or held pane";
-  - the Depends on line.
-- **W-N (binding, F): three ADR edits.**
-  - D17 still turns the model, effort and environment sentence into "#642 only", but D18 (f) gives it to #829.
-  - D18 (b)'s wording of the `--herdr-session` deferral is too broad.
-  - The Consequences bullet says CLI tests never use a real Herdr, tmux or OpenCode, and #649 adds the first that do.
-- **W-O (binding, phase 7): a third `LinkedHost`.** #664 added it before this story could, which triggers D32's "a third copy moves to the test kit". The test kit is outside the Blast radius. W-O restates A's own note: the copy stays, and O files the consolidation.
-- **W-P (binding, T): two no-hub rows no longer parse.** Since #664 and #650, `profile apply` and `pane import` take a required argument, so the no-hub test's bare rows fail at clap (exit 2) before `connect` runs.
-- **W-Q (F's paragraph and O's follow-ups): what the merges make live through the wiring.**
-  - Apply's creates and relaunches are logged under `holler pane`, which #825's premise does not cover.
-  - Apply's observation bound meets W-C's case.
-  - Import reports a mismatched `--herdr-session` as `pane-unlabelled` for every pane.
-- **W-R (low): `docs/testing.md`.** The new opt-in gate is documented nowhere but its module doc.
+1. **The plan.** The brief and the base are both unchanged, so the fourth pass's PASS stands.
+   - #828 and #829, which the brief and now the ADR name as owners, are still open.
+   - #654's body was edited at 13:34 MDT. The edit rewrites the cutover procedure only and changes nothing the plan builds on.
+2. **F's architecture change, the reason for this re-entry.** I found no drift.
+   - `Wired<P>` generalises D24's `WiredHarness` to cover W-E's fail-closed host. It is one wrapper, not a parallel second one.
+   - Every decorator forwards every port method, the two default-armed ones included (W-4).
+   - The ADR edits are the ones D17 and W-N asked for, made in the same change.
+3. **The round-1 diff gate's BLOCK.** Both of its code blocks are false positives.
+   - The code refutes them, and so do tests I re-ran against a real hub at HEAD.
+   - Its third item it lowered to a WARN itself. W-S says what T and F do with each item.
 
-**The rest of the third pass is resolved.**
+**One new warn binds F (W-T, low).** `connect` reads a value that is not UTF-8 as unset. A non-UTF-8 `HOLLER_TMUX_SOCKET` therefore falls back to tmux's default server, which D6 forbids for a malformed value.
 
-- **W-K (a):** #829 is filed and named in D18 (f) and the Depends on line, but not in D17 (W-N (a)).
-- **W-K (b):** D18 (b) says no code story is planned for the default, and #654's comment records it.
-- **W-K (c):** #654's comment (12:14 MDT) gives the DRIVEN wiring to the cutover.
-- **W-L:** D15 runs two specs, the second with an agent.
-- **W-M:** D12, D19 and the Depends on line are updated.
-
-The merges change nothing the plan builds on (listed below the table), and the work the brief blesses type-checks at `d0c1531`.
+**A BLOCK would be the wrong tool here.** The brief is unchanged, so the driver would stop the run as `needs-amendment` at the next phase-4 entry (`decideArchReReview`). Nothing in the brief needs amending, so W-S and W-T are binding warns.
 
 ## Findings
 
 | # | Severity | Plan element | Drift dimension | Finding | Suggested fix |
 |---|---|---|---|---|---|
-| W-N | warn (**binding on F**) | **D17's list of ADR edits**, with D18 (b) and D18 (f) | ADRs | **(a) Model, effort and environment** (ADR 547-548). The ADR reads "no port carries them yet (#642, #649; they will join the `ServeSpec`)", and D17 still turns that into "#642 only". But D18 (f) and the Depends on line give the work to #829, which is open and scoped to it. #642 closed at 11:56 MDT without it. Followed literally, D17 writes a closed owner into the ADR, the failure B-2 blocked on. **(b) The `--herdr-session` deferral** (568-569). D18 (b) says "the flag stays required on every verb that reaches Herdr". In fact:<ul><li>`pane launch` requires it;</li><li>`pane import` requires it (#650);</li><li>`profile apply` needs it only to create a pane (#664, `apply.rs:62-64`);</li><li>`relaunch`, `close` and `doctor` reach Herdr with no such flag.</li></ul>D5's "required by `launch`" is the accurate wording. **(c) The Consequences bullet** (916-917). It says: "tests that drive the CLI use the test kit's fakes, never a real Herdr, tmux or OpenCode, and refuse real session names". #649's scenario is the first CLI test that runs real Herdr, tmux and OpenCode, on scratch instances. D17 does not list the bullet. The overlay requires an ADR that a change contradicts to be amended in the same change. | **A's reading, binding on F.**<ul><li>(a) The sentence names #829. D18 (f) is the later, explicit decision, and D17's "#642 only" was written before #829 existed.</li><li>(b) The sentence says the flag stays required by `launch`, and is needed by `pane import`, and by `profile apply` to create a pane. Defaulting it from the adapter's configured session has no story (D18 (b)).</li><li>(c) The bullet says the default run uses the fakes. The opt-in scenarios (#649, and #667 for apply) run scratch instances they start themselves and refuse real names (D10).</li></ul>All three edits are in ADR-0021, inside the Blast radius. No decision changes. B-2 was a block because the brief named #646 three times with no alternative. Here the brief names #829 twice, so F has a reading that is both compliant and true. |
-| W-O | warn (**binding at phase 7**; restates D32) | **D32**: "the one `LinkedHost` in `pane_integration/bind.rs` is acceptable test-local glue (a third copy moves to the test kit)" | reuse | **#664 made the WIP's copy the third.** The three copies of the fake host whose `run` also starts the fake harness's server:<ul><li>`profile_verbs/apply/rig.rs:636` (#664, merged);</li><li>`pane_verbs/launch/rig.rs:663` (#644, #802);</li><li>`pane_integration/bind.rs:422` (the WIP).</li></ul>**Why D32 cannot be read literally.** It would have F move #649's copy into `holler-pane-testkit`. That is outside the Blast radius, and the other two copies belong to #644 and #664. **The test kit prescribes local glue.** Its docs leave this to each test as a `HostPort` wrapper (`host.rs:12-17`, `harness.rs:13-17`). **Nobody filed the consolidation.** #664's anti-duplication gate called the copy the house pattern (its warn 2) and asked O for a consolidation issue. None is open. | **A's reading of its own note.**<ul><li>#649's copy stays as test-local glue.</li><li>Phase 7 checks that #649 adds no fourth copy and that its copy serves only D8's pin.</li><li>For T: the test kit's documented wrapper also kills the harness server in `stop_owned`, and the WIP's does not (`bind.rs:438-440`). That matters only if the pin rolls back, so it is T's call.</li></ul>**O files the consolidation:** one wrapper in the test kit for all three, for example a `HostPort` that links `FakeHost` to `FakeHarness`, as #664's gate asked. |
-| W-P | warn (**binding on T**) | **The no-hub test** (`pane_integration/no_hub.rs:18-39`, AC 1) and **D2's list of stubs** | none (test arguments) | **Two rows no longer parse.** `EVERY_VERB` runs `["pane", "import"]` (line 30) and `["profile", "apply"]` (line 35) with no arguments.<ul><li>Since #664, `profile apply` takes a required `NAME` (`apply.rs:55`).</li><li>Since #650, `pane import` takes a required `--from` (`import.rs:83`).</li></ul>With no arguments, each is clap's usage error (exit 2), raised before `connect`. So both no-hub tests fail on these rows, whatever the wiring does. **D2's stub list is out of date.** `pane import` and `profile apply` are verbs now. Only #665's three PROPOSED verbs remain in `STUBS` (`stub.rs:18-31`), and the forced-diagnostic test now takes `STUBS.first()` (`stub.rs:216-217`). D22's plan is unchanged, and the WIP's `LiveHub` conversion survived both merges. | **T gives each row arguments that parse,** for example `profile apply hlr649` and `pane import --from <a scratch directory> --herdr-session holler649-00000000`. With no hub, `connect` then answers `unavailable` first. **These failures come from the test's own arguments.** They are **not** RED evidence for the wiring (D32). No brief change is needed. |
-| W-Q | warn (not binding; F's paragraph and O's follow-ups) | **What #664 and #650 make live through the wiring**: D18 (e), D8's W-C sentence and D18 (b) | cross-cutting concerns (audit trail, bounds, configuration) | **(a) Apply's profile writes are logged as `holler pane`.**<ul><li>`profile apply` creates through `tx_launch::launch` with `profile: Some(P)`, and relaunches with the same (`tx_apply/run.rs:51-57`, `:120`).</li><li>The engine then writes P through `ports.scope.edit_spec` (`tx_launch.rs:467`, `:576`).</li><li>`StoreScope` writes P with its fixed actor, even when the spec is unchanged (`profile_scope.rs:194`). Through D1's wiring that actor is `holler pane`.</li></ul>So a profile verb's writes are logged as a pane verb's. D18 (e) and #825 rest on "each profile verb names its own actor" (E20). Import is not affected: it writes under `holler pane import` (`import/writes.rs:27`). **(b) Apply's observation bound.** `tx_apply.rs:40-50` says the observation takes "at most one port call's own bound". It runs one `shown_session` per recorded pane at once. `shown_session` fixes its deadline and only then calls the resolver (`attach.rs:100-101`, `:169`). Through the wiring that is W-C's case: one `pane/list`, or, when the registry misses, Herdr's connect ping plus a snapshot. **(c) Import with a mismatched `--herdr-session`.** #650's join keeps only the snapshot panes whose session equals `--herdr-session` (`import/assess.rs:168`). The adapter stamps every pane with its own configured session (`adapter.rs:262`). A flag that differs from `HOLLER_HERDR_SESSION` therefore reports every pane as `pane-unlabelled`, and refuses a real run as `import-blocked`, without naming the mismatch. `launch` and apply's creates get a clear `unavailable` instead (E24). | **(a)** F's "Wiring as built (#649)" paragraph names `profile apply`'s creates and relaunches among the writes logged as `holler pane`. O comments on #825 so its scope covers `profile apply`. **(b)** That paragraph's W-C sentence names `shown_session` beside `attach_tui`, and says the case also qualifies the observation bound in `tx_apply.rs`. That file is outside the Blast radius and stays unedited. **(c)** No change for #649. #654's comment already tells the operator to pass the same name. With this evidence, the operator may revisit D18 (b)'s "no code story is planned for the default". |
-| W-R | warn (low; O decides) | **`docs/testing.md`** | pattern consistency (no dominant pattern) | **The new opt-in gate is undocumented.** `docs/testing.md` documents #640's scratch Herdr gate (lines 439-449) but not #642's real-OpenCode gate, so the precedent is mixed. #649's `HOLLER_TEST_PANE_INTEGRATION=1` is the end-to-end check an operator is most likely to run by hand. Only `pane_integration/main.rs`'s module doc names it, without the cargo command. `docs/testing.md` is not in the Blast radius. | **Optional.** Either add `docs/testing.md` to the Blast radius for one section after #640's, "Opt-in: the pane integration scenario (#649)", or have the module doc carry the exact command. Not binding: the codebase has no dominant pattern. |
+| W-S | warn (**binding on F and T**: what each does with the round-1 diff BLOCK) | D3's clients (`wiring/store.rs`) and D13's round trips (`pane_integration/clients.rs`), as `649-diff-result-r1.md` reads them | wire and protocol; pattern consistency | **B-1 ("`get` of a missing record fails as `unavailable`") is false.**<ul><li>`get` returns `Result<Option<Pane>, _>`, so `request`'s `T` is `Option<Pane>` (`store.rs:126-128`, `:265-272`).</li><li>`PaneReply.data` is `#[serde(default)] Option<Value>` (`holler-pane/src/reply.rs:50-57`). So the hub's `"data": null` becomes `Value::Null`, and `from_value::<Option<Pane>>(Null)` is `Ok(None)`.</li><li>Both conformance suites have this exact case, "Case 1: `get` of a name never stored is `Ok(None)`" (`holler-pane-testkit/src/conformance/pane_store.rs:123-131`, `profile_store.rs:187-195`).</li><li>Both pass over the clients against a real hub. I re-ran them at `1c05f75`: 2 passed, 0 failed, 66 s.</li></ul>**B-2 ("`list` sends `{}`, not no params") is false.**<ul><li>The hub decodes `pane/list` and `profile/list` as `NoParams`, which is `#[serde(deny_unknown_fields)] struct NoParams {}` and documented as "only `{}`" (`holler-hub/src/panes/handlers.rs:37-41`, `:97-99`; `profile/handlers.rs:37-39`).</li><li>The hub reads an absent or `null` `params` as `{}` (`handlers.rs:61-68`; `holler-pane/src/reply.rs:111-114`). So `json!({})` is the documented form, not a fabrication.</li><li>`holler_pane::reply` has no typed struct for it, and the hub's `NoParams` is `pub(crate)`.</li><li>Every `list` call in the suites passes.</li></ul>**"B-3" the reviewer lowered to a WARN itself (its W-1).** The two hang tests bound the 10 s only from above: `took < 13 s` against a 14 s hang (`fake_hub.rs:222-248`). No test shows that a store request outlasts the control client's default 5 s, as the watch row does for long polls (`fake_hub.rs:377-388`).<br>**The rest of the review is settled.**<ul><li>The reviewer concludes "fine" or "not a BLOCK" on B-4 to B-9, NV-3, NV-7 and its W-2, W-3 and W-5.</li><li>Its W-4 is settled by the green default run: every `EVERY_VERB` row parses, or the no-hub tests would fail (W-P).</li></ul> | **F changes no production code for B-1 or B-2.** A `request_opt`, or `None` params, would only churn a client that conforms.<br>**F adds the refuting facts to `docs/handoffs/649/evidence.md`.** The diff gate passes that file to `dual-review.sh` with `--evidence` (the driver's `buildDiffGateCaptureTaskPrompt`), so round 2's reviewer sees what NV-1, NV-2, NV-4 and NV-5 asked for:<ul><li>`reply.rs:50-57` and `:94-117`;</li><li>`panes/handlers.rs:37-41`, `:61-68` and `:89-99`;</li><li>the two conformance Case 1 excerpts and `clients.rs:53-65`;</li><li>`ports.rs:230-310`, `HarnessPort` with its two default methods (NV-4);</li><li>`panes/handlers.rs:101-116`, `cas_put`'s membership check (NV-5).</li></ul>**T owes no RED for B-1 or B-2.** These are T's call, not binding:<ul><li>a row in which a read and a write answered after 6 s succeed, with `Answer::After`, which pins the 10 s from below (D9, I5);</li><li>NIT-2: `scratch/mod.rs:406` repeats the labels of `WORKSPACES` (`:94`);</li><li>NV-6: the sentinel variables are removed on drop rather than restored.</li></ul> |
+| W-T | warn (**binding on F**, low; A's reading of D6 and the first pass's W-13) | **D6**, "neither falls back to `TmuxSocket::Default`", and W-13, "configuration errors ... fail closed" | cross-cutting concerns (configuration, fail closed) | **A value that is not UTF-8 reads as unset.**<ul><li>`Wiring::connect` passes `&\|name\| std::env::var(name).ok()` (`wiring.rs:104`).</li><li>`std::env::var` answers `Err(NotUnicode)` for such a value, and `.ok()` turns it into `None`. Every reader in `env.rs` treats `None` as unset.</li></ul>**The effect, variable by variable:**<ul><li>`HOLLER_TMUX_SOCKET` becomes `TmuxSocket::Default`, the operator's live tmux server (`env.rs:78-83`). D6 and W-E forbid exactly that for a malformed value.</li><li>`HOLLER_HERDR_SOCKET` falls through to `HERDR_SOCKET_PATH` (`env.rs:121-126`). T-green pinned against that fall-through for a relative value.</li><li>`HOLLER_OPENCODE_BIN` falls back to the `PATH` search.</li><li>`HOLLER_OPENCODE_SERVE_ARGS` is silently dropped.</li></ul>**Reach.** The scenario cannot hit this, because D10 (4) gives the binary ASCII scratch paths. Only an operator's environment can. | **Read a value that is not UTF-8 as malformed, never as unset.**<ul><li>For example: `std::env::var_os(name).map(\|v\| v.into_string().unwrap_or_default())`.</li><li>Each variable's empty-value rule then answers it: `usage` naming the variable, at the port's first use (D26).</li><li>The change is one line in `connect`, inside the Blast radius, and `Lookup` keeps D24's signature.</li></ul>T may pin it as a row of D6's test (`wired.rs`), setting the value with `OsStr::from_bytes` under `with_env`'s lock. **W-T is not an architecture change.** |
+| W-O | warn (binding at phase 7; carried) | **D32** as the fourth pass restated it | reuse | **Holds.** There are still three `LinkedHost` copies and no fourth:<ul><li>`pane_integration/bind.rs:422`;</li><li>`profile_verbs/apply/rig.rs:636`;</li><li>`pane_verbs/launch/rig.rs:663`.</li></ul>No consolidation issue is open. A search of open issues for `LinkedHost` finds only #649. | Unchanged: phase 7 checks that there is no fourth copy. O files the consolidation (Notes for O). |
+| W-U | warn (not binding on this run; O files it in Aftersight) | the driver's diff-gate rework route (`claude-pipeline-v0.1.7`) | none (pipeline) | **(a) The findings are dropped on two routes.**<ul><li>With `archChanged` set, `coding-pipeline.workflow.mjs:5508` skips the classifier and sets no note, then routes to phase 4. T-red and F follow with only their generic tasks.</li><li>A `production` classification also respawns F with "Perform Phase 6's work." and no findings. Only `mixed` carries them to F (`buildMixedReworkNoteForF`).</li><li>The findings survive only in a gitignored file outside the run's handoff directory.</li></ul>**(b) The task text does not fit a re-entry.** Phase 4's task says "before any code exists", but on this route the code exists.<br>**(c) A cannot route a code finding through BLOCK here.** On an unchanged brief, a phase-4 BLOCK stops the run as `needs-amendment`. | Carry `extractBlockingFindings`' output into `context.fNote` and `context.tNote` on every diff-gate BLOCK route. Give phase 4 a re-entry task that names the gate, its result file and the re-check's scope. |
 
-**Checked against the merges, and consistent.**
+**Checked against F's change (the drift re-check), and consistent.**
 
-- **The ports.** Neither merge touched `ports.rs`. `HarnessPort` still has eleven methods, so D31's "all eleven methods forwarded" holds.
-- **ADR-0021.** Neither #664's "Apply as built (#664)" paragraph nor #650's import decisions name #649. Every sentence D17 lists is still found by its words. At `d0c1531`:
-  - the `HostPort` amendment, 186-187;
-  - the seam, 521-525;
-  - the model, effort and environment, 547-548;
-  - the `--herdr-session` default, 568-569;
-  - DRIVEN, 823-828, 875 and 926;
-  - the first message, 932-934.
-- **Prompts.** Neither merge sends one: `tx_apply` and `import` call no `send_prompt`. `reset --first` stays the only path around the hub's gate (#828).
-- **Threads (#664).** Apply's observation calls ports from scoped threads (`tx_apply/observe.rs:54-83`). The WIP's parts are safe for that:
-  - the store clients hold no state, one control exchange per call (`wiring/store.rs:17-28`);
-  - `LazyHerdr` is a `OnceLock`;
-  - the bindings sit behind a `Mutex`.
-- **Several launches in one process (#664).** Apply runs its creates in sequence over one wiring. The WIP keeps one `pending` slot, replaced by each `ensure_pane` and taken only after the inner `ensure_session` succeeds (`bind.rs:37`, `:55`). That keeps D8 (a) correct across launches, as D8's W-5 sentence requires.
-- **Import (#650).**
-  - Its observation makes only `host.ps`, `harness.health` and `harness.list_sessions` (`import/observe.rs:11-12`). It calls no TUI method, so it makes no resolver call for a pane with no record.
-  - The adapter's snapshot covers its one configured session (`adapter.rs:388-406`), so D8 (c) needs no filter of its own.
-- **Lint.** D11's `#![allow(dead_code)] // #649` passes `lint.sh` rule 1, which accepts a trailing `// #NNN`, as `real_tmux_test.rs:14` and the adapters' `tests/common/mod.rs` already do. Every touched file is under 900 lines. `tests/support/mod.rs` is still 857 lines (W-I).
-- **Compilation.** `cargo check --tests` passes for `holler-cli`, `holler-pane` and the three adapter crates, at `f59ba21` and at `d0c1531`.
-- **Protocol.** No wire field or golden file changes, and `holler-hub` gains no dependency.
+- **Wired ports.** `Wired<P: ?Sized>` with `impl HarnessPort for Wired<dyn HarnessPort>` and `impl HostPort for Wired<dyn HostPort>` (`bind.rs:235-322`). `WiredHarness::new` keeps D24's signature.
+  - The alternatives F rejected were a second `WiredHost` struct and a `BindingHost` over a `Result`. Each would have been a copy of the pattern or a change to a D24 signature.
+  - `LazyHerdr` stays separate, because it builds on first use and a `Wired` port is built at once. Both are named in the plan.
+- **W-4: every method is forwarded.**
+  - The `Wired` harness forwards all eleven `HarnessPort` methods, `send_prompt` and `session_activity` included (`bind.rs:297-303`). Those two are the trait's only default methods (`ports.rs:293`, `:306`).
+  - `BindingHerdr` and `LazyHerdr` forward all seven `HerdrPort` methods.
+  - `BindingHost` and the `Wired` host forward all four `HostPort` methods.
+- **D3 and W-9: one mapping.**
+  - `call` and `timed_out` (`store.rs:342-378`) are the one mapping, sent through `transport::call(None, ..)`. There is still no second caller of `control::run`.
+  - The second pass's B-1 clause is in place: `Io` with `WouldBlock` or `TimedOut` is `timeout` for a read.
+  - The typed params of `holler_pane::reply` are used throughout, plus the literal `{}` for the two `NoParams` methods.
+- **The no-hub message** follows the CLI's own pattern: `resolve_state_dir().unwrap_or_default()` and "no live holler hub reachable at {}". The same pattern is in `say_cmd.rs:156,172`, `roster_cmd.rs:40,51`, `transport.rs:47` and five more commands.
+- **Layers.**
+  - Only `holler-cli` changes. `holler-hub`, `pane/mod.rs`, `main.rs` and `say_cmd.rs` are untouched.
+  - No wire, golden-file or port change. The CLI's new uses of the hub are `control`, `state` and `panes::WATCH_WAIT`, all in the dependency direction that already exists.
+- **ADR-0021, in the same change.** The edits include:
+  - D17's sentences;
+  - W-N (a) to (c): "#829", `--herdr-session` "required by `launch`", and the Consequences bullet;
+  - the read-timeout wording;
+  - W-B: #828 and the operator's stopgap;
+  - W-C's section-2 pointer;
+  - W-Q (a) and (b), on `profile apply` under `holler pane` and the `tx_apply.rs` observation bound.
+
+  #828 and #829 are open.
+- **D11 and W-3: the rigs are included, not copied.** The three rigs come in by `#[path]` (`scratch/mod.rs:38-44`). The adapter-host crate's one-helper pin (`fake_tmux_test.rs:785`) still holds after T-red's D11 repair.
+- **Size.** The wiring files run from 237 to 410 lines. `tests/support/mod.rs` is still 857 lines (W-I). `lint.sh` was clean at T-green.
+- **Public repository.** The diff has no personal names. The only home path is the generic `/home/u` in `env` rows.
+- **Secrets.** No variable carries a credential. `serve_args`' error quotes none of the value. `ProcessEnv::Inherit` leaves credentials to the tmux server's environment (#654).
+- **The fourth pass's other items.**
+  - W-N, W-P and W-Q are done.
+  - W-R is met by its second option: `scenario.rs:7` carries the exact opt-in command.
+
+## Notes for T and F (this route carries nothing else)
+
+- **T-red**
+  - **B-1 and B-2:** no RED is owed for either. W-S's evidence settles both.
+  - **W-T** is the one new behaviour of this cycle. If T pins it, a non-UTF-8 `HOLLER_TMUX_SOCKET` in D6's test is a valid RED against HEAD.
+  - **Optional rows:** the 10 s lower bound, NIT-2 and NV-6 (all in W-S) are T's call.
+- **F**
+  - **Code:** W-T's one-line fix in `connect`.
+  - **Evidence:** W-S's entries in `evidence.md`.
+  - **What not to change:** nothing for B-1 or B-2.
+  - **`archChanged`:** on A's reading, neither change touches architecture, so F's `archChanged` for this cycle is false unless F changes more. A round-2 BLOCK would then be classified (test-only, mixed or production) rather than routed back here.
 
 ## Notes for O
 
-PASS, so nothing is required. The binding readings above stand without a brief edit.
+PASS, so nothing is required for this run.
 
-**Optional, in one brief edit** (so the next reader of the brief needs no handoff):
-- W-N's three ADR items into D17;
-- W-P's two argument rows into D2 or D22.
+**Follow-ups still open from the fourth pass:**
+- comment on #825 that `profile apply` logs as `holler pane` through the wiring (W-Q (a)). #825 has no comments;
+- file the `LinkedHost` consolidation (W-O);
+- #653 and #828: the automated `pfleet o reset` caller is not covered by the operator's stopgap;
+- #803 does not list #649.
 
-**Follow-ups:**
-- comment on #825 that `profile apply` logs as `holler pane` through the wiring (W-Q (a));
-- file the `LinkedHost` consolidation (W-O).
-
-**Noticed outside this plan:**
-1. **#653 and #828.** #653 (pfleet's MO adoption) will route `pfleet o reset` to `holler pane reset`, and it has no link to #828. The ADR's stopgap ("the operator avoids `reset --first`...") does not cover an automated caller. Consider a comment on #653, or on the pfleet epic it tracks.
-2. **#803 and #649.** #803 (the setup wizard through `holler pane` and `profile apply`) is blocked by #644, #664 and #642, but does not list #649. Without #649, every verb it calls answers `not-implemented`.
-
-**Unchanged for T-red and phase 7.**
-- D32 as W-O restates it.
-- The WIP's known gaps stay T's and F's to fix:
-  - the scenario creates and lists sessions over raw HTTP, where D21 says `HarnessPort`;
-  - the grid test launches into empty workspaces, where D23 says r1c1 comes first;
-  - the probe `zz_probe_attach_after_run` is still there (D24).
+**New:** file W-U in Aftersight (per the operator's rule, pipeline bugs go to Aftersight, not Playbook).
 
 ## Patterns referenced
 
-- **`docs/adr/ADR-0021.md` at `d0c1531`:**
-  - the lines D17 edits (listed above);
-  - the Consequences bullet, 916-917;
-  - #664's "Apply as built (#664)";
-  - #650's "Decided (#650): the import's join".
-- **#664's engine and the scope it writes through:** `crates/holler-pane/src/tx_apply.rs` (40-50), `tx_apply/observe.rs` (54-83) and `tx_apply/run.rs` (51-62, 106-126). `tx_launch.rs` (462-468, 570-578), `crates/holler-cli/src/pane/profile_scope.rs` (180-198).
-- **The adapters:** `crates/holler-adapter-opencode/src/attach.rs` (96-102, 161-176), and `crates/holler-adapter-herdr/src/adapter.rs` (254-266, 388-406), against `crates/holler-pane/src/import/{observe.rs, assess.rs:168}`.
-- **The test kit and the copies:** `crates/holler-pane-testkit/src/host.rs:12-17` and `harness.rs:13-17`, and the three `LinkedHost` copies. `docs/handoffs/664/handoff-A-dup.md` (warn 2).
-- **The issues:** #828, #829, #825, #653 and #803 (bodies); #654 (comment of 12:14 MDT).
+- **The clients' contract:**
+  - `crates/holler-pane/src/reply.rs` (46-117);
+  - `crates/holler-hub/src/panes/handlers.rs` (37-68, 89-116);
+  - `crates/holler-hub/src/profile/handlers.rs` (37-39);
+  - `crates/holler-hub/src/control.rs` (492-513, via `evidence.md`).
+- **The conformance suites:** `crates/holler-pane-testkit/src/conformance/{pane_store.rs:123-131, profile_store.rs:187-195}`, run by `crates/holler-cli/tests/pane_integration/clients.rs`.
+- **The ports:** `crates/holler-pane/src/ports.rs` (the four traits; defaults at 293 and 306).
+- **The CLI's no-hub pattern:** `crates/holler-cli/src/{say_cmd.rs:156-172, roster_cmd.rs:40-51, transport.rs:47}`.
+- **The driver:** `.aftersight/releases/claude/workflow/coding-pipeline.workflow.mjs` (1095-1215 `nextPhase`; 3690-3708 the diff gate's evidence; 5376-5720 the loop), and `workflow-coding-pipeline.md` (1104-1112, 1775-1778, 1888).
