@@ -132,3 +132,36 @@ The new host conformance case must hold on a real tmux as well as on `FakeHost`:
 ### Out of scope, for the operator
 
 #832's `HerdrPort::observe_pane` is default-armed too, and #649's `BindingHerdr` and `LazyHerdr` do not forward it, so over the real wiring `pane list` would silently show no working directory and no last screen change. That is #832's to settle, and the reason this story takes the required form.
+
+---
+
+## Contract amendment, round 3: fold in the `observe_pane` flaw from #832 (operator decision)
+
+The operator decided to fold the #832 flaw into this story. The issue text at the top is unchanged; this section adds scope on the operator's word and S treats it as in scope. It supersedes nothing in rounds 1 and 2.
+
+**Correction of the name.** The method is **`HerdrPort::observe_pane`** (added by #832, merged as PR #836), not a `HostPort` method: it lives in `crates/holler-pane/src/ports.rs` on `HerdrPort`, with its batch form `observe_panes`. The `HostPort` method this story adds (`foreground_commands`) is separate.
+
+### R3-1. `observe_pane` becomes REQUIRED on `HerdrPort`
+
+- **Why.** Today `observe_pane` is default-armed: the default answers an empty `PaneObservation`. #649's production wiring (`BindingHerdr` and `LazyHerdr`, in #649's `wiring.rs` and `wiring/bind.rs`) forwards only the methods that existed when it was written, so over the real wiring the default is used: `pane list` would silently show no working directory and no last screen change for an unmanaged pane, with no compile error and no failing test (the tests use `FakeHerdr`). Making it required lets the compiler find every implementation, the same reason `foreground_commands` is required (round 2, R2-1).
+- **What changes.** Remove the default body of `HerdrPort::observe_pane`. `observe_panes` stays a defaulted batch form that delegates to `observe_pane` (the Herdr adapter overrides it to read the snapshot once). Implementations the compiler lists: the Herdr adapter and `FakeHerdr` (already implement it), `Unwired` (already answers `NotImplemented`), the test wrappers in `tests/pane_verbs/import/seams.rs`, `launch/displaced.rs` and the conformance test's wrapper (already forward it), plus, once #649 has merged, **`BindingHerdr` and `LazyHerdr`**, which must forward `observe_pane`, and, so a pane list stays one snapshot read and not N, `observe_panes` too.
+- **Lift the "do not touch `wiring.rs`" rule** for exactly these forwards (with the `foreground_commands` forwards of round 2), and nothing else in #649's files.
+- **ADR-0021.** Record the change in section 2's `HerdrPort` row and the "amended since" sentence, and in the "Decided (#835)" paragraph of section 13: `observe_pane` is required, with the reason above.
+- **Sequencing is unchanged:** this story is built after #649 has merged, on the current `main`.
+
+### R3-2. Pin each forward with a test (the same way as `foreground_commands`)
+
+- One test per decorator (`BindingHerdr`, `LazyHerdr`) that `observe_pane` reaches the inner Herdr and returns its observation unchanged, and one that `observe_panes` does too and reads the inner snapshot once (follow the pattern of #649's forwarding tests in `tests/pane_integration/bind.rs`); the Herdr conformance suite run over the production decorator if #649 already does that for the existing methods.
+- No decorator or test double may rely on a default for either method.
+
+### R3-3. New acceptance item
+
+**Over the real wiring, `pane list` shows an unmanaged pane's working directory, and its last screen change when the Herdr adapter reports one.** In a default-run test: build the production Herdr decorator stack (the same constructors #649 exposes) over `FakeHerdr`, give an unlisted Herdr pane a working directory and, in one case, a last-screen-change time, and assert that `holler pane list` (text and `--format=json`) shows the directory, and the change time in the case that has one. In the case where the adapter reports none, the change time stays absent (`-` in text, `null` in JSON): **real Herdr reports no last screen change today (#837), so null stays honest**; the test must not invent a value. A second check, with the same stack over a fake that does **not** forward (a deliberately non-forwarding decorator in the test), is not needed: the compile error and R3-2 cover that.
+
+### R3-4. Blast radius additions
+
+`crates/holler-pane/src/ports.rs` (the `observe_pane` default removed), #649's `wiring.rs` and `wiring/bind.rs` (the forwards only), the `pane list` test file for the new item (a new file or a sibling module if `tests/pane_verbs/list.rs` is near the line guard; check `wc -l`), ADR-0021 sections 2 and 13, `CHANGELOG.md` (the entry for #835 also names the follow-up to #832). Do not change #832's behaviour: the Herdr adapter's `observe_pane` already reports the working directory and no last screen change; only the trait's default goes away.
+
+### R3-5. Out of scope
+
+The source of an unmanaged pane's last screen change is #837 (an open spike). This story makes the existing value reach `pane list` over the real wiring; it does not look for a new source.
