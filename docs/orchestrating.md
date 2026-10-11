@@ -139,3 +139,7 @@ starts `claude` again in the same directory with the flags it had, the new model
 conversation yet cannot be resumed and is refused before anything changes; pass `--fresh`. The model is confirmed
 from the new process's own arguments; no prompt is sent, so nothing is spent. A running process with a flag the
 script does not know how to carry over (a prompt, `--mcp-config`) is refused and the flag is named.
+Keys are typed into the pane id the record names (`hj-c3r1:@6.%6` gives `%6`), not into the session, so a second pane
+or window in the same tmux session is never touched. Not carried over: environment variables set on the old command
+line, and a model or effort changed inside the session with `/model` or `/effort` (only the command-line arguments are
+read). The first Ctrl-C of the fallback only warns in Claude Code, so the script sends two.
