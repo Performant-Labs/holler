@@ -24,7 +24,6 @@ pub const STUBS: &[(&str, &str, u32)] = &[
     // #650
     // #662
     // #664
-    ("profile", "apply", 664),
     // #665 (proposed: the operator confirms it)
     ("profile", "rename", 665),
     ("profile", "export", 665),

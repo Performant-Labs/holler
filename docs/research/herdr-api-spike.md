@@ -277,7 +277,7 @@ On restart (`herdr-restart.sh`):
 - `[session] resume_agents_on_restore = true` (the default) resumes supported agents into their own sessions after
   a restart, but "requires official integrations that report session refs" (DOCS). UNVERIFIED: running an agent
   was out of scope. Holler should not rely on it; a restart is what the epic calls "a reboot that returns the
-  layout as empty shells", and `holler profile apply` (#664) relaunches them.
+  layout as empty shells", and `holler profile apply NAME` (#664) relaunches them.
 
 ## 9. What `agent_status` reports
 

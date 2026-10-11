@@ -20,6 +20,22 @@ fills this file in at release time.
   refused (`import-blocked`, a new open code, exit 3) while a pane has a problem, a failed write is undone, and running it
   again writes nothing. It only reads Herdr, tmux and the harness, and changes no file. A file that cannot be read is
   named with a line number or position only, never its text. Nothing a user runs changes yet: #649 wires the adapters in.
+- Pane control, `holler profile apply NAME [--dry-run] [--take-over] [--herdr-session NAME]` (epic
+  [#633](https://github.com/Performant-Labs/holler/issues/633)): converge the live panes on a profile, declaratively and
+  idempotently, without ever killing a healthy pane. For each spec of the profile, in workspace, row and column order,
+  it creates a pane that has no record (through the launch transaction, which runs the spec's health check and refuses
+  an occupied cell), adopts a healthy pane that matches its spec (makes it a member of the profile and touches nothing
+  live), reports one that differs with the field-by-field comparison `profile show` prints, relaunches an agent that is
+  not healthy in place, and never relaunches the orchestrator. Healthy is observed, not read from the record: the
+  pane's harness server answers, Herdr lists its pane, and its TUI does not show a session other than its session of
+  record. A pane of another profile is refused unless `--take-over`, which moves it. A refused or reported step leaves
+  the exit code at 0; a failed step stops the run and exits 1, printing only that failure and how many later steps it
+  skipped. A step refused or failed after its launch or relaunch had begun says how to reconcile the profile, as
+  `holler pane launch` does. `--dry-run` prints the plan and changes nothing, `--format=json` prints
+  `{"profile", "dry_run", "steps"}`, and creating a pane needs `--herdr-session`. [ADR 0021](docs/adr/ADR-0021.md)
+  defines what adopting a pane means. Until the ports are wired into the binary
+  ([#649](https://github.com/Performant-Labs/holler/issues/649)), the real verb answers `not-implemented`
+  ([#664](https://github.com/Performant-Labs/holler/issues/664)).
 - OpenCode adapter, part 3: the pane's agent, prompts and activity (epic
   [#633](https://github.com/Performant-Labs/holler/issues/633)): `holler-adapter-opencode` now applies a pane's OpenCode
   agent (`Pane.opencode_agent`) as its harness server's default agent, set once when the server starts, and checks it.

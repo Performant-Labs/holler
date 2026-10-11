@@ -178,9 +178,9 @@ profile show | Demo
 profile show | "Some Profile" --json
 
 # #664
-profile apply |
-profile apply | --take-over
-profile apply | --take-over --format=json
+profile apply | Demo
+profile apply | Demo --dry-run --format=json
+profile apply | "Some Profile" --take-over --herdr-session scratch
 
 # #665
 # (proposed: the operator confirms #665 first)
