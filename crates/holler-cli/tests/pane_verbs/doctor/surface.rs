@@ -7,7 +7,9 @@ use std::time::{Duration, Instant};
 use holler_cli::output::Format;
 use holler_pane::findings::FindingKind as K;
 use holler_pane::reconcile::{reconcile, ReconcileRequest, Report};
-use holler_pane::{Argv, EnvVarName, HarnessPort, PaneError, PaneId, PaneName, ProfileName};
+use holler_pane::{
+    Argv, EnvVarName, HarnessPort, PaneError, PaneId, PaneName, ProfileName, ServeSpec,
+};
 use holler_pane_testkit::envelope::check_envelope;
 use holler_pane_testkit::fault::Fault;
 use holler_pane_testkit::harness::FakeHarness;
@@ -469,8 +471,11 @@ impl HealthGate<'_> {
 }
 
 impl HarnessPort for HealthGate<'_> {
-    fn serve(&self, name: &PaneName, port: u16) -> Result<u32, PaneError> {
-        self.inner.serve(name, port)
+    fn serve_command(&self, n: &PaneName, port: u16, s: &ServeSpec) -> Result<Argv, PaneError> {
+        self.inner.serve_command(n, port, s)
+    }
+    fn verify_serving(&self, port: u16, spec: &ServeSpec) -> Result<(), PaneError> {
+        self.inner.verify_serving(port, spec)
     }
     fn health(&self, port: u16) -> Result<bool, PaneError> {
         let deadline = Instant::now() + Duration::from_secs(2);

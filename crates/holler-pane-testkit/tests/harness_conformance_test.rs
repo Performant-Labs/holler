@@ -6,20 +6,24 @@
 //! Each mutant is a wrapper around the fake that breaks exactly one rule. The suite is
 //! the unit under test here: a suite that cannot tell a broken harness from a good one
 //! proves nothing about the OpenCode adapter later.
+//!
+//! #802: `serve_command` only builds an argv, so the suite starts a server through a
+//! launcher the caller passes, generic over the subject. The fake and its mutants launch
+//! through the fake's scenario method `start_server`.
 
 use std::sync::Mutex;
 
-use holler_pane::{HarnessPort, PaneError, PaneId, PaneName};
+use holler_pane::{Argv, HarnessPort, PaneError, PaneId, PaneName, ServeSpec};
 use holler_pane_testkit::conformance::harness::{
     harness_cases, run_harness_conformance, HarnessRig,
 };
 use holler_pane_testkit::conformance::Conformance;
 use holler_pane_testkit::harness::{FakeHarness, Quirk};
 
-/// The 15 case ids of the brief's table, in order.
-const DOCUMENTED_CASES: [&str; 15] = [
+/// The 16 case ids of the brief's table, in order (#802 renamed case 2 and added case 16).
+const DOCUMENTED_CASES: [&str; 16] = [
     "health-of-unserved-port-is-false",
-    "serve-then-healthy",
+    "launch-then-healthy",
     "fresh-server-has-no-sessions",
     "create-session-is-listed",
     "sessions-shared-across-servers",
@@ -33,11 +37,25 @@ const DOCUMENTED_CASES: [&str; 15] = [
     "select-unknown-is-session-not-found",
     "select-without-tui-fails",
     "select-reaches-only-its-pane",
+    "serve-command-carries-the-agent",
 ];
+
+/// The fake's launcher: start the server the argv describes, as a host's `run` would.
+fn launch_fake(harness: &FakeHarness, _name: &PaneName, argv: &Argv) -> Result<(), PaneError> {
+    match harness.start_server(argv) {
+        Some(started) => started.map(drop),
+        None => Err(PaneError::Usage {
+            message: "not an argv the fake's serve_command built".to_owned(),
+        }),
+    }
+}
 
 #[test]
 fn the_fake_passes_the_harness_conformance_suite() {
-    let result = run_harness_conformance(|| (FakeHarness::new(), HarnessRig::sample(), ()));
+    let result = run_harness_conformance(
+        || (FakeHarness::new(), HarnessRig::sample(), ()),
+        launch_fake,
+    );
     assert_eq!(result, Ok(()));
 }
 
@@ -76,31 +94,40 @@ fn assert_fails_on(result: Conformance, case: &str) {
 
 #[test]
 fn a_harness_that_acks_select_without_a_tui_fails() {
-    let result = run_harness_conformance(|| {
-        let harness = FakeHarness::new();
-        harness.set_quirk(Quirk::SelectAckedWithoutTui, true);
-        (harness, HarnessRig::sample(), ())
-    });
+    let result = run_harness_conformance(
+        || {
+            let harness = FakeHarness::new();
+            harness.set_quirk(Quirk::SelectAckedWithoutTui, true);
+            (harness, HarnessRig::sample(), ())
+        },
+        launch_fake,
+    );
     assert_fails_on(result, "select-without-tui-fails");
 }
 
 #[test]
 fn a_harness_that_acks_abort_of_an_unknown_id_fails() {
-    let result = run_harness_conformance(|| {
-        let harness = FakeHarness::new();
-        harness.set_quirk(Quirk::AbortUnknownAcked, true);
-        (harness, HarnessRig::sample(), ())
-    });
+    let result = run_harness_conformance(
+        || {
+            let harness = FakeHarness::new();
+            harness.set_quirk(Quirk::AbortUnknownAcked, true);
+            (harness, HarnessRig::sample(), ())
+        },
+        launch_fake,
+    );
     assert_fails_on(result, "abort-unknown-is-session-not-found");
 }
 
 #[test]
 fn a_harness_whose_servers_do_not_share_a_data_dir_fails() {
-    let result = run_harness_conformance(|| {
-        let harness = FakeHarness::new();
-        harness.set_data_dir(48101, "other");
-        (harness, HarnessRig::sample(), ())
-    });
+    let result = run_harness_conformance(
+        || {
+            let harness = FakeHarness::new();
+            harness.set_data_dir(48101, "other");
+            (harness, HarnessRig::sample(), ())
+        },
+        launch_fake,
+    );
     assert_fails_on(result, "sessions-shared-across-servers");
 }
 
@@ -110,8 +137,13 @@ enum Break {
     Nothing,
     /// `health` answers `true` for every port.
     HealthAlwaysTrue,
-    /// `serve` leaves a stray session behind (the "ping" session).
+    /// Launching the server leaves a stray session behind (the "ping" session).
     PingSession,
+    /// `serve_command` drops the spec's agent: the argv would start a server without it
+    /// (#802).
+    DropsAgent,
+    /// `serve_command` starts the server it describes: it is not pure (#802).
+    ServeCommandStarts,
     /// `create_session` returns the first id it ever minted.
     ReusesSessionId,
     /// `attach_tui` of an unknown id shows the latest session instead.
@@ -142,13 +174,40 @@ fn is_unknown_session(error: &PaneError) -> bool {
     matches!(error, PaneError::SessionNotFound { .. })
 }
 
-impl HarnessPort for Mutant {
-    fn serve(&self, name: &PaneName, port: u16) -> Result<u32, PaneError> {
-        let pid = self.inner.serve(name, port)?;
-        if self.broken == Break::PingSession {
-            self.inner.seed_session(port);
+/// The mutants' launcher: the fake's, and the "ping" session of [`Break::PingSession`]
+/// on the port of the server it started.
+fn launch_mutant(mutant: &Mutant, name: &PaneName, argv: &Argv) -> Result<(), PaneError> {
+    launch_fake(&mutant.inner, name, argv)?;
+    if mutant.broken == Break::PingSession {
+        for port in HarnessRig::sample().ports {
+            if mutant.inner.server(port).is_some_and(|s| s.name == *name) {
+                mutant.inner.seed_session(port);
+            }
         }
-        Ok(pid)
+    }
+    Ok(())
+}
+
+impl HarnessPort for Mutant {
+    fn serve_command(
+        &self,
+        name: &PaneName,
+        port: u16,
+        spec: &ServeSpec,
+    ) -> Result<Argv, PaneError> {
+        let asked = match self.broken {
+            Break::DropsAgent => ServeSpec::default(),
+            _ => spec.clone(),
+        };
+        let argv = self.inner.serve_command(name, port, &asked)?;
+        if self.broken == Break::ServeCommandStarts {
+            self.inner.start_server(&argv);
+        }
+        Ok(argv)
+    }
+
+    fn verify_serving(&self, port: u16, spec: &ServeSpec) -> Result<(), PaneError> {
+        self.inner.verify_serving(port, spec)
     }
 
     fn health(&self, port: u16) -> Result<bool, PaneError> {
@@ -211,14 +270,19 @@ impl HarnessPort for Mutant {
 }
 
 fn assert_suite_fails_on(broken: Break, case: &str) {
-    let result = run_harness_conformance(|| (Mutant::new(broken), HarnessRig::sample(), ()));
+    let result = run_harness_conformance(
+        || (Mutant::new(broken), HarnessRig::sample(), ()),
+        launch_mutant,
+    );
     assert_fails_on(result, case);
 }
 
 #[test]
 fn the_unbroken_harness_wrapper_passes() {
-    let result =
-        run_harness_conformance(|| (Mutant::new(Break::Nothing), HarnessRig::sample(), ()));
+    let result = run_harness_conformance(
+        || (Mutant::new(Break::Nothing), HarnessRig::sample(), ()),
+        launch_mutant,
+    );
     assert_eq!(result, Ok(()));
 }
 
@@ -230,6 +294,20 @@ fn a_harness_whose_health_is_always_true_fails() {
 #[test]
 fn a_harness_whose_serve_leaves_a_session_behind_fails() {
     assert_suite_fails_on(Break::PingSession, "fresh-server-has-no-sessions");
+}
+
+/// #802: an argv that would start a server without the agent the spec asks for fails the
+/// agent case (an implementation either carries the key or refuses `agent-unsupported`).
+#[test]
+fn a_harness_whose_serve_command_drops_the_agent_fails() {
+    assert_suite_fails_on(Break::DropsAgent, "serve-command-carries-the-agent");
+}
+
+/// #802: `serve_command` starts nothing; one that starts the server fails case 2, which
+/// checks that the port is still not healthy before the launcher runs.
+#[test]
+fn a_harness_whose_serve_command_starts_the_server_fails() {
+    assert_suite_fails_on(Break::ServeCommandStarts, "launch-then-healthy");
 }
 
 #[test]
