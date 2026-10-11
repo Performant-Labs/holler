@@ -9,13 +9,13 @@
 //! rig keeps one call log per port and no merged one.
 
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use holler_cli::output::Format;
 use holler_pane::ports::AGENT_UNSUPPORTED;
 use holler_pane::tx_launch::{self, TxFailure, TxOptions};
 use holler_pane::{HarnessPort, HostPort, PaneError, PaneId, ProbeResult, ServeSpec};
-use holler_pane_testkit::harness::{HarnessOp, ServerState};
+use holler_pane_testkit::harness::{FakeHarness, HarnessOp, ServerState};
 use holler_pane_testkit::herdr::HerdrOp;
 use holler_pane_testkit::host::HostOp;
 use holler_pane_testkit::pane_store::PaneStoreOp;
@@ -371,6 +371,44 @@ fn no_health_poll_starts_once_the_budget_has_run_out() {
     );
     assert_eq!(rig.record(PANE), None);
     rig.assert_no_keystroke();
+}
+
+/// Scope 2 (I5) and plan review W-4, round 2: the one shared health wait checks its deadline
+/// before every `health` call, the first one included. A wait whose deadline has already
+/// passed answers "not healthy" and asks nothing. The engine, the conformance suite and the
+/// real rig all wait with this function, so the rule is pinned here, not in a caller.
+#[test]
+fn the_health_wait_asks_nothing_once_its_deadline_has_passed() {
+    let harness = FakeHarness::new();
+    let deadline = Instant::now();
+    assert_eq!(
+        tx_launch::wait_healthy(&harness, PORT, tx_launch::BOOT_POLL, deadline),
+        Ok(false)
+    );
+    assert_eq!(
+        harness.faults().calls(),
+        Vec::<HarnessOp>::new(),
+        "no health call once the deadline has passed"
+    );
+}
+
+/// Scope 2 (I5) and plan review W-4, round 2: a deadline that comes during the wait's sleep
+/// ends the wait without another `health` call. The poll is far longer than the time left,
+/// so the wait's one sleep always ends at or past the deadline: the first ask comes well
+/// inside it (200 ms of margin), and no ask comes after it.
+#[test]
+fn a_deadline_during_the_health_waits_sleep_ends_it_without_another_ask() {
+    let harness = FakeHarness::new();
+    let deadline = Instant::now() + Duration::from_millis(200);
+    assert_eq!(
+        tx_launch::wait_healthy(&harness, PORT, Duration::from_secs(60), deadline),
+        Ok(false)
+    );
+    assert_eq!(
+        harness.faults().calls(),
+        [HarnessOp::Health],
+        "one ask before the deadline, none once it has passed"
+    );
 }
 
 /// AC 7: a `verify_serving` refusal after a healthy start goes through the rollback: the

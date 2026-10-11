@@ -239,3 +239,10 @@
     - `TxOptions` construction in the CLI;
     - the production callers of `serve_command`, `verify_serving` and `.pid`;
     - absolute-path checks in `holler-pane` and the CLI (there are none).
+
+## T (Phase 5, author RED, round 2 after T-green's B-1 and A's round 2) — 2026-10-11T07:47:00-06:00
+- **Decided:** Kept T-green's engine-tier test `no_health_poll_starts_once_the_budget_has_run_out` as is, and added two direct tests of the shared `tx_launch::wait_healthy` in `launch/serve.rs`: no ask when the deadline has already passed, and no further ask when the deadline comes during the sleep. The engine test alone would pass with a second `budget.check()` in `server::start`, which A's W-4 rules out; the direct tests pin the rule where W-4 puts it.
+- **Decided:** The sleep case uses a 60 s poll against a 200 ms window, so its one sleep always ends at or past the deadline and the call count is fixed by ordering, not by timing. Repeated 5 times: RED each time.
+- **Assumed:** W-14 (an unrepresentable budget) and W-16 (`BOOT_POLL` import) get no test: A leaves W-14's form to F (a doc statement is acceptable), and W-16 is structural.
+- **Hedged:** None.
+- **Evidence:** `handoff-T-red.md` (the three failing assertions, and a trial fix, reverted, under which `pane_verbs` was 261/261 and the test kit's targets all passed).
