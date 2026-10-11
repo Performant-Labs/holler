@@ -249,3 +249,45 @@ Run handoff directory `docs/handoffs/642` Â· branch `issue-642-implementation` Â
   - Clippy `-D warnings`, `lint.sh`, `changelog-check.sh`, `docs_cli_test` (3), `wire_selftest` (3), `cargo machete`
     and the fmt check on the changed crates all passed.
   - Handoff: `docs/handoffs/642/handoff-T-green.md`.
+
+## A, anti-duplication gate (Phase 7): 2026-10-11T11:29-06:00 (MDT)
+
+- **Decided:** PASS, with 0 `block` and 2 `warn` findings (`docs/handoffs/642/handoff-A-dup.md`; diff `7284001..3f898ca`).
+  - Every reuse-map object was extended and none was paralleled:
+    - `ProcessEnv::prefix` delegates to `prefix_with`;
+    - `Call::unexpected` and `unexpected_status` share `answered`;
+    - `settled` and `session_activity` read `/session/status` only through `status_object` and `running`;
+    - `top_level_ids` and `child_ids` share `ids_where`;
+    - the rig's `serve` delegates to `serve_with`, and `Recording` forwards the two new methods;
+    - D12's fixtures, plus the plan review's four, moved into `support/fixtures.rs` with no copy left behind.
+  - `prompt.rs`'s plain-JSON re-read of `holler-body`'s child scope and prompt body is justified in writing by D6,
+    D7(a) and ADR-0021 section 5, so it passes.
+  - Warn 1: the `retry` status-entry literal is in both `hermetic_test.rs` (`retrying()`) and `prompt_test.rs`
+    (inline), and `status_of(kind)` builds a shape `hermetic_test.rs` writes inline. Fold both into `fixtures.rs`;
+    optional.
+  - Warn 2: `lib.rs` (741) and `hermetic_test.rs` (746) are within 60 lines of the 800-line flag. The next brief that
+    adds to either names where the code goes. The candidate split for `lib.rs` is the route table and `Call`.
+- **Assumed:**
+  - The script commits this handoff and entry at the phase commit, so I did not commit them.
+  - The T-green verdict holds for `3f898ca`. I did not re-run the tests: runtime is F's and T's, not this gate's.
+- **Hedged:**
+  - Two near-copies across test crates are not findings: `refused()`/`refusal()` and `spec()`, in `agent_test.rs` and
+    `real_opencode_test.rs`. The real suite does not include `fixtures.rs`, which needs the stub, and at the base it
+    already kept its own `unavailable` and `json_of`. Revisit if a third copy appears.
+  - The three open-coded "a 200 whose JSON is an array" reads (`server.rs`, twice in `prompt.rs`) differ in their
+    failure rule. I judged them an idiom below this gate's bar, not a missed helper.
+- **Evidence:**
+  - Read:
+    - the brief's decisions and acceptance (lines 1-82);
+    - `handoff-A.md` (round 2), `handoff-F.md` and this journal;
+    - `git diff 7284001..3f898ca` for every changed source, test, ADR and CHANGELOG file;
+    - `src/lib.rs:125-742`, `src/prompt.rs` and `tests/support/fixtures.rs`, `tests/agent_test.rs` and
+      `tests/prompt_test.rs` in full;
+    - `src/attach.rs:1-40` and `holler-adapter-herdr/src/plan.rs:235-275`.
+  - Commands:
+    - `git merge-base`, `git diff --stat` and `wc -l` over the crate;
+    - greps for the D12 fixture names, `PaneError::Refused { code, message }`, poll helpers (`wait_for`, `eventually`,
+      `wait_until`), `filter(Value::is_object)` and `as_array`, the stub's API, and `session_in_scope` and
+      `refresh_child_sessions`;
+    - a repo-wide grep for stale "every agent" or "until #642" wording outside the blast radius;
+    - `git diff --stat` on the adapter's `Cargo.toml` and on `Cargo.lock` (both unchanged).
