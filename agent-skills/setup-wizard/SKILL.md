@@ -1,6 +1,6 @@
 ---
 name: setup-wizard
-description: Install Herdr (if not already present, asked as its own up-front yes/no) and, as a genuinely separate follow-up question ("All systems go. Proceed?"), optionally set up a Herdr workspace — one or more local orchestrator panes plus one remote agent session pane per entry in a Holler session config, wired through a Holler hub (local) / body (remote) pair, using the safe `opencode attach` recipe (never herdr-mirror). Config-driven, not hardcoded — every orchestrator's name/command/directory, every session's harness, and the whole pane layout (including how many orchestrators there are and where each one sits) are all read from the config, never assumed. Use when the user asks to install Herdr, set up Herdr with a local orchestrator + remote agent sessions, recreate the alpha/beta (or N-agent, or multi-orchestrator) setup, or rebuild that workspace.
+description: Run a read-only preflight first (Stage 0: what this machine has, with Herdr installed on a yes if it is missing), end it with the question "All systems go. Proceed?", and only then optionally set up a Herdr workspace — one or more local orchestrator panes plus one remote agent session pane per entry in a Holler session config, wired through a Holler hub (local) / body (remote) pair, using the safe `opencode attach` recipe (never herdr-mirror). Config-driven, not hardcoded — every orchestrator's name/command/directory, every session's harness, and the whole pane layout (including how many orchestrators there are and where each one sits) are all read from the config, never assumed. Use when the user asks to install Herdr, set up Herdr with a local orchestrator + remote agent sessions, recreate the alpha/beta (or N-agent, or multi-orchestrator) setup, or rebuild that workspace.
 ---
 
 # Herdr: M local orchestrators + N remote agent sessions — wizard
@@ -81,7 +81,7 @@ this in Stages 4 and 9, don't silently assume another harness works the same way
 
 ## Connections this wizard's setup actually makes
 
-Holler has its own wire protocol — this is what Stage 2's checks (`tailscale status`, the hub
+Holler has its own wire protocol — this is what Stage 0's and Stage 2's checks (`tailscale status`, the hub
 port, the OpenCode model endpoint) are really probing, so it's worth stating explicitly rather
 than leaving it implicit in scattered preflight commands. **Every literal port and path in this
 section is the default instance's** (hub port 41807, serve port 443, the unnamed Herdr socket); an
@@ -283,9 +283,10 @@ time. Don't hand-author separate files by hand — one master file in, the per-h
 ## How to run this: one stage at a time, gated on real verification
 
 This is a **wizard, not a script to dump and run**. Work through the stages below **in order**,
-starting at **Stage 0 — Install Herdr**, which stands apart from everything after it: it is
-about getting the `herdr` binary onto this machine, not about building any particular workspace,
-and it ends with its own explicit yes/no before Stage 1 (config + launch) is even offered.
+starting at **Stage 0 — Preflight**, which comes before everything else: it is machine-level and
+read-only, needs no config, prints one status table of what this machine has (installing Herdr on
+its own yes if `herdr` is missing), and ends with an explicit yes/no, "All systems go. Proceed?",
+before Stage 1 (config + launch) is even offered.
 
 **The whole point of this wizard is to push through to a complete, working install — a Gate
 failure is a prompt to ask the user a concrete question, not a reason to stop and hand the run
@@ -300,7 +301,7 @@ fails" resolves). A half-finished run with a diagnosis but no working workspace 
 For every stage:
 
 1. State which stage you're starting (`Stage N/10: <name>`, N running 0 through 10 — 11 stages
-   total, Stage 0 plus the 10 build-and-verify stages below it).
+   total, Stage 0 (the Preflight) plus the 10 build-and-verify stages below it).
 2. If the stage has an **Ask** line, ask the user that question and wait for the answer before
    doing anything else in the stage — don't guess a pane id, port, hostname, orchestrator
    name/command/directory, or harness-specific behavior that varies by session state or config.
@@ -323,52 +324,114 @@ For every stage:
 
 **Stage 3 is a hard stop, not just a gate like the others: nothing that changes real state
 (starting a process, killing one, joining, splitting a pane) may happen before the user has
-explicitly said to proceed.** Stages 1 and 2 are read-only except the scratch directory and the config file you write from the user's answers (loading a file,
+explicitly said to proceed.** Stage 0 (apart from installing Herdr or the skill, each on its own yes) and Stages 1 and 2 are read-only except the scratch directory and the config file you write from the user's answers (loading a file,
 checking status; the only things they write are `<scratch>` and that config file, and installing the skill needs its own
-yes, see Stage 1) so they're safe to run ahead of that; everything from Stage 4 onward is not.
+yes, see Stage 0) so they're safe to run ahead of that; everything from Stage 4 onward is not.
 
-Keep a running status checklist as you go — one line per stage, name plus symbol, not a dense
-bracket-number line (a human reading it mid-run shouldn't have to cross-reference a legend to
-know what's happening):
+Keep a running status checklist as you go, as a **vertical table** (one row per stage, columns
+Stage, Name, Status), not an inline list and not a dense bracket-number line (a human reading it
+mid-run shouldn't have to cross-reference a legend to know what's happening). Stage 0 prints it
+directly after the preflight status table, and every stage transition reprints the whole table:
 
 ```
-✅ 0. Install Herdr
-✅ 1. Load the session config
-✅ 2. Preflight
-🔄 3. Present the plan, get assent
-⬜ 4. Start remote agent backends (N=2: alpha, beta — harness: opencode)
-⬜ 5. Capture session IDs
-⬜ 6. Bring up the hub
-⬜ 7. Join + run the body
-⬜ 8. Build the Herdr workspace (M+N panes)
-⬜ 9. Attach panes to sessions
-⬜ 10. Verify end-to-end
-⬜ 11. Basic Herdr commands
+| Stage | Name                                                     | Status |
+|-------|----------------------------------------------------------|--------|
+| 0     | Preflight                                                | ✅     |
+| 1     | Load the session config                                  | ✅     |
+| 2     | Config checks                                            | ✅     |
+| 3     | Present the plan, get assent                             | 🔄     |
+| 4     | Start remote agent backends (N=2: alpha, beta — harness: opencode) | ⬜ |
+| 5     | Capture session IDs                                      | ⬜     |
+| 6     | Bring up the hub                                         | ⬜     |
+| 7     | Join + run the body                                      | ⬜     |
+| 8     | Build the Herdr workspace (M+N panes)                    | ⬜     |
+| 9     | Attach panes to sessions                                 | ⬜     |
+| 10    | Verify end-to-end                                        | ⬜     |
+| 11    | Basic Herdr commands                                     | ⬜     |
 ```
 
 ✅ done · 🔄 in progress (the stage you just started) · ⬜ not started yet · ⏭️ skipped (nothing to
-do, for example no sessions) · ❌ failed/stopped (pair with a one-line reason). Print the whole checklist after every stage transitions, not
-just the numbers that changed. Include the real M (orchestrator count), N (session count), and
+do, for example no sessions) · ❌ failed/stopped (pair with a one-line reason). The legend stays
+one line under the first table. Include the real M (orchestrator count), N (session count), and
 every name/harness once known (from Stage 1 onward), not a generic "N sessions" placeholder —
 the point is a human can read it at a glance, including which harness is actually in play.
 
-## Stage 0 — Install Herdr
+## Stage 0 — Preflight
 
-**This stage is about the `herdr` binary only — installing it locally, on this machine.** It has
-nothing to do with Holler, with any remote host, or with building a workspace; those are Stage 1
-onward, and whether to even get there is a second, separate question asked only at the end of
-this stage. Never fold this stage's install question and Stage 1's "configure and launch"
-question into one combined ask — a yes to installing Herdr is not a yes to also setting up a
-workspace in the same run.
+**Stage 0 is the Preflight: machine-level and read-only, and it needs no config.** It looks at what this
+machine has, prints it as one status table, and ends with the question "All systems go.
+Proceed?". Its one write is installing `herdr` (or the skill's own directory), each only on an
+explicit yes. It has nothing to do with any remote host or with building a workspace: the
+checks that need the config (the orchestrators, the remote hosts, the model endpoints) are
+Stage 2's. Never fold the install question and the closing question into one ask: a yes to
+installing Herdr is not a yes to also setting up a workspace in the same run.
 
-**Ask:** check first, so the question is informed rather than asked blind:
+**First, locate the skill's scripts and define `WIZARD_LIB` (once, here, in Stage 0).** Every helper script
+this wizard runs lives in the `lib/` directory of the **whole** installed skill directory, not
+just `SKILL.md`. The one definition, an absolute path (`<HOME>` is the output of `printf %s
+"$HOME"`; if the skill is installed elsewhere, use that directory's absolute `lib` path):
+```
+WIZARD_LIB=<HOME>/.claude/skills/setup-wizard/lib
+```
+Check it before going on: `ls <that path>/ledger.sh <that path>/instance.sh <that path>/herdr.sh`.
+If the files are not there, the skill was installed as a single file. Installing writes into
+`~/.claude/skills`, so **ask the user before installing** (Stage 0 changes nothing else but Herdr, on its own yes), then
+install the whole directory (works on a machine with no checkout of this repository, and needs no
+`sudo`):
+```bash
+mkdir -p ~/.claude/skills && curl -fsSL https://github.com/Performant-Labs/holler/archive/refs/heads/main.tar.gz | tar -xz -C ~/.claude/skills --strip-components=2 holler-main/agent-skills/setup-wizard
+```
+No release tag contains the whole skill directory yet, so the command fetches `main`; pin it to a
+tag once one does. From here on the text writes `$WIZARD_LIB`; as the shell-state rule says, write the literal path
+into each command (it is never set for you). Run the scripts with `bash`, never by path alone.
+
+**Do (every command is local, none changes anything, and each runs as its own command).** The
+Herdr settings here are the default instance's (the config is not read yet); a config with an
+`[instance]` table gets its own scoped checks in Stage 2, from its ledger and inventory.
 ```bash
 command -v herdr >/dev/null 2>&1 && herdr --version || echo "herdr: not found"
+command -v holler >/dev/null 2>&1 && holler --version && holler --help || echo "holler: not found"
+command -v tailscale >/dev/null 2>&1 && tailscale status --self --json || echo "tailscale: not found"
+command -v ssh >/dev/null 2>&1; echo "ssh: exit $?"
+for f in ledger instance herdr; do test -f <WIZARD_LIB>/$f.sh && echo "$f.sh ok" || echo "$f.sh MISSING"; done
+WIZARD_INSTANCE_NAME=default bash $WIZARD_LIB/herdr.sh check-pane
+WIZARD_INSTANCE_NAME=default bash $WIZARD_LIB/herdr.sh run status 2>&1
+herdr session list 2>&1   # default instance only
+HOLLER_STATE_DIR="$HOME/.holler" holler hub status 2>&1   # default instance only
+cat "$HOME/.holler/herdr/setup/wizard-ledger.toml" 2>&1   # default instance only
+ls ./sessions.toml "$HOME/.holler/herdr/setup/sessions.toml" 2>&1
 ```
-If `herdr` is already on `PATH`, say so (name the version found) and skip straight to this
-stage's closing question below — there's nothing to install. If it's not found, ask plainly:
-**"Herdr isn't installed on this machine — do you want to install it?"** Wait for a real yes or
-no; don't install anything before an explicit answer.
+A `--config <path>` flag in the invocation text is the first of the three config tiers: report
+whether that file exists. When `herdr` or `holler` is off `PATH`, use its
+absolute path (see the note after Verify). A missing tool is a row of the table, not a failure of
+the stage.
+
+**Print one vertical status table**, columns Check, Result and Detail, one row per machine fact
+the wizard can establish without a config:
+
+| Check | Result | Detail |
+|---|---|---|
+| `herdr` installed | ok / missing | the version; the absolute path when it is off `PATH` |
+| `holler` is the current single binary | ok / missing / legacy | the version; whether `hub` and `body` subcommands exist (the legacy client lists flat `join`/`run`/`detach`/`attach` verbs and a `0.1.x` version) |
+| `tailscale` present and logged in | ok / absent | this machine's tailnet name (`.Self.DNSName`, trailing dot stripped) |
+| `ssh` present | ok / absent | absent means manual-relay mode in Stage 2 and after |
+| The skill's `lib/` scripts present (`WIZARD_LIB`) | ok / missing | the absolute `lib` path |
+| Driving agent not inside a Herdr pane (`check-pane`) | ok / stop | a stop is a Stage 3 refusal, carried forward |
+| Herdr server state and saved sessions | info | running or stopped, and `herdr session list` |
+| A Holler hub running here | info | `holler hub status`, default state directory |
+| An existing wizard ledger | info | its live rows |
+| An existing config at the three tiers | info | which tier, as an absolute path |
+
+**Directly after that table, print the stage checklist as a vertical table** (columns `| Stage |
+Name | Status |`, one row per stage, as defined under "How to run") and reprint it after every
+stage transition. The legend stays one line under the first table. Never print the checklist
+before this table: before it the machine's state is not known.
+
+**Ask:** only if `herdr` is missing. Check first, so the question is informed rather than asked
+blind. If `herdr` is already on `PATH`, say so (name the version) and go straight to the closing
+question below: there is nothing to install. If it is not found, ask plainly: **"Herdr isn't
+installed on this machine — do you want to install it?"** Wait for a real yes or no; don't
+install anything before an explicit answer.
 
 **Do**, only if the user said yes and `herdr` wasn't already found:
 ```bash
@@ -376,18 +439,17 @@ curl -fsSL https://herdr.dev/install.sh | sh
 ```
 This is the canonical installer from the real `herdrdev/herdr` project (verified against its own
 `README.md`, `https://github.com/herdrdev/herdr`) — it installs only the `herdr` binary itself
-for the current user on this machine; it does not touch any remote host (that's Stage 2 onward,
-and only for `holler`, a separate binary/project entirely — installing Herdr here says nothing
-about whether `holler` is present anywhere, that's still checked fresh in Stage 2). If the user
-says they'd rather use Homebrew (a real, equally valid path on a Homebrew-managed machine),
-`brew install herdr` is the same install, just via a different channel — use whichever the user
-asks for; don't default to one over the other without asking if they have a preference.
+for the current user on this machine; it does not touch any remote host, and it says nothing about
+whether `holler` is present (that is its own row, and Stage 2 checks `holler` on every remote
+host). If the user would rather use Homebrew (a real, equally valid path on a Homebrew-managed
+machine), `brew install herdr` is the same install, just via a different channel — use whichever
+the user asks for; don't default to one over the other without asking if they have a preference.
 
-**Verify:**
+**Verify:** the stage re-checks `herdr` after an install, then prints the status table again with the new result:
 ```bash
 command -v herdr >/dev/null 2>&1 && herdr --version || echo "herdr: still not found"
 ```
-**A real Homebrew/Linuxbrew-installed `herdr` (or `holler`, same issue in Stage 2) can still
+**A real Homebrew/Linuxbrew-installed `herdr` (or `holler`, same issue for its row and in Stage 2) can still
 report `not found` here even in a login shell (`bash -lc`)** — this isn't just the
 login-vs-non-login PATH gap noted elsewhere; some machines simply never added the brew prefix's
 `bin` dir to `$PATH` at all. Confirmed live 2026-09-23: `herdr` was a real, working
@@ -403,12 +465,14 @@ every `herdr`/`holler` invocation on this host for the rest of the run, and say 
 you're doing so (once, not on every command). For Herdr that means `HERDR_BIN=<that absolute
 path>` among the Herdr settings Stage 1 defines (`herdr.sh` runs that binary).
 
-**Gate:** if the user said no to installing, stop this stage here — do not fall through to
-asking about Stage 1 in the same breath; report plainly that Herdr isn't installed and the wizard
-is stopping, and let the user re-invoke later if they change their mind. If the install command
-itself fails, report the real error (network failure, permission issue, unsupported platform) and
-don't proceed to the closing question until it's resolved or the user explicitly says to move on
-without a working `herdr`.
+**Gate:** A no to installing ends the wizard cleanly right here: report plainly that Herdr
+isn't installed and the wizard is stopping, and let the user re-invoke later; do not fall through
+to the closing question. If the install command itself fails, report the real error (network
+failure, permission issue, unsupported platform) and don't proceed to the closing question until
+it is resolved or the user explicitly says to move on without a working `herdr`. A `holler` that
+is missing or the legacy client, a missing `lib/` directory (after the install offer above),
+and a `check-pane` stop are reported as rows of the table and carried forward: the first two are
+Stage 1 and Stage 2 gates, the pane stop a Stage 3 refusal.
 
 **Then, only once `herdr` is confirmed present (already installed, or freshly installed and
 verified) — ask a second, separate, explicit question, never assumed:** **"All systems go. Proceed?"** (yes/no) A no (or "not right now," or any non-committal
@@ -417,26 +481,7 @@ building a config/workspace in the same run. Only a clear yes moves on to Stage 
 
 ## Stage 1 — Load the session config
 
-**First, locate the skill's scripts and define `WIZARD_LIB` (once, here).** Every helper script
-this wizard runs lives in the `lib/` directory of the **whole** installed skill directory, not
-just `SKILL.md`. The one definition, an absolute path (`<HOME>` is the output of `printf %s
-"$HOME"`; if the skill is installed elsewhere, use that directory's absolute `lib` path):
-```
-WIZARD_LIB=<HOME>/.claude/skills/setup-wizard/lib
-```
-Check it before going on: `ls <that path>/ledger.sh <that path>/instance.sh <that path>/herdr.sh`.
-If the files are not there, the skill was installed as a single file. Installing writes into
-`~/.claude/skills`, so **ask the user before installing** (Stages 1 and 2 change nothing else), then
-install the whole directory (works on a machine with no checkout of this repository, and needs no
-`sudo`):
-```bash
-mkdir -p ~/.claude/skills && curl -fsSL https://github.com/Performant-Labs/holler/archive/refs/heads/main.tar.gz | tar -xz -C ~/.claude/skills --strip-components=2 holler-main/agent-skills/setup-wizard
-```
-No release tag contains the whole skill directory yet, so the command fetches `main`; pin it to a
-tag once one does. From here on the text writes `$WIZARD_LIB`; as the shell-state rule says, write the literal path
-into each command (it is never set for you). Run the scripts with `bash`, never by path alone.
-
-**First run.** A first run has no skill directory: ask, then install (the paragraph above). An
+**First run.** A first run has no skill directory: ask, then install (Stage 0's install paragraph). An
 existing global `sessions.toml` skips the interview; to start clean, the user moves it aside (for
 example `mv ~/.holler/herdr/setup/sessions.toml ~/.holler/herdr/setup/sessions.toml.old`). The
 wizard never deletes it. The "no config found" message names the config path it looked for.
@@ -449,7 +494,7 @@ stays a plain question, no menu needed.
 
 **Do:**
 
-First, check whether the invocation text contains a `--config <path>` flag (or `--config=<path>`)
+Stage 0 already checked `tailscale`, `ssh` and the `lib/` scripts; use its table. First, check whether the invocation text contains a `--config <path>` flag (or `--config=<path>`)
 — Claude Code skills receive their invocation arguments as free-form text after the command name
 (whatever followed `/setup-wizard` when it was run), not pre-parsed shell argv, so this is
 a text check against that string, not literal `$1`-style argument handling. **If `--config
@@ -662,17 +707,17 @@ explicit `--config` flag was given and that file is missing or fails to parse, t
 stop with no fallback** — do not silently substitute the cwd or global config; tell the user the
 path they gave doesn't resolve and let them fix it or drop the flag.
 
-## Stage 2 — Preflight
+## Stage 2 — Config checks
 
 **Ask:** nothing yet — the no-`ssh` fallback below is a mode switch this wizard makes for
-itself from a real, checkable fact (whether the `ssh` binary exists here), not a question to
-put to the user.
+itself from a real, checkable fact (Stage 0's `ssh` row), not a question to put to the user.
 
-**No local `ssh` binary — the manual-relay fallback, checked before anything else:**
-```bash
-command -v ssh >/dev/null 2>&1; echo "ssh: exit $?"
-```
-If that exits non-zero, this machine has no `ssh` client at all — a real, if unusual,
+This stage holds only the checks that need the config. Stage 0 already ran the machine-level
+ones (`herdr`, `holler`, `tailscale`, `ssh`, the `lib/` scripts, the Herdr server, the default
+hub and ledger), and they are not repeated here.
+
+**No local `ssh` binary — the manual-relay fallback, decided from Stage 0's `ssh` row:** if that
+row said `absent`, this machine has no `ssh` client at all — a real, if unusual,
 environment (a sandboxed Claude Code session, a locked-down container). **This does not mean
 the wizard can't run; it means every remaining `ssh <host> "<remote command>"` in every later
 stage switches to manual-relay mode for the rest of this run:** instead of running the command
@@ -688,8 +733,7 @@ call below exactly as written, run by you directly.
 **With no sessions (N=0),** skip the ssh reachability loop, the remote `which holler`, the
 model-endpoint checks, the remote state-directory and ledger fetch and the `tailscale status`
 grep of remote names: there is no remote host to reach. Still run the orchestrator `dir`/`cmd`
-checks, the local `which holler`, the scoped `holler hub status`, the local inventory and the
-`collide` inputs, and the Herdr checks. Report each skipped check as skipped, never as failed.
+checks, the local inventory, the `collide` inputs and the Herdr session check. Report each skipped check as skipped, never as failed.
 
 **Do (SSH reachability, first — looped over every DISTINCT `remote_host` from Stage 1, not just
 one — everything after this depends on it, so check each host in isolation rather than letting
@@ -719,11 +763,10 @@ An orchestrator whose `dir` doesn't exist or whose `cmd` doesn't resolve will fa
 in Stage 8 (a pane launched into a broken directory, or a shell reporting "command not found"
 with nothing watching for it) unless caught here, where it's cheap to catch and cheap to fix.
 
-**Do (the rest of preflight, per distinct `remote_host` — never a hardcoded hostname, and never
+**Do (the remote checks, per distinct `remote_host` — never a hardcoded hostname, and never
 assuming there's only one):**
 ```bash
 tailscale status | grep -E "$(echo <hub_host> | cut -d. -f1)|<pipe-separated short names of every distinct remote_tailnet_host>"
-which holler
 for host in <distinct remote_host values>; do
   ssh "$host" "which holler"
 done
@@ -733,16 +776,14 @@ done
 ssh <that session's remote_host> "cat ~/.config/opencode/opencode.jsonc" 2>&1
 # then probe the provider's model-list endpoint at the baseURL that config names:
 ssh <that session's remote_host> "curl -s <baseURL>/models" | head -c 200
-HOLLER_STATE_DIR=<state_dir> holler hub status 2>&1
-<herdr_env> bash $WIZARD_LIB/herdr.sh run status 2>&1
 ```
-With N=0 only the local `which holler` line and the last two lines run (see above). When
+With N=0 none of these remote lines runs (see above). When
 `hub_host` is absent, skip the `tailscale status` check and say why: no `hub_host` and no remote
 host to look up, so there is nothing to grep for.
 
-The last two calls are scoped to **this instance** (its state directory, its Herdr session): a bare
-`holler hub status` or `herdr status` reports the *default* instance's hub and Herdr, which is a
-different thing when this is a second instance.
+Stage 0's hub and Herdr lines report the *default* instance's hub and Herdr, which is a
+different thing when this is a second instance. This instance's own hub and Herdr server are read
+from its ledger (a live row) and the inventory below, never from a bare status call.
 
 **Do (the instance's state directory on each remote host, once per distinct `remote_host`, as
 Stage 1 describes)**, so every later command on that host uses its own resolved `<state_dir>`:
@@ -786,18 +827,18 @@ for this stage, not something to skip — the plan cannot be checked without it.
 shell often lacks it): put it on `PATH` or use the `bash -l -s` form above, then take the
 inventory again (this does not apply to `herdr` on a remote host, see above); never plan from an inventory with such a line unless the user says to.
 
-**Do (the Herdr checks, on this machine, before Stage 3):**
+**Do (the Herdr session checks for this instance, on this machine, before Stage 3):**
 ```bash
 <herdr_env> bash $WIZARD_LIB/herdr.sh check-pane      # stops if this run is inside a Herdr pane it cannot place in the instance's session
 <herdr_env> bash $WIZARD_LIB/herdr.sh check-session   # stops if the named session exists and the ledger did not create it
 ```
-Both only read. A stop from either is a **Stage 3 refusal**: carry its message into Stage 3, and
+Both only read, and both take this instance's own Herdr settings (Stage 0's `check-pane` ran with the default instance's). A stop from either is a **Stage 3 refusal**: carry its message into Stage 3, and
 do not ask "Proceed with this plan?" (Stage 3 says what to offer). `check-pane` stops when the
 driving agent is inside a Herdr pane (the fix is to run the wizard from a terminal outside any
 Herdr pane) and when that pane belongs to a different session than the instance's. For the
 default instance, with no `herdr_session`, both pass.
 
-The status calls above are read-only (they tell Stage 3 what already exists so its plan is
+The checks above are read-only (they tell Stage 3 what already exists so its plan is
 accurate) — none starts, stops, nor changes anything. The model-endpoint checks
 are driven by what each host's own OpenCode config says — never assume every host uses the same
 provider or model.
@@ -813,12 +854,11 @@ invent one or copy a value from this document.
 
 **Verify:** every orchestrator's `dir` exists and its `cmd`'s first token resolves on `$PATH`
 (locally — orchestrators always run on the hub machine, never remote). The remote lines below
-apply only when N>=1; with N=0 only the orchestrator, local `holler` and Herdr lines apply. Every host's SSH check
+apply only when N>=1; with N=0 only the orchestrator and Herdr session lines apply. Every host's SSH check
 exits 0 — a non-zero exit for any one of them is the *root cause* to report for that host
 specifically, not a mysterious later failure three stages downstream (and not a reason to
 silently skip that host's sessions — surface it). Every distinct `remote_tailnet_host` shows
-`active`/`online` in `tailscale status` (not `offline`); every `which holler` call (local and
-every remote host) resolves **to the current single-binary `holler` (hub/body subcommands) —
+`active`/`online` in `tailscale status` (not `offline`); every remote `which holler` call (the local one was Stage 0's) resolves **to the current single-binary `holler` (hub/body subcommands) —
 not the legacy `holler-client`/`holler-server` split** (check with `holler --help`: the new
 binary lists `hub`/`body` subcommands, the legacy client lists flat `join`/`run`/`detach`/
 `attach` verbs and reports a `0.1.x` version — and note that a plain non-login `ssh <host>
@@ -830,7 +870,7 @@ per Stage 0's note (the same brew-prefix-not-on-PATH issue applies to `holler` h
 every `opencode`-harness session, its own host's model endpoint returns real JSON (model list),
 not a connection error, and the relevant provider block exists on that host's OpenCode config;
 and you now know whether this instance's own hub and Herdr server are already running (a live
-row in its ledger; the scoped status calls above), for Stage 3's summary.
+row in its ledger and the inventory), for Stage 3's summary.
 
 **If the provider block is missing** (opencode-harness sessions only), don't proceed — the
 session's model will fail to resolve. Stop and ask the user which provider/model that host
@@ -852,7 +892,7 @@ was resolved 2026-09-22) rather than substituting the legacy binary's verbs, whi
 different, incompatible protocol.
 
 **Gate:** any hard failure here (an orchestrator's `dir` missing or `cmd` not resolving, remote
-host offline, `holler` missing/wrong version, an opencode-harness session's model endpoint
+host offline, `holler` missing/wrong version on a remote host, an opencode-harness session's model endpoint
 down) — stop and tell the user (the remote host, `holler` on a remote host and model-endpoint
 failures apply only when N>=1; with N=0 none of the remote failures can occur); every later stage depends on this one being real. A missing
 `dir`/unresolved `cmd` is the user's config to fix (a typo, an uninstalled CLI, a directory that
@@ -1007,7 +1047,7 @@ else, this is a real gate — stop and tell the user this wizard doesn't have a 
 for that harness yet, rather than guessing one. Don't skip the entry silently and don't
 improvise a plausible-looking command for an unfamiliar harness.
 
-**In manual-relay mode** (per Stage 2), every `ssh <remote_host> "…"` below is a command to hand
+**In manual-relay mode** (per Stage 0's `ssh` row and Stage 2), every `ssh <remote_host> "…"` below is a command to hand
 the user, not one you run — print it verbatim, wait for them to paste back the real output, then
 apply the matching Verify/Gate to what they pasted exactly as if you'd run it yourself.
 
@@ -1769,6 +1809,6 @@ Then add two notes:
 - Holler repo: `Performant-Labs/holler` — `docs/adr/ADR-0005.md` (attach mode's normative design,
   the per-session `harness` field, and the session-config TOML shape this wizard's config file
   matches), `ADR-0006` (the `wss://`/TLS-proxy hub design this recipe relies on).
-- Herdr itself (the workspace/pane tool Stage 0 installs): `https://herdr.dev` /
+- Herdr itself (the workspace/pane tool Stage 0 can install): `https://herdr.dev` /
   `https://github.com/herdrdev/herdr` — a separate project from Holler; its own install script
-  (`https://herdr.dev/install.sh`) is what Stage 0 runs.
+  (`https://herdr.dev/install.sh`) is what Stage 0 runs on a yes.

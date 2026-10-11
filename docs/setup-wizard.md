@@ -424,7 +424,7 @@ instance the wizard offers to leave the server running and stop only the hub.
 ## Automated setup
 
 A Claude Code skill drives this end to end — `setup-wizard`, an 11-stage wizard (Stage 0 through
-Stage 10). The skill ships in this repo at
+Stage 10). Stage 0 is the preflight. The skill ships in this repo at
 [`agent-skills/setup-wizard/SKILL.md`](../agent-skills/setup-wizard/SKILL.md), which is its source
 of truth, and its stages call the helper scripts in `agent-skills/setup-wizard/lib/`, so the
 **whole directory** is installed, not just `SKILL.md`. On a machine with no checkout, one command
@@ -437,11 +437,14 @@ mkdir -p ~/.claude/skills && curl -fsSL https://github.com/Performant-Labs/holle
 No release tag contains the whole skill directory yet, so the command fetches `main`; pin it to a
 tag once one does. (The README has the same line, and its agent prompt fetches the directory the same way on a
 machine that doesn't have it). Stage
-0 stands apart from the rest: it only installs the `herdr` binary itself (via
-[herdr.dev's install script](https://herdr.dev/install.sh) or `brew install herdr`), asked as
-its own up-front yes/no, and ends with a second, separate yes/no — "All systems go. Proceed?" — before anything past it runs; a yes to installing Herdr is never treated
-as a yes to also building a workspace in the same run. Only once that second question gets a
-yes does Stage 1 onward run: load the config described above, preflight (including per-host SSH
+0 comes first and needs no config: it is read-only and machine-level, prints one status table of what
+this machine has (`herdr`, `holler`, `tailscale`, `ssh`, the skill's `lib/` scripts, the Herdr
+server and saved sessions, a hub running here, an existing ledger and config), then prints the
+stage checklist as a vertical table. If `herdr` is missing it asks, as its own yes/no, whether to
+install it (via [herdr.dev's install script](https://herdr.dev/install.sh) or `brew install herdr`) and
+re-checks. It ends with a second, separate yes/no — "All systems go. Proceed?" — before anything past it runs; a yes to installing Herdr is never treated
+as a yes to also building a workspace in the same run, and a no ends the wizard cleanly. Only once that second question gets a
+yes does Stage 1 onward run: load the config described above, the config checks of Stage 2 (including per-host SSH
 reachability, with a manual-relay fallback when no local `ssh` client exists), present the plan
 and get explicit assent before touching anything, start the remote OpenCode backends, capture
 real session IDs, bring up the hub, migrate the config and join/run one body per distinct remote

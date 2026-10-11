@@ -90,18 +90,16 @@ fn the_checklist_has_the_extra_last_line() {
     let last = list
         .lines()
         .rfind(|l| {
-            l.split_once(' ')
-                .is_some_and(|(_, r)| r.starts_with(|c: char| c.is_ascii_digit()))
+            l.trim_start_matches('|')
+                .trim_start()
+                .starts_with(|c: char| c.is_ascii_digit())
         })
         .unwrap();
     assert!(
-        last.contains("11. Basic Herdr commands"),
-        "last checklist line: {last}"
+        last.contains("11") && last.contains("Basic Herdr commands"),
+        "last checklist row: {last}"
     );
-    assert!(
-        list.contains("10. Verify end-to-end"),
-        "Stage 10's line stays"
-    );
+    assert!(list.contains("Verify end-to-end"), "Stage 10's row stays");
 }
 
 #[test]

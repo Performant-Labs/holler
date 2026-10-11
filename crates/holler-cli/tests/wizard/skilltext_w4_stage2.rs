@@ -81,11 +81,9 @@ fn it_names_every_check_that_still_runs() {
         &paragraph(),
         &[
             "orchestrator `dir`/`cmd` checks",
-            "the local `which holler`",
-            "scoped `holler hub status`",
             "local inventory",
             "`collide` inputs",
-            "Herdr checks",
+            "Herdr session check",
         ],
     );
 }
@@ -122,7 +120,7 @@ fn verify_limits_the_remote_lines_to_one_or_more_sessions() {
         &verify,
         &[
             "The remote lines below apply only when N>=1",
-            "with N=0 only the orchestrator, local `holler` and Herdr lines apply",
+            "with N=0 only the orchestrator and Herdr session lines apply",
         ],
     );
 }

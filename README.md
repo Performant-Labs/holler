@@ -201,9 +201,10 @@ The prompt:
 ```
 Set up a Herdr workspace for me, per Performant-Labs/holler's docs/setup-wizard.md.
 
-Use the setup-wizard procedure and follow its stages exactly — starting with its own Stage 0,
-which only installs the `herdr` binary (asked as its own yes/no) and then asks a second,
-separate yes/no before configuring anything or launching a workspace.
+Use the setup-wizard procedure and follow its stages exactly — starting with its own Stage 0, the preflight,
+which checks what this machine has (read-only, no config needed), installs the `herdr` binary only
+on its own yes/no if it is missing, and then asks a second, separate yes/no ("All systems go.
+Proceed?") before configuring anything or launching a workspace.
 
 1. If you have the `setup-wizard` Claude Code skill installed, invoke it directly
    (/setup-wizard, optionally with --config <path>).
@@ -248,7 +249,7 @@ cell: `r1c1`, `r1c2`, `r1c3`, `r1c4` for the first row, `r2c1` for the second ro
 so on (for a bare pane count, two rows for more than four panes, up to 8 panes, and above 8 panes the squarest grid, then ask one confirm). An existing global
 `sessions.toml` skips this interview; to start clean I move it aside, and you never delete it.
 
-Once a real config exists, preflight every distinct remote host (SSH
+Once a real config exists, run the config checks on every distinct remote host (SSH
 reachability, the `holler` binary, each session's model endpoint), present the concrete plan
 you're about to execute and get my explicit yes before changing anything, start the remote
 OpenCode backends, capture real session IDs, bring up the Holler hub locally, migrate a
