@@ -338,6 +338,7 @@ know what's happening):
 ⬜ 8. Build the Herdr workspace (M+N panes)
 ⬜ 9. Attach panes to sessions
 ⬜ 10. Verify end-to-end
+⬜ 11. Basic Herdr commands
 ```
 
 ✅ done · 🔄 in progress (the stage you just started) · ⬜ not started yet · ⏭️ skipped (nothing to
@@ -1637,17 +1638,40 @@ everything above ran headlessly over Herdr's socket API — nothing was visible 
    ```bash
    <herdr_env> bash $WIZARD_LIB/herdr.sh run workspace focus <workspace_id>   # the workspace_id from pane list / workspace list above
    ```
-2. Tell the user exactly what to run and where: **"Open a terminal (Terminal.app, iTerm,
-   whichever) and run `herdr`"** (bare, no flags: **default instance only** — it attaches to the
-   same running server and default session this wizard just used; it does not start a second
-   server). For an instance with a `herdr_session`, tell them to run `herdr --session
-   <herdr_session>` instead, matching what was actually used; a bare `herdr` would open the
-   other (default) instance.
-3. Tell them what they should see immediately upon attaching: the workspace focused in step 1
-   (M+N panes arranged in `layout`'s columns/rows — every orchestrator and every session where
-   `layout` put it), not an empty default workspace. If they land somewhere else, the
-   visible-in-TUI workspace switcher (not a socket command at that point, since they're now
-   interacting directly) is how they navigate to it.
+2. Tell the user to open a terminal and attach (Stage 11's first row has the exact command, with
+   the instance's `herdr_session` when it has one), then say what they should see immediately:
+   the workspace focused in step 1 (M+N panes arranged in `layout`'s columns/rows), not an empty
+   default workspace.
+3. Then continue to Stage 11, which holds every command for looking around and cleaning up.
+
+## Stage 11 (final): Basic Herdr commands
+
+**Ask:** nothing. This step changes nothing: it is output only, shown after the verification
+report. Print this table (the bindings are Herdr's defaults, checked against `herdr --default-config`
+and Herdr's keyboard docs; if a binding differs on the user's install, `prefix+?` shows every active
+binding):
+
+| Task | Command |
+|---|---|
+| Attach | `herdr` (or `herdr --session <name>`, the instance's `herdr_session`) |
+| The prefix key | `ctrl+b`, release, then the key |
+| Show or hide the sidebar | `prefix+b` (or click the `»` at the bottom-left) |
+| Switch workspace | `prefix+w`, or click the sidebar |
+| New / rename / close workspace | `prefix+shift+n` / `prefix+shift+w` / `prefix+shift+d` (also `herdr workspace close <id>`) |
+| Split right / down | `prefix+v` / `prefix+minus` |
+| Move between panes | `prefix+h/j/k/l` |
+| Zoom / close pane | `prefix+z` / `prefix+x` |
+| Detach, leave everything running | `prefix+q` |
+| Every binding | `prefix+?` |
+
+Then add two notes:
+
+- **A restored workspace:** if `herdr.sh run workspace list` shows any workspace the wizard did
+  **not** create beside the new one (a restored saved session), name it with its id and pane count
+  and say how to close it if the user wants (`prefix+shift+d` on it, or `herdr workspace close
+  <id>`). Never close it for them.
+- **Teardown:** the wizard's own teardown is `stop-owned.sh teardown`; warn again that it closes
+  the restored workspace too (the server it stops holds it).
 
 ## If a stage fails
 

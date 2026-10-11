@@ -523,6 +523,21 @@ Unverified until story #734 checks it with the real binary: how a pane's own ses
 `herdr.sh`), and that `herdr session list` prints the session name first on each line. The tests
 use a fake `herdr`.
 
+## Basic Herdr commands
+
+The wizard ends with a final step (Stage 11) that prints the handful of Herdr commands a new user
+needs. It changes nothing; it is output only. The bindings are Herdr's defaults (confirm with
+`prefix+?` if yours differ): attach with `herdr` (or `herdr --session <name>`); the prefix is
+`ctrl+b`, released, then the key; `prefix+b` shows or hides the sidebar; `prefix+w` switches
+workspace; `prefix+shift+n` / `prefix+shift+w` / `prefix+shift+d` create, rename and close a
+workspace (also `herdr workspace close <id>`); `prefix+v` / `prefix+minus` split right / down;
+`prefix+h/j/k/l` move between panes; `prefix+z` / `prefix+x` zoom and close a pane; `prefix+q`
+detaches and leaves everything running.
+
+It also names any workspace the wizard did not create that sits beside the new one (a restored
+saved session), with its id and pane count, and says how to close it; the wizard never closes it.
+The wizard's own teardown is `stop-owned.sh teardown`, which closes the restored workspace too.
+
 ## Related
 
 - [ADR 0005](adr/ADR-0005.md) — attach mode's normative design.
