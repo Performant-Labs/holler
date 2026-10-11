@@ -1,6 +1,6 @@
 //! #776: Stage 1's default `r<row>c<col>` pane names and first-run notes (epic #769).
 //!
-//! Plain text assertions over `agent-skills/setup-wizard/SKILL.md`, `docs/setup-wizard.md` and
+//! Plain text assertions over `agent-skills/herdr-setup/SKILL.md`, `docs/setup-wizard.md` and
 //! `README.md`. Nothing here runs a script or touches a host.
 #![cfg(unix)]
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)] // #776
@@ -28,7 +28,7 @@ fn between(text: &str, start: &str, end: &str) -> String {
 
 fn stage1() -> String {
     flat(&between(
-        &read("agent-skills/setup-wizard/SKILL.md"),
+        &read("agent-skills/herdr-setup/SKILL.md"),
         "## Stage 1 \u{2014}",
         "## Stage 2 \u{2014}",
     ))
@@ -36,7 +36,7 @@ fn stage1() -> String {
 
 fn skill_config_section() -> String {
     flat(&between(
-        &read("agent-skills/setup-wizard/SKILL.md"),
+        &read("agent-skills/herdr-setup/SKILL.md"),
         "## The config file",
         "\n## ",
     ))

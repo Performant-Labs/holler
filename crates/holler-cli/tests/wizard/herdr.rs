@@ -1,6 +1,6 @@
 //! The setup wizard's Herdr stage in a named session (issue #730, epic #726).
 //!
-//! Drives `agent-skills/setup-wizard/lib/herdr.sh` with a fake `herdr` first on `PATH` that
+//! Drives `agent-skills/herdr-setup/lib/herdr.sh` with a fake `herdr` first on `PATH` that
 //! records its argv, one line per invocation. The real `herdr` is never run and no real Herdr
 //! session or socket is touched. Ledgers are fixture files in the contract's format.
 //!
@@ -19,7 +19,7 @@ fn repo_root() -> PathBuf {
 }
 
 fn script() -> PathBuf {
-    repo_root().join("agent-skills/setup-wizard/lib/herdr.sh")
+    repo_root().join("agent-skills/herdr-setup/lib/herdr.sh")
 }
 
 /// A scratch directory holding the fake `herdr`, its argv log, its session list and a ledger.
@@ -673,7 +673,7 @@ fn the_server_log_is_named_for_the_instance() {
 
 #[test]
 fn the_skill_runs_stages_8_and_9_through_the_wrapper_and_forbids_a_bare_server_stop() {
-    let skill = fs::read_to_string(repo_root().join("agent-skills/setup-wizard/SKILL.md")).unwrap();
+    let skill = fs::read_to_string(repo_root().join("agent-skills/herdr-setup/SKILL.md")).unwrap();
     let start = skill.find("## Stage 8 ").expect("stage 8");
     let end = skill.find("## Stage 10 ").expect("stage 10");
     let section = &skill[start..end];

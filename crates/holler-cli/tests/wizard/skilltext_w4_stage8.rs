@@ -2,7 +2,7 @@
 //! one yes covers creating it, the briefing is name-free and not offered with no sessions, and
 //! teardown warns about the restored workspace (epic #769).
 //!
-//! Plain text assertions over `agent-skills/setup-wizard/SKILL.md` and `docs/setup-wizard.md`.
+//! Plain text assertions over `agent-skills/herdr-setup/SKILL.md` and `docs/setup-wizard.md`.
 //! Nothing here runs a script or touches a host.
 #![cfg(unix)]
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)] // #804
@@ -27,7 +27,7 @@ fn section(text: &str, start: &str, end: &str) -> String {
 }
 
 fn skill() -> String {
-    read("agent-skills/setup-wizard/SKILL.md")
+    read("agent-skills/herdr-setup/SKILL.md")
 }
 
 fn docs() -> String {

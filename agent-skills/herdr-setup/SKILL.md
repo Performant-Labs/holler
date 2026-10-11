@@ -1,5 +1,5 @@
 ---
-name: setup-wizard
+name: herdr-setup
 description: Install Herdr (if not already present, asked as its own up-front yes/no) and, as a genuinely separate follow-up question ("All systems go. Proceed?"), optionally set up a Herdr workspace — one or more local orchestrator panes plus one remote agent session pane per entry in a Holler session config, wired through a Holler hub (local) / body (remote) pair, using the safe `opencode attach` recipe (never herdr-mirror). Config-driven, not hardcoded — every orchestrator's name/command/directory, every session's harness, and the whole pane layout (including how many orchestrators there are and where each one sits) are all read from the config, never assumed. Use when the user asks to install Herdr, set up Herdr with a local orchestrator + remote agent sessions, recreate the alpha/beta (or N-agent, or multi-orchestrator) setup, or rebuild that workspace.
 ---
 
@@ -122,7 +122,7 @@ socket, on whichever single machine each one lives on.
 **One file, single source of truth — resolved in this order:**
 
 1. **An explicit `--config <path>` flag passed to this skill's invocation** (e.g.
-   `/setup-wizard --config /path/to/some/sessions.toml`, or `--config=<path>`) — if the
+   `/herdr-setup --config /path/to/some/sessions.toml`, or `--config=<path>`) — if the
    invocation text contains this flag, `<path>` *is* the config file, full stop. It takes
    priority over both of the searches below, and neither of them runs at all in this case.
 2. `./sessions.toml` (the current working directory the wizard is invoked from) — lets a
@@ -299,8 +299,8 @@ stop the whole run (declining Stage 3's plan, or a hard technical wall nothing i
 fails" resolves). A half-finished run with a diagnosis but no working workspace is not success.
 For every stage:
 
-1. State which stage you're starting (`Stage N/10: <name>`, N running 0 through 10 — 11 stages
-   total, Stage 0 plus the 10 build-and-verify stages below it).
+1. State which stage you're starting (`Stage N/11: <name>`, N running 0 through 11 — 12 stages
+   total, Stage 0 plus the 11 stages below it).
 2. If the stage has an **Ask** line, ask the user that question and wait for the answer before
    doing anything else in the stage — don't guess a pane id, port, hostname, orchestrator
    name/command/directory, or harness-specific behavior that varies by session state or config.
@@ -422,7 +422,7 @@ this wizard runs lives in the `lib/` directory of the **whole** installed skill 
 just `SKILL.md`. The one definition, an absolute path (`<HOME>` is the output of `printf %s
 "$HOME"`; if the skill is installed elsewhere, use that directory's absolute `lib` path):
 ```
-WIZARD_LIB=<HOME>/.claude/skills/setup-wizard/lib
+WIZARD_LIB=<HOME>/.claude/skills/herdr-setup/lib
 ```
 Check it before going on: `ls <that path>/ledger.sh <that path>/instance.sh <that path>/herdr.sh`.
 If the files are not there, the skill was installed as a single file. Installing writes into
@@ -430,7 +430,7 @@ If the files are not there, the skill was installed as a single file. Installing
 install the whole directory (works on a machine with no checkout of this repository, and needs no
 `sudo`):
 ```bash
-mkdir -p ~/.claude/skills && curl -fsSL https://github.com/Performant-Labs/holler/archive/refs/heads/main.tar.gz | tar -xz -C ~/.claude/skills --strip-components=2 holler-main/agent-skills/setup-wizard
+mkdir -p ~/.claude/skills && curl -fsSL https://github.com/Performant-Labs/holler/archive/refs/heads/main.tar.gz | tar -xz -C ~/.claude/skills --strip-components=2 holler-main/agent-skills/herdr-setup
 ```
 No release tag contains the whole skill directory yet, so the command fetches `main`; pin it to a
 tag once one does. From here on the text writes `$WIZARD_LIB`; as the shell-state rule says, write the literal path
@@ -451,7 +451,7 @@ stays a plain question, no menu needed.
 
 First, check whether the invocation text contains a `--config <path>` flag (or `--config=<path>`)
 — Claude Code skills receive their invocation arguments as free-form text after the command name
-(whatever followed `/setup-wizard` when it was run), not pre-parsed shell argv, so this is
+(whatever followed `/herdr-setup` when it was run), not pre-parsed shell argv, so this is
 a text check against that string, not literal `$1`-style argument handling. **If `--config
 <path>` (or `--config=<path>`) is present, treat `<path>` as the explicit config file and use it
 directly, skipping the cwd/global search below entirely:**

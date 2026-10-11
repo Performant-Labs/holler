@@ -1,6 +1,6 @@
 //! #772: the skill text for a local-only run (zero `[[session]]` tables), epic #769.
 //!
-//! Plain text assertions over `agent-skills/setup-wizard/SKILL.md`, `docs/setup-wizard.md` and
+//! Plain text assertions over `agent-skills/herdr-setup/SKILL.md`, `docs/setup-wizard.md` and
 //! `README.md`. Nothing here runs a script or touches a host.
 #![cfg(unix)]
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)] // #772
@@ -14,7 +14,7 @@ fn read(rel: &str) -> String {
 
 /// The skill with every run of whitespace folded to one space, for phrases that wrap.
 fn skill() -> String {
-    read("agent-skills/setup-wizard/SKILL.md")
+    read("agent-skills/herdr-setup/SKILL.md")
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ")

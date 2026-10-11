@@ -513,7 +513,7 @@ fills this file in at release time.
   Install, Quick Start), following the existing zh-CN/ja/es/de pattern: AI-assisted, everything
   else stays English-only, and every language switcher now lists Français.
 - The `setup-wizard` Claude Code skill now ships in the repo at
-  [`agent-skills/setup-wizard/SKILL.md`](agent-skills/setup-wizard/SKILL.md) instead of living only
+  [`agent-skills/herdr-setup/SKILL.md`](agent-skills/herdr-setup/SKILL.md) instead of living only
   in one operator's home directory. The README's agent prompt uses the skill if it is installed and
   otherwise fetches it from the repo, so it launches the real wizard on a machine that has never seen
   it (it previously fell back to an approximation rebuilt from `docs/setup-wizard.md`). The README
