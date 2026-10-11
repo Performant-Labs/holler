@@ -2,7 +2,7 @@
 //! handful of Herdr bindings a new user needs, names a restored workspace beside the new one,
 //! warns about teardown, and changes nothing.
 //!
-//! Plain text assertions over `agent-skills/setup-wizard/SKILL.md` and `docs/setup-wizard.md`.
+//! Plain text assertions over `agent-skills/herdr-setup/SKILL.md` and `docs/setup-wizard.md`.
 #![cfg(unix)]
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)] // #811
 
@@ -25,7 +25,7 @@ fn between(text: &str, start: &str, end: &str) -> String {
 }
 
 fn skill() -> String {
-    read("agent-skills/setup-wizard/SKILL.md")
+    read("agent-skills/herdr-setup/SKILL.md")
 }
 
 fn stage10() -> String {
@@ -90,18 +90,16 @@ fn the_checklist_has_the_extra_last_line() {
     let last = list
         .lines()
         .rfind(|l| {
-            l.split_once(' ')
-                .is_some_and(|(_, r)| r.starts_with(|c: char| c.is_ascii_digit()))
+            l.trim_start_matches('|')
+                .trim_start()
+                .starts_with(|c: char| c.is_ascii_digit())
         })
         .unwrap();
     assert!(
-        last.contains("11. Basic Herdr commands"),
-        "last checklist line: {last}"
+        last.contains("11") && last.contains("Basic Herdr commands"),
+        "last checklist row: {last}"
     );
-    assert!(
-        list.contains("10. Verify end-to-end"),
-        "Stage 10's line stays"
-    );
+    assert!(list.contains("Verify end-to-end"), "Stage 10's row stays");
 }
 
 #[test]

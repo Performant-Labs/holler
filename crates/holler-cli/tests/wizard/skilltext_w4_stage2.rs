@@ -1,6 +1,6 @@
 //! #805: Stage 2 text for local-only runs (zero sessions): skip the remote checks, epic #769.
 //!
-//! Plain text assertions over `agent-skills/setup-wizard/SKILL.md` and `docs/setup-wizard.md`.
+//! Plain text assertions over `agent-skills/herdr-setup/SKILL.md` and `docs/setup-wizard.md`.
 //! Nothing here runs a script or touches a host.
 #![cfg(unix)]
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)] // #805
@@ -29,7 +29,7 @@ fn between(text: &str, start: &str, end: &str) -> String {
 
 fn stage2() -> String {
     between(
-        &flat("agent-skills/setup-wizard/SKILL.md"),
+        &flat("agent-skills/herdr-setup/SKILL.md"),
         "## Stage 2 ",
         "## Stage 3 ",
     )
@@ -81,11 +81,9 @@ fn it_names_every_check_that_still_runs() {
         &paragraph(),
         &[
             "orchestrator `dir`/`cmd` checks",
-            "the local `which holler`",
-            "scoped `holler hub status`",
             "local inventory",
             "`collide` inputs",
-            "Herdr checks",
+            "Herdr session check",
         ],
     );
 }
@@ -122,7 +120,7 @@ fn verify_limits_the_remote_lines_to_one_or_more_sessions() {
         &verify,
         &[
             "The remote lines below apply only when N>=1",
-            "with N=0 only the orchestrator, local `holler` and Herdr lines apply",
+            "with N=0 only the orchestrator and Herdr session lines apply",
         ],
     );
 }

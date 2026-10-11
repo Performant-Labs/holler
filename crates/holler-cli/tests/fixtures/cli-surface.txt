@@ -163,8 +163,8 @@ pane doctor | --fix --profile demo
 roster | --profile demo
 
 # #650
-pane import |
-pane import | --format=json
+pane import | --from /srv/state --herdr-session main
+pane import | --from /srv/state --herdr-session main --launcher /srv/state/launcher.toml --orchestrator demo-c1r1 --orchestrator demo-c2r1 --dry-run --format=json
 
 # #662
 profile create | Demo
@@ -178,9 +178,9 @@ profile show | Demo
 profile show | "Some Profile" --json
 
 # #664
-profile apply |
-profile apply | --take-over
-profile apply | --take-over --format=json
+profile apply | Demo
+profile apply | Demo --dry-run --format=json
+profile apply | "Some Profile" --take-over --herdr-session scratch
 
 # #665
 # (proposed: the operator confirms #665 first)

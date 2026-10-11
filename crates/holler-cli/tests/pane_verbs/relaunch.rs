@@ -591,7 +591,7 @@ fn relaunch_without_agent_keeps_the_stored_key() {
     theirs.opencode_agent = Some(agent("orchestrator"));
     rig.fakes.panes.concurrent_put(&theirs).unwrap();
     let run = rig.run(RELAUNCH, Format::Json);
-    data_of(&run);
+    let data = data_of(&run);
     assert_eq!(
         rig.record(PANE)
             .unwrap()
@@ -600,6 +600,8 @@ fn relaunch_without_agent_keeps_the_stored_key() {
             .map(|key| key.as_str()),
         Some("orchestrator")
     );
+    // #644 part 2: the result reports the agent the pane was recorded with.
+    assert_eq!(data["agent"], "orchestrator", "{data}");
     rig.assert_matches(&run, PANE);
     rig.assert_no_keystroke();
 }
@@ -615,7 +617,7 @@ fn relaunch_with_agent_replaces_the_stored_key() {
         &relaunch_with(&["--agent", "feature-implementor"]),
         Format::Json,
     );
-    data_of(&run);
+    let data = data_of(&run);
     assert_eq!(
         rig.record(PANE)
             .unwrap()
@@ -624,6 +626,8 @@ fn relaunch_with_agent_replaces_the_stored_key() {
             .map(|key| key.as_str()),
         Some("feature-implementor")
     );
+    // #644 part 2: the result reports the agent the pane was recorded with.
+    assert_eq!(data["agent"], "feature-implementor", "{data}");
     rig.assert_matches(&run, PANE);
     rig.assert_no_keystroke();
 }
