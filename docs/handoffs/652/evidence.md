@@ -61,3 +61,65 @@
   > ```
   >     emit_error(&mut ctx.sink, ctx.format, not_implemented(STORY))
   > ```
+
+## T (Phase 6)
+
+Facts in unchanged code that `crates/holler-cli/tests/docs_pane_control_test.rs` relies on and does not compute.
+
+- **Fact:** the test's hand-kept `APPLY_ACTIONS` and `APPLY_OUTCOMES` are exactly the words of `tx_apply`'s `Action::as_str` and `Outcome::as_str` (acceptance 15; neither enum has an `ALL` table).
+  **Source:** `crates/holler-pane/src/tx_apply.rs:148-157` and `crates/holler-pane/src/tx_apply.rs:186-197`
+  **Verbatim excerpt:**
+  > ```
+  >     pub const fn as_str(self) -> &'static str {
+  >         match self {
+  >             Action::Create => "create",
+  >             Action::Adopt => "adopt",
+  >             Action::Report => "report",
+  >             Action::Relaunch => "relaunch",
+  >             Action::Refuse => "refuse",
+  >             Action::Observe => "observe",
+  >         }
+  >     }
+  > ```
+  > ```
+  >     pub const fn as_str(self) -> &'static str {
+  >         match self {
+  >             Outcome::Created => "created",
+  >             Outcome::Relaunched => "relaunched",
+  >             Outcome::Adopted => "adopted",
+  >             Outcome::Reported => "reported",
+  >             Outcome::Refused => "refused",
+  >             Outcome::Failed => "failed",
+  >             Outcome::Skipped => "skipped",
+  >             Outcome::Planned => "planned",
+  >         }
+  >     }
+  > ```
+
+- **Fact:** `pane import`'s `--herdr-session` is optional to clap and required at run time (`usage` without it), which is why the test adds `--herdr-session NAME` to the computed heading form of `pane import` (acceptance 17).
+  **Source:** `crates/holler-cli/src/pane/import.rs:84-86` and `crates/holler-cli/src/pane/import.rs:152-158`
+  **Verbatim excerpt:**
+  > ```
+  >     /// The Herdr session the panes live in. Required.
+  >     #[arg(long, value_name = "NAME")]
+  >     pub herdr_session: Option<String>,
+  > ```
+  > ```
+  >         let herdr_session = args
+  >             .herdr_session
+  >             .clone()
+  >             .filter(|session| !session.trim().is_empty())
+  >             .ok_or_else(|| {
+  >                 usage("--herdr-session is required: name the Herdr session the panes live in")
+  >             })?;
+  > ```
+
+- **Fact:** `profile-drift` (the test's `PROPOSED_FINDING`) is a closed error code but not yet a `FindingKind` (#665 adds the kind).
+  **Source:** `crates/holler-pane/src/error.rs:121` and `crates/holler-pane/src/findings.rs:3`
+  **Verbatim excerpt:**
+  > ```
+  >             PaneCode::ProfileDrift => "profile-drift",
+  > ```
+  > ```
+  > //! untrusted text a finding quotes. #665 adds only the `ProfileDrift` kind after #647 has
+  > ```

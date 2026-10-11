@@ -136,3 +136,24 @@ This file is append-only: every phase adds its entry.
   11, 12, 13; `pane/launch.rs:385-430`; `pane/doctor.rs:60-112`; `adapter.rs:175-190` (Herdr); `profile_diff.rs:193-204`;
   `envelope.rs:202-360`; `docs_cli_test.rs` (whole); the #649 branch's `pane/wiring.rs:1-60`; the import test fixtures for
   the launcher table's shape. Facts in unchanged code are in `docs/handoffs/652/evidence.md`.
+
+## T, verify (GREEN): 2026-10-11T15:05-06:00 (MDT)
+
+- **Decided:** the RED test `readme_indexes_the_guide_under_guidance` was wrong, as F reported, so I repaired it in the
+  helper `from_heading`. The end search now skips the first byte, so a start of `\n## Guidance` no longer ends at
+  offset 0. No production file changed. With the repair the suite is GREEN: 16/16 `docs_pane_control_test`, 3/3
+  `docs_cli_test`, and the workspace unit command exits 0. Verdict PASS (`handoff-T-green.md`).
+  - I added three evidence entries: the `tx_apply` `as_str` words, `pane import`'s runtime-required `--herdr-session`,
+    and `profile-drift` as a code but not yet a kind.
+- **Assumed:** the #649 statements of sections 2 and 4 are acceptable while #649 is open (A warn 3; F's known issue).
+  They agree with the #649 branch's `wiring.rs` module doc, lines 22-38.
+- **Hedged:** no test reads #649's code. If #649 changes its contract before it merges, the guide drifts without a
+  failing test. S, or a check after #649 merges, re-reads that module doc.
+- **Evidence:**
+  - Nine doc mutations, each reverted. Every one failed exactly the matching test, including a README link moved out
+    of Guidance.
+  - Tier 1: `lint.sh`, `changelog-check.sh`, clippy `-D warnings`, `wire_selftest`, `docs_cli_test`, `cargo machete`,
+    `pane-restart-test.sh`, `test-hooks.sh` and `cargo test --workspace --no-fail-fast -- --skip
+    roster_stays_accurate_under_concurrent_body_load` all exit 0.
+  - `gitleaks detect --no-git` on the guide found no leaks.
+  - `gh issue view 649` shows OPEN.

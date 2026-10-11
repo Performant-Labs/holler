@@ -65,11 +65,13 @@ fn section(doc: &str, n: u32) -> String {
     rest[..end].to_string()
 }
 
-/// The text between `start` (a heading prefix) and the next `\n## ` (empty when absent).
+/// The text between `start` (a heading prefix) and the next `\n## ` after it (empty when
+/// absent). The end search skips the first byte, so a `start` that itself begins with `\n## `
+/// does not end at offset 0.
 fn from_heading(doc: &str, start: &str) -> String {
     let Some(at) = doc.find(start) else { return String::new() };
     let rest = &doc[at..];
-    let end = rest.find("\n## ").unwrap_or(rest.len());
+    let end = rest[1..].find("\n## ").map_or(rest.len(), |e| e + 1);
     rest[..end].to_string()
 }
 
