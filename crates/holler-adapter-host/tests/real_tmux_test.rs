@@ -4,121 +4,30 @@
 //! `cargo test -p holler-adapter-host --test real_tmux_test -- --ignored`. Each returns
 //! early, saying why, when `tmux -V` cannot run.
 //!
-//! Every host is built by [`private`] on its own tmux server, on a socket in a fresh
+//! Every host is built by [`private`] (`real_tmux/mod.rs`) on its own tmux server, on a socket in a fresh
 //! `/tmp/hlr-tmux-*` directory, with a config that forces `/bin/sh` (AC 9). The guard
 //! kills that server and removes its directory. No test touches the default socket or
 //! names a session outside `demo-*`. The real `kill` is used, and only ever on a process
 //! the test started on its private server (Decision 14).
 
+// `isolated` is #649's, unused here.
+#[allow(dead_code)] // #649
+mod real_tmux;
+
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Output, Stdio};
+use std::process::{Child, Command};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use holler_adapter_host::{TmuxHost, TmuxSocket};
+use holler_adapter_host::TmuxHost;
 use holler_pane::{Argv, HostPort, PaneError, PaneName};
 use holler_pane_testkit::conformance::host::run_host_conformance;
-use tempfile::TempDir;
-
-/// The `sun_path` limit the socket path must stay under.
-const SUN_PATH: usize = 100;
+use real_tmux::{private, tmux_available, Server};
 
 /// The longest a bounded wait polls.
 const WAIT: Duration = Duration::from_secs(1);
-
-/// A private tmux server's directory; dropping it kills the server, then removes the
-/// directory.
-struct Server {
-    dir: TempDir,
-}
-
-impl Server {
-    fn sock(&self) -> PathBuf {
-        self.dir.path().join("s")
-    }
-
-    fn config(&self) -> PathBuf {
-        self.dir.path().join("tmux.conf")
-    }
-
-    fn path(&self, name: &str) -> PathBuf {
-        self.dir.path().join(name)
-    }
-
-    /// Run tmux on this server only, with no inherited `TMUX`.
-    fn tmux(&self, args: &[&str]) -> Output {
-        Command::new("tmux")
-            .arg("-S")
-            .arg(self.sock())
-            .arg("-f")
-            .arg(self.config())
-            .args(args)
-            .env_remove("TMUX")
-            .env_remove("TMUX_PANE")
-            .stdin(Stdio::null())
-            .output()
-            .unwrap()
-    }
-
-    /// The trimmed stdout lines of a tmux call that must succeed.
-    fn lines(&self, args: &[&str]) -> Vec<String> {
-        let out = self.tmux(args);
-        assert!(out.status.success(), "tmux {args:?}: {out:?}");
-        String::from_utf8_lossy(&out.stdout)
-            .lines()
-            .map(str::to_owned)
-            .collect()
-    }
-
-    fn sessions(&self) -> Vec<String> {
-        self.lines(&["list-sessions", "-F", "#{session_name}"])
-    }
-
-    fn session_path(&self, session: &str) -> String {
-        let target = format!("={session}:");
-        self.lines(&["list-panes", "-t", &target, "-F", "#{session_path}"])
-            .into_iter()
-            .next()
-            .unwrap()
-    }
-}
-
-impl Drop for Server {
-    fn drop(&mut self) {
-        let _ = self.tmux(&["kill-server"]);
-    }
-}
-
-fn tmux_available() -> bool {
-    let found = Command::new("tmux")
-        .arg("-V")
-        .output()
-        .is_ok_and(|o| o.status.success());
-    if !found {
-        eprintln!("skipped: tmux not found");
-    }
-    found
-}
-
-/// The one helper every real-tmux test builds its host with (AC 9).
-fn private() -> (TmuxHost, Server) {
-    let dir = tempfile::Builder::new()
-        .prefix("hlr-tmux-")
-        .tempdir_in("/tmp")
-        .unwrap();
-    let server = Server { dir };
-    let sock = server.sock();
-    assert!(
-        sock.as_os_str().len() < SUN_PATH,
-        "{} is too long",
-        sock.display()
-    );
-    fs::write(server.config(), "set -g default-shell /bin/sh\n").unwrap();
-    let host = TmuxHost::new(TmuxSocket::Path(sock)).with_config(server.config());
-    (host, server)
-}
 
 fn name(text: &str) -> PaneName {
     PaneName::parse(text).unwrap()
@@ -247,11 +156,11 @@ fn stop_owned_kills_only_the_owned_process() {
         return;
     }
     let (host, server) = private();
-    let a = ensured(&host, "demo-c1r1", server.dir.path());
-    let b = ensured(&host, "demo-c2r1", server.dir.path());
+    let a = ensured(&host, "demo-c1r1", server.dir());
+    let b = ensured(&host, "demo-c2r1", server.dir());
     let shell = host.ps(&a).expect("ps of a fresh session");
-    let in_a = started(&host, &a, server.dir.path(), &["sleep", "30"]);
-    let in_b = started(&host, &b, server.dir.path(), &["sleep", "30"]);
+    let in_a = started(&host, &a, server.dir(), &["sleep", "30"]);
+    let in_b = started(&host, &b, server.dir(), &["sleep", "30"]);
     let outside = Outside(Command::new("sleep").arg("30").spawn().unwrap());
     stopped(&host, &a);
     assert!(wait_until(|| !alive(in_a)), "the owned {in_a} survived");
@@ -279,11 +188,11 @@ fn stop_owned_escalates_to_kill() {
     }
     let (host, server) = private();
     let host = host.with_stop_grace(Duration::from_millis(200));
-    let n = ensured(&host, "demo-c1r1", server.dir.path());
+    let n = ensured(&host, "demo-c1r1", server.dir());
     let stubborn = started(
         &host,
         &n,
-        server.dir.path(),
+        server.dir(),
         &["sh", "-c", "trap '' TERM HUP; sleep 30"],
     );
     stopped(&host, &n);
@@ -294,7 +203,7 @@ fn stop_owned_escalates_to_kill() {
 
     let pidfile = server.path("member.pid");
     let leader = "sh -c \"trap '' TERM HUP; exec sleep 30\" & echo $! > \"$0\"; wait";
-    let cwd = text(server.dir.path());
+    let cwd = text(server.dir());
     host.run(&n, &cwd, &argv(&["sh", "-c", leader, &text(&pidfile)]))
         .expect("run");
     let member: u32 = written(&pidfile).trim().parse().unwrap();
@@ -320,7 +229,7 @@ fn missing_session_is_typed() {
         matches!(ps, Err(PaneError::PaneNotFound { .. })),
         "ps: {ps:?}"
     );
-    let run = host.run(&n, &text(server.dir.path()), &argv(&["sleep", "30"]));
+    let run = host.run(&n, &text(server.dir()), &argv(&["sleep", "30"]));
     assert!(
         matches!(run, Err(PaneError::PaneNotFound { .. })),
         "run: {run:?}"
@@ -391,8 +300,8 @@ fn targets_are_exact() {
         return;
     }
     let (host, server) = private();
-    let long = ensured(&host, "demo-c1r10", server.dir.path());
-    let p = started(&host, &long, server.dir.path(), &["sleep", "30"]);
+    let long = ensured(&host, "demo-c1r10", server.dir());
+    let p = started(&host, &long, server.dir(), &["sleep", "30"]);
     let short = name("demo-c1r1");
     let check = |when: &str| {
         let ps = host.ps(&short);
@@ -408,7 +317,7 @@ fn targets_are_exact() {
         );
     };
     check("a prefix");
-    ensured(&host, "demo-c2r1", server.dir.path());
+    ensured(&host, "demo-c2r1", server.dir());
     let made_window = server.tmux(&["new-window", "-d", "-n", "demo-c1r1", "-t", "=demo-c2r1:"]);
     assert!(made_window.status.success(), "{made_window:?}");
     check("a window name in the newest session");

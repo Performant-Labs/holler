@@ -12,6 +12,10 @@
 //! harness (`tests/verb_harness`) builds its `Ports` from it until the test kit's fakes (#638)
 //! replace it there.
 
+pub mod bind;
+pub mod env;
+pub mod store;
+
 use std::time::Duration;
 
 use holler_pane::{
@@ -23,25 +27,65 @@ use holler_pane::{
 
 /// The ports a verb runs against, owned.
 pub struct Wiring {
+    #[allow(dead_code)] // #649
     ports: Unwired,
+    panes: std::sync::Arc<store::HubPaneStore>,
+    profiles: std::sync::Arc<store::HubProfileStore>,
+    scope: crate::pane::profile_scope::StoreScope,
+    herdr: bind::BindingHerdr,
+    host: Box<dyn HostPort>,
+    harness: bind::WiredHarness,
+    prober: holler_pane::SystemProber,
 }
 
 impl Wiring {
     /// Build the ports of a run. Fails when something they need cannot be reached.
     pub fn connect() -> Result<Self, PaneError> {
-        Ok(Self { ports: Unwired })
+        crate::transport::call(None, &holler_hub::control::ControlCall::status()).map_err(|e| match e {
+            holler_hub::control::ControlError::NoLiveHub => PaneError::Unavailable { what: format!("no live holler hub reachable at {}", holler_hub::state::resolve_state_dir().map(|d| d.display().to_string()).unwrap_or_default()) },
+            other => PaneError::Unavailable { what: other.to_string() },
+        })?;
+        let (panes, profiles) = store::stores();
+        let scope = crate::pane::profile_scope::StoreScope::new(profiles.clone(), panes.clone(), Actor::parse("holler pane")?);
+        use std::sync::Arc;
+        let lookup = |k: &str| std::env::var(k).ok();
+        let cfg = env::herdr_config(&lookup);
+        let session = cfg.as_ref().map(|c| c.session.clone()).unwrap_or_default();
+        let lazy: Arc<dyn HerdrPort> = Arc::new(bind::LazyHerdr::new(move || {
+            let c = cfg.clone()?;
+            Ok(Arc::new(holler_adapter_herdr::adapter::HerdrAdapter::connect(c)?) as Arc<dyn HerdrPort>)
+        }));
+        let bindings = bind::Bindings::new();
+        let herdr = bind::BindingHerdr::new(lazy.clone(), bindings.clone());
+        let tmux = env::tmux_socket(&lookup);
+        let host: Box<dyn HostPort> = match &tmux {
+            Ok(sock) => Box::new(bind::BindingHost::new(Arc::new(holler_adapter_host::TmuxHost::new(sock.clone())), bindings.clone())),
+            Err(_) => Box::new(Unwired),
+        };
+        let oc_sock = match tmux { Ok(holler_adapter_host::TmuxSocket::Path(p)) => holler_adapter_opencode::TmuxSocket::Path(p), _ => holler_adapter_opencode::TmuxSocket::Default };
+        let pane_dyn: Arc<dyn PaneStore> = panes.clone();
+        let harness = match (env::opencode_bin(&lookup), env::serve_args(&lookup)) {
+            (Ok(bin), Ok(args)) => bind::WiredHarness::new(Ok(Arc::new(holler_adapter_opencode::OpenCodeHarness::new(holler_adapter_opencode::OpenCodeConfig {
+                opencode_bin: bin, serve_args: args, env: holler_adapter_opencode::ProcessEnv::Inherit,
+                tmux: holler_adapter_opencode::TmuxConfig { tmux_bin: "tmux".into(), socket: oc_sock },
+                tui_session: bind::tui_session(&session, bindings, pane_dyn, lazy),
+                timeouts: holler_adapter_opencode::Timeouts::default(),
+            })) as Arc<dyn HarnessPort>)),
+            (Err(e), _) | (_, Err(e)) => bind::WiredHarness::new(Err(e)),
+        };
+        Ok(Self { ports: Unwired, panes, profiles, scope, herdr, host, harness, prober: holler_pane::SystemProber })
     }
 
     /// The ports, lent for one verb.
     pub fn ports(&self) -> Ports<'_> {
         Ports {
-            pane_store: &self.ports,
-            profile_store: &self.ports,
-            herdr: &self.ports,
-            host: &self.ports,
-            harness: &self.ports,
-            scope: &self.ports,
-            prober: &self.ports,
+            pane_store: self.panes.as_ref(),
+            profile_store: self.profiles.as_ref(),
+            herdr: &self.herdr,
+            host: self.host.as_ref(),
+            harness: &self.harness,
+            scope: &self.scope,
+            prober: &self.prober,
         }
     }
 }
