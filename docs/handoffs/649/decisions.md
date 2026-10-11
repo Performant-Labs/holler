@@ -635,3 +635,53 @@
     - the Blast radius checked against `git diff --name-only 5d366b9 HEAD`;
     - `git diff 4d7f58a c13400a -- crates/` is empty.
   - **GitHub:** `gh issue list --search LinkedHost --state all` finds only #649 and the closed #802.
+
+## S (Phase 10, spec audit) — 2026-10-11T15:46:09-06:00
+- **Decided:**
+  - **REWORK, test-only.** No `src/` change is needed. The full detail is in `handoff-S.md`.
+  - **The production code meets every decision of the brief.** Fourteen of the 15 acceptance criteria are met, three of
+    them with an advisory. AC 3 is partly met.
+  - **Two rows are missing in `pane_integration/fake_hub.rs`:**
+    - (1) D3's row "a write with no hub is `unavailable`" is unpinned, though D31 W-9 binds T to pin every row and the
+      module doc claims each is pinned. A mutant that adds `NoLiveHub` to `timed_out`'s write arm survives.
+    - (2) AC 3 says every other failure of a read is `unavailable` *naming the hub*. The lost-reply and JSON-RPC read
+      rows assert only the code.
+  - **One item blocks the merge, for O, not F or T:** CI's `wizard_scripts` rename scan fails on three tracked lines
+    under `docs/handoffs/` that quote the setup wizard's pre-#820 directory path. Those are the brief's E64 Source
+    (stale since #820), `decisions.md:66` and `handoff-T-green.md:48`. The release keeps handoffs on the branch unless
+    `removeHandoffsBeforePr: true` (Aftersight #558), and `main` shows this repo keeps them.
+- **Assumed:**
+  - The opt-in scenario's 4 of 4 at `22aa539` still stands. Since then, `crates/` changed only by comments and one
+    default-run table value. I did not re-run it.
+  - This run's PR phase does not pass `removeHandoffsBeforePr`. The CLAUDE.md template omits it, and #650 and #664
+    landed their handoffs on `main`.
+- **Hedged:**
+  - **D28's sentinel check is nearly vacuous** under D10's exact environments: the binary and the tmux server never
+    hold the sentinel. AC 15 holds by construction, because the wiring reads no credential variable. I kept this as an
+    advisory with a recommendation for #829, not an ADVISORY-HOLD.
+  - The scenario's C1 `doctor` assertion and its `pane get`-based end state are advisories, not REWORK.
+- **Evidence:**
+  - **Read in full:**
+    - the brief at `c13400a`;
+    - every handoff in `docs/handoffs/649/`;
+    - the three outside-gate results;
+    - `wiring.rs` and `wiring/{store,env,bind}.rs`;
+    - every file of `pane_integration/`;
+    - `real_tmux/mod.rs`;
+    - the diffs of the three adapter rigs, `support/mod.rs`, `pane_verbs/process/{main,stub}.rs`, ADR-0021,
+      `CHANGELOG.md` and `Cargo.toml`.
+  - **Read in part:**
+    - `holler-hub/src/control.rs` (`send_over` and the error display);
+    - `transport.rs`;
+    - `reconcile.rs` and `findings.rs` (strays carry no pane);
+    - `skilltext_w5_rename.rs`;
+    - `docs_cli_test.rs`;
+    - the release's PR-phase handoff removal (`coding-pipeline.workflow.mjs:4734-4754`) and `pipeline-conventions.md`
+      §1.
+  - **Checks (read-only):**
+    - `git merge-tree` against `origin/main` `4366fb8`: clean;
+    - `wc -l` on every touched `.rs` file: maximum 579;
+    - grep of the added lines for `allow(`, panics, prints, private names, IPs and key shapes;
+    - `git grep` for the rename-scan needles at HEAD and on `main`;
+    - `gh issue view 649`, diffed with the brief: only D10's `LANG` clause differs;
+    - `gh issue list` for the unfiled follow-ups.
