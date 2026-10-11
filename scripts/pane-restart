@@ -19,7 +19,7 @@
 # A Claude Code pane (issue #784) is found, not named: a live Claude Code process whose per-process record in
 # ~/.claude/sessions/<pid>.json names the pane's tmux session. It is restarted through its own command line, with no
 # pane.env and no oc-holler: refuse unless the record says idle and the screen shows neither 'esc to interrupt', a
-# question ('Enter to select') nor a running agent row ('◯ name'); stop it (/exit, then one Ctrl-C); start `claude` again in the same
+# question ('Enter to select') nor a running agent row ('◯ name'); stop it (C-u, /exit, then two Ctrl-C); start `claude` again in the same
 # directory with the flags it had, the new --model and/or --effort (an omitted one keeps its old value), and
 # `--resume <its session id>` (--fresh starts a new session instead; a session with no saved conversation can only be
 # restarted with --fresh, and is refused before anything changes without it); wait for the new process and for it to report
@@ -156,12 +156,13 @@ restart_claude() { # restart_claude RECORD: the whole restart of one Claude Code
     echo "$pane: dry run, nothing changed. Claude Code pid $pid, session $sid, in $cwd"
     echo "was: ${old[*]:$start}"
     echo "now: claude ${nargs[*]}"
-    echo "send-keys -t $target /exit   (then, ${type_delay}s later)   send-keys -t $target Enter     [pane $target of $session]"
+    echo "send-keys -t $target C-u   then   send-keys -t $target /exit   (then, ${type_delay}s later)   send-keys -t $target Enter     [pane $target of $session]"
+    echo "if it is still running after ${t_stop}s: send-keys -t $target C-c twice"
     echo "send-keys -t $target $launch Enter"
     return 0
   fi
 
-  # Stop it: /exit, then Enter after a pause (the autocomplete popup swallows an Enter sent with it), then one Ctrl-C.
+  # Stop it: C-u, /exit, then Enter after a pause (the autocomplete popup swallows an Enter sent with it), then two Ctrl-C.
   claude_gone() { ! kill -0 "$pid" 2>/dev/null; }
   tmux send-keys -t "$target" C-u   # a half-typed line would turn /exit into a prompt
   tmux send-keys -t "$target" /exit
@@ -171,7 +172,7 @@ restart_claude() { # restart_claude RECORD: the whole restart of one Claude Code
     tmux send-keys -t "$target" C-c   # Claude Code exits on the second Ctrl-C
     sleep "$type_delay"
     tmux send-keys -t "$target" C-c
-    wait_for "$t_stop" claude_gone || fail_step 4 stop "the Claude Code process $pid is still running ${t_stop}s after /exit and one Ctrl-C"
+    wait_for "$t_stop" claude_gone || fail_step 4 stop "the Claude Code process $pid is still running ${t_stop}s after /exit and two Ctrl-C"
   fi
 
   # Start it again, text and Enter in one call.
