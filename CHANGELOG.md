@@ -8,6 +8,20 @@ fills this file in at release time.
 ## [Unreleased]
 
 ### Enhancements
+- OpenCode adapter, part 3: the pane's agent, prompts and activity (epic
+  [#633](https://github.com/Performant-Labs/holler/issues/633)): `holler-adapter-opencode` now applies a pane's OpenCode
+  agent (`Pane.opencode_agent`) as its harness server's default agent, set once when the server starts, and checks it.
+  The server's command line sets `OPENCODE_CONFIG_CONTENT={"default_agent":"<agent>"}` (the agent's name only, and never
+  on the TUI's command line). Once the server answers, `verify_serving` asks it for its configuration and its agents: a
+  server whose default agent is not the pane's agent (the setting did not reach it), or whose agent is missing, a subagent
+  or hidden, is refused with the adapter's own code `agent-unusable` (exit 3), and the launch then rolls back and stops
+  the server. This replaces the `agent-unsupported` refusal the adapter answered for every agent, which stays the code of
+  a harness that cannot apply an agent at all. `send_prompt` now queues a prompt through OpenCode's API, never by typing
+  into the TUI, and no error message carries the prompt's text. `session_activity` reports a session that holds a
+  question or a permission request (its own or a subagent's), one that is running a turn (including a turn OpenCode is
+  retrying), or one that is idle, so `pane reset` refuses a conversation that is not idle; an abort likewise waits until
+  a retrying session has stopped. [ADR 0021](docs/adr/ADR-0021.md) records the decisions. Nothing a user runs changes yet:
+  #649 wires the adapter in ([#642](https://github.com/Performant-Labs/holler/issues/642)).
 - Pane control, a Herdr pane's label (epic [#633](https://github.com/Performant-Labs/holler/issues/633)): every pane
   `HerdrPort::snapshot` lists and `HerdrPort::ensure_pane` answers now carries its Herdr label (`HerdrPane.label`), the key
   by which `holler pane import` ([#650](https://github.com/Performant-Labs/holler/issues/650)) will find a pane name's
