@@ -7,15 +7,15 @@ Part of epic #633. This is the complete statement of the story (consolidated 202
 Write `docs/pane-control.md` (new), update `docs/orchestrating.md`, and add the guide to `docs/README.md`. The guide has these sections, in this order:
 
 1. **The rule (I1).** Nothing but `holler pane` and `holler profile` changes a pane; the registry is the one source of truth for what a pane is; Herdr, tmux and the harness are observed (I6), never inferred from files.
-2. **What a pane runs.** One Herdr pane shows one tmux session; the harness server (OpenCode) runs *inside that tmux session*, started through the host adapter from the command `HarnessPort::serve_command` builds, and stopped by `HostPort::stop_owned` (TERM, a shared grace, then KILL of every process group still alive) (#802). `--agent KEY` sets the server's default agent when it starts; a key the running server cannot use is refused with the adapter's code `agent-unusable` and the launch is rolled back; `relaunch` without `--agent` keeps the recorded agent; there is no flag to clear an agent; the agent is printed as `agent=KEY` and as an additive JSON key `agent` (#644 part 2, #642 part 3).
-3. **The verbs.** `holler pane` `list`, `get`, `watch`, `launch`, `relaunch`, `switch`, `reset`, `park`, `unpark`, `close`, `doctor`, `import`; and `holler profile` `create`, `delete`, `list`, `show`, `apply`, plus `rename`, `export`, `import`, which are **PROPOSED** (#665, not built) and marked as such, with `profile-drift` likewise PROPOSED. One short subsection per verb: purpose, the flags, an example, the exit codes it can end with. `--profile` has two classes: spec-editing (`launch`, `relaunch`, `close`) and scoping (the rest); `pane import` takes no `--profile`; `--spec-only` and `--take-over`.
+2. **What a pane runs.** One Herdr pane shows one tmux session; the harness server (OpenCode) runs *inside that tmux session*, started through the host adapter from the command `HarnessPort::serve_command` builds, and stopped by `HostPort::stop_owned` (TERM, a shared grace, then KILL of every process group still alive) (#802). `--agent KEY` sets the server's default agent when it starts; a key the running server cannot use is refused with the adapter's code `agent-unusable` and the launch is rolled back; `relaunch` without `--agent` keeps the recorded agent; there is no flag to clear an agent; the agent is printed as `agent=KEY` and as an additive JSON key `agent` (#644 part 2, #642 part 3). (Review round 1, NV-1.) `agent-unusable` is not one of `ALL_CODES` (E7, E8): it is an **open** code, the OpenCode adapter's own constant (#642 decision D5 and scope item 2, E26; ADR-0021's rule for open codes, E25), and every open code is a refusal, exit 3 (`class_of`, E23). The guide says so where it names the code.
+3. **The verbs.** `holler pane` `list`, `get`, `watch`, `launch`, `relaunch`, `switch`, `reset`, `park`, `unpark`, `close`, `doctor`, `import`; and `holler profile` `create`, `delete`, `list`, `show`, `apply`, plus `rename`, `export`, `import`, which are **PROPOSED** (#665, not built) and marked as such, with `profile-drift` likewise PROPOSED. One short subsection per verb: purpose, the flags, an example, the exit codes it can end with. `--profile` has two classes: spec-editing (`launch`, `relaunch`, `close`) and scoping (the rest); `pane import` takes no `--profile`; `--spec-only` and `--take-over`. (Review round 1, NIT-2.) `--spec-only` exists only on the spec-editing verbs (`launch`, `relaunch`, `close`) and requires `--profile` (E19, lines 9 and 31); the guide shows it on no other verb. (Review round 1, NV-2.) `profile-drift` is a PROPOSED `doctor` finding code, not a verb (#665: "A doctor finding `profile-drift` (a live pane differs from its spec)", E31): it is a string of `ALL_CODES` (E7, E8; class failure, exit 1, E23) and not yet a kind in `FindingKind::ALL` (E5), so acceptance 3 puts it in the guide and acceptance 11 keeps every line that names it marked `PROPOSED`.
 4. **Reading the table.** The columns of `holler pane list` (PANE, POS, PROFILE, PROJECT, HEALTH, SHOWN, DRIVEN, SYNC, HOLD) and what each means; SHOWN and HEALTH are what reconcile last recorded; DRIVEN is printed as the record holds it. **The roster extension (the PANE/POS/PROFILE/HEALTH/SHOWN/DRIVEN columns on `holler roster`, #648) is marked "later"**: this guide documents `pane list` and `doctor` as the places to read SHOWN against DRIVEN, and says `holler roster` does not show them yet.
-5. **`doctor`.** What one reconcile pass reports (every finding kind, in `FindingKind::ALL`), what `--fix` repairs (only `shown-driven-mismatch`: it selects the session of record; it never changes the session of record), what it will not fix (every other kind, with the command the finding names), that a pass that completes exits 0 with findings in the report, and the periodic pass (a scheduler runs `holler pane doctor --format=json` without `--fix`; there is no hub timer).
+5. **`doctor`.** What one reconcile pass reports (every finding kind, in `FindingKind::ALL`), what `--fix` repairs (only `shown-driven-mismatch`: it selects the session of record; it never changes the session of record), what it will not fix (every other kind, with the command the finding names), that a pass that completes exits 0 with findings in the report, and the periodic pass (a scheduler runs `holler pane doctor --format=json` without `--fix`; there is no hub timer). (Review round 1, NIT-1.) The guide words `--fix` so that it cannot be read as editing the record: `--fix` makes the pane's TUI show the session of record ("it selects the session of record", E5, lines 68-69; "the TUI was seen showing the session of record afterwards", E6, line 164), and it never changes which session is the session of record (E17, line 33). (Review round 1, B-2.) The guide's list of finding kinds says that `herdr-version-unsupported` is also a closed error code with the same wire string (E5, E7), and points to section 8.
 6. **Profiles.** What a profile is (a set of pane specs; at most one profile per pane; no secrets, env var names only); `create` (with `--from-current`), `delete` (refused while panes are live, `--keep-panes`), `list`, `show`; and `apply`, whose reference is the decided contract in "The `profile apply` reference" below.
-7. **Grid notation.** Positions are rowcol and 1-based: text `r2c1`, JSON `{"row":2,"col":1,"pos":"r2c1"}`, row first. Input accepts `r<row>c<col>`, `c<col>r<row>` and a bare `<row>,<col>` (always row first); the refusals `grid-ambiguous` and `grid-out-of-range`; and that **pane names such as `hj-c1r2` predate the standard and list the column first, so `hj-c1r2` sits at `r2c1`; no pane is renamed and a name is never read as a position**.
-8. **Probe, argv, layout, Herdr version.** The health probe, with the example `check ["curl","-s","http://127.0.0.1:8095/v1/models"]`, `expect ["qwen38"]` and the refusal `probe-failed`; the argv rule (`--command-arg` / `--command-json`, never a shell string, `command-not-argv`); layout reached by splits; the Herdr API version shown by `doctor` and the finding `herdr-version-unsupported`.
-9. **JSON output reference.** `--format=json` (and `--json` under `pane` and `profile`) prints exactly one envelope per result with `schema_version` 1; `pane watch` prints one envelope per line (NDJSON, resumable with `--since CURSOR`); the exit codes (a table: 0 ok, 1 runtime failure, 2 usage, 3 refusal, the same in text and JSON mode); and **every error code** (`ALL_CODES`) with its class.
-10. **Migration and cutover.** The procedure of #654: run `holler pane import --dry-run` on the live fleet and read every finding; fix drift with the old tools; import (a real import also creates the profile `fleet` from today's panes and their layout); run `doctor` until SHOWN equals DRIVEN for every pane (and `pane list` shows it); cut **one** pane over to `launch` / `reset` and watch it **through a full overnight**; then move the rest; seven days with no invisible session (every day `doctor` reports no `shown-driven-mismatch` and no stray session older than an hour) and the operator signs off. Record each step in `docs/handoffs/<#654>-cutover/decisions.md`. **Files the old launcher wrote that are now derived** (a list): `sessions.toml`, `last-session`, `owned-sessions`, `pane.env`; they are kept, read-only, for one release.
+7. **Grid notation.** Positions are rowcol and 1-based: text `r2c1`, JSON `{"row":2,"col":1,"pos":"r2c1"}`, row first. Input accepts `r<row>c<col>`, `c<col>r<row>` and a bare `<row>,<col>` (always row first); the refusals `grid-ambiguous` and `grid-out-of-range`; and that **pane names such as `hj-c1r2` predate the standard and list the column first, so `hj-c1r2` sits at `r2c1`; no pane is renamed and a name is never read as a position**. (Review round 1, W-2.) The section's example block (acceptance 5) also carries the pane name itself as a refused form, `refused grid-ambiguous hj-c1r2`: `GridPos::parse` refuses it as unreadable, because it holds no comma and a labelled cell must start with `r` or `c` (E11, lines 10-11; E33, line 108).
+8. **Probe, argv, layout, Herdr version.** The health probe, with the example `check ["curl","-s","http://127.0.0.1:8095/v1/models"]`, `expect ["qwen38"]` and the refusal `probe-failed`; the argv rule (`--command-arg` / `--command-json`, never a shell string, `command-not-argv`); layout reached by splits; the Herdr API version shown by `doctor` and the finding `herdr-version-unsupported`. (Review round 1, B-2.) The guide says plainly that `herdr-version-unsupported` is one wire string with two roles: a **finding** that `doctor` reports, in a pass that still exits 0 (E5, E17; "the reported `herdr-version-unsupported`", E25, line 526), and a closed **error code** in `ALL_CODES` (E7), class refusal, exit 3 (E23, line 288), with which a verb that needs a supported Herdr ends: `pane launch`, `pane relaunch` and `profile apply` (E25, lines 522 and 533) and `pane import` (#650, E27, line 21).
+9. **JSON output reference.** `--format=json` (and `--json` under `pane` and `profile`) prints exactly one envelope per result with `schema_version` 1; `pane watch` prints one envelope per line (NDJSON, resumable with `--since CURSOR`); the exit codes (a table: 0 ok, 1 runtime failure, 2 usage, 3 refusal, the same in text and JSON mode); and **every error code** (`ALL_CODES`) with its class. (Review round 1, B-1.) The guide states plainly that `pane watch` is the one exception to "one envelope per result": its JSON output is a stream (NDJSON, one envelope per line, resumable with `--since CURSOR`) and never a single result envelope ("`pane watch` is the one stream: one envelope per line", E10, lines 7-8; E18). (Review round 1, NV-1.) The code list is `ALL_CODES`, the closed set; the guide also says that a verb or an adapter owns further **open** codes, which are not in `ALL_CODES` and are always class refusal, exit 3 (E23, E25), and names `agent-unusable` of section 2 as an example.
+10. **Migration and cutover.** The procedure of #654: run `holler pane import --dry-run` on the live fleet and read every finding; fix drift with the old tools; import (a real import also creates the profile `fleet` from today's panes and their layout); run `doctor` until SHOWN equals DRIVEN for every pane (and `pane list` shows it); cut **one** pane over to `launch` / `reset` and watch it **through a full overnight**; then move the rest; seven days with no invisible session (every day `doctor` reports no `shown-driven-mismatch` and no stray session older than an hour) and the operator signs off. Record each step in `docs/handoffs/<#654>-cutover/decisions.md`. **Files the old launcher wrote that are now derived** (a list): `sessions.toml`, `last-session`, `owned-sessions`, `pane.env`; they are kept, read-only, for one release. (Review round 1, NV-3.) What the import does is #650's (E27): one real run writes the records and the profile `fleet`, or nothing at all, and "their layout" is each pane's position as Herdr's snapshot shows it (the `grid` of the snapshot entry whose label is the pane's name), never a position read from the name (E27, lines 7, 25, 26 and 42). (Review round 1, NV-4.) The import reads the old files as the source of the records it creates, never as observed state, so section 1's rule (I6, E30) holds during the migration, and the guide says so: the import observes Herdr, tmux and the harness only through the ports, a session id read from a file becomes the session of record only when a healthy server's session list holds it, and nothing in `last_observed` is read from a file (E27, lines 21, 30, 34 and 42).
 11. **Rollback.** **`scripts/pane-restart` stays as the fallback until the 7-day sign-off**; the guide says so, shows its usage line, and says the script is removed (in a later story, not this one) after the sign-off. Restarting a pane with the verbs is `holler pane relaunch PANE --model ...`.
 12. **Deferred, so not documented as existing:** the roster extension (#648), the shared subprocess runner (#696), the real-adapter scenario for `profile apply` (#667) and the workspace recreation from profiles (#666) are after the cutover; the guide may name them once under "Later" and describes none of them as available.
 
@@ -28,6 +28,8 @@ Write `docs/pane-control.md` (new), update `docs/orchestrating.md`, and add the 
 - A run that ends with a `failed` step prints **only the failure**: in JSON the failure envelope (`ok` false, `data` null, `error.message` is `apply stopped at <pane> (<action>): <step error message>; <N> later step(s) skipped`), in text one `error:` line on stderr and nothing on stdout; a dry run with a failed step prints no plan.
 - `--dry-run` prints the same table as the plan, runs no probe, issues no split and writes nothing. `data` is `{"profile": NAME, "dry_run": bool, "steps": [{pane, action, outcome, code?, diff?}]}`. Flags: `--herdr-session NAME`, `--take-over`, `--dry-run`, `--format`.
 - "Healthy" is a live observation (the harness answers its health call, Herdr's snapshot lists the recorded pane, and a readable shown session equals the session of record), never the stored health; apply never kills a healthy pane; a shown session that cannot be read does not make a pane unhealthy.
+
+(Review round 1, B-3.) **The failure envelope, stated once.** O6 (E20) words the failed run's message twice, and both wordings describe one message: O6's first bullet says what `error.message` names (the pane, the step's action and how many later steps were skipped), and its third bullet pins the exact text, `apply stopped at <pane> (<action>): <step error message>; <N> later step(s) skipped`, which names all three and also carries the failed step's own error message. So a run that ends with a `failed` step prints, in JSON, exactly one envelope: `schema_version` 1, `ok` false, `data` null, `error.code` the failed step's error code, and `error.message` the pinned text (O6, E20). `data` null is not particular to apply: every failed `pane` or `profile` envelope is written with `data` null, and every successful one with `error` null (`output.rs`, E24, lines 152-153 and 174-181). The guide's `profile apply` reference states the failure envelope once, in this form.
 
 ## Operator decisions (2026-10-11)
 
@@ -45,15 +47,15 @@ All new tests live in `crates/holler-cli/tests/pane_control_doc_test.rs`, declar
 
 1. **Verbs.** Every subcommand of `pane` and of `profile` read from the clap tree (`holler_cli::Cli::command()`, `find_subcommand("pane")` and `("profile")`, `get_subcommands()`) appears in the guide as `holler pane <verb>` / `holler profile <verb>` inside a heading or a code span. The three PROPOSED profile verbs (`rename`, `export`, `import`) must appear on a line or in a section whose heading contains the word `PROPOSED`.
 2. **Finding kinds.** Every `FindingKind::ALL[i].code()` appears in the guide inside backticks.
-3. **Error codes.** Every string of `holler_pane::error::ALL_CODES` appears in the guide inside backticks, and the exit-code table of section 9 has a row for each of 0, 1, 2, 3 (the values of `ErrorClass::exit_code`).
+3. **Error codes.** Every string of `holler_pane::error::ALL_CODES` appears in the guide inside backticks, and the exit-code table of section 9 has a row for each of 0, 1, 2, 3 (the values of `ErrorClass::exit_code`). (Review round 1, B-2.) A code that is both a finding kind and an error code appears inside backticks both in section 5 and in section 9. The test computes these codes as the intersection of `FindingKind::ALL[i].code()` and `ALL_CODES` from the two tables, never from a hand-kept list; at `263a2d7` the intersection is `herdr-version-unsupported` alone (E5, E7).
 4. **Columns.** Every name in `holler_cli::pane::list::COLUMNS` appears in the guide's section 4.
-5. **Grid examples parse.** The guide's grid section carries a fenced block tagged `text` with one example per line, `ok <form>` or `refused <code> <form>`; the test parses each `ok` form with `holler_pane::GridPos::parse` and each `refused` form and asserts the named code (`grid-ambiguous` or `grid-out-of-range`). The block contains at least the forms `r2c1`, `c1r2`, `2,1`, `R2C1` and one refused form of each code.
-6. **The existing docs test still passes:** every `holler ...` command in the new guide parses against the clap tree (`docs_cli_test` scans `docs/**/*.md` already; a command whose leaf verb is in `cli-surface.pending.txt` is tolerated and reported). No bare command fragment appears in backticks.
+5. **Grid examples parse.** The guide's grid section carries a fenced block tagged `text` with one example per line, `ok <form>` or `refused <code> <form>`; the test parses each `ok` form with `holler_pane::GridPos::parse` and each `refused` form and asserts the named code (`grid-ambiguous` or `grid-out-of-range`). The block contains at least the forms `r2c1`, `c1r2`, `2,1`, `R2C1` and one refused form of each code. (Review round 1, W-2.) It also contains the line `refused grid-ambiguous hj-c1r2` (section 7: a pane name is not a position; E33).
+6. **The existing docs test still passes:** every `holler ...` command in the new guide parses against the clap tree (`docs_cli_test` scans `docs/**/*.md` already; a command whose leaf verb is in `cli-surface.pending.txt` is tolerated and reported). No bare command fragment appears in backticks. (Review round 1, NIT-3.) "Bare command fragment" is this repository's term for a code span that starts `holler ` and does not parse ("a bare command fragment in backticks fails it", the tester overlay, E32). So the last sentence names the same check as the first: `docs_cli_test` makes it, with its own extraction and placeholder normalisation (E12, E34), and the new test file does not repeat it. A bare namespace such as `holler pane` alone parses as a prefix of the tree and is allowed (E34, lines 189-199).
 7. **Roster is marked later.** The guide's section 4 contains a line with `holler roster` and `#648` and the word `later`.
 8. **Rollback.** The guide contains `scripts/pane-restart` and the words `until the 7-day sign-off`; `docs/orchestrating.md` contains `holler pane relaunch` and `scripts/pane-restart` and no longer contains `removed when #644 and #653 have merged`.
 9. **Derived files.** The guide's section 10 names each of `sessions.toml`, `last-session`, `owned-sessions` and `pane.env`.
 10. **Index.** `docs/README.md` links `pane-control.md` under "Guidance".
-11. **Deferred items are not described as available:** the guide does not contain `holler roster --profile` as an example, and does not contain the strings `profile export` or `profile import` outside a line marked `PROPOSED`.
+11. **Deferred items are not described as available:** the guide does not contain `holler roster --profile` as an example, and does not contain the strings `profile export` or `profile import` outside a line marked `PROPOSED`. (Review round 1, NV-2.) The same holds for `profile-drift` (scope section 3): every line of the guide that contains `profile-drift` is a line marked `PROPOSED`.
 
 ## Blast radius
 
@@ -66,6 +68,8 @@ No source file outside tests changes. Markdown files under `docs/` are scanned b
 ## Depends on
 
 #649 and #664 (both before this story is built). The brief can be written and reviewed ahead of them; the guide is written and its tests run after both have merged, because the verbs it describes must exist in the clap tree and the behaviours it states must be the merged ones. If #649 or #664 changes a behaviour stated above, the brief is patched and the review re-run before the build.
+
+(Review round 1, NV-3.) **#650 too, by the rule above.** Sections 3 (`pane import`) and 10 (the cutover) describe the import as #650 builds it, and neither #649 nor #664 depends on #650 (E28); #650 depends on neither of them, nor on this story (E27, line 106). The guide's tests need #650 as well: on `main` at `263a2d7`, `holler pane import` is #670's stub with no arguments, and `cli-surface.pending.txt` lists no command (E29), so a `holler pane import --dry-run` code span fails `docs_cli_test` (E34) until #650 adds the flag. If #650 changes a behaviour stated above, the brief is patched and the review re-run before the build, as for #649 and #664. Section 2's agent behaviour (#802, #642 part 3, #644 part 2) needs no entry of its own: #649 depends on #642 and #644, and #644 is built after #802 and #642 part 3 (E28).
 
 ## Pipeline
 
@@ -831,4 +835,331 @@ Depends on: #649, #650, #652, #655 (the Herdr server moved to the hub's machine)
 6. **(review round 1) The server's working directory has one source: the pane's spec** (`plan.spec.host.cwd`). `HostPort::run` gains the directory: `run(&self, name: &PaneName, cwd: &str, argv: &Argv)`; the tmux adapter passes it as `new-window -c <cwd>` (escaped like every value the adapter did not write; an empty or relative `cwd` is `usage`). The engine passes `plan.spec.host.cwd` for **both** the spec's command and the server, so a session reused after a directory change no longer starts a program in the old directory. `OpenCodeConfig.workdir` is deleted (its only reader was `serve`), and ADR-0021 section 2 fact 6 is rewritten to say the directory comes from the pane spec through `HostPort::run`. A session keeps the directory it was made with for the shell window only; nothing relies on it.
 7. **(review round 1) Every refusal stays in the plan.** `serve_command` is pure, so the engine calls it **in the plan** (in `Plan::observe`, before the probe), keeps the argv there, and the act passes exactly that argv to `host.run` after `ensure_session`. An `agent-unsupported` refusal is therefore exit 3 with nothing written, no rollback and no reconcile step, like `pane-exists` and `port-in-use`.
 
+~~~~
+
+**Added in brief review round 1 (E23 to E34).** Cut the same way: a file from `263a2d7` (`git show 263a2d7:PATH`; `263a2d7` is `origin/main`), an issue body from `gh issue view N --json body --jq .body` on 2026-10-11, with the line numbers of that output; never retyped.
+
+**E23: `crates/holler-pane/src/error.rs:248-303`** — `class_of`, the one place that gives a code its class: `herdr-version-unsupported` is a refusal (exit 3), `profile-drift` a failure (exit 1), and every well-formed code outside `ALL_CODES` is an open code and always a refusal (B-2, NV-1, NV-2).
+
+~~~~text
+248	/// The class of the error coded `code`: the one place that decides which code is a
+249	/// refusal and which a runtime failure. ADR-0021 section 9 has the table, with the
+250	/// reason for every row. The CLI's output module calls this, and so will the test
+251	/// kit (#638); neither keeps a table of its own.
+252	///
+253	/// It takes the code, not a [`PaneError`], because a code is what an envelope
+254	/// carries. A caller that holds a `PaneError` passes [`PaneError::code`]:
+255	/// `class_of(error.code())`. (It is not `PaneError::classify`, a crate-private
+256	/// helper that only tells a closed code from an open one.)
+257	///
+258	/// - A **closed** code has the class of its arm below. The `match` names every
+259	///   closed code and has no catch-all arm, so a closed code added without a class
+260	///   does not compile.
+261	/// - Any other **well-formed** code is an open code, carried by
+262	///   [`PaneError::Refused`]: a refusal, always. A verb that reports a runtime
+263	///   failure uses a closed failure code.
+264	/// - A **malformed** code is a failure: it cannot be trusted, the same rule that
+265	///   turns a garbled wire reply into `unavailable`.
+266	pub fn class_of(code: &str) -> ErrorClass {
+267	    let Some(closed) = PaneCode::parse(code) else {
+268	        return if is_valid_code(code) {
+269	            ErrorClass::Refusal
+270	        } else {
+271	            ErrorClass::Failure
+272	        };
+273	    };
+274	    match closed {
+275	        PaneCode::Usage => ErrorClass::Usage,
+276	        // Understood and declined: a guard, a policy or a gate said no, the name is
+277	        // taken, or the request named something that does not exist.
+278	        PaneCode::GridAmbiguous
+279	        | PaneCode::GridOutOfRange
+280	        | PaneCode::CommandNotArgv
+281	        | PaneCode::EnvNameInvalid
+282	        | PaneCode::ProfileSecretRefused
+283	        | PaneCode::ProfileExists
+284	        | PaneCode::ProfileHasLivePanes
+285	        | PaneCode::PaneNotInProfile
+286	        | PaneCode::PaneInOtherProfile
+287	        | PaneCode::ProbeFailed
+288	        | PaneCode::HerdrVersionUnsupported
+289	        | PaneCode::ProfileNotFound
+290	        | PaneCode::PaneNotFound
+291	        | PaneCode::SessionNotFound => ErrorClass::Refusal,
+292	        // Went wrong while doing the work: a race between writers, a bound that ran
+293	        // out, something unreachable or unreadable, live state that disagrees with
+294	        // its spec, or work the verb cannot do yet.
+295	        PaneCode::GenerationConflict
+296	        | PaneCode::ProfileConflict
+297	        | PaneCode::Timeout
+298	        | PaneCode::Unavailable
+299	        | PaneCode::StoreCorrupt
+300	        | PaneCode::NotImplemented
+301	        | PaneCode::ProfileDrift => ErrorClass::Failure,
+302	    }
+303	}
+~~~~
+
+**E24: `crates/holler-cli/src/output.rs:125-132` and `150-182`** — The `error` member (`code`, `message`) and the envelope of every `pane` and `profile` result: `data` is `null` when `ok` is false (B-3).
+
+~~~~text
+125	/// The `error` member of a failed envelope.
+126	#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+127	pub struct ErrorBody {
+128	    /// The stable code a script matches on.
+129	    pub code: ErrorCode,
+130	    /// One line for a person. In JSON mode [`emit`] puts it on one line.
+131	    pub message: String,
+132	}
+~~~~
+
+~~~~text
+150	/// The one envelope of every `holler pane` and `holler profile` result in JSON mode.
+151	///
+152	/// Keys are written in this order: `schema_version`, `ok`, `data`, `error`. `data` is `null` when
+153	/// `ok` is false and `error` is `null` when it is true.
+154	#[derive(Debug, Serialize)]
+155	pub struct Envelope<T> {
+156	    pub schema_version: u32,
+157	    pub ok: bool,
+158	    pub data: Option<T>,
+159	    pub error: Option<ErrorBody>,
+160	}
+161	
+162	impl<T> Envelope<T> {
+163	    /// A successful result.
+164	    pub fn success(data: T) -> Self {
+165	        Self {
+166	            schema_version: SCHEMA_VERSION,
+167	            ok: true,
+168	            data: Some(data),
+169	            error: None,
+170	        }
+171	    }
+172	
+173	    /// A failed result.
+174	    pub fn failure(error: ErrorBody) -> Self {
+175	        Self {
+176	            schema_version: SCHEMA_VERSION,
+177	            ok: false,
+178	            data: None,
+179	            error: Some(error),
+180	        }
+181	    }
+182	}
+~~~~
+
+**E25: `docs/adr/ADR-0021.md:505-534`** — The closed and the open codes, and the codes each verb can end with: `herdr-version-unsupported` is an error of `pane launch`, `pane relaunch` and `profile apply` and a reported finding of `pane doctor`; a verb or an adapter declares its own open codes and raises them as `PaneError::Refused` (B-2, NV-1).
+
+~~~~text
+505	**Decided: closed and open pane codes.** The closed set (`ALL_CODES`, one `PaneError` variant each) is: `not-implemented`,
+506	`usage`, `grid-ambiguous`, `grid-out-of-range`, `command-not-argv`, `env-name-invalid`, `generation-conflict`, `probe-failed`,
+507	`profile-conflict`, `profile-not-found`, `profile-exists`, `profile-has-live-panes`, `pane-not-in-profile`,
+508	`pane-in-other-profile`, `profile-secret-refused`, `herdr-version-unsupported`, `timeout`, `pane-not-found`,
+509	`session-not-found`, `store-corrupt`, `unavailable`, and `profile-drift` (a reconcile finding kind, listed for convenience; it
+510	is not an error a port returns). No story edits that list (ruling 3). A verb or adapter declares any other code it owns as a
+511	constant in its own file through `RefusalCode::from_static`, which refuses a malformed or closed code at build time, and
+512	raises it as `PaneError::Refused`. **Stable** means a code is never renamed or reused for another meaning once it has
+513	merged; a code whose condition disappears is retired, not recycled. Every message is one line and never echoes a secret.
+514	
+515	**Failure modes by verb.** Every verb can also answer `usage`, `unavailable`, `timeout`, `store-corrupt` and, until its
+516	story lands, `not-implemented`. "Open (#N)" means codes that story declares as its own constants.
+517	
+518	| Verb | Codes beyond the common ones |
+519	|---|---|
+520	| `pane list`, `pane watch` | `profile-not-found`, `pane-not-in-profile` |
+521	| `pane get` | `pane-not-found`, `profile-not-found`, `pane-not-in-profile` |
+522	| `pane launch`, `pane relaunch` | `grid-ambiguous`, `grid-out-of-range`, `command-not-argv`, `env-name-invalid`, `profile-secret-refused`, `probe-failed`, `herdr-version-unsupported`, `session-not-found`, `generation-conflict`, `profile-not-found`, `profile-conflict`, `pane-in-other-profile`; `relaunch` also `pane-not-found`; open (#644) for a name that already has a record, an occupied target cell and a port a server already answers on (`pane-exists`, `grid-occupied`, `port-in-use`); open (#640) for a cell that no single split reaches, `grid-unreachable` |
+523	| `pane switch`, `pane reset` | `pane-not-found`, `session-not-found`, `generation-conflict`, `profile-not-found`, `pane-not-in-profile`; open (#645): `orchestrator-pane`, `server-unhealthy`, for `switch` `session-of-other-pane`, and for `reset` a session of record that is running a turn or holds a question (`session-busy`, `session-holds-question`) and, with `--first`, a harness that does not queue a prompt (`prompt-unsupported`, the port's default) |
+524	| `pane park`, `pane unpark` | `pane-not-found`, `generation-conflict`, `profile-not-found`, `pane-not-in-profile` |
+525	| `pane close` | `pane-not-found`, `generation-conflict`, `profile-not-found`, `profile-conflict`, `pane-not-in-profile` (with `--profile`, P holds no spec for the pane) |
+526	| `pane doctor` | `pane-not-found`, `profile-not-found`, `pane-not-in-profile`; findings are kinds in `findings.rs` (#647), not errors, and include the reported `herdr-version-unsupported` |
+527	| `pane import` | `profile-exists` (a profile `fleet` already exists); `command-not-argv` and disagreements are findings, not errors (#650) |
+528	| `say`, `interrupt`, `answer` with `--pane` | `pane-not-found`, `profile-not-found`, `pane-not-in-profile`, `session-not-found` (no session of record); open (#646), as the record says: `pane-parked`, `pane-unhealthy`, `pane-shown-driven-mismatch`; all exit 3, the code in the message. The hub's prompt gate refuses the same three as `session_held` with `hold_kind: "pane"` |
+529	| `profile create` | `profile-exists`, `profile-not-found` (for `--from`), `pane-in-other-profile`, `generation-conflict`, `profile-conflict` |
+530	| `profile delete` | `profile-not-found`, `profile-has-live-panes`, `generation-conflict`, `profile-conflict` |
+531	| `profile list` | none |
+532	| `profile show` | `profile-not-found` |
+533	| `profile apply` | `profile-not-found`, `pane-in-other-profile` (without `--take-over`), `probe-failed` (per pane; the others proceed), `herdr-version-unsupported`, `grid-out-of-range`, `generation-conflict`, `profile-conflict`; open (#640) for a cell that no single split reaches, `grid-unreachable` |
+534	| PROPOSED `profile rename`, `export`, `import` | `profile-not-found`, `profile-exists`, `profile-secret-refused`, `command-not-argv`, `grid-ambiguous`, `grid-out-of-range` |
+~~~~
+
+**E26: issue #642 body, lines 7-8 ("Scope (final)" items 1 and 2) and line 23 (decision D5 of "Operator decisions (2026-10-11)")** — `agent-unusable` is the OpenCode adapter's own open refusal code, not one of `ALL_CODES` (NV-1).
+
+~~~~text
+7	1. **`serve_command` applies the agent.** With `spec.agent == Some(key)` the argv it returns starts the server with `default_agent` set to `key`; with `None` it returns exactly the argv it returns today. It no longer refuses an agent with `agent-unsupported`.
+8	2. **`verify_serving` checks the running server.** It returns `Ok(())` only when the server really runs the agent the spec asks for, and refuses with the adapter's own open code `agent-unusable` otherwise. The launch engine (#802) calls it after the health wait and before `create_session`, and its rollback then stops the server (a process of the pane's tmux session).
+23	- **D5. `agent-unusable` is an open refusal code (exit 3), a constant in the adapter's own file** (`pub const AGENT_UNUSABLE: RefusalCode = RefusalCode::from_static("agent-unusable")` in `crates/holler-adapter-opencode/src/server.rs`, built through `PaneError::Refused`, the way the Herdr adapter owns `grid-unreachable`). It is distinct from `AGENT_UNSUPPORTED`, which stays in `holler-pane` for a harness that cannot apply an agent at all. The ADR-0021 code tables list it wherever they list `agent-unsupported`. Reason: "this harness cannot" and "this agent cannot run here" are different refusals for the operator.
+~~~~
+
+**E27: issue #650 body, lines 7, 21, 25, 26, 30, 34, 42 and 106** — What `holler pane import` does: the records and the profile `fleet` in one real run, the position taken from Herdr's snapshot, what it reads from the old files and what it observes, its `herdr-version-unsupported` error, and its dependencies (NV-3, NV-4, B-2).
+
+~~~~text
+7	Read the current fleet's per-pane files and produce registry records, a profile `fleet`, and one report of every disagreement between those files and what Herdr, tmux and the harness show. The dry run writes nothing. A real run writes the records and the profile or writes nothing at all. The verb adopts what is running: it never starts, stops, types into or moves anything, and it deletes nothing from the source files.
+21	Only through `Ports` (E3, E12, E17): `herdr.snapshot()` once, `herdr.version()` once, then per pane `host.ps(name)`, `harness.health(port)` and, only when the health call answered healthy, `harness.list_sessions(port)`. **Nothing else is called**: not `ensure_pane`, `ensure_session`, `run`, `stop_owned`, `serve`, `create_session`, `attach_tui`, `select_session`, `abort`, `send_text`, `send_keys`, `close`, `shown_session`. A `herdr.snapshot()` or `herdr.version()` error ends the verb with that error (its class, its exit code), because nothing can be joined without them; `herdr-version-unsupported` is such an error.
+25	1. **The Herdr pane is the snapshot entry whose `label` equals the pane's name** (ADR-0021 section 10, E9, merged by #808, E1). The name's cell is never the join key and never chooses a position. Zero matches: problem `pane-unlabelled`. Two or more: problem `pane-label-ambiguous` (naming the pane ids). The record's `herdr` is that snapshot entry **with `label` set to `None`** (a label is an observation, never recorded state; launch does the same, E12).
+26	2. **The position** is the entry's `grid`. Output prints rowcol (`r2c1`). If the directory name is `hj-` followed by text that `GridPos::parse` accepts (for example `c1r2`) and that cell differs from the observed position, the report carries the information finding `name-cell-differs` (naming both cells); a name that spells no cell produces no finding.
+30	   - the files agree and a **healthy** server's `list_sessions` holds `L`: `session_of_record = L` (reconcile's trust rule, E17: only a healthy server's list counts);
+34	   A session id read from a file is never copied into `last_observed` (I6).
+42	`name`; `generation` 0; `herdr` (item 1); `host { name: tx_launch::HOST_NAME, tmux: name, cwd: launcher cwd, herdr_api_version: Some(herdr.version()) }`; `harness { kind: opencode, port: launcher port, pid: None, health: healthy only when this run's `health` answered healthy, otherwise unknown }`; `session_of_record` (item 4); `role` (item 5); `hold: none`; `last_observed { shown: None, driven: None, at: 0 }` (0 means never observed; the first doctor pass fills it; nothing in it is read from a file); `profile: fleet`; `model`; `opencode_agent`; `env` (names); `context`; `command`; `probe` empty (E2, E12). The profile is `profile_from_panes(fleet, &records)` (E4), so `holler profile show fleet` reports every pane `matches` by construction.
+106	#808 (merged, `263a2d7`: the label), #637, #639, #662 (merged). Does not depend on #802, #642 or #644.
+~~~~
+
+**E28: the dependency lines of issues #649 (line 18), #664 (line 14) and #644 (line 10)** — Neither #649 nor #664 depends on #650; #649 depends on #642 and #644, and #644 is built after #802 and #642 part 3 (NV-3).
+
+~~~~text
+18	Depends on: #639, #640, #641, #642, #644, #645, #646, #647; and #660, #661, #662, #663 (amended 2026-10-08, profiles) (all wave 3, so this story stays in wave 4). (amended 2026-10-08, review) Also #643; this story stays in wave 4 (it does not depend on #664). (amended 2026-10-09, split) Also #637, #669 and #670.
+~~~~
+
+~~~~text
+14	Depends on: #637, #638, #644, #662. (amended 2026-10-08, review) (Was #640, #641, #642, #644, #647, #661, #662: the adapters and the registry are faked here.)
+~~~~
+
+~~~~text
+10	Built after **#802** and **#642 part 3** have merged. Every `#802` line quoted below is the pre-merge reading, taken from #802's branch at `3fe111d` (`origin/main` is `263a2d7`); the contract names used here (`serve_command`, `verify_serving`, `ServeSpec`, `AGENT_UNSUPPORTED`) are fixed by #802's issue body. #642 part 3 supplies the OpenCode adapter's real `verify_serving` and its refusal code `agent-unusable`; the fakes in this story stand in for it.
+~~~~
+
+**E29: `crates/holler-cli/src/pane/import.rs:1-19` and `crates/holler-cli/tests/fixtures/cli-surface.pending.txt:1-10`** — On `main`, `holler pane import` is #670's stub and takes no arguments, and the pending list names no command (NV-3).
+
+~~~~text
+1	//! `holler pane import`: a stub (story #670). Story #650 owns the real verb: it replaces this
+2	//! file and adds the verb's own positionals and flags to the arguments below, edits its own
+3	//! ADR 0003 row and `cli-surface.txt` line, and edits no frozen file.
+4	
+5	use clap::Args;
+6	
+7	use crate::output::{emit_error, not_implemented, VerbCtx};
+8	
+9	/// The story that owns this verb.
+10	const STORY: u32 = 650;
+11	
+12	/// Import the existing fleet into the pane registry.
+13	#[derive(Args, Debug)]
+14	pub struct PaneImport {}
+15	
+16	/// Run `holler pane import`: refuse, naming the story that owns it.
+17	pub fn run(_args: &PaneImport, ctx: &mut VerbCtx<'_>) -> i32 {
+18	    emit_error(&mut ctx.sink, ctx.format, not_implemented(STORY))
+19	}
+~~~~
+
+~~~~text
+1	# Verbs and flags ADR 0003 specifies that NO story has implemented yet
+2	# (issue #155 §5). Same format as cli-surface.txt.
+3	#
+4	# tests/cli_surface_test.rs asserts every line here does NOT parse — so when
+5	# the owning story lands its verb, the test fails until the line is moved to
+6	# cli-surface.txt. The docs doc-test (tests/docs_cli_test.rs) tolerates a
+7	# documented command whose leaf path is listed here, and nowhere else.
+8	#
+9	# Each line names its story.
+10	
+~~~~
+
+**E30: epic #633 body, lines 124-129** — The invariants the guide's section 1 cites, I1 and I6 among them (NV-4).
+
+~~~~text
+124	Invariants      I1 only `holler pane` verbs change a pane or its registration
+125	                I2 session_of_record is the only session a pane's TUI shows and the hub drives
+126	                I3 every verb is plan -> act -> observe -> record; a mismatch fails loudly and records nothing
+127	                I4 no verb changes a session by typing into a TUI
+128	                I5 a verb returns in bounded time (default 10 s); long work returns an operation id
+129	                I6 state is observed from Herdr, tmux and the harness, never inferred from files
+~~~~
+
+**E31: issue #665, its title (`gh issue view 665 --json title --jq .title`) and body lines 1, 7 and 9** — `profile-drift` is a PROPOSED `doctor` finding, not a verb (NV-2).
+
+~~~~text
+title	feat(cli): holler profile rename, export and import; doctor code profile-drift [PROPOSED]
+1	Part of epic #633. (added 2026-10-08, profiles) **PROPOSED: the operator confirms before any pane picks this up. Not on the critical path; nothing waits for it.**
+7	- A doctor finding `profile-drift` (a live pane differs from its spec), raised by reconcile through the comparison in `crates/holler-pane/src/profile_diff.rs` (#662).
+9	(amended 2026-10-09, split) Depends on #637 and #670 (CLI side), and #661 and #669 (hub side). The positionals and flags of `profile rename OLD NEW`, `export NAME [--out FILE]` and `import FILE [--name NAME]` are yours: they live in `rename.rs`, `export.rs` and `import.rs` with your ADR 0003 rows, `cli-surface.txt` lines and `crates/holler-cli/tests/profile_verbs/<verb>.rs` files. `ProfileStore::rename(old, new, expected_generation)` and `profile/rename` are declared (PROPOSED) by #637 with a `NotImplemented` stub; the hub-side transaction is yours. #669 pre-creates the empty `holler-hub/src/profile/rename.rs`, already declared in `profile/mod.rs`, so you edit none of #661's files. `ProfileDrift` is added to #647's `findings.rs` after #647 merges.
+~~~~
+
+**E32: `docs/agent-overlays/tester.md:14`** — What "a bare command fragment in backticks" means in this repository (NIT-3).
+
+~~~~text
+14	- Every documented `holler ...` command must parse (`docs_cli_test`); a bare command fragment in backticks fails it.
+~~~~
+
+**E33: `crates/holler-pane/src/grid.rs:75-116`** — Why `GridPos::parse("hj-c1r2")` is `grid-ambiguous`: there is no comma, and a labelled cell must start with `r` or `c` (line 108) (W-2).
+
+~~~~text
+75	/// The digit strings of the row and the column of `text` (already trimmed and
+76	/// lower-cased), or `None` when its structure is wrong.
+77	fn split_cells(text: &str) -> Option<(&str, &str)> {
+78	    if text.contains(',') {
+79	        split_pair(text)
+80	    } else {
+81	        split_labelled(text)
+82	    }
+83	}
+84	
+85	/// `<row>,<col>`: exactly two digit runs around one comma, row first.
+86	fn split_pair(text: &str) -> Option<(&str, &str)> {
+87	    let (row, col) = text.split_once(',')?;
+88	    (is_number(row) && is_number(col)).then_some((row, col))
+89	}
+90	
+91	/// `r<row>c<col>` or `c<col>r<row>`: two labelled cells with different labels.
+92	fn split_labelled(text: &str) -> Option<(&str, &str)> {
+93	    let (first_label, first, rest) = take_cell(text)?;
+94	    let (second_label, second, tail) = take_cell(rest)?;
+95	    if !tail.is_empty() || first_label == second_label {
+96	        return None;
+97	    }
+98	    if first_label == 'r' {
+99	        Some((first, second))
+100	    } else {
+101	        Some((second, first))
+102	    }
+103	}
+104	
+105	/// One labelled cell at the start of `text`: its label (`r` or `c`), its digits and
+106	/// what follows.
+107	fn take_cell(text: &str) -> Option<(char, &str, &str)> {
+108	    let label = text.chars().next().filter(|c| matches!(c, 'r' | 'c'))?;
+109	    let body = text.strip_prefix(label)?;
+110	    let end = body
+111	        .bytes()
+112	        .position(|b| !b.is_ascii_digit())
+113	        .unwrap_or(body.len());
+114	    let (digits, rest) = body.split_at(end);
+115	    (!digits.is_empty()).then_some((label, digits, rest))
+116	}
+~~~~
+
+**E34: `crates/holler-cli/tests/docs_cli_test.rs:115-125` and `186-201`** — What the docs test takes from prose (a code span that starts `holler `) and which parse errors it allows (a bare namespace such as `holler pane`); any other error fails it (NIT-3, NV-3).
+
+~~~~text
+115	        // Inline code spans in prose / tables.
+116	        let mut rest = line;
+117	        while let Some(start) = rest.find('`') {
+118	            let after = &rest[start + 1..];
+119	            let Some(end) = after.find('`') else { break };
+120	            let span = &after[..end];
+121	            if span.starts_with("holler ") {
+122	                out.push(Doc { file: file.clone(), line_no, raw: span.to_string() });
+123	            }
+124	            rest = &after[end + 1..];
+125	        }
+~~~~
+
+~~~~text
+186	            checked += 1;
+187	            match Cli::try_parse_from(&argv) {
+188	                Ok(_) => {}
+189	                // `holler --help` / `--version`, and a bare namespace such as
+190	                // `holler hub` or `holler body …` used in prose to name the
+191	                // role: a prefix of the real tree is fine, an unknown or
+192	                // malformed verb is not.
+193	                Err(e) if matches!(
+194	                    e.kind(),
+195	                    ErrorKind::DisplayHelp
+196	                        | ErrorKind::DisplayVersion
+197	                        | ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand
+198	                        | ErrorKind::MissingSubcommand
+199	                ) => {}
+200	                Err(e) => failures.push(format!("{}:{}: `{}` → {:?}: {}", doc.file, doc.line_no, doc.raw, argv, e.kind())),
+201	            }
 ~~~~
