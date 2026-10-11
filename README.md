@@ -194,6 +194,7 @@ mkdir -p ~/.claude/skills && curl -fsSL https://github.com/Performant-Labs/holle
 No release tag contains the whole skill directory yet, so the command fetches `main`. A setup built
 before ledgers existed is refused as foreign (the wizard stops only processes it recorded itself),
 see [Instance state and the ledger](docs/setup-wizard.md#instance-state-and-the-ledger).
+An optional `workspace = "<name>"` in the config names the Herdr workspace; the wizard suggests two words, such as `herald-relay`.
 
 The prompt:
 
@@ -218,7 +219,7 @@ whether `herdr` is already installed (`command -v herdr`); if not, ask me whethe
 (via `curl -fsSL https://herdr.dev/install.sh | sh` or `brew install herdr`) before doing
 anything else — and treat that as its own decision, not a green light to also configure and
 launch a workspace in the same breath. Only once `herdr` is confirmed present, ask me separately
-whether to configure Holler and launch a workspace now. If yes, replicate the doc's "Automated
+"All systems go. Proceed?" (yes/no). If yes, replicate the doc's "Automated
 setup" flow: load my session config (an explicit path I give you, else ./sessions.toml, else
 ~/.holler/herdr/setup/sessions.toml).
 

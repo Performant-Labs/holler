@@ -56,6 +56,12 @@ spreadsheet cell: `r1c1`, `r1c2`, `r1c3`, `r1c4` for the first row, `r2c1` for t
 second row, and so on. With a pane count and no grid, the wizard proposes a grid by one rule: two
 rows for more than four panes, up to 8 panes, and above 8 panes the squarest grid. It asks one confirm. Your own names always win.
 
+An optional top-level `workspace = "<name>"` (before every table header) names the Herdr workspace:
+1 to 40 characters, a letter or digit first, then letters, digits, spaces, `.`, `_` or `-`
+(`instance.sh` refuses anything else, naming the key). Stage 1 suggests two lower-case words joined
+with a hyphen, such as `herald-relay`; Stage 8 creates the workspace with `--label <name>` (or
+renames the one workspace of a fresh server). Without it Herdr labels the workspace itself.
+
 `hub_host` is optional when the config has no `[[session]]` (N=0) and required when it has one or more (N>=1). Without it the hub is started with no `--advertise`: it advertises nothing remote, which is right when no body will dial it.
 
 Shape:
@@ -111,7 +117,7 @@ session's `remote_host`/`remote_tailnet_host`) and ignores them, checking only t
 not know the `[instance]` table or a session's `backend_port`, so a master file that has either
 makes `holler body run` fail. The wizard therefore writes a **derived body config** per remote host
 (only that host's `[[session]]` tables) and sends that one: it drops the `[instance]` table and every
-session's `backend_port`, and sets each session's `endpoint` to
+session's `backend_port` and the top-level `workspace` key, and sets each session's `endpoint` to
 `http://127.0.0.1:<resolved backend port>`, the port `instance.sh` printed for that session (the master
 file's own `endpoint` may name the first instance's backend). Other tools can keep their own data in
 the file under an explicit namespace: a top-level `[ext.<namespace>]` table and a per-session
@@ -433,8 +439,7 @@ tag once one does. (The README has the same line, and its agent prompt fetches t
 machine that doesn't have it). Stage
 0 stands apart from the rest: it only installs the `herdr` binary itself (via
 [herdr.dev's install script](https://herdr.dev/install.sh) or `brew install herdr`), asked as
-its own up-front yes/no, and ends with a second, separate yes/no — "configure Herdr now and
-launch a workspace?" — before anything past it runs; a yes to installing Herdr is never treated
+its own up-front yes/no, and ends with a second, separate yes/no — "All systems go. Proceed?" — before anything past it runs; a yes to installing Herdr is never treated
 as a yes to also building a workspace in the same run. Only once that second question gets a
 yes does Stage 1 onward run: load the config described above, preflight (including per-host SSH
 reachability, with a manual-relay fallback when no local `ssh` client exists), present the plan
@@ -484,6 +489,10 @@ this instance's own processes are not refused on a rerun. A process counts as th
 reused pid is foreign.
 
 ## Herdr session
+
+When the config sets `workspace`, Stage 8 names the workspace it creates:
+`herdr.sh run workspace create --cwd <dir> --label <workspace>`, or, on a fresh server with exactly
+one pane, `herdr.sh run workspace rename <workspace_id> <workspace>` once.
 
 Stage 8 and Stage 9 run every Herdr command through `agent-skills/setup-wizard/lib/herdr.sh`,
 which adds `--session <herdr_session>` (from the `[instance]` table) to each one, `server stop`
