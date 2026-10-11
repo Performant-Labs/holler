@@ -304,6 +304,32 @@ herdr_session = "second"
 backend_port_base = 47101
 ```
 
+### Choosing the Herdr session
+
+When Stage 1 builds a new config, it asks one question after the orchestrators and before the
+workspace name: which Herdr session to build in. Herdr has no session rename, so the choice is
+made when the workspace is first built. An existing config is not re-asked; Stage 1's report and
+Stage 3's plan state the session it targets.
+
+- **The default, unnamed session** (recommended when there is no reason to separate this
+  workspace from other Herdr work). It writes no `[instance]` table and nothing changes: the
+  wizard builds in Herdr's unnamed `default` server. The plan says "Herdr session: default
+  (unnamed)".
+- **A new named session.** The wizard suggests a name (pattern `^[a-z][a-z0-9-]{0,23}$`, not
+  `default`) and refuses one already in `herdr session list`, running or stopped, naming that
+  session and offering another name or the default: it never builds in an existing session. For
+  a free name it proposes a full second instance, written after the bare top-level keys and before
+  `[[orchestrator]]`: `name` and `herdr_session` set to the name, `state_dir = "~/.holler-<name>"`,
+  `hub_port = 41808`, `serve_https_port = 8443` and `backend_port_base = 47101`. The ports are
+  defaults only; Stage 3's collision preflight refuses a taken one. The file is shown, and you
+  confirm or edit it before `instance.sh` validates it. The plan says "Herdr session: `<name>`
+  (new, own state directory and ports)".
+
+A named session is driven from a terminal outside any Herdr pane (see "Herdr session"), and
+`holler` calls in your own shells need `HOLLER_STATE_DIR=<state_dir>` (for example
+`HOLLER_STATE_DIR=$HOME/.holler-work holler hub status`); without it they reach the default
+instance.
+
 ## Instance state and the ledger
 
 Stages 4 to 7 start everything on the instance's own ports and in its own state directory (the
