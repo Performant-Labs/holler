@@ -871,3 +871,31 @@
 
 ## O (brief amendment after the S advisory-hold) — 2026-10-11T16:30:00-06:00
 - **Decided:** the citation of the setup wizard's `lib/herdr.sh` in A's first entry (line 66) is corrected to the renamed `agent-skills/herdr-setup/` directory (#820): the CI scan `no_old_command_or_directory_outside_the_rename_note` fails on the old path in any tracked file. The excerpt is unchanged. D33 is added for #832; E64's Source and Depends on are corrected; the run resumes at phase 5.
+
+## T (Phase 4, T-red, D33 cycle) — 2026-10-11T16:32:37-06:00
+- **Decided:**
+  - Pinned D33 with the three pins it names, plus two more rows:
+    - `observe::the_lazy_herdr_passes_the_herdr_conformance_suite`, so case 13 covers `LazyHerdr`;
+    - `observe_pane` added to `bind::a_lazy_herdr_that_cannot_be_built_answers_that_error_from_every_method`;
+    - one recording check each for `BindingHerdr` and `LazyHerdr`;
+    - a third recording check over production's chain, `BindingHerdr` over `LazyHerdr`;
+    - a failed-build row: one empty observation per pane, with the build attempted once.
+  - Put the new rows in a new `pane_integration/observe.rs`, not in `bind.rs`. `bind.rs` is 580 lines, and lint
+    warns at 600.
+  - Added a pin to `store_only` for D33's last sentence: `"unmanaged_unavailable": "usage"` in JSON, and the text
+    warning naming `HOLLER_HERDR_SESSION`. It passes at HEAD; it is a pin, not a RED.
+  - Proceeded on A's fifth-pass PASS, although no A pass has run on the amendment.
+- **Assumed:** D33 adds no design for A to review. It is A-dup's W-5, adopted verbatim with S's pins, and O's entry
+  resumes the run here.
+- **Hedged:**
+  - The recording inner port answers its other seven methods with `unavailable`, because the checks never call them.
+    A fix that made `observe_pane` go through `snapshot` would surface as that error rather than as a silent pass.
+  - I did not add the scenario's "own panes never appear in the unmanaged table" check (S's advisory 4). It is
+    opt-in, and the scenario re-run is T-green's.
+- **Evidence:**
+  - Default run on the merged tree: 59 passed, 7 failed (exactly the D33 rows, each on its assertion), 4 ignored.
+  - Mutant with `observe_pane` forwarded only: the three recording rows fail on the call log (three `observe_pane`
+    calls against one `observe_panes`).
+  - Local trial of D33's fix: 24 of 24 pass, then the source was restored (no diff under `src/`).
+  - Clippy (`-D warnings`) and `lint.sh` are clean.
+  - `evidence.md` has a new section with the #832 source the tests rely on.

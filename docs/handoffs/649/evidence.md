@@ -5,6 +5,68 @@ and `wiring/{store,env,bind}.rs`) and its tests rely on. One entry per fact; eac
 verbatim. The diff gate shows only the first 12,000 bytes of this file, so the sections run newest
 first: add a later round's entries above them.
 
+## The #832 source D33's pins rely on (T-red, D33 cycle)
+
+`observe::*` and the `observe_pane` row of `bind::a_lazy_herdr_that_cannot_be_built_answers_that_error_from_every_method`
+rely on `HerdrPort`'s two default-armed methods and the conformance suite's case 13, both merged by #832 and not in
+this story's diff.
+
+- **Fact:** `observe_pane`'s default answers an empty observation, and `observe_panes`' default asks `self.observe_pane`
+  once per pane, an error read as an empty observation. So a wrapper that does not override them never reaches its
+  inner port: the RED of the recording checks.
+  **Source:** `crates/holler-pane/src/ports.rs:205-220`
+  **Verbatim excerpt:**
+  >     fn observe_pane(&self, pane: &PaneId) -> Result<PaneObservation, PaneError> {
+  >         let _ = pane;
+  >         Ok(PaneObservation::default())
+  >     }
+  >
+  >     /// [`HerdrPort::observe_pane`] for several panes at once: one observation for each of
+  >     /// `panes`, in the same order, where a pane that cannot be observed (Herdr does not have
+  >     /// it, or the call failed) reports an empty one. A list of many unmanaged panes costs one
+  >     /// call to Herdr when the implementation can read them together; the default asks about
+  >     /// each pane in turn.
+  >     fn observe_panes(&self, panes: &[PaneId]) -> Vec<PaneObservation> {
+  >         panes
+  >             .iter()
+  >             .map(|pane| self.observe_pane(pane).unwrap_or_default())
+  >             .collect()
+  >     }
+
+- **Fact:** ADR-0021 section 14 requires a wrapper port to delegate `observe_pane`, and `observe_panes` exists so a list
+  costs one call.
+  **Source:** `docs/adr/ADR-0021.md:972-976`
+  **Verbatim excerpt:**
+  > - **`HerdrPort::observe_pane(pane) -> PaneObservation { cwd?, last_screen_change? }`** is the one new port method. It has a
+  >   default (`Ok` with both `None`), so an implementation that cannot tell says so and a port that does not override it keeps
+  >   compiling; `pane-not-found` for a pane Herdr does not have. A wrapper port must delegate it. `observe_panes(&[PaneId])` is the same
+  >   for several panes at once (an empty observation for a pane that cannot be observed), so a list of many unmanaged panes costs
+  >   one call: the Herdr adapter reads every `cwd` from the `PaneInfo` of **one** `session.snapshot` (any tab, grid cell or not).
+
+- **Fact:** the conformance suite's case 13 wants `pane-not-found` from `observe_pane` of an unknown id, and the fake
+  answers it (`pane_mut` of an unknown pane fails). So the suite over a wrapper fails case 13 unless the wrapper forwards.
+  **Source:** `crates/holler-pane-testkit/src/conformance/herdr.rs:424-426` and `crates/holler-pane-testkit/src/herdr.rs:338-341`
+  **Verbatim excerpt:**
+  > /// Case 13 (#832): `observe_pane` answers a pane the snapshot lists (what it reports is the
+  > /// implementation's: Herdr may report no working directory and no screen-change time), and
+  > /// an id Herdr never handed out, or a pane that has closed, is `pane-not-found`.
+
+  >     fn observe_pane(&self, pane: &PaneId) -> Result<PaneObservation, PaneError> {
+  >         self.faults.enter(HerdrOp::ObservePane)?;
+  >         Ok(self.lock().pane_mut(pane)?.observation.clone())
+  >     }
+
+- **Fact:** `pane list` reports the code of the failed Herdr call as `unmanaged_unavailable` and, in text, warns on
+  stderr (the row added to `store_only::the_store_only_verbs_work_with_no_herdr_tmux_or_opencode`).
+  **Source:** `crates/holler-cli/src/pane/list.rs:86` and `:99-102`
+  **Verbatim excerpt:**
+  > /// `"unmanaged_unavailable"` (the failed call's code) when Herdr could not be read.
+
+  >     if let (Format::Text, Ok(table)) = (ctx.format, &result) {
+  >         if let Some(gap) = &table.unmanaged_gap {
+  >             // The managed panes are listed; what could not be looked at is said, not hidden.
+  >             let _ = writeln!(ctx.sink.err, "warning: unmanaged panes not listed: {gap}");
+
 ## The source S's test-only rework relies on (T, fifth pass)
 
 `fake_hub::every_read_and_write_with_no_hub_is_unavailable_naming_the_hub` and the two `..._naming_the_hub`

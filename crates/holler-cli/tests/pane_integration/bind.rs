@@ -149,6 +149,7 @@ fn a_lazy_herdr_that_cannot_be_built_answers_that_error_from_every_method() {
         lazy.close(&pane).err(),
         lazy.snapshot().err(),
         lazy.version().err(),
+        lazy.observe_pane(&pane).err(),
     ];
     for error in codes {
         let error = error.expect("every method fails");

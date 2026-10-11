@@ -65,6 +65,16 @@ fn the_store_only_verbs_work_with_no_herdr_tmux_or_opencode() {
         list.data().to_string().contains(PANE),
         "pane list shows the record: {list:?}"
     );
+    // D33 (#832): with no Herdr configured the unmanaged panes are not listed, and the run
+    // says why, by the Herdr port's own code (JSON) and the variable to set (text).
+    assert_eq!(list.data()["unmanaged_unavailable"], "usage", "{list:?}");
+    let text = bare.holler(&["pane", "list"]);
+    assert_eq!(text.code, 0, "pane list in text: {text:?}");
+    assert!(
+        text.stderr.contains("warning: unmanaged panes not listed")
+            && text.stderr.contains("HOLLER_HERDR_SESSION"),
+        "the text run warns, naming HOLLER_HERDR_SESSION: {text:?}"
+    );
 
     let get = bare.holler(&["pane", "get", PANE, "--format=json"]);
     assert_eq!(get.code, 0, "pane get: {get:?}");

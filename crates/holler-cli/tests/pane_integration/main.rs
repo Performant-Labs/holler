@@ -35,6 +35,7 @@ mod env;
 mod fake_hub;
 mod guards;
 mod no_hub;
+mod observe;
 mod scenario;
 mod scratch;
 mod store_only;
