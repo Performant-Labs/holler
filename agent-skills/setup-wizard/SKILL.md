@@ -340,8 +340,8 @@ know what's happening):
 ⬜ 10. Verify end-to-end
 ```
 
-✅ done · 🔄 in progress (the stage you just started) · ⬜ not started yet · ❌ failed/stopped
-(pair with a one-line reason). Print the whole checklist after every stage transitions, not
+✅ done · 🔄 in progress (the stage you just started) · ⬜ not started yet · ⏭️ skipped (nothing to
+do, for example no sessions) · ❌ failed/stopped (pair with a one-line reason). Print the whole checklist after every stage transitions, not
 just the numbers that changed. Include the real M (orchestrator count), N (session count), and
 every name/harness once known (from Stage 1 onward), not a generic "N sessions" placeholder —
 the point is a human can read it at a glance, including which harness is actually in play.
@@ -568,8 +568,8 @@ question to Stage 8, where it's too late to have asked cheaply.
 `--config` flag, cwd, or the global fallback), as an absolute path — this is real, user-visible state that changes
 what a later edit to either file would affect. The file parses as valid TOML with a top-level
 `hub_host` (non-empty), at least one `[[orchestrator]]` table (every entry has a real `name`,
-`dir`, and `cmd`), at least one `[[session]]` table (every entry has a real `name`, `harness`,
-`endpoint` — a `http://127.0.0.1:<port>` URL — **and its own non-empty `remote_host` and
+`dir`, and `cmd`), zero or more `[[session]]` tables (a local-only config has none, N=0; every
+entry that exists has a real `name`, `harness`, `endpoint` — a `http://127.0.0.1:<port>` URL — **and its own non-empty `remote_host` and
 `remote_tailnet_host`**), and a top-level `layout` (a nested array of names). Cross-check
 `layout` in every direction: every `[[orchestrator]]` name must appear in `layout` exactly
 once, every `[[session]]` name must appear in `layout` exactly once, no orchestrator name and
@@ -578,7 +578,7 @@ orchestrator or session. Extract and state `hub_host`, the real M (orchestrator 
 (session count), every orchestrator's name/dir/cmd, every session's name/port/harness/
 `remote_host`, **the set of distinct `remote_host` values across all sessions** (this is what
 Stage 7 groups bodies by — state it explicitly, e.g. "2 distinct hosts: remote-a (alpha, beta),
-remote-b (gamma, delta)"), and the resolved column/row layout **naming which pane holds which
+remote-b (gamma, delta)"; with no sessions say plainly "N=0: no distinct remote hosts"), and the resolved column/row layout **naming which pane holds which
 orchestrator or session** — this is what every later stage builds from, not raw file order, an
 assumed single fixed orchestrator pane, or a hardcoded/globally-shared hostname.
 
@@ -587,7 +587,7 @@ and state its output:
 ```bash
 bash $WIZARD_LIB/instance.sh <config>
 ```
-It prints the resolved instance (name, prefix, hub port, serve port, state directory, Herdr
+With no sessions it prints the instance and no `session` lines (N=0), and exits 0. It prints the resolved instance (name, prefix, hub port, serve port, state directory, Herdr
 session, backend port base) and, per session, one line
 `session <name>: backend_port=<N> endpoint=http://127.0.0.1:<N>`; it exits 1 with one message
 per problem, each naming the key. **Those per-session ports are the only ports every later stage
@@ -632,7 +632,7 @@ these values; every later command uses them as literals (shell-state rule, top o
   mandatory: `herdr.sh` refuses to run without it, and the default instance's name is the literal
   `default`.
 
-**Gate:** the files under `$WIZARD_LIB` are missing and the install command did not fix it (stop and say so); `instance.sh` exits non-zero (stop and show the user its messages, never guess a fix);
+**Gate:** zero sessions is not a failure: a config with at least one `[[orchestrator]]` and no `[[session]]` passes. Stop on: the files under `$WIZARD_LIB` are missing and the install command did not fix it (stop and say so); `instance.sh` exits non-zero (stop and show the user its messages, never guess a fix);
 no config found at any of the three tiers (per the Do step above, this is a hard stop
 with the user, never an auto-created file), a missing/empty `hub_host`, a missing `name`/`dir`/`cmd` on any orchestrator entry, a
 missing `name`/`harness`/`mode`/`endpoint`/`remote_host`/`remote_tailnet_host` on any session
@@ -842,6 +842,9 @@ plan and show it before touching anything:
 - **Orchestrators (from the config):** the real M, each one's name/dir/cmd — e.g. "2
   orchestrators: o1 (`claude`, `~/Projects/holler`), o2 (`claude`,
   `~/Projects/other-project`)." Not assumed to be exactly one, not assumed to be Claude.
+- **With no sessions (N=0),** say so: "Stages 4, 5, 7 and 9 are skipped (no sessions)", reported as skipped, never as failed, and with
+  no remote host the `tailscale serve` line of Stage 6 is skipped too (no remote host dials the
+  hub); the hub is still started and every orchestrator pane is still built.
 - **Sessions (from the config), grouped by their own `remote_host`** — the real N, names,
   ports (the ones `instance.sh` printed in Stage 1, never recomputed), and **harnesses**,
   organized per host, not as one flat list — e.g. "2 hosts: remote-a
@@ -946,6 +949,8 @@ whole run here — Stages 1 and 2 already ran (read-only, nothing to undo) but n
 
 **Ask:** nothing further — Stage 3 already covered which processes are reused (a live ledger row) vs. started fresh; do
 what the assented-to plan said, for every `[[session]]` entry the plan called "start fresh."
+
+**With no sessions, this stage does nothing: report it as skipped (⏭️), never as failed.**
 
 **Only implemented for `harness = "opencode"` today.** If a config entry's harness is anything
 else, this is a real gate — stop and tell the user this wizard doesn't have a start mechanism
@@ -1055,7 +1060,8 @@ in the picture at all; there's nothing to brief it on.
 ## Stage 5 — Create a real first session on each backend, capture its session_id
 
 **Ask:** nothing — this is fully mechanical, looped over every `opencode`-harness config entry
-(the same harness restriction as Stage 4 applies here). In manual-relay mode, the same rule from
+(the same harness restriction as Stage 4 applies here). With no sessions, there is nothing to create:
+this stage is skipped (⏭️), never as failed. In manual-relay mode, the same rule from
 Stage 4 applies: hand the user the exact `ssh` command, capture the id they paste back.
 
 `GET /session` is a **global, per-user list, not scoped by port**. Don't trust `session[0]` as
@@ -1085,6 +1091,9 @@ fresh.
 **Never stop or replace a hub or `tailscale serve` that the ledger did not record** (ownership
 rule, top of this file): run `bash $WIZARD_LIB/stop-owned.sh check-port <state_dir> <hub_port>`
 before the start block below; a foreign or stale holder is reported and the run stops and asks.
+
+**With no remote host (no sessions), skip the `tailscale serve` line below** (nothing remote dials
+the hub) and say Stage 3's plan already said so; the hub is still started.
 
 **Do**, only if the plan called for a fresh hub (skip entirely if the ledger has a live `hub` row,
 which means the hub is reused) — bringing up the hub itself is host-agnostic, done exactly once
@@ -1137,6 +1146,8 @@ instance are not this run's to stop or rejoin, whatever they look like.
 **Ask:** nothing — you have everything from stages 1, 5, and 6. In manual-relay mode, every
 `scp`/`ssh` call in this stage (writing the derived per-host config out, `body join`, `body
 run`) is another command to hand the user rather than run — same rule as Stage 4.
+
+**With no sessions, this stage does nothing: report it as skipped (⏭️), never as failed.**
 
 **Do, in three parts.** First, update the one master file — **the config Stage 1 loaded**,
 whichever of the three sources that actually was (explicit `--config` flag, cwd, or the global
@@ -1478,6 +1489,8 @@ through `stop-owned.sh` (ownership rule), never `herdr.sh run server stop` and n
 **Ask:** nothing — you have the N session panes from Stage 8 (mapped to session names via
 `layout`, not raw file order) and the N session ids from Stage 5.
 
+**With no sessions, this stage does nothing: report it as skipped (⏭️), never as failed.**
+
 **Only implemented for `harness = "opencode"` today.** If a session's harness isn't `opencode`,
 this is a real gate — stop and tell the user this wizard doesn't have a live-view mechanism for
 that harness yet (its Holler-side session may still be real and working; it just has no known
@@ -1504,6 +1517,9 @@ wrong.
 ## Stage 10 — End-to-end verification, don't just assume it worked
 
 **Ask:** nothing.
+
+**With no sessions, verify what exists:** the hub answers (`holler hub status`) and every
+orchestrator pane is alive; this stage does not look for sessions, a roster or a `say`.
 
 **Do**, for every session in the config:
 (`<label>` is the Stage 7 token label.)

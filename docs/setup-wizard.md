@@ -35,6 +35,8 @@ to, since attach mode talks to them over `127.0.0.1` loopback HTTP by constructi
 no remote-OpenCode-endpoint mode. The diagram above shows the common one-orchestrator,
 one-remote-host case; the config below is what actually decides how many orchestrators, how
 many sessions, and how many distinct remote hosts a given run has — none of that is hardcoded.
+A local-only config (one or more orchestrators and zero `[[session]]` tables) is valid: the wizard
+builds the hub and the orchestrator panes, and reports the session stages as skipped.
 
 ## The config file
 
