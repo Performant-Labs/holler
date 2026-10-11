@@ -46,6 +46,14 @@ merging across tiers):
 2. `./sessions.toml` — a project-local config, when the wizard is run from a project directory.
 3. `~/.holler/herdr/setup/sessions.toml` — the global fallback.
 
+An existing global `sessions.toml` skips the interview. To start clean, move it aside; the wizard
+never deletes it. When no config is found, the wizard's message names the path it looked for.
+
+When you do not name the panes, the default names are the grid cells, row then column, like a
+spreadsheet cell: `r1c1`, `r1c2`, `r1c3`, `r1c4` for the first row, `r2c1` for the first cell of the
+second row, and so on. With a pane count and no grid, the wizard proposes the squarest grid (two
+rows for more than four panes) and asks one confirm. Your own names always win.
+
 Shape:
 
 ```toml
