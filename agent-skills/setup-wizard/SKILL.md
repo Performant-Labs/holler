@@ -906,6 +906,14 @@ plan and show it before touching anything:
     workspace in that server, `herdr.sh run workspace create`, never splitting the panes it already
     has; Stage 8 builds there and records nothing for it), or stop (set a `herdr_session` in an `[instance]` table, which makes the instance
     non-default). Never stop that server.
+- **A new workspace, when the wizard creates one** (a restored saved session, or "build in it" on a
+  foreign server): name the new workspace in this plan and list the restored panes beside it (they
+  stay untouched). The plan's one yes ("Proceed with this plan?") is the user's yes to that, and
+  the "Proceed with this plan?" yes covers creating it (`workspace create`); a "no" means stop, or reuse the restored panes only if the user asks.
+- **Teardown and the restored workspace.** The Herdr server the wizard starts also holds any
+  restored workspace of the user (with any auto-resumed agent), and teardown stops that server:
+  list those panes here and ask before any teardown. For the default instance, offer to leave the
+  server running and stop only the hub.
 - **What's already running vs. what will be started fresh, per host.** "Reused" means exactly one
   thing: a **live row in this instance's own ledger** (its pid, start time and command still
   match; see Stage 4, "Reuse on a rerun"). List per host which backends, the hub, the bodies and
@@ -927,7 +935,7 @@ plan and show it before touching anything:
   columns/rows `layout` specifies, hub local, **one body per distinct remote host**, all N
   sessions across all hosts verified with a real round-trip reply.
 
-**Also ask, as its own explicit yes/no, separate from "proceed with this plan":** whether to
+**Also ask, as its own explicit yes/no, separate from "proceed with this plan" (With no sessions (N=0) this briefing is not offered at all (nothing to drive), so do not ask it):** whether to
 install/update the Holler self-status briefing in each orchestrator's own `AGENTS.md` — the
 fix for an orchestrator flailing on "what is `<session>` doing" (confirmed live 2026-09-21/22:
 before this briefing existed, the orchestrator had no reason to know it could just run `holler
@@ -1297,7 +1305,9 @@ re-minting blindly, and don't let one host's token problem block diagnosing/fixi
 ## Stage 8 — Build the Herdr workspace (M+N panes)
 
 **Ask:** nothing further — Stage 3's plan already said whether the Herdr server/workspace gets
-reused, extended, or built fresh.
+reused, extended, or built fresh. When the wizard creates a new workspace (below), Stage 3's plan
+named it and listed the restored panes beside it, and the "Proceed with this plan?" yes covers
+creating it; a "no" means stop, or reuse the restored panes only if the user asks.
 
 **Every Herdr command in this stage and in Stage 9 goes through `herdr.sh`** (in `$WIZARD_LIB`),
 written in full as `<herdr_env> bash $WIZARD_LIB/herdr.sh run <args>`, where `<herdr_env>` is the
@@ -1364,8 +1374,12 @@ wizard assumes the agent driving it is **not** itself running inside a Herdr pan
 Claude Code desktop app and for a plain terminal), so there is nothing to "find" — you are building
 the workspace from scratch. If you *are* inside a Herdr pane, `herdr.sh check-pane` compares that
 pane's session with the instance's and stops when they differ; even in the instance's own
-session, don't build over your own pane: stop and ask which workspace to use. Note whichever
-pane `herdr.sh run pane list` shows — that pane becomes the **first slot** in the build below.
+session, don't build over your own pane: stop and ask which workspace to use. The older
+"note whichever pane `herdr.sh run pane list` shows, that pane becomes the **first slot**" rule
+applies only to a server with exactly one pane and no restored panes. Whenever the wizard creates
+a new workspace (a restored saved session, or "build in it" on a foreign server), `<base-pane>`
+is that workspace's first pane (`pane list` filtered by its id), and Verify and Gate below count
+panes in that workspace only.
 
 **But a Herdr that has been run before does not start blank — it restores its saved session,
 and that restore is more than pane structure.** Confirmed live 2026-09-23: after killing the
@@ -1434,14 +1448,14 @@ front, e.g. `<base-pane>` gets `o1` and `<p3>` gets `alpha`:
 <herdr_env> bash $WIZARD_LIB/herdr.sh label <p3> alpha
 ```
 
-**Verify:** `herdr.sh run pane list` shows exactly (M+N−1) new panes beyond the pre-existing base pane
+**Verify:** `herdr.sh run pane list` (count panes in that workspace only, when the wizard created one) shows exactly (M+N−1) new panes beyond the pre-existing base pane
 (M+N total in the workspace, M of which map to `[[orchestrator]]` entries and N of which map to
 real sessions), in the expected layout, and every pane's label equals its slot name. Then read
 `herdr.sh run pane list` again and tell the user if the widths look uneven: chained right-splits
 may leave columns at about 1/2, 1/4, 1/8, 1/8 of the width unless Herdr rebalances. This is
 unverified until the operator story #734 and the new-user run #778 check it with the real Herdr.
 
-**Gate:** if `herdr.sh run pane split` errors, or the pane count doesn't match M+N, stop and confirm
+**Gate:** if `herdr.sh run pane split` errors, or the pane count (in that workspace only) doesn't match M+N, stop and confirm
 the target workspace/pane with the user before retrying — don't chain more splits on a layout
 you haven't confirmed, and don't silently build fewer/more panes than the config calls for.
 
@@ -1465,7 +1479,7 @@ clearly-marked section if one does — never overwrite unrelated content) contai
 ```markdown
 ## Holler self-status
 
-You are the orchestrator "<name>" in a Holler-driven multi-agent setup. Every session you're
+You are an orchestrator in a Holler-driven multi-agent setup. Every session you're
 driving is a real, separate `holler` roster entry, but its **live roster name is namespaced**
 (e.g. `<body-label>/<session-name>`), not just the bare config name. Your hub is the one whose
 state directory is not yours to pass: this pane's environment already sets `HOLLER_STATE_DIR`,
@@ -1477,7 +1491,8 @@ dispatch and `holler interrupt <full name>` to redirect one that's
 stuck. Don't guess a session's status from memory or from what you last told it to do — check
 `holler roster`.
 ```
-Substitute that orchestrator's real `name`. **The briefing never carries the state directory's
+The text names no orchestrator: orchestrators that share a `dir` share one file, so a per-orchestrator
+name would be wrong for all but one. **The briefing never carries the state directory's
 path**: `AGENTS.md` may be shared with another instance's orchestrator (the same project directory),
 and a path written into it would send that orchestrator to this hub. The pane's own environment
 carries the value (the launch command below exports it).
@@ -1647,7 +1662,10 @@ everything above ran headlessly over Herdr's socket API — nothing was visible 
   way Stage 3 would have.
   Restart it through `stop-owned.sh restart` (ownership rule, top of this file), never by name,
   and then run Stage 4's own start command again (`RESTART-CMD` only identifies the entry).
-- **Tearing the instance down:** run `bash $WIZARD_LIB/stop-owned.sh teardown <state_dir>` on
+- **Tearing the instance down:** first, the Herdr server the wizard started also holds any restored
+  workspace of the user (with any auto-resumed agent), and teardown stops that server: list those
+  panes (`pane list`) and ask before teardown. For the default instance, offer to leave the server
+  running and stop only the hub (`stop-owned.sh stop <state_dir> <hub pid>` instead of `teardown`). Otherwise run `bash $WIZARD_LIB/stop-owned.sh teardown <state_dir>` on
   **every host the run touched** (this machine, and each distinct `remote_host` through the
   remote form at the ownership rule, with that host's own `<state_dir>`). It stops only ledger
   processes, in reverse start order (this includes the instance's Herdr server, so the named

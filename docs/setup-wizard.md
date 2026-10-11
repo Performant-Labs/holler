@@ -237,7 +237,13 @@ more than one.
   The wizard never splits or closes panes it did not create: when `pane list` shows such panes
   after the server starts, it reports them and, with the user's yes, builds a new workspace beside
   them (`workspace create`), or reuses them only if the user asks. Stage 3 says this in the plan
-  when `herdr session list` shows a stopped session of the instance's name.
+  when `herdr session list` shows a stopped session of the instance's name, names the new
+  workspace and lists the restored panes beside it, and the "Proceed with this plan?" yes covers
+  creating it (a "no" means stop, or reuse the restored panes only if the user asks). Whenever
+  the wizard creates a new workspace, `<base-pane>` is the first pane of the new workspace
+  (`pane list` filtered by its id) and Stage 8's Verify and Gate count panes in that workspace
+  only; the older "the one pane is the first slot" rule applies only to a server with exactly one
+  pane and no restored panes.
 - **Stage 8 labels and builds the grid.** Every pane gets its slot name as a label
   (`herdr.sh label <pane-id> <label>`, right after the splits) and Verify checks that each label
   equals its slot. The grid is built row first (split right along the first row, then each
@@ -353,7 +359,9 @@ refused as foreign for the same reason: nothing records its processes, so the wi
 and never stops them. See "The first instance has no ledger" above.
 
 **The `AGENTS.md` briefing.** If the operator says yes in Stage 3, Stage 8 adds a `## Holler
-self-status` section to each orchestrator's `AGENTS.md`. It never writes the instance's absolute
+self-status` section to each orchestrator's `AGENTS.md`. The briefing is not offered at all when
+there are no sessions (nothing to drive). The text names no orchestrator, because orchestrators
+that share a `dir` share one file. It never writes the instance's absolute
 `HOLLER_STATE_DIR` into the file (the file may be shared with another instance's orchestrator, and
 an "already has this section" rule would then leave the wrong path in place). Instead it says the
 pane's environment already sets `HOLLER_STATE_DIR` and the orchestrator must never change or unset it
@@ -401,6 +409,11 @@ skill sends `stop-owned.sh` and `ledger.sh` together over `ssh`). The instance's
 serve` entry is not a process of the wizard, so teardown leaves it; with the user's yes,
 `tailscale serve --https=<serve_https_port> off` turns off that one entry. `tailscale serve reset`
 is never used: it wipes every serve entry, the first instance's included.
+
+**Teardown also stops the restored workspace.** The Herdr server the wizard started holds any
+restored workspace of the user (with an auto-resumed agent) too, and teardown stops that server.
+Stage 3's plan and the teardown entry list those panes and ask before teardown; for the default
+instance the wizard offers to leave the server running and stop only the hub.
 
 ## Automated setup
 
