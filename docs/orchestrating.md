@@ -121,3 +121,25 @@ It prints one line: `c3r1: OK model=… session=…`, `c3r1: REFUSED: …` (exit
 any pane that is not idle. Pause the watchdog yourself first if you do not want it acting on the pane meanwhile.
 Do not type `tmux send-keys` by hand for this: text sent without `Enter` sits unsubmitted in the TUI prompt
 (the 2026-10-10 failure that motivated the script). This section is removed when #644 and #653 have merged.
+
+A pane running **Claude Code** is detected, not named: the script looks for a live Claude Code process whose
+record in `~/.claude/sessions/<pid>.json` names the pane's tmux session (`hj-c3r1`). Such a pane takes a Claude
+model alias or name and an effort level, and none of the OpenCode options:
+
+```bash
+scripts/pane-restart c3r1 --model opus --effort high --dry-run   # alias (opus, sonnet, fable) or full name, optional [1m]
+scripts/pane-restart c3r1 --effort xhigh                         # an omitted --model or --effort keeps its old value
+scripts/pane-restart c3r1 --model sonnet --fresh                 # a new session instead of resuming the old one
+```
+
+It refuses unless the record says `idle` and the screen shows neither `esc to interrupt`, a question
+(`Enter to select`) nor a running agent row (`◯ name`). It stops the process (`/exit`, then one Ctrl-C),
+starts `claude` again in the same directory with the flags it had, the new model and effort, and
+`--resume <session id>`, and waits for the new process to report `idle`. A session that has no saved
+conversation yet cannot be resumed and is refused before anything changes; pass `--fresh`. The model is confirmed
+from the new process's own arguments; no prompt is sent, so nothing is spent. A running process with a flag the
+script does not know how to carry over (a prompt, `--mcp-config`) is refused and the flag is named.
+Keys are typed into the pane id the record names (`hj-c3r1:@6.%6` gives `%6`), not into the session, so a second pane
+or window in the same tmux session is never touched. Not carried over: environment variables set on the old command
+line, and a model or effort changed inside the session with `/model` or `/effort` (only the command-line arguments are
+read). The first Ctrl-C of the fallback only warns in Claude Code, so the script sends two.
