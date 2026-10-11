@@ -339,3 +339,17 @@
     - `tx_launch.rs` (600-720);
     - both store conformance suites' watch cases;
     - ADR-0021 whole.
+
+## T (Phase 7, verify GREEN + Tier 2), 2026-10-11
+
+- **Decided:**
+  - **GREEN, no blocking issue.** The `pane_integration` default run is 59/0/4 and the opt-in run 4/0. Every Phase-4 RED row passes.
+  - **Added two of F's suggested rows, in `env.rs`.** One new test pins the absolute-path rule for `HOLLER_HERDR_SOCKET`, `HERDR_SOCKET_PATH` and `HOLLER_OPENCODE_BIN`, and that a bad `HOLLER_HERDR_SOCKET` does not fall through to `HERDR_SOCKET_PATH`. The existing rows gained the empty session and the empty workspace list. Each is documented operator-facing behaviour (the wiring's module-doc table), and each is a cheap unit row.
+- **Assumed:**
+  - **The `wizard_scripts` rename-scan failure is out of scope.** Its only hits are under `docs/handoffs/`, which Phase 11 removes before the push. `git grep` outside that directory finds nothing.
+- **Hedged:**
+  - **`with_env` mutates the process environment.** It is safe today under the state-dir lock, but recorded as an advisory.
+- **Evidence:**
+  - Mutations M1 to M7 (lazy watch, a lost write mapped to `unavailable`, a zero extent, relative paths, the `HERDR_SESSION` fallback, no binding offer, the host falling back to `Unwired`): each was caught by the named test, then restored with `git checkout`.
+  - `cargo test --workspace --no-fail-fast -- --skip roster_…`: 2309 passed, 1 failed (the scratch scan), 32 ignored.
+  - Clippy `-D warnings`, `docs_cli_test` 3/3, `wire_selftest` 3/3, `lint.sh`, `changelog-check` and `cargo machete`: all clean.

@@ -65,9 +65,31 @@ fn herdrs_own_session_variable_is_no_fallback() {
 #[test]
 fn no_herdr_session_is_usage_naming_holler_herdr_session() {
     let none = vars(&[("HOLLER_HERDR_SOCKET", "/tmp/h/herdr.sock")]);
-    let error = env::herdr_config(&none).expect_err("no session");
-    assert_eq!(error.code(), "usage", "{error}");
-    assert!(names_only_hollers_session_variable(&error), "{error}");
+    let empty = vars(&[("HOLLER_HERDR_SESSION", ""), ("HOLLER_HERDR_SOCKET", "/tmp/h/herdr.sock")]);
+    for (case, lookup) in [("unset", &none), ("empty", &empty)] {
+        let error = env::herdr_config(lookup).expect_err(case);
+        assert_eq!(error.code(), "usage", "{case}: {error}");
+        assert!(names_only_hollers_session_variable(&error), "{case}: {error}");
+    }
+}
+
+/// Every path a variable gives is absolute (the module doc's table): a relative or empty one is
+/// `usage` naming that variable, never a path resolved against the working directory and never
+/// the next fallback. D6's own row (`HOLLER_TMUX_SOCKET`) is pinned below.
+#[test]
+fn a_path_variable_that_is_not_absolute_is_usage_naming_it() {
+    let s = ("HOLLER_HERDR_SESSION", "holler649-0000000a");
+    for bad in ["", "herdr.sock", "./h/herdr.sock"] {
+        usage_naming(
+            env::herdr_config(&vars(&[s, ("HOLLER_HERDR_SOCKET", bad), ("HERDR_SOCKET_PATH", "/b/h.sock")])),
+            "HOLLER_HERDR_SOCKET",
+        );
+        usage_naming(
+            env::herdr_config(&vars(&[s, ("HERDR_SOCKET_PATH", bad), ("HOME", "/home/u")])),
+            "HERDR_SOCKET_PATH",
+        );
+        usage_naming(env::opencode_bin(&vars(&[("HOLLER_OPENCODE_BIN", bad)])), "HOLLER_OPENCODE_BIN");
+    }
 }
 
 #[test]
@@ -111,6 +133,14 @@ fn the_workspaces_are_label_rows_by_columns() {
     ]))
     .unwrap();
     assert!(none.workspaces.is_empty(), "unset is no workspace");
+
+    let empty = env::herdr_config(&vars(&[
+        ("HOLLER_HERDR_SESSION", "holler649-0000000a"),
+        ("HOLLER_HERDR_SOCKET", "/tmp/h/herdr.sock"),
+        ("HOLLER_HERDR_WORKSPACES", ""),
+    ]))
+    .unwrap();
+    assert!(empty.workspaces.is_empty(), "the empty list is no workspace");
 }
 
 #[test]
