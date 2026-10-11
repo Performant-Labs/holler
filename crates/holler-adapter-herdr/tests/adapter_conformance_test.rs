@@ -3,6 +3,9 @@
 //! against the wire fake, from the two starting states the suite allows (an empty
 //! Herdr, and a workspace holding only its root pane), in process and over a real Unix
 //! socket. The suite's cases are run, never copied.
+//!
+//! Each run passes the suite its label hook (#808): the case's guard carries its fake, and
+//! the hook labels a pane there, as the outside world's `pane.rename` would.
 
 mod wire_herdr;
 
@@ -12,9 +15,11 @@ use std::sync::Arc;
 use holler_adapter_herdr::adapter::{HerdrAdapter, HerdrConfig};
 use holler_adapter_herdr::plan::Extent;
 use holler_adapter_herdr::protocol::ALLOWED_METHODS;
+use holler_adapter_herdr::transport::UnixSocketTransport;
+use holler_pane::{PaneError, PaneId};
 use holler_pane_testkit::conformance::herdr::{run_herdr_conformance, HerdrFixture};
 use holler_pane_testkit::conformance::Conformance;
-use wire_herdr::serve::serve;
+use wire_herdr::serve::{serve, Served};
 use wire_herdr::WireHerdr;
 
 const SCRATCH: &str = "scratch";
@@ -35,31 +40,50 @@ fn fixture<H>(port: H) -> HerdrFixture<H> {
 }
 
 /// The suite in process, a fresh fake per case; with `root_pane`, each fake's workspace
-/// is created first and holds its root pane. Each fake is pushed onto `fakes`.
+/// is created first and holds its root pane. Each fake is pushed onto `fakes`, and is the
+/// case's guard, which the label hook labels a pane in.
 fn run_in_process(root_pane: bool, fakes: &mut Vec<Arc<WireHerdr>>) -> Conformance {
-    run_herdr_conformance(|| {
-        let fake = Arc::new(WireHerdr::new());
-        if root_pane {
-            fake.create_workspace(SCRATCH);
-        }
-        fakes.push(Arc::clone(&fake));
-        let port =
-            HerdrAdapter::connect_with(config(Path::new(UNUSED_SOCKET)), fake).expect("connect");
-        (fixture(port), ())
-    })
+    let rename = |_: &HerdrFixture<HerdrAdapter<Arc<WireHerdr>>>,
+                  fake: &Arc<WireHerdr>,
+                  pane: &PaneId,
+                  label: &str|
+     -> Result<(), PaneError> { fake.rename(pane, label) };
+    run_herdr_conformance(
+        || {
+            let fake = Arc::new(WireHerdr::new());
+            if root_pane {
+                fake.create_workspace(SCRATCH);
+            }
+            fakes.push(Arc::clone(&fake));
+            let port =
+                HerdrAdapter::connect_with(config(Path::new(UNUSED_SOCKET)), Arc::clone(&fake))
+                    .expect("connect");
+            (fixture(port), fake)
+        },
+        Some(&rename),
+    )
 }
 
-/// The suite over a real socket: each case serves a fresh, empty fake, and the server
-/// is the case's guard, dropped after the port.
+/// The suite over a real socket: each case serves a fresh, empty fake. The case's guard is
+/// the server and the fake, dropped after the port, and the label hook labels a pane in
+/// that fake.
 fn run_over_a_socket(fakes: &mut Vec<Arc<WireHerdr>>) -> Conformance {
-    run_herdr_conformance(|| {
-        let fake = Arc::new(WireHerdr::new());
-        fakes.push(Arc::clone(&fake));
-        let served = serve(Arc::clone(&fake));
-        let config = config(served.path());
-        let port = HerdrAdapter::connect(config).expect("connect");
-        (fixture(port), served)
-    })
+    let rename = |_: &HerdrFixture<HerdrAdapter<UnixSocketTransport>>,
+                  guard: &(Served, Arc<WireHerdr>),
+                  pane: &PaneId,
+                  label: &str|
+     -> Result<(), PaneError> { guard.1.rename(pane, label) };
+    run_herdr_conformance(
+        || {
+            let fake = Arc::new(WireHerdr::new());
+            fakes.push(Arc::clone(&fake));
+            let served = serve(Arc::clone(&fake));
+            let config = config(served.path());
+            let port = HerdrAdapter::connect(config).expect("connect");
+            (fixture(port), (served, fake))
+        },
+        Some(&rename),
+    )
 }
 
 #[test]

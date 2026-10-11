@@ -8,6 +8,16 @@ fills this file in at release time.
 ## [Unreleased]
 
 ### Enhancements
+- Pane control, a Herdr pane's label (epic [#633](https://github.com/Performant-Labs/holler/issues/633)): every pane
+  `HerdrPort::snapshot` lists and `HerdrPort::ensure_pane` answers now carries its Herdr label (`HerdrPane.label`), the key
+  by which `holler pane import` ([#650](https://github.com/Performant-Labs/holler/issues/650)) will find a pane name's
+  live Herdr pane. The Herdr adapter reads it from the pane info Herdr already sends, with no new request, and reports
+  none for a pane with no label or an empty one. The label is observed, never recorded: `launch` and `relaunch` write
+  none, so a pane record and `panes.json` are written byte for byte as before, and an older `panes.json` still loads.
+  Reconcile and `pane doctor` ignore it, and `launch`'s check that Herdr still lists the pane at its cell compares the
+  pane's place, not its label. The test kit's fake Herdr can label a pane, the `HerdrPort` conformance suite gains a
+  12th case for it, and [ADR 0021](docs/adr/ADR-0021.md) records the decision. Nothing a user runs changes yet: #649
+  wires the adapter in ([#808](https://github.com/Performant-Labs/holler/issues/808)).
 - `scripts/pane-restart` now also restarts Claude Code panes (issue [#784](https://github.com/Performant-Labs/holler/issues/784),
   epic [#633](https://github.com/Performant-Labs/holler/issues/633)). A pane is Claude Code when a live process's record in
   `~/.claude/sessions/<pid>.json` names its tmux session; it takes `--model ALIAS|NAME` and `--effort`, keeps the process's own flags,

@@ -374,7 +374,11 @@ impl<'a> Plan<'a> {
         Pane {
             name: self.name.clone(),
             generation: self.old.map_or(0, |old| old.generation),
-            herdr: live.herdr,
+            // The label Herdr reports is observed, never recorded (#808, constraint (c)).
+            herdr: HerdrPane {
+                label: None,
+                ..live.herdr
+            },
             host: HostInfo {
                 name: HOST_NAME.to_owned(),
                 tmux: self.name.as_str().to_owned(),
@@ -705,7 +709,8 @@ fn observe_live(
         )));
     }
     budget.check()?;
-    if !ports.herdr.snapshot()?.panes.contains(herdr) {
+    let listed = ports.herdr.snapshot()?.panes;
+    if !listed.iter().any(|pane| same_place(pane, herdr)) {
         return Err(unavailable(format!(
             "the Herdr pane {} of {name} is gone from {}",
             quoted(herdr.pane_id.as_str()),
@@ -773,6 +778,12 @@ fn closed(answer: Result<(), PaneError>) -> Result<(), PaneError> {
 /// Whether two Herdr panes are one: the same Herdr session and pane id (the join key).
 fn same_pane(a: &HerdrPane, b: &HerdrPane) -> bool {
     a.session == b.session && a.pane_id == b.pane_id
+}
+
+/// Whether two Herdr panes are one pane at one place: [`same_pane`], in the same workspace
+/// and cell. The label is not compared: it is observed, not a place (#808).
+fn same_place(a: &HerdrPane, b: &HerdrPane) -> bool {
+    same_pane(a, b) && a.workspace == b.workspace && a.grid == b.grid
 }
 
 /// A cell in a message: its grid and its workspace, which is Herdr's text and so quoted.

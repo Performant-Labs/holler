@@ -11,8 +11,10 @@
 
 pub(crate) mod rig;
 
+mod displaced;
 mod guards;
 mod profiles;
+mod record_bytes;
 mod serve;
 
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -32,6 +34,7 @@ use holler_pane_testkit::pane_store::PaneStoreOp;
 use serde_json::json;
 
 use crate::verb_harness::parse::assert_spec_flags_accepted;
+use displaced::Displace;
 use rig::{
     argv, data_of, error_of, launch_replacing, launch_spec, launch_with, name, occurrences, Rig,
     LAUNCH, PANE, PORT, PROBE, PROBE_FLAGS, STEP,
@@ -660,6 +663,56 @@ fn the_budget_bounds_a_slow_launch() {
     );
     assert_eq!(rig.record(PANE), None);
     rig.assert_no_keystroke();
+}
+
+/// #808 E11 test 1: a label is not a place. The outside world labels the new pane between its
+/// `ensure_pane` answer (no label) and O2's snapshot (`x`); the four fields O2 compares are
+/// unchanged, so the launch passes O2 and its record carries no label. A whole-value O2 check
+/// fails this run `unavailable`.
+#[test]
+fn launch_passes_o2_when_only_the_panes_label_changed() {
+    let rig = Rig::new();
+    rig.after(HarnessOp::AttachTui, |f, c| {
+        let pane = c.pane.clone().expect("attach_tui names its pane");
+        f.herdr.rename(&pane, "x").unwrap();
+    });
+    let run = rig.run(LAUNCH, Format::Json);
+    data_of(&run);
+    let listed = rig.herdr_pane_at(R2C1).expect("a Herdr pane at r2c1");
+    assert_eq!(
+        listed.label.as_deref(),
+        Some("x"),
+        "Herdr reports the label"
+    );
+    let record = rig.record(PANE).expect("a record");
+    assert_eq!(record.herdr.pane_id, listed.pane_id);
+    assert_eq!(record.herdr.label, None, "the record carries no label");
+    rig.assert_matches(&run, PANE);
+    rig.assert_no_keystroke();
+}
+
+/// #808 E11 test 3: O2 compares the pane's place, not only its id. O2's snapshot listing the
+/// pane's id in another cell, another workspace or another session fails the launch
+/// `unavailable`, naming the pane, and nothing is recorded (an O2 that compared only the
+/// session and pane id would pass the first two). Test 2 is AC 5a's
+/// `launch_fails_when_its_herdr_pane_vanishes`, unchanged.
+#[test]
+fn launch_fails_o2_when_its_pane_is_listed_elsewhere() {
+    for how in [Displace::Grid, Displace::Workspace, Displace::Session] {
+        let rig = Rig::new();
+        rig.displace_after_attach(how);
+        let run = rig.run(LAUNCH, Format::Json);
+        assert_eq!(run.code, 1, "{how:?}: {run:?}");
+        let (code, message) = error_of(&run);
+        assert_eq!(code, "unavailable", "{how:?}: {message}");
+        assert!(
+            message.contains("w1:p1"),
+            "{how:?} names the pane: {message}"
+        );
+        assert_eq!(rig.record(PANE), None, "{how:?}");
+        rig.assert_matches(&run, PANE);
+        rig.assert_no_keystroke();
+    }
 }
 
 /// The rig's own check: a seeded live pane (what relaunch's cases start from) already

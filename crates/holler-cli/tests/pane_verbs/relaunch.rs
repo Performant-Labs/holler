@@ -166,6 +166,39 @@ fn relaunch_without_grid_keeps_the_position() {
     rig.assert_no_keystroke();
 }
 
+/// #808 E9, constraint (c): a relaunch in place gets the pane already in the cell, which
+/// carries the label the outside world gave it (the setup wizard labels panes). The record it
+/// writes carries none: `herdr.label` is `None` and its JSON has no `label` key.
+#[test]
+fn relaunch_in_place_of_a_labelled_pane_records_no_label() {
+    let rig = Rig::new();
+    let before = rig.live(false);
+    rig.fakes.herdr.rename(&before.herdr.pane_id, PANE).unwrap();
+    let listed = rig.herdr_pane_at(R2C1).expect("a pane at r2c1");
+    assert_eq!(
+        listed.label.as_deref(),
+        Some(PANE),
+        "Herdr reports the label"
+    );
+    let run = rig.run(RELAUNCH, Format::Json);
+    data_of(&run);
+    let after = rig.record(PANE).unwrap();
+    assert_eq!(
+        after.herdr.pane_id, before.herdr.pane_id,
+        "relaunched in place"
+    );
+    assert_eq!(after.herdr.label, None, "the record carries no label");
+    let stored = serde_json::to_value(&after).unwrap();
+    assert!(
+        stored["herdr"].get("label").is_none(),
+        "no label key: {stored}"
+    );
+    assert_eq!(after.herdr, before.herdr);
+    assert_no_close(&run.calls);
+    rig.assert_matches(&run, PANE);
+    rig.assert_no_keystroke();
+}
+
 /// AC 18b: a relaunch that fails never closes the record's own pane, and leaves the record.
 #[test]
 fn a_failed_relaunch_never_closes_the_records_pane() {
