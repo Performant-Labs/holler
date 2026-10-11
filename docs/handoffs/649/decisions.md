@@ -899,3 +899,47 @@
   - Local trial of D33's fix: 24 of 24 pass, then the source was restored (no diff under `src/`).
   - Clippy (`-D warnings`) and `lint.sh` are clean.
   - `evidence.md` has a new section with the #832 source the tests rely on.
+
+## F (Phase 6, implement, fourth cycle: D33, #832's observe methods) — 2026-10-11T16:47:33-06:00
+- **Decided:**
+  - `BindingHerdr` and `LazyHerdr` override `observe_pane` and `observe_panes` (D33). Each forwards to its inner port.
+    `observe_panes` reaches the inner `observe_panes`, never `observe_pane` once per pane, so a list stays one read of
+    Herdr (ADR-0021 section 14).
+  - `LazyHerdr::observe_panes` with a failed build answers one `PaneObservation::default()` per pane. It goes through
+    `port()`, so the build runs once and a failure is kept. Its stored error still reaches the operator: `snapshot`
+    answers it, and `unmanaged::observe` calls `snapshot` first.
+  - Docs: a module-doc paragraph on forwarding every method, the four default-armed ones by name, and the two wrappers'
+    own docs. `LazyHerdr`'s "every method answers its error" now names its one exception.
+  - No change to `wiring.rs`, the ADR or `Unwired`.
+    - `wiring.rs`'s `holler_pane` import line stays as the merge left it. #832 widened it past rustfmt's width, and
+      `main` has the same line.
+    - The workspace on `main` is far from rustfmt-clean, and CI runs no rustfmt step.
+  - S's advisory 6 is taken: one clause of this story's CHANGELOG entry. It no longer says the variables are read when
+    an adapter is first used.
+  - `evidence.md` has a new top section with two entries. I dropped an adapter excerpt that T's ADR excerpt already
+    covers, so that the third cycle's B-2 entry stays inside the gate's 12,000-byte window.
+- **Assumed:**
+  - A's fifth-pass PASS covers this cycle. D33 adds no design (T-red's precondition note, and O's entry resuming the run).
+  - The next diff-gate round reads `evidence.md` with the same 12,000-byte cap as rounds 2 and 3.
+- **Hedged:**
+  - Round 1's evidence section is now wholly past the cap. A fresh reviewer who asks round 1's questions again would
+    not see their answers. No line those entries back has changed since round 3 passed.
+  - The opt-in scenario passed on the merged tree. It does not check that the scenario's own panes stay out of
+    `pane list`'s unmanaged table (S's advisory 4). That check is T-green's.
+- **Evidence:**
+  - RED reproduced before the change: `-- observe:: bind::` gave 13 passed and 7 failed, T-red's seven D33 rows.
+  - After the change:
+    - D33 rows with `bind::` and `store_only`: 24/0;
+    - the default run of `pane_integration`: 66 passed, 0 failed, 4 ignored (119.41 s);
+    - the opt-in scenario on the merged tree: 4/4 (81.56 s), with no scratch directory or process left.
+  - The workspace (CI's command, `--no-fail-fast`): exit 0. 151 binaries, 2345 passed, 0 failed, 32 ignored. The rename
+    scan now passes.
+  - Also clean: clippy `-D warnings` (exit 0), `rustfmt --check` on `bind.rs`, `lint.sh` (exit 0, size warnings
+    only), `changelog-check` and `machete`. Rustdoc gives no diagnostic in a wiring file.
+  - Evidence quotes: a script found the new section's 13 quoted lines equal to the cited ranges.
+  - Read:
+    - the brief (D24, D31, D33), `handoff-T-red.md`, `handoff-S.md` (second pass), `handoff-A-dup.md` (W-5), and
+      `handoff-F.md` (cycles 1 to 3);
+    - `ports.rs:161-251`, `unmanaged.rs:82-125`, `adapter.rs:409-447`, and ADR-0021 section 14;
+    - `tests/pane_integration/observe.rs` and `bind.rs`;
+    - `git show origin/main:crates/holler-cli/src/pane/wiring.rs`.

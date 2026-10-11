@@ -5,6 +5,39 @@ and `wiring/{store,env,bind}.rs`) and its tests rely on. One entry per fact; eac
 verbatim. The diff gate shows only the first 12,000 bytes of this file, so the sections run newest
 first: add a later round's entries above them.
 
+## The #832 source D33's forwards rely on (F, D33 cycle)
+
+`BindingHerdr` and `LazyHerdr` (`wiring/bind.rs`) now override `observe_pane` and `observe_panes`. T's section below
+quotes the trait's two defaults, ADR-0021 section 14 and case 13; these are the rest of the #832 source relied on.
+
+- **Fact:** `PaneObservation` is `Clone` and `Default`, so `LazyHerdr::observe_panes` can build
+  `vec![PaneObservation::default(); panes.len()]` outside `holler-pane`; `#[non_exhaustive]` forbids only a struct
+  literal there, and the wiring writes none.
+  **Source:** `crates/holler-pane/src/ports.rs:227-229`
+  **Verbatim excerpt:**
+  > #[derive(Debug, Clone, Default, PartialEq, Eq)]
+  > #[non_exhaustive]
+  > pub struct PaneObservation {
+
+- **Fact:** `holler_pane::unmanaged::observe` takes Herdr's snapshot first, then observes every unmanaged pane with one
+  `ports.herdr.observe_panes`. In a wired run `ports.herdr` is `BindingHerdr` over `LazyHerdr` over the
+  adapter (`wiring.rs`, `from_env`, in the diff), so without the forwards that call answers the trait's default and
+  never reaches the adapter. A `LazyHerdr` whose build failed fails the `snapshot` first, so its empty observations
+  are the trait's contract for a direct caller, not a path `pane list` takes.
+  **Source:** `crates/holler-pane/src/unmanaged.rs:89-92` and `:104-109`
+  **Verbatim excerpt:**
+  > pub fn observe(ports: Ports<'_>, now_ms: i64) -> Result<Vec<UnmanagedPane>, PaneError> {
+  >     let snapshot = ports.herdr.snapshot()?;
+  >     let records = ports.pane_store.list()?;
+  >     Ok(from_snapshot(ports, &snapshot, &records, now_ms))
+
+  >     // One call for all of them: a list of many unmanaged panes is one read of Herdr.
+  >     let seen = if ids.is_empty() {
+  >         Vec::new()
+  >     } else {
+  >         ports.herdr.observe_panes(&ids)
+  >     };
+
 ## The #832 source D33's pins rely on (T-red, D33 cycle)
 
 `observe::*` and the `observe_pane` row of `bind::a_lazy_herdr_that_cannot_be_built_answers_that_error_from_every_method`

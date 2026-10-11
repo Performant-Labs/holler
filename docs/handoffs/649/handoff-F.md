@@ -1,20 +1,47 @@
 # Handoff-F: Phase 6 (F, implement) - #649 hub wiring and the scratch integration scenario
 
 **Date:** 2026-10-11
-**Branch:** issue-649-implementation (worktree `.claude/worktrees/0649-live-harness`, head `13010f4` plus this phase's
+**Branch:** issue-649-implementation (worktree `.claude/worktrees/0649-live-harness`, head `0cc840e` plus this phase's
 staged changes)
 **Issue:** #649
 
-This handoff covers all three F cycles.
-- **Third cycle (this one):** the production half of the mixed rework after the diff gate's round-2 BLOCK. T took the
-  test half (B-1) in `13010f4`. It is described first.
+This handoff covers all four F cycles.
+- **Fourth cycle (this one): D33.** O merged `origin/main` at `652841b` (#832) into the branch (`63b4afa`) and amended the
+  brief with D33 (`a87dac3`, `6e20075`). T-red pinned it (`0cc840e`). This cycle makes the two Herdr wrappers forward
+  #832's two observe methods. It is described first.
+- **Third cycle (`4d7f58a`):** the production half of the mixed rework after the diff gate's round-2 BLOCK. T took the
+  test half (B-1) in `13010f4`.
 - **Second cycle (`22aa539`):** the re-entry after the diff gate's round-1 BLOCK, run on A's fifth pass (`2280399`) and
   T-red's second cycle (`ce5da11`).
 - **First cycle (`8b70771`):** its text follows. All of it still holds.
 
-The Tier 1 section has one table per later cycle, each at that cycle's tree. The file list covers all three cycles.
+The Tier 1 section has one table per later cycle, each at that cycle's tree. The file list covers all four cycles.
 
 ## What was done
+
+### Fourth cycle
+
+- `crates/holler-cli/src/pane/wiring/bind.rs`, D33:
+  - **`BindingHerdr`** overrides `observe_pane` and `observe_panes`. Each forwards to the inner port and answers what it
+    answers.
+  - **`LazyHerdr`** overrides both.
+    - `observe_pane` is `self.port()?.observe_pane(pane)`. A failed build answers its stored error, as every other
+      method does.
+    - `observe_panes` forwards to the built port's own `observe_panes`. When the build failed, it answers
+      `vec![PaneObservation::default(); panes.len()]`, one empty observation per pane.
+    - Both go through `port()`, so the build runs once, on the first use, and a failure is kept and never retried.
+  - **Docs.**
+    - The module doc has a new paragraph, "Every method is forwarded (D31 W-4, D33)". It names the four default-armed
+      methods the wrappers override, and says why `observe_panes` must reach the inner `observe_panes`.
+    - The `BindingHerdr` doc names the two methods.
+    - The `LazyHerdr` doc said "every method answers its error". It now names `observe_panes` as the exception.
+  - `PaneObservation` joins the `holler_pane` import.
+- `CHANGELOG.md`, S's advisory 6: one clause of this story's own entry.
+  - It said the variables are "each read when its adapter is first used". In fact `connect` reads them all, and a bad
+    value is answered at its port's first use.
+  - It now says a missing or malformed one "fails only the verbs that use its adapter, when they first use it". No
+    other line of the file changes.
+- `docs/handoffs/649/evidence.md`: a new top section with two entries (Evidence appendix).
 
 ### Third cycle
 
@@ -106,6 +133,47 @@ names, and `connect` is the real one.
 - `CHANGELOG.md`: an `## [Unreleased]` / Enhancements entry linking #649, #825 and #828.
 
 ## Design decisions
+
+### Fourth cycle
+
+15. **`observe_panes` forwards to the inner `observe_panes`, never through `observe_pane`.**
+    - The Herdr adapter reads every pane from one `session.snapshot`. The trait's default would ask `observe_pane` once
+      per pane, which is one snapshot each.
+    - So the forward is what keeps ADR-0021 section 14's "one call" through the wrappers. T-red's three recording rows
+      pin it.
+16. **`LazyHerdr::observe_panes` with a failed build answers one empty observation per pane, after `port()`.**
+    - The method returns no `Result`, so it cannot answer the stored error. The trait's doc gives an empty observation
+      to a pane that cannot be observed because "the call failed". The default does the same over a failing
+      `observe_pane`.
+    - It asks `port()`, the one build path, and does not read the `OnceLock` directly. So the first use builds, and a
+      failure is kept and not retried. T's failed-build row counts one build.
+    - The stored error is dropped there, but it is not lost to the operator. `unmanaged::observe` calls `snapshot`
+      before `observe_panes`, and `snapshot` answers the error. That is the `"unmanaged_unavailable": "usage"` that
+      T's `store_only` row pins.
+    - `self.port().map_or_else(..)` would be equivalent. I used a `match`, which reads as the doc does.
+17. **No change to `wiring.rs`, the ADR or `Unwired`.**
+    - `from_env` already chains the two wrappers over the adapter, so the forwards are live with no wiring change.
+    - D33 adds no type, signature or behaviour that the ADR must record. Section 14 already says "A wrapper port must
+      delegate it", and "Wiring as built (#649)" does not list port methods.
+    - `Unwired::observe_pane` (answering `not-implemented`) is #832's, merged from `main`. It is not this story's to
+      change.
+18. **`wiring.rs`'s `holler_pane` import list stays as the merge left it.**
+    - `rustfmt --check` on `wiring.rs` now reports one hunk: the import list #832 widened past 100 columns.
+      `main`'s own `wiring.rs` has the same line (`git show origin/main:crates/holler-cli/src/pane/wiring.rs`).
+    - The workspace on `main` has hundreds of rustfmt diffs, and CI runs no rustfmt step.
+    - Reformatting another story's line after a merge is the churn this run's lesson warns against. So the PR's diff
+      leaves that line alone.
+    - `bind.rs`, the only Rust file this cycle edits, is rustfmt-clean.
+19. **The new evidence section is kept small, to stay inside the diff gate's 12,000-byte window.**
+    - I dropped a third entry, the adapter's one-snapshot `observe_panes` (`adapter.rs:429-434`). T's ADR section 14
+      excerpt already states that fact.
+    - With it, the third cycle's B-2 entry (the `move` closure) would have been cut.
+    - Now these sections are whole inside the window: this one, T's D33 section, T's fifth pass, T's third cycle, and
+      the B-2 entry. Round 1's section is past it. About 2 KB of it was still inside before T-red's D33 section was
+      added.
+20. **S's advisory 6 is taken, as one clause of this story's own CHANGELOG entry.**
+    - The entry is this story's text, in the Blast radius, and the advisory names a false verb, not a false effect.
+    - Fixing it after the merge would need a docs PR of its own.
 
 ### Third cycle
 
@@ -219,6 +287,8 @@ names, and `connect` is the real one.
 
 ## Reuse / extend-vs-new
 
+- **Fourth cycle:** nothing new. D24's `BindingHerdr` and `LazyHerdr` are extended in place, with two trait methods
+  each. There is no new type, helper or module.
 - **Third cycle:** nothing new. There is one comment inside the existing `from_env`, and one evidence entry.
 - **Second cycle:** nothing new. The fix is inside the existing `connect`, and the messages are inside the existing
   `env.rs` functions.
@@ -240,6 +310,12 @@ names, and `connect` is the real one.
 
 ## Architecture notes for A
 
+- **Fourth cycle: no architecture change.**
+  - There is no new module, type, public item, dependency or signature.
+  - The two wrappers now implement the two `HerdrPort` methods that #832 gave defaults. The trait is #832's and is
+    unchanged.
+  - The production chain and its call order are unchanged: `BindingHerdr` over `LazyHerdr` over `HerdrAdapter`.
+  - This cycle reports `archChanged: false`.
 - **Third cycle: no architecture change.** The cycle adds one comment and no code: no type, signature, module or
   dependency changes. This cycle reports `archChanged: false`.
 - **Second cycle: no architecture change.** No new module, type, public item or dependency, and no signature change.
@@ -258,6 +334,9 @@ names, and `connect` is the real one.
 
 ## Deviations from spec / wireframe
 
+- **Fourth cycle:** none from D33.
+  - Beyond it is S's advisory 6, one clause of the CHANGELOG entry (Design decision 20).
+  - `wiring.rs`'s import list is left as `main` has it (Design decision 18).
 - **Third cycle:** none from the brief.
   - The evidence reordering moves T's round-2 section, unchanged, above F's sections. It is recorded in
     `decisions.md`.
@@ -281,6 +360,23 @@ names, and `connect` is the real one.
   the exact command.
 
 ## Tier 1 self-check (incl. tests now GREEN)
+
+**Fourth cycle**, at `0cc840e` (the merged tree, with #832) plus this cycle's staged changes:
+
+| Command | Result |
+|---|---|
+| `cargo test -p holler-cli --test pane_integration -- observe:: bind::`, before any change | `FAILED. 13 passed; 7 failed`. These are T-red's seven D33 rows, each failing on its assertion. RED reproduced |
+| The same, plus `store_only`, after the change | `ok. 24 passed; 0 failed` |
+| `cargo test -p holler-cli --test pane_integration` (the default run) | `ok. 66 passed; 0 failed; 4 ignored; ... finished in 119.41s`. At T-red this was 59 passed and 7 failed |
+| `HOLLER_TEST_PANE_INTEGRATION=1 cargo test -p holler-cli --test pane_integration -- --ignored --test-threads=1` | `ok. 4 passed; 0 failed; ... finished in 81.56s`. This is the scenario's first run on a tree with #832, so `pane list`, `pane get` and `pane doctor` read #832's view through the real wiring. No scratch directory or `hlr649`/`holler649` process was left by this run |
+| `cargo clippy --workspace --all-targets -- -D warnings` (CI's flags) | exit 0 |
+| `rustfmt --edition 2021 --check crates/holler-cli/src/pane/wiring/bind.rs` | clean. `wiring.rs` reports #832's import line only (Design decision 18) |
+| `bash scripts/lint.sh` | exit 0. Size warnings only, none for a wiring file. `bind.rs` is 439 lines |
+| `bash scripts/changelog-check.sh` | ok |
+| `cargo machete` | no unused dependency |
+| `cargo test --workspace --no-fail-fast -- --skip roster_stays_accurate_under_concurrent_body_load` (CI's `test.unit.command`) | exit 0. 151 test binaries: **2345 passed, 0 failed**, 32 ignored.<br>- The rename scan (`skilltext_w5_rename::no_old_command_or_directory_outside_the_rename_note`) now passes. It was the one failure in every earlier cycle; O's amendment corrected its two hits.<br>- `pane_integration`: 66/0/4, in 119.44 s.<br>- `pane_cli_process`: 36 passed (D22's stub tests over a `LiveHub`).<br>- `pane_verbs`: 329 passed, #832's tests among them |
+| After the last edit (the `LazyHerdr` doc's wording, made during the workspace run) | rustfmt on `bind.rs` clean; clippy (workspace, `-D warnings`) exit 0; `-- observe:: bind::` 20 passed, 0 failed.<br>`cargo doc -p holler-cli --no-deps --document-private-items`, with the intra-doc link lints as warnings: no diagnostic in a wiring file. The three it prints are in `cli.rs` and `token_cmd.rs` |
+| `evidence.md` quotes (a script) | The new section's 13 quoted lines equal the cited line ranges, line for line |
 
 **Third cycle**, at `13010f4` plus this cycle's staged changes (one comment in `wiring.rs`):
 
@@ -325,6 +421,14 @@ names, and `connect` is the real one.
 
 `docs/handoffs/649/evidence.md`.
 
+**Fourth cycle**, under "The #832 source D33's forwards rely on (F, D33 cycle)", at the top of the file. T-red's D33
+section, just below it, quotes the trait's two defaults, ADR-0021 section 14 and case 13.
+- **`PaneObservation` is `Clone` and `Default`** (`holler-pane/src/ports.rs:227-229`). So
+  `vec![PaneObservation::default(); n]` builds outside its crate, and `#[non_exhaustive]` forbids only a struct literal.
+- **`unmanaged::observe` takes the snapshot first, then calls `ports.herdr.observe_panes` once**
+  (`holler-pane/src/unmanaged.rs:89-92`, `:104-109`). Without the forwards, that call never reaches the adapter. And a
+  failed `LazyHerdr` build fails at the `snapshot` first.
+
 **Third cycle**, under "The source that round 2 of the diff gate asked for (F, third cycle)":
 - **B-2:** the declarations of `HerdrConfig` (`holler-adapter-herdr/src/adapter.rs:73-74`) and `PaneError`
   (`holler-pane/src/error.rs:402-403`). Neither has a lifetime or type parameter. Both quotes were checked line by line
@@ -364,6 +468,8 @@ on the gate to attach them.
 
 ## Tests that look wrong (for T)
 
+**Fourth cycle:** none. All seven D33 rows pass as T wrote them, and F touched no test.
+
 **Third cycle:** none. Round 2's B-1 was test-only, and T answered it in `13010f4`. The D8 test passes, and F did not
 touch it. This cycle only moved T's evidence section, unchanged, to the top of `evidence.md`, so that the gate shows it.
 
@@ -374,6 +480,19 @@ touch it. This cycle only moved T's evidence section, unchanged, to the top of `
 
 ## Known issues
 
+- **Fourth cycle: `wiring.rs` is not rustfmt-clean, on `main` as on the branch** (Design decision 18).
+  - The one hunk is #832's `holler_pane` import line. CI does not check it.
+  - Formatting `main` is not this story's job.
+- **Fourth cycle: round 1's evidence section is now past the diff gate's 12,000-byte window** (Design decision 19).
+  - Round 3 passed, and no line those entries back has changed since. But a fresh reviewer that asks round 1's
+    questions again will not see their answers.
+  - The cap is the Aftersight gap the third cycle already reported.
+- **Fourth cycle, for T-green: two `/tmp/hlr649-*` directories date from 15:52 MDT, before this cycle**
+  (`hlr649-f8qsRz`, `hlr649-gsPBcx`).
+  - Each holds only `wired.rs`'s `opencode` trap stub. It is a `TempDir`, so it is removed on drop, unless the run is
+    killed before the drop.
+  - This cycle's three runs (default, opt-in, workspace) left none. Older `hlr649-*.txt` files in `/tmp` are earlier
+    agents' notes.
 - **Third cycle, for O: two gaps in the diff gate's inputs.** Both are the pipeline's, not this story's, and are to be
   filed in Aftersight.
   - **The evidence cap is below this run's evidence file.**
@@ -409,16 +528,19 @@ touch it. This cycle only moved T's evidence section, unchanged, to the top of `
 
 ## Files changed
 
-Production files, all three cycles (marked by cycle where a later cycle touched them):
+Production files, all four cycles (marked by cycle where a later cycle touched them):
 - `crates/holler-cli/src/pane/wiring.rs` (second cycle; third cycle, a comment only)
-- `crates/holler-cli/src/pane/wiring/bind.rs`
+- `crates/holler-cli/src/pane/wiring/bind.rs` (fourth cycle: D33)
 - `crates/holler-cli/src/pane/wiring/env.rs` (second cycle)
 - `crates/holler-cli/src/pane/wiring/store.rs`
 - `crates/holler-cli/Cargo.toml`
 - `docs/adr/ADR-0021.md` (second cycle)
-- `CHANGELOG.md`
+- `CHANGELOG.md` (fourth cycle: one clause, S's advisory 6)
 
-The third cycle changes only `wiring.rs` in production.
+The fourth cycle changes `bind.rs` and `CHANGELOG.md` in production. The third cycle changed only `wiring.rs`.
 
-Pipeline scratch: `docs/handoffs/649/handoff-F.md`, `docs/handoffs/649/evidence.md` (third cycle: one entry, and the
-sections reordered), and the F entries in `docs/handoffs/649/decisions.md`.
+Pipeline scratch:
+- `docs/handoffs/649/handoff-F.md`;
+- `docs/handoffs/649/evidence.md`. The third cycle added one entry and reordered the sections. The fourth adds one
+  section at the top;
+- the F entries in `docs/handoffs/649/decisions.md`.

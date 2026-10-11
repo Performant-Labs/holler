@@ -14,8 +14,8 @@ fills this file in at release time.
   ([#649](https://github.com/Performant-Labs/holler/issues/649)). The CLI reads the registries over the hub's control
   socket and builds the adapters itself; the hub builds none. With no hub running, every one of these verbs exits 1 with
   `unavailable`, naming the missing hub, and touches nothing else; `pane list`, `get` and `watch` and `profile list` and
-  `show` need nothing but the hub. The adapters are configured by environment variables, each read when its adapter is
-  first used, so a missing or malformed one fails only the verbs that need it, with an error naming it:
+  `show` need nothing but the hub. The adapters are configured by environment variables, and a missing or malformed one
+  fails only the verbs that use its adapter, when they first use it, with an error naming it:
   `HOLLER_HERDR_SESSION` (the Herdr session the panes live in; Herdr's own `HERDR_SESSION` is not read),
   `HOLLER_HERDR_SOCKET` (else `HERDR_SOCKET_PATH`, else that session's default socket), `HOLLER_HERDR_WORKSPACES` (each
   workspace's rows by columns, `label=RxC,...`), `HOLLER_TMUX_SOCKET` (an absolute path; unset, tmux's default socket),

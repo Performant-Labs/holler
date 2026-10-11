@@ -12,6 +12,13 @@
 //!   `ensure_pane` returns to the name that the next `ensure_session` names (D8 (a)).
 //! - [`tui_session`] is the lookup itself (D8).
 //!
+//! **Every method is forwarded (D31 W-4, D33).** Each wrapper here overrides every method of its
+//! port, the ones the port gives a default included: `HarnessPort`'s `send_prompt` and
+//! `session_activity`, and `HerdrPort`'s `observe_pane` and `observe_panes` (#832). A default
+//! never answers in place of the inner port, and `observe_panes` goes to the inner port's own
+//! `observe_panes`, so a list of panes stays one read of Herdr (ADR-0021 section 14), never one
+//! `observe_pane` per pane.
+//!
 //! **Why the bindings (D8).** The launch engine attaches the TUI by the Herdr pane id before the
 //! pane's record exists (E34): `ensure_pane` (which knows the pane id), then `ensure_session` and
 //! `run` (which know the name), then the server, then `attach_tui(pane id)`, and only then the
@@ -29,7 +36,7 @@ use holler_adapter_opencode::Resolver;
 use holler_pane::ports::Activity;
 use holler_pane::{
     Argv, HarnessPort, HerdrPane, HerdrPort, HerdrSnapshot, HerdrSpec, HostPort, Key, Pane,
-    PaneError, PaneId, PaneName, PaneStore, ServeSpec,
+    PaneError, PaneId, PaneName, PaneObservation, PaneStore, ServeSpec,
 };
 
 /// The pairs a run's launches bound: the pane id the last `ensure_pane` answered, until an
@@ -81,7 +88,8 @@ impl Bindings {
 }
 
 /// The Herdr port, offering the pane id each `ensure_pane` answers to the `ensure_session` that
-/// follows it (D8 (a)). Every method forwards to the inner port and answers what it answers.
+/// follows it (D8 (a)). Every method forwards to the inner port and answers what it answers,
+/// `observe_pane` and `observe_panes` included (D33): a list is one call to the inner port.
 pub struct BindingHerdr {
     inner: Arc<dyn HerdrPort>,
     bindings: Bindings,
@@ -124,6 +132,14 @@ impl HerdrPort for BindingHerdr {
 
     fn version(&self) -> Result<String, PaneError> {
         self.inner.version()
+    }
+
+    fn observe_pane(&self, pane: &PaneId) -> Result<PaneObservation, PaneError> {
+        self.inner.observe_pane(pane)
+    }
+
+    fn observe_panes(&self, panes: &[PaneId]) -> Vec<PaneObservation> {
+        self.inner.observe_panes(panes)
     }
 }
 
@@ -172,7 +188,9 @@ type Build = Box<dyn Fn() -> Result<Arc<dyn HerdrPort>, PaneError> + Send + Sync
 /// The Herdr port, built on its first use and kept, the error of a build that failed included
 /// (D2): the adapter pings Herdr when it is built, so a verb that never reaches Herdr runs with no
 /// Herdr, and its configuration errors (D5) are answered at that first use, never at `connect`.
-/// A failed build is not retried: every method answers its error.
+/// A failed build is not retried: every method answers its error, except `observe_panes`, which
+/// returns no error and so observes nothing: one empty observation per pane, the port's rule for
+/// a call that failed (D33).
 pub struct LazyHerdr {
     build: Build,
     built: OnceLock<Result<Arc<dyn HerdrPort>, PaneError>>,
@@ -225,6 +243,17 @@ impl HerdrPort for LazyHerdr {
 
     fn version(&self) -> Result<String, PaneError> {
         self.port()?.version()
+    }
+
+    fn observe_pane(&self, pane: &PaneId) -> Result<PaneObservation, PaneError> {
+        self.port()?.observe_pane(pane)
+    }
+
+    fn observe_panes(&self, panes: &[PaneId]) -> Vec<PaneObservation> {
+        match self.port() {
+            Ok(port) => port.observe_panes(panes),
+            Err(_) => vec![PaneObservation::default(); panes.len()],
+        }
     }
 }
 
