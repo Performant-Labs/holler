@@ -1,18 +1,15 @@
-//! Running a helper program to its end within a bound (private). The adapter runs two
-//! helpers, never through a shell: `kill`, and tmux (the `attach` module's calls).
+//! Running a helper program to its end within a bound (private). The adapter runs one
+//! helper, never through a shell: tmux (the `attach` module's calls). It starts no server
+//! and signals no process of its own (#802: the host adapter starts and stops a pane's
+//! server).
 //!
-//! - [`kill_group`] sends SIGKILL to a process group through the `kill` program, not a raw
-//!   system call: when `serve`'s deadline passes before the server it started answers, it
-//!   stops that server's group.
-//! - [`capture`] runs a program to its exit and returns its status and what it printed,
-//!   which the tmux calls read. It knows nothing of tmux: what tmux's answers mean is the
-//!   `tui` module's.
-//!
-//! Both share one deadline loop: a child's exit is polled with `try_wait`, and on the
-//! deadline the child is killed and reaped, and the answer is `timeout` with the caller's
-//! `op`. A program that cannot be started is `unavailable`, naming it and none of its
-//! arguments. The runner is shaped like the host adapter's (#641), so that one runner for
-//! the adapters (#696) is a move.
+//! [`capture`] runs a program to its exit and returns its status and what it printed, which
+//! the tmux calls read. It knows nothing of tmux: what tmux's answers mean is the `tui`
+//! module's. Its deadline loop polls the child's exit with `try_wait`; on the deadline the
+//! child is killed and reaped, and the answer is `timeout` with the caller's `op`. A program
+//! that cannot be started is `unavailable`, naming it and none of its arguments. The runner
+//! is shaped like the host adapter's (#641), so that one runner for the adapters (#696) is a
+//! move.
 
 use std::fmt::Display;
 use std::io::{self, Read};
@@ -22,9 +19,6 @@ use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::time::{Duration, Instant};
 
 use holler_pane::PaneError;
-
-/// The program that signals a process group, found on the adapter's own `PATH`.
-const KILL: &str = "kill";
 
 /// How often a running helper is checked for its exit.
 const POLL: Duration = Duration::from_millis(5);
@@ -56,29 +50,6 @@ impl Ran {
 enum Pipe {
     Out,
     Err,
-}
-
-/// SIGKILL every process in the group `pgid` (`kill -s KILL -- -<pgid>`), within `bound`.
-///
-/// A `pgid` of 0 or 1 is refused: `kill` reads `-0` as its caller's own group and `-1` as
-/// every process the caller may signal.
-pub(crate) fn kill_group(pgid: u32, op: &str, bound: Duration) -> Result<(), PaneError> {
-    if pgid <= 1 {
-        return Err(PaneError::Unavailable {
-            what: format!("refusing to signal the process group {pgid}"),
-        });
-    }
-    let group = format!("-{pgid}");
-    let mut kill = Command::new(KILL);
-    kill.args(["-s", "KILL", "--", group.as_str()]);
-    let status = run(kill, op, bound)?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(PaneError::Unavailable {
-            what: format!("kill -s KILL -- {group} failed ({status})"),
-        })
-    }
 }
 
 /// Run `command` to its exit before `deadline`, with a null stdin and its stdout and
@@ -113,18 +84,6 @@ pub(crate) fn capture(mut command: Command, op: &str, deadline: Instant) -> Resu
         stdout,
         stderr,
     })
-}
-
-/// Run `command`, with stdin, stdout and stderr null, until it exits or `bound` passes.
-fn run(mut command: Command, op: &str, bound: Duration) -> Result<ExitStatus, PaneError> {
-    let program = program_of(&command);
-    let mut child = command
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(|error| cannot("run", &program, &error))?;
-    wait(&mut child, &program, op, crate::deadline_after(bound))
 }
 
 /// The deadline loop: poll `child` until it exits or `deadline` passes. On the deadline, or

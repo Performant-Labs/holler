@@ -172,10 +172,10 @@ fn ensured(host: &TmuxHost, session: &str, cwd: &Path) -> PaneName {
     n
 }
 
-/// Run `parts` in `n`, which must succeed; the pid it added to `ps`.
-fn started(host: &TmuxHost, n: &PaneName, parts: &[&str]) -> u32 {
+/// Run `parts` in `n`, in `cwd`, which must succeed; the pid it added to `ps`.
+fn started(host: &TmuxHost, n: &PaneName, cwd: &Path, parts: &[&str]) -> u32 {
     let before = host.ps(n).expect("ps before run");
-    host.run(n, &argv(parts)).expect("run");
+    host.run(n, &text(cwd), &argv(parts)).expect("run");
     let after = host.ps(n).expect("ps after run");
     let added: Vec<u32> = after.into_iter().filter(|p| !before.contains(p)).collect();
     assert_eq!(added.len(), 1, "run added {added:?}");
@@ -250,8 +250,8 @@ fn stop_owned_kills_only_the_owned_process() {
     let a = ensured(&host, "demo-c1r1", server.dir.path());
     let b = ensured(&host, "demo-c2r1", server.dir.path());
     let shell = host.ps(&a).expect("ps of a fresh session");
-    let in_a = started(&host, &a, &["sleep", "30"]);
-    let in_b = started(&host, &b, &["sleep", "30"]);
+    let in_a = started(&host, &a, server.dir.path(), &["sleep", "30"]);
+    let in_b = started(&host, &b, server.dir.path(), &["sleep", "30"]);
     let outside = Outside(Command::new("sleep").arg("30").spawn().unwrap());
     stopped(&host, &a);
     assert!(wait_until(|| !alive(in_a)), "the owned {in_a} survived");
@@ -280,7 +280,12 @@ fn stop_owned_escalates_to_kill() {
     let (host, server) = private();
     let host = host.with_stop_grace(Duration::from_millis(200));
     let n = ensured(&host, "demo-c1r1", server.dir.path());
-    let stubborn = started(&host, &n, &["sh", "-c", "trap '' TERM HUP; sleep 30"]);
+    let stubborn = started(
+        &host,
+        &n,
+        server.dir.path(),
+        &["sh", "-c", "trap '' TERM HUP; sleep 30"],
+    );
     stopped(&host, &n);
     assert!(
         wait_until(|| !alive(stubborn)),
@@ -289,7 +294,8 @@ fn stop_owned_escalates_to_kill() {
 
     let pidfile = server.path("member.pid");
     let leader = "sh -c \"trap '' TERM HUP; exec sleep 30\" & echo $! > \"$0\"; wait";
-    host.run(&n, &argv(&["sh", "-c", leader, &text(&pidfile)]))
+    let cwd = text(server.dir.path());
+    host.run(&n, &cwd, &argv(&["sh", "-c", leader, &text(&pidfile)]))
         .expect("run");
     let member: u32 = written(&pidfile).trim().parse().unwrap();
     assert!(alive(member), "the member {member} never started");
@@ -314,7 +320,7 @@ fn missing_session_is_typed() {
         matches!(ps, Err(PaneError::PaneNotFound { .. })),
         "ps: {ps:?}"
     );
-    let run = host.run(&n, &argv(&["sleep", "30"]));
+    let run = host.run(&n, &text(server.dir.path()), &argv(&["sleep", "30"]));
     assert!(
         matches!(run, Err(PaneError::PaneNotFound { .. })),
         "run: {run:?}"
@@ -350,7 +356,7 @@ fn argv_and_cwd_pass_exactly() {
     let out = text(&args_out);
     parts.push(&out);
     parts.extend(elements);
-    host.run(&c1, &argv(&parts)).expect("run");
+    host.run(&c1, &text(&hash), &argv(&parts)).expect("run");
     let got = written(&args_out);
     assert_eq!(got.lines().collect::<Vec<_>>(), elements, "{got:?}");
     assert!(
@@ -363,8 +369,12 @@ fn argv_and_cwd_pass_exactly() {
         assert_eq!(server.session_path(session), text(cwd));
         let pwd = server.path(&format!("{session}.pwd"));
         let pwd_text = text(&pwd);
-        host.run(n, &argv(&["sh", "-c", "pwd -P > \"$0\"", &pwd_text]))
-            .expect("run");
+        host.run(
+            n,
+            &text(cwd),
+            &argv(&["sh", "-c", "pwd -P > \"$0\"", &pwd_text]),
+        )
+        .expect("run");
         let want = format!("{}\n", text(&fs::canonicalize(cwd).unwrap()));
         assert_eq!(written(&pwd), want, "{session}");
     }
@@ -382,7 +392,7 @@ fn targets_are_exact() {
     }
     let (host, server) = private();
     let long = ensured(&host, "demo-c1r10", server.dir.path());
-    let p = started(&host, &long, &["sleep", "30"]);
+    let p = started(&host, &long, server.dir.path(), &["sleep", "30"]);
     let short = name("demo-c1r1");
     let check = |when: &str| {
         let ps = host.ps(&short);
@@ -404,26 +414,43 @@ fn targets_are_exact() {
     check("a window name in the newest session");
 }
 
+/// #802 AC 4: `run` starts its program in the directory it is given, not the one the
+/// session was made in (a session made for another directory is reused by a relaunch).
 #[test]
 #[ignore = "needs tmux; run with --ignored"]
-fn run_works_in_the_session_cwd() {
+fn run_works_in_the_given_cwd_not_the_sessions() {
     if !tmux_available() {
         return;
     }
     let (host, server) = private();
-    let a = made(&server, "A");
+    let (a, b) = (made(&server, "A"), made(&server, "B"));
     assert_ne!(
         fs::canonicalize(&a).unwrap(),
         env::current_dir().unwrap().canonicalize().unwrap()
     );
     let n = ensured(&host, "demo-c1r1", &a);
     let out = server.path("cwd.out");
-    host.run(&n, &argv(&["sh", "-c", "pwd -P > \"$0\"", &text(&out)]))
-        .expect("run");
-    let want = format!("{}\n", text(&fs::canonicalize(&a).unwrap()));
-    assert_eq!(written(&out), want);
+    host.run(
+        &n,
+        &text(&b),
+        &argv(&["sh", "-c", "pwd -P > \"$0\"", &text(&out)]),
+    )
+    .expect("run");
+    let want = format!("{}\n", text(&fs::canonicalize(&b).unwrap()));
+    assert_eq!(
+        written(&out),
+        want,
+        "the given directory, not the session's"
+    );
+    assert_eq!(
+        server.session_path("demo-c1r1"),
+        text(&a),
+        "the session keeps A"
+    );
 }
 
+/// #802 (plan review W-1): a missing or relative directory is `usage`, and no window is
+/// made (tmux would start the program in `$HOME`).
 #[test]
 #[ignore = "needs tmux; run with --ignored"]
 fn run_refuses_a_missing_or_relative_directory() {
@@ -434,8 +461,13 @@ fn run_refuses_a_missing_or_relative_directory() {
     let w = made(&server, "W");
     let n = ensured(&host, "demo-c1r1", &w);
     fs::remove_dir(&w).unwrap();
-    let run = host.run(&n, &argv(&["sleep", "30"]));
-    assert!(matches!(run, Err(PaneError::Unavailable { .. })), "{run:?}");
+    for cwd in [text(&w), "W".to_owned(), String::new()] {
+        let run = host.run(&n, &cwd, &argv(&["sleep", "30"]));
+        assert!(
+            matches!(run, Err(PaneError::Usage { .. })),
+            "{cwd:?}: {run:?}"
+        );
+    }
     let panes = server.lines(&["list-panes", "-s", "-t", "=demo-c1r1:", "-F", "#{pane_pid}"]);
     assert_eq!(panes.len(), 1, "only the shell pane: {panes:?}");
 

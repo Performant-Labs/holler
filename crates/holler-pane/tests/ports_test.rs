@@ -12,11 +12,14 @@ use std::io::Write;
 use std::time::Duration;
 
 use common::{pane, pane_name, profile, profile_name, spec, MemPaneStore};
+use holler_pane::error::{class_of, ErrorClass};
+use holler_pane::ports::AGENT_UNSUPPORTED;
 use holler_pane::{
-    next_generation, run_probe, Actor, Argv, Cursor, HarnessPort, HerdrPane, HerdrPort,
+    next_generation, run_probe, Actor, AgentKey, Argv, Cursor, HarnessPort, HerdrPane, HerdrPort,
     HerdrSnapshot, HerdrSpec, HostPort, Key, Pane, PaneError, PaneId, PaneName, PaneReply,
     PaneStore, Ports, ProbeResult, Prober, Profile, ProfileEvent, ProfileLogEntry, ProfileName,
-    ProfileScope, ProfileSpec, ProfileStore, ResolvedScope, SpecEdit, SystemProber, Watch,
+    ProfileScope, ProfileSpec, ProfileStore, ResolvedScope, ServeSpec, SpecEdit, SystemProber,
+    Watch,
 };
 use serde_json::json;
 
@@ -200,7 +203,7 @@ impl HostPort for TestHost {
     fn ensure_session(&self, _name: &PaneName, _cwd: &str) -> Result<(), PaneError> {
         Ok(())
     }
-    fn run(&self, _name: &PaneName, _argv: &Argv) -> Result<(), PaneError> {
+    fn run(&self, _name: &PaneName, _cwd: &str, _argv: &Argv) -> Result<(), PaneError> {
         Ok(())
     }
     fn stop_owned(&self, _name: &PaneName) -> Result<(), PaneError> {
@@ -214,8 +217,16 @@ impl HostPort for TestHost {
 struct TestHarness;
 
 impl HarnessPort for TestHarness {
-    fn serve(&self, _name: &PaneName, _port: u16) -> Result<u32, PaneError> {
-        Ok(4242)
+    fn serve_command(
+        &self,
+        _name: &PaneName,
+        port: u16,
+        _spec: &ServeSpec,
+    ) -> Result<Argv, PaneError> {
+        Ok(argv(&["opencode", "serve", "--port", &port.to_string()]))
+    }
+    fn verify_serving(&self, _port: u16, _spec: &ServeSpec) -> Result<(), PaneError> {
+        Ok(())
     }
     fn health(&self, _port: u16) -> Result<bool, PaneError> {
         Ok(true)
@@ -324,14 +335,21 @@ fn exercise_host_and_harness() {
     let name = pane_name("hj-c1r1");
     let host = TestHost;
     host.ensure_session(&name, "/work/holler").unwrap();
-    host.run(&name, &argv(&["opencode", "--port", "8095"]))
-        .unwrap();
+    host.run(
+        &name,
+        "/work/holler",
+        &argv(&["opencode", "--port", "8095"]),
+    )
+    .unwrap();
     assert_eq!(host.ps(&name).unwrap(), vec![4242]);
     host.stop_owned(&name).unwrap();
 
     let id = herdr_pane_id();
     let harness = TestHarness;
-    assert_eq!(harness.serve(&name, 8095).unwrap(), 4242);
+    let spec = ServeSpec::default();
+    let command = harness.serve_command(&name, 8095, &spec).unwrap();
+    assert_eq!(command, argv(&["opencode", "serve", "--port", "8095"]));
+    harness.verify_serving(8095, &spec).unwrap();
     assert!(harness.health(8095).unwrap());
     assert_eq!(harness.create_session(8095).unwrap(), "ses_new");
     assert_eq!(harness.list_sessions(8095).unwrap(), vec!["ses_abc"]);
@@ -536,4 +554,43 @@ fn run_probe_stub_never_reports_success() {
     ];
     assert_eq!(arms.len(), 3);
     assert_ne!(arms[0], arms[1]);
+}
+
+// ---------------------------------------------------------------------------
+// #802: `ServeSpec` and `agent-unsupported` (AC 1 and AC 11)
+// ---------------------------------------------------------------------------
+
+fn agent_key(text: &str) -> AgentKey {
+    AgentKey::parse(text).unwrap_or_else(|e| panic!("{text}: {e}"))
+}
+
+/// #802 AC 1: the default spec asks for no agent, and `with_agent` holds the key it is
+/// given (a builder on the spec, the one way a `#[non_exhaustive]` struct is built outside
+/// its crate). Reached through the crate root's re-export.
+#[test]
+fn serve_spec_default_has_no_agent_and_with_agent_holds_the_key() {
+    let default = ServeSpec::default();
+    assert_eq!(default.agent, None);
+    let key = agent_key("feature-implementor");
+    let with = ServeSpec::default().with_agent(key.clone());
+    assert_eq!(with.agent, Some(key.clone()));
+    assert_ne!(with, default, "an agent makes another spec");
+    assert_eq!(with.clone(), with, "Clone and PartialEq");
+    let replaced = with.with_agent(agent_key("orchestrator"));
+    assert_eq!(replaced.agent, Some(agent_key("orchestrator")));
+    // `Debug` names the field, so a failing assertion shows what was asked for.
+    assert!(format!("{replaced:?}").contains("orchestrator"));
+}
+
+/// #802 AC 11: `agent-unsupported` is a refusal (exit 3), a code of the open set beside
+/// `prompt-unsupported`, and it travels as `PaneError::Refused`.
+#[test]
+fn agent_unsupported_is_a_refusal_with_exit_3() {
+    let refused = PaneError::Refused {
+        code: AGENT_UNSUPPORTED,
+        message: "this harness cannot apply an agent yet".to_owned(),
+    };
+    assert_eq!(refused.code(), "agent-unsupported");
+    assert_eq!(class_of(refused.code()), ErrorClass::Refusal);
+    assert_eq!(class_of("agent-unsupported").exit_code(), 3);
 }
