@@ -54,3 +54,59 @@ Run handoff directory `docs/handoffs/835` · branch `issue-835-implementation` �
     - a typed bash script whose child is `sleep 600`: `bash`;
     - `exec -a claude sleep 600`: `claude`;
     - `new-window -- env -- sleep 600`: `sleep` (its session's shell window: `bash`).
+
+## A, up-front plan review (second pass, the amended brief): 2026-10-11T15:45-06:00 (MDT)
+
+- **Decided:** BLOCK, with 1 `block` and 7 `warn` findings (`docs/handoffs/835/handoff-A.md`, which replaces pass 1's
+  text; pass 1 is at `33416fa`).
+
+  The amendment settles both of pass 1's blocks (the port contract in §1, the rule in §2) and settles or records all
+  five of its warns. The plan still extends the right objects.
+
+  The new block is §1's default-armed shape together with §6's "do not touch `wiring.rs`". #649's branch (a-dup PASS at
+  15:27 MDT, not merged) wires the production host as `BindingHost` over `WiredHost` over `TmuxHost`, and both decorators
+  forward only the four existing methods. So the real import's read would answer the default's refusal for every pane:
+  every pane `command-unreadable`, every real run `import-blocked`. No compile error and no test catches it.
+  - Recommended: a required method (decision 12's "compile error at every call site").
+  - Acceptable: default-armed, with forwards in both decorators and a `WiredHost` conformance pin.
+  - Either way: sequence the run after #649 merges.
+
+  This retracts pass 1's finding 6, which recommended default-armed without reading #649's branch.
+
+  The warns:
+  - §13 has no finding table, and `no-tmux-session` is not a code;
+  - `fake_tmux_test.rs` must change, and #832 (PR #836) edits the same files;
+  - the two codes should name the condition, not the action or "command";
+  - the rule's limits are unrecorded, and pass 1 misdescribed the old launcher's test as argv[0]-only;
+  - a lost chain and a skipped read still record a pane on a guess;
+  - the constant and its predicate need one public home (`pane.rs`);
+  - the conformance case must hold on a real tmux (a shell window is listed; `env` may still show right after `run`).
+- **Assumed:**
+  - #649 merges with the decorators as they are on its branch at `9cafe0d`. If its wiring changes before merging, the
+    finding still applies to whatever decorates the host.
+  - tmux on Linux names a pane's foreground process by its process group leader's argv[0] (`/proc/<pgrp>/cmdline`),
+    cut at the first space; a name that starts with `/` is reduced to its last component. Pass 1's probe agrees:
+    `exec -a claude` changes argv[0] only, and tmux reported `claude`.
+  - The fleet's Claude Code processes have argv[0] `claude`, as the old launcher types the command (`pane-restart:153`, `:179`). The
+    live fleet was not looked at (out of bounds); the dry run is the check, and finding 5 asks for that to be recorded.
+- **Hedged:**
+  - Finding 1 offers A or B. Both are existing patterns: decision 12 for a required change, #645 and #832 for
+    default-armed methods. The block is the missing forward, not the choice.
+  - Findings 4 and 8 are guidance. The ADR's spelling and T's case design are the owners' decisions.
+- **Evidence:**
+  - Read: the amended brief (sha256 `18e5debe773dff24...`), pass 1's handoff and this journal; issues #831 and #832;
+    `git fetch` at 15:33 MDT (`origin/main` still `4366fb8`); `gh pr list` (#832 is PR #836, open; #649 has no PR yet).
+  - Read from other branches through git only, without opening their worktrees:
+    - #649's `crates/holler-cli/src/pane/wiring.rs`, `wiring/bind.rs`, `tests/pane_integration/bind.rs` and
+      `docs/handoffs/649/handoff-A.md`;
+    - #832's diff to `ports.rs`, `wiring.rs` and ADR-0021.
+  - Code on this branch:
+    - `holler-pane/src/{ports.rs, pane.rs, import.rs, import/{assess,observe,findings}.rs}`;
+    - `holler-adapter-host/src/{lib,tmux}.rs` and `tests/{fake_tmux_test.rs, real_tmux_test.rs}`;
+    - `holler-pane-testkit/src/{host.rs, conformance/host.rs}` and `tests/host_conformance_test.rs`;
+    - `holler-cli/src/pane/{import.rs, wiring.rs}` and `holler-cli/src/output.rs`;
+    - `holler-cli/tests/pane_verbs/{import.rs, import/{rig,seams}.rs, doctor/rig.rs}`;
+    - `holler-pane/tests/import_test.rs`, `holler-proto/src/vocab.rs` and `scripts/pane-restart`.
+  - Docs: ADR-0021 §2, §9 (`:698`, `:755`), §13 and the decisions list (`:976-978`); ADR 0003 (`:63`);
+    `cli-surface.txt`; `docs/research/claude-code-pane-spike.md` (§6, the contract changes, the decisions).
+  - Sizes: `wc -l` on every file the change would touch.
