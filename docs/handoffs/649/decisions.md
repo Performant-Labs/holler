@@ -187,3 +187,76 @@
     - `HarnessPort`'s methods (11);
     - `tui_session` call sites.
   - **Build:** `cargo check --tests -p holler-cli -p holler-adapter-opencode -p holler-adapter-host -p holler-adapter-herdr` on `3dff970`, clean. I ran no tests.
+
+## A (Phase 3, up-front plan review, fourth pass: the third-pass amendment and the merges of #664 and #650) — 2026-10-11T12:36:29-06:00
+- **Decided:** PASS on `docs/handoffs/649-brief.md` at `451e2b3` (sha256 `afe88dc4916d7e09...`), read against the tree at `d0c1531`. The merges `f59ba21` (#664) and `d0c1531` (#650) left the brief unchanged, and the issue's body matches it from Scope to Pipeline. No blocks and five warns, three of them binding. The full detail is in `handoff-A.md`, which replaces the third pass's.
+  - **B-2 is closed.** #828 is open (filed 12:14 MDT) and scoped to the first message's path. The brief names it in D17 (both ADR sentences), D18 (c), the W-B sentence and the Depends on line.
+  - **The rest of the third pass is resolved:** W-K (b) and (c) through D18 (b) and #654's comment (12:14 MDT), W-L through D15's second spec, and W-M. W-K (a) is half done (W-N (a)).
+  - **W-N (binding, F): three ADR edits.**
+    - (a) Lines 547-548 name #829, not D17's "#642 only".
+    - (b) Lines 568-569 use D5's wording: the flag is required by `launch` and needed by `pane import` and by apply to create a pane. D18 (b)'s "every verb that reaches Herdr" is too broad.
+    - (c) The Consequences bullet (916-917, "never a real Herdr, tmux or OpenCode") is amended for the opt-in scratch scenarios.
+  - **W-O (binding, phase 7): a third `LinkedHost`.** #664 added `profile_verbs/apply/rig.rs:636`, which triggers D32's "a third copy moves to the test kit"; the test kit is outside the Blast radius. Restated: #649's copy stays as test-local glue, no fourth copy, and O files the consolidation that #664's gate asked for.
+  - **W-P (binding, T): two no-hub rows no longer parse.** `EVERY_VERB`'s `["profile", "apply"]` and `["pane", "import"]` need `NAME` (#664) and `--from` (#650). Bare, clap exits 2 before `connect`. These failures are not RED evidence. D2's stub list is out of date; D22 is unchanged.
+  - **W-Q (F's paragraph and O's follow-ups):**
+    - apply's creates and relaunches write P through `StoreScope`, so they log `holler pane`, outside #825's premise;
+    - apply's observation bound (`tx_apply.rs:40-50`) meets W-C's case through `shown_session`;
+    - import reports a `--herdr-session` that differs from `HOLLER_HERDR_SESSION` as `pane-unlabelled` for every pane.
+  - **W-R (low):** `docs/testing.md` has no section for the new opt-in gate, and the precedent is mixed.
+  - **The merges change nothing the plan builds on:**
+    - `ports.rs` is untouched, so `HarnessPort` still has eleven methods;
+    - every sentence D17 lists is still in ADR-0021;
+    - neither merge sends a prompt;
+    - the WIP's store clients, `LazyHerdr` and bindings are safe for apply's threads and sequential launches;
+    - import calls no TUI method;
+    - the tree type-checks.
+- **Assumed:**
+  - **Binding readings reach F and T through this handoff**, as the first pass's did before D31 carried them into the brief.
+  - **The adapter's snapshot covers only its configured session.** I read this from `adapter.rs:388-406` (one `SessionSnapshot` request on the configured socket, each pane stamped with the configured session); I did not run it.
+  - **No consolidation issue exists for `LinkedHost`.** I read the titles of the open issues from #800 up, not every open issue's body.
+  - **Clap rejects the two bare rows.** I inferred exit 2 from the required arguments (`apply.rs:55`, a `String` positional; `import.rs:83`, a `String` long option). I ran no test.
+- **Hedged:**
+  - **Why W-N is a binding warn, not a block like B-2.** The brief itself names #829 twice (D18 (f), Depends on), so F has a reading that is both compliant and true. A chooses between two operator statements and overrides neither. Items (b) and (c) only add wording, inside the Blast radius.
+  - **W-O restates A's own note (D32),** which A may do. It changes no operator decision, and the test kit's docs prescribe test-local wrappers.
+  - **W-Q (b)'s worst case** is estimated from the bounds, not measured.
+  - **W-R is not binding:** `docs/testing.md` documents #640's gate but not #642's.
+  - **This review spans a merge.** `d0c1531` landed while I was reviewing (12:24 MDT); I re-checked everything above against it.
+- **Evidence:**
+  - **Read in full:**
+    - the brief at `451e2b3`, and its diff from `f59ba21`;
+    - `pane_integration/no_hub.rs`;
+    - `wiring/bind.rs` and `wiring/store.rs` (the trial);
+    - `tx_apply/observe.rs` (1-190);
+    - `pane_verbs/process/stub.rs` (1-120, plus the #650 diff).
+  - **Diffs read:**
+    - the stats of `be87a09..f59ba21` and `451e2b3..d0c1531`;
+    - both merges' changes to ADR-0021, ADR-0003, `stub.rs` and `cli-surface.txt`.
+  - **Read in part:**
+    - ADR-0021 at `d0c1531`: 180-190, 205-222, 478-572, 810-828, 862-934, and every `#649` and `#646` mention;
+    - `profile/apply.rs` (1-120) and `pane/import.rs` (60-100);
+    - `tx_apply.rs` (36-62), `tx_apply/run.rs` (44-70, 106-126) and `tx_launch.rs` (462-468, 570-578);
+    - `import/observe.rs` (1-40);
+    - `profile_scope.rs` (170-215);
+    - `attach.rs` (greps of the resolver and deadline);
+    - `adapter.rs` (254-266, 388-418);
+    - `holler-pane-testkit/src/{host.rs (1-40), harness.rs (1-30)}`;
+    - the three `LinkedHost` copies;
+    - `pane_integration/main.rs` (1-40);
+    - `scripts/lint.sh` (1-56);
+    - `docs/testing.md` (greps);
+    - `docs/handoffs/664/{handoff-A.md, handoff-A-dup.md}` (greps).
+  - **GitHub:**
+    - #828 and #829: bodies, states and creation times;
+    - #654: its comment;
+    - #825, #653 and #803: bodies;
+    - #667 and #650: states;
+    - open issues from #800 up: titles;
+    - #649's body, compared with the brief.
+  - **Greps:**
+    - every `impl <Port> for` and `struct LinkedHost` in `crates/`;
+    - `herdr_session` fields in the CLI's verbs;
+    - `ports.scope`, `edit_spec` and actor constants in `holler-pane` and the CLI;
+    - TUI and harness calls in the import engine;
+    - `allow(dead_code)` in the test trees;
+    - line counts of every file the work touches.
+  - **Build:** `cargo check --tests -p holler-cli -p holler-pane -p holler-adapter-opencode -p holler-adapter-host -p holler-adapter-herdr`, clean at `f59ba21` and at `d0c1531`. I ran no tests.
