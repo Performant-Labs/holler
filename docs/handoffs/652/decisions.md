@@ -36,7 +36,7 @@ This file is append-only: every phase adds its entry.
     #642 part 3, #644 part 2, #649, #650 and #664 merge, with the evidence re-taken (`gh issue view` on 2026-10-11 shows
     all six OPEN).
   - Claude Code panes are in the live fleet. #784 added the script's Claude Code path, and `orchestrating.md` documents
-    it for fleet panes (`hj-c3r1`). Whether the operator wants them out of the fleet before the cutover is option (b),
+    it for fleet panes. Whether the operator wants them out of the fleet before the cutover is option (b),
     the operator's call.
 - **Hedged:**
   - Finding 1 is a `block`, not a `warn`. The guide is the agent guidance for orchestrators, and the fix changes the
