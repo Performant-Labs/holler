@@ -1,6 +1,6 @@
 //! #805: Stage 2 text for local-only runs (zero sessions): skip the remote checks, epic #769.
 //!
-//! Plain text assertions over `agent-skills/setup-wizard/SKILL.md` and `docs/setup-wizard.md`.
+//! Plain text assertions over `agent-skills/herdr-setup/SKILL.md` and `docs/setup-wizard.md`.
 //! Nothing here runs a script or touches a host.
 #![cfg(unix)]
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)] // #805
@@ -29,7 +29,7 @@ fn between(text: &str, start: &str, end: &str) -> String {
 
 fn stage2() -> String {
     between(
-        &flat("agent-skills/setup-wizard/SKILL.md"),
+        &flat("agent-skills/herdr-setup/SKILL.md"),
         "## Stage 2 ",
         "## Stage 3 ",
     )

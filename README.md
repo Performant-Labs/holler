@@ -181,17 +181,17 @@ See [docs/README.md](docs/README.md) — the index. For testing: [the harness de
 To have an agent (Claude Code or similar) drive the [Herdr workspace setup](docs/setup-wizard.md)
 for you — one or more local orchestrator panes plus one live view pane per remote Holler
 session — give it the prompt below. The wizard is a Claude Code skill that ships in this repo in
-[`agent-skills/setup-wizard/`](agent-skills/setup-wizard/): `SKILL.md` plus the helper scripts in its
+[`agent-skills/herdr-setup/`](agent-skills/herdr-setup/): `SKILL.md` plus the helper scripts in its
 `lib/` directory, which its stages run, so the **whole directory** is needed. The prompt uses the skill
 if it's installed and otherwise fetches the directory from this repo, so it works on a machine that
 has never seen it. A local-only setup (orchestrators only, no remote sessions) is valid too: the session stages are skipped.
 To install it permanently for Claude Code instead (one command, no checkout needed):
 
 ```bash
-mkdir -p ~/.claude/skills && curl -fsSL https://github.com/Performant-Labs/holler/archive/refs/heads/main.tar.gz | tar -xz -C ~/.claude/skills --strip-components=2 holler-main/agent-skills/setup-wizard
+mkdir -p ~/.claude/skills && curl -fsSL https://github.com/Performant-Labs/holler/archive/refs/heads/main.tar.gz | tar -xz -C ~/.claude/skills --strip-components=2 holler-main/agent-skills/herdr-setup
 ```
 
-No release tag contains the whole skill directory yet, so the command fetches `main`. A setup built
+No release tag contains the whole skill directory yet, so the command fetches `main`. The command you type is `/herdr-setup`. A skill installed as `~/.claude/skills/setup-wizard` before the rename is a different skill name now: remove or move it by hand (the wizard never deletes it). A setup built
 before ledgers existed is refused as foreign (the wizard stops only processes it recorded itself),
 see [Instance state and the ledger](docs/setup-wizard.md#instance-state-and-the-ledger).
 An optional `workspace = "<name>"` in the config names the Herdr workspace; the wizard suggests two words, such as `herald-relay`.
@@ -201,18 +201,18 @@ The prompt:
 ```
 Set up a Herdr workspace for me, per Performant-Labs/holler's docs/setup-wizard.md.
 
-Use the setup-wizard procedure and follow its stages exactly — starting with its own Stage 0, the preflight,
+Use the herdr-setup procedure and follow its stages exactly — starting with its own Stage 0, the preflight,
 which checks what this machine has (read-only, no config needed), installs the `herdr` binary only
 on its own yes/no if it is missing, and then asks a second, separate yes/no ("All systems go.
 Proceed?") before configuring anything or launching a workspace.
 
-1. If you have the `setup-wizard` Claude Code skill installed, invoke it directly
-   (/setup-wizard, optionally with --config <path>).
-2. Otherwise get the same procedure from the repo: use agent-skills/setup-wizard/ in a local
+1. If you have the `herdr-setup` Claude Code skill installed, invoke it directly
+   (/herdr-setup, optionally with --config <path>).
+2. Otherwise get the same procedure from the repo: use agent-skills/herdr-setup/ in a local
    checkout, or install the whole directory (not SKILL.md alone: its stages run the scripts in
    its lib/ directory) into ~/.claude/skills with the README's install command in the section
    "Set up a Herdr workspace with an agent" of Performant-Labs/holler's README.md — and execute
-   SKILL.md stage by stage, as if it were that skill (treat "/setup-wizard" in it as this
+   SKILL.md stage by stage, as if it were that skill (treat "/herdr-setup" in it as this
    very task, and its optional --config <path> as the config path I give you).
 3. Only if you cannot get that file, read docs/setup-wizard.md in full and replicate its flow
    yourself. First, check

@@ -22,7 +22,7 @@ fn validate(toml: &str) -> Output {
     let cfg = dir.path().join("sessions.toml");
     std::fs::write(&cfg, toml).unwrap();
     Command::new("bash")
-        .arg(repo_root().join("agent-skills/setup-wizard/lib/instance.sh"))
+        .arg(repo_root().join("agent-skills/herdr-setup/lib/instance.sh"))
         .arg(&cfg)
         .output()
         .unwrap()
@@ -34,7 +34,7 @@ fn validate_home(toml: &str, home: &str) -> Output {
     let cfg = dir.path().join("sessions.toml");
     std::fs::write(&cfg, toml).unwrap();
     Command::new("bash")
-        .arg(repo_root().join("agent-skills/setup-wizard/lib/instance.sh"))
+        .arg(repo_root().join("agent-skills/herdr-setup/lib/instance.sh"))
         .arg(&cfg)
         .env("HOME", home)
         .output()
@@ -266,7 +266,7 @@ fn a_top_level_key_placed_under_instance_is_refused_with_a_hint() {
 #[test]
 fn usage_errors_exit_2() {
     let out = Command::new("bash")
-        .arg(repo_root().join("agent-skills/setup-wizard/lib/instance.sh"))
+        .arg(repo_root().join("agent-skills/herdr-setup/lib/instance.sh"))
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(2));
@@ -276,7 +276,7 @@ fn usage_errors_exit_2() {
 /// with the values the stages use today.
 #[test]
 fn documented_defaults_match_the_skill_text() {
-    let skill = read_repo("agent-skills/setup-wizard/SKILL.md");
+    let skill = read_repo("agent-skills/herdr-setup/SKILL.md");
     let docs = read_repo("docs/setup-wizard.md");
 
     // What the stages use today.
@@ -314,7 +314,7 @@ fn documented_defaults_match_the_skill_text() {
 
 #[test]
 fn stage_one_runs_the_validator() {
-    let skill = read_repo("agent-skills/setup-wizard/SKILL.md");
+    let skill = read_repo("agent-skills/herdr-setup/SKILL.md");
     let stage1 = skill
         .split("## Stage 1")
         .nth(1)

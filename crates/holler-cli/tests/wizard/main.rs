@@ -1,4 +1,4 @@
-//! Tests of the setup wizard's helper scripts (`agent-skills/setup-wizard/lib/`), epic #726.
+//! Tests of the setup wizard's helper scripts (`agent-skills/herdr-setup/lib/`), epic #726.
 //!
 //! One module per story, each in its own file and owned by that story alone:
 //! `instance` (#727), `preflight` (#728), `start` (#729), `herdr` (#730), `ownership` (#731).
@@ -22,4 +22,5 @@ mod skilltext_w5_basics;
 mod skilltext_w5_workspace;
 mod skilltext_w6_preflight;
 mod skilltext_w5_stage0;
+mod skilltext_w5_rename;
 mod start;

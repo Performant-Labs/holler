@@ -2,7 +2,7 @@
 //! handful of Herdr bindings a new user needs, names a restored workspace beside the new one,
 //! warns about teardown, and changes nothing.
 //!
-//! Plain text assertions over `agent-skills/setup-wizard/SKILL.md` and `docs/setup-wizard.md`.
+//! Plain text assertions over `agent-skills/herdr-setup/SKILL.md` and `docs/setup-wizard.md`.
 #![cfg(unix)]
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)] // #811
 
@@ -25,7 +25,7 @@ fn between(text: &str, start: &str, end: &str) -> String {
 }
 
 fn skill() -> String {
-    read("agent-skills/setup-wizard/SKILL.md")
+    read("agent-skills/herdr-setup/SKILL.md")
 }
 
 fn stage10() -> String {

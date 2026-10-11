@@ -7,7 +7,7 @@
 
 use std::path::PathBuf;
 
-const SKILL: &str = "agent-skills/setup-wizard/SKILL.md";
+const SKILL: &str = "agent-skills/herdr-setup/SKILL.md";
 const NEW: &str = "All systems go. Proceed?";
 
 /// A file with every run of whitespace folded to one space, for phrases that wrap.
