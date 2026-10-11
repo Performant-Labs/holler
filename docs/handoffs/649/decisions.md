@@ -574,3 +574,64 @@
   - Workspace: 151 binaries; 2312 passed, 1 failed (the rename scan, `docs/handoffs/` hits only), 32 ignored.
     `pane_integration` 61/0/4, `docs_cli_test` 3/3, `wire_selftest` 3/3. Build, clippy `-D warnings`, `lint.sh`,
     `changelog-check` and `machete` are clean.
+
+## A (Phase 8, anti-duplication gate) — 2026-10-11T15:26:46-06:00
+- **Decided:** PASS on the diff `5d366b9..c13400a`. No blocks and four low warns, none binding on this run. The full
+  detail is in `handoff-A-dup.md`.
+  - **No parallel path.**
+    - F filled #670's `Wiring` in place and reused `StoreScope`, `SystemProber`, `transport::call(None, ..)`,
+      `holler_pane::reply` and the adapters' constructors.
+    - The new objects are D24's names, plus `Wired<P>` and the `Lookup` alias.
+    - The store clients, the environment readers, the bindings and the resolver have no analogue to extend.
+  - **The tests reuse what D11 and D32 name:** the three rigs by `#[path]`, generalised in place, and `support`'s
+    `Hub`, `StateDir` and `wait_for`. There are still three `LinkedHost`s, and no fourth.
+  - **The warns:**
+    - W-1: the scratch module's `alive` is a third copy of the host adapter tests' `kill -0` helper.
+    - W-2: `real_tmux::tmux_on_path` repeats the rig's `on_path`; `isolated` could take the tmux binary.
+    - W-3: `wired.rs`'s `trap_dir` copies `no_hub.rs`'s OpenCode trap, and `Scratch::harness`'s resolver is
+      `rig::sessions_for(&[])`.
+    - W-4: the client's `Feed<E>` is the third instance of the hub's private, twinned poll iterator.
+    - W-O is carried: the `LinkedHost` consolidation is still unfiled.
+- **Assumed:**
+  - **The brief's D11, D24, D31 and D32 are the reuse map**, as in every A pass of this run. There is no `survey.md`.
+  - **T-green's workspace run covers D11's "default-run tests pass unchanged".** I re-ran no test. `c13400a`
+    changes only the brief, so the tree is the one T-green verified.
+- **Hedged:**
+  - **W-1 to W-3 are warns, not blocks.**
+    - Each is a few lines of test glue, not one of the overlay's helpers and not a production object.
+    - W-1 follows from D11's own limit on edits to the adapter test directories.
+    - W-2 was in the blessed trial `046026f`, and the host adapter's tests cannot reach the OpenCode rig.
+  - **W-4 is a warn, not a block.**
+    - The map does not name the hub's twins.
+    - They are private to `holler-hub`, which is outside the Blast radius (D16).
+    - The client's version adds D4's eager first request.
+- **Evidence:**
+  - **Read in full:**
+    - `wiring.rs` and `wiring/{store,bind,env}.rs`;
+    - `pane_integration/{main,bind,fake_hub,no_hub,store_only,wired,guards,env,clients,watch,scenario}.rs` and
+      `scratch/mod.rs`;
+    - `real_tmux/mod.rs`;
+    - `handoff-A.md` (fifth pass), `handoff-F.md`, `handoff-T-red.md`, `handoff-T-green.md` and
+      `649-diff-result-r3.md`.
+  - **Diffs read:** `scratch_herdr/mod.rs`, `real_opencode/rig.rs`, `real_tmux_test.rs`, `support/mod.rs` and
+    `pane_verbs/process/{main,stub}.rs`.
+  - **Read in part:**
+    - the hub's `panes/store.rs` (270-340) and `profile/store.rs` (330-385);
+    - `import/assess.rs` (140-200) and `holler-body/src/query.rs` (280-305);
+    - `pane_verbs/launch/rig.rs` (640-800) and `transport.rs`;
+    - the rig's `on_path`, `signal_group`, `config` and `sessions_for`.
+  - **Greps:**
+    - every `impl <Port> for` in `crates/`;
+    - `struct LinkedHost`, and every `start_server(` here and at the merge base;
+    - `PaneReply` users; `split_paths`, `XDG_CONFIG_HOME` and the no-hub text in `src`;
+    - `same_pane` and the label joins;
+    - `alive` and `kill -s 0` helpers; `UnixListener` in the tests;
+    - `control::run` and `ControlCall {` in `holler-cli/src`;
+    - re-declared `support` helpers, and `thread::sleep` in `pane_integration`;
+    - env-lock helpers;
+    - `TRIAL`, `eprintln!` and `"HERDR_SESSION"` in the wiring.
+  - **Git:**
+    - `git fetch origin`: `origin/main` is `4366fb8` (#830, `docs/research/` and `scripts/spikes/` only);
+    - the Blast radius checked against `git diff --name-only 5d366b9 HEAD`;
+    - `git diff 4d7f58a c13400a -- crates/` is empty.
+  - **GitHub:** `gh issue list --search LinkedHost --state all` finds only #649 and the closed #802.
