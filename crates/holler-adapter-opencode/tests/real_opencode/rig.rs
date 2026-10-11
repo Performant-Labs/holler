@@ -36,7 +36,7 @@ use holler_adapter_opencode::http::{self, Reply};
 use holler_adapter_opencode::{
     OpenCodeConfig, OpenCodeHarness, ProcessEnv, Timeouts, TmuxConfig, TmuxSocket,
 };
-use holler_pane::tx_launch::wait_healthy;
+use holler_pane::tx_launch::{wait_healthy, BOOT_POLL};
 use holler_pane::{Argv, HarnessPort, PaneError, PaneId, PaneName, ServeSpec};
 use holler_pane_testkit::conformance::harness::HarnessRig;
 use serde_json::{json, Value};
@@ -191,8 +191,6 @@ pub fn signal_group(pgid: u32, signal: &str) -> bool {
 
 /// How long a launched server may take to answer its first health check.
 const BOOT: Duration = Duration::from_secs(30);
-/// How often the launcher asks (the engine's default `boot_poll`).
-const BOOT_POLL: Duration = Duration::from_millis(150);
 
 /// The adapter, and the rig's launcher: every server it starts is recorded for the guard,
 /// and the model guard runs once the server is healthy.

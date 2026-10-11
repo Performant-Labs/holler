@@ -399,9 +399,11 @@ fills this file in at release time.
   adapter refuses one that is not an absolute path to an existing directory. The launch engine builds the command in
   its plan, so a harness that cannot apply the pane's agent refuses before anything is changed (`agent-unsupported`,
   exit 3; the OpenCode adapter answers it for every agent until it applies agents), checks the port again just before
-  the server starts, waits for the server's health within the run's budget (a server that never answers is now
-  `timeout`, not `unavailable`), and asks the running server whether it honours the spec (`verify_serving`) before it
-  creates the session of record. Nothing a user runs changes yet:
+  the server starts (never adopting a running server now rests on that check and the plan's `port-in-use` check, without
+  the adapter's own check that a healthy answer came from the server it had started), waits for the server's health
+  within the run's budget (a server that never answers is now `timeout`, not `unavailable`), and asks the running
+  server whether it honours the spec (`verify_serving`) before it creates the session of record. Nothing a user runs
+  changes yet:
   [#649](https://github.com/Performant-Labs/holler/issues/649) wires the adapters in
   ([#802](https://github.com/Performant-Labs/holler/issues/802)).
 

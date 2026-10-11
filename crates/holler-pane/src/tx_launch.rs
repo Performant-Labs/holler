@@ -30,8 +30,9 @@
 //! - **Bound (I5).** A run's budget ([`DEFAULT_BUDGET`]) starts when the engine is entered and is
 //!   checked before every live step (a monotonic clock, no port call). When it has run out the run
 //!   rolls back and answers `timeout`. A run takes at most the budget plus one port call's own
-//!   bound plus its rollback calls. The health wait ([`wait_healthy`]) polls every
-//!   [`TxOptions::boot_poll`] until the budget ends, and its sleep is the engine's one wait.
+//!   bound plus its rollback calls. The health wait ([`wait_healthy`]) asks every
+//!   [`TxOptions::boot_poll`] with the budget's end as its deadline, checked before each ask, so
+//!   it holds to that bound too; its sleep is the engine's one wait.
 //!
 //! Nothing here types into a pane (I4), runs a shell, or joins or splits an argv. Untrusted text
 //! (session and Herdr ids, workspaces, directories, a spec's pane, an adapter's or the prober's
@@ -225,22 +226,34 @@ pub fn relaunch(
     run(ports, &plan, &budget, options)
 }
 
-/// The budget of one run, started when the engine is entered.
+/// The budget of one run, started when the engine is entered. Its end is fixed once, when it
+/// starts, so [`Budget::check`] and the health wait ([`Budget::deadline`]) agree on when it runs
+/// out.
 struct Budget {
-    started: Instant,
-    limit: Duration,
+    end: Instant,
     op: &'static str,
 }
 
 impl Budget {
+    /// A budget of `limit` from now. A limit the clock cannot hold (hundreds of billions of
+    /// years) is halved until it can, so such a budget still never runs out in practice, for
+    /// `check` and the health wait alike.
     fn start(limit: Duration, op: &'static str) -> Self {
         let started = Instant::now();
-        Self { started, limit, op }
+        let mut limit = limit;
+        let end = loop {
+            if let Some(end) = started.checked_add(limit) {
+                break end;
+            }
+            limit /= 2;
+        };
+        Self { end, op }
     }
 
-    /// `timeout` once the budget has run out; a comparison of elapsed time, no port call.
+    /// `timeout` once the budget has run out: a reading of the monotonic clock against its end,
+    /// no port call.
     fn check(&self) -> Result<(), PaneError> {
-        if self.started.elapsed() < self.limit {
+        if Instant::now() < self.end {
             return Ok(());
         }
         Err(self.expired())
@@ -252,10 +265,10 @@ impl Budget {
         PaneError::Timeout { op }
     }
 
-    /// When the budget runs out: the end of the health wait. A budget the clock cannot hold
-    /// (centuries) ends the wait after its first poll.
+    /// When the budget runs out, the health wait's deadline: the instant from which `check`
+    /// fails, so the wait asks only while `check` would pass.
     fn deadline(&self) -> Instant {
-        self.started.checked_add(self.limit).unwrap_or(self.started)
+        self.end
     }
 }
 

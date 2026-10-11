@@ -246,3 +246,26 @@
 - **Assumed:** W-14 (an unrepresentable budget) and W-16 (`BOOT_POLL` import) get no test: A leaves W-14's form to F (a doc statement is acceptable), and W-16 is structural.
 - **Hedged:** None.
 - **Evidence:** `handoff-T-red.md` (the three failing assertions, and a trial fix, reverted, under which `pane_verbs` was 261/261 and the test kit's targets all passed).
+
+## F (Workflow Phase 6, round 2: T-green's B-1 and A's round 2) — 2026-10-11T08:00:53-06:00
+- **Decided:**
+  - **W-4 / B-1.** The shared `tx_launch::wait_healthy` checks its deadline at the top of the loop, before every `health` call, the first one included, and answers `Ok(false)` without asking once the deadline has passed.
+    - It sleeps for the smaller of `poll` and the time left, read again after the ask.
+    - `server::start` has no `budget.check()` between `run` and the wait; a comment says the wait holds the rule.
+    - The four docs W-4 names are updated (`wait_healthy`, `Budget::deadline`, step 3 of the server module doc, ADR-0021's health-wait paragraph), plus the I5 bullet of `tx_launch.rs`'s module doc.
+  - **W-14.** `Budget` computes its end once, in `start`. `check` is `now < end` and `deadline()` is `end`, so `check` and the wait are one predicate. A limit the clock cannot hold is halved until it fits, which keeps "never runs out in practice", the meaning `check` had before. The fields `started` and `limit` are removed.
+  - **W-16.** The real rig imports `tx_launch::BOOT_POLL` in place of its copy. This is the only edit in a test path: A assigned it to F, and T-red, the owner of the test files, handed it to F. No test logic or value changed.
+  - **AC 12 advisory.** The CHANGELOG entry now says that never adopting a running server rests on the plan's `port-in-use` check and its re-check before the run, and that the adapter's own-process check is gone.
+  - `archChanged: false`. No module boundary, public signature or dependency direction changed. `wait_healthy`'s documented contract only narrowed (no ask once the deadline has passed).
+- **Assumed:**
+  - T's sleep test relies on `std::thread::sleep` never sleeping less than asked (the std docs' guarantee). This is not checked in repository source, because `rust-src` is not installed here.
+  - The `remote_admin_test` failure seen once in the first full run is a flake under parallel load, unrelated to #802. It passed 3/3 alone and in the next full run, and #802 touches no hub or body code.
+- **Hedged:**
+  - W-16 crosses the role doc's "F edits no tests" line, on A's and T-red's instruction. T can redo or revert it at Phase 7.
+  - `tx_launch.rs` grew to 820 lines (it was 807). The guideline says to decompose before about 850, and #644 part 2 and #664 also edit this file.
+- **Evidence:**
+  - RED before the change: `launch::serve`, 12 passed and 3 failed, with T-red's three assertions. GREEN after: 15/15, and the three new tests 5 more times, 3/3 each.
+  - `cargo build --workspace --tests`, and `cargo clippy --workspace --all-targets -- -D warnings`, plus a forced re-check of the two changed crates.
+  - `scripts/lint.sh`, `scripts/changelog-check.sh`, `cargo machete`, rustfmt `--check`, `RUSTDOCFLAGS=-D warnings cargo doc` and `docs_cli_test`.
+  - The full verify command: 2073 passed, 0 failed, 25 ignored on the second run. The first run had 1 failure, the flake above.
+  - Opt-in real `real_opencode_test` against opencode 1.19.0: 9/9, with no stray server left.

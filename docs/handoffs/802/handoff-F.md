@@ -1,258 +1,209 @@
-# Handoff-F: Phase 6 (Workflow script; the role doc's Phase 5) - #802 `HarnessPort::serve_command` takes a `ServeSpec`; the harness server runs in the pane's tmux session
+# Handoff-F: Phase 6 (Workflow script; the role doc's Phase 5), round 2 - #802 the health wait checks the run's deadline before every ask
 
 **Date:** 2026-10-11
-**Branch:** issue-802-implementation (worktree `.claude/worktrees/0802-serve-command`, on `26148ba`)
+**Branch:** issue-802-implementation (worktree `.claude/worktrees/0802-serve-command`, on `563288a`)
 **Issue:** #802 (closes #695)
 
-Implemented against T's RED suite (`handoff-T-red.md`) and A's thirteen warns (`handoff-A.md`), with
-W-1 and W-2 applied as binding. No test file was edited. Nothing is committed: the Workflow script
-commits this phase.
+Round 1 of this handoff (the whole #802 implementation, GREEN at `7ede9c7`) is at
+`git show 7ede9c7:docs/handoffs/802/handoff-F.md`. It still describes every other file of the PR.
+This round changes only what T-green's B-1 and A's round 2 asked for. No test was edited, and
+nothing is committed, because the Workflow script commits this phase.
+
+| Field | Value |
+|---|---|
+| GitHub issue | #802 |
+| Working branch | `issue-802-implementation` |
+| Build plan phase | Workflow Phase 6 (F), the round after T-green BLOCK -> A PASS (round 2) -> T-red PASS (round 2) |
+| Input documents read | `802-brief.md` (as amended in `0dc4e8b`), `handoff-T-green.md` (B-1), `handoff-A.md` (round 2: W-4 restated and binding, W-14 to W-16), `handoff-T-red.md` (round 2), `decisions.md`, `evidence.md`, round 1's `handoff-F.md`, ADR-0021 section 2 and section 12 |
+| Acceptance criteria count | 12. This round touches AC 6 (amended Scope 2) and AC 12 (the CHANGELOG clause) |
+| Handoff document path | `docs/handoffs/802/handoff-F.md` |
 
 ## What was done
 
-**`holler-pane`**
-- `src/ports.rs`: `ServeSpec` (`#[non_exhaustive]`, `Debug + Clone + Default + PartialEq + Eq`,
-  `pub agent: Option<AgentKey>`, builder `with_agent(self, AgentKey) -> Self`) beside `HerdrSpec`,
-  with the two `compile_fail,E0639` doctests on its doc. `HarnessPort::serve` replaced by the pure
-  `serve_command(&PaneName, u16, &ServeSpec) -> Result<Argv, PaneError>` and the required
-  `verify_serving(u16, &ServeSpec) -> Result<(), PaneError>`. `HostPort::run(name, cwd, argv)`.
-  `AGENT_UNSUPPORTED` beside `PROMPT_UNSUPPORTED`. Module and trait docs record the amendment.
-- `src/lib.rs`: re-exports `ServeSpec`; the "frozen" paragraph names the two amendments.
-- `src/tx_launch.rs`: one `ServeSpec` per run, built in `Plan::new` as an exhaustive literal (W-5);
-  `Plan::observe` calls `serve_command` first and keeps the argv in `Seen`; `TxOptions.boot_poll`
-  (`BOOT_POLL`, 150 ms); `Budget::expired` and `Budget::deadline`; the `port-in-use` refusal is one
-  helper (`port_in_use`) for the plan and the act; `bring_up` passes the spec's `cwd` to both
-  `run`s and calls the child module for the server; launch writes `harness.pid: None`; the
-  "(#695)" survivor message and comment are gone. Module docs updated.
-- `src/tx_launch/server.rs` (new child module, declared `mod server;` as `reconcile.rs` declares
-  `observe`): `pub fn wait_healthy` (re-exported as `tx_launch::wait_healthy`, the one wait, W-4),
-  `stop_old` (B1/B2, moved here from the parent), and `start`: budget check, the `port-in-use`
-  re-check, `host.run` of exactly the planned argv in the spec's directory, the health wait to the
-  budget's end (`timeout` with the verb's op), budget check, `verify_serving`.
-
-**`holler-pane-testkit`**
-- `src/harness.rs`: `HarnessOp::ServeCommand` / `VerifyServing` (`harness.serve_command`,
-  `harness.verify_serving`) in place of `Serve`; `ServerView.agent`; `FakeHarness::serve_command`
-  (through the fault switch, records each spec, returns
-  `holler-fake-harness-server --pane P --port N [--agent K]`); `verify_serving` (reaches the port,
-  then `Ok` iff the spec's agent is the running server's, else the fake's own refusal
-  `AGENT_MISMATCH`, `agent-mismatch`); scenario method `start_server(&Argv) -> Option<Result<u32,
-  PaneError>>` (today's `World::serve` rules, `None` for any other argv, bypasses faults and the
-  log); inspection `serve_specs()`. Module and struct docs updated (W-8d).
-- `src/host.rs`: `run(name, cwd, argv)`; `runs() -> Vec<(PaneName, String, Argv)>` (W-8a); docs.
-- `src/conformance/harness.rs`: `run_harness_conformance(fresh, launch)` with
-  `launch: Fn(&S, &PaneName, &Argv) -> Result<(), PaneError>`, then `wait_healthy` (every
-  `BOOT_POLL`, within `DEFAULT_BUDGET`); case 2 renamed `launch-then-healthy` (checks the port is not
-  healthy between `serve_command` and the launcher; the pid check is gone); case 16
-  `serve-command-carries-the-agent`. Docs and the `text` usage block updated.
-- `src/conformance/host.rs`: every `run` passes the system temp dir as `cwd`.
-
-**`holler-adapter-opencode`**
-- `src/lib.rs`: `ProcessEnv::prefix()` (crate-private, beside `ProcessEnv`, W-12b), the one env
-  prefix of the server's and the TUI's argv (`TITLE_OFF` moved here from `tui.rs`);
-  `OpenCodeConfig::bin()` (crate-private; `attach.rs` used the same check inline);
-  `serve_command` / `verify_serving` delegate to `server`; deleted `OP_SERVE`, `Timeouts.boot_try`,
-  `OpenCodeConfig.workdir`. Crate docs rewritten (facts 2 and 6, the TUI-window precondition W-11b,
-  "No per-pane environment", the `Inherit` and `Isolated` docs).
-- `src/server.rs`: now `serve_command` (refuses an agent, else
-  `<prefix> <bin> serve --port P --hostname 127.0.0.1 <serve_args>`), `refuse_an_agent` (also
-  `verify_serving`'s answer, W-3 fail closed), and the unchanged `healthy`. Deleted `serve`,
-  `start`, `wait_until_up`, `stop`, `exited`, `reap_when_it_exits`, `refuse_a_held_port`,
-  `BOOT_INTERVAL`, `KILL_BOUND`, `timeout`.
-- `src/exec.rs`: deleted `kill_group`, its runner `run` and `KILL`; module docs.
-- `src/tui.rs`: `tui_argv` starts from `ProcessEnv::prefix()`.
-- `src/attach.rs`: uses `config.bin()`; module doc.
-
-**`holler-adapter-host`**
-- `src/lib.rs`: `run(name, cwd, argv)`: the existence read (`list-panes`, now `tmux::panes`, ps's
-  listing), then `check_argv`, then `check_cwd` (`usage` unless an absolute path to an existing
-  directory, W-1, no echo), then `new-window -c <escape_cwd(cwd)>`. `is_usable_dir` is the one
-  directory rule of `ensure_session` and `run`. Deleted `BAD_SESSION_DIR`. Crate docs (what `run`
-  starts, the error table, narrowing 5, the session-directory bullet; W-9).
-- `src/tmux.rs`: `new_window(name, cwd, argv)`; deleted `SESSION_PATH`, `session_dir`,
-  `is_session_dir`; `escape_cwd` and `panes` docs.
-
-**`holler-cli`**: `src/pane/wiring.rs`: `Unwired` gains the amended methods (`not-implemented`).
-
-**Docs**: `docs/adr/ADR-0021.md` (see "Architecture notes"); `CHANGELOG.md` `[Unreleased]` entry
-linking #802 and #695 and replacing the part 1 entry's statement about `serve`.
+- `crates/holler-pane/src/tx_launch/server.rs`
+  - **W-4 / B-1.** `wait_healthy` checks the deadline at the top of its loop, before every
+    `health` call, the first one included. Once the deadline has passed it answers `Ok(false)`
+    without asking. After a `false`, it sleeps for the smaller of `poll` and the time left,
+    measured after the ask.
+  - **No second check.** `start` has no `budget.check()` between `run` and the wait. A comment
+    says why: the rule lives in the one wait.
+  - **Docs.** Updated the docs of `wait_healthy` and step 3 of the module doc.
+- `crates/holler-pane/src/tx_launch.rs`
+  - **W-14.** `Budget` now holds its end, computed once in `Budget::start`. `check` compares the
+    monotonic clock against that end, and `deadline()` returns it. So `check` and the wait agree
+    by construction: an ask happens exactly when `check` would pass.
+  - **A budget the clock cannot hold.** A limit too large to add to an `Instant` (hundreds of
+    billions of years) is halved until it fits. It still never runs out in practice, for `check`
+    and the wait alike. The fields `started` and `limit` are gone.
+  - **Docs.** Updated the docs of `Budget`, `start`, `check` and `deadline`, and the module doc's
+    "Bound (I5)" bullet.
+- `crates/holler-adapter-opencode/tests/real_opencode/rig.rs` (**W-16**, a test-support file;
+  see Design decisions)
+  - It imports `holler_pane::tx_launch::BOOT_POLL` and drops its own copy of 150 ms. The rig's
+    own `BOOT` (30 s) stays, as A asked.
+- `docs/adr/ADR-0021.md`, section 2, the paragraph "The health wait moved into the engine"
+  - The wait has no deadline, budget or poll count of its own.
+  - It checks the budget's end before every ask, the first one after the run included, so section
+    12's bound holds for the wait too.
+  - A try that hangs costs at most `Timeouts.health`. That cost is the "one port call's own bound"
+    of section 12, not something inside the budget, so the old wording "inside the budget" was
+    corrected.
+- `CHANGELOG.md` (T-green's AC 12 advisory, which A passed to F)
+  - The #802 entry now says that never adopting a running server rests on the plan's
+    `port-in-use` check and the re-check before the server starts.
+  - It also says the adapter's own check, that a healthy answer came from the server it started,
+    is gone.
 
 ## Design decisions
 
-- **W-9, the existence read: reuse `tmux::panes` (ps's listing).** T chose option (a) and pinned
-  only that the read is a `list-panes`. Reusing the builder `ps` already has, rather than a new
-  `list-panes -F '#{session_path}'` whose output nobody reads, deletes `session_dir`,
-  `SESSION_PATH` and `is_session_dir`. The output is ignored; only a refusal (`pane-not-found`
-  or `unavailable`) matters.
-- **Check order in `run`: session, argv, `cwd`.** The session first keeps the documented "`run`
-  checks the session before the argv" (and the fake's order); `cwd` last keeps the fake's
-  behaviour a prefix of the adapter's (the fake does not check `cwd`). All three come before any
-  `new-window`.
-- **The fake's argv is a self-description with a program no real binary has**
-  (`holler-fake-harness-server`), so `start_server` can answer `None` for every other argv
-  (`["opencode", "serve", "--port", "48100"]`, `sleep 30`, empty). The key is its own element.
-- **The fake's mismatch code is its own open code, `agent-mismatch`** (T left it to F). Not
-  `agent-unsupported`: the fake can apply an agent; a mismatch means the running server was started
-  with another one.
-- **`start_server` on a frozen port answers `timeout` with `op = harness.serve_command`**: a
-  `<port>.<method>` op is the rule for every fake timeout, and that is the method whose argv was run.
-- **The idempotent start keeps the running server's agent**, as a second real `opencode serve` on
-  that port would fail to bind and leave the first running; `verify_serving` then sees the
-  mismatch. No engine path reaches it (the plan and the act both refuse a port that answers).
-- **`wait_healthy` mirrors `probe.rs`'s `wait_until`**: ask, then `left = deadline - now`; zero is
-  `Ok(false)`; else sleep `min(left, poll)`. It asks at least once and once more at the deadline.
-- **`Budget::deadline` uses `checked_add`, falling back to `started`**: an absurd budget the clock
-  cannot hold ends the wait after one poll rather than panicking (clippy denies `panic`; `Instant +`
-  would panic on overflow).
-- **The conformance suite's wait bound is the engine's own** (`DEFAULT_BUDGET`, `BOOT_POLL`), so
-  "the same way the engine waits" is literal.
-- **Case 16's key is `conformance-agent`**: a key no binary path or flag holds, so "some element
-  contains the key" cannot pass by accident (a key like `build` could match a path).
-- **`stop_old` moved into the child module.** It is the server's other step (B1/B2) and the move
-  keeps `tx_launch.rs` at 807 lines (it reached 829 with the stop in place; the guideline is to
-  decompose before about 850, and #644 part 2 and #664 will edit this file).
-- **`AGENT_UNSUPPORTED` message does not echo the key.** An agent key is not a secret, but the
-  refusal needs no key to be understood.
+- **The deadline check sits at the top of the loop, as A's W-4 asks.** I considered a check
+  between `run` and the wait in `server::start`. I rejected it because A's W-4 and Phase 8 rule
+  out a second `budget.check()`, and because the wait's two other callers (the conformance suite
+  and the real rig) would not get the rule. T's two direct tests pin the rule in the shared
+  function.
+- **The sleep is measured after the ask:** `min(poll, deadline - now)`.
+  - The time left is read again after `health` returns. Reusing the value read before the ask
+    would oversleep the deadline by up to one `health` call's duration.
+  - When `health` itself ran past the deadline, the sleep is zero and the next top check ends the
+    wait.
+  - So a call ends at most one `health` bound past the deadline, which is the bound the doc
+    states.
+- **The sleep test is deterministic.** It relies on `std::thread::sleep` never sleeping less than
+  it is asked to (std docs: "It will never sleep less"). The wait's sleep is capped at the time
+  left, so when it wakes the deadline has passed and the top check ends the wait without another
+  ask. That is how T's 60 s poll / 200 ms window test is exact.
+- **W-14: compute the end once, A's first option.** A's second option was to have both sides use
+  the time remaining. I rejected it because `wait_healthy` takes a deadline `Instant`, a
+  signature T's tests pin, so the engine would still have to turn the time remaining into an
+  `Instant`, with the same overflow question.
+  - With one `end`, `check` (`now < end`) and the wait (asks while `now < deadline`) are the same
+    predicate.
+  - For a limit the clock cannot hold, halving keeps `check`'s meaning before this change ("never
+    runs out" in practice). The alternative, falling back to `started`, would turn such a budget
+    into an immediate `timeout`. Halving ends: a zero limit always fits. It runs only for an
+    absurd limit; for any real budget the first `checked_add` succeeds.
+- **W-16 is the one edit in a test path, and it is deliberate.**
+  - The role doc says F writes and edits no tests. This edit changes no test, no assertion and no
+    value: the constant was a copy of `tx_launch::BOOT_POLL` (150 ms), and the rig now imports it.
+  - A assigned it to F ("W-14 and W-16 are small, and F can do them in the same pass"). T-red, who
+    owns the test files, also handed it to F ("W-14, W-16 and the CHANGELOG clause go in the same
+    pass, per A").
+  - A lists it among Phase 8's first checks, so leaving it would only send the run back here.
+  - T may revert it or redo it at Phase 7 if T wants the edit under its own name.
 
 ## Reuse / extend-vs-new
 
-Extended throughout, per the brief's Scope and A's map; no parallel path:
-- The ports amended in place (`HarnessPort`, `HostPort`).
-- `FakeHarness` / `World` / `ServerView` / `HarnessOp`, and `FakeHost` / `runs()`, extended (no
-  second log, no recording wrapper: W-8a).
-- The one conformance table, runner and `run_cases` (W-4: the new case is a 16th row; the runner
-  gained a parameter).
-- One wait (`tx_launch::wait_healthy`) for the engine, the suite and the real rig (W-4).
-- One env prefix (`ProcessEnv::prefix`) for the TUI's and the server's argv (Scope 3).
-- `tmux::escape_cwd` reused for `new-window -c` (no new escape); `tmux::panes` reused for the
-  existence read; `is_usable_dir` shared by `ensure_session` and `run`.
-- `OpenCodeConfig::bin` replaces the inline UTF-8 check `attach.rs` had, now that two builders need it.
-- The one new module, `tx_launch/server.rs`, is the brief's "sibling module" (Scope 2) in the
-  `reconcile/observe.rs` pattern.
+Extended in place; no new object.
+- The one shared `wait_healthy` gained the check (W-4). There is no second loop and no extra
+  `budget.check()`.
+- `Budget` keeps its role and API (`start`, `check`, `expired`, `deadline`). Only its inside
+  changed (W-14).
+- The rig now imports the engine's `BOOT_POLL` instead of copying it (W-16).
 
 ## Architecture notes for A
 
-- **Ports (contract amendment, amend-first):** `HarnessPort::serve` -> `serve_command` + required
-  `verify_serving`; `HostPort::run` gains `cwd`; new `ServeSpec` and `AGENT_UNSUPPORTED`. Every
-  implementation in the workspace is updated (fakes, adapters, `Unwired`, T's doubles).
-- **Process ownership moved**: the OpenCode adapter now starts, waits on and signals no process
-  (its `exec.rs` keeps only `capture` for tmux). The host adapter is the one place a pane's
-  processes start and stop, the server included.
-- **New module boundary**: `holler-pane/src/tx_launch/server.rs` (private), with one public
-  item, `wait_healthy`, re-exported from `tx_launch`. The test kit now depends on that function and
-  on `tx_launch::{BOOT_POLL, DEFAULT_BUDGET}` (it already depended on `holler-pane`; no manifest
-  change). No new crate dependency anywhere; `cargo machete` is clean.
-- **Engine side effect**: the launch engine now sleeps between health polls (ADR section 5 updated).
-- **No record or wire change**: `HarnessInfo.pid` keeps its serde (`skip_serializing_if`); launch
-  writes `None`. No protocol, hub or `holler-body` change.
-- **ADR-0021** (Scope 7 and W-10): port table rows; a new subsection "The harness server as amended
-  (#802)" recording decisions 1-4 as "Decided (operator, 2026-10-11)" and 5-7 as decided in review
-  round 1, the health wait and what it gives up, and the limits that move with the server
-  (W-10f: OpenCode's own `setsid` shell commands, the credential path and a possible `HostPort`
-  amendment for #649, tmux's command size); facts 1 (TUI-window precondition, W-11b), 2, 6, 7;
-  section 1's `harness` row; section 5's side effect; the section 8 seam phrase ("first
-  amendment"); "Launch and relaunch as built" (plan, act, rollback vs crash, W-10d); "Close as
-  built" (`stop_owned` now stops the server); section 11; the code table (launch/relaunch and
-  `profile apply` rows, the open-code list); the two Deferred bullets (#695 decided); "Decisions
-  taken" items 10-13.
+None that are structural.
+- No module boundary, public signature or dependency changed.
+- `wait_healthy`'s documented contract is narrower: it no longer "asks at least once"; a deadline
+  already past asks nothing. Its three callers are the engine, the conformance suite and the real
+  rig. All of them pass a deadline in the future at the start, so only the edge cases change.
+- `Budget` is private to `tx_launch`.
+- `tx_launch.rs` is 820 lines (it was 807; the lint fails at 900, and the guideline says to
+  decompose before about 850). `server.rs` is 106 lines.
 
 ## Deviations from spec / wireframe
 
-None in behaviour. Three structural choices the brief left open, recorded above: the existence
-read reuses `tmux::panes`; `stop_old` moved into the child module; `OpenCodeConfig::bin` is shared.
-Line counts asked for by W-6 (final): `tx_launch.rs` 807 (+ `tx_launch/server.rs` 101),
-`switch.rs` 833, `fake_tmux_test.rs` 803, `hermetic_test.rs` 812, `launch/rig.rs` 793 (the last
-four are T's files). `holler-adapter-opencode/src/lib.rs` is 599 and `holler-pane-testkit/src/
-harness.rs` 599 (both kept under the 600-line warning).
+None. Amended Scope 2 ("each `health` call is a live step with the budget checked before it";
+"the ADR's last sentence must keep holding for the wait too") now holds. A's four W-4 docs are
+updated, plus the module doc's I5 bullet in `tx_launch.rs`.
 
 ## Tier 1 self-check (incl. tests now GREEN)
 
 ```text
-$ cargo build --workspace --tests                     # every target compiles (RED was 11 targets)
-Finished `dev` profile
+# RED before the change (T-red round 2's three tests):
+$ cargo test -p holler-cli --test pane_verbs -- launch::serve
+test result: FAILED. 12 passed; 3 failed      # the three assertions handoff-T-red.md shows
 
-$ cargo clippy --workspace --all-targets -- -D warnings
-Finished `dev` profile                                # no warning (dead_code denied: Scope 3's deletions are complete)
+# After the change:
+$ cargo test -p holler-cli --test pane_verbs -- launch::serve
+test result: ok. 15 passed; 0 failed
+# the three new tests, 5 more runs:  ok. 3 passed; 0 failed  (x5, 1.20 s each)
 
-$ bash scripts/lint.sh        -> exit 0 (warnings only, none new: tx_launch.rs was already past 600)
-$ bash scripts/changelog-check.sh -> changelog-check: ok
-$ cargo machete               -> didn't find any unused dependencies
-$ rustfmt --edition 2021 --check <the changed crates' roots> -> clean
+$ cargo build --workspace --tests                          -> Finished, exit 0
+$ cargo clippy --workspace --all-targets -- -D warnings    -> exit 0
+  (and, after touching the crate roots so they are re-checked:
+   cargo clippy -p holler-pane -p holler-adapter-opencode --all-targets -- -D warnings -> exit 0)
+$ bash scripts/lint.sh            -> exit 0 (size warnings only; tx_launch.rs 820)
+$ bash scripts/changelog-check.sh -> changelog-check: ok   (also after the last wording edit)
+$ cargo machete                   -> no unused dependencies
+$ rustfmt --edition 2021 --check crates/holler-pane/src/lib.rs crates/holler-pane/src/tx_launch.rs \
+    crates/holler-adapter-opencode/tests/real_opencode_test.rs   -> clean
 $ RUSTDOCFLAGS="-D warnings" cargo doc --no-deps -p holler-pane -p holler-pane-testkit \
-    -p holler-adapter-opencode -p holler-adapter-host -> clean
+    -p holler-adapter-opencode    -> clean
+$ cargo test -p holler-cli --test docs_cli_test   -> 3 passed (after the last ADR/CHANGELOG edit)
 
-$ cargo test --workspace -- --skip roster_stays_accurate_under_concurrent_body_load
-passed=2070 failed=0 ignored=25, exit=0              # the pipeline's verify command, on the final code
-                                                     # (clippy on the same tree: exit 0)
-$ cargo test -p holler-cli --test docs_cli_test      # again after the last ADR/CHANGELOG wording edits
-3 passed
+# The pipeline's verify command (whole workspace):
+$ cargo test --workspace --no-fail-fast -- --skip roster_stays_accurate_under_concurrent_body_load
+run 1: 148 binaries, passed=2072 failed=1 ignored=25
+       the one failure: remote_admin_test::remote_admin_traffic_never_moves_the_bodys_last_seen
+       (hub/body traffic; #802 touches nothing on that path). Re-run alone 3 times: 21/21 each.
+run 2: 148 binaries, passed=2073 failed=0 ignored=25, exit 0     # 2070 + T-green's 1 + T-red's 2
 
-# T's targets, after the last code change:
-pane_verbs                 258 passed      fake_harness_test        23 passed
-harness_conformance_test    15 passed      host_conformance_test    12 passed
-fake_host_test              12 passed      hermetic_test            31 passed
-attach_test                 23 passed      fake_tmux_test           29 passed
-ports_test                   8 passed      pane_registry_test       15 passed
-holler_pane doc-tests        5 passed      (the two new compile_fail,E0639 among them)
-
-# The two compile_fail snippets, compiled outside the crate, fail with E0639 (rustdoc on stable
-# checks only that they fail):
-error[E0639]: cannot create non-exhaustive struct using struct expression   (x2)
-
-# Opt-in, real binaries on private servers (tmux 3.7c, a local opencode):
-cargo test -p holler-adapter-host --test real_tmux_test -- --ignored                      9 passed
-HOLLER_TEST_OPENCODE=1 cargo test -p holler-adapter-opencode --test real_opencode_test \
-  -- --ignored --test-threads=1                                                           9 passed
-# (ac12 runs the conformance suite through the new launcher against a real `opencode serve`
-#  started from the argv `serve_command` builds, `env -i K=V ... opencode serve ...`; no stray
-#  process was left.)
+# Opt-in, against a real binary (a local opencode 1.19.0; private scratch dir, tmux server and ports):
+$ HOLLER_TEST_OPENCODE=1 cargo test -p holler-adapter-opencode --test real_opencode_test \
+    -- --ignored --test-threads=1
+test result: ok. 9 passed   (ac12 runs the conformance suite through the rig's launcher, which
+                             waits with the changed wait_healthy and the imported BOOT_POLL)
+# Afterwards no `opencode serve --port 481xx` process was left.
 ```
 
 ## Evidence appendix
 
-`docs/handoffs/802/evidence.md` (rollback's `stop_owned`, `acted` and the CLI's reconcile step,
-`class_of` for open codes, the `pid` serde attribute, the host's TERM/grace/KILL and `argv[0]`
-rule, the fault switch logging failed calls).
+`docs/handoffs/802/evidence.md`.
+- Round 2 moved the `tx_launch.rs` line numbers of two entries (`roll_back` is now 721-727, and
+  the `acted` mapping is 573-576).
+- Round 2 added two entries that T's round-2 tests rely on:
+  - `FakeHarness::health` logs every call and answers `true` only for a running server
+    (`harness.rs:346-349`);
+  - `FaultSwitch::set_delay` (`fault.rs:79-83`).
+- Every excerpt was re-checked against its cited lines.
 
 ## Tests that look wrong (for T)
 
-None. Two notes, not defects:
-- `hermetic_test.rs` and `fake_tmux_test.rs` are 812 and 803 lines (lint fails at 900).
-- `ac8_a_spec_with_an_agent_is_refused_and_one_without_verifies` names "sends nothing" for the
-  no-agent `verify_serving` but does not assert the stub saw no request; the implementation sends
-  nothing (`refuse_an_agent` is pure). T may add `stub.lines().is_empty()` if it wants it pinned.
+None. One note: W-16 edited `real_opencode/rig.rs`, T's file (see Design decisions). It is an
+import in place of a copied constant, and no test logic changed.
 
 ## Known issues
 
-- **W-11(a), for O:** no test starts the server under a tmux pty through `new-window ... -- env --
-  <argv>`; the real rig's launcher spawns the argv directly (that crate may not depend on the host
-  adapter). The argv itself was proven against a real `opencode serve` (ac12, above). An opt-in
-  end-to-end check in `holler-cli` (the one crate that depends on both adapters) belongs with #649.
-- **W-13:** #664 has not merged; `crates/holler-cli/tests/profile_verbs/rig.rs` calls no `serve`,
-  so no edit outside the blast radius was needed. Whichever of #664 and #802 merges second adapts.
-- Until #649 wires the adapters, nothing a user runs changes; until #642 part 3, `--agent` against
-  the real adapter is refused (`agent-unsupported`, exit 3), as the brief intends.
+- **A flake outside #802.** `remote_admin_test::remote_admin_traffic_never_moves_the_bodys_last_seen`
+  failed once in the parallel workspace run: `last_seen` moved by one second. It passed 3/3 alone
+  and in the next full run. It is hub and body code that #802 does not touch.
+- **A fact outside the repo.** The sleep test's determinism rests on `std::thread::sleep` never
+  sleeping less than asked. That guarantee is in the std docs, not in this repository, and
+  `rust-src` is not installed here. So it is listed here, not in `evidence.md`.
+- **Carried from round 1, unchanged.**
+  - W-11(a): no test starts the server under a tmux pty. It goes with #649.
+  - W-13: the merge order with #664.
+  - W-15 (A, for O): the plan's reads and `session_of_record`'s two calls have no budget check
+    between them. This predates #802, and #802 is not held to it.
 
 ## Files changed
 
-Production (F):
-- `crates/holler-pane/src/ports.rs`
-- `crates/holler-pane/src/lib.rs`
-- `crates/holler-pane/src/tx_launch.rs`
-- `crates/holler-pane/src/tx_launch/server.rs` (new)
-- `crates/holler-pane-testkit/src/harness.rs`
-- `crates/holler-pane-testkit/src/host.rs`
-- `crates/holler-pane-testkit/src/conformance/harness.rs`
-- `crates/holler-pane-testkit/src/conformance/host.rs`
-- `crates/holler-adapter-opencode/src/lib.rs`
-- `crates/holler-adapter-opencode/src/server.rs`
-- `crates/holler-adapter-opencode/src/exec.rs`
-- `crates/holler-adapter-opencode/src/tui.rs`
-- `crates/holler-adapter-opencode/src/attach.rs`
-- `crates/holler-adapter-host/src/lib.rs`
-- `crates/holler-adapter-host/src/tmux.rs`
+This round:
+- `crates/holler-pane/src/tx_launch/server.rs` (production)
+- `crates/holler-pane/src/tx_launch.rs` (production)
+- `crates/holler-adapter-opencode/tests/real_opencode/rig.rs` (test support: W-16, the import only)
+- `docs/adr/ADR-0021.md`
+- `CHANGELOG.md`
+
+The PR's production files, both rounds (round 1's list, unchanged):
+- `crates/holler-pane/src/{ports.rs,lib.rs,tx_launch.rs,tx_launch/server.rs}`
+- `crates/holler-pane-testkit/src/{harness.rs,host.rs,conformance/harness.rs,conformance/host.rs}`
+- `crates/holler-adapter-opencode/src/{lib.rs,server.rs,exec.rs,tui.rs,attach.rs}`
+- `crates/holler-adapter-host/src/{lib.rs,tmux.rs}`
 - `crates/holler-cli/src/pane/wiring.rs`
 - `docs/adr/ADR-0021.md`
 - `CHANGELOG.md`
 
-Handoff: `docs/handoffs/802/handoff-F.md`, `docs/handoffs/802/evidence.md`, `docs/handoffs/802/decisions.md` (appended).
+Handoff: `docs/handoffs/802/handoff-F.md` (this file), `docs/handoffs/802/evidence.md` (line
+numbers and two entries), `docs/handoffs/802/decisions.md` (appended).

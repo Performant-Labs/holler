@@ -1,12 +1,13 @@
 # Evidence: #802 (F, Phase 6 of the Workflow script)
 
 Behaviour in **unchanged** code that the diff or T's tests rely on. Line numbers are at the F
-working tree (branch `issue-802-implementation`, after F's changes).
+working tree (branch `issue-802-implementation`, after F's round-2 changes: the health wait's
+deadline check, W-4, and the budget's single end, W-14).
 
 - **Fact:** a rollback stops the tmux session's processes when the act's session step ran, so the
   server started by `host.run` (after `made.session = true`) is stopped by the rollback of a later
   failure (a `verify_serving` refusal, the health wait's `timeout`, the act's `port-in-use`).
-  **Source:** `crates/holler-pane/src/tx_launch.rs:708-714`
+  **Source:** `crates/holler-pane/src/tx_launch.rs:721-727`
   **Verbatim excerpt:**
   > ```rust
   > fn roll_back(ports: Ports<'_>, name: &PaneName, made: &Made, error: PaneError) -> PaneError {
@@ -20,7 +21,7 @@ working tree (branch `issue-802-implementation`, after F's changes).
 
 - **Fact:** a failure is `acted: true` exactly when `edit_spec` entered the act; a refusal from the
   plan (`serve_command`'s `agent-unsupported`, before `edit_spec`) stays `acted: false`.
-  **Source:** `crates/holler-pane/src/tx_launch.rs:560-563`
+  **Source:** `crates/holler-pane/src/tx_launch.rs:573-576`
   **Verbatim excerpt:**
   > ```rust
   >     let profile = edited.map_err(|error| TxFailure {
@@ -116,4 +117,29 @@ working tree (branch `issue-802-implementation`, after F's changes).
   >             state.calls.push(op);
   >             state.delay
   >         };
+  > ```
+
+- **Fact:** the fake harness logs every `health` call and answers `true` only for a port whose
+  server is running, so a bare `FakeHarness::new()` answers `false` and its call log counts the
+  asks the shared `wait_healthy` made (T's two direct tests of the wait, round 2).
+  **Source:** `crates/holler-pane-testkit/src/harness.rs:346-349`
+  **Verbatim excerpt:**
+  > ```rust
+  >     fn health(&self, port: u16) -> Result<bool, PaneError> {
+  >         self.faults.enter(HarnessOp::Health)?;
+  >         Ok(self.lock().state(port) == Some(ServerState::Running))
+  >     }
+  > ```
+
+- **Fact:** `set_delay` makes every later call of that fake sleep before it answers, which is how
+  `no_health_poll_starts_once_the_budget_has_run_out` makes the host's `run` return after the
+  budget has run out, with no sleep in test code.
+  **Source:** `crates/holler-pane-testkit/src/fault.rs:79-83`
+  **Verbatim excerpt:**
+  > ```rust
+  >     /// Make every call sleep for `delay` before it answers, as a slow port does
+  >     /// (`None`: no delay).
+  >     pub fn set_delay(&self, delay: Option<Duration>) {
+  >         self.lock().delay = delay;
+  >     }
   > ```

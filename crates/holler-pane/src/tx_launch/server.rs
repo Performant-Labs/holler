@@ -13,9 +13,12 @@
 //!      this is what keeps a launch from taking over a server it did not start.
 //!   2. **The run**, in the spec's directory.
 //!   3. **The health wait** ([`wait_healthy`]): the server is asked every `boot_poll` until it
-//!      answers or the run's budget ends, and a server that never answers ends the run as the
-//!      budget's `timeout` (`pane.launch` or `pane.relaunch`). A server that exits at once is
-//!      seen the same way: the wait has no process to watch.
+//!      answers or the run's budget ends. The budget's end is the wait's deadline, checked
+//!      before every ask, the first one after the run included, so each ask is a live step
+//!      with the budget checked before it and none starts once the budget has run out. A
+//!      server that never answers ends the run as the budget's `timeout` (`pane.launch` or
+//!      `pane.relaunch`). A server that exits at once is seen the same way: the wait has no
+//!      process to watch.
 //!   4. **The spec**: `verify_serving` asks the running server whether it honours the plan's
 //!      `ServeSpec`, before any session is created on it. A refusal is the run's failure, and
 //!      the rollback stops the server.
@@ -29,8 +32,10 @@ use super::{port_in_use, unavailable, Budget, Plan, Seen};
 
 /// Wait for the harness server on `port` to answer: ask `harness.health` every `poll` until it
 /// answers `true` (`Ok(true)`) or `deadline` passes (`Ok(false)`). A `health` error is returned
-/// as it is. It asks at least once, and once more when the deadline comes during a sleep, so a
-/// call takes at most until `deadline` plus one `health` call's own bound.
+/// as it is. The deadline is checked before every ask, the first one included, and no ask
+/// starts once it has passed: a deadline already past asks nothing, and one that comes during
+/// a sleep ends the sleep and the wait. So a call takes at most until `deadline` plus one
+/// `health` call's own bound.
 ///
 /// The launch engine's wait, and the one the test kit's `HarnessPort` conformance suite and the
 /// OpenCode adapter's opt-in real tests wait with.
@@ -41,14 +46,13 @@ pub fn wait_healthy(
     deadline: Instant,
 ) -> Result<bool, PaneError> {
     loop {
+        if Instant::now() >= deadline {
+            return Ok(false);
+        }
         if harness.health(port)? {
             return Ok(true);
         }
-        let left = deadline.saturating_duration_since(Instant::now());
-        if left.is_zero() {
-            return Ok(false);
-        }
-        thread::sleep(left.min(poll));
+        thread::sleep(deadline.saturating_duration_since(Instant::now()).min(poll));
     }
 }
 
@@ -93,6 +97,7 @@ pub(super) fn start(
     ports
         .host
         .run(plan.name, &plan.spec.host.cwd, &seen.server)?;
+    // No budget check here: the wait checks the budget's end before every ask, its first included.
     if !wait_healthy(ports.harness, plan.port, poll, budget.deadline())? {
         return Err(budget.expired());
     }
