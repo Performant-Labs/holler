@@ -116,3 +116,23 @@ This file is append-only: every phase adds its entry.
   - Read: `findings.rs` (`FindingKind::ALL`), `import/findings.rs`, `import.rs:45`, `error.rs:146,221-266`,
     `grid.rs:44`, `pane/list.rs:30`, `holler-pane-testkit/src/envelope.rs:202`, and the verb `Args` in
     `pane/{switch,park,import,get,launch,relaunch,reset,unpark,close,doctor,list,watch}.rs`.
+
+## F, implementation: 2026-10-11T14:55-06:00 (MDT)
+
+- **Decided:** wrote `docs/pane-control.md` (twelve numbered sections), rewrote the "Restarting a pane on another model"
+  section of `docs/orchestrating.md` (heading without "(interim)"), added the `docs/README.md` Guidance line, replaced
+  `scripts/pane-restart` line 3 with two comment lines, and added the CHANGELOG entry (`docs/handoffs/652/handoff-F.md`).
+  - Section 3 uses T's computed heading forms (A warn 1); section 10's closing sentence is qualified (A warn 2).
+  - Every list was taken from the built binary's `--help` and the code's tables, not from the brief.
+  - 15 of 16 tests of `docs_pane_control_test` pass, and `docs_cli_test` passes. The 16th,
+    `readme_indexes_the_guide_under_guidance`, cannot pass as written (`from_heading` with a start that begins `\n## `
+    returns empty); flagged for T, the test is not edited.
+- **Assumed:** this run reached F before #649 merged, so the #649 statements of sections 2 and 4 follow the #649
+  branch's `wiring.rs` module doc and the brief's R1 to R3, which agree on every point the guide states.
+- **Hedged:** the guide names only `HOLLER_HERDR_SESSION` (the issue body and the branch differ on its fallback), and the
+  second known fact of section 10 is stated as true until #649 merges.
+- **Evidence:** `holler pane|profile <verb> --help` for every verb on the built binary; `import/findings.rs` (`ALL`,
+  `level`); `findings.rs` (`ALL`, `remedy`, `FixState`); ADR-0021 sections 3, 4, 8 (launch, switch, close, apply), 9, 10,
+  11, 12, 13; `pane/launch.rs:385-430`; `pane/doctor.rs:60-112`; `adapter.rs:175-190` (Herdr); `profile_diff.rs:193-204`;
+  `envelope.rs:202-360`; `docs_cli_test.rs` (whole); the #649 branch's `pane/wiring.rs:1-60`; the import test fixtures for
+  the launcher table's shape. Facts in unchanged code are in `docs/handoffs/652/evidence.md`.

@@ -8,6 +8,13 @@ fills this file in at release time.
 ## [Unreleased]
 
 ### Enhancements
+- Pane control, the operator guide (epic [#633](https://github.com/Performant-Labs/holler/issues/633)): [`docs/pane-control.md`](docs/pane-control.md) documents every `holler pane` and `holler profile` verb ([#652](https://github.com/Performant-Labs/holler/issues/652)).
+  It states the rule that only pane verbs change a registry (OpenCode) pane and that a Claude Code pane stays outside
+  the registry, how to read `pane list` and `pane doctor`, the `profile apply` reference, grid notation, the JSON
+  envelope with every error code and its exit code, the cutover from the launcher's files, and the rollback. The
+  section "Restarting a pane on another model" of `docs/orchestrating.md` now leads with `holler pane relaunch` and keeps
+  `scripts/pane-restart` as the fallback until the 7-day sign-off of the cutover (#654), and as the only restart path
+  of a Claude Code pane. A docs test pins the guide to the code's own tables. No behaviour changes.
 - Pane control, the migration import (epic [#633](https://github.com/Performant-Labs/holler/issues/633)): `holler pane
   import --from STATE_ROOT --herdr-session NAME [--launcher FILE] [--orchestrator PANE]... [--dry-run]` adopts the fleet
   the old launcher runs ([#650](https://github.com/Performant-Labs/holler/issues/650)). It reads each pane directory's

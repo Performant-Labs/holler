@@ -105,11 +105,22 @@ message send, a task-queue push) — the loop's only job is to hold the
 `--after` watermark across calls and hand back exactly one line when
 something real happens.
 
-## Restarting a pane on another model (interim)
+## Restarting a pane on another model
 
-Until holler pane relaunch with --model (#644) and the pfleet adoption (#653) land, `scripts/pane-restart`
-restarts one fleet pane's OpenCode TUI on a new model. Run it on the host that owns the pane's tmux session
-(the fleet host), from any shell except the pane being restarted:
+A registry pane (an OpenCode pane with a pane record) is restarted on another model with `holler pane relaunch PANE --model PROVIDER/ID`. It
+stops only the processes the pane owns, starts the harness server again on the new model, keeps the session of record
+when the restarted server still lists it, and records the new model:
+
+```bash
+holler pane relaunch hj-c3r1 --model anthropic/claude-sonnet-5-5 --effort medium
+```
+
+The synopsis is `holler pane relaunch PANE --model PROVIDER/ID [--effort E]`; [pane-control.md](pane-control.md) is the
+operator guide for every `holler pane` verb, and its section 11 is the rollback.
+
+**The fallback: `scripts/pane-restart`, until the 7-day sign-off of the cutover (#654).** It restarts one fleet pane's
+OpenCode TUI on a new model without the registry. Run it on the host that owns the pane's tmux session (the fleet host),
+from any shell except the pane being restarted:
 
 ```bash
 scripts/pane-restart c3r1 --model anthropic/claude-sonnet-5-5 --effort medium \
@@ -120,9 +131,13 @@ It prints one line: `c3r1: OK model=… session=…`, `c3r1: REFUSED: …` (exit
 `c3r1: FAIL step N (name): …` (exit 2, with the `pane.env` backup path). It refuses the MO pane (`c4r2`) and
 any pane that is not idle. Pause the watchdog yourself first if you do not want it acting on the pane meanwhile.
 Do not type `tmux send-keys` by hand for this: text sent without `Enter` sits unsubmitted in the TUI prompt
-(the 2026-10-10 failure that motivated the script). This section is removed when #644 and #653 have merged.
+(the 2026-10-10 failure that motivated the script). A registry pane restarted with the script leaves the
+registry's control: its record's model and session of record go stale until `holler pane relaunch PANE` runs on it
+again, and `holler pane doctor --fix` must not be run on it meanwhile (pane-control.md, section 11). After the sign-off
+the script's OpenCode path is retired, in a later story.
 
-A pane running **Claude Code** is detected, not named: the script looks for a live Claude Code process whose
+A pane running **Claude Code** is not in the pane registry, so `holler pane` cannot restart it: `scripts/pane-restart`
+is its way, now and after the sign-off, which does not retire this path (issue #784). Such a pane is detected, not named: the script looks for a live Claude Code process whose
 record in `~/.claude/sessions/<pid>.json` names the pane's tmux session (`hj-c3r1`). Such a pane takes a Claude
 model alias or name and an effort level, and none of the OpenCode options:
 
