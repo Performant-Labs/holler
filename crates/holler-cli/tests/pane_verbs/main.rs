@@ -49,4 +49,17 @@ fn unwired_ports_answer_not_implemented() {
     for code in codes {
         assert_eq!(code.as_deref(), Some("not-implemented"));
     }
+    // #802: the amended methods are unwired too.
+    let name = holler_pane::PaneName::parse("demo-c1r1").unwrap();
+    let spec = holler_pane::ServeSpec::default();
+    let argv = holler_pane::Argv::new(vec!["true".to_owned()]);
+    let amended = [
+        ports.harness.serve_command(&name, 1, &spec).map(drop),
+        ports.harness.verify_serving(1, &spec),
+        ports.host.run(&name, "/", &argv),
+    ];
+    for answer in amended {
+        let code = answer.err().map(|e| e.code().to_string());
+        assert_eq!(code.as_deref(), Some("not-implemented"));
+    }
 }

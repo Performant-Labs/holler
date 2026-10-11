@@ -121,7 +121,9 @@ impl Rig {
             })
             .unwrap();
         self.host.ensure_session(&pane_name, "/srv/demo").unwrap();
-        self.host.run(&pane_name, &argv(&["opencode"])).unwrap();
+        self.host
+            .run(&pane_name, "/srv/demo", &argv(&["opencode"]))
+            .unwrap();
         let session = format!("ses-{name}");
         let mut record = sample_pane(name).unwrap();
         record.herdr = herdr;

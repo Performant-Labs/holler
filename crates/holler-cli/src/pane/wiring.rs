@@ -18,7 +18,7 @@ use holler_pane::{
     Actor, Argv, Cursor, HarnessPort, HerdrPane, HerdrPort, HerdrSnapshot, HerdrSpec, HostPort,
     Key, Pane, PaneError, PaneEvent, PaneId, PaneName, PaneStore, Ports, ProbeResult, Prober,
     Profile, ProfileEvent, ProfileLogEntry, ProfileName, ProfileScope, ProfileStore, ResolvedScope,
-    SpecEdit, Watch,
+    ServeSpec, SpecEdit, Watch,
 };
 
 /// The ports a verb runs against, owned.
@@ -153,7 +153,7 @@ impl HostPort for Unwired {
         Err(PaneError::NotImplemented)
     }
 
-    fn run(&self, _name: &PaneName, _argv: &Argv) -> Result<(), PaneError> {
+    fn run(&self, _name: &PaneName, _cwd: &str, _argv: &Argv) -> Result<(), PaneError> {
         Err(PaneError::NotImplemented)
     }
 
@@ -167,7 +167,16 @@ impl HostPort for Unwired {
 }
 
 impl HarnessPort for Unwired {
-    fn serve(&self, _name: &PaneName, _port: u16) -> Result<u32, PaneError> {
+    fn serve_command(
+        &self,
+        _name: &PaneName,
+        _port: u16,
+        _spec: &ServeSpec,
+    ) -> Result<Argv, PaneError> {
+        Err(PaneError::NotImplemented)
+    }
+
+    fn verify_serving(&self, _port: u16, _spec: &ServeSpec) -> Result<(), PaneError> {
         Err(PaneError::NotImplemented)
     }
 

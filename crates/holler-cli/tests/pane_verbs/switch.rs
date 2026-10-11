@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex};
 use holler_cli::output::Format;
 use holler_pane::pane::{Health, Hold};
 use holler_pane::ports::Activity;
-use holler_pane::{HarnessPort, Pane, PaneError, PaneId, PaneName, PaneStore};
+use holler_pane::{Argv, HarnessPort, Pane, PaneError, PaneId, PaneName, PaneStore, ServeSpec};
 use holler_pane_testkit::envelope::{check_envelope, Envelope};
 use holler_pane_testkit::harness::{FakeHarness, HarnessOp, HarnessOp as H, Quirk, TuiView};
 use holler_pane_testkit::pane_store::{FakePaneStore, PaneStoreOp};
@@ -478,8 +478,11 @@ struct WriterInSelect<'a> {
 }
 
 impl HarnessPort for WriterInSelect<'_> {
-    fn serve(&self, name: &PaneName, port: u16) -> Result<u32, PaneError> {
-        self.inner.serve(name, port)
+    fn serve_command(&self, n: &PaneName, port: u16, s: &ServeSpec) -> Result<Argv, PaneError> {
+        self.inner.serve_command(n, port, s)
+    }
+    fn verify_serving(&self, port: u16, spec: &ServeSpec) -> Result<(), PaneError> {
+        self.inner.verify_serving(port, spec)
     }
     fn health(&self, port: u16) -> Result<bool, PaneError> {
         self.inner.health(port)
@@ -740,8 +743,11 @@ impl<'a> SeamHarness<'a> {
 }
 
 impl HarnessPort for SeamHarness<'_> {
-    fn serve(&self, name: &PaneName, port: u16) -> Result<u32, PaneError> {
-        self.inner.serve(name, port)
+    fn serve_command(&self, n: &PaneName, port: u16, s: &ServeSpec) -> Result<Argv, PaneError> {
+        self.inner.serve_command(n, port, s)
+    }
+    fn verify_serving(&self, port: u16, spec: &ServeSpec) -> Result<(), PaneError> {
+        self.inner.verify_serving(port, spec)
     }
     fn health(&self, port: u16) -> Result<bool, PaneError> {
         self.inner.health(port)
