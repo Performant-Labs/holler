@@ -197,3 +197,45 @@
 - **Assumed:** The amended brief's sentence is binding even though some pre-existing plan and act steps (the plan's reads, `list_sessions` then `create_session`) also run two port calls without a check between them. Those are outside #802's diff. The wait is #802's own code and the brief names it.
 - **Hedged:** The CHANGELOG clause about the adapter's own-process check is advisory (AC 12 / Scope 7), so it is not part of the BLOCK.
 - **Evidence:** `handoff-T-green.md` (RED output, the trial fix's results, and the Tier 1 run on this tree).
+
+## A (Phase 3, up-front plan review, round 2: the amended brief, after T-green's BLOCK with `resumeArchChanged`) — 2026-10-11T07:39:47-06:00
+- **Decided:** PASS on `docs/handoffs/802-brief.md` as amended in `0dc4e8b` (sha256 `16db698d23e2428c...`), with no blocks. `handoff-A.md` now holds round 2; round 1 is at `0421ec1`.
+  - **The amendment clarifies and adds.** It moves no object, layer or contract that round 1 approved. Its I5 rule for the health wait is the act's existing pattern: a budget check before every live step.
+  - **W-4 restated, binding.** The one shared `wait_healthy` checks the deadline before every `health` call, including the first after `run`. Once the deadline has passed it answers `Ok(false)` without asking.
+    - The engine passes the run budget's end.
+    - No second loop and no extra `budget.check()` in `start`: the rule lives in the one function.
+    - Four docs get updated: `wait_healthy`, `Budget::deadline`, step 3 of the module doc, and the ADR's health-wait paragraph.
+    - This is T-green's B-1. Round 1's wording ("`Ok(false)` at the deadline") let F build it in `probe.rs`'s ask-then-compare shape.
+  - **New warns.**
+    - W-14 (low): `Budget::check` and `Budget::deadline` must agree for a budget the clock cannot hold.
+    - W-15 (follow-up for O; a reading for S): the plan's four reads, and `session_of_record`'s two calls, run with no budget check between them. This predates #802, and #802 is not held to it.
+    - W-16 (low; Phase 8): the real rig copies `BOOT_POLL` instead of importing it.
+  - **Round 1's warns.** All stand and are implemented. W-1 and W-2 stay binding. The amended AC 4 absorbs W-7.
+- **Assumed:**
+  - T-green's report that the loop-top check turns its new test GREEN, with `pane_verbs`, the conformance suite and `fake_harness_test` all passing. I did not re-run it, and no code was changed in this phase.
+  - The CLI is the only production caller of the engine, and it passes `TxOptions::default()`. So W-14's overflow case cannot be reached today. I checked this by grep.
+- **Hedged:**
+  - W-15 is a follow-up, not a block. It predates #802, and the amended sentence sits in the health-wait bullet.
+  - The brief review's round 2 (`802-brief-result-r2.md`, BLOCK, unapplied) raised four points. All four are about test design or wording (AC 2, 4, 5 and 9). None changes an object, a layer or a contract. The operator relaunched past that gate.
+- **Evidence:**
+  - Diffs and records:
+    - `git diff c03544a HEAD -- docs/handoffs/802-brief.md`, which is the whole amendment;
+    - `802-brief-result-r1.md` and `802-brief-result-r2.md`;
+    - `802-diff-result-r1.md`: the diff gate never ran, because the prompt ceiling refused it;
+    - `handoff-T-green.md`, `handoff-F.md` and `decisions.md`.
+  - Read in full:
+    - `tx_launch.rs` (807 lines) and `tx_launch/server.rs` (101);
+    - `92fbc6e`'s `bring_up` and `Plan::observe`.
+  - Read in part:
+    - `probe.rs:92-106` and `:297-308`;
+    - `conformance/harness.rs:1-60` and `:500-545`;
+    - `real_opencode/rig.rs:1-60` and `:180-270`;
+    - `launch/rig.rs:642-688`, `launch/serve.rs:320-400`, `testkit/src/host.rs:1-60`;
+    - `ports.rs:1-40` and `:200-262`;
+    - `holler-adapter-host/src/lib.rs:466-492`;
+    - ADR-0021 lines 100-200 and 280-300, plus section 12 (740-760).
+  - Greps:
+    - the callers of `wait_healthy`, `BOOT_POLL` and `DEFAULT_BUDGET`;
+    - `TxOptions` construction in the CLI;
+    - the production callers of `serve_command`, `verify_serving` and `.pid`;
+    - absolute-path checks in `holler-pane` and the CLI (there are none).
