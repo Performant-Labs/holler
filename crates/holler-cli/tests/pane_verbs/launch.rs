@@ -4,13 +4,16 @@
 //! Every case runs over the rig of `launch/rig.rs` (#643's fakes, a linked host and harness
 //! hooks) and ends with `assert_no_keystroke`; every case but AC 6 and 7 also ends with
 //! `assert_matches` (the registry equals the fakes). The refusals before the act are in
-//! `launch/guards.rs`, the `--profile` cases in `launch/profiles.rs`, and relaunch's cases in
+//! `launch/guards.rs`, the `--profile` cases in `launch/profiles.rs`, the harness server's
+//! cases of #802 (`serve_command` in the plan, the server run in the pane's tmux session, the
+//! health wait, `verify_serving`) in `launch/serve.rs`, and relaunch's cases in
 //! `relaunch.rs`, which reuses this rig.
 
 pub(crate) mod rig;
 
 mod guards;
 mod profiles;
+mod serve;
 
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::{Arc, Mutex};
@@ -24,6 +27,7 @@ use holler_pane_testkit::envelope::check_envelope;
 use holler_pane_testkit::fixture::sample_pane;
 use holler_pane_testkit::harness::{HarnessOp, ServerState};
 use holler_pane_testkit::herdr::{HerdrOp, PROTOCOL_22_VERSION};
+use holler_pane_testkit::host::HostOp;
 use holler_pane_testkit::pane_store::PaneStoreOp;
 use serde_json::json;
 
@@ -32,6 +36,28 @@ use rig::{
     argv, data_of, error_of, launch_replacing, launch_spec, launch_with, name, occurrences, Rig,
     LAUNCH, PANE, PORT, PROBE, PROBE_FLAGS, STEP,
 };
+
+/// `ops` with every run of one op folded into one: the order of the steps, whatever number
+/// of health polls the wait made.
+pub(crate) fn steps<T: PartialEq + Clone>(ops: &[T]) -> Vec<T> {
+    let mut steps = ops.to_vec();
+    steps.dedup();
+    steps
+}
+
+/// A run's budget for the engine cases that wait out a server that never answers.
+pub(crate) const SHORT_BUDGET: Duration = Duration::from_millis(700);
+
+/// The engine's own request for `LAUNCH`.
+pub(crate) fn launch_request() -> LaunchRequest {
+    LaunchRequest {
+        name: name(PANE),
+        herdr_session: Some("scratch".to_owned()),
+        spec: launch_spec(),
+        profile: None,
+        spec_only: false,
+    }
+}
 
 /// The cell `LAUNCH` names.
 const R2C1: GridPos = GridPos { row: 2, col: 1 };
@@ -52,7 +78,7 @@ fn launch_records_what_the_fakes_show() {
         run.out.contains("r2c1") && run.out.contains(sid.as_str()),
         "{run:?}"
     );
-    let pid = rig.fakes.harness.server(PORT).expect("a server").pid;
+    let server = rig.fakes.harness.server(PORT).expect("a server");
     let sample = sample_pane(PANE).unwrap();
     let expected = Pane {
         generation: 1,
@@ -65,7 +91,8 @@ fn launch_records_what_the_fakes_show() {
         },
         harness: HarnessInfo {
             port: PORT,
-            pid: Some(pid),
+            // #802: the server is a process of the pane's tmux session; no pid is recorded.
+            pid: None,
             health: Health::Healthy,
             ..sample.harness
         },
@@ -87,15 +114,17 @@ fn launch_records_what_the_fakes_show() {
         Some(sid),
         "the TUI shows the session of record"
     );
+    // #802: the argv is built in the plan, the server's health is waited for, and a spec
+    // with no agent is verified too.
     let harness = [
+        HarnessOp::ServeCommand,
         HarnessOp::Health,
-        HarnessOp::Serve,
-        HarnessOp::Health,
+        HarnessOp::VerifyServing,
         HarnessOp::CreateSession,
         HarnessOp::AttachTui,
         HarnessOp::ShownSession,
     ];
-    assert_eq!(run.calls.harness, harness);
+    assert_eq!(steps(&run.calls.harness), harness);
     let herdr = [
         HerdrOp::Version,
         HerdrOp::Snapshot,
@@ -107,9 +136,15 @@ fn launch_records_what_the_fakes_show() {
         run.calls.profiles.is_empty(),
         "AC 16f: no profile, no profile call"
     );
-    assert!(
-        rig.fakes.host.runs().is_empty(),
-        "AC 11b: no command, nothing run"
+    let runs = rig.fakes.host.runs();
+    let [(session, cwd, server_argv)] = runs.as_slice() else {
+        panic!("AC 11b: no command, so the server's argv is the one run: {runs:?}");
+    };
+    assert_eq!((session.as_str(), cwd.as_str()), (PANE, "/srv/demo"));
+    assert_eq!(
+        rig.fakes.harness.start_server(server_argv),
+        Some(Ok(server.pid)),
+        "the argv run is the running server's own"
     );
     assert!(run.calls.probes.is_empty(), "no check, no probe");
     rig.assert_matches(&run, PANE);
@@ -178,48 +213,82 @@ fn launch_records_model_effort_env_and_ceilings() {
     rig.assert_no_keystroke();
 }
 
-/// AC 4a: a server that never answers stops the run before any session or TUI exists.
-#[test]
-fn launch_onto_a_frozen_server_times_out_before_any_session() {
-    let rig = Rig::new();
-    rig.serve(PANE, PORT);
-    rig.fakes.harness.freeze(PORT).unwrap();
-    let run = rig.run(LAUNCH, Format::Json);
-    assert_eq!(run.code, 1, "{run:?}");
-    assert_eq!(error_of(&run).0, "timeout");
-    let reached = |op| run.calls.harness.contains(&op);
-    assert!(!reached(HarnessOp::CreateSession) && !reached(HarnessOp::AttachTui));
-    assert_eq!(rig.record(PANE), None);
-    rig.assert_matches(&run, PANE);
-    rig.assert_no_keystroke();
-}
-
-/// AC 4b: a server that is not healthy after `serve` aborts the run, and the Herdr pane the
-/// run made is closed.
-#[test]
-fn launch_aborts_when_the_server_never_gets_healthy() {
-    let rig = Rig::new();
-    rig.after(HarnessOp::Serve, |f, c| {
-        f.harness.freeze(c.port.unwrap()).unwrap()
-    });
-    let run = rig.run(LAUNCH, Format::Json);
-    assert_eq!(run.code, 1, "{run:?}");
-    assert_eq!(error_of(&run).0, "unavailable");
-    let reached = |op| run.calls.harness.contains(&op);
-    assert!(!reached(HarnessOp::CreateSession) && !reached(HarnessOp::AttachTui));
-    assert!(
-        run.calls.herdr.contains(&HerdrOp::Close),
-        "{:?}",
-        run.calls.herdr
+/// Launch `LAUNCH` through the engine with [`SHORT_BUDGET`]; it must end as the budget's
+/// `timeout` (`pane.launch`) after the act began, well inside a generous bound, with nothing
+/// recorded and the Herdr pane it made closed. Returns the calls it made.
+fn assert_waits_out_the_budget(rig: &Rig) -> rig::Calls {
+    let options = TxOptions {
+        budget: SHORT_BUDGET,
+        ..TxOptions::default()
+    };
+    let started = Instant::now();
+    let (answer, calls) = rig.engine(|ports| tx_launch::launch(ports, &launch_request(), &options));
+    let took = started.elapsed();
+    let timeout = PaneError::Timeout {
+        op: "pane.launch".to_owned(),
+    };
+    assert_eq!(
+        answer,
+        Err(TxFailure {
+            error: timeout,
+            acted: true
+        })
     );
+    assert!(took < Duration::from_secs(3), "bounded: {took:?}");
+    let reached = |op| calls.harness.contains(&op);
+    assert!(!reached(HarnessOp::VerifyServing), "{:?}", calls.harness);
+    assert!(!reached(HarnessOp::CreateSession) && !reached(HarnessOp::AttachTui));
+    assert!(calls.herdr.contains(&HerdrOp::Close), "{:?}", calls.herdr);
     assert_eq!(
         rig.herdr_ids(),
         Vec::<PaneId>::new(),
         "the created pane is closed"
     );
     assert_eq!(rig.record(PANE), None);
-    rig.assert_matches(&run, PANE);
     rig.assert_no_keystroke();
+    calls
+}
+
+/// AC 4a (#802): a frozen server of the pane holds its port, so the server the act starts
+/// never answers: the health wait runs out the budget before any session or TUI exists.
+#[test]
+fn launch_onto_a_frozen_server_times_out_before_any_session() {
+    let rig = Rig::new();
+    rig.serve(PANE, PORT);
+    rig.fakes.harness.freeze(PORT).unwrap();
+    assert_waits_out_the_budget(&rig);
+    let server = rig.fakes.harness.server(PORT).unwrap();
+    assert_ne!(
+        server.state,
+        ServerState::Running,
+        "never adopted: {server:?}"
+    );
+}
+
+/// AC 4b, rewritten by #802 (its AC 6): a server that never becomes healthy after the host
+/// started it ends the launch as `timeout` (no longer `unavailable`), and the rollback stops
+/// the session's processes, the server among them, and closes the Herdr pane the run made.
+#[test]
+fn launch_times_out_when_the_server_never_gets_healthy() {
+    let rig = Rig::new();
+    rig.after_server_start(|f, c| f.harness.freeze(c.port.unwrap()).unwrap());
+    let calls = assert_waits_out_the_budget(&rig);
+    assert!(calls.host.contains(&HostOp::StopOwned), "{:?}", calls.host);
+    assert_eq!(
+        rig.fakes.harness.server(PORT).unwrap().state,
+        ServerState::Killed,
+        "the rollback stopped the server it started"
+    );
+    let polls = calls
+        .harness
+        .iter()
+        .filter(|op| **op == HarnessOp::Health)
+        .count();
+    assert!(
+        polls >= 3,
+        "the wait polled more than once: {:?}",
+        calls.harness
+    );
 }
 
 /// AC 5a: a Herdr pane that vanishes after the attach is observed, and nothing is recorded.
@@ -249,7 +318,7 @@ fn launch_fails_when_its_herdr_pane_vanishes() {
 #[test]
 fn launch_record_conflict_fails_loudly() {
     let rig = Rig::new();
-    rig.after(HarnessOp::Serve, |f, _| {
+    rig.after_server_start(|f, _| {
         f.panes.concurrent_put(&sample_pane(PANE).unwrap()).unwrap();
     });
     let run = rig.run(LAUNCH, Format::Json);
@@ -275,13 +344,12 @@ fn launch_record_conflict_fails_loudly() {
     rig.assert_no_keystroke();
 }
 
-/// AC 7: a crash between steps writes no record; what it leaves is observable.
+/// AC 7: a crash between steps writes no record; what it leaves is observable. A crash runs
+/// no rollback (#802): the server the host started stays in the pane's tmux session.
 #[test]
 fn a_crash_mid_launch_leaves_no_record() {
     let rig = Rig::new();
-    rig.after(HarnessOp::Serve, |_, _| {
-        panic!("the CLI crashes inside serve (#644 AC 7)")
-    });
+    rig.after_server_start(|_, _| panic!("the CLI crashes as the server starts (#644 AC 7)"));
     let mark = rig.mark();
     let crashed = catch_unwind(AssertUnwindSafe(|| rig.run(LAUNCH, Format::Text)));
     assert!(crashed.is_err(), "the run crashed: {crashed:?}");
@@ -296,6 +364,12 @@ fn a_crash_mid_launch_leaves_no_record() {
     assert!(
         rig.fakes.host.sessions().contains(&name(PANE)),
         "the tmux session is left"
+    );
+    let server = rig.fakes.harness.server(PORT).expect("the server started");
+    assert_eq!(
+        server.state,
+        ServerState::Running,
+        "and is left: {server:?}"
     );
     rig.assert_no_keystroke();
 }
@@ -360,7 +434,12 @@ fn the_command_reaches_the_host_as_argv() {
     let run = rig.run(&launch_with(&extra), Format::Json);
     data_of(&run);
     let command = argv(&["prog", "a b", "$(id);x"]);
-    assert_eq!(rig.fakes.host.runs(), vec![(name(PANE), command.clone())]);
+    let runs = rig.fakes.host.runs();
+    assert_eq!(runs.len(), 2, "the command, then the server: {runs:?}");
+    assert_eq!(
+        runs[0],
+        (name(PANE), "/srv/demo".to_owned(), command.clone())
+    );
     assert_eq!(rig.record(PANE).unwrap().command, Some(command));
     rig.assert_matches(&run, PANE);
     rig.assert_no_keystroke();
@@ -520,26 +599,21 @@ fn relaunch_conflict() -> Rig {
         role: PaneRole::Orchestrator,
         ..rig.live(false)
     };
-    rig.after(HarnessOp::Serve, move |f, _| {
+    rig.after_server_start(move |f, _| {
         f.panes.concurrent_put(&theirs).unwrap();
     });
     rig
 }
 
 /// AC 24 (I5): a run whose budget runs out stops before the next step, rolls back and answers
-/// `timeout`, well inside a generous bound.
+/// `timeout`, well inside a generous bound. With every harness call 500 ms slow, the plan's
+/// two (`serve_command`, the port check) leave too little of 1.3 s for the server step.
 #[test]
 fn the_budget_bounds_a_slow_launch() {
     let rig = Rig::new();
-    let request = LaunchRequest {
-        name: name(PANE),
-        herdr_session: Some("scratch".to_owned()),
-        spec: launch_spec(),
-        profile: None,
-        spec_only: false,
-    };
+    let request = launch_request();
     let options = TxOptions {
-        budget: Duration::from_millis(800),
+        budget: Duration::from_millis(1300),
         ..TxOptions::default()
     };
     rig.fakes
@@ -560,11 +634,17 @@ fn the_budget_bounds_a_slow_launch() {
             acted: true
         })
     );
-    assert!(took < Duration::from_secs(3), "bounded: {took:?}");
+    assert!(took < Duration::from_secs(4), "bounded: {took:?}");
     assert_eq!(
-        calls.harness,
-        [HarnessOp::Health, HarnessOp::Serve],
-        "stops before A5"
+        calls.harness[..2],
+        [HarnessOp::ServeCommand, HarnessOp::Health],
+        "the plan's two calls"
+    );
+    let reached = |op| calls.harness.contains(&op);
+    assert!(
+        !reached(HarnessOp::VerifyServing) && !reached(HarnessOp::CreateSession),
+        "stops before A5: {:?}",
+        calls.harness
     );
     let herdr = [
         HerdrOp::Version,

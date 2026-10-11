@@ -80,3 +80,56 @@
     - `gh issue view 642`: part 3, decision 3;
     - #664's brief, §10 and O3;
     - the in-flight worktrees: `git diff --name-only origin/main...HEAD` showed code changes in none of them.
+
+## T (Phase 4, author / RED) — 2026-10-11T05:58:00-06:00
+- **Decided:**
+  - RED is valid, and it is compile-level, as the brief's RED note allows. The 11 test targets that
+    call the new API fail to build, and every error names a missing or changed API or a deleted
+    field. All libraries build. The full list is in `handoff-T-red.md`.
+  - The API names the tests pin, for F:
+    - `ServeSpec::default().with_agent(k)`, a builder on `self`, per W-12.
+    - `holler_pane::ports::AGENT_UNSUPPORTED`.
+    - `tx_launch::wait_healthy(&dyn HarnessPort, port, poll, deadline) -> Result<bool, PaneError>`, per W-4.
+    - `TxOptions.boot_poll`.
+    - `HarnessOp::ServeCommand` and `HarnessOp::VerifyServing`.
+    - `FakeHarness::start_server(&Argv) -> Option<Result<u32, PaneError>>`.
+    - `FakeHarness::serve_specs()`.
+    - `ServerView.agent`.
+    - `FakeHost::runs() -> Vec<(PaneName, String, Argv)>`.
+    - `run_harness_conformance(fresh, launch)`, with case 2 renamed `launch-then-healthy` and case 16
+      `serve-command-carries-the-agent`.
+  - W-9 is option (a): the host adapter's `run` keeps one existence read before the argv check, so
+    the three-call shape and `run_checks_the_session_before_the_argv` stand.
+  - The server's env prefix is the TUI's own, `env -u OPENCODE_DISABLE_TERMINAL_TITLE` under
+    `Inherit`. This follows Scope 3's "one helper ... for both".
+  - OpenCode's `verify_serving` refuses `agent-unsupported` for an agent (W-3, fail closed).
+  - AC 4a and AC 4b both run through `rig.engine` with a 700 ms budget and expect `timeout`.
+  - A crash leaves the started server running (W-10(d)).
+  - The relaunch-survivor message drops `#695`.
+  - The cross-port order is read from the fakes' logs at hooked steps (W-8c). The rig keeps no
+    merged log.
+- **Assumed:**
+  - The plan calls `serve_command` before every other live read, the probe included. The brief
+    says "in `Plan::observe`, before the probe".
+  - The budget is checked before `verify_serving`, because I5 requires a check before every live
+    step.
+  - The `port-in-use` re-check runs on relaunch too, after `stop_old`.
+  - The fake's refusal code for an agent mismatch in `verify_serving` is F's choice. The tests
+    assert only `PaneError::Refused`.
+- **Hedged:**
+  - AC 9's "a `panes.json` written before still reads" half is a characterization pin. The test is
+    `holler-hub` `pane_registry_test`, and it is green now by design.
+  - The opt-in real tests (`real_tmux_test` and `real_opencode_test`) were compiled against a shim
+    but not run here: there is no OpenCode, and they are `#[ignore]`.
+- **Evidence:**
+  - The scratch shim worktree held the new signatures, a minimal fake and adapter, and an engine
+    that follows the brief. Against it:
+    - every target compiled;
+    - clippy `-D warnings` was clean on the tests;
+    - `lint.sh` passed on the test files;
+    - every authored test passed: `pane_verbs` 258/258, `fake_harness_test` 23, `fake_host_test`
+      12, `harness_conformance_test` 15, `host_conformance_test` 12, `hermetic_test` 31,
+      `attach_test` 23, `fake_tmux_test` 29, `pane_registry_test` 15 and `ports_test` 8.
+  - A naive engine on the new signatures fails 21 `pane_verbs` cases on assertions. The messages
+    are in `handoff-T-red.md`.
+  - The shim was deleted afterwards.

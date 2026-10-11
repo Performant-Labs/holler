@@ -37,7 +37,8 @@ fn host_with(text: &str) -> (FakeHost, PaneName) {
 
 fn run_sleep(host: &FakeHost, session: &PaneName) -> u32 {
     let before = host.ps(session).unwrap();
-    host.run(session, &argv(&["sleep", "30"])).unwrap();
+    host.run(session, "/srv/demo", &argv(&["sleep", "30"]))
+        .unwrap();
     let after = host.ps(session).unwrap();
     *after.iter().find(|pid| !before.contains(pid)).unwrap()
 }
@@ -55,7 +56,7 @@ fn a_wedged_host_times_out_every_method() {
         Err(timeout("host.ensure_session"))
     );
     assert_eq!(
-        host.run(&a, &argv(&["sleep", "30"])),
+        host.run(&a, "/srv/demo", &argv(&["sleep", "30"])),
         Err(timeout("host.run"))
     );
     assert_eq!(host.stop_owned(&a), Err(timeout("host.stop_owned")));
@@ -69,7 +70,7 @@ fn a_wedged_host_times_out_every_method() {
     );
     host.ensure_session(&a, "/srv/demo").unwrap();
     assert_eq!(host.ps(&a), Ok(vec![]), "the wedged run started nothing");
-    host.run(&a, &argv(&["sleep", "30"])).unwrap();
+    host.run(&a, "/srv/demo", &argv(&["sleep", "30"])).unwrap();
     assert_eq!(host.ps(&a).unwrap().len(), 1);
 }
 
@@ -88,7 +89,7 @@ fn calls_are_recorded_in_order() {
     let host = FakeHost::new();
     let a = name("demo-c1r1");
     host.ensure_session(&a, "/srv/demo").unwrap();
-    assert!(host.run(&a, &argv(&[])).is_err());
+    assert!(host.run(&a, "/srv/demo", &argv(&[])).is_err());
     host.ps(&a).unwrap();
     let expected = vec![HostOp::EnsureSession, HostOp::Run, HostOp::Ps];
     assert_eq!(host.faults().calls(), expected);
@@ -118,13 +119,23 @@ fn run_records_each_argv_verbatim() {
     let (host, a) = host_with("demo-c1r1");
     let serve = argv(&["opencode", "serve", "--port", "48100"]);
     let shellish = argv(&["echo", "a b; rm -rf x"]);
-    host.run(&a, &serve).unwrap();
-    host.run(&a, &shellish).unwrap();
+    host.run(&a, "/srv/demo", &serve).unwrap();
+    host.run(&a, "/srv/other", &shellish).unwrap();
 
-    let want = vec![(a.clone(), serve), (a.clone(), shellish)];
+    // #802: each entry carries the directory `run` was given, which need not be the one
+    // the session was made with.
+    let want = vec![
+        (a.clone(), "/srv/demo".to_owned(), serve),
+        (a.clone(), "/srv/other".to_owned(), shellish),
+    ];
     assert_eq!(host.runs(), want);
-    assert_eq!(host.runs()[1].1.as_slice().len(), 2, "never re-split");
-    assert_eq!(host.runs()[1].1.as_slice()[1], "a b; rm -rf x");
+    assert_eq!(host.runs()[1].2.as_slice().len(), 2, "never re-split");
+    assert_eq!(host.runs()[1].2.as_slice()[1], "a b; rm -rf x");
+    assert_eq!(
+        host.cwd(&a).as_deref(),
+        Some("/srv/demo"),
+        "run never changes the session's own directory"
+    );
 
     host.stop_owned(&a).unwrap();
     assert_eq!(host.runs(), want, "stop_owned does not clear the log");
@@ -138,11 +149,11 @@ fn a_refused_run_records_nothing() {
     let before = host.ps(&a).unwrap();
 
     assert_eq!(
-        host.run(&name("demo-c2r1"), &argv(&["sleep", "30"])),
+        host.run(&name("demo-c2r1"), "/srv/demo", &argv(&["sleep", "30"])),
         Err(not_found(&name("demo-c2r1")))
     );
     assert_eq!(
-        host.run(&a, &argv(&[])),
+        host.run(&a, "/srv/demo", &argv(&[])),
         Err(PaneError::Usage {
             message: "an empty argv has no program to run".to_owned()
         })
@@ -151,7 +162,10 @@ fn a_refused_run_records_nothing() {
         what: "tmux".to_owned(),
     };
     host.faults().fail_next(HostOp::Run, injected.clone());
-    assert_eq!(host.run(&a, &argv(&["sleep", "30"])), Err(injected));
+    assert_eq!(
+        host.run(&a, "/srv/demo", &argv(&["sleep", "30"])),
+        Err(injected)
+    );
 
     assert_eq!(host.runs(), vec![]);
     assert_eq!(host.ps(&a), Ok(before));
@@ -264,7 +278,10 @@ fn an_ended_session_is_missing_until_ensured_again() {
     host.end_session(&a).unwrap();
     assert_eq!(host.sessions(), vec![]);
     assert_eq!(host.ps(&a), Err(not_found(&a)));
-    assert_eq!(host.run(&a, &argv(&["sleep", "30"])), Err(not_found(&a)));
+    assert_eq!(
+        host.run(&a, "/srv/demo", &argv(&["sleep", "30"])),
+        Err(not_found(&a))
+    );
     assert_eq!(host.stop_owned(&a), Ok(()));
 
     host.ensure_session(&a, "/srv/demo").unwrap();

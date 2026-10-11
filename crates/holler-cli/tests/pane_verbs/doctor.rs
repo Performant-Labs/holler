@@ -318,7 +318,7 @@ fn fix_selects_the_session_of_record_and_never_changes_it() {
     assert_eq!(selects.count(), 1, "{:?}", calls.harness);
     for writer in [
         HarnessOp::CreateSession,
-        HarnessOp::Serve,
+        HarnessOp::ServeCommand,
         HarnessOp::AttachTui,
         HarnessOp::Abort,
     ] {

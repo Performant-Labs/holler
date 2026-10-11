@@ -11,6 +11,7 @@ use holler_pane::{GridPos, HarnessPort, Pane, PaneError, ProfileSpec};
 use holler_pane_testkit::fixture::sample_profile;
 use holler_pane_testkit::harness::{HarnessOp, ServerState};
 use holler_pane_testkit::herdr::HerdrOp;
+use holler_pane_testkit::host::HostOp;
 
 use crate::launch::rig::{
     agent, argv, assert_untouched, data_of, error_of, launch_spec, name, occurrences, profile_name,
@@ -64,7 +65,7 @@ fn relaunch_fails_on_a_stale_generation() {
         role: PaneRole::Orchestrator,
         ..rig.live(false)
     };
-    rig.after(HarnessOp::Serve, move |f, _| {
+    rig.after_server_start(move |f, _| {
         f.panes.concurrent_put(&theirs).unwrap();
     });
     let run = rig.run(RELAUNCH, Format::Json);
@@ -140,8 +141,11 @@ fn relaunch_refuses_a_pane_of_another_profile() {
     let run = rig.run(&relaunch_with(&["--profile", "demo"]), Format::Json);
     assert_eq!(run.code, 3, "{run:?}");
     assert_eq!(error_of(&run).0, "pane-in-other-profile");
+    // #802: the plan's pure `serve_command` ran; nothing else of the harness did.
+    assert_eq!(run.calls.harness, [HarnessOp::ServeCommand]);
     let reads_only = Calls {
         herdr: Vec::new(),
+        harness: Vec::new(),
         ..run.calls.clone()
     };
     assert_untouched(&reads_only);
@@ -485,16 +489,26 @@ fn relaunch_leaves_other_panes_alone() {
     rig.assert_no_keystroke();
 }
 
-/// AC 22: until #695, a server that survives the stop fails the relaunch loudly.
+/// AC 22 (#802 AC 8): a server that still answers after `stop_owned` (its TERM, grace and
+/// KILL; here, an unlinked host whose stop leaves the fake server running) fails the relaunch
+/// loudly, and is never adopted: no server argv is run and nothing is recorded.
 #[test]
 fn relaunch_fails_when_the_old_server_survives() {
     let rig = Rig::new().unlinked();
     let before = rig.live(false);
+    let runs_before = rig.fakes.host.runs();
     let run = rig.run(RELAUNCH, Format::Json);
     assert_eq!(run.code, 1, "{run:?}");
     let (code, message) = error_of(&run);
     assert_eq!(code, "unavailable");
     assert!(message.contains("still answers"), "{message}");
+    assert!(!message.contains("#695"), "#695 is closed: {message}");
+    assert_eq!(rig.fakes.host.runs(), runs_before, "nothing new was run");
+    assert!(
+        !run.calls.host.contains(&HostOp::Run),
+        "{:?}",
+        run.calls.host
+    );
     assert_eq!(rig.record(PANE).unwrap().generation, before.generation);
     rig.assert_matches(&run, PANE);
     rig.assert_no_keystroke();
