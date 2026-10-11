@@ -4,8 +4,12 @@
 //! person moving the TUI, a TUI that closes), the two quirks of raw OpenCode, and
 //! separate data directories. The port contract is the conformance suite's job
 //! (#638, slice e).
+//!
+//! #802: `serve_command` is the port method (pure: it builds an argv and starts nothing),
+//! and `start_server` is the scenario method that starts a server from such an argv, the
+//! way a host's `run` would. Setup here starts a server with [`serve`], which does both.
 
-use holler_pane::{HarnessPort, PaneError, PaneId, PaneName};
+use holler_pane::{AgentKey, Argv, HarnessPort, PaneError, PaneId, PaneName, ServeSpec};
 use holler_pane_testkit::fault::{Fault, PortOp};
 use holler_pane_testkit::harness::{
     FakeHarness, HarnessOp, Quirk, ServerState, ServerView, TuiView,
@@ -58,7 +62,31 @@ fn view(owner: &str, pid: u32, state: ServerState) -> Option<ServerView> {
         name: name(owner),
         pid,
         state,
+        agent: None,
     })
+}
+
+fn agent(text: &str) -> AgentKey {
+    AgentKey::parse(text).unwrap()
+}
+
+fn argv(parts: &[&str]) -> Argv {
+    Argv::new(parts.iter().map(|p| (*p).to_owned()).collect())
+}
+
+/// The argv `serve_command` builds for `owner` on `port` with `spec` (through the port, so
+/// logged as `ServeCommand`).
+fn command(harness: &FakeHarness, owner: &str, port: u16, spec: &ServeSpec) -> Argv {
+    harness.serve_command(&name(owner), port, spec).unwrap()
+}
+
+/// Start the server of `owner` on `port` with no agent: `serve_command`, then the scenario
+/// method on its argv. Its pid, or the fake's refusal.
+fn serve(harness: &FakeHarness, owner: &str, port: u16) -> Result<u32, PaneError> {
+    let argv = command(harness, owner, port, &ServeSpec::default());
+    harness
+        .start_server(&argv)
+        .expect("start_server knows the argv serve_command built")
 }
 
 /// Servers `demo-c1r1` on P0 and `demo-c2r1` on P1; sessions `a` and `b` on P0; the TUI
@@ -66,8 +94,8 @@ fn view(owner: &str, pid: u32, state: ServerState) -> Option<ServerView> {
 /// and `b`.
 fn scene() -> (FakeHarness, u32, String, String) {
     let harness = FakeHarness::new();
-    let pid = harness.serve(&name("demo-c1r1"), P0).unwrap();
-    harness.serve(&name("demo-c2r1"), P1).unwrap();
+    let pid = serve(&harness, "demo-c1r1", P0).unwrap();
+    serve(&harness, "demo-c2r1", P1).unwrap();
     let a = harness.create_session(P0).unwrap();
     let b = harness.create_session(P0).unwrap();
     harness.attach_tui(&pane0(), P0, &a).unwrap();
@@ -91,7 +119,15 @@ fn a_wedged_harness_times_out_every_method() {
     let c = name("demo-c1r1");
     harness.faults().set(Some(Fault::Wedged));
 
-    assert_eq!(harness.serve(&c, P0), Err(timeout("harness.serve")));
+    let spec = ServeSpec::default();
+    assert_eq!(
+        harness.serve_command(&c, P0, &spec),
+        Err(timeout("harness.serve_command"))
+    );
+    assert_eq!(
+        harness.verify_serving(P0, &spec),
+        Err(timeout("harness.verify_serving"))
+    );
     assert_eq!(harness.health(P0), Err(timeout("harness.health")));
     assert_eq!(
         harness.create_session(P0),
@@ -129,7 +165,8 @@ fn a_wedged_harness_times_out_every_method() {
 #[test]
 fn harness_op_names_are_port_dot_method() {
     let names = [
-        (HarnessOp::Serve, "harness.serve"),
+        (HarnessOp::ServeCommand, "harness.serve_command"),
+        (HarnessOp::VerifyServing, "harness.verify_serving"),
         (HarnessOp::Health, "harness.health"),
         (HarnessOp::CreateSession, "harness.create_session"),
         (HarnessOp::ListSessions, "harness.list_sessions"),
@@ -146,8 +183,9 @@ fn harness_op_names_are_port_dot_method() {
 #[test]
 fn calls_are_recorded_in_order() {
     let harness = FakeHarness::new();
-    harness.serve(&name("demo-c1r1"), P0).unwrap();
+    serve(&harness, "demo-c1r1", P0).unwrap();
     harness.health(P0).unwrap();
+    harness.verify_serving(P0, &ServeSpec::default()).unwrap();
     let a = harness.create_session(P0).unwrap();
     let b = harness.create_session(P0).unwrap();
     harness.list_sessions(P0).unwrap();
@@ -157,8 +195,9 @@ fn calls_are_recorded_in_order() {
     harness.abort(P0, &b).unwrap();
     harness.abort(P0, UNKNOWN).unwrap_err();
     let expected = vec![
-        HarnessOp::Serve,
+        HarnessOp::ServeCommand,
         HarnessOp::Health,
+        HarnessOp::VerifyServing,
         HarnessOp::CreateSession,
         HarnessOp::CreateSession,
         HarnessOp::ListSessions,
@@ -180,17 +219,19 @@ fn calls_are_recorded_in_order() {
     harness.delete_session(&a).unwrap();
     harness.close_tui(&pane0()).unwrap();
     harness.kill(P0).unwrap();
+    harness.start_server(&argv(&["sleep", "30"]));
     harness.server(P0);
     harness.tui(&pane0());
     harness.aborts();
+    harness.serve_specs();
     assert_eq!(harness.faults().calls(), expected);
 }
 
 #[test]
 fn session_ids_are_ses_prefixed_and_distinct() {
     let harness = FakeHarness::new();
-    harness.serve(&name("demo-c1r1"), P0).unwrap();
-    harness.serve(&name("demo-c2r1"), P1).unwrap();
+    serve(&harness, "demo-c1r1", P0).unwrap();
+    serve(&harness, "demo-c2r1", P1).unwrap();
     let ids = vec![
         harness.create_session(P0).unwrap(),
         harness.create_session(P0).unwrap(),
@@ -218,9 +259,17 @@ fn a_frozen_server_answers_health_false_and_times_out_its_calls() {
         view("demo-c1r1", pid, ServerState::Frozen)
     );
     assert_eq!(harness.health(P0), Ok(false));
+    let again = command(&harness, "demo-c1r1", P0, &ServeSpec::default());
+    assert!(
+        matches!(
+            harness.start_server(&again),
+            Some(Err(PaneError::Timeout { .. }))
+        ),
+        "a frozen server holds its port"
+    );
     assert_eq!(
-        harness.serve(&name("demo-c1r1"), P0),
-        Err(timeout("harness.serve"))
+        harness.verify_serving(P0, &ServeSpec::default()),
+        Err(timeout("harness.verify_serving"))
     );
     assert_eq!(
         harness.create_session(P0),
@@ -292,6 +341,10 @@ fn a_killed_server_answers_health_false_and_is_unavailable() {
     assert_eq!(harness.attach_tui(&pane1(), P0, &a), Err(unreachable(P0)));
     assert_eq!(harness.select_session(&pane0(), &b), Err(unreachable(P0)));
     assert_eq!(
+        harness.verify_serving(P0, &ServeSpec::default()),
+        Err(unreachable(P0))
+    );
+    assert_eq!(
         shown(&harness, &pane0()),
         Some(a),
         "the TUI keeps its screen"
@@ -307,7 +360,7 @@ fn serving_a_killed_port_again_keeps_the_sessions() {
     let (harness, old_pid, a, b) = scene();
     harness.kill(P0).unwrap();
 
-    let new_pid = harness.serve(&name("demo-c1r1"), P0).unwrap();
+    let new_pid = serve(&harness, "demo-c1r1", P0).unwrap();
     assert_ne!(new_pid, old_pid, "a new process");
     assert!(new_pid >= 20_000);
     assert_eq!(
@@ -329,17 +382,13 @@ fn serving_a_killed_port_again_keeps_the_sessions() {
 }
 
 #[test]
-fn serve_on_a_running_port() {
+fn starting_a_server_on_a_running_port() {
     let harness = FakeHarness::new();
-    let first = harness.serve(&name("demo-c1r1"), P0).unwrap();
+    let first = serve(&harness, "demo-c1r1", P0).unwrap();
     assert!(first >= 20_000);
+    assert_eq!(serve(&harness, "demo-c1r1", P0), Ok(first), "idempotent");
     assert_eq!(
-        harness.serve(&name("demo-c1r1"), P0),
-        Ok(first),
-        "idempotent"
-    );
-    assert_eq!(
-        harness.serve(&name("demo-c2r1"), P0),
+        serve(&harness, "demo-c2r1", P0),
         Err(PaneError::Unavailable {
             what: "port 48100 is in use by the server of demo-c1r1".to_owned()
         })
@@ -351,9 +400,9 @@ fn serve_on_a_running_port() {
     assert_eq!(
         harness.list_sessions(P0),
         Ok(vec![]),
-        "serve creates no session"
+        "a started server creates no session"
     );
-    let other = harness.serve(&name("demo-c2r1"), P1).unwrap();
+    let other = serve(&harness, "demo-c2r1", P1).unwrap();
     assert_ne!(other, first, "pids are never reused");
 }
 
@@ -516,8 +565,8 @@ fn abort_of_an_unknown_id_is_acked_with_the_quirk() {
 fn separate_data_dirs_do_not_share_sessions() {
     let harness = FakeHarness::new();
     let early = {
-        harness.serve(&name("demo-c1r1"), P0).unwrap();
-        harness.serve(&name("demo-c2r1"), P1).unwrap();
+        serve(&harness, "demo-c1r1", P0).unwrap();
+        serve(&harness, "demo-c2r1", P1).unwrap();
         harness.create_session(P1).unwrap()
     };
     harness.set_data_dir(P1, "other");
@@ -545,8 +594,8 @@ fn separate_data_dirs_do_not_share_sessions() {
 fn a_seeded_session_is_listed_and_bypasses_the_log() {
     let harness = FakeHarness::new();
     let seeded = harness.seed_session(P0);
-    harness.serve(&name("demo-c1r1"), P0).unwrap();
-    harness.serve(&name("demo-c2r1"), P1).unwrap();
+    serve(&harness, "demo-c1r1", P0).unwrap();
+    serve(&harness, "demo-c2r1", P1).unwrap();
 
     assert_eq!(harness.list_sessions(P0), Ok(vec![seeded.clone()]));
     assert_eq!(
@@ -559,12 +608,151 @@ fn a_seeded_session_is_listed_and_bypasses_the_log() {
     assert_eq!(
         harness.faults().calls(),
         vec![
-            HarnessOp::Serve,
-            HarnessOp::Serve,
+            HarnessOp::ServeCommand,
+            HarnessOp::ServeCommand,
             HarnessOp::ListSessions,
             HarnessOp::ListSessions,
             HarnessOp::CreateSession
         ]
+    );
+}
+
+// --- #802: serve_command, start_server and verify_serving ---
+
+/// #802: `serve_command` starts nothing (no server, no session, nothing healthy on the
+/// port), records the spec it was asked for, and fails through the fault switch like every
+/// port method, changing nothing.
+#[test]
+fn serve_command_starts_nothing_and_records_its_spec() {
+    let harness = FakeHarness::new();
+    let spec = ServeSpec::default();
+    let built = command(&harness, "demo-c1r1", P0, &spec);
+    assert!(!built.as_slice().is_empty(), "an argv with a program");
+    assert_eq!(harness.server(P0), None, "no server was started");
+    assert_eq!(harness.health(P0), Ok(false));
+    assert_eq!(harness.list_sessions(P0), Err(unreachable(P0)));
+
+    let refusal = PaneError::Unavailable {
+        what: "injected".to_owned(),
+    };
+    harness
+        .faults()
+        .fail_next(HarnessOp::ServeCommand, refusal.clone());
+    let with = ServeSpec::default().with_agent(agent("orchestrator"));
+    assert_eq!(
+        harness.serve_command(&name("demo-c1r1"), P0, &with),
+        Err(refusal)
+    );
+    assert_eq!(
+        harness.serve_specs(),
+        vec![spec],
+        "a failed call records no spec"
+    );
+    assert_eq!(
+        harness.faults().calls(),
+        vec![
+            HarnessOp::ServeCommand,
+            HarnessOp::Health,
+            HarnessOp::ListSessions,
+            HarnessOp::ServeCommand
+        ]
+    );
+}
+
+/// #802: the argv names the agent the spec asks for (some element holds the key, the
+/// port's contract), the server started from it runs for that pane and keeps the agent,
+/// and every spec is recorded in call order.
+#[test]
+fn the_argv_carries_the_agent_and_the_server_keeps_it() {
+    let harness = FakeHarness::new();
+    let key = agent("feature-implementor");
+    let with = ServeSpec::default().with_agent(key.clone());
+    let built = command(&harness, "demo-c1r1", P0, &with);
+    assert!(
+        built.as_slice().iter().any(|e| e.contains(key.as_str())),
+        "some element holds the key: {built:?}"
+    );
+    let plain = command(&harness, "demo-c2r1", P1, &ServeSpec::default());
+    assert!(
+        !plain.as_slice().iter().any(|e| e.contains(key.as_str())),
+        "no agent, no key: {plain:?}"
+    );
+    assert_ne!(built, plain, "the argv names its pane, port and agent");
+
+    let pid = harness
+        .start_server(&built)
+        .expect("a fake server argv")
+        .unwrap();
+    let server = harness.server(P0).expect("a server on P0");
+    assert_eq!(
+        server,
+        ServerView {
+            name: name("demo-c1r1"),
+            pid,
+            state: ServerState::Running,
+            agent: Some(key.clone()),
+        }
+    );
+    harness
+        .start_server(&plain)
+        .expect("a fake server argv")
+        .unwrap();
+    assert_eq!(harness.server(P1).unwrap().agent, None);
+    assert_eq!(harness.serve_specs(), vec![with, ServeSpec::default()]);
+}
+
+/// #802: the scenario method answers `None` for any argv `serve_command` did not build (a
+/// spec's own command, say) and starts nothing.
+#[test]
+fn start_server_ignores_an_argv_it_did_not_build() {
+    let harness = FakeHarness::new();
+    for other in [
+        argv(&["sleep", "30"]),
+        argv(&["opencode", "serve", "--port", "48100"]),
+        argv(&[]),
+    ] {
+        assert_eq!(harness.start_server(&other), None, "{other:?}");
+    }
+    assert_eq!(harness.server(P0), None);
+    assert_eq!(harness.server(P1), None);
+    assert_eq!(
+        harness.faults().calls(),
+        vec![],
+        "not a call through the port"
+    );
+}
+
+/// #802 (plan review W-3): `verify_serving` answers from the agent the running server was
+/// started with: `Ok` when the spec asks for exactly that, a refusal otherwise, and the
+/// server's own state for a port that does not answer.
+#[test]
+fn verify_serving_answers_from_the_running_servers_agent() {
+    let harness = FakeHarness::new();
+    let key = agent("feature-implementor");
+    let with = ServeSpec::default().with_agent(key.clone());
+    let other = ServeSpec::default().with_agent(agent("orchestrator"));
+    let started = command(&harness, "demo-c1r1", P0, &with);
+    harness.start_server(&started).unwrap().unwrap();
+    serve(&harness, "demo-c2r1", P1).unwrap();
+
+    assert_eq!(harness.verify_serving(P0, &with), Ok(()));
+    for asked in [ServeSpec::default(), other.clone()] {
+        let answer = harness.verify_serving(P0, &asked);
+        assert!(
+            matches!(answer, Err(PaneError::Refused { .. })),
+            "{asked:?}: {answer:?}"
+        );
+    }
+    assert_eq!(harness.verify_serving(P1, &ServeSpec::default()), Ok(()));
+    let answer = harness.verify_serving(P1, &with);
+    assert!(
+        matches!(answer, Err(PaneError::Refused { .. })),
+        "a server without the agent: {answer:?}"
+    );
+    assert_eq!(
+        harness.verify_serving(48102, &ServeSpec::default()),
+        Err(unreachable(48102)),
+        "no server on the port"
     );
 }
 

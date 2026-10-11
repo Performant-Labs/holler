@@ -17,16 +17,19 @@
 //! window target tries a window of the current session first, so either would let
 //! `hj-c1r1` reach `hj-c1r10`.
 //!
-//! **What `run` starts.** `run` reads the session's directory, then runs `new-window -d
-//! -P` with `-c '#{session_path}'` and the argv after `-- env --`. The program starts in
-//! the session's directory and never through a shell (`env --` keeps a one-element argv
-//! from reaching tmux as a single argument, which tmux would hand to `sh -c`), and `run`
-//! returns once tmux reports the new pane's pid: no typing and no sleep. It then tags the
-//! window with that pid (the window option `@holler-pid`) and sets the window's own
-//! `remain-on-exit off`, in one tmux invocation. The record lives in tmux, not in a file
-//! (I6). A window that closed before its tag (the program exited at once; tmux says `no
-//! such window` or `can't find window`) is `Ok`. Any other failure of the tag first kills
-//! the untagged process's group, so `run` never leaves a process `stop_owned` cannot stop.
+//! **What `run` starts.** `run` checks that the session exists (one `list-panes`), then
+//! runs `new-window -d -P` with `-c <cwd>`, the directory it is given (#802: the pane
+//! spec's, which need not be the one the session was made in), and the argv after `-- env
+//! --`. The program starts in that directory and never through a shell (`env --` keeps a
+//! one-element argv from reaching tmux as a single argument, which tmux would hand to `sh
+//! -c`), and `run` returns once tmux reports the new pane's pid: no typing and no sleep. It
+//! then tags the window with that pid (the window option `@holler-pid`) and sets the
+//! window's own `remain-on-exit off`, in one tmux invocation. The record lives in tmux, not
+//! in a file (I6). A window that closed before its tag (the program exited at once; tmux
+//! says `no such window` or `can't find window`) is `Ok`. Any other failure of the tag
+//! first kills the untagged process's group, so `run` never leaves a process `stop_owned`
+//! cannot stop. A pane's harness server is one such program (#802), so `stop_owned` stops
+//! it with the rest.
 //!
 //! **Ownership, and how `stop_owned` stops.** A pane is owned when its `@holler-pid`
 //! equals its live `pane_pid`, and that pid is in `2..=i32::MAX`. `stop_owned` sends
@@ -53,13 +56,14 @@
 //! | the session or its server is missing (stderr `can't find session`, `can't find window`, `no such window`, `no server running`, or `error connecting to` with `No such file or directory` or `Connection refused`) | created, or `usage` when its directory is not an absolute path to an existing directory | `pane-not-found` | `Ok` | `pane-not-found` |
 //! | the session exists | `Ok`, nothing changes | starts the argv | stops what it owns | its live panes' pids |
 //! | an empty argv, or an `argv[0]` containing `=` | | `usage` | | |
-//! | the session's directory is missing or not absolute | | `unavailable` | | |
+//! | `cwd` is not an absolute path to an existing directory | | `usage` | | |
 //! | the bound ran out | `timeout` | `timeout` | `timeout` | `timeout` |
 //! | a binary is missing, or tmux or `kill` failed otherwise | `unavailable` | `unavailable` | `unavailable` | `unavailable` |
 //!
-//! `run` checks the session before the argv, as the test kit's fake does. An
-//! `unavailable` carries tmux's or `kill`'s first stderr line, or the path of a binary
-//! that could not be run: never an argv element or a directory.
+//! `run` checks the session before the argv, as the test kit's fake does, and the argv
+//! before `cwd`, which the fake does not check. A `usage` never echoes an argv element or
+//! the directory. An `unavailable` carries tmux's or `kill`'s first stderr line, or the
+//! path of a binary that could not be run: never an argv element or a directory.
 //!
 //! **Narrowings.** ADR-0021 is unchanged. Five readings of the port are narrower than
 //! the fake's, which does none of them:
@@ -73,8 +77,9 @@
 //!    resolves it again against every later client's directory.
 //! 4. `run` with an `argv[0]` containing `=` is `usage`: `env` would read it as an
 //!    assignment.
-//! 5. `run` in a session whose directory is missing or not absolute is `unavailable`:
-//!    tmux would start the program in `$HOME`, or relative to the caller's directory.
+//! 5. `run` with a `cwd` that is missing, empty or not absolute is `usage` (#802), before
+//!    any window is made: tmux would start the program in `$HOME`, or relative to the
+//!    caller's directory, with exit 0.
 //!
 //! **What a consumer must know.**
 //!
@@ -85,9 +90,9 @@
 //!   shell may have exited), so a relaunch is `stop_owned`, then `ensure_session`, then
 //!   `run`. No port call ends a session: `close` leaves it, and the next launch of that
 //!   name reuses it.
-//! - A session keeps the directory it was made in: `ensure_session` of an existing
-//!   session changes nothing, so `run` works there while that directory exists and is
-//!   `unavailable` once it is removed.
+//! - A session keeps the directory it was made in (`ensure_session` of an existing
+//!   session changes nothing), but `run` does not use it: each program starts in the
+//!   `cwd` it is given. Only the session's own shell window stays in the old directory.
 //! - A process started without `run` (before the cutover, say) is untagged, and
 //!   `stop_owned` never stops it. Neither does it stop a process that left its group
 //!   (`setsid`, a daemon).
@@ -137,7 +142,6 @@ const OP_STOP_OWNED: &str = "host.stop_owned";
 const OP_PS: &str = "host.ps";
 
 /// The fixed `what` of each refusal of tmux's output; none quotes it.
-const BAD_SESSION_DIR: &str = "the session's directory is missing or not absolute";
 const BAD_NEW_WINDOW: &str =
     "tmux new-window did not print a pid in 2..=2147483647 and a window id";
 const BAD_PANE_LIST: &str =
@@ -313,8 +317,7 @@ impl HostPort for TmuxHost {
     /// `has-session`, then `Ok` for an existing session and `usage` for a missing one.
     fn ensure_session(&self, name: &PaneName, cwd: &str) -> Result<(), PaneError> {
         let call = Call::start(OP_ENSURE_SESSION, self.timeout);
-        let dir = Path::new(cwd);
-        if dir.is_absolute() && dir.is_dir() {
+        if is_usable_dir(cwd) {
             return match self.run_tmux(&tmux::new_session(name, cwd), call)? {
                 Reply::Done(_) | Reply::Refused(Refusal::Duplicate, _) => Ok(()),
                 Reply::Refused(_, what) => Err(PaneError::Unavailable { what }),
@@ -332,19 +335,17 @@ impl HostPort for TmuxHost {
         }
     }
 
-    /// Three tmux calls on success: the read of the session's directory, `new-window`,
-    /// and the tag (Decision 3).
-    fn run(&self, name: &PaneName, argv: &Argv) -> Result<(), PaneError> {
+    /// Three tmux calls on success: the read that the session exists, `new-window` in
+    /// `cwd`, and the tag (Decision 3). The session is checked first, then the argv, then
+    /// `cwd` (narrowing 5), all before any window is made.
+    fn run(&self, name: &PaneName, cwd: &str, argv: &Argv) -> Result<(), PaneError> {
         let call = Call::start(OP_RUN, self.timeout);
-        let dir = match self.run_tmux(&tmux::session_dir(name), call)? {
-            Reply::Done(stdout) => stdout,
-            Reply::Refused(refusal, what) => return Err(refused(name, refusal, what)),
-        };
-        check_argv(argv)?;
-        if !tmux::is_session_dir(&dir) {
-            return Err(unavailable(BAD_SESSION_DIR));
+        if let Reply::Refused(refusal, what) = self.run_tmux(&tmux::panes(name), call)? {
+            return Err(refused(name, refusal, what));
         }
-        let (pid, window) = match self.run_tmux(&tmux::new_window(name, argv), call)? {
+        check_argv(argv)?;
+        check_cwd(name, cwd)?;
+        let (pid, window) = match self.run_tmux(&tmux::new_window(name, cwd, argv), call)? {
             Reply::Done(stdout) => {
                 tmux::parse_new_window(&stdout).ok_or_else(|| unavailable(BAD_NEW_WINDOW))?
             }
@@ -461,6 +462,28 @@ fn check_argv(argv: &Argv) -> Result<(), PaneError> {
     Err(PaneError::Usage {
         message: message.to_owned(),
     })
+}
+
+/// Refuse a `cwd` that `run` cannot start a program in (narrowing 5): one that is not an
+/// absolute path to an existing directory, where tmux would start the program in `$HOME` or
+/// relative to the caller's directory, with exit 0. The message never echoes the directory.
+fn check_cwd(name: &PaneName, cwd: &str) -> Result<(), PaneError> {
+    if is_usable_dir(cwd) {
+        return Ok(());
+    }
+    Err(PaneError::Usage {
+        message: format!(
+            "cannot run a program in the tmux session {name}: its directory must be an \
+             absolute path to an existing directory"
+        ),
+    })
+}
+
+/// Whether `cwd` is an absolute path to an existing directory: the one directory rule of
+/// `ensure_session` (when it creates a session) and `run`.
+fn is_usable_dir(cwd: &str) -> bool {
+    let dir = Path::new(cwd);
+    dir.is_absolute() && dir.is_dir()
 }
 
 fn unavailable(what: &str) -> PaneError {

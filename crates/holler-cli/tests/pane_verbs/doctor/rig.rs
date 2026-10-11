@@ -19,7 +19,7 @@ use holler_pane::pane::PaneRole;
 use holler_pane::reconcile::{reconcile, ReconcileRequest, Report};
 use holler_pane::{
     Actor, GridPos, HarnessPort, HerdrPane, HerdrPort, HerdrSpec, HostPort, Pane, PaneId, PaneName,
-    PaneStore, Ports, ProfileName,
+    PaneStore, Ports, ProfileName, ServeSpec,
 };
 use holler_pane_testkit::envelope::check_envelope;
 use holler_pane_testkit::fixture::{sample_pane, sample_profile};
@@ -214,7 +214,7 @@ impl Rig {
     pub fn attach_foreign_tui(&self, name: &str) -> String {
         let bare = PaneName::parse("bare-opencode").expect("a pane name");
         self.harness.set_data_dir(FOREIGN_PORT, "foreign");
-        self.harness.serve(&bare, FOREIGN_PORT).expect("serve");
+        start_server(&self.harness, &bare, FOREIGN_PORT);
         let foreign = self
             .harness
             .create_session(FOREIGN_PORT)
@@ -370,7 +370,7 @@ fn make_live(
     if let Some(dir) = seed.data_dir {
         harness.set_data_dir(port, dir);
     }
-    harness.serve(&name, port).expect("serve");
+    start_server(harness, &name, port);
     let session = harness.create_session(port).expect("a session");
     harness
         .attach_tui(&pane.pane_id, port, &session)
@@ -381,6 +381,18 @@ fn make_live(
         port,
         session,
     }
+}
+
+/// Start a harness server on `port` for `name` (setup): the argv `serve_command` builds,
+/// started by the fake's scenario method, as a host's `run` would (#802).
+fn start_server(harness: &FakeHarness, name: &PaneName, port: u16) {
+    let argv = harness
+        .serve_command(name, port, &ServeSpec::default())
+        .expect("serve_command");
+    harness
+        .start_server(&argv)
+        .expect("the fake harness's own argv")
+        .expect("start the server");
 }
 
 fn record_of(seed: &Seed, live: &Live) -> Pane {

@@ -222,6 +222,39 @@ fn a_record_written_before_the_profile_field_loads_with_profile_none() {
     assert_eq!(loaded, sample_pane_at("hj-c1r1", 3), "nothing else changed");
 }
 
+/// #802 AC 9: a `panes.json` written before launch stopped recording the harness pid still
+/// loads, pid and all; a record written back without one (as `launch` writes it now) is
+/// stored with no `pid` key at all, and loads back as `None`.
+#[test]
+fn a_record_with_a_harness_pid_still_loads_and_one_without_stores_no_key() {
+    let (_dir, state) = temp_state();
+    let mut pane = serde_json::to_value(sample_pane("hj-c1r1", None)).unwrap();
+    pane["generation"] = json!(3);
+    assert_eq!(
+        pane["harness"]["pid"],
+        json!(4242),
+        "the fixture holds a pid"
+    );
+    write_registry(&state, &v1_file(&pane));
+
+    let store = load(&state);
+    let loaded = store.get(&name("hj-c1r1")).unwrap().expect("it loads");
+    assert_eq!(loaded.harness.pid, Some(4242));
+    assert_eq!(loaded, sample_pane_at("hj-c1r1", 3), "nothing changed");
+
+    let mut without = loaded.clone();
+    without.harness.pid = None;
+    store.cas_put(&without, 3).unwrap();
+    let file: Value =
+        serde_json::from_slice(&std::fs::read(registry_file(&state)).unwrap()).unwrap();
+    let harness = &file["entries"][0]["pane"]["harness"];
+    assert!(harness.is_object(), "{file}");
+    assert!(harness.get("pid").is_none(), "no pid key: {harness}");
+    let reloaded = load(&state);
+    let back = reloaded.get(&name("hj-c1r1")).unwrap().unwrap();
+    assert_eq!(back.harness.pid, None);
+}
+
 fn sample_pane_at(pane_name: &str, generation: u64) -> Pane {
     let mut pane = sample_pane(pane_name, None);
     pane.generation = generation;
