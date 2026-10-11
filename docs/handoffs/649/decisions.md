@@ -1,0 +1,77 @@
+# Decisions — #649 hub wiring and the integration scenario with the real adapters against a scratch Herdr, tmux and OpenCode
+
+## A (Phase 3, up-front plan review) — 2026-10-11T10:52:22-06:00
+- **Decided:** PASS on `docs/handoffs/649-brief.md` at `cfcb974` (sha256 `d746deeb057f7858...`), with no blocks and fifteen warns, eleven of them binding. The full detail is in `handoff-A.md`.
+  - **The objects and the layers are right.**
+    - #670's `Wiring` is filled; it is ADR-0021 ruling 1's one construction site.
+    - `StoreScope` and `SystemProber` are reused.
+    - The hub gets no adapter, as ADR section 5 requires.
+    - The store client sits CLI-side, over `holler_pane::reply`'s types.
+    - The resolver meets the precondition the OpenCode adapter leaves to wiring.
+    - No new object has an analogue it should extend instead.
+  - **W-1 (binding):** a fifth scenario guard. The test starts the private tmux server itself, with a scratch config and only the rig's isolated pairs (scratch `HOME`/`XDG_*` holding the dead-end config, `PATH`, `TERM`, the `OPENCODE_DISABLE_*` flags). The binary runs with the same scratch `HOME`/`XDG_*`. Reason: D7's `Inherit` makes the tmux server's environment the only source of OpenCode's environment.
+  - **W-2 (binding; Blast radius exception approved):** the three stub tests of `tests/pane_verbs/process/stub.rs` run against a live hub. D2 and AC 1 turn their no-hub `not-implemented` into `unavailable`.
+  - **W-3 (binding reading of D11; Blast radius exception approved):** each included rig is generalised in place by parameters or visibility, never copied. The files that may change for this purpose only:
+    - `holler-adapter-herdr/tests/scratch_herdr/mod.rs`;
+    - `holler-adapter-opencode/tests/real_opencode/rig.rs`;
+    - `holler-adapter-host/tests/real_tmux_test.rs`, plus a new `tests/real_tmux/mod.rs`;
+    - `holler-cli/tests/support/mod.rs` (one `StateDir` constructor).
+  - **W-4 (binding):** every delegating `HarnessPort` overrides `send_prompt` and `session_activity`, so #642 part 3 is not masked.
+  - **W-5 (binding):** the resolver's registry lookup and the bindings use the join key, the Herdr session and the pane id.
+  - **W-6 (binding):** D13's round trips are the test kit's `PaneStore` and `ProfileStore` conformance suites over the clients against a real hub.
+  - **W-7 (binding):** seven ADR-0021 sentences that give #649 work D5, D7 and D18 now defer are amended in the same change.
+  - **W-9 (binding):** one mapping from `ControlError` to `PaneError`, split into reads and writes; send through `transport::call(None, ..)`.
+  - **W-11 (binding):** child modules under `src/pane/wiring/`, declared from `wiring.rs`. They count as `wiring.rs` for the Blast radius; `pane/mod.rs` is untouched.
+  - **W-12 (binding):** D8's pin runs in the default run, and the decorators run the `HerdrPort` and `HostPort` suites.
+  - **W-13 (binding):** configuration errors appear at first use and fail closed; a relative `HOLLER_TMUX_SOCKET` never falls back to the default server.
+  - **Not binding:**
+    - W-8: `say_cmd.rs:252` is a third caller of `connect`;
+    - W-10: in-process tests race on `HOLLER_STATE_DIR`;
+    - W-14: the launch budget, and the dependency on #642 part 3;
+    - W-15: small points.
+- **Assumed:**
+  - **tmux environment.** A new tmux session gets the server's global environment, plus from the creating client only the `update-environment` variables (tmux's documented behaviour). So the environment the server starts with is what the OpenCode processes inherit. I did not probe it here.
+  - **OpenCode config sources.** OpenCode reads its global config, auth and session store through `XDG_CONFIG_HOME` and `XDG_DATA_HOME`, as the adapter rig and the spike assume. It also reads a project-level `opencode.json` in the working directory. I did not probe either.
+  - **Herdr pane ids.** Herdr numbers pane ids within a session (`w<N>:p<M>`, spike line 44), so two sessions can share one. This is inferred from the format, not probed.
+  - **#642 part 3.** It overrides `send_prompt` and `session_activity` in `OpenCodeHarness`, as its brief and ADR-0021 section 8 say. It has not merged.
+  - **Opt-in runs.** T or F may run the opt-in scenario on the operator's machine during this run. That is why W-1 is binding.
+- **Hedged:**
+  - **W-1 is a warn, not a block.** D12, AC 4 and the story's rules already require the outcome. The finding supplies the mechanism and changes no decision.
+  - **W-2, W-3 and W-11 approve Blast radius exceptions** (the #651 precedent) instead of blocking for an amendment. Each is the only way to meet a recorded decision: D2 with AC 1, D10 with D11, and the 900-line lint.
+  - **W-5 narrows D8 (b)'s literal text.** It drops only records the adapter could not serve anyway.
+  - **W-6's CI cost** (tens of seconds per suite, from `WATCH_WAIT` and the suites' drains) is estimated, not measured.
+  - **W-14's budget risk** is not measured.
+- **Evidence:**
+  - **Read in full:**
+    - the brief and its outside review `649-brief-result-r1.md` (PASS, NV-1 to NV-19);
+    - `holler-cli/src/pane/wiring.rs`, `src/main.rs`, `src/transport.rs`;
+    - `holler-pane/src/ports.rs`;
+    - `holler-hub/src/control.rs`;
+    - `holler-adapter-herdr/tests/scratch_herdr/mod.rs`;
+    - `holler-adapter-opencode/tests/real_opencode/rig.rs`;
+    - `holler-cli/tests/pane_verbs/process/{stub,legacy_verbs}.rs`;
+    - `holler-cli/src/pane/watch.rs`;
+    - `holler-pane-testkit/src/conformance/mod.rs`.
+  - **Read in part:**
+    - `holler-pane/src/error.rs` (395-714) and `tx_launch.rs` (560-831);
+    - `holler-adapter-opencode/src/lib.rs` (1-469) and `attach.rs` (1-120);
+    - `holler-adapter-herdr/src/{lib,adapter}.rs`;
+    - `holler-adapter-host/tests/real_tmux_test.rs` (1-122);
+    - `holler-cli/src/say_cmd.rs` (225-300);
+    - `holler-cli/tests/support/mod.rs`;
+    - `holler-hub/src/{state,panes/mod}.rs`;
+    - ADR-0021 (92-520, 728-842);
+    - `docs/testing.md` (439-449);
+    - `docs/research/herdr-api-spike.md` (40-46, 395-402);
+    - `agent-skills/setup-wizard/lib/herdr.sh` (84-95);
+    - `holler-cli/Cargo.toml` (380-522).
+  - **Greps:**
+    - every `impl <Port> for`;
+    - every caller of `Wiring::connect` and `Unwired`;
+    - `control::run` callers;
+    - `NoLiveHub` renderings;
+    - `#[path = "../../..` includes;
+    - every `#649` in ADR-0021;
+    - `HOLLER_TEST_*` hooks in the hub;
+    - the run-conformance call sites.
+  - **Parallel branches:** the Blast radii of #642 and #644 (`git show issue-642-implementation:docs/handoffs/642-brief.md`, and the same for #644).
