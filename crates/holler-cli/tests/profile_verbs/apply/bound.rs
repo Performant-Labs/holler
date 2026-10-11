@@ -63,7 +63,9 @@ fn two_creates() -> Rig {
 
 /// Entry 26 (§9, C13, C7 R3 B-4): a step runs under its own budget, the `TxOptions` the engine
 /// is given: a `create` that outlasts it is `failed` with `timeout` (op `pane.launch`), the later
-/// step is `skipped`, and the engine returns well inside a generous bound (#644's numbers).
+/// step is `skipped`, and the engine returns well inside a generous bound (#644's numbers,
+/// re-checked for #802 by C25: the plan's `serve_command` and port check take 1000 ms at 500 ms
+/// a call, past the 800 ms budget, so the launch times out before its act, in about 1 s).
 #[test]
 fn a_step_that_outlasts_its_budget_fails_and_stops_the_run() {
     let rig = two_creates();
@@ -95,14 +97,15 @@ fn a_step_that_outlasts_its_budget_fails_and_stops_the_run() {
     assert_eq!(rig.record("pane-z"), None);
 }
 
-/// Entry 27 (O5, C13, C7 R3 B-4): there is no budget over the whole run. Each `create` makes
-/// six harness calls; at 100 ms each one fits a 900 ms budget and two in a row do not, and both
-/// are `created`.
+/// Entry 27 (O5, C13, C7 R3 B-4; numbers re-derived for #802 by C25): there is no budget over
+/// the whole run. Each `create` makes eight harness calls, so at 100 ms each one takes about
+/// 800 ms: it fits a 1200 ms budget with about 400 ms to spare, and two in a row (about
+/// 1600 ms) do not. Both are `created`, and the run is seen to outlast one budget.
 #[test]
 fn there_is_no_budget_over_the_whole_run() {
     let rig = two_creates();
     let budget = TxOptions {
-        budget: Duration::from_millis(900),
+        budget: Duration::from_millis(1200),
         ..options()
     };
     rig.harness

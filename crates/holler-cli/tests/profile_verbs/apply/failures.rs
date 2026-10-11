@@ -1,19 +1,20 @@
-//! A `failed` step stops the run (brief §5, C1-C3, C5, C9, C19 and the decision on O6; C14
-//! entries 17, 21, 22, 23 and 33).
+//! A `failed` step stops the run (brief §5, C1-C3, C5, C9, C19, C22, C25 and the decision on O6;
+//! C14 entries 17, 21, 22, 23 and 33).
 //!
 //! Each case reads the `failed` step and the `skipped` steps after it from the result the engine
 //! returns, and runs the verb in both formats to see that it exits 1 and prints only the
 //! failure (`assert_stopped`). A case that fails one pane's `health` with `fail_next` holds one
 //! recorded spec pane only, since apply observes the panes in parallel (C7).
 
+use holler_cli::pane::profile_scope::reconcile_step;
 use holler_pane::tx_apply::{Action, Outcome as StepOutcome};
 use holler_pane::PaneError;
 use holler_pane_testkit::harness::HarnessOp;
 use holler_pane_testkit::herdr::HerdrOp;
 
 use super::rig::{
-    apply_argv, assert_only_observed, assert_stopped, cell, new_spec, options, outcomes, request,
-    spec_of, step, Rig, Seed, Stop, HS, P, Q,
+    apply_argv, assert_only_observed, assert_stopped, cell, new_spec, options, outcomes,
+    profile_name, request, spec_of, step, Rig, Seed, Stop, HS, P, Q,
 };
 use crate::list::rig::{NthCasPut, NthPut};
 
@@ -56,6 +57,7 @@ fn a_failed_health_call_stops_the_run() {
         step(&applied, "pane-x").code.as_deref(),
         Some("unavailable")
     );
+    assert_eq!(step(&applied, "pane-x").action, Action::Observe, "C22");
     assert_only_observed(&calls);
     assert_eq!(rig.writes_since(before), vec![]);
     assert_eq!(rig.record("pane-y"), None, "the create never ran");
@@ -63,7 +65,7 @@ fn a_failed_health_call_stops_the_run() {
     let stop = Stop {
         pane: "pane-x",
         code: "unavailable",
-        action: None,
+        action: Some(Action::Observe),
         skipped: 1,
     };
     assert_stopped(health_fails, |rig, f| rig.run(&apply_argv(&HS), f), &stop);
@@ -92,7 +94,7 @@ fn a_dry_run_with_a_failed_health_call_prints_only_the_failure() {
     let stop = Stop {
         pane: "pane-x",
         code: "unavailable",
-        action: None,
+        action: Some(Action::Observe),
         skipped: 1,
     };
     let argv = apply_argv(&["--dry-run", HS[0], HS[1]]);
@@ -196,11 +198,12 @@ fn an_unreadable_snapshot_fails_the_first_step_that_needs_it() {
         step(&applied, "pane-x").code.as_deref(),
         Some("unavailable")
     );
+    assert_eq!(step(&applied, "pane-x").action, Action::Observe, "C22");
 
     let stop = Stop {
         pane: "pane-x",
         code: "unavailable",
-        action: None,
+        action: Some(Action::Observe),
         skipped: 1,
     };
     assert_stopped(snapshot_fails, |rig, f| rig.run(&apply_argv(&HS), f), &stop);
@@ -247,4 +250,43 @@ fn a_failed_health_for_a_pane_row_a_refuses_is_not_a_failure() {
 
     let run = row_a_health_fails().run(&apply_argv(&HS), holler_cli::output::Format::Json);
     assert_eq!(run.code, 0, "{run:?}");
+}
+
+/// `pane-y` and `pane-z` (r1c1 and r2c1, no record), with the next `create_session`, which
+/// `pane-y`'s launch calls once its pane, session and server are up, answering `unavailable`.
+fn create_fails_after_its_act() -> Rig {
+    let rig = Rig::new();
+    rig.set_specs(
+        P,
+        vec![
+            new_spec("pane-y", cell(1, 1), 48100),
+            new_spec("pane-z", cell(2, 1), 48101),
+        ],
+    );
+    rig.harness
+        .faults()
+        .fail_next(HarnessOp::CreateSession, unavailable("harness"));
+    rig
+}
+
+/// C25 (ADR-0021 section 8, step 6): a `failed` step whose launch had started its act prints the
+/// reconcile step in the failure's message, in both formats, as `pane launch` does.
+#[test]
+fn a_failed_step_that_had_acted_names_the_reconcile_step() {
+    let stop = Stop {
+        pane: "pane-y",
+        code: "unavailable",
+        action: Some(Action::Create),
+        skipped: 1,
+    };
+    let message = assert_stopped(
+        create_fails_after_its_act,
+        |rig, f| rig.run(&apply_argv(&HS), f),
+        &stop,
+    );
+    let reconcile = reconcile_step(Some(&profile_name(P)));
+    assert!(
+        message.contains(&reconcile),
+        "names {reconcile:?}: {message}"
+    );
 }

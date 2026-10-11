@@ -1,7 +1,10 @@
-//! What "healthy" observes (brief §2, C9, C12 and O2; C14 entries 24 and 28, and plan-review
-//! warn 1). A recorded pane is healthy when its `health` answers `Ok(true)`, Herdr's snapshot
+//! What "healthy" observes, and how (brief §2, §9, C9, C12, C21 and O2; C14 entries 24 and 28,
+//! and plan-review warn 1). A recorded pane is healthy when its `health` answers `Ok(true)`, Herdr's snapshot
 //! lists its `(session, pane_id)` pair (no other field, the label included: ADR-0021 section 2
 //! after #808), and its TUI does not show another session than the session of record.
+
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use holler_pane::tx_apply::{Applied, Outcome as StepOutcome};
 use holler_pane::{HerdrPane, Pane, PaneError};
@@ -108,4 +111,44 @@ fn the_shown_session_decides_only_on_another_session() {
         after.session_of_record, c.session_of_record,
         "the session kept"
     );
+}
+
+/// C21 (§9, I5): the up-front observation runs one thread per call, not one per pane, so a
+/// pane's `health` and its `shown_session` are in flight together and the observation takes one
+/// call's bound. Every harness call is slowed; when each of the two calls returns, the other has
+/// already been made. A chain of the two (either order) fails this: the first to return finds
+/// the second not yet called. The delay is far above a thread's start-up, so this is an
+/// invariant of the shape, not a race on durations.
+#[test]
+fn a_panes_health_and_shown_session_are_observed_at_once() {
+    let (rig, _) = one_pane(false);
+    let made_before = rig.harness.faults().calls().len();
+    let seen: Arc<Mutex<Vec<(HarnessOp, bool)>>> = Arc::default();
+    for (op, other) in [
+        (HarnessOp::Health, HarnessOp::ShownSession),
+        (HarnessOp::ShownSession, HarnessOp::Health),
+    ] {
+        let seen = seen.clone();
+        rig.after(op, move |rig| {
+            let made = rig.harness.faults().calls()[made_before..].contains(&other);
+            seen.lock().unwrap().push((op, made));
+        });
+    }
+    rig.harness
+        .faults()
+        .set_delay(Some(Duration::from_millis(400)));
+    let (answer, _) = rig.engine(&request(true, false, false), &options());
+    rig.harness.faults().set_delay(None);
+    assert_eq!(
+        outcomes(&answer.unwrap()),
+        vec![("pane-c", StepOutcome::Planned)]
+    );
+    let seen = seen.lock().unwrap().clone();
+    assert_eq!(seen.len(), 2, "each call returned once: {seen:?}");
+    for op in [HarnessOp::Health, HarnessOp::ShownSession] {
+        assert!(
+            seen.contains(&(op, true)),
+            "{op:?} returned after the other call was made: {seen:?}"
+        );
+    }
 }

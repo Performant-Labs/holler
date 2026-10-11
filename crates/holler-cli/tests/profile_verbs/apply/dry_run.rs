@@ -2,11 +2,12 @@
 //! A dry run past §4's gate whose plan has no `failed` step prints its plan and exits 0; the
 //! failing dry run is `failures.rs`'s, and the gate's is `apply.rs`'s.
 //!
-//! The outcome a dry run gives a step it would act on (rows b, c and f) is not named by the
-//! brief (plan-review warn 9); these cases pin only that it claims no effect it did not have.
+//! A dry run's step that would act (rows b, c and f) is `planned` (C22), claiming no effect it
+//! did not have; row d's is `reported`.
 
 use holler_cli::output::Format;
 use holler_pane::tx_apply::{Action, Outcome as StepOutcome};
+use holler_pane::AgentKey;
 use serde_json::{json, Value};
 
 use super::rig::{
@@ -50,15 +51,10 @@ fn a_dry_run_calls_only_its_reads_and_plans_every_row() {
         ("pane-f", Action::Relaunch),
     ] {
         let s = step(&plan, pane);
-        assert_eq!(s.action, action, "{pane}");
-        let effects = [
-            StepOutcome::Created,
-            StepOutcome::Adopted,
-            StepOutcome::Relaunched,
-        ];
-        assert!(
-            !effects.contains(&s.outcome),
-            "{pane}: a dry run did nothing: {s:?}"
+        assert_eq!(
+            (s.action, s.outcome),
+            (action, StepOutcome::Planned),
+            "{pane}: a dry run did nothing (C22): {s:?}"
         );
     }
 }
@@ -115,18 +111,30 @@ fn a_dry_run_with_take_over_plans_the_adopt_and_writes_nothing() {
 /// Entry 11 (Acceptance 4): `apply --dry-run` and `holler profile show` agree on one fixture.
 /// The plan lists exactly the differences `show` reports, with the same `PaneDiff` (positions
 /// in rowcol form): a matching pane is an adopt with no diff, a differing one carries `show`'s
-/// row, a missing one is a create with no diff.
+/// row, a missing one is a create with no diff. `pane-g` runs another agent than its spec names:
+/// both verbs call it matching while `SpecField::ALL` omits `opencode_agent`, and both report the
+/// difference once #644 part 2 adds it, so the case holds either way and covers the agent case
+/// by composition with `show`'s own tests (C18; plan-review round 4 warn 2).
 #[test]
 fn a_dry_run_and_profile_show_agree() {
     let seed = || {
         let rig = Rig::new();
         let c = rig.seed_live(&Seed::at("pane-c", cell(1, 1), 48100));
         let d = rig.seed_live(&Seed::at("pane-d", cell(1, 2), 48101));
+        let g = rig.seed_live(&Seed::at("pane-g", cell(3, 1), 48103));
         let mut moved = spec_of(&d);
         moved.herdr.grid = cell(3, 3);
+        let mut other_agent = spec_of(&g);
+        other_agent.opencode_agent = Some(AgentKey::parse("review").unwrap());
+        assert_ne!(other_agent.opencode_agent, g.opencode_agent);
         rig.set_specs(
             P,
-            vec![spec_of(&c), moved, new_spec("pane-b", cell(2, 1), 48102)],
+            vec![
+                spec_of(&c),
+                moved,
+                new_spec("pane-b", cell(2, 1), 48102),
+                other_agent,
+            ],
         );
         rig
     };
@@ -162,10 +170,10 @@ fn a_dry_run_and_profile_show_agree() {
         }
         checked += 1;
     }
-    assert_eq!(checked, 3, "every spec pane: {shown}");
+    assert_eq!(checked, 4, "every spec pane: {shown}");
     assert_eq!(
         planned["steps"].as_array().unwrap().len(),
-        3,
+        4,
         "nothing beyond show's rows"
     );
     let d = json_step(&planned, "pane-d");

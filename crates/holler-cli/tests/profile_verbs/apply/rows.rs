@@ -1,21 +1,23 @@
 //! One case per row of the step table (§3) and per per-pane answer of §4, on the rig's fakes
-//! (brief C14 entries 1-3, 5, 8-10, 12, 13, 16, 30 and 32). `--take-over` is in `takeover.rs`.
+//! (brief C14 entries 1-3, 5, 8-10, 12, 13, 16, 30 and 32, C22's vocabulary, and C25's refusal
+//! after the act began). `--take-over` is in `takeover.rs`.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use holler_cli::output::Format;
+use holler_cli::pane::profile_scope::reconcile_step;
 use holler_pane::profile_diff::{diff_spec, PaneDiff, PaneStatus};
 use holler_pane::tx_apply::{Action, Outcome as StepOutcome};
 use holler_pane::{Cursor, Pane, PaneError, PaneEvent, PaneName, PaneStore, ProbeResult, Watch};
-use holler_pane_testkit::harness::ServerState;
+use holler_pane_testkit::harness::{HarnessOp, ServerState, AGENT_MISMATCH};
 use holler_pane_testkit::herdr::FakeHerdr;
 use holler_pane_testkit::herdr::{HerdrOp, Placement};
 use holler_pane_testkit::pane_store::FakePaneStore;
-use serde_json::json;
+use serde_json::{json, Value};
 
 use super::rig::{
     apply_argv, argv, assert_only_observed, cell, data_of, every_row, json_step, new_spec, options,
-    outcomes, request, spec_of, step, Rig, Seed, EVERY_ROW, HS, P, Q, SESSION,
+    outcomes, profile_name, request, spec_of, step, Rig, Seed, EVERY_ROW, HS, P, Q, SESSION,
 };
 
 /// §3 in one run: one step per spec pane, in `(workspace, row, col)` order whatever the
@@ -62,6 +64,23 @@ fn one_run_takes_every_row_in_grid_order() {
         json_step(&data, "pane-e")["code"],
         json!("orchestrator-not-relaunched")
     );
+    // C22: the action strings, and the step object's keys, an absent one printed as null.
+    let actions: Vec<&str> = data["steps"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["action"].as_str().unwrap_or_default())
+        .collect();
+    let want = ["refuse", "create", "adopt", "report", "refuse", "relaunch"];
+    assert_eq!(actions, want, "{data}");
+    let c = json_step(&data, "pane-c");
+    let mut keys: Vec<&str> = c.as_object().unwrap().keys().map(String::as_str).collect();
+    keys.sort_unstable();
+    let want = ["action", "code", "detail", "diff", "outcome", "pane"];
+    assert_eq!(keys, want, "{c}");
+    for key in ["code", "diff", "detail"] {
+        assert_eq!(c[key], Value::Null, "{key}: {c}");
+    }
 }
 
 /// Entry 2 (row c): a healthy pane that matches its spec is `adopted`, not relaunched. Nothing
@@ -384,8 +403,8 @@ fn row_f_a_killed_agent_is_relaunched() {
 }
 
 /// Entry 30 (§4, C7 R3 NV-3): an unhealthy agent whose spec moves its directory is answered
-/// `usage` by the relaunch rules; that is a `refused` step carrying a code, not a run failure:
-/// the run goes on and exits 0, and nothing of the pane is touched.
+/// `usage` by the relaunch rules; that is a `refused` step coded `spec-not-launchable` (C22),
+/// not a run failure: the run goes on and exits 0, and nothing of the pane is touched.
 #[test]
 fn a_per_pane_usage_from_the_relaunch_rules_is_refused_and_the_run_goes_on() {
     let seed = || {
@@ -409,8 +428,8 @@ fn a_per_pane_usage_from_the_relaunch_rules_is_refused_and_the_run_goes_on() {
             ("pane-z", StepOutcome::Adopted)
         ]
     );
-    let code = step(&applied, "pane-f").code.clone().expect("a named code");
-    assert!(!code.is_empty());
+    let code = step(&applied, "pane-f").code.clone();
+    assert_eq!(code.as_deref(), Some("spec-not-launchable"), "C22");
     assert_eq!(rig.writes_since(before), vec![]);
     assert_eq!(rig.record("pane-f"), Some(f));
     assert_eq!(
@@ -489,4 +508,87 @@ fn herdr_session_is_needed_for_a_create_alone() {
     );
     let text = seed().run(&apply_argv(&[]), Format::Text);
     assert_eq!(text.code, 0, "{text:?}");
+}
+
+/// `pane-a` of Q (r1c1: row a, refused before anything runs), then `pane-x` (r1c2), whose launch
+/// act the harness's `verify_serving` answers with a refusal (C25), then `pane-z` of P (r2c1,
+/// healthy, matching). `pane-x` has no record (a `create`) or, with `relaunch`, is an agent of P
+/// whose server was killed (row f).
+fn refused_mid_act(relaunch: bool) -> Rig {
+    let rig = Rig::new();
+    let a = rig.seed_live(&Seed::at("pane-a", cell(1, 1), 48100).in_profile(Some(Q)));
+    let x = if relaunch {
+        let x = rig.seed_live(&Seed::at("pane-x", cell(1, 2), 48101));
+        rig.kill(&x);
+        spec_of(&x)
+    } else {
+        new_spec("pane-x", cell(1, 2), 48101)
+    };
+    let z = rig.seed_live(&Seed::at("pane-z", cell(2, 1), 48102));
+    rig.set_specs(P, vec![spec_of(&a), x, spec_of(&z)]);
+    let refusal = PaneError::Refused {
+        code: AGENT_MISMATCH,
+        message: "the server on port 48101 does not run the agent the spec asks for".to_owned(),
+    };
+    rig.harness
+        .faults()
+        .fail_next(HarnessOp::VerifyServing, refusal);
+    rig
+}
+
+/// C25 (#802; §4, §5): a refusal that arrives after the launch act began (`verify_serving`, once
+/// the pane, its session and the server command have run) is still a `refused` step with its
+/// code, and the run goes on and exits 0. But it must not read as if nothing ran: in both
+/// formats its `detail` names the reconcile step, as `pane launch` does for an acted failure.
+/// Row a's refusal, which ran nothing, does not. For a `create` and for a row f relaunch.
+#[test]
+fn a_refusal_after_the_act_began_names_the_reconcile_step() {
+    let reconcile = reconcile_step(Some(&profile_name(P)));
+    for (relaunch, action) in [(false, Action::Create), (true, Action::Relaunch)] {
+        let rig = refused_mid_act(relaunch);
+        let (answer, _) = rig.engine(&request(false, false, true), &options());
+        let applied = answer.unwrap();
+        assert_eq!(
+            outcomes(&applied),
+            vec![
+                ("pane-a", StepOutcome::Refused),
+                ("pane-x", StepOutcome::Refused),
+                ("pane-z", StepOutcome::Adopted),
+            ],
+            "{action:?}"
+        );
+        let x = step(&applied, "pane-x");
+        assert_eq!(
+            (x.action, x.code.as_deref()),
+            (action, Some(AGENT_MISMATCH.as_str())),
+            "{x:?}"
+        );
+
+        let run = refused_mid_act(relaunch).run(&apply_argv(&HS), Format::Json);
+        let data = data_of(&run);
+        let x = json_step(&data, "pane-x");
+        assert_eq!(x["outcome"], json!("refused"), "{action:?}: {x}");
+        let detail = x["detail"].as_str().unwrap_or_default();
+        assert!(
+            detail.contains(&reconcile),
+            "{action:?}: the detail names {reconcile:?}: {x}"
+        );
+        let a = json_step(&data, "pane-a");
+        assert!(
+            !a["detail"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("to reconcile"),
+            "row a ran nothing: {a}"
+        );
+
+        let text = refused_mid_act(relaunch).run(&apply_argv(&HS), Format::Text);
+        assert_eq!(text.code, 0, "{text:?}");
+        let line = text
+            .out
+            .lines()
+            .find(|line| line.starts_with("pane-x:"))
+            .unwrap_or_else(|| panic!("a line for pane-x: {text:?}"));
+        assert!(line.contains(&reconcile), "{action:?}: {line}");
+    }
 }

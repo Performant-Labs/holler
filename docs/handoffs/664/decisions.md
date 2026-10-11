@@ -202,3 +202,27 @@
     - `644-brief.md` at `93b2cd7`: items 2, 4 and 7, its Blast radius, and its Rules.
     - What each in-flight branch changes, and #652's references to `tx_apply`.
     - `gh pr list` shows no PR yet for #644 part 2.
+
+## T (Phase 4, author / RED, fresh run after A round 4): 2026-10-11 11:15 MDT
+- **Decided:**
+  - **One RED test.** `a_refusal_after_the_act_began_names_the_reconcile_step` (`apply/rows.rs`) covers C25. It runs `fail_next(VerifyServing, Refused)` on a `create` and on a row f relaunch. Each step is `refused` with `agent-mismatch`, the run goes on and exits 0, and the step's `detail` names `reconcile_step(Some(P))` in JSON and in text. Row a's refusal does not.
+  - **Pins.** These cover decisions the first run's code already meets but no test checked:
+    - C25: a `failed` acted step's message names the reconcile step.
+    - C21: a pane's `health` and `shown_session` are in flight together. This is an invariant based on the call log, not a duration.
+    - C22: the six action strings, the exact step keys with `null` for an absent key, `planned`, `spec-not-launchable`, and `observe`.
+    - A round 4 warn 2: entry 11 gains an agent-difference pane that holds before and after #644 part 2.
+  - **Timing.** Entry 27 is re-derived to 100 ms per call and a 1200 ms budget. The run measured 1.60 s, which is 16 calls and confirms eight per create. Entry 26 keeps its numbers (about 1.0 s against a 3 s bound); only its doc changed.
+  - **No new file and no rig change.** Every edit is in a path on A's 27-path list.
+- **Assumed:**
+  - F's first-run code is the base this cycle builds on (A round 4's assumption), so a test of an already-met decision is a pin, not an invalid RED.
+  - The reconcile step goes on an acted step's `detail` at the verb, not in the engine's `Step.detail`, because `reconcile_step` belongs to `holler-cli` (C25). So the RED is asserted at the verb, and the engine half asserts only the outcome and code.
+- **Hedged:**
+  - The C21 test relies on a 400 ms delay being far longer than a thread's start-up. It passed 10 of 10 runs and failed a chained-observation mutant.
+  - I left the doc-only items to S rather than grep for their wording: C21's `observe.rs` doc, C22 and C25's ADR sentence, `Step.acted`'s doc, and C23's `#818`.
+- **Evidence:**
+  - **Before my edits:** 81 of 81 passed.
+  - **After:** 83 passed and 1 failed. The failure is on the C25 detail assertion, and it was the same in 10 of 10 runs of `apply::`.
+  - **Throwaway prototype in the verb:** 84 of 84 passed.
+  - **Mutants M1 to M4:** each failed at least one new test.
+  - **Tier 1 on the test files:** clippy `-D warnings` is clean, `rustfmt --check` passes, and `lint.sh` exits 0.
+  - **Files read:** the brief's C18 to C25, `handoff-A.md` round 4, `tx_apply.rs`, `tx_apply/observe.rs`, `profile/apply.rs`, `tx_launch/server.rs:85-107`, the test kit's `fault.rs` and `harness.rs`, and `pane/profile_scope.rs` (`reconcile_step`).
