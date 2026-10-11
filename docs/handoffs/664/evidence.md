@@ -116,3 +116,30 @@ branch at `e773945` (which is `origin/main` `263a2d7` plus this story's tests).
   >     excerpt(text)
   > }
   > ```
+
+## Added by T (Phase 7, 2026-10-11)
+
+- **Fact:** Herdr's `version` is called by the launch transaction's own observation (steps 3 to 6, shared by launch
+  and relaunch), never by apply's up-front observation, which calls only `snapshot`, `health` and `shown_session`. In
+  `row_f_take_over_whose_relaunch_fails_stays_in_p` the only launch or relaunch is pane-f's relaunch (pane-z is an
+  adopt), so `fail_next(HerdrOp::Version, ..)` fails that relaunch and nothing else.
+  **Source:** `crates/holler-pane/src/tx_launch.rs:288-291`
+  **Verbatim excerpt:**
+  > ```rust
+  >     fn observe(&self, ports: Ports<'_>, probe_timeout: Duration) -> Result<Seen, PaneError> {
+  >         let probe = probe(ports, self.spec, probe_timeout)?;
+  >         let herdr_api_version = ports.herdr.version()?;
+  >         let listed = ports.herdr.snapshot()?.panes;
+  > ```
+
+- **Fact:** the test kit's split-only Herdr refuses a free cell that no split reaches (`grid-unreachable`). So
+  `row_b_missing_panes_are_created_by_splits_in_grid_order`, whose P lists its cells in reverse, passes only when apply
+  creates in `(workspace, row, col)` order.
+  **Source:** `crates/holler-pane-testkit/src/herdr.rs:85-88`
+  **Verbatim excerpt:**
+  > ```rust
+  >     /// Only a cell that a split reaches, as in real Herdr (spike section 7): the root
+  >     /// `r1c1` of an empty workspace, or a free cell right of a pane (a `right` split) or
+  >     /// below one (a `down` split). Any other free cell is refused with
+  >     /// [`GRID_UNREACHABLE`].
+  > ```

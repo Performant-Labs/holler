@@ -85,3 +85,14 @@
   - **`cli_surface_test` and `docs_cli_test`** pass.
   - **`pane_cli_process`.** 34 of 36 pass; the 2 failures are the `STUBS` entry.
   - **The whole workspace.** See `handoff-F.md`'s Tier 1 output.
+
+## T (Phase 7, verify / GREEN): 2026-10-11 08:45 MDT
+- **Decided:** I took F's flag on `pane_verbs/process/stub.rs` as a test fix: I deleted the `("profile", "apply", 664)` `STUBS` entry and kept the `// #664` line, as the file's doc requires. That was my only test change. The verdict is PASS with no blocking issue. I added two evidence entries for unchanged-code facts my tests rely on: `herdr.version` is called only inside `tx_launch`'s observation, and the split-only fake refuses an unreachable cell.
+- **Assumed:** the repo-wide `cargo fmt --check` drift is not this branch's concern. None of the files that drift is changed by the branch, and CI gates on `lint.sh`, not `cargo fmt`.
+- **Hedged:** three cases stay untested: an invalid `PaneName` spec, a record that moves to another profile mid-run without `--take-over`, and duplicate specs. They are advisories for S, not blockers, because the brief does not pin them (T-red's "Not pinned").
+- **Evidence:**
+  - The whole workspace passes with `--no-fail-fast`: 2125 passed, 0 failed.
+  - `profile_verbs` passed 81/81 on 10 of 10 runs, and `pane_cli_process` passed 36/36.
+  - These are clean: clippy `-D warnings`, `lint.sh`, `changelog-check`, `cargo machete`, `docs_cli_test`, `cli_surface_test`, `wire_selftest`, `test-hooks.sh`, `pipeline-adoption-test.sh`, and rustfmt on the changed files.
+  - Five mutants of F's code were all killed, each reverted with `git checkout`.
+  - I compared the twins `leave` and `join` in `run.rs` with `profile::delete::detach` and `profile::create::join` by reading both.
