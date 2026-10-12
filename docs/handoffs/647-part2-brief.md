@@ -1,6 +1,6 @@
 # [feat(pane): doctor finds a tmux session no Herdr pane shows (`unattached`) and a pane that runs as an agent that cannot dispatch (`agent-cannot-dispatch`): part 2 of #647](https://github.com/Performant-Labs/holler/issues/647)
 
-Part of epic #633. This is the complete statement of **part 2** of story #647, written as one text against `main` at `bda1069` (#840 merged, 2026-10-11) and **refreshed on 2026-10-12 against `main` at `6eff9cc`** (#835, #831, #665, #667, #648 and #853 have merged since); every excerpt (E1 and following) was re-cut from that tree, except E42 and E43, which are cut from a named commit of #839's brief, a story that has not merged. Part 1 (the reconcile engine and `holler pane doctor`, 16 finding kinds on `main` now) merged as PR #701 (`e612878`, 2026-10-09 18:56 MDT) and is the record in `docs/handoffs/647/`, which this story does not touch. Part 2 is the two amendments the issue parked: `agent-cannot-dispatch` (operator-confirmed 2026-10-09 17:40 MDT, epic decision 8, from pfleet#372) and `unattached` (2026-10-09 19:03 MDT, from the c4r1 incident).
+Part of epic #633. This is the complete statement of **part 2** of story #647, written as one text against `main` at `bda1069` (#840 merged, 2026-10-11) and **refreshed on 2026-10-12 against `main` at `6eff9cc`** (#835, #831, #665, #667, #648 and #853 have merged since); every excerpt (E1 and following) was re-cut from that tree, except E42 and E43, which are cut from a named commit of #839's brief, a story that has not merged (E54 to E77 were added on 2026-10-12 for the brief gate's first round; "Evidence" says where each is cut). Part 1 (the reconcile engine and `holler pane doctor`, 16 finding kinds on `main` now) merged as PR #701 (`e612878`, 2026-10-09 18:56 MDT) and is the record in `docs/handoffs/647/`, which this story does not touch. Part 2 is the two amendments the issue parked: `agent-cannot-dispatch` (operator-confirmed 2026-10-09 17:40 MDT, epic decision 8, from pfleet#372) and `unattached` (2026-10-09 19:03 MDT, from the c4r1 incident).
 
 It starts from the operator's decision of 2026-10-11, the last comment on #647: the contract change is **allowed**; `agent-cannot-dispatch` and `unattached` may add read-only port methods, "default-armed or required as the contract amendment decides"; #835 and #832 set the pattern; and #649's wrappers must forward every new method. It also settles every finding of the earlier plan check (`docs/handoffs/647-part2/earlier-attempt/handoff-A.md`, verdict BLOCK, B-1, B-2, W-1 to W-9); the table in "Where this brief is the decision" says where each is settled.
 
@@ -10,7 +10,7 @@ It starts from the operator's decision of 2026-10-11, the last comment on #647: 
 
 **D1. The scope is both amendments, in one PR that closes #647.** *(decided by the preparer, to be confirmed at the plan check)* Both findings need the same kind of change (a read-only port method, the ADR amended first, a wrapper test, a finding row in the guide), and they edit the same files. The pipeline script opens the PR with `Closes #647.` (E50), which is right only if both land. Rejected: split `unattached` into its own issue (the #665 precedent): it would amend the same ADR section and the same traits twice, in two PRs that clash, for no saving. If the plan check or the build run must drop one, the PR body is edited (`gh pr edit`) so it does not close #647.
 
-**D2. The story starts after #835 and #831, which have merged, and is built on `main` at `6eff9cc`.** *(decided by the preparer, to be confirmed at the plan check)* #835 (PR #860, `4e691d9`) made the rule this story follows, required port methods (E5, E6, E33), and edited the same `ports.rs`, the same wrappers (E22, E24), the same test doubles and the same ADR lines. #831 (PR #857, `b76f4d2`) changed **every `HarnessPort` method keyed by `port: u16` to be keyed by `&HarnessEndpoint`** (E41), added the second harness (`holler-adapter-claude`, the kit's `FakeClaude`) and the one router `HarnessRouter` of the two shapes, and split the reconcile chain by the harness's shape (E10). So the method is `agent_view(at: &HarnessEndpoint, session, max_turns)`; `HarnessRouter` routes it by endpoint like every endpoint-keyed method (its module doc has the table); a single-process (Claude Code) endpoint answers an empty view; and no doctor chain calls it for a Claude Code pane (D6, rule 2). Also merged since the first text: #665 (PR #858: `profile-drift`, the last finding kind), #667 (`0f5835e`: the apply scenario and its shared end-state helper, E44), #648 (PR #856) and #853 (PR #861). The alternatives of the first text (stacking on either branch; building on #835 alone with `port: u16`) are moot and dropped.
+**D2. The story starts after #835 and #831, which have merged, and is built on `main` at `6eff9cc`.** *(decided by the preparer, to be confirmed at the plan check)* #835 (PR #860, `4e691d9`) made the rule this story follows, required port methods (E5, E6, E33), and edited the same `ports.rs`, the same wrappers (E22, E24), the same test doubles and the same ADR lines. #831 (PR #857, `b76f4d2`) changed **every `HarnessPort` method keyed by `port: u16` to be keyed by `&HarnessEndpoint`** (E41), added the second harness (`holler-adapter-claude`, the kit's `FakeClaude`) and the one router `HarnessRouter` of the two shapes, and split the reconcile chain by the harness's shape (E10). So the method is `agent_view(at: &HarnessEndpoint, session, max_turns)`; `HarnessRouter` routes it by endpoint like every endpoint-keyed method (its module doc has the table, E66, and one routing rule, `by`, E67); a single-process (Claude Code) endpoint answers an empty view; and no doctor chain calls it for a Claude Code pane (D6, rule 2). Also merged since the first text: #665 (PR #858: `profile-drift`, the last finding kind), #667 (`0f5835e`: the apply scenario and its shared end-state helper, E44), #648 (PR #856) and #853 (PR #861). The alternatives of the first text (stacking on either branch; building on #835 alone with `port: u16`) are moot and dropped.
 
 **D3. Both new port methods are required, with no default.** *(operator, by the rule of 2026-10-11, ADR decisions 12 and 23, applied by the preparer)* E51 says the contract changes by changing the port, so an omission is a compile error; E33 says why a default is wrong here: E2 was default-armed, and the review of #849-era found it answering an empty observation, silently, over the real wiring; #835 made it required. E4 is the shape this story does not repeat. Cost, stated: every implementation of `HostPort` and `HarnessPort` in the workspace gets a method (the list is in "Blast radius"); the compiler finds them. Rejected: default-armed methods "that answer cannot-tell" (the operator's decision allows them; they are the exact failure the wrapper tests below exist to catch, and `session_activity` shows the cost of a default that is a plausible answer, `Idle`).
 
@@ -21,11 +21,11 @@ It starts from the operator's decision of 2026-10-11, the last comment on #647: 
 
 **D5. `AgentView`.** *(decided by the preparer, to be confirmed at the plan check)* A `#[non_exhaustive]` struct with builders and a `Default` that is empty, as `PaneObservation` is in `ports.rs` (E3 shows the host trait; E4 the defaults this story does not repeat): `turns: Vec<TurnAgent>` (the last `max_turns` user turns of the session, oldest first) and `dispatchers: Vec<AgentKey>` (sorted, no duplicates). `TurnAgent { agent: Option<AgentKey>, can_dispatch: Option<bool> }`. The exact meaning of each field is in the ADR text below. "Cannot tell" is an empty view or a `None`, never a guess; a server whose reply has the wrong shape is `unavailable` (an `observe-failed` finding), because a rule that is silently skipped on a version change is the failure this story is about. A name the server uses that is not an `AgentKey` is left out of `dispatchers` and is `agent: None` in a turn. Rejected: `turns` as raw message ids or times (not needed by any rule; the hub's feed is not this port's business).
 
-**D6. The `agent-cannot-dispatch` rule.** *(operator for the finding's existence and its remedy text; the rule's details are decided by the preparer, to be confirmed at the plan check)* The finding is raised for a pane when all of these hold, each from an observation: (1) **the record names no agent** (`opencode_agent` is `None`). That is the only "opted out deliberately" the data has: a pane whose record names an agent chose one, `build` included, which is the pfleet#372 acceptance ("does not fire for a pane running `build` deliberately"); a pane whose record names a dispatching agent is a different problem (a server that lost its `default_agent`) and raises nothing here. No new `Pane` field. (2) The pane's harness is a server harness (OpenCode): `HarnessKind` has two variants on `main` and `check_pane` branches on `pane.harness.kind.shape()`, handing a single-process pane to the child module `process` (E10), so the agent check is added to the server-shape path only, after `check_session_of_record`, and a Claude Code pane never reaches it. (3) Its server is healthy and lists the session of record (the trust rule of E12). (4) `agent_view(&at, session_of_record, RECENT_TURNS)` answers at least one turn and **every** turn has `can_dispatch == Some(false)`, with `RECENT_TURNS = 3`, one constant in `observe.rs`. (5) `dispatchers` is not empty: the project "ships an orchestrator". "Recent hub-delivered turns" can only mean the recent turns of the session of record, the stand-in for DRIVEN that #645 chose and E14 records: OpenCode records the agent of a turn, not who sent it. Rejected: reading `.opencode/agents/` or `opencode.json` (I6; and on an Aftersight pane the orchestrator lives elsewhere, epic decision 8); `Pane.role` as the gate (the epic says the role is the fleet role, not the agent); a majority of turns instead of all (a pane that mixes agents is partly working); a stored "was reported" flag (part 1 keeps no memory between runs).
+**D6. The `agent-cannot-dispatch` rule.** *(operator for the finding's existence and its remedy text; the rule's details are decided by the preparer, to be confirmed at the plan check)* The finding is raised for a pane when all of these hold, each from an observation: (1) **the record names no agent** (`opencode_agent` is `None`). That is the only "opted out deliberately" the data has: a pane whose record names an agent chose one, `build` included, which is the pfleet#372 acceptance ("does not fire for a pane running `build` deliberately"); a pane whose record names a dispatching agent is a different problem (a server that lost its `default_agent`) and raises nothing here. No new `Pane` field. (2) The pane's harness is a server harness (OpenCode): `HarnessKind` has two variants on `main` and `check_pane` branches on `pane.harness.kind.shape()`, handing a single-process pane to the child module `process` (E10), so the agent check is added to the server-shape path only, after `check_session_of_record`, and a Claude Code pane never reaches it. (3) Its server is healthy and lists the session of record (the trust rule of E12). Exactly: the record names a session of record `record` and `server.has(record)` is true, `server` being the `Server` that `observe_server` returned in this pass (E10, line 128). `has` reads only the trusted list, which is `Some` only for `Server::Healthy { sessions: Some(..) }` (E54), so rule (3) fails, and `agent_view` is not called, for a server that failed its health check (`Wedged`, `Down`), a health check that itself failed (`Unknown`), a healthy server whose `list_sessions` failed (`Healthy { sessions: None }`, already an `observe-failed` naming `harness.list_sessions`) and a trusted list without `record` (already `session-of-record-missing`, E12). (4) `agent_view(&at, session_of_record, RECENT_TURNS)` answers at least one turn and **every** turn has `can_dispatch == Some(false)`, with `RECENT_TURNS = 3`, one constant in `observe.rs`. (5) `dispatchers` is not empty: the project "ships an orchestrator". "Recent hub-delivered turns" can only mean the recent turns of the session of record, the stand-in for DRIVEN that #645 chose and E14 records: OpenCode records the agent of a turn, not who sent it. Rejected: reading `.opencode/agents/` or `opencode.json` (I6; and on an Aftersight pane the orchestrator lives elsewhere, epic decision 8); `Pane.role` as the gate (the epic says the role is the fleet role, not the agent); a majority of turns instead of all (a pane that mixes agents is partly working); a stored "was reported" flag (part 1 keeps no memory between runs).
 
 **D7. "Ships an orchestrator", and how an agent "cannot dispatch".** *(decided by the preparer, to be confirmed at the plan check)* The adapter reports what the server says; the rule is one definition. An agent **cannot dispatch** when the server's permission rules for it deny the `task` permission for every subagent: in OpenCode 1.19.0 the rules are a list of `{permission, action, pattern}`, and the last rule whose permission is `task` or `*` and whose pattern is `*` is `deny`, with no later `task` rule that allows another pattern (measured: "Facts measured outside the repository"). The project **ships an orchestrator** when `dispatchers` is not empty: an agent the server lists that is usable as a default (the `verify_serving` rule: not a subagent, not hidden), is not one of OpenCode's own (`native` is false) and can dispatch. Anything else the adapter cannot read (a rule list of another shape, an agent missing from the list) is `None`, which stops the rule. Rejected: counting every dispatching primary agent (OpenCode's built-in `plan` is one: a false positive on every pane); a list of agent names in the ADR (a name is the project's).
 
-**D8. The remedy of `agent-cannot-dispatch`.** *(operator for "naming the cure (`relaunch --agent KEY`)"; the form is decided by the preparer, to be confirmed at the plan check)* `holler pane relaunch PANE --agent=KEY`, with KEY the one dispatcher when `dispatchers` has exactly one; with several, no remedy, and the message lists up to three (quoted) and says to pass one. The form `--agent=KEY`, not `--agent KEY`, because `AgentKey::parse` accepts a leading `-` and capitals (E17), so `-x` is a valid key and `--agent -x` would read as a flag. KEY reaches a message and a remedy only as a parsed `AgentKey`. The one table (E8) stays one table: `FindingKind::remedy_for(self, pane, fix, agent: Option<&AgentKey>)` is the table, and `remedy(self, pane, fix)` (the signature `tx_switch.rs` calls, E40) delegates with `None`; the `Finding` is built with its key through `Finding::with_agent`. `--fix` is not offered: the finding is `not-fixable`, and `--fix` never changes a pane's agent, silently or not (the issue; ADR decision 16 says a relaunch never changes the agent silently, and this one names it on the command line). Rejected: `remedy` gains a parameter (breaks an outside caller for one kind); a remedy with a `KEY` placeholder (not a command); `holler pane relaunch PANE` alone (does not change the agent: decision 16).
+**D8. The remedy of `agent-cannot-dispatch`.** *(operator for "naming the cure (`relaunch --agent KEY`)"; the form is decided by the preparer, to be confirmed at the plan check)* `holler pane relaunch PANE --agent=KEY`, with KEY the one dispatcher when `dispatchers` has exactly one; with several, no remedy, and the message lists up to three (quoted) and says to pass one. The form `--agent=KEY`, not `--agent KEY`, because `AgentKey::parse` accepts a leading `-` and capitals (E17), so `-x` is a valid key and `--agent -x` would read as a flag. The option is `SpecFlags`' `--agent`, which `PaneRelaunch` flattens (E72): `#[arg(long, value_name = "KEY")]` on an `Option<String>` that `AgentKey::parse` checks after clap (E73; `args.rs` line 141), with no `allow_hyphen_values` (`grep -rn allow_hyphen crates/holler-cli/src` finds none). Acceptance 4 proves the joined form through the real tree. KEY reaches a message and a remedy only as a parsed `AgentKey`. The one table (E8) stays one table: `FindingKind::remedy_for(self, pane, fix, agent: Option<&AgentKey>)` is the table, and `remedy(self, pane, fix)` (the signature `tx_switch.rs` calls, E40) delegates with `None`; the `Finding` is built with its key through `Finding::with_agent`. `--fix` is not offered: the finding is `not-fixable`, and `--fix` never changes a pane's agent, silently or not (the issue; ADR decision 16 says a relaunch never changes the agent silently, and this one names it on the command line). Rejected: `remedy` gains a parameter (breaks an outside caller for one kind); a remedy with a `KEY` placeholder (not a command); `holler pane relaunch PANE` alone (does not change the agent: decision 16).
 
 **D9. The `unattached` rule.** *(operator for the finding and its acceptance: "a running, registered session with no attached client raises it; the same pane attached raises nothing"; the rule's edges are decided by the preparer, to be confirmed at the plan check)* Raised when `host.ps` answered for the pane (the session exists) and `attached_clients` is `0`. It is not gated on Herdr, on the pane's hold or on its role: the operator sees nothing in every case. It is independent of `herdr-pane-missing` and `tmux-session-missing`: a missing session raises only the latter (no `attached_clients` call is made); a failed `attached_clients` is `observe-failed` naming `host.attached_clients` and no `unattached`. It is raised for a Claude Code pane too: `check_tmux` runs for every pane before `check_pane` branches on the harness's shape (E10, E11), and a Claude Code pane's tmux session needs a client in a Herdr pane as much as an OpenCode pane's does.
 
@@ -35,15 +35,15 @@ It starts from the operator's decision of 2026-10-11, the last comment on #647: 
 
 **D12. `SpecField` row for `opencode_agent`: already done, nothing to build.** *(operator, ADR decision 18, #644)* E30 shows `SpecField::OpencodeAgent` and `ALL: [SpecField; 16]` on `main`; E31 item 18 records it. The earlier W-7 is settled; this story edits no line of `profile_diff.rs`.
 
-**D13. Reconcile's chain and the read-only guarantee.** *(decided by the preparer, to be confirmed at the plan check)* `check_tmux` (E11) gains the `attached_clients` call after a successful `ps`, and it runs for both shapes (E10); the agent check is a new function called after `check_session_of_record` in the server-shape path of `check_pane` (E10), so it can use the same `Server` value. The module doc's bound (E9) becomes "at most nine port calls" for a server's chain, and the list of a single process's chain (the child module `process`) gains `attached_clients`; and the read-only allowlist (E15) adds exactly `HostOp::AttachedClients` and `HarnessOp::AgentView`. Neither rule writes the record. The agent check calls `agent_view` only when rules (1) to (3) of D6 hold, so a pane with a recorded agent costs no extra call. I6 stays true: E13.
+**D13. Reconcile's chain and the read-only guarantee.** *(decided by the preparer, to be confirmed at the plan check)* `check_tmux` (E11) gains the `attached_clients` call after a successful `ps`, and it runs for both shapes (E10); the agent check is a new function called after `check_session_of_record` in the server-shape path of `check_pane` (E10), so it can use the same `Server` value: `check_pane` owns `server`, the value `observe_server` returns (E10, line 128), and lends it by reference to `check_session_of_record` (line 130), `check_screen` and `record` (lines 131-132); the agent check borrows it the same way, `&server`, beside `ports`, `pane` and the endpoint `at` (line 114), before `server.into_sessions()` consumes it (line 136). No existing signature changes: `check_session_of_record` still returns `()`. The module doc's bound (E9) becomes "at most nine port calls" for a server's chain, and the list of a single process's chain (the child module `process`) gains `attached_clients`. **Every other module doc that lists a chain's reads changes with it**, or it would contradict the code; each is located by its words: `reconcile.rs`'s step 1, "**Observe** each pane: `host.ps`, `harness.health`, `harness.list_sessions` and `harness.shown_session`" (E13, lines 10-11), gains `host.attached_clients` (each pane whose session exists) and `harness.agent_view` (a server pane that passes D6's rules (1) to (3)); `reconcile.rs`'s single-process paragraph, "so its chain is `host.ps`, `harness.health` at its endpoint" (E55), and `process.rs`'s Observe bullet, "the parent's `host.ps`" (E56), gain `host.attached_clients` after `host.ps` (acceptance 21). The read-only allowlist (E15) adds exactly `HostOp::AttachedClients` and `HarnessOp::AgentView`. Neither rule writes the record. The agent check calls `agent_view` only when rules (1) to (3) of D6 hold, so a pane with a recorded agent costs no extra call. I6 stays true: E13.
 
-**D14. The test kit gets the support; no wrapper doubles are needed for the engine tests.** *(decided by the preparer, to be confirmed at the plan check)* The earlier W-5 wanted test-local doubles because the kit lacked support. #684 (the kit) is closed, and the support is reusable, so it goes in the kit: `FakeHost` gains `attach_client(name)` and `detach_clients(name)` and the op `HostOp::AttachedClients`, and a fresh fake session has **no** client, as a fresh real one has none (a conformance case pins it, so the fake cannot drift); `FakeHarness` gains `seed_turns(port, session, turns)`, `seed_dispatchers(port, keys)` and `HarnessOp::AgentView`. A "healthy world" of the doctor rig attaches one client per pane in `make_live` (E52), so every existing doctor test keeps its meaning. The kit files are listed in "Blast radius" (E37, E38, E53 show where).
+**D14. The test kit gets the support; no wrapper doubles are needed for the engine tests.** *(decided by the preparer, to be confirmed at the plan check)* The earlier W-5 wanted test-local doubles because the kit lacked support. #684 (the kit) is closed, and the support is reusable, so it goes in the kit: `FakeHost` gains `attach_client(name)` and `detach_clients(name)` and the op `HostOp::AttachedClients`, and a fresh fake session has **no** client, as a fresh real one has none (a conformance case pins it, so the fake cannot drift); `FakeHarness` gains `seed_turns(port, session, turns)`, `seed_dispatchers(port, keys)` and `HarnessOp::AgentView`. The four scenario methods (`attach_client`, `detach_clients`, `seed_turns`, `seed_dispatchers`) bypass the faults and the call log, as each fake's others do (`host.rs` lines 81-83; `harness.rs` lines 169-170; the model is `FakeHarness::seed_session`, `harness.rs` lines 268-273), so a rig that calls them adds no op to a test's call list. `FakeHarness::agent_view` is shaped like the fake's other method on one session, `abort` (E69): the faults, the endpoint's port, `World::reach` (a frozen server answers the method's `timeout`, a killed or never-started one `unavailable`, E68), then `World::known` (`session-not-found` for a session outside the port's data directory, `harness.rs` lines 520-528), and only then what was seeded. A "healthy world" of the doctor rig attaches one client per pane in `make_live` (E52), so every existing doctor test keeps its meaning. That call is this story's, not `main`'s: on `main`, `make_live` makes the session with `host.ensure_session` (E52, lines 388-389) and attaches nothing to it, since `FakeHost` has no client at all (its `Session` is a `cwd` and processes, E57); the story adds `host.attach_client(&name)` after that call, and the rig's module doc, which lists what `make_live` makes and says a fresh rig is a fleet doctor reports nothing about (`doctor/rig.rs` lines 1-10), names it. Every other builder of a live world that a doctor test reads attaches a client the same way (acceptance 16): `pane_claude/rig.rs`'s `seed_claude` and `seed_opencode`, which make their sessions with `ensure_session` and attach no client (the file's one attach is `seed_opencode`'s TUI, E58), and `pane_claude/mixed.rs`'s `applied()`, which builds its world with `profile apply` through the rig's `LinkedHost`, not with `seed_*` (E58, E59), for a scenario that asserts `doctor` reports nothing (E60). The kit files are listed in "Blast radius" (E37, E38, E53 show where).
 
-**D15. The real implementations.** *(decided by the preparer, to be confirmed at the plan check)* `holler-adapter-host`: `attached_clients` reads `#{session_attached}` through the exact-target listing `ps` uses, with a parser as strict as `ps`'s (a value that is not an unsigned integer is `unavailable`; a missing session is `pane-not-found`). `holler-adapter-opencode`: a new module `agents.rs` (so `lib.rs`, 741 lines, grows by the method and its `mod` line only) implements `agent_view` from `GET /session/:id/message` and `GET /agent`, existing routes (E20); the "usable as a default" rule is `server::usable`'s, shared. Unknown session is `session-not-found` (the check `abort` makes). A reply that is not the JSON a step needs is `unavailable` and quotes no reply (the adapter's rule). The message field that names the agent of a user turn is **not verified on 1.19.0** (the SDK types of 1.14.39 give `UserMessage.agent`; see "Facts measured outside the repository"): the build run proves it with the opt-in real-OpenCode test and cuts the message fixture from the answer before the adapter relies on it. `Unwired` answers `not-implemented` for both. `ClaudeHarness` (`holler-adapter-claude`) and the kit's `FakeClaude` answer an empty view (D2); `HarnessRouter` and the kit's `FakeHarnesses` route it by endpoint, and `Wired<dyn HarnessPort>` forwards it (E23).
+**D15. The real implementations.** *(decided by the preparer, to be confirmed at the plan check)* `holler-adapter-host`: `attached_clients` reads `#{session_attached}` through the exact-target listing `ps` uses, with a parser as strict as `ps`'s (a value that is not an unsigned integer is `unavailable`; a missing session is `pane-not-found`). That listing is `list-panes -s -t =NAME: -F <format>` (E61; #835's `foreground_listing` is the same listing with its own format), whose parser fails the whole answer on one malformed line (E62); the method fails as `ps` and `foreground_commands` fail (E63), and the module doc's errors table, where a missing session or server is `pane-not-found` (E64), gains an `attached_clients` column as it gained `foreground_commands`'. With `-s`, tmux prints the session's one count on every pane's line, and a missing session fails with `can't find session` ("Facts measured outside the repository"). `holler-adapter-opencode`: a new module `agents.rs` (so `lib.rs`, 741 lines, grows by the method and its `mod` line only) implements `agent_view` from `GET /session/:id/message` and `GET /agent`, existing routes (E20); the "usable as a default" rule is `server::usable`'s, shared. `usable` (E65) answers for one key, found by name in the `GET /agent` list (`Ok(())`, the refusal `agent-unusable`, or `unavailable` for an element with no string `mode`), so `agents.rs` asks it once per listed name and keeps the names it answers `Ok` for, and an `unavailable` answer is the view's (D5); `usable` is private to `server.rs`, so it becomes `pub(crate)`, and the rule stays written once. `can_dispatch` and the `native` test (D7) are new code in `agents.rs`, with nothing on `main` to share: no adapter code reads an agent's `permission` list, `native` or a `task` rule (the `GET_PERMISSION` route of E20 is the list of pending permission requests). Unknown session is `session-not-found` (the check `abort` makes). A reply that is not the JSON a step needs is `unavailable` and quotes no reply (the adapter's rule). The message field that names the agent of a user turn is **not verified on 1.19.0** (the SDK types of 1.14.39 and of 1.18.25 give `UserMessage.agent`; see "Facts measured outside the repository"): the build run proves it with the opt-in real-OpenCode test and cuts the message fixture from the answer before the adapter relies on it. `Unwired` answers `not-implemented` for both. `ClaudeHarness` (`holler-adapter-claude`) and the kit's `FakeClaude` answer an empty view (D2); `HarnessRouter` (through `by`, E67, with `agent_view` in its table's row of endpoint-keyed methods, E66) and the kit's `FakeHarnesses` route it by endpoint, and `Wired<dyn HarnessPort>` forwards it (E23).
 
 **D16. What `--fix` does: nothing new.** *(operator, the issue)* `--fix` repairs `shown-driven-mismatch` only. For both new findings `fix` is `not-fixable`. A second `doctor` run reports each standing finding again exactly once and writes nothing for them ("once per pass", the 2026-10-09 split).
 
-**D17. Finding order and the `ALL` pin.** *(decided by the preparer, to be confirmed at the plan check)* The two kinds are appended to `FindingKind` and `ALL` in this order, `Unattached` then `AgentCannotDispatch`, **after the last kind present on `main` at build time** (E7: the 16 kinds on `main`, the last `profile-drift` (#665), after `pane-waiting` and `claude-login-missing` (#831); the build run's list has 18). `findings_test.rs` pins every code in order (E16); the build run edits that list, not a copy. Codes: `unattached`, `agent-cannot-dispatch`; neither equals a closed error code or an import finding code (`import_test.rs` checks the import side).
+**D17. Finding order and the `ALL` pin.** *(decided by the preparer, to be confirmed at the plan check)* The two kinds are appended to `FindingKind` and `ALL` in this order, `Unattached` then `AgentCannotDispatch`, **after the last kind present on `main` at build time** (E7: the 16 kinds on `main`, the last `profile-drift` (#665), after `pane-waiting` and `claude-login-missing` (#831); the build run's list has 18). `findings_test.rs` pins every code in order (E16); the build run edits that list, not a copy. Codes: `unattached`, `agent-cannot-dispatch`; neither equals a closed error code or an import finding code (`import_test.rs` checks the import side). The clash with #839, which appends a kind too, cannot land silently: both stories append after the same last kind in `FindingKind` and `ALL` and change the same lines of `CODES`, its length included, so whoever merges second meets a merge conflict on those lines, and `finding_kind_codes_are_stable` (E16) fails on any resolution in which `ALL` and `CODES` disagree.
 
 **D18. Review rigor: `second-opinion`.** *(decided by the preparer, to be confirmed at the plan check)* The issue's Pipeline line says `rigor: in-session`; part 1 ran `second-opinion` on the orchestrator's instruction (its brief, C-1). This story amends two traits, adds a real implementation in two adapters, and edits the ADR, so the outside model (`deepseek-v4-pro`, DeepSeek's hosted chat endpoint) reads the brief and the diff. The CLAUDE.md prerequisites hold: `.env` with the managed block and `DUAL_REVIEW=1`, `DEEPSEEK_API_KEY` from the operator's store (never printed), one real completion proven before the run is journalled above `in-session`. Rejected: `in-session` (the issue's line, written before the contract change was allowed); `panel` (no cross-vendor reason).
 
@@ -77,7 +77,7 @@ It starts from the operator's decision of 2026-10-11, the last comment on #647: 
 3. **Test kit:** `FakeHost`, `FakeHarness`, their ops and conformance cases (D14).
 4. **Adapters:** `holler-adapter-host` (`attached_clients`), `holler-adapter-opencode` (`agent_view`, new `agents.rs`) (D15).
 5. **Wiring:** `BindingHost`, `Wired<dyn HostPort>`, `Wired<dyn HarnessPort>`, `Unwired` forward or refuse both (the "Wrapper forwarding" section).
-6. **Docs:** `docs/pane-control.md` section 5 (two rows, the "command it names" cells, the limit of `unattached`), the CHANGELOG bullet, the module docs that name the bound or the amendment list (the `bind.rs` doc E21, `reconcile.rs` and `observe.rs` module docs).
+6. **Docs:** `docs/pane-control.md` section 5 (two rows, the "command it names" cells, the limit of `unattached`), the CHANGELOG bullet, the module docs that name the bound, the amendment list or a chain's reads (the `bind.rs` doc E21; `reconcile.rs`'s step 1 and single-process paragraph, E13 and E55; `observe.rs`'s bound and single-process list, E9; `process.rs`'s Observe bullet, E56: D13).
 7. **Out of scope:** a verb that attaches a client (Q1); `--fix` for either finding; a stored "already reported" state; DRIVEN (#839); the Claude Code harness's answers beyond "empty view" (#831); any `Pane` field; `profile-drift` (#665); the roster (#648).
 
 ## The ADR-0021 amendment that lands first
@@ -130,18 +130,19 @@ Each item is a test. Every test fails on `main` (for a new method, by not compil
 10. `unattached`: a registered pane whose fake session has 0 clients raises exactly one `unattached` (its pane, its position `r?c?` in rowcol, `remedy: null`, `fix: not-fixable`, a message that says no tmux client is attached and no Holler verb attaches one); after `attach_client` on the same fake, the same pass raises nothing; `--format=json` passes the envelope helper and carries the stable code; text and JSON exit codes are equal. (The issue's acceptance, with #638's fakes.)
 11. `unattached` edges: a pane whose session is missing raises `tmux-session-missing` only and the fake records no `AttachedClients` call; a failed `attached_clients` raises `observe-failed` naming `host.attached_clients` and no `unattached`; a parked pane and an orchestrator pane with 0 clients raise it too.
 12. `agent-cannot-dispatch`, positive: record without an agent, healthy server with the session of record, `agent_view` of 3 turns all `can_dispatch: Some(false)` as `build` and `dispatchers: [orchestrator]` raises one finding on the pane with the session of record and the port, remedy `holler pane relaunch demo-c1r1 --agent=orchestrator`; the same with `--fix`: `fix: not-fixable`, the pane's record equal to before (its agent included), no `serve_command` recorded by the fake harness, no `select_session`.
-13. `agent-cannot-dispatch`, negatives (each its own test): the record names `build`, and the record names `orchestrator` (opted in): nothing; `dispatchers` empty: nothing; one of the three turns is `Some(true)` or `None`: nothing; an empty view: nothing; two dispatchers: the finding with **no remedy** and a message that lists both quoted; an unhealthy server, a server without the session of record, a record without a session: `agent_view` is never called (the fake's calls show no `AgentView`) and nothing is raised.
+13. `agent-cannot-dispatch`, negatives (each its own test): the record names `build`, and the record names `orchestrator` (opted in): nothing; `dispatchers` empty: nothing; one of the three turns is `Some(true)` or `None`: nothing; an empty view: nothing; two dispatchers: the finding with **no remedy** and a message that lists both quoted; an unhealthy server, a health check that fails (`Server::Unknown`), a healthy server whose `list_sessions` fails (`Server::Healthy { sessions: None }`, E54), a server without the session of record, a record without a session: `agent_view` is never called (the fake's calls show no `AgentView`) and no `agent-cannot-dispatch` is raised (each case's own findings, such as `server-down`, `observe-failed` or `session-of-record-missing`, are as on `main`).
 14. Once per pass: a second pass over the same world reports the same two findings once each, nothing new, and the stored records are equal after both passes (these rules write nothing).
 15. `read_only.rs`: the allowlist is extended by exactly `HostOp::AttachedClients` and `HarnessOp::AgentView`, and the full pass with and without `--fix` makes no other call (E15).
-16. The existing doctor tests all pass unchanged in meaning: both rigs that build a live world attach a client to each pane they build (`doctor/rig.rs` `make_live`, E52, and `pane_claude/rig.rs` `seed_claude` and `seed_opencode`, which also build the worlds of `pane_claude/doctor.rs` and `mixed.rs`), and a test proves that a world built without that call would raise `unattached` for every pane (so the attach is what keeps them clean, not the rule being off).
+16. The existing doctor tests all pass unchanged in meaning: every builder of a live world that a doctor test reads attaches a client to each pane it builds: `doctor/rig.rs` `make_live` (E52; the world of `pane_verbs/doctor.rs` and its submodules, and of `reset.rs`), `pane_claude/rig.rs` `seed_claude` and `seed_opencode` (E58; the worlds of `pane_claude/doctor.rs`), and `pane_claude/mixed.rs`'s `applied()`, which builds the world of `mixed.rs` with `profile apply` through the rig's `LinkedHost`, not with `seed_*` (E58, E59), and whose acceptance scenario asserts that `doctor` reports nothing (E60); and a test proves that a world built without that call would raise `unattached` for every pane (so the attach is what keeps them clean, not the rule being off). `unmanaged.rs` needs no attach: it runs doctor over `list.rs`'s rig, which makes no tmux session, so a pane there is `tmux-session-missing` and no `attached_clients` call is made (D9).
 
 **Wrapper forwarding** is its own section below (items W1 to W6 are acceptance items too).
 
 **Docs and gates.**
 17. `docs_pane_control_test`: section 5 names both codes (E36); the table rows say "none" for `unattached`'s command and `holler pane relaunch PANE --agent=KEY` for the other; the guide states the limit of `unattached` (a client in any terminal counts).
-18. The shared end-state helper `assert_end_state` (E44; #667 moved it to `pane_integration/scratch/verbs.rs`, and #649's scenario and `profile_apply_scenario/{scenario,grid,probe}.rs` all call it) asserts "no finding except `unattached` for each scratch pane", with a comment saying why (a detached scratch tmux session has no client by design). The default run still compiles and passes.
+18. The shared end-state helper `assert_end_state` (E44; #667 moved it to `pane_integration/scratch/verbs.rs`, and #649's scenario and `profile_apply_scenario/{scenario,grid,probe}.rs` all call it, the four call sites of E70) asserts "no finding except `unattached` for each scratch pane", with a comment saying why (a detached scratch tmux session has no client by design). It is the scratch suite's one assertion of "no finding"; its one other assertion on doctor's findings, through `Scratch::findings` (`scratch/verbs.rs` lines 32-47), is `break_both`'s (E71), whose check that doctor reports C1's deleted session accepts any finding about C1, so `unattached` is left out of that check and it still proves the deleted session is found. The default run still compiles and passes.
 19. `cli-surface.txt`, ADR 0003 and the clap tree are unchanged (no verb or flag is added); `scripts/lint.sh` passes (no file reaches 900 lines, E39); `cargo fmt` is run per file, never workspace-wide; clippy is clean; no `unsafe`; the privacy grep of the added lines finds no personal host, user, path or tool name.
-20. The ADR amendment is its own, first commit, and the code commits cite the section.
+20. The ADR amendment is its own, first commit, and the code commits cite the section. Both are properties of the run's branch, checked there before the merge: the contract commit comes before every commit that adds a test or code. The squash merge CLAUDE.md requires then folds the branch into one commit on `main`, as it did for #835's amendment (PR #860, merged as `4e691d9`), and the PR keeps the branch's commits on record (`gh pr view 860 --json commits` still lists #835's after its merge).
+21. The module docs that list a chain's reads name the new ones (D13), checked by `grep` as item 19's privacy check is: `attached_clients` in `reconcile.rs`'s step 1 and single-process paragraph (E13, E55), in `observe.rs`'s bound and single-process list (E9) and in `process.rs`'s Observe bullet (E56); `agent_view` in `reconcile.rs`'s step 1 and `observe.rs`'s bound.
 
 ## Wrapper forwarding
 
@@ -164,9 +165,9 @@ Re-measured with `wc -l` on 2026-10-12: the numbers are this worktree, which is 
 |---|---|---|---|
 | `crates/holler-pane/src/ports.rs` | 621 | the two required methods; two `compile_fail,E0046` doc tests (one per method, modelled on `PidsOnly`, E5); the module doc's sixth bullet; `mod agent_view;` | about 700: warn, under 900 |
 | `crates/holler-pane/src/agent_view.rs` (new) | | `AgentView`, `TurnAgent`, builders, the `E0639` doc test, re-exported from `lib.rs` | yes |
-| `crates/holler-pane/src/ports/router.rs` | 145 | the `agent_view` arm (by endpoint) and a row of the routing table in its module doc | yes |
+| `crates/holler-pane/src/ports/router.rs` | 145 | the `agent_view` arm (by endpoint, through `by`, E67) and `agent_view` in the routing table's row of endpoint-keyed methods (E66) | yes |
 | `crates/holler-pane/src/findings.rs` | 379 | two kinds, `remedy_for`, `Finding::with_agent` | yes |
-| `crates/holler-pane/src/reconcile.rs`, `reconcile/observe.rs`, `reconcile/observe/process.rs` | 533, 449, 239 | module docs (the bound; the single process's list); the two reads and the rule; `RECENT_TURNS` | observe.rs about 540: warn |
+| `crates/holler-pane/src/reconcile.rs`, `reconcile/observe.rs`, `reconcile/observe/process.rs` | 533, 449, 239 | module docs (D13: `reconcile.rs`'s step 1 and single-process paragraph, E13 and E55; `observe.rs`'s bound and single-process list, E9; `process.rs`'s Observe bullet, E56); the two reads and the rule; `RECENT_TURNS` | observe.rs about 540: warn |
 | `crates/holler-pane/src/lib.rs` | 81 | re-exports | yes |
 | `crates/holler-pane/tests/findings_test.rs`, `ports_test.rs` | 55, 613 | `CODES` (16 to 18); `TestHost`/`TestHarness` methods | `ports_test.rs` about 640 |
 | `crates/holler-pane-testkit/src/host.rs` | 278 | `attach_client`, `detach_clients`, `HostOp::AttachedClients` | yes |
@@ -175,15 +176,16 @@ Re-measured with `wc -l` on 2026-10-12: the numbers are this worktree, which is 
 | `crates/holler-pane-testkit/src/conformance/host.rs`, `conformance/harness.rs`, `conformance/claude.rs` | 319, 612, 494 | one case each | harness.rs about 660: warn |
 | `crates/holler-pane-testkit/tests/host_conformance_test.rs`, `harness_conformance_test.rs`, `claude_conformance_test.rs` | 254, 346, 297 | the `Mutant`s | yes |
 | `crates/holler-pane-testkit/tests/fake_host_test.rs`, `fake_harness_test.rs` | 372, 783 | the fake's cases; **the harness cases go in a new `fake_harness_agent_test.rs`**, not in the 783-line file | yes |
-| `crates/holler-adapter-host/src/lib.rs`, `src/tmux.rs` | 521, 336 | `attached_clients`, its listing and parser | yes |
+| `crates/holler-adapter-host/src/lib.rs`, `src/tmux.rs` | 521, 336 | `attached_clients`, its listing and parser (E61 to E63 are the model); an `attached_clients` column in `lib.rs`'s errors table (E64) | yes |
 | `crates/holler-adapter-host/tests/attached_test.rs` (new) | | the cases of item 8 (**not** in `fake_tmux_test.rs`, 820 lines; `foreground_test.rs` is the file of the same kind for `foreground_commands`) | yes |
 | `crates/holler-adapter-opencode/src/lib.rs`, new `src/agents.rs` | 764 | `mod agents;` and a one-line method in `lib.rs`; the logic in `agents.rs` | lib.rs about 775: warn |
+| `crates/holler-adapter-opencode/src/server.rs` | 156 | `usable` becomes `pub(crate)`, so `agents.rs` calls it (D15, E65); its rule is not changed | yes |
 | `crates/holler-adapter-opencode/tests/agent_view_test.rs` (new), `tests/fixtures/agents/*.json` (new), `tests/real_opencode/**` | rig 580 | the hermetic cases; the opt-in real case; the rig's `Recording` gains a forward | yes |
 | `crates/holler-adapter-claude/src/lib.rs` | 375 | `agent_view`: an empty view (the crate has its own `agents.rs`, which this story does not touch) | yes |
 | `crates/holler-cli/src/pane/wiring.rs`, `wiring/bind.rs` | 468, 489 | `Unwired` arms; the forwarding arms (`BindingHost`, `Wired` x2); the module doc | bind.rs about 530: warn |
-| `crates/holler-cli/tests/pane_integration/bind.rs`, `wired.rs`, `main.rs`, new `forwarding.rs`; `scratch/verbs.rs` | 693, 142, 126; 146 | W1 to W6; `mod forwarding;`; the scenario end state (`assert_end_state`, E44) | yes |
+| `crates/holler-cli/tests/pane_integration/bind.rs`, `wired.rs`, `main.rs`, new `forwarding.rs`; `scratch/verbs.rs`, `scenario.rs` | 693, 142, 126; 146, 296 | W1 to W6; `mod forwarding;`; the scenario end state (`assert_end_state`, E44) and `break_both`'s C1 check (E71) | yes |
 | `crates/holler-cli/tests/pane_verbs/doctor.rs`, `doctor/rig.rs`, `doctor/read_only.rs`, new `doctor/attach.rs` and `doctor/agent.rs` | 562, 449, 147 | two `mod` lines; the client in `make_live`; the allowlist; the two rule suites | yes |
-| `crates/holler-cli/tests/pane_claude/rig.rs` | 482 | the client in `seed_claude` and `seed_opencode`; `LinkedHost`'s forward | yes |
+| `crates/holler-cli/tests/pane_claude/rig.rs`, `mixed.rs` | 482, 258 | the client in `seed_claude` and `seed_opencode`; `LinkedHost`'s forward; a client for each pane `applied()` builds (E59) | yes |
 | test doubles that gain a one-line forward | | `pane_verbs/launch/rig.rs` (852), `profile_verbs/apply/rig.rs` (776), **`pane_verbs/switch.rs` (893)**, `pane_integration/bind.rs`, `pane_integration/observe.rs`, `pane_verbs/doctor/surface.rs` (601), `pane_verbs/import/harness.rs` (341; `LostChain` is #835's), `holler-pane/tests/claude_kind_test.rs` (300) | **`switch.rs` is already at 893 with two harness doubles that each need the new method (about nine lines each after `rustfmt`), so F first moves the two doubles to a sibling file `pane_verbs/switch/doubles.rs` in a commit of their own, a pure move; `launch/rig.rs` takes about thirteen lines (865).** |
 | `crates/holler-cli/tests/docs_pane_control_test.rs` | 610 | none expected (it reads the code's tables) | yes |
 | `docs/adr/ADR-0021.md`, `docs/pane-control.md`, `CHANGELOG.md` | 1604, 1008, 1079 | the amendment; section 5; one bullet at the top of `### Enhancements` (E45), linking /issues/647 | docs |
@@ -214,10 +216,10 @@ Read-only look on 2026-10-12. The first text of this section (2026-10-11) compar
 **Launch arguments** (the rest as CLAUDE.md gives them): `issueNumber: 647`, `briefPath: 'docs/handoffs/647-part2-brief.md'`, `uiSurface: false`, `rigor: 'second-opinion'`, `models: { F: 'claude-opus-5-5' }`, `removeHandoffsBeforePr` **not set** (its cleanup does `git rm -r docs/handoffs/647 docs/handoffs/647-*`, which would delete this story's record and part 1's: E49). Run from this worktree: it is a fresh worktree on `issue-647-implementation`, with `origin/main` at `6eff9cc` (#835, #831, #853 merged) merged in and the brief and the slug directory committed on it.
 
 **Least-bad route: move part 1 aside before the run, and move the run's files into the slug after it.** Both steps are commits on the run's branch; the squash merge shows only the net change.
-1. **Before the launch** (one commit, `chore(handoffs): set part 1's record aside for the part-2 run (#647)`): `mkdir docs/handoffs/647-part1-record`; `git mv docs/handoffs/647/* docs/handoffs/647-part1-record/` (the directory itself disappears); `git mv docs/handoffs/647-brief.md docs/handoffs/647-brief-result-r1.md docs/handoffs/647-brief-result-r1.md.prompt.txt docs/handoffs/647-brief-result-r1.md.usage.json docs/handoffs/647-brief-sidecar-r1.md.prompt.txt docs/handoffs/647-part1-record/`. Now `docs/handoffs/647/` is empty for the run, and no `647-brief*` file exists to be overwritten. `docs/handoffs/647-part2-brief.md` and `docs/handoffs/647-part2/` stay.
+1. **Before the launch** (one commit, `chore(handoffs): set part 1's record aside for the part-2 run (#647)`): `mkdir docs/handoffs/647-part1-record`; `git mv docs/handoffs/647/* docs/handoffs/647-part1-record/` (the directory itself disappears); `git mv docs/handoffs/647-brief.md docs/handoffs/647-brief-result-r1.md docs/handoffs/647-brief-result-r1.md.prompt.txt docs/handoffs/647-brief-result-r1.md.usage.json docs/handoffs/647-brief-sidecar-r1.md.prompt.txt docs/handoffs/647-part1-record/`. Now `docs/handoffs/647/` is empty for the run, and no `647-brief*` file exists to be overwritten. `docs/handoffs/647-part2-brief.md` and `docs/handoffs/647-part2/` stay. **Done**, as `a9a0ed5` on this branch (2026-10-12 08:23 MDT, E77), which moved the nine tracked files: part 1's `647-brief.md` and the eight files of `647/`. The four other loose names above are not in git: `.gitignore` ignores every `*.prompt.txt`, `*.usage.json`, `*-sidecar*.md` and `*-result-r*.md` under `docs/handoffs/` (E74), `git ls-tree --name-only origin/main docs/handoffs/` lists, of part 1, only `647` and `647-brief.md`, and `git mv` refuses a file that is not under version control. So the commit moved none of them, and the files of those names that the run writes are local only.
 2. **The run** writes `docs/handoffs/647/*`, `docs/handoffs/647-brief-*` and `docs/handoffs/647-diff-*`.
-3. **After the run, before the merge** (one commit, `chore(handoffs): file the part-2 run under 647-part2 and restore part 1's record (#647)`): `git mv docs/handoffs/647/* docs/handoffs/647-part2/` (no name collides: the earlier attempt is in `647-part2/earlier-attempt/`); `git mv docs/handoffs/647-brief-* docs/handoffs/647-diff-* docs/handoffs/647-part2/` for whichever exist; `git mv docs/handoffs/647-part1-record/* docs/handoffs/647/` and the five loose part-1 files back to `docs/handoffs/`; `git rm -r` the empty `647-part1-record`. Check: `git diff --stat origin/main -- docs/handoffs/647 docs/handoffs/647-brief.md docs/handoffs/647-brief-result-r1.md` is empty.
-4. A stopped run is resumed from the worktree and its history, and a resume before step 3 finds the run's files in `docs/handoffs/647/` where the script expects them.
+3. **After the run, before the merge** (one commit, `chore(handoffs): file the part-2 run under 647-part2 and restore part 1's record (#647)`): `git mv -k docs/handoffs/647/* docs/handoffs/647-part2/` (no name collides: the earlier attempt is in `647-part2/earlier-attempt/`); `git mv -k docs/handoffs/647-brief-* docs/handoffs/647-diff-* docs/handoffs/647-part2/` for whichever exist; `git mv docs/handoffs/647-part1-record/647-brief.md docs/handoffs/`, part 1's one loose tracked file (step 1 moved one, not five: E77), and then `git mv docs/handoffs/647-part1-record/* docs/handoffs/647/`; `rmdir` the emptied `647-part1-record` (git tracks no directory, so `git rm -r` of an emptied one matches nothing and leaves it on disk). Check: `git diff --stat origin/main -- docs/handoffs/647 docs/handoffs/647-brief.md docs/handoffs/647-brief-result-r1.md` is empty. `-k` because only tracked files move with `git mv`, and those globs can match gitignored ones (E74: the gate files beside the directory, and any prompt or usage file the run leaves inside it): a plain `git mv` refuses the whole command over one of them (`fatal: not under version control`, exit 128), while `-k` skips them and moves the rest; a plain `mv` keeps any of them wanted on disk.
+4. A stopped run is resumed from the worktree and its history, and a resume before step 3 finds the run's files in `docs/handoffs/647/` where the script expects them. A resume is a new, stateless invocation of the script (E75) that starts at one of its phases 4 to 10 (E76) and reads the run's record from `docs/handoffs/647/` (E47). So step 3 is done only after the script has opened the PR, when no phase is left to resume; a resume needed after step 3 first reverts its commit (`git revert`), which puts the run's files back where the script reads them.
 
 Rejected: a symlink `docs/handoffs/647 -> 647-part2` (git refuses a pathspec beyond a symbolic link, `git add -A` would work but any role that stages a path would fail, and a symlink must not reach `main`); a new issue number for the part (the issue is #647, `Closes #647.` is right for the whole story, and the commits would cite another number); editing the release (it is pinned and not this repository's).
 
@@ -238,12 +240,13 @@ Measured on 2026-10-11 with OpenCode 1.19.0 (the installed CLI), in a temporary 
 - `opencode agent list` prints, per agent, `name (mode)` and a JSON list of permission rules `{"permission", "action", "pattern"}`. The built-ins are `build`, `compaction`, `explore`, `general`, `plan`, `summary`, `title`.
 - `opencode debug agent NAME` prints one agent's info as JSON with the keys `name`, `description`, `options`, `permission` (the rule list), `mode`, `native`, `tools`. `hidden` is absent unless set.
 - With a project `opencode.json` of `{"agent":{"build":{"permission":{"task":"deny"}},"orchestrator":{"mode":"primary","description":"x","permission":{"task":"allow"}}}}`: `build` is `mode: primary`, `native: true`, its rules end with `{"permission":"task","action":"deny","pattern":"*"}` after `{"permission":"*","action":"allow","pattern":"*"}`, and `tools.task` is `false`; `orchestrator` is `mode: primary`, `native: false`, its rules end with `{"permission":"task","action":"allow","pattern":"*"}`, and `tools.task` is `true`. With no project config, `build` has no `task` rule (so it can dispatch) and `plan` has `{"permission":"task","action":"deny","pattern":"general"}` (a deny for one subagent, not for all).
-- The older SDK type definitions (version 1.14.39, a different shape for `permission`) give a user message an `agent: string` field. **Not verified on 1.19.0:** that field on a message of `GET /session/:id/message`; and that `GET /agent` serves the same info as `debug agent`. The first fixtures are therefore cut from the opt-in real run (D15), and the fixtures above are the starting point for the rule tests.
+- The older SDK type definitions (version 1.14.39, a different shape for `permission`) give a user message an `agent: string` field. So do those of SDK 1.18.25 (`UserMessage` in `dist/v2/gen/types.gen.d.ts`, read on 2026-10-12 from a cached copy of the package; no copy of 1.19.0's types was found locally). **Not verified on 1.19.0:** that field on a message of `GET /session/:id/message`; and that `GET /agent` serves the same info as `debug agent`. The first fixtures are therefore cut from the opt-in real run (D15), and the fixtures above are the starting point for the rule tests.
 - To regenerate the agent fixtures: run the two `opencode debug agent` commands above in such a directory with the config shown and save the JSON, trimming `prompt` and every `external_directory` rule that names a path.
+- Measured on 2026-10-12 with tmux 3.7c, on a private socket (`tmux -L <name> -f /dev/null`, so no other tmux server was touched): over a fresh detached session of two panes, `list-panes -s -t =demo: -F '#{session_attached}'` printed `0` on each of its two lines (the session's one count, repeated per pane); over a missing session it printed `can't find session: nosuch` and exited 1 (D15).
 
 ## Evidence (verbatim, from `main` at `6eff9cc`, merged into this branch)
 
-Each excerpt is cut by the command shown; the line numbers on the left come from `awk`, not from typing. An excerpt marked in flight (E42 and E43, #839's brief) is cut from a named commit of that story's branch (`git show <sha>:<file>`), so it is stable but is not `main`'s; every other excerpt is `main`'s at `6eff9cc`. Run the commands from the root of a worktree of this repository (the `.aftersight/releases/claude` link must exist for the pipeline excerpts) with that commit available.
+Each excerpt is cut by the command shown; the line numbers on the left come from `awk` (from `grep -n` in E58 and E70), not from typing. An excerpt marked in flight (E42 and E43, #839's brief) is cut from a named commit of that story's branch (`git show <sha>:<file>`), so it is stable but is not `main`'s; E77 is this branch's own commit `a9a0ed5`; the pipeline excerpts (E46 to E50, E75 and E76) are the pinned release's; every other excerpt is `main`'s at `6eff9cc`. E54 to E77 were cut on 2026-10-12 for the brief gate's first round. Run the commands from the root of a worktree of this repository (the `.aftersight/releases/claude` link must exist for the pipeline excerpts) with that commit available.
 
 **E1.** The module doc of `ports.rs` on main lists five amendments (#645, #802, #832, #835, #831); part 2 adds a sixth.
 
@@ -1626,7 +1629,7 @@ Each excerpt is cut by the command shown; the line numbers on the left come from
 1532|     fields of the pane's spec for its server go into it, never into new parameters.
 ````
 
-**E52.** The doctor test rig builds every server world in `make_live`: the place where a healthy fake world gets its tmux client (a fresh fake session has none, as a fresh real one has none).
+**E52.** The doctor test rig builds every server world in `make_live`: the place where part 2 gives a healthy fake world its tmux client. On `main` it attaches none (lines 388-389 make the session and nothing attaches to it), and a fresh fake session has none, as a fresh real one has none (D14).
 
 `sed -n '374,406p' crates/holler-cli/tests/pane_verbs/doctor/rig.rs | awk -v n=374 '{printf "%d| %s\n", n+NR-1, $0}'`
 
@@ -1703,4 +1706,443 @@ Each excerpt is cut by the command shown; the line numbers on the left come from
 82|         foreground_commands_names_what_run_started,
 83|     ),
 84| ];
+````
+
+**E54.** The pane's `Server`, as `check_pane` holds it (E10, line 128): `sessions()` is the trusted list, `Some` only for a healthy server whose list was read, and `has` reads only that list. D6's rule (3) is `server.has(record)`.
+
+`sed -n '41,67p' crates/holler-pane/src/reconcile/observe.rs | awk -v n=41 '{printf "%d| %s\n", n+NR-1, $0}'`
+
+````text
+41| /// The pane's harness server, as the chain observed it.
+42| enum Server {
+43|     /// It passed its health check; `sessions` is its list, `None` when reading it failed.
+44|     Healthy { sessions: Option<Vec<String>> },
+45|     /// It failed its health check, and its list timed out: it accepts and never answers.
+46|     Wedged,
+47|     /// It failed its health check, and its list did anything but time out.
+48|     Down,
+49|     /// The health check itself failed: nothing is known of the server.
+50|     Unknown,
+51| }
+52| 
+53| impl Server {
+54|     /// The sessions of a healthy server, when they were read: the only list a rule trusts
+55|     /// (an unhealthy server's answer is not).
+56|     fn sessions(&self) -> Option<&[String]> {
+57|         match self {
+58|             Server::Healthy { sessions } => sessions.as_deref(),
+59|             Server::Wedged | Server::Down | Server::Unknown => None,
+60|         }
+61|     }
+62| 
+63|     /// Whether the server's trusted list holds `session`.
+64|     fn has(&self, session: &str) -> bool {
+65|         self.sessions()
+66|             .is_some_and(|ids| ids.iter().any(|id| id == session))
+67|     }
+````
+
+**E55.** `reconcile.rs`'s paragraph on a single process lists that chain's reads. Part 2 adds `host.attached_clients` after `host.ps` (D13).
+
+`sed -n '28,33p' crates/holler-pane/src/reconcile.rs | awk -v n=28 '{printf "%d| %s\n", n+NR-1, $0}'`
+
+````text
+28| //! **A single process (#831, ADR-0021 section 15 items 6 and 13; plan review W2 and W3).** A
+29| //! pane whose harness's shape is `SingleProcess` (Claude Code) has no server list and no TUI,
+30| //! so its chain is `host.ps`, `harness.health` at its endpoint (whether its process still
+31| //! runs: `server-down` when it does not, with no wedge check), `harness.shown_session` (the
+32| //! session the process holds, which a person's `/clear` or `/resume` moves) and
+33| //! `harness.session_activity` (a wait is `pane-waiting`, with its reason). The rules that
+````
+
+**E56.** `process.rs`'s Observe bullet starts from the parent's `host.ps`. Part 2 adds `host.attached_clients` (D13).
+
+`sed -n '4,8p' crates/holler-pane/src/reconcile/observe/process.rs | awk -v n=4 '{printf "%d| %s\n", n+NR-1, $0}'`
+
+````text
+4| //! - **Observe**: the parent's `host.ps`, then `harness.health` at the process's endpoint
+5| //!   (whether it still runs; a gone process is `server-down`, and there is no wedge to tell
+6| //!   apart), `harness.shown_session` (the session it holds now; a person's `/clear` or
+7| //!   `/resume` moves it) and, while it runs, `harness.session_activity`: a process that waits
+8| //!   for a person is `pane-waiting`, with the reason.
+````
+
+**E57.** `FakeHost`'s tmux session on `main` holds a directory and processes and no client, so a fresh fake session has none until a test attaches one (D14).
+
+`sed -n '101,106p' crates/holler-pane-testkit/src/host.rs | awk -v n=101 '{printf "%d| %s\n", n+NR-1, $0}'`
+
+````text
+101| /// One tmux session.
+102| struct Session {
+103|     cwd: String,
+104|     /// Its processes, in the order they started.
+105|     processes: Vec<Process>,
+106| }
+````
+
+**E58.** Every session the `pane_claude` rig makes, and everything it attaches: `seed_claude` (line 299) and `seed_opencode` (line 330) make the session with `ensure_session`; the only attach is a TUI's (line 342); and `LinkedHost`, through which the verbs reach the rig's `FakeHost`, forwards `ensure_session` (lines 425-426). The line numbers are `grep -n`'s.
+
+`grep -n "ensure_session\|attach" crates/holler-cli/tests/pane_claude/rig.rs`
+
+````text
+299:        self.host.ensure_session(&n, CWD).unwrap();
+330:        self.host.ensure_session(&n, CWD).unwrap();
+342:        self.harnesses.attach_tui(&herdr.pane_id, &at, &id).unwrap();
+425:    fn ensure_session(&self, name: &PaneName, cwd: &str) -> Result<(), PaneError> {
+426:        self.rig.host.ensure_session(name, cwd)
+````
+
+**E59.** `mixed.rs` builds its world with `profile apply`, which reaches the rig's `FakeHost` through `LinkedHost`, not with `seed_*`; so the attach for its panes is its own (acceptance 16).
+
+`sed -n '42,55p' crates/holler-cli/tests/pane_claude/mixed.rs | awk -v n=42 '{printf "%d| %s\n", n+NR-1, $0}'`
+
+````text
+42| /// The profile `demo` with an OpenCode pane at r1c1 and a Claude pane at r1c2, applied.
+43| fn applied() -> Rig {
+44|     let rig = Rig::new();
+45|     rig.set_specs(vec![
+46|         spec(OPENCODE, 1, HarnessKind::Opencode, &format!("fixed:{PORT}")),
+47|         spec(CLAUDE, 2, HarnessKind::Claude, "none"),
+48|     ]);
+49|     let run = rig.run(
+50|         &["profile", "apply", PROFILE, "--herdr-session", SESSION],
+51|         Format::Json,
+52|     );
+53|     assert_eq!(run.code, 0, "the mixed grid applies: {run:?}");
+54|     rig
+55| }
+````
+
+**E60.** `mixed.rs`'s acceptance scenario asserts that `doctor` reports nothing about that world.
+
+`sed -n '228,230p' crates/holler-cli/tests/pane_claude/mixed.rs | awk -v n=228 '{printf "%d| %s\n", n+NR-1, $0}'`
+
+````text
+228|     // `doctor` is clean.
+229|     let found = findings(&data_of(&rig.run(&["pane", "doctor"], Format::Json)));
+230|     assert_eq!(kinds(&found), Vec::<String>::new(), "{found:?}");
+````
+
+**E61.** The host adapter's listings: `ps`'s is `list-panes -s -t =NAME: -F <format>`, and #835's `foreground_listing` is the same listing with another format. `attached_clients` takes the same shape (D15).
+
+`sed -n '118,160p' crates/holler-adapter-host/src/tmux.rs | awk -v n=118 '{printf "%d| %s\n", n+NR-1, $0}'`
+
+````text
+118| /// `ps`'s listing: every pane of the session, its pid and whether it is dead
+119| /// (Decision 5). `run` asks it first, to know that the session exists: with the colon a
+120| /// missing session fails, where `display-message` would print an empty line (PR6, PR7).
+121| pub(crate) fn panes(name: &PaneName) -> Vec<String> {
+122|     strings(&[
+123|         "list-panes",
+124|         "-s",
+125|         "-t",
+126|         &window_target(name),
+127|         "-F",
+128|         PS_FORMAT,
+129|     ])
+130| }
+131| 
+132| /// `stop_owned`'s listing, and every poll of it (Decision 4).
+133| pub(crate) fn stop_listing(name: &PaneName) -> Vec<String> {
+134|     strings(&[
+135|         "list-panes",
+136|         "-s",
+137|         "-t",
+138|         &window_target(name),
+139|         "-F",
+140|         STOP_FORMAT,
+141|     ])
+142| }
+143| 
+144| /// `foreground_commands`' listing (#835): every pane of the session, as `ps` lists them, with
+145| /// the command name of its foreground process.
+146| pub(crate) fn foreground_listing(name: &PaneName) -> Vec<String> {
+147|     strings(&[
+148|         "list-panes",
+149|         "-s",
+150|         "-t",
+151|         &window_target(name),
+152|         "-F",
+153|         FOREGROUND_FORMAT,
+154|     ])
+155| }
+156| 
+157| /// The session `name` as a window target, exactly.
+158| fn window_target(name: &PaneName) -> String {
+159|     format!("={name}:")
+160| }
+````
+
+**E62.** `ps`'s parser: one malformed line fails the whole answer. The strictness `attached_clients`'s parser keeps (D15, acceptance 8).
+
+`sed -n '233,247p' crates/holler-adapter-host/src/tmux.rs | awk -v n=233 '{printf "%d| %s\n", n+NR-1, $0}'`
+
+````text
+233| /// `ps`'s listing: the pid of every live pane, or `None` when a line is not `<pid>
+234| /// <0|1>` with the pid in range (Decision 5, W-15).
+235| pub(crate) fn parse_ps(stdout: &str) -> Option<Vec<u32>> {
+236|     let mut pids = Vec::new();
+237|     for line in stdout.lines() {
+238|         let (pid, dead) = line.split_once(' ')?;
+239|         let pid = Pid::parse(pid)?;
+240|         match dead {
+241|             "0" => pids.push(pid.get()),
+242|             "1" => {}
+243|             _ => return None,
+244|         }
+245|     }
+246|     Some(pids)
+247| }
+````
+
+**E63.** `ps` and `foreground_commands`: a listing that does not parse is `unavailable` with a fixed message that quotes no output; a refusal of tmux, a missing session among them, goes through `refused`.
+
+`sed -n '393,414p' crates/holler-adapter-host/src/lib.rs | awk -v n=393 '{printf "%d| %s\n", n+NR-1, $0}'`
+
+````text
+393|     /// The pid of every live pane of the session, the shell included (Decision 5).
+394|     fn ps(&self, name: &PaneName) -> Result<Vec<u32>, PaneError> {
+395|         let call = Call::start(OP_PS, self.timeout);
+396|         match self.run_tmux(&tmux::panes(name), call)? {
+397|             Reply::Done(stdout) => {
+398|                 tmux::parse_ps(&stdout).ok_or_else(|| unavailable(BAD_PANE_LIST))
+399|             }
+400|             Reply::Refused(refusal, what) => Err(refused(name, refusal, what)),
+401|         }
+402|     }
+403| 
+404|     /// The command name of every live pane of the session, the shell included (#835): one
+405|     /// `list-panes`, read as strictly as `ps`'s, and failing as `ps` fails.
+406|     fn foreground_commands(&self, name: &PaneName) -> Result<Vec<String>, PaneError> {
+407|         let call = Call::start(OP_FOREGROUND_COMMANDS, self.timeout);
+408|         match self.run_tmux(&tmux::foreground_listing(name), call)? {
+409|             Reply::Done(stdout) => {
+410|                 tmux::parse_foreground(&stdout).ok_or_else(|| unavailable(BAD_COMMAND_LIST))
+411|             }
+412|             Reply::Refused(refusal, what) => Err(refused(name, refusal, what)),
+413|         }
+414|     }
+````
+
+**E64.** The host adapter's errors table: a missing session or server is `pane-not-found` for `ps` and `foreground_commands`. `attached_clients` gets a column (D15).
+
+`sed -n '59,64p' crates/holler-adapter-host/src/lib.rs | awk -v n=59 '{printf "%d| %s\n", n+NR-1, $0}'`
+
+````text
+59| //! **Errors.** Each column is a method; `op` of a `timeout` is `host.<method>`.
+60| //!
+61| //! | What happened | `ensure_session` | `run` | `stop_owned` | `ps` | `foreground_commands` |
+62| //! |---|---|---|---|---|---|
+63| //! | the session or its server is missing (stderr `can't find session`, `can't find window`, `no such window`, `no server running`, or `error connecting to` with `No such file or directory` or `Connection refused`) | created, or `usage` when its directory is not an absolute path to an existing directory | `pane-not-found` | `Ok` | `pane-not-found` | `pane-not-found` |
+64| //! | the session exists | `Ok`, nothing changes | starts the argv | stops what it owns | its live panes' pids | its live panes' command names |
+````
+
+**E65.** `usable` in full (E18 stops at line 126): one key, found by name in the `GET /agent` list; `Ok(())`, the refusal `agent-unusable`, or `unavailable` for an element with no string `mode` (D15).
+
+`sed -n '108,129p' crates/holler-adapter-opencode/src/server.rs | awk -v n=108 '{printf "%d| %s\n", n+NR-1, $0}'`
+
+````text
+108| /// Whether the `GET /agent` list `agents` holds `key` as an agent OpenCode takes as a default
+109| /// agent. That is OpenCode's own rule, which refuses a missing agent, one whose `mode` is
+110| /// `subagent` and a hidden one, and nothing else: `primary` and `all` (what an agent defined in
+111| /// a config without a `mode` gets) both pass. `hidden` counts only when it is `true`, since
+112| /// OpenCode leaves it out otherwise. An element named `key` with no string `mode` is not the
+113| /// JSON the step needs: `unavailable`.
+114| fn usable(call: &Call, reply: &Reply, agents: &[Value], key: &str) -> Result<(), PaneError> {
+115|     let Some(agent) = agents
+116|         .iter()
+117|         .find(|agent| string_at(Some(agent), "name") == Some(key))
+118|     else {
+119|         return Err(unusable(format!("no agent named {key}")));
+120|     };
+121|     match string_at(Some(agent), "mode") {
+122|         None => Err(call.unexpected(GET_AGENT, reply, "agents with a string mode")),
+123|         Some("subagent") => Err(unusable(format!("agent {key} is a subagent"))),
+124|         Some(_) if agent.get("hidden") == Some(&Value::Bool(true)) => {
+125|             Err(unusable(format!("agent {key} is hidden")))
+126|         }
+127|         Some(_) => Ok(()),
+128|     }
+129| }
+````
+
+**E66.** `HarnessRouter`'s routing table: the methods keyed by an endpoint go by the endpoint's kind. Part 2 adds `agent_view` to that row (D2, D15).
+
+`sed -n '9,18p' crates/holler-pane/src/ports/router.rs | awk -v n=9 '{printf "%d| %s\n", n+NR-1, $0}'`
+
+````text
+9| //! **The routing table.**
+10| //!
+11| //! | Call | Goes to |
+12| //! |---|---|
+13| //! | every method keyed by an endpoint (`verify_serving`, `health`, `create_session`, `list_sessions`, `abort`, `attach_tui`, `shown_session`, `send_prompt`, `session_activity`) | the server harness for [`HarnessEndpoint::Port`], the process harness for [`HarnessEndpoint::Process`] |
+14| //! | `serve_command`, `select_session` (a server's argv; a TUI's switch) | the server harness |
+15| //! | `process_command`, `new_session_id`, `locate_process`, `login_status` | the process harness |
+16| //!
+17| //! A call is forwarded as it is, the methods with a default included, so a default of the
+18| //! router never answers in place of the harness a call is routed to.
+````
+
+**E67.** The router's one routing rule, `by`, which every endpoint-keyed method calls.
+
+`sed -n '51,59p' crates/holler-pane/src/ports/router.rs | awk -v n=51 '{printf "%d| %s\n", n+NR-1, $0}'`
+
+````text
+51| impl<S: HarnessPort, P: HarnessPort> HarnessRouter<S, P> {
+52|     /// The harness `endpoint` names.
+53|     fn by(&self, endpoint: &HarnessEndpoint) -> &dyn HarnessPort {
+54|         match endpoint {
+55|             HarnessEndpoint::Port(_) => &self.server,
+56|             HarnessEndpoint::Process { .. } => &self.process,
+57|         }
+58|     }
+59| }
+````
+
+**E68.** How the fake harness answers a call that reaches a frozen, a killed or a never-started server. `agent_view` answers the same (acceptance 7).
+
+`sed -n '131,134p' crates/holler-pane-testkit/src/harness.rs | awk -v n=131 '{printf "%d| %s\n", n+NR-1, $0}'`
+
+````text
+131| /// A call that *reaches* a port goes on when the server there runs. When the server is
+132| /// frozen, the call answers `timeout` with the method's [`HarnessOp`] as its `op`, the
+133| /// shape a wedged port answers; when it was killed or never started, the call answers
+134| /// `unavailable` ("the harness server on port N"). Each method, in check order:
+````
+
+**E69.** `FakeHarness::abort`, the fake's other method on one session: the faults, the port, `reach`, then `known` (`session-not-found` for a session outside the port's data directory).
+
+`sed -n '387,397p' crates/holler-pane-testkit/src/harness.rs | awk -v n=387 '{printf "%d| %s\n", n+NR-1, $0}'`
+
+````text
+387|     fn abort(&self, at: &HarnessEndpoint, session: &str) -> Result<(), PaneError> {
+388|         self.faults.enter(HarnessOp::Abort)?;
+389|         let port = at.port()?;
+390|         let mut world = self.lock();
+391|         world.reach(port, HarnessOp::Abort)?;
+392|         if !world.quirks.contains(&Quirk::AbortUnknownAcked) {
+393|             world.known(port, session)?;
+394|         }
+395|         world.aborts.push((port, session.to_owned()));
+396|         Ok(())
+397|     }
+````
+
+**E70.** Every mention of `assert_end_state`: its definition (`scratch/verbs.rs` line 98), a doc comment (line 4) and its four call sites, #649's scenario and the three of `profile_apply_scenario`. The line numbers are `grep -n`'s.
+
+`grep -rn 'assert_end_state' crates --include='*.rs' | sort`
+
+````text
+crates/holler-cli/tests/pane_integration/scenario.rs:128:    scratch.assert_end_state(&[C1, C2], &["hlr649"]);
+crates/holler-cli/tests/pane_integration/scratch/verbs.rs:4://! constants `C1`, `C2` and the workspace `"hlr649"` of `assert_end_state` became its
+crates/holler-cli/tests/pane_integration/scratch/verbs.rs:98:    pub fn assert_end_state(&self, panes: &[&str], workspaces: &[&str]) {
+crates/holler-cli/tests/profile_apply_scenario/grid.rs:98:    scratch.assert_end_state(&order, &[WORKSPACE]);
+crates/holler-cli/tests/profile_apply_scenario/probe.rs:143:        .assert_end_state(&[Z, W, Y], &["hlr649g", "hlr649h"]);
+crates/holler-cli/tests/profile_apply_scenario/scenario.rs:555:    scratch.assert_end_state(&[A1, A2, B1, X], &["hlr649", "hlr649b"]);
+````
+
+**E71.** `break_both`, the scratch suite's one other assertion on doctor's findings: its C1 check accepts any finding about C1 (acceptance 18).
+
+`sed -n '158,176p' crates/holler-cli/tests/pane_integration/scenario.rs | awk -v n=158 '{printf "%d| %s\n", n+NR-1, $0}'`
+
+````text
+158| /// Steps 6 and 7 (D21). C2's server killed: SIGKILL to the process group of each pid tmux
+159| /// lists as one `run` tagged in C2's session that `HostPort::ps` reports live there. Then C1's
+160| /// session of record after the switch, `target`, deleted under its TUI (raw HTTP: no port
+161| /// deletes a session). `doctor` finds both.
+162| fn break_both(scratch: &Scratch, p1: u16, p2: u16, target: &str) {
+163|     scratch.kill_server(C2, p2);
+164| 
+165|     raw(p1, "DELETE", &format!("/session/{target}"), None);
+166| 
+167|     let found = scratch.findings();
+168|     assert!(
+169|         found.contains(&(C2.to_owned(), "server-down".to_owned())),
+170|         "doctor finds C2's server down: {found:?}"
+171|     );
+172|     assert!(
+173|         found.iter().any(|(pane, _)| pane == C1),
+174|         "doctor reports C1's deleted session: {found:?}"
+175|     );
+176| }
+````
+
+**E72.** `holler pane relaunch` flattens `SpecFlags`, which defines `--agent` (D8).
+
+`sed -n '38,51p' crates/holler-cli/src/pane/relaunch.rs | awk -v n=38 '{printf "%d| %s\n", n+NR-1, $0}'`
+
+````text
+38| #[derive(Args, Debug)]
+39| pub struct PaneRelaunch {
+40|     /// The pane's name, e.g. demo-c1r1.
+41|     #[arg(value_name = "PANE")]
+42|     pub pane: String,
+43|     /// Boxed so `PaneCmd` (inside the frozen `Command`) stays under clippy's
+44|     /// `large_enum_variant` bound now that the verb has its own positional.
+45|     #[command(flatten)]
+46|     pub spec: Box<SpecFlags>,
+47|     #[command(flatten)]
+48|     pub profile: ProfileOpt,
+49|     #[command(flatten)]
+50|     pub spec_only: SpecOnly,
+51| }
+````
+
+**E73.** `--agent`: a long option with one value and no `allow_hyphen_values`; `AgentKey::parse` checks the value after clap (`args.rs` line 141).
+
+`sed -n '60,63p' crates/holler-cli/src/pane/args.rs | awk -v n=60 '{printf "%d| %s\n", n+NR-1, $0}'`
+
+````text
+60|     /// The OpenCode agent the pane's messages run as: letters, digits, - and _. Without it, a
+61|     /// new spec has none (the server's default agent) and an existing spec keeps its own.
+62|     #[arg(long, value_name = "KEY")]
+63|     pub agent: Option<String>,
+````
+
+**E74.** The gate files are gitignored: the sidecars, results, prompts and usage files under `docs/handoffs/` are never committed (Pipeline, steps 1 and 3).
+
+`sed -n '22,25p' .gitignore | awk -v n=22 '{printf "%d| %s\n", n+NR-1, $0}'`
+
+````text
+22| docs/handoffs/**/*.prompt.txt
+23| docs/handoffs/**/*.usage.json
+24| docs/handoffs/**/*-sidecar*.md
+25| docs/handoffs/**/*-result-r*.md
+````
+
+**E75.** The pipeline script is a stateless invocation, with no persisted run state (Pipeline, step 4).
+
+`sed -n '1319,1321p' .aftersight/releases/claude/workflow/coding-pipeline.workflow.mjs | awk -v n=1319 '{printf "%d| %s\n", n+NR-1, $0}'`
+
+````text
+1319| // deliberately a caller-declared value, not independently re-derived from git history --
+1320| // this driver has no persisted run state to check it against (a stateless Workflow script
+1321| // invocation), so it cannot detect a caller who mislabels an escalation as something else.
+````
+
+**E76.** The phases a resume may start at (Pipeline, step 4).
+
+`sed -n '1338,1338p' .aftersight/releases/claude/workflow/coding-pipeline.workflow.mjs | awk -v n=1338 '{printf "%d| %s\n", n+NR-1, $0}'`
+
+````text
+1338| const RESUMABLE_PHASES = [4, 5, 6, 7, 8, 9, 10]
+````
+
+**E77.** Step 1 of the Pipeline route, done on this branch: the nine tracked files of part 1's record, moved to `647-part1-record/`.
+
+`git show --stat --format='%h %s' a9a0ed5`
+
+````text
+a9a0ed5 chore(handoffs): set part 1's record aside for the part-2 run (#647)
+
+ docs/handoffs/{ => 647-part1-record}/647-brief.md          | 0
+ docs/handoffs/{647 => 647-part1-record}/decisions.md       | 0
+ docs/handoffs/{647 => 647-part1-record}/evidence.md        | 0
+ docs/handoffs/{647 => 647-part1-record}/handoff-A-dup.md   | 0
+ docs/handoffs/{647 => 647-part1-record}/handoff-A.md       | 0
+ docs/handoffs/{647 => 647-part1-record}/handoff-F.md       | 0
+ docs/handoffs/{647 => 647-part1-record}/handoff-S.md       | 0
+ docs/handoffs/{647 => 647-part1-record}/handoff-T-green.md | 0
+ docs/handoffs/{647 => 647-part1-record}/handoff-T-red.md   | 0
+ 9 files changed, 0 insertions(+), 0 deletions(-)
 ````
