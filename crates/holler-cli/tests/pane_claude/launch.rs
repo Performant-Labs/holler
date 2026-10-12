@@ -10,7 +10,7 @@ use holler_pane_testkit::herdr::HerdrOp;
 use holler_pane_testkit::host::HostOp;
 
 use crate::rig::{
-    data_of, error_of, has_pair, launch_claude, name, replacing, Calls, Rig, CLAUDE, CWD,
+    cell, data_of, error_of, has_pair, launch_claude, name, replacing, Calls, Rig, CLAUDE, CWD,
     LOGIN_VARIABLES, PROFILE,
 };
 
@@ -253,4 +253,25 @@ fn a_text_launch_prints_one_line_naming_the_pane() {
             "{run:?}"
         );
     }
+}
+
+/// Section 15 item 6: `pane get` of a Claude Code pane shows its pid and no port: the text line
+/// `harness: claude port=- pid=<pid>`, and in JSON a harness of kind `claude` with the pid and no
+/// `port` key.
+#[test]
+fn pane_get_of_a_claude_pane_shows_its_pid_and_no_port() {
+    let rig = Rig::new();
+    let record = rig.seed_claude(CLAUDE, cell(1, 2));
+    let pid = record.harness.pid.expect("a Claude record has a pid");
+
+    let text = rig.run(&["pane", "get", CLAUDE], Format::Text);
+    assert_eq!(text.code, 0, "{text:?}");
+    let line = format!("harness: claude port=- pid={pid}");
+    assert!(text.out.lines().any(|l| l == line), "`{line}`: {text:?}");
+
+    let json = rig.run(&["pane", "get", CLAUDE], Format::Json);
+    let harness = &data_of(&json)["pane"]["harness"];
+    assert_eq!(harness["kind"], "claude", "{harness}");
+    assert_eq!(harness["pid"], pid, "{harness}");
+    assert!(harness.get("port").is_none(), "no port key: {harness}");
 }

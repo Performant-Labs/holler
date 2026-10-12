@@ -256,3 +256,20 @@ and not the repo. One entry per fact; each excerpt is copied, not paraphrased. T
   >         }
   >     }
   > ```
+
+## T, phase 7, test-only rework (S "Rework 1")
+
+- **Fact:** the roster turns every registry record into `pane list`'s row with no filter, so a Claude Code record
+  (`HarnessKind::Claude`) is joined like any other. `roster_panes/registry.rs`'s
+  `a_claude_pane_record_fills_its_row_as_pane_list_prints_it` pins this, and a mutant that filters Claude records here
+  fails it. The code is from #648 and unchanged by this story (`git diff origin/main` of the file is empty).
+  **Source:** `crates/holler-cli/src/roster_cmd.rs:262-267`
+  **Verbatim excerpt:**
+  > ```rust
+  >     fn of(panes: &[Pane]) -> Self {
+  >         Self {
+  >             panes: panes.iter().map(PaneRow::from).collect(),
+  >             note: None,
+  >         }
+  >     }
+  > ```

@@ -1,6 +1,98 @@
 # Handoff-T-green: #831 A Claude Code harness for panes
 
-Two passes, newest first: the verification after F's rework (S's REWORK), then the first pass.
+Three passes, newest first: S's second REWORK (test-only), the verification after F's rework (S's first REWORK),
+then the first pass.
+
+## Rework 2: test-only, S's "Rework 1" (2026-10-11, 22:50 MDT)
+
+**Date:** 2026-10-11
+**Branch:** `issue-831-implementation` at `a1ef88a` (S's verdict commit over `7260b5e`; no production change since)
+**Issue:** #831 (the PR is "Part of #831")
+**Handoff-S:** `docs/handoffs/831/handoff-S.md`, "Rework 1" (REWORK, one test-only item)
+**Handoff-F reviewed:** `docs/handoffs/831/handoff-F.md`, "Rework 1" (unchanged)
+**Handoff-T-red:** `docs/handoffs/831/handoff-T-red.md`
+
+**VERDICT: GREEN, with no blocking issue.** I added the roster test S asked for and, in the same pass, S's optional
+`pane get` test. I changed no production code: `git diff --stat -- crates/*/src` is empty after both mutant runs.
+
+### What I changed (test-only)
+
+1. **`crates/holler-cli/tests/roster_panes/registry.rs`: `a_claude_pane_record_fills_its_row_as_pane_list_prints_it`**
+   (S's required item). It sits next to `the_cells_are_pane_lists_cells_for_the_same_record`, reuses `pane_list_cells`,
+   and calls `roster_cmd::render` through `Rig::render` with literal hub replies.
+   - Registry: `base_panes()` plus `pane("demo-c1r2", (3, 1), None, Healthy, (Some("ses-claude"), None))`, whose
+     `harness` is `HarnessInfo { kind: Claude, port: None, pid: Some(4242), health: Healthy }`, and whose
+     `session_of_record` is `ses-claude`, so `shown` is the session of record and `driven` is `None`.
+   - Reply: `BASE_ROWS` with `demo-c1r2/ses-claude` inserted in name order.
+   - Text: exit 0 and empty stderr (no `note:` line); the Claude row's six cells equal `pane_list_cells(&claude)`; the
+     base rows' six cells equal those of a render without the Claude record.
+   - `--format=json`: exit 0 and empty stderr; the row's `pane`, `pos`, `profile`, `health`, `shown` and `driven` equal
+     `PaneRow::from(&claude)` serialized (`pane` against its `name`); `mismatches` is `[]`; every other row equals the
+     row from the render without the Claude record. (`--json`'s rows equal `data.rows` by
+     `format_json_is_one_envelope_of_rows_and_mismatches`, so the legacy form is not asserted again.)
+   - **Mutant check (S's):** `Registered::of` (`roster_cmd.rs:262-267`) filtered out `HarnessKind::Claude` records. The
+     test **fails**: `left: ["-", "-", "-", "-", "-", "-"]`, `right: ["demo-c1r2", "r3c1", "-", "healthy",
+     "ses-claude", "-"]` (`registry.rs:86`). The other 25 roster tests still passed under the mutant, so only this test
+     pins it. Reverted from a backup copy.
+   - The position is `r3c1`, not `r2c1`, because `hj-c1r2` in `base_panes()` already sits at `r2c1`.
+2. **`crates/holler-cli/tests/pane_claude/launch.rs`: `pane_get_of_a_claude_pane_shows_its_pid_and_no_port`** (S's
+   optional item). Over `Rig::seed_claude`, it checks that `pane get` text has the line
+   `harness: claude port=- pid=<pid>`, and that in JSON `data.pane.harness` has `kind` `claude`, the record's pid, and
+   no `port` key.
+   - **Mutant check:** `harness_text` (`get.rs:284-290`) with the `pid=` field dropped. The test **fails**
+     (`launch.rs:270`). Reverted.
+
+My premise in Rework 1 (the roster test "cannot exist until a body serves that session (#850)") was wrong, as S said:
+the roster tests are pure over literal hub replies. The test now exists. Whether a live Claude pane *gets* a hub row is
+still #850's (ADR-0021 section 15 item 18).
+
+Both files are rustfmt-clean and well under 900 lines (registry.rs 318, launch.rs 277). I added no `#[allow]`.
+
+### GREEN confirmation
+
+Command: `cargo test --workspace -- --skip roster_stays_accurate_under_concurrent_body_load` (the pipeline's
+`test.unit.command`), finishing about 22:45 MDT.
+
+- **Total: 2526 passed, 0 failed, 36 ignored.** That is Rework 1's 2524, plus the two new tests.
+- `roster_panes_test`: 26 passed. `pane_claude`: 43 passed, 1 ignored (the `say` step, #839 and #850).
+
+### Tier 1 results (on `a1ef88a` plus my two test edits)
+
+| Check | Command | Expected | Actual | |
+|---|---|---|---|---|
+| Clippy | `cargo clippy --workspace --all-targets -- -D warnings` | exit 0 | exit 0 | PASS |
+| Lint | `bash scripts/lint.sh` | exit 0 | exit 0 (existing size warnings only) | PASS |
+| Changelog | `bash scripts/changelog-check.sh` | ok | `changelog-check: ok` | PASS |
+| Unused deps | `cargo machete` | clean | no unused dependencies | PASS |
+| Workspace tests | as above (it includes `docs_cli_test`, `wire_selftest` and `holler-proto`) | 0 failed | 2526/0/36 | PASS |
+
+### Tier 2 results
+
+| Check | Method | |
+|---|---|---|
+| Coverage | The brief's roster line ("the roster ... seeing the Claude pane where they read the registry") now has a test. Section 15 item 18's as-built roster sentence is pinned | PASS |
+| Test quality | Each new test names a behaviour and fails in isolation for the right reason (the mutants above). Each sits at the cheapest tier: the roster's pure render, and the verb over fakes. Neither duplicates another test: the existing roster tests seed only OpenCode records, and `launch.rs` checked only the launch JSON's harness, not `pane get` | PASS |
+| API contract | No wire or golden change. The roster goldens are untouched, because the new test asserts against cells, not a golden | PASS |
+| Security | The fixtures hold no secret | PASS |
+| Evidence appendix | Appended one entry to `evidence.md`: `Registered::of` (`roster_cmd.rs:262-267`, unchanged from #648) maps every record with no filter | PASS |
+
+### Acceptance criteria status
+
+As in Rework 1, except that **the roster seeing the Claude pane where it reads the registry** is now backed by
+`a_claude_pane_record_fills_its_row_as_pane_list_prints_it`. The `say` step stays blocked by design (#839, #850), and
+item 17 stays unbuilt (it waits for #835).
+
+### Blocking issues
+
+None.
+
+### Advisory notes
+
+- The opt-in real test has still not been run (S's advisory).
+- The remaining lower-value gaps from S's advisory: `pane watch` over a Claude record, `holler interrupt --pane` output
+  for a Claude pane, and `server-unsupported`. `pane get` is now covered.
+
+---
 
 ## Rework 1: GREEN after S's REWORK (2026-10-11, 22:20 MDT)
 

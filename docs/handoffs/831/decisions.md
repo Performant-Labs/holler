@@ -491,3 +491,26 @@ brief, the research note's "Decisions").
     - `get` and `watch` over a Claude record in the tests;
     - private names, IPs, emails, domains and secrets in all 13,096 added lines: none;
     - `wc -l` of every touched file (the largest `.rs` is 893).
+
+## T, test-only rework after S's "Rework 1": 2026-10-11T22:50-06:00 (MDT)
+
+- **Decided:**
+  - Added `roster_panes/registry.rs::a_claude_pane_record_fills_its_row_as_pane_list_prints_it`, as S specified. It
+    checks a Claude record's six cells and JSON keys against `pane list`'s row, with empty stderr and the base rows
+    unaffected, in text and `--format=json`.
+  - Also added S's optional `pane_claude/launch.rs::pane_get_of_a_claude_pane_shows_its_pid_and_no_port`.
+  - No production change. GREEN with no blocking issue.
+- **Assumed:**
+  - The legacy `--json` form needs no separate assertion, because `format_json_is_one_envelope_of_rows_and_mismatches`
+    already pins `data.rows` equal to `--json`'s rows.
+  - The Claude fixture sits at `r3c1`, because `base_panes()` already has `hj-c1r2` at `r2c1`.
+- **Hedged:**
+  - The test pins the roster's join of a Claude *record*. Whether a live Claude pane gets a hub row stays with #850
+    (section 15 item 18).
+- **Evidence:**
+  - Mutant: filtering `HarnessKind::Claude` out of `Registered::of` fails the new roster test (the six cells become `-`).
+    Dropping `pid=` from `get.rs`'s `harness_text` fails the `pane get` test. Both were reverted, and
+    `git diff --stat -- crates/*/src` is empty.
+  - Full workspace test: 2526 passed, 0 failed, 36 ignored. Clippy `-D warnings`, `lint.sh`, `changelog-check.sh` and
+    `cargo machete` all pass.
+  - `evidence.md` gained one entry: `roster_cmd.rs:262-267`.
