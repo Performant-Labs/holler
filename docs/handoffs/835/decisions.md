@@ -445,3 +445,53 @@ Run handoff directory `docs/handoffs/835` Â· branch `issue-835-implementation` Â
   - the guide's claims were read against `import/observe.rs:177-187` (the only `ObserveFailed` producers) and
     `pane/import.rs` `Input::read` (the four `usage` causes);
   - `grep` finds no "#831 and #832" or "#831 and #835" left in `crates` or ADR-0021.
+
+## A, anti-duplication gate: 2026-10-11T19:48-06:00 (MDT)
+
+- **Decided:** PASS, with 0 `block` and 1 `warn` (`docs/handoffs/835/handoff-A-dup.md`).
+  - **The scope.** I reviewed the whole feature diff, `bda1069..b488a33`: 37 files outside `docs/handoffs`. This is the
+    run's first A-dup, and cycle 1's code never reached this gate.
+  - **No parallel path.** F extended every object the map named, in its layer:
+    - the read: `HostPort` beside `ps`, and in the adapter `ps`'s shape, its listing pattern, a parser as strict as
+      `parse_ps`, and `refused()`;
+    - the rule: one constant and one predicate in `pane.rs`;
+    - the chain: one more read on the same thread, through the one `tmux_finding` mapping and `failed_message`;
+    - `Outcome::claude_code`, through `left_alone`;
+    - the forwards in `BindingHost` and `Wired<dyn HostPort>`;
+    - `FakeHost`: one `processes` list and one `each_process` helper;
+    - the switch: in `Input::read`, with `usage()` and `not_implemented_message`.
+  - **No drift from the rework.** F's cycle 2 changed only comment lines in the three Rust files it touched.
+  - **The merge.** `526bbd3` is a clean merge, plus T-red's three test edits and the handoffs.
+  - **The warn.** `ImportRig::run_with_host` copies `run_with_store`, and `text_row` is a twin of `text_line`. Both are
+    test code, and folding them is optional.
+- **Assumed:**
+  - `origin/main` is still `bda1069` (`git fetch` at 19:42 MDT), so the diff base is the PR's base.
+  - Brief R3-3 justifies, in writing, how much the two R3-3 `pane list` tests overlap `pane_verbs/unmanaged.rs`'s list
+    tests. So the overlap is reviewed, not drift.
+- **Hedged:**
+  - **The three `list-panes` builders in `tmux.rs`** differ only in their format. They follow the module's "one pure
+    function per command line" and the map's shape, so they are not flagged.
+  - **The docs' "each process" wording** is narrower in the contract: the foreground process of each live pane. That is a
+    question of what the docs say, so it is left to S.
+  - **The "refused until #831" prose** spans the ADR, the guide, the help text and the CHANGELOG, and no test pins it. This
+    is noted for #831's owner.
+- **Evidence:**
+  - **Git:**
+    - `git fetch`;
+    - `git diff --stat` and the full `git diff bda1069 HEAD` of every non-handoff file;
+    - `git merge-tree --write-tree 529467f bda1069`, compared with `526bbd3`;
+    - `git diff 526bbd3 4604693 -- crates`, filtered for lines that are not comments: none.
+  - **Read in full:**
+    - `import/{observe,assess}.rs`, `tmux.rs` and `testkit/src/host.rs`;
+    - `pane_verbs/import/harness.rs` and `pane/import.rs` (lines 40-255);
+    - `pane_integration/observe.rs` and `verb_harness/mod.rs`.
+  - **Read in part:** `lib.rs` (330-480), `bind.rs` (520-600) and the conformance `Mutant`.
+  - **grep:**
+    - `"claude"` in every `src` (one command-name comparison);
+    - every `impl HostPort for` (11 implementations);
+    - every caller of `foreground_commands` (the import only, in production);
+    - basename, poll and `text_line` helpers;
+    - stale "default" wording about `observe_pane` in ADR-0021 (none);
+    - stale story cross-references (none);
+    - personal names in the diff (none).
+  - **Sizes:** `wc -l` on every touched file. All are under 900.
