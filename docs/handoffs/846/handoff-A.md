@@ -1,51 +1,48 @@
-# Handoff-A: #846 linkedhost-fakes  (up-front plan review)
+# Handoff-A: #846 linkedhost-fakes  (up-front plan review, second pass after the amended brief)
 
 **Date:** 2026-10-12
 **Branch:** issue-846-implementation
-**Brief reviewed:** docs/handoffs/846-brief.md   **Reuse map:** the brief's "Files" / "Reuse map" paragraph (no separate survey.md)   **Wireframe:** N/A
-**Verdict:** BLOCK
+**Brief reviewed:** docs/handoffs/846-brief.md (amended in `e1eae6a`)   **Reuse map:** the brief's "Files" / "Reuse map" paragraph (no separate survey.md)   **Wireframe:** N/A
+**Verdict:** PASS
 
 ## Summary
-The core design is sound: one `LinkedHost<H, L>` in `tests/verb_harness/linked_host.rs`, a `HarnessLink` trait, two named
-error modes, and the launch rig keeping a private link. It extends the right home, with no testkit or production change.
-But the brief states four facts about the tree that are false at `6eff9cc`, and three acceptance criteria
-(AC 1, AC 2, AC 5) cannot be satisfied or checked as written. F and T would stumble on them, and S would fail the story
-on a criterion no code can meet. These are cheap to amend in the brief.
+The amended brief closes every block from the first pass (git `b59e745`) and I re-checked each fix against the tree at `6eff9cc`.
+The design extends the right home (`tests/verb_harness/`, already `#[path]`-included by all four targets and not built by
+`pane_cli_process`), adds no testkit, production or `Cargo.toml` change, and keeps the propagate/swallow difference as a named
+mode. Only warnings remain, none of which changes the design.
+
+## Verification of the first-pass blocks
+| First-pass block | State in the amended brief | Checked against the tree |
+|---|---|---|
+| 1 AC 1 grep | now `HostPort for LinkedHost` and `struct LinkedHost`; `LostChain` in Out of scope | `grep -rnE "HostPort for LinkedHost"` and `"struct LinkedHost"` each print 4 lines today (apply `rig.rs:644/640`, launch `:694/688`, claude `:424/420`, `bind.rs:524/519`); `LostChain` (`import/harness.rs:307`) no longer matches |
+| 2 `sessions_for` / W-3b | dropped from scope and AC 5 | not in `holler-cli/tests`; confirmed |
+| 3 `profile_apply_scenario` | added to the AC 2 command; `scratch/`, `out.rs`, `scenario.rs` not edited, and nothing there may import from `pane_integration`'s shared code | `profile_apply_scenario/main.rs:33-37` path-includes `out.rs` and `scratch/mod.rs`; they use `crate::support` and `crate::{output_of, Out}` only |
+| 4 no-hub text | W-6 rewritten to `no_hub.rs` + `fake_hub.rs` (four assertions), `scenario.rs` removed, both existing assertion strengths kept | `no_hub.rs:48`, `fake_hub.rs:349` (full string with state dir), `fake_hub.rs:423` (phrase only); confirmed |
+
+Also confirmed: two `opencode-ran` writers (`wired.rs:36`, `no_hub.rs:67`) with the same `hlr649-` /tmp prefix and the same script body (W-3);
+`observe.rs:27-55` and `bind.rs:293-316` are the duplicated conformance runner and the `LazyHerdr` closures are duplicated (W-7).
+The four `LinkedHost`s match the evidence block: the host is an owned `FakeHost` in apply, launch (inside `Fakes`) and claude, and is
+built inside an `Arc` in `bind.rs:630` alone. `Borrow<FakeHost>` serves `&FakeHost` and `FakeHost`; `Arc<FakeHarness>` serves `bind.rs`. The
+`RIG_PORTS` consts (`[u16; 8]` in apply, `[u16; 3]` in launch) promote to `&'static [u16]`.
 
 ## Findings
 
 | # | Severity | Plan element | Drift dimension | Finding | Suggested fix |
 |---|---|---|---|---|---|
-| 1 | block | AC 1 `grep -rn "impl HostPort for" crates/holler-cli/tests` prints exactly one line | pattern consistency (checkable criterion) | Two defects. (a) `pane_verbs/import/harness.rs:307` `impl HostPort for LostChain<'_>` also matches, so the grep prints **5** lines today, not 4, and **2** after the fold. `LostChain` is a deliberate panicking-`ps` wrapper, not a linked host. (b) The planned `impl<H: Borrow<FakeHost>, L: HarnessLink> HostPort for LinkedHost<H, L>` does not match `impl HostPort for` (generics sit between `impl` and `HostPort`), so the grep would print **0** lines for the new module. | Reword to `grep -rnE "HostPort for LinkedHost" crates/holler-cli/tests` (exactly 1 line, in `verb_harness/linked_host.rs`) and `grep -rnE "struct LinkedHost"` (exactly 1 line, same file). Say that `LostChain` stays, in Out of scope. Correct the baseline "RED" to 4 and 4 for these two greps. |
-| 2 | block | AC 5: "`sessions_for(&[])` appears once in `pane_integration`" and W-3b | reuse map accuracy | `sessions_for` does not exist in `holler-cli/tests`. It is in `holler-adapter-opencode/tests/real_opencode/rig.rs:567`, another crate's test rig, which the brief itself puts out of scope (D5). `Scratch::harness` (`scratch/mod.rs:392-396`) spells an inline `Err(PaneNotFound)` closure **once**; there is no second copy. The AC is vacuous (0 occurrences today and after) and W-3b has nothing to fold. | Drop W-3b from scope and from AC 5. Do not touch `scratch/mod.rs` (see finding 3). |
-| 3 | block | Edit list: `scratch/mod.rs`; AC 2 command | blast radius / layering | `pane_integration/scratch/mod.rs` and `out.rs` are included **by path** into the `profile_apply_scenario` target (`profile_apply_scenario/main.rs:31-35`). That target is not in AC 2's command, and it does not build `pane_integration/common.rs`. A `scratch/mod.rs` edit that reaches `crate::common` would break it. | Add `--test profile_apply_scenario` to the characterisation command (its default-run pins, with the `#[ignore]` scenario skipped). State that nothing under `pane_integration/scratch/` or `out.rs` may import from `common.rs`. With finding 2, F should not need to touch `scratch/mod.rs` at all. |
-| 4 | block | AC 5: the no-hub assertion helper "used by `no_hub.rs`, `fake_hub.rs` and `scenario.rs`" | reuse map accuracy | `scenario.rs` has no no-hub assertion (no "no live holler hub", "reachable" or "unavailable" text). The real copies are four, in two files: `no_hub.rs:117-119` (`names_the_missing_hub`: phrase and state dir), `fake_hub.rs:349` (full "... reachable at {state}" string), `fake_hub.rs:423` (phrase only, no state dir), and `no_hub.rs`'s `NO_HUB` const. | Rewrite AC 5 and W-6: one helper (phrase plus state dir) in `common.rs`, used by `no_hub.rs` (two tests) and `fake_hub.rs` (two tests). `fake_hub.rs:423` asserts the phrase only; say whether it keeps that weaker form or takes the helper with a state dir. A change in what a test asserts is out of scope, so it should keep the phrase-only check unless the state dir is already in scope. Remove `scenario.rs` from the edit list. |
-| 5 | warn | Risks: "dead-code and `unused` warnings ... must not add an un-linked `#[allow]`" | pattern consistency | All four targets already carry a crate-level `#![allow(dead_code)]` (`pane_verbs/main.rs:5` #670, `profile_verbs/main.rs:5`, `pane_claude/main.rs:4` #831, `pane_integration/main.rs:5` #649). The unused-link risk is already covered and F needs no `// #846` allow. | Replace the risk with the fact. Keep "adds no new `#[allow]`" as a check. |
-| 6 | warn | `FakeHarnessLink { harness, ports: &[u16], ... }` | lifetimes / abstraction | `pane_integration` needs `Arc<FakeHarness>`: the same `Arc` also goes into `Resolving { inner: harness, .. }` (`bind.rs:~636`), and `Arc<dyn HostPort>` needs `'static`. The other rigs borrow an owned `FakeHarness` (`rig.harness`). The sketch leaves `harness`'s type open. `RIG_PORTS` also differs per rig (`[u16; 3]` in launch, `[u16; 8]` in apply), so `ports` must be a slice parameter, not a constant of the module. | Give `FakeHarnessLink` the same `Borrow<FakeHarness>` generic as the host (`Arc<FakeHarness>` and `&FakeHarness` both satisfy it), and take `ports: &'static [u16]` (the const arrays promote), or document the `Arc` fallback. Bound `H`/`L` by `Send + Sync` so `HostPort: Send + Sync` holds. |
-| 7 | warn | The shared kill loop "lives once" | duplication | Launch keeps a private `HarnessLink` and still needs the kill loop (`kill_on_stop`). It can only reuse the loop if it is a `pub fn` (for example `kill_served(harness, ports, name)`) in `linked_host.rs`, called by both `FakeHarnessLink::stopped` and launch's link. | Name that function in the brief so Phase 7 can check it is called from two places and defined once. |
-| 8 | warn | New `pane_integration/common.rs` | naming and file structure | `pane_integration` modules are named by topic (`bind`, `clients`, `env`, `guards`, `out`, `watch`); shared helpers otherwise live in `main.rs` (`with_env`, `holler_on`). `common.rs` is a catch-all with no sibling precedent. It is acceptable (it keeps one target's glue out of `verb_harness`), but narrower names fit better. | F may split by topic (for example `traps.rs` for the trap builder and no-hub check, and a `CallLog` plus suite runner in `observe.rs` imported by `bind.rs`). If `common.rs` stays, its module doc names what it holds. |
-| 9 | warn | Size | file size | `bind.rs` is 693 lines (above the 600 warning). The plan moves `Recording`'s log, the conformance runner and the `LazyHerdr` builder out of `bind.rs`/`observe.rs` into shared code, so it should shrink. `launch/rig.rs` at 852 is close to the 900 fail line and gains a `HarnessLink` impl of about 15 lines while losing about 50. | Keep AC 6's "shrinks, never grows" and record `wc -l` before and after for the four rigs. |
-| 10 | warn | D2 (testkit home) | cross-cutting | The testkit's own `host.rs` module doc (lines 12-17) prescribes exactly this "`HostPort` wrapper" pattern, which supports folding it long term into `holler-pane-testkit`. The brief's deferral is right for scope. | Have the new module's doc say so and link a follow-up issue number (to be filed), as D2 intends. |
+| 1 | warn | AC 2 / Test plan wording | checkable criterion | AC 2 says "the four targets" and the Test plan says "the same four runs", but the command names five targets (`pane_verbs`, `profile_verbs`, `pane_claude`, `pane_integration`, `profile_apply_scenario`). A checker counting four could skip the one that proves `scratch`/`out` still build. | T records five `test result:` lines. Say "five" in both places. |
+| 2 | warn | `verb_harness/mod.rs` module doc | naming / docs | Its doc says "Included by `pane_verbs` and `profile_verbs`"; it is in fact included by four targets and will now hold a second module (`linked_host`). | F updates the one line of the module doc when it adds `pub mod linked_host;`. |
+| 3 | warn | Helper placement in `pane_integration` (`CallLog`, suite runner in `observe.rs`, imported by `bind.rs`) | dependency direction | `bind.rs` and `observe.rs` are sibling topic modules. Moving shared helpers into one and importing from the other is fine only if the dependency runs one way. | Prefer a neutral module (`traps.rs` for the trap builder and no-hub text, and the shared `CallLog`/runner/builder in one module that neither `bind.rs` nor `observe.rs` is a cycle with). If `common.rs` is used, its doc names what it holds. |
+| 4 | warn | `FakeHarnessLink { on_start, kill_on_stop, ports }` | abstraction level | Three knobs (propagate/swallow mode, kill flag, port list) on one link, plus a private launch link, is as much as one type should carry. `pane_integration` passes "kill nothing" with an empty `ports`, which is redundant with `kill_on_stop: false`. | Keep two modes only as named enums, not bare bools; do not add a fourth knob. Phase 7 checks `kill_served` is defined once and called from `FakeHarnessLink::stopped` and launch's link. |
+| 5 | warn | Size | file size | `launch/rig.rs` is 852 lines (fail line 900) and gains a ~15-line link while losing ~50; `bind.rs` is 693 and `profile_verbs/apply/rig.rs` is 776. | Keep AC 6's `wc -l` before/after for all four rigs; the new `linked_host.rs` stays well under 300 lines. |
+| 6 | warn | Out of scope list | docs accuracy | The brief writes `profile_verbs/rig.rs:252` for a direct `start_server` call; that path exists (`profile_verbs/rig.rs:252`), distinct from `profile_verbs/apply/rig.rs`. Correct, but easy to confuse with the apply rig. | No action beyond keeping the full path. |
+| 7 | warn | D2 (testkit home) | cross-cutting | `holler-pane-testkit/src/host.rs:12-17` prescribes this wrapper; folding into the testkit is the cleaner long-term home. Deferral is right for scope (production-crate, public API). | The module doc names the testkit prescription and the follow-up issue number; O files the issue before F finishes. |
 
 ## Notes for O
-Amend `docs/handoffs/846-brief.md` before a fresh run (the script stops on an unchanged brief; do not `resumeFromRunId`):
-
-1. AC 1: use `grep -rnE "HostPort for LinkedHost"` and `grep -rnE "struct LinkedHost"`, each exactly one line in
-   `verb_harness/linked_host.rs`. Baseline is 4 and 4. Add `LostChain` (`pane_verbs/import/harness.rs:307`) to Out of scope.
-2. AC 2: add `--test profile_apply_scenario` to the command, so the path-included `scratch`/`out` stay proven to build.
-3. AC 5 and the near-copy list: drop W-3b (`sessions_for` is another crate's helper; the inline closure is one copy). Correct
-   W-6 to `no_hub.rs` plus `fake_hub.rs` only, with `scenario.rs` removed from the edit list. Keep W-3 (two `opencode-ran`
-   writers; verified at `wired.rs:36` and `no_hub.rs:67`) and W-7.
-4. Say that `scratch/mod.rs` and `out.rs` are not edited, and nothing there imports from `pane_integration/common.rs`.
-5. Replace the dead-code risk with: the four targets already allow `dead_code` crate-wide; no new `#[allow]`.
-6. Optional (warn 6, 7): `FakeHarnessLink` generic over `Borrow<FakeHarness>`, `ports: &'static [u16]`, and a named
-   `pub fn` for the shared kill loop.
-
-None of these changes the design. After the amendment the plan should PASS.
+None required (PASS). Optional: file the D2 follow-up issue so the module doc can cite a number, and fix the "four runs" wording (finding 1) when convenient. Merge order for siblings is as in the brief (#845 before #846 if both are ready; #848 before the #846 PR).
 
 ## Patterns referenced
-- `crates/holler-pane-testkit/src/host.rs:12-17` (the documented `HostPort` wrapper pattern)
+- `crates/holler-pane-testkit/src/host.rs:12-17` (the documented `HostPort` wrapper pattern) and `crates/holler-pane/src/ports.rs:371` (`HostPort: Send + Sync`, five methods)
 - `crates/holler-cli/tests/{profile_verbs/apply,pane_verbs/launch,pane_claude}/rig.rs` and `pane_integration/bind.rs` (the four `LinkedHost`s)
-- `crates/holler-cli/tests/profile_apply_scenario/main.rs` (path-includes `scratch` and `out`)
-- `crates/holler-cli/tests/pane_integration/main.rs` (module layout and crate-level allows)
+- `crates/holler-cli/tests/verb_harness/mod.rs` and `pane_verbs/process/main.rs` (who builds `verb_harness`)
+- `crates/holler-cli/tests/profile_apply_scenario/main.rs` and `pane_integration/{main.rs,scratch/mod.rs}` (path-included files and their imports)
 - `scripts/lint.sh:43-50` (size gate)
