@@ -235,8 +235,8 @@ pub struct Status {
     pub protocol: u32,
     pub protocol_min: u32,
     pub protocol_max: u32,
-    /// The running binary's version (issue #319), `env!("CARGO_PKG_VERSION")` —
-    /// never hand-rolled or hardcoded independently.
+    /// The running build's version string (#319, #851), [`crate::build_info::version`]: the
+    /// version and commit `holler --version` prints, e.g. `0.4.0 (bda1069)`. For display only.
     pub version: String,
     pub hostname: String,
     /// **Body**: whether this body currently has a live socket.

@@ -20,16 +20,48 @@ fn holler() -> Command {
     Command::cargo_bin("holler").expect("holler binary on PATH")
 }
 
-// --version (and -V) print exactly `holler <workspace version>` and exit 0.
+// The 7-character hash of the checkout's HEAD, as `build.rs` reads it, or
+// `None` when the tests run outside a git checkout (a source archive).
+fn checkout_head() -> Option<String> {
+    let out = std::process::Command::new("git")
+        .args(["rev-parse", "--short=7", "HEAD"])
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .output()
+        .ok()?;
+    out.status
+        .success()
+        .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
+// Issue #851: --version (and -V) print `holler <workspace version> (<commit>)`
+// and exit 0. The first two tokens stay exactly as before #851, so a parser of
+// the first line keeps working. Built from this checkout, <commit> is HEAD's
+// 7-character hash, with `-dirty` when tracked files had changed at build time.
+// `-dirty` is allowed either way here, because a pipeline worktree is often
+// dirty partway through a phase and no test may dirty the real checkout; the
+// dirty rule itself is pinned in build_version_test.rs.
 #[test]
-fn version_flag_prints_crate_version() {
-    let expected = format!("holler {}\n", env!("CARGO_PKG_VERSION"));
+fn version_flag_prints_version_and_commit() {
+    let prefix = format!("holler {} (", env!("CARGO_PKG_VERSION"));
+    let head = checkout_head();
     for flag in ["--version", "-V"] {
-        holler()
-            .arg(flag)
-            .assert()
-            .success()
-            .stdout(predicate::eq(expected.clone()));
+        let out = holler().arg(flag).output().expect("run holler");
+        assert!(out.status.success(), "{flag}: {out:?}");
+        let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+        let commit = stdout
+            .strip_prefix(&prefix)
+            .and_then(|rest| rest.strip_suffix(")\n"))
+            .unwrap_or_else(|| panic!("{flag}: want `{prefix}<commit>)`, got {stdout:?}"));
+        match &head {
+            Some(hash) => assert!(
+                commit == hash || commit == format!("{hash}-dirty"),
+                "{flag}: commit should be HEAD {hash} (optionally -dirty): {stdout:?}"
+            ),
+            None => assert!(
+                !commit.is_empty() && !commit.contains(char::is_whitespace),
+                "{flag}: commit token: {stdout:?}"
+            ),
+        }
     }
 }
 
