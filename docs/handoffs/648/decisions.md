@@ -144,3 +144,58 @@ Append-only; every phase adds its own entry.
   - Seven mutations of `roster_cmd.rs`, all reverted, and each failed at least one test: the pair rule, the join, the
     NotRead note, the profile scope, the profile filter, the policy code and the de-duplication.
   - Tier 1 commands: see `handoff-T-green.md`.
+
+## A (Phase 8, anti-duplication gate): 2026-10-11T20:54-06:00
+
+- **Decided:** PASS on the diff `bda1069..23db217`. The production code is F's `f7f2bcf`; later commits touch only
+  handoffs. There are no blocks, five warns and one info. The detail is in `handoff-A-dup.md`.
+  - **F extended `roster_cmd.rs`, as the brief names it, and reused what the map pointed to:**
+    - from `pane::list`: `PaneRow::from`, `cells`, `COLUMNS`, `NO_VALUE`, `profile_name` and `text_value`;
+    - from `output`: `emit`, `emit_error`, `ErrorBody`, `ErrorCode` and `Sink`;
+    - the registry reads: `PaneStore::list` and `ProfileScope::resolve`;
+    - the wiring: `Wiring::connect` and `ports`, still built only in `main.rs`.
+
+    No new production file was added, and nothing outside `holler-cli`, the docs and CHANGELOG changed.
+  - **Three things look like parallel paths and are not.** Each is a shape that A's Phase 4 handoff asked for in
+    writing, so each is a reviewed decision:
+    - the pair-rule predicate (W-2, option 1), pinned to `say_cmd::resolve_pane_target` by a test;
+    - the roster's own fixed-width `table_line` (W-7);
+    - `run_roster` beside `run_with_stdio` (W-1).
+  - **Warns for O:**
+    - The twins' "keep the two equal" (`say_cmd.rs:300`, `dispatch.rs:86`) does not name the roster's copy. Put this
+      in #839's brief.
+    - W-8's doc drift is still open (`list.rs:239-240`, `reconcile.rs:181-182`). File the follow-up.
+  - **Cosmetic warns, no rework:**
+    - `usage()` copies `output::usage_body`. `emit_usage_error` already gives the same bytes.
+    - The state-dir lock in `hubless.rs` is a second copy of `pane_integration`'s.
+    - The docs test copies the whole-word matcher of `section_4_names_every_column`.
+  - **Info:** the test `Rig` is the eighth per-target copy of the ports-over-fakes rig. That is the dominant pattern,
+    so it is not drift for this story.
+- **Assumed:**
+  - The diff gate's warns about `WIDTHS` (W-1 and W-2 in `648-diff-result-r1.md`) are robustness notes, not
+    duplication, so they are not repeated in this handoff.
+  - T-green's GREEN at `f7f2bcf` still holds at `23db217`, because nothing after it touches code. The tests were not
+    re-run here: running them is T's job, not A's.
+- **Hedged:**
+  - **Severity of finding 1.** It is a warn, not a block. W-2 approved a third copy explicitly, and the pinning test
+    makes a divergent change in `say_cmd.rs` fail loudly.
+  - **The hub's twin.** It is not pinned to the roster's copy. That gap is the cost W-2 accepted to keep `say_cmd.rs`
+    out of this change.
+- **Evidence:**
+  - **Read in full:** `roster_cmd.rs` at `bda1069` and at `HEAD`; `pane/list.rs`; `output.rs`;
+    `roster_panes_test.rs` and `roster_panes/{hubless,join,profile,registry}.rs`; `verb_harness/{mod,parse}.rs`.
+  - **The diffs of:** `main.rs`, `cli.rs`, `Cargo.toml`, `roster_cli_test.rs`, `legacy_verbs.rs`, `stub.rs`,
+    `docs_pane_control_test.rs`, ADR 0003, ADR-0021, `docs/pane-control.md` and CHANGELOG.
+  - **The twins and neighbours:** the pair rule in `say_cmd.rs` (`:288-372`) and in `dispatch.rs` (`:77-103`);
+    `RoutableName` in `vocab.rs`; `qualified_name` in the hub's `roster.rs`; `wiring.rs:1-40`; the
+    `pane_integration/main.rs` lock; `support/mod.rs`'s `StateDir`; `pane_verbs/list.rs`'s `Rig`.
+  - **Greps:**
+    - `Rig`/`ports()` across the tests: 8 rigs;
+    - `STATE_DIR_LOCK`: 2 copies;
+    - `table_line`: 2, by W-7's design;
+    - `RemotePolicyRefused` across the `*_cmd.rs` files: a per-verb mapping;
+    - `split_once('/')`;
+    - `after_help`;
+    - personal infrastructure names in the diff: none.
+  - **Commands:** `git diff --stat` (nothing in `holler-hub`, `holler-pane`, `holler-proto`, the test kit or
+    `docs/protocol`); `bash scripts/lint.sh` exit 0; `git check-ignore` (the handoff is tracked).
