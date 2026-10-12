@@ -110,3 +110,61 @@ Run handoff directory `docs/handoffs/835` · branch `issue-835-implementation` �
   - Docs: ADR-0021 §2, §9 (`:698`, `:755`), §13 and the decisions list (`:976-978`); ADR 0003 (`:63`);
     `cli-surface.txt`; `docs/research/claude-code-pane-spike.md` (§6, the contract changes, the decisions).
   - Sizes: `wc -l` on every file the change would touch.
+
+## A, up-front plan review (third pass, rounds 2 and 3, on the merged #649): 2026-10-11T17:59:50-06:00 (MDT)
+
+- **Decided:** PASS, with 0 `block` and 6 `warn` findings (`docs/handoffs/835/handoff-A.md`, which replaces pass 2's text;
+  pass 2 is at `cc3d366`).
+  - Round 2 settles pass 2's block: `foreground_commands` is required, the `wiring.rs` rule is lifted for exactly the
+    forwards, and the story runs after #649. The worktree is built on it (base `2d217dd`, #649 merged at 17:35 MDT).
+  - Round 2 settles or records all seven of pass 2's warns.
+  - The plan extends the right objects, and no contract decision is left open.
+
+  The warns:
+  1. Round 3 was overtaken. It was written at 15:54 MDT, and #649's D33 (merged at 17:35) already forwards `observe_pane`
+     and `observe_panes` in both Herdr wrappers and pins them (`tests/pane_integration/observe.rs`, `bind.rs`).
+     - R3-2 is already met: T adds no copies.
+     - R3-3's test passes before any code: T writes it as a regression pin in `observe.rs`.
+     - "Required" is pinned with a `compile_fail,E0046` doctest.
+  2. ADR-0021 §14's `observe_pane` bullet ("has a default ... keeps compiling") becomes false and is not in the brief. Amend
+     it in place, keep §13's "Decided (#835)" paragraph to the import, and update `ports.rs`'s stale list of amendments.
+  3. Open PR #840 makes `unmanaged::is_unmanaged` "the one rule of 'a pane Holler does not drive'" and says #835 calls it.
+     - The import cannot use it: it is true of every import candidate.
+     - R2-7's process rule stays in `pane.rs`. If #840 merges first, F corrects #840's two sentences that name #835.
+     - Name #840 among the coexistence notes.
+  4. R2-6 reverses `import/join.rs:392-404`, a merged #650 test. Two corners are left open: a failed `ps` (read names
+     only after `ps` answers) and a read's `pane-not-found` (`tmux-session-missing`).
+  5. The implementation lists are short: `pane_integration/bind.rs`'s `LinkedHost` and `ports_test.rs`'s `TestHerdr`.
+     R3-2's "no test double relies on a default" holds for forwarding wrappers only.
+  6. `WiredHost` has no forwarding pin. One host-suite run over it, plus one line in `wired.rs`; `BindingHost`'s existing
+     run covers its forward.
+- **Assumed:**
+  - #840 keeps its text as it is at `8e39fcc`. If it merges first, the correction in warn 3 is F's; if it changes, the warn
+    still applies to whatever it says about #835.
+  - The pipeline's T reads handoff-A. With no O in the automated path, the warns reach T and F through "Notes for T and F".
+  - `origin/main`'s one commit after the base (`7fc00f1`, a #655 journal file) changes nothing #835 reads or edits.
+- **Hedged:**
+  - Warn 1 suggests a `compile_fail` doctest as the RED for "required". The test design is T's.
+  - Accepting a test that passes before F starts as R3-3's evidence is T's call and S's. This review says only that the
+    behaviour already exists.
+  - Warn 3's correction of #840's wording depends on the merge order. The operator can settle it more cheaply on #840.
+  - R2-5's limit (`node` running Claude Code is not recognised) is unverified on the real fleet, which is out of bounds. The
+    first real import's dry run is the check.
+- **Evidence:**
+  - Read: the brief (sha256 `bac2232a86462e4f...`), passes 1 and 2 and this journal; `gh issue view 835` (the body is the
+    same as the brief's issue section); `gh pr list` (#840 open; #649 merged as PR #843).
+  - `git fetch` at 17:44 and 17:57 MDT; `git log` and `git diff --stat` for #649 (`2d217dd`), #832 (`652841b`), #838 and
+    `7fc00f1`.
+  - Through git only, with no other worktree opened: #840's diff, and the other branches' changed files (#647, #648, #652,
+    #655, #828 and #842; none overlaps #835's code).
+  - Code: `holler-pane/src/{ports.rs, pane.rs, import.rs, import/{assess,observe,findings}.rs, findings.rs}`;
+    `holler-cli/src/pane/{wiring.rs, wiring/bind.rs, import.rs}`, `output.rs` and `prompt_target.rs`;
+    `holler-adapter-host/src/{lib,tmux}.rs`; `holler-pane-testkit/src/{host.rs, conformance/host.rs}`.
+  - Tests: `holler-pane-testkit/tests/host_conformance_test.rs`; `holler-cli/tests/pane_integration/{bind,observe,wired}.rs`;
+    `holler-cli/tests/pane_verbs/{import.rs, import/{rig,join}.rs, unmanaged.rs}`;
+    `holler-pane/tests/{import_test,ports_test}.rs`; `holler-adapter-host/tests/fake_tmux_test.rs`.
+  - Every implementation of `HostPort` and `HerdrPort` in the workspace, by grep, checked for `observe_pane`.
+  - Docs: ADR-0021 §2, §9, §13, §14 and the decisions list; `docs/handoffs/649-brief.md` (D33) and 649's journal;
+    `docs/research/claude-code-pane-spike.md` (§6, the contract changes, the decisions); `scripts/pane-restart:74-88`;
+    `.aftersight/pipeline.config.json` (`cargo test --workspace` runs doctests); the T rules in `tester.md`.
+  - Sizes: `wc -l` on every file the change would touch; all are under 900 (`launch/rig.rs` about 844 with #840 and #835).
