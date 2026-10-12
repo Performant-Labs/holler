@@ -12,8 +12,8 @@ use holler_pane_testkit::conformance::host::{host_cases, run_host_conformance};
 use holler_pane_testkit::conformance::Conformance;
 use holler_pane_testkit::host::FakeHost;
 
-/// The 9 case ids of the brief's table, in order.
-const DOCUMENTED_CASES: [&str; 9] = [
+/// The 9 case ids of the brief's table, in order, and #835's `foreground_commands` case.
+const DOCUMENTED_CASES: [&str; 10] = [
     "ps-of-missing-session-is-pane-not-found",
     "run-in-missing-session-is-pane-not-found",
     "run-adds-a-process",
@@ -23,6 +23,7 @@ const DOCUMENTED_CASES: [&str; 9] = [
     "stop-owned-of-missing-session-is-ok",
     "stop-owned-leaves-other-sessions",
     "ps-lists-only-its-session",
+    "foreground-commands-names-what-run-started",
 ];
 
 #[test]
@@ -60,6 +61,10 @@ enum Break {
     StopsEverySession,
     /// `ps` lists the processes of every session.
     PsListsEverySession,
+    /// `foreground_commands` names nothing, as a default that guesses would (#835).
+    ForegroundNamesNothing,
+    /// `foreground_commands` of a missing session answers an empty list.
+    ForegroundOfMissingIsEmpty,
 }
 
 struct Mutant {
@@ -145,6 +150,14 @@ impl HostPort for Mutant {
             _ => self.inner.ps(name),
         }
     }
+
+    fn foreground_commands(&self, name: &PaneName) -> Result<Vec<String>, PaneError> {
+        match self.broken {
+            Break::ForegroundNamesNothing => self.inner.foreground_commands(name).map(|_| vec![]),
+            Break::ForegroundOfMissingIsEmpty if !self.exists(name) => Ok(vec![]),
+            _ => self.inner.foreground_commands(name),
+        }
+    }
 }
 
 /// The suite must reject the run and name `case` among its failures.
@@ -222,4 +235,20 @@ fn a_host_whose_stop_owned_stops_every_session_fails() {
 #[test]
 fn a_host_whose_ps_lists_every_session_fails() {
     assert_suite_fails_on(Break::PsListsEverySession, "ps-lists-only-its-session");
+}
+
+#[test]
+fn a_host_whose_foreground_commands_names_nothing_fails() {
+    assert_suite_fails_on(
+        Break::ForegroundNamesNothing,
+        "foreground-commands-names-what-run-started",
+    );
+}
+
+#[test]
+fn a_host_whose_foreground_commands_of_a_missing_session_is_empty_fails() {
+    assert_suite_fails_on(
+        Break::ForegroundOfMissingIsEmpty,
+        "foreground-commands-names-what-run-started",
+    );
 }

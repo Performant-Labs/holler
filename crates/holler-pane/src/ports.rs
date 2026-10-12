@@ -166,6 +166,39 @@ impl Key {
 /// with [`PaneError::Timeout`]. An implementation is `Send + Sync`.
 ///
 /// Only the adapter converts a [`GridPos`] to Herdr's own order and base.
+///
+/// [`HerdrPort::observe_pane`] has no default (#835), so an implementation that leaves it
+/// out, a wrapper port included, does not compile:
+///
+/// ```compile_fail,E0046
+/// use holler_pane::{HerdrPane, HerdrPort, HerdrSnapshot, HerdrSpec, Key, PaneError, PaneId};
+///
+/// struct NoObservation;
+///
+/// impl HerdrPort for NoObservation {
+///     fn ensure_pane(&self, _: &HerdrSpec) -> Result<HerdrPane, PaneError> {
+///         Err(PaneError::NotImplemented)
+///     }
+///     fn send_text(&self, _: &PaneId, _: &str) -> Result<(), PaneError> {
+///         Ok(())
+///     }
+///     fn send_keys(&self, _: &PaneId, _: &[Key]) -> Result<(), PaneError> {
+///         Ok(())
+///     }
+///     fn read(&self, _: &PaneId, _: usize) -> Result<String, PaneError> {
+///         Ok(String::new())
+///     }
+///     fn close(&self, _: &PaneId) -> Result<(), PaneError> {
+///         Ok(())
+///     }
+///     fn snapshot(&self) -> Result<HerdrSnapshot, PaneError> {
+///         Ok(HerdrSnapshot { panes: Vec::new() })
+///     }
+///     fn version(&self) -> Result<String, PaneError> {
+///         Ok(String::new())
+///     }
+/// }
+/// ```
 pub trait HerdrPort: Send + Sync {
     /// Make a pane exist at `spec.grid` by issuing right/down splits, or fail
     /// loudly; never relocates a healthy pane. An occupied cell answers its pane and
@@ -256,6 +289,30 @@ impl PaneObservation {
 /// **Blocking.** Every method is synchronous. Call from `spawn_blocking` (or a
 /// thread) in async code. Every method returns within I5's bound (default 10 s) or
 /// with [`PaneError::Timeout`]. An implementation is `Send + Sync`.
+///
+/// No method has a default (#835), so an implementation that answers only the four methods
+/// that came before `foreground_commands`, a wrapper port included, does not compile:
+///
+/// ```compile_fail,E0046
+/// use holler_pane::{Argv, HostPort, PaneError, PaneName};
+///
+/// struct PidsOnly;
+///
+/// impl HostPort for PidsOnly {
+///     fn ensure_session(&self, _: &PaneName, _: &str) -> Result<(), PaneError> {
+///         Ok(())
+///     }
+///     fn run(&self, _: &PaneName, _: &str, _: &Argv) -> Result<(), PaneError> {
+///         Ok(())
+///     }
+///     fn stop_owned(&self, _: &PaneName) -> Result<(), PaneError> {
+///         Ok(())
+///     }
+///     fn ps(&self, _: &PaneName) -> Result<Vec<u32>, PaneError> {
+///         Ok(Vec::new())
+///     }
+/// }
+/// ```
 pub trait HostPort: Send + Sync {
     /// Make the tmux session `name` exist, working in `cwd`.
     fn ensure_session(&self, name: &PaneName, cwd: &str) -> Result<(), PaneError>;

@@ -670,6 +670,10 @@ impl HostPort for LinkedHost<'_> {
     fn ps(&self, name: &PaneName) -> Result<Vec<u32>, PaneError> {
         self.rig.host.ps(name)
     }
+
+    fn foreground_commands(&self, name: &PaneName) -> Result<Vec<String>, PaneError> {
+        self.rig.host.foreground_commands(name)
+    }
 }
 
 /// A `HarnessPort` over the rig's `FakeHarness` that runs a test's hook after a method.

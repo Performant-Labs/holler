@@ -710,6 +710,10 @@ impl HostPort for LinkedHost<'_> {
     fn ps(&self, name: &PaneName) -> Result<Vec<u32>, PaneError> {
         self.fakes.host.ps(name)
     }
+
+    fn foreground_commands(&self, name: &PaneName) -> Result<Vec<String>, PaneError> {
+        self.fakes.host.foreground_commands(name)
+    }
 }
 
 /// Run (and drop) the first hook armed for `on`. No lock is held while it runs.

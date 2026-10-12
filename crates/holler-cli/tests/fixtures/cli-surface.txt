@@ -167,6 +167,9 @@ roster | --profile demo
 pane import | --from /srv/state --herdr-session main
 pane import | --from /srv/state --herdr-session main --launcher /srv/state/launcher.toml --orchestrator demo-c1r1 --orchestrator demo-c2r1 --dry-run --format=json
 
+# #835
+pane import | --from /srv/state --herdr-session main --adopt-claude-code --dry-run
+
 # #662
 profile create | Demo
 profile create | "Some Profile" --from-current

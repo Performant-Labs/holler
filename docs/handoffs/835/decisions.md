@@ -168,3 +168,49 @@ Run handoff directory `docs/handoffs/835` · branch `issue-835-implementation` �
     `docs/research/claude-code-pane-spike.md` (§6, the contract changes, the decisions); `scripts/pane-restart:74-88`;
     `.aftersight/pipeline.config.json` (`cargo test --workspace` runs doctests); the T rules in `tester.md`.
   - Sizes: `wc -l` on every file the change would touch; all are under 900 (`launch/rig.rs` about 844 with #840 and #835).
+
+## T, author tests (RED): 2026-10-11T18:20-06:00 (MDT)
+
+- **Decided:** **RED valid** (`docs/handoffs/835/handoff-T-red.md`). The tests cover the issue, the amendment and rounds 2 and 3, following A's pass-3 notes for T.
+  - **The import's behaviour:** seven tests in a new `pane_verbs/import/harness.rs`:
+    - a pane running `claude` is left alone; a pane running `bash` and one running nothing are imported as OpenCode;
+    - the dry run shows the same finding and writes nothing;
+    - a pane left alone has one finding and blocks nothing;
+    - the switch is `usage` naming `not_implemented_message(831)`, with no port call;
+    - a failed `ps`, a failed read and a lost chain are each `harness-unreadable`, and a read that answers `pane-not-found` is `tmux-session-missing`.
+  - **#650's `a_failed_ps_is_observe_failed_and_the_pane_imports`** is removed from `join.rs` and replaced with its R2-6 opposite (A's W4).
+  - **The code table:** `import_test.rs` goes to 12 codes, with the two levels.
+  - **The rule:** a unit test in `claude_code_rule_test.rs`.
+  - **"Required":** two `compile_fail,E0046` doctests in `ports.rs`'s trait docs (A's W1).
+  - **The conformance suite:** host case 10 (R2-8), with two `Mutant` breaks.
+  - **The fake and the adapter:** `FakeHost` tests; the adapter's `METHODS` (818 to 820 lines) and a new `foreground_test.rs`.
+  - **The forwards:** a `WiredHost` conformance run and a line in `wired.rs` (A's W6).
+  - **The docs pins:** the ADRs and the `cli-surface.txt` line.
+  - **R3-3:** written as two regression pins in `pane_integration/observe.rs`, as A's W1 says. They pass before F starts. R3-2's tests are not copied.
+- **Decided:** **the names F must use**, which the brief left open:
+  - `HostOp::ForegroundCommands`;
+  - `holler_pane::pane::CLAUDE_CODE_COMMAND` and `is_claude_code_command(&str) -> bool`.
+- **Decided:** **T, not F, adds the forwards that live in test files.** These are `TestHerdr::observe_pane`, `TestHost`, the three `LinkedHost`s and the `Mutant`. A's note 6 assigned some of them to F, but F writes no test files.
+- **Decided:** **T edits two files under `src/`, and both are test content.**
+  - `holler-pane-testkit/src/conformance/host.rs`: case 10 of the conformance suite, which A's note 3 gives to T.
+  - `holler-pane/src/ports.rs`: two doctests, which A's W1 gives to T. The diff adds doc-comment lines only.
+- **Assumed:**
+  - **The listing format.** The adapter's listing carries `#{pane_dead}` beside `#{pane_current_command}`. `a_malformed_listing_is_unavailable` relies on it, following A's "strict parser beside `parse_ps` that drops dead panes". The other adapter tests do not depend on how the format is spelled, because the fake tmux fills in whatever format it is sent.
+  - **A real `env -- sleep 30` settles to `sleep`** within 2 s. A's pass-1 probe saw `sleep` for that shape.
+- **Hedged:**
+  - **The final RED is a compile RED.** The new required method is called from the test-kit lib, so nothing downstream builds until F adds it.
+  - **The assertion-level RED is shown in two steps** in the handoff:
+    1. the tests that use only today's API, run on unchanged code;
+    2. a temporary bare-API stub, reverted. The six production files were restored and checked with `sha256sum`, and touched so that cargo rebuilds them.
+  - **Under the stub,** 28 tests fail, each on an assertion and each in this story. Clippy with `-D warnings` is clean.
+- **Evidence:**
+  - Commands:
+    - `cargo test -p holler-pane --test import_test`;
+    - `cargo test -p holler-pane --doc ports`;
+    - `cargo test -p holler-cli --test cli_surface_test`;
+    - `cargo test -p holler-cli --test pane_verbs import::`;
+    - `cargo test -p holler-cli --test pane_integration observe::`;
+    - `cargo test --workspace --no-run`;
+    - `bash scripts/lint.sh` (exit 0);
+    - under the stub: `cargo test --workspace --no-fail-fast -- --skip roster_stays_accurate_under_concurrent_body_load` and `cargo clippy --workspace --all-targets -- -D warnings` (exit 0).
+  - The target dir was seeded from `../0832-review-fixes/target` with `scripts/seed-target-dir.sh`.

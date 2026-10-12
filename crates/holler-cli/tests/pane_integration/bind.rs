@@ -20,7 +20,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use holler_cli::output::Format;
 use holler_cli::pane::wiring::bind::{
-    tui_session, BindingHerdr, BindingHost, Bindings, LazyHerdr, WiredHarness,
+    tui_session, BindingHerdr, BindingHost, Bindings, LazyHerdr, WiredHarness, WiredHost,
 };
 use holler_pane::ports::Activity;
 use holler_pane::{
@@ -323,6 +323,15 @@ fn the_binding_host_passes_the_host_conformance_suite() {
     assert_eq!(result, Ok(()));
 }
 
+/// #835 (A's W6): the production host is `BindingHost` over `WiredHost` over the adapter, so
+/// `WiredHost` forwards every `HostPort` method too; the suite's `foreground_commands` case
+/// pins the method #835 adds.
+#[test]
+fn the_wired_host_passes_the_host_conformance_suite() {
+    let result = run_host_conformance(|| (WiredHost::new(Ok(Arc::new(FakeHost::new()))), ()));
+    assert_eq!(result, Ok(()));
+}
+
 // --- the resolver (D8, W-5) ---------------------------------------------------------------
 
 #[test]
@@ -441,6 +450,9 @@ impl HostPort for LinkedHost {
     }
     fn ps(&self, name: &PaneName) -> Result<Vec<u32>, PaneError> {
         self.host.ps(name)
+    }
+    fn foreground_commands(&self, name: &PaneName) -> Result<Vec<String>, PaneError> {
+        self.host.foreground_commands(name)
     }
 }
 

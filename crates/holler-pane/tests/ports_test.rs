@@ -16,7 +16,7 @@ use holler_pane::error::{class_of, ErrorClass};
 use holler_pane::ports::AGENT_UNSUPPORTED;
 use holler_pane::{
     next_generation, run_probe, Actor, AgentKey, Argv, Cursor, HarnessPort, HerdrPane, HerdrPort,
-    HerdrSnapshot, HerdrSpec, HostPort, Key, Pane, PaneError, PaneId, PaneName, PaneReply,
+    HerdrSnapshot, HerdrSpec, HostPort, Key, Pane, PaneError, PaneId, PaneName, PaneObservation, PaneReply,
     PaneStore, Ports, ProbeResult, Prober, Profile, ProfileEvent, ProfileLogEntry, ProfileName,
     ProfileScope, ProfileSpec, ProfileStore, ResolvedScope, ServeSpec, SpecEdit, SystemProber,
     Watch,
@@ -195,6 +195,10 @@ impl HerdrPort for TestHerdr {
             })
         }
     }
+    // Required since #835: the trait no longer answers it by default.
+    fn observe_pane(&self, _pane: &PaneId) -> Result<PaneObservation, PaneError> {
+        Ok(PaneObservation::default())
+    }
 }
 
 struct TestHost;
@@ -211,6 +215,9 @@ impl HostPort for TestHost {
     }
     fn ps(&self, _name: &PaneName) -> Result<Vec<u32>, PaneError> {
         Ok(vec![4242])
+    }
+    fn foreground_commands(&self, _name: &PaneName) -> Result<Vec<String>, PaneError> {
+        Ok(vec!["bash".to_string()])
     }
 }
 

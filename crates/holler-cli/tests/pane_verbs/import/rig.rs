@@ -20,7 +20,8 @@ use holler_pane::pane::{
     PaneProbe, PaneRole,
 };
 use holler_pane::{
-    AgentKey, Argv, EnvVarName, HerdrPane, Pane, PaneName, PaneStore, Ports, ProfileName,
+    AgentKey, Argv, EnvVarName, HerdrPane, HostPort, Pane, PaneName, PaneStore, Ports,
+    ProfileName,
 };
 use holler_pane_testkit::envelope::check_envelope;
 use holler_pane_testkit::harness::HarnessOp;
@@ -246,6 +247,22 @@ impl ImportRig {
         let ports = Ports {
             pane_store: store,
             herdr: &herdr,
+            ..self.world.ports()
+        };
+        let argv: Vec<&str> = argv.iter().map(String::as_str).collect();
+        run_verb_with(&argv, format, ports)
+    }
+
+    /// Run `argv` over the rig's ports with `host` in place of the fake host (#835: a host
+    /// whose chain is lost).
+    pub fn run_with_host(&self, host: &dyn HostPort, argv: &[String], format: Format) -> Outcome {
+        let herdr = ExtraHerdr {
+            herdr: &self.world.herdr,
+            extra: &self.extra_herdr,
+        };
+        let ports = Ports {
+            herdr: &herdr,
+            host,
             ..self.world.ports()
         };
         let argv: Vec<&str> = argv.iter().map(String::as_str).collect();
@@ -478,7 +495,10 @@ pub(crate) fn assert_only_allowed_reads(calls: &Calls) {
         .iter()
         .all(|op| matches!(op, HerdrOp::Snapshot | HerdrOp::Version));
     unexpected(herdr, "Herdr", format!("{:?}", calls.herdr));
-    let host = calls.host.iter().all(|op| matches!(op, HostOp::Ps));
+    let host = calls
+        .host
+        .iter()
+        .all(|op| matches!(op, HostOp::Ps | HostOp::ForegroundCommands));
     unexpected(host, "host", format!("{:?}", calls.host));
     let harness = calls
         .harness

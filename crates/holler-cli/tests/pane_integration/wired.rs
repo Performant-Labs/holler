@@ -108,6 +108,7 @@ fn assert_the_socket_is_usage_never_the_default_server(socket: &OsStr) {
         [
             usage_naming_the_socket("host.ensure_session", ports.host.ensure_session(&name, "/tmp")),
             usage_naming_the_socket("host.ps", ports.host.ps(&name)),
+            usage_naming_the_socket("host.foreground_commands", ports.host.foreground_commands(&name)),
             usage_naming_the_socket("harness.health", ports.harness.health(48199)),
             usage_naming_the_socket("harness.shown_session", ports.harness.shown_session(&pane)),
         ]

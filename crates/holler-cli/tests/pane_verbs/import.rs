@@ -5,8 +5,11 @@
 //! the files in a temporary `<state-root>`. The join and the observations are
 //! `import/join.rs`; the readers of the files and their secrets are `import/sources.rs`; the
 //! dry run, the real run's writes and their undo are `import/writes.rs`. The finding
-//! vocabulary's code table is `crates/holler-pane/tests/import_test.rs`.
+//! vocabulary's code table is `crates/holler-pane/tests/import_test.rs`. A pane whose tmux
+//! session runs Claude Code, and the `--adopt-claude-code` switch (#835), are
+//! `import/harness.rs`.
 
+mod harness;
 mod join;
 pub(crate) mod rig;
 mod seams;
@@ -110,5 +113,37 @@ fn adr_0021_lists_the_import_codes() {
     assert!(
         open_row.contains("`import-blocked`"),
         "the open-codes row lists `import-blocked`: {open_row}"
+    );
+}
+
+/// #835 (brief section 4, R2-2): the switch is in ADR-0021 section 9's import row and in ADR
+/// 0003's line for the verb, and ADR-0021 records the decision and the two new codes in a
+/// "Decided (#835)" paragraph.
+#[test]
+fn the_adrs_name_the_switch_and_the_two_new_codes() {
+    let adr = workspace_file("docs/adr/ADR-0021.md");
+    let row = adr
+        .lines()
+        .find(|l| l.starts_with("| `pane import`"))
+        .unwrap_or_else(|| panic!("ADR-0021 has the `pane import` row"));
+    assert!(
+        row.contains("--adopt-claude-code"),
+        "the import row names the switch: {row}"
+    );
+    assert!(
+        adr.contains("Decided (#835)"),
+        "ADR-0021 records #835's decision"
+    );
+    for code in ["harness-claude-code", "harness-unreadable"] {
+        assert!(adr.contains(&format!("`{code}`")), "ADR-0021 names `{code}`");
+    }
+    let adr_0003 = workspace_file("docs/adr/ADR-0003.md");
+    let verb = adr_0003
+        .lines()
+        .find(|l| l.starts_with("holler pane import "))
+        .unwrap_or_else(|| panic!("ADR 0003 has a line for `holler pane import`"));
+    assert!(
+        verb.contains("[--adopt-claude-code]"),
+        "ADR 0003's line names the switch: {verb}"
     );
 }
