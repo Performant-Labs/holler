@@ -340,3 +340,43 @@ Run handoff directory `docs/handoffs/803` Â· branch `issue-803-implementation` Â
     `wire_selftest` pass.
   - Each new test fails against the pre-rework file from `7a9dbec`, plus one bare-verb mutation (handoff-T-green.md,
     rework 1).
+
+## A, anti-duplication gate (Phase 8, rework 1): 2026-10-12T11:23-06:00 (MDT)
+
+- **Decided:**
+  - **PASS, with 0 blocks and 2 warns** (handoff-A-dup.md, section "rework 1").
+  - **The rework extends what exists:**
+    - `panes.sh` refuses a multi-line `layout` inside its own `layout` handling, and reads `workspace` from nowhere new
+      (W6).
+    - The user's pane verbs go through the unchanged door, `herdr.sh holler`, with no new script, verb or variable.
+    - `strip_slash` is byte-identical to `instance.sh`'s and listed in the header, which closes my warn 4.
+    - The new tests reuse `panes_803`'s and `skilltext.rs`'s helpers.
+  - **The warns:**
+    - **(1)** The skill and docs describe a bare close's CLI ordering in three places. The root is the CLI's deferred
+      configuration errors (`wiring.rs:148-160`, `close.rs:181-183`). That is a follow-up for O, not this story.
+    - **(2)** The door's one-sided socket guard (my first pass's warn 2) is carried forward. The user's own shell is now
+      a caller of the door.
+- **Corrected:** my first pass assumed that a bare `holler pane close` with only `HOLLER_STATE_DIR` "stops with `usage`
+  and touches nothing". S showed that was wrong, and this pass confirmed it in the code:
+  - configuration errors wait for their port's first use;
+  - `close_live` stops the host's processes before its first Herdr call.
+- **Assumed:** the recorded runs in F's and T's handoffs stand. I re-ran no build or test.
+- **Hedged:**
+  - **Finding 1 is a warn, not a block.** It is not a parallel path, the story cannot change Rust, and the text is right
+    for the CLI as it is.
+  - **Finding 2 stays a warn.** A leak needs an exported `WIZARD_*_SOCKET` of the other instance kind.
+- **Evidence:**
+  - **The diff:** `git diff f2ecfae..HEAD`, all 11 files, read in full. The diff of the frozen paths is empty (Rust
+    `src`, `holler-proto`, ADRs, `docs/protocol`, the six other `lib/*.sh`, `proof.rs`, `proof_fakes/`).
+  - **The handoffs:** `handoff-S.md`, `handoff-F-rework.md`, `handoff-T-green.md` (rework 1), and `decisions.md` from
+    my first entry on.
+  - **The scripts:**
+    - `herdr.sh`: the header, `base_env`, `holler_guard` and the `holler` verb;
+    - `panes.sh`: the layout state (196-232, 362-366, 448-480) and `env` (495-525);
+    - `instance.sh` 25-50.
+  - **The tests:** `skilltext.rs` 1-185, `skilltext_803.rs` 1-175 and the new tests, and the helper list of
+    `panes_803.rs`.
+  - **The CLI and its docs:** `wiring.rs` 135-175, `wiring/env.rs` 60-100, `close.rs` 155-195, `reset.rs`'s flags,
+    ADR-0021 344-370 and `pane-control.md` 118-134.
+  - **Checks:** a byte compare of the copied helpers across `lib/*.sh`, a grep for bare `holler pane|profile` mentions
+    in the skill, the docs and the README's wizard section, `wc -l`, and `git diff --check`.
