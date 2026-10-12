@@ -159,11 +159,18 @@ pub(super) fn rename_onto_a_deleted_name_continues_its_log(
 }
 
 /// Case 26: a rename that only changes the spelling (one slug) is one record, one
-/// `renamed` entry on the one log, and one put on the feed.
+/// `renamed` entry on the one log, and one put on the feed. The watch is opened at the head
+/// and read idle before the rename, as in case 19: a store may answer the first `next()`
+/// with the idle window that passed while `watch()` opened (the hub client does, #649).
 pub(super) fn rename_of_one_slug_is_one_put(store: &dyn ProfileStore) -> Result<(), String> {
     let who = actor()?;
     let p = put(store, &sample(ALPHA, &[C1])?, 0, &who)?;
     let mut watch = open(store, last_cursor(store)?)?;
+    expect_eq(
+        "the first next() of a watch at the head",
+        next_item(&mut watch)?,
+        None,
+    )?;
     let shouted = profile_name(ALPHA_SHOUTED)?;
     let renamed = succeeds(
         "rename(p, DEMO-ALPHA, 1)",
@@ -191,11 +198,17 @@ pub(super) fn rename_of_one_slug_is_one_put(store: &dyn ProfileStore) -> Result<
 }
 
 /// Case 27: the feed yields the deletion of the old name, then the put of the new one, at
-/// increasing cursors, and nothing else.
+/// increasing cursors, and nothing else. The watch is read idle before the rename, as in
+/// case 26.
 pub(super) fn rename_feed_is_deletion_then_put(store: &dyn ProfileStore) -> Result<(), String> {
     let who = actor()?;
     let p = put(store, &sample(ALPHA, &[C1])?, 0, &who)?;
     let mut watch = open(store, last_cursor(store)?)?;
+    expect_eq(
+        "the first next() of a watch at the head",
+        next_item(&mut watch)?,
+        None,
+    )?;
     let q = profile_name(BETA)?;
     let renamed = succeeds("rename(p, q, 1)", store.rename(&p.name, &q, 1, &who))?;
     let deleted = expect_change(&mut watch, &p.slug, None, "the rename (the old name)")?;

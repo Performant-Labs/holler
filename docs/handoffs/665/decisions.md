@@ -83,3 +83,22 @@
   - **Gates:** `cargo clippy --workspace --all-targets -- -D warnings` is clean, and `bash scripts/lint.sh` exits 0 (every touched file is under 600 lines).
   - **Formatting:** rustfmt was run per file on the leaf files F touched. Every touched module tree passes `rustfmt --check`, and no other file changed.
   - **Tests:** the targeted and workspace runs are in `handoff-F.md`. `evidence.md` holds the unchanged-code facts the diff relies on.
+
+## T (Phase 6, verify / GREEN): 2026-10-11 21:40 MDT
+- **Decided:**
+  - **Conformance cases 26 and 27 repaired (test-only), with F's option (a).** Each now reads the first `next()` of the watch opened at the head (expect `None`) before the rename, as case 19 does. F's diagnosis holds: `HubProfileStore::watch` makes its first long-poll inside `watch()` (#649 D4), and `expect_change` reads exactly one `next()`. Production code is unchanged.
+  - **PASS.** The suite is GREEN on all three conformance runners. Every Phase-4 test passes. Tier 1 and Tier 2 are clean.
+- **Assumed:**
+  - **The one workspace failure is the known flake #693, not a regression.** It is `remote_say_wait_and_hub_query_json_match_local_after_masking`, `updates` 1 vs 2.
+    - #693 is open with that exact signature.
+    - The test passed 4 of 5 runs in isolation.
+    - The diff touches no `say`, roster, body or circuit code.
+- **Hedged:**
+  - **The `unavailable` half of the file-error split is unpinned** (F's deviation 1). A permission test is unreliable as root. Recorded as advisory.
+- **Evidence:**
+  - **The workspace run:** `cargo test --workspace --no-fail-fast -- --skip roster_stays_accurate_under_concurrent_body_load`. 154 targets: 2,433 passed, 1 failed (#693), 32 ignored.
+  - **The gates:** `lint.sh`, `changelog-check.sh`, clippy `-D warnings` and `cargo machete` are all clean.
+  - **The mutation spot checks** were built in a separate target dir and reverted:
+    - with no deletion event in the fake's rename, case 27 fails;
+    - with no member moves in `Locked::moves`, H2, H3 and H5 fail.
+  - **Concurrency:** `profile_rename_faults_test` passed 5 runs of 5.
