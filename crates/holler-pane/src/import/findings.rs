@@ -1,13 +1,14 @@
 //! The findings of `holler pane import` (#650): what the import found about a pane directory,
 //! how much each weighs, and the one table of their codes.
 //!
-//! - [`ImportFinding`]: sixteen kinds, each with a stable kebab-case code that is also its
+//! - [`ImportFinding`]: eighteen kinds, each with a stable kebab-case code that is also its
 //!   JSON form ([`ImportFinding::code`] is the one source of both), copying
 //!   [`FindingKind`]'s pattern. A condition reconcile already names keeps reconcile's
 //!   spelling, taken from its one source and never retyped: `observe-failed`,
 //!   `tmux-session-missing`, `server-wedged` and `server-down` from [`FindingKind::code`],
-//!   and `session-not-found` and `command-not-argv` from the closed error codes. The other ten
-//!   are the import's own. A code is stable once merged (ADR-0021 section 9).
+//!   and `session-not-found` and `command-not-argv` from the closed error codes. The other
+//!   twelve are the import's own, two of them #835's (`harness-claude-code` and
+//!   `harness-unreadable`). A code is stable once merged (ADR-0021 section 9).
 //! - [`Level`]: a `problem` gives the pane no record and blocks a real run; a `warning` is
 //!   recorded without what it names; `skipped` and `info` block nothing.
 //! - [`Finding`]: one finding, about a pane or about no pane, with a one-line message.
@@ -66,6 +67,14 @@ pub enum ImportFinding {
     AlreadyImported,
     /// Its `sessions.toml` names a harness that is not OpenCode: no record, never blocking.
     HarnessNotOpencode,
+    /// Its tmux session runs Claude Code (#835): the pane is left alone, with no record and no
+    /// other finding, and blocks nothing. Its level is `info`, not `skipped` as
+    /// `harness-not-opencode`'s is: a switch adopts these panes once Claude Code can be driven
+    /// (#831), while nothing adopts a pane that is not OpenCode.
+    HarnessClaudeCode,
+    /// What the pane's tmux session runs could not be read (#835): a read failed, or the
+    /// pane's check did not finish. The pane is never recorded as OpenCode on a guess.
+    HarnessUnreadable,
     /// A file could not be read or parsed; the message names the file and a position only.
     SourceUnreadable,
     /// A file, a required variable or a launcher entry (or its port or cwd) is missing.
@@ -103,6 +112,8 @@ impl ImportFinding {
     pub const ALL: &'static [ImportFinding] = &[
         ImportFinding::AlreadyImported,
         ImportFinding::HarnessNotOpencode,
+        ImportFinding::HarnessClaudeCode,
+        ImportFinding::HarnessUnreadable,
         ImportFinding::SourceUnreadable,
         ImportFinding::SourceMissing,
         ImportFinding::PaneUnlabelled,
@@ -124,6 +135,8 @@ impl ImportFinding {
         match self {
             ImportFinding::AlreadyImported => "already-imported",
             ImportFinding::HarnessNotOpencode => "harness-not-opencode",
+            ImportFinding::HarnessClaudeCode => "harness-claude-code",
+            ImportFinding::HarnessUnreadable => "harness-unreadable",
             ImportFinding::SourceUnreadable => "source-unreadable",
             ImportFinding::SourceMissing => "source-missing",
             ImportFinding::PaneUnlabelled => "pane-unlabelled",
@@ -144,7 +157,8 @@ impl ImportFinding {
     /// How much a finding of this kind weighs (only a problem blocks).
     pub const fn level(self) -> Level {
         match self {
-            ImportFinding::SourceUnreadable
+            ImportFinding::HarnessUnreadable
+            | ImportFinding::SourceUnreadable
             | ImportFinding::SourceMissing
             | ImportFinding::PaneUnlabelled
             | ImportFinding::PaneLabelAmbiguous
@@ -158,6 +172,7 @@ impl ImportFinding {
             | ImportFinding::CommandNotArgv => Level::Warning,
             ImportFinding::HarnessNotOpencode => Level::Skipped,
             ImportFinding::AlreadyImported
+            | ImportFinding::HarnessClaudeCode
             | ImportFinding::NameCellDiffers
             | ImportFinding::IgnoredEntry => Level::Info,
         }

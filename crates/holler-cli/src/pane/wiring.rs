@@ -324,6 +324,10 @@ impl HostPort for Unwired {
     fn ps(&self, _name: &PaneName) -> Result<Vec<u32>, PaneError> {
         Err(PaneError::NotImplemented)
     }
+
+    fn foreground_commands(&self, _name: &PaneName) -> Result<Vec<String>, PaneError> {
+        Err(PaneError::NotImplemented)
+    }
 }
 
 impl HarnessPort for Unwired {

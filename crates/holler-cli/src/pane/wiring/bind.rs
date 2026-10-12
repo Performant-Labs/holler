@@ -14,10 +14,11 @@
 //!
 //! **Every method is forwarded (D31 W-4, D33).** Each wrapper here overrides every method of its
 //! port, the ones the port gives a default included: `HarnessPort`'s `send_prompt` and
-//! `session_activity`, and `HerdrPort`'s `observe_pane` and `observe_panes` (#832). A default
-//! never answers in place of the inner port, and `observe_panes` goes to the inner port's own
-//! `observe_panes`, so a list of panes stays one read of Herdr (ADR-0021 section 14), never one
-//! `observe_pane` per pane.
+//! `session_activity`, and `HerdrPort`'s `observe_panes` (#832). A default never answers in
+//! place of the inner port, and `observe_panes` goes to the inner port's own `observe_panes`, so
+//! a list of panes stays one read of Herdr (ADR-0021 section 14), never one `observe_pane` per
+//! pane. `HerdrPort::observe_pane` and `HostPort::foreground_commands` have no default (#835), so
+//! the compiler holds every wrapper to them.
 //!
 //! **Why the bindings (D8).** The launch engine attaches the TUI by the Herdr pane id before the
 //! pane's record exists (E34): `ensure_pane` (which knows the pane id), then `ensure_session` and
@@ -179,6 +180,10 @@ impl HostPort for BindingHost {
 
     fn ps(&self, name: &PaneName) -> Result<Vec<u32>, PaneError> {
         self.inner.ps(name)
+    }
+
+    fn foreground_commands(&self, name: &PaneName) -> Result<Vec<String>, PaneError> {
+        self.inner.foreground_commands(name)
     }
 }
 
@@ -347,6 +352,10 @@ impl HostPort for Wired<dyn HostPort> {
 
     fn ps(&self, name: &PaneName) -> Result<Vec<u32>, PaneError> {
         self.port()?.ps(name)
+    }
+
+    fn foreground_commands(&self, name: &PaneName) -> Result<Vec<String>, PaneError> {
+        self.port()?.foreground_commands(name)
     }
 }
 

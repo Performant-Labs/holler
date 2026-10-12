@@ -137,6 +137,27 @@ pub enum HarnessKind {
     Opencode,
 }
 
+/// The command name of a Claude Code CLI process, as tmux reports a pane's foreground
+/// process (`HostPort::foreground_commands`, #835). It is a process name, not the protocol's
+/// harness id: it is not taken from `holler_proto::vocab::HARNESS_IDS`, though the two are
+/// spelled alike.
+///
+/// The one place the name is written: [`is_claude_code_command`] is the one rule that uses it,
+/// for the import (#835) and the stories that adopt or show such a pane (#831, #832).
+pub const CLAUDE_CODE_COMMAND: &str = "claude";
+
+/// Whether `name`, a command name as `HostPort::foreground_commands` reports it, is Claude
+/// Code's: exactly [`CLAUDE_CODE_COMMAND`], with no case folding, trimming or path. No other
+/// name is classified.
+///
+/// The rule's limits (#835, ADR-0021 section 13): tmux names a pane's foreground process by
+/// its `argv[0]`, so a Claude Code pane whose `claude` has exited shows its shell, and one
+/// started under another `argv[0]` (a wrapper, or `node` running its script) is not
+/// recognised. It is a default for an import, not a proof of what a pane runs.
+pub fn is_claude_code_command(name: &str) -> bool {
+    name == CLAUDE_CODE_COMMAND
+}
+
 /// What the harness server last reported about its health.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

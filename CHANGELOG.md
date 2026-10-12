@@ -57,6 +57,20 @@ fills this file in at release time.
   refused (`import-blocked`, a new open code, exit 3) while a pane has a problem, a failed write is undone, and running it
   again writes nothing. It only reads Herdr, tmux and the harness, and changes no file. A file that cannot be read is
   named with a line number or position only, never its text. Nothing a user runs changes yet: #649 wires the adapters in.
+- Pane control, the import leaves Claude Code panes alone (epic [#633](https://github.com/Performant-Labs/holler/issues/633)):
+  `holler pane import` no longer records a pane whose tmux session runs Claude Code as an OpenCode pane
+  ([#835](https://github.com/Performant-Labs/holler/issues/835)). The launcher's files cannot tell the two apart, so the
+  import now reads the command name of each process in a pane's tmux session (a name only, never a command line), through
+  the new `HostPort::foreground_commands`. A pane with a process named exactly `claude` gets the new finding
+  `harness-claude-code` (info) and no record, and blocks nothing. Any other name, or no process, is imported as OpenCode, as
+  before. A pane whose tmux session cannot be read gets the new problem `harness-unreadable` and no record, so a real run is
+  refused (`import-blocked`); a failed `ps`, a warning until now, is that problem too. `--adopt-claude-code`, which will
+  adopt those panes, is refused (`usage`, exit 2) until the Claude Code harness
+  ([#831](https://github.com/Performant-Labs/holler/issues/831)) lands. The rule has limits: a Claude Code pane whose
+  `claude` has exited, or that was started under another program name, is taken for OpenCode, so read the dry run first.
+  As a follow-up to [#832](https://github.com/Performant-Labs/holler/issues/832), `HerdrPort::observe_pane` is now required
+  as well: a port wrapper that does not forward it no longer compiles, where it would have listed an unmanaged pane with no
+  working directory and no screen change.
 - Pane control, `holler profile apply NAME [--dry-run] [--take-over] [--herdr-session NAME]` (epic
   [#633](https://github.com/Performant-Labs/holler/issues/633)): converge the live panes on a profile, declaratively and
   idempotently, without ever killing a healthy pane. For each spec of the profile, in workspace, row and column order,

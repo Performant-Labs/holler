@@ -214,3 +214,49 @@ Run handoff directory `docs/handoffs/835` Â· branch `issue-835-implementation` Â
     - `bash scripts/lint.sh` (exit 0);
     - under the stub: `cargo test --workspace --no-fail-fast -- --skip roster_stays_accurate_under_concurrent_body_load` and `cargo clippy --workspace --all-targets -- -D warnings` (exit 0).
   - The target dir was seeded from `../0832-review-fixes/target` with `scripts/seed-target-dir.sh`.
+
+## F, implement against the RED: 2026-10-11T18:45-06:00 (MDT)
+
+- **Decided:** implemented the brief (issue, amendment, rounds 2 and 3) as A's pass-3 notes and T's RED name it
+  (`docs/handoffs/835/handoff-F.md`).
+  - **The port:** `HostPort::foreground_commands` is required; `HerdrPort::observe_pane` lost its default. Every
+    production implementation answers both: `TmuxHost`, `FakeHost`, `BindingHost`, `Wired<dyn HostPort>`, `Unwired`.
+  - **The adapter:** `list-panes -s -t =NAME: -F "#{pane_dead} #{pane_current_command}"`, parsed as strictly as `ps`'s
+    listing, errors through the one `refused()` path. No pid in the format: the method answers names only.
+  - **The rule:** `CLAUDE_CODE_COMMAND` and `is_claude_code_command` in `pane.rs`, the one comparison with `claude`.
+  - **The chain:** `ps`, then the names only once `ps` answered, then the server unless the session runs Claude Code. A
+    pane whose session could not be read is not known to be Claude Code, so its server is still asked, as under #650.
+  - **The findings:** `harness-claude-code` (info, the row `skipped`, one finding, no harness call) and
+    `harness-unreadable` (problem). The latter replaces `observe-failed` for a failed `ps` and for a lost chain; it is
+    not added beside it. The read's `pane-not-found` is `tmux-session-missing`.
+  - **The switch:** `--adopt-claude-code` is `usage` at the top of `Input::read`, before any file or port, with
+    `not_implemented_message(831)`.
+  - **The docs:** ADR-0021 sections 2, 9, 13 ("Decided (#835)"), 14 (in place) and the two closing lists; ADR 0003's line;
+    one CHANGELOG entry. Section 14's first bullet line and the CHANGELOG position were chosen so that the merge with
+    `origin/main` (#840 edited section 14; #652 and #840 edited the CHANGELOG) does not overlap.
+- **Assumed:**
+  - tmux reports `#{pane_current_command}` with no space in the name (it cuts the name at the first space), so a line is
+    `<0|1> <name>`. The real-tmux conformance run (case 10, tmux 3.7c, a private socket) agrees for `sleep`.
+  - Every caller of `foreground_commands` is the import; nothing else reads it yet (#831 and #832 may).
+- **Hedged:**
+  - **T's `spec_names()` in `import/harness.rs` reads the key `name`; a profile spec's key is `pane`.** Two tests fail
+    there after all their other assertions pass. Flagged for T, not edited. A temporary local fix (reverted, checked with
+    `sha256sum -c`) showed all seven `import::harness` tests pass.
+  - **This branch is behind `origin/main`** (`bda1069`: #840 and #652 merged after the base `2d217dd`). #840's two
+    sentences that name #835 as a caller of `unmanaged::is_unmanaged`, and #652's guide, are not on this branch: F could
+    not correct or extend them (A's W3; brief section 6). Listed in the handoff's Known issues for the merge.
+  - Calling the server of a pane whose session could not be read is a reading of A's note 4 ("health and the session list
+    only for a pane that is not `claude`"); S may prefer no server call for it. The pane is blocked either way.
+- **Evidence:**
+  - Commands: `cargo build --workspace --all-targets`; `cargo clippy --workspace --all-targets -- -D warnings` (exit 0);
+    `cargo test -p holler-pane --test import_test --test claude_code_rule_test --test ports_test`;
+    `cargo test -p holler-pane --doc ports`; `cargo test -p holler-pane-testkit`; `cargo test -p holler-adapter-host`;
+    `cargo test -p holler-adapter-host --test real_tmux_test -- --ignored the_tmux_host_passes_the_host_conformance_suite`
+    (a private scratch tmux; F's spot check of the parser on real output, not T's Tier 2);
+    `cargo test -p holler-cli --test pane_verbs import::`;
+    `cargo test --workspace --no-fail-fast -- --skip roster_stays_accurate_under_concurrent_body_load`;
+    `bash scripts/lint.sh` (exit 0); `bash scripts/changelog-check.sh` (ok); `rustfmt --check` on every changed source
+    file (clean but `wiring.rs:76`, a long line from #832 that F left alone); `git diff --check` (clean).
+  - Read: the brief, handoff-A (pass 3), handoff-T-red, this journal; every file listed in the handoff; `git show bda1069`
+    and `git diff 2d217dd origin/main` for the overlap.
+  - `docs/handoffs/835/evidence.md`: six facts in unchanged code.

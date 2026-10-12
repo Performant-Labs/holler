@@ -12,7 +12,7 @@
 //! **Frozen when #637 merges**, after which a change goes through the epic's
 //! amend-first rule. [`HerdrPort`], and the minimal data types it takes and returns,
 //! stay provisional until the spike #636 (Herdr) reports. [`HarnessPort`] is final:
-//! the spike #635 (OpenCode) confirmed it, and #642 built it. Two amendments since:
+//! the spike #635 (OpenCode) confirmed it, and #642 built it. Four amendments since:
 //!
 //! - #645's two default-armed seam methods, [`HarnessPort::send_prompt`] and
 //!   [`HarnessPort::session_activity`], whose defaults keep every impl that does not
@@ -21,7 +21,14 @@
 //!   [`ServeSpec`] and returns the server's argv, beside the required
 //!   [`HarnessPort::verify_serving`]; and [`HostPort::run`] takes the directory it starts
 //!   its program in. The host starts and stops a pane's processes, its harness server
-//!   among them.
+//!   among them;
+//! - #832's: [`HerdrPort::observe_pane`] and its batch form [`HerdrPort::observe_panes`],
+//!   what Herdr says about a pane that no record names;
+//! - #835's: the required [`HostPort::foreground_commands`], the command name of each pane
+//!   process of a tmux session (how the import tells a pane that runs Claude Code), and
+//!   [`HerdrPort::observe_pane`] lost its default. Both are required so that the compiler
+//!   finds every implementation, a wrapper port included: a default answers silently in place
+//!   of a port a wrapper forgot to forward.
 
 use std::time::Duration;
 
@@ -231,20 +238,20 @@ pub trait HerdrPort: Send + Sync {
     /// fresh and never stored; `pane list` and `pane get` show it for a pane no record
     /// names.
     ///
-    /// The default answers an empty [`PaneObservation`]: an implementation that cannot
-    /// tell says so with `None` fields and never guesses, so one that does not override
-    /// this keeps compiling and reports nothing. `pane-not-found` when Herdr has no such
-    /// pane.
-    fn observe_pane(&self, pane: &PaneId) -> Result<PaneObservation, PaneError> {
-        let _ = pane;
-        Ok(PaneObservation::default())
-    }
+    /// An implementation that cannot tell says so with `None` fields (an empty
+    /// [`PaneObservation`]) and never guesses. `pane-not-found` when Herdr has no such pane.
+    ///
+    /// Required since #835, with no default. The default answered an empty observation, so a
+    /// wrapper port that did not forward it reported nothing, silently, over the real wiring;
+    /// now the compiler finds every implementation.
+    fn observe_pane(&self, pane: &PaneId) -> Result<PaneObservation, PaneError>;
 
     /// [`HerdrPort::observe_pane`] for several panes at once: one observation for each of
     /// `panes`, in the same order, where a pane that cannot be observed (Herdr does not have
     /// it, or the call failed) reports an empty one. A list of many unmanaged panes costs one
     /// call to Herdr when the implementation can read them together; the default asks about
-    /// each pane in turn.
+    /// each pane in turn. A wrapper port overrides it to forward the batch, so that a list
+    /// stays one call to the port it wraps.
     fn observe_panes(&self, panes: &[PaneId]) -> Vec<PaneObservation> {
         panes
             .iter()
@@ -329,6 +336,16 @@ pub trait HostPort: Send + Sync {
 
     /// The process ids running in the session `name`.
     fn ps(&self, name: &PaneName) -> Result<Vec<u32>, PaneError>;
+
+    /// The command name of the foreground process of every live pane in the session `name`,
+    /// one per pane, in the order tmux lists them (#835): what tmux reports as
+    /// `#{pane_current_command}`, the basename of that process's `argv[0]`. Names only, never
+    /// an argv, a command line or a program's configuration (I7). A session with no pane
+    /// process answers an empty list; a missing session is `pane-not-found`, as `ps` answers.
+    ///
+    /// The import reads it to leave alone a pane that runs Claude Code
+    /// ([`crate::pane::is_claude_code_command`]).
+    fn foreground_commands(&self, name: &PaneName) -> Result<Vec<String>, PaneError>;
 }
 
 /// The harness server of a pane and its sessions (the adapter is

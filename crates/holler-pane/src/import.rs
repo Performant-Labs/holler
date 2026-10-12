@@ -13,13 +13,23 @@
 //! - `pane_store.get(name)` per pane: a pane that already has a record is `already-imported`,
 //!   skipped before any other check. A pane whose `sessions.toml` names a harness that is not
 //!   OpenCode is `harness-not-opencode`, skipped too.
-//! - For every other pane, at once (one scoped thread per pane): `host.ps`, `harness.health`
-//!   and `harness.list_sessions`.
+//! - For every other pane, at once (one scoped thread per pane): `host.ps`, then
+//!   `host.foreground_commands`, then `harness.health` and `harness.list_sessions`.
 //!
 //! Nothing else is called: it never starts, stops, types into or moves anything. The join of
 //! each pane is `assess`'s (the label finds the Herdr pane; the files and a healthy server's
 //! list give the session of record). The report lists the panes in name order, whatever order
 //! the threads finish in.
+//!
+//! **A pane that runs Claude Code is left alone (#835).** The old launcher's files cannot tell
+//! a Claude Code pane from an OpenCode one, so the import reads the command names of the
+//! pane's tmux session: one named exactly `claude` ([`crate::pane::is_claude_code_command`])
+//! leaves the pane alone, `harness-claude-code` (`info`, the row `skipped`), with no record,
+//! no other finding and no harness call. Any other name (`bash`, which the launcher's OpenCode
+//! panes show), or no process, is imported as OpenCode, as before, so a pane whose OpenCode
+//! server is merely down is still recorded and flagged `server-down`. A pane whose session
+//! could not be read, or whose chain did not finish, is never recorded on a guess:
+//! `harness-unreadable`, a problem.
 //!
 //! Only a [`Level::Problem`](findings::Level) blocks: a pane with one gets no record, and a
 //! real run that meets one is refused as [`IMPORT_BLOCKED`] ([`Plan::refusal`]).
@@ -70,7 +80,8 @@ pub enum Action {
     Record,
     /// It already has a record and is left as it is.
     AlreadyImported,
-    /// It is not an OpenCode pane and is left out.
+    /// It is not an OpenCode pane, or its tmux session runs Claude Code (#835), and is left
+    /// out.
     Skipped,
     /// It has a problem and gets no record.
     Blocked,
