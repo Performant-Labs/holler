@@ -212,7 +212,9 @@ fn ac11c_tmux_command_names_the_socket_and_drops_tmux_and_tmux_pane() {
         let command = tmux_command(&tmux, &call);
         assert_eq!(command.get_program(), OsStr::new("/opt/tmux"), "{socket:?}");
         let args: Vec<&OsStr> = command.get_args().collect();
+        // `-u` (#844): after the socket flag, before the call, on every socket.
         let mut expected: Vec<&OsStr> = flag.iter().map(OsStr::new).collect();
+        expected.push(OsStr::new("-u"));
         expected.extend(call.iter().map(OsStr::new));
         assert_eq!(args, expected, "{socket:?}");
         let envs: Vec<(&OsStr, Option<&OsStr>)> = command.get_envs().collect();
