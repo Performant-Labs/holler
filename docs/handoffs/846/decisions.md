@@ -28,3 +28,6 @@
 - **Assumed:** The workspace clippy failure at `token_load_test.rs:60` is pre-existing and unrelated (an untouched file, F reported the same); `cargo machete` is CI's, as it is not installed here and no dependency changed.
 - **Hedged:** Mutating `OnStart::Propagate` to swallow left every target green, so that mode is unpinned (as at the base). Per the brief no behaviour test was added; it is an advisory note for O. The two kill-side mutations do fail tests.
 - **Evidence:** `docs/handoffs/846/handoff-T-green.md`; mutation runs on `linked_host.rs`, reverted (`git status` clean).
+
+## A (Phase 7, anti-duplication)
+- verdict: PASS. One LinkedHost, one kill loop (OnStop::end), W-3/W-6/W-7 each folded once. Two warns: stale testkit doc, D2 issue number not filed.
