@@ -8,6 +8,11 @@ fills this file in at release time.
 ## [Unreleased]
 
 ### Enhancements
+- Pane control, the apply rehearsal (epic [#633](https://github.com/Performant-Labs/holler/issues/633)): an opt-in
+  scenario runs `holler profile apply` and the pane verbs around it on a scratch Herdr, tmux and OpenCode that it starts
+  itself ([#667](https://github.com/Performant-Labs/holler/issues/667);
+  `HOLLER_TEST_PANE_INTEGRATION=1 cargo test -p holler-cli --test profile_apply_scenario -- --ignored --test-threads=1`).
+  It shares the scratch set of #649, whose helpers moved into one place. Tests only: no behaviour change.
 - `holler --version` (and `-V`) names the commit the binary was built from, after the version: `holler 0.4.0 (bda1069)`
   ([#851](https://github.com/Performant-Labs/holler/issues/851)). Until now every build since a release printed the same
   `holler 0.4.0`, so a person could not tell which code they were running. The first two words are unchanged. The commit

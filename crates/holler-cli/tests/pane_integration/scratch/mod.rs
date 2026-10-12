@@ -18,7 +18,9 @@
 //!    OpenCode's root all lie inside it; the guard removes it after killing what it started.
 //! 4. *Refusal of real names* ([`binary_env`]): every name and path is checked before a verb
 //!    runs, and the binary runs with exactly the environment built here, nothing inherited (no
-//!    `HERDR_*`, no `TMUX`, no `TMUX_PANE`, no `HOLLER_*` the test did not set).
+//!    `HERDR_*`, no `TMUX`, no `TMUX_PANE`, no `HOLLER_*` the test did not set). A verb's
+//!    arguments may name no Herdr session but the scratch one ([`check_herdr_session_args`],
+//!    #667).
 //! 5. *OpenCode's environment* ([`tmux_server_env`], W-1): the test starts the private tmux
 //!    server itself, with exactly the rig's isolated pairs, before any verb runs. Under D7's
 //!    `ProcessEnv::Inherit` every OpenCode process inherits that server's environment, so no
@@ -43,6 +45,8 @@ pub mod rig;
 
 #[path = "../../../../holler-adapter-host/tests/real_tmux/mod.rs"]
 pub mod real_tmux;
+
+mod verbs;
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -111,6 +115,83 @@ pub fn check_pane_name(name: &str) -> Result<(), String> {
 /// Guard 3: `path` is a plain absolute path inside `base` (and short enough for a socket).
 pub fn check_inside(base: &Path, path: &Path) -> Result<(), String> {
     check_socket(base, path)
+}
+
+/// The one flag by which a verb's argument vector can name a Herdr session.
+pub const HERDR_SESSION_FLAG: &str = "--herdr-session";
+
+/// Guard 4, for an argument vector (#667, A's W-2): every `--herdr-session` in `args`, in
+/// either spelling clap accepts (`--herdr-session X` and `--herdr-session=X`), names exactly
+/// `session`, the scratch set's own. A flag with no value, an empty value or another flag in
+/// the value position is refused too. A vector with no such flag passes.
+pub fn check_herdr_session_args(args: &[&str], session: &str) -> Result<(), String> {
+    let refuse = |value: Option<&str>| {
+        Err(format!(
+            "refusing {HERDR_SESSION_FLAG} {value:?} in {args:?}: a scratch verb names only the \
+             scratch session {session:?}"
+        ))
+    };
+    let mut rest = args.iter();
+    while let Some(arg) = rest.next() {
+        let value = if *arg == HERDR_SESSION_FLAG {
+            rest.next().copied()
+        } else if let Some(value) = arg
+            .strip_prefix(HERDR_SESSION_FLAG)
+            .and_then(|tail| tail.strip_prefix('='))
+        {
+            Some(value)
+        } else {
+            continue;
+        };
+        if value != Some(session) {
+            return refuse(value);
+        }
+    }
+    Ok(())
+}
+
+/// The argument vector of a `pane launch` of `pane` into the Herdr session `session`, in
+/// `workspace` at `grid` on the fixed `port`, in the directory `project`, with the dead-end
+/// model and the scratch ceilings, then `extra`. Pure (#667, A's W-5): [`Scratch::launch`] and
+/// a spec-only launch build their flags here, and `guards.rs` pins the list.
+pub fn launch_args(
+    session: &str,
+    project: &str,
+    pane: &str,
+    workspace: &str,
+    grid: &str,
+    port: u16,
+    extra: &[&str],
+) -> Vec<String> {
+    let policy = format!("fixed:{port}");
+    let mut argv: Vec<String> = [
+        "pane",
+        "launch",
+        pane,
+        HERDR_SESSION_FLAG,
+        session,
+        "--project",
+        project,
+        "--workspace",
+        workspace,
+        "--grid",
+        grid,
+        "--model",
+        "deadend/none",
+        "--effort",
+        "medium",
+        "--ctx-soft",
+        "100000",
+        "--ctx-hard",
+        "150000",
+        "--port-policy",
+        &policy,
+    ]
+    .into_iter()
+    .map(str::to_owned)
+    .collect();
+    argv.extend(extra.iter().map(|&arg| arg.to_owned()));
+    argv
 }
 
 /// What the binary is pointed at. Every path lies inside `base`.
@@ -257,13 +338,16 @@ impl Scratch {
     }
 
     /// `holler <args>` with exactly [`binary_env`], in the scratch directory. The pane a
-    /// `pane` verb names (its first positional argument) is checked first (guard 2).
+    /// `pane` verb names (its first positional argument) is checked first (guard 2), and so is
+    /// every `--herdr-session` the arguments carry ([`check_herdr_session_args`]).
     pub fn holler(&self, args: &[&str]) -> Out {
         if let ["pane", _, pane, ..] = args {
             if !pane.starts_with("--") {
                 check_pane_name(pane).unwrap_or_else(|refusal| panic!("{refusal}"));
             }
         }
+        check_herdr_session_args(args, &self.settings.session)
+            .unwrap_or_else(|refusal| panic!("{refusal}"));
         let env = binary_env(&self.settings).unwrap_or_else(|refusal| panic!("{refusal}"));
         let mut command = Command::new(holler_bin());
         command
@@ -368,35 +452,23 @@ impl Scratch {
     /// `pane launch` of `pane` in `workspace` at `grid` on `port`, with the dead-end model,
     /// then the model guard on its server (D12, W-1 (c)).
     pub fn launch(&self, pane: &str, workspace: &str, grid: &str, port: u16, extra: &[&str]) -> Out {
-        let project = self.settings.oc_root.join("proj").display().to_string();
-        let policy = format!("fixed:{port}");
-        let mut argv = vec![
-            "pane",
-            "launch",
-            pane,
-            "--herdr-session",
-            self.herdr.session(),
-            "--project",
-            &project,
-            "--workspace",
-            workspace,
-            "--grid",
-            grid,
-            "--model",
-            "deadend/none",
-            "--effort",
-            "medium",
-            "--ctx-soft",
-            "100000",
-            "--ctx-hard",
-            "150000",
-            "--port-policy",
-            &policy,
-        ];
-        argv.extend_from_slice(extra);
-        let out = self.json(&argv, 0);
+        let argv = self.launch_argv(pane, workspace, grid, port, extra);
+        let out = self.json(&argv.iter().map(String::as_str).collect::<Vec<_>>(), 0);
         rig::no_model_can_be_reached(port);
         out
+    }
+
+    /// [`launch_args`] for this scratch set: its Herdr session and its project directory.
+    pub fn launch_argv(
+        &self,
+        pane: &str,
+        workspace: &str,
+        grid: &str,
+        port: u16,
+        extra: &[&str],
+    ) -> Vec<String> {
+        let project = self.settings.oc_root.join("proj").display().to_string();
+        launch_args(self.herdr.session(), &project, pane, workspace, grid, port, extra)
     }
 
     /// Stop the hub and start a new one on the same state dir.
