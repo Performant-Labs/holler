@@ -151,9 +151,11 @@ pub const CLAUDE_CODE_COMMAND: &str = "claude";
 /// name is classified.
 ///
 /// The rule's limits (#835, ADR-0021 section 13): tmux names a pane's foreground process by
-/// its `argv[0]`, so a Claude Code pane whose `claude` has exited shows its shell, and one
-/// started under another `argv[0]` (a wrapper, or `node` running its script) is not
-/// recognised. It is a default for an import, not a proof of what a pane runs.
+/// its `argv[0]`, so a Claude Code pane is not recognised when its `claude` has exited (the
+/// pane shows its shell), is not in the foreground (a wrapper script that stays in the
+/// foreground runs it, or it is suspended) or was started under another `argv[0]` (a wrapper
+/// that `exec`s it under another name, or `node` running its script). It is a default for an
+/// import, not a proof of what a pane runs.
 pub fn is_claude_code_command(name: &str) -> bool {
     name == CLAUDE_CODE_COMMAND
 }

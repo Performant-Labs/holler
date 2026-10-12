@@ -813,8 +813,8 @@ Deferred, so not documented here as existing; none of them is available:
 - the roster extension: the pane columns on `holler roster` (#648);
 - applying a pane's model, effort and environment to its harness server (#829);
 - DRIVEN following each pane's session of record, and `reset --first` through the hub's gate (#839);
-- adopting the Claude Code panes the import leaves alone (`--adopt-claude-code` is refused until the Claude Code
-  harness, #831, lands, and no story owns the adoption yet);
+- adopting the Claude Code panes the import leaves alone (#831, the Claude Code harness; until it lands,
+  `--adopt-claude-code` is refused);
 - the shared subprocess runner of the adapters and the probe (#696);
 - the real-adapter scenario for `profile apply` (#667);
 - recreating the Herdr workspace from the stored profiles (#666);

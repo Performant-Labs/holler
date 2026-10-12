@@ -735,3 +735,50 @@ Run handoff directory `docs/handoffs/835` Â· branch `issue-835-implementation` Â
     - `unwrap`, `expect`, `panic` and `#[allow` in the added lines;
     - private names, IPs, paths and secrets in the 3,303 added lines;
     - every place that states the read or its limits.
+
+## F, implement S's cycle-2 REWORK (cycle 4, text only): 2026-10-11T21:09-06:00 (MDT)
+
+- **Decided:** S's two items, in place, with no behaviour or test change (`docs/handoffs/835/handoff-F.md`, which replaces
+  cycle 3's at `e6d5fa0`). `archChanged: false`.
+  - **Item 1, #831 owns the adoption.** I confirmed it live first: #831's issue body says "This story owns the step that
+    adopts Claude Code panes that already exist." in its section "Adopting the fleet's existing Claude Code panes (added
+    2026-10-11, operator decision)".
+    - ADR-0021 "Deferred to named stories": the entry names #831 after the colon, by the operator's decision of 2026-10-11
+      recorded in #831's issue. The switch's refusal, the pane left alone and "changes that step or takes another route"
+      stay.
+    - The guide's section 12: "(#831, the Claude Code harness; until it lands, `--adopt-claude-code` is refused)". Still
+      two lines; the guide stays at 821.
+    - S's optional row, ADR-0021 section 13 "The switch": "#831 owns it (operator, 2026-10-11)", and "#831 changes that
+      step" for "its owner changes that step".
+    - No route is described as #831's, as S said.
+  - **Item 2, the same three limits in all five places.** ADR-0021 section 13's "The rule's limits" and
+    `is_claude_code_command`'s doc now name the three cases of the help, the guide and the CHANGELOG: the `claude` has
+    exited; it is not in the foreground (a wrapper script that stays in the foreground runs it, or it is suspended); it
+    was started under another `argv[0]` (a wrapper that `exec`s it under another name, or `node` running the script). R2-5's
+    two cases and its "a default, not a proof" sentence stay.
+  - **S's advisory 2, folded in:** `ports.rs`'s module doc says "the foreground process of each pane of a tmux session"
+    for "each pane process".
+- **Assumed:**
+  - `origin/main` stays at `d6ae539` until the phase commit (`git fetch` at 21:04 MDT: `HEAD..origin/main` is empty).
+  - The script's phase commit stages these four files with the handoff and this entry.
+- **Hedged:**
+  - **Decision 22 of ADR-0021's decisions list is left as it is.** It records #835's own decision and is still exact; the
+    ownership is recorded where S named it. If S wants it in the list too, it is one clause.
+  - **The ADR's limits explain why each "not in the foreground" example hides `claude`** (the script's interpreter is
+    named; the suspended job's shell has the foreground). The user docs do not, by design (the guide's line budget). Both
+    list the same three cases, which is S's rule.
+- **Evidence:**
+  - Live: `git fetch` (`origin/main` `d6ae539`, ancestor of `HEAD`); `gh issue view 831` (open, last updated 16:00 MDT;
+    the ownership section quoted above).
+  - Commands: `import::the_adrs_name_the_switch_and_the_two_new_codes` (1 passed); `docs_pane_control_test` (17 passed)
+    and `docs_cli_test` (3 passed); rustdoc `-D warnings -p holler-pane` (exit 0); `changelog-check` (ok);
+    `git diff --check` (clean); `cargo test -p holler-pane --doc` (7 passed, both `compile_fail,E0046` included); clippy
+    `-D warnings` on the workspace (exit 0); `lint.sh` (exit 0); CI's workspace step (exit 0, 155 groups, 2406 passed,
+    0 failed, 32 ignored).
+  - Greps: every "has exited", "suspended", "not recognised" and "under another" outside the handoffs (the five places,
+    each with three cases); every "no story owns", "owns the adoption", "its owner" (none left about #831); the tests
+    that read the guide or ADR-0021 (none pins section 12, "Deferred" or the limits).
+  - Read: `handoff-S.md` (cycle 2), `handoff-A-dup.md` (warn 1), the brief (R2-5, section 5), handoff-F cycle 3, this
+    journal; ADR-0021 `:950-989`, `:1082-1111`, `:1168-1175`; the guide `:697-708`, `:809-821`; `pane.rs:140-159`;
+    `ports.rs:1-31`, `:293-349`; `pane/import.rs:55-120`; `CHANGELOG.md:76-91`; `scripts/pane-restart:74-88`.
+  - Sizes: the guide 821 (unchanged), ADR-0021 1180, `pane.rs` 304, `ports.rs` 497.

@@ -24,11 +24,11 @@
 //!   among them;
 //! - #832's: [`HerdrPort::observe_pane`] and its batch form [`HerdrPort::observe_panes`],
 //!   what Herdr says about a pane that no record names;
-//! - #835's: the required [`HostPort::foreground_commands`], the command name of each pane
-//!   process of a tmux session (how the import tells a pane that runs Claude Code), and
-//!   [`HerdrPort::observe_pane`] lost its default. Both are required so that the compiler
-//!   finds every implementation, a wrapper port included: a default answers silently in place
-//!   of a port a wrapper forgot to forward.
+//! - #835's: the required [`HostPort::foreground_commands`], the command name of the
+//!   foreground process of each pane of a tmux session (how the import tells a pane that
+//!   runs Claude Code), and [`HerdrPort::observe_pane`] lost its default. Both are required
+//!   so that the compiler finds every implementation, a wrapper port included: a default
+//!   answers silently in place of a port a wrapper forgot to forward.
 
 use std::time::Duration;
 
