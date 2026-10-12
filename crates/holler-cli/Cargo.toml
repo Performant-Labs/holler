@@ -279,6 +279,14 @@ path = "tests/attach_cli_test.rs"
 name = "attach_mode_test"
 path = "tests/attach_mode_test.rs"
 
+# DRIVEN end to end (#839): a real hub, a real body in attach mode against the
+# same fake OpenCode server (`#[path]`-included), and pane records written
+# through the wiring's own client: `say --pane` reaches a real session of
+# record, the gate keys on the advertised id, and the rebind's bounds.
+[[test]]
+name = "driven_e2e_test"
+path = "tests/driven_e2e_test.rs"
+
 # Per-component `--debug noisy`/`--debug quiet` trace instrumentation (issue
 # #197): real hub + body + `stub-acp`, plus the same fake OpenCode HTTP
 # server (`#[path]`-included, mirroring `attach_mode_test`'s own convention)

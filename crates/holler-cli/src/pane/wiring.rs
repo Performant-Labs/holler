@@ -18,7 +18,10 @@
 //! - `SystemProber`, and `StoreScope` over the two clients as the `ProfileScope`. The scope logs
 //!   every profile write as `holler pane`: what a `--profile` edit of a pane verb writes, and
 //!   through it what `profile apply`'s creates and relaunches write (one actor; per-verb actors are
-//!   #825).
+//!   #825);
+//! - the hub port (#839, [`hub`]): a client of the hub's control socket, as the registries'
+//!   clients are, through which switch, reset and doctor read the hub's live attach bodies,
+//!   re-point one, and ask the hub's one prompt path. It needs only the hub.
 //!
 //! **What `connect` needs: the hub, and nothing else (D2).** It makes one `control/status`
 //! exchange, and any failure of it (no hub, an error, no answer within 5 s) is `unavailable`
@@ -66,6 +69,7 @@
 
 pub mod bind;
 pub mod env;
+pub mod hub;
 pub mod store;
 
 use std::path::PathBuf;
@@ -79,6 +83,7 @@ use holler_adapter_opencode::{
     OpenCodeConfig, OpenCodeHarness, ProcessEnv, Resolver, Timeouts, TmuxConfig,
     TmuxSocket as TuiSocket,
 };
+use holler_pane::hub::{Advertised, HubPort, PromptMode};
 use holler_pane::ports::{LoginStatus, SessionChoice};
 use holler_pane::{
     Actor, Argv, Cursor, HarnessEndpoint, HarnessPort, HarnessRouter, HerdrPane, HerdrPort,
@@ -114,6 +119,7 @@ pub struct Wiring {
     harness: RoutedHarness,
     scope: StoreScope,
     prober: SystemProber,
+    hub: hub::HubClient,
 }
 
 impl Wiring {
@@ -142,6 +148,7 @@ impl Wiring {
             harness: &self.harness,
             scope: &self.scope,
             prober: &self.prober,
+            hub: &self.hub,
         }
     }
 
@@ -177,6 +184,7 @@ impl Wiring {
             panes,
             profiles,
             prober: SystemProber,
+            hub: hub::HubClient::new(),
         }
     }
 }
@@ -464,5 +472,24 @@ impl ProfileScope for Unwired {
 impl Prober for Unwired {
     fn run_probe(&self, _argv: &Argv, _expect: &[String], _timeout: Duration) -> ProbeResult {
         ProbeResult::Error("not implemented".to_owned())
+    }
+}
+
+impl HubPort for Unwired {
+    fn advertised(&self) -> Result<Vec<Advertised>, PaneError> {
+        Err(PaneError::NotImplemented)
+    }
+
+    fn rebind(&self, _driver: &Advertised, _harness_session_id: &str) -> Result<String, PaneError> {
+        Err(PaneError::NotImplemented)
+    }
+
+    fn prompt(
+        &self,
+        _harness_session_id: &str,
+        _text: &str,
+        _mode: PromptMode,
+    ) -> Result<(), PaneError> {
+        Err(PaneError::NotImplemented)
     }
 }

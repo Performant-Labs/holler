@@ -29,6 +29,7 @@ use holler_pane_testkit::fixture::sample_pane;
 use holler_pane_testkit::harness::{FakeHarness, HarnessOp};
 use holler_pane_testkit::herdr::{FakeHerdr, HerdrOp};
 use holler_pane_testkit::host::{FakeHost, HostOp};
+use holler_pane_testkit::hub::{FakeHub, HubOp};
 use holler_pane_testkit::pane_store::{FakePaneStore, PaneStoreOp};
 use holler_pane_testkit::prober::FakeProber;
 use holler_pane_testkit::profile_scope::FakeProfileScope;
@@ -117,6 +118,8 @@ pub struct Rig {
     pub host: FakeHost,
     pub harness: FakeHarness,
     pub prober: FakeProber,
+    /// The hub's live attach bodies (#839): none until a test adds one with `with_body`.
+    pub hub: FakeHub,
     pub live: BTreeMap<&'static str, Live>,
 }
 
@@ -128,6 +131,7 @@ pub struct Calls {
     pub herdr: Vec<HerdrOp>,
     pub host: Vec<HostOp>,
     pub harness: Vec<HarnessOp>,
+    pub hub: Vec<HubOp>,
     pub probes: usize,
 }
 
@@ -154,6 +158,7 @@ impl Rig {
             FakeProfileStore::seeded(profiles_of(seeds, &live), &actor).expect("seed the profiles"),
         );
         let scope = FakeProfileScope::new(profiles.clone(), panes.clone(), actor);
+        let hub = FakeHub::new(panes.clone());
         Self {
             panes,
             profiles,
@@ -162,6 +167,7 @@ impl Rig {
             host,
             harness,
             prober: FakeProber::new(),
+            hub,
             live,
         }
     }
@@ -181,6 +187,7 @@ impl Rig {
             harness,
             scope: &self.scope,
             prober: &self.prober,
+            hub: &self.hub,
         }
     }
 
@@ -273,6 +280,7 @@ impl Rig {
             herdr: self.herdr.faults().calls(),
             host: self.host.faults().calls(),
             harness: self.harness.faults().calls(),
+            hub: self.hub.faults().calls(),
             probes: self.prober.calls().len(),
         }
     }
@@ -286,6 +294,7 @@ impl Rig {
             herdr: now.herdr[mark.herdr.len()..].to_vec(),
             host: now.host[mark.host.len()..].to_vec(),
             harness: now.harness[mark.harness.len()..].to_vec(),
+            hub: now.hub[mark.hub.len()..].to_vec(),
             probes: now.probes - mark.probes,
         }
     }

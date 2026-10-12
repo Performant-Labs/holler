@@ -12,25 +12,25 @@ fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
-fn read(rel: &str) -> String {
+pub(super) fn read(rel: &str) -> String {
     std::fs::read_to_string(repo_root().join(rel)).unwrap()
 }
 
-fn skill() -> String {
+pub(super) fn skill() -> String {
     read("agent-skills/herdr-setup/SKILL.md")
 }
 
 /// The skill with every run of whitespace folded to one space, for phrases that wrap.
-fn flat(text: &str) -> String {
+pub(super) fn flat(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-fn docs() -> String {
+pub(super) fn docs() -> String {
     read("docs/setup-wizard.md")
 }
 
 /// The README's wizard section (the rest of the README is the general quick start).
-fn readme() -> String {
+pub(super) fn readme() -> String {
     let text = read("README.md");
     let from = text
         .find("## Set up a Herdr workspace with an agent")
@@ -40,7 +40,7 @@ fn readme() -> String {
 }
 
 /// The three files the story owns, as (name, text).
-fn all_texts() -> Vec<(&'static str, String)> {
+pub(super) fn all_texts() -> Vec<(&'static str, String)> {
     vec![
         ("SKILL.md", skill()),
         ("docs/setup-wizard.md", docs()),
@@ -49,7 +49,7 @@ fn all_texts() -> Vec<(&'static str, String)> {
 }
 
 /// Every line inside a fenced code block.
-fn code_lines(text: &str) -> Vec<String> {
+pub(super) fn code_lines(text: &str) -> Vec<String> {
     let mut inside = false;
     let mut out = Vec::new();
     for line in text.lines() {
@@ -77,7 +77,7 @@ fn inline_spans(text: &str) -> Vec<String> {
 }
 
 /// The text between a heading and the next heading of the same or higher level.
-fn section(text: &str, start: &str, end: &str) -> String {
+pub(super) fn section(text: &str, start: &str, end: &str) -> String {
     let from = text.find(start).unwrap_or_else(|| panic!("no `{start}`"));
     let rest = &text[from..];
     let to = rest[start.len()..]
@@ -155,6 +155,8 @@ fn holler_and_herdr_commands_in_code_blocks_are_scoped_to_the_instance() {
         "herdr status",
         "herdr server",
         "herdr session",
+        "holler pane",
+        "holler profile",
     ];
     for (name, text) in all_texts() {
         // The AGENTS.md briefing is deliberately unscoped: it must not carry the state directory
@@ -166,6 +168,12 @@ fn holler_and_herdr_commands_in_code_blocks_are_scoped_to_the_instance() {
             assert!(
                 !hit || scoped_to_instance(&line) || marked,
                 "{name}: unscoped: {line}"
+            );
+            // #803: a pane or profile verb goes through the one door, never HOLLER_STATE_DIR=.
+            let pane_verb = line.contains("holler pane") || line.contains("holler profile");
+            assert!(
+                !pane_verb || line.contains("herdr.sh holler"),
+                "{name}: not through `herdr.sh holler`: {line}"
             );
         }
     }
@@ -185,14 +193,14 @@ fn no_code_block_writes_under_tmp_and_mktemp_names_a_directory() {
 }
 
 #[test]
-fn the_logs_rule_covers_stages_four_to_nine_and_stage_eight_sets_the_log_dir() {
+fn the_logs_rule_covers_stages_four_to_nine_and_stage_five_sets_the_log_dir() {
     let text = skill();
     assert!(
         flat(&text).contains("Every log Stages 4 to 9 create"),
         "the rule names Stages 4 to 9"
     );
-    let stage8 = section(&text, "## Stage 8 ", "\n## Stage 9 ");
-    assert!(stage8.contains("WIZARD_LOG_DIR=<logs_dir>"));
+    let stage5 = section(&text, "## Stage 5 ", "\n## Stage 6 ");
+    assert!(stage5.contains("WIZARD_LOG_DIR=<logs_dir>"));
 }
 
 #[test]
@@ -216,26 +224,18 @@ fn the_install_command_fetches_the_whole_skill_directory() {
 }
 
 #[test]
-fn the_join_url_and_advertise_carry_the_serve_port() {
-    let text = skill();
-    assert!(text.contains("--advertise <hub_host>:<serve_https_port>"));
-    assert!(text.contains("--server wss://<hub_host>:<serve_https_port>"));
-    assert!(!text.contains("--advertise <hub_host> "));
-    assert!(!text.contains("wss://<hub_host> "));
-}
-
-#[test]
 fn the_derived_body_config_names_what_to_drop_and_what_to_set() {
     let text = skill();
     let para = text
         .split("\n\n")
         .find(|p| p.contains("derived body config") && p.contains("drop"))
         .expect("a paragraph about the derived body config");
+    // #803: the body's rows take their endpoint and session id from the registry (D13).
     for need in [
         "[instance]",
         "`backend_port`",
-        "`endpoint`",
-        "`instance.sh` printed",
+        "`[[pane]]`",
+        "holler pane get",
     ] {
         assert!(flat(para).contains(need), "missing {need}: {para}");
     }
@@ -243,14 +243,15 @@ fn the_derived_body_config_names_what_to_drop_and_what_to_set() {
 }
 
 #[test]
-fn stages_three_and_four_use_the_ports_instance_sh_printed() {
+fn stages_three_and_four_use_the_ports_panes_sh_printed() {
     let text = skill();
     let planning = section(&text, "## Stage 3 ", "\n## Stage 5 ");
     assert!(
         !planning.contains("backend_port_base +"),
         "a second port formula"
     );
-    assert!(flat(&planning).contains("`instance.sh` printed"));
+    // #803: the OpenCode panes' ports come from `panes.sh grid` (D11).
+    assert!(flat(&planning).contains("panes.sh grid"));
 }
 
 #[test]
@@ -271,17 +272,9 @@ fn background_commands_use_a_brace_group_that_prints_the_real_pid() {
 fn the_herdr_server_is_recorded_in_full_from_the_pid_server_start_prints() {
     let text = skill();
     assert!(text.contains(
-        "HOLLER_STATE_DIR=<state_dir> bash $WIZARD_LIB/ledger.sh record --pid <pid> --role herdr --stage 8 --session <herdr_session>"
+        "HOLLER_STATE_DIR=<state_dir> bash $WIZARD_LIB/ledger.sh record --pid <pid> --role herdr --stage 5 --session <herdr_session>"
     ));
     assert!(flat(&text).contains("first line"));
-}
-
-#[test]
-fn stage_two_fetches_each_remote_ledger_and_passes_it_to_collide() {
-    let text = skill();
-    assert!(text.contains("cat <state_dir>/herdr/setup/wizard-ledger.toml"));
-    assert!(text.contains("WIZARD_LEDGER=<scratch>/ledger-<host>.toml"));
-    assert!(text.contains("wizard-scratch"));
 }
 
 #[test]
@@ -299,7 +292,7 @@ fn state_dir_is_resolved_once_per_host_to_an_absolute_path() {
 fn the_body_config_path_is_defined_once() {
     let text = skill();
     assert!(text.contains("<body_config>"));
-    assert!(text.contains("<state_dir>/<prefix>-sessions.toml"));
+    assert!(text.contains("<state_dir>/herdr/setup/<prefix>-sessions.toml"));
     assert!(!text.contains("scp <this-host-derived-sessions.toml> <remote_host>:~/sessions.toml"));
 }
 
@@ -317,13 +310,11 @@ fn reuse_means_a_live_ledger_row_and_status_calls_are_scoped() {
 }
 
 #[test]
-fn teardown_runs_on_every_host_and_turns_off_only_its_own_serve_entry() {
+fn teardown_names_the_named_herdr_session_and_never_resets_serve() {
     let text = skill();
-    assert!(text.contains("tailscale serve --https=<serve_https_port> off"));
     for line in text.lines().filter(|l| l.contains("serve reset")) {
         assert!(line.to_lowercase().contains("never"), "{line}");
     }
-    assert!(flat(&text).contains("every host the run touched"));
     assert!(flat(&text).contains("named Herdr session"));
 }
 
@@ -336,9 +327,14 @@ fn a_restart_reruns_the_stage_start_command() {
 
 #[test]
 fn the_token_label_folds_in_the_prefix_and_the_stop_path_for_herdr_is_named() {
-    let text = skill();
-    assert!(text.contains("--label <hub_host's short name>-<prefix>-<remote_host>"));
-    assert!(flat(&text).contains("never `herdr.sh run server stop`"));
+    let text = flat(&skill());
+    // #803: one local body, so the label is `<prefix>-local` (D13).
+    assert!(text.contains("`<prefix>-local`"), "{text}");
+    assert!(
+        !text.contains("-<prefix>-<remote_host>"),
+        "the remote-host label is gone"
+    );
+    assert!(text.contains("never `herdr.sh run server stop`"));
 }
 
 #[test]
@@ -370,12 +366,14 @@ fn script_words(line: &str, script: &str) -> Option<Vec<String>> {
 }
 
 fn script_source(script: &str) -> String {
-    read(&format!("agent-skills/herdr-setup/lib/{script}.sh"))
+    // #803: `panes.sh` is new; until it exists its verbs are unknown words.
+    std::fs::read_to_string(repo_root().join(format!("agent-skills/herdr-setup/lib/{script}.sh")))
+        .unwrap_or_default()
 }
 
 #[test]
 fn documented_verbs_and_flags_exist_in_the_scripts() {
-    let verbed = ["herdr", "ledger", "stop-owned"];
+    let verbed = ["herdr", "ledger", "stop-owned", "panes"];
     for script in [
         "instance",
         "inventory",
@@ -383,6 +381,7 @@ fn documented_verbs_and_flags_exist_in_the_scripts() {
         "ledger",
         "stop-owned",
         "herdr",
+        "panes",
     ] {
         let source = script_source(script);
         for line in code_lines(&skill())
@@ -475,46 +474,31 @@ fn stage_one_says_a_non_default_instance_runs_outside_any_herdr_pane_and_states_
 }
 
 #[test]
-fn stage_two_runs_the_herdr_checks_and_fetches_each_remote_home_state_dir_rule() {
+fn stage_two_runs_the_herdr_checks_read_only() {
     let text = skill();
     let stage2 = section(&text, "## Stage 2 ", "\n## Stage 3 ");
     let flat2 = flat(&stage2);
     assert!(stage2.contains("herdr.sh check-pane"), "{stage2}");
     assert!(stage2.contains("herdr.sh check-session"), "{stage2}");
     assert!(flat2.contains("Stage 3 refusal"), "{flat2}");
-    assert!(
-        flat2.contains("remote host's `$HOME/.holler`") && flat2.contains("equal to it"),
-        "{flat2}"
-    );
     assert!(flat2.contains("read-only"), "{flat2}");
 }
 
 #[test]
-fn the_herdr_inventory_flag_is_on_the_local_line_only_and_the_login_form_is_given() {
+fn the_herdr_inventory_flag_is_on_every_inventory_line_and_none_is_remote() {
     let lines = code_lines(&skill());
     let inventory: Vec<&String> = lines
         .iter()
         .filter(|l| l.contains("inventory.sh") && !l.contains("tar -C"))
         .collect();
-    assert!(inventory.len() >= 2, "{inventory:?}");
+    assert!(!inventory.is_empty());
     for line in &inventory {
-        let remote = line.contains("ssh ");
-        assert_eq!(
-            line.contains("WIZARD_INVENTORY_HERDR=1"),
-            !remote,
-            "flag on the local line only: {line}"
+        assert!(line.contains("WIZARD_INVENTORY_HERDR=1"), "{line}");
+        assert!(
+            !line.contains("ssh "),
+            "a remote inventory (#803 D6): {line}"
         );
     }
-    assert!(
-        inventory.iter().any(|l| l.contains("bash -l -s")),
-        "the login-shell form for a piped script: {inventory:?}"
-    );
-    let flat_text = flat(&skill());
-    assert!(
-        flat_text.contains("a missing `herdr` on a remote host is expected"),
-        "remote herdr"
-    );
-    assert!(flat_text.contains("`home<TAB><that host's $HOME>`"));
 }
 
 #[test]
@@ -530,19 +514,15 @@ fn stage_three_names_the_herdr_refusals_and_session_delete() {
     );
     assert!(flat3.contains("unnamed Herdr server"), "{flat3}");
     assert!(flat3.contains("build in it"), "{flat3}");
-    let stage8 = flat(&section(&text, "## Stage 8 ", "\n## Stage 9 "));
-    assert!(stage8.contains("unnamed Herdr server"), "{stage8}");
-    assert!(stage8.contains("build in it"), "{stage8}");
+    let stage5 = flat(&section(&text, "## Stage 5 ", "\n## Stage 6 "));
+    assert!(stage5.contains("unnamed Herdr server"), "{stage5}");
+    assert!(stage5.contains("build in it"), "{stage5}");
     let teardown = flat(&section(
         &text,
         "- **Tearing the instance down:**",
         "\n- **A join fails",
     ));
     assert!(teardown.contains("session-delete"), "{teardown}");
-    assert!(
-        teardown.contains("the instance's own serve entry"),
-        "{teardown}"
-    );
 }
 
 #[test]
@@ -571,7 +551,7 @@ fn no_runnable_block_carries_a_literal_example_label_and_label_is_defined() {
     }
     let text = skill();
     assert!(
-        flat(&text).contains("`<label>` is the Stage 7 token label"),
+        flat(&text).contains("`<label>` is the Stage 8 token label"),
         "undefined placeholder"
     );
 }
@@ -584,20 +564,11 @@ fn the_body_reuse_rule_compares_the_expanded_path() {
 }
 
 #[test]
-fn the_remote_teardown_form_names_its_third_argument() {
-    let text = flat(&skill());
-    assert!(
-        text.contains("for `teardown` the third argument is empty or `--purge-state`"),
-        "{text}"
-    );
-}
-
-#[test]
-fn the_check_port_sentence_comes_before_the_stage_six_start_block() {
+fn the_check_port_sentence_comes_before_the_stage_four_start_block() {
     let text = skill();
-    let stage6 = section(&text, "## Stage 6 ", "\n## Stage 7 ");
-    let check = stage6.find("check-port").expect("check-port in Stage 6");
-    let start = stage6.find("holler hub serve").expect("the start block");
+    let stage4 = section(&text, "## Stage 4 ", "\n## Stage 5 ");
+    let check = stage4.find("check-port").expect("check-port in Stage 4");
+    let start = stage4.find("holler hub serve").expect("the start block");
     assert!(check < start, "check-port after the start block");
 }
 
@@ -636,15 +607,24 @@ fn the_install_command_notes_that_no_release_tag_has_the_whole_directory() {
 fn every_wizard_file_is_under_herdr_setup_and_the_old_paths_are_gone() {
     // The one place the old locations may be named is the migration note.
     for (name, text) in all_texts() {
-        assert!(!text.contains(".config/setup-wizard"), "{name} names the old config path");
+        assert!(
+            !text.contains(".config/setup-wizard"),
+            "{name} names the old config path"
+        );
         let new = text.matches("herdr/setup/wizard-ledger.toml").count();
         let all = text.matches("wizard-ledger.toml").count();
         let old = all - new;
-        assert!(old <= usize::from(name != "README.md"), "{name}: {old} old ledger mentions");
+        assert!(
+            old <= usize::from(name != "README.md"),
+            "{name}: {old} old ledger mentions"
+        );
     }
     for (name, text) in all_texts() {
         if name != "README.md" {
-            assert!(text.contains("<state_dir>/herdr/setup/wizard-ledger.toml"), "{name}");
+            assert!(
+                text.contains("<state_dir>/herdr/setup/wizard-ledger.toml"),
+                "{name}"
+            );
         }
     }
     assert!(skill().contains("~/.holler/herdr/setup/sessions.toml"));

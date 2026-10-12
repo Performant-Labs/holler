@@ -50,6 +50,12 @@ Other checks in the same scenario:
   is logged with the `HOLLER_STATE_DIR` it carried; the test fails if one carried none or
   carried a directory that is not A's or B's. `holler roster` with B's directory shows only
   B's session, and with A's shows only A's.
+- **The panes are built through Holler** (#803, the `proof_803::` tests): with A up, B's panes
+  are built as the skill tells, `panes.sh` printing the plan and every line running through
+  `herdr.sh holler` against the fake `holler`, whose pane and profile verbs keep a registry
+  under B's state directory; every such call carries B's directory, A's snapshot is unchanged,
+  a rerun converges with every pane adopted, and the teardown lines leave no pane and no
+  profile.
 
 ## The fakes, and what that means
 

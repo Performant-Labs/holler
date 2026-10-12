@@ -326,20 +326,23 @@ fn pane_of<'a>(hub: &Value, panes: &'a [PaneRow]) -> Option<&'a PaneRow> {
 /// named like its label, never like its session, and the pane's session of record plays no part.
 ///
 /// This is the roster's relation between a row and a pane. The hub's prompt gate and `say --pane`
-/// relate them by the pane's session of record instead (ADR-0021 section 8); how the hub's DRIVEN
-/// session follows that session is #839's, and this is the one place to change if it moves.
+/// relate them by the harness session id the row's body advertises, which is the pane's session
+/// of record or its recorded DRIVEN (ADR-0021 section 11, #839); this display join is #648's.
 fn pane_label(name: &str) -> &str {
     name.split_once('/').map_or(name, |(label, _)| label)
 }
 
 /// Whether a pane's recorded SHOWN and DRIVEN are a mismatch: both known and different. One side
-/// absent is never one. It is the pair rule of `say --pane`'s refusal
-/// (`say_cmd::pane_state_refusal`, `pane-shown-driven-mismatch`) and of its twin at the hub's
-/// prompt gate (`holler-hub/src/circuit/dispatch.rs`, `pane_state_refusal`): keep the three equal
-/// (a test pins this one to `say_cmd::resolve_pane_target`). It is not `reconcile::shown_differs`,
-/// which compares SHOWN with the session of record.
+/// absent is never one. It is `holler_pane::gate::shown_driven_pair_differs` (#839), the one pair
+/// rule of the prompt gate's predicate, which `say --pane`'s refusal and the hub's gate share. It
+/// is not `reconcile::shown_differs`, which compares SHOWN with the session of record.
 fn shown_driven_mismatch(shown: Option<&str>, driven: Option<&str>) -> bool {
-    matches!((shown, driven), (Some(shown), Some(driven)) if shown != driven)
+    let pair = holler_pane::pane::LastObserved {
+        shown: shown.map(str::to_owned),
+        driven: driven.map(str::to_owned),
+        at: 0,
+    };
+    holler_pane::gate::shown_driven_pair_differs(&pair)
 }
 
 /// The panes the summary line names (scope item 3): each joined pane whose recorded pair is a

@@ -230,8 +230,8 @@ pub fn tmux_server_env(opencode: &Path, oc_root: &Path) -> Vec<(String, String)>
 }
 
 /// Guard 4: the binary's whole environment, built from nothing inherited, after every name
-/// and path is checked: OpenCode's scratch `HOME`/`XDG_*` (the rig's), the given `PATH`, a
-/// UTF-8 `LANG`, deterministic logging, and the wiring's settings. Fails closed on any refusal.
+/// and path is checked: OpenCode's scratch `HOME`/`XDG_*` (the rig's), the given `PATH`,
+/// deterministic logging, and the wiring's settings. Fails closed on any refusal.
 pub fn binary_env(settings: &Settings) -> Result<Vec<(String, String)>, String> {
     check_session(&settings.session)?;
     for path in [
@@ -250,11 +250,6 @@ pub fn binary_env(settings: &Settings) -> Result<Vec<(String, String)>, String> 
     env.extend(
         [
             ("PATH", settings.path.clone()),
-            // Chosen by the test, not inherited: without a UTF-8 locale the tmux client
-            // writes the tabs of the OpenCode adapter's `display-message` query as `_`, and
-            // every `attach_tui` then reads its pane as gone (tmux 3.7c; the adapter runs tmux
-            // without `-u`, a finding for #642's crate).
-            ("LANG", "C.UTF-8".to_owned()),
             ("HOLLER_STATE_DIR", text(&settings.state_dir)),
             ("HOLLER_DEBUG", "quiet".to_owned()),
             ("HOLLER_LOG_FORMAT", "json".to_owned()),

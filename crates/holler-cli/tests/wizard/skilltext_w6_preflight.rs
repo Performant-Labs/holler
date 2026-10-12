@@ -97,8 +97,6 @@ fn stage0_prints_one_vertical_status_table_with_every_row() {
         &[
             "| `herdr` installed",
             "| `holler` is the current single binary",
-            "| `tailscale` present and logged in",
-            "| `ssh` present",
             "| The skill's `lib/` scripts present",
             "| Driving agent not inside a Herdr pane",
             "| Herdr server state",
@@ -122,8 +120,6 @@ fn stage0_runs_the_machine_level_commands() {
             "command -v herdr",
             "holler --help",
             "holler hub status",
-            "tailscale status --self --json",
-            "command -v ssh",
             "herdr.sh check-pane",
             "herdr.sh run status",
             "herdr session list",
@@ -176,16 +172,7 @@ fn stage2_holds_no_machine_level_check() {
     ] {
         assert!(!s.contains(gone), "Stage 2 still holds `{gone}`");
     }
-    has_all(
-        "Stage 2",
-        &s,
-        &[
-            "Stage 0 already",
-            "check-session",
-            "orchestrator `dir`/`cmd`",
-            "model endpoint",
-        ],
-    );
+    has_all("Stage 2", &s, &["Stage 0 already", "check-session"]);
 }
 
 #[test]
@@ -210,7 +197,7 @@ fn no_sentence_calls_stage2_the_preflight_or_stage0_the_install() {
 #[test]
 fn the_intro_frontmatter_docs_and_readme_name_the_preflight_first() {
     let text = flat(SKILL);
-    let front = &text[..text.find("# Herdr: M local").unwrap()];
+    let front = &text[..text.find("# Herdr").unwrap()];
     assert!(front.contains("preflight"), "{front}");
     assert!(front.contains(NEW));
     assert!(!front.contains("asked as its own up-front yes/no"));

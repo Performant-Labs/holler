@@ -151,8 +151,8 @@ section for what is and isn't) and how `harness`/`command` map to a real subproc
 all): see [Attach convenience](#attach-convenience) below — `holler body attach init` writes the
 `[[session]]` row for you from a live OpenCode endpoint.
 
-For a single local orchestrator plus one or more remote attach-mode sessions in one terminal
-workspace, see [Set up a Herdr workspace with an agent](#set-up-a-herdr-workspace-with-an-agent).
+For a grid of OpenCode and Claude Code panes, one or more of them orchestrators, built and driven by
+Holler in one terminal workspace, see [Set up a Herdr workspace with an agent](#set-up-a-herdr-workspace-with-an-agent).
 
 ## The most practical way to run Holler
 
@@ -161,10 +161,10 @@ each one does. You shouldn't actually type that sequence by hand every day.
 
 The practical path: **let an agent drive it.** Author your `sessions.toml` once — [Set up a
 Herdr workspace with an agent](#set-up-a-herdr-workspace-with-an-agent) walks you through that
-the first time, with an agent asking only for what it genuinely can't know (your real remote
-hosts) rather than the whole schema cold. After that, every time you want the environment up —
-hub, bodies, sessions, a live terminal workspace to actually talk to them — give the agent that
-same prompt again. It checks what's already running before touching anything, reuses a working
+the first time, with an agent asking only for what it genuinely can't know (which project each
+pane works in, and which harness it runs) rather than the whole schema cold. After that, every time
+you want the environment up — the hub, the body, the panes, a live terminal workspace to actually
+talk to them — give the agent that same prompt again. It checks what's already running before touching anything, reuses a working
 setup instead of rebuilding it, and refuses to guess at infrastructure it doesn't recognize (see
 ["Never kill a process you didn't identify first"](docs/setup-wizard.md#never-kill-a-process-you-didnt-identify-first)).
 
@@ -174,17 +174,18 @@ environment, it doesn't replace talking to it.
 
 ## Documentation
 
-See [docs/README.md](docs/README.md) — the index. For testing: [the harness design](docs/testing.md) and [how to run the tests](docs/running-tests.md). For watching multiple attach-mode sessions in one local terminal workspace: [docs/setup-wizard.md](docs/setup-wizard.md).
+See [docs/README.md](docs/README.md) — the index. For testing: [the harness design](docs/testing.md) and [how to run the tests](docs/running-tests.md). For building a Herdr workspace of Holler registry panes with the setup wizard: [docs/setup-wizard.md](docs/setup-wizard.md).
 
 ## Set up a Herdr workspace with an agent
 
 To have an agent (Claude Code or similar) drive the [Herdr workspace setup](docs/setup-wizard.md)
-for you — one or more local orchestrator panes plus one live view pane per remote Holler
-session — give it the prompt below. The wizard is a Claude Code skill that ships in this repo in
+for you — a grid of OpenCode and Claude Code panes, one or more of them orchestrators, each a Holler
+registry pane that Holler's pane control launches and keeps in shape, with the hub and one body on
+the same machine — give it the prompt below. The wizard is a Claude Code skill that ships in this repo in
 [`agent-skills/herdr-setup/`](agent-skills/herdr-setup/): `SKILL.md` plus the helper scripts in its
 `lib/` directory, which its stages run, so the **whole directory** is needed. The prompt uses the skill
 if it's installed and otherwise fetches the directory from this repo, so it works on a machine that
-has never seen it. A local-only setup (orchestrators only, no remote sessions) is valid too: the session stages are skipped.
+has never seen it. A single orchestrator pane alone is a valid setup too.
 To install it permanently for Claude Code instead (one command, no checkout needed):
 
 ```bash
@@ -195,6 +196,10 @@ No release tag contains the whole skill directory yet, so the command fetches `m
 before ledgers existed is refused as foreign (the wizard stops only processes it recorded itself),
 see [Instance state and the ledger](docs/setup-wizard.md#instance-state-and-the-ledger).
 An optional `workspace = "<name>"` in the config names the Herdr workspace; the wizard suggests two words, such as `herald-relay`.
+A config written by the previous wizard (its orchestrator and session tables, and the sessions it ran
+on other machines) is refused by name, with a conversion shown to you as text; the wizard never
+rewrites it, and leaves a workspace that wizard built alone
+(see [If you built a workspace with the previous wizard](docs/setup-wizard.md#if-you-built-a-workspace-with-the-previous-wizard)).
 
 The prompt:
 
@@ -225,53 +230,49 @@ setup" flow: load my session config (an explicit path I give you, else ./session
 ~/.holler/herdr/setup/sessions.toml).
 
 If none of those exist, don't invent or auto-fill anything — the doc's own example config is
-illustrative, not a template to write verbatim; using it as-is would set up whatever
-infrastructure happens to be named in that example, not mine. But also don't just dump the
+illustrative, not a template to write verbatim; using it as-is would build panes in a directory
+and on a model that happen to be named in that example, not mine. But also don't just dump the
 whole schema on me and ask me to fill it in cold. Instead:
 
-1. Check whether `tailscale` is installed (`command -v tailscale`) before assuming it. If it
-   is, use `tailscale status --self --json`'s `.Self.DNSName` to read my own machine's
-   `hub_host` for me, and `tailscale status`'s peer list to let me pick a real remote host by
-   name instead of typing one blind. If it isn't installed or isn't logged in, just ask me for
-   `hub_host`/`remote_host`/`remote_tailnet_host` directly — that's a completely normal path,
-   and Tailscale isn't a requirement, only something to use for discovery when it's there.
-2. Offer me a short choice instead of an open-ended question: (A) just a local orchestrator,
-   nothing remote yet — propose `name = "r1c1"`, `dir` = my current directory, `cmd = "claude"`
-   as one confirm-or-override, and compute `layout` for me; (B) that plus one or more remote
-   attach-mode sessions — same orchestrator default, then ask only for what's genuinely
-   unknowable per session (how many, each one's name, its host, its OpenCode port); (C) let me
-   write or paste my own `sessions.toml` myself; (D) something more complex — a real interview,
-   but still using Tailscale for discovery per step 1 wherever it applies.
-3. Write the file from my answers and show it to me before treating it as the real config.
+1. Read this machine's OpenCode model from ~/.config/opencode/opencode.jsonc before proposing
+   one, and ask me only if it names none or several.
+2. Offer me a short choice instead of an open-ended question: one orchestrator pane alone —
+   propose `name = "r1c1"`, `dir` = my current directory, `role = "orchestrator"` as one
+   confirm-or-override plus its harness, and compute `layout` for me; or a grid of panes with an
+   orchestrator — ask how many, then each pane's directory and harness (OpenCode or Claude Code)
+   in one line per pane, and which one is the orchestrator; or let me write or paste my own
+   `sessions.toml` myself; or something more complex — a real interview.
+3. Ask the model, effort and context ceilings once, as one confirm-or-override.
+4. Write the file from my answers and show it to me before treating it as the real config.
 
 If I don't name the panes, name each one for its grid cell, row then column, like a spreadsheet
 cell: `r1c1`, `r1c2`, `r1c3`, `r1c4` for the first row, `r2c1` for the second row's first cell, and
-so on (for a bare pane count, two rows for more than four panes, up to 8 panes, and above 8 panes the squarest grid, then ask one confirm). An existing global
-`sessions.toml` skips this interview; to start clean I move it aside, and you never delete it.
+so on (for a bare pane count, two rows for more than four panes, up to 8 panes, and above 8 panes the squarest grid, then ask one confirm). No column may be
+taller than the column to its left. An existing global `sessions.toml` skips this interview; to
+start clean I move it aside, and you never delete it.
 
-Once a real config exists, run the config checks on every distinct remote host (SSH
-reachability, the `holler` binary, each session's model endpoint), present the concrete plan
-you're about to execute and get my explicit yes before changing anything, start the remote
-OpenCode backends, capture real session IDs, bring up the Holler hub locally, migrate a
-Holler-only derived body config and join/run one body per distinct remote host, build the Herdr
-panes per the config's `layout`, attach each session pane, and verify every session end to end
-with a real round-trip reply from it. If any stage fails, don't just stop and report it and
-leave things unfinished — tell me plainly what broke, ask me the one concrete question that
-unblocks it, and once I answer, keep going through the rest of the stages until the workspace is
-actually up and verified. Don't guess a fix silently; do push through to a finished result.
+Once a real config exists, run the config checks (each pane's directory and harness, the OpenCode
+model), present the concrete plan you're about to execute and get my explicit yes before changing
+anything, then bring up the Holler hub, start the Herdr server, create the profile with one
+spec-only launch per pane, build every pane with a dry run and one profile apply, join and run one
+body for the OpenCode panes, check the registry, and verify every OpenCode pane end to end with a
+real round-trip reply. Run every Holler pane and profile call through the skill's herdr.sh wrapper,
+never from your own shell, and never drive a Herdr pane directly. If any stage fails, don't just
+stop and report it and leave things unfinished — tell me plainly what broke, ask me the one
+concrete question that unblocks it, and once I answer, keep going through the rest of the stages
+until the workspace is actually up and verified. Don't guess a fix silently; do push through to a
+finished result.
 
-Before stopping, killing, or reusing ANY process, port, or credential on a remote host — never
-just to free up something a step needs or "to be able to run this" — identify what it actually
-is first (its config, its cwd, what it's connected to). If it wasn't started by this run, treat
-it as my real, unrelated production until I've explicitly confirmed, by name, that it's safe to
-touch. A real incident did exactly the unsafe version of this once already: killed a live
-production Holler session on the assumption a used port/process was fair game for a test.
+Before stopping, killing, or reusing ANY process, port, or credential — never just to free up
+something a step needs or "to be able to run this" — identify what it actually is first (its
+config, its cwd, what it's connected to). If it wasn't started by this run, treat it as my real,
+unrelated production until I've explicitly confirmed, by name, that it's safe to touch. A real
+incident did exactly the unsafe version of this once already: killed a live production Holler
+session on the assumption a used port/process was fair game for a test.
 
-When minting a token for a remote host, label it with this hub's own identity too, not just the
-remote host — `<this-hub>-<remote_host>` (e.g. `hub1-remote-a`), never a bare `<remote_host>-body`
-like `remote-a-body`. The same remote host can be paired to more than one hub; a generic label is
-how two real, unrelated pairings become indistinguishable later, which is exactly what almost
-caused the incident above.
+When minting the body's token, label it with this instance's own prefix, `<prefix>-local`, never a
+bare `body` or a host name: a generic label is how two real, unrelated pairings become
+indistinguishable later, which is exactly what almost caused the incident above.
 ```
 
 ## Where Holler fits
@@ -433,7 +434,7 @@ Every event carries a `component`, identifying which layer of a `say`/`interrupt
 | component     | Role | What it logs |
 | -------------- | ---- | ------------- |
 | `wire`         | hub, body | Every JSON-RPC message in/out over the hub↔body WebSocket circuit (`session/prompt`, `session/update`, `session/presence`, `circuit/ping`, …). |
-| `session`      | body | A session's mailbox enqueue/dequeue, its FIFO queue depth (`queue_enqueue`/`queue_dequeue`/`queue_full`), and its state transitions (`idle`/`working`/`input-required`). |
+| `session`      | body | A session's mailbox enqueue/dequeue, its FIFO queue depth (`queue_enqueue`/`queue_dequeue`/`queue_full`), its state transitions (`idle`/`working`/`input-required`), and a `rebind` with the `harness_session_id` an attach session was re-pointed to ([#839](https://github.com/Performant-Labs/holler/issues/839)). |
 | `acp`          | body | ACP v2 requests/notifications to/from a spawned harness child (redacted), plus the child's spawn attempt/success/failure and connection-closed ("child exit") events. |
 | `http_attach`  | body | Each HTTP call the attach driver makes to an externally-owned OpenCode session (method, path, status, elapsed ms), plus SSE connect/event/drop. |
 | `talklog`      | hub | Each line appended to a session's on-disk talklog (`prompt`/`update`/`done`). |

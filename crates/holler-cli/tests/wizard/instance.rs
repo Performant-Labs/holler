@@ -281,10 +281,7 @@ fn documented_defaults_match_the_skill_text() {
 
     // What the stages use today.
     assert!(skill.contains("holler hub serve --listen 127.0.0.1:<hub_port>"));
-    assert!(skill.contains("tailscale serve --bg --https <serve_https_port> <hub_port>"));
     assert!(skill.contains("(defaults 41807 and 443)"));
-    assert!(skill.contains("endpoint = \"http://127.0.0.1:47001\""));
-    assert!(skill.contains("endpoint = \"http://127.0.0.1:47002\""));
 
     // What the script resolves with no table.
     let out = validate(&config("", TAIL));
@@ -555,7 +552,11 @@ fn a_bad_workspace_is_refused_naming_the_key() {
     for raw in bad {
         let out = validate(&with_workspace(raw));
         assert_eq!(out.status.code(), Some(1), "{raw}");
-        assert!(stderr(&out).contains("workspace"), "{raw}: {}", stderr(&out));
+        assert!(
+            stderr(&out).contains("workspace"),
+            "{raw}: {}",
+            stderr(&out)
+        );
     }
 }
 

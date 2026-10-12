@@ -3,7 +3,10 @@
 //! mode 100755; a test writes only the data files it reads, never a script, so no `exec`
 //! can meet a file still open for writing ("Text file busy").
 //!
-//! The calls record (the brief's B-6): one line per call, each argument after `-S <path>`
+//! The fixture is called as `fake-tmux -S <path> -u <subcommand> [args...]` (#844) and exits 64
+//! without the `-u`, which it does not record.
+//!
+//! The calls record (the brief's B-6): one line per call, each argument after `-S <path> -u`
 //! followed by one U+001F, then `\n`. [`Fake::calls`] reads it back as token lists.
 
 use std::os::unix::fs::PermissionsExt;

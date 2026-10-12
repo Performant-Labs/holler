@@ -33,7 +33,11 @@ fn skill() -> String {
 }
 
 fn stage(n: u32) -> String {
-    between(&skill(), &format!("## Stage {n} "), &format!("## Stage {} ", n + 1))
+    between(
+        &skill(),
+        &format!("## Stage {n} "),
+        &format!("## Stage {} ", n + 1),
+    )
 }
 
 fn has_all(what: &str, text: &str, needles: &[&str]) {
@@ -49,40 +53,6 @@ fn readme_wizard() -> String {
 }
 
 #[test]
-fn hub_host_is_optional_for_zero_sessions_and_required_from_one() {
-    let s1 = stage(1);
-    has_all(
-        "Stage 1",
-        &s1,
-        &[
-            "`hub_host` is optional when N=0",
-            "required when N>=1",
-            "leave it out",
-            "a missing/empty `hub_host` when N>=1",
-        ],
-    );
-    assert!(
-        !s1.contains("top-level `hub_host` (non-empty), at least one"),
-        "Verify must not demand hub_host unconditionally"
-    );
-}
-
-#[test]
-fn stage_six_leaves_advertise_out_without_a_hub_host() {
-    let s6 = stage(6);
-    has_all(
-        "Stage 6",
-        &s6,
-        &[
-            "no `hub_host`",
-            "leave `--advertise` out",
-            "advertises nothing remote",
-            "--advertise <hub_host>:<serve_https_port>",
-        ],
-    );
-}
-
-#[test]
 fn scenarios_a_and_b_and_the_readme_propose_r1c1() {
     let s1 = stage(1);
     has_all("Stage 1", &s1, &["`name = \"r1c1\"`", "`[[\"r1c1\"]]`"]);
@@ -90,7 +60,10 @@ fn scenarios_a_and_b_and_the_readme_propose_r1c1() {
     assert!(!s1.contains("[[\"o1\"]]"), "Stage 1 still computes o1");
     let readme = flat("README.md");
     has_all("README", &readme, &["`name = \"r1c1\"`"]);
-    assert!(!readme.contains("name = \"o1\""), "README still proposes o1");
+    assert!(
+        !readme.contains("name = \"o1\""),
+        "README still proposes o1"
+    );
 }
 
 #[test]
@@ -136,11 +109,7 @@ fn the_readme_uses_a_placeholder_host_in_its_join_held_example() {
 #[test]
 fn stage_one_notes_the_first_run_directory_and_what_it_writes() {
     let s1 = stage(1);
-    has_all(
-        "Stage 1",
-        &s1,
-        &["mkdir -p ~/.holler/herdr/setup"],
-    );
+    has_all("Stage 1", &s1, &["mkdir -p ~/.holler/herdr/setup"]);
     assert!(
         skill().contains(
             "read-only except the scratch directory and the config file you write from the user's answers"

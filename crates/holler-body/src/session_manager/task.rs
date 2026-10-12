@@ -12,13 +12,14 @@ use std::time::{Duration, Instant};
 use futures_util::StreamExt;
 use holler_proto::docs::{LastTurn, PendingItem};
 use holler_proto::log::{Component, Direction as LogDirection, Event as LogEvent, Severity};
-use holler_proto::{log, SessionName, SessionState};
+use holler_proto::{log, Code, SessionName, SessionState, WireError};
 use tokio::sync::{broadcast, mpsc, oneshot};
 
 use super::driver::Driver;
 use super::{PromptOutcome, SessionCommand, QUEUE_CAP};
 use crate::acp_driver::{DriverEvent, DriverEventStream, DriverState, StopReason};
 use crate::config::{SessionConfig, SessionMode};
+use crate::http_attach_driver::HttpAttachDriver;
 
 /// How often a session whose initial attach failed retries
 /// [`crate::http_attach_driver::HttpAttachDriver::attach`] (issue #195's own
@@ -53,6 +54,11 @@ pub(super) struct SessionPresence {
     /// lazy, on the first prompt, not eager at task startup the way an
     /// attach is).
     pub(super) omitted_pending_attach: bool,
+    /// The harness session id this session advertises (issue #839): a mirror
+    /// of [`Inner`]'s `config.session_id`, the one source of the id the task
+    /// attaches to. [`super::SessionManager::start`] initialises it from the
+    /// configuration; after that only [`mirror_session_id`] writes it.
+    pub(super) harness_session_id: Option<String>,
 }
 
 impl Default for SessionPresence {
@@ -74,6 +80,7 @@ impl Default for SessionPresence {
             last_turn: None,
             pending: None,
             omitted_pending_attach: false,
+            harness_session_id: None,
         }
     }
 }
@@ -93,6 +100,9 @@ struct QueuedPrompt {
 /// publishes to the outside world is the sole exception, and that is a
 /// write-only relationship from this side).
 pub(super) struct Inner {
+    /// The one source of the id an attach-mode session attaches to (issue
+    /// #839): the initial attach, the 30 s retry and the re-attach after a
+    /// turn that ended in error all read it, and a `session/rebind` writes it.
     config: SessionConfig,
     name: SessionName,
     driver: Option<Driver>,
@@ -200,6 +210,7 @@ async fn dispatch_command(inner: &mut Inner, cmd: Option<SessionCommand>) -> boo
         Some(SessionCommand::Cancel { .. }) => "cancel",
         Some(SessionCommand::Answer { .. }) => "answer",
         Some(SessionCommand::Replace { .. }) => "replace",
+        Some(SessionCommand::Rebind { .. }) => "rebind",
     };
     log_session("mailbox_dequeue", &inner.name, vec![("command", kind.to_string())]);
     match cmd {
@@ -223,6 +234,10 @@ async fn dispatch_command(inner: &mut Inner, cmd: Option<SessionCommand>) -> boo
         }
         Some(SessionCommand::Replace { text, reply_tx, updates }) => {
             handle_replace(inner, text, reply_tx, updates).await;
+            true
+        }
+        Some(SessionCommand::Rebind { harness_session_id, deadline, reply_tx }) => {
+            let _ = reply_tx.send(rebind(inner, harness_session_id, deadline).await);
             true
         }
     }
@@ -259,6 +274,7 @@ async fn attempt_initial_attach(inner: &mut Inner) {
     match Driver::spawn_or_attach(&inner.config).await {
         Ok(driver) => {
             inner.driver = Some(driver);
+            mirror_session_id(inner);
             let mut p = inner.presence.lock().unwrap_or_else(PoisonError::into_inner);
             p.omitted_pending_attach = false;
             p.state = SessionState::Idle;
@@ -476,6 +492,64 @@ async fn cancel_current(inner: &Inner) -> Option<Result<StopReason, String>> {
     Some(driver.cancel().await.map_err(|e| e.message()))
 }
 
+/// The `data.reason` of a rebind that did not finish before its deadline: the
+/// old binding is kept (issue #839, ADR 0021 section 11 point 2).
+const REBIND_TIMED_OUT: &str = "endpoint did not answer";
+
+/// Re-point this attach-mode session to `harness_session_id` (`session/rebind`,
+/// issue #839), fail closed: nothing is written unless the new driver attached
+/// (the existence check of `attach`, never `session/new`) before `deadline`.
+/// Only then the new id goes to `config.session_id`, the one source every
+/// later attach reads, the driver is swapped in, presence advertises the id,
+/// and the old driver is shut down (which ends only this body's own loop).
+/// An attach still running at the deadline is dropped, never swapped in.
+async fn rebind(inner: &mut Inner, harness_session_id: String, deadline: tokio::time::Instant) -> Result<String, WireError> {
+    if tokio::time::Instant::now() >= deadline {
+        let message = "the rebind's deadline passed before the session took it";
+        return Err(WireError::new(Code::NotConnected, message, Some(REBIND_TIMED_OUT)));
+    }
+    if inner.config.mode != SessionMode::Attach {
+        let message = format!("{} is not an attach-mode session", inner.name.as_str());
+        return Err(WireError::new(Code::InvalidParams, message, Some("not an attach session")));
+    }
+    if let Some(busy) = rebind_busy(inner) {
+        return Err(busy);
+    }
+    let config = SessionConfig { session_id: Some(harness_session_id.clone()), ..inner.config.clone() };
+    let attached = match tokio::time::timeout_at(deadline, HttpAttachDriver::attach(&config)).await {
+        Ok(Ok(driver)) => driver,
+        Ok(Err(e)) => {
+            return Err(WireError::new(Code::InvalidParams, e.message(), Some("session not found on the endpoint")));
+        }
+        Err(_elapsed) => {
+            let message = format!("the endpoint did not answer for {harness_session_id} before the rebind's deadline");
+            return Err(WireError::new(Code::NotConnected, message, Some(REBIND_TIMED_OUT)));
+        }
+    };
+    inner.config.session_id = Some(harness_session_id.clone());
+    let old = inner.driver.replace(Driver::HttpAttach(attached));
+    mirror_session_id(inner);
+    inner.presence.lock().unwrap_or_else(PoisonError::into_inner).omitted_pending_attach = false;
+    log_session("rebind", &inner.name, vec![("harness_session_id", harness_session_id.clone())]);
+    notify_presence(inner);
+    if let Some(old) = old {
+        let _ = old.shutdown().await;
+    }
+    Ok(harness_session_id)
+}
+
+/// A rebind is refused while the session has a turn in flight, a queued prompt
+/// or a held question: the `-32009 session_busy` a prompt gets, with the same
+/// timing fields (issue #839).
+fn rebind_busy(inner: &Inner) -> Option<WireError> {
+    let state = inner.presence.lock().unwrap_or_else(PoisonError::into_inner).state;
+    if state == SessionState::Idle && inner.current_reply.is_none() && inner.queue.is_empty() {
+        return None;
+    }
+    let (state, turn_age_ms, last_update_age_ms) = busy_ages(inner, state);
+    Some(WireError::session_busy(state, turn_age_ms, last_update_age_ms))
+}
+
 /// Spawn (if needed) and dispatch one turn. Returns `false` (having already
 /// replied `PromptOutcome::Error` to `reply_tx`) when the driver could not
 /// even be brought up — never recurses into the queue itself (an `async fn`
@@ -491,7 +565,10 @@ async fn start_turn(
 ) -> bool {
     if inner.driver.is_none() {
         match Driver::spawn_or_attach(&inner.config).await {
-            Ok(d) => inner.driver = Some(d),
+            Ok(d) => {
+                inner.driver = Some(d);
+                mirror_session_id(inner);
+            }
             Err(e) => {
                 let _ = reply_tx.send(PromptOutcome::Error(e.message()));
                 return false;
@@ -703,3 +780,15 @@ async fn dispatch_next_queued(inner: &mut Inner) {
 fn notify_presence(inner: &Inner) {
     let _ = inner.presence_tx.send(inner.name.clone());
 }
+
+/// Mirror the one source of the attach id, `config.session_id`, into the
+/// presence snapshot (issue #839). The initial attach, the re-attach in
+/// [`start_turn`] and [`rebind`] call it, so presence never advertises an id
+/// other than the one the driver targets.
+fn mirror_session_id(inner: &Inner) {
+    let id = inner.config.session_id.clone();
+    inner.presence.lock().unwrap_or_else(PoisonError::into_inner).harness_session_id = id;
+}
+
+#[cfg(test)]
+mod rebind_tests;

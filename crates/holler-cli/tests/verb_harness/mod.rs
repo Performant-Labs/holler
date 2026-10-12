@@ -32,6 +32,7 @@ pub fn unwired_ports() -> Ports<'static> {
         harness: &UNWIRED,
         scope: &UNWIRED,
         prober: &UNWIRED,
+        hub: &UNWIRED,
     }
 }
 

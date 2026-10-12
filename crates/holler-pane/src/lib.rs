@@ -25,6 +25,8 @@
 //! - [`ports`] — [`PaneStore`], [`HerdrPort`], [`HostPort`], [`HarnessPort`] (and the
 //!   [`ServeSpec`] its server runs with), [`Prober`] and the [`Ports`] bundle a verb holds.
 //! - [`probe`] — [`ProbeResult`] and the [`run_probe`] stub.
+//! - [`hub`], [`driven`] and [`gate`] (#839) — the hub port, the join of a pane to the body
+//!   that drives it, and the prompt gate's one predicate and selection.
 //! - `profile_snapshot`, `profile_diff`, `tx_apply`, `tx_launch`, `tx_switch`,
 //!   `reconcile`, `findings`, `import` — empty stubs, declared here so that no two
 //!   stories edit this file; each names the story that fills it.
@@ -43,10 +45,13 @@
 
 pub mod argv;
 pub mod bounded;
+pub mod driven;
 pub mod error;
 pub mod findings;
+pub mod gate;
 pub mod generation;
 pub mod grid;
+pub mod hub;
 pub mod import;
 pub mod pane;
 pub mod ports;

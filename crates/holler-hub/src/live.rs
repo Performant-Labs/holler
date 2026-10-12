@@ -52,6 +52,9 @@ use tokio::sync::{oneshot, Mutex};
 
 use holler_proto::{Message, PingAck, SessionAd, WireError};
 
+// `Registry::resolve_prompt_target` and `LiveHandle::rebind` (#839).
+mod target;
+
 /// `component=registry` debug event: a circuit registered or removed
 /// (issue #197 — nothing in this module logged at all before this; the hub's
 /// live-body registry was completely silent).
@@ -117,6 +120,8 @@ pub enum LiveCommand {
         /// A one-time release grant id (issue #460), presented by `say
         /// --grant`; checked and consumed by the session hold.
         grant: Option<String>,
+        /// The `harness_session_id` the session advertises (#839): the pane gate's key.
+        harness_session: Option<String>,
         reply: oneshot::Sender<SayReply>,
     },
     /// Issue #192's `control/test_drop` test hook: forcibly end this
@@ -202,6 +207,8 @@ pub struct SayOpts {
     pub replace: bool,
     /// A one-time release grant id (issue #460).
     pub grant: Option<String>,
+    /// The `harness_session_id` the session advertises (#839), the pane gate's key.
+    pub harness_session: Option<String>,
 }
 
 /// How a [`LiveCommand::Say`] resolved.
@@ -246,6 +253,8 @@ pub struct LiveHandle {
     /// The last `session/presence` this body sent (issue #190's roster
     /// stand-in — see the module doc). `None` until its first presence.
     presence: Arc<Mutex<Option<Vec<SessionAd>>>>,
+    /// The connection's one forwarded request in flight (#839): see `forward`.
+    query_slot: Arc<Mutex<()>>,
 }
 
 impl LiveHandle {
@@ -287,15 +296,23 @@ impl LiveHandle {
                 None,
             )));
         }
-        let (reply_tx, reply_rx) = oneshot::channel();
-        if self
-            .tx
-            .send(LiveCommand::Query { method: method.to_string(), params, reply: reply_tx })
-            .is_err()
-        {
-            return None;
-        }
-        tokio::time::timeout(timeout, reply_rx).await.ok()?.ok()
+        self.forward(method, params, timeout).await
+    }
+
+    /// Send one request to the body and await its answer: the one place a forwarded request is
+    /// built (#839). The circuit keeps a single reply slot per connection and overwrites it, so
+    /// two forwards in flight at once would drop a reply; the connection's slot serialises
+    /// them. One `timeout` wraps the wait for the slot, the send and the wait for the answer,
+    /// so a caller's own bound includes its wait. `query` calls it after its allowlist, and
+    /// `rebind` (`live/target.rs`) with its literal method.
+    async fn forward(&self, method: &str, params: Option<Value>, timeout: std::time::Duration) -> Option<Result<Value, WireError>> {
+        let exchange = async {
+            let _slot = self.query_slot.lock().await;
+            let (reply_tx, reply_rx) = oneshot::channel();
+            self.tx.send(LiveCommand::Query { method: method.to_string(), params, reply: reply_tx }).ok()?;
+            reply_rx.await.ok()
+        };
+        tokio::time::timeout(timeout, exchange).await.ok().flatten()
     }
 
     /// Ask the live connection to run one `say` turn and await its outcome,
@@ -312,8 +329,8 @@ impl LiveHandle {
         timeout: std::time::Duration,
     ) -> Option<SayReply> {
         let (reply_tx, reply_rx) = oneshot::channel();
-        let SayOpts { queue, replace, grant } = opts;
-        let cmd = LiveCommand::Say { request_id, session, message, queue, replace, grant, reply: reply_tx };
+        let SayOpts { queue, replace, grant, harness_session } = opts;
+        let cmd = LiveCommand::Say { request_id, session, message, queue, replace, grant, harness_session, reply: reply_tx };
         if self.tx.send(cmd).is_err() {
             return None;
         }
@@ -512,6 +529,7 @@ impl Registry {
             cancel_tx,
             state: Arc::new(Mutex::new(LiveState::default())),
             presence: Arc::new(Mutex::new(None)),
+            query_slot: Arc::new(Mutex::new(())),
         };
         self.inner.lock().await.insert(client_id.to_string(), handle);
         // A fresh connection supersedes any stale offline snapshot for this
@@ -811,74 +829,4 @@ pub enum ResolveOutcome {
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable)] // #185
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn find_target_matches_by_token_id_client_id_or_label() {
-        let registry = Registry::new();
-        let (mut rx, mut cancel_rx, _seq) = registry.insert("cli_1", "kiwi", "tok_1", "127.0.0.1:1").await;
-
-        assert!(matches!(registry.find_target("tok_1").await, TargetLookup::Found(_)));
-        assert!(matches!(registry.find_target("cli_1").await, TargetLookup::Found(_)));
-        assert!(matches!(registry.find_target("kiwi").await, TargetLookup::Found(_)));
-        // A `label/session` form resolves by its label segment.
-        assert!(matches!(registry.find_target("kiwi/alpha").await, TargetLookup::Found(_)));
-        assert!(matches!(registry.find_target("nobody").await, TargetLookup::NotConnected));
-
-        rx.close();
-        cancel_rx.close();
-    }
-
-    /// Two live bodies sharing the same hostname (a collision issue #184's
-    /// uniqueness enforcement is what actually prevents in practice — this
-    /// registry alone does not) resolve as [`TargetLookup::Ambiguous`], not a
-    /// silently-picked one.
-    #[tokio::test]
-    async fn ambiguous_target_is_reported_as_ambiguous() {
-        let registry = Registry::new();
-        let (mut rx1, mut cancel_rx1, _seq) = registry.insert("cli_1", "kiwi", "tok_1", "127.0.0.1:1").await;
-        let (mut rx2, mut cancel_rx2, _seq) = registry.insert("cli_2", "kiwi", "tok_2", "127.0.0.1:1").await;
-
-        assert!(matches!(registry.find_target("kiwi").await, TargetLookup::Ambiguous));
-        // Each body's own token/client id still resolves unambiguously.
-        assert!(matches!(registry.find_target("tok_1").await, TargetLookup::Found(_)));
-
-        rx1.close();
-        rx2.close();
-        cancel_rx1.close();
-        cancel_rx2.close();
-    }
-
-    #[tokio::test]
-    async fn confirm_harness_and_advertised_are_independent() {
-        let registry = Registry::new();
-        let (mut rx, mut cancel_rx, _seq) = registry.insert("cli_1", "kiwi", "tok_1", "127.0.0.1:1").await;
-        registry.set_harnesses_advertised("cli_1", vec!["opencode".to_string(), "claude".to_string()]).await;
-        assert_eq!(registry.harnesses_known().await, vec!["claude".to_string(), "opencode".to_string()]);
-        assert!(registry.harnesses_confirmed().await.is_empty(), "advertising alone confirms nothing");
-
-        registry.confirm_harness("cli_1", "opencode").await;
-        let confirmed = registry.harnesses_confirmed().await;
-        assert_eq!(confirmed.len(), 1);
-        assert_eq!(confirmed[0].id, "opencode");
-        assert_eq!(confirmed[0].bodies, vec!["kiwi".to_string()]);
-
-        rx.close();
-        cancel_rx.close();
-    }
-
-    #[tokio::test]
-    async fn session_count_sums_across_bodies() {
-        let registry = Registry::new();
-        let (mut rx1, mut cancel_rx1, _seq) = registry.insert("cli_1", "kiwi", "tok_1", "127.0.0.1:1").await;
-        let (mut rx2, mut cancel_rx2, _seq) = registry.insert("cli_2", "mango", "tok_2", "127.0.0.1:1").await;
-        registry.set_session_count("cli_1", 2).await;
-        registry.set_session_count("cli_2", 3).await;
-        assert_eq!(registry.total_sessions().await, 5);
-        rx1.close();
-        rx2.close();
-        cancel_rx1.close();
-        cancel_rx2.close();
-    }
-}
+mod tests;

@@ -12,6 +12,11 @@
 //!   [`TmuxSocket::Default`] is tmux's own default socket, never the server an inherited
 //!   `$TMUX` names. The adapter never starts a tmux server (it only addresses sessions that
 //!   exist), so a tmux config file has no effect and there is no `-f`.
+//! - **UTF-8 output.** [`tmux_command`] passes `-u` on every call. Without a UTF-8 locale
+//!   in the process (`LANG=C`, `LC_ALL=C`, or none set) the tmux client prints each TAB of
+//!   [`QUERY_FORMAT`]'s reply as `_`, and [`parse_query`] would read a live pane as
+//!   [`Query::NoPane`] (#844). `-u` is a client flag: the process locale, the server and
+//!   the panes are left as they are.
 //! - **Exact targets.** tmux matches a bare target by prefix (`-t demo` reaches
 //!   `demo-c1r1`), so a session name reaches tmux only as [`exact_target`], `=<name>:`, the
 //!   form the host adapter (#641) calls `window_target`. tmux resolves it to the active pane
@@ -111,9 +116,10 @@ pub(crate) enum Refusal {
     Other,
 }
 
-/// A `Command` for one tmux call: `<tmux_bin> [-S <path> | -L <name>] <args...>`, with
+/// A `Command` for one tmux call: `<tmux_bin> [-S <path> | -L <name>] -u <args...>`, with
 /// `TMUX` and `TMUX_PANE` removed from the child's environment. Every tmux process the
-/// adapter starts is built here.
+/// adapter starts is built here. `-u` makes the client print UTF-8 whatever the process
+/// locale, so a TAB in [`QUERY_FORMAT`]'s reply stays a TAB (#844).
 pub fn tmux_command(tmux: &TmuxConfig, args: &[String]) -> Command {
     let mut command = Command::new(&tmux.tmux_bin);
     match &tmux.socket {
@@ -126,6 +132,7 @@ pub fn tmux_command(tmux: &TmuxConfig, args: &[String]) -> Command {
         }
     }
     command
+        .arg("-u")
         .args(args)
         .env_remove("TMUX")
         .env_remove("TMUX_PANE");
