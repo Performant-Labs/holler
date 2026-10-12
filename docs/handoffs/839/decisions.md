@@ -254,3 +254,51 @@ Run handoff directory `docs/handoffs/839` Â· branch `issue-839-implementation` Â
     - a whitespace-normalised comparison of ADR section 11 and of section 8's replacement with the brief;
     - `git merge-tree --write-tree HEAD origin/main`, for the ADR-0021 conflict;
     - `git log` for the commit trailers.
+
+## F, implement (Phase 6), S rework round 1: 2026-10-12, 10:30 MDT
+
+- **Decided:**
+  - **REWORK 2 (production) is fixed by one builder,** `holler_pane::hub::session_held(id, name, kind, reason)`,
+    placed beside the `SESSION_HELD` code it raises.
+    - The body session's name is printed with `findings::quoted`.
+    - `holler release <name>` is built only from a name that parses as `RoutableName`. Any other name, or no name,
+      gets the existing fallback sentence, which names the id and spells no name.
+    - D4's content is kept: the kind, the reason and the release.
+  - **`HubClient::held` and `FakeHub::judge` both call the builder.** The fake carried a copy of the same sentence
+    (A-dup's warn 2). Fixing only the real client would have left the fake spelling the name raw, and the verbs'
+    tests pinning words the real client no longer says.
+  - **`Advertised.name`'s doc now says its session part is untrusted,** as `harness_session_id`'s doc already said.
+  - **REWORK 1 (test-only) is T's.** The handoff states it in full under "Tests that look wrong (for T)", because a
+    production-kind S REWORK sets no T-green note (`coding-pipeline.workflow.mjs:5557-5560`).
+  - **`archChanged: false`.** This round adds one function to a module this story created. It changes no existing
+    signature (`HubPort` included), adds no module and leaves the dependency direction alone.
+- **Assumed:**
+  - **The production paths behind every REWORK 1 clause do what S's pins expect.** I traced each one in the code
+    (the table in `handoff-F.md`), but no test exercises them yet, because T writes those tests.
+  - **`kind` is never advertised text.** `classify` admits only `operator` and `default`, and `FakeHub` passes
+    `HoldKind::as_str()`. So `kind` is printed unquoted.
+- **Hedged:**
+  - **A trade-off of S's rule.** A name outside the grammar but harmless (such as `kiwi/OC`) no longer gets a
+    command, although `holler release kiwi/OC` would work: the CLI passes the text as it is, and the hub matches it
+    exactly. The fallback names the id. This is S's "only when it parses" rule, and a body that follows ADR 0005
+    never advertises such a name.
+  - **Nothing pins REWORK 2's own behaviour,** that is, a name that is not a routable name. I suggested a pin to T;
+    S did not require one.
+- **Evidence:**
+  - **Read:** `handoff-S.md`, `handoff-A-dup.md`, round 1's `handoff-F.md`, and the brief's D3, D4 and D7. Code:
+    `wiring/hub.rs`, the test kit's `hub.rs`, `holler-pane`'s `hub.rs`, `driven.rs` and `findings.rs`, `error.rs`'s
+    `excerpt`, `vocab.rs`, `roster.rs`'s `qualified_name`, `control_hold.rs`, `cli.rs`'s `Release`, and `hold_cmd.rs`.
+  - **Read for REWORK 1:** `say_cmd.rs`, `interrupt_cmd.rs`, `answer_cmd.rs`, `hub_refusal.rs`, `live/target.rs`,
+    `control_say.rs`, `control_server.rs`, `interrupt.rs`, `talk.rs`, `gate.rs`, and the body's `config.rs`.
+  - **Commands:**
+    - `cargo build` and `cargo clippy --workspace --all-targets -- -D warnings`;
+    - `rustfmt --check` on the three files;
+    - `scripts/lint.sh` and `scripts/changelog-check.sh origin/main`;
+    - `git diff --check`, and a scan of the added lines for personal names (none);
+    - `cargo test -p holler-pane` and `-p holler-pane-testkit`, `--test pane_verbs` (381) and
+      `--test driven_e2e_test` (11), all green;
+    - a scratch program outside the repo that prints `session_held` for valid, crafted and missing names;
+    - `cargo test --workspace --no-fail-fast -- --skip roster_stays_accurate_under_concurrent_body_load`: 2721
+      passed, 0 failed, 36 ignored, which is T-green's count. After a later doc-only edit, clippy, rustdoc with
+      broken intra-doc links denied, and the held tests were green again.
+  - **New facts** are in `evidence.md`, in its section for this round.

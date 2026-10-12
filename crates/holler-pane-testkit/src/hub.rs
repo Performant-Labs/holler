@@ -10,9 +10,10 @@
 //!   moves nothing on a fault; a hold does not refuse it (a hold stops prompts, not a rebind);
 //! - `prompt` judges in the hub's order: the id resolves to exactly one body (none or two:
 //!   `pane-not-driven`), then an operator or default hold on that body's session (`session-held`,
-//!   naming `holler release`), then the pane gate through `holler_pane::gate::first_refusal`, the
-//!   very selection the hub's `pane_gate` calls, over the records of the store the fake was built
-//!   over, then a held question or permission (`session-busy`; a busy body is admitted, because
+//!   in the real client's words, `holler_pane::hub::session_held`, naming `holler release`), then
+//!   the pane gate through `holler_pane::gate::first_refusal`, the very selection the hub's
+//!   `pane_gate` calls, over the records of the store the fake was built over, then a held
+//!   question or permission (`session-busy`; a busy body is admitted, because
 //!   the wiring sends `queue: true`). `Check` sends nothing; `Send` is logged in
 //!   [`FakeHub::prompts`]. [`FakeHub::fail_send`] refuses the next `Send` only, as a race between
 //!   the check and the send does;
@@ -29,7 +30,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use holler_pane::findings::quoted;
 use holler_pane::gate::{first_refusal, PromptRefusal};
-use holler_pane::hub::{Advertised, HubPort, PromptMode, PANE_NOT_DRIVEN, SESSION_HELD};
+use holler_pane::hub::{session_held, Advertised, HubPort, PromptMode, PANE_NOT_DRIVEN};
 use holler_pane::ports::Activity;
 use holler_pane::tx_switch::SESSION_BUSY;
 use holler_pane::PaneError;
@@ -211,15 +212,7 @@ impl FakeHub {
             (body, hold)
         };
         if let Some(kind) = hold {
-            return Err(PaneError::Refused {
-                code: SESSION_HELD,
-                message: format!(
-                    "{} is held ({} hold); run holler release {} to lift it",
-                    body.name,
-                    kind.as_str(),
-                    body.name
-                ),
-            });
+            return Err(session_held(id, Some(&body.name), kind.as_str(), None));
         }
         let records = self.panes.records();
         if let Some((pane, refusal)) = first_refusal(&records, id) {

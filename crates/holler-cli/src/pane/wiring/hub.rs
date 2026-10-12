@@ -23,7 +23,7 @@ use std::time::Duration;
 use holler_hub::control::{ControlCall, ControlError};
 use holler_pane::error::RefusalCode;
 use holler_pane::findings::quoted;
-use holler_pane::hub::{Advertised, HubPort, PromptMode, PANE_NOT_DRIVEN, SESSION_HELD};
+use holler_pane::hub::{session_held, Advertised, HubPort, PromptMode, PANE_NOT_DRIVEN};
 use holler_pane::ports::Activity;
 use holler_pane::tx_switch::SESSION_BUSY;
 use holler_pane::PaneError;
@@ -153,10 +153,7 @@ impl HubClient {
                 Ok(code) => PaneError::Refused { code, message },
                 Err(_) => hub_unavailable("control/say", &ControlError::Refused(refusal.clone())),
             },
-            HubRefusal::Held { kind, reason } => PaneError::Refused {
-                code: SESSION_HELD,
-                message: self.held(id, &kind, reason.as_deref()),
-            },
+            HubRefusal::Held { kind, reason } => self.held(id, &kind, reason.as_deref()),
             HubRefusal::Busy(message) => PaneError::Refused {
                 code: SESSION_BUSY,
                 message,
@@ -167,12 +164,11 @@ impl HubClient {
         }
     }
 
-    /// What `session-held` says (D4): the hold's kind and reason, and the `holler release` that
-    /// lifts it, naming the body session that advertises `id` (one more roster read, on this path
-    /// only; when it fails, the id names the session instead).
-    fn held(&self, id: &str, kind: &str, reason: Option<&str>) -> String {
-        let reason =
-            reason.map_or_else(String::new, |reason| format!(", reason {}", quoted(reason)));
+    /// The `session-held` refusal (D4) in `holler_pane::hub::session_held`'s words, naming the
+    /// body session that advertises `id`: one more roster read, on this path only, since the
+    /// refusal's data carries no hold key. When the read fails or no live body advertises `id`,
+    /// the message names the id instead.
+    fn held(&self, id: &str, kind: &str, reason: Option<&str>) -> PaneError {
         let name = self
             .advertised()
             .ok()
@@ -182,13 +178,7 @@ impl HubClient {
                     .find(|body| body.harness_session_id == id)
             })
             .map(|body| body.name);
-        match name {
-            Some(name) => format!("{name} is held ({kind} hold{reason}); run holler release {name} to lift it"),
-            None => format!(
-                "the session that advertises {} is held ({kind} hold{reason}); release it with holler release",
-                quoted(id)
-            ),
-        }
+        session_held(id, name.as_deref(), kind, reason)
     }
 }
 

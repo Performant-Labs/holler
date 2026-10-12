@@ -201,3 +201,67 @@ Added by T in Phase 7, excerpts copied from source by T.
   > ) -> Result<(), DriverError> {
   >     let base = endpoint.trim_end_matches('/');
   >     let v1_url = format!("{base}/session/{session_id}");
+
+## What F's rework of S's REWORK 2 (`session-held`) relies on
+
+Added by F on 2026-10-12 (the S rework round). Every source below is unchanged since the base `4e691d9`.
+
+- **Fact:** the body session name a `session-held` message names is advertised text. A roster row's name is the
+  token's label joined to the body's `SessionAd.name`, which is a plain wire `String` that the roster joins without
+  a check (`qualified_name`, quoted above under T-1). So the name needs `quoted`, and no command may spell it unchecked.
+  **Source:** `crates/holler-proto/src/docs.rs:519-521`
+  **Verbatim excerpt:**
+  > pub struct SessionAd {
+  >     /// The routable name (`<label>/<session>`).
+  >     pub name: String,
+  **Source:** `crates/holler-hub/src/roster.rs:855`
+  **Verbatim excerpt:**
+  > Some(label) if !label.is_empty() => format!("{label}/{}", s.name),
+
+- **Fact:** a `RoutableName` is `/`-separated segments of lowercase letters, digits and inner hyphens (the segment
+  check is quoted above, under T-6), so a name that parses holds no space, quote, control character or shell
+  metacharacter. `session_held` builds `holler release <name>` only from a parsed `RoutableName`.
+  **Source:** `crates/holler-proto/src/vocab.rs:123-128`
+  **Verbatim excerpt:**
+  > /// Parse a wire string into a `RoutableName`.
+  > ///
+  > /// Succeeds iff the string is one or more `/`-separated segments, each
+  > /// 1–32 chars, each matching the segment grammar (lowercase letters and
+  > /// digits; `-` only between word chars; no leading/trailing `-`).
+  > pub fn parse(s: &str) -> Result<Self, NameError> {
+
+- **Fact:** `findings::quoted` is `{:?}` quoting, cut to 64 characters: every control character and quote in the
+  name, the reason and the id is escaped, and an oversized value cannot make an oversized message.
+  **Source:** `crates/holler-pane/src/findings.rs:419-425`
+  **Verbatim excerpt:**
+  > /// `text` as one value in a message or a line of text output: `{:?}`-quoted, so every
+  > /// control character and quote in it is escaped, and cut to 64 characters
+  > /// (`error::excerpt`). The quoting of every untrusted value doctor prints, its text output
+  > /// included.
+  > pub fn quoted(text: &str) -> String {
+  >     excerpt(text)
+  > }
+  **Source:** `crates/holler-pane/src/error.rs:691-698`
+  **Verbatim excerpt:**
+  > pub(crate) fn excerpt(text: &str) -> String {
+  >     const LIMIT: usize = 64;
+  >     if text.chars().count() <= LIMIT {
+  >         return format!("{text:?}");
+  >     }
+  >     let head: String = text.chars().take(LIMIT).collect();
+  >     format!("{head:?}...")
+  > }
+
+- **Fact:** `holler release NAME` resolves NAME against the roster's row names, and an exact match wins. So the
+  command built from the row's own name lifts that row's hold.
+  **Source:** `crates/holler-hub/src/control_hold.rs:29-37`
+  **Verbatim excerpt:**
+  > /// `name` is `<label>/<session>` or a bare `<session>`; a bare name matches
+  > /// any known key ending in `/<name>`, an exact match always wins.
+  > fn resolve(name: &str, registry: &Registry, roster: &Roster) -> Resolved {
+  >     let mut known: Vec<String> = roster.rows(Some(true)).into_iter().map(|r| r.name).collect();
+  >     known.extend(registry.holds().keys());
+  >     known.sort();
+  >     known.dedup();
+  >     if known.iter().any(|k| k == name) {
+  >         return Resolved::Key(name.to_owned());

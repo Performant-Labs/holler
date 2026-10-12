@@ -13,8 +13,14 @@
 //! returns within I5's bound or with [`PaneError::Timeout`]. Every method is **required**, with
 //! no default, so the compiler finds every implementation, a wrapper included (#835's rule: a
 //! default answers silently for a wrapper that forgot to forward).
+//!
+//! [`session_held`] builds the port's `session-held` answer, so the real client and the test
+//! kit's `FakeHub` refuse a held session in the same words.
+
+use holler_proto::RoutableName;
 
 use crate::error::RefusalCode;
+use crate::findings::quoted;
 use crate::ports::Activity;
 use crate::PaneError;
 
@@ -27,13 +33,41 @@ pub const PANE_NOT_DRIVEN: RefusalCode = RefusalCode::from_static("pane-not-driv
 /// exit 3.
 pub const SESSION_HELD: RefusalCode = RefusalCode::from_static("session-held");
 
+/// The `session-held` refusal of a prompt to the session that advertises `id` (D4): the hold's
+/// `kind` (`operator` or `default`), the operator's `reason` when one was given, and the
+/// `holler release` that lifts the hold. `name` is the body session that advertises `id`
+/// (`label/session`), when the caller knows it. Advertised text is untrusted, so the name is
+/// printed with [`quoted`], and the command is built from it only when it parses as a
+/// [`RoutableName`], whose grammar has no space and no shell metacharacter. Otherwise, and with
+/// no name, the message names the session by `id` and spells no name.
+pub fn session_held(id: &str, name: Option<&str>, kind: &str, reason: Option<&str>) -> PaneError {
+    let reason = reason.map_or_else(String::new, |reason| format!(", reason {}", quoted(reason)));
+    let message = match name.and_then(|name| RoutableName::parse(name).ok()) {
+        Some(name) => format!(
+            "{} is held ({kind} hold{reason}); run holler release {name} to lift it",
+            quoted(name.as_str())
+        ),
+        None => format!(
+            "the session that advertises {} is held ({kind} hold{reason}); release it with \
+             holler release",
+            quoted(id)
+        ),
+    };
+    PaneError::Refused {
+        code: SESSION_HELD,
+        message,
+    }
+}
+
 /// One live attach-mode body session the hub knows, with the harness session it advertises.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Advertised {
     /// The token of the body's connection (the roster row's `token_id`): how a rebind names
     /// its body.
     pub token: String,
-    /// The session's routable name, `label/session`.
+    /// The session's routable name, `label/session`. Its session part is the body's advertised
+    /// text, which the hub does not check, so it is untrusted too: a message quotes it, and a
+    /// command is built from it only once it parses as a routable name ([`session_held`]).
     pub name: String,
     /// The harness session it drives. Advertised text, so untrusted: a message quotes it.
     pub harness_session_id: String,
