@@ -125,3 +125,22 @@ Append-only; every phase adds its own entry.
     - This change makes no call on its `--server` path. The hub moves `last_seen` only from a token's WebSocket circuit
       (`circuit.rs:834`), never from the control socket.
   - `docs/handoffs/648/evidence.md`: the unchanged-source facts the diff relies on.
+
+## T (Phase 7, verify / GREEN): 2026-10-11T20:46-06:00
+
+- **Decided:**
+  - GREEN: all 29 authored tests pass, and the full workspace suite is exit 0 (2402 passed, 0 failed, 32 ignored).
+  - Tier 2 is clean, so the verdict is PASS. No test was repaired: F flagged none, and none looked wrong.
+  - I appended a T section to `evidence.md` for the unchanged-source facts the tests rely on: the hub `Row`,
+    `check_envelope`'s class rule, `FakeProfileScope`'s order, the loopback-policy message and
+    `resolve_pane_target`.
+- **Assumed:**
+  - rustfmt is not a gate, because neither `ci.yml` nor `lint.sh` runs it. The two rustfmt diffs in `roster_cmd.rs`
+    are advisory.
+- **Hedged:**
+  - W-12's empty `--profile` line is still unpinned (advisory).
+  - The merge of `d6ae539` (#851) should re-run the docs tests and the changelog check.
+- **Evidence:**
+  - Seven mutations of `roster_cmd.rs`, all reverted, and each failed at least one test: the pair rule, the join, the
+    NotRead note, the profile scope, the profile filter, the policy code and the de-duplication.
+  - Tier 1 commands: see `handoff-T-green.md`.

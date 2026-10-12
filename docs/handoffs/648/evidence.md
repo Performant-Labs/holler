@@ -281,3 +281,100 @@ Source facts the change relies on that the diff does not show. Each excerpt is v
   >         serde_json::json!({ "rows": rows }),
   >     )
   > ```
+
+## T (Phase 7, verify)
+
+Source facts the tests (`roster_panes_test` and its modules) rely on that live in unchanged code. Excerpts copied by T
+from the worktree at `f7f2bcf`.
+
+- **Fact:** the fixture rows are the hub's own `Row`, serialized, so the reply the tests hand `render` has the real
+  reply's keys; a session hold is flattened into the row and absent when the session is not held (the tests seed no
+  hold, W-6).
+  **Source:** `crates/holler-hub/src/roster.rs:137-140`, `crates/holler-hub/src/roster.rs:174-179`
+  **Verbatim excerpt:**
+  > ```rust
+  > #[derive(Debug, Clone, PartialEq, serde::Serialize)]
+  > pub struct Row {
+  >     /// The routable name (`label/session`).
+  >     pub name: String,
+  > ```
+  > ```rust
+  >     /// The session hold (issue #442), filled in from the hub's hold registry
+  >     /// when the row is read by `control/roster`; the roster itself never holds
+  >     /// it (a hold belongs to the session name, not to a row). Flattened, and
+  >     /// absent for a session that is not held.
+  >     #[serde(flatten)]
+  >     pub hold: holler_proto::SessionHold,
+  > ```
+
+- **Fact:** `check_envelope` accepts a failure envelope only when the error code's class agrees with the exit code, so
+  `hubless::a_server_refused_by_policy_exits_3_in_every_mode` passing at exit 3 proves the roster's code is a
+  refusal-class code, and `with_no_hub_...` at exit 1 a failure-class one.
+  **Source:** `crates/holler-pane-testkit/src/envelope.rs:202-203`, `crates/holler-pane-testkit/src/envelope.rs:342-347`
+  **Verbatim excerpt:**
+  > ```rust
+  > pub fn check_envelope(stdout: &str, exit_code: i32) -> Result<Envelope, EnvelopeFault> {
+  >     check_exit_code(exit_code)?;
+  > ```
+  > ```rust
+  >     let [code, message] = exact_members(error, ERROR_KEYS, "error.")?;
+  >     let code = kebab_code(code)?;
+  >     let message = one_line_message(message)?;
+  >     if class_of(&code).exit_code() != exit_code {
+  >         return Err(EnvelopeFault::ClassDisagreesWithExit);
+  >     }
+  > ```
+
+- **Fact:** the test kit's `FakeProfileScope` resolves `--profile P` with no pane to P's members in name order, as the
+  real scope does, so the `profile::` tests' expected row order (the reply's, not the store's) discriminates.
+  **Source:** `crates/holler-pane-testkit/src/profile_scope.rs:105-115`, `crates/holler-pane-testkit/src/profile_scope.rs:191-200`
+  **Verbatim excerpt:**
+  > ```rust
+  >     /// Every pane whose record names `profile`, in name order.
+  >     fn members(&self, profile: &ProfileName) -> Result<Vec<Pane>, PaneError> {
+  >         let mut members: Vec<Pane> = self
+  >             .panes
+  >             .list()?
+  >             .into_iter()
+  >             .filter(|pane| belongs(pane, profile))
+  >             .collect();
+  >         members.sort_by(|x, y| x.name.cmp(&y.name));
+  >         Ok(members)
+  >     }
+  > ```
+  > ```rust
+  >     fn resolve(
+  >         &self,
+  >         profile: &ProfileName,
+  >         pane: Option<&PaneName>,
+  >     ) -> Result<ResolvedScope, PaneError> {
+  >         let stored = self.stored(profile)?;
+  >         let panes = match pane {
+  >             None => self.members(&stored.name)?,
+  >             Some(name) => vec![self.member(&stored.name, name)?],
+  >         };
+  > ```
+
+- **Fact:** the message the policy-refusal tests expect as "today's line" is the transport's fixed loopback rule.
+  **Source:** `crates/holler-body/src/server_address.rs:159-164`
+  **Verbatim excerpt:**
+  > ```rust
+  > pub fn loopback_only_check(addr: &ServerAddress) -> Option<&'static str> {
+  >     if addr.scheme == "ws" && !addr.is_loopback() {
+  >         Some(
+  >             "a plaintext ws:// to a non-loopback host is refused; \
+  >              off-loopback pairing is wss:// (ADR 0002)",
+  >         )
+  > ```
+
+- **Fact:** `registry::the_mismatch_rule_is_say_pane_targets_rule` compares the roster with `say --pane`'s public
+  resolver, which takes the ports, a pane name and an optional profile.
+  **Source:** `crates/holler-cli/src/say_cmd.rs:301-305`
+  **Verbatim excerpt:**
+  > ```rust
+  > pub fn resolve_pane_target(
+  >     ports: Ports<'_>,
+  >     pane: &str,
+  >     profile: Option<&str>,
+  > ) -> Result<String, PaneError> {
+  > ```
