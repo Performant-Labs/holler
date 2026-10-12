@@ -631,7 +631,12 @@ fn user_turn(port: u16, session: &str, agent: &str) {
         "noReply": true,
         "parts": [{ "type": "text", "text": "hello" }],
     });
-    let reply = raw(port, "POST", &format!("/session/{session}/message"), Some(&body));
+    let reply = raw(
+        port,
+        "POST",
+        &format!("/session/{session}/message"),
+        Some(&body),
+    );
     assert_eq!(reply.status, 200, "POST /session/:id/message as {agent}");
 }
 
@@ -670,9 +675,13 @@ fn ac647_agent_view_reads_a_real_servers_turns_and_agents() {
             (key("orchestrator"), Some(true)),
         ]
     );
-    assert_eq!(view.dispatchers, vec![AgentKey::parse("orchestrator").unwrap()]);
     assert_eq!(
-        rig.harness.agent_view(&HarnessEndpoint::Port(p0), UNKNOWN, 3),
+        view.dispatchers,
+        vec![AgentKey::parse("orchestrator").unwrap()]
+    );
+    assert_eq!(
+        rig.harness
+            .agent_view(&HarnessEndpoint::Port(p0), UNKNOWN, 3),
         Err(PaneError::SessionNotFound {
             what: UNKNOWN.to_owned()
         })

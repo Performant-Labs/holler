@@ -1,10 +1,29 @@
 # Handoff-T-green: Phase 6 - #647 part 2: `unattached` and `agent-cannot-dispatch`
 
-**Date:** 2026-10-12 (11:20 MDT)
-**Branch:** `issue-647-implementation`, at F's `8b6030e`, plus T's two test edits below (uncommitted; the driver commits them)
+**Date:** 2026-10-12 (11:20 MDT; re-verified at about 11:55 MDT, see "Re-entry" below)
+**Branch:** `issue-647-implementation`, at F's `8b6030e` plus T's two test edits below (committed as `4bd4e75`), and in the re-entry a whitespace-only fix to three test files (uncommitted; the driver commits it)
 **Issue:** #647 (brief `docs/handoffs/647-part2-brief.md`)
 **Handoff-F reviewed:** `docs/handoffs/647/handoff-F.md`
 **Handoff-T-red:** `docs/handoffs/647/handoff-T-red.md`
+
+## Re-entry (Phase 7 call, at `4bd4e75`)
+
+The driver called this phase again with no new F commit. `git diff 8b6030e HEAD -- 'crates/*/src' docs/adr docs/pane-control.md CHANGELOG.md` is empty, so the production code is the code T verified below, and the mutation results still hold. T re-ran everything from scratch at `4bd4e75`:
+
+| Check | Result |
+|---|---|
+| `cargo test --workspace --no-fail-fast -- --skip roster_stays_accurate_under_concurrent_body_load` (the `test.unit.command`) | **171 binaries: 2688 passed, 0 failed, 39 ignored; exit 0.** 2688 is F's 2687 plus T's new `attached_test` case. The #847 flake did not recur |
+| `cargo clippy --workspace --all-targets -- -D warnings` | exit 0 (re-run again after the fix below) |
+| `bash scripts/lint.sh` | exit 0, warnings only. The largest touched test file is `pane_verbs/launch/rig.rs` at 865 lines, under 900 |
+| `bash scripts/changelog-check.sh` | `changelog-check: ok` |
+| `docs_cli_test`, `wire_selftest` | 3 passed each |
+| `cargo machete` | no unused dependency |
+
+**Correction to the rustfmt row below.** The first pass said "rustfmt clean on the 63 files". That was wrong. `rustfmt --check` flags 12 of the branch's files, and `cargo fmt --all --check` also fails on `main` across many untouched files: CI does not run rustfmt (no `fmt` in `.github/workflows/` or `scripts/lint.sh`), and the repo has no `rustfmt.toml`. To separate this branch's drift from what was already there, T ran `cargo fmt --all` in two throwaway detached worktrees, one at `origin/main` and one at HEAD, and compared the formatting diff file by file (both worktrees were removed afterwards):
+- **Fixed (whitespace only):** `holler-adapter-opencode/tests/real_opencode_test.rs` (+15), `holler-cli/tests/pane_verbs/doctor.rs` (+4) and `holler-pane/tests/ports_test.rs` (+6). Each was rustfmt-clean on `main`, and only this branch's lines broke it. T copied rustfmt's output for those three files only. Each now passes `rustfmt --check`. After the fix, `ports_test` passes 8 of 8, `pane_verbs -- doctor` 71 of 71, and `real_opencode_test` compiles (14 opt-in tests, ignored by default). Clippy and lint are clean.
+- **Left as is:** `docs_pane_control_test.rs`, `pane_integration/{scenario,wired}.rs` and `fake_host_test.rs`. On `main` these files already use long lines that rustfmt would wrap (298, 157, 48 and 13 lines of drift). The branch's new lines follow that style, so wrapping only them would be inconsistent churn. `pane_integration/bind.rs` has less drift than on `main`. CI does not check any of it.
+
+No production code is touched. Verdict unchanged: PASS.
 
 ## GREEN confirmation
 
@@ -64,7 +83,7 @@ Both edited test files are rustfmt-clean and pass: OpenCode `agent_view_test` 13
 | Docs CLI | `cargo test -p holler-cli --test docs_cli_test` | pass | 3 passed | PASS |
 | Wire canary | `cargo test -p holler-cli --test wire_selftest` | pass | 3 passed | PASS |
 | Unused deps | `cargo machete` | none | none | PASS |
-| rustfmt | `rustfmt --edition 2021 --check`, one file at a time, on the 63 `.rs` files changed since `4973f9a` | clean | clean | PASS |
+| rustfmt (not run by CI) | `rustfmt --edition 2021 --check`, one file at a time, on the 63 `.rs` files changed since `4973f9a` | no drift added by the branch | **corrected in the re-entry:** 12 files flagged. 3 had branch-only drift and were fixed; 4 follow their files' existing long-line style on `main` | PASS (after the re-entry fix) |
 | Real tmux (opt-in) | `cargo test -p holler-adapter-host --test real_tmux_test -- --ignored` (tmux 3.7c) | pass | 9 passed, conformance case 11 included | PASS |
 | Real OpenCode (opt-in) | `HOLLER_TEST_OPENCODE=1 cargo test -p holler-adapter-opencode --test real_opencode_test -- --ignored --test-threads=1` (1.19.0) | pass | 14 passed, both `ac647` tests included | PASS |
 

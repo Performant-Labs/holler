@@ -24,9 +24,7 @@ use holler_pane_testkit::harness::{HarnessOp, Quirk};
 use holler_pane_testkit::herdr::HerdrOp;
 use holler_pane_testkit::pane_store::PaneStoreOp;
 
-use rig::{
-    json_data, json_findings, keys, kinds, of_kind, one, whole, Rig, Seed, HOST_READS, NOW,
-};
+use rig::{json_data, json_findings, keys, kinds, of_kind, one, whole, Rig, Seed, HOST_READS, NOW};
 
 const PANE: &str = "demo-c1r1";
 

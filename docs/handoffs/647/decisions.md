@@ -108,3 +108,19 @@ Run record for the part-2 build run. The brief is `docs/handoffs/647-part2-brief
   - 12 production mutations, each restored with `git checkout`:
     - M1 to M8 and both W7 wrapper mutations were killed;
     - P1 and P2 were killed once T's new test was in place.
+
+## T (Phase 7 re-entry, verify / GREEN) — 2026-10-12T11:55-06:00
+- **Decided:**
+  - GREEN is confirmed again at `4bd4e75`. Production code is unchanged since F's `8b6030e`, so the mutation results stand.
+  - Corrected the first pass's "rustfmt clean" claim. A per-file comparison of `cargo fmt` drift, `origin/main` against HEAD, found three test files that were rustfmt-clean on `main` and that only this branch's lines broke: `real_opencode_test.rs`, `pane_verbs/doctor.rs` and `ports_test.rs`. T fixed them, whitespace only.
+  - Left four files as they are: `docs_pane_control_test.rs`, `pane_integration/{scenario,wired}.rs` and `fake_host_test.rs`. Their long-line style was already there on `main`, and the branch's lines follow it.
+  - Verdict PASS.
+- **Assumed:**
+  - rustfmt is advisory here, because CI and `lint.sh` do not run it and the repo has no `rustfmt.toml`.
+- **Hedged:**
+  - Acceptance 18's opt-in scratch scenarios still have not been run (they need real Herdr).
+- **Evidence:**
+  - Workspace: 2688 passed, 0 failed, 39 ignored (exit 0).
+  - Clippy is clean, before and after the fix. Lint exits 0.
+  - changelog-check, `docs_cli_test` (3), `wire_selftest` (3) and machete pass.
+  - After the fix: `ports_test` passes 8 of 8, and `pane_verbs -- doctor` 71 of 71.

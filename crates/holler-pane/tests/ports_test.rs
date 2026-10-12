@@ -15,9 +15,9 @@ use common::{pane, pane_name, profile, profile_name, spec, MemPaneStore};
 use holler_pane::error::{class_of, ErrorClass};
 use holler_pane::ports::AGENT_UNSUPPORTED;
 use holler_pane::{
-    next_generation, run_probe, Actor, AgentKey, AgentView, Argv, Cursor, HarnessEndpoint, HarnessPort,
-    HerdrPane, HerdrPort, HerdrSnapshot, HerdrSpec, HostPort, Key, Pane, PaneError, PaneId,
-    PaneName, PaneObservation, PaneReply, PaneStore, Ports, ProbeResult, Prober, Profile,
+    next_generation, run_probe, Actor, AgentKey, AgentView, Argv, Cursor, HarnessEndpoint,
+    HarnessPort, HerdrPane, HerdrPort, HerdrSnapshot, HerdrSpec, HostPort, Key, Pane, PaneError,
+    PaneId, PaneName, PaneObservation, PaneReply, PaneStore, Ports, ProbeResult, Prober, Profile,
     ProfileEvent, ProfileLogEntry, ProfileName, ProfileScope, ProfileSpec, ProfileStore,
     ResolvedScope, ServeSpec, SpecEdit, SystemProber, Watch,
 };
