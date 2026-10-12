@@ -66,13 +66,13 @@ fn findings_about<'v>(data: &'v Value, pane: &str) -> Vec<&'v Value> {
         .collect()
 }
 
-/// The names of the specs of `data.profile`.
+/// The pane names of the specs of `data.profile` (`ProfileSpec.pane`).
 fn spec_names(data: &Value) -> Vec<String> {
     data["profile"]["panes"]
         .as_array()
         .unwrap_or_else(|| panic!("data.profile.panes is an array: {data}"))
         .iter()
-        .map(|spec| spec["name"].as_str().expect("a spec name").to_owned())
+        .map(|spec| spec["pane"].as_str().expect("a spec's pane name").to_owned())
         .collect()
 }
 

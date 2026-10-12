@@ -103,3 +103,25 @@ Facts in code the diff does not change, which the change or the tests rely on. L
   >     match closed {
   >         PaneCode::Usage => ErrorClass::Usage,
   > ```
+
+## T (Phase 7, GREEN), 2026-10-11
+
+- **Fact:** `pane import`'s JSON `data.profile` is the serde form of `Profile`, and each spec's pane is under the key
+  `pane` (no rename), which `pane_verbs/import/harness.rs`'s `spec_names()` reads.
+  **Source:** `crates/holler-cli/src/pane/import.rs:128-137` and `crates/holler-pane/src/profile.rs:178-181`
+  **Verbatim excerpt:**
+  > ```rust
+  > /// The data of `pane import`. Its JSON keys are its fields, in this order.
+  > #[derive(Debug, Serialize)]
+  > struct Imported {
+  > ```
+  > ```rust
+  >     /// The profile a dry run would create, or the one a real run stored.
+  >     profile: Option<Profile>,
+  > ```
+  > ```rust
+  > #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+  > #[serde(deny_unknown_fields)]
+  > pub struct ProfileSpec {
+  >     pub pane: String,
+  > ```

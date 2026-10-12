@@ -260,3 +260,34 @@ Run handoff directory `docs/handoffs/835` Â· branch `issue-835-implementation` Â
   - Read: the brief, handoff-A (pass 3), handoff-T-red, this journal; every file listed in the handoff; `git show bda1069`
     and `git diff 2d217dd origin/main` for the overlap.
   - `docs/handoffs/835/evidence.md`: six facts in unchanged code.
+
+## T, Phase 7 (verify / GREEN), 2026-10-11 18:56 MDT
+
+- **Decided:**
+  - I repaired my own Phase 4 bug in `pane_verbs/import/harness.rs`: `spec_names()` reads `spec["pane"]` (it read
+    `name`). `import::harness` passes 7 of 7. The branch's workspace suite exits 0 (2377 passed).
+  - I verified the branch against current `origin/main`, not only its base, because a PR's CI runs on the merge ref. A
+    scratch merge commit, in a throwaway worktree with its own target dir (since removed), fails one test:
+    `docs_pane_control_test::import_findings_are_named_in_section_3_or_10`. #652's guide names neither new code.
+  - Verdict BLOCK, routed to F. The fix is the merge plus edits to `docs/pane-control.md`, which F owns, and no test
+    change. In the same merge, F corrects #840's #835 claims (`unmanaged.rs:66`, `:84`; ADR-0021 line 972).
+- **Assumed:**
+  - The PR's CI runs `cargo test --workspace` on the merge with main, as GitHub's `pull_request` event does. So the
+    failure on the merge is a real CI failure, not a hypothetical one.
+- **Hedged:**
+  - Nothing else fails on the merge (154 groups, 2396 passed). I did not run clippy on the merge, because main's three
+    commits add no port implementor and no lint-relevant code beside these files.
+- **Evidence:**
+  - Commands:
+    - `cargo test -p holler-cli --test pane_verbs import::` (46 passed)
+    - the CI workspace test (exit 0)
+    - `bash scripts/lint.sh` (exit 0) and `bash scripts/changelog-check.sh` (ok)
+    - clippy `-D warnings` (exit 0)
+    - `docs_cli_test` (3 passed) and `wire_selftest` (3 passed)
+    - `cargo machete` (clean)
+    - `real_tmux_test -- --ignored` (9 passed, tmux 3.7c)
+    - `git merge-tree --write-tree HEAD origin/main` (clean), then the workspace suite on the merge (1 failed)
+  - Mutations, each restored with `sha256sum -c` OK:
+    - the rule always `false`: 4 tests fail
+    - dead panes kept: 1 test fails
+  - `evidence.md`: one T entry (`ProfileSpec.pane`).
