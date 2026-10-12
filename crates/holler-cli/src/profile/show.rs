@@ -10,6 +10,10 @@
 //!
 //! The verb reads the two registries (`ProfileStore::get`, then one `PaneStore::list`)
 //! and nothing else: no adapter, no probe, no write.
+//!
+//! `difference_line` and `text` are shared with `apply` (as `super::show::...`), which prints a
+//! reported pane's differences as this verb does, because the frozen `profile/mod.rs` admits no
+//! new module.
 
 use clap::Args;
 use holler_pane::profile_diff::{
@@ -131,8 +135,9 @@ fn render(view: &ProfileView) -> String {
     lines.join("\n")
 }
 
-/// `spec PANE`, then one `FIELD: VALUE` line per field.
-fn push_spec(lines: &mut Vec<String>, spec: &ProfileSpec) {
+/// `spec PANE`, then one `FIELD: VALUE` line per field. `pane import` (#650) prints the
+/// profile a dry run would create through it.
+pub(crate) fn push_spec(lines: &mut Vec<String>, spec: &ProfileSpec) {
     lines.push(format!("spec {}", text(&spec.pane)));
     lines.extend(
         SpecField::ALL
@@ -157,7 +162,7 @@ fn push_row(lines: &mut Vec<String>, row: &ComparisonRow) {
 }
 
 /// `  FIELD: spec VALUE, live VALUE`.
-fn difference_line(difference: &FieldDiff) -> String {
+pub(crate) fn difference_line(difference: &FieldDiff) -> String {
     format!(
         "  {}: spec {}, live {}",
         difference.field.as_str(),
@@ -193,6 +198,6 @@ fn probe_text(probe: Option<&ProbeResult>) -> String {
 
 /// A stored string for a text line, with its control characters escaped. A spec's pane
 /// is unchecked text, so it goes through the same escape as every stored field value.
-fn text(stored: &str) -> String {
+pub(crate) fn text(stored: &str) -> String {
     FieldValue::Text(stored.to_owned()).to_string()
 }

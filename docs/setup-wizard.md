@@ -56,6 +56,12 @@ spreadsheet cell: `r1c1`, `r1c2`, `r1c3`, `r1c4` for the first row, `r2c1` for t
 second row, and so on. With a pane count and no grid, the wizard proposes a grid by one rule: two
 rows for more than four panes, up to 8 panes, and above 8 panes the squarest grid. It asks one confirm. Your own names always win.
 
+An optional top-level `workspace = "<name>"` (before every table header) names the Herdr workspace:
+1 to 40 characters, a letter or digit first, then letters, digits, spaces, `.`, `_` or `-`
+(`instance.sh` refuses anything else, naming the key). Stage 1 suggests two lower-case words joined
+with a hyphen, such as `herald-relay`; Stage 8 creates the workspace with `--label <name>` (or
+renames the one workspace of a fresh server). Without it Herdr labels the workspace itself.
+
 `hub_host` is optional when the config has no `[[session]]` (N=0) and required when it has one or more (N>=1). Without it the hub is started with no `--advertise`: it advertises nothing remote, which is right when no body will dial it.
 
 Shape:
@@ -111,7 +117,7 @@ session's `remote_host`/`remote_tailnet_host`) and ignores them, checking only t
 not know the `[instance]` table or a session's `backend_port`, so a master file that has either
 makes `holler body run` fail. The wizard therefore writes a **derived body config** per remote host
 (only that host's `[[session]]` tables) and sends that one: it drops the `[instance]` table and every
-session's `backend_port`, and sets each session's `endpoint` to
+session's `backend_port` and the top-level `workspace` key, and sets each session's `endpoint` to
 `http://127.0.0.1:<resolved backend port>`, the port `instance.sh` printed for that session (the master
 file's own `endpoint` may name the first instance's backend). Other tools can keep their own data in
 the file under an explicit namespace: a top-level `[ext.<namespace>]` table and a per-session
@@ -237,7 +243,13 @@ more than one.
   The wizard never splits or closes panes it did not create: when `pane list` shows such panes
   after the server starts, it reports them and, with the user's yes, builds a new workspace beside
   them (`workspace create`), or reuses them only if the user asks. Stage 3 says this in the plan
-  when `herdr session list` shows a stopped session of the instance's name.
+  when `herdr session list` shows a stopped session of the instance's name, names the new
+  workspace and lists the restored panes beside it, and the "Proceed with this plan?" yes covers
+  creating it (a "no" means stop, or reuse the restored panes only if the user asks). Whenever
+  the wizard creates a new workspace, `<base-pane>` is the first pane of the new workspace
+  (`pane list` filtered by its id) and Stage 8's Verify and Gate count panes in that workspace
+  only; the older "the one pane is the first slot" rule applies only to a server with exactly one
+  pane and no restored panes.
 - **Stage 8 labels and builds the grid.** Every pane gets its slot name as a label
   (`herdr.sh label <pane-id> <label>`, right after the splits) and Verify checks that each label
   equals its slot. The grid is built row first (split right along the first row, then each
@@ -271,7 +283,7 @@ A non-default instance (any key differing from its default) must set `name`, `st
 `herdr_session`. It also may not use the first instance's ports: `instance.sh` refuses a
 non-default instance with a `hub_port` of 41807, a `serve_https_port` of 443, or resolved backend
 ports in 47001 to 47001 plus the session count unless every session sets its own `backend_port`
-(exit 1, one line naming the key). Stage 1 runs `agent-skills/setup-wizard/lib/instance.sh <config>`,
+(exit 1, one line naming the key). Stage 1 runs `agent-skills/herdr-setup/lib/instance.sh <config>`,
 which refuses a malformed value or a missing required key naming the key, a `state_dir` that is the
 default state directory, and two sessions on the same `remote_host` that resolve to one backend
 port, naming both. Stage 2 also reads each remote host's `$HOME/.holler` and refuses a non-default
@@ -291,6 +303,32 @@ state_dir = "~/.holler-second"
 herdr_session = "second"
 backend_port_base = 47101
 ```
+
+### Choosing the Herdr session
+
+When Stage 1 builds a new config, it asks one question after the orchestrators and before the
+workspace name: which Herdr session to build in. Herdr has no session rename, so the choice is
+made when the workspace is first built. An existing config is not re-asked; Stage 1's report and
+Stage 3's plan state the session it targets.
+
+- **The default, unnamed session** (recommended when there is no reason to separate this
+  workspace from other Herdr work). It writes no `[instance]` table and nothing changes: the
+  wizard builds in Herdr's unnamed `default` server. The plan says "Herdr session: default
+  (unnamed)".
+- **A new named session.** The wizard suggests a name (pattern `^[a-z][a-z0-9-]{0,23}$`, not
+  `default`) and refuses one already in `herdr session list`, running or stopped, naming that
+  session and offering another name or the default: it never builds in an existing session. For
+  a free name it proposes a full second instance, written after the bare top-level keys and before
+  `[[orchestrator]]`: `name` and `herdr_session` set to the name, `state_dir = "~/.holler-<name>"`,
+  `hub_port = 41808`, `serve_https_port = 8443` and `backend_port_base = 47101`. The ports are
+  defaults only; Stage 3's collision preflight refuses a taken one. The file is shown, and you
+  confirm or edit it before `instance.sh` validates it. The plan says "Herdr session: `<name>`
+  (new, own state directory and ports)".
+
+A named session is driven from a terminal outside any Herdr pane (see "Herdr session"), and
+`holler` calls in your own shells need `HOLLER_STATE_DIR=<state_dir>` (for example
+`HOLLER_STATE_DIR=$HOME/.holler-work holler hub status`); without it they reach the default
+instance.
 
 ## Instance state and the ledger
 
@@ -325,7 +363,7 @@ start time and command still match; a pid that was reused by another program is 
 a process in no ledger is **foreign**. The wizard signals only live rows. On a rerun "reused"
 means exactly one thing, a live row in this instance's ledger whose command still matches; it
 starts and records a new process when the old one died, and never adopts one it did not record.
-`agent-skills/setup-wizard/lib/ledger.sh` (`record`, `list`, `owns <pid>`) maintains the file and
+`agent-skills/herdr-setup/lib/ledger.sh` (`record`, `list`, `owns <pid>`) maintains the file and
 reads the state directory from `HOLLER_STATE_DIR`, which every call must set, the default
 instance's included (an unset value is refused, exit 64, so a lost variable cannot reach another
 instance's ledger). Each start command prints the pid of the
@@ -353,7 +391,9 @@ refused as foreign for the same reason: nothing records its processes, so the wi
 and never stops them. See "The first instance has no ledger" above.
 
 **The `AGENTS.md` briefing.** If the operator says yes in Stage 3, Stage 8 adds a `## Holler
-self-status` section to each orchestrator's `AGENTS.md`. It never writes the instance's absolute
+self-status` section to each orchestrator's `AGENTS.md`. The briefing is not offered at all when
+there are no sessions (nothing to drive). The text names no orchestrator, because orchestrators
+that share a `dir` share one file. It never writes the instance's absolute
 `HOLLER_STATE_DIR` into the file (the file may be shared with another instance's orchestrator, and
 an "already has this section" rule would then leave the wrong path in place). Instead it says the
 pane's environment already sets `HOLLER_STATE_DIR` and the orchestrator must never change or unset it
@@ -385,7 +425,7 @@ processes are still running they appear as foreign and are never signalled. Move
 - **Live**: stopped with SIGTERM, nothing stronger. If it is still running after the grace
   period the wizard says so and asks.
 
-`agent-skills/setup-wizard/lib/stop-owned.sh` does this (`stop`, `restart`, `check-port`,
+`agent-skills/herdr-setup/lib/stop-owned.sh` does this (`stop`, `restart`, `check-port`,
 `teardown`; exit 0 done, 1 stale, 2 foreign, 3 still running, 4 usage). `restart` stops the
 recorded process and prints `RESTART-CMD <recorded command>`; it does not run it, and that
 recorded command has no environment, no `nohup` and no log redirect (run alone it would use the
@@ -402,35 +442,43 @@ serve` entry is not a process of the wizard, so teardown leaves it; with the use
 `tailscale serve --https=<serve_https_port> off` turns off that one entry. `tailscale serve reset`
 is never used: it wipes every serve entry, the first instance's included.
 
+**Teardown also stops the restored workspace.** The Herdr server the wizard started holds any
+restored workspace of the user (with an auto-resumed agent) too, and teardown stops that server.
+Stage 3's plan and the teardown entry list those panes and ask before teardown; for the default
+instance the wizard offers to leave the server running and stop only the hub.
+
 ## Automated setup
 
-A Claude Code skill drives this end to end — `setup-wizard`, an 11-stage wizard (Stage 0 through
-Stage 10). The skill ships in this repo at
-[`agent-skills/setup-wizard/SKILL.md`](../agent-skills/setup-wizard/SKILL.md), which is its source
-of truth, and its stages call the helper scripts in `agent-skills/setup-wizard/lib/`, so the
+A Claude Code skill drives this end to end — `herdr-setup`, a 12-stage wizard (Stage 0 through
+Stage 11). The command you type is `/herdr-setup`. Stage 0 is the preflight. The skill ships in this repo at
+[`agent-skills/herdr-setup/SKILL.md`](../agent-skills/herdr-setup/SKILL.md), which is its source
+of truth, and its stages call the helper scripts in `agent-skills/herdr-setup/lib/`, so the
 **whole directory** is installed, not just `SKILL.md`. On a machine with no checkout, one command
 does it (no `sudo`):
 
 ```bash
-mkdir -p ~/.claude/skills && curl -fsSL https://github.com/Performant-Labs/holler/archive/refs/heads/main.tar.gz | tar -xz -C ~/.claude/skills --strip-components=2 holler-main/agent-skills/setup-wizard
+mkdir -p ~/.claude/skills && curl -fsSL https://github.com/Performant-Labs/holler/archive/refs/heads/main.tar.gz | tar -xz -C ~/.claude/skills --strip-components=2 holler-main/agent-skills/herdr-setup
 ```
 
 No release tag contains the whole skill directory yet, so the command fetches `main`; pin it to a
-tag once one does. (The README has the same line, and its agent prompt fetches the directory the same way on a
+tag once one does. A skill installed as `~/.claude/skills/setup-wizard` before the rename is a different skill name now: remove or move it by hand (the wizard never deletes it). (The README has the same line, and its agent prompt fetches the directory the same way on a
 machine that doesn't have it). Stage
-0 stands apart from the rest: it only installs the `herdr` binary itself (via
-[herdr.dev's install script](https://herdr.dev/install.sh) or `brew install herdr`), asked as
-its own up-front yes/no, and ends with a second, separate yes/no — "configure Herdr now and
-launch a workspace?" — before anything past it runs; a yes to installing Herdr is never treated
-as a yes to also building a workspace in the same run. Only once that second question gets a
-yes does Stage 1 onward run: load the config described above, preflight (including per-host SSH
+0 comes first and needs no config: it is read-only and machine-level, prints one status table of what
+this machine has (`herdr`, `holler`, `tailscale`, `ssh`, the skill's `lib/` scripts, the Herdr
+server and saved sessions, a hub running here, an existing ledger and config), then prints the
+stage checklist as a vertical table. If `herdr` is missing it asks, as its own yes/no, whether to
+install it (via [herdr.dev's install script](https://herdr.dev/install.sh) or `brew install herdr`) and
+re-checks. It ends with a second, separate yes/no — "All systems go. Proceed?" — before anything past it runs; a yes to installing Herdr is never treated
+as a yes to also building a workspace in the same run, and a no ends the wizard cleanly. Only once that second question gets a
+yes does Stage 1 onward run: load the config described above, the config checks of Stage 2 (including per-host SSH
 reachability, with a manual-relay fallback when no local `ssh` client exists), present the plan
 and get explicit assent before touching anything, start the remote OpenCode backends, capture
 real session IDs, bring up the hub, migrate the config and join/run one body per distinct remote
 host, build the Herdr workspace, attach each pane, and verify every session end to end with a
 real round-trip reply. It's config-driven throughout — however many orchestrators, sessions, and
 distinct remote hosts the config lists is however many panes and bodies get built, never a
-hardcoded pair.
+hardcoded pair. With no sessions (N=0), preflight skips every remote check (SSH, the remote
+`holler`, model endpoints, remote state and ledger, the tailnet lookup) and runs the local ones.
 
 **A failed check is a prompt to ask, not a reason to stop.** The wizard is meant to push through
 to a fully working install — when a stage's Gate fails or something is genuinely ambiguous, it
@@ -441,7 +489,7 @@ leaving the run there isn't the goal; a complete, verified workspace is.
 ## Collision preflight
 
 Stage 2 takes a read-only inventory of each host the run touches
-(`agent-skills/setup-wizard/lib/inventory.sh`): listening ports, running `holler hub`,
+(`agent-skills/herdr-setup/lib/inventory.sh`): listening ports, running `holler hub`,
 `holler body`, `opencode` and `herdr` processes (a body's row carries its `--config` path), the `tailscale serve`
 configuration and the Herdr sessions; a tool it needs and cannot find on `PATH` is reported as a
 `warn` line, never skipped silently. It only runs `ss`/`lsof`, `ps`, `tailscale serve status` and
@@ -471,7 +519,11 @@ reused pid is foreign.
 
 ## Herdr session
 
-Stage 8 and Stage 9 run every Herdr command through `agent-skills/setup-wizard/lib/herdr.sh`,
+When the config sets `workspace`, Stage 8 names the workspace it creates:
+`herdr.sh run workspace create --cwd <dir> --label <workspace>`, or, on a fresh server with exactly
+one pane, `herdr.sh run workspace rename <workspace_id> <workspace>` once.
+
+Stage 8 and Stage 9 run every Herdr command through `agent-skills/herdr-setup/lib/herdr.sh`,
 which adds `--session <herdr_session>` (from the `[instance]` table) to each one, `server stop`
 and `session attach` included. A bare `herdr server stop` is never issued: which server it stops
 is not established, and it could stop another instance's session. The wrapper refuses to run when
@@ -508,6 +560,21 @@ Unverified until story #734 checks it with the real binary: how a pane's own ses
 (`HERDR_PANE_ID` and `HERDR_SESSION` in the environment, in one function, `pane_session`, in
 `herdr.sh`), and that `herdr session list` prints the session name first on each line. The tests
 use a fake `herdr`.
+
+## Basic Herdr commands
+
+The wizard ends with a final step (Stage 11) that prints the handful of Herdr commands a new user
+needs. It changes nothing; it is output only. The bindings are Herdr's defaults (confirm with
+`prefix+?` if yours differ): attach with `herdr` (or `herdr --session <name>`); the prefix is
+`ctrl+b`, released, then the key; `prefix+b` shows or hides the sidebar; `prefix+w` switches
+workspace; `prefix+shift+n` / `prefix+shift+w` / `prefix+shift+d` create, rename and close a
+workspace (also `herdr workspace close <id>`); `prefix+v` / `prefix+minus` split right / down;
+`prefix+h/j/k/l` move between panes; `prefix+z` / `prefix+x` zoom and close a pane; `prefix+q`
+detaches and leaves everything running.
+
+It also names any workspace the wizard did not create that sits beside the new one (a restored
+saved session), with its id and pane count, and says how to close it; the wizard never closes it.
+The wizard's own teardown is `stop-owned.sh teardown`, which closes the restored workspace too.
 
 ## Related
 

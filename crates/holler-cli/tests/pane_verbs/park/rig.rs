@@ -152,7 +152,24 @@ impl Rig {
     /// AC 9: no Herdr, host, harness or probe call, and no profile write (`CasPut`,
     /// `Delete`, `Rename`). The profile reads a `--profile` run makes are expected.
     pub fn assert_no_live_call_and_no_profile_write(&self) {
-        assert_eq!(self.herdr.faults().calls(), vec![], "no Herdr call");
+        self.assert_no_live_call_and_no_profile_write_with(false);
+    }
+
+    /// [`Self::assert_no_live_call_and_no_profile_write`] for a refusal of a pane with **no
+    /// record**: Herdr may be read (#832), never acted on.
+    pub fn assert_no_acting_call_and_no_profile_write(&self) {
+        self.assert_no_live_call_and_no_profile_write_with(true);
+    }
+
+    fn assert_no_live_call_and_no_profile_write_with(&self, herdr_reads_ok: bool) {
+        if herdr_reads_ok {
+            assert!(
+                crate::list::only_herdr_reads(&self.herdr.faults().calls()),
+                "no Herdr call that acts, only reads"
+            );
+        } else {
+            assert_eq!(self.herdr.faults().calls(), vec![], "no Herdr call");
+        }
         assert_eq!(self.host.faults().calls(), vec![], "no host call");
         assert_eq!(self.harness.faults().calls(), vec![], "no harness call");
         assert_eq!(self.prober.calls(), vec![], "no probe run");
@@ -218,12 +235,29 @@ impl Both {
 /// on `err` and its `out` passes the test kit's envelope checker, and neither run called
 /// an adapter or the prober or wrote a profile.
 pub(crate) fn run_both(seed: impl Fn() -> Rig, argv: &[&str]) -> Both {
+    run_both_checked(seed, argv, false)
+}
+
+/// [`run_both`] for a pane with **no record**: the verb may read Herdr to tell an unmanaged
+/// pane from a typo (#832), and still makes no call that acts.
+pub(crate) fn run_both_missing_record(seed: impl Fn() -> Rig, argv: &[&str]) -> Both {
+    run_both_checked(seed, argv, true)
+}
+
+fn run_both_checked(seed: impl Fn() -> Rig, argv: &[&str], herdr_reads_ok: bool) -> Both {
+    let check = |rig: &Rig| {
+        if herdr_reads_ok {
+            rig.assert_no_acting_call_and_no_profile_write();
+        } else {
+            rig.assert_no_live_call_and_no_profile_write();
+        }
+    };
     let text_rig = seed();
     let text = text_rig.run(argv, Format::Text);
-    text_rig.assert_no_live_call_and_no_profile_write();
+    check(&text_rig);
     let json_rig = seed();
     let json = json_rig.run(argv, Format::Json);
-    json_rig.assert_no_live_call_and_no_profile_write();
+    check(&json_rig);
     assert_eq!(
         text.code, json.code,
         "{argv:?}: exit codes are equal across formats: text {text:?}, json {json:?}"

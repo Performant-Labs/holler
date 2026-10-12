@@ -1,7 +1,7 @@
 //! #775: Stage 8's text (pane labels, restored saved sessions, the 0.8.x status format, the
 //! row-first build) and the `WIZARD_HERDR_HOST=1` collide line (epic #769).
 //!
-//! Plain text assertions over `agent-skills/setup-wizard/SKILL.md` and `docs/setup-wizard.md`.
+//! Plain text assertions over `agent-skills/herdr-setup/SKILL.md` and `docs/setup-wizard.md`.
 //! Nothing here runs a script or touches a host.
 #![cfg(unix)]
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)] // #775
@@ -14,7 +14,7 @@ fn read(rel: &str) -> String {
 }
 
 fn skill() -> String {
-    read("agent-skills/setup-wizard/SKILL.md")
+    read("agent-skills/herdr-setup/SKILL.md")
 }
 
 /// Whitespace folded to one space, for phrases that wrap.

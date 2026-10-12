@@ -457,6 +457,75 @@ fn print_to_an_unknown_pane_is_pane_not_found() {
     assert_eq!(err.code(), "pane-not-found");
 }
 
+// --- labels (#808) ---
+
+/// The label of each pane `snapshot` lists, by pane id.
+fn labels(herdr: &FakeHerdr) -> Vec<(String, Option<String>)> {
+    herdr
+        .snapshot()
+        .unwrap()
+        .panes
+        .into_iter()
+        .map(|p| (p.pane_id.as_str().to_owned(), p.label))
+        .collect()
+}
+
+/// #808 acceptance 1 (the fake): a pane the outside world labels (Herdr's `pane.rename`)
+/// is reported with its label, by `snapshot` and by `ensure_pane` of its cell, which answers
+/// the snapshot's entry whole. An unlabelled pane, and one labelled `""`, report `None`; a
+/// label is not trimmed. `rename` bypasses the faults and the call log, like `vanish`.
+#[test]
+fn a_labelled_pane_is_reported_with_its_label() {
+    let herdr = fake(3, 1);
+    let a = ensure(&herdr, 1, 1);
+    let b = ensure(&herdr, 2, 1);
+    let c = ensure(&herdr, 3, 1);
+    assert_eq!(a.label, None, "a new pane has no label");
+    let calls_before = herdr.faults().calls();
+
+    herdr.rename(&a.pane_id, "x").unwrap();
+    herdr.rename(&b.pane_id, "").unwrap();
+    herdr.rename(&c.pane_id, " ").unwrap();
+    assert_eq!(
+        herdr.faults().calls(),
+        calls_before,
+        "rename is not a port call"
+    );
+
+    let label = |text: &str| Some(text.to_owned());
+    assert_eq!(
+        labels(&herdr),
+        vec![
+            ("w1:p1".to_owned(), label("x")),
+            ("w1:p2".to_owned(), None),
+            ("w1:p3".to_owned(), label(" ")),
+        ]
+    );
+    let listed = herdr.snapshot().unwrap().panes;
+    assert_eq!(
+        ensure(&herdr, 1, 1),
+        listed[0],
+        "the labelled pane, label included"
+    );
+    assert_eq!(ensure(&herdr, 2, 1), listed[1], "the pane labelled \"\"");
+
+    herdr.rename(&a.pane_id, "y").unwrap();
+    assert_eq!(ensure(&herdr, 1, 1).label, label("y"), "a rename replaces");
+    herdr.close(&a.pane_id).unwrap();
+    assert_eq!(
+        ensure(&herdr, 1, 1).label,
+        None,
+        "a new pane in a closed labelled pane's cell has no label"
+    );
+}
+
+#[test]
+fn rename_of_an_unknown_pane_is_pane_not_found() {
+    let herdr = fake(1, 1);
+    let err = herdr.rename(&id("w1:p1"), "x").err().unwrap();
+    assert_eq!(err.code(), "pane-not-found");
+}
+
 #[test]
 fn snapshot_lists_panes_by_workspace_then_row_then_col() {
     let herdr = FakeHerdr::new(SESSION)

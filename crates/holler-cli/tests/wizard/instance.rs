@@ -22,7 +22,7 @@ fn validate(toml: &str) -> Output {
     let cfg = dir.path().join("sessions.toml");
     std::fs::write(&cfg, toml).unwrap();
     Command::new("bash")
-        .arg(repo_root().join("agent-skills/setup-wizard/lib/instance.sh"))
+        .arg(repo_root().join("agent-skills/herdr-setup/lib/instance.sh"))
         .arg(&cfg)
         .output()
         .unwrap()
@@ -34,7 +34,7 @@ fn validate_home(toml: &str, home: &str) -> Output {
     let cfg = dir.path().join("sessions.toml");
     std::fs::write(&cfg, toml).unwrap();
     Command::new("bash")
-        .arg(repo_root().join("agent-skills/setup-wizard/lib/instance.sh"))
+        .arg(repo_root().join("agent-skills/herdr-setup/lib/instance.sh"))
         .arg(&cfg)
         .env("HOME", home)
         .output()
@@ -266,7 +266,7 @@ fn a_top_level_key_placed_under_instance_is_refused_with_a_hint() {
 #[test]
 fn usage_errors_exit_2() {
     let out = Command::new("bash")
-        .arg(repo_root().join("agent-skills/setup-wizard/lib/instance.sh"))
+        .arg(repo_root().join("agent-skills/herdr-setup/lib/instance.sh"))
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(2));
@@ -276,7 +276,7 @@ fn usage_errors_exit_2() {
 /// with the values the stages use today.
 #[test]
 fn documented_defaults_match_the_skill_text() {
-    let skill = read_repo("agent-skills/setup-wizard/SKILL.md");
+    let skill = read_repo("agent-skills/herdr-setup/SKILL.md");
     let docs = read_repo("docs/setup-wizard.md");
 
     // What the stages use today.
@@ -314,7 +314,7 @@ fn documented_defaults_match_the_skill_text() {
 
 #[test]
 fn stage_one_runs_the_validator() {
-    let skill = read_repo("agent-skills/setup-wizard/SKILL.md");
+    let skill = read_repo("agent-skills/herdr-setup/SKILL.md");
     let stage1 = skill
         .split("## Stage 1")
         .nth(1)
@@ -507,4 +507,61 @@ fn the_default_instance_keeps_every_default_port() {
     let out = validate(&config("[instance]\nname = \"default\"\n", TAIL));
     assert!(out.status.success(), "{}", stderr(&out));
     assert_eq!(stdout(&out), RECORDED_PLAN);
+}
+
+// #810: the optional top-level `workspace` key.
+
+/// `HEAD` with a `workspace` line (raw TOML after the `=`) before the tables.
+fn with_workspace(raw: &str) -> String {
+    format!("workspace = {raw}\n{HEAD}\n{TAIL}")
+}
+
+#[test]
+fn a_valid_workspace_is_accepted_and_printed() {
+    for ok in ["herald-relay", "Quiet Tower 2", "a", "x.y_z-1"] {
+        let out = validate(&with_workspace(&format!("\"{ok}\"")));
+        assert!(out.status.success(), "{ok}: {}", stderr(&out));
+        assert!(stdout(&out).contains(&format!("workspace: {ok}\n")), "{ok}");
+    }
+}
+
+#[test]
+fn a_workspace_of_forty_characters_is_accepted() {
+    let name = "a".repeat(40);
+    let out = validate(&with_workspace(&format!("\"{name}\"")));
+    assert!(out.status.success(), "{}", stderr(&out));
+}
+
+#[test]
+fn no_workspace_is_fine_and_prints_no_workspace_line() {
+    let out = validate(&config("", TAIL));
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert!(!stdout(&out).contains("workspace"));
+}
+
+#[test]
+fn a_bad_workspace_is_refused_naming_the_key() {
+    let long = format!("\"{}\"", "a".repeat(41));
+    let bad = [
+        "\"\"",
+        long.as_str(),
+        "\" lead\"",
+        "\"-dash\"",
+        "\"say \\\"hi\\\"\"",
+        "\"it's\"",
+        "\"a/b\"",
+        "herald-relay",
+    ];
+    for raw in bad {
+        let out = validate(&with_workspace(raw));
+        assert_eq!(out.status.code(), Some(1), "{raw}");
+        assert!(stderr(&out).contains("workspace"), "{raw}: {}", stderr(&out));
+    }
+}
+
+#[test]
+fn a_workspace_with_a_trailing_comment_is_accepted() {
+    let out = validate(&with_workspace("\"herald-relay\" # my name"));
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert!(stdout(&out).contains("workspace: herald-relay\n"));
 }

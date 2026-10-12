@@ -9,20 +9,24 @@
 //! timestamp. `get.rs` and `watch.rs` use them through `super::list`, and a later consumer
 //! (the roster, #648) can use them through `crate::pane::list`.
 //!
-//! The read verbs read the record and nothing else. They call `PaneStore::{get, list,
-//! watch}`, `ProfileStore::get` and `ProfileScope::resolve`, never an adapter or a probe,
-//! and they write nothing. SHOWN and health are what reconcile last recorded. DRIVEN is
+//! The read verbs read the record and nothing else, with one exception (story #832): `list`
+//! over the whole registry, and `get` when no record answers, also read Herdr
+//! (`HerdrPort::{snapshot, observe_pane}`) for the panes no record names, which they show as
+//! `unmanaged`. They call `PaneStore::{get, list, watch}`, `ProfileStore::get` and
+//! `ProfileScope::resolve` otherwise, never a probe, and they write nothing. SHOWN and health are what reconcile last recorded. DRIVEN is
 //! printed as the record holds it and never compared: nothing records it before the hub
 //! wiring (#649).
 
 use clap::Args;
 use holler_pane::pane::{Health, Hold};
 use holler_pane::reconcile::shown_differs;
+use holler_pane::unmanaged::{self, duration_text, UnmanagedPane};
 use holler_pane::{GridPos, Pane, PaneError, PaneName, Ports, ProfileName};
+use holler_proto::clock::now_millis;
 use serde::Serialize;
 
 use super::args::ProfileOpt;
-use crate::output::{emit, ErrorBody, VerbCtx};
+use crate::output::{emit, ErrorBody, Format, VerbCtx};
 use crate::time_fmt::format_epoch;
 
 /// The table's columns, in order. A `pane watch` line prints the same cells after the
@@ -63,11 +67,23 @@ const GAP: &str = "  ";
 /// `--profile`, only the panes of that profile are listed, and a named pane must belong to
 /// it.
 ///
+/// A list of the whole registry also shows the **unmanaged** panes: every pane of the Herdr
+/// session that no record names (a Claude Code session set up by hand, say), in a second
+/// table after a blank line with the columns PANE-ID, LABEL, POS, PROJECT, STATE (always
+/// `unmanaged`) and IDLE (how long its screen has not changed, `-` when Herdr does not
+/// report it). `unmanaged` is a visible state, not a hold: no verb that acts on a pane accepts
+/// such a pane (`pane-unmanaged`, exit 3). If Herdr cannot be read, the registry's panes are
+/// still listed and a warning line says the unmanaged ones are not.
+///
 /// `--format=json` prints one envelope whose data is `{"panes": [ROW, ...]}`, sorted by
 /// name. A ROW has the keys "name", "pos" (`{"row": 2, "col": 1, "pos": "r2c1"}`),
 /// "profile", "project", "health" (`"healthy"`, `"unknown"` or `{"unhealthy": REASON}`),
 /// "shown", "driven", "sync" (`"ok"`, `"mismatch"` or `"unobserved"`) and "hold" (`"none"`,
-/// `"drained"` or `{"parked": {...}}`); an empty value is null.
+/// `"drained"` or `{"parked": {...}}`); an empty value is null. A whole-registry list adds
+/// `"unmanaged"`, an array left out when empty, of `{"state": "unmanaged", "pane_id",
+/// "session", "workspace", "pos", "label", "cwd", "last_screen_change" (milliseconds since the
+/// Unix epoch), "idle_seconds"}` (`null` for what Herdr does not report), and
+/// `"unmanaged_unavailable"` (the failed call's code) when Herdr could not be read.
 #[derive(Args, Debug)]
 pub struct PaneList {
     /// List only this pane.
@@ -79,7 +95,14 @@ pub struct PaneList {
 
 /// Run `holler pane list`: read the panes in scope and print them sorted by name.
 pub fn run(args: &PaneList, ctx: &mut VerbCtx<'_>) -> i32 {
-    let result = rows_in_scope(args, ctx.ports).map_err(|e| ErrorBody::from(&e));
+    let result = rows_in_scope(args, ctx.ports);
+    if let (Format::Text, Ok(table)) = (ctx.format, &result) {
+        if let Some(gap) = &table.unmanaged_gap {
+            // The managed panes are listed; what could not be looked at is said, not hidden.
+            let _ = writeln!(ctx.sink.err, "warning: unmanaged panes not listed: {gap}");
+        }
+    }
+    let result = result.map_err(|e| ErrorBody::from(&e));
     emit(&mut ctx.sink, ctx.format, result, render_table)
 }
 
@@ -88,6 +111,17 @@ pub fn run(args: &PaneList, ctx: &mut VerbCtx<'_>) -> i32 {
 #[derive(Debug, Serialize)]
 struct PaneTable {
     panes: Vec<PaneRow>,
+    /// The Herdr panes no record names (story #832), each with the state `unmanaged`; left
+    /// out when there are none, and always left out of a list scoped to a pane or a profile.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    unmanaged: Vec<UnmanagedPane>,
+    /// The code of the Herdr (or pane store) call that failed when the unmanaged panes could
+    /// not be looked at; left out when they could. The managed rows are listed either way.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    unmanaged_unavailable: Option<String>,
+    /// `<code>: <message>` for the stderr warning of a text run.
+    #[serde(skip)]
+    unmanaged_gap: Option<String>,
 }
 
 /// The panes in scope, as rows sorted by name. The names are typed here, so a bad one is
@@ -95,14 +129,28 @@ struct PaneTable {
 /// `pane-not-in-profile`); without it a named pane that has no record is an empty table.
 fn rows_in_scope(args: &PaneList, ports: Ports<'_>) -> Result<PaneTable, PaneError> {
     let pane = args.pane.as_deref().map(PaneName::parse).transpose()?;
+    let unscoped = pane.is_none() && args.profile.profile.is_none();
     let mut panes = match (profile_name(&args.profile)?, pane) {
         (Some(profile), pane) => ports.scope.resolve(&profile, pane.as_ref())?.panes,
         (None, Some(pane)) => ports.pane_store.get(&pane)?.into_iter().collect(),
         (None, None) => ports.pane_store.list()?,
     };
     panes.sort_by(|a, b| a.name.cmp(&b.name));
+    // Only the whole registry also shows what the registry does not hold: a pane scoped by
+    // name or profile is a question about records.
+    let (unmanaged, gap) = match unscoped.then(|| unmanaged::observe(ports, now_millis())) {
+        Some(Ok(found)) => (found, None),
+        Some(Err(error)) => (Vec::new(), Some(error)),
+        None => (Vec::new(), None),
+    };
     Ok(PaneTable {
         panes: panes.iter().map(PaneRow::from).collect(),
+        unmanaged,
+        unmanaged_unavailable: gap.as_ref().map(|e| e.code().to_string()),
+        unmanaged_gap: gap.map(|e| {
+            let body = ErrorBody::from(&e);
+            format!("{}: {}", body.code.as_str(), body.message)
+        }),
     })
 }
 
@@ -111,15 +159,45 @@ fn rows_in_scope(args: &PaneList, ports: Ports<'_>) -> Result<PaneTable, PaneErr
 /// so no line ends in a space. With no pane, the header alone.
 fn render_table(table: &PaneTable) -> String {
     let rows: Vec<[String; COLUMNS.len()]> = table.panes.iter().map(PaneRow::cells).collect();
-    let mut widths = COLUMNS.map(|column| column.chars().count());
-    for row in &rows {
+    let mut text = table_text(&COLUMNS, &rows);
+    if !table.unmanaged.is_empty() {
+        // A table of its own, after a blank line: these panes have no name, no profile and
+        // none of the registry's columns (story #832).
+        let rows: Vec<[String; UNMANAGED_COLUMNS.len()]> =
+            table.unmanaged.iter().map(unmanaged_cells).collect();
+        text.push('\n');
+        text.push_str(&table_text(&UNMANAGED_COLUMNS, &rows));
+    }
+    text
+}
+
+/// The columns of the table of unmanaged panes, in order.
+const UNMANAGED_COLUMNS: [&str; 6] = ["PANE-ID", "LABEL", "POS", "PROJECT", "STATE", "IDLE"];
+
+/// The cells of one unmanaged pane's row. IDLE is `-` when Herdr reports no screen change.
+fn unmanaged_cells(pane: &UnmanagedPane) -> [String; UNMANAGED_COLUMNS.len()] {
+    [
+        text_value(pane.pane_id.as_str()),
+        pane.label.as_deref().map_or_else(|| NO_VALUE.to_owned(), text_value),
+        pane.pos.to_string(),
+        pane.cwd.as_deref().map_or_else(|| NO_VALUE.to_owned(), text_value),
+        pane.state.to_owned(),
+        pane.idle_seconds.map_or_else(|| NO_VALUE.to_owned(), duration_text),
+    ]
+}
+
+/// A header and rows, each column left-aligned to its widest cell (counted in characters)
+/// and two spaces from the next; the last is not padded.
+fn table_text<const N: usize>(header: &[&str; N], rows: &[[String; N]]) -> String {
+    let header = header.map(str::to_owned);
+    let mut widths = header.clone().map(|column| column.chars().count());
+    for row in rows {
         for (width, cell) in widths.iter_mut().zip(row) {
             *width = (*width).max(cell.chars().count());
         }
     }
-    let header = COLUMNS.map(str::to_owned);
     std::iter::once(&header)
-        .chain(&rows)
+        .chain(rows)
         .map(|cells| table_line(cells, &widths))
         .collect()
 }

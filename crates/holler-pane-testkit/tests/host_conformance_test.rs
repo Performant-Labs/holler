@@ -94,11 +94,11 @@ impl HostPort for Mutant {
         self.inner.ensure_session(name, cwd)
     }
 
-    fn run(&self, name: &PaneName, argv: &Argv) -> Result<(), PaneError> {
+    fn run(&self, name: &PaneName, cwd: &str, argv: &Argv) -> Result<(), PaneError> {
         match self.broken {
             Break::RunCreatesMissingSession if !self.exists(name) => {
                 self.inner.ensure_session(name, "/")?;
-                self.inner.run(name, argv)
+                self.inner.run(name, cwd, argv)
             }
             Break::RunIsNoop => {
                 if self.exists(name) {
@@ -108,9 +108,10 @@ impl HostPort for Mutant {
                 }
             }
             Break::RunsEmptyArgv if argv.as_slice().is_empty() => {
-                self.inner.run(name, &Argv::new(vec!["true".to_owned()]))
+                self.inner
+                    .run(name, cwd, &Argv::new(vec!["true".to_owned()]))
             }
-            _ => self.inner.run(name, argv),
+            _ => self.inner.run(name, cwd, argv),
         }
     }
 

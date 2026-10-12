@@ -24,7 +24,8 @@ use serde_json::{json, Value};
 
 use crate::verb_harness::run_verb_with;
 use rig::{
-    assert_failure, assert_failure_message, held, old_park, pane, profile_world, run_both, Rig,
+    assert_failure, assert_failure_message, held, old_park, pane, profile_world, run_both,
+    run_both_missing_record, Rig,
     Verb, R, W,
 };
 
@@ -357,7 +358,7 @@ fn park_and_unpark_refuse_a_pane_outside_the_profile_or_a_missing_profile() {
 #[test]
 fn park_and_unpark_refuse_a_pane_with_no_record() {
     for verb in [Verb::Park, Verb::Unpark] {
-        let both = run_both(one_pane, &verb.argv(&["demo-c9r9"]));
+        let both = run_both_missing_record(one_pane, &verb.argv(&["demo-c9r9"]));
         assert_failure_message(&both, "pane-not-found", 3, "pane not found: demo-c9r9");
         both.assert_nothing_written();
     }
@@ -400,8 +401,12 @@ fn park_and_unpark_usage_errors_touch_no_store() {
 
     // (b) An invalid pane name: `PaneName::parse`'s own message.
     let bad_pane = PaneName::parse("a/b").unwrap_err().to_string();
+    // It may be the label of an unmanaged pane, so the verb reads Herdr and the pane store to
+    // tell (#832); it acts on nothing and writes nothing.
     for verb in [Verb::Park, Verb::Unpark] {
-        assert_usage(&verb.argv(&["a/b"]), &bad_pane);
+        let both = run_both_missing_record(one_pane, &verb.argv(&["a/b"]));
+        assert_failure_message(&both, "usage", 2, &bad_pane);
+        both.assert_nothing_written();
     }
 
     // (c) An invalid profile name: `ProfileName::parse`'s own message.
@@ -431,10 +436,12 @@ fn park_and_unpark_usage_errors_touch_no_store() {
         &["pane", "park", "--reason", "", "--release-when", ""],
         "pane park needs a PANE or --profile NAME",
     );
-    assert_usage(
+    let both = run_both_missing_record(
+        one_pane,
         &["pane", "park", "a/b", "--reason", "", "--release-when", ""],
-        &bad_pane,
     );
+    assert_failure_message(&both, "usage", 2, &bad_pane);
+    both.assert_nothing_written();
     assert_usage(
         &[
             "pane",

@@ -265,9 +265,7 @@ fn read(ports: Ports<'_>, request: &SwitchRequest) -> Result<Pane, PaneError> {
             .find(|pane| pane.name == request.pane),
         None => ports.pane_store.get(&request.pane)?,
     };
-    record.ok_or_else(|| PaneError::PaneNotFound {
-        what: request.pane.to_string(),
-    })
+    record.ok_or_else(|| crate::unmanaged::missing(ports, request.pane.as_str()))
 }
 
 /// The orchestrator's pane changes only as the operator's deliberate act (`--as-operator`).

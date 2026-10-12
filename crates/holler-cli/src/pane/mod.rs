@@ -28,8 +28,9 @@ pub mod watch;
 pub mod wiring;
 
 use clap::Subcommand;
+use holler_pane::unmanaged;
 
-use crate::output::VerbCtx;
+use crate::output::{emit_error, ErrorBody, VerbCtx};
 
 /// The `holler pane` verbs.
 #[derive(Subcommand, Debug)]
@@ -48,8 +49,47 @@ pub enum PaneCmd {
     Import(import::PaneImport),
 }
 
+/// Whether `arg` could be a Herdr pane id rather than a pane name: it has a `:` and is not a
+/// valid pane name (Herdr ids look like `w1:p3`).
+pub(crate) fn is_herdr_pane_id_shaped(arg: &str) -> bool {
+    arg.contains(':') && holler_pane::PaneName::parse(arg).is_err()
+}
+
+/// The pane a verb that **acts on** a pane was given, as typed; `None` for a verb that
+/// reads, creates or adopts panes, and for an acting verb given no pane (every pane in scope).
+fn acting_pane(cmd: &PaneCmd) -> Option<&str> {
+    match cmd {
+        PaneCmd::Relaunch(args) => Some(&args.pane),
+        PaneCmd::Switch(args) => Some(&args.pane),
+        PaneCmd::Reset(args) => Some(&args.pane),
+        PaneCmd::Park(args) => args.pane.as_deref(),
+        PaneCmd::Unpark(args) => args.pane.as_deref(),
+        PaneCmd::Close(args) => args.pane.as_deref(),
+        PaneCmd::List(_)
+        | PaneCmd::Get(_)
+        | PaneCmd::Watch(_)
+        | PaneCmd::Launch(_)
+        | PaneCmd::Doctor(_)
+        | PaneCmd::Import(_) => None,
+    }
+}
+
 /// Run a `holler pane` verb and return its exit code (0 ok, 1 failure, 2 usage, 3 refusal).
+///
+/// No verb that acts on a pane accepts an unmanaged one (story #832): a Herdr pane no record
+/// names is visible, not drivable, so each such verb refuses it the same way
+/// (`pane-unmanaged`, exit 3) instead of reporting a missing record. A verb does that where
+/// it finds no record, through `unmanaged::missing`, so a pane that has a record costs no
+/// extra read. The case a verb cannot see is an argument that is **not a valid pane name**:
+/// a Herdr pane id (`w1:p3`), or a label, which Herdr allows to be any text (`Claude Code`, a
+/// label with upper case or over 32 characters). The verb would answer `usage` before any
+/// lookup, so it is checked here, and `usage` stands only when no unmanaged pane answers to it.
 pub fn run(cmd: &PaneCmd, ctx: &mut VerbCtx<'_>) -> i32 {
+    if let Some(arg) = acting_pane(cmd).filter(|arg| holler_pane::PaneName::parse(arg).is_err()) {
+        if let Err(error) = unmanaged::refuse_if_unmanaged(ctx.ports, arg) {
+            return emit_error(&mut ctx.sink, ctx.format, ErrorBody::from(&error));
+        }
+    }
     match cmd {
         PaneCmd::List(args) => list::run(args, ctx),
         PaneCmd::Get(args) => get::run(args, ctx),

@@ -15,6 +15,10 @@
 //! - A closed or unknown pane is `pane-not-found` for `close`, `send_text`, `send_keys`
 //!   and `read`.
 //! - `read` returns at most the lines asked for, and `version` reports one line.
+//! - `observe_pane` answers a listed pane and refuses an unknown or closed one (#832).
+//! - A pane the outside world labels is reported with its label, by `snapshot` and by
+//!   `ensure_pane` of its cell, and a pane with no label, or labelled `""`, with none
+//!   (#808).
 //!
 //! "The workspace's panes" in a case are the panes of `snapshot` whose session and
 //! workspace are the fixture's. Every case ensures `r1c1` before any other cell and
@@ -22,8 +26,15 @@
 //! a pane only by splitting an existing one (the fake's split-only placement) and
 //! against real Herdr, which creates a workspace with its root pane. After a close, a
 //! case checks ids, not cells. The cases press keys by Herdr's own names (`enter`).
+//!
+//! The label case is the one case the suite drives through a hook, a deliberate
+//! exception to the rule that a suite does not drive what the port cannot cause: the
+//! port cannot label a pane, so each implementation hands [`run_herdr_conformance`] a
+//! [`LabelHook`] that labels one in the case's Herdr, as Herdr's `pane.rename` does.
+//! Without a hook (the opt-in run against a real Herdr) the case is not run, and
+//! [`herdr_cases`] still lists it.
 
-use holler_pane::{GridPos, HerdrPane, HerdrPort, HerdrSpec, Key, PaneId};
+use holler_pane::{GridPos, HerdrPane, HerdrPort, HerdrSpec, Key, PaneError, PaneId};
 
 use super::{expect_code, expect_eq, run_cases, succeeds, Conformance};
 
@@ -41,6 +52,9 @@ const NOT_FOUND: &str = "pane-not-found";
 
 /// An id that no Herdr hands out to the first panes of a scratch session.
 const UNKNOWN_ID: &str = "w999:p999";
+
+/// The label case's id: the one case that needs the label hook (#808).
+const LABEL_CASE: &str = "labelled-pane-reports-its-label";
 
 // How many lines case 10 types, and how many it reads back.
 const TYPED_LINES: usize = 5;
@@ -63,20 +77,31 @@ pub struct HerdrFixture<H> {
     pub workspace: String,
 }
 
-/// What a case sees of its fixture: the port, and the session and workspace it works
-/// in.
+/// The label hook (#808): the outside world labels the pane `PaneId` of the case's
+/// Herdr with the text, `""` included, as Herdr's `pane.rename` does, and a pane that
+/// Herdr does not hold is `pane-not-found`. It is handed the case's fixture and its
+/// guard, either of which may reach that Herdr.
+pub type LabelHook<'a, H, K> =
+    &'a dyn Fn(&HerdrFixture<H>, &K, &PaneId, &str) -> Result<(), PaneError>;
+
+/// What a case sees of its fixture: the port, the session and workspace it works in,
+/// and the label hook, bound to the fixture and its guard.
 struct Scratch<'a> {
     port: &'a dyn HerdrPort,
     session: &'a str,
     workspace: &'a str,
+    label: Option<Rename<'a>>,
 }
+
+/// The label hook as a case calls it: label the pane with the text.
+type Rename<'a> = &'a dyn Fn(&PaneId, &str) -> Result<(), PaneError>;
 
 /// One case: `Err` with the reason when it does not hold.
 type Case = fn(&Scratch<'_>) -> Result<(), String>;
 
 /// The suite, in order: the one table that the runner iterates and [`herdr_cases`]
 /// lists.
-const CASES: [(&str, Case); 11] = [
+const CASES: [(&str, Case); 13] = [
     (
         "ensure-r2c1-reads-back-as-r2c1",
         ensure_r2c1_reads_back_as_r2c1,
@@ -112,6 +137,11 @@ const CASES: [(&str, Case); 11] = [
         read_returns_at_most_max_lines,
     ),
     ("version-is-reported", version_is_reported),
+    (LABEL_CASE, labelled_pane_reports_its_label),
+    (
+        "observe-pane-answers-a-listed-pane-and-refuses-an-unknown-one",
+        observe_pane_answers_a_listed_pane_and_refuses_an_unknown_one,
+    ),
 ];
 
 /// The ids of the cases [`run_herdr_conformance`] runs, in the order it runs them.
@@ -124,31 +154,58 @@ pub fn herdr_cases() -> Vec<&'static str> {
 ///
 /// `fresh` is called once per case. It returns the fixture and a guard that the suite
 /// keeps alive for that case only: `()` for the fake, the scratch server's handle for
-/// the adapter (#640). The fixture is dropped before its guard. How each implementation
-/// runs the suite:
+/// the adapter (#640). The fixture is dropped before its guard. `label` is the
+/// [`LabelHook`] the label case labels its panes with (#808); with `None` that case is
+/// not run. How each implementation runs the suite:
 ///
 /// ```text
-/// // the fake:
-/// run_herdr_conformance(|| {
-///     let port = FakeHerdr::new("scratch").with_workspace("scratch", 2, 1).expect("workspace");
-///     (HerdrFixture { port, session: "scratch".into(), workspace: "scratch".into() }, ())
-/// })
-/// // the adapter (#640, opt-in, #[ignore]): a fresh scratch Herdr session per case whose
-/// // workspace the adapter knows to be 2 rows by 1 column; the session's server handle
-/// // as the guard; never the default or a live session.
+/// // the fake, whose own `rename` is the hook:
+/// let rename = |f: &HerdrFixture<FakeHerdr>, _: &(), pane: &PaneId, label: &str| {
+///     f.port.rename(pane, label)
+/// };
+/// run_herdr_conformance(
+///     || {
+///         let port = FakeHerdr::new("scratch").with_workspace("scratch", 2, 1).expect("workspace");
+///         (HerdrFixture { port, session: "scratch".into(), workspace: "scratch".into() }, ())
+///     },
+///     Some(&rename),
+/// )
+/// // the adapter's own runs (#640): over its simulated Herdr, which the case's guard
+/// // carries and the hook labels a pane in.
+/// // the adapter against a real Herdr (#640, opt-in, #[ignore]): a fresh scratch Herdr
+/// // session per case whose workspace the adapter knows to be 2 rows by 1 column; the
+/// // session's server handle as the guard; never the default or a live session; `None`
+/// // for the hook, so the label case is not run.
 /// ```
-pub fn run_herdr_conformance<H, K, F>(fresh: F) -> Conformance
+pub fn run_herdr_conformance<H, K, F>(
+    mut fresh: F,
+    label: Option<LabelHook<'_, H, K>>,
+) -> Conformance
 where
     H: HerdrPort,
     F: FnMut() -> (HerdrFixture<H>, K),
 {
-    run_cases(&CASES, fresh, |case, fixture| {
-        case(&Scratch {
-            port: &fixture.port,
-            session: &fixture.session,
-            workspace: &fixture.workspace,
-        })
-    })
+    // The label case needs the hook: without one, it is not run.
+    let cases: Vec<(&'static str, Case)> = CASES
+        .into_iter()
+        .filter(|&(id, _)| label.is_some() || id != LABEL_CASE)
+        .collect();
+    // The hook takes the guard, so the guard rides in the subject, after the fixture: a
+    // tuple drops its fields in order, so the fixture is still dropped before its guard.
+    run_cases(
+        &cases,
+        || (fresh(), ()),
+        |case, (fixture, guard)| {
+            let rename =
+                label.map(|hook| move |pane: &PaneId, text: &str| hook(fixture, guard, pane, text));
+            case(&Scratch {
+                port: &fixture.port,
+                session: &fixture.session,
+                workspace: &fixture.workspace,
+                label: rename.as_ref().map(|rename| rename as Rename<'_>),
+            })
+        },
+    )
 }
 
 // --- the cases ---
@@ -362,6 +419,64 @@ fn version_is_reported(s: &Scratch<'_>) -> Result<(), String> {
     Err(format!(
         "version() returned {version:?}; expected a non-empty string on one line"
     ))
+}
+
+/// Case 13 (#832): `observe_pane` answers a pane the snapshot lists (what it reports is the
+/// implementation's: Herdr may report no working directory and no screen-change time), and
+/// an id Herdr never handed out, or a pane that has closed, is `pane-not-found`.
+fn observe_pane_answers_a_listed_pane_and_refuses_an_unknown_one(
+    s: &Scratch<'_>,
+) -> Result<(), String> {
+    let a = s.ensure(R1C1)?;
+    let b = s.ensure(R2C1)?.pane_id;
+    succeeds(
+        &format!("observe_pane({}), a listed pane", a.pane_id.as_str()),
+        s.port.observe_pane(&a.pane_id),
+    )?;
+    expect_code(
+        &format!("observe_pane({UNKNOWN_ID}), an id never handed out"),
+        s.port.observe_pane(&PaneId::new(UNKNOWN_ID)),
+        NOT_FOUND,
+    )?;
+    s.close(&b)?;
+    expect_code(
+        &format!("observe_pane({}) after it closed", b.as_str()),
+        s.port.observe_pane(&b),
+        NOT_FOUND,
+    )
+}
+
+/// Case 12 (#808): a pane labelled through the hook is reported with its label, by
+/// `snapshot` and by `ensure_pane` of its cell, which answers the pane's snapshot entry,
+/// label included. A pane never labelled reports none, and so does one labelled `""`:
+/// `a` at `r1c1` is labelled `x` and `b` at `r2c1` is labelled `""`.
+fn labelled_pane_reports_its_label(s: &Scratch<'_>) -> Result<(), String> {
+    let Some(rename) = s.label else {
+        return Err("the label case runs only with a label hook".to_owned());
+    };
+    let a = s.ensure(R1C1)?;
+    let b = s.ensure(R2C1)?;
+    expect_eq(
+        "the labels of the panes at r1c1 and r2c1 before either is labelled",
+        (&a.label, &b.label),
+        (&None, &None),
+    )?;
+    for (pane, text) in [(&a.pane_id, "x"), (&b.pane_id, "")] {
+        let call = format!("labelling {} {text:?}", pane.as_str());
+        succeeds(&call, rename(pane, text))?;
+    }
+    let listed = s.panes()?;
+    for (pane, cell, want) in [(&a, R1C1, Some("x")), (&b, R2C1, None)] {
+        let entry = listed
+            .iter()
+            .find(|p| p.pane_id == pane.pane_id)
+            .ok_or_else(|| format!("the snapshot no longer lists {}", pane.pane_id.as_str()))?;
+        let what = format!("the label the snapshot lists for the pane at {cell}");
+        expect_eq(&what, entry.label.as_deref(), want)?;
+        let call = format!("ensure_pane({cell}) of the labelled pane");
+        expect_eq(&call, &s.ensure(cell)?, entry)?;
+    }
+    Ok(())
 }
 
 // --- helpers ---

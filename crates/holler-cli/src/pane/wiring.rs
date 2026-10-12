@@ -1,49 +1,205 @@
 //! The ports a `holler pane` or `holler profile` verb runs against (epic #633).
 //!
-//! [`Wiring`] owns them: [`Wiring::connect`] builds them, which can fail (no hub, no Herdr
-//! socket), and [`Wiring::ports`] lends them as the [`Ports`] bundle a verb holds. `main.rs` calls
-//! `connect` once per run and reports its error the way a verb reports one; `pane::run` and
-//! `profile::run` never see it.
+//! [`Wiring`] owns them: [`Wiring::connect`] builds them, and [`Wiring::ports`] lends them as the
+//! [`Ports`] bundle a verb holds. `main.rs` calls `connect` once per run, and `say_cmd.rs` once for
+//! `say`, `interrupt` and `answer` with `--pane`; each reports its error the way a verb reports one,
+//! so `pane::run` and `profile::run` never see it. The in-process verb harness and the verb tests
+//! build their `Ports` from fakes, or from [`Unwired`], and never call `connect`.
 //!
-//! **Stub (story #670).** `connect` hands out [`Unwired`], whose every method answers
-//! `not-implemented`, so a verb that runs before its wiring exists fails loudly and never acts.
-//! Story #649 replaces the body of `connect` (and the fields of `Wiring`) with the real stores and
-//! adapters, and keeps `Unwired`: it is the one not-implemented port set, and the in-process verb
-//! harness (`tests/verb_harness`) builds its `Ports` from it until the test kit's fakes (#638)
-//! replace it there.
+//! **What `connect` builds (#649, D1).** The verbs run here, CLI-side; the hub is the store only
+//! and constructs no adapter (ADR-0021 section 5). So `connect` builds:
+//!
+//! - the two registries' clients ([`store`]), over the hub's control socket;
+//! - the Herdr adapter, built on its first use ([`bind::LazyHerdr`]): it pings Herdr when it is
+//!   built;
+//! - the tmux host (`TmuxHost`) and the OpenCode harness (`OpenCodeHarness`), on one tmux server;
+//!   building either does no I/O;
+//! - `SystemProber`, and `StoreScope` over the two clients as the `ProfileScope`. The scope logs
+//!   every profile write as `holler pane`: what a `--profile` edit of a pane verb writes, and
+//!   through it what `profile apply`'s creates and relaunches write (one actor; per-verb actors are
+//!   #825).
+//!
+//! **What `connect` needs: the hub, and nothing else (D2).** It makes one `control/status`
+//! exchange, and any failure of it (no hub, an error, no answer within 5 s) is `unavailable`
+//! naming the hub, so with no hub every verb exits 1 and touches no adapter. It touches no Herdr,
+//! tmux or OpenCode, and a configuration variable that is missing or malformed never fails it
+//! (D26): the error is kept, and the port it configures answers it at its first use. So `pane list`,
+//! `pane get`, `pane watch`, `profile list` and `profile show` work with nothing but the hub.
+//!
+//! **The environment (D5 to D7).** Read once, by `connect`, through [`mod@env`]:
+//!
+//! | Variable | What it sets | When it is unset |
+//! |---|---|---|
+//! | `HOLLER_HERDR_SESSION` | the one Herdr session the panes live in (Herdr's `HERDR_SESSION` is not read) | each Herdr call answers `usage` naming it |
+//! | `HOLLER_HERDR_SOCKET` | that session's socket, an absolute path | `HERDR_SOCKET_PATH`, else `$XDG_CONFIG_HOME/herdr/sessions/<session>/herdr.sock` (`$HOME/.config` for `XDG_CONFIG_HOME`) |
+//! | `HOLLER_HERDR_WORKSPACES` | each workspace's rows by columns, `label=RxC[,label=RxC]...` (a launch into an unlisted workspace is `unavailable`) | no workspace |
+//! | `HOLLER_TMUX_SOCKET` | the tmux server of the host and the harness, an absolute path (`tmux` and `kill` come from `PATH`) | tmux's default socket |
+//! | `HOLLER_OPENCODE_BIN` | the `opencode` binary, an absolute path | `opencode` found on `PATH` (none: each harness call answers `unavailable` naming the variable) |
+//! | `HOLLER_OPENCODE_SERVE_ARGS` | a JSON array of strings, appended to `opencode serve --port P --hostname 127.0.0.1` | none |
+//!
+//! A malformed value (a relative or empty path, a workspace list that does not parse, serve
+//! arguments that are not a JSON array of strings) is `usage` naming its variable, at the first
+//! use of the port it configures; a bad `HOLLER_TMUX_SOCKET` fails the host and the harness both,
+//! and never falls back to the default tmux server. A variable of the table whose value is not
+//! UTF-8 is read as the empty value, never as unset, so it takes no fallback: the empty value is
+//! `usage` naming the variable, but for `HOLLER_HERDR_WORKSPACES`, where it is no workspace, so
+//! the Herdr adapter refuses every launch as it refuses one into an unlisted workspace
+//! ([`env::Lookup`]). The OpenCode processes run with `ProcessEnv::Inherit`: they inherit the
+//! tmux server's environment, never the CLI's, so a provider credential reaches a harness server
+//! only through that tmux server's environment. No variable here carries a credential, and
+//! nothing of this module puts one on an argv, in a file or in a message.
+//!
+//! **The `tui_session` lookup (D8)** answers from the bindings of a launch in progress, then the
+//! pane registry, then Herdr's labels ([`bind::tui_session`]).
+//!
+//! **Bounds (D9).** Each adapter and each registry request keeps its own 10 s bound (I5), and the
+//! verbs keep their own budgets; there is no flag or variable for a bound.
+//!
+//! [`Unwired`] stays: it is the one not-implemented port set, which tests build `Ports` from.
 
+pub mod bind;
+pub mod env;
+pub mod store;
+
+use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
+use holler_adapter_herdr::adapter::{HerdrAdapter, HerdrConfig};
+use holler_adapter_host::{TmuxHost, TmuxSocket as HostSocket};
+use holler_adapter_opencode::{
+    OpenCodeConfig, OpenCodeHarness, ProcessEnv, Resolver, Timeouts, TmuxConfig,
+    TmuxSocket as TuiSocket,
+};
 use holler_pane::{
     Actor, Argv, Cursor, HarnessPort, HerdrPane, HerdrPort, HerdrSnapshot, HerdrSpec, HostPort,
-    Key, Pane, PaneError, PaneEvent, PaneId, PaneName, PaneStore, Ports, ProbeResult, Prober,
+    Key, Pane, PaneError, PaneEvent, PaneId, PaneName, PaneObservation, PaneStore, Ports, ProbeResult, Prober,
     Profile, ProfileEvent, ProfileLogEntry, ProfileName, ProfileScope, ProfileStore, ResolvedScope,
-    SpecEdit, Watch,
+    ServeSpec, SpecEdit, SystemProber, Watch,
 };
 
-/// The ports a verb runs against, owned.
+use self::bind::{
+    tui_session, BindingHerdr, BindingHost, Bindings, LazyHerdr, WiredHarness, WiredHost,
+};
+use self::env::Lookup;
+use crate::pane::profile_scope::StoreScope;
+
+/// Who the profile scope logs every profile write of a wired run as (D1).
+const ACTOR: &str = "holler pane";
+
+/// The ports a verb runs against, owned (D1).
 pub struct Wiring {
-    ports: Unwired,
+    panes: Arc<dyn PaneStore>,
+    profiles: Arc<dyn ProfileStore>,
+    herdr: BindingHerdr,
+    host: BindingHost,
+    harness: WiredHarness,
+    scope: StoreScope,
+    prober: SystemProber,
 }
 
 impl Wiring {
-    /// Build the ports of a run. Fails when something they need cannot be reached.
+    /// Build the ports of a run from this process's environment, once the hub has answered.
+    /// Fails `unavailable`, naming the hub, only when the hub cannot be reached (D2).
+    ///
+    /// A variable whose value is not UTF-8 is read as the empty value, never as unset
+    /// ([`env::Lookup`]): unset, `HOLLER_TMUX_SOCKET` would be tmux's default server, the
+    /// operator's live one (D6).
     pub fn connect() -> Result<Self, PaneError> {
-        Ok(Self { ports: Unwired })
+        store::reach_hub()?;
+        let actor = Actor::parse(ACTOR)?;
+        let lookup = |name: &str| {
+            std::env::var_os(name).map(|value| value.into_string().unwrap_or_default())
+        };
+        Ok(Self::from_env(&lookup, actor))
     }
 
     /// The ports, lent for one verb.
     pub fn ports(&self) -> Ports<'_> {
         Ports {
-            pane_store: &self.ports,
-            profile_store: &self.ports,
-            herdr: &self.ports,
-            host: &self.ports,
-            harness: &self.ports,
-            scope: &self.ports,
-            prober: &self.ports,
+            pane_store: self.panes.as_ref(),
+            profile_store: self.profiles.as_ref(),
+            herdr: &self.herdr,
+            host: &self.host,
+            harness: &self.harness,
+            scope: &self.scope,
+            prober: &self.prober,
         }
     }
+
+    /// The ports `env` configures, each configuration error kept for its port's first use. No
+    /// I/O but the search of `PATH` for `opencode`.
+    fn from_env(env: Lookup<'_>, actor: Actor) -> Self {
+        let (panes, profiles) = store::stores();
+        let herdr_config = env::herdr_config(env);
+        let session = herdr_config
+            .as_ref()
+            .map(|config| config.session.clone())
+            .unwrap_or_default();
+        // `move`: the closure owns `herdr_config` from here on, so it is `'static`, as
+        // `LazyHerdr::new` requires, and each build borrows the config from the closure.
+        let lazy: Arc<dyn HerdrPort> =
+            Arc::new(LazyHerdr::new(move || connect_herdr(&herdr_config)));
+        let bindings = Bindings::new();
+        let tmux = env::tmux_socket(env);
+        let lookup = tui_session(
+            &session,
+            bindings.clone(),
+            Arc::clone(&panes),
+            Arc::clone(&lazy),
+        );
+        Self {
+            herdr: BindingHerdr::new(lazy, bindings.clone()),
+            host: BindingHost::new(Arc::new(tmux_host(&tmux)), bindings),
+            harness: WiredHarness::new(opencode_harness(env, &tmux, lookup)),
+            scope: StoreScope::new(Arc::clone(&profiles), Arc::clone(&panes), actor),
+            panes,
+            profiles,
+            prober: SystemProber,
+        }
+    }
+}
+
+/// The Herdr adapter of `config` (D5), connected now: [`LazyHerdr`] calls this on its first use.
+fn connect_herdr(config: &Result<HerdrConfig, PaneError>) -> Result<Arc<dyn HerdrPort>, PaneError> {
+    let adapter = HerdrAdapter::connect(config.clone()?)?;
+    Ok(Arc::new(adapter))
+}
+
+/// The tmux host on `socket` (D6), or the socket's configuration error.
+fn tmux_host(socket: &Result<HostSocket, PaneError>) -> WiredHost {
+    match socket {
+        Ok(socket) => WiredHost::new(Ok(Arc::new(TmuxHost::new(socket.clone())))),
+        Err(error) => WiredHost::new(Err(error.clone())),
+    }
+}
+
+/// The OpenCode harness (D7) on the tmux server of `socket` (D6), with `tui_session` as its
+/// lookup (D8), or the first configuration error of the socket, the binary and the serve
+/// arguments, in that order.
+fn opencode_harness(
+    env: Lookup<'_>,
+    socket: &Result<HostSocket, PaneError>,
+    tui_session: Resolver<PaneId, PaneName>,
+) -> Result<Arc<dyn HarnessPort>, PaneError> {
+    // The two adapters' socket types mirror each other (an adapter may not depend on another).
+    let socket = match socket.clone()? {
+        HostSocket::Default => TuiSocket::Default,
+        HostSocket::Name(name) => TuiSocket::Name(name),
+        HostSocket::Path(path) => TuiSocket::Path(path),
+    };
+    let config = OpenCodeConfig {
+        opencode_bin: env::opencode_bin(env)?,
+        serve_args: env::serve_args(env)?,
+        env: ProcessEnv::Inherit,
+        tmux: TmuxConfig {
+            tmux_bin: PathBuf::from("tmux"),
+            socket,
+        },
+        tui_session,
+        timeouts: Timeouts::default(),
+    };
+    Ok(Arc::new(OpenCodeHarness::new(config)))
 }
 
 /// A port set whose every method answers [`PaneError::NotImplemented`]. Its probe never passes.
@@ -146,6 +302,10 @@ impl HerdrPort for Unwired {
     fn version(&self) -> Result<String, PaneError> {
         Err(PaneError::NotImplemented)
     }
+
+    fn observe_pane(&self, _pane: &PaneId) -> Result<PaneObservation, PaneError> {
+        Err(PaneError::NotImplemented)
+    }
 }
 
 impl HostPort for Unwired {
@@ -153,7 +313,7 @@ impl HostPort for Unwired {
         Err(PaneError::NotImplemented)
     }
 
-    fn run(&self, _name: &PaneName, _argv: &Argv) -> Result<(), PaneError> {
+    fn run(&self, _name: &PaneName, _cwd: &str, _argv: &Argv) -> Result<(), PaneError> {
         Err(PaneError::NotImplemented)
     }
 
@@ -167,7 +327,16 @@ impl HostPort for Unwired {
 }
 
 impl HarnessPort for Unwired {
-    fn serve(&self, _name: &PaneName, _port: u16) -> Result<u32, PaneError> {
+    fn serve_command(
+        &self,
+        _name: &PaneName,
+        _port: u16,
+        _spec: &ServeSpec,
+    ) -> Result<Argv, PaneError> {
+        Err(PaneError::NotImplemented)
+    }
+
+    fn verify_serving(&self, _port: u16, _spec: &ServeSpec) -> Result<(), PaneError> {
         Err(PaneError::NotImplemented)
     }
 

@@ -5,21 +5,35 @@
 //! - a fresh scratch dir in `/tmp`, short enough for a tmux socket path; `HOME` and the
 //!   `XDG_*` dirs inside it, so no real OpenCode config, auth or session store is read;
 //! - the dead-end provider config, verbatim from the spike, so no model can be reached:
-//!   127.0.0.1:9 must refuse, and after every `serve` the server must report exactly that
-//!   provider, or the test fails without going on. No prompt is ever sent;
+//!   127.0.0.1:9 must refuse, and after every server the rig launches is healthy it must
+//!   report exactly that provider, or the test fails without going on. A prompt is sent only
+//!   by the agent and prompt tests of #642 part 3 (D11), and only to that provider: OpenCode
+//!   1.19.0 retries the refused connection (the session's status reads `retry`) until the
+//!   turn is aborted, so no model is reached;
+//! - a launcher (#802): `serve_command` only builds the server's argv, so the rig runs that
+//!   argv itself, in a process group of its own, in the scratch project dir, waits for its
+//!   health with the engine's own wait (`holler_pane::tx_launch::wait_healthy`), then runs
+//!   the model guard. This crate may not depend on the host adapter (ADR-0021 section 5), so
+//!   the server does not run under tmux here;
 //! - two ports from 48100-48199 only, each refused and bindable when picked and not yet
 //!   handed out in this process;
 //! - a private tmux server (`-S <scratch>/tmux.sock -f /dev/null`) with sessions
 //!   `demo-c1r1` and `demo-c2r1` running a placeholder (`sleep 3600`), for the panes
 //!   `w9:p1` and `w9:p2`; never the default tmux server.
 //!
+//! The dead-end config ([`CONFIG`]), its layout ([`lay_out`]), the isolated environment
+//! ([`isolated_vars`]), the binaries ([`binaries`]) and the model guard
+//! ([`no_model_can_be_reached`]) are public: the pane integration scenario (#649) includes
+//! this file and reuses them, never a copy.
+//!
 //! The [`Guard`] is built before the tmux server starts. On drop it SIGKILLs the process
-//! group of every pid `serve` returned through [`Recording`], kills the private tmux server
+//! group of every server the launcher started through [`Recording`], kills the private tmux server
 //! by its socket (`kill-server`, never a signal), and removes the scratch dir. It never
 //! signals a process it did not start and never looks processes up.
 
 use std::collections::HashSet;
 use std::net::{Ipv4Addr, SocketAddr, TcpStream};
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
@@ -29,7 +43,9 @@ use holler_adapter_opencode::http::{self, Reply};
 use holler_adapter_opencode::{
     OpenCodeConfig, OpenCodeHarness, ProcessEnv, Timeouts, TmuxConfig, TmuxSocket,
 };
-use holler_pane::{HarnessPort, PaneError, PaneId, PaneName};
+use holler_pane::ports::Activity;
+use holler_pane::tx_launch::{wait_healthy, BOOT_POLL};
+use holler_pane::{Argv, HarnessPort, PaneError, PaneId, PaneName, ServeSpec};
 use holler_pane_testkit::conformance::harness::HarnessRig;
 use serde_json::{json, Value};
 use tempfile::TempDir;
@@ -48,7 +64,7 @@ const PORT_COUNT: u16 = 100;
 const DEAD_END: u16 = 9;
 
 /// `scripts/spikes/opencode-lib.sh:68-85`, verbatim.
-const CONFIG: &str = r#"{
+pub const CONFIG: &str = r#"{
   "$schema": "https://opencode.ai/config.json",
   "enabled_providers": ["deadend"],
   "disabled_providers": ["opencode"],
@@ -77,7 +93,7 @@ pub fn opted_in(test: &str) -> bool {
 }
 
 /// `name` on `PATH`, as an absolute path.
-fn on_path(name: &str) -> Option<PathBuf> {
+pub fn on_path(name: &str) -> Option<PathBuf> {
     let path = std::env::var_os("PATH")?;
     std::env::split_paths(&path)
         .map(|dir| dir.join(name))
@@ -86,7 +102,7 @@ fn on_path(name: &str) -> Option<PathBuf> {
 
 /// The binaries: `OPENCODE_BIN` or `opencode` on `PATH`, and `tmux` on `PATH`. Opted in, a
 /// missing one is a failure, not a skip.
-fn binaries() -> (PathBuf, PathBuf) {
+pub fn binaries() -> (PathBuf, PathBuf) {
     let opencode = std::env::var_os("OPENCODE_BIN")
         .map(PathBuf::from)
         .or_else(|| on_path("opencode"))
@@ -171,7 +187,7 @@ impl Drop for Guard {
     }
 }
 
-/// `kill -s <signal> -- -<pgid>`: only ever a group `serve` returned.
+/// `kill -s <signal> -- -<pgid>`: only ever a group the launcher started.
 pub fn signal_group(pgid: u32, signal: &str) -> bool {
     assert!(pgid > 1, "refusing to signal the process group {pgid}");
     Command::new("kill")
@@ -181,22 +197,87 @@ pub fn signal_group(pgid: u32, signal: &str) -> bool {
         .is_ok_and(|s| s.success())
 }
 
-/// The adapter, with every pid `serve` returns recorded for the guard and the model guard
-/// run after every `serve`.
+/// How long a launched server may take to answer its first health check.
+const BOOT: Duration = Duration::from_secs(30);
+
+/// The adapter, and the rig's launcher: every server it starts is recorded for the guard,
+/// and the model guard runs once the server is healthy.
 pub struct Recording {
     inner: OpenCodeHarness,
     pids: Arc<Mutex<Vec<u32>>>,
+    /// The directory a server runs in: the scratch project dir.
+    project: PathBuf,
 }
 
-impl HarnessPort for Recording {
-    fn serve(&self, name: &PaneName, port: u16) -> Result<u32, PaneError> {
-        let pid = self.inner.serve(name, port)?;
+impl Recording {
+    /// Run `argv` (what `serve_command` built for a server on `port`) in a process group of
+    /// its own in the project dir, with null stdio, never through a shell; wait for it to be
+    /// healthy, then run the model guard. Returns its pid, which is also its group id.
+    pub fn launch_on(&self, port: u16, argv: &Argv) -> Result<u32, PaneError> {
+        let (program, args) = argv
+            .as_slice()
+            .split_first()
+            .ok_or_else(|| PaneError::Usage {
+                message: "an empty argv".to_owned(),
+            })?;
+        let child = Command::new(program)
+            .args(args)
+            .current_dir(&self.project)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .process_group(0)
+            .spawn()
+            .map_err(|e| PaneError::Unavailable {
+                what: format!("cannot start {program}: {e}"),
+            })?;
+        let pid = child.id();
         self.pids
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .push(pid);
+        // The guard kills the group; a thread reaps the child so no zombie is left.
+        std::thread::spawn(move || {
+            let mut child = child;
+            let _ = child.wait();
+        });
+        if !wait_healthy(&self.inner, port, BOOT_POLL, Instant::now() + BOOT)? {
+            return Err(PaneError::Timeout {
+                op: "real_opencode.launch".to_owned(),
+            });
+        }
         no_model_can_be_reached(port);
         Ok(pid)
+    }
+
+    /// The conformance suite's launcher: [`Recording::launch_on`] on the port the argv names
+    /// after `--port`.
+    pub fn launch(&self, _name: &PaneName, argv: &Argv) -> Result<(), PaneError> {
+        let port = port_in(argv).ok_or_else(|| PaneError::Usage {
+            message: "the server's argv names no --port".to_owned(),
+        })?;
+        self.launch_on(port, argv).map(drop)
+    }
+}
+
+/// The port a server argv names after `--port`.
+fn port_in(argv: &Argv) -> Option<u16> {
+    let parts = argv.as_slice();
+    let at = parts.iter().position(|part| part == "--port")?;
+    parts.get(at + 1)?.parse().ok()
+}
+
+impl HarnessPort for Recording {
+    fn serve_command(
+        &self,
+        name: &PaneName,
+        port: u16,
+        spec: &ServeSpec,
+    ) -> Result<Argv, PaneError> {
+        self.inner.serve_command(name, port, spec)
+    }
+    fn verify_serving(&self, port: u16, spec: &ServeSpec) -> Result<(), PaneError> {
+        self.inner.verify_serving(port, spec)
     }
     fn health(&self, port: u16) -> Result<bool, PaneError> {
         self.inner.health(port)
@@ -219,11 +300,19 @@ impl HarnessPort for Recording {
     fn shown_session(&self, pane: &PaneId) -> Result<Option<String>, PaneError> {
         self.inner.shown_session(pane)
     }
+    // #642 part 3: forwarded, or the trait's defaults (`prompt-unsupported`, `Idle`) would
+    // answer for the adapter through `rig.harness`.
+    fn send_prompt(&self, port: u16, session: &str, text: &str) -> Result<(), PaneError> {
+        self.inner.send_prompt(port, session, text)
+    }
+    fn session_activity(&self, port: u16, session: &str) -> Result<Activity, PaneError> {
+        self.inner.session_activity(port, session)
+    }
 }
 
 /// The model guard: the server on `port` lists exactly the dead-end provider, and
 /// 127.0.0.1:9 still refuses. Otherwise the test stops here.
-fn no_model_can_be_reached(port: u16) {
+pub fn no_model_can_be_reached(port: u16) {
     let reply = raw(port, "GET", "/config/providers", None);
     let providers: Option<Vec<Value>> = serde_json::from_slice::<Value>(&reply.body)
         .ok()
@@ -284,10 +373,7 @@ impl Rig {
             refused(DEAD_END),
             "127.0.0.1:9 accepts connections; the dead-end provider would not be dead. Refusing."
         );
-        for sub in ["home", "data", "config/opencode", "state", "cache", "proj"] {
-            std::fs::create_dir_all(root.join(sub)).unwrap();
-        }
-        std::fs::write(root.join("config/opencode/opencode.json"), CONFIG).unwrap();
+        lay_out(&root);
         for session in SESSIONS {
             let out = tmux(
                 &tmux_bin,
@@ -310,6 +396,7 @@ impl Rig {
             harness: Recording {
                 inner: OpenCodeHarness::new(config.clone()),
                 pids,
+                project: root.join("proj"),
             },
             ports: [free_port(), free_port()],
             panes: PANES.map(PaneId::new),
@@ -329,18 +416,32 @@ impl Rig {
         (self.harness, rig, self.guard)
     }
 
-    /// Serve `SESSIONS[i]` on `ports[i]`. A port another process took since it was picked
-    /// ("port N is in use") is replaced by a new one from the range, not a failure (AC 31).
+    /// Start the server of `SESSIONS[i]` on `ports[i]` with no agent: [`Rig::serve_with`] of
+    /// the default spec. Its pid, which is also its process group id.
     pub fn serve(&mut self, i: usize) -> u32 {
+        self.serve_with(i, &ServeSpec::default())
+    }
+
+    /// Start the server of `SESSIONS[i]` on `ports[i]`: the argv `serve_command` builds for
+    /// `spec`, run by the rig's launcher. A port another process took since it was picked
+    /// (it no longer refuses) is replaced by a new one from the range, not a failure (AC 31).
+    /// Its pid, which is also its process group id.
+    pub fn serve_with(&mut self, i: usize, spec: &ServeSpec) -> u32 {
         let name = PaneName::parse(SESSIONS[i]).unwrap();
         for _ in 0..3 {
-            match self.harness.serve(&name, self.ports[i]) {
-                Ok(pid) => return pid,
-                Err(PaneError::Unavailable { what }) if what.contains("is in use") => {
-                    self.ports[i] = free_port();
-                }
-                Err(other) => panic!("serve({name}, {}): {other:?}", self.ports[i]),
+            let port = self.ports[i];
+            if !refused(port) {
+                self.ports[i] = free_port();
+                continue;
             }
+            let argv = self
+                .harness
+                .serve_command(&name, port, spec)
+                .unwrap_or_else(|e| panic!("serve_command({name}, {port}): {e:?}"));
+            return self
+                .harness
+                .launch_on(port, &argv)
+                .unwrap_or_else(|e| panic!("launch({name}, {port}): {e:?}"));
         }
         panic!("serve({name}): three ports in a row were taken by another process");
     }
@@ -386,10 +487,19 @@ impl Rig {
     }
 }
 
-/// The adapter's config for a rig: the isolated env of `opencode-lib.sh:98-111`, `--pure`,
-/// one scratch project dir for every pane, the private tmux socket, and a `tui_session`
-/// that maps the rig's panes to their sessions and anything else to `pane-not-found`.
-fn config(opencode: &Path, tmux_bin: &Path, sock: &Path, root: &Path) -> OpenCodeConfig {
+/// Lay out a scratch root: `home`, `data`, `config`, `state`, `cache` and `proj`, with the
+/// dead-end [`CONFIG`] as `config/opencode/opencode.json`.
+pub fn lay_out(root: &Path) {
+    for sub in ["home", "data", "config/opencode", "state", "cache", "proj"] {
+        std::fs::create_dir_all(root.join(sub)).unwrap();
+    }
+    std::fs::write(root.join("config/opencode/opencode.json"), CONFIG).unwrap();
+}
+
+/// The isolated env of `opencode-lib.sh:98-111` over the scratch `root` (laid out by
+/// [`lay_out`]): `PATH` with `opencode`'s directory, `HOME` and the `XDG_*` dirs inside the
+/// root, `TERM`, and the five `OPENCODE_DISABLE_*` flags. Nothing else.
+pub fn isolated_vars(opencode: &Path, root: &Path) -> Vec<(String, String)> {
     let dir = |sub: &str| root.join(sub).display().to_string();
     let bin_dir = opencode
         .parent()
@@ -415,16 +525,21 @@ fn config(opencode: &Path, tmux_bin: &Path, sock: &Path, root: &Path) -> OpenCod
     ] {
         vars.push((format!("OPENCODE_DISABLE_{flag}"), "1".to_owned()));
     }
-    let project = root.join("proj");
+    vars
+}
+
+/// The adapter's config for a rig: the isolated env of [`isolated_vars`], `--pure`, one
+/// scratch project dir for every pane, the private tmux socket, and a `tui_session` that maps
+/// the rig's panes to their sessions and anything else to `pane-not-found`.
+fn config(opencode: &Path, tmux_bin: &Path, sock: &Path, root: &Path) -> OpenCodeConfig {
     OpenCodeConfig {
         opencode_bin: opencode.to_path_buf(),
         serve_args: vec!["--pure".to_owned()],
-        env: ProcessEnv::Isolated(vars),
+        env: ProcessEnv::Isolated(isolated_vars(opencode, root)),
         tmux: TmuxConfig {
             tmux_bin: tmux_bin.to_path_buf(),
             socket: TmuxSocket::Path(sock.to_path_buf()),
         },
-        workdir: Arc::new(move |_: &PaneName| Ok(project.clone())),
         tui_session: sessions_for(&[(PANES[0], SESSIONS[0]), (PANES[1], SESSIONS[1])]),
         timeouts: Timeouts::default(),
     }
