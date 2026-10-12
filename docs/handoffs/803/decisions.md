@@ -149,3 +149,27 @@ Run handoff directory `docs/handoffs/803` Â· branch `issue-803-implementation` Â
   `docs_cli_test` and `docs_pane_control_test` green; the script modules also pass with mawk and busybox awk
   first on `PATH`, and `panes.sh` prints byte-identical output under gawk, mawk and busybox awk; the full
   Tier 1 results are in handoff-F.md; evidence.md quotes the unchanged code relied on.
+
+## T, verify / GREEN (Phase 7): 2026-10-12T10:12-06:00
+
+- **Decided:**
+  - **GREEN, no blocking issue.** The wizard suite passes 303 of 303. The CI workspace command passes 2624 tests with 0 failures in 167 binaries, matching F. Clippy, lint, changelog-check, machete, `docs_cli_test` and `wire_selftest` are all clean.
+  - **Repaired F's three "tests that look wrong", in `skilltext_803.rs` only.**
+    - The 803 ban now scans flattened text with whole-word matching (`contains_phrase`). The `herdr.sh run ` allow-list exempts the one "never `" mention.
+    - The ADR decision pin ends before the closing backtick, so `holler profile apply NAME` also satisfies it.
+    - Neither pin depends on a line break any more.
+  - **Appended 4 evidence entries** for what the fake `holler` models from unchanged code: apply's JSON steps, apply's exit 3 with no steps, `grid-unreachable` below a row of two, and session agreement.
+- **Assumed:**
+  - **CI does not run `cargo fmt --check`.** Its run list has no fmt step, and the repo already has existing fmt drift. I formatted only the file I changed.
+- **Hedged:**
+  - **The ADR's code span is still wrapped across two lines** (advisory in handoff-T-green.md). It passes, but a reflow would break `docs_cli_test` unless the text names `NAME`.
+  - **U1 to U8 stay UNVERIFIED** until the operator's #778 repeat.
+- **Evidence:**
+  - **Mutation spot-checks:**
+    - disabling the guard fails 3 tests;
+    - leaking `ANTHROPIC_API_KEY` fails the scrub test;
+    - admitting `pane split` fails the `run` test;
+    - a forward teardown fails the teardown test;
+    - a wrapped banned call fails the repaired ban;
+    - "pane runs" passes it.
+  - **Commands and outputs:** in handoff-T-green.md.

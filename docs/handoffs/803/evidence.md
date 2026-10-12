@@ -127,3 +127,37 @@ Phase 6 (F) entries. Each fact is quoted from unchanged source at the branch's b
   >             }
   >             rest = &after[end + 1..];
   >         }
+
+## Added by T (Phase 7): the facts `proof_fakes/holler` models from unchanged code
+
+- **Fact:** `profile apply --format=json` prints an envelope whose `data` is `{"profile", "dry_run", "steps"}`, each step `{"pane", "action", "outcome", "code", "diff", "detail"}`; the fake's dry-run output has that shape, and Stage 7 reads `data.steps`.
+  **Source:** `crates/holler-cli/src/profile/apply.rs:61-62`
+  **Verbatim excerpt:**
+  > /// `--format=json` prints one envelope whose data is `{"profile", "dry_run", "steps"}`, each step
+  > /// `{"pane", "action", "outcome", "code", "diff", "detail"}`.
+
+- **Fact:** a real apply with a refused step exits 3 and prints only the refusal (`apply refused <N> step(s): ...`), never the steps; `proof_803::a_pane_of_another_profile_is_a_refused_step_exit_3_and_an_empty_stdout` pins the fake to that.
+  **Source:** `crates/holler-cli/src/profile/apply.rs:12-17`
+  **Verbatim excerpt:**
+  > //! - **3, a real run with a `refused` step** (#853, ADR-0021 decision 33): only the refusal,
+  > //!   coded as the first refused step's error, with the message `apply refused <N> step(s):
+  > //!   <pane> (<code>), ...; <M> other step(s) ran`, then `; <pane>: <detail>` for each refused
+  > //!   step that had started its act. Refusals do not stop the run, so every step ran; the
+  > //!   steps are not printed (an envelope carries no data with a failure), and a script that
+  > //!   needs them runs `--dry-run` first.
+
+- **Fact:** the planner refuses a new row below a row of more than one pane as `grid-unreachable`, which is why the config's `layout` must be a staircase and `proof_803::a_new_row_below_a_live_row_of_two_panes_is_a_refused_grid_unreachable_step` exists.
+  **Source:** `crates/holler-adapter-herdr/src/plan.rs:27-29`
+  **Verbatim excerpt:**
+  > //! - Any other cell is [`GRID_UNREACHABLE`] when the workspace is not a grid (it has an
+  > //!   unplaced pane), or when no single split makes it: it needs a pane that is neither
+  > //!   there nor asked for, or it is in a new row below a row of more than one pane.
+
+- **Fact:** `--herdr-session` and `HOLLER_HERDR_SESSION` must name the same session; the fake reduces every mismatch to `usage` (exit 2), so `proof_803::the_default_instances_apply_agrees_with_its_environment_on_the_session_default` catches a plan and a door that disagree. The real verbs answer a mismatch differently per verb (the excerpt's next lines); the test pins agreement, not the real code.
+  **Source:** `docs/pane-control.md:135-139`
+  **Verbatim excerpt:**
+  > **`--herdr-session NAME` stays a required flag** of every verb that reaches Herdr: `launch` (unless `--spec-only`),
+  > `pane import`, and `profile apply` when its plan has a create. `relaunch` has no such flag and acts in the Herdr session
+  > its record names, which must be the adapter's session too. The flag is required even when `HOLLER_HERDR_SESSION` is set, and is not defaulted from it: the
+  > variable configures the adapter, and the flag names the session the verb acts on. **The two must name the same
+  > session**, and a mismatch is not answered the same way by every verb:

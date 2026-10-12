@@ -49,21 +49,39 @@ fn no_direct_herdr_pane_control_and_no_remote_session_in_the_skill_docs_or_readm
         "tailscale serve --bg",
     ];
     for (name, text) in all_texts() {
+        // Flattened, so a phrase wrapped across a line break is still seen.
+        let flat_text = flat(&text);
         for b in banned {
-            assert!(!text.contains(b), "{name} still has `{b}`");
+            assert!(!contains_phrase(&flat_text, b), "{name} still has `{b}`");
         }
         for line in code_lines(&text) {
             let ssh = line.split_whitespace().any(|w| w == "ssh");
             assert!(!ssh, "{name}: an ssh command: {line}");
         }
-        for (at, _) in text.match_indices("herdr.sh run ") {
-            let rest = &text[at + "herdr.sh run ".len()..];
+        for (at, _) in flat_text.match_indices("herdr.sh run ") {
+            // The one sanctioned mention of another word: naming the call
+            // the wizard never makes (`skilltext.rs`'s stop-path pin).
+            if flat_text[..at].ends_with("never `") {
+                continue;
+            }
+            let rest = &flat_text[at + "herdr.sh run ".len()..];
             let ok = ["status", "session list", "workspace list"]
                 .iter()
                 .any(|w| rest.starts_with(w));
             assert!(ok, "{name}: herdr.sh run {}", &rest[..rest.len().min(30)]);
         }
     }
+}
+
+/// `phrase` occurs in `text` as whole words: the character after it is not a
+/// letter or digit, so `pane run` matches `pane run` but not `pane runs`.
+fn contains_phrase(text: &str, phrase: &str) -> bool {
+    text.match_indices(phrase).any(|(at, _)| {
+        text[at + phrase.len()..]
+            .chars()
+            .next()
+            .is_none_or(|c| !c.is_alphanumeric())
+    })
 }
 
 #[test]
@@ -472,8 +490,11 @@ fn the_adr_carries_the_wizard_sentence_the_decision_and_item_16_as_built() {
         adr.contains(&format!("{kept} {added}")),
         "section 11's sentence (W11)"
     );
+    // No closing backtick: `docs_cli_test` parses every inline `holler ...`
+    // span under docs/, so the ADR may name the verb with its argument
+    // (`holler profile apply NAME`) rather than the bare form.
     let decided =
-        "**The setup wizard builds registry panes through `holler pane` and `holler profile apply`";
+        "**The setup wizard builds registry panes through `holler pane` and `holler profile apply";
     let taken = &adr[adr.find("## Decisions taken").unwrap()..];
     assert!(taken.contains(decided), "the Decisions taken item");
     assert!(!adr.contains("lands with #803, not here"), "item 16");
