@@ -8,6 +8,13 @@ fills this file in at release time.
 ## [Unreleased]
 
 ### Enhancements
+- Pane control, the operator guide (epic [#633](https://github.com/Performant-Labs/holler/issues/633)): [`docs/pane-control.md`](docs/pane-control.md) documents every `holler pane` and `holler profile` verb ([#652](https://github.com/Performant-Labs/holler/issues/652)).
+  It states the rule that only pane verbs change a registry (OpenCode) pane and that a Claude Code pane stays outside
+  the registry, how to read `pane list` and `pane doctor`, the `profile apply` reference, grid notation, the JSON
+  envelope with every error code and its exit code, the cutover from the launcher's files, and the rollback. The
+  section "Restarting a pane on another model" of `docs/orchestrating.md` now leads with `holler pane relaunch`, says
+  that its `--model` is recorded and not yet applied to the server (#829), and keeps `scripts/pane-restart` as the
+  fallback until the 7-day sign-off of the cutover (#654), and as the only restart path of a Claude Code pane. A docs test pins the guide to the code's own tables. No behaviour changes.
 - Pane control is wired (epic [#633](https://github.com/Performant-Labs/holler/issues/633)): every `holler pane` and
   `holler profile` verb, and `say`, `interrupt` and `answer` with `--pane`, now run against the hub's pane and profile
   registries and the real Herdr, tmux and OpenCode adapters, where they answered `not-implemented` before
@@ -43,7 +50,7 @@ fills this file in at release time.
   reports an unmanaged pane whose screen has not changed that long as the finding `unmanaged-stalled`. **Herdr 0.8.2 reports no
   time at which a screen last changed**, so the port carries `last_screen_change` (new `HerdrPort::observe_pane`) and the real
   adapter leaves it, and the idle time, empty rather than guess one: the idle time and `unmanaged-stalled` need a Herdr that
-  reports it, tracked as a follow-up. If Herdr cannot be read, `list` still prints the registry's panes and says so. The test
+  reports it, tracked in [#837](https://github.com/Performant-Labs/holler/issues/837). If Herdr cannot be read, `list` still prints the registry's panes and says so. The test
   kit gains `seed_unmanaged_pane`, and the roster (#648) is not changed here.
 - Pane control, the migration import (epic [#633](https://github.com/Performant-Labs/holler/issues/633)): `holler pane
   import --from STATE_ROOT --herdr-session NAME [--launcher FILE] [--orchestrator PANE]... [--dry-run]` adopts the fleet

@@ -35,13 +35,19 @@ fn now_ms() -> i64 {
 /// unmanaged pane at `r1c1` whose screen last changed `hours` hours ago (`None`: Herdr
 /// reports no time). Returns the rig and the unmanaged pane's id.
 fn rig_with_unmanaged(managed: &[&str], hours: Option<i64>) -> (Rig, String) {
+    rig_with_unmanaged_labelled(managed, hours, LABEL)
+}
+
+/// [`rig_with_unmanaged`] with the unmanaged pane labelled `label`, which Herdr allows to be
+/// any text, not only a valid pane name.
+fn rig_with_unmanaged_labelled(managed: &[&str], hours: Option<i64>, label: &str) -> (Rig, String) {
     let mut rig = Rig::new(managed.iter().map(|name| pane(name)), []).unwrap();
     rig.herdr = FakeHerdr::new("scratch")
         .with_workspace("scratch", 3, 3)
         .unwrap();
     let changed = hours.map(|h| now_ms() - h * HOUR_MS);
     let seeded =
-        seed_unmanaged_pane(&rig.herdr, GridPos { row: 1, col: 1 }, LABEL, CWD, changed).unwrap();
+        seed_unmanaged_pane(&rig.herdr, GridPos { row: 1, col: 1 }, label, CWD, changed).unwrap();
     (rig, seeded.pane_id.as_str().to_owned())
 }
 
@@ -381,4 +387,101 @@ fn get_of_an_unknown_herdr_pane_id_is_pane_not_found_not_usage() {
     assert_fails(&rig, &["pane", "get", "w9:p9"], 3, "pane-not-found", false);
     // A bad name that does not look like a Herdr pane id is still a usage error.
     assert_fails(&rig, &["pane", "get", "a/b"], 2, "usage", false);
+}
+
+// --- review of #836 -------------------------------------------------------------------
+
+/// A Herdr label is free text: these are not valid pane names (upper case, a space, 40
+/// characters), and a hand-labelled pane is exactly such a pane. The verbs that act on a
+/// pane refuse each as `pane-unmanaged`, exit 3, not as `usage`; `get` shows it.
+#[test]
+fn a_label_that_is_not_a_valid_pane_name_is_still_refused_by_every_acting_verb() {
+    let long = "x".repeat(40);
+    for label in ["Claude Code", "Seeding Pane", long.as_str()] {
+        let (rig, _) = rig_with_unmanaged_labelled(&["demo-c2r1"], Some(4), label);
+        for verb in [
+            &["pane", "relaunch", label][..],
+            &["pane", "reset", label][..],
+            &["pane", "switch", label, "ses_demo"][..],
+            &[
+                "pane",
+                "park",
+                label,
+                "--reason",
+                "x",
+                "--release-when",
+                "y",
+            ][..],
+            &["pane", "unpark", label][..],
+            &["pane", "close", label][..],
+        ] {
+            assert_fails(&rig, verb, 3, "pane-unmanaged", false);
+        }
+        let shown = ok_envelope(&rig.run(&["pane", "get", label], Format::Json));
+        assert_eq!(shown.data["state"], "unmanaged", "{label:?}");
+    }
+}
+
+/// A name that is not valid and that no unmanaged pane answers to is still a typo.
+#[test]
+fn an_invalid_name_that_no_pane_answers_to_is_still_usage() {
+    let (rig, _) = rig_with_unmanaged(&["demo-c2r1"], Some(4));
+    for verb in [
+        &["pane", "reset", "Not A Pane"][..],
+        &["pane", "close", "a/b"][..],
+        &["pane", "relaunch", "x".repeat(40).as_str()][..],
+    ] {
+        assert_fails(&rig, verb, 2, "usage", false);
+    }
+}
+
+/// A pane that has a record costs no read of Herdr: park and unpark of a recorded pane make
+/// no Herdr call at all, even with an unmanaged pane next to it (the guard looks at Herdr
+/// only on the missing-record path).
+#[test]
+fn a_recorded_pane_costs_no_read_of_herdr() {
+    let (rig, _) = rig_with_unmanaged(&["demo-c2r1"], Some(4));
+    let after_setup = rig.herdr.faults().calls();
+    for argv in [
+        &[
+            "pane",
+            "park",
+            "demo-c2r1",
+            "--reason",
+            "x",
+            "--release-when",
+            "y",
+        ][..],
+        &["pane", "unpark", "demo-c2r1"][..],
+    ] {
+        let run = rig.run(argv, Format::Json);
+        assert_eq!(run.code, 0, "{argv:?}: {run:?}");
+    }
+    assert_eq!(
+        rig.herdr.faults().calls(),
+        after_setup,
+        "the verbs made no Herdr call (the calls so far are the fixture's own)"
+    );
+}
+
+/// The rule "no record names this Herdr pane" is public, for the story that decides whether
+/// Holler drives a pane (#831): `unregistered` lists such panes and `is_unmanaged` answers for
+/// one. The import (#835) asks what a pane runs instead (`pane::is_claude_code_command`); a pane
+/// it leaves alone has no record, so this rule lists it.
+#[test]
+fn the_unmanaged_predicate_is_public_and_one_rule() {
+    use holler_pane::unmanaged::{is_unmanaged, unregistered};
+    use holler_pane::HerdrPort;
+    let (rig, id) = rig_with_unmanaged(&[], Some(1));
+    let snapshot = rig.herdr.snapshot().unwrap();
+    let mut recorded = pane("demo-c1r1");
+    recorded.herdr.pane_id = holler_pane::PaneId::new(id.clone());
+
+    let listed: Vec<&str> = unregistered(&snapshot, &[])
+        .map(|p| p.pane_id.as_str())
+        .collect();
+    assert_eq!(listed, [id.as_str()]);
+    assert!(is_unmanaged(&snapshot.panes[0], &[]));
+    assert!(!is_unmanaged(&snapshot.panes[0], &[recorded.clone()]));
+    assert_eq!(unregistered(&snapshot, &[recorded]).count(), 0);
 }

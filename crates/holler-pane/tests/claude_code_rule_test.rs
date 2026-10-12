@@ -1,7 +1,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)] // #835
 //! The one rule that tells a Claude Code pane by its foreground command name (#835, brief
-//! section 2 and R2-7): public in `holler_pane::pane`, beside `HarnessKind`, so #831 and
-//! #832 reuse it, and nothing else compares a command name with `claude`.
+//! section 2 and R2-7): public in `holler_pane::pane`, beside `HarnessKind`, so #831 can reuse
+//! it, and nothing else compares a command name with `claude`.
 //!
 //! The name is a process name as tmux reports it (`#{pane_current_command}`, already the
 //! basename of the program), not the protocol's harness id: it matches exactly, and only

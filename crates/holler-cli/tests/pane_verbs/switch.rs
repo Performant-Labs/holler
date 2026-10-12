@@ -125,6 +125,25 @@ pub(crate) fn both_with<T>(
     words: impl Fn(&Rig, &T) -> Vec<String>,
     exec: impl Fn(&Rig, &T, &[&str], Format) -> Outcome,
 ) -> [Case<T>; 2] {
+    both_checked(build, words, exec, false)
+}
+
+/// [`both_with`] for a refusal of a pane that has **no record**: the verb may read Herdr to
+/// tell an unmanaged pane from a typo (#832), and still makes no call that acts.
+pub(crate) fn both_with_missing_record<T>(
+    build: impl Fn() -> (Rig, T),
+    words: impl Fn(&Rig, &T) -> Vec<String>,
+    exec: impl Fn(&Rig, &T, &[&str], Format) -> Outcome,
+) -> [Case<T>; 2] {
+    both_checked(build, words, exec, true)
+}
+
+fn both_checked<T>(
+    build: impl Fn() -> (Rig, T),
+    words: impl Fn(&Rig, &T) -> Vec<String>,
+    exec: impl Fn(&Rig, &T, &[&str], Format) -> Outcome,
+    herdr_reads_ok: bool,
+) -> [Case<T>; 2] {
     let cases = [Format::Text, Format::Json].map(|format| one_case(format, &build, &words, &exec));
     let [text, json] = &cases;
     assert_eq!(
@@ -142,8 +161,12 @@ pub(crate) fn both_with<T>(
     );
     for case in &cases {
         assert!(
-            crate::list::only_herdr_reads(&case.calls.herdr) && case.calls.host.is_empty(),
-            "{:?}: no Herdr call that acts and no host call, so no keystroke (I4): {:?}",
+            (if herdr_reads_ok {
+                crate::list::only_herdr_reads(&case.calls.herdr)
+            } else {
+                case.calls.herdr.is_empty()
+            }) && case.calls.host.is_empty(),
+            "{:?}: no Herdr call (a read, for a missing record) that acts and no host call, so no keystroke (I4): {:?}",
             case.format,
             case.calls
         );
@@ -574,7 +597,9 @@ fn switch_in_a_profile() {
 #[test]
 fn switch_unknown_pane() {
     let words = |_: &Rig, s2: &String| argv(&["pane", "switch", "demo-c9r9", s2]);
-    let cases = both(one_pane, words);
+    let cases = both_with_missing_record(one_pane, words, |rig, _, argv, format| {
+        rig.verb(argv, format)
+    });
     failed_before_the_act(&cases, 3, "pane-not-found");
     for case in &cases {
         assert!(case.calls.harness.is_empty(), "{:?}", case.calls);
@@ -595,7 +620,15 @@ fn switch_usage() {
     ];
     for [pane, session] in bad {
         let words = |_: &Rig, (): &()| argv(&["pane", "switch", pane, session]);
-        let cases = both(|| (Rig::new(&[Seed::new(P, 1, 1)]), ()), words);
+        // A name that is not a valid pane name may be the label of an unmanaged pane, so the
+        // verb reads Herdr and the pane store to tell (#832); it still acts and writes nothing.
+        let bad_pane_name = pane != P;
+        let build = || (Rig::new(&[Seed::new(P, 1, 1)]), ());
+        let cases = if bad_pane_name {
+            both_with_missing_record(build, words, |rig, _, argv, format| rig.verb(argv, format))
+        } else {
+            both(build, words)
+        };
         for message in failed_before_the_act(&cases, 2, "usage") {
             assert!(
                 !message.contains('\u{1b}'),
@@ -604,7 +637,9 @@ fn switch_usage() {
         }
         for case in &cases {
             let c = &case.calls;
-            let none = c.panes.is_empty() && c.profiles.is_empty() && c.harness.is_empty();
+            let pane_reads_only = c.panes.iter().all(|op| !matches!(op, PaneStoreOp::CasPut | PaneStoreOp::Delete));
+            let panes_ok = if bad_pane_name { pane_reads_only } else { c.panes.is_empty() };
+            let none = panes_ok && c.profiles.is_empty() && c.harness.is_empty();
             assert!(
                 none && c.probes == 0,
                 "{pane} {session:?}: no port call: {c:?}"

@@ -357,3 +357,30 @@ Run handoff directory `docs/handoffs/835` Â· branch `issue-835-implementation` Â
   - **grep:**
     - `"claude"` in every non-test `.rs` file: only `pane.rs:147` in `holler-pane`;
     - `ObserveFailed`: now raised for the harness reads only.
+
+## T, Phase 4 (AUTHOR / RED), cycle 2: 2026-10-11T19:17-06:00 (MDT)
+
+- **Decided:** RED is valid (`docs/handoffs/835/handoff-T-red.md`, which replaces cycle 1's at `36b0de8`).
+  - **The merge (A's W1).** I ran `git merge --no-ff --no-commit origin/main` (`bda1069`). It was clean, and `MERGE_HEAD`
+    is left for the script's phase commit. There was no rebase or squash.
+  - **The RED is two docs-conformance tests:**
+    - #652's `import_findings_are_named_in_section_3_or_10` (unchanged). It wants `harness-claude-code` and
+      `harness-unreadable` in section 3 or 10.
+    - The new `section_3_names_every_flag_of_pane_import`. It wants `--adopt-claude-code` in section 3's `pane import`
+      subsection.
+  - **I fixed two test doc comments:** `pane_verbs/unmanaged.rs` (W2: #831 only) and `claude_code_rule_test.rs`
+    (W3: "#831 can reuse").
+- **Assumed:**
+  - The script's phase commit turns the pending merge into a two-parent commit (A's assumption, not run here).
+  - F's cycle is text only, so no Rust test beyond these two needs to change.
+- **Hedged:**
+  - **I narrowed the flag pin to `pane import`.** Its generic form, over every verb, fails on 25 flags of other verbs
+    that #652's guide summarises rather than lists. That is #652's scope, so it is an operator follow-up and not part
+    of this story.
+  - **The guide's prose is not pinned.** This covers sections 1, 10 and 12 and the `observe-failed` row. S reads it,
+    as A said.
+- **Evidence:**
+  - `cargo test -p holler-cli --test docs_pane_control_test`: 15 passed, 2 failed, both on their assertion.
+  - CI's workspace step on the merged tree: 154 groups, 2396 passed, 2 failed (the same two), 32 ignored.
+  - Clippy `-D warnings` clean; `lint.sh` exit 0; `changelog-check` ok; `docs_cli_test` 3 passed;
+    `git diff --check -- crates` clean.
