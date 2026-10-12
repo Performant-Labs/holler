@@ -8,9 +8,10 @@
 //!
 //! - the test kit's fakes, with the fake scope over the two stores and a Herdr serving the
 //!   session `scratch` with one workspace `main` of 3 by 3;
-//! - a **linked host**: `stop_owned(name)` also kills the harness server of every rig port
-//!   served for `name` (the host and harness fakes share no state, so a relaunch of a pane
-//!   whose server still runs would otherwise fail in `stop_old`);
+//! - a **linked host** (`verb_harness::linked_host`, #846): `run` starts the server an argv
+//!   describes, a refusal being `run`'s error, and `stop_owned(name)` also kills the harness
+//!   server of every rig port served for `name` (the host and harness fakes share no state, so
+//!   a relaunch of a pane whose server still runs would otherwise fail in `stop_old`);
 //! - **harness hooks**: a test closure run once, right after a named `HarnessPort` method
 //!   returns (another writer editing P during apply's up-front observation);
 //! - a **call-log span** (`Calls`): `run` and `engine` return the calls the run made and
@@ -43,6 +44,7 @@ use holler_pane_testkit::profile_scope::FakeProfileScope;
 use holler_pane_testkit::profile_store::{FakeProfileStore, ProfileStoreOp};
 
 use crate::list::rig::serve_server;
+use crate::verb_harness::linked_host::{FakeHarnessLink, LinkedHost, OnStart, OnStop};
 use crate::verb_harness::{run_verb_with, Outcome};
 
 /// The profile every case applies.
@@ -221,7 +223,14 @@ impl Rig {
         pane_store: Option<&dyn PaneStore>,
         f: impl FnOnce(Ports<'_>) -> R,
     ) -> R {
-        let host = LinkedHost { rig: self };
+        let host = LinkedHost {
+            host: &self.host,
+            link: FakeHarnessLink {
+                harness: &self.harness,
+                on_start: OnStart::Propagate,
+                on_stop: OnStop::KillServed(&RIG_PORTS),
+            },
+        };
         let harness = HookedHarness { rig: self };
         f(Ports {
             pane_store: pane_store.unwrap_or(self.panes.as_ref()),
@@ -634,51 +643,6 @@ pub(crate) fn wire<T: serde::Serialize>(value: T) -> String {
         .as_str()
         .expect("a unit variant serializes as a string")
         .to_owned()
-}
-
-/// A `HostPort` over the rig's `FakeHost` whose `stop_owned` also kills the servers served for
-/// the pane.
-struct LinkedHost<'a> {
-    rig: &'a Rig,
-}
-
-impl HostPort for LinkedHost<'_> {
-    fn ensure_session(&self, name: &PaneName, cwd: &str) -> Result<(), PaneError> {
-        self.rig.host.ensure_session(name, cwd)
-    }
-
-    fn run(&self, name: &PaneName, cwd: &str, argv: &Argv) -> Result<(), PaneError> {
-        self.rig.host.run(name, cwd, argv)?;
-        // The host starts the server the argv describes (#802): the fake harness does it for
-        // the argv it built, and starts nothing for any other.
-        if let Some(started) = self.rig.harness.start_server(argv) {
-            started?;
-        }
-        Ok(())
-    }
-
-    fn stop_owned(&self, name: &PaneName) -> Result<(), PaneError> {
-        self.rig.host.stop_owned(name)?;
-        for port in RIG_PORTS {
-            if self
-                .rig
-                .harness
-                .server(port)
-                .is_some_and(|s| s.name == *name)
-            {
-                self.rig.harness.kill(port)?;
-            }
-        }
-        Ok(())
-    }
-
-    fn ps(&self, name: &PaneName) -> Result<Vec<u32>, PaneError> {
-        self.rig.host.ps(name)
-    }
-
-    fn foreground_commands(&self, name: &PaneName) -> Result<Vec<String>, PaneError> {
-        self.rig.host.foreground_commands(name)
-    }
 }
 
 /// A `HarnessPort` over the rig's `FakeHarness` that runs a test's hook after a method.
