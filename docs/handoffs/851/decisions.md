@@ -35,3 +35,31 @@ Run handoff directory `docs/handoffs/851` Â· branch `issue-851-implementation` Â
   - `wc -l`: `docs.rs` has 899 lines and `cli.rs` has 780.
   - Ran `git rev-parse --git-path HEAD|index|refs/heads/<branch>` in this worktree. `.git` is a file here, and the
     branch ref is in the common git directory.
+
+## T, author / RED: 2026-10-11T19:05-06:00
+
+- **Decided:** RED is valid (see handoff-T-red.md).
+  - Format: `holler 0.4.0 (bda1069)`. On a dirty tree, `holler 0.4.0 (bda1069-dirty)` (finding 6). Only tracked
+    changes count as dirty.
+  - Precedence: the checkout's HEAD, then a non-empty `HOLLER_GIT_SHA`, then `unknown`.
+  - The resolver contract is `crates/holler-cli/build_version.rs`, which exports
+    `commit_token(Option<&str>, bool, Option<&str>) -> String` and `git_state(&Path) -> Option<(String, bool)>`.
+    The new `build_version_test` target pins it.
+  - Each `version` field a verb prints must equal the text `--version` prints after `holler `.
+  - Three existing tests were rewritten: `cli_invocation_test` and `query_test` became the process-level RED, and
+    `pane_cli_process`'s `--version` check now checks only the first two tokens.
+- **Assumed:**
+  - The test can read the dirty state only from the build, so the process-level `--version` test accepts `-dirty`
+    either way. The dirty rule is pinned at the resolver and `git_state` level, on temp repos.
+  - CI has `git` on PATH, which `actions/checkout` already needs.
+  - An empty `HOLLER_GIT_SHA` counts as unset.
+- **Hedged:**
+  - `build_version_test`'s RED is a compile error naming the missing contract file; a function that does not exist
+    yet cannot be RED any other way. I offset this by running the tests against a throwaway wrong stub (7 of 8
+    failed on assertions) and a throwaway correct reference (8 of 8 passed). I deleted both; neither is
+    committed.
+  - `git_state_outside_a_checkout_is_none` is a guard, not a RED.
+- **Evidence:**
+  - Ran the cargo test, clippy and `scripts/lint.sh` results quoted in handoff-T-red.md, at HEAD `3a9151e` with
+    git 2.53.0.
+  - Seeded `target/` with `scripts/seed-target-dir.sh ../dryrun-import/target`.
