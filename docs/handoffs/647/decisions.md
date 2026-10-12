@@ -222,3 +222,29 @@ Run record for the part-2 build run. The brief is `docs/handoffs/647-part2-brief
   - Read: `handoff-S.md`, `handoff-F.md` (Rework round), F's `6f07eff` diff, `observe.rs:111-200`, `pane_claude/rig.rs`, `pane_verbs/doctor/rig.rs` (`in_profile`, `profiles_of`), `error.rs:691-698`, `profile.rs:42-61`, `profile_scope.rs:545-565`.
   - Mutations Q0, Q1, Q2 and C1 each killed by an assertion, with the files restored and checked by sha256 (table in `handoff-T-green.md`, Re-entry 2).
   - Tier 1: the workspace `test.unit.command` exit 0 (171 binaries, 2689/0/39); clippy `-D warnings` exit 0; `lint.sh` exit 0; changelog-check ok; `docs_cli_test` and `wire_selftest` 3 each; `cargo machete` clean; rustfmt clean on both edited files.
+
+## A (Phase 7 re-entry, anti-duplication gate, S REWORK round) — 2026-10-12T12:33-06:00
+- **Decided:**
+  - PASS, with 0 blocks (`handoff-A-dup.md`, "Re-entry"). The round is `e393e87..1d12249`: F's `6f07eff` changed two production files, and T's `1d12249` changed two test files.
+  - R1, new warn. `findings::single_quoted` is the third copy of the POSIX single-quote body. `holler-cli` keeps two: `profile/delete.rs:206`, which `create.rs` and `import/writes.rs` share, and `pane/profile_scope.rs:270`. It is not a block, for three reasons:
+    - The object S named, `quoted`, uses `{:?}` double quotes, which a shell expands. F's prose-plus-argument split is the repository's dominant pattern, and ADR-0021 section 3 states it.
+    - The copies live in `holler-cli`, which `holler-pane` cannot depend on. Folding them would be an unplanned drive-by in four files outside the story.
+    - The helper sits beside `quoted` and `doctor_command`, which both crates already share, and F justified it in writing.
+  - The follow-up for R1 is XS: make the helper `pub` and fold the six `holler-cli` call sites onto it. All six pass a `ProfileName`.
+  - R2, carried from W-2 and updated. PR #863 (#839) is still open at `e57a7b5`. This round's untrusted-text bullet (`findings.rs:24-30`) sits directly below the "Remedies" bullet that both branches rewrite, so it joins that conflict region.
+  - The first pass's warns 1 and 3 are unchanged, and their files are untouched this round.
+  - T's tests reuse `Rig`, `Seed::in_profile`, `seed`, `one`, `mixed`, `doctor`, `kinds` and `FakeHost::detach_clients`. The superseded profile test was merged into its replacement, not kept beside it.
+- **Assumed:**
+  - #839 still lands its `findings.rs` as it is at `e57a7b5`. Its hunks do not touch the region of `quoted`, `single_quoted` and `embedded`.
+- **Hedged:**
+  - R1 is a warn only because the fold would edit code outside the story. If the operator would rather fold now, the change is mechanical: six call sites, two deletions and one module-doc line.
+- **Evidence:**
+  - Diffs read: `git diff af34a4f 6f07eff -- crates/`, `git diff 6f07eff 1d12249 -- crates/` and `git diff --stat e393e87 HEAD`.
+  - Commands:
+    - greps for quoting helpers and the `'\''` escape across `crates/`, and for shell-quoting crates in every `Cargo.toml` (none);
+    - greps for `holler_pane::findings` imports in `holler-cli/src`, for `--profile` and `holler profile` in `holler-pane/src` string literals, for `single_quoted` call sites, and for `$(id) Demo` and shared test fixtures;
+    - `git diff 6eff9cc origin/issue-839-implementation -- crates/holler-pane/src/findings.rs` (hunk headers and module doc);
+    - `git ls-remote origin` and `gh pr view 863` (read-only, no fetch);
+    - `gh api .../compare/6eff9cc...05471b9`: remote `main` gained #847 and #848, both test-only, with no overlap;
+    - `wc -l` on the four touched files.
+  - Read: `handoff-S.md`, `handoff-F.md` (Rework round), `handoff-T-green.md` (Re-entry 2), this journal's S, F and T entries, `findings.rs:395-458`, `error.rs:689-698`, `profile/delete.rs:140-219`, `profile_scope.rs:30-56, 255-272`, `create.rs:232-260`, `import/writes.rs:60-90, 168-186`, `reconcile/drift.rs` (the message), `docs/pane-control.md:606, 650` and `ADR-0021.md:530-531`.
