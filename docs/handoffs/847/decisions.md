@@ -22,3 +22,9 @@
 - **Assumed:** a test-only flake fix needs no `CHANGELOG.md` entry, because AC 5 limits the diff to the test files and `docs/handoffs/`. Flagged for O/S.
 - **Hedged:** none.
 - **Evidence:** target test ok (1.32 s) and ok with `HOLLER_HEARTBEAT_INTERVAL_MS=300` (0.90 s); `remote_admin_test` 21/21; clippy on `remote_admin_test` + `remote_admin_liveness_test` with `-D warnings` clean; `git diff origin/main --stat -- crates/` shows only the two test files.
+
+## T (Phase 7, green) - 2026-10-12
+- **Decided:** GREEN, no blocking Tier 2 issue. `remote_admin_test` 21/21, `remote_admin_liveness_test` 7/7, 30/30 loaded runs, 10/10 at `HOLLER_HEARTBEAT_INTERVAL_MS=300`, mutant red 3/3 and restored. Detail in `docs/handoffs/847/handoff-T-green.md`.
+- **Assumed:** the workspace-wide clippy failure at `token_load_test.rs:60` is pre-existing, because that file is absent from the diff.
+- **Hedged:** AC 6's `--all-targets` clippy clause is unmet for a reason outside this story; reported, not fixed here.
+- **Evidence:** loaded runs used the compiled test binary directly; mutant failures at `remote_admin_test.rs:392`.
