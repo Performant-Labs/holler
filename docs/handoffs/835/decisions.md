@@ -1119,3 +1119,68 @@ Run handoff directory `docs/handoffs/835` Â· branch `issue-835-implementation` Â
   - **Counts:**
     - repeated long lines in the two changed files: the same as the third pass;
     - `wc -l`: `assess.rs` 435, `harness.rs` 341, `rig.rs` 535.
+
+## S, spec audit (cycle 5, after F cycle 6, the `harness-claude-code` message): 2026-10-12T06:15-06:00 (MDT)
+
+- **Decided:** PASS (`docs/handoffs/835/handoff-S.md`, which replaces cycle 4's at `bb233f0`).
+  - **Cycle 4's one item is done, in place.** The message of `Outcome::claude_code` (`holler-pane/src/import/assess.rs:104-106`)
+    meets the four conditions:
+    - it makes no claim that Holler cannot drive Claude Code;
+    - its reason is true on the merged tree;
+    - it has "until #831's adoption step lands" on one source line;
+    - it is still a constant.
+
+    F's design decisions 1 to 4 are accepted. "such a pane" is better than my example's "which".
+  - **Nothing else in production changed.** Since `bb233f0`, outside the handoffs, only two things changed: that string,
+    and T-green's doc-only edit of `harness.rs`, which was my optional Advisory 3. All 20 acceptance criteria keep their
+    proving tests. I updated the line numbers, because `harness.rs` moved by 1.
+  - **The documents agree with the message**, and none quotes it: the guide, the CHANGELOG and ADR-0021 sections 9, 13,
+    "Deferred" and decision 30.
+  - **Advisory 2 is extended with A-dup's note.** `main`'s "no holler verb adopts a pane" text becomes false for these
+    panes once #831's step lands. It is in `reconcile.rs:449`, the assertion text at `doctor.rs:149`, the guide `:641` and
+    ADR-0021 `:1111`. All four are outside this PR.
+- **Assumed:**
+  - T-green's GREEN on `5dd002e`, with its doc-only edit, holds for `fa630f6`, which changes handoffs only. I ran no
+    build or test, as the role says.
+  - `origin/main` stays `b76f4d2` until the PR phase.
+- **Hedged:**
+  - **History privacy stays advisory (Advisory 1), as ruled in cycle 4, though the PR phase pushes right after this
+    PASS.**
+    - **The rule.** The role's REWORK rule is for the diff, and the diff is clean.
+    - **The exposure.** The five commits' path names the local account. That name is spelled as the operator's public
+      author name. No host, tailnet, IP or secret is in it, and `main`'s history never had it.
+    - **Why not REWORK.** F cannot rewrite history (A's W1 forbids a rebase), so a REWORK could not be acted on.
+    - **Why not ADVISORY-HOLD.** It is not a defect of the brief.
+    - **What the operator can still do.** Rewrite and force-push before the merge.
+- **Evidence:**
+  - **Live:**
+    - `git fetch` at 06:05 MDT: `origin/main` is `b76f4d2`, an ancestor of `HEAD`, and `merge-tree` exits 0;
+    - `gh issue view 835`: the body was diffed equal to the brief's issue section, and nothing is new since 03:49 MDT;
+    - `gh issue view 831`: open, and the adoption is still listed;
+    - `gh pr list --head issue-835-implementation --state all`: none;
+    - `git ls-remote --heads origin issue-835-implementation`: none.
+  - **Read:**
+    - every handoff and the brief;
+    - this journal and `evidence.md` from F cycle 6 on;
+    - `git diff bb233f0 HEAD` in full;
+    - the PR's production diff on the current tree;
+    - `assess.rs:50-135` and `harness.rs` in full;
+    - `ports.rs:293-305` and `:370-398`, and case 10 (`conformance/host.rs:220-256`);
+    - `reconcile.rs:440-460`;
+    - the guide `:25-35`, `:330-340`, `:375-380`, `:630-650`, `:935-939` and `:978-984`;
+    - `CHANGELOG.md:1-20` and `:125-150`;
+    - ADR-0021 `:1355-1380` and its PR hunks;
+    - `CONTRIBUTING.md:15-39`;
+    - the release script's PR phase: `coding-pipeline.workflow.mjs:4700-4779`, where the push follows S without a gate.
+  - **Greps:**
+    - "cannot drive", "not drive" and "adoption step" outside the handoffs;
+    - `is_claude_code_command`, `CLAUDE_CODE_COMMAND` and comparisons with `"claude"` in every `src`;
+    - added `unwrap`, `expect`, `panic!` and `#[allow]` (the 5 `#[allow]` hits are handoff prose);
+    - `impl HostPort for` in the CLI;
+    - a privacy grep of the PR's added lines and this cycle's;
+    - the account path in each branch commit's tree, and `git log -S` on `origin/main` (none);
+    - `fmt` in `.github/workflows/` (none).
+  - **Counts:**
+    - 30 commits after `origin/main`, all with Conventional subjects and a `Co-Authored-By` trailer;
+    - every touched `.rs` file is under 900 lines (the largest is `ports.rs`, 621);
+    - the PR's diff outside the handoffs is 21 files, with 952 lines added and 124 removed.
