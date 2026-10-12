@@ -1,4 +1,117 @@
-# Handoff-T-green: Phase 7 - #831 A Claude Code harness for panes
+# Handoff-T-green: #831 A Claude Code harness for panes
+
+Two passes, newest first: the verification after F's rework (S's REWORK), then the first pass.
+
+## Rework 1: GREEN after S's REWORK (2026-10-11, 22:20 MDT)
+
+**Date:** 2026-10-11
+**Branch:** `issue-831-implementation` at `7260b5e` (F's phase commit; it concludes the merge of `origin/main` at
+`037405f`, #855 and #856)
+**Issue:** #831 (the PR is "Part of #831")
+**Handoff-F reviewed:** `docs/handoffs/831/handoff-F.md`, "Rework 1"
+**Handoff-S:** `docs/handoffs/831/handoff-S.md` (REWORK, three items; Advisory 4 is test gaps "for T-green in this loop")
+**Handoff-T-red:** `docs/handoffs/831/handoff-T-red.md`
+
+**VERDICT: GREEN, with no blocking issue.** S's three REWORK items are fixed as S asked. F listed no test as wrong. I
+closed S Advisory 4's two main test gaps with test-only edits and changed no production code.
+
+### S's REWORK items, checked
+
+| # | S asked | What is on `7260b5e` | |
+|---|---|---|---|
+| 1 | `HARNESS_IDS` doc comment says what section 15 item 1 says | `vocab.rs:269-279`: the two uses of `claude` (pane harness, `HarnessKind::Claude`, read only by the pane engine; body harness, ADR 0012, read only by `holler-body`), and that `rework_test.rs` pins every `HarnessKind` serde name to the list. "The rest are reserved" is gone. The pin exists (`holler-pane/tests/rework_test.rs:179`) | PASS |
+| 2 | `env.rs` passes `CLAUDE_CODE_COMMAND`, not a second `"claude"` | `claude_bin` is `program_bin(env, CLAUDE_BIN, CLAUDE_CODE_COMMAND)`. `grep '"claude"' crates/*/src` outside `holler-body` finds only `HarnessKind::as_str`, the constant, `HARNESS_IDS` and a hub unit test | PASS |
+| 3 | ADR-0021 section 15 item 2's "As built" states what holds | "text for text ... identical hunks" is gone; the paragraph says the API and host-side code are #835's and unchanged, names the doc comments that differ, and says the second lander resolves a conflict in them | PASS |
+
+S asked T-green to re-run clippy, `docs_cli_test`, `docs_pane_control_test` and `cargo test -p holler-proto`: all pass (below).
+
+### Test additions (T's, test-only; S Advisory 4)
+
+1. **`crates/holler-adapter-claude/tests/hermetic_test.rs`: `a_dialog_and_an_unknown_status_are_never_an_activity`.**
+   It pins that `waiting` on `dialog open` is `harness-dialog-open` and that an unknown status (`compacting`) is
+   `unavailable`, never an activity. Before this, `harness-dialog-open` was pinned by no test (S Advisory 4 corrected
+   the earlier handoffs' claim). It is a separate test, not two rows of `activity_maps_status_and_waiting_for`, because
+   that table returns `Activity` and these return errors.
+   - **Mutant check:** guarding the `dialog open` arm of `agents::activity` with `if false` (so it falls to
+     `WaitingPermission`) makes the test fail ("called `unwrap_err()` on an `Ok` value: WaitingPermission"). Reverted;
+     `git status` showed only my two test files afterwards.
+2. **`crates/holler-cli/tests/pane_claude/lifecycle.rs`: `switch_refuses_a_busy_pane_and_one_waiting_on_a_permission`.**
+   The permission case now asserts the code `session-holds-permission` as well as exit 3 (it asserted only the exit
+   code). Passes on `7260b5e`.
+
+Both files are rustfmt-clean and under 900 lines (670 and 395).
+
+### GREEN confirmation
+
+Command: `cargo test --workspace --no-fail-fast -- --skip roster_stays_accurate_under_concurrent_body_load` (the
+pipeline's `test.unit.command`, CI's step), 22:05 to 22:11 MDT.
+
+- **Total: 2524 passed, 0 failed, 36 ignored**, across 165 test binaries. F reported 2523/0/36; the one more is the new
+  hermetic test.
+- `holler-adapter-claude` `hermetic_test`: 16 passed. `pane_claude`: 42 passed, 1 ignored (the `say` step, #839 and
+  #850).
+
+### Tier 1 results (on `7260b5e` plus my two test edits)
+
+| Check | Command | Expected | Actual | |
+|---|---|---|---|---|
+| Clippy | `cargo clippy --workspace --all-targets -- -D warnings` | exit 0 | exit 0 | PASS |
+| Lint | `bash scripts/lint.sh` | exit 0 | exit 0 | PASS |
+| Changelog | `bash scripts/changelog-check.sh` | ok | ok | PASS |
+| Unused deps | `cargo machete` | clean | exit 0 | PASS |
+| Workspace tests | as above | 0 failed | 2524/0/36 | PASS |
+| Docs | `cargo test -p holler-cli --test docs_cli_test --test docs_pane_control_test` | pass | 3 + 16 passed | PASS |
+| Canary | `cargo test -p holler-cli --test wire_selftest` | pass | 3 passed | PASS |
+| Proto | `cargo test -p holler-proto` | pass | every target passes | PASS |
+| Hooks | `bash scripts/test-hooks.sh` | pass | exit 0 | PASS |
+| rustfmt | `cargo fmt --all -- --check` | not a CI step | exit 1: drift across many files, including `holler-body` and `holler-adapter-herdr`, which this story's rework did not touch. CI and `lint.sh` do not run fmt. My two files pass `rustfmt --check` | Advisory |
+
+**Cross-check of F's reported results:** F reported clippy exit 0, 2523/0/36, docs 3 + 16, proto pass, lint exit 0,
+changelog ok, machete clean. Mine match, plus the one added test. No discrepancy.
+
+### Tier 2 results
+
+| Check | Method | |
+|---|---|---|
+| Coverage of each criterion | Unchanged from the first pass (below). The rework changed one literal and doc text. The merge of #855 and #856 brought `main`'s tests, which pass as merged | PASS |
+| The literal change keeps behaviour | `CLAUDE_CODE_COMMAND` is `"claude"` (`pane.rs:232`), so `claude_bin`'s lookup is byte-identical. The wiring's `claude_bin` tests pass | PASS |
+| Test quality of the additions | Each names a behaviour, fails in isolation for the right reason (mutant above), sits at the cheapest tier (the adapter's hermetic seam; the verb-over-fakes tier for the code the CLI prints), and duplicates no other test | PASS |
+| API contract | No wire change: `docs/protocol/v2.md` and the goldens are untouched by the rework. The `vocab.rs` edit is a doc comment | PASS |
+| Security | Unchanged; the login tests pass | PASS |
+| `#[allow]` links and file sizes | No new `allow`. Every changed file is under 900 | PASS |
+| Evidence appendix | My tests rely only on code inside the diff (`agents.rs`, `tx_switch.rs`), so no entry is added | N/A |
+
+### Acceptance criteria status
+
+As in the first pass, with two changes:
+
+- **The roster** (the first pass's "S to judge"): #648 is now on the branch, and a Claude Code pane has no roster row
+  until a body serves its session (#850). F recorded this in section 15 item 18; S judges the line.
+- **`harness-dialog-open`** is now pinned (`a_dialog_and_an_unknown_status_are_never_an_activity`).
+
+The `say` step stays **blocked by design** (#839, #850), and item 17 stays **not built** (waits for #835).
+
+### Blocking issues
+
+None.
+
+### Advisory notes
+
+- **The opt-in real test was not run** (S Advisory 1). Run it before #831 closes and before a Claude Code pane is
+  launched on the fleet.
+- **S Advisory 4's lower-value gaps are left:** `pane get` and `pane watch` over a Claude record, `holler interrupt
+  --pane` CLI output for a Claude pane, and `server-unsupported`. A roster test for a hub row joined to a Claude Code
+  pane cannot exist until a body serves that session (#850).
+- **`reset_first_reaches_the_new_process`** has no #828 reference in its comments (checked with `grep`), so S Advisory 6
+  needs no test edit.
+- **`cargo fmt --check` fails workspace-wide.** This drift predates the story, and CI does not run fmt. Not this story's
+  to fix.
+- **`pane_verbs/switch.rs` is at 893 lines** (unchanged; `lint.sh` fails at 900).
+
+---
+
+# First pass: Phase 7 - #831 A Claude Code harness for panes
+
 
 **Date:** 2026-10-11
 **Branch:** `issue-831-implementation` (worktree `.claude/worktrees/0831-claude-harness`, head `881ebe1`, which is F's

@@ -469,7 +469,24 @@ fn activity_maps_status_and_waiting_for() {
     }
 }
 
-// --- abort (item 9) -----------------------------------------------------------------------
+/// A process held by a first-run or trust dialog, and a status the adapter does not know, are
+/// errors with their own codes, never an activity: neither may be taken for idle (item 8).
+#[test]
+fn a_dialog_and_an_unknown_status_are_never_an_activity() {
+    for (status, waiting_for, code) in [
+        ("waiting", Some("dialog open"), "harness-dialog-open"),
+        ("compacting", None, "unavailable"),
+    ] {
+        let rig = Rig::new(json!([entry(4242, SESSION, status, waiting_for)]));
+        let err = rig
+            .harness
+            .session_activity(&endpoint(4242), SESSION)
+            .unwrap_err();
+        assert_eq!(err.code(), code, "{status} {waiting_for:?}: {err}");
+    }
+}
+
+// --- abort (item 9)-----------------------------------------------------------------------
 
 #[test]
 fn abort_is_refused_abort_unsupported() {

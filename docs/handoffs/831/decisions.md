@@ -342,3 +342,26 @@ brief, the research note's "Decisions").
     (exit 0), the CI test step (2523 passed, 0 failed, 36 ignored), `docs_cli_test`, `docs_pane_control_test`,
     `cargo test -p holler-proto`, `scripts/lint.sh` (exit 0), `scripts/changelog-check.sh` (ok), `cargo machete`
     (clean), `rustfmt --check` on the four edited `.rs` files.
+
+## T, verify GREEN after the rework: 2026-10-11T22:20-06:00 (MDT)
+
+- **Decided:**
+  - GREEN with no blocking issue on `7260b5e` plus two test-only edits. S's REWORK items 1 to 3 are fixed as S asked.
+  - Closed S Advisory 4's two main gaps, as T's work: `hermetic_test::a_dialog_and_an_unknown_status_are_never_an_activity`
+    (`harness-dialog-open` and `unavailable`), and the `session-holds-permission` code in
+    `lifecycle::switch_refuses_a_busy_pane_and_one_waiting_on_a_permission`. The first is its own test because the existing
+    table returns `Activity` and these return errors.
+  - The lower-value Advisory 4 gaps (`pane get`/`pane watch` over a Claude record, `interrupt --pane` output,
+    `server-unsupported`) are left as advisories. They do not gate.
+- **Assumed:**
+  - `cargo fmt --check`'s workspace-wide failure is not a gate: neither `ci.yml` nor `lint.sh` runs fmt, and the drift is
+    in files the rework did not touch.
+- **Hedged:**
+  - The roster line is still for S to judge: a Claude Code pane has no roster row until #850.
+- **Evidence:**
+  - CI test step: 2524 passed, 0 failed, 36 ignored (165 binaries). Clippy `-D warnings`, `lint.sh`, `changelog-check.sh`,
+    `cargo machete`, `docs_cli_test` + `docs_pane_control_test`, `wire_selftest`, `cargo test -p holler-proto` and
+    `test-hooks.sh` all pass.
+  - Mutant: an `if false` guard on the `dialog open` arm of `agents::activity` fails the new test; reverted.
+  - `grep '"claude"' crates/*/src`: no second spelling outside `as_str`, the constant, `HARNESS_IDS`, a hub test and
+    `holler-body`.

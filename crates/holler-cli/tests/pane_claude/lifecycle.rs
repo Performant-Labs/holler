@@ -173,9 +173,11 @@ fn switch_refuses_a_busy_pane_and_one_waiting_on_a_permission() {
         let (run, calls) = rig.run_logged(&["pane", "switch", CLAUDE, &target], Format::Json);
 
         assert_eq!(run.code, 3, "{hold}: {run:?}");
-        if hold == "busy" {
-            assert_eq!(error_of(&run).0, "session-busy", "{run:?}");
-        }
+        let want = match hold {
+            "busy" => "session-busy",
+            _ => "session-holds-permission",
+        };
+        assert_eq!(error_of(&run).0, want, "{hold}: {run:?}");
         assert_untouched(&rig, &before, pid, &calls);
     }
 }
