@@ -38,3 +38,37 @@ Append-only; every phase adds its own entry.
   - **ADRs:** ADR-0003 lines 88-110; ADR-0021 lines 245-275, 316-330, 685-720, 760-830, 862-895.
   - **Tests:** `roster_cli_test.rs`, `hold_cli_test.rs`, `grant_cli_test.rs`, `pane_verbs/{main,list}.rs`, `pane_verbs/process/{main,docs_rows}.rs`, `pane_integration/main.rs`, `verb_harness/mod.rs`, `docs_pane_control_test.rs`; and the `Cargo.toml` test targets.
   - **State checked:** `git fetch` (`origin/main` is still `bda1069`); `gh issue view 839` and `648` (both open).
+
+## T (Phase 4, author / RED): 2026-10-11T20:15-06:00
+
+- **Decided:** RED is valid. The detail is in `handoff-T-red.md`.
+  - **What was authored.** 29 tests:
+    - 25 in-process in the new target `roster_panes_test`, with 4 goldens;
+    - 4 process tests in `roster_cli_test.rs`. One of them (clap's usage errors) is a pin that passes today.
+  - **The API.** It is named here, as W-1 leaves it to T and F:
+    - `roster_cmd::PANE_COLUMNS`;
+    - `Registry::{Ports, Failed, NotRead}`;
+    - `render(reply, registry, roster, choice, sink) -> i32`;
+    - `run(roster, choice, source, sink) -> i32`.
+  - **The text layout** (W-7): HOLD is padded to 20, then PANE 20, POS 6, PROFILE 12, HEALTH 10, SHOWN 20, and DRIVEN unpadded.
+  - **Test changes the brief assigns:**
+    - `section_4_marks_the_roster_extension_later` is replaced by `section_4_documents_the_roster_columns`;
+    - the `roster --profile` guard is deleted;
+    - `roster_profile_is_refused_with_the_roster_story` and `ROSTER_PROFILE_REFUSAL` are deleted.
+- **Assumed:**
+  - Stderr `note:` lines are printed in all three modes, `--format=json` included (R3 and W-9 say the roster reports a partial read only on stderr).
+  - Legacy `--json` errors go to stderr as text (W-4).
+  - `RemotePolicyRefused` under `--format=json` is pinned only as a refusal-class envelope with today's message. Its code name is F's.
+- **Hedged:**
+  - **W-2.** It is pinned by behaviour (the roster's `mismatches` against `resolve_pane_target`), not by naming a predicate, so either of W-2's placements passes.
+  - **AC 13 (a)** is tested twice: in-process, to show R3's check is first in `run` (before the policy refusal), and as the process test the AC names.
+  - **Fixtures.** The fixture rows are serialized from the hub's real `Row` type, so they are the reply's real shape and also serve as W-10's key-collision check.
+- **Evidence:**
+  - **Runs on the clean tree:**
+    - `cargo test -p holler-cli --test roster_cli_test`: 6 passed, 3 failed, all three on their assertions;
+    - `roster_panes_test` and `docs_pane_control_test` fail to build on exactly the four new API items;
+    - `pane_cli_process`: 35 passed.
+  - **A scratch stub of today's behaviour behind the new API** gave 0 of 25 passing, every failure an assertion.
+  - **A scratch trial implementation** gave 25 of 25 and 9 of 9; with it the docs test fails only on R9's guide text.
+  - **Restored.** Both scratch versions were reverted from scratchpad copies; `src/` is unchanged.
+  - **Checks:** `lint.sh` exit 0, `changelog-check.sh` exit 0, `cargo clippy -p holler-cli --tests -D warnings` clean.

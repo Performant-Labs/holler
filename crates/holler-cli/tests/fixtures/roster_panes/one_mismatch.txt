@@ -1,0 +1,5 @@
+1 pane(s) show a different session than the hub drives: hj-c1r2
+SESSION              HARNESS    MODE     STATE      CONN       HOSTNAME PENDING  LAST TURN            HOLD                 PANE                 POS    PROFILE      HEALTH     SHOWN                DRIVEN
+alpha                opencode   spawn    idle       connected  host-a   -        -                    -                    -                    -      -            -          -                    -
+hj-c1r2/build        opencode   spawn    idle       connected  host-a   1        -                    -                    hj-c1r2              r2c1   -            unhealthy  ses-b                ses-c
+hj-c1r2/review       opencode   spawn    idle       connected  host-a   -        -                    -                    hj-c1r2              r2c1   -            unhealthy  ses-b                ses-c

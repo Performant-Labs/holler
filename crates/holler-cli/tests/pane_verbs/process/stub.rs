@@ -30,11 +30,6 @@ pub const STUBS: &[(&str, &str, u32)] = &[
     ("profile", "import", 665),
 ];
 
-/// The refusal of `roster --profile`, until story #648.
-// #646
-// #648
-pub const ROSTER_PROFILE_REFUSAL: &str = "error: not implemented (story #648)";
-
 /// The table and the permanent verb lists agree: every stub is a known verb, and a verb
 /// missing from the table is simply no longer a stub (so this checks only the first half).
 #[test]
