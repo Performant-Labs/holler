@@ -9,3 +9,9 @@
 - **Assumed:** The real-repo scan failing on this worktree's own `docs/handoffs/848-brief.md` is expected evidence of the bug, not a wrong-reason failure; F's skip resolves it.
 - **Hedged:** The new test does not call the not-yet-existing `is_pipeline_scratch` directly, so it stays a behavioural test through `scan_files` and compiles before F.
 - **Evidence:** `cargo test -p holler-cli --test wizard_scripts skilltext_w5_rename::` (6 passed, 2 failed); clippy and lint.sh clean.
+
+## F (implement / GREEN) — 2026-10-12
+- **Decided:** Added `is_pipeline_scratch(rel)` (component-wise `starts_with("docs/handoffs")`, with a comment citing `docs_cli_test::is_cli_doc` / #462 / #848) and applied it in `scan_files` next to the self-skip. The skip lives in the pure seam, not in `tracked_files`, so the temp-tree test exercises it.
+- **Assumed:** No CHANGELOG entry, because the brief confines the diff to the one test file and the changelog check only requires the `[Unreleased]` heading.
+- **Hedged:** Did not run `cargo fmt` on the file, because the workspace is not default-rustfmt formatted and has no fmt gate. The added lines produce no fmt diff.
+- **Evidence:** `cargo test -p holler-cli --test wizard_scripts skilltext_w5_rename::` 8 passed (was 6 passed, 2 failed at RED); clippy `-D warnings` clean; `scripts/lint.sh` no failures.

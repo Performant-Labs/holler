@@ -46,11 +46,19 @@ fn tracked_files(root: &Path) -> Vec<String> {
         .collect()
 }
 
+/// #848: pipeline handoffs (briefs, journals) under `docs/handoffs/` quote history verbatim and
+/// are removed before a PR is pushed. Mirrors `docs_cli_test::is_cli_doc` (#462): `starts_with`
+/// compares whole components, so `docs/research/handoffs-notes.md` is still scanned.
+fn is_pipeline_scratch(rel: &str) -> bool {
+    Path::new(rel).starts_with("docs/handoffs")
+}
+
 /// Lines of the files `rels` (relative to `root`) that contain `needle`, as `path:line: text`.
+/// Skips this file itself and pipeline handoffs.
 fn scan_files(root: &Path, rels: &[String], needle: &str) -> Vec<String> {
     let mut hits = Vec::new();
     for rel in rels {
-        if rel.ends_with("skilltext_w5_rename.rs") {
+        if rel.ends_with("skilltext_w5_rename.rs") || is_pipeline_scratch(rel) {
             continue;
         }
         let Ok(text) = std::fs::read_to_string(root.join(rel)) else {
