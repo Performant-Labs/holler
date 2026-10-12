@@ -20,6 +20,7 @@ use std::path::{Path, PathBuf};
 use holler_adapter_herdr::adapter::HerdrConfig;
 use holler_adapter_herdr::plan::Extent;
 use holler_adapter_host::TmuxSocket;
+use holler_pane::pane::CLAUDE_CODE_COMMAND;
 use holler_pane::PaneError;
 
 /// How the wiring reads a variable: its value, or `None` when it is unset.
@@ -100,11 +101,17 @@ pub fn opencode_bin(env: Lookup<'_>) -> Result<PathBuf, PaneError> {
 }
 
 /// The `claude` binary (#831), found as the `opencode` one is: `HOLLER_CLAUDE_BIN` (`usage` when
-/// it is not absolute), else the first executable `claude` in an absolute directory of `PATH`.
-/// None found is `unavailable` naming `HOLLER_CLAUDE_BIN`. A shell alias is never consulted:
-/// tmux starts the program, never a shell.
+/// it is not absolute), else the first executable [`CLAUDE_CODE_COMMAND`] in an absolute
+/// directory of `PATH`. None found is `unavailable` naming `HOLLER_CLAUDE_BIN`. A shell alias is
+/// never consulted: tmux starts the program, never a shell.
+///
+/// The name looked up on `PATH` is that constant, not a second spelling of it: tmux names a
+/// pane's foreground process by the basename of its `argv[0]`, and a Claude launch's
+/// `process-in-use` (like #835's import) compares that name with the constant
+/// (`is_claude_code_command`). So a process started from a `HOLLER_CLAUDE_BIN` with another
+/// basename is one that this check does not recognise.
 pub fn claude_bin(env: Lookup<'_>) -> Result<PathBuf, PaneError> {
-    program_bin(env, CLAUDE_BIN, "claude")
+    program_bin(env, CLAUDE_BIN, CLAUDE_CODE_COMMAND)
 }
 
 /// Claude Code's configuration directory (#831): `$HOME/.claude`, the one a pane's process uses,

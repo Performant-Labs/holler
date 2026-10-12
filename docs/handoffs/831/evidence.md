@@ -125,6 +125,121 @@ and not the repo. One entry per fact; each excerpt is copied, not paraphrased. T
   >     }
   > ```
 
+## F, the rework after S's REWORK (the script's phase 6; `origin/main` at `037405f` merged)
+
+- **Fact:** the roster prints the hub's rows only, each joined to the pane named like its label, if any: a registry pane
+  that no hub row names has no roster row. So a Claude Code pane, which no body serves until #850, is not in the roster
+  (ADR-0021 section 15 item 18's "The roster, as built", `docs/pane-control.md` section 4, the CHANGELOG entry).
+  **Source:** `crates/holler-cli/src/roster_cmd.rs:173-181`
+  **Verbatim excerpt:**
+  > ```rust
+  >     let hub_rows = reply.get("rows").and_then(Value::as_array).map_or(&[][..], Vec::as_slice);
+  >     let rows: Vec<Joined<'_>> = hub_rows
+  >         .iter()
+  >         .map(|hub| Joined {
+  >             hub,
+  >             pane: pane_of(hub, &registered.panes),
+  >         })
+  >         .filter(|row| profile.is_none() || row.pane.is_some())
+  >         .collect();
+  > ```
+
+- **Fact:** the cells the roster prints for a joined pane read no harness port (`health` only), so a Claude Code record,
+  which has none, renders like an OpenCode one once a row joins it.
+  **Source:** `crates/holler-cli/src/pane/list.rs:248-262`
+  **Verbatim excerpt:**
+  > ```rust
+  > impl From<&Pane> for PaneRow {
+  >     fn from(pane: &Pane) -> Self {
+  >         Self {
+  >             name: pane.name.clone(),
+  >             pos: pane.herdr.grid,
+  >             profile: pane.profile.clone(),
+  >             project: pane.host.cwd.clone(),
+  >             health: pane.harness.health.clone(),
+  >             shown: pane.last_observed.shown.clone(),
+  >             driven: pane.last_observed.driven.clone(),
+  >             sync: SessionSync::of(pane),
+  >             hold: pane.hold.clone(),
+  >         }
+  >     }
+  > }
+  > ```
+
+- **Fact:** the hub refuses a pane registry file it cannot parse as `store-corrupt`, so an older `holler` that cannot read
+  a Claude Code record fails the whole registry closed (`docs/pane-control.md` section 11, the downgrade bullet).
+  **Source:** `crates/holler-hub/src/panes/persist.rs:143` and `crates/holler-hub/src/panes/store.rs:328-336`
+  **Verbatim excerpt:**
+  > ```rust
+  >     let doc: Doc<E> = serde_json::from_slice(&bytes).map_err(|e| Problem::parse(&e))?;
+  > ```
+  > ```rust
+  > fn load_table(path: &Path, retained: usize) -> Result<Table, PaneError> {
+  >     let doc = persist::load_doc::<PaneEvent>(path).map_err(|problem| {
+  >         log_fault("pane_registry_corrupt", path, &problem, CORRUPT_EFFECT);
+  >         PaneError::StoreCorrupt {
+  >             what: problem.what(LABEL, path),
+  >         }
+  >     })?;
+  >     Ok(Table::from_doc(doc, retained))
+  > }
+  > ```
+
+- **Fact:** a launch's pane id is bound to a name by claiming the one pending offer, so two relaunches at once (doctor's
+  `--fix`, one thread per pane) can pair one pane's id with the other's name; only the OpenCode harness is given the TUI
+  lookup that reads those pairs (`wiring/bind.rs`'s module doc, the `Bindings` paragraph).
+  **Source:** `crates/holler-cli/src/pane/wiring/bind.rs:169-176` and `crates/holler-cli/src/pane/wiring.rs:163-175`,
+  `:201-205`
+  **Verbatim excerpt:**
+  > ```rust
+  >     fn ensure_session(&self, name: &PaneName, cwd: &str) -> Result<(), PaneError> {
+  >         let offered = self.bindings.claim();
+  >         self.inner.ensure_session(name, cwd)?;
+  >         if let Some(pane) = offered {
+  >             self.bindings.bind(pane, name.clone());
+  >         }
+  >         Ok(())
+  >     }
+  > ```
+  > ```rust
+  >         let lookup = tui_session(
+  >             &session,
+  >             bindings.clone(),
+  >             Arc::clone(&panes),
+  >             Arc::clone(&lazy),
+  >         );
+  >         Self {
+  >             herdr: BindingHerdr::new(lazy, bindings.clone()),
+  >             host: BindingHost::new(Arc::new(tmux_host(&tmux)), bindings),
+  >             harness: HarnessRouter::new(
+  >                 WiredHarness::new(opencode_harness(env, &tmux, lookup)),
+  >                 WiredHarness::new(claude_harness(env)),
+  >             ),
+  > ```
+  > ```rust
+  > fn opencode_harness(
+  >     env: Lookup<'_>,
+  >     socket: &Result<HostSocket, PaneError>,
+  >     tui_session: Resolver<PaneId, PaneName>,
+  > ) -> Result<Arc<dyn HarnessPort>, PaneError> {
+  > ```
+
+- **Fact:** the binary's default is found by looking the given program name up in each absolute `PATH` directory, so
+  passing `CLAUDE_CODE_COMMAND` (whose value is `claude`) instead of the literal changes no behaviour (REWORK 2).
+  **Source:** `crates/holler-cli/src/pane/wiring/env.rs:137-145`
+  **Verbatim excerpt:**
+  > ```rust
+  > fn program_bin(env: Lookup<'_>, variable: &str, program: &str) -> Result<PathBuf, PaneError> {
+  >     if let Some(value) = env(variable) {
+  >         return absolute(variable, value);
+  >     }
+  >     let path = env("PATH").unwrap_or_default();
+  >     std::env::split_paths(&path)
+  >         .filter(|dir| dir.is_absolute())
+  >         .map(|dir| dir.join(program))
+  >         .find(|candidate| is_executable(candidate))
+  > ```
+
 ## T, phase 7
 
 - **Fact:** the exit codes the `pane_claude` tests assert (3 for each plan refusal such as `port-policy-unsupported`,

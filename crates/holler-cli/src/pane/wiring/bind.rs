@@ -29,8 +29,11 @@
 //! pair. This couples the wiring to the engine's call order (`tx_launch::bring_up` calls
 //! `ensure_session` right after each `ensure_pane`), which a default-run test pins; carrying the
 //! name in `attach_tui` would be a change to the frozen port. The bindings are per run and in
-//! memory; a wiring runs one launch at a time (`profile apply` runs its creates in sequence), and
-//! only the TUI methods read them, from any thread.
+//! memory, and only the TUI methods read them, from any thread. A wiring runs one launch at a
+//! time (`profile apply` runs its creates in sequence), with one exception (#831): `pane doctor
+//! --fix` can relaunch several Claude Code panes at once, one per pane's thread, and their
+//! bindings may then pair one pane's id with another's name. Nothing reads those pairs: a Claude
+//! Code relaunch attaches no TUI, and the TUI lookup is asked only for an OpenCode pane's id.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};

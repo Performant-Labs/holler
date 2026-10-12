@@ -1,0 +1,6 @@
+SESSION              HARNESS    MODE     STATE      CONN       HOSTNAME PENDING  LAST TURN            HOLD                 PANE                 POS    PROFILE      HEALTH     SHOWN                DRIVEN
+alpha                opencode   spawn    idle       connected  host-a   -        -                    -                    -                    -      -            -          -                    -
+demo-c1r1/main       opencode   spawn    idle       connected  host-a   -        -                    -                    -                    -      -            -          -                    -
+hj-c1r2/build        opencode   spawn    idle       connected  host-a   1        -                    -                    -                    -      -            -          -                    -
+io/alpha             claude     attach   working    reconnecting host-b   -        -                    -                    -                    -      -            -          -                    -
+zz-c2r2/work         opencode   spawn    idle       connected  host-a   -        -                    -                    -                    -      -            -          -                    -

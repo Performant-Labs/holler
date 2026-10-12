@@ -15,6 +15,7 @@ use std::path::{Path, PathBuf};
 
 use clap::CommandFactory;
 use holler_cli::pane::list::COLUMNS;
+use holler_cli::roster_cmd::PANE_COLUMNS;
 use holler_cli::Cli;
 use holler_pane::error::{class_of, ErrorClass, ALL_CODES};
 use holler_pane::findings::FindingKind;
@@ -152,8 +153,7 @@ fn heading_forms() -> Vec<(String, String, String)> {
     out
 }
 
-/// Acceptance 1: every verb is named in a span or heading, the PROPOSED line rule, and no
-/// `holler roster --profile`.
+/// Acceptance 1: every verb is named in a span or heading, and the PROPOSED line rule.
 #[test]
 fn every_verb_is_named_and_proposed_lines_say_so() {
     let doc = guide();
@@ -177,9 +177,6 @@ fn every_verb_is_named_and_proposed_lines_say_so() {
         for l in lines.iter().filter(|l| !l.contains("PROPOSED")) {
             missing.push(format!("a line names `{word}` without PROPOSED: {l}"));
         }
-    }
-    if doc.contains("holler roster --profile") {
-        missing.push("the guide documents `holler roster --profile`, which #648 has not built".into());
     }
     assert_none("docs/pane-control.md, the verbs", missing);
 }
@@ -292,14 +289,36 @@ fn section_7_grid_examples_parse_as_stated() {
     assert_none("section 7 (Grid notation), the example block", missing);
 }
 
-/// Acceptance 7: section 4 marks the roster extension later.
+/// Acceptance 7 of #652, as #648 changes it: section 4 documents the roster's pane columns
+/// (each of `roster_cmd::PANE_COLUMNS` as a whole word) and `holler roster --profile`; no line
+/// of the guide still says the roster extension is later, and section 12 (what is later) no
+/// longer lists #648.
 #[test]
-fn section_4_marks_the_roster_extension_later() {
-    let s4 = section(&guide(), 4);
-    assert!(
-        s4.lines().any(|l| l.contains("holler roster") && l.contains("#648") && l.contains("later")),
-        "section 4 has no line with `holler roster`, `#648` and `later`"
-    );
+fn section_4_documents_the_roster_columns() {
+    let doc = guide();
+    let s4 = section(&doc, 4);
+    let is_word = |c: char| c.is_ascii_alphanumeric() || c == '_';
+    let mut missing: Vec<String> = PANE_COLUMNS
+        .iter()
+        .filter(|col| {
+            !s4.match_indices(*col).any(|(i, _)| {
+                let before = s4[..i].chars().next_back().is_none_or(|c| !is_word(c));
+                let after = s4[i + col.len()..].chars().next().is_none_or(|c| !is_word(c));
+                before && after
+            })
+        })
+        .map(|c| format!("section 4 does not name the roster column {c}"))
+        .collect();
+    if !s4.lines().any(|l| l.contains("holler roster") && l.contains("--profile")) {
+        missing.push("no line of section 4 names `holler roster` and `--profile`".into());
+    }
+    for l in doc.lines().filter(|l| l.contains("holler roster") && l.contains("#648") && l.contains("later")) {
+        missing.push(format!("a line still says the roster extension is later: {l}"));
+    }
+    for l in section(&doc, 12).lines().filter(|l| l.contains("#648")) {
+        missing.push(format!("section 12 still lists #648: {l}"));
+    }
+    assert_none("docs/pane-control.md, the roster (#648)", missing);
 }
 
 /// Acceptance 8: the fallback and the registry boundary, in the guide, `docs/orchestrating.md`

@@ -59,14 +59,16 @@ holler pane launch demo-beta --herdr-session demo --workspace demo --grid r1c2 -
   lists the process holding that session and idle, checks that it holds it, and only then writes the record. A process
   held by Claude Code's first-run or trust dialog is `harness-dialog-open`, and the launch is rolled back: answer the dialog
   once by hand in that directory, then launch again. A tmux session that already runs Claude Code is refused
-  `process-in-use`: a process left behind is never doubled and never adopted.
+  `process-in-use`: a process left behind is never doubled and never adopted. The check knows Claude Code by the name
+  tmux gives the session's foreground process, the program file's name, so it does not recognise a Claude Code started
+  from a `HOLLER_CLAUDE_BIN` whose file has another name.
 - **The model is applied.** `--model PROVIDER/ID` and `--effort` reach the process as its `--model ID` and `--effort`
   (the provider is recorded, not passed). `--agent` is refused `agent-unsupported`.
 - **The login.** The process is started without the environment variables that would change Claude Code's login
   (`ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CONFIG_DIR`, `CLAUDE_CODE_USE_BEDROCK`,
-  `CLAUDE_CODE_USE_VERTEX` and `CLAUDE_CODE_USE_FOUNDRY`), so every Claude Code pane uses the subscription login, and a
-  spec that names one of them with `--env` is refused `claude-login-env-refused`. `doctor` reports a missing login
-  (section 5).
+  `CLAUDE_CODE_USE_VERTEX` and `CLAUDE_CODE_USE_FOUNDRY`), so every Claude Code pane uses the login Claude Code itself
+  holds, and a spec that names one of them with `--env` is refused `claude-login-env-refused`. Whether that login is the
+  subscription one is what `doctor` checks: it reports `claude-login-missing` when it is not (section 5).
 - **Its session is chosen when it starts**, so a Claude Code pane is never switched in place: `relaunch`, `switch`,
   `reset` and its interrupt restart the process on the session they choose (section 3). It accepts a message from another
   session without a dialog and is launched without Claude Code's question tool, so it never waits on a question the hub
@@ -481,7 +483,22 @@ A `holler pane watch` line prints the same cells as `key=value`, the column name
 cursor=4 put demo-alpha pos=r1c1 profile=fleet project=/srv/demo health=healthy shown=ses_0a1b2c driven=- sync=ok hold=none
 ```
 
-The roster extension (the PANE, POS, PROFILE, HEALTH, SHOWN and DRIVEN columns on `holler roster`, #648) is later: read SHOWN against DRIVEN from `holler pane list` and `holler pane doctor`.
+**The roster.** `holler roster` appends six columns after HOLD: PANE (the pane's name), POS (`r2c1`, row first; a pane
+named `hj-c1r2` is a name, and it sits at `r2c1`), PROFILE, HEALTH, SHOWN and DRIVEN. They are the registry's values,
+the same cells `pane list` prints for the same record, and an empty cell is `-`; a session with no pane (the io body, an
+alpha or beta agent) shows `-` in all six. A roster row is joined to a pane when the part of its name before the first
+`/` is the pane's name. The rows are the hub's, one per session a body serves, so a pane that no body serves has no row:
+a Claude Code pane has none until a body drives its session ([#850](https://github.com/Performant-Labs/holler/issues/850)),
+and `pane list` shows it meanwhile. The roster calls no adapter and shows no unmanaged pane (`pane list` does), and it
+reads the registry of the local hub, so with `--server` the six columns are `-`. When at least one pane's SHOWN and
+DRIVEN are both known and differ, the first line of the output says so:
+`2 pane(s) show a different session than the hub drives: demo-alpha, demo-beta`.
+`holler roster --profile fleet` lists only that profile's panes, and a profile that does not exist is refused
+`profile-not-found` (exit 3). `holler roster --format=json` prints the envelope of section 9 with `data` =
+`{"rows": [...], "mismatches": ["demo-alpha", "demo-beta"]}`; `holler roster --json` keeps its shape and gains the keys
+`pane`, `pos`, `profile`, `health`, `shown` and `driven` (`null` for a row with no pane). DRIVEN is `-` for every pane
+until the hub's DRIVEN session is recorded ([#839](https://github.com/Performant-Labs/holler/issues/839)), so the
+summary line does not appear before then; read SYNC from `holler pane list` and `holler pane doctor`.
 
 The Herdr display plugin (`plugins/herdr-holler`, #651) shows each pane's project, SHOWN against DRIVEN and hold in
 Herdr's sidebar; it only reports metadata and reads, and its actions run the `holler pane` verbs.
@@ -855,13 +872,16 @@ scripts/pane-restart PANE --model PROVIDER/ID [--effort E] [--key-file PATH]
 - The same command is the way back from an `agent-unusable` refusal of `holler pane relaunch PANE --agent KEY`: that
   refusal comes after the old server was stopped, so the pane has no server and its record is unchanged until
   `holler pane relaunch PANE` runs again without `--agent` (section 2).
+- **Going back to a `holler` older than #831** while the registry holds a Claude Code pane: the older hub cannot read
+  that pane's record (its harness kind is unknown there, and it has a pid and no port), so it refuses the whole registry
+  as `store-corrupt` and every `pane` and `profile` verb stops. Close each Claude Code pane with `holler pane close PANE`
+  before installing the older binary.
 - Using the fallback is a rollback, and is recorded as one in `docs/handoffs/<#654>-cutover/decisions.md`.
 
 ## 12. Later
 
 Deferred, so not documented here as existing; none of them is available:
 
-- the roster extension: the pane columns on `holler roster` (#648);
 - applying a pane's model, effort and environment to its harness server (#829);
 - DRIVEN following each pane's session of record, and `reset --first` through the hub's gate (#839);
 - an import that leaves the panes Holler does not drive alone (#835), and adopting the fleet's Claude Code panes with
@@ -869,6 +889,5 @@ Deferred, so not documented here as existing; none of them is available:
 - a body that lets `holler say --pane NAME TEXT` reach a Claude Code pane (#850, after #839);
 - answering a Claude Code pane's permission prompt, and its `--agent` (later stories of ADR-0021 section 15);
 - the shared subprocess runner of the adapters and the probe (#696);
-- the real-adapter scenario for `profile apply` (#667);
 - recreating the Herdr workspace from the stored profiles (#666);
 - the PROPOSED profile verbs and the PROPOSED doctor finding `profile-drift` (#665).

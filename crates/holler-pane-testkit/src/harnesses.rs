@@ -3,10 +3,13 @@
 //! built on `holler_pane::HarnessRouter`, the one router the wiring builds too, so a grid that
 //! mixes the two harnesses needs no new field in `Ports` and the routing rule exists once.
 //!
-//! It is also the one linker a rig's host calls ([`FakeHarnesses::start`] and
+//! It is also the linker a rig's host calls ([`FakeHarnesses::start`] and
 //! [`FakeHarnesses::stop`]): `HostPort::run` of an argv either fake built starts it, and
 //! `HostPort::stop_owned` of a pane ends both fakes' processes of that pane, as tmux runs and
-//! stops a pane's processes (#802). No rig writes a linker of its own.
+//! stops a pane's processes (#802). Every rig that runs a `FakeClaude` links it through these
+//! two, and none writes a Claude linker of its own. The three rigs that run only `FakeHarness`
+//! and predate #831 (in `pane_verbs`, `profile_verbs` and `pane_integration`) keep their own
+//! linking, unchanged.
 
 use holler_pane::ports::{Activity, LoginStatus, SessionChoice};
 use holler_pane::{

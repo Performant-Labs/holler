@@ -1,4 +1,4 @@
-//! `say`, `interrupt`, `answer` and `roster` with `--pane` / `--profile` (story #670,
+//! `say`, `interrupt` and `answer` with `--pane` / `--profile` (story #670,
 //! decision 5; the pane forms routed by story #646), on the real binary.
 //!
 //! No hub is running and the wiring is still #670's unwired port set, so a routed
@@ -10,7 +10,6 @@
 //! deliver a prompt unchecked; the routed engine (`say_cmd::resolve_pane_target`,
 //! tested in `pane_verbs/target_flags.rs`) is what these forms now run.
 
-use crate::stub::ROSTER_PROFILE_REFUSAL as ROSTER_REFUSAL;
 use crate::{assert_no_failures, holler};
 
 /// The #646 stub refusal line, spelled once: what no routed form may print again.
@@ -89,18 +88,6 @@ fn a_profile_without_a_pane_is_a_usage_error() {
             out.stderr.to_lowercase().contains("--pane"),
             "{argv:?}: the message names --pane: {out:?}"
         );
-    }
-}
-
-#[test]
-fn roster_profile_is_refused_with_the_roster_story() {
-    for format in [&[][..], &["--json"], &["--format=json"]] {
-        let mut argv = vec!["roster", "--profile", "demo"];
-        argv.extend_from_slice(format);
-        let out = holler(&argv);
-        assert_eq!(out.code, 1, "{argv:?}: {out:?}");
-        assert!(out.stdout.is_empty(), "{argv:?}: {out:?}");
-        assert!(out.stderr_has_line(ROSTER_REFUSAL), "{argv:?}: {out:?}");
     }
 }
 

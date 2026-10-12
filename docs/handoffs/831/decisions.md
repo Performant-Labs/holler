@@ -299,3 +299,46 @@ brief, the research note's "Decisions").
     - private names, IPs, home paths and secrets in about 12,000 added lines: none;
     - every test of `harness-dialog-open`, `session-holds-permission`, `server-unsupported` and `foreground_commands`;
     - `wc -l` of every touched file (the largest `.rs` is 893).
+
+## F, rework after S's REWORK: 2026-10-11T22:05-06:00 (MDT)
+
+- **Decided:** done (`docs/handoffs/831/handoff-F.md`, "Rework 1"). The three REWORK items, the merge of `origin/main`,
+  and the advisories that are this PR's own doc statements. No behaviour changes.
+  - **REWORK 1:** the doc comment of `HARNESS_IDS` says what section 15 item 1 says (the pane and the body uses of
+    `claude`, `HarnessKind`, `holler-body` and ADR 0012, the pinning test), and no longer calls the other ids reserved.
+  - **REWORK 2:** `claude_bin` passes `CLAUDE_CODE_COMMAND`; its doc names the `HOLLER_CLAUDE_BIN` basename limit.
+  - **REWORK 3:** section 15 item 2's "As built" states what holds against #835's branch at `f1d1bd0`: the API and the
+    host-side code are identical, the doc comments and the constant's place are not, so the second to land resolves a
+    doc-comment conflict. Re-copying #835's doc comments was rejected: #835 rewords them again at each of its reworks.
+  - **The merge:** `origin/main` at `037405f` (#855, #856) merged with `--no-commit`. It conflicted in `CHANGELOG.md`,
+    ADR-0003 and ADR-0021, each resolved by keeping both sides. No code changed for it.
+  - **The roster:** with #648 merged, a Claude Code pane has no roster row until a body serves its session (#850). It is
+    recorded in section 15 item 18, `docs/pane-control.md` section 4 and the CHANGELOG. The roster's code is not changed:
+    listing a pane with no hub row would change #648's decided output.
+  - **Advisories done:** 5 (the "one linker" and the subscription-login wordings), 6 (item 18's #828 sentence), 7, 8 and
+    9. Not done: A-dup W1 and W3, which S lists as follow-ups (Advisory 10).
+- **Assumed:**
+  - The driver's phase commit concludes the merge, as it did for `881ebe1` (two parents). The three conflicted files are
+    staged by path, so the index holds no unmerged entry.
+  - #839 edits the older #828 sentences of ADR-0021 (sections 5 and 8, "Deferred") and of #649's CHANGELOG entry, as its
+    issue says it will ("whichever lands second edits the other's words"), so they are left as they are.
+- **Hedged:**
+  - **S's acceptance row 8 moves.** It said the roster waits for #648. #648 is now on the branch, and the roster still
+    shows no Claude Code pane until #850. S judges whether the line is met as the brief reads it ("where they read the
+    registry"); the gap is recorded either way.
+  - **Merging now widens what T-green, A-dup and S see** (#855's and #856's files arrive through the merge). They are
+    `main`'s, reviewed there, and `git diff origin/main...HEAD` leaves them out once `origin/main` is the merge parent.
+- **Evidence:**
+  - Read: `handoff-S.md`, `handoff-A-dup.md`, `handoff-F.md`, the brief, ADR-0021 section 15; the roster code
+    (`roster_cmd.rs` on `037405f`), `pane/list.rs`'s `PaneRow`, the hub's `panes/{persist,store}.rs`, the wiring's
+    `bind.rs` and `wiring.rs`, `reconcile.rs`'s `observe_all`; ADR 0012, `holler-body/src/config.rs`, `docs/protocol/v2.md`
+    section 9 and the spike note's item 1.
+  - `gh issue view`: 835 (OPEN), 828 (CLOSED, not planned, 15:56 MDT), 839 (OPEN; "absorbs #828").
+  - `git diff issue-835-implementation HEAD` (`f1d1bd0`): `holler-adapter-host/src`, the test kit's `host.rs` and
+    `conformance/host.rs`, `fake_tmux_test.rs`, `foreground_test.rs`, `fake_host_test.rs` and
+    `host_conformance_test.rs` identical; the forwards' bodies identical; the doc comments of the constant, the rule and
+    `foreground_commands`, and the module doc of `claude_code_rule_test.rs`, differ.
+  - Ran on the merged tree: `cargo build --workspace --tests`, `cargo clippy --workspace --all-targets -- -D warnings`
+    (exit 0), the CI test step (2523 passed, 0 failed, 36 ignored), `docs_cli_test`, `docs_pane_control_test`,
+    `cargo test -p holler-proto`, `scripts/lint.sh` (exit 0), `scripts/changelog-check.sh` (ok), `cargo machete`
+    (clean), `rustfmt --check` on the four edited `.rs` files.

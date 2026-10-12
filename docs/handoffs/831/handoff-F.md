@@ -1,4 +1,181 @@
-# Handoff-F: Phase 5 - #831 A Claude Code harness for panes
+# Handoff-F: #831 A Claude Code harness for panes
+
+Two passes, newest first: the rework after S's REWORK, then the first pass (phase 5 of the role doc, phase 6 of the
+script).
+
+## Rework 1: S's REWORK (2026-10-11, 22:05 MDT)
+
+**Branch:** `issue-831-implementation` at `ccec57c` (worktree `.claude/worktrees/0831-claude-harness`), plus this rework,
+uncommitted. `MERGE_HEAD` is set: `origin/main` at `037405f` is merged with `--no-commit`, and the driver's phase commit
+concludes it, as in the first pass.
+**Issue:** #831 (still "Part of #831": item 17 waits for #835, which is OPEN at 22:00 MDT, and is not on `main`)
+**Input:** `handoff-S.md` (REWORK, `reworkKind: production`, three items and ten advisories), `handoff-A-dup.md` (W6 to W8),
+`decisions.md`.
+
+### What was done
+
+**The three REWORK items.**
+
+1. **`crates/holler-proto/src/vocab.rs`, the doc comment of `HARNESS_IDS`.** It now says what section 15 item 1 says: the id
+   `claude` has two uses that do not meet, a pane harness (Claude Code's interactive CLI, read only by the pane engine,
+   `holler_pane::pane::HarnessKind::Claude`) and a body harness (the ACP bridge, ADR 0012, read only by `holler-body`); that
+   `opencode` and `claude` also name a pane's harness; and that a test (`holler-pane`'s `tests/rework_test.rs`) pins every
+   `HarnessKind` serde name to the list. "The rest are reserved for future adapters" is gone; the protocol's own claim is
+   kept as a reference ("docs §9, where only `opencode` is a v2 adapter"). No wire, golden or `docs/protocol/v2.md` change.
+2. **`crates/holler-cli/src/pane/wiring/env.rs`.** `claude_bin` passes `holler_pane::pane::CLAUDE_CODE_COMMAND`, not a
+   second `"claude"`. Its doc says why the two are one fact: tmux names a pane's foreground process by the basename of its
+   `argv[0]`, which `process-in-use` (and #835's import) compares with the constant, so a `HOLLER_CLAUDE_BIN` with another
+   basename is not recognised (A-dup W7, S Advisory 7). No `"claude"` literal is left in `crates/*/src` outside
+   `HarnessKind::as_str` (the harness id), the constant itself, `HARNESS_IDS`, a hub test and `holler-body`.
+3. **`docs/adr/ADR-0021.md`, section 15 item 2's "As built".** "Text for text ... identical hunks" is replaced by what holds,
+   checked against `issue-835-implementation` at `f1d1bd0`: the API and the host-side code are #835's, unchanged (the
+   constant's value, the rule, the method's signature, `TmuxHost`'s and `FakeHost`'s implementations, host case 10, the
+   forwards: `holler-adapter-host/src`, the test kit's `host.rs` and `conformance/host.rs`, and four copied test files are
+   byte-identical); the doc comments are not (#835 reworded those of `CLAUDE_CODE_COMMAND` and `is_claude_code_command`
+   and the module doc of `claude_code_rule_test.rs` after F's copy; this story's doc of `foreground_commands` names
+   `process-in-use` too; the constant sits after `impl HarnessKind`). So whichever lands second keeps the other's API and
+   code and resolves a conflict in those doc comments.
+
+**The merge of `origin/main` (S Advisory 3; the brief: "Rebase onto `origin/main` before the PR").** `origin/main` moved to
+`037405f`: #855 (#667, the apply rehearsal: tests only) and #856 (#648, the roster's pane columns). `git merge --no-commit
+--no-ff origin/main` conflicted in three docs files, resolved by keeping both sides:
+
+- `CHANGELOG.md`: both new Enhancements entries (#831, then main's #667), and in #652's entry this branch's "a Claude
+  Code pane set up by hand" followed by main's new #648 entry.
+- `docs/adr/ADR-0003.md`: this branch's SPEC FLAGS line (`--port-policy` with `none`, `--harness`) and main's `say` line
+  (which drops "Until #648, `roster --profile` is refused ...").
+- `docs/adr/ADR-0021.md`, "Deferred to named stories": main's removal of the #648 bullet, and this branch's #839 and #850
+  bullets.
+
+No code needed to change for the merge: `cargo build`, clippy and the whole suite pass as merged. #856's roster reads the
+registry through `PaneRow::from`, which reads no harness port, so a Claude Code record renders there.
+
+**The roster, now that #648 is on the branch.** The roster's rows are the hub's (the sessions bodies serve), each joined
+to the pane named like its label, so a Claude Code pane, which no body serves until #850, has no roster row. Recorded in
+section 15 item 18 ("The roster, as built") and its "Not built here" paragraph, `docs/pane-control.md` section 4 and the
+CHANGELOG entry. S's acceptance row 8 ("the roster waits for #648") now reads: the roster waits for #850.
+
+**The advisories that are doc statements of this PR's own** (each a sentence or two):
+
+- Advisory 5: `holler-pane-testkit/src/harnesses.rs` and section 15 item 4 no longer say "no rig writes a linker of its
+  own" or "the one linker" (the three older OpenCode-only rigs keep theirs: A-dup W6); `docs/pane-control.md` section 2
+  and the CHANGELOG no longer say the launch gives every pane the subscription login (it removes the overriding
+  variables; `claude-login-missing` checks whether the login is the subscription's).
+- Advisory 6: section 15 item 18 no longer says #828 "is moving" `reset --first`: #828 was closed (not planned, 15:56 MDT)
+  as folded into #839. The older #828 sentences (ADR-0021 sections 5 and 8, "Deferred", and #649's CHANGELOG entry) are
+  other stories' words, and #839's issue says it edits them, so they are left.
+- Advisory 7: the `process-in-use` bullet of `docs/pane-control.md` section 2 names the `HOLLER_CLAUDE_BIN` basename limit
+  (and the `env.rs` doc, above).
+- Advisory 8: the `Bindings` paragraph of `wiring/bind.rs`'s module doc says that `pane doctor --fix` can relaunch several
+  Claude Code panes at once, and why the pairs that may cross are never read.
+- Advisory 9: `docs/pane-control.md` section 11 says to close the Claude Code panes before going back to a `holler`
+  older than #831 (its hub refuses the registry as `store-corrupt`).
+
+### Design decisions
+
+1. **REWORK 3 states the facts instead of re-copying #835's doc comments.** #835 has reworded its doc comments since the
+   copy (its own S REWORKs), and may again before it lands, so text identity is not a stable target; the API and the code
+   are what the coordination needs identical, and they are. This story's doc of `foreground_commands` also names a second
+   reader that #835's lacks, which is correct for this branch.
+2. **REWORK 1 keeps the protocol's claim as a reference, not a restatement.** `claude` is in use as a body harness (a
+   config row for the ACP bridge, ADR 0012) and as a pane harness, so "reserved" would be wrong for it; the wire and
+   `docs/protocol/v2.md` stay untouched.
+3. **The merge now, not at the PR.** The branch conflicted with `main` in three files and the PR step does not merge, so a
+   PR opened as is would have conflicted (and, on GitHub, run no `pull_request` CI). Merging here puts the integration
+   under T-green, A-dup and S. Same mechanism as the first pass (`--no-commit`, `MERGE_HEAD` for the driver's commit).
+4. **No roster code change.** #648 decided that the roster lists the hub's rows; listing a registry pane with no row would
+   change #648's output, outside this story. The gap is recorded, and #850 closes it.
+5. **A-dup W1 and W3 (code refactors) are not done here.** S lists them as follow-ups (Advisory 10), and W1 would edit
+   `import/files.rs`, which #835 rewrites.
+
+### Reuse / extend-vs-new
+
+No new object. REWORK 2 uses the existing constant, `CLAUDE_CODE_COMMAND`.
+
+### Architecture notes for A
+
+None from this rework: one literal replaced by an existing constant, doc comments and docs. The merge brings #855 (tests)
+and #856 (the roster) in unchanged; no #831 code changed for them. `archChanged: false`.
+
+### Deviations from spec / wireframe
+
+None new. Section 15's "As built" text changed in items 2, 4 and 18 (and the "Not built here" paragraph); the PR body's
+list of edits to the amendment should name them.
+
+### Tier 1 self-check (incl. tests now GREEN)
+
+Run on the merged tree with every edit in place, 21:40 to 22:00 MDT:
+
+```text
+$ cargo build --workspace --tests                                   clean
+$ cargo clippy --workspace --all-targets -- -D warnings             exit 0, no diagnostic
+$ cargo test --workspace --no-fail-fast -- --skip roster_stays_accurate_under_concurrent_body_load
+  passed 2523, failed 0, ignored 36 (165 test binaries; 2488/34/163 before the merge brought #855's and #856's tests)
+$ cargo test -p holler-cli --test docs_cli_test --test docs_pane_control_test   3 + 16 passed
+$ cargo test -p holler-proto                                         every target passes
+$ bash scripts/lint.sh                                               exit 0 (size warnings only)
+$ bash scripts/changelog-check.sh                                    changelog-check: ok
+$ cargo machete                                                      no unused dependencies
+$ rustfmt --check (env.rs, bind.rs, vocab.rs, harnesses.rs)          clean
+$ git diff HEAD --check -- CHANGELOG.md docs/adr docs/pane-control.md crates   clean
+```
+
+`git diff HEAD --check` over the whole tree reports trailing whitespace in `docs/handoffs/667-brief.md` only: main's file,
+merged as it is.
+
+### Evidence appendix
+
+`docs/handoffs/831/evidence.md`, "F, the rework after S's REWORK": five facts (the roster's rows are the hub's;
+`PaneRow::from` reads no port; the hub refuses an unreadable registry as `store-corrupt`; how the bindings pair an id with
+a name, and that only the OpenCode harness reads them; `program_bin`'s lookup).
+
+### Tests that look wrong (for T)
+
+None. Test gaps that stay T's (S Advisory 4, "for T-green in this loop"):
+
+- `harness-dialog-open` and an unknown status (`unavailable`) have no row in the adapter's
+  `activity_maps_status_and_waiting_for`; `session-holds-permission` is asserted by its exit code only;
+- lower value: `pane get` and `pane watch` over a Claude record, `holler interrupt --pane` output for a Claude pane,
+  `server-unsupported`;
+- new with the merge: a roster test that a hub row named like a Claude Code pane shows that pane's cells (the
+  acceptance's "the roster sees the Claude pane", where a row joins it);
+- `reset_first_reaches_the_new_process`'s comments name #828, now folded into #839 (S Advisory 6).
+
+### Known issues
+
+- Item 17 is not built: #835 is not on `main` (checked at 21:30 and 22:00 MDT).
+- The opt-in real test is not run (unchanged from the first pass; S Advisory 1).
+- `MERGE_HEAD` is set. The three files that conflicted are resolved and staged by path; the driver's commit concludes the
+  merge.
+
+### Files changed
+
+This rework's own edits (production and docs):
+
+- `crates/holler-proto/src/vocab.rs`
+- `crates/holler-cli/src/pane/wiring/env.rs`
+- `crates/holler-cli/src/pane/wiring/bind.rs`
+- `crates/holler-pane-testkit/src/harnesses.rs`
+- `docs/adr/ADR-0021.md` (with the conflict's resolution)
+- `docs/adr/ADR-0003.md` (the conflict's resolution only)
+- `CHANGELOG.md` (with the conflicts' resolution)
+- `docs/pane-control.md`
+- `docs/handoffs/831/handoff-F.md`, `evidence.md` and `decisions.md`
+
+Plus the merge of `origin/main` at `037405f`: main's files (#855, #856), unchanged.
+
+### For the PR body (S's Advisory 2, updated)
+
+- "Part of #831". What remains: item 17 after #835; the `say` step after #839 and #850; the Claude pane's roster row with
+  #850 (#648 is merged); the real test's first run.
+- The edits to the amendment, as built: items 2, 4 to 10, 12 to 15, 17 and 18, the "Not built here" paragraph, and
+  decisions 26 to 28.
+- The `stop_owned` difference from the issue's "by the recorded pid".
+- The AI disclosure `CONTRIBUTING.md` requires.
+
+---
+
+# First pass: Phase 5 - #831 A Claude Code harness for panes
 
 **Date:** 2026-10-11
 **Branch:** `issue-831-implementation` (worktree `.claude/worktrees/0831-claude-harness`)
