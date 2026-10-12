@@ -173,3 +173,48 @@ Run handoff directory `docs/handoffs/803` · branch `issue-803-implementation` �
     - a wrapped banned call fails the repaired ban;
     - "pane runs" passes it.
   - **Commands and outputs:** in handoff-T-green.md.
+
+## A, anti-duplication gate (Phase 8): 2026-10-12T10:20-06:00
+
+- **Decided:**
+  - **PASS, with 0 blocks and 4 warns** (see handoff-A-dup.md).
+  - **F extended every object the map named:**
+    - `herdr.sh` keeps one allow-list in `base_env`: `server-start` adds `HERDR_*` to it, and `holler` adds
+      the instance's `HOLLER_*` literals.
+    - `panes.sh` reads `[instance]` and `workspace` only from `instance.sh`'s printed lines, and takes the
+      first instance's port base from `instance.sh /dev/null`.
+    - The test harness (`Env`, `Host`, `code_lines`, `section` and the rest) is reused through
+      `pub(super)`.
+  - **The fake `holler` matches the code:** its action and outcome words, `cell_key`, rows a to f, apply's
+    text and exit 3, and the JSON of `get`, `list`, `profile list` and `doctor`.
+  - **The warns:**
+    - **(1)** Stage 11 and the docs tell the user to run `holler pane close` / `relaunch` in their own
+      shell with only `HOLLER_STATE_DIR`, a route around the door.
+    - **(2)** The door passes a stray socket of the other kind of instance (T-green's advisory 2).
+    - **(3)** `docs/setup-wizard.md` restates apply's creation order, which the brief said to state once.
+    - **(4)** `panes.sh`'s `noslash` is an unlisted copy of `strip_slash`.
+- **Assumed:**
+  - **An earlier pane-config check.** A pane verb builds its Herdr configuration before acting, so a user's
+    bare `holler pane close` with only `HOLLER_STATE_DIR` stops with `usage` and touches nothing. I read
+    this from `env.rs:66-74`; I did not run it.
+  - **The phase number.** Phase 8 follows this run's own handoffs (T-red 4, F 6, T-green 7) and the
+    pipeline doc's line 96. The doc also calls this gate Phase 9 elsewhere.
+- **Hedged:**
+  - **Warn 2's severity.** It needs an agent mistake (a literal of the other instance typed into
+    `<herdr_env>`), so it stays a warn. It is the same class as W1, and the fix is a guard clause.
+  - **Per-module test helpers.** I counted them as the target's established pattern (W7c), not as
+    duplication: `lib`, `out`, `err`, `stage`, `teardown`, and the two small `panes.sh` runners.
+- **Evidence:**
+  - **The diff:** `git diff 6eff9cc 2698960`, all 39 files listed. I read in full `panes.sh`, the
+    `herdr.sh` diff, `proof_fakes/holler`, `proof_803.rs`, `herdr_803.rs` and the `proof.rs`, `herdr.rs`
+    and `skilltext.rs` diffs. I read the import blocks and helper lists of `panes_803.rs`,
+    `panes_803_plan.rs` and `skilltext_803.rs`.
+  - **The skill and docs:** `SKILL.md` lines 1-1587 in full. In `docs/setup-wizard.md`, the section "How
+    the wizard builds panes" and the user-shell lines. The ADR-0021, `docs/pane-control.md`, README,
+    CHANGELOG, `docs/README.md` and two-instances diffs.
+  - **The code:** `instance.sh` in full, and the helper lists of every `lib/*.sh`. `tx_apply.rs` lines
+    1-260 and `cell_key`. The headers of `profile/apply.rs`, `pane/list.rs`, `pane/get.rs`,
+    `profile/list.rs` and `pane/doctor.rs`. `pane/wiring/env.rs` lines 53-95 and 160-200.
+  - **Grep and size checks:** grep checks for bare `holler pane|profile` in code blocks, and for duplicated
+    helpers across `tests/wizard/*.rs` and `lib/*.sh`. `wc -l` against `main` for `proof.rs` (825 → 825),
+    `herdr.rs` (874 → 751) and `skilltext.rs` (656 → 636).
