@@ -218,3 +218,57 @@ Run handoff directory `docs/handoffs/803` · branch `issue-803-implementation` �
   - **Grep and size checks:** grep checks for bare `holler pane|profile` in code blocks, and for duplicated
     helpers across `tests/wizard/*.rs` and `lib/*.sh`. `wc -l` against `main` for `proof.rs` (825 → 825),
     `herdr.rs` (874 → 751) and `skilltext.rs` (656 → 636).
+
+## S, spec audit: 2026-10-12T10:37-06:00 (MDT)
+
+- **Decided:** REWORK (`reworkKind: production`), four items (`docs/handoffs/803/handoff-S.md`).
+  - **Coverage.** Every Acceptance line 1 to 24 has a proving test. A and T preconditions are met. D1 to D22 are built as
+    decided, with A's warns and F's declared deviations.
+  - **Item 1.** Stage 11's note (`SKILL.md:1510-1513`) and the docs (`setup-wizard.md:645-647`) give the user
+    `holler pane close` / `relaunch` with only `HOLLER_STATE_DIR`, or with no environment.
+    - A pane verb keeps its Herdr configuration error until Herdr's first use (`wiring.rs:148-162`).
+    - `close_live` stops the host's processes first (`close.rs:165-186`).
+    - `stop_owned` signals the owned processes of the same-named session on tmux's default server.
+    - So, for a named instance, the call can stop another instance's `r1c1` before it fails with `usage`.
+  - **Item 2.** `panes.sh` parses a multi-line `layout`, which the unchanged `instance.sh:69-81` reads as a table header.
+    A `workspace` after it is dropped:
+    - `check` exits 0 with `workspace holler, profile holler`;
+    - `workspace = "a=b"` passes too, which bypasses Acceptance 6.
+  - **Item 3.** `holler pane reset PANE` on the orchestrator is refused `orchestrator-pane` without `--as-operator`
+    (`tx_switch.rs:345-350`). See `SKILL.md:1466-1468` and `setup-wizard.md:282-284`.
+  - **Item 4.** `setup-wizard.md:159-161` restates the creation order, against Amendment (d).
+- **Assumed:**
+  - T's and F's recorded runs stand. I re-ran no build or test.
+  - My checks were read-only:
+    - `git fetch`, `diff`, `show`, `log`, `diff --check`; `grep` and `wc -l`;
+    - `gh issue view` of 803, 839, 842, 850, 829 and 848, and `gh pr list`;
+    - `panes.sh` and `instance.sh` on scratch configs (they only read a file and print).
+  - The script commits this handoff and this entry at the phase commit.
+- **Hedged:**
+  - **Item 1's severity.** A-dup kept it a warn, on the reading that the call "touches nothing". The wiring and
+    `close_live` show the host acts before the Herdr error surfaces. For a named instance it is the cross-instance case
+    that D8 and W1b exist to refuse, so it is REWORK.
+  - **Item 2 needs one test.** F changes `panes.sh`. T adds the `panes_803` case, which is a mixed REWORK, so it is routed
+    `production`.
+  - **Not REWORK:** the one-sided socket guard, the `[ext.*]` multi-line refusal, the fake's missing exit-1 path, the
+    `--spec-only` offer for a live pane, and the default instance's tmux environment. All are advisory in handoff-S.
+- **Evidence:**
+  - **Live:** `origin/main` is `6eff9cc`, which is the merge base. #803 has 4 comments, the last at 04:27 MDT, all covered
+    by the brief. #839, #842, #850, #829 and #848 are open, so the REFRESH rows stand.
+  - **Read:**
+    - the brief's decision, Scope, Amendments, Acceptance, Blast radius, Depends on, Clashes, Rules and U1 to U8 sections;
+    - every handoff, `decisions.md` and `evidence.md`;
+    - `panes.sh`, the `herdr.sh` diff and file, `SKILL.md` in full, and `docs/setup-wizard.md` in full;
+    - the README, ADR-0021, `pane-control.md`, `docs/README.md`, two-instances and CHANGELOG diffs;
+    - every new test module, and the diffs of `herdr.rs`, `skilltext.rs`, `skilltext_772a/b.rs`, `instance.rs`, `main.rs`,
+      `skilltext_838.rs` and `skilltext_w5_stage0.rs`;
+    - `proof_fakes/holler`.
+  - **Code checked:**
+    - `pane/reset.rs`, `pane/switch.rs`, `tx_switch.rs`, `pane/relaunch.rs` (no orchestrator guard), `pane/close.rs`,
+      `pane/doctor.rs`, `profile/apply.rs`, `profile/show.rs` and `profile/create.rs`;
+    - `tx_apply.rs` (actions, outcomes, `dry`), `pane/wiring.rs`, `wiring/env.rs` and `reconcile/drift.rs`;
+    - in `holler-adapter-host`: `lib.rs` (`stop_owned`) and `tmux.rs`.
+  - **Diff checks:**
+    - `proof.rs` with `pub(super) ` stripped equals `main` (825 lines);
+    - privacy grep of all 8625 added lines: clean;
+    - `diff --check`: whitespace only inside the brief's verbatim evidence.
