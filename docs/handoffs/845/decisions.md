@@ -16,3 +16,9 @@
 - **Assumed:** that the hermetic model (title unchanged after `200 true`) is the real 1.19.0 failure; T's real probe on 1.18.35 did not reproduce the race. A re-sent request answered non-`true` or HTML ends `unavailable`, as the first one does (A's stricter reading).
 - **Hedged:** criterion 6 (opt-in #649 scenario with `HOLLER_TEST_PANE_INTEGRATION=1`) was not run by F (no scratch Herdr run in this phase); its compile and default (ignored) run are green. Whether 5 s `settle` covers the 1.19.0 warm-up stays unmeasured; nothing was added under "Needs operator decision if measured".
 - **Evidence:** `cargo test -p holler-adapter-opencode` all green (attach_test 27/27, ac29 x5 repeats green); `cargo test -p holler-pane` 141 passed; `cargo test -p holler-cli --test pane_verbs` 347 passed; `--test pane_integration` 71 passed, 4 ignored; clippy `-D warnings` clean on the adapter (all targets) and on holler-cli's lib, bins, `pane_integration` and `pane_verbs`; `bash scripts/lint.sh` exit 0; facts in evidence.md.
+
+## T (phase 7, verify GREEN)
+- Decided: PASS. Suite green, 8 repeat runs stable, three mutations each caught by a named test.
+- Assumed: `cargo machete` unavailable locally; CI runs it and the change adds no dependency.
+- Hedged: criterion 6 live run and risk 1 stay with the operator.
+- Evidence: docs/handoffs/845/handoff-T-green.md.
