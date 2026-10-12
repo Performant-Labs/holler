@@ -65,17 +65,18 @@ const GAP: &str = "  ";
 /// Every pane is an agent unless --orchestrator names it.
 ///
 /// A pane whose tmux session runs Claude Code is left alone. The old files cannot tell it from
-/// an OpenCode pane, so the import reads the command name of each process in the pane's tmux
-/// session (a name only, never a command line). A pane with a process named exactly `claude`
-/// gets the finding harness-claude-code (info), the action `skipped` and no record, and blocks
-/// nothing; `pane doctor` then reports it as unregistered-herdr-pane. Any other name (`bash`,
-/// which the launcher's OpenCode panes show), or no process, is imported as OpenCode. The rule
-/// is a default, not a proof: tmux names a process by the name it was started under, so a
-/// Claude Code pane whose `claude` has exited (it shows its shell), or one started under
-/// another name (a wrapper), is taken for OpenCode. Read the dry run first. A pane whose tmux
-/// session cannot be read gets the problem harness-unreadable and is never recorded on a guess.
-/// --adopt-claude-code would adopt the Claude Code panes too; it is refused (usage) until the
-/// Claude Code harness (#831) lands.
+/// an OpenCode pane, so the import reads the command name of the foreground process of each
+/// tmux pane in the pane's tmux session (a name only, never a command line). A pane whose tmux
+/// session has a foreground process named exactly `claude` gets the finding harness-claude-code
+/// (info), the action `skipped` and no record, and blocks nothing; `pane doctor` then reports
+/// it as unregistered-herdr-pane. Any other name (`bash`, which the launcher's OpenCode panes
+/// show), or no process, is imported as OpenCode. The rule is a default, not a proof: tmux
+/// names only the foreground process, so a Claude Code pane is taken for OpenCode when its
+/// `claude` has exited (it shows its shell), is not in the foreground (a wrapper script runs
+/// it, or it is suspended) or was started under another name. Read the dry run first. A pane
+/// whose tmux session cannot be read gets the problem harness-unreadable and is never recorded
+/// on a guess. --adopt-claude-code would adopt the Claude Code panes too; it is refused (usage)
+/// until the Claude Code harness (#831) lands.
 ///
 /// The run never starts, stops, types into or moves anything, and changes no file. With
 /// --dry-run it writes nothing and reports what a real run would write. A real run writes the

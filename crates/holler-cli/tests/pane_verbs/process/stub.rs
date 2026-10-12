@@ -175,11 +175,15 @@ fn top_level_help_names_pane_and_profile() {
             out.stdout
         );
     }
+    // #851 adds the commit after the version; the first two tokens are unchanged.
     let version = holler(&["--version"]);
     assert_eq!(version.code, 0);
+    let tokens: Vec<&str> = version.stdout.split_whitespace().take(2).collect();
     assert_eq!(
-        version.stdout,
-        format!("holler {}\n", env!("CARGO_PKG_VERSION"))
+        tokens,
+        ["holler", env!("CARGO_PKG_VERSION")],
+        "{}",
+        version.stdout
     );
 }
 

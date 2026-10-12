@@ -112,8 +112,8 @@ fn observe(ports: Ports<'_>, target: &Target<'_>) -> Observed {
 }
 
 /// Whether the tmux session `name` runs Claude Code: `host.ps`, then, once it has answered,
-/// the command names of its processes. Every other name, and a session with no process, is
-/// not Claude Code.
+/// the command name of the foreground process of each of its tmux panes. Every other name, and
+/// a session with no process, is not Claude Code.
 fn read_tmux(ports: Ports<'_>, name: &PaneName) -> Result<bool, Unread> {
     ports
         .host

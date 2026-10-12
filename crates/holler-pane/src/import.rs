@@ -22,14 +22,14 @@
 //! the threads finish in.
 //!
 //! **A pane that runs Claude Code is left alone (#835).** The old launcher's files cannot tell
-//! a Claude Code pane from an OpenCode one, so the import reads the command names of the
-//! pane's tmux session: one named exactly `claude` ([`crate::pane::is_claude_code_command`])
-//! leaves the pane alone, `harness-claude-code` (`info`, the row `skipped`), with no record,
-//! no other finding and no harness call. Any other name (`bash`, which the launcher's OpenCode
-//! panes show), or no process, is imported as OpenCode, as before, so a pane whose OpenCode
-//! server is merely down is still recorded and flagged `server-down`. A pane whose session
-//! could not be read, or whose chain did not finish, is never recorded on a guess:
-//! `harness-unreadable`, a problem.
+//! a Claude Code pane from an OpenCode one, so the import reads the command name of the
+//! foreground process of each tmux pane in the pane's tmux session: one named exactly `claude`
+//! ([`crate::pane::is_claude_code_command`]) leaves the pane alone, `harness-claude-code`
+//! (`info`, the row `skipped`), with no record, no other finding and no harness call. Any other
+//! name (`bash`, which the launcher's OpenCode panes show), or no process, is imported as
+//! OpenCode, as before, so a pane whose OpenCode server is merely down is still recorded and
+//! flagged `server-down`. A pane whose session could not be read, or whose chain did not
+//! finish, is never recorded on a guess: `harness-unreadable`, a problem.
 //!
 //! Only a [`Level::Problem`](findings::Level) blocks: a pane with one gets no record, and a
 //! real run that meets one is refused as [`IMPORT_BLOCKED`] ([`Plan::refusal`]).

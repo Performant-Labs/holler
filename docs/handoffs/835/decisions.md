@@ -560,3 +560,60 @@ Run handoff directory `docs/handoffs/835` Â· branch `issue-835-implementation` Â
     - private names, IPs, paths and secrets in the 2,882 added lines;
     - "each process" and its variants in docs and help.
   - Sizes: `wc -l` on all 37 touched files.
+
+## F, implement S's REWORK 1 (cycle 3, text only), and merge `main`: 2026-10-11T20:32-06:00 (MDT)
+
+- **Decided:** S's REWORK 1, in place, with no behaviour or test change (`docs/handoffs/835/handoff-F.md`, which
+  replaces cycle 2's at `4604693`). `archChanged: false`.
+  - **The six places S names** now say the import reads the command name of the foreground process of each tmux pane
+    in the pane's tmux session, and leaves alone a pane whose tmux session has a foreground process named exactly
+    `claude`:
+    - the help (`pane/import.rs`);
+    - the guide's sections 1, 3 (the `harness-claude-code` row) and 10 (the fact);
+    - the CHANGELOG;
+    - `read_tmux`'s doc.
+  - **One limits sentence** is used in the help, the guide and the CHANGELOG: "tmux names only the foreground process,
+    so a Claude Code pane is taken for OpenCode when its `claude` has exited (it shows its shell), is not in the
+    foreground (a wrapper script runs it, or it is suspended) or was started under another name."
+  - **One place beyond S's table:** the `holler-pane` import module doc's "the command names of the pane's tmux
+    session" gets the same foreground wording, for the reason S gives for `observe.rs`.
+  - **The guide gains no line from this story** (817 on the branch). Section 10's bullet stays at 12 lines: "It is a
+    default for this import, not a proof of what a pane runs; step 1 says how to check it" becomes "It is a default,
+    not a proof; step 1 checks it".
+  - **ADR-0021, `ports.rs` and `pane.rs` are unchanged.** S judged them exact.
+  - **Merged `origin/main` `d6ae539`** (#851, PR #854, merged 20:07 MDT, after S's 20:03 fetch), with
+    `--no-ff --no-commit`. The phase commit concludes it as a two-parent commit, as T-red's `526bbd3` was.
+    - Reasons: S's audit rests on the branch tree being the PR's merge result; brief R2-1 asks for the current `main`;
+      A's W1 precedent.
+    - Clean: `git merge-tree` showed no conflict, and the merge auto-merged ADR-0003 and the guide.
+- **Assumed:**
+  - The script's phase commit (`git add -A`, then `git commit`) concludes an in-progress merge, as it did for T-red's
+    `526bbd3`.
+  - #851 is reviewed and merged on `main`, so its files are not this story's to review. They drop out of
+    `git diff origin/main...HEAD` once the merge is committed.
+- **Hedged:**
+  - **Section 3's row and the limits' "not in the foreground" case** are worded differently from S's suggestions. S
+    left the wording to F, and both say "foreground" and name a `claude` outside it (handoff-F, "Deviations").
+  - **The merge is outside S's REWORK list.** It is branch upkeep, not production code. If the pipeline wants it done by
+    T or by the run's agent, reverting is one `git merge --abort` before the phase commit, then `git apply` of the
+    rework patch.
+  - **The guide is 821 lines after the merge.** The 4 extra lines are #851's ("confirm the binary", before section 10's
+    fact). S's advisory 1 is unchanged.
+- **Evidence:**
+  - Commands on the merged tree:
+    - CI's workspace step: exit 0, 155 groups, 2406 passed, 0 failed, 32 ignored;
+    - `docs_pane_control_test`: 17 passed; `docs_cli_test`: 3 passed;
+    - clippy `-D warnings`: exit 0;
+    - `lint.sh`: exit 0; `changelog-check`: ok;
+    - rustdoc `-D warnings -p holler-pane`: exit 0;
+    - `git diff --check` on the worktree, on the staged merge and against `origin/main`: clean.
+  - Before the merge, the workspace step had 2 failures in `interrupt_test` ("body is not connected", "reconnecting") at
+    load average 23. That binary then passed 11 of 11 alone.
+  - The patch round trip:
+    - the merged worktree diff equals the saved rework patch, line for line;
+    - the three files #851 does not touch are byte-identical to the saved copies;
+    - `CHANGELOG.md` and the guide differ from their copies only by #851's lines.
+  - `holler-cli` rustdoc `-D warnings` fails on `main` in `cli.rs`, `launch.rs`, `park.rs`, `reset.rs` and `switch.rs`,
+    none in this diff. There are 0 diagnostics in `pane/import.rs`, and CI has no doc step.
+  - Read: `handoff-S.md`, the brief, handoff-F cycle 2, ADR-0021 section 13, `ports.rs`, `pane.rs`,
+    `tmux.rs:35` (`FOREGROUND_FORMAT`), `docs_pane_control_test.rs`, and `git diff HEAD...origin/main`.

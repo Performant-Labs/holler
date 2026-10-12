@@ -42,7 +42,8 @@ pub(crate) async fn status_doc(registry: &Registry, lockout: &Lockout) -> serde_
                 .and_then(|a| a.as_str())
                 .map(str::to_owned)
         });
-    let version = env!("CARGO_PKG_VERSION");
+    // Issue #851: the version and commit `holler --version` prints, e.g. `0.4.0 (bda1069)`.
+    let version = holler_proto::build_info::version();
     let hostname = hostname::get()
         .map(|h| h.to_string_lossy().into_owned())
         .unwrap_or_else(|_| "unknown".to_string());

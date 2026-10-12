@@ -1,142 +1,151 @@
-# Handoff-F: #835 - `holler pane import` leaves Claude Code panes alone, with `--adopt-claude-code` (cycle 2: the guide and the records after the merge with `main`)
+# Handoff-F: #835 - `holler pane import` leaves Claude Code panes alone, with `--adopt-claude-code` (cycle 3: S's REWORK 1, the foreground wording, and the merge with `main`)
 
-**Date:** 2026-10-11 (19:31 MDT)
-**Branch:** `issue-835-implementation` at `526bbd3` (T-red's two-parent merge of `origin/main` `bda1069`), F's changes uncommitted
+**Date:** 2026-10-11 (20:32 MDT)
+**Branch:** `issue-835-implementation` at `ccc53a0` (S's REWORK commit). On top of it:
+- `origin/main` `d6ae539` (#851) is merged and **uncommitted**: `MERGE_HEAD` is set and #851's files are staged;
+- F's rework is unstaged.
+
+The phase commit (`git add -A`, then `git commit`) concludes both as one two-parent commit, as T-red's `526bbd3` was.
+
 **Issue:** #835
 
-This handoff replaces cycle 1's, which is at `9bd101b` and lists the code: the port method, the adapter, the fake, the
-forwards, the import and the switch. This cycle is text only, as handoff-A pass 4 ("Notes for T and F", item 2) and
-handoff-T-red cycle 2 ("Ready for F") say.
+This handoff replaces cycle 2's, which is at `4604693` (cycle 1's is at `9bd101b`). This cycle is text only: S's REWORK 1
+(`handoff-S.md`, "Verdict") and the merge with the `main` that moved after S's audit.
 
 | Field | Value |
 |---|---|
 | GitHub issue | #835 |
 | Working branch | `issue-835-implementation` |
-| Phase | F, cycle 2: the rework after T-green's BLOCK (A pass 4 PASS, T-red cycle 2 PASS) |
-| Input documents read | the brief (issue, amendment, rounds 2 and 3); handoff-A pass 4; handoff-T-red cycle 2; handoff-T-green cycle 1; handoff-F cycle 1; `decisions.md`; `evidence.md`; `docs/pane-control.md`; `docs_pane_control_test.rs`; `docs_cli_test.rs`; #654's options (`gh issue view 654`) |
-| What this cycle must turn GREEN | `import_findings_are_named_in_section_3_or_10` and `section_3_names_every_flag_of_pane_import`, plus A's W2 to W4 text items (not pinned by a test) |
+| Phase | F, cycle 3: the rework after S's REWORK (A pass 4 PASS, T-green cycle 2 PASS, A-dup PASS) |
+| Input documents read | `handoff-S.md`; the brief (issue, amendment, rounds 2 and 3); handoff-F cycle 2; `decisions.md`; the six places S names; ADR-0021 section 13; `ports.rs` and `pane.rs` (the rule's docs); the adapter's `tmux.rs` and `lib.rs`; `docs_pane_control_test.rs`; #851's diff (`git diff HEAD...origin/main`) |
+| What this cycle must change | S's REWORK 1: six places that say the import reads "each process" of the tmux session, reworded to the foreground process of each tmux pane, with a `claude` outside the foreground among the limits. No behaviour change, no test change, and the guide no longer than 817 lines from this story |
 | Handoff document path | `docs/handoffs/835/handoff-F.md` |
 
 ## What was done
 
-**The merge (A's W1)** was already made by T-red: `526bbd3` is a two-parent merge of `bda1069`. `git fetch` at 19:30 MDT
-shows `origin/main` still at `bda1069`, so F merged nothing.
+**S's REWORK 1, in place.** Every place now says the import reads the command name of the **foreground process of each
+tmux pane** in the pane's tmux session. Every limits sentence names a `claude` outside the foreground.
 
-**`docs/pane-control.md`** (A's W4):
+| Where | Change |
+|---|---|
+| `crates/holler-cli/src/pane/import.rs`: the `PaneImport` doc, which is `pane import --help` | The read, the rule ("a pane whose tmux session has a foreground process named exactly `claude`") and the limits sentence (design decision 1). |
+| `docs/pane-control.md`, section 1 | "whose tmux session has a foreground process named `claude`". "Claude Code" stays. The paragraph is still 4 lines. |
+| `docs/pane-control.md`, section 3's `harness-claude-code` row | "Its tmux session has a foreground process named `claude` (Claude Code)". |
+| `docs/pane-control.md`, section 10's fact | The read, the rule and the same limits sentence. The bullet is still 12 lines (design decision 3). |
+| `CHANGELOG.md`, the #835 entry | The read, the rule and the same limits sentence, then "Read the dry run first." |
+| `crates/holler-pane/src/import/observe.rs`: `read_tmux`'s doc | "the command name of the foreground process of each of its tmux panes". |
+| `crates/holler-pane/src/import.rs`: the module doc (beyond S's table) | "reads the command names of the pane's tmux session" becomes the same foreground wording (design decision 5). |
 
-- **Section 1:** the import also creates no record, by default, for a pane whose tmux session runs a process named
-  `claude` (`harness-claude-code`, sections 3 and 10).
-- **Section 3, `pane import`:**
-  - the synopsis gains `[--adopt-claude-code]`;
-  - one sentence says what the switch would do, and that it is refused with `usage` until #831, in a dry run too;
-  - two rows in the one findings table, in `ImportFinding::ALL` order after `harness-not-opencode`:
-    `harness-claude-code` (info) and `harness-unreadable` (problem);
-  - the `observe-failed` row is narrowed to the harness server's two calls, and says a failed tmux read is
-    `harness-unreadable` instead;
-  - the exit-code paragraph says `usage` comes before any file or port, so a dry run gets it too, and names its four
-    causes, the switch among them.
-- **Section 10:**
-  - the fact is restated: why `harness-not-opencode` does not catch these panes, the rule (a process named exactly
-    `claude`), what is still imported as OpenCode (so a merely-down server is still `server-down`), and
-    `harness-unreadable`;
-  - the rule's limits, with a link to ADR-0021 section 13 ("Decided (#835)") as the contract;
-  - step 1's check, as its own paragraph: run the dry run while the Claude Code sessions run; each Claude Code pane
-    should show `harness-claude-code`; one that does not (`record`, or `blocked` for another problem) was not
-    recognised, and the fallback is #654's option (a); the real run of step 3 also runs while those sessions run;
-  - the closing paragraph names `harness-claude-code` beside `harness-not-opencode`.
-- **Section 12:** the #835 line is replaced by the adoption that is still later: `--adopt-claude-code` is refused until
-  #831, and no story owns the adoption yet.
-
-**The doc comments and the ADR:**
-
-- `crates/holler-pane/src/import/findings.rs`: `ImportFinding::ObserveFailed`'s doc is narrowed to a call to the pane's
-  harness server, and points at `harness-unreadable` for a failed tmux read (W4).
-- `crates/holler-pane/src/unmanaged.rs` (#840's sentences, W2):
-  - the docs of `unregistered` no longer name #835 as a caller; they say the import asks what a pane runs
-    (`is_claude_code_command`, an intra-doc link), because no pane it observes has a record, and that a pane it leaves
-    alone has no record, so this rule lists it;
-  - the docs of `is_unmanaged` say "The question #831 asks".
-- `crates/holler-pane/src/pane.rs`: `CLAUDE_CODE_COMMAND`'s doc names #831 as a story that can reuse the predicate, and
-  no longer says #832 does (W3).
-- `docs/adr/ADR-0021.md`:
-  - section 13: "which #831 can reuse" (W3);
-  - section 14: "that #831 calls instead of writing its own", plus one sentence that the import does not call the
-    registry rule, pointing at section 13's "Not the registry's rule" (W2).
-- `docs/handoffs/835/evidence.md`: three facts in unchanged code (section "F, cycle 2").
+**The merge with `main`.** `origin/main` moved to `d6ae539` (#851, PR #854, merged 20:07 MDT). That was after S's
+`git fetch` at 20:03 MDT. F merged it with `git merge --no-ff --no-commit origin/main`:
+- it auto-merged `docs/adr/ADR-0003.md` and `docs/pane-control.md`, with no conflict;
+- it is left in progress for the phase commit, since F does not commit (design decision 6).
 
 ## Design decisions
 
-1. **Section 10 states the rule and its limits, and links the contract.** A asked for the fact "restated with the rule and
-   its limits", and lists "a guide section that restates ADR-0021 section 13 instead of linking to it" as a parallel path.
-   - The guide keeps what an operator needs to read a dry run: the rule, what is imported as OpenCode, the problem and
-     the limits.
-   - It links section 13 for the rest: the port read, "never on a guess", the switch's reasons and "Not the registry's
-     rule".
-2. **The fact stays one bullet** under "One fact about the live fleet comes first". The rule is how the import meets that
-   fact, so section 10's intro and structure stay as #652 wrote them.
-3. **Step 1 also covers the real run.** Step 3's real run observes the panes again. A Claude Code session that exits
-   between the dry run and the real run shows its shell and would be recorded as OpenCode. So step 1 says the real run
-   also runs while those sessions run. W4 names only the dry-run check, but this sentence is inside step 1's text, which
-   W4 names, and step 3 is not edited.
-4. **The fallback is #654's option (a), in #654's words:** "a copy or a link farm" the operator makes, with the old files
-   untouched (read with `gh issue view 654`).
-5. **The exit-code paragraph lists all four `usage` causes, not only the switch.** Naming the switch alone would suggest it
-   is the only one. The four are ADR-0021 section 9's row and `Input::read`'s checks (evidence, fact 2).
-6. **The `observe-failed` row says where a failed tmux read went.** T-green's blocking issue 1 asks the guide to state that
-   a failed tmux read is now `harness-unreadable`, a problem, rather than an `observe-failed` warning.
-7. **Section 12 says no story owns the adoption yet**, as ADR-0021's "Deferred to named stories" does, so the guide does not
-   imply that #831 builds it.
+1. **One limits sentence, the same in the help, the guide's section 10 and the CHANGELOG.** It reads: "tmux names only
+   the foreground process, so a Claude Code pane is taken for OpenCode when its `claude` has exited (it shows its shell),
+   is not in the foreground (a wrapper script runs it, or it is suspended) or was started under another name."
+   - The subject comes first, so the three cases read as one list.
+   - **"Is not in the foreground"** is S's missing case. A wrapper script that stays in the foreground runs `claude` as its
+     child, so tmux reports the script's interpreter. A suspended `claude` leaves its shell in the foreground.
+   - **"Was started under another name"** is the case the old text called "a wrapper". ADR-0021 and `pane.rs` give
+     `node` running Claude Code's script as an example.
+   - **"By the name it was started under" is dropped** from the old sentence. The third case says it, and the guide's
+     bullet had to stay at 12 lines.
+2. **"tmux pane" and "pane".** The read is defined as "the command name of the foreground process of each tmux pane in the
+   pane's tmux session". The words "tmux pane" separate tmux's panes of the session from the Holler pane, which is a pane
+   directory with a record. The short form is "whose tmux session has a foreground process named `claude`". It is used
+   in section 1, in section 3's row and in the rule sentences, as S proposed for section 1.
+3. **The guide's line budget.** S asked that the rework add no line to the guide (817). The new read and limits are
+   longer, so section 10's bullet keeps its 12 lines by two cuts:
+   - "It is a default for this import, not a proof of what a pane runs; step 1 says how to check it" becomes "It is a
+     default, not a proof; step 1 checks it". The help already says "The rule is a default, not a proof".
+   - The dropped clause of design decision 1.
+   I measured each wording with a wrapper at the guide's 120 columns. Every other sentence of the bullet is unchanged.
+4. **ADR-0021, `ports.rs` and `pane.rs` are unchanged.** S found that they say this exactly (`handoff-S.md`, "Spec
+   compliance", and REWORK 1). They state the foreground model. Their limits put "a wrapper" under another `argv[0]`,
+   which is true of a wrapper that `exec`s Claude Code under another name.
+5. **One place beyond S's table: the `holler-pane` import module doc.** It said "the import reads the command names of the
+   pane's tmux session". That is vaguer than "each process" but not wrong, and S did not list it. It now uses the same
+   foreground wording, for the same reason S gives for `observe.rs` ("for consistency"). It stays one paragraph of 9
+   lines.
+6. **The merge with `main`.**
+   - **Why:**
+     - S's audit rests on "the branch tree is the PR's merge result" (`handoff-S.md`, header). That stopped being true
+       two minutes after S's fetch.
+     - Brief R2-1 says this story "also needs the current `main`".
+     - A's pass 4 (W1) asked for the same merge after #649 and #832, and T-red made it.
+     - Merging now lets T-green and S verify the tree the PR will merge. Otherwise S could find the branch behind `main`
+       and send it round the loop again.
+   - **Clean:**
+     - `git merge-tree --write-tree` reported no conflict before the merge.
+     - #851 does not overlap #835. It changes the version string (`build.rs`, `build_info`), adds a CHANGELOG entry and
+       ADR-0003's header and version line, and adds four guide lines before section 10's fact.
+   - **How, without a commit or the shared stash.** The rework was saved as a patch and as file copies in the
+     scratchpad. The five files were restored and `main` merged with `--no-commit`. Then the patch was applied again.
+     - The worktree diff on the merged tree is, line for line, the saved patch.
+     - The three files #851 does not touch are byte-identical to their copies.
+     - The other two (`CHANGELOG.md` and the guide) differ from their copies only by #851's lines.
 
 ## Reuse / extend-vs-new
 
-Every edit is in place, in the sentences, rows and sections that A's reuse map names for the rework ("The guide
-(rework)" and "The records of #840 and of #832's reuse (rework)"):
-
-- no new section, page, table or helper;
-- the two findings go into the one findings table of section 3; there is no second table of import findings;
-- section 10 links ADR-0021 section 13 rather than restating it (design decision 1);
-- no edit to `main`'s files beyond the sentences W2 to W4 name (design decision 3's sentence is inside step 1).
+All edits are in place, in the sentences S names (plus design decision 5's one sentence). There is no new section, page,
+table, helper or test, and no edit to a file that is not already in this story's diff.
 
 ## Architecture notes for A
 
-None. Docs and doc comments only: no code, interface, dependency, protocol, error code or state change.
-`archChanged: false`, as A's note 2 expects.
+None. Prose and doc comments only: no code, interface, dependency, protocol, error code or state change. The merge brings
+in #851's code (the commit in the version string). That is #851's, it is reviewed and merged on `main`, and it overlaps
+nothing of #835. `archChanged: false`, as S says.
 
 ## Deviations from spec / wireframe
 
-None. Design decision 3 adds one sentence beyond W4's list, inside the step W4 names.
+None. S left the wording to F ("as long as every place says 'foreground' and names a `claude` outside the foreground among
+the limits"). Two places differ from S's suggested words, and both meet that rule:
+- section 3's row reads "Its tmux session has a foreground process named `claude`", parallel to section 1, where S
+  suggested "The foreground process of a pane of its tmux session is named `claude`";
+- the limits say "is not in the foreground (a wrapper script runs it, or it is suspended)", where S suggested "runs
+  behind another foreground process (a wrapper script, a suspended job)".
 
 ## Tier 1 self-check (incl. tests now GREEN)
 
-```
-$ cargo test -p holler-cli --test docs_pane_control_test --test docs_cli_test
-  docs_pane_control_test: 17 passed, 0 failed
-    (import_findings_are_named_in_section_3_or_10 ... ok; section_3_names_every_flag_of_pane_import ... ok)
-  docs_cli_test: 3 passed (every_documented_holler_command_parses ... ok, so the new synopsis span parses)
+There is no RED for this cycle: S asked for no test, and no test pins this prose. On the **merged tree** (branch, #851 and
+the rework):
 
+```
 $ cargo test --workspace --no-fail-fast -- --skip roster_stays_accurate_under_concurrent_body_load   (CI's step)
-  exit 0. 154 result groups: 2398 passed, 0 failed, 32 ignored
-  (T-red's run on the same merged tree: 2396 passed, 2 failed, the two tests above.)
+  exit 0. 155 result groups: 2406 passed, 0 failed, 32 ignored
+  (cycle 2's T-green: 154 groups, 2398 passed; the 8 more and the 155th group are #851's build_version_test and others)
 
-$ cargo clippy --workspace --all-targets -- -D warnings     -> exit 0
-$ cargo doc --no-deps -p holler-pane                        -> no warning (the new intra-doc link in unmanaged.rs resolves)
-$ bash scripts/lint.sh                                      -> exit 0
-$ bash scripts/changelog-check.sh                           -> changelog-check: ok
-$ git diff --check                                          -> clean
+$ cargo test -p holler-cli --test docs_pane_control_test --test docs_cli_test
+  docs_pane_control_test: 17 passed, 0 failed     docs_cli_test: 3 passed, 0 failed
+
+$ bash scripts/changelog-check.sh                                  -> changelog-check: ok
+$ cargo clippy --workspace --all-targets -- -D warnings            -> exit 0
+$ bash scripts/lint.sh                                             -> exit 0
+$ RUSTDOCFLAGS="-D warnings" cargo doc --no-deps -p holler-pane     -> exit 0 (the module doc's intra-doc link resolves)
+$ git diff --check; git diff --cached --check;
+  git diff --check origin/main -- . ':(exclude)docs/handoffs'      -> clean, clean, clean
+$ wc -l docs/pane-control.md                                       -> 821 (817 from this branch, plus #851's 4)
 ```
 
-Before the edits, `docs_pane_control_test` failed with exactly T-red's two failures (15 passed, 2 failed). The last edit
-(step 1's paragraph in the guide, wording only) came after the workspace run. The only tests that read the guide,
-`docs_pane_control_test` and `docs_cli_test`, were run again after it: 17 and 3 passed, and `git diff --check` was clean.
+Before the merge, on the branch with the rework alone, the same checks passed except for two workspace tests:
+- `interrupt_test`'s `cancel_not_queued_behind_large_update_flush` failed with "alpha's body is not connected", and
+  `full_journey_with_stub` with "t/alpha is reconnecting";
+- the machine's load average was 23 at the time;
+- both are hub and body end-to-end races in code this change cannot reach, and the binary passed 11 of 11 alone;
+- the run on the merged tree, above, had no failure.
+
+`holler-cli`'s rustdoc with `-D warnings` fails on `main` as it stands (see Known issues). None of its errors is in
+`pane/import.rs` (0 diagnostics there).
 
 ## Evidence appendix
 
-`docs/handoffs/835/evidence.md`, section "F, cycle 2", three facts:
-
-1. `observe-failed` comes only from the harness server's two calls (`observe.rs:177-187`);
-2. every `usage` comes from `Input::read`, before the files are read and before `plan` (`pane/import.rs:145-146`,
-   `:182-207`);
-3. a whole-fleet reconcile pass reports a pane with no record as `unregistered-herdr-pane` (`reconcile.rs:362-372`).
+None: no behaviour outside the diff is relied on. The wording rests on two things this story's diff already shows:
+- the adapter's `FOREGROUND_FORMAT`, `#{pane_dead} #{pane_current_command}` (`crates/holler-adapter-host/src/tmux.rs:35`),
+  read once per live tmux pane;
+- `HostPort::foreground_commands`'s docs (`crates/holler-pane/src/ports.rs`).
 
 ## Tests that look wrong (for T)
 
@@ -144,30 +153,27 @@ None.
 
 ## Known issues
 
-1. **`docs/pane-control.md` is 817 lines** (it was 794). `scripts/lint.sh` checks only `crates/**/*.rs`, so nothing
-   fails. #652's A-dup named "about 800" as a soft line for the guide. That is S's or the operator's call, not this
-   story's.
-2. **The epic's contract block** (#633's issue body) is the operator's to edit, as in cycle 1.
+1. **The guide is 821 lines after the merge:** 817 from this branch, plus the 4 lines #851 added before section 10's fact.
+   This rework adds none, as S asked. S's advisory 1 (#652's soft "about 800", enforced by no check) still applies.
+2. **`holler-cli` rustdoc with `-D warnings` fails on `main` already.** The errors are unclosed `<label>`/`<session>` tags
+   in `cli.rs`, and private intra-doc links in `pane/launch.rs`, `park.rs`, `reset.rs` and `switch.rs`. None of these
+   files is in this story's diff, and CI has no doc step. The gate T-green used is `-p holler-pane`, which is clean. This
+   is for the operator, if a doc gate is wanted.
+3. **For the run's agent, after the PR opens** (adds to S's advisory 5): name #851 (PR #854) among the coexistence notes.
+   It edited the guide's section 10, ADR-0003 and `CHANGELOG.md`, and merged cleanly.
 
 ## Files changed
 
-This cycle's production files:
+This cycle's production files (5), all already in this story's diff:
 
-- `docs/pane-control.md`
-- `docs/adr/ADR-0021.md`
-- `crates/holler-pane/src/import/findings.rs`
-- `crates/holler-pane/src/unmanaged.rs`
-- `crates/holler-pane/src/pane.rs`
-
-For S's scope review, the PR's production files across both cycles are cycle 1's list plus these five:
-
-- `crates/holler-pane/src/{ports.rs, pane.rs, import.rs, unmanaged.rs}`
-- `crates/holler-pane/src/import/{assess.rs, findings.rs, observe.rs}`
-- `crates/holler-pane-testkit/src/host.rs`
-- `crates/holler-adapter-host/src/{lib.rs, tmux.rs}`
-- `crates/holler-cli/src/pane/{import.rs, wiring.rs, wiring/bind.rs}`
-- `docs/adr/ADR-0021.md`, `docs/adr/ADR-0003.md`, `docs/pane-control.md`
 - `CHANGELOG.md`
+- `crates/holler-cli/src/pane/import.rs`
+- `crates/holler-pane/src/import.rs`
+- `crates/holler-pane/src/import/observe.rs`
+- `docs/pane-control.md`
 
-Run artifacts: `docs/handoffs/835/handoff-F.md`, `docs/handoffs/835/evidence.md` (appended),
-`docs/handoffs/835/decisions.md` (appended).
+The in-progress merge also stages #851's files from `main` (`git diff --cached`). They are not this story's, and
+`git diff origin/main...HEAD` will not show them once the phase commit concludes the merge. The PR's production files
+across all cycles are cycle 2's list, unchanged.
+
+Run artifacts: `docs/handoffs/835/handoff-F.md` (this file) and `docs/handoffs/835/decisions.md` (appended).

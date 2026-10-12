@@ -8,6 +8,15 @@ fills this file in at release time.
 ## [Unreleased]
 
 ### Enhancements
+- `holler --version` (and `-V`) names the commit the binary was built from, after the version: `holler 0.4.0 (bda1069)`
+  ([#851](https://github.com/Performant-Labs/holler/issues/851)). Until now every build since a release printed the same
+  `holler 0.4.0`, so a person could not tell which code they were running. The first two words are unchanged. The commit
+  is the 7-character hash of the checkout's `HEAD`, followed by `-dirty` when a tracked file had changed; a build with no
+  git checkout (a source archive) uses the build-time variable `HOLLER_GIT_SHA`, and otherwise prints `unknown`. The
+  `version` field that `hub status`, `hub query status`, `body query status` and `caps` print carries the same string, so
+  `hub status` begins `hub 0.4.0 (bda1069) (protocol 3)`; no field is added. A release binary is built from a checkout of
+  its tag, so it names the tag's commit, and the Homebrew formula, which installs that binary, needs no change.
+  `docs/releasing.md` says when the build works the commit out again.
 - Pane control, the operator guide (epic [#633](https://github.com/Performant-Labs/holler/issues/633)): [`docs/pane-control.md`](docs/pane-control.md) documents every `holler pane` and `holler profile` verb ([#652](https://github.com/Performant-Labs/holler/issues/652)).
   It states the rule that only pane verbs change a registry (OpenCode) pane and that a Claude Code pane stays outside
   the registry, how to read `pane list` and `pane doctor`, the `profile apply` reference, grid notation, the JSON
@@ -67,14 +76,16 @@ fills this file in at release time.
 - Pane control, the import leaves Claude Code panes alone (epic [#633](https://github.com/Performant-Labs/holler/issues/633)):
   `holler pane import` no longer records a pane whose tmux session runs Claude Code as an OpenCode pane
   ([#835](https://github.com/Performant-Labs/holler/issues/835)). The launcher's files cannot tell the two apart, so the
-  import now reads the command name of each process in a pane's tmux session (a name only, never a command line), through
-  the new `HostPort::foreground_commands`. A pane with a process named exactly `claude` gets the new finding
-  `harness-claude-code` (info) and no record, and blocks nothing. Any other name, or no process, is imported as OpenCode, as
-  before. A pane whose tmux session cannot be read gets the new problem `harness-unreadable` and no record, so a real run is
-  refused (`import-blocked`); a failed `ps`, a warning until now, is that problem too. `--adopt-claude-code`, which will
-  adopt those panes, is refused (`usage`, exit 2) until the Claude Code harness
-  ([#831](https://github.com/Performant-Labs/holler/issues/831)) lands. The rule has limits: a Claude Code pane whose
-  `claude` has exited, or that was started under another program name, is taken for OpenCode, so read the dry run first.
+  import now reads the command name of the foreground process of each tmux pane in a pane's tmux session (a name only,
+  never a command line), through the new `HostPort::foreground_commands`. A pane whose tmux session has a foreground
+  process named exactly `claude` gets the new finding `harness-claude-code` (info) and no record, and blocks nothing.
+  Any other name, or no process, is imported as OpenCode, as before. A pane whose tmux session cannot be read gets the
+  new problem `harness-unreadable` and no record, so a real run is refused (`import-blocked`); a failed `ps`, a warning
+  until now, is that problem too. `--adopt-claude-code`, which will adopt those panes, is refused (`usage`, exit 2)
+  until the Claude Code harness ([#831](https://github.com/Performant-Labs/holler/issues/831)) lands. The rule has
+  limits: tmux names only the foreground process, so a Claude Code pane is taken for OpenCode when its `claude` has
+  exited (it shows its shell), is not in the foreground (a wrapper script runs it, or it is suspended) or was started
+  under another name. Read the dry run first.
   As a follow-up to [#832](https://github.com/Performant-Labs/holler/issues/832), `HerdrPort::observe_pane` is now required
   as well: a port wrapper that does not forward it no longer compiles, where it would have listed an unmanaged pane with no
   working directory and no screen change.
