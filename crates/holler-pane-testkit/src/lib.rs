@@ -26,6 +26,8 @@
 //! - [`host`] and [`harness`] — `FakeHost` and `FakeHarness` (slice e, #684).
 //! - [`claude`] and [`harnesses`] — `FakeClaude`, the single-process harness, and
 //!   `FakeHarnesses`, the router of the two harness fakes (#831).
+//! - [`hub`] — `FakeHub`, the hub's live attach bodies and its prompt gate (#839), and
+//!   `fixture::session_id`, the `ses_`-shaped id of a hub-routed fixture.
 //!
 //! The modules of slices b to e are empty stubs, declared here so that no two slices
 //! edit this file.
@@ -40,6 +42,7 @@ pub mod harness;
 pub mod harnesses;
 pub mod herdr;
 pub mod host;
+pub mod hub;
 pub mod pane_store;
 pub mod prober;
 pub mod profile_scope;

@@ -15,6 +15,7 @@
 //!   collide).
 //! - [`methods`] — the method catalog (15 methods, their kinds and
 //!   directions).
+//! - [`rebind`] — `session/rebind`'s params and result (issue #839).
 //! - [`error`] — the error table (JSON-RPC codes + Holler `data.code`).
 //! - [`docs`] — the per-method `params`/`result` types (hello, status,
 //!   presence, prompt, …) and the `stop_reason` → A2A-state mapping.
@@ -43,6 +44,7 @@ pub mod id;
 pub mod log;
 pub mod methods;
 pub mod noise;
+pub mod rebind;
 pub mod sas;
 pub mod token;
 pub mod version;

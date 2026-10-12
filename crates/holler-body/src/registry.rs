@@ -75,6 +75,13 @@ impl SessionRegistry {
     /// #182 sends on every heartbeat and reconnect): one [`SessionAd`] per
     /// registered session, reflecting its current state. `hostname` is the
     /// body's own hostname/label (`Presence::hostname`).
+    ///
+    /// This is the configured baseline, built before any session task exists:
+    /// `harness_session_id` is the id in the configuration, not the live one.
+    /// A running body's presence is
+    /// [`crate::session_manager::SessionManager::presence_doc`], which reads
+    /// the id its session task drives, and a `session/rebind` (issue #839)
+    /// changes that one only.
     pub fn presence_doc(&self, hostname: String) -> Presence {
         let sessions = self
             .sessions

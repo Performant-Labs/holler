@@ -263,6 +263,7 @@ fn list_over_the_chain(herdr: Arc<FakeHerdr>, format: Format) -> Outcome {
         harness: &harness,
         scope: &scope,
         prober: &prober,
+        hub: &holler_cli::pane::wiring::Unwired,
     };
     run_verb_with(&["pane", "list"], format, ports)
 }

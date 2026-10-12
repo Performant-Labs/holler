@@ -5,13 +5,16 @@
 //!
 //! A server's chain makes at most seven port calls, each bounded by I5: `ps`, `health`,
 //! `list_sessions`, `shown_session`, and with `--fix` `select_session` and `shown_session`
-//! again, then one `cas_put`. A single process's chain (#831) is the child module `process`:
-//! at most `ps`, `health`, `shown_session` and `session_activity`, then with `--fix` the
-//! caller's relaunch (a launch engine run, under its own budget) or one `cas_put`.
+//! again, then one `cas_put`; the pass's one `hub.advertised` (#839) is shared by every chain.
+//! A single process's chain (#831) is the child module `process`: at most `ps`, `health`,
+//! `shown_session` and `session_activity`, then with `--fix` the caller's relaunch (a launch
+//! engine run, under its own budget) or one `cas_put`.
 
 mod process;
 
+use crate::driven::{self, driver_of, Driver};
 use crate::findings::{quoted, Finding, FindingKind, FixError, FixState};
+use crate::hub::Advertised;
 use crate::pane::{PaneRole, Shape};
 use crate::{HarnessEndpoint, Pane, PaneError, Ports};
 
@@ -28,6 +31,21 @@ const PANE_STORE_CAS_PUT: &str = "pane_store.cas_put";
 /// The record's harness, when it does not fit its kind (a value built in code: a stored record
 /// that does not fit does not load).
 const PANE_HARNESS: &str = "pane.harness";
+
+/// The hub's live attach bodies as the pass read them, once (#839), and every record the pass
+/// read, whose evidence the exclusion rule of `driver_of` weighs: what a chain joins its pane
+/// to.
+#[derive(Clone, Copy)]
+pub(super) struct Bodies<'a> {
+    /// `None` when the pass did not read them, or the read failed: DRIVEN is left as stored.
+    pub(super) advertised: Option<&'a [Advertised]>,
+    pub(super) records: &'a [Pane],
+}
+
+/// DRIVEN as a chain observed it (#839): `None` when it was not observed (it is left as
+/// stored); else the id the pane's body advertises, or `None` when no body drives the pane or
+/// none can be told to be its own.
+type Driven = Option<Option<String>>;
 
 /// What one pane's chain found and observed.
 pub(super) struct Checked {
@@ -102,11 +120,12 @@ impl Screen {
 }
 
 /// Run the chain of `pane`: observe, compare, repair, record. A single process's chain is
-/// the child module `process`'s, with `relaunch` as its repair (#831).
+/// the child module `process`'s, with `relaunch` as its repair (#831); it observes no DRIVEN.
 pub(super) fn check_pane(
     ports: Ports<'_>,
     request: &ReconcileRequest<'_>,
     relaunch: Option<Relaunch<'_>>,
+    bodies: Bodies<'_>,
     pane: &Pane,
 ) -> Checked {
     let mut findings = Vec::new();
@@ -129,7 +148,8 @@ pub(super) fn check_pane(
     let screen = observe_screen(ports, pane, &at, &mut findings);
     check_session_of_record(pane, &server, &mut findings);
     let screen = check_screen(ports, request, pane, &server, screen, &mut findings);
-    findings.extend(record(ports, request, pane, &server, &screen));
+    let driven = check_driven(bodies, pane, &server, &screen, &mut findings);
+    findings.extend(record_with(ports, request, pane, &server, &screen, driven));
     Checked {
         findings,
         summary: summary(pane, screen.shown(), server.health()),
@@ -307,6 +327,48 @@ fn check_screen(
     repair.screen.unwrap_or(screen)
 }
 
+/// The body that drives `pane`, by `driver_of` over what the pass read of the hub and the
+/// chain's own trusted server list (#839), and its findings: `shown-driven-mismatch` for a body
+/// that drives a session that is neither SHOWN nor the session of record (a body that is
+/// behind: not fixable, with the switch back to the session of record as its own remedy), and
+/// for a body that cannot be told to be the pane's (no remedy, the refusal's own message).
+/// Returns the DRIVEN to record.
+fn check_driven(
+    bodies: Bodies<'_>,
+    pane: &Pane,
+    server: &Server,
+    screen: &Screen,
+    findings: &mut Vec<Finding>,
+) -> Driven {
+    let advertised = bodies.advertised?;
+    let listed = server.sessions().unwrap_or_default();
+    let driver = driver_of(pane, advertised, listed, bodies.records, None);
+    if let Some(refusal) = driven::not_driven(&pane.name, &driver) {
+        let finding = Finding::about(FindingKind::ShownDrivenMismatch, pane, refusal.to_string());
+        findings.push(finding.without_remedy());
+        return Some(None);
+    }
+    let Driver::One(body) = driver else {
+        return Some(None);
+    };
+    let id = body.harness_session_id.as_str();
+    if let Some(record) = pane.session_of_record.as_deref() {
+        if id != record && screen.shown() != Some(id) {
+            let message = format!(
+                "its body {} drives session {}, while the session of record is {} and the TUI \
+                 shows {}",
+                quoted(&body.name),
+                quoted(id),
+                quoted(record),
+                screen_text(screen.shown())
+            );
+            let finding = Finding::about(FindingKind::ShownDrivenMismatch, pane, message);
+            findings.push(finding.with_session(Some(id)).with_switch_remedy(record));
+        }
+    }
+    Some(Some(id.to_owned()))
+}
+
 /// `tui-foreign-session` for `pane`, whose TUI shows `session`.
 fn foreign_session(pane: &Pane, session: &str) -> Finding {
     let port = port_text(pane);
@@ -405,10 +467,8 @@ fn screen_text(shown: Option<&str>) -> String {
     )
 }
 
-/// Record what the chain observed (`harness.health`, `last_observed.shown`, stamped
-/// `request.now_ms`) when it differs from the record or is the record's first observation
-/// (`at == 0`). One compare-and-swap at the generation the pass read, never retried; a
-/// failed write is an `observe-failed` finding.
+/// [`record_with`] for a chain that observes no DRIVEN, a single process's (#831): it is left
+/// as stored.
 fn record(
     ports: Ports<'_>,
     request: &ReconcileRequest<'_>,
@@ -416,8 +476,23 @@ fn record(
     server: &Server,
     screen: &Screen,
 ) -> Option<Finding> {
+    record_with(ports, request, pane, server, screen, None)
+}
+
+/// Record what the chain observed (`harness.health`, `last_observed.shown` and, #839,
+/// `last_observed.driven`, stamped `request.now_ms`) when it differs from the record or is the
+/// record's first observation (`at == 0`). One compare-and-swap at the generation the pass
+/// read, never retried; a failed write is an `observe-failed` finding.
+fn record_with(
+    ports: Ports<'_>,
+    request: &ReconcileRequest<'_>,
+    pane: &Pane,
+    server: &Server,
+    screen: &Screen,
+    driven: Driven,
+) -> Option<Finding> {
     let health = server.health().recorded();
-    if health.is_none() && matches!(screen, Screen::Unseen) {
+    if health.is_none() && matches!(screen, Screen::Unseen) && driven.is_none() {
         return None;
     }
     let mut next = pane.clone();
@@ -426,6 +501,9 @@ fn record(
     }
     if let Screen::Seen(shown) = screen {
         next.last_observed.shown.clone_from(shown);
+    }
+    if let Some(driven) = driven {
+        next.last_observed.driven = driven;
     }
     if next == *pane && pane.last_observed.at != 0 {
         return None;

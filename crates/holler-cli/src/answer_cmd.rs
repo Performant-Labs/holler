@@ -8,7 +8,9 @@ use holler_pane::pane::Shape;
 use holler_pane::{PaneError, Ports};
 
 use crate::prompt_target::Routed;
-use crate::say_cmd::{resolve_pane_record, route_target_by, session_of_record, ANSWER_UNSUPPORTED};
+use crate::say_cmd::{
+    pane_not_driven, resolve_pane_record, route_target_by, session_of_record, ANSWER_UNSUPPORTED,
+};
 use crate::Answer;
 
 /// What `answer_command` (in `main.rs`) should print and exit with.
@@ -66,7 +68,7 @@ fn err(message: String, exit_code: i32) -> AnswerResult {
 /// not apply to it. A Claude Code pane (#831) is refused `answer-unsupported`.
 pub fn run(answer: &Answer, json: bool) -> AnswerResult {
     let routed = route_target_by(answer.resolve(), &answer.profile, answer_pane_target);
-    let Routed { session, arg } = match routed {
+    let Routed { session, arg, pane } = match routed {
         Ok(routed) => routed,
         Err(stop) => return err(stop.message, stop.exit_code),
     };
@@ -87,6 +89,10 @@ pub fn run(answer: &Answer, json: bool) -> AnswerResult {
         }
         Err(holler_hub::control::ControlError::RemotePolicyRefused(msg)) => err(msg, 3),
         Err(holler_hub::control::ControlError::Refused(e)) => {
+            // #839: for `--pane`, no live body for the pane's id is `pane-not-driven`, first.
+            if let Some(stop) = pane_not_driven(pane.as_deref(), &session, &e) {
+                return err(stop.message, stop.exit_code);
+            }
             // `ambiguous` (matching `say`'s own convention: "lists
             // candidates") is the one refusal that exits 2, not 1 — every
             // other refusal (unknown session, nothing_pending, not_connected,

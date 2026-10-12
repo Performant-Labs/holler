@@ -8,6 +8,41 @@ fills this file in at release time.
 ## [Unreleased]
 
 ### Enhancements
+- Pane control, the setup wizard (epic [#633](https://github.com/Performant-Labs/holler/issues/633)): the wizard
+  (`/herdr-setup`) builds its Herdr workspace out of Holler registry panes
+  ([#803](https://github.com/Performant-Labs/holler/issues/803)), a grid of OpenCode and Claude Code panes with one or
+  more orchestrators. It writes one spec per pane with `holler pane launch --spec-only`, dry-runs the profile, then runs
+  one `holler profile apply`, which creates the whole grid (no pane is launched or split by hand), and its teardown
+  closes the panes with `holler pane close` and `holler profile delete` before the ledger's processes stop. A new
+  helper, `lib/panes.sh`, checks the `[[pane]]` config and prints the grid, the environment literals and the exact
+  Holler calls, in order. Every Holler pane and profile call runs through `herdr.sh holler`, which scrubs the
+  environment (no `HERDR_*` and none of the driving agent's own variables reach `holler`, and so no pane) and refuses
+  to run without the instance's state directory and its Herdr or tmux socket. The hub and one body run on loopback on
+  the same machine, and the body's attach rows take each OpenCode pane's port and session of record from the registry.
+  Stages 4 to 9 now bring up the hub, start the Herdr server, create the profile, build the panes, join the body and
+  check the registry. [ADR 0021](docs/adr/ADR-0021.md) section 11 and decision 48 record it, and
+  [`docs/setup-wizard.md`](docs/setup-wizard.md) has the design ("How the wizard builds panes").
+- Pane control, DRIVEN (epic [#633](https://github.com/Performant-Labs/holler/issues/633)): the session the hub drives now
+  follows each pane's session of record
+  ([#839](https://github.com/Performant-Labs/holler/issues/839), which absorbs [#828](https://github.com/Performant-Labs/holler/issues/828)).
+  The hub joins a pane to the attach-mode body that advertises its session of record, and the hub resolves that `ses_…`
+  id as an address for `say`, `interrupt` and `answer`, so `--pane` now reaches a real pane (a `ses_…` typed as the
+  session argument is still refused, as before); the pane gate (`pane-parked`, `pane-unhealthy`,
+  `pane-shown-driven-mismatch`) is keyed on the same id, and on a pane's recorded DRIVEN, instead of the body's session
+  name. `holler pane switch` and `holler pane reset` ask the body to follow the new session (a new additive hub-to-body
+  request, `session/rebind`; the protocol catalog has 23 rows) and record `last_observed.driven` from its answer, and
+  `holler pane doctor` records it too and reports `shown-driven-mismatch` when it differs; a body is taken to be a pane's
+  only on evidence (its session of record, its recorded DRIVEN or the session being switched to), and a switch onto a
+  session that another body already drives is refused (`session-driven-elsewhere`). A restarted body attaches its
+  configured session again; `holler pane doctor` reports that and `holler pane switch PANE SESSION` re-points it. The
+  first message of `holler pane reset --first` now goes through the hub's prompt path: a parked, held or unhealthy pane
+  refuses it before anything moves (`pane-parked`, `session-held`, `pane-unhealthy`, `pane-shown-driven-mismatch`), and a
+  pane no body drives refuses it (`pane-not-driven`; it worked through the harness before), a Claude Code pane included
+  until [#850](https://github.com/Performant-Labs/holler/issues/850) gives it a body. `control/say` gains an optional
+  `check_only`, and the hub's `not_connected` refusal of an offline body gains an optional `data.reason` of `offline`,
+  which is how `say --pane` tells a pane no body drives from a turn that outlived its wait. This replaces the caution
+  about `reset --first` on a parked or held pane in the #649 entry below. [ADR 0021](docs/adr/ADR-0021.md) section 11 records
+  the decisions.
 - Pane control, a Claude Code harness (epic [#633](https://github.com/Performant-Labs/holler/issues/633)):
   `holler pane launch PANE --harness claude --port-policy none` launches a pane whose harness is one interactive Claude
   Code process, recorded by its pid and with no port, and the pane verbs drive it
@@ -94,9 +129,9 @@ fills this file in at release time.
   write whose reply is lost answers `timeout`, since it may have landed. No credential is read, printed or put on a
   command line: an OpenCode server inherits its tmux server's environment. Two things go live with it: every profile
   write a `--profile` pane verb or `profile apply` makes is logged as `holler pane`
-  ([#825](https://github.com/Performant-Labs/holler/issues/825)), and the first message of `pane reset --first` reaches
-  the pane's server outside the hub's park and hold gate, so until
-  [#828](https://github.com/Performant-Labs/holler/issues/828) lands, do not use `reset --first` on a parked or held pane.
+  ([#825](https://github.com/Performant-Labs/holler/issues/825)), and the first message of `pane reset --first` reached
+  the pane's server outside the hub's park and hold gate, and, since
+  [#839](https://github.com/Performant-Labs/holler/issues/839), goes through the hub's gate.
   An opt-in scenario (`HOLLER_TEST_PANE_INTEGRATION=1`) runs the verbs end to end against scratch Herdr, tmux and OpenCode
   instances it starts itself, and refuses any real session. [ADR 0021](docs/adr/ADR-0021.md) records the wiring.
 - Setup wizard (epic [#726](https://github.com/Performant-Labs/holler/issues/726)): Stage 1 asks which Herdr session to
@@ -597,7 +632,23 @@ fills this file in at release time.
   ([#649](https://github.com/Performant-Labs/holler/issues/649)), the real verbs answer `not-implemented`
   ([#644](https://github.com/Performant-Labs/holler/issues/644)).
 
+### Breaking Changes
+- The setup wizard's config is `[[pane]]` ([#803](https://github.com/Performant-Labs/holler/issues/803)): an
+  orchestrator is a role on an OpenCode or Claude Code pane. `[[orchestrator]]` and `[[session]]`, the free-form `cmd`,
+  remote attach-mode sessions (with `endpoint`, `mode`, `session_id`, `remote_host` and `remote_tailnet_host`) and the
+  manual-relay mode are gone: `panes.sh check` refuses each by name, and the wizard shows a conversion as text and never
+  rewrites the old file. `layout` goes on one line and must be a staircase (no column taller than the column to its
+  left), the set of grids `holler profile apply` can build. `herdr.sh label` and every pane and workspace word of
+  `herdr.sh run` are gone (`run` refuses them with exit 2, naming `holler pane`). `hub_host` is ignored and
+  `serve_https_port` unused.
+
 ### Bug Fixes
+- The OpenCode adapter reads a pane's TUI correctly when holler runs with no UTF-8 locale (`LANG=C`, `LC_ALL=C`, or
+  neither set) (epic [#633](https://github.com/Performant-Labs/holler/issues/633),
+  [#844](https://github.com/Performant-Labs/holler/issues/844)). Its one tmux query joins five fields with TABs, and a
+  tmux client without a UTF-8 locale prints each TAB as `_`, so `attach_tui`, `select_session` and `shown_session`
+  reported "no tmux session" for a pane that was fine. Every tmux call the adapter makes now passes `-u`, which makes
+  the client print UTF-8 whatever the locale; the query, its reply and the process environment are unchanged.
 - `holler profile apply` builds a whole grid from an empty workspace, and a real run with a refused step exits 3 (epic
   [#633](https://github.com/Performant-Labs/holler/issues/633),
   [#853](https://github.com/Performant-Labs/holler/issues/853)). Apply created the missing panes in workspace, row and

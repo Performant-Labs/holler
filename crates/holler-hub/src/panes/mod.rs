@@ -34,7 +34,7 @@
 //!   client's own timeout bounds the verb.
 //! - A `profile/rename` (#665) holds the lock across two saves, this file's and
 //!   `profiles.json`, so every pane call waits for a rename, the prompt gate's `list` in
-//!   `circuit/dispatch.rs` included. A rename is paced by an operator's verb.
+//!   `gate.rs` (#839) included. A rename is paced by an operator's verb.
 //! - Each pending `pane/watch` holds one blocking-pool thread for up to [`WATCH_WAIT`], and
 //!   the runtime's shutdown waits for it. Do not raise the window without revisiting this.
 //!
@@ -49,6 +49,7 @@
 //! the `panes/**` blast radius that #639 owns, and a sibling `panes.rs` would not.
 
 pub(crate) mod feed;
+pub(crate) mod gate;
 pub(crate) mod handlers;
 pub(crate) mod persist;
 mod store;

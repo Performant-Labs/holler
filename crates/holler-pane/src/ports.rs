@@ -38,7 +38,11 @@
 //!   [`HarnessPort::new_session_id`], [`HarnessPort::locate_process`],
 //!   [`HarnessPort::login_status`]); [`ServeSpec`] gains the model and the directory; and
 //!   [`Activity::WaitingPermission`]. [`HarnessRouter`] is the one router of the two
-//!   shapes, so [`Ports`] keeps one harness.
+//!   shapes, so [`Ports`] keeps one harness;
+//! - #839's: [`Ports`] gains `hub`, the [`HubPort`] (`crate::hub`) through which switch, reset
+//!   and reconcile read the hub's live attach bodies, re-point one, and ask the hub's one prompt
+//!   path; its three methods are required, as #835's rule asks. [`HarnessPort::send_prompt`]
+//!   stays as the adapter's transport, with no verb or engine caller since then.
 
 mod process;
 mod router;
@@ -50,6 +54,7 @@ use serde::{Deserialize, Serialize};
 use crate::argv::{AgentKey, Argv};
 use crate::error::{PaneError, RefusalCode};
 use crate::grid::GridPos;
+use crate::hub::HubPort;
 use crate::pane::{HerdrPane, ModelSpec, Pane, PaneEvent, PaneId, PaneName};
 use crate::probe::{run_probe, ProbeResult};
 use crate::profile::{ProfileScope, ProfileStore};
@@ -488,7 +493,9 @@ pub trait HarnessPort: Send + Sync {
     ) -> Result<Option<String>, PaneError>;
 
     /// Queue `text` as a prompt to `session` at `at`, through the harness API, never by
-    /// typing into a TUI (I4). `pane reset --first` calls it (#645).
+    /// typing into a TUI (I4). No verb and no engine calls it since #839: a first message goes
+    /// through the hub's one prompt path ([`HubPort::prompt`]); the adapters keep it as their
+    /// transport, and a wrapper forwards it.
     ///
     /// The default refuses with [`PROMPT_UNSUPPORTED`]: an impl that does not send
     /// prompts says so as a stable refusal, which the real adapter replaces (#642).
@@ -618,4 +625,6 @@ pub struct Ports<'a> {
     pub harness: &'a dyn HarnessPort,
     pub scope: &'a dyn ProfileScope,
     pub prober: &'a dyn Prober,
+    /// The hub's live attach bodies and its prompt path (#839).
+    pub hub: &'a dyn HubPort,
 }

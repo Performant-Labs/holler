@@ -213,7 +213,7 @@ impl ProfileStore for HubProfileStore {
 
 /// What a request does to its registry, which decides what a lost reply means (D3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Effect {
+pub(super) enum Effect {
     /// It reads: a request that failed changed nothing.
     Read,
     /// It writes: a request whose reply was lost may have landed.
@@ -365,7 +365,7 @@ fn call(
 
 /// Whether a failed exchange is a `timeout` (D3): no reply within the bound, for any method, and
 /// for a write also a reply lost in flight, since the write may have landed.
-fn timed_out(error: &ControlError, effect: Effect) -> bool {
+pub(super) fn timed_out(error: &ControlError, effect: Effect) -> bool {
     match (error, effect) {
         (ControlError::Io(io), _)
             if matches!(io.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) =>
@@ -379,7 +379,7 @@ fn timed_out(error: &ControlError, effect: Effect) -> bool {
 
 /// `unavailable`, naming the hub: `no live holler hub reachable at <state dir>`, the CLI's own
 /// text, when there is none, else which hub did not answer `method`, and how.
-fn hub_unavailable(method: &str, error: &ControlError) -> PaneError {
+pub(super) fn hub_unavailable(method: &str, error: &ControlError) -> PaneError {
     let state = holler_hub::state::resolve_state_dir().unwrap_or_default();
     let state = state.display();
     let what = match error {
@@ -390,7 +390,7 @@ fn hub_unavailable(method: &str, error: &ControlError) -> PaneError {
 }
 
 /// `unavailable` naming `method`: its reply, or the reply's `data`, does not decode (W-9).
-fn undecodable(method: &str, error: &serde_json::Error) -> PaneError {
+pub(super) fn undecodable(method: &str, error: &serde_json::Error) -> PaneError {
     PaneError::Unavailable {
         what: format!("{method}: the hub's reply does not decode: {error}"),
     }

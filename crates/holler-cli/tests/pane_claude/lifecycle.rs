@@ -204,22 +204,27 @@ fn reset_relaunches_on_a_fresh_session() {
     assert!(has_pair(&last, "--session-id", &fresh), "{last:?}");
 }
 
-/// W4: the first message goes to the process the reset started, never to the stopped one (the
-/// endpoint of the record the relaunch stored, not of the record the plan read).
+/// W4 until #839 (E91): `reset --first` reached the new process through the engine's own
+/// `send_prompt`. Since #839 a first message goes only through the hub's gate, and no body drives
+/// a Claude Code pane until #850, so the plan refuses it `pane-not-driven` before anything is
+/// stopped (D3 item 8, D6): the process, the record and the inbox are as they were.
 #[test]
-fn reset_first_reaches_the_new_process() {
+fn reset_first_on_a_claude_pane_is_not_driven_and_stops_nothing() {
     let rig = one_claude_pane();
-    let old_pid = rig.record(CLAUDE).harness.pid.unwrap();
+    let before = rig.record(CLAUDE);
+    let pid = before.harness.pid.unwrap();
 
-    let run = rig.run(
+    let (run, calls) = rig.run_logged(
         &["pane", "reset", CLAUDE, "--first", "start on the review"],
         Format::Json,
     );
 
-    assert_eq!(run.code, 0, "{run:?}");
+    assert_eq!(run.code, 3, "{run:?}");
+    assert_eq!(error_of(&run).0, "pane-not-driven");
+    assert_untouched(&rig, &before, pid, &calls);
     let process = rig.process_of(CLAUDE).unwrap();
-    assert_ne!(process.pid, old_pid);
-    assert_eq!(process.inbox, vec!["start on the review"]);
+    assert!(process.inbox.is_empty(), "nothing was delivered: {:?}", process.inbox);
+    assert!(calls.hub.is_empty(), "the plan asks the hub nothing: {:?}", calls.hub);
 }
 
 #[test]

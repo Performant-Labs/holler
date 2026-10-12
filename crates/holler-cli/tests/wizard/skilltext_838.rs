@@ -104,7 +104,7 @@ fn the_named_branch_states_the_pattern_the_refusal_and_the_proposed_values() {
             "serve_https_port = 8443",
             "backend_port_base = 47101",
             "herdr_session",
-            "after the bare top-level keys and before `[[orchestrator]]`",
+            "after the bare top-level keys and before `[[pane]]`",
             "instance.sh",
         ],
     );

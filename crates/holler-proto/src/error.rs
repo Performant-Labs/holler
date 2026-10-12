@@ -280,7 +280,20 @@ impl Error {
         };
         Self::new(Code::InvalidGrant, message, Some(reason))
     }
+
+    /// Build a `-32004 not_connected` refusal marked [`OFFLINE_REASON`] (issue #839, P7): the
+    /// hub's resolve-time answer of `say`, `interrupt` and `answer` for a target whose body is
+    /// offline. A `-32004` without the reason is a prompt the body did not answer within the
+    /// wait, a cancelled prompt, an unacknowledged cancel or a failed redirect; the reason is
+    /// additive and optional, so an older hub that never sends it stays conformant.
+    pub fn offline(message: impl Into<String>) -> Self {
+        Self::new(Code::NotConnected, message, Some(OFFLINE_REASON))
+    }
 }
+
+/// The `data.reason` of a `-32004 not_connected` whose target's body is offline (issue #839,
+/// P7): [`Error::offline`] builds it, and a `--pane` verb reads it as "no body drives the pane".
+pub const OFFLINE_REASON: &str = "offline";
 
 impl From<Code> for Error {
     /// The bare error for a code: numeric `code`, the Holler string as the

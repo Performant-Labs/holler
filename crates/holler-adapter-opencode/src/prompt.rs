@@ -4,8 +4,9 @@
 //! doing from the server's live state, each within one call's bound.
 //!
 //! Both are pure transport. A hold, a limit or a park belongs at the hub's one prompt path,
-//! never in an adapter. `pane reset --first` sends through `send_prompt` outside that path,
-//! the operator's carve-out (ADR-0021 section 8).
+//! never in an adapter. Since #839 no verb and no engine calls `send_prompt`: `pane reset
+//! --first` goes through the hub's prompt path too (ADR-0021 section 11), and the method stays
+//! as the adapter's transport.
 
 use holler_pane::ports::Activity;
 use holler_pane::PaneError;

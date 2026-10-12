@@ -2,20 +2,26 @@
 # A fake tmux for the OpenCode adapter's hermetic tests (#642b, AC 32-33). Committed with
 # git mode 100755; the tests never write a script, only the data files below.
 #
-# Contract: it is called as `fake-tmux -S <path> <subcommand> [args...]`.
-#   - It appends one line to <path>.calls: every argument after `-S <path>`, each one
-#     followed by U+001F (also the last), then one newline.
+# Contract: it is called as `fake-tmux -S <path> -u <subcommand> [args...]` (#844: the adapter
+# forces UTF-8 with `-u`, so a missing `-u` is a usage error, exit 64).
+#   - It appends one line to <path>.calls: every argument after `-S <path> -u`, each one
+#     followed by U+001F (also the last), then one newline. The `-u` is not recorded.
 #   - It prints <path>.<subcommand>.out to stdout and <path>.<subcommand>.err to stderr
 #     when they exist, and exits with the number in <path>.<subcommand>.code (default 0).
 #
 # POSIX sh only, and no program but `cat` (AC 33).
 
-if [ "$#" -lt 3 ] || [ "$1" != "-S" ]; then
-  printf 'fake-tmux: expected -S <path> <subcommand> [args...]\n' >&2
+if [ "$#" -lt 4 ] || [ "$1" != "-S" ]; then
+  printf 'fake-tmux: expected -S <path> -u <subcommand> [args...]\n' >&2
   exit 64
 fi
 sock=$2
 shift 2
+if [ "$1" != "-u" ]; then
+  printf 'fake-tmux: expected -u right after -S <path> (#844)\n' >&2
+  exit 64
+fi
+shift
 sub=$1
 
 { printf '%s\037' "$@"; printf '\n'; } >>"$sock.calls"

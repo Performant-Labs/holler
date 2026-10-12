@@ -149,6 +149,8 @@ async fn dispatch_session_control(
         // `control/hold` / `control/release` (issue #442): the session hold.
         "control/hold" => crate::control_hold::hold(cid, obj, registry, roster),
         "control/release" => crate::control_hold::release(cid, obj, registry, roster),
+        // `control/rebind` (#839): re-point a body's session; local socket only, no `admin/` form.
+        "control/rebind" => crate::control_rebind::rebind(cid, obj, registry, roster).await,
         // Issue #192's test-only hook: forcibly end a body's live connection
         // to simulate an abrupt drop. Gated behind `HOLLER_TEST_HOOKS=1` (an
         // env var, not `cfg(test)`, since this dispatch runs inside the real
@@ -191,7 +193,7 @@ pub(crate) async fn dispatch_allowlisted(
     Some(match verb {
         "status" => encode_response(cid, crate::control_status::status_doc(registry, lockout).await),
         "roster" => roster_control(cid, obj, roster, registry).await,
-        "say" => say(cid, obj, registry, roster).await,
+        "say" => crate::control_say::say(cid, obj, registry, roster).await,
         "interrupt" => interrupt(cid, obj, registry, roster).await,
         "answer" => answer(cid, obj, registry).await,
         "wait" => wait(cid, obj, roster).await,
@@ -284,76 +286,6 @@ async fn hub_query_remote(cid: &holler_proto::CorrelationId, obj: &serde_json::V
     }
 }
 
-/// `control/say {session, text, timeout_ms, queue}` (issue #190): the CLI's
-/// `say` verb, relayed to [`crate::talk::say`]. See that module for the full
-/// resolve → busy-check → send → collect → TalkLog flow; this is only the
-/// control-socket param/result mapping.
-async fn say(cid: &holler_proto::CorrelationId, obj: &serde_json::Value, registry: &Registry, roster: &Roster) -> String {
-    let params = obj.get("params");
-    let Some(session) = params.and_then(|p| p.get("session")).and_then(|v| v.as_str()) else {
-        return encode_error(cid, Code::InvalidParams, "control/say needs params.session".to_string());
-    };
-    let Some(text) = params.and_then(|p| p.get("text")).and_then(|v| v.as_str()) else {
-        return encode_error(cid, Code::InvalidParams, "control/say needs params.text".to_string());
-    };
-    let queue = params.and_then(|p| p.get("queue")).and_then(|v| v.as_bool()).unwrap_or(false);
-    let timeout_ms = params.and_then(|p| p.get("timeout_ms")).and_then(|v| v.as_u64()).unwrap_or(600_000);
-    let timeout = std::time::Duration::from_millis(timeout_ms);
-
-    let state = HubState::from_root(resolve_state_dir().unwrap_or_default());
-    let grant = params.and_then(|p| p.get("grant")).and_then(|v| v.as_str());
-    match crate::talk::say(registry, roster, &state, crate::talk::SayArgs { session, text, queue, grant, timeout }).await {
-        Ok(outcome) => encode_response(cid, serde_json::json!({
-            "session": outcome.session,
-            "stop_reason": outcome.stop_reason,
-            "state": outcome.state,
-            "updates": outcome.updates,
-            "elapsed_ms": outcome.elapsed_ms,
-            "text": crate::talk::reply_text(&outcome.message),
-            "message": outcome.message,
-        })),
-        Err(crate::talk::SayError::UnknownSession) => {
-            encode_error(cid, Code::UnknownSession, format!("unknown session: {session}"))
-        }
-        // Issue #192, rule 4: `detail` already carries the roster's own
-        // `conn_state` (and, for `reconnecting`, the last-seen age) when the
-        // roster still remembers this name — see `talk::not_connected_detail`.
-        Err(crate::talk::SayError::NotConnected(detail)) => encode_error(cid, Code::NotConnected, detail),
-        Err(crate::talk::SayError::Ambiguous(candidates)) => {
-            let message = format!("ambiguous session {session}: candidates are {}", candidates.join(", "));
-            let err = WireError::new(Code::UnknownSession, message, Some("ambiguous"));
-            encode_error_frame(cid, &err)
-        }
-        Err(crate::talk::SayError::Busy { state, turn_age_ms, last_update_age_ms }) => {
-            let err = WireError::session_busy(state, turn_age_ms, last_update_age_ms);
-            encode_error_frame(cid, &err)
-        }
-        // Issue #151: reported as `-32009 session_busy` with `data.state
-        // = "input-required"` (distinct from `working`/`stalled`) so the
-        // CLI's own busy hint (`say_cmd::busy_hint`) can point at `answer`
-        // instead of `interrupt`/`--queue` — neither of which resolves a
-        // held permission/elicitation.
-        Err(crate::talk::SayError::InputRequired { question, turn_age_ms, last_update_age_ms }) => {
-            let mut err = WireError::session_busy("input-required", turn_age_ms, last_update_age_ms);
-            if let Some(q) = question {
-                err.message = q;
-            }
-            encode_error_frame(cid, &err)
-        }
-        Err(crate::talk::SayError::Refused(err)) => encode_error_frame(cid, &err),
-        Err(crate::talk::SayError::ConnectionLost) => {
-            encode_error(cid, Code::ConnectionLost, format!("{session} io disconnected mid-turn; ask again"))
-        }
-        Err(crate::talk::SayError::Timeout) => {
-            let secs = timeout.as_secs();
-            encode_error(cid, Code::NotConnected, format!("no reply from {session} within {secs}s"))
-        }
-        Err(crate::talk::SayError::Cancelled) => {
-            encode_error(cid, Code::NotConnected, "prompt was interrupted before it completed".to_string())
-        }
-    }
-}
-
 /// `control/interrupt {session, text?}` (issue #191): the CLI's `interrupt`
 /// verb, relayed to [`crate::interrupt::interrupt`]. Without `text` the
 /// result is `{session, applied: true}`; with `text` it also carries the
@@ -384,8 +316,10 @@ async fn interrupt(cid: &holler_proto::CorrelationId, obj: &serde_json::Value, r
         Err(crate::interrupt::InterruptError::UnknownSession) => {
             encode_error(cid, Code::UnknownSession, format!("unknown session: {session}"))
         }
+        // #839 (P7): the resolve-time offline body is marked `offline`; the
+        // unconfirmed cancel and the failed redirect below stay a bare `-32004`.
         Err(crate::interrupt::InterruptError::NotConnected) => {
-            encode_error(cid, Code::NotConnected, format!("{session}'s body is not connected"))
+            encode_error_frame(cid, &WireError::offline(format!("{session}'s body is not connected")))
         }
         Err(crate::interrupt::InterruptError::Ambiguous(candidates)) => {
             let message = format!("ambiguous session {session}: candidates are {}", candidates.join(", "));
@@ -430,8 +364,9 @@ async fn answer(cid: &holler_proto::CorrelationId, obj: &serde_json::Value, regi
         Err(crate::talk::AnswerError::UnknownSession) => {
             encode_error(cid, Code::UnknownSession, format!("unknown session: {session}"))
         }
+        // #839 (P7): the resolve-time offline body is marked `offline`.
         Err(crate::talk::AnswerError::NotConnected) => {
-            encode_error(cid, Code::NotConnected, format!("{session}'s body is not connected"))
+            encode_error_frame(cid, &WireError::offline(format!("{session}'s body is not connected")))
         }
         Err(crate::talk::AnswerError::Ambiguous(candidates)) => {
             let message = format!("ambiguous session {session}: candidates are {}", candidates.join(", "));

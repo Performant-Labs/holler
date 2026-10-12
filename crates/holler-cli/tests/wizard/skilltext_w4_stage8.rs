@@ -38,12 +38,9 @@ fn stage3() -> String {
     flat(&section(&skill(), "## Stage 3 ", "\n## Stage 4 "))
 }
 
-fn stage8() -> String {
-    flat(&section(
-        &skill(),
-        "## Stage 8 ",
-        "\n## Holler self-status\n",
-    ))
+/// #803: the panes are built in Stage 7.
+fn stage7() -> String {
+    flat(&section(&skill(), "## Stage 7 ", "\n## Stage 8 "))
 }
 
 fn teardown() -> String {
@@ -55,39 +52,13 @@ fn teardown() -> String {
 }
 
 #[test]
-fn base_pane_is_the_new_workspaces_first_pane_and_the_count_is_scoped() {
-    let s = stage8();
-    assert!(
-        s.contains("the wizard creates a new workspace (a restored saved session, or \"build in it\" on a foreign server)"),
-        "{s}"
-    );
-    assert!(
-        s.contains("`<base-pane>` is that workspace's first pane (`pane list` filtered by its id)"),
-        "{s}"
-    );
-    assert!(s.contains("count panes in that workspace only"), "{s}");
-    assert!(
-        s.contains("applies only to a server with exactly one pane and no restored panes"),
-        "{s}"
-    );
-    assert!(
-        !s.contains("that pane becomes the **first slot** in the build below"),
-        "the old unconditional first-slot sentence is gone"
-    );
-}
-
-#[test]
-fn stage8_ask_is_covered_by_the_plan_yes() {
-    let s = stage8();
+fn stage7_ask_is_covered_by_the_plan_yes() {
+    let s = stage7();
     assert!(
         s.contains("the \"Proceed with this plan?\" yes covers creating it"),
         "{s}"
     );
     assert!(s.contains("a \"no\" means stop"), "{s}");
-    assert!(
-        s.contains("reuse the restored panes only if the user asks"),
-        "{s}"
-    );
 }
 
 #[test]
@@ -104,14 +75,15 @@ fn stage3_plan_names_the_new_workspace_and_lists_restored_panes() {
 }
 
 #[test]
-fn briefing_is_not_offered_without_sessions_and_is_name_free() {
-    let s = stage3();
-    assert!(
-        s.contains("With no sessions (N=0) this briefing is not offered at all (nothing to drive)"),
-        "{s}"
-    );
+fn briefing_is_written_in_stage_7_and_is_name_free() {
     let text = skill();
     let from = text.find("## Holler self-status\n").expect("the briefing");
+    let stage7 = text.find("## Stage 7 ").expect("stage 7");
+    let stage8 = text.find("## Stage 8 ").expect("stage 8");
+    assert!(
+        stage7 < from && from < stage8,
+        "#803 D10: the write moves to Stage 7"
+    );
     let block = flat(&text[from..from + text[from..].find("```").unwrap()]);
     assert!(
         block.contains("You are an orchestrator in a Holler-driven"),
@@ -147,14 +119,9 @@ fn teardown_warns_about_the_restored_workspace_and_offers_to_leave_the_server() 
 #[test]
 fn docs_carry_the_same_rules() {
     let d = docs();
-    assert!(d.contains("first pane of the new workspace"), "base pane");
     assert!(
         d.contains("the \"Proceed with this plan?\" yes covers creating it"),
         "one yes"
-    );
-    assert!(
-        d.contains("not offered at all when there are no sessions"),
-        "briefing N=0"
     );
     assert!(
         d.contains("leave the server running and stop only the hub"),
