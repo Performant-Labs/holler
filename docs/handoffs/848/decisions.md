@@ -15,3 +15,9 @@
 - **Assumed:** No CHANGELOG entry, because the brief confines the diff to the one test file and the changelog check only requires the `[Unreleased]` heading.
 - **Hedged:** Did not run `cargo fmt` on the file, because the workspace is not default-rustfmt formatted and has no fmt gate. The added lines produce no fmt diff.
 - **Evidence:** `cargo test -p holler-cli --test wizard_scripts skilltext_w5_rename::` 8 passed (was 6 passed, 2 failed at RED); clippy `-D warnings` clean; `scripts/lint.sh` no failures.
+
+## T (verify / GREEN) — 2026-10-12
+- **Decided:** GREEN, no blocking Tier 2 issue. Module 8/8, wizard_scripts 286/286, docs_cli_test and wire_selftest pass. Two production-predicate mutations (always false; over-wide match) each fail the new test, so it pins behavior. AC 3 was checked through the tracked `docs/handoffs/848-brief.md`, which quotes the old path, instead of adding a scratch file.
+- **Assumed:** The workspace clippy error in `token_load_test.rs` (untouched file) and the `remote_admin_test` failure under load are pre-existing/unrelated (#847), since the file passes 21/21 alone three times.
+- **Hedged:** `cargo machete` is not installed, so the unused-dependency check was skipped; the diff adds no dependency.
+- **Evidence:** `docs/handoffs/848/handoff-T-green.md`.
