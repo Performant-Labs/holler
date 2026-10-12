@@ -48,3 +48,56 @@ Run handoff directory `docs/handoffs/839` Â· branch `issue-839-implementation` Â
   - **Tests:** `hold_hub_test.rs`, the fake OpenCode servers.
   - **Docs:** ADR-0003, ADR-0005, ADR-0014, ADR-0021 section 2, `docs/protocol/v2.md` sections 4 and 7, `scripts/lint.sh`, the #828 A review on branch `issue-828-implementation`.
   - Commands: `grep -n`, `sed -n`, `wc -l`, `git log origin/main`, `git show`.
+
+## A, up-front plan review, second pass: 2026-10-11T20:43-06:00 (MDT)
+
+- **Decided:** BLOCK, with 1 `block` and 9 `warn` findings (`docs/handoffs/839/handoff-A.md`, which replaces the first pass's file; that version is at `6211c86`).
+  - **The first pass's 13 findings are all answered.**
+    - The three blocks are resolved: P1, P2 and P3.
+    - Of the warns, 4, 5, 7, 9, 12 and 13 are resolved.
+    - 6, 8 and 11 are resolved in substance, with follow-on points (findings 2, 5 and 6 of this pass).
+    - 10 is narrowed correctly, but the relaunch sentence it added is false (block 1).
+  - **The block:** `driver_of` takes "the pane's own server lists the advertised id" as proof that a body belongs to the pane.
+    - **Too wide:** with servers that list each other's sessions (the case `check_unclaimed` documents), another pane's behind body is "the only candidate" for a pane with no connected body. `doctor`, `pane switch` and `pane reset` then claim it and re-point it silently.
+    - **Too narrow:** after a relaunch onto a new session, the body's session is no longer listed. It is never found, `doctor` erases the stored DRIVEN, and `pane switch` succeeds without re-pointing it. The verbatim section 11 text says the opposite.
+    - P2 makes behind bodies routine (every restart), so this rule is now the main recovery path.
+  - **The warns:**
+    - the routed verbs' hold exit (3 or 4) and the shape of `hub_refusal`;
+    - two bodies on one session after a switch;
+    - `talk::admit` must be `say`'s extracted prelude;
+    - the slot outside `query`'s timeout, one send and wait, and the 10 s tie between the hub and the CLI;
+    - the remedy set by hand against `with_fix` and the remedy table;
+    - the presence mirror before the task runs;
+    - reuse of `store.rs`'s failure mapping and of `FaultSwitch`;
+    - section 11's "ADR 0014 stays in force, unchanged.";
+    - the clashes table (#667 now has code in `scenario.rs`).
+- **Confirmed against the code, and left standing:**
+  - `LiveCommand` is `pub`, and `live/target.rs` reaches `LiveHandle`'s private `tx` as a child module.
+  - `Inner.config` is an owned `SessionConfig`, read by `run`, `attempt_initial_attach` and `start_turn`.
+  - The body reads `session_id` in exactly `presence_doc`, `query.rs`, `registry.rs` and `HttpAttachDriver::attach`.
+  - `SayOpts` is built only in `send_turn`.
+  - The CLI's bare-id refusal equals the hub's existing `RoutableName::parse` refusal.
+  - `advertise` upserts a changed `harness_session_id`.
+  - The four ADR passages exist as quoted.
+  - The 15 `Ports` literals are in 13 files.
+  - `codec_test.rs` takes a one-line arm.
+  - The existing forward scan still passes with P1.
+- **Assumed:**
+  - OpenCode servers that share storage answer `GET /session/{id}` for each other's sessions, so a rebind through another pane's server succeeds. The brief assumes the same ("every rebind would succeed").
+  - A body can be disconnected while another pane's body is up, e.g. during the cutover or while a fleet boots.
+  - Local refs are current. I did not fetch.
+- **Hedged:**
+  - The "too wide" half needs listings that overlap. Production may not have them: question 2 confirmed one attach body per pane, not separate data directories. It is still a `block`, because the plan designs for overlapping listings (Acceptance 20, `check_unclaimed`) and its own rules reject a silent wrong pairing.
+  - The "too narrow" half does not depend on overlap.
+  - Two fixes are offered. I recommend none over the other: (a) rules over the record and the hub, with a fallback guarded by the shared-listing signal; (b) a join on the endpoint from the body's `query/status`.
+  - I ran no build or test: no code exists yet.
+- **Evidence:**
+  - Read the amended brief: the decisions, the ADR text, where the code goes, Reuse, acceptance, blast radius, clashes, and E98 to E136.
+  - **Hub:** `live.rs` (in full), `talk.rs`, `interrupt.rs`, `circuit.rs` (the command arms, `PendingQuery`), `circuit/dispatch.rs` (`handle_response`, the presence handler), `circuit/admin.rs`, `control_server.rs`, `control_hold.rs`, `control.rs`, `roster.rs` (`advertise`, `apply_ad`, `set_last_turn`), `panes/mod.rs`, `lib.rs`.
+  - **Body:** `session_manager.rs`, `session_manager/task.rs` (in full), `session_manager/driver.rs`, `http_attach_driver.rs`, `http_attach_driver/connection.rs`, `connection.rs`, `connection/session_dispatch.rs`, `connection/handshake.rs`, `query.rs`, `registry.rs`, `dispatch.rs`.
+  - **Pane crate and kit:** `ports.rs`, `lib.rs`, `tx_switch.rs` (in full), `tx_launch.rs`, `reconcile.rs`, `reconcile/observe.rs`, `findings.rs`; the testkit's `lib.rs`, `fault.rs` and manifest.
+  - **CLI:** `say_cmd.rs`, `prompt_target.rs`, `interrupt_cmd.rs`, `answer_cmd.rs`, `hold_cmd.rs`, `pane/wiring.rs`, `pane/wiring/store.rs`; the tests `hold_single_path_test.rs`, `hold_hub_test.rs`, `pane_verbs/target_flags.rs`, `pane_verbs/switch.rs` (`SeamHarness`) and `docs_pane_control_test.rs`.
+  - **Proto:** `methods.rs`, `lib.rs`, `hold.rs`, `codec_test.rs`.
+  - **Docs:** ADR-0003, ADR-0005, ADR-0014 and ADR-0021 (sections 2 and 11, the header).
+  - **Issue and siblings:** issue #839 (`gh issue view`); the sibling branches #667, #835, #648, #665 and #831 (`git log`, `git diff --stat` from the merge base, `git grep`).
+  - Commands: `grep -n`, `sed -n`, `wc -l`, `git show`, `git grep`, `git diff --stat`, `gh issue view`.
