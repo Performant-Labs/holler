@@ -634,3 +634,45 @@ Run handoff directory `docs/handoffs/835` Â· branch `issue-835-implementation` Â
   - rustdoc `-D warnings -p holler-pane` exit 0; `git diff --check` clean.
   - The built `holler pane import --help` shows the new paragraph.
   - `tmux.rs:35` `FOREGROUND_FORMAT` matches the wording.
+
+## A, anti-duplication gate (second pass, after S's REWORK): 2026-10-11T20:46-06:00 (MDT)
+
+- **Decided:** PASS, with 0 `block` and 2 `warn` (`docs/handoffs/835/handoff-A-dup.md`, which replaces the first
+  A-dup's at `e5e35ee`).
+  - **The scope.** This cycle's diff: `git show --remerge-diff e6d5fa0` (F's edits beyond the automatic merge of
+    `ccc53a0` and `d6ae539`), and `d2922a9` (handoffs only).
+  - **No parallel path.** The cycle is prose and doc comments, edited in place, in five files already in this story's
+    diff. No object of the map changed: the rule, the chain, the switch, the port, the adapter, the forwards, the fake
+    and the tests are as the first A-dup passed them.
+  - **The merge is clean.** The automatic merge tree `e77e7a0` plus F's remerge diff is `e6d5fa0`, and no file of `main`
+    was edited. #851 and #835 share only `CHANGELOG.md`, ADR-0003 and the guide, in separate places.
+  - **Warn 1 (new, records).** The help, the guide's section 10 and the CHANGELOG now name three limits of the rule
+    (exited; not in the foreground: a wrapper script, a suspended job; another name). ADR-0021 section 13 and
+    `is_claude_code_command`'s doc name two, and put "a wrapper" under another `argv[0]`. Optional: one clause in each.
+  - **Warn 2 (carried, test-only).** `ImportRig::run_with_host` copies `run_with_store`; `text_row` twins `text_line`.
+- **Assumed:**
+  - `origin/main` is still `d6ae539` (`git fetch` at 20:48 MDT), and an ancestor of `HEAD`, so `d6ae539` is the PR's
+    base.
+  - The first A-dup's object-by-object review of the production code holds, because the 31 feature files this cycle did
+    not touch are byte-identical to `b488a33`.
+- **Hedged:**
+  - **Warn 1 is a warn, not a block.** Both lists are true, the ADR's definition of the read implies the missing case,
+    and F's design decision 4 records leaving the ADR and `pane.rs` on S's reading. It is not a parallel path.
+  - **F's merge of `main`** sits outside S's REWORK list. It is branch upkeep, and I verified it is the automatic merge
+    plus F's prose, so it is not drift.
+- **Evidence:**
+  - **Git:**
+    - `git fetch`; `git merge-base HEAD origin/main` is `d6ae539`;
+    - the parents of `e6d5fa0` (`ccc53a0`, `d6ae539`) and of `d2922a9` (`e6d5fa0`);
+    - `git merge-tree --write-tree ccc53a0 d6ae539` gives `e77e7a0`, no conflict; `git diff e77e7a0 e6d5fa0` equals the
+      remerge diff (5 prose files and 2 handoffs);
+    - `git diff b488a33 ccc53a0`: handoffs only; `git diff b488a33 HEAD` over the 31 other feature files: empty;
+    - the files #851 and #835 share (`comm` of both name lists): `CHANGELOG.md`, ADR-0003 and the guide;
+    - the remerge diff of the `.rs` files, filtered for lines that are not comments: none.
+  - **Read:** the full remerge diff; `git diff origin/main...HEAD` of ADR-0003, the CHANGELOG and the guide; ADR-0021
+    `:944-991`; `pane.rs:130-164`; `ports.rs:296-349`; `import/observe.rs:1-140`; handoff-A pass 4's reuse map;
+    handoff-S, handoff-F cycle 3, handoff-T-green cycle 3 and this journal from the first A-dup on.
+  - **grep:** the foreground wording and "each process" across the docs and `src`; `"claude"` in every `src` (one
+    command-name comparison); the callers of `is_claude_code_command` (one in production); tests pinning the limits
+    wording (none); personal names in the added lines (none).
+  - **Sizes:** `wc -l` of the five files: 1007, 353, 220, 244 and 821 (the guide).
