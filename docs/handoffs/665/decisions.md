@@ -151,3 +151,21 @@
     - bounded file readers;
     - personal infrastructure names in the diff and the commit metadata.
   - **D6:** `git diff --stat` is empty for the files D6 says are untouched.
+
+## S (Phase 10, spec audit): 2026-10-11 22:17 MDT
+- **Decided:** REWORK (`production`), with four items (`docs/handoffs/665/handoff-S.md`).
+  - **The transaction, the verbs and the drift finding are spec-compliant.** A's and T's preconditions hold. The deviations (A warns 2b, 3, 4a and 5, and the override of the issue's "#661 files" rule) are recorded and justified.
+  - **1. Production:** `profile import` and `profile export` print `1 specs`. Use `super::list::count`, as every sibling verb does. This resolves A-dup warn 2, which no one had resolved. T updates the 3 pinned strings.
+  - **2. Production docs:** four statements, the `profile import` help among them, say no refusal prints the file's content. A refused position is quoted by `GridPos`'s `excerpt`. Narrow the statements, or make them true in import and pin that.
+  - **3. Test-only:** no spec-level case makes serde quote a value, so `spec_refused`'s redaction can be removed with every test green. Add wrong-typed `CANARY` members.
+  - **4. Test-only:** acceptance 1's "the stamp as `updated`" is checked only as `>=`. Assert equality with the rename's log `at`, in H1 and in conformance case 23.
+- **Assumed:**
+  - The automated run has no O, so A's warns are amendments to the brief, as T and F read them.
+  - The brief's `<N> specs` is a template rendered through `count()`, as `create`'s identical doc template is. It is not a requirement to print `1 specs`.
+  - A position is not secret by type. Item 2 is about the accuracy of the claim, so either side may move.
+- **Hedged:**
+  - I ran no test, as S does not run Tier 1 or Tier 2. That each REWORK test gap survives its mutation is reasoned from serde's messages: an unknown key names the key, not the value. It was not run.
+  - Lock-order safety is verified by reading every hub path to the profile registry. `check_membership` runs before the pane lock. It is not proven by a test beyond T's bounded races.
+- **Evidence:**
+  - **Read:** the full diff `git diff origin/main...HEAD`; every production file in full; every new or changed test; the brief's decisions, acceptance, contract and guide sections; all six handoffs, `evidence.md` and the outside gate's `665-diff-result-r1.md` (PASS).
+  - **Commands:** `git merge-tree` against `origin/main` (5 conflicting docs and test files, advisory); `git diff --stat` of the untouched files; `wc -l` of every touched file; a privacy grep of the added lines (no hits); greps for `unwrap`, `expect`, `panic` and `#[allow]`; `target/debug/holler profile import --help`; and source reads of `GridPos::parse`, `excerpt`, `from_decode` and `split_prefix`.
