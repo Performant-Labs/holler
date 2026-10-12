@@ -114,3 +114,46 @@ Run handoff directory `docs/handoffs/853` Â· branch `issue-853-implementation` Â
     - pins of `WORKSPACES`: none;
     - for the active branches (#803, #831, #835, #839, #850, #647, #828, #832, #655), their changes to #853's files.
       Only #835's docs overlap: #831's apply files are identical to `origin/main`, and #832's merged as #840.
+
+## T, author tests (RED): 2026-10-12T05:40-06:00
+
+- **Decided:** RED is valid. F may start.
+  - **The failures.** 13 apply tests fail, plus the fake's new split-only test and the adapter's cross-check. Each
+    fails on an assertion about the missing behaviour: the old step order, exit 0 where 3 is due, or the loose fake
+    accepting r2c1 below a row of two. None fails on compile, harness or setup.
+  - **Acceptance 1** goes through a dry run on the rig (A warn 2): `order.rs`.
+  - **Acceptance 2** extends `rows.rs:182` to the whole 2x2 grid. I did not add a second split-only apply test. The
+    test kit's rule is pinned by the cross-check in `plan_splits_test.rs` and by one new `fake_herdr_test`.
+  - **One refused-form helper** (A warn 7), in the new `refused.rs`: `assert_refused`, `Refusal` and
+    `assert_carries`. C25 moved there from `rows.rs`, so that its take-over twin can share the `verify_serving`
+    fault.
+  - **The scratch tests.** They read a refused run from the failure (`plan.rs` `assert_refused_run`), and its steps
+    from a dry run first. The new `hlr649sq=2x2` workspace backs `grid.rs` (Acceptance 3). `herdr_snapshot` now
+    reads each workspace's own extent from `WORKSPACES`.
+- **Assumed:**
+  - **`M` in "other step(s) ran"** is every step that is not refused, whatever its outcome (planning refusals count as
+    refused). This is ADR-0021 section 8 as amended.
+  - **The text form** is exactly `error: <the JSON message>`, because `emit` prints the one `ErrorBody` in both formats.
+  - **The carried detail** starts with the engine's `detail` unchanged (`reconciled()` appends to it), as A warn 7 says.
+- **Hedged:**
+  - **A warn 4** (a take-over note on a relaunch refused before its act) is not tested, because its wording is O's or
+    F's choice. Only the acted take-over case, which both options carry, is pinned.
+  - **The 2x2 apply test on the fakes** fails at RED on the order, not on the fake. Per A warn 1, its dependence on
+    the order is shown at Phase 6 by reverting `cell_key` on F's tightened fake.
+  - **The opted-in `probe` and `scenario` tests** were not run at RED (several minutes each); they run at Phase 6.
+- **Evidence:**
+  - **Ran:**
+    - `cargo test -p holler-cli --test profile_verbs`: 105 ok, 13 failed (the list is in handoff-T-red.md);
+    - `fake_herdr_test split_only`: 4 ok, 1 failed;
+    - `plan_splits_test`: 19 ok, 1 failed;
+    - the test kit with `--no-fail-fast`: only `fake_herdr_test` fails, and `herdr_conformance_test` passes 22;
+    - `pane_claude`: 43 ok. `pane_integration`: 69 ok;
+    - `profile_apply_scenario` pins: 5 ok, 3 ignored;
+    - clippy `-D warnings` on the three crates: clean. `lint.sh`: exit 0.
+  - **Ran opted in (real Herdr 0.9.1 from `~/.local/bin`; the default PATH's `herdr` is 0.8.2):** `grid.rs`
+    reproduces the spike. g11 and g12 were `Created`; g21 and g22 were `Refused`, `grid-unreachable`, each detail
+    ending with the reconcile step. That last part confirms A warn 3 (an acted refusal) on real Herdr.
+  - **Incident, no harm:** while looking for a 0.9.1 binary I ran `--version` on every executable named `herdr*` on
+    the disk. That ran four `scripts/spikes/herdr-*.sh` scripts. Each starts and tears down its own scratch server
+    (one printed `target proven`). No spike process was left. The operator's live Herdr servers (session `jupiter`, 15
+    h old, and `herdr-jupiter`, 20 days old) were not touched.

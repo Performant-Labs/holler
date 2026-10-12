@@ -211,10 +211,44 @@ fn split_only_mode_refuses_an_absolute_placement() {
         Some(GRID_UNREACHABLE.as_str().to_owned()),
         "r2c2 has no pane to its left or above yet"
     );
+    // Rows first, then columns (#853): the order the adapter's planner builds a grid in.
+    ensure(&herdr, 2, 1);
     ensure(&herdr, 1, 2);
     ensure(&herdr, 2, 2);
-    ensure(&herdr, 2, 1);
     assert_eq!(ids(&herdr).len(), 4);
+}
+
+/// #853 (ADR-0021 section 10): a new row starts only at column 1, below a last row of one
+/// pane, since a `down` split of a pane in a wider row nests inside its cell. With `r1c1` and
+/// `r1c2` placed, neither `r2c1` nor `r2c2` is reachable, though a pane sits above each; and
+/// below a row of two (`r2c1`, `r2c2`) no `r3c1` is.
+#[test]
+fn split_only_mode_adds_a_row_only_below_a_last_row_of_one_pane() {
+    let refused = |herdr: &FakeHerdr, row: u16, col: u16| match herdr.ensure_pane(&spec(row, col))
+    {
+        Err(PaneError::Refused { code, message }) => {
+            assert_eq!(code.as_str(), GRID_UNREACHABLE.as_str(), "r{row}c{col}");
+            assert!(message.contains(&format!("r{row}c{col}")), "{message}");
+        }
+        other => panic!("r{row}c{col}: expected grid-unreachable, got {other:?}"),
+    };
+
+    let herdr = fake(3, 2);
+    herdr.set_placement(Placement::SplitOnly);
+    ensure(&herdr, 1, 1);
+    ensure(&herdr, 1, 2);
+    refused(&herdr, 2, 1);
+    refused(&herdr, 2, 2);
+    assert_eq!(ids(&herdr).len(), 2, "a refusal creates nothing");
+
+    let herdr = fake(3, 2);
+    herdr.set_placement(Placement::SplitOnly);
+    ensure(&herdr, 1, 1);
+    ensure(&herdr, 2, 1);
+    ensure(&herdr, 2, 2);
+    refused(&herdr, 3, 1);
+    ensure(&herdr, 1, 2);
+    assert_eq!(ids(&herdr).len(), 4, "a cell right of its row's last pane");
 }
 
 #[test]

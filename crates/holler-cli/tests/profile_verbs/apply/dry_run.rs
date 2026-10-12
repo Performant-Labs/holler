@@ -17,9 +17,10 @@ use super::rig::{
 
 /// Entries 4, 7 and 31 (§6, C1, C7 R3 NV-4): over a fixture with one step of each row, a dry
 /// run calls nothing but its reads (Herdr's snapshot, `health`, `shown_session`): no probe, no
-/// launch or relaunch, no write. Its plan has one step per spec pane in grid order, lists the
-/// pane of another profile as refused, the differing pane with its diff, and names the action
-/// of each other step without claiming its effect.
+/// launch or relaunch, no write. Its plan has one step per spec pane in apply's order (#853:
+/// column 1 by row, then the rest by row and column), lists the pane of another profile as
+/// refused, the differing pane with its diff, and names the action of each other step without
+/// claiming its effect.
 #[test]
 fn a_dry_run_calls_only_its_reads_and_plans_every_row() {
     let rig = every_row();
@@ -60,8 +61,8 @@ fn a_dry_run_calls_only_its_reads_and_plans_every_row() {
 }
 
 /// Entry 4 (C6, E61, E62): the verb prints that plan as §7's object with `"dry_run": true`,
-/// one step per spec pane in grid order, in an envelope the test kit's checker passes, and
-/// exits 0 in both formats.
+/// one step per spec pane in apply's order, in an envelope the test kit's checker passes, and
+/// exits 0 in both formats, though the plan holds refused steps (#853: only a real run exits 3).
 #[test]
 fn a_dry_run_prints_its_plan_as_the_steps_object() {
     let run = every_row().run(&apply_argv(&["--dry-run", HS[0], HS[1]]), Format::Json);
