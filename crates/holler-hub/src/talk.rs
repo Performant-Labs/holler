@@ -143,8 +143,7 @@ pub async fn answer(
     choice: &str,
     timeout: Duration,
 ) -> Result<AnswerOutcome, AnswerError> {
-    let name = holler_proto::RoutableName::parse(session).map_err(|_| AnswerError::UnknownSession)?;
-    let (handle, ad) = match registry.resolve_session(&name).await {
+    let (handle, ad) = match registry.resolve_prompt_target(session).await {
         ResolveOutcome::Found(h, ad) => (h, ad),
         ResolveOutcome::Unknown => return Err(AnswerError::UnknownSession),
         ResolveOutcome::NotConnected => return Err(AnswerError::NotConnected),
@@ -200,8 +199,27 @@ pub async fn say(
     args: SayArgs<'_>,
 ) -> Result<SayOutcome, SayError> {
     let SayArgs { session, text, queue, grant, timeout } = args;
-    let name = holler_proto::RoutableName::parse(session).map_err(|_| SayError::UnknownSession)?;
-    let (handle, ad) = match registry.resolve_session(&name).await {
+    let (handle, ad) = admit(registry, roster, session, queue, grant).await?;
+    let kind = if queue { TurnKind::Queue } else { TurnKind::Plain };
+    send_turn(&TurnCtx { registry, roster, state, grant }, &handle, &ad, text, kind, timeout).await
+}
+
+/// `say`'s prelude (#839, D5), which `control/say`'s `check_only` runs alone: resolve
+/// `session` (a name, or at the hub the `harness_session_id` a live attach session
+/// advertises), then the session hold's fast path, the pane gate on the id the session
+/// advertises, and the busy check, in that order. Nothing is sent, logged or moved, and no
+/// grant is consumed: each check is the very function the enforcement calls
+/// (`holds().would_refuse` asks what `admit` would answer, and `pane_gate` is the gate of
+/// `circuit::dispatch::send_prompt`), so this is a fast path only, and `send_prompt` stays
+/// the authority that cannot be raced.
+pub async fn admit(
+    registry: &Registry,
+    roster: &Roster,
+    session: &str,
+    queue: bool,
+    grant: Option<&str>,
+) -> Result<(LiveHandle, Box<holler_proto::SessionAd>), SayError> {
+    let (handle, ad) = match registry.resolve_prompt_target(session).await {
         ResolveOutcome::Found(h, ad) => (h, ad),
         ResolveOutcome::Unknown => return Err(SayError::UnknownSession),
         ResolveOutcome::NotConnected => return Err(SayError::NotConnected(not_connected_detail(roster, session))),
@@ -215,16 +233,24 @@ pub async fn say(
     if let Some(refusal) = registry.holds().would_refuse(&crate::holds::session_key(&handle.hostname, ad.name.as_str()), grant) {
         return Err(SayError::Refused(refusal));
     }
+    // #839: the pane gate, keyed on the id the session advertises, as `send_prompt` keys it.
+    if let (Some(panes), Some(id)) = (registry.panes(), ad.harness_session_id.as_deref()) {
+        crate::panes::gate::pane_gate(panes, id).map_err(SayError::Refused)?;
+    }
+    busy_check(&ad, queue)?;
+    Ok((handle, ad))
+}
 
-    // The busy check (issue #150's policy, enforced here as the hub's own
-    // fail-closed gate — the body's `SessionManager` enforces it again,
-    // independently, so a race still fails closed).
+/// The busy check (issue #150's policy, enforced here as the hub's own fail-closed
+/// gate — the body's `SessionManager` enforces it again, independently, so a race
+/// still fails closed). A held question refuses even a queued prompt (#151).
+fn busy_check(ad: &holler_proto::SessionAd, queue: bool) -> Result<(), SayError> {
     match ad.state {
         SessionState::InputRequired => {
             let question = ad.pending.as_ref().and_then(|items| items.first()).map(|item| item.prompt.clone());
             let turn_age_ms = age_ms(ad.turn_started_at.as_deref());
             let last_update_age_ms = age_ms(ad.last_update_at.as_deref());
-            return Err(SayError::InputRequired { question, turn_age_ms, last_update_age_ms });
+            Err(SayError::InputRequired { question, turn_age_ms, last_update_age_ms })
         }
         SessionState::Working if !queue => {
             let turn_age_ms = age_ms(ad.turn_started_at.as_deref());
@@ -236,13 +262,10 @@ pub async fn say(
             // minimal stand-in `say`'s own busy hint needs (see the module
             // doc's "Decisions I made").
             let state = if last_update_age_ms >= stall_threshold_ms() { "stalled" } else { "working" };
-            return Err(SayError::Busy { state: state.to_string(), turn_age_ms, last_update_age_ms });
+            Err(SayError::Busy { state: state.to_string(), turn_age_ms, last_update_age_ms })
         }
-        _ => {}
+        _ => Ok(()),
     }
-
-    let kind = if queue { TurnKind::Queue } else { TurnKind::Plain };
-    send_turn(&TurnCtx { registry, roster, state, grant }, &handle, &ad, text, kind, timeout).await
 }
 
 /// `interrupt SESSION TEXT`'s own redirect turn (issue #191): unlike [`say`],
@@ -334,7 +357,12 @@ async fn send_turn(
             request_id.clone(),
             ad.name.clone(),
             Box::new(message),
-            SayOpts { queue: kind.queue(), replace: kind.replace(), grant: grant.map(str::to_owned) },
+            SayOpts {
+                queue: kind.queue(),
+                replace: kind.replace(),
+                grant: grant.map(str::to_owned),
+                harness_session: ad.harness_session_id.clone(),
+            },
             timeout,
         )
         .await;

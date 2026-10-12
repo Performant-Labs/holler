@@ -106,3 +106,46 @@ Run handoff directory `docs/handoffs/839` Â· branch `issue-839-implementation` Â
     - `cargo clippy --workspace --all-targets -- -D warnings`, against the stubs;
     - `bash scripts/lint.sh` (exit 0);
     - `rustfmt --edition 2021` on the new files only, with the `#[path]` includes kept out.
+
+## F, implement (Phase 6): 2026-10-12, 09:12 MDT
+
+- **Decided:**
+  - **The contract is implemented under the names T pinned**, in the brief's order: the contract docs (ADR-0021, ADR-0014, ADR-0005, ADR-0003, `v2.md`, the guide, the CHANGELOG), then proto, body, hub, pane, the test kit and the CLI. The handoff is `docs/handoffs/839/handoff-F.md`.
+  - **A's warns that F owned are all taken:**
+    - Warn 1: `control/rebind` fills one roster row (`Roster::set_harness_session_id`, in a new child module `roster/rebind.rs`) after `Registry::replace_session`. It does not call a whole-set `Roster::advertise`, so the body's other rows and their state are never put back stale.
+    - Warn 3: `interrupt` with text checks the pane gate before the cancel, beside `would_refuse`.
+    - Warn 5: `parse_session_id` and `SESSION_ID_MAX` move to `findings.rs`, and `tx_switch` re-exports them, so `switch_command` causes no module cycle.
+    - Warn 7: the whole `control/say` handler is in `control_say.rs`.
+  - **Splits the brief's own rules call for:**
+    - `tx_switch.rs` would have been 683 lines, over the brief's 650 trigger, so the plan's helpers moved to `tx_switch/plan.rs`.
+    - `live.rs`'s inline tests moved whole to `live/tests.rs`, as the brief's "do first" says. Only the indentation changed (checked with `diff`).
+  - **Choices the brief left open:**
+    - `HubRefusal::Held` is `{ kind, reason }`, with no `key`. The `-32011` data carries no key, so `session-held` names the body session from one roster read, on that path only.
+    - `control/rebind` checks the id with `parse_session_id` before any body is asked.
+    - `FakePaneStore::records()` is a crate-private read that is not logged. It keeps `FakeHub`'s reads out of the store's call log, as T's contract requires.
+    - The README's debug table names the body's new `rebind` event under `session`.
+  - **Five documented commands** in F's doc text did not parse (`docs_cli_test`). They now use single-token placeholders.
+- **Assumed:**
+  - **The six failing tests are T's to fix** (T-1 to T-6 in the handoff). Each was confirmed by a temporary local edit of the test alone, run and then restored with `git checkout --`. With the edits, every affected target was green.
+  - **The one failure of `profile_rename_faults_test` is a flake that existed before this story**, not caused by it:
+    - it is a test from #665 that compares inodes;
+    - run alone, it fails 20 times in 20 on the tree before #839 (`9ecfc34`, built in the scratchpad) and 40 in 40 on this branch;
+    - this diff touches neither the rename nor the store.
+- **Hedged:**
+  - **`rebind_test` passed 8 of 8 in the full run, but it is flaky.** Run alone it fails 11 times in 12 (`-p` build) and 4 in 6 (workspace build). With `until_attached` temporarily made to wait for the first attach, it failed 0 times in 12. The production code cannot avoid the race: T's own guard pins the row as visible before the task runs. So this is T-5.
+  - **The end-to-end tests were run green only with an ephemeral `--listen`.** The rig's hubs bind the default port, which on this machine is the operator's live hub. That hub was never contacted: the bind failed and the tests stopped at the start.
+  - **Acceptance 20(d) row (1)** follows D3's order (the existing refusals come first), as T's tests do. T flagged it for O.
+- **Evidence:**
+  - Commands:
+    - `cargo test --workspace --no-fail-fast -- --skip roster_stays_accurate_under_concurrent_body_load`: 2703 passed and 18 failed. All 18 are accounted for:
+      - 15 are T-1 to T-6;
+      - 1 is the five doc commands, since fixed;
+      - 1 is the #665 flake.
+    - `cargo clippy --workspace --all-targets -- -D warnings`: exit 0.
+    - `bash scripts/lint.sh`: exit 0, with the three new goldens shown as `(new file)`.
+    - `bash scripts/changelog-check.sh origin/main`: ok.
+    - `rustfmt --check --edition 2021` on the nine new leaf files: clean.
+    - `cargo test -p holler-cli --test docs_cli_test --test docs_pane_control_test`: 3 and 20 passed.
+    - The temporary-edit runs: `check_only_test` 4, `driven_resolve_test` 11, `offline_reason_test` 3, `cli_invocation_test` 14, `driven_e2e_test` 11 and `hold_single_path_test` 5, all passed. The edits were restored, and `git status` on `crates/*/tests` is clean.
+  - Files read: the brief (its decisions, where the code goes, Reuse, Acceptance and Blast radius), `handoff-A.md`, `handoff-T-red.md`, and every test target named in it.
+  - Source facts F relies on are in `docs/handoffs/839/evidence.md`.

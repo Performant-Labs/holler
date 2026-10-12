@@ -78,9 +78,9 @@ holler pane launch demo-beta --herdr-session demo --workspace demo --grid r1c2 -
 - **The prompt verbs.** `holler interrupt --pane NAME` on a Claude Code pane relaunches it on its session of record (the
   operator's decision: no keypress, and a signal would end the process), dropping the turn in flight; with text it is
   refused `interrupt-text-unsupported`, and `holler answer --pane NAME CHOICE` is refused `answer-unsupported`.
-  `holler say --pane NAME TEXT` does not reach a Claude Code pane yet: the hub drives no body for its session until
-  [#839](https://github.com/Performant-Labs/holler/issues/839) and [#850](https://github.com/Performant-Labs/holler/issues/850)
-  (section 12).
+  `holler say --pane NAME TEXT` does not reach a Claude Code pane yet: no body drives its session until
+  [#850](https://github.com/Performant-Labs/holler/issues/850) (section 12), so it is refused `pane-not-driven`, and so
+  is `holler pane reset PANE --first TEXT`.
 - A pane's harness kind is never changed: `relaunch` with another `--harness`, or `profile apply` of a spec that names
   another harness for a recorded pane, is refused `harness-change-refused`. Close the pane and launch it again instead.
 
@@ -257,6 +257,15 @@ Refused (3) with `session-not-found` (the pane's server does not have it), `sess
 (without `--as-operator`) or `server-unhealthy` (relaunch it first). A TUI that does not show the session afterwards is
 `unavailable` (1) and records nothing.
 
+The pane's body follows (#839): once the TUI is seen showing SESSION, the switch asks the attach-mode body that drives the
+pane (the one that advertises its session of record, or its recorded DRIVEN) to drive SESSION, and records the id the
+body acknowledged as DRIVEN in the same write as the record; a pane no body drives records DRIVEN `-`. A body that
+already drives SESSION is not asked. Refused (3) before anything moves: `session-driven-elsewhere` when another live body
+already drives SESSION; `session-busy` or `session-holds-question` when the pane's body runs a turn or holds a question;
+and `pane-not-driven` when more than one body could drive the pane, or a body the pane's server lists cannot be shown to
+be its own (the message names each body and the two steps that pair the pane by hand, below in section 4). A body that
+refuses or does not answer is a failure after the act (1), and the message ends with the reconcile step.
+
 A Claude Code pane is switched by a relaunch: its process is stopped and started again resuming SESSION, a Claude Code
 session id that has a conversation in the pane's directory (`session-not-found` otherwise, before anything is stopped),
 and recorded with its new pid. Since the relaunch drops a running turn, the switch is also refused while the pane is not
@@ -272,22 +281,27 @@ holler pane reset demo-alpha --first "Read the brief and start."
 ```
 
 Refused (3) with `session-busy` or `session-holds-question` while the session of record is running a turn or waits on
-an answer, and with `orchestrator-pane` and `server-unhealthy` as `switch` is. A Claude Code pane is reset by a relaunch on
-a fresh session id, refused as `switch` is (`session-holds-permission` included); `--first` goes to the relaunched
-process, through the same direct path as below.
+an answer, and with `orchestrator-pane` and `server-unhealthy` as `switch` is. The pane's body is re-pointed to the new
+session and DRIVEN recorded as for `switch`. A Claude Code pane is reset by a relaunch on a fresh session id, refused as
+`switch` is (`session-holds-permission` included); `--first` on a Claude Code pane is refused `pane-not-driven` until a
+body drives it (#850).
 
-**Do not use `--first` on a parked or held pane.** The first message goes to the harness directly, outside the hub's
-prompt path, so the gate that refuses a prompt to a parked or held pane does not see it (ADR-0021 section 8, "The prompt
-and activity seam"). Sending it through that gate is issue [#839](https://github.com/Performant-Labs/holler/issues/839),
-not built.
+**`--first` goes through the hub's gate (#839).** Before anything moves, the hub is asked, without sending, whether it
+would admit the first message: a parked pane (`pane-parked`), a pane whose body's session is held (`session-held`, which
+names the `holler release SESSION` that lifts it), an unhealthy pane (`pane-unhealthy`), a pane whose SHOWN and DRIVEN differ
+(`pane-shown-driven-mismatch`) and a pane no body drives (`pane-not-driven`) are refused, exit 3, with no session created
+and the record as it was. So `--first` needs a body attached to the pane's server that advertises its session of record
+(an attach-mode `holler body` session); `holler pane reset PANE` without `--first` works without one, and the message can
+follow as `holler say --pane PANE TEXT`. After the record, the message is queued through the hub, accepted and not waited
+for. If the hub refuses it then (the pane was parked or held in between), the run fails with that code, and the message
+says the session was created, shown and recorded but the first message did not land.
 
 ### `holler pane park --reason TEXT --release-when WHEN`
 
 Take a pane out of service until it is unparked: the record's hold becomes parked, with the reason and the release
 condition (one line each, at most 200 characters). It takes one pane, or with `--profile` and no pane every pane of the
 profile. It changes the record only: nothing moves in Herdr and no process is touched. A prompt
-through the hub to a parked pane's session of record is refused (`pane-parked`); the first message of `reset --first` is
-not (see `reset`).
+through the hub to a parked pane's session of record is refused (`pane-parked`).
 
 ```bash
 holler pane park demo-alpha --reason "waiting for the review" --release-when "the review merges"
@@ -518,7 +532,7 @@ profile document, or `unavailable` (1) when FILE cannot be read.
 | PROJECT | The directory it works in. |
 | HEALTH | `healthy`, `unhealthy` or `unknown`, as the harness server last reported it (`pane get` shows the reason); for a Claude Code pane, whether its process still ran. |
 | SHOWN | The session the pane's TUI showed when reconcile last observed it; for a Claude Code pane, the session its process held. |
-| DRIVEN | The session the hub drives, printed as the record holds it and never compared. |
+| DRIVEN | The session the pane's body drives: the harness session the attach-mode body that drives the pane advertises, recorded by `switch`, `reset` and `doctor`; `-` when no body drives the pane. |
 | SYNC | SHOWN against the session of record: `ok`, `MISMATCH` (loud on purpose) or `-` when nothing was observed. |
 | HOLD | `none`, `parked` or `drained`. |
 
@@ -542,9 +556,26 @@ after a blank line, as a second table with the columns PANE-ID, LABEL, POS, PROJ
 
 **SHOWN against DRIVEN.** The session of record is the session the hub drives (I2), so SYNC compares SHOWN with it. It
 is `MISMATCH` when the TUI showed another session or its home screen, and `-` when reconcile has never observed the pane
-or the pane has no session of record. DRIVEN is printed as the record holds it and is not compared: nothing records it
-yet (the hub wiring, #649, leaves it as stored; making it follow each pane's session of record is
-[#839](https://github.com/Performant-Labs/holler/issues/839), not built), so it prints `-`. `pane doctor` uses the same rule for `shown-driven-mismatch` (section 5).
+or the pane has no session of record. DRIVEN is the session the pane's body advertises, as `switch`, `reset` and `doctor`
+last observed it ([#839](https://github.com/Performant-Labs/holler/issues/839); ADR-0021 section 11), and `-` when no
+body drives the pane. `pane doctor` reports `shown-driven-mismatch` when SHOWN differs from the session of record, as
+SYNC does, and also when DRIVEN is neither SHOWN nor the session of record: the body is behind (section 5). And the hub's
+prompt gate refuses a prompt to a body whose session is a pane's session of record or recorded DRIVEN while SHOWN and
+DRIVEN differ (`pane-shown-driven-mismatch`).
+
+**The pane's body (#839).** The hub joins a pane to the attach-mode body that advertises its session of record (its
+`harness_session_id`), and takes a body to be a pane's only on evidence: the session of record, the recorded DRIVEN, or
+the session a switch moves to. A body that advertises another pane's session of record or recorded DRIVEN is that pane's.
+When servers share a data directory, a listed body that no evidence names may be any pane's; `switch` and `reset` then
+refuse `pane-not-driven`, naming each body, and `doctor` reports it without a remedy. Pair the pane with its body by
+hand in two steps: switch the pane to the session its own body drives (`holler pane switch PANE ID`, where `ID` is that
+session, which needs no rebind), then switch it to the session of record (`holler pane switch PANE SESSION`), which
+re-points the body. **A body restart reverts** a re-pointed body to the session in its configuration (the re-point is
+not persisted), so run `holler pane doctor` before any relaunch and after restarting bodies: it reports such a body as
+`shown-driven-mismatch`, not fixable, with the remedy `holler pane switch PANE SESSION`, the session of record (on
+servers that share a data directory it is reported without a remedy, and the two steps pair it). A harness session id
+(`ses_…`) is an address the hub resolves for `--pane` only: typed as a `SESSION`, `holler say ses_… TEXT` (and
+`interrupt`, `answer`) is `unknown session`, exit 1.
 
 A `holler pane watch` line prints the same cells as `key=value`, the column name in lower case, after the pane's name:
 
@@ -565,9 +596,10 @@ DRIVEN are both known and differ, the first line of the output says so:
 `holler roster --profile fleet` lists only that profile's panes, and a profile that does not exist is refused
 `profile-not-found` (exit 3). `holler roster --format=json` prints the envelope of section 9 with `data` =
 `{"rows": [...], "mismatches": ["demo-alpha", "demo-beta"]}`; `holler roster --json` keeps its shape and gains the keys
-`pane`, `pos`, `profile`, `health`, `shown` and `driven` (`null` for a row with no pane). DRIVEN is `-` for every pane
-until the hub's DRIVEN session is recorded ([#839](https://github.com/Performant-Labs/holler/issues/839)), so the
-summary line does not appear before then; read SYNC from `holler pane list` and `holler pane doctor`.
+`pane`, `pos`, `profile`, `health`, `shown` and `driven` (`null` for a row with no pane). DRIVEN is `-` for a pane until
+`switch`, `reset` or `doctor` records the session its body drives
+([#839](https://github.com/Performant-Labs/holler/issues/839)); read SYNC from `holler pane list` and
+`holler pane doctor`.
 
 The Herdr display plugin (`plugins/herdr-holler`, #651) shows each pane's project, SHOWN against DRIVEN and hold in
 Herdr's sidebar; it only reports metadata and reads, and its actions run the `holler pane` verbs.
@@ -593,7 +625,7 @@ The finding kinds:
 | `no-session-of-record` | The record names no session of record; doctor never picks one. | `holler pane reset PANE` |
 | `session-of-record-missing` | The pane's server answered, and it does not have the session of record. | `holler pane reset PANE` |
 | `tui-foreign-session` | The TUI shows a session its pane's own server does not have. | `holler pane relaunch PANE` |
-| `shown-driven-mismatch` | The TUI shows another session than the session of record, or its home screen. | `holler pane doctor PANE --fix` |
+| `shown-driven-mismatch` | The TUI shows another session than the session of record, or its home screen; or (#839) the pane's body drives a session that is neither SHOWN nor the session of record, or cannot be told to be the pane's. | `holler pane doctor PANE --fix`; for a body that is behind, `holler pane switch PANE SESSION`; for a body that cannot be told, none |
 | `stray-session` | A session on a pane's server that is the session of record of no pane. | none |
 | `unmanaged-stalled` | An unmanaged pane whose screen has not changed for the threshold or longer. Whole-fleet passes with `--unmanaged-stalled-after SECONDS` only. | none |
 | `pane-waiting` | A Claude Code pane whose process waits on a person: a permission prompt or a question. | none |
@@ -601,7 +633,10 @@ The finding kinds:
 | `profile-drift` | A pane's record differs from its profile's spec on at least one field; the message names the fields, not the values. | none |
 
 **`--fix` repairs only `shown-driven-mismatch`.** It selects the session of record in the pane's TUI, so the TUI shows
-the session the record already names, and observes the TUI again. It never changes which session is the session of
+the session the record already names, and observes the TUI again. It repairs only the TUI's side: a body that is behind
+(#839) is `not-fixable`, and its line names `holler pane switch PANE SESSION`, which re-points the body to the session
+of record. A pass also records DRIVEN, in the same write as SHOWN, from one read of the hub's live bodies; when that read
+fails it is an `observe-failed` finding naming `hub.advertised`, and DRIVEN is left as stored. It never changes which session is the session of
 record, never writes the record's session, and never creates, starts, stops or types into anything, with the one
 exception of a Claude Code pane below. It leaves the orchestrator's pane alone unless the run names that pane (the
 bracket then says `skipped`).
@@ -839,8 +874,12 @@ and `spec-not-launchable` of `profile apply` (section 6), `import-blocked` of `p
 `session-busy`, `session-holds-question`, `pane-parked` and `pane-unmanaged` (section 1). A Claude Code pane (#831,
 section 2) adds `port-policy-unsupported`, `harness-change-refused`, `claude-login-env-refused`, `process-in-use`,
 `agent-unsupported`, `harness-dialog-open`, `session-holds-permission`, `interrupt-text-unsupported`,
-`answer-unsupported`, and the harness's own `session-mismatch` and `inbound-held` for a message it did not run.
-ADR-0021 sections 9 and 15 list each verb's.
+`answer-unsupported`, and the harness's own `session-mismatch` and `inbound-held` for a message it did not run. DRIVEN
+(#839, section 3, `switch` and `reset`) adds `pane-not-driven` (no body drives the pane, or more than one could, or a
+listed body cannot be shown to be its own; also `say`, `interrupt` and `answer` with `--pane` when no live body drives
+the pane's session of record), `session-held` (`reset --first` on a pane whose body's session is held) and
+`session-driven-elsewhere` (a switch onto a session another live body drives). ADR-0021 sections 9 and 15 list each
+verb's.
 
 ## 10. Migration and cutover
 
@@ -919,8 +958,9 @@ The steps, in order:
 4. **Bring SHOWN and the session of record together.** Run `holler pane doctor` until it reports no
    `shown-driven-mismatch`, and `holler pane list` shows SYNC `ok` for every pane (section 4).
 5. **Cut one pane over** to `holler pane launch PANE` and `holler pane reset PANE`, watch it **through a full overnight**,
-   then move the rest. A launch records the pane's model and does not apply it yet (#829, section 2), and
-   `reset --first` is not used on a parked or held pane (section 3).
+   then move the rest. A launch records the pane's model and does not apply it yet (#829, section 2). Each pane needs an
+   attach-mode body on its server before a step that uses `reset --first` (section 3), and `holler pane doctor` is run
+   after the bodies start, so DRIVEN is recorded (section 4).
 6. **Seven days with no invisible session.** Every day `doctor` reports no `shown-driven-mismatch` and no stray session
    older than an hour. A pass keeps no memory, so read "older than an hour" by comparing the `session` of each
    `stray-session` finding between two passes an hour apart. Then the operator signs off.
@@ -977,10 +1017,9 @@ scripts/pane-restart PANE --model PROVIDER/ID [--effort E] [--key-file PATH]
 Deferred, so not documented here as existing; none of them is available:
 
 - applying a pane's model, effort and environment to its harness server (#829);
-- DRIVEN following each pane's session of record, and `reset --first` through the hub's gate (#839);
 - adopting the Claude Code panes the import leaves alone (#831's last step, ADR-0021 section 15, item 17; until it lands,
   `--adopt-claude-code` is refused);
-- a body that lets `holler say --pane NAME TEXT` reach a Claude Code pane (#850, after #839);
+- a body that lets `holler say --pane NAME TEXT` reach a Claude Code pane (#850);
 - answering a Claude Code pane's permission prompt, and its `--agent` (later stories of ADR-0021 section 15);
 - the shared subprocess runner of the adapters and the probe (#696);
 - recreating the Herdr workspace from the stored profiles (#666).

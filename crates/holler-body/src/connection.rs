@@ -270,6 +270,7 @@ fn static_wire_method(method: &str) -> &'static str {
         "session/prompt" => "session/prompt",
         "session/cancel" => "session/cancel",
         "session/answer" => "session/answer",
+        "session/rebind" => "session/rebind",
         "session/update" => "session/update",
         "session/presence" => "session/presence",
         "circuit/ping" => "circuit/ping",
@@ -701,14 +702,14 @@ where
                 }
             }
             Envelope::Request { id, method, params } if method.starts_with("query/") => {
-                crate::dispatch::handle_query(self.sink, &id, &method, params, self.identity, self.state_root, self.configs).await
+                crate::dispatch::handle_query(self.sink, &id, &method, params, self.identity, self.state_root, &self.session_manager.live_configs(self.configs)).await
             }
             Envelope::Notification { method, .. } if method == "circuit/superseded" => {
                 warn("conn_superseded", vec![]);
                 FrameOutcome::Superseded
             }
             Envelope::Request { id, method, params }
-                if matches!(method.as_str(), "session/prompt" | "session/cancel" | "session/answer") =>
+                if matches!(method.as_str(), "session/prompt" | "session/cancel" | "session/answer" | "session/rebind") =>
             {
                 // Issue #191's priority path: `session/cancel`'s own
                 // response frame goes out via `priority_tx`, not the normal

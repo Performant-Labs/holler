@@ -11,11 +11,13 @@
 //!   session, harness servers), a one-line message, its remedy and what `--fix` did.
 //! - **Remedies** ([`FindingKind::remedy`]) name only the verb that owns each repair
 //!   (`pane relaunch`, `pane reset`, `pane doctor`), built from constant words and a
-//!   [`PaneName`], whose grammar has no space, shell metacharacter or leading `-`. No remedy
-//!   carries a session id, a Herdr id, a port, a profile or any adapter text, and none is a
+//!   [`PaneName`], whose grammar has no space, shell metacharacter or leading `-`. None is a
 //!   raw OpenCode, Herdr or tmux command: only Holler reaches those (epic #633). A finding no
 //!   Holler verb repairs (a stray session, an unregistered Herdr pane, an unsupported Herdr)
-//!   has no remedy, and its message says why.
+//!   has no remedy, and its message says why. No remedy carries a Herdr id, a port, a profile
+//!   or any adapter text, and only one carries a session id: reconcile's switch back of a body
+//!   that is behind (#839, [`switch_command`]), built only for an id that passes
+//!   [`parse_session_id`], whose grammar has no space or shell metacharacter either.
 //! - **Untrusted text** (session and Herdr ids, the record's host names, adapter messages)
 //!   reaches a message only through [`quoted`] (one value) or `embedded` (an adapter's
 //!   message), so no control sequence reaches a terminal.
@@ -36,6 +38,12 @@ const EMBED_LIMIT: usize = 200;
 const DOCTOR: &str = "holler pane doctor";
 const RELAUNCH: &str = "holler pane relaunch";
 const RESET: &str = "holler pane reset";
+const SWITCH: &str = "holler pane switch";
+
+/// The longest session id [`parse_session_id`] accepts. It is the length [`quoted`] cuts at.
+/// `quoted` counts characters and [`parse_session_id`] counts bytes, which agree because an
+/// accepted id is ASCII, so a typed id is never cut short in a message.
+pub const SESSION_ID_MAX: usize = 64;
 
 /// What a reconcile pass found about a pane, a harness server, a session or Herdr.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -132,7 +140,10 @@ impl FindingKind {
 
     /// The command a finding of this kind tells the operator to run, for the pane `pane`
     /// (`None` when it is about no pane) once `--fix` left it at `fix`; `None` when no Holler
-    /// verb repairs it. The one table of remedies:
+    /// verb repairs it. The table answers by kind and fix alone; reconcile sets two remedies
+    /// itself, after [`Finding::with_fix`] (#839): a body that is behind its pane gets the
+    /// switch back to the session of record ([`switch_command`]), and a body that cannot be
+    /// told to be the pane's gets none. The one table of remedies:
     ///
     /// - a read that failed: run the pass again, `holler pane doctor [<pane>]`;
     /// - the pane's process or its harness is gone or wrong: `holler pane relaunch <pane>`;
@@ -326,6 +337,58 @@ impl Finding {
             ..self
         }
     }
+
+    /// The same finding, whose remedy is to switch its pane to `session` (#839: a body that is
+    /// behind, back to the session of record), or no remedy when `session` is not a valid
+    /// session id. Set after [`Finding::with_fix`], which would overwrite it.
+    pub(crate) fn with_switch_remedy(self, session: &str) -> Self {
+        Self {
+            remedy: self
+                .pane
+                .as_ref()
+                .and_then(|pane| switch_command(pane, session)),
+            ..self
+        }
+    }
+
+    /// The same finding, with no remedy (#839: no one verb repairs a body that cannot be told
+    /// to be its pane's unattended). Set after [`Finding::with_fix`].
+    pub(crate) fn without_remedy(self) -> Self {
+        Self {
+            remedy: None,
+            ..self
+        }
+    }
+}
+
+/// The `holler pane switch <pane> <session>` command line, or `None` when `session` is not a
+/// valid session id ([`parse_session_id`]): the remedy of a body that is behind (#839), and the
+/// manual step of a refusal that names bodies. A session id here may be advertised text, which
+/// is untrusted, so the command is built only for an id that parses, never spelled from one
+/// that does not.
+pub fn switch_command(pane: &PaneName, session: &str) -> Option<String> {
+    let session = parse_session_id(session).ok()?;
+    Some(format!("{SWITCH} {pane} {session}"))
+}
+
+/// A harness session id typed by a person, or advertised by a body: 1 to [`SESSION_ID_MAX`]
+/// ASCII letters, digits, `_` or `-` (OpenCode's ids are `ses_` and 26 letters and digits).
+/// Anything else is `usage`, and the message quotes the text with [`quoted`], so no whitespace,
+/// control character or shell metacharacter reaches a port, a message or a command line.
+/// (`tx_switch` re-exports it; it lives here, beside [`quoted`], since #839 builds a remedy
+/// from it.)
+pub fn parse_session_id(text: &str) -> Result<String, PaneError> {
+    let allowed = |b: u8| b.is_ascii_alphanumeric() || b == b'_' || b == b'-';
+    if (1..=SESSION_ID_MAX).contains(&text.len()) && text.bytes().all(allowed) {
+        return Ok(text.to_owned());
+    }
+    Err(PaneError::Usage {
+        message: format!(
+            "invalid session id {}: a session id is 1 to {SESSION_ID_MAX} ASCII letters, \
+             digits, '_' or '-'",
+            quoted(text)
+        ),
+    })
 }
 
 /// The `holler pane doctor` command line for `pane` (every pane when `None`), with `--fix`
