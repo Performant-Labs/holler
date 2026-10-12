@@ -111,3 +111,20 @@ Run handoff directory `docs/handoffs/851` Â· branch `issue-851-implementation` Â
     `cargo machete`, all clean. Full output is in handoff-F.md.
   - `evidence.md` has nine F entries.
   - The fixture-workspace probe ran in the session scratchpad and was not committed.
+
+## T (Phase 6, verify GREEN), 2026-10-11
+
+- **Decided:**
+  - GREEN is valid: T's four targets pass at `bf26366` on a clean tree, and `holler --version` prints
+    `holler 0.4.0 (bf26366)`, HEAD's hash with no `-dirty`.
+  - No test changes in this phase. F flagged none, and five mutations of F's code each made the matching test fail.
+  - Two evidence entries added for unchanged code the test relies on: the `body caps` and `body query status`
+    paths.
+- **Assumed:** the CI legs (Linux, Windows, macOS) build from a checkout, so the `--version` test compares with
+  `git rev-parse` there. If a leg has no `.git`, the test's `None` branch accepts any one-word token.
+- **Hedged:**
+  - Cargo's re-run triggers for `build.rs` still have no automated test. I confirmed two by hand: a tracked edit
+    in `src/` gave `-dirty`, and restoring it gave a clean build.
+  - The Windows leg is not run locally.
+- **Evidence:** handoff-T-green.md (Tier 1 table, mutation table, `git archive` builds giving `unknown`,
+  `abc1234`, and `unknown` for a blank `HOLLER_GIT_SHA`).

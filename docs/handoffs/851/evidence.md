@@ -97,3 +97,26 @@ T appends its own at Phase 6.
   **Source:** `CHANGELOG.md:805` (the 0.3.0 entry)
   **Verbatim excerpt:**
   > (fetches the real published release binary, real sha256-verified — not a source build). A
+
+## T (Phase 6)
+
+- **Fact:** `body caps` and `body query status` run without a live body, in the CLI process, through the body
+  crate's producers, so `query_test::status_docs_carry_version` checks the CLI-installed string on those two verbs.
+  **Source:** `crates/holler-cli/src/body_cmd.rs:269-273`
+  **Verbatim excerpt:**
+  > ```rust
+  >             let doc = holler_body::query::local_status(&state.root, identity.as_ref(), &configs);
+  >             doc_outcome(&doc, |doc| format!("body: role={:?}", doc.role))
+  >         }
+  >         Cmd::Caps => {
+  >             let doc = holler_body::query::local_caps(&state.root, identity.as_ref(), &configs);
+  > ```
+
+- **Fact:** the body's `query/caps` document embeds the same `Status` its `query/status` builds, so the
+  `status.version` that `body caps` prints is the field the diff changes in `local_status`.
+  **Source:** `crates/holler-body/src/query.rs:86-87`
+  **Verbatim excerpt:**
+  > ```rust
+  > pub fn local_caps(state_root: &Path, identity: Option<&BodyIdentity>, configs: &[SessionConfig]) -> Caps {
+  >     let status = local_status(state_root, identity, configs);
+  > ```
