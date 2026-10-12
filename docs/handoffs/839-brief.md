@@ -1,6 +1,6 @@
 # [feat(pane): DRIVEN follows each pane's session of record: the hub joins a pane to the body that drives it, the gate keys on the join, switch and reset move it, and `reset --first` goes through the hub's gate](https://github.com/Performant-Labs/holler/issues/839)
 
-Part of epic #633. This is the complete statement of story #839, prepared on 2026-10-11 and **re-cut once on 2026-10-12 from `main` at `b76f4d2`**, which holds #831 (PR #857), #665, #648 and #667; #835 is not on `main`, so what depends on it is marked `REFRESH AFTER MERGE of #835` (the main session refreshes those in one short pass after it merges). It **absorbs #828** (closed): the issue text is the source of truth where this brief is silent, and this brief is the decision where they differ (the differences are listed in "Where this brief is the decision"). The story is **contract amendment first** (ADR-0021 section 11 and the passages listed in "The ADR and the dependent docs", then `docs/protocol/v2.md`), then tests (RED), then code. Rigor is `in-session`, as "Pipeline" declares it: no outside model reviews the brief, so the Evidence section quotes every source fact a decision rests on, and a reviewer needs no other source. Cite an entry as E<n>. "Plan-check history" says what the three plan checks blocked and where this cut answers each. Every Evidence command was re-run on the tree this cut was written on, and "Line numbers re-checked" says what moved.
+Part of epic #633. This is the complete statement of story #839, prepared on 2026-10-11 and **re-cut once on 2026-10-12 from `main` at `b76f4d2`** (which held #831, PR #857, #665, #648 and #667) and **refreshed once on 2026-10-12 for #835** (PR #860), on `main` at `4e691d9`, which holds all five. It **absorbs #828** (closed): the issue text is the source of truth where this brief is silent, and this brief is the decision where they differ (the differences are listed in "Where this brief is the decision"). The story is **contract amendment first** (ADR-0021 section 11 and the passages listed in "The ADR and the dependent docs", then `docs/protocol/v2.md`), then tests (RED), then code. Rigor is `in-session`, as "Pipeline" declares it: no outside model reviews the brief, so the Evidence section quotes every source fact a decision rests on, and a reviewer needs no other source. Cite an entry as E<n>. "Plan-check history" says what the three plan checks blocked and where this cut answers each. Every Evidence command was re-run on the tree this cut was written on, and again at the #835 refresh, and "Line numbers re-checked" says what moved.
 
 **Status of the decisions.** The five questions the issue asks (the address, how a body follows, who records DRIVEN and when, hold keys, the order of `reset --first`) and the decisions that follow from them (D1 to D12) were **decided by the preparer under the operator's standing rules ("decide, don't ask"), to be confirmed at the plan check**. Each lists what it rejected and why. "Questions only the operator can answer" lists the five the preparer did not decide. Three further decisions were taken by the main session at the plan check (P1 to P3 below: the generic forward stays closed, one source for the body's attach id, the ADR amendments and the bare-id CLI form); they are recorded as decided, with what each rejected, and are not to be re-opened. Three more were taken at the second plan check (P4 to P6 below: `driver_of` accepts a body only on positive evidence, the three `--pane` verbs keep their hold exit, a switch onto a session another body drives is refused in the plan); same rule. Two more were taken by the operator after the third (P7 and P8 below: the hub marks an offline body's `-32004` with an additive `data.reason`, and the exclusion rule has one statement, in D3), recorded on 2026-10-12; same rule.
 
@@ -11,7 +11,7 @@ Three plan checks have run on this story (their records are in `docs/handoffs/83
 1. **First pass (2026-10-11), BLOCK, 3 blocks and 10 warns.** The rebind leaked onto the generic forward; the body silently returned to the old session; ADRs 0005, 0003 and 0014 were not amended. Answered by P1 (the rebind has its own forward), P2 (one source for the attach id, mirrored; a restart reverts) and P3 (the three ADRs amended; a typed bare id refused), and the warns by D1 to D5, D8, D10, D11 and the blast radius.
 2. **Second pass (2026-10-11), BLOCK, 1 block and 9 warns.** `driver_of`'s only evidence was membership in the pane's server list, which fails both ways. Answered by P4 (positive evidence, D3's rules (i) to (v), `Unproven`), P5 (the routed verbs keep exit 4), P6 (`session-driven-elsewhere`), and the `talk::admit`, forward-helper, remedy-builder, presence-mirror and fake-reuse decisions of D2, D3 and D5.
 3. **Third pass (night of 2026-10-11), BLOCK, 2 blocks and 6 warns.** (1) The exclusion of another pane's body was stated two ways: answered by P8 and by D3's single statement, "the exclusion rule", which every other place points at. (2) `NotDriven` could not be told by code, because the hub sends `-32004` both for an offline body and after delivery: answered by P7 (the additive `data.reason: "offline"`), D5's `classify`, the D7 table, Acceptance 18 (three turn-outlives-the-wait cases) and Acceptance 11 (a new golden file). The warns: the `.send_prompt(` scan now allows the two wrapper forwards (D5, Acceptance 13); the tests that drive `send_prompt` stay in `circuit/dispatch.rs` and every `mod …;` line is last in its file ("Where the code goes", Acceptance 4); one selection, `holler_pane::gate::first_refusal`, serves the hub and `FakeHub` (D1, D10); the #803 row no longer spells the wizard skill's old directory; the clashes table, counts and merge order were re-read on 2026-10-12; `SESSION_DRIVEN_ELSEWHERE` is declared in `tx_switch.rs`, the control parameter is `token_id`, and advertised values are quoted and the remedy id validated (D2, D3, D7).
-4. **What moved under the brief since (2026-10-12).** #831, #665, #648 and #667 merged. Every excerpt was re-cut from `main`; D3 says what a single-process pane (#831) does in the new order; the ADR edit list gains #831's passages (section 8's single-process paragraph, section 9's rows, item 18); the `Ports` literals are 18 in 16 files; `HarnessPort` takes an endpoint.
+4. **What moved under the brief since (2026-10-12).** #831, #665, #648, #667 and then #835 merged. Every excerpt was re-cut from `main`; D3 says what a single-process pane (#831) does in the new order; the ADR edit list gains #831's passages (section 8's single-process paragraph, section 9's rows, item 18); the `Ports` literals are 20 in 17 files (#835 added two); `HarnessPort` takes an endpoint; `HerdrPort::observe_pane` and `HostPort::foreground_commands` are required (#835).
 
 ## Where this brief is the decision
 
@@ -71,7 +71,7 @@ Three plan checks have run on this story (their records are in `docs/handoffs/83
 - Rejected: **(a) restart the body with a new config**: not bounded by I5, needs the CLI to supervise another process and rewrite a file the wizard owns (E88), and ADR 0014 point 3 says a body must be able to leave without touching the harness (E51). **(b) a new body session per `ses_`**: a new name is a new hold key, so `--join-held` would default-hold every reset (E17) and operator holds would not carry over; the roster would grow by a row per reset; and ADR 0005 section 3 says the name is the stable identity (E52). **(c) the hub or the CLI posts the prompt to the pane's OpenCode server itself**: that is an adapter in the hub (ruling 1, section 5 of the ADR, E56), it skips the body's turn tracking, and it is a second way to deliver a prompt, which the single-sender guard exists to prevent (E77). **(d) leave it to the cutover**: the story's own acceptance (a healthy pane's `reset --first` is delivered) cannot hold in production, and after every switch the body would still drive the old session, so the gate would refuse everything as `pane-shown-driven-mismatch`. **(e) hot reload of the body's config file**: the body has no reload path and the file would become a control channel. **(f) allowlist `session/rebind` on `LiveHandle::query`**, **(g) a body-side "swapped state" separate from the configuration**, **(h) persist the binding across a restart**: see P1 and P2.
 
 **D3. Who records `last_observed.driven`, and where in the step order: the verb and reconcile record it from what the body acknowledged or advertised; the hub records nothing.**
-- A new port, `HubPort` (`holler-pane`, new file `crates/holler-pane/src/hub.rs`), with three **required** methods (no defaults: `HostPort::foreground_commands` is required on `main` for exactly the reason that a default answers silently for a wrapper that forgot to forward, E92; **REFRESH AFTER MERGE of #835**: #835 also makes `HerdrPort::observe_pane` required, and on `main` it still has a default, E185; re-check that E92 and E185 say so) and `Ports` gains `pub hub: &'a dyn HubPort` (E29; `Wiring::ports` lends the real ports, E25, and `Unwired` is the not-implemented set, E26; `PaneStore`, E27, gets no new method):
+- A new port, `HubPort` (`holler-pane`, new file `crates/holler-pane/src/hub.rs`), with three **required** methods (no defaults: `HostPort::foreground_commands` and, since #835, `HerdrPort::observe_pane` are required on `main` for exactly the reason that a default answers silently for a wrapper that forgot to forward, E92, E185) and `Ports` gains `pub hub: &'a dyn HubPort` (E29; `Wiring::ports` lends the real ports, E25, and `Unwired` is the not-implemented set, E26; `PaneStore`, E27, gets no new method):
   ```rust
   pub struct Advertised { pub token: String, pub name: String /* "label/session" */, pub harness_session_id: String, pub state: Activity /* holler_pane::ports::Activity */ }
   pub enum PromptMode { Check, Send }
@@ -147,7 +147,7 @@ Three plan checks have run on this story (their records are in `docs/handoffs/83
 
 **D10. The test kit.** `FakeHub` (new file `crates/holler-pane-testkit/src/hub.rs`) implements `HubPort`: scripted bodies (`with_body(token, name, harness_session_id, state)`), `rebind` updates the matching body's id (or answers a scripted fault), `prompt(Check|Send)` calls `holler_pane::gate::first_refusal` (D1: the very selection the hub's `pane_gate` calls, so a pane's recorded DRIVEN and two panes that record one id are judged as the hub judges them) over the panes of the `FakePaneStore` it was built over, plus scripted holds (`hold(name, kind)`), its faults and its call log from `fault::FaultSwitch<HubOp>` (E147; `HubOp` is `Advertised`, `Rebind`, `Prompt`, with `as_str` `hub.advertised`, `hub.rebind`, `hub.prompt`, and `faults()`), not a hand-rolled log, and the `Send` log (`prompts()`). For Acceptance 2's order across two fakes each `Rebind` and `Prompt` entry also records whether a pane in the store has the call's id as its session of record at that moment, as `SeamHarness` records `then_of_record` (E148). A conformance function (new file `conformance/hub.rs`) runs against `FakeHub` and, in the default-run end-to-end test, against the real client over a real hub; it pins the selection's two keys (the session of record, the recorded DRIVEN) and its order (the first bad pane in name order is the one named).
 
-**D11. Size rules.** `scripts/lint.sh` fails at 900. "Where the code goes" lists the files and what each may grow by (sizes re-measured on `main` at `b76f4d2`); `circuit.rs` takes **no** growth, `docs.rs` (899) and `roster.rs` (892) take none, `live.rs` about +13 (`mod target;`, the `query_slot` field, its initialiser, the `forward` helper, `query` shorter by its moved send-and-wait, the two `Say` fields: 897 at most), and so first loses its inline `mod tests` (lines 812-884) to `live/tests.rs`, a pure move, `control_server.rs` and `circuit/dispatch.rs` end smaller than they are, `codec_test.rs` (889) gains one arm (+1), and no file crosses about 850 by this story. The test files that are already near the limit (`pane_verbs/switch.rs` 893, `support/mod.rs` 857, `launch/rig.rs` 852) take at most one line each. New tests go in new files, and each `#[cfg(test)] mod …;` line this story adds is the last line of its file (the hub's precedent, E172, E173; `code_of` cuts a file at its first `#[cfg(test)]`, E171).
+**D11. Size rules.** `scripts/lint.sh` fails at 900. "Where the code goes" lists the files and what each may grow by (sizes re-measured on `main` at `4e691d9`; only `ports.rs` differs from `b76f4d2`); `circuit.rs` takes **no** growth, `docs.rs` (899) and `roster.rs` (892) take none, `live.rs` about +13 (`mod target;`, the `query_slot` field, its initialiser, the `forward` helper, `query` shorter by its moved send-and-wait, the two `Say` fields: 897 at most), and so first loses its inline `mod tests` (lines 812-884) to `live/tests.rs`, a pure move, `control_server.rs` and `circuit/dispatch.rs` end smaller than they are, `codec_test.rs` (889) gains one arm (+1), and no file crosses about 850 by this story. The test files that are already near the limit (`pane_verbs/switch.rs` 893, `support/mod.rs` 857, `launch/rig.rs` 852) take at most one line each. New tests go in new files, and each `#[cfg(test)] mod …;` line this story adds is the last line of its file (the hub's precedent, E172, E173; `code_of` cuts a file at its first `#[cfg(test)]`, E171).
 
 **D12. What this story does not do** (named so a test can pin the edge): it builds no Claude Code body (#850); it adds no `doctor --fix` that re-points a body (the remedy is `pane switch`); it does not retire `HarnessPort::send_prompt`; it adds no CLI flag (`cli-surface.txt` is unchanged); it starts no body in the opt-in scenario; it does not change `pane list`'s columns (DRIVEN prints what the record holds, which is now real); it does not touch the roster command (#648, merged); it adds no `admin/rebind` (question 4); it does not persist a rebind across a body restart (P2); it does not change how a single-process pane's switch and reset record DRIVEN (`tx_launch` keeps the stored value, D3 item 8).
 
@@ -161,17 +161,17 @@ In this order:
 4. **`holler-hub`:** `resolve_prompt_target`, the re-keyed gate (moved to `panes/gate.rs`), `LiveHandle::rebind` and the per-connection query slot (the allowlist of `LiveHandle::query` is **unchanged**), `control/rebind`, `check_only` (`talk::admit`, extracted from `say`, and `control_say.rs`), the offline `data.reason` on the offline-body arms of `say`, `interrupt` and `answer` (P7), the one `forward` helper under `query` and `rebind`, the `SayOpts`/`LiveCommand::Say`/`HoldGate` field.
 5. **`holler-pane`:** `gate` (with `first_refusal`, the one selection), `driven`, `hub` (the port and the codes `pane-not-driven` and `session-held`), `Ports.hub`, the engine's new order (`tx_switch`, which also declares `session-driven-elsewhere`), reconcile's observation and finding, `findings.rs` (`switch_command`, `with_switch_remedy`, `without_remedy`), the module docs.
 6. **`holler-pane-testkit`:** `session_id`, `FakeHub`, its conformance.
-7. **`holler-cli`:** `wiring/hub.rs` (with `wiring/store.rs`'s failure mapping made `pub(super)`), `pane/hub_refusal.rs` (the `HubRefusal` classification), `Unwired`, `say_cmd` (the shared predicate, a bare id refused as a SESSION, `pane-not-driven` for routed verbs), `interrupt_cmd`, `answer_cmd` and `prompt_target` (`Routed.pane`), `ControlCall` constructors, the 18 `Ports { … }` literals (16 files) (one line each).
+7. **`holler-cli`:** `wiring/hub.rs` (with `wiring/store.rs`'s failure mapping made `pub(super)`), `pane/hub_refusal.rs` (the `HubRefusal` classification), `Unwired`, `say_cmd` (the shared predicate, a bare id refused as a SESSION, `pane-not-driven` for routed verbs), `interrupt_cmd`, `answer_cmd` and `prompt_target` (`Routed.pane`), `ControlCall` constructors, the 20 `Ports { … }` literals (17 files) (one line each).
 8. **Docs:** `docs/pane-control.md`, `CHANGELOG.md`, the module docs.
 
 ## The ADR and the dependent docs
 
-**ADR-0021** (locate each by its words; the Evidence line numbers are those of `main` at `b76f4d2`, which holds #831 and #665, and they move again when #835 merges, which edits sections 2, 3, 9, 13 and 14 of the ADR: **REFRESH AFTER MERGE of #835**, re-run the verifier over E53 to E65, E89, E90, E178 and E183). Numbers for the new "Decisions taken" items are the next free numbers at merge time (item 29 is the last on `main`, E183); do not renumber others.
+**ADR-0021** (locate each by its words; the Evidence line numbers are those of `main` at `4e691d9`, which holds #831, #665 and #835; #835 edited the intro of section 2 and its `HerdrPort` and `HostPort` rows, the `pane import` row of section 9, section 13 (a new "Decided (#835)" block), section 14's `observe_pane` bullet, "Deferred to named stories" (the adoption sentence left item 18's bullet and became a last bullet of its own) and "Decisions taken" (items 30 and 31), so E53 to E65, E89, E90, E178 and E183 are cut at their new lines). Numbers for the new "Decisions taken" items are the next free numbers at merge time (item 31 is the last on `main`, E183, so 32 today; #853's branch also appends 30 and 31 and takes the next free numbers when it rebases, so the numbers depend on which of the two merges first); do not renumber others.
 
 | Where (by words) | Change |
 |---|---|
 | Header, the **Amends:** line (E53) | Append: "[ADR 0014](ADR-0014.md) (point 5 and its Consequences bullet on `roster`/`status`), [ADR 0005](ADR-0005.md) section 3 and [ADR 0003](ADR-0003.md)'s Addressing line are extended by section 11 (#839): the hub also resolves a live attach-mode session's `harness_session_id` as an address (the `holler` CLI sends one only for `--pane`; a person's `SESSION` is still a name), and may ask an attach-mode body to re-point one of its sessions to another harness session on the same endpoint (`session/rebind`); the session's name, and so its identity, does not change." |
-| Section 2, the port table (E54 and the table above it) | Add the row: `\| HubPort \| advertised, rebind(driver, harness_session_id), prompt(harness_session_id, text, mode) (#839) \| holler-cli/src/pane/wiring/hub.rs, a client of the hub's control socket \|`. In the sentence "Both `HarnessPort` and `HostPort` are amended since, under that rule", append: "and `Ports` by #839, which gains `HubPort` (section 11)". In the sentence "All ports are traits in `holler-pane` (`src/ports.rs`, `src/profile.rs`)" (E54) add `src/hub.rs`. |
+| Section 2, the port table (E54 and the table above it) | Add the row: `\| HubPort \| advertised, rebind(driver, harness_session_id), prompt(harness_session_id, text, mode) (#839) \| holler-cli/src/pane/wiring/hub.rs, a client of the hub's control socket \|`. In the sentence "Both `HarnessPort` and `HostPort` are amended since, under that rule" (section 2, below its port table; #835 lengthened it: it now ends at "(section 13, \"Decided (#835)\")", and the next sentence, on `observe_pane`, is #835's), append before that sentence's full stop: ", and `Ports` by #839, which gains `HubPort` (section 11)". In the sentence "All ports are traits in `holler-pane` (`src/ports.rs`, `src/profile.rs`)" (E54) add `src/hub.rs`. |
 | Section 4, invariant I2's test idea (E55) | Append: "After a switch or a reset the driven session is the one the fake hub's body advertises (#839). A launch and a relaunch keep the stored DRIVEN and never infer it; a relaunch onto a new session leaves the body on the old one, which `pane doctor` reports from the stored DRIVEN and `pane switch` re-points (section 11, point 3)." |
 | Section 5, "Wiring as built (#649)", bullet "What the wiring makes live" (E57), the sentences from "And since #642 part 3 the first message of `pane reset --first` is a real prompt through `HarnessPort::send_prompt`" through "Until #828 lands, the operator does not use `reset --first` on a parked or held pane." | Replace with: "Since #839 the first message of `pane reset --first` goes through the hub's prompt path, so a parked, held or unhealthy pane refuses it (section 8, 'Switch and reset as built')." |
 | Same section, bullet "Not done here", the sentence "The hub's DRIVEN session is not pointed at `session_of_record` (section 11, #654)." | Delete it (done: section 11, #839). |
@@ -326,9 +326,9 @@ the operator's standing rules (2026-10-11). Each point names what it rejected.
 - **ADR 0003**, "Not decided here", the Addressing line (E130): append "A bare harness session id (`ses_…`) is not a `SESSION`: `holler say ses_… TEXT`, `interrupt` and `answer` refuse it as `unknown session` (exit 1); only `--pane` resolves to one, and the hub accepts it as an address ([ADR 0021](ADR-0021.md) section 11, #839)." And one `**Clarified by:**` line in the header, after the last one, in the form of the others: "[#839](https://github.com/Performant-Labs/holler/issues/839) (2026-10-11) — a harness session id is an address at the hub, for `--pane` only; the CLI's `SESSION` positional stays a name."
 - **ADR-0021's Amends line** names all of the above (the first row of the table).
 
-**`docs/pane-control.md`** (E71 to E75; `docs_pane_control_test` pins the guide to the code's tables, so it must still pass): section for `reset` (E71): replace the paragraph "**Do not use `--first` on a parked or held pane.** …" with the new rule (the first message goes through the hub's gate; a parked, held or unhealthy pane, one whose SHOWN and DRIVEN differ, and one no body drives are refused before anything moves, `pane-parked`, `session-held`, `pane-unhealthy`, `pane-shown-driven-mismatch`, `pane-not-driven`), and add that a pane needs a body attached to its server for `--first`; in the same section replace "`--first` goes to the relaunched process, through the same direct path as below" (a Claude Code pane's reset, #831) with "`--first` on a Claude Code pane is refused `pane-not-driven` until a body drives it (#850)"; section for `park` (E71): delete "; the first message of `reset --first` is not (see `reset`)"; DRIVEN column (E72) and "SHOWN against DRIVEN" (E73): DRIVEN is the session the body that drives the pane advertises, recorded by `switch`, `reset` and `doctor`, `-` when no body drives the pane; SYNC and `doctor` compare as ADR section 11 says; cutover steps (E74): delete "and `reset --first` is not used on a parked or held pane (section 3)", and add that each pane needs an attach body before the cutover step that uses `reset --first`; "Later" (E75): delete the bullet "DRIVEN following each pane's session of record, and `reset --first` through the hub's gate (#839)", and in the bullet "a body that lets `holler say --pane NAME TEXT` reach a Claude Code pane (#850, after #839)" drop ", after #839" ("Later" is at E75, which #835's merge moves: **REFRESH AFTER MERGE of #835**). Section 9's error table gains `pane-not-driven`, `session-held` and `session-driven-elsewhere`. Also: a short paragraph that a body restart reverts a re-pointed body to its configured session, that `pane doctor` is run before any relaunch and after restarting bodies, and reports it as `shown-driven-mismatch` with the remedy `holler pane switch PANE SESSION` (on servers that share a data directory a reverted body is reported without a remedy, and the two-step switch pairs it); the message of the ambiguous-body refusal and its two steps (switch to the session the pane's own body drives, then to the session of record); and that a `ses_…` id is typed only as `--pane` resolution, never as a `SESSION` (`holler say ses_… TEXT` is `unknown session`).
+**`docs/pane-control.md`** (E71 to E75; `docs_pane_control_test` pins the guide to the code's tables, so it must still pass): section for `reset` (E71): replace the paragraph "**Do not use `--first` on a parked or held pane.** …" with the new rule (the first message goes through the hub's gate; a parked, held or unhealthy pane, one whose SHOWN and DRIVEN differ, and one no body drives are refused before anything moves, `pane-parked`, `session-held`, `pane-unhealthy`, `pane-shown-driven-mismatch`, `pane-not-driven`), and add that a pane needs a body attached to its server for `--first`; in the same section replace "`--first` goes to the relaunched process, through the same direct path as below" (a Claude Code pane's reset, #831) with "`--first` on a Claude Code pane is refused `pane-not-driven` until a body drives it (#850)"; section for `park` (E71): delete "; the first message of `reset --first` is not (see `reset`)"; DRIVEN column (E72) and "SHOWN against DRIVEN" (E73): DRIVEN is the session the body that drives the pane advertises, recorded by `switch`, `reset` and `doctor`, `-` when no body drives the pane; SYNC and `doctor` compare as ADR section 11 says; cutover steps (E74): delete "and `reset --first` is not used on a parked or held pane (section 3)", and add that each pane needs an attach body before the cutover step that uses `reset --first`; "Later" (E75): delete the bullet "DRIVEN following each pane's session of record, and `reset --first` through the hub's gate (#839)", and in the bullet "a body that lets `holler say --pane NAME TEXT` reach a Claude Code pane (#850, after #839)" drop ", after #839" ("Later" is at E75; #835 reworded the bullet between the two this story edits, on adopting the Claude Code panes the import leaves alone, and that bullet stays). Section 9's error table gains `pane-not-driven`, `session-held` and `session-driven-elsewhere`. Also: a short paragraph that a body restart reverts a re-pointed body to its configured session, that `pane doctor` is run before any relaunch and after restarting bodies, and reports it as `shown-driven-mismatch` with the remedy `holler pane switch PANE SESSION` (on servers that share a data directory a reverted body is reported without a remedy, and the two-step switch pairs it); the message of the ambiguous-body refusal and its two steps (switch to the session the pane's own body drives, then to the session of record); and that a `ses_…` id is typed only as `--pane` resolution, never as a `SESSION` (`holler say ses_… TEXT` is `unknown session`).
 
-**Module docs that repeat the old sentences** (edit by words): `crates/holler-pane/src/tx_switch.rs` lines 29-36 and 61 (E30), `crates/holler-pane/src/reconcile.rs` lines 52-54 (E34), `crates/holler-cli/src/pane/reset.rs` lines 1-15, `crates/holler-pane/src/ports.rs` line 433 ("`pane reset --first` calls it", E28) and the amendments list at its top (lines 15-40, E92), `crates/holler-adapter-opencode/src/prompt.rs` line 7 ("`pane reset --first` sends through `send_prompt` outside that path"), `crates/holler-hub/src/panes/gate.rs` (the moved docs of `pane_state_refusal` and of the tests that name the CLI twin; `circuit/dispatch.rs` loses them), `crates/holler-cli/src/say_cmd.rs` (the doc of `resolve_pane_target` that names the twin), `crates/holler-cli/src/roster_cmd.rs` (the doc of `shown_driven_mismatch` that says "keep the three equal", E154), `crates/holler-proto/src/methods.rs` (the "22-row" doc and the count test, E42, E43), and `crates/holler-body/src/registry.rs` (the doc of `SessionRegistry::presence_doc`: the as-started baseline, not the live id). `crates/holler-hub/src/live.rs`'s allowlist comment (E6) is **not** edited (P1).
+**Module docs that repeat the old sentences** (edit by words): `crates/holler-pane/src/tx_switch.rs` lines 29-36 and 61 (E30), `crates/holler-pane/src/reconcile.rs` lines 52-54 (E34), `crates/holler-cli/src/pane/reset.rs` lines 1-15, `crates/holler-pane/src/ports.rs` line 491 ("`pane reset --first` calls it", E28) and the amendments list at its top (lines 15-41, E92), `crates/holler-adapter-opencode/src/prompt.rs` line 7 ("`pane reset --first` sends through `send_prompt` outside that path"), `crates/holler-hub/src/panes/gate.rs` (the moved docs of `pane_state_refusal` and of the tests that name the CLI twin; `circuit/dispatch.rs` loses them), `crates/holler-cli/src/say_cmd.rs` (the doc of `resolve_pane_target` that names the twin), `crates/holler-cli/src/roster_cmd.rs` (the doc of `shown_driven_mismatch` that says "keep the three equal", E154), `crates/holler-proto/src/methods.rs` (the "22-row" doc and the count test, E42, E43), and `crates/holler-body/src/registry.rs` (the doc of `SessionRegistry::presence_doc`: the as-started baseline, not the live id). `crates/holler-hub/src/live.rs`'s allowlist comment (E6) is **not** edited (P1).
 
 **`CHANGELOG.md`**, under `## [Unreleased]`, `### Enhancements`, one new item (E76 shows the shape), linking `/issues/839` and `/issues/828`:
 
@@ -338,7 +338,7 @@ and, in the existing #649 item (E179: "so until [#828] lands, do not use `reset 
 
 ## Where the code goes
 
-Sizes measured with `wc -l` on 2026-10-12 on `main` at `b76f4d2`; `scripts/lint.sh` fails at 900. The issue's numbers for `switch.rs` (~833) and `support/mod.rs` (~849) have grown to 893 and 857. **Test modules:** each `#[cfg(test)] mod …;` line this story adds (or moves) is the last line of its file, as in the hub's precedent (`holds.rs:575-576`, `lockout.rs:589-590`, E172, E173): `hold_single_path_test.rs`'s `code_of` cuts a file at its first `#[cfg(test)]` (E171), so a `mod` line near the top would hide the code below it from the scans. A test file that is out of line is read unstripped by `rust_files`; the moved hub tests contain no `"session/prompt"` + `Envelope::request` line and no `LiveCommand`, so the two scans do not count them.
+Sizes measured with `wc -l` on 2026-10-12 on `main` at `b76f4d2` and re-counted at `4e691d9` after #835 (only `ports.rs` differs); `scripts/lint.sh` fails at 900. The issue's numbers for `switch.rs` (~833) and `support/mod.rs` (~849) have grown to 893 and 857. **Test modules:** each `#[cfg(test)] mod …;` line this story adds (or moves) is the last line of its file, as in the hub's precedent (`holds.rs:575-576`, `lockout.rs:589-590`, E172, E173): `hold_single_path_test.rs`'s `code_of` cuts a file at its first `#[cfg(test)]` (E171), so a `mod` line near the top would hide the code below it from the scans. A test file that is out of line is read unstripped by `rust_files`; the moved hub tests contain no `"session/prompt"` + `Envelope::request` line and no `LiveCommand`, so the two scans do not count them.
 
 | File | Now | What | Rule |
 |---|---|---|---|
@@ -361,7 +361,7 @@ Sizes measured with `wc -l` on 2026-10-12 on `main` at `b76f4d2`; `scripts/lint.
 | `crates/holler-body/src/session_manager.rs` | 389 | the `Rebind` command and `SessionManager::rebind`, `start` builds the presence with the configured id (E143), `presence_doc` reads the mirror, `live_configs` | ~+47 |
 | `crates/holler-body/tests/http_attach_driver_test/fake_server.rs` | 347 | a stall mode for the existence check (E133, E134) | ~+25; the CLI's `attach_mode_test` includes this file by `#[path]` (E87), so it must keep compiling there |
 | `crates/holler-proto/tests/codec_test.rs` | 889 | one `canonical_frame` arm for `session/rebind` (E132) | **+1** (890) |
-| `crates/holler-pane/src/ports.rs` | 563 | `Ports.hub`; the amendments list at its top | +1 field, +6 doc |
+| `crates/holler-pane/src/ports.rs` | 621 (563 before #835) | `Ports.hub`; the amendments list at its top | +1 field, +6 doc |
 | `crates/holler-pane/src/tx_switch.rs` | 487 | the new order in `plan` and `switch_in_place` (E31, E175); `prompt` calls `hub.prompt` (E158); `activity_refusal` shared with `check_idle`; `SESSION_DRIVEN_ELSEWHERE`; a single-process pane takes the driver as `None` without asking the hub | ~+80 (about 570), ok; if it passes 650, the plan helpers go to `tx_switch/plan.rs` |
 | `crates/holler-pane/src/reconcile.rs`, `reconcile/observe.rs` | 533, 449 | the observation of `hub.advertised` once per pass and the finding | ok; if `reconcile.rs` would pass 700, the observation goes to a new `reconcile/driven.rs` |
 | new `crates/holler-pane/src/{gate,driven,hub}.rs`; `lib.rs` | 0; 81 | D1 (`gate.rs`: `prompt_refusal`, `shown_driven_pair_differs`, `first_refusal` and the three pane codes), D3 (`driven.rs`: `driver_of`, `elsewhere`; `hub.rs`: the port, `pane-not-driven` and `session-held`) | each under 250; `lib.rs` +3 |
@@ -378,7 +378,7 @@ Sizes measured with `wc -l` on 2026-10-12 on `main` at `b76f4d2`; `scripts/lint.
 | `crates/holler-cli/tests/pane_verbs/switch.rs` | 893 | **no growth** (it already holds `SeamHarness`) | new tests in new files |
 | `crates/holler-cli/tests/support/mod.rs` | 857 | at most a `mod driven;` line | helpers in new `crates/holler-cli/tests/support/driven.rs` |
 | `crates/holler-cli/tests/pane_verbs/reset.rs` | 532 | E83 and E84 are rewritten in place; the rest of the new tests are in new `crates/holler-cli/tests/pane_verbs/driven.rs` (add `mod driven;` to `main.rs`, 81 lines; it also holds D8's fixture test) | |
-| the 18 `Ports { … }` literals (16 files) | | one line each (`hub: &hub,`), E180: `verb_harness/mod.rs`, `pane_integration/bind.rs`, `pane_claude/rig.rs`, `roster_panes_test.rs`, `pane_verbs/{park/rig,list,doctor/rig,park,close/rig,launch/rig,import/rig}.rs`, `profile_verbs/{rig (two),rename,apply/rig}.rs`, `holler-pane/tests/ports_test.rs` (two), `pane/wiring.rs` | `launch/rig.rs` is 852: +1 is fine; **REFRESH AFTER MERGE of #835**: it touches `launch/rig.rs`, `import/rig.rs` and `profile_verbs/apply/rig.rs`; recount with E180 |
+| the 20 `Ports { … }` literals (17 files) | | one line each (`hub: &hub,`), E180: `verb_harness/mod.rs`, `pane_integration/{bind,observe}.rs`, `pane_claude/rig.rs`, `roster_panes_test.rs`, `pane_verbs/{park/rig,list,doctor/rig,park,close/rig,launch/rig,import/rig (two)}.rs`, `profile_verbs/{rig (two),rename,apply/rig}.rs`, `holler-pane/tests/ports_test.rs` (two), `pane/wiring.rs` | `launch/rig.rs` is 852: +1 is fine (`import/rig.rs` is 535, `profile_verbs/apply/rig.rs` 775); #835 added the `observe.rs` literal and the second `import/rig.rs` one |
 
 ## Reuse (the survey for T and F)
 
@@ -419,33 +419,36 @@ Fixtures use `ses_`-shaped ids (D8). "On the fakes" means the test kit's fakes w
 - `crates/holler-hub/src/{circuit.rs (the `Say` arm only),circuit/dispatch.rs,live.rs,live/target.rs (new),live/tests.rs (new: the inline tests of `live.rs`, moved),panes/gate.rs (new),panes/gate_tests.rs (new),panes/mod.rs,talk.rs,interrupt.rs,control_server.rs,control_rebind.rs (new),control_say.rs (new),control.rs,lib.rs}`, `crates/holler-hub/tests/{driven_resolve_test.rs,offline_reason_test.rs}` (new).
 - `crates/holler-pane/src/{lib.rs,ports.rs,gate.rs,driven.rs,hub.rs (the last three new),tx_switch.rs,reconcile.rs,reconcile/observe.rs,findings.rs}`, `crates/holler-pane/tests/{driven_test.rs (new),gate_test.rs (new),ports_test.rs}`. Not edited: `ports/router.rs` (its `send_prompt` forward is the second call the scan allows).
 - `crates/holler-pane-testkit/src/{lib.rs,fixture.rs,hub.rs (new),conformance/hub.rs (new),conformance/mod.rs}`, and its tests.
-- `crates/holler-cli/src/{say_cmd.rs,interrupt_cmd.rs,answer_cmd.rs,prompt_target.rs,pane/wiring.rs,pane/wiring/hub.rs (new),pane/wiring/store.rs (visibility of four items only),pane/hub_refusal.rs (new),pane/reset.rs (doc)}`, `crates/holler-cli/src/roster_cmd.rs` (#648 has merged: its `shown_driven_mismatch` body becomes a call to `holler_pane::gate::shown_driven_pair_differs`, and its doc stops naming the three copies, E154), `crates/holler-cli/Cargo.toml` (the new `[[test]]` `driven_e2e_test`), `crates/holler-cli/tests/hold_single_path_test.rs` (the forward-shape scan), the 18 `Ports` literals listed above (16 files, among them `pane_claude/rig.rs`, `roster_panes_test.rs` and `profile_verbs/rename.rs`), `crates/holler-cli/tests/{driven_e2e_test.rs (new),pane_verbs/driven.rs (new),pane_verbs/reset.rs,pane_verbs/main.rs,support/driven.rs (new),support/mod.rs (one line),pane_integration/scenario.rs,pane_claude/lifecycle.rs (E91: the changed test)}`. `pane/wiring/bind.rs` is **not edited** (its `send_prompt` forward is one of the two calls the scan allows).
+- `crates/holler-cli/src/{say_cmd.rs,interrupt_cmd.rs,answer_cmd.rs,prompt_target.rs,pane/wiring.rs,pane/wiring/hub.rs (new),pane/wiring/store.rs (visibility of four items only),pane/hub_refusal.rs (new),pane/reset.rs (doc)}`, `crates/holler-cli/src/roster_cmd.rs` (#648 has merged: its `shown_driven_mismatch` body becomes a call to `holler_pane::gate::shown_driven_pair_differs`, and its doc stops naming the three copies, E154), `crates/holler-cli/Cargo.toml` (the new `[[test]]` `driven_e2e_test`), `crates/holler-cli/tests/hold_single_path_test.rs` (the forward-shape scan), the 20 `Ports` literals listed above (17 files, among them `pane_claude/rig.rs`, `roster_panes_test.rs` and `profile_verbs/rename.rs`), `crates/holler-cli/tests/{driven_e2e_test.rs (new),pane_verbs/driven.rs (new),pane_verbs/reset.rs,pane_verbs/main.rs,support/driven.rs (new),support/mod.rs (one line),pane_integration/scenario.rs,pane_claude/lifecycle.rs (E91: the changed test)}`. `pane/wiring/bind.rs` is **not edited** (its `send_prompt` forward is one of the two calls the scan allows).
 - `crates/holler-adapter-opencode/src/prompt.rs` (the module doc line only).
 - Not touched: `crates/holler-cli/tests/fixtures/cli-surface.txt` (no CLI flag; no `--json` shape change: `last_observed.driven` is an existing field that now holds a value, and no `FixState` or `FindingKind` is added), `crates/holler-pane-testkit/Cargo.toml` (D8's test lives in `holler-cli`), `crates/holler-hub/src/circuit.rs` beyond the `Say` arm, and the allowlist of `LiveHandle::query`.
 
 ## Clashes with stories in flight
 
-State on 2026-10-12 at about 04:00 MDT, re-read for this cut (read only; branches and shas as found; `git log origin/main`, `gh pr list`, `git merge-tree`). **Merged since the last pass:** #667 (`0f5835e`, PR #855, 2026-10-11 21:11 MDT), #648 (`037405f`, PR #856, 21:25 MDT), #665 (`8462c9e`, PR #858, 2026-10-12 00:02 MDT) and #831 (`b76f4d2`, PR #857, 00:50 MDT); this branch holds all four. The shared hot spots are `ports.rs`/`Ports` literals, `wiring/bind.rs`, `findings.rs`/`reconcile*`, the ADR's "Deferred" bullets and "Decisions taken", sections 2, 8, 9, 11 and 15 of the ADR, `docs/pane-control.md` and `CHANGELOG.md`.
+State on 2026-10-12 at about 04:00 MDT, re-read for the cut, and again at about 06:40 MDT for the #835 refresh (read only; branches and shas as found; `git log origin/main` and each sibling worktree's own `git log`). **Merged since the last pass:** #835 (`4e691d9`, PR #860, 2026-10-12 06:29 MDT) and, before it, #667 (`0f5835e`, PR #855, 2026-10-11 21:11 MDT), #648 (`037405f`, PR #856, 21:25 MDT), #665 (`8462c9e`, PR #858, 2026-10-12 00:02 MDT) and #831 (`b76f4d2`, PR #857, 00:50 MDT); this branch holds all five. The shared hot spots are `ports.rs`/`Ports` literals, `wiring/bind.rs`, `findings.rs`/`reconcile*`, the ADR's "Deferred" bullets and "Decisions taken", sections 2, 8, 9, 11 and 15 of the ADR, `docs/pane-control.md` and `CHANGELOG.md`.
 
 | Story | Shared files and hunks | Does the DRIVEN decision change what it assumes? |
 |---|---|---|
 | **#667** `profile apply` scenario (**merged**, `0f5835e`) | `crates/holler-cli/tests/pane_integration/{scenario.rs,guards.rs,main.rs,out.rs,scratch/mod.rs,scratch/verbs.rs}`, `crates/holler-cli/tests/profile_apply_scenario/**`. It added no `Ports { }` literal and uses none of `--first`, `send_prompt` or DRIVEN there. | **Yes, one place, now a fact.** D9's step edits `reset_with_a_first_message`, which is at line 144 of `scenario.rs` on `main` and reads `scratch.session_of_record(C2)` and `scratch.record(C2)` (E86, E155). |
 | **#648** roster SHOWN and DRIVEN (**merged**, `037405f`) | `crates/holler-cli/src/roster_cmd.rs` (578 lines), `cli.rs`, `main.rs`, its tests, ADR-0003, ADR-0021, `docs/pane-control.md`, `CHANGELOG.md`. It does not touch `crates/holler-hub/src/roster.rs` (892 lines). | **Yes, one place, now unconditional.** `roster_cmd::shown_driven_mismatch` is the third copy of the pair rule that D1's public `holler_pane::gate::shown_driven_pair_differs` exists to prevent (E154: its doc says "keep the three equal"); #839 replaces its body by a call and corrects the doc (Blast radius; Acceptance 14 scans for it). Its join of a roster row to a pane is by the **label** of the row's name (`pane_label`, E154): that is #648's display rule, not the gate's join (D1). With #803's one local body for the fleet (below) a row is named `<token label>/<pane name>`, so `pane_label` pairs no row with a pane; that display is #648's and #803's to settle and this story does not change it (D12). |
 | **#665** `profile rename/export/import`, `profile-drift` (**merged**, `8462c9e`) | `crates/holler-pane/src/findings.rs` (`FindingKind::ProfileDrift` appended, with its `code` and `remedy` arm), `reconcile.rs` (`mod drift;` and one call), `reconcile/drift.rs` (new), `tests/findings_test.rs`, ADR-0003, ADR-0021, `docs/pane-control.md`, `CHANGELOG.md`; also the hub's `profile/*` and `panes/store.rs`. It added a `Ports { }` literal (`profile_verbs/rename.rs`, counted in the 18). | **No change.** Hunks are adjacent, not overlapping: #839 adds `switch_command`, two `Finding` methods and the doc of `remedy` in `findings.rs` (379 lines now), and an observation of `hub.advertised` in `reconcile*`; #665 added an enum arm and a call. `CODES` in `findings_test.rs` was recomputed by #665; #839 adds no kind. |
-| **#831** Claude Code harness (**merged**, `b76f4d2`) | `ports.rs` (563 lines; `HarnessPort` keyed by `at: &HarnessEndpoint`, `Activity::WaitingPermission`, four default-armed process methods), **`ports/router.rs` (new: `HarnessRouter`, whose `send_prompt` forward is `router.rs:118`, E159)**, `tx_switch.rs` (487 lines; the plan and the act split into `switch_in_place` and `relaunched`, E31, E175), `tx_launch.rs` split into submodules (`tx_launch/server.rs` now holds E129), `reconcile*` (a single-process chain, E176), `pane.rs` (`Shape`, E177), `say_cmd.rs`, `interrupt_cmd.rs`, `answer_cmd.rs` (the `--pane` routes of a Claude Code pane), `wiring.rs`, `wiring/bind.rs`, ADR-0021 (section 8's single-process paragraph E178, section 9's rows, section 15, "Deferred", "Decisions taken" 22 to 28), `docs/pane-control.md`, `CHANGELOG.md`, a `Ports` literal in `pane_claude/rig.rs` (E180). | **Yes, in four places, now facts.** (1) `ports/router.rs` is a second `.send_prompt(` forward, so D5's scan allows it beside `wiring/bind.rs` (Acceptance 13). (2) A single-process pane's switch and reset are a relaunch: D3 item 8 says the plan asks the hub nothing and `--first` is refused `pane-not-driven`; `pane_claude/lifecycle.rs::reset_first_reaches_the_new_process` (E91) becomes "refused, nothing moved" (Acceptance 22) and two passages of ADR text change (the ADR table). (3) `Activity` has a fourth variant, so `activity_refusal` is a total match over four (E118, E119). (4) Its `interrupt --pane` and `answer --pane` for a Claude Code pane never reach the hub (`interrupt_pane`, `answer_pane_target`), so the `NotDriven` arm is reached only for a server pane; `Routed.pane` is set in `interrupt_cmd::route` (E169). Its ADR item 18 already says `say --pane` needs #839 and a body (#850). |
-| **#835** import leaves panes it does not drive alone (worktree `0835-import-leave-alone`, branch `issue-835-implementation` at `dc64e11`: S REWORK of cycle 3 at 2026-10-12 03:49 MDT, "main moved, #857 conflicts"; **not merged**) | Already on `main` through #831: `HostPort::foreground_commands` (required) and `is_claude_code_command`. Still to land: `HerdrPort::observe_pane` made required (it still has a default on `main`, E185), the import (`import.rs`, `import/*`), forwards in `wiring/bind.rs` and `wiring.rs`, ADR-0021 (sections 2, 3, 9, 13, 14), `docs/pane-control.md`, `CHANGELOG.md`, `docs_pane_control_test.rs`, `ports_test.rs`, the `Ports` literals of `launch/rig.rs`, `import/rig.rs` and `profile_verbs/apply/rig.rs`. A trial merge of the branch with `main` conflicts in `wiring/bind.rs`, `ports.rs`, `import/observe.rs`, `unmanaged.rs`, `wired.rs`, `claude_code_rule_test.rs`, `ports_test.rs`, `docs_pane_control_test.rs`, ADR-0021 and `pane-control.md`; resolving them is #835's. | **No change to what it assumes.** It adds no DRIVEN logic; `HubPort` follows its rule (required methods, no defaults). **REFRESH AFTER MERGE of #835:** re-run the verifier over every Evidence entry that cites `ports.rs`, `wiring.rs`, `wiring/bind.rs`, ADR-0021, `docs/pane-control.md` or `CHANGELOG.md` (E25 to E29, E53 to E65, E71 to E76, E89, E90, E92, E127, E178, E179, E183, E185); re-check the sizes of `ports.rs` (563), `bind.rs` (489) and `wiring.rs` (468) in "Where the code goes"; recount the `Ports` literals with E180 (18 in 16 files); re-read D3's "no defaults" sentence and E92 / E185 (the `observe_pane` default is gone); renumber the ADR items (E183); and check that `bind.rs` still has exactly one `.send_prompt(`. |
+| **#831** Claude Code harness (**merged**, `b76f4d2`) | `ports.rs` (563 lines at `b76f4d2`, 621 after #835; `HarnessPort` keyed by `at: &HarnessEndpoint`, `Activity::WaitingPermission`, four default-armed process methods), **`ports/router.rs` (new: `HarnessRouter`, whose `send_prompt` forward is `router.rs:118`, E159)**, `tx_switch.rs` (487 lines; the plan and the act split into `switch_in_place` and `relaunched`, E31, E175), `tx_launch.rs` split into submodules (`tx_launch/server.rs` now holds E129), `reconcile*` (a single-process chain, E176), `pane.rs` (`Shape`, E177), `say_cmd.rs`, `interrupt_cmd.rs`, `answer_cmd.rs` (the `--pane` routes of a Claude Code pane), `wiring.rs`, `wiring/bind.rs`, ADR-0021 (section 8's single-process paragraph E178, section 9's rows, section 15, "Deferred", "Decisions taken" 22 to 28), `docs/pane-control.md`, `CHANGELOG.md`, a `Ports` literal in `pane_claude/rig.rs` (E180). | **Yes, in four places, now facts.** (1) `ports/router.rs` is a second `.send_prompt(` forward, so D5's scan allows it beside `wiring/bind.rs` (Acceptance 13). (2) A single-process pane's switch and reset are a relaunch: D3 item 8 says the plan asks the hub nothing and `--first` is refused `pane-not-driven`; `pane_claude/lifecycle.rs::reset_first_reaches_the_new_process` (E91) becomes "refused, nothing moved" (Acceptance 22) and two passages of ADR text change (the ADR table). (3) `Activity` has a fourth variant, so `activity_refusal` is a total match over four (E118, E119). (4) Its `interrupt --pane` and `answer --pane` for a Claude Code pane never reach the hub (`interrupt_pane`, `answer_pane_target`), so the `NotDriven` arm is reached only for a server pane; `Routed.pane` is set in `interrupt_cmd::route` (E169). Its ADR item 18 already says `say --pane` needs #839 and a body (#850). |
+| **#835** import leaves panes it does not drive alone (**merged**, `4e691d9`, PR #860, 2026-10-12 06:29 MDT) | `ports.rs` (621 lines: `HerdrPort::observe_pane` made required, with a `compile_fail` doctest, and `observe_panes` documented as forwarded by a wrapper, E185; the amendments list, E92), `HostPort::foreground_commands` (required since #831's merge, now with its own `compile_fail` doctest), the import (`crates/holler-pane/src/import.rs`, `import/{assess,findings,observe}.rs`, `crates/holler-cli/src/pane/import.rs`: the info finding `harness-claude-code`, the problem `harness-unreadable`, and `--adopt-claude-code`, which is `usage` before any file or port is read), `pane.rs` (a doc on `is_claude_code_command`), `wiring/bind.rs` (a doc comment only: the forwards of `observe_pane` and `observe_panes` were already there; `wiring.rs` is untouched), ADR-0021 (section 2's intro and its `HerdrPort` and `HostPort` rows, section 9's `pane import` row, a "Decided (#835)" block in section 13, section 14's `observe_pane` bullet, "Deferred to named stories", "Decisions taken" items 30 and 31), ADR-0003, `docs/pane-control.md`, `CHANGELOG.md`, `docs_pane_control_test.rs`, `cli-surface.txt`, and two new `Ports` literals (`pane_integration/observe.rs` and a second one in `pane_verbs/import/rig.rs`). It left `launch/rig.rs` and `profile_verbs/apply/rig.rs` alone. | **No change to what it assumes.** It adds no DRIVEN logic and no doctor kind (`harness-claude-code` is a finding of the import's report, not of `findings.rs`); `HubPort` follows its rule (required methods, no defaults), and the compiler now holds a wrapper to it for `observe_pane` too. A pane the import leaves alone has no record, so there is no DRIVEN, gate or driver for this story to look up. **Re-verified on `4e691d9`:** every Evidence command was re-run ("Line numbers re-checked" lists the 28 entries that moved or changed); `wiring/bind.rs` still has exactly one `.send_prompt(` (`bind.rs:352`, inside its `fn send_prompt`, E127) and `ports/router.rs` one (`router.rs:118`, E159), and the only other call in `holler-pane/src` and `holler-cli/src` is the engine's own (`tx_switch.rs:295`, E158), which this story removes; the `Ports` literals are 20 in 17 files (E180). |
 | **#647 part 2** `agent-cannot-dispatch`, `unattached` (worktree `0647-agent-cannot-dispatch`, branch `issue-647-implementation`, brief `docs/handoffs/647-part2-brief.md` at `f8d2624`; no code) | `findings.rs` (two kinds, `remedy_for`, `Finding::with_agent`: it may rename or extend `remedy`, beside which #839's doc amendment and `with_switch_remedy` sit, E156), `reconcile.rs`, `reconcile/observe.rs`, `ports.rs` (new harness methods, no `Ports` field), `wiring.rs`, `wiring/bind.rs` (forwarding arms for its new methods; `send_prompt`'s forward is untouched), `pane_integration/{bind,wired,scenario}.rs`, ADR-0021, `docs/pane-control.md` section 5, `CHANGELOG.md`. | **No change to what it assumes** (its brief says it does not depend on DRIVEN). Mechanical; whichever merges second rebases `findings.rs` (the call to `with_fix` then `with_switch_remedy` must survive a rename of `remedy`) and recomputes its own call bound (its chain bound, and #839's thirteen port calls for switch and reset, are different bounds). Its brief lands it after #839. |
-| **#803** the setup wizard builds panes through `holler pane` and `holler profile apply` (parked; worktree `0803-wizard-panes`, its brief `docs/handoffs/803-brief.md` at `9af2ad7`, 2026-10-11 21:11 MDT) | Files #839 does not edit (the wizard's skill directory, `agent-skills/herdr-setup`, `docs/setup-wizard.md`, the wizard's tests; those tests scan every tracked file for the skill's old directory name, so this brief never spells it, E174). No source-file clash found. Its brief has REFRESH rows for #839 (its D13 and D14). | **One semantic dependency, resolved by its brief.** Its D13 builds **one local body for the whole fleet, with one attach row per OpenCode pane** (`name` = the pane's name, `session_id` = the pane's session of record read from the registry; E181), which is the shape question 2 assumes. Consequences for this story, stated where they bite: a body restart reverts every pane that body drives at once (D2's restart text); the per-connection query slot is fleet-wide (D2 "Hub"); a Claude Code pane gets no row (D6). Its brief also notes that its own text carries a REFRESH row for DRIVEN printing `-`, which it refreshes after #839 merges. |
-| **#850** a body driver for a Claude Code pane (follow-up issue, no branch) | The body's `session/rebind` handler for a relaunch driver; the roster row of a Claude Code pane. | Not needed here: D6 says a Claude pane is `Driver::None` until it lands, and nothing in this story builds, fakes or assumes a Claude body. |
+| **#803** the setup wizard builds panes through `holler pane` and `holler profile apply` (parked on #853; worktree `0803-wizard-panes`, its brief `docs/handoffs/803-brief.md` at `ccd25df`, 2026-10-12 04:26 MDT, which names #853 and #835 as pending; the shape E181 quotes, at `9af2ad7`, is unchanged in D13 at `ccd25df`) | Files #839 does not edit (the wizard's skill directory, `agent-skills/herdr-setup`, `docs/setup-wizard.md`, the wizard's tests; those tests scan every tracked file for the skill's old directory name, so this brief never spells it, E174). No source-file clash found. Its brief has REFRESH rows for #839 (its D13 and D14). | **One semantic dependency, resolved by its brief.** Its D13 builds **one local body for the whole fleet, with one attach row per OpenCode pane** (`name` = the pane's name, `session_id` = the pane's session of record read from the registry; E181), which is the shape question 2 assumes. Consequences for this story, stated where they bite: a body restart reverts every pane that body drives at once (D2's restart text); the per-connection query slot is fleet-wide (D2 "Hub"); a Claude Code pane gets no row (D6). Its brief also notes that its own text carries a REFRESH row for DRIVEN printing `-`, which it refreshes after #839 merges. |
+| **#850** a body driver for a Claude Code pane (worktree `0850-claude-body`, its brief `docs/handoffs/850-brief.md` at `6adf3f9`, 2026-10-12 05:09 MDT; not merged, and it builds on this story) | The body's `session/rebind` handler for a relaunch driver; the roster row of a Claude Code pane. Its D5 (accepted by the operator): the engine's drive step is extended to a single process once a Claude body exists, which #850 does after #839. | Nothing here changes: D6 says a Claude pane is `Driver::None` until #850 lands, D3 item 8, Acceptance 22 and the ADR text say that the refusal holds only until #850, and nothing in this story builds, fakes or assumes a Claude body. |
+| **#853** `profile apply` creation order and its exit 3 on a refused step (worktree `0853-apply-grid-order`, branch `issue-853-implementation` at `c1f7deb`, 2026-10-12 06:28 MDT, its cycle 4 round 1; **not merged**) | `crates/holler-pane/src/tx_apply.rs`, `crates/holler-cli/src/profile/apply.rs`, the adapter's `plan_splits_test.rs`, the testkit's `herdr.rs`, the `profile_verbs/apply/*` and `profile_apply_scenario/*` tests (`apply/rig.rs` holds a `Ports` literal: only comments and a constant change there), ADR-0021 (its own contract amendment; it appends "Decisions taken" items 30 and 31, which #835 now holds), ADR-0003, `docs/pane-control.md`, `CHANGELOG.md`. | **No change to what it assumes**: no DRIVEN, no `Ports` field, no `tx_switch.rs`, `reconcile*` or `ports.rs` edit. Mechanical: the numbers of its two "Decisions taken" items are retaken (the next free numbers) by whichever of the two merges second, and the `CHANGELOG.md` and `pane-control.md` hunks are distinct. It gates #803 (parked on it). |
 
-**Shared ADR-0021 and CHANGELOG hunks, so the conflicts are expected and mechanical.** (1) The "Deferred to named stories" DRIVEN bullet: #831 rewrote it (E90) and #839 rewrites it again: take #839's text. (2) The end of "Decisions taken": #831 appended 22 to 28, #665 added 29, #835 appends a few lines, and #839 appends its own: keep all, renumber #839's to the next free numbers (30 on `main` today, E183). (3) Section 9's table: #835 edits the `pane import` row, which is the line above the `say`, `interrupt`, `answer` row that #839 edits; #831 edited both rows #839 edits (E61), and the ADR table gives the words to keep. (4) Section 2 and the wiring bullets of section 5: #835 and #839 each add to the port tables and lists. (5) Sections 8, 11 and 15: only #839 edits section 11; in section 8 it edits one sentence of #831's single-process paragraph (E178), and in section 15 three clauses of item 18 (E89). (6) `CHANGELOG.md`: every story adds a bullet at the top of `### Enhancements`; whichever merges later rebases its bullet above the others, and #839 also edits one clause of the #649 item (E179). (7) `docs/pane-control.md`: #839 edits `reset` (with the Claude Code sentence at line 274) and `park` (section 3), the DRIVEN column and "SHOWN against DRIVEN" (section 4), cutover steps 4 to 6 (section 10) and the "Later" list (section 12); #835 edits the same file in other hunks, adjacent to #839's deleted "Later" bullet. (8) `findings.rs`, `reconcile.rs` and `reconcile/observe.rs`: #839, #647 part 2 and (merged) #831 and #665 add to them (kinds are appended last; #839 adds no kind, only a command builder, two `Finding` methods and a doc, and the observation of `hub.advertised`); the hunks are distinct.
+**Shared ADR-0021 and CHANGELOG hunks, so the conflicts are expected and mechanical.** (1) The "Deferred to named stories" DRIVEN bullet: #831 rewrote it (E90) and #839 rewrites it again: take #839's text. (2) The end of "Decisions taken": #831 appended 22 to 28, #665 added 29, #835 added 30 and 31, and #839 appends its own: keep all, number #839's from the next free number (32 on `main` today, E183); #853's branch also appends 30 and 31, so whichever of #839 and #853 merges second renumbers. (3) Section 9's table: #835 edited the `pane import` row (merged), which is the line above the `say`, `interrupt`, `answer` row that #839 edits; #831 edited both rows #839 edits (E61), and the ADR table gives the words to keep. (4) Section 2 and the wiring bullets of section 5: #835 edited section 2's intro sentence and the `HerdrPort` and `HostPort` rows (merged); #839 appends to the same intro sentence (see the ADR table) and adds its own port row. (5) Sections 8, 11 and 15: only #839 edits section 11; in section 8 it edits one sentence of #831's single-process paragraph (E178), and in section 15 three clauses of item 18 (E89). (6) `CHANGELOG.md`: every story adds a bullet at the top of `### Enhancements`; whichever merges later rebases its bullet above the others, and #839 also edits one clause of the #649 item (E179). (7) `docs/pane-control.md`: #839 edits `reset` (with the Claude Code sentence at line 276) and `park` (section 3), the DRIVEN column and "SHOWN against DRIVEN" (section 4), cutover steps 4 to 6 (section 10) and the "Later" list (section 12); #835 edited the same file in other hunks (merged): in section 12 its reworded adoption bullet sits between the two "Later" bullets #839 edits. (8) `findings.rs`, `reconcile.rs` and `reconcile/observe.rs`: #839, #647 part 2 and (merged) #831 and #665 add to them (kinds are appended last; #839 adds no kind, only a command builder, two `Finding` methods and a doc, and the observation of `hub.advertised`); the hunks are distinct.
 
-**Recommended merge order:** #667, #648, #665 and #831 are merged; then **#835**, then **#839**, then #647 part 2, then #803. Reasons: #839 adds a field to `Ports` (18 literals) and rewrites the engine's tail, and #835 has code and tests written against the current `Ports`, so rebasing #839 onto it is smaller than rebasing it onto #839, and the operator's plan is one fresh run for this story once #835 has merged. #647 part 2 appends finding kinds and a reconcile call and says in its own brief that it lands after #839. #803 needs a body per pane and reads #839's `pane-not-driven`; it merges last, and its D13 and D14 REFRESH rows are then written once against a DRIVEN that is wired.
+**Recommended merge order:** #667, #648, #665, #831 and #835 are merged; then **#839**, then #647 part 2 and #850 (each says in its own brief that it lands after #839); #853 is independent of #839 and may merge on either side of it (only the numbers of the "Decisions taken" items and the `CHANGELOG.md` order differ), and #803, parked on #853, merges last. Reasons: #839 adds a field to `Ports` (20 literals) and rewrites the engine's tail, and #835 is now on `main`, so the operator's plan is one fresh run for this story on a tree that holds it. #647 part 2 appends finding kinds and a reconcile call and says in its own brief that it lands after #839; #850 extends the drive step to a single process, which needs #839's drive step to exist. #803 needs a body per pane and reads #839's `pane-not-driven`; it merges last, and its D13 and D14 REFRESH rows are then written once against a DRIVEN that is wired.
 
 
 ## Line numbers re-checked
 
-**At this cut (2026-10-12, `main` at `b76f4d2`).** The 157 Evidence commands of the previous version were re-run on this tree by a script that compares each command's output with its excerpt. 97 matched as they were. 38 moved without changing and were re-cut at their new lines (E20, E22 to E27, E29, E32 to E36, E38, E55, E57, E58, E63, E64, E73, E74, E79, E80, E83 to E85, E96, E120, E121, E124, E125, E128, E130, E137, E142, E148, E149, E153). 22 changed and were re-cut by reading the code: E21, E28, E30, E31, E53, E56, E59 to E62, E65, E71, E72, E75, E76, E86, E118, E119, E123, E127, E129 (it moved to `tx_launch/server.rs`) and E141. Eleven entries that cited a sibling branch's commit now cite `main`, because the story merged: E89 to E91 (#831's ADR text and test), E92 (the amendments list of `ports.rs`), E93 and E154 (#648's roster), E155 (#667's scenario) and E157 (#665's reconcile doc); E156 stays cut from #647 part 2's brief. E158 onward are new. After the re-cut all 157 old entries and the new ones match their commands. What #835 will move is marked `REFRESH AFTER MERGE of #835` (the clashes table lists the entries).
+**At the #835 refresh (2026-10-12, `main` at `4e691d9`, which holds #835, PR #860).** All 185 Evidence commands were re-run by the same script. 157 matched as they were. 20 moved without changing and were re-cut at their new lines (E27 to E29, E33, E55 to E60, E62 to E64, E71 to E74, E89, E118 and E178). 8 changed and were re-cut: E61 (section 9's `pane import` row is #835's), E65 and E90 ("Deferred": the adoption sentence left item 18's bullet for a bullet of its own at the end of the list), E75 (the "Later" bullet on adopting Claude Code panes), E92 (the amendments list now says `observe_pane` lost its default), E180 (20 `Ports` literals in 17 files, from 18 in 16), E183 (items 30 and 31 are #835's, so the next free number is 32) and E185 (`observe_pane` is required now: its excerpt is lines 284-308 and shows `observe_panes` keeping its default). Every size in "Where the code goes" was re-counted: only `ports.rs` changed (563 to 621); `bind.rs` (489) and `wiring.rs` (468) are the same lengths, and `bind.rs` lines 346-353 (E127) match. Sizes the story's `Ports` literals sit beside (`launch/rig.rs` 852, `import/rig.rs` 535, `profile_verbs/apply/rig.rs` 775) were re-counted too.
+
+**At the earlier cut (2026-10-12, `main` at `b76f4d2`).** The 157 Evidence commands of the previous version were re-run on this tree by a script that compares each command's output with its excerpt. 97 matched as they were. 38 moved without changing and were re-cut at their new lines (E20, E22 to E27, E29, E32 to E36, E38, E55, E57, E58, E63, E64, E73, E74, E79, E80, E83 to E85, E96, E120, E121, E124, E125, E128, E130, E137, E142, E148, E149, E153). 22 changed and were re-cut by reading the code: E21, E28, E30, E31, E53, E56, E59 to E62, E65, E71, E72, E75, E76, E86, E118, E119, E123, E127, E129 (it moved to `tx_launch/server.rs`) and E141. Eleven entries that cited a sibling branch's commit now cite `main`, because the story merged: E89 to E91 (#831's ADR text and test), E92 (the amendments list of `ports.rs`), E93 and E154 (#648's roster), E155 (#667's scenario) and E157 (#665's reconcile doc); E156 stays cut from #647 part 2's brief. E158 onward are new. After the re-cut all 157 old entries and the new ones match their commands. What #835 would move was left for one refresh after it merged; the next paragraph is that refresh.
 
 The citations in the prose, re-read on this tree:
 
@@ -457,22 +460,23 @@ The citations in the prose, re-read on this tree:
 | `dispatch.rs:83-103` (`pane_state_refusal`), `dispatch.rs:130-133` (the gate's compare) | 87-103 and 134-136 |
 | `tx_switch.rs:218` (the engine's `send_prompt` call) | **moved to `tx_switch.rs:295`** (`fn prompt`, E158) |
 | `tx_launch.rs:680-688` (E129) | **moved to `tx_launch/server.rs:126-140`**; E128 is `tx_launch.rs:473-484` |
-| `ports.rs` line 345 (`send_prompt`'s doc) | **line 433** (E28); the amendments list is lines 15-40 |
+| `ports.rs` line 345 (`send_prompt`'s doc) | **line 491** (E28; 433 before #835 added 58 lines above it); the amendments list is lines 15-41 (E92) |
 | `say_cmd.rs:341-372` (`pane_state_refusal`) | 382-413 (E22); `resolve_pane_target` is 325-332 and `route_target_by` 259-284 |
-| `bind.rs` `send_prompt` forward | `bind.rs:346-353` (E127); the router's forward is `router.rs:118` (E159) |
+| `bind.rs` `send_prompt` forward | `bind.rs:346-353` (E127), the call itself `bind.rs:352`; the router's forward is `router.rs:118` (E159); no other `.send_prompt(` in `holler-pane/src` or `holler-cli/src` but the engine's own, `tx_switch.rs:295` (E158) |
+| `docs/pane-control.md` line 274 (the Claude Code sentence of `reset`) | 276 (E71 is 265-290) |
 | `pane_integration/bind.rs:537` (a `Ports` literal) | 650 |
 | `holds.rs:429-450` (`note_joined`), `vocab.rs:202-223`, `docs.rs:530-532` (`harness_session_id`), `record_bytes.rs:20` | 435-460, `check_segment` 202-218, true, true |
-| ADR-0021 `:823-828`, `:926`, `:480-486`, `:525-526`, `:694`, `:931-934` | moved: section 11 is 922-944; the DRIVEN "Deferred" bullet 1387; section 8's switch and reset paragraph 540-572 and #831's single-process paragraph 574-588; the section 9 rows 807 and 812. **Locate by words.** |
+| ADR-0021 `:823-828`, `:926`, `:480-486`, `:525-526`, `:694`, `:931-934` | moved again at the #835 refresh: section 11 is 925-947; the DRIVEN "Deferred" bullet 1432; section 8's switch and reset paragraph 543-575 and #831's single-process paragraph 577-591; the section 9 rows 810 and 815. **Locate by words.** |
 | `docs/protocol/v2.md` line 824 (the `pane/*` note), `-32004` row | 824, 658 (E184) |
 
 
 ## Depends on
 
-Merged: #645, #646, #647 (part 1), #649, #652, #802, #832, #648, #665, #667, #831. Related and not dependencies: #835 (not merged; the run launches after it), #647 part 2, #803, #850 (see "Clashes"). **#654** (the cutover) loses DRIVEN as its own work: its step "run `doctor` until it reports no `shown-driven-mismatch`" becomes a meaningful check, and it must start one attach body for each pane and use `holler pane switch` or `reset` afterwards (the guide edit above says so). **#850** (a body for a Claude Code pane) is the follow-up that gives a Claude pane a driver. The issue #654's body is edited by the operator, not by this story.
+Merged: #645, #646, #647 (part 1), #649, #652, #802, #832, #648, #665, #667, #831, #835. Related and not dependencies: #647 part 2, #803, #850, #853 (see "Clashes"). **#654** (the cutover) loses DRIVEN as its own work: its step "run `doctor` until it reports no `shown-driven-mismatch`" becomes a meaningful check, and it must start one attach body for each pane and use `holler pane switch` or `reset` afterwards (the guide edit above says so). **#850** (a body for a Claude Code pane) is the follow-up that gives a Claude pane a driver. The issue #654's body is edited by the operator, not by this story.
 
 ## Pipeline
 
-`rigor: in-session` (operator decision, 2026-10-11). Phase order (the repo's pipeline, `uiSurface: false`, so D and U never run): O, A (this brief), T (author, RED), F, T (verify, GREEN), A (anti-duplication), S. Contract amendment first (ADR-0021 and `docs/protocol/v2.md`, one commit), then tests, then code. A fresh worktree, branch `issue-839-implementation`, F on `claude-opus-5-5` at `max` (the repo's table). The branch is merged with `origin/main` at `b76f4d2`. One fresh run, launched once #835 has merged (operator, 2026-10-12); if its plan check blocks a fourth time, #839 is parked again. Needs no real port, live fleet, or real Herdr session; verification is the test kit and scratch instances (a real hub and body against the fake OpenCode server are scratch instances the test starts).
+`rigor: in-session` (operator decision, 2026-10-11). Phase order (the repo's pipeline, `uiSurface: false`, so D and U never run): O, A (this brief), T (author, RED), F, T (verify, GREEN), A (anti-duplication), S. Contract amendment first (ADR-0021 and `docs/protocol/v2.md`, one commit), then tests, then code. A fresh worktree, branch `issue-839-implementation`, F on `claude-opus-5-5` at `max` (the repo's table). The branch is merged with `origin/main` at `4e691d9` (which holds #835). One fresh run (operator, 2026-10-12), launched now that #835 has merged; if its plan check blocks a fourth time, #839 is parked again. Needs no real port, live fleet, or real Herdr session; verification is the test kit and scratch instances (a real hub and body against the fake OpenCode server are scratch instances the test starts).
 
 ## Rules for this story
 
@@ -503,7 +507,7 @@ The preparer did not guess these. Each has a default, which the brief above alre
 - That a real OpenCode server sends `session.error` the way the fake does (E105 reads the code, not a recording), and that a real restart of a body leaves the pane's server listing the old session (no port deletes sessions; assumed, not observed).
 - The ambiguity rule (the target rule of D3) was reasoned from the code, not run: the production fleet may not share a data directory at all (question 2), in which case `Ambiguous` never arises.
 - That the fake OpenCode server (E87's pattern) can serve two session ids: it answers one verdict for every id (`exists_v1`), so the rebind tests toggle it.
-- #835 is moving (its S verdict of cycle 3 is REWORK at `dc64e11`, 2026-10-12 03:49 MDT), and #803's brief (`9af2ad7`) and #647 part 2's brief (`f8d2624`) were read at the shas named: the clashes table says what to refresh after #835 merges (`REFRESH AFTER MERGE of #835`).
+- #803's brief (`ccd25df`), #850's brief (`6adf3f9`), #853's branch (`c1f7deb`) and #647 part 2's brief (`f8d2624`) were read at the shas named, and none is merged: the clashes table says what each touches. E181 stays cut from #803's brief at `9af2ad7`; D13 is unchanged in substance at `ccd25df`.
 - That the optional `data.reason` of `Error::offline` survives every route an error takes to the CLI: `ErrorData.reason` is an `Option<String>` and `Error::new` already sets it for `-32003` (`ambiguous`), so the local control socket carries it, but the remote route (`admin/say` through `holler_body::admin_client`) was not read for a reshaping of `data`. `hub_refusal::classify` fails safe there: a missing reason is `Other` (exit 1, the hub's text).
 - The single-process rule (D3 item 8) was reasoned from `tx_switch::switch`, `plan` and `relaunched` (E31, E175) and from D6, not run: no build exists yet.
 - That a `say --pane` against a real body whose turn never ends exits at `--timeout` plus the hub's own handling (Acceptance 18 (i)) in about a second: read from `talk::say`'s timeout, not timed.
@@ -514,11 +518,11 @@ The preparer did not guess these. Each has a default, which the brief above alre
 
 ## AI assistance
 
-Drafted by Claude (Sonnet 5.5) for story #839, from the issue, `docs/handoffs/828/handoff-A.md` (on the #828 branch), `main` at `bda1069` and the read-only state of the sibling branches named above, at the operator's direction, per `CONTRIBUTING.md`. The decisions are the preparer's, to be confirmed at the plan check. Amended on 2026-10-11 by Claude (Sonnet 5.5) after the plan check's BLOCK, from `docs/handoffs/839/handoff-A.md` and the main session's decisions P1 to P3, on the tree merged with `origin/main` at `d6ae539`. Amended a second time on 2026-10-11 by Claude (Sonnet 5.5) after the plan check's second pass, from `docs/handoffs/839/handoff-A.md` and the main session's decisions P4 to P6. Re-cut once on 2026-10-12 by Claude (Sonnet 5.5) after the third pass, from `docs/handoffs/839-plan-checks/handoff-A.md`, the operator's decisions of 2026-10-12 (P7, P8) and `main` at `b76f4d2`; every Evidence command was re-run and the new ones were cut by `sed -n` from the files named.
+Drafted by Claude (Sonnet 5.5) for story #839, from the issue, `docs/handoffs/828/handoff-A.md` (on the #828 branch), `main` at `bda1069` and the read-only state of the sibling branches named above, at the operator's direction, per `CONTRIBUTING.md`. The decisions are the preparer's, to be confirmed at the plan check. Amended on 2026-10-11 by Claude (Sonnet 5.5) after the plan check's BLOCK, from `docs/handoffs/839/handoff-A.md` and the main session's decisions P1 to P3, on the tree merged with `origin/main` at `d6ae539`. Amended a second time on 2026-10-11 by Claude (Sonnet 5.5) after the plan check's second pass, from `docs/handoffs/839/handoff-A.md` and the main session's decisions P4 to P6. Re-cut once on 2026-10-12 by Claude (Sonnet 5.5) after the third pass, from `docs/handoffs/839-plan-checks/handoff-A.md`, the operator's decisions of 2026-10-12 (P7, P8) and `main` at `b76f4d2`; every Evidence command was re-run and the new ones were cut by `sed -n` from the files named. Refreshed once on 2026-10-12 by Claude (Sonnet 5.5) for the merge of #835 (`main` at `4e691d9`): the markers were resolved against the merged tree, every Evidence command was re-run again, and no decision was changed.
 
 ## Evidence (verbatim)
 
-Cut on 2026-10-11 from `main` at `bda1069`, re-run and re-cut on 2026-10-12 on the tree at `b76f4d2` (`main`, which holds #831, #665, #648 and #667) with this branch's docs; "Line numbers re-checked" says which entries moved. E158 onward are new on that tree (E181 is a sibling branch's brief at a named commit, as E156 is). Every excerpt below was produced by a command (shown under its heading) that pipes the source through `sed -n 'A,Bp'` (E180 is a `grep`, E181 a `git show`); the line numbers on the left were added by `awk` and are those of the file on that tree (E180's are `grep`'s own). Nothing is retyped.
+Cut on 2026-10-11 from `main` at `bda1069`, re-run and re-cut on 2026-10-12 on the tree at `b76f4d2` (`main`, which held #831, #665, #648 and #667) with this branch's docs, and re-run and re-cut once more on 2026-10-12 at the #835 refresh, on the tree at `4e691d9` (`main`, which also holds #835); "Line numbers re-checked" says which entries moved. E158 onward are new on that tree (E181 is a sibling branch's brief at a named commit, as E156 is). Every excerpt below was produced by a command (shown under its heading) that pipes the source through `sed -n 'A,Bp'` (E180 is a `grep`, E181 a `git show`); the line numbers on the left were added by `awk` and are those of the file on that tree (E180's are `grep`'s own). Nothing is retyped.
 
 **E1: `crates/holler-hub/src/circuit/dispatch.rs:58-103`** — The hub's gate input and the pane-state predicate (copy 1 of 2): `HoldGate`, the three codes, `pane_state_refusal`. It keys on nothing but the record.
 
@@ -1478,94 +1482,94 @@ Command: `sed -n '241,252p' crates/holler-cli/src/pane/wiring.rs | awk -v s=241 
 252	    }
 ~~~~
 
-**E27: `crates/holler-pane/src/ports.rs:89-117`** — `PaneStore`.
+**E27: `crates/holler-pane/src/ports.rs:90-118`** — `PaneStore`.
 
-Command: `sed -n '89,117p' crates/holler-pane/src/ports.rs | awk -v s=89 '{printf "%d\t%s\n", s+NR-1, $0}'`
+Command: `sed -n '90,118p' crates/holler-pane/src/ports.rs | awk -v s=90 '{printf "%d\t%s\n", s+NR-1, $0}'`
 
 ~~~~text
-89	/// The registry of panes, kept by the hub (#639) and faked by the test kit (#638).
-90	///
-91	/// **Blocking.** Every method is synchronous. Call from `spawn_blocking` (or a
-92	/// thread) in async code. Every method returns within I5's bound (default 10 s) or
-93	/// with [`PaneError::Timeout`]. An implementation is `Send + Sync`.
-94	///
-95	/// Every write is a compare-and-swap on the pane's `generation` (see
-96	/// [`crate::generation`]); a stale one is `generation-conflict`.
-97	pub trait PaneStore: Send + Sync {
-98	    /// The pane named `name`, or `None`.
-99	    fn get(&self, name: &PaneName) -> Result<Option<Pane>, PaneError>;
-100	
-101	    /// Every pane.
-102	    fn list(&self) -> Result<Vec<Pane>, PaneError>;
-103	
-104	    /// Store `pane` if the stored one is still at `expected_generation` (0 for a
-105	    /// new pane); returns the stored record with its bumped generation.
-106	    fn cas_put(&self, pane: &Pane, expected_generation: u64) -> Result<Pane, PaneError>;
-107	
-108	    /// Remove a pane's record if it is still at `expected_generation`. `close`
-109	    /// uses it, so a closed pane's record does not outlive the pane. A stale
-110	    /// generation is `generation-conflict`; a record that does not exist is
-111	    /// `pane-not-found`, whatever `expected_generation` is (a missing record is
-112	    /// checked first, so no store has to guess which of the two to answer).
-113	    fn delete(&self, name: &PaneName, expected_generation: u64) -> Result<(), PaneError>;
-114	
-115	    /// The changes after `since`, in order (see [`Watch`] for the cursor rules).
-116	    fn watch(&self, since: Cursor) -> Result<Watch<PaneEvent>, PaneError>;
-117	}
+90	/// The registry of panes, kept by the hub (#639) and faked by the test kit (#638).
+91	///
+92	/// **Blocking.** Every method is synchronous. Call from `spawn_blocking` (or a
+93	/// thread) in async code. Every method returns within I5's bound (default 10 s) or
+94	/// with [`PaneError::Timeout`]. An implementation is `Send + Sync`.
+95	///
+96	/// Every write is a compare-and-swap on the pane's `generation` (see
+97	/// [`crate::generation`]); a stale one is `generation-conflict`.
+98	pub trait PaneStore: Send + Sync {
+99	    /// The pane named `name`, or `None`.
+100	    fn get(&self, name: &PaneName) -> Result<Option<Pane>, PaneError>;
+101	
+102	    /// Every pane.
+103	    fn list(&self) -> Result<Vec<Pane>, PaneError>;
+104	
+105	    /// Store `pane` if the stored one is still at `expected_generation` (0 for a
+106	    /// new pane); returns the stored record with its bumped generation.
+107	    fn cas_put(&self, pane: &Pane, expected_generation: u64) -> Result<Pane, PaneError>;
+108	
+109	    /// Remove a pane's record if it is still at `expected_generation`. `close`
+110	    /// uses it, so a closed pane's record does not outlive the pane. A stale
+111	    /// generation is `generation-conflict`; a record that does not exist is
+112	    /// `pane-not-found`, whatever `expected_generation` is (a missing record is
+113	    /// checked first, so no store has to guess which of the two to answer).
+114	    fn delete(&self, name: &PaneName, expected_generation: u64) -> Result<(), PaneError>;
+115	
+116	    /// The changes after `since`, in order (see [`Watch`] for the cursor rules).
+117	    fn watch(&self, since: Cursor) -> Result<Watch<PaneEvent>, PaneError>;
+118	}
 ~~~~
 
-**E28: `crates/holler-pane/src/ports.rs:432-459`** — `HarnessPort::send_prompt` and `session_activity` and their defaults.
+**E28: `crates/holler-pane/src/ports.rs:490-517`** — `HarnessPort::send_prompt` and `session_activity` and their defaults.
 
-Command: `sed -n '432,459p' crates/holler-pane/src/ports.rs | awk -v s=432 '{printf "%d\t%s\n", s+NR-1, $0}'`
+Command: `sed -n '490,517p' crates/holler-pane/src/ports.rs | awk -v s=490 '{printf "%d\t%s\n", s+NR-1, $0}'`
 
 ~~~~text
-432	    /// Queue `text` as a prompt to `session` at `at`, through the harness API, never by
-433	    /// typing into a TUI (I4). `pane reset --first` calls it (#645).
-434	    ///
-435	    /// The default refuses with [`PROMPT_UNSUPPORTED`]: an impl that does not send
-436	    /// prompts says so as a stable refusal, which the real adapter replaces (#642).
-437	    fn send_prompt(
-438	        &self,
-439	        at: &HarnessEndpoint,
-440	        session: &str,
-441	        text: &str,
-442	    ) -> Result<(), PaneError> {
-443	        let _ = (at, session, text);
-444	        Err(PaneError::Refused {
-445	            code: PROMPT_UNSUPPORTED,
-446	            message: "this harness does not queue a prompt".to_owned(),
-447	        })
-448	    }
-449	
-450	    /// What `session` at `at` is doing now (#645: `pane reset` refuses a conversation that
-451	    /// is not [`Activity::Idle`]). A single process holds one session at a time, so its
-452	    /// activity is the process's.
-453	    ///
-454	    /// The default answers [`Activity::Idle`], so an impl that does not report activity
-455	    /// refuses nothing.
-456	    fn session_activity(&self, at: &HarnessEndpoint, session: &str) -> Result<Activity, PaneError> {
-457	        let _ = (at, session);
-458	        Ok(Activity::Idle)
-459	    }
+490	    /// Queue `text` as a prompt to `session` at `at`, through the harness API, never by
+491	    /// typing into a TUI (I4). `pane reset --first` calls it (#645).
+492	    ///
+493	    /// The default refuses with [`PROMPT_UNSUPPORTED`]: an impl that does not send
+494	    /// prompts says so as a stable refusal, which the real adapter replaces (#642).
+495	    fn send_prompt(
+496	        &self,
+497	        at: &HarnessEndpoint,
+498	        session: &str,
+499	        text: &str,
+500	    ) -> Result<(), PaneError> {
+501	        let _ = (at, session, text);
+502	        Err(PaneError::Refused {
+503	            code: PROMPT_UNSUPPORTED,
+504	            message: "this harness does not queue a prompt".to_owned(),
+505	        })
+506	    }
+507	
+508	    /// What `session` at `at` is doing now (#645: `pane reset` refuses a conversation that
+509	    /// is not [`Activity::Idle`]). A single process holds one session at a time, so its
+510	    /// activity is the process's.
+511	    ///
+512	    /// The default answers [`Activity::Idle`], so an impl that does not report activity
+513	    /// refuses nothing.
+514	    fn session_activity(&self, at: &HarnessEndpoint, session: &str) -> Result<Activity, PaneError> {
+515	        let _ = (at, session);
+516	        Ok(Activity::Idle)
+517	    }
 ~~~~
 
-**E29: `crates/holler-pane/src/ports.rs:552-563`** — `Ports`: the struct every verb holds.
+**E29: `crates/holler-pane/src/ports.rs:610-621`** — `Ports`: the struct every verb holds.
 
-Command: `sed -n '552,563p' crates/holler-pane/src/ports.rs | awk -v s=552 '{printf "%d\t%s\n", s+NR-1, $0}'`
+Command: `sed -n '610,621p' crates/holler-pane/src/ports.rs | awk -v s=610 '{printf "%d\t%s\n", s+NR-1, $0}'`
 
 ~~~~text
-552	/// One `&dyn` of each port: what a verb holds. `Ports` is `Copy`, so it is passed
-553	/// by value or by reference freely, and `Ports<'static>` is `Send + Sync`.
-554	#[derive(Clone, Copy)]
-555	pub struct Ports<'a> {
-556	    pub pane_store: &'a dyn PaneStore,
-557	    pub profile_store: &'a dyn ProfileStore,
-558	    pub herdr: &'a dyn HerdrPort,
-559	    pub host: &'a dyn HostPort,
-560	    pub harness: &'a dyn HarnessPort,
-561	    pub scope: &'a dyn ProfileScope,
-562	    pub prober: &'a dyn Prober,
-563	}
+610	/// One `&dyn` of each port: what a verb holds. `Ports` is `Copy`, so it is passed
+611	/// by value or by reference freely, and `Ports<'static>` is `Send + Sync`.
+612	#[derive(Clone, Copy)]
+613	pub struct Ports<'a> {
+614	    pub pane_store: &'a dyn PaneStore,
+615	    pub profile_store: &'a dyn ProfileStore,
+616	    pub herdr: &'a dyn HerdrPort,
+617	    pub host: &'a dyn HostPort,
+618	    pub harness: &'a dyn HarnessPort,
+619	    pub scope: &'a dyn ProfileScope,
+620	    pub prober: &'a dyn Prober,
+621	}
 ~~~~
 
 **E30: `crates/holler-pane/src/tx_switch.rs:1-62`** — The module doc of `tx_switch.rs` on `main` (with #831's single-process paragraph): the steps, "`last_observed.driven` is left as stored" and "at most eight port calls".
@@ -1679,23 +1683,23 @@ Command: `sed -n '477,487p' crates/holler-pane/src/tx_switch.rs | awk -v s=477 '
 487	}
 ~~~~
 
-**E33: `crates/holler-pane/src/pane.rs:370-381`** — `LastObserved { shown, driven, at }`.
+**E33: `crates/holler-pane/src/pane.rs:372-383`** — `LastObserved { shown, driven, at }`.
 
-Command: `sed -n '370,381p' crates/holler-pane/src/pane.rs | awk -v s=370 '{printf "%d\t%s\n", s+NR-1, $0}'`
+Command: `sed -n '372,383p' crates/holler-pane/src/pane.rs | awk -v s=372 '{printf "%d\t%s\n", s+NR-1, $0}'`
 
 ~~~~text
-370	/// What reconcile last observed about which session the pane shows and which the hub
-371	/// drives. Written by reconcile, never inferred.
-372	#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-373	#[serde(deny_unknown_fields)]
-374	pub struct LastObserved {
-375	    #[serde(default, skip_serializing_if = "Option::is_none")]
-376	    pub shown: Option<String>,
+372	/// What reconcile last observed about which session the pane shows and which the hub
+373	/// drives. Written by reconcile, never inferred.
+374	#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+375	#[serde(deny_unknown_fields)]
+376	pub struct LastObserved {
 377	    #[serde(default, skip_serializing_if = "Option::is_none")]
-378	    pub driven: Option<String>,
-379	    /// When it was observed (milliseconds since the Unix epoch).
-380	    pub at: i64,
-381	}
+378	    pub shown: Option<String>,
+379	    #[serde(default, skip_serializing_if = "Option::is_none")]
+380	    pub driven: Option<String>,
+381	    /// When it was observed (milliseconds since the Unix epoch).
+382	    pub at: i64,
+383	}
 ~~~~
 
 **E34: `crates/holler-pane/src/reconcile.rs:45-59`** — reconcile's module doc: "`last_observed.driven` is left as stored. No port observes DRIVEN before #649".
@@ -2233,237 +2237,236 @@ Command: `sed -n '92,101p' docs/adr/ADR-0021.md | awk -v s=92 '{printf "%d\t%s\n
 101	(#649)"). `Ports` bundles one `&dyn` of each, and a verb holds it.
 ~~~~
 
-**E55: `docs/adr/ADR-0021.md:316-325`** — The invariants table: I2 and I5.
+**E55: `docs/adr/ADR-0021.md:319-328`** — The invariants table: I2 and I5.
 
-Command: `sed -n '316,325p' docs/adr/ADR-0021.md | awk -v s=316 '{printf "%d\t%s\n", s+NR-1, $0}'`
+Command: `sed -n '319,328p' docs/adr/ADR-0021.md | awk -v s=319 '{printf "%d\t%s\n", s+NR-1, $0}'`
 
 ~~~~text
-316	### 4. Ratified: the invariants, each with a test idea
-317	
-318	| | Invariant | One-line test idea |
-319	|---|---|---|
-320	| I1 | Only pane verbs change a pane or its registration. | Every adapter call in a scenario is made from a verb's code path: the fakes record their caller, and the hub's `pane/*` handlers hold no adapter (no adapter crate in `holler-hub`'s manifest). |
-321	| I2 | `session_of_record` is the only session a pane's TUI shows and the hub drives. | After each of launch, relaunch, switch and reset on the fakes, the fake TUI's shown session, the driven session and `session_of_record` are equal. |
-322	| I3 | Every verb is plan, act, observe, record; a mismatch fails loudly and records nothing. | Make the fake TUI show a different session after `act`: the verb exits 1 with a code, and the stored record and its generation are unchanged. |
-323	| I4 | No verb changes a session by typing into a TUI. | The fake Herdr records every `send_text`/`send_keys`; the switch and reset tests fail if any keystroke was sent (#645). |
-324	| I5 | A verb returns in bounded time (default 10 s); long work returns an operation id. | A wedged fake port makes the verb exit with `timeout` within the bound plus a margin; the operation-id half is not built (section 12, decided 2026-10-11). |
-325	| I6 | State is observed from Herdr, tmux and the harness, never inferred from files. | Give the importer and reconcile a stale registration file that names session A while the fake harness shows B: no record gets A as observed state. |
+319	### 4. Ratified: the invariants, each with a test idea
+320	
+321	| | Invariant | One-line test idea |
+322	|---|---|---|
+323	| I1 | Only pane verbs change a pane or its registration. | Every adapter call in a scenario is made from a verb's code path: the fakes record their caller, and the hub's `pane/*` handlers hold no adapter (no adapter crate in `holler-hub`'s manifest). |
+324	| I2 | `session_of_record` is the only session a pane's TUI shows and the hub drives. | After each of launch, relaunch, switch and reset on the fakes, the fake TUI's shown session, the driven session and `session_of_record` are equal. |
+325	| I3 | Every verb is plan, act, observe, record; a mismatch fails loudly and records nothing. | Make the fake TUI show a different session after `act`: the verb exits 1 with a code, and the stored record and its generation are unchanged. |
+326	| I4 | No verb changes a session by typing into a TUI. | The fake Herdr records every `send_text`/`send_keys`; the switch and reset tests fail if any keystroke was sent (#645). |
+327	| I5 | A verb returns in bounded time (default 10 s); long work returns an operation id. | A wedged fake port makes the verb exit with `timeout` within the bound plus a margin; the operation-id half is not built (section 12, decided 2026-10-11). |
+328	| I6 | State is observed from Herdr, tmux and the harness, never inferred from files. | Give the importer and reconcile a stale registration file that names session A while the fake harness shows B: no record gets A as observed state. |
 ~~~~
 
-**E56: `docs/adr/ADR-0021.md:336-351`** — Section 5, "Wiring as built (#649)": the first bullets.
+**E56: `docs/adr/ADR-0021.md:339-354`** — Section 5, "Wiring as built (#649)": the first bullets.
 
-Command: `sed -n '336,351p' docs/adr/ADR-0021.md | awk -v s=336 '{printf "%d\t%s\n", s+NR-1, $0}'`
+Command: `sed -n '339,354p' docs/adr/ADR-0021.md | awk -v s=339 '{printf "%d\t%s\n", s+NR-1, $0}'`
 
 ~~~~text
-336	**Wiring as built (#649).** `Wiring::connect` builds the ports of a run, once per run, and every pane and profile verb runs
-337	over them, as do `say`, `interrupt` and `answer` with `--pane`, whose pane resolution calls `connect` (`say_cmd.rs`), and
-338	the roster (#648), which calls `connect` only after its hub call has answered and never with `--server`, and reads the
-339	pane store or, with `--profile`, the profile scope, and no adapter.
-340	
-341	- **`connect` needs the hub and nothing else.** It makes one `control/status` exchange (the control client's own 5 s), and
-342	  any failure of it is `unavailable` naming the hub and its state dir, so with no hub every verb exits 1 having touched no
-343	  adapter. It builds the two registries' clients, the Herdr adapter, the tmux host, the OpenCode harness, `SystemProber`, and
-344	  `StoreScope` over the two clients as the `ProfileScope`. The Herdr adapter pings Herdr when it is built, so it is built on
-345	  its first use and kept, a failed build included; building the host or the harness does no I/O. So `pane list`, `get` and
-346	  `watch` and `profile list` and `show` run with no Herdr, tmux or OpenCode present.
-347	- **The registries' clients** (`wiring/store.rs`) send each call as one control-socket request through the CLI's one dispatch
-348	  point (`transport::call`), with the params of `holler_pane::reply` and a `PaneReply` back, within 10 s, or within the
-349	  long-poll window plus 5 s for a `*/watch` request. A failed exchange of a read is `timeout` naming the store method when
-350	  the hub took the request and did not answer within the bound, which is section 2's own rule, and `unavailable` naming the
-351	  hub otherwise. A write whose reply is lost is `timeout`, since it may have landed (section 8, step 2). A JSON-RPC error is
+339	**Wiring as built (#649).** `Wiring::connect` builds the ports of a run, once per run, and every pane and profile verb runs
+340	over them, as do `say`, `interrupt` and `answer` with `--pane`, whose pane resolution calls `connect` (`say_cmd.rs`), and
+341	the roster (#648), which calls `connect` only after its hub call has answered and never with `--server`, and reads the
+342	pane store or, with `--profile`, the profile scope, and no adapter.
+343	
+344	- **`connect` needs the hub and nothing else.** It makes one `control/status` exchange (the control client's own 5 s), and
+345	  any failure of it is `unavailable` naming the hub and its state dir, so with no hub every verb exits 1 having touched no
+346	  adapter. It builds the two registries' clients, the Herdr adapter, the tmux host, the OpenCode harness, `SystemProber`, and
+347	  `StoreScope` over the two clients as the `ProfileScope`. The Herdr adapter pings Herdr when it is built, so it is built on
+348	  its first use and kept, a failed build included; building the host or the harness does no I/O. So `pane list`, `get` and
+349	  `watch` and `profile list` and `show` run with no Herdr, tmux or OpenCode present.
+350	- **The registries' clients** (`wiring/store.rs`) send each call as one control-socket request through the CLI's one dispatch
+351	  point (`transport::call`), with the params of `holler_pane::reply` and a `PaneReply` back, within 10 s, or within the
+352	  long-poll window plus 5 s for a `*/watch` request. A failed exchange of a read is `timeout` naming the store method when
+353	  the hub took the request and did not answer within the bound, which is section 2's own rule, and `unavailable` naming the
+354	  hub otherwise. A write whose reply is lost is `timeout`, since it may have landed (section 8, step 2). A JSON-RPC error is
 ~~~~
 
-**E57: `docs/adr/ADR-0021.md:377-388`** — Section 5: the bullets "What the wiring makes live" and "Not done here" (the #828 and #654 sentences).
+**E57: `docs/adr/ADR-0021.md:380-391`** — Section 5: the bullets "What the wiring makes live" and "Not done here" (the #828 and #654 sentences).
 
-Command: `sed -n '377,388p' docs/adr/ADR-0021.md | awk -v s=377 '{printf "%d\t%s\n", s+NR-1, $0}'`
+Command: `sed -n '380,391p' docs/adr/ADR-0021.md | awk -v s=380 '{printf "%d\t%s\n", s+NR-1, $0}'`
 
 ~~~~text
-377	- **No new bound.** Each adapter and each registry request keeps its own 10 s bound (I5), and each verb its budget; there is
-378	  no flag, option or variable for a bound.
-379	- **What the wiring makes live.** Every profile write through the scope is logged under the one actor `holler pane`: a
-380	  `--profile` edit of `launch`, `relaunch` or `close`, and the creates and relaunches of `profile apply`, so the profile log
-381	  cannot tell those verbs apart. A per-verb actor needs a seam other than the argument-less `connect` (#825). And since #642
-382	  part 3 the first message of `pane reset --first` is a real prompt through `HarnessPort::send_prompt`, outside the hub's
-383	  prompt path and so outside its park and hold gate (section 8, "The prompt and activity seam"): this wiring makes that path
-384	  live, and closing it is #828's. Until #828 lands, the operator does not use `reset --first` on a parked or held pane.
-385	- **Not done here.** No `HostPort` amendment and no credential handling: a provider credential reaches a harness server only
-386	  through its tmux server's environment, and how production sets that is the cutover's (#654). The hub's DRIVEN session
-387	  is not pointed at `session_of_record` (section 11, #654). `--herdr-session` is not defaulted from the configured session
-388	  (section 8, "Launch and relaunch as built (#644)"). The pane's model, effort and environment still do not reach its
+380	- **No new bound.** Each adapter and each registry request keeps its own 10 s bound (I5), and each verb its budget; there is
+381	  no flag, option or variable for a bound.
+382	- **What the wiring makes live.** Every profile write through the scope is logged under the one actor `holler pane`: a
+383	  `--profile` edit of `launch`, `relaunch` or `close`, and the creates and relaunches of `profile apply`, so the profile log
+384	  cannot tell those verbs apart. A per-verb actor needs a seam other than the argument-less `connect` (#825). And since #642
+385	  part 3 the first message of `pane reset --first` is a real prompt through `HarnessPort::send_prompt`, outside the hub's
+386	  prompt path and so outside its park and hold gate (section 8, "The prompt and activity seam"): this wiring makes that path
+387	  live, and closing it is #828's. Until #828 lands, the operator does not use `reset --first` on a parked or held pane.
+388	- **Not done here.** No `HostPort` amendment and no credential handling: a provider credential reaches a harness server only
+389	  through its tmux server's environment, and how production sets that is the cutover's (#654). The hub's DRIVEN session
+390	  is not pointed at `session_of_record` (section 11, #654). `--herdr-session` is not defaulted from the configured session
+391	  (section 8, "Launch and relaunch as built (#644)"). The pane's model, effort and environment still do not reach its
 ~~~~
 
-**E58: `docs/adr/ADR-0021.md:410-416`** — Section 6: the pane and profile methods are control-socket methods, "the closed 22-row catalog".
+**E58: `docs/adr/ADR-0021.md:413-419`** — Section 6: the pane and profile methods are control-socket methods, "the closed 22-row catalog".
 
-Command: `sed -n '410,416p' docs/adr/ADR-0021.md | awk -v s=410 '{printf "%d\t%s\n", s+NR-1, $0}'`
+Command: `sed -n '413,419p' docs/adr/ADR-0021.md | awk -v s=413 '{printf "%d\t%s\n", s+NR-1, $0}'`
 
 ~~~~text
-410	### 6. The hub control-socket methods and their replies
-411	
-412	**Decided (ruling 6): `pane/*` and `profile/*` are hub control-socket methods, not v2 wire methods.** They sit outside the
-413	closed 22-row catalog (`holler_proto::methods::CATALOG`), are not reserved in [protocol v2](../protocol/v2.md) §4, and a body
-414	connection that sends one still gets `method_not_found`. The names are:
-415	
-416	- `PANE_METHODS`: `pane/get`, `pane/list`, `pane/cas_put`, `pane/delete`, `pane/watch`.
+413	### 6. The hub control-socket methods and their replies
+414	
+415	**Decided (ruling 6): `pane/*` and `profile/*` are hub control-socket methods, not v2 wire methods.** They sit outside the
+416	closed 22-row catalog (`holler_proto::methods::CATALOG`), are not reserved in [protocol v2](../protocol/v2.md) §4, and a body
+417	connection that sends one still gets `method_not_found`. The names are:
+418	
+419	- `PANE_METHODS`: `pane/get`, `pane/list`, `pane/cas_put`, `pane/delete`, `pane/watch`.
 ~~~~
 
-**E59: `docs/adr/ADR-0021.md:540-572`** — Section 8, "Switch and reset as built (#645)".
+**E59: `docs/adr/ADR-0021.md:543-575`** — Section 8, "Switch and reset as built (#645)".
 
-Command: `sed -n '540,572p' docs/adr/ADR-0021.md | awk -v s=540 '{printf "%d\t%s\n", s+NR-1, $0}'`
+Command: `sed -n '543,575p' docs/adr/ADR-0021.md | awk -v s=543 '{printf "%d\t%s\n", s+NR-1, $0}'`
 
 ~~~~text
-540	**Switch and reset as built (#645).** One engine, `holler_pane::tx_switch`, runs both verbs: switch moves a pane to a
-541	session its harness server already has, and reset to one the run creates. Its plan reads the record (through the profile's
-542	scope with `--profile`) and refuses before anything is written or moved: the orchestrator's pane unless the operator passes
-543	`--as-operator`, a statement of intent and not authentication (`orchestrator-pane`); a harness server that does not answer
-544	its health check, observed live and never read from `harness.health` (`server-unhealthy`, naming the relaunch remedy); for
-545	reset of a pane that has a session of record, a conversation that `HarnessPort::session_activity` reports running a turn
-546	(`session-busy`) or holding a question (`session-holds-question`), while a pane with none is not asked, since reset is
-547	doctor's remedy for it; and, for switch, a target the pane's own server does not list (`session-not-found`) or that is
-548	another pane's session of record (`session-of-other-pane`). The act is `select_session` in the pane's TUI, after
-549	`create_session` for reset, and the observation is `shown_session`. **A mismatch observed after the act is the closed
-550	failure `unavailable`, exit 1:** I3 needs a failure, and an open code is a refusal (section 9). A mismatch records nothing.
-551	Otherwise the record the plan read is written with exactly four fields set (`session_of_record` and `last_observed.shown` to
-552	the target, `last_observed.at` to the run's clock, `harness.health` to healthy) in one compare-and-swap at the generation the
-553	plan read, never retried; `last_observed.driven` is left as stored (section 11). Then, only for `reset --first TEXT`,
-554	`HarnessPort::send_prompt` queues `TEXT` to the new session, now the session of record (I2), so the first message can land
-555	nowhere else. A prompt that fails after the record is the port's own error (its class decides the exit), and its message
-556	says the session was created, shown and recorded but the first message did not land; it has no reconcile step, because the
-557	record is correct. No step calls Herdr or the host (I4; a single process's switch and reset are a relaunch, below), and a
-558	run makes at most eight port calls, each bounded by I5 (section 12). Neither verb checks the pane's park state; a refusal
-559	derived from pane state belongs to the prompt gate of #646, which `reset --first` does not pass through (see the seam
-560	below). A failure after the act and before the record is not compensated: the record still names the previous session,
-561	and the message ends with the reconcile step, the pane doctor command line for the pane with `--fix`, which selects that
-562	session again. That step follows every such failure once `select_session` has been called, a record conflict or a
-563	`timeout` included; a failure before then has moved neither the TUI nor the record, and its message has no step.
-564	Whether or not the verb ran with `--profile`, the step names the pane, unlike the two forms of step 6 that the generations
-565	rule above gives. Those name no pane because a failed launch can leave a pane with no record, which a pane-scoped doctor
-566	refuses. A switch or reset reads the pane's record before it acts, so a doctor run for that pane is not refused, and
-567	`--fix` is the pane doctor's own remedy for a TUI that does not show the session of record, while a fix can repair it.
-568	Neither verb edits P's specs, so no `profile show` is needed. A session that reset created and did not record stays on the
-569	server, and the message names it. After a successful reset the previous session also stays on the server, and the pane
-570	doctor reports it as a stray session: no port deletes a session. The session-of-other-pane check is a read in the verb, not
-571	a rule of the registry, whose compare-and-swap enforces only the generation and the membership rule, so two concurrent
-572	switches of two panes to one session can both pass it and both record that session.
+543	**Switch and reset as built (#645).** One engine, `holler_pane::tx_switch`, runs both verbs: switch moves a pane to a
+544	session its harness server already has, and reset to one the run creates. Its plan reads the record (through the profile's
+545	scope with `--profile`) and refuses before anything is written or moved: the orchestrator's pane unless the operator passes
+546	`--as-operator`, a statement of intent and not authentication (`orchestrator-pane`); a harness server that does not answer
+547	its health check, observed live and never read from `harness.health` (`server-unhealthy`, naming the relaunch remedy); for
+548	reset of a pane that has a session of record, a conversation that `HarnessPort::session_activity` reports running a turn
+549	(`session-busy`) or holding a question (`session-holds-question`), while a pane with none is not asked, since reset is
+550	doctor's remedy for it; and, for switch, a target the pane's own server does not list (`session-not-found`) or that is
+551	another pane's session of record (`session-of-other-pane`). The act is `select_session` in the pane's TUI, after
+552	`create_session` for reset, and the observation is `shown_session`. **A mismatch observed after the act is the closed
+553	failure `unavailable`, exit 1:** I3 needs a failure, and an open code is a refusal (section 9). A mismatch records nothing.
+554	Otherwise the record the plan read is written with exactly four fields set (`session_of_record` and `last_observed.shown` to
+555	the target, `last_observed.at` to the run's clock, `harness.health` to healthy) in one compare-and-swap at the generation the
+556	plan read, never retried; `last_observed.driven` is left as stored (section 11). Then, only for `reset --first TEXT`,
+557	`HarnessPort::send_prompt` queues `TEXT` to the new session, now the session of record (I2), so the first message can land
+558	nowhere else. A prompt that fails after the record is the port's own error (its class decides the exit), and its message
+559	says the session was created, shown and recorded but the first message did not land; it has no reconcile step, because the
+560	record is correct. No step calls Herdr or the host (I4; a single process's switch and reset are a relaunch, below), and a
+561	run makes at most eight port calls, each bounded by I5 (section 12). Neither verb checks the pane's park state; a refusal
+562	derived from pane state belongs to the prompt gate of #646, which `reset --first` does not pass through (see the seam
+563	below). A failure after the act and before the record is not compensated: the record still names the previous session,
+564	and the message ends with the reconcile step, the pane doctor command line for the pane with `--fix`, which selects that
+565	session again. That step follows every such failure once `select_session` has been called, a record conflict or a
+566	`timeout` included; a failure before then has moved neither the TUI nor the record, and its message has no step.
+567	Whether or not the verb ran with `--profile`, the step names the pane, unlike the two forms of step 6 that the generations
+568	rule above gives. Those name no pane because a failed launch can leave a pane with no record, which a pane-scoped doctor
+569	refuses. A switch or reset reads the pane's record before it acts, so a doctor run for that pane is not refused, and
+570	`--fix` is the pane doctor's own remedy for a TUI that does not show the session of record, while a fix can repair it.
+571	Neither verb edits P's specs, so no `profile show` is needed. A session that reset created and did not record stays on the
+572	server, and the message names it. After a successful reset the previous session also stays on the server, and the pane
+573	doctor reports it as a stray session: no port deletes a session. The session-of-other-pane check is a read in the verb, not
+574	a rule of the registry, whose compare-and-swap enforces only the generation and the membership rule, so two concurrent
+575	switches of two panes to one session can both pass it and both record that session.
 ~~~~
 
-**E60: `docs/adr/ADR-0021.md:590-617`** — Section 8, "The prompt and activity seam".
+**E60: `docs/adr/ADR-0021.md:593-620`** — Section 8, "The prompt and activity seam".
 
-Command: `sed -n '590,617p' docs/adr/ADR-0021.md | awk -v s=590 '{printf "%d\t%s\n", s+NR-1, $0}'`
+Command: `sed -n '593,620p' docs/adr/ADR-0021.md | awk -v s=593 '{printf "%d\t%s\n", s+NR-1, $0}'`
 
 ~~~~text
-590	**The prompt and activity seam (#645 part 2, the operator's carve-out).** `HarnessPort` grows two default-armed methods,
-591	the first amendment since #637 froze it (the second is #802's, section 2): `send_prompt(port, session, text)` and
-592	`session_activity(port, session)`, which
-593	answers the closed `Activity` (`Idle`, `Busy`, `HoldingQuestion`, and since #831 `WaitingPermission`; in `ports.rs`, never on
-594	the wire). A default keeps every
-595	impl that does not override it as it was: `session_activity` answers `Idle`, so nothing is refused where no port reports
-596	activity, and `send_prompt` refuses with the open code `prompt-unsupported` (exit 3). That code departs from the
-597	`not-implemented` the skeleton answers for unlanded methods on purpose: by the time `reset --first` sends the prompt the
-598	reset itself has succeeded, so "understood and declined" (a refusal) is the honest class, not a runtime failure. The OpenCode
-599	adapter replaces both defaults (#642 part 3), and the test kit's fake records them (#684). Its `send_prompt` asks `GET
-600	/session/:id` first, as its `abort` does (an unknown session is `session-not-found` and nothing is posted), then posts
-601	`{"parts":[{"type":"text","text":TEXT}]}`, naming no agent, to the bare `POST /session/:id/prompt_async`, the route and body
-602	`holler-body` sends; it is `Ok` exactly on that route's `204`, and its message for any other reply names the route, the port
-603	and the status and quotes no part of the reply, which could echo the prompt. Its `session_activity` is `HoldingQuestion`
-604	while `GET /question` or `GET /permission` lists an item of the session or of a direct child (subagent) session of it, the
-605	scope `holler-body` reads: a pending permission request, the session's own or a direct child's, reads as `HoldingQuestion`,
-606	since the turn waits on an answer either way. A list that cannot be read holds nothing (a turn that waits on an answer still
-607	runs, so its status reads `Busy`). Otherwise it is `Busy` while `GET /session/status` has an entry for the session whose
-608	`type` is not `idle` (`busy`, `retry`, or none), else `Idle`; only a server whose status route answers no JSON object is read
-609	from its last assistant message instead (`Busy` while it has no `time.completed`). Its `abort` reads that route the same
-610	way, so an abort of a session OpenCode is retrying is not settled until the session's entry is gone or `idle`. Two choices
-611	differ from what this ADR had proposed for 645b, and #646 and #649 build on them rather than beside them: the first message
-612	goes from the verb straight to `HarnessPort::send_prompt`, not through the hub's one prompt path (so the prompt gate of #646,
-613	park state included, does not see it); and the activity read is of the pane's session of record, not of its DRIVEN session,
-614	which is not kept in step with it until the cutover wires DRIVEN (#654, section 11). Since #642 part 3 the adapter sends
-615	that first message for real, and the gate still does not see this path; the wiring (#649) makes it live, and whether it
-616	moves to the hub's one prompt path is #828's (section 5, "Wiring as built (#649)"). The adapter's `send_prompt` stays pure transport: a
-617	hold, a limit or a park belongs at the hub's choke point, not in an adapter.
+593	**The prompt and activity seam (#645 part 2, the operator's carve-out).** `HarnessPort` grows two default-armed methods,
+594	the first amendment since #637 froze it (the second is #802's, section 2): `send_prompt(port, session, text)` and
+595	`session_activity(port, session)`, which
+596	answers the closed `Activity` (`Idle`, `Busy`, `HoldingQuestion`, and since #831 `WaitingPermission`; in `ports.rs`, never on
+597	the wire). A default keeps every
+598	impl that does not override it as it was: `session_activity` answers `Idle`, so nothing is refused where no port reports
+599	activity, and `send_prompt` refuses with the open code `prompt-unsupported` (exit 3). That code departs from the
+600	`not-implemented` the skeleton answers for unlanded methods on purpose: by the time `reset --first` sends the prompt the
+601	reset itself has succeeded, so "understood and declined" (a refusal) is the honest class, not a runtime failure. The OpenCode
+602	adapter replaces both defaults (#642 part 3), and the test kit's fake records them (#684). Its `send_prompt` asks `GET
+603	/session/:id` first, as its `abort` does (an unknown session is `session-not-found` and nothing is posted), then posts
+604	`{"parts":[{"type":"text","text":TEXT}]}`, naming no agent, to the bare `POST /session/:id/prompt_async`, the route and body
+605	`holler-body` sends; it is `Ok` exactly on that route's `204`, and its message for any other reply names the route, the port
+606	and the status and quotes no part of the reply, which could echo the prompt. Its `session_activity` is `HoldingQuestion`
+607	while `GET /question` or `GET /permission` lists an item of the session or of a direct child (subagent) session of it, the
+608	scope `holler-body` reads: a pending permission request, the session's own or a direct child's, reads as `HoldingQuestion`,
+609	since the turn waits on an answer either way. A list that cannot be read holds nothing (a turn that waits on an answer still
+610	runs, so its status reads `Busy`). Otherwise it is `Busy` while `GET /session/status` has an entry for the session whose
+611	`type` is not `idle` (`busy`, `retry`, or none), else `Idle`; only a server whose status route answers no JSON object is read
+612	from its last assistant message instead (`Busy` while it has no `time.completed`). Its `abort` reads that route the same
+613	way, so an abort of a session OpenCode is retrying is not settled until the session's entry is gone or `idle`. Two choices
+614	differ from what this ADR had proposed for 645b, and #646 and #649 build on them rather than beside them: the first message
+615	goes from the verb straight to `HarnessPort::send_prompt`, not through the hub's one prompt path (so the prompt gate of #646,
+616	park state included, does not see it); and the activity read is of the pane's session of record, not of its DRIVEN session,
+617	which is not kept in step with it until the cutover wires DRIVEN (#654, section 11). Since #642 part 3 the adapter sends
+618	that first message for real, and the gate still does not see this path; the wiring (#649) makes it live, and whether it
+619	moves to the hub's one prompt path is #828's (section 5, "Wiring as built (#649)"). The adapter's `send_prompt` stays pure transport: a
+620	hold, a limit or a park belongs at the hub's choke point, not in an adapter.
 ~~~~
 
-**E61: `docs/adr/ADR-0021.md:807-812`** — Section 9: the verb rows for switch, reset and the routed prompt verbs.
+**E61: `docs/adr/ADR-0021.md:810-815`** — Section 9: the verb rows for switch, reset and the routed prompt verbs (the `pane import` row above the routed verbs' row is #835's; this story does not edit it).
 
-Command: `sed -n '807,812p' docs/adr/ADR-0021.md | awk -v s=807 '{printf "%d\t%s\n", s+NR-1, $0}'`
+Command: `sed -n '810,815p' docs/adr/ADR-0021.md | awk -v s=810 '{printf "%d\t%s\n", s+NR-1, $0}'`
 
 ~~~~text
-807	| `pane switch`, `pane reset` | `pane-not-found`, open (#832) `pane-unmanaged`, `session-not-found`, `generation-conflict`, `profile-not-found`, `pane-not-in-profile`; open (#645): `orchestrator-pane`, `server-unhealthy`, for `switch` `session-of-other-pane`, and for `reset` a session of record that is running a turn or holds a question (`session-busy`, `session-holds-question`) and, with `--first`, a harness that does not queue a prompt (`prompt-unsupported`, the port's default); open (#831, section 8) for a Claude Code pane, which is relaunched: `session-busy` and `session-holds-question` for `switch` too, `session-holds-permission` for both, the relaunch's codes (`harness-dialog-open`, `timeout`, ...), and with `--first` the port's `session-mismatch` and `inbound-held` |
-808	| `pane park`, `pane unpark` | `pane-not-found`, open (#832) `pane-unmanaged`, `generation-conflict`, `profile-not-found`, `pane-not-in-profile` |
-809	| `pane close` | `pane-not-found`, open (#832) `pane-unmanaged`, `generation-conflict`, `profile-not-found`, `profile-conflict`, `pane-not-in-profile` (with `--profile`, P holds no spec for the pane) |
-810	| `pane doctor` | `pane-not-found`, `profile-not-found`, `pane-not-in-profile`; findings are kinds in `findings.rs` (#647), not errors, and include the reported `herdr-version-unsupported` and, with `--unmanaged-stalled-after SECONDS`, `unmanaged-stalled` (#832, section 14), and for a Claude Code pane `pane-waiting` and, about no pane, `claude-login-missing` (#831, section 15 item 13); `--fix` of a Claude Code pane's mismatch is a relaunch, with the relaunch's codes |
-811	| `pane import` | `usage` (no `--herdr-session`, a `--from` that is not a directory, an `--orchestrator` that names no pane directory), `herdr-version-unsupported` (from `herdr.version()`, which ends the run with no report), `profile-exists` (a real run with a pane to record while a profile `fleet` exists), the code of a failed write whose undo completed (`generation-conflict`, `timeout`, ...), `profile-conflict` (an undo step failed; the message names the commands that reconcile); open (#650): `import-blocked` (a real run while a pane has a problem; nothing is written). `command-not-argv`, `session-not-found` and every disagreement are findings of the report, not errors (#650) |
-812	| `say`, `interrupt`, `answer` with `--pane` | `pane-not-found`, `profile-not-found`, `pane-not-in-profile`, `session-not-found` (no session of record); open (#646), as the record says: `pane-parked`, `pane-unhealthy`, `pane-shown-driven-mismatch`; all exit 3, the code in the message. The hub's prompt gate refuses the same three as `session_held` with `hold_kind: "pane"`. For a Claude Code pane (#831, section 15 item 9): `interrupt` is a relaunch on the session of record, with the relaunch's codes, and with text `interrupt-text-unsupported`; `answer` is `answer-unsupported` |
+810	| `pane switch`, `pane reset` | `pane-not-found`, open (#832) `pane-unmanaged`, `session-not-found`, `generation-conflict`, `profile-not-found`, `pane-not-in-profile`; open (#645): `orchestrator-pane`, `server-unhealthy`, for `switch` `session-of-other-pane`, and for `reset` a session of record that is running a turn or holds a question (`session-busy`, `session-holds-question`) and, with `--first`, a harness that does not queue a prompt (`prompt-unsupported`, the port's default); open (#831, section 8) for a Claude Code pane, which is relaunched: `session-busy` and `session-holds-question` for `switch` too, `session-holds-permission` for both, the relaunch's codes (`harness-dialog-open`, `timeout`, ...), and with `--first` the port's `session-mismatch` and `inbound-held` |
+811	| `pane park`, `pane unpark` | `pane-not-found`, open (#832) `pane-unmanaged`, `generation-conflict`, `profile-not-found`, `pane-not-in-profile` |
+812	| `pane close` | `pane-not-found`, open (#832) `pane-unmanaged`, `generation-conflict`, `profile-not-found`, `profile-conflict`, `pane-not-in-profile` (with `--profile`, P holds no spec for the pane) |
+813	| `pane doctor` | `pane-not-found`, `profile-not-found`, `pane-not-in-profile`; findings are kinds in `findings.rs` (#647), not errors, and include the reported `herdr-version-unsupported` and, with `--unmanaged-stalled-after SECONDS`, `unmanaged-stalled` (#832, section 14), and for a Claude Code pane `pane-waiting` and, about no pane, `claude-login-missing` (#831, section 15 item 13); `--fix` of a Claude Code pane's mismatch is a relaunch, with the relaunch's codes |
+814	| `pane import` | `usage` (`--adopt-claude-code` until #831's adoption step lands (section 15, item 17), before any file or port is read (#835); no `--herdr-session`, a `--from` that is not a directory, an `--orchestrator` that names no pane directory), `herdr-version-unsupported` (from `herdr.version()`, which ends the run with no report), `profile-exists` (a real run with a pane to record while a profile `fleet` exists), the code of a failed write whose undo completed (`generation-conflict`, `timeout`, ...), `profile-conflict` (an undo step failed; the message names the commands that reconcile); open (#650): `import-blocked` (a real run while a pane has a problem, `harness-unreadable` included; nothing is written). `command-not-argv`, `session-not-found`, every disagreement, and a pane left alone because its tmux session runs Claude Code (`harness-claude-code`, #835, section 13) are findings of the report, not errors (#650) |
+815	| `say`, `interrupt`, `answer` with `--pane` | `pane-not-found`, `profile-not-found`, `pane-not-in-profile`, `session-not-found` (no session of record); open (#646), as the record says: `pane-parked`, `pane-unhealthy`, `pane-shown-driven-mismatch`; all exit 3, the code in the message. The hub's prompt gate refuses the same three as `session_held` with `hold_kind: "pane"`. For a Claude Code pane (#831, section 15 item 9): `interrupt` is a relaunch on the session of record, with the relaunch's codes, and with text `interrupt-text-unsupported`; `answer` is `answer-unsupported` |
 ~~~~
 
-**E62: `docs/adr/ADR-0021.md:868-871`** — Section 9: the closed and open code rows.
+**E62: `docs/adr/ADR-0021.md:871-874`** — Section 9: the closed and open code rows.
 
-Command: `sed -n '868,871p' docs/adr/ADR-0021.md | awk -v s=868 '{printf "%d\t%s\n", s+NR-1, $0}'`
+Command: `sed -n '871,874p' docs/adr/ADR-0021.md | awk -v s=871 '{printf "%d\t%s\n", s+NR-1, $0}'`
 
 ~~~~text
-868	  | `not-implemented` | Failure (1) | The verb cannot do the work yet; every stub exits 1. |
-869	  | `profile-drift` | Failure (1) | A finding kind, not an error a port returns; if one surfaces, live state disagrees with its spec. Raised by reconcile since #665. |
-870	  | any other well-formed code (open, raised as `Refused`) | Refusal (3) | `Refused` is the channel for the codes a verb or adapter owns; the open codes so far (#640's `grid-unreachable`, #645's `session-busy`, `session-holds-question` and `prompt-unsupported`, #646's `pane-parked`, `pane-unhealthy` and `pane-shown-driven-mismatch`, all merged, #802's `agent-unsupported`, #642's `agent-unusable`, the OpenCode adapter's, #650's `import-blocked`, and #648's `remote-policy-refused`, the roster's `--format=json` code for a `--server` the transport refuses before any dial, ADR 0003's exit 3) are all refusals. |
-871	  | a malformed code | Failure (1) | It cannot be trusted: the same rule turns a garbled wire reply into `unavailable`. |
+871	  | `not-implemented` | Failure (1) | The verb cannot do the work yet; every stub exits 1. |
+872	  | `profile-drift` | Failure (1) | A finding kind, not an error a port returns; if one surfaces, live state disagrees with its spec. Raised by reconcile since #665. |
+873	  | any other well-formed code (open, raised as `Refused`) | Refusal (3) | `Refused` is the channel for the codes a verb or adapter owns; the open codes so far (#640's `grid-unreachable`, #645's `session-busy`, `session-holds-question` and `prompt-unsupported`, #646's `pane-parked`, `pane-unhealthy` and `pane-shown-driven-mismatch`, all merged, #802's `agent-unsupported`, #642's `agent-unusable`, the OpenCode adapter's, #650's `import-blocked`, and #648's `remote-policy-refused`, the roster's `--format=json` code for a `--server` the transport refuses before any dial, ADR 0003's exit 3) are all refusals. |
+874	  | a malformed code | Failure (1) | It cannot be trusted: the same rule turns a garbled wire reply into `unavailable`. |
 ~~~~
 
-**E63: `docs/adr/ADR-0021.md:922-944`** — Section 11, in full.
+**E63: `docs/adr/ADR-0021.md:925-947`** — Section 11, in full.
 
-Command: `sed -n '922,944p' docs/adr/ADR-0021.md | awk -v s=922 '{printf "%d\t%s\n", s+NR-1, $0}'`
+Command: `sed -n '925,947p' docs/adr/ADR-0021.md | awk -v s=925 '{printf "%d\t%s\n", s+NR-1, $0}'`
 
 ~~~~text
-922	### 11. How attach mode (ADR 0014) relates
-923	
-924	[ADR 0014](ADR-0014.md) stays in force, unchanged. What changes is **who chooses the session**. For a pane in the registry,
-925	Holler creates the session of record: the pane verbs start the harness server (the argv `HarnessPort::serve_command`
-926	builds, which `HostPort::run` starts in the pane's tmux session, #802), create the session over its API (`create_session`)
-927	and attach the TUI to it (`attach_tui`). The body that drives that session is still not its
-928	parent, so ADR 0014's teardown rule (point 3) and its rule against typing into a PTY (point 4, which I4 restates for pane
-929	verbs) apply as they are. The difference is that the session id comes from `session_of_record`, which a verb writes after it
-930	observes the session. It is no longer pasted by an operator or guessed by a repair. That answers ADR 0014's open "automatic
-931	discovery of attachable sessions (e.g. from a Herdr pane)" for registered panes: there is no discovery; the registry names
-932	the session. Attach mode with an operator-written `endpoint` and `session_id` stays for sessions Holler does not own (a
-933	session with no pane record).
-934	
-935	`HerdrPort::send_text` and `send_keys` exist in the provisional port. Under I4 no verb may use them to change which
-936	session a pane shows or what it is doing; #640 uses them only in its tests, which type into panes they created in a scratch
-937	Herdr session, #646 names the permitted uses, and #645's tests fail on any keystroke.
-938	
-939	**Deferred to #654 (cutover):** how the hub's DRIVEN session is pointed at `session_of_record` for each registered pane,
-940	and when it moves after a switch or reset. The wiring (#649) wires the ports and leaves DRIVEN to the cutover.
-941	Until the cutover wires DRIVEN, reconcile (#647) compares SHOWN with `session_of_record`, which I2 makes the session the
-942	hub drives, and leaves `last_observed.driven` as stored.
-943	A switch or reset (#645) likewise leaves `last_observed.driven` as stored; the hub's DRIVEN session follows the new
-944	`session_of_record` once the cutover wires it.
+925	### 11. How attach mode (ADR 0014) relates
+926	
+927	[ADR 0014](ADR-0014.md) stays in force, unchanged. What changes is **who chooses the session**. For a pane in the registry,
+928	Holler creates the session of record: the pane verbs start the harness server (the argv `HarnessPort::serve_command`
+929	builds, which `HostPort::run` starts in the pane's tmux session, #802), create the session over its API (`create_session`)
+930	and attach the TUI to it (`attach_tui`). The body that drives that session is still not its
+931	parent, so ADR 0014's teardown rule (point 3) and its rule against typing into a PTY (point 4, which I4 restates for pane
+932	verbs) apply as they are. The difference is that the session id comes from `session_of_record`, which a verb writes after it
+933	observes the session. It is no longer pasted by an operator or guessed by a repair. That answers ADR 0014's open "automatic
+934	discovery of attachable sessions (e.g. from a Herdr pane)" for registered panes: there is no discovery; the registry names
+935	the session. Attach mode with an operator-written `endpoint` and `session_id` stays for sessions Holler does not own (a
+936	session with no pane record).
+937	
+938	`HerdrPort::send_text` and `send_keys` exist in the provisional port. Under I4 no verb may use them to change which
+939	session a pane shows or what it is doing; #640 uses them only in its tests, which type into panes they created in a scratch
+940	Herdr session, #646 names the permitted uses, and #645's tests fail on any keystroke.
+941	
+942	**Deferred to #654 (cutover):** how the hub's DRIVEN session is pointed at `session_of_record` for each registered pane,
+943	and when it moves after a switch or reset. The wiring (#649) wires the ports and leaves DRIVEN to the cutover.
+944	Until the cutover wires DRIVEN, reconcile (#647) compares SHOWN with `session_of_record`, which I2 makes the session the
+945	hub drives, and leaves `last_observed.driven` as stored.
+946	A switch or reset (#645) likewise leaves `last_observed.driven` as stored; the hub's DRIVEN session follows the new
+947	`session_of_record` once the cutover wires it.
 ~~~~
 
-**E64: `docs/adr/ADR-0021.md:991-992`** — Section 13: the sentence about the hub's own registration.
+**E64: `docs/adr/ADR-0021.md:994-995`** — Section 13: the sentence about the hub's own registration.
 
-Command: `sed -n '991,992p' docs/adr/ADR-0021.md | awk -v s=991 '{printf "%d\t%s\n", s+NR-1, $0}'`
+Command: `sed -n '994,995p' docs/adr/ADR-0021.md | awk -v s=994 '{printf "%d\t%s\n", s+NR-1, $0}'`
 
 ~~~~text
-991	The hub's own registration, the fifth record of the incident, is replaced by `session_of_record` once the cutover (#654)
-992	points the hub's DRIVEN session at it (section 11).
+994	The hub's own registration, the fifth record of the incident, is replaced by `session_of_record` once the cutover (#654)
+995	points the hub's DRIVEN session at it (section 11).
 ~~~~
 
-**E65: `docs/adr/ADR-0021.md:1385-1399`** — "Deferred to named stories": the DRIVEN bullet and the `reset --first` bullet.
+**E65: `docs/adr/ADR-0021.md:1430-1443`** — "Deferred to named stories": the DRIVEN bullet and the `reset --first` bullet. #835 took the sentence on adopting Claude Code panes out of the second bullet and made it a bullet of its own at the end of the list (out of this range).
 
-Command: `sed -n '1385,1399p' docs/adr/ADR-0021.md | awk -v s=1385 '{printf "%d\t%s\n", s+NR-1, $0}'`
+Command: `sed -n '1430,1443p' docs/adr/ADR-0021.md | awk -v s=1430 '{printf "%d\t%s\n", s+NR-1, $0}'`
 
 ~~~~text
-1385	## Deferred to named stories
-1386	
-1387	- How the hub's DRIVEN session follows `session_of_record`: #839 (it was #654's; the wiring, #649, leaves it to the cutover).
-1388	- A body that lets `holler say --pane NAME TEXT` reach a Claude Code pane: #850 (section 15, item 18). Adopting the fleet's
-1389	  existing Claude Code panes (section 15, item 17): #831 itself, once #835 is on `main`. `pane-stalled` waits with #837's time
-1390	  source, and the `PreToolUse` gate, a permission-mode, allowed-tools and questions spec field and `--agent` for Claude are later
-1391	  stories (section 15).
-1392	- The exact file layouts of `panes.json` and `profiles.json`, the long-poll window, and the feed's retained window: #639 and
-1393	  #661.
-1394	- Which closed failure code a mismatch observed after `act` carries: decided, `unavailable` (exit 1), section 8: #644 for
-1395	  launch and relaunch; #645 for switch and reset.
-1396	- The refusal of a pane that is not idle or holds a question, and `reset --first`: decided, #645 part 2, through two
-1397	  default-armed `HarnessPort` methods (section 8, "The prompt and activity seam"). Their real implementation is built, in
-1398	  the OpenCode adapter (#642 part 3); the fake's recording is #684's; the wiring (#649) makes the first message's path live,
-1399	  and whether it moves to the hub's one prompt path is #828's.
+1430	## Deferred to named stories
+1431	
+1432	- How the hub's DRIVEN session follows `session_of_record`: #839 (it was #654's; the wiring, #649, leaves it to the cutover).
+1433	- A body that lets `holler say --pane NAME TEXT` reach a Claude Code pane: #850 (section 15, item 18). `pane-stalled` waits
+1434	  with #837's time source, and the `PreToolUse` gate, a permission-mode, allowed-tools and questions spec field and `--agent`
+1435	  for Claude are later stories (section 15).
+1436	- The exact file layouts of `panes.json` and `profiles.json`, the long-poll window, and the feed's retained window: #639 and
+1437	  #661.
+1438	- Which closed failure code a mismatch observed after `act` carries: decided, `unavailable` (exit 1), section 8: #644 for
+1439	  launch and relaunch; #645 for switch and reset.
+1440	- The refusal of a pane that is not idle or holds a question, and `reset --first`: decided, #645 part 2, through two
+1441	  default-armed `HarnessPort` methods (section 8, "The prompt and activity seam"). Their real implementation is built, in
+1442	  the OpenCode adapter (#642 part 3); the fake's recording is #684's; the wiring (#649) makes the first message's path live,
+1443	  and whether it moves to the hub's one prompt path is #828's.
 ~~~~
 
 **E66: `docs/protocol/v2.md:276-300`** — Section 4, the method table (the rows `session/prompt`, `session/cancel`, `session/answer`).
@@ -2558,88 +2561,88 @@ Command: `sed -n '663,665p' docs/protocol/v2.md | awk -v s=663 '{printf "%d\t%s\
 665	| `-32011` | `session_held` | `say` (plain, `--queue` or `--replace`, including the redirect half of `interrupt SESSION TEXT`) to a session an operator has **held** (`holler hold SESSION`, issue #437). New work is refused; the turn already running, turns already accepted into the body's queue, `interrupt` and `roster` are not affected. `data.reason` is the operator's text (absent when none was given), `data.since` is when the hold was set (RFC 3339) and `data.hold_kind` (issue #460) is `operator` or `default` (absent means `operator`). With `data.hold_kind: "pane"` (issue #646) the refusal comes from a pane record and not an operator hold: `data.reason` is the stable pane code (`pane-parked`, `pane-unhealthy`, `pane-shown-driven-mismatch`), there is no `data.since`, and the `release` verb does not lift it. |
 ~~~~
 
-**E71: `docs/pane-control.md:263-288`** — The guide: `reset`, "Do not use `--first` on a parked or held pane", `park`.
+**E71: `docs/pane-control.md:265-290`** — The guide: `reset`, "Do not use `--first` on a parked or held pane", `park`.
 
-Command: `sed -n '263,288p' docs/pane-control.md | awk -v s=263 '{printf "%d\t%s\n", s+NR-1, $0}'`
+Command: `sed -n '265,290p' docs/pane-control.md | awk -v s=265 '{printf "%d\t%s\n", s+NR-1, $0}'`
 
 ~~~~text
-263	### `holler pane reset PANE`
-264	
-265	Start a pane on a fresh session: create it, show it, record it. `--first TEXT` queues a first message to the new session
-266	once it is recorded. The previous session stays on the server, and `doctor` then reports it as a `stray-session`.
-267	
-268	```bash
-269	holler pane reset demo-alpha --first "Read the brief and start."
-270	```
-271	
-272	Refused (3) with `session-busy` or `session-holds-question` while the session of record is running a turn or waits on
-273	an answer, and with `orchestrator-pane` and `server-unhealthy` as `switch` is. A Claude Code pane is reset by a relaunch on
-274	a fresh session id, refused as `switch` is (`session-holds-permission` included); `--first` goes to the relaunched
-275	process, through the same direct path as below.
-276	
-277	**Do not use `--first` on a parked or held pane.** The first message goes to the harness directly, outside the hub's
-278	prompt path, so the gate that refuses a prompt to a parked or held pane does not see it (ADR-0021 section 8, "The prompt
-279	and activity seam"). Sending it through that gate is issue [#839](https://github.com/Performant-Labs/holler/issues/839),
-280	not built.
-281	
-282	### `holler pane park --reason TEXT --release-when WHEN`
+265	### `holler pane reset PANE`
+266	
+267	Start a pane on a fresh session: create it, show it, record it. `--first TEXT` queues a first message to the new session
+268	once it is recorded. The previous session stays on the server, and `doctor` then reports it as a `stray-session`.
+269	
+270	```bash
+271	holler pane reset demo-alpha --first "Read the brief and start."
+272	```
+273	
+274	Refused (3) with `session-busy` or `session-holds-question` while the session of record is running a turn or waits on
+275	an answer, and with `orchestrator-pane` and `server-unhealthy` as `switch` is. A Claude Code pane is reset by a relaunch on
+276	a fresh session id, refused as `switch` is (`session-holds-permission` included); `--first` goes to the relaunched
+277	process, through the same direct path as below.
+278	
+279	**Do not use `--first` on a parked or held pane.** The first message goes to the harness directly, outside the hub's
+280	prompt path, so the gate that refuses a prompt to a parked or held pane does not see it (ADR-0021 section 8, "The prompt
+281	and activity seam"). Sending it through that gate is issue [#839](https://github.com/Performant-Labs/holler/issues/839),
+282	not built.
 283	
-284	Take a pane out of service until it is unparked: the record's hold becomes parked, with the reason and the release
-285	condition (one line each, at most 200 characters). It takes one pane, or with `--profile` and no pane every pane of the
-286	profile. It changes the record only: nothing moves in Herdr and no process is touched. A prompt
-287	through the hub to a parked pane's session of record is refused (`pane-parked`); the first message of `reset --first` is
-288	not (see `reset`).
+284	### `holler pane park --reason TEXT --release-when WHEN`
+285	
+286	Take a pane out of service until it is unparked: the record's hold becomes parked, with the reason and the release
+287	condition (one line each, at most 200 characters). It takes one pane, or with `--profile` and no pane every pane of the
+288	profile. It changes the record only: nothing moves in Herdr and no process is touched. A prompt
+289	through the hub to a parked pane's session of record is refused (`pane-parked`); the first message of `reset --first` is
+290	not (see `reset`).
 ~~~~
 
-**E72: `docs/pane-control.md:510-512`** — The guide's DRIVEN column.
+**E72: `docs/pane-control.md:519-521`** — The guide's DRIVEN column.
 
-Command: `sed -n '510,512p' docs/pane-control.md | awk -v s=510 '{printf "%d\t%s\n", s+NR-1, $0}'`
+Command: `sed -n '519,521p' docs/pane-control.md | awk -v s=519 '{printf "%d\t%s\n", s+NR-1, $0}'`
 
 ~~~~text
-510	| HEALTH | `healthy`, `unhealthy` or `unknown`, as the harness server last reported it (`pane get` shows the reason); for a Claude Code pane, whether its process still ran. |
-511	| SHOWN | The session the pane's TUI showed when reconcile last observed it; for a Claude Code pane, the session its process held. |
-512	| DRIVEN | The session the hub drives, printed as the record holds it and never compared. |
+519	| HEALTH | `healthy`, `unhealthy` or `unknown`, as the harness server last reported it (`pane get` shows the reason); for a Claude Code pane, whether its process still ran. |
+520	| SHOWN | The session the pane's TUI showed when reconcile last observed it; for a Claude Code pane, the session its process held. |
+521	| DRIVEN | The session the hub drives, printed as the record holds it and never compared. |
 ~~~~
 
-**E73: `docs/pane-control.md:534-538`** — The guide: "SHOWN against DRIVEN".
+**E73: `docs/pane-control.md:543-547`** — The guide: "SHOWN against DRIVEN".
 
-Command: `sed -n '534,538p' docs/pane-control.md | awk -v s=534 '{printf "%d\t%s\n", s+NR-1, $0}'`
+Command: `sed -n '543,547p' docs/pane-control.md | awk -v s=543 '{printf "%d\t%s\n", s+NR-1, $0}'`
 
 ~~~~text
-534	**SHOWN against DRIVEN.** The session of record is the session the hub drives (I2), so SYNC compares SHOWN with it. It
-535	is `MISMATCH` when the TUI showed another session or its home screen, and `-` when reconcile has never observed the pane
-536	or the pane has no session of record. DRIVEN is printed as the record holds it and is not compared: nothing records it
-537	yet (the hub wiring, #649, leaves it as stored; making it follow each pane's session of record is
-538	[#839](https://github.com/Performant-Labs/holler/issues/839), not built), so it prints `-`. `pane doctor` uses the same rule for `shown-driven-mismatch` (section 5).
+543	**SHOWN against DRIVEN.** The session of record is the session the hub drives (I2), so SYNC compares SHOWN with it. It
+544	is `MISMATCH` when the TUI showed another session or its home screen, and `-` when reconcile has never observed the pane
+545	or the pane has no session of record. DRIVEN is printed as the record holds it and is not compared: nothing records it
+546	yet (the hub wiring, #649, leaves it as stored; making it follow each pane's session of record is
+547	[#839](https://github.com/Performant-Labs/holler/issues/839), not built), so it prints `-`. `pane doctor` uses the same rule for `shown-driven-mismatch` (section 5).
 ~~~~
 
-**E74: `docs/pane-control.md:898-902`** — The guide's cutover steps 4 to 6.
+**E74: `docs/pane-control.md:920-924`** — The guide's cutover steps 4 to 6.
 
-Command: `sed -n '898,902p' docs/pane-control.md | awk -v s=898 '{printf "%d\t%s\n", s+NR-1, $0}'`
+Command: `sed -n '920,924p' docs/pane-control.md | awk -v s=920 '{printf "%d\t%s\n", s+NR-1, $0}'`
 
 ~~~~text
-898	   `shown-driven-mismatch`, and `holler pane list` shows SYNC `ok` for every pane (section 4).
-899	5. **Cut one pane over** to `holler pane launch PANE` and `holler pane reset PANE`, watch it **through a full overnight**,
-900	   then move the rest. A launch records the pane's model and does not apply it yet (#829, section 2), and
-901	   `reset --first` is not used on a parked or held pane (section 3).
-902	6. **Seven days with no invisible session.** Every day `doctor` reports no `shown-driven-mismatch` and no stray session
+920	   `shown-driven-mismatch`, and `holler pane list` shows SYNC `ok` for every pane (section 4).
+921	5. **Cut one pane over** to `holler pane launch PANE` and `holler pane reset PANE`, watch it **through a full overnight**,
+922	   then move the rest. A launch records the pane's model and does not apply it yet (#829, section 2), and
+923	   `reset --first` is not used on a parked or held pane (section 3).
+924	6. **Seven days with no invisible session.** Every day `doctor` reports no `shown-driven-mismatch` and no stray session
 ~~~~
 
-**E75: `docs/pane-control.md:953-962`** — The guide's "Later" list.
+**E75: `docs/pane-control.md:975-984`** — The guide's "Later" list (#835 reworded the bullet that named the import and `--adopt-claude-code`; the DRIVEN bullet this story deletes is unchanged).
 
-Command: `sed -n '953,962p' docs/pane-control.md | awk -v s=953 '{printf "%d\t%s\n", s+NR-1, $0}'`
+Command: `sed -n '975,984p' docs/pane-control.md | awk -v s=975 '{printf "%d\t%s\n", s+NR-1, $0}'`
 
 ~~~~text
-953	## 12. Later
-954	
-955	Deferred, so not documented here as existing; none of them is available:
-956	
-957	- applying a pane's model, effort and environment to its harness server (#829);
-958	- DRIVEN following each pane's session of record, and `reset --first` through the hub's gate (#839);
-959	- an import that leaves the panes Holler does not drive alone (#835), and adopting the fleet's Claude Code panes with
-960	  `--adopt-claude-code` after it (#831's last step);
-961	- a body that lets `holler say --pane NAME TEXT` reach a Claude Code pane (#850, after #839);
-962	- answering a Claude Code pane's permission prompt, and its `--agent` (later stories of ADR-0021 section 15);
+975	## 12. Later
+976	
+977	Deferred, so not documented here as existing; none of them is available:
+978	
+979	- applying a pane's model, effort and environment to its harness server (#829);
+980	- DRIVEN following each pane's session of record, and `reset --first` through the hub's gate (#839);
+981	- adopting the Claude Code panes the import leaves alone (#831's last step, ADR-0021 section 15, item 17; until it lands,
+982	  `--adopt-claude-code` is refused);
+983	- a body that lets `holler say --pane NAME TEXT` reach a Claude Code pane (#850, after #839);
+984	- answering a Claude Code pane's permission prompt, and its `--agent` (later stories of ADR-0021 section 15);
 ~~~~
 
 **E76: `CHANGELOG.md:8-12`** — The head of `## [Unreleased]`: the shape of an entry.
@@ -2983,44 +2986,43 @@ Command: `sed -n '88,104p' docs/setup-wizard.md | awk -v s=88 '{printf "%d\t%s\n
 104	remote_tailnet_host = "remote-a.example.ts.net"
 ~~~~
 
-**E89: `docs/adr/ADR-0021.md:1335-1355`** — #831 on `main`: item 18, `say` needs #839 and a body (#850); its last sentences say `reset --first` "waits for #850 too" once #839 moves it, and name the edit this story makes to them.
+**E89: `docs/adr/ADR-0021.md:1380-1400`** — #831 on `main`: item 18, `say` needs #839 and a body (#850); its last sentences say `reset --first` "waits for #850 too" once #839 moves it, and name the edit this story makes to them.
 
-Command: `sed -n '1335,1355p' docs/adr/ADR-0021.md | awk -v s=1335 '{printf "%d\t%s\n", s+NR-1, $0}'`
+Command: `sed -n '1380,1400p' docs/adr/ADR-0021.md | awk -v s=1380 '{printf "%d\t%s\n", s+NR-1, $0}'`
 
 ~~~~text
-1335	18. **`holler say` and the acceptance step: it needs #839, and more (checked 2026-10-11).** The scratch scenario's step "deliver
-1336	    a message to each through `holler say`" cannot be met by this story alone, for either harness:
-1337	    - The hub reaches a harness session only through a **body**: `say` sends `session/prompt` to a connected body that drives
-1338	      its harness, addressed by the body's advertised name (ADR 0014 point 5; `send_prompt` and `pane_gate` in
-1339	      `holler-hub/src/circuit/dispatch.rs`). `holler say --pane NAME` resolves the pane to its `session_of_record` and uses
-1340	      that as the address (`resolve_pane_target`), which matches no body's name: the id is an OpenCode `ses_…` or a Claude
-1341	      UUID, and the join from a body's `harness_session_id` to `Pane.session_of_record` is **#839** (DRIVEN, not built). So
-1342	      `say --pane`, its holds and its pane gate reach no real pane of either harness until #839.
-1343	    - A Claude Code pane additionally has **no body at all**: the hub constructs no adapter (decision 1 of section 5), and the
-1344	      adapter this story builds is called by the pane engine, not by a body. A body driver for it is the follow-up story **#850**.
-1345	    So this story proves delivery where it can, at `HarnessPort::send_prompt` (item 7) against `FakeClaude` and the opt-in
-1346	    real-binary test, and through `reset --first`; the `say` step of the scenario is written down, marked blocked by #839 and
-1347	    #850, and **#831 does not close on it**. Nothing here routes a prompt around the hub's gate: the Claude pane's `say` is not
-1348	    given a CLI-side path, because that would be a second enforcement site for holds and parks. **As built (plan review W4 and
-1349	    W12):** delivery is proven at `HarnessPort::send_prompt`, on `FakeClaude`, in the conformance suite's case 9 and in the
-1350	    opt-in real test. `reset --first` reaches the relaunched process (the endpoint of the record the relaunch stored), but it is
-1351	    the existing carve-out around the hub's prompt gate (section 8, the seam). Moving it to the hub's prompt path was #828's,
-1352	    which was closed on 2026-10-11 (not planned) as folded into #839: once #839 moves it, a Claude pane's `reset --first` waits
-1353	    for #850 too. **The roster, as built:** #648 merged before this story's PR, so `holler roster` reads the registry and
-1354	    prints a pane's cells on the hub row joined to it. Its rows are the sessions that bodies serve, so a Claude Code pane has
-1355	    no roster row until a body drives its session (#850); `holler pane list` and `holler pane doctor` show it now.
+1380	18. **`holler say` and the acceptance step: it needs #839, and more (checked 2026-10-11).** The scratch scenario's step "deliver
+1381	    a message to each through `holler say`" cannot be met by this story alone, for either harness:
+1382	    - The hub reaches a harness session only through a **body**: `say` sends `session/prompt` to a connected body that drives
+1383	      its harness, addressed by the body's advertised name (ADR 0014 point 5; `send_prompt` and `pane_gate` in
+1384	      `holler-hub/src/circuit/dispatch.rs`). `holler say --pane NAME` resolves the pane to its `session_of_record` and uses
+1385	      that as the address (`resolve_pane_target`), which matches no body's name: the id is an OpenCode `ses_…` or a Claude
+1386	      UUID, and the join from a body's `harness_session_id` to `Pane.session_of_record` is **#839** (DRIVEN, not built). So
+1387	      `say --pane`, its holds and its pane gate reach no real pane of either harness until #839.
+1388	    - A Claude Code pane additionally has **no body at all**: the hub constructs no adapter (decision 1 of section 5), and the
+1389	      adapter this story builds is called by the pane engine, not by a body. A body driver for it is the follow-up story **#850**.
+1390	    So this story proves delivery where it can, at `HarnessPort::send_prompt` (item 7) against `FakeClaude` and the opt-in
+1391	    real-binary test, and through `reset --first`; the `say` step of the scenario is written down, marked blocked by #839 and
+1392	    #850, and **#831 does not close on it**. Nothing here routes a prompt around the hub's gate: the Claude pane's `say` is not
+1393	    given a CLI-side path, because that would be a second enforcement site for holds and parks. **As built (plan review W4 and
+1394	    W12):** delivery is proven at `HarnessPort::send_prompt`, on `FakeClaude`, in the conformance suite's case 9 and in the
+1395	    opt-in real test. `reset --first` reaches the relaunched process (the endpoint of the record the relaunch stored), but it is
+1396	    the existing carve-out around the hub's prompt gate (section 8, the seam). Moving it to the hub's prompt path was #828's,
+1397	    which was closed on 2026-10-11 (not planned) as folded into #839: once #839 moves it, a Claude pane's `reset --first` waits
+1398	    for #850 too. **The roster, as built:** #648 merged before this story's PR, so `holler roster` reads the registry and
+1399	    prints a pane's cells on the hub row joined to it. Its rows are the sessions that bodies serve, so a Claude Code pane has
+1400	    no roster row until a body drives its session (#850); `holler pane list` and `holler pane doctor` show it now.
 ~~~~
 
-**E90: `docs/adr/ADR-0021.md:1387-1391`** — #831 on `main`: the "Deferred" DRIVEN bullet (#839) and the Claude body bullet (#850) that this story rewrites.
+**E90: `docs/adr/ADR-0021.md:1432-1435`** — #831 on `main`: the "Deferred" DRIVEN bullet (#839) and the Claude body bullet (#850) that this story rewrites (#835 shortened the second bullet: the adoption sentence moved to a bullet of its own at the end of the list).
 
-Command: `sed -n '1387,1391p' docs/adr/ADR-0021.md | awk -v s=1387 '{printf "%d\t%s\n", s+NR-1, $0}'`
+Command: `sed -n '1432,1435p' docs/adr/ADR-0021.md | awk -v s=1432 '{printf "%d\t%s\n", s+NR-1, $0}'`
 
 ~~~~text
-1387	- How the hub's DRIVEN session follows `session_of_record`: #839 (it was #654's; the wiring, #649, leaves it to the cutover).
-1388	- A body that lets `holler say --pane NAME TEXT` reach a Claude Code pane: #850 (section 15, item 18). Adopting the fleet's
-1389	  existing Claude Code panes (section 15, item 17): #831 itself, once #835 is on `main`. `pane-stalled` waits with #837's time
-1390	  source, and the `PreToolUse` gate, a permission-mode, allowed-tools and questions spec field and `--agent` for Claude are later
-1391	  stories (section 15).
+1432	- How the hub's DRIVEN session follows `session_of_record`: #839 (it was #654's; the wiring, #649, leaves it to the cutover).
+1433	- A body that lets `holler say --pane NAME TEXT` reach a Claude Code pane: #850 (section 15, item 18). `pane-stalled` waits
+1434	  with #837's time source, and the `PreToolUse` gate, a permission-mode, allowed-tools and questions spec field and `--agent`
+1435	  for Claude are later stories (section 15).
 ~~~~
 
 **E91: `crates/holler-cli/tests/pane_claude/lifecycle.rs:207-223`** — #831 on `main`: its test that `reset --first` reaches the new Claude process (through the engine's `send_prompt`); this story changes it to "refused, nothing moved".
@@ -3047,27 +3049,28 @@ Command: `sed -n '207,223p' crates/holler-cli/tests/pane_claude/lifecycle.rs | a
 223	}
 ~~~~
 
-**E92: `crates/holler-pane/src/ports.rs:25-40`** — `ports.rs` on `main`: the amendments list, with #835's required `HostPort::foreground_commands` (it reached `main` inside #831) and #831's endpoint-keyed `HarnessPort`, "so that the compiler finds every implementation".
+**E92: `crates/holler-pane/src/ports.rs:25-41`** — `ports.rs` on `main`: the amendments list, with #835's required `HostPort::foreground_commands` and `HerdrPort::observe_pane` (which lost its default) and #831's endpoint-keyed `HarnessPort`, "so that the compiler finds every implementation".
 
-Command: `sed -n '25,40p' crates/holler-pane/src/ports.rs | awk -v s=25 '{printf "%d\t%s\n", s+NR-1, $0}'`
+Command: `sed -n '25,41p' crates/holler-pane/src/ports.rs | awk -v s=25 '{printf "%d\t%s\n", s+NR-1, $0}'`
 
 ~~~~text
 25	//! - #832's: [`HerdrPort::observe_pane`] and its batch form [`HerdrPort::observe_panes`],
 26	//!   what Herdr says about a pane that no record names;
-27	//! - #835's: the required [`HostPort::foreground_commands`], the command name of each pane
-28	//!   process of a tmux session (how the import tells a pane that runs Claude Code). It is
-29	//!   required so that the compiler finds every implementation, a wrapper port included: a
-30	//!   default answers silently in place of a port a wrapper forgot to forward;
-31	//! - #831's, a second harness (ADR-0021 section 15): every [`HarnessPort`] method keyed by a
-32	//!   server's `port: u16` is keyed by a [`HarnessEndpoint`] instead (a port, or a single
-33	//!   process), the change of the port that #802 decision 2 set as the pattern, so a call
-34	//!   site that forgets the endpoint does not compile; `shown_session` and `attach_tui` take
-35	//!   one too. Four default-armed methods for a single-process harness, each defaulting to
-36	//!   the refusal [`PROCESS_UNSUPPORTED`] ([`HarnessPort::process_command`],
-37	//!   [`HarnessPort::new_session_id`], [`HarnessPort::locate_process`],
-38	//!   [`HarnessPort::login_status`]); [`ServeSpec`] gains the model and the directory; and
-39	//!   [`Activity::WaitingPermission`]. [`HarnessRouter`] is the one router of the two
-40	//!   shapes, so [`Ports`] keeps one harness.
+27	//! - #835's: the required [`HostPort::foreground_commands`], the command name of the
+28	//!   foreground process of each pane of a tmux session (how the import tells a pane that
+29	//!   runs Claude Code), and [`HerdrPort::observe_pane`] lost its default. Both are required
+30	//!   so that the compiler finds every implementation, a wrapper port included: a default
+31	//!   answers silently in place of a port a wrapper forgot to forward;
+32	//! - #831's, a second harness (ADR-0021 section 15): every [`HarnessPort`] method keyed by a
+33	//!   server's `port: u16` is keyed by a [`HarnessEndpoint`] instead (a port, or a single
+34	//!   process), the change of the port that #802 decision 2 set as the pattern, so a call
+35	//!   site that forgets the endpoint does not compile; `shown_session` and `attach_tui` take
+36	//!   one too. Four default-armed methods for a single-process harness, each defaulting to
+37	//!   the refusal [`PROCESS_UNSUPPORTED`] ([`HarnessPort::process_command`],
+38	//!   [`HarnessPort::new_session_id`], [`HarnessPort::locate_process`],
+39	//!   [`HarnessPort::login_status`]); [`ServeSpec`] gains the model and the directory; and
+40	//!   [`Activity::WaitingPermission`]. [`HarnessRouter`] is the one router of the two
+41	//!   shapes, so [`Ports`] keeps one harness.
 ~~~~
 
 **E93: `crates/holler-cli/src/roster_cmd.rs:10-16`** — #648 on `main`: the roster's module doc: a pane is a mismatch when SHOWN and DRIVEN are both known and differ.
@@ -3598,25 +3601,25 @@ Command: `sed -n '626,631p' crates/holler-hub/src/live.rs | awk -v s=626 '{print
 631	    pub async fn find_target(&self, target: &str) -> TargetLookup {
 ~~~~
 
-**E118: `crates/holler-pane/src/ports.rs:515-528`** — `Activity`, the closed answer of `session_activity` (four variants since #831; in `ports.rs`, never on the wire).
+**E118: `crates/holler-pane/src/ports.rs:573-586`** — `Activity`, the closed answer of `session_activity` (four variants since #831; in `ports.rs`, never on the wire).
 
-Command: `sed -n '515,528p' crates/holler-pane/src/ports.rs | awk -v s=515 '{printf "%d\t%s\n", s+NR-1, $0}'`
+Command: `sed -n '573,586p' crates/holler-pane/src/ports.rs | awk -v s=573 '{printf "%d\t%s\n", s+NR-1, $0}'`
 
 ~~~~text
-515	/// What a harness session is doing, as [`HarnessPort::session_activity`] reports it.
-516	#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-517	pub enum Activity {
-518	    /// Waiting for a prompt.
-519	    Idle,
-520	    /// Running a turn.
-521	    Busy,
-522	    /// Waiting for an answer to a question it asked.
-523	    HoldingQuestion,
-524	    /// Waiting for a person to answer a permission prompt (#831; Claude Code's `waiting`
-525	    /// with `permission prompt`, `sandbox request` or `worker request`). Holler does not
-526	    /// answer one in this story.
-527	    WaitingPermission,
-528	}
+573	/// What a harness session is doing, as [`HarnessPort::session_activity`] reports it.
+574	#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+575	pub enum Activity {
+576	    /// Waiting for a prompt.
+577	    Idle,
+578	    /// Running a turn.
+579	    Busy,
+580	    /// Waiting for an answer to a question it asked.
+581	    HoldingQuestion,
+582	    /// Waiting for a person to answer a permission prompt (#831; Claude Code's `waiting`
+583	    /// with `permission prompt`, `sandbox request` or `worker request`). Holler does not
+584	    /// answer one in this story.
+585	    WaitingPermission,
+586	}
 ~~~~
 
 **E119: `crates/holler-pane/src/tx_switch.rs:388-410`** — `check_idle`: the one mapping today from an `Activity` (four variants since #831) to `session-busy`, `session-holds-question` and `session-holds-permission`.
@@ -5068,26 +5071,26 @@ Command: `sed -n '149,158p' crates/holler-pane/src/pane.rs | awk -v s=149 '{prin
 158	}
 ~~~~
 
-**E178: `docs/adr/ADR-0021.md:574-588`** — ADR-0021 section 8, "Switch and reset of a single process as built (#831, section 15 item 6)": the last sentence says `reset --first` sends to the endpoint of the record the relaunch stored; this story replaces it.
+**E178: `docs/adr/ADR-0021.md:577-591`** — ADR-0021 section 8, "Switch and reset of a single process as built (#831, section 15 item 6)": the last sentence says `reset --first` sends to the endpoint of the record the relaunch stored; this story replaces it.
 
-Command: `sed -n '574,588p' docs/adr/ADR-0021.md | awk -v s=574 '{printf "%d\t%s\n", s+NR-1, $0}'`
+Command: `sed -n '577,591p' docs/adr/ADR-0021.md | awk -v s=577 '{printf "%d\t%s\n", s+NR-1, $0}'`
 
 ~~~~text
-574	**Switch and reset of a single process as built (#831, section 15 item 6).** A pane whose harness's shape is
-575	`SingleProcess` (Claude Code) has no server to create a session on and no TUI to switch, so `tx_switch` keeps its plan and
-576	replaces its act with a relaunch. The plan refuses as above (`orchestrator-pane`, `server-unhealthy` for a process that no
-577	longer runs, and for switch `session-of-other-pane`), except that a switch also refuses a pane that is not idle, since a
-578	relaunch drops the turn in flight (`session-busy`, `session-holds-question`, and `session-holds-permission` for a
-579	permission prompt, which reset refuses too), and asks for no session list. Whether the target has a conversation is the
-580	relaunch's plan's: `process_command` with the resume-only `SessionChoice::Resume` answers `session-not-found` for an id
-581	with no transcript, before anything is stopped, so a switch to an unknown id starts and records nothing, as a server
-582	pane's switch does. The act is then
-583	`tx_launch::relaunch_recorded`, the one stop, run, wait, locate and record sequence (section 15 item 6): the pane's
-584	processes stopped, its process run on the target (switch) or on a fresh session (reset), located idle, seen holding it, and
-585	recorded with its new pid by the launch engine's own compare-and-swap. A relaunch calls Herdr and the host as a launch does,
-586	and types nothing (I4). `reset --first` sends its message to the endpoint of the record the relaunch stored, the new process,
-587	never the stopped one. A failure once the relaunch entered its act ends with the reconcile step, as a failure after
-588	`select_session` does.
+577	**Switch and reset of a single process as built (#831, section 15 item 6).** A pane whose harness's shape is
+578	`SingleProcess` (Claude Code) has no server to create a session on and no TUI to switch, so `tx_switch` keeps its plan and
+579	replaces its act with a relaunch. The plan refuses as above (`orchestrator-pane`, `server-unhealthy` for a process that no
+580	longer runs, and for switch `session-of-other-pane`), except that a switch also refuses a pane that is not idle, since a
+581	relaunch drops the turn in flight (`session-busy`, `session-holds-question`, and `session-holds-permission` for a
+582	permission prompt, which reset refuses too), and asks for no session list. Whether the target has a conversation is the
+583	relaunch's plan's: `process_command` with the resume-only `SessionChoice::Resume` answers `session-not-found` for an id
+584	with no transcript, before anything is stopped, so a switch to an unknown id starts and records nothing, as a server
+585	pane's switch does. The act is then
+586	`tx_launch::relaunch_recorded`, the one stop, run, wait, locate and record sequence (section 15 item 6): the pane's
+587	processes stopped, its process run on the target (switch) or on a fresh session (reset), located idle, seen holding it, and
+588	recorded with its new pid by the launch engine's own compare-and-swap. A relaunch calls Herdr and the host as a launch does,
+589	and types nothing (I4). `reset --first` sends its message to the endpoint of the record the relaunch stored, the new process,
+590	never the stopped one. A failure once the relaunch entered its act ends with the reconcile step, as a failure after
+591	`select_session` does.
 ~~~~
 
 **E179: `CHANGELOG.md:94-99`** — `CHANGELOG.md`, the #649 item: the clause "so until #828 lands, do not use `reset --first` on a parked or held pane" that this story replaces.
@@ -5103,7 +5106,7 @@ Command: `sed -n '94,99p' CHANGELOG.md | awk -v s=94 '{printf "%d\t%s\n", s+NR-1
 99	  [#828](https://github.com/Performant-Labs/holler/issues/828) lands, do not use `reset --first` on a parked or held pane.
 ~~~~
 
-**E180: `grep -rn "Ports {" crates --include='*.rs'`** — Every `Ports { … }` literal on `main` (the struct itself and doc lines excluded): 18 literals in 16 files.
+**E180: `grep -rn "Ports {" crates --include='*.rs'`** — Every `Ports { … }` literal on `main` (the struct itself and doc lines excluded): 20 literals in 17 files.
 
 Command: `grep -rn "Ports {" crates --include='*.rs' | grep -v 'crates/holler-pane/src/ports.rs' | grep -v 'pub struct\|impl\|///\|//!' | sort`
 
@@ -5111,9 +5114,11 @@ Command: `grep -rn "Ports {" crates --include='*.rs' | grep -v 'crates/holler-pa
 crates/holler-cli/src/pane/wiring.rs:137:        Ports {
 crates/holler-cli/tests/pane_claude/rig.rs:199:        f(Ports {
 crates/holler-cli/tests/pane_integration/bind.rs:650:    let ports = Ports {
+crates/holler-cli/tests/pane_integration/observe.rs:258:    let ports = Ports {
 crates/holler-cli/tests/pane_verbs/close/rig.rs:143:        Ports {
 crates/holler-cli/tests/pane_verbs/doctor/rig.rs:176:        Ports {
-crates/holler-cli/tests/pane_verbs/import/rig.rs:246:        let ports = Ports {
+crates/holler-cli/tests/pane_verbs/import/rig.rs:247:        let ports = Ports {
+crates/holler-cli/tests/pane_verbs/import/rig.rs:263:        let ports = Ports {
 crates/holler-cli/tests/pane_verbs/launch/rig.rs:324:        f(Ports {
 crates/holler-cli/tests/pane_verbs/list.rs:72:        Ports {
 crates/holler-cli/tests/pane_verbs/park/rig.rs:98:        Ports {
@@ -5163,20 +5168,27 @@ Command: `sed -n '162,181p' crates/holler-hub/src/control.rs | awk -v s=162 '{pr
 181	}
 ~~~~
 
-**E183: `docs/adr/ADR-0021.md:1490-1498`** — ADR-0021, the end of "Decisions taken": item 29 is the last on `main` (#831 appended 22 to 28, #665 item 29); this story appends from item 30, or from the next free number once #835 has appended.
+**E183: `docs/adr/ADR-0021.md:1537-1552`** — ADR-0021, the end of "Decisions taken": item 31 is the last on `main` (#831 appended 22 to 28, #665 item 29, #835 items 30 and 31); this story appends from item 32, or from the next free number at merge time.
 
-Command: `sed -n '1490,1498p' docs/adr/ADR-0021.md | awk -v s=1490 '{printf "%d\t%s\n", s+NR-1, $0}'`
+Command: `sed -n '1537,1552p' docs/adr/ADR-0021.md | awk -v s=1537 '{printf "%d\t%s\n", s+NR-1, $0}'`
 
 ~~~~text
-1490	28. **The login variables are a fact of the kind, refused by the engine's plan** (2026-10-11, #831, section 15 item 10;
-1491	    decided under the operator's standing rules in phase F): `HarnessKind::login_variables()`, so the adapter's `env -u` list
-1492	    and the plan's `claude-login-env-refused` cannot drift, and the refusal comes before any port call.
-1493	29. **`profile rename`, `export`, `import`, `profile/rename`, `ProfileStore::rename` and the `profile-drift` finding (#665) are
-1494	    confirmed and built** (operator, 2026-10-11; decided in the plan check under the operator's standing rules, not operator
-1495	    rulings, so the operator may overturn them: the log of a rename (a `deleted` entry on the old name's log, one `renamed`
-1496	    entry on the new), the file format, and 'once per episode' read as once per pass).
-1497	
-1498	Items still open and owned by a named story are listed under "Deferred to named stories" above.
+1537	28. **The login variables are a fact of the kind, refused by the engine's plan** (2026-10-11, #831, section 15 item 10;
+1538	    decided under the operator's standing rules in phase F): `HarnessKind::login_variables()`, so the adapter's `env -u` list
+1539	    and the plan's `claude-login-env-refused` cannot drift, and the refusal comes before any port call.
+1540	29. **`profile rename`, `export`, `import`, `profile/rename`, `ProfileStore::rename` and the `profile-drift` finding (#665) are
+1541	    confirmed and built** (operator, 2026-10-11; decided in the plan check under the operator's standing rules, not operator
+1542	    rulings, so the operator may overturn them: the log of a rename (a `deleted` entry on the old name's log, one `renamed`
+1543	    entry on the new), the file format, and 'once per episode' read as once per pass).
+1544	30. **`pane import` leaves a pane whose tmux session runs Claude Code alone, and `--adopt-claude-code` will adopt it**
+1545	    (operator, 2026-10-11, #835, section 13): #654's option (b), changed to a default plus a switch. The switch is refused
+1546	    until #831's adoption step lands (section 15, item 17).
+1547	31. **`HerdrPort::observe_pane` is required** (operator, 2026-10-11, #835, section 14): the operator folded this change to
+1548	    #832's method into #835, which makes `HostPort::foreground_commands` required for the same reason. A wrapper port that
+1549	    does not forward a defaulted method answers the default silently over the real wiring, where a required method is a
+1550	    compile error.
+1551	
+1552	Items still open and owned by a named story are listed under "Deferred to named stories" above.
 ~~~~
 
 **E184: `docs/protocol/v2.md:658-658`** — `docs/protocol/v2.md` section 8, the `-32004` row: today it names only a remote `query`/`ping`; this story adds the rebind cases and the offline reason.
@@ -5187,22 +5199,34 @@ Command: `sed -n '658,658p' docs/protocol/v2.md | awk -v s=658 '{printf "%d\t%s\
 658	| `-32004` | `not_connected` | A remote `query`/`ping` for a bound token with no live socket. |
 ~~~~
 
-**E185: `crates/holler-pane/src/ports.rs:250-262`** — `HerdrPort::observe_pane` on `main`: it still has a default (#835 makes it required; **REFRESH AFTER MERGE of #835**).
+**E185: `crates/holler-pane/src/ports.rs:284-308`** — `HerdrPort::observe_pane` on `main` after #835: required, no default (the compiler finds every implementation, a wrapper port included); `observe_panes` keeps its default and a wrapper port forwards it.
 
-Command: `sed -n '250,262p' crates/holler-pane/src/ports.rs | awk -v s=250 '{printf "%d\t%s\n", s+NR-1, $0}'`
+Command: `sed -n '284,308p' crates/holler-pane/src/ports.rs | awk -v s=284 '{printf "%d\t%s\n", s+NR-1, $0}'`
 
 ~~~~text
-250	    /// What Herdr says about the pane `pane` that a record does not hold: its working
-251	    /// directory and when its screen last changed (#832). It is an observation (I6), read
-252	    /// fresh and never stored; `pane list` and `pane get` show it for a pane no record
-253	    /// names.
-254	    ///
-255	    /// The default answers an empty [`PaneObservation`]: an implementation that cannot
-256	    /// tell says so with `None` fields and never guesses, so one that does not override
-257	    /// this keeps compiling and reports nothing. `pane-not-found` when Herdr has no such
-258	    /// pane.
-259	    fn observe_pane(&self, pane: &PaneId) -> Result<PaneObservation, PaneError> {
-260	        let _ = pane;
-261	        Ok(PaneObservation::default())
-262	    }
+284	    /// What Herdr says about the pane `pane` that a record does not hold: its working
+285	    /// directory and when its screen last changed (#832). It is an observation (I6), read
+286	    /// fresh and never stored; `pane list` and `pane get` show it for a pane no record
+287	    /// names.
+288	    ///
+289	    /// An implementation that cannot tell says so with `None` fields (an empty
+290	    /// [`PaneObservation`]) and never guesses. `pane-not-found` when Herdr has no such pane.
+291	    ///
+292	    /// Required since #835, with no default. The default answered an empty observation, so a
+293	    /// wrapper port that did not forward it reported nothing, silently, over the real wiring;
+294	    /// now the compiler finds every implementation.
+295	    fn observe_pane(&self, pane: &PaneId) -> Result<PaneObservation, PaneError>;
+296	
+297	    /// [`HerdrPort::observe_pane`] for several panes at once: one observation for each of
+298	    /// `panes`, in the same order, where a pane that cannot be observed (Herdr does not have
+299	    /// it, or the call failed) reports an empty one. A list of many unmanaged panes costs one
+300	    /// call to Herdr when the implementation can read them together; the default asks about
+301	    /// each pane in turn. A wrapper port overrides it to forward the batch, so that a list
+302	    /// stays one call to the port it wraps.
+303	    fn observe_panes(&self, panes: &[PaneId]) -> Vec<PaneObservation> {
+304	        panes
+305	            .iter()
+306	            .map(|pane| self.observe_pane(pane).unwrap_or_default())
+307	            .collect()
+308	    }
 ~~~~
