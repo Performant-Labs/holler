@@ -27,7 +27,7 @@ mod support;
 use std::time::Duration;
 
 use support::raw_ws::live_socket;
-use support::remote_admin_rig::{mutate_credential, run, spawn_cmd, two_dir_rig};
+use support::remote_admin_rig::{joined_rig, mutate_credential, presence_frame, run, spawn_cmd, two_dir_rig, wait_past_second};
 use support::{hub_status_json, join, mint_token, roster_json, wait_for, write_sessions_toml, Body, Hub, StateDir, STARTUP_WAIT};
 
 // ---------------------------------------------------------------------------
@@ -172,15 +172,8 @@ async fn remote_admin_hello_must_not_create_a_roster_row_from_presence() {
         "no roster row should exist right after an admin hello with no presence sent yet"
     );
 
-    let presence = serde_json::json!({
-        "jsonrpc": "2.0",
-        "method": "session/presence",
-        "params": {
-            "hostname": "admin-only",
-            "sessions": [{ "name": "phantom", "harness": "opencode", "state": "idle", "mode": "spawn" }],
-        },
-    });
-    futures_util::SinkExt::send(&mut admin, tokio_tungstenite::tungstenite::Message::text(presence.to_string()))
+    let presence = presence_frame("admin-only", "phantom");
+    futures_util::SinkExt::send(&mut admin, tokio_tungstenite::tungstenite::Message::text(presence))
         .await
         .expect("send session/presence on the admin socket");
 
@@ -357,32 +350,52 @@ fn remote_admin_does_not_supersede_the_body() {
 }
 
 /// **AC 4 (second half).** Admin traffic (`admin/roster`, `admin/status`, run
-/// twice each with a pause between) must never move the body's own roster
-/// row's `last_seen` (roster.rs:162) — the hazard-free half AC 4 pins beyond
-/// "no row is created" (already covered by
+/// twice each) must never move the body's own roster row's `last_seen`
+/// (roster.rs:162) — the hazard-free half AC 4 pins beyond "no row is
+/// created" (already covered by
 /// `remote_admin_hello_must_not_create_a_roster_row_from_presence`).
-#[test]
-fn remote_admin_traffic_never_moves_the_bodys_last_seen() {
-    let (hub_state, body_state, hub, body, _token_id, ws_url) = two_dir_rig(&[("alpha", &[])]);
+///
+/// The body is a hand-rolled socket that sends one `session/presence` and
+/// then nothing (#847): a real `holler body run` heartbeats on its own
+/// schedule and legitimately moves `last_seen`, which made this test a
+/// wall-clock window over an uncontrolled writer. Time is made to pass by
+/// waiting for the wall clock to cross a second boundary BEFORE the admin
+/// calls, so a hub that did touch the row would stamp a later second.
+#[tokio::test]
+async fn remote_admin_traffic_never_moves_the_bodys_last_seen() {
+    // The silent body never sends a second frame, so pin the hub's liveness
+    // timeout far above the test's length: it defaults to 3 x
+    // `HOLLER_HEARTBEAT_INTERVAL_MS`, which an ambient short heartbeat would
+    // shrink below the test's own runtime and get the silent body torn down.
+    let (hub_state, body_state, hub, token_id) = joined_rig(&[("HOLLER_HUB_LIVENESS_TIMEOUT_MS", "120000")]);
+    let ws_url = hub.ws_url();
+    let mut body_ws = live_socket(&body_state, &hub, &token_id, "silent-body", "body").await;
+    futures_util::SinkExt::send(&mut body_ws, tokio_tungstenite::tungstenite::Message::text(presence_frame("silent-body", "alpha")))
+        .await
+        .expect("send the silent body's one session/presence");
+    wait_for(STARTUP_WAIT, || roster_json(&hub_state)["rows"].as_array()?.first().map(|_| ()))
+        .expect("the silent body's row never appeared");
 
     let before = roster_json(&hub_state);
     let last_seen_before = before["rows"][0]["last_seen"].as_u64().expect("last_seen is a number");
+    wait_past_second(last_seen_before);
 
-    std::thread::sleep(Duration::from_secs(2)); // last_seen is whole seconds; make a moved value observable.
-
-    let roster_out = run(&body_state, &["roster", "--server", &ws_url, "--json"]);
-    assert!(roster_out.status.success(), "{}", String::from_utf8_lossy(&roster_out.stderr));
-    let status_out = run(&body_state, &["hub", "status", "--server", &ws_url, "--json"]);
-    assert!(status_out.status.success(), "{}", String::from_utf8_lossy(&status_out.stderr));
+    for _ in 0..2 {
+        let roster_out = run(&body_state, &["roster", "--server", &ws_url, "--json"]);
+        assert!(roster_out.status.success(), "{}", String::from_utf8_lossy(&roster_out.stderr));
+        let status_out = run(&body_state, &["hub", "status", "--server", &ws_url, "--json"]);
+        assert!(status_out.status.success(), "{}", String::from_utf8_lossy(&status_out.stderr));
+    }
 
     let after = roster_json(&hub_state);
-    let last_seen_after = after["rows"][0]["last_seen"].as_u64().expect("last_seen is a number");
+    assert_eq!(after["rows"][0]["conn_state"], "connected", "AC 3: the silent body stays connected, not superseded: {after}");
     assert_eq!(
-        last_seen_before, last_seen_after,
+        after["rows"][0]["last_seen"].as_u64().expect("last_seen is a number"),
+        last_seen_before,
         "AC 4: admin/roster and admin/status traffic must never touch the body's last_seen: before={before} after={after}"
     );
 
-    body.stop(&body_state, Duration::from_secs(10));
+    drop(body_ws);
     drop(hub);
 }
 
