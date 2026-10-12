@@ -64,6 +64,11 @@ path = "tests/bound_token_lifetime_test.rs"
 name = "cli_invocation_test"
 path = "tests/cli_invocation_test.rs"
 
+# Issue #851: the commit resolver shared with build.rs through #[path].
+[[test]]
+name = "build_version_test"
+path = "tests/build_version_test.rs"
+
 [[test]]
 name = "logging_test"
 path = "tests/logging_test.rs"
@@ -203,6 +208,14 @@ path = "tests/talk_test.rs"
 [[test]]
 name = "roster_cli_test"
 path = "tests/roster_cli_test.rs"
+
+# Story #648: the roster's pane columns, summary line, `--profile` and envelope,
+# in-process over the test kit's fakes (`roster_cmd::render`), with the golden
+# tables under tests/fixtures/roster_panes/. The process cases are in
+# `roster_cli_test`.
+[[test]]
+name = "roster_panes_test"
+path = "tests/roster_panes_test.rs"
 
 # Issue #255: proves `Roster::sweep()` actually runs inside the production
 # hub process (a dedicated background task, not just the unit tests'

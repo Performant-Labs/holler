@@ -23,6 +23,20 @@ fills this file in at release time.
   `holler profile show NAME` makes: one finding per drifted pane per pass, naming the fields and no value, with no
   remedy. A pass reads the profiles once, and only when a pane in scope names a profile.
   [ADR 0021](docs/adr/ADR-0021.md) records the rename transaction, the file format and the finding.
+- Pane control, the apply rehearsal (epic [#633](https://github.com/Performant-Labs/holler/issues/633)): an opt-in
+  scenario runs `holler profile apply` and the pane verbs around it on a scratch Herdr, tmux and OpenCode that it starts
+  itself ([#667](https://github.com/Performant-Labs/holler/issues/667);
+  `HOLLER_TEST_PANE_INTEGRATION=1 cargo test -p holler-cli --test profile_apply_scenario -- --ignored --test-threads=1`).
+  It shares the scratch set of #649, whose helpers moved into one place. Tests only: no behaviour change.
+- `holler --version` (and `-V`) names the commit the binary was built from, after the version: `holler 0.4.0 (bda1069)`
+  ([#851](https://github.com/Performant-Labs/holler/issues/851)). Until now every build since a release printed the same
+  `holler 0.4.0`, so a person could not tell which code they were running. The first two words are unchanged. The commit
+  is the 7-character hash of the checkout's `HEAD`, followed by `-dirty` when a tracked file had changed; a build with no
+  git checkout (a source archive) uses the build-time variable `HOLLER_GIT_SHA`, and otherwise prints `unknown`. The
+  `version` field that `hub status`, `hub query status`, `body query status` and `caps` print carries the same string, so
+  `hub status` begins `hub 0.4.0 (bda1069) (protocol 3)`; no field is added. A release binary is built from a checkout of
+  its tag, so it names the tag's commit, and the Homebrew formula, which installs that binary, needs no change.
+  `docs/releasing.md` says when the build works the commit out again.
 - Pane control, the operator guide (epic [#633](https://github.com/Performant-Labs/holler/issues/633)): [`docs/pane-control.md`](docs/pane-control.md) documents every `holler pane` and `holler profile` verb ([#652](https://github.com/Performant-Labs/holler/issues/652)).
   It states the rule that only pane verbs change a registry (OpenCode) pane and that a Claude Code pane stays outside
   the registry, how to read `pane list` and `pane doctor`, the `profile apply` reference, grid notation, the JSON
@@ -30,6 +44,18 @@ fills this file in at release time.
   section "Restarting a pane on another model" of `docs/orchestrating.md` now leads with `holler pane relaunch`, says
   that its `--model` is recorded and not yet applied to the server (#829), and keeps `scripts/pane-restart` as the
   fallback until the 7-day sign-off of the cutover (#654), and as the only restart path of a Claude Code pane. A docs test pins the guide to the code's own tables. No behaviour changes.
+- The roster shows the pane (epic [#633](https://github.com/Performant-Labs/holler/issues/633),
+  [#648](https://github.com/Performant-Labs/holler/issues/648)): `holler roster` appends the columns PANE, POS, PROFILE,
+  HEALTH, SHOWN and DRIVEN after HOLD, read from the pane registry as `holler pane list` prints them (`-` for a session
+  with no pane), and prints `N pane(s) show a different session than the hub drives: <names>` as its first line when
+  a pane's SHOWN and DRIVEN are both known and differ. `roster --profile NAME` lists only that profile's panes (it was
+  refused with `not implemented (story #648)`; an unknown profile is refused `profile-not-found`, exit 3),
+  `roster --format=json` prints the JSON envelope with `data.rows` and `data.mismatches`, and `roster --json` keeps its
+  shape and gains the keys `pane`, `pos`, `profile`, `health`, `shown` and `driven` (additive, so MINOR under ADR 0003).
+  The roster makes no call to Herdr, tmux or OpenCode and shows no unmanaged pane. With `--server` the new columns are
+  `-`, since the registry is the local hub's, and `--profile` with `--server` is a usage error (exit 2). A registry that
+  cannot answer leaves the columns `-` and prints one `note:` line on stderr. DRIVEN is `-` until the hub's DRIVEN
+  session is recorded (#839).
 - Pane control is wired (epic [#633](https://github.com/Performant-Labs/holler/issues/633)): every `holler pane` and
   `holler profile` verb, and `say`, `interrupt` and `answer` with `--pane`, now run against the hub's pane and profile
   registries and the real Herdr, tmux and OpenCode adapters, where they answered `not-implemented` before

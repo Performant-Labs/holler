@@ -15,7 +15,8 @@
 //! lazy ports (`bind`), and the scenario's guards as pure functions (`guards`). The
 //! scenario itself (`scenario`) is `#[ignore]` and runs only with
 //! `HOLLER_TEST_PANE_INTEGRATION=1` exactly, on scratch instances it starts itself
-//! (`scratch`).
+//! (`scratch`). `out` and `scratch` are shared with the `profile_apply_scenario` target
+//! (#667), which includes them by path.
 //!
 //! **The state-dir lock.** The store clients reach the hub through
 //! `holler_hub::control::run`, which reads `HOLLER_STATE_DIR` from this process on every
@@ -36,6 +37,7 @@ mod fake_hub;
 mod guards;
 mod no_hub;
 mod observe;
+mod out;
 mod scenario;
 mod scratch;
 mod store_only;
@@ -43,10 +45,9 @@ mod watch;
 mod wired;
 
 use std::path::Path;
-use std::process::Command;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
-use holler_pane_testkit::envelope::{check_envelope, Envelope};
+pub use out::{output_of, Out};
 
 /// Held while an in-process test points `HOLLER_STATE_DIR` at its own hub.
 static STATE_DIR_LOCK: Mutex<()> = Mutex::new(());
@@ -95,44 +96,6 @@ pub fn with_env<R, V: AsRef<std::ffi::OsStr>>(
         }
     }
     result.unwrap_or_else(|panic| std::panic::resume_unwind(panic))
-}
-
-/// What one run of the `holler` binary produced.
-#[derive(Debug)]
-pub struct Out {
-    pub code: i32,
-    pub stdout: String,
-    pub stderr: String,
-}
-
-impl Out {
-    /// Stdout as exactly one envelope that agrees with the exit code (#638's checker).
-    pub fn envelope(&self) -> Envelope {
-        check_envelope(&self.stdout, self.code)
-            .unwrap_or_else(|fault| panic!("stdout is one envelope: {fault}: {self:?}"))
-    }
-
-    /// The error code of the envelope on stdout.
-    pub fn error_code(&self) -> Option<String> {
-        self.envelope().error.map(|e| e.code)
-    }
-
-    /// The `data` of a successful envelope on stdout.
-    pub fn data(&self) -> serde_json::Value {
-        let envelope = self.envelope();
-        assert!(envelope.ok, "a successful envelope: {self:?}");
-        envelope.data
-    }
-}
-
-/// Run `command` to its end and collect what it printed.
-pub fn output_of(mut command: Command) -> Out {
-    let output = command.output().expect("run the holler binary");
-    Out {
-        code: output.status.code().expect("holler exited, not killed"),
-        stdout: String::from_utf8(output.stdout).expect("stdout is UTF-8"),
-        stderr: String::from_utf8(output.stderr).expect("stderr is UTF-8"),
-    }
 }
 
 /// The variables a verb run of the default run never inherits: anything that could point
