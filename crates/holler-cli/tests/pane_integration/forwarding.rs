@@ -1,6 +1,6 @@
 //! #647 part 2, wrapper forwarding (brief W1 and W3): the wiring's two host wrappers forward
-//! the required `HostPort::attached_clients` faithfully. `attached_clients` has no default, so
-//! a wrapper that leaves it out does not compile; these tests catch the other failure, a
+//! the required `HostPort::attached_clients` and (#831) `HostPort::foreground_pids` faithfully.
+//! Neither has a default, so a wrapper that leaves one out does not compile; these tests catch the other failure, a
 //! wrapper that compiles and forwards wrongly (answers a constant, drops the name, calls
 //! another inner method). Over a recording inner host that answers `Ok(7)` for one name and an
 //! error for another, each wrapper answers what the inner host did, and the inner host saw one
@@ -74,6 +74,14 @@ impl HostPort for Counting {
         self.note("foreground_commands", name);
         Ok(vec!["sh".to_owned()])
     }
+    fn foreground_pids(&self, name: &PaneName) -> Result<Vec<u32>, PaneError> {
+        self.note("foreground_pids", name);
+        if name.as_str() == SEVEN {
+            Ok(vec![4242, 4243])
+        } else {
+            Err(unreadable())
+        }
+    }
     fn attached_clients(&self, name: &PaneName) -> Result<u32, PaneError> {
         self.note("attached_clients", name);
         if name.as_str() == SEVEN {
@@ -94,10 +102,22 @@ fn assert_forwards(wrapper: &dyn HostPort, inner: &Counting, what: &str) {
         "{what}: the inner host's error, as it is"
     );
     assert_eq!(
+        wrapper.foreground_pids(&name(SEVEN)),
+        Ok(vec![4242, 4243]),
+        "{what}: foreground_pids, as the inner host answered"
+    );
+    assert_eq!(
+        wrapper.foreground_pids(&name(FAILING)),
+        Err(unreadable()),
+        "{what}: the inner host's error from foreground_pids, as it is"
+    );
+    assert_eq!(
         inner.calls(),
         vec![
             ("attached_clients", SEVEN.to_owned()),
             ("attached_clients", FAILING.to_owned()),
+            ("foreground_pids", SEVEN.to_owned()),
+            ("foreground_pids", FAILING.to_owned()),
         ],
         "{what}: one inner call per ask, with the name given"
     );
@@ -129,7 +149,7 @@ fn the_binding_host_over_the_wired_host_forwards_attached_clients() {
 }
 
 /// W3: a `WiredHost` built from a misconfiguration answers that error from `attached_clients`,
-/// as from every other method, and never a count.
+/// as from every other method, and never a count (nor, #831, a list of pids).
 #[test]
 fn a_misconfigured_wired_host_answers_its_error_from_attached_clients() {
     let wired = WiredHost::new(Err(PaneError::Usage {
@@ -138,6 +158,11 @@ fn a_misconfigured_wired_host_answers_its_error_from_attached_clients() {
     let error = wired
         .attached_clients(&name(SEVEN))
         .expect_err("a misconfigured host has no count");
+    let pids = wired
+        .foreground_pids(&name(SEVEN))
+        .expect_err("a misconfigured host has no pids");
+    assert_eq!(pids.code(), "usage", "{pids}");
+    assert!(pids.to_string().contains("HOLLER_TMUX_SOCKET"), "{pids}");
     assert_eq!(error.code(), "usage", "{error}");
     assert!(error.to_string().contains("HOLLER_TMUX_SOCKET"), "{error}");
 }

@@ -6,9 +6,16 @@
 //! `import/join.rs`; the readers of the files and their secrets are `import/sources.rs`; the
 //! dry run, the real run's writes and their undo are `import/writes.rs`. The finding
 //! vocabulary's code table is `crates/holler-pane/tests/import_test.rs`. A pane whose tmux
-//! session runs Claude Code, and the `--adopt-claude-code` switch (#835), are
-//! `import/harness.rs`.
+//! session runs Claude Code is `import/harness.rs` (#835), and `--adopt-claude-code` (#831) is
+//! `import/adopt.rs` (the record), `adopt_problems.rs` (what stops an adoption), `adopt_fleet.rs`
+//! (an existing `fleet`, re-runs and the dry run) and `adopt_undo.rs` (the undo), over the rig
+//! of `adopt_rig.rs`.
 
+mod adopt;
+mod adopt_fleet;
+mod adopt_problems;
+mod adopt_rig;
+mod adopt_undo;
 mod harness;
 mod join;
 pub(crate) mod rig;

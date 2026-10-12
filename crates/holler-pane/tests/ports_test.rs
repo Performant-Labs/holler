@@ -220,6 +220,10 @@ impl HostPort for TestHost {
     fn foreground_commands(&self, _name: &PaneName) -> Result<Vec<String>, PaneError> {
         Ok(vec!["bash".to_string()])
     }
+    // Required since #831: the adoption reads the foreground process group's pids.
+    fn foreground_pids(&self, _name: &PaneName) -> Result<Vec<u32>, PaneError> {
+        Ok(vec![4242])
+    }
     // Required since #647 part 2.
     fn attached_clients(&self, _name: &PaneName) -> Result<u32, PaneError> {
         Ok(1)
