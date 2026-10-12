@@ -709,15 +709,17 @@ One step per spec pane, in creation order (below); the first matching row applie
   launch for a step's spec is refused with the open code `spec-not-launchable`.
 - **A refused run prints only the refusal** (#853), as a failed run prints only the failure: in JSON the failure
   envelope, whose `error.code` is the first refused step's code and whose message is
-  `apply refused <N> step(s): <pane> (<code>), ...; <M> other step(s) ran`; in text one `error:` line on stderr and
-  nothing on stdout. To read the steps as data, run `holler profile apply NAME --dry-run` (exit 0) or read
+  `apply refused <N> step(s): <pane> (<code>), ...; <M> other step(s) ran`, then, for each refused step whose launch
+  or relaunch had begun its act, `; <pane>: <detail>` (its detail ends with the command that reconciles, and carries a
+  take-over note when there is one); in text one `error:` line on stderr and nothing on stdout. To read the steps as data, run `holler profile apply NAME --dry-run` (exit 0) or read
   `holler pane list` and `holler profile show NAME` afterwards.
 - **A failure stops it.** A `failed` step (`unavailable`, `timeout`, a failed health call, a store conflict) stops the
   run, and the later steps are `skipped`. A run that ends with a `failed` step prints **only the failure**: in JSON the
   failure envelope, whose `error.code` is the failed step's code and whose message is
   `apply stopped at <pane> (<action>): <step error message>; <N> later step(s) skipped`; in text one `error:` line on
   stderr and nothing on stdout. So `skipped` appears only in that count. A dry run with a failed step prints no plan.
-- A step refused or failed after its launch or relaunch had begun carries the command that reconciles.
+- A step refused or failed after its launch or relaunch had begun carries the command that reconciles, in the failure or
+  refusal line when the run exits non-zero.
 - **`--dry-run`** prints the plan as the same table (for a run that does not fail), runs no probe, issues no split and
   writes nothing. It exits 0 even when the plan has a `refused` step, as the dry run of `pane import` exits 0 on a plan
   with problems; only a real run exits 3. `data` is `{"profile": NAME, "dry_run": bool, "steps": [...]}`, every key always present.

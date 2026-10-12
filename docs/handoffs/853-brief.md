@@ -68,7 +68,7 @@ Committed before any code, in `docs/adr/ADR-0021.md`, `docs/adr/ADR-0003.md` and
   `reported` step still exits 0. Refusals still do not stop the run: every step runs, and nothing is rolled back.
 - **Output:** the run then prints only the failure, because the shared envelope has no `data` on a failure (`check_envelope`:
   `ok` is exactly "exit 0", `DataOnFailure`). JSON: the failure envelope, `error.code` the first refused step's code (step
-  order), message `apply refused <N> step(s): <pane> (<code>), ...; <M> other step(s) ran`. Text: one `error:` line on stderr,
+  order), message `apply refused <N> step(s): <pane> (<code>), ...; <M> other step(s) ran`, then for each refused step that had begun its act `; <pane>: <detail>` (the detail ends with the reconcile step, once, and carries a take-over note; A's finding 1, decided in the amendment). Text: one `error:` line on stderr,
   nothing on stdout. The operator chose this over changing the envelope. A script that needs the steps as data runs
   `--dry-run` first (exit 0).
 - **`--dry-run` is not changed** (exit 0 whatever it plans): the verbs' dry runs do not refuse; `pane import`'s dry run exits 0
@@ -88,20 +88,34 @@ Committed before any code, in `docs/adr/ADR-0021.md`, `docs/adr/ADR-0003.md` and
 
 1. **The order, pure.** A unit test of the order: cells given in any order, in one workspace and in several, come out
    column-1-by-row first and then by row and column; workspaces keep their order; two specs of one cell keep P's order.
-2. **The fix, on the fakes.** `profile apply` of a four-pane 2x2 profile with no records, on the testkit's fake Herdr (which
-   plans with the real `plan_splits`), creates all four and none is `grid-unreachable`. It fails with the old order.
+2. **The fix, on the fakes.** The decision (A's finding 2): the testkit's `FakeHerdr` does not plan with `plan_splits`; its
+   `Placement::SplitOnly` (`herdr.rs:471-493`) is looser than the adapter's rule, and the apply rig uses
+   `Placement::Absolute`. So **extend `SplitOnly` to ADR-0021 section 10's rule** (a new row only at column 1, below a last
+   row of one pane; a new cell of an existing row only right of the row's last pane) and update its own tests; add a
+   cross-check in `crates/holler-adapter-herdr/tests/` that the fake accepts a cell exactly when `plan_splits` plans one
+   step for it (the testkit cannot depend on the adapter). Then `profile apply` of a four-pane 2x2 profile with no records,
+   on a rig set to `SplitOnly`, creates all four and none is `grid-unreachable`; it fails (r2c1 refused) with the old order.
+   Do not add a new double in the `holler-cli` tests or widen `holler-pane`'s API.
 3. **The fix, on the scratch set.** A new test in `crates/holler-cli/tests/profile_apply_scenario/`, opt-in
    (`HOLLER_TEST_PANE_INTEGRATION=1`) and `#[ignore]`, modelled on the spike: an empty 2-row-by-2-column workspace and a profile
    of four panes; apply creates all four, the adapter lists them at `r1c1`, `r1c2`, `r2c1`, `r2c2`, and a second apply adopts all
    four. The rig's `WORKSPACES` gets a `2x2` workspace for it. The scratch needs a Herdr that speaks protocol 22 (0.9.1) first on
    `PATH`; on a machine where an older one comes first the opted-in run fails at connect, and the test says so.
-4. **The remaining limit and the exit code.** With a live `r1c1` and `r1c2` and a spec `r2c1`, apply's `r2c1` step is `refused`
-   with `grid-unreachable`, the run exits **3**, JSON is the failure envelope with `error.code` `grid-unreachable` and the
-   one-line `apply refused 1 step(s): ...` message, text is one `error:` line, and the other steps still ran. Also: a `failed`
-   step with a refused one still exits 1; a `reported` step alone exits 0; a dry run that plans a refusal exits 0 with the plan.
-5. **The old order is unpinned everywhere.** Every test that pins `(workspace, row, col)` order (the list in "Blast radius") is
-   updated to the new order, and each still proves what it proved before.
-6. **The text.** `tx_apply.rs`'s module doc and doc comments, `profile/apply.rs`'s module doc, ADR-0021, ADR-0003, the guide and
+4. **The remaining limit and the exit code.** On `SplitOnly`, with a live `r1c1` and `r1c2` and a spec `r2c1`, apply's `r2c1`
+   step is `refused` with `grid-unreachable`, the run exits **3**, JSON is the failure envelope with `error.code`
+   `grid-unreachable` and the one-line `apply refused 1 step(s): ...` message, text is one `error:` line, and the other steps
+   still ran. Also: a `failed` step with a refused one still exits 1; a `reported` step alone exits 0; a dry run that plans a
+   refusal exits 0 with the plan. **Acted refusal (A's finding 1):** a refused step whose launch had begun its act (a
+   `verify_serving`-style refusal, as `rows.rs:544 a_refusal_after_the_act_began_names_the_reconcile_step` builds) exits 3 and
+   its one line ends with that step's detail, which ends with the reconcile step, in both formats; a take-over note is carried
+   the same way.
+5. **The old order is unpinned everywhere.** Every test that pins `(workspace, row, col)` order or exit 0 beside a refused step
+   (the list in "Blast radius") is updated, and each still proves what it proved before. **Not** `fake_herdr_test.rs:536`
+   (`snapshot_lists_panes_by_workspace_then_row_then_col` pins the fake's snapshot listing, which matches the real adapter's and
+   must not change).
+6. **The text.** `tx_apply.rs`'s module doc and doc comments (`cell_key`'s own doc names `plan_splits` as the rule it mirrors; the
+   key stays private inside `cell_key`, e.g. `(workspace, col != 1, row, col)`), `profile/apply.rs`'s module doc **and the
+   `ProfileApply` clap doc at lines 34-51 (the `--help` text, which states both old rules)**, ADR-0021, ADR-0003, the guide and
    `CHANGELOG.md` (Bug Fixes, linking #853, both the order and the exit code) say the new behaviour.
 
 ## Pipeline
@@ -111,14 +125,24 @@ orders: self-merge on green CI, an S pass and a clean PR-agent score.
 
 ## Blast radius and hot files
 
-- **Production:** `crates/holler-pane/src/tx_apply.rs` (`cell_key`, the module doc at line 21, the doc comments at lines 103
-  and 331) and `crates/holler-cli/src/profile/apply.rs` (the exit decision, a refused-run message beside `stopped`, the module
-  doc). Nothing else in `holler-pane`, `holler-adapter-herdr` or `holler-cli` changes. No consumer of apply's output exists on
-  `main` (the wizard, #803, is parked).
-- **Tests that state or pin the old order** (T updates them): `crates/holler-cli/tests/profile_verbs/apply/rows.rs`
-  (`one_run_takes_every_row_in_grid_order`), `crates/holler-cli/tests/profile_apply_scenario/probe.rs:133` and
-  `scenario.rs:238`, and `crates/holler-pane-testkit/tests/fake_herdr_test.rs:536`. Each may or may not change in outcome,
-  depending on its cells; T decides by running them.
+- **Production:** `crates/holler-pane/src/tx_apply.rs` (`cell_key` and its doc, the module doc at line 21, the doc comments at
+  lines 103 and 331; no public order API) and `crates/holler-cli/src/profile/apply.rs` (the exit decision; `refused()` beside
+  `stopped()`, reusing `reconcile_step` and each step's `acted`; the module doc and the `ProfileApply` clap doc). Exit codes
+  come from `class_of` alone (no table in the verb). No consumer of apply's output exists on `main` (the wizard, #803, is parked).
+- **Test kit (A's finding 2):** `crates/holler-pane-testkit/src/herdr.rs` (`Placement::SplitOnly`, `check_split`) and
+  `crates/holler-pane-testkit/tests/fake_herdr_test.rs` (its SplitOnly tests, lines ~191-218), plus a cross-check test in
+  `crates/holler-adapter-herdr/tests/`. `holler-pane-testkit` does not depend on the adapter and must not start to.
+- **Tests that state or pin the old order or exit 0 beside a refused step** (T updates them; A's findings 3 and 4):
+  `profile_verbs/apply/rows.rs` (`one_run_takes_every_row_in_grid_order`; `:182`, whose outcome order becomes r1c1, r2c1, r1c2;
+  `:544 a_refusal_after_the_act_began_names_the_reconcile_step`, now exit 3), `profile_verbs/apply/rig.rs:462 EVERY_ROW` (becomes
+  a, d, b, c, e, f) and its doc lines 422 and 461 (this file is on the parked #835 branch: touch only those lines),
+  `profile_verbs/apply/dry_run.rs:20,63` (wording "in grid order"), and the comments at `profile_apply_scenario/probe.rs:133`
+  and `scenario.rs:238` (their outcomes do not change: every scratch workspace there has one cell per column). **Not**
+  `fake_herdr_test.rs:536`. The scratch rig's `WORKSPACES` doc (`pane_integration/scratch/mod.rs:97`, "each 2 rows by 1
+  column") is updated for the new 2x2 entry; if the test side needs an extent, parse it from `WORKSPACES`.
+- **New tests go in a new file** under `profile_verbs/apply/` (e.g. `order.rs`), registered in `profile_verbs/apply.rs`, not in
+  `rows.rs` (594 lines) or `rig.rs` (775 lines). Acceptance 1 tests the key in an in-file `#[cfg(test)]` module of `tx_apply.rs`
+  or through a dry run on the rig; it does not widen the API.
 - **Docs:** `docs/adr/ADR-0021.md`, `docs/pane-control.md`, `CHANGELOG.md`.
 - **Overlap with other branches:** `issue-835-implementation` (parked) edits `docs/adr/ADR-0021.md`, `docs/pane-control.md`,
   `CHANGELOG.md` and `crates/holler-cli/tests/profile_verbs/apply/rig.rs`. This story does not touch `rig.rs`'s #835 lines; the
