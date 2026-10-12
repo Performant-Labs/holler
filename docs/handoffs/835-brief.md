@@ -165,3 +165,16 @@ The operator decided to fold the #832 flaw into this story. The issue text at th
 ### R3-5. Out of scope
 
 The source of an unmanaged pane's last screen change is #837 (an open spike). This story makes the existing value reach `pane list` over the real wiring; it does not look for a new source.
+
+## Round 5: merge `origin/main` into the branch (operator-authorised extra run, 2026-10-12)
+
+**Why.** S's third audit (`docs/handoffs/835/handoff-S.md`, cycle 3, verdict REWORK) found that `main` moved while the story was parked. PR #857 (part of #831) landed this story's own names (`HostPort::foreground_commands`, `CLAUDE_CODE_COMMAND`, `is_claude_code_command`, host conformance case 10, the forwards) and ADR-0021 section 15, whose item 17 and decision 23 decide the adoption route (a re-run of `pane import --adopt-claude-code` that extends the existing profile). This changes no contract and no scope: the issue, rounds 1 to 3 and the behaviour stand. It is branch upkeep plus prose.
+
+**The work list is S's REWORK in `docs/handoffs/835/handoff-S.md`, section "Verdict", items 1 (a to e) and 2 (a to i). Do exactly that list, nothing else.**
+
+- Run `git fetch origin`, then `git merge --no-commit --no-ff origin/main` and resolve all 10 conflicts. Leave the merge uncommitted: the pipeline's phase commit records it as a two-parent commit. Stage by explicit path.
+- Keep #857's names and positions. There must be exactly one `CLAUDE_CODE_COMMAND` and one `is_claude_code_command`. Renumber this story's ADR-0021 decisions 22 and 23 to follow `main`'s. Keep one adoption entry under "Deferred to named stories".
+- Resolving the merge conflicts in test files named in S's item 1d (`wired.rs`, `ports_test.rs`, `claude_code_rule_test.rs`, `docs_pane_control_test.rs`) is authorised as part of the merge; take both sides' meaning as S's table says. This is not new test authorship. T-green reviews the merged tests.
+- The statements of the rule's limits (foreground process, the command name only, an exact `claude`, the three limits, "a default, not a proof") stay exactly as they are on the branch. Do not reword them.
+- Prose that says the adoption waits for the Claude Code harness must say it waits for #831's adoption step (ADR-0021 section 15, item 17 and decision 23), per S's item 2.
+- After the merge, `git merge-tree --write-tree HEAD origin/main` must be clean, `cargo build --workspace --all-targets` must pass, and the full Tier 1 must be green.
