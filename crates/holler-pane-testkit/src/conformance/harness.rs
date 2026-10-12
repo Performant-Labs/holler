@@ -40,10 +40,19 @@
 //! `unavailable`, checked first (case 17). What a turn's agent is, and which agents dispatch,
 //! need turns and agents the port cannot make; the fake's own tests and the adapter's
 //! fixtures pin them.
+//!
+//! `compact` (#878, ADR-0021 "Compaction") is read through the port as far as any harness
+//! agrees without a model to spend: a port with no server is `unavailable`, checked first
+//! (case 18); an id the server does not know is `session-not-found` (case 19); and a call on a
+//! known session either compacts, with a context that shrank, or is refused with the code of
+//! a harness that cannot (`compact-unsupported`) or has no model to run it on
+//! (`compact-model-unpinned`) (case 20). Nothing here can make a session busy through the
+//! port, so a busy session's `session-busy` and "nothing was sent" are pinned by the fake's
+//! own tests and the adapter's stub tests.
 
 use std::time::Instant;
 
-use holler_pane::ports::AGENT_UNSUPPORTED;
+use holler_pane::ports::{AGENT_UNSUPPORTED, COMPACT_MODEL_UNPINNED, COMPACT_UNSUPPORTED};
 use holler_pane::tx_launch::{wait_healthy, BOOT_POLL, DEFAULT_BUDGET};
 use holler_pane::{
     AgentKey, Argv, HarnessEndpoint, HarnessPort, PaneError, PaneId, PaneName, ServeSpec,
@@ -104,7 +113,7 @@ impl HarnessRig {
 
 /// The suite, in order: the one table that the runner iterates and [`harness_cases`]
 /// lists.
-const CASES: [(&str, Case); 17] = [
+const CASES: [(&str, Case); 20] = [
     (
         "health-of-unserved-port-is-false",
         health_of_unserved_port_is_false,
@@ -148,6 +157,18 @@ const CASES: [(&str, Case); 17] = [
     (
         "agent-view-of-a-fresh-session-has-no-turns",
         agent_view_of_a_fresh_session_has_no_turns,
+    ),
+    (
+        "compact-of-unserved-port-is-unavailable",
+        compact_of_unserved_port_is_unavailable,
+    ),
+    (
+        "compact-of-unknown-session-is-session-not-found",
+        compact_of_unknown_session_is_session_not_found,
+    ),
+    (
+        "compact-shrinks-the-context-or-is-refused",
+        compact_shrinks_the_context_or_is_refused,
     ),
 ];
 
@@ -545,6 +566,73 @@ fn agent_view_of_a_fresh_session_has_no_turns(
         view.turns,
         Vec::new(),
     )
+}
+
+/// Case 18 (#878): `compact` on a port never served is `unavailable`, before the id is looked
+/// at, as every call that reaches the server is.
+fn compact_of_unserved_port_is_unavailable(
+    h: &dyn HarnessPort,
+    _: &Launcher<'_>,
+    rig: &HarnessRig,
+) -> Result<(), String> {
+    let [p0, _] = rig.ports;
+    expect_code(
+        "compact on a port never served",
+        h.compact(&at(p0), UNKNOWN, None),
+        UNAVAILABLE,
+    )
+}
+
+/// Case 19 (#878): `compact` of an id the server does not know is `session-not-found`, as
+/// `abort` and `send_prompt` answer, and nothing was sent to a model.
+fn compact_of_unknown_session_is_session_not_found(
+    h: &dyn HarnessPort,
+    l: &Launcher<'_>,
+    rig: &HarnessRig,
+) -> Result<(), String> {
+    let [p0, _] = rig.ports;
+    launch(h, l, C1, p0)?;
+    expect_code(
+        "compact of an id the server does not know",
+        h.compact(&at(p0), UNKNOWN, None),
+        NOT_FOUND,
+    )
+}
+
+/// Case 20 (#878): `compact` of a session the server holds, naming no model, either returns a
+/// context that shrank (`tokens_after` below `tokens_before`: a call that did not shrink it is
+/// not an outcome), or is refused `compact-unsupported` (the harness cannot) or
+/// `compact-model-unpinned` (the harness has no model of its own to run it on). Any other
+/// answer fails: a harness never compacts on a model nobody chose, and never answers a count it
+/// made up.
+fn compact_shrinks_the_context_or_is_refused(
+    h: &dyn HarnessPort,
+    l: &Launcher<'_>,
+    rig: &HarnessRig,
+) -> Result<(), String> {
+    let [p0, _] = rig.ports;
+    launch(h, l, C1, p0)?;
+    let a = create(h, p0)?;
+    let call = format!("compact({p0}, {a}) naming no model");
+    match h.compact(&at(p0), &a, None) {
+        Ok(outcome) if outcome.tokens_after < outcome.tokens_before => Ok(()),
+        Ok(outcome) => Err(format!(
+            "{call} answered an outcome whose context did not shrink: {} tokens before, {} after",
+            outcome.tokens_before, outcome.tokens_after
+        )),
+        Err(e)
+            if e.code() == COMPACT_UNSUPPORTED.as_str()
+                || e.code() == COMPACT_MODEL_UNPINNED.as_str() =>
+        {
+            Ok(())
+        }
+        Err(e) => Err(format!(
+            "{call}: expected a shrunk context, `{}` or `{}`; got `{}`: {e}",
+            COMPACT_UNSUPPORTED.as_str(),
+            COMPACT_MODEL_UNPINNED.as_str(),
+            e.code()
+        )),
+    }
 }
 
 // --- helpers ---

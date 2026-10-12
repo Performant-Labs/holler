@@ -13,6 +13,7 @@
 
 use std::sync::Mutex;
 
+use holler_pane::ports::{CompactModel, CompactOutcome, COMPACT_MODEL_UNPINNED};
 use holler_pane::{
     AgentView, Argv, HarnessEndpoint, HarnessPort, PaneError, PaneId, PaneName, ServeSpec,
     TurnAgent,
@@ -24,8 +25,8 @@ use holler_pane_testkit::conformance::Conformance;
 use holler_pane_testkit::harness::{FakeHarness, Quirk};
 
 /// The 16 case ids of the brief's table, in order (#802 renamed case 2 and added case 16),
-/// and #647 part 2's `agent_view` case.
-const DOCUMENTED_CASES: [&str; 17] = [
+/// #647 part 2's `agent_view` case and #878's three `compact` cases.
+const DOCUMENTED_CASES: [&str; 20] = [
     "health-of-unserved-port-is-false",
     "launch-then-healthy",
     "fresh-server-has-no-sessions",
@@ -43,6 +44,9 @@ const DOCUMENTED_CASES: [&str; 17] = [
     "select-reaches-only-its-pane",
     "serve-command-carries-the-agent",
     "agent-view-of-a-fresh-session-has-no-turns",
+    "compact-of-unserved-port-is-unavailable",
+    "compact-of-unknown-session-is-session-not-found",
+    "compact-shrinks-the-context-or-is-refused",
 ];
 
 /// The fake's launcher: start the server the argv describes, as a host's `run` would.
@@ -162,7 +166,21 @@ enum Break {
     AgentViewAlwaysEmpty,
     /// `agent_view` invents a turn the session never had.
     AgentViewInventsATurn,
+    /// `compact` of a port with no server answers an outcome instead of `unavailable` (#878).
+    CompactAcksAnUnservedPort,
+    /// `compact` of an id the server does not know answers an outcome instead of
+    /// `session-not-found` (#878).
+    CompactAcksAnUnknownSession,
+    /// `compact` answers a context that did not shrink, and does so in place of the refusal a
+    /// harness with no model of its own owes (#878).
+    CompactDoesNotShrink,
 }
+
+/// An outcome that shrank, which a broken `compact` answers where it owed a refusal.
+const SHRUNK: CompactOutcome = CompactOutcome {
+    tokens_before: 90_000,
+    tokens_after: 12_000,
+};
 
 struct Mutant {
     inner: FakeHarness,
@@ -302,6 +320,29 @@ impl HarnessPort for Mutant {
             _ => self.inner.agent_view(at, session, max_turns),
         }
     }
+
+    fn compact(
+        &self,
+        at: &HarnessEndpoint,
+        session: &str,
+        model: Option<&CompactModel>,
+    ) -> Result<CompactOutcome, PaneError> {
+        if self.broken == Break::CompactAcksAnUnservedPort && !self.inner.health(at)? {
+            return Ok(SHRUNK);
+        }
+        match (self.broken, self.inner.compact(at, session, model)) {
+            (Break::CompactAcksAnUnknownSession, Err(e)) if is_unknown_session(&e) => Ok(SHRUNK),
+            (Break::CompactDoesNotShrink, Err(e))
+                if e.code() == COMPACT_MODEL_UNPINNED.as_str() =>
+            {
+                Ok(CompactOutcome {
+                    tokens_before: 4_000,
+                    tokens_after: 4_000,
+                })
+            }
+            (_, answer) => answer,
+        }
+    }
 }
 
 fn assert_suite_fails_on(broken: Break, case: &str) {
@@ -384,5 +425,32 @@ fn a_harness_whose_agent_view_invents_a_turn_fails() {
     assert_suite_fails_on(
         Break::AgentViewInventsATurn,
         "agent-view-of-a-fresh-session-has-no-turns",
+    );
+}
+
+/// #878: a `compact` on a port with no server is `unavailable`, checked before the id.
+#[test]
+fn a_harness_that_compacts_on_an_unserved_port_fails() {
+    assert_suite_fails_on(
+        Break::CompactAcksAnUnservedPort,
+        "compact-of-unserved-port-is-unavailable",
+    );
+}
+
+/// #878: an unknown id is `session-not-found`, as `abort` and `send_prompt` answer.
+#[test]
+fn a_harness_that_compacts_an_unknown_session_fails() {
+    assert_suite_fails_on(
+        Break::CompactAcksAnUnknownSession,
+        "compact-of-unknown-session-is-session-not-found",
+    );
+}
+
+/// #878: an outcome whose context did not shrink is not a compaction.
+#[test]
+fn a_harness_whose_compaction_does_not_shrink_the_context_fails() {
+    assert_suite_fails_on(
+        Break::CompactDoesNotShrink,
+        "compact-shrinks-the-context-or-is-refused",
     );
 }

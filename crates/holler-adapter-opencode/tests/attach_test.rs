@@ -50,6 +50,7 @@ fn quick() -> Timeouts {
         request: Duration::from_millis(800),
         health: Duration::from_millis(300),
         settle: Duration::from_millis(600),
+        compact: Duration::from_secs(6),
     }
 }
 
@@ -400,6 +401,7 @@ fn patient() -> Timeouts {
         request: Duration::from_secs(2),
         health: Duration::from_millis(300),
         settle: Duration::from_secs(5),
+        compact: Duration::from_secs(16),
     }
 }
 

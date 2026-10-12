@@ -59,6 +59,8 @@ struct State {
     /// Routes that are accepted and read, and never answered (#845): one route frozen, not
     /// the whole server.
     hung: HashSet<(String, String)>,
+    /// Routes answered only after a pause (#878: a model call outlasts a request's bound).
+    delays: HashMap<(String, String), Duration>,
     /// How many requests each route has received, this one included (#845).
     counts: HashMap<(String, String), usize>,
     /// Run once, when its route receives its `n`th request, before that request is answered
@@ -181,6 +183,16 @@ impl Stub {
         lock(&self.state)
             .hung
             .insert((method.to_string(), path.to_string()));
+    }
+
+    /// `method path` is read at once and answered only after `by` (#878: a summarize is a model
+    /// call, which outlasts the ordinary bound of one request). Every other route answers at
+    /// once.
+    #[allow(dead_code)] // #642: not every test crate uses it
+    pub fn delay(&self, method: &str, path: &str, by: Duration) {
+        lock(&self.state)
+            .delays
+            .insert((method.to_string(), path.to_string()), by);
     }
 
     /// Run `run` once, when `method path` receives its `nth` request (1 is the first) and
@@ -327,7 +339,11 @@ fn serve_one(mut stream: TcpStream, state: &Mutex<State>) -> std::io::Result<()>
             body: NOT_FOUND.to_string(),
             framing: Framing::ContentLength,
         });
+    let delay = st.delays.get(&route).copied();
     drop(st);
+    if let Some(delay) = delay {
+        std::thread::sleep(delay);
+    }
     stream.write_all(&encode(&canned))?;
     stream.flush()
 }

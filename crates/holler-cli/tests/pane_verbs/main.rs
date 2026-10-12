@@ -22,6 +22,7 @@ mod spec_flags;
 mod target_flags;
 
 mod close;
+mod compact;
 mod doctor;
 mod driven;
 mod get;
@@ -79,6 +80,12 @@ fn unwired_ports_answer_not_implemented() {
         ports
             .harness
             .agent_view(&holler_pane::HarnessEndpoint::Port(1), "ses_1", 3)
+            .map(drop),
+        // #878: `compact` is default-armed (`compact-unsupported`), so the unwired set
+        // overrides it: a verb that runs before its ports exist must say `not-implemented`.
+        ports
+            .harness
+            .compact(&holler_pane::HarnessEndpoint::Port(1), "ses_1", None)
             .map(drop),
     ];
     for answer in amended {

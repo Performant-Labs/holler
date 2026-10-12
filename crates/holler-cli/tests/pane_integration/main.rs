@@ -34,6 +34,7 @@ mod verb_harness;
 
 mod bind;
 mod clients;
+mod compact_forwarding;
 mod env;
 mod fake_hub;
 mod forwarding;
