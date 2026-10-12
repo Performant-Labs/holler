@@ -5,6 +5,8 @@ Base: `origin/main` at ef881fc (re-checked 2026-10-12 after `git fetch`; unchang
 
 **Status: every open item is decided. No "Needs operator decision" item remains.** The operator's decisions of 2026-10-12 (issue comment) are in "Decided" below.
 
+**Amended after the A review (round one of two, `docs/handoffs/878/handoff-A.md`, 1 block + 8 warns, all taken as written; no operator decision changed).** The engine/CLI split (A2), the bound's scope, the secrets rule, the file list (A5) and the ADR edit list (A1) changed; "Verified against the tree" at the end lists every code claim re-checked.
+
 **Structure for the operator's session.**
 
 - **PART A, the pipeline story. Launchable now.** Everything that needs no real server: contract amendment first, `HarnessPort::compact`, the refusal codes, the
@@ -120,10 +122,10 @@ fn check_idle(ports: Ports<'_>, record: &Pane, at: &HarnessEndpoint) -> Result<(
     Err(PaneError::Refused { code, message: format!("session {} of {} {doing}", quoted(session), record.name) })
 }
 ```
-`check_health` is the sibling at `plan.rs:220` (refuses `server-unhealthy`). Both are private to `tx_switch::plan`. **`session-busy` already exists**
+`check_health` is the sibling at `plan.rs:220` (refuses `server-unhealthy`). Both are private to `tx_switch::plan`, and `mod plan;` is itself private (`tx_switch.rs:86`). **`session-busy` already exists**
 with the meaning "is running a turn"; compact reuses that constant. The new codes of this issue are only `compact-unsupported` and
-`compact-model-unpinned`. The record to start from, with the pane-state refusals (`pane-parked`, `pane-unhealthy`, `pane-shown-driven-mismatch`):
-`crates/holler-cli/src/say_cmd.rs:384-397` (`resolve_pane_record`). The endpoint of a record: `HarnessInfo::endpoint(&self, pane)`,
+`compact-model-unpinned`. The record to start from, with the pane-state refusals (`pane-parked`, `pane-unhealthy`, `pane-shown-driven-mismatch`) and the guarantee of a session of record (`session_of_record`, which refuses a pane with none):
+`crates/holler-cli/src/say_cmd.rs:384-397` (`resolve_pane_record(ports, pane, profile)`; `pane_state_refusal` is `say_cmd.rs:434`). **Both live in `holler-cli`, which `holler-pane` cannot import.** The precedent for a verb that needs them is `interrupt_pane`, `crates/holler-cli/src/interrupt_cmd.rs:61-67`: the CLI calls `resolve_pane_record` and then the engine/act. `check_idle` returns `Ok` for a record with no session of record, so it cannot stand in for `resolve_pane_record`. The endpoint of a record: `HarnessInfo::endpoint(&self, pane)`,
 `crates/holler-pane/src/pane.rs:315`.
 
 ### E4. How the OpenCode adapter calls the server, and its time bound
@@ -145,6 +147,7 @@ constants (`lib.rs:450-505`; `Call` is `lib.rs:508`, built by `call`/`call_until
 (`crates/holler-adapter-opencode/src/prompt.rs:31-44`) shows the shape: `known(&call, &path, session)?` (a `GET /session/:id`; an unknown session is
 `session-not-found` and nothing is posted), then `call.send(PROMPT_ASYNC, ...)`, `Ok` only on the one status it expects, any other status named in a
 message that quotes none of the reply. The adapter runs `session_activity` from `GET /session/status`, `GET /question`, `GET /permission` (`prompt.rs:49-70`).
+`unexpected_status` (`lib.rs:575`) names the route, port and status and quotes **no** body; `unexpected` (`lib.rs:561`) quotes up to 60 bytes of it (`verify_serving` uses that one for `GET /config`, `server.rs:97-100`). `prompt::session_activity` builds its **own** `Call` (`harness.call(port, OP_SESSION_ACTIVITY)`, `prompt.rs:64`), so it is bounded by `call` (10 s) whatever `Call` a caller holds.
 **A summarize call is a model call and may outlast the 10 s `call` bound.** ADR-0021 section 2 already allows a method to be bounded otherwise
 (it names two, `edit_spec` and `run_probe`, and a third through the wiring, `ADR-0021.md:97-100`; `compact` would be another).
 
@@ -190,7 +193,7 @@ differs, the fix is a follow-up commit and the recorded replies replace the stan
 ADR-0021 says a contract change goes first, so the commit order is the review boundary and the PR may be split after it if the reviewer asks.
 `docs/adr/ADR-0021.md`: add `compact` to the verb list (line 250 and the "Failure modes by verb" table at 872-877: a new row `pane compact`); the
 `HarnessPort` row of the ports table (line 111) gets `compact`; a new paragraph "Compaction (#878)" after "The prompt and activity seam" (lines 616-643) with
-the signature, the codes, the shrink rule, the model rule and the bound; "Deferred to named stories" (line 1648) gets the Claude Code entry (decided by
+the signature, the codes, the shrink rule, the model rule, the bound, the engine/CLI split (A2) and the order of refusals (a busy or unhealthy pane answers `session-busy` / `server-unhealthy` before `compact-unsupported`, so a busy Claude pane is not told `compact-unsupported`); **section 2, lines 96-100** ("every method returns within I5's bound (default 10 s) ... Two methods are bounded otherwise") gets `compact` named as a further method bounded otherwise (the summarize POST and the token reads after it, 120 s; the other reads stay at 10 s); "Deferred to named stories" (line 1648) gets the Claude Code entry (decided by
 Part B); a "Decisions taken" entry at **the next free number at merge time** (the list ends at 49 at `ADR-0021.md:1830`; do not hard-code a number).
 `docs/pane-control.md`: the verb list (lines 150-151), a `### holler pane compact PANE` section between `reset` (276) and `park` (301), and section 12 "Later"
 (line 1072). `CHANGELOG.md` `[Unreleased]` / `### Enhancements` (lines 8-10). Commits 2 on write tests (RED), then code.
@@ -207,52 +210,71 @@ Part B); a "Decisions taken" entry at **the next free number at merge time** (th
   (The issue's `compact(at, session, model)` is this signature; `Option` is the one refinement, said so in the ADR.) Contract rules: a busy session is refused
   `session-busy` and the harness sends no summarize; an unknown session is `session-not-found` and nothing is posted (as `abort` and `send_prompt` do); it
   never types into a TUI (I4); `tokens_after` is read from the harness after the act, never inferred; a count the harness cannot read is `unavailable`, never zero.
-- The engine `holler_pane::tx_compact` (new `crates/holler-pane/src/tx_compact.rs`; no CAS write, a compaction records nothing in the registry): plan (the
-  record and the pane-state refusals; `check_health`; `check_idle`), act (`compact` with `None`), observe: the outcome must satisfy `tokens_after < tokens_before`,
-  otherwise `unavailable` (exit 1), the message naming both counts and saying the context did not shrink (the I3 mismatch rule: a failure observed after the act
-  is `unavailable`, not an open code). `check_idle` and `check_health` become `pub(crate)` in `tx_switch::plan` (lines 250 and 220) and are called, not copied.
-- CLI `holler pane compact PANE [--json]` (`crates/holler-cli/src/pane/compact.rs`, struct `PaneCompact`). **No other flag** (N1). Text: `compacted <pane>:
+- **The engine and the CLI split (the `interrupt_pane` precedent, E3).** The CLI verb resolves the record: `holler_cli::say_cmd::resolve_pane_record(ports, pane,
+  profile)` (the `--profile` target flag included; it owns `pane-not-found`, `profile-not-found`, `pane-not-in-profile`, `pane-parked`, `pane-unhealthy`,
+  `pane-shown-driven-mismatch`, and `session-not-found` for a pane with no session of record), then calls the engine. The engine is
+  `holler_pane::tx_compact` (new `crates/holler-pane/src/tx_compact.rs`; no CAS write, a compaction records nothing in the registry):
+  ```
+  pub fn compact(ports: Ports<'_>, record: &Pane) -> Result<CompactOutcome, PaneError>
+  ```
+  The engine **owns only**, in this order: (1) the endpoint, `record.harness.endpoint(&record.name)?` (`pane.rs:315`); a `record.session_of_record` of `None` is
+  `session-not-found` (defence; the CLI already refused it); (2) **health**: `check_health`, `server-unhealthy`; (3) **idle**: `check_idle`, `session-busy` /
+  `session-holds-question` / `session-holds-permission`; (4) **the act**: `ports.harness.compact(&endpoint, &session, None)` (so `compact-unsupported`,
+  `compact-model-unpinned`, `session-not-found`, `timeout`, `unavailable` come from the harness as they are); (5) **the shrink rule**: `tokens_after <
+  tokens_before`, otherwise `unavailable` (exit 1), the message naming both counts and saying the context did not shrink (the I3 mismatch rule: a failure observed
+  after the act is `unavailable`, not an open code). It reads no record, applies no pane-state predicate and does not import from `holler-cli`. T authors the engine
+  tests against exactly this signature with a `Pane` built in the test and the fakes in `Ports`, and the verb tests through `holler pane compact`. `check_idle` and
+  `check_health` become `pub(crate)` in `tx_switch::plan` (lines 250 and 220) **and** `crates/holler-pane/src/tx_switch.rs` re-exports them
+  (`pub(crate) use plan::{check_health, check_idle};` beside `mod plan;` at line 86), because `plan` is a private module; they are called, not copied.
+- CLI `holler pane compact PANE [--json]` (`crates/holler-cli/src/pane/compact.rs`, struct `PaneCompact`, shaped like `switch.rs`; it calls `resolve_pane_record` then `tx_compact::compact`, above, and emits through `emit_outcome`). **No other flag** (N1), beyond the shared target flags `switch` has. Text: `compacted <pane>:
   <before> -> <after> tokens`. JSON `data`: `{"pane","session","tokens_before","tokens_after"}` (additive; `schema_version` stays 1). Exit 0 only when the context
   shrank; 3 for a refusal; 1 for no shrink or a failure; 2 for usage. No retry loop.
-- **The bound (N4).** `Timeouts` (`crates/holler-adapter-opencode/src/lib.rs:257-266`) gets one field, `compact: Duration`, default **120 s** (set in
-  `Default`, line 268; the CLI uses `Timeouts::default()`, `wiring.rs:229`). It replaces both `call` and `request` for the one `summarize` request: the compact
-  method builds its `Call` with `deadline_after(timeouts.compact)` and `request: timeouts.compact` (via `call_until`, `lib.rs:330`), so the 5 s `request` bound
-  does not cut it. Every other method keeps `call`/`request`. The cheap reads inside the compact method (`known`, activity, `GET /config`, token reads) use the
-  same `Call`, so they are bounded by the 120 s too; that is acceptable and stated in the ADR (ADR-0021 section 2 already lets a method be bounded otherwise,
-  `ADR-0021.md:97-100`; `compact` is another). The value is a named field and never a literal in the call.
-- The OpenCode adapter's `compact` (`crates/holler-adapter-opencode`: new `compact.rs` beside `prompt.rs`, the `impl` method in `lib.rs` beside `send_prompt`, new
-  `Route` constants for `POST /session/:id/summarize`). Order, in one `Call`: `known(...)` (unknown session `session-not-found`, nothing posted); activity via the
+- **The bound (N4).** `Timeouts` (`crates/holler-adapter-opencode/src/lib.rs:257-266`) gets one field, `compact: Duration`, default **120 s** (set in `Default`,
+  line 268; the CLI uses `Timeouts::default()`, `wiring.rs:229`). **The 120 s applies only to the `summarize` POST and the token reads after it.** The adapter's
+  compact method opens the ordinary `harness.call(port, OP_COMPACT)` (10 s, 5 s per request) for the `known` GET, the activity read and `GET /config`; for the POST
+  and the token reads it opens a second `Call` through `call_until(port, op, deadline_after(timeouts.compact))` with `request: timeouts.compact`, so the 5 s
+  `request` bound does not cut it. A server that hangs on the first read therefore holds the caller 10 s, not 120 s, with nothing sent. The activity check is
+  `prompt::session_activity`, which builds its own 10 s `Call` (E4). Every other method keeps `call`/`request`. The value is a named field, never a literal in
+  the call. The ADR states this scope (A1).
+- The OpenCode adapter's `compact` (`crates/holler-adapter-opencode`: new `compact.rs` beside `prompt.rs`; `lib.rs` (778 lines; the repo's lint fails at 900, this story
+  keeps it under 800) gets **only** the `compact` field of `Timeouts` with its default, `mod compact;` and the 3-line `HarnessPort::compact` method beside
+  `send_prompt`. The `SUMMARIZE` route constant (`POST /session/:id/summarize`) and any other new `Route` live in `compact.rs`; a child module sees the parent's
+  private `Route` and `Call`). Order: on the ordinary 10 s `Call`, `known(...)` (unknown session `session-not-found`, nothing posted); activity via the
   existing `session_activity` (busy `session-busy`, pending question `session-holds-question`; the engine already checked, the adapter checks again because a turn
-  can start in between); resolve the model (`Some` as given; `None` from `GET /config` `agent.compaction.model`; missing, empty or not a `provider/model` pair is
-  `compact-model-unpinned`, nothing sent); read `tokens_before`; `POST summarize` with `providerID`/`modelID` split from the pin; accept only the one status the OpenAPI
-  document gives for success (any other named in a message that quotes none of the reply, as `send_prompt` does); read `tokens_after`. Token source: the last
-  assistant message's `info.tokens` from `GET /session/:id/message` (`prompt::messages`, `prompt.rs:138`) is the candidate, **Documented** and unrun; the brief does not
-  assume it. T pins it from the OpenAPI schema; if the schema offers no readable count, the adapter answers `unavailable` (never zero) and Part B.1 step 3 settles it.
-  The summarize variant (`variant`) and `auto` are not sent.
-- Claude Code: the adapter inherits the default and answers `compact-unsupported`; the ADR and `docs/pane-control.md` say so, and that Part B decides whether it changes.
+  can start in between); resolve the model (`Some` as given; `None` from `GET /config` `agent.compaction.model`). The pin is split at the **first** `/`; provider
+  and model must each be non-empty; the model id may itself contain `/` (a routed provider: `a/b/c` is provider `a`, model `b/c`). A missing, empty or
+  slash-less pin is `compact-model-unpinned`, nothing sent. Then, on the compact `Call`: read `tokens_before`; `POST summarize` with `providerID`/`modelID`; accept
+  only the one status the OpenAPI document gives for success; read `tokens_after`. **Every reply in `compact` (messages, config, summarize) is reported with
+  `Call::unexpected_status`, never `Call::unexpected`**: `GET /config` is a whole server config that can hold a provider `apiKey`, so no part of any body is quoted
+  in a message. Only the `provider/model` name pair is ever carried into a message (the `compact-model-unpinned` text and the `CompactModel` log). Token source:
+  the last assistant message's `info.tokens` from `GET /session/:id/message` (`prompt::messages`, `prompt.rs:138`) is the candidate, **Documented** and unrun; the
+  brief does not assume it. T pins it from the OpenAPI schema; if the schema offers no readable count, the adapter answers `unavailable` (never zero) and Part B.1
+  step 3 settles it. The summarize variant (`variant`) and `auto` are not sent.
+- Claude Code: the adapter inherits the default and answers `compact-unsupported` (for a pane that passes the engine's health and idle checks; a busy or stopped Claude pane is refused `session-busy` / `server-unhealthy` first, as the ADR says); the ADR and `docs/pane-control.md` say so, and that Part B decides whether it changes.
 
 ### A3. Work (T authors RED first, on the fakes)
 1. `FakeHarness` learns `compact`: `HarnessOp::Compact` (`"harness.compact"`, fault-injectable like the others), a seedable context size and "compacts to", a
    seedable harness-side compaction pin (for `model: None`), an accessor returning the compact calls `(port, session, model)`, and a settable `session_activity`
    so a busy session can be seeded (today it is always `Idle`, E1). `FakeHarnesses` and `Wired` forward `compact`; the router forwards by endpoint; `Unwired`
-   answers `NotImplemented`.
+   answers `NotImplemented`. The Claude fake (`FakeClaude`) is seeded idle and healthy wherever acceptance 3 expects `compact-unsupported` from it.
 2. Forwarding tests: one per wrapper (`HarnessRouter`, `FakeHarnesses`, `Wired`) that a `compact` reaches the inner port and is not the default (the guard against
    the silent-default trap in E1).
 3. Conformance: new cases in `conformance/harness.rs` (17 becomes 17 + n; update the count wherever it is asserted): unknown session is `session-not-found`;
    unserved port is `unavailable` checked first; a call either returns a `CompactOutcome` with `tokens_after < tokens_before` or is refused
    `compact-unsupported` / `compact-model-unpinned`; a busy session is `session-busy` and nothing was sent (where the rig can make one busy; otherwise the fake's own
    tests pin it). One Claude case (`conformance/claude.rs`, 13 becomes 14): `compact` is `compact-unsupported`. Each new case gets a mutant.
-4. Engine and verb tests (acceptance below).
+4. Engine tests (`crates/holler-pane/tests/`, calling `tx_compact::compact(ports, &Pane)` directly): health refusal before anything; busy / question / permission refused with no `compact` logged; the act is called once with `None`; `tokens_after >= tokens_before` is `unavailable` naming both counts; a harness refusal passes through unchanged; a record with no session of record is `session-not-found`. Verb tests (acceptance below) cover the pane-state refusals through `resolve_pane_record`.
 5. OpenCode adapter tests with `tests/support/stub.rs`: the stub asserts the requests it saw (the `known` GET, the `GET /config`, then exactly one POST, nothing else);
    a busy session sent no POST; no pin sent no POST; the request body names the pinned model; a stub that holds the reply for more than `request` (5 s) but less than
-   `compact` still succeeds (the 120 s bound is wired; use a small `compact` in the test), and one that outlasts `compact` is `timeout`.
+   `compact` still succeeds (the 120 s bound is wired; use a small `compact` in the test), and one that outlasts `compact` is `timeout`; a hang on the first `known` GET ends at `call`, not at `compact`; a `GET /config` reply holding a marker string never reaches any error text (every reply uses `unexpected_status`); a pin whose model id contains `/` is split at the first `/`; `session_activity` is not given the compact bound.
+6. The `Timeouts` fallout (A5) is a mechanical edit T owns in RED: the defaults test `ac11_default_timeouts_are_10s_5s_2s_5s` (`hermetic_test.rs:679`) gains `compact: 120 s`.
 
 ### A4. Acceptance criteria (from the issue, each observable)
 1. `holler pane compact` on a fake harness that compacts: exit 0, prints both token counts; the fake logged exactly one `compact` call, with `model: None` and the
    fake's own pin as the model it ran. Test `compact_prints_before_and_after_on_the_harness_pinned_model` in `crates/holler-cli/tests/pane_verbs/compact.rs`.
 2. A busy session: exit 3 with `session-busy`, and the fake logged no `compact` call (`compact_refuses_a_busy_session_and_sends_nothing`).
-3. A harness with no pinned compaction model: exit 3 with `compact-model-unpinned`, no call to summarize. A harness that cannot compact (the Claude fake): exit 3 with
-   `compact-unsupported`.
+3. A harness with no pinned compaction model: exit 3 with `compact-model-unpinned`, no call to summarize. A harness that cannot compact (the Claude fake, **seeded idle and healthy**): exit 3 with
+   `compact-unsupported`. (A busy or unhealthy Claude fake is `session-busy` / `server-unhealthy` first.)
 4. The context did not shrink (fake returns `tokens_after >= tokens_before`): exit 1, the message says the context did not shrink and names both counts; `--json` gives `ok:false`.
 5. No keystroke: the fake Herdr records no `send_text`/`send_keys` during any of the above (I4).
 6. The conformance suite (`run_harness_conformance`) has the `compact` cases, FakeHarness passes them, each mutant fails its case: `cargo test -p holler-pane-testkit`
@@ -264,20 +286,22 @@ Part B); a "Decisions taken" entry at **the next free number at merge time** (th
    --workspace --all-targets -- -D warnings` clean on the files touched; ADR, `pane-control.md` and CHANGELOG carry the amendment.
 
 ### A5. Files
-Production: `crates/holler-pane/src/{ports.rs, ports/compact.rs (new), ports/router.rs, tx_compact.rs (new), tx_switch/plan.rs (visibility only), lib.rs (module)}`,
+Production: `crates/holler-pane/src/{ports.rs, ports/compact.rs (new), ports/router.rs, tx_compact.rs (new), tx_switch.rs (re-export of the two plan helpers), tx_switch/plan.rs (visibility only), lib.rs (module)}`,
 `crates/holler-pane-testkit/src/{harness.rs, harnesses.rs, conformance/harness.rs, conformance/claude.rs, lib.rs}`,
 `crates/holler-adapter-opencode/src/{compact.rs (new), lib.rs}`, `crates/holler-cli/src/pane/{compact.rs (new), mod.rs, wiring/bind.rs, wiring.rs}`.
-`crates/holler-adapter-claude` is not touched. Docs: `docs/adr/ADR-0021.md`, `docs/pane-control.md`, `CHANGELOG.md`.
+`crates/holler-adapter-claude` is not touched. **Not touched:** `crates/holler-cli/src/say_cmd.rs` and `interrupt_cmd.rs` (called, not edited), `crates/holler-adapter-claude`, the hub.
+Mechanical edits to existing tests, because `Timeouts` gains a field: five struct literals with no `..` break (`crates/holler-adapter-opencode/tests/support/fixtures.rs:30`, `hermetic_test.rs:679`, `attach_test.rs:48` and `:398`, `tmux_capture_test.rs:36`); `hermetic_test.rs:487` and `attach_test.rs:710` use `..` and are unaffected; the Claude adapter has its own `Timeouts`. Add `compact:` to each of the five (a small value in the quick ones).
+Docs: `docs/adr/ADR-0021.md`, `docs/pane-control.md`, `CHANGELOG.md`.
 Tests: `crates/holler-cli/tests/pane_verbs/compact.rs` (new, registered in `pane_verbs/main.rs`), `crates/holler-pane/tests/` (engine), testkit tests
 (`fake_harness_*`, `harness_conformance_test.rs` mutants, `claude_conformance_test.rs`), `crates/holler-adapter-opencode/tests/compact_test.rs` (new).
-Reuse map (extend, do not duplicate): `check_idle` and `check_health` (E3); `resolve_pane_record` (E3); `activity_refusal`; `known()`, `Call::send`, `session_activity`,
+Reuse map (extend, do not duplicate): `check_idle` and `check_health` (E3); `resolve_pane_record` (E3; called from the CLI only, the `interrupt_pane` precedent); `activity_refusal`; `known()`, `Call::send`, `session_activity`,
 `prompt::messages` and `unexpected_status` in the OpenCode adapter (E4); `HarnessInfo::endpoint`; the `switch.rs` verb shape and `emit_outcome`; the existing fixtures
-support (`tests/support/{stub,fixtures}.rs`). No second poll, no second activity read, no second pane-state predicate.
+support (`tests/support/{stub,fixtures}.rs`). No second poll, no second activity read, no second pane-state predicate (the engine has none).
 
 ### A6. Decisions already made
 - Signature, outcome, the codes, default `compact-unsupported`, `holler pane compact PANE [--json]`, exit 0 only when the context shrank, no retry loop: the issue.
 - `session-busy` is the existing constant. New codes: `compact-unsupported`, `compact-model-unpinned`. No code for "did not shrink": it is `unavailable` (exit 1).
-- Compaction is a pane verb with its engine in `holler-pane`, beside `tx_switch`; it writes no record and calls no Herdr or host port (HTTP only for OpenCode), so I4
+- Compaction is a pane verb with its engine in `holler-pane`, beside `tx_switch` (record and pane-state refusals stay in the CLI, A2); it writes no record and calls no Herdr or host port (HTTP only for OpenCode), so I4
   reduces to a test that the fake Herdr saw nothing. The hub's control socket and the v2 wire are unchanged (verbs run CLI-side, ADR-0021 section 5).
 - The pane-state refusals apply (`pane-parked`, `pane-unhealthy`, `pane-shown-driven-mismatch`), because a compaction is a model call on the session of record. The
   orchestrator guard of `switch`/`reset` does **not** apply (compaction keeps the session; the use case is an orchestrator compacting its agents). Both are defaults
@@ -286,7 +310,7 @@ support (`tests/support/{stub,fixtures}.rs`). No second poll, no second activity
   new order (pfleet side); applying a pane's model to an OpenCode server (#829); a `compact` for a body or the hub; any `--all` or loop form of the verb.
 
 ### A7. Test plan
-RED first, on the fakes: (1) the engine and verb tests of acceptance 1 to 5 fail because `HarnessPort` has no `compact` and the verb does not exist; (2) the conformance
+RED first, on the fakes: (1) the engine tests (A3.4, `tx_compact::compact(ports, &Pane)`) and verb tests of acceptance 1 to 5 fail because `HarnessPort` has no `compact` and the engine and verb do not exist; (2) the conformance
 cases fail against a `Mutant` that breaks each rule (answers `Ok` for an unknown session; sends when busy; returns `tokens_after` equal to `tokens_before`); (3) the
 forwarding tests fail until the three wrappers forward; (4) the adapter tests of A3.5 fail until `compact` is written. Then GREEN with the minimum code. Final: the full
 workspace test command above, and a doc sweep: `git grep -n "session_activity"` over `docs/` and the `bind.rs` doc for every place the default-armed list is restated
@@ -407,3 +431,16 @@ scratch directory's transcripts afterwards.
 ## Rejected (one line each)
 New spec field plus flag (N1 B); required `--model` flag (N1 C); the pane's recorded main model (N1 D); polling after a start (N4 b); keeping the 10 s bound (N4 c);
 a generic ACP agent (N3, dropped from #878).
+
+## Verified against the tree
+Checked 2026-10-12 after `git fetch origin`; `origin/main` is ef881fc and this branch is based on it (no rebase needed). Every file:line claim above was read in the worktree:
+
+- Port and wrappers (E1): `ports.rs` trait at 523, `send_prompt` default at ~603, `session_activity` default, `PROMPT_UNSUPPORTED`/`AGENT_UNSUPPORTED` at 689-698, `agent_view` 681; `HarnessEndpoint` in `ports/process.rs:54-60`; forwarders at `router.rs:114,123`, `harnesses.rs:118,127`, `bind.rs:353,362` (doc 277-280), `Unwired` impl `wiring.rs:381` with `abort` at 407 (no `send_prompt`/`session_activity` override); adapters `opencode/lib.rs:420-431`, `claude/lib.rs:302-330`, `testkit/claude.rs:380,391`; `FakeHarness` impl at `harness.rs:368`. `ports.rs` is 750 lines.
+- Model and config (E2): `ModelSpec` `pane.rs:385-392`, `Pane.model` 438, `ProfileSpec.model` `profile.rs:185`, both `deny_unknown_fields`; `ServeSpec` `ports.rs:167-179`; the restart script's pin `scripts/pane-restart:291-292` and its test `pane-restart-test.sh:298-299`; `GET /config` in `server.rs:97-100`, route `lib.rs:482-485`. `agent.compaction` in a live reply remains unobserved (stated).
+- Busy check (E3): `SESSION_BUSY` etc. and `activity_refusal` in `tx_switch.rs:109-141`; `mod plan;` private at 86; `check_health` `plan.rs:220`, `check_idle` 250; `resolve_pane_record` `say_cmd.rs:384-397`, `pane_state_refusal` 434; `interrupt_pane` `interrupt_cmd.rs:61-67`; `HarnessInfo::endpoint` `pane.rs:315`.
+- Adapter (E4): `Timeouts` 257-266 (four fields), `Default` 268, `call`/`call_until` 323/330, `Call` 508, `send` 520, `unexpected` 561, `unexpected_status` 575, `known` 614, `deadline_after` 771, `lib.rs` 778 lines; `send_prompt` `prompt.rs:31-44` (uses `unexpected_status`), `session_activity` 59 (own `Call`), `messages` 138. **Correction found:** the review listed six `Timeouts` literal sites; the tree has seven, of which five break (A5); two use `..`.
+- Claude (E5): `send_prompt` 302-322, `frame` `inbox.rs:57-58`, `agents::activity` `agents.rs:63-80`, `hermetic_test.rs:474-486`. `HarnessKind` `pane.rs:140-148`.
+- CLI and testkit (E6, E7): `PaneCmd` and `acting_pane` in `pane/mod.rs` (edited by #832, #839 per `git log`); `emit_outcome` `switch.rs:127`, `tx_switch::switch` 231; `holler-pane/src/lib.rs` is 90 lines with no `tx_compact` yet; `CASES` 17 (`conformance/harness.rs:107`) and 13 (`conformance/claude.rs:128`); `Mutant` at `harness_conformance_test.rs:201`, `claude_conformance_test.rs:134`; `HarnessOp` `harness.rs:51-79`; `seed_session` 287, `seed_turns` 294, `aborts` 353; `SeamHarness` `doubles.rs:164`; `pane_verbs/main.rs` lists the verb modules.
+- Docs: ADR-0021 lines 96-100 (bounded otherwise), 111, 133, 250, 281-297, 616-643, 627, 872-877, 1648, 1830 (decision 49); `pane-control.md` 87-92, 150-151, 163-164, 276, 301, 1072; `CHANGELOG.md` 8-10.
+
+Count: 61 claims re-verified, 1 corrected (seven `Timeouts` sites, five break). **No "Needs operator decision" item exists** and none was added; N1 to N4 and the Part A/Part B split are unchanged.
