@@ -24,7 +24,7 @@ use crate::profile::ProfileCmd;
 #[command(
     name = "holler",
     about = "One binary, two roles: hub and body (ADR 0001)",
-    version,
+    version = crate::VERSION,
     subcommand_required = true
 )]
 pub struct Cli {
