@@ -29,9 +29,9 @@ use holler_pane::profile_snapshot::spec_from_pane;
 use holler_pane::tx_apply::{self, Applied, ApplyRequest, Outcome as StepOutcome, Step};
 use holler_pane::tx_launch::TxOptions;
 use holler_pane::{
-    Actor, Argv, Cursor, GridPos, HarnessEndpoint, HarnessPort, HerdrPane, HerdrPort, HerdrSpec,
-    HostPort, Pane, PaneError, PaneEvent, PaneId, PaneName, PaneStore, Ports, Profile, ProfileName,
-    ProfileSpec, ProfileStore, ServeSpec,
+    Actor, AgentView, Argv, Cursor, GridPos, HarnessEndpoint, HarnessPort, HerdrPane, HerdrPort,
+    HerdrSpec, HostPort, Pane, PaneError, PaneEvent, PaneId, PaneName, PaneStore, Ports, Profile,
+    ProfileName, ProfileSpec, ProfileStore, ServeSpec,
 };
 use holler_pane_testkit::envelope::{check_envelope, Envelope};
 use holler_pane_testkit::fixture::{sample_pane, sample_profile};
@@ -737,5 +737,14 @@ impl HarnessPort for HookedHarness<'_> {
         let answer = self.rig.harness.shown_session(pane, at);
         self.fire(HarnessOp::ShownSession);
         answer
+    }
+
+    fn agent_view(
+        &self,
+        at: &HarnessEndpoint,
+        session: &str,
+        max_turns: usize,
+    ) -> Result<AgentView, PaneError> {
+        self.rig.harness.agent_view(at, session, max_turns)
     }
 }

@@ -65,6 +65,10 @@ fn a_wedged_host_times_out_every_method() {
         host.foreground_commands(&a),
         Err(timeout("host.foreground_commands"))
     );
+    assert_eq!(
+        host.attached_clients(&a),
+        Err(timeout("host.attached_clients"))
+    );
 
     host.faults().set(None);
     assert_eq!(
@@ -88,6 +92,7 @@ fn host_op_names_are_port_dot_method() {
         HostOp::ForegroundCommands.as_str(),
         "host.foreground_commands"
     );
+    assert_eq!(HostOp::AttachedClients.as_str(), "host.attached_clients");
 }
 
 // --- the call log ---
@@ -368,5 +373,81 @@ fn a_fault_on_foreground_commands_fails_that_call_only() {
             HostOp::ForegroundCommands,
             HostOp::ForegroundCommands
         ]
+    );
+}
+
+// --- attached_clients (#647 part 2) ---
+
+/// A fresh session has no client, as a fresh detached tmux session has none. Each
+/// `attach_client` adds one, `detach_clients` takes them all, and the count is per session.
+#[test]
+fn attached_clients_counts_what_attach_client_added() {
+    let (host, a) = host_with("demo-c1r1");
+    let b = name("demo-c2r1");
+    host.ensure_session(&b, "/srv/demo").unwrap();
+    assert_eq!(host.attached_clients(&a), Ok(0), "a fresh session has none");
+
+    host.attach_client(&a).unwrap();
+    host.attach_client(&a).unwrap();
+    assert_eq!(host.attached_clients(&a), Ok(2));
+    assert_eq!(host.attached_clients(&b), Ok(0), "another session's count");
+
+    host.detach_clients(&a).unwrap();
+    assert_eq!(host.attached_clients(&a), Ok(0));
+}
+
+/// A missing session is `pane-not-found`, from the port as from the two scenario methods,
+/// and a session ended outside Holler takes its clients with it: ensured again, it has none.
+#[test]
+fn attached_clients_of_a_missing_session_is_pane_not_found() {
+    let (host, a) = host_with("demo-c1r1");
+    let missing = name("demo-c9r9");
+    assert_eq!(host.attached_clients(&missing), Err(not_found(&missing)));
+    assert_eq!(host.attach_client(&missing), Err(not_found(&missing)));
+    assert_eq!(host.detach_clients(&missing), Err(not_found(&missing)));
+    assert_eq!(host.sessions(), vec![a.clone()], "neither created a session");
+
+    host.attach_client(&a).unwrap();
+    host.end_session(&a).unwrap();
+    assert_eq!(host.attached_clients(&a), Err(not_found(&a)));
+    host.ensure_session(&a, "/srv/demo").unwrap();
+    assert_eq!(host.attached_clients(&a), Ok(0), "it comes back with no client");
+}
+
+/// A client is not a process: `stop_owned` and `ensure_session` leave the count alone.
+#[test]
+fn clients_survive_stop_owned_and_a_second_ensure_session() {
+    let (host, a) = host_with("demo-c1r1");
+    run_sleep(&host, &a);
+    host.attach_client(&a).unwrap();
+    host.stop_owned(&a).unwrap();
+    host.ensure_session(&a, "/srv/demo").unwrap();
+    assert_eq!(host.attached_clients(&a), Ok(1));
+}
+
+/// A fault queued for `attached_clients` fails that call only and changes nothing, the call
+/// is logged, and the two scenario methods are not calls through the port.
+#[test]
+fn a_fault_on_attached_clients_fails_that_call_only() {
+    let (host, a) = host_with("demo-c1r1");
+    let before = host.faults().calls();
+    host.attach_client(&a).unwrap();
+    assert_eq!(
+        host.faults().calls(),
+        before,
+        "attach_client is a scenario method, not a call through the port"
+    );
+    let unavailable = PaneError::Unavailable {
+        what: "made-up".to_owned(),
+    };
+    host.faults()
+        .fail_next(HostOp::AttachedClients, unavailable.clone());
+    assert_eq!(host.attached_clients(&a), Err(unavailable));
+    assert_eq!(host.attached_clients(&a), Ok(1), "the failed call changed nothing");
+    host.detach_clients(&a).unwrap();
+    let calls = host.faults().calls();
+    assert_eq!(
+        calls[before.len()..],
+        [HostOp::AttachedClients, HostOp::AttachedClients]
     );
 }

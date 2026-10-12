@@ -18,7 +18,8 @@ use holler_pane_testkit::fixture::sample_spec;
 use holler_pane_testkit::harness::ServerState;
 
 use crate::rig::{
-    cell, data_of, findings, kinds, Rig, CLAUDE, CWD, OPENCODE, PORT, PROFILE, SESSION, WORKSPACE,
+    cell, data_of, findings, kinds, name, Rig, CLAUDE, CWD, OPENCODE, PORT, PROFILE, SESSION,
+    WORKSPACE,
 };
 
 /// A spec of the profile: `pane` at `r1c<col>` in the rig's workspace, on `kind` with `policy`.
@@ -51,6 +52,11 @@ fn applied() -> Rig {
         Format::Json,
     );
     assert_eq!(run.code, 0, "the mixed grid applies: {run:?}");
+    // The Herdr pane of each shows its tmux session through a client (#647 part 2): the apply
+    // made the sessions, and no Holler verb attaches a client, so the world gets one here.
+    for pane in [OPENCODE, CLAUDE] {
+        rig.host.attach_client(&name(pane)).unwrap();
+    }
     rig
 }
 

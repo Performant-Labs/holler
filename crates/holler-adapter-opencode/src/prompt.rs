@@ -7,11 +7,15 @@
 //! never in an adapter. Since #839 no verb and no engine calls `send_prompt`: `pane reset
 //! --first` goes through the hub's prompt path too (ADR-0021 section 11), and the method stays
 //! as the adapter's transport.
+//!
+//! [`messages`] is the crate's one reader of a session's message list, which
+//! `session_activity`'s fallback and `agent_view` (#647 part 2, `agents.rs`) share.
 
 use holler_pane::ports::Activity;
 use holler_pane::PaneError;
 use serde_json::{json, Value};
 
+use crate::http::Reply;
 use crate::{child_ids, json_of, known, running, session_path, status_object, string_at};
 use crate::{Call, OpenCodeHarness, Route, OP_SEND_PROMPT, OP_SESSION_ACTIVITY};
 use crate::{GET_MESSAGES, GET_PERMISSION, GET_QUESTION, LIST, PROMPT_ASYNC, STATUS};
@@ -115,19 +119,29 @@ fn children_of(call: &Call, session: &str) -> Result<Vec<String>, PaneError> {
 /// The fallback for a server whose status route answers no JSON object: the last message of
 /// `session` whose `info.role` is `assistant` is [`Activity::Busy`] while it has no
 /// `info.time.completed`; a completed one, or none, is [`Activity::Idle`]. A message list
-/// that is not a `200` JSON array either is `unavailable`.
+/// that is not a `200` JSON array either is `unavailable` ([`messages`]).
 fn from_messages(call: &Call, session: &str) -> Result<Activity, PaneError> {
-    let path = format!("{}/message", session_path(session));
-    let reply = call.send(GET_MESSAGES, &path, None)?;
-    let list = json_of(&reply);
-    let Some(messages) = list.as_ref().and_then(Value::as_array) else {
-        return Err(call.unexpected(GET_MESSAGES, &reply, "a list of messages"));
-    };
+    let (_, messages) = messages(call, session)?;
     let last = messages
         .iter()
         .filter_map(|message| message.get("info"))
         .rfind(|info| string_at(Some(info), "role") == Some("assistant"));
     Ok(busy_or_idle(last.is_some_and(|info| !completed(info))))
+}
+
+/// `GET /session/:id/message`: the messages of `session`, oldest first, the JSON array of a
+/// `200`, with the reply, for a step that finds a message of the wrong shape to name the route
+/// and the status. Any other answer is `unavailable`, naming the route, the port and the status
+/// and quoting nothing of the body ([`Call::unexpected_status`]): the list is conversation
+/// text, which no message may hold, as a prompt's reply is not quoted (#647 part 2, plan review
+/// W-1). The crate's one reader of the route.
+pub(crate) fn messages(call: &Call, session: &str) -> Result<(Reply, Vec<Value>), PaneError> {
+    let path = format!("{}/message", session_path(session));
+    let reply = call.send(GET_MESSAGES, &path, None)?;
+    match json_of(&reply) {
+        Some(Value::Array(messages)) => Ok((reply, messages)),
+        _ => Err(call.unexpected_status(GET_MESSAGES, &reply, "a list of messages")),
+    }
 }
 
 /// Whether a message's `info` carries `time.completed`.

@@ -19,7 +19,7 @@ use holler_pane::pane::{AbortStyle, HarnessInfo, HarnessKind, Health, Shape};
 use holler_pane::ports::{Activity, SessionChoice, PROCESS_UNSUPPORTED};
 use holler_pane::profile_snapshot::spec_from_pane;
 use holler_pane::{
-    Argv, HarnessEndpoint, HarnessPort, Pane, PaneError, PaneId, PaneName, ServeSpec,
+    AgentView, Argv, HarnessEndpoint, HarnessPort, Pane, PaneError, PaneId, PaneName, ServeSpec,
 };
 use serde_json::json;
 
@@ -225,6 +225,9 @@ impl HarnessPort for ServerOnly {
     }
     fn shown_session(&self, _: &PaneId, _: &HarnessEndpoint) -> Result<Option<String>, PaneError> {
         Ok(None)
+    }
+    fn agent_view(&self, _: &HarnessEndpoint, _: &str, _: usize) -> Result<AgentView, PaneError> {
+        Ok(AgentView::default())
     }
 }
 

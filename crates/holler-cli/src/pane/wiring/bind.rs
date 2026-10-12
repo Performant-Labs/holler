@@ -19,8 +19,11 @@
 //! `HerdrPort`'s `observe_panes` (#832). A default never answers in place of the inner port, and
 //! `observe_panes` goes to the inner port's own `observe_panes`, so a list of panes stays one read
 //! of Herdr (ADR-0021 section 14), never one `observe_pane` per pane. `HerdrPort::observe_pane`
-//! and `HostPort::foreground_commands` have no default (#835), so the compiler holds every wrapper
-//! to them.
+//! and `HostPort::foreground_commands` have no default (#835), nor do the reads #647 part 2 added
+//! (ADR-0021 section 12), `HostPort::attached_clients` and `HarnessPort::agent_view`: a wrapper
+//! that does not forward one does not compile, so none of these wrappers has a default to fall
+//! back on for them. Each forwards them as it forwards the rest, and a test per wrapper pins that
+//! it answers the inner port's answer, with the arguments it was given.
 //!
 //! **Why the bindings (D8).** The launch engine attaches the TUI by the Herdr pane id before the
 //! pane's record exists (E34): `ensure_pane` (which knows the pane id), then `ensure_session` and
@@ -41,8 +44,8 @@ use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 use holler_adapter_opencode::Resolver;
 use holler_pane::ports::{Activity, LoginStatus, SessionChoice};
 use holler_pane::{
-    Argv, HarnessEndpoint, HarnessPort, HerdrPane, HerdrPort, HerdrSnapshot, HerdrSpec, HostPort,
-    Key, Pane, PaneError, PaneId, PaneName, PaneObservation, PaneStore, ServeSpec,
+    AgentView, Argv, HarnessEndpoint, HarnessPort, HerdrPane, HerdrPort, HerdrSnapshot, HerdrSpec,
+    HostPort, Key, Pane, PaneError, PaneId, PaneName, PaneObservation, PaneStore, ServeSpec,
 };
 
 /// The pairs a run's launches bound: the pane id the last `ensure_pane` answered, until an
@@ -189,6 +192,10 @@ impl HostPort for BindingHost {
 
     fn foreground_commands(&self, name: &PaneName) -> Result<Vec<String>, PaneError> {
         self.inner.foreground_commands(name)
+    }
+
+    fn attached_clients(&self, name: &PaneName) -> Result<u32, PaneError> {
+        self.inner.attached_clients(name)
     }
 }
 
@@ -376,6 +383,15 @@ impl HarnessPort for Wired<dyn HarnessPort> {
     fn login_status(&self) -> Result<LoginStatus, PaneError> {
         self.port()?.login_status()
     }
+
+    fn agent_view(
+        &self,
+        at: &HarnessEndpoint,
+        session: &str,
+        max_turns: usize,
+    ) -> Result<AgentView, PaneError> {
+        self.port()?.agent_view(at, session, max_turns)
+    }
 }
 
 impl HostPort for Wired<dyn HostPort> {
@@ -397,6 +413,10 @@ impl HostPort for Wired<dyn HostPort> {
 
     fn foreground_commands(&self, name: &PaneName) -> Result<Vec<String>, PaneError> {
         self.port()?.foreground_commands(name)
+    }
+
+    fn attached_clients(&self, name: &PaneName) -> Result<u32, PaneError> {
+        self.port()?.attached_clients(name)
     }
 }
 

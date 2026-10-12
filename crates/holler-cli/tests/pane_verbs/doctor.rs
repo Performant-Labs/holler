@@ -5,8 +5,11 @@
 //! where a test pins what it found or wrote; the verb is run through the in-process harness
 //! where a test pins exit codes or output. The rig is `doctor/rig.rs`; scope, output and
 //! remedy cases are `doctor/surface.rs`; the read-only pass is `doctor/read_only.rs`;
-//! `profile-drift` (#665) is `doctor/drift.rs`.
+//! `profile-drift` (#665) is `doctor/drift.rs`; #647 part 2's `unattached` is
+//! `doctor/attach.rs` and `agent-cannot-dispatch` is `doctor/agent.rs`.
 
+mod agent;
+mod attach;
 mod drift;
 mod read_only;
 pub(crate) mod rig;
@@ -19,10 +22,9 @@ use holler_pane::reconcile::ReconcileRequest;
 use holler_pane::{HerdrPort, PaneError, PaneName};
 use holler_pane_testkit::harness::{HarnessOp, Quirk};
 use holler_pane_testkit::herdr::HerdrOp;
-use holler_pane_testkit::host::HostOp;
 use holler_pane_testkit::pane_store::PaneStoreOp;
 
-use rig::{json_data, json_findings, keys, kinds, of_kind, one, whole, Rig, Seed, NOW};
+use rig::{json_data, json_findings, keys, kinds, of_kind, one, whole, Rig, Seed, HOST_READS, NOW};
 
 const PANE: &str = "demo-c1r1";
 
@@ -336,7 +338,7 @@ fn fix_selects_the_session_of_record_and_never_changes_it() {
         calls.herdr
     );
     assert!(
-        calls.host.iter().all(|op| *op == HostOp::Ps),
+        calls.host.iter().all(|op| HOST_READS.contains(op)),
         "{:?}",
         calls.host
     );

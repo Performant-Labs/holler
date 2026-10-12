@@ -39,6 +39,9 @@
 //! - `login_status`: `claude auth status`'s `authMethod` alone: `claude.ai` is the subscription
 //!   login, anything else is not. An answer with no `authMethod` is `unavailable`, quoting none
 //!   of it: nothing of the login is read, kept or printed (I7).
+//! - `agent_view(at, _, _)` (#647 part 2): the empty view for a process endpoint, with nothing
+//!   read: one process has no server that lists agents or turns, so it cannot tell. A port is
+//!   `server-unsupported`, the one conversion, so a call routed to the wrong harness is loud.
 //!
 //! **What it reads and writes on disk.** Whether a transcript file exists under Claude Code's
 //! configuration directory, never its contents nor any other file there (the registry files
@@ -60,7 +63,9 @@ use holler_pane::ports::{
     Activity, LoginStatus, SessionChoice, ABORT_UNSUPPORTED, INBOUND_HELD, SERVER_UNSUPPORTED,
     SESSION_MISMATCH,
 };
-use holler_pane::{Argv, HarnessEndpoint, HarnessPort, PaneError, PaneId, PaneName, ServeSpec};
+use holler_pane::{
+    AgentView, Argv, HarnessEndpoint, HarnessPort, PaneError, PaneId, PaneName, ServeSpec,
+};
 use serde_json::Value;
 
 use crate::agents::Entry;
@@ -358,6 +363,16 @@ impl HarnessPort for ClaudeHarness {
                     .to_owned(),
             }),
         }
+    }
+
+    fn agent_view(
+        &self,
+        at: &HarnessEndpoint,
+        _session: &str,
+        _max_turns: usize,
+    ) -> Result<AgentView, PaneError> {
+        at.process()?;
+        Ok(AgentView::default())
     }
 }
 

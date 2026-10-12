@@ -7,9 +7,12 @@
 //! One pass, over every pane in scope at once (a thread per pane, so a pass takes about as
 //! long as its slowest pane's chain, not the pane count times it: I5):
 //!
-//! 1. **Observe** each pane: `host.ps`, `harness.health`, `harness.list_sessions` and
-//!    `harness.shown_session`; and once per pass `herdr.version` and `herdr.snapshot`, and
-//!    (#839) `hub.advertised`, the hub's live attach bodies, when a pane in scope has a server.
+//! 1. **Observe** each pane: `host.ps`, `host.attached_clients` (each pane whose session
+//!    exists: none is `unattached`, #647 part 2), `harness.health`, `harness.list_sessions`,
+//!    `harness.shown_session` and `harness.agent_view` (a server pane whose record names no
+//!    agent and whose healthy server lists the session of record: `agent-cannot-dispatch`,
+//!    #647 part 2); and once per pass `herdr.version` and `herdr.snapshot`, and (#839)
+//!    `hub.advertised`, the hub's live attach bodies, when a pane in scope has a server.
 //!    A healthy server's list is trusted. An unhealthy server's list only tells a wedged
 //!    server (the list times out) from a down one. A rule that needs a value that was not
 //!    observed is skipped, and the call that failed is an `observe-failed` finding: nothing
@@ -34,12 +37,14 @@
 //!
 //! **A single process (#831, ADR-0021 section 15 items 6 and 13; plan review W2 and W3).** A
 //! pane whose harness's shape is `SingleProcess` (Claude Code) has no server list and no TUI,
-//! so its chain is `host.ps`, `harness.health` at its endpoint (whether its process still
-//! runs: `server-down` when it does not, with no wedge check), `harness.shown_session` (the
-//! session the process holds, which a person's `/clear` or `/resume` moves) and
-//! `harness.session_activity` (a wait is `pane-waiting`, with its reason). The rules that
-//! need a server's list are skipped: `session-of-record-missing`, `tui-foreign-session`,
-//! `stray-session` and `server-wedged`. Its one mismatch, the process holding another session
+//! so its chain is `host.ps`, `host.attached_clients` (its tmux session needs a client in a
+//! Herdr pane as much as a server pane's does), `harness.health` at its endpoint (whether its
+//! process still runs: `server-down` when it does not, with no wedge check),
+//! `harness.shown_session` (the session the process holds, which a person's `/clear` or
+//! `/resume` moves) and `harness.session_activity` (a wait is `pane-waiting`, with its
+//! reason). The rules that need a server's list are skipped: `session-of-record-missing`,
+//! `tui-foreign-session`, `stray-session`, `server-wedged` and `agent-cannot-dispatch` (a
+//! server's agents). Its one mismatch, the process holding another session
 //! than the session of record, is repaired by relaunching it on the session of record, and
 //! only while it is idle, so a repair never drops a running turn: a pane that works or waits
 //! is `not-fixable`, with the relaunch remedy. The relaunch is the caller's

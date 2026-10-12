@@ -10,7 +10,7 @@
 //!
 //! | Call | Goes to |
 //! |---|---|
-//! | every method keyed by an endpoint (`verify_serving`, `health`, `create_session`, `list_sessions`, `abort`, `attach_tui`, `shown_session`, `send_prompt`, `session_activity`) | the server harness for [`HarnessEndpoint::Port`], the process harness for [`HarnessEndpoint::Process`] |
+//! | every method keyed by an endpoint (`verify_serving`, `health`, `create_session`, `list_sessions`, `abort`, `attach_tui`, `shown_session`, `send_prompt`, `session_activity`, `agent_view`) | the server harness for [`HarnessEndpoint::Port`], the process harness for [`HarnessEndpoint::Process`] |
 //! | `serve_command`, `select_session` (a server's argv; a TUI's switch) | the server harness |
 //! | `process_command`, `new_session_id`, `locate_process`, `login_status` | the process harness |
 //!
@@ -21,7 +21,9 @@ use crate::argv::Argv;
 use crate::error::PaneError;
 use crate::pane::{PaneId, PaneName};
 
-use super::{Activity, HarnessEndpoint, HarnessPort, LoginStatus, ServeSpec, SessionChoice};
+use super::{
+    Activity, AgentView, HarnessEndpoint, HarnessPort, LoginStatus, ServeSpec, SessionChoice,
+};
 
 /// A `HarnessPort` over a server harness `S` (OpenCode) and a single-process harness `P`
 /// (Claude Code), routing each call as the module docs' table says.
@@ -141,5 +143,14 @@ impl<S: HarnessPort, P: HarnessPort> HarnessPort for HarnessRouter<S, P> {
 
     fn login_status(&self) -> Result<LoginStatus, PaneError> {
         self.process.login_status()
+    }
+
+    fn agent_view(
+        &self,
+        at: &HarnessEndpoint,
+        session: &str,
+        max_turns: usize,
+    ) -> Result<AgentView, PaneError> {
+        self.by(at).agent_view(at, session, max_turns)
     }
 }

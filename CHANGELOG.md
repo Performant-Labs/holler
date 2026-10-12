@@ -48,6 +48,18 @@ fills this file in at release time.
   which is how `say --pane` tells a pane no body drives from a turn that outlived its wait. This replaces the caution
   about `reset --first` on a parked or held pane in the #649 entry below. [ADR 0021](docs/adr/ADR-0021.md) section 11 records
   the decisions.
+
+- `holler pane doctor` reports two more findings (epic [#633](https://github.com/Performant-Labs/holler/issues/633),
+  part 2 of [#647](https://github.com/Performant-Labs/holler/issues/647)). `unattached`: a pane whose tmux session
+  exists and has no tmux client attached, so no Herdr pane shows it. It names no command, since no Holler verb attaches
+  a client, and a client attached in any terminal hides it. `agent-cannot-dispatch`: an OpenCode pane whose record names
+  no agent, whose last three turns all ran as an agent that cannot dispatch a subagent, while the project ships an
+  orchestrator (an agent of its own that can). It names `holler pane relaunch PANE --agent=KEY` when there is one such
+  agent, and tells a pane in a profile to add `--profile`. `--fix` repairs neither, and neither writes the record. The
+  host port gains the required read `attached_clients` (tmux's `#{session_attached}`) and the harness port the required
+  read `agent_view` (OpenCode's `GET /session/:id/message` and `GET /agent`; a Claude Code pane answers an empty view),
+  and every wrapper of the wiring forwards both. [ADR 0021](docs/adr/ADR-0021.md) section 12 records the contract, and
+  [`docs/pane-control.md`](docs/pane-control.md) section 5 documents both findings.
 - Pane control, a Claude Code harness (epic [#633](https://github.com/Performant-Labs/holler/issues/633)):
   `holler pane launch PANE --harness claude --port-policy none` launches a pane whose harness is one interactive Claude
   Code process, recorded by its pid and with no port, and the pane verbs drive it

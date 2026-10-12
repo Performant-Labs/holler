@@ -74,6 +74,10 @@ where
     fn foreground_commands(&self, name: &PaneName) -> Result<Vec<String>, PaneError> {
         self.host.borrow().foreground_commands(name)
     }
+
+    fn attached_clients(&self, name: &PaneName) -> Result<u32, PaneError> {
+        self.host.borrow().attached_clients(name)
+    }
 }
 
 /// What `run` answers when the fake refuses to start the server its argv describes (a port

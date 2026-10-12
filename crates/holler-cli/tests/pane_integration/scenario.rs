@@ -146,8 +146,10 @@ fn break_both(scratch: &Scratch, p1: u16, p2: u16, target: &str) {
         found.contains(&(C2.to_owned(), "server-down".to_owned())),
         "doctor finds C2's server down: {found:?}"
     );
+    // A scratch session has no tmux client, so C1 is `unattached` too (#647 part 2): left
+    // out, so the check still proves the deleted session is found.
     assert!(
-        found.iter().any(|(pane, _)| pane == C1),
+        found.iter().any(|(pane, kind)| pane == C1 && kind != "unattached"),
         "doctor reports C1's deleted session: {found:?}"
     );
 }

@@ -320,6 +320,9 @@ impl HostPort for LostChain<'_> {
     fn foreground_commands(&self, name: &PaneName) -> Result<Vec<String>, PaneError> {
         self.host.foreground_commands(name)
     }
+    fn attached_clients(&self, name: &PaneName) -> Result<u32, PaneError> {
+        self.host.attached_clients(name)
+    }
 }
 
 /// Brief R2-6: a chain that did not finish read nothing, so the pane is `harness-unreadable`

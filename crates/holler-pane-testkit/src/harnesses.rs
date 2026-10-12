@@ -13,7 +13,8 @@
 
 use holler_pane::ports::{Activity, LoginStatus, SessionChoice};
 use holler_pane::{
-    Argv, HarnessEndpoint, HarnessPort, HarnessRouter, PaneError, PaneId, PaneName, ServeSpec,
+    AgentView, Argv, HarnessEndpoint, HarnessPort, HarnessRouter, PaneError, PaneId, PaneName,
+    ServeSpec,
 };
 
 use crate::claude::FakeClaude;
@@ -146,5 +147,14 @@ impl HarnessPort for FakeHarnesses {
 
     fn login_status(&self) -> Result<LoginStatus, PaneError> {
         self.0.login_status()
+    }
+
+    fn agent_view(
+        &self,
+        at: &HarnessEndpoint,
+        session: &str,
+        max_turns: usize,
+    ) -> Result<AgentView, PaneError> {
+        self.0.agent_view(at, session, max_turns)
     }
 }

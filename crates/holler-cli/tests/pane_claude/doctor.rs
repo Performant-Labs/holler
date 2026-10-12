@@ -196,6 +196,23 @@ fn a_claude_pane_waiting_on_a_permission_is_a_pane_waiting_warning_with_its_reas
     );
 }
 
+/// #647 part 2 (D9): `unattached` is raised whatever the pane's harness. A Claude Code pane
+/// whose tmux session lost its client raises it exactly once, with no remedy, and the
+/// OpenCode pane beside it, still attached, raises nothing.
+#[test]
+fn a_claude_pane_with_no_tmux_client_is_unattached() {
+    let rig = mixed();
+    rig.host
+        .detach_clients(&rig.record(CLAUDE).name)
+        .expect("the session exists");
+
+    let found = doctor(&rig, &[]);
+
+    assert_eq!(kinds(&found), vec!["unattached"], "{found:?}");
+    assert_eq!(found[0]["pane"], CLAUDE);
+    assert_eq!(found[0]["remedy"], serde_json::Value::Null, "{found:?}");
+}
+
 #[test]
 fn a_claude_process_that_is_gone_is_server_down() {
     let rig = mixed();

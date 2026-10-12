@@ -7,7 +7,8 @@
 //! ([`FakeHarness::faults`]), switches for two quirks of raw OpenCode ([`Quirk`]), a data
 //! directory per port, the scenarios the port cannot cause (a server started from the argv
 //! `serve_command` built, a frozen or killed server, a session another client creates or
-//! deletes, a person moving the TUI, a TUI that exits) and the inspection of servers, the
+//! deletes, a person moving the TUI, a TUI that exits, and what `agent_view` reports: a
+//! session's turns and a server's dispatchers, #647 part 2) and the inspection of servers, the
 //! specs asked for, TUIs and aborts.
 //!
 //! The host and harness fakes share no state: `FakeHost::run` of a server's argv starts no
@@ -21,7 +22,8 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use holler_pane::error::RefusalCode;
 use holler_pane::{
-    AgentKey, Argv, HarnessEndpoint, HarnessPort, PaneError, PaneId, PaneName, ServeSpec,
+    AgentKey, AgentView, Argv, HarnessEndpoint, HarnessPort, PaneError, PaneId, PaneName,
+    ServeSpec, TurnAgent,
 };
 
 use crate::fault::{FaultSwitch, PortOp};
@@ -56,6 +58,7 @@ pub enum HarnessOp {
     AttachTui,
     SelectSession,
     ShownSession,
+    AgentView,
 }
 
 impl PortOp for HarnessOp {
@@ -70,6 +73,7 @@ impl PortOp for HarnessOp {
             HarnessOp::AttachTui => "harness.attach_tui",
             HarnessOp::SelectSession => "harness.select_session",
             HarnessOp::ShownSession => "harness.shown_session",
+            HarnessOp::AgentView => "harness.agent_view",
         }
     }
 }
@@ -158,6 +162,12 @@ pub struct TuiView {
 /// - `shown_session(pane)`: the session the TUI shows, or `None` on its home screen or
 ///   with no TUI. It does not reach the server: a TUI keeps its screen while its server
 ///   is frozen or dead (opencode-pane-spike.md:193-194).
+/// - `agent_view(port, session, max_turns)` (#647 part 2) reaches the port, in `abort`'s
+///   order. A session outside its data directory is `session-not-found`; otherwise the newest
+///   `max_turns` of the turns [`FakeHarness::seed_turns`] gave the session in that data
+///   directory, oldest first, and the dispatchers [`FakeHarness::seed_dispatchers`] gave the
+///   server on the port. Nothing seeded is the empty view, as a real server's fresh session
+///   and a project without an orchestrator answer.
 ///
 /// Every method reaches a server through its endpoint's port (#831); an endpoint that names a
 /// process is the refusal `process-unsupported` (`HarnessEndpoint::port`), which the router of
@@ -187,6 +197,12 @@ struct World {
     quirks: HashSet<Quirk>,
     /// Every acknowledged abort, oldest first.
     aborts: Vec<(u16, String)>,
+    /// The user turns of each session, oldest first, by data directory and session id
+    /// (#647 part 2): a session's turns are in its data directory, as its id is.
+    turns: HashMap<(String, String), Vec<TurnAgent>>,
+    /// The agents that can dispatch, by the port of the server that lists them (#647 part 2):
+    /// a server's agents are its project's.
+    dispatchers: HashMap<u16, Vec<AgentKey>>,
     /// How many session ids were minted: the next one is number `sessions_minted + 1`.
     sessions_minted: u64,
     /// How many pids were minted: the next one is `FIRST_PID + pids_minted`.
@@ -270,6 +286,22 @@ impl FakeHarness {
     /// no running server. Returns its id.
     pub fn seed_session(&self, port: u16) -> String {
         self.lock().mint_session(port)
+    }
+
+    /// The user turns of `session` in the data directory of `port` are `turns`, oldest first
+    /// (#647 part 2), replacing any seeded before: what `agent_view` reports for it. It needs
+    /// no running server, and does not check that the session exists.
+    pub fn seed_turns(&self, port: u16, session: &str, turns: Vec<TurnAgent>) {
+        let mut world = self.lock();
+        let dir = world.dir(port).to_owned();
+        world.turns.insert((dir, session.to_owned()), turns);
+    }
+
+    /// The server on `port` lists `dispatchers` as the agents that can dispatch (#647 part 2),
+    /// replacing any seeded before: what `agent_view` reports, sorted and without duplicates.
+    /// It needs no running server.
+    pub fn seed_dispatchers(&self, port: u16, dispatchers: Vec<AgentKey>) {
+        self.lock().dispatchers.insert(port, dispatchers);
     }
 
     /// Another client deleted `session` (`DELETE /session/:id`): it leaves its data
@@ -443,6 +475,20 @@ impl HarnessPort for FakeHarness {
         at.port()?;
         Ok(self.lock().tuis.get(pane).and_then(|tui| tui.shown.clone()))
     }
+
+    fn agent_view(
+        &self,
+        at: &HarnessEndpoint,
+        session: &str,
+        max_turns: usize,
+    ) -> Result<AgentView, PaneError> {
+        self.faults.enter(HarnessOp::AgentView)?;
+        let port = at.port()?;
+        let world = self.lock();
+        world.reach(port, HarnessOp::AgentView)?;
+        world.known(port, session)?;
+        Ok(world.agent_view(port, session, max_turns))
+    }
 }
 
 impl World {
@@ -525,6 +571,21 @@ impl World {
         } else {
             Err(unknown_session(session))
         }
+    }
+
+    /// `agent_view`'s answer, once the server and the session were reached: the newest
+    /// `max_turns` turns seeded for `session` in the data directory of `port`, oldest first, and
+    /// the dispatchers seeded for `port`.
+    fn agent_view(&self, port: u16, session: &str, max_turns: usize) -> AgentView {
+        let turns = self
+            .turns
+            .get(&(self.dir(port).to_owned(), session.to_owned()))
+            .map(Vec::as_slice)
+            .unwrap_or_default();
+        let newest = turns.get(turns.len().saturating_sub(max_turns)..);
+        AgentView::default()
+            .with_turns(newest.unwrap_or_default().iter().cloned())
+            .with_dispatchers(self.dispatchers.get(&port).into_iter().flatten().cloned())
     }
 
     /// Mint a new session id in the data directory of `port`.

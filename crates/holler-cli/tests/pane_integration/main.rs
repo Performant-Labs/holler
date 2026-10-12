@@ -36,6 +36,7 @@ mod bind;
 mod clients;
 mod env;
 mod fake_hub;
+mod forwarding;
 mod guards;
 mod no_hub;
 mod observe;

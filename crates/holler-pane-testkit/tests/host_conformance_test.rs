@@ -12,8 +12,9 @@ use holler_pane_testkit::conformance::host::{host_cases, run_host_conformance};
 use holler_pane_testkit::conformance::Conformance;
 use holler_pane_testkit::host::FakeHost;
 
-/// The 9 case ids of the brief's table, in order, and #835's `foreground_commands` case.
-const DOCUMENTED_CASES: [&str; 10] = [
+/// The 9 case ids of the brief's table, in order, #835's `foreground_commands` case and #647
+/// part 2's `attached_clients` case.
+const DOCUMENTED_CASES: [&str; 11] = [
     "ps-of-missing-session-is-pane-not-found",
     "run-in-missing-session-is-pane-not-found",
     "run-adds-a-process",
@@ -24,6 +25,7 @@ const DOCUMENTED_CASES: [&str; 10] = [
     "stop-owned-leaves-other-sessions",
     "ps-lists-only-its-session",
     "foreground-commands-names-what-run-started",
+    "attached-clients-of-fresh-session-is-zero-and-of-missing-is-pane-not-found",
 ];
 
 #[test]
@@ -65,6 +67,11 @@ enum Break {
     ForegroundNamesNothing,
     /// `foreground_commands` of a missing session answers an empty list.
     ForegroundOfMissingIsEmpty,
+    /// `attached_clients` always answers 1, as a wrapper that answers a constant would
+    /// (#647 part 2).
+    AttachedAlwaysOne,
+    /// `attached_clients` of a missing session answers 0.
+    AttachedOfMissingIsZero,
 }
 
 struct Mutant {
@@ -156,6 +163,14 @@ impl HostPort for Mutant {
             Break::ForegroundNamesNothing => self.inner.foreground_commands(name).map(|_| vec![]),
             Break::ForegroundOfMissingIsEmpty if !self.exists(name) => Ok(vec![]),
             _ => self.inner.foreground_commands(name),
+        }
+    }
+
+    fn attached_clients(&self, name: &PaneName) -> Result<u32, PaneError> {
+        match self.broken {
+            Break::AttachedAlwaysOne => Ok(1),
+            Break::AttachedOfMissingIsZero if !self.exists(name) => Ok(0),
+            _ => self.inner.attached_clients(name),
         }
     }
 }
@@ -250,5 +265,21 @@ fn a_host_whose_foreground_commands_of_a_missing_session_is_empty_fails() {
     assert_suite_fails_on(
         Break::ForegroundOfMissingIsEmpty,
         "foreground-commands-names-what-run-started",
+    );
+}
+
+#[test]
+fn a_host_whose_attached_clients_is_always_one_fails() {
+    assert_suite_fails_on(
+        Break::AttachedAlwaysOne,
+        "attached-clients-of-fresh-session-is-zero-and-of-missing-is-pane-not-found",
+    );
+}
+
+#[test]
+fn a_host_whose_attached_clients_of_a_missing_session_is_zero_fails() {
+    assert_suite_fails_on(
+        Break::AttachedOfMissingIsZero,
+        "attached-clients-of-fresh-session-is-zero-and-of-missing-is-pane-not-found",
     );
 }

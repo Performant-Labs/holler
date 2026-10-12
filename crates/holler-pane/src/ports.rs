@@ -39,11 +39,18 @@
 //!   [`HarnessPort::login_status`]); [`ServeSpec`] gains the model and the directory; and
 //!   [`Activity::WaitingPermission`]. [`HarnessRouter`] is the one router of the two
 //!   shapes, so [`Ports`] keeps one harness;
+//! - #647 part 2's (ADR-0021 section 12): the required [`HostPort::attached_clients`], the
+//!   number of tmux clients attached to a session (`unattached`), and the required
+//!   [`HarnessPort::agent_view`], what a harness server says about the agents of a session's
+//!   recent turns and the agents that can dispatch (`agent-cannot-dispatch`), as an
+//!   [`AgentView`]. Both are read-only and required for #835's reason, so a wrapper that does
+//!   not forward one does not compile.
 //! - #839's: [`Ports`] gains `hub`, the [`HubPort`] (`crate::hub`) through which switch, reset
 //!   and reconcile read the hub's live attach bodies, re-point one, and ask the hub's one prompt
 //!   path; its three methods are required, as #835's rule asks. [`HarnessPort::send_prompt`]
 //!   stays as the adapter's transport, with no verb or engine caller since then.
 
+mod agent_view;
 mod process;
 mod router;
 
@@ -59,6 +66,7 @@ use crate::pane::{HerdrPane, ModelSpec, Pane, PaneEvent, PaneId, PaneName};
 use crate::probe::{run_probe, ProbeResult};
 use crate::profile::{ProfileScope, ProfileStore};
 
+pub use self::agent_view::{AgentView, TurnAgent};
 use self::process::process_unsupported;
 pub use self::process::{
     HarnessEndpoint, LoginStatus, SessionChoice, ABORT_UNSUPPORTED, INBOUND_HELD,
@@ -350,8 +358,8 @@ impl PaneObservation {
 /// thread) in async code. Every method returns within I5's bound (default 10 s) or
 /// with [`PaneError::Timeout`]. An implementation is `Send + Sync`.
 ///
-/// No method has a default (#835), so an implementation that answers only the four methods
-/// that came before `foreground_commands`, a wrapper port included, does not compile:
+/// No method has a default (#835), so an implementation that leaves out
+/// `foreground_commands`, a wrapper port included, does not compile:
 ///
 /// ```compile_fail,E0046
 /// use holler_pane::{Argv, HostPort, PaneError, PaneName};
@@ -369,6 +377,35 @@ impl PaneObservation {
 ///         Ok(())
 ///     }
 ///     fn ps(&self, _: &PaneName) -> Result<Vec<u32>, PaneError> {
+///         Ok(Vec::new())
+///     }
+///     fn attached_clients(&self, _: &PaneName) -> Result<u32, PaneError> {
+///         Ok(0)
+///     }
+/// }
+/// ```
+///
+/// Nor does one that leaves out `attached_clients` (#647 part 2, ADR-0021 section 12):
+///
+/// ```compile_fail,E0046
+/// use holler_pane::{Argv, HostPort, PaneError, PaneName};
+///
+/// struct NoClientCount;
+///
+/// impl HostPort for NoClientCount {
+///     fn ensure_session(&self, _: &PaneName, _: &str) -> Result<(), PaneError> {
+///         Ok(())
+///     }
+///     fn run(&self, _: &PaneName, _: &str, _: &Argv) -> Result<(), PaneError> {
+///         Ok(())
+///     }
+///     fn stop_owned(&self, _: &PaneName) -> Result<(), PaneError> {
+///         Ok(())
+///     }
+///     fn ps(&self, _: &PaneName) -> Result<Vec<u32>, PaneError> {
+///         Ok(Vec::new())
+///     }
+///     fn foreground_commands(&self, _: &PaneName) -> Result<Vec<String>, PaneError> {
 ///         Ok(Vec::new())
 ///     }
 /// }
@@ -400,6 +437,15 @@ pub trait HostPort: Send + Sync {
     /// ([`crate::pane::is_claude_code_command`]), and a Claude Code launch to refuse a session
     /// that already runs one (`process-in-use`, #831).
     fn foreground_commands(&self, name: &PaneName) -> Result<Vec<String>, PaneError>;
+
+    /// The number of tmux clients attached to the session `name`, as tmux counts them
+    /// (`#{session_attached}`; #647 part 2, ADR-0021 section 12). A fresh session made by
+    /// [`HostPort::ensure_session`] has none; a missing session is `pane-not-found`, as `ps`
+    /// answers. A count only, never a client's name, tty or process (I7).
+    ///
+    /// Reconcile reads it once `ps` answered for a pane: no client at all is `unattached`, a
+    /// session no Herdr pane shows.
+    fn attached_clients(&self, name: &PaneName) -> Result<u32, PaneError>;
 }
 
 /// The harness of a pane and its sessions: an OpenCode server and its TUI (the adapter is
@@ -420,6 +466,60 @@ pub trait HostPort: Send + Sync {
 /// **Blocking.** Every method is synchronous. Call from `spawn_blocking` (or a
 /// thread) in async code. Every method returns within I5's bound (default 10 s) or
 /// with [`PaneError::Timeout`]. An implementation is `Send + Sync`.
+///
+/// `agent_view` has no default (#647 part 2, ADR-0021 section 12), so an implementation that
+/// leaves it out, a wrapper port included, does not compile:
+///
+/// ```compile_fail,E0046
+/// use holler_pane::{Argv, HarnessEndpoint, HarnessPort, PaneError, PaneId, PaneName, ServeSpec};
+///
+/// struct NoAgentView;
+///
+/// impl HarnessPort for NoAgentView {
+///     fn serve_command(&self, _: &PaneName, _: u16, _: &ServeSpec) -> Result<Argv, PaneError> {
+///         Err(PaneError::NotImplemented)
+///     }
+///     fn verify_serving(&self, _: &HarnessEndpoint, _: &ServeSpec) -> Result<(), PaneError> {
+///         Ok(())
+///     }
+///     fn health(&self, _: &HarnessEndpoint) -> Result<bool, PaneError> {
+///         Ok(false)
+///     }
+///     fn create_session(&self, _: &HarnessEndpoint) -> Result<String, PaneError> {
+///         Err(PaneError::NotImplemented)
+///     }
+///     fn list_sessions(&self, _: &HarnessEndpoint) -> Result<Vec<String>, PaneError> {
+///         Ok(Vec::new())
+///     }
+///     fn abort(&self, _: &HarnessEndpoint, _: &str) -> Result<(), PaneError> {
+///         Ok(())
+///     }
+///     fn attach_tui(&self, _: &PaneId, _: &HarnessEndpoint, _: &str) -> Result<(), PaneError> {
+///         Ok(())
+///     }
+///     fn select_session(&self, _: &PaneId, _: &str) -> Result<(), PaneError> {
+///         Ok(())
+///     }
+///     fn shown_session(
+///         &self,
+///         _: &PaneId,
+///         _: &HarnessEndpoint,
+///     ) -> Result<Option<String>, PaneError> {
+///         Ok(None)
+///     }
+/// }
+/// ```
+///
+/// The view it answers is `#[non_exhaustive]`: outside this crate an `AgentView` is built only
+/// from its empty default and its builders, so a struct literal does not compile there, with or
+/// without `..Default::default()`:
+///
+/// ```compile_fail,E0639
+/// let view = holler_pane::AgentView { turns: Vec::new(), dispatchers: Vec::new() };
+/// ```
+/// ```compile_fail,E0639
+/// let view = holler_pane::AgentView { turns: Vec::new(), ..Default::default() };
+/// ```
 pub trait HarnessPort: Send + Sync {
     /// The argv that starts the harness server of `name` on `port` with `spec` applied,
     /// for [`HostPort::run`] to start. Pure: it starts no process, binds no port, writes
@@ -564,6 +664,26 @@ pub trait HarnessPort: Send + Sync {
     fn login_status(&self) -> Result<LoginStatus, PaneError> {
         Err(process_unsupported("login_status"))
     }
+
+    /// What the harness at `at` says about the agents of `session`, in one call (#647 part 2,
+    /// ADR-0021 section 12): for each of its last `max_turns` user turns, oldest first, the
+    /// agent the server recorded and whether that agent can dispatch a subagent, and the agents
+    /// it lists that a pane could run as its default, that are not its own and that can dispatch
+    /// (see [`AgentView`]). Read-only.
+    ///
+    /// An implementation that cannot tell answers an empty view, never a guess: a single-process
+    /// harness answers one for a process endpoint (it has no server to list agents or turns), and
+    /// `server-unsupported` for a port, its one conversion. A session the server does not have is
+    /// `session-not-found`; a reply of the wrong shape is `unavailable`.
+    ///
+    /// Required, with no default, for #835's reason: a default would answer silently in place of
+    /// a harness a wrapper did not forward.
+    fn agent_view(
+        &self,
+        at: &HarnessEndpoint,
+        session: &str,
+        max_turns: usize,
+    ) -> Result<AgentView, PaneError>;
 }
 
 /// `prompt-unsupported`: the default of [`HarnessPort::send_prompt`], for a harness that

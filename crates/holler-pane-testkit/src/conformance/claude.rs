@@ -25,6 +25,10 @@
 //! 10. a stopped process is not healthy;
 //! 11. `abort` is `abort-unsupported` (there is no in-place abort, and a signal is not one);
 //! 12. `login_status` answers.
+//! 13. `agent_view` of a process endpoint is the empty view (#647 part 2, ADR-0021 section 12):
+//!     a single process has no server to list agents or turns, so it cannot tell, and says so
+//!     with an empty view, never a guess. Run over the router of the two harnesses, it also
+//!     pins that a process endpoint's `agent_view` reaches the process harness.
 //!
 //! **The bounds.** A launched process must be located within [`LOCATE_WITHIN`], half the launch
 //! engine's `DEFAULT_BUDGET`, which must also hold the Herdr and tmux steps of a launch; what a
@@ -41,7 +45,9 @@ use std::time::{Duration, Instant};
 
 use holler_pane::ports::{Activity, SessionChoice, ABORT_UNSUPPORTED, SESSION_MISMATCH};
 use holler_pane::tx_launch::{wait_located, wait_until, BOOT_POLL};
-use holler_pane::{Argv, HarnessEndpoint, HarnessPort, PaneError, PaneId, PaneName, ServeSpec};
+use holler_pane::{
+    AgentView, Argv, HarnessEndpoint, HarnessPort, PaneError, PaneId, PaneName, ServeSpec,
+};
 
 use super::{expect_code, expect_eq, run_cases, succeeds, Conformance};
 
@@ -119,7 +125,7 @@ fn constant_name(text: &str) -> PaneName {
 }
 
 /// The suite, in order: the one table that the runner iterates and [`claude_cases`] lists.
-const CASES: [(&str, Case); 12] = [
+const CASES: [(&str, Case); 13] = [
     (
         "process-command-starts-nothing",
         process_command_starts_nothing,
@@ -153,6 +159,10 @@ const CASES: [(&str, Case); 12] = [
     ),
     ("abort-is-unsupported", abort_is_unsupported),
     ("login-status-answers", login_status_answers),
+    (
+        "agent-view-of-a-process-is-empty",
+        agent_view_of_a_process_is_empty,
+    ),
 ];
 
 /// The ids of the cases [`run_claude_conformance`] runs, in the order it runs them.
@@ -414,6 +424,22 @@ fn abort_is_unsupported(h: &dyn HarnessPort, _: &Hands<'_>, rig: &ClaudeRig) -> 
 /// Case 12: `login_status` answers.
 fn login_status_answers(h: &dyn HarnessPort, _: &Hands<'_>, _: &ClaudeRig) -> Result<(), String> {
     succeeds("login_status", h.login_status()).map(drop)
+}
+
+/// Case 13 (#647 part 2): `agent_view` of a process endpoint is `Ok` with the empty view.
+/// Nothing is launched: a single process cannot tell, whatever it is doing.
+fn agent_view_of_a_process_is_empty(
+    h: &dyn HarnessPort,
+    _: &Hands<'_>,
+    rig: &ClaudeRig,
+) -> Result<(), String> {
+    let id = new_id(h)?;
+    let at = HarnessEndpoint::Process {
+        pane: rig.panes[0].clone(),
+        pid: ABORTED_PID,
+    };
+    let view = succeeds(&format!("agent_view of {at}"), h.agent_view(&at, &id, 3))?;
+    expect_eq(&format!("agent_view of {at}"), view, AgentView::default())
 }
 
 // --- helpers ---

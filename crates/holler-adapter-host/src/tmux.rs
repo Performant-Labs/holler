@@ -34,6 +34,11 @@ const PS_FORMAT: &str = "#{pane_pid} #{pane_dead}";
 /// basename: a name only, never a command line (I7).
 const FOREGROUND_FORMAT: &str = "#{pane_dead} #{pane_current_command}";
 
+/// What `attached_clients` lists for every pane (#647 part 2): the number of clients attached
+/// to the pane's session. With `-s` every line is one pane of the one session, so each carries
+/// the same count. A count only, never a client's name or tty (I7).
+const ATTACHED_FORMAT: &str = "#{session_attached}";
+
 /// What `stop_owned` lists for every pane: also the window's tag (an untagged pane's
 /// third field is empty, Q5).
 const STOP_FORMAT: &str = "#{pane_pid} #{pane_dead} #{@holler-pid}";
@@ -154,6 +159,19 @@ pub(crate) fn foreground_listing(name: &PaneName) -> Vec<String> {
     ])
 }
 
+/// `attached_clients`' listing (#647 part 2): every pane of the session, as `ps` lists them,
+/// with the number of clients attached to the session.
+pub(crate) fn attached_listing(name: &PaneName) -> Vec<String> {
+    strings(&[
+        "list-panes",
+        "-s",
+        "-t",
+        &window_target(name),
+        "-F",
+        ATTACHED_FORMAT,
+    ])
+}
+
 /// The session `name` as a window target, exactly.
 fn window_target(name: &PaneName) -> String {
     format!("={name}:")
@@ -263,6 +281,19 @@ pub(crate) fn parse_foreground(stdout: &str) -> Option<Vec<String>> {
     Some(names)
 }
 
+/// `attached_clients`' listing (#647 part 2): the session's client count, or `None` unless
+/// every line is the same decimal count and there is at least one. Read as strictly as `ps`'s:
+/// tmux prints the session's one count on each pane's line, so an empty listing, a line that is
+/// not a count (empty, signed, fractional, a word) or two lines that disagree fail the whole
+/// answer, never a guess.
+pub(crate) fn parse_attached(stdout: &str) -> Option<u32> {
+    let mut lines = stdout.lines();
+    let count = decimal(lines.next()?)?;
+    lines
+        .all(|line| decimal(line) == Some(count))
+        .then_some(count)
+}
+
 /// One reading of `stop_owned`'s listing (Decision 4). A line that is malformed or whose
 /// pid is out of range is in neither list.
 #[derive(Debug, Default)]
@@ -295,13 +326,14 @@ pub(crate) fn parse_listing(stdout: &str) -> Listing {
 /// A failed tmux call, read from its stderr (Decision 8).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Refusal {
-    /// No such session, or no server: `pane-not-found` for `run`, `ps` and
-    /// `foreground_commands`, `Ok` for `stop_owned`.
+    /// No such session, or no server: `pane-not-found` for `run`, `ps`,
+    /// `foreground_commands` and `attached_clients`, `Ok` for `stop_owned`.
     Missing,
     /// No such window: `can't find window` from a target lookup, and `no such window`,
     /// which `set-option -w -t @<id>` prints for a window that closed (tmux 3.7c). For
-    /// `run`, `ps`, `foreground_commands` and `stop_owned` it is [`Refusal::Missing`]; for
-    /// `run`'s tag it means the program already exited, and the window with it.
+    /// `run`, `ps`, `foreground_commands`, `attached_clients` and `stop_owned` it is
+    /// [`Refusal::Missing`]; for `run`'s tag it means the program already exited, and the
+    /// window with it.
     WindowGone,
     /// `new-session` of a session that exists.
     Duplicate,
@@ -310,8 +342,8 @@ pub(crate) enum Refusal {
 }
 
 impl Refusal {
-    /// Whether the session is missing, as `run`, `ps`, `foreground_commands` and
-    /// `stop_owned` read it.
+    /// Whether the session is missing, as `run`, `ps`, `foreground_commands`,
+    /// `attached_clients` and `stop_owned` read it.
     pub(crate) fn is_missing(self) -> bool {
         matches!(self, Refusal::Missing | Refusal::WindowGone)
     }
