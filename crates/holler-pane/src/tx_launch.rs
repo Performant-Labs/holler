@@ -1,36 +1,48 @@
 //! The launch/relaunch transaction (plan, act, observe, record; I3 and I8), story #644: the
-//! engine `holler pane launch` and `holler pane relaunch` run, and `profile apply` (#664) will.
+//! engine `holler pane launch` and `holler pane relaunch` run, and `profile apply` (#664) does.
 //! It works only through the [`Ports`] (ADR-0021 section 5) and holds no I/O of its own.
 //!
 //! - **Plan**, writing nothing and changing nothing live: the spec names the pane; a launched
-//!   name has no record (`pane-exists`) and its Herdr session is given; the port policy names a
-//!   port ([`port_of_policy`]); the harness builds the server's argv (`serve_command`, pure, so
-//!   its refusal, `agent-unsupported` say, writes nothing); the probe passes when the spec has a
-//!   check (a failing result is not stored); Herdr's version is supported; the target cell holds
-//!   no Herdr pane (`grid-occupied`, decided by Herdr's snapshot alone, recorded or not: a pane is
-//!   never adopted); and no server answers on the port (`port-in-use`, never adopted).
+//!   name has no record (`pane-exists`) and its Herdr session is given; the port policy fits the
+//!   harness's kind ([`port_for`]: a port for OpenCode, `none` for Claude Code); a Claude spec
+//!   names no variable that changes its login (`claude-login-env-refused`); the harness builds
+//!   its argv (`serve_command` for a server, `process_command` for a single process, both pure,
+//!   so a refusal, `agent-unsupported` say, writes nothing); the probe passes when the spec has
+//!   a check (a failing result is not stored); Herdr's version is supported; the target cell
+//!   holds no Herdr pane (`grid-occupied`, decided by Herdr's snapshot alone, recorded or not: a
+//!   pane is never adopted); and nothing already runs the harness: no server answers on the port
+//!   (`port-in-use`), no Claude Code runs in the tmux session (`process-in-use`, #831). Neither
+//!   is ever adopted.
 //! - **Act**, inside `ProfileScope::edit_spec` (I8: with a profile, P is written first and its
 //!   specs are put back if the act fails): ensure the Herdr pane and the tmux session, run the
-//!   spec's command there, then start the server from the planned argv and check it (both runs
-//!   in the spec's directory; the child module `server`, #802), create the session of record
-//!   through the harness API (never a "ping" session, never "the most recent"), attach the TUI to
-//!   exactly that session, and observe that the TUI shows it and Herdr still lists the pane (a
-//!   mismatch is `unavailable`). Only then is the record written, by one compare-and-swap, with no
-//!   server pid: the server is a process of the pane's tmux session.
-//! - **Rollback.** A failed step stops the tmux session's processes, the harness server among
-//!   them, and closes the Herdr pane this run created (one the plan's snapshot did not list), and
+//!   spec's command there, then bring the harness up from the planned argv, in the spec's
+//!   directory. A server (the child module `server`, #802) is started and checked, the session
+//!   of record is created through the harness API (never a "ping" session, never "the most
+//!   recent"), the TUI is attached to exactly that session and seen showing it. A single process
+//!   (the child module `process`, #831) is started holding its session, waited for until the
+//!   harness locates it idle, and seen holding that session. Then Herdr must still list the pane
+//!   (a mismatch is `unavailable`). Only then is the record written, by one compare-and-swap: a
+//!   server's port and no pid (it is a process of the pane's tmux session), or a process's pid
+//!   and no port.
+//! - **Rollback.** A failed step stops the tmux session's processes, the harness among them,
+//!   and closes the Herdr pane this run created (one the plan's snapshot did not list), and
 //!   nothing is recorded. The tmux session and a session the server created stay: no port call
 //!   ends either. A record write that conflicts is not rolled back: another writer owns the
-//!   record now. A crash runs no rollback, so a server it started stays in the tmux session.
-//! - **Relaunch** is the same act after stopping only what the pane owns, its server among them.
-//!   It keeps the pane's directory, moves its cell only when the caller was asked to place it
-//!   (`grid_given`), keeps the session of record the restarted server still lists, and after a
-//!   move records the new pane before it closes the old one. Its rules are the engine's first
-//!   step (E0), so every caller is held to them.
+//!   record now. A crash runs no rollback, so a harness it started stays in the tmux session.
+//! - **Relaunch** is the same act after stopping only what the pane owns, its harness among
+//!   them. It keeps the pane's directory and harness (`harness-change-refused`), moves its cell
+//!   only when the caller was asked to place it (`grid_given`), and after a move records the new
+//!   pane before it closes the old one. A server keeps the session of record the restarted
+//!   server still lists. A single process starts on the session [`relaunch_on`] is given
+//!   ([`ProcessSession`]): the session of record, kept (`relaunch`, `interrupt`, doctor's
+//!   repair), another conversation (`switch`) or a fresh one (`reset`); [`relaunch_recorded`] is
+//!   that one sequence for a pane relaunched as recorded. Its rules are the engine's first step
+//!   (E0), so every caller is held to them.
 //! - **Bound (I5).** A run's budget ([`DEFAULT_BUDGET`]) starts when the engine is entered and is
 //!   checked before every live step (a monotonic clock, no port call). When it has run out the run
 //!   rolls back and answers `timeout`. A run takes at most the budget plus one port call's own
-//!   bound plus its rollback calls. The health wait ([`wait_healthy`]) asks every
+//!   bound plus its rollback calls. The waits ([`wait_healthy`] for a server, [`wait_located`]
+//!   and the act's idle wait for a process) are the one loop [`wait_until`]: it asks every
 //!   [`TxOptions::boot_poll`] with the budget's end as its deadline, checked before each ask, so
 //!   it holds to that bound too; its sleep is the engine's one wait.
 //!
@@ -38,21 +50,36 @@
 //! (session and Herdr ids, workspaces, directories, a spec's pane, an adapter's or the prober's
 //! message) reaches a message only through `findings::quoted` or `findings::embedded`.
 
+mod budget;
+mod process;
+mod rules;
 mod server;
+mod undo;
 
+use std::thread;
 use std::time::{Duration, Instant};
 
 use crate::error::RefusalCode;
 use crate::findings::{embedded, quoted};
-use crate::pane::{HarnessInfo, Health, Hold, HostInfo, LastObserved, PaneProbe};
-use crate::profile_snapshot::FIXED_PORT_POLICY_PREFIX;
-use crate::reconcile::shown_differs;
+use crate::pane::{HarnessInfo, Health, Hold, HostInfo, LastObserved, PaneProbe, Shape};
+use crate::ports::SessionChoice;
+use crate::profile_snapshot::spec_from_pane;
 use crate::{
-    Argv, GridPos, HerdrPane, HerdrSpec, Pane, PaneError, PaneId, PaneName, Ports, ProbeResult,
-    Profile, ProfileName, ProfileSpec, ServeSpec, SpecEdit,
+    Argv, GridPos, HerdrPane, HerdrSpec, Pane, PaneError, PaneName, Ports, ProbeResult, Profile,
+    ProfileName, ProfileSpec, ServeSpec, SpecEdit,
 };
 
+pub use process::{wait_located, PROCESS_IN_USE};
+pub use rules::{
+    port_for, port_of_policy, CLAUDE_LOGIN_ENV_REFUSED, HARNESS_CHANGE_REFUSED,
+    PORT_POLICY_UNSUPPORTED,
+};
 pub use server::wait_healthy;
+
+pub(crate) use rules::check_harness_unchanged;
+
+use budget::Budget;
+use undo::{close_old, roll_back, stop_old, Made};
 
 /// `pane-exists`: `launch` of a name that already has a record (relaunch it instead). A
 /// refusal, exit 3.
@@ -67,7 +94,7 @@ pub const PORT_IN_USE: RefusalCode = RefusalCode::from_static("port-in-use");
 pub const DEFAULT_BUDGET: Duration = Duration::from_secs(10);
 /// The timeout handed to `Prober::run_probe`.
 pub const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
-/// How often the act asks a server it started whether it is healthy (#802).
+/// How often the act asks a harness it started whether it is up (#802, #831).
 pub const BOOT_POLL: Duration = Duration::from_millis(150);
 /// `HostInfo.name` of every pane recorded here (epic decision 3: Herdr, tmux and the harness
 /// run on the hub's machine).
@@ -77,30 +104,11 @@ pub const OP_LAUNCH: &str = "pane.launch";
 /// The `op` of the `timeout` a relaunch answers when its budget runs out.
 pub const OP_RELAUNCH: &str = "pane.relaunch";
 
-/// The port a policy names. The grammar beyond #662a's one form is this story's, and it is that
-/// form alone: [`FIXED_PORT_POLICY_PREFIX`] then `<port>`, in 1..=65535 in canonical decimal
-/// (digits only, no leading zero). So `port_of_policy(&fixed_port_policy(p)) == Ok(p)` for every
-/// such `p`, and a policy it accepts equals `fixed_port_policy` of its port. Anything else (the
-/// bare `fixed`, `fixed:048100`, `fixed:0`, `auto`) is `usage`, and the message names the form.
-pub fn port_of_policy(policy: &str) -> Result<u16, PaneError> {
-    let port = policy
-        .strip_prefix(FIXED_PORT_POLICY_PREFIX)
-        .filter(|digits| digits.bytes().all(|b| b.is_ascii_digit()) && !digits.starts_with('0'))
-        .and_then(|digits| digits.parse::<u16>().ok());
-    port.ok_or_else(|| {
-        usage(format!(
-            "{} is not a port policy: the one form is {FIXED_PORT_POLICY_PREFIX}<port>, with \
-             <port> from 1 to 65535 and no leading zero",
-            quoted(policy)
-        ))
-    })
-}
-
 /// How one engine run is bounded and clocked.
 ///
 /// `now_ms` is a function, where `ReconcileRequest.now_ms` is a value taken once: a run stamps
-/// `last_observed.at` when it writes the record, after the TUI was observed, which can be up to
-/// the budget after the verb started, so the engine reads the clock there. A test passes a
+/// `last_observed.at` when it writes the record, after the harness was observed, which can be up
+/// to the budget after the verb started, so the engine reads the clock there. A test passes a
 /// constant.
 #[derive(Debug, Clone, Copy)]
 pub struct TxOptions {
@@ -108,8 +116,8 @@ pub struct TxOptions {
     pub budget: Duration,
     /// The timeout of the health probe ([`PROBE_TIMEOUT`]).
     pub probe_timeout: Duration,
-    /// How often the health wait asks the started server ([`BOOT_POLL`]); the wait ends with
-    /// the budget.
+    /// How often the waits ask the started harness ([`BOOT_POLL`]); a wait ends with the
+    /// budget.
     pub boot_poll: Duration,
     /// The wall clock stamped into `last_observed.at` (`holler_proto::clock::now_millis`).
     pub now_ms: fn() -> i64,
@@ -155,6 +163,22 @@ pub struct RelaunchRequest {
     pub spec_only: bool,
 }
 
+/// Which session a relaunched single process starts on (#831, plan review W1 and W4). A
+/// server keeps its session of record (B8), so a server pane takes [`ProcessSession::Keep`]
+/// alone; anything else is `usage` (a server switches sessions in place: `pane switch`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProcessSession {
+    /// The session of record: resumed when it has a conversation, started on its id when it
+    /// has none (relaunch, interrupt, doctor's repair). A record with no session of record
+    /// starts on a fresh one.
+    Keep,
+    /// Another conversation, which must exist: `session-not-found` otherwise, before
+    /// anything is stopped (switch).
+    Resume(String),
+    /// A fresh session, its id the harness's (reset).
+    Fresh,
+}
+
 /// What a run that succeeded stored.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Launched {
@@ -183,7 +207,8 @@ impl From<PaneError> for TxFailure {
 }
 
 /// Create a pane: plan, act, observe, record (see the module docs). Step 0, the spec naming the
-/// pane, runs first, also with `spec_only`, which then sets P's spec and calls nothing else.
+/// pane, runs first, also with `spec_only`, which then sets P's spec and calls nothing else. A
+/// single process starts on a fresh session.
 pub fn launch(
     ports: Ports<'_>,
     request: &LaunchRequest,
@@ -202,16 +227,31 @@ pub fn launch(
     let Some(session) = request.herdr_session.clone() else {
         return Err(usage("--herdr-session is required unless --spec-only".to_owned()).into());
     };
-    let plan = Plan::new(name, spec, session, None, profile)?;
+    let fresh = ProcessSession::Fresh;
+    let plan = Plan::new(name, spec, session, None, profile, &fresh)?;
     run(ports, &plan, &budget, options)
 }
 
 /// Launch a pane again, replacing its processes: E0 (the relaunch rules), then launch's plan
-/// and act after stopping only what the pane owns (see the module docs). With `spec_only` only
-/// E0's spec check runs, and P's spec is set and nothing else is called.
+/// and act after stopping only what the pane owns (see the module docs). A single process keeps
+/// the session of record. With `spec_only` only E0's spec check runs, and P's spec is set and
+/// nothing else is called.
 pub fn relaunch(
     ports: Ports<'_>,
     request: &RelaunchRequest,
+    options: &TxOptions,
+) -> Result<Launched, TxFailure> {
+    relaunch_on(ports, request, &ProcessSession::Keep, options)
+}
+
+/// [`relaunch`], with the session a single process starts on (#831): the one stop, run, wait,
+/// locate and record sequence that `relaunch`, `switch`, `reset`, `interrupt` and doctor's repair
+/// share. A choice the harness cannot honour (a [`ProcessSession::Resume`] of a session with no
+/// conversation) is refused in the plan, before anything is stopped.
+pub fn relaunch_on(
+    ports: Ports<'_>,
+    request: &RelaunchRequest,
+    session: &ProcessSession,
     options: &TxOptions,
 ) -> Result<Launched, TxFailure> {
     let budget = Budget::start(options.budget, OP_RELAUNCH);
@@ -220,56 +260,67 @@ pub fn relaunch(
     if request.spec_only {
         return spec_only(ports, profile, &old.name, spec);
     }
-    check_relaunch_rules(old, spec, request.grid_given)?;
-    let session = old.herdr.session.clone();
-    let plan = Plan::new(&old.name, spec, session, Some(old), profile)?;
+    rules::check_relaunch_rules(old, spec, request.grid_given)?;
+    if spec.harness.kind.shape() == Shape::ServerAndTui && *session != ProcessSession::Keep {
+        let message = format!(
+            "{} runs a harness server, which keeps its session of record on a relaunch; switch \
+             it with holler pane switch, or reset it with holler pane reset",
+            old.name
+        );
+        return Err(usage(message).into());
+    }
+    let herdr_session = old.herdr.session.clone();
+    let plan = Plan::new(&old.name, spec, herdr_session, Some(old), profile, session)?;
     run(ports, &plan, &budget, options)
 }
 
-/// The budget of one run, started when the engine is entered. Its end is fixed once, when it
-/// starts, so [`Budget::check`] and the health wait ([`Budget::deadline`]) agree on when it runs
-/// out.
-struct Budget {
-    end: Instant,
-    op: &'static str,
+/// Relaunch `record` as it is recorded, on `session` (#831): its own spec (`spec_from_pane`, the
+/// one mapping), its cell, its directory and its profile, through [`relaunch_on`]. The sequence
+/// `switch`, `reset`, `interrupt` and doctor's repair of a single process run.
+pub fn relaunch_recorded(
+    ports: Ports<'_>,
+    record: &Pane,
+    session: &ProcessSession,
+    options: &TxOptions,
+) -> Result<Launched, TxFailure> {
+    let request = RelaunchRequest {
+        record: record.clone(),
+        spec: spec_from_pane(record),
+        grid_given: false,
+        profile: None,
+        spec_only: false,
+    };
+    relaunch_on(ports, &request, session, options)
 }
 
-impl Budget {
-    /// A budget of `limit` from now. A limit the clock cannot hold (hundreds of billions of
-    /// years) is halved until it can, so such a budget still never runs out in practice, for
-    /// `check` and the health wait alike.
-    fn start(limit: Duration, op: &'static str) -> Self {
-        let started = Instant::now();
-        let mut limit = limit;
-        let end = loop {
-            if let Some(end) = started.checked_add(limit) {
-                break end;
-            }
-            limit /= 2;
-        };
-        Self { end, op }
-    }
-
-    /// `timeout` once the budget has run out: a reading of the monotonic clock against its end,
-    /// no port call.
-    fn check(&self) -> Result<(), PaneError> {
-        if Instant::now() < self.end {
-            return Ok(());
+/// The engine's one wait (#802, #831): ask `probe` every `poll` until it answers `Some` or
+/// `deadline` passes (`Ok(None)`). An error of `probe` is returned as it is. The deadline is
+/// checked before every ask, the first one included, and no ask starts once it has passed: a
+/// deadline already past asks nothing, and one that comes during a sleep ends the sleep and
+/// the wait. So a call takes at most until `deadline` plus one ask's own bound.
+pub fn wait_until<T>(
+    poll: Duration,
+    deadline: Instant,
+    mut probe: impl FnMut() -> Result<Option<T>, PaneError>,
+) -> Result<Option<T>, PaneError> {
+    loop {
+        if Instant::now() >= deadline {
+            return Ok(None);
         }
-        Err(self.expired())
+        if let Some(found) = probe()? {
+            return Ok(Some(found));
+        }
+        thread::sleep(deadline.saturating_duration_since(Instant::now()).min(poll));
     }
+}
 
-    /// The `timeout` of a run whose budget ran out, its `op` the verb's.
-    fn expired(&self) -> PaneError {
-        let op = self.op.to_owned();
-        PaneError::Timeout { op }
-    }
-
-    /// When the budget runs out, the health wait's deadline: the instant from which `check`
-    /// fails, so the wait asks only while `check` would pass.
-    fn deadline(&self) -> Instant {
-        self.end
-    }
+/// What a run starts, by the harness's shape and its port policy ([`port_for`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Start {
+    /// A harness server on this port, and its TUI (OpenCode).
+    Server(u16),
+    /// One process holding one session (Claude Code, #831).
+    Process,
 }
 
 /// What a live run is asked to bring up.
@@ -278,19 +329,24 @@ struct Plan<'a> {
     spec: &'a ProfileSpec,
     /// Where the pane goes: the Herdr session, and the spec's workspace and grid.
     target: HerdrSpec,
-    port: u16,
-    /// What the harness server runs with, from the in-flight spec: the one spec both
-    /// `serve_command` (in the plan) and `verify_serving` (in the act) get.
+    start: Start,
+    /// What the harness runs with, from the in-flight spec: the one spec both the argv's
+    /// builder (in the plan) and `verify_serving` (in a server's act) get.
     serve: ServeSpec,
     /// The record a relaunch replaces; `None` for a launch.
     old: Option<&'a Pane>,
     profile: Option<&'a ProfileName>,
+    /// The session a single process starts on.
+    session: &'a ProcessSession,
 }
 
 /// What the plan's reads saw, for the act and the record.
 struct Seen {
-    /// The argv `serve_command` built, which the act runs exactly as it is.
-    server: Argv,
+    /// The argv `serve_command` or `process_command` built, which the act runs exactly as it
+    /// is.
+    command: Argv,
+    /// The session a single process's argv holds; `None` for a server.
+    held: Option<String>,
     /// The probe's result when the spec has a check (it passed), written only at R.
     probe: Option<ProbeResult>,
     /// Herdr's version, recorded as `host.herdr_api_version`.
@@ -301,61 +357,117 @@ struct Seen {
 }
 
 impl<'a> Plan<'a> {
-    /// The plan of a run that puts `name` in the Herdr session `session`, at the spec's cell, on
-    /// the port its policy names (`usage` when it names none).
+    /// The plan of a run that puts `name` in the Herdr session `herdr_session`, at the spec's
+    /// cell, with the harness its spec names: on the port its policy names, or as one process
+    /// (`usage` for a policy outside the grammar, `port-policy-unsupported` for one the kind
+    /// does not take), its spec naming no login variable of the kind.
     fn new(
         name: &'a PaneName,
         spec: &'a ProfileSpec,
-        session: String,
+        herdr_session: String,
         old: Option<&'a Pane>,
         profile: Option<&'a ProfileName>,
+        session: &'a ProcessSession,
     ) -> Result<Self, PaneError> {
-        let port = port_of_policy(&spec.harness.port_policy)?;
+        let start = match port_for(spec.harness.kind, &spec.harness.port_policy)? {
+            Some(port) => Start::Server(port),
+            None => Start::Process,
+        };
+        rules::refuse_login_env(spec)?;
         let (workspace, grid) = (spec.herdr.workspace.clone(), spec.herdr.grid);
         let target = HerdrSpec {
-            session,
+            session: herdr_session,
             workspace,
             grid,
         };
+        let process = start == Start::Process;
         // Every field named, never `..Default::default()`: a field `ServeSpec` gains later
-        // fails to compile here until the spec's value is passed on.
+        // fails to compile here until the spec's value is passed on. The model and the
+        // directory go to a single process only (#829 applies the model to OpenCode).
         let serve = ServeSpec {
             agent: spec.opencode_agent.clone(),
+            model: process.then(|| spec.model.clone()),
+            cwd: process.then(|| spec.host.cwd.clone()),
         };
         Ok(Self {
             name,
             spec,
             target,
-            port,
+            start,
             serve,
             old,
             profile,
+            session,
         })
     }
 
-    /// The plan's reads, none of which writes or changes anything live: first the server's argv
-    /// (pure, so its refusal stays in the plan; #802), then steps 3 to 6: the probe, Herdr's
-    /// version, the target cell (where a relaunch's own pane is no occupant) and the port, which
-    /// for a relaunch is checked only when it changes (its own server answers there until B1).
+    /// The plan's reads, none of which writes or changes anything live: first the harness's
+    /// argv (pure, so its refusal stays in the plan; #802, #831), then steps 3 to 6: the probe,
+    /// Herdr's version, the target cell (where a relaunch's own pane is no occupant) and what
+    /// already runs the harness ([`Plan::refuse_running`]).
     fn observe(&self, ports: Ports<'_>, probe_timeout: Duration) -> Result<Seen, PaneError> {
-        let server = ports
-            .harness
-            .serve_command(self.name, self.port, &self.serve)?;
+        let (command, held) = self.command(ports)?;
         let probe = probe(ports, self.spec, probe_timeout)?;
         let herdr_api_version = ports.herdr.version()?;
         let listed = ports.herdr.snapshot()?.panes;
         let own = self.old.map(|old| &old.herdr);
-        refuse_occupied(ports, &listed, &self.target, own)?;
-        let must_be_free = self.old.is_none_or(|old| old.harness.port != self.port);
-        if must_be_free && ports.harness.health(self.port)? {
-            return Err(port_in_use(self.port));
-        }
+        rules::refuse_occupied(ports, &listed, &self.target, own)?;
+        self.refuse_running(ports)?;
         Ok(Seen {
-            server,
+            command,
+            held,
             probe,
             herdr_api_version,
             listed,
         })
+    }
+
+    /// The harness's argv, and for a single process the session it holds.
+    fn command(&self, ports: Ports<'_>) -> Result<(Argv, Option<String>), PaneError> {
+        match self.start {
+            Start::Server(port) => {
+                let argv = ports.harness.serve_command(self.name, port, &self.serve)?;
+                Ok((argv, None))
+            }
+            Start::Process => {
+                let choice = self.choice(ports)?;
+                let argv = ports
+                    .harness
+                    .process_command(self.name, &self.serve, &choice)?;
+                Ok((argv, Some(choice.session().to_owned())))
+            }
+        }
+    }
+
+    /// The session choice a single process's argv is built for, from the run's
+    /// [`ProcessSession`]: a fresh id is the harness's (`new_session_id`).
+    fn choice(&self, ports: Ports<'_>) -> Result<SessionChoice, PaneError> {
+        let kept = self.old.and_then(|old| old.session_of_record.clone());
+        Ok(match (self.session, kept) {
+            (ProcessSession::Keep, Some(session)) => SessionChoice::Keep(session),
+            (ProcessSession::Resume(session), _) => SessionChoice::Resume(session.clone()),
+            (ProcessSession::Keep, None) | (ProcessSession::Fresh, _) => {
+                SessionChoice::Fresh(ports.harness.new_session_id()?)
+            }
+        })
+    }
+
+    /// Nothing already runs the harness, which is never adopted: no server answers on the port
+    /// (`port-in-use`; for a relaunch only when the port changes, since its own server answers
+    /// there until B1), and no Claude Code runs in the tmux session of a launch
+    /// (`process-in-use`; a relaunch stops what the pane owns first).
+    fn refuse_running(&self, ports: Ports<'_>) -> Result<(), PaneError> {
+        match self.start {
+            Start::Server(port) => {
+                let must_be_free = self.old.is_none_or(|old| old.harness.port != Some(port));
+                if must_be_free && ports.harness.health(&server::endpoint(port))? {
+                    return Err(server::port_in_use(port));
+                }
+                Ok(())
+            }
+            Start::Process if self.old.is_none() => process::refuse_in_use(ports, self.name),
+            Start::Process => Ok(()),
+        }
     }
 
     /// The record R writes: what the act brought up and observed, and the spec's values. A
@@ -371,6 +483,10 @@ impl<'a> Plan<'a> {
             None => (Hold::None, None, self.profile.cloned()),
         };
         let spec = self.spec;
+        let port = match self.start {
+            Start::Server(port) => Some(port),
+            Start::Process => None,
+        };
         Pane {
             name: self.name.clone(),
             generation: self.old.map_or(0, |old| old.generation),
@@ -387,8 +503,8 @@ impl<'a> Plan<'a> {
             },
             harness: HarnessInfo {
                 kind: spec.harness.kind,
-                port: self.port,
-                pid: None,
+                port,
+                pid: live.pid,
                 health: Health::Healthy,
             },
             session_of_record: Some(live.session),
@@ -423,29 +539,6 @@ fn check_named(spec: &ProfileSpec, name: &PaneName) -> Result<(), PaneError> {
     Err(usage(format!(
         "the spec names the pane {named}, not {name}"
     )))
-}
-
-/// E0 past the spec's pane, for a live relaunch: it never changes a pane's directory, and moves
-/// its cell only when the caller was asked to place it (decision 11).
-fn check_relaunch_rules(old: &Pane, spec: &ProfileSpec, grid_given: bool) -> Result<(), PaneError> {
-    if spec.host.cwd != old.host.cwd {
-        return Err(usage(format!(
-            "relaunch cannot change the directory of {} (from {} to {}); close it and launch it \
-             again",
-            old.name,
-            quoted(&old.host.cwd),
-            quoted(&spec.host.cwd)
-        )));
-    }
-    let moved = spec.herdr.workspace != old.herdr.workspace || spec.herdr.grid != old.herdr.grid;
-    if moved && !grid_given {
-        return Err(usage(format!(
-            "relaunch moves a pane only with --grid: the record is at {}, the spec gives {}",
-            cell(&old.herdr.workspace, old.herdr.grid),
-            cell(&spec.herdr.workspace, spec.herdr.grid)
-        )));
-    }
-    Ok(())
 }
 
 /// `spec_only`: P's spec for the pane is set, and nothing else is called (no probe, no live
@@ -490,62 +583,6 @@ fn probe(
         ProbeResult::Error(reason) => embedded(&reason),
     };
     Err(PaneError::ProbeFailed { message })
-}
-
-/// Step 5: `grid-occupied` when the target cell holds a Herdr pane other than `own`. Whether the
-/// run is refused is the snapshot's alone. The records are read only to word the refusal, joined
-/// to each occupant by Herdr session and pane id whatever cell a record stores, so a stale record
-/// is still named.
-fn refuse_occupied(
-    ports: Ports<'_>,
-    listed: &[HerdrPane],
-    target: &HerdrSpec,
-    own: Option<&HerdrPane>,
-) -> Result<(), PaneError> {
-    let at_target = |p: &&HerdrPane| {
-        p.session == target.session && p.workspace == target.workspace && p.grid == target.grid
-    };
-    let occupants: Vec<&HerdrPane> = listed
-        .iter()
-        .filter(at_target)
-        .filter(|p| own.is_none_or(|own| !same_pane(own, p)))
-        .collect();
-    if occupants.is_empty() {
-        return Ok(());
-    }
-    let records = ports.pane_store.list();
-    let held: Vec<String> = occupants
-        .iter()
-        .map(|pane| occupant(pane, records.as_deref()))
-        .collect();
-    let message = format!(
-        "{} holds {}; a Herdr pane is never adopted, so choose a free cell",
-        cell(&target.workspace, target.grid),
-        held.join(" and ")
-    );
-    Err(refused(GRID_OCCUPIED, message))
-}
-
-/// One occupant in a `grid-occupied` message: its id, and the records that name it or that no
-/// record does.
-fn occupant(pane: &HerdrPane, records: Result<&[Pane], &PaneError>) -> String {
-    let id = quoted(pane.pane_id.as_str());
-    let records = match records {
-        Ok(records) => records,
-        Err(error) => {
-            let code = error.code();
-            return format!("Herdr pane {id} (the records could not be read: {code})");
-        }
-    };
-    let names: Vec<&str> = records
-        .iter()
-        .filter(|record| same_pane(&record.herdr, pane))
-        .map(|record| record.name.as_str())
-        .collect();
-    if names.is_empty() {
-        return format!("Herdr pane {id}, which no record names");
-    }
-    format!("Herdr pane {id}, recorded as {}", names.join(", "))
 }
 
 /// What a live act stored, and the error of a relaunch's close of its old pane (B10), which
@@ -605,7 +642,7 @@ fn act_live(
     options: &TxOptions,
 ) -> Result<Acted, PaneError> {
     if let Some(old) = plan.old {
-        server::stop_old(ports, plan.name, old, budget)?;
+        stop_old(ports, plan.name, old, budget)?;
     }
     let mut made = Made::default();
     let live = bring_up(ports, plan, seen, budget, options.boot_poll, &mut made)
@@ -619,25 +656,18 @@ fn act_live(
     Ok(Acted { stored, unclosed })
 }
 
-/// What the act made, so that a rollback undoes that and nothing else.
-#[derive(Default)]
-struct Made {
-    /// The tmux session's step ran, so its processes, the server among them, are stopped.
-    session: bool,
-    /// The Herdr pane this run created (the plan's snapshot did not list it), so it is closed.
-    pane: Option<PaneId>,
-}
-
 /// What the act brought up and observed.
 struct Live {
     herdr: HerdrPane,
     session: String,
     shown: Option<String>,
+    /// The single process's pid; `None` for a server, which records none.
+    pid: Option<u32>,
 }
 
 /// A1 to O2 (a relaunch's B3 to O2), each after a budget check, and the budget check before R.
-/// The spec's command and the server run in the spec's directory, whatever directory the tmux
-/// session was made in; the server's step is `server::start`.
+/// The spec's command and the harness run in the spec's directory, whatever directory the tmux
+/// session was made in; the harness's steps are `server::bring_up` or `process::bring_up`.
 fn bring_up(
     ports: Ports<'_>,
     plan: &Plan<'_>,
@@ -659,55 +689,22 @@ fn bring_up(
         budget.check()?;
         ports.host.run(plan.name, cwd, command)?;
     }
-    server::start(ports, plan, seen, budget, boot_poll)?;
+    let live = match plan.start {
+        Start::Server(port) => server::bring_up(ports, plan, seen, budget, boot_poll, herdr, port)?,
+        Start::Process => process::bring_up(ports, plan, seen, budget, boot_poll, herdr)?,
+    };
+    observe_listed(ports, plan.name, budget, &live.herdr)?;
     budget.check()?;
-    let session = session_of_record(ports, plan)?;
-    budget.check()?;
-    ports
-        .harness
-        .attach_tui(&herdr.pane_id, plan.port, &session)?;
-    let shown = observe_live(ports, plan.name, budget, &herdr, &session)?;
-    budget.check()?;
-    Ok(Live {
-        herdr,
-        session,
-        shown,
-    })
+    Ok(live)
 }
 
-/// A6: a new session, created through the harness API. B8 for a relaunch: the record's session
-/// of record when the restarted server still lists it, else a new one (decision 8).
-fn session_of_record(ports: Ports<'_>, plan: &Plan<'_>) -> Result<String, PaneError> {
-    if let Some(kept) = plan.old.and_then(|old| old.session_of_record.as_deref()) {
-        let listed = ports.harness.list_sessions(plan.port)?;
-        if listed.iter().any(|session| session == kept) {
-            return Ok(kept.to_owned());
-        }
-    }
-    ports.harness.create_session(plan.port)
-}
-
-/// O1 and O2: the TUI shows the session of record (`shown_differs`, the one form of that
-/// comparison), and Herdr still lists the pane at its cell. Either mismatch is `unavailable`
-/// (decision 14). Returns what the TUI showed.
-fn observe_live(
+/// O2: Herdr still lists the pane at its cell; a pane gone is `unavailable` (decision 14).
+fn observe_listed(
     ports: Ports<'_>,
     name: &PaneName,
     budget: &Budget,
     herdr: &HerdrPane,
-    session: &str,
-) -> Result<Option<String>, PaneError> {
-    budget.check()?;
-    let shown = ports.harness.shown_session(&herdr.pane_id)?;
-    if shown_differs(Some(session), shown.as_deref()) {
-        let seen = shown
-            .as_deref()
-            .map_or_else(|| "no session".to_owned(), quoted);
-        return Err(unavailable(format!(
-            "the TUI of {name} shows {seen}, not the session of record {}",
-            quoted(session)
-        )));
-    }
+) -> Result<(), PaneError> {
     budget.check()?;
     let listed = ports.herdr.snapshot()?.panes;
     if !listed.iter().any(|pane| same_place(pane, herdr)) {
@@ -717,62 +714,7 @@ fn observe_live(
             cell(&herdr.workspace, herdr.grid)
         )));
     }
-    Ok(shown)
-}
-
-/// Undo what `made` says this run made, best effort and in order: stop the tmux session's
-/// processes, then close the Herdr pane it created. A rollback call that fails does not hide
-/// `error`: its message gains `; rollback failed: <call> (<code>)`.
-fn roll_back(ports: Ports<'_>, name: &PaneName, made: &Made, error: PaneError) -> PaneError {
-    let mut failed = Vec::new();
-    if made.session {
-        if let Err(stop) = ports.host.stop_owned(name) {
-            failed.push(format!("host.stop_owned ({})", stop.code()));
-        }
-    }
-    if let Some(pane) = &made.pane {
-        if let Err(close) = closed(ports.herdr.close(pane)) {
-            failed.push(format!("herdr.close ({})", close.code()));
-        }
-    }
-    if failed.is_empty() {
-        return error;
-    }
-    with_note(error, &format!("rollback failed: {}", failed.join(", ")))
-}
-
-/// B10, after R and only on a move: close the old Herdr pane, when the plan's snapshot listed it
-/// and it is not the pane the record now names. A close that fails never fails the act (the
-/// record names the pane that holds the TUI, decision 23); its error is the run's failure.
-fn close_old(
-    ports: Ports<'_>,
-    plan: &Plan<'_>,
-    seen: &Seen,
-    old: &Pane,
-    now: &HerdrPane,
-) -> Option<PaneError> {
-    let moved = plan.target.workspace != old.herdr.workspace || plan.target.grid != old.herdr.grid;
-    let listed = seen.listed.iter().any(|p| same_pane(p, &old.herdr));
-    if !moved || !listed || same_pane(&old.herdr, now) {
-        return None;
-    }
-    let error = closed(ports.herdr.close(&old.herdr.pane_id)).err()?;
-    Some(unavailable(format!(
-        "relaunched {} at {}, but its old Herdr pane {} was not closed ({}: {})",
-        plan.name,
-        cell(&now.workspace, now.grid),
-        quoted(old.herdr.pane_id.as_str()),
-        error.code(),
-        embedded(&error.to_string())
-    )))
-}
-
-/// A close's answer, with `pane-not-found` counted as closed: a vanished pane is already gone.
-fn closed(answer: Result<(), PaneError>) -> Result<(), PaneError> {
-    match answer {
-        Err(PaneError::PaneNotFound { .. }) => Ok(()),
-        other => other,
-    }
+    Ok(())
 }
 
 /// Whether two Herdr panes are one: the same Herdr session and pane id (the join key).
@@ -791,16 +733,6 @@ fn cell(workspace: &str, grid: GridPos) -> String {
     format!("{grid} in workspace {}", quoted(workspace))
 }
 
-/// `port-in-use`: a server answers on `port`, and a running server is never adopted. The plan
-/// asks before anything moves, and the act again just before the server's run.
-fn port_in_use(port: u16) -> PaneError {
-    let message = format!(
-        "a harness server already answers on port {port}; a running server is never adopted, \
-         so stop it or choose another port"
-    );
-    refused(PORT_IN_USE, message)
-}
-
 fn usage(message: String) -> PaneError {
     PaneError::Usage { message }
 }
@@ -812,20 +744,4 @@ fn unavailable(what: String) -> PaneError {
 /// A refusal with one of this story's open codes.
 fn refused(code: RefusalCode, message: String) -> PaneError {
     PaneError::Refused { code, message }
-}
-
-/// `error` with `; <note>` added to its message, its code kept: through the one payload that
-/// travels beside the code (`PaneError::detail`, which the crate's own `from_wire` turns back
-/// into the variant), or a `Refused`'s message. A variant with no payload is returned as it is.
-fn with_note(error: PaneError, note: &str) -> PaneError {
-    let noted = match &error {
-        PaneError::Refused { code, message } => {
-            Some(refused(code.clone(), format!("{message}; {note}")))
-        }
-        other => other.detail().map(|detail| {
-            let detail = Some(format!("{detail}; {note}"));
-            PaneError::from_wire(other.code().to_owned(), String::new(), detail)
-        }),
-    };
-    noted.unwrap_or(error)
 }

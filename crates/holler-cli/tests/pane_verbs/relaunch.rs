@@ -7,15 +7,15 @@ use holler_cli::output::Format;
 use holler_pane::pane::PaneRole;
 use holler_pane::profile_snapshot::spec_from_pane;
 use holler_pane::tx_launch::{self, LaunchRequest, RelaunchRequest, TxFailure, TxOptions};
-use holler_pane::{GridPos, HarnessPort, Pane, PaneError, ProfileSpec};
+use holler_pane::{GridPos, HarnessEndpoint, HarnessPort, Pane, PaneError, ProfileSpec};
 use holler_pane_testkit::fixture::sample_profile;
 use holler_pane_testkit::harness::{HarnessOp, ServerState};
 use holler_pane_testkit::herdr::HerdrOp;
 use holler_pane_testkit::host::HostOp;
 
 use crate::launch::rig::{
-    agent, argv, assert_untouched, data_of, error_of, launch_spec, name, occurrences, profile_name,
-    Calls, Rig, Seed, PANE, PORT, STEP,
+    agent, argv, assert_untouched, assert_untouched_after_missing_record, data_of, error_of,
+    launch_spec, name, occurrences, profile_name, Calls, Rig, Seed, PANE, PORT, STEP,
 };
 use crate::verb_harness::parse::assert_spec_flags_accepted;
 
@@ -442,7 +442,10 @@ fn relaunch_keeps_the_session_of_record() {
         run.calls
     );
     assert_eq!(
-        rig.fakes.harness.list_sessions(PORT).unwrap(),
+        rig.fakes
+            .harness
+            .list_sessions(&HarnessEndpoint::Port(PORT))
+            .unwrap(),
         std::slice::from_ref(&sid)
     );
     assert_session_is(&rig, &sid);
@@ -554,7 +557,7 @@ fn relaunch_of_a_missing_pane_is_refused() {
     let run = rig.run(RELAUNCH, Format::Json);
     assert_eq!(run.code, 3, "{run:?}");
     assert_eq!(error_of(&run).0, "pane-not-found");
-    assert_untouched(&run.calls);
+    assert_untouched_after_missing_record(&run.calls);
     rig.assert_matches(&run, PANE);
     rig.assert_no_keystroke();
 }

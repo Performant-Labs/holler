@@ -10,10 +10,17 @@ name = "holler_adapter_claude"
 path = "src/lib.rs"
 
 # Declare only what is consumed (issue #155 §7 — `cargo machete` fails CI
-# otherwise). #831 phase T (RED) wrote only this skeleton so the workspace loads:
-# phase F declares the crate's own [dependencies] (holler-pane and what the
-# adapter's seams need) with the code that consumes them.
+# otherwise).
 [dependencies]
+# The port this crate implements and every type it speaks (`HarnessPort`, `HarnessEndpoint`,
+# `SessionChoice`, `LoginStatus`, `PaneError`). The adapter depends on nothing else of Holler
+# (ADR-0021 section 5).
+holler-pane = { path = "../holler-pane" }
+# `claude agents --json` and `claude auth status`, read; the `--settings` JSON and the inbox
+# frame, written; for `agents`, `argv` and the port methods.
+serde_json = { workspace = true }
+# The randomness of a fresh session id (a version 4 UUID); for `new_session_id`.
+getrandom = { workspace = true }
 
 [dev-dependencies]
 # The port, the endpoint and the session choice the tests call (`HarnessPort`,

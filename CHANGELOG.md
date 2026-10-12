@@ -8,6 +8,43 @@ fills this file in at release time.
 ## [Unreleased]
 
 ### Enhancements
+- Pane control, a Claude Code harness (epic [#633](https://github.com/Performant-Labs/holler/issues/633)):
+  `holler pane launch PANE --harness claude --port-policy none` launches a pane whose harness is one interactive Claude
+  Code process, recorded by its pid and with no port, and the pane verbs drive it
+  ([#831](https://github.com/Performant-Labs/holler/issues/831); adopting the fleet's existing Claude Code panes is its
+  last step and waits for [#835](https://github.com/Performant-Labs/holler/issues/835)). The launch starts Claude Code on
+  a fresh session id with the subscription login (the seven environment variables that would change the login are
+  removed, and a spec that names one is refused `claude-login-env-refused`), accepts cross-session messages and leaves
+  out the question tool, and writes the record only once `claude agents --json` lists the process idle on its session;
+  otherwise it rolls back. Its `--model` and `--effort` are applied. A Claude Code process chooses its session when it
+  starts, so `relaunch`, `switch` (to a conversation of the pane's directory), `reset` (a fresh session), doctor's `--fix`
+  (only while it is idle) and `holler interrupt --pane NAME` (on its session of record: the operator's decision, no
+  keypress) restart it. `switch` and `reset` also refuse a pane waiting on a permission prompt
+  (`session-holds-permission`), an interrupt with text is `interrupt-text-unsupported` and `answer --pane` is
+  `answer-unsupported`. `holler pane doctor` reports two new findings, `pane-waiting` and `claude-login-missing`.
+  `holler say --pane NAME TEXT` does not reach a Claude Code pane yet: that needs a body for its session
+  ([#850](https://github.com/Performant-Labs/holler/issues/850), after
+  [#839](https://github.com/Performant-Labs/holler/issues/839)). The new crate `holler-adapter-claude` implements the
+  harness port (the binary is `HOLLER_CLAUDE_BIN`, else `claude` on `PATH`); every harness call is now keyed by an
+  endpoint, a port or a process; and `HostPort::foreground_commands` with the one Claude Code command rule is built to
+  #835's brief. [ADR 0021](docs/adr/ADR-0021.md) section 15 records the contract and what was built, and
+  [`docs/pane-control.md`](docs/pane-control.md) documents the Claude Code pane.
+- `holler --version` (and `-V`) names the commit the binary was built from, after the version: `holler 0.4.0 (bda1069)`
+  ([#851](https://github.com/Performant-Labs/holler/issues/851)). Until now every build since a release printed the same
+  `holler 0.4.0`, so a person could not tell which code they were running. The first two words are unchanged. The commit
+  is the 7-character hash of the checkout's `HEAD`, followed by `-dirty` when a tracked file had changed; a build with no
+  git checkout (a source archive) uses the build-time variable `HOLLER_GIT_SHA`, and otherwise prints `unknown`. The
+  `version` field that `hub status`, `hub query status`, `body query status` and `caps` print carries the same string, so
+  `hub status` begins `hub 0.4.0 (bda1069) (protocol 3)`; no field is added. A release binary is built from a checkout of
+  its tag, so it names the tag's commit, and the Homebrew formula, which installs that binary, needs no change.
+  `docs/releasing.md` says when the build works the commit out again.
+- Pane control, the operator guide (epic [#633](https://github.com/Performant-Labs/holler/issues/633)): [`docs/pane-control.md`](docs/pane-control.md) documents every `holler pane` and `holler profile` verb ([#652](https://github.com/Performant-Labs/holler/issues/652)).
+  It states the rule that only pane verbs change a registry (OpenCode) pane and that a Claude Code pane set up by hand
+  stays outside the registry, how to read `pane list` and `pane doctor`, the `profile apply` reference, grid notation, the JSON
+  envelope with every error code and its exit code, the cutover from the launcher's files, and the rollback. The
+  section "Restarting a pane on another model" of `docs/orchestrating.md` now leads with `holler pane relaunch`, says
+  that its `--model` is recorded and not yet applied to the server (#829), and keeps `scripts/pane-restart` as the
+  fallback until the 7-day sign-off of the cutover (#654), and as the only restart path of a Claude Code pane set up by hand. A docs test pins the guide to the code's own tables. No behaviour changes.
 - Pane control is wired (epic [#633](https://github.com/Performant-Labs/holler/issues/633)): every `holler pane` and
   `holler profile` verb, and `say`, `interrupt` and `answer` with `--pane`, now run against the hub's pane and profile
   registries and the real Herdr, tmux and OpenCode adapters, where they answered `not-implemented` before
@@ -43,7 +80,7 @@ fills this file in at release time.
   reports an unmanaged pane whose screen has not changed that long as the finding `unmanaged-stalled`. **Herdr 0.8.2 reports no
   time at which a screen last changed**, so the port carries `last_screen_change` (new `HerdrPort::observe_pane`) and the real
   adapter leaves it, and the idle time, empty rather than guess one: the idle time and `unmanaged-stalled` need a Herdr that
-  reports it, tracked as a follow-up. If Herdr cannot be read, `list` still prints the registry's panes and says so. The test
+  reports it, tracked in [#837](https://github.com/Performant-Labs/holler/issues/837). If Herdr cannot be read, `list` still prints the registry's panes and says so. The test
   kit gains `seed_unmanaged_pane`, and the roster (#648) is not changed here.
 - Pane control, the migration import (epic [#633](https://github.com/Performant-Labs/holler/issues/633)): `holler pane
   import --from STATE_ROOT --herdr-session NAME [--launcher FILE] [--orchestrator PANE]... [--dry-run]` adopts the fleet

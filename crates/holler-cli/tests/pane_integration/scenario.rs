@@ -18,7 +18,7 @@ use std::time::{Duration, Instant};
 
 use holler_pane::ports::Activity;
 use holler_pane::tx_launch::{wait_healthy, BOOT_POLL};
-use holler_pane::{AgentKey, GridPos, HarnessPort, HostPort, PaneName, ServeSpec};
+use holler_pane::{AgentKey, GridPos, HarnessEndpoint, HarnessPort, HostPort, PaneName, ServeSpec};
 use holler_pane_testkit::envelope::check_envelope;
 use serde_json::{json, Value};
 
@@ -45,7 +45,7 @@ fn session_of_record(scratch: &Scratch, pane: &str) -> String {
 /// leaves the previous one on the server as a stray, which doctor reports. The sessions are
 /// listed through the port; no port deletes one, so the delete is raw HTTP (W-G).
 fn delete_strays(scratch: &Scratch, port: u16, keep: &BTreeSet<String>) {
-    let listed = scratch.harness().list_sessions(port).expect("list_sessions");
+    let listed = scratch.harness().list_sessions(&HarnessEndpoint::Port(port)).expect("list_sessions");
     for session in listed.into_iter().filter(|s| !keep.contains(s)) {
         raw(port, "DELETE", &format!("/session/{session}"), None);
     }
@@ -147,7 +147,7 @@ fn the_scenario_runs_in_order_on_scratch_instances() {
     reset_with_a_first_message(&scratch, p2);
 
     // 4. A switch of one, to a session its server already has, made through the port.
-    let target = scratch.harness().create_session(p1).expect("create_session");
+    let target = scratch.harness().create_session(&HarnessEndpoint::Port(p1)).expect("create_session");
     switch_once_the_tui_takes_it(&scratch, C1, &target);
     let switched = record(&scratch, C1);
     assert_eq!(switched["session_of_record"], target.as_str());
@@ -198,7 +198,7 @@ fn reset_with_a_first_message(scratch: &Scratch, p2: u16) {
     assert_ne!(fresh, before, "a fresh session");
     assert_eq!(after["last_observed"]["shown"], fresh.as_str(), "SHOWN follows");
     let busy = wait_for(Duration::from_secs(15), || {
-        (scratch.harness().session_activity(p2, &fresh) == Ok(Activity::Busy)).then_some(())
+        (scratch.harness().session_activity(&HarnessEndpoint::Port(p2), &fresh) == Ok(Activity::Busy)).then_some(())
     });
     assert!(busy.is_some(), "the first message reached the server: its session reads Busy");
     no_model_can_be_reached(p2);
@@ -374,11 +374,11 @@ fn the_server_argv_runs_under_a_real_tmux_pty_and_stops() {
         scratch.host.ensure_session(&name, &project).expect("ensure_session");
         let begun = Instant::now();
         scratch.host.run(&name, &project, &argv).expect("run under tmux");
-        let healthy = wait_healthy(&harness, port, BOOT_POLL, Instant::now() + Duration::from_secs(30));
+        let healthy = wait_healthy(&harness, &HarnessEndpoint::Port(port), BOOT_POLL, Instant::now() + Duration::from_secs(30));
         eprintln!("{pane}: a cold server under tmux answered its health in {:?}", begun.elapsed());
         assert_eq!(healthy, Ok(true), "{pane}: the server under tmux answers its health");
         no_model_can_be_reached(port);
-        assert_eq!(harness.verify_serving(port, &spec), Ok(()), "{pane}: {spec:?}");
+        assert_eq!(harness.verify_serving(&HarnessEndpoint::Port(port), &spec), Ok(()), "{pane}: {spec:?}");
 
         let owned = scratch.owned_pids(pane);
         assert!(!owned.is_empty(), "{pane}: run tagged the server's window");

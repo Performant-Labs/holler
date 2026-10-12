@@ -38,7 +38,9 @@ use std::time::Instant;
 
 use holler_pane::ports::AGENT_UNSUPPORTED;
 use holler_pane::tx_launch::{wait_healthy, BOOT_POLL, DEFAULT_BUDGET};
-use holler_pane::{AgentKey, Argv, HarnessPort, PaneError, PaneId, PaneName, ServeSpec};
+use holler_pane::{
+    AgentKey, Argv, HarnessEndpoint, HarnessPort, PaneError, PaneId, PaneName, ServeSpec,
+};
 
 use super::{expect_code, expect_eq, run_cases, succeeds, Conformance};
 
@@ -201,7 +203,7 @@ fn health_of_unserved_port_is_false(
     rig: &HarnessRig,
 ) -> Result<(), String> {
     let [p0, _] = rig.ports;
-    let healthy = succeeds("health of a port never served", h.health(p0))?;
+    let healthy = succeeds("health of a port never served", h.health(&at(p0)))?;
     expect_eq("health of a port never served", healthy, false)
 }
 
@@ -214,14 +216,14 @@ fn launch_then_healthy(
 ) -> Result<(), String> {
     let [p0, _] = rig.ports;
     let (name, argv) = command(h, C1, p0)?;
-    let early = succeeds("health after serve_command", h.health(p0))?;
+    let early = succeeds("health after serve_command", h.health(&at(p0)))?;
     expect_eq(
         "health after serve_command, before the launcher (it starts nothing)",
         early,
         false,
     )?;
     launched(h, l, &name, &argv, p0)?;
-    let healthy = succeeds("health after the launch", h.health(p0))?;
+    let healthy = succeeds("health after the launch", h.health(&at(p0)))?;
     expect_eq("health after the launch", healthy, true)
 }
 
@@ -287,22 +289,22 @@ fn calls_to_unserved_port_are_unavailable(
     let unserved = "on a port never served";
     expect_code(
         &format!("create_session {unserved}"),
-        h.create_session(p0),
+        h.create_session(&at(p0)),
         UNAVAILABLE,
     )?;
     expect_code(
         &format!("list_sessions {unserved}"),
-        h.list_sessions(p0),
+        h.list_sessions(&at(p0)),
         UNAVAILABLE,
     )?;
     expect_code(
         &format!("abort {unserved}"),
-        h.abort(p0, UNKNOWN),
+        h.abort(&at(p0), UNKNOWN),
         UNAVAILABLE,
     )?;
     expect_code(
         &format!("attach_tui {unserved}"),
-        h.attach_tui(pane0, p0, UNKNOWN),
+        h.attach_tui(pane0, &at(p0), UNKNOWN),
         UNAVAILABLE,
     )
 }
@@ -316,7 +318,7 @@ fn abort_known_session(
     let [p0, _] = rig.ports;
     launch(h, l, C1, p0)?;
     let a = create(h, p0)?;
-    succeeds(&format!("abort({p0}, {a})"), h.abort(p0, &a))
+    succeeds(&format!("abort({p0}, {a})"), h.abort(&at(p0), &a))
 }
 
 /// Case 8: `abort` of an id the server does not know is `session-not-found`, where raw
@@ -330,7 +332,7 @@ fn abort_unknown_is_session_not_found(
     launch(h, l, C1, p0)?;
     expect_code(
         "abort of an id the server does not know",
-        h.abort(p0, UNKNOWN),
+        h.abort(&at(p0), UNKNOWN),
         NOT_FOUND,
     )
 }
@@ -341,10 +343,11 @@ fn shown_without_tui_is_none(
     _: &Launcher<'_>,
     rig: &HarnessRig,
 ) -> Result<(), String> {
+    let [p0, _] = rig.ports;
     let [pane0, _] = &rig.panes;
     expect_eq(
         "shown_session of a pane with no TUI",
-        shown(h, pane0)?,
+        shown(h, pane0, p0)?,
         None,
     )
 }
@@ -360,7 +363,11 @@ fn attach_shows_the_session(
     launch(h, l, C1, p0)?;
     let a = create(h, p0)?;
     attach(h, pane0, p0, &a)?;
-    expect_eq("shown_session after attach_tui", shown(h, pane0)?, Some(a))
+    expect_eq(
+        "shown_session after attach_tui",
+        shown(h, pane0, p0)?,
+        Some(a),
+    )
 }
 
 /// Case 11: `attach_tui` to an id the server does not know is `session-not-found`, and
@@ -376,10 +383,10 @@ fn attach_unknown_is_session_not_found(
     launch(h, l, C1, p0)?;
     create(h, p0)?;
     let call = "attach_tui to an id the server does not know";
-    expect_code(call, h.attach_tui(pane0, p0, UNKNOWN), NOT_FOUND)?;
+    expect_code(call, h.attach_tui(pane0, &at(p0), UNKNOWN), NOT_FOUND)?;
     expect_eq(
         &format!("shown_session after the refused {call}"),
-        shown(h, pane0)?,
+        shown(h, pane0, p0)?,
         None,
     )
 }
@@ -400,13 +407,14 @@ fn select_unknown_is_session_not_found(
     l: &Launcher<'_>,
     rig: &HarnessRig,
 ) -> Result<(), String> {
+    let [p0, _] = rig.ports;
     let [pane0, _] = &rig.panes;
     let b = switched(h, l, rig)?;
     let call = "select_session of an id the server does not know";
     expect_code(call, h.select_session(pane0, UNKNOWN), NOT_FOUND)?;
     expect_eq(
         &format!("shown_session after the refused {call}"),
-        shown(h, pane0)?,
+        shown(h, pane0, p0)?,
         Some(b),
     )
 }
@@ -426,7 +434,7 @@ fn select_without_tui_fails(
     expect_code(call, h.select_session(pane0, &a), UNAVAILABLE)?;
     expect_eq(
         &format!("shown_session after the refused {call}"),
-        shown(h, pane0)?,
+        shown(h, pane0, p0)?,
         None,
     )
 }
@@ -450,10 +458,14 @@ fn select_reaches_only_its_pane(
     select(h, pane0, &b)?;
     expect_eq(
         "shown_session of the pane switched",
-        shown(h, pane0)?,
+        shown(h, pane0, p0)?,
         Some(b),
     )?;
-    expect_eq("shown_session of the other pane", shown(h, pane1)?, Some(a))
+    expect_eq(
+        "shown_session of the other pane",
+        shown(h, pane1, p1)?,
+        Some(a),
+    )
 }
 
 /// Case 16 (#802): `serve_command` of a spec with an agent never returns an argv that would
@@ -525,7 +537,7 @@ fn launched(
     )?;
     let deadline = Instant::now() + DEFAULT_BUDGET;
     let wait = format!("the health wait on {port}");
-    if succeeds(&wait, wait_healthy(h, port, BOOT_POLL, deadline))? {
+    if succeeds(&wait, wait_healthy(h, &at(port), BOOT_POLL, deadline))? {
         Ok(())
     } else {
         Err(format!(
@@ -534,17 +546,28 @@ fn launched(
     }
 }
 
+/// The endpoint of the server on `port`.
+fn at(port: u16) -> HarnessEndpoint {
+    HarnessEndpoint::Port(port)
+}
+
 fn create(h: &dyn HarnessPort, port: u16) -> Result<String, String> {
-    succeeds(&format!("create_session({port})"), h.create_session(port))
+    succeeds(
+        &format!("create_session({port})"),
+        h.create_session(&at(port)),
+    )
 }
 
 fn list(h: &dyn HarnessPort, port: u16) -> Result<Vec<String>, String> {
-    succeeds(&format!("list_sessions({port})"), h.list_sessions(port))
+    succeeds(
+        &format!("list_sessions({port})"),
+        h.list_sessions(&at(port)),
+    )
 }
 
 fn attach(h: &dyn HarnessPort, pane: &PaneId, port: u16, session: &str) -> Result<(), String> {
     let call = format!("attach_tui({}, {port}, {session})", pane.as_str());
-    succeeds(&call, h.attach_tui(pane, port, session))
+    succeeds(&call, h.attach_tui(pane, &at(port), session))
 }
 
 fn select(h: &dyn HarnessPort, pane: &PaneId, session: &str) -> Result<(), String> {
@@ -552,10 +575,11 @@ fn select(h: &dyn HarnessPort, pane: &PaneId, session: &str) -> Result<(), Strin
     succeeds(&call, h.select_session(pane, session))
 }
 
-fn shown(h: &dyn HarnessPort, pane: &PaneId) -> Result<Option<String>, String> {
+/// What the TUI of `pane`, whose server is on `port`, shows.
+fn shown(h: &dyn HarnessPort, pane: &PaneId, port: u16) -> Result<Option<String>, String> {
     succeeds(
         &format!("shown_session({})", pane.as_str()),
-        h.shown_session(pane),
+        h.shown_session(pane, &at(port)),
     )
 }
 
@@ -581,7 +605,7 @@ fn switched(h: &dyn HarnessPort, l: &Launcher<'_>, rig: &HarnessRig) -> Result<S
     select(h, pane0, &b)?;
     expect_eq(
         "shown_session after select_session",
-        shown(h, pane0)?,
+        shown(h, pane0, p0)?,
         Some(b.clone()),
     )?;
     Ok(b)

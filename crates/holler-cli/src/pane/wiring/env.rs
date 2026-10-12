@@ -1,6 +1,7 @@
 //! What the wiring reads from the environment (#649, D5 to D7): the Herdr session, its socket
-//! and its workspaces, the tmux socket, and the OpenCode binary and server arguments. The
-//! parent module's doc lists every variable.
+//! and its workspaces, the tmux socket, the OpenCode binary and server arguments, and (#831) the
+//! Claude Code binary and its configuration directory. The parent module's doc lists every
+//! variable.
 //!
 //! Each function reads through the [`Lookup`] it is given (the process environment in
 //! production), so a test needs no process environment. A malformed or missing value is an
@@ -45,6 +46,8 @@ const TMUX_SOCKET: &str = "HOLLER_TMUX_SOCKET";
 const OPENCODE_BIN: &str = "HOLLER_OPENCODE_BIN";
 /// The arguments appended to `opencode serve`.
 const OPENCODE_SERVE_ARGS: &str = "HOLLER_OPENCODE_SERVE_ARGS";
+/// The `claude` binary (#831).
+const CLAUDE_BIN: &str = "HOLLER_CLAUDE_BIN";
 
 /// The Herdr adapter's configuration (D5): the session `HOLLER_HERDR_SESSION` names, its socket,
 /// the workspaces `HOLLER_HERDR_WORKSPACES` lists, and the adapter's own 10 s bound (D9).
@@ -93,18 +96,50 @@ pub fn tmux_socket(env: Lookup<'_>) -> Result<TmuxSocket, PaneError> {
 /// (`usage` when it is not absolute), else the first executable `opencode` in an absolute
 /// directory of `PATH`. None found is `unavailable` naming `HOLLER_OPENCODE_BIN`.
 pub fn opencode_bin(env: Lookup<'_>) -> Result<PathBuf, PaneError> {
-    if let Some(value) = env(OPENCODE_BIN) {
-        return absolute(OPENCODE_BIN, value);
+    program_bin(env, OPENCODE_BIN, "opencode")
+}
+
+/// The `claude` binary (#831), found as the `opencode` one is: `HOLLER_CLAUDE_BIN` (`usage` when
+/// it is not absolute), else the first executable `claude` in an absolute directory of `PATH`.
+/// None found is `unavailable` naming `HOLLER_CLAUDE_BIN`. A shell alias is never consulted:
+/// tmux starts the program, never a shell.
+pub fn claude_bin(env: Lookup<'_>) -> Result<PathBuf, PaneError> {
+    program_bin(env, CLAUDE_BIN, "claude")
+}
+
+/// Claude Code's configuration directory (#831): `$HOME/.claude`, the one a pane's process uses,
+/// since its launch argv unsets `CLAUDE_CONFIG_DIR`. The adapter checks only whether a transcript
+/// exists under it. A `HOME` that is unset, empty or relative is `usage`.
+pub fn claude_config_dir(env: Lookup<'_>) -> Result<PathBuf, PaneError> {
+    env("HOME")
+        .map(PathBuf::from)
+        .filter(|home| home.is_absolute())
+        .map(|home| home.join(".claude"))
+        .ok_or_else(|| {
+            usage(
+                "HOME is not an absolute directory, so Claude Code's configuration directory \
+                 ($HOME/.claude) is not known"
+                    .to_owned(),
+            )
+        })
+}
+
+/// The binary `program`, always an absolute path, since tmux starts it: `variable` (`usage` when
+/// it is not absolute), else the first executable `program` in an absolute directory of `PATH`.
+/// None found is `unavailable` naming `variable`.
+fn program_bin(env: Lookup<'_>, variable: &str, program: &str) -> Result<PathBuf, PaneError> {
+    if let Some(value) = env(variable) {
+        return absolute(variable, value);
     }
     let path = env("PATH").unwrap_or_default();
     std::env::split_paths(&path)
         .filter(|dir| dir.is_absolute())
-        .map(|dir| dir.join("opencode"))
+        .map(|dir| dir.join(program))
         .find(|candidate| is_executable(candidate))
         .ok_or_else(|| PaneError::Unavailable {
             what: format!(
-                "no opencode binary: none is executable on PATH; set {OPENCODE_BIN} to its \
-                 absolute path"
+                "no {program} binary: none is executable on PATH; set {variable} to its absolute \
+                 path"
             ),
         })
 }

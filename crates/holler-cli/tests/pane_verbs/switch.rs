@@ -14,7 +14,9 @@ use std::sync::{Arc, Mutex};
 use holler_cli::output::Format;
 use holler_pane::pane::{Health, Hold};
 use holler_pane::ports::Activity;
-use holler_pane::{Argv, HarnessPort, Pane, PaneError, PaneId, PaneName, PaneStore, ServeSpec};
+use holler_pane::{
+    Argv, HarnessEndpoint, HarnessPort, Pane, PaneError, PaneId, PaneName, PaneStore, ServeSpec,
+};
 use holler_pane_testkit::envelope::{check_envelope, Envelope};
 use holler_pane_testkit::harness::{FakeHarness, HarnessOp, HarnessOp as H, Quirk, TuiView};
 use holler_pane_testkit::pane_store::{FakePaneStore, PaneStoreOp};
@@ -125,6 +127,25 @@ pub(crate) fn both_with<T>(
     words: impl Fn(&Rig, &T) -> Vec<String>,
     exec: impl Fn(&Rig, &T, &[&str], Format) -> Outcome,
 ) -> [Case<T>; 2] {
+    both_checked(build, words, exec, false)
+}
+
+/// [`both_with`] for a refusal of a pane that has **no record**: the verb may read Herdr to
+/// tell an unmanaged pane from a typo (#832), and still makes no call that acts.
+pub(crate) fn both_with_missing_record<T>(
+    build: impl Fn() -> (Rig, T),
+    words: impl Fn(&Rig, &T) -> Vec<String>,
+    exec: impl Fn(&Rig, &T, &[&str], Format) -> Outcome,
+) -> [Case<T>; 2] {
+    both_checked(build, words, exec, true)
+}
+
+fn both_checked<T>(
+    build: impl Fn() -> (Rig, T),
+    words: impl Fn(&Rig, &T) -> Vec<String>,
+    exec: impl Fn(&Rig, &T, &[&str], Format) -> Outcome,
+    herdr_reads_ok: bool,
+) -> [Case<T>; 2] {
     let cases = [Format::Text, Format::Json].map(|format| one_case(format, &build, &words, &exec));
     let [text, json] = &cases;
     assert_eq!(
@@ -142,8 +163,12 @@ pub(crate) fn both_with<T>(
     );
     for case in &cases {
         assert!(
-            crate::list::only_herdr_reads(&case.calls.herdr) && case.calls.host.is_empty(),
-            "{:?}: no Herdr call that acts and no host call, so no keystroke (I4): {:?}",
+            (if herdr_reads_ok {
+                crate::list::only_herdr_reads(&case.calls.herdr)
+            } else {
+                case.calls.herdr.is_empty()
+            }) && case.calls.host.is_empty(),
+            "{:?}: no Herdr call (a read, for a missing record) that acts and no host call, so no keystroke (I4): {:?}",
             case.format,
             case.calls
         );
@@ -481,30 +506,39 @@ impl HarnessPort for WriterInSelect<'_> {
     fn serve_command(&self, n: &PaneName, port: u16, s: &ServeSpec) -> Result<Argv, PaneError> {
         self.inner.serve_command(n, port, s)
     }
-    fn verify_serving(&self, port: u16, spec: &ServeSpec) -> Result<(), PaneError> {
-        self.inner.verify_serving(port, spec)
+    fn verify_serving(&self, at: &HarnessEndpoint, spec: &ServeSpec) -> Result<(), PaneError> {
+        self.inner.verify_serving(at, spec)
     }
-    fn health(&self, port: u16) -> Result<bool, PaneError> {
-        self.inner.health(port)
+    fn health(&self, at: &HarnessEndpoint) -> Result<bool, PaneError> {
+        self.inner.health(at)
     }
-    fn create_session(&self, port: u16) -> Result<String, PaneError> {
-        self.inner.create_session(port)
+    fn create_session(&self, at: &HarnessEndpoint) -> Result<String, PaneError> {
+        self.inner.create_session(at)
     }
-    fn list_sessions(&self, port: u16) -> Result<Vec<String>, PaneError> {
-        self.inner.list_sessions(port)
+    fn list_sessions(&self, at: &HarnessEndpoint) -> Result<Vec<String>, PaneError> {
+        self.inner.list_sessions(at)
     }
-    fn abort(&self, port: u16, session: &str) -> Result<(), PaneError> {
-        self.inner.abort(port, session)
+    fn abort(&self, at: &HarnessEndpoint, session: &str) -> Result<(), PaneError> {
+        self.inner.abort(at, session)
     }
-    fn attach_tui(&self, pane: &PaneId, port: u16, session: &str) -> Result<(), PaneError> {
-        self.inner.attach_tui(pane, port, session)
+    fn attach_tui(
+        &self,
+        pane: &PaneId,
+        at: &HarnessEndpoint,
+        session: &str,
+    ) -> Result<(), PaneError> {
+        self.inner.attach_tui(pane, at, session)
     }
     fn select_session(&self, pane: &PaneId, session: &str) -> Result<(), PaneError> {
         self.panes.concurrent_put(self.other)?;
         self.inner.select_session(pane, session)
     }
-    fn shown_session(&self, pane: &PaneId) -> Result<Option<String>, PaneError> {
-        self.inner.shown_session(pane)
+    fn shown_session(
+        &self,
+        pane: &PaneId,
+        at: &HarnessEndpoint,
+    ) -> Result<Option<String>, PaneError> {
+        self.inner.shown_session(pane, at)
     }
 }
 
@@ -574,7 +608,9 @@ fn switch_in_a_profile() {
 #[test]
 fn switch_unknown_pane() {
     let words = |_: &Rig, s2: &String| argv(&["pane", "switch", "demo-c9r9", s2]);
-    let cases = both(one_pane, words);
+    let cases = both_with_missing_record(one_pane, words, |rig, _, argv, format| {
+        rig.verb(argv, format)
+    });
     failed_before_the_act(&cases, 3, "pane-not-found");
     for case in &cases {
         assert!(case.calls.harness.is_empty(), "{:?}", case.calls);
@@ -595,7 +631,15 @@ fn switch_usage() {
     ];
     for [pane, session] in bad {
         let words = |_: &Rig, (): &()| argv(&["pane", "switch", pane, session]);
-        let cases = both(|| (Rig::new(&[Seed::new(P, 1, 1)]), ()), words);
+        // A name that is not a valid pane name may be the label of an unmanaged pane, so the
+        // verb reads Herdr and the pane store to tell (#832); it still acts and writes nothing.
+        let bad_pane_name = pane != P;
+        let build = || (Rig::new(&[Seed::new(P, 1, 1)]), ());
+        let cases = if bad_pane_name {
+            both_with_missing_record(build, words, |rig, _, argv, format| rig.verb(argv, format))
+        } else {
+            both(build, words)
+        };
         for message in failed_before_the_act(&cases, 2, "usage") {
             assert!(
                 !message.contains('\u{1b}'),
@@ -604,7 +648,9 @@ fn switch_usage() {
         }
         for case in &cases {
             let c = &case.calls;
-            let none = c.panes.is_empty() && c.profiles.is_empty() && c.harness.is_empty();
+            let pane_reads_only = c.panes.iter().all(|op| !matches!(op, PaneStoreOp::CasPut | PaneStoreOp::Delete));
+            let panes_ok = if bad_pane_name { pane_reads_only } else { c.panes.is_empty() };
+            let none = panes_ok && c.profiles.is_empty() && c.harness.is_empty();
             assert!(
                 none && c.probes == 0,
                 "{pane} {session:?}: no port call: {c:?}"
@@ -746,44 +792,58 @@ impl HarnessPort for SeamHarness<'_> {
     fn serve_command(&self, n: &PaneName, port: u16, s: &ServeSpec) -> Result<Argv, PaneError> {
         self.inner.serve_command(n, port, s)
     }
-    fn verify_serving(&self, port: u16, spec: &ServeSpec) -> Result<(), PaneError> {
-        self.inner.verify_serving(port, spec)
+    fn verify_serving(&self, at: &HarnessEndpoint, spec: &ServeSpec) -> Result<(), PaneError> {
+        self.inner.verify_serving(at, spec)
     }
-    fn health(&self, port: u16) -> Result<bool, PaneError> {
-        self.inner.health(port)
+    fn health(&self, at: &HarnessEndpoint) -> Result<bool, PaneError> {
+        self.inner.health(at)
     }
-    fn create_session(&self, port: u16) -> Result<String, PaneError> {
-        self.inner.create_session(port)
+    fn create_session(&self, at: &HarnessEndpoint) -> Result<String, PaneError> {
+        self.inner.create_session(at)
     }
-    fn list_sessions(&self, port: u16) -> Result<Vec<String>, PaneError> {
-        self.inner.list_sessions(port)
+    fn list_sessions(&self, at: &HarnessEndpoint) -> Result<Vec<String>, PaneError> {
+        self.inner.list_sessions(at)
     }
-    fn abort(&self, port: u16, session: &str) -> Result<(), PaneError> {
-        self.inner.abort(port, session)
+    fn abort(&self, at: &HarnessEndpoint, session: &str) -> Result<(), PaneError> {
+        self.inner.abort(at, session)
     }
-    fn attach_tui(&self, pane: &PaneId, port: u16, session: &str) -> Result<(), PaneError> {
-        self.inner.attach_tui(pane, port, session)
+    fn attach_tui(
+        &self,
+        pane: &PaneId,
+        at: &HarnessEndpoint,
+        session: &str,
+    ) -> Result<(), PaneError> {
+        self.inner.attach_tui(pane, at, session)
     }
     fn select_session(&self, pane: &PaneId, session: &str) -> Result<(), PaneError> {
         self.inner.select_session(pane, session)
     }
-    fn shown_session(&self, pane: &PaneId) -> Result<Option<String>, PaneError> {
-        self.inner.shown_session(pane)
+    fn shown_session(
+        &self,
+        pane: &PaneId,
+        at: &HarnessEndpoint,
+    ) -> Result<Option<String>, PaneError> {
+        self.inner.shown_session(pane, at)
     }
-    fn send_prompt(&self, port: u16, session: &str, text: &str) -> Result<(), PaneError> {
+    fn send_prompt(
+        &self,
+        at: &HarnessEndpoint,
+        session: &str,
+        text: &str,
+    ) -> Result<(), PaneError> {
         let then = self
             .panes
             .get(&self.pane)
             .expect("the store answers")
             .and_then(|record| record.session_of_record);
-        self.log.prompt(port, session, text, then);
+        self.log.prompt(at.port().unwrap(), session, text, then);
         match self.prompt.clone() {
             Some(error) => Err(error),
             None => Ok(()),
         }
     }
-    fn session_activity(&self, port: u16, session: &str) -> Result<Activity, PaneError> {
-        self.log.activity_query(port, session);
+    fn session_activity(&self, at: &HarnessEndpoint, session: &str) -> Result<Activity, PaneError> {
+        self.log.activity_query(at.port().unwrap(), session);
         Ok(self.activity)
     }
 }
@@ -798,12 +858,12 @@ fn seam_defaults_are_permissive() {
     let port = rig.live(P).port;
     let activity = rig
         .harness
-        .session_activity(port, &s2)
+        .session_activity(&HarnessEndpoint::Port(port), &s2)
         .expect("the default answers");
     assert_eq!(activity, Activity::Idle, "the activity default is idle");
     let refused = rig
         .harness
-        .send_prompt(port, &s2, "hello")
+        .send_prompt(&HarnessEndpoint::Port(port), &s2, "hello")
         .expect_err("the prompt default refuses");
     assert_eq!(refused.code().to_string(), "prompt-unsupported");
 }

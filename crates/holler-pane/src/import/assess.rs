@@ -384,7 +384,7 @@ fn record(
         },
         harness: HarnessInfo {
             kind: HarnessKind::Opencode,
-            port: launcher.port,
+            port: Some(launcher.port),
             pid: None,
             health: seen.health,
         },

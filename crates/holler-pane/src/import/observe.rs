@@ -15,7 +15,7 @@ use std::thread::{self, ScopedJoinHandle};
 
 use crate::findings::embedded;
 use crate::pane::Health;
-use crate::{PaneError, PaneName, Ports};
+use crate::{HarnessEndpoint, PaneError, PaneName, Ports};
 
 use super::findings::{Finding, ImportFinding};
 
@@ -86,12 +86,13 @@ fn observe(ports: Ports<'_>, target: &Target<'_>) -> Observed {
 /// The server on `port`: its health check, then one list. A healthy server's list is read
 /// for the session of record; an unhealthy server's only tells wedged from down.
 fn observe_server(ports: Ports<'_>, port: u16) -> Server {
-    match ports.harness.health(port) {
+    let at = HarnessEndpoint::Port(port);
+    match ports.harness.health(&at) {
         Err(error) => Server::Unknown(error),
-        Ok(true) => Server::Healthy(ports.harness.list_sessions(port)),
+        Ok(true) => Server::Healthy(ports.harness.list_sessions(&at)),
         Ok(false) => {
             let wedged = matches!(
-                ports.harness.list_sessions(port),
+                ports.harness.list_sessions(&at),
                 Err(PaneError::Timeout { .. })
             );
             if wedged {

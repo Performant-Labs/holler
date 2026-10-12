@@ -24,16 +24,20 @@
 //!   `FakeProfileScope` (slice c, #682).
 //! - [`herdr`] and [`prober`] — `FakeHerdr` and `FakeProber` (slice d, #683).
 //! - [`host`] and [`harness`] — `FakeHost` and `FakeHarness` (slice e, #684).
+//! - [`claude`] and [`harnesses`] — `FakeClaude`, the single-process harness, and
+//!   `FakeHarnesses`, the router of the two harness fakes (#831).
 //!
 //! The modules of slices b to e are empty stubs, declared here so that no two slices
 //! edit this file.
 
+pub mod claude;
 pub mod conformance;
 pub mod envelope;
 pub mod fault;
 mod feed;
 pub mod fixture;
 pub mod harness;
+pub mod harnesses;
 pub mod herdr;
 pub mod host;
 pub mod pane_store;

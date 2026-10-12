@@ -66,7 +66,7 @@ fn configured(pane_name: &str, row: u16, col: u16, n: u32) -> Pane {
     let mut p = pane(pane_name);
     p.herdr.grid = GridPos { row, col };
     p.host.cwd = format!("/srv/demo/w{n}");
-    p.harness.port = 48100 + u16::try_from(n).unwrap();
+    p.harness.port = Some(48100 + u16::try_from(n).unwrap());
     p.model = ModelSpec {
         provider: "demo-provider".to_owned(),
         model_id: format!("demo-model-{n}"),

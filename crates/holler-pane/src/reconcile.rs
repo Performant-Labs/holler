@@ -23,6 +23,23 @@
 //!    a pass that names it.
 //! 4. **Record** what was observed, in one compare-and-swap of the pane's record.
 //!
+//! **A single process (#831, ADR-0021 section 15 items 6 and 13; plan review W2 and W3).** A
+//! pane whose harness's shape is `SingleProcess` (Claude Code) has no server list and no TUI,
+//! so its chain is `host.ps`, `harness.health` at its endpoint (whether its process still
+//! runs: `server-down` when it does not, with no wedge check), `harness.shown_session` (the
+//! session the process holds, which a person's `/clear` or `/resume` moves) and
+//! `harness.session_activity` (a wait is `pane-waiting`, with its reason). The rules that
+//! need a server's list are skipped: `session-of-record-missing`, `tui-foreign-session`,
+//! `stray-session` and `server-wedged`. Its one mismatch, the process holding another session
+//! than the session of record, is repaired by relaunching it on the session of record, and
+//! only while it is idle, so a repair never drops a running turn: a pane that works or waits
+//! is `not-fixable`, with the relaunch remedy. The relaunch is the caller's
+//! ([`reconcile_with`]'s `relaunch`: `holler pane doctor` passes `tx_launch`'s), so this
+//! engine never imports the launch engine, which reads its [`shown_differs`]. After a
+//! relaunch the chain writes no record of its own: the relaunch stored it. And once per pass,
+//! when a pane in scope is a single process, `harness.login_status` is asked: a login that is
+//! not the subscription's is one `claude-login-missing`.
+//!
 //! **What the record write means.** Other verbs gate on these fields (#645, #646, #648):
 //!
 //! - `harness.health` is written from this pass's health check: `healthy`,
@@ -50,7 +67,8 @@ use std::thread::{self, ScopedJoinHandle};
 use serde::{Serialize, Serializer};
 
 use crate::findings::{embedded, quoted, Finding, FindingKind};
-use crate::pane::Health;
+use crate::pane::{Health, Shape};
+use crate::ports::LoginStatus;
 use crate::unmanaged;
 use crate::{GridPos, HerdrSnapshot, Pane, PaneError, PaneId, PaneName, Ports, ProfileName};
 
@@ -59,6 +77,14 @@ use observe::Checked;
 /// The Herdr calls of a pass, named as `<port>.<method>` in an `observe-failed` message.
 const HERDR_VERSION: &str = "herdr.version";
 const HERDR_SNAPSHOT: &str = "herdr.snapshot";
+/// The login call of a pass that holds a single-process pane (#831).
+const HARNESS_LOGIN_STATUS: &str = "harness.login_status";
+
+/// How a pass relaunches a single-process pane on its session of record, for `--fix` (#831,
+/// plan review W2): given the record the pass read, it relaunches the pane as recorded and
+/// returns the record it stored. The caller's, so this engine never imports the launch engine;
+/// `holler pane doctor` passes `tx_launch::relaunch_recorded` with `ProcessSession::Keep`.
+pub type Relaunch<'a> = &'a (dyn Fn(&Pane) -> Result<Pane, PaneError> + Sync);
 
 /// What one reconcile pass is asked to do.
 #[derive(Debug, Clone, Copy)]
@@ -185,17 +211,30 @@ pub fn shown_differs(session_of_record: Option<&str>, shown: Option<&str>) -> bo
     session_of_record.is_some_and(|record| shown != Some(record))
 }
 
-/// Run one reconcile pass over `ports` (see the module docs).
+/// Run one reconcile pass over `ports` (see the module docs), with no way to relaunch a
+/// single-process pane: [`reconcile_with`] and no `relaunch`.
+pub fn reconcile(ports: Ports<'_>, request: &ReconcileRequest<'_>) -> Result<Report, PaneError> {
+    reconcile_with(ports, request, None)
+}
+
+/// Run one reconcile pass over `ports` (see the module docs). `relaunch` is how `--fix`
+/// repairs a single-process pane's mismatch; without it such a mismatch is `not-fixable`, with
+/// the relaunch remedy, when `--fix` asks for its repair.
 ///
 /// It fails only when it cannot run the pass: a named pane or profile that does not exist
 /// or a pane outside the profile (`pane-not-found`, `profile-not-found`,
 /// `pane-not-in-profile`), or a pane store or profile scope that cannot be read. Everything
 /// else the pass observes, a failed call included, is a finding of the report.
-pub fn reconcile(ports: Ports<'_>, request: &ReconcileRequest<'_>) -> Result<Report, PaneError> {
+pub fn reconcile_with(
+    ports: Ports<'_>,
+    request: &ReconcileRequest<'_>,
+    relaunch: Option<Relaunch<'_>>,
+) -> Result<Report, PaneError> {
     let (scope, records) = resolve(ports, request)?;
-    let (herdr, checked) = observe_all(ports, request, &scope);
+    let (herdr, login, checked) = observe_all(ports, request, relaunch, &scope);
     let whole_fleet = request.profile.is_none() && request.pane.is_none();
     let mut findings = herdr_findings(herdr.as_ref(), &scope, &records, whole_fleet);
+    findings.extend(login.and_then(login_finding));
     findings.extend(strays(&scope, &checked, &records));
     if let (true, Some(after), Some(Ok(snapshot))) = (
         whole_fleet,
@@ -261,24 +300,37 @@ struct HerdrSeen {
     snapshot: Result<HerdrSnapshot, PaneError>,
 }
 
-/// Observe Herdr and every pane of `scope` at once: one thread for the two Herdr calls and
-/// one per pane, each pane's in `scope` order. A thread that cannot start or does not finish
-/// leaves `None` for Herdr, and a lone `observe-failed` for a pane.
+/// What a pass's login check answered (#831): `None` when no pane in scope is a single
+/// process, so nothing was asked.
+type LoginSeen = Option<Result<LoginStatus, PaneError>>;
+
+/// Observe Herdr and every pane of `scope` at once: one thread for the two Herdr calls, one
+/// for the login check when a pane in scope is a single process (#831), and one per pane, each
+/// pane's in `scope` order. A thread that cannot start or does not finish leaves `None` for
+/// Herdr, an `unavailable` login check, and a lone `observe-failed` for a pane.
 fn observe_all(
     ports: Ports<'_>,
     request: &ReconcileRequest<'_>,
+    relaunch: Option<Relaunch<'_>>,
     scope: &[Pane],
-) -> (Option<HerdrSeen>, Vec<Checked>) {
+) -> (Option<HerdrSeen>, LoginSeen, Vec<Checked>) {
+    let asks_login = scope
+        .iter()
+        .any(|pane| pane.harness.kind.shape() == Shape::SingleProcess);
     thread::scope(|threads| {
         let herdr = thread::Builder::new().spawn_scoped(threads, move || HerdrSeen {
             version: ports.herdr.version(),
             snapshot: ports.herdr.snapshot(),
         });
+        let login = asks_login.then(|| {
+            thread::Builder::new().spawn_scoped(threads, move || ports.harness.login_status())
+        });
         let chains: Vec<_> = scope
             .iter()
             .map(|pane| {
-                thread::Builder::new()
-                    .spawn_scoped(threads, move || observe::check_pane(ports, request, pane))
+                thread::Builder::new().spawn_scoped(threads, move || {
+                    observe::check_pane(ports, request, relaunch, pane)
+                })
             })
             .collect();
         let checked: Vec<Checked> = scope
@@ -286,8 +338,34 @@ fn observe_all(
             .zip(chains)
             .map(|(pane, chain)| joined(chain).unwrap_or_else(|| observe::lost(pane)))
             .collect();
-        (joined(herdr), checked)
+        let login = login.map(|thread| {
+            joined(thread).unwrap_or_else(|| {
+                Err(PaneError::Unavailable {
+                    what: "the login check did not finish".to_owned(),
+                })
+            })
+        });
+        (joined(herdr), login, checked)
     })
+}
+
+/// The finding of a pass's login check (#831): `claude-login-missing` when the processes do
+/// not use the subscription login, `observe-failed` when the check failed, nothing when the
+/// login is the subscription's. The finding names the login and never a command that reads one.
+fn login_finding(login: Result<LoginStatus, PaneError>) -> Option<Finding> {
+    match login {
+        Ok(LoginStatus::Ok) => None,
+        Ok(LoginStatus::Missing) => Some(Finding::new(
+            FindingKind::ClaudeLoginMissing,
+            "the Claude Code panes' processes do not use the subscription login; log in to Claude \
+             Code as the user the panes run as (holler never reads, copies or sets a login)"
+                .to_owned(),
+        )),
+        Err(error) => Some(Finding::new(
+            FindingKind::ObserveFailed,
+            failed_message(HARNESS_LOGIN_STATUS, &error),
+        )),
+    }
 }
 
 /// What a thread of the pass returned, or `None` when it could not start or panicked.
@@ -384,12 +462,13 @@ fn strays(scope: &[Pane], checked: &[Checked], records: &[Pane]) -> Vec<Finding>
         .collect();
     let mut listed_on: BTreeMap<&str, BTreeSet<u16>> = BTreeMap::new();
     for (pane, chain) in scope.iter().zip(checked) {
+        // Only a server lists sessions, and a server has a port.
+        let Some(port) = pane.harness.port else {
+            continue;
+        };
         for session in chain.listed.iter().flatten() {
             if !recorded.contains(session.as_str()) {
-                listed_on
-                    .entry(session.as_str())
-                    .or_default()
-                    .insert(pane.harness.port);
+                listed_on.entry(session.as_str()).or_default().insert(port);
             }
         }
     }

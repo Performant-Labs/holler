@@ -18,8 +18,8 @@ use holler_pane::findings::{Finding, FindingKind};
 use holler_pane::pane::PaneRole;
 use holler_pane::reconcile::{reconcile, ReconcileRequest, Report};
 use holler_pane::{
-    Actor, GridPos, HarnessPort, HerdrPane, HerdrPort, HerdrSpec, HostPort, Pane, PaneId, PaneName,
-    PaneStore, Ports, ProfileName, ServeSpec,
+    Actor, GridPos, HarnessEndpoint, HarnessPort, HerdrPane, HerdrPort, HerdrSpec, HostPort, Pane,
+    PaneId, PaneName, PaneStore, Ports, ProfileName, ServeSpec,
 };
 use holler_pane_testkit::envelope::check_envelope;
 use holler_pane_testkit::fixture::{sample_pane, sample_profile};
@@ -229,10 +229,14 @@ impl Rig {
         start_server(&self.harness, &bare, FOREIGN_PORT);
         let foreign = self
             .harness
-            .create_session(FOREIGN_PORT)
+            .create_session(&HarnessEndpoint::Port(FOREIGN_PORT))
             .expect("a session");
         self.harness
-            .attach_tui(&self.pane_id(name), FOREIGN_PORT, &foreign)
+            .attach_tui(
+                &self.pane_id(name),
+                &HarnessEndpoint::Port(FOREIGN_PORT),
+                &foreign,
+            )
             .expect("attach the TUI");
         foreign
     }
@@ -384,9 +388,11 @@ fn make_live(
         harness.set_data_dir(port, dir);
     }
     start_server(harness, &name, port);
-    let session = harness.create_session(port).expect("a session");
+    let session = harness
+        .create_session(&HarnessEndpoint::Port(port))
+        .expect("a session");
     harness
-        .attach_tui(&pane.pane_id, port, &session)
+        .attach_tui(&pane.pane_id, &HarnessEndpoint::Port(port), &session)
         .expect("attach the TUI");
     Live {
         name,
@@ -411,7 +417,7 @@ fn start_server(harness: &FakeHarness, name: &PaneName, port: u16) {
 fn record_of(seed: &Seed, live: &Live) -> Pane {
     let mut pane = sample_pane(seed.name).expect("a sample pane");
     pane.herdr = live.herdr.clone();
-    pane.harness.port = live.port;
+    pane.harness.port = Some(live.port);
     pane.session_of_record = Some(live.session.clone());
     pane.role = seed.role;
     pane.profile = seed

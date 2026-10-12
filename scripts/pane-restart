@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # pane-restart: restart one fleet pane's OpenCode or Claude Code TUI on a new model, in its existing tmux session.
-# A stop-gap (issue #746) until `holler pane relaunch --model` (#644) and the pfleet adoption (#653) land.
+# For an OpenCode pane it is the fallback for `holler pane relaunch --model` until the 7-day sign-off of #654 (issue #746);
+# its Claude Code path (issue #784) has no replacement and stays.
 #
 #   pane-restart PANE --model PROVIDER/ID [--effort E] [--key-file PATH] [--project DIR] [--agent KEY] [--dry-run]
 #   pane-restart PANE [--model ALIAS|NAME] [--effort E] [--fresh] [--dry-run]            (a Claude Code pane, see below)

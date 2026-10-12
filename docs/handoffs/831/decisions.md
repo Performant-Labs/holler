@@ -90,3 +90,66 @@ brief, the research note's "Decisions").
     - `--no-run` of every new or changed target: only contract items unresolved.
     - `scripts/lint.sh`: exit 0.
     - `rustfmt --check` on the new files.
+
+## F, implement: 2026-10-11T20:54-06:00 (MDT)
+
+- **Decided:** done (`docs/handoffs/831/handoff-F.md`). The contract of `handoff-T-red.md` is built in A's order. Every
+  authored test is GREEN except `findings_test.rs`'s stable-codes list, which T must extend with the two new kinds.
+  - **W1:** `SessionChoice::{Fresh, Keep, Resume}`. A switch's resume-only choice is `session-not-found` in the plan,
+    before anything stops.
+  - **W2 and W3:** `reconcile_with(ports, request, Option<Relaunch>)`. `holler pane doctor` passes
+    `relaunch_recorded(Keep)`. The repair runs only while the process is idle, and the chain writes no record after a
+    relaunch. A's open choice of mechanism was taken this way so the chain knows it relaunched.
+  - **W4 and W10:** one entry point, `tx_launch::relaunch_on` and `relaunch_recorded`. `process_command` runs first in
+    the plan. `reset --first` goes to the stored record's endpoint.
+  - **W5:** `holler_pane::HarnessRouter<S, P>`, with a routing table by endpoint variant and by call.
+  - **W6:** #835's `CLAUDE_CODE_COMMAND` and `is_claude_code_command`, and its required `HostPort::foreground_commands`,
+    were copied verbatim from its branch (`9bd101b`, `36b0de8`), because #835 is not on `main`.
+  - **W7:** the import's rule is `!= Some(Opencode)`.
+  - **W8:** the hook is fixed text and writes `<state>/claude-inbox/$PPID` atomically under `umask 077`. The read fails
+    closed and trusts a file only for a pid listed now. A's open choice of key was taken as the pid, so a `/clear`
+    rewrites the same file.
+  - **W9:** `LoginStatus {Ok, Missing}`. Every default refuses `process-unsupported`.
+  - **W11:** `process-in-use` through `foreground_commands`.
+  - **W13:** `--harness` in `SpecFlags`, with one policy rule, `port_for`. `HarnessInfo` uses `try_from`.
+  - **W14:** `tx_launch.rs` is split into five submodules (747 lines).
+  - **Under the standing rules:**
+    - a new port code, `server-unsupported`, for a single-process harness asked for a server's or a TUI's step;
+    - the login variables are a fact of the kind, refused by the engine's plan (`claude-login-env-refused`);
+    - the login check runs once per pass, only with a single process in scope.
+  - **Docs:**
+    - ADR-0021: "as built" in sections 8, 14 and 15, the section 9 rows, "Deferred", and decisions 26 to 28;
+    - `docs/pane-control.md`, `docs/orchestrating.md`, ADR-0003 and `CHANGELOG.md`.
+  - **Merge:** `origin/main` (`d6ae539`: #849, #840, #851) was merged with `--no-commit`, and `MERGE_HEAD` is left for
+    the driver's commit. A rebase was impossible: `008a995` is pushed, and the driver does not force-push.
+- **Assumed:**
+  - The endpoint migration of the existing tests is F's endpoint step, as T's handoff and A's note 3 assign it. It was
+    done with no assertion edited, and Phase 6 checks that.
+  - Claude Code runs a hook's shell as a direct child, so `$PPID` is the pid that `claude agents --json` lists. This is
+    not verified live. If it is wrong, `send_prompt` fails closed (`unavailable`).
+- **Hedged:**
+  - **Item 17 is not built:** #835 is not on `main` (checked at F's start and end). The PR says "Part of #831".
+  - **The opt-in real test was not run by F:** it uses the real login and a model turn. Its case 9 is the live guard for
+    the frame and the hook.
+  - **Two test-only findings for T:**
+    - `findings_test.rs`'s `CODES` gains `pane-waiting` and `claude-login-missing`;
+    - `pane_claude/mixed.rs:242` trips `clippy::never_loop`, a CI step.
+  - **#835's verbatim files** keep their own formatting, so the two branches merge identical hunks.
+- **Evidence:**
+  - Ran:
+    - `cargo test --workspace --no-fail-fast -- --skip roster_stays_accurate_under_concurrent_body_load`: 2487 passed,
+      1 failed (above), 34 ignored;
+    - the T targets: `pane_claude` 42 passed and 1 ignored, `claude_conformance_test` 4, `fake_claude_test` 13,
+      `fake_harnesses_test` 5, `claude_kind_test` 15, the adapter's `hermetic_test` 15, `cli_surface_test` 3,
+      `pane_integration` 67;
+    - `cargo clippy --workspace --all-targets -- -D warnings`: only `mixed.rs:242`;
+    - `scripts/lint.sh` (exit 0), `cargo machete` (clean) and `scripts/changelog-check.sh` (ok);
+    - the docs tests (`docs_cli_test`, `docs_pane_control_test`, `docs_errors_test`, `docs_wire_test`): all pass.
+  - Read:
+    - `handoff-A.md`, `handoff-T-red.md` and the brief;
+    - ADR-0021 sections 2, 8, 9, 14 and 15;
+    - the spike note;
+    - `docs/pane-control.md` in full;
+    - #835's branch diff.
+  - `git fetch` at the end: `origin/main` is `d6ae539`, and #835 is not merged.
+  - Evidence of unchanged code: `docs/handoffs/831/evidence.md`.

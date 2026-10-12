@@ -7,14 +7,14 @@ use std::sync::Arc;
 use holler_pane::findings::FindingKind as K;
 use holler_pane::ports::Activity;
 use holler_pane::reconcile::Report;
-use holler_pane::{HarnessPort, PaneError};
+use holler_pane::{HarnessEndpoint, HarnessPort, PaneError};
 use holler_pane_testkit::harness::{HarnessOp as H, Quirk};
 use holler_pane_testkit::pane_store::PaneStoreOp;
 
 use crate::doctor::rig::{keys, kinds, of_kind, one, whole, Rig, Seed};
 use crate::switch::{
-    argv, both, both_with, data, failed, failed_before_the_act, Case, SeamHarness, SeamLog, P, Q,
-    RECONCILE_P,
+    argv, both, both_with, both_with_missing_record, data, failed, failed_before_the_act, Case,
+    SeamHarness, SeamLog, P, Q, RECONCILE_P,
 };
 use crate::verb_harness::parse::try_parse;
 use crate::verb_harness::run_verb_with;
@@ -34,7 +34,9 @@ fn one_pane() -> (Rig, ()) {
 
 /// The sessions on the server at `port`.
 fn sessions(rig: &Rig, port: u16) -> Vec<String> {
-    rig.harness.list_sessions(port).expect("list the sessions")
+    rig.harness
+        .list_sessions(&HarnessEndpoint::Port(port))
+        .expect("list the sessions")
 }
 
 /// The one session on `P`'s server that `before` does not have: the one the run created.
@@ -201,7 +203,12 @@ fn reset_refusals_create_nothing() {
             words.extend(argv(extra));
             words
         };
-        let cases = both(build, words);
+        let cases = if code == "pane-not-found" {
+            // No record: Herdr may be read to tell an unmanaged pane from a typo (#832).
+            both_with_missing_record(build, words, |rig, _, argv, format| rig.verb(argv, format))
+        } else {
+            both(build, words)
+        };
         failed_before_the_act(&cases, 3, code);
         for case in &cases {
             let calls = &case.calls.harness;
