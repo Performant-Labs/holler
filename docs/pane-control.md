@@ -789,6 +789,5 @@ Deferred, so not documented here as existing; none of them is available:
 - DRIVEN following each pane's session of record, and `reset --first` through the hub's gate (#839);
 - an import that leaves the panes Holler does not drive alone (#835);
 - the shared subprocess runner of the adapters and the probe (#696);
-- the real-adapter scenario for `profile apply` (#667);
 - recreating the Herdr workspace from the stored profiles (#666);
 - the PROPOSED profile verbs and the PROPOSED doctor finding `profile-drift` (#665).

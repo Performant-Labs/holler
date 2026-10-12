@@ -101,3 +101,24 @@
   - **Liveness:** mutant M2 in `tx_launch.rs` failed test B at `probe.rs:142` with `(Create, Created)` against `(Create, Refused)`. The file was restored, and `git diff -- crates/holler-pane/` was empty afterwards.
   - **Lint:** `cargo clippy -p holler-cli --all-targets -- -D warnings` was clean, and `bash scripts/lint.sh` exited 0.
   - **Tools:** herdr 0.9.1-preview, tmux 3.7c, OpenCode 1.19.0, `/usr/bin/curl`.
+
+## F (Phase 6 in the script's numbering, implement): 2026-10-11T20:10-06:00 (MDT)
+- **Decided:** F's part is documentation only, as A's W-1 binds. Nothing under `crates/` was touched. The detail is in `handoff-F.md`.
+  - **`CHANGELOG.md`:** decision 14's text, word for word, as the first entry under `## [Unreleased]` / `### Enhancements` (the section is newest first). It links #633 and #667, gives the opt-in run line of decision 4, and says "Tests only: no behaviour change."
+  - **`docs/pane-control.md` section 12:** the one bullet for #667 is deleted, because the scenario now exists. The other bullets and the list's punctuation are unchanged.
+  - **Not done, as decided:** no `docs/testing.md` run line (A's nit: #666 or a docs follow-up). No ADR-0021 edit (E60 already describes the scenario).
+  - `archChanged: false`.
+- **Assumed:**
+  - The script's orchestrator green check runs the full workspace suite after this phase. F ran only the targets that read the edited files and T's two targets.
+  - The other stories in flight (#839, #835, #648, #831) resolve the CHANGELOG by keeping every entry, and section 12 by keeping every bullet that is not theirs (the brief's Clashes).
+- **Hedged:**
+  - The entry is decision 14's proposed text unchanged. Linking the bare `#649` was considered and not done: the brief decided the text, and the section already uses bare `#NNN` references.
+- **Evidence:**
+  - `bash scripts/changelog-check.sh`: `changelog-check: ok`.
+  - `cargo test -p holler-cli --test docs_pane_control_test --test docs_cli_test --test profile_apply_scenario --test pane_integration`: 16, 3, 5 (2 ignored) and 68 (4 ignored) passed.
+  - `bash scripts/lint.sh`: exit 0, with no warning on a file of this story.
+  - `cargo clippy -p holler-cli --all-targets -- -D warnings`: exit 0.
+  - **Searches:**
+    - No `section(&doc, 12)` in `docs_pane_control_test.rs`.
+    - `CHANGELOG` and `pane-control` across `crates/`, `plugins/` and `scripts/`: only `docs_pane_control_test.rs` (its #652 pin, `:478-487`), `scripts/changelog-check.sh` and comments.
+  - The two source facts are in `evidence.md`.
