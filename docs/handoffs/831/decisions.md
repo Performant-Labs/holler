@@ -241,3 +241,61 @@ brief, the research note's "Decisions").
     - `gh issue view 696`;
     - `git merge-tree` of HEAD with `origin/main` `0f5835e`: a conflict in `CHANGELOG.md` only;
     - `wc -l` of every touched `.rs` file.
+
+## S, spec audit: 2026-10-11T21:40-06:00 (MDT)
+
+- **Decided:** REWORK (`reworkKind: production`), three items (`docs/handoffs/831/handoff-S.md`). They are one production
+  literal and two statements in the contract. No behaviour changes.
+  - **The acceptance lines are covered.** Every line has proving evidence, or the brief's own rule defers it:
+    - the `say` step waits for #839 and #850, and its ignored test names both;
+    - the roster line waits for #648, since no roster or watchdog reads the registry yet;
+    - item 17 waits for #835, which is not on `main`.
+  - **Section 15 is built as recorded,** and so are the operator's abort decision, A's W1 to W14 and the relayed request
+    (amend first, rigor, worktree, the answer about `say` and #839, and the #835 coordination in code).
+  - **Item 1:** section 15 item 1 says that the doc comment of `HARNESS_IDS` records the `claude` id's two uses (pane
+    and body). `holler-proto/src/vocab.rs:269-271` was not changed, and no as-built note records why. A silent deviation.
+  - **Item 2:** `wiring/env.rs:107` spells `"claude"` a second time. Item 2 makes `CLAUDE_CODE_COMMAND` the one place the
+    name is written (A-dup W7).
+  - **Item 3:** the as-built sentence "text for text ... identical hunks" in item 2 is not true. The API and the host-side
+    code match #835's branch; the doc comments of the constant, the rule and `foreground_commands` do not (A-dup W8).
+- **Assumed:**
+  - T's and F's recorded runs stand. I re-ran no build or test, as the role says.
+  - My checks were read-only: `git diff`, `show`, `log`, `diff --check` and `merge-base`; `grep` and `wc -l`;
+    `changelog-check.sh`; `gh issue view` of 831, 633, 828, 835, 839, 850 and 648.
+  - The script commits this handoff and this entry at the phase commit.
+- **Hedged:**
+  - **Why REWORK and not PASS with advisories.** No behaviour is wrong, but the PR would put three false statements
+    into the contract, one of them about the #835 coordination that the operator asked for. #835's S held its own
+    contract statements to the same bar: its REWORK 1 and 2, docs only.
+  - **The test gaps are advisory, not REWORK.** Two of them are documented codes: `harness-dialog-open` has no test at
+    all, and `session-holds-permission` is asserted only by its exit code. Each is a decided behaviour that is
+    implemented, not an acceptance line. F's and T-green's handoffs say the adapter's hermetic mapping pins
+    `harness-dialog-open`; no test does. I asked T-green to add the rows in this loop (Advisory 4).
+  - **The opt-in real test is not a merge condition.** The issue makes it opt-in and `#[ignore]`. It should run before
+    #831 closes or a Claude Code pane is launched on the fleet. The hook's `$PPID` key and the frame stay unverified, and
+    both fail closed.
+- **Evidence:**
+  - Live:
+    - `gh issue view 831`: the body equals the brief's issue section, with no comments;
+    - #633's amendment comment, 18:12 MDT;
+    - #828 is closed as not planned (15:56 MDT), absorbed by #839;
+    - #835, #839, #850 and #648 are open;
+    - `git fetch`: `origin/main` is `0f5835e`; the merge base is `d6ae539`.
+  - Diff:
+    - `git diff origin/main...HEAD`: 119 files, +12019/-1302;
+    - `issue-835-implementation` at `f1d1bd0`, diffed: the host code is identical, and the doc comments of `pane.rs:225-244`
+      and `ports.rs:330-339` differ.
+  - Read:
+    - the brief, every handoff, `decisions.md` and `evidence.md`;
+    - the full production diff (`holler-pane`, `holler-adapter-claude`, `holler-cli`, the test kit's `harnesses.rs` and
+      `conformance/claude.rs`);
+    - ADR-0021 sections 1, 2, 8, 9, 14 and 15, "Deferred" and decisions 22 to 28, ADR-0003, `docs/pane-control.md`,
+      `docs/orchestrating.md`, the CHANGELOG and the research note;
+    - the tests `pane_claude/{mixed,lifecycle,doctor,rig}.rs`, `hermetic_test.rs`, `real_claude_test.rs`, the forwarding
+      pin in `pane_integration/bind.rs`, `rework_test.rs` and `claude_kind_test.rs`.
+  - Greps:
+    - `unwrap`, `expect`, `panic` and `#[allow` in the added lines;
+    - every `"claude"` literal in `src`;
+    - private names, IPs, home paths and secrets in about 12,000 added lines: none;
+    - every test of `harness-dialog-open`, `session-holds-permission`, `server-unsupported` and `foreground_commands`;
+    - `wc -l` of every touched file (the largest `.rs` is 893).
