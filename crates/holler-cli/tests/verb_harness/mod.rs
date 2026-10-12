@@ -1,6 +1,8 @@
 //! The in-process harness for the pane and profile verbs (story #670).
 //!
-//! Included by `pane_verbs` and `profile_verbs` through `#[path]`. It runs one verb
+//! Included by `pane_verbs`, `profile_verbs`, `pane_claude` and `pane_integration` through
+//! `#[path]`; its `linked_host` module is the one host that links the host and harness fakes
+//! of their rigs (#846). It runs one verb
 //! **in this process** over given `Ports` and two captured writers, so a verb story
 //! tests its routing (text goes to `err`/`out`, JSON is one envelope on `out`) without
 //! a subprocess. `run_verb_with` takes the ports (a verb story passes the fakes of
@@ -18,6 +20,7 @@ use holler_cli::{pane, profile, Cli, Command};
 use holler_pane::Ports;
 use serde_json::Value;
 
+pub mod linked_host;
 pub mod parse;
 
 static UNWIRED: Unwired = Unwired;

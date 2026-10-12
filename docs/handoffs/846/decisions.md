@@ -16,3 +16,9 @@
 - **Assumed:** The pipeline stays on `claude-pipeline-v0.1.7` for this in-flight story; the operator said 0.1.8 is for new stories only and not to restart work.
 - **Hedged:** A refactor has no failing behaviour assertion; the mutation check in Phase 6 is what shows the propagate/swallow modes are pinned.
 - **Evidence:** `docs/handoffs/846/handoff-T-red.md`; baseline run on `90d62fd`, exit 0.
+
+## Phase 5 - F, the fold (2026-10-12)
+- **Decided:** One `LinkedHost<H, L>` in `tests/verb_harness/linked_host.rs` over a `HarnessLink`, with the modes as enums `OnStart { Propagate, Swallow }` and `OnStop { KillServed(&'static [u16]), KillNothing }`; the kill loop exists once as `OnStop::end`, called by `FakeHarnessLink` and the launch rig's private `HookedLink`. The #649 near-copies go to `pane_integration/traps.rs` (OpenCode trap, `NO_HUB`, `OPENCODE_MARK`, `names_the_missing_hub`) and `pane_integration/wrappers.rs` (`CallLog`, `herdr_suite_over`, `unbuildable_lazy_herdr`).
+- **Assumed:** No `CHANGELOG.md` line for a test-only refactor, per #800 and #735; no D2 follow-up issue exists yet, so the module doc names it without a number.
+- **Hedged:** Only the new `traps.rs` was rustfmt-ed; the edited `pane_integration` files were not rustfmt-clean at the base and were left as they were outside the changed hunks.
+- **Evidence:** `docs/handoffs/846/handoff-F.md`; the five AC 2 targets reproduce T's baseline (43/71/347/5/118 passed; 1/4/0/3/0 ignored); the workspace test exits 0; AC 1 greps print one line each; `lint.sh` exit 0.
